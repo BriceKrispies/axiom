@@ -1,0 +1,23 @@
+# Axiom module manifest — axiom-resources.
+
+[module]
+name = "resources"
+crate_name = "axiom-resources"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "runtime",
+    "math",
+    "frame",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "cpu-resource-table",
+    "built-in-cube-mesh",
+    "basic-lit-material-description",
+    "solid-color-texture",
+    "resolved-resources-snapshot",
+]

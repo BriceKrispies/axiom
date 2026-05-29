@@ -1,0 +1,17 @@
+# `Runtime` is exported and the kernel IS used (via KernelClock), but the proof
+# claims `Runtime` must reference `KernelResult`, which its implementation never
+# does. Only ProofReferenceMissing should fire.
+[layer]
+name = "runtime"
+index = 1
+previous = "kernel"
+crate_name = "runtime"
+allowed_dependencies = ["kernel"]
+forbidden_dependencies = []
+meaningful_dependency = "Runtime claims to build on the kernel result type."
+introduced_capabilities = ["Runtime"]
+consumed_capabilities = ["KernelResult"]
+
+[[proof_exports]]
+export = "Runtime"
+must_reference = ["KernelResult"]

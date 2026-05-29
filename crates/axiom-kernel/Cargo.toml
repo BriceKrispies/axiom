@@ -1,0 +1,22 @@
+[package]
+name = "axiom-kernel"
+description = "Axiom Layer 00: the deterministic runtime substrate. No browser, no I/O, no higher-layer concepts."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No cdylib / wasm-bindgen yet: the kernel is a computational
+# substrate and carries no browser bindings. It is `wasm32-unknown-unknown`
+# friendly because it touches no platform APIs, no wall clock, and no randomness.
+crate-type = ["rlib"]
+
+# Dependency policy: the kernel has ZERO external dependencies by design.
+# See ARCHITECTURE.md. Adding one requires written justification there.
+[dependencies]
+
+[lints.rust]
+# The kernel must stay self-contained and explicit.
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

@@ -1,0 +1,16 @@
+# Layer 1 that never references the kernel — it fails to adapt the layer beneath
+# it. `must_reference` is intentionally omitted so the ONLY violation is the
+# missing previous-layer import.
+[layer]
+name = "runtime"
+index = 1
+previous = "kernel"
+crate_name = "runtime"
+allowed_dependencies = ["kernel"]
+forbidden_dependencies = []
+meaningful_dependency = "Claims to adapt the kernel but does not."
+introduced_capabilities = ["Runtime"]
+consumed_capabilities = []
+
+[[proof_exports]]
+export = "Runtime"

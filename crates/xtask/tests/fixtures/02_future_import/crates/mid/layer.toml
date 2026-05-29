@@ -1,0 +1,16 @@
+# Layer 1. Correctly uses the kernel, but ALSO imports the future layer `top`
+# (index 2) — that forward import is the violation this fixture exercises.
+[layer]
+name = "mid"
+index = 1
+previous = "kernel"
+crate_name = "mid"
+allowed_dependencies = ["kernel"]
+forbidden_dependencies = []
+meaningful_dependency = "Mid adapts the kernel clock."
+introduced_capabilities = ["MidThing"]
+consumed_capabilities = ["KernelClock"]
+
+[[proof_exports]]
+export = "MidThing"
+must_reference = ["KernelClock"]

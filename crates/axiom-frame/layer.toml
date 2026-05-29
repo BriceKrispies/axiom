@@ -1,0 +1,61 @@
+# Axiom layer manifest — Layer 04 (axiom-frame).
+#
+# Frame is the canonical engine frame boundary. It adapts host frame reports
+# (Layer 03), runtime step records (Layer 01), viewport facts (Layer 03), and
+# math primitives (Layer 02) into a stable per-frame contract — the
+# `EngineFrame` and `FrameContext` future engine systems consume.
+#
+# Layer-04 logical capabilities (documentation only — Rust public surface is
+# the curated re-export list in `lib.rs`, enforced by the layer's own
+# `tests/architecture.rs::lib_exports_are_curated_set`):
+#   - canonical-engine-frame
+#   - frame-context
+#   - frame-step-summary
+#   - frame-timing-summary
+#   - frame-viewport-snapshot
+#   - frame-lifecycle-state
+#   - deterministic-frame-command-queue
+#   - frame-diagnostics
+#   - host-frame-adaptation
+
+[layer]
+name = "frame"
+index = 4
+previous = "host"
+crate_name = "axiom-frame"
+allowed_dependencies = ["kernel", "runtime", "math", "host"]
+forbidden_dependencies = []
+meaningful_dependency = "Frame consumes host (`HostFrameReport`, `HostViewport`, `HostLifecycleState`, `HostSkipReason` for host adaptation), runtime (`RuntimeStepRecord` for ordered step summaries), math (`MathApi` for finite scalar validation on viewport-derived values), and kernel (`Tick`, `FrameIndex`, `TelemetryMetric`) — and exposes the deterministic engine frame contract every future engine system will read from."
+
+# Public Rust surface is the curated list in `lib.rs`; the architecture
+# checker needs the facade and the constructor types to prove the layer's
+# adapter role.
+introduced_capabilities = ["FrameApi", "EngineFrame", "FrameBuilder"]
+
+consumed_capabilities = [
+    "HostFrameReport",
+    "HostViewport",
+    "HostLifecycleState",
+    "HostSkipReason",
+    "RuntimeStepRecord",
+    "MathApi",
+    "Tick",
+    "FrameIndex",
+    "TelemetryMetric",
+]
+
+# Each proof export is a real Layer-04 public export whose source file must
+# reference at least one previous-layer (host) symbol. Listing only host
+# symbols here proves all three files use axiom-host directly through its
+# public API, as required.
+[[proof_exports]]
+export = "FrameApi"
+must_reference = ["HostFrameReport", "HostViewport"]
+
+[[proof_exports]]
+export = "EngineFrame"
+must_reference = ["HostFrameReport"]
+
+[[proof_exports]]
+export = "FrameBuilder"
+must_reference = ["HostFrameReport"]

@@ -1,0 +1,6 @@
+# Repo-local cargo aliases.
+#
+# `cargo xtask <cmd>` runs the repo's tooling crate. The architecture checker is
+# `cargo xtask check-architecture`.
+[alias]
+xtask = "run --package xtask --"

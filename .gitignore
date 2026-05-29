@@ -1,0 +1,56 @@
+# Rust / Cargo
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock for libraries (keep for binaries/workspaces — comment out if undesired)
+# Cargo.lock
+
+# WebAssembly build artifacts
+/pkg/
+**/pkg/
+/dist/
+**/dist/
+*.wasm
+wasm-pack.log
+
+# Node (web/editor tooling)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm/
+.yarn/
+
+# IDE / editor
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.fleet/
+.zed/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs / coverage / profiling
+*.log
+coverage/
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*
+
+# Local agent / tooling state
+.claude/settings.local.json

@@ -1,0 +1,80 @@
+//! A validated power-of-two memory alignment.
+
+use crate::error::KernelError;
+use crate::error_code::KernelErrorCode;
+use crate::error_scope::KernelErrorScope;
+use crate::result::KernelResult;
+
+/// A memory alignment, guaranteed at construction to be a power of two.
+///
+/// Validating the power-of-two invariant once, at construction, means every
+/// `Alignment` value is usable for fast `offset % align == 0` checks without
+/// re-validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Alignment(u64);
+
+impl Alignment {
+    /// Construct an alignment.
+    ///
+    /// Returns [`KernelErrorCode::InvalidAlignment`] unless `value` is a power
+    /// of two (which also rejects zero).
+    pub const fn new(value: u64) -> KernelResult<Self> {
+        if value == 0 || (value & (value - 1)) != 0 {
+            return Err(KernelError::new(
+                KernelErrorScope::Memory,
+                KernelErrorCode::InvalidAlignment,
+                "alignment must be a non-zero power of two",
+            ));
+        }
+        Ok(Alignment(value))
+    }
+
+    /// The raw alignment value.
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+
+    /// Whether `offset` lies on this alignment boundary.
+    pub const fn is_aligned(self, offset: u64) -> bool {
+        offset % self.0 == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn powers_of_two_are_accepted() {
+        for p in [1u64, 2, 4, 8, 16, 4096] {
+            assert_eq!(Alignment::new(p).unwrap().raw(), p);
+        }
+    }
+
+    #[test]
+    fn zero_is_rejected() {
+        let err = Alignment::new(0).unwrap_err();
+        assert_eq!(err.scope(), KernelErrorScope::Memory);
+        assert_eq!(err.code(), KernelErrorCode::InvalidAlignment);
+    }
+
+    #[test]
+    fn non_power_of_two_is_rejected() {
+        assert_eq!(
+            Alignment::new(3).unwrap_err().code(),
+            KernelErrorCode::InvalidAlignment
+        );
+        assert_eq!(
+            Alignment::new(6).unwrap_err().code(),
+            KernelErrorCode::InvalidAlignment
+        );
+    }
+
+    #[test]
+    fn alignment_check_is_correct() {
+        let align = Alignment::new(8).unwrap();
+        assert!(align.is_aligned(0));
+        assert!(align.is_aligned(16));
+        assert!(!align.is_aligned(4));
+    }
+}

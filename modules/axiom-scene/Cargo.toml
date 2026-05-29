@@ -1,0 +1,31 @@
+[package]
+name = "axiom-scene"
+description = "Axiom engine module: the deterministic 3D scene graph. Adapts the layer spine (math transforms + frame stepping) into stable scene state and snapshots."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free and wasm-clean.
+crate-type = ["rlib"]
+
+[dependencies]
+# Modules may depend only on approved layers — never on another module,
+# an app, or a tool. `cargo xtask check-architecture` enforces this.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-frame = { path = "../../crates/axiom-frame" }
+
+# Test-only: building a real `HostFrameReport` (the input the frame
+# layer turns into `FrameContext`) is the cleanest way to test scene's
+# `advance(&FrameContext)` integration end-to-end. dev-dependencies do
+# not load-bear at runtime and are ignored by the architecture
+# checker's dependency-class scan.
+[dev-dependencies]
+axiom-host = { path = "../../crates/axiom-host" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

@@ -1,0 +1,40 @@
+# Axiom layer manifest — Layer 00 (the kernel).
+#
+# The kernel is the base of the layer chain: it adapts nothing beneath it, so it
+# declares no `previous`, no dependencies, and no proof exports. Every higher
+# layer must, per the Axiom Layer Law (see repo-root CLAUDE.md), be a semantic
+# adapter over the layer directly beneath it.
+
+[layer]
+name = "kernel"
+index = 0
+crate_name = "axiom-kernel"
+allowed_dependencies = []
+forbidden_dependencies = []
+meaningful_dependency = "Layer 00 is the deterministic runtime substrate. It transforms nothing beneath it because nothing exists beneath it; instead it defines the primitives (time, identity, errors, memory, messaging, binary serialization, the layer contract, structured logging and telemetry) that every higher layer specializes."
+introduced_capabilities = [
+    "KernelApi",
+    "KernelError",
+    "KernelErrorCode",
+    "KernelErrorScope",
+    "KernelResult",
+    "FixedStep",
+    "FrameIndex",
+    "SimulationClock",
+    "Tick",
+    "HandleId",
+    "MessageId",
+    "InMemoryLogSink",
+    "LogField",
+    "LogLevel",
+    "LogRecord",
+    "LogSink",
+    "InMemoryTelemetrySink",
+    "MetricKind",
+    "MetricValue",
+    "TelemetryMetric",
+    "TelemetrySink",
+]
+consumed_capabilities = []
+
+# No [[proof_exports]]: the base layer has no previous layer to prove use of.

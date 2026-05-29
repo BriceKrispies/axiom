@@ -1,0 +1,22 @@
+[package]
+name = "axiom-runtime"
+description = "Axiom Layer 01: the deterministic engine runtime substrate that adapts the kernel into lifecycle, stepping, scheduling, and replay-ready step records."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib, like the kernel. No browser / wasm-bindgen surface — Layer 01
+# is platform-agnostic deterministic execution; host integration lives in
+# higher layers.
+crate-type = ["rlib"]
+
+[dependencies]
+# Layer 01 is allowed to import from layer 00 (kernel) only. The Axiom Layer
+# Law and `cargo xtask check-architecture` enforce that no other layer is used.
+axiom-kernel = { path = "../axiom-kernel" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

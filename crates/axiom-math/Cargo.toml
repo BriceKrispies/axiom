@@ -1,0 +1,21 @@
+[package]
+name = "axiom-math"
+description = "Axiom Layer 02: deterministic math and geometry primitives (scalar policy, vectors, quaternions, 4x4 matrices, transforms, AABBs, spheres, rays, planes, frusta)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free and wasm-clean.
+crate-type = ["rlib"]
+
+[dependencies]
+# Layer 02 may import only layers 00 and 01. The Axiom Layer Law and
+# `cargo xtask check-architecture` enforce that nothing else slips in.
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-runtime = { path = "../axiom-runtime" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

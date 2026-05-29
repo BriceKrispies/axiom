@@ -1,0 +1,147 @@
+//! Scene-independent render input.
+
+use crate::render_camera::RenderCamera;
+use crate::render_light::RenderLight;
+use crate::render_material::RenderMaterial;
+use crate::render_mesh::RenderMesh;
+use crate::render_object::RenderObject;
+
+/// The scene-independent input the renderer turns into a
+/// [`crate::RenderCommandList`].
+///
+/// `RenderInput` is plain data: viewport dimensions, an optional
+/// camera, a clear colour, deduplicated `RenderMesh` and
+/// `RenderMaterial` lists, the lights to apply, and the objects to
+/// draw. It contains no scene-graph concepts, no `SceneNodeId`s, no
+/// resource ids; the app pre-translates those.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderInput {
+    viewport_width: u32,
+    viewport_height: u32,
+    clear_color: [f32; 4],
+    camera: Option<RenderCamera>,
+    meshes: Vec<RenderMesh>,
+    materials: Vec<RenderMaterial>,
+    lights: Vec<RenderLight>,
+    objects: Vec<RenderObject>,
+}
+
+impl RenderInput {
+    pub fn new(viewport_width: u32, viewport_height: u32) -> Self {
+        RenderInput {
+            viewport_width,
+            viewport_height,
+            clear_color: [0.0, 0.0, 0.0, 1.0],
+            camera: None,
+            meshes: Vec::new(),
+            materials: Vec::new(),
+            lights: Vec::new(),
+            objects: Vec::new(),
+        }
+    }
+
+    pub(crate) fn set_clear_color(&mut self, color: [f32; 4]) {
+        self.clear_color = color;
+    }
+
+    pub(crate) fn set_camera(&mut self, camera: RenderCamera) {
+        self.camera = Some(camera);
+    }
+
+    pub(crate) fn add_mesh(&mut self, mesh: RenderMesh) -> u32 {
+        let idx = self.meshes.len() as u32;
+        self.meshes.push(mesh);
+        idx
+    }
+
+    pub(crate) fn add_material(&mut self, material: RenderMaterial) -> u32 {
+        let idx = self.materials.len() as u32;
+        self.materials.push(material);
+        idx
+    }
+
+    pub(crate) fn add_light(&mut self, light: RenderLight) {
+        self.lights.push(light);
+    }
+
+    pub(crate) fn add_object(&mut self, object: RenderObject) {
+        self.objects.push(object);
+    }
+
+    pub const fn viewport_width(&self) -> u32 {
+        self.viewport_width
+    }
+
+    pub const fn viewport_height(&self) -> u32 {
+        self.viewport_height
+    }
+
+    pub const fn clear_color(&self) -> [f32; 4] {
+        self.clear_color
+    }
+
+    pub const fn camera(&self) -> Option<RenderCamera> {
+        self.camera
+    }
+
+    pub fn meshes(&self) -> &[RenderMesh] {
+        &self.meshes
+    }
+
+    pub fn materials(&self) -> &[RenderMaterial] {
+        &self.materials
+    }
+
+    pub fn lights(&self) -> &[RenderLight] {
+        &self.lights
+    }
+
+    pub fn objects(&self) -> &[RenderObject] {
+        &self.objects
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axiom_math::{Mat4, Vec2, Vec3, Vec4};
+
+    #[test]
+    fn new_input_has_supplied_viewport() {
+        let i = RenderInput::new(1920, 1080);
+        assert_eq!(i.viewport_width(), 1920);
+        assert_eq!(i.viewport_height(), 1080);
+        assert!(i.camera().is_none());
+        assert!(i.meshes().is_empty());
+    }
+
+    #[test]
+    fn builder_methods_round_trip() {
+        let mut i = RenderInput::new(100, 100);
+        i.set_clear_color([0.1, 0.2, 0.3, 1.0]);
+        i.set_camera(RenderCamera::new(Mat4::IDENTITY, Mat4::IDENTITY));
+        let m = i.add_mesh(RenderMesh::new(
+            7,
+            vec![Vec3::ZERO],
+            vec![Vec3::UNIT_Y],
+            vec![Vec2::ZERO],
+            vec![0],
+        ));
+        let mat = i.add_material(RenderMaterial::new(3, Vec4::ONE));
+        i.add_object(RenderObject::new(Mat4::IDENTITY, m, mat, true));
+        assert_eq!(i.clear_color(), [0.1, 0.2, 0.3, 1.0]);
+        assert!(i.camera().is_some());
+        assert_eq!(i.meshes().len(), 1);
+        assert_eq!(i.materials().len(), 1);
+        assert_eq!(i.objects().len(), 1);
+    }
+
+    #[test]
+    fn equality_requires_same_content() {
+        let a = RenderInput::new(100, 100);
+        let b = RenderInput::new(100, 100);
+        let c = RenderInput::new(200, 100);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+}

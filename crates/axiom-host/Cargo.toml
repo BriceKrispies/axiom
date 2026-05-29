@@ -1,0 +1,22 @@
+[package]
+name = "axiom-host"
+description = "Axiom Layer 03: the deterministic platform/host boundary. Validates host-supplied viewport/frame/lifecycle data and adapts it into runtime stepping. Browser-free and wasm-clean."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free and wasm-clean.
+crate-type = ["rlib"]
+
+[dependencies]
+# Layer 03 may import only layers 00, 01, and 02. The Axiom Layer Law and
+# `cargo xtask check-architecture` enforce that nothing else slips in.
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-runtime = { path = "../axiom-runtime" }
+axiom-math = { path = "../axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

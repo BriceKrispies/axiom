@@ -1,0 +1,81 @@
+# Axiom layer manifest — Layer 01 (the runtime).
+#
+# The runtime is the deterministic engine execution substrate. It adapts the
+# kernel's deterministic primitives (clock/ticks, structured results,
+# logging/telemetry, stable IDs) into lifecycle management, fixed-timestep
+# stepping, ordered scheduling, command/event queues, and replay-ready step
+# records. It introduces no rendering / ECS / asset / physics / input / browser
+# concepts — those belong to higher layers.
+
+[layer]
+name = "runtime"
+index = 1
+previous = "kernel"
+crate_name = "axiom-runtime"
+allowed_dependencies = ["kernel"]
+forbidden_dependencies = []
+meaningful_dependency = "Runtime consumes kernel primitives — `KernelApi` for emission, `SimulationClock`/`FixedStep`/`Tick`/`FrameIndex` for deterministic time, `KernelResult`/`KernelError` for failure identity, `HandleId` for stable system identity, and `LogRecord`/`TelemetryMetric` (with their sinks) for structured observability — to provide deterministic engine lifecycle, fixed-timestep stepping, ordered system scheduling, FIFO command/event queues, and replay-ready step records that all later engine layers will build on."
+
+introduced_capabilities = [
+    "Runtime",
+    "RuntimeConfig",
+    "RuntimeState",
+    "RuntimeError",
+    "RuntimeErrorCode",
+    "RuntimeResult",
+    "RuntimeStep",
+    "RuntimeTimeline",
+    "RuntimeSystem",
+    "RuntimeScheduler",
+    "SystemOutcome",
+    "RuntimeCommand",
+    "RuntimeCommandQueue",
+    "RuntimeEvent",
+    "RuntimeEventQueue",
+    "RuntimeContext",
+    "RuntimeDiagnostics",
+    "RuntimeStepRecord",
+]
+
+consumed_capabilities = [
+    "KernelApi",
+    "KernelResult",
+    "KernelError",
+    "SimulationClock",
+    "FixedStep",
+    "Tick",
+    "FrameIndex",
+    "HandleId",
+    "LogRecord",
+    "LogLevel",
+    "InMemoryLogSink",
+    "LogSink",
+    "TelemetryMetric",
+    "InMemoryTelemetrySink",
+    "TelemetrySink",
+]
+
+# Each block names a public Layer 01 export and the kernel symbols its
+# implementation must reference. The architecture checker follows the
+# `pub use module::Type;` re-export in lib.rs to the module file and asserts
+# the named kernel symbol appears there.
+
+[[proof_exports]]
+export = "Runtime"
+must_reference = ["KernelApi"]
+
+[[proof_exports]]
+export = "RuntimeTimeline"
+must_reference = ["SimulationClock", "Tick", "FrameIndex"]
+
+[[proof_exports]]
+export = "RuntimeStep"
+must_reference = ["Tick", "FrameIndex"]
+
+[[proof_exports]]
+export = "RuntimeConfig"
+must_reference = ["FixedStep"]
+
+[[proof_exports]]
+export = "RuntimeContext"
+must_reference = ["KernelApi", "LogRecord", "TelemetryMetric"]

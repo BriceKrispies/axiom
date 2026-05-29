@@ -1,0 +1,22 @@
+# Axiom module manifest — axiom-render.
+
+[module]
+name = "render"
+crate_name = "axiom-render"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "runtime",
+    "math",
+    "frame",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "render-input-construction",
+    "backend-neutral-render-commands",
+    "basic-lit-pipeline-marker",
+    "deterministic-command-list",
+]

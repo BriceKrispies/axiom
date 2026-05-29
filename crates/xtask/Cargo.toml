@@ -1,0 +1,20 @@
+[package]
+name = "xtask"
+description = "Axiom repo-local tooling. Not a layer: enforces the Axiom Layer Law via `cargo xtask check-architecture`."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+# These dependencies live ONLY in this tooling crate. The kernel (and every
+# future layer) stays free to remain zero-dependency and wasm-clean. `serde` +
+# `toml` give us a readable, derive-based manifest schema that future agents can
+# extend without hand-writing a TOML parser.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"

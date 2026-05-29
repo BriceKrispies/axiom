@@ -1,0 +1,17 @@
+# The proof export `Runtime` is named here but is NOT public in source. The
+# introduced capability `RuntimeApi` IS exported, so the only violation is the
+# missing public proof export.
+[layer]
+name = "runtime"
+index = 1
+previous = "kernel"
+crate_name = "runtime"
+allowed_dependencies = ["kernel"]
+forbidden_dependencies = []
+meaningful_dependency = "Runtime adapts the kernel clock."
+introduced_capabilities = ["RuntimeApi"]
+consumed_capabilities = ["KernelClock"]
+
+[[proof_exports]]
+export = "Runtime"
+must_reference = ["KernelClock"]

@@ -1,0 +1,29 @@
+[package]
+name = "axiom-demo-rotating-cube"
+description = "Axiom demo app: the deterministic rotating-cube vertical slice. The only place in the workspace where modules are composed together."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# Layers the demo app reaches for directly.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-frame = { path = "../../crates/axiom-frame" }
+
+# Modules the demo app composes. This is the ONLY crate that depends
+# on more than one module today.
+axiom-scene = { path = "../../modules/axiom-scene" }
+axiom-resources = { path = "../../modules/axiom-resources" }
+axiom-render = { path = "../../modules/axiom-render" }
+axiom-webgpu = { path = "../../modules/axiom-webgpu" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

@@ -1,0 +1,55 @@
+# Axiom layer manifest — Layer 03 (axiom-host).
+#
+# Host is the deterministic platform boundary. It accepts externally supplied
+# host facts as explicit data, validates them, and adapts them into runtime
+# stepping plans and reports. It knows that a host exists but it does NOT call
+# any browser/DOM/WebGPU/WebGL/JS/wall-clock/OS API itself — those belong to
+# future browser/native adapter layers built on this boundary.
+#
+# Layer-03 logical capabilities (documentation only — Rust public surface is
+# the curated re-export list in `lib.rs`, enforced by the layer's own
+# `tests/architecture.rs::lib_exports_are_curated_set`):
+#   - host-boundary-contracts
+#   - viewport-validation
+#   - explicit-host-frame-input
+#   - lifecycle-signals
+#   - deterministic-host-step-planning
+#   - runtime-host-step-driver
+#   - host-frame-reporting
+#   - host-error-propagation
+
+[layer]
+name = "host"
+index = 3
+previous = "math"
+crate_name = "axiom-host"
+allowed_dependencies = ["kernel", "runtime", "math"]
+forbidden_dependencies = []
+meaningful_dependency = "Host consumes math (`MathApi` for finite-scalar validation of host-supplied viewport scale factors and for converting viewport dimensions to deterministic Vec2-shaped engine data), runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `Tick`, `TelemetryMetric`) for telemetry routing — and exposes the deterministic host boundary every future browser/native adapter will sit on top of."
+
+# Public Rust surface is the curated list in `lib.rs`; the architecture
+# checker only needs the facade plus the driver to prove the layer's
+# adapter role.
+introduced_capabilities = ["HostApi", "HostStepDriver"]
+
+consumed_capabilities = [
+    "MathApi",
+    "Runtime",
+    "RuntimeStepRecord",
+    "RuntimeConfig",
+    "KernelApi",
+    "Tick",
+    "TelemetryMetric",
+]
+
+# Each proof export is a real Layer-03 public export whose source must
+# reference at least one previous-layer (math) symbol. Listing only
+# `MathApi` here proves both files use axiom-math directly through its
+# public API, as required.
+[[proof_exports]]
+export = "HostApi"
+must_reference = ["MathApi"]
+
+[[proof_exports]]
+export = "HostStepDriver"
+must_reference = ["MathApi"]

@@ -1,0 +1,35 @@
+# Axiom workspace root.
+#
+# Only the kernel (Layer 00) exists today. Future layers will be added as new
+# members here (e.g. crates/axiom-render, crates/axiom-ecs). The kernel imports
+# nothing from any higher layer because no higher layer exists yet.
+#
+# `xtask` is repo-local tooling (the architecture checker), not a layer. It has
+# no `layer.toml`, so the checker never treats it as part of the layer chain.
+[workspace]
+resolver = "2"
+members = [
+    "crates/axiom-kernel",
+    "crates/axiom-runtime",
+    "crates/axiom-math",
+    "crates/axiom-host",
+    "crates/axiom-frame",
+    "modules/axiom-scene",
+    "modules/axiom-resources",
+    "modules/axiom-render",
+    "modules/axiom-webgpu",
+    "apps/axiom-demo-rotating-cube",
+    "crates/xtask",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.89"
+
+# Deterministic, size-conscious release profile suitable for a future wasm build.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

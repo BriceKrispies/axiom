@@ -1,0 +1,33 @@
+# Axiom module manifest — axiom-scene.
+#
+# Scene is an *isolated* engine module: it adapts the layer spine (math
+# transforms + frame stepping) into deterministic 3D scene graph state and
+# snapshots. It is not a layer, not a renderer, and it must not depend on
+# any other module.
+
+[module]
+name = "scene"
+crate_name = "axiom-scene"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "runtime",
+    "math",
+    "frame",
+]
+
+# Modules may not depend on other modules today. Leave this empty.
+allowed_modules = []
+
+introduced_capabilities = [
+    "scene-graph",
+    "scene-node-identity",
+    "transform-hierarchy",
+    "world-transform-propagation",
+    "camera-components",
+    "light-components",
+    "renderable-scene-references",
+    "deterministic-scene-snapshots",
+    "scene-frame-system",
+]
