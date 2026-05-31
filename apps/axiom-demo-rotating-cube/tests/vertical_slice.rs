@@ -97,18 +97,22 @@ fn driven_sequence_replays_identically() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tick_60_cube_world_transform_differs_from_tick_0() {
-    let tick_0 = run_fresh(0);
-    let tick_60 = run_fresh(60);
+fn cube_world_transform_changes_as_the_simulation_advances() {
+    // The cube spin is driven by the simulation clock (the cube-spin system),
+    // so the rotation differs between an early frame and a later one across a
+    // driven sequence — not between two fresh single-step runs.
+    let mut demo = DemoRotatingCubeApi::new();
+    let first = demo.run_tick(0);
+    let mut later = first.clone();
+    for tick in 1..=60 {
+        later = demo.run_tick(tick);
+    }
     assert_ne!(
-        tick_0.cube_transform.world,
-        tick_60.cube_transform.world,
-        "the rotating cube must have a different world transform at tick 60"
+        first.cube_transform.world, later.cube_transform.world,
+        "the rotating cube must have a different world transform 60 ticks later"
     );
     // The drawn object's world matrix must differ too.
-    let world_0 = draw_world(&tick_0);
-    let world_60 = draw_world(&tick_60);
-    assert_ne!(world_0, world_60);
+    assert_ne!(draw_world(&first), draw_world(&later));
 }
 
 /// Extract the draw command's world matrix from the render command list.
@@ -230,23 +234,25 @@ fn introspection_records_each_tick_and_is_queryable() {
     assert_eq!(demo.recent_frames(1000).len(), 61);
 
     // Every observed frame index is queryable; indices are monotonic; each
-    // frame ran the cube-telemetry system and captured a per-tick angle that
-    // tracks the engine frame index (the cube spins one degree per tick).
+    // frame ran the cube-spin system and captured the angle it produced. The
+    // spin is keyed to the simulation tick, which is one ahead of the 0-based
+    // engine frame index (the first step is sim tick 1).
+    let expected_angle = |index: u64| ((index + 1) % 360) as f32 * std::f32::consts::PI / 180.0;
     for (i, &index) in indices.iter().enumerate() {
         let report = demo.describe_frame(index).expect("frame is retained");
         assert_eq!(report.engine_frame_index(), index);
 
         assert_eq!(report.systems().len(), 1);
-        assert_eq!(report.systems()[0].name(), "cube-telemetry");
+        assert_eq!(report.systems()[0].name(), "cube-spin");
         assert!(report.systems()[0].succeeded());
 
         let angle = report
             .metrics()
             .iter()
-            .find(|m| m.name() == "cube.angle_deg")
+            .find(|m| m.name() == "cube.angle_rad")
             .and_then(|m| m.value().as_float())
             .expect("the cube angle metric is present");
-        assert_eq!(angle, (index % 360) as f32);
+        assert!((angle - expected_angle(index)).abs() < 1e-6);
 
         if i > 0 {
             assert!(indices[i - 1] < index);
@@ -260,7 +266,7 @@ fn introspection_records_each_tick_and_is_queryable() {
             .unwrap()
             .metrics()
             .iter()
-            .find(|m| m.name() == "cube.angle_deg")
+            .find(|m| m.name() == "cube.angle_rad")
             .unwrap()
             .value()
             .as_float()

@@ -85,17 +85,17 @@ fn main() {
 
     // The whole point: a metric that actually changes frame to frame, plus a
     // diff between two frames an agent would compare.
-    let angle = |idx: usize| metric_f32(&recent[idx], "cube.angle_deg");
+    let angle = |idx: usize| metric_f32(&recent[idx], "cube.angle_rad");
     info!(
-        "diff idx {}->{}: cube.angle_deg {:.1} -> {:.1}  (delta {:.1})",
+        "diff idx {}->{}: cube.angle_rad {:.4} -> {:.4}  (delta {:.4})",
         recent[0].engine_frame_index(),
         recent[60].engine_frame_index(),
         angle(0),
         angle(60),
         angle(60) - angle(0),
     );
-    check!("cube.angle_deg changes between frame 0 and 60", angle(0) != angle(60));
-    check!("every frame carries the cube.angle_deg metric", recent.iter().all(|r| r.metrics().iter().any(|m| m.name() == "cube.angle_deg")));
+    check!("cube.angle_rad changes between frame 0 and 60", angle(0) != angle(60));
+    check!("every frame carries the cube.angle_rad metric", recent.iter().all(|r| r.metrics().iter().any(|m| m.name() == "cube.angle_rad")));
 
     // --- 2. Query by index. ---
     let probe = indices[60];

@@ -106,13 +106,6 @@ pub struct VerticalSliceArtifact {
     pub gpu_submission_report: GpuSubmissionReportArtifact,
 }
 
-/// Deterministically rotate the cube's parent node: one full revolution
-/// every 360 ticks, around +Y. Tick 0 is zero rotation.
-pub(crate) fn cube_rotation_for_tick(tick: u64) -> f32 {
-    let degrees_per_tick = 1.0_f32;
-    ((tick % 360) as f32) * degrees_per_tick * std::f32::consts::PI / 180.0
-}
-
 /// Run the full headless vertical slice for one deterministic tick.
 ///
 /// The whole pipeline lives in one function on purpose: the module
@@ -126,10 +119,38 @@ pub(crate) fn run_vertical_slice(
     api: &mut DemoRotatingCubeApi,
     tick: u64,
 ) -> VerticalSliceArtifact {
-    // ---- 1. Build a fresh scene: rotating parent + child cube + camera + light. ----
-    let mut scene = api.scene_api.empty_scene();
+    // ---- 1. Drive one host frame through the runtime (this runs the
+    //         cube-spin system) and build the engine frame contract. ----
+    let host_input = HostFrameInput::new(tick + 1, FIXED_STEP_NANOS, api.viewport);
+    let host_report = api
+        .driver
+        .drive(&mut api.runtime, host_input)
+        .expect("driver inputs are deterministic and valid");
+    let engine_frame = api
+        .frame_builder
+        .build(&host_report, Vec::new())
+        .expect("host report sequence is monotone");
 
-    let rotation = Quat::from_axis_angle(Vec3::UNIT_Y, cube_rotation_for_tick(tick))
+    // Record the frame into the introspection surface — every tick's frame
+    // becomes a queryable, serializable report.
+    api.introspect.observe(&engine_frame);
+    let frame_ctx = api.frame_api.frame_context(&engine_frame);
+
+    // ---- 2. The cube's rotation IS the engine's own telemetry: the cube-spin
+    //         system computed `cube.angle_rad` this step and it flows through
+    //         the frame. The value the cube is built from is the value
+    //         introspection reports — a single source of truth. ----
+    let angle_rad = engine_frame
+        .runtime_step_summaries()
+        .iter()
+        .flat_map(|summary| summary.metrics())
+        .find(|m| m.name() == "cube.angle_rad")
+        .and_then(|m| m.value().as_float())
+        .expect("the cube-spin system emits cube.angle_rad each step");
+
+    // ---- 3. Build a fresh scene: rotating parent + child cube + camera + light. ----
+    let mut scene = api.scene_api.empty_scene();
+    let rotation = Quat::from_axis_angle(Vec3::UNIT_Y, angle_rad)
         .expect("axis is unit and angle is finite");
     let cube_root = api
         .scene_api
@@ -188,26 +209,6 @@ pub(crate) fn run_vertical_slice(
     api.scene_api
         .add_renderable(&mut scene, cube_child, mesh_ref, material_ref)
         .expect("renderable refs are valid");
-
-    // ---- 4. Drive one host frame through the runtime. ----
-    let host_input = HostFrameInput::new(tick + 1, FIXED_STEP_NANOS, api.viewport);
-    let host_report = api
-        .driver
-        .drive(&mut api.runtime, host_input)
-        .expect("driver inputs are deterministic and valid");
-
-    // ---- 5. Build the engine frame contract. ----
-    let engine_frame = api
-        .frame_builder
-        .build(&host_report, Vec::new())
-        .expect("host report sequence is monotone");
-
-    // ---- 5a. Record the frame into the introspection surface. ----
-    // This is what makes the running demo interrogable end-to-end: every
-    // tick's frame becomes a queryable, serializable report.
-    api.introspect.observe(&engine_frame);
-
-    let frame_ctx = api.frame_api.frame_context(&engine_frame);
 
     // ---- 6. Update world transforms and snapshot the scene (un-nameable value). ----
     let scene_snapshot = api

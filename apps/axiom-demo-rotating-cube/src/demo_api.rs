@@ -20,30 +20,28 @@ pub(crate) const FIXED_STEP_NANOS: u64 = 1_000_000;
 /// How many recent frame reports the introspection facade retains.
 const INTROSPECT_HISTORY: usize = 256;
 
-/// A runtime system that emits the cube's per-tick rotation as telemetry, so
-/// the introspection surface captures state that actually changes each frame
-/// (rather than only frame bookkeeping). The cube spins one degree per demo
-/// tick; the runtime tick is one ahead of the demo tick (the demo drives host
-/// sequence `tick + 1`), so the demo tick is `runtime_tick - 1`.
-#[derive(Debug)]
-struct CubeTelemetrySystem;
+/// The cube's spin: one full revolution every 360 simulation ticks, around
+/// +Y, as radians. This is the *only* place the rotation is computed.
+pub(crate) fn cube_spin_radians(sim_tick: u64) -> f32 {
+    ((sim_tick % 360) as f32) * std::f32::consts::PI / 180.0
+}
 
-impl RuntimeSystem for CubeTelemetrySystem {
+/// The runtime system that owns the cube's rotation. Each simulation step it
+/// computes the spin angle from the deterministic simulation tick and emits it
+/// as `cube.angle_rad`. The app reads that value back from the frame to build
+/// the cube, so the value rendered and the value introspection reports are the
+/// same — one source of truth, no duplicated formula, no tick fudging.
+#[derive(Debug)]
+struct CubeSpinSystem;
+
+impl RuntimeSystem for CubeSpinSystem {
     fn run(&mut self, ctx: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
         let tick = ctx.step().tick();
-        let demo_tick = tick.raw().saturating_sub(1);
-        let angle_deg = (demo_tick % 360) as f32;
         ctx.metric(TelemetryMetric::gauge(
-            "cube.angle_deg",
-            MetricValue::float(angle_deg),
+            "cube.angle_rad",
+            MetricValue::float(cube_spin_radians(tick.raw())),
             Some(tick),
         ));
-        ctx.metric(TelemetryMetric::gauge(
-            "cube.spin_sin",
-            MetricValue::float(angle_deg.to_radians().sin()),
-            Some(tick),
-        ));
-        ctx.metric(TelemetryMetric::counter("frame.draws", 1, Some(tick)));
         Ok(())
     }
 }
@@ -104,11 +102,11 @@ impl DemoRotatingCubeApi {
             .scheduler_mut()
             .register(
                 HandleId::from_raw(1),
-                "cube-telemetry",
+                "cube-spin",
                 1,
-                Box::new(CubeTelemetrySystem),
+                Box::new(CubeSpinSystem),
             )
-            .expect("registering the cube telemetry system cannot fail");
+            .expect("registering the cube spin system cannot fail");
 
         let boundary_config = HostBoundaryConfig::new(FIXED_STEP_NANOS, 1)
             .expect("max-steps-per-frame = 1 is valid");
