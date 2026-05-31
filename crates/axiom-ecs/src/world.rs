@@ -1,10 +1,17 @@
 //! The world: live entities + component storage + the systems that advance it.
 
 use axiom_frame::FrameContext;
-use axiom_kernel::EntityId;
+use axiom_kernel::{
+    BinaryReader, BinaryWriter, EntityId, KernelError, KernelErrorCode, KernelErrorScope,
+    KernelResult, SchemaVersion, TypeSchema,
+};
 
+use crate::column_set::ColumnSet;
 use crate::entity_registry::EntityRegistry;
 use crate::world_system::WorldSystem;
+
+/// Wire schema version of a serialized world.
+const WORLD_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 
 /// The single deterministic world model: an [`EntityRegistry`] of live
 /// entities, a consumer-defined component storage `S` (a struct of
@@ -104,6 +111,154 @@ impl<S> World<S> {
 impl<S: Default> Default for World<S> {
     fn default() -> Self {
         World::new()
+    }
+}
+
+impl<S: ColumnSet> World<S> {
+    /// Serialize the whole world's component state: a schema header, the column
+    /// count, then each column's bytes in `columns()` order.
+    pub fn serialize(&self, writer: &mut BinaryWriter) {
+        WORLD_SCHEMA.write_to(writer);
+        let columns = self.storage.columns();
+        writer.write_u32(columns.len() as u32);
+        for (_, column) in columns {
+            column.write(writer);
+        }
+    }
+
+    /// Replace the world's component columns with state previously produced by
+    /// [`Self::serialize`]. Entities and systems are untouched; each column's
+    /// contents are replaced wholesale.
+    pub fn deserialize(&mut self, reader: &mut BinaryReader<'_>) -> KernelResult<()> {
+        let version = SchemaVersion::read_from(reader)?;
+        if !WORLD_SCHEMA.is_compatible_with(version) {
+            return Err(KernelError::new(
+                KernelErrorScope::Binary,
+                KernelErrorCode::SchemaVersionMismatch,
+                "world schema major version is incompatible",
+            ));
+        }
+        let count = reader.read_u32()? as usize;
+        let columns = self.storage.columns_mut();
+        if count != columns.len() {
+            return Err(KernelError::new(
+                KernelErrorScope::Binary,
+                KernelErrorCode::TruncatedData,
+                "serialized world column count does not match the storage",
+            ));
+        }
+        for (_, column) in columns {
+            column.read_replace(reader)?;
+        }
+        Ok(())
+    }
+
+    /// Describe the world: per column, its role name, component schema, and
+    /// entry count — the world describing its own contents as data.
+    pub fn describe(&self) -> Vec<(&'static str, TypeSchema, usize)> {
+        self.storage
+            .columns()
+            .into_iter()
+            .map(|(name, column)| (name, column.describe(), column.entry_count()))
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod serial_tests {
+    use super::*;
+    use crate::component_column::ComponentColumn;
+    use crate::erased_column::ErasedColumn;
+
+    #[derive(Default)]
+    struct TestStorage {
+        a: ComponentColumn<u32>,
+        b: ComponentColumn<u64>,
+    }
+
+    impl ColumnSet for TestStorage {
+        fn columns(&self) -> Vec<(&'static str, &dyn ErasedColumn)> {
+            vec![("a", &self.a), ("b", &self.b)]
+        }
+
+        fn columns_mut(&mut self) -> Vec<(&'static str, &mut dyn ErasedColumn)> {
+            vec![("a", &mut self.a), ("b", &mut self.b)]
+        }
+    }
+
+    fn populated() -> World<TestStorage> {
+        let mut world: World<TestStorage> = World::new();
+        let e1 = world.spawn();
+        let e2 = world.spawn();
+        world.storage_mut().a.insert(e1, 10);
+        world.storage_mut().a.insert(e2, 20);
+        world.storage_mut().b.insert(e1, 1000);
+        world
+    }
+
+    #[test]
+    fn whole_world_round_trips() {
+        let world = populated();
+        let mut w = BinaryWriter::new();
+        world.serialize(&mut w);
+        let bytes = w.into_bytes();
+
+        let mut loaded: World<TestStorage> = World::new();
+        loaded.deserialize(&mut BinaryReader::new(&bytes)).unwrap();
+        assert_eq!(loaded.storage().a.len(), 2);
+        assert_eq!(loaded.storage().a.get(EntityId::from_raw(1)), Some(&10));
+        assert_eq!(loaded.storage().a.get(EntityId::from_raw(2)), Some(&20));
+        assert_eq!(loaded.storage().b.get(EntityId::from_raw(1)), Some(&1000));
+    }
+
+    #[test]
+    fn describe_reports_columns_schemas_and_counts() {
+        let world = populated();
+        let description = world.describe();
+        assert_eq!(description.len(), 2);
+        assert_eq!(description[0].0, "a");
+        assert_eq!(description[0].1.name(), "u32");
+        assert_eq!(description[0].2, 2);
+        assert_eq!(description[1].0, "b");
+        assert_eq!(description[1].1.name(), "u64");
+        assert_eq!(description[1].2, 1);
+    }
+
+    #[test]
+    fn deserialize_rejects_incompatible_schema() {
+        let mut w = BinaryWriter::new();
+        SchemaVersion::new(WORLD_SCHEMA.major() + 1, 0).write_to(&mut w);
+        let bytes = w.into_bytes();
+        let mut world: World<TestStorage> = World::new();
+        assert_eq!(
+            world.deserialize(&mut BinaryReader::new(&bytes)).unwrap_err().code(),
+            KernelErrorCode::SchemaVersionMismatch
+        );
+    }
+
+    #[test]
+    fn deserialize_rejects_wrong_column_count() {
+        let mut w = BinaryWriter::new();
+        WORLD_SCHEMA.write_to(&mut w);
+        w.write_u32(99); // storage has 2 columns, not 99
+        let bytes = w.into_bytes();
+        let mut world: World<TestStorage> = World::new();
+        assert_eq!(
+            world.deserialize(&mut BinaryReader::new(&bytes)).unwrap_err().code(),
+            KernelErrorCode::TruncatedData
+        );
+    }
+
+    #[test]
+    fn deserialize_rejects_truncation_at_every_prefix() {
+        let world = populated();
+        let mut w = BinaryWriter::new();
+        world.serialize(&mut w);
+        let bytes = w.into_bytes();
+        for len in 0..bytes.len() {
+            let mut fresh: World<TestStorage> = World::new();
+            assert!(fresh.deserialize(&mut BinaryReader::new(&bytes[..len])).is_err());
+        }
     }
 }
 

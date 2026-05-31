@@ -25,15 +25,19 @@
 //! (a sparse per-type store), and [`WorldSystem`] (per-frame behavior). Curated
 //! set enforced by `tests/architecture.rs::lib_exports_are_curated_set`.
 
+mod column_set;
 mod component_column;
 mod entity_registry;
+mod erased_column;
 mod world;
 mod world_system;
 
 #[cfg(test)]
 mod fixtures;
 
+pub use column_set::ColumnSet;
 pub use component_column::ComponentColumn;
 pub use entity_registry::EntityRegistry;
+pub use erased_column::ErasedColumn;
 pub use world::World;
 pub use world_system::WorldSystem;
