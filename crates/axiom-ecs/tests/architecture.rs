@@ -179,7 +179,8 @@ fn lib_exports_are_curated_set() {
     actual.sort();
 
     let mut expected: Vec<&str> = vec![
-        "pub use entity_store::EntityStore;",
+        "pub use component_column::ComponentColumn;",
+        "pub use entity_registry::EntityRegistry;",
         "pub use world::World;",
         "pub use world_system::WorldSystem;",
     ];
