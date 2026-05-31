@@ -22,7 +22,7 @@ use std::fmt::Write as _;
 use std::fs;
 
 use axiom_demo_rotating_cube::DemoRotatingCubeApi;
-use axiom_ecs::ComponentColumn;
+use axiom_ecs::{ColumnSet, ComponentColumn, ErasedColumn, World};
 use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, Reflect};
 use axiom_math::{Mat4, Quat, Transform, Vec2, Vec3, Vec4};
 
@@ -174,6 +174,56 @@ fn main() {
     );
     check!("an ECS component column round-trips", col_ok);
     check!("truncated column bytes are rejected", col_safe);
+
+    // --- 6. Whole-world: a World serializes, reloads, and self-describes via
+    //        erased columns (no per-type code at the call site). ---
+    #[derive(Default)]
+    struct DemoWorld {
+        transforms: ComponentColumn<Transform>,
+        tags: ComponentColumn<u32>,
+    }
+    impl ColumnSet for DemoWorld {
+        fn columns(&self) -> Vec<(&'static str, &dyn ErasedColumn)> {
+            vec![("transforms", &self.transforms), ("tags", &self.tags)]
+        }
+        fn columns_mut(&mut self) -> Vec<(&'static str, &mut dyn ErasedColumn)> {
+            vec![("transforms", &mut self.transforms), ("tags", &mut self.tags)]
+        }
+    }
+
+    let mut world: World<DemoWorld> = World::new();
+    let a = world.spawn();
+    let b = world.spawn();
+    world.storage_mut().transforms.insert(a, Transform::IDENTITY);
+    world
+        .storage_mut()
+        .transforms
+        .insert(b, Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)));
+    world.storage_mut().tags.insert(a, 7);
+
+    for (name, schema, count) in world.describe() {
+        let f: Vec<String> = schema
+            .fields()
+            .iter()
+            .map(|f| format!("{}: {}", f.name(), f.type_name()))
+            .collect();
+        info!("world-column {name}: {} {{ {} }} entries={count}", schema.name(), f.join(", "));
+    }
+
+    let mut ww = BinaryWriter::new();
+    world.serialize(&mut ww);
+    let world_bytes = ww.into_bytes();
+    let mut loaded: World<DemoWorld> = World::new();
+    let load_ok = loaded.deserialize(&mut BinaryReader::new(&world_bytes)).is_ok();
+    let world_roundtrips = load_ok
+        && loaded.storage().transforms.len() == 2
+        && loaded.storage().transforms.get(b) == world.storage().transforms.get(b)
+        && loaded.storage().tags.get(a) == Some(&7);
+    info!(
+        "whole-world serialize bytes={} reload_ok={load_ok} roundtrip={world_roundtrips}",
+        world_bytes.len()
+    );
+    check!("a whole world serializes, reloads, and matches", world_roundtrips);
 
     let all_pass = passed == checks;
     let _ = writeln!(
