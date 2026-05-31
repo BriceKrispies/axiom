@@ -6,6 +6,7 @@ use axiom_kernel::{
     SchemaVersion,
 };
 
+use crate::metric_report::MetricReport;
 use crate::system_report::SystemReport;
 
 /// The wire schema version of a [`FrameReport`]. Bumped on incompatible
@@ -29,6 +30,7 @@ pub struct FrameReport {
     viewport_width: u32,
     viewport_height: u32,
     systems: Vec<SystemReport>,
+    metrics: Vec<MetricReport>,
 }
 
 impl FrameReport {
@@ -40,6 +42,11 @@ impl FrameReport {
             .iter()
             .flat_map(|summary| summary.systems().iter().map(SystemReport::from_frame))
             .collect();
+        let metrics = frame
+            .runtime_step_summaries()
+            .iter()
+            .flat_map(|summary| summary.metrics().iter().map(MetricReport::from_metric))
+            .collect();
         FrameReport {
             engine_frame_index: frame.engine_frame_index(),
             host_frame_sequence: frame.host_frame_sequence(),
@@ -49,6 +56,7 @@ impl FrameReport {
             viewport_width: frame.viewport().logical_width(),
             viewport_height: frame.viewport().logical_height(),
             systems,
+            metrics,
         }
     }
 
@@ -92,6 +100,11 @@ impl FrameReport {
         &self.systems
     }
 
+    /// The telemetry metrics emitted across this frame's steps.
+    pub fn metrics(&self) -> &[MetricReport] {
+        &self.metrics
+    }
+
     /// Serialize this report to bytes — the snapshot an external agent reads.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut writer = BinaryWriter::new();
@@ -120,6 +133,10 @@ impl FrameReport {
         for system in &self.systems {
             system.write_to(writer);
         }
+        writer.write_u32(self.metrics.len() as u32);
+        for metric in &self.metrics {
+            metric.write_to(writer);
+        }
     }
 
     fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
@@ -143,6 +160,11 @@ impl FrameReport {
         for _ in 0..count {
             systems.push(SystemReport::read_from(reader)?);
         }
+        let metric_count = reader.read_u32()?;
+        let mut metrics = Vec::new();
+        for _ in 0..metric_count {
+            metrics.push(MetricReport::read_from(reader)?);
+        }
         Ok(FrameReport {
             engine_frame_index,
             host_frame_sequence,
@@ -152,6 +174,7 @@ impl FrameReport {
             viewport_width,
             viewport_height,
             systems,
+            metrics,
         })
     }
 }
@@ -196,6 +219,7 @@ mod tests {
             viewport_width: 320,
             viewport_height: 200,
             systems: Vec::new(),
+            metrics: Vec::new(),
         }
     }
 
@@ -219,6 +243,9 @@ mod tests {
         assert_eq!(report.systems()[0].name(), "fail");
         assert!(!report.systems()[0].succeeded());
         assert!(report.systems()[0].error_code().is_some());
+        // The same step emitted a metric, which must ride along.
+        assert_eq!(report.metrics().len(), 1);
+        assert_eq!(report.metrics()[0].name(), "cube.angle_deg");
     }
 
     #[test]

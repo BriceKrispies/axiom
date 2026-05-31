@@ -30,6 +30,7 @@
 mod frame_history;
 mod frame_report;
 mod introspect_api;
+mod metric_report;
 mod system_report;
 
 #[cfg(test)]
@@ -43,4 +44,5 @@ pub use introspect_api::IntrospectApi;
 // Inert, inspectable, serializable report types reachable through the facade.
 pub use frame_history::FrameHistory;
 pub use frame_report::FrameReport;
+pub use metric_report::MetricReport;
 pub use system_report::SystemReport;

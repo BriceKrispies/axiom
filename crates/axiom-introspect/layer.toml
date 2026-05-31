@@ -27,7 +27,7 @@ meaningful_dependency = "Introspect consumes the frame contract (`EngineFrame` a
 
 # Public Rust surface is the curated list in `lib.rs`; the checker needs the
 # facade plus the report type to prove the layer's adapter role over frame.
-introduced_capabilities = ["IntrospectApi", "FrameReport", "SystemReport", "FrameHistory"]
+introduced_capabilities = ["IntrospectApi", "FrameReport", "SystemReport", "MetricReport", "FrameHistory"]
 
 consumed_capabilities = [
     "EngineFrame",
@@ -38,6 +38,9 @@ consumed_capabilities = [
     "BinaryReader",
     "SchemaVersion",
     "KernelResult",
+    "TelemetryMetric",
+    "MetricValue",
+    "MetricKind",
 ]
 
 # Each proof export is a real Layer-05 public export whose source file must

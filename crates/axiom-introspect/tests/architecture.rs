@@ -182,6 +182,7 @@ fn lib_exports_are_curated_set() {
         "pub use introspect_api::IntrospectApi;",
         "pub use frame_history::FrameHistory;",
         "pub use frame_report::FrameReport;",
+        "pub use metric_report::MetricReport;",
         "pub use system_report::SystemReport;",
     ];
     expected.sort();

@@ -10,7 +10,7 @@ use axiom_frame::{EngineFrame, FrameBuilder};
 use axiom_host::{
     HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport,
 };
-use axiom_kernel::HandleId;
+use axiom_kernel::{HandleId, MetricValue, TelemetryMetric};
 use axiom_math::MathApi;
 use axiom_runtime::{
     Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode, RuntimeResult,
@@ -46,13 +46,22 @@ pub(crate) fn active_engine_frames(n: u64) -> Vec<EngineFrame> {
 struct AlwaysFail;
 
 impl RuntimeSystem for AlwaysFail {
-    fn run(&mut self, _: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
+    fn run(&mut self, ctx: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
+        // Emit a metric before failing, so the produced frame carries both a
+        // failed system report and a telemetry metric.
+        let tick = ctx.step().tick();
+        ctx.metric(TelemetryMetric::gauge(
+            "cube.angle_deg",
+            MetricValue::float(1.0),
+            Some(tick),
+        ));
         Err(RuntimeError::new(RuntimeErrorCode::SystemFailed, "boom"))
     }
 }
 
-/// One engine frame whose single runtime step ran a failing system, so its
-/// step summary carries a populated per-system report (with an error code).
+/// One engine frame whose single runtime step ran a failing system that also
+/// emitted a metric, so its step summary carries both a populated per-system
+/// report (with an error code) and a telemetry metric.
 pub(crate) fn failing_engine_frame() -> EngineFrame {
     let mut driver = HostStepDriver::new(HostBoundaryConfig::new(STEP_NANOS, 5).unwrap());
     driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
