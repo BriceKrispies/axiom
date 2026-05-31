@@ -24,13 +24,14 @@ use std::fmt::Write as _;
 use std::fs;
 
 use axiom_demo_rotating_cube::DemoRotatingCubeApi;
+use axiom_ecs::ComponentColumn;
 use axiom_frame::FrameBuilder;
 use axiom_host::{
     HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport,
 };
 use axiom_introspect::{FrameReport, IntrospectApi};
-use axiom_kernel::HandleId;
-use axiom_math::MathApi;
+use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, HandleId, Reflect};
+use axiom_math::{MathApi, Transform, Vec3};
 use axiom_runtime::{
     Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode, RuntimeResult,
     RuntimeSystem,
@@ -149,6 +150,36 @@ fn main() {
         "frame-with-system serializes and round-trips",
         sys_decoded.systems().len() == 1 && &sys_decoded == report
     );
+
+    // --- 6. Reflection: the world describes its components, and a component
+    //        column round-trips as bytes (the world is now data). ---
+    for schema in demo.component_schemas() {
+        let fields: Vec<String> = schema
+            .fields()
+            .iter()
+            .map(|f| format!("{}: {}", f.name(), f.type_name()))
+            .collect();
+        info!("schema {} {{ {} }}", schema.name(), fields.join(", "));
+    }
+    check!("the world exposes component schemas", demo.component_schemas().len() >= 4);
+
+    let mut column: ComponentColumn<Transform> = ComponentColumn::new();
+    column.insert(EntityId::from_raw(1), Transform::IDENTITY);
+    column.insert(
+        EntityId::from_raw(2),
+        Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)),
+    );
+    let mut w = BinaryWriter::new();
+    column.reflect_write(&mut w);
+    let bytes = w.into_bytes();
+    let decoded =
+        ComponentColumn::<Transform>::reflect_read(&mut BinaryReader::new(&bytes)).expect("decodes");
+    let column_roundtrips = decoded.len() == 2 && decoded.get(EntityId::from_raw(2)).is_some();
+    info!(
+        "column Transform entries=2 bytes={} roundtrip={column_roundtrips}",
+        bytes.len()
+    );
+    check!("a Transform component column round-trips as bytes", column_roundtrips);
 
     let all_pass = passed == checks;
     let _ = writeln!(

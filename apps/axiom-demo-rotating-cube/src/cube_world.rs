@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use axiom_ecs::{ComponentColumn, EntityRegistry, World, WorldSystem};
-use axiom_kernel::EntityId;
+use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, FieldSchema, KernelResult, Reflect, TypeSchema};
 use axiom_math::{Transform, Vec3};
 
 use crate::scene_to_render_input::{
@@ -41,6 +41,81 @@ pub(crate) struct RenderableData {
     pub mesh_id: u64,
     pub material_id: u64,
     pub visible: bool,
+}
+
+impl Reflect for CameraData {
+    const SCHEMA: TypeSchema = TypeSchema::new(
+        "CameraData",
+        &[
+            FieldSchema::new("fovy_radians", "f32"),
+            FieldSchema::new("aspect", "f32"),
+            FieldSchema::new("near", "f32"),
+            FieldSchema::new("far", "f32"),
+        ],
+    );
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.fovy_radians.reflect_write(writer);
+        self.aspect.reflect_write(writer);
+        self.near.reflect_write(writer);
+        self.far.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        Ok(CameraData {
+            fovy_radians: f32::reflect_read(reader)?,
+            aspect: f32::reflect_read(reader)?,
+            near: f32::reflect_read(reader)?,
+            far: f32::reflect_read(reader)?,
+        })
+    }
+}
+
+impl Reflect for LightData {
+    const SCHEMA: TypeSchema = TypeSchema::new(
+        "LightData",
+        &[
+            FieldSchema::new("color", "Vec3"),
+            FieldSchema::new("intensity", "f32"),
+        ],
+    );
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.color.reflect_write(writer);
+        self.intensity.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        Ok(LightData {
+            color: Vec3::reflect_read(reader)?,
+            intensity: f32::reflect_read(reader)?,
+        })
+    }
+}
+
+impl Reflect for RenderableData {
+    const SCHEMA: TypeSchema = TypeSchema::new(
+        "RenderableData",
+        &[
+            FieldSchema::new("mesh_id", "u64"),
+            FieldSchema::new("material_id", "u64"),
+            FieldSchema::new("visible", "bool"),
+        ],
+    );
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.mesh_id.reflect_write(writer);
+        self.material_id.reflect_write(writer);
+        self.visible.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        Ok(RenderableData {
+            mesh_id: u64::reflect_read(reader)?,
+            material_id: u64::reflect_read(reader)?,
+            visible: bool::reflect_read(reader)?,
+        })
+    }
 }
 
 /// The demo's component storage: one sparse column per component type. This is
