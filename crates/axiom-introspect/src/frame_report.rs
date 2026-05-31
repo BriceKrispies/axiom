@@ -277,6 +277,22 @@ mod tests {
     }
 
     #[test]
+    fn invalid_lifecycle_code_in_buffer_is_rejected() {
+        // A structurally valid buffer whose lifecycle byte is an unknown code
+        // must fail decode (the read_u8 succeeds, so this exercises the `?`
+        // propagation of lifecycle_from_u8's error at the call site, not just
+        // the helper itself).
+        let mut bytes = report_with(FrameLifecycleState::Active, false).to_bytes();
+        // Layout: schema(4) + u64 + u64 + u32 + bool(1) => lifecycle byte at 25.
+        let lifecycle_offset = 4 + 8 + 8 + 4 + 1;
+        bytes[lifecycle_offset] = 99;
+        assert_eq!(
+            FrameReport::from_bytes(&bytes).unwrap_err().code(),
+            KernelErrorCode::InvalidId
+        );
+    }
+
+    #[test]
     fn lifecycle_codes_round_trip_and_reject_unknown() {
         assert_eq!(lifecycle_to_u8(FrameLifecycleState::Active), 0);
         assert_eq!(lifecycle_to_u8(FrameLifecycleState::Hidden), 1);
