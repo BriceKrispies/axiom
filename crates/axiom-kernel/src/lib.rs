@@ -112,6 +112,10 @@ pub use message_id::MessageId;
 // them. The kernel facade still constructs them.
 pub use binary_reader::BinaryReader;
 pub use binary_writer::BinaryWriter;
+// SchemaVersion lets higher layers stamp a `major.minor` header on their own
+// wire formats and reject incompatible data — e.g. axiom-introspect's
+// serialized FrameReport snapshot.
+pub use schema_version::SchemaVersion;
 
 // Layer-contract primitives — layers carry their own manifests and need to
 // construct dependencies and capabilities by code to validate them in tests.

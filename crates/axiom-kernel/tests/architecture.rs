@@ -138,6 +138,7 @@ fn lib_exports_are_curated_set() {
         "pub use message_id::MessageId;",
         "pub use binary_reader::BinaryReader;",
         "pub use binary_writer::BinaryWriter;",
+        "pub use schema_version::SchemaVersion;",
         "pub use layer_capability::LayerCapability;",
         "pub use layer_dependency::LayerDependency;",
         "pub use layer_manifest::LayerManifest;",

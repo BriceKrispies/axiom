@@ -67,10 +67,15 @@ The trade-off is enforced rather than left to discipline:
   public re-exports match an explicit approved list. Adding to the surface
   requires updating both `lib.rs` and the test in the same change — accidental
   widening still fails the build.
-- Memory, binary-serialization, and layer-manifest types remain crate-internal:
-  they are reachable only through `KernelApi` methods that return them (their
-  values are usable via inference, just not nameable). This keeps the visible
-  surface aligned with what higher layers actually need.
+- The binary-serialization primitives (`BinaryWriter`, `BinaryReader`,
+  `SchemaVersion`) and layer-manifest types are nameable, because higher layers
+  build and **version** their own wire formats on them — e.g. Layer 5
+  (`axiom-introspect`) stamps a `SchemaVersion` header on its serialized
+  `FrameReport` and reads it back through a `BinaryReader`. Memory-addressing
+  types (offsets, lengths, ranges) remain crate-internal: they are reachable
+  only through `KernelApi` methods that return them (usable via inference, just
+  not nameable). This keeps the visible surface aligned with what higher layers
+  actually need.
 
 ## Logging and telemetry as structured data
 
