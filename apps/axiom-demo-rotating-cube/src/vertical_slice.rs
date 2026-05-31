@@ -201,6 +201,12 @@ pub(crate) fn run_vertical_slice(
         .frame_builder
         .build(&host_report, Vec::new())
         .expect("host report sequence is monotone");
+
+    // ---- 5a. Record the frame into the introspection surface. ----
+    // This is what makes the running demo interrogable end-to-end: every
+    // tick's frame becomes a queryable, serializable report.
+    api.introspect.observe(&engine_frame);
+
     let frame_ctx = api.frame_api.frame_context(&engine_frame);
 
     // ---- 6. Update world transforms and snapshot the scene (un-nameable value). ----

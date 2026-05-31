@@ -212,6 +212,46 @@ fn every_boundary_artifact_is_present_and_well_formed() {
     assert_eq!(f.gpu_submission_report.target_height, 600);
 }
 
+// ---------------------------------------------------------------------------
+// Introspection proofs — the demo drives the Layer-05 IntrospectApi.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn introspection_records_each_tick_and_is_queryable() {
+    use axiom_introspect::FrameReport;
+
+    let mut demo = DemoRotatingCubeApi::new();
+    let mut indices = Vec::new();
+    for tick in 0..5 {
+        indices.push(demo.run_tick(tick).engine_frame_index);
+    }
+
+    // One retained report per tick.
+    assert_eq!(demo.recent_frames(10).len(), 5);
+
+    // Every observed frame index is queryable; indices are monotonic.
+    for (i, &index) in indices.iter().enumerate() {
+        let report = demo.describe_frame(index).expect("frame is retained");
+        assert_eq!(report.engine_frame_index(), index);
+        // The demo registers no runtime systems, so the per-system list is
+        // empty by design; the populated path is covered by the frame and
+        // introspect unit tests.
+        assert!(report.systems().is_empty());
+        if i > 0 {
+            assert!(indices[i - 1] < index);
+        }
+    }
+
+    // The serialized snapshot of the latest frame round-trips to an equal
+    // report — the byte channel an external agent would read.
+    let bytes = demo.introspection_snapshot().expect("a tick has run");
+    let decoded = FrameReport::from_bytes(&bytes).unwrap();
+    assert_eq!(decoded.engine_frame_index(), *indices.last().unwrap());
+
+    // An index that was never observed misses.
+    assert!(demo.describe_frame(9_999).is_none());
+}
+
 #[test]
 fn engine_frame_indices_increase_across_a_driven_sequence() {
     let mut demo = DemoRotatingCubeApi::new();

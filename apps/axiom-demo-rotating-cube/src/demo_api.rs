@@ -2,6 +2,7 @@
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostBoundaryConfig, HostLifecycleSignal, HostStepDriver, HostViewport};
+use axiom_introspect::{FrameReport, IntrospectApi};
 use axiom_math::MathApi;
 use axiom_render::RenderApi;
 use axiom_resources::ResourcesApi;
@@ -14,6 +15,9 @@ use crate::vertical_slice::{run_vertical_slice, VerticalSliceArtifact};
 
 /// One runtime step per tick — the demo runs at a fixed 1 ms step.
 pub(crate) const FIXED_STEP_NANOS: u64 = 1_000_000;
+
+/// How many recent frame reports the introspection facade retains.
+const INTROSPECT_HISTORY: usize = 256;
 
 /// The deterministic headless rotating-cube vertical-slice facade.
 ///
@@ -40,6 +44,10 @@ pub struct DemoRotatingCubeApi {
     pub(crate) driver: HostStepDriver,
     pub(crate) frame_builder: FrameBuilder,
     pub(crate) viewport: HostViewport,
+
+    /// The engine introspection surface, fed one report per tick so the demo
+    /// is interrogable end-to-end (see [`Self::describe_frame`]).
+    pub(crate) introspect: IntrospectApi,
 }
 
 impl DemoRotatingCubeApi {
@@ -86,6 +94,7 @@ impl DemoRotatingCubeApi {
             driver,
             frame_builder,
             viewport,
+            introspect: IntrospectApi::new(INTROSPECT_HISTORY),
         }
     }
 
@@ -96,6 +105,23 @@ impl DemoRotatingCubeApi {
     /// world transforms.
     pub fn run_tick(&mut self, tick: u64) -> VerticalSliceArtifact {
         run_vertical_slice(self, tick)
+    }
+
+    /// The recorded introspection report for a given engine frame index, if
+    /// still retained in the bounded history.
+    pub fn describe_frame(&self, engine_frame_index: u64) -> Option<&FrameReport> {
+        self.introspect.describe_frame(engine_frame_index)
+    }
+
+    /// The most recent `n` introspection reports, in tick order.
+    pub fn recent_frames(&self, n: usize) -> &[FrameReport] {
+        self.introspect.recent(n)
+    }
+
+    /// A serialized snapshot of the most recent frame — the bytes an external
+    /// agent would read. `None` until at least one tick has run.
+    pub fn introspection_snapshot(&self) -> Option<Vec<u8>> {
+        self.introspect.snapshot_bytes()
     }
 }
 

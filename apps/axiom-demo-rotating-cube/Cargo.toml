@@ -16,6 +16,7 @@ axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-frame = { path = "../../crates/axiom-frame" }
+axiom-introspect = { path = "../../crates/axiom-introspect" }
 
 # Modules the demo app composes. This is the ONLY crate that depends
 # on more than one module today.
