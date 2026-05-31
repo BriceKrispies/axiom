@@ -88,6 +88,15 @@ mod tests {
     }
 
     #[test]
+    fn populated_sink_is_not_empty() {
+        let mut sink = InMemoryLogSink::new();
+        sink.record(rec(1));
+        // Distinguishes `is_empty -> true`: a sink with a record is NOT empty.
+        assert!(!sink.is_empty());
+        assert_eq!(sink.len(), 1);
+    }
+
+    #[test]
     fn clear_empties_the_sink() {
         let mut sink = InMemoryLogSink::new();
         sink.record(rec(1));

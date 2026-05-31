@@ -326,3 +326,52 @@ mod tests {
         assert!(!stepped.is_skipped());
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::host_lifecycle_signal::HostLifecycleSignal;
+    use crate::host_viewport::HostViewport;
+    use axiom_math::MathApi;
+
+    fn vp() -> HostViewport {
+        HostViewport::new(&MathApi::new(), 800, 600, 1.0).unwrap()
+    }
+
+    fn visible() -> HostLifecycleState {
+        HostLifecycleState::initial().apply(HostLifecycleSignal::Started)
+    }
+
+    #[test]
+    fn zero_fixed_step_produces_zero_steps() {
+        // `fixed_step_nanos == 0` is allowed by `new`; planning must take the
+        // `fixed == 0` branch and schedule zero steps rather than divide.
+        let cfg = HostBoundaryConfig::new(0, 5).unwrap();
+        let plan = HostStepPlan::build(
+            &HostFrameInput::new(1, 1_000_000, vp()),
+            &cfg,
+            &visible(),
+            0,
+        );
+        assert_eq!(plan.steps(), 0);
+        assert_eq!(plan.consumed_nanos(), 0);
+    }
+
+    #[test]
+    fn hidden_skip_without_retain_drops_accumulator() {
+        // Exercises `retained_after_skip`'s else arm via a hidden skip with a
+        // non-retaining config.
+        let cfg = HostBoundaryConfig::new(1_000, 5)
+            .unwrap()
+            .with_retain_accumulator(false);
+        let hidden = HostLifecycleState::initial();
+        let plan = HostStepPlan::build(
+            &HostFrameInput::new(1, 1_000, vp()),
+            &cfg,
+            &hidden,
+            5_000,
+        );
+        assert_eq!(plan.skip_reason(), Some(HostSkipReason::LifecycleHidden));
+        assert_eq!(plan.retained_nanos(), 0);
+    }
+}

@@ -110,3 +110,19 @@ mod tests {
         assert_eq!(e.message(), "layer imported itself");
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    #[test]
+    fn eq_covers_both_short_circuit_sides() {
+        let base = KernelError::new(KernelErrorScope::Memory, KernelErrorCode::RangeOverflow, "x");
+        let same = KernelError::new(KernelErrorScope::Memory, KernelErrorCode::RangeOverflow, "y");
+        let diff_scope = KernelError::new(KernelErrorScope::Time, KernelErrorCode::RangeOverflow, "z");
+        let diff_code = KernelError::new(KernelErrorScope::Memory, KernelErrorCode::InvalidId, "w");
+        assert!(base == same); // scope eq true, code eq true
+        assert!(base != diff_scope); // scope eq false (short-circuits)
+        assert!(base != diff_code); // scope eq true, code eq false
+    }
+}

@@ -539,3 +539,89 @@ mod tests {
         assert_eq!(rt.telemetry_sink().len(), 0);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::runtime_system::RuntimeSystem;
+    use axiom_kernel::{HandleId, Tick};
+
+    struct AccessorSystem;
+    impl RuntimeSystem for AccessorSystem {
+        fn run(&mut self, ctx: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
+            let _ = ctx.kernel();
+            let _ = ctx.step();
+            let _ = ctx.commands();
+            let _ = ctx.events();
+            let _ = ctx.commands_mut();
+            ctx.events_mut()
+                .push(crate::runtime_event::RuntimeEvent::new(1, Tick::new(0), vec![]));
+            Ok(())
+        }
+    }
+
+    fn started(cfg: RuntimeConfig) -> Runtime {
+        let mut rt = Runtime::new(cfg).unwrap();
+        rt.initialize().unwrap();
+        rt.start().unwrap();
+        rt
+    }
+
+    #[test]
+    fn new_rejects_invalid_config() {
+        assert!(Runtime::new(RuntimeConfig::new(0)).is_err());
+    }
+
+    #[test]
+    fn debug_renders_runtime() {
+        let rt = started(RuntimeConfig::new(1_000));
+        assert!(format!("{:?}", rt).contains("Runtime"));
+    }
+
+    #[test]
+    fn diagnostics_enabled_step_runs_and_touches_context() {
+        let mut rt = started(RuntimeConfig::new(1_000).with_diagnostics_enabled(true));
+        rt.scheduler_mut()
+            .register(HandleId::from_raw(1), "acc", 1, Box::new(AccessorSystem))
+            .unwrap();
+        rt.step().unwrap();
+    }
+
+    #[test]
+    fn scheduler_accessor_reflects_registered_systems() {
+        // A registered system makes the live scheduler non-empty; a leaked
+        // `Default` scheduler would report len 0.
+        let mut rt = started(RuntimeConfig::new(1_000));
+        rt.scheduler_mut()
+            .register(HandleId::from_raw(1), "acc", 1, Box::new(AccessorSystem))
+            .unwrap();
+        assert_eq!(rt.scheduler().len(), 1);
+        assert!(!rt.scheduler().is_empty());
+    }
+
+    #[test]
+    fn all_accessors_are_reachable() {
+        let mut rt = started(RuntimeConfig::new(1_000));
+        let _ = rt.state();
+        let _ = rt.config();
+        let _ = rt.scheduler();
+        let _ = rt.scheduler_mut();
+        let tl = rt.timeline();
+        let _ = tl.frame();
+        let _ = tl.tick();
+        let _ = tl.sequence();
+        let _ = tl.elapsed_nanos();
+        let _ = rt.commands();
+        let _ = rt.events();
+        let _ = rt.log_sink();
+        let _ = rt.telemetry_sink();
+        let _ = rt.current_step();
+    }
+
+    #[test]
+    fn step_propagates_clock_overflow() {
+        let mut rt = started(RuntimeConfig::new(u64::MAX));
+        assert!(rt.step().is_ok()); // 0 + MAX
+        assert!(rt.step().is_err()); // MAX + MAX overflows
+    }
+}

@@ -1,5 +1,6 @@
 //! The single public facade of the `axiom-render` module.
 
+use axiom_kernel::{FrameIndex, Tick};
 use axiom_math::{Mat4, Vec2, Vec3, Vec4};
 
 use crate::render_camera::RenderCamera;
@@ -11,6 +12,7 @@ use crate::render_material::RenderMaterial;
 use crate::render_mesh::RenderMesh;
 use crate::render_object::RenderObject;
 use crate::render_pipeline_kind::RenderPipelineKind;
+use crate::render_receipt::RenderReceipt;
 
 /// The only public export of `axiom-render`.
 ///
@@ -242,6 +244,32 @@ impl RenderApi {
             _ => None,
         }
     }
+
+    // --- Frame capture (engine-owned artifact; NOT pixel capture) ---
+
+    /// Capture a deterministic [`RenderReceipt`] for one frame: the frame
+    /// identity ([`FrameIndex`] + [`Tick`]) plus the ordered command list,
+    /// serialized to a stable byte form. This captures the engine's render
+    /// contract *before* platform presentation — no pixels, no GPU readback,
+    /// no screenshot. See `render_receipt.rs`.
+    pub fn capture_receipt(
+        &self,
+        frame_index: FrameIndex,
+        tick: Tick,
+        list: &RenderCommandList,
+    ) -> RenderReceipt {
+        RenderReceipt::capture(frame_index, tick, list)
+    }
+
+    /// The receipt's deterministic serialized bytes (for byte comparison).
+    pub fn receipt_bytes<'a>(&self, receipt: &'a RenderReceipt) -> &'a [u8] {
+        receipt.bytes()
+    }
+
+    /// The receipt's deterministic FNV-1a hash (for cheap comparison).
+    pub fn receipt_hash(&self, receipt: &RenderReceipt) -> u64 {
+        receipt.hash()
+    }
 }
 
 #[cfg(test)]
@@ -397,5 +425,58 @@ mod tests {
         let list = api().build_command_list(&input);
         // ClearFrame + SetPipeline only.
         assert_eq!(list.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    fn api() -> RenderApi {
+        RenderApi::new()
+    }
+
+    #[test]
+    fn out_of_range_material_index_is_skipped() {
+        // Valid mesh idx but out-of-range material idx exercises the
+        // material `None => continue` arm specifically.
+        let mut input = api().new_input(100, 100);
+        let mesh_idx = api().add_input_mesh(
+            &mut input,
+            1,
+            vec![],
+            vec![],
+            vec![],
+            vec![0, 1, 2],
+        );
+        api().add_input_object(&mut input, Mat4::IDENTITY, mesh_idx, 99, true);
+        let list = api().build_command_list(&input);
+        // ClearFrame + SetPipeline only; the object was dropped at material lookup.
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn command_count_matches_list_len() {
+        let api = api();
+        let empty = api.new_input(10, 10);
+        let list = api.build_command_list(&empty);
+        assert_eq!(api.command_count(&list), list.len());
+        assert_eq!(api.command_count(&list), 2);
+    }
+
+    #[test]
+    fn inspection_accessors_return_none_on_kind_mismatch() {
+        let api = api();
+        // A minimal list: index 0 is ClearFrame, index 1 is SetPipeline.
+        let list = api.build_command_list(&api.new_input(10, 10));
+
+        // Each typed accessor against a command of a different kind hits its
+        // `_ => None` arm.
+        assert_eq!(api.command_clear_color_at(&list, 1), None);
+        assert_eq!(api.command_camera_at(&list, 0), None);
+        assert_eq!(api.command_pipeline_at(&list, 0), None);
+        assert_eq!(api.command_mesh_id_at(&list, 0), None);
+        assert_eq!(api.command_material_id_at(&list, 0), None);
+        assert_eq!(api.command_draw_indexed_at(&list, 0), None);
     }
 }

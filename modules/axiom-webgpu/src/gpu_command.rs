@@ -72,3 +72,47 @@ mod tests {
         assert_eq!(GpuCommand::Present.kind_code(), GpuCommand::KIND_PRESENT);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    #[test]
+    fn kind_code_covers_every_variant() {
+        assert_eq!(
+            GpuCommand::ClearFrame {
+                color: [0.0, 0.0, 0.0, 1.0]
+            }
+            .kind_code(),
+            GpuCommand::KIND_CLEAR_FRAME
+        );
+        assert_eq!(
+            GpuCommand::SetPipeline { pipeline_id: 1 }.kind_code(),
+            GpuCommand::KIND_SET_PIPELINE
+        );
+        assert_eq!(
+            GpuCommand::SetCamera {
+                view: Mat4::IDENTITY,
+                projection: Mat4::IDENTITY
+            }
+            .kind_code(),
+            GpuCommand::KIND_SET_CAMERA
+        );
+        assert_eq!(
+            GpuCommand::SetMesh { mesh_id: 5 }.kind_code(),
+            GpuCommand::KIND_SET_MESH
+        );
+        assert_eq!(
+            GpuCommand::SetMaterial { material_id: 9 }.kind_code(),
+            GpuCommand::KIND_SET_MATERIAL
+        );
+        assert_eq!(
+            GpuCommand::DrawIndexed {
+                index_count: 36,
+                world: Mat4::IDENTITY
+            }
+            .kind_code(),
+            GpuCommand::KIND_DRAW_INDEXED
+        );
+    }
+}

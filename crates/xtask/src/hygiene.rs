@@ -32,6 +32,11 @@ const FORBIDDEN_MACROS: &[&str] = &[
 /// these names.
 const JUNK_DRAWER_NAMES: &[&str] = &["utils", "helpers", "common", "misc"];
 
+/// Coverage-suppression tokens. Banned everywhere in layers and modules:
+/// coverage must be earned by reachable tests, never silenced. Genuinely
+/// unreachable defensive code must be refactored away instead.
+const COVERAGE_OFF_NEEDLES: &[&str] = &["coverage(off)", "coverage(on)", "coverage_attribute"];
+
 /// Browser / platform API substrings. The scanner uses substring matches
 /// so it catches references regardless of casing of the surrounding code.
 const BROWSER_API_NEEDLES: &[&str] = &[
@@ -104,6 +109,29 @@ fn scan_one(
         // Track which (forbidden, kind) we've already reported per file so
         // a single file doesn't spam the report.
         let mut reported: BTreeSet<(&str, &str)> = BTreeSet::new();
+
+        // Coverage-suppression tokens are scanned against the RAW text (not the
+        // comment-stripped form): even a commented-out `#[coverage(off)]` is a
+        // sign the ban is being worked around, and the attribute itself is the
+        // thing we forbid outright.
+        for needle in COVERAGE_OFF_NEEDLES {
+            if text.contains(needle) && reported.insert((needle, "coverage")) {
+                let line = first_line_containing(&text, needle);
+                let mut v = Violation::new(
+                    ViolationKind::SourceHygieneCoverageOff,
+                    name.to_string(),
+                    format!(
+                        "{kind_label} `{name}` uses banned coverage-suppression `{needle}` in {}; \
+                         cover the code with a reachable test or refactor the dead branch away",
+                        path.display()
+                    ),
+                );
+                if let Some(line) = line {
+                    v = v.at(path.clone(), line);
+                }
+                report.push(v);
+            }
+        }
 
         for needle in FORBIDDEN_MACROS {
             if stripped.contains(needle) && reported.insert((needle, "macro")) {
@@ -205,6 +233,16 @@ mod tests {
         let mut report = CheckReport::default();
         check(&[("host".into(), dir)], &[], &mut report);
         assert!(!report.has_kind(ViolationKind::SourceHygieneBrowserApi));
+    }
+
+    #[test]
+    fn coverage_off_attribute_is_banned() {
+        let tmp = std::env::temp_dir().join("axiom_xtask_hygiene_covoff");
+        let _ = fs::remove_dir_all(&tmp);
+        let dir = make_src(&tmp, "lib.rs", "#[coverage(off)]\nfn x() {}");
+        let mut report = CheckReport::default();
+        check(&[("test".into(), dir)], &[], &mut report);
+        assert!(report.has_kind(ViolationKind::SourceHygieneCoverageOff));
     }
 
     #[test]

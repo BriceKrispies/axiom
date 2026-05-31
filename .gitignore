@@ -52,5 +52,10 @@ coverage/
 flamegraph.svg
 perf.data*
 
+# Mutation testing output (cargo-mutants)
+mutants.out/
+mutants.out.old/
+mutants-out*/
+
 # Local agent / tooling state
 .claude/settings.local.json

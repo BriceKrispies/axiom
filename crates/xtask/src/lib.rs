@@ -10,6 +10,7 @@ pub mod cargo_metadata;
 pub mod check;
 pub mod class_check;
 pub mod classification;
+pub mod coverage_scope;
 pub mod hygiene;
 pub mod manifest;
 pub mod module_manifest;

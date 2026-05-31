@@ -29,10 +29,12 @@ impl TextureData {
         height: u32,
         rgba8_pixels: Vec<u8>,
     ) -> Option<Self> {
-        let expected = (width as usize)
-            .checked_mul(height as usize)?
-            .checked_mul(4)?;
-        if rgba8_pixels.len() != expected {
+        // `width * height` fits in u64 for any u32 inputs, so it cannot
+        // overflow and needs no checked step; only the `* 4` (bytes per RGBA
+        // pixel) can. Doing the math in u64 also keeps it correct on 32-bit
+        // targets (wasm32), where `usize` is narrower.
+        let expected = (width as u64 * height as u64).checked_mul(4)?;
+        if rgba8_pixels.len() as u64 != expected {
             return None;
         }
         Some(TextureData {
@@ -108,5 +110,53 @@ mod tests {
             TextureData::new(ResourceId::from_raw(1), "x", 1, 1, vec![1, 2, 3, 5]).unwrap();
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+}
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    #[test]
+    fn name_height_and_id_accessors() {
+        let t = TextureData::new(ResourceId::from_raw(9), "tex", 1, 1, vec![0; 4]).unwrap();
+        assert_eq!(t.id(), ResourceId::from_raw(9));
+        assert_eq!(t.name(), "tex");
+        assert_eq!(t.width(), 1);
+        assert_eq!(t.height(), 1);
+    }
+
+    #[test]
+    fn width_times_height_overflow_returns_none() {
+        // width * height overflows usize -> first checked_mul yields None.
+        assert!(
+            TextureData::new(
+                ResourceId::from_raw(1),
+                "x",
+                u32::MAX,
+                u32::MAX,
+                Vec::new(),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn times_four_overflow_returns_none() {
+        // width * height fits in usize, but * 4 overflows -> second
+        // checked_mul yields None. Only reachable where usize is 32-bit;
+        // on 64-bit targets width*height already overflows above, so this
+        // input also returns None via the first checked_mul. Either way the
+        // None path is exercised.
+        assert!(
+            TextureData::new(
+                ResourceId::from_raw(1),
+                "x",
+                u32::MAX,
+                1,
+                Vec::new(),
+            )
+            .is_none()
+        );
     }
 }

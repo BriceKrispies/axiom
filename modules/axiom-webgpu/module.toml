@@ -1,9 +1,11 @@
 # Axiom module manifest — axiom-webgpu.
 #
-# Owns the backend boundary for WebGPU/WASM. Today it captures what
-# WOULD be submitted to wgpu as a deterministic GpuSubmissionReport;
-# real GPU device + surface creation is blocked on missing
-# `axiom-host` capabilities (see ARCHITECTURE.md).
+# Owns the backend boundary for WebGPU/WASM. Routes the one GpuSubmission
+# input contract through a Recording backend (deterministic record, no GPU)
+# or a Live backend (structurally built from the `axiom-host` presentation
+# boundary, but performing no real GPU work yet). Binding a real surface to a
+# HostSurfaceHandle and driving real GPU calls belongs to a future
+# browser/native adapter app, not this module (see ARCHITECTURE.md).
 
 [module]
 name = "webgpu"
@@ -27,4 +29,9 @@ introduced_capabilities = [
     "gpu-submission-report",
     "deterministic-submission-record",
     "backend-boundary",
+    "webgpu-backend-mode",
+    "recording-backend",
+    "live-backend-boundary",
+    "gpu-submission-routing",
+    "host-presentation-consumption",
 ]

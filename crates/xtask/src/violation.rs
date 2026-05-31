@@ -105,6 +105,20 @@ pub enum ViolationKind {
     /// (`web_sys`, `js_sys`, `wasm_bindgen`, `WebGPU`, `WebGL`,
     /// `requestAnimationFrame`, `window`, `document`, `canvas`).
     SourceHygieneBrowserApi,
+    /// A layer or module source file uses the `#[coverage(off)]` attribute or
+    /// the `coverage_attribute` feature to exclude code from coverage. Banned:
+    /// coverage is earned by reachable tests, not by silencing the tool.
+    SourceHygieneCoverageOff,
+
+    // --- Coverage gate scope (the Axiom Coverage Law) ---
+    /// The coverage gate's sanctioned `--ignore-filename-regex` matches a layer
+    /// or module source path. The 100% gate may exclude only apps and tooling;
+    /// excluding engine code is forbidden.
+    CoverageIgnoreExcludesEngine,
+    /// A `scripts/coverage.*` gate script does not apply exactly the sanctioned
+    /// ignore pattern once (it is missing, altered, or a second ignore was
+    /// added) — a path to silently widen what the gate hides.
+    CoverageIgnoreScriptDrift,
 }
 
 impl fmt::Display for ViolationKind {
@@ -150,6 +164,9 @@ impl fmt::Display for ViolationKind {
             ViolationKind::SourceHygieneForbiddenMacro => "SourceHygieneForbiddenMacro",
             ViolationKind::SourceHygieneJunkDrawerModule => "SourceHygieneJunkDrawerModule",
             ViolationKind::SourceHygieneBrowserApi => "SourceHygieneBrowserApi",
+            ViolationKind::SourceHygieneCoverageOff => "SourceHygieneCoverageOff",
+            ViolationKind::CoverageIgnoreExcludesEngine => "CoverageIgnoreExcludesEngine",
+            ViolationKind::CoverageIgnoreScriptDrift => "CoverageIgnoreScriptDrift",
         };
         f.write_str(token)
     }

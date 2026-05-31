@@ -128,12 +128,110 @@ mod tests {
         builder.build(&report, Vec::new()).unwrap()
     }
 
+    fn dummy_summary(tick_value: u64) -> FrameStepSummary {
+        use axiom_kernel::{FrameIndex, Tick};
+        use axiom_runtime::{RuntimeDiagnostics, RuntimeState, RuntimeStep, RuntimeStepRecord};
+        let step = RuntimeStep::new(
+            FrameIndex::new(tick_value),
+            Tick::new(tick_value),
+            STEP_NANOS,
+            tick_value,
+        );
+        let record =
+            RuntimeStepRecord::new(step, RuntimeDiagnostics::new(step), RuntimeState::Running, 0, 0);
+        FrameStepSummary::from_record(&record)
+    }
+
+    /// Build an `EngineFrame` with fully distinguishing field values: a frame
+    /// index and host sequence that are neither 0 nor 1, a non-square viewport
+    /// (aspect != 1.0), two step summaries, and two commands. This is the
+    /// vehicle for pinning every borrow-side accessor against its mutation
+    /// constant.
+    fn rich_frame() -> EngineFrame {
+        let math = MathApi::new();
+        let host_vp = HostViewport::new(&math, 1600, 900, 1.0).unwrap();
+        let report = {
+            let input = HostFrameInput::new(5, STEP_NANOS, host_vp.clone());
+            let plan = HostStepPlan::build(&input, &cfg(), &visible(), 0);
+            axiom_host::HostFrameReport::new(
+                input.sequence(),
+                plan,
+                plan.steps(),
+                Vec::new(),
+                host_vp,
+                visible(),
+            )
+        };
+        let viewport = FrameViewport::from_host(report.viewport());
+        let lifecycle = FrameLifecycleState::from_host(report.lifecycle_after());
+        let timing = FrameTiming::from_host_report(&report, STEP_NANOS).unwrap();
+        let diagnostics = FrameDiagnostics::new(
+            timing.skipped(),
+            report.plan().skip_reason(),
+            timing.runtime_steps_executed(),
+            2,
+            0,
+            lifecycle,
+        );
+        let summaries = vec![dummy_summary(1), dummy_summary(2)];
+        let commands = vec![
+            FrameCommand::new(1, 7, vec![1]),
+            FrameCommand::new(2, 9, Vec::new()),
+        ];
+        EngineFrame::new(
+            3,
+            report.sequence(),
+            summaries,
+            viewport,
+            lifecycle,
+            timing,
+            diagnostics,
+            commands,
+            &report,
+        )
+    }
+
     #[test]
     fn context_mirrors_engine_frame_identity() {
         let frame = build_frame(STEP_NANOS, visible());
         let ctx = FrameContext::new(&frame);
         assert_eq!(ctx.engine_frame_index(), frame.engine_frame_index());
         assert_eq!(ctx.host_frame_sequence(), frame.host_frame_sequence());
+    }
+
+    #[test]
+    fn context_identity_accessors_return_exact_nonconstant_values() {
+        let frame = rich_frame();
+        let ctx = FrameContext::new(&frame);
+        // engine_frame_index = 3 (not 0); host_frame_sequence = 5 (not 1).
+        assert_eq!(ctx.engine_frame_index(), 3);
+        assert_eq!(ctx.host_frame_sequence(), 5);
+    }
+
+    #[test]
+    fn context_aspect_ratio_is_not_unity_for_widescreen() {
+        let frame = rich_frame();
+        let ctx = FrameContext::new(&frame);
+        // 1600x900 -> 16:9, distinct from the mutation constant 1.0.
+        assert!((ctx.viewport_aspect_ratio() - 16.0 / 9.0).abs() < 1.0e-6);
+        assert_ne!(ctx.viewport_aspect_ratio(), 1.0);
+    }
+
+    #[test]
+    fn context_step_summaries_and_commands_are_nonempty() {
+        let frame = rich_frame();
+        let ctx = FrameContext::new(&frame);
+        assert_eq!(ctx.runtime_step_summaries().len(), 2);
+        assert_eq!(ctx.runtime_step_summaries()[0].runtime_tick(), 1);
+        assert_eq!(ctx.commands().len(), 2);
+        assert_eq!(ctx.commands()[0].kind(), 7);
+    }
+
+    #[test]
+    fn context_visible_frame_is_not_skipped() {
+        let frame = rich_frame();
+        let ctx = FrameContext::new(&frame);
+        assert!(!ctx.is_skipped());
     }
 
     #[test]

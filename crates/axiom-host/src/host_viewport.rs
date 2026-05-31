@@ -266,3 +266,122 @@ mod tests {
         assert_eq!(err.code(), HostErrorCode::InvalidScaleFactor);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::host_error_code::HostErrorCode;
+
+    fn math() -> MathApi {
+        MathApi::new()
+    }
+
+    #[test]
+    fn new_derived_physical_width_zero_fails() {
+        // logical * tiny scale rounds to 0 physical width.
+        let err = HostViewport::new(&math(), 1, 1, 1.0e-4).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn new_derived_physical_height_zero_fails() {
+        // Width survives but height rounds to zero exercises the `||` rhs.
+        let err = HostViewport::new(&math(), 100_000, 1, 1.0e-4).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn new_derived_physical_exceeds_u32_max_fails() {
+        let err = HostViewport::new(&math(), u32::MAX, 1, 4.0).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn new_derived_physical_height_exceeds_u32_max_fails() {
+        // Width fits but height overflows exercises the `||` rhs.
+        let err = HostViewport::new(&math(), 1, u32::MAX, 4.0).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn from_physical_zero_height_fails() {
+        // Width survives, height zero exercises the `||` rhs.
+        let err = HostViewport::from_physical(&math(), 100, 0, 1.0).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn from_physical_negative_scale_fails() {
+        let err = HostViewport::from_physical(&math(), 100, 100, -1.0).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidScaleFactor);
+    }
+
+    #[test]
+    fn from_physical_zero_scale_fails() {
+        let err = HostViewport::from_physical(&math(), 100, 100, 0.0).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidScaleFactor);
+    }
+
+    #[test]
+    fn from_physical_derived_logical_zero_fails() {
+        // physical / huge scale rounds logical to zero.
+        let err = HostViewport::from_physical(&math(), 1, 1, 1.0e6).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn from_physical_derived_logical_height_zero_fails() {
+        // Logical width survives, height rounds to zero exercises the `||` rhs.
+        let err = HostViewport::from_physical(&math(), 100_000, 1, 1.0e3).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn from_physical_derived_logical_exceeds_u32_max_fails() {
+        let err = HostViewport::from_physical(&math(), u32::MAX, 1, 0.25).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn from_physical_derived_logical_height_exceeds_u32_max_fails() {
+        // Logical width fits, height overflows exercises the `||` rhs.
+        let err = HostViewport::from_physical(&math(), 1, u32::MAX, 0.25).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn from_physical_zero_width_reports_the_physical_zero_error_not_the_derived_one() {
+        // Distinguishes `||` -> `&&` in the physical-zero guard. With `||`,
+        // `physical_width == 0` short-circuits to the *physical* dimension
+        // error message. With `&&`, the guard never fires for a single zero
+        // and the code falls through to the *derived logical* error message.
+        // Both share the `InvalidViewportDimensions` code, so the message is
+        // the only thing that distinguishes the two operators.
+        let err = HostViewport::from_physical(&math(), 0, 100, 1.0).unwrap_err();
+        assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+        assert_eq!(
+            err.message(),
+            "viewport physical width and height must be non-zero"
+        );
+    }
+
+    #[test]
+    fn from_physical_derived_logical_width_exactly_u32_max_is_accepted() {
+        // Boundary for the width comparison `logical_width > u32::MAX`: a scale
+        // of 1.0 makes derived logical width exactly u32::MAX, which is in
+        // range. The `>=` mutant would wrongly reject this exact value.
+        let v = HostViewport::from_physical(&math(), u32::MAX, 8, 1.0).unwrap();
+        assert_eq!(v.logical_width(), u32::MAX);
+        assert_eq!(v.physical_width(), u32::MAX);
+    }
+
+    #[test]
+    fn from_physical_derived_logical_height_exactly_u32_max_is_accepted() {
+        // Boundary for the height comparison `logical_height > u32::MAX`: scale
+        // 1.0 makes derived logical height exactly u32::MAX, in range. The
+        // `>=` mutant would wrongly reject this exact value.
+        let v = HostViewport::from_physical(&math(), 8, u32::MAX, 1.0).unwrap();
+        assert_eq!(v.logical_height(), u32::MAX);
+        assert_eq!(v.physical_height(), u32::MAX);
+    }
+}

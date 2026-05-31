@@ -71,6 +71,18 @@ mod tests {
     }
 
     #[test]
+    fn intensity_is_the_constructed_value() {
+        // Kills `intensity -> 1.0`: use a value distinct from 1.0.
+        let l = RenderLight::new(
+            RenderLightKind::Point,
+            Vec3::ZERO,
+            Vec3::ONE,
+            3.5,
+        );
+        assert_eq!(l.intensity(), 3.5);
+    }
+
+    #[test]
     fn equality_requires_all_fields() {
         let a = RenderLight::new(RenderLightKind::Point, Vec3::ZERO, Vec3::ZERO, 1.0);
         let b = RenderLight::new(RenderLightKind::Point, Vec3::ZERO, Vec3::ZERO, 1.0);

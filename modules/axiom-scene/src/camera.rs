@@ -116,6 +116,15 @@ mod tests {
     }
 
     #[test]
+    fn fovy_radians_is_the_constructed_value() {
+        // Kills `fovy_radians -> 1.0 / 0.0 / -1.0`: FRAC_PI_3 (~1.047) is
+        // distinct from all three mutant constants.
+        let fov = std::f32::consts::FRAC_PI_3;
+        let c = Camera::perspective(&math(), node(), fov, 1.0, 0.1, 100.0).unwrap();
+        assert_eq!(c.fovy_radians(), fov);
+    }
+
+    #[test]
     fn invalid_near_is_rejected() {
         let err = Camera::perspective(&math(), node(), 1.0, 1.0, 0.0, 100.0).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
@@ -149,5 +158,28 @@ mod tests {
         let a = c.projection_matrix(&math()).unwrap();
         let b = c.projection_matrix(&math()).unwrap();
         assert_eq!(a.as_cols_array(), b.as_cols_array());
+    }
+}
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::scene_error_code::SceneErrorCode;
+
+    #[test]
+    fn projection_matrix_failure_is_wrapped() {
+        // A Camera holding intrinsics the math layer rejects exercises the
+        // `map_err` arm of `projection_matrix`. Construction normally
+        // validates, so the struct is built directly to reach this path.
+        let bad = Camera {
+            node: SceneNodeId::from_raw(7),
+            fovy_radians: 0.0,
+            aspect: 0.0,
+            near: 0.0,
+            far: 0.0,
+        };
+        let err = bad.projection_matrix(&MathApi::new()).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
+        assert!(err.math().is_some());
     }
 }

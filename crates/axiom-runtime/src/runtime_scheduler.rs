@@ -367,3 +367,58 @@ mod tests {
         assert_eq!(*trace.lock().unwrap(), vec!["a", "c"]);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::runtime::Runtime;
+    use crate::runtime_config::RuntimeConfig;
+    use axiom_kernel::HandleId;
+
+    struct Noop;
+    impl RuntimeSystem for Noop {
+        fn run(&mut self, _: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn default_matches_new() {
+        assert_eq!(
+            RuntimeScheduler::default().len(),
+            RuntimeScheduler::new().len()
+        );
+    }
+
+    #[test]
+    fn registered_system_runs_through_a_runtime() {
+        let mut rt = Runtime::new(RuntimeConfig::new(1_000)).unwrap();
+        rt.initialize().unwrap();
+        rt.start().unwrap();
+        rt.scheduler_mut()
+            .register(HandleId::from_raw(1), "noop", 1, Box::new(Noop))
+            .unwrap();
+        rt.step().unwrap(); // executes Noop::run
+    }
+
+    #[test]
+    fn duplicates_rejected_and_accessors_work() {
+        let mut s = RuntimeScheduler::new();
+        assert!(s.is_empty());
+        s.register(HandleId::from_raw(1), "a", 1, Box::new(Noop)).unwrap();
+        assert!(s
+            .register(HandleId::from_raw(1), "b", 2, Box::new(Noop))
+            .is_err()); // duplicate id
+        assert!(s
+            .register(HandleId::from_raw(2), "c", 1, Box::new(Noop))
+            .is_err()); // duplicate order
+        s.register(HandleId::from_raw(2), "c", 2, Box::new(Noop)).unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(!s.is_empty());
+        assert_eq!(
+            s.system_ids(),
+            vec![HandleId::from_raw(1), HandleId::from_raw(2)]
+        );
+        assert!(format!("{:?}", s).contains("RuntimeScheduler"));
+    }
+}

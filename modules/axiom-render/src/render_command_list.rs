@@ -65,6 +65,30 @@ mod tests {
     }
 
     #[test]
+    fn populated_list_is_not_empty() {
+        let mut l = RenderCommandList::new();
+        l.push(RenderCommand::ClearFrame {
+            color: [0.0, 0.0, 0.0, 1.0],
+        });
+        // Kills `is_empty -> true`: a list holding a command is not empty.
+        assert!(!l.is_empty());
+        assert_eq!(l.len(), 1);
+    }
+
+    #[test]
+    fn with_capacity_is_empty_but_constructed() {
+        // Kills `with_capacity -> Default::default()` only insofar as the
+        // returned list must be a usable, empty list that accepts pushes.
+        let mut l = RenderCommandList::with_capacity(4);
+        assert!(l.is_empty());
+        assert_eq!(l.len(), 0);
+        l.push(RenderCommand::ClearFrame {
+            color: [1.0, 1.0, 1.0, 1.0],
+        });
+        assert_eq!(l.len(), 1);
+    }
+
+    #[test]
     fn push_and_at_round_trip() {
         let mut l = RenderCommandList::new();
         l.push(RenderCommand::ClearFrame {

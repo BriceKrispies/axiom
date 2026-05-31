@@ -17,6 +17,12 @@
 #   - runtime-host-step-driver
 #   - host-frame-reporting
 #   - host-error-propagation
+#   - presentation-target-boundary
+#   - surface-handle-boundary
+#   - surface-descriptor-validation
+#   - adapter-request-boundary
+#   - device-request-boundary
+#   - presentation-request-validation
 
 [layer]
 name = "host"
@@ -25,7 +31,7 @@ previous = "math"
 crate_name = "axiom-host"
 allowed_dependencies = ["kernel", "runtime", "math"]
 forbidden_dependencies = []
-meaningful_dependency = "Host consumes math (`MathApi` for finite-scalar validation of host-supplied viewport scale factors and for converting viewport dimensions to deterministic Vec2-shaped engine data), runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `Tick`, `TelemetryMetric`) for telemetry routing — and exposes the deterministic host boundary every future browser/native adapter will sit on top of."
+meaningful_dependency = "Host consumes math (`MathApi` for finite-scalar validation of host-supplied viewport scale factors and for converting viewport dimensions to deterministic Vec2-shaped engine data, including the surface-descriptor viewport behind the presentation boundary), runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `HandleId`, `Tick`, `TelemetryMetric`) for telemetry routing and for minting the stable opaque identities behind `HostPresentationTarget` / `HostSurfaceHandle` — and exposes the deterministic host boundary (stepping plus presentation) every future browser/native adapter will sit on top of."
 
 # Public Rust surface is the curated list in `lib.rs`; the architecture
 # checker only needs the facade plus the driver to prove the layer's

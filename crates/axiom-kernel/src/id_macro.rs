@@ -97,6 +97,12 @@ macro_rules! define_id {
                 assert_eq!(restored, id);
                 assert_eq!(reader.remaining(), 0);
             }
+
+            #[test]
+            fn read_from_rejects_a_truncated_buffer() {
+                let mut reader = crate::binary_reader::BinaryReader::new(&[0u8, 1u8]);
+                assert!($name::read_from(&mut reader).is_err());
+            }
         }
     };
 }

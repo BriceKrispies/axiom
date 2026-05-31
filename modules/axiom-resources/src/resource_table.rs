@@ -112,7 +112,8 @@ mod tests {
         let a = t.next_id();
         let b = t.next_id();
         let c = t.next_id();
-        assert!(a.raw() < b.raw() && b.raw() < c.raw());
+        assert!(a.raw() < b.raw());
+        assert!(b.raw() < c.raw());
     }
 
     #[test]
@@ -136,4 +137,34 @@ mod tests {
         let ids: Vec<u64> = t.meshes_in_order().map(|(id, _)| id.raw()).collect();
         assert_eq!(ids, vec![a.raw(), b.raw()]);
     }
+}
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::solid_color_texture::build_solid_color_texture;
+
+    #[test]
+    fn texture_insert_lookup_and_order() {
+        let mut t = ResourceTable::new();
+        let a = t.next_id();
+        let b = t.next_id();
+        t.insert_texture(build_solid_color_texture(b, "b", [0, 0, 0, 0]));
+        t.insert_texture(build_solid_color_texture(a, "a", [1, 1, 1, 1]));
+        assert!(t.texture(a).is_some());
+        assert!(t.texture(b).is_some());
+        assert!(t.texture(ResourceId::from_raw(9999)).is_none());
+        assert_eq!(t.texture_count(), 2);
+        let ids: Vec<u64> = t.textures_in_order().map(|(id, _)| id.raw()).collect();
+        assert_eq!(ids, vec![a.raw(), b.raw()]);
+    }
+
+    #[test]
+    fn material_missing_lookup_is_none() {
+        let t = ResourceTable::new();
+        assert!(t.material(ResourceId::from_raw(1)).is_none());
+        assert!(t.mesh(ResourceId::from_raw(1)).is_none());
+        let _ = t.materials_in_order().count();
+    }
+
 }

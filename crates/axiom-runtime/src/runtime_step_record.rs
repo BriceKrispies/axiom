@@ -92,6 +92,21 @@ mod tests {
     }
 
     #[test]
+    fn remaining_counts_round_trip_nonzero_values() {
+        // Use values distinct from the mutation constant 0 (and from 1) so a
+        // `-> usize with 0` replacement is observable.
+        let r = RuntimeStepRecord::new(
+            step(),
+            RuntimeDiagnostics::new(step()),
+            RuntimeState::Running,
+            4,
+            7,
+        );
+        assert_eq!(r.commands_remaining(), 4);
+        assert_eq!(r.events_remaining(), 7);
+    }
+
+    #[test]
     fn succeeded_is_false_when_diagnostics_have_errors() {
         let mut d = RuntimeDiagnostics::new(step());
         d.record_outcomes(vec![SystemOutcome::new(

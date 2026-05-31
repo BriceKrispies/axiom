@@ -17,6 +17,12 @@
 //! module. Not a WebGPU module. Not an asset loader. The module
 //! imports no host APIs and no other module.
 //!
+//! ## Frame capture boundary
+//! [`RenderApi`] can also capture a deterministic, engine-owned
+//! [`RenderReceipt`](crate::render_receipt::RenderReceipt) for one frame: the
+//! frame identity plus the ordered command stream, serialized and hashable.
+//! **This is not pixel capture** — see `render_receipt.rs`.
+//!
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** facade: [`RenderApi`].
 
@@ -30,5 +36,6 @@ mod render_material;
 mod render_mesh;
 mod render_object;
 mod render_pipeline_kind;
+mod render_receipt;
 
 pub use render_api::RenderApi;

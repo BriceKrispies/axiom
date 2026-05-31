@@ -220,3 +220,30 @@ mod tests {
         assert!(back.approx_eq(&v, eps()));
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::BinaryReader;
+
+    #[test]
+    fn normalize_non_finite_length_fails() {
+        assert!(Vec2::new(f32::MAX, f32::MAX).normalize().is_err());
+    }
+
+    #[test]
+    fn read_from_truncated_each_component() {
+        assert!(Vec2::read_from(&mut BinaryReader::new(&[])).is_err());
+        assert!(Vec2::read_from(&mut BinaryReader::new(&[0u8; 4])).is_err());
+    }
+
+    // Kills normalize divide mutants at 89 (`self.x / len`, `self.y / len` ->
+    // `% len` / `* len`). v = (3,4) has length 5, normalizing to exactly
+    // (0.6, 0.8). Both components are nonzero so each divide is observable.
+    #[test]
+    fn normalize_divides_each_component_by_length() {
+        let n = Vec2::new(3.0, 4.0).normalize().unwrap();
+        assert!((n.x - 0.6).abs() < 1.0e-7);
+        assert!((n.y - 0.8).abs() < 1.0e-7);
+    }
+}

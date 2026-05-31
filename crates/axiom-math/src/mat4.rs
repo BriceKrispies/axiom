@@ -510,3 +510,190 @@ mod tests {
         assert!(d.approx_eq(&Vec4::new(1.0, 0.0, 0.0, 0.0), eps()));
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::BinaryReader;
+
+    #[test]
+    fn perspective_rejects_non_finite_each() {
+        assert!(Mat4::perspective(f32::NAN, 1.0, 1.0, 2.0).is_err());
+        assert!(Mat4::perspective(1.0, f32::NAN, 1.0, 2.0).is_err());
+        assert!(Mat4::perspective(1.0, 1.0, f32::NAN, 2.0).is_err());
+        assert!(Mat4::perspective(1.0, 1.0, 1.0, f32::NAN).is_err());
+    }
+
+    #[test]
+    fn perspective_rejects_fovy_bounds() {
+        assert!(Mat4::perspective(0.0, 1.0, 1.0, 2.0).is_err());
+        assert!(Mat4::perspective(std::f32::consts::PI, 1.0, 1.0, 2.0).is_err());
+    }
+
+    #[test]
+    fn perspective_rejects_aspect_near_far() {
+        assert!(Mat4::perspective(1.0, 0.0, 1.0, 2.0).is_err());
+        assert!(Mat4::perspective(1.0, 1.0, 0.0, 2.0).is_err());
+        assert!(Mat4::perspective(1.0, 1.0, 2.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn perspective_accepts_valid() {
+        assert!(Mat4::perspective(1.0, 1.5, 0.1, 100.0).is_ok());
+    }
+
+    #[test]
+    fn orthographic_rejects_non_finite() {
+        assert!(Mat4::orthographic(f32::NAN, 1.0, 0.0, 1.0, 0.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn orthographic_accepts_valid() {
+        assert!(Mat4::orthographic(-1.0, 1.0, -1.0, 1.0, 0.1, 10.0).is_ok());
+    }
+
+    #[test]
+    fn transform_point_perspective_divide_and_affine() {
+        // Perspective matrix yields w' != 0 and != 1 -> divide branch.
+        let p = Mat4::perspective(1.0, 1.0, 0.1, 100.0).unwrap();
+        let _ = p.transform_point(Vec3::new(1.0, 1.0, -5.0));
+        // Identity yields w' == 1 -> affine branch.
+        let i = Mat4::IDENTITY.transform_point(Vec3::new(2.0, 3.0, 4.0));
+        assert!(i.approx_eq(&Vec3::new(2.0, 3.0, 4.0), Epsilon::DEFAULT));
+    }
+
+    #[test]
+    fn transform_point_zero_w_takes_affine_branch() {
+        // Fourth row all zeros -> w' == 0, so the perspective divide is skipped.
+        let m = Mat4::from_cols_array([
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, //
+        ]);
+        let r = m.transform_point(Vec3::new(2.0, 3.0, 4.0));
+        assert!(r.approx_eq(&Vec3::new(2.0, 3.0, 4.0), Epsilon::DEFAULT));
+    }
+
+    #[test]
+    fn read_from_truncated_errors() {
+        let mut r = BinaryReader::new(&[0u8; 4]);
+        assert!(Mat4::read_from(&mut r).is_err());
+    }
+
+    #[test]
+    fn approx_eq_detects_difference() {
+        let a = Mat4::IDENTITY;
+        let mut data = a.as_cols_array();
+        data[5] = 99.0;
+        let b = Mat4::from_cols_array(data);
+        assert!(!a.approx_eq(&b, Epsilon::DEFAULT));
+        assert!(a.approx_eq(&Mat4::IDENTITY, Epsilon::DEFAULT));
+    }
+
+    fn eps5() -> Epsilon {
+        Epsilon::new(1.0e-5).unwrap()
+    }
+
+    // Kills from_quaternion mutants at 71 (`x*x`), 88 (`yz + wx`), 92
+    // (`yz - wx`). Uses q = (0.5,0.5,0.5,0.5) (a genuine unit quaternion) where
+    // each squared/cross term is a distinct 0.25, so the mutated forms produce
+    // different, checkable matrix elements.
+    #[test]
+    fn from_quaternion_matrix_elements_are_exact() {
+        let q = Quat::new(0.5, 0.5, 0.5, 0.5);
+        let m = Mat4::from_quaternion(q).as_cols_array();
+        // index5 = 1 - 2*(xx + zz); with xx=x*x=0.25 this is 0.0.
+        // Mutant `x + x = 1.0` makes it 1 - 2*1.25 = -1.5.
+        assert!(m[5].approx_eq(&0.0, eps5()));
+        // index6 = 2*(yz + wx) = 2*(0.25+0.25) = 1.0.
+        assert!(m[6].approx_eq(&1.0, eps5()));
+        // index9 = 2*(yz - wx) = 0.0; mutant `+` gives 1.0.
+        assert!(m[9].approx_eq(&0.0, eps5()));
+        // index10 = 1 - 2*(xx + yy) = 0.0 (also pins the `x*x` term).
+        assert!(m[10].approx_eq(&0.0, eps5()));
+    }
+
+    // Kills perspective mutants at 133 (`1.0 / tan`) and 153 (`2.0 * far`).
+    // FRAC_PI_2 makes tan == 1 which hides the 133 divide, so use FRAC_PI_3.
+    #[test]
+    fn perspective_focal_and_depth_terms_are_exact() {
+        let fovy = std::f32::consts::FRAC_PI_3; // 60 deg; tan(30 deg) = 1/sqrt(3)
+        // near = 2 (NOT 1) so that `far * near` differs from `far / near`,
+        // killing the 153:23 (`*` -> `/`) mutant; and `far - near` differs from
+        // `far + near` for the depth terms.
+        let near = 2.0f32;
+        let far = 100.0f32;
+        let m = Mat4::perspective(fovy, 1.0, near, far).unwrap();
+        let cols = m.as_cols_array();
+        // f = 1/tan(30deg) = sqrt(3) ~= 1.7320508; f/aspect with aspect 1.
+        // Mutant 133 (`/` -> `*`) gives f = tan(30deg) ~= 0.57735.
+        assert!(cols[0].approx_eq(&3.0f32.sqrt(), eps5()));
+        let nf = 1.0f32 / (near - far); // = -1/98
+        // col[10] = (far+near)*nf = 102 * nf.
+        assert!(cols[10].approx_eq(&((far + near) * nf), eps5()));
+        // col[14] = 2*far*near*nf. With near=2: 2*100*2*nf = 400*nf.
+        // Mutant 153 (`far / near`) gives 2*(100/2)*nf = 100*nf, distinct.
+        assert!(cols[14].approx_eq(&(2.0 * far * near * nf), eps5()));
+    }
+
+    // Kills every orthographic mutant: 183 (`far - near`), 197 (`-2.0/fn_`
+    // delete `-`, `/`->`%`/`*`), 200/201 (translation column delete `-`,
+    // `/`->`%`/`*`), 202 (`far + near` -> `-`, `/`->`*`). Asymmetric bounds make
+    // each element distinct from the mutated alternatives.
+    #[test]
+    fn orthographic_matrix_elements_are_exact() {
+        let m = Mat4::orthographic(2.0, 6.0, 1.0, 5.0, 3.0, 9.0).unwrap();
+        let c = m.as_cols_array();
+        // rl=4, tb=4, fn_=6.
+        assert!(c[0].approx_eq(&0.5, eps5())); // 2/rl
+        assert!(c[5].approx_eq(&0.5, eps5())); // 2/tb
+        assert!(c[10].approx_eq(&(-2.0 / 6.0), eps5())); // -2/fn_
+        assert!(c[12].approx_eq(&-2.0, eps5())); // -(right+left)/rl = -8/4
+        assert!(c[13].approx_eq(&-1.5, eps5())); // -(top+bottom)/tb = -6/4
+        assert!(c[14].approx_eq(&-2.0, eps5())); // -(far+near)/fn_ = -12/6
+    }
+
+    // Kills the look_at `delete -` mutants at 220..=224. f, s, u and the eye
+    // dots are recomputed independently and the matrix's third row / fourth
+    // column are pinned to the negated values production must store.
+    #[test]
+    fn look_at_negation_terms_are_exact() {
+        let eye = Vec3::new(3.0, 4.0, 5.0);
+        let target = Vec3::new(0.0, 1.0, -2.0);
+        let up = Vec3::UNIT_Y;
+        let m = Mat4::look_at(eye, target, up).unwrap().as_cols_array();
+
+        let f = target.subtract(eye).normalize().unwrap();
+        let s = f.cross(up).normalize().unwrap();
+        let u = s.cross(f);
+
+        // Third row holds -f (indices 2, 6, 10).
+        assert!(m[2].approx_eq(&(-f.x), eps5()));
+        assert!(m[6].approx_eq(&(-f.y), eps5()));
+        assert!(m[10].approx_eq(&(-f.z), eps5()));
+        // Fourth column holds -s.dot(eye), -u.dot(eye), f.dot(eye).
+        assert!(m[12].approx_eq(&(-s.dot(eye)), eps5()));
+        assert!(m[13].approx_eq(&(-u.dot(eye)), eps5()));
+        assert!(m[14].approx_eq(&(f.dot(eye)), eps5()));
+        // Guard the values are actually non-trivial (so deletes change them).
+        assert!(f.z.abs() > 1.0e-3);
+        assert!(s.dot(eye).abs() > 1.0e-3);
+        assert!(u.dot(eye).abs() > 1.0e-3);
+    }
+
+    // Kills transform_point mutants at 261 (`v.w != 1.0` -> `==`) and 262
+    // (the three perspective divides `/` -> `%` / `*`). A matrix that forces
+    // w' == 2 (not 0, not 1) must take the divide branch and divide by 2.
+    #[test]
+    fn transform_point_perspective_divide_by_two() {
+        let m = Mat4::from_cols_array([
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 2.0, // w' = 2 for any input point
+        ]);
+        let r = m.transform_point(Vec3::new(3.0, 7.0, 9.0));
+        assert!(r.approx_eq(&Vec3::new(1.5, 3.5, 4.5), eps5()));
+    }
+}

@@ -64,6 +64,19 @@ mod tests {
     }
 
     #[test]
+    fn importing_immediately_lower_layer_is_allowed_not_forward() {
+        // Boundary for `target > importer`: target is exactly one below the
+        // importer (target != importer, so the SelfImport guard does not fire).
+        // The correct result is Ok; a forward-import error here would be wrong.
+        assert!(LayerImportRule::validate(2, 1).is_ok());
+        // One step the other way is a forward import.
+        assert_eq!(
+            LayerImportRule::validate(1, 2).unwrap_err().code(),
+            KernelErrorCode::ForwardImport
+        );
+    }
+
+    #[test]
     fn kernel_can_import_nothing() {
         // Index 0 against any target is either self (0) or forward (>0).
         assert_eq!(

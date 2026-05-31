@@ -80,3 +80,34 @@ mod tests {
         assert_eq!(SchemaVersion::read_from(&mut r).unwrap(), v);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::binary_reader::BinaryReader;
+    use crate::binary_writer::BinaryWriter;
+
+    #[test]
+    fn read_from_round_trips_and_rejects_truncation() {
+        let mut w = BinaryWriter::new();
+        SchemaVersion::new(2, 3).write_to(&mut w);
+        let bytes = w.into_bytes();
+        let mut r = BinaryReader::new(&bytes);
+        assert_eq!(SchemaVersion::read_from(&mut r).unwrap(), SchemaVersion::new(2, 3));
+        let mut short = BinaryReader::new(&[0u8]);
+        assert!(SchemaVersion::read_from(&mut short).is_err());
+    }
+}
+
+#[cfg(test)]
+mod cov2 {
+    use super::*;
+    use crate::binary_reader::BinaryReader;
+
+    #[test]
+    fn read_from_fails_when_minor_is_truncated() {
+        // major reads ok (2 bytes); minor needs 2 but only 1 remains.
+        let mut r = BinaryReader::new(&[1u8, 0u8, 9u8]);
+        assert!(SchemaVersion::read_from(&mut r).is_err());
+    }
+}

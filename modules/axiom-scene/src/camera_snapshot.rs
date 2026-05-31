@@ -82,6 +82,20 @@ mod tests {
     }
 
     #[test]
+    fn aspect_is_the_constructed_value() {
+        // Kills `aspect -> 1.0`: use an aspect distinct from 1.0.
+        let s = CameraSnapshot::new(
+            CameraId::from_raw(1),
+            SceneNodeId::from_raw(1),
+            1.5,
+            16.0 / 9.0,
+            0.1,
+            100.0,
+        );
+        assert_eq!(s.aspect(), 16.0 / 9.0);
+    }
+
+    #[test]
     fn equality_requires_all_fields() {
         let a = CameraSnapshot::new(
             CameraId::from_raw(1),

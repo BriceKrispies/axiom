@@ -326,3 +326,73 @@ mod tests {
         assert!(back.approx_eq(&t, eps()));
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    #[test]
+    fn inverse_zero_rotation_fails_after_scale_checks() {
+        // Uniform, finite, non-zero scale passes all scale checks; the zero
+        // quaternion then fails to invert.
+        let t = Transform::new(Vec3::ZERO, Quat::new(0.0, 0.0, 0.0, 0.0), Vec3::ONE);
+        assert!(t.inverse().is_err());
+    }
+
+    #[test]
+    fn inverse_non_uniform_scale_x_ne_y() {
+        let t = Transform::from_scale(Vec3::new(2.0, 1.0, 1.0));
+        assert!(t.inverse().is_err());
+    }
+
+    #[test]
+    fn inverse_non_uniform_scale_y_ne_z() {
+        let t = Transform::from_scale(Vec3::new(1.0, 1.0, 2.0));
+        assert!(t.inverse().is_err());
+    }
+
+    #[test]
+    fn inverse_uniform_ok() {
+        let t = Transform::new(Vec3::new(1.0, 2.0, 3.0), Quat::IDENTITY, Vec3::ONE);
+        assert!(t.inverse().is_ok());
+    }
+
+    #[test]
+    fn read_from_truncated_each_field() {
+        // translation fails (0 bytes), rotation fails (12 bytes), scale fails (28 bytes).
+        assert!(Transform::read_from(&mut BinaryReader::new(&[])).is_err());
+        assert!(Transform::read_from(&mut BinaryReader::new(&[0u8; 12])).is_err());
+        assert!(Transform::read_from(&mut BinaryReader::new(&[0u8; 28])).is_err());
+    }
+
+    #[test]
+    fn approx_eq_rotation_and_scale_differ() {
+        let base = Transform::IDENTITY;
+        let eps = Epsilon::DEFAULT;
+        let rot = Transform::new(Vec3::ZERO, Quat::new(1.0, 0.0, 0.0, 0.0), Vec3::ONE);
+        assert!(!base.approx_eq(&rot, eps));
+        let scl = Transform::from_scale(Vec3::new(2.0, 2.0, 2.0));
+        assert!(!base.approx_eq(&scl, eps));
+        assert!(base.approx_eq(&Transform::IDENTITY, eps));
+    }
+
+    #[test]
+    fn approx_eq_translation_differs() {
+        let base = Transform::IDENTITY;
+        let moved = Transform::from_translation(Vec3::new(5.0, 0.0, 0.0));
+        assert!(!base.approx_eq(&moved, Epsilon::DEFAULT));
+    }
+
+    // Kills combine 94:28 (`parent.scale.x * child.translation.x` -> `/`).
+    // Identity parent rotation and zero parent translation leave the combined
+    // translation equal to the (scaled) child translation, so the X term is
+    // observable: 3 * 2 = 6 (correct) vs 3 / 2 = 1.5 (mutant).
+    #[test]
+    fn combine_scales_child_translation_x_by_multiplication() {
+        let parent = Transform::new(Vec3::ZERO, Quat::IDENTITY, Vec3::new(3.0, 3.0, 3.0));
+        let child = Transform::new(Vec3::new(2.0, 5.0, 7.0), Quat::IDENTITY, Vec3::ONE);
+        let combined = Transform::combine(parent, child);
+        let p = combined.transform_point(Vec3::ZERO);
+        assert!(p.approx_eq(&Vec3::new(6.0, 15.0, 21.0), Epsilon::new(1.0e-5).unwrap()));
+    }
+}

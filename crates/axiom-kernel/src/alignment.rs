@@ -78,3 +78,15 @@ mod tests {
         assert!(!align.is_aligned(4));
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    #[test]
+    fn new_covers_both_sides_of_the_validity_check() {
+        assert!(Alignment::new(0).is_err()); // value == 0 (left of ||)
+        assert!(Alignment::new(3).is_err()); // non-zero, not power of two (right of ||)
+        assert!(Alignment::new(8).is_ok()); // valid power of two (both false)
+    }
+}

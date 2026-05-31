@@ -285,6 +285,67 @@ mod tests {
         assert_eq!(indices.len(), 36);
     }
 
+    #[test]
+    fn imports_live_executes() {
+        _imports_live();
+    }
+
+    #[test]
+    fn resolved_counts_via_facade() {
+        let mut t = api().empty_table();
+        api().register_cube_mesh(&mut t);
+        api().register_basic_lit_material(&mut t, Vec4::ONE);
+        let r = api().resolve(&t);
+        assert_eq!(api().resolved_mesh_count(&r), 1);
+        assert_eq!(api().resolved_material_count(&r), 1);
+    }
+
+    #[test]
+    fn resolved_counts_differ_from_one() {
+        // Kills `resolved_mesh_count/resolved_material_count -> 1`: assert
+        // exact counts that are NOT 1 (0 for empty, 2 for two registrations).
+        let empty = api().resolve(&api().empty_table());
+        assert_eq!(api().resolved_mesh_count(&empty), 0);
+        assert_eq!(api().resolved_material_count(&empty), 0);
+
+        let mut t = api().empty_table();
+        api().register_cube_mesh(&mut t);
+        api().register_cube_mesh(&mut t);
+        api().register_basic_lit_material(&mut t, Vec4::ONE);
+        api().register_basic_lit_material(&mut t, Vec4::new(0.1, 0.2, 0.3, 1.0));
+        let r = api().resolve(&t);
+        assert_eq!(api().resolved_mesh_count(&r), 2);
+        assert_eq!(api().resolved_material_count(&r), 2);
+    }
+
+    #[test]
+    fn resolved_normal_and_uv_present_and_missing() {
+        let mut t = api().empty_table();
+        let mesh = api().register_cube_mesh(&mut t);
+        let r = api().resolve(&t);
+        // Present mesh + present vertex.
+        assert!(api().resolved_mesh_normal_at(&r, mesh.raw(), 0).is_some());
+        assert!(api().resolved_mesh_uv_at(&r, mesh.raw(), 0).is_some());
+        // Present mesh, out-of-range vertex index.
+        assert!(api().resolved_mesh_normal_at(&r, mesh.raw(), 9999).is_none());
+        assert!(api().resolved_mesh_uv_at(&r, mesh.raw(), 9999).is_none());
+        // Missing mesh id.
+        assert!(api().resolved_mesh_normal_at(&r, 9999, 0).is_none());
+        assert!(api().resolved_mesh_uv_at(&r, 9999, 0).is_none());
+    }
+
+    #[test]
+    fn resolved_mesh_accessors_handle_missing_ids() {
+        let r = api().resolve(&api().empty_table());
+        assert!(api().resolved_mesh_id_at(&r, 0).is_none());
+        assert!(api().resolved_material_id_at(&r, 0).is_none());
+        assert!(api().resolved_mesh_vertex_count(&r, 1).is_none());
+        assert!(api().resolved_mesh_index_count(&r, 1).is_none());
+        assert!(api().resolved_mesh_position_at(&r, 1, 0).is_none());
+        assert!(api().resolved_mesh_indices(&r, 1).is_none());
+        assert!(api().resolved_material_base_color(&r, 1).is_none());
+    }
+
     // Keep imports live so dead-code lints don't fire if a test is
     // commented out during local development.
     #[allow(dead_code)]

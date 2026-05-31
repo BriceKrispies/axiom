@@ -92,6 +92,14 @@ mod tests {
         let summaries = FrameStepSummary::list_from_records(report.step_records());
         let ticks: Vec<u64> = summaries.iter().map(|s| s.runtime_tick()).collect();
         assert_eq!(ticks, vec![1, 2, 3]);
+        // Pin frame index and sequence to the third step's value (3), which is
+        // distinct from the mutation constant 1.
+        let frames: Vec<u64> = summaries.iter().map(|s| s.runtime_frame_index()).collect();
+        assert_eq!(frames, vec![1, 2, 3]);
+        let seqs: Vec<u64> = summaries.iter().map(|s| s.runtime_sequence()).collect();
+        assert_eq!(seqs, vec![1, 2, 3]);
+        assert_eq!(summaries[2].runtime_frame_index(), 3);
+        assert_eq!(summaries[2].runtime_sequence(), 3);
     }
 
     #[test]

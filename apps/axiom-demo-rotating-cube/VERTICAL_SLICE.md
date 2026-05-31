@@ -1,148 +1,160 @@
-# Axiom — Deterministic Rotating Cube Vertical Slice
+# Axiom — Headless Deterministic Rotating-Cube Vertical Slice (First Pass)
 
-This app is the engine's first end-to-end vertical slice. It is the
-**only** place in the workspace where the four engine modules are
-composed together. Every step in the pipeline is owned by exactly
-one crate; the app does the translation between module contracts.
+This app is Axiom's first end-to-end vertical slice and the **only** place
+in the workspace where the four engine modules (`scene`, `resources`,
+`render`, `webgpu`) are composed. This first pass is **headless**: it
+proves the layers and modules can produce deterministic per-frame
+artifacts end-to-end. It does **not** open a canvas, create a WebGPU
+surface or swapchain, run `wasm-bindgen`, or present pixels.
 
-## Boundary-by-boundary pipeline
+## What this first pass proves
+
+1. Tick 0 produces deterministic artifacts.
+2. Tick 60 produces a **different** cube world transform than tick 0.
+3. Tick 0 replayed from a fresh app is **byte-equal** to the first tick 0.
+4. `SceneSnapshot`, `ResolvedResources`, `RenderInput`,
+   `RenderCommandList`, `GpuSubmission`, and `GpuSubmissionReport` are all
+   captured as inspectable plain-data artifacts.
+5. Module boundaries stay isolated — no module imports another module.
+6. All cross-module composition glue lives in this app crate.
+7. The whole pipeline runs through the real module facades (the render
+   command list is built by `axiom-render`; the GPU submission is recorded
+   by `axiom-webgpu`), not re-implemented in the app.
+
+These are exercised by `tests/vertical_slice.rs` and the per-module unit
+tests in `src/*.rs`.
+
+## Public facade
+
+The app exposes a single **behavioral** facade from `lib.rs`:
+[`DemoRotatingCubeApi`]. Its one method,
+`run_tick(&mut self, tick) -> VerticalSliceArtifact`, runs the full
+headless pipeline for one deterministic tick and returns a single
+inspectable artifact.
+
+Everything else re-exported from `lib.rs` is **inert plain data**: the
+artifact tree that `run_tick` returns. Those types carry no behavior; they
+are exported only so every boundary value is inspectable by callers and
+tests (a public method returning a private type would not compile under the
+workspace lint settings).
+
+## Exact data flow
 
 ```text
-                        OWNING CRATE
-─────────────────────────────────────────────────────────────────
-                                            apps/axiom-demo-
-                                            rotating-cube
-   ┌── frame tick                          (app)
-   │
-   ▼
-host frame input                            axiom-host
-   │
-   ▼
-host frame report                           axiom-host
-   │
-   ▼
-engine frame context                        axiom-frame
-   │
-   ▼
-scene transform update                      axiom-scene
-   │
-   ▼
-SceneSnapshot                               axiom-scene
-   │
-   │     ResolvedResources                  axiom-resources
-   │           ▼
-   └─────────►  ◄────────────────────────  (app translation)
-                   ▼
-                 RenderInput                axiom-render
-                   ▼
-                 RenderCommandList          axiom-render
-                   ▼
-              (app translation)
-                   ▼
-                 GpuSubmission              axiom-webgpu
-                   ▼
-                 GpuSubmissionReport        axiom-webgpu
+                                              OWNING CRATE
+──────────────────────────────────────────────────────────────────────
+frame tick                                    app (DemoRotatingCubeApi)
+  → HostFrameInput                            app builds → axiom-host
+  → HostFrameReport  (runtime steps once)     axiom-host
+  → EngineFrame / FrameContext                axiom-frame
+  → scene transform update                    axiom-scene
+  → SceneSnapshot                             axiom-scene
+  → ResolvedResources                         axiom-resources
+  ───── app glue: scene_to_render_input ─────────────────────────────
+  → RenderInput          (app plan → builder) axiom-render
+  → RenderCommandList                         axiom-render
+  ───── app glue: render_command_list_to_gpu_submission ─────────────
+  → GpuSubmission        (app plan → builder) axiom-webgpu
+  → GpuSubmissionReport                       axiom-webgpu
 ```
 
-### Step-by-step
+### Which crate owns each artifact
 
-| #  | Boundary value         | Producer crate      | Consumer crate(s)          |
-|----|------------------------|---------------------|----------------------------|
-| 1  | `HostFrameInput`       | app                 | `axiom-host`               |
-| 2  | `HostFrameReport`      | `axiom-host`        | `axiom-frame`              |
-| 3  | `EngineFrame`          | `axiom-frame`       | `axiom-frame`              |
-| 4  | `FrameContext`         | `axiom-frame`       | `axiom-scene` (via `advance`) |
-| 5  | `SceneSnapshot`        | `axiom-scene`       | app                        |
-| 6  | `ResourceTable`        | `axiom-resources`   | `axiom-resources`          |
-| 7  | `ResolvedResources`    | `axiom-resources`   | app                        |
-| 8  | `RenderInput`          | `axiom-render` (app builds) | `axiom-render`     |
-| 9  | `RenderCommandList`    | `axiom-render`      | app                        |
-| 10 | `GpuSubmission`        | `axiom-webgpu` (app builds) | `axiom-webgpu`     |
-| 11 | `GpuSubmissionReport`  | `axiom-webgpu`      | app                        |
+| Boundary value         | Owning crate                | Mirrored as (app artifact)     |
+|------------------------|-----------------------------|--------------------------------|
+| `HostFrameInput`       | `axiom-host`                | (frame bookkeeping fields)     |
+| `HostFrameReport`      | `axiom-host`                | (frame bookkeeping fields)     |
+| `EngineFrame`          | `axiom-frame`               | `engine_frame_index`, …        |
+| `SceneSnapshot`        | `axiom-scene`               | `SceneSnapshotArtifact`        |
+| `ResolvedResources`    | `axiom-resources`           | `ResolvedResourcesArtifact`    |
+| `RenderInput`          | `axiom-render`              | `RenderInputArtifact`          |
+| `RenderCommandList`    | `axiom-render`              | `RenderCommandListArtifact`    |
+| `GpuSubmission`        | `axiom-webgpu`              | `GpuSubmissionArtifact`        |
+| `GpuSubmissionReport`  | `axiom-webgpu`              | `GpuSubmissionReportArtifact`  |
+| translation glue       | `axiom-demo-rotating-cube`  | —                              |
 
-### Translation glue (app-owned)
+## Source layout
 
-- `SceneSnapshot + ResolvedResources → RenderInput`
-  - Read `snapshot.cameras()`, compute `view = inverse(world)` and
-    `projection = MathApi::mat4_perspective(...)`.
-  - Read `snapshot.lights()`, translate each to a `RenderApi`
-    directional / point light.
-  - Walk `ResolvedResources` meshes and materials, add each to
-    `RenderInput` via `RenderApi::add_input_mesh` /
-    `add_input_basic_lit_material`. Remember the resulting render-
-    side indices keyed by resource id.
-  - For each `snapshot.renderables()`, look up its mesh/material
-    indices and add a `RenderObject` with the renderable's node's
-    world matrix.
-- `RenderCommandList → GpuSubmission`
-  - Walk the list one command at a time via `RenderApi`'s indexed
-    accessors, switching on the `KIND_*` `u32` codes. For each
-    command, call the matching `WebGpuApi::submission_*` method.
-  - Append `submission_present` at the end.
+| File                            | Responsibility                                             |
+|---------------------------------|------------------------------------------------------------|
+| `src/lib.rs`                    | Single facade + the inert artifact re-exports.             |
+| `src/demo_api.rs`               | `DemoRotatingCubeApi` + persistent engine state.           |
+| `src/vertical_slice.rs`         | Per-tick orchestrator + `VerticalSliceArtifact`.           |
+| `src/scene_to_render_input.rs`  | Glue: `SceneSnapshot + ResolvedResources → RenderInput`.   |
+| `src/render_to_gpu_submission.rs` | Glue: `RenderCommandList → GpuSubmission`.               |
+| `tests/vertical_slice.rs`       | Determinism, boundary-completeness, isolation proofs.      |
 
-## What is deterministic today
+## Why composition glue lives in the app
 
-- The scene is rebuilt each tick from the rotation derived from the
-  tick number (`cube_rotation_for_tick`).
-- The resource table is rebuilt each tick with the built-in cube
-  mesh and basic-lit material.
-- The runtime steps exactly once per tick (fixed-step config).
-- The host driver, the frame builder, and the runtime are persistent
-  across ticks so engine frame indices, host frame sequences, and
-  runtime tick counts increase monotonically.
-- The per-tick `CubeFrame` is plain-data (`Vec<u32>` + `Mat4` + scalar
-  counts) and byte-equal across two replays of the same tick
-  sequence.
+Two modules can never name each other's types: each module re-exports
+**exactly one** facade, and its contract types (`SceneSnapshot`,
+`RenderInput`, `GpuSubmission`, …) live behind private modules. So the only
+way to bridge two modules is for an **app** to read the producer's facade
+and feed the consumer's facade. That keeps each module a black box with a
+stable shape and keeps every two-module pairing re-composable by future
+apps (a native app, a WASM app, a different backend) without rewriting the
+modules.
 
-## What is NOT working today (and why)
+Concretely, the app's two glue steps are pure functions over **app-owned,
+nameable** plain-data types:
 
-**Actual WebGPU presentation does not run.** The `axiom-webgpu`
-module is in `Recording` backend mode: every submission is captured
-into a deterministic `GpuSubmissionReport` instead of being submitted
-to a real device. The blockers are entirely in `axiom-host`:
+- `scene_to_render_input(math, scene, resources) -> RenderInputArtifact`
+- `render_command_list_to_gpu_submission(commands, w, h) -> GpuSubmissionArtifact`
 
-1. **No surface handle.** `HostViewport` describes the viewport
-   dimensions and scale factor but does not yet hand out a
+The orchestrator in `vertical_slice.rs` does only the mechanical plumbing
+that *must* touch the un-nameable module values: it reads each producer
+value (through its facade's accessors) into a plain-data artifact, runs the
+nameable glue, and replays the resulting plan back into the next module's
+builder. Because a helper function cannot name an un-nameable contract type
+in its signature, that plumbing lives in one function by necessity — the
+*decisions* it makes are delegated to the two glue modules, which are
+independently unit-tested.
+
+## Why this pass is headless
+
+`axiom-webgpu` ships only its `Recording` backend today: each command
+pushed into a `GpuSubmission` is captured into a deterministic
+`GpuSubmissionReport` rather than issued to a real GPU device. No surface,
+no swapchain, no device, no draw calls. That is exactly what makes the
+slice deterministic and CI-friendly: every boundary — up to and including
+the GPU submission **shape** — is a comparable value.
+
+## Missing host / WebGPU presentation boundary (what blocks actual pixels)
+
+Real WebGPU presentation is blocked entirely in the **host layer**, not in
+this app:
+
+1. **No surface handle.** `axiom-host`'s `HostViewport` describes the
+   viewport dimensions and scale factor but does not hand out a
    `wasm-bindgen` canvas reference, a `RawWindowHandle`, or a
-   `wgpu::Surface` constructor. Without a surface there is no
-   swap-chain to present to.
-2. **No async device init path.** `wgpu`'s
-   `Instance ⇒ Adapter ⇒ Device ⇒ Queue` initialisation is async.
+   `wgpu::Surface` constructor. Without a surface there is no swapchain to
+   present to.
+2. **No async device-init path.** `wgpu`'s
+   `Instance → Adapter → Device → Queue` initialisation is async;
    `axiom-host` is synchronous today and `axiom-runtime`/`axiom-frame`
    assume synchronous stepping.
-3. **No adapter-request entry point.** `axiom-host` does not expose
-   a "request adapter" entry matching the future browser
-   `navigator.gpu.requestAdapter()` shape.
+3. **No adapter-request entry point.** `axiom-host` exposes nothing shaped
+   like the browser `navigator.gpu.requestAdapter()` path.
 
-The vertical slice is otherwise complete: the headless test
-`deterministic_rotating_cube_tick_60_produces_stable_render_commands`
-proves that every boundary up to (and including) the GPU submission
-shape is deterministic. When the host layer exposes the missing
-surface / adapter / async-init capability, `axiom-webgpu`'s
-`submit()` can be extended with a `BackendKind::Live` arm that runs
-real `wgpu` calls without changing the `GpuSubmission` /
-`GpuSubmissionReport` shape.
+(See `modules/axiom-webgpu/ARCHITECTURE.md` for the backend-side view.)
+
+## What remains for the browser-visible second pass
+
+- Extend `axiom-host` with a surface/adapter/async-device capability
+  (a new platform-facing boundary on the host layer's allowlist).
+- Add a `BackendKind::Live` arm to `axiom-webgpu::WebGpuApi::submit` that
+  drives real `wgpu` calls. The `GpuSubmission` / `GpuSubmissionReport`
+  **shape stays unchanged**, so this app's glue does not change.
+- Add a thin WASM/`wasm-bindgen` entrypoint **in a new app** (not in any
+  module) that owns the canvas and the render loop.
+
+None of that is in this first pass. **This pass does not render pixels in a
+browser.**
 
 ## How to run
 
 ```sh
-cargo test -p axiom-demo-rotating-cube
+cargo test -p axiom-demo-rotating-cube     # app unit + integration tests
+cargo test --workspace                     # whole workspace, incl. arch check
+cargo xtask check-architecture             # the Axiom Layer/Module/App laws
 ```
-
-The integration test
-`deterministic_rotating_cube_tick_60_produces_stable_render_commands`
-runs the full pipeline for 61 ticks and asserts the shape, content,
-and byte-equality of every artifact.
-
-## How to extend
-
-The cleanest module-isolated extensions:
-
-- Add new mesh kinds — extend `ResourcesApi` with new built-in mesh
-  builders. The app's translation step does not change.
-- Add new render pipelines — extend `RenderApi` with new `KIND_*`
-  codes and `add_input_*` builder methods. The app's translation
-  step grows a new `match` arm.
-- Add a live GPU backend — implement `BackendKind::Live` inside
-  `axiom-webgpu` once the host layer exposes a surface. The boundary
-  shape (`GpuSubmission`/`GpuSubmissionReport`) stays unchanged.

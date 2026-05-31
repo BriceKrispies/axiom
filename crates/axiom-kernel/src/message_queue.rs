@@ -110,6 +110,16 @@ mod tests {
     }
 
     #[test]
+    fn populated_queue_is_not_empty_and_reports_real_len() {
+        let mut q = MessageQueue::new();
+        q.push(envelope(1));
+        q.push(envelope(2));
+        // Distinguishes `is_empty -> true`: a populated queue is NOT empty.
+        assert!(!q.is_empty());
+        assert_eq!(q.len(), 2);
+    }
+
+    #[test]
     fn clear_empties_the_queue() {
         let mut q = MessageQueue::new();
         q.push(envelope(1));

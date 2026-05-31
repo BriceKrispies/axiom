@@ -210,3 +210,38 @@ mod tests {
         assert_eq!(err.code(), FrameErrorCode::InvalidFrameTiming);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_host::{
+        HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
+        HostLifecycleState, HostStepPlan, HostViewport,
+    };
+    use axiom_math::MathApi;
+
+    fn report() -> HostFrameReport {
+        let vp = HostViewport::new(&MathApi::new(), 100, 100, 1.0).unwrap();
+        let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
+        let lifecycle = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
+        let input = HostFrameInput::new(1, 1_000, vp);
+        let plan = HostStepPlan::build(&input, &cfg, &lifecycle, 0);
+        HostFrameReport::new(input.sequence(), plan, plan.steps(), Vec::new(), vp, lifecycle)
+    }
+
+    #[test]
+    fn mismatched_fixed_step_is_rejected() {
+        // consumed = 1 step * 1000ns; supplying a different fixed step makes
+        // expected != consumed, exercising the consistency-check failure.
+        let err = FrameTiming::from_host_report(&report(), 1_001).unwrap_err();
+        assert_eq!(
+            err.code(),
+            crate::frame_error_code::FrameErrorCode::InvalidFrameTiming
+        );
+    }
+
+    #[test]
+    fn zero_fixed_step_skips_the_consistency_check() {
+        assert!(FrameTiming::from_host_report(&report(), 0).is_ok());
+    }
+}

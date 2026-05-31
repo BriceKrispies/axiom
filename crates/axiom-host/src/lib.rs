@@ -28,18 +28,31 @@
 //! `tests/architecture.rs::lib_exports_are_curated_set` — any accidental
 //! widening fails the build.
 
+mod host_adapter_request;
+mod host_alpha_mode;
 mod host_api;
 mod host_boundary_config;
+mod host_color_format;
+mod host_device_profile;
+mod host_device_request;
 mod host_error;
 mod host_error_code;
 mod host_frame_input;
 mod host_frame_report;
 mod host_lifecycle_signal;
 mod host_lifecycle_state;
+mod host_present_mode;
+mod host_presentation_report;
+mod host_presentation_request;
+mod host_presentation_status;
+mod host_presentation_target;
+mod host_power_preference;
 mod host_result;
 mod host_skip_reason;
 mod host_step_driver;
 mod host_step_plan;
+mod host_surface_descriptor;
+mod host_surface_handle;
 mod host_viewport;
 
 // --- Curated public surface ---
@@ -60,3 +73,21 @@ pub use host_skip_reason::HostSkipReason;
 pub use host_step_driver::HostStepDriver;
 pub use host_step_plan::HostStepPlan;
 pub use host_viewport::HostViewport;
+
+// Presentation-boundary data types future browser/WASM adapters and a future
+// axiom-webgpu live mode must be able to name. None of these contain
+// browser/DOM/WebGPU objects — they are stable kernel identities and
+// validated host-owned data.
+pub use host_adapter_request::HostAdapterRequest;
+pub use host_alpha_mode::HostAlphaMode;
+pub use host_color_format::HostColorFormat;
+pub use host_device_profile::HostDeviceProfile;
+pub use host_device_request::HostDeviceRequest;
+pub use host_present_mode::HostPresentMode;
+pub use host_presentation_report::HostPresentationReport;
+pub use host_presentation_request::HostPresentationRequest;
+pub use host_presentation_status::HostPresentationStatus;
+pub use host_presentation_target::HostPresentationTarget;
+pub use host_power_preference::HostPowerPreference;
+pub use host_surface_descriptor::HostSurfaceDescriptor;
+pub use host_surface_handle::HostSurfaceHandle;

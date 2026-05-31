@@ -192,6 +192,13 @@ mod tests {
     }
 
     #[test]
+    fn index_reports_the_constructed_nonzero_value() {
+        // Distinguishes `index -> 0`: a non-kernel layer reports its real index.
+        let manifest = LayerManifest::new(7, "axiom-fake");
+        assert_eq!(manifest.index(), 7);
+    }
+
+    #[test]
     fn distinct_capabilities_are_kept_in_order() {
         let manifest = LayerManifest::new(1, "axiom-fake")
             .with_capability(LayerCapability::new(1))
@@ -202,5 +209,23 @@ mod tests {
             manifest.capabilities(),
             &[LayerCapability::new(1), LayerCapability::new(2)]
         );
+    }
+}
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    #[test]
+    fn validate_covers_index_and_dependency_branches() {
+        assert!(LayerManifest::kernel().validate().is_ok()); // index 0, no deps
+        let kernel_with_dep = LayerManifest::new(0, "k")
+            .with_dependency(LayerDependency::new(3))
+            .unwrap();
+        assert!(kernel_with_dep.validate().is_err()); // index 0 + deps
+        let normal = LayerManifest::new(2, "l")
+            .with_dependency(LayerDependency::new(1))
+            .unwrap();
+        assert!(normal.validate().is_ok()); // index != 0
     }
 }

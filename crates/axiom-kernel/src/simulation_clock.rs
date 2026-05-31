@@ -145,3 +145,37 @@ mod tests {
         assert_eq!(err.code(), KernelErrorCode::RangeOverflow);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::fixed_step::FixedStep;
+
+    #[test]
+    fn advance_by_runs_and_no_ops_at_zero() {
+        let mut c = SimulationClock::new(FixedStep::new(1000).unwrap());
+        c.advance_by(3).unwrap();
+        assert_eq!(c.tick().raw(), 3);
+        c.advance_by(0).unwrap();
+        assert_eq!(c.tick().raw(), 3);
+    }
+}
+
+#[cfg(test)]
+mod cov2 {
+    use super::*;
+    use crate::fixed_step::FixedStep;
+
+    #[test]
+    fn advance_reports_overflow() {
+        let mut c = SimulationClock::new(FixedStep::new(u64::MAX).unwrap());
+        assert!(c.advance().is_ok()); // 0 + MAX
+        assert!(c.advance().is_err()); // MAX + MAX overflows
+    }
+
+    #[test]
+    fn advance_by_propagates_overflow() {
+        let mut c = SimulationClock::new(FixedStep::new(u64::MAX).unwrap());
+        assert!(c.advance_by(2).is_err());
+    }
+}

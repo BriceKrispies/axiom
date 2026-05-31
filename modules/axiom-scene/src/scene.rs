@@ -197,12 +197,14 @@ impl Scene {
                 parent_node.remove_child(child);
             }
         }
-        if let Some(child_node) = self.nodes.get_mut(&child) {
-            child_node.set_parent(Some(parent));
-        }
-        if let Some(parent_node) = self.nodes.get_mut(&parent) {
-            parent_node.add_child(child);
-        }
+        self.nodes
+            .get_mut(&child)
+            .expect("set_parent: child present (validated by contains_key above)")
+            .set_parent(Some(parent));
+        self.nodes
+            .get_mut(&parent)
+            .expect("set_parent: parent present (validated by contains_key above)")
+            .add_child(child);
         Ok(())
     }
 
@@ -218,9 +220,10 @@ impl Scene {
                 parent_node.remove_child(child);
             }
         }
-        if let Some(child_node) = self.nodes.get_mut(&child) {
-            child_node.set_parent(None);
-        }
+        self.nodes
+            .get_mut(&child)
+            .expect("clear_parent: child present (validated by contains_key above)")
+            .set_parent(None);
         Ok(())
     }
 
@@ -271,11 +274,10 @@ impl Scene {
 
         let mut updates: BTreeMap<SceneNodeId, Transform> = BTreeMap::new();
         while let Some((id, world)) = stack.pop() {
-            let node = self.nodes.get(&id).ok_or_else(|| {
-                SceneError::hierarchy_update_failed(
-                    "propagation visited a node that no longer exists",
-                )
-            })?;
+            // `id` was just popped from the stack, which only ever holds ids
+            // taken from the live node map (roots, and children validated
+            // present below), so indexing cannot miss.
+            let node = &self.nodes[&id];
             updates.insert(id, world);
             // Push children in reverse order so smallest id is processed
             // next under LIFO traversal.
@@ -296,9 +298,10 @@ impl Scene {
         }
 
         for (id, world) in updates {
-            if let Some(node) = self.nodes.get_mut(&id) {
-                node.set_world(world);
-            }
+            self.nodes
+                .get_mut(&id)
+                .expect("propagation: every id in `updates` was just read from the live map")
+                .set_world(world);
         }
         Ok(())
     }
@@ -409,6 +412,22 @@ mod tests {
         assert_eq!(s.camera_count(), 0);
         assert_eq!(s.light_count(), 0);
         assert_eq!(s.renderable_count(), 0);
+    }
+
+    #[test]
+    fn populated_scene_reports_nonzero_node_and_renderable_counts() {
+        use crate::material_ref::MaterialRef;
+        use crate::mesh_ref::MeshRef;
+        // Kills `node_count -> 0` and `renderable_count -> 0`: build a scene
+        // with a known non-zero number of nodes and renderables.
+        let mut s = Scene::new();
+        let n1 = s.create_node(Transform::IDENTITY);
+        let _n2 = s.create_node(Transform::IDENTITY);
+        assert_eq!(s.node_count(), 2);
+        let r =
+            Renderable::new(n1, MeshRef::from_raw(1), MaterialRef::from_raw(2)).unwrap();
+        s.add_renderable(r).unwrap();
+        assert_eq!(s.renderable_count(), 1);
     }
 
     #[test]
@@ -603,5 +622,402 @@ mod tests {
         let c = s.create_node(Transform::IDENTITY);
         let ids: Vec<u64> = s.nodes_in_order().map(|(id, _)| id.raw()).collect();
         assert_eq!(ids, vec![a.raw(), b.raw(), c.raw()]);
+    }
+}
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::material_ref::MaterialRef;
+    use crate::mesh_ref::MeshRef;
+    use crate::scene_error_code::SceneErrorCode;
+    use axiom_math::{MathApi, Vec3};
+
+    fn math() -> MathApi {
+        MathApi::new()
+    }
+
+    fn cam_on(s: &mut Scene, node: SceneNodeId) -> CameraId {
+        let cam =
+            Camera::perspective(&math(), node, std::f32::consts::FRAC_PI_2, 1.0, 0.1, 100.0)
+                .unwrap();
+        s.add_camera(cam).unwrap()
+    }
+
+    fn light_on(s: &mut Scene, node: SceneNodeId) -> LightId {
+        let l = Light::directional(&math(), node, Vec3::ONE, 1.0).unwrap();
+        s.add_light(l).unwrap()
+    }
+
+    fn renderable_on(s: &mut Scene, node: SceneNodeId) -> RenderableId {
+        let r = Renderable::new(node, MeshRef::from_raw(1), MaterialRef::from_raw(2)).unwrap();
+        s.add_renderable(r).unwrap()
+    }
+
+    // ---------- read queries: Ok (Some) + Err (None) arms ----------
+
+    #[test]
+    fn camera_query_returns_present_and_missing() {
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        let id = cam_on(&mut s, n);
+        assert!(s.camera(id).is_ok());
+        let err = s.camera(CameraId::from_raw(999)).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingCamera);
+    }
+
+    #[test]
+    fn light_query_returns_present_and_missing() {
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        let id = light_on(&mut s, n);
+        assert!(s.light(id).is_ok());
+        let err = s.light(LightId::from_raw(999)).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingLight);
+    }
+
+    #[test]
+    fn renderable_query_returns_present_and_missing() {
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        let id = renderable_on(&mut s, n);
+        assert!(s.renderable(id).is_ok());
+        let err = s.renderable(RenderableId::from_raw(999)).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingRenderable);
+    }
+
+    #[test]
+    fn component_iterators_yield_attached_components() {
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        cam_on(&mut s, n);
+        light_on(&mut s, n);
+        renderable_on(&mut s, n);
+        assert_eq!(s.cameras_in_order().count(), 1);
+        assert_eq!(s.lights_in_order().count(), 1);
+        assert_eq!(s.renderables_in_order().count(), 1);
+    }
+
+    // ---------- remove_node ----------
+
+    #[test]
+    fn remove_missing_node_fails() {
+        let mut s = Scene::new();
+        let err = s.remove_node(SceneNodeId::from_raw(7)).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingNode);
+    }
+
+    #[test]
+    fn remove_child_node_detaches_from_parent_and_drops_components() {
+        // Removing a node that HAS a parent exercises the parent-detach
+        // arm; the node also carries camera/light/renderable so the three
+        // `retain` calls drop them.
+        let mut s = Scene::new();
+        let p = s.create_node(Transform::IDENTITY);
+        let c = s.create_node(Transform::IDENTITY);
+        s.set_parent(c, p).unwrap();
+        cam_on(&mut s, c);
+        light_on(&mut s, c);
+        renderable_on(&mut s, c);
+        assert_eq!(s.camera_count(), 1);
+
+        s.remove_node(c).unwrap();
+        assert!(s.node(c).is_err());
+        // Parent no longer lists the removed child.
+        assert!(s.node(p).unwrap().children().is_empty());
+        // Components attached to the removed node are gone.
+        assert_eq!(s.camera_count(), 0);
+        assert_eq!(s.light_count(), 0);
+        assert_eq!(s.renderable_count(), 0);
+    }
+
+    // ---------- set_local ----------
+
+    #[test]
+    fn set_local_missing_node_fails() {
+        let mut s = Scene::new();
+        let err = s
+            .set_local(SceneNodeId::from_raw(5), Transform::IDENTITY)
+            .unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingNode);
+    }
+
+    // ---------- set_parent ----------
+
+    #[test]
+    fn set_parent_missing_child_fails() {
+        let mut s = Scene::new();
+        let p = s.create_node(Transform::IDENTITY);
+        let err = s
+            .set_parent(SceneNodeId::from_raw(999), p)
+            .unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingNode);
+    }
+
+    #[test]
+    fn reparenting_detaches_from_old_parent() {
+        // First parent assignment leaves child with no old parent (None
+        // arm); the second reparent exercises the old-parent Some arm.
+        let mut s = Scene::new();
+        let p1 = s.create_node(Transform::IDENTITY);
+        let p2 = s.create_node(Transform::IDENTITY);
+        let c = s.create_node(Transform::IDENTITY);
+        s.set_parent(c, p1).unwrap();
+        assert!(s.node(p1).unwrap().children().contains(&c));
+        s.set_parent(c, p2).unwrap();
+        assert_eq!(s.node(c).unwrap().parent(), Some(p2));
+        assert!(s.node(p1).unwrap().children().is_empty());
+        assert!(s.node(p2).unwrap().children().contains(&c));
+    }
+
+    // ---------- clear_parent ----------
+
+    #[test]
+    fn clear_parent_missing_child_fails() {
+        let mut s = Scene::new();
+        let err = s.clear_parent(SceneNodeId::from_raw(5)).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingNode);
+    }
+
+    #[test]
+    fn clear_parent_on_root_is_a_noop() {
+        // A root has no old parent: the `if let Some(old)` arm is skipped.
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        s.clear_parent(n).unwrap();
+        assert!(s.node(n).unwrap().parent().is_none());
+    }
+
+    // ---------- propagation ----------
+
+    #[test]
+    fn update_world_transforms_scales_through_hierarchy() {
+        let mut s = Scene::new();
+        let p = s.create_node(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
+        let c = s.create_node(Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)));
+        let g = s.create_node(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
+        s.set_parent(c, p).unwrap();
+        s.set_parent(g, c).unwrap();
+        s.update_world_transforms().unwrap();
+        // Translations accumulate down the chain: 1 + 2 + 3 = 6.
+        assert_eq!(s.node(g).unwrap().world().translation.x, 6.0);
+    }
+
+    #[test]
+    fn update_world_transforms_is_idempotent() {
+        let mut s = Scene::new();
+        let p = s.create_node(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
+        let c = s.create_node(Transform::from_translation(Vec3::new(0.0, 2.0, 0.0)));
+        s.set_parent(c, p).unwrap();
+        s.update_world_transforms().unwrap();
+        let first = s.node(c).unwrap().world();
+        s.update_world_transforms().unwrap();
+        let second = s.node(c).unwrap().world();
+        assert_eq!(first, second);
+    }
+
+    // ---------- component removal ----------
+
+    #[test]
+    fn remove_light_present_and_missing() {
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        let id = light_on(&mut s, n);
+        s.remove_light(id).unwrap();
+        let err = s.remove_light(id).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingLight);
+    }
+
+    #[test]
+    fn remove_renderable_present_and_missing() {
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        let id = renderable_on(&mut s, n);
+        s.remove_renderable(id).unwrap();
+        let err = s.remove_renderable(id).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingRenderable);
+    }
+
+    #[test]
+    fn remove_camera_present_succeeds() {
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        let id = cam_on(&mut s, n);
+        s.remove_camera(id).unwrap();
+        assert_eq!(s.camera_count(), 0);
+    }
+
+    // ---------- visibility ----------
+
+    #[test]
+    fn set_renderable_visible_present_and_missing() {
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        let id = renderable_on(&mut s, n);
+        s.set_renderable_visible(id, false).unwrap();
+        assert!(!s.renderable(id).unwrap().visible());
+        s.set_renderable_visible(id, true).unwrap();
+        assert!(s.renderable(id).unwrap().visible());
+        let err = s
+            .set_renderable_visible(RenderableId::from_raw(999), true)
+            .unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingRenderable);
+    }
+
+    // ---------- Default ----------
+
+    #[test]
+    fn default_scene_is_empty() {
+        let s = Scene::default();
+        assert_eq!(s.node_count(), 0);
+    }
+
+    // ---------- defensive / invariant-guard arms ----------
+    //
+    // The following tests build *deliberately inconsistent* graphs through
+    // the crate-internal API (private `nodes` map + `SceneNode` mutators)
+    // to exercise the defensive arms that intact public-API invariants can
+    // never reach: dangling parent ids, dangling child ids, and the
+    // pre-existing-cycle guard in `would_introduce_cycle`. These are NOT
+    // reachable through `SceneApi`; they protect against future internal
+    // bugs and must still execute under test.
+
+    /// Insert a node directly into the private map at a chosen id, keeping
+    /// `next_node_id` ahead of it.
+    fn raw_insert(s: &mut Scene, raw: u64, node: SceneNode) -> SceneNodeId {
+        let id = SceneNodeId::from_raw(raw);
+        s.nodes.insert(id, node);
+        s.next_node_id = s.next_node_id.max(raw + 1);
+        id
+    }
+
+    #[test]
+    fn remove_node_with_dangling_parent_skips_parent_detach() {
+        // Node records a parent that does not exist: the inner
+        // `if let Some(parent_node) = get_mut(&pid)` takes its None arm.
+        let mut s = Scene::new();
+        let mut child = SceneNode::new(Transform::IDENTITY);
+        child.set_parent(Some(SceneNodeId::from_raw(404)));
+        let c = raw_insert(&mut s, 1, child);
+        s.remove_node(c).unwrap();
+        assert!(s.node(c).is_err());
+    }
+
+    #[test]
+    fn remove_node_with_dangling_child_skips_child_detach() {
+        // Node lists a child id that is not in the map: the
+        // `if let Some(child_node) = get_mut(&child)` takes its None arm.
+        let mut s = Scene::new();
+        let mut parent = SceneNode::new(Transform::IDENTITY);
+        parent.add_child(SceneNodeId::from_raw(404));
+        let p = raw_insert(&mut s, 1, parent);
+        s.remove_node(p).unwrap();
+        assert!(s.node(p).is_err());
+    }
+
+    #[test]
+    fn set_parent_with_dangling_old_parent_skips_old_detach() {
+        // child's recorded old parent does not exist: the inner
+        // `if let Some(parent_node) = get_mut(&old)` of set_parent takes
+        // its None arm while the reparent still completes.
+        let mut s = Scene::new();
+        let mut child = SceneNode::new(Transform::IDENTITY);
+        child.set_parent(Some(SceneNodeId::from_raw(404)));
+        let c = raw_insert(&mut s, 1, child);
+        let p = s.create_node(Transform::IDENTITY);
+        s.set_parent(c, p).unwrap();
+        assert_eq!(s.node(c).unwrap().parent(), Some(p));
+    }
+
+    #[test]
+    fn clear_parent_with_dangling_old_parent_skips_old_detach() {
+        // child's recorded old parent does not exist: the inner
+        // `if let Some(parent_node) = get_mut(&old)` of clear_parent takes
+        // its None arm while the clear still completes.
+        let mut s = Scene::new();
+        let mut child = SceneNode::new(Transform::IDENTITY);
+        child.set_parent(Some(SceneNodeId::from_raw(404)));
+        let c = raw_insert(&mut s, 1, child);
+        s.clear_parent(c).unwrap();
+        assert!(s.node(c).unwrap().parent().is_none());
+    }
+
+    #[test]
+    fn would_introduce_cycle_detects_preexisting_cycle() {
+        // Hand-build a 2-node cycle (a.parent = b, b.parent = a) that the
+        // public API can never produce, so the parent-walk in
+        // `would_introduce_cycle` revisits a node and hits its
+        // visited-guard `return true`.
+        let mut s = Scene::new();
+        let mut na = SceneNode::new(Transform::IDENTITY);
+        let mut nb = SceneNode::new(Transform::IDENTITY);
+        let a = SceneNodeId::from_raw(1);
+        let b = SceneNodeId::from_raw(2);
+        na.set_parent(Some(b));
+        nb.set_parent(Some(a));
+        raw_insert(&mut s, 1, na);
+        raw_insert(&mut s, 2, nb);
+        // Walk upward from `b` looking for an unrelated target; the cycle
+        // a<->b is revisited, tripping the guard.
+        assert!(s.would_introduce_cycle(SceneNodeId::from_raw(99), b));
+    }
+
+    #[test]
+    fn update_world_transforms_errors_on_dangling_child() {
+        // A root node lists a child id that does not exist: propagation's
+        // child lookup `get(&child_id).ok_or_else(...)` returns the
+        // hierarchy-update-failed error.
+        let mut s = Scene::new();
+        let mut root = SceneNode::new(Transform::IDENTITY);
+        root.add_child(SceneNodeId::from_raw(404));
+        raw_insert(&mut s, 1, root);
+        let err = s.update_world_transforms().unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::HierarchyUpdateFailed);
+    }
+
+    #[test]
+    fn advance_propagates_update_world_transforms_error() {
+        // `SceneApi::advance` runs `update_world_transforms?` on an active
+        // host frame with runtime steps. A corrupt scene (dangling child)
+        // makes that call fail, exercising the `?` error arm in `advance`.
+        // This is the only place a corrupt scene can be fed to `advance`,
+        // and the private `nodes` map is reachable only from this module.
+        use crate::scene_api::SceneApi;
+        use axiom_frame::FrameApi;
+        use axiom_host::{
+            HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
+            HostLifecycleState, HostStepPlan, HostViewport,
+        };
+
+        let m = math();
+        let vp = HostViewport::new(&m, 100, 100, 1.0).unwrap();
+        let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
+        let visible = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
+        // elapsed >= fixed_step => at least one runtime step, not skipped.
+        let input = HostFrameInput::new(1, 1_000, vp);
+        let plan = HostStepPlan::build(&input, &cfg, &visible, 0);
+        assert!(!plan.is_skipped());
+        assert!(plan.steps() > 0);
+        let report = HostFrameReport::new(
+            input.sequence(),
+            plan,
+            plan.steps(),
+            Vec::new(),
+            vp,
+            visible,
+        );
+        let frame_api = FrameApi::new();
+        let engine_frame = frame_api
+            .engine_frame_from_host_report(&report, 1_000, Vec::new())
+            .unwrap();
+        let ctx = frame_api.frame_context(&engine_frame);
+
+        let mut s = Scene::new();
+        let mut root = SceneNode::new(Transform::IDENTITY);
+        root.add_child(SceneNodeId::from_raw(404));
+        raw_insert(&mut s, 1, root);
+
+        let err = SceneApi::new().advance(&mut s, &ctx).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::HierarchyUpdateFailed);
     }
 }

@@ -178,6 +178,37 @@ fn no_higher_engine_concepts() {
 }
 
 #[test]
+fn capture_boundary_has_no_pixels_clock_randomness_or_global_state() {
+    // The RenderReceipt capture boundary is an engine-owned artifact, not a
+    // pixel capture: no screenshots, no GPU readback, no offscreen targets,
+    // no wall-clock time, no randomness, no global mutable state. (Comments
+    // and string literals are stripped before scanning, so the doc prose in
+    // render_receipt.rs that *describes* these exclusions does not trip it.)
+    assert_absent(
+        &[
+            "screenshot",
+            "read_back",
+            "readback",
+            "map_async",
+            "get_current_texture",
+            "TextureView",
+            "Framebuffer",
+            "Instant",
+            "SystemTime",
+            "std::time",
+            "chrono",
+            "rand::",
+            "thread_rng",
+            "getrandom",
+            "random()",
+            "static mut",
+            "lazy_static",
+        ],
+        "axiom-render's capture boundary must be pixel-free and deterministic",
+    );
+}
+
+#[test]
 fn no_utils_modules() {
     for p in source_files() {
         let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");

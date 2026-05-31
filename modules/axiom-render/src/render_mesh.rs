@@ -82,4 +82,17 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
+
+    #[test]
+    fn normals_and_uvs_accessors_round_trip() {
+        let m = RenderMesh::new(
+            3,
+            vec![Vec3::ZERO],
+            vec![Vec3::UNIT_Y, Vec3::UNIT_X],
+            vec![Vec2::ZERO, Vec2::ZERO, Vec2::ZERO],
+            vec![0, 1, 2],
+        );
+        assert_eq!(m.normals(), &[Vec3::UNIT_Y, Vec3::UNIT_X]);
+        assert_eq!(m.uvs().len(), 3);
+    }
 }

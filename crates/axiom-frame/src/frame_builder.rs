@@ -1,7 +1,6 @@
 //! Deterministic construction helper for [`EngineFrame`].
 
 use axiom_host::HostFrameReport;
-use axiom_math::MathApi;
 
 use crate::engine_frame::EngineFrame;
 use crate::frame_command::FrameCommand;
@@ -29,7 +28,6 @@ pub struct FrameBuilder {
     next_engine_frame_index: u64,
     last_host_sequence: Option<u64>,
     fixed_step_nanos: u64,
-    math: MathApi,
 }
 
 impl FrameBuilder {
@@ -41,7 +39,6 @@ impl FrameBuilder {
             next_engine_frame_index: 0,
             last_host_sequence: None,
             fixed_step_nanos,
-            math: MathApi::new(),
         }
     }
 
@@ -66,8 +63,6 @@ impl FrameBuilder {
     /// Failure paths:
     /// - `InvalidHostFrameSequence` — `report.sequence()` did not strictly
     ///   increase over `last_host_sequence`.
-    /// - `InvalidViewport` — the host viewport's derived aspect failed the
-    ///   math finite check (via [`FrameViewport::from_host`]).
     /// - `InvalidFrameTiming` — the host report's `steps_executed` did
     ///   not match the plan (propagated from
     ///   [`FrameTiming::from_host_report`]).
@@ -84,7 +79,7 @@ impl FrameBuilder {
             }
         }
 
-        let viewport = FrameViewport::from_host(&self.math, report.viewport())?;
+        let viewport = FrameViewport::from_host(report.viewport());
         let lifecycle = FrameLifecycleState::from_host(report.lifecycle_after());
         let timing = FrameTiming::from_host_report(report, self.fixed_step_nanos)?;
         let summaries = FrameStepSummary::list_from_records(report.step_records());
@@ -123,6 +118,7 @@ mod tests {
         HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
         HostLifecycleState, HostStepPlan, HostViewport,
     };
+    use axiom_math::MathApi;
 
     const STEP_NANOS: u64 = 1_000;
 
@@ -266,6 +262,17 @@ mod tests {
         let a = make();
         let b = make();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn accessors_advance_after_builds() {
+        let mut b = FrameBuilder::new(STEP_NANOS);
+        b.build(&report(7, STEP_NANOS, visible()), vec![]).unwrap();
+        b.build(&report(8, STEP_NANOS, visible()), vec![]).unwrap();
+        // After two builds the next index is 2 (distinct from 0 and 1) and the
+        // last accepted host sequence is the most recent one (Some, not None).
+        assert_eq!(b.next_engine_frame_index(), 2);
+        assert_eq!(b.last_host_sequence(), Some(8));
     }
 
     #[test]

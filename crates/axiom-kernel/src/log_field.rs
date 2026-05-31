@@ -121,3 +121,14 @@ mod tests {
         assert_ne!(LogField::i64("a", 1), LogField::u64("a", 1));
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    #[test]
+    fn as_i64_returns_none_for_a_non_integer_field() {
+        assert_eq!(LogField::bool("k", true).as_i64(), None);
+        assert_eq!(LogField::i64("k", 5).as_i64(), Some(5));
+    }
+}

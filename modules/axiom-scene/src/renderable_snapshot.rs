@@ -74,6 +74,20 @@ mod tests {
     }
 
     #[test]
+    fn visible_true_is_reported_true() {
+        // Kills `visible -> false`: a renderable constructed visible must
+        // report true.
+        let s = RenderableSnapshot::new(
+            RenderableId::from_raw(1),
+            SceneNodeId::from_raw(1),
+            MeshRef::from_raw(1),
+            MaterialRef::from_raw(1),
+            true,
+        );
+        assert!(s.visible());
+    }
+
+    #[test]
     fn equality_requires_all_fields() {
         let a = RenderableSnapshot::new(
             RenderableId::from_raw(1),

@@ -11,6 +11,7 @@ use crate::app_manifest::load_app_manifests;
 use crate::cargo_metadata::load as load_cargo_metadata;
 use crate::class_check::check as check_classes;
 use crate::classification::ManifestIndex;
+use crate::coverage_scope::check as check_coverage_scope;
 use crate::hygiene::check as check_hygiene;
 use crate::manifest::{load_manifests, LayerManifest};
 use crate::module_manifest::load_module_manifests;
@@ -66,20 +67,23 @@ pub fn check_architecture(root: &Path) -> CheckReport {
 
     let manifest_index = ManifestIndex::new(&manifests, &module_manifests, &app_manifests);
 
-    // Centralized source hygiene scan: runs for every discovered layer and
-    // module regardless of whether `cargo metadata` is available, because it
-    // is a pure filesystem scan.
-    {
-        let layer_dirs: Vec<(String, PathBuf)> = manifests
-            .iter()
-            .map(|m| (m.layer.name.clone(), m.src_dir()))
-            .collect();
-        let module_dirs: Vec<(String, PathBuf)> = module_manifests
-            .iter()
-            .map(|m| (m.module.name.clone(), m.src_dir()))
-            .collect();
-        check_hygiene(&layer_dirs, &module_dirs, &mut report);
-    }
+    // Pure filesystem scans below run for every discovered layer and module
+    // regardless of whether `cargo metadata` is available.
+    let layer_dirs: Vec<(String, PathBuf)> = manifests
+        .iter()
+        .map(|m| (m.layer.name.clone(), m.src_dir()))
+        .collect();
+    let module_dirs: Vec<(String, PathBuf)> = module_manifests
+        .iter()
+        .map(|m| (m.module.name.clone(), m.src_dir()))
+        .collect();
+
+    // Centralized source hygiene scan.
+    check_hygiene(&layer_dirs, &module_dirs, &mut report);
+
+    // The coverage gate's ignore list may exclude only apps and tooling; prove
+    // it never excludes a layer or module (the Axiom Coverage Law's scope).
+    check_coverage_scope(root, &layer_dirs, &module_dirs, &mut report);
 
     // Cargo metadata is required for cross-class dependency-graph checks.
     // If it is unavailable (e.g. on a synthetic fixture that has no

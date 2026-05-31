@@ -95,6 +95,7 @@ mod tests {
         assert_eq!(q.push(20, vec![]), 2);
         assert_eq!(q.push(30, vec![]), 3);
         assert_eq!(q.len(), 3);
+        assert!(!q.is_empty());
     }
 
     #[test]

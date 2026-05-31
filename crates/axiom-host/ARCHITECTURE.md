@@ -24,8 +24,8 @@ The boundary between deterministic engine code and the world outside it.
   [`axiom_runtime::Runtime`] via [`HostStepDriver`], and emits
   per-frame [`HostFrameReport`]s.
 
-The crate ships exactly thirteen public items, all curated through
-`lib.rs`:
+The crate's public surface is curated through `lib.rs`. The stepping
+boundary is:
 
 - `HostApi` — the facade.
 - `HostViewport` — validated viewport / surface metadata.
@@ -38,6 +38,28 @@ The crate ships exactly thirteen public items, all curated through
   `Runtime::step`.
 - `HostFrameReport` — the post-frame summary.
 - `HostError` / `HostErrorCode` / `HostResult` — the error model.
+
+The **presentation boundary** (added for the second-pass browser-visible
+slice) adds:
+
+- `HostPresentationTarget` — the abstract thing the engine presents into
+  (kernel `HandleId` identity + deterministic label).
+- `HostSurfaceHandle` — an opaque kernel-`HandleId` handle to a future live
+  surface.
+- `HostSurfaceDescriptor` — the requested surface shape (a validated
+  `HostViewport` + abstract present/alpha/colour enums).
+- `HostPresentMode` / `HostAlphaMode` / `HostColorFormat` — abstract surface
+  enums.
+- `HostAdapterRequest` / `HostPowerPreference` — the abstract adapter request.
+- `HostDeviceRequest` / `HostDeviceProfile` — the abstract device request.
+- `HostPresentationRequest` — a validated binding of target + surface +
+  descriptor + adapter/device requests.
+- `HostPresentationReport` / `HostPresentationStatus` — the deterministic
+  evaluation result.
+
+The curated set (every `pub use` in `lib.rs`) is locked by
+`tests/architecture.rs::lib_exports_are_curated_set`; widening it requires
+editing both `lib.rs` and that test together.
 
 ## Why it exists
 
@@ -183,3 +205,118 @@ The adapter never reaches around the host layer to call `Runtime::step`
 itself, and it never invents its own viewport or lifecycle types. If a
 future adapter needs a fact the host layer does not yet expose, the
 correct response is to add it to this layer, not to bypass it.
+
+## The host presentation boundary
+
+The first-pass vertical slice (`apps/axiom-demo-rotating-cube`) runs the
+whole `frame → … → GpuSubmission → GpuSubmissionReport` pipeline
+deterministically, but `axiom-webgpu` stays in **Recording** mode: it
+captures a deterministic submission report instead of presenting pixels.
+The blocker that pass found was structural — there was no host-owned way to
+*describe* a presentation target, a surface, or an adapter/device request.
+This boundary fills exactly that gap and nothing more.
+
+### What it is
+
+A set of deterministic, host-owned **data** types and **opaque stable
+handles** that describe *what the engine wants to present into and with*:
+
+```
+HostPresentationTarget   abstract target the engine presents into (HandleId + label)
+HostSurfaceHandle        opaque handle to a future live surface (HandleId)
+HostSurfaceDescriptor    requested surface shape (HostViewport + present/alpha/colour)
+HostAdapterRequest       requested adapter (power preference + needs-presentation)
+HostDeviceRequest        requested device (needs-presentation + coarse profile)
+HostPresentationRequest  validated binding of all of the above
+HostPresentationReport   deterministic evaluation result (status PendingBackend)
+```
+
+Everything is built and validated through `HostApi`:
+`presentation_target`, `surface_handle`, `surface_descriptor`,
+`adapter_request`, `device_request`, `presentation_request`, and
+`evaluate_presentation`. The two identity-bearing types
+(`HostPresentationTarget`, `HostSurfaceHandle`) have crate-private
+constructors, so their kernel `HandleId` identity is always minted by the
+host boundary — never forged elsewhere.
+
+### What it intentionally does not implement
+
+- **No real adapter/device/surface acquisition.** Nothing here calls
+  `navigator.gpu`, requests an adapter, awaits a device, or configures a
+  swapchain. There is no async, no threads, no wall-clock, no randomness.
+- **No live presentation.** `evaluate_presentation` always returns
+  `HostPresentationStatus::PendingBackend`. The boundary records that
+  presentation was *structurally requested and validated*; it never claims
+  a GPU, adapter, device, or surface actually exists. `Ready` is
+  unreachable until the live pass binds a real backend.
+- **No renderer concepts.** No pipelines, shaders, meshes, materials, or
+  swapchain objects — those belong to the render/webgpu modules, not the
+  host boundary.
+
+### Why it contains no browser/DOM/WebGPU objects
+
+The same structural reason the rest of the layer avoids them: a presentation
+*description* that embedded a `web_sys::HtmlCanvasElement`, a
+`wgpu::Surface`, or a `GPUDevice` would drag browser/GPU machinery into
+every replay test, native build, and headless harness, and would make the
+boundary non-deterministic and non-`Copy`. Instead, identity is a kernel
+`HandleId` and shape is validated host data. The architecture tests scan
+the source for `web_sys`/`js_sys`/`wasm_bindgen`/`wgpu`/`webgpu`/`WebGL`/
+`GPUDevice`/DOM globals and fail the build if any appear — the new
+presentation files are covered by those same scans.
+
+### How future wasm/browser code binds a real surface
+
+A future `axiom-browser` (or native) adapter — built *on top of* this layer,
+never inside it — will:
+
+1. Mint a `HostPresentationTarget` and a `HostSurfaceHandle` from `HostApi`,
+   choosing the raw ids (e.g. `1` for the primary canvas).
+2. Out-of-band, create the real browser surface (a `<canvas>` +
+   `wgpu::Surface`, or a native window surface) and store it in the
+   adapter's own table, keyed by the handle's `HandleId`. The host layer
+   never sees that object.
+3. Build a `HostSurfaceDescriptor` from a validated `HostViewport` plus the
+   abstract present/alpha/colour enums, and a `HostPresentationRequest`
+   binding the target, surface handle, descriptor, and adapter/device
+   requests.
+
+The `HandleId` is the stable join key between the deterministic engine side
+and the adapter's nondeterministic real-surface table.
+
+### How a future `axiom-webgpu` live mode consumes the request
+
+`axiom-webgpu` is untouched by this pass (it remains Recording-only). When
+the live pass arrives, a `BackendKind::Live` arm will accept a
+`HostPresentationRequest` and:
+
+- look up the real surface bound to `request.surface()`'s `HandleId`,
+- translate `request.adapter()` / `request.device()` into the backend's real
+  adapter/device requests,
+- configure the surface from `request.descriptor()` (viewport size, present
+  mode, alpha mode, colour format),
+
+…all **without changing** the existing `GpuSubmission` / `GpuSubmissionReport`
+shapes. The recorder and the live backend will present the same module
+surface; only `submit()`'s body differs.
+
+### Why `axiom-webgpu` is still Recording-only after this pass
+
+This pass only adds the host-side *description* of presentation. There is
+still no live backend, no real surface, no device, and no async device-init
+path in any layer. `axiom-webgpu` therefore continues to record submissions
+deterministically. Binding a real surface to a `HostSurfaceHandle` and
+driving real `wgpu` calls is the next pass's job.
+
+### What remains for the live WebGPU pass
+
+- A browser/native **adapter crate** (a new app/adapter, not a layer or
+  module) that owns the real canvas/window and the `HandleId → real surface`
+  table, plus the `wasm-bindgen`/`web_sys` glue. None of that lives here.
+- An **async device-init path**. `wgpu`'s `Instance → Adapter → Device →
+  Queue` is async; the runtime/host stepping is synchronous. The live pass
+  must bridge the async acquisition to a point where a `HostSurfaceHandle`
+  becomes backed, and only then can `HostPresentationStatus::Ready` be
+  produced.
+- A `BackendKind::Live` arm in `axiom-webgpu::WebGpuApi::submit` that
+  consumes a `HostPresentationRequest` and presents to the bound surface.

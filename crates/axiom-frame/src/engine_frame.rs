@@ -149,7 +149,7 @@ mod tests {
     fn pieces_for(
         report: &HostFrameReport,
     ) -> (FrameViewport, FrameLifecycleState, FrameTiming, FrameDiagnostics) {
-        let viewport = FrameViewport::from_host(&math(), report.viewport()).unwrap();
+        let viewport = FrameViewport::from_host(report.viewport());
         let lifecycle = FrameLifecycleState::from_host(report.lifecycle_after());
         let timing = FrameTiming::from_host_report(report, STEP_NANOS).unwrap();
         let diagnostics = FrameDiagnostics::new(
@@ -180,6 +180,9 @@ mod tests {
         );
         assert_eq!(frame.engine_frame_index(), 0);
         assert_eq!(frame.host_frame_sequence(), report.sequence());
+        // A visible (non-skipped) frame must report `false`; the skipped test
+        // below pins the `true` outcome.
+        assert!(!frame.is_skipped());
     }
 
     #[test]

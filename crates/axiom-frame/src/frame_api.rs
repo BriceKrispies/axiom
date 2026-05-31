@@ -1,7 +1,6 @@
 //! The Layer-04 engine frame boundary facade.
 
 use axiom_host::{HostFrameReport, HostLifecycleState, HostViewport};
-use axiom_math::MathApi;
 
 use crate::engine_frame::EngineFrame;
 use crate::frame_builder::FrameBuilder;
@@ -71,12 +70,8 @@ impl FrameApi {
 
     /// Construct a [`FrameViewport`] snapshot from a host viewport, routing
     /// finite-aspect validation through [`MathApi`].
-    pub fn frame_viewport(
-        &self,
-        math: &MathApi,
-        viewport: &HostViewport,
-    ) -> FrameResult<FrameViewport> {
-        FrameViewport::from_host(math, viewport)
+    pub fn frame_viewport(&self, viewport: &HostViewport) -> FrameViewport {
+        FrameViewport::from_host(viewport)
     }
 
     /// Project a host lifecycle state onto the four frame-level states.
@@ -141,6 +136,7 @@ mod tests {
     use axiom_host::{
         HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostSkipReason, HostStepPlan,
     };
+    use axiom_math::MathApi;
 
     const STEP_NANOS: u64 = 1_000;
 
@@ -222,8 +218,8 @@ mod tests {
     }
 
     #[test]
-    fn frame_viewport_uses_math_validation() {
-        let v = api().frame_viewport(&math(), &host_vp()).unwrap();
+    fn frame_viewport_projects_host_viewport() {
+        let v = api().frame_viewport(&host_vp());
         assert_eq!(v.logical_width(), 100);
         assert!(v.aspect_ratio().is_finite());
     }

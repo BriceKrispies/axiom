@@ -37,6 +37,13 @@ mod tests {
         let mut sink = SummingSink::default();
         sink.record(TelemetryMetric::counter("a", 3, None));
         sink.record(TelemetryMetric::counter("a", 4, None));
+        // A float gauge has no integer payload, exercising the `None` arm of
+        // `as_integer()` in the sink; it must not change the running total.
+        sink.record(TelemetryMetric::gauge(
+            "g",
+            crate::metric_value::MetricValue::float(1.5),
+            None,
+        ));
         assert_eq!(sink.total, 7);
     }
 }

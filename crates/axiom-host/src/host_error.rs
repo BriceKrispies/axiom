@@ -71,6 +71,21 @@ impl HostError {
         HostError::with_runtime(HostErrorCode::RuntimeStepFailed, message, cause)
     }
 
+    /// Shorthand for [`HostErrorCode::InvalidPresentationTarget`].
+    pub const fn invalid_presentation_target(message: &'static str) -> Self {
+        HostError::new(HostErrorCode::InvalidPresentationTarget, message)
+    }
+
+    /// Shorthand for [`HostErrorCode::InvalidSurfaceHandle`].
+    pub const fn invalid_surface_handle(message: &'static str) -> Self {
+        HostError::new(HostErrorCode::InvalidSurfaceHandle, message)
+    }
+
+    /// Shorthand for [`HostErrorCode::InvalidPresentationRequest`].
+    pub const fn invalid_presentation_request(message: &'static str) -> Self {
+        HostError::new(HostErrorCode::InvalidPresentationRequest, message)
+    }
+
     /// The machine-readable host error code.
     pub const fn code(&self) -> HostErrorCode {
         self.code

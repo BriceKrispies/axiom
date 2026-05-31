@@ -280,3 +280,115 @@ mod tests {
         assert_eq!(err.code(), MathErrorCode::InvalidAabbBounds);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::BinaryReader;
+
+    fn cube() -> Aabb {
+        Aabb::new(Vec3::ZERO, Vec3::ONE).unwrap()
+    }
+
+    #[test]
+    fn new_rejects_each_axis_inverted() {
+        assert!(Aabb::new(Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 1.0)).is_err());
+        assert!(Aabb::new(Vec3::new(0.0, 1.0, 0.0), Vec3::new(1.0, 0.0, 1.0)).is_err());
+        assert!(Aabb::new(Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 1.0, 0.0)).is_err());
+    }
+
+    #[test]
+    fn from_center_extents_rejects_non_finite() {
+        assert!(Aabb::from_center_extents(Vec3::ZERO, Vec3::new(f32::NAN, 0.0, 0.0)).is_err());
+    }
+
+    #[test]
+    fn from_center_extents_rejects_negative() {
+        assert!(Aabb::from_center_extents(Vec3::ZERO, Vec3::new(-1.0, 0.0, 0.0)).is_err());
+    }
+
+    #[test]
+    fn from_center_extents_accepts_valid() {
+        assert!(Aabb::from_center_extents(Vec3::ZERO, Vec3::ONE).is_ok());
+    }
+
+    #[test]
+    fn contains_point_each_axis_outside() {
+        let c = cube();
+        assert!(c.contains_point(Vec3::new(0.5, 0.5, 0.5)));
+        assert!(!c.contains_point(Vec3::new(-1.0, 0.5, 0.5)));
+        assert!(!c.contains_point(Vec3::new(2.0, 0.5, 0.5)));
+        assert!(!c.contains_point(Vec3::new(0.5, -1.0, 0.5)));
+        assert!(!c.contains_point(Vec3::new(0.5, 2.0, 0.5)));
+        assert!(!c.contains_point(Vec3::new(0.5, 0.5, -1.0)));
+        assert!(!c.contains_point(Vec3::new(0.5, 0.5, 2.0)));
+    }
+
+    #[test]
+    fn overlaps_each_axis_separated() {
+        let c = cube();
+        assert!(c.overlaps(&cube()));
+        assert!(!c.overlaps(&Aabb::new(Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 1.0, 1.0)).unwrap()));
+        assert!(!c.overlaps(&Aabb::new(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(-2.0, 1.0, 1.0)).unwrap()));
+        assert!(!c.overlaps(&Aabb::new(Vec3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 3.0, 1.0)).unwrap()));
+        assert!(!c.overlaps(&Aabb::new(Vec3::new(0.0, -3.0, 0.0), Vec3::new(1.0, -2.0, 1.0)).unwrap()));
+        assert!(!c.overlaps(&Aabb::new(Vec3::new(0.0, 0.0, 2.0), Vec3::new(1.0, 1.0, 3.0)).unwrap()));
+        assert!(!c.overlaps(&Aabb::new(Vec3::new(0.0, 0.0, -3.0), Vec3::new(1.0, 1.0, -2.0)).unwrap()));
+    }
+
+    #[test]
+    fn read_from_min_truncated() {
+        let mut r = BinaryReader::new(&[]);
+        assert!(Aabb::read_from(&mut r).is_err());
+    }
+
+    #[test]
+    fn read_from_max_truncated() {
+        let mut r = BinaryReader::new(&[0u8; 12]);
+        assert!(Aabb::read_from(&mut r).is_err());
+    }
+
+    #[test]
+    fn approx_eq_max_differs() {
+        let a = cube();
+        let b = Aabb::new(Vec3::ZERO, Vec3::new(1.0, 1.0, 2.0)).unwrap();
+        assert!(!a.approx_eq(&b, Epsilon::DEFAULT));
+    }
+
+    #[test]
+    fn approx_eq_min_differs() {
+        let a = cube();
+        let b = Aabb::new(Vec3::new(-1.0, 0.0, 0.0), Vec3::ONE).unwrap();
+        assert!(!a.approx_eq(&b, Epsilon::DEFAULT));
+    }
+
+    // Kills `replace < with <=` / `replace < with ==` at aabb.rs:54:26.
+    // The guard is `extents component < 0.0`. A *zero* extent is the boundary:
+    // `< 0.0` accepts it, but `<= 0.0` and `== 0.0` would (wrongly) reject it.
+    #[test]
+    fn from_center_extents_accepts_exactly_zero_extent() {
+        let a = Aabb::from_center_extents(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0))
+            .unwrap();
+        assert!(a.min().approx_eq(&Vec3::new(1.0, 1.0, 2.0), Epsilon::DEFAULT));
+        assert!(a.max().approx_eq(&Vec3::new(1.0, 3.0, 4.0), Epsilon::DEFAULT));
+        // And a negative extent must still be rejected (pins the `< 0.0` sense).
+        assert!(Aabb::from_center_extents(Vec3::ZERO, Vec3::new(-0.5, 0.0, 0.0)).is_err());
+    }
+
+    // Kills `replace && with ||` at aabb.rs:95:40 in `contains_aabb`.
+    // `other.min` is inside `self` but `other.max` is outside: `&&` => false,
+    // `||` => true.
+    #[test]
+    fn contains_aabb_requires_both_corners_inside() {
+        let outer = cube();
+        let partially_outside =
+            Aabb::new(Vec3::new(0.5, 0.5, 0.5), Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        assert!(outer.contains_point(partially_outside.min()));
+        assert!(!outer.contains_point(partially_outside.max()));
+        assert!(!outer.contains_aabb(&partially_outside));
+        // Mirror case: min outside, max inside.
+        let other =
+            Aabb::new(Vec3::new(-2.0, -2.0, -2.0), Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        assert!(!outer.contains_aabb(&other));
+    }
+}

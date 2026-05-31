@@ -265,3 +265,83 @@ mod tests {
         assert!(back.approx_eq(&q, eps()));
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::BinaryReader;
+
+    #[test]
+    fn normalize_non_finite_length_fails() {
+        let q = Quat::new(f32::MAX, f32::MAX, f32::MAX, f32::MAX);
+        assert!(q.normalize().is_err());
+    }
+
+    #[test]
+    fn inverse_non_finite_length_squared_fails() {
+        let q = Quat::new(f32::MAX, f32::MAX, f32::MAX, f32::MAX);
+        assert!(q.inverse().is_err());
+    }
+
+    #[test]
+    fn read_from_truncated_each_component() {
+        assert!(Quat::read_from(&mut BinaryReader::new(&[])).is_err());
+        assert!(Quat::read_from(&mut BinaryReader::new(&[0u8; 4])).is_err());
+        assert!(Quat::read_from(&mut BinaryReader::new(&[0u8; 8])).is_err());
+        assert!(Quat::read_from(&mut BinaryReader::new(&[0u8; 12])).is_err());
+    }
+
+    #[test]
+    fn approx_eq_each_component_differs() {
+        let base = Quat::new(0.0, 0.0, 0.0, 1.0);
+        let eps = Epsilon::DEFAULT;
+        assert!(!base.approx_eq(&Quat::new(1.0, 0.0, 0.0, 1.0), eps));
+        assert!(!base.approx_eq(&Quat::new(0.0, 1.0, 0.0, 1.0), eps));
+        assert!(!base.approx_eq(&Quat::new(0.0, 0.0, 1.0, 1.0), eps));
+        assert!(!base.approx_eq(&Quat::new(0.0, 0.0, 0.0, 2.0), eps));
+        assert!(base.approx_eq(&base, eps));
+    }
+
+    // Kills normalize divide mutants at 78/79/80 (`/ len` -> `% len` / `* len`).
+    // q = (2,2,2,2) has length 4, so each component normalizes to exactly 0.5.
+    // The mutated forms give 2*4=8 (mul) or 2%4=2 (rem), both checkable.
+    #[test]
+    fn normalize_divides_each_component_by_length() {
+        let n = Quat::new(2.0, 2.0, 2.0, 2.0).normalize().unwrap();
+        assert_eq!(n.x, 0.5);
+        assert_eq!(n.y, 0.5);
+        assert_eq!(n.z, 0.5);
+        assert_eq!(n.w, 0.5);
+    }
+
+    // Kills inverse divide mutants at 101 (`/ ls` -> `% ls` / `* ls`) for all
+    // four components. q = (1,2,3,4) has length_squared 30; inverse is
+    // conjugate/30 = (-1/30, -2/30, -3/30, 4/30).
+    #[test]
+    fn inverse_divides_conjugate_by_length_squared() {
+        let inv = Quat::new(1.0, 2.0, 3.0, 4.0).inverse().unwrap();
+        let ls = 30.0f32;
+        assert!((inv.x - (-1.0 / ls)).abs() < 1.0e-7);
+        assert!((inv.y - (-2.0 / ls)).abs() < 1.0e-7);
+        assert!((inv.z - (-3.0 / ls)).abs() < 1.0e-7);
+        assert!((inv.w - (4.0 / ls)).abs() < 1.0e-7);
+    }
+
+    // Kills every Hamilton-product mutant at 110..=113. Operands have distinct
+    // nonzero integer components so each term is value-significant; the exact
+    // product is asserted component-wise.
+    #[test]
+    fn multiply_hamilton_product_is_exact() {
+        let a = Quat::new(1.0, 2.0, 3.0, 4.0);
+        let b = Quat::new(5.0, 6.0, 7.0, 8.0);
+        let r = a.multiply(b);
+        // x = aw*bx + ax*bw + ay*bz - az*by = 20 + 8 + 14 - 18 = 24
+        assert_eq!(r.x, 24.0);
+        // y = aw*by - ax*bz + ay*bw + az*bx = 24 - 7 + 16 + 15 = 48
+        assert_eq!(r.y, 48.0);
+        // z = aw*bz + ax*by - ay*bx + az*bw = 28 + 6 - 10 + 24 = 48
+        assert_eq!(r.z, 48.0);
+        // w = aw*bw - ax*bx - ay*by - az*bz = 32 - 5 - 12 - 21 = -6
+        assert_eq!(r.w, -6.0);
+    }
+}

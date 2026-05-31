@@ -88,3 +88,18 @@ mod tests {
         assert_ne!(a, c);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_math::Vec3;
+
+    #[test]
+    fn local_accessor_returns_local_transform() {
+        let local = Transform::from_translation(Vec3::new(2.0, 3.0, 4.0));
+        let s = NodeSnapshot::new(SceneNodeId::from_raw(5), None, local, Transform::IDENTITY);
+        assert_eq!(s.local().translation.x, 2.0);
+        assert_eq!(s.local().translation.y, 3.0);
+        assert_eq!(s.local().translation.z, 4.0);
+    }
+}

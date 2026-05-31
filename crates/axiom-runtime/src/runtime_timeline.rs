@@ -111,6 +111,24 @@ mod tests {
     }
 
     #[test]
+    fn getters_return_advanced_values_not_constants() {
+        // After three advances, sequence/frame/tick are all 3 — a value the
+        // mutation constants (0, 1) cannot produce.
+        let mut t = timeline(1000);
+        t.advance().unwrap();
+        t.advance().unwrap();
+        t.advance().unwrap();
+        assert_eq!(t.sequence(), 3);
+        assert_eq!(t.frame(), FrameIndex::new(3));
+        assert_eq!(t.tick(), Tick::new(3));
+        // Guard the boundary the `with 0`/`with 1` constants would satisfy.
+        assert_ne!(t.sequence(), 0);
+        assert_ne!(t.sequence(), 1);
+        assert_ne!(t.frame(), FrameIndex::default());
+        assert_ne!(t.tick(), Tick::default());
+    }
+
+    #[test]
     fn two_timelines_advance_to_byte_identical_state() {
         let mut a = timeline(500);
         let mut b = timeline(500);

@@ -158,6 +158,21 @@ mod tests {
     }
 
     #[test]
+    fn non_skipped_frame_report_is_not_skipped() {
+        // Distinguishes `is_skipped -> true`: a visible frame that actually
+        // stepped is NOT a lifecycle skip.
+        let plan = HostStepPlan::build(
+            &HostFrameInput::new(1, 1_000, vp()),
+            &cfg(),
+            &visible(),
+            0,
+        );
+        assert!(!plan.is_skipped());
+        let report = HostFrameReport::new(1, plan, 1, vec![], vp(), visible());
+        assert!(!report.is_skipped());
+    }
+
+    #[test]
     fn lifecycle_state_is_reflected() {
         let after = visible().apply(HostLifecycleSignal::Focused);
         let plan = HostStepPlan::build(

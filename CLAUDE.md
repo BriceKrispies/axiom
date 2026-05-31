@@ -502,6 +502,144 @@ Avoid:
 
 If nondeterminism is required, isolate it behind an explicit boundary and explain why it exists.
 
+## The Axiom Coverage Law
+
+> **Axiom's engine spine is, at all times, at 100% test coverage. Every
+> region, line, branch, and function in every layer and module is
+> exercised by a test. This is not a target to drift toward. It is an
+> invariant.**
+
+This is the same kind of law as the Layer Law and the Module Law: not
+advisory, not aspirational, not "when we get to it." `main` is always
+green and always fully covered. A change that drops coverage below 100%
+is broken, the same way a change that breaks the layer chain is broken.
+
+### What "covered" means here
+
+Coverage is measured on the whole workspace with
+[`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov):
+
+* **regions** — every code region (each branch arm is its own region)
+* **lines** — every executable line
+* **functions** — every function, including trait impls and closures
+* **branches** — every true branch arm, when measured on a nightly
+  toolchain (`--branch`)
+
+All four must read `100.00%`. The gate enforces regions, lines, and
+functions (llvm-cov has no branch threshold); regions are the
+enforceable branch-level proxy because each branch arm is a distinct
+region, and the branch column is printed so a human sees the exact arms.
+
+**Scope: the reusable engine spine — every layer and module.** Two
+categories sit *outside* the gate, via `--ignore-filename-regex`:
+
+* **Apps** (`apps/`) are composition leaves — nothing depends on them,
+  and they carry one-off wiring (browser bootstrap, demo orchestration)
+  that the engine itself never reuses. They are exercised by their own
+  slice/integration tests, not held to the 100% invariant.
+* **Tooling** (`xtask`, anything under `tools/`) is explicitly outside
+  the engine dependency graph (see the Module Law).
+
+That boundary is a deliberate scope line, **not** a loophole. It is
+drawn at the app/tooling edge and nowhere else: no layer or module file
+may ever be added to the ignore list to dodge the gate. The reusable
+engine — the code every future app and agent builds on — is fully
+covered, always.
+
+This is **mechanically enforced**, not left to prose. `cargo xtask
+check-architecture` owns the sanctioned ignore pattern
+(`coverage_scope.rs`) and fails if either: (a) the pattern matches any
+layer or module source path (`CoverageIgnoreExcludesEngine`), or (b)
+`scripts/coverage.sh` / `scripts/coverage.ps1` apply anything other than
+exactly that one sanctioned ignore (`CoverageIgnoreScriptDrift`). To
+change what the gate excludes you must edit the constant in
+`coverage_scope.rs` *and* both scripts, and the new pattern must still
+exclude no engine code — there is no quiet way to widen it.
+
+### Running the coverage gate
+
+A single repo-tooling script runs the suite under instrumentation and
+fails unless the workspace is fully covered:
+
+```sh
+scripts/coverage.ps1          # Windows / PowerShell (this repo's primary dev shell)
+bash scripts/coverage.sh      # Linux / CI
+```
+
+It prints a per-file table and, via `--show-missing-lines`, the exact
+`file:line` ranges that no test reached. To see *which branch* inside a
+line is uncovered, open the annotated report:
+
+```sh
+scripts/coverage.ps1 -Open    # or:  bash scripts/coverage.sh --open
+```
+
+The HTML report highlights every uncovered branch arm in red. That red
+is your work list: there is no such thing as an acceptable red region in
+Axiom.
+
+The script prefers a nightly toolchain so the "Branches / Missed
+Branches" columns are populated with true branch coverage; on stable it
+falls back to region coverage, which still pins the gate at 100%.
+
+### New code carries its own coverage
+
+Every change ships at 100%. The rule for new code is simple and
+non-negotiable:
+
+* New layer or module code lands **with the tests that cover all of
+  it** — every region, every branch arm — in the same change. (Apps and
+  tooling are outside the gate, but still ship with the tests their
+  behavior warrants — they're simply not held to 100%.)
+* "I'll add tests later" is a coverage regression wearing a fake
+  mustache. There is no later. The gate is part of the definition of
+  done.
+* A PR that lowers coverage does not merge. CI runs the same gate.
+
+### When 100% is not achievable, that is a design signal — not an exception
+
+You will sometimes hit code you genuinely cannot drive a test through: a
+branch that can't be reached, an error arm that can't be provoked, a
+function whose behavior depends on state the public API won't let a test
+construct. **The answer is never to lower the bar, suppress the gate, or
+sprinkle `#[coverage(off)]`.** Untestable code is the symptom; bad shape
+is the disease.
+
+When you cannot reach 100% on a piece of code, stop and treat it as a
+structural problem. Raise it explicitly and propose a
+refactor/restructure **of whatever size is required** — a renamed
+function, a split module, a re-cut layer boundary, a reworked data
+contract — so the behavior becomes reachable through a clean,
+test-driven boundary. No refactor is "too big" if the alternative is
+permanently un-covered code. That is exactly the kind of structural
+change this engine exists to make safe.
+
+But the refactor must be **thoughtful, and it must not create fluff.**
+The goal is *less* code that is *fully* testable, not more code that
+games a number. Specifically forbidden:
+
+* dead branches or unreachable arms added only to be "covered"
+* trivial getters/setters, pass-through wrappers, or shim functions whose
+  only purpose is to host a test
+* tests that execute code without asserting on its behavior (coverage
+  theater — they move the number, prove nothing, and rot)
+* widening a public API purely so a test can reach an internal state
+* `#[coverage(off)]`, `cfg(test)` carve-outs, or llvm-cov ignore
+  patterns used to dodge the gate rather than to mark genuinely
+  non-runtime code
+
+A correct refactor *removes the untestable shape*. If a branch can't be
+hit, either it's dead (delete it) or the surrounding design hides the
+state that selects it (restructure so the state is explicit and
+constructible). Either way you end with simpler, more honest code — and
+the coverage follows for free.
+
+If a region truly cannot and should not run at runtime (a
+defensively-`unreachable!` invariant, a platform arm compiled out), that
+is a deliberate, documented decision, justified in the code at the site
+and called out in review — not a silent suppression to make the gate
+pass.
+
 ## Logging and Telemetry Rules
 
 Logging and telemetry are part of the architecture, not decoration.

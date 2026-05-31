@@ -308,6 +308,15 @@ mod tests {
         assert!(api().approx_eq(&a, &b, api().default_epsilon()));
     }
 
+    // Kills `replace MathApi::approx_eq -> bool with true` at math_api.rs:85.
+    // Two clearly distinct vectors must compare NOT approx-equal.
+    #[test]
+    fn approx_eq_returns_false_for_distinct_values() {
+        let a = api().vec3(1.0, 2.0, 3.0);
+        let b = api().vec3(1.0, 2.0, 9.0);
+        assert!(!api().approx_eq(&a, &b, api().default_epsilon()));
+    }
+
     #[test]
     fn vector_constructors_match_module_constants() {
         let m = api();

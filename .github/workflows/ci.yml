@@ -1,9 +1,10 @@
 # Axiom CI.
 #
-# Runs formatting, lints, the full test suite, the architecture checker, and a
-# wasm build of the kernel. The architecture check is also covered by
-# `cargo test` (the `real_repo_layers_pass` test), but it is run explicitly here
-# so a failure is obvious and actionable in the job log.
+# Runs formatting, lints, the full test suite, the architecture checker, the
+# 100% coverage gate (the Axiom Coverage Law), and a wasm build of the kernel.
+# The architecture check is also covered by `cargo test` (the
+# `real_repo_layers_pass` test), but it is run explicitly here so a failure is
+# obvious and actionable in the job log.
 name: ci
 
 on:
@@ -23,8 +24,13 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          # Nightly + llvm-tools power the coverage gate's true branch coverage.
+          rustup toolchain install nightly --profile minimal --component llvm-tools-preview
           rustup target add wasm32-unknown-unknown
           rustup default stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -46,6 +52,9 @@ jobs:
 
       - name: Architecture check (Axiom Layer Law)
         run: cargo xtask check-architecture
+
+      - name: Coverage gate (Axiom Coverage Law — 100%)
+        run: bash scripts/coverage.sh
 
       - name: Kernel wasm build
         run: cargo build --target wasm32-unknown-unknown -p axiom-kernel

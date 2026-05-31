@@ -190,3 +190,57 @@ mod tests {
         assert_eq!(err.code(), MathErrorCode::InvalidSphereRadius);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::BinaryReader;
+
+    #[test]
+    fn read_from_center_truncated() {
+        assert!(Sphere::read_from(&mut BinaryReader::new(&[])).is_err());
+    }
+
+    #[test]
+    fn read_from_radius_truncated() {
+        // 12 bytes feed the center; radius read then fails.
+        assert!(Sphere::read_from(&mut BinaryReader::new(&[0u8; 12])).is_err());
+    }
+
+    #[test]
+    fn approx_eq_radius_differs() {
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = Sphere::new(Vec3::ZERO, 2.0).unwrap();
+        assert!(!a.approx_eq(&b, Epsilon::DEFAULT));
+        assert!(a.approx_eq(&a, Epsilon::DEFAULT));
+    }
+
+    #[test]
+    fn approx_eq_center_differs() {
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = Sphere::new(Vec3::new(5.0, 0.0, 0.0), 1.0).unwrap();
+        assert!(!a.approx_eq(&b, Epsilon::DEFAULT));
+    }
+
+    // Kills contains_point 58:27 (`radius * radius` -> `radius + radius` /
+    // `radius / radius`). r = 3 so r*r = 9, r+r = 6, r/r = 1. A point at squared
+    // distance 8 is contained only under the correct `r*r`.
+    #[test]
+    fn contains_point_radius_squared_term() {
+        let s = Sphere::new(Vec3::ZERO, 3.0).unwrap();
+        // (2,2,0) -> d2 = 8, within 9 but outside 6 and 1.
+        assert!(s.contains_point(Vec3::new(2.0, 2.0, 0.0)));
+        // Clearly outside (d2 = 25).
+        assert!(!s.contains_point(Vec3::new(5.0, 0.0, 0.0)));
+    }
+
+    // Kills overlaps 65:19 (`radius + radius` -> `radius * radius`). radii 1 and
+    // 3: sum = 4 (sum^2 = 16) vs product = 3 (product^2 = 9). Centers at squared
+    // distance 12 overlap under the correct sum but not under the product.
+    #[test]
+    fn overlaps_sum_of_radii_term() {
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = Sphere::new(Vec3::new(2.0, 2.0, 2.0), 3.0).unwrap();
+        assert!(a.overlaps(&b));
+    }
+}

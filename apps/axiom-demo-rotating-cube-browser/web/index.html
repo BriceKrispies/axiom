@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Rotating Cube (visible slice)</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: #15171c;
+        color: #d7dbe2;
+      }
+      h1 { font-size: 16px; font-weight: 600; margin: 0; }
+      /* The canvas id MUST match browser_bootstrap::CANVAS_ELEMENT_ID. */
+      #axiom-cube-canvas {
+        width: 800px;
+        height: 600px;
+        border: 1px solid #2a2e36;
+        border-radius: 6px;
+        background: #000;
+      }
+      #status { font-family: ui-monospace, monospace; white-space: pre; }
+      .ok { color: #7fd17f; }
+      .err { color: #e07a7a; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — browser-visible rotating-cube slice</h1>
+    <canvas id="axiom-cube-canvas" width="800" height="600"></canvas>
+    <div id="status">booting…</div>
+
+    <script type="module">
+      import init, { BrowserRotatingCubeApi } from "./pkg/axiom_demo_rotating_cube_browser.js";
+
+      const status = document.getElementById("status");
+      const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
+
+      async function main() {
+        if (!("gpu" in navigator)) {
+          set(
+            "WebGPU is not available in this browser.\n" +
+            "Use a recent Chrome/Edge (or Firefox Nightly) over http://localhost.",
+            "err"
+          );
+          return;
+        }
+        try {
+          await init(); // load + instantiate the wasm module
+          const canvas = document.getElementById("axiom-cube-canvas");
+          // Constructor args mirror BrowserRotatingCubeApi::new_for_canvas.
+          const app = new BrowserRotatingCubeApi("axiom-cube-canvas", canvas.width, canvas.height);
+          app.start(); // async wgpu init + requestAnimationFrame loop (consumes app)
+          set(
+            "Live backend started. You should see three shaded cubes on a dark\n" +
+            "background: red spinning on the vertical (Y) axis, green on the\n" +
+            "horizontal (X) axis, and blue on a diagonal (X+Y) axis.\n" +
+            "Geometry = the engine's resolved cube mesh; the three MVPs + colours\n" +
+            "are extracted from the engine's render command list each tick.",
+            "ok"
+          );
+        } catch (e) {
+          set("Startup failed: " + e, "err");
+          throw e;
+        }
+      }
+      main();
+    </script>
+  </body>
+</html>

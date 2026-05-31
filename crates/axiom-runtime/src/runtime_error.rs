@@ -110,3 +110,25 @@ mod tests {
         assert_ne!(bare, wrapped);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::{KernelError, KernelErrorCode, KernelErrorScope};
+
+    #[test]
+    fn kernel_accessor_and_equality_branches() {
+        let bare = RuntimeError::new(RuntimeErrorCode::SystemFailed, "x");
+        assert_eq!(bare.kernel(), None);
+        assert_eq!(bare.message(), "x");
+        let k = KernelError::new(KernelErrorScope::Time, KernelErrorCode::RangeOverflow, "o");
+        let wrapped = RuntimeError::with_kernel(RuntimeErrorCode::KernelFailure, "x", k);
+        assert_eq!(wrapped.kernel(), Some(k));
+        // code eq true + kernel eq true
+        assert!(bare == RuntimeError::new(RuntimeErrorCode::SystemFailed, "y"));
+        // code eq false (short-circuits)
+        assert!(bare != RuntimeError::new(RuntimeErrorCode::InvalidConfig, "y"));
+        // code eq true, kernel eq false
+        assert!(RuntimeError::new(RuntimeErrorCode::KernelFailure, "z") != wrapped);
+    }
+}

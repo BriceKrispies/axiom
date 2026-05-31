@@ -769,3 +769,116 @@ mod tests {
         assert_eq!(child_snap.world().translation.y, 4.0);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::scene_error_code::SceneErrorCode;
+
+    fn math() -> MathApi {
+        MathApi::new()
+    }
+
+    fn api() -> SceneApi {
+        SceneApi::new()
+    }
+
+    // `?` error-propagation arms of the read facades: a missing id makes the
+    // underlying `scene.node(id)?` / `scene.camera(id)?` return early.
+    #[test]
+    fn local_transform_propagates_missing_node_error() {
+        let s = api().empty_scene();
+        let err = api()
+            .local_transform(&s, SceneNodeId::from_raw(123))
+            .unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingNode);
+    }
+
+    #[test]
+    fn world_transform_propagates_missing_node_error() {
+        let s = api().empty_scene();
+        let err = api()
+            .world_transform(&s, SceneNodeId::from_raw(123))
+            .unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingNode);
+    }
+
+    #[test]
+    fn camera_projection_matrix_propagates_missing_camera_error() {
+        let s = api().empty_scene();
+        let err = api()
+            .camera_projection_matrix(&math(), &s, CameraId::from_raw(123))
+            .unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::MissingCamera);
+    }
+
+    // `?` error arm of `add_point_light`: invalid (non-finite) parameters are
+    // rejected by `Light::point` before any scene mutation.
+    #[test]
+    fn add_point_light_propagates_invalid_parameters() {
+        let mut s = api().empty_scene();
+        let n = api().create_node(&mut s);
+        let err = api()
+            .add_point_light(&math(), &mut s, n, Vec3::new(f32::NAN, 0.0, 0.0), 1.0)
+            .unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::InvalidLightParameters);
+    }
+
+    // `advance` branch coverage: a non-skipped (visible) host frame that ran
+    // zero runtime steps takes the `&&` right-operand false path, so world
+    // transforms are NOT recomputed.
+    #[test]
+    fn advance_does_not_propagate_on_active_frame_with_zero_steps() {
+        use axiom_frame::FrameApi;
+        use axiom_host::{
+            HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
+            HostLifecycleState, HostStepPlan, HostViewport,
+        };
+
+        let m = math();
+        let vp = HostViewport::new(&m, 100, 100, 1.0).unwrap();
+        let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
+        let visible = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
+        // elapsed (0) < fixed_step (1_000) and accumulator 0 => zero steps,
+        // but the frame is NOT a lifecycle skip.
+        let input = HostFrameInput::new(1, 0, vp);
+        let plan = HostStepPlan::build(&input, &cfg, &visible, 0);
+        assert!(!plan.is_skipped());
+        assert_eq!(plan.steps(), 0);
+        let report = HostFrameReport::new(
+            input.sequence(),
+            plan,
+            plan.steps(),
+            Vec::new(),
+            vp,
+            visible,
+        );
+        let frame_api = FrameApi::new();
+        let engine_frame = frame_api
+            .engine_frame_from_host_report(&report, 0, Vec::new())
+            .unwrap();
+        let ctx = frame_api.frame_context(&engine_frame);
+        assert!(!ctx.is_skipped());
+        assert_eq!(ctx.runtime_step_count(), 0);
+
+        let mut s = api().empty_scene();
+        let p = api().create_node_with_transform(
+            &mut s,
+            Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)),
+        );
+        let c = api().create_node_with_transform(
+            &mut s,
+            Transform::from_translation(Vec3::new(0.0, 4.0, 0.0)),
+        );
+        api().set_parent(&mut s, c, p).unwrap();
+
+        let snap = api().advance(&mut s, &ctx).unwrap();
+        let child_snap = snap
+            .nodes()
+            .iter()
+            .find(|n| n.parent().is_some())
+            .expect("expected one child");
+        // Propagation did not run: world stayed at default (local copy).
+        assert_eq!(child_snap.world().translation.x, 0.0);
+    }
+}

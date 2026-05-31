@@ -158,3 +158,61 @@ mod tests {
         assert_eq!(err.code(), KernelErrorCode::RangeOverflow);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::alignment::Alignment;
+    use crate::byte_length::ByteLength;
+    use crate::byte_offset::ByteOffset;
+
+    #[test]
+    fn covers_overflow_and_predicate_branches() {
+        assert!(MemoryRange::new(ByteOffset::new(u64::MAX), ByteLength::new(1)).is_err());
+        let r = MemoryRange::new(ByteOffset::new(10), ByteLength::new(10)).unwrap(); // [10, 20)
+        assert!(!r.contains_offset(5));
+        assert!(r.contains_offset(10));
+        assert!(!r.contains_offset(20));
+        let zero = MemoryRange::new(ByteOffset::new(12), ByteLength::new(0)).unwrap();
+        assert!(!r.contains_range(zero));
+        let inside = MemoryRange::new(ByteOffset::new(12), ByteLength::new(4)).unwrap();
+        assert!(r.contains_range(inside));
+        let beyond = MemoryRange::new(ByteOffset::new(18), ByteLength::new(10)).unwrap();
+        assert!(!r.contains_range(beyond));
+        let below = MemoryRange::new(ByteOffset::new(0), ByteLength::new(5)).unwrap();
+        assert!(!r.contains_range(below));
+        let over = MemoryRange::new(ByteOffset::new(15), ByteLength::new(10)).unwrap();
+        assert!(r.overlaps(over));
+        let disjoint = MemoryRange::new(ByteOffset::new(100), ByteLength::new(5)).unwrap();
+        assert!(!r.overlaps(disjoint));
+        assert!(r.checked_shift(u64::MAX).is_err());
+        assert!(r.checked_shift(5).is_ok());
+        let _ = r.is_aligned(Alignment::new(2).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod cov2 {
+    use super::*;
+    use crate::byte_length::ByteLength;
+    use crate::byte_offset::ByteOffset;
+
+    #[test]
+    fn overlaps_is_false_when_other_is_entirely_before_self() {
+        let r = MemoryRange::new(ByteOffset::new(10), ByteLength::new(10)).unwrap();
+        let before = MemoryRange::new(ByteOffset::new(0), ByteLength::new(5)).unwrap();
+        assert!(!r.overlaps(before)); // self.offset(10) < other.end(5) is false
+    }
+
+    #[test]
+    fn overlaps_is_false_when_self_start_touches_other_end() {
+        // Boundary case for the first comparison `self.offset < other.end`:
+        // self.offset (10) exactly equals other.end (10). Half-open intervals
+        // mean touching does NOT overlap, so the correct result is `false`.
+        // The `<= ` mutant would treat the touch as an overlap (`true`).
+        let r = MemoryRange::new(ByteOffset::new(10), ByteLength::new(10)).unwrap(); // [10, 20)
+        let touching = MemoryRange::new(ByteOffset::new(5), ByteLength::new(5)).unwrap(); // [5, 10)
+        assert_eq!(touching.end(), 10);
+        assert!(!r.overlaps(touching));
+    }
+}

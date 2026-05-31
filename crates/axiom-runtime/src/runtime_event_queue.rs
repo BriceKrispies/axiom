@@ -87,3 +87,21 @@ mod tests {
         assert!(q.is_empty());
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::Tick;
+
+    #[test]
+    fn push_peek_pop_len() {
+        let mut q = RuntimeEventQueue::new();
+        assert!(q.is_empty());
+        q.push(crate::runtime_event::RuntimeEvent::new(1, Tick::new(0), vec![]));
+        assert_eq!(q.len(), 1);
+        assert!(!q.is_empty());
+        assert!(q.peek().is_some());
+        assert!(q.pop().is_some());
+        assert!(q.pop().is_none());
+    }
+}

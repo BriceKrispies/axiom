@@ -180,3 +180,64 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::binary_writer::BinaryWriter;
+
+    #[test]
+    fn round_trips_every_read() {
+        let mut w = BinaryWriter::new();
+        w.write_u16(0x0102);
+        w.write_u32(0x0304_0506);
+        w.write_u64(0x0708_090A_0B0C_0D0E);
+        w.write_i32(-5);
+        w.write_f32(1.5);
+        w.write_bool(true);
+        w.write_byte_slice(&[9, 8, 7]);
+        let bytes = w.into_bytes();
+        let mut r = BinaryReader::new(&bytes);
+        assert_eq!(r.read_u16().unwrap(), 0x0102);
+        assert_eq!(r.read_u32().unwrap(), 0x0304_0506);
+        assert_eq!(r.read_u64().unwrap(), 0x0708_090A_0B0C_0D0E);
+        assert_eq!(r.read_i32().unwrap(), -5);
+        assert_eq!(r.read_f32().unwrap(), 1.5);
+        assert!(r.read_bool().unwrap());
+        assert_eq!(r.read_byte_slice().unwrap(), &[9, 8, 7]);
+        assert_eq!(r.remaining(), 0);
+        assert_eq!(r.position(), bytes.len());
+    }
+
+    #[test]
+    fn read_past_end_is_out_of_bounds() {
+        let mut r = BinaryReader::new(&[0u8]);
+        assert!(r.read_u32().is_err());
+    }
+
+    #[test]
+    fn truncated_byte_slice_is_err() {
+        let mut w = BinaryWriter::new();
+        w.write_u32(100); // declared length far beyond the buffer
+        let bytes = w.into_bytes();
+        let mut r = BinaryReader::new(&bytes);
+        assert!(r.read_byte_slice().is_err());
+    }
+}
+
+#[cfg(test)]
+mod cov2 {
+    use super::*;
+
+    #[test]
+    fn every_read_propagates_out_of_bounds() {
+        assert!(BinaryReader::new(&[0u8; 0]).read_u8().is_err());
+        assert!(BinaryReader::new(&[0u8]).read_u16().is_err());
+        assert!(BinaryReader::new(&[0u8, 1, 2]).read_u32().is_err());
+        assert!(BinaryReader::new(&[0u8; 7]).read_u64().is_err());
+        assert!(BinaryReader::new(&[0u8, 1, 2]).read_i32().is_err());
+        assert!(BinaryReader::new(&[0u8, 1, 2]).read_f32().is_err());
+        assert!(BinaryReader::new(&[0u8; 0]).read_bool().is_err());
+        assert!(BinaryReader::new(&[0u8; 0]).read_byte_slice().is_err());
+    }
+}

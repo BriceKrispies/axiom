@@ -130,15 +130,21 @@ mod tests {
         let errs = d.errors();
         assert_eq!(errs.len(), 1);
         assert_eq!(errs[0].code(), RuntimeErrorCode::SystemFailed);
+        // The raw outcomes slice must reflect all three recorded outcomes, not
+        // an empty leaked slice.
+        assert_eq!(d.system_outcomes().len(), 3);
+        assert_eq!(d.system_outcomes()[1].name(), "boom");
     }
 
     #[test]
     fn queue_counts_are_recorded() {
         let mut d = RuntimeDiagnostics::new(step());
-        d.record_queue_counts(2, 1, 2, 1);
+        // Use distinct counts, all different from the mutation constants 0/1,
+        // so each accessor is independently pinned.
+        d.record_queue_counts(2, 5, 3, 4);
         assert_eq!(d.commands_pushed(), 2);
-        assert_eq!(d.events_pushed(), 1);
-        assert_eq!(d.commands_drained(), 2);
-        assert_eq!(d.events_drained(), 1);
+        assert_eq!(d.events_pushed(), 5);
+        assert_eq!(d.commands_drained(), 3);
+        assert_eq!(d.events_drained(), 4);
     }
 }

@@ -163,3 +163,42 @@ mod tests {
         assert_eq!(l.intensity(), 0.0);
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use crate::scene_error_code::SceneErrorCode;
+
+    fn math() -> MathApi {
+        MathApi::new()
+    }
+
+    fn node() -> SceneNodeId {
+        SceneNodeId::from_raw(1)
+    }
+
+    #[test]
+    fn negative_green_component_is_rejected() {
+        let err = Light::point(&math(), node(), Vec3::new(0.0, -0.1, 0.0), 1.0).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::InvalidLightParameters);
+    }
+
+    #[test]
+    fn negative_blue_component_is_rejected() {
+        let err = Light::point(&math(), node(), Vec3::new(0.0, 0.0, -0.1), 1.0).unwrap_err();
+        assert_eq!(err.code(), SceneErrorCode::InvalidLightParameters);
+    }
+
+    #[test]
+    fn zero_color_component_is_allowed_per_channel() {
+        // Kills `color.x < 0.0 -> <=`, `color.y < 0.0 -> <=`, and
+        // `color.z < 0.0 -> <=`: exactly 0.0 is a valid (non-negative)
+        // colour component and must be accepted on each channel.
+        let red0 = Light::directional(&math(), node(), Vec3::new(0.0, 1.0, 1.0), 1.0).unwrap();
+        assert_eq!(red0.color().x, 0.0);
+        let green0 = Light::directional(&math(), node(), Vec3::new(1.0, 0.0, 1.0), 1.0).unwrap();
+        assert_eq!(green0.color().y, 0.0);
+        let blue0 = Light::directional(&math(), node(), Vec3::new(1.0, 1.0, 0.0), 1.0).unwrap();
+        assert_eq!(blue0.color().z, 0.0);
+    }
+}

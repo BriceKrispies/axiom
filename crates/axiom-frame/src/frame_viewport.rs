@@ -1,18 +1,19 @@
 //! Frame-stable viewport snapshot derived from `HostViewport`.
 
 use axiom_host::HostViewport;
-use axiom_math::MathApi;
-
-use crate::frame_error::FrameError;
-use crate::frame_result::FrameResult;
 
 /// A frame-stable snapshot of the host viewport.
 ///
 /// Built once per engine frame from a [`HostViewport`]. The four integer
-/// dimensions and the scale factor are copied verbatim; the cached aspect
-/// ratio is computed from the physical size and validated as a finite
-/// `f32` via [`MathApi::validate_finite`]. That math validation is what
-/// makes this type a real Layer-04 semantic adapter over Layer-02 math.
+/// dimensions and the scale factor are copied verbatim; the aspect ratio is
+/// computed from the physical size.
+///
+/// Construction is **infallible**: a [`HostViewport`] already guarantees
+/// non-zero physical dimensions and a finite positive scale factor, so the
+/// derived aspect ratio is always a finite positive `f32`. There is no error
+/// path to validate here — a guard against a non-finite aspect would be
+/// unreachable dead code. (Frame still adapts Layer-02 math elsewhere, e.g.
+/// [`crate::FrameContext::viewport_aspect_is_finite`].)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameViewport {
     logical_width: u32,
@@ -24,23 +25,16 @@ pub struct FrameViewport {
 }
 
 impl FrameViewport {
-    /// Build a frame viewport from a host viewport, validating the derived
-    /// aspect ratio through math. Fails with
-    /// [`crate::frame_error_code::FrameErrorCode::InvalidViewport`] if the
-    /// derived aspect is not a finite `f32` (which would only happen if
-    /// the host viewport's invariants were already broken).
-    pub fn from_host(math: &MathApi, viewport: &HostViewport) -> FrameResult<Self> {
-        let aspect_ratio = viewport.aspect_ratio();
-        math.validate_finite(aspect_ratio)
-            .map_err(|_| FrameError::invalid_viewport("derived aspect ratio is not finite"))?;
-        Ok(FrameViewport {
+    /// Project a validated [`HostViewport`] into a frame viewport.
+    pub fn from_host(viewport: &HostViewport) -> Self {
+        FrameViewport {
             logical_width: viewport.logical_width(),
             logical_height: viewport.logical_height(),
             physical_width: viewport.physical_width(),
             physical_height: viewport.physical_height(),
             scale_factor: viewport.scale_factor(),
-            aspect_ratio,
-        })
+            aspect_ratio: viewport.aspect_ratio(),
+        }
     }
 
     pub const fn logical_width(&self) -> u32 {
@@ -63,8 +57,6 @@ impl FrameViewport {
         self.scale_factor
     }
 
-    /// The cached aspect ratio (`physical_width / physical_height`). Always
-    /// finite because the constructor rejected non-finite values.
     pub const fn aspect_ratio(&self) -> f32 {
         self.aspect_ratio
     }
@@ -73,7 +65,7 @@ impl FrameViewport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frame_error_code::FrameErrorCode;
+    use axiom_math::MathApi;
 
     fn math() -> MathApi {
         MathApi::new()
@@ -85,8 +77,7 @@ mod tests {
 
     #[test]
     fn values_are_copied_from_host_viewport() {
-        let h = host_vp();
-        let v = FrameViewport::from_host(&math(), &h).unwrap();
+        let v = FrameViewport::from_host(&host_vp());
         assert_eq!(v.logical_width(), 1600);
         assert_eq!(v.logical_height(), 900);
         assert_eq!(v.physical_width(), 1600);
@@ -96,49 +87,42 @@ mod tests {
 
     #[test]
     fn aspect_ratio_matches_host_viewport() {
-        let v = FrameViewport::from_host(&math(), &host_vp()).unwrap();
+        let v = FrameViewport::from_host(&host_vp());
         assert!((v.aspect_ratio() - host_vp().aspect_ratio()).abs() < 1.0e-6);
         assert!((v.aspect_ratio() - 16.0 / 9.0).abs() < 1.0e-6);
     }
 
     #[test]
-    fn aspect_ratio_is_stable_across_constructions() {
-        let a = FrameViewport::from_host(&math(), &host_vp()).unwrap();
-        let b = FrameViewport::from_host(&math(), &host_vp()).unwrap();
-        assert_eq!(a.aspect_ratio(), b.aspect_ratio());
-    }
-
-    #[test]
-    fn finite_aspect_passes_math_validation() {
-        // The host viewport already validates scale; the resulting aspect
-        // must be a finite f32 that math accepts.
-        let v = FrameViewport::from_host(&math(), &host_vp()).unwrap();
+    fn derived_aspect_is_finite() {
+        // The host viewport guarantees a finite aspect; confirm the projected
+        // value is what math considers finite (frame's math adapter lives in
+        // FrameContext, but this pins the invariant the projection relies on).
+        let v = FrameViewport::from_host(&host_vp());
         assert!(math().is_finite_value(v.aspect_ratio()));
     }
 
     #[test]
+    fn scale_factor_is_copied_verbatim_not_unity() {
+        // A scale distinct from 1.0 (and 0.0/-1.0) pins the accessor against
+        // the `-> f32 with 1.0` mutation.
+        let host = HostViewport::new(&math(), 800, 600, 2.0).unwrap();
+        let v = FrameViewport::from_host(&host);
+        assert_eq!(v.scale_factor(), 2.0);
+        assert_ne!(v.scale_factor(), 1.0);
+    }
+
+    #[test]
     fn identical_input_produces_equal_frame_viewport() {
-        let a = FrameViewport::from_host(&math(), &host_vp()).unwrap();
-        let b = FrameViewport::from_host(&math(), &host_vp()).unwrap();
+        let a = FrameViewport::from_host(&host_vp());
+        let b = FrameViewport::from_host(&host_vp());
         assert_eq!(a, b);
     }
 
     #[test]
     fn different_host_viewport_produces_different_frame_viewport() {
         let other = HostViewport::new(&math(), 800, 600, 2.0).unwrap();
-        let a = FrameViewport::from_host(&math(), &host_vp()).unwrap();
-        let b = FrameViewport::from_host(&math(), &other).unwrap();
+        let a = FrameViewport::from_host(&host_vp());
+        let b = FrameViewport::from_host(&other);
         assert_ne!(a, b);
-    }
-
-    #[test]
-    fn invalid_viewport_error_code_is_distinct() {
-        // The constructor's only failure path is the math finite check. We
-        // can't easily fabricate a non-finite host viewport (the host's
-        // constructors reject one), so we pin the error code shape via the
-        // shorthand constructor — proves the failure path exists and is
-        // wired to the right code.
-        let err = FrameError::invalid_viewport("synthetic");
-        assert_eq!(err.code(), FrameErrorCode::InvalidViewport);
     }
 }

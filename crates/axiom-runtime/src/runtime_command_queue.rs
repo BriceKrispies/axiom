@@ -88,6 +88,7 @@ mod tests {
     fn peek_does_not_consume() {
         let mut q = RuntimeCommandQueue::new();
         q.push(cmd(9));
+        assert!(!q.is_empty());
         assert_eq!(q.peek().unwrap().kind(), 9);
         assert_eq!(q.len(), 1);
     }

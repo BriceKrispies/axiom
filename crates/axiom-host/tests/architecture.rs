@@ -276,6 +276,20 @@ fn lib_exports_are_curated_set() {
         "pub use host_step_driver::HostStepDriver;",
         "pub use host_step_plan::HostStepPlan;",
         "pub use host_viewport::HostViewport;",
+        // Presentation boundary.
+        "pub use host_adapter_request::HostAdapterRequest;",
+        "pub use host_alpha_mode::HostAlphaMode;",
+        "pub use host_color_format::HostColorFormat;",
+        "pub use host_device_profile::HostDeviceProfile;",
+        "pub use host_device_request::HostDeviceRequest;",
+        "pub use host_present_mode::HostPresentMode;",
+        "pub use host_presentation_report::HostPresentationReport;",
+        "pub use host_presentation_request::HostPresentationRequest;",
+        "pub use host_presentation_status::HostPresentationStatus;",
+        "pub use host_presentation_target::HostPresentationTarget;",
+        "pub use host_power_preference::HostPowerPreference;",
+        "pub use host_surface_descriptor::HostSurfaceDescriptor;",
+        "pub use host_surface_handle::HostSurfaceHandle;",
     ];
     expected.sort();
 

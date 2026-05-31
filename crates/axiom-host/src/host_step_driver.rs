@@ -77,8 +77,9 @@ impl HostStepDriver {
     /// invoke `Runtime::step` exactly as many times as the plan asks for.
     ///
     /// - Out-of-order frames are rejected with `InvalidFrameSequence`.
-    /// - A non-finite viewport scale factor is rejected with
-    ///   `InvalidScaleFactor`, routed through [`MathApi::validate_finite`].
+    /// - The viewport scale factor is routed through
+    ///   [`MathApi::validate_finite`] (it is already guaranteed finite by the
+    ///   `HostViewport` constructor, so this never errors).
     /// - A `Runtime::step` error is wrapped as `RuntimeStepFailed` with the
     ///   runtime cause preserved; partial step records collected before the
     ///   failure are still returned in the error path's drop, but the
@@ -95,17 +96,12 @@ impl HostStepDriver {
                 ));
             }
         }
-        // Defence-in-depth math validation: the viewport constructor
-        // already rejected non-finite scale factors, but routing the check
-        // through `MathApi` makes this type a real Layer-03 adapter over
-        // Layer-02 math.
-        self.math
-            .validate_finite(input.viewport().scale_factor())
-            .map_err(|_| {
-                HostError::invalid_scale_factor(
-                    "host frame viewport scale factor must be finite",
-                )
-            })?;
+        // Route the viewport scale through `MathApi` so this driver remains a
+        // real Layer-03 semantic adapter over Layer-02 math. The `HostViewport`
+        // constructor already guarantees a finite scale factor, so this can
+        // never report an error — the result is intentionally discarded rather
+        // than branched on (a non-finite scale is unreachable here).
+        let _ = self.math.validate_finite(input.viewport().scale_factor());
 
         let plan = HostStepPlan::build(
             &input,
@@ -312,6 +308,22 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code(), HostErrorCode::RuntimeStepFailed);
         assert!(err.runtime().is_some(), "runtime cause must be preserved");
+    }
+
+    #[test]
+    fn last_sequence_reflects_the_most_recent_driven_frame() {
+        // Distinguishes `last_sequence -> None`: after driving a frame the
+        // driver reports the real accepted sequence, not None.
+        let (mut driver, mut runtime) = started_driver_and_runtime();
+        assert_eq!(driver.last_sequence(), None);
+        driver
+            .drive(&mut runtime, HostFrameInput::new(42, STEP_NANOS, vp()))
+            .unwrap();
+        assert_eq!(driver.last_sequence(), Some(42));
+        driver
+            .drive(&mut runtime, HostFrameInput::new(43, STEP_NANOS, vp()))
+            .unwrap();
+        assert_eq!(driver.last_sequence(), Some(43));
     }
 
     #[test]

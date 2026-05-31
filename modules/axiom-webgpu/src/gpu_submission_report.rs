@@ -1,15 +1,20 @@
 //! Deterministic report of one GPU submission.
 
 use crate::gpu_command::GpuCommand;
+use crate::gpu_submission_status::GpuSubmissionStatus;
 
 /// The deterministic record `WebGpuApi::submit` returns.
 ///
-/// Today the backend is a *recorder*: every command the app pushed
-/// into the submission is captured in the report, plus a per-kind
-/// counter that lets test code assert on submission shape without
-/// having to walk the command list. Real GPU presentation will be
-/// added when the host layer exposes a surface — see
-/// `ARCHITECTURE.md` for the blocker.
+/// Every command the app pushed into the submission is captured here, plus a
+/// per-kind counter that lets test code assert on submission shape without
+/// walking the command list. These describe *what the submission contained*
+/// and are identical regardless of backend, because `GpuSubmission` is the
+/// stable input contract.
+///
+/// The [`GpuSubmissionStatus`] describes *what the backend did with it*: the
+/// recording backend reports `Recorded`; a live backend reports a
+/// deterministic not-bound / not-initialized status. No status claims pixels
+/// were presented in this pass — see `ARCHITECTURE.md`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GpuSubmissionReport {
     submitted_commands: Vec<GpuCommand>,
@@ -18,6 +23,7 @@ pub struct GpuSubmissionReport {
     clear_count: u32,
     draw_count: u32,
     present_count: u32,
+    status: GpuSubmissionStatus,
 }
 
 impl GpuSubmissionReport {
@@ -25,6 +31,7 @@ impl GpuSubmissionReport {
         submitted_commands: Vec<GpuCommand>,
         target_width: u32,
         target_height: u32,
+        status: GpuSubmissionStatus,
     ) -> Self {
         let mut clear_count = 0u32;
         let mut draw_count = 0u32;
@@ -44,6 +51,7 @@ impl GpuSubmissionReport {
             clear_count,
             draw_count,
             present_count,
+            status,
         }
     }
 
@@ -74,6 +82,36 @@ impl GpuSubmissionReport {
     pub const fn present_count(&self) -> u32 {
         self.present_count
     }
+
+    /// The deterministic backend outcome for this submission.
+    pub const fn status(&self) -> GpuSubmissionStatus {
+        self.status
+    }
+
+    /// Whether real, visible presentation occurred. Always `false` in this
+    /// pass — neither backend touches a GPU. Exposed as a primitive so
+    /// downstream crates can assert "no pixels were claimed" without naming
+    /// the module-internal status enum.
+    pub const fn presented(&self) -> bool {
+        self.status.presented()
+    }
+
+    /// Whether this report came from the deterministic recording backend.
+    pub const fn is_recorded(&self) -> bool {
+        matches!(self.status, GpuSubmissionStatus::Recorded)
+    }
+
+    /// Whether a live backend accepted the submission but had no
+    /// target/surface bound.
+    pub const fn is_live_not_bound(&self) -> bool {
+        matches!(self.status, GpuSubmissionStatus::LiveNotBound)
+    }
+
+    /// Whether a live backend had a validated presentation request but no
+    /// initialized device/surface.
+    pub const fn is_live_not_initialized(&self) -> bool {
+        matches!(self.status, GpuSubmissionStatus::LiveNotInitialized)
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +137,7 @@ mod tests {
             ],
             800,
             600,
+            GpuSubmissionStatus::Recorded,
         );
         assert_eq!(r.clear_count(), 1);
         assert_eq!(r.draw_count(), 2);
@@ -107,16 +146,88 @@ mod tests {
     }
 
     #[test]
+    fn report_counts_distinguish_from_zero_and_one() {
+        // Two of every counted kind so each count is 2 — distinct from the
+        // mutant constants 0 and 1 for clear_count / present_count (and
+        // draw_count for good measure).
+        let r = GpuSubmissionReport::new(
+            vec![
+                GpuCommand::ClearFrame {
+                    color: [0.0, 0.0, 0.0, 1.0],
+                },
+                GpuCommand::ClearFrame {
+                    color: [1.0, 1.0, 1.0, 1.0],
+                },
+                GpuCommand::DrawIndexed {
+                    index_count: 36,
+                    world: axiom_math::Mat4::IDENTITY,
+                },
+                GpuCommand::DrawIndexed {
+                    index_count: 6,
+                    world: axiom_math::Mat4::IDENTITY,
+                },
+                GpuCommand::Present,
+                GpuCommand::Present,
+            ],
+            1,
+            1,
+            GpuSubmissionStatus::Recorded,
+        );
+        assert_eq!(r.clear_count(), 2);
+        assert_eq!(r.draw_count(), 2);
+        assert_eq!(r.present_count(), 2);
+    }
+
+    #[test]
     fn report_round_trips_target_dimensions() {
-        let r = GpuSubmissionReport::new(vec![], 1920, 1080);
+        let r = GpuSubmissionReport::new(vec![], 1920, 1080, GpuSubmissionStatus::Recorded);
         assert_eq!(r.target_width(), 1920);
         assert_eq!(r.target_height(), 1080);
     }
 
     #[test]
     fn equal_inputs_produce_equal_reports() {
-        let a = GpuSubmissionReport::new(vec![GpuCommand::Present], 1, 1);
-        let b = GpuSubmissionReport::new(vec![GpuCommand::Present], 1, 1);
+        let a = GpuSubmissionReport::new(vec![GpuCommand::Present], 1, 1, GpuSubmissionStatus::Recorded);
+        let b = GpuSubmissionReport::new(vec![GpuCommand::Present], 1, 1, GpuSubmissionStatus::Recorded);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn status_is_carried_and_recording_claims_no_pixels() {
+        let r = GpuSubmissionReport::new(vec![], 1, 1, GpuSubmissionStatus::Recorded);
+        assert_eq!(r.status(), GpuSubmissionStatus::Recorded);
+        assert!(r.is_recorded());
+        assert!(!r.presented());
+    }
+
+    #[test]
+    fn live_status_reports_are_not_presented() {
+        let unbound = GpuSubmissionReport::new(vec![], 1, 1, GpuSubmissionStatus::LiveNotBound);
+        assert!(unbound.is_live_not_bound());
+        assert!(!unbound.presented());
+        let pending =
+            GpuSubmissionReport::new(vec![], 1, 1, GpuSubmissionStatus::LiveNotInitialized);
+        assert!(pending.is_live_not_initialized());
+        assert!(!pending.presented());
+    }
+}
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+
+    #[test]
+    fn status_predicates_return_false_on_mismatch() {
+        // A `LiveNotBound` report is none of the other classifications, so
+        // each `matches!` predicate exercises its non-matching arm.
+        let r = GpuSubmissionReport::new(vec![], 1, 1, GpuSubmissionStatus::LiveNotBound);
+        assert!(!r.is_recorded());
+        assert!(!r.is_live_not_initialized());
+
+        // A `Recorded` report exercises the non-matching arm of the live
+        // predicates.
+        let rec = GpuSubmissionReport::new(vec![], 1, 1, GpuSubmissionStatus::Recorded);
+        assert!(!rec.is_live_not_bound());
+        assert!(!rec.is_live_not_initialized());
     }
 }

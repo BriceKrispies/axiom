@@ -30,6 +30,14 @@ pub enum HostErrorCode {
     /// A host lifecycle signal was applied in a state that does not
     /// permit it (today: shutting down then re-applying signals).
     InvalidLifecycleTransition = 7,
+    /// A [`crate::HostPresentationTarget`] was constructed with a null
+    /// handle id or an empty label.
+    InvalidPresentationTarget = 8,
+    /// A [`crate::HostSurfaceHandle`] was constructed with a null handle id.
+    InvalidSurfaceHandle = 9,
+    /// A [`crate::HostPresentationRequest`] bound an invalid/missing target
+    /// or surface, or an internally inconsistent adapter/device pairing.
+    InvalidPresentationRequest = 10,
 }
 
 impl HostErrorCode {
@@ -47,6 +55,9 @@ mod tests {
     fn discriminants_are_stable() {
         assert_eq!(HostErrorCode::InvalidViewportDimensions.raw(), 1);
         assert_eq!(HostErrorCode::InvalidLifecycleTransition.raw(), 7);
+        assert_eq!(HostErrorCode::InvalidPresentationTarget.raw(), 8);
+        assert_eq!(HostErrorCode::InvalidSurfaceHandle.raw(), 9);
+        assert_eq!(HostErrorCode::InvalidPresentationRequest.raw(), 10);
     }
 
     #[test]

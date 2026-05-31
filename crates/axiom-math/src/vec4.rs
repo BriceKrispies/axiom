@@ -191,3 +191,28 @@ mod tests {
         assert!(back.approx_eq(&v, eps()));
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::BinaryReader;
+
+    #[test]
+    fn read_from_truncated_each_component() {
+        assert!(Vec4::read_from(&mut BinaryReader::new(&[])).is_err());
+        assert!(Vec4::read_from(&mut BinaryReader::new(&[0u8; 4])).is_err());
+        assert!(Vec4::read_from(&mut BinaryReader::new(&[0u8; 8])).is_err());
+        assert!(Vec4::read_from(&mut BinaryReader::new(&[0u8; 12])).is_err());
+    }
+
+    #[test]
+    fn approx_eq_each_component_differs() {
+        let base = Vec4::new(0.0, 0.0, 0.0, 0.0);
+        let eps = Epsilon::DEFAULT;
+        assert!(!base.approx_eq(&Vec4::new(1.0, 0.0, 0.0, 0.0), eps));
+        assert!(!base.approx_eq(&Vec4::new(0.0, 1.0, 0.0, 0.0), eps));
+        assert!(!base.approx_eq(&Vec4::new(0.0, 0.0, 1.0, 0.0), eps));
+        assert!(!base.approx_eq(&Vec4::new(0.0, 0.0, 0.0, 1.0), eps));
+        assert!(base.approx_eq(&base, eps));
+    }
+}

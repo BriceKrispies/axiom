@@ -272,3 +272,21 @@ mod tests {
         assert!(back.approx_eq(&v, eps()));
     }
 }
+
+#[cfg(test)]
+mod cov {
+    use super::*;
+    use axiom_kernel::BinaryReader;
+
+    #[test]
+    fn normalize_non_finite_length_fails() {
+        assert!(Vec3::new(f32::MAX, f32::MAX, f32::MAX).normalize().is_err());
+    }
+
+    #[test]
+    fn read_from_truncated_each_component() {
+        assert!(Vec3::read_from(&mut BinaryReader::new(&[])).is_err());
+        assert!(Vec3::read_from(&mut BinaryReader::new(&[0u8; 4])).is_err());
+        assert!(Vec3::read_from(&mut BinaryReader::new(&[0u8; 8])).is_err());
+    }
+}

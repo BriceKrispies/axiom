@@ -103,6 +103,45 @@ mod tests {
     }
 
     #[test]
+    fn cube_corner_positions_are_exact() {
+        // Kills the digit/`-` deletions in the `p` corner table: every
+        // corner coordinate is exactly +/-0.5. Face 0 has corners
+        // [1, 0, 3, 2] into `p`, so its 4 vertices are p[1], p[0], p[3],
+        // p[2]; face 1 (+Z) has corners [4, 5, 6, 7] => p[4]..p[7].
+        let mesh = build_cube_mesh(ResourceId::from_raw(1));
+        let v = mesh.vertices();
+        let pos = |i: usize| {
+            let p = v[i].position();
+            [p.x, p.y, p.z]
+        };
+        // Face 0 (-Z): p[1], p[0], p[3], p[2].
+        assert_eq!(pos(0), [0.5, -0.5, -0.5]); // p[1]
+        assert_eq!(pos(1), [-0.5, -0.5, -0.5]); // p[0]
+        assert_eq!(pos(2), [-0.5, 0.5, -0.5]); // p[3]
+        assert_eq!(pos(3), [0.5, 0.5, -0.5]); // p[2]
+        // Face 1 (+Z): p[4], p[5], p[6], p[7].
+        assert_eq!(pos(4), [-0.5, -0.5, 0.5]); // p[4]
+        assert_eq!(pos(5), [0.5, -0.5, 0.5]); // p[5]
+        assert_eq!(pos(6), [0.5, 0.5, 0.5]); // p[6]
+        assert_eq!(pos(7), [-0.5, 0.5, 0.5]); // p[7]
+    }
+
+    #[test]
+    fn cube_indices_match_per_face_winding() {
+        // Kills `base + 1 -> base * 1` at line 60: on faces after the first,
+        // `base` is non-zero, so the two triangles must read
+        // base, base+1, base+2, base, base+2, base+3.
+        let mesh = build_cube_mesh(ResourceId::from_raw(1));
+        let idx = mesh.indices();
+        // Face 1 starts at vertex base = 4 (6 indices per face).
+        let face1 = &idx[6..12];
+        assert_eq!(face1, &[4, 5, 6, 4, 6, 7]);
+        // Face 5 starts at base = 20.
+        let face5 = &idx[30..36];
+        assert_eq!(face5, &[20, 21, 22, 20, 22, 23]);
+    }
+
+    #[test]
     fn cube_indices_are_valid() {
         let mesh = build_cube_mesh(ResourceId::from_raw(1));
         for &i in mesh.indices() {

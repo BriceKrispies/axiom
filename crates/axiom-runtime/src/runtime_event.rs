@@ -54,6 +54,14 @@ mod tests {
     }
 
     #[test]
+    fn payload_returns_the_constructed_bytes() {
+        // A non-empty payload distinguishes the real accessor from an empty
+        // leaked slice.
+        let e = RuntimeEvent::new(2, Tick::new(5), vec![9, 8, 7]);
+        assert_eq!(e.payload(), &[9, 8, 7]);
+    }
+
+    #[test]
     fn equality_is_structural() {
         let a = RuntimeEvent::new(1, Tick::new(0), vec![]);
         let b = RuntimeEvent::new(1, Tick::new(0), vec![]);
