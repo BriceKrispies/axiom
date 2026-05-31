@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use axiom_kernel::EntityId;
+use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, KernelResult, Reflect, TypeSchema};
 
 /// A sparse store of one component type `T`, keyed by [`EntityId`].
 ///
@@ -68,6 +68,85 @@ impl<T> ComponentColumn<T> {
 impl<T> Default for ComponentColumn<T> {
     fn default() -> Self {
         ComponentColumn::new()
+    }
+}
+
+impl<T: Reflect> ComponentColumn<T> {
+    /// The schema of the component type stored in this column.
+    pub fn schema(&self) -> TypeSchema {
+        T::SCHEMA
+    }
+
+    /// Serialize the column: entry count, then each `(entity, component)` in
+    /// ascending entity-id order.
+    pub fn reflect_write(&self, writer: &mut BinaryWriter) {
+        writer.write_u32(self.entries.len() as u32);
+        for (entity, component) in &self.entries {
+            entity.reflect_write(writer);
+            component.reflect_write(writer);
+        }
+    }
+
+    /// Read a column previously written with [`Self::reflect_write`].
+    pub fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        let count = reader.read_u32()?;
+        let mut column = ComponentColumn::new();
+        for _ in 0..count {
+            let entity = EntityId::reflect_read(reader)?;
+            let component = T::reflect_read(reader)?;
+            column.insert(entity, component);
+        }
+        Ok(column)
+    }
+}
+
+#[cfg(test)]
+mod reflect_tests {
+    use super::*;
+
+    fn e(raw: u64) -> EntityId {
+        EntityId::from_raw(raw)
+    }
+
+    #[test]
+    fn schema_is_the_component_schema() {
+        let col: ComponentColumn<u32> = ComponentColumn::new();
+        assert_eq!(col.schema(), <u32 as Reflect>::SCHEMA);
+    }
+
+    #[test]
+    fn empty_and_populated_columns_round_trip() {
+        let empty: ComponentColumn<u32> = ComponentColumn::new();
+        let mut w = BinaryWriter::new();
+        empty.reflect_write(&mut w);
+        let decoded =
+            ComponentColumn::<u32>::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap();
+        assert!(decoded.is_empty());
+
+        let mut col: ComponentColumn<u32> = ComponentColumn::new();
+        col.insert(e(1), 10);
+        col.insert(e(3), 30);
+        let mut w = BinaryWriter::new();
+        col.reflect_write(&mut w);
+        let decoded =
+            ComponentColumn::<u32>::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap();
+        assert_eq!(decoded.len(), 2);
+        assert_eq!(decoded.get(e(1)), Some(&10));
+        assert_eq!(decoded.get(e(3)), Some(&30));
+    }
+
+    #[test]
+    fn truncation_at_every_prefix_is_err() {
+        let mut col: ComponentColumn<u32> = ComponentColumn::new();
+        col.insert(e(1), 10);
+        col.insert(e(2), 20);
+        let mut w = BinaryWriter::new();
+        col.reflect_write(&mut w);
+        let bytes = w.into_bytes();
+        for len in 0..bytes.len() {
+            assert!(ComponentColumn::<u32>::reflect_read(&mut BinaryReader::new(&bytes[..len]))
+                .is_err());
+        }
     }
 }
 
