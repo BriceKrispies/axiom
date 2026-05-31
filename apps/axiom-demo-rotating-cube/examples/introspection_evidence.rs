@@ -68,19 +68,34 @@ fn main() {
     info!("capture ticks=0..={TICKS} retained={}", recent.len());
     for r in recent {
         info!(
-            "frame idx={} host_seq={} steps={} lifecycle={:?} viewport={}x{} systems={}",
+            "frame idx={} host_seq={} steps={} lifecycle={:?} viewport={}x{} systems=[{}] metrics=[{}]",
             r.engine_frame_index(),
             r.host_frame_sequence(),
             r.runtime_step_count(),
             r.lifecycle(),
             r.viewport_width(),
             r.viewport_height(),
-            r.systems().len(),
+            fmt_systems(r),
+            fmt_metrics(r),
         );
     }
     let monotonic = indices.windows(2).all(|w| w[0] < w[1]);
     check!("one report retained per tick", recent.len() == (TICKS + 1) as usize);
     check!("engine frame index strictly monotonic", monotonic);
+
+    // The whole point: a metric that actually changes frame to frame, plus a
+    // diff between two frames an agent would compare.
+    let angle = |idx: usize| metric_f32(&recent[idx], "cube.angle_deg");
+    info!(
+        "diff idx {}->{}: cube.angle_deg {:.1} -> {:.1}  (delta {:.1})",
+        recent[0].engine_frame_index(),
+        recent[60].engine_frame_index(),
+        angle(0),
+        angle(60),
+        angle(60) - angle(0),
+    );
+    check!("cube.angle_deg changes between frame 0 and 60", angle(0) != angle(60));
+    check!("every frame carries the cube.angle_deg metric", recent.iter().all(|r| r.metrics().iter().any(|m| m.name() == "cube.angle_deg")));
 
     // --- 2. Query by index. ---
     let probe = indices[60];
@@ -175,6 +190,45 @@ fn failing_system_frame() -> axiom_frame::EngineFrame {
         .drive(&mut runtime, HostFrameInput::new(1, STEP, viewport))
         .unwrap();
     FrameBuilder::new(STEP).build(&report, Vec::new()).unwrap()
+}
+
+/// `name=value` for each metric on a frame, space-separated.
+fn fmt_metrics(report: &FrameReport) -> String {
+    let mut s = String::new();
+    for (i, m) in report.metrics().iter().enumerate() {
+        if i > 0 {
+            s.push(' ');
+        }
+        match m.value().as_integer() {
+            Some(v) => {
+                let _ = write!(s, "{}={v}", m.name());
+            }
+            None => {
+                let _ = write!(s, "{}={:.3}", m.name(), m.value().as_float().unwrap_or(0.0));
+            }
+        }
+    }
+    s
+}
+
+/// Comma-separated system names on a frame.
+fn fmt_systems(report: &FrameReport) -> String {
+    report
+        .systems()
+        .iter()
+        .map(axiom_introspect::SystemReport::name)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The float value of the named metric on a frame, or 0.0 if absent.
+fn metric_f32(report: &FrameReport, name: &str) -> f32 {
+    report
+        .metrics()
+        .iter()
+        .find(|m| m.name() == name)
+        .and_then(|m| m.value().as_float())
+        .unwrap_or(0.0)
 }
 
 /// Lowercase hex of a byte slice.

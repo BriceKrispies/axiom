@@ -222,25 +222,51 @@ fn introspection_records_each_tick_and_is_queryable() {
 
     let mut demo = DemoRotatingCubeApi::new();
     let mut indices = Vec::new();
-    for tick in 0..5 {
+    for tick in 0..=60 {
         indices.push(demo.run_tick(tick).engine_frame_index);
     }
 
     // One retained report per tick.
-    assert_eq!(demo.recent_frames(10).len(), 5);
+    assert_eq!(demo.recent_frames(1000).len(), 61);
 
-    // Every observed frame index is queryable; indices are monotonic.
+    // Every observed frame index is queryable; indices are monotonic; each
+    // frame ran the cube-telemetry system and captured a per-tick angle that
+    // tracks the engine frame index (the cube spins one degree per tick).
     for (i, &index) in indices.iter().enumerate() {
         let report = demo.describe_frame(index).expect("frame is retained");
         assert_eq!(report.engine_frame_index(), index);
-        // The demo registers no runtime systems, so the per-system list is
-        // empty by design; the populated path is covered by the frame and
-        // introspect unit tests.
-        assert!(report.systems().is_empty());
+
+        assert_eq!(report.systems().len(), 1);
+        assert_eq!(report.systems()[0].name(), "cube-telemetry");
+        assert!(report.systems()[0].succeeded());
+
+        let angle = report
+            .metrics()
+            .iter()
+            .find(|m| m.name() == "cube.angle_deg")
+            .and_then(|m| m.value().as_float())
+            .expect("the cube angle metric is present");
+        assert_eq!(angle, (index % 360) as f32);
+
         if i > 0 {
             assert!(indices[i - 1] < index);
         }
     }
+
+    // The captured angle genuinely differs frame to frame — introspection is
+    // recording state that changes, not just bookkeeping.
+    let angle_at = |idx: u64| {
+        demo.describe_frame(idx)
+            .unwrap()
+            .metrics()
+            .iter()
+            .find(|m| m.name() == "cube.angle_deg")
+            .unwrap()
+            .value()
+            .as_float()
+            .unwrap()
+    };
+    assert_ne!(angle_at(0), angle_at(60));
 
     // The serialized snapshot of the latest frame round-trips to an equal
     // report — the byte channel an external agent would read.

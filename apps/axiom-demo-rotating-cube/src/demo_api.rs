@@ -3,10 +3,11 @@
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostBoundaryConfig, HostLifecycleSignal, HostStepDriver, HostViewport};
 use axiom_introspect::{FrameReport, IntrospectApi};
+use axiom_kernel::{HandleId, MetricValue, TelemetryMetric};
 use axiom_math::MathApi;
 use axiom_render::RenderApi;
 use axiom_resources::ResourcesApi;
-use axiom_runtime::{Runtime, RuntimeConfig};
+use axiom_runtime::{Runtime, RuntimeConfig, RuntimeContext, RuntimeResult, RuntimeSystem};
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
 
@@ -18,6 +19,34 @@ pub(crate) const FIXED_STEP_NANOS: u64 = 1_000_000;
 
 /// How many recent frame reports the introspection facade retains.
 const INTROSPECT_HISTORY: usize = 256;
+
+/// A runtime system that emits the cube's per-tick rotation as telemetry, so
+/// the introspection surface captures state that actually changes each frame
+/// (rather than only frame bookkeeping). The cube spins one degree per demo
+/// tick; the runtime tick is one ahead of the demo tick (the demo drives host
+/// sequence `tick + 1`), so the demo tick is `runtime_tick - 1`.
+#[derive(Debug)]
+struct CubeTelemetrySystem;
+
+impl RuntimeSystem for CubeTelemetrySystem {
+    fn run(&mut self, ctx: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
+        let tick = ctx.step().tick();
+        let demo_tick = tick.raw().saturating_sub(1);
+        let angle_deg = (demo_tick % 360) as f32;
+        ctx.metric(TelemetryMetric::gauge(
+            "cube.angle_deg",
+            MetricValue::float(angle_deg),
+            Some(tick),
+        ));
+        ctx.metric(TelemetryMetric::gauge(
+            "cube.spin_sin",
+            MetricValue::float(angle_deg.to_radians().sin()),
+            Some(tick),
+        ));
+        ctx.metric(TelemetryMetric::counter("frame.draws", 1, Some(tick)));
+        Ok(())
+    }
+}
 
 /// The deterministic headless rotating-cube vertical-slice facade.
 ///
@@ -71,6 +100,15 @@ impl DemoRotatingCubeApi {
             .initialize()
             .expect("demo runtime initialize cannot fail");
         runtime.start().expect("demo runtime start cannot fail");
+        runtime
+            .scheduler_mut()
+            .register(
+                HandleId::from_raw(1),
+                "cube-telemetry",
+                1,
+                Box::new(CubeTelemetrySystem),
+            )
+            .expect("registering the cube telemetry system cannot fail");
 
         let boundary_config = HostBoundaryConfig::new(FIXED_STEP_NANOS, 1)
             .expect("max-steps-per-frame = 1 is valid");
