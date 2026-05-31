@@ -134,6 +134,7 @@ fn lib_exports_are_curated_set() {
         "pub use frame_index::FrameIndex;",
         "pub use simulation_clock::SimulationClock;",
         "pub use tick::Tick;",
+        "pub use entity_id::EntityId;",
         "pub use handle_id::HandleId;",
         "pub use message_id::MessageId;",
         "pub use binary_reader::BinaryReader;",

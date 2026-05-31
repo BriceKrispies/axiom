@@ -104,6 +104,7 @@ pub use simulation_clock::SimulationClock;
 pub use tick::Tick;
 
 // Identity primitives used by higher layers.
+pub use entity_id::EntityId;
 pub use handle_id::HandleId;
 pub use message_id::MessageId;
 
