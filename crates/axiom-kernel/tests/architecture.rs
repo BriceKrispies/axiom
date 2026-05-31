@@ -140,6 +140,8 @@ fn lib_exports_are_curated_set() {
         "pub use binary_reader::BinaryReader;",
         "pub use binary_writer::BinaryWriter;",
         "pub use schema_version::SchemaVersion;",
+        "pub use reflect::Reflect;",
+        "pub use type_schema::{FieldSchema, TypeSchema};",
         "pub use layer_capability::LayerCapability;",
         "pub use layer_dependency::LayerDependency;",
         "pub use layer_manifest::LayerManifest;",

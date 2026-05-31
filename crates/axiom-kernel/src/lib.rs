@@ -59,7 +59,9 @@ mod message_queue;
 mod binary_reader;
 mod binary_writer;
 mod endian;
+mod reflect;
 mod schema_version;
+mod type_schema;
 
 // --- Layer contract model ---
 mod layer_capability;
@@ -117,6 +119,11 @@ pub use binary_writer::BinaryWriter;
 // wire formats and reject incompatible data — e.g. axiom-introspect's
 // serialized FrameReport snapshot.
 pub use schema_version::SchemaVersion;
+// Reflection: a type describes its shape (TypeSchema) and round-trips its
+// values. The composable formalization of the write_to/read_from idiom that
+// makes engine data (e.g. ECS components) serializable and describable.
+pub use reflect::Reflect;
+pub use type_schema::{FieldSchema, TypeSchema};
 
 // Layer-contract primitives — layers carry their own manifests and need to
 // construct dependencies and capabilities by code to validate them in tests.
