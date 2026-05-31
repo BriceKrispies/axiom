@@ -1,6 +1,10 @@
 # Design Plan — `axiom-introspect` (Layer 05): the engine introspection surface
 
-**Status:** proposed (not yet implemented)
+**Status:** Phases 0–1 implemented (+ headless demo wiring); Phases 2–4 pending.
+The `axiom-introspect` layer (Layer 05), the de-lossied frame contract, and the
+demo's `IntrospectApi` wiring are landed and fully covered. `FrameDiff`/failure
+queries (Phase 2), the browser query bridge (Phase 3), and host-injected perf
+timing (Phase 4) remain.
 **Owner concept:** the agent-facing "interrogate the running engine" capability
 **North star:** Axiom is a 3D engine *built for agentic engineering* — an agent
 can interrogate a running engine and understand what it is and what it just did.
@@ -148,13 +152,14 @@ enforces. No browser API ever enters the layer.
 
 ## 7. Phasing — each phase lands green at 100% coverage
 
-| Phase | Deliverable |
-|-------|-------------|
-| **0** | De-lossy the frame contract: carry per-system outcomes into the frame layer. (Pure Layer-04 fix.) |
-| **1** | `axiom-introspect` layer: `FrameReport` + `FrameHistory` ring + `IntrospectApi` read verbs, kernel-serializable & versioned. |
-| **2** | `FrameDiff` + failure queries — the "explain what changed" capability. |
-| **3** | Browser query bridge in the browser app: a live agent can interrogate the running cube. |
-| **4** | Inject deterministic perf-timing at the host boundary so reports carry real durations without breaking replay. |
+| Phase | Deliverable | Status |
+|-------|-------------|--------|
+| **0** | De-lossy the frame contract: carry per-system outcomes into the frame layer. (Pure Layer-04 fix.) | ✅ done |
+| **1** | `axiom-introspect` layer: `FrameReport` + `FrameHistory` ring + `IntrospectApi` read verbs, kernel-serializable & versioned. | ✅ done |
+| **1a** | Wire the headless demo to drive `IntrospectApi::observe` each tick. | ✅ done |
+| **2** | `FrameDiff` + failure queries — the "explain what changed" capability. | ⬜ pending |
+| **3** | Browser query bridge in the browser app: a live agent can interrogate the running cube. | ⬜ pending |
+| **4** | Inject deterministic perf-timing at the host boundary so reports carry real durations without breaking replay. | ⬜ pending |
 
 ## 8. First change to cut
 
