@@ -47,6 +47,7 @@ version = "0.1.0"
 dependencies = [
  "axiom-frame",
  "axiom-host",
+ "axiom-introspect",
  "axiom-kernel",
  "axiom-math",
  "axiom-render",
@@ -93,6 +94,17 @@ dependencies = [
 name = "axiom-host"
 version = "0.1.0"
 dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-introspect"
+version = "0.1.0"
+dependencies = [
+ "axiom-frame",
+ "axiom-host",
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
