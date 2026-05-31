@@ -23,7 +23,7 @@ use axiom_math::{Quat, Transform, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 
 use crate::cube_world::{
-    world_to_scene_snapshot, CameraData, CubeComponents, LightData, RenderableData,
+    world_to_scene_snapshot, CameraData, CubeStorage, LightData, RenderableData,
     TransformPropagation,
 };
 use crate::demo_api::{DemoRotatingCubeApi, FIXED_STEP_NANOS};
@@ -169,46 +169,60 @@ pub(crate) fn run_vertical_slice(
     //         cube (renderable) + camera + light. This is the demo's world
     //         model, replacing the former axiom-scene scene graph. ----
     let aspect = VIEWPORT_WIDTH as f32 / VIEWPORT_HEIGHT as f32;
-    let mut world: World<CubeComponents> = World::new();
+    let mut world: World<CubeStorage> = World::new();
     world.register_system(Box::new(TransformPropagation));
 
-    let cube_root = world.spawn();
     let rotation = Quat::from_axis_angle(Vec3::UNIT_Y, angle_rad)
         .expect("axis is unit and angle is finite");
-    world.get_mut(cube_root).expect("just spawned").local = Some(Transform::from_rotation(rotation));
+    let cube_root = world.spawn();
+    world
+        .storage_mut()
+        .locals
+        .insert(cube_root, Transform::from_rotation(rotation));
 
     let cube_child = world.spawn();
     {
-        let row = world.get_mut(cube_child).expect("just spawned");
-        row.local = Some(Transform::IDENTITY);
-        row.parent = Some(cube_root);
-        row.renderable = Some(RenderableData {
-            mesh_id: mesh_id.raw(),
-            material_id: material_id.raw(),
-            visible: true,
-        });
+        let storage = world.storage_mut();
+        storage.locals.insert(cube_child, Transform::IDENTITY);
+        storage.parents.insert(cube_child, cube_root);
+        storage.renderables.insert(
+            cube_child,
+            RenderableData {
+                mesh_id: mesh_id.raw(),
+                material_id: material_id.raw(),
+                visible: true,
+            },
+        );
     }
 
     let camera_entity = world.spawn();
     {
-        let row = world.get_mut(camera_entity).expect("just spawned");
-        row.local = Some(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
-        row.camera = Some(CameraData {
-            fovy_radians: std::f32::consts::FRAC_PI_3,
-            aspect,
-            near: 0.1,
-            far: 100.0,
-        });
+        let storage = world.storage_mut();
+        storage
+            .locals
+            .insert(camera_entity, Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
+        storage.cameras.insert(
+            camera_entity,
+            CameraData {
+                fovy_radians: std::f32::consts::FRAC_PI_3,
+                aspect,
+                near: 0.1,
+                far: 100.0,
+            },
+        );
     }
 
     let light_entity = world.spawn();
     {
-        let row = world.get_mut(light_entity).expect("just spawned");
-        row.local = Some(Transform::IDENTITY);
-        row.light = Some(LightData {
-            color: DEMO_LIGHT_COLOR,
-            intensity: DEMO_LIGHT_INTENSITY,
-        });
+        let storage = world.storage_mut();
+        storage.locals.insert(light_entity, Transform::IDENTITY);
+        storage.lights.insert(
+            light_entity,
+            LightData {
+                color: DEMO_LIGHT_COLOR,
+                intensity: DEMO_LIGHT_INTENSITY,
+            },
+        );
     }
 
     // ---- 5. Advance the world (frame-gated): runs transform propagation. ----
