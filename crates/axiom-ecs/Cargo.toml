@@ -1,0 +1,27 @@
+[package]
+name = "axiom-ecs"
+description = "Axiom Layer 05: the generic deterministic world store. Entities plus a consumer-defined component row, with frame-gated system execution — the single world model feature modules and apps build on."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free and wasm-clean.
+crate-type = ["rlib"]
+
+[dependencies]
+# Layer 05 imports the kernel (EntityId) and the frame layer it advances over.
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-frame = { path = "../axiom-frame" }
+
+[dev-dependencies]
+# Test-only: lower layers used to synthesize real `FrameContext` fixtures the
+# frame-gated `World::advance` runs against. Never imported by runtime code.
+axiom-host = { path = "../axiom-host" }
+axiom-runtime = { path = "../axiom-runtime" }
+axiom-math = { path = "../axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
