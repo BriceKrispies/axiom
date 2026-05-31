@@ -1,6 +1,6 @@
 //! A 4×4 column-major float matrix.
 
-use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult};
+use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 
 use crate::approx_eq::ApproxEq;
 use crate::epsilon::Epsilon;
@@ -297,6 +297,44 @@ impl ApproxEq for Mat4 {
             }
         }
         true
+    }
+}
+
+impl Reflect for Mat4 {
+    const SCHEMA: TypeSchema =
+        TypeSchema::new("Mat4", &[FieldSchema::new("data", "[f32; 16]")]);
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        for elem in self.data {
+            elem.reflect_write(writer);
+        }
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        let mut data = [0.0f32; 16];
+        for slot in data.iter_mut() {
+            *slot = f32::reflect_read(reader)?;
+        }
+        Ok(Mat4 { data })
+    }
+}
+
+#[cfg(test)]
+mod reflect_tests {
+    use super::*;
+
+    #[test]
+    fn reflect_round_trips_describes_and_rejects_truncation() {
+        let m = Mat4::IDENTITY;
+        let mut w = BinaryWriter::new();
+        m.reflect_write(&mut w);
+        let bytes = w.into_bytes();
+        assert_eq!(Mat4::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), m);
+        for len in 0..bytes.len() {
+            assert!(Mat4::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
+        }
+        assert_eq!(<Mat4 as Reflect>::SCHEMA.name(), "Mat4");
+        assert_eq!(<Mat4 as Reflect>::SCHEMA.fields().len(), 1);
     }
 }
 

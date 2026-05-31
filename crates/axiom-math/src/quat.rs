@@ -1,6 +1,6 @@
 //! Unit-rotation quaternion.
 
-use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult};
+use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 
 use crate::approx_eq::ApproxEq;
 use crate::epsilon::Epsilon;
@@ -147,6 +147,53 @@ impl ApproxEq for Quat {
             && self.y.approx_eq(&other.y, epsilon)
             && self.z.approx_eq(&other.z, epsilon)
             && self.w.approx_eq(&other.w, epsilon)
+    }
+}
+
+impl Reflect for Quat {
+    const SCHEMA: TypeSchema = TypeSchema::new(
+        "Quat",
+        &[
+            FieldSchema::new("x", "f32"),
+            FieldSchema::new("y", "f32"),
+            FieldSchema::new("z", "f32"),
+            FieldSchema::new("w", "f32"),
+        ],
+    );
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.x.reflect_write(writer);
+        self.y.reflect_write(writer);
+        self.z.reflect_write(writer);
+        self.w.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        Ok(Quat::new(
+            f32::reflect_read(reader)?,
+            f32::reflect_read(reader)?,
+            f32::reflect_read(reader)?,
+            f32::reflect_read(reader)?,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod reflect_tests {
+    use super::*;
+
+    #[test]
+    fn reflect_round_trips_describes_and_rejects_truncation() {
+        let q = Quat::new(0.0, 0.5, 0.0, 0.866);
+        let mut w = BinaryWriter::new();
+        q.reflect_write(&mut w);
+        let bytes = w.into_bytes();
+        assert_eq!(Quat::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), q);
+        for len in 0..bytes.len() {
+            assert!(Quat::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
+        }
+        assert_eq!(<Quat as Reflect>::SCHEMA.name(), "Quat");
+        assert_eq!(<Quat as Reflect>::SCHEMA.fields().len(), 4);
     }
 }
 

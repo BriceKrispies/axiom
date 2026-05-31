@@ -1,6 +1,6 @@
 //! A translation/rotation/scale composition.
 
-use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult};
+use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 
 use crate::approx_eq::ApproxEq;
 use crate::epsilon::Epsilon;
@@ -176,6 +176,50 @@ impl ApproxEq for Transform {
         self.translation.approx_eq(&other.translation, epsilon)
             && self.rotation.approx_eq(&other.rotation, epsilon)
             && self.scale.approx_eq(&other.scale, epsilon)
+    }
+}
+
+impl Reflect for Transform {
+    const SCHEMA: TypeSchema = TypeSchema::new(
+        "Transform",
+        &[
+            FieldSchema::new("translation", "Vec3"),
+            FieldSchema::new("rotation", "Quat"),
+            FieldSchema::new("scale", "Vec3"),
+        ],
+    );
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.translation.reflect_write(writer);
+        self.rotation.reflect_write(writer);
+        self.scale.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        Ok(Transform {
+            translation: Vec3::reflect_read(reader)?,
+            rotation: Quat::reflect_read(reader)?,
+            scale: Vec3::reflect_read(reader)?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod reflect_tests {
+    use super::*;
+
+    #[test]
+    fn reflect_round_trips_describes_and_rejects_truncation() {
+        let t = Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
+        let mut w = BinaryWriter::new();
+        t.reflect_write(&mut w);
+        let bytes = w.into_bytes();
+        assert_eq!(Transform::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), t);
+        for len in 0..bytes.len() {
+            assert!(Transform::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
+        }
+        assert_eq!(<Transform as Reflect>::SCHEMA.name(), "Transform");
+        assert_eq!(<Transform as Reflect>::SCHEMA.fields().len(), 3);
     }
 }
 

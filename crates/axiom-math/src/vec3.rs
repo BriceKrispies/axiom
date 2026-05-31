@@ -1,6 +1,6 @@
 //! Three-component float vector.
 
-use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult};
+use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 
 use crate::approx_eq::ApproxEq;
 use crate::epsilon::Epsilon;
@@ -132,6 +132,50 @@ impl ApproxEq for Vec3 {
         self.x.approx_eq(&other.x, epsilon)
             && self.y.approx_eq(&other.y, epsilon)
             && self.z.approx_eq(&other.z, epsilon)
+    }
+}
+
+impl Reflect for Vec3 {
+    const SCHEMA: TypeSchema = TypeSchema::new(
+        "Vec3",
+        &[
+            FieldSchema::new("x", "f32"),
+            FieldSchema::new("y", "f32"),
+            FieldSchema::new("z", "f32"),
+        ],
+    );
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.x.reflect_write(writer);
+        self.y.reflect_write(writer);
+        self.z.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        Ok(Vec3::new(
+            f32::reflect_read(reader)?,
+            f32::reflect_read(reader)?,
+            f32::reflect_read(reader)?,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod reflect_tests {
+    use super::*;
+
+    #[test]
+    fn reflect_round_trips_describes_and_rejects_truncation() {
+        let v = Vec3::new(1.0, -2.0, 3.5);
+        let mut w = BinaryWriter::new();
+        v.reflect_write(&mut w);
+        let bytes = w.into_bytes();
+        assert_eq!(Vec3::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), v);
+        for len in 0..bytes.len() {
+            assert!(Vec3::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
+        }
+        assert_eq!(<Vec3 as Reflect>::SCHEMA.name(), "Vec3");
+        assert_eq!(<Vec3 as Reflect>::SCHEMA.fields().len(), 3);
     }
 }
 
