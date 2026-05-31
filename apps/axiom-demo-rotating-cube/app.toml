@@ -1,8 +1,8 @@
 # Axiom app manifest — axiom-demo-rotating-cube.
 #
-# Apps are the only composition roots in the workspace. This app
-# composes the four vertical-slice modules (scene, resources, render,
-# webgpu) and provides the cross-module translation glue.
+# Apps are the only composition roots in the workspace. This app builds its
+# world on the ECS layer and composes the resources/render/webgpu modules,
+# providing the cross-boundary translation glue.
 
 [app]
 name = "rotating-cube-demo"
@@ -14,11 +14,11 @@ allowed_layers = [
     "math",
     "host",
     "frame",
+    "ecs",
     "introspect",
 ]
 
 allowed_modules = [
-    "scene",
     "resources",
     "render",
     "webgpu",

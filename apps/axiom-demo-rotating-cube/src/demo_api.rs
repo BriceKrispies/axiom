@@ -8,7 +8,6 @@ use axiom_math::MathApi;
 use axiom_render::RenderApi;
 use axiom_resources::ResourcesApi;
 use axiom_runtime::{Runtime, RuntimeConfig, RuntimeContext, RuntimeResult, RuntimeSystem};
-use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
 
 use crate::scene_to_render_input::{VIEWPORT_HEIGHT, VIEWPORT_WIDTH};
@@ -62,7 +61,6 @@ impl RuntimeSystem for CubeSpinSystem {
 pub struct DemoRotatingCubeApi {
     pub(crate) math: MathApi,
     pub(crate) frame_api: FrameApi,
-    pub(crate) scene_api: SceneApi,
     pub(crate) resources_api: ResourcesApi,
     pub(crate) render_api: RenderApi,
     pub(crate) webgpu_api: WebGpuApi,
@@ -84,7 +82,6 @@ impl DemoRotatingCubeApi {
         let math = MathApi::new();
         let host_api = HostApi::new();
         let frame_api = FrameApi::new();
-        let scene_api = SceneApi::new();
         let resources_api = ResourcesApi::new();
         let render_api = RenderApi::new();
         // The headless slice stays on the deterministic recording backend.
@@ -122,7 +119,6 @@ impl DemoRotatingCubeApi {
         DemoRotatingCubeApi {
             math,
             frame_api,
-            scene_api,
             resources_api,
             render_api,
             webgpu_api,

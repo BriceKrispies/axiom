@@ -17,10 +17,15 @@
 //! lives in [`crate::scene_to_render_input`] and
 //! [`crate::render_to_gpu_submission`].
 
+use axiom_ecs::World;
 use axiom_host::HostFrameInput;
 use axiom_math::{Quat, Transform, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 
+use crate::cube_world::{
+    world_to_scene_snapshot, CameraData, CubeComponents, LightData, RenderableData,
+    TransformPropagation,
+};
 use crate::demo_api::{DemoRotatingCubeApi, FIXED_STEP_NANOS};
 use crate::render_to_gpu_submission::{
     render_command_list_to_gpu_submission, GpuCommandArtifact, RenderCommandArtifact,
@@ -28,8 +33,7 @@ use crate::render_to_gpu_submission::{
 };
 use crate::scene_to_render_input::{
     scene_to_render_input, ResolvedMaterialArtifact, ResolvedMeshArtifact,
-    ResolvedResourcesArtifact, SceneCameraArtifact, SceneLightArtifact, SceneNodeArtifact,
-    SceneRenderableArtifact, SceneSnapshotArtifact, DEMO_CUBE_BASE_COLOR, DEMO_LIGHT_COLOR,
+    ResolvedResourcesArtifact, SceneSnapshotArtifact, DEMO_CUBE_BASE_COLOR, DEMO_LIGHT_COLOR,
     DEMO_LIGHT_INTENSITY, VIEWPORT_HEIGHT, VIEWPORT_WIDTH,
 };
 
@@ -148,28 +152,7 @@ pub(crate) fn run_vertical_slice(
         .and_then(|m| m.value().as_float())
         .expect("the cube-spin system emits cube.angle_rad each step");
 
-    // ---- 3. Build a fresh scene: rotating parent + child cube + camera + light. ----
-    let mut scene = api.scene_api.empty_scene();
-    let rotation = Quat::from_axis_angle(Vec3::UNIT_Y, angle_rad)
-        .expect("axis is unit and angle is finite");
-    let cube_root = api
-        .scene_api
-        .create_node_with_transform(&mut scene, Transform::from_rotation(rotation));
-    let cube_child = api
-        .scene_api
-        .create_node_with_transform(&mut scene, Transform::IDENTITY);
-    api.scene_api
-        .set_parent(&mut scene, cube_child, cube_root)
-        .expect("cube_child and cube_root were just created");
-    let camera_node = api.scene_api.create_node_with_transform(
-        &mut scene,
-        Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)),
-    );
-    let light_node = api
-        .scene_api
-        .create_node_with_transform(&mut scene, Transform::IDENTITY);
-
-    // ---- 2. Build a fresh resource table: built-in cube mesh + basic-lit material. ----
+    // ---- 3. Build a fresh resource table: built-in cube mesh + basic-lit material. ----
     let mut resources = api.resources_api.empty_table();
     let mesh_id = api.resources_api.register_cube_mesh(&mut resources);
     let base_color = Vec4::new(
@@ -182,87 +165,61 @@ pub(crate) fn run_vertical_slice(
         .resources_api
         .register_basic_lit_material(&mut resources, base_color);
 
-    // ---- 3. Attach scene components. ----
+    // ---- 4. Build the world on the ECS substrate: rotating parent + child
+    //         cube (renderable) + camera + light. This is the demo's world
+    //         model, replacing the former axiom-scene scene graph. ----
     let aspect = VIEWPORT_WIDTH as f32 / VIEWPORT_HEIGHT as f32;
-    api.scene_api
-        .add_perspective_camera(
-            &api.math,
-            &mut scene,
-            camera_node,
-            std::f32::consts::FRAC_PI_3,
+    let mut world: World<CubeComponents> = World::new();
+    world.register_system(Box::new(TransformPropagation));
+
+    let cube_root = world.spawn();
+    let rotation = Quat::from_axis_angle(Vec3::UNIT_Y, angle_rad)
+        .expect("axis is unit and angle is finite");
+    world.get_mut(cube_root).expect("just spawned").local = Some(Transform::from_rotation(rotation));
+
+    let cube_child = world.spawn();
+    {
+        let row = world.get_mut(cube_child).expect("just spawned");
+        row.local = Some(Transform::IDENTITY);
+        row.parent = Some(cube_root);
+        row.renderable = Some(RenderableData {
+            mesh_id: mesh_id.raw(),
+            material_id: material_id.raw(),
+            visible: true,
+        });
+    }
+
+    let camera_entity = world.spawn();
+    {
+        let row = world.get_mut(camera_entity).expect("just spawned");
+        row.local = Some(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
+        row.camera = Some(CameraData {
+            fovy_radians: std::f32::consts::FRAC_PI_3,
             aspect,
-            0.1,
-            100.0,
-        )
-        .expect("camera intrinsics are valid");
-    api.scene_api
-        .add_directional_light(
-            &api.math,
-            &mut scene,
-            light_node,
-            DEMO_LIGHT_COLOR,
-            DEMO_LIGHT_INTENSITY,
-        )
-        .expect("light parameters are valid");
-    let mesh_ref = api.scene_api.mesh_ref(mesh_id.raw());
-    let material_ref = api.scene_api.material_ref(material_id.raw());
-    api.scene_api
-        .add_renderable(&mut scene, cube_child, mesh_ref, material_ref)
-        .expect("renderable refs are valid");
+            near: 0.1,
+            far: 100.0,
+        });
+    }
 
-    // ---- 6. Update world transforms and snapshot the scene (un-nameable value). ----
-    let scene_snapshot = api
-        .scene_api
-        .advance(&mut scene, &frame_ctx)
-        .expect("scene advance never fails for a valid frame context");
+    let light_entity = world.spawn();
+    {
+        let row = world.get_mut(light_entity).expect("just spawned");
+        row.local = Some(Transform::IDENTITY);
+        row.light = Some(LightData {
+            color: DEMO_LIGHT_COLOR,
+            intensity: DEMO_LIGHT_INTENSITY,
+        });
+    }
 
-    // ---- 7. Resolve resources (un-nameable value). ----
+    // ---- 5. Advance the world (frame-gated): runs transform propagation. ----
+    world.advance(&frame_ctx);
+
+    // ---- 6. Resolve resources (un-nameable value). ----
     let resolved = api.resources_api.resolve(&resources);
 
-    // ---- 8. Read the scene snapshot into a plain-data artifact. ----
-    let scene_snapshot_artifact = SceneSnapshotArtifact {
-        nodes: scene_snapshot
-            .nodes()
-            .iter()
-            .map(|n| SceneNodeArtifact {
-                id: n.id().raw(),
-                parent: n.parent().map(|p| p.raw()),
-                local: n.local(),
-                world: n.world(),
-            })
-            .collect(),
-        cameras: scene_snapshot
-            .cameras()
-            .iter()
-            .map(|c| SceneCameraArtifact {
-                node: c.node().raw(),
-                fovy_radians: c.fovy_radians(),
-                aspect: c.aspect(),
-                near: c.near(),
-                far: c.far(),
-            })
-            .collect(),
-        lights: scene_snapshot
-            .lights()
-            .iter()
-            .map(|l| SceneLightArtifact {
-                node: l.node().raw(),
-                color: l.color(),
-                intensity: l.intensity(),
-            })
-            .collect(),
-        renderables: scene_snapshot
-            .renderables()
-            .iter()
-            .map(|r| SceneRenderableArtifact {
-                id: r.id().raw(),
-                node: r.node().raw(),
-                mesh_id: r.mesh().raw(),
-                material_id: r.material().raw(),
-                visible: r.visible(),
-            })
-            .collect(),
-    };
+    // ---- 7. Read the world into the same plain-data snapshot the render
+    //         pipeline already consumes — nothing downstream changes. ----
+    let scene_snapshot_artifact = world_to_scene_snapshot(&world);
 
     // ---- 9. Read the resolved resources into a plain-data artifact. ----
     let mut meshes = Vec::with_capacity(api.resources_api.resolved_mesh_count(&resolved));

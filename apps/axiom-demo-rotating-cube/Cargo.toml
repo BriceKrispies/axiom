@@ -16,11 +16,11 @@ axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-frame = { path = "../../crates/axiom-frame" }
+axiom-ecs = { path = "../../crates/axiom-ecs" }
 axiom-introspect = { path = "../../crates/axiom-introspect" }
 
-# Modules the demo app composes. This is the ONLY crate that depends
-# on more than one module today.
-axiom-scene = { path = "../../modules/axiom-scene" }
+# Modules the demo app composes. The cube's world model is now the ECS layer
+# above, not the axiom-scene module.
 axiom-resources = { path = "../../modules/axiom-resources" }
 axiom-render = { path = "../../modules/axiom-render" }
 axiom-webgpu = { path = "../../modules/axiom-webgpu" }
