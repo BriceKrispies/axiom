@@ -273,6 +273,7 @@ fn lib_exports_are_curated_set() {
         "pub use frame_lifecycle_state::FrameLifecycleState;",
         "pub use frame_result::FrameResult;",
         "pub use frame_step_summary::FrameStepSummary;",
+        "pub use frame_system_report::FrameSystemReport;",
         "pub use frame_timing::FrameTiming;",
         "pub use frame_viewport::FrameViewport;",
     ];

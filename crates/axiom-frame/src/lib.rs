@@ -42,6 +42,7 @@ mod frame_error_code;
 mod frame_lifecycle_state;
 mod frame_result;
 mod frame_step_summary;
+mod frame_system_report;
 mod frame_timing;
 mod frame_viewport;
 
@@ -62,5 +63,6 @@ pub use frame_error_code::FrameErrorCode;
 pub use frame_lifecycle_state::FrameLifecycleState;
 pub use frame_result::FrameResult;
 pub use frame_step_summary::FrameStepSummary;
+pub use frame_system_report::FrameSystemReport;
 pub use frame_timing::FrameTiming;
 pub use frame_viewport::FrameViewport;

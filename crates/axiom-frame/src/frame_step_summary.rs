@@ -2,35 +2,47 @@
 
 use axiom_runtime::RuntimeStepRecord;
 
+use crate::frame_system_report::FrameSystemReport;
+
 /// A stable, value-typed summary of one [`RuntimeStepRecord`].
 ///
 /// `RuntimeStepRecord` carries diagnostics, queue counts, and a full
-/// runtime state. Layer 04 keeps only the deterministic identity fields
-/// every future engine system needs to reason about a step:
+/// runtime state. Layer 04 keeps the deterministic identity fields every
+/// future engine system needs to reason about a step:
 ///
 /// - the runtime frame index (kernel `FrameIndex`),
 /// - the runtime simulation tick (kernel `Tick`),
 /// - the runtime's monotonic step sequence number,
-/// - whether every system in the step succeeded.
+/// - whether every system in the step succeeded,
+/// - and an ordered, value-typed report of each system that ran (so the
+///   per-system detail the runtime gathered survives the frame boundary).
 ///
 /// Two equal records produce equal summaries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FrameStepSummary {
     runtime_frame_index: u64,
     runtime_tick: u64,
     runtime_sequence: u64,
     succeeded: bool,
+    systems: Vec<FrameSystemReport>,
 }
 
 impl FrameStepSummary {
     /// Build a summary from a runtime step record.
     pub fn from_record(record: &RuntimeStepRecord) -> Self {
         let step = record.step();
+        let systems = record
+            .diagnostics()
+            .system_outcomes()
+            .iter()
+            .map(FrameSystemReport::from_outcome)
+            .collect();
         FrameStepSummary {
             runtime_frame_index: step.frame().raw(),
             runtime_tick: step.tick().raw(),
             runtime_sequence: step.sequence(),
             succeeded: record.succeeded(),
+            systems,
         }
     }
 
@@ -54,6 +66,12 @@ impl FrameStepSummary {
 
     pub const fn succeeded(&self) -> bool {
         self.succeeded
+    }
+
+    /// The ordered per-system reports gathered during this step. Empty when
+    /// the runtime ran no systems (or had diagnostics disabled).
+    pub fn systems(&self) -> &[FrameSystemReport] {
+        &self.systems
     }
 }
 
@@ -170,5 +188,24 @@ mod tests {
             .unwrap();
         let summary = FrameStepSummary::from_record(&report.step_records()[0]);
         assert!(!summary.succeeded(), "summary must mirror record.succeeded()");
+
+        // The per-system detail must survive into the frame summary: one
+        // system ran, named "fail", at order 1, with the SystemFailed code.
+        assert_eq!(summary.systems().len(), 1);
+        let system = &summary.systems()[0];
+        assert_eq!(system.name(), "fail");
+        assert_eq!(system.order(), 1);
+        assert!(!system.succeeded());
+        assert_eq!(system.error_code(), Some(RuntimeErrorCode::SystemFailed.raw()));
+    }
+
+    #[test]
+    fn step_without_systems_has_empty_system_list() {
+        let (mut driver, mut runtime) = driver_and_runtime();
+        let report = driver
+            .drive(&mut runtime, HostFrameInput::new(1, STEP_NANOS, vp()))
+            .unwrap();
+        let summary = FrameStepSummary::from_record(&report.step_records()[0]);
+        assert!(summary.systems().is_empty());
     }
 }
