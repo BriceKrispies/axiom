@@ -32,6 +32,7 @@ mod frame_report;
 mod introspect_api;
 mod metric_report;
 mod system_report;
+mod world_report;
 
 #[cfg(test)]
 mod fixtures;
@@ -46,3 +47,4 @@ pub use frame_history::FrameHistory;
 pub use frame_report::FrameReport;
 pub use metric_report::MetricReport;
 pub use system_report::SystemReport;
+pub use world_report::WorldReport;

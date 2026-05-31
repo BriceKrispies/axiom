@@ -184,6 +184,7 @@ fn lib_exports_are_curated_set() {
         "pub use frame_report::FrameReport;",
         "pub use metric_report::MetricReport;",
         "pub use system_report::SystemReport;",
+        "pub use world_report::WorldReport;",
     ];
     expected.sort();
 
@@ -196,12 +197,19 @@ fn lib_exports_are_curated_set() {
 
 #[test]
 fn lower_layers_do_not_import_axiom_introspect() {
-    for layer in ["axiom-kernel", "axiom-runtime", "axiom-math", "axiom-host", "axiom-frame"] {
+    for layer in [
+        "axiom-kernel",
+        "axiom-runtime",
+        "axiom-math",
+        "axiom-host",
+        "axiom-frame",
+        "axiom-ecs",
+    ] {
         assert_absent_in(
             &sibling_src_dir(layer),
             layer,
             &["axiom_introspect", "axiom-introspect"],
-            "no lower layer may import axiom-introspect (Layer 05)",
+            "no lower layer may import axiom-introspect (Layer 06)",
         );
     }
 }
@@ -223,6 +231,7 @@ fn introspect_only_imports_legal_lower_layers() {
                     && chunk != "axiom_math"
                     && chunk != "axiom_host"
                     && chunk != "axiom_frame"
+                    && chunk != "axiom_ecs"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
                 }
