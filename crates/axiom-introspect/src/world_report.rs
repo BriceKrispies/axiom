@@ -17,9 +17,9 @@ pub struct WorldReport {
 
 impl WorldReport {
     /// Observe a world, capturing its entity and system counts.
-    pub fn observe<R>(world: &World<R>) -> Self {
+    pub fn observe<S>(world: &World<S>) -> Self {
         WorldReport {
-            entities: world.len() as u64,
+            entities: world.entity_count() as u64,
             systems: world.system_count() as u64,
         }
     }
@@ -38,21 +38,21 @@ impl WorldReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_ecs::{EntityStore, WorldSystem};
+    use axiom_ecs::{EntityRegistry, WorldSystem};
 
     #[derive(Default)]
-    struct Row;
+    struct Storage;
 
     struct Noop;
-    impl WorldSystem<Row> for Noop {
-        fn run(&self, _: &mut EntityStore<Row>) {}
+    impl WorldSystem<Storage> for Noop {
+        fn run(&self, _: &EntityRegistry, _: &mut Storage) {}
     }
 
     #[test]
     fn observe_captures_entity_and_system_counts() {
         use axiom_frame::FrameContext;
 
-        let mut world: World<Row> = World::new();
+        let mut world: World<Storage> = World::new();
         world.register_system(Box::new(Noop));
         world.spawn();
         world.spawn();
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn empty_world_reports_zero() {
-        let world: World<Row> = World::new();
+        let world: World<Storage> = World::new();
         let report = WorldReport::observe(&world);
         assert_eq!(report.entities(), 0);
         assert_eq!(report.systems(), 0);
