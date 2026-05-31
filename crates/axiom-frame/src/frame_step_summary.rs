@@ -1,5 +1,6 @@
 //! Stable summary of one runtime step inside an engine frame.
 
+use axiom_kernel::TelemetryMetric;
 use axiom_runtime::RuntimeStepRecord;
 
 use crate::frame_system_report::FrameSystemReport;
@@ -14,17 +15,21 @@ use crate::frame_system_report::FrameSystemReport;
 /// - the runtime simulation tick (kernel `Tick`),
 /// - the runtime's monotonic step sequence number,
 /// - whether every system in the step succeeded,
-/// - and an ordered, value-typed report of each system that ran (so the
-///   per-system detail the runtime gathered survives the frame boundary).
+/// - an ordered, value-typed report of each system that ran (so the
+///   per-system detail the runtime gathered survives the frame boundary),
+/// - and the telemetry metrics the step's systems emitted.
 ///
-/// Two equal records produce equal summaries.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Two equal records produce equal summaries. `Eq`/`Hash` are intentionally
+/// not derived: carried [`TelemetryMetric`]s may hold `f32` gauge values,
+/// which are not totally ordered.
+#[derive(Debug, Clone, PartialEq)]
 pub struct FrameStepSummary {
     runtime_frame_index: u64,
     runtime_tick: u64,
     runtime_sequence: u64,
     succeeded: bool,
     systems: Vec<FrameSystemReport>,
+    metrics: Vec<TelemetryMetric>,
 }
 
 impl FrameStepSummary {
@@ -37,12 +42,14 @@ impl FrameStepSummary {
             .iter()
             .map(FrameSystemReport::from_outcome)
             .collect();
+        let metrics = record.diagnostics().metrics().to_vec();
         FrameStepSummary {
             runtime_frame_index: step.frame().raw(),
             runtime_tick: step.tick().raw(),
             runtime_sequence: step.sequence(),
             succeeded: record.succeeded(),
             systems,
+            metrics,
         }
     }
 
@@ -72,6 +79,11 @@ impl FrameStepSummary {
     /// the runtime ran no systems (or had diagnostics disabled).
     pub fn systems(&self) -> &[FrameSystemReport] {
         &self.systems
+    }
+
+    /// The telemetry metrics the step's systems emitted, in emission order.
+    pub fn metrics(&self) -> &[TelemetryMetric] {
+        &self.metrics
     }
 }
 
@@ -200,12 +212,49 @@ mod tests {
     }
 
     #[test]
-    fn step_without_systems_has_empty_system_list() {
+    fn step_without_systems_has_empty_system_list_and_no_metrics() {
         let (mut driver, mut runtime) = driver_and_runtime();
         let report = driver
             .drive(&mut runtime, HostFrameInput::new(1, STEP_NANOS, vp()))
             .unwrap();
         let summary = FrameStepSummary::from_record(&report.step_records()[0]);
         assert!(summary.systems().is_empty());
+        assert!(summary.metrics().is_empty());
+    }
+
+    #[test]
+    fn step_metrics_survive_into_the_summary() {
+        use axiom_kernel::{HandleId, MetricValue, TelemetryMetric};
+        use axiom_runtime::{RuntimeContext, RuntimeResult, RuntimeSystem};
+
+        struct Emit;
+        impl RuntimeSystem for Emit {
+            fn run(&mut self, ctx: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
+                let tick = ctx.step().tick();
+                ctx.metric(TelemetryMetric::gauge(
+                    "cube.angle_deg",
+                    MetricValue::float(3.0),
+                    Some(tick),
+                ));
+                Ok(())
+            }
+        }
+
+        let mut driver = HostStepDriver::new(HostBoundaryConfig::new(STEP_NANOS, 5).unwrap());
+        driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
+        let mut runtime = Runtime::new(RuntimeConfig::new(STEP_NANOS)).unwrap();
+        runtime.initialize().unwrap();
+        runtime.start().unwrap();
+        runtime
+            .scheduler_mut()
+            .register(HandleId::from_raw(1), "emit", 1, Box::new(Emit))
+            .unwrap();
+        let report = driver
+            .drive(&mut runtime, HostFrameInput::new(1, STEP_NANOS, vp()))
+            .unwrap();
+        let summary = FrameStepSummary::from_record(&report.step_records()[0]);
+        assert_eq!(summary.metrics().len(), 1);
+        assert_eq!(summary.metrics()[0].name(), "cube.angle_deg");
+        assert_eq!(summary.metrics()[0].value(), MetricValue::float(3.0));
     }
 }

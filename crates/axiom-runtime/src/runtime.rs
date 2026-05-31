@@ -142,6 +142,7 @@ impl Runtime {
 
         let commands_before = self.commands.len();
         let events_before = self.events.len();
+        let metrics_before = self.telemetry_sink.len();
 
         let step = self.timeline.advance()?;
         let mut diagnostics = RuntimeDiagnostics::new(step);
@@ -163,6 +164,11 @@ impl Runtime {
 
         let any_error = outcomes.iter().any(|o| !o.succeeded());
         diagnostics.record_outcomes(outcomes);
+
+        // Capture the metrics the step's systems emitted (everything appended
+        // to the sink during the scheduler run), before the runtime's own
+        // diagnostics counter is recorded below.
+        diagnostics.record_metrics(self.telemetry_sink.metrics()[metrics_before..].to_vec());
 
         let commands_after = self.commands.len();
         let events_after = self.events.len();
@@ -527,6 +533,39 @@ mod tests {
         rt.step().unwrap();
         assert_eq!(rt.log_sink().len(), log_count_before + 2);
         assert_eq!(rt.telemetry_sink().len(), metric_count_before + 2);
+    }
+
+    #[test]
+    fn system_metrics_are_captured_per_step_excluding_internal_counter() {
+        use axiom_kernel::{MetricValue, TelemetryMetric};
+        struct Emit;
+        impl RuntimeSystem for Emit {
+            fn run(&mut self, ctx: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
+                let tick = ctx.step().tick();
+                ctx.metric(TelemetryMetric::gauge(
+                    "cube.angle_deg",
+                    MetricValue::float(7.0),
+                    Some(tick),
+                ));
+                Ok(())
+            }
+        }
+        // Default config has diagnostics enabled, so the runtime also emits its
+        // own `runtime.steps` counter — which must NOT appear in the step's
+        // captured metrics.
+        let mut rt = started();
+        rt.scheduler_mut()
+            .register(HandleId::from_raw(1), "emit", 1, Box::new(Emit))
+            .unwrap();
+        let record = rt.step().unwrap();
+        let metrics = record.diagnostics().metrics();
+        assert_eq!(metrics.len(), 1, "only the system metric, not runtime.steps");
+        assert_eq!(metrics[0].name(), "cube.angle_deg");
+        assert_eq!(metrics[0].value(), MetricValue::float(7.0));
+
+        // A runtime with no emitting system captures no metrics.
+        let mut bare = started();
+        assert!(bare.step().unwrap().diagnostics().metrics().is_empty());
     }
 
     #[test]

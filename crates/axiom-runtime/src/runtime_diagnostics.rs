@@ -1,5 +1,7 @@
 //! Plain-data, per-step runtime diagnostics.
 
+use axiom_kernel::TelemetryMetric;
+
 use crate::runtime_error::RuntimeError;
 use crate::runtime_step::RuntimeStep;
 use crate::system_outcome::SystemOutcome;
@@ -17,6 +19,9 @@ pub struct RuntimeDiagnostics {
     events_pushed: u32,
     commands_drained: u32,
     events_drained: u32,
+    /// Telemetry metrics emitted by the step's systems, in emission order.
+    /// Excludes the runtime's own internal step-summary counter.
+    metrics: Vec<TelemetryMetric>,
     /// The kernel never reads wall-clock time, so step duration is `None`
     /// until a future layer supplies a deterministic time source. The field
     /// exists so the diagnostics schema is stable.
@@ -33,6 +38,7 @@ impl RuntimeDiagnostics {
             events_pushed: 0,
             commands_drained: 0,
             events_drained: 0,
+            metrics: Vec::new(),
             step_duration_nanos: None,
         }
     }
@@ -65,6 +71,11 @@ impl RuntimeDiagnostics {
         self.step_duration_nanos
     }
 
+    /// Telemetry metrics emitted by this step's systems, in emission order.
+    pub fn metrics(&self) -> &[TelemetryMetric] {
+        &self.metrics
+    }
+
     /// All errors recorded by failing systems, in execution order.
     pub fn errors(&self) -> Vec<&RuntimeError> {
         self.system_outcomes
@@ -77,6 +88,10 @@ impl RuntimeDiagnostics {
 
     pub(crate) fn record_outcomes(&mut self, outcomes: Vec<SystemOutcome>) {
         self.system_outcomes = outcomes;
+    }
+
+    pub(crate) fn record_metrics(&mut self, metrics: Vec<TelemetryMetric>) {
+        self.metrics = metrics;
     }
 
     pub(crate) fn record_queue_counts(
@@ -97,7 +112,7 @@ impl RuntimeDiagnostics {
 mod tests {
     use super::*;
     use crate::runtime_error_code::RuntimeErrorCode;
-    use axiom_kernel::{FrameIndex, HandleId, Tick};
+    use axiom_kernel::{FrameIndex, HandleId, MetricValue, Tick};
 
     fn step() -> RuntimeStep {
         RuntimeStep::new(FrameIndex::new(1), Tick::new(1), 1_000, 1)
@@ -146,5 +161,18 @@ mod tests {
         assert_eq!(d.events_pushed(), 5);
         assert_eq!(d.commands_drained(), 3);
         assert_eq!(d.events_drained(), 4);
+    }
+
+    #[test]
+    fn metrics_default_empty_and_are_recorded() {
+        let mut d = RuntimeDiagnostics::new(step());
+        assert!(d.metrics().is_empty());
+        d.record_metrics(vec![
+            TelemetryMetric::counter("frame.draws", 1, Some(Tick::new(1))),
+            TelemetryMetric::gauge("cube.angle_deg", MetricValue::float(2.0), Some(Tick::new(1))),
+        ]);
+        assert_eq!(d.metrics().len(), 2);
+        assert_eq!(d.metrics()[0].name(), "frame.draws");
+        assert_eq!(d.metrics()[1].value(), MetricValue::float(2.0));
     }
 }
