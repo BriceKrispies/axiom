@@ -1,0 +1,52 @@
+# Axiom layer manifest — Layer 05 (axiom-introspect).
+#
+# Introspect is the engine's agent-facing observability boundary. It adapts the
+# frame contract (Layer 04) into a retained, deterministic, byte-serializable
+# model of what the engine just did, and exposes a query facade an external
+# agent interrogates a running engine through. It records; it never reaches
+# around the frame contract into lower layers at runtime, never reads a wall
+# clock, and never touches a browser/GPU API.
+#
+# Layer-05 logical capabilities (documentation only — Rust public surface is
+# the curated re-export list in `lib.rs`, enforced by the layer's own
+# `tests/architecture.rs::lib_exports_are_curated_set`):
+#   - per-frame-report
+#   - per-system-report
+#   - retained-frame-history
+#   - frame-report-serialization
+#   - engine-introspection-facade
+
+[layer]
+name = "introspect"
+index = 5
+previous = "frame"
+crate_name = "axiom-introspect"
+allowed_dependencies = ["kernel", "runtime", "math", "host", "frame"]
+forbidden_dependencies = []
+meaningful_dependency = "Introspect consumes the frame contract (`EngineFrame` and the per-system detail on its `FrameStepSummary`/`FrameSystemReport`, plus `FrameLifecycleState`/`FrameViewport`) and kernel serialization (`BinaryWriter`/`BinaryReader`/`SchemaVersion`, `KernelResult`) to produce a retained, byte-serializable per-frame `FrameReport`, a bounded `FrameHistory`, and the `IntrospectApi` query facade an agent uses to ask a running engine what it is and what it just did."
+
+# Public Rust surface is the curated list in `lib.rs`; the checker needs the
+# facade plus the report type to prove the layer's adapter role over frame.
+introduced_capabilities = ["IntrospectApi", "FrameReport", "SystemReport", "FrameHistory"]
+
+consumed_capabilities = [
+    "EngineFrame",
+    "FrameStepSummary",
+    "FrameSystemReport",
+    "FrameLifecycleState",
+    "BinaryWriter",
+    "BinaryReader",
+    "SchemaVersion",
+    "KernelResult",
+]
+
+# Each proof export is a real Layer-05 public export whose source file must
+# reference at least one previous-layer (frame) symbol. `EngineFrame` is the
+# frame contract both the report builder and the facade consume.
+[[proof_exports]]
+export = "FrameReport"
+must_reference = ["EngineFrame"]
+
+[[proof_exports]]
+export = "IntrospectApi"
+must_reference = ["EngineFrame"]

@@ -1,0 +1,30 @@
+[package]
+name = "axiom-introspect"
+description = "Axiom Layer 05: the engine introspection surface. Adapts the frame contract into a retained, byte-serializable, queryable per-frame model an agent can interrogate a running engine through."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free and wasm-clean.
+crate-type = ["rlib"]
+
+[dependencies]
+# Layer 05 imports only the kernel and the frame layer it adapts. The Axiom
+# Layer Law and `cargo xtask check-architecture` enforce that nothing else
+# slips in.
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-frame = { path = "../axiom-frame" }
+
+[dev-dependencies]
+# Test-only: lower layers used to synthesize real `EngineFrame` fixtures the
+# introspection adapters run against (the same path the frame layer's own
+# tests use). Never imported by the layer's runtime code.
+axiom-host = { path = "../axiom-host" }
+axiom-runtime = { path = "../axiom-runtime" }
+axiom-math = { path = "../axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
