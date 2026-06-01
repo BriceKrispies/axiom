@@ -191,6 +191,9 @@ fn scene_imports_only_legal_layers() {
                     && chunk != "axiom_runtime"
                     && chunk != "axiom_math"
                     && chunk != "axiom_frame"
+                    // The scene is an ECS world (Layer 05): nodes are entities,
+                    // node facts are component columns.
+                    && chunk != "axiom_ecs"
                     // axiom_host appears only in #[cfg(test)] blocks because it
                     // is a dev-dependency; allow it here too.
                     && chunk != "axiom_host"
@@ -203,8 +206,8 @@ fn scene_imports_only_legal_layers() {
     }
     assert!(
         illegal.is_empty(),
-        "axiom-scene may only import axiom-kernel, axiom-runtime, axiom-math, axiom-frame \
-         (and axiom-host as a dev-dependency in tests):\n{}",
+        "axiom-scene may only import axiom-kernel, axiom-runtime, axiom-math, axiom-frame, \
+         axiom-ecs (and axiom-host as a dev-dependency in tests):\n{}",
         illegal.join("\n")
     );
 }

@@ -5,18 +5,17 @@ use crate::light_snapshot::LightSnapshot;
 use crate::node_snapshot::NodeSnapshot;
 use crate::renderable_snapshot::RenderableSnapshot;
 use crate::scene::Scene;
+use crate::scene_node_id::SceneNodeId;
 
 /// A deterministic, value-typed snapshot of a [`Scene`].
 ///
-/// Plain data. Lists are ordered by their respective ids — ascending
-/// `SceneNodeId`, `CameraId`, `LightId`, `RenderableId`. Two snapshots
-/// taken from scenes constructed with equal operations are
-/// byte-identical.
+/// Plain data. Lists are ordered by ascending node (entity) id. Two snapshots
+/// taken from scenes constructed with equal operations are byte-identical.
 ///
-/// The snapshot intentionally contains **no** GPU objects, browser
-/// objects, asset payloads, file paths, editor state, or gameplay
-/// state. Future resource/render modules (or app composition layers)
-/// can extend this contract; the module itself owns only this shape.
+/// The snapshot intentionally contains **no** GPU objects, browser objects,
+/// asset payloads, file paths, editor state, or gameplay state. The app reads
+/// it through [`crate::SceneApi`] accessors to translate into a renderer's
+/// input.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneSnapshot {
     nodes: Vec<NodeSnapshot>,
@@ -26,44 +25,44 @@ pub struct SceneSnapshot {
 }
 
 impl SceneSnapshot {
-    /// Build a snapshot from a scene. Reads every node, camera, light,
-    /// and renderable in ascending-id order.
+    /// Build a snapshot from a scene. Every node (and its camera/light/
+    /// renderable, if any) is read in ascending entity-id order.
     pub fn from_scene(scene: &Scene) -> Self {
-        let nodes = scene
-            .nodes_in_order()
-            .map(|(id, n)| NodeSnapshot::new(id, n.parent(), n.local(), n.world()))
-            .collect();
-        let cameras = scene
-            .cameras_in_order()
-            .map(|(id, c)| {
-                CameraSnapshot::new(
-                    id,
-                    c.node(),
+        let world = scene.world();
+        let storage = world.storage();
+        let mut nodes = Vec::new();
+        let mut cameras = Vec::new();
+        let mut lights = Vec::new();
+        let mut renderables = Vec::new();
+
+        for (id, &local) in storage.locals.iter() {
+            let node = SceneNodeId::from_raw(id.raw());
+            let parent = storage.parents.get(id).map(|p| SceneNodeId::from_raw(p.raw()));
+            let world_t = storage.worlds.get(id).copied().unwrap_or(local);
+            nodes.push(NodeSnapshot::new(node, parent, local, world_t));
+
+            if let Some(c) = storage.cameras.get(id) {
+                cameras.push(CameraSnapshot::new(
+                    node,
                     c.fovy_radians(),
                     c.aspect(),
                     c.near(),
                     c.far(),
-                )
-            })
-            .collect();
-        let lights = scene
-            .lights_in_order()
-            .map(|(id, l)| {
-                LightSnapshot::new(id, l.node(), l.kind(), l.color(), l.intensity())
-            })
-            .collect();
-        let renderables = scene
-            .renderables_in_order()
-            .map(|(id, r)| {
-                RenderableSnapshot::new(
-                    id,
-                    r.node(),
+                ));
+            }
+            if let Some(l) = storage.lights.get(id) {
+                lights.push(LightSnapshot::new(node, l.kind(), l.color(), l.intensity()));
+            }
+            if let Some(r) = storage.renderables.get(id) {
+                renderables.push(RenderableSnapshot::new(
+                    node,
                     r.mesh(),
                     r.material(),
                     r.visible(),
-                )
-            })
-            .collect();
+                ));
+            }
+        }
+
         SceneSnapshot {
             nodes,
             cameras,
@@ -115,21 +114,12 @@ mod tests {
         let a = s.create_node(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
         let b = s.create_node(Transform::from_translation(Vec3::new(0.0, 2.0, 0.0)));
         s.set_parent(b, a).unwrap();
-        s.update_world_transforms().unwrap();
-        let cam = Camera::perspective(
-            &math(),
-            a,
-            std::f32::consts::FRAC_PI_2,
-            1.0,
-            0.1,
-            100.0,
-        )
-        .unwrap();
-        s.add_camera(cam).unwrap();
-        let l = Light::directional(&math(), a, Vec3::ONE, 1.0).unwrap();
-        s.add_light(l).unwrap();
-        let r = Renderable::new(b, MeshRef::from_raw(7), MaterialRef::from_raw(8)).unwrap();
-        s.add_renderable(r).unwrap();
+        s.add_camera(a, Camera::perspective(&math(), std::f32::consts::FRAC_PI_2, 1.0, 0.1, 100.0).unwrap())
+            .unwrap();
+        s.add_light(a, Light::directional(&math(), Vec3::ONE, 1.0).unwrap()).unwrap();
+        s.add_renderable(b, Renderable::new(MeshRef::from_raw(7), MaterialRef::from_raw(8)).unwrap())
+            .unwrap();
+        s.update_world_transforms();
         s
     }
 
@@ -163,121 +153,79 @@ mod tests {
     #[test]
     fn snapshot_world_transform_reflects_propagation() {
         let s = SceneSnapshot::from_scene(&populated_scene());
-        // Child node is at world (1, 2, 0) because parent translates (1, 0, 0)
-        // and child translates (0, 2, 0) in its local frame.
-        let child = s
-            .nodes()
-            .iter()
-            .find(|n| n.parent().is_some())
-            .expect("expected a child node");
+        let child = s.nodes().iter().find(|n| n.parent().is_some()).expect("a child node");
         assert_eq!(child.world().translation.x, 1.0);
         assert_eq!(child.world().translation.y, 2.0);
     }
 
     #[test]
+    fn snapshot_world_falls_back_to_local_before_propagation() {
+        // Build a parented scene but DO NOT propagate: world == local (the
+        // `unwrap_or(local)` fallback arm).
+        let mut s = Scene::new();
+        let a = s.create_node(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
+        let b = s.create_node(Transform::from_translation(Vec3::new(0.0, 5.0, 0.0)));
+        s.set_parent(b, a).unwrap();
+        let snap = SceneSnapshot::from_scene(&s);
+        let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
+        assert_eq!(child.world().translation.x, 0.0); // not propagated
+        assert_eq!(child.world().translation.y, 5.0);
+    }
+
+    #[test]
     fn identical_scenes_produce_identical_snapshots() {
-        let a = SceneSnapshot::from_scene(&populated_scene());
-        let b = SceneSnapshot::from_scene(&populated_scene());
-        assert_eq!(a, b);
+        assert_eq!(
+            SceneSnapshot::from_scene(&populated_scene()),
+            SceneSnapshot::from_scene(&populated_scene())
+        );
     }
 }
 
 #[cfg(test)]
 mod cov {
     use super::*;
-    use crate::camera_id::CameraId;
-    use crate::light_id::LightId;
     use crate::light_kind::LightKind;
     use crate::material_ref::MaterialRef;
     use crate::mesh_ref::MeshRef;
-    use crate::renderable_id::RenderableId;
-    use crate::scene_node_id::SceneNodeId;
     use axiom_math::{Transform, Vec3};
 
     fn node_only() -> NodeSnapshot {
-        NodeSnapshot::new(
-            SceneNodeId::from_raw(1),
-            None,
-            Transform::IDENTITY,
-            Transform::IDENTITY,
-        )
+        NodeSnapshot::new(SceneNodeId::from_raw(1), None, Transform::IDENTITY, Transform::IDENTITY)
     }
-
     fn camera_only() -> CameraSnapshot {
-        CameraSnapshot::new(
-            CameraId::from_raw(1),
-            SceneNodeId::from_raw(1),
-            1.0,
-            1.0,
-            0.1,
-            100.0,
-        )
+        CameraSnapshot::new(SceneNodeId::from_raw(1), 1.0, 1.0, 0.1, 100.0)
     }
-
     fn light_only() -> LightSnapshot {
-        LightSnapshot::new(
-            LightId::from_raw(1),
-            SceneNodeId::from_raw(1),
-            LightKind::Point,
-            Vec3::ONE,
-            1.0,
-        )
+        LightSnapshot::new(SceneNodeId::from_raw(1), LightKind::Point, Vec3::ONE, 1.0)
     }
-
     fn renderable_only() -> RenderableSnapshot {
-        RenderableSnapshot::new(
-            RenderableId::from_raw(1),
-            SceneNodeId::from_raw(1),
-            MeshRef::from_raw(1),
-            MaterialRef::from_raw(1),
-            true,
-        )
+        RenderableSnapshot::new(SceneNodeId::from_raw(1), MeshRef::from_raw(1), MaterialRef::from_raw(1), true)
     }
 
-    // Each snapshot below leaves exactly one collection non-empty so that
-    // `is_empty`'s `&&` chain short-circuits at a different conjunct.
+    // Each leaves exactly one collection non-empty so `is_empty`'s `&&` chain
+    // short-circuits at a different conjunct.
 
     #[test]
     fn not_empty_when_only_nodes_present() {
-        let s = SceneSnapshot {
-            nodes: vec![node_only()],
-            cameras: vec![],
-            lights: vec![],
-            renderables: vec![],
-        };
+        let s = SceneSnapshot { nodes: vec![node_only()], cameras: vec![], lights: vec![], renderables: vec![] };
         assert!(!s.is_empty());
     }
 
     #[test]
     fn not_empty_when_only_cameras_present() {
-        let s = SceneSnapshot {
-            nodes: vec![],
-            cameras: vec![camera_only()],
-            lights: vec![],
-            renderables: vec![],
-        };
+        let s = SceneSnapshot { nodes: vec![], cameras: vec![camera_only()], lights: vec![], renderables: vec![] };
         assert!(!s.is_empty());
     }
 
     #[test]
     fn not_empty_when_only_lights_present() {
-        let s = SceneSnapshot {
-            nodes: vec![],
-            cameras: vec![],
-            lights: vec![light_only()],
-            renderables: vec![],
-        };
+        let s = SceneSnapshot { nodes: vec![], cameras: vec![], lights: vec![light_only()], renderables: vec![] };
         assert!(!s.is_empty());
     }
 
     #[test]
     fn not_empty_when_only_renderables_present() {
-        let s = SceneSnapshot {
-            nodes: vec![],
-            cameras: vec![],
-            lights: vec![],
-            renderables: vec![renderable_only()],
-        };
+        let s = SceneSnapshot { nodes: vec![], cameras: vec![], lights: vec![], renderables: vec![renderable_only()] };
         assert!(!s.is_empty());
     }
 }

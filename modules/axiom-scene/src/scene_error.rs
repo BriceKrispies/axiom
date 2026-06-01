@@ -77,10 +77,6 @@ impl SceneError {
         SceneError::new(SceneErrorCode::InvalidRenderableReference, message)
     }
 
-    pub const fn hierarchy_update_failed(message: &'static str) -> Self {
-        SceneError::new(SceneErrorCode::HierarchyUpdateFailed, message)
-    }
-
     pub const fn code(&self) -> SceneErrorCode {
         self.code
     }
@@ -159,10 +155,6 @@ mod tests {
         assert_eq!(
             SceneError::invalid_renderable_reference("").code(),
             SceneErrorCode::InvalidRenderableReference
-        );
-        assert_eq!(
-            SceneError::hierarchy_update_failed("").code(),
-            SceneErrorCode::HierarchyUpdateFailed
         );
     }
 

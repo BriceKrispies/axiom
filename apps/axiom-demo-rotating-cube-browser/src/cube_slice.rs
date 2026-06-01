@@ -236,10 +236,7 @@ impl CubeSliceDriver {
             .build(&host_report, Vec::new())
             .expect("host report sequence is monotone");
         let frame_ctx = self.frame_api.frame_context(&engine_frame);
-        let snapshot = self
-            .scene_api
-            .advance(&mut scene, &frame_ctx)
-            .expect("scene advance never fails for a valid frame context");
+        let snapshot = self.scene_api.advance(&mut scene, &frame_ctx);
 
         // 7. Resolve resources.
         let resolved = self.resources_api.resolve(&resources);

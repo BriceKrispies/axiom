@@ -15,6 +15,7 @@ allowed_layers = [
     "runtime",
     "math",
     "frame",
+    "ecs",
 ]
 
 # Modules may not depend on other modules today. Leave this empty.

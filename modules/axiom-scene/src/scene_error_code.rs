@@ -32,9 +32,6 @@ pub enum SceneErrorCode {
     /// A renderable was constructed with an invalid mesh or material
     /// reference (the invalid sentinel `0`).
     InvalidRenderableReference = 9,
-    /// World-transform propagation could not complete (cycle detected
-    /// late, missing parent during traversal).
-    HierarchyUpdateFailed = 10,
 }
 
 impl SceneErrorCode {
@@ -50,7 +47,7 @@ mod tests {
     #[test]
     fn discriminants_are_stable() {
         assert_eq!(SceneErrorCode::MissingNode.raw(), 1);
-        assert_eq!(SceneErrorCode::HierarchyUpdateFailed.raw(), 10);
+        assert_eq!(SceneErrorCode::InvalidRenderableReference.raw(), 9);
     }
 
     #[test]
@@ -59,6 +56,6 @@ mod tests {
             SceneErrorCode::SelfParenting,
             SceneErrorCode::HierarchyCycle
         );
-        assert!(SceneErrorCode::MissingNode < SceneErrorCode::HierarchyUpdateFailed);
+        assert!(SceneErrorCode::MissingNode < SceneErrorCode::InvalidRenderableReference);
     }
 }

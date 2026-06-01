@@ -30,25 +30,22 @@
 //! own one primary public thing but are never re-exported here.
 
 mod camera;
-mod camera_id;
 mod camera_snapshot;
 mod light;
-mod light_id;
 mod light_kind;
 mod light_snapshot;
 mod material_ref;
 mod mesh_ref;
 mod node_snapshot;
 mod renderable;
-mod renderable_id;
 mod renderable_snapshot;
 mod scene;
 mod scene_api;
 mod scene_error;
 mod scene_error_code;
-mod scene_node;
 mod scene_node_id;
 mod scene_result;
 mod scene_snapshot;
+mod scene_storage;
 
 pub use scene_api::SceneApi;
