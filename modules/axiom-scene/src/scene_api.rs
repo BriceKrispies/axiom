@@ -10,94 +10,82 @@ use crate::material_ref::MaterialRef;
 use crate::mesh_ref::MeshRef;
 use crate::renderable::Renderable;
 use crate::scene::Scene;
-use crate::spin::Spin;
 use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
+use crate::spin::Spin;
 
-/// The only public export of `axiom-scene`.
+/// The only public export of `axiom-scene`: a **stateful scene handle**.
 ///
-/// `SceneApi` is a zero-sized facade. Every scene operation goes through one of
-/// its methods; the internal types (`Scene`, `Camera`, `Light`, `Renderable`,
-/// snapshots) are public inside the crate but never re-exported from `lib.rs`.
+/// `SceneApi` *owns* the scene — an ECS world (Layer 05) where nodes are
+/// entities and every node fact is a component column. A consumer builds it
+/// **once** and holds it across frames, mutating it incrementally and calling
+/// [`Self::advance`] each tick; the world is durable authored state, not
+/// rebuilt per frame. (It owns the world rather than handing back a `Scene`
+/// value precisely so apps can keep it in a field — the internal types are
+/// never re-exported, so they can't be named as field types.)
 ///
-/// The scene is an ECS world (Layer 05): nodes are entities and every node fact
-/// is a component column. The facade is also where Layer 02 ([`MathApi`]) and
-/// Layer 04 ([`FrameContext`]) integration lives — see [`Self::advance`] and
-/// the camera/light validators.
-#[derive(Debug, Clone, Copy, Default)]
+/// The facade is also where Layer 02 ([`MathApi`]) and Layer 04
+/// ([`FrameContext`]) integration lives — see [`Self::advance`] and the
+/// camera/light validators.
+#[derive(Debug, Default)]
 pub struct SceneApi {
-    _sealed: (),
+    scene: Scene,
 }
 
 impl SceneApi {
-    /// Construct the facade.
-    pub const fn new() -> Self {
-        SceneApi { _sealed: () }
-    }
-
-    // --- Scene construction ---
-
-    /// Create a fresh, empty scene.
-    pub fn empty_scene(&self) -> Scene {
-        Scene::new()
+    /// Construct an empty scene with the standard systems registered.
+    pub fn new() -> Self {
+        SceneApi {
+            scene: Scene::new(),
+        }
     }
 
     // --- Nodes ---
 
     /// Create a node with the identity local transform.
-    pub fn create_node(&self, scene: &mut Scene) -> SceneNodeId {
-        scene.create_node(Transform::IDENTITY)
+    pub fn create_node(&mut self) -> SceneNodeId {
+        self.scene.create_node(Transform::IDENTITY)
     }
 
     /// Create a node with an explicit local transform.
-    pub fn create_node_with_transform(&self, scene: &mut Scene, local: Transform) -> SceneNodeId {
-        scene.create_node(local)
+    pub fn create_node_with_transform(&mut self, local: Transform) -> SceneNodeId {
+        self.scene.create_node(local)
     }
 
     /// Set a node's local transform.
-    pub fn set_local_transform(
-        &self,
-        scene: &mut Scene,
-        id: SceneNodeId,
-        transform: Transform,
-    ) -> SceneResult<()> {
-        scene.set_local(id, transform)
+    pub fn set_local_transform(&mut self, id: SceneNodeId, transform: Transform) -> SceneResult<()> {
+        self.scene.set_local(id, transform)
     }
 
     /// Get a node's local transform.
-    pub fn local_transform(&self, scene: &Scene, id: SceneNodeId) -> SceneResult<Transform> {
-        scene.local(id)
+    pub fn local_transform(&self, id: SceneNodeId) -> SceneResult<Transform> {
+        self.scene.local(id)
     }
 
     /// Get a node's world transform (the value computed by the most recent
     /// propagation, falling back to the local transform before any).
-    pub fn world_transform(&self, scene: &Scene, id: SceneNodeId) -> SceneResult<Transform> {
-        scene.world_transform(id)
+    pub fn world_transform(&self, id: SceneNodeId) -> SceneResult<Transform> {
+        self.scene.world_transform(id)
     }
 
     /// A node's parent, if any.
-    pub fn parent_of(&self, scene: &Scene, id: SceneNodeId) -> Option<SceneNodeId> {
-        scene.parent_of(id)
+    pub fn parent_of(&self, id: SceneNodeId) -> Option<SceneNodeId> {
+        self.scene.parent_of(id)
     }
 
     // --- Hierarchy ---
 
     /// Make `child` a child of `parent`. Rejects self-parenting, cycles, and
     /// missing ids.
-    pub fn set_parent(
-        &self,
-        scene: &mut Scene,
-        child: SceneNodeId,
-        parent: SceneNodeId,
-    ) -> SceneResult<()> {
-        scene.set_parent(child, parent)
+    pub fn set_parent(&mut self, child: SceneNodeId, parent: SceneNodeId) -> SceneResult<()> {
+        self.scene.set_parent(child, parent)
     }
 
     /// Detach `child` from its parent (if any), leaving it a root.
-    pub fn clear_parent(&self, scene: &mut Scene, child: SceneNodeId) -> SceneResult<()> {
-        scene.clear_parent(child)
+    pub fn clear_parent(&mut self, child: SceneNodeId) -> SceneResult<()> {
+        self.scene.clear_parent(child)
     }
 
     // --- Cameras ---
@@ -105,9 +93,8 @@ impl SceneApi {
     /// Add a perspective camera to `node`. Intrinsic validation is delegated to
     /// [`MathApi::mat4_perspective`].
     pub fn add_perspective_camera(
-        &self,
+        &mut self,
         math: &MathApi,
-        scene: &mut Scene,
         node: SceneNodeId,
         fovy_radians: f32,
         aspect: f32,
@@ -115,22 +102,17 @@ impl SceneApi {
         far: f32,
     ) -> SceneResult<()> {
         let camera = Camera::perspective(math, fovy_radians, aspect, near, far)?;
-        scene.add_camera(node, camera)
+        self.scene.add_camera(node, camera)
     }
 
     /// Remove the camera on `node`.
-    pub fn remove_camera(&self, scene: &mut Scene, node: SceneNodeId) -> SceneResult<()> {
-        scene.remove_camera(node)
+    pub fn remove_camera(&mut self, node: SceneNodeId) -> SceneResult<()> {
+        self.scene.remove_camera(node)
     }
 
     /// Compute the projection matrix for the camera on `node`.
-    pub fn camera_projection_matrix(
-        &self,
-        math: &MathApi,
-        scene: &Scene,
-        node: SceneNodeId,
-    ) -> SceneResult<Mat4> {
-        match scene.camera(node) {
+    pub fn camera_projection_matrix(&self, math: &MathApi, node: SceneNodeId) -> SceneResult<Mat4> {
+        match self.scene.camera(node) {
             Some(camera) => camera.projection_matrix(math),
             None => Err(SceneError::missing_camera("node has no camera")),
         }
@@ -140,33 +122,31 @@ impl SceneApi {
 
     /// Add a directional light to `node`.
     pub fn add_directional_light(
-        &self,
+        &mut self,
         math: &MathApi,
-        scene: &mut Scene,
         node: SceneNodeId,
         color: Vec3,
         intensity: f32,
     ) -> SceneResult<()> {
         let light = Light::directional(math, color, intensity)?;
-        scene.add_light(node, light)
+        self.scene.add_light(node, light)
     }
 
     /// Add a point light to `node`.
     pub fn add_point_light(
-        &self,
+        &mut self,
         math: &MathApi,
-        scene: &mut Scene,
         node: SceneNodeId,
         color: Vec3,
         intensity: f32,
     ) -> SceneResult<()> {
         let light = Light::point(math, color, intensity)?;
-        scene.add_light(node, light)
+        self.scene.add_light(node, light)
     }
 
     /// Remove the light on `node`.
-    pub fn remove_light(&self, scene: &mut Scene, node: SceneNodeId) -> SceneResult<()> {
-        scene.remove_light(node)
+    pub fn remove_light(&mut self, node: SceneNodeId) -> SceneResult<()> {
+        self.scene.remove_light(node)
     }
 
     // --- Renderables ---
@@ -183,65 +163,57 @@ impl SceneApi {
 
     /// Add a renderable to `node`.
     pub fn add_renderable(
-        &self,
-        scene: &mut Scene,
+        &mut self,
         node: SceneNodeId,
         mesh: MeshRef,
         material: MaterialRef,
     ) -> SceneResult<()> {
         let renderable = Renderable::new(mesh, material)?;
-        scene.add_renderable(node, renderable)
+        self.scene.add_renderable(node, renderable)
     }
 
     /// Remove the renderable on `node`.
-    pub fn remove_renderable(&self, scene: &mut Scene, node: SceneNodeId) -> SceneResult<()> {
-        scene.remove_renderable(node)
+    pub fn remove_renderable(&mut self, node: SceneNodeId) -> SceneResult<()> {
+        self.scene.remove_renderable(node)
     }
 
     /// Toggle the visibility of the renderable on `node`.
-    pub fn set_renderable_visibility(
-        &self,
-        scene: &mut Scene,
-        node: SceneNodeId,
-        visible: bool,
-    ) -> SceneResult<()> {
-        scene.set_renderable_visible(node, visible)
+    pub fn set_renderable_visibility(&mut self, node: SceneNodeId, visible: bool) -> SceneResult<()> {
+        self.scene.set_renderable_visible(node, visible)
     }
 
     // --- Spin (data-declared rotation, animated by the engine) ---
 
     /// Give `node` a spin: a pure rotation about `axis`, one revolution every
     /// `period_ticks` frames, animated by the engine's spin system each
-    /// [`Self::advance`]. This is the data-driven alternative to an app setting
-    /// the rotation by hand every tick.
+    /// [`Self::advance`].
     pub fn add_spin(
-        &self,
-        scene: &mut Scene,
+        &mut self,
         node: SceneNodeId,
         axis: Vec3,
         period_ticks: u32,
     ) -> SceneResult<()> {
-        scene.add_spin(node, Spin::new(axis, period_ticks))
+        self.scene.add_spin(node, Spin::new(axis, period_ticks))
     }
 
     // --- Propagation / frame integration ---
 
     /// Recompute every node's world transform now.
-    pub fn update_world_transforms(&self, scene: &mut Scene) {
-        scene.update_world_transforms();
+    pub fn update_world_transforms(&mut self) {
+        self.scene.update_world_transforms();
     }
 
     /// Advance the scene for one engine frame at logical time `tick`: run the
     /// spin + transform-propagation systems iff the frame is active, then return
     /// the snapshot taken afterward. The caller owns the tick (see
     /// [`axiom_ecs::World::advance`]).
-    pub fn advance(&self, scene: &mut Scene, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
-        scene.advance(tick, frame)
+    pub fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
+        self.scene.advance(tick, frame)
     }
 
     /// Build a deterministic snapshot of the scene's current state.
-    pub fn snapshot(&self, scene: &Scene) -> SceneSnapshot {
-        scene.snapshot()
+    pub fn snapshot(&self) -> SceneSnapshot {
+        self.scene.snapshot()
     }
 
     // --- Self-description ---
@@ -280,76 +252,83 @@ mod tests {
 
     #[test]
     fn nodes_transforms_and_hierarchy_round_trip() {
-        let a = api();
-        let mut s = a.empty_scene();
-        let p = a.create_node(&mut s);
-        let c = a.create_node_with_transform(&mut s, Transform::from_translation(Vec3::new(0.0, 2.0, 0.0)));
-        a.set_local_transform(&mut s, p, Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)))
+        let mut a = api();
+        let p = a.create_node();
+        let c = a.create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 2.0, 0.0)));
+        a.set_local_transform(p, Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)))
             .unwrap();
-        assert_eq!(a.local_transform(&s, p).unwrap().translation.x, 1.0);
-        a.set_parent(&mut s, c, p).unwrap();
-        assert_eq!(a.parent_of(&s, c), Some(p));
-        a.update_world_transforms(&mut s);
-        assert_eq!(a.world_transform(&s, c).unwrap().translation.x, 1.0);
-        a.clear_parent(&mut s, c).unwrap();
-        assert_eq!(a.parent_of(&s, c), None);
+        assert_eq!(a.local_transform(p).unwrap().translation.x, 1.0);
+        a.set_parent(c, p).unwrap();
+        assert_eq!(a.parent_of(c), Some(p));
+        a.update_world_transforms();
+        assert_eq!(a.world_transform(c).unwrap().translation.x, 1.0);
+        a.clear_parent(c).unwrap();
+        assert_eq!(a.parent_of(c), None);
     }
 
     #[test]
     fn add_perspective_camera_valid_and_invalid() {
-        let a = api();
-        let mut s = a.empty_scene();
-        let n = a.create_node(&mut s);
-        a.add_perspective_camera(&math(), &mut s, n, std::f32::consts::FRAC_PI_3, 1.0, 0.1, 100.0)
+        let mut a = api();
+        let n = a.create_node();
+        a.add_perspective_camera(&math(), n, std::f32::consts::FRAC_PI_3, 1.0, 0.1, 100.0)
             .unwrap();
         // Invalid intrinsics propagate the `?` error arm.
         let err = a
-            .add_perspective_camera(&math(), &mut s, n, 0.0, 1.0, 0.1, 100.0)
+            .add_perspective_camera(&math(), n, 0.0, 1.0, 0.1, 100.0)
             .unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
         // Projection matrix: present + missing.
-        let m = a.camera_projection_matrix(&math(), &s, n).unwrap();
+        let m = a.camera_projection_matrix(&math(), n).unwrap();
         assert_eq!(m.as_cols_array(), m.as_cols_array());
-        let n2 = a.create_node(&mut s);
+        let n2 = a.create_node();
         assert_eq!(
-            a.camera_projection_matrix(&math(), &s, n2).unwrap_err().code(),
+            a.camera_projection_matrix(&math(), n2).unwrap_err().code(),
             SceneErrorCode::MissingCamera
         );
-        a.remove_camera(&mut s, n).unwrap();
+        a.remove_camera(n).unwrap();
     }
 
     #[test]
     fn lights_valid_and_invalid() {
-        let a = api();
-        let mut s = a.empty_scene();
-        let n = a.create_node(&mut s);
-        a.add_directional_light(&math(), &mut s, n, Vec3::ONE, 1.0).unwrap();
-        a.add_point_light(&math(), &mut s, n, Vec3::new(0.5, 0.5, 0.5), 2.0).unwrap();
-        // Invalid params propagate the `?` arm (both constructors).
+        let mut a = api();
+        let n = a.create_node();
+        a.add_directional_light(&math(), n, Vec3::ONE, 1.0).unwrap();
+        a.add_point_light(&math(), n, Vec3::new(0.5, 0.5, 0.5), 2.0).unwrap();
         assert_eq!(
-            a.add_directional_light(&math(), &mut s, n, Vec3::ONE, -1.0).unwrap_err().code(),
+            a.add_directional_light(&math(), n, Vec3::ONE, -1.0).unwrap_err().code(),
             SceneErrorCode::InvalidLightParameters
         );
         assert_eq!(
-            a.add_point_light(&math(), &mut s, n, Vec3::ONE, f32::NAN).unwrap_err().code(),
+            a.add_point_light(&math(), n, Vec3::ONE, f32::NAN).unwrap_err().code(),
             SceneErrorCode::InvalidLightParameters
         );
-        a.remove_light(&mut s, n).unwrap();
+        a.remove_light(n).unwrap();
     }
 
     #[test]
     fn renderables_valid_and_invalid() {
-        let a = api();
-        let mut s = a.empty_scene();
-        let n = a.create_node(&mut s);
-        a.add_renderable(&mut s, n, a.mesh_ref(1), a.material_ref(2)).unwrap();
-        // Invalid ref propagates the `?` arm.
+        let mut a = api();
+        let n = a.create_node();
+        let mesh = a.mesh_ref(1);
+        let material = a.material_ref(2);
+        a.add_renderable(n, mesh, material).unwrap();
         assert_eq!(
-            a.add_renderable(&mut s, n, MeshRef::INVALID, a.material_ref(2)).unwrap_err().code(),
+            a.add_renderable(n, MeshRef::INVALID, material).unwrap_err().code(),
             SceneErrorCode::InvalidRenderableReference
         );
-        a.set_renderable_visibility(&mut s, n, false).unwrap();
-        a.remove_renderable(&mut s, n).unwrap();
+        a.set_renderable_visibility(n, false).unwrap();
+        a.remove_renderable(n).unwrap();
+    }
+
+    #[test]
+    fn add_spin_valid_and_missing_node() {
+        let mut a = api();
+        let n = a.create_node();
+        a.add_spin(n, Vec3::UNIT_Y, 360).unwrap();
+        assert_eq!(
+            a.add_spin(SceneNodeId::from_raw(99), Vec3::UNIT_Y, 360).unwrap_err().code(),
+            SceneErrorCode::MissingNode
+        );
     }
 
     #[test]
@@ -364,55 +343,57 @@ mod tests {
     }
 
     #[test]
-    fn add_spin_valid_and_missing_node() {
-        let a = api();
-        let mut s = a.empty_scene();
-        let n = a.create_node(&mut s);
-        a.add_spin(&mut s, n, Vec3::UNIT_Y, 360).unwrap();
-        assert_eq!(
-            a.add_spin(&mut s, SceneNodeId::from_raw(99), Vec3::UNIT_Y, 360).unwrap_err().code(),
-            SceneErrorCode::MissingNode
-        );
-    }
-
-    #[test]
     fn snapshot_reads_current_scene_state() {
-        let a = api();
-        let mut s = a.empty_scene();
-        let n = a.create_node(&mut s);
-        a.add_directional_light(&math(), &mut s, n, Vec3::ONE, 1.0).unwrap();
-        let snap = a.snapshot(&s);
+        let mut a = api();
+        let n = a.create_node();
+        a.add_directional_light(&math(), n, Vec3::ONE, 1.0).unwrap();
+        let snap = a.snapshot();
         assert_eq!(snap.nodes().len(), 1);
         assert_eq!(snap.lights().len(), 1);
     }
 
     #[test]
-    fn advance_is_frame_gated() {
+    fn advance_animates_and_propagates_across_ticks_on_a_held_scene() {
         use axiom_frame::FrameApi;
         use axiom_host::{
             HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
             HostLifecycleState, HostStepPlan, HostViewport,
         };
-        let a = api();
-        let mut s = a.empty_scene();
-        let p = a.create_node_with_transform(&mut s, Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
-        let c = a.create_node_with_transform(&mut s, Transform::from_translation(Vec3::new(0.0, 4.0, 0.0)));
-        a.set_parent(&mut s, c, p).unwrap();
+        // Build the scene ONCE, then advance it at two different ticks: the
+        // spun child's world transform must differ — proving a held, durable
+        // world that evolves, not a rebuilt one.
+        let mut a = api();
+        let parent =
+            a.create_node_with_transform(Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)));
+        let child = a.create_node();
+        a.set_parent(child, parent).unwrap();
+        a.add_spin(child, Vec3::UNIT_Y, 8).unwrap();
 
-        let m = math();
-        let vp = HostViewport::new(&m, 100, 100, 1.0).unwrap();
-        let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
-        let visible = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
-        let input = HostFrameInput::new(1, 1_000, vp);
-        let plan = HostStepPlan::build(&input, &cfg, &visible, 0);
-        let report = HostFrameReport::new(input.sequence(), plan, plan.steps(), Vec::new(), vp, visible);
-        let frame_api = FrameApi::new();
-        let engine_frame = frame_api.engine_frame_from_host_report(&report, 1_000, Vec::new()).unwrap();
-        let ctx = frame_api.frame_context(&engine_frame);
+        let frame = |elapsed: u64| {
+            let m = math();
+            let vp = HostViewport::new(&m, 100, 100, 1.0).unwrap();
+            let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
+            let visible = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
+            let input = HostFrameInput::new(1, elapsed, vp);
+            let plan = HostStepPlan::build(&input, &cfg, &visible, 0);
+            let report =
+                HostFrameReport::new(input.sequence(), plan, plan.steps(), Vec::new(), vp, visible);
+            FrameApi::new()
+                .engine_frame_from_host_report(&report, elapsed, Vec::new())
+                .unwrap()
+        };
 
-        let snap = a.advance(&mut s, 0, &ctx);
-        let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
-        assert_eq!(child.world().translation.x, 3.0);
-        assert_eq!(child.world().translation.y, 4.0);
+        let f0 = frame(1_000);
+        let snap0 = a.advance(0, &FrameContext::new(&f0));
+        let child0 = snap0.nodes().iter().find(|n| n.parent().is_some()).unwrap().world();
+
+        let f2 = frame(1_000);
+        let snap2 = a.advance(2, &FrameContext::new(&f2));
+        let child2 = snap2.nodes().iter().find(|n| n.parent().is_some()).unwrap().world();
+
+        // Same handle, different ticks -> different world rotation, same parent
+        // translation carried through.
+        assert_ne!(child0.rotation, child2.rotation);
+        assert_eq!(child2.translation.x, 2.0);
     }
 }

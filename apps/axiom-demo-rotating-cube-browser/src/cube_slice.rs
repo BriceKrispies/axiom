@@ -7,10 +7,11 @@
 //! layers to produce the **same** deterministic `GpuSubmission` shape. It is
 //! entirely browser-free and natively testable.
 //!
-//! The only difference from the headless app is *which* `WebGpuApi` the
-//! submission is fed into: the headless app uses recording mode; here the
-//! caller passes a live-mode `WebGpuApi`. The submission contract is
-//! identical, so there is no second command model and no forked render path.
+//! The scene is built **once** from data ([`crate::scene_content`]) and held as
+//! a durable `SceneApi` world; each tick only advances it (the engine animates
+//! the cubes' `Spin`) and re-derives the per-frame render input from the
+//! resulting snapshot. The world is authored state that evolves, not a graph
+//! rebuilt every frame.
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
@@ -30,9 +31,7 @@ pub(crate) const FIXED_STEP_NANOS: u64 = 1_000_000;
 pub(crate) const NUM_CUBES: usize = 3;
 
 /// One cube's GPU instance data: its full model-view-projection matrix
-/// (column-major, wgpu clip-depth corrected) and RGBA colour. Both are derived
-/// from engine artifacts — the render command list's camera + per-draw world,
-/// and the material colour.
+/// (column-major, wgpu clip-depth corrected) and RGBA colour.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CubeInstance {
     pub mvp_cols: [f32; 16],
@@ -79,6 +78,17 @@ pub struct CubeGeometry {
     pub indices: Vec<u32>,
 }
 
+/// The cube mesh resolved into the separate vertex streams a `RenderInput`
+/// wants, extracted from `axiom-resources` once and held for per-frame reuse.
+#[derive(Debug, Clone)]
+struct CubeMeshData {
+    id: u64,
+    positions: Vec<Vec3>,
+    normals: Vec<Vec3>,
+    uvs: Vec<Vec2>,
+    indices: Vec<u32>,
+}
+
 /// Column-major matrix that remaps OpenGL clip depth `z' = (z + w) / 2` so the
 /// engine's `[-1,1]` projection lands in wgpu's `[0,1]` clip space.
 const GL_TO_WGPU_DEPTH: [f32; 16] = [
@@ -93,31 +103,36 @@ const GL_TO_WGPU_DEPTH: [f32; 16] = [
 pub struct CubeSliceDriver {
     math: MathApi,
     frame_api: FrameApi,
-    scene_api: SceneApi,
-    resources_api: ResourcesApi,
     render_api: RenderApi,
     runtime: Runtime,
     driver: HostStepDriver,
     frame_builder: FrameBuilder,
     viewport: HostViewport,
-    /// The scene content, as data. Interpreted into the world each tick.
+    /// The scene content, as data (clear colour + light direction are read each
+    /// frame; the rest was consumed building the world once).
     content: SceneContent,
+    /// The durable world: built once from `content`, advanced every tick.
+    scene: SceneApi,
+    /// The cube mesh, resolved once.
+    mesh: CubeMeshData,
+    /// `(material id, colour)` for each cube's material, resolved once.
+    materials: Vec<(u64, [f32; 4])>,
 }
 
 impl CubeSliceDriver {
     /// Build the driver for a viewport of `width` x `height` logical pixels.
+    /// The scene and its resources are constructed **once** here.
     pub fn new(viewport: HostViewport) -> Self {
         let math = MathApi::new();
         let host_api = HostApi::new();
         let frame_api = FrameApi::new();
-        let scene_api = SceneApi::new();
         let resources_api = ResourcesApi::new();
         let render_api = RenderApi::new();
+        let content = demo_scene();
 
-        let mut runtime = Runtime::new(
-            RuntimeConfig::new(FIXED_STEP_NANOS).with_diagnostics_enabled(false),
-        )
-        .expect("runtime config is valid for the demo fixed step");
+        let mut runtime =
+            Runtime::new(RuntimeConfig::new(FIXED_STEP_NANOS).with_diagnostics_enabled(false))
+                .expect("runtime config is valid for the demo fixed step");
         runtime.initialize().expect("runtime initialize cannot fail");
         runtime.start().expect("runtime start cannot fail");
 
@@ -129,111 +144,117 @@ impl CubeSliceDriver {
 
         let frame_builder = frame_api.frame_builder(FIXED_STEP_NANOS);
 
+        // --- Resources, resolved once. The shared cube mesh + one material per
+        //     cube, extracted into plain data the per-frame render input reuses.
+        let mut resources = resources_api.empty_table();
+        let mesh_id = resources_api.register_cube_mesh(&mut resources);
+        let mut materials: Vec<(u64, [f32; 4])> = Vec::with_capacity(content.cubes.len());
+        for cube in &content.cubes {
+            let material_id = resources_api.register_basic_lit_material(
+                &mut resources,
+                Vec4::new(cube.color[0], cube.color[1], cube.color[2], cube.color[3]),
+            );
+            materials.push((material_id.raw(), cube.color));
+        }
+        // Extract the resolved cube mesh into plain data (the resolved-resources
+        // value is not nameable outside its module, so this stays inline).
+        let resolved = resources_api.resolve(&resources);
+        let mesh = {
+            let id = mesh_id.raw();
+            let vc = resources_api
+                .resolved_mesh_vertex_count(&resolved, id)
+                .expect("cube mesh present");
+            let mut positions = Vec::with_capacity(vc);
+            let mut normals = Vec::with_capacity(vc);
+            let mut uvs = Vec::with_capacity(vc);
+            for v in 0..vc {
+                let p = resources_api.resolved_mesh_position_at(&resolved, id, v).expect("vertex in range");
+                let n = resources_api.resolved_mesh_normal_at(&resolved, id, v).expect("vertex in range");
+                let u = resources_api.resolved_mesh_uv_at(&resolved, id, v).expect("vertex in range");
+                positions.push(Vec3::new(p[0], p[1], p[2]));
+                normals.push(Vec3::new(n[0], n[1], n[2]));
+                uvs.push(Vec2::new(u[0], u[1]));
+            }
+            let indices = resources_api
+                .resolved_mesh_indices(&resolved, id)
+                .expect("cube mesh present")
+                .to_vec();
+            CubeMeshData { id, positions, normals, uvs, indices }
+        };
+
+        // --- The world, built once from the content data. Each cube is a
+        //     translation parent + a child carrying an engine `Spin` and a
+        //     renderable; plus a camera and a light. Advancing animates it.
+        let aspect = viewport.physical_width() as f32 / viewport.physical_height() as f32;
+        let mut scene = SceneApi::new();
+        for (cube, &(material_id, _)) in content.cubes.iter().zip(materials.iter()) {
+            let parent = scene
+                .create_node_with_transform(Transform::from_translation(Vec3::new(cube.offset_x, 0.0, 0.0)));
+            let child = scene.create_node();
+            scene.set_parent(child, parent).expect("cube nodes were just created");
+            scene
+                .add_spin(child, cube.spin_axis, cube.period_ticks)
+                .expect("cube child was just created");
+            let mesh_ref = scene.mesh_ref(mesh.id);
+            let material_ref = scene.material_ref(material_id);
+            scene
+                .add_renderable(child, mesh_ref, material_ref)
+                .expect("renderable refs are valid");
+        }
+        let camera_node = scene
+            .create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, content.camera.offset_z)));
+        let light_node = scene.create_node_with_transform(Transform::IDENTITY);
+        scene
+            .add_perspective_camera(
+                &math,
+                camera_node,
+                content.camera.fovy_radians,
+                aspect,
+                content.camera.near,
+                content.camera.far,
+            )
+            .expect("camera intrinsics are valid");
+        scene
+            .add_directional_light(&math, light_node, content.light.color, content.light.intensity)
+            .expect("light parameters are valid");
+
         CubeSliceDriver {
             math,
             frame_api,
-            scene_api,
-            resources_api,
             render_api,
             runtime,
             driver,
             frame_builder,
             viewport,
-            content: demo_scene(),
+            content,
+            scene,
+            mesh,
+            materials,
         }
     }
 
-    /// Drive one tick: build the rotating-cube scene, run the engine step,
-    /// produce the deterministic `GpuSubmission`, submit it through the given
-    /// `WebGpuApi`, and summarise the outcome.
+    /// Drive one tick: advance the held world, derive the deterministic
+    /// `GpuSubmission`, submit it through the given `WebGpuApi`, and summarise.
     pub fn drive_tick(&mut self, webgpu: &WebGpuApi, tick: u64) -> TickOutcome {
         let width = self.viewport.physical_width();
         let height = self.viewport.physical_height();
 
-        // 1. Interpret the scene content (data) into the world. Each cube is a
-        //    translation parent + a child carrying an engine `Spin` (so the
-        //    engine animates the rotation each advance — no per-tick rotation
-        //    code here) and a renderable. The shared cube mesh is registered
-        //    once; each cube gets its own material from its data colour.
-        let mut scene = self.scene_api.empty_scene();
-        let mut resources = self.resources_api.empty_table();
-        let mesh_id = self.resources_api.register_cube_mesh(&mut resources);
-        let mesh_raw = mesh_id.raw();
-
-        let mut material_colors: Vec<(u64, [f32; 4])> = Vec::with_capacity(self.content.cubes.len());
-        for cube in &self.content.cubes {
-            let parent = self.scene_api.create_node_with_transform(
-                &mut scene,
-                Transform::from_translation(Vec3::new(cube.offset_x, 0.0, 0.0)),
-            );
-            let child = self.scene_api.create_node(&mut scene);
-            self.scene_api
-                .set_parent(&mut scene, child, parent)
-                .expect("cube nodes were just created");
-            self.scene_api
-                .add_spin(&mut scene, child, cube.spin_axis, cube.period_ticks)
-                .expect("cube child was just created");
-            let material_id = self.resources_api.register_basic_lit_material(
-                &mut resources,
-                Vec4::new(cube.color[0], cube.color[1], cube.color[2], cube.color[3]),
-            );
-            material_colors.push((material_id.raw(), cube.color));
-            let mesh_ref = self.scene_api.mesh_ref(mesh_raw);
-            let material_ref = self.scene_api.material_ref(material_id.raw());
-            self.scene_api
-                .add_renderable(&mut scene, child, mesh_ref, material_ref)
-                .expect("renderable refs are valid");
-        }
-
-        // 2. Camera + light, from data.
-        let camera_node = self.scene_api.create_node_with_transform(
-            &mut scene,
-            Transform::from_translation(Vec3::new(0.0, 0.0, self.content.camera.offset_z)),
-        );
-        let light_node = self
-            .scene_api
-            .create_node_with_transform(&mut scene, Transform::IDENTITY);
-        let aspect = width as f32 / height as f32;
-        self.scene_api
-            .add_perspective_camera(
-                &self.math,
-                &mut scene,
-                camera_node,
-                self.content.camera.fovy_radians,
-                aspect,
-                self.content.camera.near,
-                self.content.camera.far,
-            )
-            .expect("camera intrinsics are valid");
-        self.scene_api
-            .add_directional_light(
-                &self.math,
-                &mut scene,
-                light_node,
-                self.content.light.color,
-                self.content.light.intensity,
-            )
-            .expect("light parameters are valid");
-
-        // 4. Drive one host frame through the runtime.
+        // 1. Drive one host frame through the runtime, build the engine frame.
         let host_input = HostFrameInput::new(tick + 1, FIXED_STEP_NANOS, self.viewport);
         let host_report = self
             .driver
             .drive(&mut self.runtime, host_input)
             .expect("driver inputs are deterministic and valid");
-
-        // 5. Engine frame + 6. snapshot.
         let engine_frame = self
             .frame_builder
             .build(&host_report, Vec::new())
             .expect("host report sequence is monotone");
         let frame_ctx = self.frame_api.frame_context(&engine_frame);
-        let snapshot = self.scene_api.advance(&mut scene, tick, &frame_ctx);
 
-        // 7. Resolve resources.
-        let resolved = self.resources_api.resolve(&resources);
+        // 2. Advance the durable world at this tick (animates Spin + propagates).
+        let snapshot = self.scene.advance(tick, &frame_ctx);
 
-        // 8. Build render input (scene + resources -> RenderInput).
+        // 3. Build the per-frame render input from the snapshot + held resources.
         let mut input = self.render_api.new_input(width, height);
         self.render_api.set_input_clear_color(&mut input, self.content.clear_color);
         let cam = snapshot.cameras().first().expect("the demo has one camera");
@@ -260,59 +281,20 @@ impl CubeSliceDriver {
                 light.intensity(),
             );
         }
-        let mut mesh_index_by_id: Vec<(u64, u32)> = Vec::new();
-        for i in 0..self.resources_api.resolved_mesh_count(&resolved) {
-            let id = self
-                .resources_api
-                .resolved_mesh_id_at(&resolved, i)
-                .expect("mesh index in range");
-            let vc = self
-                .resources_api
-                .resolved_mesh_vertex_count(&resolved, id)
-                .expect("mesh present");
-            let mut positions = Vec::with_capacity(vc);
-            let mut normals = Vec::with_capacity(vc);
-            let mut uvs = Vec::with_capacity(vc);
-            for v in 0..vc {
-                let p = self
-                    .resources_api
-                    .resolved_mesh_position_at(&resolved, id, v)
-                    .expect("vertex in range");
-                let n = self
-                    .resources_api
-                    .resolved_mesh_normal_at(&resolved, id, v)
-                    .expect("vertex in range");
-                let u = self
-                    .resources_api
-                    .resolved_mesh_uv_at(&resolved, id, v)
-                    .expect("vertex in range");
-                positions.push(Vec3::new(p[0], p[1], p[2]));
-                normals.push(Vec3::new(n[0], n[1], n[2]));
-                uvs.push(Vec2::new(u[0], u[1]));
-            }
-            let indices = self
-                .resources_api
-                .resolved_mesh_indices(&resolved, id)
-                .expect("mesh present")
-                .to_vec();
-            let render_idx =
-                self.render_api.add_input_mesh(&mut input, id, positions, normals, uvs, indices);
-            mesh_index_by_id.push((id, render_idx));
-        }
-        let mut material_index_by_id: Vec<(u64, u32)> = Vec::new();
-        for i in 0..self.resources_api.resolved_material_count(&resolved) {
-            let id = self
-                .resources_api
-                .resolved_material_id_at(&resolved, i)
-                .expect("material index in range");
-            let c = self
-                .resources_api
-                .resolved_material_base_color(&resolved, id)
-                .expect("material present");
+        let mesh_render_idx = self.render_api.add_input_mesh(
+            &mut input,
+            self.mesh.id,
+            self.mesh.positions.clone(),
+            self.mesh.normals.clone(),
+            self.mesh.uvs.clone(),
+            self.mesh.indices.clone(),
+        );
+        let mut material_index_by_id: Vec<(u64, u32)> = Vec::with_capacity(self.materials.len());
+        for &(id, color) in &self.materials {
             let render_idx = self.render_api.add_input_basic_lit_material(
                 &mut input,
                 id,
-                Vec4::new(c[0], c[1], c[2], c[3]),
+                Vec4::new(color[0], color[1], color[2], color[3]),
             );
             material_index_by_id.push((id, render_idx));
         }
@@ -324,24 +306,19 @@ impl CubeSliceDriver {
                 .expect("renderable node present")
                 .world()
                 .to_matrix();
-            let mesh_idx = mesh_index_by_id
-                .iter()
-                .find(|(id, _)| *id == renderable.mesh().raw())
-                .map(|(_, i)| *i)
-                .expect("mesh ref resolves");
             let material_idx = material_index_by_id
                 .iter()
                 .find(|(id, _)| *id == renderable.material().raw())
                 .map(|(_, i)| *i)
                 .expect("material ref resolves");
             self.render_api
-                .add_input_object(&mut input, world, mesh_idx, material_idx, renderable.visible());
+                .add_input_object(&mut input, world, mesh_render_idx, material_idx, renderable.visible());
         }
 
-        // 9. Compile RenderInput -> RenderCommandList.
+        // 4. Compile RenderInput -> RenderCommandList.
         let commands = self.render_api.build_command_list(&input);
 
-        // 10. Translate RenderCommandList -> GpuSubmission (same contract).
+        // 5. Translate RenderCommandList -> GpuSubmission (same contract).
         let mut submission = webgpu.new_submission(width, height);
         let count = self.render_api.command_count(&commands);
         for i in 0..count {
@@ -398,7 +375,8 @@ impl CubeSliceDriver {
             match self.render_api.command_kind_at(&commands, i) {
                 Some(RenderApi::KIND_SET_MATERIAL) => {
                     if let Some(id) = self.render_api.command_material_id_at(&commands, i) {
-                        current_color = material_colors
+                        current_color = self
+                            .materials
                             .iter()
                             .find(|(m, _)| *m == id)
                             .map(|(_, c)| *c)
@@ -418,7 +396,7 @@ impl CubeSliceDriver {
             }
         }
 
-        // 11. Submit through the (live or recording) backend.
+        // 6. Submit through the (live or recording) backend.
         let report = webgpu.submit(submission);
 
         TickOutcome {
@@ -435,32 +413,14 @@ impl CubeSliceDriver {
     /// position+normal vertices and indices, for upload to the live GPU
     /// binding. Browser-free and deterministic.
     pub(crate) fn cube_geometry(&self) -> CubeGeometry {
-        let mut table = self.resources_api.empty_table();
-        let mesh_id = self.resources_api.register_cube_mesh(&mut table);
-        let resolved = self.resources_api.resolve(&table);
-        let id = mesh_id.raw();
-        let vertex_count = self
-            .resources_api
-            .resolved_mesh_vertex_count(&resolved, id)
-            .expect("cube mesh present");
-        let mut vertices = Vec::with_capacity(vertex_count * 6);
-        for v in 0..vertex_count {
-            let p = self
-                .resources_api
-                .resolved_mesh_position_at(&resolved, id, v)
-                .expect("vertex in range");
-            let n = self
-                .resources_api
-                .resolved_mesh_normal_at(&resolved, id, v)
-                .expect("vertex in range");
-            vertices.extend_from_slice(&[p[0], p[1], p[2], n[0], n[1], n[2]]);
+        let mut vertices = Vec::with_capacity(self.mesh.positions.len() * 6);
+        for (p, n) in self.mesh.positions.iter().zip(self.mesh.normals.iter()) {
+            vertices.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z]);
         }
-        let indices = self
-            .resources_api
-            .resolved_mesh_indices(&resolved, id)
-            .expect("cube mesh present")
-            .to_vec();
-        CubeGeometry { vertices, indices }
+        CubeGeometry {
+            vertices,
+            indices: self.mesh.indices.clone(),
+        }
     }
 }
 
@@ -501,15 +461,25 @@ mod tests {
 
     #[test]
     fn the_three_cubes_spin_on_different_axes() {
-        // After a non-zero rotation the three MVPs differ (different axes +
-        // different offsets), and at tick 0 the vertical and horizontal cubes
-        // differ only by position.
+        // After a non-zero tick the three MVPs differ (different axes +
+        // offsets). Engine-driven Spin animates them from the tick.
         let webgpu = WebGpuApi::new_recording();
         let mut driver = CubeSliceDriver::new(viewport(800, 600));
         let c = driver.drive_tick(&webgpu, 45).cubes;
         assert_ne!(c[0].mvp_cols, c[1].mvp_cols);
         assert_ne!(c[1].mvp_cols, c[2].mvp_cols);
         assert_ne!(c[0].mvp_cols, c[2].mvp_cols);
+    }
+
+    #[test]
+    fn a_held_world_evolves_across_ticks() {
+        // The same driver (one built world) at two ticks yields different cube
+        // MVPs — the world is advanced, not rebuilt-from-identical-data.
+        let webgpu = WebGpuApi::new_recording();
+        let mut driver = CubeSliceDriver::new(viewport(800, 600));
+        let early = driver.drive_tick(&webgpu, 10).cubes;
+        let later = driver.drive_tick(&webgpu, 200).cubes;
+        assert_ne!(early[0].mvp_cols, later[0].mvp_cols);
     }
 
     #[test]
