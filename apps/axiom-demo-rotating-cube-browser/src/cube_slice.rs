@@ -14,29 +14,19 @@
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
-use axiom_math::{MathApi, Mat4, Quat, Transform, Vec2, Vec3, Vec4};
+use axiom_math::{MathApi, Mat4, Transform, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 use axiom_resources::ResourcesApi;
 use axiom_runtime::{Runtime, RuntimeConfig};
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
 
+use crate::scene_content::{demo_scene, SceneContent};
+
 /// Fixed 1 ms simulation step (matches the headless slice).
 pub(crate) const FIXED_STEP_NANOS: u64 = 1_000_000;
 
-/// Background clear colour (linear RGBA) — the deterministic colour the live
-/// binding clears the canvas to.
-pub(crate) const DEMO_CLEAR_COLOR: [f32; 4] = [0.05, 0.06, 0.08, 1.0];
-
-const DEMO_LIGHT_DIRECTION_WORLD: Vec3 = Vec3::new(0.3, -1.0, 0.4);
-
-/// Deterministic per-tick rotation angle: one full revolution every 360 ticks.
-/// Each cube applies it about its own spin axis. Tick 0 is zero rotation.
-pub(crate) fn cube_rotation_for_tick(tick: u64) -> f32 {
-    ((tick % 360) as f32) * std::f32::consts::PI / 180.0
-}
-
-/// Number of cubes the slice draws (one per spin axis).
+/// Number of cubes the demo scene draws (one per spin axis).
 pub(crate) const NUM_CUBES: usize = 3;
 
 /// One cube's GPU instance data: its full model-view-projection matrix
@@ -110,6 +100,8 @@ pub struct CubeSliceDriver {
     driver: HostStepDriver,
     frame_builder: FrameBuilder,
     viewport: HostViewport,
+    /// The scene content, as data. Interpreted into the world each tick.
+    content: SceneContent,
 }
 
 impl CubeSliceDriver {
@@ -147,6 +139,7 @@ impl CubeSliceDriver {
             driver,
             frame_builder,
             viewport,
+            content: demo_scene(),
         }
     }
 
@@ -157,41 +150,34 @@ impl CubeSliceDriver {
         let width = self.viewport.physical_width();
         let height = self.viewport.physical_height();
 
-        // 1. Three cubes. Each is a translation parent + a rotation child on
-        //    a distinct spin axis, with its own colour. The shared cube mesh
-        //    is registered once; each cube gets its own material.
+        // 1. Interpret the scene content (data) into the world. Each cube is a
+        //    translation parent + a child carrying an engine `Spin` (so the
+        //    engine animates the rotation each advance — no per-tick rotation
+        //    code here) and a renderable. The shared cube mesh is registered
+        //    once; each cube gets its own material from its data colour.
         let mut scene = self.scene_api.empty_scene();
         let mut resources = self.resources_api.empty_table();
         let mesh_id = self.resources_api.register_cube_mesh(&mut resources);
         let mesh_raw = mesh_id.raw();
-        let angle = cube_rotation_for_tick(tick);
 
-        // (spin axis, x offset, RGBA colour).
-        let cube_specs: [(Vec3, f32, [f32; 4]); NUM_CUBES] = [
-            (Vec3::UNIT_Y, -2.6, [0.85, 0.25, 0.25, 1.0]), // vertical   — red
-            (Vec3::UNIT_X, 0.0, [0.30, 0.80, 0.35, 1.0]),  // horizontal — green
-            (Vec3::new(1.0, 1.0, 0.0), 2.6, [0.30, 0.50, 0.95, 1.0]), // diagonal — blue
-        ];
-
-        let mut material_colors: Vec<(u64, [f32; 4])> = Vec::with_capacity(NUM_CUBES);
-        for (axis, offset_x, color) in cube_specs {
+        let mut material_colors: Vec<(u64, [f32; 4])> = Vec::with_capacity(self.content.cubes.len());
+        for cube in &self.content.cubes {
             let parent = self.scene_api.create_node_with_transform(
                 &mut scene,
-                Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)),
+                Transform::from_translation(Vec3::new(cube.offset_x, 0.0, 0.0)),
             );
-            let rotation = Quat::from_axis_angle(axis, angle)
-                .expect("axis is non-zero and angle is finite");
-            let child = self
-                .scene_api
-                .create_node_with_transform(&mut scene, Transform::from_rotation(rotation));
+            let child = self.scene_api.create_node(&mut scene);
             self.scene_api
                 .set_parent(&mut scene, child, parent)
                 .expect("cube nodes were just created");
+            self.scene_api
+                .add_spin(&mut scene, child, cube.spin_axis, cube.period_ticks)
+                .expect("cube child was just created");
             let material_id = self.resources_api.register_basic_lit_material(
                 &mut resources,
-                Vec4::new(color[0], color[1], color[2], color[3]),
+                Vec4::new(cube.color[0], cube.color[1], cube.color[2], cube.color[3]),
             );
-            material_colors.push((material_id.raw(), color));
+            material_colors.push((material_id.raw(), cube.color));
             let mesh_ref = self.scene_api.mesh_ref(mesh_raw);
             let material_ref = self.scene_api.material_ref(material_id.raw());
             self.scene_api
@@ -199,10 +185,10 @@ impl CubeSliceDriver {
                 .expect("renderable refs are valid");
         }
 
-        // 2. Camera (pulled back to frame three cubes) + light.
+        // 2. Camera + light, from data.
         let camera_node = self.scene_api.create_node_with_transform(
             &mut scene,
-            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+            Transform::from_translation(Vec3::new(0.0, 0.0, self.content.camera.offset_z)),
         );
         let light_node = self
             .scene_api
@@ -213,14 +199,20 @@ impl CubeSliceDriver {
                 &self.math,
                 &mut scene,
                 camera_node,
-                std::f32::consts::FRAC_PI_3,
+                self.content.camera.fovy_radians,
                 aspect,
-                0.1,
-                100.0,
+                self.content.camera.near,
+                self.content.camera.far,
             )
             .expect("camera intrinsics are valid");
         self.scene_api
-            .add_directional_light(&self.math, &mut scene, light_node, Vec3::ONE, 1.0)
+            .add_directional_light(
+                &self.math,
+                &mut scene,
+                light_node,
+                self.content.light.color,
+                self.content.light.intensity,
+            )
             .expect("light parameters are valid");
 
         // 4. Drive one host frame through the runtime.
@@ -236,14 +228,14 @@ impl CubeSliceDriver {
             .build(&host_report, Vec::new())
             .expect("host report sequence is monotone");
         let frame_ctx = self.frame_api.frame_context(&engine_frame);
-        let snapshot = self.scene_api.advance(&mut scene, &frame_ctx);
+        let snapshot = self.scene_api.advance(&mut scene, tick, &frame_ctx);
 
         // 7. Resolve resources.
         let resolved = self.resources_api.resolve(&resources);
 
         // 8. Build render input (scene + resources -> RenderInput).
         let mut input = self.render_api.new_input(width, height);
-        self.render_api.set_input_clear_color(&mut input, DEMO_CLEAR_COLOR);
+        self.render_api.set_input_clear_color(&mut input, self.content.clear_color);
         let cam = snapshot.cameras().first().expect("the demo has one camera");
         let cam_world = snapshot
             .nodes()
@@ -263,7 +255,7 @@ impl CubeSliceDriver {
         for light in snapshot.lights() {
             self.render_api.add_input_directional_light(
                 &mut input,
-                DEMO_LIGHT_DIRECTION_WORLD,
+                self.content.light.direction_world,
                 light.color(),
                 light.intensity(),
             );
@@ -493,7 +485,7 @@ mod tests {
         assert_eq!(outcome.cubes.len(), NUM_CUBES);
         assert!(outcome.recorded);
         assert!(!outcome.presented);
-        assert_eq!(outcome.clear_color, DEMO_CLEAR_COLOR);
+        assert_eq!(outcome.clear_color, demo_scene().clear_color);
     }
 
     #[test]

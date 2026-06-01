@@ -47,5 +47,6 @@ mod scene_node_id;
 mod scene_result;
 mod scene_snapshot;
 mod scene_storage;
+mod spin;
 
 pub use scene_api::SceneApi;

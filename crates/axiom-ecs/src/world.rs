@@ -8,6 +8,7 @@ use axiom_kernel::{
 
 use crate::column_set::ColumnSet;
 use crate::entity_registry::EntityRegistry;
+use crate::world_step::WorldStep;
 use crate::world_system::WorldSystem;
 
 /// Wire schema version of a serialized world.
@@ -95,15 +96,19 @@ impl<S> World<S> {
         self.entities.is_empty()
     }
 
-    /// Advance the world for one engine frame: run every registered system, in
-    /// order, but only when the frame is active (not skipped and it executed at
-    /// least one runtime step). Mirrors `axiom-scene::advance`.
-    pub fn advance(&mut self, frame: &FrameContext<'_>) {
+    /// Advance the world for one engine frame at logical time `tick`: run every
+    /// registered system, in order, but only when the frame is active (not
+    /// skipped and it executed at least one runtime step). The caller owns the
+    /// tick — a real app passes its accumulating simulation tick; a test or a
+    /// frame-N renderer passes the frame it wants. The tick reaches systems via
+    /// [`WorldStep`].
+    pub fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) {
         if frame.is_skipped() || frame.runtime_step_count() == 0 {
             return;
         }
+        let step = WorldStep::new(tick);
         for system in &self.systems {
-            system.run(&self.entities, &mut self.storage);
+            system.run(&step, &self.entities, &mut self.storage);
         }
     }
 }
@@ -278,13 +283,24 @@ mod tests {
     /// A system that writes `doubled = value * 2` for every entity with a value.
     struct DoubleValues;
     impl WorldSystem<Storage> for DoubleValues {
-        fn run(&self, entities: &EntityRegistry, storage: &mut Storage) {
+        fn run(&self, _step: &WorldStep, entities: &EntityRegistry, storage: &mut Storage) {
             let pairs: Vec<(EntityId, i32)> = entities
                 .iter()
                 .filter_map(|e| storage.value.get(e).map(|v| (e, *v)))
                 .collect();
             for (e, v) in pairs {
                 storage.doubled.insert(e, v * 2);
+            }
+        }
+    }
+
+    /// Records the advance tick into the `doubled` column for every entity.
+    struct RecordTick;
+    impl WorldSystem<Storage> for RecordTick {
+        fn run(&self, step: &WorldStep, entities: &EntityRegistry, storage: &mut Storage) {
+            let ids: Vec<EntityId> = entities.iter().collect();
+            for e in ids {
+                storage.doubled.insert(e, step.tick() as i32);
             }
         }
     }
@@ -325,15 +341,25 @@ mod tests {
         let (mut world, e) = world_with_one_value(5);
         assert_eq!(world.system_count(), 1);
         let frame = fixtures::active_engine_frame();
-        world.advance(&FrameContext::new(&frame));
+        world.advance(0, &FrameContext::new(&frame));
         assert_eq!(world.storage().doubled.get(e), Some(&10));
+    }
+
+    #[test]
+    fn advance_passes_the_tick_to_systems() {
+        let mut world: World<Storage> = World::new();
+        world.register_system(Box::new(RecordTick));
+        let e = world.spawn();
+        let frame = fixtures::active_engine_frame();
+        world.advance(42, &FrameContext::new(&frame));
+        assert_eq!(world.storage().doubled.get(e), Some(&42));
     }
 
     #[test]
     fn advance_skips_systems_for_a_skipped_frame() {
         let (mut world, e) = world_with_one_value(5);
         let frame = fixtures::skipped_engine_frame();
-        world.advance(&FrameContext::new(&frame));
+        world.advance(0, &FrameContext::new(&frame));
         assert!(world.storage().doubled.get(e).is_none(), "skipped frame runs no systems");
     }
 
@@ -345,7 +371,7 @@ mod tests {
         let ctx = FrameContext::new(&frame);
         assert!(!ctx.is_skipped());
         assert_eq!(ctx.runtime_step_count(), 0);
-        world.advance(&ctx);
+        world.advance(0, &ctx);
         assert!(world.storage().doubled.get(e).is_none(), "zero-step frame runs no systems");
     }
 

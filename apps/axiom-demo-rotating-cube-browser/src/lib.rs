@@ -32,5 +32,6 @@ mod browser_surface_registry;
 mod cube_slice;
 mod live_gpu_binding;
 mod render_loop;
+mod scene_content;
 
 pub use browser_api::BrowserRotatingCubeApi;

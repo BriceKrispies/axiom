@@ -31,6 +31,7 @@ mod dynamic_components;
 mod entity_registry;
 mod erased_column;
 mod world;
+mod world_step;
 mod world_system;
 
 #[cfg(test)]
@@ -42,4 +43,5 @@ pub use dynamic_components::DynamicComponents;
 pub use entity_registry::EntityRegistry;
 pub use erased_column::ErasedColumn;
 pub use world::World;
+pub use world_step::WorldStep;
 pub use world_system::WorldSystem;

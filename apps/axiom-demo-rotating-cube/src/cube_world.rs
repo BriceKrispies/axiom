@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use axiom_ecs::{ComponentColumn, EntityRegistry, World, WorldSystem};
+use axiom_ecs::{ComponentColumn, EntityRegistry, World, WorldStep, WorldSystem};
 use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, FieldSchema, KernelResult, Reflect, TypeSchema};
 use axiom_math::{Transform, Vec3};
 
@@ -140,7 +140,7 @@ pub(crate) struct CubeStorage {
 pub(crate) struct TransformPropagation;
 
 impl WorldSystem<CubeStorage> for TransformPropagation {
-    fn run(&self, entities: &EntityRegistry, storage: &mut CubeStorage) {
+    fn run(&self, _step: &WorldStep, entities: &EntityRegistry, storage: &mut CubeStorage) {
         let mut worlds: BTreeMap<EntityId, Transform> = BTreeMap::new();
         for id in entities.iter() {
             if let Some(&local) = storage.locals.get(id) {

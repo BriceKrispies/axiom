@@ -9,13 +9,14 @@
 
 use std::collections::BTreeMap;
 
-use axiom_ecs::{ComponentColumn, EntityRegistry, WorldSystem};
+use axiom_ecs::{ComponentColumn, EntityRegistry, WorldStep, WorldSystem};
 use axiom_kernel::EntityId;
 use axiom_math::Transform;
 
 use crate::camera::Camera;
 use crate::light::Light;
 use crate::renderable::Renderable;
+use crate::spin::Spin;
 
 /// The scene's component storage: one sparse column per standard component
 /// type. This is the `S` the generic [`axiom_ecs::World<S>`] holds.
@@ -31,6 +32,7 @@ pub struct SceneStorage {
     pub cameras: ComponentColumn<Camera>,
     pub lights: ComponentColumn<Light>,
     pub renderables: ComponentColumn<Renderable>,
+    pub spins: ComponentColumn<Spin>,
 }
 
 /// The transform-hierarchy system: computes each entity's world transform from
@@ -46,8 +48,31 @@ pub struct SceneStorage {
 pub struct TransformPropagation;
 
 impl WorldSystem<SceneStorage> for TransformPropagation {
-    fn run(&self, entities: &EntityRegistry, storage: &mut SceneStorage) {
+    fn run(&self, _step: &WorldStep, entities: &EntityRegistry, storage: &mut SceneStorage) {
         propagate(entities.iter(), storage);
+    }
+}
+
+/// The spin system: drives each entity with a [`Spin`] component to a pure
+/// rotation about its axis, derived from the frame tick. Runs before
+/// [`TransformPropagation`] so the updated local transforms propagate this
+/// frame. Entities whose spin axis cannot form a rotation are left untouched.
+#[derive(Debug)]
+pub struct SpinSystem;
+
+impl WorldSystem<SceneStorage> for SpinSystem {
+    fn run(&self, step: &WorldStep, _entities: &EntityRegistry, storage: &mut SceneStorage) {
+        let updates: Vec<(EntityId, Transform)> = storage
+            .spins
+            .iter()
+            .filter_map(|(entity, spin)| {
+                spin.rotation_at(step.tick())
+                    .map(|q| (entity, Transform::from_rotation(q)))
+            })
+            .collect();
+        for (entity, local) in updates {
+            storage.locals.insert(entity, local);
+        }
     }
 }
 
@@ -98,6 +123,32 @@ mod tests {
         assert!(s.cameras.is_empty());
         assert!(s.lights.is_empty());
         assert!(s.renderables.is_empty());
+        assert!(s.spins.is_empty());
+    }
+
+    #[test]
+    fn spin_system_rotates_spun_nodes_and_skips_invalid_axes() {
+        let reg = registry(2);
+        let mut storage = SceneStorage::default();
+        // e1: a valid spin; its local starts at identity.
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.spins.insert(e(1), Spin::new(Vec3::UNIT_Y, 360));
+        // e2: a degenerate (zero-axis) spin — the filter_map None arm; its local
+        // must be left untouched.
+        storage.locals.insert(e(2), Transform::from_translation(Vec3::new(9.0, 0.0, 0.0)));
+        storage.spins.insert(e(2), Spin::new(Vec3::new(0.0, 0.0, 0.0), 360));
+
+        SpinSystem.run(&WorldStep::new(90), &reg, &mut storage);
+
+        // e1 became a non-identity rotation about Y (a quarter turn).
+        assert!((storage.locals.get(e(1)).unwrap().rotation.w - 1.0).abs() > 1.0e-6);
+        // e2 is unchanged (invalid axis -> skipped).
+        assert_eq!(storage.locals.get(e(2)).unwrap().translation.x, 9.0);
+    }
+
+    #[test]
+    fn spin_system_debug_is_renderable() {
+        assert!(format!("{:?}", SpinSystem).contains("SpinSystem"));
     }
 
     #[test]
@@ -115,7 +166,7 @@ mod tests {
         storage.locals.insert(e(4), Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)));
         storage.parents.insert(e(4), e(3));
 
-        TransformPropagation.run(&reg, &mut storage);
+        TransformPropagation.run(&WorldStep::new(0), &reg, &mut storage);
 
         // Root world == its local.
         assert_eq!(storage.worlds.get(e(1)).unwrap().translation.x, 1.0);
@@ -137,7 +188,7 @@ mod tests {
             storage.locals.insert(e(1), Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
             storage.locals.insert(e(2), Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)));
             storage.parents.insert(e(2), e(1));
-            TransformPropagation.run(&reg, &mut storage);
+            TransformPropagation.run(&WorldStep::new(0), &reg, &mut storage);
             let w = storage.worlds.get(e(2)).unwrap();
             (w.translation.x, w.translation.y)
         };

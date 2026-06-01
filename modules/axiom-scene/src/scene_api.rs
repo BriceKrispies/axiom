@@ -10,6 +10,7 @@ use crate::material_ref::MaterialRef;
 use crate::mesh_ref::MeshRef;
 use crate::renderable::Renderable;
 use crate::scene::Scene;
+use crate::spin::Spin;
 use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
@@ -207,6 +208,22 @@ impl SceneApi {
         scene.set_renderable_visible(node, visible)
     }
 
+    // --- Spin (data-declared rotation, animated by the engine) ---
+
+    /// Give `node` a spin: a pure rotation about `axis`, one revolution every
+    /// `period_ticks` frames, animated by the engine's spin system each
+    /// [`Self::advance`]. This is the data-driven alternative to an app setting
+    /// the rotation by hand every tick.
+    pub fn add_spin(
+        &self,
+        scene: &mut Scene,
+        node: SceneNodeId,
+        axis: Vec3,
+        period_ticks: u32,
+    ) -> SceneResult<()> {
+        scene.add_spin(node, Spin::new(axis, period_ticks))
+    }
+
     // --- Propagation / frame integration ---
 
     /// Recompute every node's world transform now.
@@ -214,10 +231,12 @@ impl SceneApi {
         scene.update_world_transforms();
     }
 
-    /// Advance the scene for one engine frame: propagate world transforms iff
-    /// the frame is active, then return the snapshot taken afterward.
-    pub fn advance(&self, scene: &mut Scene, frame: &FrameContext<'_>) -> SceneSnapshot {
-        scene.advance(frame)
+    /// Advance the scene for one engine frame at logical time `tick`: run the
+    /// spin + transform-propagation systems iff the frame is active, then return
+    /// the snapshot taken afterward. The caller owns the tick (see
+    /// [`axiom_ecs::World::advance`]).
+    pub fn advance(&self, scene: &mut Scene, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
+        scene.advance(tick, frame)
     }
 
     /// Build a deterministic snapshot of the scene's current state.
@@ -235,6 +254,7 @@ impl SceneApi {
             Camera::SCHEMA,
             Light::SCHEMA,
             Renderable::SCHEMA,
+            Spin::SCHEMA,
         ]
     }
 }
@@ -335,11 +355,24 @@ mod tests {
     #[test]
     fn component_schemas_describe_the_standard_components() {
         let schemas = api().component_schemas();
-        assert_eq!(schemas.len(), 4);
+        assert_eq!(schemas.len(), 5);
         assert_eq!(schemas[0].name(), "Transform");
         assert_eq!(schemas[1].name(), "Camera");
         assert_eq!(schemas[2].name(), "Light");
         assert_eq!(schemas[3].name(), "Renderable");
+        assert_eq!(schemas[4].name(), "Spin");
+    }
+
+    #[test]
+    fn add_spin_valid_and_missing_node() {
+        let a = api();
+        let mut s = a.empty_scene();
+        let n = a.create_node(&mut s);
+        a.add_spin(&mut s, n, Vec3::UNIT_Y, 360).unwrap();
+        assert_eq!(
+            a.add_spin(&mut s, SceneNodeId::from_raw(99), Vec3::UNIT_Y, 360).unwrap_err().code(),
+            SceneErrorCode::MissingNode
+        );
     }
 
     #[test]
@@ -377,7 +410,7 @@ mod tests {
         let engine_frame = frame_api.engine_frame_from_host_report(&report, 1_000, Vec::new()).unwrap();
         let ctx = frame_api.frame_context(&engine_frame);
 
-        let snap = a.advance(&mut s, &ctx);
+        let snap = a.advance(&mut s, 0, &ctx);
         let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
         assert_eq!(child.world().translation.x, 3.0);
         assert_eq!(child.world().translation.y, 4.0);

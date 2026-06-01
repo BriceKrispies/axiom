@@ -38,14 +38,14 @@ impl WorldReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_ecs::{EntityRegistry, WorldSystem};
+    use axiom_ecs::{EntityRegistry, WorldStep, WorldSystem};
 
     #[derive(Default)]
     struct Storage;
 
     struct Noop;
     impl WorldSystem<Storage> for Noop {
-        fn run(&self, _: &EntityRegistry, _: &mut Storage) {}
+        fn run(&self, _: &WorldStep, _: &EntityRegistry, _: &mut Storage) {}
     }
 
     #[test]
@@ -61,7 +61,7 @@ mod tests {
         // Advance once over an active frame so the registered system actually
         // runs, then observe.
         let frame = &crate::fixtures::active_engine_frames(1)[0];
-        world.advance(&FrameContext::new(frame));
+        world.advance(0, &FrameContext::new(frame));
 
         let report = WorldReport::observe(&world);
         assert_eq!(report.entities(), 3);

@@ -226,7 +226,7 @@ pub(crate) fn run_vertical_slice(
     }
 
     // ---- 5. Advance the world (frame-gated): runs transform propagation. ----
-    world.advance(&frame_ctx);
+    world.advance(tick, &frame_ctx);
 
     // ---- 6. Resolve resources (un-nameable value). ----
     let resolved = api.resources_api.resolve(&resources);

@@ -22,7 +22,8 @@ use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
-use crate::scene_storage::{propagate, SceneStorage, TransformPropagation};
+use crate::scene_storage::{propagate, SceneStorage, SpinSystem, TransformPropagation};
+use crate::spin::Spin;
 
 use axiom_ecs::World;
 
@@ -38,9 +39,12 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// Construct an empty scene with the transform-hierarchy system registered.
+    /// Construct an empty scene with the standard systems registered: spin runs
+    /// first (it drives local rotations from the tick), then transform
+    /// propagation turns locals into world transforms.
     pub fn new() -> Self {
         let mut world = World::new();
+        world.register_system(Box::new(SpinSystem));
         world.register_system(Box::new(TransformPropagation));
         Scene { world }
     }
@@ -256,6 +260,14 @@ impl Scene {
         }
     }
 
+    pub(crate) fn add_spin(&mut self, node: SceneNodeId, spin: Spin) -> SceneResult<()> {
+        if !self.is_node(node) {
+            return Err(SceneError::missing_node("add_spin: node id not in scene"));
+        }
+        self.world.storage_mut().spins.insert(Self::entity(node), spin);
+        Ok(())
+    }
+
     // --- Transform propagation ---
 
     /// Recompute every node's world transform now, regardless of frame state.
@@ -267,10 +279,11 @@ impl Scene {
     /// Advance the scene for one engine frame: recompute world transforms iff
     /// the frame is active (not skipped, ran at least one runtime step), then
     /// return the deterministic snapshot taken after whatever update happened.
-    pub(crate) fn advance(&mut self, frame: &FrameContext<'_>) -> SceneSnapshot {
-        // The ECS scheduler runs the registered `TransformPropagation` system,
-        // gated on the frame (skipped / zero-step frames run nothing).
-        self.world.advance(frame);
+    pub(crate) fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
+        // The ECS scheduler runs the registered systems (spin, then transform
+        // propagation) at logical time `tick`, gated on the frame (skipped /
+        // zero-step frames run nothing).
+        self.world.advance(tick, frame);
         self.snapshot()
     }
 
@@ -511,6 +524,19 @@ mod tests {
     }
 
     #[test]
+    fn add_spin_present_and_missing() {
+        let mut s = Scene::new();
+        let n = node(&mut s);
+        s.add_spin(n, Spin::new(Vec3::UNIT_Y, 360)).unwrap();
+        assert_eq!(
+            s.add_spin(SceneNodeId::from_raw(99), Spin::new(Vec3::UNIT_Y, 360))
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingNode
+        );
+    }
+
+    #[test]
     fn update_world_transforms_propagates_parent_to_child() {
         let mut s = Scene::new();
         let p = s.create_node(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
@@ -562,13 +588,27 @@ mod frame_tests {
 
     #[test]
     fn advance_propagates_on_active_frame_with_steps() {
-        let (mut s, c) = parented_scene();
+        let (mut s, _c) = parented_scene();
         let frame = engine_frame(1_000, true);
         let ctx = FrameContext::new(&frame);
-        let snap = s.advance(&ctx);
+        let snap = s.advance(0, &ctx);
         let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
         assert_eq!(child.world().translation.x, 3.0);
         assert_eq!(child.world().translation.y, 4.0);
+    }
+
+    #[test]
+    fn advance_animates_a_spun_node_via_the_registered_spin_system() {
+        use crate::spin::Spin;
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::IDENTITY);
+        s.add_spin(n, Spin::new(Vec3::UNIT_Y, 4)).unwrap();
+        let frame = engine_frame(1_000, true);
+        let ctx = FrameContext::new(&frame);
+        s.advance(3, &ctx);
+        // The spin system set the node's local to the rotation for tick 3.
+        let expected = Spin::new(Vec3::UNIT_Y, 4).rotation_at(3).unwrap();
+        assert_eq!(s.local(n).unwrap().rotation, expected);
     }
 
     #[test]
@@ -577,7 +617,7 @@ mod frame_tests {
         let frame = engine_frame(1_000, false); // never started -> skipped
         let ctx = FrameContext::new(&frame);
         assert!(ctx.is_skipped());
-        let snap = s.advance(&ctx);
+        let snap = s.advance(0, &ctx);
         let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
         // No propagation: world fell back to local.
         assert_eq!(child.world().translation.x, 0.0);
@@ -591,7 +631,7 @@ mod frame_tests {
         let ctx = FrameContext::new(&frame);
         assert!(!ctx.is_skipped());
         assert_eq!(ctx.runtime_step_count(), 0);
-        let snap = s.advance(&ctx);
+        let snap = s.advance(0, &ctx);
         let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
         assert_eq!(child.world().translation.x, 0.0);
     }
