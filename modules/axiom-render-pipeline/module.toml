@@ -1,0 +1,30 @@
+# Axiom module manifest — axiom-render-pipeline (a FEATURE module).
+#
+# Feature modules are the sanctioned composition tier: unlike isolated engine
+# modules, a feature module may depend on the modules listed in
+# `allowed_modules`. This one owns the deterministic per-frame render pipeline —
+# the translation scene snapshot -> render input -> render command list -> GPU
+# submission — so apps no longer reimplement it. It reads a scene through
+# `axiom-scene`, builds commands through `axiom-render`, and submits through a
+# caller-provided `axiom-webgpu` backend (recording or live).
+
+[module]
+name = "render-pipeline"
+crate_name = "axiom-render-pipeline"
+kind = "feature-module"
+
+allowed_layers = [
+    "math",
+]
+
+# The engine modules this feature module composes.
+allowed_modules = [
+    "scene",
+    "render",
+    "webgpu",
+]
+
+introduced_capabilities = [
+    "scene-to-gpu-render-pipeline",
+    "per-frame-draw-extraction",
+]

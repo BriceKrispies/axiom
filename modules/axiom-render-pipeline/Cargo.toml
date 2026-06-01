@@ -1,0 +1,24 @@
+[package]
+name = "axiom-render-pipeline"
+description = "Axiom feature module: composes scene + render + webgpu into the deterministic per-frame render pipeline (scene snapshot -> render commands -> GPU submission). The one place that translation lives."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free and wasm-clean (the recording backend is used in
+# tests; a live backend is supplied by the app).
+crate-type = ["rlib"]
+
+[dependencies]
+# A *feature module* (kind = "feature-module"): it composes the engine modules
+# listed in `module.toml`'s `allowed_modules`, plus the math layer.
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-scene = { path = "../axiom-scene" }
+axiom-render = { path = "../axiom-render" }
+axiom-webgpu = { path = "../axiom-webgpu" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
