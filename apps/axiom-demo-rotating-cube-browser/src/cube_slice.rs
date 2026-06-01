@@ -120,15 +120,30 @@ pub struct CubeSliceDriver {
 }
 
 impl CubeSliceDriver {
-    /// Build the driver for a viewport of `width` x `height` logical pixels.
-    /// The scene and its resources are constructed **once** here.
+    /// Build the driver from the built-in demo scene.
     pub fn new(viewport: HostViewport) -> Self {
+        Self::build_from(demo_scene(), viewport)
+    }
+
+    /// Build the driver from a serialized scene **document** (kernel `Reflect`
+    /// bytes) — the same content authored as data that could come from a file,
+    /// a network fetch, or an agent, instead of the in-code default.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn from_document(
+        bytes: &[u8],
+        viewport: HostViewport,
+    ) -> axiom_kernel::KernelResult<Self> {
+        Ok(Self::build_from(SceneContent::from_bytes(bytes)?, viewport))
+    }
+
+    /// Build the driver from decoded scene content. The scene and its resources
+    /// are constructed **once** here.
+    fn build_from(content: SceneContent, viewport: HostViewport) -> Self {
         let math = MathApi::new();
         let host_api = HostApi::new();
         let frame_api = FrameApi::new();
         let resources_api = ResourcesApi::new();
         let render_api = RenderApi::new();
-        let content = demo_scene();
 
         let mut runtime =
             Runtime::new(RuntimeConfig::new(FIXED_STEP_NANOS).with_diagnostics_enabled(false))
@@ -480,6 +495,19 @@ mod tests {
         let early = driver.drive_tick(&webgpu, 10).cubes;
         let later = driver.drive_tick(&webgpu, 200).cubes;
         assert_ne!(early[0].mvp_cols, later[0].mvp_cols);
+    }
+
+    #[test]
+    fn a_driver_built_from_a_document_matches_the_built_in_scene() {
+        // Serialize the demo scene to a document, load a driver from those
+        // bytes, and confirm it renders identically to the in-code default —
+        // i.e. the scene is genuinely loadable as data.
+        let webgpu = WebGpuApi::new_recording();
+        let bytes = demo_scene().to_bytes();
+        let mut from_doc =
+            CubeSliceDriver::from_document(&bytes, viewport(800, 600)).expect("document loads");
+        let mut built_in = CubeSliceDriver::new(viewport(800, 600));
+        assert_eq!(from_doc.drive_tick(&webgpu, 30), built_in.drive_tick(&webgpu, 30));
     }
 
     #[test]
