@@ -27,6 +27,7 @@
 
 mod column_set;
 mod component_column;
+mod dynamic_components;
 mod entity_registry;
 mod erased_column;
 mod world;
@@ -37,6 +38,7 @@ mod fixtures;
 
 pub use column_set::ColumnSet;
 pub use component_column::ComponentColumn;
+pub use dynamic_components::DynamicComponents;
 pub use entity_registry::EntityRegistry;
 pub use erased_column::ErasedColumn;
 pub use world::World;

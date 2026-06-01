@@ -25,7 +25,7 @@ allowed_dependencies = ["kernel", "runtime", "math", "host", "frame"]
 forbidden_dependencies = []
 meaningful_dependency = "ECS consumes the kernel `EntityId` for stable, ordered, serializable entity identity, and the frame contract (`FrameContext`) to advance its registered world systems once per engine frame — gated on `is_skipped` / `runtime_step_count`, the same way `axiom-scene::advance` is — exposing the single generic world store every feature module and app composes on."
 
-introduced_capabilities = ["World", "EntityRegistry", "ComponentColumn", "WorldSystem", "ErasedColumn", "ColumnSet"]
+introduced_capabilities = ["World", "EntityRegistry", "ComponentColumn", "WorldSystem", "ErasedColumn", "ColumnSet", "DynamicComponents"]
 
 consumed_capabilities = ["EntityId", "FrameContext"]
 

@@ -181,6 +181,7 @@ fn lib_exports_are_curated_set() {
     let mut expected: Vec<&str> = vec![
         "pub use column_set::ColumnSet;",
         "pub use component_column::ComponentColumn;",
+        "pub use dynamic_components::DynamicComponents;",
         "pub use entity_registry::EntityRegistry;",
         "pub use erased_column::ErasedColumn;",
         "pub use world::World;",

@@ -22,7 +22,7 @@ use std::fmt::Write as _;
 use std::fs;
 
 use axiom_demo_rotating_cube::DemoRotatingCubeApi;
-use axiom_ecs::{ColumnSet, ComponentColumn, ErasedColumn, World};
+use axiom_ecs::{ColumnSet, ComponentColumn, DynamicComponents, ErasedColumn, World};
 use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, Reflect};
 use axiom_math::{Mat4, Quat, Transform, Vec2, Vec3, Vec4};
 
@@ -224,6 +224,21 @@ fn main() {
         world_bytes.len()
     );
     check!("a whole world serializes, reloads, and matches", world_roundtrips);
+
+    // --- 7. App-blind dynamic components: a store that was never told about
+    //        these types holds and returns them by type (safe, owned). ---
+    let mut dynamic = DynamicComponents::new();
+    let de = EntityId::from_raw(1);
+    dynamic.insert(de, Transform::from_translation(Vec3::new(9.0, 0.0, 0.0)));
+    dynamic.insert(de, 1234u32);
+    for (name, schema, count) in dynamic.describe() {
+        info!("dynamic-component {name} (schema {}) entries={count}", schema.name());
+    }
+    let transform_x = dynamic.get::<Transform>(de).unwrap().map(|t| t.translation.x);
+    let tag = dynamic.get::<u32>(de).unwrap();
+    let dynamic_ok = transform_x == Some(9.0) && tag == Some(1234);
+    info!("dynamic typed get: Transform.x={transform_x:?} tag={tag:?} ok={dynamic_ok}");
+    check!("app-blind dynamic components round-trip by type (safe, owned)", dynamic_ok);
 
     let all_pass = passed == checks;
     let _ = writeln!(
