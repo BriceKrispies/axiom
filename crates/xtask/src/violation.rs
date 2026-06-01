@@ -63,8 +63,15 @@ pub enum ViolationKind {
     ModuleDependsOnApp,
     /// A module's Cargo deps include a tool crate.
     ModuleDependsOnTool,
-    /// A `module.toml` declares a non-empty `allowed_modules` list.
+    /// An *engine* `module.toml` (not a feature module) declares a non-empty
+    /// `allowed_modules` list. Only feature modules
+    /// (`kind = "feature-module"`) may compose other modules.
     ModuleHasNonEmptyAllowedModules,
+    /// A feature module's `allowed_modules` names a module that does not exist.
+    ModuleAllowedModuleUnknown,
+    /// A feature module's Cargo deps include a module crate that is not in its
+    /// declared `allowed_modules`.
+    ModuleDependsOnModuleNotAllowed,
     /// A `module.toml` names a layer in `allowed_layers` that does not exist.
     ModuleAllowedLayerUnknown,
     /// A module crate's `lib.rs` does not publicly export exactly one item.
@@ -148,6 +155,8 @@ impl fmt::Display for ViolationKind {
             ViolationKind::ModuleDependsOnApp => "ModuleDependsOnApp",
             ViolationKind::ModuleDependsOnTool => "ModuleDependsOnTool",
             ViolationKind::ModuleHasNonEmptyAllowedModules => "ModuleHasNonEmptyAllowedModules",
+            ViolationKind::ModuleAllowedModuleUnknown => "ModuleAllowedModuleUnknown",
+            ViolationKind::ModuleDependsOnModuleNotAllowed => "ModuleDependsOnModuleNotAllowed",
             ViolationKind::ModuleAllowedLayerUnknown => "ModuleAllowedLayerUnknown",
             ViolationKind::ModuleFacadeMustExportOne => "ModuleFacadeMustExportOne",
             ViolationKind::DuplicateModuleName => "DuplicateModuleName",

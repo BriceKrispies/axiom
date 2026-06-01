@@ -217,13 +217,22 @@ the per-category rules below are violated.
 >   chain (kernel → runtime → math → host → frame → …). Each layer may
 >   import only lower-indexed layers, must directly use the layer at
 >   index N-1, and is governed by the Layer Law above.
-> - **Modules** (`modules/<name>/` + `module.toml`) are *isolated*
->   capabilities (e.g. scene, render, assets). A module may depend on a
->   curated set of layers and **never** on another module, an app, or a
->   tool. A module exposes exactly one public facade from `lib.rs`.
-> - **Apps** (`apps/<name>/` + `app.toml`) are the only composition
->   roots. An app may depend on layers and modules. Nothing else may
->   depend on an app — apps are leaves in the dependency graph.
+> - **Modules** (`modules/<name>/` + `module.toml`) come in two kinds, both
+>   exposing exactly one public facade from `lib.rs`:
+>   - **Engine modules** (the default) are *isolated* capabilities (e.g.
+>     scene, render, assets). An engine module may depend on a curated set
+>     of layers and **never** on another module, an app, or a tool
+>     (`allowed_modules = []`).
+>   - **Feature modules** (`kind = "feature-module"`) are *composition*
+>     capabilities: a feature module may depend on the layers AND the
+>     curated set of modules it declares in `allowed_modules` (e.g. a
+>     render pipeline composing scene + resources + render + webgpu). It
+>     still may never depend on an app or a tool, and may only be depended
+>     on by apps (or another feature module that lists it).
+> - **Apps** (`apps/<name>/` + `app.toml`) are the only *leaf* composition
+>   roots. An app may depend on layers and modules (engine or feature).
+>   Nothing else may depend on an app — apps are leaves in the dependency
+>   graph.
 > - **Tools** (`tools/<name>/`, plus the existing `xtask` crate) are
 >   repo tooling. Tools must not be part of the runtime engine
 >   dependency graph; layers, modules, and apps must not depend on
@@ -234,10 +243,17 @@ Hard rules (mechanically enforced):
 1. **Layers must never import modules.** A layer's Cargo deps must contain
    only lower-indexed layer crates — never a module crate, an app crate,
    or a tool crate.
-2. **Modules must never depend on other modules.** `allowed_modules` in
-   `module.toml` must be empty today; a module's Cargo deps must contain
-   only its `allowed_layers`. If two modules want to share a primitive,
-   the primitive belongs in a lower **layer**, not in a third module.
+2. **Engine modules must never depend on other modules.** For an engine
+   module, `allowed_modules` in `module.toml` must be empty; its Cargo
+   deps must contain only its `allowed_layers`. If two engine modules want
+   to share a primitive, the primitive belongs in a lower **layer**, not a
+   third module. **Feature modules** (`kind = "feature-module"`) are the
+   sanctioned exception: they may Cargo-depend on exactly the modules named
+   in their `allowed_modules` (each of which must be a real module), and on
+   nothing else module-shaped. An engine module depending on any module is
+   `ModuleDependsOnModule`; a feature module depending on an *unlisted*
+   module is `ModuleDependsOnModuleNotAllowed`; a feature module listing a
+   non-existent module is `ModuleAllowedModuleUnknown`.
 3. **Modules must never depend on apps or tools.**
 4. **Apps must never be imported by engine code.** A layer or module that
    depends on an app crate is rejected as `LayerDependsOnApp` /
@@ -281,14 +297,17 @@ One manifest lives in each module crate at `modules/<name>/module.toml`:
 [module]
 name = "scene"                       # short logical module name (unique)
 crate_name = "axiom-scene"           # must match the cargo package name
-kind = "engine-module"               # optional, free-form
+kind = "engine-module"               # "engine-module" (default, isolated) or
+                                     # "feature-module" (may compose modules)
 allowed_layers = [                   # layers this module may depend on
   "kernel",
   "runtime",
   "math",
   "frame",
 ]
-allowed_modules = []                 # MUST be empty today
+allowed_modules = []                 # engine module: MUST be empty.
+                                     # feature module: the modules it composes,
+                                     # e.g. ["scene", "resources", "render"]
 introduced_capabilities = [
   "scene-graph",
   "transform-hierarchy",
@@ -371,12 +390,16 @@ GpuSubmissionReport
 1. **Modules expose data contracts** through their single facade
    (`SceneApi`, `ResourcesApi`, `RenderApi`, `WebGpuApi`). The contract
    types live behind the facade and are accessed only through it.
-2. **Modules do not import other modules.** `allowed_modules = []` is
-   the unconditional default; the architecture checker fails any
-   non-empty `allowed_modules` list.
-3. **Apps translate between module contracts.** A function like
-   `scene_to_render_input(scene_api, snapshot, resources_api, resolved,
-   render_api, &mut input)` lives in the app crate, not in a module.
+2. **These slice modules are isolated engine modules.** `axiom-scene`,
+   `axiom-resources`, `axiom-render`, and `axiom-webgpu` each declare
+   `allowed_modules = []` and never import one another. Composing them is
+   the job of either an app or a **feature module**
+   (`kind = "feature-module"`) that lists them in `allowed_modules` — the
+   only sanctioned way one crate may depend on several of these modules.
+3. **Apps or feature modules translate between module contracts.** A
+   function like `scene_to_render_input(...)` lives in an app or a feature
+   module (a composition tier), never in one of the isolated engine
+   modules above.
 4. **`axiom-render` does not import `axiom-scene`.** Render takes
    neutral data (matrices, vertex arrays, light arrays) through its
    own `RenderInput` builder.

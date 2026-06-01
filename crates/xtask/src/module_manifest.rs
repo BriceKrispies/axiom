@@ -41,7 +41,10 @@ pub struct ModuleSection {
     /// The actual cargo package name (e.g. `"axiom-scene"`). Must match
     /// the workspace package this manifest belongs to.
     pub crate_name: String,
-    /// Free-form kind tag (e.g. `"engine-module"`). Optional.
+    /// Kind tag. `"feature-module"` marks a *composition* module that may
+    /// depend on a curated set of other modules (declared in
+    /// `allowed_modules`); any other value (or absent) is an isolated
+    /// *engine module* whose `allowed_modules` must be empty.
     #[serde(default)]
     pub kind: Option<String>,
     /// Logical layer names this module is permitted to depend on. Every
@@ -56,6 +59,14 @@ pub struct ModuleSection {
     /// rejected at load time.
     #[serde(default)]
     pub introduced_capabilities: Vec<String>,
+}
+
+impl ModuleSection {
+    /// Whether this is a feature (composition) module — one permitted to
+    /// depend on the modules listed in `allowed_modules`.
+    pub fn is_feature_module(&self) -> bool {
+        self.kind.as_deref() == Some("feature-module")
+    }
 }
 
 #[derive(Debug, Deserialize)]

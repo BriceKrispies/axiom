@@ -150,6 +150,45 @@ impl Fixture {
         self
     }
 
+    /// A feature (composition) module: `kind = "feature-module"`, so a
+    /// non-empty `allowed_modules` is permitted.
+    fn feature_module_crate(
+        &self,
+        dir_rel: &str,
+        crate_name: &str,
+        module_name: &str,
+        allowed_layers: &[&str],
+        allowed_modules: &[&str],
+        capabilities: &[&str],
+        deps: &[(&str, &str)],
+        lib_rs: &str,
+    ) -> &Self {
+        let dir = self.root.join(dir_rel);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        self.write_cargo_toml(&dir, crate_name, deps);
+        let join = |xs: &[&str]| {
+            xs.iter()
+                .map(|s| format!("\"{s}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let module_toml = format!(
+            "[module]\n\
+             name = \"{module_name}\"\n\
+             crate_name = \"{crate_name}\"\n\
+             kind = \"feature-module\"\n\
+             allowed_layers = [{}]\n\
+             allowed_modules = [{}]\n\
+             introduced_capabilities = [{}]\n",
+            join(allowed_layers),
+            join(allowed_modules),
+            join(capabilities)
+        );
+        std::fs::write(dir.join("module.toml"), module_toml).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), lib_rs).unwrap();
+        self
+    }
+
     fn app_crate(
         &self,
         dir_rel: &str,
@@ -890,6 +929,134 @@ fn case_s_junk_drawer_module_fails() {
     let report = check_architecture(&f.root);
     assert!(
         report.has_kind(ViolationKind::SourceHygieneJunkDrawerModule),
+        "violations: {:?}",
+        report.violations()
+    );
+}
+
+#[test]
+fn case_t_feature_module_composing_a_listed_module_passes() {
+    // A feature module that declares `allowed_modules = ["scene"]` and depends
+    // on the scene module is legal — the composition tier.
+    let f = Fixture::new("t_feature_composes");
+    f.workspace(&["crates/kernel", "modules/scene", "modules/pipeline"])
+        .layer_crate(
+            "crates/kernel",
+            "fc-kernel",
+            "kernel",
+            0,
+            None,
+            &[],
+            &[],
+            "pub struct K;\n",
+        )
+        .module_crate(
+            "modules/scene",
+            "fc-scene",
+            "scene",
+            &["kernel"],
+            &[],
+            &["scene-graph"],
+            &[("fc-kernel", "../../crates/kernel")],
+            one_pub_facade(),
+        )
+        .feature_module_crate(
+            "modules/pipeline",
+            "fc-pipeline",
+            "pipeline",
+            &["kernel"],
+            &["scene"],
+            &["render-pipeline"],
+            &[
+                ("fc-kernel", "../../crates/kernel"),
+                ("fc-scene", "../scene"),
+            ],
+            one_pub_facade(),
+        );
+    let report = check_architecture(&f.root);
+    assert!(
+        report.is_ok(),
+        "expected clean report, got: {:?}",
+        report.violations()
+    );
+}
+
+#[test]
+fn case_u_feature_module_depending_on_unlisted_module_fails() {
+    // A feature module that depends on a module it did NOT list in
+    // `allowed_modules` is rejected.
+    let f = Fixture::new("u_feature_unlisted");
+    f.workspace(&["crates/kernel", "modules/scene", "modules/pipeline"])
+        .layer_crate(
+            "crates/kernel",
+            "fu-kernel",
+            "kernel",
+            0,
+            None,
+            &[],
+            &[],
+            "pub struct K;\n",
+        )
+        .module_crate(
+            "modules/scene",
+            "fu-scene",
+            "scene",
+            &["kernel"],
+            &[],
+            &["scene-graph"],
+            &[("fu-kernel", "../../crates/kernel")],
+            one_pub_facade(),
+        )
+        .feature_module_crate(
+            "modules/pipeline",
+            "fu-pipeline",
+            "pipeline",
+            &["kernel"],
+            &[], // does NOT list scene
+            &["render-pipeline"],
+            &[
+                ("fu-kernel", "../../crates/kernel"),
+                ("fu-scene", "../scene"),
+            ],
+            one_pub_facade(),
+        );
+    let report = check_architecture(&f.root);
+    assert!(
+        report.has_kind(ViolationKind::ModuleDependsOnModuleNotAllowed),
+        "violations: {:?}",
+        report.violations()
+    );
+}
+
+#[test]
+fn case_v_feature_module_allowing_unknown_module_fails() {
+    // A feature module whose `allowed_modules` names a module that does not
+    // exist is rejected.
+    let f = Fixture::new("v_feature_unknown_allowed");
+    f.workspace(&["crates/kernel", "modules/pipeline"])
+        .layer_crate(
+            "crates/kernel",
+            "fv-kernel",
+            "kernel",
+            0,
+            None,
+            &[],
+            &[],
+            "pub struct K;\n",
+        )
+        .feature_module_crate(
+            "modules/pipeline",
+            "fv-pipeline",
+            "pipeline",
+            &["kernel"],
+            &["ghost"], // no such module
+            &["render-pipeline"],
+            &[("fv-kernel", "../../crates/kernel")],
+            one_pub_facade(),
+        );
+    let report = check_architecture(&f.root);
+    assert!(
+        report.has_kind(ViolationKind::ModuleAllowedModuleUnknown),
         "violations: {:?}",
         report.violations()
     );

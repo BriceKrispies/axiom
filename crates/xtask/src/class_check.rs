@@ -30,6 +30,7 @@ pub fn check(
     check_duplicate_module_names(index, report);
     check_duplicate_module_capabilities(index, report);
     check_module_manifest_local_rules(index, report);
+    check_feature_module_allowed_module_references(index, report);
     check_layer_manifest_crate_name_matches(index, &class_by_name, report);
     check_module_manifest_crate_name_matches(index, report);
     check_app_manifest_crate_name_matches(index, report);
@@ -147,16 +148,47 @@ fn check_duplicate_module_capabilities(index: &ManifestIndex, report: &mut Check
 
 fn check_module_manifest_local_rules(index: &ManifestIndex, report: &mut CheckReport) {
     for m in index.module_by_dir.values() {
-        if !m.module.allowed_modules.is_empty() {
+        // Only *engine* modules are barred from composing other modules.
+        // Feature modules (`kind = "feature-module"`) may list modules they
+        // compose; those references are validated separately.
+        if !m.module.is_feature_module() && !m.module.allowed_modules.is_empty() {
             report.push(Violation::new(
                 ViolationKind::ModuleHasNonEmptyAllowedModules,
                 m.module.name.clone(),
                 format!(
-                    "module `{}` declares non-empty `allowed_modules` = {:?}; \
-                     modules may not depend on other modules — leave `allowed_modules = []`",
+                    "engine module `{}` declares non-empty `allowed_modules` = {:?}; \
+                     only feature modules (kind = \"feature-module\") may compose other \
+                     modules — leave `allowed_modules = []` or mark this a feature module",
                     m.module.name, m.module.allowed_modules
                 ),
             ));
+        }
+    }
+}
+
+/// A feature module's `allowed_modules` must name real modules.
+fn check_feature_module_allowed_module_references(index: &ManifestIndex, report: &mut CheckReport) {
+    let known_modules: BTreeSet<&str> = index
+        .module_by_dir
+        .values()
+        .map(|m| m.module.name.as_str())
+        .collect();
+    for m in index.module_by_dir.values() {
+        if !m.module.is_feature_module() {
+            continue;
+        }
+        for module_name in &m.module.allowed_modules {
+            if !known_modules.contains(module_name.as_str()) {
+                report.push(Violation::new(
+                    ViolationKind::ModuleAllowedModuleUnknown,
+                    m.module.name.clone(),
+                    format!(
+                        "feature module `{}` allows module `{module_name}`, but no such module exists; \
+                         valid module names are: {known_modules:?}",
+                        m.module.name
+                    ),
+                ));
+            }
         }
     }
 }
@@ -356,15 +388,49 @@ fn check_forward_dependencies(
                     }
                 },
                 PackageClass::Module => match dep_class {
-                    PackageClass::Module => report.push(Violation::new(
-                        ViolationKind::ModuleDependsOnModule,
-                        c.package.name.clone(),
-                        format!(
-                            "module crate `{}` depends on module crate `{dep_name}`; \
-                             modules must never depend on other modules",
-                            c.package.name
-                        ),
-                    )),
+                    PackageClass::Module => {
+                        // Engine modules may never depend on a module. A feature
+                        // module may depend on the modules it lists in
+                        // `allowed_modules`; anything else is a violation.
+                        let src = module_by_crate.get(c.package.name.as_str());
+                        let is_feature = src.is_some_and(|s| s.module.is_feature_module());
+                        if is_feature {
+                            let target_name = module_by_crate
+                                .get(dep_name.as_str())
+                                .map(|t| t.module.name.clone());
+                            let allowed = match &target_name {
+                                Some(name) => src
+                                    .expect("is_feature implies src is Some")
+                                    .module
+                                    .allowed_modules
+                                    .contains(name),
+                                None => false,
+                            };
+                            if !allowed {
+                                report.push(Violation::new(
+                                    ViolationKind::ModuleDependsOnModuleNotAllowed,
+                                    c.package.name.clone(),
+                                    format!(
+                                        "feature module `{}` depends on module crate `{dep_name}` but its \
+                                         `allowed_modules` is {:?}; add `{}` to `allowed_modules` or drop the dependency",
+                                        c.package.name,
+                                        src.expect("is_feature implies src is Some").module.allowed_modules,
+                                        target_name.unwrap_or_else(|| dep_name.clone())
+                                    ),
+                                ));
+                            }
+                        } else {
+                            report.push(Violation::new(
+                                ViolationKind::ModuleDependsOnModule,
+                                c.package.name.clone(),
+                                format!(
+                                    "engine module crate `{}` depends on module crate `{dep_name}`; \
+                                     only feature modules may compose other modules",
+                                    c.package.name
+                                ),
+                            ));
+                        }
+                    }
                     PackageClass::App => report.push(Violation::new(
                         ViolationKind::ModuleDependsOnApp,
                         c.package.name.clone(),
