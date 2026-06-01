@@ -54,6 +54,7 @@ dependencies = [
  "axiom-render",
  "axiom-resources",
  "axiom-runtime",
+ "axiom-scene",
  "axiom-webgpu",
 ]
 

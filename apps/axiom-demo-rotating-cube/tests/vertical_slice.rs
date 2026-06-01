@@ -30,18 +30,14 @@ fn app_manifest_classifies_as_an_app_with_declared_layers_and_modules() {
             "app.toml must allow layer `{layer}`"
         );
     }
-    // The cube's world now lives on the ECS layer; the app composes only these
-    // three modules (no scene module).
-    for module in ["resources", "render", "webgpu"] {
+    // The scene module (ECS-native) is the shared world model; the app also
+    // composes resources/render/webgpu.
+    for module in ["scene", "resources", "render", "webgpu"] {
         assert!(
             app_toml.contains(&format!("\"{module}\"")),
             "app.toml must allow module `{module}`"
         );
     }
-    assert!(
-        !app_toml.contains("\"scene\""),
-        "the demo no longer composes the scene module"
-    );
 }
 
 #[test]
@@ -49,6 +45,7 @@ fn modules_declare_no_dependency_on_other_modules() {
     // The app composes these modules; each must remain isolated
     // (`allowed_modules = []`).
     for manifest in [
+        include_str!("../../../modules/axiom-scene/module.toml"),
         include_str!("../../../modules/axiom-resources/module.toml"),
         include_str!("../../../modules/axiom-render/module.toml"),
         include_str!("../../../modules/axiom-webgpu/module.toml"),

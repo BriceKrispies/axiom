@@ -30,7 +30,7 @@ use axiom_host::{
     HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport,
 };
 use axiom_introspect::{FrameReport, IntrospectApi};
-use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, HandleId, Reflect};
+use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, HandleId};
 use axiom_math::{MathApi, Transform, Vec3};
 use axiom_runtime::{
     Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode, RuntimeResult,

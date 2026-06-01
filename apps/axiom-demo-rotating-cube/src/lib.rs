@@ -26,7 +26,6 @@
 //! [`DemoRotatingCubeApi::run_tick`] returns, exposed so every boundary
 //! value is inspectable by callers and tests.
 
-mod cube_world;
 mod demo_api;
 mod render_to_gpu_submission;
 mod scene_to_render_input;

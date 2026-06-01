@@ -3,8 +3,8 @@
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostBoundaryConfig, HostLifecycleSignal, HostStepDriver, HostViewport};
 use axiom_introspect::{FrameReport, IntrospectApi};
-use axiom_kernel::{HandleId, MetricValue, Reflect, TelemetryMetric, TypeSchema};
-use axiom_math::{MathApi, Transform};
+use axiom_kernel::{HandleId, MetricValue, TelemetryMetric, TypeSchema};
+use axiom_math::MathApi;
 use axiom_render::RenderApi;
 use axiom_resources::ResourcesApi;
 use axiom_runtime::{Runtime, RuntimeConfig, RuntimeContext, RuntimeResult, RuntimeSystem};
@@ -156,16 +156,11 @@ impl DemoRotatingCubeApi {
         self.introspect.snapshot_bytes()
     }
 
-    /// The reflected schemas of the component types the cube world is built
-    /// from — the world describing its own shape as data an agent can read.
+    /// The reflected schemas of the standard component types the scene is built
+    /// from — the scene module describing its own shape as data an agent can
+    /// read (delegated to the shared `axiom-scene` facade).
     pub fn component_schemas(&self) -> Vec<TypeSchema> {
-        use crate::cube_world::{CameraData, LightData, RenderableData};
-        vec![
-            <Transform as Reflect>::SCHEMA,
-            <CameraData as Reflect>::SCHEMA,
-            <LightData as Reflect>::SCHEMA,
-            <RenderableData as Reflect>::SCHEMA,
-        ]
+        axiom_scene::SceneApi::new().component_schemas()
     }
 }
 

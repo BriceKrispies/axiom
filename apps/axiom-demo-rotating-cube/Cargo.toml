@@ -19,8 +19,9 @@ axiom-frame = { path = "../../crates/axiom-frame" }
 axiom-ecs = { path = "../../crates/axiom-ecs" }
 axiom-introspect = { path = "../../crates/axiom-introspect" }
 
-# Modules the demo app composes. The cube's world model is now the ECS layer
-# above, not the axiom-scene module.
+# Modules the demo app composes. The scene module (ECS-native) is the shared
+# world model; both demo apps build their scene through its facade.
+axiom-scene = { path = "../../modules/axiom-scene" }
 axiom-resources = { path = "../../modules/axiom-resources" }
 axiom-render = { path = "../../modules/axiom-render" }
 axiom-webgpu = { path = "../../modules/axiom-webgpu" }
