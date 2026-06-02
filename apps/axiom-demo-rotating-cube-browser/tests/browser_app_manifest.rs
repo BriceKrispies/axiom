@@ -35,7 +35,7 @@ fn app_declares_only_allowed_layers_and_modules() {
     for layer in ["kernel", "runtime", "math", "host", "frame"] {
         assert!(app_toml.contains(&format!("\"{layer}\"")), "missing layer {layer}");
     }
-    for module in ["scene", "resources", "render", "webgpu"] {
+    for module in ["scene", "resources", "webgpu", "render-pipeline"] {
         assert!(app_toml.contains(&format!("\"{module}\"")), "missing module {module}");
     }
     // No app-to-app dependency on the headless app.

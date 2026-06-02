@@ -21,8 +21,10 @@ axiom-frame = { path = "../../crates/axiom-frame" }
 # headless app does; it does NOT depend on the headless app (apps are leaves).
 axiom-scene = { path = "../../modules/axiom-scene" }
 axiom-resources = { path = "../../modules/axiom-resources" }
-axiom-render = { path = "../../modules/axiom-render" }
 axiom-webgpu = { path = "../../modules/axiom-webgpu" }
+# The render pipeline (a feature module) owns the scene->render->GPU
+# translation, so the app no longer depends on axiom-render directly.
+axiom-render-pipeline = { path = "../../modules/axiom-render-pipeline" }
 
 # Browser / WASM platform dependencies. Confined to this app and pulled in
 # ONLY for the wasm32 target, so native `cargo test --workspace` never

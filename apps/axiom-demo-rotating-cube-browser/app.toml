@@ -23,6 +23,6 @@ allowed_layers = [
 allowed_modules = [
     "scene",
     "resources",
-    "render",
     "webgpu",
+    "render-pipeline",
 ]
