@@ -1,0 +1,22 @@
+[package]
+name = "axiom"
+description = "Axiom engine umbrella (a feature module): the single `axiom::prelude` an app imports. It composes the engine modules (scene, resources, render-pipeline, webgpu) and the layer spine into the high-level App/DefaultPlugins/Assets/SceneCommands surface, so an app is pure scene description."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free; a live windowing backend is composed in later.
+crate-type = ["rlib"]
+
+[dependencies]
+# A *feature module* (kind = "feature-module"). It depends on the layer spine it
+# needs and, as features land, on the engine modules listed in `module.toml`'s
+# `allowed_modules`. The skeleton starts with just the layers it re-exports.
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-ecs = { path = "../../crates/axiom-ecs" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
