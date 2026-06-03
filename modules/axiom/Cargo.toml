@@ -16,7 +16,13 @@ crate-type = ["rlib"]
 # `allowed_modules`. The skeleton starts with just the layers it re-exports.
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-ecs = { path = "../../crates/axiom-ecs" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-frame = { path = "../../crates/axiom-frame" }
 axiom-scene = { path = "../axiom-scene" }
+axiom-resources = { path = "../axiom-resources" }
+axiom-render-pipeline = { path = "../axiom-render-pipeline" }
+axiom-webgpu = { path = "../axiom-webgpu" }
 
 [lints.rust]
 unsafe_code = "forbid"

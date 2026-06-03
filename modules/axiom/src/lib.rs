@@ -12,16 +12,20 @@
 //! That one `pub mod` is the module's single facade under Module Law #8.
 
 mod angle;
+mod app;
 mod assets;
 mod bundle;
 mod camera;
 mod color;
+mod default_plugins;
 mod directional_light;
+mod frame_outcome;
 mod handle;
 mod material;
 mod mesh;
 mod renderable;
 mod scene_commands;
 mod spin;
+mod window;
 
 pub mod prelude;

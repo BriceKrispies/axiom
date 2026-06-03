@@ -9,13 +9,17 @@ pub use axiom_ecs::SchedulePhase;
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
 
 pub use crate::angle::Angle;
+pub use crate::app::{App, RunningApp};
 pub use crate::assets::Assets;
 pub use crate::camera::{Camera, PerspectiveProjection};
 pub use crate::color::Color;
+pub use crate::default_plugins::DefaultPlugins;
 pub use crate::directional_light::DirectionalLight;
+pub use crate::frame_outcome::{DrawData, FrameOutcome};
 pub use crate::handle::Handle;
 pub use crate::material::Material;
 pub use crate::mesh::Mesh;
 pub use crate::renderable::Renderable;
 pub use crate::scene_commands::SceneCommands;
 pub use crate::spin::Spin;
+pub use crate::window::Window;
