@@ -29,9 +29,17 @@ commits below.
      platform layer — so no linear position exists for it. Layers also may not
      import modules, which would permanently bar it from `GpuSubmission`. Rule #9
      already anticipates an allowlist extension, not a new layer.
-3. **The prelude is a sanctioned umbrella crate.** A single `axiom` frontend
-   crate re-exports the curated barrel (`axiom::prelude::*`). Module Law #8
-   (one facade per module) stays intact; the umbrella is the one named exception.
+3. **The prelude umbrella is just a feature module — no new tier, no law
+   amendment.** Module Law #8 is enforced by counting `lib.rs` lines starting
+   with `pub ` (`class_check.rs::check_module_facades_export_one`). A single
+   `pub mod prelude;` is exactly one such line, so it satisfies #8. The `axiom`
+   crate is therefore an ordinary **feature module**: `lib.rs` = `pub mod
+   prelude;` (its one facade), `allowed_modules = [scene, resources,
+   render-pipeline, windowing]`, depended on by apps (apps may depend on
+   modules). A `prelude` is the idiomatic single entry point — honest, not
+   gaming the rule. **Original commit 12 (sanction an umbrella tier) dissolves**;
+   the only remaining law change in the effort is the windowing platform-API
+   allowlist (commit 9).
 4. **There is one canonical world, and it is `axiom-scene`'s.** Godot
    (`SceneTree`), Unity (the active scene), and Unreal (`UWorld`) all collapse
    "scene" and "world" into a single tree that engine systems and user scripts
