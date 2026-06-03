@@ -13,6 +13,7 @@
 
 mod angle;
 mod assets;
+mod bundle;
 mod camera;
 mod color;
 mod directional_light;
@@ -20,6 +21,7 @@ mod handle;
 mod material;
 mod mesh;
 mod renderable;
+mod scene_commands;
 mod spin;
 
 pub mod prelude;

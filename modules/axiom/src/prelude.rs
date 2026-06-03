@@ -17,4 +17,5 @@ pub use crate::handle::Handle;
 pub use crate::material::Material;
 pub use crate::mesh::Mesh;
 pub use crate::renderable::Renderable;
+pub use crate::scene_commands::SceneCommands;
 pub use crate::spin::Spin;

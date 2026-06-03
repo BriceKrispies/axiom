@@ -16,6 +16,7 @@ crate-type = ["rlib"]
 # `allowed_modules`. The skeleton starts with just the layers it re-exports.
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-ecs = { path = "../../crates/axiom-ecs" }
+axiom-scene = { path = "../axiom-scene" }
 
 [lints.rust]
 unsafe_code = "forbid"
