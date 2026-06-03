@@ -22,7 +22,8 @@
 //!
 //! ## Public surface
 //! [`World`] (the facade), [`EntityRegistry`] (live entities), [`ComponentColumn`]
-//! (a sparse per-type store), and [`WorldSystem`] (per-frame behavior). Curated
+//! (a sparse per-type store), [`WorldSystem`] (per-frame behavior), and
+//! [`SchedulePhase`] (whether a system runs at startup or every update). Curated
 //! set enforced by `tests/architecture.rs::lib_exports_are_curated_set`.
 
 mod column_set;
@@ -30,6 +31,7 @@ mod component_column;
 mod dynamic_components;
 mod entity_registry;
 mod erased_column;
+mod schedule_phase;
 mod world;
 mod world_step;
 mod world_system;
@@ -42,6 +44,7 @@ pub use component_column::ComponentColumn;
 pub use dynamic_components::DynamicComponents;
 pub use entity_registry::EntityRegistry;
 pub use erased_column::ErasedColumn;
+pub use schedule_phase::SchedulePhase;
 pub use world::World;
 pub use world_step::WorldStep;
 pub use world_system::WorldSystem;

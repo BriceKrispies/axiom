@@ -8,6 +8,7 @@ use axiom_kernel::{
 
 use crate::column_set::ColumnSet;
 use crate::entity_registry::EntityRegistry;
+use crate::schedule_phase::SchedulePhase;
 use crate::world_step::WorldStep;
 use crate::world_system::WorldSystem;
 
@@ -22,18 +23,22 @@ const WORLD_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 /// own component set; the world knows nothing about what components exist.
 /// `advance` consumes a [`FrameContext`] and runs the registered systems only
 /// when the frame is active — the same gating `axiom-scene::advance` uses, and
-/// this layer's adapter over the frame layer.
+/// this layer's adapter over the frame layer. Systems run in two ordered
+/// [`SchedulePhase`]s: every `Startup` system runs once on the first active
+/// advance, then every `Update` system runs on each active advance.
 pub struct World<S> {
     entities: EntityRegistry,
     storage: S,
-    systems: Vec<Box<dyn WorldSystem<S>>>,
+    startup: Vec<Box<dyn WorldSystem<S>>>,
+    update: Vec<Box<dyn WorldSystem<S>>>,
+    startup_done: bool,
 }
 
 impl<S> std::fmt::Debug for World<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("World")
             .field("entities", &self.entities.len())
-            .field("systems", &self.systems.len())
+            .field("systems", &self.system_count())
             .finish()
     }
 }
@@ -44,20 +49,39 @@ impl<S: Default> World<S> {
         World {
             entities: EntityRegistry::new(),
             storage: S::default(),
-            systems: Vec::new(),
+            startup: Vec::new(),
+            update: Vec::new(),
+            startup_done: false,
         }
     }
 }
 
 impl<S> World<S> {
-    /// Register a system; systems run in registration order on `advance`.
+    /// Register a system in the [`SchedulePhase::Update`] phase: it runs on every
+    /// active advance, in registration order. Shorthand for
+    /// [`Self::register_system_in`] with `Update`.
     pub fn register_system(&mut self, system: Box<dyn WorldSystem<S>>) {
-        self.systems.push(system);
+        self.register_system_in(SchedulePhase::Update, system);
     }
 
-    /// The number of registered systems.
+    /// Register a system into an explicit [`SchedulePhase`]. `Startup` systems run
+    /// exactly once, on the first active advance, before any `Update` system;
+    /// `Update` systems run on every active advance. Within a phase, systems run
+    /// in registration order.
+    pub fn register_system_in(
+        &mut self,
+        phase: SchedulePhase,
+        system: Box<dyn WorldSystem<S>>,
+    ) {
+        match phase {
+            SchedulePhase::Startup => self.startup.push(system),
+            SchedulePhase::Update => self.update.push(system),
+        }
+    }
+
+    /// The number of registered systems across all phases.
     pub fn system_count(&self) -> usize {
-        self.systems.len()
+        self.startup.len() + self.update.len()
     }
 
     /// Mint and register a new entity. Components are inserted into the
@@ -96,10 +120,13 @@ impl<S> World<S> {
         self.entities.is_empty()
     }
 
-    /// Advance the world for one engine frame at logical time `tick`: run every
-    /// registered system, in order, but only when the frame is active (not
-    /// skipped and it executed at least one runtime step). The caller owns the
-    /// tick — a real app passes its accumulating simulation tick; a test or a
+    /// Advance the world for one engine frame at logical time `tick`: run the
+    /// registered systems by phase — every `Startup` system once on the first
+    /// active advance, then every `Update` system — but only when the frame is
+    /// active (not skipped and it executed at least one runtime step). A frame
+    /// that is not active runs nothing and does not consume the startup phase, so
+    /// `Startup` systems still fire on the first *active* advance. The caller owns
+    /// the tick — a real app passes its accumulating simulation tick; a test or a
     /// frame-N renderer passes the frame it wants. The tick reaches systems via
     /// [`WorldStep`].
     pub fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) {
@@ -107,7 +134,13 @@ impl<S> World<S> {
             return;
         }
         let step = WorldStep::new(tick);
-        for system in &self.systems {
+        if !self.startup_done {
+            for system in &self.startup {
+                system.run(&step, &self.entities, &mut self.storage);
+            }
+            self.startup_done = true;
+        }
+        for system in &self.update {
             system.run(&step, &self.entities, &mut self.storage);
         }
     }
@@ -305,6 +338,20 @@ mod tests {
         }
     }
 
+    /// Appends `mark` as a decimal digit onto `doubled` each run, so the final
+    /// value encodes the exact sequence of systems that ran (e.g. `12` = a
+    /// `Mark(1)` then a `Mark(2)`).
+    struct Mark(i32);
+    impl WorldSystem<Storage> for Mark {
+        fn run(&self, _step: &WorldStep, entities: &EntityRegistry, storage: &mut Storage) {
+            let ids: Vec<EntityId> = entities.iter().collect();
+            for e in ids {
+                let n = storage.doubled.get(e).copied().unwrap_or(0);
+                storage.doubled.insert(e, n * 10 + self.0);
+            }
+        }
+    }
+
     fn world_with_one_value(v: i32) -> (World<Storage>, EntityId) {
         let mut world: World<Storage> = World::new();
         world.register_system(Box::new(DoubleValues));
@@ -373,6 +420,38 @@ mod tests {
         assert_eq!(ctx.runtime_step_count(), 0);
         world.advance(0, &ctx);
         assert!(world.storage().doubled.get(e).is_none(), "zero-step frame runs no systems");
+    }
+
+    #[test]
+    fn startup_runs_once_before_update_on_each_active_advance() {
+        let mut world: World<Storage> = World::new();
+        world.register_system_in(SchedulePhase::Startup, Box::new(Mark(1)));
+        world.register_system_in(SchedulePhase::Update, Box::new(Mark(2)));
+        assert_eq!(world.system_count(), 2);
+        let e = world.spawn();
+        let frame = fixtures::active_engine_frame();
+        // Advance 1: startup(1) then update(2) -> 12.
+        world.advance(0, &FrameContext::new(&frame));
+        assert_eq!(world.storage().doubled.get(e), Some(&12));
+        // Advance 2: update only -> 12*10 + 2 = 122.
+        world.advance(1, &FrameContext::new(&frame));
+        assert_eq!(world.storage().doubled.get(e), Some(&122));
+        // Advance 3: update only -> 1222. Startup never runs again.
+        world.advance(2, &FrameContext::new(&frame));
+        assert_eq!(world.storage().doubled.get(e), Some(&1222));
+    }
+
+    #[test]
+    fn an_inactive_first_frame_does_not_consume_the_startup_phase() {
+        let mut world: World<Storage> = World::new();
+        world.register_system_in(SchedulePhase::Startup, Box::new(Mark(1)));
+        let e = world.spawn();
+        // A skipped frame runs nothing and leaves startup pending.
+        world.advance(0, &FrameContext::new(&fixtures::skipped_engine_frame()));
+        assert!(world.storage().doubled.get(e).is_none());
+        // The first *active* advance is where startup finally fires.
+        world.advance(1, &FrameContext::new(&fixtures::active_engine_frame()));
+        assert_eq!(world.storage().doubled.get(e), Some(&1));
     }
 
     #[test]
