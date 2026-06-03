@@ -63,13 +63,21 @@ commits below.
    (decision 4): the schedule is consumed/proven by the App frontend (slice 4),
    not the demo. No second world to drive it through.
 
-### Slice 2 — module facade ergonomics (no new crates)
-5. `axiom-resources`: handle-based `Assets<T>` (`add`/`get`) behind `ResourcesApi`.
-6. `axiom-resources`: `Mesh::cube` / `Material::lit` constructors.
-7. `axiom-scene`: bundle spawn (`spawn`/`with_child`) + `Renderable`/`Camera`/
-   `DirectionalLight`/`Spin`/`Transform` bundles, behind `SceneApi`.
-8. headless demo: rewrite onto `Assets` + bundle spawn (second shrink).
-   **← lowest-risk checkpoint: payoff to both apps, zero new crates, zero law changes.**
+### Slice 2 — ergonomics — RELOCATED to the umbrella crate (Module Law #8)
+Module Law #8 (one public facade per module) forbids a module from exporting
+free-standing types like `Assets<T>`, `Mesh`, `Material`, or component bundles —
+they would be a second top-level `pub`. `ResourcesApi`/`SceneApi` already expose
+everything needed, so the modules get **no change**. The ergonomic *types* are
+an umbrella-crate concern and move into slice 4:
+- ~~5–6 `axiom-resources`: `Assets<T>` / `Mesh::cube` / `Material::lit`~~ →
+  umbrella `Mesh`/`Material`/`Assets<T>` value types wrapping `ResourcesApi`.
+- ~~7 `axiom-scene`: bundle spawn + component bundles~~ → umbrella `SceneCommands`
+  + `Renderable`/`Camera`/`Spin`/`DirectionalLight` bundles wrapping `SceneApi`.
+- ~~8 headless demo shrink~~ → folds into slice 5 (collapse onto `App`).
+
+Consequence: the umbrella-tier law change (was commit 12) moves onto the
+critical path early, since it gates both the prelude *and* every relocated
+ergonomic type.
 
 ### Slice 3 — windowing feature module
 9. **(law)** `xtask`: add windowing to the rule-9 browser/GPU-API allowlist.
