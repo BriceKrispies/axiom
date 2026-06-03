@@ -32,6 +32,20 @@ commits below.
 3. **The prelude is a sanctioned umbrella crate.** A single `axiom` frontend
    crate re-exports the curated barrel (`axiom::prelude::*`). Module Law #8
    (one facade per module) stays intact; the umbrella is the one named exception.
+4. **There is one canonical world, and it is `axiom-scene`'s.** Godot
+   (`SceneTree`), Unity (the active scene), and Unreal (`UWorld`) all collapse
+   "scene" and "world" into a single tree that engine systems and user scripts
+   share. Axiom already does this: `axiom-scene`'s `World<SceneStorage>` *is*
+   the entity/component world (nodes are entities, facts are columns). So the
+   App frontend does **not** create a second world — it drives and extends
+   scene's. User-defined components/systems plug into that world through the
+   ecs `DynamicComponents` primitive when needed. Consequence: the original
+   commits 3 (scene "registerable systems") and 4 (headless demo "through the
+   schedule") dissolve — scene already registers `SpinSystem` +
+   `TransformPropagation` and exposes `advance`; manufacturing a new scene API
+   for them would be the speculative abstraction the engine forbids. The
+   Startup/Update schedule from commit 2 is instead consumed and proven by the
+   App frontend (slice 4).
 
 ## The commit series
 
@@ -39,12 +53,15 @@ commits below.
 `(doc)` is prose only.
 
 ### Slice 1 — schedule backbone
-1. **(doc)** add the north-star sketch, README, and this build plan.
+1. **(doc)** add the north-star sketch, README, and this build plan. ✅
 2. `axiom-ecs`: add labelled `Schedule` phases (`Startup`/`Update`) over
-   `WorldSystem`; adapter-over-frame relationship preserved.
-3. `axiom-scene`: expose spin + transform propagation as registerable systems,
-   behind `SceneApi`.
-4. headless demo: drive its tick through the ecs Schedule (first app shrink).
+   `WorldSystem`; adapter-over-frame relationship preserved. ✅
+3. ~~`axiom-scene`: expose spin + transform propagation as registerable
+   systems~~ — **dissolved** (decision 4): scene already registers
+   `SpinSystem` + `TransformPropagation` and exposes `advance`.
+4. ~~headless demo: drive its tick through the ecs Schedule~~ — **dissolved**
+   (decision 4): the schedule is consumed/proven by the App frontend (slice 4),
+   not the demo. No second world to drive it through.
 
 ### Slice 2 — module facade ergonomics (no new crates)
 5. `axiom-resources`: handle-based `Assets<T>` (`add`/`get`) behind `ResourcesApi`.
