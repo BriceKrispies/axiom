@@ -8,8 +8,13 @@
 pub use axiom_ecs::SchedulePhase;
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
 
+pub use crate::angle::Angle;
 pub use crate::assets::Assets;
+pub use crate::camera::{Camera, PerspectiveProjection};
 pub use crate::color::Color;
+pub use crate::directional_light::DirectionalLight;
 pub use crate::handle::Handle;
 pub use crate::material::Material;
 pub use crate::mesh::Mesh;
+pub use crate::renderable::Renderable;
+pub use crate::spin::Spin;

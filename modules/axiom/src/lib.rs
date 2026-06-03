@@ -11,10 +11,15 @@
 //! is re-exported from there, so an app writes a single `use axiom::prelude::*;`.
 //! That one `pub mod` is the module's single facade under Module Law #8.
 
+mod angle;
 mod assets;
+mod camera;
 mod color;
+mod directional_light;
 mod handle;
 mod material;
 mod mesh;
+mod renderable;
+mod spin;
 
 pub mod prelude;
