@@ -32,6 +32,14 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.89"
 
+# Custom `dylint` lints (repo tooling — see tools/lints/). These hook into rustc
+# to enforce structural rules the text-based xtask checker can't, starting with
+# `test_without_assertion`. Run with `cargo dylint --all -- --all-targets`. This
+# is metadata only: it adds no dependency edge, so the lint workspace stays out
+# of the engine graph and the Module/Coverage laws.
+[workspace.metadata.dylint]
+libraries = [{ path = "tools/lints/test_without_assertion" }]
+
 # Deterministic, size-conscious release profile suitable for a future wasm build.
 [profile.release]
 opt-level = "s"

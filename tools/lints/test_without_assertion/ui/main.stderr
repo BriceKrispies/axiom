@@ -1,0 +1,69 @@
+warning: this `#[test]` function contains no assertion
+  --> $DIR/main.rs:11:1
+   |
+LL | / fn no_assertion_just_executes() {
+LL | |     let _ = 1 + 1;
+LL | | }
+   | |_^
+   |
+   = help: assert on an observable result, or delete the test if it proves nothing
+   = note: `#[warn(test_without_assertion)]` on by default
+
+warning: this `#[test]` function contains no assertion
+  --> $DIR/main.rs:19:1
+   |
+LL | / fn new_and_default_only_construct() {
+LL | |     let _ = String::new();
+LL | |     let _ = String::default();
+LL | | }
+   | |_^
+   |
+   = help: assert on an observable result, or delete the test if it proves nothing
+
+warning: this `#[test]` function contains no assertion
+  --> $DIR/main.rs:26:1
+   |
+LL | / fn all_accessors_are_reachable() {
+LL | |     let s = String::from("hi");
+LL | |     let _ = s.len();
+LL | |     let _ = s.is_empty();
+LL | |     let _ = s.capacity();
+LL | | }
+   | |_^
+   |
+   = help: assert on an observable result, or delete the test if it proves nothing
+
+warning: this `#[test]` function contains no assertion
+  --> $DIR/main.rs:36:1
+   |
+LL | / fn unwrap_only_is_flagged() {
+LL | |     let v: Result<i32, ()> = Ok(3);
+LL | |     v.unwrap();
+LL | | }
+   | |_^
+   |
+   = help: assert on an observable result, or delete the test if it proves nothing
+
+warning: this `#[test]` function contains no assertion
+  --> $DIR/main.rs:43:1
+   |
+LL | / fn question_mark_only_is_flagged() -> Result<(), String> {
+LL | |     Err::<(), _>("boom".to_string()).map_err(|e| e)?;
+LL | |     Ok(())
+LL | | }
+   | |_^
+   |
+   = help: assert on an observable result, or delete the test if it proves nothing
+
+warning: this `#[test]` function contains no assertion
+  --> $DIR/main.rs:50:1
+   |
+LL | / fn delegates_to_non_asserting_helper() {
+LL | |     just_compute(3);
+LL | | }
+   | |_^
+   |
+   = help: assert on an observable result, or delete the test if it proves nothing
+
+warning: 6 warnings emitted
+

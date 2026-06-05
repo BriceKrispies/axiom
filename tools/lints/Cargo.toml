@@ -1,0 +1,15 @@
+# Axiom lint workspace — repo TOOLING, deliberately a SEPARATE workspace.
+#
+# These are `dylint` lint libraries: out-of-tree Clippy-style lints that hook
+# into rustc (HIR + types, and MIR/control-flow when a rule needs it) to enforce
+# Axiom's structural rules — the first being `test_without_assertion`.
+#
+# This is its own workspace, NOT a member of the repo root, for two reasons:
+#   1. It pins a nightly with `rustc_private`/`rustc-dev` (see rust-toolchain),
+#      which must never leak into the engine build.
+#   2. Being a separate workspace, it is absent from the root `cargo metadata`,
+#      so the Module Law's "every package must classify" checker never sees it.
+# It is Tooling: outside the engine dependency graph and the coverage gate.
+[workspace]
+resolver = "2"
+members = ["test_without_assertion"]
