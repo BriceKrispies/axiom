@@ -233,8 +233,16 @@ fn scene_imports_no_other_modules() {
     let mut violations = Vec::new();
     for path in scene_source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
+        // Match whole import-prefix identifiers, not raw substrings: a module's
+        // crate prefix (`axiom_render`, or the umbrella's bare `axiom`) is a
+        // distinct token. A substring check would flag legal layer imports like
+        // `axiom_math` as references to the `axiom` umbrella — the same
+        // identifier-token split the legal-layers test above relies on.
+        let tokens: std::collections::HashSet<&str> = stripped
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .collect();
         for other in &other_modules {
-            if stripped.contains(other.as_str()) {
+            if tokens.contains(other.as_str()) {
                 violations.push(format!(
                     "{}: references other module `{}`",
                     path.display(),
