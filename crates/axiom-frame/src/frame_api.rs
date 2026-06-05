@@ -175,8 +175,11 @@ mod tests {
 
     #[test]
     fn new_and_default_are_equivalent() {
-        let _from_new = FrameApi::new();
-        let _from_default = FrameApi::default();
+        // Both construction paths yield a facade that builds an identical queue.
+        let mut from_new = FrameApi::new().command_queue();
+        let mut from_default = FrameApi::default().command_queue();
+        assert_eq!(from_new.push(7, vec![1]), from_default.push(7, vec![1]));
+        assert_eq!(from_new.len(), from_default.len());
     }
 
     #[test]

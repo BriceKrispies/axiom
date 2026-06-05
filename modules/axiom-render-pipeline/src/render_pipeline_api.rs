@@ -368,8 +368,14 @@ mod tests {
 
     #[test]
     fn new_and_default_are_equivalent() {
-        let _ = RenderPipelineApi::new();
-        let _ = RenderPipelineApi::default();
+        // Both construction paths submit the same scene to the same command count.
+        let scene = cube_scene();
+        let webgpu = WebGpuApi::new_recording();
+        let n = RenderPipelineApi::new();
+        let d = RenderPipelineApi::default();
+        let rn = n.submit(&frame_with_assets(&n), &scene, &webgpu);
+        let rd = d.submit(&frame_with_assets(&d), &scene, &webgpu);
+        assert_eq!(n.report_command_count(&rn), d.report_command_count(&rd));
     }
 
     #[test]

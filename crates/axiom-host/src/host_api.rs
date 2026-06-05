@@ -268,9 +268,13 @@ mod tests {
 
     #[test]
     fn new_and_default_are_equivalent() {
-        // The facade is a zero-sized marker.
-        let _from_default = HostApi::default();
-        let _from_new = HostApi::new();
+        // The facade is a zero-sized marker: both paths validate viewports
+        // identically through math.
+        let m = math();
+        assert_eq!(
+            HostApi::new().viewport(&m, 800, 600, 2.0).unwrap().physical_width(),
+            HostApi::default().viewport(&m, 800, 600, 2.0).unwrap().physical_width(),
+        );
     }
 
     #[test]

@@ -618,12 +618,14 @@ mod cov {
     }
 
     #[test]
-    fn diagnostics_enabled_step_runs_and_touches_context() {
+    fn diagnostics_enabled_step_keeps_the_runtime_running() {
         let mut rt = started(RuntimeConfig::new(1_000).with_diagnostics_enabled(true));
         rt.scheduler_mut()
             .register(HandleId::from_raw(1), "acc", 1, Box::new(AccessorSystem))
             .unwrap();
         rt.step().unwrap();
+        // The diagnostics-enabled step completes without tripping the runtime.
+        assert_eq!(rt.state(), RuntimeState::Running);
     }
 
     #[test]
@@ -639,22 +641,19 @@ mod cov {
     }
 
     #[test]
-    fn all_accessors_are_reachable() {
+    fn accessors_reflect_a_freshly_started_runtime() {
         let mut rt = started(RuntimeConfig::new(1_000));
-        let _ = rt.state();
+        // A freshly started runtime is Running with nothing registered or queued.
+        assert_eq!(rt.state(), RuntimeState::Running);
+        assert!(rt.scheduler().is_empty());
+        assert!(rt.scheduler_mut().is_empty());
+        assert_eq!(rt.commands().len(), 0);
+        assert_eq!(rt.events().len(), 0);
+        // The remaining accessors are reachable on the started runtime.
         let _ = rt.config();
-        let _ = rt.scheduler();
-        let _ = rt.scheduler_mut();
         let tl = rt.timeline();
-        let _ = tl.frame();
-        let _ = tl.tick();
-        let _ = tl.sequence();
-        let _ = tl.elapsed_nanos();
-        let _ = rt.commands();
-        let _ = rt.events();
-        let _ = rt.log_sink();
-        let _ = rt.telemetry_sink();
-        let _ = rt.current_step();
+        let _ = (tl.frame(), tl.tick(), tl.sequence(), tl.elapsed_nanos());
+        let _ = (rt.log_sink(), rt.telemetry_sink(), rt.current_step());
     }
 
     #[test]

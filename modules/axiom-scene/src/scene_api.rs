@@ -246,8 +246,8 @@ mod tests {
 
     #[test]
     fn new_and_default_facades_are_equivalent() {
-        let _ = SceneApi::new();
-        let _ = SceneApi::default();
+        // Both construction paths produce the same (empty) scene snapshot.
+        assert_eq!(SceneApi::new().snapshot(), SceneApi::default().snapshot());
     }
 
     #[test]

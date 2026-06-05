@@ -208,8 +208,11 @@ mod tests {
 
     #[test]
     fn new_and_default_facades_are_equivalent() {
-        let _ = WebGpuApi::new();
-        let _ = WebGpuApi::default();
+        // Both construction paths start in the same recording backend.
+        assert_eq!(
+            WebGpuApi::new().backend_kind(),
+            WebGpuApi::default().backend_kind(),
+        );
     }
 
     #[test]

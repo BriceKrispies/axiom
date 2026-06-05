@@ -1,17 +1,13 @@
 //! The single public facade of the `axiom-resources` module.
 
-use axiom_math::{Vec2, Vec3, Vec4};
+use axiom_math::Vec4;
 
 use crate::basic_lit_material::build_basic_lit_material;
 use crate::cube_mesh::build_cube_mesh;
-use crate::mesh_data::MeshData;
-use crate::material_data::MaterialData;
 use crate::resolved_resources::ResolvedResources;
 use crate::resource_id::ResourceId;
 use crate::resource_table::ResourceTable;
 use crate::solid_color_texture::build_solid_color_texture;
-use crate::texture_data::TextureData;
-use crate::vertex::Vertex;
 
 /// The only public export of `axiom-resources`.
 ///
@@ -180,7 +176,7 @@ impl ResourcesApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_math::{Vec3, Vec4};
+    use axiom_math::Vec4;
 
     fn api() -> ResourcesApi {
         ResourcesApi::new()
@@ -188,8 +184,11 @@ mod tests {
 
     #[test]
     fn new_and_default_facades_are_equivalent() {
-        let _ = ResourcesApi::new();
-        let _ = ResourcesApi::default();
+        // Both construction paths produce an equivalent empty table.
+        assert_eq!(
+            ResourcesApi::new().empty_table().mesh_count(),
+            ResourcesApi::default().empty_table().mesh_count(),
+        );
     }
 
     #[test]
@@ -286,11 +285,6 @@ mod tests {
     }
 
     #[test]
-    fn imports_live_executes() {
-        _imports_live();
-    }
-
-    #[test]
     fn resolved_counts_via_facade() {
         let mut t = api().empty_table();
         api().register_cube_mesh(&mut t);
@@ -344,21 +338,5 @@ mod tests {
         assert!(api().resolved_mesh_position_at(&r, 1, 0).is_none());
         assert!(api().resolved_mesh_indices(&r, 1).is_none());
         assert!(api().resolved_material_base_color(&r, 1).is_none());
-    }
-
-    // Keep imports live so dead-code lints don't fire if a test is
-    // commented out during local development.
-    #[allow(dead_code)]
-    fn _imports_live() {
-        let _ = (
-            MeshData::new(
-                ResourceId::from_raw(1),
-                "x",
-                vec![Vertex::new(Vec3::ZERO, Vec3::ZERO, Vec2::ZERO, Vec4::ZERO)],
-                vec![0],
-            ),
-            MaterialData::new(ResourceId::from_raw(1), "x", Vec4::ONE, None),
-            TextureData::new(ResourceId::from_raw(1), "x", 1, 1, vec![0u8; 4]),
-        );
     }
 }

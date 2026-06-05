@@ -309,8 +309,13 @@ mod tests {
 
     #[test]
     fn new_and_default_facades_are_equivalent() {
-        let _ = RenderApi::new();
-        let _ = RenderApi::default();
+        // Both construction paths build the same command list from equal input.
+        let n = RenderApi::new();
+        let d = RenderApi::default();
+        assert_eq!(
+            n.build_command_list(&n.new_input(100, 100)).len(),
+            d.build_command_list(&d.new_input(100, 100)).len(),
+        );
     }
 
     #[test]

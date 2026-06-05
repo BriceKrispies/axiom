@@ -399,6 +399,8 @@ mod cov {
             .register(HandleId::from_raw(1), "noop", 1, Box::new(Noop))
             .unwrap();
         rt.step().unwrap(); // executes Noop::run
+        // The registered system survived the step through the runtime.
+        assert_eq!(rt.scheduler().len(), 1);
     }
 
     #[test]
