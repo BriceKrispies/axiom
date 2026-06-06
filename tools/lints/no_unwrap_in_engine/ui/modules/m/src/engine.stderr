@@ -1,0 +1,19 @@
+warning: this `unwrap`-family call panics; it is banned in non-test engine code
+  --> $DIR/engine.rs:11:15
+   |
+LL |     let _ = v.unwrap();
+   |               ^^^^^^
+   |
+   = help: propagate the error with `?`, or use `.expect("<why it can't fail>")` for a documented invariant
+   = note: `#[warn(unwrap_in_engine)]` on by default
+
+warning: this `unwrap`-family call panics; it is banned in non-test engine code
+  --> $DIR/engine.rs:16:15
+   |
+LL |     let _ = v.unwrap_err();
+   |               ^^^^^^^^^^
+   |
+   = help: propagate the error with `?`, or use `.expect("<why it can't fail>")` for a documented invariant
+
+warning: 2 warnings emitted
+

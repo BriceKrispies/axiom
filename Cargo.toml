@@ -38,7 +38,10 @@ rust-version = "1.89"
 # is metadata only: it adds no dependency edge, so the lint workspace stays out
 # of the engine graph and the Module/Coverage laws.
 [workspace.metadata.dylint]
-libraries = [{ path = "tools/lints/test_without_assertion" }]
+libraries = [
+    { path = "tools/lints/test_without_assertion" },
+    { path = "tools/lints/no_unwrap_in_engine" },
+]
 
 # Deterministic, size-conscious release profile suitable for a future wasm build.
 [profile.release]

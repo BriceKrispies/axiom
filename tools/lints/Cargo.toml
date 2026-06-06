@@ -2,7 +2,7 @@
 #
 # These are `dylint` lint libraries: out-of-tree Clippy-style lints that hook
 # into rustc (HIR + types, and MIR/control-flow when a rule needs it) to enforce
-# Axiom's structural rules — the first being `test_without_assertion`.
+# Axiom's structural rules: `test_without_assertion`, `no_unwrap_in_engine`.
 #
 # This is its own workspace, NOT a member of the repo root, for two reasons:
 #   1. It pins a nightly with `rustc_private`/`rustc-dev` (see rust-toolchain),
@@ -12,4 +12,4 @@
 # It is Tooling: outside the engine dependency graph and the coverage gate.
 [workspace]
 resolver = "2"
-members = ["test_without_assertion"]
+members = ["test_without_assertion", "no_unwrap_in_engine"]
