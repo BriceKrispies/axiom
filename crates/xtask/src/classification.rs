@@ -17,6 +17,10 @@ pub enum PackageClass {
     Module,
     App,
     Tool,
+    /// A build-time support crate (today: the `axiom-zones` zone-marker
+    /// proc-macros). It is not on the runtime spine, every layer/module/app may
+    /// depend on it, and it is excluded from the coverage gate.
+    Support,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +62,7 @@ impl ManifestIndex {
 /// - `modules/<name>/module.toml`         → Module
 /// - `apps/<name>/app.toml`               → App
 /// - package name `"xtask"`               → Tool
+/// - package name `"axiom-zones"`         → Support
 /// - `tools/<name>/...`                   → Tool
 /// - anything else                        → `None`
 pub fn classify(
@@ -76,6 +81,10 @@ pub fn classify(
     }
     if pkg.name == "xtask" {
         return Some(PackageClass::Tool);
+    }
+    // The zone-marker proc-macro crate is build-time engine support, not a layer.
+    if pkg.name == "axiom-zones" {
+        return Some(PackageClass::Support);
     }
     if let Ok(rel) = pkg.dir.strip_prefix(root) {
         let first = rel.components().next().and_then(|c| c.as_os_str().to_str());
@@ -130,6 +139,20 @@ mod tests {
         assert_eq!(
             classify(Path::new("/repo"), &pkg, &index),
             Some(PackageClass::Tool)
+        );
+    }
+
+    #[test]
+    fn axiom_zones_package_is_support() {
+        let pkg = WorkspacePackage {
+            name: "axiom-zones".into(),
+            dir: PathBuf::from("/repo/crates/axiom-zones"),
+            workspace_deps: vec![],
+        };
+        let index = ManifestIndex::default();
+        assert_eq!(
+            classify(Path::new("/repo"), &pkg, &index),
+            Some(PackageClass::Support)
         );
     }
 

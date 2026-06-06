@@ -386,6 +386,8 @@ fn check_forward_dependencies(
                     )),
                     PackageClass::Layer => { /* allowed: the existing layer law handles index ordering */
                     }
+                    PackageClass::Support => { /* allowed: any engine code may depend on the support crate */
+                    }
                 },
                 PackageClass::Module => match dep_class {
                     PackageClass::Module => {
@@ -475,6 +477,8 @@ fn check_forward_dependencies(
                             }
                         }
                     }
+                    PackageClass::Support => { /* allowed: any engine code may depend on the support crate */
+                    }
                 },
                 PackageClass::App => match dep_class {
                     PackageClass::App => report.push(Violation::new(
@@ -545,8 +549,12 @@ fn check_forward_dependencies(
                             }
                         }
                     }
+                    PackageClass::Support => { /* allowed: any engine code may depend on the support crate */
+                    }
                 },
                 PackageClass::Tool => { /* tools are free to depend on whatever they need */ }
+                PackageClass::Support => { /* the support crate depends only on external proc-macro crates */
+                }
             }
         }
     }

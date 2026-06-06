@@ -48,7 +48,7 @@ elseif ($Html) { $report = @('--html') }
 # composition leaves (nothing depends on them) and xtask is repo tooling (outside
 # the engine graph) — both sit outside the gate. This is a scope boundary, NOT a
 # loophole: no layer or module file may ever be added here to dodge the gate.
-$exclude = @('--ignore-filename-regex', '[/\\](xtask|apps)[/\\]')
+$exclude = @('--ignore-filename-regex', '[/\\](xtask|apps|axiom-zones)[/\\]')
 
 # The 100% gate. llvm-cov has no --fail-under-branches; regions are the
 # branch-level enforceable proxy (one region per branch arm).

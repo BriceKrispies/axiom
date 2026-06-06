@@ -281,7 +281,16 @@ Hard rules (mechanically enforced):
     module.
 12. **Every workspace package must classify.** A package that is not under
     `crates/`, `modules/`, `apps/`, or `tools/` (and is not the existing
-    `xtask` crate) fails as `UnknownPackageClass`.
+    `xtask` crate, nor the `axiom-zones` support crate) fails as
+    `UnknownPackageClass`.
+13. **Support crates are build-time engine support, not the spine.** The
+    `axiom-zones` crate (the zone-marker proc-macros — see "Zone markers"
+    below) classifies as `PackageClass::Support`: it has no `layer.toml`,
+    **every** layer/module/app may depend on it (it is exempt from the layer
+    ordering), it may depend on nothing engine, and it is excluded from the
+    coverage gate. It is the one sanctioned escape from "layers depend only
+    on lower layers"; adding another support crate is a deliberate amendment
+    here, not a default.
 
 Architecture violations fail `cargo xtask check-architecture` and the
 workspace test `real_repo_class_aware_check_passes`. The checker reads
@@ -329,14 +338,33 @@ allowed_modules = ["scene", "render"]
 ### Repo structure summary
 
 ```text
-crates/    # layers (ordered spine)
+crates/    # layers (ordered spine) + the axiom-zones support crate
 modules/   # isolated capabilities (future)
 apps/      # composition roots (future)
-tools/     # repo tooling (future)
+tools/     # repo tooling (future) — incl. tools/lints (dylint rulebook)
 ```
 
 The `xtask` crate is a tool; it has no `layer.toml`, no `module.toml`,
-no `app.toml`, and is excluded from the engine dependency graph.
+no `app.toml`, and is excluded from the engine dependency graph. The
+`axiom-zones` crate is a `Support` crate (see Module Law #13).
+
+## Zone markers
+
+`crates/axiom-zones` provides attribute macros that label engine code with a
+structural *zone* so the dylint rulebook (`tools/lints/`) can enforce
+zone-specific rules — e.g. no wall-clock time in a `#[sim]` zone, no allocation
+in a `#[hot_path]`. The markers: `#[sim]` (deterministic simulation),
+`#[hot_path]` (per-frame/tick work), `#[strict]` (branchless/primitive),
+`#[supervisor]` (an unbounded `loop` is allowed here), and
+`#[escape_hatch(reason = "…")]` (a documented, deliberate exception).
+
+Custom attributes do not exist on stable Rust, so each attribute is a near-no-op
+proc-macro that re-emits the item with a **greppable zero-sized marker**
+prepended — `const __engine_zone_sim: () = ();` for a `#[sim]` fn/mod, and a
+`const __engine_escape_hatch_reason: &str = "…";` for an escape hatch. The raw
+attribute is consumed at expansion (like `#[test]`), but the marker survives into
+HIR where the lints detect it by name. Because the markers are greppable, the
+zones are also discoverable with a plain text search — which is the point.
 
 ## Vertical Slice Module Contracts
 

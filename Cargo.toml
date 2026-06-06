@@ -16,6 +16,7 @@ members = [
     "crates/axiom-frame",
     "crates/axiom-ecs",
     "crates/axiom-introspect",
+    "crates/axiom-zones",
     "modules/axiom-scene",
     "modules/axiom-resources",
     "modules/axiom-render",
