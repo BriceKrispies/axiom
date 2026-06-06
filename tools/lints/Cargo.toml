@@ -12,4 +12,4 @@
 # It is Tooling: outside the engine dependency graph and the coverage gate.
 [workspace]
 resolver = "2"
-members = ["test_without_assertion", "no_unwrap_in_engine"]
+members = ["test_without_assertion", "no_unwrap_in_engine", "engine_no_time_in_sim"]

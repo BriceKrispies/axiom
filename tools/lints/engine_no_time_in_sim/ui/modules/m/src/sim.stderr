@@ -1,0 +1,27 @@
+warning: reading the clock inside a `#[sim]` zone makes the simulation non-deterministic
+  --> $DIR/sim.rs:11:13
+   |
+LL |     let _ = Instant::now();
+   |             ^^^^^^^^^^^^^^
+   |
+   = help: take time as an explicit seeded input (a fixed tick / step), never sample it here
+   = note: `#[warn(no_time_in_sim)]` on by default
+
+warning: reading the clock inside a `#[sim]` zone makes the simulation non-deterministic
+  --> $DIR/sim.rs:12:13
+   |
+LL |     let _ = SystemTime::now();
+   |             ^^^^^^^^^^^^^^^^^
+   |
+   = help: take time as an explicit seeded input (a fixed tick / step), never sample it here
+
+warning: reading the clock inside a `#[sim]` zone makes the simulation non-deterministic
+  --> $DIR/sim.rs:33:17
+   |
+LL |         let _ = std::time::Instant::now();
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: take time as an explicit seeded input (a fixed tick / step), never sample it here
+
+warning: 3 warnings emitted
+
