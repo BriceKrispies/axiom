@@ -25,7 +25,7 @@
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Item, LitStr, parse_macro_input};
+use syn::{Item, LitStr};
 
 /// `#[sim]` — deterministic simulation zone.
 #[proc_macro_attribute]
@@ -56,13 +56,12 @@ pub fn supervisor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn escape_hatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     let reason = parse_escape_hatch_reason(attr);
-    let item = parse_macro_input!(item as Item);
     let marker = format_ident!("__engine_escape_hatch_reason");
     let injected = quote! {
         #[allow(dead_code, non_upper_case_globals)]
         const #marker: &str = #reason;
     };
-    inject_into_item(item, injected)
+    inject(item, injected)
 }
 
 /// Parse `reason = "…"` from the attribute tokens, defaulting to `""` (which the
@@ -87,42 +86,55 @@ fn parse_escape_hatch_reason(attr: TokenStream) -> LitStr {
 
 /// Inject `const __engine_zone_<zone>: () = ();` into `item`.
 fn inject_zone(item: TokenStream, zone: &str) -> TokenStream {
-    let item = parse_macro_input!(item as Item);
     let marker = format_ident!("__engine_zone_{}", zone);
     let injected = quote! {
         #[allow(dead_code, non_upper_case_globals)]
         const #marker: () = ();
     };
-    inject_into_item(item, injected)
+    inject(item, injected)
 }
 
-/// Prepend `injected` to a function body or a module's items, re-emitting the
-/// item. Any other item kind is a compile error: zones live on fns and mods.
-fn inject_into_item(item: Item, injected: proc_macro2::TokenStream) -> TokenStream {
-    match item {
-        Item::Fn(mut f) => {
-            let stmt: syn::Stmt = syn::parse_quote! { #injected };
-            f.block.stmts.insert(0, stmt);
-            quote! { #f }.into()
+/// Prepend `injected` to a function body, an `impl`-method body, or a module's
+/// items, re-emitting the item. Any other item kind is a compile error: zones
+/// live on functions, methods, and inline modules.
+fn inject(item: TokenStream, injected: proc_macro2::TokenStream) -> TokenStream {
+    // A free-standing item: function or inline module.
+    match syn::parse::<Item>(item.clone()) {
+        Ok(Item::Fn(mut f)) => {
+            f.block.stmts.insert(0, syn::parse_quote! { #injected });
+            return quote! { #f }.into();
         }
-        Item::Mod(mut m) => match &mut m.content {
-            Some((_brace, items)) => {
-                let nested: Item = syn::parse_quote! { #injected };
-                items.insert(0, nested);
-                quote! { #m }.into()
-            }
-            None => syn::Error::new_spanned(
-                &m,
-                "a zone marker on a module requires an inline `mod name { ... }` body",
+        Ok(Item::Mod(mut m)) => {
+            return match &mut m.content {
+                Some((_brace, items)) => {
+                    items.insert(0, syn::parse_quote! { #injected });
+                    quote! { #m }.into()
+                }
+                None => syn::Error::new_spanned(
+                    &m,
+                    "a zone marker on a module requires an inline `mod name { ... }` body",
+                )
+                .to_compile_error()
+                .into(),
+            };
+        }
+        Ok(other) => {
+            return syn::Error::new_spanned(
+                &other,
+                "zone markers apply only to functions, methods, and inline modules",
             )
             .to_compile_error()
-            .into(),
-        },
-        other => syn::Error::new_spanned(
-            &other,
-            "zone markers apply only to functions and inline modules",
-        )
-        .to_compile_error()
-        .into(),
+            .into();
+        }
+        Err(_) => {}
+    }
+    // An associated function (a method in an `impl` block) parses as `ImplItemFn`,
+    // not `Item` — handle it so zones can mark the engine's `step`/`advance` etc.
+    match syn::parse::<syn::ImplItemFn>(item) {
+        Ok(mut method) => {
+            method.block.stmts.insert(0, syn::parse_quote! { #injected });
+            quote! { #method }.into()
+        }
+        Err(err) => err.to_compile_error().into(),
     }
 }

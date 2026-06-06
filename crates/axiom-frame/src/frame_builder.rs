@@ -66,6 +66,7 @@ impl FrameBuilder {
     /// - `InvalidFrameTiming` — the host report's `steps_executed` did
     ///   not match the plan (propagated from
     ///   [`FrameTiming::from_host_report`]).
+    #[axiom_zones::sim]
     pub fn build(
         &mut self,
         report: &HostFrameReport,

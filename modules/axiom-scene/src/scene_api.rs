@@ -207,6 +207,7 @@ impl SceneApi {
     /// spin + transform-propagation systems iff the frame is active, then return
     /// the snapshot taken afterward. The caller owns the tick (see
     /// [`axiom_ecs::World::advance`]).
+    #[axiom_zones::sim]
     pub fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
         self.scene.advance(tick, frame)
     }

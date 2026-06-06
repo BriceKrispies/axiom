@@ -16,6 +16,8 @@ crate-type = ["rlib"]
 # Layer 01 is allowed to import from layer 00 (kernel) only. The Axiom Layer
 # Law and `cargo xtask check-architecture` enforce that no other layer is used.
 axiom-kernel = { path = "../axiom-kernel" }
+# Build-time Support crate (zone marker attributes); allowed for all engine code.
+axiom-zones = { path = "../axiom-zones" }
 
 [lints.rust]
 unsafe_code = "forbid"

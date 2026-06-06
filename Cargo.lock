@@ -115,6 +115,7 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
+ "axiom-zones",
 ]
 
 [[package]]
@@ -148,6 +149,7 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-runtime",
+ "axiom-zones",
 ]
 
 [[package]]
@@ -185,6 +187,7 @@ name = "axiom-runtime"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
+ "axiom-zones",
 ]
 
 [[package]]
@@ -197,6 +200,7 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
+ "axiom-zones",
 ]
 
 [[package]]

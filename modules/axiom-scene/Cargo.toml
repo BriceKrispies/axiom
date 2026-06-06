@@ -20,6 +20,8 @@ axiom-frame = { path = "../../crates/axiom-frame" }
 # The scene is now an ECS world (Layer 05): nodes are entities, every node
 # fact is a component column, and the transform hierarchy is a WorldSystem.
 axiom-ecs = { path = "../../crates/axiom-ecs" }
+# Build-time Support crate (zone marker attributes); allowed for all engine code.
+axiom-zones = { path = "../../crates/axiom-zones" }
 
 # Test-only: building a real `HostFrameReport` (the input the frame
 # layer turns into `FrameContext`) is the cleanest way to test scene's

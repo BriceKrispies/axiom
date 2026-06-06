@@ -17,6 +17,8 @@ axiom-kernel = { path = "../axiom-kernel" }
 axiom-runtime = { path = "../axiom-runtime" }
 axiom-math = { path = "../axiom-math" }
 axiom-host = { path = "../axiom-host" }
+# Build-time Support crate (zone marker attributes); allowed for all engine code.
+axiom-zones = { path = "../axiom-zones" }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -228,6 +228,7 @@ impl Mat4 {
     }
 
     /// Matrix product `self * other`.
+    #[axiom_zones::strict]
     pub fn multiply(self, other: Mat4) -> Mat4 {
         let mut out = [0.0f32; 16];
         for col in 0..4 {

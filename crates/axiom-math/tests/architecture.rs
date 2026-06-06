@@ -309,6 +309,8 @@ fn math_only_imports_legal_lower_layers() {
                     && chunk != "axiom_kernel"
                     && chunk != "axiom_runtime"
                     && chunk != "axiom_math"
+                    // axiom-zones is the build-time zone-marker Support crate.
+                    && chunk != "axiom_zones"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
                 }

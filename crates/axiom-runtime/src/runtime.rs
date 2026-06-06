@@ -132,6 +132,7 @@ impl Runtime {
     /// - If any system failed and the config opts in, transitions to `Failed`.
     /// - If diagnostics are enabled, emits a kernel `LogRecord` summarizing
     ///   the step into the runtime's in-memory log sink.
+    #[axiom_zones::sim]
     pub fn step(&mut self) -> RuntimeResult<RuntimeStepRecord> {
         if self.state != RuntimeState::Running {
             return Err(RuntimeError::new(

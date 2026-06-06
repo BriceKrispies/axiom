@@ -38,6 +38,16 @@ mod sim_mod {
     }
 }
 
+struct Stepper;
+
+impl Stepper {
+    // The engine's real sim entry points are impl methods, not free fns.
+    #[sim]
+    fn step(&self) {
+        __engine_zone_sim
+    }
+}
+
 #[test]
 fn every_marker_is_injected() {
     sim_fn();
@@ -45,5 +55,6 @@ fn every_marker_is_injected() {
     strict_fn();
     supervisor_fn();
     sim_mod::reads_module_marker();
+    Stepper.step();
     assert_eq!(escape_hatch_fn(), "documented and deliberate");
 }

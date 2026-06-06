@@ -198,6 +198,8 @@ fn scene_imports_only_legal_layers() {
                     // is a dev-dependency; allow it here too.
                     && chunk != "axiom_host"
                     && chunk != "axiom_scene"
+                    // axiom-zones is the build-time zone-marker Support crate.
+                    && chunk != "axiom_zones"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
                 }
