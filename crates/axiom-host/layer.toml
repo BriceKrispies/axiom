@@ -27,8 +27,8 @@
 [layer]
 name = "host"
 crate_name = "axiom-host"
-depends_on = ["kernel", "runtime", "math"]
-meaningful_dependency = "Host consumes math (`MathApi` for finite-scalar validation of host-supplied viewport scale factors and for converting viewport dimensions to deterministic Vec2-shaped engine data, including the surface-descriptor viewport behind the presentation boundary), runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `HandleId`, `Tick`, `TelemetryMetric`) for telemetry routing and for minting the stable opaque identities behind `HostPresentationTarget` / `HostSurfaceHandle` — and exposes the deterministic host boundary (stepping plus presentation) every future browser/native adapter will sit on top of."
+depends_on = ["kernel", "runtime"]
+meaningful_dependency = "Host consumes runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `HandleId`, `Tick`, `TelemetryMetric`) for telemetry routing and for minting the stable opaque identities behind `HostPresentationTarget` / `HostSurfaceHandle` — and validates host-supplied viewport scale factors through the kernel `Ratio` quantity type at its boundary. It exposes the deterministic host boundary (stepping plus presentation) every future browser/native adapter will sit on top of."
 
 # Public Rust surface is the curated list in `lib.rs`; the architecture
 # checker only needs the facade plus the driver to prove the layer's
@@ -36,7 +36,6 @@ meaningful_dependency = "Host consumes math (`MathApi` for finite-scalar validat
 introduced_capabilities = ["HostApi", "HostStepDriver"]
 
 consumed_capabilities = [
-    "MathApi",
     "Runtime",
     "RuntimeStepRecord",
     "RuntimeConfig",
@@ -46,13 +45,13 @@ consumed_capabilities = [
 ]
 
 # Each proof export is a real Layer-03 public export whose source must
-# reference at least one previous-layer (math) symbol. Listing only
-# `MathApi` here proves both files use axiom-math directly through its
-# public API, as required.
+# reference at least one previous-layer (kernel/runtime) symbol. The driver
+# names `Runtime` (it steps it); the facade names `KernelApi` (it routes
+# identity/boundary-config validation through the kernel facade).
 [[proof_exports]]
 export = "HostApi"
-must_reference = ["MathApi"]
+must_reference = ["KernelApi"]
 
 [[proof_exports]]
 export = "HostStepDriver"
-must_reference = ["MathApi"]
+must_reference = ["Runtime"]

@@ -3,7 +3,7 @@
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostBoundaryConfig, HostLifecycleSignal, HostStepDriver, HostViewport};
 use axiom_introspect::{FrameReport, IntrospectApi};
-use axiom_kernel::{HandleId, MetricValue, TelemetryMetric, TypeSchema};
+use axiom_kernel::{HandleId, MetricValue, Ratio, TelemetryMetric, TypeSchema};
 use axiom_math::MathApi;
 use axiom_render::RenderApi;
 use axiom_resources::ResourcesApi;
@@ -113,7 +113,11 @@ impl DemoRotatingCubeApi {
         let frame_builder = frame_api.frame_builder(FIXED_STEP_NANOS);
 
         let viewport = host_api
-            .viewport(&math, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)
+            .viewport(
+                VIEWPORT_WIDTH,
+                VIEWPORT_HEIGHT,
+                Ratio::new(1.0).expect("unit scale factor is finite"),
+            )
             .expect("demo viewport dimensions are valid");
 
         DemoRotatingCubeApi {

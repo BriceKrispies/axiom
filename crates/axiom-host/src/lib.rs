@@ -9,8 +9,9 @@
 //!   nondeterministic host integrations (browser, native window, headless).
 //! - The single place that calls [`axiom_runtime::Runtime::step`] in response
 //!   to a host frame pulse.
-//! - The single place that consumes [`axiom_math::MathApi`] to validate
-//!   finite host scalar inputs.
+//! - The boundary that types host scale factors as the kernel
+//!   [`axiom_kernel::Ratio`] quantity, which guarantees finiteness at
+//!   construction.
 //!
 //! ## What this layer is not
 //! Not a browser adapter, not a renderer, not a renderer abstraction, not

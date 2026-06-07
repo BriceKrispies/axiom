@@ -11,11 +11,12 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-# Layer 03 may import only layers 00, 01, and 02. The Axiom Layer Law and
-# `cargo xtask check-architecture` enforce that nothing else slips in.
+# Layer 03 may import only lower layers. The Axiom Layer Law and
+# `cargo xtask check-architecture` enforce that nothing else slips in. Host
+# consumes runtime (stepping) and kernel (identities, telemetry, the `Ratio`
+# quantity type that validates viewport scale factors at the boundary).
 axiom-kernel = { path = "../axiom-kernel" }
 axiom-runtime = { path = "../axiom-runtime" }
-axiom-math = { path = "../axiom-math" }
 
 [lints.rust]
 unsafe_code = "forbid"

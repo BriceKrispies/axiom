@@ -109,8 +109,9 @@ generated:
   type system rules out negative elapsed times.
 - **Surface size and scale** enter only through `HostViewport::new` /
   `HostViewport::from_physical`. Logical and physical dimensions are
-  non-zero `u32`s; the scale factor is validated as a finite positive
-  `f32` via [`axiom_math::MathApi::validate_finite`].
+  non-zero `u32`s; the scale factor arrives as the kernel
+  [`axiom_kernel::Ratio`] quantity type, which guarantees finiteness at
+  construction, and the viewport additionally enforces positivity.
 - **Lifecycle and visibility** enter only as `HostLifecycleSignal`
   values. The signal alphabet is closed: any future signal requires a
   layer-03 change. Keyboard, mouse, touch, gamepad, and any other input
@@ -155,21 +156,22 @@ the engine boundary needs to decide whether to step at all. A future
 input layer (Layer N) will accept its own input events as data, in the
 same deterministic style, and route them through the runtime context.
 
-## How it consumes `axiom-math` and `axiom-runtime`
+## How it consumes `axiom-runtime` and `axiom-kernel`
 
-Math is the immediate previous layer, and the host layer is a
-**semantic adapter over math**:
+The host no longer depends on `axiom-math`. Viewport finiteness is now a
+property of the kernel `Ratio` quantity type:
 
-- `HostViewport::new` calls `MathApi::validate_finite` on the scale
-  factor. The kernel does not have a finite-`f32` policy; math does.
-  Calling math here is what makes `HostViewport` enforce the engine-wide
-  scalar discipline.
-- `HostStepDriver` carries a `MathApi` and re-checks the viewport scale
-  factor on every `drive` call as defence in depth. The architecture
-  checker's proof exports for `HostApi` and `HostStepDriver` lock this
-  usage in.
+- `HostViewport::new` / `from_physical` take a `scale_factor: Ratio`.
+  `Ratio::new` is the only way to build one and it rejects NaN / ±inf, so
+  a non-finite scale can no longer reach the host at all. The viewport
+  enforces only positivity and the dimension invariants on top.
+- `HostViewport::aspect_ratio` returns a `Ratio` (`physical_width /
+  physical_height`); both dimensions are validated non-zero, so the
+  quotient is provably finite and the `Ratio::new` invariant holds by
+  construction.
 
-Runtime is the layer the host *drives*:
+Runtime is the layer the host *drives*, and is the immediate previous
+layer the host adapts:
 
 - `HostBoundaryConfig::validate` calls `KernelApi::fixed_step` (via the
   same path `RuntimeConfig::validate` uses) so the host and runtime

@@ -557,12 +557,12 @@ mod frame_tests {
         HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
         HostLifecycleState, HostStepPlan, HostViewport,
     };
-    use axiom_math::{MathApi, Vec3};
+    use axiom_kernel::Ratio;
+    use axiom_math::Vec3;
 
     /// Build an `EngineFrame` for the given elapsed-nanos and lifecycle.
     fn engine_frame(elapsed: u64, started: bool) -> axiom_frame::EngineFrame {
-        let m = MathApi::new();
-        let vp = HostViewport::new(&m, 100, 100, 1.0).unwrap();
+        let vp = HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap();
         let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
         let lifecycle = if started {
             HostLifecycleState::initial().apply(HostLifecycleSignal::Started)

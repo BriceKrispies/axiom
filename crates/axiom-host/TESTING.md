@@ -137,8 +137,8 @@ Every host error code has a direct test:
 Layer 03 deliberately ships **zero** ambient logging or telemetry today.
 Diagnostics are emitted by the runtime through the kernel sinks; the
 host layer surfaces them via `HostFrameReport::step_records`. If a
-future iteration adds host-level telemetry it must follow the same rule
-as math: counts only, tick-stamped, routed through `KernelApi` and
+future iteration adds host-level telemetry it must follow the kernel's
+rule: counts only, tick-stamped, routed through `KernelApi` and
 `TelemetrySink`, and proven deterministic with a counter-equality test.
 
 ## Architecture / boundary tests
@@ -163,17 +163,17 @@ asserts:
   `EditorPanel`, `GameLoop`, `rapier`, `winit`, `egui`, `bevy`);
 - no `utils`, `helpers`, `common`, or `misc` modules;
 - `lib.rs` exports exactly the curated thirteen-item set;
-- `axiom-kernel`, `axiom-runtime`, and `axiom-math` do not import
-  `axiom_host`;
-- `axiom-host` imports only `axiom_kernel`, `axiom_runtime`, and
-  `axiom_math`.
+- `axiom-kernel` and `axiom-runtime` do not import `axiom_host`;
+- `axiom-host` imports only `axiom_kernel` and `axiom_runtime` (viewport
+  finiteness is carried by the kernel `Ratio` quantity type — no
+  `axiom-math` dependency).
 
 `tests/manifest.rs` proves the layer-manifest contract:
 
-- the host manifest validates with index 3, the three legal
-  dependencies (kernel, runtime, math), and the eight documented
+- the host manifest validates with index 3, the two legal
+  dependencies (kernel, runtime), and the eight documented
   capabilities,
-- math (the immediate previous layer) is accepted as a dependency
+- runtime (the immediate previous layer) is accepted as a dependency
   on its own,
 - depending on itself is rejected as `SelfImport`,
 - depending on a future layer (index 4+) is rejected as

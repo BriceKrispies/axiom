@@ -30,8 +30,8 @@ use axiom_host::{
     HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport,
 };
 use axiom_introspect::{FrameReport, IntrospectApi};
-use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, HandleId};
-use axiom_math::{MathApi, Transform, Vec3};
+use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, HandleId, Ratio};
+use axiom_math::{Transform, Vec3};
 use axiom_runtime::{
     Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode, RuntimeResult,
     RuntimeSystem,
@@ -206,7 +206,7 @@ fn failing_system_frame() -> axiom_frame::EngineFrame {
             Err(RuntimeError::new(RuntimeErrorCode::SystemFailed, "boom"))
         }
     }
-    let viewport = HostViewport::new(&MathApi::new(), 320, 200, 1.0).unwrap();
+    let viewport = HostViewport::new(320, 200, Ratio::new(1.0).unwrap()).unwrap();
     let mut driver = HostStepDriver::new(HostBoundaryConfig::new(STEP, 5).unwrap());
     driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
     let mut runtime =

@@ -61,13 +61,12 @@ mod tests {
         HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostPowerPreference,
         HostPresentMode,
     };
-    use axiom_kernel::KernelApi;
-    use axiom_math::MathApi;
+    use axiom_kernel::{KernelApi, Ratio};
 
     fn request() -> HostPresentationRequest {
         let host = HostApi::new();
         let kernel = KernelApi::new();
-        let viewport = host.viewport(&MathApi::new(), 800, 600, 1.0).unwrap();
+        let viewport = host.viewport(800, 600, Ratio::new(1.0).unwrap()).unwrap();
         let descriptor = host.surface_descriptor(
             viewport,
             HostPresentMode::Fifo,

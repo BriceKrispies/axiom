@@ -7,12 +7,12 @@ use axiom_host::{
     HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal, HostLifecycleState,
     HostStepPlan, HostViewport,
 };
-use axiom_math::MathApi;
+use axiom_kernel::Ratio;
 
 const STEP_NANOS: u64 = 1_000;
 
 fn viewport() -> HostViewport {
-    HostViewport::new(&MathApi::new(), 320, 200, 1.0).unwrap()
+    HostViewport::new(320, 200, Ratio::new(1.0).unwrap()).unwrap()
 }
 
 fn config() -> HostBoundaryConfig {

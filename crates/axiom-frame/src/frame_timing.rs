@@ -103,12 +103,12 @@ mod tests {
         HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostLifecycleState,
         HostStepPlan, HostViewport,
     };
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     const STEP_NANOS: u64 = 1_000;
 
     fn vp() -> HostViewport {
-        HostViewport::new(&MathApi::new(), 100, 100, 1.0).unwrap()
+        HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     fn cfg() -> HostBoundaryConfig {
@@ -218,10 +218,10 @@ mod cov {
         HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
         HostLifecycleState, HostStepPlan, HostViewport,
     };
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     fn report() -> HostFrameReport {
-        let vp = HostViewport::new(&MathApi::new(), 100, 100, 1.0).unwrap();
+        let vp = HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap();
         let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
         let lifecycle = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
         let input = HostFrameInput::new(1, 1_000, vp);

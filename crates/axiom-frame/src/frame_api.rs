@@ -18,10 +18,9 @@ use crate::frame_viewport::FrameViewport;
 /// `FrameApi` is a zero-sized facade. It is the only place future engine
 /// systems should reach for to construct frame-boundary values: builders,
 /// command queues, viewports, lifecycle projections, timing summaries,
-/// diagnostics, and the read-only `FrameContext`. Frame-boundary math
-/// validation flows through [`MathApi::validate_finite`] inside the helpers
-/// the facade delegates to, which is what makes this facade a real
-/// Layer-04 semantic adapter over both Layer-02 math and Layer-03 host.
+/// diagnostics, and the read-only `FrameContext`. Every helper adapts
+/// Layer-03 host data into the stable frame contract, which is what makes
+/// this facade a real Layer-04 semantic adapter over the host layer.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FrameApi {
     _sealed: (),
@@ -68,8 +67,8 @@ impl FrameApi {
 
     // --- Snapshots / projections from host data ---
 
-    /// Construct a [`FrameViewport`] snapshot from a host viewport, routing
-    /// finite-aspect validation through [`MathApi`].
+    /// Construct a [`FrameViewport`] snapshot from a host viewport, copying
+    /// its kernel [`axiom_kernel::Ratio`] scale factor and aspect ratio.
     pub fn frame_viewport(&self, viewport: &HostViewport) -> FrameViewport {
         FrameViewport::from_host(viewport)
     }
@@ -136,16 +135,12 @@ mod tests {
     use axiom_host::{
         HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostSkipReason, HostStepPlan,
     };
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     const STEP_NANOS: u64 = 1_000;
 
-    fn math() -> MathApi {
-        MathApi::new()
-    }
-
     fn host_vp() -> HostViewport {
-        HostViewport::new(&math(), 100, 100, 1.0).unwrap()
+        HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     fn cfg() -> HostBoundaryConfig {
@@ -224,7 +219,7 @@ mod tests {
     fn frame_viewport_projects_host_viewport() {
         let v = api().frame_viewport(&host_vp());
         assert_eq!(v.logical_width(), 100);
-        assert!(v.aspect_ratio().is_finite());
+        assert!(v.aspect_ratio().get().is_finite());
     }
 
     #[test]

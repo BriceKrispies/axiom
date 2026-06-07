@@ -9,6 +9,7 @@
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
+use axiom_kernel::Ratio;
 use axiom_math::{MathApi, Vec2, Vec3};
 use axiom_render_pipeline::RenderPipelineApi;
 use axiom_resources::ResourcesApi;
@@ -150,7 +151,11 @@ impl RunningApp {
 
         let surface = app.window;
         let viewport = host_api
-            .viewport(&math, surface.width(), surface.height(), 1.0)
+            .viewport(
+                surface.width(),
+                surface.height(),
+                Ratio::new(1.0).expect("unit scale factor is finite"),
+            )
             .expect("surface dimensions are valid");
         let aspect = surface.width() as f32 / surface.height() as f32;
 

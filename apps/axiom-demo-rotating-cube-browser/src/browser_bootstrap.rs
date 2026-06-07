@@ -8,8 +8,9 @@ use axiom_host::{
     HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostError, HostPowerPreference,
     HostPresentMode, HostPresentationRequest,
 };
-use axiom_kernel::{KernelApi, KernelError, KernelErrorCode, KernelErrorScope, KernelResult};
-use axiom_math::MathApi;
+use axiom_kernel::{
+    KernelApi, KernelError, KernelErrorCode, KernelErrorScope, KernelResult, Ratio,
+};
 
 /// Map a host-boundary validation failure into the kernel error model so the
 /// browser app reports a single `KernelResult` failure type at startup.
@@ -40,10 +41,13 @@ pub(crate) fn build_presentation_request(
 ) -> KernelResult<HostPresentationRequest> {
     let host = HostApi::new();
     let kernel = KernelApi::new();
-    let math = MathApi::new();
 
     let viewport = host
-        .viewport(&math, width, height, 1.0)
+        .viewport(
+            width,
+            height,
+            Ratio::new(1.0).expect("unit scale factor is finite"),
+        )
         .map_err(host_to_kernel)?;
     let target = host
         .presentation_target(&kernel, TARGET_HANDLE_RAW, TARGET_LABEL)

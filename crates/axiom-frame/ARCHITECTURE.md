@@ -81,7 +81,7 @@ contract this layer publishes is the only one those systems get to use.
 The contract is:
 
 - a function of explicit lower-layer inputs (`HostFrameReport`,
-  `RuntimeStepRecord`, `MathApi`, and a fixed step value),
+  `RuntimeStepRecord`, and a fixed step value),
 - byte-identical for byte-identical inputs,
 - expressed in terms of value types with stable equality.
 
@@ -94,12 +94,12 @@ The contract is:
 - **From `axiom-runtime`:** [`RuntimeStepRecord`] (read through the host
   report; layer 04 does not call `Runtime::step` itself), and the
   underlying [`RuntimeStep`] / `FrameIndex` / `Tick` identities.
-- **From `axiom-math`:** [`MathApi`] — used by [`FrameViewport`] to
-  validate the derived aspect ratio as a finite `f32`, and by
-  [`FrameContext`] for the read-side `viewport_aspect_is_finite` check.
 - **From `axiom-kernel`:** the deterministic primitives that flow
   through the layers above (FrameIndex, Tick), reached transitively
-  through `RuntimeStepRecord`.
+  through `RuntimeStepRecord`. The [`axiom_kernel::Ratio`] type carried
+  by [`HostViewport`] also guarantees that the viewport's scale factor
+  and aspect ratio are finite by construction — no separate finiteness
+  validation is needed at this layer.
 
 ## What higher-level contract it creates
 

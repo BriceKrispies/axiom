@@ -65,10 +65,10 @@ impl HostSurfaceDescriptor {
 mod tests {
     use super::*;
     use crate::host_error_code::HostErrorCode;
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     fn viewport() -> HostViewport {
-        HostViewport::new(&MathApi::new(), 800, 600, 1.0).unwrap()
+        HostViewport::new(800, 600, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     #[test]
@@ -89,7 +89,7 @@ mod tests {
     fn descriptor_dimension_validity_comes_from_the_viewport() {
         // A zero-width surface is unrepresentable: the viewport rejects it
         // before a descriptor can be built.
-        let err = HostViewport::new(&MathApi::new(), 0, 600, 1.0).unwrap_err();
+        let err = HostViewport::new(0, 600, Ratio::new(1.0).unwrap()).unwrap_err();
         assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
     }
 

@@ -88,10 +88,10 @@ mod tests {
     use crate::host_lifecycle_signal::HostLifecycleSignal;
     use crate::host_skip_reason::HostSkipReason;
     use crate::host_viewport::HostViewport;
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     fn vp() -> HostViewport {
-        HostViewport::new(&MathApi::new(), 100, 100, 1.0).unwrap()
+        HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     fn cfg() -> HostBoundaryConfig {

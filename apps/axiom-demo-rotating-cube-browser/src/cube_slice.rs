@@ -308,10 +308,15 @@ impl CubeSliceDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_kernel::Ratio;
 
     fn viewport(w: u32, h: u32) -> HostViewport {
         HostApi::new()
-            .viewport(&MathApi::new(), w, h, 1.0)
+            .viewport(
+                w,
+                h,
+                Ratio::new(1.0).expect("unit scale factor is finite"),
+            )
             .expect("valid viewport")
     }
 

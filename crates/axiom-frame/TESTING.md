@@ -58,7 +58,9 @@ equal (`repeated_builder_use_with_identical_input_is_deterministic`).
 - values copied verbatim from the host viewport;
 - aspect ratio matching `physical_width / physical_height`;
 - aspect ratio stable across constructions;
-- finite aspect passing `MathApi::is_finite_value`;
+- aspect ratio is finite by construction (the kernel `Ratio` type
+  carried by `HostViewport` guarantees finiteness — no explicit check
+  needed here);
 - identical inputs producing equal snapshots;
 - different host viewports producing different snapshots;
 - the `InvalidViewport` error code being distinct (its shape is pinned
@@ -147,21 +149,21 @@ Every frame error code has a direct test:
   triggers this both directly (in `FrameTiming`) and through the
   builder.
 - `InvalidViewport` — the error shape is pinned; the constructor's
-  only real failure path is the math finite check, which is exercised
-  indirectly through the viewport tests.
+  only real failure path (a non-finite aspect) is structurally
+  unreachable because the kernel `Ratio` type guarantees finiteness,
+  so the error code identity is tested via the shorthand constructor.
 - `HostFrameAdaptationFailed` — wraps a `HostError`; the round-trip is
   tested via `FrameError::with_host` and `host_frame_adaptation_failed`.
 
 ## Logging / telemetry determinism
 
 Layer 04 deliberately ships **zero** ambient logging or telemetry today.
-The runtime emits diagnostics through its own kernel sinks; the host
-boundary records explicit metrics through `MathApi`. The frame layer's
-own diagnostic surface is the typed `FrameDiagnostics` struct, which is
-plain data with no IO. If a future iteration adds frame-level
-telemetry it must follow the same rule as math/host: counts only,
-tick-stamped, routed through `KernelApi` and `TelemetrySink`, and
-proven deterministic with a counter-equality test.
+The runtime emits diagnostics through its own kernel sinks; the frame
+layer's own diagnostic surface is the typed `FrameDiagnostics` struct,
+which is plain data with no IO. If a future iteration adds frame-level
+telemetry it must follow the kernel's rule: counts only, tick-stamped,
+routed through `KernelApi` and `TelemetrySink`, and proven deterministic
+with a counter-equality test.
 
 ## Architecture / boundary tests
 
@@ -186,15 +188,15 @@ asserts:
   `bevy`);
 - no `utils`, `helpers`, `common`, or `misc` modules;
 - `lib.rs` exports exactly the curated fourteen-item set;
-- `axiom-kernel`, `axiom-runtime`, `axiom-math`, and `axiom-host` do
-  not import `axiom_frame`;
-- `axiom-frame` imports only `axiom_kernel`, `axiom_runtime`,
-  `axiom_math`, and `axiom_host`.
+- `axiom-kernel`, `axiom-runtime`, and `axiom-host` do not import
+  `axiom_frame`;
+- `axiom-frame` imports only `axiom_kernel`, `axiom_runtime`, and
+  `axiom_host`.
 
 `tests/manifest.rs` proves the layer-manifest contract:
 
-- the frame manifest validates with index 4, the four legal
-  dependencies (kernel, runtime, math, host), and the nine documented
+- the frame manifest validates with index 4, the three legal
+  dependencies (kernel, runtime, host), and the nine documented
   capabilities;
 - host (the immediate previous layer) is accepted as a dependency on
   its own;

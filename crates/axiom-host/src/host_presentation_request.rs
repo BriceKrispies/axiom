@@ -96,10 +96,10 @@ mod tests {
     use crate::host_present_mode::HostPresentMode;
     use crate::host_viewport::HostViewport;
     use axiom_kernel::HandleId;
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     fn descriptor() -> HostSurfaceDescriptor {
-        let viewport = HostViewport::new(&MathApi::new(), 800, 600, 1.0).unwrap();
+        let viewport = HostViewport::new(800, 600, Ratio::new(1.0).unwrap()).unwrap();
         HostSurfaceDescriptor::new(
             viewport,
             HostPresentMode::Fifo,

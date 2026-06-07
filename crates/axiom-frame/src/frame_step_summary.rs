@@ -94,13 +94,13 @@ mod tests {
         HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostLifecycleState,
         HostStepDriver, HostViewport,
     };
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
     use axiom_runtime::{Runtime, RuntimeConfig};
 
     const STEP_NANOS: u64 = 1_000;
 
     fn vp() -> HostViewport {
-        HostViewport::new(&MathApi::new(), 100, 100, 1.0).unwrap()
+        HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     fn driver_and_runtime() -> (HostStepDriver, Runtime) {

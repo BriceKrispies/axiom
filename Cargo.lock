@@ -48,6 +48,7 @@ dependencies = [
  "axiom-ecs",
  "axiom-frame",
  "axiom-host",
+ "axiom-kernel",
  "axiom-math",
  "axiom-render-pipeline",
  "axiom-resources",
@@ -113,7 +114,6 @@ version = "0.1.0"
 dependencies = [
  "axiom-host",
  "axiom-kernel",
- "axiom-math",
  "axiom-runtime",
  "axiom-zones",
 ]
@@ -123,7 +123,6 @@ name = "axiom-host"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
- "axiom-math",
  "axiom-runtime",
 ]
 

@@ -1,6 +1,6 @@
 //! Read-only per-frame context future engine systems consume.
 
-use axiom_math::MathApi;
+use axiom_kernel::Ratio;
 
 use crate::engine_frame::EngineFrame;
 use crate::frame_command::FrameCommand;
@@ -42,19 +42,10 @@ impl<'a> FrameContext<'a> {
         self.frame.viewport()
     }
 
-    /// The viewport's cached aspect ratio. Already finite by construction;
-    /// supply a `MathApi` if a caller wants to assert that against the
-    /// engine's scalar policy.
-    pub fn viewport_aspect_ratio(&self) -> f32 {
+    /// The viewport's cached aspect ratio as a kernel [`Ratio`], finite by
+    /// construction.
+    pub fn viewport_aspect_ratio(&self) -> Ratio {
         self.frame.viewport().aspect_ratio()
-    }
-
-    /// `true` iff the cached aspect ratio is a finite `f32` according to
-    /// the math layer's scalar policy. This is what makes the context a
-    /// real Layer-04 read surface over Layer-02 math even on the borrow
-    /// side.
-    pub fn viewport_aspect_is_finite(&self, math: &MathApi) -> bool {
-        math.is_finite_value(self.frame.viewport().aspect_ratio())
     }
 
     pub const fn lifecycle(&self) -> FrameLifecycleState {
@@ -97,12 +88,8 @@ mod tests {
 
     const STEP_NANOS: u64 = 1_000;
 
-    fn math() -> MathApi {
-        MathApi::new()
-    }
-
     fn vp() -> HostViewport {
-        HostViewport::new(&math(), 100, 100, 1.0).unwrap()
+        HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     fn cfg() -> HostBoundaryConfig {
@@ -148,8 +135,7 @@ mod tests {
     /// vehicle for pinning every borrow-side accessor against its mutation
     /// constant.
     fn rich_frame() -> EngineFrame {
-        let math = MathApi::new();
-        let host_vp = HostViewport::new(&math, 1600, 900, 1.0).unwrap();
+        let host_vp = HostViewport::new(1600, 900, Ratio::new(1.0).unwrap()).unwrap();
         let report = {
             let input = HostFrameInput::new(5, STEP_NANOS, host_vp.clone());
             let plan = HostStepPlan::build(&input, &cfg(), &visible(), 0);
@@ -213,8 +199,8 @@ mod tests {
         let frame = rich_frame();
         let ctx = FrameContext::new(&frame);
         // 1600x900 -> 16:9, distinct from the mutation constant 1.0.
-        assert!((ctx.viewport_aspect_ratio() - 16.0 / 9.0).abs() < 1.0e-6);
-        assert_ne!(ctx.viewport_aspect_ratio(), 1.0);
+        assert!((ctx.viewport_aspect_ratio().get() - 16.0 / 9.0).abs() < 1.0e-6);
+        assert_ne!(ctx.viewport_aspect_ratio().get(), 1.0);
     }
 
     #[test]
@@ -239,8 +225,7 @@ mod tests {
         let frame = build_frame(STEP_NANOS, visible());
         let ctx = FrameContext::new(&frame);
         assert_eq!(ctx.viewport().logical_width(), 100);
-        assert_eq!(ctx.viewport_aspect_ratio(), 1.0);
-        assert!(ctx.viewport_aspect_is_finite(&math()));
+        assert_eq!(ctx.viewport_aspect_ratio().get(), 1.0);
     }
 
     #[test]

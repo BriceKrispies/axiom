@@ -1,6 +1,6 @@
 //! The single public facade of the browser app: [`BrowserRotatingCubeApi`].
 
-use axiom_kernel::KernelResult;
+use axiom_kernel::{KernelResult, Ratio};
 use axiom_webgpu::WebGpuApi;
 
 use crate::browser_bootstrap::{build_presentation_request, SURFACE_HANDLE_RAW};
@@ -10,7 +10,6 @@ use crate::live_gpu_binding::LiveBindingState;
 use crate::render_loop::RenderLoopState;
 
 use axiom_host::{HostApi, HostPresentationRequest};
-use axiom_math::MathApi;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -51,7 +50,11 @@ impl BrowserRotatingCubeApi {
 
         let host = HostApi::new();
         let viewport = host
-            .viewport(&MathApi::new(), width, height, 1.0)
+            .viewport(
+                width,
+                height,
+                Ratio::new(1.0).expect("unit scale factor is finite"),
+            )
             .expect("viewport dimensions already validated by the request");
         let driver = CubeSliceDriver::new(viewport);
 

@@ -1,6 +1,5 @@
 //! The deterministic adapter that drives `Runtime::step` from host frames.
 
-use axiom_math::MathApi;
 use axiom_runtime::Runtime;
 
 use crate::host_boundary_config::HostBoundaryConfig;
@@ -19,19 +18,14 @@ use crate::host_step_plan::HostStepPlan;
 /// The driver is **the only place** in Layer 03 that calls
 /// [`Runtime::step`]. It never sleeps, never spawns, never schedules a
 /// `requestAnimationFrame`, and never reads a clock — every timing value is
-/// supplied by the host as data on the [`HostFrameInput`].
-///
-/// Math validation routes through [`MathApi::validate_finite`] (a
-/// defence-in-depth check on the viewport scale factor, even though the
-/// viewport constructor already validates it), which is what makes this
-/// type a Layer-03 semantic adapter over Layer-02 math.
+/// supplied by the host as data on the [`HostFrameInput`]. This is what makes
+/// the driver a Layer-03 semantic adapter over Layer-01 runtime stepping.
 #[derive(Debug, Clone)]
 pub struct HostStepDriver {
     config: HostBoundaryConfig,
     lifecycle: HostLifecycleState,
     accumulator_nanos: u64,
     last_sequence: Option<u64>,
-    math: MathApi,
 }
 
 impl HostStepDriver {
@@ -42,7 +36,6 @@ impl HostStepDriver {
             lifecycle: HostLifecycleState::initial(),
             accumulator_nanos: 0,
             last_sequence: None,
-            math: MathApi::new(),
         }
     }
 
@@ -77,9 +70,6 @@ impl HostStepDriver {
     /// invoke `Runtime::step` exactly as many times as the plan asks for.
     ///
     /// - Out-of-order frames are rejected with `InvalidFrameSequence`.
-    /// - The viewport scale factor is routed through
-    ///   [`MathApi::validate_finite`] (it is already guaranteed finite by the
-    ///   `HostViewport` constructor, so this never errors).
     /// - A `Runtime::step` error is wrapped as `RuntimeStepFailed` with the
     ///   runtime cause preserved; partial step records collected before the
     ///   failure are still returned in the error path's drop, but the
@@ -96,12 +86,6 @@ impl HostStepDriver {
                 ));
             }
         }
-        // Route the viewport scale through `MathApi` so this driver remains a
-        // real Layer-03 semantic adapter over Layer-02 math. The `HostViewport`
-        // constructor already guarantees a finite scale factor, so this can
-        // never report an error — the result is intentionally discarded rather
-        // than branched on (a non-finite scale is unreachable here).
-        let _ = self.math.validate_finite(input.viewport().scale_factor());
 
         let plan = HostStepPlan::build(
             &input,
@@ -141,12 +125,13 @@ mod tests {
     use crate::host_error_code::HostErrorCode;
     use crate::host_lifecycle_signal::HostLifecycleSignal;
     use crate::host_viewport::HostViewport;
+    use axiom_kernel::Ratio;
     use axiom_runtime::RuntimeConfig;
 
     const STEP_NANOS: u64 = 1_000;
 
     fn vp() -> HostViewport {
-        HostViewport::new(&MathApi::new(), 800, 600, 1.0).unwrap()
+        HostViewport::new(800, 600, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     fn cfg() -> HostBoundaryConfig {

@@ -1,7 +1,7 @@
 //! The Layer-03 host boundary facade.
 
 use axiom_kernel::KernelApi;
-use axiom_math::MathApi;
+use axiom_kernel::Ratio;
 
 use crate::host_adapter_request::HostAdapterRequest;
 use crate::host_alpha_mode::HostAlphaMode;
@@ -34,9 +34,9 @@ use crate::host_viewport::HostViewport;
 /// helper used by adapters that need to surface a non-stepping plan without
 /// touching the runtime.
 ///
-/// Every viewport-related constructor routes finite-scalar validation
-/// through [`MathApi::validate_finite`], which is what makes this facade a
-/// real Layer-03 semantic adapter over Layer-02 math.
+/// Viewport scale factors arrive as the kernel [`Ratio`] quantity type, which
+/// already guarantees finiteness at its boundary; the facade only enforces the
+/// host's positivity and dimension invariants on top.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostApi {
     _sealed: (),
@@ -51,27 +51,25 @@ impl HostApi {
     // --- Viewport ---
 
     /// Construct a validated viewport from a logical size and a scale
-    /// factor. Validation routes through [`MathApi`].
+    /// factor. The scale factor is a finite kernel [`Ratio`].
     pub fn viewport(
         &self,
-        math: &MathApi,
         logical_width: u32,
         logical_height: u32,
-        scale_factor: f32,
+        scale_factor: Ratio,
     ) -> HostResult<HostViewport> {
-        HostViewport::new(math, logical_width, logical_height, scale_factor)
+        HostViewport::new(logical_width, logical_height, scale_factor)
     }
 
     /// Construct a validated viewport from a physical size and a scale
-    /// factor.
+    /// factor. The scale factor is a finite kernel [`Ratio`].
     pub fn viewport_from_physical(
         &self,
-        math: &MathApi,
         physical_width: u32,
         physical_height: u32,
-        scale_factor: f32,
+        scale_factor: Ratio,
     ) -> HostResult<HostViewport> {
-        HostViewport::from_physical(math, physical_width, physical_height, scale_factor)
+        HostViewport::from_physical(physical_width, physical_height, scale_factor)
     }
 
     // --- Frame input ---
@@ -258,8 +256,8 @@ mod tests {
 
     const STEP_NANOS: u64 = 1_000;
 
-    fn math() -> MathApi {
-        MathApi::new()
+    fn ratio(value: f32) -> Ratio {
+        Ratio::new(value).unwrap()
     }
 
     fn api() -> HostApi {
@@ -269,21 +267,20 @@ mod tests {
     #[test]
     fn new_and_default_are_equivalent() {
         // The facade is a zero-sized marker: both paths validate viewports
-        // identically through math.
-        let m = math();
+        // identically.
         assert_eq!(
-            HostApi::new().viewport(&m, 800, 600, 2.0).unwrap().physical_width(),
-            HostApi::default().viewport(&m, 800, 600, 2.0).unwrap().physical_width(),
+            HostApi::new().viewport(800, 600, ratio(2.0)).unwrap().physical_width(),
+            HostApi::default().viewport(800, 600, ratio(2.0)).unwrap().physical_width(),
         );
     }
 
     #[test]
-    fn viewport_uses_math_for_scalar_validation() {
-        let v = api().viewport(&math(), 800, 600, 2.0).unwrap();
+    fn viewport_rejects_non_positive_scale_factor() {
+        let v = api().viewport(800, 600, ratio(2.0)).unwrap();
         assert_eq!(v.physical_width(), 1600);
         assert_eq!(
             api()
-                .viewport(&math(), 800, 600, f32::NAN)
+                .viewport(800, 600, ratio(-1.0))
                 .unwrap_err()
                 .code(),
             HostErrorCode::InvalidScaleFactor
@@ -292,14 +289,14 @@ mod tests {
 
     #[test]
     fn viewport_from_physical_round_trips_with_viewport() {
-        let v = api().viewport_from_physical(&math(), 1600, 1200, 2.0).unwrap();
+        let v = api().viewport_from_physical(1600, 1200, ratio(2.0)).unwrap();
         assert_eq!(v.logical_width(), 800);
         assert_eq!(v.logical_height(), 600);
     }
 
     #[test]
     fn frame_input_carries_supplied_values() {
-        let v = api().viewport(&math(), 800, 600, 1.0).unwrap();
+        let v = api().viewport(800, 600, ratio(1.0)).unwrap();
         let f = api().frame_input(3, 16_666_667, v);
         assert_eq!(f.sequence(), 3);
         assert_eq!(f.elapsed_nanos(), 16_666_667);
@@ -348,7 +345,7 @@ mod tests {
 
     #[test]
     fn plan_frame_is_deterministic() {
-        let v = api().viewport(&math(), 100, 100, 1.0).unwrap();
+        let v = api().viewport(100, 100, ratio(1.0)).unwrap();
         let cfg = api().boundary_config(STEP_NANOS, 5).unwrap();
         let lifecycle = api()
             .apply_lifecycle_signal(api().lifecycle_initial(), HostLifecycleSignal::Started);
@@ -361,7 +358,7 @@ mod tests {
 
     #[test]
     fn report_no_step_frame_describes_skip() {
-        let v = api().viewport(&math(), 100, 100, 1.0).unwrap();
+        let v = api().viewport(100, 100, ratio(1.0)).unwrap();
         let cfg = api().boundary_config(STEP_NANOS, 5).unwrap();
         let hidden = api().lifecycle_initial();
         let input = api().frame_input(7, STEP_NANOS, v);
@@ -390,7 +387,7 @@ mod tests {
     }
 
     fn demo_descriptor(api: &HostApi) -> crate::host_surface_descriptor::HostSurfaceDescriptor {
-        let viewport = api.viewport(&math(), 800, 600, 1.0).unwrap();
+        let viewport = api.viewport(800, 600, ratio(1.0)).unwrap();
         api.surface_descriptor(
             viewport,
             HostPresentMode::Fifo,
@@ -496,7 +493,7 @@ mod tests {
 
     #[test]
     fn facade_can_drive_a_runtime_through_a_driver() {
-        let v = api().viewport(&math(), 100, 100, 1.0).unwrap();
+        let v = api().viewport(100, 100, ratio(1.0)).unwrap();
         let cfg = api().boundary_config(STEP_NANOS, 5).unwrap();
         let mut driver = api().step_driver(cfg);
         driver.apply_lifecycle_signal(HostLifecycleSignal::Started);

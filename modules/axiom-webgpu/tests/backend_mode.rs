@@ -11,8 +11,8 @@ use axiom_host::{
     HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostPowerPreference,
     HostPresentMode, HostPresentationRequest,
 };
-use axiom_kernel::KernelApi;
-use axiom_math::{Mat4, MathApi};
+use axiom_kernel::{KernelApi, Ratio};
+use axiom_math::Mat4;
 use axiom_webgpu::WebGpuApi;
 
 /// Build a host presentation request. `presentable` controls whether the
@@ -22,7 +22,7 @@ use axiom_webgpu::WebGpuApi;
 fn host_request(presentable: bool) -> HostPresentationRequest {
     let host = HostApi::new();
     let kernel = KernelApi::new();
-    let viewport = host.viewport(&MathApi::new(), 800, 600, 1.0).unwrap();
+    let viewport = host.viewport(800, 600, Ratio::new(1.0).unwrap()).unwrap();
     let descriptor = host.surface_descriptor(
         viewport,
         HostPresentMode::Fifo,

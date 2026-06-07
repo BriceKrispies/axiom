@@ -73,10 +73,10 @@ impl HostFrameInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     fn vp() -> HostViewport {
-        HostViewport::new(&MathApi::new(), 800, 600, 1.0).unwrap()
+        HostViewport::new(800, 600, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     #[test]
@@ -122,7 +122,7 @@ mod tests {
         // A frame input cannot wrap a viewport that did not validate — the
         // viewport constructor is the choke point. This test pins that
         // contract.
-        let err = HostViewport::new(&MathApi::new(), 0, 100, 1.0).unwrap_err();
+        let err = HostViewport::new(0, 100, Ratio::new(1.0).unwrap()).unwrap_err();
         assert_eq!(
             err.code(),
             crate::host_error_code::HostErrorCode::InvalidViewportDimensions

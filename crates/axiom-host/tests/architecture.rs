@@ -344,7 +344,6 @@ fn host_only_imports_legal_lower_layers() {
                 if chunk.starts_with("axiom_")
                     && chunk != "axiom_kernel"
                     && chunk != "axiom_runtime"
-                    && chunk != "axiom_math"
                     && chunk != "axiom_host"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
@@ -354,7 +353,7 @@ fn host_only_imports_legal_lower_layers() {
     }
     assert!(
         illegal.is_empty(),
-        "axiom-host may only import axiom-kernel, axiom-runtime, and axiom-math:\n{}",
+        "axiom-host may only import axiom-kernel and axiom-runtime:\n{}",
         illegal.join("\n")
     );
 }

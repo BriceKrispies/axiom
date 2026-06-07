@@ -10,8 +10,7 @@ use axiom_frame::{EngineFrame, FrameBuilder};
 use axiom_host::{
     HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport,
 };
-use axiom_kernel::{HandleId, MetricValue, TelemetryMetric};
-use axiom_math::MathApi;
+use axiom_kernel::{HandleId, MetricValue, Ratio, TelemetryMetric};
 use axiom_runtime::{
     Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode, RuntimeResult,
     RuntimeSystem,
@@ -20,7 +19,7 @@ use axiom_runtime::{
 const STEP_NANOS: u64 = 1_000;
 
 fn viewport() -> HostViewport {
-    HostViewport::new(&MathApi::new(), 320, 200, 1.0).unwrap()
+    HostViewport::new(320, 200, Ratio::new(1.0).unwrap()).unwrap()
 }
 
 /// `n` consecutive active engine frames (no systems registered), with

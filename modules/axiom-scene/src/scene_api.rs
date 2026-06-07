@@ -235,6 +235,7 @@ impl SceneApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_kernel::Ratio;
     use crate::scene_error_code::SceneErrorCode;
 
     fn math() -> MathApi {
@@ -371,8 +372,7 @@ mod tests {
         a.add_spin(child, Vec3::UNIT_Y, 8).unwrap();
 
         let frame = |elapsed: u64| {
-            let m = math();
-            let vp = HostViewport::new(&m, 100, 100, 1.0).unwrap();
+            let vp = HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap();
             let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
             let visible = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
             let input = HostFrameInput::new(1, elapsed, vp);

@@ -340,7 +340,6 @@ fn frame_only_imports_legal_lower_layers() {
                 if chunk.starts_with("axiom_")
                     && chunk != "axiom_kernel"
                     && chunk != "axiom_runtime"
-                    && chunk != "axiom_math"
                     && chunk != "axiom_host"
                     && chunk != "axiom_frame"
                     // axiom-zones is the build-time zone-marker Support crate.
@@ -353,7 +352,7 @@ fn frame_only_imports_legal_lower_layers() {
     }
     assert!(
         illegal.is_empty(),
-        "axiom-frame may only import axiom-kernel, axiom-runtime, axiom-math, and axiom-host:\n{}",
+        "axiom-frame may only import axiom-kernel, axiom-runtime, and axiom-host:\n{}",
         illegal.join("\n")
     );
 }

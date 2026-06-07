@@ -1,27 +1,26 @@
 //! Frame-stable viewport snapshot derived from `HostViewport`.
 
 use axiom_host::HostViewport;
+use axiom_kernel::Ratio;
 
 /// A frame-stable snapshot of the host viewport.
 ///
 /// Built once per engine frame from a [`HostViewport`]. The four integer
-/// dimensions and the scale factor are copied verbatim; the aspect ratio is
-/// computed from the physical size.
+/// dimensions are copied verbatim; the scale factor and aspect ratio are
+/// copied as kernel [`Ratio`] quantities.
 ///
 /// Construction is **infallible**: a [`HostViewport`] already guarantees
-/// non-zero physical dimensions and a finite positive scale factor, so the
-/// derived aspect ratio is always a finite positive `f32`. There is no error
-/// path to validate here — a guard against a non-finite aspect would be
-/// unreachable dead code. (Frame still adapts Layer-02 math elsewhere, e.g.
-/// [`crate::FrameContext::viewport_aspect_is_finite`].)
+/// non-zero physical dimensions and a finite positive scale factor, and the
+/// scale factor and aspect ratio are carried as kernel [`Ratio`] values, which
+/// are finite by construction. There is no error path to validate here.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameViewport {
     logical_width: u32,
     logical_height: u32,
     physical_width: u32,
     physical_height: u32,
-    scale_factor: f32,
-    aspect_ratio: f32,
+    scale_factor: Ratio,
+    aspect_ratio: Ratio,
 }
 
 impl FrameViewport {
@@ -53,11 +52,11 @@ impl FrameViewport {
         self.physical_height
     }
 
-    pub const fn scale_factor(&self) -> f32 {
+    pub const fn scale_factor(&self) -> Ratio {
         self.scale_factor
     }
 
-    pub const fn aspect_ratio(&self) -> f32 {
+    pub const fn aspect_ratio(&self) -> Ratio {
         self.aspect_ratio
     }
 }
@@ -65,14 +64,9 @@ impl FrameViewport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_math::MathApi;
-
-    fn math() -> MathApi {
-        MathApi::new()
-    }
 
     fn host_vp() -> HostViewport {
-        HostViewport::new(&math(), 1600, 900, 1.0).unwrap()
+        HostViewport::new(1600, 900, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     #[test]
@@ -82,33 +76,24 @@ mod tests {
         assert_eq!(v.logical_height(), 900);
         assert_eq!(v.physical_width(), 1600);
         assert_eq!(v.physical_height(), 900);
-        assert_eq!(v.scale_factor(), 1.0);
+        assert_eq!(v.scale_factor().get(), 1.0);
     }
 
     #[test]
     fn aspect_ratio_matches_host_viewport() {
         let v = FrameViewport::from_host(&host_vp());
-        assert!((v.aspect_ratio() - host_vp().aspect_ratio()).abs() < 1.0e-6);
-        assert!((v.aspect_ratio() - 16.0 / 9.0).abs() < 1.0e-6);
-    }
-
-    #[test]
-    fn derived_aspect_is_finite() {
-        // The host viewport guarantees a finite aspect; confirm the projected
-        // value is what math considers finite (frame's math adapter lives in
-        // FrameContext, but this pins the invariant the projection relies on).
-        let v = FrameViewport::from_host(&host_vp());
-        assert!(math().is_finite_value(v.aspect_ratio()));
+        assert!((v.aspect_ratio().get() - host_vp().aspect_ratio().get()).abs() < 1.0e-6);
+        assert!((v.aspect_ratio().get() - 16.0 / 9.0).abs() < 1.0e-6);
     }
 
     #[test]
     fn scale_factor_is_copied_verbatim_not_unity() {
         // A scale distinct from 1.0 (and 0.0/-1.0) pins the accessor against
-        // the `-> f32 with 1.0` mutation.
-        let host = HostViewport::new(&math(), 800, 600, 2.0).unwrap();
+        // the `-> Ratio with 1.0` mutation.
+        let host = HostViewport::new(800, 600, Ratio::new(2.0).unwrap()).unwrap();
         let v = FrameViewport::from_host(&host);
-        assert_eq!(v.scale_factor(), 2.0);
-        assert_ne!(v.scale_factor(), 1.0);
+        assert_eq!(v.scale_factor().get(), 2.0);
+        assert_ne!(v.scale_factor().get(), 1.0);
     }
 
     #[test]
@@ -120,7 +105,7 @@ mod tests {
 
     #[test]
     fn different_host_viewport_produces_different_frame_viewport() {
-        let other = HostViewport::new(&math(), 800, 600, 2.0).unwrap();
+        let other = HostViewport::new(800, 600, Ratio::new(2.0).unwrap()).unwrap();
         let a = FrameViewport::from_host(&host_vp());
         let b = FrameViewport::from_host(&other);
         assert_ne!(a, b);

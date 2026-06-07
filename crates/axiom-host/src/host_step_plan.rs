@@ -140,12 +140,12 @@ mod tests {
     use super::*;
     use crate::host_lifecycle_signal::HostLifecycleSignal;
     use crate::host_viewport::HostViewport;
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     const STEP_NANOS: u64 = 1_000;
 
     fn vp() -> HostViewport {
-        HostViewport::new(&MathApi::new(), 800, 600, 1.0).unwrap()
+        HostViewport::new(800, 600, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     fn cfg() -> HostBoundaryConfig {
@@ -332,10 +332,10 @@ mod cov {
     use super::*;
     use crate::host_lifecycle_signal::HostLifecycleSignal;
     use crate::host_viewport::HostViewport;
-    use axiom_math::MathApi;
+    use axiom_kernel::Ratio;
 
     fn vp() -> HostViewport {
-        HostViewport::new(&MathApi::new(), 800, 600, 1.0).unwrap()
+        HostViewport::new(800, 600, Ratio::new(1.0).unwrap()).unwrap()
     }
 
     fn visible() -> HostLifecycleState {

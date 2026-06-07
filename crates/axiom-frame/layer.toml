@@ -1,9 +1,9 @@
 # Axiom layer manifest — Layer 04 (axiom-frame).
 #
 # Frame is the canonical engine frame boundary. It adapts host frame reports
-# (Layer 03), runtime step records (Layer 01), viewport facts (Layer 03), and
-# math primitives (Layer 02) into a stable per-frame contract — the
-# `EngineFrame` and `FrameContext` future engine systems consume.
+# (Layer 03), runtime step records (Layer 01), and viewport facts (Layer 03)
+# into a stable per-frame contract — the `EngineFrame` and `FrameContext`
+# future engine systems consume.
 #
 # Layer-04 logical capabilities (documentation only — Rust public surface is
 # the curated re-export list in `lib.rs`, enforced by the layer's own
@@ -21,8 +21,8 @@
 [layer]
 name = "frame"
 crate_name = "axiom-frame"
-depends_on = ["kernel", "runtime", "math", "host"]
-meaningful_dependency = "Frame consumes host (`HostFrameReport`, `HostViewport`, `HostLifecycleState`, `HostSkipReason` for host adaptation), runtime (`RuntimeStepRecord` for ordered step summaries), math (`MathApi` for finite scalar validation on viewport-derived values), and kernel (`Tick`, `FrameIndex`, `TelemetryMetric`) — and exposes the deterministic engine frame contract every future engine system will read from."
+depends_on = ["kernel", "runtime", "host"]
+meaningful_dependency = "Frame consumes host (`HostFrameReport`, `HostViewport`, `HostLifecycleState`, `HostSkipReason` for host adaptation, including the viewport's kernel `Ratio` scale factor and aspect ratio), runtime (`RuntimeStepRecord` for ordered step summaries), and kernel (`Tick`, `FrameIndex`, `TelemetryMetric`) — and exposes the deterministic engine frame contract every future engine system will read from. Finiteness of viewport-derived scalars is guaranteed by the kernel `Ratio` type the viewport carries, so no math layer is needed."
 
 # Public Rust surface is the curated list in `lib.rs`; the architecture
 # checker needs the facade and the constructor types to prove the layer's
@@ -35,7 +35,6 @@ consumed_capabilities = [
     "HostLifecycleState",
     "HostSkipReason",
     "RuntimeStepRecord",
-    "MathApi",
     "Tick",
     "FrameIndex",
     "TelemetryMetric",
