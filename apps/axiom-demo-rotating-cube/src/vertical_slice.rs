@@ -18,6 +18,7 @@
 //! [`crate::render_to_gpu_submission`].
 
 use axiom_host::HostFrameInput;
+use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::{Quat, Transform, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 use axiom_scene::SceneApi;
@@ -186,12 +187,24 @@ pub(crate) fn run_vertical_slice(
     let camera_entity =
         scene.create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
     scene
-        .add_perspective_camera(&api.math, camera_entity, std::f32::consts::FRAC_PI_3, aspect, 0.1, 100.0)
+        .add_perspective_camera(
+            &api.math,
+            camera_entity,
+            Radians::new(std::f32::consts::FRAC_PI_3).expect("fovy is finite"),
+            Ratio::new(aspect).expect("aspect is finite"),
+            Meters::new(0.1).expect("near is finite"),
+            Meters::new(100.0).expect("far is finite"),
+        )
         .expect("camera intrinsics are valid");
 
     let light_entity = scene.create_node_with_transform(Transform::IDENTITY);
     scene
-        .add_directional_light(&api.math, light_entity, DEMO_LIGHT_COLOR, DEMO_LIGHT_INTENSITY)
+        .add_directional_light(
+            &api.math,
+            light_entity,
+            DEMO_LIGHT_COLOR,
+            Ratio::new(DEMO_LIGHT_INTENSITY).expect("light intensity is finite"),
+        )
         .expect("light parameters are valid");
 
     // ---- 5. Advance the scene (frame-gated): runs transform propagation. ----
@@ -218,10 +231,10 @@ pub(crate) fn run_vertical_slice(
             .iter()
             .map(|c| SceneCameraArtifact {
                 node: c.node().raw(),
-                fovy_radians: c.fovy_radians(),
-                aspect: c.aspect(),
-                near: c.near(),
-                far: c.far(),
+                fovy_radians: c.fovy_radians().get(),
+                aspect: c.aspect().get(),
+                near: c.near().get(),
+                far: c.far().get(),
             })
             .collect(),
         lights: snapshot
@@ -230,7 +243,7 @@ pub(crate) fn run_vertical_slice(
             .map(|l| SceneLightArtifact {
                 node: l.node().raw(),
                 color: l.color(),
-                intensity: l.intensity(),
+                intensity: l.intensity().get(),
             })
             .collect(),
         renderables: snapshot
@@ -331,7 +344,7 @@ pub(crate) fn run_vertical_slice(
             &mut render_input,
             light.vector_world,
             light.color,
-            light.intensity,
+            Ratio::new(light.intensity).expect("light intensity is finite"),
         );
     }
     for mesh in &render_input_artifact.meshes {

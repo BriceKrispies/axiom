@@ -1,6 +1,6 @@
 //! Directional / point light component.
 
-use axiom_kernel::{FieldSchema, TypeSchema};
+use axiom_kernel::{FieldSchema, Ratio, TypeSchema};
 use axiom_math::{MathApi, Vec3};
 
 use crate::light_kind::LightKind;
@@ -17,7 +17,7 @@ use crate::scene_result::SceneResult;
 pub struct Light {
     kind: LightKind,
     color: Vec3,
-    intensity: f32,
+    intensity: Ratio,
 }
 
 impl Light {
@@ -27,19 +27,19 @@ impl Light {
         &[
             FieldSchema::new("kind", "u32"),
             FieldSchema::new("color", "Vec3"),
-            FieldSchema::new("intensity", "f32"),
+            FieldSchema::new("intensity", "Ratio"),
         ],
     );
 
     /// Build a directional light. `color` is a linear-RGB triple; each component
     /// must be finite and non-negative. `intensity` must be finite and
     /// non-negative.
-    pub fn directional(math: &MathApi, color: Vec3, intensity: f32) -> SceneResult<Self> {
+    pub fn directional(math: &MathApi, color: Vec3, intensity: Ratio) -> SceneResult<Self> {
         Light::build(math, LightKind::Directional, color, intensity)
     }
 
     /// Build a point light. Same validation rules as [`Light::directional`].
-    pub fn point(math: &MathApi, color: Vec3, intensity: f32) -> SceneResult<Self> {
+    pub fn point(math: &MathApi, color: Vec3, intensity: Ratio) -> SceneResult<Self> {
         Light::build(math, LightKind::Point, color, intensity)
     }
 
@@ -47,9 +47,11 @@ impl Light {
         math: &MathApi,
         kind: LightKind,
         color: Vec3,
-        intensity: f32,
+        intensity: Ratio,
     ) -> SceneResult<Self> {
-        for component in [color.x, color.y, color.z, intensity] {
+        // `intensity` is a `Ratio`, so it is already finite; only the raw colour
+        // components still need the engine's finite check.
+        for component in [color.x, color.y, color.z] {
             if math.validate_finite(component).is_err() {
                 return Err(SceneError::invalid_light_parameters(
                     "light parameters must be finite",
@@ -61,7 +63,7 @@ impl Light {
                 "light colour components must be non-negative",
             ));
         }
-        if intensity < 0.0 {
+        if intensity.get() < 0.0 {
             return Err(SceneError::invalid_light_parameters(
                 "light intensity must be non-negative",
             ));
@@ -81,7 +83,7 @@ impl Light {
         self.color
     }
 
-    pub const fn intensity(&self) -> f32 {
+    pub const fn intensity(&self) -> Ratio {
         self.intensity
     }
 }
@@ -95,29 +97,29 @@ mod tests {
         MathApi::new()
     }
 
+    fn rat(x: f32) -> Ratio {
+        Ratio::new(x).unwrap()
+    }
+
     #[test]
     fn directional_light_is_built_with_valid_params() {
-        let l = Light::directional(&math(), Vec3::new(1.0, 1.0, 1.0), 5.0).unwrap();
+        let l = Light::directional(&math(), Vec3::new(1.0, 1.0, 1.0), rat(5.0)).unwrap();
         assert_eq!(l.kind(), LightKind::Directional);
-        assert_eq!(l.intensity(), 5.0);
+        assert_eq!(l.intensity().get(), 5.0);
     }
 
     #[test]
     fn point_light_is_built_with_valid_params() {
-        let l = Light::point(&math(), Vec3::new(0.5, 0.5, 0.5), 2.0).unwrap();
+        let l = Light::point(&math(), Vec3::new(0.5, 0.5, 0.5), rat(2.0)).unwrap();
         assert_eq!(l.kind(), LightKind::Point);
         assert_eq!(l.color().x, 0.5);
     }
 
     #[test]
     fn negative_intensity_is_rejected() {
-        let err = Light::directional(&math(), Vec3::ONE, -1.0).unwrap_err();
-        assert_eq!(err.code(), SceneErrorCode::InvalidLightParameters);
-    }
-
-    #[test]
-    fn nan_intensity_is_rejected() {
-        let err = Light::point(&math(), Vec3::ONE, f32::NAN).unwrap_err();
+        // A `Ratio` is finite but may be negative; the non-negative intensity
+        // guard still rejects it.
+        let err = Light::directional(&math(), Vec3::ONE, rat(-1.0)).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidLightParameters);
     }
 
@@ -128,25 +130,25 @@ mod tests {
             Vec3::new(0.0, -0.1, 0.0),
             Vec3::new(0.0, 0.0, -0.1),
         ] {
-            let err = Light::directional(&math(), bad, 1.0).unwrap_err();
+            let err = Light::directional(&math(), bad, rat(1.0)).unwrap_err();
             assert_eq!(err.code(), SceneErrorCode::InvalidLightParameters);
         }
     }
 
     #[test]
     fn nan_color_component_is_rejected() {
-        let err = Light::point(&math(), Vec3::new(f32::NAN, 0.0, 0.0), 1.0).unwrap_err();
+        let err = Light::point(&math(), Vec3::new(f32::NAN, 0.0, 0.0), rat(1.0)).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidLightParameters);
     }
 
     #[test]
     fn zero_intensity_and_zero_channels_are_allowed() {
-        let l = Light::directional(&math(), Vec3::ONE, 0.0).unwrap();
-        assert_eq!(l.intensity(), 0.0);
+        let l = Light::directional(&math(), Vec3::ONE, rat(0.0)).unwrap();
+        assert_eq!(l.intensity().get(), 0.0);
         // Each channel exactly 0.0 is non-negative and accepted.
-        assert_eq!(Light::directional(&math(), Vec3::new(0.0, 1.0, 1.0), 1.0).unwrap().color().x, 0.0);
-        assert_eq!(Light::directional(&math(), Vec3::new(1.0, 0.0, 1.0), 1.0).unwrap().color().y, 0.0);
-        assert_eq!(Light::directional(&math(), Vec3::new(1.0, 1.0, 0.0), 1.0).unwrap().color().z, 0.0);
+        assert_eq!(Light::directional(&math(), Vec3::new(0.0, 1.0, 1.0), rat(1.0)).unwrap().color().x, 0.0);
+        assert_eq!(Light::directional(&math(), Vec3::new(1.0, 0.0, 1.0), rat(1.0)).unwrap().color().y, 0.0);
+        assert_eq!(Light::directional(&math(), Vec3::new(1.0, 1.0, 0.0), rat(1.0)).unwrap().color().z, 0.0);
     }
 
     #[test]

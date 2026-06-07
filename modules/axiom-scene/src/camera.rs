@@ -1,6 +1,6 @@
 //! Perspective camera component.
 
-use axiom_kernel::{FieldSchema, TypeSchema};
+use axiom_kernel::{FieldSchema, Meters, Radians, Ratio, TypeSchema};
 use axiom_math::{Mat4, MathApi};
 
 use crate::scene_error::SceneError;
@@ -16,10 +16,10 @@ use crate::scene_result::SceneResult;
 /// Layer-02 math user takes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Camera {
-    fovy_radians: f32,
-    aspect: f32,
-    near: f32,
-    far: f32,
+    fovy_radians: Radians,
+    aspect: Ratio,
+    near: Meters,
+    far: Meters,
 }
 
 impl Camera {
@@ -28,10 +28,10 @@ impl Camera {
     pub const SCHEMA: TypeSchema = TypeSchema::new(
         "Camera",
         &[
-            FieldSchema::new("fovy_radians", "f32"),
-            FieldSchema::new("aspect", "f32"),
-            FieldSchema::new("near", "f32"),
-            FieldSchema::new("far", "f32"),
+            FieldSchema::new("fovy_radians", "Radians"),
+            FieldSchema::new("aspect", "Ratio"),
+            FieldSchema::new("near", "Meters"),
+            FieldSchema::new("far", "Meters"),
         ],
     );
 
@@ -41,12 +41,12 @@ impl Camera {
     /// [`crate::scene_error_code::SceneErrorCode::InvalidCameraParameters`].
     pub fn perspective(
         math: &MathApi,
-        fovy_radians: f32,
-        aspect: f32,
-        near: f32,
-        far: f32,
+        fovy_radians: Radians,
+        aspect: Ratio,
+        near: Meters,
+        far: Meters,
     ) -> SceneResult<Self> {
-        math.mat4_perspective(fovy_radians, aspect, near, far)
+        math.mat4_perspective(fovy_radians.get(), aspect.get(), near.get(), far.get())
             .map_err(|cause| {
                 SceneError::invalid_camera_parameters(
                     "camera perspective parameters were rejected by the math layer",
@@ -61,19 +61,19 @@ impl Camera {
         })
     }
 
-    pub const fn fovy_radians(&self) -> f32 {
+    pub const fn fovy_radians(&self) -> Radians {
         self.fovy_radians
     }
 
-    pub const fn aspect(&self) -> f32 {
+    pub const fn aspect(&self) -> Ratio {
         self.aspect
     }
 
-    pub const fn near(&self) -> f32 {
+    pub const fn near(&self) -> Meters {
         self.near
     }
 
-    pub const fn far(&self) -> f32 {
+    pub const fn far(&self) -> Meters {
         self.far
     }
 
@@ -81,13 +81,18 @@ impl Camera {
     /// way the camera produces a projection matrix — there is no parallel
     /// implementation.
     pub fn projection_matrix(&self, math: &MathApi) -> SceneResult<Mat4> {
-        math.mat4_perspective(self.fovy_radians, self.aspect, self.near, self.far)
-            .map_err(|cause| {
-                SceneError::invalid_camera_parameters(
-                    "camera projection was rejected by the math layer",
-                    cause,
-                )
-            })
+        math.mat4_perspective(
+            self.fovy_radians.get(),
+            self.aspect.get(),
+            self.near.get(),
+            self.far.get(),
+        )
+        .map_err(|cause| {
+            SceneError::invalid_camera_parameters(
+                "camera projection was rejected by the math layer",
+                cause,
+            )
+        })
     }
 }
 
@@ -100,52 +105,66 @@ mod tests {
         MathApi::new()
     }
 
+    fn rad(x: f32) -> Radians {
+        Radians::new(x).unwrap()
+    }
+    fn rat(x: f32) -> Ratio {
+        Ratio::new(x).unwrap()
+    }
+    fn m(x: f32) -> Meters {
+        Meters::new(x).unwrap()
+    }
+
     #[test]
     fn perspective_camera_is_built_with_valid_intrinsics() {
-        let c = Camera::perspective(&math(), std::f32::consts::FRAC_PI_2, 16.0 / 9.0, 0.1, 1000.0)
-            .unwrap();
-        assert_eq!(c.aspect(), 16.0 / 9.0);
-        assert_eq!(c.near(), 0.1);
-        assert_eq!(c.far(), 1000.0);
+        let c = Camera::perspective(
+            &math(),
+            rad(std::f32::consts::FRAC_PI_2),
+            rat(16.0 / 9.0),
+            m(0.1),
+            m(1000.0),
+        )
+        .unwrap();
+        assert_eq!(c.aspect().get(), 16.0 / 9.0);
+        assert_eq!(c.near().get(), 0.1);
+        assert_eq!(c.far().get(), 1000.0);
     }
 
     #[test]
     fn fovy_radians_is_the_constructed_value() {
         let fov = std::f32::consts::FRAC_PI_3;
-        let c = Camera::perspective(&math(), fov, 1.0, 0.1, 100.0).unwrap();
-        assert_eq!(c.fovy_radians(), fov);
+        let c = Camera::perspective(&math(), rad(fov), rat(1.0), m(0.1), m(100.0)).unwrap();
+        assert_eq!(c.fovy_radians().get(), fov);
     }
 
     #[test]
     fn invalid_near_is_rejected() {
-        let err = Camera::perspective(&math(), 1.0, 1.0, 0.0, 100.0).unwrap_err();
+        let err = Camera::perspective(&math(), rad(1.0), rat(1.0), m(0.0), m(100.0)).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
         assert!(err.math().is_some(), "math cause must be preserved");
     }
 
     #[test]
     fn far_less_than_near_is_rejected() {
-        let err = Camera::perspective(&math(), 1.0, 1.0, 100.0, 1.0).unwrap_err();
+        let err = Camera::perspective(&math(), rad(1.0), rat(1.0), m(100.0), m(1.0)).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
     }
 
     #[test]
     fn invalid_aspect_is_rejected() {
-        let err = Camera::perspective(&math(), 1.0, 0.0, 0.1, 100.0).unwrap_err();
+        let err = Camera::perspective(&math(), rad(1.0), rat(0.0), m(0.1), m(100.0)).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
     }
 
     #[test]
     fn invalid_fovy_is_rejected() {
-        let err = Camera::perspective(&math(), 0.0, 1.0, 0.1, 100.0).unwrap_err();
-        assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
-        let err = Camera::perspective(&math(), f32::NAN, 1.0, 0.1, 100.0).unwrap_err();
+        let err = Camera::perspective(&math(), rad(0.0), rat(1.0), m(0.1), m(100.0)).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
     }
 
     #[test]
     fn projection_matrix_is_deterministic_for_identical_intrinsics() {
-        let c = Camera::perspective(&math(), 1.5, 1.0, 0.1, 100.0).unwrap();
+        let c = Camera::perspective(&math(), rad(1.5), rat(1.0), m(0.1), m(100.0)).unwrap();
         let a = c.projection_matrix(&math()).unwrap();
         let b = c.projection_matrix(&math()).unwrap();
         assert_eq!(a.as_cols_array(), b.as_cols_array());
@@ -155,12 +174,14 @@ mod tests {
     fn projection_matrix_failure_is_wrapped() {
         // A Camera holding intrinsics the math layer rejects exercises the
         // `map_err` arm of `projection_matrix`. Construction normally validates,
-        // so the struct is built directly to reach this path.
+        // so the struct is built directly to reach this path. The quantity types
+        // accept these finite values; it is the perspective *relationship*
+        // (zero fovy/aspect/extent) the math layer rejects.
         let bad = Camera {
-            fovy_radians: 0.0,
-            aspect: 0.0,
-            near: 0.0,
-            far: 0.0,
+            fovy_radians: rad(0.0),
+            aspect: rat(0.0),
+            near: m(0.0),
+            far: m(0.0),
         };
         let err = bad.projection_matrix(&math()).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);

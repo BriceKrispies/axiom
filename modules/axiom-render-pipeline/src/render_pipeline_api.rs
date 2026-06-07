@@ -155,7 +155,12 @@ impl RenderPipelineApi {
                 .expect("camera node has identity scale, so inverse succeeds")
                 .to_matrix();
             let projection = math
-                .mat4_perspective(cam.fovy_radians(), cam.aspect(), cam.near(), cam.far())
+                .mat4_perspective(
+                    cam.fovy_radians().get(),
+                    cam.aspect().get(),
+                    cam.near().get(),
+                    cam.far().get(),
+                )
                 .expect("camera intrinsics were validated at scene insertion");
             render.set_input_camera(&mut input, view, projection);
             let depth_fix = Mat4::from_cols_array(GL_TO_WGPU_DEPTH);
@@ -323,6 +328,7 @@ impl RenderPipelineApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_kernel::{Meters, Radians, Ratio};
 
     fn math() -> MathApi {
         MathApi::new()
@@ -343,10 +349,19 @@ mod tests {
         let camera = scene
             .create_node_with_transform(axiom_math::Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
         scene
-            .add_perspective_camera(&math(), camera, std::f32::consts::FRAC_PI_3, 4.0 / 3.0, 0.1, 100.0)
+            .add_perspective_camera(
+                &math(),
+                camera,
+                Radians::new(std::f32::consts::FRAC_PI_3).unwrap(),
+                Ratio::new(4.0 / 3.0).unwrap(),
+                Meters::new(0.1).unwrap(),
+                Meters::new(100.0).unwrap(),
+            )
             .unwrap();
         let light = scene.create_node();
-        scene.add_directional_light(&math(), light, Vec3::ONE, 1.0).unwrap();
+        scene
+            .add_directional_light(&math(), light, Vec3::ONE, Ratio::new(1.0).unwrap())
+            .unwrap();
 
         scene.update_world_transforms();
         scene
@@ -421,7 +436,9 @@ mod tests {
         let mesh = scene.mesh_ref(1);
         let material = scene.material_ref(2);
         scene.add_renderable(n, mesh, material).unwrap();
-        scene.add_directional_light(&math(), n, Vec3::ONE, 1.0).unwrap();
+        scene
+            .add_directional_light(&math(), n, Vec3::ONE, Ratio::new(1.0).unwrap())
+            .unwrap();
         scene.update_world_transforms();
 
         let frame = frame_with_assets(&api);

@@ -5,6 +5,7 @@
 //! whole replay happens in that single function, so the scene's un-nameable node
 //! ids only ever live as locals (`nodes: Vec<_>`).
 
+use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::{MathApi, Vec3};
 use axiom_scene::SceneApi;
 
@@ -75,10 +76,11 @@ impl SceneCommands {
                             .add_perspective_camera(
                                 math,
                                 node,
-                                p.fov_y.as_radians(),
-                                self.aspect,
-                                p.near,
-                                p.far,
+                                Radians::new(p.fov_y.as_radians())
+                                    .expect("authored fov is finite"),
+                                Ratio::new(self.aspect).expect("authored aspect is finite"),
+                                Meters::new(p.near).expect("authored near plane is finite"),
+                                Meters::new(p.far).expect("authored far plane is finite"),
                             )
                             .expect("authored camera intrinsics are valid");
                     }
@@ -88,7 +90,7 @@ impl SceneCommands {
                                 math,
                                 node,
                                 Vec3::new(l.color.r, l.color.g, l.color.b),
-                                l.intensity,
+                                Ratio::new(l.intensity).expect("authored light intensity is finite"),
                             )
                             .expect("authored light parameters are valid");
                         light_direction = Some(l.direction);

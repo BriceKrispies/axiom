@@ -1,7 +1,7 @@
 //! The single public facade of the `axiom-scene` module.
 
 use axiom_frame::FrameContext;
-use axiom_kernel::{Reflect, TypeSchema};
+use axiom_kernel::{Meters, Radians, Ratio, Reflect, TypeSchema};
 use axiom_math::{Mat4, MathApi, Transform, Vec3};
 
 use crate::camera::Camera;
@@ -96,10 +96,10 @@ impl SceneApi {
         &mut self,
         math: &MathApi,
         node: SceneNodeId,
-        fovy_radians: f32,
-        aspect: f32,
-        near: f32,
-        far: f32,
+        fovy_radians: Radians,
+        aspect: Ratio,
+        near: Meters,
+        far: Meters,
     ) -> SceneResult<()> {
         let camera = Camera::perspective(math, fovy_radians, aspect, near, far)?;
         self.scene.add_camera(node, camera)
@@ -126,7 +126,7 @@ impl SceneApi {
         math: &MathApi,
         node: SceneNodeId,
         color: Vec3,
-        intensity: f32,
+        intensity: Ratio,
     ) -> SceneResult<()> {
         let light = Light::directional(math, color, intensity)?;
         self.scene.add_light(node, light)
@@ -138,7 +138,7 @@ impl SceneApi {
         math: &MathApi,
         node: SceneNodeId,
         color: Vec3,
-        intensity: f32,
+        intensity: Ratio,
     ) -> SceneResult<()> {
         let light = Light::point(math, color, intensity)?;
         self.scene.add_light(node, light)
@@ -235,7 +235,7 @@ impl SceneApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_kernel::Ratio;
+    use axiom_kernel::{Meters, Radians, Ratio};
     use crate::scene_error_code::SceneErrorCode;
 
     fn math() -> MathApi {
@@ -244,6 +244,16 @@ mod tests {
 
     fn api() -> SceneApi {
         SceneApi::new()
+    }
+
+    fn rad(x: f32) -> Radians {
+        Radians::new(x).unwrap()
+    }
+    fn rat(x: f32) -> Ratio {
+        Ratio::new(x).unwrap()
+    }
+    fn m(x: f32) -> Meters {
+        Meters::new(x).unwrap()
     }
 
     #[test]
@@ -272,11 +282,11 @@ mod tests {
     fn add_perspective_camera_valid_and_invalid() {
         let mut a = api();
         let n = a.create_node();
-        a.add_perspective_camera(&math(), n, std::f32::consts::FRAC_PI_3, 1.0, 0.1, 100.0)
+        a.add_perspective_camera(&math(), n, rad(std::f32::consts::FRAC_PI_3), rat(1.0), m(0.1), m(100.0))
             .unwrap();
         // Invalid intrinsics propagate the `?` error arm.
         let err = a
-            .add_perspective_camera(&math(), n, 0.0, 1.0, 0.1, 100.0)
+            .add_perspective_camera(&math(), n, rad(0.0), rat(1.0), m(0.1), m(100.0))
             .unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
         // Projection matrix: present + missing.
@@ -294,14 +304,14 @@ mod tests {
     fn lights_valid_and_invalid() {
         let mut a = api();
         let n = a.create_node();
-        a.add_directional_light(&math(), n, Vec3::ONE, 1.0).unwrap();
-        a.add_point_light(&math(), n, Vec3::new(0.5, 0.5, 0.5), 2.0).unwrap();
+        a.add_directional_light(&math(), n, Vec3::ONE, rat(1.0)).unwrap();
+        a.add_point_light(&math(), n, Vec3::new(0.5, 0.5, 0.5), rat(2.0)).unwrap();
         assert_eq!(
-            a.add_directional_light(&math(), n, Vec3::ONE, -1.0).unwrap_err().code(),
+            a.add_directional_light(&math(), n, Vec3::ONE, rat(-1.0)).unwrap_err().code(),
             SceneErrorCode::InvalidLightParameters
         );
         assert_eq!(
-            a.add_point_light(&math(), n, Vec3::ONE, f32::NAN).unwrap_err().code(),
+            a.add_point_light(&math(), n, Vec3::new(f32::NAN, 0.0, 0.0), rat(1.0)).unwrap_err().code(),
             SceneErrorCode::InvalidLightParameters
         );
         a.remove_light(n).unwrap();
@@ -348,7 +358,7 @@ mod tests {
     fn snapshot_reads_current_scene_state() {
         let mut a = api();
         let n = a.create_node();
-        a.add_directional_light(&math(), n, Vec3::ONE, 1.0).unwrap();
+        a.add_directional_light(&math(), n, Vec3::ONE, rat(1.0)).unwrap();
         let snap = a.snapshot();
         assert_eq!(snap.nodes().len(), 1);
         assert_eq!(snap.lights().len(), 1);

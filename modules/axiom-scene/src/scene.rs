@@ -303,6 +303,7 @@ impl Default for Scene {
 mod tests {
     use super::*;
     use crate::scene_error_code::SceneErrorCode;
+    use axiom_kernel::{Meters, Radians, Ratio};
     use axiom_math::{MathApi, Vec3};
 
     fn math() -> MathApi {
@@ -460,7 +461,14 @@ mod tests {
     fn add_and_remove_camera() {
         let mut s = Scene::new();
         let n = node(&mut s);
-        let cam = Camera::perspective(&math(), std::f32::consts::FRAC_PI_2, 1.0, 0.1, 100.0).unwrap();
+        let cam = Camera::perspective(
+            &math(),
+            Radians::new(std::f32::consts::FRAC_PI_2).unwrap(),
+            Ratio::new(1.0).unwrap(),
+            Meters::new(0.1).unwrap(),
+            Meters::new(100.0).unwrap(),
+        )
+        .unwrap();
         s.add_camera(n, cam).unwrap();
         assert_eq!(s.camera_count(), 1);
         // Missing node.
@@ -481,7 +489,7 @@ mod tests {
     fn add_and_remove_light() {
         let mut s = Scene::new();
         let n = node(&mut s);
-        let l = Light::directional(&math(), Vec3::ONE, 1.0).unwrap();
+        let l = Light::directional(&math(), Vec3::ONE, Ratio::new(1.0).unwrap()).unwrap();
         s.add_light(n, l).unwrap();
         assert_eq!(s.light_count(), 1);
         assert_eq!(

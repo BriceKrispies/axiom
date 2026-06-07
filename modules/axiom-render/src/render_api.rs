@@ -1,6 +1,6 @@
 //! The single public facade of the `axiom-render` module.
 
-use axiom_kernel::{FrameIndex, Tick};
+use axiom_kernel::{FrameIndex, Ratio, Tick};
 use axiom_math::{Mat4, Vec2, Vec3, Vec4};
 
 use crate::render_camera::RenderCamera;
@@ -67,7 +67,7 @@ impl RenderApi {
         input: &mut RenderInput,
         direction_world: Vec3,
         color: Vec3,
-        intensity: f32,
+        intensity: Ratio,
     ) {
         input.add_light(RenderLight::new(
             RenderLightKind::Directional,
@@ -82,7 +82,7 @@ impl RenderApi {
         input: &mut RenderInput,
         position_world: Vec3,
         color: Vec3,
-        intensity: f32,
+        intensity: Ratio,
     ) {
         input.add_light(RenderLight::new(
             RenderLightKind::Point,
@@ -288,7 +288,7 @@ mod tests {
             &mut input,
             Vec3::new(0.0, -1.0, 0.0),
             Vec3::ONE,
-            1.0,
+            Ratio::new(1.0).unwrap(),
         );
         let mesh_idx = api().add_input_mesh(
             &mut input,
@@ -417,9 +417,14 @@ mod tests {
             &mut input,
             Vec3::new(0.0, -1.0, 0.0),
             Vec3::ONE,
-            1.0,
+            Ratio::new(1.0).unwrap(),
         );
-        api().add_input_point_light(&mut input, Vec3::ZERO, Vec3::ONE, 0.5);
+        api().add_input_point_light(
+            &mut input,
+            Vec3::ZERO,
+            Vec3::ONE,
+            Ratio::new(0.5).unwrap(),
+        );
         assert_eq!(input.lights().len(), 2);
     }
 

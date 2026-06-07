@@ -1,5 +1,7 @@
 //! One camera entry inside a [`crate::SceneSnapshot`].
 
+use axiom_kernel::{Meters, Radians, Ratio};
+
 use crate::scene_node_id::SceneNodeId;
 
 /// One camera entry in a deterministic scene snapshot: the node it is attached
@@ -8,19 +10,19 @@ use crate::scene_node_id::SceneNodeId;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraSnapshot {
     node: SceneNodeId,
-    fovy_radians: f32,
-    aspect: f32,
-    near: f32,
-    far: f32,
+    fovy_radians: Radians,
+    aspect: Ratio,
+    near: Meters,
+    far: Meters,
 }
 
 impl CameraSnapshot {
     pub const fn new(
         node: SceneNodeId,
-        fovy_radians: f32,
-        aspect: f32,
-        near: f32,
-        far: f32,
+        fovy_radians: Radians,
+        aspect: Ratio,
+        near: Meters,
+        far: Meters,
     ) -> Self {
         CameraSnapshot {
             node,
@@ -35,19 +37,19 @@ impl CameraSnapshot {
         self.node
     }
 
-    pub const fn fovy_radians(&self) -> f32 {
+    pub const fn fovy_radians(&self) -> Radians {
         self.fovy_radians
     }
 
-    pub const fn aspect(&self) -> f32 {
+    pub const fn aspect(&self) -> Ratio {
         self.aspect
     }
 
-    pub const fn near(&self) -> f32 {
+    pub const fn near(&self) -> Meters {
         self.near
     }
 
-    pub const fn far(&self) -> f32 {
+    pub const fn far(&self) -> Meters {
         self.far
     }
 }
@@ -56,21 +58,31 @@ impl CameraSnapshot {
 mod tests {
     use super::*;
 
+    fn rad(x: f32) -> Radians {
+        Radians::new(x).unwrap()
+    }
+    fn rat(x: f32) -> Ratio {
+        Ratio::new(x).unwrap()
+    }
+    fn m(x: f32) -> Meters {
+        Meters::new(x).unwrap()
+    }
+
     #[test]
     fn accessors_round_trip_constructed_values() {
-        let s = CameraSnapshot::new(SceneNodeId::from_raw(5), 1.5, 16.0 / 9.0, 0.1, 100.0);
+        let s = CameraSnapshot::new(SceneNodeId::from_raw(5), rad(1.5), rat(16.0 / 9.0), m(0.1), m(100.0));
         assert_eq!(s.node().raw(), 5);
-        assert_eq!(s.fovy_radians(), 1.5);
-        assert_eq!(s.aspect(), 16.0 / 9.0);
-        assert_eq!(s.near(), 0.1);
-        assert_eq!(s.far(), 100.0);
+        assert_eq!(s.fovy_radians().get(), 1.5);
+        assert_eq!(s.aspect().get(), 16.0 / 9.0);
+        assert_eq!(s.near().get(), 0.1);
+        assert_eq!(s.far().get(), 100.0);
     }
 
     #[test]
     fn equality_requires_all_fields() {
-        let a = CameraSnapshot::new(SceneNodeId::from_raw(1), 1.0, 1.0, 0.1, 100.0);
-        let b = CameraSnapshot::new(SceneNodeId::from_raw(1), 1.0, 1.0, 0.1, 100.0);
-        let c = CameraSnapshot::new(SceneNodeId::from_raw(2), 1.0, 1.0, 0.1, 100.0);
+        let a = CameraSnapshot::new(SceneNodeId::from_raw(1), rad(1.0), rat(1.0), m(0.1), m(100.0));
+        let b = CameraSnapshot::new(SceneNodeId::from_raw(1), rad(1.0), rat(1.0), m(0.1), m(100.0));
+        let c = CameraSnapshot::new(SceneNodeId::from_raw(2), rad(1.0), rat(1.0), m(0.1), m(100.0));
         assert_eq!(a, b);
         assert_ne!(a, c);
     }

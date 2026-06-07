@@ -103,6 +103,7 @@ mod tests {
     use crate::material_ref::MaterialRef;
     use crate::mesh_ref::MeshRef;
     use crate::renderable::Renderable;
+    use axiom_kernel::{Meters, Radians, Ratio};
     use axiom_math::{MathApi, Transform, Vec3};
 
     fn math() -> MathApi {
@@ -114,9 +115,20 @@ mod tests {
         let a = s.create_node(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
         let b = s.create_node(Transform::from_translation(Vec3::new(0.0, 2.0, 0.0)));
         s.set_parent(b, a).unwrap();
-        s.add_camera(a, Camera::perspective(&math(), std::f32::consts::FRAC_PI_2, 1.0, 0.1, 100.0).unwrap())
+        s.add_camera(
+            a,
+            Camera::perspective(
+                &math(),
+                Radians::new(std::f32::consts::FRAC_PI_2).unwrap(),
+                Ratio::new(1.0).unwrap(),
+                Meters::new(0.1).unwrap(),
+                Meters::new(100.0).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        s.add_light(a, Light::directional(&math(), Vec3::ONE, Ratio::new(1.0).unwrap()).unwrap())
             .unwrap();
-        s.add_light(a, Light::directional(&math(), Vec3::ONE, 1.0).unwrap()).unwrap();
         s.add_renderable(b, Renderable::new(MeshRef::from_raw(7), MaterialRef::from_raw(8)).unwrap())
             .unwrap();
         s.update_world_transforms();
@@ -187,16 +199,23 @@ mod cov {
     use crate::light_kind::LightKind;
     use crate::material_ref::MaterialRef;
     use crate::mesh_ref::MeshRef;
+    use axiom_kernel::{Meters, Radians, Ratio};
     use axiom_math::{Transform, Vec3};
 
     fn node_only() -> NodeSnapshot {
         NodeSnapshot::new(SceneNodeId::from_raw(1), None, Transform::IDENTITY, Transform::IDENTITY)
     }
     fn camera_only() -> CameraSnapshot {
-        CameraSnapshot::new(SceneNodeId::from_raw(1), 1.0, 1.0, 0.1, 100.0)
+        CameraSnapshot::new(
+            SceneNodeId::from_raw(1),
+            Radians::new(1.0).unwrap(),
+            Ratio::new(1.0).unwrap(),
+            Meters::new(0.1).unwrap(),
+            Meters::new(100.0).unwrap(),
+        )
     }
     fn light_only() -> LightSnapshot {
-        LightSnapshot::new(SceneNodeId::from_raw(1), LightKind::Point, Vec3::ONE, 1.0)
+        LightSnapshot::new(SceneNodeId::from_raw(1), LightKind::Point, Vec3::ONE, Ratio::new(1.0).unwrap())
     }
     fn renderable_only() -> RenderableSnapshot {
         RenderableSnapshot::new(SceneNodeId::from_raw(1), MeshRef::from_raw(1), MaterialRef::from_raw(1), true)

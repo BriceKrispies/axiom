@@ -1,5 +1,6 @@
 //! Render-facing light data.
 
+use axiom_kernel::Ratio;
 use axiom_math::Vec3;
 
 /// Render-facing light kind tag.
@@ -17,7 +18,7 @@ pub struct RenderLight {
     kind: RenderLightKind,
     direction_or_position_world: Vec3,
     color: Vec3,
-    intensity: f32,
+    intensity: Ratio,
 }
 
 impl RenderLight {
@@ -25,7 +26,7 @@ impl RenderLight {
         kind: RenderLightKind,
         direction_or_position_world: Vec3,
         color: Vec3,
-        intensity: f32,
+        intensity: Ratio,
     ) -> Self {
         RenderLight {
             kind,
@@ -47,7 +48,7 @@ impl RenderLight {
         self.color
     }
 
-    pub const fn intensity(&self) -> f32 {
+    pub const fn intensity(&self) -> Ratio {
         self.intensity
     }
 }
@@ -62,12 +63,12 @@ mod tests {
             RenderLightKind::Directional,
             Vec3::new(0.0, -1.0, 0.0),
             Vec3::ONE,
-            1.0,
+            Ratio::new(1.0).unwrap(),
         );
         assert_eq!(l.kind(), RenderLightKind::Directional);
         assert_eq!(l.direction_or_position_world(), Vec3::new(0.0, -1.0, 0.0));
         assert_eq!(l.color(), Vec3::ONE);
-        assert_eq!(l.intensity(), 1.0);
+        assert_eq!(l.intensity(), Ratio::new(1.0).unwrap());
     }
 
     #[test]
@@ -77,17 +78,32 @@ mod tests {
             RenderLightKind::Point,
             Vec3::ZERO,
             Vec3::ONE,
-            3.5,
+            Ratio::new(3.5).unwrap(),
         );
-        assert_eq!(l.intensity(), 3.5);
+        assert_eq!(l.intensity(), Ratio::new(3.5).unwrap());
+        assert_eq!(l.intensity().get(), 3.5);
     }
 
     #[test]
     fn equality_requires_all_fields() {
-        let a = RenderLight::new(RenderLightKind::Point, Vec3::ZERO, Vec3::ZERO, 1.0);
-        let b = RenderLight::new(RenderLightKind::Point, Vec3::ZERO, Vec3::ZERO, 1.0);
-        let c =
-            RenderLight::new(RenderLightKind::Directional, Vec3::ZERO, Vec3::ZERO, 1.0);
+        let a = RenderLight::new(
+            RenderLightKind::Point,
+            Vec3::ZERO,
+            Vec3::ZERO,
+            Ratio::new(1.0).unwrap(),
+        );
+        let b = RenderLight::new(
+            RenderLightKind::Point,
+            Vec3::ZERO,
+            Vec3::ZERO,
+            Ratio::new(1.0).unwrap(),
+        );
+        let c = RenderLight::new(
+            RenderLightKind::Directional,
+            Vec3::ZERO,
+            Vec3::ZERO,
+            Ratio::new(1.0).unwrap(),
+        );
         assert_eq!(a, b);
         assert_ne!(a, c);
     }

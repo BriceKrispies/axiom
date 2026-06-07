@@ -10,6 +10,7 @@
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
+use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::{MathApi, Transform, Vec2, Vec3, Vec4};
 use axiom_render_pipeline::RenderPipelineApi;
 use axiom_resources::ResourcesApi;
@@ -203,14 +204,19 @@ impl CubeSliceDriver {
             .add_perspective_camera(
                 &math,
                 camera_node,
-                content.camera.fovy_radians,
-                aspect,
-                content.camera.near,
-                content.camera.far,
+                Radians::new(content.camera.fovy_radians).expect("fovy is finite"),
+                Ratio::new(aspect).expect("aspect is finite"),
+                Meters::new(content.camera.near).expect("near plane is finite"),
+                Meters::new(content.camera.far).expect("far plane is finite"),
             )
             .expect("camera intrinsics are valid");
         scene
-            .add_directional_light(&math, light_node, content.light.color, content.light.intensity)
+            .add_directional_light(
+                &math,
+                light_node,
+                content.light.color,
+                Ratio::new(content.light.intensity).expect("light intensity is finite"),
+            )
             .expect("light parameters are valid");
 
         CubeSliceDriver {
@@ -308,7 +314,6 @@ impl CubeSliceDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_kernel::Ratio;
 
     fn viewport(w: u32, h: u32) -> HostViewport {
         HostApi::new()

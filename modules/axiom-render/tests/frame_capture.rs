@@ -7,7 +7,7 @@
 //! pixels** here — no screenshot, no GPU readback, no canvas, no presentation.
 //! Everything is built through the deterministic `RenderApi` contract.
 
-use axiom_kernel::{FrameIndex, Tick};
+use axiom_kernel::{FrameIndex, Ratio, Tick};
 use axiom_math::{Mat4, Quat, Transform, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 
@@ -34,7 +34,12 @@ fn cube_capture(api: &RenderApi, frame: u64, tick: u64, world: Mat4) -> (Vec<u8>
     let mut input = api.new_input(VIEWPORT_W, VIEWPORT_H);
     api.set_input_clear_color(&mut input, [0.05, 0.06, 0.08, 1.0]);
     api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
-    api.add_input_directional_light(&mut input, Vec3::new(0.3, -1.0, 0.4), Vec3::ONE, 1.0);
+    api.add_input_directional_light(
+        &mut input,
+        Vec3::new(0.3, -1.0, 0.4),
+        Vec3::ONE,
+        Ratio::new(1.0).unwrap(),
+    );
     let mesh = api.add_input_mesh(
         &mut input,
         1,
