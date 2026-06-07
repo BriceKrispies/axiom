@@ -38,6 +38,9 @@ pub enum HostErrorCode {
     /// A [`crate::HostPresentationRequest`] bound an invalid/missing target
     /// or surface, or an internally inconsistent adapter/device pairing.
     InvalidPresentationRequest = 10,
+    /// A [`crate::Pixels`] quantity was constructed from a non-finite value
+    /// (NaN or infinity).
+    NonFinitePixels = 11,
 }
 
 impl HostErrorCode {
@@ -58,6 +61,7 @@ mod tests {
         assert_eq!(HostErrorCode::InvalidPresentationTarget.raw(), 8);
         assert_eq!(HostErrorCode::InvalidSurfaceHandle.raw(), 9);
         assert_eq!(HostErrorCode::InvalidPresentationRequest.raw(), 10);
+        assert_eq!(HostErrorCode::NonFinitePixels.raw(), 11);
     }
 
     #[test]

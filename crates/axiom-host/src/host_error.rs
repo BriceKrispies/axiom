@@ -86,6 +86,11 @@ impl HostError {
         HostError::new(HostErrorCode::InvalidPresentationRequest, message)
     }
 
+    /// Shorthand for [`HostErrorCode::NonFinitePixels`].
+    pub const fn non_finite_pixels(message: &'static str) -> Self {
+        HostError::new(HostErrorCode::NonFinitePixels, message)
+    }
+
     /// The machine-readable host error code.
     pub const fn code(&self) -> HostErrorCode {
         self.code
@@ -151,6 +156,10 @@ mod tests {
         assert_eq!(
             HostError::invalid_lifecycle_transition("").code(),
             HostErrorCode::InvalidLifecycleTransition
+        );
+        assert_eq!(
+            HostError::non_finite_pixels("").code(),
+            HostErrorCode::NonFinitePixels
         );
     }
 

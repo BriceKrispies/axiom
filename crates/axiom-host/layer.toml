@@ -33,7 +33,7 @@ meaningful_dependency = "Host consumes runtime (`Runtime`, `RuntimeStepRecord`, 
 # Public Rust surface is the curated list in `lib.rs`; the architecture
 # checker only needs the facade plus the driver to prove the layer's
 # adapter role.
-introduced_capabilities = ["HostApi", "HostStepDriver"]
+introduced_capabilities = ["HostApi", "HostStepDriver", "Pixels"]
 
 consumed_capabilities = [
     "Runtime",

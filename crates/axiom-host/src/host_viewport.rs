@@ -4,6 +4,7 @@ use axiom_kernel::Ratio;
 
 use crate::host_error::HostError;
 use crate::host_result::HostResult;
+use crate::pixels::Pixels;
 
 /// Viewport / surface metadata supplied by the host.
 ///
@@ -148,13 +149,19 @@ impl HostViewport {
 
     /// Logical-to-physical conversion of one axis, deterministic across
     /// architectures because it is rounded `f64` arithmetic.
-    pub fn logical_to_physical(&self, value: f32) -> f32 {
-        ((value as f64) * (self.scale_factor.get() as f64)) as f32
+    pub fn logical_to_physical(&self, value: Pixels) -> Pixels {
+        let result = ((value.get() as f64) * (self.scale_factor.get() as f64)) as f32;
+        Pixels::new(result)
+            .expect("a finite pixel value scaled by a finite scale factor is finite")
     }
 
-    /// Physical-to-logical conversion of one axis.
-    pub fn physical_to_logical(&self, value: f32) -> f32 {
-        ((value as f64) / (self.scale_factor.get() as f64)) as f32
+    /// Physical-to-logical conversion of one axis. `self.scale_factor` is a
+    /// positive, non-zero [`Ratio`] by the viewport's construction invariant,
+    /// so dividing a finite pixel value by it stays finite.
+    pub fn physical_to_logical(&self, value: Pixels) -> Pixels {
+        let result = ((value.get() as f64) / (self.scale_factor.get() as f64)) as f32;
+        Pixels::new(result)
+            .expect("a finite pixel value divided by a finite positive scale factor is finite")
     }
 }
 
@@ -212,16 +219,23 @@ mod tests {
     #[test]
     fn logical_to_physical_is_deterministic() {
         let v = HostViewport::new(100, 100, ratio(2.0)).unwrap();
-        assert_eq!(v.logical_to_physical(50.0), 100.0);
+        assert_eq!(
+            v.logical_to_physical(Pixels::new(50.0).unwrap()),
+            Pixels::new(100.0).unwrap()
+        );
         // Identical inputs across two calls must match byte-for-byte.
-        assert_eq!(v.logical_to_physical(50.0), v.logical_to_physical(50.0));
+        assert_eq!(
+            v.logical_to_physical(Pixels::new(50.0).unwrap()),
+            v.logical_to_physical(Pixels::new(50.0).unwrap())
+        );
     }
 
     #[test]
     fn physical_to_logical_is_inverse_of_logical_to_physical() {
         let v = HostViewport::new(100, 100, ratio(2.5)).unwrap();
-        let recovered = v.physical_to_logical(v.logical_to_physical(40.0));
-        assert!((recovered - 40.0).abs() < 1.0e-3);
+        let recovered =
+            v.physical_to_logical(v.logical_to_physical(Pixels::new(40.0).unwrap()));
+        assert!((recovered.get() - 40.0).abs() < 1.0e-3);
     }
 
     #[test]
