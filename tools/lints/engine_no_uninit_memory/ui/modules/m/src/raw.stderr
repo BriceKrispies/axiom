@@ -1,0 +1,43 @@
+warning: uninitialized or zero-initialized memory is banned in non-test engine code
+  --> $DIR/raw.rs:9:27
+   |
+LL |     let _: u32 = unsafe { std::mem::zeroed() };
+   |                           ^^^^^^^^^^^^^^^^^^
+   |
+   = help: construct a fully-initialized value (e.g. `Default::default()` or a named constructor); if a reviewed storage primitive genuinely needs uninit memory, encapsulate it there rather than calling these APIs at each site
+   = note: `#[warn(engine_no_uninit_memory)]` on by default
+
+warning: uninitialized or zero-initialized memory is banned in non-test engine code
+  --> $DIR/raw.rs:13:13
+   |
+LL |     let _ = core::mem::MaybeUninit::<u32>::uninit();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: construct a fully-initialized value (e.g. `Default::default()` or a named constructor); if a reviewed storage primitive genuinely needs uninit memory, encapsulate it there rather than calling these APIs at each site
+
+warning: uninitialized or zero-initialized memory is banned in non-test engine code
+  --> $DIR/raw.rs:17:13
+   |
+LL |     let _ = core::mem::MaybeUninit::<u32>::zeroed();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: construct a fully-initialized value (e.g. `Default::default()` or a named constructor); if a reviewed storage primitive genuinely needs uninit memory, encapsulate it there rather than calling these APIs at each site
+
+warning: uninitialized or zero-initialized memory is banned in non-test engine code
+  --> $DIR/raw.rs:21:14
+   |
+LL |     let mu = core::mem::MaybeUninit::<u32>::uninit();
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: construct a fully-initialized value (e.g. `Default::default()` or a named constructor); if a reviewed storage primitive genuinely needs uninit memory, encapsulate it there rather than calling these APIs at each site
+
+warning: uninitialized or zero-initialized memory is banned in non-test engine code
+  --> $DIR/raw.rs:22:22
+   |
+LL |     let _ = unsafe { mu.assume_init() };
+   |                      ^^^^^^^^^^^^^^^^
+   |
+   = help: construct a fully-initialized value (e.g. `Default::default()` or a named constructor); if a reviewed storage primitive genuinely needs uninit memory, encapsulate it there rather than calling these APIs at each site
+
+warning: 5 warnings emitted
+

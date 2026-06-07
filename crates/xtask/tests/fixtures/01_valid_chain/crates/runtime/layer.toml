@@ -1,11 +1,8 @@
 # A valid layer 1: imports the previous layer's public export and proves it.
 [layer]
 name = "runtime"
-index = 1
-previous = "kernel"
 crate_name = "runtime"
-allowed_dependencies = ["kernel"]
-forbidden_dependencies = []
+depends_on = ["kernel"]
 meaningful_dependency = "Runtime adapts the deterministic kernel clock into engine stepping."
 introduced_capabilities = ["Runtime"]
 consumed_capabilities = ["KernelClock"]

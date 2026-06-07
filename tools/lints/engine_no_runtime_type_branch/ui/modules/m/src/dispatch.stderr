@@ -1,0 +1,19 @@
+warning: runtime type reflection is banned in non-test engine code; it defeats the engine's static, deterministic data model
+  --> $DIR/dispatch.rs:11:22
+   |
+LL |     if let Some(n) = value.downcast_ref::<u32>() {
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use an explicit enum or typed dispatch instead of `Any`/`TypeId`/`downcast`
+   = note: `#[warn(engine_no_runtime_type_branch)]` on by default
+
+warning: runtime type reflection is banned in non-test engine code; it defeats the engine's static, deterministic data model
+  --> $DIR/dispatch.rs:17:13
+   |
+LL |     let _ = TypeId::of::<u32>();
+   |             ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use an explicit enum or typed dispatch instead of `Any`/`TypeId`/`downcast`
+
+warning: 2 warnings emitted
+

@@ -256,6 +256,112 @@ pub fn strip_line_comments(text: &str) -> String {
     out
 }
 
+/// Blank out the body of every `#[cfg(test)]` / `#[test]` item, preserving line
+/// structure (newlines kept; other bytes replaced with spaces) so reported line
+/// numbers stay accurate.
+///
+/// This makes the cross-layer import scan see only **non-test** code, so a layer
+/// that imports another layer purely from its tests is not treated as depending
+/// on it — matching the `engine_genuine_dependency` dylint, which also ignores
+/// test code. `depends_on` is a layer's non-test architecture in both tools.
+///
+/// Run this on already comment-stripped text. It matches the literal attributes
+/// `#[cfg(test)]` and `#[test]`; exotic forms (`#[cfg(all(test, …))]`) and braces
+/// inside string literals are not handled — the same documented limitation as
+/// the rest of this text scanner.
+pub fn strip_test_code(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out: Vec<u8> = bytes.to_vec();
+    for marker in ["#[cfg(test)]", "#[test]"] {
+        let mut from = 0;
+        while let Some(rel) = text[from..].find(marker) {
+            let attr_start = from + rel;
+            from = attr_start + marker.len();
+            let end = item_end(bytes, attr_start);
+            for b in out.iter_mut().take(end).skip(attr_start) {
+                if *b != b'\n' {
+                    *b = b' ';
+                }
+            }
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| text.to_string())
+}
+
+/// The end (exclusive) of the item an attribute at `attr_start` applies to:
+/// either the matching `}` of its first brace block, or the first `;` if that
+/// comes first (e.g. `#[cfg(test)] use foo::Bar;`).
+fn item_end(bytes: &[u8], attr_start: usize) -> usize {
+    let mut i = attr_start;
+    while i < bytes.len() && bytes[i] != b'{' && bytes[i] != b';' {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return bytes.len();
+    }
+    if bytes[i] == b';' {
+        return i + 1;
+    }
+    let mut depth = 0u32;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+/// The names of file-modules declared `#[cfg(test)] mod NAME;` (the `;` form, a
+/// separate file — not an inline `mod NAME { … }`, which `strip_test_code`
+/// already handles). Those files are compiled only in test builds, so the
+/// import scan must skip them entirely — matching the dylint's HIR-level
+/// `is_in_test`, which sees the gate that lives in the *declaring* file.
+pub fn find_cfg_test_modules(text: &str) -> Vec<String> {
+    let marker = "#[cfg(test)]";
+    let mut names = Vec::new();
+    let mut from = 0;
+    while let Some(rel) = text[from..].find(marker) {
+        let after = from + rel + marker.len();
+        from = after;
+        let rest = strip_leading_pub(text[after..].trim_start());
+        let Some(rest) = rest.strip_prefix("mod ") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(name) = first_ident(rest) else {
+            continue;
+        };
+        // Only the `mod NAME;` declaration form (a separate file).
+        if rest[name.len()..].trim_start().starts_with(';') {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Strip a leading `pub` / `pub(crate)` / `pub(in …)` visibility, returning the
+/// rest trimmed.
+fn strip_leading_pub(s: &str) -> &str {
+    let Some(after_pub) = s.strip_prefix("pub") else {
+        return s;
+    };
+    let rest = after_pub.trim_start();
+    if let Some(open) = rest.strip_prefix('(') {
+        if let Some(close) = open.find(')') {
+            return open[close + 1..].trim_start();
+        }
+    }
+    rest
+}
+
 /// Recursively collect every `.rs` file under `dir`, sorted for determinism.
 pub fn collect_rs_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -352,6 +458,47 @@ mod tests {
             "KernelClock"
         ));
         assert!(!references_symbol("KernelClockTower", "KernelClock"));
+    }
+
+    #[test]
+    fn test_code_is_stripped_but_lines_preserved() {
+        let src = "use axiom_kernel::A;\n\
+                   #[cfg(test)]\n\
+                   mod tests {\n\
+                       use axiom_host::B;\n\
+                   }\n\
+                   pub fn keep() {}\n";
+        let stripped = strip_test_code(src);
+        // Non-test import survives; the test-module import is gone.
+        assert!(stripped.contains("axiom_kernel::A"));
+        assert!(!stripped.contains("axiom_host::B"));
+        // The non-test item after the test module is preserved.
+        assert!(stripped.contains("pub fn keep"));
+        // Line count is unchanged so reported line numbers stay accurate.
+        assert_eq!(stripped.lines().count(), src.lines().count());
+    }
+
+    #[test]
+    fn finds_cfg_test_file_modules_only() {
+        let src = "#[cfg(test)]\nmod fixtures;\n\
+                   #[cfg(test)] pub mod helpers;\n\
+                   #[cfg(test)]\nmod inline { fn x() {} }\n\
+                   mod real;\n";
+        let mods = find_cfg_test_modules(src);
+        assert!(mods.contains(&"fixtures".to_string()));
+        assert!(mods.contains(&"helpers".to_string()));
+        // The inline (`{ … }`) form is handled by strip_test_code, not here.
+        assert!(!mods.contains(&"inline".to_string()));
+        // A non-test module is never returned.
+        assert!(!mods.contains(&"real".to_string()));
+    }
+
+    #[test]
+    fn test_attribute_on_a_use_statement_is_stripped() {
+        let src = "#[cfg(test)] use axiom_math::M;\nuse axiom_kernel::K;\n";
+        let stripped = strip_test_code(src);
+        assert!(!stripped.contains("axiom_math::M"));
+        assert!(stripped.contains("axiom_kernel::K"));
     }
 
     #[test]

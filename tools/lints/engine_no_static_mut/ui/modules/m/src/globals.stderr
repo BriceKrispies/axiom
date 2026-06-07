@@ -1,0 +1,11 @@
+warning: `static mut` is banned in engine code: it breaks determinism and reentrancy
+  --> $DIR/globals.rs:8:1
+   |
+LL | static mut COUNTER: u32 = 0;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: thread owned state through the runtime or use a typed handle instead of process-global mutable state
+   = note: `#[warn(engine_no_static_mut)]` on by default
+
+warning: 1 warning emitted
+

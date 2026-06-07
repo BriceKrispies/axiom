@@ -37,19 +37,21 @@ impl LayerManifest {
 }
 
 /// The `[layer]` table.
+///
+/// Layers form a directed *acyclic* graph, not a strict line: each layer lists
+/// the lower layers it directly depends on in `depends_on` and must genuinely
+/// use each one (the latter enforced by the `engine_genuine_dependency` dylint).
+/// A layer with an empty `depends_on` is a root (e.g. the kernel).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LayerSection {
     pub name: String,
-    pub index: u32,
-    #[serde(default)]
-    pub previous: Option<String>,
     #[serde(default)]
     pub crate_name: Option<String>,
+    /// The lower layers this layer directly depends on. These are exactly the
+    /// layers it may import, and each must be genuinely used.
     #[serde(default)]
-    pub allowed_dependencies: Vec<String>,
-    #[serde(default)]
-    pub forbidden_dependencies: Vec<String>,
+    pub depends_on: Vec<String>,
     pub meaningful_dependency: String,
     #[serde(default)]
     pub introduced_capabilities: Vec<String>,
@@ -150,11 +152,8 @@ mod tests {
         let text = r#"
             [layer]
             name = "runtime"
-            index = 1
-            previous = "kernel"
             crate_name = "axiom-runtime"
-            allowed_dependencies = ["kernel"]
-            forbidden_dependencies = []
+            depends_on = ["kernel"]
             meaningful_dependency = "Runtime steps the deterministic kernel clock."
             introduced_capabilities = ["Runtime"]
             consumed_capabilities = ["KernelApi"]
@@ -165,8 +164,7 @@ mod tests {
         "#;
         let m = parse_manifest(Path::new("crates/axiom-runtime"), text).unwrap();
         assert_eq!(m.layer.name, "runtime");
-        assert_eq!(m.layer.index, 1);
-        assert_eq!(m.layer.previous.as_deref(), Some("kernel"));
+        assert_eq!(m.layer.depends_on, vec!["kernel"]);
         assert_eq!(m.import_prefix(), "axiom_runtime");
         assert_eq!(m.proof_exports.len(), 1);
         assert_eq!(m.proof_exports[0].export, "Runtime");
@@ -178,11 +176,11 @@ mod tests {
         let text = r#"
             [layer]
             name = "kernel"
-            index = 0
             meaningful_dependency = "Base layer."
         "#;
         let m = parse_manifest(Path::new("crates/axiom-kernel"), text).unwrap();
         assert_eq!(m.import_prefix(), "axiom_kernel");
+        assert!(m.layer.depends_on.is_empty());
     }
 
     #[test]
@@ -190,7 +188,6 @@ mod tests {
         let text = r#"
             [layer]
             name = "kernel"
-            index = 0
             meaningful_dependency = "Base."
             surprise = true
         "#;

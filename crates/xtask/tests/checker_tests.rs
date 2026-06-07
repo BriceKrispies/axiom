@@ -34,23 +34,37 @@ fn case_01_valid_chain_passes() {
 }
 
 #[test]
-fn case_02_future_import_fails() {
-    let report = check_architecture(&fixture("02_future_import"));
+fn case_02_disallowed_import_fails() {
+    // `mid` imports `top`, which is not in `mid`'s `depends_on`.
+    let report = check_architecture(&fixture("02_disallowed_import"));
     assert!(!report.is_ok());
     assert!(
-        report.has_kind(ViolationKind::FutureImport),
-        "expected FutureImport, got: {:?}",
+        report.has_kind(ViolationKind::DisallowedLayerImport),
+        "expected DisallowedLayerImport, got: {:?}",
         report.violations()
     );
 }
 
 #[test]
-fn case_03_missing_previous_import_fails() {
-    let report = check_architecture(&fixture("03_missing_prev_import"));
+fn case_03_unknown_dependency_fails() {
+    // `runtime` lists `depends_on = [.. "ghost" ..]`, but no `ghost` layer exists.
+    let report = check_architecture(&fixture("03_unknown_dependency"));
     assert!(!report.is_ok());
     assert!(
-        report.has_kind(ViolationKind::MissingPreviousImport),
-        "expected MissingPreviousImport, got: {:?}",
+        report.has_kind(ViolationKind::UnknownDependency),
+        "expected UnknownDependency, got: {:?}",
+        report.violations()
+    );
+}
+
+#[test]
+fn case_08_dependency_cycle_fails() {
+    // `a` depends_on `b` and `b` depends_on `a` — the graph is not acyclic.
+    let report = check_architecture(&fixture("08_dependency_cycle"));
+    assert!(!report.is_ok());
+    assert!(
+        report.has_kind(ViolationKind::DependencyCycle),
+        "expected DependencyCycle, got: {:?}",
         report.violations()
     );
 }

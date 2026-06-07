@@ -35,6 +35,11 @@ mod frame_index;
 mod simulation_clock;
 mod tick;
 
+// --- Dimensioned scalar quantity model ---
+mod meters;
+mod radians;
+mod ratio;
+
 // --- Stable ID model ---
 mod asset_id;
 mod entity_id;
@@ -104,6 +109,14 @@ pub use fixed_step::FixedStep;
 pub use frame_index::FrameIndex;
 pub use simulation_clock::SimulationClock;
 pub use tick::Tick;
+
+// Dimensioned scalar quantities — the typed boundary where a raw f32 becomes a
+// length/angle/ratio, so layers above the kernel and math stop exposing naked
+// floats whose unit a caller must guess. Higher layers name and construct these
+// directly (e.g. a camera's `fovy: Radians`, a viewport's `aspect: Ratio`).
+pub use meters::Meters;
+pub use radians::Radians;
+pub use ratio::Ratio;
 
 // Identity primitives used by higher layers.
 pub use entity_id::EntityId;

@@ -75,14 +75,15 @@ impl Fixture {
         let dir = self.root.join(dir_rel);
         std::fs::create_dir_all(dir.join("src")).unwrap();
         self.write_cargo_toml(&dir, crate_name, deps);
-        let allowed_list = allowed_deps
+        // `index`/`previous` are legacy parameters kept so existing call sites
+        // compile; the DAG model expresses dependencies through `depends_on`
+        // (populated from `allowed_deps`).
+        let _ = (index, previous);
+        let depends_list = allowed_deps
             .iter()
             .map(|s| format!("\"{s}\""))
             .collect::<Vec<_>>()
             .join(", ");
-        let previous_line = previous
-            .map(|p| format!("previous = \"{p}\"\n"))
-            .unwrap_or_default();
         let introduced = match proof {
             Some((export, _)) => format!("[\"{export}\"]"),
             None => "[]".to_string(),
@@ -90,11 +91,8 @@ impl Fixture {
         let mut layer_toml = format!(
             "[layer]\n\
              name = \"{layer_name}\"\n\
-             index = {index}\n\
-             {previous_line}\
              crate_name = \"{crate_name}\"\n\
-             allowed_dependencies = [{allowed_list}]\n\
-             forbidden_dependencies = []\n\
+             depends_on = [{depends_list}]\n\
              meaningful_dependency = \"fixture layer\"\n\
              introduced_capabilities = {introduced}\n\
              consumed_capabilities = []\n"
@@ -314,14 +312,15 @@ fn case_a_valid_layer_chain_passes() {
 }
 
 #[test]
-fn case_b_layer_importing_future_layer_fails() {
-    // Reuse the existing static fixture for layer-only rules.
+fn case_b_layer_importing_undeclared_layer_fails() {
+    // Reuse the existing static fixture: `mid` imports `top`, which is not in
+    // `mid`'s `depends_on`.
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("02_future_import");
+        .join("02_disallowed_import");
     let report = check_architecture(&path);
-    assert!(report.has_kind(ViolationKind::FutureImport));
+    assert!(report.has_kind(ViolationKind::DisallowedLayerImport));
 }
 
 #[test]
@@ -357,13 +356,13 @@ fn case_c_layer_depending_on_module_fails() {
 }
 
 #[test]
-fn case_d_layer_missing_previous_layer_fails() {
-    let f = Fixture::new("d_missing_previous");
-    // Layer indexes: 0 and 2 — gap at 1.
+fn case_d_layer_with_unknown_dependency_fails() {
+    let f = Fixture::new("d_unknown_dependency");
+    // `jumper` declares `depends_on = ["ghost"]`, but no `ghost` layer exists.
     f.workspace(&["crates/kernel", "crates/jumper"])
         .layer_crate(
             "crates/kernel",
-            "mp-kernel",
+            "ud-kernel",
             "kernel",
             0,
             None,
@@ -373,18 +372,17 @@ fn case_d_layer_missing_previous_layer_fails() {
         )
         .layer_crate(
             "crates/jumper",
-            "mp-jumper",
+            "ud-jumper",
             "jumper",
-            2,
+            1,
             Some("kernel"),
-            &["kernel"],
-            &[("mp-kernel", "../kernel")],
-            "pub use self::inner::J;\nmod inner { use mp_kernel::*; pub struct J; }\n",
+            &["ghost"],
+            &[],
+            "pub struct J;\n",
         );
     let report = check_architecture(&f.root);
     assert!(
-        report.has_kind(ViolationKind::IndexNotContinuous)
-            || report.has_kind(ViolationKind::MissingPreviousLayer),
+        report.has_kind(ViolationKind::UnknownDependency),
         "violations: {:?}",
         report.violations()
     );

@@ -1,0 +1,20 @@
+[package]
+name = "engine_no_unitless_float_public_api"
+version = "0.1.0"
+description = "dylint lint: ban naked f32/f64 in public engine APIs"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "f6d310692116e9a527ce6d0b3526c965d9c5d7b9" }
+dylint_linting = "6.0.1"
+engine_lint_helpers = { path = "../engine_lint_helpers" }
+
+[dev-dependencies]
+dylint_testing = "6.0.1"
+
+[package.metadata.rust-analyzer]
+rustc_private = true

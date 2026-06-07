@@ -4,7 +4,7 @@
 //! Pure and deterministic: no clock, no randomness, every collection sorted
 //! before iteration. The same repo always produces the same report.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::app_manifest::load_app_manifests;
@@ -16,8 +16,8 @@ use crate::hygiene::check as check_hygiene;
 use crate::manifest::{load_manifests, LayerManifest};
 use crate::module_manifest::load_module_manifests;
 use crate::rust_source::{
-    collect_rs_files, find_cross_refs, find_public_export, reexport_module_path, references_symbol,
-    strip_line_comments,
+    collect_rs_files, find_cfg_test_modules, find_cross_refs, find_public_export,
+    reexport_module_path, references_symbol, strip_line_comments, strip_test_code,
 };
 use crate::violation::{CheckReport, Violation, ViolationKind};
 
@@ -96,35 +96,28 @@ pub fn check_architecture(root: &Path) -> CheckReport {
         return report.finish();
     }
 
-    // Index -> first manifest at that index (duplicates flagged separately).
-    let mut by_index: BTreeMap<u32, Vec<&LayerManifest>> = BTreeMap::new();
-    for m in &manifests {
-        by_index.entry(m.layer.index).or_default().push(m);
-    }
-
-    check_indexing(&by_index, &mut report);
-
-    // index -> layer name, and the full prefix table for cross-ref resolution.
-    let index_to_name: BTreeMap<u32, String> = by_index
-        .iter()
-        .map(|(idx, ms)| (*idx, ms[0].layer.name.clone()))
-        .collect();
+    // The set of declared layer names, and the prefix table for resolving
+    // cross-layer references found in source.
+    let known_names: BTreeSet<String> = manifests.iter().map(|m| m.layer.name.clone()).collect();
     let prefix_table: Vec<PrefixEntry> = manifests
         .iter()
         .map(|m| PrefixEntry {
             prefix: m.import_prefix(),
             name: m.layer.name.clone(),
-            index: m.layer.index,
         })
         .collect();
 
-    // Layers in index order for a deterministic report.
+    // Layers form a directed acyclic graph: every `depends_on` edge must name a
+    // real layer, and the graph must contain no cycle.
+    check_dependency_graph(&manifests, &known_names, &mut report);
+
+    // Layers in name order for a deterministic report.
     let mut ordered: Vec<&LayerManifest> = manifests.iter().collect();
-    ordered.sort_by_key(|m| (m.layer.index, m.layer.name.clone()));
+    ordered.sort_by(|a, b| a.layer.name.cmp(&b.layer.name));
     report.layers_checked = ordered.iter().map(|m| m.layer.name.clone()).collect();
 
     for m in &ordered {
-        check_layer(root, m, &index_to_name, &prefix_table, &mut report);
+        check_layer(root, m, &prefix_table, &mut report);
     }
 
     report.finish()
@@ -133,90 +126,137 @@ pub fn check_architecture(root: &Path) -> CheckReport {
 struct PrefixEntry {
     prefix: String,
     name: String,
-    index: u32,
 }
 
-fn check_indexing(by_index: &BTreeMap<u32, Vec<&LayerManifest>>, report: &mut CheckReport) {
-    for (idx, ms) in by_index {
-        if ms.len() > 1 {
-            let names: Vec<&str> = ms.iter().map(|m| m.layer.name.as_str()).collect();
-            report.push(Violation::new(
-                ViolationKind::DuplicateIndex,
-                names.join(", "),
-                format!(
-                    "layers {names:?} all declare index {idx}; each layer index must be unique"
-                ),
-            ));
+/// Validate the layer dependency graph: every `depends_on` names a real layer,
+/// and the graph (edges = `depends_on`) is acyclic.
+fn check_dependency_graph(
+    manifests: &[LayerManifest],
+    known: &BTreeSet<String>,
+    report: &mut CheckReport,
+) {
+    for m in manifests {
+        for dep in &m.layer.depends_on {
+            if !known.contains(dep) {
+                report.push(Violation::new(
+                    ViolationKind::UnknownDependency,
+                    &m.layer.name,
+                    format!(
+                        "layer `{}` lists `depends_on = [.. \"{dep}\" ..]`, but no layer named \
+                         `{dep}` exists",
+                        m.layer.name
+                    ),
+                ));
+            }
         }
     }
 
-    let found: Vec<u32> = by_index.keys().copied().collect();
-    let expected: Vec<u32> = (0..found.len() as u32).collect();
-    if found != expected {
-        report.push(Violation::new(
-            ViolationKind::IndexNotContinuous,
-            "<workspace>",
-            format!(
-                "layer indexes must be the continuous sequence starting at 0; \
-                 found {found:?} but expected {expected:?}"
-            ),
-        ));
+    // Adjacency over known edges only (unknown edges are reported above).
+    let adj: BTreeMap<&str, Vec<&str>> = manifests
+        .iter()
+        .map(|m| {
+            let mut deps: Vec<&str> = m
+                .layer
+                .depends_on
+                .iter()
+                .filter(|d| known.contains(*d))
+                .map(String::as_str)
+                .collect();
+            deps.sort_unstable();
+            (m.layer.name.as_str(), deps)
+        })
+        .collect();
+
+    // 3-colour DFS for a cycle, visiting nodes in sorted order for determinism.
+    let mut color: BTreeMap<&str, u8> = adj.keys().map(|k| (*k, 0u8)).collect();
+    let mut names: Vec<&str> = adj.keys().copied().collect();
+    names.sort_unstable();
+    for start in names {
+        if color[start] == 0 {
+            let mut stack: Vec<&str> = Vec::new();
+            if let Some(cycle) = dfs_cycle(start, &adj, &mut color, &mut stack) {
+                report.push(Violation::new(
+                    ViolationKind::DependencyCycle,
+                    cycle.join(" -> "),
+                    format!(
+                        "the layer `depends_on` graph has a cycle: {}; layers must form a \
+                         directed acyclic graph",
+                        cycle.join(" -> ")
+                    ),
+                ));
+                return; // one reported cycle is enough to fail the build.
+            }
+        }
     }
+}
+
+/// DFS that returns the first cycle (as a path of layer names) it finds, or
+/// `None`. Colours: 0 = unvisited, 1 = on the current stack, 2 = done.
+fn dfs_cycle<'a>(
+    node: &'a str,
+    adj: &BTreeMap<&'a str, Vec<&'a str>>,
+    color: &mut BTreeMap<&'a str, u8>,
+    stack: &mut Vec<&'a str>,
+) -> Option<Vec<String>> {
+    color.insert(node, 1);
+    stack.push(node);
+    for &next in &adj[node] {
+        match color.get(next).copied().unwrap_or(2) {
+            1 => {
+                // Back-edge: build the cycle path from where `next` sits on the stack.
+                let start = stack.iter().position(|n| *n == next).unwrap_or(0);
+                let mut cycle: Vec<String> = stack[start..].iter().map(|s| s.to_string()).collect();
+                cycle.push(next.to_string());
+                return Some(cycle);
+            }
+            0 => {
+                if let Some(c) = dfs_cycle(next, adj, color, stack) {
+                    return Some(c);
+                }
+            }
+            _ => {}
+        }
+    }
+    stack.pop();
+    color.insert(node, 2);
+    None
 }
 
 fn check_layer(
     root: &Path,
     m: &LayerManifest,
-    index_to_name: &BTreeMap<u32, String>,
     prefix_table: &[PrefixEntry],
     report: &mut CheckReport,
 ) {
     let name = &m.layer.name;
-    let index = m.layer.index;
-
-    // --- Previous-layer link (rule 2) ---
-    if index > 0 {
-        let prev_index = index - 1;
-        match index_to_name.get(&prev_index) {
-            None => report.push(Violation::new(
-                ViolationKind::MissingPreviousLayer,
-                name,
-                format!(
-                    "layer `{name}` has index {index} but no layer declares index {prev_index}; \
-                     indexes must form a continuous chain"
-                ),
-            )),
-            Some(expected_prev) => match &m.layer.previous {
-                None => report.push(Violation::new(
-                    ViolationKind::MissingPreviousLayer,
-                    name,
-                    format!(
-                        "layer `{name}` (index {index}) must set `previous = \"{expected_prev}\"` \
-                         in its [layer] table"
-                    ),
-                )),
-                Some(declared) if declared != expected_prev => report.push(Violation::new(
-                    ViolationKind::PreviousNameMismatch,
-                    name,
-                    format!(
-                        "layer `{name}` declares previous = \"{declared}\" but the layer at index \
-                         {prev_index} is `{expected_prev}`; set previous = \"{expected_prev}\""
-                    ),
-                )),
-                Some(_) => {}
-            },
-        }
-    }
 
     // --- Read this layer's source once (comments stripped so a stray mention
     // in a comment cannot mask or invent a violation) ---
-    let files: Vec<(PathBuf, String)> = collect_rs_files(&m.src_dir())
+    // Read each file with `//` comments stripped (so a mention can't mask or
+    // invent a violation). This is BEFORE test-code stripping, so the
+    // `#[cfg(test)] mod NAME;` declarations are still visible.
+    let commented: Vec<(PathBuf, String)> = collect_rs_files(&m.src_dir())
         .into_iter()
         .filter_map(|p| {
             std::fs::read_to_string(&p)
                 .ok()
                 .map(|t| (p, strip_line_comments(&t)))
         })
+        .collect();
+
+    // Files reachable only through a `#[cfg(test)] mod NAME;` declaration are
+    // test-only; the gate lives in the declaring file, not in them. Collect
+    // those names first, then drop the corresponding files and strip remaining
+    // in-file test code — so the scan sees only non-test architecture,
+    // consistent with the `engine_genuine_dependency` dylint.
+    let test_module_names: BTreeSet<String> = commented
+        .iter()
+        .flat_map(|(_, text)| find_cfg_test_modules(text))
+        .collect();
+    let files: Vec<(PathBuf, String)> = commented
+        .into_iter()
+        .filter(|(path, _)| !is_test_module_file(path, &test_module_names))
+        .map(|(path, text)| (path, strip_test_code(&text)))
         .collect();
 
     // Prefixes of OTHER layers (a layer referencing itself is intra-layer).
@@ -231,8 +271,6 @@ fn check_layer(
         .map(|e| (e.prefix.as_str(), e))
         .collect();
 
-    let mut referenced_previous = false;
-
     for (path, text) in &files {
         let rel = relativize(root, path);
         for cross in find_cross_refs(text, &other_prefixes) {
@@ -240,16 +278,19 @@ fn check_layer(
                 continue;
             };
 
-            if target.index >= index {
-                // Rule 4: never import from a future (or same-level) layer.
+            // DAG rule: a layer may import only the layers in its `depends_on`.
+            // "Genuinely uses each declared dependency" is enforced separately by
+            // the `engine_genuine_dependency` dylint (which has real type info);
+            // here we enforce the converse — no import of an undeclared layer.
+            if !m.layer.depends_on.contains(&target.name) {
                 report.push(
                     Violation::new(
-                        ViolationKind::FutureImport,
+                        ViolationKind::DisallowedLayerImport,
                         name,
                         format!(
-                            "imports `{}` (layer `{}`, index {}) which is not below layer `{name}` \
-                             (index {index}); a layer may import only layers with a lower index",
-                            cross.prefix, target.name, target.index
+                            "imports layer `{}` but it is not in `depends_on`; add it (and \
+                             genuinely use it) or remove the import",
+                            target.name
                         ),
                     )
                     .at(rel.clone(), cross.line),
@@ -257,31 +298,8 @@ fn check_layer(
                 continue;
             }
 
-            // Lower layer: must be explicitly allowed and not forbidden.
-            let allowed = m.layer.allowed_dependencies.contains(&target.name);
-            let forbidden = m.layer.forbidden_dependencies.contains(&target.name);
-            if !allowed || forbidden {
-                let reason = if forbidden {
-                    "it is listed in `forbidden_dependencies`"
-                } else {
-                    "it is not listed in `allowed_dependencies`"
-                };
-                report.push(
-                    Violation::new(
-                        ViolationKind::DisallowedLayerImport,
-                        name,
-                        format!(
-                            "imports layer `{}` but {reason}; add it to \
-                             `allowed_dependencies` or remove the import",
-                            target.name
-                        ),
-                    )
-                    .at(rel.clone(), cross.line),
-                );
-            }
-
             if cross.private {
-                // Rule 5: reach only public exports, never private module paths.
+                // Reach only public exports, never private module paths.
                 report.push(
                     Violation::new(
                         ViolationKind::PrivatePathImport,
@@ -295,28 +313,10 @@ fn check_layer(
                     .at(rel.clone(), cross.line),
                 );
             }
-
-            if target.index == index - 1 {
-                referenced_previous = true;
-            }
         }
     }
 
-    // --- Must meaningfully use the previous layer (rule 2) ---
-    if index > 0 && index_to_name.contains_key(&(index - 1)) && !referenced_previous {
-        let prev = &index_to_name[&(index - 1)];
-        report.push(Violation::new(
-            ViolationKind::MissingPreviousImport,
-            name,
-            format!(
-                "layer `{name}` never references its previous layer `{prev}`; a layer must adapt \
-                 the layer directly beneath it (import at least one `{}::` symbol)",
-                prefix_for(prefix_table, prev)
-            ),
-        ));
-    }
-
-    // --- Introduced capabilities must be publicly exported (rule 6 + 3) ---
+    // --- Introduced capabilities must be publicly exported ---
     for cap in &m.layer.introduced_capabilities {
         if locate_public_export(&files, cap).is_none() {
             report.push(Violation::new(
@@ -330,7 +330,7 @@ fn check_layer(
         }
     }
 
-    // --- Proof exports (rule 3) ---
+    // --- Proof exports ---
     check_proof_exports(root, m, &files, report);
 }
 
@@ -341,15 +341,17 @@ fn check_proof_exports(
     report: &mut CheckReport,
 ) {
     let name = &m.layer.name;
-    let index = m.layer.index;
 
-    if index > 0 && m.proof_exports.is_empty() {
+    // A root layer (empty `depends_on`, e.g. the kernel) adapts nothing, so it
+    // proves nothing. Every non-root layer must expose at least one public
+    // capability whose implementation uses a layer it depends on.
+    if !m.layer.depends_on.is_empty() && m.proof_exports.is_empty() {
         report.push(Violation::new(
             ViolationKind::MissingProofExport,
             name,
             format!(
-                "layer `{name}` declares no [[proof_exports]]; a non-kernel layer must expose at \
-                 least one public capability whose implementation uses the previous layer"
+                "layer `{name}` declares no [[proof_exports]]; a non-root layer must expose at \
+                 least one public capability whose implementation uses a layer it depends on"
             ),
         ));
         return;
@@ -407,14 +409,6 @@ fn check_proof_exports(
 
 // --- helpers ---
 
-fn prefix_for(prefix_table: &[PrefixEntry], layer_name: &str) -> String {
-    prefix_table
-        .iter()
-        .find(|e| e.name == layer_name)
-        .map(|e| e.prefix.clone())
-        .unwrap_or_else(|| layer_name.to_string())
-}
-
 fn locate_public_export(files: &[(PathBuf, String)], name: &str) -> Option<(PathBuf, usize)> {
     for (path, text) in files {
         if let Some(line) = find_public_export(text, name) {
@@ -451,6 +445,19 @@ fn resolve_module_text<'a>(
         }
     }
     None
+}
+
+/// Is `path` the source file of a `#[cfg(test)] mod NAME;` module? The module
+/// name is the file stem, or — for a `NAME/mod.rs` directory module — the parent
+/// directory name.
+fn is_test_module_file(path: &Path, test_module_names: &BTreeSet<String>) -> bool {
+    let name = if path.file_name().and_then(|n| n.to_str()) == Some("mod.rs") {
+        path.parent().and_then(|p| p.file_name())
+    } else {
+        path.file_stem()
+    };
+    name.and_then(|n| n.to_str())
+        .is_some_and(|n| test_module_names.contains(n))
 }
 
 fn relativize(root: &Path, path: &Path) -> PathBuf {

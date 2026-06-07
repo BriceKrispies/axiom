@@ -26,11 +26,8 @@
 
 [layer]
 name = "host"
-index = 3
-previous = "math"
 crate_name = "axiom-host"
-allowed_dependencies = ["kernel", "runtime", "math"]
-forbidden_dependencies = []
+depends_on = ["kernel", "runtime", "math"]
 meaningful_dependency = "Host consumes math (`MathApi` for finite-scalar validation of host-supplied viewport scale factors and for converting viewport dimensions to deterministic Vec2-shaped engine data, including the surface-descriptor viewport behind the presentation boundary), runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `HandleId`, `Tick`, `TelemetryMetric`) for telemetry routing and for minting the stable opaque identities behind `HostPresentationTarget` / `HostSurfaceHandle` — and exposes the deterministic host boundary (stepping plus presentation) every future browser/native adapter will sit on top of."
 
 # Public Rust surface is the curated list in `lib.rs`; the architecture

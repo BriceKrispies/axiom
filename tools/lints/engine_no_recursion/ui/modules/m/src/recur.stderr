@@ -1,0 +1,19 @@
+warning: this function calls itself; direct recursion is banned in non-test engine code
+  --> $DIR/recur.rs:12:28
+   |
+LL |     if n == 0 { 0 } else { down(n - 1) }
+   |                            ^^^^^^^^^^^
+   |
+   = help: rewrite as an explicit bounded loop, or an explicit worklist/stack you push and pop
+   = note: `#[warn(engine_no_recursion)]` on by default
+
+warning: this function calls itself; direct recursion is banned in non-test engine code
+  --> $DIR/recur.rs:25:13
+   |
+LL |             Walker { depth: self.depth - 1 }.descend()
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: rewrite as an explicit bounded loop, or an explicit worklist/stack you push and pop
+
+warning: 2 warnings emitted
+

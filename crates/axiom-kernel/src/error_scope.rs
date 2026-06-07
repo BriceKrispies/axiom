@@ -15,6 +15,7 @@ pub enum KernelErrorScope {
     Message = 4,
     Binary = 5,
     Layer = 6,
+    Scalar = 7,
 }
 
 impl KernelErrorScope {
@@ -36,6 +37,7 @@ mod tests {
         assert_eq!(KernelErrorScope::Message.raw(), 4);
         assert_eq!(KernelErrorScope::Binary.raw(), 5);
         assert_eq!(KernelErrorScope::Layer.raw(), 6);
+        assert_eq!(KernelErrorScope::Scalar.raw(), 7);
     }
 
     #[test]

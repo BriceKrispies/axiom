@@ -12,4 +12,25 @@
 # It is Tooling: outside the engine dependency graph and the coverage gate.
 [workspace]
 resolver = "2"
-members = ["test_without_assertion", "no_unwrap_in_engine", "engine_no_time_in_sim"]
+members = [
+    "engine_lint_helpers",
+    "test_without_assertion",
+    "no_unwrap_in_engine",
+    "engine_no_time_in_sim",
+    "engine_genuine_dependency",
+    # Tier-1 rulebook fan-out (banned-symbol / structural-size lints).
+    "engine_no_transmute",
+    "engine_no_uninit_memory",
+    "engine_no_static_mut",
+    "engine_no_thread_spawn",
+    "engine_no_wildcard_imports",
+    "engine_no_runtime_type_branch",
+    "engine_no_recursion",
+    "engine_no_unitless_float_public_api",
+    "engine_no_large_files",
+    "engine_no_large_functions",
+    "engine_no_large_structs",
+    "engine_no_large_enums",
+    "engine_no_large_impl_blocks",
+    "engine_require_module_docs",
+]

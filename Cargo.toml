@@ -43,6 +43,22 @@ libraries = [
     { path = "tools/lints/test_without_assertion" },
     { path = "tools/lints/no_unwrap_in_engine" },
     { path = "tools/lints/engine_no_time_in_sim" },
+    { path = "tools/lints/engine_genuine_dependency" },
+    # Tier-1 rulebook fan-out (banned-symbol / structural-size lints).
+    { path = "tools/lints/engine_no_transmute" },
+    { path = "tools/lints/engine_no_uninit_memory" },
+    { path = "tools/lints/engine_no_static_mut" },
+    { path = "tools/lints/engine_no_thread_spawn" },
+    { path = "tools/lints/engine_no_wildcard_imports" },
+    { path = "tools/lints/engine_no_runtime_type_branch" },
+    { path = "tools/lints/engine_no_recursion" },
+    { path = "tools/lints/engine_no_unitless_float_public_api" },
+    { path = "tools/lints/engine_no_large_files" },
+    { path = "tools/lints/engine_no_large_functions" },
+    { path = "tools/lints/engine_no_large_structs" },
+    { path = "tools/lints/engine_no_large_enums" },
+    { path = "tools/lints/engine_no_large_impl_blocks" },
+    { path = "tools/lints/engine_require_module_docs" },
 ]
 
 # Deterministic, size-conscious release profile suitable for a future wasm build.

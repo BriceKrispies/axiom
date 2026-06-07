@@ -19,11 +19,8 @@
 
 [layer]
 name = "math"
-index = 2
-previous = "runtime"
 crate_name = "axiom-math"
-allowed_dependencies = ["kernel", "runtime"]
-forbidden_dependencies = []
+depends_on = ["kernel", "runtime"]
 meaningful_dependency = "Math consumes kernel primitives (`KernelApi` for binary serialization, `KernelResult`/`KernelError` for wrapped deserialization failures) and runtime substrate (`RuntimeContext`, `TelemetryMetric`) to provide deterministic-scalar, vector, quaternion, 4x4-matrix, transform, and geometry primitives — with checked failures, approximate-equality, and binary round-trip — that every later rendering / scene / physics / animation / culling layer will build on."
 
 # Public Rust surface is intentionally the single `MathApi` facade; logical

@@ -1,0 +1,14 @@
+# Layer `runtime` lists a `depends_on` entry (`ghost`) for which no layer exists.
+# Everything else is valid, so the ONLY violation is the dangling edge
+# (UnknownDependency).
+[layer]
+name = "runtime"
+crate_name = "runtime"
+depends_on = ["kernel", "ghost"]
+meaningful_dependency = "Runtime adapts the kernel but also names a layer that does not exist."
+introduced_capabilities = ["Runtime"]
+consumed_capabilities = ["KernelClock"]
+
+[[proof_exports]]
+export = "Runtime"
+must_reference = ["KernelClock"]

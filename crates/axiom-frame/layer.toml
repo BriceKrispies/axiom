@@ -20,11 +20,8 @@
 
 [layer]
 name = "frame"
-index = 4
-previous = "host"
 crate_name = "axiom-frame"
-allowed_dependencies = ["kernel", "runtime", "math", "host"]
-forbidden_dependencies = []
+depends_on = ["kernel", "runtime", "math", "host"]
 meaningful_dependency = "Frame consumes host (`HostFrameReport`, `HostViewport`, `HostLifecycleState`, `HostSkipReason` for host adaptation), runtime (`RuntimeStepRecord` for ordered step summaries), math (`MathApi` for finite scalar validation on viewport-derived values), and kernel (`Tick`, `FrameIndex`, `TelemetryMetric`) — and exposes the deterministic engine frame contract every future engine system will read from."
 
 # Public Rust surface is the curated list in `lib.rs`; the architecture

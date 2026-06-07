@@ -1,0 +1,11 @@
+warning: glob import (`use foo::*`) is banned in engine code
+  --> $DIR/imports.rs:10:1
+   |
+LL | use std::collections::*;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: import the specific items you use so the symbol set is greppable: `use foo::{A, B}`
+   = note: `#[warn(engine_no_wildcard_imports)]` on by default
+
+warning: 1 warning emitted
+

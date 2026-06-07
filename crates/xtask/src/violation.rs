@@ -13,22 +13,13 @@ use std::path::PathBuf;
 pub enum ViolationKind {
     /// A `layer.toml` could not be parsed or was structurally invalid.
     ManifestInvalid,
-    /// Two layers declare the same index.
-    DuplicateIndex,
-    /// Layer indexes are not the continuous sequence 0, 1, 2, ...
-    IndexNotContinuous,
-    /// A non-kernel layer is missing its `previous` link, or the previous layer
-    /// (index N-1) does not exist.
-    MissingPreviousLayer,
-    /// `previous` names a layer that is not the one at index N-1.
-    PreviousNameMismatch,
-    /// A layer imports from a higher-or-equal-index (future) layer.
-    FutureImport,
-    /// A layer imports from a lower layer that is not in `allowed_dependencies`
-    /// (or is explicitly in `forbidden_dependencies`).
+    /// A layer's `depends_on` names a layer that does not exist.
+    UnknownDependency,
+    /// The `depends_on` graph across all layers contains a cycle. Layers form a
+    /// directed *acyclic* graph; nothing may (transitively) depend on itself.
+    DependencyCycle,
+    /// A layer imports another layer that is not in its `depends_on` list.
     DisallowedLayerImport,
-    /// A non-kernel layer never references its immediately previous layer.
-    MissingPreviousImport,
     /// A cross-layer import reaches into another layer's private module path
     /// instead of using its public root export.
     PrivatePathImport,
@@ -133,13 +124,9 @@ impl fmt::Display for ViolationKind {
         // A stable, greppable token for each kind.
         let token = match self {
             ViolationKind::ManifestInvalid => "ManifestInvalid",
-            ViolationKind::DuplicateIndex => "DuplicateIndex",
-            ViolationKind::IndexNotContinuous => "IndexNotContinuous",
-            ViolationKind::MissingPreviousLayer => "MissingPreviousLayer",
-            ViolationKind::PreviousNameMismatch => "PreviousNameMismatch",
-            ViolationKind::FutureImport => "FutureImport",
+            ViolationKind::UnknownDependency => "UnknownDependency",
+            ViolationKind::DependencyCycle => "DependencyCycle",
             ViolationKind::DisallowedLayerImport => "DisallowedLayerImport",
-            ViolationKind::MissingPreviousImport => "MissingPreviousImport",
             ViolationKind::PrivatePathImport => "PrivatePathImport",
             ViolationKind::CapabilityNotExported => "CapabilityNotExported",
             ViolationKind::MissingProofExport => "MissingProofExport",

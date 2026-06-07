@@ -110,11 +110,8 @@ mod tests {
             dir: pkg.dir.clone(),
             layer: crate::manifest::LayerSection {
                 name: "kernel".into(),
-                index: 0,
-                previous: None,
                 crate_name: Some("axiom-kernel".into()),
-                allowed_dependencies: vec![],
-                forbidden_dependencies: vec![],
+                depends_on: vec![],
                 meaningful_dependency: "Base layer.".into(),
                 introduced_capabilities: vec![],
                 consumed_capabilities: vec![],

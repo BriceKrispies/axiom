@@ -1,0 +1,22 @@
+# Shared helpers for the Axiom dylint rulebook. This is NOT a lint cdylib — it is
+# a plain rlib of `rustc_private` helper functions that the lint crates link in,
+# so the engine-file scoping and zone-marker detection logic lives in exactly one
+# place instead of being copy-pasted into every lint. It is a workspace member of
+# `tools/lints`, never a dylint library in the root manifest.
+[package]
+name = "engine_lint_helpers"
+version = "0.1.0"
+description = "Shared rustc_private helpers for Axiom's dylint rulebook (engine-file scoping + zone-marker detection)"
+edition = "2024"
+publish = false
+
+# This crate is a plain rlib of `rustc_private` helpers linked into the lint
+# cdylibs; it has no test harness of its own (building one would need to link
+# `rustc_driver`, which only the dylint-provided driver supplies). The helpers
+# are exercised through every lint's `ui/` fixtures instead.
+[lib]
+test = false
+doctest = false
+
+[package.metadata.rust-analyzer]
+rustc_private = true

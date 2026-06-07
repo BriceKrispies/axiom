@@ -1,0 +1,43 @@
+warning: naked floating-point type in a public engine API
+  --> $DIR/api.rs:10:25
+   |
+LL | pub fn set_speed(speed: f32) {}
+   |                         ^^^
+   |
+   = help: wrap it in a unit newtype (e.g. `Meters`, `Seconds`, `Radians`) so the unit is part of the type
+   = note: `#[warn(engine_no_unitless_float_public_api)]` on by default
+
+warning: naked floating-point type in a public engine API
+  --> $DIR/api.rs:13:18
+   |
+LL | pub fn area() -> f64 {
+   |                  ^^^
+   |
+   = help: wrap it in a unit newtype (e.g. `Meters`, `Seconds`, `Radians`) so the unit is part of the type
+
+warning: naked floating-point type in a public engine API
+  --> $DIR/api.rs:19:5
+   |
+LL |     pub mass: f32,
+   |     ^^^^^^^^^^^^^
+   |
+   = help: wrap it in a unit newtype (e.g. `Meters`, `Seconds`, `Radians`) so the unit is part of the type
+
+warning: naked floating-point type in a public engine API
+  --> $DIR/api.rs:28:36
+   |
+LL |     pub fn set_speed(&self, speed: f32) {}
+   |                                    ^^^
+   |
+   = help: wrap it in a unit newtype (e.g. `Meters`, `Seconds`, `Radians`) so the unit is part of the type
+
+warning: naked floating-point type in a public engine API
+  --> $DIR/api.rs:31:28
+   |
+LL |     pub fn speed(&self) -> f32 {
+   |                            ^^^
+   |
+   = help: wrap it in a unit newtype (e.g. `Meters`, `Seconds`, `Radians`) so the unit is part of the type
+
+warning: 5 warnings emitted
+

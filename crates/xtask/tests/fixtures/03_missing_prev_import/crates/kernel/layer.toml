@@ -1,9 +1,0 @@
-[layer]
-name = "kernel"
-index = 0
-crate_name = "kernel"
-allowed_dependencies = []
-forbidden_dependencies = []
-meaningful_dependency = "Fixture base substrate layer."
-introduced_capabilities = ["KernelClock", "KernelResult"]
-consumed_capabilities = []

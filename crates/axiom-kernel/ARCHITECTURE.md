@@ -67,6 +67,17 @@ The trade-off is enforced rather than left to discipline:
   public re-exports match an explicit approved list. Adding to the surface
   requires updating both `lib.rs` and the test in the same change — accidental
   widening still fails the build.
+- The **dimensioned scalar quantities** (`Meters`, `Radians`, `Ratio`) are
+  nameable primitives for the same reason the time and identity primitives are:
+  higher layers must store them in fields and construct them (a camera's
+  `fovy: Radians`, a viewport's `aspect: Ratio`, a clip plane's `near: Meters`).
+  They live in the kernel — not a separate layer — because they are *core scalars
+  required broadly across the engine*, the kernel's sanctioned remit, and because
+  the strictly-linear Layer Law cannot host a broadly-shared primitive without a
+  fake adjacent-layer dependency. They carry **no** unit *algebra* and no
+  feature semantics; domain quantities (light intensity, colour channels,
+  viewport pixels) deliberately stay out of the kernel and live in the
+  layer/module that owns that domain. Each is the only public type in its file.
 - The binary-serialization primitives (`BinaryWriter`, `BinaryReader`,
   `SchemaVersion`) and layer-manifest types are nameable, because higher layers
   build and **version** their own wire formats on them — e.g. Layer 5

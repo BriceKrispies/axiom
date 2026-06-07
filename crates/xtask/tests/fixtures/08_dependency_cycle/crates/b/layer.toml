@@ -1,0 +1,11 @@
+[layer]
+name = "b"
+crate_name = "b"
+depends_on = ["a"]
+meaningful_dependency = "b adapts a."
+introduced_capabilities = ["BThing"]
+consumed_capabilities = ["AThing"]
+
+[[proof_exports]]
+export = "BThing"
+must_reference = ["AThing"]

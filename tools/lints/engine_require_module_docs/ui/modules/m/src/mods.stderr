@@ -1,0 +1,11 @@
+warning: this public engine module has no doc comment
+  --> $DIR/mods.rs:10:1
+   |
+LL | pub mod undocumented {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: add a `//!` (inside the module) or `///` (before the `mod`) comment stating the module's role and its allowed dependencies
+   = note: `#[warn(engine_require_module_docs)]` on by default
+
+warning: 1 warning emitted
+

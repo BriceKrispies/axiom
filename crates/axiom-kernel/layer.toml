@@ -7,10 +7,8 @@
 
 [layer]
 name = "kernel"
-index = 0
 crate_name = "axiom-kernel"
-allowed_dependencies = []
-forbidden_dependencies = []
+depends_on = []
 meaningful_dependency = "Layer 00 is the deterministic runtime substrate. It transforms nothing beneath it because nothing exists beneath it; instead it defines the primitives (time, identity, errors, memory, messaging, binary serialization, the layer contract, structured logging and telemetry) that every higher layer specializes."
 introduced_capabilities = [
     "KernelApi",

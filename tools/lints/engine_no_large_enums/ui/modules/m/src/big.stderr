@@ -1,0 +1,15 @@
+warning: this enum has 26 variants, which exceeds the engine limit of 24
+  --> $DIR/big.rs:8:1
+   |
+LL | / enum BigEnum {
+LL | |     V0, V1, V2, V3, V4, V5, V6, V7, V8, V9,
+LL | |     V10, V11, V12, V13, V14, V15, V16, V17, V18, V19,
+LL | |     V20, V21, V22, V23, V24, V25,
+LL | | }
+   | |_^
+   |
+   = help: split into focused sub-enums grouped by semantic category, or replace the discriminant space with a struct + smaller tag
+   = note: `#[warn(engine_no_large_enums)]` on by default
+
+warning: 1 warning emitted
+

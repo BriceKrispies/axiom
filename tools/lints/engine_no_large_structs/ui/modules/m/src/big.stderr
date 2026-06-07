@@ -1,0 +1,17 @@
+warning: engine struct has 26 fields, which exceeds the limit of 24
+  --> $DIR/big.rs:9:1
+   |
+LL | / struct TooManyFields {
+LL | |     f0: u8,
+LL | |     f1: u8,
+LL | |     f2: u8,
+...  |
+LL | |     f25: u8,
+LL | | }
+   | |_^
+   |
+   = help: group related fields into focused sub-structs; a god-struct is a design smell
+   = note: `#[warn(engine_no_large_structs)]` on by default
+
+warning: 1 warning emitted
+

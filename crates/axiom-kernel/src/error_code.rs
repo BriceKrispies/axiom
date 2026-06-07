@@ -33,6 +33,9 @@ pub enum KernelErrorCode {
     ForwardImport = 11,
     /// The kernel layer (index 0) declared a dependency; it must import nothing.
     KernelMustNotImport = 12,
+    /// A dimensioned scalar quantity was built from a non-finite value (NaN or
+    /// infinity).
+    NonFiniteScalar = 13,
 }
 
 impl KernelErrorCode {
@@ -51,6 +54,7 @@ mod tests {
         assert_eq!(KernelErrorCode::InvalidFixedStep.raw(), 1);
         assert_eq!(KernelErrorCode::OutOfBounds.raw(), 5);
         assert_eq!(KernelErrorCode::KernelMustNotImport.raw(), 12);
+        assert_eq!(KernelErrorCode::NonFiniteScalar.raw(), 13);
     }
 
     #[test]

@@ -9,11 +9,8 @@
 
 [layer]
 name = "runtime"
-index = 1
-previous = "kernel"
 crate_name = "axiom-runtime"
-allowed_dependencies = ["kernel"]
-forbidden_dependencies = []
+depends_on = ["kernel"]
 meaningful_dependency = "Runtime consumes kernel primitives — `KernelApi` for emission, `SimulationClock`/`FixedStep`/`Tick`/`FrameIndex` for deterministic time, `KernelResult`/`KernelError` for failure identity, `HandleId` for stable system identity, and `LogRecord`/`TelemetryMetric` (with their sinks) for structured observability — to provide deterministic engine lifecycle, fixed-timestep stepping, ordered system scheduling, FIFO command/event queues, and replay-ready step records that all later engine layers will build on."
 
 introduced_capabilities = [

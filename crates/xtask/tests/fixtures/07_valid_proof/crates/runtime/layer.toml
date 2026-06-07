@@ -2,11 +2,8 @@
 # previous layer's public symbols.
 [layer]
 name = "runtime"
-index = 1
-previous = "kernel"
 crate_name = "runtime"
-allowed_dependencies = ["kernel"]
-forbidden_dependencies = []
+depends_on = ["kernel"]
 meaningful_dependency = "Runtime orchestrates the deterministic kernel clock and result types into engine stepping and scheduling."
 introduced_capabilities = ["Runtime", "RuntimeScheduler"]
 consumed_capabilities = ["KernelClock", "KernelResult"]

@@ -1,0 +1,7 @@
+warning: this engine file has 1005 physical lines, exceeding the 1000-line budget
+   |
+   = help: split this file into smaller, single-responsibility modules; Axiom forbids junk-drawer files and large files hide structure from agents
+   = note: `#[warn(engine_no_large_files)]` on by default
+
+warning: 1 warning emitted
+

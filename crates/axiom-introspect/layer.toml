@@ -19,11 +19,8 @@
 
 [layer]
 name = "introspect"
-index = 6
-previous = "ecs"
 crate_name = "axiom-introspect"
-allowed_dependencies = ["kernel", "runtime", "math", "host", "frame", "ecs"]
-forbidden_dependencies = []
+depends_on = ["kernel", "frame", "ecs"]
 meaningful_dependency = "Introspect consumes the frame contract (`EngineFrame` and the per-system detail on its `FrameStepSummary`/`FrameSystemReport`, plus `FrameLifecycleState`/`FrameViewport`) and kernel serialization (`BinaryWriter`/`BinaryReader`/`SchemaVersion`, `KernelResult`) to produce a retained, byte-serializable per-frame `FrameReport`, a bounded `FrameHistory`, and the `IntrospectApi` query facade an agent uses to ask a running engine what it is and what it just did."
 
 # Public Rust surface is the curated list in `lib.rs`; the checker needs the

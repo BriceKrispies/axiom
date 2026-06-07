@@ -1,0 +1,13 @@
+# Layer `a` depends on `b`, and `b` depends on `a` — a cycle. Layers must form a
+# directed ACYCLIC graph; this fixture exercises DependencyCycle.
+[layer]
+name = "a"
+crate_name = "a"
+depends_on = ["b"]
+meaningful_dependency = "a adapts b."
+introduced_capabilities = ["AThing"]
+consumed_capabilities = ["BThing"]
+
+[[proof_exports]]
+export = "AThing"
+must_reference = ["BThing"]

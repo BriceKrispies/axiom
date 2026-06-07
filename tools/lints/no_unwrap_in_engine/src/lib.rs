@@ -4,13 +4,12 @@
 // A list of available compiler crates can be found here:
 // https://doc.rust-lang.org/nightly/nightly-rustc/
 extern crate rustc_hir;
-extern crate rustc_span;
 
 use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::is_in_test;
+use engine_lint_helpers::is_engine_file;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_span::FileName;
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
@@ -66,7 +65,7 @@ impl<'tcx> LateLintPass<'tcx> for UnwrapInEngine {
         if is_in_test(cx.tcx, expr.hir_id) {
             return;
         }
-        if !is_engine_file(cx, expr) {
+        if !is_engine_file(cx, expr.span) {
             return;
         }
         span_lint_and_help(
@@ -78,33 +77,6 @@ impl<'tcx> LateLintPass<'tcx> for UnwrapInEngine {
             "propagate the error with `?`, or use `.expect(\"<why it can't fail>\")` for a documented invariant",
         );
     }
-}
-
-/// True if `expr` lives in engine *source*: under `crates/<layer>/src/` (except
-/// the `xtask` tool) or `modules/<module>/src/`. The `src` requirement is what
-/// makes integration tests (`crates/<x>/tests/…`), benches, and examples exempt
-/// — they are test/tooling code, not the engine spine. Apps are exempt because
-/// their path has no `crates`/`modules` component.
-fn is_engine_file(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
-    let FileName::Real(name) = cx.tcx.sess.source_map().span_to_filename(expr.span) else {
-        return false;
-    };
-    let Some(path) = name.local_path() else {
-        return false;
-    };
-    let path = path.to_string_lossy().replace('\\', "/");
-    let mut in_engine = false;
-    let mut in_src = false;
-    let mut is_tool = false;
-    for component in path.split('/') {
-        match component {
-            "crates" | "modules" => in_engine = true,
-            "src" => in_src = true,
-            "xtask" => is_tool = true,
-            _ => {}
-        }
-    }
-    in_engine && in_src && !is_tool
 }
 
 #[test]

@@ -1,0 +1,17 @@
+warning: this engine function is 143 lines long; the limit is 120
+  --> $DIR/big.rs:10:1
+   |
+LL | / fn big_engine_fn(n: u32) -> u32 {
+LL | |     let _ = n;
+LL | |     let _ = n;
+LL | |     let _ = n;
+...  |
+LL | |     n
+LL | | }
+   | |_^
+   |
+   = help: extract helper functions and name each responsibility; an over-long function hides its design from future agents
+   = note: `#[warn(engine_no_large_functions)]` on by default
+
+warning: 1 warning emitted
+

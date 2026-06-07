@@ -1,0 +1,22 @@
+warning: direct OS thread spawning is banned in engine code
+  --> $DIR/workers.rs:8:13
+   |
+LL |     let _ = std::thread::spawn(|| {});
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: the engine is WASM-first and deterministic — raw threads break both; spawn work through the engine's runtime/scheduler instead
+   = note: `#[warn(engine_no_thread_spawn)]` on by default
+
+warning: direct OS thread spawning is banned in engine code
+  --> $DIR/workers.rs:12:18
+   |
+LL |       let handle = std::thread::Builder::new()
+   |  __________________^
+LL | |         .name("worker".to_string())
+LL | |         .spawn(|| {})
+   | |_____________________^
+   |
+   = help: the engine is WASM-first and deterministic — raw threads break both; spawn work through the engine's runtime/scheduler instead
+
+warning: 2 warnings emitted
+

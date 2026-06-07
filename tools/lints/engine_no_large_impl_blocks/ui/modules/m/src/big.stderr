@@ -1,0 +1,17 @@
+warning: engine impl block has 32 items, which exceeds the limit of 30
+  --> $DIR/big.rs:10:1
+   |
+LL | / impl BigType {
+LL | |     fn method_0(&self) {}
+LL | |     fn method_1(&self) {}
+LL | |     fn method_2(&self) {}
+...  |
+LL | |     fn method_31(&self) {}
+LL | | }
+   | |_^
+   |
+   = help: split behavior into focused traits or smaller types; a large impl block is a god-object smell
+   = note: `#[warn(engine_no_large_impl_blocks)]` on by default
+
+warning: 1 warning emitted
+
