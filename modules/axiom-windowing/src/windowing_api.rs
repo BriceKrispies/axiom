@@ -108,6 +108,14 @@ impl WindowingApi {
             .map(|r| r.descriptor().viewport().physical_height())
     }
 
+    /// The validated presentation request, once a surface is configured. This
+    /// is a `host`-layer value (nameable across the engine graph, unlike a
+    /// module contract type), so a consumer can drive a live presentation
+    /// backend and register its surface handle from it.
+    pub fn presentation_request(&self) -> Option<&HostPresentationRequest> {
+        self.surface.as_ref()
+    }
+
     /// Drive one frame of the fixed-step loop: return the tick to simulate this
     /// frame and advance the counters. Monotonic and browser-free; the web arm
     /// calls this once per animation frame, a native/headless drive in a plain
@@ -146,6 +154,7 @@ mod tests {
         assert!(!w.is_surface_configured());
         assert_eq!(w.surface_width(), None);
         assert_eq!(w.surface_height(), None);
+        assert!(w.presentation_request().is_none());
         assert_eq!(w.next_tick(), 0);
         assert_eq!(w.frames_driven(), 0);
         // Default matches new (compared through observable state), and the
@@ -163,6 +172,10 @@ mod tests {
         assert!(w.is_surface_configured());
         assert_eq!(w.surface_width(), Some(800));
         assert_eq!(w.surface_height(), Some(600));
+        // The assembled request is exposed for a live backend to consume.
+        let request = w.presentation_request().expect("configured");
+        assert_eq!(request.descriptor().viewport().physical_width(), 800);
+        assert!(request.surface().is_valid());
     }
 
     #[test]

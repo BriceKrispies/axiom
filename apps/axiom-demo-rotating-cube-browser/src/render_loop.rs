@@ -1,57 +1,9 @@
-//! The per-frame render loop.
+//! The per-frame render loop (wasm32 only).
 //!
-//! The deterministic half tracks the tick/frame counters and is testable on
-//! native. The wasm32 half drives `requestAnimationFrame`, advancing one
-//! deterministic tick per frame and clearing+presenting through the live GPU
-//! binding.
-
-/// Deterministic render-loop bookkeeping: which tick is next and how many
-/// frames have been presented. Browser-free and testable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct RenderLoopState {
-    next_tick: u64,
-    frames_driven: u64,
-}
-
-impl RenderLoopState {
-    pub const fn new() -> Self {
-        RenderLoopState {
-            next_tick: 0,
-            frames_driven: 0,
-        }
-    }
-
-    /// Consume the next tick index and advance the counters.
-    pub fn step(&mut self) -> u64 {
-        let tick = self.next_tick;
-        self.next_tick += 1;
-        self.frames_driven += 1;
-        tick
-    }
-
-    pub const fn next_tick(&self) -> u64 {
-        self.next_tick
-    }
-
-    pub const fn frames_driven(&self) -> u64 {
-        self.frames_driven
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn step_yields_monotonic_ticks() {
-        let mut s = RenderLoopState::new();
-        assert_eq!(s.step(), 0);
-        assert_eq!(s.step(), 1);
-        assert_eq!(s.step(), 2);
-        assert_eq!(s.next_tick(), 3);
-        assert_eq!(s.frames_driven(), 3);
-    }
-}
+//! The run-loop counters now live in `axiom_windowing::WindowingApi` (the app
+//! drives ticks through it). This module is just the wasm32
+//! `requestAnimationFrame` driver: it advances one deterministic tick per frame
+//! and clears+presents through the live GPU binding.
 
 // ---------------------------------------------------------------------------
 // wasm32 requestAnimationFrame driver — never compiled on native.

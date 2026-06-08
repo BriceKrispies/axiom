@@ -25,6 +25,9 @@ axiom-webgpu = { path = "../../modules/axiom-webgpu" }
 # The render pipeline (a feature module) owns the scene->render->GPU
 # translation, so the app no longer depends on axiom-render directly.
 axiom-render-pipeline = { path = "../../modules/axiom-render-pipeline" }
+# Windowing owns the deterministic presentation-request assembly + run loop, so
+# the app no longer duplicates them.
+axiom-windowing = { path = "../../modules/axiom-windowing" }
 
 # Browser / WASM platform dependencies. Confined to this app and pulled in
 # ONLY for the wasm32 target, so native `cargo test --workspace` never

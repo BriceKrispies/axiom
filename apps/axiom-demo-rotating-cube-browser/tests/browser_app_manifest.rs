@@ -112,7 +112,9 @@ fn builds_host_presentation_request_without_browser_objects() {
     assert!(app.has_presentation_request());
     assert_eq!(app.viewport_width(), 1280);
     assert_eq!(app.viewport_height(), 720);
-    assert_eq!(app.presentation_target_label(), "axiom-rotating-cube-canvas");
+    // The presentation target label is now owned by axiom-windowing's
+    // deterministic request assembly.
+    assert_eq!(app.presentation_target_label(), "axiom-window-surface");
     assert!(app.surface_handle_id() > 0);
     // The request is reachable as host-owned data (no browser objects).
     assert_eq!(app.presentation_request().descriptor().viewport().physical_width(), 1280);

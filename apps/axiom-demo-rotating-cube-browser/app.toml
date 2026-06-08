@@ -25,4 +25,5 @@ allowed_modules = [
     "resources",
     "webgpu",
     "render-pipeline",
+    "windowing",
 ]
