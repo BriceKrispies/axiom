@@ -1,5 +1,7 @@
 //! A camera component an app spawns onto a node.
 
+use axiom_kernel::Meters;
+
 use crate::angle::Angle;
 
 /// Perspective camera intrinsics: vertical field of view plus near/far clip
@@ -8,8 +10,8 @@ use crate::angle::Angle;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PerspectiveProjection {
     pub fov_y: Angle,
-    pub near: f32,
-    pub far: f32,
+    pub near: Meters,
+    pub far: Meters,
 }
 
 /// A camera component. Today the engine offers a perspective camera; the
@@ -40,8 +42,8 @@ mod tests {
     fn perspective_carries_its_intrinsics() {
         let proj = PerspectiveProjection {
             fov_y: Angle::degrees(60.0),
-            near: 0.1,
-            far: 100.0,
+            near: Meters::new(0.1).unwrap(),
+            far: Meters::new(100.0).unwrap(),
         };
         let camera = Camera::perspective(proj);
         assert_eq!(camera.projection(), proj);

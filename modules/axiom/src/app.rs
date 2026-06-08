@@ -355,19 +355,28 @@ mod tests {
     use crate::directional_light::DirectionalLight;
     use crate::renderable::Renderable;
     use crate::spin::Spin;
+    use axiom_kernel::Meters;
     use axiom_math::Transform;
+
+    /// A linear colour channel from a known-finite authored literal.
+    fn ch(value: f32) -> Ratio {
+        Ratio::new(value).expect("authored colour channel is finite")
+    }
 
     /// The three-cube demo scene authored against the public App surface.
     fn three_cube_app() -> App {
         App::new()
-            .window(Window::new(800, 600).with_clear_color(Color::linear_rgb(0.05, 0.06, 0.08)))
+            .window(
+                Window::new(800, 600)
+                    .with_clear_color(Color::linear_rgb(ch(0.05), ch(0.06), ch(0.08))),
+            )
             .add_plugins(DefaultPlugins)
             .setup(|world, meshes, materials| {
                 let cube = meshes.add(Mesh::cube());
                 let cubes = [
-                    (-2.6, Vec3::UNIT_Y, Color::linear_rgb(0.85, 0.25, 0.25)),
-                    (0.0, Vec3::UNIT_X, Color::linear_rgb(0.30, 0.80, 0.35)),
-                    (2.6, Vec3::new(1.0, 1.0, 0.0), Color::linear_rgb(0.30, 0.50, 0.95)),
+                    (-2.6, Vec3::UNIT_Y, Color::linear_rgb(ch(0.85), ch(0.25), ch(0.25))),
+                    (0.0, Vec3::UNIT_X, Color::linear_rgb(ch(0.30), ch(0.80), ch(0.35))),
+                    (2.6, Vec3::new(1.0, 1.0, 0.0), Color::linear_rgb(ch(0.30), ch(0.50), ch(0.95))),
                 ];
                 for (offset_x, axis, color) in cubes {
                     let material = materials.add(Material::lit(color));
@@ -379,8 +388,8 @@ mod tests {
                     Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
                     Camera::perspective(PerspectiveProjection {
                         fov_y: Angle::degrees(60.0),
-                        near: 0.1,
-                        far: 100.0,
+                        near: Meters::new(0.1).expect("authored near plane is finite"),
+                        far: Meters::new(100.0).expect("authored far plane is finite"),
                     }),
                 ));
                 world.spawn((
@@ -388,7 +397,7 @@ mod tests {
                     DirectionalLight {
                         direction: Vec3::new(0.3, -1.0, 0.4),
                         color: Color::WHITE,
-                        intensity: 1.0,
+                        intensity: Ratio::new(1.0).expect("authored intensity is finite"),
                     },
                 ));
             })
@@ -479,7 +488,7 @@ mod tests {
                     DirectionalLight {
                         direction: Vec3::new(0.0, -1.0, 0.0),
                         color: Color::WHITE,
-                        intensity: 1.0,
+                        intensity: Ratio::new(1.0).expect("authored intensity is finite"),
                     },
                 ));
             })

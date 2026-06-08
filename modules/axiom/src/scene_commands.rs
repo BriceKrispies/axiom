@@ -5,7 +5,7 @@
 //! whole replay happens in that single function, so the scene's un-nameable node
 //! ids only ever live as locals (`nodes: Vec<_>`).
 
-use axiom_kernel::{Meters, Radians, Ratio};
+use axiom_kernel::{Radians, Ratio};
 use axiom_math::{MathApi, Vec3};
 use axiom_scene::SceneApi;
 
@@ -79,8 +79,8 @@ impl SceneCommands {
                                 Radians::new(p.fov_y.as_radians())
                                     .expect("authored fov is finite"),
                                 Ratio::new(self.aspect).expect("authored aspect is finite"),
-                                Meters::new(p.near).expect("authored near plane is finite"),
-                                Meters::new(p.far).expect("authored far plane is finite"),
+                                p.near,
+                                p.far,
                             )
                             .expect("authored camera intrinsics are valid");
                     }
@@ -89,8 +89,8 @@ impl SceneCommands {
                             .add_directional_light(
                                 math,
                                 node,
-                                Vec3::new(l.color.r, l.color.g, l.color.b),
-                                Ratio::new(l.intensity).expect("authored light intensity is finite"),
+                                Vec3::new(l.color.r.get(), l.color.g.get(), l.color.b.get()),
+                                l.intensity,
                             )
                             .expect("authored light parameters are valid");
                         light_direction = Some(l.direction);
@@ -137,6 +137,7 @@ mod tests {
     use crate::renderable::Renderable;
     use crate::spin::Spin;
     use crate::angle::Angle;
+    use axiom_kernel::Meters;
     use axiom_math::Transform;
 
     fn math() -> MathApi {
@@ -167,8 +168,8 @@ mod tests {
             Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
             Camera::perspective(PerspectiveProjection {
                 fov_y: Angle::degrees(60.0),
-                near: 0.1,
-                far: 100.0,
+                near: Meters::new(0.1).unwrap(),
+                far: Meters::new(100.0).unwrap(),
             }),
         ));
         cmds.spawn((
@@ -176,7 +177,7 @@ mod tests {
             DirectionalLight {
                 direction: Vec3::new(0.3, -1.0, 0.4),
                 color: Color::WHITE,
-                intensity: 1.0,
+                intensity: Ratio::new(1.0).unwrap(),
             },
         ));
 

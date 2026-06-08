@@ -30,7 +30,13 @@ mod tests {
 
     #[test]
     fn lit_carries_its_base_color() {
-        let m = Material::lit(Color::linear_rgb(0.8, 0.2, 0.2));
-        assert_eq!(m.base_color(), Color::linear_rgb(0.8, 0.2, 0.2));
+        use axiom_kernel::Ratio;
+        let red = || Color::linear_rgb(
+            Ratio::new(0.8).expect("authored colour channel is finite"),
+            Ratio::new(0.2).expect("authored colour channel is finite"),
+            Ratio::new(0.2).expect("authored colour channel is finite"),
+        );
+        let m = Material::lit(red());
+        assert_eq!(m.base_color(), red());
     }
 }

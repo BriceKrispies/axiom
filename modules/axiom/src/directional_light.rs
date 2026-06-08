@@ -1,5 +1,6 @@
 //! A directional-light component an app spawns onto a node.
 
+use axiom_kernel::Ratio;
 use axiom_math::Vec3;
 
 use crate::color::Color;
@@ -13,7 +14,7 @@ use crate::color::Color;
 pub struct DirectionalLight {
     pub direction: Vec3,
     pub color: Color,
-    pub intensity: f32,
+    pub intensity: Ratio,
 }
 
 #[cfg(test)]
@@ -25,10 +26,10 @@ mod tests {
         let light = DirectionalLight {
             direction: Vec3::new(0.3, -1.0, 0.4),
             color: Color::WHITE,
-            intensity: 1.0,
+            intensity: Ratio::new(1.0).expect("default intensity is finite"),
         };
         assert_eq!(light.direction, Vec3::new(0.3, -1.0, 0.4));
         assert_eq!(light.color, Color::WHITE);
-        assert_eq!(light.intensity, 1.0);
+        assert_eq!(light.intensity, Ratio::new(1.0).unwrap());
     }
 }
