@@ -1,0 +1,34 @@
+# Axiom module manifest — axiom-windowing (an ENGINE module).
+#
+# Windowing is the deterministic presentation driver. It is an *isolated engine
+# module* (allowed_modules = []): it composes no other module. It builds only on
+# the kernel and the host layer's deterministic presentation boundary
+# (HostPresentationRequest / HostSurfaceHandle / surface descriptor + adapter /
+# device requests), turning plain viewport dimensions into a validated
+# presentation request and driving the fixed per-frame tick loop.
+#
+# Why an engine module and not a feature module composing axiom-webgpu: module
+# contract types are not nameable across modules (axiom-webgpu exposes only its
+# WebGpuApi facade; GpuSubmission is threaded as an inferred local, never named).
+# The presentation backend therefore operates on plain, nameable data and the
+# host layer's presentation types — not on a webgpu module type — so windowing
+# needs no module dependency. The platform (wasm/wgpu) presentation arm plugs in
+# behind this deterministic core later; it is the one place that will hold
+# browser/GPU APIs, added to the source-hygiene platform allowlist when it lands.
+
+[module]
+name = "windowing"
+crate_name = "axiom-windowing"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "host",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "presentation-request-assembly",
+    "fixed-tick-presentation-loop",
+]

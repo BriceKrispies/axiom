@@ -1,0 +1,24 @@
+[package]
+name = "axiom-windowing"
+description = "Axiom engine module: the deterministic presentation driver — assembles a validated host presentation request and drives the fixed per-frame tick loop. The platform (wasm/wgpu) presentation arm plugs in behind this deterministic core later; the core is browser-free and 100% testable on native."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. The deterministic core is browser-free and wasm-clean; the
+# real wgpu/web-sys presentation arm (a future, compiled-out platform arm) never
+# enters this rlib's native build.
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module"): it composes NO other module
+# (allowed_modules = []). It builds on the kernel and the host layer's
+# deterministic presentation boundary (HostPresentationRequest and friends).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-host = { path = "../../crates/axiom-host" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
