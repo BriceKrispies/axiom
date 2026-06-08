@@ -56,6 +56,54 @@ impl Quat {
         Ok(Quat::new(axis.x * s, axis.y * s, axis.z * s, c))
     }
 
+    /// Build a unit rotation that orients local **-Z** along `forward` with
+    /// local **+Y** toward `up`, using the same right-handed basis
+    /// [`crate::Mat4::look_at`] uses for its view. This is the *camera-to-world*
+    /// rotation: a node carrying it, viewed through `inverse(world)`, looks down
+    /// `forward`. `up` need only be non-parallel to `forward`; it is
+    /// orthonormalised, not used verbatim.
+    ///
+    /// Fails with
+    /// [`crate::math_error_code::MathErrorCode::InvalidMatrixOperation`] when
+    /// `forward` is zero-length or parallel to `up` (the basis would be
+    /// degenerate) — matching `Mat4::look_at`.
+    pub fn look_rotation(forward: Vec3, up: Vec3) -> MathResult<Quat> {
+        let f = forward.normalize().map_err(|_| {
+            MathError::invalid_matrix_operation("look_rotation forward is zero-length")
+        })?;
+        let s = f.cross(up).normalize().map_err(|_| {
+            MathError::invalid_matrix_operation("look_rotation forward and up are parallel")
+        })?;
+        let u = s.cross(f);
+        // Rotation whose columns are the world-space camera axes: +X -> s,
+        // +Y -> u, +Z -> -f (so -Z -> f). Extract its quaternion via Shepperd's
+        // method, branching on the largest diagonal term so the divisor stays
+        // well away from zero. The diagonal entries are m00 = s.x, m11 = u.y,
+        // m22 = -f.z; off-diagonals follow from the same column layout.
+        let m00 = s.x;
+        let m11 = u.y;
+        let m22 = -f.z;
+        let trace = m00 + m11 + m22;
+        let q = if trace > 0.0 {
+            let big = (trace + 1.0).sqrt(); // 2w
+            let r = 0.5 / big; // 1 / 4w
+            Quat::new((u.z + f.y) * r, (-f.x - s.z) * r, (s.y - u.x) * r, 0.5 * big)
+        } else if m00 >= m11 && m00 >= m22 {
+            let big = (1.0 + m00 - m11 - m22).sqrt(); // 2x
+            let r = 0.5 / big;
+            Quat::new(0.5 * big, (u.x + s.y) * r, (-f.x + s.z) * r, (u.z + f.y) * r)
+        } else if m11 >= m22 {
+            let big = (1.0 + m11 - m00 - m22).sqrt(); // 2y
+            let r = 0.5 / big;
+            Quat::new((u.x + s.y) * r, 0.5 * big, (-f.y + u.z) * r, (-f.x - s.z) * r)
+        } else {
+            let big = (1.0 + m22 - m00 - m11).sqrt(); // 2z
+            let r = 0.5 / big;
+            Quat::new((-f.x + s.z) * r, (-f.y + u.z) * r, 0.5 * big, (s.y - u.x) * r)
+        };
+        Ok(q)
+    }
+
     /// Squared length (`x² + y² + z² + w²`).
     pub const fn length_squared(self) -> f32 {
         self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w
@@ -240,6 +288,79 @@ mod tests {
     fn from_axis_angle_nan_angle_fails() {
         let err = Quat::from_axis_angle(Vec3::UNIT_X, f32::NAN).unwrap_err();
         assert_eq!(err.code(), MathErrorCode::NonFiniteScalar);
+    }
+
+    // look_rotation: a node carrying it maps its local axes (+X, +Y, -Z) onto
+    // the world basis (right, up, forward). Each case is chosen to land in a
+    // distinct Shepperd branch (positive trace, then each dominant diagonal).
+    fn assert_look_maps_axes(forward: Vec3, up: Vec3, right: Vec3, real_up: Vec3) {
+        let q = Quat::look_rotation(forward, up).unwrap();
+        // Unit rotation.
+        assert!((q.length() - 1.0).abs() <= eps().value());
+        // Local -Z faces `forward`; +X -> right; +Y -> the orthonormalised up.
+        assert!(q.rotate(Vec3::new(0.0, 0.0, -1.0)).approx_eq(&forward, eps()));
+        assert!(q.rotate(Vec3::UNIT_X).approx_eq(&right, eps()));
+        assert!(q.rotate(Vec3::UNIT_Y).approx_eq(&real_up, eps()));
+    }
+
+    #[test]
+    fn look_rotation_forward_is_identity_when_facing_negative_z() {
+        // trace > 0 branch: basis already aligned, rotation is identity.
+        let q = Quat::look_rotation(Vec3::new(0.0, 0.0, -1.0), Vec3::UNIT_Y).unwrap();
+        assert!(q.approx_eq(&Quat::IDENTITY, eps()));
+        assert_look_maps_axes(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::UNIT_Y,
+            Vec3::UNIT_X,
+            Vec3::UNIT_Y,
+        );
+    }
+
+    #[test]
+    fn look_rotation_covers_x_dominant_branch() {
+        // forward +Z, up -Y -> R = diag(1,-1,-1), m00 dominant.
+        assert_look_maps_axes(
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::UNIT_X,
+            Vec3::new(0.0, -1.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn look_rotation_covers_y_dominant_branch() {
+        // forward +Z, up +Y -> R = diag(-1,1,-1), m11 dominant.
+        assert_look_maps_axes(
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::UNIT_Y,
+            Vec3::new(-1.0, 0.0, 0.0),
+            Vec3::UNIT_Y,
+        );
+    }
+
+    #[test]
+    fn look_rotation_covers_z_dominant_branch() {
+        // forward -Z, up -Y -> R = diag(-1,-1,1), m22 dominant.
+        assert_look_maps_axes(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(-1.0, 0.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn look_rotation_rejects_degenerate_inputs() {
+        // Zero-length forward.
+        assert_eq!(
+            Quat::look_rotation(Vec3::ZERO, Vec3::UNIT_Y).unwrap_err().code(),
+            MathErrorCode::InvalidMatrixOperation
+        );
+        // Forward parallel to up.
+        assert_eq!(
+            Quat::look_rotation(Vec3::UNIT_Y, Vec3::UNIT_Y).unwrap_err().code(),
+            MathErrorCode::InvalidMatrixOperation
+        );
     }
 
     #[test]

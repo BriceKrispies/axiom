@@ -67,6 +67,23 @@ impl Transform {
         }
     }
 
+    /// Aim the transform so its local **-Z** points from its current
+    /// translation toward `target`, with local **+Y** toward `up`. Translation
+    /// and scale are preserved; only the rotation is replaced. A camera node
+    /// carrying the result has `inverse(world) == `[`Mat4::look_at`], so it
+    /// looks at `target`.
+    ///
+    /// Fails when the translation coincides with `target`, or the look
+    /// direction is parallel to `up` (see [`Quat::look_rotation`]).
+    pub fn looking_at(self, target: Vec3, up: Vec3) -> MathResult<Transform> {
+        let rotation = Quat::look_rotation(target.subtract(self.translation), up)?;
+        Ok(Transform {
+            translation: self.translation,
+            rotation,
+            scale: self.scale,
+        })
+    }
+
     /// Apply the transform to a point: `T(R(S * p))`.
     pub fn transform_point(self, p: Vec3) -> Vec3 {
         let scaled = Vec3::new(p.x * self.scale.x, p.y * self.scale.y, p.z * self.scale.z);
@@ -280,6 +297,53 @@ mod tests {
         assert!(t
             .transform_point(Vec3::UNIT_X)
             .approx_eq(&Vec3::new(10.0, 2.0, 0.0), eps()));
+    }
+
+    #[test]
+    fn looking_at_world_inverse_equals_look_at_view() {
+        // A camera node's transform, inverted, must reproduce the engine's view
+        // matrix exactly — this is the contract the render pipeline relies on
+        // (view = inverse(camera world)). Off-axis target so the rotation is
+        // non-trivial.
+        let eye = Vec3::new(0.0, 0.0, 8.0);
+        let target = Vec3::new(1.0, 0.5, 0.0);
+        let up = Vec3::UNIT_Y;
+        let world = Transform::from_translation(eye).looking_at(target, up).unwrap();
+        let view = world.inverse().unwrap().to_matrix();
+        let expected = Mat4::look_at(eye, target, up).unwrap();
+        let (a, b) = (view.as_cols_array(), expected.as_cols_array());
+        for i in 0..16 {
+            assert!((a[i] - b[i]).abs() <= eps().value());
+        }
+    }
+
+    #[test]
+    fn looking_at_preserves_translation_and_scale() {
+        let t = Transform::new(
+            Vec3::new(1.0, 2.0, 3.0),
+            Quat::IDENTITY,
+            Vec3::new(2.0, 2.0, 2.0),
+        );
+        let aimed = t.looking_at(Vec3::new(1.0, 2.0, 0.0), Vec3::UNIT_Y).unwrap();
+        assert!(aimed.translation.approx_eq(&Vec3::new(1.0, 2.0, 3.0), eps()));
+        assert!(aimed.scale.approx_eq(&Vec3::new(2.0, 2.0, 2.0), eps()));
+    }
+
+    #[test]
+    fn looking_at_rejects_coincident_target_and_parallel_up() {
+        // Target coincides with the eye -> zero-length forward.
+        let at_self = Transform::from_translation(Vec3::new(4.0, 0.0, 0.0))
+            .looking_at(Vec3::new(4.0, 0.0, 0.0), Vec3::UNIT_Y);
+        assert_eq!(
+            at_self.unwrap_err().code(),
+            MathErrorCode::InvalidMatrixOperation
+        );
+        // Look direction parallel to up.
+        let parallel = Transform::IDENTITY.looking_at(Vec3::UNIT_Y, Vec3::UNIT_Y);
+        assert_eq!(
+            parallel.unwrap_err().code(),
+            MathErrorCode::InvalidMatrixOperation
+        );
     }
 
     #[test]
