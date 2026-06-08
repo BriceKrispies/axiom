@@ -320,11 +320,16 @@ Hard rules (mechanically enforced):
    in another module's list.
 8. **Module `lib.rs` exposes exactly one public facade.** Multiple
    top-level `pub use`/`pub` items in a module's `lib.rs` is rejected.
-9. **Browser/platform APIs are layer-host-only.** A non-host layer or
-   module that references `web_sys`, `js_sys`, `wasm_bindgen`, `WebGPU`,
-   `WebGL`, `requestAnimationFrame`, `window.`, `document.`, or `canvas`
-   is rejected. Future explicitly-platform-facing layers will be added
-   to the allowlist when they exist.
+9. **Browser/platform APIs are layer-host-only, plus the sanctioned
+   `windowing` module.** A layer or module that references `web_sys`,
+   `js_sys`, `wasm_bindgen`, `WebGPU`, `WebGL`, `requestAnimationFrame`,
+   `window.`, `document.`, or `canvas` is rejected — **except** the `host`
+   layer and the `windowing` module, the two explicitly platform-facing
+   allowlist entries (`PLATFORM_FACING_LAYERS` / `PLATFORM_FACING_MODULES`
+   in `crates/xtask/src/hygiene.rs`). `windowing` owns the live presentation
+   arm (the real `wgpu` / `web-sys` binding), compiled only for `wasm32`
+   behind its deterministic, fully-covered core. Adding another entry is a
+   deliberate amendment here, not a default.
 10. **No console output or placeholder macros in layers or modules.**
     `println!`, `eprintln!`, `print!`, `eprint!`, `dbg!`, `todo!`,
     `unimplemented!` are all rejected outside tests.

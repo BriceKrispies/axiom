@@ -51,8 +51,15 @@ const BROWSER_API_NEEDLES: &[&str] = &[
     "canvas",
 ];
 
-/// Crates that are explicitly allowed to reference platform APIs.
+/// Layers that are explicitly allowed to reference platform APIs.
 const PLATFORM_FACING_LAYERS: &[&str] = &["host"];
+
+/// Modules that are explicitly allowed to reference platform APIs. The
+/// `windowing` module owns the live presentation arm (the real `wgpu` /
+/// `web-sys` binding), compiled only for `wasm32` behind its deterministic
+/// core — the one sanctioned platform-facing module (Module Law #9). Adding
+/// another entry here is a deliberate amendment, not a default.
+const PLATFORM_FACING_MODULES: &[&str] = &["windowing"];
 
 /// Run the centralized source-hygiene scan against every layer source dir
 /// and every module source dir, pushing violations into `report`.
@@ -66,9 +73,10 @@ pub fn check(
         scan_one(name, dir, "layer", is_platform_facing, report);
     }
     for (name, dir) in module_dirs {
-        // Modules have no platform-facing allowlist today; all reject
-        // browser APIs.
-        scan_one(name, dir, "module", false, report);
+        // Only the sanctioned platform-facing module (windowing) may reference
+        // browser APIs; every other module rejects them.
+        let is_platform_facing = PLATFORM_FACING_MODULES.contains(&name.as_str());
+        scan_one(name, dir, "module", is_platform_facing, report);
     }
 }
 
