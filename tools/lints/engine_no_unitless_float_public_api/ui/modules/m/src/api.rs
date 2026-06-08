@@ -62,3 +62,29 @@ impl Area for Body {
         0.0
     }
 }
+
+// A quantity newtype (single f32 field): its OWN new/get boundary must NOT be
+// flagged — the raw f32 is where the scalar enters/leaves the type.
+pub struct Length(f32);
+
+impl Length {
+    pub fn new(value: f32) -> Self {
+        Length(value)
+    }
+    pub fn get(self) -> f32 {
+        self.0
+    }
+}
+
+// ...but a MULTI-field struct is not a quantity newtype, so a float method on it
+// IS still flagged (it's a composite, not a single scalar boundary).
+pub struct Span2 {
+    lo: f32,
+    hi: f32,
+}
+
+impl Span2 {
+    pub fn width(&self) -> f32 {
+        self.hi - self.lo
+    }
+}

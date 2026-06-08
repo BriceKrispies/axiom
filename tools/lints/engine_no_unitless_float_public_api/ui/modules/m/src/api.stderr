@@ -39,5 +39,13 @@ LL |     pub fn speed(&self) -> f32 {
    |
    = help: wrap it in a unit newtype (e.g. `Meters`, `Seconds`, `Radians`) so the unit is part of the type
 
-warning: 5 warnings emitted
+warning: naked floating-point type in a public engine API
+  --> $DIR/api.rs:87:28
+   |
+LL |     pub fn width(&self) -> f32 {
+   |                            ^^^
+   |
+   = help: wrap it in a unit newtype (e.g. `Meters`, `Seconds`, `Radians`) so the unit is part of the type
+
+warning: 6 warnings emitted
 

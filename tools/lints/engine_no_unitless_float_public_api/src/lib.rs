@@ -25,6 +25,11 @@ dylint_linting::declare_late_lint! {
     /// (`&f32`, `&mut f64`) is peeled before the check. Methods of a *trait*
     /// `impl` are intentionally skipped — their signature is dictated by the
     /// trait, not by this crate, so the unit decision isn't ours to make there.
+    /// The inherent methods of a **quantity newtype** (a struct that is itself a
+    /// single `f32`/`f64` field, e.g. `Pixels(f32)`) are also skipped: that
+    /// type's own `new(f32)` / `get() -> f32` are the boundary where a raw scalar
+    /// enters/leaves the quantity, not a unitless leak — the same shape as the
+    /// kernel's `Ratio::new`/`get`.
     /// The **scalar-floor crates** `axiom-kernel` and `axiom-math` are skipped
     /// entirely: the kernel owns the dimensioned-scalar primitives (whose
     /// constructors take a raw `f32` by definition) plus serialization /
@@ -153,20 +158,49 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUnitlessFloatPublicApi {
         if !cx.tcx.visibility(def_id.to_def_id()).is_public() {
             return;
         }
-        // Skip trait-impl methods: the signature is the trait's contract, not a
-        // free choice of this crate, so a unit newtype can't be substituted here.
-        // The parent of an impl item is its `impl` block; an `impl Trait for T`
-        // sets `of_trait`, an inherent `impl T` leaves it `None`.
+        // The parent of an impl item is its `impl` block.
         let parent = cx.tcx.local_parent(def_id);
         if let Node::Item(parent_item) = cx.tcx.hir_node_by_def_id(parent) {
             if let ItemKind::Impl(imp) = parent_item.kind {
+                // Skip trait-impl methods: the signature is the trait's contract,
+                // not a free choice of this crate. (`impl Trait for T` sets
+                // `of_trait`; an inherent `impl T` leaves it `None`.)
                 if imp.of_trait.is_some() {
+                    return;
+                }
+                // Skip the inherent methods of a *quantity newtype* — a struct
+                // that is itself a single `f32`/`f64` field (e.g. `Pixels(f32)`,
+                // `Angle { radians: f32 }`). Such a type IS a float quantity, so
+                // its own constructor (`new(f32)`) and accessor (`get() -> f32`)
+                // are the boundary where a raw scalar enters/leaves the type, not
+                // a unitless leak — exactly like the kernel's `Ratio::new`/`get`.
+                if impl_self_is_float_newtype(cx, &imp) {
                     return;
                 }
             }
         }
         check_fn_sig(cx, &sig);
     }
+}
+
+/// True if `imp`'s `Self` type is a struct with exactly one field whose type is a
+/// bare `f32`/`f64` — a float quantity newtype. The type is always local (you can
+/// only write an inherent impl for a local type), so its definition is in HIR.
+fn impl_self_is_float_newtype(cx: &LateContext<'_>, imp: &rustc_hir::Impl<'_>) -> bool {
+    let TyKind::Path(QPath::Resolved(_, path)) = imp.self_ty.kind else {
+        return false;
+    };
+    let Some(local) = path.res.opt_def_id().and_then(|d| d.as_local()) else {
+        return false;
+    };
+    let Node::Item(item) = cx.tcx.hir_node_by_def_id(local) else {
+        return false;
+    };
+    let ItemKind::Struct(_, _, data) = item.kind else {
+        return false;
+    };
+    let fields = data.fields();
+    fields.len() == 1 && is_bare_float(fields[0].ty)
 }
 
 /// Flag every bare-float parameter and the bare-float return type of `sig`.

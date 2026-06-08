@@ -52,6 +52,12 @@ pub struct Body { pub mass: Kilograms }
   (`clippy_utils::is_in_test`).
 - **Apps and tooling** — `apps/`, `tools/`, and `crates/xtask` are composition
   leaves / tooling outside the engine spine.
+- **A quantity newtype's own boundary** — the inherent methods of a struct that
+  is itself a single `f32`/`f64` field (e.g. `Pixels(f32)`, `Angle`) are skipped.
+  That type's `new(f32)` / `get() -> f32` are where a raw scalar enters and leaves
+  the quantity — the boundary, not a unitless leak (the same shape as the kernel's
+  `Ratio::new`/`get`). A *multi*-field struct is not a newtype, so a float method
+  on it is still flagged.
 - **The scalar-floor crates** — `axiom-kernel` and `axiom-math` are skipped
   entirely. The kernel owns the dimensioned-scalar primitives themselves (their
   constructors take a raw `f32` by definition) plus serialization (`write_f32`)
