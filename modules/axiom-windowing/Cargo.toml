@@ -19,6 +19,16 @@ crate-type = ["rlib"]
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-host = { path = "../../crates/axiom-host" }
 
+# The live presentation arm: real wgpu + web-sys, pulled in ONLY for wasm32, so
+# native `cargo test`/coverage never compiles them and the deterministic core
+# stays browser-free. This is the sanctioned platform-facing module (Module Law
+# #9 / PLATFORM_FACING_MODULES).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
+wgpu = "25"
+bytemuck = "1"
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"

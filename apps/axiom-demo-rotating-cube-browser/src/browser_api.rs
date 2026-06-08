@@ -3,9 +3,7 @@
 use axiom_kernel::{KernelResult, Ratio};
 use axiom_webgpu::WebGpuApi;
 
-use crate::browser_surface_registry::BrowserSurfaceRegistry;
 use crate::cube_slice::{CubeSliceDriver, TickOutcome};
-use crate::live_gpu_binding::LiveBindingState;
 
 use axiom_host::{HostApi, HostPresentationRequest};
 use axiom_windowing::WindowingApi;
@@ -21,10 +19,10 @@ use wasm_bindgen::prelude::*;
 /// *live* `WebGpuApi` and (on wasm32) presents through a real wgpu binding.
 ///
 /// The struct itself is browser-free: it owns the windowing driver (which holds
-/// the validated `HostPresentationRequest` and the run loop), the deterministic
-/// slice driver, the live `WebGpuApi`, and the surface registry (whose real GPU
-/// binding is attached only on wasm32). All of that constructs and is tested on
-/// native; the `#[wasm_bindgen]` startup methods exist only on wasm32.
+/// the validated `HostPresentationRequest`, the run loop, and — on wasm32 — the
+/// real GPU binding), the deterministic slice driver, and the live `WebGpuApi`.
+/// All of that constructs and is tested on native; the `#[wasm_bindgen]` startup
+/// methods exist only on wasm32.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(Debug)]
 pub struct BrowserRotatingCubeApi {
@@ -32,16 +30,14 @@ pub struct BrowserRotatingCubeApi {
     windowing: WindowingApi,
     webgpu: WebGpuApi,
     driver: CubeSliceDriver,
-    registry: BrowserSurfaceRegistry,
 }
 
 impl BrowserRotatingCubeApi {
     /// Build the app for a `width` x `height` canvas identified by `canvas_id`.
     ///
     /// Deterministic and browser-free: `axiom-windowing` assembles the
-    /// `HostPresentationRequest`, from which a **live** `WebGpuApi` is created
-    /// and the surface handle registered. Any host/webgpu validation failure
-    /// surfaces through `KernelResult`.
+    /// `HostPresentationRequest`, from which a **live** `WebGpuApi` is created.
+    /// Any host/webgpu validation failure surfaces through `KernelResult`.
     pub fn new(canvas_id: &str, width: u32, height: u32) -> KernelResult<Self> {
         let mut windowing = WindowingApi::new();
         windowing.configure_surface(width, height)?;
@@ -49,7 +45,6 @@ impl BrowserRotatingCubeApi {
             .presentation_request()
             .expect("surface was just configured");
         let webgpu = WebGpuApi::new_live(request)?;
-        let surface_id = request.surface().id().raw();
 
         let host = HostApi::new();
         let viewport = host
@@ -61,15 +56,11 @@ impl BrowserRotatingCubeApi {
             .expect("viewport dimensions already validated by the request");
         let driver = CubeSliceDriver::new(viewport);
 
-        let mut registry = BrowserSurfaceRegistry::new();
-        registry.register(surface_id, width, height);
-
         Ok(BrowserRotatingCubeApi {
             canvas_id: canvas_id.to_string(),
             windowing,
             webgpu,
             driver,
-            registry,
         })
     }
 
@@ -118,11 +109,10 @@ impl BrowserRotatingCubeApi {
         self.webgpu.has_presentation_request()
     }
 
-    /// The deterministic live-binding lifecycle state for the surface handle.
-    /// `pub(crate)`: `LiveBindingState` is an internal type, so this is not
-    /// part of the single public facade (kept reachable for tests + the loop).
-    pub(crate) fn binding_state(&self) -> LiveBindingState {
-        self.registry.state(self.request().surface().id().raw())
+    /// Whether the live GPU binding is ready to present (always false on native;
+    /// true on wasm32 once the binding has initialised).
+    pub(crate) fn binding_is_ready(&self) -> bool {
+        self.windowing.binding_is_ready()
     }
 
     /// The next tick index this app will drive.
@@ -158,35 +148,28 @@ impl BrowserRotatingCubeApi {
     }
 
     /// Boot the visible slice: locate the canvas, initialise the real wgpu
-    /// binding asynchronously, attach it to the surface registry, and run the
+    /// binding asynchronously through `axiom-windowing`, then run the
     /// requestAnimationFrame loop. Consumes `self` into the loop.
     #[wasm_bindgen]
     pub fn start(self) -> Result<(), JsValue> {
         let canvas = crate::browser_bootstrap::find_canvas(&self.canvas_id)?;
-        let width = self.viewport_width();
-        let height = self.viewport_height();
         let geometry = self.driver.cube_geometry();
         let max_instances = crate::cube_slice::NUM_CUBES as u32;
 
         wasm_bindgen_futures::spawn_local(async move {
             let mut app = self;
-            match crate::live_gpu_binding::LiveGpuBinding::initialize(
-                canvas,
-                width,
-                height,
-                geometry,
-                max_instances,
-            )
-            .await
+            match app
+                .windowing
+                .initialize_live(canvas, &geometry.vertices, &geometry.indices, max_instances)
+                .await
             {
-                Ok(binding) => {
-                    app.attach_live_binding(binding);
+                // The binding is now owned by windowing; drive the loop.
+                Ok(()) => {
                     let _ = crate::render_loop::run(app);
                 }
-                Err(_) => {
-                    let surface_id = app.request().surface().id().raw();
-                    app.registry.fail(surface_id);
-                }
+                // Init failed: windowing has no live binding, so nothing
+                // presents — the loop is simply not started.
+                Err(_) => {}
             }
         });
         Ok(())
@@ -195,28 +178,21 @@ impl BrowserRotatingCubeApi {
 
 #[cfg(target_arch = "wasm32")]
 impl BrowserRotatingCubeApi {
-    /// Attach the real wgpu binding to the registry (wasm32 only).
-    pub(crate) fn attach_live_binding(
-        &mut self,
-        binding: crate::live_gpu_binding::LiveGpuBinding,
-    ) {
-        let surface_id = self.request().surface().id().raw();
-        self.registry.attach_binding(surface_id, binding);
-    }
-
-    /// Draw + present all cubes for one tick through the bound live binding,
-    /// using the engine's per-cube instances and clear colour (wasm32 only).
+    /// Draw + present all cubes for one tick through `axiom-windowing`'s live
+    /// binding, using the engine's per-cube instances and clear colour (wasm32
+    /// only).
     pub(crate) fn present_cubes(
         &self,
         instances: &[f32],
         instance_count: u32,
         color: [f32; 4],
     ) -> Result<(), wasm_bindgen::JsValue> {
-        match self.registry.binding(self.request().surface().id().raw()) {
-            Some(binding) => binding.render_frame(instances, instance_count, color),
-            None => Err(wasm_bindgen::JsValue::from_str(
-                "no live GPU binding attached for the surface handle",
-            )),
+        if self.windowing.present_frame(color, instances, instance_count) {
+            Ok(())
+        } else {
+            Err(wasm_bindgen::JsValue::from_str(
+                "no live GPU binding ready to present",
+            ))
         }
     }
 }
@@ -234,9 +210,9 @@ mod tests {
         assert_eq!(app.viewport_width(), 800);
         assert_eq!(app.viewport_height(), 600);
         assert_eq!(app.presentation_target_label(), "axiom-window-surface");
-        // Surface handle registered, but no real device can be acquired on
-        // native — the binding stops at SurfaceRegistered.
-        assert_eq!(app.binding_state(), LiveBindingState::SurfaceRegistered);
+        // No real device can be acquired on native, so the live binding never
+        // becomes ready — the app simulates but never presents.
+        assert!(!app.binding_is_ready());
     }
 
     #[test]

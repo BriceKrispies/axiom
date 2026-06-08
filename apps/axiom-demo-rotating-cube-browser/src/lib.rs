@@ -28,9 +28,7 @@
 
 mod browser_api;
 mod browser_bootstrap;
-mod browser_surface_registry;
 mod cube_slice;
-mod live_gpu_binding;
 mod render_loop;
 mod scene_content;
 

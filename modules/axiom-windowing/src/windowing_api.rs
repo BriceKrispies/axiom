@@ -36,6 +36,10 @@ pub struct WindowingApi {
     surface: Option<HostPresentationRequest>,
     next_tick: u64,
     frames_driven: u64,
+    // The real GPU binding, present only once initialised on wasm32. Its
+    // absence is what "not ready" means; native never has one.
+    #[cfg(target_arch = "wasm32")]
+    live: Option<crate::live_gpu_binding::LiveGpuBinding>,
 }
 
 impl WindowingApi {
@@ -45,6 +49,8 @@ impl WindowingApi {
             surface: None,
             next_tick: 0,
             frames_driven: 0,
+            #[cfg(target_arch = "wasm32")]
+            live: None,
         }
     }
 
@@ -136,6 +142,79 @@ impl WindowingApi {
     pub fn frames_driven(&self) -> u64 {
         self.frames_driven
     }
+
+    /// Whether a live GPU binding is initialised and could present real pixels.
+    /// Always `false` on native (there is no GPU): the run loop simulates but
+    /// does not present. On wasm32 it is `true` once [`Self::initialize_live`]
+    /// has succeeded.
+    pub fn binding_is_ready(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self.live.is_some();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            false
+        }
+    }
+
+    /// Present one frame: the engine's per-cube instance floats
+    /// (`[mvp(16), colour(4)]` each) and a clear colour. Returns whether real
+    /// pixels were drawn — always `false` on native (headless), and on wasm32
+    /// `true` when a live binding rendered the frame. This is the uniform seam
+    /// `App::run` drives on both targets.
+    pub fn present_frame(
+        &self,
+        clear_color: [f32; 4],
+        instances: &[f32],
+        instance_count: u32,
+    ) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(live) = &self.live {
+                return live
+                    .render_frame(instances, instance_count, clear_color)
+                    .is_ok();
+            }
+            false
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (clear_color, instances, instance_count);
+            false
+        }
+    }
+
+    /// Initialise the real wgpu binding from a canvas and the engine's cube
+    /// geometry (interleaved position+normal `vertices`, triangle-list
+    /// `indices`). wasm32 only; on success later [`Self::present_frame`] calls
+    /// draw real pixels. On failure the binding stays absent (not ready).
+    #[cfg(target_arch = "wasm32")]
+    pub async fn initialize_live(
+        &mut self,
+        canvas: web_sys::HtmlCanvasElement,
+        vertices: &[f32],
+        indices: &[u32],
+        max_instances: u32,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let request = self
+            .surface
+            .as_ref()
+            .ok_or_else(|| wasm_bindgen::JsValue::from_str("no surface configured"))?;
+        let width = request.descriptor().viewport().physical_width();
+        let height = request.descriptor().viewport().physical_height();
+        let binding = crate::live_gpu_binding::LiveGpuBinding::initialize(
+            canvas,
+            width,
+            height,
+            vertices,
+            indices,
+            max_instances,
+        )
+        .await?;
+        self.live = Some(binding);
+        Ok(())
+    }
 }
 
 impl Default for WindowingApi {
@@ -206,5 +285,16 @@ mod tests {
         assert_eq!(w.step(), 2);
         assert_eq!(w.next_tick(), 3);
         assert_eq!(w.frames_driven(), 3);
+    }
+
+    #[test]
+    fn native_never_presents_real_pixels() {
+        // On native there is no GPU binding: the loop simulates but never
+        // presents, so the headless contract is "not ready, present is a no-op".
+        let mut w = WindowingApi::new();
+        w.configure_surface(640, 480).unwrap();
+        assert!(!w.binding_is_ready());
+        let instances = [0.0_f32; 20]; // one cube: mvp(16) + colour(4)
+        assert!(!w.present_frame([0.1, 0.2, 0.3, 1.0], &instances, 1));
     }
 }

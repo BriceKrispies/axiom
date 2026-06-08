@@ -27,4 +27,9 @@
 
 mod windowing_api;
 
+// The real wgpu presentation arm — compiled only for wasm32, behind the
+// deterministic core. Never enters the native build or the coverage gate.
+#[cfg(target_arch = "wasm32")]
+mod live_gpu_binding;
+
 pub use windowing_api::WindowingApi;
