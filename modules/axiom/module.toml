@@ -30,6 +30,7 @@ allowed_modules = [
     "resources",
     "render-pipeline",
     "webgpu",
+    "windowing",
 ]
 
 introduced_capabilities = [

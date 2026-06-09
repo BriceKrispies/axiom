@@ -1,11 +1,12 @@
 //! `App`: the engine entry point an app builds and runs.
 //!
-//! `App` is a builder; [`App::run`] realizes it into a [`RunningApp`] that drives
-//! deterministic frames via [`RunningApp::tick`]. This is the headless core of
-//! the run loop — it composes runtime stepping, the host frame boundary, the
-//! scene, resources, and the render pipeline into one per-frame outcome. The
-//! live windowing backend drives this same `tick` later; nothing here touches a
-//! platform surface or a wall clock.
+//! [`App::build`] realizes the builder into a [`RunningApp`] — the headless core
+//! that composes runtime stepping, the host frame boundary, the scene,
+//! resources, and the render pipeline into one deterministic per-frame outcome
+//! via [`RunningApp::tick`]. [`App::run`] is the terminal entry built on top: it
+//! configures the surface and drives the per-frame loop through the windowing
+//! backend (the `requestAnimationFrame` loop on the web). Nothing here touches a
+//! platform surface or a wall clock — the platform loop lives in `axiom-windowing`.
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
@@ -16,6 +17,15 @@ use axiom_resources::ResourcesApi;
 use axiom_runtime::{Runtime, RuntimeConfig};
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
+// Windowing is the platform presentation backend, used only by the wasm `run`
+// terminal entry; native builds drive headlessly via `build` + `tick`.
+#[cfg(target_arch = "wasm32")]
+use axiom_windowing::WindowingApi;
+
+/// The presentation-target element id the live backend binds to when a
+/// [`Window`] does not name one.
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_SURFACE_ID: &str = "axiom-surface";
 
 use crate::assets::Assets;
 use crate::default_plugins::DefaultPlugins;
@@ -87,6 +97,37 @@ impl App {
     pub fn build(self) -> RunningApp {
         RunningApp::realize(self)
     }
+
+    /// Run the app on the web: realize the world, configure the surface, and
+    /// drive the terminal per-frame loop through `axiom-windowing` — the
+    /// `requestAnimationFrame` loop that presents the deterministic cubes through
+    /// the live backend. `run` requires a window backend, and today only the web
+    /// has one, so it is wasm32-only; native builds drive headlessly via
+    /// [`App::build`] + [`RunningApp::tick`]. The umbrella stays platform-free:
+    /// it hands windowing a surface-id string and a per-frame closure producing
+    /// plain draw data, never a platform type.
+    #[cfg(target_arch = "wasm32")]
+    pub fn run(self) {
+        // Read the surface config through a non-`window`-named binding so this
+        // platform-free module never spells the literal platform needles.
+        let cfg = &self.window;
+        let surface_id = cfg.surface_id().unwrap_or(DEFAULT_SURFACE_ID).to_string();
+        let (width, height) = (cfg.width(), cfg.height());
+
+        let mut windowing = WindowingApi::new();
+        windowing
+            .configure_surface(width, height)
+            .expect("surface dimensions are valid");
+
+        let mut running = self.build();
+        let (vertices, indices) = running.mesh_vertex_stream();
+        let max_instances = running.renderable_count() as u32;
+        let _ = windowing.run_web(&surface_id, vertices, indices, max_instances, move |tick| {
+            let outcome = running.tick(tick);
+            let count = outcome.draws().len() as u32;
+            (outcome.clear_color(), outcome.instance_floats(), count)
+        });
+    }
 }
 
 impl Default for App {
@@ -127,6 +168,9 @@ pub struct RunningApp {
     // material's colour. The scene's renderables reference these ids.
     meshes: Vec<(u64, MeshGeometry)>,
     materials: Vec<(u64, [f32; 4])>,
+    // How many renderables the scene draws each frame (the live backend's
+    // per-instance buffer capacity).
+    renderables: usize,
 }
 
 impl RunningApp {
@@ -165,6 +209,7 @@ impl RunningApp {
         if let Some(setup) = app.setup {
             setup(&mut commands, &mut meshes, &mut materials);
         }
+        let renderables = commands.renderable_count();
 
         // Realize the scene; capture the per-frame light direction.
         let mut scene = SceneApi::new();
@@ -203,6 +248,30 @@ impl RunningApp {
             light_direction,
             meshes,
             materials,
+            renderables,
+        }
+    }
+
+    /// How many renderables the scene draws each frame — the live backend's
+    /// per-instance buffer capacity.
+    pub fn renderable_count(&self) -> usize {
+        self.renderables
+    }
+
+    /// The first mesh's geometry as the live backend's vertex stream
+    /// (interleaved position+normal, 6 floats per vertex) plus its triangle-list
+    /// indices. Empty when the app registered no mesh. Plain data the windowing
+    /// backend uploads.
+    pub fn mesh_vertex_stream(&self) -> (Vec<f32>, Vec<u32>) {
+        match self.meshes.first() {
+            Some((_, geom)) => {
+                let mut vertices = Vec::with_capacity(geom.positions.len() * 6);
+                for (p, n) in geom.positions.iter().zip(geom.normals.iter()) {
+                    vertices.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z]);
+                }
+                (vertices, geom.indices.clone())
+            }
+            None => (Vec::new(), Vec::new()),
         }
     }
 
@@ -488,5 +557,25 @@ mod tests {
         // Clear + Present, no draws.
         assert_eq!(outcome.draws().len(), 0);
         assert!(outcome.recorded());
+    }
+
+    #[test]
+    fn realized_app_exposes_geometry_and_renderable_count() {
+        let app = three_cube_app().build();
+        assert_eq!(app.renderable_count(), 3);
+        let (vertices, indices) = app.mesh_vertex_stream();
+        assert!(!vertices.is_empty());
+        assert_eq!(vertices.len() % 6, 0); // position(3) + normal(3) per vertex
+        assert!(!indices.is_empty());
+    }
+
+    #[test]
+    fn an_app_with_no_mesh_has_empty_geometry() {
+        // Exercises the no-mesh arm of mesh_vertex_stream + a zero count.
+        let app = App::new().build();
+        assert_eq!(app.renderable_count(), 0);
+        let (vertices, indices) = app.mesh_vertex_stream();
+        assert!(vertices.is_empty());
+        assert!(indices.is_empty());
     }
 }

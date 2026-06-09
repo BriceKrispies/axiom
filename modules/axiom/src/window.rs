@@ -14,6 +14,12 @@ pub struct Window {
     width: u32,
     height: u32,
     clear_color: Color,
+    // The presentation-target element id the live backend binds to (a web
+    // drawing element, on the web). A plain string — the only "where the surface
+    // lives" hint, handed to the windowing backend, never a platform type.
+    // `None` means use the engine default. Named platform-neutrally: this module
+    // is platform-free and must not name web concepts.
+    surface_id: Option<String>,
 }
 
 impl Window {
@@ -24,12 +30,20 @@ impl Window {
             width,
             height,
             clear_color: Color::BLACK,
+            surface_id: None,
         }
     }
 
     /// Set the clear colour.
     pub fn with_clear_color(mut self, clear_color: Color) -> Self {
         self.clear_color = clear_color;
+        self
+    }
+
+    /// Bind the live backend to the presentation-target element with this id
+    /// (the web drawing element, on the web).
+    pub fn with_surface_id(mut self, surface_id: &str) -> Self {
+        self.surface_id = Some(surface_id.to_string());
         self
     }
 
@@ -46,6 +60,11 @@ impl Window {
     /// The clear colour.
     pub fn clear_color(&self) -> Color {
         self.clear_color
+    }
+
+    /// The presentation-target element id the live backend binds to, if set.
+    pub fn surface_id(&self) -> Option<&str> {
+        self.surface_id.as_deref()
     }
 }
 
@@ -65,6 +84,13 @@ mod tests {
         assert_eq!(w.width(), 800);
         assert_eq!(w.height(), 600);
         assert_eq!(w.clear_color(), Color::BLACK);
+        assert_eq!(w.surface_id(), None);
+    }
+
+    #[test]
+    fn with_surface_id_sets_the_binding_target() {
+        let w = Window::new(640, 480).with_surface_id("axiom-cube-surface");
+        assert_eq!(w.surface_id(), Some("axiom-cube-surface"));
     }
 
     #[test]

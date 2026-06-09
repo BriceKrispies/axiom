@@ -25,6 +25,12 @@ axiom-resources = { path = "../axiom-resources" }
 axiom-render-pipeline = { path = "../axiom-render-pipeline" }
 axiom-webgpu = { path = "../axiom-webgpu" }
 
+# Windowing is the platform presentation backend, used only by the wasm32 `run`
+# terminal entry (native builds drive headlessly via build + tick). Pulled in
+# only for wasm32 so the native umbrella never links it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../axiom-windowing" }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"

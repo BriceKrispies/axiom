@@ -215,12 +215,100 @@ impl WindowingApi {
         self.live = Some(binding);
         Ok(())
     }
+
+    /// Drive the terminal web run loop. Initialise the live binding from the
+    /// canvas (looked up by id) and the engine's cube geometry, then present one
+    /// frame per `requestAnimationFrame`: each frame the loop owns the monotonic
+    /// tick ([`Self::step`]), hands it to `frame_fn`, and presents the plain
+    /// draw data it returns — `(clear_color, [mvp(16), colour(4)] per cube,
+    /// count)`. wasm32 only; consumes the driver into the loop. If init fails,
+    /// nothing presents (the loop never starts).
+    #[cfg(target_arch = "wasm32")]
+    pub fn run_web<F>(
+        self,
+        canvas_id: &str,
+        vertices: Vec<f32>,
+        indices: Vec<u32>,
+        max_instances: u32,
+        frame_fn: F,
+    ) -> Result<(), wasm_bindgen::JsValue>
+    where
+        F: FnMut(u64) -> ([f32; 4], Vec<f32>, u32) + 'static,
+    {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::closure::Closure;
+
+        let canvas = find_canvas(canvas_id)?;
+        let frame_fn = Rc::new(RefCell::new(frame_fn));
+        let mut windowing = self;
+
+        wasm_bindgen_futures::spawn_local(async move {
+            if windowing
+                .initialize_live(canvas, &vertices, &indices, max_instances)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let windowing = Rc::new(RefCell::new(windowing));
+            let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
+            let g = f.clone();
+            let win = windowing.clone();
+            let ff = frame_fn.clone();
+            *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+                let tick = win.borrow_mut().step();
+                let (clear, instances, count) = (ff.borrow_mut())(tick);
+                let _ = win.borrow().present_frame(clear, &instances, count);
+                let next = f.borrow();
+                if let Some(cb) = next.as_ref() {
+                    let _ = request_animation_frame(cb);
+                }
+            }) as Box<dyn FnMut()>));
+            let initial = g.borrow();
+            if let Some(cb) = initial.as_ref() {
+                let _ = request_animation_frame(cb);
+            }
+        });
+        Ok(())
+    }
 }
 
 impl Default for WindowingApi {
     fn default() -> Self {
         WindowingApi::new()
     }
+}
+
+/// Locate the `<canvas>` element by id. wasm32 only.
+#[cfg(target_arch = "wasm32")]
+fn find_canvas(canvas_id: &str) -> Result<web_sys::HtmlCanvasElement, wasm_bindgen::JsValue> {
+    use wasm_bindgen::{JsCast, JsValue};
+
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("no document"))?;
+    let element = document
+        .get_element_by_id(canvas_id)
+        .ok_or_else(|| JsValue::from_str("canvas element not found by id"))?;
+    element
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .map_err(|_| JsValue::from_str("element is not an HtmlCanvasElement"))
+}
+
+/// Schedule the next animation frame. wasm32 only.
+#[cfg(target_arch = "wasm32")]
+fn request_animation_frame(
+    callback: &wasm_bindgen::closure::Closure<dyn FnMut()>,
+) -> Result<(), wasm_bindgen::JsValue> {
+    use wasm_bindgen::JsCast;
+
+    let window =
+        web_sys::window().ok_or_else(|| wasm_bindgen::JsValue::from_str("no window"))?;
+    window
+        .request_animation_frame(callback.as_ref().unchecked_ref())
+        .map(|_| ())
 }
 
 #[cfg(test)]

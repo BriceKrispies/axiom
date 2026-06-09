@@ -90,4 +90,50 @@ impl FrameOutcome {
     pub const fn recorded(&self) -> bool {
         self.recorded
     }
+
+    /// Pack the per-object draws into the live backend's instance layout: each
+    /// draw contributes its 16 MVP floats followed by its 4 colour floats (20
+    /// floats per instance), in submission order. This is the plain data the
+    /// windowing run loop presents each frame.
+    pub fn instance_floats(&self) -> Vec<f32> {
+        let mut out = Vec::with_capacity(self.draws.len() * 20);
+        for draw in &self.draws {
+            out.extend_from_slice(&draw.mvp);
+            out.extend_from_slice(&draw.color);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instance_floats_pack_mvp_then_colour_per_draw() {
+        let outcome = FrameOutcome::new(
+            0,
+            0,
+            [0.0; 4],
+            vec![
+                DrawData::new([1.0; 16], [0.1, 0.2, 0.3, 1.0]),
+                DrawData::new([2.0; 16], [0.4, 0.5, 0.6, 1.0]),
+            ],
+            false,
+            true,
+        );
+        let floats = outcome.instance_floats();
+        assert_eq!(floats.len(), 40); // 2 draws x (16 + 4)
+        assert_eq!(&floats[0..16], &[1.0; 16]);
+        assert_eq!(&floats[16..20], &[0.1, 0.2, 0.3, 1.0]);
+        assert_eq!(&floats[20..36], &[2.0; 16]);
+        assert_eq!(&floats[36..40], &[0.4, 0.5, 0.6, 1.0]);
+    }
+
+    #[test]
+    fn instance_floats_empty_when_no_draws() {
+        assert!(FrameOutcome::simulation_only(3, [0.0; 4])
+            .instance_floats()
+            .is_empty());
+    }
 }

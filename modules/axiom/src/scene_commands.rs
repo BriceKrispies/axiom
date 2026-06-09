@@ -30,6 +30,17 @@ impl SceneCommands {
         }
     }
 
+    /// How many renderable components were authored across all spawns. The live
+    /// backend sizes its per-instance buffer to this (one instance per drawn
+    /// renderable).
+    pub(crate) fn renderable_count(&self) -> usize {
+        self.commands
+            .iter()
+            .flat_map(|command| command.components.iter())
+            .filter(|component| matches!(component, NodeComponent::Renderable(_)))
+            .count()
+    }
+
     /// Spawn a node carrying `bundle`. Returns a handle for attaching children.
     pub fn spawn<B: Bundle>(&mut self, bundle: B) -> SpawnedNode<'_> {
         let index = self.record(None, bundle);
