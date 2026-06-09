@@ -6,7 +6,28 @@ a time, into the correct layer/module until the demo apps are pure scene
 description — then delete the sketch (the [README](README.md) "deletion test").
 
 Every code commit ships **with the tests that take it to 100% coverage** and
-keeps `cargo xtask check-architecture` green. There is no "tests later."
+keeps `cargo xtask check-architecture` green (plus the dylint rulebook). There
+is no "tests later." Enforced by a pre-commit gate (architecture + coverage +
+dylint).
+
+## Status (2026-06-09)
+
+| Slice | State |
+|---|---|
+| 1 — schedule backbone | ✅ complete |
+| 2 — ergonomics (→ umbrella) | ✅ complete (+ `Transform::looking_at` for camera aiming) |
+| 3 — windowing **engine** module | 🟡 ~90% — module + live `wgpu` arm done & screenshot-verified; rAF driver ownership pending (with 14) |
+| 4 — `App` frontend | 🟡 ~80% — headless core done; `App::run()` not yet terminal |
+| 5 — collapse apps, delete sketch | 🔴 ~10% |
+
+**Fidelity:** shape & altitude match, **not** the verbatim deletion test — the
+sketch's symbol names are illustrative (per the README); today's honest idioms
+(`.setup`, `fixed_timestep_nanos`, the `Window` builder) stay. Slice 5's
+"deletion test" is therefore judgment, not literal compilation.
+
+The two remaining moves are **`App::run()` terminal** (closes slice 3 commit 11
++ slice 4 commit 14: the umbrella composes windowing, windowing owns the loop)
+and **slice 5** (collapse both demos onto `App`, retire the sketch).
 
 ## Settled architectural decisions
 
@@ -17,18 +38,31 @@ commits below.
    runs registered `WorldSystem`s once per engine frame; the Schedule is just
    *labelled phases* (`Startup`/`Update`) ordering that existing primitive. No
    new crate.
-2. **Windowing is a feature module that composes `webgpu`** —
-   `modules/axiom-windowing`, `kind = "feature-module"`,
-   `allowed_modules = ["webgpu"]`, with a rule-9 platform-API allowlist
-   exception. Because it may consume `axiom-webgpu`'s `GpuSubmission`, live and
-   deterministic presentation become **one path**, not the raw-wgpu bypass the
-   browser app uses today.
+2. **Windowing is an *engine* module over plain data** —
+   `modules/axiom-windowing`, `kind = "engine-module"`, `allowed_modules = []`,
+   building only on the kernel and the `host` layer's presentation boundary,
+   with a rule-9 platform-API allowlist exception (`PLATFORM_FACING_MODULES`).
+   - **Correction (was: "feature module composing `webgpu`").** Module contract
+     types are not nameable across modules: `axiom-webgpu` exposes only its
+     `WebGpuApi` facade, and `GpuSubmission` is `pub` inside a *private* module,
+     so another crate can thread it as an inferred local but can never name it in
+     a signature. A presentation backend therefore cannot take a `&GpuSubmission`,
+     so composing `webgpu` buys nothing. What actually reaches the GPU is plain,
+     nameable data (per-draw `mvp:[f32;16]` + `color:[f32;4]` + clear colour,
+     extracted from the render pipeline's report). Windowing operates on that +
+     host presentation types, needs no module dependency, and is an isolated
+     engine module. The "one path" unifying artifact is the single
+     `RenderPipelineApi.submit` → extracted plain draws → present seam, **not**
+     `GpuSubmission` (so `axiom-webgpu` is untouched).
+   - **No portable trait.** With one real backend (the wasm `wgpu` arm) and a
+     native headless no-op, a `PresentationBackend` trait would be dead
+     abstraction; `cfg`-dispatch on `present_frame`/`binding_is_ready` is the
+     honest seam. Readiness is the presence of the optional live binding.
    - A platform **layer** was considered and rejected: the spine is strictly
      linear, each layer must adapt the one directly beneath it, and the
      browser-free engine-data layers (frame/ecs/introspect) may never use a
-     platform layer — so no linear position exists for it. Layers also may not
-     import modules, which would permanently bar it from `GpuSubmission`. Rule #9
-     already anticipates an allowlist extension, not a new layer.
+     platform layer — so no linear position exists for it. Rule #9 anticipates an
+     allowlist extension, not a new layer.
 3. **The prelude umbrella is just a feature module — no new tier, no law
    amendment.** Module Law #8 is enforced by counting `lib.rs` lines starting
    with `pub ` (`class_check.rs::check_module_facades_export_one`). A single
@@ -87,26 +121,44 @@ Consequence: the umbrella-tier law change (was commit 12) moves onto the
 critical path early, since it gates both the prelude *and* every relocated
 ergonomic type.
 
-### Slice 3 — windowing feature module
-9. **(law)** `xtask`: add windowing to the rule-9 browser/GPU-API allowlist.
-10. `axiom-windowing`: feature module composing `webgpu`; owns the live GPU
-    binding + surface lifecycle promoted out of the browser app. Native stub +
-    wasm impl behind one portable trait; boundary documented in its
-    `ARCHITECTURE.md`.
-11. `axiom-windowing`: run-loop driver (rAF on web, native fallback).
+### Slice 3 — windowing engine module — 🟡 ~90%
+9. **(law)** `xtask`: add windowing to the rule-9 browser/GPU-API allowlist
+   (`PLATFORM_FACING_MODULES`). ✅ `ac79483`
+10. `axiom-windowing`: engine module owning the presentation-request assembly +
+    the live GPU binding promoted out of the browser app (the real `wgpu` arm,
+    wasm32-only, behind the deterministic core; `cfg`-dispatch, not a trait);
+    boundary documented in its `ARCHITECTURE.md`. ✅ `a881bcb`/`e35759a`/`abdd66c`
+    — verified by browser screenshot (cubes render + spin).
+11. `axiom-windowing`: run-loop driver (rAF on web, native fallback). 🟡 the
+    deterministic loop **counters** (`step`/`next_tick`/`frames_driven`) + the
+    present seam live in windowing; the **rAF driver itself still lives in the
+    browser app** (`render_loop.rs`). It moves into windowing with `App::run`
+    (slice 4 commit 14) — the umbrella supplies a per-frame closure producing
+    plain draw data, windowing owns the loop.
 
-### Slice 4 — `App` frontend
-12. **(law)** `xtask`: sanction the `axiom` umbrella/prelude tier.
-13. `axiom-engine`: feature module (lifecycle + plugin registry), composing
-    scene + resources + render-pipeline + windowing. Composition only.
-14. `axiom-engine`: fixed-step run loop + `.window` / `.fixed_timestep` config.
-15. `axiom-engine`: `DefaultPlugins`.
-16. `axiom`: the prelude umbrella crate.
+### Slice 4 — `App` frontend — 🟡 ~80%
+12. ~~**(law)** sanction an umbrella tier~~ — **dissolved** (decision 3): the
+    `axiom` umbrella is an ordinary feature module.
+13. `axiom` (the umbrella feature module): lifecycle + composition of scene +
+    resources + render-pipeline. ✅ (pre-existing; windowing is added in 14)
+14. fixed-step run loop + `.window` / `.fixed_timestep` config. 🟡 the
+    **headless** core (`App::build` → `RunningApp::tick`) + `.window` /
+    `.fixed_timestep_nanos` exist; **`App::run()` is not yet terminal** (it does
+    not own the loop or compose windowing). This is the next step: `App::run`
+    builds the world, then hands windowing a per-frame closure (plain draw data)
+    and the canvas id; windowing drives the rAF loop (web) / a headless drive
+    (native). Adds `axiom-windowing` to the umbrella's `allowed_modules`.
+15. `DefaultPlugins`. ✅ (pre-existing)
+16. `axiom` prelude. ✅ (pre-existing)
 
-### Slice 5 — collapse apps, delete sketch
-17. headless demo: rewrite onto `App`/`DefaultPlugins`.
-18. browser demo: rewrite onto `App`; delete `browser_*` + `live_gpu_binding`.
-19. delete `rotating_cubes.rs` once it compiles verbatim against `axiom::prelude`.
+### Slice 5 — collapse apps, delete sketch — 🔴 ~10%
+17. headless demo: rewrite onto `App`/`DefaultPlugins`. 🔴
+18. browser demo: rewrite onto `App`; delete `browser_*` + the bespoke driver.
+    🟡 `live_gpu_binding.rs` + `browser_surface_registry.rs` already deleted
+    (slice 3); the rest (`browser_api`/`cube_slice`/`scene_content`/`render_loop`)
+    is replaced when it adopts `App::run`.
+19. delete `rotating_cubes.rs` once it compiles (shape & altitude) against
+    `axiom::prelude`. 🔴
 
 ## Invariants (do not violate)
 
