@@ -81,11 +81,11 @@ impl App {
     }
 
     /// Realize the app: run setup, build the scene + resources, and return a
-    /// running app ready to drive frames. (On the web target the windowing
-    /// backend will instead drive the returned app's `tick` per animation
-    /// frame.)
-    pub fn run(self) -> RunningApp {
-        RunningApp::build(self)
+    /// running app ready to drive frames with [`RunningApp::tick`]. This is the
+    /// headless core; the terminal `run` (which owns the per-frame loop) is
+    /// built on top of it.
+    pub fn build(self) -> RunningApp {
+        RunningApp::realize(self)
     }
 }
 
@@ -127,11 +127,10 @@ pub struct RunningApp {
     // material's colour. The scene's renderables reference these ids.
     meshes: Vec<(u64, MeshGeometry)>,
     materials: Vec<(u64, [f32; 4])>,
-    next_tick: u64,
 }
 
 impl RunningApp {
-    fn build(app: App) -> Self {
+    fn realize(app: App) -> Self {
         let math = MathApi::new();
         let host_api = HostApi::new();
         let frame_api = FrameApi::new();
@@ -204,23 +203,17 @@ impl RunningApp {
             light_direction,
             meshes,
             materials,
-            next_tick: 0,
         }
     }
 
-    /// The next tick index this app will drive.
-    pub fn next_tick(&self) -> u64 {
-        self.next_tick
-    }
-
-    /// Drive one deterministic frame: step the runtime, advance the scene at the
-    /// tick, and (when rendering is enabled) submit the frame and summarise the
-    /// per-object draws. Browser-free and fully replayable.
-    pub fn tick(&mut self) -> FrameOutcome {
+    /// Drive one deterministic frame at `tick`: step the runtime, advance the
+    /// scene at the tick, and (when rendering is enabled) submit the frame and
+    /// summarise the per-object draws. Browser-free and fully replayable — the
+    /// outcome is a pure function of `tick`. The caller (the run loop) owns the
+    /// monotonic tick and must pass `0, 1, 2, …` in order.
+    pub fn tick(&mut self, tick: u64) -> FrameOutcome {
         let width = self.viewport.physical_width();
         let height = self.viewport.physical_height();
-        let tick = self.next_tick;
-        self.next_tick += 1;
 
         let host_input = HostFrameInput::new(tick + 1, self.step_nanos, self.viewport);
         let host_report = self
@@ -412,18 +405,17 @@ mod tests {
     #[test]
     fn an_app_with_no_setup_runs_an_empty_simulation() {
         // Exercises the no-setup path (the `None` arm of the setup callback).
-        let mut app = App::new().run();
-        let outcome = app.tick();
+        let mut app = App::new().build();
+        let outcome = app.tick(0);
         assert_eq!(outcome.command_count(), 0);
         assert!(outcome.draws().is_empty());
     }
 
     #[test]
     fn three_cubes_produce_the_deterministic_submission() {
-        let mut app = three_cube_app().run();
+        let mut app = three_cube_app().build();
         assert!(format!("{app:?}").starts_with("RunningApp"));
-        assert_eq!(app.next_tick(), 0);
-        let outcome = app.tick();
+        let outcome = app.tick(0);
         // Clear + SetCamera + SetPipeline + 3 x (SetMesh + SetMaterial +
         // DrawIndexed) + Present = 13.
         assert_eq!(outcome.command_count(), 13);
@@ -432,13 +424,12 @@ mod tests {
         assert!(outcome.recorded());
         assert!(!outcome.presented());
         assert_eq!(outcome.tick(), 0);
-        assert_eq!(app.next_tick(), 1);
     }
 
     #[test]
     fn the_three_cubes_have_distinct_colours() {
-        let mut app = three_cube_app().run();
-        let draws = app.tick();
+        let mut app = three_cube_app().build();
+        let draws = app.tick(0);
         let c: Vec<[f32; 4]> = draws.draws().iter().map(|d| d.color()).collect();
         assert_ne!(c[0], c[1]);
         assert_ne!(c[1], c[2]);
@@ -448,18 +439,18 @@ mod tests {
     #[test]
     fn a_held_world_evolves_and_replays_deterministically() {
         // Tick 0 differs from a later tick (the cubes spun)...
-        let mut a = three_cube_app().run();
-        let early = a.tick();
+        let mut a = three_cube_app().build();
+        let early = a.tick(0);
         let mut later_outcome = early.clone();
-        for _ in 0..60 {
-            later_outcome = a.tick();
+        for t in 1..=60 {
+            later_outcome = a.tick(t);
         }
         assert_eq!(later_outcome.tick(), 60);
         assert_ne!(early.draws()[0].mvp(), later_outcome.draws()[0].mvp());
 
         // ...and a fresh app replays tick 0 byte-equal.
-        let mut b = three_cube_app().run();
-        assert_eq!(b.tick(), early);
+        let mut b = three_cube_app().build();
+        assert_eq!(b.tick(0), early);
     }
 
     #[test]
@@ -469,8 +460,8 @@ mod tests {
             .setup(|world, _meshes, _materials| {
                 world.spawn(Transform::IDENTITY);
             })
-            .run();
-        let outcome = app.tick();
+            .build();
+        let outcome = app.tick(0);
         assert_eq!(outcome.command_count(), 0);
         assert!(outcome.draws().is_empty());
         assert!(!outcome.recorded());
@@ -492,8 +483,8 @@ mod tests {
                     },
                 ));
             })
-            .run();
-        let outcome = app.tick();
+            .build();
+        let outcome = app.tick(0);
         // Clear + Present, no draws.
         assert_eq!(outcome.draws().len(), 0);
         assert!(outcome.recorded());
