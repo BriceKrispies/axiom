@@ -748,6 +748,45 @@ is a deliberate, documented decision, justified in the code at the site
 and called out in review — not a silent suppression to make the gate
 pass.
 
+## Browser verification (Playwright controller)
+
+The native gate (tests, coverage) cannot exercise the `wasm32` platform arm
+(the live `wgpu`/`web-sys` presentation in `axiom-windowing`, driven by the
+browser demo app). To confirm that the wasm build actually renders — e.g. that
+the rotating cubes paint — drive a real browser with the **Playwright
+controller**:
+
+```sh
+uv run scripts/playwright_controller.py <command> [args]
+```
+
+It is a persistent, self-healing browser you steer with short commands. The
+first command starts a background daemon that holds **one** browser open; later
+commands reconnect to it instead of paying browser startup again. If the browser
+or daemon has died, the next command detects it and brings it back up first.
+Every command is appended to `scripts/.playwright-controller/commands.log` (the
+whole `scripts/.playwright-controller/` state dir — logs, screenshots — is
+git-ignored).
+
+Commands: `status`, `goto <url>`, `reload`, `wait <ms>`, `screenshot [name]`
+(writes a PNG under the state dir and returns its path, which you can then
+`Read`), `eval "<js>"`, `console` (collected console + page errors since the
+last navigation), and `stop` (shut the browser down). Env knobs:
+`AXIOM_PW_HEADLESS=0` for a visible window, `AXIOM_PW_PORT` to change the daemon
+port. First run also downloads the Chromium binary.
+
+Typical wasm smoke test (serve the built app separately, then):
+
+```sh
+uv run scripts/playwright_controller.py goto http://localhost:8080/
+uv run scripts/playwright_controller.py wait 1500
+uv run scripts/playwright_controller.py console        # check for errors
+uv run scripts/playwright_controller.py screenshot cubes
+```
+
+This is verification tooling, outside the engine dependency graph — not a layer,
+module, app, or Cargo package.
+
 ## Logging and Telemetry Rules
 
 Logging and telemetry are part of the architecture, not decoration.
