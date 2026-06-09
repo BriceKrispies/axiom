@@ -55,6 +55,7 @@ dependencies = [
  "axiom-runtime",
  "axiom-scene",
  "axiom-webgpu",
+ "axiom-windowing",
 ]
 
 [[package]]
@@ -78,24 +79,9 @@ dependencies = [
 name = "axiom-demo-rotating-cube-browser"
 version = "0.1.0"
 dependencies = [
- "axiom-frame",
- "axiom-host",
- "axiom-kernel",
- "axiom-math",
- "axiom-render-pipeline",
- "axiom-resources",
- "axiom-runtime",
- "axiom-scene",
- "axiom-webgpu",
- "axiom-windowing",
- "bytemuck",
+ "axiom",
  "console_error_panic_hook",
- "js-sys",
- "raw-window-handle",
  "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
 ]
 
 [[package]]
@@ -223,6 +209,7 @@ dependencies = [
  "axiom-kernel",
  "bytemuck",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
 ]
