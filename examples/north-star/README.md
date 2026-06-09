@@ -14,13 +14,19 @@ finished `axiom::prelude` — `App`, `DefaultPlugins`, `Spin`, `Camera`,
 `DirectionalLight`, and friends — none of which exist yet.
 
 Each sketch has a real, shipping counterpart somewhere in the workspace. The
-gap between the two **is the work remaining**. When a sketch can be deleted
-because it compiles and runs verbatim against the real API, that slice of the
-engine is done.
+gap between the two **is the work remaining**. When a sketch's *shape and
+altitude* are realized by the shipping API — a real app expresses the same thing
+as pure scene description — that slice of the engine is done and the sketch
+retires.
 
-| Sketch | Shipping counterpart today | What the gap represents |
+| Sketch | Shipping counterpart | Status |
 |---|---|---|
-| [`rotating_cubes.rs`](rotating_cubes.rs) | `apps/axiom-demo-rotating-cube-browser` (~8 files) | window/canvas binding, GPU backend init, surface lifecycle, render pipeline, fixed-tick driver, scene-as-data — all the engine surface the one-file `App` hides |
+| `rotating_cubes.rs` *(retired)* | `apps/axiom-demo-rotating-cube-browser` — one `lib.rs` of scene description on `App::new()…run()` | ✅ **Realized.** The engine now owns the window/canvas binding, GPU backend, surface lifecycle, render pipeline, fixed-tick loop, and `Spin`; the app authors three cubes + a camera + a light and `run`s. Verified by a real browser screenshot. |
+
+The sketch was retired at **shape & altitude** fidelity (the chosen target), not
+the literal verbatim deletion test — the shipping symbol names differ slightly
+(`with_surface_id` not `canvas_id`, typed `Ratio`/`Meters` not bare floats) by
+design. See [`BUILD_PLAN.md`](BUILD_PLAN.md).
 
 ## What this is NOT
 

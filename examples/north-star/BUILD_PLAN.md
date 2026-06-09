@@ -16,18 +16,20 @@ dylint).
 |---|---|
 | 1 — schedule backbone | ✅ complete |
 | 2 — ergonomics (→ umbrella) | ✅ complete (+ `Transform::looking_at` for camera aiming) |
-| 3 — windowing **engine** module | 🟡 ~90% — module + live `wgpu` arm done & screenshot-verified; rAF driver ownership pending (with 14) |
-| 4 — `App` frontend | 🟡 ~80% — headless core done; `App::run()` not yet terminal |
-| 5 — collapse apps, delete sketch | 🔴 ~10% |
+| 3 — windowing **engine** module | ✅ complete — module + live `wgpu` arm + rAF driver, screenshot-verified |
+| 4 — `App` frontend | ✅ complete — `App::run()` is the terminal web entry, owning the loop via windowing |
+| 5 — collapse apps, retire sketch | 🟢 ~85% — browser app is pure scene description on `App::run` (screenshot-verified); sketch retired; headless demo deliberately kept as the introspection harness |
 
 **Fidelity:** shape & altitude match, **not** the verbatim deletion test — the
 sketch's symbol names are illustrative (per the README); today's honest idioms
 (`.setup`, `fixed_timestep_nanos`, the `Window` builder) stay. Slice 5's
 "deletion test" is therefore judgment, not literal compilation.
 
-The two remaining moves are **`App::run()` terminal** (closes slice 3 commit 11
-+ slice 4 commit 14: the umbrella composes windowing, windowing owns the loop)
-and **slice 5** (collapse both demos onto `App`, retire the sketch).
+**The rotating-cube north-star is realized:** the browser app is pure scene
+description on `App::new()…run()`, screenshot-verified, with the engine owning
+the window/GPU/pipeline/loop. The one open item is folding the headless demo's
+**introspection** capability into `App` so it, too, collapses onto the high-level
+API — its own slice, since it adds an engine feature rather than moving code.
 
 ## Settled architectural decisions
 
@@ -151,14 +153,21 @@ ergonomic type.
 15. `DefaultPlugins`. ✅ (pre-existing)
 16. `axiom` prelude. ✅ (pre-existing)
 
-### Slice 5 — collapse apps, delete sketch — 🔴 ~10%
-17. headless demo: rewrite onto `App`/`DefaultPlugins`. 🔴
-18. browser demo: rewrite onto `App`; delete `browser_*` + the bespoke driver.
-    🟡 `live_gpu_binding.rs` + `browser_surface_registry.rs` already deleted
-    (slice 3); the rest (`browser_api`/`cube_slice`/`scene_content`/`render_loop`)
-    is replaced when it adopts `App::run`.
-19. delete `rotating_cubes.rs` once it compiles (shape & altitude) against
-    `axiom::prelude`. 🔴
+### Slice 5 — collapse apps, retire sketch — 🟢 ~85%
+17. headless demo: rewrite onto `App`. **Deferred — deliberately.** The headless
+    demo (`axiom-demo-rotating-cube`) is not just the slice; it is the
+    **introspection / agent-interrogability** harness (`IntrospectApi`,
+    `describe_frame`, `component_schemas`) + the per-boundary determinism
+    inspector, neither of which `App` exposes today. Force-rewriting it onto
+    `App` would *lose* that capability demo — a regression. Collapsing it cleanly
+    needs introspection integrated into `App` first (a real feature, its own
+    slice). Until then it keeps a distinct role.
+18. browser demo: rewrite onto `App`. ✅ `44a2530` — now one `lib.rs` of scene
+    description; deleted `browser_api`/`cube_slice`/`scene_content`/`render_loop`/
+    `browser_bootstrap` (and earlier `live_gpu_binding`/`browser_surface_registry`).
+    Depends only on the `axiom` umbrella. **Screenshot-verified.**
+19. retire `rotating_cubes.rs`. ✅ — realized at shape & altitude by the browser
+    app; sketch deleted, README marks the slice done.
 
 ## Invariants (do not violate)
 
