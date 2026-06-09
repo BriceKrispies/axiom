@@ -87,6 +87,7 @@ dependencies = [
  "axiom-runtime",
  "axiom-scene",
  "axiom-webgpu",
+ "axiom-windowing",
  "bytemuck",
  "console_error_panic_hook",
  "js-sys",
@@ -212,6 +213,18 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-windowing"
+version = "0.1.0"
+dependencies = [
+ "axiom-host",
+ "axiom-kernel",
+ "bytemuck",
+ "wasm-bindgen",
+ "web-sys",
+ "wgpu",
 ]
 
 [[package]]
