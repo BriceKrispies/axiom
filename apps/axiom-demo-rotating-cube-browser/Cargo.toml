@@ -1,6 +1,6 @@
 [package]
 name = "axiom-demo-rotating-cube-browser"
-description = "Axiom browser/WASM app: the visible rotating-cube slice. The only crate allowed to use browser/WASM platform APIs and a live wgpu binding; it reuses the engine modules and feeds the same GpuSubmission shape into axiom-webgpu live mode."
+description = "Axiom browser/WASM app: the visible rotating-cube slice, as pure scene description on the engine's App API. Depends only on the `axiom` umbrella; the wasm entry calls App::run, which drives the live wgpu presentation through axiom-windowing."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -10,42 +10,15 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Layers (allowed by app.toml).
-axiom-kernel = { path = "../../crates/axiom-kernel" }
-axiom-runtime = { path = "../../crates/axiom-runtime" }
-axiom-math = { path = "../../crates/axiom-math" }
-axiom-host = { path = "../../crates/axiom-host" }
-axiom-frame = { path = "../../crates/axiom-frame" }
+# The one engine crate an app imports. Everything else (scene, render, the live
+# windowing/wgpu backend) comes through the umbrella + its wasm32 windowing dep.
+axiom = { path = "../../modules/axiom" }
 
-# Modules (allowed by app.toml). This app composes the same modules the
-# headless app does; it does NOT depend on the headless app (apps are leaves).
-axiom-scene = { path = "../../modules/axiom-scene" }
-axiom-resources = { path = "../../modules/axiom-resources" }
-axiom-webgpu = { path = "../../modules/axiom-webgpu" }
-# The render pipeline (a feature module) owns the scene->render->GPU
-# translation, so the app no longer depends on axiom-render directly.
-axiom-render-pipeline = { path = "../../modules/axiom-render-pipeline" }
-# Windowing owns the deterministic presentation-request assembly + run loop, so
-# the app no longer duplicates them.
-axiom-windowing = { path = "../../modules/axiom-windowing" }
-
-# Browser / WASM platform dependencies. Confined to this app and pulled in
-# ONLY for the wasm32 target, so native `cargo test --workspace` never
-# compiles them and the deterministic core stays browser-free.
+# Browser entry only: the wasm-bindgen export macro + a panic hook. Confined to
+# wasm32, so native `cargo test --workspace` never compiles them.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
-web-sys = { version = "0.3", features = [
-    "Window",
-    "Document",
-    "Element",
-    "HtmlCanvasElement",
-] }
 console_error_panic_hook = "0.1"
-wgpu = "25"
-raw-window-handle = "0.6"
-bytemuck = "1"
 
 [lints.rust]
 unsafe_code = "forbid"

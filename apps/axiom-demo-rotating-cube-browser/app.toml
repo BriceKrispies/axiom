@@ -1,29 +1,19 @@
 # Axiom app manifest — axiom-demo-rotating-cube-browser.
 #
-# The browser/WASM rotating-cube app. Like the headless demo it is a
-# composition root that composes the four vertical-slice modules (scene,
-# resources, render, webgpu) over the engine layers. Unlike the headless
-# demo it owns the browser/platform binding and drives axiom-webgpu in LIVE
-# mode. Browser/WASM/wgpu dependencies are confined to this app and are
-# pulled in only for the wasm32 target (see Cargo.toml). It does NOT depend
+# The browser/WASM rotating-cube app, now pure scene description on the engine's
+# App API. It composes a single module — the `axiom` umbrella (`engine`) — which
+# internally pulls in the slice modules and the live windowing/wgpu backend
+# (wasm32). The app names no layer directly: the authoring vocabulary
+# (App/Window/Mesh/Material/Vec3/Transform/Ratio/Meters/...) all arrives through
+# `axiom::prelude`. The wasm entry (`start`) calls `App::run`. It does NOT depend
 # on the headless app — apps are leaves in the dependency graph.
 
 [app]
 name = "rotating-cube-browser-demo"
 crate_name = "axiom-demo-rotating-cube-browser"
 
-allowed_layers = [
-    "kernel",
-    "runtime",
-    "math",
-    "host",
-    "frame",
-]
+allowed_layers = []
 
 allowed_modules = [
-    "scene",
-    "resources",
-    "webgpu",
-    "render-pipeline",
-    "windowing",
+    "engine",
 ]

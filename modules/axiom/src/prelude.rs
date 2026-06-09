@@ -6,6 +6,10 @@
 //! component bundles) and `App`/`DefaultPlugins` are added as features land.
 
 pub use axiom_ecs::SchedulePhase;
+// Kernel quantity types in the authoring vocabulary: `Ratio` for colour
+// channels/intensities, `Meters` for camera clip planes. Re-exported so an app
+// depends only on `axiom`.
+pub use axiom_kernel::{Meters, Ratio};
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
 
 pub use crate::angle::Angle;

@@ -38,7 +38,7 @@
     <div id="status">booting…</div>
 
     <script type="module">
-      import init, { BrowserRotatingCubeApi } from "./pkg/axiom_demo_rotating_cube_browser.js";
+      import init, { start } from "./pkg/axiom_demo_rotating_cube_browser.js";
 
       const status = document.getElementById("status");
       const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
@@ -54,16 +54,15 @@
         }
         try {
           await init(); // load + instantiate the wasm module
-          const canvas = document.getElementById("axiom-cube-canvas");
-          // Constructor args mirror BrowserRotatingCubeApi::new_for_canvas.
-          const app = new BrowserRotatingCubeApi("axiom-cube-canvas", canvas.width, canvas.height);
-          app.start(); // async wgpu init + requestAnimationFrame loop (consumes app)
+          // `App::run()` (via the wasm `start` export): authors the scene,
+          // configures the surface from Window, and drives the engine's
+          // requestAnimationFrame loop through axiom-windowing.
+          start();
           set(
-            "Live backend started. You should see three shaded cubes on a dark\n" +
+            "Engine started. You should see three shaded cubes on a dark\n" +
             "background: red spinning on the vertical (Y) axis, green on the\n" +
             "horizontal (X) axis, and blue on a diagonal (X+Y) axis.\n" +
-            "Geometry = the engine's resolved cube mesh; the three MVPs + colours\n" +
-            "are extracted from the engine's render command list each tick.",
+            "The whole app is pure scene description on App::new()...run().",
             "ok"
           );
         } catch (e) {
