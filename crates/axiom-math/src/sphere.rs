@@ -30,9 +30,7 @@ impl Sphere {
             }
         }
         if !radius.is_finite() {
-            return Err(MathError::non_finite_scalar(
-                "sphere radius must be finite",
-            ));
+            return Err(MathError::non_finite_scalar("sphere radius must be finite"));
         }
         if radius < 0.0 {
             return Err(MathError::invalid_sphere_radius(
@@ -88,7 +86,8 @@ impl Sphere {
 
 fn read_f32(reader: &mut BinaryReader<'_>) -> MathResult<f32> {
     let kernel_result: KernelResult<f32> = reader.read_f32();
-    kernel_result.map_err(|cause| MathError::deserialization_failed("Sphere.radius read failed", cause))
+    kernel_result
+        .map_err(|cause| MathError::deserialization_failed("Sphere.radius read failed", cause))
 }
 
 impl ApproxEq for Sphere {

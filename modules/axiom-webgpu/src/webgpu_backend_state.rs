@@ -29,8 +29,9 @@ impl WebGpuBackendState {
     pub const fn kind(&self) -> BackendKind {
         match self {
             WebGpuBackendState::Recording => BackendKind::Recording,
-            WebGpuBackendState::LiveUnbound
-            | WebGpuBackendState::LivePresentationRequested(_) => BackendKind::Live,
+            WebGpuBackendState::LiveUnbound | WebGpuBackendState::LivePresentationRequested(_) => {
+                BackendKind::Live
+            }
         }
     }
 
@@ -103,7 +104,10 @@ mod tests {
     fn live_requested_maps_to_live_kind_and_not_initialized_status() {
         let s = WebGpuBackendState::LivePresentationRequested(request());
         assert_eq!(s.kind(), BackendKind::Live);
-        assert_eq!(s.submission_status(), GpuSubmissionStatus::LiveNotInitialized);
+        assert_eq!(
+            s.submission_status(),
+            GpuSubmissionStatus::LiveNotInitialized
+        );
         assert!(s.presentation_request().is_some());
     }
 }

@@ -399,7 +399,7 @@ mod cov {
             .register(HandleId::from_raw(1), "noop", 1, Box::new(Noop))
             .unwrap();
         rt.step().unwrap(); // executes Noop::run
-        // The registered system survived the step through the runtime.
+                            // The registered system survived the step through the runtime.
         assert_eq!(rt.scheduler().len(), 1);
     }
 
@@ -407,14 +407,16 @@ mod cov {
     fn duplicates_rejected_and_accessors_work() {
         let mut s = RuntimeScheduler::new();
         assert!(s.is_empty());
-        s.register(HandleId::from_raw(1), "a", 1, Box::new(Noop)).unwrap();
+        s.register(HandleId::from_raw(1), "a", 1, Box::new(Noop))
+            .unwrap();
         assert!(s
             .register(HandleId::from_raw(1), "b", 2, Box::new(Noop))
             .is_err()); // duplicate id
         assert!(s
             .register(HandleId::from_raw(2), "c", 1, Box::new(Noop))
             .is_err()); // duplicate order
-        s.register(HandleId::from_raw(2), "c", 2, Box::new(Noop)).unwrap();
+        s.register(HandleId::from_raw(2), "c", 2, Box::new(Noop))
+            .unwrap();
         assert_eq!(s.len(), 2);
         assert!(!s.is_empty());
         assert_eq!(

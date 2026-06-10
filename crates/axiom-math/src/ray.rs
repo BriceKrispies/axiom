@@ -24,7 +24,12 @@ impl Ray {
     /// direction is normalized on the way in.
     pub fn new(origin: Vec3, direction: Vec3) -> MathResult<Ray> {
         for component in [
-            origin.x, origin.y, origin.z, direction.x, direction.y, direction.z,
+            origin.x,
+            origin.y,
+            origin.z,
+            direction.x,
+            direction.y,
+            direction.z,
         ] {
             if !component.is_finite() {
                 return Err(MathError::non_finite_scalar(
@@ -32,9 +37,9 @@ impl Ray {
                 ));
             }
         }
-        let dir = direction.normalize().map_err(|_| {
-            MathError::invalid_ray_direction("Ray direction must be non-zero")
-        })?;
+        let dir = direction
+            .normalize()
+            .map_err(|_| MathError::invalid_ray_direction("Ray direction must be non-zero"))?;
         Ok(Ray {
             origin,
             direction: dir,
@@ -153,9 +158,7 @@ mod tests {
     #[test]
     fn point_at_advances_along_direction() {
         let r = Ray::new(Vec3::new(1.0, 2.0, 3.0), Vec3::UNIT_X).unwrap();
-        assert!(r
-            .point_at(2.5)
-            .approx_eq(&Vec3::new(3.5, 2.0, 3.0), eps()));
+        assert!(r.point_at(2.5).approx_eq(&Vec3::new(3.5, 2.0, 3.0), eps()));
     }
 
     #[test]
@@ -235,7 +238,9 @@ mod cov {
     #[test]
     fn origin_accessor() {
         let r = ray(Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.0, 0.0, 0.0));
-        assert!(r.origin().approx_eq(&Vec3::new(1.0, 2.0, 3.0), Epsilon::DEFAULT));
+        assert!(r
+            .origin()
+            .approx_eq(&Vec3::new(1.0, 2.0, 3.0), Epsilon::DEFAULT));
     }
 
     #[test]

@@ -35,7 +35,10 @@ pub(crate) fn active_engine_frames(n: u64) -> Vec<EngineFrame> {
     let mut frames = Vec::new();
     for seq in 1..=n {
         let report = driver
-            .drive(&mut runtime, HostFrameInput::new(seq, STEP_NANOS, viewport()))
+            .drive(
+                &mut runtime,
+                HostFrameInput::new(seq, STEP_NANOS, viewport()),
+            )
             .unwrap();
         frames.push(builder.build(&report, Vec::new()).unwrap());
     }

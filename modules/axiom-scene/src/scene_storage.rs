@@ -135,8 +135,12 @@ mod tests {
         storage.spins.insert(e(1), Spin::new(Vec3::UNIT_Y, 360));
         // e2: a degenerate (zero-axis) spin — the filter_map None arm; its local
         // must be left untouched.
-        storage.locals.insert(e(2), Transform::from_translation(Vec3::new(9.0, 0.0, 0.0)));
-        storage.spins.insert(e(2), Spin::new(Vec3::new(0.0, 0.0, 0.0), 360));
+        storage
+            .locals
+            .insert(e(2), Transform::from_translation(Vec3::new(9.0, 0.0, 0.0)));
+        storage
+            .spins
+            .insert(e(2), Spin::new(Vec3::new(0.0, 0.0, 0.0), 360));
 
         SpinSystem.run(&WorldStep::new(90), &reg, &mut storage);
 
@@ -159,11 +163,17 @@ mod tests {
         // e4: child of e3 with a local-> parent has no world, and_then None arm.
         let reg = registry(4);
         let mut storage = SceneStorage::default();
-        storage.locals.insert(e(1), Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
-        storage.locals.insert(e(2), Transform::from_translation(Vec3::new(0.0, 2.0, 0.0)));
+        storage
+            .locals
+            .insert(e(1), Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
+        storage
+            .locals
+            .insert(e(2), Transform::from_translation(Vec3::new(0.0, 2.0, 0.0)));
         storage.parents.insert(e(2), e(1));
         // e3 deliberately has no local.
-        storage.locals.insert(e(4), Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)));
+        storage
+            .locals
+            .insert(e(4), Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)));
         storage.parents.insert(e(4), e(3));
 
         TransformPropagation.run(&WorldStep::new(0), &reg, &mut storage);
@@ -185,8 +195,12 @@ mod tests {
         let run = || {
             let reg = registry(2);
             let mut storage = SceneStorage::default();
-            storage.locals.insert(e(1), Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
-            storage.locals.insert(e(2), Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)));
+            storage
+                .locals
+                .insert(e(1), Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
+            storage
+                .locals
+                .insert(e(2), Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)));
             storage.parents.insert(e(2), e(1));
             TransformPropagation.run(&WorldStep::new(0), &reg, &mut storage);
             let w = storage.worlds.get(e(2)).unwrap();

@@ -151,7 +151,6 @@ impl std::fmt::Debug for App {
 /// it with [`Self::tick`]; each call advances exactly one deterministic frame.
 #[derive(Debug)]
 pub struct RunningApp {
-    math: MathApi,
     frame_api: FrameApi,
     pipeline: RenderPipelineApi,
     webgpu: WebGpuApi,
@@ -182,7 +181,9 @@ impl RunningApp {
         let mut runtime =
             Runtime::new(RuntimeConfig::new(app.step_nanos).with_diagnostics_enabled(false))
                 .expect("fixed step is valid");
-        runtime.initialize().expect("runtime initialize cannot fail");
+        runtime
+            .initialize()
+            .expect("runtime initialize cannot fail");
         runtime.start().expect("runtime start cannot fail");
 
         let boundary_config = host_api
@@ -233,7 +234,6 @@ impl RunningApp {
             .collect();
 
         RunningApp {
-            math,
             frame_api,
             pipeline: RenderPipelineApi::new(),
             webgpu: WebGpuApi::new_recording(),
@@ -428,23 +428,42 @@ mod tests {
     /// The three-cube demo scene authored against the public App surface.
     fn three_cube_app() -> App {
         App::new()
-            .window(
-                Window::new(800, 600)
-                    .with_clear_color(Color::linear_rgb(ch(0.05), ch(0.06), ch(0.08))),
-            )
+            .window(Window::new(800, 600).with_clear_color(Color::linear_rgb(
+                ch(0.05),
+                ch(0.06),
+                ch(0.08),
+            )))
             .add_plugins(DefaultPlugins)
             .setup(|world, meshes, materials| {
                 let cube = meshes.add(Mesh::cube());
                 let cubes = [
-                    (-2.6, Vec3::UNIT_Y, Color::linear_rgb(ch(0.85), ch(0.25), ch(0.25))),
-                    (0.0, Vec3::UNIT_X, Color::linear_rgb(ch(0.30), ch(0.80), ch(0.35))),
-                    (2.6, Vec3::new(1.0, 1.0, 0.0), Color::linear_rgb(ch(0.30), ch(0.50), ch(0.95))),
+                    (
+                        -2.6,
+                        Vec3::UNIT_Y,
+                        Color::linear_rgb(ch(0.85), ch(0.25), ch(0.25)),
+                    ),
+                    (
+                        0.0,
+                        Vec3::UNIT_X,
+                        Color::linear_rgb(ch(0.30), ch(0.80), ch(0.35)),
+                    ),
+                    (
+                        2.6,
+                        Vec3::new(1.0, 1.0, 0.0),
+                        Color::linear_rgb(ch(0.30), ch(0.50), ch(0.95)),
+                    ),
                 ];
                 for (offset_x, axis, color) in cubes {
                     let material = materials.add(Material::lit(color));
                     world
                         .spawn(Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)))
-                        .with_child((Renderable { mesh: cube, material }, Spin::around(axis).period(360)));
+                        .with_child((
+                            Renderable {
+                                mesh: cube,
+                                material,
+                            },
+                            Spin::around(axis).period(360),
+                        ));
                 }
                 world.spawn((
                     Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),

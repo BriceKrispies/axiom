@@ -21,9 +21,18 @@ mod tests {
 
     #[test]
     fn variants_are_distinct() {
-        assert_ne!(HostSkipReason::LifecycleHidden, HostSkipReason::LifecycleSuspended);
-        assert_ne!(HostSkipReason::LifecycleHidden, HostSkipReason::ShutdownRequested);
-        assert_ne!(HostSkipReason::LifecycleSuspended, HostSkipReason::ShutdownRequested);
+        assert_ne!(
+            HostSkipReason::LifecycleHidden,
+            HostSkipReason::LifecycleSuspended
+        );
+        assert_ne!(
+            HostSkipReason::LifecycleHidden,
+            HostSkipReason::ShutdownRequested
+        );
+        assert_ne!(
+            HostSkipReason::LifecycleSuspended,
+            HostSkipReason::ShutdownRequested
+        );
     }
 
     #[test]

@@ -120,9 +120,7 @@ fn validate_local(m: &ModuleManifest) -> Result<(), String> {
 /// Discover and parse every module manifest at `<root>/modules/*/module.toml`.
 ///
 /// Discovery is one level deep, mirroring the layer manifest loader.
-pub fn load_module_manifests(
-    root: &Path,
-) -> (Vec<ModuleManifest>, Vec<ModuleManifestError>) {
+pub fn load_module_manifests(root: &Path) -> (Vec<ModuleManifest>, Vec<ModuleManifestError>) {
     let modules_dir = root.join("modules");
     let mut manifests = Vec::new();
     let mut errors = Vec::new();

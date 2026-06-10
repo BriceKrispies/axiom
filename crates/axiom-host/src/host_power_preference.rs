@@ -23,8 +23,14 @@ mod tests {
     #[test]
     fn variants_are_distinct() {
         assert_ne!(HostPowerPreference::Default, HostPowerPreference::LowPower);
-        assert_ne!(HostPowerPreference::LowPower, HostPowerPreference::HighPerformance);
-        assert_ne!(HostPowerPreference::Default, HostPowerPreference::HighPerformance);
+        assert_ne!(
+            HostPowerPreference::LowPower,
+            HostPowerPreference::HighPerformance
+        );
+        assert_ne!(
+            HostPowerPreference::Default,
+            HostPowerPreference::HighPerformance
+        );
     }
 
     #[test]

@@ -22,15 +22,35 @@ pub struct Vec3 {
 
 impl Vec3 {
     /// `(0, 0, 0)`.
-    pub const ZERO: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 0.0 };
+    pub const ZERO: Vec3 = Vec3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
     /// `(1, 1, 1)`.
-    pub const ONE: Vec3 = Vec3 { x: 1.0, y: 1.0, z: 1.0 };
+    pub const ONE: Vec3 = Vec3 {
+        x: 1.0,
+        y: 1.0,
+        z: 1.0,
+    };
     /// `(1, 0, 0)`.
-    pub const UNIT_X: Vec3 = Vec3 { x: 1.0, y: 0.0, z: 0.0 };
+    pub const UNIT_X: Vec3 = Vec3 {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    };
     /// `(0, 1, 0)`.
-    pub const UNIT_Y: Vec3 = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
+    pub const UNIT_Y: Vec3 = Vec3 {
+        x: 0.0,
+        y: 1.0,
+        z: 0.0,
+    };
     /// `(0, 0, 1)`.
-    pub const UNIT_Z: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 1.0 };
+    pub const UNIT_Z: Vec3 = Vec3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    };
 
     /// Component constructor.
     pub const fn new(x: f32, y: f32, z: f32) -> Self {
@@ -62,9 +82,7 @@ impl Vec3 {
             ));
         }
         if k == 0.0 {
-            return Err(MathError::divide_by_zero(
-                "vec3 scalar divisor was zero",
-            ));
+            return Err(MathError::divide_by_zero("vec3 scalar divisor was zero"));
         }
         Ok(Vec3::new(self.x / k, self.y / k, self.z / k))
     }
@@ -170,7 +188,10 @@ mod reflect_tests {
         let mut w = BinaryWriter::new();
         v.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Vec3::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), v);
+        assert_eq!(
+            Vec3::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            v
+        );
         for len in 0..bytes.len() {
             assert!(Vec3::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
         }
@@ -240,7 +261,10 @@ mod tests {
     fn dot_matches_orthogonality() {
         assert_eq!(Vec3::UNIT_X.dot(Vec3::UNIT_Y), 0.0);
         assert_eq!(Vec3::UNIT_X.dot(Vec3::UNIT_X), 1.0);
-        assert_eq!(Vec3::new(1.0, 2.0, 3.0).dot(Vec3::new(4.0, -5.0, 6.0)), 12.0);
+        assert_eq!(
+            Vec3::new(1.0, 2.0, 3.0).dot(Vec3::new(4.0, -5.0, 6.0)),
+            12.0
+        );
     }
 
     #[test]
@@ -260,10 +284,7 @@ mod tests {
     fn cross_is_antisymmetric() {
         let a = Vec3::new(1.0, 2.0, 3.0);
         let b = Vec3::new(-2.0, 5.0, 0.5);
-        assert!(a
-            .cross(b)
-            .add(b.cross(a))
-            .approx_eq(&Vec3::ZERO, eps()));
+        assert!(a.cross(b).add(b.cross(a)).approx_eq(&Vec3::ZERO, eps()));
     }
 
     #[test]

@@ -113,11 +113,7 @@ impl FrameApi {
     /// Validate that `next` is a strict successor of `previous` in host
     /// frame sequence. Returns `Ok(())` or an
     /// `InvalidHostFrameSequence` error.
-    pub fn validate_host_frame_transition(
-        &self,
-        previous: u64,
-        next: u64,
-    ) -> FrameResult<()> {
+    pub fn validate_host_frame_transition(&self, previous: u64, next: u64) -> FrameResult<()> {
         if next > previous {
             Ok(())
         } else {

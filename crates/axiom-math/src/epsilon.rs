@@ -24,9 +24,7 @@ impl Epsilon {
             ));
         }
         if value < 0.0 {
-            return Err(MathError::non_finite_scalar(
-                "epsilon must not be negative",
-            ));
+            return Err(MathError::non_finite_scalar("epsilon must not be negative"));
         }
         Ok(Epsilon(value))
     }

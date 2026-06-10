@@ -67,18 +67,14 @@ pub(crate) fn render_command_list_to_gpu_submission(
     let mut commands = Vec::with_capacity(list.commands.len() + 1);
     for command in &list.commands {
         commands.push(match *command {
-            RenderCommandArtifact::ClearFrame { color } => {
-                GpuCommandArtifact::ClearFrame { color }
-            }
+            RenderCommandArtifact::ClearFrame { color } => GpuCommandArtifact::ClearFrame { color },
             RenderCommandArtifact::SetCamera { view, projection } => {
                 GpuCommandArtifact::SetCamera { view, projection }
             }
             RenderCommandArtifact::SetPipeline { pipeline_id } => {
                 GpuCommandArtifact::SetPipeline { pipeline_id }
             }
-            RenderCommandArtifact::SetMesh { mesh_id } => {
-                GpuCommandArtifact::SetMesh { mesh_id }
-            }
+            RenderCommandArtifact::SetMesh { mesh_id } => GpuCommandArtifact::SetMesh { mesh_id },
             RenderCommandArtifact::SetMaterial { material_id } => {
                 GpuCommandArtifact::SetMaterial { material_id }
             }

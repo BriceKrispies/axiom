@@ -31,14 +31,26 @@ fn app_manifest_is_valid_and_classifies_as_an_app() {
 #[test]
 fn app_composes_only_the_engine_umbrella() {
     let app_toml = read(&manifest_dir().join("app.toml"));
-    assert!(app_toml.contains("\"engine\""), "must allow the engine umbrella");
-    for not_allowed in ["scene", "resources", "render-pipeline", "webgpu", "windowing"] {
+    assert!(
+        app_toml.contains("\"engine\""),
+        "must allow the engine umbrella"
+    );
+    for not_allowed in [
+        "scene",
+        "resources",
+        "render-pipeline",
+        "webgpu",
+        "windowing",
+    ] {
         assert!(
             !app_toml.contains(&format!("\"{not_allowed}\"")),
             "the app composes the umbrella, not the slice module `{not_allowed}` directly"
         );
     }
-    assert!(!app_toml.contains("rotating-cube-demo"), "no app-to-app dependency");
+    assert!(
+        !app_toml.contains("rotating-cube-demo"),
+        "no app-to-app dependency"
+    );
 }
 
 // 3. The Cargo manifest depends only on the `axiom` umbrella (plus the wasm32
@@ -46,13 +58,25 @@ fn app_composes_only_the_engine_umbrella() {
 #[test]
 fn cargo_depends_only_on_the_umbrella() {
     let cargo = read(&manifest_dir().join("Cargo.toml"));
-    assert!(cargo.contains("axiom = {"), "must depend on the axiom umbrella");
-    for direct in ["axiom-scene", "axiom-render", "axiom-webgpu", "axiom-windowing", "axiom-host"] {
+    assert!(
+        cargo.contains("axiom = {"),
+        "must depend on the axiom umbrella"
+    );
+    for direct in [
+        "axiom-scene",
+        "axiom-render",
+        "axiom-webgpu",
+        "axiom-windowing",
+        "axiom-host",
+    ] {
         let declares = cargo
             .lines()
             .map(str::trim)
             .any(|line| line.starts_with(&format!("{direct} =")));
-        assert!(!declares, "must reach `{direct}` through the umbrella, not directly");
+        assert!(
+            !declares,
+            "must reach `{direct}` through the umbrella, not directly"
+        );
     }
 }
 
@@ -60,7 +84,13 @@ fn cargo_depends_only_on_the_umbrella() {
 //    other engine crate declares them.
 #[test]
 fn browser_dependencies_are_confined() {
-    let browser_needles = ["wasm-bindgen", "web-sys", "js-sys", "wgpu", "console_error_panic_hook"];
+    let browser_needles = [
+        "wasm-bindgen",
+        "web-sys",
+        "js-sys",
+        "wgpu",
+        "console_error_panic_hook",
+    ];
     let engine_manifests = [
         "../../crates/axiom-kernel/Cargo.toml",
         "../../crates/axiom-host/Cargo.toml",
@@ -94,5 +124,8 @@ fn headless_app_still_uses_recording_backend() {
         demo.contains("WebGpuApi::new_recording()"),
         "headless app must construct the recording backend"
     );
-    assert!(!demo.contains("new_live"), "headless app must not switch to a live backend");
+    assert!(
+        !demo.contains("new_live"),
+        "headless app must not switch to a live backend"
+    );
 }

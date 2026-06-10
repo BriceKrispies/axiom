@@ -11,12 +11,12 @@
 //! ```
 //!
 //! Claims proven:
-//!   1. Round-trip  — every reflected value serializes then deserializes back
-//!                    to an equal value (scalars, math types, an ECS column).
-//!   2. Schema      — a type's TypeSchema names its real fields and types.
-//!   3. Determinism — the same value always serializes to identical bytes.
-//!   4. Safety      — every truncated prefix of valid bytes is rejected with an
-//!                    error (never a panic or a silently-wrong value).
+//! 1. Round-trip — every reflected value serializes then deserializes back to
+//!    an equal value (scalars, math types, an ECS column).
+//! 2. Schema — a type's TypeSchema names its real fields and types.
+//! 3. Determinism — the same value always serializes to identical bytes.
+//! 4. Safety — every truncated prefix of valid bytes is rejected with an error
+//!    (never a panic or a silently-wrong value).
 
 use std::fmt::Write as _;
 use std::fs;
@@ -88,7 +88,10 @@ fn main() {
     let (bool_ok, _) = round_trip(&true);
     let (eid_ok, _) = round_trip(&EntityId::from_raw(42));
     info!("scalars u32={u32_ok} u64={u64_ok} f32={f32_ok} bool={bool_ok} EntityId={eid_ok}");
-    check!("scalars + EntityId round-trip", u32_ok && u64_ok && f32_ok && bool_ok && eid_ok);
+    check!(
+        "scalars + EntityId round-trip",
+        u32_ok && u64_ok && f32_ok && bool_ok && eid_ok
+    );
 
     // --- 1b. Round-trip: math value types (the real component building blocks). ---
     let transform = Transform::from_translation(Vec3::new(1.0, -2.0, 3.5));
@@ -128,7 +131,11 @@ fn main() {
             .iter()
             .map(|f| format!("{}: {}", f.name(), f.type_name()))
             .collect();
-        info!("world-component schema {} {{ {} }}", s.name(), fs.join(", "));
+        info!(
+            "world-component schema {} {{ {} }}",
+            s.name(),
+            fs.join(", ")
+        );
     }
     check!(
         "the world exposes >=4 component schemas",
@@ -139,7 +146,10 @@ fn main() {
     let a = bytes_of(&transform);
     let b = bytes_of(&transform);
     let deterministic = a == b;
-    info!("determinism Transform bytes identical={deterministic} hex={}", hex(&a));
+    info!(
+        "determinism Transform bytes identical={deterministic} hex={}",
+        hex(&a)
+    );
     check!("serialization is deterministic", deterministic);
 
     // --- 4. Safety: every truncated prefix is rejected. ---
@@ -148,7 +158,10 @@ fn main() {
         "safety Transform truncations rejected={transform_safe} (over {} prefixes)",
         transform_bytes.len()
     );
-    check!("truncated Transform bytes are rejected, not mis-decoded", transform_safe);
+    check!(
+        "truncated Transform bytes are rejected, not mis-decoded",
+        transform_safe
+    );
 
     // --- 5. ECS column: the world's per-type storage round-trips. ---
     let mut column: ComponentColumn<Transform> = ComponentColumn::new();
@@ -157,16 +170,18 @@ fn main() {
     let mut col_writer = BinaryWriter::new();
     column.reflect_write(&mut col_writer);
     let col_bytes = col_writer.into_bytes();
-    let col_ok = match ComponentColumn::<Transform>::reflect_read(&mut BinaryReader::new(&col_bytes)) {
-        Ok(decoded) => {
-            decoded.len() == 2
-                && decoded.get(EntityId::from_raw(1)) == column.get(EntityId::from_raw(1))
-                && decoded.get(EntityId::from_raw(7)) == column.get(EntityId::from_raw(7))
-        }
-        Err(_) => false,
-    };
+    let col_ok =
+        match ComponentColumn::<Transform>::reflect_read(&mut BinaryReader::new(&col_bytes)) {
+            Ok(decoded) => {
+                decoded.len() == 2
+                    && decoded.get(EntityId::from_raw(1)) == column.get(EntityId::from_raw(1))
+                    && decoded.get(EntityId::from_raw(7)) == column.get(EntityId::from_raw(7))
+            }
+            Err(_) => false,
+        };
     let col_safe = (0..col_bytes.len()).all(|len| {
-        ComponentColumn::<Transform>::reflect_read(&mut BinaryReader::new(&col_bytes[..len])).is_err()
+        ComponentColumn::<Transform>::reflect_read(&mut BinaryReader::new(&col_bytes[..len]))
+            .is_err()
     });
     info!(
         "ecs ComponentColumn<Transform> entries=2 bytes={} roundtrip={col_ok} truncations_rejected={col_safe}",
@@ -187,14 +202,20 @@ fn main() {
             vec![("transforms", &self.transforms), ("tags", &self.tags)]
         }
         fn columns_mut(&mut self) -> Vec<(&'static str, &mut dyn ErasedColumn)> {
-            vec![("transforms", &mut self.transforms), ("tags", &mut self.tags)]
+            vec![
+                ("transforms", &mut self.transforms),
+                ("tags", &mut self.tags),
+            ]
         }
     }
 
     let mut world: World<DemoWorld> = World::new();
     let a = world.spawn();
     let b = world.spawn();
-    world.storage_mut().transforms.insert(a, Transform::IDENTITY);
+    world
+        .storage_mut()
+        .transforms
+        .insert(a, Transform::IDENTITY);
     world
         .storage_mut()
         .transforms
@@ -207,14 +228,20 @@ fn main() {
             .iter()
             .map(|f| format!("{}: {}", f.name(), f.type_name()))
             .collect();
-        info!("world-column {name}: {} {{ {} }} entries={count}", schema.name(), f.join(", "));
+        info!(
+            "world-column {name}: {} {{ {} }} entries={count}",
+            schema.name(),
+            f.join(", ")
+        );
     }
 
     let mut ww = BinaryWriter::new();
     world.serialize(&mut ww);
     let world_bytes = ww.into_bytes();
     let mut loaded: World<DemoWorld> = World::new();
-    let load_ok = loaded.deserialize(&mut BinaryReader::new(&world_bytes)).is_ok();
+    let load_ok = loaded
+        .deserialize(&mut BinaryReader::new(&world_bytes))
+        .is_ok();
     let world_roundtrips = load_ok
         && loaded.storage().transforms.len() == 2
         && loaded.storage().transforms.get(b) == world.storage().transforms.get(b)
@@ -223,7 +250,10 @@ fn main() {
         "whole-world serialize bytes={} reload_ok={load_ok} roundtrip={world_roundtrips}",
         world_bytes.len()
     );
-    check!("a whole world serializes, reloads, and matches", world_roundtrips);
+    check!(
+        "a whole world serializes, reloads, and matches",
+        world_roundtrips
+    );
 
     // --- 7. App-blind dynamic components: a store that was never told about
     //        these types holds and returns them by type (safe, owned). ---
@@ -232,13 +262,22 @@ fn main() {
     dynamic.insert(de, Transform::from_translation(Vec3::new(9.0, 0.0, 0.0)));
     dynamic.insert(de, 1234u32);
     for (name, schema, count) in dynamic.describe() {
-        info!("dynamic-component {name} (schema {}) entries={count}", schema.name());
+        info!(
+            "dynamic-component {name} (schema {}) entries={count}",
+            schema.name()
+        );
     }
-    let transform_x = dynamic.get::<Transform>(de).unwrap().map(|t| t.translation.x);
+    let transform_x = dynamic
+        .get::<Transform>(de)
+        .unwrap()
+        .map(|t| t.translation.x);
     let tag = dynamic.get::<u32>(de).unwrap();
     let dynamic_ok = transform_x == Some(9.0) && tag == Some(1234);
     info!("dynamic typed get: Transform.x={transform_x:?} tag={tag:?} ok={dynamic_ok}");
-    check!("app-blind dynamic components round-trip by type (safe, owned)", dynamic_ok);
+    check!(
+        "app-blind dynamic components round-trip by type (safe, owned)",
+        dynamic_ok
+    );
 
     let all_pass = passed == checks;
     let _ = writeln!(

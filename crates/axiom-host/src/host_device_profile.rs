@@ -21,7 +21,10 @@ mod tests {
 
     #[test]
     fn variants_are_distinct() {
-        assert_ne!(HostDeviceProfile::Baseline, HostDeviceProfile::ExtendedLimits);
+        assert_ne!(
+            HostDeviceProfile::Baseline,
+            HostDeviceProfile::ExtendedLimits
+        );
     }
 
     #[test]

@@ -87,19 +87,39 @@ impl Quat {
         let q = if trace > 0.0 {
             let big = (trace + 1.0).sqrt(); // 2w
             let r = 0.5 / big; // 1 / 4w
-            Quat::new((u.z + f.y) * r, (-f.x - s.z) * r, (s.y - u.x) * r, 0.5 * big)
+            Quat::new(
+                (u.z + f.y) * r,
+                (-f.x - s.z) * r,
+                (s.y - u.x) * r,
+                0.5 * big,
+            )
         } else if m00 >= m11 && m00 >= m22 {
             let big = (1.0 + m00 - m11 - m22).sqrt(); // 2x
             let r = 0.5 / big;
-            Quat::new(0.5 * big, (u.x + s.y) * r, (-f.x + s.z) * r, (u.z + f.y) * r)
+            Quat::new(
+                0.5 * big,
+                (u.x + s.y) * r,
+                (-f.x + s.z) * r,
+                (u.z + f.y) * r,
+            )
         } else if m11 >= m22 {
             let big = (1.0 + m11 - m00 - m22).sqrt(); // 2y
             let r = 0.5 / big;
-            Quat::new((u.x + s.y) * r, 0.5 * big, (-f.y + u.z) * r, (-f.x - s.z) * r)
+            Quat::new(
+                (u.x + s.y) * r,
+                0.5 * big,
+                (-f.y + u.z) * r,
+                (-f.x - s.z) * r,
+            )
         } else {
             let big = (1.0 + m22 - m00 - m11).sqrt(); // 2z
             let r = 0.5 / big;
-            Quat::new((-f.x + s.z) * r, (-f.y + u.z) * r, 0.5 * big, (s.y - u.x) * r)
+            Quat::new(
+                (-f.x + s.z) * r,
+                (-f.y + u.z) * r,
+                0.5 * big,
+                (s.y - u.x) * r,
+            )
         };
         Ok(q)
     }
@@ -236,7 +256,10 @@ mod reflect_tests {
         let mut w = BinaryWriter::new();
         q.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Quat::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), q);
+        assert_eq!(
+            Quat::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            q
+        );
         for len in 0..bytes.len() {
             assert!(Quat::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
         }
@@ -298,7 +321,9 @@ mod tests {
         // Unit rotation.
         assert!((q.length() - 1.0).abs() <= eps().value());
         // Local -Z faces `forward`; +X -> right; +Y -> the orthonormalised up.
-        assert!(q.rotate(Vec3::new(0.0, 0.0, -1.0)).approx_eq(&forward, eps()));
+        assert!(q
+            .rotate(Vec3::new(0.0, 0.0, -1.0))
+            .approx_eq(&forward, eps()));
         assert!(q.rotate(Vec3::UNIT_X).approx_eq(&right, eps()));
         assert!(q.rotate(Vec3::UNIT_Y).approx_eq(&real_up, eps()));
     }
@@ -353,12 +378,16 @@ mod tests {
     fn look_rotation_rejects_degenerate_inputs() {
         // Zero-length forward.
         assert_eq!(
-            Quat::look_rotation(Vec3::ZERO, Vec3::UNIT_Y).unwrap_err().code(),
+            Quat::look_rotation(Vec3::ZERO, Vec3::UNIT_Y)
+                .unwrap_err()
+                .code(),
             MathErrorCode::InvalidMatrixOperation
         );
         // Forward parallel to up.
         assert_eq!(
-            Quat::look_rotation(Vec3::UNIT_Y, Vec3::UNIT_Y).unwrap_err().code(),
+            Quat::look_rotation(Vec3::UNIT_Y, Vec3::UNIT_Y)
+                .unwrap_err()
+                .code(),
             MathErrorCode::InvalidMatrixOperation
         );
     }
@@ -375,9 +404,7 @@ mod tests {
 
         // And the reverse composition is genuinely different.
         let reverse = rot_z.multiply(rot_y);
-        assert!(!reverse
-            .rotate(Vec3::UNIT_X)
-            .approx_eq(&through_q, eps()));
+        assert!(!reverse.rotate(Vec3::UNIT_X).approx_eq(&through_q, eps()));
     }
 
     #[test]

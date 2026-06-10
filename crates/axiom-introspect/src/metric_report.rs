@@ -122,8 +122,11 @@ mod tests {
 
     #[test]
     fn counter_with_tick_round_trips() {
-        let report =
-            MetricReport::from_metric(&TelemetryMetric::counter("frame.draws", 3, Some(Tick::new(7))));
+        let report = MetricReport::from_metric(&TelemetryMetric::counter(
+            "frame.draws",
+            3,
+            Some(Tick::new(7)),
+        ));
         assert_eq!(report.name(), "frame.draws");
         assert!(report.is_counter());
         assert_eq!(report.value(), MetricValue::integer(3));
@@ -147,8 +150,7 @@ mod tests {
 
     #[test]
     fn negative_integer_round_trips_through_u64_bits() {
-        let report =
-            MetricReport::from_metric(&TelemetryMetric::counter("delta", -42, None));
+        let report = MetricReport::from_metric(&TelemetryMetric::counter("delta", -42, None));
         assert_eq!(round_trip(&report).value(), MetricValue::integer(-42));
     }
 
@@ -161,7 +163,10 @@ mod tests {
         let bytes = w.into_bytes();
         for len in 0..bytes.len() {
             let mut r = BinaryReader::new(&bytes[..len]);
-            assert!(MetricReport::read_from(&mut r).is_err(), "len {len} must fail");
+            assert!(
+                MetricReport::read_from(&mut r).is_err(),
+                "len {len} must fail"
+            );
         }
     }
 

@@ -76,19 +76,11 @@ impl ResourcesApi {
         resolved.material_count()
     }
 
-    pub fn resolved_mesh_id_at(
-        &self,
-        resolved: &ResolvedResources,
-        idx: usize,
-    ) -> Option<u64> {
+    pub fn resolved_mesh_id_at(&self, resolved: &ResolvedResources, idx: usize) -> Option<u64> {
         resolved.mesh_at(idx).map(|m| m.id().raw())
     }
 
-    pub fn resolved_material_id_at(
-        &self,
-        resolved: &ResolvedResources,
-        idx: usize,
-    ) -> Option<u64> {
+    pub fn resolved_material_id_at(&self, resolved: &ResolvedResources, idx: usize) -> Option<u64> {
         resolved.material_at(idx).map(|m| m.id().raw())
     }
 
@@ -210,8 +202,7 @@ mod tests {
     #[test]
     fn basic_lit_material_can_be_registered() {
         let mut t = api().empty_table();
-        let id = api()
-            .register_basic_lit_material(&mut t, Vec4::new(0.8, 0.4, 0.2, 1.0));
+        let id = api().register_basic_lit_material(&mut t, Vec4::new(0.8, 0.4, 0.2, 1.0));
         assert!(id.is_valid());
         assert_eq!(t.material_count(), 1);
     }
@@ -219,8 +210,7 @@ mod tests {
     #[test]
     fn solid_color_texture_can_be_registered() {
         let mut t = api().empty_table();
-        let id = api()
-            .register_solid_color_texture(&mut t, "white", [255, 255, 255, 255]);
+        let id = api().register_solid_color_texture(&mut t, "white", [255, 255, 255, 255]);
         assert!(id.is_valid());
         assert_eq!(t.texture_count(), 1);
     }
@@ -230,8 +220,7 @@ mod tests {
         let mut t = api().empty_table();
         let mesh = api().register_cube_mesh(&mut t);
         let mat = api().register_basic_lit_material(&mut t, Vec4::ONE);
-        let _tex =
-            api().register_solid_color_texture(&mut t, "white", [255, 255, 255, 255]);
+        let _tex = api().register_solid_color_texture(&mut t, "white", [255, 255, 255, 255]);
         let r = api().resolve(&t);
         assert_eq!(r.mesh_count(), 1);
         assert_eq!(r.material_count(), 1);
@@ -266,8 +255,7 @@ mod tests {
     #[test]
     fn resolved_material_base_color_matches_registration() {
         let mut t = api().empty_table();
-        let id = api()
-            .register_basic_lit_material(&mut t, Vec4::new(0.1, 0.2, 0.3, 1.0));
+        let id = api().register_basic_lit_material(&mut t, Vec4::new(0.1, 0.2, 0.3, 1.0));
         let r = api().resolve(&t);
         assert_eq!(
             api().resolved_material_base_color(&r, id.raw()),
@@ -321,7 +309,9 @@ mod tests {
         assert!(api().resolved_mesh_normal_at(&r, mesh.raw(), 0).is_some());
         assert!(api().resolved_mesh_uv_at(&r, mesh.raw(), 0).is_some());
         // Present mesh, out-of-range vertex index.
-        assert!(api().resolved_mesh_normal_at(&r, mesh.raw(), 9999).is_none());
+        assert!(api()
+            .resolved_mesh_normal_at(&r, mesh.raw(), 9999)
+            .is_none());
         assert!(api().resolved_mesh_uv_at(&r, mesh.raw(), 9999).is_none());
         // Missing mesh id.
         assert!(api().resolved_mesh_normal_at(&r, 9999, 0).is_none());

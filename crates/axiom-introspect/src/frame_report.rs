@@ -327,7 +327,10 @@ mod tests {
         assert_eq!(lifecycle_to_u8(FrameLifecycleState::ShutdownRequested), 3);
         assert_eq!(lifecycle_from_u8(0).unwrap(), FrameLifecycleState::Active);
         assert_eq!(lifecycle_from_u8(1).unwrap(), FrameLifecycleState::Hidden);
-        assert_eq!(lifecycle_from_u8(2).unwrap(), FrameLifecycleState::Suspended);
+        assert_eq!(
+            lifecycle_from_u8(2).unwrap(),
+            FrameLifecycleState::Suspended
+        );
         assert_eq!(
             lifecycle_from_u8(3).unwrap(),
             FrameLifecycleState::ShutdownRequested

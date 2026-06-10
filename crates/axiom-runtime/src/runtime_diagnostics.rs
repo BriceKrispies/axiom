@@ -169,7 +169,11 @@ mod tests {
         assert!(d.metrics().is_empty());
         d.record_metrics(vec![
             TelemetryMetric::counter("frame.draws", 1, Some(Tick::new(1))),
-            TelemetryMetric::gauge("cube.angle_deg", MetricValue::float(2.0), Some(Tick::new(1))),
+            TelemetryMetric::gauge(
+                "cube.angle_deg",
+                MetricValue::float(2.0),
+                Some(Tick::new(1)),
+            ),
         ]);
         assert_eq!(d.metrics().len(), 2);
         assert_eq!(d.metrics()[0].name(), "frame.draws");

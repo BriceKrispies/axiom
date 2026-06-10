@@ -231,7 +231,10 @@ mod reflect_tests {
         let mut w = BinaryWriter::new();
         t.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Transform::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), t);
+        assert_eq!(
+            Transform::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            t
+        );
         for len in 0..bytes.len() {
             assert!(Transform::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
         }
@@ -271,8 +274,12 @@ mod tests {
     fn from_rotation_only_rotates_points_and_vectors() {
         let q = Quat::from_axis_angle(Vec3::UNIT_Z, std::f32::consts::FRAC_PI_2).unwrap();
         let t = Transform::from_rotation(q);
-        assert!(t.transform_point(Vec3::UNIT_X).approx_eq(&Vec3::UNIT_Y, eps()));
-        assert!(t.transform_vector(Vec3::UNIT_X).approx_eq(&Vec3::UNIT_Y, eps()));
+        assert!(t
+            .transform_point(Vec3::UNIT_X)
+            .approx_eq(&Vec3::UNIT_Y, eps()));
+        assert!(t
+            .transform_vector(Vec3::UNIT_X)
+            .approx_eq(&Vec3::UNIT_Y, eps()));
     }
 
     #[test]
@@ -308,7 +315,9 @@ mod tests {
         let eye = Vec3::new(0.0, 0.0, 8.0);
         let target = Vec3::new(1.0, 0.5, 0.0);
         let up = Vec3::UNIT_Y;
-        let world = Transform::from_translation(eye).looking_at(target, up).unwrap();
+        let world = Transform::from_translation(eye)
+            .looking_at(target, up)
+            .unwrap();
         let view = world.inverse().unwrap().to_matrix();
         let expected = Mat4::look_at(eye, target, up).unwrap();
         let (a, b) = (view.as_cols_array(), expected.as_cols_array());
@@ -324,8 +333,12 @@ mod tests {
             Quat::IDENTITY,
             Vec3::new(2.0, 2.0, 2.0),
         );
-        let aimed = t.looking_at(Vec3::new(1.0, 2.0, 0.0), Vec3::UNIT_Y).unwrap();
-        assert!(aimed.translation.approx_eq(&Vec3::new(1.0, 2.0, 3.0), eps()));
+        let aimed = t
+            .looking_at(Vec3::new(1.0, 2.0, 0.0), Vec3::UNIT_Y)
+            .unwrap();
+        assert!(aimed
+            .translation
+            .approx_eq(&Vec3::new(1.0, 2.0, 3.0), eps()));
         assert!(aimed.scale.approx_eq(&Vec3::new(2.0, 2.0, 2.0), eps()));
     }
 
@@ -375,7 +388,9 @@ mod tests {
         let p = Vec3::new(0.5, -1.0, 2.0);
         assert!(m.transform_point(p).approx_eq(&t.transform_point(p), eps()));
         let d = Vec3::new(1.0, 0.0, 0.0);
-        assert!(m.transform_vector(d).approx_eq(&t.transform_vector(d), eps()));
+        assert!(m
+            .transform_vector(d)
+            .approx_eq(&t.transform_vector(d), eps()));
     }
 
     #[test]
@@ -403,10 +418,7 @@ mod tests {
     #[test]
     fn inverse_zero_scale_fails() {
         let t = Transform::from_scale(Vec3::new(0.0, 1.0, 1.0));
-        assert_eq!(
-            t.inverse().unwrap_err().code(),
-            MathErrorCode::DivideByZero
-        );
+        assert_eq!(t.inverse().unwrap_err().code(), MathErrorCode::DivideByZero);
     }
 
     #[test]

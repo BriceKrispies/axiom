@@ -13,12 +13,12 @@
 //! ```
 //!
 //! Checks:
-//!   1. Live capture      — one report per tick, monotonic engine frame index.
-//!   2. Query by index    — describe_frame returns the matching report.
-//!   3. Snapshot channel  — snapshot_bytes() decodes back to an equal report.
-//!   4. Deterministic     — two independent runs yield byte-identical snapshots.
-//!   5. Per-system report — a frame whose step failed carries the system's
-//!                          name + error code through serialization.
+//! 1. Live capture — one report per tick, monotonic engine frame index.
+//! 2. Query by index — describe_frame returns the matching report.
+//! 3. Snapshot channel — snapshot_bytes() decodes back to an equal report.
+//! 4. Deterministic — two independent runs yield byte-identical snapshots.
+//! 5. Per-system report — a frame whose step failed carries the system's name +
+//!    error code through serialization.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -81,7 +81,10 @@ fn main() {
         );
     }
     let monotonic = indices.windows(2).all(|w| w[0] < w[1]);
-    check!("one report retained per tick", recent.len() == (TICKS + 1) as usize);
+    check!(
+        "one report retained per tick",
+        recent.len() == (TICKS + 1) as usize
+    );
     check!("engine frame index strictly monotonic", monotonic);
 
     // The whole point: a metric that actually changes frame to frame, plus a
@@ -95,13 +98,23 @@ fn main() {
         angle(60),
         angle(60) - angle(0),
     );
-    check!("cube.angle_rad changes between frame 0 and 60", angle(0) != angle(60));
-    check!("every frame carries the cube.angle_rad metric", recent.iter().all(|r| r.metrics().iter().any(|m| m.name() == "cube.angle_rad")));
+    check!(
+        "cube.angle_rad changes between frame 0 and 60",
+        angle(0) != angle(60)
+    );
+    check!(
+        "every frame carries the cube.angle_rad metric",
+        recent
+            .iter()
+            .all(|r| r.metrics().iter().any(|m| m.name() == "cube.angle_rad"))
+    );
 
     // --- 2. Query by index. ---
     let probe = indices[60];
-    let described_ok =
-        demo.describe_frame(probe).map(FrameReport::engine_frame_index) == Some(probe);
+    let described_ok = demo
+        .describe_frame(probe)
+        .map(FrameReport::engine_frame_index)
+        == Some(probe);
     let missing_ok = demo.describe_frame(u64::MAX).is_none();
     info!("query describe_frame({probe})={described_ok} describe_frame(MAX)_miss={missing_ok}");
     check!("describe_frame returns the matching report", described_ok);
@@ -111,7 +124,11 @@ fn main() {
     let snapshot = demo.introspection_snapshot().expect("a tick has run");
     let decoded = FrameReport::from_bytes(&snapshot).expect("snapshot decodes");
     let round_trips = Some(&decoded) == demo.recent_frames(1).first();
-    info!("snapshot bytes={} roundtrip={round_trips} hex={}", snapshot.len(), hex(&snapshot));
+    info!(
+        "snapshot bytes={} roundtrip={round_trips} hex={}",
+        snapshot.len(),
+        hex(&snapshot)
+    );
     check!("snapshot decodes back to an equal report", round_trips);
 
     // --- 4. Deterministic replay. ---
@@ -126,7 +143,10 @@ fn main() {
     let snap_b = run(TICKS);
     let identical = snap_a == snap_b;
     info!("replay runs=2 bytes={} identical={identical}", snap_a.len());
-    check!("independent runs are byte-identical (replayable)", identical);
+    check!(
+        "independent runs are byte-identical (replayable)",
+        identical
+    );
 
     // --- 5. Per-system introspection via a failing system. ---
     let frame = failing_system_frame();
@@ -145,7 +165,10 @@ fn main() {
     let sys_bytes = api.snapshot_bytes().expect("observed one frame");
     let sys_decoded = FrameReport::from_bytes(&sys_bytes).expect("decodes");
     check!("failing system captured by name", sys.name() == "physics");
-    check!("failure carries a non-empty error code", sys.error_code().is_some());
+    check!(
+        "failure carries a non-empty error code",
+        sys.error_code().is_some()
+    );
     check!(
         "frame-with-system serializes and round-trips",
         sys_decoded.systems().len() == 1 && &sys_decoded == report
@@ -161,7 +184,10 @@ fn main() {
             .collect();
         info!("schema {} {{ {} }}", schema.name(), fields.join(", "));
     }
-    check!("the world exposes component schemas", demo.component_schemas().len() >= 4);
+    check!(
+        "the world exposes component schemas",
+        demo.component_schemas().len() >= 4
+    );
 
     let mut column: ComponentColumn<Transform> = ComponentColumn::new();
     column.insert(EntityId::from_raw(1), Transform::IDENTITY);
@@ -172,14 +198,17 @@ fn main() {
     let mut w = BinaryWriter::new();
     column.reflect_write(&mut w);
     let bytes = w.into_bytes();
-    let decoded =
-        ComponentColumn::<Transform>::reflect_read(&mut BinaryReader::new(&bytes)).expect("decodes");
+    let decoded = ComponentColumn::<Transform>::reflect_read(&mut BinaryReader::new(&bytes))
+        .expect("decodes");
     let column_roundtrips = decoded.len() == 2 && decoded.get(EntityId::from_raw(2)).is_some();
     info!(
         "column Transform entries=2 bytes={} roundtrip={column_roundtrips}",
         bytes.len()
     );
-    check!("a Transform component column round-trips as bytes", column_roundtrips);
+    check!(
+        "a Transform component column round-trips as bytes",
+        column_roundtrips
+    );
 
     let all_pass = passed == checks;
     let _ = writeln!(

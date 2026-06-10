@@ -147,16 +147,14 @@ mod tests {
 
     #[test]
     fn focused_and_unfocused_toggle_focus() {
-        let s = HostLifecycleState::initial()
-            .apply(HostLifecycleSignal::Focused);
+        let s = HostLifecycleState::initial().apply(HostLifecycleSignal::Focused);
         assert!(s.focused());
         assert!(!s.apply(HostLifecycleSignal::Unfocused).focused());
     }
 
     #[test]
     fn suspended_and_resumed_toggle_suspension() {
-        let s = HostLifecycleState::initial()
-            .apply(HostLifecycleSignal::Suspended);
+        let s = HostLifecycleState::initial().apply(HostLifecycleSignal::Suspended);
         assert!(s.suspended());
         assert!(!s.apply(HostLifecycleSignal::Resumed).suspended());
     }
@@ -167,7 +165,10 @@ mod tests {
             .apply(HostLifecycleSignal::ShutdownRequested)
             .apply(HostLifecycleSignal::Started)
             .apply(HostLifecycleSignal::Visible);
-        assert!(s.shutdown_requested(), "shutdown must survive later signals");
+        assert!(
+            s.shutdown_requested(),
+            "shutdown must survive later signals"
+        );
         assert!(!s.allows_stepping(true));
     }
 

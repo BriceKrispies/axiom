@@ -140,7 +140,15 @@ fn no_real_gpu_backend_today() {
 #[test]
 fn no_forbidden_debug_macros() {
     assert_absent(
-        &["println!", "eprintln!", "print!", "eprint!", "dbg!", "todo!", "unimplemented!"],
+        &[
+            "println!",
+            "eprintln!",
+            "print!",
+            "eprint!",
+            "dbg!",
+            "todo!",
+            "unimplemented!",
+        ],
         "axiom-webgpu must not use debug-print macros",
     );
 }

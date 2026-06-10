@@ -47,12 +47,7 @@ impl Color {
 
     /// An opaque colour from linear RGB (alpha = 1).
     pub const fn linear_rgb(r: Ratio, g: Ratio, b: Ratio) -> Self {
-        Color {
-            r,
-            g,
-            b,
-            a: OPAQUE,
-        }
+        Color { r, g, b, a: OPAQUE }
     }
 
     /// A colour from linear RGBA.

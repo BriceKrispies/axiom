@@ -52,7 +52,13 @@ impl DynamicComponents {
 
     /// Store `bytes` for `entity` under the column named `name`, creating the
     /// column (recording `schema`) on first use.
-    fn put_bytes(&mut self, name: &'static str, schema: TypeSchema, entity: EntityId, bytes: Vec<u8>) {
+    fn put_bytes(
+        &mut self,
+        name: &'static str,
+        schema: TypeSchema,
+        entity: EntityId,
+        bytes: Vec<u8>,
+    ) {
         self.columns
             .entry(name)
             .or_insert_with(|| DynColumn {

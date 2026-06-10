@@ -20,7 +20,10 @@ mod tests {
 
     #[test]
     fn variants_are_distinct() {
-        assert_ne!(HostColorFormat::Rgba8UnormSrgb, HostColorFormat::Bgra8UnormSrgb);
+        assert_ne!(
+            HostColorFormat::Rgba8UnormSrgb,
+            HostColorFormat::Bgra8UnormSrgb
+        );
     }
 
     #[test]

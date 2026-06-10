@@ -183,11 +183,7 @@ impl HostApi {
 
     /// Mint an opaque [`HostSurfaceHandle`]. The handle id is built through
     /// the kernel facade; a null id is rejected.
-    pub fn surface_handle(
-        &self,
-        kernel: &KernelApi,
-        raw_id: u64,
-    ) -> HostResult<HostSurfaceHandle> {
+    pub fn surface_handle(&self, kernel: &KernelApi, raw_id: u64) -> HostResult<HostSurfaceHandle> {
         HostSurfaceHandle::new(kernel.handle_id(raw_id))
     }
 
@@ -269,8 +265,14 @@ mod tests {
         // The facade is a zero-sized marker: both paths validate viewports
         // identically.
         assert_eq!(
-            HostApi::new().viewport(800, 600, ratio(2.0)).unwrap().physical_width(),
-            HostApi::default().viewport(800, 600, ratio(2.0)).unwrap().physical_width(),
+            HostApi::new()
+                .viewport(800, 600, ratio(2.0))
+                .unwrap()
+                .physical_width(),
+            HostApi::default()
+                .viewport(800, 600, ratio(2.0))
+                .unwrap()
+                .physical_width(),
         );
     }
 
@@ -279,17 +281,16 @@ mod tests {
         let v = api().viewport(800, 600, ratio(2.0)).unwrap();
         assert_eq!(v.physical_width(), 1600);
         assert_eq!(
-            api()
-                .viewport(800, 600, ratio(-1.0))
-                .unwrap_err()
-                .code(),
+            api().viewport(800, 600, ratio(-1.0)).unwrap_err().code(),
             HostErrorCode::InvalidScaleFactor
         );
     }
 
     #[test]
     fn viewport_from_physical_round_trips_with_viewport() {
-        let v = api().viewport_from_physical(1600, 1200, ratio(2.0)).unwrap();
+        let v = api()
+            .viewport_from_physical(1600, 1200, ratio(2.0))
+            .unwrap();
         assert_eq!(v.logical_width(), 800);
         assert_eq!(v.logical_height(), 600);
     }
@@ -304,10 +305,8 @@ mod tests {
 
     #[test]
     fn lifecycle_initial_and_apply_route_through_state() {
-        let s = api().apply_lifecycle_signal(
-            api().lifecycle_initial(),
-            HostLifecycleSignal::Started,
-        );
+        let s =
+            api().apply_lifecycle_signal(api().lifecycle_initial(), HostLifecycleSignal::Started);
         assert!(s.visible());
     }
 
@@ -324,7 +323,10 @@ mod tests {
         let kernel = KernelApi::new();
         let c = api().boundary_config(0, 1).unwrap();
         assert_eq!(
-            api().validate_boundary_config(&c, &kernel).unwrap_err().code(),
+            api()
+                .validate_boundary_config(&c, &kernel)
+                .unwrap_err()
+                .code(),
             HostErrorCode::InvalidBoundaryConfig
         );
     }
@@ -347,8 +349,8 @@ mod tests {
     fn plan_frame_is_deterministic() {
         let v = api().viewport(100, 100, ratio(1.0)).unwrap();
         let cfg = api().boundary_config(STEP_NANOS, 5).unwrap();
-        let lifecycle = api()
-            .apply_lifecycle_signal(api().lifecycle_initial(), HostLifecycleSignal::Started);
+        let lifecycle =
+            api().apply_lifecycle_signal(api().lifecycle_initial(), HostLifecycleSignal::Started);
         let input = api().frame_input(1, 3 * STEP_NANOS, v);
         let a = api().plan_frame(&input, &cfg, &lifecycle, 0);
         let b = api().plan_frame(&input, &cfg, &lifecycle, 0);
@@ -406,11 +408,17 @@ mod tests {
     #[test]
     fn facade_rejects_null_target_and_empty_label() {
         assert_eq!(
-            api().presentation_target(&kernel(), 0, "x").unwrap_err().code(),
+            api()
+                .presentation_target(&kernel(), 0, "x")
+                .unwrap_err()
+                .code(),
             HostErrorCode::InvalidPresentationTarget
         );
         assert_eq!(
-            api().presentation_target(&kernel(), 1, "").unwrap_err().code(),
+            api()
+                .presentation_target(&kernel(), 1, "")
+                .unwrap_err()
+                .code(),
             HostErrorCode::InvalidPresentationTarget
         );
     }

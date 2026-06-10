@@ -68,11 +68,7 @@ impl<S> World<S> {
     /// exactly once, on the first active advance, before any `Update` system;
     /// `Update` systems run on every active advance. Within a phase, systems run
     /// in registration order.
-    pub fn register_system_in(
-        &mut self,
-        phase: SchedulePhase,
-        system: Box<dyn WorldSystem<S>>,
-    ) {
+    pub fn register_system_in(&mut self, phase: SchedulePhase, system: Box<dyn WorldSystem<S>>) {
         match phase {
             SchedulePhase::Startup => self.startup.push(system),
             SchedulePhase::Update => self.update.push(system),
@@ -269,7 +265,10 @@ mod serial_tests {
         let bytes = w.into_bytes();
         let mut world: World<TestStorage> = World::new();
         assert_eq!(
-            world.deserialize(&mut BinaryReader::new(&bytes)).unwrap_err().code(),
+            world
+                .deserialize(&mut BinaryReader::new(&bytes))
+                .unwrap_err()
+                .code(),
             KernelErrorCode::SchemaVersionMismatch
         );
     }
@@ -282,7 +281,10 @@ mod serial_tests {
         let bytes = w.into_bytes();
         let mut world: World<TestStorage> = World::new();
         assert_eq!(
-            world.deserialize(&mut BinaryReader::new(&bytes)).unwrap_err().code(),
+            world
+                .deserialize(&mut BinaryReader::new(&bytes))
+                .unwrap_err()
+                .code(),
             KernelErrorCode::TruncatedData
         );
     }
@@ -295,7 +297,9 @@ mod serial_tests {
         let bytes = w.into_bytes();
         for len in 0..bytes.len() {
             let mut fresh: World<TestStorage> = World::new();
-            assert!(fresh.deserialize(&mut BinaryReader::new(&bytes[..len])).is_err());
+            assert!(fresh
+                .deserialize(&mut BinaryReader::new(&bytes[..len]))
+                .is_err());
         }
     }
 }
@@ -407,7 +411,10 @@ mod tests {
         let (mut world, e) = world_with_one_value(5);
         let frame = fixtures::skipped_engine_frame();
         world.advance(0, &FrameContext::new(&frame));
-        assert!(world.storage().doubled.get(e).is_none(), "skipped frame runs no systems");
+        assert!(
+            world.storage().doubled.get(e).is_none(),
+            "skipped frame runs no systems"
+        );
     }
 
     #[test]
@@ -419,7 +426,10 @@ mod tests {
         assert!(!ctx.is_skipped());
         assert_eq!(ctx.runtime_step_count(), 0);
         world.advance(0, &ctx);
-        assert!(world.storage().doubled.get(e).is_none(), "zero-step frame runs no systems");
+        assert!(
+            world.storage().doubled.get(e).is_none(),
+            "zero-step frame runs no systems"
+        );
     }
 
     #[test]

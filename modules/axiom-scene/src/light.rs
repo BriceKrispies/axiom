@@ -43,12 +43,7 @@ impl Light {
         Light::build(math, LightKind::Point, color, intensity)
     }
 
-    fn build(
-        math: &MathApi,
-        kind: LightKind,
-        color: Vec3,
-        intensity: Ratio,
-    ) -> SceneResult<Self> {
+    fn build(math: &MathApi, kind: LightKind, color: Vec3, intensity: Ratio) -> SceneResult<Self> {
         // `intensity` is a `Ratio`, so it is already finite; only the raw colour
         // components still need the engine's finite check.
         for component in [color.x, color.y, color.z] {
@@ -146,9 +141,27 @@ mod tests {
         let l = Light::directional(&math(), Vec3::ONE, rat(0.0)).unwrap();
         assert_eq!(l.intensity().get(), 0.0);
         // Each channel exactly 0.0 is non-negative and accepted.
-        assert_eq!(Light::directional(&math(), Vec3::new(0.0, 1.0, 1.0), rat(1.0)).unwrap().color().x, 0.0);
-        assert_eq!(Light::directional(&math(), Vec3::new(1.0, 0.0, 1.0), rat(1.0)).unwrap().color().y, 0.0);
-        assert_eq!(Light::directional(&math(), Vec3::new(1.0, 1.0, 0.0), rat(1.0)).unwrap().color().z, 0.0);
+        assert_eq!(
+            Light::directional(&math(), Vec3::new(0.0, 1.0, 1.0), rat(1.0))
+                .unwrap()
+                .color()
+                .x,
+            0.0
+        );
+        assert_eq!(
+            Light::directional(&math(), Vec3::new(1.0, 0.0, 1.0), rat(1.0))
+                .unwrap()
+                .color()
+                .y,
+            0.0
+        );
+        assert_eq!(
+            Light::directional(&math(), Vec3::new(1.0, 1.0, 0.0), rat(1.0))
+                .unwrap()
+                .color()
+                .z,
+            0.0
+        );
     }
 
     #[test]

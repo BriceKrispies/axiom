@@ -98,8 +98,6 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
     #[derive(Deserialize, Default)]
     struct DepTable {
         #[serde(default)]
-        path: Option<String>,
-        #[serde(default)]
         package: Option<String>,
     }
 
@@ -141,10 +139,7 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
             .as_ref()
             .map(|p| p.name.clone())
             .ok_or_else(|| MetadataError {
-                message: format!(
-                    "member at {} has no `[package].name`",
-                    manifest.display()
-                ),
+                message: format!("member at {} has no `[package].name`", manifest.display()),
             })?;
         dir_by_name.insert(name.clone(), member_dir.clone());
         members.push((member_dir, name, parsed));
@@ -154,14 +149,12 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
     for (dir, name, parsed) in &members {
         let mut workspace_deps: BTreeSet<String> = BTreeSet::new();
         for (dep_key, value) in &parsed.dependencies {
-            let (path, rename) = match value {
-                DepValue::Version(_) => (None, None),
-                DepValue::Detailed(t) => (t.path.clone(), t.package.clone()),
+            let rename = match value {
+                DepValue::Version(_) => None,
+                DepValue::Detailed(t) => t.package.clone(),
             };
             let resolved = rename.unwrap_or_else(|| dep_key.clone());
-            if path.is_some() && dir_by_name.contains_key(&resolved) {
-                workspace_deps.insert(resolved);
-            } else if path.is_none() && dir_by_name.contains_key(&resolved) {
+            if dir_by_name.contains_key(&resolved) {
                 workspace_deps.insert(resolved);
             }
         }
@@ -252,8 +245,7 @@ fn parse_metadata(bytes: &[u8]) -> Result<WorkspaceGraph, MetadataError> {
         message: format!("could not parse `cargo metadata` output as JSON: {e}"),
     })?;
 
-    let workspace_ids: BTreeSet<&str> =
-        raw.workspace_members.iter().map(String::as_str).collect();
+    let workspace_ids: BTreeSet<&str> = raw.workspace_members.iter().map(String::as_str).collect();
     let workspace_names: BTreeSet<&str> = raw
         .packages
         .iter()

@@ -144,8 +144,10 @@ mod reflect_tests {
         col.reflect_write(&mut w);
         let bytes = w.into_bytes();
         for len in 0..bytes.len() {
-            assert!(ComponentColumn::<u32>::reflect_read(&mut BinaryReader::new(&bytes[..len]))
-                .is_err());
+            assert!(
+                ComponentColumn::<u32>::reflect_read(&mut BinaryReader::new(&bytes[..len]))
+                    .is_err()
+            );
         }
     }
 }

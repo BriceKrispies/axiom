@@ -159,12 +159,24 @@ mod tests {
     fn classify_point_at_exact_epsilon_boundary_is_on() {
         let p = Plane::new(Vec3::UNIT_Z, 0.0).unwrap();
         let e = Epsilon::new(0.25).unwrap(); // 0.25 is exactly representable
-        // signed distance == +0.25 == eps -> On (not Front).
-        assert_eq!(p.classify_point(Vec3::new(0.0, 0.0, 0.25), e), PlaneSide::On);
+                                             // signed distance == +0.25 == eps -> On (not Front).
+        assert_eq!(
+            p.classify_point(Vec3::new(0.0, 0.0, 0.25), e),
+            PlaneSide::On
+        );
         // signed distance == -0.25 == -eps -> On (not Back).
-        assert_eq!(p.classify_point(Vec3::new(0.0, 0.0, -0.25), e), PlaneSide::On);
+        assert_eq!(
+            p.classify_point(Vec3::new(0.0, 0.0, -0.25), e),
+            PlaneSide::On
+        );
         // Just past the boundary still resolves Front / Back.
-        assert_eq!(p.classify_point(Vec3::new(0.0, 0.0, 0.5), e), PlaneSide::Front);
-        assert_eq!(p.classify_point(Vec3::new(0.0, 0.0, -0.5), e), PlaneSide::Back);
+        assert_eq!(
+            p.classify_point(Vec3::new(0.0, 0.0, 0.5), e),
+            PlaneSide::Front
+        );
+        assert_eq!(
+            p.classify_point(Vec3::new(0.0, 0.0, -0.5), e),
+            PlaneSide::Back
+        );
     }
 }

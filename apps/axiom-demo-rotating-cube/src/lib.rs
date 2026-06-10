@@ -37,8 +37,7 @@ pub use demo_api::DemoRotatingCubeApi;
 // --- Inspectable artifact tree returned by `DemoRotatingCubeApi::run_tick`. ---
 
 pub use vertical_slice::{
-    CubeIdentityArtifact, CubeTransformArtifact, GpuSubmissionReportArtifact,
-    VerticalSliceArtifact,
+    CubeIdentityArtifact, CubeTransformArtifact, GpuSubmissionReportArtifact, VerticalSliceArtifact,
 };
 
 pub use scene_to_render_input::{

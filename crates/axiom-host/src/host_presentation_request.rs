@@ -165,14 +165,8 @@ mod tests {
     fn adapter_and_device_accessors_round_trip() {
         let adapter = HostAdapterRequest::new(HostPowerPreference::LowPower, true);
         let device = HostDeviceRequest::new(false, HostDeviceProfile::Baseline);
-        let req = HostPresentationRequest::new(
-            target(),
-            surface(),
-            descriptor(),
-            adapter,
-            device,
-        )
-        .unwrap();
+        let req = HostPresentationRequest::new(target(), surface(), descriptor(), adapter, device)
+            .unwrap();
         assert_eq!(req.adapter(), adapter);
         assert_eq!(req.device(), device);
     }

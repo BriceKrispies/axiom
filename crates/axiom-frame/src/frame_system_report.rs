@@ -91,14 +91,15 @@ mod tests {
         assert_eq!(report.name(), "boom");
         assert_eq!(report.order(), -2);
         assert!(!report.succeeded());
-        assert_eq!(report.error_code(), Some(RuntimeErrorCode::SystemFailed.raw()));
+        assert_eq!(
+            report.error_code(),
+            Some(RuntimeErrorCode::SystemFailed.raw())
+        );
     }
 
     #[test]
     fn identical_outcomes_produce_equal_reports() {
-        let make = || {
-            SystemOutcome::new(HandleId::from_raw(1), "a", 1, Ok(()))
-        };
+        let make = || SystemOutcome::new(HandleId::from_raw(1), "a", 1, Ok(()));
         assert_eq!(
             FrameSystemReport::from_outcome(&make()),
             FrameSystemReport::from_outcome(&make())

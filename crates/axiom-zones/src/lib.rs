@@ -132,7 +132,10 @@ fn inject(item: TokenStream, injected: proc_macro2::TokenStream) -> TokenStream 
     // not `Item` — handle it so zones can mark the engine's `step`/`advance` etc.
     match syn::parse::<syn::ImplItemFn>(item) {
         Ok(mut method) => {
-            method.block.stmts.insert(0, syn::parse_quote! { #injected });
+            method
+                .block
+                .stmts
+                .insert(0, syn::parse_quote! { #injected });
             quote! { #method }.into()
         }
         Err(err) => err.to_compile_error().into(),

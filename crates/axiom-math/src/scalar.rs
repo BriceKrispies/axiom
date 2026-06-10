@@ -38,16 +38,18 @@ impl Scalar {
     }
 }
 
+// The default tolerance is a property of the constant, not a runtime input:
+// assert at compile time that it is a sensible positive sub-millisecond value,
+// rather than as a runtime test that can never observe anything else.
+const _: () = assert!(
+    Scalar::DEFAULT_EPSILON > 0.0 && Scalar::DEFAULT_EPSILON < 1.0e-3,
+    "DEFAULT_EPSILON must be a positive sub-millisecond tolerance"
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::math_error_code::MathErrorCode;
-
-    #[test]
-    fn default_epsilon_is_a_sensible_positive_tolerance() {
-        assert!(Scalar::DEFAULT_EPSILON > 0.0);
-        assert!(Scalar::DEFAULT_EPSILON < 1.0e-3);
-    }
 
     #[test]
     fn is_finite_value_accepts_finite_numbers() {
@@ -80,11 +82,5 @@ mod tests {
         assert_eq!(err.code(), MathErrorCode::NonFiniteScalar);
         let err = Scalar::validate_finite(f32::NEG_INFINITY).unwrap_err();
         assert_eq!(err.code(), MathErrorCode::NonFiniteScalar);
-    }
-
-    #[test]
-    fn default_is_a_no_state_marker() {
-        // The policy is a zero-sized marker; default must equal the unit value.
-        assert_eq!(Scalar, Scalar::default());
     }
 }

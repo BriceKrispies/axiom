@@ -237,11 +237,8 @@ mod tests {
     fn byte_len_equals_bytes_length_and_grows_with_commands() {
         // Kills `byte_len -> 1`: byte_len must equal bytes().len() exactly,
         // which for any real capture is far larger than 1.
-        let empty = RenderReceipt::capture(
-            FrameIndex::new(0),
-            Tick::new(0),
-            &RenderCommandList::new(),
-        );
+        let empty =
+            RenderReceipt::capture(FrameIndex::new(0), Tick::new(0), &RenderCommandList::new());
         // Header is magic(4)+version(4)+frame(8)+tick(8)+count(4) = 28 bytes.
         assert_eq!(empty.byte_len(), 28);
         assert_eq!(empty.byte_len(), empty.bytes().len());

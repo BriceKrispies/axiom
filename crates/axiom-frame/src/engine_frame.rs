@@ -40,6 +40,13 @@ impl EngineFrame {
     /// pins the layer-03 adapter relationship in the proof export's
     /// "must_reference" list — the public API of [`HostFrameReport`] is
     /// what every input passed in here was derived from.
+    //
+    // This is a plain-data constructor that mirrors the immutable struct's
+    // fields one-to-one (plus the `_host_report` proof anchor). Folding the
+    // arguments into a separate params struct would be pure ceremony — a second
+    // type carrying the identical shape — so the argument-count lint is allowed
+    // here deliberately.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         engine_frame_index: u64,
         host_frame_sequence: u64,
@@ -110,8 +117,8 @@ impl EngineFrame {
 mod tests {
     use super::*;
     use axiom_host::{
-        HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostLifecycleState,
-        HostStepPlan, HostViewport,
+        HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostLifecycleState, HostStepPlan,
+        HostViewport,
     };
     use axiom_kernel::Ratio;
 
@@ -144,7 +151,12 @@ mod tests {
 
     fn pieces_for(
         report: &HostFrameReport,
-    ) -> (FrameViewport, FrameLifecycleState, FrameTiming, FrameDiagnostics) {
+    ) -> (
+        FrameViewport,
+        FrameLifecycleState,
+        FrameTiming,
+        FrameDiagnostics,
+    ) {
         let viewport = FrameViewport::from_host(report.viewport());
         let lifecycle = FrameLifecycleState::from_host(report.lifecycle_after());
         let timing = FrameTiming::from_host_report(report, STEP_NANOS).unwrap();
@@ -275,7 +287,18 @@ mod tests {
     fn dummy_record(tick_value: u64) -> axiom_runtime::RuntimeStepRecord {
         use axiom_kernel::{FrameIndex, Tick};
         use axiom_runtime::{RuntimeDiagnostics, RuntimeState, RuntimeStep};
-        let step = RuntimeStep::new(FrameIndex::new(tick_value), Tick::new(tick_value), STEP_NANOS, tick_value);
-        axiom_runtime::RuntimeStepRecord::new(step, RuntimeDiagnostics::new(step), RuntimeState::Running, 0, 0)
+        let step = RuntimeStep::new(
+            FrameIndex::new(tick_value),
+            Tick::new(tick_value),
+            STEP_NANOS,
+            tick_value,
+        );
+        axiom_runtime::RuntimeStepRecord::new(
+            step,
+            RuntimeDiagnostics::new(step),
+            RuntimeState::Running,
+            0,
+            0,
+        )
     }
 }

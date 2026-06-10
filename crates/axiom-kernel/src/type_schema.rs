@@ -74,10 +74,8 @@ mod tests {
 
     #[test]
     fn composite_type_schema_lists_fields_in_order() {
-        const FIELDS: &[FieldSchema] = &[
-            FieldSchema::new("x", "f32"),
-            FieldSchema::new("y", "f32"),
-        ];
+        const FIELDS: &[FieldSchema] =
+            &[FieldSchema::new("x", "f32"), FieldSchema::new("y", "f32")];
         let s = TypeSchema::new("Vec2", FIELDS);
         assert_eq!(s.name(), "Vec2");
         assert_eq!(s.fields().len(), 2);

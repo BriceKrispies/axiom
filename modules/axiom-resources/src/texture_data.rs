@@ -73,14 +73,7 @@ mod tests {
 
     #[test]
     fn valid_texture_is_built() {
-        let t = TextureData::new(
-            ResourceId::from_raw(1),
-            "solid",
-            2,
-            2,
-            vec![255; 16],
-        )
-        .unwrap();
+        let t = TextureData::new(ResourceId::from_raw(1), "solid", 2, 2, vec![255; 16]).unwrap();
         assert_eq!(t.width(), 2);
         assert_eq!(t.height(), 2);
         assert_eq!(t.rgba8_pixels().len(), 16);
@@ -88,26 +81,14 @@ mod tests {
 
     #[test]
     fn wrong_size_pixel_buffer_is_rejected() {
-        assert!(
-            TextureData::new(
-                ResourceId::from_raw(1),
-                "x",
-                2,
-                2,
-                vec![255; 15],
-            )
-            .is_none()
-        );
+        assert!(TextureData::new(ResourceId::from_raw(1), "x", 2, 2, vec![255; 15],).is_none());
     }
 
     #[test]
     fn equality_requires_all_fields() {
-        let a =
-            TextureData::new(ResourceId::from_raw(1), "x", 1, 1, vec![1, 2, 3, 4]).unwrap();
-        let b =
-            TextureData::new(ResourceId::from_raw(1), "x", 1, 1, vec![1, 2, 3, 4]).unwrap();
-        let c =
-            TextureData::new(ResourceId::from_raw(1), "x", 1, 1, vec![1, 2, 3, 5]).unwrap();
+        let a = TextureData::new(ResourceId::from_raw(1), "x", 1, 1, vec![1, 2, 3, 4]).unwrap();
+        let b = TextureData::new(ResourceId::from_raw(1), "x", 1, 1, vec![1, 2, 3, 4]).unwrap();
+        let c = TextureData::new(ResourceId::from_raw(1), "x", 1, 1, vec![1, 2, 3, 5]).unwrap();
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
@@ -130,14 +111,8 @@ mod cov {
     fn width_times_height_overflow_returns_none() {
         // width * height overflows usize -> first checked_mul yields None.
         assert!(
-            TextureData::new(
-                ResourceId::from_raw(1),
-                "x",
-                u32::MAX,
-                u32::MAX,
-                Vec::new(),
-            )
-            .is_none()
+            TextureData::new(ResourceId::from_raw(1), "x", u32::MAX, u32::MAX, Vec::new(),)
+                .is_none()
         );
     }
 
@@ -148,15 +123,6 @@ mod cov {
         // on 64-bit targets width*height already overflows above, so this
         // input also returns None via the first checked_mul. Either way the
         // None path is exercised.
-        assert!(
-            TextureData::new(
-                ResourceId::from_raw(1),
-                "x",
-                u32::MAX,
-                1,
-                Vec::new(),
-            )
-            .is_none()
-        );
+        assert!(TextureData::new(ResourceId::from_raw(1), "x", u32::MAX, 1, Vec::new(),).is_none());
     }
 }

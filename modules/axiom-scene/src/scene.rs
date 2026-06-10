@@ -95,7 +95,10 @@ impl Scene {
         if !self.is_node(id) {
             return Err(SceneError::missing_node("set_local: node id not in scene"));
         }
-        self.world.storage_mut().locals.insert(Self::entity(id), local);
+        self.world
+            .storage_mut()
+            .locals
+            .insert(Self::entity(id), local);
         Ok(())
     }
 
@@ -127,17 +130,25 @@ impl Scene {
 
     // --- Hierarchy ---
 
-    pub(crate) fn set_parent(&mut self, child: SceneNodeId, parent: SceneNodeId) -> SceneResult<()> {
+    pub(crate) fn set_parent(
+        &mut self,
+        child: SceneNodeId,
+        parent: SceneNodeId,
+    ) -> SceneResult<()> {
         if child == parent {
             return Err(SceneError::self_parenting(
                 "set_parent: a node cannot be its own parent",
             ));
         }
         if !self.is_node(child) {
-            return Err(SceneError::missing_node("set_parent: child id not in scene"));
+            return Err(SceneError::missing_node(
+                "set_parent: child id not in scene",
+            ));
         }
         if !self.is_node(parent) {
-            return Err(SceneError::missing_node("set_parent: parent id not in scene"));
+            return Err(SceneError::missing_node(
+                "set_parent: parent id not in scene",
+            ));
         }
         if self.would_introduce_cycle(Self::entity(child), Self::entity(parent)) {
             return Err(SceneError::hierarchy_cycle(
@@ -153,7 +164,9 @@ impl Scene {
 
     pub(crate) fn clear_parent(&mut self, child: SceneNodeId) -> SceneResult<()> {
         if !self.is_node(child) {
-            return Err(SceneError::missing_node("clear_parent: child id not in scene"));
+            return Err(SceneError::missing_node(
+                "clear_parent: child id not in scene",
+            ));
         }
         self.world.storage_mut().parents.remove(Self::entity(child));
         Ok(())
@@ -184,7 +197,10 @@ impl Scene {
         if !self.is_node(node) {
             return Err(SceneError::missing_node("add_camera: node id not in scene"));
         }
-        self.world.storage_mut().cameras.insert(Self::entity(node), camera);
+        self.world
+            .storage_mut()
+            .cameras
+            .insert(Self::entity(node), camera);
         Ok(())
     }
 
@@ -193,8 +209,16 @@ impl Scene {
     }
 
     pub(crate) fn remove_camera(&mut self, node: SceneNodeId) -> SceneResult<()> {
-        if self.world.storage_mut().cameras.remove(Self::entity(node)).is_none() {
-            return Err(SceneError::missing_camera("remove_camera: node has no camera"));
+        if self
+            .world
+            .storage_mut()
+            .cameras
+            .remove(Self::entity(node))
+            .is_none()
+        {
+            return Err(SceneError::missing_camera(
+                "remove_camera: node has no camera",
+            ));
         }
         Ok(())
     }
@@ -203,12 +227,21 @@ impl Scene {
         if !self.is_node(node) {
             return Err(SceneError::missing_node("add_light: node id not in scene"));
         }
-        self.world.storage_mut().lights.insert(Self::entity(node), light);
+        self.world
+            .storage_mut()
+            .lights
+            .insert(Self::entity(node), light);
         Ok(())
     }
 
     pub(crate) fn remove_light(&mut self, node: SceneNodeId) -> SceneResult<()> {
-        if self.world.storage_mut().lights.remove(Self::entity(node)).is_none() {
+        if self
+            .world
+            .storage_mut()
+            .lights
+            .remove(Self::entity(node))
+            .is_none()
+        {
             return Err(SceneError::missing_light("remove_light: node has no light"));
         }
         Ok(())
@@ -220,7 +253,9 @@ impl Scene {
         renderable: Renderable,
     ) -> SceneResult<()> {
         if !self.is_node(node) {
-            return Err(SceneError::missing_node("add_renderable: node id not in scene"));
+            return Err(SceneError::missing_node(
+                "add_renderable: node id not in scene",
+            ));
         }
         self.world
             .storage_mut()
@@ -249,7 +284,12 @@ impl Scene {
         node: SceneNodeId,
         visible: bool,
     ) -> SceneResult<()> {
-        match self.world.storage_mut().renderables.get_mut(Self::entity(node)) {
+        match self
+            .world
+            .storage_mut()
+            .renderables
+            .get_mut(Self::entity(node))
+        {
             Some(r) => {
                 r.set_visible(visible);
                 Ok(())
@@ -264,7 +304,10 @@ impl Scene {
         if !self.is_node(node) {
             return Err(SceneError::missing_node("add_spin: node id not in scene"));
         }
-        self.world.storage_mut().spins.insert(Self::entity(node), spin);
+        self.world
+            .storage_mut()
+            .spins
+            .insert(Self::entity(node), spin);
         Ok(())
     }
 
@@ -366,7 +409,9 @@ mod tests {
         assert_eq!(s.world_transform(n).unwrap().translation.x, 4.0);
         // Missing node.
         assert_eq!(
-            s.world_transform(SceneNodeId::from_raw(99)).unwrap_err().code(),
+            s.world_transform(SceneNodeId::from_raw(99))
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
     }
@@ -396,12 +441,16 @@ mod tests {
         let mut s = Scene::new();
         let p = node(&mut s);
         assert_eq!(
-            s.set_parent(SceneNodeId::from_raw(99), p).unwrap_err().code(),
+            s.set_parent(SceneNodeId::from_raw(99), p)
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
         let c = node(&mut s);
         assert_eq!(
-            s.set_parent(c, SceneNodeId::from_raw(99)).unwrap_err().code(),
+            s.set_parent(c, SceneNodeId::from_raw(99))
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
     }
@@ -452,7 +501,9 @@ mod tests {
         s.clear_parent(p).unwrap();
         // Missing node fails.
         assert_eq!(
-            s.clear_parent(SceneNodeId::from_raw(99)).unwrap_err().code(),
+            s.clear_parent(SceneNodeId::from_raw(99))
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
     }
@@ -473,7 +524,9 @@ mod tests {
         assert_eq!(s.camera_count(), 1);
         // Missing node.
         assert_eq!(
-            s.add_camera(SceneNodeId::from_raw(99), cam).unwrap_err().code(),
+            s.add_camera(SceneNodeId::from_raw(99), cam)
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
         s.remove_camera(n).unwrap();
@@ -493,7 +546,9 @@ mod tests {
         s.add_light(n, l).unwrap();
         assert_eq!(s.light_count(), 1);
         assert_eq!(
-            s.add_light(SceneNodeId::from_raw(99), l).unwrap_err().code(),
+            s.add_light(SceneNodeId::from_raw(99), l)
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
         s.remove_light(n).unwrap();
@@ -513,7 +568,9 @@ mod tests {
         s.add_renderable(n, r).unwrap();
         assert_eq!(s.renderable_count(), 1);
         assert_eq!(
-            s.add_renderable(SceneNodeId::from_raw(99), r).unwrap_err().code(),
+            s.add_renderable(SceneNodeId::from_raw(99), r)
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
         // Toggle visibility present + missing.
@@ -579,8 +636,14 @@ mod frame_tests {
         };
         let input = HostFrameInput::new(1, elapsed, vp);
         let plan = HostStepPlan::build(&input, &cfg, &lifecycle, 0);
-        let report =
-            HostFrameReport::new(input.sequence(), plan, plan.steps(), Vec::new(), vp, lifecycle);
+        let report = HostFrameReport::new(
+            input.sequence(),
+            plan,
+            plan.steps(),
+            Vec::new(),
+            vp,
+            lifecycle,
+        );
         FrameApi::new()
             .engine_frame_from_host_report(&report, elapsed, Vec::new())
             .unwrap()

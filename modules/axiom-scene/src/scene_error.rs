@@ -29,11 +29,7 @@ impl SceneError {
 
     /// A scene error that wraps a math validation failure (e.g. an
     /// invalid camera projection parameter).
-    pub const fn with_math(
-        code: SceneErrorCode,
-        message: &'static str,
-        cause: MathError,
-    ) -> Self {
+    pub const fn with_math(code: SceneErrorCode, message: &'static str, cause: MathError) -> Self {
         SceneError {
             code,
             message,
@@ -171,11 +167,8 @@ mod tests {
     #[test]
     fn wrapped_and_unwrapped_are_not_equal() {
         let bare = SceneError::new(SceneErrorCode::InvalidCameraParameters, "x");
-        let wrapped = SceneError::with_math(
-            SceneErrorCode::InvalidCameraParameters,
-            "x",
-            math_cause(),
-        );
+        let wrapped =
+            SceneError::with_math(SceneErrorCode::InvalidCameraParameters, "x", math_cause());
         assert_ne!(bare, wrapped);
     }
 

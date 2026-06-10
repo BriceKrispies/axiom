@@ -42,9 +42,7 @@ fn frame_manifest_with_full_contract() -> LayerManifest {
         .unwrap()
         .with_capability(LayerCapability::new(CAP_FRAME_LIFECYCLE_STATE))
         .unwrap()
-        .with_capability(LayerCapability::new(
-            CAP_DETERMINISTIC_FRAME_COMMAND_QUEUE,
-        ))
+        .with_capability(LayerCapability::new(CAP_DETERMINISTIC_FRAME_COMMAND_QUEUE))
         .unwrap()
         .with_capability(LayerCapability::new(CAP_FRAME_DIAGNOSTICS))
         .unwrap()

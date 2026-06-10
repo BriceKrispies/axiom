@@ -10,26 +10,12 @@ use axiom_math::Mat4;
 /// exposes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RenderCommand {
-    ClearFrame {
-        color: [f32; 4],
-    },
-    SetCamera {
-        view: Mat4,
-        projection: Mat4,
-    },
-    SetPipeline {
-        pipeline_id: u32,
-    },
-    SetMesh {
-        mesh_id: u64,
-    },
-    SetMaterial {
-        material_id: u64,
-    },
-    DrawIndexed {
-        index_count: u32,
-        world: Mat4,
-    },
+    ClearFrame { color: [f32; 4] },
+    SetCamera { view: Mat4, projection: Mat4 },
+    SetPipeline { pipeline_id: u32 },
+    SetMesh { mesh_id: u64 },
+    SetMaterial { material_id: u64 },
+    DrawIndexed { index_count: u32, world: Mat4 },
 }
 
 impl RenderCommand {

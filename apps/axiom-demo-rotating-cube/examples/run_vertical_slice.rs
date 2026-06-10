@@ -9,9 +9,7 @@
 //! cargo run -p axiom-demo-rotating-cube --example run_vertical_slice
 //! ```
 
-use axiom_demo_rotating_cube::{
-    DemoRotatingCubeApi, RenderCommandArtifact, VerticalSliceArtifact,
-};
+use axiom_demo_rotating_cube::{DemoRotatingCubeApi, RenderCommandArtifact, VerticalSliceArtifact};
 
 fn main() {
     println!("Axiom — headless deterministic rotating-cube vertical slice");
@@ -80,8 +78,14 @@ fn print_summary(a: &VerticalSliceArtifact) {
     println!(
         "  ResolvedResources  : {} meshes ({} verts / {} indices), {} materials",
         a.resolved_resources.meshes.len(),
-        a.resolved_resources.meshes.first().map_or(0, |m| m.positions.len()),
-        a.resolved_resources.meshes.first().map_or(0, |m| m.indices.len()),
+        a.resolved_resources
+            .meshes
+            .first()
+            .map_or(0, |m| m.positions.len()),
+        a.resolved_resources
+            .meshes
+            .first()
+            .map_or(0, |m| m.indices.len()),
         a.resolved_resources.materials.len()
     );
     println!(

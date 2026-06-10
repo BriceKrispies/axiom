@@ -35,9 +35,18 @@ mod tests {
 
     #[test]
     fn variants_are_distinct() {
-        assert_ne!(HostPresentationStatus::PendingBackend, HostPresentationStatus::Ready);
-        assert_ne!(HostPresentationStatus::PendingBackend, HostPresentationStatus::Unavailable);
-        assert_ne!(HostPresentationStatus::Unavailable, HostPresentationStatus::Ready);
+        assert_ne!(
+            HostPresentationStatus::PendingBackend,
+            HostPresentationStatus::Ready
+        );
+        assert_ne!(
+            HostPresentationStatus::PendingBackend,
+            HostPresentationStatus::Unavailable
+        );
+        assert_ne!(
+            HostPresentationStatus::Unavailable,
+            HostPresentationStatus::Ready
+        );
     }
 
     #[test]

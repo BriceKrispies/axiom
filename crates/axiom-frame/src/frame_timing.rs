@@ -100,8 +100,8 @@ mod tests {
     use super::*;
     use crate::frame_error_code::FrameErrorCode;
     use axiom_host::{
-        HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostLifecycleState,
-        HostStepPlan, HostViewport,
+        HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostLifecycleState, HostStepPlan,
+        HostViewport,
     };
     use axiom_kernel::Ratio;
 
@@ -119,7 +119,11 @@ mod tests {
         HostLifecycleState::initial().apply(HostLifecycleSignal::Started)
     }
 
-    fn report_for(elapsed: u64, accumulator: u64, lifecycle: HostLifecycleState) -> HostFrameReport {
+    fn report_for(
+        elapsed: u64,
+        accumulator: u64,
+        lifecycle: HostLifecycleState,
+    ) -> HostFrameReport {
         let input = HostFrameInput::new(1, elapsed, vp());
         let plan = HostStepPlan::build(&input, &cfg(), &lifecycle, accumulator);
         HostFrameReport::new(
@@ -185,10 +189,12 @@ mod tests {
 
     #[test]
     fn identical_input_produces_identical_timing() {
-        let a = FrameTiming::from_host_report(&report_for(2 * STEP_NANOS, 0, visible()), STEP_NANOS)
-            .unwrap();
-        let b = FrameTiming::from_host_report(&report_for(2 * STEP_NANOS, 0, visible()), STEP_NANOS)
-            .unwrap();
+        let a =
+            FrameTiming::from_host_report(&report_for(2 * STEP_NANOS, 0, visible()), STEP_NANOS)
+                .unwrap();
+        let b =
+            FrameTiming::from_host_report(&report_for(2 * STEP_NANOS, 0, visible()), STEP_NANOS)
+                .unwrap();
         assert_eq!(a, b);
     }
 
@@ -226,7 +232,14 @@ mod cov {
         let lifecycle = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
         let input = HostFrameInput::new(1, 1_000, vp);
         let plan = HostStepPlan::build(&input, &cfg, &lifecycle, 0);
-        HostFrameReport::new(input.sequence(), plan, plan.steps(), Vec::new(), vp, lifecycle)
+        HostFrameReport::new(
+            input.sequence(),
+            plan,
+            plan.steps(),
+            Vec::new(),
+            vp,
+            lifecycle,
+        )
     }
 
     #[test]

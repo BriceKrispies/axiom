@@ -3,6 +3,12 @@
 //! workspace under a temp directory, runs `check_architecture` against it,
 //! and asserts the expected [`ViolationKind`].
 
+// These flat fixture builders take one positional argument per field of the
+// synthetic crate/module/app they assemble; folding them into params structs
+// would only add ceremony to the test fixtures, so the argument-count lint is
+// allowed across this test module.
+#![allow(clippy::too_many_arguments)]
+
 use std::path::{Path, PathBuf};
 
 use xtask::check::check_architecture;
@@ -222,12 +228,7 @@ impl Fixture {
 
     /// A workspace member with a Cargo.toml but no manifest of any kind.
     /// Used to test `UnknownPackageClass`.
-    fn unclassified_crate(
-        &self,
-        dir_rel: &str,
-        crate_name: &str,
-        deps: &[(&str, &str)],
-    ) -> &Self {
+    fn unclassified_crate(&self, dir_rel: &str, crate_name: &str, deps: &[(&str, &str)]) -> &Self {
         let dir = self.root.join(dir_rel);
         std::fs::create_dir_all(dir.join("src")).unwrap();
         self.write_cargo_toml(&dir, crate_name, deps);
@@ -469,44 +470,40 @@ fn case_f_module_importing_unlisted_layer_fails() {
 #[test]
 fn case_g_module_importing_another_module_fails() {
     let f = Fixture::new("g_module_to_module");
-    f.workspace(&[
-        "crates/kernel",
-        "modules/scene",
-        "modules/render",
-    ])
-    .layer_crate(
-        "crates/kernel",
-        "gmm-kernel",
-        "kernel",
-        0,
-        None,
-        &[],
-        &[],
-        "pub struct K;\n",
-    )
-    .module_crate(
-        "modules/scene",
-        "gmm-scene",
-        "scene",
-        &["kernel"],
-        &[],
-        &["scene-graph"],
-        &[("gmm-kernel", "../../crates/kernel")],
-        one_pub_facade(),
-    )
-    .module_crate(
-        "modules/render",
-        "gmm-render",
-        "render",
-        &["kernel"],
-        &[],
-        &["render-pipeline"],
-        &[
-            ("gmm-kernel", "../../crates/kernel"),
-            ("gmm-scene", "../scene"),
-        ],
-        one_pub_facade(),
-    );
+    f.workspace(&["crates/kernel", "modules/scene", "modules/render"])
+        .layer_crate(
+            "crates/kernel",
+            "gmm-kernel",
+            "kernel",
+            0,
+            None,
+            &[],
+            &[],
+            "pub struct K;\n",
+        )
+        .module_crate(
+            "modules/scene",
+            "gmm-scene",
+            "scene",
+            &["kernel"],
+            &[],
+            &["scene-graph"],
+            &[("gmm-kernel", "../../crates/kernel")],
+            one_pub_facade(),
+        )
+        .module_crate(
+            "modules/render",
+            "gmm-render",
+            "render",
+            &["kernel"],
+            &[],
+            &["render-pipeline"],
+            &[
+                ("gmm-kernel", "../../crates/kernel"),
+                ("gmm-scene", "../scene"),
+            ],
+            one_pub_facade(),
+        );
     let report = check_architecture(&f.root);
     assert!(
         report.has_kind(ViolationKind::ModuleDependsOnModule),
@@ -707,41 +704,37 @@ fn case_l_unknown_workspace_package_fails() {
 #[test]
 fn case_m_duplicate_module_names_fail() {
     let f = Fixture::new("m_dup_module_names");
-    f.workspace(&[
-        "crates/kernel",
-        "modules/scene",
-        "modules/scene2",
-    ])
-    .layer_crate(
-        "crates/kernel",
-        "mdn-kernel",
-        "kernel",
-        0,
-        None,
-        &[],
-        &[],
-        "pub struct K;\n",
-    )
-    .module_crate(
-        "modules/scene",
-        "mdn-scene-a",
-        "scene",
-        &["kernel"],
-        &[],
-        &["scene-graph"],
-        &[("mdn-kernel", "../../crates/kernel")],
-        one_pub_facade(),
-    )
-    .module_crate(
-        "modules/scene2",
-        "mdn-scene-b",
-        "scene", // same logical name as the first one
-        &["kernel"],
-        &[],
-        &["other-cap"],
-        &[("mdn-kernel", "../../crates/kernel")],
-        one_pub_facade(),
-    );
+    f.workspace(&["crates/kernel", "modules/scene", "modules/scene2"])
+        .layer_crate(
+            "crates/kernel",
+            "mdn-kernel",
+            "kernel",
+            0,
+            None,
+            &[],
+            &[],
+            "pub struct K;\n",
+        )
+        .module_crate(
+            "modules/scene",
+            "mdn-scene-a",
+            "scene",
+            &["kernel"],
+            &[],
+            &["scene-graph"],
+            &[("mdn-kernel", "../../crates/kernel")],
+            one_pub_facade(),
+        )
+        .module_crate(
+            "modules/scene2",
+            "mdn-scene-b",
+            "scene", // same logical name as the first one
+            &["kernel"],
+            &[],
+            &["other-cap"],
+            &[("mdn-kernel", "../../crates/kernel")],
+            one_pub_facade(),
+        );
     let report = check_architecture(&f.root);
     assert!(
         report.has_kind(ViolationKind::DuplicateModuleName),
@@ -753,41 +746,37 @@ fn case_m_duplicate_module_names_fail() {
 #[test]
 fn case_n_duplicate_module_capabilities_fail() {
     let f = Fixture::new("n_dup_caps");
-    f.workspace(&[
-        "crates/kernel",
-        "modules/scene",
-        "modules/render",
-    ])
-    .layer_crate(
-        "crates/kernel",
-        "ndc-kernel",
-        "kernel",
-        0,
-        None,
-        &[],
-        &[],
-        "pub struct K;\n",
-    )
-    .module_crate(
-        "modules/scene",
-        "ndc-scene",
-        "scene",
-        &["kernel"],
-        &[],
-        &["shared-cap"],
-        &[("ndc-kernel", "../../crates/kernel")],
-        one_pub_facade(),
-    )
-    .module_crate(
-        "modules/render",
-        "ndc-render",
-        "render",
-        &["kernel"],
-        &[],
-        &["shared-cap"], // duplicate across modules
-        &[("ndc-kernel", "../../crates/kernel")],
-        one_pub_facade(),
-    );
+    f.workspace(&["crates/kernel", "modules/scene", "modules/render"])
+        .layer_crate(
+            "crates/kernel",
+            "ndc-kernel",
+            "kernel",
+            0,
+            None,
+            &[],
+            &[],
+            "pub struct K;\n",
+        )
+        .module_crate(
+            "modules/scene",
+            "ndc-scene",
+            "scene",
+            &["kernel"],
+            &[],
+            &["shared-cap"],
+            &[("ndc-kernel", "../../crates/kernel")],
+            one_pub_facade(),
+        )
+        .module_crate(
+            "modules/render",
+            "ndc-render",
+            "render",
+            &["kernel"],
+            &[],
+            &["shared-cap"], // duplicate across modules
+            &[("ndc-kernel", "../../crates/kernel")],
+            one_pub_facade(),
+        );
     let report = check_architecture(&f.root);
     assert!(
         report.has_kind(ViolationKind::DuplicateModuleCapability),
@@ -863,17 +852,16 @@ fn case_p_module_facade_must_export_one() {
 #[test]
 fn case_q_forbidden_source_macro_fails() {
     let f = Fixture::new("q_forbidden_macro");
-    f.workspace(&["crates/kernel"])
-        .layer_crate(
-            "crates/kernel",
-            "qfm-kernel",
-            "kernel",
-            0,
-            None,
-            &[],
-            &[],
-            "pub fn boom() { println!(\"forbidden\"); }\n",
-        );
+    f.workspace(&["crates/kernel"]).layer_crate(
+        "crates/kernel",
+        "qfm-kernel",
+        "kernel",
+        0,
+        None,
+        &[],
+        &[],
+        "pub fn boom() { println!(\"forbidden\"); }\n",
+    );
     let report = check_architecture(&f.root);
     assert!(
         report.has_kind(ViolationKind::SourceHygieneForbiddenMacro),
@@ -885,17 +873,16 @@ fn case_q_forbidden_source_macro_fails() {
 #[test]
 fn case_r_browser_api_in_non_host_layer_fails() {
     let f = Fixture::new("r_browser_api");
-    f.workspace(&["crates/kernel"])
-        .layer_crate(
-            "crates/kernel",
-            "rba-kernel",
-            "kernel",
-            0,
-            None,
-            &[],
-            &[],
-            "use web_sys::Window;\npub struct K;\n",
-        );
+    f.workspace(&["crates/kernel"]).layer_crate(
+        "crates/kernel",
+        "rba-kernel",
+        "kernel",
+        0,
+        None,
+        &[],
+        &[],
+        "use web_sys::Window;\npub struct K;\n",
+    );
     let report = check_architecture(&f.root);
     assert!(
         report.has_kind(ViolationKind::SourceHygieneBrowserApi),

@@ -70,7 +70,13 @@ mod tests {
 
     #[test]
     fn accessors_round_trip_constructed_values() {
-        let s = CameraSnapshot::new(SceneNodeId::from_raw(5), rad(1.5), rat(16.0 / 9.0), m(0.1), m(100.0));
+        let s = CameraSnapshot::new(
+            SceneNodeId::from_raw(5),
+            rad(1.5),
+            rat(16.0 / 9.0),
+            m(0.1),
+            m(100.0),
+        );
         assert_eq!(s.node().raw(), 5);
         assert_eq!(s.fovy_radians().get(), 1.5);
         assert_eq!(s.aspect().get(), 16.0 / 9.0);
@@ -80,9 +86,27 @@ mod tests {
 
     #[test]
     fn equality_requires_all_fields() {
-        let a = CameraSnapshot::new(SceneNodeId::from_raw(1), rad(1.0), rat(1.0), m(0.1), m(100.0));
-        let b = CameraSnapshot::new(SceneNodeId::from_raw(1), rad(1.0), rat(1.0), m(0.1), m(100.0));
-        let c = CameraSnapshot::new(SceneNodeId::from_raw(2), rad(1.0), rat(1.0), m(0.1), m(100.0));
+        let a = CameraSnapshot::new(
+            SceneNodeId::from_raw(1),
+            rad(1.0),
+            rat(1.0),
+            m(0.1),
+            m(100.0),
+        );
+        let b = CameraSnapshot::new(
+            SceneNodeId::from_raw(1),
+            rad(1.0),
+            rat(1.0),
+            m(0.1),
+            m(100.0),
+        );
+        let c = CameraSnapshot::new(
+            SceneNodeId::from_raw(2),
+            rad(1.0),
+            rat(1.0),
+            m(0.1),
+            m(100.0),
+        );
         assert_eq!(a, b);
         assert_ne!(a, c);
     }

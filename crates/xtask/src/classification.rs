@@ -38,11 +38,7 @@ pub struct ManifestIndex {
 }
 
 impl ManifestIndex {
-    pub fn new(
-        layers: &[LayerManifest],
-        modules: &[ModuleManifest],
-        apps: &[AppManifest],
-    ) -> Self {
+    pub fn new(layers: &[LayerManifest], modules: &[ModuleManifest], apps: &[AppManifest]) -> Self {
         let mut idx = ManifestIndex::default();
         for m in layers {
             idx.layer_by_dir.insert(m.dir.clone(), m.clone());

@@ -74,9 +74,7 @@ impl Vec4 {
             ));
         }
         if k == 0.0 {
-            return Err(MathError::divide_by_zero(
-                "vec4 scalar divisor was zero",
-            ));
+            return Err(MathError::divide_by_zero("vec4 scalar divisor was zero"));
         }
         Ok(Vec4::new(self.x / k, self.y / k, self.z / k, self.w / k))
     }
@@ -151,7 +149,10 @@ mod reflect_tests {
         let mut w = BinaryWriter::new();
         v.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Vec4::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), v);
+        assert_eq!(
+            Vec4::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            v
+        );
         for len in 0..bytes.len() {
             assert!(Vec4::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
         }
@@ -181,13 +182,17 @@ mod tests {
         let a = Vec4::new(1.0, 2.0, 3.0, 4.0);
         let b = Vec4::new(5.0, 6.0, 7.0, 8.0);
         assert!(a.add(b).approx_eq(&Vec4::new(6.0, 8.0, 10.0, 12.0), eps()));
-        assert!(b.subtract(a).approx_eq(&Vec4::new(4.0, 4.0, 4.0, 4.0), eps()));
+        assert!(b
+            .subtract(a)
+            .approx_eq(&Vec4::new(4.0, 4.0, 4.0, 4.0), eps()));
     }
 
     #[test]
     fn mul_and_div_scalar_work() {
         let v = Vec4::new(2.0, -4.0, 6.0, 8.0);
-        assert!(v.mul_scalar(0.5).approx_eq(&Vec4::new(1.0, -2.0, 3.0, 4.0), eps()));
+        assert!(v
+            .mul_scalar(0.5)
+            .approx_eq(&Vec4::new(1.0, -2.0, 3.0, 4.0), eps()));
         assert!(v
             .div_scalar(2.0)
             .unwrap()

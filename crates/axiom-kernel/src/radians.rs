@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn new_accepts_finite() {
-        assert_eq!(Radians::new(3.14).unwrap().get(), 3.14);
+        assert_eq!(Radians::new(1.25).unwrap().get(), 1.25);
     }
 
     #[test]

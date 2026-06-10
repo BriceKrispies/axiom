@@ -27,17 +27,24 @@ impl Frustum {
     pub fn from_view_projection(clip_from_world: Mat4) -> MathResult<Frustum> {
         let m = clip_from_world.as_cols_array();
         // Row r of the row-major form is `(m[0*4+r], m[1*4+r], m[2*4+r], m[3*4+r])`.
-        let r = |row: usize| -> (f32, f32, f32, f32) {
-            (m[row], m[4 + row], m[8 + row], m[12 + row])
-        };
+        let r =
+            |row: usize| -> (f32, f32, f32, f32) { (m[row], m[4 + row], m[8 + row], m[12 + row]) };
         let row0 = r(0);
         let row1 = r(1);
         let row2 = r(2);
         let row3 = r(3);
 
-        fn plane_from(row: (f32, f32, f32, f32), sign: f32, base: (f32, f32, f32, f32)) -> (Vec3, f32) {
+        fn plane_from(
+            row: (f32, f32, f32, f32),
+            sign: f32,
+            base: (f32, f32, f32, f32),
+        ) -> (Vec3, f32) {
             (
-                Vec3::new(base.0 + sign * row.0, base.1 + sign * row.1, base.2 + sign * row.2),
+                Vec3::new(
+                    base.0 + sign * row.0,
+                    base.1 + sign * row.1,
+                    base.2 + sign * row.2,
+                ),
                 base.3 + sign * row.3,
             )
         }
@@ -81,9 +88,21 @@ impl Frustum {
             let n = plane.normal();
             // p-vertex: corner that maximizes signed distance.
             let p_vertex = Vec3::new(
-                if n.x >= 0.0 { aabb.max().x } else { aabb.min().x },
-                if n.y >= 0.0 { aabb.max().y } else { aabb.min().y },
-                if n.z >= 0.0 { aabb.max().z } else { aabb.min().z },
+                if n.x >= 0.0 {
+                    aabb.max().x
+                } else {
+                    aabb.min().x
+                },
+                if n.y >= 0.0 {
+                    aabb.max().y
+                } else {
+                    aabb.min().y
+                },
+                if n.z >= 0.0 {
+                    aabb.max().z
+                } else {
+                    aabb.min().z
+                },
             );
             if plane.signed_distance_to_point(p_vertex) < 0.0 {
                 return false;
@@ -153,22 +172,16 @@ mod tests {
     #[test]
     fn intersects_aabb_in_front_of_camera() {
         let f = standard_frustum();
-        let aabb = Aabb::from_center_extents(
-            Vec3::new(0.0, 0.0, -10.0),
-            Vec3::new(1.0, 1.0, 1.0),
-        )
-        .unwrap();
+        let aabb = Aabb::from_center_extents(Vec3::new(0.0, 0.0, -10.0), Vec3::new(1.0, 1.0, 1.0))
+            .unwrap();
         assert!(f.intersects_aabb(&aabb));
     }
 
     #[test]
     fn culls_aabb_behind_camera() {
         let f = standard_frustum();
-        let aabb = Aabb::from_center_extents(
-            Vec3::new(0.0, 0.0, 50.0),
-            Vec3::new(1.0, 1.0, 1.0),
-        )
-        .unwrap();
+        let aabb =
+            Aabb::from_center_extents(Vec3::new(0.0, 0.0, 50.0), Vec3::new(1.0, 1.0, 1.0)).unwrap();
         assert!(!f.intersects_aabb(&aabb));
     }
 

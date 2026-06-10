@@ -74,10 +74,7 @@ mod tests {
         });
         s.push(GpuCommand::Present);
         assert_eq!(s.len(), 2);
-        assert_eq!(
-            s.commands()[0].kind_code(),
-            GpuCommand::KIND_CLEAR_FRAME
-        );
+        assert_eq!(s.commands()[0].kind_code(), GpuCommand::KIND_CLEAR_FRAME);
         assert_eq!(s.commands()[1].kind_code(), GpuCommand::KIND_PRESENT);
     }
 }

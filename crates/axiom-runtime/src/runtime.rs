@@ -560,7 +560,11 @@ mod tests {
             .unwrap();
         let record = rt.step().unwrap();
         let metrics = record.diagnostics().metrics();
-        assert_eq!(metrics.len(), 1, "only the system metric, not runtime.steps");
+        assert_eq!(
+            metrics.len(),
+            1,
+            "only the system metric, not runtime.steps"
+        );
         assert_eq!(metrics[0].name(), "cube.angle_deg");
         assert_eq!(metrics[0].value(), MetricValue::float(7.0));
 
@@ -595,7 +599,11 @@ mod cov {
             let _ = ctx.events();
             let _ = ctx.commands_mut();
             ctx.events_mut()
-                .push(crate::runtime_event::RuntimeEvent::new(1, Tick::new(0), vec![]));
+                .push(crate::runtime_event::RuntimeEvent::new(
+                    1,
+                    Tick::new(0),
+                    vec![],
+                ));
             Ok(())
         }
     }

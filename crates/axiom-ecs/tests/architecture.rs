@@ -120,7 +120,13 @@ fn no_browser_or_js_bindgen_apis() {
 #[test]
 fn no_dom_canvas_or_browser_globals() {
     assert_absent(
-        &["HtmlCanvas", "OffscreenCanvas", "document.", "window.", "navigator."],
+        &[
+            "HtmlCanvas",
+            "OffscreenCanvas",
+            "document.",
+            "window.",
+            "navigator.",
+        ],
         "axiom-ecs must not reference DOM/canvas/browser globals",
     );
 }
@@ -136,7 +142,14 @@ fn no_webgpu_or_webgl_apis() {
 #[test]
 fn no_wall_clock_time_or_randomness() {
     assert_absent(
-        &["std::time", "SystemTime", "Instant::now", "rand::", "thread_rng", "getrandom"],
+        &[
+            "std::time",
+            "SystemTime",
+            "Instant::now",
+            "rand::",
+            "thread_rng",
+            "getrandom",
+        ],
         "axiom-ecs must not read wall-clock time or use randomness",
     );
 }
@@ -162,7 +175,10 @@ fn no_utils_or_helpers_modules() {
     for path in ecs_source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         assert_ne!(name, "utils", "axiom-ecs must not have a `utils` module");
-        assert_ne!(name, "helpers", "axiom-ecs must not have a `helpers` module");
+        assert_ne!(
+            name, "helpers",
+            "axiom-ecs must not have a `helpers` module"
+        );
         assert_ne!(name, "common", "axiom-ecs must not have a `common` module");
         assert_ne!(name, "misc", "axiom-ecs must not have a `misc` module");
     }
@@ -200,7 +216,13 @@ fn lib_exports_are_curated_set() {
 
 #[test]
 fn lower_layers_do_not_import_axiom_ecs() {
-    for layer in ["axiom-kernel", "axiom-runtime", "axiom-math", "axiom-host", "axiom-frame"] {
+    for layer in [
+        "axiom-kernel",
+        "axiom-runtime",
+        "axiom-math",
+        "axiom-host",
+        "axiom-frame",
+    ] {
         assert_absent_in(
             &sibling_src_dir(layer),
             layer,

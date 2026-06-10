@@ -52,7 +52,12 @@ mod tests {
 
     #[test]
     fn accessors_round_trip_constructed_values() {
-        let s = LightSnapshot::new(SceneNodeId::from_raw(7), LightKind::Point, Vec3::new(0.5, 0.5, 0.5), rat(3.0));
+        let s = LightSnapshot::new(
+            SceneNodeId::from_raw(7),
+            LightKind::Point,
+            Vec3::new(0.5, 0.5, 0.5),
+            rat(3.0),
+        );
         assert_eq!(s.node().raw(), 7);
         assert_eq!(s.kind(), LightKind::Point);
         assert_eq!(s.color().x, 0.5);
@@ -61,9 +66,24 @@ mod tests {
 
     #[test]
     fn equality_requires_all_fields() {
-        let a = LightSnapshot::new(SceneNodeId::from_raw(1), LightKind::Directional, Vec3::ONE, rat(1.0));
-        let b = LightSnapshot::new(SceneNodeId::from_raw(1), LightKind::Directional, Vec3::ONE, rat(1.0));
-        let c = LightSnapshot::new(SceneNodeId::from_raw(1), LightKind::Point, Vec3::ONE, rat(1.0));
+        let a = LightSnapshot::new(
+            SceneNodeId::from_raw(1),
+            LightKind::Directional,
+            Vec3::ONE,
+            rat(1.0),
+        );
+        let b = LightSnapshot::new(
+            SceneNodeId::from_raw(1),
+            LightKind::Directional,
+            Vec3::ONE,
+            rat(1.0),
+        );
+        let c = LightSnapshot::new(
+            SceneNodeId::from_raw(1),
+            LightKind::Point,
+            Vec3::ONE,
+            rat(1.0),
+        );
         assert_eq!(a, b);
         assert_ne!(a, c);
     }

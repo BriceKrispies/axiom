@@ -105,16 +105,8 @@ impl Mat4 {
     /// Validates that `aspect > 0`, `near > 0`, `far > near`, and that
     /// `fovy_radians` is in `(0, π)`. Otherwise returns
     /// [`crate::math_error_code::MathErrorCode::InvalidMatrixOperation`].
-    pub fn perspective(
-        fovy_radians: f32,
-        aspect: f32,
-        near: f32,
-        far: f32,
-    ) -> MathResult<Mat4> {
-        if !fovy_radians.is_finite()
-            || !aspect.is_finite()
-            || !near.is_finite()
-            || !far.is_finite()
+    pub fn perspective(fovy_radians: f32, aspect: f32, near: f32, far: f32) -> MathResult<Mat4> {
+        if !fovy_radians.is_finite() || !aspect.is_finite() || !near.is_finite() || !far.is_finite()
         {
             return Err(MathError::invalid_matrix_operation(
                 "perspective parameters must be finite",
@@ -209,17 +201,27 @@ impl Mat4 {
     /// Fails when `eye == target` or when `target - eye` is parallel to `up`
     /// (the resulting basis would be degenerate).
     pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) -> MathResult<Mat4> {
-        let f = target.subtract(eye).normalize().map_err(|_| {
-            MathError::invalid_matrix_operation("look_at eye and target coincide")
-        })?;
+        let f = target
+            .subtract(eye)
+            .normalize()
+            .map_err(|_| MathError::invalid_matrix_operation("look_at eye and target coincide"))?;
         let s = f.cross(up).normalize().map_err(|_| {
             MathError::invalid_matrix_operation("look_at forward and up are parallel")
         })?;
         let u = s.cross(f);
         Ok(Mat4::from_cols_array([
-            s.x, u.x, -f.x, 0.0, //
-            s.y, u.y, -f.y, 0.0, //
-            s.z, u.z, -f.z, 0.0, //
+            s.x,
+            u.x,
+            -f.x,
+            0.0, //
+            s.y,
+            u.y,
+            -f.y,
+            0.0, //
+            s.z,
+            u.z,
+            -f.z,
+            0.0, //
             -s.dot(eye),
             -u.dot(eye),
             f.dot(eye),
@@ -302,8 +304,7 @@ impl ApproxEq for Mat4 {
 }
 
 impl Reflect for Mat4 {
-    const SCHEMA: TypeSchema =
-        TypeSchema::new("Mat4", &[FieldSchema::new("data", "[f32; 16]")]);
+    const SCHEMA: TypeSchema = TypeSchema::new("Mat4", &[FieldSchema::new("data", "[f32; 16]")]);
 
     fn reflect_write(&self, writer: &mut BinaryWriter) {
         for elem in self.data {
@@ -330,7 +331,10 @@ mod reflect_tests {
         let mut w = BinaryWriter::new();
         m.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Mat4::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), m);
+        assert_eq!(
+            Mat4::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            m
+        );
         for len in 0..bytes.len() {
             assert!(Mat4::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
         }
@@ -434,7 +438,9 @@ mod tests {
             MathErrorCode::InvalidMatrixOperation
         );
         assert_eq!(
-            Mat4::perspective(1.0, 1.0, 1.0, f32::NAN).unwrap_err().code(),
+            Mat4::perspective(1.0, 1.0, 1.0, f32::NAN)
+                .unwrap_err()
+                .code(),
             MathErrorCode::InvalidMatrixOperation
         );
     }
@@ -658,9 +664,9 @@ mod cov {
     #[test]
     fn perspective_focal_and_depth_terms_are_exact() {
         let fovy = std::f32::consts::FRAC_PI_3; // 60 deg; tan(30 deg) = 1/sqrt(3)
-        // near = 2 (NOT 1) so that `far * near` differs from `far / near`,
-        // killing the 153:23 (`*` -> `/`) mutant; and `far - near` differs from
-        // `far + near` for the depth terms.
+                                                // near = 2 (NOT 1) so that `far * near` differs from `far / near`,
+                                                // killing the 153:23 (`*` -> `/`) mutant; and `far - near` differs from
+                                                // `far + near` for the depth terms.
         let near = 2.0f32;
         let far = 100.0f32;
         let m = Mat4::perspective(fovy, 1.0, near, far).unwrap();
@@ -669,7 +675,7 @@ mod cov {
         // Mutant 133 (`/` -> `*`) gives f = tan(30deg) ~= 0.57735.
         assert!(cols[0].approx_eq(&3.0f32.sqrt(), eps5()));
         let nf = 1.0f32 / (near - far); // = -1/98
-        // col[10] = (far+near)*nf = 102 * nf.
+                                        // col[10] = (far+near)*nf = 102 * nf.
         assert!(cols[10].approx_eq(&((far + near) * nf), eps5()));
         // col[14] = 2*far*near*nf. With near=2: 2*100*2*nf = 400*nf.
         // Mutant 153 (`far / near`) gives 2*(100/2)*nf = 100*nf, distinct.

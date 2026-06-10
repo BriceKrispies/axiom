@@ -43,7 +43,10 @@ mod tests {
 
     #[test]
     fn variants_are_distinct() {
-        assert_ne!(GpuSubmissionStatus::Recorded, GpuSubmissionStatus::LiveNotBound);
+        assert_ne!(
+            GpuSubmissionStatus::Recorded,
+            GpuSubmissionStatus::LiveNotBound
+        );
         assert_ne!(
             GpuSubmissionStatus::LiveNotBound,
             GpuSubmissionStatus::LiveNotInitialized

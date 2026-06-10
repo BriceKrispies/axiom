@@ -144,9 +144,17 @@ mod tests {
         // The shared `events()` accessor must reflect what was pushed through
         // `events_mut()` — a leaked default queue would report len 0.
         ctx.events_mut()
-            .push(crate::runtime_event::RuntimeEvent::new(3, Tick::new(0), vec![]));
+            .push(crate::runtime_event::RuntimeEvent::new(
+                3,
+                Tick::new(0),
+                vec![],
+            ));
         ctx.events_mut()
-            .push(crate::runtime_event::RuntimeEvent::new(4, Tick::new(0), vec![]));
+            .push(crate::runtime_event::RuntimeEvent::new(
+                4,
+                Tick::new(0),
+                vec![],
+            ));
         assert_eq!(ctx.events().len(), 2);
         assert!(!ctx.events().is_empty());
     }

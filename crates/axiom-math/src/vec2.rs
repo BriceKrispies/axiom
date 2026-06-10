@@ -54,9 +54,7 @@ impl Vec2 {
             ));
         }
         if k == 0.0 {
-            return Err(MathError::divide_by_zero(
-                "vec2 scalar divisor was zero",
-            ));
+            return Err(MathError::divide_by_zero("vec2 scalar divisor was zero"));
         }
         Ok(Vec2::new(self.x / k, self.y / k))
     }
@@ -143,7 +141,10 @@ mod reflect_tests {
         let mut w = BinaryWriter::new();
         v.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Vec2::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), v);
+        assert_eq!(
+            Vec2::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            v
+        );
         for len in 0..bytes.len() {
             assert!(Vec2::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
         }

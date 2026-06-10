@@ -55,7 +55,11 @@ impl SceneApi {
     }
 
     /// Set a node's local transform.
-    pub fn set_local_transform(&mut self, id: SceneNodeId, transform: Transform) -> SceneResult<()> {
+    pub fn set_local_transform(
+        &mut self,
+        id: SceneNodeId,
+        transform: Transform,
+    ) -> SceneResult<()> {
         self.scene.set_local(id, transform)
     }
 
@@ -178,7 +182,11 @@ impl SceneApi {
     }
 
     /// Toggle the visibility of the renderable on `node`.
-    pub fn set_renderable_visibility(&mut self, node: SceneNodeId, visible: bool) -> SceneResult<()> {
+    pub fn set_renderable_visibility(
+        &mut self,
+        node: SceneNodeId,
+        visible: bool,
+    ) -> SceneResult<()> {
         self.scene.set_renderable_visible(node, visible)
     }
 
@@ -235,8 +243,8 @@ impl SceneApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_kernel::{Meters, Radians, Ratio};
     use crate::scene_error_code::SceneErrorCode;
+    use axiom_kernel::{Meters, Radians, Ratio};
 
     fn math() -> MathApi {
         MathApi::new()
@@ -282,8 +290,15 @@ mod tests {
     fn add_perspective_camera_valid_and_invalid() {
         let mut a = api();
         let n = a.create_node();
-        a.add_perspective_camera(&math(), n, rad(std::f32::consts::FRAC_PI_3), rat(1.0), m(0.1), m(100.0))
-            .unwrap();
+        a.add_perspective_camera(
+            &math(),
+            n,
+            rad(std::f32::consts::FRAC_PI_3),
+            rat(1.0),
+            m(0.1),
+            m(100.0),
+        )
+        .unwrap();
         // Invalid intrinsics propagate the `?` error arm.
         let err = a
             .add_perspective_camera(&math(), n, rad(0.0), rat(1.0), m(0.1), m(100.0))
@@ -304,14 +319,20 @@ mod tests {
     fn lights_valid_and_invalid() {
         let mut a = api();
         let n = a.create_node();
-        a.add_directional_light(&math(), n, Vec3::ONE, rat(1.0)).unwrap();
-        a.add_point_light(&math(), n, Vec3::new(0.5, 0.5, 0.5), rat(2.0)).unwrap();
+        a.add_directional_light(&math(), n, Vec3::ONE, rat(1.0))
+            .unwrap();
+        a.add_point_light(&math(), n, Vec3::new(0.5, 0.5, 0.5), rat(2.0))
+            .unwrap();
         assert_eq!(
-            a.add_directional_light(&math(), n, Vec3::ONE, rat(-1.0)).unwrap_err().code(),
+            a.add_directional_light(&math(), n, Vec3::ONE, rat(-1.0))
+                .unwrap_err()
+                .code(),
             SceneErrorCode::InvalidLightParameters
         );
         assert_eq!(
-            a.add_point_light(&math(), n, Vec3::new(f32::NAN, 0.0, 0.0), rat(1.0)).unwrap_err().code(),
+            a.add_point_light(&math(), n, Vec3::new(f32::NAN, 0.0, 0.0), rat(1.0))
+                .unwrap_err()
+                .code(),
             SceneErrorCode::InvalidLightParameters
         );
         a.remove_light(n).unwrap();
@@ -325,7 +346,9 @@ mod tests {
         let material = a.material_ref(2);
         a.add_renderable(n, mesh, material).unwrap();
         assert_eq!(
-            a.add_renderable(n, MeshRef::INVALID, material).unwrap_err().code(),
+            a.add_renderable(n, MeshRef::INVALID, material)
+                .unwrap_err()
+                .code(),
             SceneErrorCode::InvalidRenderableReference
         );
         a.set_renderable_visibility(n, false).unwrap();
@@ -338,7 +361,9 @@ mod tests {
         let n = a.create_node();
         a.add_spin(n, Vec3::UNIT_Y, 360).unwrap();
         assert_eq!(
-            a.add_spin(SceneNodeId::from_raw(99), Vec3::UNIT_Y, 360).unwrap_err().code(),
+            a.add_spin(SceneNodeId::from_raw(99), Vec3::UNIT_Y, 360)
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
     }
@@ -358,7 +383,8 @@ mod tests {
     fn snapshot_reads_current_scene_state() {
         let mut a = api();
         let n = a.create_node();
-        a.add_directional_light(&math(), n, Vec3::ONE, rat(1.0)).unwrap();
+        a.add_directional_light(&math(), n, Vec3::ONE, rat(1.0))
+            .unwrap();
         let snap = a.snapshot();
         assert_eq!(snap.nodes().len(), 1);
         assert_eq!(snap.lights().len(), 1);
@@ -387,8 +413,14 @@ mod tests {
             let visible = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
             let input = HostFrameInput::new(1, elapsed, vp);
             let plan = HostStepPlan::build(&input, &cfg, &visible, 0);
-            let report =
-                HostFrameReport::new(input.sequence(), plan, plan.steps(), Vec::new(), vp, visible);
+            let report = HostFrameReport::new(
+                input.sequence(),
+                plan,
+                plan.steps(),
+                Vec::new(),
+                vp,
+                visible,
+            );
             FrameApi::new()
                 .engine_frame_from_host_report(&report, elapsed, Vec::new())
                 .unwrap()
@@ -396,11 +428,21 @@ mod tests {
 
         let f0 = frame(1_000);
         let snap0 = a.advance(0, &FrameContext::new(&f0));
-        let child0 = snap0.nodes().iter().find(|n| n.parent().is_some()).unwrap().world();
+        let child0 = snap0
+            .nodes()
+            .iter()
+            .find(|n| n.parent().is_some())
+            .unwrap()
+            .world();
 
         let f2 = frame(1_000);
         let snap2 = a.advance(2, &FrameContext::new(&f2));
-        let child2 = snap2.nodes().iter().find(|n| n.parent().is_some()).unwrap().world();
+        let child2 = snap2
+            .nodes()
+            .iter()
+            .find(|n| n.parent().is_some())
+            .unwrap()
+            .world();
 
         // Same handle, different ticks -> different world rotation, same parent
         // translation carried through.

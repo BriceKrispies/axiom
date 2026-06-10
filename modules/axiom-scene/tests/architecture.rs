@@ -454,8 +454,14 @@ fn no_utils_or_helpers_modules() {
     for path in scene_source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         assert_ne!(name, "utils", "axiom-scene must not have a `utils` module");
-        assert_ne!(name, "helpers", "axiom-scene must not have a `helpers` module");
-        assert_ne!(name, "common", "axiom-scene must not have a `common` module");
+        assert_ne!(
+            name, "helpers",
+            "axiom-scene must not have a `helpers` module"
+        );
+        assert_ne!(
+            name, "common",
+            "axiom-scene must not have a `common` module"
+        );
         assert_ne!(name, "misc", "axiom-scene must not have a `misc` module");
     }
 }

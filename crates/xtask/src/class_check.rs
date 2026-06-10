@@ -453,11 +453,9 @@ fn check_forward_dependencies(
                     )),
                     PackageClass::Layer => {
                         if let Some(module) = module_by_crate.get(c.package.name.as_str()) {
-                            let layer_name = layer_by_crate
-                                .iter()
-                                .find_map(|(crate_name, l)| {
-                                    (crate_name == dep_name).then(|| l.layer.name.clone())
-                                });
+                            let layer_name = layer_by_crate.iter().find_map(|(crate_name, l)| {
+                                (crate_name == dep_name).then(|| l.layer.name.clone())
+                            });
                             let allowed = match &layer_name {
                                 Some(name) => module.module.allowed_layers.contains(name),
                                 None => false,
@@ -501,11 +499,9 @@ fn check_forward_dependencies(
                     )),
                     PackageClass::Layer => {
                         if let Some(app) = app_by_crate.get(c.package.name.as_str()) {
-                            let layer_name = layer_by_crate
-                                .iter()
-                                .find_map(|(crate_name, l)| {
-                                    (crate_name == dep_name).then(|| l.layer.name.clone())
-                                });
+                            let layer_name = layer_by_crate.iter().find_map(|(crate_name, l)| {
+                                (crate_name == dep_name).then(|| l.layer.name.clone())
+                            });
                             let allowed = match &layer_name {
                                 Some(name) => app.app.allowed_layers.contains(name),
                                 None => false,

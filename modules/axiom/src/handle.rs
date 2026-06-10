@@ -67,7 +67,12 @@ mod tests {
         assert_eq!(h.id(), 7);
     }
 
+    // The explicit `.clone()` is the point: it exercises `Handle`'s hand-written
+    // `Clone` impl (the `*self` body the coverage gate requires a test to reach),
+    // alongside the `Copy` move above. `clone_on_copy` would have us drop it and
+    // lose that coverage, so it is allowed here deliberately.
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn copy_and_clone_preserve_identity() {
         let h: Handle<NotCopyable> = Handle::new(3);
         let copied = h;

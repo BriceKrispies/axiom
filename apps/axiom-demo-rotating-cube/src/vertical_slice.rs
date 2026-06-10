@@ -171,8 +171,8 @@ pub(crate) fn run_vertical_slice(
     //         app drives rotation from telemetry for the introspection story.) ----
     let aspect = VIEWPORT_WIDTH as f32 / VIEWPORT_HEIGHT as f32;
     let mut scene = SceneApi::new();
-    let rotation = Quat::from_axis_angle(Vec3::UNIT_Y, angle_rad)
-        .expect("axis is unit and angle is finite");
+    let rotation =
+        Quat::from_axis_angle(Vec3::UNIT_Y, angle_rad).expect("axis is unit and angle is finite");
     let cube_root = scene.create_node_with_transform(Transform::from_rotation(rotation));
     let cube_child = scene.create_node();
     scene
@@ -303,8 +303,7 @@ pub(crate) fn run_vertical_slice(
             indices,
         });
     }
-    let mut materials =
-        Vec::with_capacity(api.resources_api.resolved_material_count(&resolved));
+    let mut materials = Vec::with_capacity(api.resources_api.resolved_material_count(&resolved));
     for i in 0..api.resources_api.resolved_material_count(&resolved) {
         let id = api
             .resources_api
@@ -329,9 +328,10 @@ pub(crate) fn run_vertical_slice(
     );
 
     // ---- 11. Replay the render input plan into the real RenderApi builder. ----
-    let mut render_input = api
-        .render_api
-        .new_input(render_input_artifact.viewport_width, render_input_artifact.viewport_height);
+    let mut render_input = api.render_api.new_input(
+        render_input_artifact.viewport_width,
+        render_input_artifact.viewport_height,
+    );
     api.render_api
         .set_input_clear_color(&mut render_input, render_input_artifact.clear_color);
     if let Some(camera) = render_input_artifact.camera {
@@ -393,39 +393,41 @@ pub(crate) fn run_vertical_slice(
     let command_count = api.render_api.command_count(&render_commands);
     let render_command_list_artifact = RenderCommandListArtifact {
         commands: (0..command_count)
-            .filter_map(|i| match api.render_api.command_kind_at(&render_commands, i)? {
-                RenderApi::KIND_CLEAR_FRAME => api
-                    .render_api
-                    .command_clear_color_at(&render_commands, i)
-                    .map(|color| RenderCommandArtifact::ClearFrame { color }),
-                RenderApi::KIND_SET_CAMERA => api
-                    .render_api
-                    .command_camera_at(&render_commands, i)
-                    .map(|(view, projection)| RenderCommandArtifact::SetCamera {
-                        view,
-                        projection,
-                    }),
-                RenderApi::KIND_SET_PIPELINE => api
-                    .render_api
-                    .command_pipeline_at(&render_commands, i)
-                    .map(|pipeline_id| RenderCommandArtifact::SetPipeline { pipeline_id }),
-                RenderApi::KIND_SET_MESH => api
-                    .render_api
-                    .command_mesh_id_at(&render_commands, i)
-                    .map(|mesh_id| RenderCommandArtifact::SetMesh { mesh_id }),
-                RenderApi::KIND_SET_MATERIAL => api
-                    .render_api
-                    .command_material_id_at(&render_commands, i)
-                    .map(|material_id| RenderCommandArtifact::SetMaterial { material_id }),
-                RenderApi::KIND_DRAW_INDEXED => api
-                    .render_api
-                    .command_draw_indexed_at(&render_commands, i)
-                    .map(|(index_count, world)| RenderCommandArtifact::DrawIndexed {
-                        index_count,
-                        world,
-                    }),
-                _ => None,
-            })
+            .filter_map(
+                |i| match api.render_api.command_kind_at(&render_commands, i)? {
+                    RenderApi::KIND_CLEAR_FRAME => api
+                        .render_api
+                        .command_clear_color_at(&render_commands, i)
+                        .map(|color| RenderCommandArtifact::ClearFrame { color }),
+                    RenderApi::KIND_SET_CAMERA => api
+                        .render_api
+                        .command_camera_at(&render_commands, i)
+                        .map(|(view, projection)| RenderCommandArtifact::SetCamera {
+                            view,
+                            projection,
+                        }),
+                    RenderApi::KIND_SET_PIPELINE => api
+                        .render_api
+                        .command_pipeline_at(&render_commands, i)
+                        .map(|pipeline_id| RenderCommandArtifact::SetPipeline { pipeline_id }),
+                    RenderApi::KIND_SET_MESH => api
+                        .render_api
+                        .command_mesh_id_at(&render_commands, i)
+                        .map(|mesh_id| RenderCommandArtifact::SetMesh { mesh_id }),
+                    RenderApi::KIND_SET_MATERIAL => api
+                        .render_api
+                        .command_material_id_at(&render_commands, i)
+                        .map(|material_id| RenderCommandArtifact::SetMaterial { material_id }),
+                    RenderApi::KIND_DRAW_INDEXED => api
+                        .render_api
+                        .command_draw_indexed_at(&render_commands, i)
+                        .map(|(index_count, world)| RenderCommandArtifact::DrawIndexed {
+                            index_count,
+                            world,
+                        }),
+                    _ => None,
+                },
+            )
             .collect(),
     };
 
@@ -437,14 +439,15 @@ pub(crate) fn run_vertical_slice(
     );
 
     // ---- 15. Replay the submission plan into the real WebGpuApi and submit. ----
-    let mut submission = api
-        .webgpu_api
-        .new_submission(gpu_submission_artifact.target_width, gpu_submission_artifact.target_height);
+    let mut submission = api.webgpu_api.new_submission(
+        gpu_submission_artifact.target_width,
+        gpu_submission_artifact.target_height,
+    );
     for command in &gpu_submission_artifact.commands {
         match *command {
-            GpuCommandArtifact::ClearFrame { color } => {
-                api.webgpu_api.submission_clear_frame(&mut submission, color)
-            }
+            GpuCommandArtifact::ClearFrame { color } => api
+                .webgpu_api
+                .submission_clear_frame(&mut submission, color),
             GpuCommandArtifact::SetCamera { view, projection } => api
                 .webgpu_api
                 .submission_set_camera(&mut submission, view, projection),
@@ -460,9 +463,7 @@ pub(crate) fn run_vertical_slice(
             GpuCommandArtifact::DrawIndexed { index_count, world } => api
                 .webgpu_api
                 .submission_draw_indexed(&mut submission, index_count, world),
-            GpuCommandArtifact::Present => {
-                api.webgpu_api.submission_present(&mut submission)
-            }
+            GpuCommandArtifact::Present => api.webgpu_api.submission_present(&mut submission),
         }
     }
     let gpu_report = api.webgpu_api.submit(submission);

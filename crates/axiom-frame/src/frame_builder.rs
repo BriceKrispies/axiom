@@ -192,7 +192,10 @@ mod tests {
     fn builder_handles_skipped_frames() {
         let mut b = FrameBuilder::new(STEP_NANOS);
         let f = b
-            .build(&report(1, STEP_NANOS, HostLifecycleState::initial()), vec![])
+            .build(
+                &report(1, STEP_NANOS, HostLifecycleState::initial()),
+                vec![],
+            )
             .unwrap();
         assert!(f.is_skipped());
         assert_eq!(f.runtime_step_count(), 0);
@@ -206,7 +209,9 @@ mod tests {
             FrameCommand::new(1, 7, vec![1, 2]),
             FrameCommand::new(2, 8, Vec::new()),
         ];
-        let f = b.build(&report(1, STEP_NANOS, visible()), cmds.clone()).unwrap();
+        let f = b
+            .build(&report(1, STEP_NANOS, visible()), cmds.clone())
+            .unwrap();
         assert_eq!(f.commands(), cmds.as_slice());
         assert_eq!(f.diagnostics().command_count(), 2);
     }
@@ -252,7 +257,10 @@ mod tests {
             let mut b = FrameBuilder::new(STEP_NANOS);
             let mut frames = Vec::new();
             for seq in [1u64, 2, 3] {
-                frames.push(b.build(&report(seq, STEP_NANOS, visible()), vec![]).unwrap());
+                frames.push(
+                    b.build(&report(seq, STEP_NANOS, visible()), vec![])
+                        .unwrap(),
+                );
             }
             frames
         };

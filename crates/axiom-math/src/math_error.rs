@@ -164,7 +164,10 @@ mod tests {
         let wrapped = MathError::deserialization_failed("binary read failed", kernel_err);
         assert_eq!(wrapped.code(), MathErrorCode::DeserializationFailed);
         assert_eq!(wrapped.kernel(), Some(kernel_err));
-        assert_eq!(wrapped.kernel().unwrap().code(), KernelErrorCode::InvalidFixedStep);
+        assert_eq!(
+            wrapped.kernel().unwrap().code(),
+            KernelErrorCode::InvalidFixedStep
+        );
     }
 
     #[test]

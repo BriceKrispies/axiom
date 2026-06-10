@@ -87,8 +87,7 @@ impl SceneCommands {
                             .add_perspective_camera(
                                 math,
                                 node,
-                                Radians::new(p.fov_y.as_radians())
-                                    .expect("authored fov is finite"),
+                                Radians::new(p.fov_y.as_radians()).expect("authored fov is finite"),
                                 Ratio::new(self.aspect).expect("authored aspect is finite"),
                                 p.near,
                                 p.far,
@@ -139,6 +138,7 @@ impl SpawnedNode<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::angle::Angle;
     use crate::camera::{Camera, PerspectiveProjection};
     use crate::color::Color;
     use crate::directional_light::DirectionalLight;
@@ -147,7 +147,6 @@ mod tests {
     use crate::mesh::Mesh;
     use crate::renderable::Renderable;
     use crate::spin::Spin;
-    use crate::angle::Angle;
     use axiom_kernel::Meters;
     use axiom_math::Transform;
 

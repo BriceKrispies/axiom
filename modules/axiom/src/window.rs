@@ -96,11 +96,13 @@ mod tests {
     #[test]
     fn with_clear_color_overrides() {
         use axiom_kernel::Ratio;
-        let bg = || Color::linear_rgb(
-            Ratio::new(0.05).expect("authored colour channel is finite"),
-            Ratio::new(0.06).expect("authored colour channel is finite"),
-            Ratio::new(0.08).expect("authored colour channel is finite"),
-        );
+        let bg = || {
+            Color::linear_rgb(
+                Ratio::new(0.05).expect("authored colour channel is finite"),
+                Ratio::new(0.06).expect("authored colour channel is finite"),
+                Ratio::new(0.08).expect("authored colour channel is finite"),
+            )
+        };
         let w = Window::new(320, 240).with_clear_color(bg());
         assert_eq!(w.width(), 320);
         assert_eq!(w.height(), 240);

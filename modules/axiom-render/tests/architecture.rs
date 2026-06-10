@@ -156,7 +156,15 @@ fn no_host_layer_import() {
 #[test]
 fn no_forbidden_debug_macros() {
     assert_absent(
-        &["println!", "eprintln!", "print!", "eprint!", "dbg!", "todo!", "unimplemented!"],
+        &[
+            "println!",
+            "eprintln!",
+            "print!",
+            "eprint!",
+            "dbg!",
+            "todo!",
+            "unimplemented!",
+        ],
         "axiom-render must not use debug-print macros",
     );
 }

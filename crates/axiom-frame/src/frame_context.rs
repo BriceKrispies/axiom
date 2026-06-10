@@ -82,8 +82,8 @@ mod tests {
     use super::*;
     use crate::frame_builder::FrameBuilder;
     use axiom_host::{
-        HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostLifecycleState,
-        HostStepPlan, HostViewport,
+        HostBoundaryConfig, HostFrameInput, HostLifecycleSignal, HostLifecycleState, HostStepPlan,
+        HostViewport,
     };
 
     const STEP_NANOS: u64 = 1_000;
@@ -124,8 +124,13 @@ mod tests {
             STEP_NANOS,
             tick_value,
         );
-        let record =
-            RuntimeStepRecord::new(step, RuntimeDiagnostics::new(step), RuntimeState::Running, 0, 0);
+        let record = RuntimeStepRecord::new(
+            step,
+            RuntimeDiagnostics::new(step),
+            RuntimeState::Running,
+            0,
+            0,
+        );
         FrameStepSummary::from_record(&record)
     }
 
@@ -137,7 +142,7 @@ mod tests {
     fn rich_frame() -> EngineFrame {
         let host_vp = HostViewport::new(1600, 900, Ratio::new(1.0).unwrap()).unwrap();
         let report = {
-            let input = HostFrameInput::new(5, STEP_NANOS, host_vp.clone());
+            let input = HostFrameInput::new(5, STEP_NANOS, host_vp);
             let plan = HostStepPlan::build(&input, &cfg(), &visible(), 0);
             axiom_host::HostFrameReport::new(
                 input.sequence(),

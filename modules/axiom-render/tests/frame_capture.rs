@@ -53,7 +53,10 @@ fn cube_capture(api: &RenderApi, frame: u64, tick: u64, world: Mat4) -> (Vec<u8>
 
     let list = api.build_command_list(&input);
     let receipt = api.capture_receipt(FrameIndex::new(frame), Tick::new(tick), &list);
-    (api.receipt_bytes(&receipt).to_vec(), api.receipt_hash(&receipt))
+    (
+        api.receipt_bytes(&receipt).to_vec(),
+        api.receipt_hash(&receipt),
+    )
 }
 
 /// Build a two-object frame capture; `swap` reverses the object order so the
@@ -98,7 +101,10 @@ fn rotating_cube_frame_120_replay_produces_byte_identical_frame_capture() {
     let world = cube_world(cube_rotation_angle(120));
     let (bytes_a, hash_a) = cube_capture(&api, 120, 120, world);
     let (bytes_b, hash_b) = cube_capture(&api, 120, 120, world);
-    assert_eq!(bytes_a, bytes_b, "same frame must serialize byte-identically");
+    assert_eq!(
+        bytes_a, bytes_b,
+        "same frame must serialize byte-identically"
+    );
     assert_eq!(hash_a, hash_b, "same frame must hash identically");
 }
 
@@ -111,8 +117,14 @@ fn rotating_cube_frame_120_meaningful_render_change_changes_frame_capture() {
     let rotated = cube_world(cube_rotation_angle(121)); // different cube rotation only
     let (bytes_a, hash_a) = cube_capture(&api, 120, 120, baseline);
     let (bytes_b, hash_b) = cube_capture(&api, 120, 120, rotated);
-    assert_ne!(bytes_a, bytes_b, "a different cube world transform must change the capture");
-    assert_ne!(hash_a, hash_b, "a different cube world transform must change the hash");
+    assert_ne!(
+        bytes_a, bytes_b,
+        "a different cube world transform must change the capture"
+    );
+    assert_ne!(
+        hash_a, hash_b,
+        "a different cube world transform must change the hash"
+    );
 }
 
 // 3. Command ordering: the same commands in a different order must capture

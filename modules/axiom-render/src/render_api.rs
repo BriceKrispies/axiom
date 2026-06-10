@@ -185,22 +185,14 @@ impl RenderApi {
         list.at(idx).map(RenderCommand::kind_code)
     }
 
-    pub fn command_clear_color_at(
-        &self,
-        list: &RenderCommandList,
-        idx: usize,
-    ) -> Option<[f32; 4]> {
+    pub fn command_clear_color_at(&self, list: &RenderCommandList, idx: usize) -> Option<[f32; 4]> {
         match list.at(idx) {
             Some(RenderCommand::ClearFrame { color }) => Some(*color),
             _ => None,
         }
     }
 
-    pub fn command_camera_at(
-        &self,
-        list: &RenderCommandList,
-        idx: usize,
-    ) -> Option<(Mat4, Mat4)> {
+    pub fn command_camera_at(&self, list: &RenderCommandList, idx: usize) -> Option<(Mat4, Mat4)> {
         match list.at(idx) {
             Some(RenderCommand::SetCamera { view, projection }) => Some((*view, *projection)),
             _ => None,
@@ -221,11 +213,7 @@ impl RenderApi {
         }
     }
 
-    pub fn command_material_id_at(
-        &self,
-        list: &RenderCommandList,
-        idx: usize,
-    ) -> Option<u64> {
+    pub fn command_material_id_at(&self, list: &RenderCommandList, idx: usize) -> Option<u64> {
         match list.at(idx) {
             Some(RenderCommand::SetMaterial { material_id }) => Some(*material_id),
             _ => None,
@@ -238,9 +226,7 @@ impl RenderApi {
         idx: usize,
     ) -> Option<(u32, Mat4)> {
         match list.at(idx) {
-            Some(RenderCommand::DrawIndexed { index_count, world }) => {
-                Some((*index_count, *world))
-            }
+            Some(RenderCommand::DrawIndexed { index_count, world }) => Some((*index_count, *world)),
             _ => None,
         }
     }
@@ -298,11 +284,8 @@ mod tests {
             vec![Vec2::ZERO; 24],
             (0..36).collect(),
         );
-        let mat_idx = api().add_input_basic_lit_material(
-            &mut input,
-            99,
-            Vec4::new(0.5, 0.5, 0.5, 1.0),
-        );
+        let mat_idx =
+            api().add_input_basic_lit_material(&mut input, 99, Vec4::new(0.5, 0.5, 0.5, 1.0));
         api().add_input_object(&mut input, Mat4::IDENTITY, mesh_idx, mat_idx, true);
         input
     }
@@ -352,7 +335,10 @@ mod tests {
             api().command_kind_at(&list, 2),
             Some(RenderApi::KIND_SET_PIPELINE)
         );
-        assert_eq!(api().command_kind_at(&list, 3), Some(RenderApi::KIND_SET_MESH));
+        assert_eq!(
+            api().command_kind_at(&list, 3),
+            Some(RenderApi::KIND_SET_MESH)
+        );
         assert_eq!(
             api().command_kind_at(&list, 4),
             Some(RenderApi::KIND_SET_MATERIAL)
@@ -395,14 +381,7 @@ mod tests {
     #[test]
     fn invisible_objects_are_skipped() {
         let mut input = api().new_input(100, 100);
-        let mesh_idx = api().add_input_mesh(
-            &mut input,
-            1,
-            vec![],
-            vec![],
-            vec![],
-            vec![0, 1, 2],
-        );
+        let mesh_idx = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
         let mat_idx = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
         api().add_input_object(&mut input, Mat4::IDENTITY, mesh_idx, mat_idx, false);
         let list = api().build_command_list(&input);
@@ -419,12 +398,7 @@ mod tests {
             Vec3::ONE,
             Ratio::new(1.0).unwrap(),
         );
-        api().add_input_point_light(
-            &mut input,
-            Vec3::ZERO,
-            Vec3::ONE,
-            Ratio::new(0.5).unwrap(),
-        );
+        api().add_input_point_light(&mut input, Vec3::ZERO, Vec3::ONE, Ratio::new(0.5).unwrap());
         assert_eq!(input.lights().len(), 2);
     }
 
@@ -451,14 +425,7 @@ mod cov {
         // Valid mesh idx but out-of-range material idx exercises the
         // material `None => continue` arm specifically.
         let mut input = api().new_input(100, 100);
-        let mesh_idx = api().add_input_mesh(
-            &mut input,
-            1,
-            vec![],
-            vec![],
-            vec![],
-            vec![0, 1, 2],
-        );
+        let mesh_idx = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
         api().add_input_object(&mut input, Mat4::IDENTITY, mesh_idx, 99, true);
         let list = api().build_command_list(&input);
         // ClearFrame + SetPipeline only; the object was dropped at material lookup.

@@ -24,7 +24,15 @@ fn app_manifest_classifies_as_an_app_with_declared_layers_and_modules() {
     let app_toml = include_str!("../app.toml");
     assert!(app_toml.contains("[app]"), "app.toml must declare [app]");
     assert!(app_toml.contains("crate_name = \"axiom-demo-rotating-cube\""));
-    for layer in ["kernel", "runtime", "math", "host", "frame", "ecs", "introspect"] {
+    for layer in [
+        "kernel",
+        "runtime",
+        "math",
+        "host",
+        "frame",
+        "ecs",
+        "introspect",
+    ] {
         assert!(
             app_toml.contains(&format!("\"{layer}\"")),
             "app.toml must allow layer `{layer}`"
@@ -118,9 +126,7 @@ fn cube_world_transform_changes_as_the_simulation_advances() {
 }
 
 /// Extract the draw command's world matrix from the render command list.
-fn draw_world(
-    artifact: &axiom_demo_rotating_cube::VerticalSliceArtifact,
-) -> axiom_math::Mat4 {
+fn draw_world(artifact: &axiom_demo_rotating_cube::VerticalSliceArtifact) -> axiom_math::Mat4 {
     artifact
         .render_command_list
         .commands
@@ -194,7 +200,10 @@ fn every_boundary_artifact_is_present_and_well_formed() {
     ));
     assert!(matches!(
         f.render_command_list.commands.last().unwrap(),
-        RenderCommandArtifact::DrawIndexed { index_count: 36, .. }
+        RenderCommandArtifact::DrawIndexed {
+            index_count: 36,
+            ..
+        }
     ));
     // (the discriminant vec exists only to assert the list is inspectable)
     assert_eq!(kinds.len(), 6);

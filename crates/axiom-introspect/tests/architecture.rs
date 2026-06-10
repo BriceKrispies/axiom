@@ -120,7 +120,13 @@ fn no_browser_or_js_bindgen_apis() {
 #[test]
 fn no_dom_canvas_or_browser_globals() {
     assert_absent(
-        &["HtmlCanvas", "OffscreenCanvas", "document.", "window.", "navigator."],
+        &[
+            "HtmlCanvas",
+            "OffscreenCanvas",
+            "document.",
+            "window.",
+            "navigator.",
+        ],
         "axiom-introspect must not reference DOM/canvas/browser globals",
     );
 }
@@ -136,7 +142,14 @@ fn no_webgpu_or_webgl_apis() {
 #[test]
 fn no_wall_clock_time_or_randomness() {
     assert_absent(
-        &["std::time", "SystemTime", "Instant::now", "rand::", "thread_rng", "getrandom"],
+        &[
+            "std::time",
+            "SystemTime",
+            "Instant::now",
+            "rand::",
+            "thread_rng",
+            "getrandom",
+        ],
         "axiom-introspect must not read wall-clock time or use randomness",
     );
 }
@@ -161,10 +174,22 @@ fn no_placeholder_macros() {
 fn no_utils_or_helpers_modules() {
     for path in introspect_source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        assert_ne!(name, "utils", "axiom-introspect must not have a `utils` module");
-        assert_ne!(name, "helpers", "axiom-introspect must not have a `helpers` module");
-        assert_ne!(name, "common", "axiom-introspect must not have a `common` module");
-        assert_ne!(name, "misc", "axiom-introspect must not have a `misc` module");
+        assert_ne!(
+            name, "utils",
+            "axiom-introspect must not have a `utils` module"
+        );
+        assert_ne!(
+            name, "helpers",
+            "axiom-introspect must not have a `helpers` module"
+        );
+        assert_ne!(
+            name, "common",
+            "axiom-introspect must not have a `common` module"
+        );
+        assert_ne!(
+            name, "misc",
+            "axiom-introspect must not have a `misc` module"
+        );
     }
 }
 

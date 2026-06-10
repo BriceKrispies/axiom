@@ -304,8 +304,7 @@ fn request_animation_frame(
 ) -> Result<(), wasm_bindgen::JsValue> {
     use wasm_bindgen::JsCast;
 
-    let window =
-        web_sys::window().ok_or_else(|| wasm_bindgen::JsValue::from_str("no window"))?;
+    let window = web_sys::window().ok_or_else(|| wasm_bindgen::JsValue::from_str("no window"))?;
     window
         .request_animation_frame(callback.as_ref().unchecked_ref())
         .map(|_| ())

@@ -87,10 +87,9 @@ impl DemoRotatingCubeApi {
         // The headless slice stays on the deterministic recording backend.
         let webgpu_api = WebGpuApi::new_recording();
 
-        let mut runtime = Runtime::new(
-            RuntimeConfig::new(FIXED_STEP_NANOS).with_diagnostics_enabled(false),
-        )
-        .expect("runtime config is valid for the demo fixed step");
+        let mut runtime =
+            Runtime::new(RuntimeConfig::new(FIXED_STEP_NANOS).with_diagnostics_enabled(false))
+                .expect("runtime config is valid for the demo fixed step");
         runtime
             .initialize()
             .expect("demo runtime initialize cannot fail");
@@ -105,8 +104,8 @@ impl DemoRotatingCubeApi {
             )
             .expect("registering the cube spin system cannot fail");
 
-        let boundary_config = HostBoundaryConfig::new(FIXED_STEP_NANOS, 1)
-            .expect("max-steps-per-frame = 1 is valid");
+        let boundary_config =
+            HostBoundaryConfig::new(FIXED_STEP_NANOS, 1).expect("max-steps-per-frame = 1 is valid");
         let mut driver = host_api.step_driver(boundary_config);
         driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
 

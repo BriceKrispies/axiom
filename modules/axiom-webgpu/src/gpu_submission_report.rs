@@ -187,8 +187,18 @@ mod tests {
 
     #[test]
     fn equal_inputs_produce_equal_reports() {
-        let a = GpuSubmissionReport::new(vec![GpuCommand::Present], 1, 1, GpuSubmissionStatus::Recorded);
-        let b = GpuSubmissionReport::new(vec![GpuCommand::Present], 1, 1, GpuSubmissionStatus::Recorded);
+        let a = GpuSubmissionReport::new(
+            vec![GpuCommand::Present],
+            1,
+            1,
+            GpuSubmissionStatus::Recorded,
+        );
+        let b = GpuSubmissionReport::new(
+            vec![GpuCommand::Present],
+            1,
+            1,
+            GpuSubmissionStatus::Recorded,
+        );
         assert_eq!(a, b);
     }
 

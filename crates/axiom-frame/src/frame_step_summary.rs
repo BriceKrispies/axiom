@@ -181,13 +181,10 @@ mod tests {
         // host driver gets a `RuntimeStepRecord` back rather than a
         // failure. The record's `succeeded()` is `false`, which is what we
         // want to assert flows through to the summary.
-        let mut driver =
-            HostStepDriver::new(HostBoundaryConfig::new(STEP_NANOS, 5).unwrap());
+        let mut driver = HostStepDriver::new(HostBoundaryConfig::new(STEP_NANOS, 5).unwrap());
         driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
-        let mut runtime = Runtime::new(
-            RuntimeConfig::new(STEP_NANOS).with_fail_on_system_error(false),
-        )
-        .unwrap();
+        let mut runtime =
+            Runtime::new(RuntimeConfig::new(STEP_NANOS).with_fail_on_system_error(false)).unwrap();
         runtime.initialize().unwrap();
         runtime.start().unwrap();
         runtime
@@ -199,7 +196,10 @@ mod tests {
             .drive(&mut runtime, HostFrameInput::new(1, STEP_NANOS, vp()))
             .unwrap();
         let summary = FrameStepSummary::from_record(&report.step_records()[0]);
-        assert!(!summary.succeeded(), "summary must mirror record.succeeded()");
+        assert!(
+            !summary.succeeded(),
+            "summary must mirror record.succeeded()"
+        );
 
         // The per-system detail must survive into the frame summary: one
         // system ran, named "fail", at order 1, with the SystemFailed code.
@@ -208,7 +208,10 @@ mod tests {
         assert_eq!(system.name(), "fail");
         assert_eq!(system.order(), 1);
         assert!(!system.succeeded());
-        assert_eq!(system.error_code(), Some(RuntimeErrorCode::SystemFailed.raw()));
+        assert_eq!(
+            system.error_code(),
+            Some(RuntimeErrorCode::SystemFailed.raw())
+        );
     }
 
     #[test]

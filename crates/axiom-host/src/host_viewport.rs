@@ -44,11 +44,7 @@ impl HostViewport {
     /// type at its boundary — a non-finite scale can no longer even be
     /// constructed — so this constructor only enforces positivity and the
     /// dimension invariants.
-    pub fn new(
-        logical_width: u32,
-        logical_height: u32,
-        scale_factor: Ratio,
-    ) -> HostResult<Self> {
+    pub fn new(logical_width: u32, logical_height: u32, scale_factor: Ratio) -> HostResult<Self> {
         if logical_width == 0 || logical_height == 0 {
             return Err(HostError::invalid_viewport_dimensions(
                 "viewport logical width and height must be non-zero",
@@ -60,7 +56,8 @@ impl HostViewport {
             ));
         }
         let physical_width = ((logical_width as f64) * (scale_factor.get() as f64)).round() as u64;
-        let physical_height = ((logical_height as f64) * (scale_factor.get() as f64)).round() as u64;
+        let physical_height =
+            ((logical_height as f64) * (scale_factor.get() as f64)).round() as u64;
         if physical_width == 0 || physical_height == 0 {
             return Err(HostError::invalid_viewport_dimensions(
                 "derived physical viewport dimensions must be non-zero",
@@ -99,7 +96,8 @@ impl HostViewport {
             ));
         }
         let logical_width = ((physical_width as f64) / (scale_factor.get() as f64)).round() as u64;
-        let logical_height = ((physical_height as f64) / (scale_factor.get() as f64)).round() as u64;
+        let logical_height =
+            ((physical_height as f64) / (scale_factor.get() as f64)).round() as u64;
         if logical_width == 0 || logical_height == 0 {
             return Err(HostError::invalid_viewport_dimensions(
                 "derived logical viewport dimensions must be non-zero",
@@ -151,8 +149,7 @@ impl HostViewport {
     /// architectures because it is rounded `f64` arithmetic.
     pub fn logical_to_physical(&self, value: Pixels) -> Pixels {
         let result = ((value.get() as f64) * (self.scale_factor.get() as f64)) as f32;
-        Pixels::new(result)
-            .expect("a finite pixel value scaled by a finite scale factor is finite")
+        Pixels::new(result).expect("a finite pixel value scaled by a finite scale factor is finite")
     }
 
     /// Physical-to-logical conversion of one axis. `self.scale_factor` is a
@@ -233,8 +230,7 @@ mod tests {
     #[test]
     fn physical_to_logical_is_inverse_of_logical_to_physical() {
         let v = HostViewport::new(100, 100, ratio(2.5)).unwrap();
-        let recovered =
-            v.physical_to_logical(v.logical_to_physical(Pixels::new(40.0).unwrap()));
+        let recovered = v.physical_to_logical(v.logical_to_physical(Pixels::new(40.0).unwrap()));
         assert!((recovered.get() - 40.0).abs() < 1.0e-3);
     }
 

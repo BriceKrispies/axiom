@@ -146,8 +146,7 @@ mod tests {
     fn wrapped_and_unwrapped_are_not_equal() {
         let cause = host_cause();
         let bare = FrameError::new(FrameErrorCode::HostFrameAdaptationFailed, "x");
-        let wrapped =
-            FrameError::with_host(FrameErrorCode::HostFrameAdaptationFailed, "x", cause);
+        let wrapped = FrameError::with_host(FrameErrorCode::HostFrameAdaptationFailed, "x", cause);
         assert_ne!(bare, wrapped);
     }
 

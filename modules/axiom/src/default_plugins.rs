@@ -7,7 +7,7 @@
 /// it the app still steps the deterministic simulation but renders nothing — a
 /// headless sim. (As more plugins gain independent behaviour they will be
 /// selectable here; today this bundle is the render path.)
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct DefaultPlugins;
 
 #[cfg(test)]
@@ -18,8 +18,7 @@ mod tests {
     fn default_plugins_is_a_zero_sized_marker() {
         // The bundle carries no data; its render-enabling behaviour is proven in
         // `app.rs` (`add_plugins(DefaultPlugins)` vs. not). Here we pin that it is
-        // a true zero-sized marker, and exercise its `Default`.
+        // a true zero-sized marker.
         assert_eq!(std::mem::size_of::<DefaultPlugins>(), 0);
-        let _ = DefaultPlugins::default();
     }
 }

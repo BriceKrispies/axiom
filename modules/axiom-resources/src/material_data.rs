@@ -69,24 +69,9 @@ mod tests {
 
     #[test]
     fn equality_requires_all_fields() {
-        let a = MaterialData::new(
-            ResourceId::from_raw(1),
-            "x",
-            Vec4::ONE,
-            None,
-        );
-        let b = MaterialData::new(
-            ResourceId::from_raw(1),
-            "x",
-            Vec4::ONE,
-            None,
-        );
-        let c = MaterialData::new(
-            ResourceId::from_raw(1),
-            "x",
-            Vec4::ZERO,
-            None,
-        );
+        let a = MaterialData::new(ResourceId::from_raw(1), "x", Vec4::ONE, None);
+        let b = MaterialData::new(ResourceId::from_raw(1), "x", Vec4::ONE, None);
+        let c = MaterialData::new(ResourceId::from_raw(1), "x", Vec4::ZERO, None);
         assert_eq!(a, b);
         assert_ne!(a, c);
     }

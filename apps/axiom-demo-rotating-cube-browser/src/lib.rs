@@ -17,6 +17,10 @@ use axiom::prelude::*;
 use wasm_bindgen::prelude::*;
 
 /// A linear colour channel / intensity from a known-finite authored literal.
+// Only the `wasm32` `start` entry references this at runtime; on native it is
+// reached solely from tests, so the non-wasm library build sees it as dead.
+// The lint stays live on `wasm32`, where the live entry must keep using it.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn ch(value: f32) -> Ratio {
     Ratio::new(value).expect("authored colour channel is finite")
 }
@@ -25,6 +29,7 @@ fn ch(value: f32) -> Ratio {
 /// a parent at an x-offset with a spinning child cube renderable, times three
 /// (red on Y, green on X, blue on a diagonal), plus a pulled-back camera and a
 /// single directional light.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn rotating_cubes_app() -> App {
     App::new()
         .window(
@@ -36,16 +41,31 @@ fn rotating_cubes_app() -> App {
         .setup(|world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
             let cubes = [
-                (-2.6, Vec3::UNIT_Y, Color::linear_rgb(ch(0.85), ch(0.25), ch(0.25))),
-                (0.0, Vec3::UNIT_X, Color::linear_rgb(ch(0.30), ch(0.80), ch(0.35))),
-                (2.6, Vec3::new(1.0, 1.0, 0.0), Color::linear_rgb(ch(0.30), ch(0.50), ch(0.95))),
+                (
+                    -2.6,
+                    Vec3::UNIT_Y,
+                    Color::linear_rgb(ch(0.85), ch(0.25), ch(0.25)),
+                ),
+                (
+                    0.0,
+                    Vec3::UNIT_X,
+                    Color::linear_rgb(ch(0.30), ch(0.80), ch(0.35)),
+                ),
+                (
+                    2.6,
+                    Vec3::new(1.0, 1.0, 0.0),
+                    Color::linear_rgb(ch(0.30), ch(0.50), ch(0.95)),
+                ),
             ];
             for (offset_x, axis, color) in cubes {
                 let material = materials.add(Material::lit(color));
                 world
                     .spawn(Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)))
                     .with_child((
-                        Renderable { mesh: cube, material },
+                        Renderable {
+                            mesh: cube,
+                            material,
+                        },
                         Spin::around(axis).period(360),
                     ));
             }

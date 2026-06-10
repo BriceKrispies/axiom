@@ -223,7 +223,13 @@ impl RenderPipelineApi {
                 .find(|(id, _)| *id == renderable.material().raw())
                 .map(|(_, i)| *i)
                 .expect("frame supplies a material asset for every renderable");
-            render.add_input_object(&mut input, world, mesh_idx, material_idx, renderable.visible());
+            render.add_input_object(
+                &mut input,
+                world,
+                mesh_idx,
+                material_idx,
+                renderable.visible(),
+            );
         }
 
         // ---- Compile and translate to a GPU submission. ----
@@ -338,16 +344,18 @@ mod tests {
     /// (mesh id 1, material id 2) parented under a translated root.
     fn cube_scene() -> SceneApi {
         let mut scene = SceneApi::new();
-        let root = scene
-            .create_node_with_transform(axiom_math::Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)));
+        let root = scene.create_node_with_transform(axiom_math::Transform::from_translation(
+            Vec3::new(0.0, 0.0, 0.0),
+        ));
         let child = scene.create_node();
         scene.set_parent(child, root).unwrap();
         let mesh = scene.mesh_ref(1);
         let material = scene.material_ref(2);
         scene.add_renderable(child, mesh, material).unwrap();
 
-        let camera = scene
-            .create_node_with_transform(axiom_math::Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
+        let camera = scene.create_node_with_transform(axiom_math::Transform::from_translation(
+            Vec3::new(0.0, 0.0, 5.0),
+        ));
         scene
             .add_perspective_camera(
                 &math(),
@@ -407,7 +415,10 @@ mod tests {
         assert_eq!(api.report_command_count(&report), 7);
         assert_eq!(api.report_clear_color(&report), [0.05, 0.06, 0.08, 1.0]);
         assert_eq!(api.report_draw_count(&report), 1);
-        assert_eq!(api.report_draw_color(&report, 0), Some([0.8, 0.4, 0.2, 1.0]));
+        assert_eq!(
+            api.report_draw_color(&report, 0),
+            Some([0.8, 0.4, 0.2, 1.0])
+        );
         assert!(api.report_draw_world(&report, 0).is_some());
         assert!(api.report_draw_world(&report, 9).is_none());
         assert!(api.report_draw_color(&report, 9).is_none());

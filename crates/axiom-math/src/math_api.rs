@@ -325,7 +325,9 @@ mod tests {
         assert!(m.vec2_zero().approx_eq(&Vec2::ZERO, eps));
         assert!(m.vec2_one().approx_eq(&Vec2::ONE, eps));
 
-        assert!(m.vec3(1.0, 2.0, 3.0).approx_eq(&Vec3::new(1.0, 2.0, 3.0), eps));
+        assert!(m
+            .vec3(1.0, 2.0, 3.0)
+            .approx_eq(&Vec3::new(1.0, 2.0, 3.0), eps));
         assert!(m.vec3_zero().approx_eq(&Vec3::ZERO, eps));
         assert!(m.vec3_one().approx_eq(&Vec3::ONE, eps));
         assert!(m.vec3_unit_x().approx_eq(&Vec3::UNIT_X, eps));
@@ -345,9 +347,7 @@ mod tests {
         let q = m
             .quat_from_axis_angle(m.vec3_unit_z(), std::f32::consts::FRAC_PI_2)
             .unwrap();
-        assert!(q
-            .rotate(m.vec3_unit_x())
-            .approx_eq(&m.vec3_unit_y(), eps));
+        assert!(q.rotate(m.vec3_unit_x()).approx_eq(&m.vec3_unit_y(), eps));
     }
 
     #[test]
@@ -373,15 +373,9 @@ mod tests {
         assert!(m
             .mat4_perspective(std::f32::consts::FRAC_PI_2, 1.0, 1.0, 100.0)
             .is_ok());
+        assert!(m.mat4_orthographic(-1.0, 1.0, -1.0, 1.0, 0.0, 1.0).is_ok());
         assert!(m
-            .mat4_orthographic(-1.0, 1.0, -1.0, 1.0, 0.0, 1.0)
-            .is_ok());
-        assert!(m
-            .mat4_look_at(
-                m.vec3(0.0, 0.0, 5.0),
-                m.vec3_zero(),
-                m.vec3_unit_y(),
-            )
+            .mat4_look_at(m.vec3(0.0, 0.0, 5.0), m.vec3_zero(), m.vec3_unit_y(),)
             .is_ok());
     }
 
@@ -389,9 +383,7 @@ mod tests {
     fn transform_helpers_round_trip() {
         let m = api();
         let eps = m.epsilon(1.0e-5).unwrap();
-        assert!(m
-            .transform_identity()
-            .approx_eq(&Transform::IDENTITY, eps));
+        assert!(m.transform_identity().approx_eq(&Transform::IDENTITY, eps));
         assert!(m
             .transform_from_translation(m.vec3(1.0, 0.0, 0.0))
             .transform_point(m.vec3_zero())
@@ -438,11 +430,7 @@ mod tests {
         let m = api();
         let plane = m.plane(m.vec3_unit_z(), 0.0).unwrap();
         assert_eq!(
-            m.classify_point_against_plane(
-                &plane,
-                m.vec3(0.0, 0.0, 1.0),
-                m.default_epsilon(),
-            ),
+            m.classify_point_against_plane(&plane, m.vec3(0.0, 0.0, 1.0), m.default_epsilon(),),
             PlaneSide::Front,
         );
         assert_eq!(

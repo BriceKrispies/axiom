@@ -126,7 +126,7 @@ mod tests {
         let mut w = BinaryWriter::new();
         w.write_u16(0x0201); // two bytes
         w.write_u8(0xFF); // one more byte → 3 total
-        // Distinguishes `len -> 0`: a real length distinct from 0 and 1.
+                          // Distinguishes `len -> 0`: a real length distinct from 0 and 1.
         assert_eq!(w.len(), 3);
         // Distinguishes `is_empty -> true`: a written buffer is NOT empty.
         assert!(!w.is_empty());

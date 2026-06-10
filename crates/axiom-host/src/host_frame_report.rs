@@ -104,12 +104,7 @@ mod tests {
 
     #[test]
     fn report_carries_sequence_and_plan() {
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(3, 1_000, vp()),
-            &cfg(),
-            &visible(),
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(3, 1_000, vp()), &cfg(), &visible(), 0);
         let report = HostFrameReport::new(3, plan, 1, Vec::new(), vp(), visible());
         assert_eq!(report.sequence(), 3);
         assert_eq!(report.plan(), &plan);
@@ -117,24 +112,14 @@ mod tests {
 
     #[test]
     fn report_matches_executed_step_count() {
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(1, 3_000, vp()),
-            &cfg(),
-            &visible(),
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(1, 3_000, vp()), &cfg(), &visible(), 0);
         let report = HostFrameReport::new(1, plan, 3, vec![], vp(), visible());
         assert_eq!(report.steps_executed(), 3);
     }
 
     #[test]
     fn report_preserves_record_order_via_slice_accessor() {
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(1, 0, vp()),
-            &cfg(),
-            &visible(),
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(1, 0, vp()), &cfg(), &visible(), 0);
         let report = HostFrameReport::new(1, plan, 0, Vec::new(), vp(), visible());
         // The slice length matches the constructor's vec length.
         assert_eq!(report.step_records().len(), 0);
@@ -143,12 +128,7 @@ mod tests {
     #[test]
     fn skipped_frame_report_is_explicit() {
         let hidden = HostLifecycleState::initial();
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(1, 1_000, vp()),
-            &cfg(),
-            &hidden,
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(1, 1_000, vp()), &cfg(), &hidden, 0);
         let report = HostFrameReport::new(1, plan, 0, Vec::new(), vp(), hidden);
         assert!(report.is_skipped());
         assert_eq!(
@@ -161,12 +141,7 @@ mod tests {
     fn non_skipped_frame_report_is_not_skipped() {
         // Distinguishes `is_skipped -> true`: a visible frame that actually
         // stepped is NOT a lifecycle skip.
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(1, 1_000, vp()),
-            &cfg(),
-            &visible(),
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(1, 1_000, vp()), &cfg(), &visible(), 0);
         assert!(!plan.is_skipped());
         let report = HostFrameReport::new(1, plan, 1, vec![], vp(), visible());
         assert!(!report.is_skipped());
@@ -175,12 +150,7 @@ mod tests {
     #[test]
     fn lifecycle_state_is_reflected() {
         let after = visible().apply(HostLifecycleSignal::Focused);
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(1, 1_000, vp()),
-            &cfg(),
-            &after,
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(1, 1_000, vp()), &cfg(), &after, 0);
         let report = HostFrameReport::new(1, plan, 1, vec![], vp(), after);
         assert_eq!(report.lifecycle_after(), after);
         assert!(report.lifecycle_after().focused());
@@ -188,24 +158,14 @@ mod tests {
 
     #[test]
     fn report_carries_viewport_from_input() {
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(1, 1_000, vp()),
-            &cfg(),
-            &visible(),
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(1, 1_000, vp()), &cfg(), &visible(), 0);
         let report = HostFrameReport::new(1, plan, 1, vec![], vp(), visible());
         assert_eq!(report.viewport(), &vp());
     }
 
     #[test]
     fn equal_inputs_produce_equal_reports() {
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(2, 1_000, vp()),
-            &cfg(),
-            &visible(),
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(2, 1_000, vp()), &cfg(), &visible(), 0);
         let a = HostFrameReport::new(2, plan, 1, vec![], vp(), visible());
         let b = HostFrameReport::new(2, plan, 1, vec![], vp(), visible());
         assert_eq!(a.sequence(), b.sequence());

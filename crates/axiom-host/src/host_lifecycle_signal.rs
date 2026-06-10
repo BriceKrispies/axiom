@@ -42,10 +42,7 @@ mod tests {
     fn distinct_variants_are_not_equal() {
         assert_ne!(HostLifecycleSignal::Hidden, HostLifecycleSignal::Visible);
         assert_ne!(HostLifecycleSignal::Focused, HostLifecycleSignal::Unfocused);
-        assert_ne!(
-            HostLifecycleSignal::Suspended,
-            HostLifecycleSignal::Resumed
-        );
+        assert_ne!(HostLifecycleSignal::Suspended, HostLifecycleSignal::Resumed);
         assert_ne!(
             HostLifecycleSignal::Started,
             HostLifecycleSignal::ShutdownRequested
@@ -64,7 +61,7 @@ mod tests {
             HostLifecycleSignal::Hidden,
             HostLifecycleSignal::Resumed,
         ];
-        let replayed: Vec<_> = queue.iter().copied().collect();
+        let replayed: Vec<_> = queue.to_vec();
         assert_eq!(queue, replayed);
     }
 }

@@ -128,12 +128,7 @@ impl WebGpuApi {
         sub.push(GpuCommand::SetPipeline { pipeline_id });
     }
 
-    pub fn submission_set_camera(
-        &self,
-        sub: &mut GpuSubmission,
-        view: Mat4,
-        projection: Mat4,
-    ) {
+    pub fn submission_set_camera(&self, sub: &mut GpuSubmission, view: Mat4, projection: Mat4) {
         sub.push(GpuCommand::SetCamera { view, projection });
     }
 
@@ -145,12 +140,7 @@ impl WebGpuApi {
         sub.push(GpuCommand::SetMaterial { material_id });
     }
 
-    pub fn submission_draw_indexed(
-        &self,
-        sub: &mut GpuSubmission,
-        index_count: u32,
-        world: Mat4,
-    ) {
+    pub fn submission_draw_indexed(&self, sub: &mut GpuSubmission, index_count: u32, world: Mat4) {
         sub.push(GpuCommand::DrawIndexed { index_count, world });
     }
 
@@ -194,7 +184,10 @@ impl WebGpuApi {
     }
 
     pub fn report_kind_at(&self, report: &GpuSubmissionReport, idx: usize) -> Option<u32> {
-        report.submitted_commands().get(idx).map(GpuCommand::kind_code)
+        report
+            .submitted_commands()
+            .get(idx)
+            .map(GpuCommand::kind_code)
     }
 }
 
@@ -294,12 +287,12 @@ mod tests {
 
     // --- Backend modes ---
 
+    use crate::gpu_submission_status::GpuSubmissionStatus;
     use axiom_host::{
         HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostPowerPreference,
         HostPresentMode, HostPresentationRequest,
     };
     use axiom_kernel::{KernelApi, Ratio};
-    use crate::gpu_submission_status::GpuSubmissionStatus;
 
     /// Build a presentation-capable host presentation request. When
     /// `presentable` is false the adapter does not require a presentation
@@ -351,7 +344,10 @@ mod tests {
     #[test]
     fn recording_report_is_deterministic_including_status() {
         let api = WebGpuApi::new_recording();
-        assert_eq!(api.submit(demo_submission(&api)), api.submit(demo_submission(&api)));
+        assert_eq!(
+            api.submit(demo_submission(&api)),
+            api.submit(demo_submission(&api))
+        );
     }
 
     #[test]
@@ -379,7 +375,10 @@ mod tests {
     #[test]
     fn live_submit_is_deterministic() {
         let api = WebGpuApi::new_live(&host_request(true)).unwrap();
-        assert_eq!(api.submit(demo_submission(&api)), api.submit(demo_submission(&api)));
+        assert_eq!(
+            api.submit(demo_submission(&api)),
+            api.submit(demo_submission(&api))
+        );
     }
 
     #[test]

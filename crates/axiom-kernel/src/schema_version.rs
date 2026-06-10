@@ -93,7 +93,10 @@ mod cov {
         SchemaVersion::new(2, 3).write_to(&mut w);
         let bytes = w.into_bytes();
         let mut r = BinaryReader::new(&bytes);
-        assert_eq!(SchemaVersion::read_from(&mut r).unwrap(), SchemaVersion::new(2, 3));
+        assert_eq!(
+            SchemaVersion::read_from(&mut r).unwrap(),
+            SchemaVersion::new(2, 3)
+        );
         let mut short = BinaryReader::new(&[0u8]);
         assert!(SchemaVersion::read_from(&mut short).is_err());
     }

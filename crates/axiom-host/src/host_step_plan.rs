@@ -253,12 +253,7 @@ mod tests {
     fn hidden_frame_steps_when_policy_allows() {
         let cfg = cfg().with_step_while_hidden(true);
         let hidden = HostLifecycleState::initial();
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(1, STEP_NANOS, vp()),
-            &cfg,
-            &hidden,
-            0,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(1, STEP_NANOS, vp()), &cfg, &hidden, 0);
         assert!(plan.skip_reason().is_none());
         assert_eq!(plan.steps(), 1);
     }
@@ -365,12 +360,7 @@ mod cov {
             .unwrap()
             .with_retain_accumulator(false);
         let hidden = HostLifecycleState::initial();
-        let plan = HostStepPlan::build(
-            &HostFrameInput::new(1, 1_000, vp()),
-            &cfg,
-            &hidden,
-            5_000,
-        );
+        let plan = HostStepPlan::build(&HostFrameInput::new(1, 1_000, vp()), &cfg, &hidden, 5_000);
         assert_eq!(plan.skip_reason(), Some(HostSkipReason::LifecycleHidden));
         assert_eq!(plan.retained_nanos(), 0);
     }

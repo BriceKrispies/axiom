@@ -25,9 +25,7 @@ impl Aabb {
     /// Construct from explicit corners. Fails if `min > max` on any axis or
     /// if any component is not finite.
     pub fn new(min: Vec3, max: Vec3) -> MathResult<Aabb> {
-        for component in [
-            min.x, min.y, min.z, max.x, max.y, max.z,
-        ] {
+        for component in [min.x, min.y, min.z, max.x, max.y, max.z] {
             if !component.is_finite() {
                 return Err(MathError::non_finite_scalar(
                     "Aabb corner components must be finite",
@@ -47,9 +45,7 @@ impl Aabb {
     pub fn from_center_extents(center: Vec3, extents: Vec3) -> MathResult<Aabb> {
         for component in [extents.x, extents.y, extents.z] {
             if !component.is_finite() {
-                return Err(MathError::non_finite_scalar(
-                    "Aabb extents must be finite",
-                ));
+                return Err(MathError::non_finite_scalar("Aabb extents must be finite"));
             }
             if component < 0.0 {
                 return Err(MathError::invalid_aabb_bounds(
@@ -192,8 +188,8 @@ mod tests {
 
     #[test]
     fn from_center_extents_works() {
-        let a = Aabb::from_center_extents(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.5, 0.5, 0.5))
-            .unwrap();
+        let a =
+            Aabb::from_center_extents(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.5, 0.5, 0.5)).unwrap();
         assert!(a.min().approx_eq(&Vec3::new(0.5, 1.5, 2.5), eps()));
         assert!(a.max().approx_eq(&Vec3::new(1.5, 2.5, 3.5), eps()));
     }
@@ -328,12 +324,24 @@ mod cov {
     fn overlaps_each_axis_separated() {
         let c = cube();
         assert!(c.overlaps(&cube()));
-        assert!(!c.overlaps(&Aabb::new(Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 1.0, 1.0)).unwrap()));
-        assert!(!c.overlaps(&Aabb::new(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(-2.0, 1.0, 1.0)).unwrap()));
-        assert!(!c.overlaps(&Aabb::new(Vec3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 3.0, 1.0)).unwrap()));
-        assert!(!c.overlaps(&Aabb::new(Vec3::new(0.0, -3.0, 0.0), Vec3::new(1.0, -2.0, 1.0)).unwrap()));
-        assert!(!c.overlaps(&Aabb::new(Vec3::new(0.0, 0.0, 2.0), Vec3::new(1.0, 1.0, 3.0)).unwrap()));
-        assert!(!c.overlaps(&Aabb::new(Vec3::new(0.0, 0.0, -3.0), Vec3::new(1.0, 1.0, -2.0)).unwrap()));
+        assert!(
+            !c.overlaps(&Aabb::new(Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 1.0, 1.0)).unwrap())
+        );
+        assert!(
+            !c.overlaps(&Aabb::new(Vec3::new(-3.0, 0.0, 0.0), Vec3::new(-2.0, 1.0, 1.0)).unwrap())
+        );
+        assert!(
+            !c.overlaps(&Aabb::new(Vec3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 3.0, 1.0)).unwrap())
+        );
+        assert!(
+            !c.overlaps(&Aabb::new(Vec3::new(0.0, -3.0, 0.0), Vec3::new(1.0, -2.0, 1.0)).unwrap())
+        );
+        assert!(
+            !c.overlaps(&Aabb::new(Vec3::new(0.0, 0.0, 2.0), Vec3::new(1.0, 1.0, 3.0)).unwrap())
+        );
+        assert!(
+            !c.overlaps(&Aabb::new(Vec3::new(0.0, 0.0, -3.0), Vec3::new(1.0, 1.0, -2.0)).unwrap())
+        );
     }
 
     #[test]
@@ -367,10 +375,14 @@ mod cov {
     // `< 0.0` accepts it, but `<= 0.0` and `== 0.0` would (wrongly) reject it.
     #[test]
     fn from_center_extents_accepts_exactly_zero_extent() {
-        let a = Aabb::from_center_extents(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0))
-            .unwrap();
-        assert!(a.min().approx_eq(&Vec3::new(1.0, 1.0, 2.0), Epsilon::DEFAULT));
-        assert!(a.max().approx_eq(&Vec3::new(1.0, 3.0, 4.0), Epsilon::DEFAULT));
+        let a =
+            Aabb::from_center_extents(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0)).unwrap();
+        assert!(a
+            .min()
+            .approx_eq(&Vec3::new(1.0, 1.0, 2.0), Epsilon::DEFAULT));
+        assert!(a
+            .max()
+            .approx_eq(&Vec3::new(1.0, 3.0, 4.0), Epsilon::DEFAULT));
         // And a negative extent must still be rejected (pins the `< 0.0` sense).
         assert!(Aabb::from_center_extents(Vec3::ZERO, Vec3::new(-0.5, 0.0, 0.0)).is_err());
     }
@@ -387,8 +399,7 @@ mod cov {
         assert!(!outer.contains_point(partially_outside.max()));
         assert!(!outer.contains_aabb(&partially_outside));
         // Mirror case: min outside, max inside.
-        let other =
-            Aabb::new(Vec3::new(-2.0, -2.0, -2.0), Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        let other = Aabb::new(Vec3::new(-2.0, -2.0, -2.0), Vec3::new(0.5, 0.5, 0.5)).unwrap();
         assert!(!outer.contains_aabb(&other));
     }
 }

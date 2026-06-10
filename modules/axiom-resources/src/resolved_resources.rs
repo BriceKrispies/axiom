@@ -22,10 +22,7 @@ impl ResolvedResources {
     pub fn from_table(table: &ResourceTable) -> Self {
         ResolvedResources {
             meshes: table.meshes_in_order().map(|(_, m)| m.clone()).collect(),
-            materials: table
-                .materials_in_order()
-                .map(|(_, m)| *m)
-                .collect(),
+            materials: table.materials_in_order().map(|(_, m)| *m).collect(),
             textures: table.textures_in_order().map(|(_, t)| t.clone()).collect(),
         }
     }
@@ -141,7 +138,11 @@ mod cov {
         let tex_id = t.next_id();
         t.insert_mesh(build_cube_mesh(mesh_id));
         t.insert_material(build_basic_lit_material(mat_id, Vec4::ONE));
-        t.insert_texture(build_solid_color_texture(tex_id, "white", [255, 255, 255, 255]));
+        t.insert_texture(build_solid_color_texture(
+            tex_id,
+            "white",
+            [255, 255, 255, 255],
+        ));
         t
     }
 

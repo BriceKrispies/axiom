@@ -166,5 +166,4 @@ mod cov {
         assert!(t.mesh(ResourceId::from_raw(1)).is_none());
         let _ = t.materials_in_order().count();
     }
-
 }

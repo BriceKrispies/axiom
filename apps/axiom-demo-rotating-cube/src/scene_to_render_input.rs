@@ -92,10 +92,7 @@ pub struct SceneSnapshotArtifact {
 impl SceneSnapshotArtifact {
     /// World transform of a node by id, if present.
     pub(crate) fn world_of(&self, node_id: u64) -> Option<Transform> {
-        self.nodes
-            .iter()
-            .find(|n| n.id == node_id)
-            .map(|n| n.world)
+        self.nodes.iter().find(|n| n.id == node_id).map(|n| n.world)
     }
 }
 
@@ -268,8 +265,7 @@ pub(crate) fn scene_to_render_input(
         .filter_map(|r| {
             let world = scene.world_of(r.node)?.to_matrix();
             let mesh_idx = meshes.iter().position(|m| m.id == r.mesh_id)? as u32;
-            let material_idx =
-                materials.iter().position(|m| m.id == r.material_id)? as u32;
+            let material_idx = materials.iter().position(|m| m.id == r.material_id)? as u32;
             Some(RenderObjectArtifact {
                 world,
                 mesh_idx,

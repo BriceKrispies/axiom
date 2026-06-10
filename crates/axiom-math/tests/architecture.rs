@@ -200,12 +200,32 @@ fn no_engine_layer_concepts_higher_than_math() {
     // to higher layers. Use word-boundary-ish patterns to avoid false hits
     // (e.g. don't flag plain "Plane" because of "plane.rs").
     let forbidden = &[
-        "::World", "::Scene", "::Renderer", "::Material", "::Mesh",
-        "::Asset", "::AssetLoader", "::Physics", "::RigidBody", "::Collider",
-        "::Animation", "::Animator", "::Audio", "::SoundSource",
-        "::InputState", "::KeyCode", "::MouseButton",
-        "::Plugin", "::EditorPanel", "::GameLoop", "::Schedule",
-        "rapier", "wgpu", "winit", "egui", "bevy",
+        "::World",
+        "::Scene",
+        "::Renderer",
+        "::Material",
+        "::Mesh",
+        "::Asset",
+        "::AssetLoader",
+        "::Physics",
+        "::RigidBody",
+        "::Collider",
+        "::Animation",
+        "::Animator",
+        "::Audio",
+        "::SoundSource",
+        "::InputState",
+        "::KeyCode",
+        "::MouseButton",
+        "::Plugin",
+        "::EditorPanel",
+        "::GameLoop",
+        "::Schedule",
+        "rapier",
+        "wgpu",
+        "winit",
+        "egui",
+        "bevy",
     ];
     assert_absent(
         forbidden,
@@ -218,7 +238,10 @@ fn no_utils_module() {
     for path in math_source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         assert_ne!(name, "utils", "axiom-math must not have a `utils` module");
-        assert_ne!(name, "helpers", "axiom-math must not have a `helpers` module");
+        assert_ne!(
+            name, "helpers",
+            "axiom-math must not have a `helpers` module"
+        );
         assert_ne!(name, "common", "axiom-math must not have a `common` module");
         assert_ne!(name, "misc", "axiom-math must not have a `misc` module");
     }
