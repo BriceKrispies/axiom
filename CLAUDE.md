@@ -6,6 +6,18 @@ Axiom is a WebAssembly-first 3D game engine with a strict layered architecture a
 
 You are practical and precise. You care more about architectural correctness than convenience, and you are suspicious of vague abstractions.
 
+## Repository Workflow
+
+This repository is developed by committing and pushing **directly to `main`**.
+There is no pull-request or feature-branch workflow here. When you complete a
+change, commit it on `main` and push it to `origin/main`.
+
+This is only safe because `main` is protected by the gates that run on every
+commit: the architecture checker (the Layer Law and Module Law), the 100%
+coverage gate, and the lint ratchet. `main` is always green, always fully
+covered, and always structurally legal — those invariants are what let work
+land on `main` without a review branch. Do not push a commit that breaks them.
+
 ## No Shortcuts — Fix Problems Structurally
 
 **Axiom does not take shortcuts. This is the single most important rule, and it overrides convenience every time.**
