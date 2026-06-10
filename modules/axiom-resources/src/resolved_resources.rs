@@ -80,14 +80,14 @@ impl ResolvedResources {
 mod tests {
     use super::*;
     use crate::basic_lit_material::build_basic_lit_material;
-    use crate::cube_mesh::build_cube_mesh;
+    use crate::mesh_data::test_mesh;
     use axiom_math::Vec4;
 
     fn populated_table() -> ResourceTable {
         let mut t = ResourceTable::new();
         let mesh_id = t.next_id();
         let mat_id = t.next_id();
-        t.insert_mesh(build_cube_mesh(mesh_id));
+        t.insert_mesh(test_mesh(mesh_id));
         t.insert_material(build_basic_lit_material(
             mat_id,
             Vec4::new(0.8, 0.4, 0.2, 1.0),
@@ -118,8 +118,8 @@ mod tests {
     #[test]
     fn lookup_by_id_works() {
         let r = ResolvedResources::from_table(&populated_table());
-        let cube_id = r.mesh_at(0).unwrap().id();
-        assert!(r.mesh_by_id(cube_id).is_some());
+        let mesh_id = r.mesh_at(0).unwrap().id();
+        assert!(r.mesh_by_id(mesh_id).is_some());
     }
 }
 
@@ -127,7 +127,7 @@ mod tests {
 mod cov {
     use super::*;
     use crate::basic_lit_material::build_basic_lit_material;
-    use crate::cube_mesh::build_cube_mesh;
+    use crate::mesh_data::test_mesh;
     use crate::solid_color_texture::build_solid_color_texture;
     use axiom_math::Vec4;
 
@@ -136,7 +136,7 @@ mod cov {
         let mesh_id = t.next_id();
         let mat_id = t.next_id();
         let tex_id = t.next_id();
-        t.insert_mesh(build_cube_mesh(mesh_id));
+        t.insert_mesh(test_mesh(mesh_id));
         t.insert_material(build_basic_lit_material(mat_id, Vec4::ONE));
         t.insert_texture(build_solid_color_texture(
             tex_id,
@@ -178,8 +178,8 @@ mod cov {
         let mut t = ResourceTable::new();
         let m1 = t.next_id();
         let m2 = t.next_id();
-        t.insert_mesh(build_cube_mesh(m1));
-        t.insert_mesh(build_cube_mesh(m2));
+        t.insert_mesh(test_mesh(m1));
+        t.insert_mesh(test_mesh(m2));
         let mat1 = t.next_id();
         let mat2 = t.next_id();
         t.insert_material(build_basic_lit_material(mat1, Vec4::ONE));
@@ -210,7 +210,7 @@ mod cov {
         // meshes-only: first operand false -> short-circuits.
         let mut tm = ResourceTable::new();
         let id = tm.next_id();
-        tm.insert_mesh(build_cube_mesh(id));
+        tm.insert_mesh(test_mesh(id));
         assert!(!ResolvedResources::from_table(&tm).is_empty());
 
         // materials-only: meshes empty (true), materials non-empty (false).

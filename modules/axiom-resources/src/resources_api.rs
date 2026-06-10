@@ -1,13 +1,15 @@
 //! The single public facade of the `axiom-resources` module.
 
-use axiom_math::Vec4;
+use axiom_math::{Vec2, Vec3, Vec4};
 
 use crate::basic_lit_material::build_basic_lit_material;
 use crate::cube_mesh::build_cube_mesh;
+use crate::mesh_data::{MeshData, MeshInputVertex};
 use crate::resolved_resources::ResolvedResources;
 use crate::resource_id::ResourceId;
 use crate::resource_table::ResourceTable;
 use crate::solid_color_texture::build_solid_color_texture;
+use crate::vertex::Vertex;
 
 /// The only public export of `axiom-resources`.
 ///
@@ -32,10 +34,41 @@ impl ResourcesApi {
         ResourceTable::new()
     }
 
-    /// Register the built-in cube mesh and return its [`ResourceId`].
-    pub fn register_cube_mesh(&self, table: &mut ResourceTable) -> ResourceId {
+    /// Register an arbitrary triangle mesh from neutral geometry and return its
+    /// [`ResourceId`]. This is the engine's general, shape-agnostic mesh
+    /// capability: `vertices` is a slice of `(position, normal, uv, color)`
+    /// float tuples and `indices` is a triangle-list into them. `name` is debug
+    /// metadata. Built-in primitives such as [`Self::register_cube_mesh`] are
+    /// thin generators layered on this one path — the resource module knows no
+    /// shapes of its own.
+    pub fn register_mesh(
+        &self,
+        table: &mut ResourceTable,
+        name: &'static str,
+        vertices: &[MeshInputVertex],
+        indices: &[u32],
+    ) -> ResourceId {
         let id = table.next_id();
-        table.insert_mesh(build_cube_mesh(id))
+        let verts: Vec<Vertex> = vertices
+            .iter()
+            .map(|&(p, n, uv, c)| {
+                Vertex::new(
+                    Vec3::new(p[0], p[1], p[2]),
+                    Vec3::new(n[0], n[1], n[2]),
+                    Vec2::new(uv[0], uv[1]),
+                    Vec4::new(c[0], c[1], c[2], c[3]),
+                )
+            })
+            .collect();
+        table.insert_mesh(MeshData::new(id, name, verts, indices.to_vec()))
+    }
+
+    /// Register the built-in unit cube mesh and return its [`ResourceId`]. A
+    /// thin generator over [`Self::register_mesh`]: the cube is a primitive, not
+    /// a special case the resource table bakes in.
+    pub fn register_cube_mesh(&self, table: &mut ResourceTable) -> ResourceId {
+        let (vertices, indices) = build_cube_mesh();
+        self.register_mesh(table, "axiom.builtin.cube", &vertices, &indices)
     }
 
     /// Register the built-in basic-lit material with the given base
@@ -197,6 +230,95 @@ mod tests {
         let id = api().register_cube_mesh(&mut t);
         assert!(id.is_valid());
         assert_eq!(t.mesh_count(), 1);
+    }
+
+    #[test]
+    fn arbitrary_mesh_can_be_registered_through_the_general_path() {
+        // A non-cube shape (a single triangle) proves the resource module is
+        // shape-agnostic: any neutral geometry round-trips through the snapshot.
+        let mut t = api().empty_table();
+        let tri = [
+            (
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0],
+                [1.0, 0.0, 0.0, 1.0],
+            ),
+            (
+                [2.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0],
+                [0.0, 1.0, 0.0, 1.0],
+            ),
+            (
+                [0.0, 3.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0],
+                [0.0, 0.0, 1.0, 1.0],
+            ),
+        ];
+        let id = api().register_mesh(&mut t, "triangle", &tri, &[0, 1, 2]);
+        assert!(id.is_valid());
+
+        let r = api().resolve(&t);
+        // Not the cube's 24/36 — the registered shape's own counts.
+        assert_eq!(api().resolved_mesh_vertex_count(&r, id.raw()), Some(3));
+        assert_eq!(api().resolved_mesh_index_count(&r, id.raw()), Some(3));
+        // Position, normal, and uv all thread through unchanged.
+        assert_eq!(
+            api().resolved_mesh_position_at(&r, id.raw(), 1),
+            Some([2.0, 0.0, 0.0])
+        );
+        assert_eq!(
+            api().resolved_mesh_normal_at(&r, id.raw(), 0),
+            Some([0.0, 0.0, 1.0])
+        );
+        assert_eq!(api().resolved_mesh_uv_at(&r, id.raw(), 2), Some([0.0, 1.0]));
+        assert_eq!(
+            api().resolved_mesh_indices(&r, id.raw()),
+            Some(&[0, 1, 2][..])
+        );
+    }
+
+    #[test]
+    fn register_mesh_is_deterministic() {
+        let tri = [
+            (
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0],
+                [1.0, 1.0, 1.0, 1.0],
+            ),
+            (
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0],
+                [1.0, 1.0, 1.0, 1.0],
+            ),
+            (
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+            ),
+        ];
+        let build = || {
+            let mut t = api().empty_table();
+            api().register_mesh(&mut t, "triangle", &tri, &[0, 1, 2]);
+            api().resolve(&t)
+        };
+        assert_eq!(build(), build());
+    }
+
+    #[test]
+    fn cube_is_the_general_path_with_cube_geometry() {
+        // register_cube_mesh is a thin generator over register_mesh: the cube
+        // produces the same 24/36 it always did, now through the general path.
+        let mut t = api().empty_table();
+        let id = api().register_cube_mesh(&mut t);
+        let r = api().resolve(&t);
+        assert_eq!(api().resolved_mesh_vertex_count(&r, id.raw()), Some(24));
+        assert_eq!(api().resolved_mesh_index_count(&r, id.raw()), Some(36));
     }
 
     #[test]

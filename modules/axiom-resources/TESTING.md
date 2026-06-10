@@ -11,8 +11,9 @@ output is the contract. Every public concept reached through
 - `MeshData` — accessor round-trip, equality.
 - `MaterialData` — accessor round-trip, optional texture.
 - `TextureData` — happy path, wrong-size pixel buffer rejection, equality.
-- `cube_mesh::build_cube_mesh` — 24 vertices, 36 indices, each face
-  has its expected outward normal, indices stay in vertex range, runs
+- `cube_mesh::build_cube_mesh` — neutral cube geometry: 24 vertices,
+  36 indices, each face has its expected outward normal and positions,
+  per-face UVs and white colour, indices stay in vertex range, runs
   produce equal output.
 - `basic_lit_material::build_basic_lit_material` — colour round-trip,
   deterministic.
@@ -22,10 +23,11 @@ output is the contract. Every public concept reached through
   lookup, deterministic ascending-id iteration.
 - `ResolvedResources` — empty snapshot, populated snapshot,
   determinism across two builds, id lookup.
-- `ResourcesApi` — every facade method (`empty_table`,
-  `register_cube_mesh`, `register_basic_lit_material`,
-  `register_solid_color_texture`, `resolve`, every `resolved_*`
-  inspection method).
+- `ResourcesApi` — every facade method (`empty_table`, `register_mesh`
+  for arbitrary neutral geometry, `register_cube_mesh` layered over it,
+  `register_basic_lit_material`, `register_solid_color_texture`,
+  `resolve`, every `resolved_*` inspection method). A non-cube shape (a
+  single triangle) proves the general path is shape-agnostic.
 
 ## Determinism
 

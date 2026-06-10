@@ -1,9 +1,15 @@
 # Axiom Resources — Module Architecture
 
 `axiom-resources` is **an isolated engine module**, not a layer. It
-owns CPU-side resource descriptions (built-in cube mesh, basic-lit
-material, solid-colour textures) and the deterministic
-`ResolvedResources` snapshot the app hands to the renderer.
+owns CPU-side resource descriptions — arbitrary meshes from neutral
+geometry, basic-lit materials, solid-colour textures — and the
+deterministic `ResolvedResources` snapshot the app hands to the renderer.
+
+The module is **shape-agnostic**: `ResourcesApi::register_mesh` takes
+neutral `(position, normal, uv, color)` vertex data plus a triangle
+index list and knows no shapes of its own. The built-in unit cube
+(`register_cube_mesh`) is a thin *generator* layered on that one path —
+a primitive, not a special case baked into the resource table.
 
 ## What this module owns
 

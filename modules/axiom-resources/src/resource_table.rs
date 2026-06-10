@@ -95,7 +95,7 @@ impl ResourceTable {
 mod tests {
     use super::*;
     use crate::basic_lit_material::build_basic_lit_material;
-    use crate::cube_mesh::build_cube_mesh;
+    use crate::mesh_data::test_mesh;
     use axiom_math::Vec4;
 
     #[test]
@@ -121,7 +121,7 @@ mod tests {
         let mut t = ResourceTable::new();
         let mesh_id = t.next_id();
         let mat_id = t.next_id();
-        t.insert_mesh(build_cube_mesh(mesh_id));
+        t.insert_mesh(test_mesh(mesh_id));
         t.insert_material(build_basic_lit_material(mat_id, Vec4::ONE));
         assert!(t.mesh(mesh_id).is_some());
         assert!(t.material(mat_id).is_some());
@@ -132,8 +132,8 @@ mod tests {
         let mut t = ResourceTable::new();
         let a = t.next_id();
         let b = t.next_id();
-        t.insert_mesh(build_cube_mesh(b));
-        t.insert_mesh(build_cube_mesh(a));
+        t.insert_mesh(test_mesh(b));
+        t.insert_mesh(test_mesh(a));
         let ids: Vec<u64> = t.meshes_in_order().map(|(id, _)| id.raw()).collect();
         assert_eq!(ids, vec![a.raw(), b.raw()]);
     }
