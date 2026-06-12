@@ -84,7 +84,10 @@ mod tests {
         let bytes = w.into_bytes();
         for k in 0..bytes.len() {
             let mut r = BinaryReader::new(&bytes[..k]);
-            assert!(NetCommand::read_from(&mut r).is_err(), "prefix len {k} must fail");
+            assert!(
+                NetCommand::read_from(&mut r).is_err(),
+                "prefix len {k} must fail"
+            );
         }
         assert!(NetCommand::read_from(&mut BinaryReader::new(&bytes)).is_ok());
     }

@@ -146,6 +146,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-netcode-demo"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-netcode",
+]
+
+[[package]]
 name = "axiom-render"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,22 @@
+[package]
+name = "axiom-netcode-demo"
+description = "Axiom app: drives the real engine `App` through the axiom-netcode deterministic-lockstep session, proving two independent engine instances stay byte-identical at every confirmed tick (and that a divergent world is caught). Headless and native — no sockets, no browser."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# An app composes modules. This one wires two: the `axiom` umbrella (the real
+# engine `App`) and `axiom-netcode` (the lockstep session). Translating between
+# them — a frame outcome into the bytes netcode hashes — is the app's job, the
+# only tier allowed to name both modules' types.
+axiom = { path = "../../modules/axiom" }
+axiom-netcode = { path = "../../modules/axiom-netcode" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
