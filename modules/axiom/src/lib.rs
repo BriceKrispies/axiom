@@ -23,6 +23,7 @@ mod frame_outcome;
 mod handle;
 mod material;
 mod mesh;
+mod player;
 mod renderable;
 mod scene_commands;
 mod spin;

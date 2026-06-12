@@ -32,6 +32,7 @@ use crate::default_plugins::DefaultPlugins;
 use crate::frame_outcome::{DrawData, FrameOutcome};
 use crate::material::Material;
 use crate::mesh::Mesh;
+use crate::player::PlayerInput;
 use crate::scene_commands::SceneCommands;
 use crate::window::Window;
 
@@ -281,6 +282,15 @@ impl RunningApp {
     /// outcome is a pure function of `tick`. The caller (the run loop) owns the
     /// monotonic tick and must pass `0, 1, 2, …` in order.
     pub fn tick(&mut self, tick: u64) -> FrameOutcome {
+        self.tick_with(tick, &[])
+    }
+
+    /// Drive one deterministic frame at `tick`, applying `inputs` (per-player
+    /// move deltas) to the simulation before stepping. The input-free
+    /// [`Self::tick`] is `tick_with(tick, &[])`. Like `tick`, the outcome is a
+    /// pure function of `tick` and `inputs`, so two peers given the same
+    /// confirmed inputs produce byte-identical frames.
+    pub fn tick_with(&mut self, tick: u64, inputs: &[PlayerInput]) -> FrameOutcome {
         let width = self.viewport.physical_width();
         let height = self.viewport.physical_height();
 
@@ -289,9 +299,14 @@ impl RunningApp {
             .driver
             .drive(&mut self.runtime, host_input)
             .expect("driver inputs are deterministic and valid");
+        let commands: Vec<_> = inputs
+            .iter()
+            .enumerate()
+            .map(|(i, input)| self.scene.move_command(i as u64, input.player, input.delta))
+            .collect();
         let engine_frame = self
             .frame_builder
-            .build(&host_report, Vec::new())
+            .build(&host_report, commands)
             .expect("host report sequence is monotone");
         let frame_ctx = self.frame_api.frame_context(&engine_frame);
         self.scene.advance(tick, &frame_ctx);
@@ -482,6 +497,68 @@ mod tests {
                     },
                 ));
             })
+    }
+
+    /// An app with one renderable player cube (player 0) plus a camera, so a
+    /// move shows up in the frame's draws.
+    fn player_app() -> App {
+        use crate::player::Player;
+        App::new()
+            .window(Window::new(800, 600))
+            .add_plugins(DefaultPlugins)
+            .setup(|world, meshes, materials| {
+                let cube = meshes.add(Mesh::cube());
+                let material = materials.add(Material::lit(Color::WHITE));
+                world.spawn((
+                    Transform::IDENTITY,
+                    Renderable {
+                        mesh: cube,
+                        material,
+                    },
+                    Player::new(0),
+                ));
+                world.spawn((
+                    Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+                    Camera::perspective(PerspectiveProjection {
+                        fov_y: Angle::degrees(60.0),
+                        near: Meters::new(0.1).expect("near plane is finite"),
+                        far: Meters::new(100.0).expect("far plane is finite"),
+                    }),
+                ));
+            })
+    }
+
+    #[test]
+    fn tick_with_moves_a_player_cube() {
+        let moved = player_app()
+            .build()
+            .tick_with(0, &[PlayerInput::new(0, Vec3::new(1.0, 0.0, 0.0))]);
+        let still = player_app().build().tick_with(0, &[]);
+        // Moving player 0 changes its on-screen draw; an input-free tick does not.
+        assert_ne!(
+            moved.draws(),
+            still.draws(),
+            "a player move must change the rendered frame"
+        );
+    }
+
+    #[test]
+    fn tick_with_is_deterministic_and_accumulates() {
+        // Same inputs ⇒ byte-identical frames; the move accumulates across ticks.
+        let drive = |deltas: &[f32]| {
+            let mut app = player_app().build();
+            let mut last = app.tick_with(0, &[]);
+            for (i, &dx) in deltas.iter().enumerate() {
+                last = app.tick_with(
+                    i as u64 + 1,
+                    &[PlayerInput::new(0, Vec3::new(dx, 0.0, 0.0))],
+                );
+            }
+            last
+        };
+        assert_eq!(drive(&[0.5, 0.5]), drive(&[0.5, 0.5]));
+        // Two +0.5 steps land somewhere a single +0.5 step does not.
+        assert_ne!(drive(&[0.5, 0.5]).draws(), drive(&[0.5]).draws());
     }
 
     #[test]

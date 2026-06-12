@@ -13,16 +13,19 @@ use std::collections::BTreeSet;
 
 use axiom_frame::FrameContext;
 use axiom_kernel::EntityId;
-use axiom_math::Transform;
+use axiom_math::{Transform, Vec3};
 
 use crate::camera::Camera;
 use crate::light::Light;
+use crate::player_command::decode_move;
 use crate::renderable::Renderable;
 use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
-use crate::scene_storage::{propagate, SceneStorage, SpinSystem, TransformPropagation};
+use crate::scene_storage::{
+    propagate, PlayerMoveSystem, SceneStorage, SpinSystem, TransformPropagation,
+};
 use crate::spin::Spin;
 
 use axiom_ecs::World;
@@ -45,6 +48,7 @@ impl Scene {
     pub fn new() -> Self {
         let mut world = World::new();
         world.register_system(Box::new(SpinSystem));
+        world.register_system(Box::new(PlayerMoveSystem));
         world.register_system(Box::new(TransformPropagation));
         Scene { world }
     }
@@ -311,6 +315,19 @@ impl Scene {
         Ok(())
     }
 
+    /// Mark `node` as the controllable node for `player` index, so per-tick move
+    /// commands addressed to that index translate it (via [`PlayerMoveSystem`]).
+    pub(crate) fn add_player(&mut self, node: SceneNodeId, player: u32) -> SceneResult<()> {
+        if !self.is_node(node) {
+            return Err(SceneError::missing_node("add_player: node id not in scene"));
+        }
+        self.world
+            .storage_mut()
+            .players
+            .insert(Self::entity(node), player);
+        Ok(())
+    }
+
     // --- Transform propagation ---
 
     /// Recompute every node's world transform now, regardless of frame state.
@@ -323,9 +340,12 @@ impl Scene {
     /// the frame is active (not skipped, ran at least one runtime step), then
     /// return the deterministic snapshot taken after whatever update happened.
     pub(crate) fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
-        // The ECS scheduler runs the registered systems (spin, then transform
-        // propagation) at logical time `tick`, gated on the frame (skipped /
-        // zero-step frames run nothing).
+        // Stage this frame's player-move commands for the move system to apply.
+        let moves: Vec<(u32, Vec3)> = frame.commands().iter().filter_map(decode_move).collect();
+        self.world.storage_mut().pending_moves = moves;
+        // The ECS scheduler runs the registered systems (spin, player-move, then
+        // transform propagation) at logical time `tick`, gated on the frame
+        // (skipped / zero-step frames run nothing).
         self.world.advance(tick, frame);
         self.snapshot()
     }
@@ -627,6 +647,14 @@ mod frame_tests {
 
     /// Build an `EngineFrame` for the given elapsed-nanos and lifecycle.
     fn engine_frame(elapsed: u64, started: bool) -> axiom_frame::EngineFrame {
+        engine_frame_with(elapsed, started, Vec::new())
+    }
+
+    fn engine_frame_with(
+        elapsed: u64,
+        started: bool,
+        commands: Vec<axiom_frame::FrameCommand>,
+    ) -> axiom_frame::EngineFrame {
         let vp = HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap();
         let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
         let lifecycle = if started {
@@ -645,7 +673,7 @@ mod frame_tests {
             lifecycle,
         );
         FrameApi::new()
-            .engine_frame_from_host_report(&report, elapsed, Vec::new())
+            .engine_frame_from_host_report(&report, elapsed, commands)
             .unwrap()
     }
 
@@ -680,6 +708,42 @@ mod frame_tests {
         // The spin system set the node's local to the rotation for tick 3.
         let expected = Spin::new(Vec3::UNIT_Y, 4).rotation_at(3).unwrap();
         assert_eq!(s.local(n).unwrap().rotation, expected);
+    }
+
+    #[test]
+    fn advance_applies_a_move_command_to_the_addressed_player() {
+        use crate::player_command::encode_move;
+        let mut s = Scene::new();
+        let node = s.create_node(Transform::IDENTITY);
+        s.add_player(node, 0).unwrap();
+        // A frame carrying a move for player 0 by (+1, +2).
+        let frame = engine_frame_with(
+            1_000,
+            true,
+            vec![encode_move(0, 0, Vec3::new(1.0, 2.0, 0.0))],
+        );
+        let snap = s.advance(0, &FrameContext::new(&frame));
+        // The player node's local — and its propagated world — moved by the delta.
+        assert_eq!(s.local(node).unwrap().translation.x, 1.0);
+        assert_eq!(s.local(node).unwrap().translation.y, 2.0);
+        let moved = snap.nodes().iter().find(|n| n.world().translation.x == 1.0);
+        assert!(moved.is_some(), "snapshot reflects the moved player");
+    }
+
+    #[test]
+    fn advance_with_no_commands_leaves_the_player_put() {
+        let mut s = Scene::new();
+        let node = s.create_node(Transform::IDENTITY);
+        s.add_player(node, 0).unwrap();
+        let frame = engine_frame(1_000, true); // no commands
+        s.advance(0, &FrameContext::new(&frame));
+        assert_eq!(s.local(node).unwrap().translation.x, 0.0);
+    }
+
+    #[test]
+    fn add_player_rejects_a_missing_node() {
+        let mut s = Scene::new();
+        assert!(s.add_player(SceneNodeId::from_raw(99), 0).is_err());
     }
 
     #[test]

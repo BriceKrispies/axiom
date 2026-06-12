@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use axiom_ecs::{ComponentColumn, EntityRegistry, WorldStep, WorldSystem};
 use axiom_kernel::EntityId;
-use axiom_math::Transform;
+use axiom_math::{Transform, Vec3};
 
 use crate::camera::Camera;
 use crate::light::Light;
@@ -33,6 +33,13 @@ pub struct SceneStorage {
     pub lights: ComponentColumn<Light>,
     pub renderables: ComponentColumn<Renderable>,
     pub spins: ComponentColumn<Spin>,
+    /// Controllable nodes, keyed entity → player index. Authored once; the
+    /// bridge that lets a per-tick move command address a node by player index.
+    pub players: BTreeMap<EntityId, u32>,
+    /// The per-tick move deltas to apply this frame, `(player index, delta)`.
+    /// Staged from frame commands by [`crate::scene::Scene::advance`] and drained
+    /// by [`PlayerMoveSystem`]; transient, never serialized.
+    pub pending_moves: Vec<(u32, Vec3)>,
 }
 
 /// The transform-hierarchy system: computes each entity's world transform from
@@ -72,6 +79,40 @@ impl WorldSystem<SceneStorage> for SpinSystem {
             .collect();
         for (entity, local) in updates {
             storage.locals.insert(entity, local);
+        }
+    }
+}
+
+/// The player-move system: applies this frame's staged move deltas to the local
+/// translation of each addressed player node, then clears the queue. Runs after
+/// [`SpinSystem`] and before [`TransformPropagation`] so the moved locals
+/// propagate this frame. A player node carries no [`Spin`], so nothing else
+/// writes its local — its translation accumulates across ticks.
+#[derive(Debug)]
+pub struct PlayerMoveSystem;
+
+impl WorldSystem<SceneStorage> for PlayerMoveSystem {
+    fn run(&self, _step: &WorldStep, _entities: &EntityRegistry, storage: &mut SceneStorage) {
+        let moves = std::mem::take(&mut storage.pending_moves);
+        for (player, delta) in moves {
+            // Resolve the player index to its node (deterministic: BTreeMap iter).
+            let entity = storage
+                .players
+                .iter()
+                .find_map(|(&e, &i)| (i == player).then_some(e));
+            if let Some(entity) = entity {
+                let mut local = storage
+                    .locals
+                    .get(entity)
+                    .copied()
+                    .unwrap_or(Transform::IDENTITY);
+                local.translation = Vec3::new(
+                    local.translation.x + delta.x,
+                    local.translation.y + delta.y,
+                    local.translation.z + delta.z,
+                );
+                storage.locals.insert(entity, local);
+            }
         }
     }
 }
@@ -124,6 +165,61 @@ mod tests {
         assert!(s.lights.is_empty());
         assert!(s.renderables.is_empty());
         assert!(s.spins.is_empty());
+        assert!(s.players.is_empty());
+        assert!(s.pending_moves.is_empty());
+    }
+
+    #[test]
+    fn player_move_system_translates_the_addressed_player_and_drains() {
+        let reg = registry(2);
+        let mut storage = SceneStorage::default();
+        // e1 is player 0 at the origin; e2 is player 1 offset on x.
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.players.insert(e(1), 0);
+        storage
+            .locals
+            .insert(e(2), Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)));
+        storage.players.insert(e(2), 1);
+        // Move player 0 by (+1, +2); player 1 gets no input this tick.
+        storage.pending_moves.push((0, Vec3::new(1.0, 2.0, 0.0)));
+
+        PlayerMoveSystem.run(&WorldStep::new(0), &reg, &mut storage);
+
+        assert_eq!(storage.locals.get(e(1)).unwrap().translation.x, 1.0);
+        assert_eq!(storage.locals.get(e(1)).unwrap().translation.y, 2.0);
+        // Player 1 is untouched, and the queue is drained.
+        assert_eq!(storage.locals.get(e(2)).unwrap().translation.x, 5.0);
+        assert!(storage.pending_moves.is_empty());
+    }
+
+    #[test]
+    fn player_move_system_accumulates_across_ticks() {
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.players.insert(e(1), 0);
+        for _ in 0..3 {
+            storage.pending_moves.push((0, Vec3::new(0.5, 0.0, 0.0)));
+            PlayerMoveSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        }
+        assert_eq!(storage.locals.get(e(1)).unwrap().translation.x, 1.5);
+    }
+
+    #[test]
+    fn player_move_for_unknown_index_is_ignored() {
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.players.insert(e(1), 0);
+        // No player 7 exists — the find_map None arm; nothing moves.
+        storage.pending_moves.push((7, Vec3::new(9.0, 9.0, 9.0)));
+        PlayerMoveSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        assert_eq!(storage.locals.get(e(1)).unwrap().translation.x, 0.0);
+    }
+
+    #[test]
+    fn player_move_system_debug_is_renderable() {
+        assert!(format!("{:?}", PlayerMoveSystem).contains("PlayerMoveSystem"));
     }
 
     #[test]

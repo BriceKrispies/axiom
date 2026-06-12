@@ -1,6 +1,6 @@
 //! The single public facade of the `axiom-scene` module.
 
-use axiom_frame::FrameContext;
+use axiom_frame::{FrameCommand, FrameContext};
 use axiom_kernel::{Meters, Radians, Ratio, Reflect, TypeSchema};
 use axiom_math::{Mat4, MathApi, Transform, Vec3};
 
@@ -204,6 +204,21 @@ impl SceneApi {
         self.scene.add_spin(node, Spin::new(axis, period_ticks))
     }
 
+    // --- Players (controllable nodes moved by per-tick commands) ---
+
+    /// Mark `node` as the controllable node for `player` index. Per-tick move
+    /// commands addressed to that index translate it during [`Self::advance`].
+    pub fn add_player(&mut self, node: SceneNodeId, player: u32) -> SceneResult<()> {
+        self.scene.add_player(node, player)
+    }
+
+    /// Encode a per-tick move for `player` by `delta` (a translation delta) as a
+    /// [`FrameCommand`] to hand to the frame builder. The scene decodes these in
+    /// [`Self::advance`] and applies them to the addressed player's node.
+    pub fn move_command(&self, sequence: u64, player: u32, delta: Vec3) -> FrameCommand {
+        crate::player_command::encode_move(sequence, player, delta)
+    }
+
     // --- Propagation / frame integration ---
 
     /// Recompute every node's world transform now.
@@ -268,6 +283,25 @@ mod tests {
     fn new_and_default_facades_are_equivalent() {
         // Both construction paths produce the same (empty) scene snapshot.
         assert_eq!(SceneApi::new().snapshot(), SceneApi::default().snapshot());
+    }
+
+    #[test]
+    fn add_player_marks_a_node_and_rejects_a_missing_one() {
+        let mut s = api();
+        let node = s.create_node();
+        assert!(s.add_player(node, 0).is_ok());
+        assert!(s.add_player(SceneNodeId::from_raw(404), 1).is_err());
+    }
+
+    #[test]
+    fn move_command_encodes_a_decodable_move() {
+        // The facade-built command round-trips through the scene's decoder.
+        let s = api();
+        let cmd = s.move_command(0, 3, Vec3::new(0.25, -0.75, 0.0));
+        assert_eq!(
+            crate::player_command::decode_move(&cmd),
+            Some((3, Vec3::new(0.25, -0.75, 0.0)))
+        );
     }
 
     #[test]

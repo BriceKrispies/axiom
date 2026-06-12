@@ -11,6 +11,7 @@ use axiom_math::Transform;
 
 use crate::camera::Camera;
 use crate::directional_light::DirectionalLight;
+use crate::player::Player;
 use crate::renderable::Renderable;
 use crate::spin::Spin;
 
@@ -21,6 +22,7 @@ pub enum NodeComponent {
     Camera(Camera),
     Light(DirectionalLight),
     Spin(Spin),
+    Player(Player),
 }
 
 /// A recorded spawn: the node's local transform, its components, and the index
@@ -81,9 +83,23 @@ impl Bundle for Spin {
     }
 }
 
+impl Bundle for Player {
+    fn apply(self, command: &mut SpawnCommand) {
+        command.components.push(NodeComponent::Player(self));
+    }
+}
+
 impl<A: Bundle, B: Bundle> Bundle for (A, B) {
     fn apply(self, command: &mut SpawnCommand) {
         self.0.apply(command);
         self.1.apply(command);
+    }
+}
+
+impl<A: Bundle, B: Bundle, C: Bundle> Bundle for (A, B, C) {
+    fn apply(self, command: &mut SpawnCommand) {
+        self.0.apply(command);
+        self.1.apply(command);
+        self.2.apply(command);
     }
 }

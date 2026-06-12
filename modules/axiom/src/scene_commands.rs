@@ -110,6 +110,11 @@ impl SceneCommands {
                             .add_spin(node, s.axis, s.period_ticks)
                             .expect("spin attaches to a just-created node");
                     }
+                    NodeComponent::Player(p) => {
+                        scene
+                            .add_player(node, p.index)
+                            .expect("player attaches to a just-created node");
+                    }
                 }
             }
             nodes.push(node);
