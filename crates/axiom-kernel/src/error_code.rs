@@ -36,6 +36,10 @@ pub enum KernelErrorCode {
     /// A dimensioned scalar quantity was built from a non-finite value (NaN or
     /// infinity).
     NonFiniteScalar = 13,
+    /// A serialized tagged value carried a discriminant the reader does not
+    /// recognize (e.g. an unknown enum tag byte in an otherwise well-formed
+    /// buffer).
+    InvalidDiscriminant = 14,
 }
 
 impl KernelErrorCode {
@@ -55,6 +59,7 @@ mod tests {
         assert_eq!(KernelErrorCode::OutOfBounds.raw(), 5);
         assert_eq!(KernelErrorCode::KernelMustNotImport.raw(), 12);
         assert_eq!(KernelErrorCode::NonFiniteScalar.raw(), 13);
+        assert_eq!(KernelErrorCode::InvalidDiscriminant.raw(), 14);
     }
 
     #[test]

@@ -134,6 +134,7 @@ fn lib_exports_are_curated_set() {
         "pub use frame_index::FrameIndex;",
         "pub use simulation_clock::SimulationClock;",
         "pub use tick::Tick;",
+        "pub use deterministic_rng::DeterministicRng;",
         "pub use meters::Meters;",
         "pub use radians::Radians;",
         "pub use ratio::Ratio;",

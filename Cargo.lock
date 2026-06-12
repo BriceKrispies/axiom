@@ -139,6 +139,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-netcode"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-render"
 version = "0.1.0"
 dependencies = [

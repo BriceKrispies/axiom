@@ -23,6 +23,7 @@ members = [
     "modules/axiom-webgpu",
     "modules/axiom-render-pipeline",
     "modules/axiom-windowing",
+    "modules/axiom-netcode",
     "modules/axiom",
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",

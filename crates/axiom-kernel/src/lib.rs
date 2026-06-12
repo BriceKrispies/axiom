@@ -35,6 +35,9 @@ mod frame_index;
 mod simulation_clock;
 mod tick;
 
+// --- Deterministic random source ---
+mod deterministic_rng;
+
 // --- Dimensioned scalar quantity model ---
 mod meters;
 mod radians;
@@ -109,6 +112,10 @@ pub use fixed_step::FixedStep;
 pub use frame_index::FrameIndex;
 pub use simulation_clock::SimulationClock;
 pub use tick::Tick;
+
+// Deterministic random source — a seeded generator higher layers and modules
+// use for replayable simulation, fuzzing, and adversarial-network models.
+pub use deterministic_rng::DeterministicRng;
 
 // Dimensioned scalar quantities — the typed boundary where a raw f32 becomes a
 // length/angle/ratio, so layers above the kernel and math stop exposing naked
