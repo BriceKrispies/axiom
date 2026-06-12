@@ -31,10 +31,11 @@ use regex::Regex;
 use crate::violation::{CheckReport, Violation, ViolationKind};
 
 /// The ONE ignore pattern the coverage gate is permitted to use. It excludes
-/// the apps (composition leaves), the `xtask` tooling, and the `axiom-zones`
-/// build-time support crate from the 100% count, and nothing else. Mirrored
-/// verbatim in `scripts/coverage.sh` and `scripts/coverage.ps1`.
-pub const SANCTIONED_IGNORE_REGEX: &str = r"[/\\](xtask|apps|axiom-zones)[/\\]";
+/// the apps (composition leaves), repo tooling (the `xtask` crate and anything
+/// under `tools/`), and the `axiom-zones` build-time support crate from the 100%
+/// count, and nothing else. Mirrored verbatim in `scripts/coverage.sh` and
+/// `scripts/coverage.ps1`.
+pub const SANCTIONED_IGNORE_REGEX: &str = r"[/\\](xtask|apps|axiom-zones|tools)[/\\]";
 
 /// Gate scripts, relative to the repo root. Each must apply exactly the
 /// sanctioned ignore, once.
@@ -193,6 +194,7 @@ mod tests {
         assert!(re.is_match("/apps/axiom-demo/src/lib.rs"));
         assert!(re.is_match("/crates/xtask/src/main.rs"));
         assert!(re.is_match("/crates/axiom-zones/src/lib.rs"));
+        assert!(re.is_match("/tools/axiom-netcode-relay/src/main.rs"));
         assert!(!re.is_match("/crates/axiom-kernel/src/lib.rs"));
         assert!(!re.is_match("/modules/axiom-scene/src/scene.rs"));
     }
@@ -201,7 +203,7 @@ mod tests {
     fn real_sanctioned_line_passes() {
         let root = setup(
             "ok",
-            "exclude=(--ignore-filename-regex '[/\\\\](xtask|apps|axiom-zones)[/\\\\]')",
+            "exclude=(--ignore-filename-regex '[/\\\\](xtask|apps|axiom-zones|tools)[/\\\\]')",
         );
         let (layers, modules) = dirs(&root);
         let mut report = CheckReport::default();
@@ -240,7 +242,7 @@ mod tests {
         // let engine code be hidden. Two flag uses must fail.
         let root = setup(
             "drift_extra",
-            "exclude=(--ignore-filename-regex '[/\\\\](xtask|apps|axiom-zones)[/\\\\]' \
+            "exclude=(--ignore-filename-regex '[/\\\\](xtask|apps|axiom-zones|tools)[/\\\\]' \
              --ignore-filename-regex '[/\\\\]modules[/\\\\]')",
         );
         let (layers, modules) = dirs(&root);
@@ -266,7 +268,7 @@ mod tests {
         // it regardless of how the misplacement happened.
         let root = setup(
             "engine_excluded",
-            "exclude=(--ignore-filename-regex '[/\\\\](xtask|apps|axiom-zones)[/\\\\]')",
+            "exclude=(--ignore-filename-regex '[/\\\\](xtask|apps|axiom-zones|tools)[/\\\\]')",
         );
         let layers = vec![("kernel".to_string(), root.join("crates/axiom-kernel/src"))];
         let modules = vec![("stray".to_string(), root.join("apps/stray/src"))];

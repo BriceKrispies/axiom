@@ -1,0 +1,23 @@
+[package]
+name = "axiom-netcode-relay"
+description = "Repo tooling: a dumb WebSocket broadcast relay for the live lockstep demo. It assigns each connecting browser a peer id and forwards every binary message to the others; it never decodes netcode bytes. Outside the engine graph and the coverage gate (a Tool, by its tools/ location)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-netcode-relay"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
+tokio-tungstenite = "0.24"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[lints.rust]
+unsafe_code = "forbid"

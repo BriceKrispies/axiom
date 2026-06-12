@@ -1,0 +1,20 @@
+# Axiom app manifest — axiom-netplay-browser.
+#
+# The live deterministic-lockstep multiplayer demo. Two browsers each run the
+# engine and control their own cube; only inputs cross the wire through a relay.
+# It composes three modules — `engine` (the umbrella `App`, with player input),
+# `netcode` (the lockstep session), and `windowing` (the live presentation loop,
+# wasm32 only) — and owns the translation glue plus the nondeterministic edge
+# (WebSocket + keyboard), which is an app's job. The relay is a separate tool.
+
+[app]
+name = "netplay-browser"
+crate_name = "axiom-netplay-browser"
+
+allowed_layers = []
+
+allowed_modules = [
+    "engine",
+    "netcode",
+    "windowing",
+]

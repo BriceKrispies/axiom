@@ -28,7 +28,9 @@ members = [
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",
     "apps/axiom-netcode-demo",
+    "apps/axiom-netplay-browser",
     "crates/xtask",
+    "tools/axiom-netcode-relay",
 ]
 
 [workspace.package]

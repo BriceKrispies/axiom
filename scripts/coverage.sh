@@ -40,10 +40,11 @@ case "${1:-}" in
 esac
 
 # The Coverage Law governs the reusable engine spine: layers + modules. Apps are
-# composition leaves (nothing depends on them) and xtask is repo tooling (outside
-# the engine graph) — both sit outside the gate. This is a scope boundary, NOT a
-# loophole: no layer or module file may ever be added here to dodge the gate.
-exclude=(--ignore-filename-regex '[/\\](xtask|apps|axiom-zones)[/\\]')
+# composition leaves (nothing depends on them) and repo tooling (the xtask crate
+# and anything under tools/) sits outside the engine graph — both sit outside the
+# gate. This is a scope boundary, NOT a loophole: no layer or module file may ever
+# be added here to dodge the gate.
+exclude=(--ignore-filename-regex '[/\\](xtask|apps|axiom-zones|tools)[/\\]')
 
 # The 100% gate. llvm-cov has no --fail-under-branches; regions are the
 # branch-level enforceable proxy (one region per branch arm).

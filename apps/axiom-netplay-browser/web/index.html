@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Live Lockstep Multiplayer</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: #15171c;
+        color: #d7dbe2;
+      }
+      h1 { font-size: 16px; font-weight: 600; margin: 0; }
+      /* The canvas id MUST match CANVAS_ID in src/lib.rs. */
+      #axiom-netplay-canvas {
+        width: 800px;
+        height: 600px;
+        border: 1px solid #2a2e36;
+        border-radius: 6px;
+        background: #000;
+      }
+      #status { font-family: ui-monospace, monospace; white-space: pre; text-align: center; }
+      .ok { color: #7fd17f; }
+      .err { color: #e07a7a; }
+      kbd {
+        background: #20242c; border: 1px solid #333; border-radius: 4px;
+        padding: 1px 5px; font-family: ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — live deterministic-lockstep multiplayer</h1>
+    <canvas id="axiom-netplay-canvas" width="800" height="600"></canvas>
+    <div id="status">booting…</div>
+
+    <script type="module">
+      import init, { start } from "./pkg/axiom_netplay_browser.js";
+
+      const status = document.getElementById("status");
+      const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
+
+      async function main() {
+        if (!("gpu" in navigator)) {
+          set(
+            "WebGPU is not available in this browser.\n" +
+            "Use a recent Chrome/Edge (or Firefox Nightly) over http://localhost.",
+            "err"
+          );
+          return;
+        }
+        try {
+          await init();
+          start(); // connect to the relay, capture the keyboard, drive the loop
+          set(
+            "Connected. Open this page in a SECOND browser window to start —\n" +
+            "lockstep waits until both players are present (the screen stays\n" +
+            "black until then). Each window controls its OWN cube with the\n" +
+            "arrow keys (← → ↑ ↓); only inputs cross the wire, so the two\n" +
+            "screens stay identical by determinism. Red = player 1, blue = player 2.",
+            "ok"
+          );
+        } catch (e) {
+          set("Startup failed: " + e + "\n(is the relay running? `make relay`)", "err");
+          throw e;
+        }
+      }
+      main();
+    </script>
+  </body>
+</html>
