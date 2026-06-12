@@ -44,11 +44,11 @@ help:
 
 # Serve the prebuilt wasm bundle. uv provides/manages the Python interpreter;
 # --no-project keeps it from trying to sync a Python project in the repo root.
+# Recipe lines are kept portable (no sh-only test/||/{}) so make runs them under
+# cmd.exe on Windows too; run `make demo-build` first if the page is blank.
 demo:
-	@test -f "$(PKG_DIR)/axiom_demo_rotating_cube_browser_bg.wasm" \
-		|| { echo "No wasm bundle in $(PKG_DIR). Run 'make demo-build' first."; exit 1; }
-	@echo "Serving $(WEB_DIR) at http://localhost:$(PORT)"
-	@echo "Open it in a WebGPU browser (recent Chrome/Edge, or Firefox Nightly). Ctrl+C to stop."
+	@echo Serving rotating-cube demo at http://localhost:$(PORT) - run make demo-build first if blank
+	@echo Open it in a WebGPU browser such as recent Chrome or Edge. Ctrl+C to stop.
 	uv run --no-project python -m http.server $(PORT) --directory $(WEB_DIR)
 
 # Rebuild the wasm bundle from the browser app crate into web/pkg. Uses the
@@ -75,11 +75,11 @@ netplay-build:
 	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
 
 # Serve the netplay page. The relay (make relay) must already be running, then
-# open this URL in TWO WebGPU browser windows.
+# open this URL in TWO WebGPU browser windows. Recipe lines are kept portable
+# (no sh-only test/||/{}) so make runs them under cmd.exe on Windows too; if the
+# bundle is missing the page reports it, so run `make netplay-build` first.
 netplay:
-	@test -f "$(NETPLAY_PKG)/axiom_netplay_browser_bg.wasm" \
-		|| { echo "No wasm bundle in $(NETPLAY_PKG). Run 'make netplay-build' first."; exit 1; }
-	@echo "Serving $(NETPLAY_WEB) at http://localhost:$(NETPLAY_PORT)"
-	@echo "Make sure 'make relay' is running, then open this URL in TWO WebGPU"
-	@echo "browser windows. Arrow-key your cube; the other window sees it move."
+	@echo Serving netplay at http://localhost:$(NETPLAY_PORT) - run make netplay-build first if blank
+	@echo Start the relay in another shell with:  make relay
+	@echo Then open this URL in TWO WebGPU browser windows and arrow-key your cube.
 	uv run --no-project python -m http.server $(NETPLAY_PORT) --directory $(NETPLAY_WEB)
