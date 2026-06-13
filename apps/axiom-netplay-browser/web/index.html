@@ -42,7 +42,19 @@
     <div id="status">booting…</div>
 
     <script type="module">
-      import init, { start } from "./pkg/axiom_netplay_browser.js";
+      // Cache-bust both the JS glue and the wasm binary on every load. The dev
+      // server (`make netplay` → python http.server) sends no cache headers, so a
+      // browser that loaded an OLD bundle once would otherwise keep serving the
+      // stale .js/.wasm from disk cache forever — even across a normal refresh —
+      // which looks like a frozen/black window running last build's code. The
+      // `?v=<timestamp>` query forces a fresh fetch of both files.
+      const v = Date.now();
+      const { default: init, start } =
+        await import(`./pkg/axiom_netplay_browser.js?v=${v}`);
+      const wasmUrl = new URL(
+        `./pkg/axiom_netplay_browser_bg.wasm?v=${v}`, import.meta.url);
+      // wasm-bindgen's init takes a single options object ({ module_or_path }).
+      const initOptions = { module_or_path: wasmUrl };
 
       const status = document.getElementById("status");
       const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
@@ -57,7 +69,7 @@
           return;
         }
         try {
-          await init();
+          await init(initOptions);
           start(); // connect to the relay, capture the keyboard, drive the loop
           set(
             "Connected. Open this page in a SECOND browser window to start —\n" +
