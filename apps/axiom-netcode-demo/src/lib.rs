@@ -15,6 +15,7 @@
 //! per-tick input channel.)
 
 use axiom::prelude::*;
+use axiom_crypto::SigningKey;
 use axiom_netcode::NetcodeApi;
 
 const PEER_A: u64 = 1;
@@ -128,9 +129,16 @@ fn confirm_and_step(
 pub fn run_two_peer_lockstep(ticks: u64, peer_b_cubes: usize) -> LockstepReport {
     let mut app_a = build_app(3);
     let mut app_b = build_app(peer_b_cubes);
-    let peers = [PEER_A, PEER_B];
-    let mut net_a = NetcodeApi::new(PEER_A, &peers);
-    let mut net_b = NetcodeApi::new(PEER_B, &peers);
+    // Each peer holds its own signing key; both share a roster of verifying keys
+    // (the same shape the live demo exchanges at handshake).
+    let key_a = SigningKey::from_seed([PEER_A as u8; 32]);
+    let key_b = SigningKey::from_seed([PEER_B as u8; 32]);
+    let roster = [
+        (PEER_A, key_a.verifying_key()),
+        (PEER_B, key_b.verifying_key()),
+    ];
+    let mut net_a = NetcodeApi::new(PEER_A, key_a, &roster);
+    let mut net_b = NetcodeApi::new(PEER_B, key_b, &roster);
 
     let mut report = LockstepReport {
         peer_a_hashes: Vec::new(),

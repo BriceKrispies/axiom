@@ -16,6 +16,9 @@ crate-type = ["rlib"]
 # only tier allowed to name both modules' types.
 axiom = { path = "../../modules/axiom" }
 axiom-netcode = { path = "../../modules/axiom-netcode" }
+# The crypto layer: each peer's signing key + the shared roster of verifying
+# keys that `NetcodeApi::new` authenticates ingested frames against.
+axiom-crypto = { path = "../../crates/axiom-crypto" }
 
 [lints.rust]
 unsafe_code = "forbid"

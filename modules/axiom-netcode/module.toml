@@ -22,6 +22,7 @@ kind = "engine-module"
 
 allowed_layers = [
     "kernel",
+    "crypto",
 ]
 
 allowed_modules = []

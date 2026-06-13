@@ -144,7 +144,18 @@ mod web;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_crypto::SigningKey;
     use axiom_netcode::NetcodeApi;
+
+    /// Peer `id`'s deterministic signing key for the tests.
+    fn key(id: u64) -> SigningKey {
+        SigningKey::from_seed([id as u8; 32])
+    }
+
+    /// The two-peer roster both sessions share.
+    fn roster() -> [(u64, axiom_crypto::VerifyingKey); 2] {
+        [(1, key(1).verifying_key()), (2, key(2).verifying_key())]
+    }
 
     /// Drive two peers in lockstep over a clean in-process channel. Peer 1
     /// (player 0) plays `m0`; peer 2 (player 1) plays `m1`. Each peer applies
@@ -154,8 +165,8 @@ mod tests {
         assert_eq!(m0.len(), m1.len());
         let mut app_a = build_netplay_app();
         let mut app_b = build_netplay_app();
-        let mut net_a = NetcodeApi::new(1, &[1, 2]);
-        let mut net_b = NetcodeApi::new(2, &[1, 2]);
+        let mut net_a = NetcodeApi::new(1, key(1), &roster());
+        let mut net_b = NetcodeApi::new(2, key(2), &roster());
         let (mut ha, mut hb, mut desync) = (Vec::new(), Vec::new(), false);
 
         for tick in 0..m0.len() {
@@ -252,5 +263,45 @@ mod tests {
     fn the_scene_draws_two_player_cubes() {
         let mut app = build_netplay_app();
         assert_eq!(app.tick(0).draws().len(), 2);
+    }
+
+    #[test]
+    fn a_compromised_peer_cannot_forge_the_other_players_input() {
+        // Two honest browsers. A third actor (a compromised client / malicious
+        // relay) holds NO roster key; it floods peer A every tick with frames
+        // claiming to be peer 2, signed by its own key. Peer A must stay
+        // byte-identical to peer B — the forged frames never reach the sim.
+        let mut app_a = build_netplay_app();
+        let mut app_b = build_netplay_app();
+        let mut net_a = NetcodeApi::new(1, key(1), &roster());
+        let mut net_b = NetcodeApi::new(2, key(2), &roster());
+        // The attacker thinks it is peer 2 but holds an off-roster key.
+        let attacker_key = SigningKey::from_seed([200u8; 32]);
+        let mut attacker = NetcodeApi::new(
+            2,
+            attacker_key.clone(),
+            &[(2, attacker_key.verifying_key())],
+        );
+        let (mut ha, mut hb) = (Vec::new(), Vec::new());
+
+        for _ in 0..16 {
+            let in_a =
+                net_a.submit_local(MOVE_KIND, &encode_delta(Vec3::new(MOVE_SPEED, 0.0, 0.0)));
+            let in_b = net_b.submit_local(MOVE_KIND, &encode_delta(Vec3::ZERO));
+            net_a.ingest(&in_b).unwrap();
+            net_b.ingest(&in_a).unwrap();
+            // Forged peer-2 input pushed at peer A: decodes fine, fails the
+            // signature check against peer 2's real roster key, and is dropped.
+            let forged =
+                attacker.submit_local(MOVE_KIND, &encode_delta(Vec3::new(0.0, -MOVE_SPEED, 0.0)));
+            net_a.ingest(&forged).unwrap();
+
+            step(&mut net_a, &mut app_a, &mut ha);
+            step(&mut net_b, &mut app_b, &mut hb);
+        }
+        assert_eq!(
+            ha, hb,
+            "forged frames never reached the sim; the two engines stay identical"
+        );
     }
 }

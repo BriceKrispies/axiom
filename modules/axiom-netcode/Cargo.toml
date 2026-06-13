@@ -19,6 +19,10 @@ crate-type = ["rlib"]
 # codec, the result/error model, and the seeded DeterministicRng (used by the
 # convergence proof to model an adversarial network).
 axiom-kernel = { path = "../../crates/axiom-kernel" }
+# The crypto layer: each input/beacon is signed by its author, so a compromised
+# peer (or relay) cannot forge another peer's inputs. Verified on ingest against
+# a roster of verifying keys.
+axiom-crypto = { path = "../../crates/axiom-crypto" }
 
 [lints.rust]
 unsafe_code = "forbid"

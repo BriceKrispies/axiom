@@ -16,8 +16,16 @@
 
 use std::collections::BTreeMap;
 
+use axiom_crypto::SigningKey;
 use axiom_kernel::DeterministicRng;
 use axiom_netcode::NetcodeApi;
+
+/// A deterministic signing key for a peer id (so the whole run stays replayable).
+fn key_for(id: u64) -> SigningKey {
+    let mut seed = [0u8; 32];
+    seed[..8].copy_from_slice(&id.to_le_bytes());
+    SigningKey::from_seed(seed)
+}
 
 /// A deterministic fold standing in for a real per-tick simulation: a pure
 /// function of the inputs applied, in order, so two peers that apply the same
@@ -54,9 +62,13 @@ impl Harness {
         max_delay: u64,
         corrupt: Option<usize>,
     ) -> Self {
+        let roster = peer_ids
+            .iter()
+            .map(|&id| (id, key_for(id).verifying_key()))
+            .collect::<Vec<_>>();
         let peers = peer_ids
             .iter()
-            .map(|&id| NetcodeApi::new(id, peer_ids))
+            .map(|&id| NetcodeApi::new(id, key_for(id), &roster))
             .collect::<Vec<_>>();
         let n = peers.len();
         Harness {

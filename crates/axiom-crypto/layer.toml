@@ -1,0 +1,39 @@
+# Axiom layer manifest — axiom-crypto (authenticated identity).
+#
+# A root-adjacent layer that depends only on the kernel. It provides a single
+# new capability: cryptographic proof of authorship (ed25519 sign/verify) plus
+# wire-serializable keys and signatures. It genuinely consumes the kernel's
+# binary writer/reader and result/error model to serialize keys/signatures and
+# to report a malformed key encoding. No higher layer's concepts leak in; OS
+# entropy is injected at the edge (apps), so the layer stays deterministic.
+
+[layer]
+name = "crypto"
+crate_name = "axiom-crypto"
+depends_on = ["kernel"]
+meaningful_dependency = "Crypto consumes the kernel's BinaryWriter/BinaryReader to serialize verifying keys and signatures onto the wire and into rosters, and KernelResult/KernelError to report a structurally-invalid key encoding — building the kernel's serialization + error primitives into an authenticity capability (sign/verify) that netcode and other layers use to prove a message's author."
+
+introduced_capabilities = [
+    "SigningKey",
+    "VerifyingKey",
+    "Signature",
+]
+
+consumed_capabilities = [
+    "BinaryWriter",
+    "BinaryReader",
+    "KernelResult",
+    "KernelError",
+    "KernelErrorCode",
+    "KernelErrorScope",
+]
+
+# VerifyingKey and Signature both serialize through the kernel's binary
+# primitives; VerifyingKey additionally reports a KernelError for non-point bytes.
+[[proof_exports]]
+export = "VerifyingKey"
+must_reference = ["BinaryReader", "BinaryWriter", "KernelError"]
+
+[[proof_exports]]
+export = "Signature"
+must_reference = ["BinaryReader", "BinaryWriter"]

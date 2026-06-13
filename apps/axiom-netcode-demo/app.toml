@@ -12,7 +12,9 @@
 name = "netcode-demo"
 crate_name = "axiom-netcode-demo"
 
-allowed_layers = []
+allowed_layers = [
+    "crypto",
+]
 
 allowed_modules = [
     "engine",

@@ -43,6 +43,20 @@ impl InputTimeline {
             .map(|((_, peer), command)| (*peer, command.clone()))
             .collect()
     }
+
+    /// Drop every input recorded at `tick`. Called once a tick is confirmed (its
+    /// inputs are immutable thereafter), so confirmed history does not leak and
+    /// the live timeline stays bounded.
+    pub fn remove_tick(&mut self, tick: u64) {
+        self.inputs.retain(|(t, _), _| *t != tick);
+    }
+
+    /// The total number of inputs currently buffered (across all ticks/peers).
+    /// Test-only introspection for the memory-bound proof.
+    #[cfg(test)]
+    pub fn entry_count(&self) -> usize {
+        self.inputs.len()
+    }
 }
 
 #[cfg(test)]
@@ -94,5 +108,18 @@ mod tests {
         // A resent (duplicate) input must not overwrite the first.
         t.insert(0, p, cmd(99));
         assert_eq!(t.ordered_at(0), vec![(p, cmd(10))]);
+    }
+
+    #[test]
+    fn remove_tick_drops_only_that_tick_and_tracks_len() {
+        let mut t = InputTimeline::new();
+        t.insert(0, PeerId::from_raw(1), cmd(1));
+        t.insert(0, PeerId::from_raw(2), cmd(2));
+        t.insert(1, PeerId::from_raw(1), cmd(3));
+        assert_eq!(t.entry_count(), 3);
+        t.remove_tick(0);
+        assert_eq!(t.entry_count(), 1);
+        assert!(t.ordered_at(0).is_empty());
+        assert_eq!(t.ordered_at(1), vec![(PeerId::from_raw(1), cmd(3))]);
     }
 }

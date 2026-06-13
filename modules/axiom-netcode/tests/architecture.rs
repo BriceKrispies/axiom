@@ -172,9 +172,10 @@ fn lib_rs_exports_only_netcode_api() {
 // ---------- legal layer imports only ----------
 
 #[test]
-fn netcode_imports_only_the_kernel_layer() {
-    // Netcode is a kernel-only module: the deterministic session needs the
-    // kernel's time/id/codec/result primitives and nothing higher.
+fn netcode_imports_only_its_allowed_layers() {
+    // Netcode builds on two layers only: the kernel (time/id/codec/result
+    // primitives) and crypto (input/beacon signing + verification). Nothing
+    // higher, and no other module.
     let mut illegal = Vec::new();
     for path in netcode_source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -186,6 +187,7 @@ fn netcode_imports_only_the_kernel_layer() {
             for chunk in trimmed.split(|c: char| !c.is_alphanumeric() && c != '_') {
                 if chunk.starts_with("axiom_")
                     && chunk != "axiom_kernel"
+                    && chunk != "axiom_crypto"
                     && chunk != "axiom_netcode"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
@@ -195,7 +197,7 @@ fn netcode_imports_only_the_kernel_layer() {
     }
     assert!(
         illegal.is_empty(),
-        "axiom-netcode may only import axiom-kernel:\n{}",
+        "axiom-netcode may only import axiom-kernel and axiom-crypto:\n{}",
         illegal.join("\n")
     );
 }

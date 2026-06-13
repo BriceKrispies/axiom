@@ -11,7 +11,9 @@
 name = "netplay-browser"
 crate_name = "axiom-netplay-browser"
 
-allowed_layers = []
+allowed_layers = [
+    "crypto",
+]
 
 allowed_modules = [
     "engine",

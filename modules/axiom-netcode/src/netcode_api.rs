@@ -1,5 +1,6 @@
 //! The single public facade of the `axiom-netcode` module.
 
+use axiom_crypto::{SigningKey, VerifyingKey};
 use axiom_kernel::KernelResult;
 
 use crate::digest::digest;
@@ -34,24 +35,32 @@ pub struct NetcodeApi {
 }
 
 impl NetcodeApi {
-    /// Open a session for `local` among `peers` (raw ids; `local` is added if
-    /// absent). How far ahead the app submits inputs is the app loop's policy,
-    /// not the session's — the session simply confirms a tick once every peer's
-    /// input for it has arrived.
-    pub fn new(local: u64, peers: &[u64]) -> Self {
+    /// Open a session for `local` (raw id) holding `signing_key`, among a
+    /// `roster` of `(peer raw id, verifying key)` — every participant's public
+    /// key, including this one's. `local` is added to the peer set if absent.
+    ///
+    /// The roster is the trust anchor: every ingested frame must be validly
+    /// signed by the roster key for its claimed author, so a peer (or relay)
+    /// cannot forge another peer's inputs. How far ahead the app submits is the
+    /// app loop's policy; the session confirms a tick once every peer's input
+    /// for it has arrived.
+    pub fn new(local: u64, signing_key: SigningKey, roster: &[(u64, VerifyingKey)]) -> Self {
         NetcodeApi {
-            session: Session::new(local, peers),
+            session: Session::new(local, signing_key, roster),
         }
     }
 
-    /// Schedule a local input and return the wire bytes the app must broadcast.
+    /// Schedule a local input, **sign it**, and return the wire bytes the app
+    /// must broadcast.
     pub fn submit_local(&mut self, kind: u32, payload: &[u8]) -> Vec<u8> {
         self.session.schedule_local(kind, payload.to_vec()).encode()
     }
 
     /// Decode a received wire message and fold it into the session. Fails with a
-    /// kernel error if the bytes are malformed (bad version, unknown tag, or
-    /// truncated).
+    /// kernel error if the bytes are *malformed* (bad version, unknown tag, or
+    /// truncated). A well-formed frame that is *inadmissible* — forged signature,
+    /// unknown peer, or an out-of-window tick — decodes fine and is then silently
+    /// dropped by the session, never affecting confirmed state.
     pub fn ingest(&mut self, message: &[u8]) -> KernelResult<()> {
         self.session.accept(NetMessage::decode(message)?);
         Ok(())
@@ -109,19 +118,36 @@ impl NetcodeApi {
 mod tests {
     use super::*;
 
+    /// A matched pair of peers (1 and 2), each with its own key and the shared
+    /// two-key roster — the facade-level equivalent of two browsers.
+    fn pair() -> (NetcodeApi, NetcodeApi) {
+        let k1 = SigningKey::from_seed([1u8; 32]);
+        let k2 = SigningKey::from_seed([2u8; 32]);
+        let roster = [(1u64, k1.verifying_key()), (2u64, k2.verifying_key())];
+        (
+            NetcodeApi::new(1, k1, &roster),
+            NetcodeApi::new(2, k2, &roster),
+        )
+    }
+
+    fn solo() -> NetcodeApi {
+        let k = SigningKey::from_seed([1u8; 32]);
+        let roster = [(1u64, k.verifying_key())];
+        NetcodeApi::new(1, k, &roster)
+    }
+
     #[test]
     fn ingest_rejects_malformed_bytes() {
-        let mut peer = NetcodeApi::new(1, &[2]);
+        let mut peer = solo();
         assert!(peer.ingest(&[0xFF, 0xFF]).is_err());
         assert_eq!(peer.confirmed_tick(), 0);
     }
 
     #[test]
     fn submit_then_ingest_round_trips_an_input() {
-        // Peer 1 submits locally; peer 2 ingests peer 1's bytes and, once it adds
-        // its own input, confirms tick 0 with both inputs in peer order.
-        let mut p1 = NetcodeApi::new(1, &[2]);
-        let mut p2 = NetcodeApi::new(2, &[1]);
+        // Peer 1 submits locally; peer 2 ingests peer 1's signed bytes and, once
+        // it adds its own input, confirms tick 0 with both inputs in peer order.
+        let (mut p1, mut p2) = pair();
         let bytes = p1.submit_local(7, &[1, 2, 3]);
         p2.ingest(&bytes).unwrap();
         assert_eq!(p2.ready_tick(), None, "peer 2 still owes tick 0");
@@ -136,16 +162,36 @@ mod tests {
     }
 
     #[test]
+    fn an_impersonated_input_is_ignored_through_the_facade() {
+        // Peer 1 signs an input but tags it as peer 2 — a different peer's bytes,
+        // verified against peer 1's roster key, fail and are dropped. (Peer 1
+        // cannot mint peer-2 bytes: its signature is over `peer = 2` but made
+        // with key 1, so peer 2's roster entry rejects it.)
+        let mut p2 = pair().1;
+        // A rogue holding peer 1's key submits *as peer 2*: a frame claiming
+        // peer 2 but signed by key 1.
+        let forged = {
+            let k = SigningKey::from_seed([1u8; 32]); // peer 1's key
+            let roster = [(2u64, k.verifying_key())];
+            let mut liar = NetcodeApi::new(2, k, &roster);
+            liar.submit_local(5, &[1])
+        };
+        // p2's roster has the REAL peer-2 key, so the forged frame fails to verify.
+        p2.ingest(&forged).unwrap();
+        p2.submit_local(0, &[]);
+        assert_eq!(p2.ready_tick(), None, "no genuine peer-1 input arrived");
+    }
+
+    #[test]
     fn confirm_tick_is_empty_when_not_ready() {
-        let mut peer = NetcodeApi::new(1, &[2]);
+        let mut peer = pair().0;
         peer.submit_local(1, &[]);
         assert!(peer.confirm_tick(0).is_empty(), "peer 2 missing");
     }
 
     #[test]
     fn reconcile_maps_all_three_states() {
-        let mut p1 = NetcodeApi::new(1, &[2]);
-        let mut p2 = NetcodeApi::new(2, &[1]);
+        let (mut p1, mut p2) = pair();
         // Pending: no hashes yet.
         assert_eq!(p1.reconcile(0), None);
         // In sync: both peers report the same hash for the same state.
@@ -162,7 +208,7 @@ mod tests {
 
     #[test]
     fn digest_is_deterministic_through_the_facade() {
-        let peer = NetcodeApi::new(1, &[]);
+        let peer = solo();
         assert_eq!(peer.digest(b"abc"), peer.digest(b"abc"));
         assert_ne!(peer.digest(b"abc"), peer.digest(b"abd"));
     }

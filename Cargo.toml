@@ -10,6 +10,7 @@
 resolver = "2"
 members = [
     "crates/axiom-kernel",
+    "crates/axiom-crypto",
     "crates/axiom-runtime",
     "crates/axiom-math",
     "crates/axiom-host",
@@ -72,3 +73,15 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# Optimize the cryptography dependencies even in debug/test builds. ed25519/
+# curve25519 field arithmetic is ~100x slower unoptimized, which would make the
+# signed-lockstep tests (and the coverage gate) crawl. These are third-party
+# dependencies, not engine spine, so optimizing them does not affect coverage
+# instrumentation of our own crates — it only makes signing/verification fast.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3

@@ -15,6 +15,9 @@ crate-type = ["cdylib", "rlib"]
 # the live loop.
 axiom = { path = "../../modules/axiom" }
 axiom-netcode = { path = "../../modules/axiom-netcode" }
+# The crypto layer: each browser mints its own signing key and the two exchange
+# verifying keys at handshake, so a compromised peer/relay cannot forge inputs.
+axiom-crypto = { path = "../../crates/axiom-crypto" }
 
 # The live arm only: the windowing presentation loop and the browser edge
 # (WebSocket + keyboard). Confined to wasm32, so native `cargo test`/coverage
@@ -25,6 +28,9 @@ axiom-windowing = { path = "../../modules/axiom-windowing" }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
+# A 32-byte random seed for this browser's signing key, from the browser's
+# CSPRNG (the `js` feature routes getrandom to crypto.getRandomValues).
+getrandom = { version = "0.2", features = ["js"] }
 web-sys = { version = "0.3", features = [
     "Window",
     "EventTarget",
