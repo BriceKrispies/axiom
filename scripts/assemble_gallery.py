@@ -29,6 +29,7 @@ DEMO_PKGS = {
     "rotating-cube": "apps/axiom-demo-rotating-cube-browser/web/pkg",
     "netplay": "apps/axiom-netplay-browser/web/pkg",
     "retro_fps": "apps/axiom-retro-fps-browser/web/pkg",
+    "stress-cubes": "apps/axiom-stress-cubes-browser/web/pkg",
 }
 
 

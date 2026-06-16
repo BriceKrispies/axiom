@@ -29,6 +29,7 @@ members = [
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",
     "apps/axiom-retro-fps-browser",
+    "apps/axiom-stress-cubes-browser",
     "apps/axiom-netcode-demo",
     "apps/axiom-netcode-sim",
     "apps/axiom-netplay-browser",

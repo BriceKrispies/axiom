@@ -64,6 +64,24 @@ export const DEMOS = [
       { key: " ", label: "FIRE", pos: "fire" },
     ],
   },
+  {
+    id: "stress-cubes",
+    title: "Stress (N cubes)",
+    blurb: "A field of N spinning cubes — a live load test you can watch.",
+    desc:
+      "The browser-visible counterpart to the engine's CPU pipeline benchmark: " +
+      "a grid of N independently-spinning cube renderables on the same " +
+      "scene → render → WebGPU path. Pick a cube count below and watch the FPS " +
+      "fall as N climbs — the frame-rate collapse is the deterministic pipeline " +
+      "cost made visible. Purely visual — no input.",
+    dir: "stress-cubes",
+    jsModule: "axiom_stress_cubes_browser",
+    canvasId: "axiom-stress-canvas",
+    buttons: [],
+    // Declares a cube-count control bar + FPS readout, and that `start` takes a
+    // cube count (read from `?cubes=`, default 2000).
+    cubeStress: true,
+  },
 ];
 
 /** Look a demo up by its `id`, or `null` when unknown. */
@@ -98,6 +116,59 @@ function mountRelayBar(host, demo, currentRelay) {
     location.search = "?" + q.toString();
   });
   host.appendChild(bar);
+}
+
+// The cube-count presets offered by the stress demo's control bar.
+const CUBE_PRESETS = [100, 500, 1000, 2000, 5000, 10000, 25000];
+
+// Read the requested cube count from `?cubes=`, defaulting to 2000 and never
+// below 1 (matching the Rust `start` clamp).
+function readCubeCount(params) {
+  return Math.max(1, parseInt(params.get("cubes") ?? "2000", 10) || 2000);
+}
+
+// Mount the stress demo's control bar: cube-count presets that reload the page
+// with `?cubes=N` applied, plus a live FPS / frame-time readout. The FPS counter
+// is an independent requestAnimationFrame loop on the main thread, so it
+// measures the true delivered frame rate — when a frame's CPU+GPU work overruns
+// the vsync budget, this drops with it.
+function mountCubeBar(host, demo, current) {
+  const bar = document.createElement("div");
+  bar.className = "cubebar";
+  const label = document.createElement("span");
+  label.className = "cubebar-label";
+  label.textContent = "cubes:";
+  bar.appendChild(label);
+  for (const n of CUBE_PRESETS) {
+    const a = document.createElement("a");
+    const q = new URLSearchParams({ id: demo.id, cubes: String(n) });
+    a.href = "?" + q.toString();
+    a.textContent = n.toLocaleString();
+    if (n === current) a.className = "active";
+    bar.appendChild(a);
+  }
+  const fps = document.createElement("span");
+  fps.className = "fps";
+  fps.textContent = "fps: —";
+  bar.appendChild(fps);
+  host.appendChild(bar);
+
+  let last = performance.now();
+  let acc = 0;
+  let frames = 0;
+  const loop = (now) => {
+    acc += now - last;
+    last = now;
+    frames += 1;
+    if (acc >= 500) {
+      const value = (frames * 1000) / acc;
+      fps.textContent = `fps: ${value.toFixed(1)}  (${(acc / frames).toFixed(1)} ms)`;
+      acc = 0;
+      frames = 0;
+    }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
 }
 
 /**
@@ -136,6 +207,11 @@ export async function bootDemo() {
     mountRelayBar(document.getElementById("controls"), demo, relay);
   }
 
+  const cubeCount = demo.cubeStress ? readCubeCount(params) : null;
+  if (demo.cubeStress) {
+    mountCubeBar(document.getElementById("controls"), demo, cubeCount);
+  }
+
   if (!("gpu" in navigator)) {
     setStatus(
       status,
@@ -156,9 +232,20 @@ export async function bootDemo() {
       import.meta.url,
     );
     await mod.default({ module_or_path: wasmUrl });
-    mod.start();
+    if (cubeCount != null) {
+      mod.start(cubeCount);
+    } else {
+      mod.start();
+    }
 
-    if (demo.needsRelay && !relay) {
+    if (demo.cubeStress) {
+      setStatus(
+        status,
+        `Engine started — rendering ${cubeCount.toLocaleString()} spinning ` +
+          "cubes. Pick a cube count above and watch the FPS.",
+        "ok",
+      );
+    } else if (demo.needsRelay && !relay) {
       setStatus(
         status,
         "Engine started. No relay set — enter a wss:// relay above (or run " +
