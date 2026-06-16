@@ -5,6 +5,7 @@ use axiom_kernel::KernelResult;
 
 use crate::digest::digest;
 use crate::net_message::NetMessage;
+use crate::rejections::Rejections;
 use crate::session::Session;
 use crate::sync_status::SyncStatus;
 
@@ -112,6 +113,19 @@ impl NetcodeApi {
     pub fn digest(&self, bytes: &[u8]) -> [u8; 32] {
         digest(bytes)
     }
+
+    /// How many inputs are currently buffered (bounded by `peers × HORIZON`).
+    /// Telemetry: buffer occupancy, e.g. to watch it stay bounded under a flood.
+    pub fn buffered_inputs(&self) -> usize {
+        self.session.buffered_inputs()
+    }
+
+    /// How many ingested frames this session has dropped, grouped by reason
+    /// (unknown peer / bad signature / out-of-window). Telemetry for observing a
+    /// session under attack — e.g. how many forgeries a peer shrugged off.
+    pub fn rejections(&self) -> Rejections {
+        self.session.rejections()
+    }
 }
 
 #[cfg(test)]
@@ -211,5 +225,24 @@ mod tests {
         let peer = solo();
         assert_eq!(peer.digest(b"abc"), peer.digest(b"abc"));
         assert_ne!(peer.digest(b"abc"), peer.digest(b"abd"));
+    }
+
+    #[test]
+    fn telemetry_reports_buffer_occupancy_and_rejections() {
+        let (mut p1, mut p2) = pair();
+        // A genuine peer-2 input buffers; an unknown-peer forgery is dropped and
+        // counted. Both are observable through the facade.
+        let real = p2.submit_local(3, &[7]);
+        p1.ingest(&real).unwrap();
+        assert_eq!(p1.buffered_inputs(), 1);
+        assert_eq!(p1.rejections(), Default::default());
+
+        let rogue = SigningKey::from_seed([200u8; 32]);
+        let mut outsider = NetcodeApi::new(9, rogue.clone(), &[(9, rogue.verifying_key())]);
+        let forged = outsider.submit_local(0, &[]);
+        p1.ingest(&forged).unwrap();
+        assert_eq!(p1.buffered_inputs(), 1, "the forgery did not buffer");
+        assert_eq!(p1.rejections().unknown_peer, 1);
+        assert_eq!(p1.rejections().total(), 1);
     }
 }

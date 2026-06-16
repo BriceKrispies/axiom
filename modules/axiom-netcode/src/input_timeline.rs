@@ -52,8 +52,7 @@ impl InputTimeline {
     }
 
     /// The total number of inputs currently buffered (across all ticks/peers).
-    /// Test-only introspection for the memory-bound proof.
-    #[cfg(test)]
+    /// Surfaced as session telemetry (buffer occupancy under load).
     pub fn entry_count(&self) -> usize {
         self.inputs.len()
     }

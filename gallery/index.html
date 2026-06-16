@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Demo Gallery</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site">
+      <h1>Axiom Demos</h1>
+      <p>WebAssembly demos of the Axiom engine. Needs WebGPU (recent Chrome/Edge, Android Chrome, or iOS Safari 18.2+).</p>
+    </header>
+
+    <main class="grid" id="grid"></main>
+
+    <script type="module">
+      import { DEMOS } from "./gallery.js";
+
+      const grid = document.getElementById("grid");
+      for (const demo of DEMOS) {
+        const card = document.createElement("a");
+        card.className = "card";
+        card.href = `./demo.html?id=${encodeURIComponent(demo.id)}`;
+
+        const h2 = document.createElement("h2");
+        h2.textContent = demo.title;
+
+        const p = document.createElement("p");
+        p.textContent = demo.blurb;
+
+        const open = document.createElement("span");
+        open.className = "open";
+        open.textContent = "Open demo →";
+
+        card.append(h2, p, open);
+        grid.appendChild(card);
+      }
+    </script>
+  </body>
+</html>

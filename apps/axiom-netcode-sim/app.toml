@@ -1,0 +1,24 @@
+# Axiom app manifest — axiom-netcode-sim.
+#
+# An N-peer deterministic-lockstep simulation harness. It composes the `engine`
+# umbrella (the real App, for the full-fidelity client backend) and `netcode`
+# (the signed lockstep session), and depends on the `kernel` layer (the seeded
+# DeterministicRng that drives the replayable network model) and the `crypto`
+# layer (per-peer signing keys). It owns the modeled in-process transport, the
+# input scripts, the misbehaving-peer behaviors, and the per-client report —
+# all app glue. No sockets, no browser; the run is fully in-process and
+# deterministic, so it reproduces exactly what N real clients would compute.
+
+[app]
+name = "netcode-sim"
+crate_name = "axiom-netcode-sim"
+
+allowed_layers = [
+    "kernel",
+    "crypto",
+]
+
+allowed_modules = [
+    "engine",
+    "netcode",
+]

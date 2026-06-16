@@ -32,8 +32,35 @@ use web_sys::{BinaryType, KeyboardEvent, MessageEvent, WebSocket};
 
 use super::{build_netplay_app, encode_delta, input_for, Keys, CANVAS_ID, MOVE_KIND};
 
-/// The relay address (see `tools/axiom-netcode-relay`).
+/// The local-dev relay address (see `tools/axiom-netcode-relay`), used when the
+/// page does not override it. The deployed gallery page has no relay of its own,
+/// so it points the demo at a hosted relay via a `?relay=<url>` query param —
+/// see [`relay_url`].
 const RELAY_URL: &str = "ws://127.0.0.1:9001";
+
+/// The relay address to connect to: a `?relay=<url>` query param if the page
+/// supplies one (so a static deploy can target a hosted `wss://` relay), else
+/// the local-dev [`RELAY_URL`] default.
+fn relay_url() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .and_then(|search| relay_from_query(&search))
+        .unwrap_or_else(|| RELAY_URL.to_string())
+}
+
+/// Extract and URL-decode the `relay` parameter from a `location.search` string
+/// (e.g. `"?relay=wss%3A%2F%2Fhost%3A443"`). Returns `None` when the parameter
+/// is absent or decodes to empty.
+fn relay_from_query(search: &str) -> Option<String> {
+    let query = search.strip_prefix('?').unwrap_or(search);
+    query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("relay="))
+        .filter(|raw| !raw.is_empty())
+        .and_then(|raw| js_sys::decode_uri_component(raw).ok())
+        .map(String::from)
+        .filter(|url| !url.is_empty())
+}
 
 /// How many ticks a peer may run ahead of confirmation before it stops
 /// submitting and waits — bounds the input backlog if one tab is faster.
@@ -68,7 +95,8 @@ fn log(msg: &str) {
 #[wasm_bindgen]
 pub fn start() {
     console_error_panic_hook::set_once();
-    log(&format!("start(): connecting to relay {RELAY_URL}"));
+    let relay = relay_url();
+    log(&format!("start(): connecting to relay {relay}"));
 
     // Mint this browser's signing keypair from the browser CSPRNG. The private
     // key never leaves this tab; only the public key is published at handshake.
@@ -91,7 +119,7 @@ pub fn start() {
     install_key_listener(&shared, "keydown", true);
     install_key_listener(&shared, "keyup", false);
 
-    let ws = WebSocket::new(RELAY_URL).expect("relay websocket opens");
+    let ws = WebSocket::new(&relay).expect("relay websocket opens");
     ws.set_binary_type(BinaryType::Arraybuffer);
 
     // Surface the socket lifecycle so a missing/closed relay is obvious.
@@ -99,7 +127,7 @@ pub fn start() {
     ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
     onopen.forget();
     let onerror = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-        log("websocket ERROR (is `make relay` running on ws://127.0.0.1:9001?)")
+        log("websocket ERROR (no relay reachable — run one locally with `make relay`, or point the page at a hosted one via ?relay=wss://host:port)")
     });
     ws.set_onerror(Some(onerror.as_ref().unchecked_ref()));
     onerror.forget();
@@ -286,7 +314,7 @@ fn run_loop(
                 confirmed_logged = true;
                 log("first tick CONFIRMED — both players present, signed inputs flowing");
             }
-            if frames == 1 || frames % 180 == 0 {
+            if frames == 1 || frames.is_multiple_of(180) {
                 log(&format!(
                     "frame {frames}: submitted={submitted} confirmed={confirmed} \
                      inbound_total={inbound_total} draws={}",

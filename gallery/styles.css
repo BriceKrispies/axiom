@@ -1,0 +1,254 @@
+/* Axiom demo gallery — mobile-first styling. Dark theme matching the engine's
+   existing demo pages (#15171c bg, #d7dbe2 text, #7fd17f accent). Designed for a
+   phone screen first; widens at >=720px. */
+
+:root {
+  color-scheme: dark;
+  --bg: #15171c;
+  --panel: #1b1e25;
+  --line: #2a2e36;
+  --text: #d7dbe2;
+  --muted: #8b93a1;
+  --accent: #7fd17f;
+  --warn: #e0c27a;
+  --err: #e07a7a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+header.site {
+  padding: 20px 16px 8px;
+  text-align: center;
+}
+
+header.site h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+header.site p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---- Gallery grid (index.html) ------------------------------------------ */
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  padding: 16px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.card {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  transition: border-color 0.15s ease, transform 0.05s ease;
+}
+
+.card:active {
+  transform: scale(0.99);
+}
+
+.card h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.card .open {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ---- Demo page (demo.html) ---------------------------------------------- */
+
+.demo-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.demo-top .back {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.demo-top h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+main.demo {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 14px 16px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+#stage {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+#stage canvas {
+  width: 100%;
+  max-width: 640px;
+  aspect-ratio: 4 / 3;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #000;
+  touch-action: none;
+}
+
+#controls {
+  width: 100%;
+  max-width: 640px;
+}
+
+.relaybar {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.relaybar input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  font: 13px ui-monospace, monospace;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.relaybar button {
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #10130f;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+}
+
+.status {
+  width: 100%;
+  max-width: 640px;
+  font: 12px/1.5 ui-monospace, monospace;
+  color: var(--muted);
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+.status.ok {
+  color: var(--accent);
+}
+.status.warn {
+  color: var(--warn);
+}
+.status.err {
+  color: var(--err);
+}
+
+/* ---- On-screen keypad (D-pad) ------------------------------------------- */
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  grid-template-rows: repeat(3, 64px);
+  grid-template-areas:
+    ".    up    ."
+    "left .     right"
+    ".    down  .";
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.keypad .pad {
+  width: 64px;
+  height: 64px;
+  font-size: 24px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.keypad .pad.active {
+  background: var(--accent);
+  color: #10130f;
+  border-color: var(--accent);
+}
+
+.pad-up {
+  grid-area: up;
+}
+.pad-down {
+  grid-area: down;
+}
+.pad-left {
+  grid-area: left;
+}
+.pad-right {
+  grid-area: right;
+}
+
+@media (min-width: 720px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  header.site h1 {
+    font-size: 22px;
+  }
+}

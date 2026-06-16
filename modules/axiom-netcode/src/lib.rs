@@ -41,6 +41,7 @@ mod net_command;
 mod net_message;
 mod netcode_api;
 mod peer_id;
+mod rejections;
 mod session;
 mod sync_status;
 

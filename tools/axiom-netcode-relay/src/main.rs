@@ -119,7 +119,7 @@ async fn serve_peer(stream: TcpStream, relay: Arc<Relay>, mut rx: broadcast::Rec
             incoming = source.next() => match incoming {
                 Some(Ok(msg)) if msg.is_binary() => {
                     sent_in += 1;
-                    if sent_in == 1 || sent_in % 300 == 0 {
+                    if sent_in == 1 || sent_in.is_multiple_of(300) {
                         println!("relay: peer {id} -> {sent_in} input frames forwarded");
                     }
                     let _ = relay.tx.send(Bus::Data(id, msg.into_data().to_vec()));

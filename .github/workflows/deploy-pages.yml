@@ -1,0 +1,97 @@
+# Build the browser/WASM demos and publish the mobile-first demo gallery
+# (gallery/) to GitHub Pages on every push to main.
+#
+# This is repo tooling, NOT part of the engine dependency graph — same status as
+# the CI workflow, the Makefile, and scripts/. It builds each browser app for
+# wasm32 with the exact wasm-bindgen generator pinned in Cargo.lock (matching
+# `make demo-build` / `make netplay-build`), assembles dist/, and deploys it.
+#
+# One-time setup: enable Pages in repo Settings → Pages → Source: GitHub Actions.
+name: deploy-pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least-privilege token plus the OIDC id-token the Pages deploy needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight Pages deploy at a time; newer pushes supersede older runs.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-unknown-unknown
+          rustup default stable
+
+      # Pin wasm-bindgen-cli to the exact wasm-bindgen version locked in
+      # Cargo.lock — a mismatched generator errors out, so we read it rather
+      # than hardcode it.
+      - name: Resolve wasm-bindgen version
+        id: wb
+        run: |
+          version="$(cargo metadata --format-version 1 --locked \
+            | python3 -c 'import json,sys; pkgs=json.load(sys.stdin)["packages"]; print(next(p["version"] for p in pkgs if p["name"]=="wasm-bindgen"))')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "wasm-bindgen $version"
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@${{ steps.wb.outputs.version }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-pages-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build wasm demos
+        run: |
+          cargo build -p axiom-demo-rotating-cube-browser --target wasm32-unknown-unknown --release
+          cargo build -p axiom-netplay-browser --target wasm32-unknown-unknown --release
+          wasm-bindgen --target web \
+            --out-dir apps/axiom-demo-rotating-cube-browser/web/pkg \
+            target/wasm32-unknown-unknown/release/axiom_demo_rotating_cube_browser.wasm
+          wasm-bindgen --target web \
+            --out-dir apps/axiom-netplay-browser/web/pkg \
+            target/wasm32-unknown-unknown/release/axiom_netplay_browser.wasm
+
+      # Same assembler the Makefile uses, so dist/ is identical locally and here.
+      - name: Assemble dist/
+        run: python3 scripts/assemble_gallery.py
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -231,16 +231,16 @@ mod tests {
     fn driver_is_value_for_value_deterministic_across_identical_input_sequences() {
         let make = || {
             let (mut driver, mut runtime) = started_driver_and_runtime();
-            let mut sequence = 1u64;
             let mut last_tick = 0u64;
-            for elapsed in [STEP_NANOS / 2, STEP_NANOS / 2, 3 * STEP_NANOS, STEP_NANOS] {
+            for (sequence, elapsed) in
+                (1u64..).zip([STEP_NANOS / 2, STEP_NANOS / 2, 3 * STEP_NANOS, STEP_NANOS])
+            {
                 let r = driver
                     .drive(&mut runtime, HostFrameInput::new(sequence, elapsed, vp()))
                     .unwrap();
                 if let Some(last) = r.step_records().last() {
                     last_tick = last.step().tick().raw();
                 }
-                sequence += 1;
             }
             (driver.accumulator_nanos(), last_tick)
         };

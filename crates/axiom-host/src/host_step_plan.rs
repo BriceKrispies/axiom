@@ -77,7 +77,7 @@ impl HostStepPlan {
 
         let fixed = config.fixed_step_nanos();
         let total = accumulator_nanos.saturating_add(elapsed);
-        let raw_steps = if fixed == 0 { 0 } else { total / fixed };
+        let raw_steps = total.checked_div(fixed).unwrap_or(0);
         let clamped = raw_steps.min(config.max_steps_per_frame() as u64);
         let steps = clamped as u32;
         let consumed_nanos = (steps as u64).saturating_mul(fixed);

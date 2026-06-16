@@ -173,6 +173,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-netcode-sim"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-crypto",
+ "axiom-kernel",
+ "axiom-netcode",
+]
+
+[[package]]
 name = "axiom-netplay-browser"
 version = "0.1.0"
 dependencies = [

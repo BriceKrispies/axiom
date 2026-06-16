@@ -8,6 +8,7 @@ use crate::input_timeline::InputTimeline;
 use crate::net_command::NetCommand;
 use crate::net_message::NetMessage;
 use crate::peer_id::PeerId;
+use crate::rejections::Rejections;
 use crate::sync_status::SyncStatus;
 
 /// How far ahead of the confirmed cursor a peer's inputs may be buffered.
@@ -38,6 +39,7 @@ pub(crate) struct Session {
     next_local_tick: u64,
     timeline: InputTimeline,
     hashes: BTreeMap<(u64, PeerId), [u8; 32]>,
+    rejections: Rejections,
 }
 
 impl Session {
@@ -63,6 +65,7 @@ impl Session {
             next_local_tick: 0,
             timeline: InputTimeline::new(),
             hashes: BTreeMap::new(),
+            rejections: Rejections::default(),
         }
     }
 
@@ -71,11 +74,15 @@ impl Session {
         self.confirmed
     }
 
-    /// How many inputs are currently buffered (bounded by `peers × HORIZON`).
-    /// Test-only introspection for the memory-bound proof.
-    #[cfg(test)]
+    /// How many inputs are currently buffered (bounded by `peers × HORIZON`) —
+    /// session telemetry for buffer occupancy under load.
     pub(crate) fn buffered_inputs(&self) -> usize {
         self.timeline.entry_count()
+    }
+
+    /// How many ingested frames this session has dropped, by reason.
+    pub(crate) fn rejections(&self) -> Rejections {
+        self.rejections
     }
 
     /// Whether `tick` is inside the input admission window.
@@ -118,10 +125,12 @@ impl Session {
     /// not an error that should halt an honest peer.
     pub(crate) fn accept(&mut self, message: NetMessage) {
         let Some(verifying_key) = self.roster.get(&message.peer()) else {
-            return; // unknown peer — not in the roster
+            self.rejections.unknown_peer += 1; // not in the roster
+            return;
         };
         if !verifying_key.verify(&message.signed_bytes(), message.signature()) {
-            return; // forged / corrupted — signature does not match the author
+            self.rejections.bad_signature += 1; // signature does not match author
+            return;
         }
         match message {
             NetMessage::Input {
@@ -132,6 +141,8 @@ impl Session {
             } => {
                 if self.in_input_window(tick) {
                     self.timeline.insert(tick, peer, command);
+                } else {
+                    self.rejections.out_of_window += 1;
                 }
             }
             NetMessage::HashBeacon {
@@ -139,6 +150,8 @@ impl Session {
             } => {
                 if self.in_beacon_window(tick) {
                     self.hashes.insert((tick, peer), hash);
+                } else {
+                    self.rejections.out_of_window += 1;
                 }
             }
         }
@@ -274,8 +287,11 @@ mod tests {
         // catch-all match arm left unexercised.
         let m1 = s.schedule_local(8, vec![2]);
         let command = NetCommand::new(8, vec![2]);
-        let signature =
-            key(1).sign(&NetMessage::input_signing_payload(PeerId::from_raw(1), 1, &command));
+        let signature = key(1).sign(&NetMessage::input_signing_payload(
+            PeerId::from_raw(1),
+            1,
+            &command,
+        ));
         assert_eq!(
             m1,
             NetMessage::Input {
@@ -318,6 +334,8 @@ mod tests {
         // Peer 99 is not in the roster, even with a valid self-signature.
         s.accept(signed_input(&key(99), 99, 0, 5));
         assert_eq!(s.buffered_inputs(), 0);
+        assert_eq!(s.rejections().unknown_peer, 1);
+        assert_eq!(s.rejections().total(), 1);
     }
 
     #[test]
@@ -332,6 +350,7 @@ mod tests {
             "the forged peer-2 input did not count"
         );
         assert_eq!(s.buffered_inputs(), 1, "only the local input is buffered");
+        assert_eq!(s.rejections().bad_signature, 1);
     }
 
     #[test]
@@ -348,6 +367,8 @@ mod tests {
         s.accept(signed_input(&k2, 2, 0, 9)); // tick 0 < confirmed 1
                                               // Only peer 1's tick-1 local will exist; peer 2's stale tick 0 ignored.
         assert!(s.ready_tick().is_none());
+        // Both the future and the past input were counted as out-of-window.
+        assert_eq!(s.rejections().out_of_window, 2);
     }
 
     #[test]
@@ -431,6 +452,7 @@ mod tests {
         };
         s.accept(forged);
         assert_eq!(s.reconcile(0), SyncStatus::Pending);
+        assert_eq!(s.rejections().bad_signature, 1);
     }
 
     #[test]
@@ -474,6 +496,8 @@ mod tests {
             SyncStatus::Pending,
             "stale beacon dropped"
         );
+        // Both out-of-window beacons were counted.
+        assert_eq!(s.rejections().out_of_window, 2);
     }
 
     #[test]

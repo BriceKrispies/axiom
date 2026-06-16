@@ -36,7 +36,7 @@ impl Alignment {
 
     /// Whether `offset` lies on this alignment boundary.
     pub const fn is_aligned(self, offset: u64) -> bool {
-        offset % self.0 == 0
+        offset.is_multiple_of(self.0)
     }
 }
 

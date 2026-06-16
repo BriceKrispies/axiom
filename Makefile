@@ -27,7 +27,11 @@ NETPLAY_WEB      := $(NETPLAY_DIR)/web
 NETPLAY_PKG      := $(NETPLAY_WEB)/pkg
 NETPLAY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build relay help
+GALLERY_DIR      := gallery
+DIST_DIR         := dist
+GALLERY_PORT     ?= 8000
+
+.PHONY: demo demo-build netplay netplay-build relay gallery gallery-build help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -41,6 +45,10 @@ help:
 	@echo "  make netplay       Serve the netplay page at http://localhost:$(NETPLAY_PORT)"
 	@echo "  (run 'make relay' in one shell and 'make netplay' in another, then"
 	@echo "   open the page in TWO WebGPU browsers and arrow-key your cube.)"
+	@echo ""
+	@echo "  Mobile-first demo gallery (what deploy-pages.yml publishes):"
+	@echo "  make gallery-build Build both wasm demos and assemble $(DIST_DIR)/"
+	@echo "  make gallery       Serve $(DIST_DIR)/ at http://localhost:$(GALLERY_PORT)"
 
 # Serve the prebuilt wasm bundle. uv provides/manages the Python interpreter;
 # --no-project keeps it from trying to sync a Python project in the repo root.
@@ -83,3 +91,23 @@ netplay:
 	@echo Start the relay in another shell with:  make relay
 	@echo Then open this URL in TWO WebGPU browser windows and arrow-key your cube.
 	uv run --no-project python -m http.server $(NETPLAY_PORT) --directory $(NETPLAY_WEB)
+
+# --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
+
+# Build both wasm demos and assemble the static gallery bundle into dist/. Uses
+# the same raw cargo + wasm-bindgen flow as the per-demo builds, then a portable
+# Python assembler (scripts/assemble_gallery.py) so dist/ is identical locally
+# and in CI. Recipe stays portable (cargo/wasm-bindgen/uv run all work under
+# cmd.exe on Windows too).
+gallery-build:
+	cargo build -p $(BROWSER_CRATE) --target $(WASM_TARGET) --release
+	cargo build -p $(NETPLAY_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(PKG_DIR) $(WASM_ARTIFACT)
+	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
+	uv run --no-project python scripts/assemble_gallery.py
+
+# Serve the assembled gallery. Run `make gallery-build` first if dist/ is blank.
+gallery:
+	@echo Serving demo gallery at http://localhost:$(GALLERY_PORT) - run make gallery-build first if blank
+	@echo Open it in a WebGPU browser. Ctrl+C to stop.
+	uv run --no-project python -m http.server $(GALLERY_PORT) --directory $(DIST_DIR)
