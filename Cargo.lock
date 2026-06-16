@@ -93,6 +93,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-doom-browser"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-ecs"
 version = "0.1.0"
 dependencies = [

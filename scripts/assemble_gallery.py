@@ -28,6 +28,7 @@ GALLERY_FILES = ["index.html", "demo.html", "gallery.js", "keypad.js", "styles.c
 DEMO_PKGS = {
     "rotating-cube": "apps/axiom-demo-rotating-cube-browser/web/pkg",
     "netplay": "apps/axiom-netplay-browser/web/pkg",
+    "doom": "apps/axiom-doom-browser/web/pkg",
 }
 
 

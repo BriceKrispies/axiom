@@ -10,7 +10,7 @@
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
-use axiom_kernel::Ratio;
+use axiom_kernel::{Radians, Ratio};
 use axiom_math::{MathApi, Vec2, Vec3};
 use axiom_render_pipeline::RenderPipelineApi;
 use axiom_resources::ResourcesApi;
@@ -28,6 +28,7 @@ use axiom_windowing::WindowingApi;
 const DEFAULT_SURFACE_ID: &str = "axiom-surface";
 
 use crate::assets::Assets;
+use crate::controller::FirstPersonInput;
 use crate::default_plugins::DefaultPlugins;
 use crate::frame_outcome::{DrawData, FrameOutcome};
 use crate::material::Material;
@@ -282,7 +283,7 @@ impl RunningApp {
     /// outcome is a pure function of `tick`. The caller (the run loop) owns the
     /// monotonic tick and must pass `0, 1, 2, …` in order.
     pub fn tick(&mut self, tick: u64) -> FrameOutcome {
-        self.tick_with(tick, &[])
+        self.tick_with_controls(tick, &[], &[])
     }
 
     /// Drive one deterministic frame at `tick`, applying `inputs` (per-player
@@ -291,6 +292,22 @@ impl RunningApp {
     /// pure function of `tick` and `inputs`, so two peers given the same
     /// confirmed inputs produce byte-identical frames.
     pub fn tick_with(&mut self, tick: u64, inputs: &[PlayerInput]) -> FrameOutcome {
+        self.tick_with_controls(tick, inputs, &[])
+    }
+
+    /// Drive one deterministic frame at `tick`, applying both per-player move
+    /// `inputs` and first-person `controls` to the simulation before stepping.
+    /// [`Self::tick`] and [`Self::tick_with`] are the empty-`controls` cases. A
+    /// `control` yaws and moves its addressed [`crate::prelude::Controller`] node
+    /// along its own facing — the first-person camera path — while `inputs`
+    /// translate [`crate::prelude::Player`] nodes in world space. The outcome
+    /// stays a pure function of `tick`, `inputs`, and `controls`.
+    pub fn tick_with_controls(
+        &mut self,
+        tick: u64,
+        inputs: &[PlayerInput],
+        controls: &[FirstPersonInput],
+    ) -> FrameOutcome {
         let width = self.viewport.physical_width();
         let height = self.viewport.physical_height();
 
@@ -299,11 +316,20 @@ impl RunningApp {
             .driver
             .drive(&mut self.runtime, host_input)
             .expect("driver inputs are deterministic and valid");
-        let commands: Vec<_> = inputs
+        let mut commands: Vec<_> = inputs
             .iter()
             .enumerate()
             .map(|(i, input)| self.scene.move_command(i as u64, input.player, input.delta))
             .collect();
+        for (j, control) in controls.iter().enumerate() {
+            let turn = Radians::new(control.turn.as_radians()).expect("authored turn is finite");
+            commands.push(self.scene.controller_command(
+                (inputs.len() + j) as u64,
+                control.index,
+                control.move_local,
+                turn,
+            ));
+        }
         let engine_frame = self
             .frame_builder
             .build(&host_report, commands)
@@ -526,6 +552,80 @@ mod tests {
                     }),
                 ));
             })
+    }
+
+    /// An app with one renderable cube in front of a first-person camera marked
+    /// as controller 0, so turning/moving the camera changes the frame.
+    fn controller_app() -> App {
+        use crate::controller::Controller;
+        App::new()
+            .window(Window::new(800, 600))
+            .add_plugins(DefaultPlugins)
+            .setup(|world, meshes, materials| {
+                let cube = meshes.add(Mesh::cube());
+                let material = materials.add(Material::lit(Color::WHITE));
+                world.spawn((
+                    Transform::from_translation(Vec3::new(0.0, 0.0, -5.0)),
+                    Renderable {
+                        mesh: cube,
+                        material,
+                    },
+                ));
+                world.spawn((
+                    Transform::IDENTITY,
+                    Camera::perspective(PerspectiveProjection {
+                        fov_y: Angle::degrees(60.0),
+                        near: Meters::new(0.1).expect("near plane is finite"),
+                        far: Meters::new(100.0).expect("far plane is finite"),
+                    }),
+                    Controller::new(0),
+                ));
+            })
+    }
+
+    #[test]
+    fn tick_with_controls_moves_the_camera() {
+        // Moving the controller camera forward changes the cube's on-screen draw;
+        // an input-free tick does not.
+        let moved = controller_app().build().tick_with_controls(
+            0,
+            &[],
+            &[FirstPersonInput::new(
+                0,
+                Vec3::new(0.0, 0.0, -1.0),
+                Angle::radians(0.0),
+            )],
+        );
+        let still = controller_app().build().tick_with_controls(0, &[], &[]);
+        assert_ne!(
+            moved.draws(),
+            still.draws(),
+            "a camera move must change the rendered frame"
+        );
+    }
+
+    #[test]
+    fn tick_with_controls_turn_changes_the_frame_and_is_deterministic() {
+        let drive = || {
+            let mut app = controller_app().build();
+            let mut last = app.tick(0);
+            for i in 0..3 {
+                last = app.tick_with_controls(
+                    i + 1,
+                    &[],
+                    &[FirstPersonInput::new(
+                        0,
+                        Vec3::new(0.0, 0.0, -0.2),
+                        Angle::radians(0.15),
+                    )],
+                );
+            }
+            last
+        };
+        // Same controls ⇒ byte-identical frames; turning changes the view from a
+        // bare tick.
+        assert_eq!(drive(), drive());
+        assert_ne!(drive().draws(), controller_app().build().tick(0).draws());
     }
 
     #[test]

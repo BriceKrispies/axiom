@@ -27,11 +27,19 @@ NETPLAY_WEB      := $(NETPLAY_DIR)/web
 NETPLAY_PKG      := $(NETPLAY_WEB)/pkg
 NETPLAY_PORT     ?= 8000
 
+# The DOOM-style first-person demo (apps/axiom-doom-browser).
+DOOM_DIR         := apps/axiom-doom-browser
+DOOM_CRATE       := axiom-doom-browser
+DOOM_ARTIFACT    := target/$(WASM_TARGET)/release/axiom_doom_browser.wasm
+DOOM_WEB         := $(DOOM_DIR)/web
+DOOM_PKG         := $(DOOM_WEB)/pkg
+DOOM_PORT        ?= 8000
+
 GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build relay gallery gallery-build help
+.PHONY: demo demo-build netplay netplay-build relay doom doom-build gallery gallery-build help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -45,6 +53,10 @@ help:
 	@echo "  make netplay       Serve the netplay page at http://localhost:$(NETPLAY_PORT)"
 	@echo "  (run 'make relay' in one shell and 'make netplay' in another, then"
 	@echo "   open the page in TWO WebGPU browsers and arrow-key your cube.)"
+	@echo ""
+	@echo "  DOOM-style first-person demo:"
+	@echo "  make doom-build    Rebuild the doom wasm bundle into its web/pkg"
+	@echo "  make doom          Serve the doom page at http://localhost:$(DOOM_PORT)"
 	@echo ""
 	@echo "  Mobile-first demo gallery (what deploy-pages.yml publishes):"
 	@echo "  make gallery-build Build both wasm demos and assemble $(DIST_DIR)/"
@@ -92,6 +104,20 @@ netplay:
 	@echo Then open this URL in TWO WebGPU browser windows and arrow-key your cube.
 	uv run --no-project python -m http.server $(NETPLAY_PORT) --directory $(NETPLAY_WEB)
 
+# --- DOOM-style first-person demo ---
+
+# Rebuild the doom wasm bundle (same raw cargo + wasm-bindgen flow).
+doom-build:
+	cargo build -p $(DOOM_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(DOOM_PKG) $(DOOM_ARTIFACT)
+
+# Serve the doom page. Run `make doom-build` first if blank. Open in a WebGPU
+# browser; tank controls (arrows/WASD + Space).
+doom:
+	@echo Serving doom at http://localhost:$(DOOM_PORT) - run make doom-build first if blank
+	@echo Open it in a WebGPU browser. Tank controls: arrows/WASD to move+turn, Space to fire.
+	uv run --no-project python -m http.server $(DOOM_PORT) --directory $(DOOM_WEB)
+
 # --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
 
 # Build both wasm demos and assemble the static gallery bundle into dist/. Uses
@@ -102,8 +128,10 @@ netplay:
 gallery-build:
 	cargo build -p $(BROWSER_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(NETPLAY_CRATE) --target $(WASM_TARGET) --release
+	cargo build -p $(DOOM_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(PKG_DIR) $(WASM_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
+	wasm-bindgen --target web --out-dir $(DOOM_PKG) $(DOOM_ARTIFACT)
 	uv run --no-project python scripts/assemble_gallery.py
 
 # Serve the assembled gallery. Run `make gallery-build` first if dist/ is blank.

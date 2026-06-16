@@ -1,0 +1,40 @@
+[package]
+name = "axiom-doom-browser"
+description = "Axiom browser/WASM app: a DOOM-style first-person shooter built entirely on the engine — a cube-walled level, a first-person camera driven by the engine's controller input, chasing enemy cubes, hitscan shooting, and a health/score HUD. Depends only on the `axiom` umbrella; the wasm entry drives the live wgpu loop through axiom-windowing."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The one engine crate an app imports. The first-person camera (Controller +
+# FirstPersonInput), the scene authoring vocabulary, and the live windowing/wgpu
+# backend (wasm32) all arrive through the umbrella.
+axiom = { path = "../../modules/axiom" }
+
+# Browser entry only: the wasm-bindgen glue, a panic hook, and the DOM surface
+# the HUD (health/score/ammo) is drawn into. Confined to wasm32, so native
+# `cargo test --workspace` never compiles them.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The live presentation loop (drives our own per-tick first-person input each
+# frame, which App::run does not), plus the wasm glue and the DOM the HUD draws
+# into. Confined to wasm32, so native `cargo test --workspace` never compiles them.
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "KeyboardEvent",
+    "console",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

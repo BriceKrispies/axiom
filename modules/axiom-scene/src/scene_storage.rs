@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use axiom_ecs::{ComponentColumn, EntityRegistry, WorldStep, WorldSystem};
 use axiom_kernel::EntityId;
-use axiom_math::{Transform, Vec3};
+use axiom_math::{Quat, Transform, Vec3};
 
 use crate::camera::Camera;
 use crate::light::Light;
@@ -40,6 +40,14 @@ pub struct SceneStorage {
     /// Staged from frame commands by [`crate::scene::Scene::advance`] and drained
     /// by [`PlayerMoveSystem`]; transient, never serialized.
     pub pending_moves: Vec<(u32, Vec3)>,
+    /// First-person controller nodes, keyed entity → controller index. Authored
+    /// once; the bridge that lets a per-tick controller input address a node by
+    /// index.
+    pub controllers: BTreeMap<EntityId, u32>,
+    /// The per-tick controller inputs to apply this frame, `(index, move_local,
+    /// turn)`. Staged from frame commands by [`crate::scene::Scene::advance`] and
+    /// drained by [`ControllerSystem`]; transient, never serialized.
+    pub pending_controls: Vec<(u32, Vec3, f32)>,
 }
 
 /// The transform-hierarchy system: computes each entity's world transform from
@@ -117,6 +125,51 @@ impl WorldSystem<SceneStorage> for PlayerMoveSystem {
     }
 }
 
+/// The first-person controller system: applies this frame's staged controller
+/// inputs to each addressed controller node. For each input it yaws the node's
+/// local rotation about +Y by `turn`, then translates the node along its **new
+/// local frame** (`forward` along local -Z, `strafe` along local +X). Runs after
+/// [`SpinSystem`] and before [`TransformPropagation`] so the updated local
+/// propagates this frame. A controller node carries no [`Spin`] and no player
+/// mark, so nothing else writes its local — its pose accumulates across ticks.
+#[derive(Debug)]
+pub struct ControllerSystem;
+
+impl WorldSystem<SceneStorage> for ControllerSystem {
+    fn run(&self, _step: &WorldStep, _entities: &EntityRegistry, storage: &mut SceneStorage) {
+        let controls = std::mem::take(&mut storage.pending_controls);
+        for (index, move_local, turn) in controls {
+            // Resolve the controller index to its node (deterministic: BTreeMap
+            // iter). An input for an unknown index is ignored.
+            let entity = storage
+                .controllers
+                .iter()
+                .find_map(|(&e, &i)| (i == index).then_some(e));
+            if let Some(entity) = entity {
+                let mut local = storage
+                    .locals
+                    .get(entity)
+                    .copied()
+                    .unwrap_or(Transform::IDENTITY);
+                // Yaw about +Y. Built directly as a unit quaternion
+                // `(0, sin(θ/2), 0, cos(θ/2))` — infallible, so there is no
+                // unreachable error arm.
+                let half = turn * 0.5;
+                let yaw = Quat::new(0.0, half.sin(), 0.0, half.cos());
+                local.rotation = yaw.multiply(local.rotation);
+                // Move along the node's own (post-yaw) frame.
+                let step = local.rotation.rotate(move_local);
+                local.translation = Vec3::new(
+                    local.translation.x + step.x,
+                    local.translation.y + step.y,
+                    local.translation.z + step.z,
+                );
+                storage.locals.insert(entity, local);
+            }
+        }
+    }
+}
+
 /// Compute world transforms for `ids` (in the given order) from `locals` +
 /// `parents`, writing them into `storage.worlds`. The single implementation
 /// shared by [`TransformPropagation`] (per-frame, via the ECS world) and
@@ -167,6 +220,97 @@ mod tests {
         assert!(s.spins.is_empty());
         assert!(s.players.is_empty());
         assert!(s.pending_moves.is_empty());
+        assert!(s.controllers.is_empty());
+        assert!(s.pending_controls.is_empty());
+    }
+
+    #[test]
+    fn controller_system_yaws_then_moves_relative_to_facing_and_drains() {
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        // e1 is controller 0 at the origin, facing -Z (identity rotation).
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.controllers.insert(e(1), 0);
+        // A quarter turn left (+90° about +Y) then move forward by 1: after the
+        // yaw, local -Z points to -X, so the node should translate toward -X.
+        let quarter = std::f32::consts::FRAC_PI_2;
+        storage
+            .pending_controls
+            .push((0, Vec3::new(0.0, 0.0, -1.0), quarter));
+
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+
+        let local = storage.locals.get(e(1)).unwrap();
+        assert!(local.rotation.w.abs() < 0.999, "the node yawed");
+        assert!(local.translation.x < -0.9, "forward followed the new facing");
+        assert!(local.translation.z.abs() < 1.0e-5);
+        // The queue drained.
+        assert!(storage.pending_controls.is_empty());
+    }
+
+    #[test]
+    fn controller_system_strafes_along_local_right() {
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.controllers.insert(e(1), 0);
+        // No turn; strafe +1 (local +X) with identity facing moves along +X.
+        storage
+            .pending_controls
+            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        let local = storage.locals.get(e(1)).unwrap();
+        assert!((local.translation.x - 1.0).abs() < 1.0e-5);
+        assert!(local.translation.z.abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn controller_system_accumulates_forward_across_ticks() {
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.controllers.insert(e(1), 0);
+        // Forward (-Z) by 0.5 three times, no turning -> z = -1.5.
+        for _ in 0..3 {
+            storage
+                .pending_controls
+                .push((0, Vec3::new(0.0, 0.0, -0.5), 0.0));
+            ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        }
+        assert!((storage.locals.get(e(1)).unwrap().translation.z + 1.5).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn controller_input_for_unknown_index_is_ignored() {
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.controllers.insert(e(1), 0);
+        // No controller 7 exists — the find_map None arm; nothing moves.
+        storage
+            .pending_controls
+            .push((7, Vec3::new(9.0, 0.0, 9.0), 9.0));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        assert_eq!(storage.locals.get(e(1)).unwrap().translation.z, 0.0);
+    }
+
+    #[test]
+    fn controller_uses_identity_when_node_has_no_local() {
+        // Exercises the `unwrap_or(Transform::IDENTITY)` arm: a controller marked
+        // on an entity with no local transform yet still applies its input.
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.controllers.insert(e(1), 0);
+        storage
+            .pending_controls
+            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        assert!((storage.locals.get(e(1)).unwrap().translation.x - 1.0).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn controller_system_debug_is_renderable() {
+        assert!(format!("{:?}", ControllerSystem).contains("ControllerSystem"));
     }
 
     #[test]
