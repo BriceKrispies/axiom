@@ -1,0 +1,28 @@
+# Standalone load/scaling harness (NOT a workspace member): it drives the real
+# deterministic per-frame pipeline at increasing scene sizes and times it. Its
+# own `[workspace]` keeps it out of the main workspace's coverage gate and
+# architecture checker (a long-running sweep is not engine spine). It depends
+# only on the real engine crates, so the numbers reflect the engine, not a
+# stand-in. Run with:
+#   cargo run --release --manifest-path bench/pipeline-scaling/Cargo.toml
+[package]
+name = "pipeline-scaling-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-frame = { path = "../../crates/axiom-frame" }
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-scene = { path = "../../modules/axiom-scene" }
+axiom-render-pipeline = { path = "../../modules/axiom-render-pipeline" }
+axiom-webgpu = { path = "../../modules/axiom-webgpu" }
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = true
