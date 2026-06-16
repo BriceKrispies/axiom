@@ -129,30 +129,60 @@ impl Hud {
             .expect("a browser window")
             .document()
             .expect("a document");
-        let body = document.body().expect("a document body");
+
+        // Anchor the overlay to the CANVAS, not the viewport: wrap the canvas in
+        // a position:relative box and make the canvas fill it, so the crosshair
+        // and HUD bar (position:absolute children) are centred on the canvas and
+        // scroll with it — instead of being pinned to the viewport centre. The
+        // wrapper also owns the responsive size (overriding the host page's
+        // canvas CSS), which keeps the 960x600 (8:5) aspect undistorted.
+        let canvas = document
+            .get_element_by_id(CANVAS_ID)
+            .expect("doom canvas is in the page");
+        let parent = canvas.parent_node().expect("canvas has a parent");
+        let wrap = document.create_element("div").expect("create div");
+        wrap.set_attribute(
+            "style",
+            "position:relative;display:block;width:100%;max-width:960px;\
+             margin:0 auto;line-height:0;",
+        )
+        .expect("style wrap");
+        // Put the wrapper where the canvas was, then move the canvas inside it.
+        parent
+            .insert_before(&wrap, Some(&canvas))
+            .expect("insert wrapper");
+        wrap.append_child(&canvas).expect("reparent canvas");
+        canvas
+            .set_attribute(
+                "style",
+                "display:block;width:100%;height:auto;max-width:100%;\
+                 aspect-ratio:8/5;border:1px solid #2a2e36;border-radius:8px;\
+                 background:#000;touch-action:none;",
+            )
+            .expect("style canvas");
 
         let bar = document.create_element("div").expect("create div");
         bar.set_attribute(
             "style",
-            "position:fixed;left:50%;top:10px;transform:translateX(-50%);\
+            "position:absolute;top:8px;left:50%;transform:translateX(-50%);\
              z-index:10;pointer-events:none;font:600 15px ui-monospace,monospace;\
              color:#e8ecf2;background:rgba(10,12,16,0.65);padding:6px 14px;\
              border-radius:8px;white-space:nowrap;",
         )
         .expect("style bar");
-        body.append_child(&bar).expect("append bar");
+        wrap.append_child(&bar).expect("append bar");
 
         let crosshair = document.create_element("div").expect("create div");
         crosshair
             .set_attribute(
                 "style",
-                "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);\
+                "position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);\
                  z-index:10;pointer-events:none;font:700 22px ui-monospace,monospace;\
-                 color:rgba(255,255,255,0.75);",
+                 color:rgba(255,255,255,0.8);",
             )
             .expect("style crosshair");
         crosshair.set_text_content(Some("+"));
-        body.append_child(&crosshair).expect("append crosshair");
+        wrap.append_child(&crosshair).expect("append crosshair");
 
         Hud { bar }
     }
