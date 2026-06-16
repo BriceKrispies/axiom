@@ -177,6 +177,42 @@ main.demo {
   border-radius: 8px;
 }
 
+.cubebar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: 100%;
+  font: 13px ui-monospace, monospace;
+}
+
+.cubebar-label {
+  color: var(--muted);
+}
+
+.cubebar a {
+  color: var(--text);
+  text-decoration: none;
+  padding: 4px 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.cubebar a.active {
+  color: #10130f;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.cubebar .fps {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .status {
   width: 100%;
   max-width: 640px;

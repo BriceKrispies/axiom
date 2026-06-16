@@ -35,11 +35,19 @@ DOOM_WEB         := $(DOOM_DIR)/web
 DOOM_PKG         := $(DOOM_WEB)/pkg
 DOOM_PORT        ?= 8000
 
+# The N-spinning-cubes load/stress visual (apps/axiom-stress-cubes-browser).
+STRESS_DIR       := apps/axiom-stress-cubes-browser
+STRESS_CRATE     := axiom-stress-cubes-browser
+STRESS_ARTIFACT  := target/$(WASM_TARGET)/release/axiom_stress_cubes_browser.wasm
+STRESS_WEB       := $(STRESS_DIR)/web
+STRESS_PKG       := $(STRESS_WEB)/pkg
+STRESS_PORT      ?= 8000
+
 GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build relay doom doom-build gallery gallery-build help
+.PHONY: demo demo-build netplay netplay-build relay doom doom-build stress stress-build gallery gallery-build help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -57,6 +65,11 @@ help:
 	@echo "  DOOM-style first-person demo:"
 	@echo "  make doom-build    Rebuild the doom wasm bundle into its web/pkg"
 	@echo "  make doom          Serve the doom page at http://localhost:$(DOOM_PORT)"
+	@echo ""
+	@echo "  Load/stress visual (N spinning cubes):"
+	@echo "  make stress-build  Rebuild the stress wasm bundle into its web/pkg"
+	@echo "  make stress        Serve the stress page at http://localhost:$(STRESS_PORT)"
+	@echo "  (open with ?cubes=N, or click the presets, to change the cube count.)"
 	@echo ""
 	@echo "  Mobile-first demo gallery (what deploy-pages.yml publishes):"
 	@echo "  make gallery-build Build both wasm demos and assemble $(DIST_DIR)/"
@@ -118,6 +131,20 @@ doom:
 	@echo Open it in a WebGPU browser. Tank controls: arrows/WASD to move+turn, Space to fire.
 	uv run --no-project python -m http.server $(DOOM_PORT) --directory $(DOOM_WEB)
 
+# --- Load/stress visual (N spinning cubes) ---
+
+# Rebuild the stress wasm bundle (same raw cargo + wasm-bindgen flow).
+stress-build:
+	cargo build -p $(STRESS_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(STRESS_PKG) $(STRESS_ARTIFACT)
+
+# Serve the stress page. Run `make stress-build` first if blank. Open in a
+# WebGPU browser; change the cube count with ?cubes=N or the on-page presets.
+stress:
+	@echo Serving stress visual at http://localhost:$(STRESS_PORT) - run make stress-build first if blank
+	@echo Open it in a WebGPU browser. Change cube count with ?cubes=N or the presets.
+	uv run --no-project python -m http.server $(STRESS_PORT) --directory $(STRESS_WEB)
+
 # --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
 
 # Build both wasm demos and assemble the static gallery bundle into dist/. Uses
@@ -129,9 +156,11 @@ gallery-build:
 	cargo build -p $(BROWSER_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(NETPLAY_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(DOOM_CRATE) --target $(WASM_TARGET) --release
+	cargo build -p $(STRESS_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(PKG_DIR) $(WASM_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(DOOM_PKG) $(DOOM_ARTIFACT)
+	wasm-bindgen --target web --out-dir $(STRESS_PKG) $(STRESS_ARTIFACT)
 	uv run --no-project python scripts/assemble_gallery.py
 
 # Serve the assembled gallery. Run `make gallery-build` first if dist/ is blank.
