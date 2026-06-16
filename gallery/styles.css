@@ -204,7 +204,7 @@ main.demo {
   grid-template-rows: repeat(3, 64px);
   grid-template-areas:
     ".    up    ."
-    "left .     right"
+    "left fire  right"
     ".    down  .";
   gap: 8px;
   justify-content: center;
@@ -242,6 +242,19 @@ main.demo {
 }
 .pad-right {
   grid-area: right;
+}
+.pad-fire {
+  grid-area: fire;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f0d9d9;
+  background: #5a2330;
+  border-color: #7a3340;
+}
+.pad-fire.active {
+  background: #e07a7a;
+  color: #2a0d10;
+  border-color: #e07a7a;
 }
 
 @media (min-width: 720px) {

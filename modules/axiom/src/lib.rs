@@ -17,6 +17,7 @@ mod assets;
 mod bundle;
 mod camera;
 mod color;
+mod controller;
 mod default_plugins;
 mod directional_light;
 mod frame_outcome;

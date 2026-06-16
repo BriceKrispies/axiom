@@ -219,6 +219,30 @@ impl SceneApi {
         crate::player_command::encode_move(sequence, player, delta)
     }
 
+    // --- Controllers (first-person nodes yawed + moved by per-tick commands) ---
+
+    /// Mark `node` as the first-person controller for `index`. Per-tick
+    /// controller commands addressed to that index yaw it about +Y and move it
+    /// along its own facing during [`Self::advance`].
+    pub fn add_controller(&mut self, node: SceneNodeId, index: u32) -> SceneResult<()> {
+        self.scene.add_controller(node, index)
+    }
+
+    /// Encode a per-tick first-person input for controller `index`: a `turn` (yaw
+    /// about +Y) plus a `move_local` translation in the node's own frame (local
+    /// -Z is forward, local +X is right), as a [`FrameCommand`] to hand to the
+    /// frame builder. The scene decodes these in [`Self::advance`] and applies
+    /// them to the addressed controller's node.
+    pub fn controller_command(
+        &self,
+        sequence: u64,
+        index: u32,
+        move_local: Vec3,
+        turn: Radians,
+    ) -> FrameCommand {
+        crate::controller_command::encode_controller(sequence, index, move_local, turn.get())
+    }
+
     // --- Propagation / frame integration ---
 
     /// Recompute every node's world transform now.
@@ -301,6 +325,25 @@ mod tests {
         assert_eq!(
             crate::player_command::decode_move(&cmd),
             Some((3, Vec3::new(0.25, -0.75, 0.0)))
+        );
+    }
+
+    #[test]
+    fn add_controller_marks_a_node_and_rejects_a_missing_one() {
+        let mut s = api();
+        let node = s.create_node();
+        assert!(s.add_controller(node, 0).is_ok());
+        assert!(s.add_controller(SceneNodeId::from_raw(404), 1).is_err());
+    }
+
+    #[test]
+    fn controller_command_encodes_a_decodable_input() {
+        // The facade-built command round-trips through the scene's decoder.
+        let s = api();
+        let cmd = s.controller_command(0, 1, Vec3::new(0.5, 0.0, -0.25), rad(0.1));
+        assert_eq!(
+            crate::controller_command::decode_controller(&cmd),
+            Some((1, Vec3::new(0.5, 0.0, -0.25), 0.1))
         );
     }
 

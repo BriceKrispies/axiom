@@ -16,6 +16,7 @@ use axiom_kernel::EntityId;
 use axiom_math::{Transform, Vec3};
 
 use crate::camera::Camera;
+use crate::controller_command::decode_controller;
 use crate::light::Light;
 use crate::player_command::decode_move;
 use crate::renderable::Renderable;
@@ -24,7 +25,7 @@ use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
 use crate::scene_storage::{
-    propagate, PlayerMoveSystem, SceneStorage, SpinSystem, TransformPropagation,
+    propagate, ControllerSystem, PlayerMoveSystem, SceneStorage, SpinSystem, TransformPropagation,
 };
 use crate::spin::Spin;
 
@@ -49,6 +50,7 @@ impl Scene {
         let mut world = World::new();
         world.register_system(Box::new(SpinSystem));
         world.register_system(Box::new(PlayerMoveSystem));
+        world.register_system(Box::new(ControllerSystem));
         world.register_system(Box::new(TransformPropagation));
         Scene { world }
     }
@@ -328,6 +330,22 @@ impl Scene {
         Ok(())
     }
 
+    /// Mark `node` as the first-person controller node for `index`, so per-tick
+    /// controller inputs addressed to that index yaw and move it (via
+    /// [`ControllerSystem`]).
+    pub(crate) fn add_controller(&mut self, node: SceneNodeId, index: u32) -> SceneResult<()> {
+        if !self.is_node(node) {
+            return Err(SceneError::missing_node(
+                "add_controller: node id not in scene",
+            ));
+        }
+        self.world
+            .storage_mut()
+            .controllers
+            .insert(Self::entity(node), index);
+        Ok(())
+    }
+
     // --- Transform propagation ---
 
     /// Recompute every node's world transform now, regardless of frame state.
@@ -340,12 +358,19 @@ impl Scene {
     /// the frame is active (not skipped, ran at least one runtime step), then
     /// return the deterministic snapshot taken after whatever update happened.
     pub(crate) fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
-        // Stage this frame's player-move commands for the move system to apply.
+        // Stage this frame's player-move and controller commands for the move and
+        // controller systems to apply.
         let moves: Vec<(u32, Vec3)> = frame.commands().iter().filter_map(decode_move).collect();
+        let controls: Vec<(u32, Vec3, f32)> = frame
+            .commands()
+            .iter()
+            .filter_map(decode_controller)
+            .collect();
         self.world.storage_mut().pending_moves = moves;
-        // The ECS scheduler runs the registered systems (spin, player-move, then
-        // transform propagation) at logical time `tick`, gated on the frame
-        // (skipped / zero-step frames run nothing).
+        self.world.storage_mut().pending_controls = controls;
+        // The ECS scheduler runs the registered systems (spin, player-move,
+        // controller, then transform propagation) at logical time `tick`, gated on
+        // the frame (skipped / zero-step frames run nothing).
         self.world.advance(tick, frame);
         self.snapshot()
     }
@@ -744,6 +769,26 @@ mod frame_tests {
     fn add_player_rejects_a_missing_node() {
         let mut s = Scene::new();
         assert!(s.add_player(SceneNodeId::from_raw(99), 0).is_err());
+    }
+
+    #[test]
+    fn advance_applies_a_controller_command_to_the_addressed_node() {
+        use crate::controller_command::encode_controller;
+        let mut s = Scene::new();
+        let node = s.create_node(Transform::IDENTITY);
+        s.add_controller(node, 0).unwrap();
+        // A frame carrying a forward move (local -Z by 1) for controller 0, no turn.
+        let frame = encode_controller(0, 0, Vec3::new(0.0, 0.0, -1.0), 0.0);
+        let engine_frame = engine_frame_with(1_000, true, vec![frame]);
+        s.advance(0, &FrameContext::new(&engine_frame));
+        // Forward with identity facing translates along -Z.
+        assert!((s.local(node).unwrap().translation.z + 1.0).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn add_controller_rejects_a_missing_node() {
+        let mut s = Scene::new();
+        assert!(s.add_controller(SceneNodeId::from_raw(99), 0).is_err());
     }
 
     #[test]

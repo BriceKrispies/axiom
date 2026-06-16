@@ -1,0 +1,20 @@
+# Axiom app manifest — axiom-retro-fps-browser.
+#
+# A retro FPS-style first-person shooter as pure scene description + per-tick input on
+# the engine's App API. It composes a single module — the `axiom` umbrella
+# (`engine`) — which internally pulls in the slice modules and the live
+# windowing/wgpu backend (wasm32). The first-person camera is the engine's own
+# Controller/FirstPersonInput; the level, enemies, collision, shooting, and the
+# HUD are app-owned gameplay. It names no layer directly and depends on no other
+# app — apps are leaves in the dependency graph.
+
+[app]
+name = "retro_fps-browser-demo"
+crate_name = "axiom-retro-fps-browser"
+
+allowed_layers = []
+
+allowed_modules = [
+    "engine",
+    "windowing",
+]

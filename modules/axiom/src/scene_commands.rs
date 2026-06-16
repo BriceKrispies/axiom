@@ -115,6 +115,11 @@ impl SceneCommands {
                             .add_player(node, p.index)
                             .expect("player attaches to a just-created node");
                     }
+                    NodeComponent::Controller(c) => {
+                        scene
+                            .add_controller(node, c.index)
+                            .expect("controller attaches to a just-created node");
+                    }
                 }
             }
             nodes.push(node);
@@ -208,6 +213,26 @@ mod tests {
         // The child is parented (carries a parent id).
         assert!(snap.nodes().iter().any(|n| n.parent().is_some()));
         assert_eq!(light_dir, Some(Vec3::new(0.3, -1.0, 0.4)));
+    }
+
+    #[test]
+    fn realizes_a_controller_marked_camera_node() {
+        use crate::controller::Controller;
+        let mut cmds = SceneCommands::new(4.0 / 3.0);
+        cmds.spawn((
+            Transform::IDENTITY,
+            Camera::perspective(PerspectiveProjection {
+                fov_y: Angle::degrees(60.0),
+                near: Meters::new(0.1).unwrap(),
+                far: Meters::new(100.0).unwrap(),
+            }),
+            Controller::new(0),
+        ));
+        let mut scene = SceneApi::new();
+        // The Controller arm of realize_into runs add_controller without error.
+        assert_eq!(cmds.realize_into(&mut scene, &math()), None);
+        assert_eq!(scene.snapshot().nodes().len(), 1);
+        assert_eq!(scene.snapshot().cameras().len(), 1);
     }
 
     #[test]

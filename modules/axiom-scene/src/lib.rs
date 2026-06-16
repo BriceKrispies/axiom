@@ -31,6 +31,7 @@
 
 mod camera;
 mod camera_snapshot;
+mod controller_command;
 mod light;
 mod light_kind;
 mod light_snapshot;

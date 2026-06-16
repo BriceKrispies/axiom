@@ -27,11 +27,19 @@ NETPLAY_WEB      := $(NETPLAY_DIR)/web
 NETPLAY_PKG      := $(NETPLAY_WEB)/pkg
 NETPLAY_PORT     ?= 8000
 
+# The retro FPS-style first-person demo (apps/axiom-retro-fps-browser).
+retro FPS_DIR         := apps/axiom-retro-fps-browser
+retro FPS_CRATE       := axiom-retro-fps-browser
+retro FPS_ARTIFACT    := target/$(WASM_TARGET)/release/axiom_retro_fps_browser.wasm
+retro FPS_WEB         := $(retro FPS_DIR)/web
+retro FPS_PKG         := $(retro FPS_WEB)/pkg
+retro FPS_PORT        ?= 8000
+
 GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build relay gallery gallery-build help
+.PHONY: demo demo-build netplay netplay-build relay retro_fps retro_fps-build gallery gallery-build help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -45,6 +53,10 @@ help:
 	@echo "  make netplay       Serve the netplay page at http://localhost:$(NETPLAY_PORT)"
 	@echo "  (run 'make relay' in one shell and 'make netplay' in another, then"
 	@echo "   open the page in TWO WebGPU browsers and arrow-key your cube.)"
+	@echo ""
+	@echo "  retro FPS-style first-person demo:"
+	@echo "  make retro_fps-build    Rebuild the retro_fps wasm bundle into its web/pkg"
+	@echo "  make retro_fps          Serve the retro_fps page at http://localhost:$(retro FPS_PORT)"
 	@echo ""
 	@echo "  Mobile-first demo gallery (what deploy-pages.yml publishes):"
 	@echo "  make gallery-build Build both wasm demos and assemble $(DIST_DIR)/"
@@ -92,6 +104,20 @@ netplay:
 	@echo Then open this URL in TWO WebGPU browser windows and arrow-key your cube.
 	uv run --no-project python -m http.server $(NETPLAY_PORT) --directory $(NETPLAY_WEB)
 
+# --- retro FPS-style first-person demo ---
+
+# Rebuild the retro_fps wasm bundle (same raw cargo + wasm-bindgen flow).
+retro_fps-build:
+	cargo build -p $(retro FPS_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(retro FPS_PKG) $(retro FPS_ARTIFACT)
+
+# Serve the retro_fps page. Run `make retro_fps-build` first if blank. Open in a WebGPU
+# browser; tank controls (arrows/WASD + Space).
+retro_fps:
+	@echo Serving retro_fps at http://localhost:$(retro FPS_PORT) - run make retro_fps-build first if blank
+	@echo Open it in a WebGPU browser. Tank controls: arrows/WASD to move+turn, Space to fire.
+	uv run --no-project python -m http.server $(retro FPS_PORT) --directory $(retro FPS_WEB)
+
 # --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
 
 # Build both wasm demos and assemble the static gallery bundle into dist/. Uses
@@ -102,8 +128,10 @@ netplay:
 gallery-build:
 	cargo build -p $(BROWSER_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(NETPLAY_CRATE) --target $(WASM_TARGET) --release
+	cargo build -p $(retro FPS_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(PKG_DIR) $(WASM_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
+	wasm-bindgen --target web --out-dir $(retro FPS_PKG) $(retro FPS_ARTIFACT)
 	uv run --no-project python scripts/assemble_gallery.py
 
 # Serve the assembled gallery. Run `make gallery-build` first if dist/ is blank.

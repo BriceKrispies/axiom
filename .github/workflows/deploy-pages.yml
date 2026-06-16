@@ -69,12 +69,16 @@ jobs:
         run: |
           cargo build -p axiom-demo-rotating-cube-browser --target wasm32-unknown-unknown --release
           cargo build -p axiom-netplay-browser --target wasm32-unknown-unknown --release
+          cargo build -p axiom-retro-fps-browser --target wasm32-unknown-unknown --release
           wasm-bindgen --target web \
             --out-dir apps/axiom-demo-rotating-cube-browser/web/pkg \
             target/wasm32-unknown-unknown/release/axiom_demo_rotating_cube_browser.wasm
           wasm-bindgen --target web \
             --out-dir apps/axiom-netplay-browser/web/pkg \
             target/wasm32-unknown-unknown/release/axiom_netplay_browser.wasm
+          wasm-bindgen --target web \
+            --out-dir apps/axiom-retro-fps-browser/web/pkg \
+            target/wasm32-unknown-unknown/release/axiom_retro_fps_browser.wasm
 
       # Same assembler the Makefile uses, so dist/ is identical locally and here.
       - name: Assemble dist/
