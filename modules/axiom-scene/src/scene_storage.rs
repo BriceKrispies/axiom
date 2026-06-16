@@ -40,15 +40,31 @@ pub struct SceneStorage {
     /// Staged from frame commands by [`crate::scene::Scene::advance`] and drained
     /// by [`PlayerMoveSystem`]; transient, never serialized.
     pub pending_moves: Vec<(u32, Vec3)>,
-    /// First-person controller nodes, keyed entity → controller index. Authored
-    /// once; the bridge that lets a per-tick controller input address a node by
-    /// index.
-    pub controllers: BTreeMap<EntityId, u32>,
+    /// First-person controller nodes, keyed entity → [`ControllerState`].
+    /// Authored once; the bridge that lets a per-tick controller input address a
+    /// node by index, and the home of that controller's accumulated yaw/pitch.
+    pub controllers: BTreeMap<EntityId, ControllerState>,
     /// The per-tick controller inputs to apply this frame, `(index, move_local,
-    /// turn)`. Staged from frame commands by [`crate::scene::Scene::advance`] and
-    /// drained by [`ControllerSystem`]; transient, never serialized.
-    pub pending_controls: Vec<(u32, Vec3, f32)>,
+    /// yaw_delta, pitch_delta)`. Staged from frame commands by
+    /// [`crate::scene::Scene::advance`] and drained by [`ControllerSystem`];
+    /// transient, never serialized.
+    pub pending_controls: Vec<(u32, Vec3, f32, f32)>,
 }
+
+/// A first-person controller node's persistent orientation: the index it answers
+/// to, plus accumulated `yaw` (about world +Y) and `pitch` (about its local +X).
+/// The [`ControllerSystem`] rebuilds the node rotation from these every tick, so
+/// orientation never drifts and pitch can be clamped.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControllerState {
+    pub(crate) index: u32,
+    pub(crate) yaw: f32,
+    pub(crate) pitch: f32,
+}
+
+/// How far the camera may pitch up or down (radians, ~86°), short of straight
+/// up/down so the look basis never degenerates.
+const PITCH_LIMIT: f32 = 1.5;
 
 /// The transform-hierarchy system: computes each entity's world transform from
 /// its local transform and its parent's world transform
@@ -126,39 +142,50 @@ impl WorldSystem<SceneStorage> for PlayerMoveSystem {
 }
 
 /// The first-person controller system: applies this frame's staged controller
-/// inputs to each addressed controller node. For each input it yaws the node's
-/// local rotation about +Y by `turn`, then translates the node along its **new
-/// local frame** (`forward` along local -Z, `strafe` along local +X). Runs after
-/// [`SpinSystem`] and before [`TransformPropagation`] so the updated local
-/// propagates this frame. A controller node carries no [`Spin`] and no player
-/// mark, so nothing else writes its local — its pose accumulates across ticks.
+/// inputs to each addressed controller node. For each input it accumulates
+/// `yaw_delta` (about world +Y) and `pitch_delta` (about local +X, clamped to
+/// [`PITCH_LIMIT`]) into the node's [`ControllerState`], then rebuilds the node's
+/// rotation as `Ry(yaw)·Rx(pitch)` (the view) and translates it by `move_local`
+/// rotated by the **yaw only** — so looking up or down never tilts movement off
+/// the horizontal plane. Runs after [`SpinSystem`] and before
+/// [`TransformPropagation`]. Rebuilding from stored angles (rather than
+/// accumulating into the quaternion) keeps orientation drift-free and lets pitch
+/// clamp.
 #[derive(Debug)]
 pub struct ControllerSystem;
 
 impl WorldSystem<SceneStorage> for ControllerSystem {
     fn run(&self, _step: &WorldStep, _entities: &EntityRegistry, storage: &mut SceneStorage) {
         let controls = std::mem::take(&mut storage.pending_controls);
-        for (index, move_local, turn) in controls {
+        for (index, move_local, yaw_delta, pitch_delta) in controls {
             // Resolve the controller index to its node (deterministic: BTreeMap
             // iter). An input for an unknown index is ignored.
             let entity = storage
                 .controllers
                 .iter()
-                .find_map(|(&e, &i)| (i == index).then_some(e));
+                .find_map(|(&e, s)| (s.index == index).then_some(e));
             if let Some(entity) = entity {
+                let state = storage
+                    .controllers
+                    .get_mut(&entity)
+                    .expect("entity was just resolved from this map");
+                state.yaw += yaw_delta;
+                state.pitch = (state.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+                // Unit quaternions built directly (`(axis·sin(θ/2), cos(θ/2))`) —
+                // infallible, so there is no unreachable error arm.
+                let (yh, ph) = (state.yaw * 0.5, state.pitch * 0.5);
+                let yaw = Quat::new(0.0, yh.sin(), 0.0, yh.cos());
+                let pitch = Quat::new(ph.sin(), 0.0, 0.0, ph.cos());
+
                 let mut local = storage
                     .locals
                     .get(entity)
                     .copied()
                     .unwrap_or(Transform::IDENTITY);
-                // Yaw about +Y. Built directly as a unit quaternion
-                // `(0, sin(θ/2), 0, cos(θ/2))` — infallible, so there is no
-                // unreachable error arm.
-                let half = turn * 0.5;
-                let yaw = Quat::new(0.0, half.sin(), 0.0, half.cos());
-                local.rotation = yaw.multiply(local.rotation);
-                // Move along the node's own (post-yaw) frame.
-                let step = local.rotation.rotate(move_local);
+                // View orientation: yaw then pitch.
+                local.rotation = yaw.multiply(pitch);
+                // Movement uses the yaw-only frame, so it stays horizontal.
+                let step = yaw.rotate(move_local);
                 local.translation = Vec3::new(
                     local.translation.x + step.x,
                     local.translation.y + step.y,
@@ -224,19 +251,28 @@ mod tests {
         assert!(s.pending_controls.is_empty());
     }
 
+    /// A fresh controller state for index `i` (yaw/pitch zero).
+    fn ctrl(i: u32) -> ControllerState {
+        ControllerState {
+            index: i,
+            yaw: 0.0,
+            pitch: 0.0,
+        }
+    }
+
     #[test]
     fn controller_system_yaws_then_moves_relative_to_facing_and_drains() {
         let reg = registry(1);
         let mut storage = SceneStorage::default();
         // e1 is controller 0 at the origin, facing -Z (identity rotation).
         storage.locals.insert(e(1), Transform::IDENTITY);
-        storage.controllers.insert(e(1), 0);
+        storage.controllers.insert(e(1), ctrl(0));
         // A quarter turn left (+90° about +Y) then move forward by 1: after the
         // yaw, local -Z points to -X, so the node should translate toward -X.
         let quarter = std::f32::consts::FRAC_PI_2;
         storage
             .pending_controls
-            .push((0, Vec3::new(0.0, 0.0, -1.0), quarter));
+            .push((0, Vec3::new(0.0, 0.0, -1.0), quarter, 0.0));
 
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
 
@@ -244,6 +280,7 @@ mod tests {
         assert!(local.rotation.w.abs() < 0.999, "the node yawed");
         assert!(local.translation.x < -0.9, "forward followed the new facing");
         assert!(local.translation.z.abs() < 1.0e-5);
+        assert_eq!(storage.controllers.get(&e(1)).unwrap().yaw, quarter);
         // The queue drained.
         assert!(storage.pending_controls.is_empty());
     }
@@ -253,11 +290,11 @@ mod tests {
         let reg = registry(1);
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
-        storage.controllers.insert(e(1), 0);
+        storage.controllers.insert(e(1), ctrl(0));
         // No turn; strafe +1 (local +X) with identity facing moves along +X.
         storage
             .pending_controls
-            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0));
+            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0, 0.0));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         let local = storage.locals.get(e(1)).unwrap();
         assert!((local.translation.x - 1.0).abs() < 1.0e-5);
@@ -269,15 +306,54 @@ mod tests {
         let reg = registry(1);
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
-        storage.controllers.insert(e(1), 0);
+        storage.controllers.insert(e(1), ctrl(0));
         // Forward (-Z) by 0.5 three times, no turning -> z = -1.5.
         for _ in 0..3 {
             storage
                 .pending_controls
-                .push((0, Vec3::new(0.0, 0.0, -0.5), 0.0));
+                .push((0, Vec3::new(0.0, 0.0, -0.5), 0.0, 0.0));
             ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         }
         assert!((storage.locals.get(e(1)).unwrap().translation.z + 1.5).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn controller_pitch_tilts_the_view_and_clamps_both_ways() {
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.controllers.insert(e(1), ctrl(0));
+        // A huge upward pitch clamps to +PITCH_LIMIT and tilts the rotation (the
+        // X component of a pitch-about-X quaternion becomes non-zero).
+        storage
+            .pending_controls
+            .push((0, Vec3::ZERO, 0.0, 10.0));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, PITCH_LIMIT);
+        assert!(storage.locals.get(e(1)).unwrap().rotation.x.abs() > 0.1, "pitched");
+        // A huge downward pitch clamps to -PITCH_LIMIT (the other clamp arm).
+        storage
+            .pending_controls
+            .push((0, Vec3::ZERO, 0.0, -20.0));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, -PITCH_LIMIT);
+    }
+
+    #[test]
+    fn controller_movement_stays_horizontal_under_pitch() {
+        // Looking up must not lift the node off the floor: forward movement is in
+        // the yaw-only frame, so y stays put even with a large pitch.
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.controllers.insert(e(1), ctrl(0));
+        storage
+            .pending_controls
+            .push((0, Vec3::new(0.0, 0.0, -1.0), 0.0, 1.2));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        let local = storage.locals.get(e(1)).unwrap();
+        assert!(local.translation.y.abs() < 1.0e-6, "forward stayed horizontal");
+        assert!((local.translation.z + 1.0).abs() < 1.0e-5, "moved forward on -Z");
     }
 
     #[test]
@@ -285,11 +361,11 @@ mod tests {
         let reg = registry(1);
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
-        storage.controllers.insert(e(1), 0);
+        storage.controllers.insert(e(1), ctrl(0));
         // No controller 7 exists — the find_map None arm; nothing moves.
         storage
             .pending_controls
-            .push((7, Vec3::new(9.0, 0.0, 9.0), 9.0));
+            .push((7, Vec3::new(9.0, 0.0, 9.0), 9.0, 9.0));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.locals.get(e(1)).unwrap().translation.z, 0.0);
     }
@@ -300,10 +376,10 @@ mod tests {
         // on an entity with no local transform yet still applies its input.
         let reg = registry(1);
         let mut storage = SceneStorage::default();
-        storage.controllers.insert(e(1), 0);
+        storage.controllers.insert(e(1), ctrl(0));
         storage
             .pending_controls
-            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0));
+            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0, 0.0));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert!((storage.locals.get(e(1)).unwrap().translation.x - 1.0).abs() < 1.0e-5);
     }

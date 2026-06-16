@@ -26,28 +26,33 @@ impl Controller {
     }
 }
 
-/// One tick's first-person input for a controller: yaw by `turn` (about +Y),
-/// then move by `move_local` in the node's own frame — local -Z is forward,
-/// local +X is right. The app builds these from input each tick and hands them
-/// to [`crate::prelude::RunningApp::tick_with_controls`]; the engine applies
-/// them deterministically before stepping the frame.
+/// One tick's first-person input for a controller: look by `yaw` (about +Y) and
+/// `pitch` (about local +X; the engine clamps it), then move by `move_local` in
+/// the node's own frame — local -Z is forward, local +X is right. Movement is
+/// applied in the yaw-only frame, so looking up/down never tilts it. The app
+/// builds these from input each tick and hands them to
+/// [`crate::prelude::RunningApp::tick_with_controls`]; the engine applies them
+/// deterministically before stepping the frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FirstPersonInput {
     /// The controller this input is for.
     pub index: u32,
     /// Translation in the node's own frame (-Z forward, +X right).
     pub move_local: Vec3,
-    /// Yaw about +Y (positive turns left).
-    pub turn: Angle,
+    /// Yaw delta about +Y (positive turns left).
+    pub yaw: Angle,
+    /// Pitch delta about local +X (positive looks up; clamped by the engine).
+    pub pitch: Angle,
 }
 
 impl FirstPersonInput {
     /// A first-person input for `index`.
-    pub const fn new(index: u32, move_local: Vec3, turn: Angle) -> Self {
+    pub const fn new(index: u32, move_local: Vec3, yaw: Angle, pitch: Angle) -> Self {
         FirstPersonInput {
             index,
             move_local,
-            turn,
+            yaw,
+            pitch,
         }
     }
 }
@@ -63,9 +68,15 @@ mod tests {
 
     #[test]
     fn first_person_input_carries_its_fields() {
-        let input = FirstPersonInput::new(1, Vec3::new(-0.25, 0.0, -0.5), Angle::radians(0.1));
+        let input = FirstPersonInput::new(
+            1,
+            Vec3::new(-0.25, 0.0, -0.5),
+            Angle::radians(0.1),
+            Angle::radians(-0.05),
+        );
         assert_eq!(input.index, 1);
         assert_eq!(input.move_local, Vec3::new(-0.25, 0.0, -0.5));
-        assert_eq!(input.turn.as_radians(), 0.1);
+        assert_eq!(input.yaw.as_radians(), 0.1);
+        assert_eq!(input.pitch.as_radians(), -0.05);
     }
 }

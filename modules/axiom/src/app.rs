@@ -322,12 +322,14 @@ impl RunningApp {
             .map(|(i, input)| self.scene.move_command(i as u64, input.player, input.delta))
             .collect();
         for (j, control) in controls.iter().enumerate() {
-            let turn = Radians::new(control.turn.as_radians()).expect("authored turn is finite");
+            let yaw = Radians::new(control.yaw.as_radians()).expect("authored yaw is finite");
+            let pitch = Radians::new(control.pitch.as_radians()).expect("authored pitch is finite");
             commands.push(self.scene.controller_command(
                 (inputs.len() + j) as u64,
                 control.index,
                 control.move_local,
-                turn,
+                yaw,
+                pitch,
             ));
         }
         let engine_frame = self
@@ -594,6 +596,7 @@ mod tests {
                 0,
                 Vec3::new(0.0, 0.0, -1.0),
                 Angle::radians(0.0),
+                Angle::radians(0.0),
             )],
         );
         let still = controller_app().build().tick_with_controls(0, &[], &[]);
@@ -617,6 +620,7 @@ mod tests {
                         0,
                         Vec3::new(0.0, 0.0, -0.2),
                         Angle::radians(0.15),
+                        Angle::radians(0.05),
                     )],
                 );
             }
