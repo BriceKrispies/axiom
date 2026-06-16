@@ -25,7 +25,8 @@ use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
 use crate::scene_storage::{
-    propagate, ControllerSystem, PlayerMoveSystem, SceneStorage, SpinSystem, TransformPropagation,
+    propagate, ControllerState, ControllerSystem, PlayerMoveSystem, SceneStorage, SpinSystem,
+    TransformPropagation,
 };
 use crate::spin::Spin;
 
@@ -339,10 +340,14 @@ impl Scene {
                 "add_controller: node id not in scene",
             ));
         }
-        self.world
-            .storage_mut()
-            .controllers
-            .insert(Self::entity(node), index);
+        self.world.storage_mut().controllers.insert(
+            Self::entity(node),
+            ControllerState {
+                index,
+                yaw: 0.0,
+                pitch: 0.0,
+            },
+        );
         Ok(())
     }
 
@@ -361,7 +366,7 @@ impl Scene {
         // Stage this frame's player-move and controller commands for the move and
         // controller systems to apply.
         let moves: Vec<(u32, Vec3)> = frame.commands().iter().filter_map(decode_move).collect();
-        let controls: Vec<(u32, Vec3, f32)> = frame
+        let controls: Vec<(u32, Vec3, f32, f32)> = frame
             .commands()
             .iter()
             .filter_map(decode_controller)
@@ -777,8 +782,8 @@ mod frame_tests {
         let mut s = Scene::new();
         let node = s.create_node(Transform::IDENTITY);
         s.add_controller(node, 0).unwrap();
-        // A frame carrying a forward move (local -Z by 1) for controller 0, no turn.
-        let frame = encode_controller(0, 0, Vec3::new(0.0, 0.0, -1.0), 0.0);
+        // A frame carrying a forward move (local -Z by 1) for controller 0, no look.
+        let frame = encode_controller(0, 0, Vec3::new(0.0, 0.0, -1.0), 0.0, 0.0);
         let engine_frame = engine_frame_with(1_000, true, vec![frame]);
         s.advance(0, &FrameContext::new(&engine_frame));
         // Forward with identity facing translates along -Z.

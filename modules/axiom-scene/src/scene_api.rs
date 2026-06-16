@@ -228,19 +228,27 @@ impl SceneApi {
         self.scene.add_controller(node, index)
     }
 
-    /// Encode a per-tick first-person input for controller `index`: a `turn` (yaw
-    /// about +Y) plus a `move_local` translation in the node's own frame (local
-    /// -Z is forward, local +X is right), as a [`FrameCommand`] to hand to the
-    /// frame builder. The scene decodes these in [`Self::advance`] and applies
-    /// them to the addressed controller's node.
+    /// Encode a per-tick first-person input for controller `index`: a `yaw`/`pitch`
+    /// look delta (yaw about +Y, pitch about local +X, clamped by the scene) plus
+    /// a `move_local` translation in the node's own frame (local -Z is forward,
+    /// local +X is right), as a [`FrameCommand`] to hand to the frame builder.
+    /// The scene decodes these in [`Self::advance`] and applies them to the
+    /// addressed controller's node — moving in the yaw-only horizontal frame.
     pub fn controller_command(
         &self,
         sequence: u64,
         index: u32,
         move_local: Vec3,
-        turn: Radians,
+        yaw: Radians,
+        pitch: Radians,
     ) -> FrameCommand {
-        crate::controller_command::encode_controller(sequence, index, move_local, turn.get())
+        crate::controller_command::encode_controller(
+            sequence,
+            index,
+            move_local,
+            yaw.get(),
+            pitch.get(),
+        )
     }
 
     // --- Propagation / frame integration ---
@@ -340,10 +348,10 @@ mod tests {
     fn controller_command_encodes_a_decodable_input() {
         // The facade-built command round-trips through the scene's decoder.
         let s = api();
-        let cmd = s.controller_command(0, 1, Vec3::new(0.5, 0.0, -0.25), rad(0.1));
+        let cmd = s.controller_command(0, 1, Vec3::new(0.5, 0.0, -0.25), rad(0.1), rad(-0.2));
         assert_eq!(
             crate::controller_command::decode_controller(&cmd),
-            Some((1, Vec3::new(0.5, 0.0, -0.25), 0.1))
+            Some((1, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2))
         );
     }
 

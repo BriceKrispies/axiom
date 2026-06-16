@@ -51,8 +51,8 @@ export const DEMOS = [
     desc:
       "A retro FPS-style first-person shooter on nothing but the engine: the level " +
       "is scaled cube instances, the camera is the engine's first-person " +
-      "controller, and enemies are chasing cube players. Tank controls: turn " +
-      "with ◀ ▶, move with ▲ ▼, FIRE to shoot.",
+      "controller, and enemies are chasing cube players. Desktop: click to look " +
+      "(mouse), WASD to move, click to fire. Touch: ◀ ▶ turn, ▲ ▼ move, FIRE.",
     dir: "retro_fps",
     jsModule: "axiom_retro_fps_browser",
     canvasId: "axiom-retro-fps-canvas",

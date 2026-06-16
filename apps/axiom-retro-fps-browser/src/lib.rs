@@ -30,6 +30,9 @@ const EYE: f32 = 1.0;
 const MOVE_SPEED: f32 = 0.06;
 const TURN_SPEED: f32 = 0.045;
 const ENEMY_SPEED: f32 = 0.025;
+/// Pitch clamp, mirroring the engine's controller limit so the app's tracked
+/// pitch matches the camera (lets respawn snap the view level).
+const PITCH_LIMIT: f32 = 1.5;
 const ENEMY_Y: f32 = 0.5;
 const ENEMY_SCALE: f32 = 0.7;
 /// Where a dead enemy is parked: far below the floor, out of view.
@@ -138,6 +141,11 @@ pub struct Intent {
     pub strafe_right: bool,
     /// Fire this tick.
     pub fire: bool,
+    /// Mouse-look yaw delta this tick (radians; positive turns left). Added to
+    /// any keyboard/keypad turn.
+    pub look_yaw: f32,
+    /// Mouse-look pitch delta this tick (radians; positive looks up).
+    pub look_pitch: f32,
 }
 
 /// The player-facing state the HUD shows.
@@ -174,6 +182,7 @@ pub struct RetroFpsGame {
     px: f32,
     pz: f32,
     yaw: f32,
+    pitch: f32,
     health: i32,
     score: u32,
     ammo: u32,
@@ -201,6 +210,7 @@ impl RetroFpsGame {
             px: map.start.0,
             pz: map.start.1,
             yaw: 0.0,
+            pitch: 0.0,
             health: MAX_HEALTH,
             score: 0,
             ammo: START_AMMO,
@@ -256,12 +266,22 @@ impl RetroFpsGame {
         self.fire_cd = self.fire_cd.saturating_sub(1);
         self.hurt_cd = self.hurt_cd.saturating_sub(1);
 
-        // 1. Turn first, then move relative to the new facing.
-        let turn = (intent.turn_left as i32 - intent.turn_right as i32) as f32 * TURN_SPEED;
-        self.yaw += turn;
+        // 1. Look: keypad/key turn plus mouse yaw; mouse pitch (clamped). Then
+        //    move relative to the new yaw.
+        let yaw_delta =
+            (intent.turn_left as i32 - intent.turn_right as i32) as f32 * TURN_SPEED + intent.look_yaw;
+        let pitch_delta = intent.look_pitch;
+        self.yaw += yaw_delta;
+        self.pitch = (self.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
         let forward = (intent.forward as i32 - intent.backward as i32) as f32 * MOVE_SPEED;
         let strafe = (intent.strafe_right as i32 - intent.strafe_left as i32) as f32 * MOVE_SPEED;
-        let control = self.move_player(forward, strafe, turn);
+        let move_local = self.move_player(forward, strafe);
+        let control = FirstPersonInput::new(
+            0,
+            move_local,
+            Angle::radians(yaw_delta),
+            Angle::radians(pitch_delta),
+        );
 
         // 2. Shoot before enemies move, so a killed enemy parks this same tick.
         self.fire(intent.fire);
@@ -284,10 +304,9 @@ impl RetroFpsGame {
     }
 
     /// Apply a `(forward, strafe)` move at the current yaw with axis-separated
-    /// wall sliding, returning the [`FirstPersonInput`] that reproduces the
-    /// *applied* motion in the engine (turn + the part of the move that wasn't
-    /// blocked).
-    fn move_player(&mut self, forward: f32, strafe: f32, turn: f32) -> FirstPersonInput {
+    /// wall sliding, returning the `move_local` (in the camera's own frame) that
+    /// reproduces the *applied* (unblocked) motion in the engine.
+    fn move_player(&mut self, forward: f32, strafe: f32) -> Vec3 {
         let (sin, cos) = (self.yaw.sin(), self.yaw.cos());
         let dx = strafe * cos - forward * sin;
         let dz = -strafe * sin - forward * cos;
@@ -305,10 +324,9 @@ impl RetroFpsGame {
         self.px = nx;
         self.pz = nz;
         // Express the applied world delta in the camera's local frame, so the
-        // engine (which rotates move_local by the post-yaw facing) reproduces
+        // engine (which rotates move_local by the yaw-only facing) reproduces
         // exactly (adx, adz).
-        let move_local = Vec3::new(adx * cos - adz * sin, 0.0, adx * sin + adz * cos);
-        FirstPersonInput::new(0, move_local, Angle::radians(turn))
+        Vec3::new(adx * cos - adz * sin, 0.0, adx * sin + adz * cos)
     }
 
     /// Resolve a fire input: spend ammo on cooldown and kill the nearest living
@@ -419,16 +437,21 @@ impl RetroFpsGame {
     /// Death → reset: snap the camera back to the start (one corrective control),
     /// respawn every enemy at its spawn, and restore health/score/ammo.
     fn respawn(&mut self) -> StepCommands {
-        let turn = -self.yaw;
-        // After the corrective turn the yaw is 0, so world-axis-aligned: the move
-        // back to start is a pure (forward, strafe) at yaw 0.
-        let (dx, dz) = (self.map.start.0 - self.px, self.map.start.1 - self.pz);
-        // At yaw 0 the local frame is world-aligned, so the move back to start is
+        // Correct yaw and pitch back to zero (look level, facing -Z). After the
+        // yaw correction the frame is world-aligned, so the move back to start is
         // the world delta directly.
-        let control = FirstPersonInput::new(0, Vec3::new(dx, 0.0, dz), Angle::radians(turn));
+        let (yaw_delta, pitch_delta) = (-self.yaw, -self.pitch);
+        let (dx, dz) = (self.map.start.0 - self.px, self.map.start.1 - self.pz);
+        let control = FirstPersonInput::new(
+            0,
+            Vec3::new(dx, 0.0, dz),
+            Angle::radians(yaw_delta),
+            Angle::radians(pitch_delta),
+        );
         self.px = self.map.start.0;
         self.pz = self.map.start.1;
         self.yaw = 0.0;
+        self.pitch = 0.0;
         self.health = MAX_HEALTH;
         self.score = 0;
         self.ammo = START_AMMO;
@@ -611,6 +634,26 @@ mod tests {
     }
 
     #[test]
+    fn mouse_look_feeds_yaw_and_pitch_into_the_control_and_clamps_pitch() {
+        let mut g = RetroFpsGame::new();
+        let cmd = g.step(Intent {
+            look_yaw: 0.3,
+            look_pitch: -0.2,
+            ..idle()
+        });
+        // Mouse yaw/pitch flow straight into the controller input...
+        assert_eq!(cmd.control.yaw.as_radians(), 0.3);
+        assert_eq!(cmd.control.pitch.as_radians(), -0.2);
+        assert!((g.yaw - 0.3).abs() < 1.0e-6);
+        // ...and the tracked pitch clamps to the engine's limit on a big look.
+        g.step(Intent {
+            look_pitch: 5.0,
+            ..idle()
+        });
+        assert_eq!(g.pitch, PITCH_LIMIT);
+    }
+
+    #[test]
     fn turning_changes_yaw_and_is_reported_in_the_control() {
         let mut g = RetroFpsGame::new();
         let cmd = g.step(Intent {
@@ -618,7 +661,7 @@ mod tests {
             ..idle()
         });
         assert!(g.yaw > 0.0);
-        assert_eq!(cmd.control.turn.as_radians(), TURN_SPEED);
+        assert_eq!(cmd.control.yaw.as_radians(), TURN_SPEED);
     }
 
     #[test]
