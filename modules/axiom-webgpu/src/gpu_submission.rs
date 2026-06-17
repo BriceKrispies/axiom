@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn populated_submission_is_not_empty() {
         let mut s = GpuSubmission::new(1, 1);
-        s.push(GpuCommand::Present);
+        s.push(GpuCommand::present());
         // Distinguishes `is_empty -> true`: a submission with a command is NOT empty.
         assert!(!s.is_empty());
         assert_eq!(s.len(), 1);
@@ -69,10 +69,8 @@ mod tests {
     #[test]
     fn push_records_commands_in_order() {
         let mut s = GpuSubmission::new(1, 1);
-        s.push(GpuCommand::ClearFrame {
-            color: [0.0, 0.0, 0.0, 1.0],
-        });
-        s.push(GpuCommand::Present);
+        s.push(GpuCommand::clear_frame([0.0, 0.0, 0.0, 1.0]));
+        s.push(GpuCommand::present());
         assert_eq!(s.len(), 2);
         assert_eq!(s.commands()[0].kind_code(), GpuCommand::KIND_CLEAR_FRAME);
         assert_eq!(s.commands()[1].kind_code(), GpuCommand::KIND_PRESENT);

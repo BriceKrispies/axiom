@@ -139,18 +139,11 @@ impl RenderApi {
     ///    - `DrawIndexed`
     pub fn build_command_list(&self, input: &RenderInput) -> RenderCommandList {
         let mut list = RenderCommandList::with_capacity(3 + input.objects().len() * 3);
-        list.push(RenderCommand::ClearFrame {
-            color: input.clear_color(),
-        });
+        list.push(RenderCommand::clear_frame(input.clear_color()));
         input.camera().map(|camera| {
-            list.push(RenderCommand::SetCamera {
-                view: camera.view(),
-                projection: camera.projection(),
-            });
+            list.push(RenderCommand::set_camera(camera.view(), camera.projection()));
         });
-        list.push(RenderCommand::SetPipeline {
-            pipeline_id: RenderPipelineKind::BASIC_LIT,
-        });
+        list.push(RenderCommand::set_pipeline(RenderPipelineKind::BASIC_LIT));
         input.objects().iter().for_each(|object| {
             // An object emits commands only when it is visible AND both its
             // mesh and material indices resolve. `Option`-combinators carry
@@ -171,14 +164,12 @@ impl RenderApi {
                         .map(|material| (object, mesh, material))
                 })
                 .map(|(object, mesh, material)| {
-                    list.push(RenderCommand::SetMesh { mesh_id: mesh.id() });
-                    list.push(RenderCommand::SetMaterial {
-                        material_id: material.id(),
-                    });
-                    list.push(RenderCommand::DrawIndexed {
-                        index_count: mesh.indices().len() as u32,
-                        world: object.world(),
-                    });
+                    list.push(RenderCommand::set_mesh(mesh.id()));
+                    list.push(RenderCommand::set_material(material.id()));
+                    list.push(RenderCommand::draw_indexed(
+                        mesh.indices().len() as u32,
+                        object.world(),
+                    ));
                 });
         });
         list

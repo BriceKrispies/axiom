@@ -58,16 +58,23 @@ impl MetricReport {
     pub(crate) fn write_to(&self, writer: &mut BinaryWriter) {
         writer.write_byte_slice(self.name.as_bytes());
         writer.write_bool(self.is_counter);
-        match self.value {
-            MetricValue::Integer(i) => {
+        // Branchless value encode: the value is exactly one kind, so exactly
+        // one accessor yields `Some` and runs its writes; the other is `None`.
+        // Order and bytes match the former `match`: integer => tag `0` + the
+        // `i64`'s `u64` bit pattern; float => tag `1` + the `f32`.
+        self.value
+            .as_integer()
+            .map(|i| {
                 writer.write_u8(0);
                 writer.write_u64(i as u64);
-            }
-            MetricValue::Float(f) => {
-                writer.write_u8(1);
-                writer.write_f32(f);
-            }
-        }
+            })
+            .or_else(|| {
+                self.value.as_float().map(|f| {
+                    writer.write_u8(1);
+                    writer.write_f32(f);
+                })
+            })
+            .unwrap_or(());
         writer.write_bool(self.tick.is_some());
         self.tick.iter().for_each(|t| writer.write_u64(*t));
     }

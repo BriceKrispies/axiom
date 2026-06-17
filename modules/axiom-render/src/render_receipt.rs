@@ -69,25 +69,31 @@ impl RenderReceipt {
     /// stream is order-sensitive by construction.
     fn write_command(w: &mut BinaryWriter, command: &RenderCommand) {
         w.write_u32(command.kind_code());
-        match command {
-            RenderCommand::ClearFrame { color } => {
-                color.iter().for_each(|c| w.write_f32(*c));
-            }
-            RenderCommand::SetCamera { view, projection } => {
-                view.as_cols_array().iter().for_each(|c| w.write_f32(*c));
-                projection
-                    .as_cols_array()
-                    .iter()
-                    .for_each(|c| w.write_f32(*c));
-            }
-            RenderCommand::SetPipeline { pipeline_id } => w.write_u32(*pipeline_id),
-            RenderCommand::SetMesh { mesh_id } => w.write_u64(*mesh_id),
-            RenderCommand::SetMaterial { material_id } => w.write_u64(*material_id),
-            RenderCommand::DrawIndexed { index_count, world } => {
-                w.write_u32(*index_count);
-                world.as_cols_array().iter().for_each(|c| w.write_f32(*c));
-            }
-        }
+        // Branchless gated dispatch: each accessor yields `Some(payload)` for
+        // exactly its own kind and `None` otherwise, so at most one closure
+        // runs. The `.or_else` chain preserves the same per-kind serialization
+        // the original `match` arms produced, in the same field order.
+        command
+            .as_clear_color()
+            .map(|color| color.iter().for_each(|c| w.write_f32(*c)))
+            .or_else(|| {
+                command.as_camera().map(|(view, projection)| {
+                    view.as_cols_array().iter().for_each(|c| w.write_f32(*c));
+                    projection
+                        .as_cols_array()
+                        .iter()
+                        .for_each(|c| w.write_f32(*c));
+                })
+            })
+            .or_else(|| command.as_pipeline().map(|pipeline_id| w.write_u32(pipeline_id)))
+            .or_else(|| command.as_mesh_id().map(|mesh_id| w.write_u64(mesh_id)))
+            .or_else(|| command.as_material_id().map(|material_id| w.write_u64(material_id)))
+            .or_else(|| {
+                command.as_draw_indexed().map(|(index_count, world)| {
+                    w.write_u32(index_count);
+                    world.as_cols_array().iter().for_each(|c| w.write_f32(*c));
+                })
+            });
     }
 
     /// The frame this receipt captured.
@@ -143,20 +149,12 @@ mod tests {
 
     fn cube_commands() -> Vec<RenderCommand> {
         vec![
-            RenderCommand::ClearFrame {
-                color: [0.05, 0.06, 0.08, 1.0],
-            },
-            RenderCommand::SetCamera {
-                view: Mat4::IDENTITY,
-                projection: Mat4::IDENTITY,
-            },
-            RenderCommand::SetPipeline { pipeline_id: 1 },
-            RenderCommand::SetMesh { mesh_id: 7 },
-            RenderCommand::SetMaterial { material_id: 9 },
-            RenderCommand::DrawIndexed {
-                index_count: 36,
-                world: Mat4::IDENTITY,
-            },
+            RenderCommand::clear_frame([0.05, 0.06, 0.08, 1.0]),
+            RenderCommand::set_camera(Mat4::IDENTITY, Mat4::IDENTITY),
+            RenderCommand::set_pipeline(1),
+            RenderCommand::set_mesh(7),
+            RenderCommand::set_material(9),
+            RenderCommand::draw_indexed(36, Mat4::IDENTITY),
         ]
     }
 
@@ -206,12 +204,12 @@ mod tests {
         let a = RenderReceipt::capture(
             FrameIndex::new(0),
             Tick::new(0),
-            &list_with(&[RenderCommand::SetPipeline { pipeline_id: 1 }]),
+            &list_with(&[RenderCommand::set_pipeline(1)]),
         );
         let b = RenderReceipt::capture(
             FrameIndex::new(0),
             Tick::new(0),
-            &list_with(&[RenderCommand::SetPipeline { pipeline_id: 2 }]),
+            &list_with(&[RenderCommand::set_pipeline(2)]),
         );
         assert_ne!(a.bytes(), b.bytes());
     }
