@@ -67,9 +67,7 @@ mod tests {
     #[test]
     fn populated_list_is_not_empty() {
         let mut l = RenderCommandList::new();
-        l.push(RenderCommand::ClearFrame {
-            color: [0.0, 0.0, 0.0, 1.0],
-        });
+        l.push(RenderCommand::clear_frame([0.0, 0.0, 0.0, 1.0]));
         // Kills `is_empty -> true`: a list holding a command is not empty.
         assert!(!l.is_empty());
         assert_eq!(l.len(), 1);
@@ -82,22 +80,15 @@ mod tests {
         let mut l = RenderCommandList::with_capacity(4);
         assert!(l.is_empty());
         assert_eq!(l.len(), 0);
-        l.push(RenderCommand::ClearFrame {
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
+        l.push(RenderCommand::clear_frame([1.0, 1.0, 1.0, 1.0]));
         assert_eq!(l.len(), 1);
     }
 
     #[test]
     fn push_and_at_round_trip() {
         let mut l = RenderCommandList::new();
-        l.push(RenderCommand::ClearFrame {
-            color: [0.0, 0.0, 0.0, 1.0],
-        });
-        l.push(RenderCommand::DrawIndexed {
-            index_count: 36,
-            world: Mat4::IDENTITY,
-        });
+        l.push(RenderCommand::clear_frame([0.0, 0.0, 0.0, 1.0]));
+        l.push(RenderCommand::draw_indexed(36, Mat4::IDENTITY));
         assert_eq!(l.len(), 2);
         assert_eq!(
             l.at(0).unwrap().kind_code(),

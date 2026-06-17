@@ -6,37 +6,49 @@
 /// `PartialEq` is derived (not `Eq`) because `f32` is not totally ordered; the
 /// kernel never relies on float equality for control flow, only for value
 /// inspection.
+///
+/// Represented as a tagged struct rather than an enum so payload extraction is
+/// branchless: `kind` selects which field is live, and the unused field is
+/// always its default (`0` / `0.0`). Derived `PartialEq` compares every field,
+/// which is correct precisely because the inactive field is fixed at its
+/// default for a given `kind`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MetricValue {
-    Integer(i64),
-    Float(f32),
+pub struct MetricValue {
+    kind: u8,
+    int: i64,
+    float: f32,
 }
 
 impl MetricValue {
+    const KIND_INTEGER: u8 = 0;
+    const KIND_FLOAT: u8 = 1;
+
     /// Construct an integer value.
     pub const fn integer(value: i64) -> Self {
-        MetricValue::Integer(value)
+        MetricValue {
+            kind: Self::KIND_INTEGER,
+            int: value,
+            float: 0.0,
+        }
     }
 
     /// Construct a float value.
     pub const fn float(value: f32) -> Self {
-        MetricValue::Float(value)
+        MetricValue {
+            kind: Self::KIND_FLOAT,
+            int: 0,
+            float: value,
+        }
     }
 
     /// The integer payload, if this is an `Integer`.
-    pub const fn as_integer(self) -> Option<i64> {
-        match self {
-            MetricValue::Integer(v) => Some(v),
-            MetricValue::Float(_) => None,
-        }
+    pub fn as_integer(self) -> Option<i64> {
+        (self.kind == Self::KIND_INTEGER).then_some(self.int)
     }
 
     /// The float payload, if this is a `Float`.
-    pub const fn as_float(self) -> Option<f32> {
-        match self {
-            MetricValue::Float(v) => Some(v),
-            MetricValue::Integer(_) => None,
-        }
+    pub fn as_float(self) -> Option<f32> {
+        (self.kind == Self::KIND_FLOAT).then_some(self.float)
     }
 }
 

@@ -46,7 +46,7 @@ impl WebGpuApi {
     /// into a report and never touches a GPU.
     pub const fn new_recording() -> Self {
         WebGpuApi {
-            state: WebGpuBackendState::Recording,
+            state: WebGpuBackendState::recording(),
         }
     }
 
@@ -55,7 +55,7 @@ impl WebGpuApi {
     /// is presented.
     pub const fn new_live_unbound() -> Self {
         WebGpuApi {
-            state: WebGpuBackendState::LiveUnbound,
+            state: WebGpuBackendState::live_unbound(),
         }
     }
 
@@ -77,7 +77,7 @@ impl WebGpuApi {
             .adapter()
             .require_presentation_surface()
             .then_some(WebGpuApi {
-                state: WebGpuBackendState::LivePresentationRequested(*request),
+                state: WebGpuBackendState::live_presentation_requested(*request),
             })
             .ok_or_else(|| {
                 KernelError::new(
@@ -127,31 +127,31 @@ impl WebGpuApi {
     }
 
     pub fn submission_clear_frame(&self, sub: &mut GpuSubmission, color: [f32; 4]) {
-        sub.push(GpuCommand::ClearFrame { color });
+        sub.push(GpuCommand::clear_frame(color));
     }
 
     pub fn submission_set_pipeline(&self, sub: &mut GpuSubmission, pipeline_id: u32) {
-        sub.push(GpuCommand::SetPipeline { pipeline_id });
+        sub.push(GpuCommand::set_pipeline(pipeline_id));
     }
 
     pub fn submission_set_camera(&self, sub: &mut GpuSubmission, view: Mat4, projection: Mat4) {
-        sub.push(GpuCommand::SetCamera { view, projection });
+        sub.push(GpuCommand::set_camera(view, projection));
     }
 
     pub fn submission_set_mesh(&self, sub: &mut GpuSubmission, mesh_id: u64) {
-        sub.push(GpuCommand::SetMesh { mesh_id });
+        sub.push(GpuCommand::set_mesh(mesh_id));
     }
 
     pub fn submission_set_material(&self, sub: &mut GpuSubmission, material_id: u64) {
-        sub.push(GpuCommand::SetMaterial { material_id });
+        sub.push(GpuCommand::set_material(material_id));
     }
 
     pub fn submission_draw_indexed(&self, sub: &mut GpuSubmission, index_count: u32, world: Mat4) {
-        sub.push(GpuCommand::DrawIndexed { index_count, world });
+        sub.push(GpuCommand::draw_indexed(index_count, world));
     }
 
     pub fn submission_present(&self, sub: &mut GpuSubmission) {
-        sub.push(GpuCommand::Present);
+        sub.push(GpuCommand::present());
     }
 
     // --- Submission ---

@@ -127,18 +127,10 @@ mod tests {
     fn report_records_per_kind_counts() {
         let r = GpuSubmissionReport::new(
             vec![
-                GpuCommand::ClearFrame {
-                    color: [0.0, 0.0, 0.0, 1.0],
-                },
-                GpuCommand::DrawIndexed {
-                    index_count: 36,
-                    world: axiom_math::Mat4::IDENTITY,
-                },
-                GpuCommand::DrawIndexed {
-                    index_count: 6,
-                    world: axiom_math::Mat4::IDENTITY,
-                },
-                GpuCommand::Present,
+                GpuCommand::clear_frame([0.0, 0.0, 0.0, 1.0]),
+                GpuCommand::draw_indexed(36, axiom_math::Mat4::IDENTITY),
+                GpuCommand::draw_indexed(6, axiom_math::Mat4::IDENTITY),
+                GpuCommand::present(),
             ],
             800,
             600,
@@ -157,22 +149,12 @@ mod tests {
         // draw_count for good measure).
         let r = GpuSubmissionReport::new(
             vec![
-                GpuCommand::ClearFrame {
-                    color: [0.0, 0.0, 0.0, 1.0],
-                },
-                GpuCommand::ClearFrame {
-                    color: [1.0, 1.0, 1.0, 1.0],
-                },
-                GpuCommand::DrawIndexed {
-                    index_count: 36,
-                    world: axiom_math::Mat4::IDENTITY,
-                },
-                GpuCommand::DrawIndexed {
-                    index_count: 6,
-                    world: axiom_math::Mat4::IDENTITY,
-                },
-                GpuCommand::Present,
-                GpuCommand::Present,
+                GpuCommand::clear_frame([0.0, 0.0, 0.0, 1.0]),
+                GpuCommand::clear_frame([1.0, 1.0, 1.0, 1.0]),
+                GpuCommand::draw_indexed(36, axiom_math::Mat4::IDENTITY),
+                GpuCommand::draw_indexed(6, axiom_math::Mat4::IDENTITY),
+                GpuCommand::present(),
+                GpuCommand::present(),
             ],
             1,
             1,
@@ -193,13 +175,13 @@ mod tests {
     #[test]
     fn equal_inputs_produce_equal_reports() {
         let a = GpuSubmissionReport::new(
-            vec![GpuCommand::Present],
+            vec![GpuCommand::present()],
             1,
             1,
             GpuSubmissionStatus::Recorded,
         );
         let b = GpuSubmissionReport::new(
-            vec![GpuCommand::Present],
+            vec![GpuCommand::present()],
             1,
             1,
             GpuSubmissionStatus::Recorded,
