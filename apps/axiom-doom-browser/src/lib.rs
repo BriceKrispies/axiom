@@ -579,6 +579,11 @@ fn block(x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32) -> Transform {
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+// The native agent bridge (drive the game from JSON, read back state/images).
+// Native + `agent`-feature only, so the wasm build and default gates skip it.
+#[cfg(all(feature = "agent", not(target_arch = "wasm32")))]
+pub mod agent;
+
 #[cfg(test)]
 mod tests {
     use super::*;

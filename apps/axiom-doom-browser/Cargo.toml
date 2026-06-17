@@ -9,11 +9,33 @@ rust-version.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# The native agent-bridge server: drives the real DOOM game headlessly and
+# answers JSON over HTTP so an external agent can send inputs and read back state
+# (and, with `agent-render`, images). Gated behind `required-features` so the
+# default workspace gates and the wasm build never compile it or its deps.
+[[bin]]
+name = "agent"
+path = "src/bin/agent.rs"
+required-features = ["agent"]
+
+[features]
+# Headless agent server (structured state). Native-only deps, pulled in only when
+# building the agent bin — off by default, so coverage/test/clippy/wasm are
+# untouched.
+agent = ["dep:tiny_http", "dep:serde", "dep:serde_json"]
+
 [dependencies]
 # The one engine crate an app imports. The first-person camera (Controller +
 # FirstPersonInput), the scene authoring vocabulary, and the live windowing/wgpu
 # backend (wasm32) all arrive through the umbrella.
 axiom = { path = "../../modules/axiom" }
+
+# Native agent-bridge deps (optional; enabled by the `agent` feature). Confined to
+# non-wasm so the browser build never sees them.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tiny_http = { version = "0.12", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 # Browser entry only: the wasm-bindgen glue, a panic hook, and the DOM surface
 # the HUD (health/score/ammo) is drawn into. Confined to wasm32, so native
