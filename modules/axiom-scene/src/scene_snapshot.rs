@@ -78,6 +78,21 @@ impl SceneSnapshot {
         &self.nodes
     }
 
+    /// The node with the given id, or `None` if the scene has no such node.
+    ///
+    /// `O(log N)`: the node list is kept in ascending id order (see
+    /// [`Self::from_scene`]), so this binary-searches rather than scans. A
+    /// consumer resolving many ids — e.g. a renderer mapping each renderable to
+    /// its node's world transform — does so in `O(log N)` per lookup instead of
+    /// `O(N)`, turning an `O(renderables x nodes)` pass into `O(renderables log
+    /// nodes)`.
+    pub fn node(&self, id: SceneNodeId) -> Option<&NodeSnapshot> {
+        self.nodes
+            .binary_search_by_key(&id.raw(), |n| n.id().raw())
+            .ok()
+            .map(|i| &self.nodes[i])
+    }
+
     pub fn cameras(&self) -> &[CameraSnapshot] {
         &self.cameras
     }
@@ -195,6 +210,18 @@ mod tests {
         let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
         assert_eq!(child.world().translation.x, 0.0); // not propagated
         assert_eq!(child.world().translation.y, 5.0);
+    }
+
+    #[test]
+    fn node_lookup_resolves_present_ids_and_rejects_absent_ones() {
+        let s = SceneSnapshot::from_scene(&populated_scene());
+        // Every listed node is found by its own id, and the lookup returns that
+        // same node (the `Ok` -> `map` arm of the binary search).
+        for n in s.nodes() {
+            assert_eq!(s.node(n.id()), Some(n));
+        }
+        // An id no node carries returns `None` (the `Err` -> `None` arm).
+        assert!(s.node(SceneNodeId::from_raw(9_999)).is_none());
     }
 
     #[test]
