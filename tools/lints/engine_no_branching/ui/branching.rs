@@ -1,5 +1,7 @@
+// compile-flags: --test
 // Every control-flow construct below must be flagged by `engine_no_branching`.
-// The straight-line function and the combinator calls at the bottom must NOT be.
+// The straight-line function, the combinator calls, and the `#[cfg(test)]`
+// module at the bottom must NOT be.
 #![allow(unused, clippy::all)]
 
 fn if_construct(x: i32) -> i32 {
@@ -68,6 +70,20 @@ fn straight_line(a: i32, b: i32) -> i32 {
 
 fn combinators(o: Option<i32>) -> i32 {
     o.map(|x| x + 1).unwrap_or(0)
+}
+
+// --- must NOT be flagged: branches inside test code are exempt ---
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_test_may_branch_freely() {
+        for i in 0..3 {
+            if i % 2 == 0 {
+                assert!(i >= 0);
+            }
+        }
+    }
 }
 
 fn main() {}
