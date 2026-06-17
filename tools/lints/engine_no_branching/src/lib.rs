@@ -4,11 +4,13 @@
 // A list of available compiler crates can be found here:
 // https://doc.rust-lang.org/nightly/nightly-rustc/
 extern crate rustc_hir;
+extern crate rustc_span;
 
 use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::is_in_test;
 use rustc_hir::{BinOpKind, Expr, ExprKind, LoopSource, MatchSource};
 use rustc_lint::{LateContext, LateLintPass};
+use rustc_span::{FileName, Span};
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
@@ -75,6 +77,22 @@ fn branch_message(kind: &ExprKind<'_>) -> Option<&'static str> {
     })
 }
 
+/// True if `span`'s source file lives under a `tests/`, `examples/`, or
+/// `benches/` directory — integration tests, example binaries, and benchmarks.
+/// Their non-`#[test]` helper code is still test/support code, so it is exempt
+/// just like inline `#[cfg(test)]` code.
+fn in_test_or_example_file(cx: &LateContext<'_>, span: Span) -> bool {
+    let FileName::Real(name) = cx.tcx.sess.source_map().span_to_filename(span) else {
+        return false;
+    };
+    let Some(path) = name.local_path() else {
+        return false;
+    };
+    let path = path.to_string_lossy().replace('\\', "/");
+    path.split('/')
+        .any(|c| matches!(c, "tests" | "examples" | "benches"))
+}
+
 impl<'tcx> LateLintPass<'tcx> for EngineNoBranching {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
         let Some(message) = branch_message(&expr.kind) else {
@@ -96,11 +114,14 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoBranching {
         if matches!(expr.kind, ExprKind::If(..)) && expr.span.desugaring_kind().is_some() {
             return;
         }
-        // Test code (`#[test]` fns and `#[cfg(test)]` modules) may branch
-        // freely: the ban targets the engine the build ships, not the suites
-        // that verify it. (Scope is otherwise everything — no engine-file
-        // filter — so apps and tools are still covered.)
-        if is_in_test(cx.tcx, expr.hir_id) {
+        // Test code may branch freely: the ban targets the engine the build
+        // ships, not the suites that verify it. Two forms of test code are
+        // exempt — inline `#[test]` fns / `#[cfg(test)]` modules (via
+        // `is_in_test`), and whole `tests/` / `examples/` / `benches/` files,
+        // whose non-`#[test]` helpers `is_in_test` would otherwise miss. (Scope
+        // is otherwise everything — no engine-file filter — so apps and tools
+        // are still covered.)
+        if is_in_test(cx.tcx, expr.hir_id) || in_test_or_example_file(cx, expr.span) {
             return;
         }
         span_lint_and_help(
