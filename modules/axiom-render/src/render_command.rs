@@ -36,6 +36,56 @@ impl RenderCommand {
             RenderCommand::DrawIndexed { .. } => Self::KIND_DRAW_INDEXED,
         }
     }
+
+    /// Extract this command's `ClearFrame` payload, or `None` for any other
+    /// kind. Centralizes the single exhaustive `match` over the command enum
+    /// so callers compose with `Option`-combinators instead of re-matching.
+    pub const fn as_clear_color(&self) -> Option<[f32; 4]> {
+        match self {
+            RenderCommand::ClearFrame { color } => Some(*color),
+            _ => None,
+        }
+    }
+
+    /// Extract this command's `SetCamera` `(view, projection)`, or `None`.
+    pub const fn as_camera(&self) -> Option<(Mat4, Mat4)> {
+        match self {
+            RenderCommand::SetCamera { view, projection } => Some((*view, *projection)),
+            _ => None,
+        }
+    }
+
+    /// Extract this command's `SetPipeline` id, or `None`.
+    pub const fn as_pipeline(&self) -> Option<u32> {
+        match self {
+            RenderCommand::SetPipeline { pipeline_id } => Some(*pipeline_id),
+            _ => None,
+        }
+    }
+
+    /// Extract this command's `SetMesh` id, or `None`.
+    pub const fn as_mesh_id(&self) -> Option<u64> {
+        match self {
+            RenderCommand::SetMesh { mesh_id } => Some(*mesh_id),
+            _ => None,
+        }
+    }
+
+    /// Extract this command's `SetMaterial` id, or `None`.
+    pub const fn as_material_id(&self) -> Option<u64> {
+        match self {
+            RenderCommand::SetMaterial { material_id } => Some(*material_id),
+            _ => None,
+        }
+    }
+
+    /// Extract this command's `DrawIndexed` `(index_count, world)`, or `None`.
+    pub const fn as_draw_indexed(&self) -> Option<(u32, Mat4)> {
+        match self {
+            RenderCommand::DrawIndexed { index_count, world } => Some((*index_count, *world)),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

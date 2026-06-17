@@ -76,8 +76,7 @@ impl Transform {
     /// Fails when the translation coincides with `target`, or the look
     /// direction is parallel to `up` (see [`Quat::look_rotation`]).
     pub fn looking_at(self, target: Vec3, up: Vec3) -> MathResult<Transform> {
-        let rotation = Quat::look_rotation(target.subtract(self.translation), up)?;
-        Ok(Transform {
+        Quat::look_rotation(target.subtract(self.translation), up).map(|rotation| Transform {
             translation: self.translation,
             rotation,
             scale: self.scale,
@@ -132,32 +131,43 @@ impl Transform {
     /// Fails additionally when the scale is zero or non-finite, or when the
     /// rotation cannot be inverted.
     pub fn inverse(self) -> MathResult<Transform> {
-        for component in [self.scale.x, self.scale.y, self.scale.z] {
-            if !component.is_finite() {
-                return Err(MathError::non_finite_scalar(
-                    "transform scale must be finite to invert",
-                ));
-            }
-            if component == 0.0 {
-                return Err(MathError::divide_by_zero(
-                    "transform scale must be non-zero to invert",
-                ));
-            }
-        }
-        if self.scale.x != self.scale.y || self.scale.y != self.scale.z {
-            return Err(MathError::invalid_matrix_operation(
-                "Transform::inverse requires uniform scale; expand to Mat4 first for non-uniform scale",
-            ));
-        }
-        let inv_rot = self.rotation.inverse()?;
-        let s_inv = 1.0 / self.scale.x;
-        let neg_t = self.translation.mul_scalar(-1.0);
-        let inv_translation = inv_rot.rotate(neg_t).mul_scalar(s_inv);
-        Ok(Transform {
-            translation: inv_translation,
-            rotation: inv_rot,
-            scale: Vec3::new(s_inv, s_inv, s_inv),
-        })
+        // Scan x, y, z in order; the first component that is non-finite or zero
+        // produces the same error the original early-return loop did (non-finite
+        // takes priority over zero for a given component, which cannot be both).
+        let scale_check: Option<MathError> = [self.scale.x, self.scale.y, self.scale.z]
+            .into_iter()
+            .find_map(|component| {
+                (!component.is_finite())
+                    .then_some(MathError::non_finite_scalar(
+                        "transform scale must be finite to invert",
+                    ))
+                    .or_else(|| {
+                        (component == 0.0).then_some(MathError::divide_by_zero(
+                            "transform scale must be non-zero to invert",
+                        ))
+                    })
+            });
+        let non_uniform =
+            (self.scale.x != self.scale.y) | (self.scale.y != self.scale.z);
+        scale_check
+            .map(Err)
+            .or_else(|| {
+                non_uniform.then_some(Err(MathError::invalid_matrix_operation(
+                    "Transform::inverse requires uniform scale; expand to Mat4 first for non-uniform scale",
+                )))
+            })
+            .unwrap_or_else(|| {
+                self.rotation.inverse().map(|inv_rot| {
+                    let s_inv = 1.0 / self.scale.x;
+                    let neg_t = self.translation.mul_scalar(-1.0);
+                    let inv_translation = inv_rot.rotate(neg_t).mul_scalar(s_inv);
+                    Transform {
+                        translation: inv_translation,
+                        rotation: inv_rot,
+                        scale: Vec3::new(s_inv, s_inv, s_inv),
+                    }
+                })
+            })
     }
 
     /// Expand to a homogeneous `T * R * S` matrix.
@@ -177,13 +187,14 @@ impl Transform {
 
     /// Read translation, rotation, and scale in declaration order.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Transform> {
-        let translation = Vec3::read_from(reader)?;
-        let rotation = Quat::read_from(reader)?;
-        let scale = Vec3::read_from(reader)?;
-        Ok(Transform {
-            translation,
-            rotation,
-            scale,
+        Vec3::read_from(reader).and_then(|translation| {
+            Quat::read_from(reader).and_then(|rotation| {
+                Vec3::read_from(reader).map(|scale| Transform {
+                    translation,
+                    rotation,
+                    scale,
+                })
+            })
         })
     }
 }
@@ -191,8 +202,8 @@ impl Transform {
 impl ApproxEq for Transform {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
         self.translation.approx_eq(&other.translation, epsilon)
-            && self.rotation.approx_eq(&other.rotation, epsilon)
-            && self.scale.approx_eq(&other.scale, epsilon)
+            & self.rotation.approx_eq(&other.rotation, epsilon)
+            & self.scale.approx_eq(&other.scale, epsilon)
     }
 }
 
@@ -213,10 +224,14 @@ impl Reflect for Transform {
     }
 
     fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        Ok(Transform {
-            translation: Vec3::reflect_read(reader)?,
-            rotation: Quat::reflect_read(reader)?,
-            scale: Vec3::reflect_read(reader)?,
+        Vec3::reflect_read(reader).and_then(|translation| {
+            Quat::reflect_read(reader).and_then(|rotation| {
+                Vec3::reflect_read(reader).map(|scale| Transform {
+                    translation,
+                    rotation,
+                    scale,
+                })
+            })
         })
     }
 }

@@ -28,13 +28,9 @@ impl Scalar {
     /// Return `v` if it is finite; otherwise produce a
     /// [`crate::math_error_code::MathErrorCode::NonFiniteScalar`] error.
     pub fn validate_finite(v: f32) -> MathResult<f32> {
-        if v.is_finite() {
-            Ok(v)
-        } else {
-            Err(MathError::non_finite_scalar(
-                "math scalar must be finite (no NaN, no Inf)",
-            ))
-        }
+        v.is_finite().then_some(v).ok_or_else(|| {
+            MathError::non_finite_scalar("math scalar must be finite (no NaN, no Inf)")
+        })
     }
 }
 

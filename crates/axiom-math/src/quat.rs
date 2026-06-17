@@ -44,16 +44,17 @@ impl Quat {
     /// [`crate::math_error_code::MathErrorCode::NonFiniteScalar`] when any
     /// component is not finite.
     pub fn from_axis_angle(axis: Vec3, angle: f32) -> MathResult<Quat> {
-        if !angle.is_finite() {
-            return Err(MathError::non_finite_scalar(
-                "quaternion angle must be finite",
-            ));
-        }
-        let axis = axis.normalize()?;
-        let half = angle * 0.5;
-        let s = half.sin();
-        let c = half.cos();
-        Ok(Quat::new(axis.x * s, axis.y * s, axis.z * s, c))
+        angle
+            .is_finite()
+            .then_some(())
+            .ok_or_else(|| MathError::non_finite_scalar("quaternion angle must be finite"))
+            .and_then(|()| axis.normalize())
+            .map(|axis| {
+                let half = angle * 0.5;
+                let s = half.sin();
+                let c = half.cos();
+                Quat::new(axis.x * s, axis.y * s, axis.z * s, c)
+            })
     }
 
     /// Build a unit rotation that orients local **-Z** along `forward` with
@@ -68,60 +69,88 @@ impl Quat {
     /// `forward` is zero-length or parallel to `up` (the basis would be
     /// degenerate) — matching `Mat4::look_at`.
     pub fn look_rotation(forward: Vec3, up: Vec3) -> MathResult<Quat> {
-        let f = forward.normalize().map_err(|_| {
-            MathError::invalid_matrix_operation("look_rotation forward is zero-length")
-        })?;
-        let s = f.cross(up).normalize().map_err(|_| {
-            MathError::invalid_matrix_operation("look_rotation forward and up are parallel")
-        })?;
+        forward
+            .normalize()
+            .map_err(|_| {
+                MathError::invalid_matrix_operation("look_rotation forward is zero-length")
+            })
+            .and_then(|f| {
+                f.cross(up)
+                    .normalize()
+                    .map_err(|_| {
+                        MathError::invalid_matrix_operation(
+                            "look_rotation forward and up are parallel",
+                        )
+                    })
+                    .map(|s| Self::shepperd(f, s))
+            })
+    }
+
+    /// Shepperd's quaternion extraction for the rotation whose columns are the
+    /// world-space camera axes `+X -> s`, `+Y -> u`, `+Z -> -f`. The original
+    /// picked one of four formulas via the largest diagonal term; here all four
+    /// candidates are computed (each pure, no panic) and the matching one is
+    /// selected branchlessly. The selection conditions are mutually exclusive,
+    /// so exactly one candidate is chosen — value-identical to the branched
+    /// form.
+    fn shepperd(f: Vec3, s: Vec3) -> Quat {
         let u = s.cross(f);
-        // Rotation whose columns are the world-space camera axes: +X -> s,
-        // +Y -> u, +Z -> -f (so -Z -> f). Extract its quaternion via Shepperd's
-        // method, branching on the largest diagonal term so the divisor stays
-        // well away from zero. The diagonal entries are m00 = s.x, m11 = u.y,
-        // m22 = -f.z; off-diagonals follow from the same column layout.
         let m00 = s.x;
         let m11 = u.y;
         let m22 = -f.z;
         let trace = m00 + m11 + m22;
-        let q = if trace > 0.0 {
-            let big = (trace + 1.0).sqrt(); // 2w
-            let r = 0.5 / big; // 1 / 4w
-            Quat::new(
-                (u.z + f.y) * r,
-                (-f.x - s.z) * r,
-                (s.y - u.x) * r,
-                0.5 * big,
-            )
-        } else if m00 >= m11 && m00 >= m22 {
-            let big = (1.0 + m00 - m11 - m22).sqrt(); // 2x
-            let r = 0.5 / big;
-            Quat::new(
-                0.5 * big,
-                (u.x + s.y) * r,
-                (-f.x + s.z) * r,
-                (u.z + f.y) * r,
-            )
-        } else if m11 >= m22 {
-            let big = (1.0 + m11 - m00 - m22).sqrt(); // 2y
-            let r = 0.5 / big;
-            Quat::new(
-                (u.x + s.y) * r,
-                0.5 * big,
-                (-f.y + u.z) * r,
-                (-f.x - s.z) * r,
-            )
-        } else {
-            let big = (1.0 + m22 - m00 - m11).sqrt(); // 2z
-            let r = 0.5 / big;
-            Quat::new(
-                (-f.x + s.z) * r,
-                (-f.y + u.z) * r,
-                0.5 * big,
-                (s.y - u.x) * r,
-            )
-        };
-        Ok(q)
+
+        let big_w = (trace + 1.0).sqrt(); // 2w
+        let r_w = 0.5 / big_w;
+        let cand_w = Quat::new(
+            (u.z + f.y) * r_w,
+            (-f.x - s.z) * r_w,
+            (s.y - u.x) * r_w,
+            0.5 * big_w,
+        );
+
+        let big_x = (1.0 + m00 - m11 - m22).sqrt(); // 2x
+        let r_x = 0.5 / big_x;
+        let cand_x = Quat::new(
+            0.5 * big_x,
+            (u.x + s.y) * r_x,
+            (-f.x + s.z) * r_x,
+            (u.z + f.y) * r_x,
+        );
+
+        let big_y = (1.0 + m11 - m00 - m22).sqrt(); // 2y
+        let r_y = 0.5 / big_y;
+        let cand_y = Quat::new(
+            (u.x + s.y) * r_y,
+            0.5 * big_y,
+            (-f.y + u.z) * r_y,
+            (-f.x - s.z) * r_y,
+        );
+
+        let big_z = (1.0 + m22 - m00 - m11).sqrt(); // 2z
+        let r_z = 0.5 / big_z;
+        let cand_z = Quat::new(
+            (-f.x + s.z) * r_z,
+            (-f.y + u.z) * r_z,
+            0.5 * big_z,
+            (s.y - u.x) * r_z,
+        );
+
+        // Mirror the original if / else-if / else-if / else exactly. The four
+        // conditions are evaluated in order; `select(cond, fallback)` returns
+        // `self` when `cond` else `fallback`, so nesting them reproduces the
+        // first-match cascade with the final `else` defaulting to `cand_z`.
+        let pick_w = trace > 0.0;
+        let pick_x = !pick_w & (m00 >= m11) & (m00 >= m22);
+        let pick_y = !pick_w & !pick_x & (m11 >= m22);
+        let after_w = cand_w.select(pick_w, cand_z);
+        let after_x = cand_x.select(pick_x, after_w);
+        cand_y.select(pick_y, after_x)
+    }
+
+    /// Branchless choose: `self` when `cond`, else `other`.
+    fn select(self, cond: bool, other: Quat) -> Quat {
+        cond.then_some(self).unwrap_or(other)
     }
 
     /// Squared length (`x² + y² + z² + w²`).
@@ -137,17 +166,13 @@ impl Quat {
     /// Unit-length copy. Fails for the zero quaternion.
     pub fn normalize(self) -> MathResult<Quat> {
         let len = self.length();
-        if len == 0.0 || !len.is_finite() {
-            return Err(MathError::normalize_zero_length(
-                "cannot normalize zero-length quaternion",
-            ));
-        }
-        Ok(Quat::new(
-            self.x / len,
-            self.y / len,
-            self.z / len,
-            self.w / len,
-        ))
+        let valid = (len != 0.0) & len.is_finite();
+        valid
+            .then_some(len)
+            .map(|len| Quat::new(self.x / len, self.y / len, self.z / len, self.w / len))
+            .ok_or_else(|| {
+                MathError::normalize_zero_length("cannot normalize zero-length quaternion")
+            })
     }
 
     /// Conjugate `(-x, -y, -z, w)`. For a unit quaternion this is its inverse.
@@ -160,13 +185,16 @@ impl Quat {
     /// well as unit ones.
     pub fn inverse(self) -> MathResult<Quat> {
         let ls = self.length_squared();
-        if ls == 0.0 || !ls.is_finite() {
-            return Err(MathError::normalize_zero_length(
-                "cannot invert zero-length quaternion",
-            ));
-        }
-        let c = self.conjugate();
-        Ok(Quat::new(c.x / ls, c.y / ls, c.z / ls, c.w / ls))
+        let valid = (ls != 0.0) & ls.is_finite();
+        valid
+            .then_some(ls)
+            .map(|ls| {
+                let c = self.conjugate();
+                Quat::new(c.x / ls, c.y / ls, c.z / ls, c.w / ls)
+            })
+            .ok_or_else(|| {
+                MathError::normalize_zero_length("cannot invert zero-length quaternion")
+            })
     }
 
     /// Hamilton product: `self * other` rotates first by `other`, then by
@@ -201,20 +229,22 @@ impl Quat {
 
     /// Read four `f32` components in declaration order.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Quat> {
-        let x = reader.read_f32()?;
-        let y = reader.read_f32()?;
-        let z = reader.read_f32()?;
-        let w = reader.read_f32()?;
-        Ok(Quat::new(x, y, z, w))
+        reader.read_f32().and_then(|x| {
+            reader.read_f32().and_then(|y| {
+                reader
+                    .read_f32()
+                    .and_then(|z| reader.read_f32().map(|w| Quat::new(x, y, z, w)))
+            })
+        })
     }
 }
 
 impl ApproxEq for Quat {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
         self.x.approx_eq(&other.x, epsilon)
-            && self.y.approx_eq(&other.y, epsilon)
-            && self.z.approx_eq(&other.z, epsilon)
-            && self.w.approx_eq(&other.w, epsilon)
+            & self.y.approx_eq(&other.y, epsilon)
+            & self.z.approx_eq(&other.z, epsilon)
+            & self.w.approx_eq(&other.w, epsilon)
     }
 }
 
@@ -237,12 +267,12 @@ impl Reflect for Quat {
     }
 
     fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        Ok(Quat::new(
-            f32::reflect_read(reader)?,
-            f32::reflect_read(reader)?,
-            f32::reflect_read(reader)?,
-            f32::reflect_read(reader)?,
-        ))
+        f32::reflect_read(reader).and_then(|x| {
+            f32::reflect_read(reader).and_then(|y| {
+                f32::reflect_read(reader)
+                    .and_then(|z| f32::reflect_read(reader).map(|w| Quat::new(x, y, z, w)))
+            })
+        })
     }
 }
 

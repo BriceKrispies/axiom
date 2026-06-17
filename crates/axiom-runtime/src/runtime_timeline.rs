@@ -43,15 +43,17 @@ impl RuntimeTimeline {
     /// a [`RuntimeError`] whose [`RuntimeError::kernel`] retains the original
     /// `(scope, code)` identity.
     pub fn advance(&mut self) -> RuntimeResult<RuntimeStep> {
-        self.clock.advance().map_err(|e| {
+        let advanced = self.clock.advance().map_err(|e| {
             RuntimeError::with_kernel(
                 RuntimeErrorCode::KernelFailure,
                 "kernel SimulationClock advance failed",
                 e,
             )
-        })?;
-        self.sequence = self.sequence.saturating_add(1);
-        Ok(self.current_step())
+        });
+        advanced.map(|_| {
+            self.sequence = self.sequence.saturating_add(1);
+            self.current_step()
+        })
     }
 
     /// The kernel-typed current frame index.

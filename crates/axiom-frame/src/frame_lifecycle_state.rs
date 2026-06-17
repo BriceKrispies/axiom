@@ -29,21 +29,34 @@ pub enum FrameLifecycleState {
 impl FrameLifecycleState {
     /// Project a host lifecycle state onto the four frame-level states.
     pub const fn from_host(state: HostLifecycleState) -> Self {
-        if state.shutdown_requested() {
-            FrameLifecycleState::ShutdownRequested
-        } else if state.suspended() {
-            FrameLifecycleState::Suspended
-        } else if !state.visible() {
-            FrameLifecycleState::Hidden
-        } else {
-            FrameLifecycleState::Active
-        }
+        // Branchless priority selection mirroring the original `if/else if`
+        // chain: `ShutdownRequested` wins, then `Suspended`, then `Hidden`,
+        // then `Active`. Each predicate's mask (`false`/`true` -> `0`/`1`)
+        // gates the lower-priority predicates, so exactly one term is
+        // non-zero and it equals that variant's priority value. Pure
+        // arithmetic on `bool`-as-`u8` — no branch.
+        let shutdown = state.shutdown_requested() as u8;
+        let suspended = state.suspended() as u8;
+        let hidden = (!state.visible()) as u8;
+        let priority = shutdown * 3
+            + (1 - shutdown) * suspended * 2
+            + (1 - shutdown) * (1 - suspended) * hidden;
+        // Index the four states by priority (0 = Active .. 3 = Shutdown).
+        // A fixed-array lookup is a pure projection, not a branch.
+        [
+            FrameLifecycleState::Active,
+            FrameLifecycleState::Hidden,
+            FrameLifecycleState::Suspended,
+            FrameLifecycleState::ShutdownRequested,
+        ][priority as usize]
     }
 
     /// `true` iff the frame boundary considers this state safe to step
     /// (i.e. the host is visible, not suspended, not shutting down).
     pub const fn is_active(self) -> bool {
-        matches!(self, FrameLifecycleState::Active)
+        // `Active` is discriminant 0 in declaration order; comparing the
+        // numeric discriminant avoids a `match`/`matches!` branch.
+        (self as u8) == (FrameLifecycleState::Active as u8)
     }
 }
 

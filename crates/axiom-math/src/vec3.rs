@@ -76,15 +76,16 @@ impl Vec3 {
     /// if `k` is `0.0` and [`crate::math_error_code::MathErrorCode::NonFiniteScalar`]
     /// if `k` is not finite.
     pub fn div_scalar(self, k: f32) -> MathResult<Vec3> {
-        if !k.is_finite() {
-            return Err(MathError::non_finite_scalar(
+        (!k.is_finite())
+            .then_some(Err(MathError::non_finite_scalar(
                 "vec3 scalar divisor must be finite",
-            ));
-        }
-        if k == 0.0 {
-            return Err(MathError::divide_by_zero("vec3 scalar divisor was zero"));
-        }
-        Ok(Vec3::new(self.x / k, self.y / k, self.z / k))
+            )))
+            .or_else(|| {
+                (k == 0.0).then_some(Err(MathError::divide_by_zero(
+                    "vec3 scalar divisor was zero",
+                )))
+            })
+            .unwrap_or_else(|| Ok(Vec3::new(self.x / k, self.y / k, self.z / k)))
     }
 
     /// Dot product.
@@ -116,12 +117,13 @@ impl Vec3 {
     /// zero vector.
     pub fn normalize(self) -> MathResult<Vec3> {
         let len = self.length();
-        if len == 0.0 || !len.is_finite() {
-            return Err(MathError::normalize_zero_length(
-                "cannot normalize zero-length Vec3",
-            ));
-        }
-        Ok(Vec3::new(self.x / len, self.y / len, self.z / len))
+        let valid = (len != 0.0) & len.is_finite();
+        valid
+            .then_some(len)
+            .map(|len| Vec3::new(self.x / len, self.y / len, self.z / len))
+            .ok_or_else(|| {
+                MathError::normalize_zero_length("cannot normalize zero-length Vec3")
+            })
     }
 
     /// Euclidean distance between `self` and `other`.
@@ -138,18 +140,19 @@ impl Vec3 {
 
     /// Read three `f32` components in declaration order.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Vec3> {
-        let x = reader.read_f32()?;
-        let y = reader.read_f32()?;
-        let z = reader.read_f32()?;
-        Ok(Vec3::new(x, y, z))
+        reader.read_f32().and_then(|x| {
+            reader
+                .read_f32()
+                .and_then(|y| reader.read_f32().map(|z| Vec3::new(x, y, z)))
+        })
     }
 }
 
 impl ApproxEq for Vec3 {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
         self.x.approx_eq(&other.x, epsilon)
-            && self.y.approx_eq(&other.y, epsilon)
-            && self.z.approx_eq(&other.z, epsilon)
+            & self.y.approx_eq(&other.y, epsilon)
+            & self.z.approx_eq(&other.z, epsilon)
     }
 }
 
@@ -170,11 +173,10 @@ impl Reflect for Vec3 {
     }
 
     fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        Ok(Vec3::new(
-            f32::reflect_read(reader)?,
-            f32::reflect_read(reader)?,
-            f32::reflect_read(reader)?,
-        ))
+        f32::reflect_read(reader).and_then(|x| {
+            f32::reflect_read(reader)
+                .and_then(|y| f32::reflect_read(reader).map(|z| Vec3::new(x, y, z)))
+        })
     }
 }
 

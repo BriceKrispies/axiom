@@ -110,7 +110,7 @@ impl HostError {
 /// Equality on machine identity only.
 impl PartialEq for HostError {
     fn eq(&self, other: &Self) -> bool {
-        self.code == other.code && self.runtime == other.runtime
+        (self.code == other.code) & (self.runtime == other.runtime)
     }
 }
 

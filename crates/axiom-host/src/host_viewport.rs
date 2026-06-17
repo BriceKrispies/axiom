@@ -45,36 +45,50 @@ impl HostViewport {
     /// constructed — so this constructor only enforces positivity and the
     /// dimension invariants.
     pub fn new(logical_width: u32, logical_height: u32, scale_factor: Ratio) -> HostResult<Self> {
-        if logical_width == 0 || logical_height == 0 {
-            return Err(HostError::invalid_viewport_dimensions(
-                "viewport logical width and height must be non-zero",
-            ));
-        }
-        if scale_factor.get() <= 0.0 {
-            return Err(HostError::invalid_scale_factor(
-                "viewport scale factor must be positive",
-            ));
-        }
-        let physical_width = ((logical_width as f64) * (scale_factor.get() as f64)).round() as u64;
-        let physical_height =
-            ((logical_height as f64) * (scale_factor.get() as f64)).round() as u64;
-        if physical_width == 0 || physical_height == 0 {
-            return Err(HostError::invalid_viewport_dimensions(
-                "derived physical viewport dimensions must be non-zero",
-            ));
-        }
-        if physical_width > u32::MAX as u64 || physical_height > u32::MAX as u64 {
-            return Err(HostError::invalid_viewport_dimensions(
-                "derived physical viewport dimensions exceed u32::MAX",
-            ));
-        }
-        Ok(HostViewport {
-            logical_width,
-            logical_height,
-            physical_width: physical_width as u32,
-            physical_height: physical_height as u32,
-            scale_factor,
-        })
+        // `&`/`|` over the pure comparisons reproduces the original `||`/`&&`
+        // truth tables without short-circuit control flow; every operand is a
+        // total comparison with no side effect, so eager evaluation is exact.
+        ((logical_width != 0) & (logical_height != 0))
+            .then_some(())
+            .ok_or_else(|| {
+                HostError::invalid_viewport_dimensions(
+                    "viewport logical width and height must be non-zero",
+                )
+            })
+            .and_then(|()| {
+                (scale_factor.get() > 0.0).then_some(()).ok_or_else(|| {
+                    HostError::invalid_scale_factor("viewport scale factor must be positive")
+                })
+            })
+            .and_then(|()| {
+                let physical_width =
+                    ((logical_width as f64) * (scale_factor.get() as f64)).round() as u64;
+                let physical_height =
+                    ((logical_height as f64) * (scale_factor.get() as f64)).round() as u64;
+                ((physical_width != 0) & (physical_height != 0))
+                    .then_some(())
+                    .ok_or_else(|| {
+                        HostError::invalid_viewport_dimensions(
+                            "derived physical viewport dimensions must be non-zero",
+                        )
+                    })
+                    .and_then(|()| {
+                        ((physical_width <= u32::MAX as u64) & (physical_height <= u32::MAX as u64))
+                            .then_some(())
+                            .ok_or_else(|| {
+                                HostError::invalid_viewport_dimensions(
+                                    "derived physical viewport dimensions exceed u32::MAX",
+                                )
+                            })
+                    })
+                    .map(|()| HostViewport {
+                        logical_width,
+                        logical_height,
+                        physical_width: physical_width as u32,
+                        physical_height: physical_height as u32,
+                        scale_factor,
+                    })
+            })
     }
 
     /// Construct from an explicit physical size and a scale factor (used by
@@ -85,36 +99,49 @@ impl HostViewport {
         physical_height: u32,
         scale_factor: Ratio,
     ) -> HostResult<Self> {
-        if physical_width == 0 || physical_height == 0 {
-            return Err(HostError::invalid_viewport_dimensions(
-                "viewport physical width and height must be non-zero",
-            ));
-        }
-        if scale_factor.get() <= 0.0 {
-            return Err(HostError::invalid_scale_factor(
-                "viewport scale factor must be positive",
-            ));
-        }
-        let logical_width = ((physical_width as f64) / (scale_factor.get() as f64)).round() as u64;
-        let logical_height =
-            ((physical_height as f64) / (scale_factor.get() as f64)).round() as u64;
-        if logical_width == 0 || logical_height == 0 {
-            return Err(HostError::invalid_viewport_dimensions(
-                "derived logical viewport dimensions must be non-zero",
-            ));
-        }
-        if logical_width > u32::MAX as u64 || logical_height > u32::MAX as u64 {
-            return Err(HostError::invalid_viewport_dimensions(
-                "derived logical viewport dimensions exceed u32::MAX",
-            ));
-        }
-        Ok(HostViewport {
-            logical_width: logical_width as u32,
-            logical_height: logical_height as u32,
-            physical_width,
-            physical_height,
-            scale_factor,
-        })
+        // Same branchless shape as `new`: `&`/`|` over total comparisons
+        // reproduces the original `||` guards without short-circuit flow.
+        ((physical_width != 0) & (physical_height != 0))
+            .then_some(())
+            .ok_or_else(|| {
+                HostError::invalid_viewport_dimensions(
+                    "viewport physical width and height must be non-zero",
+                )
+            })
+            .and_then(|()| {
+                (scale_factor.get() > 0.0).then_some(()).ok_or_else(|| {
+                    HostError::invalid_scale_factor("viewport scale factor must be positive")
+                })
+            })
+            .and_then(|()| {
+                let logical_width =
+                    ((physical_width as f64) / (scale_factor.get() as f64)).round() as u64;
+                let logical_height =
+                    ((physical_height as f64) / (scale_factor.get() as f64)).round() as u64;
+                ((logical_width != 0) & (logical_height != 0))
+                    .then_some(())
+                    .ok_or_else(|| {
+                        HostError::invalid_viewport_dimensions(
+                            "derived logical viewport dimensions must be non-zero",
+                        )
+                    })
+                    .and_then(|()| {
+                        ((logical_width <= u32::MAX as u64) & (logical_height <= u32::MAX as u64))
+                            .then_some(())
+                            .ok_or_else(|| {
+                                HostError::invalid_viewport_dimensions(
+                                    "derived logical viewport dimensions exceed u32::MAX",
+                                )
+                            })
+                    })
+                    .map(|()| HostViewport {
+                        logical_width: logical_width as u32,
+                        logical_height: logical_height as u32,
+                        physical_width,
+                        physical_height,
+                        scale_factor,
+                    })
+            })
     }
 
     pub const fn logical_width(&self) -> u32 {

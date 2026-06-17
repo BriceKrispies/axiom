@@ -114,13 +114,11 @@ impl FrameApi {
     /// frame sequence. Returns `Ok(())` or an
     /// `InvalidHostFrameSequence` error.
     pub fn validate_host_frame_transition(&self, previous: u64, next: u64) -> FrameResult<()> {
-        if next > previous {
-            Ok(())
-        } else {
-            Err(crate::frame_error::FrameError::invalid_host_frame_sequence(
+        (next > previous).then_some(()).ok_or_else(|| {
+            crate::frame_error::FrameError::invalid_host_frame_sequence(
                 "host frame sequence must strictly increase",
-            ))
-        }
+            )
+        })
     }
 }
 

@@ -23,27 +23,30 @@ impl Ray {
     /// Construct from an origin and a non-zero, finite direction. The
     /// direction is normalized on the way in.
     pub fn new(origin: Vec3, direction: Vec3) -> MathResult<Ray> {
-        for component in [
+        let all_finite = [
             origin.x,
             origin.y,
             origin.z,
             direction.x,
             direction.y,
             direction.z,
-        ] {
-            if !component.is_finite() {
-                return Err(MathError::non_finite_scalar(
-                    "Ray components must be finite",
-                ));
-            }
-        }
-        let dir = direction
-            .normalize()
-            .map_err(|_| MathError::invalid_ray_direction("Ray direction must be non-zero"))?;
-        Ok(Ray {
-            origin,
-            direction: dir,
-        })
+        ]
+        .into_iter()
+        .all(|component| component.is_finite());
+        all_finite
+            .then_some(())
+            .ok_or_else(|| MathError::non_finite_scalar("Ray components must be finite"))
+            .and_then(|()| {
+                direction
+                    .normalize()
+                    .map_err(|_| {
+                        MathError::invalid_ray_direction("Ray direction must be non-zero")
+                    })
+                    .map(|dir| Ray {
+                        origin,
+                        direction: dir,
+                    })
+            })
     }
 
     /// Origin point.
@@ -64,42 +67,41 @@ impl Ray {
     /// Slab-test ray/Aabb intersection. Returns `true` when the ray enters the
     /// box at a non-negative parameter.
     pub fn intersect_aabb(&self, aabb: &Aabb) -> bool {
-        let mut tmin: f32 = 0.0;
-        let mut tmax: f32 = f32::INFINITY;
         let min = aabb.min();
         let max = aabb.max();
         let ds = [self.direction.x, self.direction.y, self.direction.z];
         let os = [self.origin.x, self.origin.y, self.origin.z];
         let los = [min.x, min.y, min.z];
         let his = [max.x, max.y, max.z];
-        for i in 0..3 {
+        // Fold the slab test over the three axes, carrying (tmin, tmax). Any
+        // axis that proves a miss short-circuits via `Err(false)`, mirroring the
+        // original mid-loop `return false`. All scalar conditionals are replaced
+        // by `min`/`max` (bit-identical for the finite/inf values that arise
+        // here, since no operand is NaN) and boolean algebra.
+        let folded = (0..3).try_fold((0.0f32, f32::INFINITY), |(tmin, tmax), i| {
             let d = ds[i];
             let o = os[i];
             let lo = los[i];
             let hi = his[i];
-            if d.abs() < 1.0e-20 {
-                if o < lo || o > hi {
-                    return false;
-                }
-            } else {
-                let inv = 1.0 / d;
-                let mut t1 = (lo - o) * inv;
-                let mut t2 = (hi - o) * inv;
-                if t1 > t2 {
-                    core::mem::swap(&mut t1, &mut t2);
-                }
-                if t1 > tmin {
-                    tmin = t1;
-                }
-                if t2 < tmax {
-                    tmax = t2;
-                }
-                if tmin > tmax {
-                    return false;
-                }
-            }
-        }
-        tmax >= 0.0
+            let parallel = d.abs() < 1.0e-20;
+            let parallel_miss = parallel & ((o < lo) | (o > hi));
+            // Non-parallel slab update. Computed unconditionally (pure, no
+            // panic); only applied when `!parallel`.
+            let inv = 1.0 / d;
+            let raw_t1 = (lo - o) * inv;
+            let raw_t2 = (hi - o) * inv;
+            let t1 = raw_t1.min(raw_t2); // post-swap lower bound
+            let t2 = raw_t1.max(raw_t2); // post-swap upper bound
+            let updated_tmin = tmin.max(t1);
+            let updated_tmax = tmax.min(t2);
+            let next_tmin = parallel.then_some(tmin).unwrap_or(updated_tmin);
+            let next_tmax = parallel.then_some(tmax).unwrap_or(updated_tmax);
+            let slab_miss = !parallel & (next_tmin > next_tmax);
+            (parallel_miss | slab_miss)
+                .then_some(Err(false))
+                .unwrap_or(Ok((next_tmin, next_tmax)))
+        });
+        folded.map_or(false, |(_, tmax)| tmax >= 0.0)
     }
 
     /// Geometric ray/sphere intersection test.
@@ -107,23 +109,20 @@ impl Ray {
         let oc = self.origin.subtract(sphere.center());
         let b = oc.dot(self.direction);
         let c = oc.dot(oc) - sphere.radius() * sphere.radius();
-        // Origin already inside the sphere counts as a hit.
-        if c <= 0.0 {
-            return true;
-        }
-        // Origin outside but heading away.
-        if b > 0.0 {
-            return false;
-        }
         let discriminant = b * b - c;
-        discriminant >= 0.0
+        // Equivalent to: inside (c <= 0) -> hit; else outside heading away
+        // (b > 0) -> miss; else hit iff discriminant >= 0. All operands are
+        // finite and side-effect free, so this evaluates the same boolean.
+        let inside = c <= 0.0;
+        let heading_away = b > 0.0;
+        inside | (!heading_away & (discriminant >= 0.0))
     }
 }
 
 impl ApproxEq for Ray {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
         self.origin.approx_eq(&other.origin, epsilon)
-            && self.direction.approx_eq(&other.direction, epsilon)
+            & self.direction.approx_eq(&other.direction, epsilon)
     }
 }
 

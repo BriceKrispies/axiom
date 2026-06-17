@@ -63,16 +63,17 @@ pub fn check(
         .map(|rel| root.join(rel))
         .filter(|p| p.is_file())
         .collect();
-    if present.is_empty() {
-        return;
-    }
 
-    // The sanctioned pattern is a constant, so a compile failure is an xtask
-    // programming error. Surface it as a violation rather than panicking so the
-    // checker stays infallible.
-    let re = match Regex::new(SANCTIONED_IGNORE_REGEX) {
-        Ok(re) => re,
-        Err(err) => {
+    // Nothing to govern when no gate script is present (synthetic fixtures /
+    // alternate roots); the whole body is gated on that.
+    (!present.is_empty()).then(|| {
+        // The sanctioned pattern is a constant, so a compile failure is an xtask
+        // programming error. Surface it as a violation rather than panicking so
+        // the checker stays infallible.
+        let re = Regex::new(SANCTIONED_IGNORE_REGEX);
+
+        // Compile failure: emit one drift violation and run no further steps.
+        re.as_ref().err().into_iter().for_each(|err| {
             report.push(Violation::new(
                 ViolationKind::CoverageIgnoreScriptDrift,
                 SCOPE,
@@ -80,56 +81,62 @@ pub fn check(
                     "sanctioned coverage ignore `{SANCTIONED_IGNORE_REGEX}` does not compile: {err}"
                 ),
             ));
-            return;
-        }
-    };
+        });
 
-    // (1) The sanctioned pattern must exclude no engine (layer/module) path.
-    for (label, dirs) in [("layer", layer_dirs), ("module", module_dirs)] {
-        for (name, src_dir) in dirs {
-            let probe = engine_probe_path(root, src_dir);
-            if re.is_match(&probe) {
-                report.push(Violation::new(
-                    ViolationKind::CoverageIgnoreExcludesEngine,
-                    name.clone(),
-                    format!(
-                        "coverage ignore `{SANCTIONED_IGNORE_REGEX}` excludes {label} `{name}` \
-                         (matches `{probe}`); the gate may exclude only apps and tooling, never a \
-                         layer or module"
-                    ),
-                ));
-            }
-        }
-    }
+        re.as_ref().ok().into_iter().for_each(|re| {
+            // (1) The sanctioned pattern must exclude no engine path.
+            [("layer", layer_dirs), ("module", module_dirs)]
+                .into_iter()
+                .flat_map(|(label, dirs)| dirs.iter().map(move |pair| (label, pair)))
+                .map(|(label, (name, src_dir))| (label, name, engine_probe_path(root, src_dir)))
+                .filter(|(_, _, probe)| re.is_match(probe))
+                .for_each(|(label, name, probe)| {
+                    report.push(Violation::new(
+                        ViolationKind::CoverageIgnoreExcludesEngine,
+                        name.clone(),
+                        format!(
+                            "coverage ignore `{SANCTIONED_IGNORE_REGEX}` excludes {label} `{name}` \
+                             (matches `{probe}`); the gate may exclude only apps and tooling, never a \
+                             layer or module"
+                        ),
+                    ));
+                });
 
-    // (2) Every present script must apply exactly the sanctioned ignore, once.
-    for path in &present {
-        let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
-        let Ok(text) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        // Count real usages only: a `#`-comment that merely mentions the flag
-        // must not trip (or mask) the check.
-        let code = strip_hash_comments(&text);
-        let flag_uses = code.matches(IGNORE_FLAG).count();
-        let has_sanctioned = code.contains(SANCTIONED_IGNORE_REGEX);
-        if flag_uses != 1 || !has_sanctioned {
-            report.push(
-                Violation::new(
-                    ViolationKind::CoverageIgnoreScriptDrift,
-                    SCOPE,
-                    format!(
-                        "coverage script `{}` must apply the sanctioned ignore \
-                         `{SANCTIONED_IGNORE_REGEX}` exactly once via `{IGNORE_FLAG}` (found \
-                         {flag_uses} flag use(s); sanctioned pattern present: {has_sanctioned}); \
-                         widening the ignore list to hide engine code is forbidden",
-                        rel.display()
-                    ),
-                )
-                .at(rel, 1),
-            );
-        }
-    }
+            // (2) Every present script must apply exactly the sanctioned ignore,
+            // once. A script we cannot read contributes nothing.
+            present
+                .iter()
+                .filter_map(|path| {
+                    let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
+                    std::fs::read_to_string(path).ok().map(|text| (rel, text))
+                })
+                .map(|(rel, text)| {
+                    // Count real usages only: a `#`-comment that merely mentions
+                    // the flag must not trip (or mask) the check.
+                    let code = strip_hash_comments(&text);
+                    let flag_uses = code.matches(IGNORE_FLAG).count();
+                    let has_sanctioned = code.contains(SANCTIONED_IGNORE_REGEX);
+                    (rel, flag_uses, has_sanctioned)
+                })
+                .filter(|&(_, flag_uses, has_sanctioned)| (flag_uses != 1) | !has_sanctioned)
+                .for_each(|(rel, flag_uses, has_sanctioned)| {
+                    report.push(
+                        Violation::new(
+                            ViolationKind::CoverageIgnoreScriptDrift,
+                            SCOPE,
+                            format!(
+                                "coverage script `{}` must apply the sanctioned ignore \
+                                 `{SANCTIONED_IGNORE_REGEX}` exactly once via `{IGNORE_FLAG}` (found \
+                                 {flag_uses} flag use(s); sanctioned pattern present: {has_sanctioned}); \
+                                 widening the ignore list to hide engine code is forbidden",
+                                rel.display()
+                            ),
+                        )
+                        .at(rel, 1),
+                    );
+                });
+        });
+    });
 }
 
 /// A representative source path for an engine crate, normalized the way the
@@ -147,10 +154,7 @@ fn engine_probe_path(root: &Path, src_dir: &Path) -> String {
 /// inside strings.
 fn strip_hash_comments(text: &str) -> String {
     text.lines()
-        .map(|line| match line.find('#') {
-            Some(i) => &line[..i],
-            None => line,
-        })
+        .map(|line| line.find('#').map_or(line, |i| &line[..i]))
         .collect::<Vec<_>>()
         .join("\n")
 }

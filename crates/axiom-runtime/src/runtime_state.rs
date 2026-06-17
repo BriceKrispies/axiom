@@ -25,7 +25,7 @@ impl RuntimeState {
     /// Whether this state is terminal (no further transitions are possible
     /// other than reading or dropping the runtime).
     pub const fn is_terminal(self) -> bool {
-        matches!(self, RuntimeState::Stopped | RuntimeState::Failed)
+        (self as u8 == RuntimeState::Stopped as u8) | (self as u8 == RuntimeState::Failed as u8)
     }
 
     /// The stable numeric discriminant.

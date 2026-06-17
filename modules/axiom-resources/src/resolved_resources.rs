@@ -72,7 +72,7 @@ impl ResolvedResources {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.meshes.is_empty() && self.materials.is_empty() && self.textures.is_empty()
+        self.meshes.is_empty() & self.materials.is_empty() & self.textures.is_empty()
     }
 }
 

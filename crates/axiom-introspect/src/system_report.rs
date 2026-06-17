@@ -65,13 +65,10 @@ impl SystemReport {
         writer.write_byte_slice(self.name.as_bytes());
         writer.write_i32(self.order);
         writer.write_bool(self.succeeded);
-        match self.error_code {
-            Some(code) => {
-                writer.write_bool(true);
-                writer.write_u16(code);
-            }
-            None => writer.write_bool(false),
-        }
+        writer.write_bool(self.error_code.is_some());
+        self.error_code
+            .iter()
+            .for_each(|code| writer.write_u16(*code));
     }
 
     /// Read a report previously written with [`Self::write_to`]. The name is
@@ -82,11 +79,10 @@ impl SystemReport {
         let name = String::from_utf8_lossy(reader.read_byte_slice()?).into_owned();
         let order = reader.read_i32()?;
         let succeeded = reader.read_bool()?;
-        let error_code = if reader.read_bool()? {
-            Some(reader.read_u16()?)
-        } else {
-            None
-        };
+        let error_code = reader
+            .read_bool()?
+            .then(|| reader.read_u16())
+            .transpose()?;
         Ok(SystemReport {
             system_id,
             name,

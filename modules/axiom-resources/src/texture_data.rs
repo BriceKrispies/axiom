@@ -33,17 +33,16 @@ impl TextureData {
         // overflow and needs no checked step; only the `* 4` (bytes per RGBA
         // pixel) can. Doing the math in u64 also keeps it correct on 32-bit
         // targets (wasm32), where `usize` is narrower.
-        let expected = (width as u64 * height as u64).checked_mul(4)?;
-        if rgba8_pixels.len() as u64 != expected {
-            return None;
-        }
-        Some(TextureData {
-            id,
-            name,
-            width,
-            height,
-            rgba8_pixels,
-        })
+        (width as u64 * height as u64)
+            .checked_mul(4)
+            .filter(|&expected| rgba8_pixels.len() as u64 == expected)
+            .map(|_| TextureData {
+                id,
+                name,
+                width,
+                height,
+                rgba8_pixels,
+            })
     }
 
     pub const fn id(&self) -> ResourceId {

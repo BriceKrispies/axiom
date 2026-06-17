@@ -49,19 +49,22 @@ impl HostPresentationRequest {
         // reject null ids and the fields are private), so the only binding
         // failure that can actually occur is an inconsistent adapter/device
         // pairing.
-        if device.require_presentation() && !adapter.require_presentation_surface() {
-            return Err(HostError::invalid_presentation_request(
-                "device requires presentation but the adapter request does not \
-                 require a presentation-capable surface",
-            ));
-        }
-        Ok(HostPresentationRequest {
-            target,
-            surface,
-            descriptor,
-            adapter,
-            device,
-        })
+        let inconsistent =
+            device.require_presentation() & !adapter.require_presentation_surface();
+        (!inconsistent)
+            .then_some(HostPresentationRequest {
+                target,
+                surface,
+                descriptor,
+                adapter,
+                device,
+            })
+            .ok_or_else(|| {
+                HostError::invalid_presentation_request(
+                    "device requires presentation but the adapter request does not \
+                     require a presentation-capable surface",
+                )
+            })
     }
 
     pub const fn target(&self) -> HostPresentationTarget {

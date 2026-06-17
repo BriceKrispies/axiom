@@ -69,10 +69,11 @@ impl<S> World<S> {
     /// `Update` systems run on every active advance. Within a phase, systems run
     /// in registration order.
     pub fn register_system_in(&mut self, phase: SchedulePhase, system: Box<dyn WorldSystem<S>>) {
-        match phase {
-            SchedulePhase::Startup => self.startup.push(system),
-            SchedulePhase::Update => self.update.push(system),
-        }
+        let is_startup = phase == SchedulePhase::Startup;
+        let target = is_startup
+            .then_some(&mut self.startup)
+            .unwrap_or(&mut self.update);
+        target.push(system);
     }
 
     /// The number of registered systems across all phases.
@@ -126,19 +127,27 @@ impl<S> World<S> {
     /// frame-N renderer passes the frame it wants. The tick reaches systems via
     /// [`WorldStep`].
     pub fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) {
-        if frame.is_skipped() || frame.runtime_step_count() == 0 {
-            return;
-        }
+        let active = !(frame.is_skipped() | (frame.runtime_step_count() == 0));
         let step = WorldStep::new(tick);
-        if !self.startup_done {
-            for system in &self.startup {
-                system.run(&step, &self.entities, &mut self.storage);
-            }
-            self.startup_done = true;
-        }
-        for system in &self.update {
-            system.run(&step, &self.entities, &mut self.storage);
-        }
+        // On an active advance, run pending startup systems exactly once, then
+        // every update system. `run_startup` is true only when active AND the
+        // startup phase has not yet been consumed, so it both gates the startup
+        // run and (assigned back) marks the phase done — branchlessly.
+        let run_startup = active & !self.startup_done;
+        self.startup_done |= run_startup;
+        let World {
+            entities,
+            storage,
+            startup,
+            update,
+            ..
+        } = self;
+        startup.iter().for_each(|system| {
+            run_startup.then(|| system.run(&step, entities, &mut *storage));
+        });
+        update.iter().for_each(|system| {
+            active.then(|| system.run(&step, entities, &mut *storage));
+        });
     }
 }
 
@@ -155,36 +164,46 @@ impl<S: ColumnSet> World<S> {
         WORLD_SCHEMA.write_to(writer);
         let columns = self.storage.columns();
         writer.write_u32(columns.len() as u32);
-        for (_, column) in columns {
-            column.write(writer);
-        }
+        columns
+            .into_iter()
+            .for_each(|(_, column)| column.write(writer));
     }
 
     /// Replace the world's component columns with state previously produced by
     /// [`Self::serialize`]. Entities and systems are untouched; each column's
     /// contents are replaced wholesale.
     pub fn deserialize(&mut self, reader: &mut BinaryReader<'_>) -> KernelResult<()> {
-        let version = SchemaVersion::read_from(reader)?;
-        if !WORLD_SCHEMA.is_compatible_with(version) {
-            return Err(KernelError::new(
-                KernelErrorScope::Binary,
-                KernelErrorCode::SchemaVersionMismatch,
-                "world schema major version is incompatible",
-            ));
-        }
-        let count = reader.read_u32()? as usize;
-        let columns = self.storage.columns_mut();
-        if count != columns.len() {
-            return Err(KernelError::new(
-                KernelErrorScope::Binary,
-                KernelErrorCode::TruncatedData,
-                "serialized world column count does not match the storage",
-            ));
-        }
-        for (_, column) in columns {
-            column.read_replace(reader)?;
-        }
-        Ok(())
+        SchemaVersion::read_from(reader)
+            .and_then(|version| {
+                WORLD_SCHEMA
+                    .is_compatible_with(version)
+                    .then_some(())
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            KernelErrorScope::Binary,
+                            KernelErrorCode::SchemaVersionMismatch,
+                            "world schema major version is incompatible",
+                        )
+                    })
+            })
+            .and_then(|()| reader.read_u32().map(|count| count as usize))
+            .and_then(|count| {
+                let columns = self.storage.columns_mut();
+                (count == columns.len())
+                    .then_some(columns)
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            KernelErrorScope::Binary,
+                            KernelErrorCode::TruncatedData,
+                            "serialized world column count does not match the storage",
+                        )
+                    })
+            })
+            .and_then(|columns| {
+                columns
+                    .into_iter()
+                    .try_for_each(|(_, column)| column.read_replace(reader))
+            })
     }
 
     /// Describe the world: per column, its role name, component schema, and

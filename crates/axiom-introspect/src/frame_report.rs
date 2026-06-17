@@ -130,24 +130,24 @@ impl FrameReport {
         writer.write_u32(self.viewport_width);
         writer.write_u32(self.viewport_height);
         writer.write_u32(self.systems.len() as u32);
-        for system in &self.systems {
-            system.write_to(writer);
-        }
+        self.systems
+            .iter()
+            .for_each(|system| system.write_to(writer));
         writer.write_u32(self.metrics.len() as u32);
-        for metric in &self.metrics {
-            metric.write_to(writer);
-        }
+        self.metrics
+            .iter()
+            .for_each(|metric| metric.write_to(writer));
     }
 
     fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
         let version = SchemaVersion::read_from(reader)?;
-        if !SCHEMA.is_compatible_with(version) {
-            return Err(KernelError::new(
+        SCHEMA.is_compatible_with(version).then_some(()).ok_or_else(|| {
+            KernelError::new(
                 KernelErrorScope::Binary,
                 KernelErrorCode::SchemaVersionMismatch,
                 "FrameReport schema major version is incompatible",
-            ));
-        }
+            )
+        })?;
         let engine_frame_index = reader.read_u64()?;
         let host_frame_sequence = reader.read_u64()?;
         let runtime_step_count = reader.read_u32()?;
@@ -156,15 +156,13 @@ impl FrameReport {
         let viewport_width = reader.read_u32()?;
         let viewport_height = reader.read_u32()?;
         let count = reader.read_u32()?;
-        let mut systems = Vec::new();
-        for _ in 0..count {
-            systems.push(SystemReport::read_from(reader)?);
-        }
+        let systems = (0..count)
+            .map(|_| SystemReport::read_from(reader))
+            .collect::<KernelResult<Vec<_>>>()?;
         let metric_count = reader.read_u32()?;
-        let mut metrics = Vec::new();
-        for _ in 0..metric_count {
-            metrics.push(MetricReport::read_from(reader)?);
-        }
+        let metrics = (0..metric_count)
+            .map(|_| MetricReport::read_from(reader))
+            .collect::<KernelResult<Vec<_>>>()?;
         Ok(FrameReport {
             engine_frame_index,
             host_frame_sequence,

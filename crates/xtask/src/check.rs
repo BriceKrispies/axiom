@@ -27,7 +27,7 @@ pub fn check_architecture(root: &Path) -> CheckReport {
     let mut report = CheckReport::default();
     let (manifests, parse_errors) = load_manifests(root);
 
-    for err in &parse_errors {
+    parse_errors.iter().for_each(|err| {
         let rel = relativize(root, &err.path);
         report.push(
             Violation::new(
@@ -37,10 +37,10 @@ pub fn check_architecture(root: &Path) -> CheckReport {
             )
             .at(rel, 1),
         );
-    }
+    });
 
     let (module_manifests, module_errors) = load_module_manifests(root);
-    for err in &module_errors {
+    module_errors.iter().for_each(|err| {
         let rel = relativize(root, &err.path);
         report.push(
             Violation::new(
@@ -50,10 +50,10 @@ pub fn check_architecture(root: &Path) -> CheckReport {
             )
             .at(rel, 1),
         );
-    }
+    });
 
     let (app_manifests, app_errors) = load_app_manifests(root);
-    for err in &app_errors {
+    app_errors.iter().for_each(|err| {
         let rel = relativize(root, &err.path);
         report.push(
             Violation::new(
@@ -63,7 +63,7 @@ pub fn check_architecture(root: &Path) -> CheckReport {
             )
             .at(rel, 1),
         );
-    }
+    });
 
     let manifest_index = ManifestIndex::new(&manifests, &module_manifests, &app_manifests);
 
@@ -88,16 +88,13 @@ pub fn check_architecture(root: &Path) -> CheckReport {
     // Cargo metadata is required for cross-class dependency-graph checks.
     // If it is unavailable (e.g. on a synthetic fixture that has no
     // `Cargo.toml`), we still emit every check above and finish.
-    if let Ok(graph) = load_cargo_metadata(root) {
+    load_cargo_metadata(root).into_iter().for_each(|graph| {
         check_classes(root, &graph, &manifest_index, &mut report);
-    }
-
-    if manifests.is_empty() {
-        return report.finish();
-    }
+    });
 
     // The set of declared layer names, and the prefix table for resolving
-    // cross-layer references found in source.
+    // cross-layer references found in source. With no manifests these are empty
+    // and every step below is a no-op, so no early return is needed.
     let known_names: BTreeSet<String> = manifests.iter().map(|m| m.layer.name.clone()).collect();
     let prefix_table: Vec<PrefixEntry> = manifests
         .iter()
@@ -116,9 +113,9 @@ pub fn check_architecture(root: &Path) -> CheckReport {
     ordered.sort_by(|a, b| a.layer.name.cmp(&b.layer.name));
     report.layers_checked = ordered.iter().map(|m| m.layer.name.clone()).collect();
 
-    for m in &ordered {
-        check_layer(root, m, &prefix_table, &mut report);
-    }
+    ordered
+        .iter()
+        .for_each(|m| check_layer(root, m, &prefix_table, &mut report));
 
     report.finish()
 }
@@ -135,9 +132,12 @@ fn check_dependency_graph(
     known: &BTreeSet<String>,
     report: &mut CheckReport,
 ) {
-    for m in manifests {
-        for dep in &m.layer.depends_on {
-            if !known.contains(dep) {
+    manifests.iter().for_each(|m| {
+        m.layer
+            .depends_on
+            .iter()
+            .filter(|dep| !known.contains(*dep))
+            .for_each(|dep| {
                 report.push(Violation::new(
                     ViolationKind::UnknownDependency,
                     &m.layer.name,
@@ -147,9 +147,8 @@ fn check_dependency_graph(
                         m.layer.name
                     ),
                 ));
-            }
-        }
-    }
+            });
+    });
 
     // Adjacency over known edges only (unknown edges are reported above).
     let adj: BTreeMap<&str, Vec<&str>> = manifests
@@ -171,23 +170,25 @@ fn check_dependency_graph(
     let mut color: BTreeMap<&str, u8> = adj.keys().map(|k| (*k, 0u8)).collect();
     let mut names: Vec<&str> = adj.keys().copied().collect();
     names.sort_unstable();
-    for start in names {
-        if color[start] == 0 {
+    // The first cycle found (in sorted start order) is enough to fail the build;
+    // `find_map` stops at it, threading `color` across starts statefully.
+    let cycle = names.into_iter().find_map(|start| {
+        (color[start] == 0).then_some(()).and_then(|()| {
             let mut stack: Vec<&str> = Vec::new();
-            if let Some(cycle) = dfs_cycle(start, &adj, &mut color, &mut stack) {
-                report.push(Violation::new(
-                    ViolationKind::DependencyCycle,
-                    cycle.join(" -> "),
-                    format!(
-                        "the layer `depends_on` graph has a cycle: {}; layers must form a \
-                         directed acyclic graph",
-                        cycle.join(" -> ")
-                    ),
-                ));
-                return; // one reported cycle is enough to fail the build.
-            }
-        }
-    }
+            dfs_cycle(start, &adj, &mut color, &mut stack)
+        })
+    });
+    cycle.into_iter().for_each(|cycle| {
+        report.push(Violation::new(
+            ViolationKind::DependencyCycle,
+            cycle.join(" -> "),
+            format!(
+                "the layer `depends_on` graph has a cycle: {}; layers must form a \
+                 directed acyclic graph",
+                cycle.join(" -> ")
+            ),
+        ));
+    });
 }
 
 /// DFS that returns the first cycle (as a path of layer names) it finds, or
@@ -200,26 +201,28 @@ fn dfs_cycle<'a>(
 ) -> Option<Vec<String>> {
     color.insert(node, 1);
     stack.push(node);
-    for &next in &adj[node] {
-        match color.get(next).copied().unwrap_or(2) {
-            1 => {
-                // Back-edge: build the cycle path from where `next` sits on the stack.
+    // Visit neighbours in order; the first that yields a cycle wins. A
+    // `1`-coloured (on-stack) neighbour is a back-edge; a `0`-coloured one is
+    // recursed into; `2` (done) contributes nothing.
+    let neighbours: Vec<&str> = adj[node].clone();
+    let found = neighbours.into_iter().find_map(|next| {
+        let col = color.get(next).copied().unwrap_or(2);
+        (col == 1)
+            .then(|| {
+                // Back-edge: build the cycle from where `next` sits on the stack.
                 let start = stack.iter().position(|n| *n == next).unwrap_or(0);
-                let mut cycle: Vec<String> = stack[start..].iter().map(|s| s.to_string()).collect();
+                let mut cycle: Vec<String> =
+                    stack[start..].iter().map(|s| s.to_string()).collect();
                 cycle.push(next.to_string());
-                return Some(cycle);
-            }
-            0 => {
-                if let Some(c) = dfs_cycle(next, adj, color, stack) {
-                    return Some(c);
-                }
-            }
-            _ => {}
-        }
-    }
+                cycle
+            })
+            .or_else(|| (col == 0).then(|| dfs_cycle(next, adj, color, stack)).flatten())
+    });
     stack.pop();
-    color.insert(node, 2);
-    None
+    // Only mark this node done when no cycle was found through it (matching the
+    // original, which returns before the `color.insert(node, 2)` on a hit).
+    found.is_none().then(|| color.insert(node, 2));
+    found
 }
 
 fn check_layer(
@@ -271,54 +274,62 @@ fn check_layer(
         .map(|e| (e.prefix.as_str(), e))
         .collect();
 
-    for (path, text) in &files {
+    files.iter().for_each(|(path, text)| {
         let rel = relativize(root, path);
-        for cross in find_cross_refs(text, &other_prefixes) {
-            let Some(target) = prefix_lookup.get(cross.prefix.as_str()) else {
-                continue;
-            };
-
-            // DAG rule: a layer may import only the layers in its `depends_on`.
-            // "Genuinely uses each declared dependency" is enforced separately by
-            // the `engine_genuine_dependency` dylint (which has real type info);
-            // here we enforce the converse — no import of an undeclared layer.
-            if !m.layer.depends_on.contains(&target.name) {
-                report.push(
-                    Violation::new(
-                        ViolationKind::DisallowedLayerImport,
-                        name,
-                        format!(
-                            "imports layer `{}` but it is not in `depends_on`; add it (and \
-                             genuinely use it) or remove the import",
-                            target.name
-                        ),
-                    )
-                    .at(rel.clone(), cross.line),
-                );
-                continue;
-            }
-
-            if cross.private {
+        find_cross_refs(text, &other_prefixes)
+            .into_iter()
+            // An unknown prefix has no target layer; ignore it.
+            .filter_map(|cross| {
+                prefix_lookup
+                    .get(cross.prefix.as_str())
+                    .map(|target| (cross, *target))
+            })
+            .for_each(|(cross, target)| {
+                // DAG rule: a layer may import only the layers in its
+                // `depends_on`. "Genuinely uses each declared dependency" is
+                // enforced separately by the `engine_genuine_dependency` dylint
+                // (which has real type info); here we enforce the converse — no
+                // import of an undeclared layer. An undeclared import is flagged
+                // and the private-path check is skipped for it.
+                let declared = m.layer.depends_on.contains(&target.name);
+                (!declared).then(|| {
+                    report.push(
+                        Violation::new(
+                            ViolationKind::DisallowedLayerImport,
+                            name,
+                            format!(
+                                "imports layer `{}` but it is not in `depends_on`; add it (and \
+                                 genuinely use it) or remove the import",
+                                target.name
+                            ),
+                        )
+                        .at(rel.clone(), cross.line),
+                    );
+                });
                 // Reach only public exports, never private module paths.
-                report.push(
-                    Violation::new(
-                        ViolationKind::PrivatePathImport,
-                        name,
-                        format!(
-                            "imports through a private module path of layer `{}` (`{}::...`); \
-                             import the layer's public export instead",
-                            target.name, cross.prefix
-                        ),
-                    )
-                    .at(rel.clone(), cross.line),
-                );
-            }
-        }
-    }
+                (declared & cross.private).then(|| {
+                    report.push(
+                        Violation::new(
+                            ViolationKind::PrivatePathImport,
+                            name,
+                            format!(
+                                "imports through a private module path of layer `{}` (`{}::...`); \
+                                 import the layer's public export instead",
+                                target.name, cross.prefix
+                            ),
+                        )
+                        .at(rel.clone(), cross.line),
+                    );
+                });
+            });
+    });
 
     // --- Introduced capabilities must be publicly exported ---
-    for cap in &m.layer.introduced_capabilities {
-        if locate_public_export(&files, cap).is_none() {
+    m.layer
+        .introduced_capabilities
+        .iter()
+        .filter(|cap| locate_public_export(&files, cap).is_none())
+        .for_each(|cap| {
             report.push(Violation::new(
                 ViolationKind::CapabilityNotExported,
                 name,
@@ -327,8 +338,7 @@ fn check_layer(
                      declare it `pub` (or `pub use ... {cap}`)"
                 ),
             ));
-        }
-    }
+        });
 
     // --- Proof exports ---
     check_proof_exports(root, m, &files, report);
@@ -344,8 +354,11 @@ fn check_proof_exports(
 
     // A root layer (empty `depends_on`, e.g. the kernel) adapts nothing, so it
     // proves nothing. Every non-root layer must expose at least one public
-    // capability whose implementation uses a layer it depends on.
-    if !m.layer.depends_on.is_empty() && m.proof_exports.is_empty() {
+    // capability whose implementation uses a layer it depends on. When this
+    // fires, `proof_exports` is empty, so the per-export loop below is a no-op —
+    // no early return is needed.
+    let missing_all = !m.layer.depends_on.is_empty() & m.proof_exports.is_empty();
+    missing_all.then(|| {
         report.push(Violation::new(
             ViolationKind::MissingProofExport,
             name,
@@ -354,68 +367,66 @@ fn check_proof_exports(
                  least one public capability whose implementation uses a layer it depends on"
             ),
         ));
-        return;
-    }
+    });
 
-    for pe in &m.proof_exports {
-        let Some((export_file, export_line)) = locate_public_export(files, &pe.export) else {
-            report.push(Violation::new(
-                ViolationKind::MissingProofExport,
-                name,
-                format!(
-                    "proof export `{}` is not a public export of layer `{name}`; declare it `pub` \
-                     or fix the name in layer.toml",
-                    pe.export
-                ),
-            ));
-            continue;
-        };
-
-        if pe.must_reference.is_empty() {
-            continue; // Nothing to prove against.
-        }
-
-        // Candidate text: the file declaring the export, plus the module it
-        // re-exports from (the facade pattern), if any.
-        let mut candidate_texts: Vec<&str> = vec![text_of(files, &export_file)];
-        if let Some(segments) = reexport_module_path(text_of(files, &export_file), &pe.export) {
-            if let Some(module_text) = resolve_module_text(&m.src_dir(), &segments, files) {
-                candidate_texts.push(module_text);
-            }
-        }
-
-        let proven = pe
-            .must_reference
-            .iter()
-            .any(|sym| candidate_texts.iter().any(|t| references_symbol(t, sym)));
-
-        if !proven {
-            let rel = relativize(root, &export_file);
-            report.push(
-                Violation::new(
-                    ViolationKind::ProofReferenceMissing,
+    m.proof_exports.iter().for_each(|pe| {
+        // A missing public export is itself a violation; otherwise prove the
+        // located export against its required symbols. Build at most one
+        // `Violation` here, then push it once (so `report` is borrowed once).
+        let violation = locate_public_export(files, &pe.export).map_or_else(
+            || {
+                Some(Violation::new(
+                    ViolationKind::MissingProofExport,
                     name,
                     format!(
-                        "proof export `{}` does not reference any required previous-layer symbol \
-                         {:?}; its implementation must use at least one of them",
-                        pe.export, pe.must_reference
+                        "proof export `{}` is not a public export of layer `{name}`; declare it `pub` \
+                         or fix the name in layer.toml",
+                        pe.export
                     ),
-                )
-                .at(rel, export_line),
-            );
-        }
-    }
+                ))
+            },
+            |(export_file, export_line)| {
+                // An empty `must_reference` has nothing to prove against.
+                (!pe.must_reference.is_empty()).then(|| {
+                    // Candidate text: the file declaring the export, plus the
+                    // module it re-exports from (the facade pattern), if any.
+                    let export_text = text_of(files, &export_file);
+                    let module_text = reexport_module_path(export_text, &pe.export)
+                        .and_then(|segments| resolve_module_text(&m.src_dir(), &segments, files));
+                    let candidate_texts: Vec<&str> =
+                        std::iter::once(export_text).chain(module_text).collect();
+
+                    let proven = pe.must_reference.iter().any(|sym| {
+                        candidate_texts.iter().any(|t| references_symbol(t, sym))
+                    });
+
+                    (!proven).then(|| {
+                        let rel = relativize(root, &export_file);
+                        Violation::new(
+                            ViolationKind::ProofReferenceMissing,
+                            name,
+                            format!(
+                                "proof export `{}` does not reference any required previous-layer symbol \
+                                 {:?}; its implementation must use at least one of them",
+                                pe.export, pe.must_reference
+                            ),
+                        )
+                        .at(rel, export_line)
+                    })
+                })
+                .flatten()
+            },
+        );
+        violation.into_iter().for_each(|v| report.push(v));
+    });
 }
 
 // --- helpers ---
 
 fn locate_public_export(files: &[(PathBuf, String)], name: &str) -> Option<(PathBuf, usize)> {
-    for (path, text) in files {
-        if let Some(line) = find_public_export(text, name) {
-            return Some((path.clone(), line));
-        }
-    }
-    None
+    files
+        .iter()
+        .find_map(|(path, text)| find_public_export(text, name).map(|line| (path.clone(), line)))
 }
 
 fn text_of<'a>(files: &'a [(PathBuf, String)], path: &Path) -> &'a str {
@@ -433,29 +444,32 @@ fn resolve_module_text<'a>(
     segments: &[String],
     files: &'a [(PathBuf, String)],
 ) -> Option<&'a str> {
-    let mut base = src_dir.to_path_buf();
-    for seg in segments {
-        base.push(seg);
-    }
+    let base = segments
+        .iter()
+        .fold(src_dir.to_path_buf(), |mut base, seg| {
+            base.push(seg);
+            base
+        });
     let as_file = base.with_extension("rs");
     let as_mod = base.join("mod.rs");
-    for candidate in [as_file, as_mod] {
-        if let Some((_, text)) = files.iter().find(|(p, _)| *p == candidate) {
-            return Some(text.as_str());
-        }
-    }
-    None
+    [as_file, as_mod].into_iter().find_map(|candidate| {
+        files
+            .iter()
+            .find(|(p, _)| *p == candidate)
+            .map(|(_, text)| text.as_str())
+    })
 }
 
 /// Is `path` the source file of a `#[cfg(test)] mod NAME;` module? The module
 /// name is the file stem, or — for a `NAME/mod.rs` directory module — the parent
 /// directory name.
 fn is_test_module_file(path: &Path, test_module_names: &BTreeSet<String>) -> bool {
-    let name = if path.file_name().and_then(|n| n.to_str()) == Some("mod.rs") {
-        path.parent().and_then(|p| p.file_name())
-    } else {
-        path.file_stem()
-    };
+    let is_mod_rs = path.file_name().and_then(|n| n.to_str()) == Some("mod.rs");
+    // A `NAME/mod.rs` directory module is named by its parent dir; otherwise by
+    // the file stem.
+    let name = is_mod_rs
+        .then(|| path.parent().and_then(|p| p.file_name()))
+        .unwrap_or_else(|| path.file_stem());
     name.and_then(|n| n.to_str())
         .is_some_and(|n| test_module_names.contains(n))
 }

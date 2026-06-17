@@ -79,43 +79,56 @@ impl HostStepDriver {
         runtime: &mut Runtime,
         input: HostFrameInput,
     ) -> HostResult<HostFrameReport> {
-        if let Some(last) = self.last_sequence {
-            if input.sequence() <= last {
-                return Err(HostError::invalid_frame_sequence(
-                    "host frame sequence must strictly increase",
-                ));
-            }
-        }
+        // Out-of-order rejection, branchless: `is_some_and` folds the original
+        // nested `if let Some(last) { if seq <= last }` into one predicate that
+        // is false whenever no frame has been accepted yet, and the
+        // `then_some(()).ok_or_else(..)` turns that predicate into the same
+        // early `Err` the guard produced.
+        let out_of_order = self
+            .last_sequence
+            .is_some_and(|last| input.sequence() <= last);
+        (!out_of_order)
+            .then_some(())
+            .ok_or_else(|| {
+                HostError::invalid_frame_sequence("host frame sequence must strictly increase")
+            })
+            .and_then(|()| {
+                let plan = HostStepPlan::build(
+                    &input,
+                    &self.config,
+                    &self.lifecycle,
+                    self.accumulator_nanos,
+                );
 
-        let plan = HostStepPlan::build(
-            &input,
-            &self.config,
-            &self.lifecycle,
-            self.accumulator_nanos,
-        );
+                // `collect` into `Result<Vec<_>, _>` reproduces the `for … ?`
+                // loop exactly: it drives `Runtime::step` in order and stops at
+                // the first `Err`, so the same calls happen and the same first
+                // failure propagates — no `for`, no `?`.
+                (0..plan.steps())
+                    .map(|_| {
+                        runtime.step().map_err(|e| {
+                            HostError::runtime_step_failed("Runtime::step rejected by runtime", e)
+                        })
+                    })
+                    .collect::<HostResult<Vec<_>>>()
+                    .map(|step_records| {
+                        // Commit accumulator only after a successful drive. For
+                        // a lifecycle skip the plan's `retained_nanos` already
+                        // reflects policy.
+                        self.accumulator_nanos = plan.retained_nanos();
+                        self.last_sequence = Some(input.sequence());
 
-        let mut step_records = Vec::with_capacity(plan.steps() as usize);
-        for _ in 0..plan.steps() {
-            let record = runtime.step().map_err(|e| {
-                HostError::runtime_step_failed("Runtime::step rejected by runtime", e)
-            })?;
-            step_records.push(record);
-        }
-
-        // Commit accumulator only after a successful drive. For a lifecycle
-        // skip the plan's `retained_nanos` already reflects policy.
-        self.accumulator_nanos = plan.retained_nanos();
-        self.last_sequence = Some(input.sequence());
-
-        let steps_executed = step_records.len() as u32;
-        Ok(HostFrameReport::new(
-            input.sequence(),
-            plan,
-            steps_executed,
-            step_records,
-            *input.viewport(),
-            self.lifecycle,
-        ))
+                        let steps_executed = step_records.len() as u32;
+                        HostFrameReport::new(
+                            input.sequence(),
+                            plan,
+                            steps_executed,
+                            step_records,
+                            *input.viewport(),
+                            self.lifecycle,
+                        )
+                    })
+            })
     }
 }
 

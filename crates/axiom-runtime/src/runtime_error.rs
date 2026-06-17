@@ -60,7 +60,7 @@ impl RuntimeError {
 /// identity. The human message is metadata.
 impl PartialEq for RuntimeError {
     fn eq(&self, other: &Self) -> bool {
-        self.code == other.code && self.kernel == other.kernel
+        (self.code == other.code) & (self.kernel == other.kernel)
     }
 }
 

@@ -30,17 +30,20 @@ impl HostBoundaryConfig {
         fixed_step_nanos: u64,
         max_steps_per_frame: u32,
     ) -> HostResult<HostBoundaryConfig> {
-        if max_steps_per_frame == 0 {
-            return Err(HostError::invalid_boundary_config(
+        // Branchless selection: index `[Err, Ok]` by whether the count is
+        // non-zero. Both arms are `Copy`, so the array is const-constructible
+        // and indexing is legal in a `const fn` (no `if`, no `?`, no closure).
+        [
+            Err(HostError::invalid_boundary_config(
                 "host boundary max_steps_per_frame must be non-zero",
-            ));
-        }
-        Ok(HostBoundaryConfig {
-            fixed_step_nanos,
-            max_steps_per_frame,
-            step_while_hidden: false,
-            retain_accumulator: true,
-        })
+            )),
+            Ok(HostBoundaryConfig {
+                fixed_step_nanos,
+                max_steps_per_frame,
+                step_while_hidden: false,
+                retain_accumulator: true,
+            }),
+        ][(max_steps_per_frame != 0) as usize]
     }
 
     /// If `true`, the driver continues to step the runtime while the host
@@ -81,12 +84,14 @@ impl HostBoundaryConfig {
     /// wrapped as `InvalidBoundaryConfig` so the host layer's error model is
     /// the single source of truth at the boundary.
     pub fn validate(&self, kernel: &KernelApi) -> HostResult<()> {
-        kernel.fixed_step(self.fixed_step_nanos).map_err(|_| {
-            HostError::invalid_boundary_config(
-                "host boundary fixed_step_nanos was rejected by the kernel",
-            )
-        })?;
-        Ok(())
+        kernel
+            .fixed_step(self.fixed_step_nanos)
+            .map_err(|_| {
+                HostError::invalid_boundary_config(
+                    "host boundary fixed_step_nanos was rejected by the kernel",
+                )
+            })
+            .map(|_| ())
     }
 }
 

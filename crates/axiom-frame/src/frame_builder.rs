@@ -72,42 +72,61 @@ impl FrameBuilder {
         report: &HostFrameReport,
         commands: Vec<FrameCommand>,
     ) -> FrameResult<EngineFrame> {
-        if let Some(last) = self.last_host_sequence {
-            if report.sequence() <= last {
-                return Err(FrameError::invalid_host_frame_sequence(
-                    "host frame sequence did not strictly increase",
-                ));
-            }
-        }
+        // Branchless rewrite of the original guard + `?` flow.
+        //
+        // 1. Sequence guard: the original `if let Some(last) { if seq <= last
+        //    { return Err } }` rejects only when a previous sequence exists
+        //    AND the new one does not strictly increase. `map_or(false, ..)`
+        //    turns the `Option` into that exact predicate (absent => allowed),
+        //    and `.then_some(()).map_or_else(Ok, Err)` selects the outcome.
+        // 2. Timing: `FrameTiming::from_host_report` is fallible; chaining it
+        //    with `.and_then` replaces the `?`, propagating its error.
+        // 3. On the success arm we perform the same state mutation and build
+        //    the same `EngineFrame` the original did.
+        let sequence_rejected = self
+            .last_host_sequence
+            .map_or(false, |last| report.sequence() <= last);
 
-        let viewport = FrameViewport::from_host(report.viewport());
-        let lifecycle = FrameLifecycleState::from_host(report.lifecycle_after());
-        let timing = FrameTiming::from_host_report(report, self.fixed_step_nanos)?;
-        let summaries = FrameStepSummary::list_from_records(report.step_records());
-        let command_count = commands.len().min(u32::MAX as usize) as u32;
-        let diagnostics = FrameDiagnostics::new(
-            timing.skipped(),
-            report.plan().skip_reason(),
-            timing.runtime_steps_executed(),
-            command_count,
-            0,
-            lifecycle,
-        );
-        let engine_frame_index = self.next_engine_frame_index;
-        self.next_engine_frame_index = self.next_engine_frame_index.saturating_add(1);
-        self.last_host_sequence = Some(report.sequence());
+        sequence_rejected
+            .then_some(())
+            .map_or_else(
+                || Ok(()),
+                |()| {
+                    Err(FrameError::invalid_host_frame_sequence(
+                        "host frame sequence did not strictly increase",
+                    ))
+                },
+            )
+            .and_then(|()| FrameTiming::from_host_report(report, self.fixed_step_nanos))
+            .map(|timing| {
+                let viewport = FrameViewport::from_host(report.viewport());
+                let lifecycle = FrameLifecycleState::from_host(report.lifecycle_after());
+                let summaries = FrameStepSummary::list_from_records(report.step_records());
+                let command_count = commands.len().min(u32::MAX as usize) as u32;
+                let diagnostics = FrameDiagnostics::new(
+                    timing.skipped(),
+                    report.plan().skip_reason(),
+                    timing.runtime_steps_executed(),
+                    command_count,
+                    0,
+                    lifecycle,
+                );
+                let engine_frame_index = self.next_engine_frame_index;
+                self.next_engine_frame_index = self.next_engine_frame_index.saturating_add(1);
+                self.last_host_sequence = Some(report.sequence());
 
-        Ok(EngineFrame::new(
-            engine_frame_index,
-            report.sequence(),
-            summaries,
-            viewport,
-            lifecycle,
-            timing,
-            diagnostics,
-            commands,
-            report,
-        ))
+                EngineFrame::new(
+                    engine_frame_index,
+                    report.sequence(),
+                    summaries,
+                    viewport,
+                    lifecycle,
+                    timing,
+                    diagnostics,
+                    commands,
+                    report,
+                )
+            })
     }
 }
 

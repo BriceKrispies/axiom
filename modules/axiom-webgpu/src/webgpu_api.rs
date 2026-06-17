@@ -71,17 +71,21 @@ impl WebGpuApi {
     pub fn new_live(request: &HostPresentationRequest) -> KernelResult<Self> {
         // The request's surface handle is already guaranteed valid by
         // `HostApi`, which mints only valid handles; the only setup that can
-        // actually fail is a request whose adapter cannot present.
-        if !request.adapter().require_presentation_surface() {
-            return Err(KernelError::new(
-                KernelErrorScope::Id,
-                KernelErrorCode::InvalidId,
-                "live backend requires a presentation-capable adapter request",
-            ));
-        }
-        Ok(WebGpuApi {
-            state: WebGpuBackendState::LivePresentationRequested(*request),
-        })
+        // actually fail is a request whose adapter cannot present. Branchless:
+        // map the presentability flag to the corresponding result.
+        request
+            .adapter()
+            .require_presentation_surface()
+            .then_some(WebGpuApi {
+                state: WebGpuBackendState::LivePresentationRequested(*request),
+            })
+            .ok_or_else(|| {
+                KernelError::new(
+                    KernelErrorScope::Id,
+                    KernelErrorCode::InvalidId,
+                    "live backend requires a presentation-capable adapter request",
+                )
+            })
     }
 
     /// The coarse [`BackendKind`] this backend is operating in.

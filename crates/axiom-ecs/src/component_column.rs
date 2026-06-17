@@ -81,22 +81,26 @@ impl<T: Reflect> ComponentColumn<T> {
     /// ascending entity-id order.
     pub fn reflect_write(&self, writer: &mut BinaryWriter) {
         writer.write_u32(self.entries.len() as u32);
-        for (entity, component) in &self.entries {
+        self.entries.iter().for_each(|(entity, component)| {
             entity.reflect_write(writer);
             component.reflect_write(writer);
-        }
+        });
     }
 
     /// Read a column previously written with [`Self::reflect_write`].
     pub fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        let count = reader.read_u32()?;
-        let mut column = ComponentColumn::new();
-        for _ in 0..count {
-            let entity = EntityId::reflect_read(reader)?;
-            let component = T::reflect_read(reader)?;
-            column.insert(entity, component);
-        }
-        Ok(column)
+        reader.read_u32().and_then(|count| {
+            (0..count).try_fold(ComponentColumn::new(), |mut column, _| {
+                EntityId::reflect_read(reader)
+                    .and_then(|entity| {
+                        T::reflect_read(reader).map(|component| (entity, component))
+                    })
+                    .map(|(entity, component)| {
+                        column.insert(entity, component);
+                        column
+                    })
+            })
+        })
     }
 }
 
