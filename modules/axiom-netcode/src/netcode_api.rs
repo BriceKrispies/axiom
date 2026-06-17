@@ -7,7 +7,6 @@ use crate::digest::digest;
 use crate::net_message::NetMessage;
 use crate::rejections::Rejections;
 use crate::session::Session;
-use crate::sync_status::SyncStatus;
 
 /// One peer's deterministic-lockstep session — the only public export of
 /// `axiom-netcode`.
@@ -63,8 +62,7 @@ impl NetcodeApi {
     /// unknown peer, or an out-of-window tick — decodes fine and is then silently
     /// dropped by the session, never affecting confirmed state.
     pub fn ingest(&mut self, message: &[u8]) -> KernelResult<()> {
-        self.session.accept(NetMessage::decode(message)?);
-        Ok(())
+        NetMessage::decode(message).map(|m| self.session.accept(m))
     }
 
     /// The next tick whose inputs are all present (the lockstep gate), or `None`
@@ -100,11 +98,11 @@ impl NetcodeApi {
     /// `Some(true)` if all agree (in sync), `Some(false)` if they diverge (a
     /// desync at `tick` — the app should halt/resync).
     pub fn reconcile(&self, tick: u64) -> Option<bool> {
-        match self.session.reconcile(tick) {
-            SyncStatus::Pending => None,
-            SyncStatus::InSync => Some(true),
-            SyncStatus::Desync { .. } => Some(false),
-        }
+        let status = self.session.reconcile(tick);
+        // Pending -> None; InSync -> Some(true); any Desync -> Some(false).
+        // `is_pending`/`is_in_sync` are exact equality checks against the two
+        // field-less variants, so the remaining case is exactly Desync.
+        (!status.is_pending()).then(|| status.is_in_sync())
     }
 
     /// The canonical deterministic 256-bit digest of `bytes`. Apps hash their

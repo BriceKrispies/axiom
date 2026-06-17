@@ -89,7 +89,9 @@ impl SceneError {
 /// Equality on machine identity only.
 impl PartialEq for SceneError {
     fn eq(&self, other: &Self) -> bool {
-        self.code == other.code && self.math == other.math
+        // Both operands are pure equality comparisons, so the short-circuiting
+        // `&&` is behaviour-identical to a bitwise `&`.
+        (self.code == other.code) & (self.math == other.math)
     }
 }
 

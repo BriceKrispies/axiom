@@ -101,9 +101,9 @@ impl WorldSystem<SceneStorage> for SpinSystem {
                     .map(|q| (entity, Transform::from_rotation(q)))
             })
             .collect();
-        for (entity, local) in updates {
+        updates.into_iter().for_each(|(entity, local)| {
             storage.locals.insert(entity, local);
-        }
+        });
     }
 }
 
@@ -118,26 +118,28 @@ pub struct PlayerMoveSystem;
 impl WorldSystem<SceneStorage> for PlayerMoveSystem {
     fn run(&self, _step: &WorldStep, _entities: &EntityRegistry, storage: &mut SceneStorage) {
         let moves = std::mem::take(&mut storage.pending_moves);
-        for (player, delta) in moves {
+        moves.into_iter().for_each(|(player, delta)| {
             // Resolve the player index to its node (deterministic: BTreeMap iter).
-            let entity = storage
+            // An input for an unknown index resolves to `None` and is ignored.
+            storage
                 .players
                 .iter()
-                .find_map(|(&e, &i)| (i == player).then_some(e));
-            if let Some(entity) = entity {
-                let mut local = storage
-                    .locals
-                    .get(entity)
-                    .copied()
-                    .unwrap_or(Transform::IDENTITY);
-                local.translation = Vec3::new(
-                    local.translation.x + delta.x,
-                    local.translation.y + delta.y,
-                    local.translation.z + delta.z,
-                );
-                storage.locals.insert(entity, local);
-            }
-        }
+                .find_map(|(&e, &i)| (i == player).then_some(e))
+                .into_iter()
+                .for_each(|entity| {
+                    let mut local = storage
+                        .locals
+                        .get(entity)
+                        .copied()
+                        .unwrap_or(Transform::IDENTITY);
+                    local.translation = Vec3::new(
+                        local.translation.x + delta.x,
+                        local.translation.y + delta.y,
+                        local.translation.z + delta.z,
+                    );
+                    storage.locals.insert(entity, local);
+                });
+        });
     }
 }
 
@@ -157,43 +159,49 @@ pub struct ControllerSystem;
 impl WorldSystem<SceneStorage> for ControllerSystem {
     fn run(&self, _step: &WorldStep, _entities: &EntityRegistry, storage: &mut SceneStorage) {
         let controls = std::mem::take(&mut storage.pending_controls);
-        for (index, move_local, yaw_delta, pitch_delta) in controls {
-            // Resolve the controller index to its node (deterministic: BTreeMap
-            // iter). An input for an unknown index is ignored.
-            let entity = storage
-                .controllers
-                .iter()
-                .find_map(|(&e, s)| (s.index == index).then_some(e));
-            if let Some(entity) = entity {
-                let state = storage
+        controls
+            .into_iter()
+            .for_each(|(index, move_local, yaw_delta, pitch_delta)| {
+                // Resolve the controller index to its node (deterministic: BTreeMap
+                // iter). An input for an unknown index resolves to `None` and is
+                // ignored.
+                storage
                     .controllers
-                    .get_mut(&entity)
-                    .expect("entity was just resolved from this map");
-                state.yaw += yaw_delta;
-                state.pitch = (state.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-                // Unit quaternions built directly (`(axis·sin(θ/2), cos(θ/2))`) —
-                // infallible, so there is no unreachable error arm.
-                let (yh, ph) = (state.yaw * 0.5, state.pitch * 0.5);
-                let yaw = Quat::new(0.0, yh.sin(), 0.0, yh.cos());
-                let pitch = Quat::new(ph.sin(), 0.0, 0.0, ph.cos());
+                    .iter()
+                    .find_map(|(&e, s)| (s.index == index).then_some(e))
+                    .into_iter()
+                    .for_each(|entity| {
+                        let state = storage
+                            .controllers
+                            .get_mut(&entity)
+                            .expect("entity was just resolved from this map");
+                        state.yaw += yaw_delta;
+                        state.pitch =
+                            (state.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+                        // Unit quaternions built directly (`(axis·sin(θ/2),
+                        // cos(θ/2))`) — infallible, so there is no unreachable
+                        // error arm.
+                        let (yh, ph) = (state.yaw * 0.5, state.pitch * 0.5);
+                        let yaw = Quat::new(0.0, yh.sin(), 0.0, yh.cos());
+                        let pitch = Quat::new(ph.sin(), 0.0, 0.0, ph.cos());
 
-                let mut local = storage
-                    .locals
-                    .get(entity)
-                    .copied()
-                    .unwrap_or(Transform::IDENTITY);
-                // View orientation: yaw then pitch.
-                local.rotation = yaw.multiply(pitch);
-                // Movement uses the yaw-only frame, so it stays horizontal.
-                let step = yaw.rotate(move_local);
-                local.translation = Vec3::new(
-                    local.translation.x + step.x,
-                    local.translation.y + step.y,
-                    local.translation.z + step.z,
-                );
-                storage.locals.insert(entity, local);
-            }
-        }
+                        let mut local = storage
+                            .locals
+                            .get(entity)
+                            .copied()
+                            .unwrap_or(Transform::IDENTITY);
+                        // View orientation: yaw then pitch.
+                        local.rotation = yaw.multiply(pitch);
+                        // Movement uses the yaw-only frame, so it stays horizontal.
+                        let step = yaw.rotate(move_local);
+                        local.translation = Vec3::new(
+                            local.translation.x + step.x,
+                            local.translation.y + step.y,
+                            local.translation.z + step.z,
+                        );
+                        storage.locals.insert(entity, local);
+                    });
+            });
     }
 }
 
@@ -203,18 +211,19 @@ impl WorldSystem<SceneStorage> for ControllerSystem {
 /// [`crate::scene::Scene::update_world_transforms`] (on demand).
 pub(crate) fn propagate(ids: impl Iterator<Item = EntityId>, storage: &mut SceneStorage) {
     let mut worlds: BTreeMap<EntityId, Transform> = BTreeMap::new();
-    for id in ids {
-        if let Some(&local) = storage.locals.get(id) {
-            let world = match storage.parents.get(id).and_then(|p| worlds.get(p).copied()) {
-                Some(parent_world) => Transform::combine(parent_world, local),
-                None => local,
-            };
+    ids.for_each(|id| {
+        storage.locals.get(id).copied().into_iter().for_each(|local| {
+            let world = storage
+                .parents
+                .get(id)
+                .and_then(|p| worlds.get(p).copied())
+                .map_or(local, |parent_world| Transform::combine(parent_world, local));
             worlds.insert(id, world);
-        }
-    }
-    for (id, world) in worlds {
+        });
+    });
+    worlds.into_iter().for_each(|(id, world)| {
         storage.worlds.insert(id, world);
-    }
+    });
 }
 
 #[cfg(test)]

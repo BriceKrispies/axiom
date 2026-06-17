@@ -105,8 +105,8 @@ impl SceneApi {
         near: Meters,
         far: Meters,
     ) -> SceneResult<()> {
-        let camera = Camera::perspective(math, fovy_radians, aspect, near, far)?;
-        self.scene.add_camera(node, camera)
+        Camera::perspective(math, fovy_radians, aspect, near, far)
+            .and_then(|camera| self.scene.add_camera(node, camera))
     }
 
     /// Remove the camera on `node`.
@@ -116,10 +116,12 @@ impl SceneApi {
 
     /// Compute the projection matrix for the camera on `node`.
     pub fn camera_projection_matrix(&self, math: &MathApi, node: SceneNodeId) -> SceneResult<Mat4> {
-        match self.scene.camera(node) {
-            Some(camera) => camera.projection_matrix(math),
-            None => Err(SceneError::missing_camera("node has no camera")),
-        }
+        self.scene
+            .camera(node)
+            .map_or_else(
+                || Err(SceneError::missing_camera("node has no camera")),
+                |camera| camera.projection_matrix(math),
+            )
     }
 
     // --- Lights ---
@@ -132,8 +134,8 @@ impl SceneApi {
         color: Vec3,
         intensity: Ratio,
     ) -> SceneResult<()> {
-        let light = Light::directional(math, color, intensity)?;
-        self.scene.add_light(node, light)
+        Light::directional(math, color, intensity)
+            .and_then(|light| self.scene.add_light(node, light))
     }
 
     /// Add a point light to `node`.
@@ -144,8 +146,7 @@ impl SceneApi {
         color: Vec3,
         intensity: Ratio,
     ) -> SceneResult<()> {
-        let light = Light::point(math, color, intensity)?;
-        self.scene.add_light(node, light)
+        Light::point(math, color, intensity).and_then(|light| self.scene.add_light(node, light))
     }
 
     /// Remove the light on `node`.
@@ -172,8 +173,7 @@ impl SceneApi {
         mesh: MeshRef,
         material: MaterialRef,
     ) -> SceneResult<()> {
-        let renderable = Renderable::new(mesh, material)?;
-        self.scene.add_renderable(node, renderable)
+        Renderable::new(mesh, material).and_then(|renderable| self.scene.add_renderable(node, renderable))
     }
 
     /// Remove the renderable on `node`.

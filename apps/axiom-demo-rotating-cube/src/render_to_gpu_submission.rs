@@ -64,9 +64,10 @@ pub(crate) fn render_command_list_to_gpu_submission(
     target_width: u32,
     target_height: u32,
 ) -> GpuSubmissionArtifact {
-    let mut commands = Vec::with_capacity(list.commands.len() + 1);
-    for command in &list.commands {
-        commands.push(match *command {
+    let commands = list
+        .commands
+        .iter()
+        .map(|command| match *command {
             RenderCommandArtifact::ClearFrame { color } => GpuCommandArtifact::ClearFrame { color },
             RenderCommandArtifact::SetCamera { view, projection } => {
                 GpuCommandArtifact::SetCamera { view, projection }
@@ -81,9 +82,9 @@ pub(crate) fn render_command_list_to_gpu_submission(
             RenderCommandArtifact::DrawIndexed { index_count, world } => {
                 GpuCommandArtifact::DrawIndexed { index_count, world }
             }
-        });
-    }
-    commands.push(GpuCommandArtifact::Present);
+        })
+        .chain(std::iter::once(GpuCommandArtifact::Present))
+        .collect();
     GpuSubmissionArtifact {
         target_width,
         target_height,

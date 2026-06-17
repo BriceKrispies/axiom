@@ -17,26 +17,27 @@ pub(crate) fn digest(bytes: &[u8]) -> [u8; 32] {
         0xc4ce_b9fe_1a85_ec53,
     ];
 
-    for (i, &b) in bytes.iter().enumerate() {
+    bytes.iter().enumerate().for_each(|(i, &b)| {
         let lane = i & 3;
         lanes[lane] ^= b as u64;
         lanes[lane] = lanes[lane].wrapping_mul(PRIME);
         lanes[lane] = lanes[lane].rotate_left((i as u32 & 31) + 1);
-    }
+    });
 
-    for round in 0..4 {
+    (0..4usize).for_each(|round| {
         let prev = lanes[(round + 3) & 3];
         let mut c = lanes[round];
         c ^= prev.rotate_left(17);
         c = c.wrapping_mul(PRIME);
         c ^= c >> 31;
         lanes[round] = c;
-    }
+    });
 
     let mut out = [0u8; 32];
-    for (lane, chunk) in lanes.iter().zip(out.chunks_mut(8)) {
-        chunk.copy_from_slice(&lane.to_le_bytes());
-    }
+    lanes
+        .iter()
+        .zip(out.chunks_mut(8))
+        .for_each(|(lane, chunk)| chunk.copy_from_slice(&lane.to_le_bytes()));
     out
 }
 

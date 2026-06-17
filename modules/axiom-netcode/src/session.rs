@@ -87,7 +87,9 @@ impl Session {
 
     /// Whether `tick` is inside the input admission window.
     fn in_input_window(&self, tick: u64) -> bool {
-        tick >= self.confirmed && tick < self.confirmed.saturating_add(HORIZON)
+        // `&` not `&&`: both operands are pure, always-safe `u64` comparisons,
+        // so eager evaluation is behavior-identical and branchless.
+        (tick >= self.confirmed) & (tick < self.confirmed.saturating_add(HORIZON))
     }
 
     /// Whether `tick` is inside the hash-beacon admission window. Beacons report
@@ -95,8 +97,9 @@ impl Session {
     /// well as forward — old enough beacons are rejected so the table stays
     /// bounded.
     fn in_beacon_window(&self, tick: u64) -> bool {
-        tick >= self.confirmed.saturating_sub(HORIZON)
-            && tick < self.confirmed.saturating_add(HORIZON)
+        // `&` not `&&`: both operands are pure, always-safe `u64` comparisons.
+        (tick >= self.confirmed.saturating_sub(HORIZON))
+            & (tick < self.confirmed.saturating_add(HORIZON))
     }
 
     /// Schedule a local input at the next local tick, **sign it**, and return the
@@ -124,47 +127,61 @@ impl Session {
     /// out-of-window tick) is silently dropped: adversarial traffic is expected,
     /// not an error that should halt an honest peer.
     pub(crate) fn accept(&mut self, message: NetMessage) {
-        let Some(verifying_key) = self.roster.get(&message.peer()) else {
-            self.rejections.unknown_peer += 1; // not in the roster
-            return;
-        };
-        if !verifying_key.verify(&message.signed_bytes(), message.signature()) {
-            self.rejections.bad_signature += 1; // signature does not match author
-            return;
-        }
+        // Authenticate first, branchlessly. `roster.get(...).copied()` ends the
+        // borrow of `self.roster` so the admission step can mutate `self`.
+        // `map_or_else` is the `let-else` replacement: None -> count unknown
+        // peer; Some(key) -> verify-then-admit. The verify result then selects
+        // between counting a bad signature and admitting the frame, again with
+        // `then/unwrap_or_else` rather than an `if`.
+        let key = self.roster.get(&message.peer()).copied();
+        let present = key.is_some();
+        // `verified` is true iff the peer is in the roster AND its signature
+        // matches; absent key folds to `false` via `unwrap_or`.
+        let verified = key
+            .map(|verifying_key| {
+                verifying_key.verify(&message.signed_bytes(), message.signature())
+            })
+            .unwrap_or(false);
+        // The three outcomes are mutually exclusive by construction, applied as
+        // separate guarded statements (no `if`): unknown peer, bad signature, or
+        // admit. Exactly one guard is true for any frame.
+        (!present).then(|| self.rejections.unknown_peer += 1);
+        (present & !verified).then(|| self.rejections.bad_signature += 1);
+        verified.then(|| self.admit(message));
+    }
+
+    /// Fold an already-authenticated frame into local state, counting it as
+    /// out-of-window if its tick is outside the admission window. The variant
+    /// dispatch is an exhaustive enum match (each arm extracts a different field
+    /// set); the in-window guard inside each arm is branchless.
+    fn admit(&mut self, message: NetMessage) {
         match message {
             NetMessage::Input {
                 peer,
                 tick,
                 command,
                 ..
-            } => {
-                if self.in_input_window(tick) {
-                    self.timeline.insert(tick, peer, command);
-                } else {
-                    self.rejections.out_of_window += 1;
-                }
-            }
+            } => self
+                .in_input_window(tick)
+                .then(|| self.timeline.insert(tick, peer, command))
+                .unwrap_or_else(|| self.rejections.out_of_window += 1),
             NetMessage::HashBeacon {
                 peer, tick, hash, ..
-            } => {
-                if self.in_beacon_window(tick) {
+            } => self
+                .in_beacon_window(tick)
+                .then(|| {
                     self.hashes.insert((tick, peer), hash);
-                } else {
-                    self.rejections.out_of_window += 1;
-                }
-            }
+                })
+                .unwrap_or_else(|| self.rejections.out_of_window += 1),
         }
     }
 
     /// The next tick whose inputs are all present, or `None` if the lockstep
     /// gate is still waiting on a peer.
     pub(crate) fn ready_tick(&self) -> Option<u64> {
-        if self.timeline.has_all(self.confirmed, &self.peers) {
-            Some(self.confirmed)
-        } else {
-            None
-        }
+        self.timeline
+            .has_all(self.confirmed, &self.peers)
+            .then_some(self.confirmed)
     }
 
     /// Confirm `tick`, advancing the cursor and returning its ordered inputs.
@@ -173,15 +190,18 @@ impl Session {
     /// tick's inputs are pruned afterwards (confirmed history is immutable), so
     /// the timeline never accumulates past ticks.
     pub(crate) fn confirm(&mut self, tick: u64) -> Vec<(PeerId, NetCommand)> {
-        if tick == self.confirmed && self.timeline.has_all(tick, &self.peers) {
-            let ordered = self.timeline.ordered_at(tick);
-            self.timeline.remove_tick(tick);
-            self.confirmed = self.confirmed.saturating_add(1);
-            self.prune_stale_hashes();
-            ordered
-        } else {
-            Vec::new()
-        }
+        // `&` not `&&`: `has_all` is a pure read, always safe to evaluate. The
+        // `then(..).unwrap_or_default()` runs the mutating body only when the
+        // tick is exactly next and complete — identical to the original guard.
+        ((tick == self.confirmed) & self.timeline.has_all(tick, &self.peers))
+            .then(|| {
+                let ordered = self.timeline.ordered_at(tick);
+                self.timeline.remove_tick(tick);
+                self.confirmed = self.confirmed.saturating_add(1);
+                self.prune_stale_hashes();
+                ordered
+            })
+            .unwrap_or_default()
     }
 
     /// Drop hash beacons that have fallen out of the (backward) admission window.
@@ -207,21 +227,26 @@ impl Session {
 
     /// Compare every peer's reported hash for `tick`.
     pub(crate) fn reconcile(&self, tick: u64) -> SyncStatus {
-        let mut agreed: Option<[u8; 32]> = None;
-        for peer in &self.peers {
-            match self.hashes.get(&(tick, *peer)) {
-                None => return SyncStatus::Pending,
-                Some(hash) => match agreed {
-                    None => agreed = Some(*hash),
-                    Some(first) => {
-                        if *hash != first {
-                            return SyncStatus::Desync { tick };
-                        }
-                    }
-                },
-            }
-        }
-        SyncStatus::InSync
+        // Branchless fold over the peers, threading the first-seen agreed hash.
+        // `try_fold` short-circuits to a verdict (`Err`) exactly where the
+        // original loop did an early `return`: a missing hash -> Pending, a
+        // mismatch -> Desync. The accumulator is `Ok(Option<hash>)`; an `Ok` at
+        // the end (no early exit) means every peer reported and all agreed ->
+        // InSync. `map_or`/`map_or_else` replace the inner `match`/`if`.
+        self.peers
+            .iter()
+            .try_fold(None::<[u8; 32]>, |agreed, peer| {
+                self.hashes
+                    .get(&(tick, *peer))
+                    .map_or(Err(SyncStatus::Pending), |hash| {
+                        agreed.map_or(Ok(Some(*hash)), |first| {
+                            (*hash == first)
+                                .then_some(Ok(agreed))
+                                .unwrap_or(Err(SyncStatus::Desync { tick }))
+                        })
+                    })
+            })
+            .map_or_else(|verdict| verdict, |_| SyncStatus::InSync)
     }
 }
 

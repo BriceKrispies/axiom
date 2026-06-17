@@ -27,15 +27,20 @@ pub(crate) fn encode_move(sequence: u64, player: u32, delta: Vec3) -> FrameComma
 /// Decode a move command into `(player, delta)`, or `None` if it is not a
 /// well-formed move (wrong kind, or a truncated payload).
 pub(crate) fn decode_move(command: &FrameCommand) -> Option<(u32, Vec3)> {
-    if command.kind() != MOVE_KIND {
-        return None;
-    }
-    let mut r = BinaryReader::new(command.payload());
-    let player = r.read_u32().ok()?;
-    let x = r.read_f32().ok()?;
-    let y = r.read_f32().ok()?;
-    let z = r.read_f32().ok()?;
-    Some((player, Vec3::new(x, y, z)))
+    // Reads are sequential on a stateful reader, so each field read nests inside
+    // the previous one's success arm (`and_then`); a wrong kind or any truncated
+    // field collapses the whole chain to `None`.
+    (command.kind() == MOVE_KIND)
+        .then(|| BinaryReader::new(command.payload()))
+        .and_then(|mut r| {
+            r.read_u32().ok().and_then(|player| {
+                r.read_f32().ok().and_then(|x| {
+                    r.read_f32().ok().and_then(|y| {
+                        r.read_f32().ok().map(|z| (player, Vec3::new(x, y, z)))
+                    })
+                })
+            })
+        })
 }
 
 #[cfg(test)]

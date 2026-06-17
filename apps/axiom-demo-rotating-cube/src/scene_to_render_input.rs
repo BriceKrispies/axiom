@@ -263,14 +263,17 @@ pub(crate) fn scene_to_render_input(
         .renderables
         .iter()
         .filter_map(|r| {
-            let world = scene.world_of(r.node)?.to_matrix();
-            let mesh_idx = meshes.iter().position(|m| m.id == r.mesh_id)? as u32;
-            let material_idx = materials.iter().position(|m| m.id == r.material_id)? as u32;
-            Some(RenderObjectArtifact {
-                world,
-                mesh_idx,
-                material_idx,
-                visible: r.visible,
+            scene.world_of(r.node).and_then(|world| {
+                meshes
+                    .iter()
+                    .position(|m| m.id == r.mesh_id)
+                    .zip(materials.iter().position(|m| m.id == r.material_id))
+                    .map(|(mesh_idx, material_idx)| RenderObjectArtifact {
+                        world: world.to_matrix(),
+                        mesh_idx: mesh_idx as u32,
+                        material_idx: material_idx as u32,
+                        visible: r.visible,
+                    })
             })
         })
         .collect();

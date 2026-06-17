@@ -34,21 +34,25 @@ impl Renderable {
 
     /// Build a renderable, rejecting an invalid mesh or material ref.
     pub fn new(mesh: MeshRef, material: MaterialRef) -> SceneResult<Self> {
-        if !mesh.is_valid() {
-            return Err(SceneError::invalid_renderable_reference(
-                "renderable mesh ref was the invalid sentinel",
-            ));
-        }
-        if !material.is_valid() {
-            return Err(SceneError::invalid_renderable_reference(
-                "renderable material ref was the invalid sentinel",
-            ));
-        }
-        Ok(Renderable {
-            mesh,
-            material,
-            visible: true,
-        })
+        mesh.is_valid()
+            .then_some(())
+            .ok_or_else(|| {
+                SceneError::invalid_renderable_reference(
+                    "renderable mesh ref was the invalid sentinel",
+                )
+            })
+            .and_then(|()| {
+                material.is_valid().then_some(()).ok_or_else(|| {
+                    SceneError::invalid_renderable_reference(
+                        "renderable material ref was the invalid sentinel",
+                    )
+                })
+            })
+            .map(|()| Renderable {
+                mesh,
+                material,
+                visible: true,
+            })
     }
 
     pub const fn mesh(&self) -> MeshRef {

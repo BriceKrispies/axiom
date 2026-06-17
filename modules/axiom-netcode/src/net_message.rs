@@ -73,9 +73,7 @@ impl NetMessage {
         w.write_u8(TAG_HASH_BEACON);
         peer.write_to(&mut w);
         w.write_u64(tick);
-        for &byte in hash {
-            w.write_u8(byte);
-        }
+        hash.iter().for_each(|&byte| w.write_u8(byte));
         w.into_bytes()
     }
 
@@ -129,49 +127,89 @@ impl NetMessage {
     /// that is the session's job.
     pub fn decode(bytes: &[u8]) -> KernelResult<Self> {
         let mut r = BinaryReader::new(bytes);
-        let version = SchemaVersion::read_from(&mut r)?;
-        if !version.is_compatible_with(WIRE_VERSION) {
-            return Err(KernelError::new(
-                KernelErrorScope::Binary,
-                KernelErrorCode::SchemaVersionMismatch,
-                "netcode wire version is incompatible with this peer",
-            ));
-        }
-        let tag = r.read_u8()?;
-        match tag {
-            TAG_INPUT => {
-                let peer = PeerId::read_from(&mut r)?;
-                let tick = r.read_u64()?;
-                let command = NetCommand::read_from(&mut r)?;
-                let signature = Signature::read_from(&mut r)?;
-                Ok(NetMessage::Input {
-                    peer,
-                    tick,
-                    command,
-                    signature,
+        SchemaVersion::read_from(&mut r)
+            .and_then(|version| {
+                // `then_some`/`ok_or_else` is the branchless form of the
+                // incompatible-major guard: compatible -> Ok(()), else the
+                // SchemaVersionMismatch error.
+                version
+                    .is_compatible_with(WIRE_VERSION)
+                    .then_some(())
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            KernelErrorScope::Binary,
+                            KernelErrorCode::SchemaVersionMismatch,
+                            "netcode wire version is incompatible with this peer",
+                        )
+                    })
+            })
+            .and_then(|()| r.read_u8())
+            .and_then(|tag| Self::decode_body(&mut r, tag))
+    }
+
+    /// Decode the frame body for a known `tag`, or fail with
+    /// `InvalidDiscriminant`. The tag dispatch is a value comparison (not an
+    /// enum match): `then`/`or_else` selects exactly one decode path so the
+    /// reader is consumed by only the matching arm, and an unknown tag falls
+    /// through to the discriminant error.
+    fn decode_body(r: &mut BinaryReader<'_>, tag: u8) -> KernelResult<Self> {
+        (tag == TAG_INPUT)
+            .then(|| Self::decode_input(r))
+            .or_else(|| (tag == TAG_HASH_BEACON).then(|| Self::decode_beacon(r)))
+            .unwrap_or_else(|| {
+                Err(KernelError::new(
+                    KernelErrorScope::Binary,
+                    KernelErrorCode::InvalidDiscriminant,
+                    "unknown netcode message tag",
+                ))
+            })
+    }
+
+    /// Decode an `Input` body (the fields after the tag), as a `?`-free chain of
+    /// fallible field reads.
+    fn decode_input(r: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        PeerId::read_from(r).and_then(|peer| {
+            r.read_u64().and_then(|tick| {
+                NetCommand::read_from(r).and_then(|command| {
+                    Signature::read_from(r).map(|signature| NetMessage::Input {
+                        peer,
+                        tick,
+                        command,
+                        signature,
+                    })
                 })
-            }
-            TAG_HASH_BEACON => {
-                let peer = PeerId::read_from(&mut r)?;
-                let tick = r.read_u64()?;
-                let mut hash = [0u8; 32];
-                for byte in &mut hash {
-                    *byte = r.read_u8()?;
-                }
-                let signature = Signature::read_from(&mut r)?;
-                Ok(NetMessage::HashBeacon {
-                    peer,
-                    tick,
-                    hash,
-                    signature,
+            })
+        })
+    }
+
+    /// Decode a `HashBeacon` body (the fields after the tag), as a `?`-free chain
+    /// of fallible field reads.
+    fn decode_beacon(r: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        PeerId::read_from(r).and_then(|peer| {
+            r.read_u64().and_then(|tick| {
+                Self::read_hash(r).and_then(|hash| {
+                    Signature::read_from(r).map(|signature| NetMessage::HashBeacon {
+                        peer,
+                        tick,
+                        hash,
+                        signature,
+                    })
                 })
-            }
-            _ => Err(KernelError::new(
-                KernelErrorScope::Binary,
-                KernelErrorCode::InvalidDiscriminant,
-                "unknown netcode message tag",
-            )),
-        }
+            })
+        })
+    }
+
+    /// Read the 32 hash bytes in order, failing on the first short read. The
+    /// `try_fold` writes each byte into its slot and threads the reader's
+    /// `OutOfBounds`/`TruncatedData` error out of the fold — the branchless form
+    /// of the per-byte `?` loop.
+    fn read_hash(r: &mut BinaryReader<'_>) -> KernelResult<[u8; 32]> {
+        (0..32usize).try_fold([0u8; 32], |mut hash, i| {
+            r.read_u8().map(|byte| {
+                hash[i] = byte;
+                hash
+            })
+        })
     }
 }
 

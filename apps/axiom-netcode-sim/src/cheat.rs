@@ -44,9 +44,8 @@ impl CheatState {
         ticks: u64,
         seed: u64,
     ) -> Self {
-        match kind {
-            None => CheatState::None,
-            Some(CheatKind::ForgeOthers) => {
+        kind.map_or(CheatState::None, |k| match k {
+            CheatKind::ForgeOthers => {
                 // Claim a *different* peer, signed by a key that is not in the roster.
                 let target = (cheater_id % peers as u64) + 1;
                 let off_key = SigningKey::from_seed(forge_seed(seed, cheater_id));
@@ -57,14 +56,14 @@ impl CheatState {
                 );
                 CheatState::Forge(Box::new(aux))
             }
-            Some(CheatKind::Flood) => CheatState::Flood {
+            CheatKind::Flood => CheatState::Flood {
                 frames: flood_frames(cheater_id, cheater_key, roster, ticks),
                 cursor: 0,
             },
-            Some(CheatKind::OutOfWindow) => CheatState::OutOfWindow { first: None },
-            Some(CheatKind::Malformed) => CheatState::Malformed,
-            Some(CheatKind::CorruptSim) => CheatState::CorruptSim,
-        }
+            CheatKind::OutOfWindow => CheatState::OutOfWindow { first: None },
+            CheatKind::Malformed => CheatState::Malformed,
+            CheatKind::CorruptSim => CheatState::CorruptSim,
+        })
     }
 
     /// Whether this peer simulates a divergent world.
@@ -75,9 +74,7 @@ impl CheatState {
     /// Note this peer's own just-submitted frame (so `OutOfWindow` can replay it).
     pub(crate) fn note_submit(&mut self, frame: &[u8]) {
         if let CheatState::OutOfWindow { first } = self {
-            if first.is_none() {
-                *first = Some(frame.to_vec());
-            }
+            first.get_or_insert_with(|| frame.to_vec());
         }
     }
 
@@ -86,20 +83,16 @@ impl CheatState {
         match self {
             CheatState::None | CheatState::CorruptSim => Vec::new(),
             CheatState::Forge(aux) => vec![aux.submit_local(MOVE_KIND, &ZERO_DELTA)],
-            CheatState::Flood { frames, cursor } => {
-                if frames.is_empty() {
-                    return Vec::new();
-                }
-                let f = frames[*cursor % frames.len()].clone();
-                *cursor += 1;
-                vec![f]
-            }
+            CheatState::Flood { frames, cursor } => (!frames.is_empty())
+                .then(|| {
+                    let f = frames[*cursor % frames.len()].clone();
+                    *cursor += 1;
+                    vec![f]
+                })
+                .unwrap_or_default(),
             CheatState::OutOfWindow { first } => first.clone().into_iter().collect(),
             CheatState::Malformed => {
-                let mut bytes = vec![0u8; 12];
-                for b in &mut bytes {
-                    *b = rng.next_bounded(256) as u8;
-                }
+                let bytes: Vec<u8> = (0..12).map(|_| rng.next_bounded(256) as u8).collect();
                 vec![bytes]
             }
         }
@@ -125,9 +118,9 @@ fn flood_frames(
 ) -> Vec<Vec<u8>> {
     let mut aux = NetcodeApi::new(cheater_id, cheater_key.clone(), roster);
     let base = ticks + 512;
-    for _ in 0..base {
+    (0..base).for_each(|_| {
         aux.submit_local(MOVE_KIND, &ZERO_DELTA); // advance the local tick cursor
-    }
+    });
     (0..32)
         .map(|_| aux.submit_local(MOVE_KIND, &ZERO_DELTA))
         .collect()

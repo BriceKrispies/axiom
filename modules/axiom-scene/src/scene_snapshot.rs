@@ -35,7 +35,7 @@ impl SceneSnapshot {
         let mut lights = Vec::new();
         let mut renderables = Vec::new();
 
-        for (id, &local) in storage.locals.iter() {
+        storage.locals.iter().for_each(|(id, &local)| {
             let node = SceneNodeId::from_raw(id.raw());
             let parent = storage
                 .parents
@@ -44,7 +44,7 @@ impl SceneSnapshot {
             let world_t = storage.worlds.get(id).copied().unwrap_or(local);
             nodes.push(NodeSnapshot::new(node, parent, local, world_t));
 
-            if let Some(c) = storage.cameras.get(id) {
+            storage.cameras.get(id).into_iter().for_each(|c| {
                 cameras.push(CameraSnapshot::new(
                     node,
                     c.fovy_radians(),
@@ -52,19 +52,19 @@ impl SceneSnapshot {
                     c.near(),
                     c.far(),
                 ));
-            }
-            if let Some(l) = storage.lights.get(id) {
+            });
+            storage.lights.get(id).into_iter().for_each(|l| {
                 lights.push(LightSnapshot::new(node, l.kind(), l.color(), l.intensity()));
-            }
-            if let Some(r) = storage.renderables.get(id) {
+            });
+            storage.renderables.get(id).into_iter().for_each(|r| {
                 renderables.push(RenderableSnapshot::new(
                     node,
                     r.mesh(),
                     r.material(),
                     r.visible(),
                 ));
-            }
-        }
+            });
+        });
 
         SceneSnapshot {
             nodes,
@@ -107,9 +107,9 @@ impl SceneSnapshot {
 
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
-            && self.cameras.is_empty()
-            && self.lights.is_empty()
-            && self.renderables.is_empty()
+            & self.cameras.is_empty()
+            & self.lights.is_empty()
+            & self.renderables.is_empty()
     }
 }
 

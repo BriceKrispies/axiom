@@ -32,7 +32,7 @@ impl ModeledNetwork {
         self.cfg
             .partitions
             .iter()
-            .any(|p| p.peer == peer && tick >= p.from_tick && tick < p.to_tick)
+            .any(|p| (p.peer == peer) & (tick >= p.from_tick) & (tick < p.to_tick))
     }
 
     /// A delivery delay in `[latency_min, latency_max]`.
@@ -45,23 +45,21 @@ impl ModeledNetwork {
     /// applying drop / delay / duplication per recipient. A partitioned sender
     /// emits nothing.
     pub(crate) fn broadcast(&mut self, from: usize, bytes: &[u8], now: u64) {
-        if self.partitioned(from, now) {
-            return;
-        }
-        for to in 0..self.peers {
-            if to == from {
-                continue;
-            }
-            if self.rng.next_bool_in_thousand(self.cfg.drop_per_mille) {
-                continue;
-            }
-            let at = now + self.delay();
-            self.inflight.push((at, to, bytes.to_vec()));
-            if self.rng.next_bool_in_thousand(self.cfg.duplicate_per_mille) {
-                let at2 = now + self.delay();
-                self.inflight.push((at2, to, bytes.to_vec()));
-            }
-        }
+        let peers = self.peers;
+        (!self.partitioned(from, now)).then(|| {
+            (0..peers).filter(|&to| to != from).for_each(|to| {
+                let dropped = self.rng.next_bool_in_thousand(self.cfg.drop_per_mille);
+                (!dropped).then(|| {
+                    let at = now + self.delay();
+                    self.inflight.push((at, to, bytes.to_vec()));
+                    let dup = self.rng.next_bool_in_thousand(self.cfg.duplicate_per_mille);
+                    dup.then(|| {
+                        let at2 = now + self.delay();
+                        self.inflight.push((at2, to, bytes.to_vec()));
+                    });
+                });
+            });
+        });
     }
 
     /// Remove and return every frame due by `now` as `(recipient, bytes)`. A
@@ -69,13 +67,14 @@ impl ModeledNetwork {
     pub(crate) fn deliver_due(&mut self, now: u64) -> Vec<(usize, Vec<u8>)> {
         let mut delivered = Vec::new();
         let mut still = Vec::new();
-        for (at, to, bytes) in std::mem::take(&mut self.inflight) {
-            if at > now {
-                still.push((at, to, bytes));
-            } else if !self.partitioned(to, now) {
-                delivered.push((to, bytes));
-            }
-        }
+        std::mem::take(&mut self.inflight)
+            .into_iter()
+            .for_each(|(at, to, bytes)| {
+                let pending = at > now;
+                let arrives = !pending & !self.partitioned(to, now);
+                pending.then(|| still.push((at, to, bytes.clone())));
+                arrives.then(|| delivered.push((to, bytes.clone())));
+            });
         self.inflight = still;
         delivered
     }
