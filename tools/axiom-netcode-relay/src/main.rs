@@ -206,21 +206,25 @@ async fn serve_peer(stream: TcpStream, relay: Arc<Relay>, rx: broadcast::Receive
     };
 
     // The peer id arrives as a text frame; all netcode payloads are binary.
-    if sink.send(Message::text(id.to_string())).await.is_err() {
-        free_slot(&relay, id).await;
-        return;
-    }
-    println!("relay: peer {id} connected");
-    // Completing the pair starts both clients together (no early-input loss).
-    all_filled
-        .then(|| {
-            println!("relay: both players present — sending go");
-            let _ = relay.tx.send(Bus::go());
-        })
-        .unwrap_or(());
+    let sent_ok = sink.send(Message::text(id.to_string())).await.is_ok();
+    // Release the slot iff the send failed — the old `if … is_err()` arm.
+    futures_util::future::OptionFuture::from((!sent_ok).then(|| free_slot(&relay, id))).await;
+    // Serve the peer iff the send succeeded — the old fall-through continuation,
+    // lifted whole into a gated async block so the `if` keyword disappears.
+    futures_util::future::OptionFuture::from(sent_ok.then(|| async move {
+        println!("relay: peer {id} connected");
+        // Completing the pair starts both clients together (no early-input loss).
+        all_filled
+            .then(|| {
+                println!("relay: both players present — sending go");
+                let _ = relay.tx.send(Bus::go());
+            })
+            .unwrap_or(());
 
-    bridge_peer(sink, source, &relay, rx, id).await;
-    free_slot(&relay, id).await;
+        bridge_peer(sink, source, &relay, rx, id).await;
+        free_slot(&relay, id).await;
+    }))
+    .await;
 }
 
 /// Bridge one paired peer's socket to the bus until either side ends.

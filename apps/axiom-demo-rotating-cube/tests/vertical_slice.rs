@@ -131,10 +131,7 @@ fn draw_world(artifact: &axiom_demo_rotating_cube::VerticalSliceArtifact) -> axi
         .render_command_list
         .commands
         .iter()
-        .find_map(|c| match c {
-            RenderCommandArtifact::DrawIndexed { world, .. } => Some(*world),
-            _ => None,
-        })
+        .find_map(|c| c.as_draw_indexed().map(|(_, world)| world))
         .expect("the cube draw command is present")
 }
 
@@ -183,29 +180,31 @@ fn every_boundary_artifact_is_present_and_well_formed() {
         .render_command_list
         .commands
         .iter()
-        .map(std::mem::discriminant)
+        .map(RenderCommandArtifact::kind)
         .collect();
     assert_eq!(f.render_command_list.commands.len(), 6);
-    assert!(matches!(
-        f.render_command_list.commands[0],
-        RenderCommandArtifact::ClearFrame { .. }
-    ));
-    assert!(matches!(
-        f.render_command_list.commands[1],
-        RenderCommandArtifact::SetCamera { .. }
-    ));
-    assert!(matches!(
-        f.render_command_list.commands[2],
-        RenderCommandArtifact::SetPipeline { .. }
-    ));
-    assert!(matches!(
-        f.render_command_list.commands.last().unwrap(),
-        RenderCommandArtifact::DrawIndexed {
-            index_count: 36,
-            ..
-        }
-    ));
-    // (the discriminant vec exists only to assert the list is inspectable)
+    assert_eq!(
+        f.render_command_list.commands[0].kind(),
+        RenderCommandArtifact::KIND_CLEAR_FRAME
+    );
+    assert_eq!(
+        f.render_command_list.commands[1].kind(),
+        RenderCommandArtifact::KIND_SET_CAMERA
+    );
+    assert_eq!(
+        f.render_command_list.commands[2].kind(),
+        RenderCommandArtifact::KIND_SET_PIPELINE
+    );
+    assert_eq!(
+        f.render_command_list
+            .commands
+            .last()
+            .unwrap()
+            .as_draw_indexed()
+            .map(|(index_count, _world)| index_count),
+        Some(36)
+    );
+    // (the kind vec exists only to assert the list is inspectable)
     assert_eq!(kinds.len(), 6);
 
     // Boundary 5 — GPU submission: every render command mapped plus a
@@ -213,7 +212,7 @@ fn every_boundary_artifact_is_present_and_well_formed() {
     assert_eq!(f.gpu_submission.commands.len(), 7);
     assert_eq!(
         *f.gpu_submission.commands.last().unwrap(),
-        GpuCommandArtifact::Present
+        GpuCommandArtifact::present()
     );
     assert_eq!(f.gpu_submission.target_width, 800);
     assert_eq!(f.gpu_submission.target_height, 600);

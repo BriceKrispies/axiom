@@ -25,8 +25,7 @@ use axiom_scene::SceneApi;
 
 use crate::demo_api::{DemoRotatingCubeApi, FIXED_STEP_NANOS};
 use crate::render_to_gpu_submission::{
-    render_command_list_to_gpu_submission, GpuCommandArtifact, RenderCommandArtifact,
-    RenderCommandListArtifact,
+    render_command_list_to_gpu_submission, RenderCommandArtifact, RenderCommandListArtifact,
 };
 use crate::scene_to_render_input::{
     scene_to_render_input, ResolvedMaterialArtifact, ResolvedMeshArtifact,
@@ -404,15 +403,14 @@ pub(crate) fn run_vertical_slice(
                             .then(|| {
                                 api.render_api
                                     .command_clear_color_at(&render_commands, i)
-                                    .map(|color| RenderCommandArtifact::ClearFrame { color })
+                                    .map(RenderCommandArtifact::clear_frame)
                             })
                             .flatten();
                         let camera = (kind == RenderApi::KIND_SET_CAMERA)
                             .then(|| {
                                 api.render_api.command_camera_at(&render_commands, i).map(
-                                    |(view, projection)| RenderCommandArtifact::SetCamera {
-                                        view,
-                                        projection,
+                                    |(view, projection)| {
+                                        RenderCommandArtifact::set_camera(view, projection)
                                     },
                                 )
                             })
@@ -421,33 +419,28 @@ pub(crate) fn run_vertical_slice(
                             .then(|| {
                                 api.render_api
                                     .command_pipeline_at(&render_commands, i)
-                                    .map(|pipeline_id| RenderCommandArtifact::SetPipeline {
-                                        pipeline_id,
-                                    })
+                                    .map(RenderCommandArtifact::set_pipeline)
                             })
                             .flatten();
                         let mesh = (kind == RenderApi::KIND_SET_MESH)
                             .then(|| {
                                 api.render_api
                                     .command_mesh_id_at(&render_commands, i)
-                                    .map(|mesh_id| RenderCommandArtifact::SetMesh { mesh_id })
+                                    .map(RenderCommandArtifact::set_mesh)
                             })
                             .flatten();
                         let material = (kind == RenderApi::KIND_SET_MATERIAL)
                             .then(|| {
                                 api.render_api
                                     .command_material_id_at(&render_commands, i)
-                                    .map(|material_id| RenderCommandArtifact::SetMaterial {
-                                        material_id,
-                                    })
+                                    .map(RenderCommandArtifact::set_material)
                             })
                             .flatten();
                         let draw = (kind == RenderApi::KIND_DRAW_INDEXED)
                             .then(|| {
                                 api.render_api.command_draw_indexed_at(&render_commands, i).map(
-                                    |(index_count, world)| RenderCommandArtifact::DrawIndexed {
-                                        index_count,
-                                        world,
+                                    |(index_count, world)| {
+                                        RenderCommandArtifact::draw_indexed(index_count, world)
                                     },
                                 )
                             })
@@ -475,30 +468,51 @@ pub(crate) fn run_vertical_slice(
         gpu_submission_artifact.target_width,
         gpu_submission_artifact.target_height,
     );
-    gpu_submission_artifact
-        .commands
-        .iter()
-        .for_each(|command| match *command {
-            GpuCommandArtifact::ClearFrame { color } => api
-                .webgpu_api
-                .submission_clear_frame(&mut submission, color),
-            GpuCommandArtifact::SetCamera { view, projection } => api
-                .webgpu_api
-                .submission_set_camera(&mut submission, view, projection),
-            GpuCommandArtifact::SetPipeline { pipeline_id } => api
-                .webgpu_api
-                .submission_set_pipeline(&mut submission, pipeline_id),
-            GpuCommandArtifact::SetMesh { mesh_id } => {
-                api.webgpu_api.submission_set_mesh(&mut submission, mesh_id)
-            }
-            GpuCommandArtifact::SetMaterial { material_id } => api
-                .webgpu_api
-                .submission_set_material(&mut submission, material_id),
-            GpuCommandArtifact::DrawIndexed { index_count, world } => api
-                .webgpu_api
-                .submission_draw_indexed(&mut submission, index_count, world),
-            GpuCommandArtifact::Present => api.webgpu_api.submission_present(&mut submission),
-        });
+    // Replay each command into the submission through the branchless `as_*`
+    // accessors: every command matches exactly one arm, and `Present` is the
+    // gated fallthrough. No `match` over the command shape.
+    gpu_submission_artifact.commands.iter().for_each(|command| {
+        command
+            .as_clear_frame()
+            .map(|color| {
+                api.webgpu_api
+                    .submission_clear_frame(&mut submission, color)
+            })
+            .or_else(|| {
+                command.as_set_camera().map(|(view, projection)| {
+                    api.webgpu_api
+                        .submission_set_camera(&mut submission, view, projection)
+                })
+            })
+            .or_else(|| {
+                command.as_set_pipeline().map(|pipeline_id| {
+                    api.webgpu_api
+                        .submission_set_pipeline(&mut submission, pipeline_id)
+                })
+            })
+            .or_else(|| {
+                command
+                    .as_set_mesh()
+                    .map(|mesh_id| api.webgpu_api.submission_set_mesh(&mut submission, mesh_id))
+            })
+            .or_else(|| {
+                command.as_set_material().map(|material_id| {
+                    api.webgpu_api
+                        .submission_set_material(&mut submission, material_id)
+                })
+            })
+            .or_else(|| {
+                command.as_draw_indexed().map(|(index_count, world)| {
+                    api.webgpu_api
+                        .submission_draw_indexed(&mut submission, index_count, world)
+                })
+            })
+            .or_else(|| {
+                command
+                    .is_present()
+                    .then(|| api.webgpu_api.submission_present(&mut submission))
+            });
+    });
     let gpu_report = api.webgpu_api.submit(submission);
 
     // ---- 16. Read the GPU submission report into a plain-data artifact. ----
