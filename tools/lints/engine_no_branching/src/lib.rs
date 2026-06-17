@@ -6,6 +6,7 @@
 extern crate rustc_hir;
 
 use clippy_utils::diagnostics::span_lint_and_help;
+use clippy_utils::is_in_test;
 use rustc_hir::{BinOpKind, Expr, ExprKind, LoopSource, MatchSource};
 use rustc_lint::{LateContext, LateLintPass};
 
@@ -93,6 +94,13 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoBranching {
         // genuine `if` / `if let` is never a desugaring, so this only drops the
         // artifact, never real source.
         if matches!(expr.kind, ExprKind::If(..)) && expr.span.desugaring_kind().is_some() {
+            return;
+        }
+        // Test code (`#[test]` fns and `#[cfg(test)]` modules) may branch
+        // freely: the ban targets the engine the build ships, not the suites
+        // that verify it. (Scope is otherwise everything — no engine-file
+        // filter — so apps and tools are still covered.)
+        if is_in_test(cx.tcx, expr.hir_id) {
             return;
         }
         span_lint_and_help(

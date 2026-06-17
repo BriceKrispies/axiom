@@ -25,11 +25,12 @@ inner `ForLoopDesugar` match is not double-counted).
 
 This lint is intentionally **maximal**, per its commissioning:
 
-- **Scope: literally everything.** No engine-file filter and no test exemption —
-  it fires on every file the build compiles (`crates/`, `modules/`, `apps/`,
-  `xtask`, `axiom-zones`, `tools/axiom-netcode-relay`). The `tools/lints/`
-  platform is a separate cargo workspace, so the root `cargo dylint` run does
-  not scan the lint's own source.
+- **Scope: everything except test code.** No engine-file filter — it fires on
+  every non-test file the build compiles (`crates/`, `modules/`, `apps/`,
+  `xtask`, `axiom-zones`, `tools/axiom-netcode-relay`). `#[test]` functions and
+  `#[cfg(test)]` modules are exempt: the ban targets the engine the build ships,
+  not the suites that verify it. The `tools/lints/` platform is a separate cargo
+  workspace, so the root `cargo dylint` run does not scan the lint's own source.
 - **Zero exemptions.** Unlike the rest of the rulebook, this lint honors **no**
   zone marker — not `#[escape_hatch]`, not `#[supervisor]`, not `#[strict]`.
   Nothing annotated is spared.
