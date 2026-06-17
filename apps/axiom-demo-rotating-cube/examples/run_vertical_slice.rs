@@ -121,23 +121,25 @@ fn print_summary(a: &VerticalSliceArtifact) {
 }
 
 fn command_name(c: &RenderCommandArtifact) -> &'static str {
-    match c {
-        RenderCommandArtifact::ClearFrame { .. } => "ClearFrame",
-        RenderCommandArtifact::SetCamera { .. } => "SetCamera",
-        RenderCommandArtifact::SetPipeline { .. } => "SetPipeline",
-        RenderCommandArtifact::SetMesh { .. } => "SetMesh",
-        RenderCommandArtifact::SetMaterial { .. } => "SetMaterial",
-        RenderCommandArtifact::DrawIndexed { .. } => "DrawIndexed",
-    }
+    // Branchless kind lookup: one (kind, name) pair per command kind, in
+    // declaration order; the matching pair wins. No `match`.
+    [
+        (RenderCommandArtifact::KIND_CLEAR_FRAME, "ClearFrame"),
+        (RenderCommandArtifact::KIND_SET_CAMERA, "SetCamera"),
+        (RenderCommandArtifact::KIND_SET_PIPELINE, "SetPipeline"),
+        (RenderCommandArtifact::KIND_SET_MESH, "SetMesh"),
+        (RenderCommandArtifact::KIND_SET_MATERIAL, "SetMaterial"),
+        (RenderCommandArtifact::KIND_DRAW_INDEXED, "DrawIndexed"),
+    ]
+    .into_iter()
+    .find_map(|(kind, name)| (c.kind() == kind).then_some(name))
+    .unwrap_or("Unknown")
 }
 
 fn draw_world(a: &VerticalSliceArtifact) -> axiom_math::Mat4 {
     a.render_command_list
         .commands
         .iter()
-        .find_map(|c| match c {
-            RenderCommandArtifact::DrawIndexed { world, .. } => Some(*world),
-            _ => None,
-        })
+        .find_map(|c| c.as_draw_indexed().map(|(_, world)| world))
         .expect("cube draw command present")
 }

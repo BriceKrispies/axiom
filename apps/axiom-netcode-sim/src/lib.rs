@@ -229,28 +229,40 @@ fn perturb(mut bytes: Vec<u8>) -> Vec<u8> {
 /// the state, record latency, broadcast the beacon, and drain reconciliations.
 fn confirm_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
     peers.iter_mut().enumerate().for_each(|(i, peer)| {
-        while let Some(tick) = peer.net.ready_tick() {
-            let inputs = peer.net.confirm_tick(tick);
-            let stepped = peer.sim.step(tick, &inputs);
-            let bytes = peer
-                .cheat
-                .corrupts_sim()
-                .then(|| perturb(stepped.clone()))
-                .unwrap_or(stepped);
-            let beacon = peer.net.record_local_hash(tick, &bytes);
-            let hash = peer.net.digest(&bytes);
-            peer.hashes.insert(tick, hash);
-            let mut chained = peer.history.to_vec();
-            chained.extend_from_slice(&hash);
-            peer.history = peer.net.digest(&chained);
-            peer.last_hash_prefix = u32::from_le_bytes([hash[0], hash[1], hash[2], hash[3]]);
-            peer.submit_time
-                .get(&tick)
-                .map(|submitted_at| peer.latencies.push(t - submitted_at));
-            let peak = peer.net.buffered_inputs();
-            peer.buffer_peak = peer.buffer_peak.max(peak);
-            net.broadcast(i, &beacon, t);
-        }
+        // `ready_tick()` returns the next unconfirmed tick once its inputs are
+        // all present, and `confirm_tick` advances that cursor — so the producer
+        // is feedback-coupled to each iteration's side effects and the ticks
+        // CANNOT be drained ahead of processing (a pre-drain would spin on a
+        // never-advancing `confirmed`). Instead the whole per-tick body lives in
+        // the `from_fn` closure itself: it reads the producer and runs its
+        // consumer in one scope, yielding `Some(())` to continue and `None` (when
+        // no tick is ready) to end the pass — semantically identical to the
+        // original `while let`, one in-order tick per step.
+        std::iter::from_fn(|| {
+            peer.net.ready_tick().map(|tick| {
+                let inputs = peer.net.confirm_tick(tick);
+                let stepped = peer.sim.step(tick, &inputs);
+                let bytes = peer
+                    .cheat
+                    .corrupts_sim()
+                    .then(|| perturb(stepped.clone()))
+                    .unwrap_or(stepped);
+                let beacon = peer.net.record_local_hash(tick, &bytes);
+                let hash = peer.net.digest(&bytes);
+                peer.hashes.insert(tick, hash);
+                let mut chained = peer.history.to_vec();
+                chained.extend_from_slice(&hash);
+                peer.history = peer.net.digest(&chained);
+                peer.last_hash_prefix = u32::from_le_bytes([hash[0], hash[1], hash[2], hash[3]]);
+                peer.submit_time
+                    .get(&tick)
+                    .map(|submitted_at| peer.latencies.push(t - submitted_at));
+                let peak = peer.net.buffered_inputs();
+                peer.buffer_peak = peer.buffer_peak.max(peak);
+                net.broadcast(i, &beacon, t);
+            })
+        })
+        .for_each(|()| {});
         // Drain every newly-confirmed tick's reconciliation: `from_fn` yields one
         // `(tick, in_sync)` per step while the cursor trails the confirmed tick
         // and `reconcile` is ready (a `None` from `reconcile` means we're still

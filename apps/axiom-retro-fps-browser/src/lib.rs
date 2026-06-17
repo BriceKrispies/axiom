@@ -76,6 +76,22 @@ fn cell_of(coord: f32) -> i32 {
     (coord + 0.5).floor() as i32
 }
 
+/// Is the world cell containing `(x, z)` a wall, treating anything out of bounds
+/// as a wall? The four-way bounds test is folded into the lookup itself: a
+/// past-the-end index misses the `.get(..)`, and a *negative* index cast to
+/// `usize` wraps to a huge value that also misses — so both out-of-bounds cases
+/// resolve through the same `.get(..).unwrap_or(true)`, with no `||` and no
+/// panicking index.
+fn map_wall_at(map: &MapData, x: f32, z: f32) -> bool {
+    let col = cell_of(x) as usize;
+    let row = cell_of(z) as usize;
+    map.walls
+        .get(row)
+        .and_then(|line| line.get(col))
+        .copied()
+        .unwrap_or(true)
+}
+
 /// The parsed level: wall grid (row-major), the player start, and enemy spawns
 /// in row-major order (so enemy `i` here is [`Player`] index `i` in the scene).
 #[derive(Debug, Clone)]
@@ -93,16 +109,16 @@ fn parse_map() -> MapData {
     let mut walls = vec![vec![false; width]; height];
     let mut start = (1.0, 1.0);
     let mut enemy_spawns = Vec::new();
-    for (row, line) in MAP.iter().enumerate() {
-        for (col, c) in line.chars().enumerate() {
-            match c {
-                '#' => walls[row][col] = true,
-                'S' => start = (col as f32, row as f32),
-                'E' => enemy_spawns.push((col as f32, row as f32)),
-                _ => {}
-            }
-        }
-    }
+    MAP.iter().enumerate().for_each(|(row, line)| {
+        line.chars().enumerate().for_each(|(col, c)| {
+            // Fieldless dispatch over the four map glyphs without branching: a
+            // cell is a wall iff it is '#'; a 'S'/'E' glyph writes the start /
+            // pushes a spawn, each gated by an equality `.then(..)`.
+            walls[row][col] = c == '#';
+            (c == 'S').then(|| start = (col as f32, row as f32));
+            (c == 'E').then(|| enemy_spawns.push((col as f32, row as f32)));
+        });
+    });
     MapData {
         width,
         height,
@@ -233,12 +249,7 @@ impl RetroFpsGame {
 
     /// Is the world cell containing `(x, z)` a wall (or out of bounds)?
     fn is_wall(&self, x: f32, z: f32) -> bool {
-        let col = cell_of(x);
-        let row = cell_of(z);
-        if col < 0 || row < 0 || col as usize >= self.map.width || row as usize >= self.map.height {
-            return true;
-        }
-        self.map.walls[row as usize][col as usize]
+        map_wall_at(&self.map, x, z)
     }
 
     /// Is the straight segment from the player to `(tx, tz)` free of walls? A
@@ -247,22 +258,26 @@ impl RetroFpsGame {
         let (dx, dz) = (tx - self.px, tz - self.pz);
         let dist = (dx * dx + dz * dz).sqrt();
         let steps = (dist / 0.25).ceil() as i32;
-        for i in 1..steps {
+        !(1..steps).any(|i| {
             let t = i as f32 / steps as f32;
-            if self.is_wall(self.px + dx * t, self.pz + dz * t) {
-                return false;
-            }
-        }
-        true
+            self.is_wall(self.px + dx * t, self.pz + dz * t)
+        })
     }
 
     /// Advance one deterministic tick under `intent`, returning the engine
     /// commands (camera control + enemy moves) and the HUD. When the player has
     /// died, this tick snaps the camera back to the start and respawns enemies.
     pub fn step(&mut self, intent: Intent) -> StepCommands {
-        if self.health <= 0 {
-            return self.respawn();
-        }
+        // Dead → respawn; else the live tick. Compute both as kind-gated paths
+        // and pick one without an `if`: a dead player runs `respawn` and parks
+        // the live tick, a living one does the reverse.
+        let dead = self.health <= 0;
+        dead.then(|| self.respawn())
+            .map_or_else(|| self.live_step(intent), |cmds| cmds)
+    }
+
+    /// The normal (alive) tick: look, move, shoot, enemy chase, contact damage.
+    fn live_step(&mut self, intent: Intent) -> StepCommands {
         self.fire_cd = self.fire_cd.saturating_sub(1);
         self.hurt_cd = self.hurt_cd.saturating_sub(1);
 
@@ -291,10 +306,10 @@ impl RetroFpsGame {
 
         // 4. Contact damage: a periodic "bite" while a living enemy is in melee
         //    range, gated by a cooldown so standing in a crowd is survivable.
-        if self.hurt_cd == 0 && self.any_enemy_in_contact() {
+        ((self.hurt_cd == 0) & self.any_enemy_in_contact()).then(|| {
             self.health -= CONTACT_DAMAGE;
             self.hurt_cd = HURT_COOLDOWN;
-        }
+        });
 
         StepCommands {
             control,
@@ -310,16 +325,14 @@ impl RetroFpsGame {
         let (sin, cos) = (self.yaw.sin(), self.yaw.cos());
         let dx = strafe * cos - forward * sin;
         let dz = -strafe * sin - forward * cos;
-        let nx = if self.is_wall(self.px + dx, self.pz) {
-            self.px
-        } else {
-            self.px + dx
-        };
-        let nz = if self.is_wall(self.px, self.pz + dz) {
-            self.pz
-        } else {
-            self.pz + dz
-        };
+        let nx = self
+            .is_wall(self.px + dx, self.pz)
+            .then_some(self.px)
+            .unwrap_or(self.px + dx);
+        let nz = self
+            .is_wall(self.px, self.pz + dz)
+            .then_some(self.pz)
+            .unwrap_or(self.pz + dz);
         let (adx, adz) = (nx - self.px, nz - self.pz);
         self.px = nx;
         self.pz = nz;
@@ -332,36 +345,43 @@ impl RetroFpsGame {
     /// Resolve a fire input: spend ammo on cooldown and kill the nearest living
     /// enemy inside the aiming cone, in range, and in line of sight.
     fn fire(&mut self, firing: bool) {
-        if !firing || self.fire_cd > 0 || self.ammo == 0 {
-            return;
-        }
+        // Gate the whole shot on the fire guard (all-pure checks → `&`), so no
+        // early-return branch is needed.
+        (firing & (self.fire_cd == 0) & (self.ammo != 0)).then(|| self.fire_shot());
+    }
+
+    /// The actual shot, run only once the fire guard passes: spend ammo and kill
+    /// the nearest eligible enemy. The "nearest eligible" search is a `fold` over
+    /// the enemies, each eligibility test reduced to a boolean mask.
+    fn fire_shot(&mut self) {
         self.fire_cd = FIRE_COOLDOWN;
         self.ammo -= 1;
         let (fx, fz) = (-self.yaw.sin(), -self.yaw.cos());
         let cone = FIRE_HALF_ANGLE.cos();
-        let mut best: Option<(usize, f32)> = None;
-        for (i, e) in self.enemies.iter().enumerate() {
-            if !e.alive {
-                continue;
-            }
-            let (dx, dz) = (e.x - self.px, e.z - self.pz);
-            let dist = (dx * dx + dz * dz).sqrt();
-            if !(1.0e-4..=FIRE_RANGE).contains(&dist) {
-                continue;
-            }
-            let aim = (fx * dx + fz * dz) / dist;
-            if aim < cone || !self.line_clear(e.x, e.z) {
-                continue;
-            }
-            if best.is_none_or(|(_, d)| dist < d) {
-                best = Some((i, dist));
-            }
-        }
-        if let Some((i, _)) = best {
+        let best = self.enemies.iter().enumerate().fold(
+            None::<(usize, f32)>,
+            |best, (i, e)| {
+                let (dx, dz) = (e.x - self.px, e.z - self.pz);
+                let dist = (dx * dx + dz * dz).sqrt();
+                let aim = (fx * dx + fz * dz) / dist;
+                // Eligible iff alive, in range, inside the cone, and unobstructed.
+                // `line_clear` is only reached when the cheap masks already hold
+                // (it is pure regardless), so a flat `&` chain is safe.
+                let eligible = e.alive
+                    & (1.0e-4..=FIRE_RANGE).contains(&dist)
+                    & (aim >= cone)
+                    & self.line_clear(e.x, e.z);
+                let closer = best.is_none_or(|(_, d)| dist < d);
+                (eligible & closer)
+                    .then_some((i, dist))
+                    .or(best)
+            },
+        );
+        best.iter().for_each(|&(i, _)| {
             self.enemies[i].alive = false;
             self.score += KILL_SCORE;
             self.ammo += AMMO_PER_KILL;
-        }
+        });
     }
 
     /// Move every enemy one tick and return the world-delta [`PlayerInput`]s. A
@@ -371,25 +391,29 @@ impl RetroFpsGame {
     /// always equals `target - current` — the engine node tracks it exactly.
     fn update_enemies(&mut self, respawning: bool) -> Vec<PlayerInput> {
         let (px, pz) = (self.px, self.pz);
-        let mut inputs = Vec::with_capacity(self.enemies.len());
-        for (i, e) in self.enemies.iter_mut().enumerate() {
-            let (tx, ty, tz) = if respawning {
-                e.alive = true;
-                (e.spawn.0, ENEMY_Y, e.spawn.1)
-            } else if e.alive {
-                Self::chase(&self.map, e, px, pz)
-            } else {
-                (e.spawn.0, PARK_Y, e.spawn.1)
-            };
-            inputs.push(PlayerInput::new(
-                i as u32,
-                Vec3::new(tx - e.x, ty - e.y, tz - e.z),
-            ));
-            e.x = tx;
-            e.y = ty;
-            e.z = tz;
-        }
-        inputs
+        let map = &self.map;
+        self.enemies
+            .iter_mut()
+            .enumerate()
+            .map(|(i, e)| {
+                // Respawn forces the enemy alive; the post-respawn liveness then
+                // selects the target without an `if`. All three candidate targets
+                // are pure to compute, so evaluating them unconditionally is safe.
+                e.alive |= respawning;
+                let respawn_t = (e.spawn.0, ENEMY_Y, e.spawn.1);
+                let chase_t = Self::chase(map, e, px, pz);
+                let park_t = (e.spawn.0, PARK_Y, e.spawn.1);
+                // alive ? (respawning ? respawn_t : chase_t) : park_t
+                let live_t = respawning.then_some(respawn_t).unwrap_or(chase_t);
+                let (tx, ty, tz) = e.alive.then_some(live_t).unwrap_or(park_t);
+                let input =
+                    PlayerInput::new(i as u32, Vec3::new(tx - e.x, ty - e.y, tz - e.z));
+                e.x = tx;
+                e.y = ty;
+                e.z = tz;
+                input
+            })
+            .collect()
     }
 
     /// One chase step for a living enemy toward `(px, pz)`, with per-axis wall
@@ -397,40 +421,38 @@ impl RetroFpsGame {
     fn chase(map: &MapData, e: &Enemy, px: f32, pz: f32) -> (f32, f32, f32) {
         let (dx, dz) = (px - e.x, pz - e.z);
         let len = (dx * dx + dz * dz).sqrt();
-        if len < 1.0e-4 {
-            return (e.x, ENEMY_Y, e.z);
-        }
-        let (nx, nz) = (dx / len * ENEMY_SPEED, dz / len * ENEMY_SPEED);
-        let tx = if Self::map_wall(map, e.x + nx, e.z) {
-            e.x
-        } else {
-            e.x + nx
-        };
-        let tz = if Self::map_wall(map, e.x, e.z + nz) {
-            e.z
-        } else {
-            e.z + nz
-        };
+        // Too close to move: zero out the step (mask the normalized delta to 0).
+        // This avoids the `len < eps` early-return and keeps the same result —
+        // when too close, `tx,tz` collapse to the enemy's own position. The
+        // denominator is floored away from zero so the normalize never yields
+        // NaN/inf (which the mask would not fully clear); the mask then forces a
+        // genuine zero step in exactly the `len < eps` case.
+        let moving = (len >= 1.0e-4) as i32 as f32;
+        let safe_len = len.max(1.0e-4);
+        let (nx, nz) = (
+            dx / safe_len * ENEMY_SPEED * moving,
+            dz / safe_len * ENEMY_SPEED * moving,
+        );
+        let tx = Self::map_wall(map, e.x + nx, e.z)
+            .then_some(e.x)
+            .unwrap_or(e.x + nx);
+        let tz = Self::map_wall(map, e.x, e.z + nz)
+            .then_some(e.z)
+            .unwrap_or(e.z + nz);
         (tx, ENEMY_Y, tz)
     }
 
     /// Wall lookup against a map (the static helper used by enemy chasing).
     fn map_wall(map: &MapData, x: f32, z: f32) -> bool {
-        let col = cell_of(x);
-        let row = cell_of(z);
-        if col < 0 || row < 0 || col as usize >= map.width || row as usize >= map.height {
-            return true;
-        }
-        map.walls[row as usize][col as usize]
+        map_wall_at(map, x, z)
     }
 
     /// Is any living enemy within melee contact of the player?
     fn any_enemy_in_contact(&self) -> bool {
         self.enemies.iter().any(|e| {
-            e.alive && {
-                let (dx, dz) = (e.x - self.px, e.z - self.pz);
-                (dx * dx + dz * dz).sqrt() < CONTACT_RADIUS
-            }
+            let (dx, dz) = (e.x - self.px, e.z - self.pz);
+            // `&` over two pure tests (no guarded index): alive AND within range.
+            e.alive & ((dx * dx + dz * dz).sqrt() < CONTACT_RADIUS)
         })
     }
 
@@ -493,22 +515,24 @@ pub fn build_retro_fps_app() -> RunningApp {
             let ceiling = materials.add(Material::lit(Color::linear_rgb(ch(0.05), ch(0.06), ch(0.09))));
             let enemy = materials.add(Material::lit(Color::linear_rgb(ch(0.85), ch(0.20), ch(0.18))));
 
-            // Walls: one scaled cube per wall cell, two-tone by parity.
-            for (row, line) in map.walls.iter().enumerate() {
-                for (col, &is_wall) in line.iter().enumerate() {
-                    if !is_wall {
-                        continue;
-                    }
-                    let mat = if (row + col) % 2 == 0 { wall_a } else { wall_b };
-                    world.spawn((
-                        block(col as f32, WALL_HEIGHT * 0.5, row as f32, 1.0, WALL_HEIGHT, 1.0),
-                        Renderable {
-                            mesh: cube,
-                            material: mat,
-                        },
-                    ));
-                }
-            }
+            // Walls: one scaled cube per wall cell, two-tone by parity. The
+            // wall-cell filter replaces the `continue`; the parity selects the
+            // material via an index into a 2-tone table (no `if/else`).
+            map.walls.iter().enumerate().for_each(|(row, line)| {
+                line.iter()
+                    .enumerate()
+                    .filter(|&(_, &is_wall)| is_wall)
+                    .for_each(|(col, _)| {
+                        let mat = [wall_a, wall_b][(row + col) % 2];
+                        world.spawn((
+                            block(col as f32, WALL_HEIGHT * 0.5, row as f32, 1.0, WALL_HEIGHT, 1.0),
+                            Renderable {
+                                mesh: cube,
+                                material: mat,
+                            },
+                        ));
+                    });
+            });
 
             // Floor + ceiling: two big flat slabs spanning the whole grid.
             let (cx, cz) = ((map.width as f32 - 1.0) * 0.5, (map.height as f32 - 1.0) * 0.5);
@@ -535,16 +559,19 @@ pub fn build_retro_fps_app() -> RunningApp {
             ));
 
             // Enemies: a red cube Player per spawn, in row-major (index) order.
-            for (i, &(x, z)) in map.enemy_spawns.iter().enumerate() {
-                world.spawn((
-                    block(x, ENEMY_Y, z, ENEMY_SCALE, ENEMY_SCALE, ENEMY_SCALE),
-                    Renderable {
-                        mesh: cube,
-                        material: enemy,
-                    },
-                    Player::new(i as u32),
-                ));
-            }
+            map.enemy_spawns
+                .iter()
+                .enumerate()
+                .for_each(|(i, &(x, z))| {
+                    world.spawn((
+                        block(x, ENEMY_Y, z, ENEMY_SCALE, ENEMY_SCALE, ENEMY_SCALE),
+                        Renderable {
+                            mesh: cube,
+                            material: enemy,
+                        },
+                        Player::new(i as u32),
+                    ));
+                });
 
             // The first-person camera at the start, facing -Z (yaw 0).
             world.spawn((
