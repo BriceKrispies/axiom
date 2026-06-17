@@ -414,9 +414,12 @@ struct MeshGeometry {
 /// neither module can name the other's types, so the composition is the feature
 /// module's job.
 fn mesh_geometry(mesh: &Mesh) -> MeshGeometry {
-    match mesh {
-        Mesh::Cube => cube_geometry(),
-    }
+    // `Mesh` has a single variant, so the former `match mesh { Mesh::Cube => … }`
+    // is an irrefutable bind, not a branch: destructure it directly and resolve
+    // the one built-in primitive. Adding a second kind reintroduces a real choice
+    // here (and the `let` will fail to compile, flagging the omission).
+    let Mesh::Cube = mesh;
+    cube_geometry()
 }
 
 /// The engine's built-in cube primitive. `axiom-resources` owns the cube mesh

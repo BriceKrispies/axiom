@@ -75,33 +75,47 @@ impl MetricReport {
     /// Read a report previously written with [`Self::write_to`]. Rejects an
     /// unknown value tag.
     pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        let name = String::from_utf8_lossy(reader.read_byte_slice()?).into_owned();
-        let is_counter = reader.read_bool()?;
-        // Value-tag dispatch on a `u8` (not an enum discriminant): `.then`
-        // runs only the selected read, so the reader advances by exactly the
-        // bytes the chosen branch consumes. An unrecognized tag falls through
-        // both guards to the invalid-tag error.
-        let value = reader.read_u8().and_then(|tag| {
-            (tag == 0)
-                .then(|| reader.read_u64().map(|i| MetricValue::integer(i as i64)))
-                .or_else(|| (tag == 1).then(|| reader.read_f32().map(MetricValue::float)))
-                .unwrap_or_else(|| {
-                    Err(KernelError::new(
-                        KernelErrorScope::Binary,
-                        KernelErrorCode::InvalidId,
-                        "unknown metric value tag",
-                    ))
-                })
-        })?;
-        let tick = reader
-            .read_bool()?
-            .then(|| reader.read_u64())
-            .transpose()?;
-        Ok(MetricReport {
-            name,
-            is_counter,
-            value,
-            tick,
+        // Branchless sequential decode: each field threads through `and_then`,
+        // so the first failure short-circuits and the reader advances exactly
+        // as `write_to` laid the fields down.
+        reader.read_byte_slice().and_then(|name_bytes| {
+            let name = String::from_utf8_lossy(name_bytes).into_owned();
+            reader.read_bool().and_then(|is_counter| {
+                // Value-tag dispatch on a `u8` (not an enum discriminant):
+                // `.then` runs only the selected read, so the reader advances
+                // by exactly the bytes the chosen branch consumes. An
+                // unrecognized tag falls through both guards to the invalid-tag
+                // error.
+                reader
+                    .read_u8()
+                    .and_then(|tag| {
+                        (tag == 0)
+                            .then(|| reader.read_u64().map(|i| MetricValue::integer(i as i64)))
+                            .or_else(|| (tag == 1).then(|| reader.read_f32().map(MetricValue::float)))
+                            .unwrap_or_else(|| {
+                                Err(KernelError::new(
+                                    KernelErrorScope::Binary,
+                                    KernelErrorCode::InvalidId,
+                                    "unknown metric value tag",
+                                ))
+                            })
+                    })
+                    .and_then(|value| {
+                        // Optional tick: the presence-tag pattern, with
+                        // `transpose` folded into the chain to leave no `?`.
+                        reader.read_bool().and_then(|has_tick| {
+                            has_tick
+                                .then(|| reader.read_u64())
+                                .transpose()
+                                .map(|tick| MetricReport {
+                                    name,
+                                    is_counter,
+                                    value,
+                                    tick,
+                                })
+                        })
+                    })
+            })
         })
     }
 }

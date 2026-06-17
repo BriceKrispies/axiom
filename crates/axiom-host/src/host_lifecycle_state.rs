@@ -37,39 +37,37 @@ impl HostLifecycleState {
     /// deterministic and prevents a stuck-shutdown bug from being masked by
     /// an out-of-order `Started`.
     pub const fn apply(self, signal: HostLifecycleSignal) -> Self {
-        match signal {
-            HostLifecycleSignal::Started => HostLifecycleState {
-                visible: true,
-                ..self
-            },
-            HostLifecycleSignal::Visible => HostLifecycleState {
-                visible: true,
-                ..self
-            },
-            HostLifecycleSignal::Hidden => HostLifecycleState {
-                visible: false,
-                ..self
-            },
-            HostLifecycleSignal::Focused => HostLifecycleState {
-                focused: true,
-                ..self
-            },
-            HostLifecycleSignal::Unfocused => HostLifecycleState {
-                focused: false,
-                ..self
-            },
-            HostLifecycleSignal::Suspended => HostLifecycleState {
-                suspended: true,
-                ..self
-            },
-            HostLifecycleSignal::Resumed => HostLifecycleState {
-                suspended: false,
-                ..self
-            },
-            HostLifecycleSignal::ShutdownRequested => HostLifecycleState {
-                shutdown_requested: true,
-                ..self
-            },
+        // Each signal sets exactly one boolean field; the projection is a pure
+        // table lookup. `(clear_mask, set_mask)` over the packed field bits
+        // (visible=1, focused=2, suspended=4, shutdown=8) replaces the per-signal
+        // `match`: new_bits = (self_bits & !clear) | set, indexed by the fieldless
+        // signal's discriminant. Behaviourally identical, branchless in source.
+        const VISIBLE: u8 = 1;
+        const FOCUSED: u8 = 2;
+        const SUSPENDED: u8 = 4;
+        const SHUTDOWN: u8 = 8;
+        // Indexed by `HostLifecycleSignal as u8` (Started=0 … ShutdownRequested=7).
+        const TRANSITION: [(u8, u8); 8] = [
+            (0, VISIBLE),   // Started        -> visible = true
+            (0, SUSPENDED), // Suspended      -> suspended = true
+            (SUSPENDED, 0), // Resumed        -> suspended = false
+            (VISIBLE, 0),   // Hidden         -> visible = false
+            (0, VISIBLE),   // Visible        -> visible = true
+            (0, FOCUSED),   // Focused        -> focused = true
+            (FOCUSED, 0),   // Unfocused      -> focused = false
+            (0, SHUTDOWN),  // ShutdownRequested -> shutdown = true
+        ];
+        let bits = (self.visible as u8) * VISIBLE
+            | (self.focused as u8) * FOCUSED
+            | (self.suspended as u8) * SUSPENDED
+            | (self.shutdown_requested as u8) * SHUTDOWN;
+        let (clear, set) = TRANSITION[signal as usize];
+        let next = (bits & !clear) | set;
+        HostLifecycleState {
+            visible: next & VISIBLE != 0,
+            focused: next & FOCUSED != 0,
+            suspended: next & SUSPENDED != 0,
+            shutdown_requested: next & SHUTDOWN != 0,
         }
     }
 

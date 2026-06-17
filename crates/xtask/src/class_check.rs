@@ -372,9 +372,22 @@ fn check_forward_dependencies(
                 .copied()
                 .into_iter()
                 .for_each(|dep_class| {
-            match c.class {
-                PackageClass::Layer => match dep_class {
-                    PackageClass::Module => report.push(Violation::new(
+            // `PackageClass` is fieldless, so the legal/illegal dispatch is a
+            // pure lookup over the `(source, dep)` pair — no control flow, just
+            // data. Each illegal pair is one arm of a flat combinator chain
+            // keyed on `pair == (Src, Dep)`; "allowed" pairs (layer→layer,
+            // anything→support, tool→*, support→*) are simply absent, so they
+            // fall through to the terminating `None`. Arms that need a lookup
+            // (module/app allowlists) run their multi-step work inside the
+            // `then(|| { … })` closure. The whole chain is evaluated for its
+            // side effects (pushing violations); its `Option<()>` value is
+            // discarded.
+            let pair = (c.class, dep_class);
+            use PackageClass::{App, Layer, Module, Tool};
+
+            (pair == (Layer, Module))
+                .then(|| {
+                    report.push(Violation::new(
                         ViolationKind::LayerDependsOnModule,
                         c.package.name.clone(),
                         format!(
@@ -382,32 +395,36 @@ fn check_forward_dependencies(
                              layers must never depend on modules",
                             c.package.name
                         ),
-                    )),
-                    PackageClass::App => report.push(Violation::new(
-                        ViolationKind::LayerDependsOnApp,
-                        c.package.name.clone(),
-                        format!(
-                            "layer crate `{}` depends on app crate `{dep_name}`; \
-                             layers must never depend on apps",
-                            c.package.name
-                        ),
-                    )),
-                    PackageClass::Tool => report.push(Violation::new(
-                        ViolationKind::LayerDependsOnTool,
-                        c.package.name.clone(),
-                        format!(
-                            "layer crate `{}` depends on tool crate `{dep_name}`; \
-                             layers must never depend on tools",
-                            c.package.name
-                        ),
-                    )),
-                    PackageClass::Layer => { /* allowed: the existing layer law handles index ordering */
-                    }
-                    PackageClass::Support => { /* allowed: any engine code may depend on the support crate */
-                    }
-                },
-                PackageClass::Module => match dep_class {
-                    PackageClass::Module => {
+                    ));
+                })
+                .or_else(|| {
+                    (pair == (Layer, App)).then(|| {
+                        report.push(Violation::new(
+                            ViolationKind::LayerDependsOnApp,
+                            c.package.name.clone(),
+                            format!(
+                                "layer crate `{}` depends on app crate `{dep_name}`; \
+                                 layers must never depend on apps",
+                                c.package.name
+                            ),
+                        ));
+                    })
+                })
+                .or_else(|| {
+                    (pair == (Layer, Tool)).then(|| {
+                        report.push(Violation::new(
+                            ViolationKind::LayerDependsOnTool,
+                            c.package.name.clone(),
+                            format!(
+                                "layer crate `{}` depends on tool crate `{dep_name}`; \
+                                 layers must never depend on tools",
+                                c.package.name
+                            ),
+                        ));
+                    })
+                })
+                .or_else(|| {
+                    (pair == (Module, Module)).then(|| {
                         // Engine modules may never depend on a module. A feature
                         // module may depend on the modules it lists in
                         // `allowed_modules`; anything else is a violation.
@@ -449,26 +466,36 @@ fn check_forward_dependencies(
                             },
                         );
                         violation.into_iter().for_each(|v| report.push(v));
-                    }
-                    PackageClass::App => report.push(Violation::new(
-                        ViolationKind::ModuleDependsOnApp,
-                        c.package.name.clone(),
-                        format!(
-                            "module crate `{}` depends on app crate `{dep_name}`; \
-                             modules must never depend on apps",
-                            c.package.name
-                        ),
-                    )),
-                    PackageClass::Tool => report.push(Violation::new(
-                        ViolationKind::ModuleDependsOnTool,
-                        c.package.name.clone(),
-                        format!(
-                            "module crate `{}` depends on tool crate `{dep_name}`; \
-                             modules must never depend on tools",
-                            c.package.name
-                        ),
-                    )),
-                    PackageClass::Layer => {
+                    })
+                })
+                .or_else(|| {
+                    (pair == (Module, App)).then(|| {
+                        report.push(Violation::new(
+                            ViolationKind::ModuleDependsOnApp,
+                            c.package.name.clone(),
+                            format!(
+                                "module crate `{}` depends on app crate `{dep_name}`; \
+                                 modules must never depend on apps",
+                                c.package.name
+                            ),
+                        ));
+                    })
+                })
+                .or_else(|| {
+                    (pair == (Module, Tool)).then(|| {
+                        report.push(Violation::new(
+                            ViolationKind::ModuleDependsOnTool,
+                            c.package.name.clone(),
+                            format!(
+                                "module crate `{}` depends on tool crate `{dep_name}`; \
+                                 modules must never depend on tools",
+                                c.package.name
+                            ),
+                        ));
+                    })
+                })
+                .or_else(|| {
+                    (pair == (Module, Layer)).then(|| {
                         module_by_crate
                             .get(c.package.name.as_str())
                             .into_iter()
@@ -494,30 +521,36 @@ fn check_forward_dependencies(
                                     ));
                                 });
                             });
-                    }
-                    PackageClass::Support => { /* allowed: any engine code may depend on the support crate */
-                    }
-                },
-                PackageClass::App => match dep_class {
-                    PackageClass::App => report.push(Violation::new(
-                        ViolationKind::AppDependsOnApp,
-                        c.package.name.clone(),
-                        format!(
-                            "app crate `{}` depends on app crate `{dep_name}`; \
-                             apps must not depend on other apps",
-                            c.package.name
-                        ),
-                    )),
-                    PackageClass::Tool => report.push(Violation::new(
-                        ViolationKind::AppDependsOnTool,
-                        c.package.name.clone(),
-                        format!(
-                            "app crate `{}` depends on tool crate `{dep_name}`; \
-                             apps must not depend on tools",
-                            c.package.name
-                        ),
-                    )),
-                    PackageClass::Layer => {
+                    })
+                })
+                .or_else(|| {
+                    (pair == (App, App)).then(|| {
+                        report.push(Violation::new(
+                            ViolationKind::AppDependsOnApp,
+                            c.package.name.clone(),
+                            format!(
+                                "app crate `{}` depends on app crate `{dep_name}`; \
+                                 apps must not depend on other apps",
+                                c.package.name
+                            ),
+                        ));
+                    })
+                })
+                .or_else(|| {
+                    (pair == (App, Tool)).then(|| {
+                        report.push(Violation::new(
+                            ViolationKind::AppDependsOnTool,
+                            c.package.name.clone(),
+                            format!(
+                                "app crate `{}` depends on tool crate `{dep_name}`; \
+                                 apps must not depend on tools",
+                                c.package.name
+                            ),
+                        ));
+                    })
+                })
+                .or_else(|| {
+                    (pair == (App, Layer)).then(|| {
                         app_by_crate
                             .get(c.package.name.as_str())
                             .into_iter()
@@ -543,8 +576,10 @@ fn check_forward_dependencies(
                                     ));
                                 });
                             });
-                    }
-                    PackageClass::Module => {
+                    })
+                })
+                .or_else(|| {
+                    (pair == (App, Module)).then(|| {
                         app_by_crate
                             .get(c.package.name.as_str())
                             .into_iter()
@@ -569,14 +604,11 @@ fn check_forward_dependencies(
                                     ));
                                 });
                             });
-                    }
-                    PackageClass::Support => { /* allowed: any engine code may depend on the support crate */
-                    }
-                },
-                PackageClass::Tool => { /* tools are free to depend on whatever they need */ }
-                PackageClass::Support => { /* the support crate depends only on external proc-macro crates */
-                }
-            }
+                    })
+                });
+            // Pairs not listed above are allowed: layer→layer (layer-law
+            // ordering), {layer,module,app}→support, tool→* (tools depend on
+            // anything), and support→* (support depends only on externals).
                 });
         });
     });
