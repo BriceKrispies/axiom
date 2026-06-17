@@ -57,7 +57,7 @@ fn rotating_cubes_app() -> App {
                     Color::linear_rgb(ch(0.30), ch(0.50), ch(0.95)),
                 ),
             ];
-            for (offset_x, axis, color) in cubes {
+            cubes.into_iter().for_each(|(offset_x, axis, color)| {
                 let material = materials.add(Material::lit(color));
                 world
                     .spawn(Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)))
@@ -68,7 +68,7 @@ fn rotating_cubes_app() -> App {
                         },
                         Spin::around(axis).period(360),
                     ));
-            }
+            });
             world.spawn((
                 Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
                 Camera::perspective(PerspectiveProjection {

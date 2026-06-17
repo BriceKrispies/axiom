@@ -44,17 +44,26 @@ pub(crate) fn encode_controller(
 /// if it is not a well-formed controller input (wrong kind, or a truncated
 /// payload).
 pub(crate) fn decode_controller(command: &FrameCommand) -> Option<(u32, Vec3, f32, f32)> {
-    if command.kind() != CONTROLLER_KIND {
-        return None;
-    }
-    let mut r = BinaryReader::new(command.payload());
-    let index = r.read_u32().ok()?;
-    let x = r.read_f32().ok()?;
-    let y = r.read_f32().ok()?;
-    let z = r.read_f32().ok()?;
-    let yaw = r.read_f32().ok()?;
-    let pitch = r.read_f32().ok()?;
-    Some((index, Vec3::new(x, y, z), yaw, pitch))
+    // Reads are sequential on a stateful reader, so each field read nests inside
+    // the previous one's success arm (`and_then`); a wrong kind or any truncated
+    // field collapses the whole chain to `None`.
+    (command.kind() == CONTROLLER_KIND)
+        .then(|| BinaryReader::new(command.payload()))
+        .and_then(|mut r| {
+            r.read_u32().ok().and_then(|index| {
+                r.read_f32().ok().and_then(|x| {
+                    r.read_f32().ok().and_then(|y| {
+                        r.read_f32().ok().and_then(|z| {
+                            r.read_f32().ok().and_then(|yaw| {
+                                r.read_f32()
+                                    .ok()
+                                    .map(|pitch| (index, Vec3::new(x, y, z), yaw, pitch))
+                            })
+                        })
+                    })
+                })
+            })
+        })
 }
 
 #[cfg(test)]

@@ -65,14 +65,14 @@ impl SceneCommands {
     pub(crate) fn realize_into(self, scene: &mut SceneApi, math: &MathApi) -> Option<Vec3> {
         let mut nodes = Vec::with_capacity(self.commands.len());
         let mut light_direction = None;
-        for command in &self.commands {
+        self.commands.iter().for_each(|command| {
             let node = scene.create_node_with_transform(command.transform);
-            if let Some(parent) = command.parent {
+            command.parent.into_iter().for_each(|parent| {
                 scene
                     .set_parent(node, nodes[parent])
-                    .expect("a parent command is recorded before its child");
-            }
-            for component in &command.components {
+                    .expect("a parent command is recorded before its child")
+            });
+            command.components.iter().for_each(|component| {
                 match component {
                     NodeComponent::Renderable(r) => {
                         let mesh = scene.mesh_ref(r.mesh.id());
@@ -121,9 +121,9 @@ impl SceneCommands {
                             .expect("controller attaches to a just-created node");
                     }
                 }
-            }
+            });
             nodes.push(node);
-        }
+        });
         light_direction
     }
 }

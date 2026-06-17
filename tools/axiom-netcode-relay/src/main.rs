@@ -59,12 +59,17 @@ async fn run_relay(listener: TcpListener) {
         tx,
     });
     loop {
-        let Ok((stream, _)) = listener.accept().await else {
-            continue;
-        };
-        let relay = relay.clone();
-        let rx = relay.tx.subscribe();
-        tokio::spawn(serve_peer(stream, relay, rx));
+        listener
+            .accept()
+            .await
+            .ok()
+            .map(|(stream, _)| {
+                let relay = relay.clone();
+                let rx = relay.tx.subscribe();
+                tokio::spawn(serve_peer(stream, relay, rx))
+            })
+            .map(|_| ())
+            .unwrap_or(());
     }
 }
 
@@ -72,17 +77,24 @@ async fn run_relay(listener: TcpListener) {
 /// if the game is already full.
 async fn claim_slot(relay: &Relay) -> Option<(u64, bool)> {
     let mut slots = relay.slots.lock().await;
-    let free = slots.iter().position(|taken| !*taken)?;
-    slots[free] = true;
-    let all_filled = slots.iter().all(|taken| *taken);
-    Some(((free + 1) as u64, all_filled))
+    slots
+        .iter()
+        .position(|taken| !*taken)
+        .map(|free| {
+            slots[free] = true;
+            ((free + 1) as u64, slots.iter().all(|taken| *taken))
+        })
 }
 
 /// Release a slot when its peer leaves.
 async fn free_slot(relay: &Relay, id: u64) {
-    if let Some(slot) = relay.slots.lock().await.get_mut((id - 1) as usize) {
-        *slot = false;
-    }
+    relay
+        .slots
+        .lock()
+        .await
+        .get_mut((id - 1) as usize)
+        .map(|slot| *slot = false)
+        .unwrap_or(());
 }
 
 /// Serve one peer: handshake, claim a slot id, broadcast `go` if it completes the
@@ -107,10 +119,12 @@ async fn serve_peer(stream: TcpStream, relay: Arc<Relay>, mut rx: broadcast::Rec
     }
     println!("relay: peer {id} connected");
     // Completing the pair starts both clients together (no early-input loss).
-    if all_filled {
-        println!("relay: both players present — sending go");
-        let _ = relay.tx.send(Bus::Go);
-    }
+    all_filled
+        .then(|| {
+            println!("relay: both players present — sending go");
+            let _ = relay.tx.send(Bus::Go);
+        })
+        .unwrap_or(());
 
     let mut sent_in = 0u64;
     let mut sent_out = 0u64;
@@ -119,9 +133,11 @@ async fn serve_peer(stream: TcpStream, relay: Arc<Relay>, mut rx: broadcast::Rec
             incoming = source.next() => match incoming {
                 Some(Ok(msg)) if msg.is_binary() => {
                     sent_in += 1;
-                    if sent_in == 1 || sent_in.is_multiple_of(300) {
-                        println!("relay: peer {id} -> {sent_in} input frames forwarded");
-                    }
+                    ((sent_in == 1) | sent_in.is_multiple_of(300))
+                        .then(|| {
+                            println!("relay: peer {id} -> {sent_in} input frames forwarded");
+                        })
+                        .unwrap_or(());
                     let _ = relay.tx.send(Bus::Data(id, msg.into_data().to_vec()));
                 }
                 Some(Ok(msg)) if msg.is_close() => break,
@@ -136,9 +152,11 @@ async fn serve_peer(stream: TcpStream, relay: Arc<Relay>, mut rx: broadcast::Rec
                 }
                 Ok(Bus::Data(from, data)) if from != id => {
                     sent_out += 1;
-                    if sent_out == 1 {
-                        println!("relay: peer {id} <- first frame from peer {from}");
-                    }
+                    (sent_out == 1)
+                        .then(|| {
+                            println!("relay: peer {id} <- first frame from peer {from}");
+                        })
+                        .unwrap_or(());
                     if sink.send(Message::binary(data)).await.is_err() {
                         break;
                     }

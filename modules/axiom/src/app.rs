@@ -209,9 +209,9 @@ impl RunningApp {
         let mut commands = SceneCommands::new(aspect);
         let mut meshes: Assets<Mesh> = Assets::new();
         let mut materials: Assets<Material> = Assets::new();
-        if let Some(setup) = app.setup {
-            setup(&mut commands, &mut meshes, &mut materials);
-        }
+        app.setup
+            .into_iter()
+            .for_each(|setup| setup(&mut commands, &mut meshes, &mut materials));
         let renderables = commands.renderable_count();
 
         // Realize the scene; capture the per-frame light direction.
@@ -265,16 +265,19 @@ impl RunningApp {
     /// indices. Empty when the app registered no mesh. Plain data the windowing
     /// backend uploads.
     pub fn mesh_vertex_stream(&self) -> (Vec<f32>, Vec<u32>) {
-        match self.meshes.first() {
-            Some((_, geom)) => {
+        self.meshes.first().map_or_else(
+            || (Vec::new(), Vec::new()),
+            |(_, geom)| {
                 let mut vertices = Vec::with_capacity(geom.positions.len() * 6);
-                for (p, n) in geom.positions.iter().zip(geom.normals.iter()) {
-                    vertices.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z]);
-                }
+                geom.positions
+                    .iter()
+                    .zip(geom.normals.iter())
+                    .for_each(|(p, n)| {
+                        vertices.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z])
+                    });
                 (vertices, geom.indices.clone())
-            }
-            None => (Vec::new(), Vec::new()),
-        }
+            },
+        )
     }
 
     /// Drive one deterministic frame at `tick`: step the runtime, advance the
@@ -321,17 +324,18 @@ impl RunningApp {
             .enumerate()
             .map(|(i, input)| self.scene.move_command(i as u64, input.player, input.delta))
             .collect();
-        for (j, control) in controls.iter().enumerate() {
+        let scene = &self.scene;
+        commands.extend(controls.iter().enumerate().map(|(j, control)| {
             let yaw = Radians::new(control.yaw.as_radians()).expect("authored yaw is finite");
             let pitch = Radians::new(control.pitch.as_radians()).expect("authored pitch is finite");
-            commands.push(self.scene.controller_command(
+            scene.controller_command(
                 (inputs.len() + j) as u64,
                 control.index,
                 control.move_local,
                 yaw,
                 pitch,
-            ));
-        }
+            )
+        }));
         let engine_frame = self
             .frame_builder
             .build(&host_report, commands)
@@ -339,54 +343,58 @@ impl RunningApp {
         let frame_ctx = self.frame_api.frame_context(&engine_frame);
         self.scene.advance(tick, &frame_ctx);
 
-        if !self.render {
-            return FrameOutcome::simulation_only(tick, self.clear_color);
-        }
+        // `then` keeps the render path lazy: it runs (with all its side effects)
+        // only when rendering is enabled; otherwise the simulation-only outcome is
+        // produced. Behaviourally identical to the former `if !self.render` early
+        // return, without the branch in source.
+        self.render
+            .then(|| {
+                let mut frame = self.pipeline.new_frame(
+                    width,
+                    height,
+                    self.clear_color,
+                    self.light_direction,
+                );
+                let pipeline = &mut self.pipeline;
+                self.meshes.iter().for_each(|(id, geometry)| {
+                    pipeline.frame_add_mesh(
+                        &mut frame,
+                        *id,
+                        geometry.positions.clone(),
+                        geometry.normals.clone(),
+                        geometry.uvs.clone(),
+                        geometry.indices.clone(),
+                    )
+                });
+                self.materials
+                    .iter()
+                    .for_each(|(id, color)| pipeline.frame_add_material(&mut frame, *id, *color));
+                let report = pipeline.submit(&frame, &self.scene, &self.webgpu);
 
-        let mut frame =
-            self.pipeline
-                .new_frame(width, height, self.clear_color, self.light_direction);
-        for (id, geometry) in &self.meshes {
-            self.pipeline.frame_add_mesh(
-                &mut frame,
-                *id,
-                geometry.positions.clone(),
-                geometry.normals.clone(),
-                geometry.uvs.clone(),
-                geometry.indices.clone(),
-            );
-        }
-        for (id, color) in &self.materials {
-            self.pipeline.frame_add_material(&mut frame, *id, *color);
-        }
-        let report = self.pipeline.submit(&frame, &self.scene, &self.webgpu);
+                let view_projection = pipeline.report_view_projection(&report);
+                let draw_count = pipeline.report_draw_count(&report);
+                let draws: Vec<DrawData> = (0..draw_count)
+                    .map(|i| {
+                        let world = pipeline
+                            .report_draw_world(&report, i)
+                            .expect("draw index in range");
+                        let color = pipeline
+                            .report_draw_color(&report, i)
+                            .expect("draw index in range");
+                        DrawData::new(view_projection.multiply(world).as_cols_array(), color)
+                    })
+                    .collect();
 
-        let view_projection = self.pipeline.report_view_projection(&report);
-        let draw_count = self.pipeline.report_draw_count(&report);
-        let mut draws = Vec::with_capacity(draw_count);
-        for i in 0..draw_count {
-            let world = self
-                .pipeline
-                .report_draw_world(&report, i)
-                .expect("draw index in range");
-            let color = self
-                .pipeline
-                .report_draw_color(&report, i)
-                .expect("draw index in range");
-            draws.push(DrawData::new(
-                view_projection.multiply(world).as_cols_array(),
-                color,
-            ));
-        }
-
-        FrameOutcome::new(
-            tick,
-            self.pipeline.report_command_count(&report),
-            self.pipeline.report_clear_color(&report),
-            draws,
-            self.pipeline.report_presented(&report),
-            self.pipeline.report_recorded(&report),
-        )
+                FrameOutcome::new(
+                    tick,
+                    pipeline.report_command_count(&report),
+                    pipeline.report_clear_color(&report),
+                    draws,
+                    pipeline.report_presented(&report),
+                    pipeline.report_recorded(&report),
+                )
+            })
+            .unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
     }
 }
 
@@ -425,7 +433,7 @@ fn cube_geometry() -> MeshGeometry {
     let mut positions = Vec::with_capacity(vertex_count);
     let mut normals = Vec::with_capacity(vertex_count);
     let mut uvs = Vec::with_capacity(vertex_count);
-    for v in 0..vertex_count {
+    (0..vertex_count).for_each(|v| {
         let p = resources
             .resolved_mesh_position_at(&resolved, id, v)
             .expect("vertex in range");
@@ -438,7 +446,7 @@ fn cube_geometry() -> MeshGeometry {
         positions.push(Vec3::new(p[0], p[1], p[2]));
         normals.push(Vec3::new(n[0], n[1], n[2]));
         uvs.push(Vec2::new(u[0], u[1]));
-    }
+    });
     let indices = resources
         .resolved_mesh_indices(&resolved, id)
         .expect("cube mesh present")

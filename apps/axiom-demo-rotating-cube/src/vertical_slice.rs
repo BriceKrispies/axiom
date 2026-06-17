@@ -260,64 +260,67 @@ pub(crate) fn run_vertical_slice(
     };
 
     // ---- 9. Read the resolved resources into a plain-data artifact. ----
-    let mut meshes = Vec::with_capacity(api.resources_api.resolved_mesh_count(&resolved));
-    for i in 0..api.resources_api.resolved_mesh_count(&resolved) {
-        let id = api
-            .resources_api
-            .resolved_mesh_id_at(&resolved, i)
-            .expect("mesh index in range");
-        let vertex_count = api
-            .resources_api
-            .resolved_mesh_vertex_count(&resolved, id)
-            .expect("mesh is present");
-        let mut positions = Vec::with_capacity(vertex_count);
-        let mut normals = Vec::with_capacity(vertex_count);
-        let mut uvs = Vec::with_capacity(vertex_count);
-        for v in 0..vertex_count {
-            positions.push(
-                api.resources_api
-                    .resolved_mesh_position_at(&resolved, id, v)
-                    .expect("vertex in range"),
-            );
-            normals.push(
-                api.resources_api
-                    .resolved_mesh_normal_at(&resolved, id, v)
-                    .expect("vertex in range"),
-            );
-            uvs.push(
-                api.resources_api
-                    .resolved_mesh_uv_at(&resolved, id, v)
-                    .expect("vertex in range"),
-            );
-        }
-        let indices = api
-            .resources_api
-            .resolved_mesh_indices(&resolved, id)
-            .expect("mesh is present")
-            .to_vec();
-        meshes.push(ResolvedMeshArtifact {
-            id,
-            positions,
-            normals,
-            uvs,
-            indices,
-        });
-    }
-    let mut materials = Vec::with_capacity(api.resources_api.resolved_material_count(&resolved));
-    for i in 0..api.resources_api.resolved_material_count(&resolved) {
-        let id = api
-            .resources_api
-            .resolved_material_id_at(&resolved, i)
-            .expect("material index in range");
-        let mat_base_color = api
-            .resources_api
-            .resolved_material_base_color(&resolved, id)
-            .expect("material is present");
-        materials.push(ResolvedMaterialArtifact {
-            id,
-            base_color: mat_base_color,
-        });
-    }
+    let meshes = (0..api.resources_api.resolved_mesh_count(&resolved))
+        .map(|i| {
+            let id = api
+                .resources_api
+                .resolved_mesh_id_at(&resolved, i)
+                .expect("mesh index in range");
+            let vertex_count = api
+                .resources_api
+                .resolved_mesh_vertex_count(&resolved, id)
+                .expect("mesh is present");
+            let positions = (0..vertex_count)
+                .map(|v| {
+                    api.resources_api
+                        .resolved_mesh_position_at(&resolved, id, v)
+                        .expect("vertex in range")
+                })
+                .collect();
+            let normals = (0..vertex_count)
+                .map(|v| {
+                    api.resources_api
+                        .resolved_mesh_normal_at(&resolved, id, v)
+                        .expect("vertex in range")
+                })
+                .collect();
+            let uvs = (0..vertex_count)
+                .map(|v| {
+                    api.resources_api
+                        .resolved_mesh_uv_at(&resolved, id, v)
+                        .expect("vertex in range")
+                })
+                .collect();
+            let indices = api
+                .resources_api
+                .resolved_mesh_indices(&resolved, id)
+                .expect("mesh is present")
+                .to_vec();
+            ResolvedMeshArtifact {
+                id,
+                positions,
+                normals,
+                uvs,
+                indices,
+            }
+        })
+        .collect();
+    let materials = (0..api.resources_api.resolved_material_count(&resolved))
+        .map(|i| {
+            let id = api
+                .resources_api
+                .resolved_material_id_at(&resolved, i)
+                .expect("material index in range");
+            let mat_base_color = api
+                .resources_api
+                .resolved_material_base_color(&resolved, id)
+                .expect("material is present");
+            ResolvedMaterialArtifact {
+                id,
+                base_color: mat_base_color,
+            }
+        })
+        .collect();
     let resolved_resources_artifact = ResolvedResourcesArtifact { meshes, materials };
 
     // ---- 10. GLUE: scene snapshot + resolved resources -> render input plan. ----
@@ -334,11 +337,11 @@ pub(crate) fn run_vertical_slice(
     );
     api.render_api
         .set_input_clear_color(&mut render_input, render_input_artifact.clear_color);
-    if let Some(camera) = render_input_artifact.camera {
+    render_input_artifact.camera.iter().for_each(|camera| {
         api.render_api
             .set_input_camera(&mut render_input, camera.view, camera.projection);
-    }
-    for light in &render_input_artifact.lights {
+    });
+    render_input_artifact.lights.iter().for_each(|light| {
         // Every demo light is directional (see scene_to_render_input).
         api.render_api.add_input_directional_light(
             &mut render_input,
@@ -346,8 +349,8 @@ pub(crate) fn run_vertical_slice(
             light.color,
             Ratio::new(light.intensity).expect("light intensity is finite"),
         );
-    }
-    for mesh in &render_input_artifact.meshes {
+    });
+    render_input_artifact.meshes.iter().for_each(|mesh| {
         let positions = mesh
             .positions
             .iter()
@@ -367,16 +370,16 @@ pub(crate) fn run_vertical_slice(
             uvs,
             mesh.indices.clone(),
         );
-    }
-    for material in &render_input_artifact.materials {
+    });
+    render_input_artifact.materials.iter().for_each(|material| {
         let c = material.base_color;
         api.render_api.add_input_basic_lit_material(
             &mut render_input,
             material.id,
             Vec4::new(c[0], c[1], c[2], c[3]),
         );
-    }
-    for object in &render_input_artifact.objects {
+    });
+    render_input_artifact.objects.iter().for_each(|object| {
         api.render_api.add_input_object(
             &mut render_input,
             object.world,
@@ -384,7 +387,7 @@ pub(crate) fn run_vertical_slice(
             object.material_idx,
             object.visible,
         );
-    }
+    });
 
     // ---- 12. Compile the render command list (un-nameable value). ----
     let render_commands = api.render_api.build_command_list(&render_input);
@@ -393,41 +396,70 @@ pub(crate) fn run_vertical_slice(
     let command_count = api.render_api.command_count(&render_commands);
     let render_command_list_artifact = RenderCommandListArtifact {
         commands: (0..command_count)
-            .filter_map(
-                |i| match api.render_api.command_kind_at(&render_commands, i)? {
-                    RenderApi::KIND_CLEAR_FRAME => api
-                        .render_api
-                        .command_clear_color_at(&render_commands, i)
-                        .map(|color| RenderCommandArtifact::ClearFrame { color }),
-                    RenderApi::KIND_SET_CAMERA => api
-                        .render_api
-                        .command_camera_at(&render_commands, i)
-                        .map(|(view, projection)| RenderCommandArtifact::SetCamera {
-                            view,
-                            projection,
-                        }),
-                    RenderApi::KIND_SET_PIPELINE => api
-                        .render_api
-                        .command_pipeline_at(&render_commands, i)
-                        .map(|pipeline_id| RenderCommandArtifact::SetPipeline { pipeline_id }),
-                    RenderApi::KIND_SET_MESH => api
-                        .render_api
-                        .command_mesh_id_at(&render_commands, i)
-                        .map(|mesh_id| RenderCommandArtifact::SetMesh { mesh_id }),
-                    RenderApi::KIND_SET_MATERIAL => api
-                        .render_api
-                        .command_material_id_at(&render_commands, i)
-                        .map(|material_id| RenderCommandArtifact::SetMaterial { material_id }),
-                    RenderApi::KIND_DRAW_INDEXED => api
-                        .render_api
-                        .command_draw_indexed_at(&render_commands, i)
-                        .map(|(index_count, world)| RenderCommandArtifact::DrawIndexed {
-                            index_count,
-                            world,
-                        }),
-                    _ => None,
-                },
-            )
+            .filter_map(|i| {
+                api.render_api
+                    .command_kind_at(&render_commands, i)
+                    .and_then(|kind| {
+                        let clear = (kind == RenderApi::KIND_CLEAR_FRAME)
+                            .then(|| {
+                                api.render_api
+                                    .command_clear_color_at(&render_commands, i)
+                                    .map(|color| RenderCommandArtifact::ClearFrame { color })
+                            })
+                            .flatten();
+                        let camera = (kind == RenderApi::KIND_SET_CAMERA)
+                            .then(|| {
+                                api.render_api.command_camera_at(&render_commands, i).map(
+                                    |(view, projection)| RenderCommandArtifact::SetCamera {
+                                        view,
+                                        projection,
+                                    },
+                                )
+                            })
+                            .flatten();
+                        let pipeline = (kind == RenderApi::KIND_SET_PIPELINE)
+                            .then(|| {
+                                api.render_api
+                                    .command_pipeline_at(&render_commands, i)
+                                    .map(|pipeline_id| RenderCommandArtifact::SetPipeline {
+                                        pipeline_id,
+                                    })
+                            })
+                            .flatten();
+                        let mesh = (kind == RenderApi::KIND_SET_MESH)
+                            .then(|| {
+                                api.render_api
+                                    .command_mesh_id_at(&render_commands, i)
+                                    .map(|mesh_id| RenderCommandArtifact::SetMesh { mesh_id })
+                            })
+                            .flatten();
+                        let material = (kind == RenderApi::KIND_SET_MATERIAL)
+                            .then(|| {
+                                api.render_api
+                                    .command_material_id_at(&render_commands, i)
+                                    .map(|material_id| RenderCommandArtifact::SetMaterial {
+                                        material_id,
+                                    })
+                            })
+                            .flatten();
+                        let draw = (kind == RenderApi::KIND_DRAW_INDEXED)
+                            .then(|| {
+                                api.render_api.command_draw_indexed_at(&render_commands, i).map(
+                                    |(index_count, world)| RenderCommandArtifact::DrawIndexed {
+                                        index_count,
+                                        world,
+                                    },
+                                )
+                            })
+                            .flatten();
+                        clear
+                            .or(camera)
+                            .or(pipeline)
+                            .or(mesh)
+                            .or(material)
+                            .or(draw)
+                    })
+            })
             .collect(),
     };
 
@@ -443,8 +475,10 @@ pub(crate) fn run_vertical_slice(
         gpu_submission_artifact.target_width,
         gpu_submission_artifact.target_height,
     );
-    for command in &gpu_submission_artifact.commands {
-        match *command {
+    gpu_submission_artifact
+        .commands
+        .iter()
+        .for_each(|command| match *command {
             GpuCommandArtifact::ClearFrame { color } => api
                 .webgpu_api
                 .submission_clear_frame(&mut submission, color),
@@ -464,8 +498,7 @@ pub(crate) fn run_vertical_slice(
                 .webgpu_api
                 .submission_draw_indexed(&mut submission, index_count, world),
             GpuCommandArtifact::Present => api.webgpu_api.submission_present(&mut submission),
-        }
-    }
+        });
     let gpu_report = api.webgpu_api.submit(submission);
 
     // ---- 16. Read the GPU submission report into a plain-data artifact. ----

@@ -22,10 +22,9 @@ pub(crate) trait Simulant: fmt::Debug {
 
 /// Construct the backend for a run.
 pub(crate) fn build(backend: Backend, peers: usize) -> Box<dyn Simulant> {
-    match backend {
-        Backend::Engine => Box::new(EngineSimulant::new(peers)),
-        Backend::Mock => Box::<MockSimulant>::default(),
-    }
+    let engine: fn(usize) -> Box<dyn Simulant> = |p| Box::new(EngineSimulant::new(p));
+    let mock: fn(usize) -> Box<dyn Simulant> = |_| Box::<MockSimulant>::default();
+    [mock, engine][(backend == Backend::Engine) as usize](peers)
 }
 
 /// Encode a move delta as the netcode payload: x and y as two little-endian f32s.
@@ -38,12 +37,14 @@ pub(crate) fn encode_delta(delta: Vec3) -> Vec<u8> {
 
 /// Decode a move payload; a short/garbled payload is no movement.
 fn decode_delta(payload: &[u8]) -> Vec3 {
-    if payload.len() < 8 {
-        return Vec3::ZERO;
-    }
-    let x = f32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let y = f32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    Vec3::new(x, y, 0.0)
+    payload
+        .get(0..8)
+        .map(|p| {
+            let x = f32::from_le_bytes([p[0], p[1], p[2], p[3]]);
+            let y = f32::from_le_bytes([p[4], p[5], p[6], p[7]]);
+            Vec3::new(x, y, 0.0)
+        })
+        .unwrap_or(Vec3::ZERO)
 }
 
 /// A finite linear colour channel from an authored literal.
@@ -102,7 +103,7 @@ fn build_app(peers: usize) -> RunningApp {
         .setup(move |world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
             let span = peers.max(1) as f32;
-            for i in 0..peers {
+            (0..peers).for_each(|i| {
                 let x = (i as f32) - (span - 1.0) * 0.5;
                 let material = materials.add(Material::lit(Color::linear_rgb(
                     ch(0.30 + 0.5 * ((i % 2) as f32)),
@@ -117,7 +118,7 @@ fn build_app(peers: usize) -> RunningApp {
                     },
                     Player::new(i as u32),
                 ));
-            }
+            });
             world.spawn((
                 Transform::from_translation(Vec3::new(0.0, 0.0, 6.0 + span)),
                 Camera::perspective(PerspectiveProjection {
@@ -147,14 +148,14 @@ struct MockSimulant {
 
 impl Simulant for MockSimulant {
     fn step(&mut self, tick: u64, inputs: &[(u64, u32, Vec<u8>)]) -> Vec<u8> {
-        let mut s = self.state ^ tick.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        for (peer, kind, payload) in inputs {
-            s = s.rotate_left(7) ^ peer.wrapping_mul(0xD1B5_4A32_D192_ED03);
-            s = s.wrapping_add(*kind as u64);
-            for &b in payload {
-                s = (s ^ b as u64).wrapping_mul(0x0000_0100_0000_01B3);
-            }
-        }
+        let seed = self.state ^ tick.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let s = inputs.iter().fold(seed, |acc, (peer, kind, payload)| {
+            let acc = acc.rotate_left(7) ^ peer.wrapping_mul(0xD1B5_4A32_D192_ED03);
+            let acc = acc.wrapping_add(*kind as u64);
+            payload
+                .iter()
+                .fold(acc, |a, &b| (a ^ b as u64).wrapping_mul(0x0000_0100_0000_01B3))
+        });
         self.state = s;
         s.to_le_bytes().to_vec()
     }

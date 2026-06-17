@@ -99,14 +99,15 @@ impl Scene {
     }
 
     pub(crate) fn set_local(&mut self, id: SceneNodeId, local: Transform) -> SceneResult<()> {
-        if !self.is_node(id) {
-            return Err(SceneError::missing_node("set_local: node id not in scene"));
-        }
-        self.world
-            .storage_mut()
-            .locals
-            .insert(Self::entity(id), local);
-        Ok(())
+        self.is_node(id)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("set_local: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .locals
+                    .insert(Self::entity(id), local);
+            })
     }
 
     pub(crate) fn local(&self, id: SceneNodeId) -> SceneResult<Transform> {
@@ -121,10 +122,12 @@ impl Scene {
     pub(crate) fn world_transform(&self, id: SceneNodeId) -> SceneResult<Transform> {
         let storage = self.world.storage();
         let entity = Self::entity(id);
-        match storage.locals.get(entity) {
-            None => Err(SceneError::missing_node("scene does not contain that node")),
-            Some(&local) => Ok(storage.worlds.get(entity).copied().unwrap_or(local)),
-        }
+        storage
+            .locals
+            .get(entity)
+            .copied()
+            .map(|local| storage.worlds.get(entity).copied().unwrap_or(local))
+            .ok_or_else(|| SceneError::missing_node("scene does not contain that node"))
     }
 
     pub(crate) fn parent_of(&self, id: SceneNodeId) -> Option<SceneNodeId> {
@@ -142,41 +145,45 @@ impl Scene {
         child: SceneNodeId,
         parent: SceneNodeId,
     ) -> SceneResult<()> {
-        if child == parent {
-            return Err(SceneError::self_parenting(
-                "set_parent: a node cannot be its own parent",
-            ));
-        }
-        if !self.is_node(child) {
-            return Err(SceneError::missing_node(
-                "set_parent: child id not in scene",
-            ));
-        }
-        if !self.is_node(parent) {
-            return Err(SceneError::missing_node(
-                "set_parent: parent id not in scene",
-            ));
-        }
-        if self.would_introduce_cycle(Self::entity(child), Self::entity(parent)) {
-            return Err(SceneError::hierarchy_cycle(
-                "set_parent: assignment would introduce a cycle",
-            ));
-        }
-        self.world
-            .storage_mut()
-            .parents
-            .insert(Self::entity(child), Self::entity(parent));
-        Ok(())
+        (child != parent)
+            .then_some(())
+            .ok_or_else(|| {
+                SceneError::self_parenting("set_parent: a node cannot be its own parent")
+            })
+            .and_then(|()| {
+                self.is_node(child)
+                    .then_some(())
+                    .ok_or_else(|| SceneError::missing_node("set_parent: child id not in scene"))
+            })
+            .and_then(|()| {
+                self.is_node(parent)
+                    .then_some(())
+                    .ok_or_else(|| SceneError::missing_node("set_parent: parent id not in scene"))
+            })
+            .and_then(|()| {
+                (!self.would_introduce_cycle(Self::entity(child), Self::entity(parent)))
+                    .then_some(())
+                    .ok_or_else(|| {
+                        SceneError::hierarchy_cycle(
+                            "set_parent: assignment would introduce a cycle",
+                        )
+                    })
+            })
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .parents
+                    .insert(Self::entity(child), Self::entity(parent));
+            })
     }
 
     pub(crate) fn clear_parent(&mut self, child: SceneNodeId) -> SceneResult<()> {
-        if !self.is_node(child) {
-            return Err(SceneError::missing_node(
-                "clear_parent: child id not in scene",
-            ));
-        }
-        self.world.storage_mut().parents.remove(Self::entity(child));
-        Ok(())
+        self.is_node(child)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("clear_parent: child id not in scene"))
+            .map(|()| {
+                self.world.storage_mut().parents.remove(Self::entity(child));
+            })
     }
 
     /// Walk upward from `new_parent`; the assignment cycles iff we reach
@@ -184,31 +191,30 @@ impl Scene {
     /// cycle, only reachable by corrupting the parents column directly).
     fn would_introduce_cycle(&self, child: EntityId, new_parent: EntityId) -> bool {
         let parents = &self.world.storage().parents;
-        let mut cursor = Some(new_parent);
+        // Walk the ancestor chain from `new_parent` as a lazy iterator, halting
+        // the moment a node repeats (a pre-existing cycle) so the walk is finite.
+        // The assignment cycles iff that finite walk visits `child`.
         let mut visited: BTreeSet<EntityId> = BTreeSet::new();
-        while let Some(id) = cursor {
-            if id == child {
-                return true;
-            }
-            if !visited.insert(id) {
-                return true;
-            }
-            cursor = parents.get(id).copied();
-        }
-        false
+        std::iter::successors(Some(new_parent), |&id| parents.get(id).copied())
+            // Each step is a cycle hit iff it reaches `child` or revisits a node;
+            // `scan` yields one bool per visited ancestor and `any` short-circuits
+            // on the first hit, so the lazy walk never runs past the first repeat.
+            .scan((), |(), id| Some((id == child) | !visited.insert(id)))
+            .any(|hit| hit)
     }
 
     // --- Components ---
 
     pub(crate) fn add_camera(&mut self, node: SceneNodeId, camera: Camera) -> SceneResult<()> {
-        if !self.is_node(node) {
-            return Err(SceneError::missing_node("add_camera: node id not in scene"));
-        }
-        self.world
-            .storage_mut()
-            .cameras
-            .insert(Self::entity(node), camera);
-        Ok(())
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_camera: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .cameras
+                    .insert(Self::entity(node), camera);
+            })
     }
 
     pub(crate) fn camera(&self, node: SceneNodeId) -> Option<&Camera> {
@@ -216,42 +222,33 @@ impl Scene {
     }
 
     pub(crate) fn remove_camera(&mut self, node: SceneNodeId) -> SceneResult<()> {
-        if self
-            .world
+        self.world
             .storage_mut()
             .cameras
             .remove(Self::entity(node))
-            .is_none()
-        {
-            return Err(SceneError::missing_camera(
-                "remove_camera: node has no camera",
-            ));
-        }
-        Ok(())
+            .map(|_| ())
+            .ok_or_else(|| SceneError::missing_camera("remove_camera: node has no camera"))
     }
 
     pub(crate) fn add_light(&mut self, node: SceneNodeId, light: Light) -> SceneResult<()> {
-        if !self.is_node(node) {
-            return Err(SceneError::missing_node("add_light: node id not in scene"));
-        }
-        self.world
-            .storage_mut()
-            .lights
-            .insert(Self::entity(node), light);
-        Ok(())
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_light: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .lights
+                    .insert(Self::entity(node), light);
+            })
     }
 
     pub(crate) fn remove_light(&mut self, node: SceneNodeId) -> SceneResult<()> {
-        if self
-            .world
+        self.world
             .storage_mut()
             .lights
             .remove(Self::entity(node))
-            .is_none()
-        {
-            return Err(SceneError::missing_light("remove_light: node has no light"));
-        }
-        Ok(())
+            .map(|_| ())
+            .ok_or_else(|| SceneError::missing_light("remove_light: node has no light"))
     }
 
     pub(crate) fn add_renderable(
@@ -259,31 +256,26 @@ impl Scene {
         node: SceneNodeId,
         renderable: Renderable,
     ) -> SceneResult<()> {
-        if !self.is_node(node) {
-            return Err(SceneError::missing_node(
-                "add_renderable: node id not in scene",
-            ));
-        }
-        self.world
-            .storage_mut()
-            .renderables
-            .insert(Self::entity(node), renderable);
-        Ok(())
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_renderable: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .renderables
+                    .insert(Self::entity(node), renderable);
+            })
     }
 
     pub(crate) fn remove_renderable(&mut self, node: SceneNodeId) -> SceneResult<()> {
-        if self
-            .world
+        self.world
             .storage_mut()
             .renderables
             .remove(Self::entity(node))
-            .is_none()
-        {
-            return Err(SceneError::missing_renderable(
-                "remove_renderable: node has no renderable",
-            ));
-        }
-        Ok(())
+            .map(|_| ())
+            .ok_or_else(|| {
+                SceneError::missing_renderable("remove_renderable: node has no renderable")
+            })
     }
 
     pub(crate) fn set_renderable_visible(
@@ -291,64 +283,59 @@ impl Scene {
         node: SceneNodeId,
         visible: bool,
     ) -> SceneResult<()> {
-        match self
-            .world
+        self.world
             .storage_mut()
             .renderables
             .get_mut(Self::entity(node))
-        {
-            Some(r) => {
-                r.set_visible(visible);
-                Ok(())
-            }
-            None => Err(SceneError::missing_renderable(
-                "set_renderable_visible: node has no renderable",
-            )),
-        }
+            .map(|r| r.set_visible(visible))
+            .ok_or_else(|| {
+                SceneError::missing_renderable("set_renderable_visible: node has no renderable")
+            })
     }
 
     pub(crate) fn add_spin(&mut self, node: SceneNodeId, spin: Spin) -> SceneResult<()> {
-        if !self.is_node(node) {
-            return Err(SceneError::missing_node("add_spin: node id not in scene"));
-        }
-        self.world
-            .storage_mut()
-            .spins
-            .insert(Self::entity(node), spin);
-        Ok(())
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_spin: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .spins
+                    .insert(Self::entity(node), spin);
+            })
     }
 
     /// Mark `node` as the controllable node for `player` index, so per-tick move
     /// commands addressed to that index translate it (via [`PlayerMoveSystem`]).
     pub(crate) fn add_player(&mut self, node: SceneNodeId, player: u32) -> SceneResult<()> {
-        if !self.is_node(node) {
-            return Err(SceneError::missing_node("add_player: node id not in scene"));
-        }
-        self.world
-            .storage_mut()
-            .players
-            .insert(Self::entity(node), player);
-        Ok(())
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_player: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .players
+                    .insert(Self::entity(node), player);
+            })
     }
 
     /// Mark `node` as the first-person controller node for `index`, so per-tick
     /// controller inputs addressed to that index yaw and move it (via
     /// [`ControllerSystem`]).
     pub(crate) fn add_controller(&mut self, node: SceneNodeId, index: u32) -> SceneResult<()> {
-        if !self.is_node(node) {
-            return Err(SceneError::missing_node(
-                "add_controller: node id not in scene",
-            ));
-        }
-        self.world.storage_mut().controllers.insert(
-            Self::entity(node),
-            ControllerState {
-                index,
-                yaw: 0.0,
-                pitch: 0.0,
-            },
-        );
-        Ok(())
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_controller: node id not in scene"))
+            .map(|()| {
+                self.world.storage_mut().controllers.insert(
+                    Self::entity(node),
+                    ControllerState {
+                        index,
+                        yaw: 0.0,
+                        pitch: 0.0,
+                    },
+                );
+            })
     }
 
     // --- Transform propagation ---

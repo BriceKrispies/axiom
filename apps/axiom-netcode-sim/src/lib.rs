@@ -64,22 +64,24 @@ struct Peer {
 impl Peer {
     /// Whether this peer is connected at driver tick `t`.
     fn active(&self, t: u64) -> bool {
-        t >= self.cfg.join_tick && t < self.cfg.leave_tick
+        (t >= self.cfg.join_tick) & (t < self.cfg.leave_tick)
     }
 
     /// Whether this peer should submit a fresh input this driver tick.
     fn should_submit(&self, t: u64, max_ahead: u64) -> bool {
         self.active(t)
-            && t.is_multiple_of(self.cfg.tick_rate.max(1))
-            && self.submitted.saturating_sub(self.net.confirmed_tick()) < max_ahead
+            & t.is_multiple_of(self.cfg.tick_rate.max(1))
+            & (self.submitted.saturating_sub(self.net.confirmed_tick()) < max_ahead)
     }
 
     /// This peer's input delta for `tick`, per its script.
     fn input(&mut self, tick: u64) -> Vec3 {
         match &self.cfg.input {
             InputScript::Idle => Vec3::ZERO,
-            InputScript::Scripted(v) if v.is_empty() => Vec3::ZERO,
-            InputScript::Scripted(v) => v[(tick as usize) % v.len()],
+            InputScript::Scripted(v) => v
+                .get((tick as usize).checked_rem(v.len()).unwrap_or(0))
+                .copied()
+                .unwrap_or(Vec3::ZERO),
             InputScript::RandomWalk => {
                 let mut axis = || (self.input_rng.next_bounded(3) as i32 - 1) as f32 * MOVE_SPEED;
                 let (x, y) = (axis(), axis());
@@ -165,8 +167,8 @@ fn submit_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64, cfg: &SimC
         .map(|p| p.net.confirmed_tick())
         .min()
         .unwrap_or(0);
-    for (i, peer) in peers.iter_mut().enumerate() {
-        if peer.should_submit(t, cfg.max_ahead) {
+    peers.iter_mut().enumerate().for_each(|(i, peer)| {
+        peer.should_submit(t, cfg.max_ahead).then(|| {
             let delta = peer.input(t);
             let frame = peer.net.submit_local(MOVE_KIND, &encode_delta(delta));
             let sim_tick = peer.submitted;
@@ -175,53 +177,52 @@ fn submit_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64, cfg: &SimC
             peer.cheat.note_submit(&frame);
             peer.outbox.push((sim_tick, frame.clone()));
             net.broadcast(i, &frame, t);
-        }
-        if cfg.network.retransmit && peer.active(t) {
+        });
+        (cfg.network.retransmit & peer.active(t)).then(|| {
             peer.outbox.retain(|(st, _)| *st >= resend_floor);
-            if peer.outbox.len() > RESEND_WINDOW {
-                let excess = peer.outbox.len() - RESEND_WINDOW;
-                peer.outbox.drain(0..excess);
-            }
-            for (_, f) in peer.outbox.clone() {
-                net.broadcast(i, &f, t);
-            }
-        }
-        if peer.active(t) {
-            for f in peer.cheat_frames() {
-                net.broadcast(i, &f, t);
-            }
-        }
-    }
+            let excess = peer.outbox.len().saturating_sub(RESEND_WINDOW);
+            peer.outbox.drain(0..excess);
+            peer.outbox
+                .clone()
+                .into_iter()
+                .for_each(|(_, f)| net.broadcast(i, &f, t));
+        });
+        peer.active(t).then(|| {
+            peer.cheat_frames()
+                .into_iter()
+                .for_each(|f| net.broadcast(i, &f, t));
+        });
+    });
 }
 
 /// Deliver every frame due this tick into its recipient's session.
 fn deliver_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
-    for (to, bytes) in net.deliver_due(t) {
-        if peers[to].net.ingest(&bytes).is_err() {
+    net.deliver_due(t).into_iter().for_each(|(to, bytes)| {
+        peers[to].net.ingest(&bytes).is_err().then(|| {
             peers[to].ingest_errors += 1;
-        }
-    }
+        });
+    });
 }
 
 /// Diverge a corrupt peer's reported state so its beacon mismatches.
 fn perturb(mut bytes: Vec<u8>) -> Vec<u8> {
-    match bytes.first_mut() {
-        Some(b) => *b ^= 0xFF,
-        None => bytes.push(0xAB),
-    }
+    bytes.first_mut().map(|b| *b ^= 0xFF);
+    bytes.is_empty().then(|| bytes.push(0xAB));
     bytes
 }
 
 /// Confirm every ready tick for every peer: step its sim, fingerprint + beacon
 /// the state, record latency, broadcast the beacon, and drain reconciliations.
 fn confirm_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
-    for (i, peer) in peers.iter_mut().enumerate() {
+    peers.iter_mut().enumerate().for_each(|(i, peer)| {
         while let Some(tick) = peer.net.ready_tick() {
             let inputs = peer.net.confirm_tick(tick);
-            let mut bytes = peer.sim.step(tick, &inputs);
-            if peer.cheat.corrupts_sim() {
-                bytes = perturb(bytes);
-            }
+            let stepped = peer.sim.step(tick, &inputs);
+            let bytes = peer
+                .cheat
+                .corrupts_sim()
+                .then(|| perturb(stepped.clone()))
+                .unwrap_or(stepped);
             let beacon = peer.net.record_local_hash(tick, &bytes);
             let hash = peer.net.digest(&bytes);
             peer.hashes.insert(tick, hash);
@@ -229,9 +230,9 @@ fn confirm_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
             chained.extend_from_slice(&hash);
             peer.history = peer.net.digest(&chained);
             peer.last_hash_prefix = u32::from_le_bytes([hash[0], hash[1], hash[2], hash[3]]);
-            if let Some(submitted_at) = peer.submit_time.get(&tick) {
-                peer.latencies.push(t - submitted_at);
-            }
+            peer.submit_time
+                .get(&tick)
+                .map(|submitted_at| peer.latencies.push(t - submitted_at));
             let peak = peer.net.buffered_inputs();
             peer.buffer_peak = peer.buffer_peak.max(peak);
             net.broadcast(i, &beacon, t);
@@ -247,7 +248,7 @@ fn confirm_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
                 }
             }
         }
-    }
+    });
 }
 
 /// Whether `peers` (excluding corrupt-sim cheaters) all agree wherever they
@@ -255,22 +256,20 @@ fn confirm_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
 fn convergence(peers: &[Peer]) -> (bool, Option<u64>) {
     let mut consensus: BTreeMap<u64, [u8; 32]> = BTreeMap::new();
     let mut first: Option<u64> = None;
-    for p in peers {
-        if p.cheat.corrupts_sim() {
-            continue;
-        }
-        for (&tick, &hash) in &p.hashes {
-            match consensus.get(&tick) {
-                None => {
-                    consensus.insert(tick, hash);
-                }
-                Some(seen) if *seen != hash => {
+    peers
+        .iter()
+        .filter(|p| !p.cheat.corrupts_sim())
+        .for_each(|p| {
+            p.hashes.iter().for_each(|(&tick, &hash)| {
+                let diverged = consensus
+                    .get(&tick)
+                    .map_or(false, |seen| *seen != hash);
+                consensus.entry(tick).or_insert(hash);
+                diverged.then(|| {
                     first = Some(first.map_or(tick, |f| f.min(tick)));
-                }
-                Some(_) => {}
-            }
-        }
-    }
+                });
+            });
+        });
     (first.is_none(), first)
 }
 
@@ -287,25 +286,26 @@ fn stream_line(peers: &[Peer], net: &ModeledNetwork, t: u64) {
             .map(|p| p.net.confirmed_tick())
             .min()
             .unwrap_or(0);
-        floor == 0
-            || active
+        floor.checked_sub(1).map_or(true, |prev| {
+            active
                 .iter()
-                .filter_map(|p| p.hashes.get(&(floor - 1)))
+                .filter_map(|p| p.hashes.get(&prev))
                 .collect::<std::collections::BTreeSet<_>>()
                 .len()
                 <= 1
+        })
     };
     println!(
         "tick {t:>4}: confirmed=[{}] agree={} inflight={}",
         cursors.join(","),
-        if agree { "OK" } else { "XX" },
+        agree.then_some("OK").unwrap_or("XX"),
         net.inflight_count()
     );
 }
 
 /// Collect one CSV row per peer for this tick.
 fn snapshot(peers: &[Peer], t: u64, rows: &mut Vec<CsvRow>) {
-    for p in peers {
+    peers.iter().for_each(|p| {
         let r = p.net.rejections();
         rows.push(CsvRow {
             tick: t,
@@ -317,7 +317,7 @@ fn snapshot(peers: &[Peer], t: u64, rows: &mut Vec<CsvRow>) {
             drop_bad_sig: r.bad_signature,
             drop_window: r.out_of_window,
         });
-    }
+    });
 }
 
 /// Assemble the final report from the peers' accumulators.
@@ -359,21 +359,21 @@ pub fn run_simulation(config: &SimConfig) -> SimReport {
     let mut net = ModeledNetwork::new(config.seed, config.network.clone(), config.peers);
     let mut rows: Vec<CsvRow> = Vec::new();
 
-    for t in 0..config.ticks {
+    (0..config.ticks).for_each(|t| {
         submit_phase(&mut peers, &mut net, t, config);
         deliver_phase(&mut peers, &mut net, t);
         confirm_phase(&mut peers, &mut net, t);
-        if config.csv_path.is_some() {
-            snapshot(&peers, t, &mut rows);
-        }
-        if config.stream {
-            stream_line(&peers, &net, t);
-        }
-    }
+        config
+            .csv_path
+            .is_some()
+            .then(|| snapshot(&peers, t, &mut rows));
+        config.stream.then(|| stream_line(&peers, &net, t));
+    });
 
-    if let Some(path) = &config.csv_path {
-        let _ = write_csv(path, &rows);
-    }
+    config
+        .csv_path
+        .as_ref()
+        .map(|path| write_csv(path, &rows).ok());
     finish(peers)
 }
 

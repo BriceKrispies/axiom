@@ -39,7 +39,7 @@ fn build_app(cubes: usize) -> RunningApp {
         .add_plugins(DefaultPlugins)
         .setup(move |scene, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
-            for i in 0..cubes {
+            (0..cubes).for_each(|i| {
                 let offset = i as f32 * 2.6 - 2.6;
                 let material = materials.add(Material::lit(Color::linear_rgb(
                     ch(0.85),
@@ -55,7 +55,7 @@ fn build_app(cubes: usize) -> RunningApp {
                         },
                         Spin::around(Vec3::UNIT_Y).period(360),
                     ));
-            }
+            });
             scene.spawn((
                 Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
                 Camera::perspective(PerspectiveProjection {
@@ -80,15 +80,13 @@ fn build_app(cubes: usize) -> RunningApp {
 /// packed per-object instance floats (MVP + colour), the clear colour, and the
 /// command count. This is the app-owned bridge between the two modules.
 fn frame_state_bytes(outcome: &FrameOutcome) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    for f in outcome.instance_floats() {
-        bytes.extend_from_slice(&f.to_le_bytes());
-    }
-    for c in outcome.clear_color() {
-        bytes.extend_from_slice(&c.to_le_bytes());
-    }
-    bytes.extend_from_slice(&(outcome.command_count() as u64).to_le_bytes());
-    bytes
+    outcome
+        .instance_floats()
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .chain(outcome.clear_color().iter().flat_map(|c| c.to_le_bytes()))
+        .chain((outcome.command_count() as u64).to_le_bytes())
+        .collect()
 }
 
 /// The per-tick state-hash logs both peers recorded, plus the first tick (if
@@ -146,7 +144,7 @@ pub fn run_two_peer_lockstep(ticks: u64, peer_b_cubes: usize) -> LockstepReport 
         desync_tick: None,
     };
 
-    for tick in 0..ticks {
+    (0..ticks).for_each(|tick| {
         // 1. Both peers submit their input for this tick and exchange them.
         let in_a = net_a.submit_local(0, &[tick as u8]);
         let in_b = net_b.submit_local(0, &[tick as u8]);
@@ -162,10 +160,12 @@ pub fn run_two_peer_lockstep(ticks: u64, peer_b_cubes: usize) -> LockstepReport 
         net_a.ingest(&beacon_b).expect("well-formed beacon");
 
         // 4. Reconcile peer A's view of this tick; record the first desync.
-        if net_a.reconcile(tick) == Some(false) && report.desync_tick.is_none() {
-            report.desync_tick = Some(tick);
-        }
-    }
+        // `Option::or` keeps the first recorded desync tick and ignores later
+        // ones, exactly as the original first-desync-wins check did.
+        report.desync_tick = report
+            .desync_tick
+            .or((net_a.reconcile(tick) == Some(false)).then_some(tick));
+    });
 
     report
 }

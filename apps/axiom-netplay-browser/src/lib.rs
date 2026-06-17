@@ -55,11 +55,20 @@ pub fn encode_delta(delta: Vec3) -> Vec<u8> {
 
 /// Decode a move payload. A short/garbled payload decodes to no movement.
 pub fn decode_delta(payload: &[u8]) -> Vec3 {
-    if payload.len() < 8 {
-        return Vec3::ZERO;
-    }
-    let x = f32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let y = f32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    // Copy the first 8 bytes into a buffer, AND-masked to all-zero unless a full
+    // 8-byte payload was present. A short payload yields an all-zero buffer, so
+    // both `x` and `y` decode to exactly 0.0 — behaviour-identical to the early
+    // `Vec3::ZERO` return, but branch-free (a `.take(8)` over a short slice
+    // simply leaves the unwritten tail at its masked zero).
+    let keep = 0u8.wrapping_sub((payload.len() >= 8) as u8); // 0xFF if full, else 0x00
+    let mut buf = [0u8; 8];
+    payload
+        .iter()
+        .take(8)
+        .enumerate()
+        .for_each(|(i, b)| buf[i] = *b & keep);
+    let x = f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    let y = f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
     Vec3::new(x, y, 0.0)
 }
 

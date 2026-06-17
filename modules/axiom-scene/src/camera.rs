@@ -52,13 +52,13 @@ impl Camera {
                     "camera perspective parameters were rejected by the math layer",
                     cause,
                 )
-            })?;
-        Ok(Camera {
-            fovy_radians,
-            aspect,
-            near,
-            far,
-        })
+            })
+            .map(|_| Camera {
+                fovy_radians,
+                aspect,
+                near,
+                far,
+            })
     }
 
     pub const fn fovy_radians(&self) -> Radians {

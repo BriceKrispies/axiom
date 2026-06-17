@@ -143,9 +143,11 @@ impl RenderPipelineApi {
 
         // Camera: the first camera, if any. view = inverse(node world);
         // projection from validated intrinsics. The wgpu-ready view-projection
-        // is reported for callers that build per-instance MVPs.
-        let mut view_projection = Mat4::IDENTITY;
-        if let Some(cam) = snapshot.cameras().first() {
+        // is reported for callers that build per-instance MVPs. `map_or`
+        // collapses the present/absent arms into a single expression: absent
+        // yields identity, present sets the camera command and returns the
+        // depth-corrected view-projection.
+        let view_projection = snapshot.cameras().first().map_or(Mat4::IDENTITY, |cam| {
             let cam_world = snapshot
                 .node(cam.node())
                 .expect("camera node is present in the snapshot")
@@ -164,54 +166,60 @@ impl RenderPipelineApi {
                 .expect("camera intrinsics were validated at scene insertion");
             render.set_input_camera(&mut input, view, projection);
             let depth_fix = Mat4::from_cols_array(GL_TO_WGPU_DEPTH);
-            view_projection = depth_fix.multiply(projection).multiply(view);
-        }
+            depth_fix.multiply(projection).multiply(view)
+        });
 
         // Lights: every scene light is emitted as directional with the frame's
         // world-space direction; colour/intensity carry through.
-        for light in snapshot.lights() {
+        snapshot.lights().iter().for_each(|light| {
             render.add_input_directional_light(
                 &mut input,
                 frame.light_direction,
                 light.color(),
                 light.intensity(),
             );
-        }
+        });
 
         // Meshes / materials: registration order defines the render-side index.
         // The id->index maps resolve each renderable's mesh/material in O(1)
         // (the lists carry no duplicate ids), and `material_color` lets the
         // per-draw pass below recover a command's colour without a scan.
-        let mut mesh_index: HashMap<u64, u32> = HashMap::with_capacity(frame.meshes.len());
-        for mesh in &frame.meshes {
-            let idx = render.add_input_mesh(
-                &mut input,
-                mesh.id,
-                mesh.positions.clone(),
-                mesh.normals.clone(),
-                mesh.uvs.clone(),
-                mesh.indices.clone(),
-            );
-            mesh_index.insert(mesh.id, idx);
-        }
-        let mut material_index: HashMap<u64, u32> = HashMap::with_capacity(frame.materials.len());
+        let mesh_index: HashMap<u64, u32> = frame
+            .meshes
+            .iter()
+            .map(|mesh| {
+                let idx = render.add_input_mesh(
+                    &mut input,
+                    mesh.id,
+                    mesh.positions.clone(),
+                    mesh.normals.clone(),
+                    mesh.uvs.clone(),
+                    mesh.indices.clone(),
+                );
+                (mesh.id, idx)
+            })
+            .collect();
         let mut material_color: HashMap<u64, [f32; 4]> =
             HashMap::with_capacity(frame.materials.len());
-        for material in &frame.materials {
-            let c = material.color;
-            let idx = render.add_input_basic_lit_material(
-                &mut input,
-                material.id,
-                Vec4::new(c[0], c[1], c[2], c[3]),
-            );
-            material_index.insert(material.id, idx);
-            material_color.insert(material.id, c);
-        }
+        let material_index: HashMap<u64, u32> = frame
+            .materials
+            .iter()
+            .map(|material| {
+                let c = material.color;
+                let idx = render.add_input_basic_lit_material(
+                    &mut input,
+                    material.id,
+                    Vec4::new(c[0], c[1], c[2], c[3]),
+                );
+                material_color.insert(material.id, c);
+                (material.id, idx)
+            })
+            .collect();
 
         // Objects: one per renderable, resolving its mesh/material ids to the
         // render-side indices. The frame must supply an asset for every id the
         // scene references.
-        for renderable in snapshot.renderables() {
+        snapshot.renderables().iter().for_each(|renderable| {
             let world = snapshot
                 .node(renderable.node())
                 .expect("renderable node is present in the snapshot")
@@ -232,7 +240,7 @@ impl RenderPipelineApi {
                 material_idx,
                 renderable.visible(),
             );
-        }
+        });
 
         // ---- Compile and translate to a GPU submission. ----
         let commands = render.build_command_list(&input);
@@ -240,26 +248,37 @@ impl RenderPipelineApi {
         let mut submission = webgpu.new_submission(frame.width, frame.height);
         // Per-kind accessors return `Some` only for their command, so each arm
         // is exercised across a real command list — no unreachable catch-all.
-        for i in 0..count {
-            if let Some(c) = render.command_clear_color_at(&commands, i) {
-                webgpu.submission_clear_frame(&mut submission, c);
-            }
-            if let Some((v, p)) = render.command_camera_at(&commands, i) {
-                webgpu.submission_set_camera(&mut submission, v, p);
-            }
-            if let Some(id) = render.command_pipeline_at(&commands, i) {
-                webgpu.submission_set_pipeline(&mut submission, id);
-            }
-            if let Some(id) = render.command_mesh_id_at(&commands, i) {
-                webgpu.submission_set_mesh(&mut submission, id);
-            }
-            if let Some(id) = render.command_material_id_at(&commands, i) {
-                webgpu.submission_set_material(&mut submission, id);
-            }
-            if let Some((index_count, world)) = render.command_draw_indexed_at(&commands, i) {
-                webgpu.submission_draw_indexed(&mut submission, index_count, world);
-            }
-        }
+        // `for_each` over the index range plus `Option::map` on each accessor
+        // replaces the index `for` and the six `if let` guards branchlessly:
+        // a `None` accessor maps to nothing, a `Some` applies its submission.
+        (0..count).for_each(|i| {
+            render
+                .command_clear_color_at(&commands, i)
+                .into_iter()
+                .for_each(|c| webgpu.submission_clear_frame(&mut submission, c));
+            render
+                .command_camera_at(&commands, i)
+                .into_iter()
+                .for_each(|(v, p)| webgpu.submission_set_camera(&mut submission, v, p));
+            render
+                .command_pipeline_at(&commands, i)
+                .into_iter()
+                .for_each(|id| webgpu.submission_set_pipeline(&mut submission, id));
+            render
+                .command_mesh_id_at(&commands, i)
+                .into_iter()
+                .for_each(|id| webgpu.submission_set_mesh(&mut submission, id));
+            render
+                .command_material_id_at(&commands, i)
+                .into_iter()
+                .for_each(|id| webgpu.submission_set_material(&mut submission, id));
+            render
+                .command_draw_indexed_at(&commands, i)
+                .into_iter()
+                .for_each(|(index_count, world)| {
+                    webgpu.submission_draw_indexed(&mut submission, index_count, world)
+                });
+        });
         webgpu.submission_present(&mut submission);
 
         let clear_color = render
@@ -267,17 +286,25 @@ impl RenderPipelineApi {
             .unwrap_or([0.0; 4]);
 
         // Per-draw data: walk the command list once. Each material command sets
-        // the colour the following draws use; each draw carries its world.
-        let mut draws: Vec<(Mat4, [f32; 4])> = Vec::new();
-        let mut current_color = [1.0_f32; 4];
-        for i in 0..count {
-            if let Some(id) = render.command_material_id_at(&commands, i) {
-                current_color = material_color.get(&id).copied().unwrap_or([1.0; 4]);
-            }
-            if let Some((_, world)) = render.command_draw_indexed_at(&commands, i) {
-                draws.push((world, current_color));
-            }
-        }
+        // the colour the following draws use; each draw carries its world. The
+        // colour is state threaded across commands, so a `fold` carries
+        // `(current_color, draws)`: a material command replaces the colour (else
+        // keeps it via `map_or`), a draw command appends `(world, colour)`.
+        let (_, draws): ([f32; 4], Vec<(Mat4, [f32; 4])>) = (0..count).fold(
+            ([1.0_f32; 4], Vec::new()),
+            |(current_color, mut acc), i| {
+                let next_color = render
+                    .command_material_id_at(&commands, i)
+                    .map_or(current_color, |id| {
+                        material_color.get(&id).copied().unwrap_or([1.0; 4])
+                    });
+                render
+                    .command_draw_indexed_at(&commands, i)
+                    .into_iter()
+                    .for_each(|(_, world)| acc.push((world, next_color)));
+                (next_color, acc)
+            },
+        );
 
         let gpu_report = webgpu.submit(submission);
         RenderReport {

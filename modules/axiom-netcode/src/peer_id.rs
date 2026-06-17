@@ -27,7 +27,7 @@ impl PeerId {
 
     /// Read a peer id previously written with [`Self::write_to`].
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        Ok(PeerId(HandleId::read_from(reader)?))
+        HandleId::read_from(reader).map(PeerId)
     }
 }
 

@@ -83,16 +83,15 @@ fn stress_cubes_app(cubes: u32) -> App {
         .add_plugins(DefaultPlugins)
         .setup(move |world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
-            for i in 0..cubes {
+            (0..cubes).for_each(|i| {
                 let col = i % cols;
                 let row = i / cols;
                 let x = x0 + col as f32 * SPACING;
                 let y = y0 + row as f32 * SPACING;
-                let axis = match i % 3 {
-                    0 => Vec3::UNIT_Y,
-                    1 => Vec3::UNIT_X,
-                    _ => Vec3::new(1.0, 1.0, 0.0),
-                };
+                // Branch-free three-way axis select: `i % 3` is always 0, 1, or
+                // 2, so this index is always in bounds — behaviour-identical to
+                // the original `match`.
+                let axis = [Vec3::UNIT_Y, Vec3::UNIT_X, Vec3::new(1.0, 1.0, 0.0)][(i % 3) as usize];
                 let period = 120 + (i % 240);
                 let material = materials.add(Material::lit(cube_color(i, cubes)));
                 world
@@ -104,7 +103,7 @@ fn stress_cubes_app(cubes: u32) -> App {
                         },
                         Spin::around(axis).period(period),
                     ));
-            }
+            });
             world.spawn((
                 Transform::from_translation(Vec3::new(0.0, 0.0, camera_z)),
                 Camera::perspective(PerspectiveProjection {

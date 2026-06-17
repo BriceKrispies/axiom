@@ -25,17 +25,16 @@ impl LatencyStats {
     /// Summarize a set of per-tick latencies (`None` if the peer confirmed
     /// nothing).
     pub(crate) fn from_samples(mut v: Vec<u64>) -> Option<Self> {
-        if v.is_empty() {
-            return None;
-        }
-        v.sort_unstable();
-        let pick = |num: usize, den: usize| v[((v.len() - 1) * num) / den];
-        Some(LatencyStats {
-            min: v[0],
-            median: pick(1, 2),
-            p95: pick(95, 100),
-            max: v[v.len() - 1],
-            samples: v.len(),
+        (!v.is_empty()).then(|| {
+            v.sort_unstable();
+            let pick = |num: usize, den: usize| v[((v.len() - 1) * num) / den];
+            LatencyStats {
+                min: v[0],
+                median: pick(1, 2),
+                p95: pick(95, 100),
+                max: v[v.len() - 1],
+                samples: v.len(),
+            }
         })
     }
 }
@@ -87,11 +86,9 @@ impl SimReport {
             self.peers.len(),
             self.min_confirmed,
             self.max_confirmed,
-            if self.all_agree { "YES" } else { "NO" },
-            match self.first_divergence {
-                Some(t) => format!(" (first divergence at tick {t})"),
-                None => String::new(),
-            }
+            self.all_agree.then_some("YES").unwrap_or("NO"),
+            self.first_divergence
+                .map_or(String::new(), |t| format!(" (first divergence at tick {t})"))
         );
         println!(
             "{:>4}  {:<16} {:>9} {:>6} {:>20} {:>20} {:>6}",
@@ -103,11 +100,11 @@ impl SimReport {
             "drops(unk/sig/win/mal)",
             "desync"
         );
-        for p in &self.peers {
-            let lat = match p.latency {
-                Some(l) => format!("{}/{}/{}/{}", l.min, l.median, l.p95, l.max),
-                None => "-".to_string(),
-            };
+        self.peers.iter().for_each(|p| {
+            let lat = p.latency.map_or_else(
+                || "-".to_string(),
+                |l| format!("{}/{}/{}/{}", l.min, l.median, l.p95, l.max),
+            );
             let (u, s, w) = p.rejections;
             println!(
                 "{:>4}  {:<16} {:>9} {:>6} {:>20} {:>20} {:>6}",
@@ -119,7 +116,7 @@ impl SimReport {
                 format!("{u}/{s}/{w}/{}", p.ingest_errors),
                 p.desync_ticks.len(),
             );
-        }
+        });
     }
 }
 
@@ -141,7 +138,7 @@ pub(crate) fn write_csv(path: &Path, rows: &[CsvRow]) -> io::Result<()> {
     let mut out = String::from(
         "tick,peer,confirmed,buffered,hash_prefix,drop_unknown,drop_bad_sig,drop_window\n",
     );
-    for r in rows {
+    rows.iter().for_each(|r| {
         out.push_str(&format!(
             "{},{},{},{},{},{},{},{}\n",
             r.tick,
@@ -153,6 +150,6 @@ pub(crate) fn write_csv(path: &Path, rows: &[CsvRow]) -> io::Result<()> {
             r.drop_bad_sig,
             r.drop_window,
         ));
-    }
+    });
     fs::write(path, out)
 }

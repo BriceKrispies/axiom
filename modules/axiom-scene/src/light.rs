@@ -46,28 +46,37 @@ impl Light {
     fn build(math: &MathApi, kind: LightKind, color: Vec3, intensity: Ratio) -> SceneResult<Self> {
         // `intensity` is a `Ratio`, so it is already finite; only the raw colour
         // components still need the engine's finite check.
-        for component in [color.x, color.y, color.z] {
-            if math.validate_finite(component).is_err() {
-                return Err(SceneError::invalid_light_parameters(
-                    "light parameters must be finite",
-                ));
-            }
-        }
-        if color.x < 0.0 || color.y < 0.0 || color.z < 0.0 {
-            return Err(SceneError::invalid_light_parameters(
-                "light colour components must be non-negative",
-            ));
-        }
-        if intensity.get() < 0.0 {
-            return Err(SceneError::invalid_light_parameters(
-                "light intensity must be non-negative",
-            ));
-        }
-        Ok(Light {
-            kind,
-            color,
-            intensity,
-        })
+        [color.x, color.y, color.z]
+            .iter()
+            .all(|&component| math.validate_finite(component).is_ok())
+            .then_some(())
+            .ok_or_else(|| {
+                SceneError::invalid_light_parameters("light parameters must be finite")
+            })
+            .and_then(|()| {
+                // Colour components must be non-negative (the inverse of the
+                // original `x < 0 || y < 0 || z < 0` reject); operands are pure
+                // comparisons, so the short-circuiting `||` becomes a bitwise `&`.
+                ((color.x >= 0.0) & (color.y >= 0.0) & (color.z >= 0.0))
+                    .then_some(())
+                    .ok_or_else(|| {
+                        SceneError::invalid_light_parameters(
+                            "light colour components must be non-negative",
+                        )
+                    })
+            })
+            .and_then(|()| {
+                (intensity.get() >= 0.0).then_some(()).ok_or_else(|| {
+                    SceneError::invalid_light_parameters(
+                        "light intensity must be non-negative",
+                    )
+                })
+            })
+            .map(|()| Light {
+                kind,
+                color,
+                intensity,
+            })
     }
 
     pub const fn kind(&self) -> LightKind {

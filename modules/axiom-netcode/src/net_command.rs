@@ -38,9 +38,14 @@ impl NetCommand {
 
     /// Read a command previously written with [`Self::write_to`].
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        let kind = reader.read_u32()?;
-        let payload = reader.read_byte_slice()?.to_vec();
-        Ok(NetCommand { kind, payload })
+        reader.read_u32().and_then(|kind| {
+            reader
+                .read_byte_slice()
+                .map(|payload| NetCommand {
+                    kind,
+                    payload: payload.to_vec(),
+                })
+        })
     }
 }
 

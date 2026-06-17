@@ -97,10 +97,10 @@ impl FrameOutcome {
     /// windowing run loop presents each frame.
     pub fn instance_floats(&self) -> Vec<f32> {
         let mut out = Vec::with_capacity(self.draws.len() * 20);
-        for draw in &self.draws {
+        self.draws.iter().for_each(|draw| {
             out.extend_from_slice(&draw.mvp);
             out.extend_from_slice(&draw.color);
-        }
+        });
         out
     }
 }
