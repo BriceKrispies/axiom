@@ -142,36 +142,45 @@ impl RenderApi {
         list.push(RenderCommand::ClearFrame {
             color: input.clear_color(),
         });
-        if let Some(camera) = input.camera() {
+        input.camera().map(|camera| {
             list.push(RenderCommand::SetCamera {
                 view: camera.view(),
                 projection: camera.projection(),
             });
-        }
+        });
         list.push(RenderCommand::SetPipeline {
             pipeline_id: RenderPipelineKind::BASIC_LIT,
         });
-        for object in input.objects() {
-            if !object.visible() {
-                continue;
-            }
-            let mesh = match input.meshes().get(object.mesh_idx() as usize) {
-                Some(m) => m,
-                None => continue,
-            };
-            let material = match input.materials().get(object.material_idx() as usize) {
-                Some(m) => m,
-                None => continue,
-            };
-            list.push(RenderCommand::SetMesh { mesh_id: mesh.id() });
-            list.push(RenderCommand::SetMaterial {
-                material_id: material.id(),
-            });
-            list.push(RenderCommand::DrawIndexed {
-                index_count: mesh.indices().len() as u32,
-                world: object.world(),
-            });
-        }
+        input.objects().iter().for_each(|object| {
+            // An object emits commands only when it is visible AND both its
+            // mesh and material indices resolve. `Option`-combinators carry
+            // each gate: a failed gate yields `None` and pushes nothing.
+            object
+                .visible()
+                .then_some(object)
+                .and_then(|object| {
+                    input
+                        .meshes()
+                        .get(object.mesh_idx() as usize)
+                        .map(|mesh| (object, mesh))
+                })
+                .and_then(|(object, mesh)| {
+                    input
+                        .materials()
+                        .get(object.material_idx() as usize)
+                        .map(|material| (object, mesh, material))
+                })
+                .map(|(object, mesh, material)| {
+                    list.push(RenderCommand::SetMesh { mesh_id: mesh.id() });
+                    list.push(RenderCommand::SetMaterial {
+                        material_id: material.id(),
+                    });
+                    list.push(RenderCommand::DrawIndexed {
+                        index_count: mesh.indices().len() as u32,
+                        world: object.world(),
+                    });
+                });
+        });
         list
     }
 
@@ -186,38 +195,23 @@ impl RenderApi {
     }
 
     pub fn command_clear_color_at(&self, list: &RenderCommandList, idx: usize) -> Option<[f32; 4]> {
-        match list.at(idx) {
-            Some(RenderCommand::ClearFrame { color }) => Some(*color),
-            _ => None,
-        }
+        list.at(idx).and_then(RenderCommand::as_clear_color)
     }
 
     pub fn command_camera_at(&self, list: &RenderCommandList, idx: usize) -> Option<(Mat4, Mat4)> {
-        match list.at(idx) {
-            Some(RenderCommand::SetCamera { view, projection }) => Some((*view, *projection)),
-            _ => None,
-        }
+        list.at(idx).and_then(RenderCommand::as_camera)
     }
 
     pub fn command_pipeline_at(&self, list: &RenderCommandList, idx: usize) -> Option<u32> {
-        match list.at(idx) {
-            Some(RenderCommand::SetPipeline { pipeline_id }) => Some(*pipeline_id),
-            _ => None,
-        }
+        list.at(idx).and_then(RenderCommand::as_pipeline)
     }
 
     pub fn command_mesh_id_at(&self, list: &RenderCommandList, idx: usize) -> Option<u64> {
-        match list.at(idx) {
-            Some(RenderCommand::SetMesh { mesh_id }) => Some(*mesh_id),
-            _ => None,
-        }
+        list.at(idx).and_then(RenderCommand::as_mesh_id)
     }
 
     pub fn command_material_id_at(&self, list: &RenderCommandList, idx: usize) -> Option<u64> {
-        match list.at(idx) {
-            Some(RenderCommand::SetMaterial { material_id }) => Some(*material_id),
-            _ => None,
-        }
+        list.at(idx).and_then(RenderCommand::as_material_id)
     }
 
     pub fn command_draw_indexed_at(
@@ -225,10 +219,7 @@ impl RenderApi {
         list: &RenderCommandList,
         idx: usize,
     ) -> Option<(u32, Mat4)> {
-        match list.at(idx) {
-            Some(RenderCommand::DrawIndexed { index_count, world }) => Some((*index_count, *world)),
-            _ => None,
-        }
+        list.at(idx).and_then(RenderCommand::as_draw_indexed)
     }
 
     // --- Frame capture (engine-owned artifact; NOT pixel capture) ---

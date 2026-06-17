@@ -19,10 +19,8 @@ pub trait ApproxEq {
 
 impl ApproxEq for f32 {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
-        if !self.is_finite() || !other.is_finite() {
-            return false;
-        }
-        (self - other).abs() <= epsilon.value()
+        let both_finite = self.is_finite() & other.is_finite();
+        both_finite & ((self - other).abs() <= epsilon.value())
     }
 }
 

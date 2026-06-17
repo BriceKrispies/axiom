@@ -33,17 +33,20 @@ impl GpuSubmissionReport {
         target_height: u32,
         status: GpuSubmissionStatus,
     ) -> Self {
-        let mut clear_count = 0u32;
-        let mut draw_count = 0u32;
-        let mut present_count = 0u32;
-        for c in &submitted_commands {
-            match c {
-                GpuCommand::ClearFrame { .. } => clear_count += 1,
-                GpuCommand::DrawIndexed { .. } => draw_count += 1,
-                GpuCommand::Present => present_count += 1,
-                _ => {}
-            }
-        }
+        // Branchless tally: map each command to its kind code, then count the
+        // occurrences of each counted kind. Equality on the stable kind codes
+        // replaces the per-variant `match` arms, and `filter().count()` walks
+        // the sequence without an explicit `for`/`if`.
+        let kinds = || submitted_commands.iter().map(GpuCommand::kind_code);
+        let clear_count = kinds()
+            .filter(|code| *code == GpuCommand::KIND_CLEAR_FRAME)
+            .count() as u32;
+        let draw_count = kinds()
+            .filter(|code| *code == GpuCommand::KIND_DRAW_INDEXED)
+            .count() as u32;
+        let present_count = kinds()
+            .filter(|code| *code == GpuCommand::KIND_PRESENT)
+            .count() as u32;
         GpuSubmissionReport {
             submitted_commands,
             target_width,

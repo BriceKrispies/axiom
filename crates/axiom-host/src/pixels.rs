@@ -21,12 +21,9 @@ impl Pixels {
     /// Construct a pixel length, rejecting any non-finite value (NaN or
     /// infinity) with [`HostError::non_finite_pixels`].
     pub fn new(value: f32) -> HostResult<Self> {
-        if !value.is_finite() {
-            return Err(HostError::non_finite_pixels(
-                "a pixel length must be a finite value",
-            ));
-        }
-        Ok(Pixels(value))
+        value.is_finite().then_some(Pixels(value)).ok_or_else(|| {
+            HostError::non_finite_pixels("a pixel length must be a finite value")
+        })
     }
 
     /// The underlying finite pixel length.

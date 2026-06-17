@@ -100,7 +100,7 @@ impl MathError {
 /// Equality on machine identity only.
 impl PartialEq for MathError {
     fn eq(&self, other: &Self) -> bool {
-        self.code == other.code && self.kernel == other.kernel
+        (self.code == other.code) & (self.kernel == other.kernel)
     }
 }
 

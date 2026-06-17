@@ -81,7 +81,7 @@ impl FrameError {
 /// Equality on machine identity only.
 impl PartialEq for FrameError {
     fn eq(&self, other: &Self) -> bool {
-        self.code == other.code && self.host == other.host
+        (self.code == other.code) & (self.host == other.host)
     }
 }
 

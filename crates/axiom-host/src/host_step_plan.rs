@@ -47,53 +47,59 @@ impl HostStepPlan {
         let sequence = input.sequence();
         let elapsed = input.elapsed_nanos();
 
-        if lifecycle.shutdown_requested() {
-            return HostStepPlan {
+        // The lifecycle guards are an ordered priority: shutdown wins over
+        // suspended, which wins over hidden. `Option::or_else` reproduces that
+        // exact precedence branchlessly — the first `Some` short-circuits the
+        // rest the same way the original `if … return` ladder did, and the
+        // final stepping plan is the `unwrap_or_else` fall-through that the
+        // original code reached only when every guard was false.
+        lifecycle
+            .shutdown_requested()
+            .then_some(HostStepPlan {
                 sequence,
                 steps: 0,
                 consumed_nanos: 0,
                 retained_nanos: 0,
                 skip: Some(HostSkipReason::ShutdownRequested),
-            };
-        }
-        if lifecycle.suspended() {
-            return HostStepPlan {
-                sequence,
-                steps: 0,
-                consumed_nanos: 0,
-                retained_nanos: retained_after_skip(config, accumulator_nanos, elapsed),
-                skip: Some(HostSkipReason::LifecycleSuspended),
-            };
-        }
-        if !lifecycle.visible() && !config.step_while_hidden() {
-            return HostStepPlan {
-                sequence,
-                steps: 0,
-                consumed_nanos: 0,
-                retained_nanos: retained_after_skip(config, accumulator_nanos, elapsed),
-                skip: Some(HostSkipReason::LifecycleHidden),
-            };
-        }
+            })
+            .or_else(|| {
+                lifecycle.suspended().then_some(HostStepPlan {
+                    sequence,
+                    steps: 0,
+                    consumed_nanos: 0,
+                    retained_nanos: retained_after_skip(config, accumulator_nanos, elapsed),
+                    skip: Some(HostSkipReason::LifecycleSuspended),
+                })
+            })
+            .or_else(|| {
+                (!lifecycle.visible() & !config.step_while_hidden()).then_some(HostStepPlan {
+                    sequence,
+                    steps: 0,
+                    consumed_nanos: 0,
+                    retained_nanos: retained_after_skip(config, accumulator_nanos, elapsed),
+                    skip: Some(HostSkipReason::LifecycleHidden),
+                })
+            })
+            .unwrap_or_else(|| {
+                let fixed = config.fixed_step_nanos();
+                let total = accumulator_nanos.saturating_add(elapsed);
+                let raw_steps = total.checked_div(fixed).unwrap_or(0);
+                let clamped = raw_steps.min(config.max_steps_per_frame() as u64);
+                let steps = clamped as u32;
+                let consumed_nanos = (steps as u64).saturating_mul(fixed);
+                let retained_nanos = config
+                    .retain_accumulator()
+                    .then(|| total.saturating_sub(consumed_nanos))
+                    .unwrap_or(0);
 
-        let fixed = config.fixed_step_nanos();
-        let total = accumulator_nanos.saturating_add(elapsed);
-        let raw_steps = total.checked_div(fixed).unwrap_or(0);
-        let clamped = raw_steps.min(config.max_steps_per_frame() as u64);
-        let steps = clamped as u32;
-        let consumed_nanos = (steps as u64).saturating_mul(fixed);
-        let retained_nanos = if config.retain_accumulator() {
-            total.saturating_sub(consumed_nanos)
-        } else {
-            0
-        };
-
-        HostStepPlan {
-            sequence,
-            steps,
-            consumed_nanos,
-            retained_nanos,
-            skip: None,
-        }
+                HostStepPlan {
+                    sequence,
+                    steps,
+                    consumed_nanos,
+                    retained_nanos,
+                    skip: None,
+                }
+            })
     }
 
     /// Host frame sequence this plan corresponds to.
@@ -128,11 +134,10 @@ impl HostStepPlan {
 }
 
 fn retained_after_skip(config: &HostBoundaryConfig, accumulator: u64, elapsed: u64) -> u64 {
-    if config.retain_accumulator() {
-        accumulator.saturating_add(elapsed)
-    } else {
-        0
-    }
+    config
+        .retain_accumulator()
+        .then(|| accumulator.saturating_add(elapsed))
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

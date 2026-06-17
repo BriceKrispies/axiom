@@ -97,16 +97,9 @@ impl HostLifecycleState {
     /// - `!visible` blocks stepping unless the caller has opted into
     ///   `step_while_hidden`.
     pub const fn allows_stepping(&self, step_while_hidden: bool) -> bool {
-        if self.shutdown_requested {
-            return false;
-        }
-        if self.suspended {
-            return false;
-        }
-        if !self.visible && !step_while_hidden {
-            return false;
-        }
-        true
+        let blocked =
+            self.shutdown_requested | self.suspended | (!self.visible & !step_while_hidden);
+        !blocked
     }
 }
 

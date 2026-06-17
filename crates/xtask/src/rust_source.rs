@@ -24,7 +24,7 @@ pub struct CrossRef {
 }
 
 fn is_ident_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+    b.is_ascii_alphanumeric() | (b == b'_')
 }
 
 fn line_of(text: &str, byte_index: usize) -> usize {
@@ -46,36 +46,42 @@ fn line_of(text: &str, byte_index: usize) -> usize {
 /// (reaching through the private `facade` module).
 pub fn find_cross_refs(text: &str, prefixes: &[String]) -> Vec<CrossRef> {
     let bytes = text.as_bytes();
-    let mut refs = Vec::new();
 
-    for prefix in prefixes {
-        let needle = format!("{prefix}::");
-        let needle_bytes = needle.as_bytes();
-        let mut search_from = 0;
-
-        while let Some(rel) = text[search_from..].find(&needle) {
-            let start = search_from + rel;
-            search_from = start + needle_bytes.len();
-
-            // Left boundary: the prefix must not be the tail of a longer
-            // identifier or path segment (e.g. `axiom_kernel` must not match
-            // inside `my_axiom_kernel` or `crate::axiom_kernel`).
-            if start > 0 {
-                let prev = bytes[start - 1];
-                if is_ident_char(prev) || prev == b':' {
-                    continue;
-                }
-            }
-
-            let tail = &bytes[search_from..];
-            let private = classify_tail(tail);
-            refs.push(CrossRef {
-                prefix: prefix.clone(),
-                line: line_of(text, start),
-                private,
-            });
-        }
-    }
+    // `match_indices` yields every (non-overlapping) `needle` occurrence with no
+    // explicit cursor; the boundary rule below is the same as a manual scan.
+    let mut refs: Vec<CrossRef> = prefixes
+        .iter()
+        .flat_map(|prefix| {
+            let needle = format!("{prefix}::");
+            let needle_len = needle.len();
+            // Collect eagerly so the borrow of `needle` does not escape the
+            // closure (flat_map's inner iterator must own its data).
+            text.match_indices(&needle)
+                .map(|(start, _)| start)
+                .collect::<Vec<usize>>()
+                .into_iter()
+                .filter(|&start| {
+                    // Left boundary: the prefix must not be the tail of a longer
+                    // identifier or path segment (e.g. `axiom_kernel` must not
+                    // match inside `my_axiom_kernel` or `crate::axiom_kernel`).
+                    // `start == 0` short-circuits the index read safely.
+                    (start == 0)
+                        | (start
+                            .checked_sub(1)
+                            .map(|i| bytes[i])
+                            .is_none_or(|prev| !(is_ident_char(prev) | (prev == b':'))))
+                })
+                .map(move |start| {
+                    let tail = &bytes[start + needle_len..];
+                    CrossRef {
+                        prefix: prefix.clone(),
+                        line: line_of(text, start),
+                        private: classify_tail(tail),
+                    }
+                })
+                .collect::<Vec<CrossRef>>()
+        })
+        .collect();
 
     refs.sort_by(|a, b| a.line.cmp(&b.line).then(a.prefix.cmp(&b.prefix)));
     refs
@@ -84,23 +90,24 @@ pub fn find_cross_refs(text: &str, prefixes: &[String]) -> Vec<CrossRef> {
 /// Given the bytes immediately following `prefix::`, decide if the access is
 /// private (reaches through a lowercase module and continues deeper).
 fn classify_tail(tail: &[u8]) -> bool {
-    match tail.first() {
-        // Group import or glob at the root: public.
-        Some(b'{') | Some(b'*') => false,
-        Some(&first) if first.is_ascii_alphabetic() || first == b'_' => {
-            // Read the first identifier segment.
-            let mut i = 0;
-            while i < tail.len() && is_ident_char(tail[i]) {
-                i += 1;
-            }
-            let module_like = first.is_ascii_lowercase() || first == b'_';
-            let continues = tail.get(i) == Some(&b':') && tail.get(i + 1) == Some(&b':');
+    // The first byte after `prefix::`. A group import or glob (`{`, `*`) or
+    // anything non-identifier is public; only a module-like identifier segment
+    // followed by more path (`mod::...`) is private.
+    tail.first()
+        .copied()
+        .filter(|&first| first.is_ascii_alphabetic() | (first == b'_'))
+        .is_some_and(|first| {
+            // Length of the leading identifier segment.
+            let seg_len = tail
+                .iter()
+                .position(|b| !is_ident_char(*b))
+                .unwrap_or(tail.len());
+            let module_like = first.is_ascii_lowercase() | (first == b'_');
+            let continues =
+                (tail.get(seg_len) == Some(&b':')) & (tail.get(seg_len + 1) == Some(&b':'));
             // Private only when a module-like segment is followed by more path.
-            module_like && continues
-        }
-        // Anything else (`;`, whitespace, malformed): not a meaningful ref.
-        _ => false,
-    }
+            module_like & continues
+        })
 }
 
 /// Whether `name` is publicly exported by this source text.
@@ -114,36 +121,32 @@ pub fn find_public_export(text: &str, name: &str) -> Option<usize> {
         "fn", "struct", "enum", "trait", "type", "const", "static", "union", "mod",
     ];
 
-    for (idx, raw_line) in text.lines().enumerate() {
-        let line = raw_line.trim_start();
-        let Some(rest) = line.strip_prefix("pub ") else {
-            continue;
-        };
-        let rest = rest.trim_start();
-
-        // `pub use ... name;` or `pub use ... as name;`
-        if let Some(use_rest) = rest.strip_prefix("use ") {
-            if reexports_name(use_rest, name) {
-                return Some(idx + 1);
-            }
-            continue;
-        }
-
-        // `pub <keyword> name`
-        for kw in ITEM_KEYWORDS {
-            if let Some(after_kw) = rest.strip_prefix(kw) {
-                // Require a separator after the keyword so `structure` != `struct`.
-                let after_kw = match after_kw.chars().next() {
-                    Some(c) if c.is_whitespace() => after_kw.trim_start(),
-                    _ => continue,
-                };
-                if first_ident(after_kw) == Some(name) {
-                    return Some(idx + 1);
-                }
-            }
-        }
-    }
-    None
+    text.lines()
+        .enumerate()
+        .filter_map(|(idx, raw_line)| {
+            raw_line
+                .trim_start()
+                .strip_prefix("pub ")
+                .map(|rest| (idx, rest.trim_start()))
+        })
+        .find_map(|(idx, rest)| {
+            // `pub use ... name;` / `pub use ... as name;`, else `pub <kw> name`.
+            let is_export = rest.strip_prefix("use ").map_or_else(
+                || {
+                    ITEM_KEYWORDS.iter().any(|kw| {
+                        rest.strip_prefix(kw)
+                            // Require a separator after the keyword so
+                            // `structure` != `struct`.
+                            .filter(|after_kw| {
+                                after_kw.chars().next().is_some_and(char::is_whitespace)
+                            })
+                            .is_some_and(|after_kw| first_ident(after_kw.trim_start()) == Some(name))
+                    })
+                },
+                |use_rest| reexports_name(use_rest, name),
+            );
+            is_export.then_some(idx + 1)
+        })
 }
 
 /// Whether a `use` body (text after `pub use `) re-exports `name`.
@@ -151,91 +154,82 @@ fn reexports_name(use_body: &str, name: &str) -> bool {
     // Strip a trailing `;` and surrounding whitespace.
     let body = use_body.trim().trim_end_matches(';').trim();
 
-    // `... as alias`
-    if let Some((_, alias)) = body.rsplit_once(" as ") {
-        return alias.trim() == name;
-    }
-    // `a::b::name`
-    let last = body.rsplit("::").next().unwrap_or(body).trim();
-    last == name
+    // `... as alias` takes precedence; otherwise the final `::` segment.
+    body.rsplit_once(" as ").map_or_else(
+        || body.rsplit("::").next().unwrap_or(body).trim() == name,
+        |(_, alias)| alias.trim() == name,
+    )
 }
 
 /// The leading identifier of a string (stops at the first non-identifier char).
 fn first_ident(s: &str) -> Option<&str> {
     let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() && is_ident_char(bytes[i]) {
-        i += 1;
-    }
-    if i == 0 {
-        None
-    } else {
-        Some(&s[..i])
-    }
+    let len = bytes
+        .iter()
+        .position(|b| !is_ident_char(*b))
+        .unwrap_or(bytes.len());
+    (len != 0).then(|| &s[..len])
 }
 
 /// Whether `symbol` appears anywhere in `text` as a standalone identifier.
 pub fn references_symbol(text: &str, symbol: &str) -> bool {
     let bytes = text.as_bytes();
     let sym = symbol.as_bytes();
-    if sym.is_empty() {
-        return false;
-    }
-    let mut from = 0;
-    while let Some(rel) = text[from..].find(symbol) {
-        let start = from + rel;
-        let end = start + sym.len();
-        from = start + 1;
-        let left_ok = start == 0 || !is_ident_char(bytes[start - 1]);
-        let right_ok = end >= bytes.len() || !is_ident_char(bytes[end]);
-        if left_ok && right_ok {
-            return true;
-        }
-    }
-    false
+    // Every byte offset where `symbol` could begin (overlapping matches kept, so
+    // the boundary test is identical to a 1-byte-advancing manual scan). An
+    // empty `symbol` yields an empty start set => `false`, as before.
+    bytes
+        .len()
+        .checked_sub(sym.len())
+        .filter(|_| !sym.is_empty())
+        .into_iter()
+        .flat_map(|last_start| 0..=last_start)
+        .filter(|&start| text.is_char_boundary(start) & bytes[start..].starts_with(sym))
+        .any(|start| {
+            let end = start + sym.len();
+            let left_ok = (start == 0) | start.checked_sub(1).is_none_or(|i| !is_ident_char(bytes[i]));
+            let right_ok = (end >= bytes.len()) | bytes.get(end).is_none_or(|&b| !is_ident_char(b));
+            left_ok & right_ok
+        })
 }
 
 /// If `name` is re-exported via `pub use a::b::name;`, return the module path
 /// segments before the final symbol (`["a", "b"]`). Used to follow a facade
 /// re-export to the module that actually references lower-layer symbols.
 pub fn reexport_module_path(text: &str, name: &str) -> Option<Vec<String>> {
-    for raw_line in text.lines() {
-        let line = raw_line.trim_start();
-        let Some(rest) = line.strip_prefix("pub ") else {
-            continue;
-        };
-        let Some(use_body) = rest.trim_start().strip_prefix("use ") else {
-            continue;
-        };
-        let body = use_body.trim().trim_end_matches(';').trim();
-
-        let (path, exported) = match body.rsplit_once(" as ") {
-            Some((path, alias)) => (path.trim(), alias.trim()),
-            None => {
-                let exported = body.rsplit("::").next().unwrap_or(body).trim();
-                (body, exported)
-            }
-        };
-        if exported != name {
-            continue;
-        }
-        let mut segments: Vec<String> = path.split("::").map(|s| s.trim().to_string()).collect();
-        // Drop the final symbol segment, keeping only the module path.
-        segments.pop();
-        // Ignore leading `crate`/`self`/`super` qualifiers; they are not modules
-        // on disk we can resolve from `src/`.
-        while matches!(
-            segments.first().map(String::as_str),
-            Some("crate") | Some("self") | Some("super")
-        ) {
-            segments.remove(0);
-        }
-        if segments.is_empty() {
-            return None;
-        }
-        return Some(segments);
-    }
-    None
+    text.lines()
+        .filter_map(|raw_line| {
+            raw_line
+                .trim_start()
+                .strip_prefix("pub ")
+                .and_then(|rest| rest.trim_start().strip_prefix("use "))
+        })
+        .filter_map(|use_body| {
+            let body = use_body.trim().trim_end_matches(';').trim();
+            // `... as alias` names the export explicitly; otherwise the last
+            // `::` segment is both the export name and the symbol segment.
+            let (path, exported) = body.rsplit_once(" as ").map_or_else(
+                || (body, body.rsplit("::").next().unwrap_or(body).trim()),
+                |(path, alias)| (path.trim(), alias.trim()),
+            );
+            (exported == name).then(|| {
+                let segments: Vec<String> =
+                    path.split("::").map(|s| s.trim().to_string()).collect();
+                // Drop the final symbol segment, then skip leading
+                // `crate`/`self`/`super` qualifiers (not on-disk modules).
+                segments
+                    .split_last()
+                    .map(|(_, head)| head)
+                    .unwrap_or(&[])
+                    .iter()
+                    .skip_while(|s| ["crate", "self", "super"].contains(&s.as_str()))
+                    .cloned()
+                    .collect::<Vec<String>>()
+            })
+        })
+        .map(|segments| (!segments.is_empty()).then_some(segments))
+        .next()
+        .flatten()
 }
 
 /// Remove `//` line comments, preserving line structure (one output line per
@@ -246,13 +240,10 @@ pub fn reexport_module_path(text: &str, name: &str) -> Option<Vec<String>> {
 /// comments and string literals are left intact — a documented limitation.
 pub fn strip_line_comments(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    for line in text.lines() {
-        match line.find("//") {
-            Some(idx) => out.push_str(&line[..idx]),
-            None => out.push_str(line),
-        }
+    text.lines().for_each(|line| {
+        out.push_str(line.find("//").map_or(line, |idx| &line[..idx]));
         out.push('\n');
-    }
+    });
     out
 }
 
@@ -272,19 +263,17 @@ pub fn strip_line_comments(text: &str) -> String {
 pub fn strip_test_code(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out: Vec<u8> = bytes.to_vec();
-    for marker in ["#[cfg(test)]", "#[test]"] {
-        let mut from = 0;
-        while let Some(rel) = text[from..].find(marker) {
-            let attr_start = from + rel;
-            from = attr_start + marker.len();
+    ["#[cfg(test)]", "#[test]"].into_iter().for_each(|marker| {
+        text.match_indices(marker).for_each(|(attr_start, _)| {
             let end = item_end(bytes, attr_start);
-            for b in out.iter_mut().take(end).skip(attr_start) {
-                if *b != b'\n' {
-                    *b = b' ';
-                }
-            }
-        }
-    }
+            // Blank the item's bytes, keeping `\n` so line numbers stay aligned.
+            out.iter_mut()
+                .take(end)
+                .skip(attr_start)
+                .filter(|b| **b != b'\n')
+                .for_each(|b| *b = b' ');
+        });
+    });
     String::from_utf8(out).unwrap_or_else(|_| text.to_string())
 }
 
@@ -292,31 +281,28 @@ pub fn strip_test_code(text: &str) -> String {
 /// either the matching `}` of its first brace block, or the first `;` if that
 /// comes first (e.g. `#[cfg(test)] use foo::Bar;`).
 fn item_end(bytes: &[u8], attr_start: usize) -> usize {
-    let mut i = attr_start;
-    while i < bytes.len() && bytes[i] != b'{' && bytes[i] != b';' {
-        i += 1;
-    }
-    if i >= bytes.len() {
-        return bytes.len();
-    }
-    if bytes[i] == b';' {
-        return i + 1;
-    }
-    let mut depth = 0u32;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return i + 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    bytes.len()
+    // First `{` or `;` at or after `attr_start` (absolute index), if any.
+    let delim = bytes[attr_start..]
+        .iter()
+        .position(|&b| (b == b'{') | (b == b';'))
+        .map(|rel| attr_start + rel);
+
+    delim.map_or(bytes.len(), |start| {
+        // A `;` ends the item right there; a `{` opens a brace block to match.
+        (bytes[start] == b';').then_some(start + 1).unwrap_or_else(|| {
+            // Walk forward tracking brace depth; the item ends one past the `}`
+            // that returns depth to 0. `scan` carries the running depth so the
+            // match-position search stays a pure iterator chain.
+            bytes[start..]
+                .iter()
+                .scan(0u32, |depth, &b| {
+                    *depth = *depth + u32::from(b == b'{') - u32::from(b == b'}');
+                    Some((b, *depth))
+                })
+                .position(|(b, depth)| (b == b'}') & (depth == 0))
+                .map_or(bytes.len(), |rel| start + rel + 1)
+        })
+    })
 }
 
 /// The names of file-modules declared `#[cfg(test)] mod NAME;` (the `;` form, a
@@ -326,40 +312,30 @@ fn item_end(bytes: &[u8], attr_start: usize) -> usize {
 /// `is_in_test`, which sees the gate that lives in the *declaring* file.
 pub fn find_cfg_test_modules(text: &str) -> Vec<String> {
     let marker = "#[cfg(test)]";
-    let mut names = Vec::new();
-    let mut from = 0;
-    while let Some(rel) = text[from..].find(marker) {
-        let after = from + rel + marker.len();
-        from = after;
-        let rest = strip_leading_pub(text[after..].trim_start());
-        let Some(rest) = rest.strip_prefix("mod ") else {
-            continue;
-        };
-        let rest = rest.trim_start();
-        let Some(name) = first_ident(rest) else {
-            continue;
-        };
-        // Only the `mod NAME;` declaration form (a separate file).
-        if rest[name.len()..].trim_start().starts_with(';') {
-            names.push(name.to_string());
-        }
-    }
-    names
+    text.match_indices(marker)
+        .filter_map(|(start, _)| {
+            let after = start + marker.len();
+            strip_leading_pub(text[after..].trim_start())
+                .strip_prefix("mod ")
+                .map(str::trim_start)
+                .and_then(|rest| first_ident(rest).map(|name| (rest, name)))
+                // Only the `mod NAME;` declaration form (a separate file).
+                .filter(|(rest, name)| rest[name.len()..].trim_start().starts_with(';'))
+                .map(|(_, name)| name.to_string())
+        })
+        .collect()
 }
 
 /// Strip a leading `pub` / `pub(crate)` / `pub(in …)` visibility, returning the
 /// rest trimmed.
 fn strip_leading_pub(s: &str) -> &str {
-    let Some(after_pub) = s.strip_prefix("pub") else {
-        return s;
-    };
-    let rest = after_pub.trim_start();
-    if let Some(open) = rest.strip_prefix('(') {
-        if let Some(close) = open.find(')') {
-            return open[close + 1..].trim_start();
-        }
-    }
-    rest
+    s.strip_prefix("pub").map_or(s, |after_pub| {
+        let rest = after_pub.trim_start();
+        // `pub(crate)` / `pub(in …)`: skip the parenthesized restriction.
+        rest.strip_prefix('(')
+            .and_then(|open| open.find(')').map(|close| open[close + 1..].trim_start()))
+            .unwrap_or(rest)
+    })
 }
 
 /// Recursively collect every `.rs` file under `dir`, sorted for determinism.
@@ -371,17 +347,20 @@ pub fn collect_rs_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn collect_into(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_into(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            out.push(path);
-        }
-    }
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .for_each(|entry| {
+            let path = entry.path();
+            // A directory recurses; a `.rs` file is collected; anything else is
+            // ignored. The two effects are sequenced (not nested) so neither
+            // closure aliases `out`.
+            path.is_dir()
+                .then(|| collect_into(&path, out));
+            ((!path.is_dir()) & (path.extension().and_then(|e| e.to_str()) == Some("rs")))
+                .then(|| out.push(path.clone()));
+        });
 }
 
 #[cfg(test)]

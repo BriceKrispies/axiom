@@ -40,8 +40,7 @@ impl<T: Reflect> ErasedColumn for ComponentColumn<T> {
     }
 
     fn read_replace(&mut self, reader: &mut BinaryReader<'_>) -> KernelResult<()> {
-        *self = ComponentColumn::<T>::reflect_read(reader)?;
-        Ok(())
+        ComponentColumn::<T>::reflect_read(reader).map(|column| *self = column)
     }
 }
 

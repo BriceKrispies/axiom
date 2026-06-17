@@ -42,14 +42,14 @@ pub(crate) fn build_cube_mesh() -> (Vec<MeshInputVertex>, Vec<u32>) {
     let mut vertices: Vec<MeshInputVertex> = Vec::with_capacity(24);
     let mut indices = Vec::with_capacity(36);
 
-    for (normal, corner) in faces {
+    faces.into_iter().for_each(|(normal, corner)| {
         let base = vertices.len() as u32;
-        for i in 0..4 {
+        (0..4).for_each(|i| {
             vertices.push((p[corner[i]], normal, uvs[i], WHITE));
-        }
+        });
         // Two triangles: (0, 1, 2) and (0, 2, 3).
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
+    });
 
     (vertices, indices)
 }

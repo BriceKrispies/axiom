@@ -71,26 +71,23 @@ impl DynamicComponents {
 
     /// The bytes stored for `entity` under `name`, if any.
     fn get_bytes(&self, name: &'static str, entity: EntityId) -> Option<&[u8]> {
-        match self.columns.get(name) {
-            Some(column) => column.entries.get(&entity).map(Vec::as_slice),
-            None => None,
-        }
+        self.columns
+            .get(name)
+            .and_then(|column| column.entries.get(&entity).map(Vec::as_slice))
     }
 
     /// Whether `entity` has bytes stored under `name`.
     fn has_bytes(&self, name: &'static str, entity: EntityId) -> bool {
-        match self.columns.get(name) {
-            Some(column) => column.entries.contains_key(&entity),
-            None => false,
-        }
+        self.columns
+            .get(name)
+            .map_or(false, |column| column.entries.contains_key(&entity))
     }
 
     /// Remove `entity`'s bytes under `name`, returning whether they existed.
     fn take_bytes(&mut self, name: &'static str, entity: EntityId) -> bool {
-        match self.columns.get_mut(name) {
-            Some(column) => column.entries.remove(&entity).is_some(),
-            None => false,
-        }
+        self.columns
+            .get_mut(name)
+            .map_or(false, |column| column.entries.remove(&entity).is_some())
     }
 
     // ---- typed shell: the only generic part is Reflect (de)serialization ----

@@ -47,11 +47,7 @@ impl FrameCommandQueue {
     /// pushed-and-drained in the same shape produce identical output and
     /// identical *next* sequences.
     pub fn drain(&mut self) -> Vec<FrameCommand> {
-        let mut out = Vec::with_capacity(self.items.len());
-        while let Some(c) = self.items.pop_front() {
-            out.push(c);
-        }
-        out
+        self.items.drain(..).collect()
     }
 
     /// Discard every queued command without producing them. The sequence

@@ -87,15 +87,16 @@ pub struct ManifestError {
 
 /// Parse a single manifest's text.
 pub fn parse_manifest(dir: &Path, text: &str) -> Result<LayerManifest, ManifestError> {
-    let raw: RawManifest = toml::from_str(text).map_err(|e| ManifestError {
-        path: dir.join("layer.toml"),
-        message: e.message().to_string(),
-    })?;
-    Ok(LayerManifest {
-        dir: dir.to_path_buf(),
-        layer: raw.layer,
-        proof_exports: raw.proof_exports,
-    })
+    toml::from_str::<RawManifest>(text)
+        .map_err(|e| ManifestError {
+            path: dir.join("layer.toml"),
+            message: e.message().to_string(),
+        })
+        .map(|raw| LayerManifest {
+            dir: dir.to_path_buf(),
+            layer: raw.layer,
+            proof_exports: raw.proof_exports,
+        })
 }
 
 /// Discover and parse every layer manifest at `<root>/crates/*/layer.toml`.
@@ -106,40 +107,46 @@ pub fn parse_manifest(dir: &Path, text: &str) -> Result<LayerManifest, ManifestE
 /// any parse errors separately; both are sorted by path for determinism.
 pub fn load_manifests(root: &Path) -> (Vec<LayerManifest>, Vec<ManifestError>) {
     let crates_dir = root.join("crates");
-    let mut manifests = Vec::new();
-    let mut errors = Vec::new();
 
-    let entries = match std::fs::read_dir(&crates_dir) {
-        Ok(entries) => entries,
-        // No `crates/` dir means no layers to check; not an error here.
-        Err(_) => return (manifests, errors),
-    };
-
-    let mut crate_dirs: Vec<PathBuf> = entries
+    // No `crates/` dir means no layers to check; `read_dir`'s `Result` flattens
+    // to zero entries on `Err`.
+    let mut crate_dirs: Vec<PathBuf> = std::fs::read_dir(&crates_dir)
+        .into_iter()
+        .flatten()
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.is_dir())
         .collect();
     crate_dirs.sort();
 
-    for crate_dir in crate_dirs {
-        let manifest_path = crate_dir.join("layer.toml");
-        if !manifest_path.is_file() {
-            continue; // Not a layer (e.g. the xtask tooling crate).
-        }
-        match std::fs::read_to_string(&manifest_path) {
-            Ok(text) => match parse_manifest(&crate_dir, &text) {
-                Ok(manifest) => manifests.push(manifest),
-                Err(err) => errors.push(err),
+    // Each crate dir with a `layer.toml` yields one parse result; split the
+    // Ok/Err results into the two output vecs without branching. Dirs lacking a
+    // `layer.toml` (e.g. the xtask tooling crate) are skipped.
+    crate_dirs
+        .into_iter()
+        .map(|crate_dir| crate_dir.join("layer.toml"))
+        .filter(|manifest_path| manifest_path.is_file())
+        .map(|manifest_path| {
+            let crate_dir = manifest_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default();
+            std::fs::read_to_string(&manifest_path)
+                .map_err(|e| ManifestError {
+                    path: manifest_path,
+                    message: format!("could not read file: {e}"),
+                })
+                .and_then(|text| parse_manifest(&crate_dir, &text))
+        })
+        .fold(
+            (Vec::new(), Vec::new()),
+            |(mut manifests, mut errors), result| {
+                result
+                    .map(|manifest| manifests.push(manifest))
+                    .unwrap_or_else(|err| errors.push(err));
+                (manifests, errors)
             },
-            Err(e) => errors.push(ManifestError {
-                path: manifest_path,
-                message: format!("could not read file: {e}"),
-            }),
-        }
-    }
-
-    (manifests, errors)
+        )
 }
 
 #[cfg(test)]

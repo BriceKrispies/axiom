@@ -18,15 +18,16 @@ impl Epsilon {
 
     /// Construct a tolerance, rejecting `NaN`, `±Inf`, and negative values.
     pub fn new(value: f32) -> MathResult<Self> {
-        if !value.is_finite() {
-            return Err(MathError::non_finite_scalar(
+        (!value.is_finite())
+            .then_some(Err(MathError::non_finite_scalar(
                 "epsilon must be finite (no NaN, no Inf)",
-            ));
-        }
-        if value < 0.0 {
-            return Err(MathError::non_finite_scalar("epsilon must not be negative"));
-        }
-        Ok(Epsilon(value))
+            )))
+            .or_else(|| {
+                (value.is_finite() & (value < 0.0)).then_some(Err(MathError::non_finite_scalar(
+                    "epsilon must not be negative",
+                )))
+            })
+            .unwrap_or(Ok(Epsilon(value)))
     }
 
     /// The underlying tolerance.

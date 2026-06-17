@@ -42,15 +42,13 @@ impl FrameTiming {
         // non-zero). A mismatch means the host driver and the plan
         // disagree on how much time a step takes — that is a host-driver
         // bug, not a host-input bug.
-        if fixed_step_nanos != 0 {
-            let expected = (runtime_steps_executed as u64).saturating_mul(fixed_step_nanos);
-            if expected != consumed_nanos {
-                return Err(FrameError::invalid_frame_timing(
-                    "frame consumed nanoseconds disagree with steps_executed * fixed_step_nanos",
-                ));
-            }
-        }
-
+        //
+        // Branchless form: gate a mismatch flag on `fixed_step_nanos != 0`
+        // (the original outer `if`) AND the value disagreement (the inner
+        // `if`), then select the `Ok`/`Err` outcome with `.then_some` /
+        // `.map_or` instead of an early `return`. The success arm builds
+        // the same `FrameTiming` the original constructed at the end.
+        //
         // The host elapsed time we can recover is total = consumed + retained
         // (minus any pre-existing accumulator the report does not carry).
         // Frame timing reports the *frame's contribution* — consumed plus
@@ -59,15 +57,26 @@ impl FrameTiming {
         // still deterministic and meaningful as "this frame's planning
         // budget".
         let host_elapsed_nanos = consumed_nanos.saturating_add(retained_nanos);
+        let expected = (runtime_steps_executed as u64).saturating_mul(fixed_step_nanos);
+        let timing_is_invalid = (fixed_step_nanos != 0) & (expected != consumed_nanos);
 
-        Ok(FrameTiming {
-            host_elapsed_nanos,
-            consumed_nanos,
-            retained_nanos,
-            fixed_step_nanos,
-            runtime_steps_executed,
-            skipped,
-        })
+        timing_is_invalid.then_some(()).map_or_else(
+            || {
+                Ok(FrameTiming {
+                    host_elapsed_nanos,
+                    consumed_nanos,
+                    retained_nanos,
+                    fixed_step_nanos,
+                    runtime_steps_executed,
+                    skipped,
+                })
+            },
+            |()| {
+                Err(FrameError::invalid_frame_timing(
+                    "frame consumed nanoseconds disagree with steps_executed * fixed_step_nanos",
+                ))
+            },
+        )
     }
 
     pub const fn host_elapsed_nanos(&self) -> u64 {

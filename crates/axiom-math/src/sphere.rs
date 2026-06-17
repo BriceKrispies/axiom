@@ -22,22 +22,26 @@ pub struct Sphere {
 impl Sphere {
     /// Construct from a finite center and a non-negative finite radius.
     pub fn new(center: Vec3, radius: f32) -> MathResult<Sphere> {
-        for component in [center.x, center.y, center.z] {
-            if !component.is_finite() {
-                return Err(MathError::non_finite_scalar(
-                    "sphere center components must be finite",
-                ));
-            }
-        }
-        if !radius.is_finite() {
-            return Err(MathError::non_finite_scalar("sphere radius must be finite"));
-        }
-        if radius < 0.0 {
-            return Err(MathError::invalid_sphere_radius(
-                "sphere radius must be non-negative",
-            ));
-        }
-        Ok(Sphere { center, radius })
+        let center_finite = [center.x, center.y, center.z]
+            .into_iter()
+            .all(|component| component.is_finite());
+        // Error precedence mirrors the original: a non-finite center component
+        // first, then a non-finite radius, then a negative radius.
+        (!center_finite)
+            .then_some(Err(MathError::non_finite_scalar(
+                "sphere center components must be finite",
+            )))
+            .or_else(|| {
+                (center_finite & !radius.is_finite()).then_some(Err(
+                    MathError::non_finite_scalar("sphere radius must be finite"),
+                ))
+            })
+            .or_else(|| {
+                (center_finite & radius.is_finite() & (radius < 0.0)).then_some(Err(
+                    MathError::invalid_sphere_radius("sphere radius must be non-negative"),
+                ))
+            })
+            .unwrap_or(Ok(Sphere { center, radius }))
     }
 
     /// Center.
@@ -76,11 +80,9 @@ impl Sphere {
 
     /// Read `center` then `radius` and revalidate.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> MathResult<Sphere> {
-        let center = Vec3::read_from(reader).map_err(|cause| {
-            MathError::deserialization_failed("Sphere.center read failed", cause)
-        })?;
-        let radius = read_f32(reader)?;
-        Sphere::new(center, radius)
+        Vec3::read_from(reader)
+            .map_err(|cause| MathError::deserialization_failed("Sphere.center read failed", cause))
+            .and_then(|center| read_f32(reader).and_then(|radius| Sphere::new(center, radius)))
     }
 }
 
@@ -93,7 +95,7 @@ fn read_f32(reader: &mut BinaryReader<'_>) -> MathResult<f32> {
 impl ApproxEq for Sphere {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
         self.center.approx_eq(&other.center, epsilon)
-            && self.radius.approx_eq(&other.radius, epsilon)
+            & self.radius.approx_eq(&other.radius, epsilon)
     }
 }
 

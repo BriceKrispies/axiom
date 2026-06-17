@@ -68,15 +68,16 @@ impl Vec4 {
     /// Divide by a scalar with the same checked semantics as the other
     /// vectors.
     pub fn div_scalar(self, k: f32) -> MathResult<Vec4> {
-        if !k.is_finite() {
-            return Err(MathError::non_finite_scalar(
+        (!k.is_finite())
+            .then_some(Err(MathError::non_finite_scalar(
                 "vec4 scalar divisor must be finite",
-            ));
-        }
-        if k == 0.0 {
-            return Err(MathError::divide_by_zero("vec4 scalar divisor was zero"));
-        }
-        Ok(Vec4::new(self.x / k, self.y / k, self.z / k, self.w / k))
+            )))
+            .or_else(|| {
+                (k == 0.0).then_some(Err(MathError::divide_by_zero(
+                    "vec4 scalar divisor was zero",
+                )))
+            })
+            .unwrap_or_else(|| Ok(Vec4::new(self.x / k, self.y / k, self.z / k, self.w / k)))
     }
 
     /// Dot product.
@@ -94,20 +95,22 @@ impl Vec4 {
 
     /// Read four `f32` components in declaration order.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Vec4> {
-        let x = reader.read_f32()?;
-        let y = reader.read_f32()?;
-        let z = reader.read_f32()?;
-        let w = reader.read_f32()?;
-        Ok(Vec4::new(x, y, z, w))
+        reader.read_f32().and_then(|x| {
+            reader.read_f32().and_then(|y| {
+                reader
+                    .read_f32()
+                    .and_then(|z| reader.read_f32().map(|w| Vec4::new(x, y, z, w)))
+            })
+        })
     }
 }
 
 impl ApproxEq for Vec4 {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
         self.x.approx_eq(&other.x, epsilon)
-            && self.y.approx_eq(&other.y, epsilon)
-            && self.z.approx_eq(&other.z, epsilon)
-            && self.w.approx_eq(&other.w, epsilon)
+            & self.y.approx_eq(&other.y, epsilon)
+            & self.z.approx_eq(&other.z, epsilon)
+            & self.w.approx_eq(&other.w, epsilon)
     }
 }
 
@@ -130,12 +133,12 @@ impl Reflect for Vec4 {
     }
 
     fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        Ok(Vec4::new(
-            f32::reflect_read(reader)?,
-            f32::reflect_read(reader)?,
-            f32::reflect_read(reader)?,
-            f32::reflect_read(reader)?,
-        ))
+        f32::reflect_read(reader).and_then(|x| {
+            f32::reflect_read(reader).and_then(|y| {
+                f32::reflect_read(reader)
+                    .and_then(|z| f32::reflect_read(reader).map(|w| Vec4::new(x, y, z, w)))
+            })
+        })
     }
 }
 

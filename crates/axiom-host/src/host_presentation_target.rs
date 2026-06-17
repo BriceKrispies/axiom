@@ -30,17 +30,21 @@ impl HostPresentationTarget {
     /// - a null (zero) handle id → `InvalidPresentationTarget`,
     /// - an empty label → `InvalidPresentationTarget`.
     pub(crate) fn new(id: HandleId, label: &'static str) -> HostResult<Self> {
-        if !id.is_valid() {
-            return Err(HostError::invalid_presentation_target(
-                "presentation target handle id must be non-null",
-            ));
-        }
-        if label.is_empty() {
-            return Err(HostError::invalid_presentation_target(
-                "presentation target label must be non-empty",
-            ));
-        }
-        Ok(HostPresentationTarget { id, label })
+        id.is_valid()
+            .then_some(())
+            .ok_or_else(|| {
+                HostError::invalid_presentation_target(
+                    "presentation target handle id must be non-null",
+                )
+            })
+            .and_then(|()| {
+                (!label.is_empty()).then_some(()).ok_or_else(|| {
+                    HostError::invalid_presentation_target(
+                        "presentation target label must be non-empty",
+                    )
+                })
+            })
+            .map(|()| HostPresentationTarget { id, label })
     }
 
     /// The stable kernel identity of this target.

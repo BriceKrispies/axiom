@@ -26,9 +26,7 @@ impl FrameHistory {
 
     /// Append a report, evicting the oldest if at capacity.
     pub fn record(&mut self, report: FrameReport) {
-        if self.frames.len() == self.capacity {
-            self.frames.remove(0);
-        }
+        (self.frames.len() == self.capacity).then(|| self.frames.remove(0));
         self.frames.push(report);
     }
 

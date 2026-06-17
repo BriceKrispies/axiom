@@ -21,28 +21,32 @@ impl Plane {
     /// Construct from a non-zero, finite normal and a finite plane offset.
     /// The normal is normalized on the way in.
     pub fn new(normal: Vec3, d: f32) -> MathResult<Plane> {
-        if !d.is_finite() {
-            return Err(MathError::non_finite_scalar(
-                "plane offset d must be finite",
-            ));
-        }
-        for component in [normal.x, normal.y, normal.z] {
-            if !component.is_finite() {
-                return Err(MathError::non_finite_scalar(
-                    "plane normal components must be finite",
-                ));
-            }
-        }
+        let normal_finite = [normal.x, normal.y, normal.z]
+            .into_iter()
+            .all(|component| component.is_finite());
         let len = normal.length();
-        if len == 0.0 {
-            return Err(MathError::normalize_zero_length(
-                "plane normal must be non-zero",
-            ));
-        }
-        Ok(Plane {
-            normal: Vec3::new(normal.x / len, normal.y / len, normal.z / len),
-            d: d / len,
-        })
+        // Error precedence mirrors the original: non-finite `d`, then a
+        // non-finite normal component, then a zero-length normal.
+        (!d.is_finite())
+            .then_some(Err(MathError::non_finite_scalar(
+                "plane offset d must be finite",
+            )))
+            .or_else(|| {
+                (d.is_finite() & !normal_finite).then_some(Err(MathError::non_finite_scalar(
+                    "plane normal components must be finite",
+                )))
+            })
+            .or_else(|| {
+                (d.is_finite() & normal_finite & (len == 0.0)).then_some(Err(
+                    MathError::normalize_zero_length("plane normal must be non-zero"),
+                ))
+            })
+            .unwrap_or_else(|| {
+                Ok(Plane {
+                    normal: Vec3::new(normal.x / len, normal.y / len, normal.z / len),
+                    d: d / len,
+                })
+            })
     }
 
     /// Unit normal.
@@ -63,19 +67,19 @@ impl Plane {
     /// Classify a point against the plane using the supplied tolerance.
     pub fn classify_point(&self, p: Vec3, epsilon: Epsilon) -> PlaneSide {
         let s = self.signed_distance_to_point(p);
-        if s > epsilon.value() {
-            PlaneSide::Front
-        } else if s < -epsilon.value() {
-            PlaneSide::Back
-        } else {
-            PlaneSide::On
-        }
+        // Front when s > +eps, Back when s < -eps, else On. The conditions are
+        // mutually exclusive, so selecting Front first then Back over a default
+        // of On reproduces the if / else-if / else exactly.
+        let front = s > epsilon.value();
+        let back = (!front) & (s < -epsilon.value());
+        let back_or_on = back.then_some(PlaneSide::Back).unwrap_or(PlaneSide::On);
+        front.then_some(PlaneSide::Front).unwrap_or(back_or_on)
     }
 }
 
 impl ApproxEq for Plane {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
-        self.normal.approx_eq(&other.normal, epsilon) && self.d.approx_eq(&other.d, epsilon)
+        self.normal.approx_eq(&other.normal, epsilon) & self.d.approx_eq(&other.d, epsilon)
     }
 }
 

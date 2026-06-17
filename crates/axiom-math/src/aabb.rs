@@ -25,35 +25,41 @@ impl Aabb {
     /// Construct from explicit corners. Fails if `min > max` on any axis or
     /// if any component is not finite.
     pub fn new(min: Vec3, max: Vec3) -> MathResult<Aabb> {
-        for component in [min.x, min.y, min.z, max.x, max.y, max.z] {
-            if !component.is_finite() {
-                return Err(MathError::non_finite_scalar(
-                    "Aabb corner components must be finite",
-                ));
-            }
-        }
-        if min.x > max.x || min.y > max.y || min.z > max.z {
-            return Err(MathError::invalid_aabb_bounds(
-                "Aabb min must be component-wise <= max",
-            ));
-        }
-        Ok(Aabb { min, max })
+        let all_finite = [min.x, min.y, min.z, max.x, max.y, max.z]
+            .into_iter()
+            .all(|component| component.is_finite());
+        let inverted = (min.x > max.x) | (min.y > max.y) | (min.z > max.z);
+        (!all_finite)
+            .then_some(Err(MathError::non_finite_scalar(
+                "Aabb corner components must be finite",
+            )))
+            .or_else(|| {
+                (all_finite & inverted).then_some(Err(MathError::invalid_aabb_bounds(
+                    "Aabb min must be component-wise <= max",
+                )))
+            })
+            .unwrap_or(Ok(Aabb { min, max }))
     }
 
     /// Construct from a center and non-negative half-extents. Fails when any
     /// extent is negative or non-finite.
     pub fn from_center_extents(center: Vec3, extents: Vec3) -> MathResult<Aabb> {
-        for component in [extents.x, extents.y, extents.z] {
-            if !component.is_finite() {
-                return Err(MathError::non_finite_scalar("Aabb extents must be finite"));
-            }
-            if component < 0.0 {
-                return Err(MathError::invalid_aabb_bounds(
-                    "Aabb extents must be non-negative",
-                ));
-            }
-        }
-        Aabb::new(center.subtract(extents), center.add(extents))
+        // First offending extent (in x, y, z order) decides the error, with
+        // non-finite taking priority over negative for a given component.
+        let extent_error: Option<MathError> = [extents.x, extents.y, extents.z]
+            .into_iter()
+            .find_map(|component| {
+                (!component.is_finite())
+                    .then_some(MathError::non_finite_scalar("Aabb extents must be finite"))
+                    .or_else(|| {
+                        (component < 0.0).then_some(MathError::invalid_aabb_bounds(
+                            "Aabb extents must be non-negative",
+                        ))
+                    })
+            });
+        extent_error
+            .map(Err)
+            .unwrap_or_else(|| Aabb::new(center.subtract(extents), center.add(extents)))
     }
 
     /// Minimum corner.
@@ -78,27 +84,27 @@ impl Aabb {
 
     /// Inclusive point containment.
     pub fn contains_point(&self, p: Vec3) -> bool {
-        p.x >= self.min.x
-            && p.x <= self.max.x
-            && p.y >= self.min.y
-            && p.y <= self.max.y
-            && p.z >= self.min.z
-            && p.z <= self.max.z
+        (p.x >= self.min.x)
+            & (p.x <= self.max.x)
+            & (p.y >= self.min.y)
+            & (p.y <= self.max.y)
+            & (p.z >= self.min.z)
+            & (p.z <= self.max.z)
     }
 
     /// Whether `other` is fully inside `self`.
     pub fn contains_aabb(&self, other: &Aabb) -> bool {
-        self.contains_point(other.min) && self.contains_point(other.max)
+        self.contains_point(other.min) & self.contains_point(other.max)
     }
 
     /// Whether `self` and `other` share any point.
     pub fn overlaps(&self, other: &Aabb) -> bool {
-        self.min.x <= other.max.x
-            && self.max.x >= other.min.x
-            && self.min.y <= other.max.y
-            && self.max.y >= other.min.y
-            && self.min.z <= other.max.z
-            && self.max.z >= other.min.z
+        (self.min.x <= other.max.x)
+            & (self.max.x >= other.min.x)
+            & (self.min.y <= other.max.y)
+            & (self.max.y >= other.min.y)
+            & (self.min.z <= other.max.z)
+            & (self.max.z >= other.min.z)
     }
 
     /// Union: smallest AABB containing both `self` and `other`.
@@ -139,17 +145,21 @@ impl Aabb {
 
     /// Read `min` then `max` and validate the resulting AABB.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> MathResult<Aabb> {
-        let min = Vec3::read_from(reader)
-            .map_err(|cause| MathError::deserialization_failed("Aabb.min read failed", cause))?;
-        let max = Vec3::read_from(reader)
-            .map_err(|cause| MathError::deserialization_failed("Aabb.max read failed", cause))?;
-        Aabb::new(min, max)
+        Vec3::read_from(reader)
+            .map_err(|cause| MathError::deserialization_failed("Aabb.min read failed", cause))
+            .and_then(|min| {
+                Vec3::read_from(reader)
+                    .map_err(|cause| {
+                        MathError::deserialization_failed("Aabb.max read failed", cause)
+                    })
+                    .and_then(|max| Aabb::new(min, max))
+            })
     }
 }
 
 impl ApproxEq for Aabb {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
-        self.min.approx_eq(&other.min, epsilon) && self.max.approx_eq(&other.max, epsilon)
+        self.min.approx_eq(&other.min, epsilon) & self.max.approx_eq(&other.max, epsilon)
     }
 }
 

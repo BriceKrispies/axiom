@@ -87,34 +87,40 @@ pub fn parse_module_manifest(
     dir: &Path,
     text: &str,
 ) -> Result<ModuleManifest, ModuleManifestError> {
-    let raw: RawManifest = toml::from_str(text).map_err(|e| ModuleManifestError {
-        path: dir.join("module.toml"),
-        message: e.message().to_string(),
-    })?;
-    let manifest = ModuleManifest {
-        dir: dir.to_path_buf(),
-        module: raw.module,
-    };
-    validate_local(&manifest).map_err(|message| ModuleManifestError {
-        path: dir.join("module.toml"),
-        message,
-    })?;
-    Ok(manifest)
+    toml::from_str::<RawManifest>(text)
+        .map_err(|e| ModuleManifestError {
+            path: dir.join("module.toml"),
+            message: e.message().to_string(),
+        })
+        .map(|raw| ModuleManifest {
+            dir: dir.to_path_buf(),
+            module: raw.module,
+        })
+        .and_then(|manifest| {
+            validate_local(&manifest)
+                .map_err(|message| ModuleManifestError {
+                    path: dir.join("module.toml"),
+                    message,
+                })
+                .map(|()| manifest)
+        })
 }
 
 /// Validation that requires only the manifest itself (no cross-manifest
 /// context).
 fn validate_local(m: &ModuleManifest) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
-    for cap in &m.module.introduced_capabilities {
-        if !seen.insert(cap.as_str()) {
-            return Err(format!(
+    // The first capability that fails to insert is a duplicate.
+    m.module
+        .introduced_capabilities
+        .iter()
+        .find(|cap| !seen.insert(cap.as_str()))
+        .map_or(Ok(()), |cap| {
+            Err(format!(
                 "module `{}` introduces duplicate capability `{cap}`",
                 m.module.name
-            ));
-        }
-    }
-    Ok(())
+            ))
+        })
 }
 
 /// Discover and parse every module manifest at `<root>/modules/*/module.toml`.
@@ -122,39 +128,45 @@ fn validate_local(m: &ModuleManifest) -> Result<(), String> {
 /// Discovery is one level deep, mirroring the layer manifest loader.
 pub fn load_module_manifests(root: &Path) -> (Vec<ModuleManifest>, Vec<ModuleManifestError>) {
     let modules_dir = root.join("modules");
-    let mut manifests = Vec::new();
-    let mut errors = Vec::new();
 
-    let entries = match std::fs::read_dir(&modules_dir) {
-        Ok(entries) => entries,
-        Err(_) => return (manifests, errors),
-    };
-
-    let mut crate_dirs: Vec<PathBuf> = entries
+    // A missing `modules/` dir yields nothing (not an error). `read_dir`'s
+    // `Result` flattens to zero entries on `Err`.
+    let mut crate_dirs: Vec<PathBuf> = std::fs::read_dir(&modules_dir)
+        .into_iter()
+        .flatten()
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.is_dir())
         .collect();
     crate_dirs.sort();
 
-    for crate_dir in crate_dirs {
-        let manifest_path = crate_dir.join("module.toml");
-        if !manifest_path.is_file() {
-            continue;
-        }
-        match std::fs::read_to_string(&manifest_path) {
-            Ok(text) => match parse_module_manifest(&crate_dir, &text) {
-                Ok(manifest) => manifests.push(manifest),
-                Err(err) => errors.push(err),
+    // Each crate dir with a `module.toml` yields one parse result; split the
+    // Ok/Err results into the two output vecs without branching.
+    crate_dirs
+        .into_iter()
+        .map(|crate_dir| crate_dir.join("module.toml"))
+        .filter(|manifest_path| manifest_path.is_file())
+        .map(|manifest_path| {
+            let crate_dir = manifest_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default();
+            std::fs::read_to_string(&manifest_path)
+                .map_err(|e| ModuleManifestError {
+                    path: manifest_path,
+                    message: format!("could not read file: {e}"),
+                })
+                .and_then(|text| parse_module_manifest(&crate_dir, &text))
+        })
+        .fold(
+            (Vec::new(), Vec::new()),
+            |(mut manifests, mut errors), result| {
+                result
+                    .map(|manifest| manifests.push(manifest))
+                    .unwrap_or_else(|err| errors.push(err));
+                (manifests, errors)
             },
-            Err(e) => errors.push(ModuleManifestError {
-                path: manifest_path,
-                message: format!("could not read file: {e}"),
-            }),
-        }
-    }
-
-    (manifests, errors)
+        )
 }
 
 #[cfg(test)]

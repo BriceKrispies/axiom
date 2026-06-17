@@ -54,10 +54,8 @@ impl std::fmt::Display for MetadataError {
 /// [`load_via_toml`] so synthetic fixtures and CI environments without a
 /// working cargo install still validate.
 pub fn load(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
-    match load_via_cargo(root) {
-        Ok(g) => Ok(g),
-        Err(_) => load_via_toml(root),
-    }
+    // Cargo is authoritative; fall back to a pure-TOML parse on any failure.
+    load_via_cargo(root).or_else(|_| load_via_toml(root))
 }
 
 /// Manifest-only workspace graph loader: parses the workspace's
@@ -102,114 +100,151 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
     }
 
     let root_cargo_path = root.join("Cargo.toml");
+    // Read + parse the workspace manifest, then read + parse each member; both
+    // are fallible, so the whole pipeline is an error-propagating chain.
     let root_text = std::fs::read_to_string(&root_cargo_path).map_err(|e| MetadataError {
         message: format!(
             "could not read workspace Cargo.toml at {}: {e}",
             root_cargo_path.display()
         ),
-    })?;
-    let root_cargo: RootCargo = toml::from_str(&root_text).map_err(|e| MetadataError {
-        message: format!(
-            "could not parse workspace Cargo.toml at {}: {}",
-            root_cargo_path.display(),
-            e.message()
-        ),
-    })?;
-
-    let mut dir_by_name: BTreeMap<String, PathBuf> = BTreeMap::new();
-    let mut members: Vec<(PathBuf, String, MemberCargo)> = Vec::new();
-    for member_dir_rel in &root_cargo.workspace.members {
-        let member_dir = root.join(member_dir_rel);
-        let manifest = member_dir.join("Cargo.toml");
-        let text = std::fs::read_to_string(&manifest).map_err(|e| MetadataError {
+    });
+    let root_cargo = root_text.and_then(|root_text| {
+        toml::from_str::<RootCargo>(&root_text).map_err(|e| MetadataError {
             message: format!(
-                "could not read member Cargo.toml at {}: {e}",
-                manifest.display()
-            ),
-        })?;
-        let parsed: MemberCargo = toml::from_str(&text).map_err(|e| MetadataError {
-            message: format!(
-                "could not parse member Cargo.toml at {}: {}",
-                manifest.display(),
+                "could not parse workspace Cargo.toml at {}: {}",
+                root_cargo_path.display(),
                 e.message()
             ),
-        })?;
-        let name = parsed
-            .package
-            .as_ref()
-            .map(|p| p.name.clone())
-            .ok_or_else(|| MetadataError {
-                message: format!("member at {} has no `[package].name`", manifest.display()),
-            })?;
-        dir_by_name.insert(name.clone(), member_dir.clone());
-        members.push((member_dir, name, parsed));
-    }
+        })
+    });
 
-    let mut packages = Vec::new();
-    for (dir, name, parsed) in &members {
-        let mut workspace_deps: BTreeSet<String> = BTreeSet::new();
-        for (dep_key, value) in &parsed.dependencies {
-            let rename = match value {
-                DepValue::Version(_) => None,
-                DepValue::Detailed(t) => t.package.clone(),
-            };
-            let resolved = rename.unwrap_or_else(|| dep_key.clone());
-            if dir_by_name.contains_key(&resolved) {
-                workspace_deps.insert(resolved);
-            }
+    let members = root_cargo.and_then(|root_cargo| {
+        root_cargo
+            .workspace
+            .members
+            .iter()
+            .map(|member_dir_rel| {
+                let member_dir = root.join(member_dir_rel);
+                let manifest = member_dir.join("Cargo.toml");
+                std::fs::read_to_string(&manifest)
+                    .map_err(|e| MetadataError {
+                        message: format!(
+                            "could not read member Cargo.toml at {}: {e}",
+                            manifest.display()
+                        ),
+                    })
+                    .and_then(|text| {
+                        toml::from_str::<MemberCargo>(&text).map_err(|e| MetadataError {
+                            message: format!(
+                                "could not parse member Cargo.toml at {}: {}",
+                                manifest.display(),
+                                e.message()
+                            ),
+                        })
+                    })
+                    .and_then(|parsed| {
+                        parsed
+                            .package
+                            .as_ref()
+                            .map(|p| p.name.clone())
+                            .ok_or_else(|| MetadataError {
+                                message: format!(
+                                    "member at {} has no `[package].name`",
+                                    manifest.display()
+                                ),
+                            })
+                            .map(|name| (member_dir, name, parsed))
+                    })
+            })
+            .collect::<Result<Vec<(PathBuf, String, MemberCargo)>, MetadataError>>()
+    });
+
+    members.map(|members| {
+        let dir_by_name: BTreeMap<String, PathBuf> = members
+            .iter()
+            .map(|(dir, name, _)| (name.clone(), dir.clone()))
+            .collect();
+
+        let mut packages: Vec<WorkspacePackage> = members
+            .iter()
+            .map(|(dir, name, parsed)| {
+                let workspace_deps: Vec<String> = parsed
+                    .dependencies
+                    .iter()
+                    .filter_map(|(dep_key, value)| {
+                        // A renamed dep (`package = "…"`) resolves to that name;
+                        // otherwise the key is the crate name.
+                        let resolved = match value {
+                            DepValue::Version(_) => None,
+                            DepValue::Detailed(t) => t.package.clone(),
+                        }
+                        .unwrap_or_else(|| dep_key.clone());
+                        dir_by_name.contains_key(&resolved).then_some(resolved)
+                    })
+                    .collect::<BTreeSet<String>>()
+                    .into_iter()
+                    .collect();
+                WorkspacePackage {
+                    name: name.clone(),
+                    dir: dir.clone(),
+                    workspace_deps,
+                }
+            })
+            .collect();
+        packages.sort_by(|a, b| a.name.cmp(&b.name));
+
+        WorkspaceGraph {
+            root: root.to_path_buf(),
+            packages,
         }
-        packages.push(WorkspacePackage {
-            name: name.clone(),
-            dir: dir.clone(),
-            workspace_deps: workspace_deps.into_iter().collect(),
-        });
-    }
-    packages.sort_by(|a, b| a.name.cmp(&b.name));
-
-    Ok(WorkspaceGraph {
-        root: root.to_path_buf(),
-        packages,
     })
 }
 
 fn load_via_cargo(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
     let manifest = root.join("Cargo.toml");
-    if !manifest.is_file() {
-        return Err(MetadataError {
+    let cargo_bin = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+
+    // Require the manifest, run `cargo metadata`, require success, then parse —
+    // each step error-propagates into the next.
+    manifest
+        .is_file()
+        .then_some(())
+        .ok_or_else(|| MetadataError {
             message: format!(
                 "no workspace Cargo.toml at {} — cannot run `cargo metadata`",
                 manifest.display()
             ),
-        });
-    }
-
-    let cargo_bin = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let output = Command::new(&cargo_bin)
-        .arg("metadata")
-        .arg("--format-version=1")
-        .arg("--no-deps")
-        .arg("--offline")
-        .arg("--manifest-path")
-        .arg(&manifest)
-        .output()
-        .map_err(|e| MetadataError {
-            message: format!("could not invoke `{cargo_bin} metadata`: {e}"),
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(MetadataError {
-            message: format!(
-                "`cargo metadata` exited with status {}: {}",
-                output.status, stderr
-            ),
-        });
-    }
-
-    parse_metadata(&output.stdout).map(|mut g| {
-        g.root = root.to_path_buf();
-        g
-    })
+        })
+        .and_then(|()| {
+            Command::new(&cargo_bin)
+                .arg("metadata")
+                .arg("--format-version=1")
+                .arg("--no-deps")
+                .arg("--offline")
+                .arg("--manifest-path")
+                .arg(&manifest)
+                .output()
+                .map_err(|e| MetadataError {
+                    message: format!("could not invoke `{cargo_bin} metadata`: {e}"),
+                })
+        })
+        .and_then(|output| {
+            let status = output.status;
+            let stdout = output.stdout;
+            let stderr = output.stderr;
+            status.success().then_some(stdout).ok_or_else(|| MetadataError {
+                message: format!(
+                    "`cargo metadata` exited with status {status}: {}",
+                    String::from_utf8_lossy(&stderr)
+                ),
+            })
+        })
+        .and_then(|stdout| {
+            parse_metadata(&stdout).map(|mut g| {
+                g.root = root.to_path_buf();
+                g
+            })
+        })
 }
 
 #[derive(Debug, Deserialize)]
@@ -241,62 +276,63 @@ struct RawDependency {
 }
 
 fn parse_metadata(bytes: &[u8]) -> Result<WorkspaceGraph, MetadataError> {
-    let raw: RawMetadata = serde_json::from_slice(bytes).map_err(|e| MetadataError {
+    let raw = serde_json::from_slice::<RawMetadata>(bytes).map_err(|e| MetadataError {
         message: format!("could not parse `cargo metadata` output as JSON: {e}"),
-    })?;
+    });
 
-    let workspace_ids: BTreeSet<&str> = raw.workspace_members.iter().map(String::as_str).collect();
-    let workspace_names: BTreeSet<&str> = raw
-        .packages
-        .iter()
-        .filter(|p| workspace_ids.contains(p.id.as_str()))
-        .map(|p| p.name.as_str())
-        .collect();
+    raw.and_then(|raw| {
+        let workspace_ids: BTreeSet<&str> =
+            raw.workspace_members.iter().map(String::as_str).collect();
+        let workspace_names: BTreeSet<&str> = raw
+            .packages
+            .iter()
+            .filter(|p| workspace_ids.contains(p.id.as_str()))
+            .map(|p| p.name.as_str())
+            .collect();
 
-    let mut packages = Vec::new();
-    for raw_pkg in &raw.packages {
-        if !workspace_ids.contains(raw_pkg.id.as_str()) {
-            continue;
-        }
-        let manifest_path = PathBuf::from(&raw_pkg.manifest_path);
-        let dir = manifest_path
-            .parent()
-            .ok_or_else(|| MetadataError {
-                message: format!(
-                    "package `{}` manifest_path has no parent dir: {}",
-                    raw_pkg.name,
-                    manifest_path.display()
-                ),
-            })?
-            .to_path_buf();
-
-        let mut workspace_deps: BTreeSet<String> = BTreeSet::new();
-        for dep in &raw_pkg.dependencies {
-            // Ignore dev-deps and build-deps; only normal deps load-bear.
-            if dep.kind.is_some() {
-                continue;
-            }
-            // Path/workspace deps have `source = null`. Cross-checked with
-            // the workspace name set so a renamed dep doesn't slip through.
-            if dep.source.is_some() {
-                continue;
-            }
-            if workspace_names.contains(dep.name.as_str()) {
-                workspace_deps.insert(dep.name.clone());
-            }
-        }
-
-        packages.push(WorkspacePackage {
-            name: raw_pkg.name.clone(),
-            dir,
-            workspace_deps: workspace_deps.into_iter().collect(),
-        });
-    }
-
-    packages.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(WorkspaceGraph {
-        root: PathBuf::new(),
-        packages,
+        // Keep only workspace members; each resolves its parent dir (fallible).
+        raw.packages
+            .iter()
+            .filter(|raw_pkg| workspace_ids.contains(raw_pkg.id.as_str()))
+            .map(|raw_pkg| {
+                let manifest_path = PathBuf::from(&raw_pkg.manifest_path);
+                manifest_path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .ok_or_else(|| MetadataError {
+                        message: format!(
+                            "package `{}` manifest_path has no parent dir: {}",
+                            raw_pkg.name,
+                            manifest_path.display()
+                        ),
+                    })
+                    .map(|dir| {
+                        // Normal deps only (no dev/build, source = null), and
+                        // cross-checked against the workspace name set.
+                        let workspace_deps: Vec<String> = raw_pkg
+                            .dependencies
+                            .iter()
+                            .filter(|dep| dep.kind.is_none() & dep.source.is_none())
+                            .filter(|dep| workspace_names.contains(dep.name.as_str()))
+                            .map(|dep| dep.name.clone())
+                            .collect::<BTreeSet<String>>()
+                            .into_iter()
+                            .collect();
+                        WorkspacePackage {
+                            name: raw_pkg.name.clone(),
+                            dir,
+                            workspace_deps,
+                        }
+                    })
+            })
+            .collect::<Result<Vec<WorkspacePackage>, MetadataError>>()
+            .map(|mut packages| {
+                packages.sort_by(|a, b| a.name.cmp(&b.name));
+                WorkspaceGraph {
+                    root: PathBuf::new(),
+                    packages,
+                }
+            })
     })
 }
 

@@ -106,22 +106,32 @@ impl Mat4 {
     /// `fovy_radians` is in `(0, π)`. Otherwise returns
     /// [`crate::math_error_code::MathErrorCode::InvalidMatrixOperation`].
     pub fn perspective(fovy_radians: f32, aspect: f32, near: f32, far: f32) -> MathResult<Mat4> {
-        if !fovy_radians.is_finite() || !aspect.is_finite() || !near.is_finite() || !far.is_finite()
-        {
-            return Err(MathError::invalid_matrix_operation(
+        let all_finite = fovy_radians.is_finite()
+            & aspect.is_finite()
+            & near.is_finite()
+            & far.is_finite();
+        let fovy_in_range = (fovy_radians > 0.0) & (fovy_radians < std::f32::consts::PI);
+        let bounds_ok = (aspect > 0.0) & (near > 0.0) & (far > near);
+        (!all_finite)
+            .then_some(Err(MathError::invalid_matrix_operation(
                 "perspective parameters must be finite",
-            ));
-        }
-        if fovy_radians <= 0.0 || fovy_radians >= std::f32::consts::PI {
-            return Err(MathError::invalid_matrix_operation(
-                "perspective fovy must be in (0, pi)",
-            ));
-        }
-        if aspect <= 0.0 || near <= 0.0 || far <= near {
-            return Err(MathError::invalid_matrix_operation(
-                "perspective requires aspect > 0, near > 0, far > near",
-            ));
-        }
+            )))
+            .or_else(|| {
+                (all_finite & !fovy_in_range).then_some(Err(MathError::invalid_matrix_operation(
+                    "perspective fovy must be in (0, pi)",
+                )))
+            })
+            .or_else(|| {
+                (all_finite & fovy_in_range & !bounds_ok).then_some(Err(
+                    MathError::invalid_matrix_operation(
+                        "perspective requires aspect > 0, near > 0, far > near",
+                    ),
+                ))
+            })
+            .unwrap_or_else(|| Self::perspective_unchecked(fovy_radians, aspect, near, far))
+    }
+
+    fn perspective_unchecked(fovy_radians: f32, aspect: f32, near: f32, far: f32) -> MathResult<Mat4> {
         let f = 1.0 / (fovy_radians * 0.5).tan();
         let nf = 1.0 / (near - far);
         Ok(Mat4::from_cols_array([
@@ -158,18 +168,30 @@ impl Mat4 {
         near: f32,
         far: f32,
     ) -> MathResult<Mat4> {
-        for v in [left, right, bottom, top, near, far] {
-            if !v.is_finite() {
-                return Err(MathError::invalid_matrix_operation(
-                    "orthographic parameters must be finite",
-                ));
-            }
-        }
-        if right <= left || top <= bottom || far <= near {
-            return Err(MathError::invalid_matrix_operation(
-                "orthographic requires right > left, top > bottom, far > near",
-            ));
-        }
+        let all_finite = [left, right, bottom, top, near, far]
+            .into_iter()
+            .all(|v| v.is_finite());
+        let bounds_ok = (right > left) & (top > bottom) & (far > near);
+        (!all_finite)
+            .then_some(Err(MathError::invalid_matrix_operation(
+                "orthographic parameters must be finite",
+            )))
+            .or_else(|| {
+                (all_finite & !bounds_ok).then_some(Err(MathError::invalid_matrix_operation(
+                    "orthographic requires right > left, top > bottom, far > near",
+                )))
+            })
+            .unwrap_or_else(|| Self::orthographic_unchecked(left, right, bottom, top, near, far))
+    }
+
+    fn orthographic_unchecked(
+        left: f32,
+        right: f32,
+        bottom: f32,
+        top: f32,
+        near: f32,
+        far: f32,
+    ) -> MathResult<Mat4> {
         let rl = right - left;
         let tb = top - bottom;
         let fn_ = far - near;
@@ -201,48 +223,75 @@ impl Mat4 {
     /// Fails when `eye == target` or when `target - eye` is parallel to `up`
     /// (the resulting basis would be degenerate).
     pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) -> MathResult<Mat4> {
-        let f = target
+        target
             .subtract(eye)
             .normalize()
-            .map_err(|_| MathError::invalid_matrix_operation("look_at eye and target coincide"))?;
-        let s = f.cross(up).normalize().map_err(|_| {
-            MathError::invalid_matrix_operation("look_at forward and up are parallel")
-        })?;
-        let u = s.cross(f);
-        Ok(Mat4::from_cols_array([
-            s.x,
-            u.x,
-            -f.x,
-            0.0, //
-            s.y,
-            u.y,
-            -f.y,
-            0.0, //
-            s.z,
-            u.z,
-            -f.z,
-            0.0, //
-            -s.dot(eye),
-            -u.dot(eye),
-            f.dot(eye),
-            1.0,
-        ]))
+            .map_err(|_| MathError::invalid_matrix_operation("look_at eye and target coincide"))
+            .and_then(|f| {
+                f.cross(up)
+                    .normalize()
+                    .map_err(|_| {
+                        MathError::invalid_matrix_operation("look_at forward and up are parallel")
+                    })
+                    .map(|s| {
+                        let u = s.cross(f);
+                        Mat4::from_cols_array([
+                            s.x,
+                            u.x,
+                            -f.x,
+                            0.0, //
+                            s.y,
+                            u.y,
+                            -f.y,
+                            0.0, //
+                            s.z,
+                            u.z,
+                            -f.z,
+                            0.0, //
+                            -s.dot(eye),
+                            -u.dot(eye),
+                            f.dot(eye),
+                            1.0,
+                        ])
+                    })
+            })
     }
 
     /// Matrix product `self * other`.
     #[axiom_zones::strict]
     pub fn multiply(self, other: Mat4) -> Mat4 {
-        let mut out = [0.0f32; 16];
-        for col in 0..4 {
-            for row in 0..4 {
-                let mut acc = 0.0f32;
-                for k in 0..4 {
-                    acc += self.data[k * 4 + row] * other.data[col * 4 + k];
-                }
-                out[col * 4 + row] = acc;
-            }
+        let a = &self.data;
+        let b = &other.data;
+        // Explicit unroll of the column-major 4x4 product. Each element keeps
+        // the exact accumulation order of the original `acc += a[k*4+row] *
+        // b[col*4+k]` loop over k = 0,1,2,3: `(((0 + t0) + t1) + t2) + t3`.
+        let elem = |col: usize, row: usize| -> f32 {
+            0.0f32
+                + a[row] * b[col * 4]
+                + a[4 + row] * b[col * 4 + 1]
+                + a[8 + row] * b[col * 4 + 2]
+                + a[12 + row] * b[col * 4 + 3]
+        };
+        Mat4 {
+            data: [
+                elem(0, 0),
+                elem(0, 1),
+                elem(0, 2),
+                elem(0, 3),
+                elem(1, 0),
+                elem(1, 1),
+                elem(1, 2),
+                elem(1, 3),
+                elem(2, 0),
+                elem(2, 1),
+                elem(2, 2),
+                elem(2, 3),
+                elem(3, 0),
+                elem(3, 1),
+                elem(3, 2),
+                elem(3, 3),
+            ],
         }
-        Mat4 { data: out }
     }
 
     /// Multiply a column vector by this matrix.
@@ -261,11 +310,12 @@ impl Mat4 {
     /// divide if `w'` is non-zero.
     pub fn transform_point(&self, p: Vec3) -> Vec3 {
         let v = self.transform_vec4(Vec4::new(p.x, p.y, p.z, 1.0));
-        if v.w != 0.0 && v.w != 1.0 {
-            Vec3::new(v.x / v.w, v.y / v.w, v.z / v.w)
-        } else {
-            Vec3::new(v.x, v.y, v.z)
-        }
+        let needs_divide = (v.w != 0.0) & (v.w != 1.0);
+        // Select the divisor branchlessly: 1.0 leaves the components unchanged
+        // (the affine branch), v.w performs the perspective divide. Dividing by
+        // 1.0 is always finite, so this is safe for the non-divide case.
+        let divisor = needs_divide.then_some(v.w).unwrap_or(1.0);
+        Vec3::new(v.x / divisor, v.y / divisor, v.z / divisor)
     }
 
     /// Transform a 3D direction (homogeneous `w = 0`). Translation has no
@@ -277,29 +327,24 @@ impl Mat4 {
 
     /// Append the 16 column-major `f32` elements in order.
     pub fn write_to(self, writer: &mut BinaryWriter) {
-        for elem in self.data {
-            writer.write_f32(elem);
-        }
+        self.data.into_iter().for_each(|elem| writer.write_f32(elem));
     }
 
     /// Read 16 column-major `f32` elements in order.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Mat4> {
         let mut data = [0.0f32; 16];
-        for slot in data.iter_mut() {
-            *slot = reader.read_f32()?;
-        }
-        Ok(Mat4 { data })
+        data.iter_mut()
+            .try_for_each(|slot| reader.read_f32().map(|v| *slot = v))
+            .map(|()| Mat4 { data })
     }
 }
 
 impl ApproxEq for Mat4 {
     fn approx_eq(&self, other: &Self, epsilon: Epsilon) -> bool {
-        for i in 0..16 {
-            if !self.data[i].approx_eq(&other.data[i], epsilon) {
-                return false;
-            }
-        }
-        true
+        self.data
+            .iter()
+            .zip(other.data.iter())
+            .all(|(a, b)| a.approx_eq(b, epsilon))
     }
 }
 
@@ -307,17 +352,16 @@ impl Reflect for Mat4 {
     const SCHEMA: TypeSchema = TypeSchema::new("Mat4", &[FieldSchema::new("data", "[f32; 16]")]);
 
     fn reflect_write(&self, writer: &mut BinaryWriter) {
-        for elem in self.data {
-            elem.reflect_write(writer);
-        }
+        self.data
+            .into_iter()
+            .for_each(|elem| elem.reflect_write(writer));
     }
 
     fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
         let mut data = [0.0f32; 16];
-        for slot in data.iter_mut() {
-            *slot = f32::reflect_read(reader)?;
-        }
-        Ok(Mat4 { data })
+        data.iter_mut()
+            .try_for_each(|slot| f32::reflect_read(reader).map(|v| *slot = v))
+            .map(|()| Mat4 { data })
     }
 }
 

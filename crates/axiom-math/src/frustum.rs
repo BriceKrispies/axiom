@@ -56,15 +56,20 @@ impl Frustum {
         let (nn, nd) = plane_from(row2, 1.0, row3);
         let (fn_, fd) = plane_from(row2, -1.0, row3);
 
-        Ok(Frustum {
-            planes: [
-                Plane::new(ln, ld)?,
-                Plane::new(rn, rd)?,
-                Plane::new(bn, bd)?,
-                Plane::new(tn, td)?,
-                Plane::new(nn, nd)?,
-                Plane::new(fn_, fd)?,
-            ],
+        // Build the six planes left-to-right, short-circuiting on the first
+        // zero-length normal exactly as the original `?` chain did.
+        Plane::new(ln, ld).and_then(|left| {
+            Plane::new(rn, rd).and_then(|right| {
+                Plane::new(bn, bd).and_then(|bottom| {
+                    Plane::new(tn, td).and_then(|top| {
+                        Plane::new(nn, nd).and_then(|near| {
+                            Plane::new(fn_, fd).map(|far| Frustum {
+                                planes: [left, right, bottom, top, near, far],
+                            })
+                        })
+                    })
+                })
+            })
         })
     }
 
@@ -84,41 +89,25 @@ impl Frustum {
     /// `true` for boxes that touch the frustum only through their bounding
     /// volume but not their interior — this is the standard culling test.
     pub fn intersects_aabb(&self, aabb: &Aabb) -> bool {
-        for plane in &self.planes {
+        self.planes.iter().all(|plane| {
             let n = plane.normal();
-            // p-vertex: corner that maximizes signed distance.
+            // p-vertex: corner that maximizes signed distance. Each axis picks
+            // `max` when the normal component is >= 0, else `min` — the same
+            // selection the `if` did, expressed branchlessly.
             let p_vertex = Vec3::new(
-                if n.x >= 0.0 {
-                    aabb.max().x
-                } else {
-                    aabb.min().x
-                },
-                if n.y >= 0.0 {
-                    aabb.max().y
-                } else {
-                    aabb.min().y
-                },
-                if n.z >= 0.0 {
-                    aabb.max().z
-                } else {
-                    aabb.min().z
-                },
+                (n.x >= 0.0).then_some(aabb.max().x).unwrap_or(aabb.min().x),
+                (n.y >= 0.0).then_some(aabb.max().y).unwrap_or(aabb.min().y),
+                (n.z >= 0.0).then_some(aabb.max().z).unwrap_or(aabb.min().z),
             );
-            if plane.signed_distance_to_point(p_vertex) < 0.0 {
-                return false;
-            }
-        }
-        true
+            plane.signed_distance_to_point(p_vertex) >= 0.0
+        })
     }
 
     /// Whether the sphere is not fully outside any plane.
     pub fn intersects_sphere(&self, sphere: &Sphere) -> bool {
-        for plane in &self.planes {
-            if plane.signed_distance_to_point(sphere.center()) < -sphere.radius() {
-                return false;
-            }
-        }
-        true
+        self.planes
+            .iter()
+            .all(|plane| plane.signed_distance_to_point(sphere.center()) >= -sphere.radius())
     }
 }
 

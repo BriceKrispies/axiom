@@ -68,16 +68,16 @@ pub fn check(
     module_dirs: &[(String, PathBuf)],
     report: &mut CheckReport,
 ) {
-    for (name, dir) in layer_dirs {
+    layer_dirs.iter().for_each(|(name, dir)| {
         let is_platform_facing = PLATFORM_FACING_LAYERS.contains(&name.as_str());
         scan_one(name, dir, "layer", is_platform_facing, report);
-    }
-    for (name, dir) in module_dirs {
+    });
+    module_dirs.iter().for_each(|(name, dir)| {
         // Only the sanctioned platform-facing module (windowing) may reference
         // browser APIs; every other module rejects them.
         let is_platform_facing = PLATFORM_FACING_MODULES.contains(&name.as_str());
         scan_one(name, dir, "module", is_platform_facing, report);
-    }
+    });
 }
 
 fn scan_one(
@@ -87,100 +87,103 @@ fn scan_one(
     is_platform_facing: bool,
     report: &mut CheckReport,
 ) {
-    if !src_dir.is_dir() {
-        return;
-    }
-    let files = collect_rs_files(src_dir);
-    for path in files {
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            if JUNK_DRAWER_NAMES.contains(&stem) {
-                report.push(Violation::new(
-                    ViolationKind::SourceHygieneJunkDrawerModule,
-                    name.to_string(),
-                    format!(
-                        "{kind_label} `{name}` contains a junk-drawer module `{stem}`: {}; \
-                         rename it to something specific",
-                        path.display()
-                    ),
-                ));
-            }
-        }
-
-        let text = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        // Strip `//` line comments so a forbidden token mentioned only in
-        // a comment does not fail the scan.
-        let stripped = strip_line_comments(&text);
-
-        // Track which (forbidden, kind) we've already reported per file so
-        // a single file doesn't spam the report.
-        let mut reported: BTreeSet<(&str, &str)> = BTreeSet::new();
-
-        // Coverage-suppression tokens are scanned against the RAW text (not the
-        // comment-stripped form): even a commented-out `#[coverage(off)]` is a
-        // sign the ban is being worked around, and the attribute itself is the
-        // thing we forbid outright.
-        for needle in COVERAGE_OFF_NEEDLES {
-            if text.contains(needle) && reported.insert((needle, "coverage")) {
-                let line = first_line_containing(&text, needle);
-                let mut v = Violation::new(
-                    ViolationKind::SourceHygieneCoverageOff,
-                    name.to_string(),
-                    format!(
-                        "{kind_label} `{name}` uses banned coverage-suppression `{needle}` in {}; \
-                         cover the code with a reachable test or refactor the dead branch away",
-                        path.display()
-                    ),
-                );
-                if let Some(line) = line {
-                    v = v.at(path.clone(), line);
-                }
-                report.push(v);
-            }
-        }
-
-        for needle in FORBIDDEN_MACROS {
-            if stripped.contains(needle) && reported.insert((needle, "macro")) {
-                let line = first_line_containing(&stripped, needle);
-                let mut v = Violation::new(
-                    ViolationKind::SourceHygieneForbiddenMacro,
-                    name.to_string(),
-                    format!(
-                        "{kind_label} `{name}` uses forbidden macro `{needle}` in {}; \
-                         emit structured records through kernel logging instead",
-                        path.display()
-                    ),
-                );
-                if let Some(line) = line {
-                    v = v.at(path.clone(), line);
-                }
-                report.push(v);
-            }
-        }
-
-        if !is_platform_facing {
-            for needle in BROWSER_API_NEEDLES {
-                if stripped.contains(needle) && reported.insert((needle, "browser")) {
-                    let line = first_line_containing(&stripped, needle);
-                    let mut v = Violation::new(
-                        ViolationKind::SourceHygieneBrowserApi,
+    src_dir.is_dir().then(|| {
+        collect_rs_files(src_dir).into_iter().for_each(|path| {
+            // Junk-drawer file/dir name (e.g. `utils.rs`).
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .filter(|stem| JUNK_DRAWER_NAMES.contains(stem))
+                .into_iter()
+                .for_each(|stem| {
+                    report.push(Violation::new(
+                        ViolationKind::SourceHygieneJunkDrawerModule,
                         name.to_string(),
                         format!(
-                            "{kind_label} `{name}` references platform API `{needle}` in {}; \
-                             only the platform-facing host layer may reference these",
+                            "{kind_label} `{name}` contains a junk-drawer module `{stem}`: {}; \
+                             rename it to something specific",
                             path.display()
                         ),
-                    );
-                    if let Some(line) = line {
-                        v = v.at(path.clone(), line);
-                    }
-                    report.push(v);
-                }
-            }
-        }
-    }
+                    ));
+                });
+
+            // A file we cannot read contributes no token scans.
+            std::fs::read_to_string(&path)
+                .into_iter()
+                .for_each(|text| {
+                    // Strip `//` line comments so a forbidden token mentioned only
+                    // in a comment does not fail the scan.
+                    let stripped = strip_line_comments(&text);
+
+                    // Track which (forbidden, kind) we've already reported per file
+                    // so a single file doesn't spam the report.
+                    let mut reported: BTreeSet<(&str, &str)> = BTreeSet::new();
+
+                    // Coverage-suppression tokens are scanned against the RAW text
+                    // (not the comment-stripped form): even a commented-out
+                    // `#[coverage(off)]` is a sign the ban is being worked around,
+                    // and the attribute itself is the thing we forbid outright.
+                    COVERAGE_OFF_NEEDLES
+                        .iter()
+                        .filter(|needle| text.contains(*needle))
+                        // `insert` runs only when `contains` passed (per-file dedup).
+                        .filter(|needle| reported.insert((needle, "coverage")))
+                        .for_each(|needle| {
+                            let v = Violation::new(
+                                ViolationKind::SourceHygieneCoverageOff,
+                                name.to_string(),
+                                format!(
+                                    "{kind_label} `{name}` uses banned coverage-suppression `{needle}` in {}; \
+                                     cover the code with a reachable test or refactor the dead branch away",
+                                    path.display()
+                                ),
+                            );
+                            let v = first_line_containing(&text, needle)
+                                .map_or(v.clone(), |line| v.at(path.clone(), line));
+                            report.push(v);
+                        });
+
+                    FORBIDDEN_MACROS
+                        .iter()
+                        .filter(|needle| stripped.contains(*needle))
+                        .filter(|needle| reported.insert((needle, "macro")))
+                        .for_each(|needle| {
+                            let v = Violation::new(
+                                ViolationKind::SourceHygieneForbiddenMacro,
+                                name.to_string(),
+                                format!(
+                                    "{kind_label} `{name}` uses forbidden macro `{needle}` in {}; \
+                                     emit structured records through kernel logging instead",
+                                    path.display()
+                                ),
+                            );
+                            let v = first_line_containing(&stripped, needle)
+                                .map_or(v.clone(), |line| v.at(path.clone(), line));
+                            report.push(v);
+                        });
+
+                    // Browser APIs are rejected only for non-platform-facing crates.
+                    BROWSER_API_NEEDLES
+                        .iter()
+                        .filter(|_| !is_platform_facing)
+                        .filter(|needle| stripped.contains(*needle))
+                        .filter(|needle| reported.insert((needle, "browser")))
+                        .for_each(|needle| {
+                            let v = Violation::new(
+                                ViolationKind::SourceHygieneBrowserApi,
+                                name.to_string(),
+                                format!(
+                                    "{kind_label} `{name}` references platform API `{needle}` in {}; \
+                                     only the platform-facing host layer may reference these",
+                                    path.display()
+                                ),
+                            );
+                            let v = first_line_containing(&stripped, needle)
+                                .map_or(v.clone(), |line| v.at(path.clone(), line));
+                            report.push(v);
+                        });
+                });
+        });
+    });
 }
 
 fn first_line_containing(text: &str, needle: &str) -> Option<usize> {

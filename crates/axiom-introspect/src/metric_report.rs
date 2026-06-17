@@ -26,7 +26,7 @@ impl MetricReport {
     pub fn from_metric(metric: &TelemetryMetric) -> Self {
         MetricReport {
             name: metric.name().to_string(),
-            is_counter: matches!(metric.kind(), MetricKind::Counter),
+            is_counter: metric.kind().raw() == MetricKind::Counter.raw(),
             value: metric.value(),
             tick: metric.tick().map(|t| t.raw()),
         }
@@ -68,13 +68,8 @@ impl MetricReport {
                 writer.write_f32(f);
             }
         }
-        match self.tick {
-            Some(t) => {
-                writer.write_bool(true);
-                writer.write_u64(t);
-            }
-            None => writer.write_bool(false),
-        }
+        writer.write_bool(self.tick.is_some());
+        self.tick.iter().for_each(|t| writer.write_u64(*t));
     }
 
     /// Read a report previously written with [`Self::write_to`]. Rejects an
@@ -93,11 +88,10 @@ impl MetricReport {
                 ))
             }
         };
-        let tick = if reader.read_bool()? {
-            Some(reader.read_u64()?)
-        } else {
-            None
-        };
+        let tick = reader
+            .read_bool()?
+            .then(|| reader.read_u64())
+            .transpose()?;
         Ok(MetricReport {
             name,
             is_counter,

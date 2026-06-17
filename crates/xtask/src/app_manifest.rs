@@ -53,52 +53,59 @@ pub struct AppManifestError {
 }
 
 pub fn parse_app_manifest(dir: &Path, text: &str) -> Result<AppManifest, AppManifestError> {
-    let raw: RawManifest = toml::from_str(text).map_err(|e| AppManifestError {
-        path: dir.join("app.toml"),
-        message: e.message().to_string(),
-    })?;
-    Ok(AppManifest {
-        dir: dir.to_path_buf(),
-        app: raw.app,
-    })
+    toml::from_str::<RawManifest>(text)
+        .map_err(|e| AppManifestError {
+            path: dir.join("app.toml"),
+            message: e.message().to_string(),
+        })
+        .map(|raw| AppManifest {
+            dir: dir.to_path_buf(),
+            app: raw.app,
+        })
 }
 
 /// Discover and parse every app manifest at `<root>/apps/*/app.toml`.
 pub fn load_app_manifests(root: &Path) -> (Vec<AppManifest>, Vec<AppManifestError>) {
     let apps_dir = root.join("apps");
-    let mut manifests = Vec::new();
-    let mut errors = Vec::new();
 
-    let entries = match std::fs::read_dir(&apps_dir) {
-        Ok(entries) => entries,
-        Err(_) => return (manifests, errors),
-    };
-
-    let mut crate_dirs: Vec<PathBuf> = entries
+    // A missing `apps/` dir yields nothing; `read_dir`'s `Result` flattens to
+    // zero entries on `Err`.
+    let mut crate_dirs: Vec<PathBuf> = std::fs::read_dir(&apps_dir)
+        .into_iter()
+        .flatten()
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.is_dir())
         .collect();
     crate_dirs.sort();
 
-    for crate_dir in crate_dirs {
-        let manifest_path = crate_dir.join("app.toml");
-        if !manifest_path.is_file() {
-            continue;
-        }
-        match std::fs::read_to_string(&manifest_path) {
-            Ok(text) => match parse_app_manifest(&crate_dir, &text) {
-                Ok(manifest) => manifests.push(manifest),
-                Err(err) => errors.push(err),
+    // Each crate dir with an `app.toml` yields one parse result; split the
+    // Ok/Err results into the two output vecs without branching.
+    crate_dirs
+        .into_iter()
+        .map(|crate_dir| crate_dir.join("app.toml"))
+        .filter(|manifest_path| manifest_path.is_file())
+        .map(|manifest_path| {
+            let crate_dir = manifest_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default();
+            std::fs::read_to_string(&manifest_path)
+                .map_err(|e| AppManifestError {
+                    path: manifest_path,
+                    message: format!("could not read file: {e}"),
+                })
+                .and_then(|text| parse_app_manifest(&crate_dir, &text))
+        })
+        .fold(
+            (Vec::new(), Vec::new()),
+            |(mut manifests, mut errors), result| {
+                result
+                    .map(|manifest| manifests.push(manifest))
+                    .unwrap_or_else(|err| errors.push(err));
+                (manifests, errors)
             },
-            Err(e) => errors.push(AppManifestError {
-                path: manifest_path,
-                message: format!("could not read file: {e}"),
-            }),
-        }
-    }
-
-    (manifests, errors)
+        )
 }
 
 #[cfg(test)]

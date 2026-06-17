@@ -51,9 +51,10 @@ impl RenderReceipt {
 
         let command_count = commands.len().min(u32::MAX as usize) as u32;
         w.write_u32(command_count);
-        for command in commands.commands() {
-            Self::write_command(&mut w, command);
-        }
+        commands
+            .commands()
+            .iter()
+            .for_each(|command| Self::write_command(&mut w, command));
 
         RenderReceipt {
             frame_index,
@@ -70,26 +71,21 @@ impl RenderReceipt {
         w.write_u32(command.kind_code());
         match command {
             RenderCommand::ClearFrame { color } => {
-                for c in color {
-                    w.write_f32(*c);
-                }
+                color.iter().for_each(|c| w.write_f32(*c));
             }
             RenderCommand::SetCamera { view, projection } => {
-                for c in view.as_cols_array() {
-                    w.write_f32(c);
-                }
-                for c in projection.as_cols_array() {
-                    w.write_f32(c);
-                }
+                view.as_cols_array().iter().for_each(|c| w.write_f32(*c));
+                projection
+                    .as_cols_array()
+                    .iter()
+                    .for_each(|c| w.write_f32(*c));
             }
             RenderCommand::SetPipeline { pipeline_id } => w.write_u32(*pipeline_id),
             RenderCommand::SetMesh { mesh_id } => w.write_u64(*mesh_id),
             RenderCommand::SetMaterial { material_id } => w.write_u64(*material_id),
             RenderCommand::DrawIndexed { index_count, world } => {
                 w.write_u32(*index_count);
-                for c in world.as_cols_array() {
-                    w.write_f32(c);
-                }
+                world.as_cols_array().iter().for_each(|c| w.write_f32(*c));
             }
         }
     }
@@ -126,12 +122,9 @@ impl RenderReceipt {
     pub fn hash(&self) -> u64 {
         const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
         const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = FNV_OFFSET;
-        for &b in &self.bytes {
-            h ^= b as u64;
-            h = h.wrapping_mul(FNV_PRIME);
-        }
-        h
+        self.bytes
+            .iter()
+            .fold(FNV_OFFSET, |h, &b| (h ^ b as u64).wrapping_mul(FNV_PRIME))
     }
 }
 

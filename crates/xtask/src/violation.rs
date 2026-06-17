@@ -215,11 +215,17 @@ impl Violation {
 
 impl fmt::Display for Violation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let location = match (&self.file, self.line) {
-            (Some(file), Some(line)) => format!("{}:{}", file.display(), line),
-            (Some(file), None) => file.display().to_string(),
-            _ => "<manifest>".to_string(),
-        };
+        // `file:line` when both are present, `file` when only the file is, else
+        // a manifest-level placeholder.
+        let location = self.file.as_ref().map_or_else(
+            || "<manifest>".to_string(),
+            |file| {
+                self.line.map_or_else(
+                    || file.display().to_string(),
+                    |line| format!("{}:{}", file.display(), line),
+                )
+            },
+        );
         write!(
             f,
             "{location} [{}] layer `{}`: {}",

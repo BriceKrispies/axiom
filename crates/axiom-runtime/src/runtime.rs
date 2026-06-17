@@ -57,68 +57,76 @@ impl Runtime {
     /// the kernel; on rejection the returned error wraps the kernel cause.
     pub fn new(config: RuntimeConfig) -> RuntimeResult<Self> {
         let kernel = KernelApi::new();
-        let fixed_step = config.validate(&kernel)?;
-        let clock = kernel.simulation_clock(fixed_step);
-        let log_sink = kernel.log_sink();
-        let telemetry_sink = kernel.telemetry_sink();
-        Ok(Runtime {
-            kernel,
-            config,
-            state: RuntimeState::Created,
-            timeline: RuntimeTimeline::new(clock),
-            scheduler: RuntimeScheduler::new(),
-            commands: RuntimeCommandQueue::new(),
-            events: RuntimeEventQueue::new(),
-            log_sink,
-            telemetry_sink,
+        config.validate(&kernel).map(|fixed_step| {
+            let clock = kernel.simulation_clock(fixed_step);
+            let log_sink = kernel.log_sink();
+            let telemetry_sink = kernel.telemetry_sink();
+            Runtime {
+                kernel,
+                config,
+                state: RuntimeState::Created,
+                timeline: RuntimeTimeline::new(clock),
+                scheduler: RuntimeScheduler::new(),
+                commands: RuntimeCommandQueue::new(),
+                events: RuntimeEventQueue::new(),
+                log_sink,
+                telemetry_sink,
+            }
         })
     }
 
     /// Transition `Created` → `Initialized`.
     pub fn initialize(&mut self) -> RuntimeResult<()> {
-        match self.state {
-            RuntimeState::Created => {
-                self.state = RuntimeState::Initialized;
-                Ok(())
-            }
-            _ => Err(invalid_transition("initialize requires Created")),
-        }
+        (self.state == RuntimeState::Created)
+            .then_some(RuntimeState::Initialized)
+            .map_or(
+                Err(invalid_transition("initialize requires Created")),
+                |next| {
+                    self.state = next;
+                    Ok(())
+                },
+            )
     }
 
     /// Transition `Initialized` or `Paused` → `Running`.
     pub fn start(&mut self) -> RuntimeResult<()> {
-        match self.state {
-            RuntimeState::Initialized | RuntimeState::Paused => {
-                self.state = RuntimeState::Running;
-                Ok(())
-            }
-            _ => Err(invalid_transition("start requires Initialized or Paused")),
-        }
+        ((self.state == RuntimeState::Initialized) | (self.state == RuntimeState::Paused))
+            .then_some(RuntimeState::Running)
+            .map_or(
+                Err(invalid_transition("start requires Initialized or Paused")),
+                |next| {
+                    self.state = next;
+                    Ok(())
+                },
+            )
     }
 
     /// Transition `Running` → `Paused`.
     pub fn pause(&mut self) -> RuntimeResult<()> {
-        match self.state {
-            RuntimeState::Running => {
-                self.state = RuntimeState::Paused;
+        (self.state == RuntimeState::Running)
+            .then_some(RuntimeState::Paused)
+            .map_or(Err(invalid_transition("pause requires Running")), |next| {
+                self.state = next;
                 Ok(())
-            }
-            _ => Err(invalid_transition("pause requires Running")),
-        }
+            })
     }
 
     /// Transition `Running`, `Paused`, or `Initialized` → `Stopped`.
     /// Terminal states (`Stopped`, `Failed`) are rejected.
     pub fn stop(&mut self) -> RuntimeResult<()> {
-        match self.state {
-            RuntimeState::Running | RuntimeState::Paused | RuntimeState::Initialized => {
-                self.state = RuntimeState::Stopped;
-                Ok(())
-            }
-            _ => Err(invalid_transition(
-                "stop requires Running, Paused, or Initialized",
-            )),
-        }
+        ((self.state == RuntimeState::Running)
+            | (self.state == RuntimeState::Paused)
+            | (self.state == RuntimeState::Initialized))
+            .then_some(RuntimeState::Stopped)
+            .map_or(
+                Err(invalid_transition(
+                    "stop requires Running, Paused, or Initialized",
+                )),
+                |next| {
+                    self.state = next;
+                    Ok(())
+                },
+            )
     }
 
     /// Advance exactly one deterministic step.
@@ -134,80 +142,91 @@ impl Runtime {
     ///   the step into the runtime's in-memory log sink.
     #[axiom_zones::sim]
     pub fn step(&mut self) -> RuntimeResult<RuntimeStepRecord> {
-        if self.state != RuntimeState::Running {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::StepWhileNotRunning,
-                "step() requires the runtime to be in Running",
-            ));
-        }
+        // The running-state guard becomes the first link of the chain: only a
+        // `Running` runtime yields `Ok(())` to advance through; any other state
+        // short-circuits to `StepWhileNotRunning` without touching the body.
+        (self.state == RuntimeState::Running)
+            .then_some(())
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::StepWhileNotRunning,
+                    "step() requires the runtime to be in Running",
+                )
+            })
+            .and_then(|()| self.run_one_step())
+    }
 
+    /// The body of one `Running` step: advance the timeline, run the scheduler,
+    /// drain the queues, and record the result. Split out of [`Self::step`] so
+    /// the running-state guard composes as a plain `and_then` chain.
+    fn run_one_step(&mut self) -> RuntimeResult<RuntimeStepRecord> {
         let commands_before = self.commands.len();
         let events_before = self.events.len();
         let metrics_before = self.telemetry_sink.len();
 
-        let step = self.timeline.advance()?;
-        let mut diagnostics = RuntimeDiagnostics::new(step);
+        self.timeline.advance().map(|step| {
+            let mut diagnostics = RuntimeDiagnostics::new(step);
 
-        // Run the scheduler with a context borrowing the runtime's queues and
-        // sinks. The kernel is borrowed shared (the facade is stateless).
-        let outcomes = {
-            let mut ctx = RuntimeContext::new(
-                step,
-                &mut self.commands,
-                &mut self.events,
-                &self.kernel,
-                &mut self.log_sink,
-                &mut self.telemetry_sink,
+            // Run the scheduler with a context borrowing the runtime's queues
+            // and sinks. The kernel is borrowed shared (the facade is stateless).
+            let outcomes = {
+                let mut ctx = RuntimeContext::new(
+                    step,
+                    &mut self.commands,
+                    &mut self.events,
+                    &self.kernel,
+                    &mut self.log_sink,
+                    &mut self.telemetry_sink,
+                );
+                self.scheduler
+                    .execute(&mut ctx, self.config.fail_on_system_error())
+            };
+
+            let any_error = outcomes.iter().any(|o| !o.succeeded());
+            diagnostics.record_outcomes(outcomes);
+
+            // Capture the metrics the step's systems emitted (everything
+            // appended to the sink during the scheduler run), before the
+            // runtime's own diagnostics counter is recorded below.
+            diagnostics.record_metrics(self.telemetry_sink.metrics()[metrics_before..].to_vec());
+
+            let commands_after = self.commands.len();
+            let events_after = self.events.len();
+            let commands_pushed = commands_after
+                .saturating_sub(commands_before)
+                .min(u32::MAX as usize) as u32;
+            let events_pushed = events_after
+                .saturating_sub(events_before)
+                .min(u32::MAX as usize) as u32;
+
+            // Drain at the step boundary.
+            let commands_drained = commands_after.min(u32::MAX as usize) as u32;
+            let events_drained = events_after.min(u32::MAX as usize) as u32;
+            self.commands.clear();
+            self.events.clear();
+
+            diagnostics.record_queue_counts(
+                commands_pushed,
+                events_pushed,
+                commands_drained,
+                events_drained,
             );
-            self.scheduler
-                .execute(&mut ctx, self.config.fail_on_system_error())
-        };
 
-        let any_error = outcomes.iter().any(|o| !o.succeeded());
-        diagnostics.record_outcomes(outcomes);
+            (any_error & self.config.fail_on_system_error())
+                .then(|| self.state = RuntimeState::Failed);
 
-        // Capture the metrics the step's systems emitted (everything appended
-        // to the sink during the scheduler run), before the runtime's own
-        // diagnostics counter is recorded below.
-        diagnostics.record_metrics(self.telemetry_sink.metrics()[metrics_before..].to_vec());
+            self.config
+                .diagnostics_enabled()
+                .then(|| self.emit_step_summary(&diagnostics));
 
-        let commands_after = self.commands.len();
-        let events_after = self.events.len();
-        let commands_pushed = commands_after
-            .saturating_sub(commands_before)
-            .min(u32::MAX as usize) as u32;
-        let events_pushed = events_after
-            .saturating_sub(events_before)
-            .min(u32::MAX as usize) as u32;
-
-        // Drain at the step boundary.
-        let commands_drained = commands_after.min(u32::MAX as usize) as u32;
-        let events_drained = events_after.min(u32::MAX as usize) as u32;
-        self.commands.clear();
-        self.events.clear();
-
-        diagnostics.record_queue_counts(
-            commands_pushed,
-            events_pushed,
-            commands_drained,
-            events_drained,
-        );
-
-        if any_error && self.config.fail_on_system_error() {
-            self.state = RuntimeState::Failed;
-        }
-
-        if self.config.diagnostics_enabled() {
-            self.emit_step_summary(&diagnostics);
-        }
-
-        Ok(RuntimeStepRecord::new(
-            step,
-            diagnostics,
-            self.state,
-            self.commands.len(),
-            self.events.len(),
-        ))
+            RuntimeStepRecord::new(
+                step,
+                diagnostics,
+                self.state,
+                self.commands.len(),
+                self.events.len(),
+            )
+        })
     }
 
     /// Emit a `LogRecord` summarizing the just-completed step into the
@@ -215,11 +234,11 @@ impl Runtime {
     fn emit_step_summary(&mut self, diagnostics: &RuntimeDiagnostics) {
         use axiom_kernel::{LogField, LogLevel, LogRecord, TelemetryMetric};
 
-        let level = if diagnostics.errors().is_empty() {
-            LogLevel::Info
-        } else {
-            LogLevel::Error
-        };
+        let level = diagnostics
+            .errors()
+            .is_empty()
+            .then_some(LogLevel::Info)
+            .unwrap_or(LogLevel::Error);
         let record = LogRecord::new(level, "runtime.step", 1, "runtime step completed")
             .at(diagnostics.step().tick(), diagnostics.step().frame())
             .with_field(LogField::u64("sequence", diagnostics.step().sequence()))

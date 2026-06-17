@@ -6,9 +6,9 @@ use crate::texture_data::TextureData;
 /// Build a 2×2 solid-colour RGBA8 texture.
 pub fn build_solid_color_texture(id: ResourceId, name: &'static str, rgba: [u8; 4]) -> TextureData {
     let mut pixels = Vec::with_capacity(16);
-    for _ in 0..4 {
+    (0..4).for_each(|_| {
         pixels.extend_from_slice(&rgba);
-    }
+    });
     TextureData::new(id, name, 2, 2, pixels).expect("2x2 solid-color texture is well-formed")
 }
 
