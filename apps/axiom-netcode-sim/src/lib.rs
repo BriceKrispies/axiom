@@ -237,17 +237,27 @@ fn confirm_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
             peer.buffer_peak = peer.buffer_peak.max(peak);
             net.broadcast(i, &beacon, t);
         }
-        while peer.reconcile_cursor < peer.net.confirmed_tick() {
-            match peer.net.reconcile(peer.reconcile_cursor) {
-                None => break,
-                Some(true) => peer.reconcile_cursor += 1,
-                Some(false) => {
-                    let at = peer.reconcile_cursor;
-                    peer.desync_ticks.push(at);
-                    peer.reconcile_cursor += 1;
-                }
-            }
-        }
+        // Drain every newly-confirmed tick's reconciliation: `from_fn` yields one
+        // `(tick, in_sync)` per step while the cursor trails the confirmed tick
+        // and `reconcile` is ready (a `None` from `reconcile` means we're still
+        // waiting on a peer, which ends the stream for this pass). A desync
+        // (`!in_sync`) is recorded; the cursor advances past every drained tick.
+        let net = &peer.net;
+        let cursor = &mut peer.reconcile_cursor;
+        let desyncs = &mut peer.desync_ticks;
+        std::iter::from_fn(|| {
+            (*cursor < net.confirmed_tick())
+                .then(|| net.reconcile(*cursor))
+                .flatten()
+                .map(|in_sync| {
+                    let at = *cursor;
+                    *cursor += 1;
+                    (at, in_sync)
+                })
+        })
+        .for_each(|(at, in_sync)| {
+            (!in_sync).then(|| desyncs.push(at));
+        });
     });
 }
 

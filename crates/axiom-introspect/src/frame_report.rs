@@ -140,40 +140,64 @@ impl FrameReport {
     }
 
     fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        let version = SchemaVersion::read_from(reader)?;
-        SCHEMA.is_compatible_with(version).then_some(()).ok_or_else(|| {
-            KernelError::new(
-                KernelErrorScope::Binary,
-                KernelErrorCode::SchemaVersionMismatch,
-                "FrameReport schema major version is incompatible",
-            )
-        })?;
-        let engine_frame_index = reader.read_u64()?;
-        let host_frame_sequence = reader.read_u64()?;
-        let runtime_step_count = reader.read_u32()?;
-        let skipped = reader.read_bool()?;
-        let lifecycle = lifecycle_from_u8(reader.read_u8()?)?;
-        let viewport_width = reader.read_u32()?;
-        let viewport_height = reader.read_u32()?;
-        let count = reader.read_u32()?;
-        let systems = (0..count)
-            .map(|_| SystemReport::read_from(reader))
-            .collect::<KernelResult<Vec<_>>>()?;
-        let metric_count = reader.read_u32()?;
-        let metrics = (0..metric_count)
-            .map(|_| MetricReport::read_from(reader))
-            .collect::<KernelResult<Vec<_>>>()?;
-        Ok(FrameReport {
-            engine_frame_index,
-            host_frame_sequence,
-            runtime_step_count,
-            skipped,
-            lifecycle,
-            viewport_width,
-            viewport_height,
-            systems,
-            metrics,
-        })
+        // A fully branchless sequential decode: each field's read is chained
+        // through `and_then`, so the first error short-circuits the rest and
+        // the reader advances field-by-field exactly as `write_to` laid them
+        // down. The schema guard becomes a `then_some(...).ok_or_else(...)`
+        // expression threaded into the same chain.
+        SchemaVersion::read_from(reader)
+            .and_then(|version| {
+                SCHEMA.is_compatible_with(version).then_some(()).ok_or_else(|| {
+                    KernelError::new(
+                        KernelErrorScope::Binary,
+                        KernelErrorCode::SchemaVersionMismatch,
+                        "FrameReport schema major version is incompatible",
+                    )
+                })
+            })
+            .and_then(|()| reader.read_u64())
+            .and_then(|engine_frame_index| {
+                reader.read_u64().and_then(|host_frame_sequence| {
+                    reader.read_u32().and_then(|runtime_step_count| {
+                        reader.read_bool().and_then(|skipped| {
+                            reader
+                                .read_u8()
+                                .and_then(lifecycle_from_u8)
+                                .and_then(|lifecycle| {
+                                    reader.read_u32().and_then(|viewport_width| {
+                                        reader.read_u32().and_then(|viewport_height| {
+                                            reader.read_u32().and_then(|count| {
+                                                (0..count)
+                                                    .map(|_| SystemReport::read_from(reader))
+                                                    .collect::<KernelResult<Vec<_>>>()
+                                                    .and_then(|systems| {
+                                                        reader.read_u32().and_then(|metric_count| {
+                                                            (0..metric_count)
+                                                                .map(|_| {
+                                                                    MetricReport::read_from(reader)
+                                                                })
+                                                                .collect::<KernelResult<Vec<_>>>()
+                                                                .map(|metrics| FrameReport {
+                                                                    engine_frame_index,
+                                                                    host_frame_sequence,
+                                                                    runtime_step_count,
+                                                                    skipped,
+                                                                    lifecycle,
+                                                                    viewport_width,
+                                                                    viewport_height,
+                                                                    systems,
+                                                                    metrics,
+                                                                })
+                                                        })
+                                                    })
+                                            })
+                                        })
+                                    })
+                                })
+                        })
+                    })
+                })
+            })
     }
 }
 
