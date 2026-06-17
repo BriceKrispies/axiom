@@ -1,5 +1,7 @@
 //! The single public facade of the `axiom-render-pipeline` feature module.
 
+use std::collections::HashMap;
+
 use axiom_math::{Mat4, MathApi, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 use axiom_scene::SceneApi;
@@ -145,9 +147,7 @@ impl RenderPipelineApi {
         let mut view_projection = Mat4::IDENTITY;
         if let Some(cam) = snapshot.cameras().first() {
             let cam_world = snapshot
-                .nodes()
-                .iter()
-                .find(|n| n.id() == cam.node())
+                .node(cam.node())
                 .expect("camera node is present in the snapshot")
                 .world();
             let view = cam_world
@@ -179,7 +179,10 @@ impl RenderPipelineApi {
         }
 
         // Meshes / materials: registration order defines the render-side index.
-        let mut mesh_index: Vec<(u64, u32)> = Vec::with_capacity(frame.meshes.len());
+        // The id->index maps resolve each renderable's mesh/material in O(1)
+        // (the lists carry no duplicate ids), and `material_color` lets the
+        // per-draw pass below recover a command's colour without a scan.
+        let mut mesh_index: HashMap<u64, u32> = HashMap::with_capacity(frame.meshes.len());
         for mesh in &frame.meshes {
             let idx = render.add_input_mesh(
                 &mut input,
@@ -189,9 +192,11 @@ impl RenderPipelineApi {
                 mesh.uvs.clone(),
                 mesh.indices.clone(),
             );
-            mesh_index.push((mesh.id, idx));
+            mesh_index.insert(mesh.id, idx);
         }
-        let mut material_index: Vec<(u64, u32)> = Vec::with_capacity(frame.materials.len());
+        let mut material_index: HashMap<u64, u32> = HashMap::with_capacity(frame.materials.len());
+        let mut material_color: HashMap<u64, [f32; 4]> =
+            HashMap::with_capacity(frame.materials.len());
         for material in &frame.materials {
             let c = material.color;
             let idx = render.add_input_basic_lit_material(
@@ -199,7 +204,8 @@ impl RenderPipelineApi {
                 material.id,
                 Vec4::new(c[0], c[1], c[2], c[3]),
             );
-            material_index.push((material.id, idx));
+            material_index.insert(material.id, idx);
+            material_color.insert(material.id, c);
         }
 
         // Objects: one per renderable, resolving its mesh/material ids to the
@@ -207,21 +213,17 @@ impl RenderPipelineApi {
         // scene references.
         for renderable in snapshot.renderables() {
             let world = snapshot
-                .nodes()
-                .iter()
-                .find(|n| n.id() == renderable.node())
+                .node(renderable.node())
                 .expect("renderable node is present in the snapshot")
                 .world()
                 .to_matrix();
             let mesh_idx = mesh_index
-                .iter()
-                .find(|(id, _)| *id == renderable.mesh().raw())
-                .map(|(_, i)| *i)
+                .get(&renderable.mesh().raw())
+                .copied()
                 .expect("frame supplies a mesh asset for every renderable");
             let material_idx = material_index
-                .iter()
-                .find(|(id, _)| *id == renderable.material().raw())
-                .map(|(_, i)| *i)
+                .get(&renderable.material().raw())
+                .copied()
                 .expect("frame supplies a material asset for every renderable");
             render.add_input_object(
                 &mut input,
@@ -270,11 +272,7 @@ impl RenderPipelineApi {
         let mut current_color = [1.0_f32; 4];
         for i in 0..count {
             if let Some(id) = render.command_material_id_at(&commands, i) {
-                current_color = material_index
-                    .iter()
-                    .position(|(mid, _)| *mid == id)
-                    .map(|pos| frame.materials[pos].color)
-                    .unwrap_or([1.0; 4]);
+                current_color = material_color.get(&id).copied().unwrap_or([1.0; 4]);
             }
             if let Some((_, world)) = render.command_draw_indexed_at(&commands, i) {
                 draws.push((world, current_color));
