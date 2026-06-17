@@ -65,34 +65,36 @@ impl WindowingApi {
 
         // The one genuinely fallible step with caller-supplied data: the host
         // rejects a zero/oversized viewport. The remaining steps use fixed,
-        // valid constants and so cannot fail (documented at each site).
-        let viewport = host
-            .viewport(
-                width,
-                height,
-                Ratio::new(1.0).expect("unit scale factor is finite"),
-            )
-            .map_err(host_to_kernel)?;
-        let target = host
-            .presentation_target(&kernel, TARGET_HANDLE_RAW, TARGET_LABEL)
-            .expect("fixed non-zero target handle and non-empty label are valid");
-        let surface = host
-            .surface_handle(&kernel, SURFACE_HANDLE_RAW)
-            .expect("fixed non-zero surface handle is valid");
-        let descriptor = host.surface_descriptor(
-            viewport,
-            HostPresentMode::Fifo,
-            HostAlphaMode::Opaque,
-            HostColorFormat::Bgra8UnormSrgb,
-        );
-        let adapter = host.adapter_request(HostPowerPreference::HighPerformance, true);
-        let device = host.device_request(true, HostDeviceProfile::Baseline);
-        let request = host
-            .presentation_request(target, surface, descriptor, adapter, device)
-            .expect("adapter requires a presentation surface, matching the device request");
-
-        self.surface = Some(request);
-        Ok(())
+        // valid constants and so cannot fail (documented at each site). The
+        // success arm builds and stores the request; on the viewport error we
+        // return it and leave the surface unconfigured — expressed branchlessly
+        // through `map`, so this carries no `?`.
+        host.viewport(
+            width,
+            height,
+            Ratio::new(1.0).expect("unit scale factor is finite"),
+        )
+        .map_err(host_to_kernel)
+        .map(|viewport| {
+            let target = host
+                .presentation_target(&kernel, TARGET_HANDLE_RAW, TARGET_LABEL)
+                .expect("fixed non-zero target handle and non-empty label are valid");
+            let surface = host
+                .surface_handle(&kernel, SURFACE_HANDLE_RAW)
+                .expect("fixed non-zero surface handle is valid");
+            let descriptor = host.surface_descriptor(
+                viewport,
+                HostPresentMode::Fifo,
+                HostAlphaMode::Opaque,
+                HostColorFormat::Bgra8UnormSrgb,
+            );
+            let adapter = host.adapter_request(HostPowerPreference::HighPerformance, true);
+            let device = host.device_request(true, HostDeviceProfile::Baseline);
+            let request = host
+                .presentation_request(target, surface, descriptor, adapter, device)
+                .expect("adapter requires a presentation surface, matching the device request");
+            self.surface = Some(request);
+        })
     }
 
     /// Whether a surface has been configured.
