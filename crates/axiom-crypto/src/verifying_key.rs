@@ -45,9 +45,9 @@ impl VerifyingKey {
 
     /// Serialize as exactly [`Self::LEN`] raw bytes (no length prefix).
     pub fn write_to(&self, writer: &mut BinaryWriter) {
-        for byte in self.to_bytes() {
-            writer.write_u8(byte);
-        }
+        self.to_bytes()
+            .iter()
+            .for_each(|&byte| writer.write_u8(byte));
     }
 
     /// Read a verifying key previously written with [`Self::write_to`].
@@ -56,17 +56,22 @@ impl VerifyingKey {
     /// [`Self::LEN`] bytes remain, or `Binary`/`InvalidDiscriminant` if the bytes
     /// are not a valid curve point.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        let mut bytes = [0u8; Self::LEN];
-        for slot in bytes.iter_mut() {
-            *slot = reader.read_u8()?;
-        }
-        Self::try_from_bytes(&bytes).ok_or_else(|| {
-            KernelError::new(
-                KernelErrorScope::Binary,
-                KernelErrorCode::InvalidDiscriminant,
-                "verifying key bytes are not a valid curve point",
-            )
-        })
+        (0..Self::LEN)
+            .try_fold([0u8; Self::LEN], |mut bytes, index| {
+                reader.read_u8().map(|byte| {
+                    bytes[index] = byte;
+                    bytes
+                })
+            })
+            .and_then(|bytes| {
+                Self::try_from_bytes(&bytes).ok_or_else(|| {
+                    KernelError::new(
+                        KernelErrorScope::Binary,
+                        KernelErrorCode::InvalidDiscriminant,
+                        "verifying key bytes are not a valid curve point",
+                    )
+                })
+            })
     }
 }
 

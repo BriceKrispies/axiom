@@ -119,52 +119,57 @@ pub enum ViolationKind {
     CoverageIgnoreScriptDrift,
 }
 
+impl ViolationKind {
+    /// The stable, greppable tokens, one per variant, in declaration order.
+    /// `ViolationKind` is fieldless, so `self as usize` is its discriminant and
+    /// indexes straight into this table — no per-variant match arm to maintain.
+    const TOKENS: [&'static str; 40] = [
+        "ManifestInvalid",
+        "UnknownDependency",
+        "DependencyCycle",
+        "DisallowedLayerImport",
+        "PrivatePathImport",
+        "CapabilityNotExported",
+        "MissingProofExport",
+        "ProofReferenceMissing",
+        "UnknownPackageClass",
+        "ModuleManifestInvalid",
+        "AppManifestInvalid",
+        "LayerDependsOnModule",
+        "LayerDependsOnApp",
+        "LayerDependsOnTool",
+        "ModuleDependsOnModule",
+        "ModuleDependsOnLayerNotAllowed",
+        "ModuleDependsOnApp",
+        "ModuleDependsOnTool",
+        "ModuleHasNonEmptyAllowedModules",
+        "ModuleAllowedModuleUnknown",
+        "ModuleDependsOnModuleNotAllowed",
+        "ModuleAllowedLayerUnknown",
+        "ModuleFacadeMustExportOne",
+        "DuplicateModuleName",
+        "DuplicateModuleCapability",
+        "AppDependsOnLayerNotAllowed",
+        "AppDependsOnModuleNotAllowed",
+        "AppDependsOnApp",
+        "AppDependsOnTool",
+        "AppImportedBySomething",
+        "ToolImportedByEngine",
+        "AppAllowedLayerUnknown",
+        "AppAllowedModuleUnknown",
+        "ManifestCrateNameMismatch",
+        "SourceHygieneForbiddenMacro",
+        "SourceHygieneJunkDrawerModule",
+        "SourceHygieneBrowserApi",
+        "SourceHygieneCoverageOff",
+        "CoverageIgnoreExcludesEngine",
+        "CoverageIgnoreScriptDrift",
+    ];
+}
+
 impl fmt::Display for ViolationKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // A stable, greppable token for each kind.
-        let token = match self {
-            ViolationKind::ManifestInvalid => "ManifestInvalid",
-            ViolationKind::UnknownDependency => "UnknownDependency",
-            ViolationKind::DependencyCycle => "DependencyCycle",
-            ViolationKind::DisallowedLayerImport => "DisallowedLayerImport",
-            ViolationKind::PrivatePathImport => "PrivatePathImport",
-            ViolationKind::CapabilityNotExported => "CapabilityNotExported",
-            ViolationKind::MissingProofExport => "MissingProofExport",
-            ViolationKind::ProofReferenceMissing => "ProofReferenceMissing",
-            ViolationKind::UnknownPackageClass => "UnknownPackageClass",
-            ViolationKind::ModuleManifestInvalid => "ModuleManifestInvalid",
-            ViolationKind::AppManifestInvalid => "AppManifestInvalid",
-            ViolationKind::LayerDependsOnModule => "LayerDependsOnModule",
-            ViolationKind::LayerDependsOnApp => "LayerDependsOnApp",
-            ViolationKind::LayerDependsOnTool => "LayerDependsOnTool",
-            ViolationKind::ModuleDependsOnModule => "ModuleDependsOnModule",
-            ViolationKind::ModuleDependsOnLayerNotAllowed => "ModuleDependsOnLayerNotAllowed",
-            ViolationKind::ModuleDependsOnApp => "ModuleDependsOnApp",
-            ViolationKind::ModuleDependsOnTool => "ModuleDependsOnTool",
-            ViolationKind::ModuleHasNonEmptyAllowedModules => "ModuleHasNonEmptyAllowedModules",
-            ViolationKind::ModuleAllowedModuleUnknown => "ModuleAllowedModuleUnknown",
-            ViolationKind::ModuleDependsOnModuleNotAllowed => "ModuleDependsOnModuleNotAllowed",
-            ViolationKind::ModuleAllowedLayerUnknown => "ModuleAllowedLayerUnknown",
-            ViolationKind::ModuleFacadeMustExportOne => "ModuleFacadeMustExportOne",
-            ViolationKind::DuplicateModuleName => "DuplicateModuleName",
-            ViolationKind::DuplicateModuleCapability => "DuplicateModuleCapability",
-            ViolationKind::AppDependsOnLayerNotAllowed => "AppDependsOnLayerNotAllowed",
-            ViolationKind::AppDependsOnModuleNotAllowed => "AppDependsOnModuleNotAllowed",
-            ViolationKind::AppDependsOnApp => "AppDependsOnApp",
-            ViolationKind::AppDependsOnTool => "AppDependsOnTool",
-            ViolationKind::AppImportedBySomething => "AppImportedBySomething",
-            ViolationKind::ToolImportedByEngine => "ToolImportedByEngine",
-            ViolationKind::AppAllowedLayerUnknown => "AppAllowedLayerUnknown",
-            ViolationKind::AppAllowedModuleUnknown => "AppAllowedModuleUnknown",
-            ViolationKind::ManifestCrateNameMismatch => "ManifestCrateNameMismatch",
-            ViolationKind::SourceHygieneForbiddenMacro => "SourceHygieneForbiddenMacro",
-            ViolationKind::SourceHygieneJunkDrawerModule => "SourceHygieneJunkDrawerModule",
-            ViolationKind::SourceHygieneBrowserApi => "SourceHygieneBrowserApi",
-            ViolationKind::SourceHygieneCoverageOff => "SourceHygieneCoverageOff",
-            ViolationKind::CoverageIgnoreExcludesEngine => "CoverageIgnoreExcludesEngine",
-            ViolationKind::CoverageIgnoreScriptDrift => "CoverageIgnoreScriptDrift",
-        };
-        f.write_str(token)
+        f.write_str(ViolationKind::TOKENS[*self as usize])
     }
 }
 

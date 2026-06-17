@@ -95,12 +95,14 @@ impl WebGpuApi {
 
     /// Whether this is the deterministic recording backend.
     pub const fn is_recording(&self) -> bool {
-        matches!(self.state.kind(), BackendKind::Recording)
+        // Fieldless-enum predicate: compare the coarse `BackendKind`'s integer
+        // discriminants directly rather than branching on a `matches!` arm.
+        (self.state.kind() as u8) == (BackendKind::Recording as u8)
     }
 
     /// Whether this is a live backend (bound or unbound).
     pub const fn is_live(&self) -> bool {
-        matches!(self.state.kind(), BackendKind::Live)
+        (self.state.kind() as u8) == (BackendKind::Live as u8)
     }
 
     /// Whether a live backend has a bound, validated host presentation

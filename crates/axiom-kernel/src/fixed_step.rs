@@ -21,14 +21,15 @@ impl FixedStep {
     ///
     /// Returns [`KernelErrorCode::InvalidFixedStep`] if `nanos` is zero.
     pub const fn new(nanos: u64) -> KernelResult<Self> {
-        if nanos == 0 {
-            return Err(KernelError::new(
+        let valid = nanos != 0;
+        [
+            Err(KernelError::new(
                 KernelErrorScope::Time,
                 KernelErrorCode::InvalidFixedStep,
                 "fixed step must be greater than zero nanoseconds",
-            ));
-        }
-        Ok(FixedStep { nanos })
+            )),
+            Ok(FixedStep { nanos }),
+        ][valid as usize]
     }
 
     /// The step duration in nanoseconds. Always greater than zero.

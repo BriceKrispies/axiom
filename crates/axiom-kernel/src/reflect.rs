@@ -55,7 +55,7 @@ impl Reflect for EntityId {
     }
 
     fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        Ok(EntityId::from_raw(reader.read_u64()?))
+        reader.read_u64().map(EntityId::from_raw)
     }
 }
 

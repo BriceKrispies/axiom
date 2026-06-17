@@ -47,30 +47,36 @@ impl LayerManifest {
     ///
     /// Returns [`KernelErrorCode::DuplicateDependency`] if already present.
     pub fn with_dependency(mut self, dependency: LayerDependency) -> KernelResult<Self> {
-        if self.dependencies.contains(&dependency) {
-            return Err(KernelError::new(
+        let duplicate = self.dependencies.contains(&dependency);
+        (!duplicate)
+            .then_some(())
+            .ok_or(KernelError::new(
                 KernelErrorScope::Layer,
                 KernelErrorCode::DuplicateDependency,
                 "layer declared the same dependency more than once",
-            ));
-        }
-        self.dependencies.push(dependency);
-        Ok(self)
+            ))
+            .map(move |()| {
+                self.dependencies.push(dependency);
+                self
+            })
     }
 
     /// Add a capability, rejecting an exact duplicate.
     ///
     /// Returns [`KernelErrorCode::DuplicateCapability`] if already present.
     pub fn with_capability(mut self, capability: LayerCapability) -> KernelResult<Self> {
-        if self.capabilities.contains(&capability) {
-            return Err(KernelError::new(
+        let duplicate = self.capabilities.contains(&capability);
+        (!duplicate)
+            .then_some(())
+            .ok_or(KernelError::new(
                 KernelErrorScope::Layer,
                 KernelErrorCode::DuplicateCapability,
                 "layer declared the same capability more than once",
-            ));
-        }
-        self.capabilities.push(capability);
-        Ok(self)
+            ))
+            .map(move |()| {
+                self.capabilities.push(capability);
+                self
+            })
     }
 
     /// The layer's index.
@@ -98,17 +104,21 @@ impl LayerManifest {
     /// The kernel must import nothing; every other layer's dependencies must
     /// target strictly lower indices.
     pub fn validate(&self) -> KernelResult<()> {
-        if self.index == 0 && !self.dependencies.is_empty() {
-            return Err(KernelError::new(
+        let kernel_violation = (self.index == 0) & !self.dependencies.is_empty();
+        (!kernel_violation)
+            .then_some(())
+            .ok_or(KernelError::new(
                 KernelErrorScope::Layer,
                 KernelErrorCode::KernelMustNotImport,
                 "the kernel layer (index 0) must declare no dependencies",
-            ));
-        }
-        for dependency in &self.dependencies {
-            LayerImportRule::validate(self.index, dependency.layer())?;
-        }
-        Ok(())
+            ))
+            .and_then(|()| {
+                self.dependencies
+                    .iter()
+                    .try_for_each(|dependency| {
+                        LayerImportRule::validate(self.index, dependency.layer())
+                    })
+            })
     }
 }
 

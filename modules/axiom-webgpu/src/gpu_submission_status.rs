@@ -33,7 +33,9 @@ impl GpuSubmissionStatus {
 
     /// Whether this status came from the deterministic recording backend.
     pub const fn is_recorded(self) -> bool {
-        matches!(self, GpuSubmissionStatus::Recorded)
+        // Fieldless-enum predicate: compare integer discriminants directly
+        // instead of a `matches!` arm (which compiles to a two-arm branch).
+        (self as u8) == (GpuSubmissionStatus::Recorded as u8)
     }
 }
 

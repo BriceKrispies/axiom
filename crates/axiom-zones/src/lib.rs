@@ -67,21 +67,22 @@ pub fn escape_hatch(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Parse `reason = "…"` from the attribute tokens, defaulting to `""` (which the
 /// reason lint then rejects) when absent or malformed.
 fn parse_escape_hatch_reason(attr: TokenStream) -> LitStr {
-    let default = LitStr::new("", proc_macro2::Span::call_site());
-    if attr.is_empty() {
-        return default;
-    }
-    // Expect `reason = "<text>"`.
-    match syn::parse::<syn::MetaNameValue>(attr) {
-        Ok(nv) if nv.path.is_ident("reason") => match nv.value {
+    // Expect `reason = "<text>"`. An empty/malformed attr fails to parse (or
+    // fails a filter) and falls through to the `""` default, which the reason
+    // lint then rejects — behavior-identical to the prior explicit branches.
+    syn::parse::<syn::MetaNameValue>(attr)
+        .ok()
+        .filter(|nv| nv.path.is_ident("reason"))
+        .and_then(|nv| match nv.value {
+            // Data-carrying `syn::Expr` destructure: extracting the inner
+            // `LitStr` to return it. Irreducible in safe Rust.
             syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Str(s),
                 ..
-            }) => s,
-            _ => default,
-        },
-        _ => default,
-    }
+            }) => Some(s),
+            _ => None,
+        })
+        .unwrap_or_else(|| LitStr::new("", proc_macro2::Span::call_site()))
 }
 
 /// Inject `const __engine_zone_<zone>: () = ();` into `item`.

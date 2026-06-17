@@ -39,18 +39,19 @@ impl SimulationClock {
     /// Returns [`KernelErrorCode::RangeOverflow`] if accumulated nanoseconds
     /// would exceed `u64::MAX`.
     pub fn advance(&mut self) -> KernelResult<()> {
-        let next_elapsed =
-            self.elapsed_nanos
-                .checked_add(self.step.nanos())
-                .ok_or(KernelError::new(
-                    KernelErrorScope::Time,
-                    KernelErrorCode::RangeOverflow,
-                    "simulation clock elapsed nanoseconds overflowed u64",
-                ))?;
-        self.elapsed_nanos = next_elapsed;
-        self.tick = self.tick.next();
-        self.frame = self.frame.next();
-        Ok(())
+        self.elapsed_nanos
+            .checked_add(self.step.nanos())
+            .ok_or(KernelError::new(
+                KernelErrorScope::Time,
+                KernelErrorCode::RangeOverflow,
+                "simulation clock elapsed nanoseconds overflowed u64",
+            ))
+            .map(|next_elapsed| {
+                // Mutate only on success; on overflow the clock is unchanged.
+                self.elapsed_nanos = next_elapsed;
+                self.tick = self.tick.next();
+                self.frame = self.frame.next();
+            })
     }
 
     /// Advance by `n` fixed steps.
@@ -59,10 +60,7 @@ impl SimulationClock {
     /// advancing one-at-a-time `n` times reach identical state. On overflow the
     /// clock is left unchanged from before the call's overflowing step.
     pub fn advance_by(&mut self, n: u64) -> KernelResult<()> {
-        for _ in 0..n {
-            self.advance()?;
-        }
-        Ok(())
+        (0..n).try_for_each(|_| self.advance())
     }
 
     /// The current tick.
