@@ -46,6 +46,14 @@ This lint is intentionally **maximal**, per its commissioning:
   land on control flow the programmer wrote. Compiler desugarings of surface
   constructs (`for` / `while` / `?` / `if let`) carry a desugaring kind and are
   still flagged.
+- **`async`/`.await` desugaring.** `.await` lowers to a generator poll loop
+  (`loop { match poll { Ready => break, Pending => yield } }`); `async fn`/`async`
+  blocks lower to generators. That loop/match is compiler machinery, not a
+  branch the programmer wrote, so spans tagged `DesugaringKind::Async`/`Await`
+  are skipped — just like a `for` loop's internal `next()` match. A real
+  `if`/`match`/`loop` written *inside* an async fn is still flagged (it keeps its
+  own non-desugared span). (If you ever want to ban `async`/`.await` itself,
+  that's a separate rule — this lint is about source branching keywords.)
 - **Combinators.** `.map()`, `.and_then()`, `.unwrap_or()`, `.filter()`,
   `.ok()`, `.is_some()`, etc. are method calls, not language branching
   constructs, so they are not flagged. ("All forms of branching in the Rust

@@ -1,5 +1,5 @@
 warning: `if` is a branching construct; all branching is banned
-  --> $DIR/branching.rs:8:5
+  --> $DIR/branching.rs:9:5
    |
 LL | /     if x > 0 {
 LL | |         1
@@ -12,7 +12,7 @@ LL | |     }
    = note: `#[warn(engine_no_branching)]` on by default
 
 warning: `if` is a branching construct; all branching is banned
-  --> $DIR/branching.rs:16:5
+  --> $DIR/branching.rs:17:5
    |
 LL | /     if let Some(v) = o {
 LL | |         v
@@ -24,7 +24,7 @@ LL | |     }
    = help: this analyzer bans all control flow — remove the branch (there is no escape hatch)
 
 warning: `match` is a branching construct; all branching is banned
-  --> $DIR/branching.rs:24:5
+  --> $DIR/branching.rs:25:5
    |
 LL | /     match x {
 LL | |         0 => 10,
@@ -35,7 +35,7 @@ LL | |     }
    = help: this analyzer bans all control flow — remove the branch (there is no escape hatch)
 
 warning: `while` is a branching construct; all branching is banned
-  --> $DIR/branching.rs:32:5
+  --> $DIR/branching.rs:33:5
    |
 LL | /     while i < 3 {
 LL | |         i += 1;
@@ -45,7 +45,7 @@ LL | |     }
    = help: this analyzer bans all control flow — remove the branch (there is no escape hatch)
 
 warning: `while` is a branching construct; all branching is banned
-  --> $DIR/branching.rs:38:5
+  --> $DIR/branching.rs:39:5
    |
 LL |     while let Some(_x) = v.pop() {}
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -53,7 +53,7 @@ LL |     while let Some(_x) = v.pop() {}
    = help: this analyzer bans all control flow — remove the branch (there is no escape hatch)
 
 warning: `for` is a branching construct; all branching is banned
-  --> $DIR/branching.rs:42:5
+  --> $DIR/branching.rs:43:5
    |
 LL |     for _i in 0..3 {}
    |     ^^^^^^^^^^^^^^^^^
@@ -61,7 +61,7 @@ LL |     for _i in 0..3 {}
    = help: this analyzer bans all control flow — remove the branch (there is no escape hatch)
 
 warning: `loop` is a branching construct; all branching is banned
-  --> $DIR/branching.rs:46:5
+  --> $DIR/branching.rs:47:5
    |
 LL | /     loop {
 LL | |         break;
@@ -71,7 +71,7 @@ LL | |     }
    = help: this analyzer bans all control flow — remove the branch (there is no escape hatch)
 
 warning: the `&&` operator is a lazy boolean branch; all branching is banned
-  --> $DIR/branching.rs:52:5
+  --> $DIR/branching.rs:53:5
    |
 LL |     a && b
    |     ^^^^^^
@@ -79,7 +79,7 @@ LL |     a && b
    = help: this analyzer bans all control flow — remove the branch (there is no escape hatch)
 
 warning: the `||` operator is a lazy boolean branch; all branching is banned
-  --> $DIR/branching.rs:56:5
+  --> $DIR/branching.rs:57:5
    |
 LL |     a || b
    |     ^^^^^^
@@ -87,7 +87,7 @@ LL |     a || b
    = help: this analyzer bans all control flow — remove the branch (there is no escape hatch)
 
 warning: the `?` operator is a branching construct; all branching is banned
-  --> $DIR/branching.rs:60:13
+  --> $DIR/branching.rs:61:13
    |
 LL |     let v = o?;
    |             ^^
