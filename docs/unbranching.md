@@ -141,6 +141,27 @@ common fields out of `NetMessage`, store command kind as a field, replace
 command/message enums with tagged structs. (b) is a real, sizable contract
 change needing sign-off.
 
+## MILESTONE (2026-06-17): engine spine is branchless
+
+After the contract-reshape waves, **every layer (`crates/*`) and module
+(`modules/*`) has zero `engine_no_branching` findings.** All ~61 remaining are
+in `apps/` (doom, rotating-cube, netcode-sim) and the `tools/` relay. Data
+contracts reshaped enum→tagged-struct: `RenderCommand`, `GpuCommand`,
+`WebGpuBackendState`, kernel `MetricValue`/`FieldValue`, `NetMessage`,
+`NodeComponent`, xtask `DepValue`, and the netcode-sim app enums. `axiom-zones`
+de-matched via concrete `syn` parses + `or_else`.
+
+Remaining (all outside the spine):
+- doom app (35) — ignored by request.
+- relay tool (18) — reductions done in working tree, **held**: its `tokio-stream`
+  deps tangle `Cargo.lock` with the uncommitted doom agent-bridge WIP.
+- rotating-cube artifacts (~2) — **genuinely blocked**: the app's test/example
+  files pattern-match `RenderCommandArtifact`/`GpuCommandArtifact`
+  (`matches!`, `mem::discriminant`), so reshaping needs changing test logic.
+- netcode-sim `confirm_phase` `while let ready_tick()` drain (1) — loop control
+  over a stateful `&mut` producer; disjoint-borrow blocks the `iter::from_fn`
+  form without a session-API change.
+
 ## Progress log
 
 - 2026-06-16: lint updated to exempt test code; baseline non-test count ≈1195.
