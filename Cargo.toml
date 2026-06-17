@@ -61,6 +61,7 @@ libraries = [
     { path = "tools/lints/engine_no_wildcard_imports" },
     { path = "tools/lints/engine_no_runtime_type_branch" },
     { path = "tools/lints/engine_no_recursion" },
+    { path = "tools/lints/engine_no_branching" },
     { path = "tools/lints/engine_no_unitless_float_public_api" },
     { path = "tools/lints/engine_no_large_files" },
     { path = "tools/lints/engine_no_large_functions" },
