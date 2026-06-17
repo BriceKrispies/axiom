@@ -22,6 +22,8 @@ pub use config::{
 };
 pub use report::{LatencyStats, PeerReport, SimReport};
 
+use config::ScriptKind;
+
 use std::collections::BTreeMap;
 
 use axiom::prelude::Vec3;
@@ -30,7 +32,6 @@ use axiom_kernel::DeterministicRng;
 use axiom_netcode::NetcodeApi;
 
 use cheat::CheatState;
-use config::Behavior::Cheater;
 use network::ModeledNetwork;
 use report::{write_csv, CsvRow};
 use simulant::{build as build_sim, encode_delta, Simulant, MOVE_KIND, MOVE_SPEED};
@@ -74,25 +75,41 @@ impl Peer {
             & (self.submitted.saturating_sub(self.net.confirmed_tick()) < max_ahead)
     }
 
-    /// This peer's input delta for `tick`, per its script.
+    /// This peer's input delta for `tick`, per its script. Each kind's delta is
+    /// computed unconditionally and the script's `kind` tag selects which one
+    /// to keep — no `match`. `Idle` (and any unselected kind) contributes the
+    /// zero delta, so the four sources sum to exactly one non-zero source.
     fn input(&mut self, tick: u64) -> Vec3 {
-        match &self.cfg.input {
-            InputScript::Idle => Vec3::ZERO,
-            InputScript::Scripted(v) => v
-                .get((tick as usize).checked_rem(v.len()).unwrap_or(0))
-                .copied()
-                .unwrap_or(Vec3::ZERO),
-            InputScript::RandomWalk => {
-                let mut axis = || (self.input_rng.next_bounded(3) as i32 - 1) as f32 * MOVE_SPEED;
+        let kind = self.cfg.input.kind();
+
+        let scripted = (kind == ScriptKind::Scripted)
+            .then(|| self.cfg.input.scripted())
+            .flatten()
+            .and_then(|v| v.get((tick as usize).checked_rem(v.len()).unwrap_or(0)))
+            .copied()
+            .unwrap_or(Vec3::ZERO);
+
+        // The RNG must only advance when this peer actually random-walks, or the
+        // seeded stream (and thus the replay) would drift; gate the draw on the
+        // tag before touching `input_rng`.
+        let random_walk = (kind == ScriptKind::RandomWalk)
+            .then(|| {
+                let mut axis =
+                    || (self.input_rng.next_bounded(3) as i32 - 1) as f32 * MOVE_SPEED;
                 let (x, y) = (axis(), axis());
                 Vec3::new(x, y, 0.0)
-            }
-            InputScript::Oscillate { period } => {
-                let p = (*period).max(1);
+            })
+            .unwrap_or(Vec3::ZERO);
+
+        let oscillate = (kind == ScriptKind::Oscillate)
+            .then(|| {
+                let p = self.cfg.input.period().max(1);
                 let a = std::f32::consts::TAU * (tick % p) as f32 / p as f32;
                 Vec3::new(a.cos() * MOVE_SPEED, a.sin() * MOVE_SPEED, 0.0)
-            }
-        }
+            })
+            .unwrap_or(Vec3::ZERO);
+
+        scripted.add(random_walk).add(oscillate)
     }
 
     /// The extra bad frames this peer injects this tick (empty if honest).
@@ -125,10 +142,7 @@ fn build_peers(cfg: &SimConfig) -> Vec<Peer> {
         .map(|(i, key)| {
             let id = (i + 1) as u64;
             let pc = cfg.peer(i);
-            let kind = match pc.behavior {
-                Cheater(k) => Some(k),
-                Behavior::Honest => None,
-            };
+            let kind = pc.behavior.cheat_kind();
             Peer {
                 id,
                 net: NetcodeApi::new(id, key.clone(), &roster),

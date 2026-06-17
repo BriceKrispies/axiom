@@ -13,45 +13,189 @@ pub enum Backend {
     Mock,
 }
 
-/// How a peer produces its per-tick input delta. All variants are deterministic
+/// How a peer produces its per-tick input delta. All forms are deterministic
 /// (seeded from the run's master seed), so the whole run replays.
+///
+/// Reshaped from a data-carrying enum into a **tagged struct**: a `kind`
+/// discriminant (`ScriptKind`) plus the payload each kind needs (the scripted
+/// delta list, the oscillation period). A `None`/`0` payload is the kind that
+/// does not carry one. This makes selection a tag comparison instead of a
+/// `match`, while `InputScript::Idle`/`InputScript::Scripted`/etc. keep working
+/// as constructors for callers.
 #[derive(Debug, Clone, PartialEq)]
-pub enum InputScript {
+pub struct InputScript {
+    kind: ScriptKind,
+    /// The looping delta list (only present for `ScriptKind::Scripted`).
+    scripted: Option<Vec<Vec3>>,
+    /// The oscillation period in ticks (only meaningful for
+    /// `ScriptKind::Oscillate`).
+    period: u64,
+}
+
+/// The discriminant tag for an [`InputScript`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScriptKind {
     /// Never moves (zero delta every tick).
     Idle,
     /// A fixed, looping list of deltas.
-    Scripted(Vec<Vec3>),
+    Scripted,
     /// Seeded pseudo-random walk (a "button masher").
     RandomWalk,
+    /// A smooth oscillation with a period in ticks.
+    Oscillate,
+}
+
+impl InputScript {
+    /// Never moves (zero delta every tick).
+    #[allow(non_upper_case_globals)]
+    pub const Idle: InputScript = InputScript {
+        kind: ScriptKind::Idle,
+        scripted: None,
+        period: 0,
+    };
+
+    /// Seeded pseudo-random walk (a "button masher").
+    #[allow(non_upper_case_globals)]
+    pub const RandomWalk: InputScript = InputScript {
+        kind: ScriptKind::RandomWalk,
+        scripted: None,
+        period: 0,
+    };
+
+    /// A fixed, looping list of deltas.
+    #[allow(non_snake_case)]
+    pub fn Scripted(deltas: Vec<Vec3>) -> InputScript {
+        InputScript {
+            kind: ScriptKind::Scripted,
+            scripted: Some(deltas),
+            period: 0,
+        }
+    }
+
     /// A smooth oscillation with the given period in ticks.
-    Oscillate { period: u64 },
+    #[allow(non_snake_case)]
+    pub fn Oscillate(period: u64) -> InputScript {
+        InputScript {
+            kind: ScriptKind::Oscillate,
+            scripted: None,
+            period,
+        }
+    }
+
+    /// This script's discriminant tag (lets callers select branchlessly).
+    pub(crate) fn kind(&self) -> ScriptKind {
+        self.kind
+    }
+
+    /// The scripted delta list, if this is a [`ScriptKind::Scripted`] script.
+    pub(crate) fn scripted(&self) -> Option<&[Vec3]> {
+        self.scripted.as_deref()
+    }
+
+    /// The oscillation period (meaningful only for [`ScriptKind::Oscillate`]).
+    pub(crate) fn period(&self) -> u64 {
+        self.period
+    }
 }
 
 /// A way a peer can misbehave — each exercises a different defense (or the
 /// desync referee).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CheatKind {
+///
+/// Reshaped into a **tagged struct** wrapping a single discriminant byte, with
+/// one associated `const` per kind. This keeps `CheatKind::ForgeOthers` (and
+/// the rest) working as value constructors for callers while turning kind
+/// selection into a `==` on the tag rather than a `match`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct CheatKind {
+    tag: u8,
+}
+
+impl CheatKind {
     /// Sign inputs claiming *another* peer (with the cheater's own key) — the
     /// victim's roster key rejects them (`bad_signature`).
-    ForgeOthers,
+    #[allow(non_upper_case_globals)]
+    pub const ForgeOthers: CheatKind = CheatKind { tag: 0 };
     /// Spray validly-signed inputs for far-future ticks — dropped as
     /// `out_of_window`; the victim's buffer stays bounded.
-    Flood,
+    #[allow(non_upper_case_globals)]
+    pub const Flood: CheatKind = CheatKind { tag: 1 };
     /// Send inputs for already-confirmed past ticks — dropped as `out_of_window`.
-    OutOfWindow,
+    #[allow(non_upper_case_globals)]
+    pub const OutOfWindow: CheatKind = CheatKind { tag: 2 };
     /// Send structurally-garbage bytes — rejected by `ingest` as a decode error.
-    Malformed,
+    #[allow(non_upper_case_globals)]
+    pub const Malformed: CheatKind = CheatKind { tag: 3 };
     /// Simulate a divergent world — honest peers' `reconcile` flags the desync.
-    CorruptSim,
+    #[allow(non_upper_case_globals)]
+    pub const CorruptSim: CheatKind = CheatKind { tag: 4 };
+
+    /// This kind's discriminant tag (lets the cheat-state builder dispatch
+    /// branchlessly on equality rather than matching variants).
+    pub(crate) fn tag(self) -> u8 {
+        self.tag
+    }
+}
+
+impl std::fmt::Debug for CheatKind {
+    /// Preserves the original enum's `Debug` spelling (`ForgeOthers`, `Flood`,
+    /// …) so console summaries print exactly as before.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = [
+            "ForgeOthers",
+            "Flood",
+            "OutOfWindow",
+            "Malformed",
+            "CorruptSim",
+        ]
+        .get(self.tag as usize)
+        .copied()
+        .unwrap_or("CheatKind");
+        f.write_str(name)
+    }
 }
 
 /// Whether a peer plays fair or misbehaves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Behavior {
+///
+/// Reshaped into a **tagged struct**: an `Option<CheatKind>` payload that is
+/// the whole tag — `None` is honest, `Some(kind)` is a cheater of that kind.
+/// `Behavior::Honest` stays a value constructor (an associated `const`) and
+/// `Behavior::Cheater(kind)` stays one (an associated fn), so callers are
+/// unchanged; extracting the kind is now `Behavior::cheat_kind` (a field
+/// read) rather than a `match`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Behavior {
+    cheat: Option<CheatKind>,
+}
+
+impl Behavior {
     /// Plays by the rules.
-    Honest,
+    #[allow(non_upper_case_globals)]
+    pub const Honest: Behavior = Behavior { cheat: None };
+
     /// Misbehaves in the given way.
-    Cheater(CheatKind),
+    #[allow(non_snake_case)]
+    pub fn Cheater(kind: CheatKind) -> Behavior {
+        Behavior { cheat: Some(kind) }
+    }
+
+    /// The cheat kind this peer runs, or `None` if it plays fair.
+    pub(crate) fn cheat_kind(self) -> Option<CheatKind> {
+        self.cheat
+    }
+}
+
+impl std::fmt::Debug for Behavior {
+    /// Preserves the original enum's `Debug` spelling (`Honest`,
+    /// `Cheater(ForgeOthers)`) so console summaries print exactly as before.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `Some(kind)` formats as the original `Cheater(<kind>)` tuple variant;
+        // `None` as the original `Honest` unit variant. Render the text once
+        // (no `if`/`match`) and write it through a single `f` borrow.
+        let rendered = self
+            .cheat
+            .map_or_else(|| "Honest".to_string(), |kind| format!("Cheater({kind:?})"));
+        f.write_str(&rendered)
+    }
 }
 
 /// A window during which a peer's links are cut (it sends/receives nothing).

@@ -86,17 +86,30 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
     struct PackageTable {
         name: String,
     }
+    // A dependency value in `[dependencies]` is either a bare version string
+    // (`dep = "1.0"`) or an inline table (`dep = { package = "…", … }`). The
+    // only thing the architecture checker reads from it is the table's optional
+    // `package` rename; the version string was never load-bearing. Capturing
+    // the value as a generic `toml::Value` collapses both shapes into one
+    // struct field — the detailed table when present, `None` otherwise — and
+    // lets the `package` override be reached by a branchless accessor chain
+    // (`as_table().and_then(get).and_then(as_str)`) with no data-carrying enum.
     #[derive(Deserialize)]
-    #[serde(untagged)]
-    #[allow(dead_code)]
-    enum DepValue {
-        Version(String),
-        Detailed(DepTable),
+    #[serde(transparent)]
+    struct DepValue {
+        value: toml::Value,
     }
-    #[derive(Deserialize, Default)]
-    struct DepTable {
-        #[serde(default)]
-        package: Option<String>,
+    impl DepValue {
+        /// The renamed package (`package = "…"`) when this dependency is a
+        /// detailed table that sets it; `None` for a bare version string or a
+        /// table without the override.
+        fn package_override(&self) -> Option<String> {
+            self.value
+                .as_table()
+                .and_then(|table| table.get("package"))
+                .and_then(toml::Value::as_str)
+                .map(str::to_owned)
+        }
     }
 
     let root_cargo_path = root.join("Cargo.toml");
@@ -174,11 +187,9 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
                     .filter_map(|(dep_key, value)| {
                         // A renamed dep (`package = "…"`) resolves to that name;
                         // otherwise the key is the crate name.
-                        let resolved = match value {
-                            DepValue::Version(_) => None,
-                            DepValue::Detailed(t) => t.package.clone(),
-                        }
-                        .unwrap_or_else(|| dep_key.clone());
+                        let resolved = value
+                            .package_override()
+                            .unwrap_or_else(|| dep_key.clone());
                         dir_by_name.contains_key(&resolved).then_some(resolved)
                     })
                     .collect::<BTreeSet<String>>()

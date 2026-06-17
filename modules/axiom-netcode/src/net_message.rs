@@ -16,9 +16,35 @@ const WIRE_VERSION: SchemaVersion = SchemaVersion::new(2, 0);
 const TAG_INPUT: u8 = 0;
 const TAG_HASH_BEACON: u8 = 1;
 
+/// The `kind` discriminant for an `Input` frame — identical to its wire tag, so
+/// the in-memory kind and the on-wire tag never drift.
+pub(crate) const KIND_INPUT: u8 = TAG_INPUT;
+/// The `kind` discriminant for a `HashBeacon` frame — identical to its wire tag.
+pub(crate) const KIND_HASH_BEACON: u8 = TAG_HASH_BEACON;
+
+/// The placeholder command stored in a `HashBeacon` frame, where no input
+/// command exists. Constructors set it deterministically so two equal frames of
+/// the same kind always compare equal under the derived `Eq` (the `command`
+/// field is read only when `kind == KIND_INPUT`).
+fn absent_command() -> NetCommand {
+    NetCommand::new(0, Vec::new())
+}
+
+/// The placeholder hash stored in an `Input` frame, where no state hash exists.
+/// Constructors set it deterministically for the same equality reason (the
+/// `hash` field is read only when `kind == KIND_HASH_BEACON`).
+const ABSENT_HASH: [u8; 32] = [0u8; 32];
+
 /// One frame on the wire: either a peer's input for a tick, or a peer's state
 /// hash for a confirmed tick. Every frame carries an ed25519 [`Signature`] over
 /// its canonical body, so the author cannot be forged.
+///
+/// This is a **tagged struct**, not an enum: `kind` selects which logical frame
+/// this is ([`KIND_INPUT`] or [`KIND_HASH_BEACON`]), `peer` and `signature` are
+/// common to both kinds (read with no branch), and the remaining fields are the
+/// payload of one kind or the other. A field that does not belong to the active
+/// kind holds a deterministic placeholder and is never read for that kind, so
+/// payload extraction is a kind-gated field read rather than a `match`.
 ///
 /// Every frame is prefixed with [`WIRE_VERSION`] and a one-byte discriminant,
 /// then decoded with bounds checks — a truncated or version-mismatched or
@@ -26,32 +52,86 @@ const TAG_HASH_BEACON: u8 = 1;
 /// The signature is **structural only** here (its bytes round-trip); whether it
 /// is *valid* for a given author is decided by the session against its roster.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NetMessage {
-    /// A peer's input scheduled at `tick`.
-    Input {
-        /// The peer that authored the input.
-        peer: PeerId,
-        /// The tick the input executes at.
-        tick: u64,
-        /// The input itself.
-        command: NetCommand,
-        /// The author's signature over this frame's canonical body.
-        signature: Signature,
-    },
-    /// A peer's state-hash report for a confirmed `tick`.
-    HashBeacon {
-        /// The peer reporting the hash.
-        peer: PeerId,
-        /// The confirmed tick the hash is for.
-        tick: u64,
-        /// The 256-bit state fingerprint.
-        hash: [u8; 32],
-        /// The author's signature over this frame's canonical body.
-        signature: Signature,
-    },
+pub struct NetMessage {
+    /// Which kind of frame this is: [`KIND_INPUT`] or [`KIND_HASH_BEACON`].
+    kind: u8,
+    /// The peer this frame claims as its author (common to both kinds).
+    peer: PeerId,
+    /// The author's signature over this frame's canonical body (common to both
+    /// kinds).
+    signature: Signature,
+    /// The tick this frame is for — the execution tick of an input, or the
+    /// confirmed tick of a beacon (common to both kinds).
+    tick: u64,
+    /// The input command — meaningful only when `kind == KIND_INPUT`.
+    command: NetCommand,
+    /// The 256-bit state fingerprint — meaningful only when
+    /// `kind == KIND_HASH_BEACON`.
+    hash: [u8; 32],
 }
 
 impl NetMessage {
+    /// Construct an `Input` frame: a peer's `command` scheduled at `tick`,
+    /// authenticated by `signature`. The `hash` field is the absent placeholder.
+    pub(crate) fn input(
+        peer: PeerId,
+        tick: u64,
+        command: NetCommand,
+        signature: Signature,
+    ) -> Self {
+        NetMessage {
+            kind: KIND_INPUT,
+            peer,
+            signature,
+            tick,
+            command,
+            hash: ABSENT_HASH,
+        }
+    }
+
+    /// Construct a `HashBeacon` frame: a peer's state `hash` for confirmed
+    /// `tick`, authenticated by `signature`. The `command` field is the absent
+    /// placeholder.
+    pub(crate) fn hash_beacon(
+        peer: PeerId,
+        tick: u64,
+        hash: [u8; 32],
+        signature: Signature,
+    ) -> Self {
+        NetMessage {
+            kind: KIND_HASH_BEACON,
+            peer,
+            signature,
+            tick,
+            command: absent_command(),
+            hash,
+        }
+    }
+
+    /// This frame's kind discriminant ([`KIND_INPUT`] or [`KIND_HASH_BEACON`]).
+    /// Common to both kinds — a plain field read, the basis for kind-gated
+    /// payload extraction.
+    pub(crate) fn kind(&self) -> u8 {
+        self.kind
+    }
+
+    /// The input command, present (`Some`) only for an `Input` frame; `None` for
+    /// a beacon, whose `command` field is the absent placeholder.
+    pub(crate) fn command(&self) -> Option<&NetCommand> {
+        (self.kind == KIND_INPUT).then_some(&self.command)
+    }
+
+    /// The state hash, present (`Some`) only for a `HashBeacon` frame; `None` for
+    /// an input, whose `hash` field is the absent placeholder.
+    pub(crate) fn hash(&self) -> Option<&[u8; 32]> {
+        (self.kind == KIND_HASH_BEACON).then_some(&self.hash)
+    }
+
+    /// The tick this frame is for (common to both kinds).
+    pub(crate) fn tick(&self) -> u64 {
+        self.tick
+    }
+
     /// The canonical bytes an `Input` author signs (everything but the
     /// signature). Shared by signing (in the session) and verification, so the
     /// two can never drift.
@@ -78,35 +158,25 @@ impl NetMessage {
     }
 
     /// The peer this frame claims as its author (to be verified against a
-    /// roster).
+    /// roster). Common to both kinds — a plain field read, no branch.
     pub(crate) fn peer(&self) -> PeerId {
-        match self {
-            NetMessage::Input { peer, .. } | NetMessage::HashBeacon { peer, .. } => *peer,
-        }
+        self.peer
     }
 
-    /// This frame's signature.
+    /// This frame's signature. Common to both kinds — a plain field read.
     pub(crate) fn signature(&self) -> &Signature {
-        match self {
-            NetMessage::Input { signature, .. } | NetMessage::HashBeacon { signature, .. } => {
-                signature
-            }
-        }
+        &self.signature
     }
 
-    /// The canonical bytes this frame's signature must cover.
+    /// The canonical bytes this frame's signature must cover. The signing
+    /// payload is per-kind, so the kind selects which payload to build: an
+    /// `Input` frame signs over its command, a `HashBeacon` over its hash. The
+    /// `then(..).unwrap_or_else(..)` builds exactly one payload — the EXACT bytes
+    /// that kind has always produced — with no `match`.
     pub(crate) fn signed_bytes(&self) -> Vec<u8> {
-        match self {
-            NetMessage::Input {
-                peer,
-                tick,
-                command,
-                ..
-            } => Self::input_signing_payload(*peer, *tick, command),
-            NetMessage::HashBeacon {
-                peer, tick, hash, ..
-            } => Self::beacon_signing_payload(*peer, *tick, hash),
-        }
+        (self.kind == KIND_INPUT)
+            .then(|| Self::input_signing_payload(self.peer, self.tick, &self.command))
+            .unwrap_or_else(|| Self::beacon_signing_payload(self.peer, self.tick, &self.hash))
     }
 
     /// Encode this frame to bytes: the canonical signed body, then the signature.
@@ -171,12 +241,8 @@ impl NetMessage {
         PeerId::read_from(r).and_then(|peer| {
             r.read_u64().and_then(|tick| {
                 NetCommand::read_from(r).and_then(|command| {
-                    Signature::read_from(r).map(|signature| NetMessage::Input {
-                        peer,
-                        tick,
-                        command,
-                        signature,
-                    })
+                    Signature::read_from(r)
+                        .map(|signature| NetMessage::input(peer, tick, command, signature))
                 })
             })
         })
@@ -188,12 +254,8 @@ impl NetMessage {
         PeerId::read_from(r).and_then(|peer| {
             r.read_u64().and_then(|tick| {
                 Self::read_hash(r).and_then(|hash| {
-                    Signature::read_from(r).map(|signature| NetMessage::HashBeacon {
-                        peer,
-                        tick,
-                        hash,
-                        signature,
-                    })
+                    Signature::read_from(r)
+                        .map(|signature| NetMessage::hash_beacon(peer, tick, hash, signature))
                 })
             })
         })
@@ -227,12 +289,7 @@ mod tests {
         let tick = 7;
         let command = NetCommand::new(2, vec![9, 9, 9]);
         let signature = key().sign(&NetMessage::input_signing_payload(peer, tick, &command));
-        NetMessage::Input {
-            peer,
-            tick,
-            command,
-            signature,
-        }
+        NetMessage::input(peer, tick, command, signature)
     }
 
     fn beacon() -> NetMessage {
@@ -240,12 +297,7 @@ mod tests {
         let tick = 12;
         let hash = [0xAB; 32];
         let signature = key().sign(&NetMessage::beacon_signing_payload(peer, tick, &hash));
-        NetMessage::HashBeacon {
-            peer,
-            tick,
-            hash,
-            signature,
-        }
+        NetMessage::hash_beacon(peer, tick, hash, signature)
     }
 
     #[test]
@@ -269,6 +321,22 @@ mod tests {
             let other = SigningKey::from_seed([99u8; 32]).verifying_key();
             assert!(!other.verify(&msg.signed_bytes(), msg.signature()));
         }
+    }
+
+    #[test]
+    fn kind_gated_accessors_select_the_active_payload() {
+        // An input frame: kind is INPUT, `command()` is Some, `hash()` is None.
+        let i = input();
+        assert_eq!(i.kind(), KIND_INPUT);
+        assert_eq!(i.tick(), 7);
+        assert_eq!(i.command(), Some(&NetCommand::new(2, vec![9, 9, 9])));
+        assert_eq!(i.hash(), None, "an input carries no hash");
+        // A beacon frame: kind is HASH_BEACON, `hash()` is Some, `command()` None.
+        let b = beacon();
+        assert_eq!(b.kind(), KIND_HASH_BEACON);
+        assert_eq!(b.tick(), 12);
+        assert_eq!(b.hash(), Some(&[0xAB; 32]));
+        assert_eq!(b.command(), None, "a beacon carries no command");
     }
 
     #[test]

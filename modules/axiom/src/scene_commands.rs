@@ -37,7 +37,7 @@ impl SceneCommands {
         self.commands
             .iter()
             .flat_map(|command| command.components.iter())
-            .filter(|component| matches!(component, NodeComponent::Renderable(_)))
+            .filter(|component| component.kind() == NodeComponent::KIND_RENDERABLE)
             .count()
     }
 
@@ -73,28 +73,43 @@ impl SceneCommands {
                     .expect("a parent command is recorded before its child")
             });
             command.components.iter().for_each(|component| {
-                match component {
-                    NodeComponent::Renderable(r) => {
+                // Each component has exactly one kind; exactly one gated arm
+                // below fires, reading the payload its kind names. Same dispatch
+                // and ordering as the old per-variant match, driven by `kind()`.
+                // The kind gate and the payload `Option` agree by construction,
+                // so `(kind == K).then(payload).flatten()` is `Some` for exactly
+                // the matching kind — no unreachable arm, no panicking unwrap.
+                (component.kind() == NodeComponent::KIND_RENDERABLE)
+                    .then(|| component.as_renderable())
+                    .flatten()
+                    .inspect(|r| {
                         let mesh = scene.mesh_ref(r.mesh.id());
                         let material = scene.material_ref(r.material.id());
                         scene
                             .add_renderable(node, mesh, material)
                             .expect("renderable handle ids are valid refs");
-                    }
-                    NodeComponent::Camera(c) => {
+                    });
+                (component.kind() == NodeComponent::KIND_CAMERA)
+                    .then(|| component.as_camera())
+                    .flatten()
+                    .inspect(|c| {
                         let p = c.projection();
                         scene
                             .add_perspective_camera(
                                 math,
                                 node,
-                                Radians::new(p.fov_y.as_radians()).expect("authored fov is finite"),
+                                Radians::new(p.fov_y.as_radians())
+                                    .expect("authored fov is finite"),
                                 Ratio::new(self.aspect).expect("authored aspect is finite"),
                                 p.near,
                                 p.far,
                             )
                             .expect("authored camera intrinsics are valid");
-                    }
-                    NodeComponent::Light(l) => {
+                    });
+                (component.kind() == NodeComponent::KIND_LIGHT)
+                    .then(|| component.as_light())
+                    .flatten()
+                    .inspect(|l| {
                         scene
                             .add_directional_light(
                                 math,
@@ -104,23 +119,31 @@ impl SceneCommands {
                             )
                             .expect("authored light parameters are valid");
                         light_direction = Some(l.direction);
-                    }
-                    NodeComponent::Spin(s) => {
+                    });
+                (component.kind() == NodeComponent::KIND_SPIN)
+                    .then(|| component.as_spin())
+                    .flatten()
+                    .inspect(|s| {
                         scene
                             .add_spin(node, s.axis, s.period_ticks)
                             .expect("spin attaches to a just-created node");
-                    }
-                    NodeComponent::Player(p) => {
+                    });
+                (component.kind() == NodeComponent::KIND_PLAYER)
+                    .then(|| component.as_player())
+                    .flatten()
+                    .inspect(|p| {
                         scene
                             .add_player(node, p.index)
                             .expect("player attaches to a just-created node");
-                    }
-                    NodeComponent::Controller(c) => {
+                    });
+                (component.kind() == NodeComponent::KIND_CONTROLLER)
+                    .then(|| component.as_controller())
+                    .flatten()
+                    .inspect(|c| {
                         scene
                             .add_controller(node, c.index)
                             .expect("controller attaches to a just-created node");
-                    }
-                }
+                    });
             });
             nodes.push(node);
         });
