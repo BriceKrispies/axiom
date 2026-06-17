@@ -49,7 +49,7 @@ macro_rules! define_id {
             pub fn read_from(
                 reader: &mut crate::binary_reader::BinaryReader<'_>,
             ) -> crate::result::KernelResult<Self> {
-                Ok($name(reader.read_u64()?))
+                reader.read_u64().map($name)
             }
         }
 

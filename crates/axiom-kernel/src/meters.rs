@@ -20,15 +20,14 @@ pub struct Meters(f32);
 impl Meters {
     /// Construct a length, rejecting non-finite scalars (NaN / ±infinity).
     pub const fn new(value: f32) -> KernelResult<Self> {
-        if value.is_finite() {
-            Ok(Meters(value))
-        } else {
+        [
             Err(KernelError::new(
                 KernelErrorScope::Scalar,
                 KernelErrorCode::NonFiniteScalar,
                 "Meters must be finite",
-            ))
-        }
+            )),
+            Ok(Meters(value)),
+        ][value.is_finite() as usize]
     }
 
     /// The underlying scalar value, in metres.

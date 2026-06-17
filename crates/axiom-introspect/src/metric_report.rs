@@ -77,17 +77,22 @@ impl MetricReport {
     pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
         let name = String::from_utf8_lossy(reader.read_byte_slice()?).into_owned();
         let is_counter = reader.read_bool()?;
-        let value = match reader.read_u8()? {
-            0 => MetricValue::integer(reader.read_u64()? as i64),
-            1 => MetricValue::float(reader.read_f32()?),
-            _ => {
-                return Err(KernelError::new(
-                    KernelErrorScope::Binary,
-                    KernelErrorCode::InvalidId,
-                    "unknown metric value tag",
-                ))
-            }
-        };
+        // Value-tag dispatch on a `u8` (not an enum discriminant): `.then`
+        // runs only the selected read, so the reader advances by exactly the
+        // bytes the chosen branch consumes. An unrecognized tag falls through
+        // both guards to the invalid-tag error.
+        let value = reader.read_u8().and_then(|tag| {
+            (tag == 0)
+                .then(|| reader.read_u64().map(|i| MetricValue::integer(i as i64)))
+                .or_else(|| (tag == 1).then(|| reader.read_f32().map(MetricValue::float)))
+                .unwrap_or_else(|| {
+                    Err(KernelError::new(
+                        KernelErrorScope::Binary,
+                        KernelErrorCode::InvalidId,
+                        "unknown metric value tag",
+                    ))
+                })
+        })?;
         let tick = reader
             .read_bool()?
             .then(|| reader.read_u64())

@@ -36,59 +36,67 @@ impl<'a> BinaryReader<'a> {
     }
 
     fn take(&mut self, count: usize) -> KernelResult<&'a [u8]> {
-        if self.remaining() < count {
-            return Err(KernelError::new(
+        let start = self.position;
+        let slice = self.data.get(start..start + count).ok_or_else(|| {
+            KernelError::new(
                 KernelErrorScope::Binary,
                 KernelErrorCode::OutOfBounds,
                 "binary reader ran past the end of the buffer",
-            ));
-        }
-        let start = self.position;
-        self.position += count;
-        Ok(&self.data[start..self.position])
+            )
+        });
+        // Advance only on success; an Err leaves the cursor unmoved.
+        self.position += slice.map(<[u8]>::len).unwrap_or(0);
+        slice
     }
 
     /// Read a `u8`.
     pub fn read_u8(&mut self) -> KernelResult<u8> {
-        Ok(self.take(1)?[0])
+        self.take(1).map(|b| b[0])
     }
 
     /// Read a little-endian `u16`.
     pub fn read_u16(&mut self) -> KernelResult<u16> {
-        let b = self.take(2)?;
-        Ok(u16::from_le_bytes([b[0], b[1]]))
+        self.take(2).map(|b| u16::from_le_bytes([b[0], b[1]]))
     }
 
     /// Read a little-endian `u32`.
     pub fn read_u32(&mut self) -> KernelResult<u32> {
-        let b = self.take(4)?;
-        Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        self.take(4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
     /// Read a little-endian `u64`.
     pub fn read_u64(&mut self) -> KernelResult<u64> {
-        let b = self.take(8)?;
-        Ok(u64::from_le_bytes([
-            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-        ]))
+        self.take(8).map(|b| {
+            u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+        })
     }
 
     /// Read a little-endian `i32`.
     pub fn read_i32(&mut self) -> KernelResult<i32> {
-        let b = self.take(4)?;
-        Ok(i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        self.take(4)
+            .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
     /// Read a little-endian `f32`.
     pub fn read_f32(&mut self) -> KernelResult<f32> {
-        let b = self.take(4)?;
-        Ok(f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        self.take(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
     /// Read a `bool` encoded as a single `0`/`1` byte. Any non-zero byte reads
     /// as `true`.
     pub fn read_bool(&mut self) -> KernelResult<bool> {
-        Ok(self.read_u8()? != 0)
+        self.read_u8().map(|b| b != 0)
+    }
+
+    /// Read a fixed-length array of exactly `N` raw bytes (no length prefix),
+    /// advancing the cursor only on success.
+    ///
+    /// Fails with [`KernelErrorCode::OutOfBounds`] if fewer than `N` bytes
+    /// remain, leaving the cursor unmoved.
+    pub fn read_bytes<const N: usize>(&mut self) -> KernelResult<[u8; N]> {
+        self.take(N).map(|b| core::array::from_fn(|i| b[i]))
     }
 
     /// Read a length-prefixed byte slice written by
@@ -97,15 +105,19 @@ impl<'a> BinaryReader<'a> {
     /// Fails with [`KernelErrorCode::TruncatedData`] if the declared length
     /// exceeds the remaining bytes.
     pub fn read_byte_slice(&mut self) -> KernelResult<&'a [u8]> {
-        let len = self.read_u32()? as usize;
-        if self.remaining() < len {
-            return Err(KernelError::new(
-                KernelErrorScope::Binary,
-                KernelErrorCode::TruncatedData,
-                "length-prefixed byte slice extends past the buffer",
-            ));
-        }
-        self.take(len)
+        self.read_u32().and_then(|len| {
+            let len = len as usize;
+            (self.remaining() >= len)
+                .then_some(())
+                .ok_or_else(|| {
+                    KernelError::new(
+                        KernelErrorScope::Binary,
+                        KernelErrorCode::TruncatedData,
+                        "length-prefixed byte slice extends past the buffer",
+                    )
+                })
+                .and_then(|()| self.take(len))
+        })
     }
 }
 
@@ -239,5 +251,25 @@ mod cov2 {
         assert!(BinaryReader::new(&[0u8, 1, 2]).read_f32().is_err());
         assert!(BinaryReader::new(&[0u8; 0]).read_bool().is_err());
         assert!(BinaryReader::new(&[0u8; 0]).read_byte_slice().is_err());
+    }
+
+    #[test]
+    fn read_bytes_returns_exactly_n_bytes_and_advances() {
+        let bytes = [10u8, 20, 30, 40, 50];
+        let mut r = BinaryReader::new(&bytes);
+        let got: [u8; 3] = r.read_bytes().unwrap();
+        assert_eq!(got, [10, 20, 30]);
+        assert_eq!(r.position(), 3);
+        assert_eq!(r.remaining(), 2);
+    }
+
+    #[test]
+    fn read_bytes_too_short_is_out_of_bounds_and_does_not_advance() {
+        let bytes = [1u8, 2]; // only 2 bytes available
+        let mut r = BinaryReader::new(&bytes);
+        let err = r.read_bytes::<4>().unwrap_err();
+        assert_eq!(err.scope(), KernelErrorScope::Binary);
+        assert_eq!(err.code(), KernelErrorCode::OutOfBounds);
+        assert_eq!(r.position(), 0, "failed read must not advance the cursor");
     }
 }

@@ -177,29 +177,36 @@ impl FrameReport {
     }
 }
 
-/// Stable wire encoding of the frame lifecycle state.
+/// The wire codes, in code order. `FrameLifecycleState` is a fieldless enum
+/// whose default discriminants (`Active = 0` .. `ShutdownRequested = 3`) are
+/// the wire codes, so the table doubles as both the encode discriminant set and
+/// the decode lookup — keeping the two directions provably in lock-step.
+const LIFECYCLE_VARIANTS: [FrameLifecycleState; 4] = [
+    FrameLifecycleState::Active,
+    FrameLifecycleState::Hidden,
+    FrameLifecycleState::Suspended,
+    FrameLifecycleState::ShutdownRequested,
+];
+
+/// Stable wire encoding of the frame lifecycle state. The fieldless enum's
+/// discriminants are the wire codes, so the cast is the encoding.
 fn lifecycle_to_u8(state: FrameLifecycleState) -> u8 {
-    match state {
-        FrameLifecycleState::Active => 0,
-        FrameLifecycleState::Hidden => 1,
-        FrameLifecycleState::Suspended => 2,
-        FrameLifecycleState::ShutdownRequested => 3,
-    }
+    state as u8
 }
 
-/// Inverse of [`lifecycle_to_u8`]; rejects an unknown code.
+/// Inverse of [`lifecycle_to_u8`]; rejects an unknown code by indexing the
+/// variant table, whose miss is the only failure arm.
 fn lifecycle_from_u8(code: u8) -> KernelResult<FrameLifecycleState> {
-    match code {
-        0 => Ok(FrameLifecycleState::Active),
-        1 => Ok(FrameLifecycleState::Hidden),
-        2 => Ok(FrameLifecycleState::Suspended),
-        3 => Ok(FrameLifecycleState::ShutdownRequested),
-        _ => Err(KernelError::new(
-            KernelErrorScope::Binary,
-            KernelErrorCode::InvalidId,
-            "unknown frame lifecycle code",
-        )),
-    }
+    LIFECYCLE_VARIANTS
+        .get(code as usize)
+        .copied()
+        .ok_or_else(|| {
+            KernelError::new(
+                KernelErrorScope::Binary,
+                KernelErrorCode::InvalidId,
+                "unknown frame lifecycle code",
+            )
+        })
 }
 
 #[cfg(test)]

@@ -17,15 +17,14 @@ pub struct Radians(f32);
 impl Radians {
     /// Construct an angle, rejecting non-finite scalars (NaN / ±infinity).
     pub const fn new(value: f32) -> KernelResult<Self> {
-        if value.is_finite() {
-            Ok(Radians(value))
-        } else {
+        [
             Err(KernelError::new(
                 KernelErrorScope::Scalar,
                 KernelErrorCode::NonFiniteScalar,
                 "Radians must be finite",
-            ))
-        }
+            )),
+            Ok(Radians(value)),
+        ][value.is_finite() as usize]
     }
 
     /// The underlying scalar value, in radians.

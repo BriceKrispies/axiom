@@ -19,14 +19,18 @@ impl Alignment {
     /// Returns [`KernelErrorCode::InvalidAlignment`] unless `value` is a power
     /// of two (which also rejects zero).
     pub const fn new(value: u64) -> KernelResult<Self> {
-        if value == 0 || (value & (value - 1)) != 0 {
-            return Err(KernelError::new(
+        // `is_power_of_two` is true only for non-zero powers of two — exactly
+        // the original `value != 0 && (value & (value - 1)) == 0` validity,
+        // computed without a branch or a possible `0 - 1` underflow.
+        let valid = value.is_power_of_two();
+        [
+            Err(KernelError::new(
                 KernelErrorScope::Memory,
                 KernelErrorCode::InvalidAlignment,
                 "alignment must be a non-zero power of two",
-            ));
-        }
-        Ok(Alignment(value))
+            )),
+            Ok(Alignment(value)),
+        ][valid as usize]
     }
 
     /// The raw alignment value.

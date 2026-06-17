@@ -51,7 +51,7 @@ impl KernelError {
 /// human message so error comparisons stay deterministic.
 impl PartialEq for KernelError {
     fn eq(&self, other: &Self) -> bool {
-        self.scope == other.scope && self.code == other.code
+        (self.scope == other.scope) & (self.code == other.code)
     }
 }
 

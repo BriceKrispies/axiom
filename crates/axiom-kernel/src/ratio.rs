@@ -20,15 +20,14 @@ pub struct Ratio(f32);
 impl Ratio {
     /// Construct a ratio, rejecting non-finite scalars (NaN / ±infinity).
     pub const fn new(value: f32) -> KernelResult<Self> {
-        if value.is_finite() {
-            Ok(Ratio(value))
-        } else {
+        [
             Err(KernelError::new(
                 KernelErrorScope::Scalar,
                 KernelErrorCode::NonFiniteScalar,
                 "Ratio must be finite",
-            ))
-        }
+            )),
+            Ok(Ratio(value)),
+        ][value.is_finite() as usize]
     }
 
     /// The underlying dimensionless value.

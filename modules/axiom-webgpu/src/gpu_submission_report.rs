@@ -101,19 +101,21 @@ impl GpuSubmissionReport {
 
     /// Whether this report came from the deterministic recording backend.
     pub const fn is_recorded(&self) -> bool {
-        matches!(self.status, GpuSubmissionStatus::Recorded)
+        // Fieldless-enum predicate over the carried status: compare integer
+        // discriminants directly rather than branching on a `matches!` arm.
+        (self.status as u8) == (GpuSubmissionStatus::Recorded as u8)
     }
 
     /// Whether a live backend accepted the submission but had no
     /// target/surface bound.
     pub const fn is_live_not_bound(&self) -> bool {
-        matches!(self.status, GpuSubmissionStatus::LiveNotBound)
+        (self.status as u8) == (GpuSubmissionStatus::LiveNotBound as u8)
     }
 
     /// Whether a live backend had a validated presentation request but no
     /// initialized device/surface.
     pub const fn is_live_not_initialized(&self) -> bool {
-        matches!(self.status, GpuSubmissionStatus::LiveNotInitialized)
+        (self.status as u8) == (GpuSubmissionStatus::LiveNotInitialized as u8)
     }
 }
 

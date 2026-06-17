@@ -26,14 +26,15 @@ impl MemoryRange {
     /// Returns [`KernelErrorCode::RangeOverflow`] if `offset + length` would
     /// exceed `u64::MAX`.
     pub const fn new(offset: ByteOffset, length: ByteLength) -> KernelResult<Self> {
-        if offset.raw().checked_add(length.raw()).is_none() {
-            return Err(KernelError::new(
+        let fits = offset.raw().checked_add(length.raw()).is_some();
+        [
+            Err(KernelError::new(
                 KernelErrorScope::Memory,
                 KernelErrorCode::RangeOverflow,
                 "memory range end offset overflows u64",
-            ));
-        }
-        Ok(MemoryRange { offset, length })
+            )),
+            Ok(MemoryRange { offset, length }),
+        ][fits as usize]
     }
 
     /// The starting offset.
@@ -53,22 +54,21 @@ impl MemoryRange {
 
     /// Whether `offset` falls within `[start, end)`.
     pub const fn contains_offset(self, offset: u64) -> bool {
-        offset >= self.offset.raw() && offset < self.end()
+        (offset >= self.offset.raw()) & (offset < self.end())
     }
 
     /// Whether `other` is fully contained within `self`.
     ///
     /// A zero-length `other` is never contained (it occupies no byte position).
     pub const fn contains_range(self, other: MemoryRange) -> bool {
-        if other.length.raw() == 0 {
-            return false;
-        }
-        other.offset.raw() >= self.offset.raw() && other.end() <= self.end()
+        (other.length.raw() != 0)
+            & (other.offset.raw() >= self.offset.raw())
+            & (other.end() <= self.end())
     }
 
     /// Whether `self` and `other` share at least one byte position.
     pub const fn overlaps(self, other: MemoryRange) -> bool {
-        self.offset.raw() < other.end() && other.offset.raw() < self.end()
+        (self.offset.raw() < other.end()) & (other.offset.raw() < self.end())
     }
 
     /// Whether this range's start offset lies on the given alignment boundary.
@@ -81,14 +81,21 @@ impl MemoryRange {
     /// Returns [`KernelErrorCode::RangeOverflow`] if the shifted end would
     /// exceed `u64::MAX`.
     pub const fn checked_shift(self, delta: u64) -> KernelResult<MemoryRange> {
-        match self.offset.raw().checked_add(delta) {
-            Some(new_offset) => MemoryRange::new(ByteOffset::new(new_offset), self.length),
-            None => Err(KernelError::new(
+        let base = self.offset.raw();
+        let shifted = base.wrapping_add(delta);
+        // For unsigned addition, the sum wraps below `base` exactly when the
+        // true result exceeded u64::MAX — a branchless overflow test.
+        let overflowed = shifted < base;
+        [
+            // No shift overflow: delegate to `new`, which checks offset+length.
+            MemoryRange::new(ByteOffset::new(shifted), self.length),
+            // Shift overflow: the offset itself overran u64.
+            Err(KernelError::new(
                 KernelErrorScope::Memory,
                 KernelErrorCode::RangeOverflow,
                 "shifted memory range offset overflows u64",
             )),
-        }
+        ][overflowed as usize]
     }
 }
 

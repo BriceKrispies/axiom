@@ -23,21 +23,24 @@ impl LayerImportRule {
     /// [`KernelErrorCode::ForwardImport`] when `target` is higher than
     /// `importer`.
     pub const fn validate(importer: u16, target: u16) -> KernelResult<()> {
-        if target == importer {
-            return Err(KernelError::new(
+        // Exactly one of these conditions holds (or neither, for a legal
+        // lower import), so the weighted sum picks one arm with no branch:
+        //   0 -> Ok, 1 -> SelfImport (target == importer),
+        //   2 -> ForwardImport (target > importer).
+        let selector = (target == importer) as usize + (target > importer) as usize * 2;
+        [
+            Ok(()),
+            Err(KernelError::new(
                 KernelErrorScope::Layer,
                 KernelErrorCode::SelfImport,
                 "a layer may not import itself",
-            ));
-        }
-        if target > importer {
-            return Err(KernelError::new(
+            )),
+            Err(KernelError::new(
                 KernelErrorScope::Layer,
                 KernelErrorCode::ForwardImport,
                 "a layer may only import strictly lower (earlier) layers",
-            ));
-        }
-        Ok(())
+            )),
+        ][selector]
     }
 }
 

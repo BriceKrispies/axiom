@@ -29,20 +29,24 @@ impl Signature {
     /// Serialize as exactly [`Self::LEN`] raw bytes (no length prefix — the
     /// length is fixed and known).
     pub fn write_to(&self, writer: &mut BinaryWriter) {
-        for &byte in self.0.to_bytes().iter() {
-            writer.write_u8(byte);
-        }
+        self.0
+            .to_bytes()
+            .iter()
+            .for_each(|&byte| writer.write_u8(byte));
     }
 
     /// Read a signature previously written with [`Self::write_to`]. Fails (the
     /// reader's `TruncatedData`/`OutOfBounds`) if fewer than [`Self::LEN`] bytes
     /// remain.
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        let mut bytes = [0u8; Self::LEN];
-        for slot in bytes.iter_mut() {
-            *slot = reader.read_u8()?;
-        }
-        Ok(Signature(ed25519_dalek::Signature::from_bytes(&bytes)))
+        (0..Self::LEN)
+            .try_fold([0u8; Self::LEN], |mut bytes, index| {
+                reader.read_u8().map(|byte| {
+                    bytes[index] = byte;
+                    bytes
+                })
+            })
+            .map(|bytes| Signature(ed25519_dalek::Signature::from_bytes(&bytes)))
     }
 }
 
