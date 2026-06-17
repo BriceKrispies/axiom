@@ -26,6 +26,7 @@ members = [
     "engine_no_wildcard_imports",
     "engine_no_runtime_type_branch",
     "engine_no_recursion",
+    "engine_no_branching",
     "engine_no_unitless_float_public_api",
     "engine_no_large_files",
     "engine_no_large_functions",

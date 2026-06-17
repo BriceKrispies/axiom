@@ -299,6 +299,15 @@ name = "engine_lint_helpers"
 version = "0.1.0"
 
 [[package]]
+name = "engine_no_branching"
+version = "0.1.0"
+dependencies = [
+ "clippy_utils",
+ "dylint_linting",
+ "dylint_testing",
+]
+
+[[package]]
 name = "engine_no_large_enums"
 version = "0.1.0"
 dependencies = [
