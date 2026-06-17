@@ -10,6 +10,7 @@ use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::is_in_test;
 use rustc_hir::{BinOpKind, Expr, ExprKind, LoopSource, MatchSource};
 use rustc_lint::{LateContext, LateLintPass};
+use rustc_span::hygiene::DesugaringKind;
 use rustc_span::{FileName, Span};
 
 dylint_linting::declare_late_lint! {
@@ -98,6 +99,19 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoBranching {
         let Some(message) = branch_message(&expr.kind) else {
             return;
         };
+        // `async`/`.await` desugar to a generator state machine — a `loop {
+        // match poll { Ready => break, Pending => yield } }`. That loop/match is
+        // compiler machinery, not branching the programmer wrote (they wrote
+        // `.await`), exactly like a `for` loop's internal `next()` match. The ban
+        // targets source-level branching keywords, so skip async/await
+        // desugaring. (A real `if`/`match`/`loop` written *inside* an async fn
+        // keeps its own span and is still flagged.)
+        if matches!(
+            expr.span.desugaring_kind(),
+            Some(DesugaringKind::Async | DesugaringKind::Await)
+        ) {
+            return;
+        }
         // Skip branching that originated inside a macro expansion (library/user
         // macro internals such as `assert!` / `matches!`), keeping diagnostics on
         // control flow the programmer actually wrote. Compiler desugarings of

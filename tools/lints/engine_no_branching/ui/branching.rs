@@ -1,4 +1,5 @@
 // compile-flags: --test
+// edition:2021
 // Every control-flow construct below must be flagged by `engine_no_branching`.
 // The straight-line function, the combinator calls, and the `#[cfg(test)]`
 // module at the bottom must NOT be.
@@ -84,6 +85,13 @@ mod tests {
             }
         }
     }
+}
+
+// --- must NOT be flagged: async/await desugaring is compiler machinery, not
+// written branching (the `.await` lowers to a poll loop) ---
+
+async fn awaits<F: core::future::Future<Output = i32>>(f: F) -> i32 {
+    f.await
 }
 
 fn main() {}
