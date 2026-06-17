@@ -38,7 +38,7 @@ impl Scalar {
 // assert at compile time that it is a sensible positive sub-millisecond value,
 // rather than as a runtime test that can never observe anything else.
 const _: () = assert!(
-    Scalar::DEFAULT_EPSILON > 0.0 && Scalar::DEFAULT_EPSILON < 1.0e-3,
+    (Scalar::DEFAULT_EPSILON > 0.0) & (Scalar::DEFAULT_EPSILON < 1.0e-3),
     "DEFAULT_EPSILON must be a positive sub-millisecond tolerance"
 );
 
