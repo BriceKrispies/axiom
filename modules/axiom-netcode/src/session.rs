@@ -6,7 +6,7 @@ use axiom_crypto::{SigningKey, VerifyingKey};
 
 use crate::input_timeline::InputTimeline;
 use crate::net_command::NetCommand;
-use crate::net_message::NetMessage;
+use crate::net_message::{NetMessage, KIND_HASH_BEACON, KIND_INPUT};
 use crate::peer_id::PeerId;
 use crate::rejections::Rejections;
 use crate::sync_status::SyncStatus;
@@ -113,12 +113,7 @@ impl Session {
             self.local, tick, &command,
         ));
         self.timeline.insert(tick, self.local, command.clone());
-        NetMessage::Input {
-            peer: self.local,
-            tick,
-            command,
-            signature,
-        }
+        NetMessage::input(self.local, tick, command, signature)
     }
 
     /// Fold a received frame into local state — **only if** its signature
@@ -151,29 +146,38 @@ impl Session {
     }
 
     /// Fold an already-authenticated frame into local state, counting it as
-    /// out-of-window if its tick is outside the admission window. The variant
-    /// dispatch is an exhaustive enum match (each arm extracts a different field
-    /// set); the in-window guard inside each arm is branchless.
+    /// out-of-window if its tick is outside the admission window. The frame is a
+    /// tagged struct, so the dispatch is a kind-gated guard (no `match`): the
+    /// `kind` selects the input timeline or the hash table via two mutually
+    /// exclusive `then` guards — exactly one runs for any frame, mirroring the
+    /// branchless guards in [`Self::accept`]. Each kind's in-window guard is
+    /// branchless, and an out-of-window frame of either kind is counted once.
     fn admit(&mut self, message: NetMessage) {
-        match message {
-            NetMessage::Input {
-                peer,
-                tick,
-                command,
-                ..
-            } => self
-                .in_input_window(tick)
+        let (peer, tick, kind) = (message.peer(), message.tick(), message.kind());
+        // Input: take the command (present iff this is an input frame) and admit
+        // it to the timeline iff in the input window. The `.expect` cannot fire:
+        // the guard is true exactly when `command()` is `Some`.
+        (kind == KIND_INPUT).then(|| {
+            let command = message
+                .command()
+                .expect("an input-kind frame always carries a command")
+                .clone();
+            self.in_input_window(tick)
                 .then(|| self.timeline.insert(tick, peer, command))
-                .unwrap_or_else(|| self.rejections.out_of_window += 1),
-            NetMessage::HashBeacon {
-                peer, tick, hash, ..
-            } => self
-                .in_beacon_window(tick)
+                .unwrap_or_else(|| self.rejections.out_of_window += 1)
+        });
+        // HashBeacon: take the hash (present iff this is a beacon frame) and
+        // admit it to the table iff in the beacon window.
+        (kind == KIND_HASH_BEACON).then(|| {
+            let hash = *message
+                .hash()
+                .expect("a beacon-kind frame always carries a hash");
+            self.in_beacon_window(tick)
                 .then(|| {
                     self.hashes.insert((tick, peer), hash);
                 })
-                .unwrap_or_else(|| self.rejections.out_of_window += 1),
-        }
+                .unwrap_or_else(|| self.rejections.out_of_window += 1)
+        });
     }
 
     /// The next tick whose inputs are all present, or `None` if the lockstep
@@ -217,12 +221,7 @@ impl Session {
             .signing_key
             .sign(&NetMessage::beacon_signing_payload(self.local, tick, &hash));
         self.hashes.insert((tick, self.local), hash);
-        NetMessage::HashBeacon {
-            peer: self.local,
-            tick,
-            hash,
-            signature,
-        }
+        NetMessage::hash_beacon(self.local, tick, hash, signature)
     }
 
     /// Compare every peer's reported hash for `tick`.
@@ -271,12 +270,7 @@ mod tests {
         let peer = PeerId::from_raw(peer);
         let command = NetCommand::new(kind, vec![kind as u8]);
         let signature = signer.sign(&NetMessage::input_signing_payload(peer, tick, &command));
-        NetMessage::Input {
-            peer,
-            tick,
-            command,
-            signature,
-        }
+        NetMessage::input(peer, tick, command, signature)
     }
 
     #[test]
@@ -319,12 +313,7 @@ mod tests {
         ));
         assert_eq!(
             m1,
-            NetMessage::Input {
-                peer: PeerId::from_raw(1),
-                tick: 1,
-                command,
-                signature,
-            }
+            NetMessage::input(PeerId::from_raw(1), 1, command, signature)
         );
     }
 
@@ -426,12 +415,7 @@ mod tests {
                 0,
                 &hash,
             ));
-            NetMessage::HashBeacon {
-                peer: PeerId::from_raw(2),
-                tick: 0,
-                hash,
-                signature: sig,
-            }
+            NetMessage::hash_beacon(PeerId::from_raw(2), 0, hash, sig)
         };
         s.accept(beacon);
         assert_eq!(s.reconcile(0), SyncStatus::InSync);
@@ -444,12 +428,7 @@ mod tests {
                 1,
                 &hash,
             ));
-            NetMessage::HashBeacon {
-                peer: PeerId::from_raw(2),
-                tick: 1,
-                hash,
-                signature: sig,
-            }
+            NetMessage::hash_beacon(PeerId::from_raw(2), 1, hash, sig)
         };
         s.accept(bad);
         assert_eq!(s.reconcile(1), SyncStatus::Desync { tick: 1 });
@@ -468,12 +447,7 @@ mod tests {
                 0,
                 &hash,
             ));
-            NetMessage::HashBeacon {
-                peer: PeerId::from_raw(2),
-                tick: 0,
-                hash,
-                signature: sig,
-            }
+            NetMessage::hash_beacon(PeerId::from_raw(2), 0, hash, sig)
         };
         s.accept(forged);
         assert_eq!(s.reconcile(0), SyncStatus::Pending);
@@ -500,12 +474,7 @@ mod tests {
                 tick,
                 &hash,
             ));
-            NetMessage::HashBeacon {
-                peer: PeerId::from_raw(2),
-                tick,
-                hash,
-                signature: sig,
-            }
+            NetMessage::hash_beacon(PeerId::from_raw(2), tick, hash, sig)
         };
         s.accept(mk(future));
         assert_eq!(

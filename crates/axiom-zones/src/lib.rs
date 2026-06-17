@@ -24,7 +24,7 @@
 //! so a lint can require it to be non-empty.
 
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use syn::{Item, LitStr};
 
 /// `#[sim]` — deterministic simulation zone.
@@ -70,18 +70,16 @@ fn parse_escape_hatch_reason(attr: TokenStream) -> LitStr {
     // Expect `reason = "<text>"`. An empty/malformed attr fails to parse (or
     // fails a filter) and falls through to the `""` default, which the reason
     // lint then rejects — behavior-identical to the prior explicit branches.
+    // Extract the `LitStr` without destructuring the `syn::Expr`/`Lit` enums:
+    // re-parse `nv.value`'s tokens directly as a `LitStr`. A non-string-literal
+    // value (e.g. `reason = 1` or `reason = foo`) yields tokens that fail to
+    // parse as `LitStr`, so it falls through to the `""` default — exactly as the
+    // old `Expr::Lit(.. Lit::Str ..) => Some / _ => None` branches did. `Result`/
+    // `Option` combinators only, no enum `match`.
     syn::parse::<syn::MetaNameValue>(attr)
         .ok()
         .filter(|nv| nv.path.is_ident("reason"))
-        .and_then(|nv| match nv.value {
-            // Data-carrying `syn::Expr` destructure: extracting the inner
-            // `LitStr` to return it. Irreducible in safe Rust.
-            syn::Expr::Lit(syn::ExprLit {
-                lit: syn::Lit::Str(s),
-                ..
-            }) => Some(s),
-            _ => None,
-        })
+        .and_then(|nv| syn::parse2::<LitStr>(nv.value.into_token_stream()).ok())
         .unwrap_or_else(|| LitStr::new("", proc_macro2::Span::call_site()))
 }
 
@@ -99,46 +97,63 @@ fn inject_zone(item: TokenStream, zone: &str) -> TokenStream {
 /// items, re-emitting the item. Any other item kind is a compile error: zones
 /// live on functions, methods, and inline modules.
 fn inject(item: TokenStream, injected: proc_macro2::TokenStream) -> TokenStream {
-    // A free-standing item: function or inline module.
-    match syn::parse::<Item>(item.clone()) {
-        Ok(Item::Fn(mut f)) => {
+    // Try each concrete item kind directly, chained with `Result` combinators —
+    // no `Item` enum and no variant `match`. A free-standing `fn`, then an inline
+    // `mod`, then an associated function (a method in an `impl` block, which
+    // parses as `ImplItemFn`, not `Item` — so zones can mark the engine's
+    // `step`/`advance` etc.). The final fallback emits the unsupported-item error.
+    let injected_for_mod = injected.clone();
+    let injected_for_method = injected.clone();
+    syn::parse::<syn::ItemFn>(item.clone())
+        .map(|mut f| {
             f.block.stmts.insert(0, syn::parse_quote! { #injected });
-            return quote! { #f }.into();
-        }
-        Ok(Item::Mod(mut m)) => {
-            return match &mut m.content {
-                Some((_brace, items)) => {
-                    items.insert(0, syn::parse_quote! { #injected });
-                    quote! { #m }.into()
-                }
-                None => syn::Error::new_spanned(
-                    &m,
-                    "a zone marker on a module requires an inline `mod name { ... }` body",
-                )
-                .to_compile_error()
-                .into(),
-            };
-        }
-        Ok(other) => {
-            return syn::Error::new_spanned(
-                &other,
-                "zone markers apply only to functions, methods, and inline modules",
-            )
-            .to_compile_error()
-            .into();
-        }
-        Err(_) => {}
-    }
-    // An associated function (a method in an `impl` block) parses as `ImplItemFn`,
-    // not `Item` — handle it so zones can mark the engine's `step`/`advance` etc.
-    match syn::parse::<syn::ImplItemFn>(item) {
-        Ok(mut method) => {
-            method
-                .block
-                .stmts
-                .insert(0, syn::parse_quote! { #injected });
-            quote! { #method }.into()
-        }
-        Err(err) => err.to_compile_error().into(),
-    }
+            quote! { #f }
+        })
+        .or_else(|_| {
+            syn::parse::<syn::ItemMod>(item.clone()).map(|mut m| {
+                // `m.content` is `Option<(Brace, Vec<Item>)>`: an inline body
+                // injects the marker; a bodyless `mod name;` produces the
+                // module-needs-a-body error. `Option` combinators, no `match`.
+                let with_body = m.content.as_mut().map(|(_brace, items)| {
+                    items.insert(0, syn::parse_quote! { #injected_for_mod });
+                });
+                with_body
+                    .map(|()| quote! { #m })
+                    .unwrap_or_else(|| {
+                        syn::Error::new_spanned(
+                            &m,
+                            "a zone marker on a module requires an inline `mod name { ... }` body",
+                        )
+                        .to_compile_error()
+                    })
+            })
+        })
+        .or_else(|_| {
+            syn::parse::<syn::ImplItemFn>(item.clone()).map(|mut method| {
+                method
+                    .block
+                    .stmts
+                    .insert(0, syn::parse_quote! { #injected_for_method });
+                quote! { #method }
+            })
+        })
+        // Every concrete kind failed. Reproduce the original two-tier error
+        // without matching the `Item` enum: if the tokens *do* parse as some
+        // `Item` (necessarily neither `fn` nor `mod`, since those were tried
+        // above), emit the "apply only to" error spanned on that item — exactly
+        // the old `Ok(other) =>` arm. Otherwise the tokens aren't a valid item
+        // at all, so surface that parse error verbatim — the old `ImplItemFn`
+        // `Err(err)` arm. `Result::or_else`/`map_err`, no `match`.
+        .unwrap_or_else(|impl_err| {
+            syn::parse::<Item>(item)
+                .map(|other| {
+                    syn::Error::new_spanned(
+                        &other,
+                        "zone markers apply only to functions, methods, and inline modules",
+                    )
+                    .to_compile_error()
+                })
+                .unwrap_or_else(|_| impl_err.to_compile_error())
+        })
+        .into()
 }
