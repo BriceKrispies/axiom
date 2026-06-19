@@ -25,6 +25,8 @@ members = [
     "modules/axiom-render-pipeline",
     "modules/axiom-windowing",
     "modules/axiom-netcode",
+    "modules/axiom-net-protocol",
+    "modules/axiom-client-core",
     "modules/axiom",
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",
@@ -33,8 +35,13 @@ members = [
     "apps/axiom-netcode-demo",
     "apps/axiom-netcode-sim",
     "apps/axiom-netplay-browser",
+    "apps/axiom-netplay-ffi",
+    "apps/axiom-growth",
     "crates/xtask",
     "tools/axiom-netcode-relay",
+    "tools/axiom-netplay-server",
+    "tools/axiom-profile-runner",
+    "tools/axiom-dev-reload",
 ]
 
 [workspace.package]

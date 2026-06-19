@@ -1,80 +1,51 @@
-//! # Axiom Netplay (browser) — live deterministic-lockstep multiplayer
+//! # Axiom Netplay (browser) — live server-authoritative multiplayer
 //!
-//! Two browsers each run the engine and control their own cube with the arrow
-//! keys. Only inputs cross the wire (through `axiom-netcode-relay`); both clients
-//! simulate, so the screens stay identical by determinism — no state is ever
-//! sent. This app owns the nondeterministic edge (the WebSocket + the keyboard)
-//! and the glue between the engine `App`, the lockstep session, and the live
-//! windowing loop. The deterministic core (the scene, the input codec, the
-//! lockstep stepping) is native-testable; the live arm is `wasm32`-only.
+//! Two browsers each control a cube. The **authoritative server** owns the
+//! simulation — and in the `examples/axiom-netplay-dotnet` setup it runs the
+//! *real Axiom engine* in-process (natively, via FFI). Each browser sends
+//! *intents* (arrow-key move deltas) and receives *snapshots* that are the
+//! engine's actual rendered frame: per-cube `[mvp(16), colour(4)]` instance
+//! floats.
+//!
+//! This browser crate runs its **own** engine instance for rendering, and the
+//! page tells it where to draw the two cubes each frame via [`web::set_positions`]
+//! — positions the page computes with **client-side prediction** (its own cube)
+//! and **interpolation** (the other cube) from the authoritative snapshots. The
+//! engine integrates a per-tick *delta*, so [`inputs_to_targets`] turns "draw at
+//! this absolute position" into the delta that lands the cube there. The
+//! networking + prediction + interpolation live in the page's JavaScript over the
+//! `@axiom/client` SDK; the server stays authoritative.
 
 use axiom::prelude::*;
 
 /// The presentation canvas element id (must match `web/index.html`).
 pub const CANVAS_ID: &str = "axiom-netplay-canvas";
 
-/// Units a player cube moves per tick while an arrow key is held.
-pub const MOVE_SPEED: f32 = 0.06;
+/// The cubes' spawn positions `[p0x, p0y, p1x, p1y]` — matches the scene and the
+/// server's authoritative initial state, so the first frame already lines up.
+pub const INITIAL_POSITIONS: [f32; 4] = [-1.5, 0.0, 1.5, 0.0];
 
-/// The `submit_local` kind tag for a move payload (app-defined; netcode treats
-/// the payload as opaque bytes).
-pub const MOVE_KIND: u32 = 0;
+/// Build the [`PlayerInput`]s that move each cube from its `current` rendered
+/// position to the `target` (delta = target - current); after the tick each cube
+/// sits exactly at `target`. A zero delta (target == current) holds it still.
+pub fn inputs_to_targets(current: [f32; 4], target: [f32; 4]) -> [PlayerInput; 2] {
+    [
+        PlayerInput::new(0, Vec3::new(target[0] - current[0], target[1] - current[1], 0.0)),
+        PlayerInput::new(1, Vec3::new(target[2] - current[2], target[3] - current[3], 0.0)),
+    ]
+}
 
 /// A linear colour channel from an authored literal.
 fn ch(value: f32) -> Ratio {
     Ratio::new(value).expect("authored colour channel is finite")
 }
 
-/// The arrow-key state, polled each frame into a move delta.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Keys {
-    left: bool,
-    right: bool,
-    up: bool,
-    down: bool,
-}
-
-impl Keys {
-    /// The per-tick translation delta these held keys produce (right/up are
-    /// positive x/y).
-    pub fn delta(self) -> Vec3 {
-        let x = (self.right as i32 - self.left as i32) as f32;
-        let y = (self.up as i32 - self.down as i32) as f32;
-        Vec3::new(x * MOVE_SPEED, y * MOVE_SPEED, 0.0)
-    }
-}
-
-/// Encode a move delta as the netcode command payload: the x and y translation
-/// as two little-endian `f32`s.
-pub fn encode_delta(delta: Vec3) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8);
-    out.extend_from_slice(&delta.x.to_le_bytes());
-    out.extend_from_slice(&delta.y.to_le_bytes());
-    out
-}
-
-/// Decode a move payload. A short/garbled payload decodes to no movement.
-pub fn decode_delta(payload: &[u8]) -> Vec3 {
-    // Copy the first 8 bytes into a buffer, AND-masked to all-zero unless a full
-    // 8-byte payload was present. A short payload yields an all-zero buffer, so
-    // both `x` and `y` decode to exactly 0.0 — behaviour-identical to the early
-    // `Vec3::ZERO` return, but branch-free (a `.take(8)` over a short slice
-    // simply leaves the unwritten tail at its masked zero).
-    let keep = 0u8.wrapping_sub((payload.len() >= 8) as u8); // 0xFF if full, else 0x00
-    let mut buf = [0u8; 8];
-    payload
-        .iter()
-        .take(8)
-        .enumerate()
-        .for_each(|(i, b)| buf[i] = *b & keep);
-    let x = f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
-    let y = f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
-    Vec3::new(x, y, 0.0)
-}
-
 /// Build the netplay scene: two player cubes (player 0 red on the left, player 1
-/// blue on the right), a pulled-back camera, and a directional light. Rendering
-/// is enabled. Two peers build identical apps and stay in sync via determinism.
+/// blue on the right), a pulled-back camera, and a directional light. The browser
+/// uses this for the cube geometry, the instance count, and an initial frame; the
+/// authoritative per-frame transforms come from the server's engine. Authored
+/// identically to the server scene (`apps/axiom-netplay-ffi`) so the instance
+/// floats line up with this vertex buffer.
 pub fn build_netplay_app() -> RunningApp {
     App::new()
         .window(
@@ -131,142 +102,12 @@ pub fn build_netplay_app() -> RunningApp {
         .build()
 }
 
-/// The neutral bytes a peer fingerprints each tick — the real frame's packed
-/// instance floats — so two peers agree iff their engines agree.
-pub fn frame_state_bytes(outcome: &FrameOutcome) -> Vec<u8> {
-    outcome
-        .instance_floats()
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect()
-}
-
-/// Map a confirmed `(peer, kind, payload)` input into a [`PlayerInput`]: peer
-/// `p` drives player index `p - 1`.
-pub fn input_for(peer: u64, payload: &[u8]) -> PlayerInput {
-    PlayerInput::new((peer.saturating_sub(1)) as u32, decode_delta(payload))
-}
-
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_crypto::SigningKey;
-    use axiom_netcode::NetcodeApi;
-
-    /// Peer `id`'s deterministic signing key for the tests.
-    fn key(id: u64) -> SigningKey {
-        SigningKey::from_seed([id as u8; 32])
-    }
-
-    /// The two-peer roster both sessions share.
-    fn roster() -> [(u64, axiom_crypto::VerifyingKey); 2] {
-        [(1, key(1).verifying_key()), (2, key(2).verifying_key())]
-    }
-
-    /// Drive two peers in lockstep over a clean in-process channel. Peer 1
-    /// (player 0) plays `m0`; peer 2 (player 1) plays `m1`. Each peer applies
-    /// *both* players' confirmed inputs to its own engine. Returns each peer's
-    /// per-tick state hash and whether reconcile ever flagged a desync.
-    fn run(m0: &[Vec3], m1: &[Vec3]) -> (Vec<[u8; 32]>, Vec<[u8; 32]>, bool) {
-        assert_eq!(m0.len(), m1.len());
-        let mut app_a = build_netplay_app();
-        let mut app_b = build_netplay_app();
-        let mut net_a = NetcodeApi::new(1, key(1), &roster());
-        let mut net_b = NetcodeApi::new(2, key(2), &roster());
-        let (mut ha, mut hb, mut desync) = (Vec::new(), Vec::new(), false);
-
-        for tick in 0..m0.len() {
-            let in_a = net_a.submit_local(MOVE_KIND, &encode_delta(m0[tick]));
-            let in_b = net_b.submit_local(MOVE_KIND, &encode_delta(m1[tick]));
-            net_a.ingest(&in_b).unwrap();
-            net_b.ingest(&in_a).unwrap();
-
-            let beacon_a = step(&mut net_a, &mut app_a, &mut ha);
-            let beacon_b = step(&mut net_b, &mut app_b, &mut hb);
-            net_b.ingest(&beacon_a).unwrap();
-            net_a.ingest(&beacon_b).unwrap();
-
-            if net_a.reconcile(tick as u64) == Some(false) {
-                desync = true;
-            }
-        }
-        (ha, hb, desync)
-    }
-
-    fn step(net: &mut NetcodeApi, app: &mut RunningApp, log: &mut Vec<[u8; 32]>) -> Vec<u8> {
-        let tick = net.ready_tick().expect("both peers submitted this tick");
-        let inputs: Vec<PlayerInput> = net
-            .confirm_tick(tick)
-            .iter()
-            .map(|(peer, _kind, payload)| input_for(*peer, payload))
-            .collect();
-        let bytes = frame_state_bytes(&app.tick_with(tick, &inputs));
-        log.push(net.digest(&bytes));
-        net.record_local_hash(tick, &bytes)
-    }
-
-    #[test]
-    fn same_inputs_keep_both_browsers_byte_identical() {
-        let m0 = [Vec3::new(MOVE_SPEED, 0.0, 0.0); 24];
-        let m1 = [Vec3::new(0.0, MOVE_SPEED, 0.0); 24];
-        let (ha, hb, desync) = run(&m0, &m1);
-        assert_eq!(ha.len(), 24);
-        assert_eq!(
-            ha, hb,
-            "both browsers' real engines agree every confirmed tick"
-        );
-        assert!(!desync, "matching deterministic engines never desync");
-    }
-
-    #[test]
-    fn a_players_moves_change_the_frame() {
-        // Player 0 moving right makes consecutive frames differ.
-        let m0 = [Vec3::new(MOVE_SPEED, 0.0, 0.0); 12];
-        let m1 = [Vec3::ZERO; 12];
-        let (ha, _, _) = run(&m0, &m1);
-        let changed = ha.windows(2).filter(|w| w[0] != w[1]).count();
-        assert!(
-            changed > 8,
-            "moving the player must change the rendered frame"
-        );
-    }
-
-    #[test]
-    fn codec_round_trips_and_keys_map_to_deltas() {
-        assert_eq!(
-            decode_delta(&encode_delta(Vec3::new(0.5, -0.25, 0.0))),
-            Vec3::new(0.5, -0.25, 0.0)
-        );
-        assert_eq!(decode_delta(&[1, 2, 3]), Vec3::ZERO); // too short
-        assert_eq!(
-            Keys {
-                right: true,
-                ..Keys::default()
-            }
-            .delta(),
-            Vec3::new(MOVE_SPEED, 0.0, 0.0)
-        );
-        assert_eq!(
-            Keys {
-                up: true,
-                left: true,
-                ..Keys::default()
-            }
-            .delta(),
-            Vec3::new(-MOVE_SPEED, MOVE_SPEED, 0.0)
-        );
-        assert_eq!(Keys::default().delta(), Vec3::ZERO);
-    }
-
-    #[test]
-    fn input_for_maps_peer_to_player_index() {
-        // peer 1 -> player 0, peer 2 -> player 1.
-        assert_eq!(input_for(1, &encode_delta(Vec3::ZERO)).player, 0);
-        assert_eq!(input_for(2, &encode_delta(Vec3::ZERO)).player, 1);
-    }
 
     #[test]
     fn the_scene_draws_two_player_cubes() {
@@ -275,42 +116,24 @@ mod tests {
     }
 
     #[test]
-    fn a_compromised_peer_cannot_forge_the_other_players_input() {
-        // Two honest browsers. A third actor (a compromised client / malicious
-        // relay) holds NO roster key; it floods peer A every tick with frames
-        // claiming to be peer 2, signed by its own key. Peer A must stay
-        // byte-identical to peer B — the forged frames never reach the sim.
-        let mut app_a = build_netplay_app();
-        let mut app_b = build_netplay_app();
-        let mut net_a = NetcodeApi::new(1, key(1), &roster());
-        let mut net_b = NetcodeApi::new(2, key(2), &roster());
-        // The attacker thinks it is peer 2 but holds an off-roster key.
-        let attacker_key = SigningKey::from_seed([200u8; 32]);
-        let mut attacker = NetcodeApi::new(
-            2,
-            attacker_key.clone(),
-            &[(2, attacker_key.verifying_key())],
-        );
-        let (mut ha, mut hb) = (Vec::new(), Vec::new());
+    fn inputs_to_targets_are_the_per_player_deltas() {
+        let inputs = inputs_to_targets(INITIAL_POSITIONS, [-1.0, 0.5, 2.0, -0.5]);
+        assert_eq!(inputs[0].delta, Vec3::new(0.5, 0.5, 0.0)); // -1.0 - (-1.5)
+        assert_eq!(inputs[1].delta, Vec3::new(0.5, -0.5, 0.0)); // 2.0 - 1.5
+        // No change → zero deltas (cubes hold still).
+        let still = inputs_to_targets(INITIAL_POSITIONS, INITIAL_POSITIONS);
+        assert_eq!(still[0].delta, Vec3::ZERO);
+        assert_eq!(still[1].delta, Vec3::ZERO);
+    }
 
-        for _ in 0..16 {
-            let in_a =
-                net_a.submit_local(MOVE_KIND, &encode_delta(Vec3::new(MOVE_SPEED, 0.0, 0.0)));
-            let in_b = net_b.submit_local(MOVE_KIND, &encode_delta(Vec3::ZERO));
-            net_a.ingest(&in_b).unwrap();
-            net_b.ingest(&in_a).unwrap();
-            // Forged peer-2 input pushed at peer A: decodes fine, fails the
-            // signature check against peer 2's real roster key, and is dropped.
-            let forged =
-                attacker.submit_local(MOVE_KIND, &encode_delta(Vec3::new(0.0, -MOVE_SPEED, 0.0)));
-            net_a.ingest(&forged).unwrap();
-
-            step(&mut net_a, &mut app_a, &mut ha);
-            step(&mut net_b, &mut app_b, &mut hb);
-        }
-        assert_eq!(
-            ha, hb,
-            "forged frames never reached the sim; the two engines stay identical"
-        );
+    #[test]
+    fn a_player_move_changes_the_rendered_frame() {
+        // Same path the server's engine takes; proves a move is visible.
+        let mut app = build_netplay_app();
+        let still = app.tick_with(0, &[]).instance_floats();
+        let moved = app
+            .tick_with(1, &[PlayerInput::new(0, Vec3::new(0.5, 0.0, 0.0))])
+            .instance_floats();
+        assert_ne!(still, moved);
     }
 }

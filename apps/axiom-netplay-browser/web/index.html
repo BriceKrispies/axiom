@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Axiom — Live Lockstep Multiplayer</title>
+    <title>Axiom — Server-Authoritative Multiplayer</title>
     <style>
       :root { color-scheme: dark; }
       body {
@@ -30,34 +30,67 @@
       #status { font-family: ui-monospace, monospace; white-space: pre; text-align: center; }
       .ok { color: #7fd17f; }
       .err { color: #e07a7a; }
-      kbd {
-        background: #20242c; border: 1px solid #333; border-radius: 4px;
-        padding: 1px 5px; font-family: ui-monospace, monospace;
-      }
     </style>
   </head>
   <body>
-    <h1>Axiom — live deterministic-lockstep multiplayer</h1>
+    <h1>Axiom — live server-authoritative multiplayer</h1>
     <canvas id="axiom-netplay-canvas" width="800" height="600"></canvas>
     <div id="status">booting…</div>
 
     <script type="module">
-      // Cache-bust both the JS glue and the wasm binary on every load. The dev
-      // server (`make netplay` → python http.server) sends no cache headers, so a
-      // browser that loaded an OLD bundle once would otherwise keep serving the
-      // stale .js/.wasm from disk cache forever — even across a normal refresh —
-      // which looks like a frozen/black window running last build's code. The
-      // `?v=<timestamp>` query forces a fresh fetch of both files.
+      // The browser networking is done entirely by the @axiom/client SDK (built
+      // from packages/axiom-client into ./vendor/axiom-client by `make
+      // netplay-build`). The Rust/wasm module is only the renderer: we hand it
+      // the authoritative positions the SERVER sends, and it draws them.
+      //
+      // Cache-bust everything on each load (the dev http.server sends no cache
+      // headers), so a refresh never serves a stale bundle.
       const v = Date.now();
-      const { default: init, start } =
+      const { default: initWasm, start, set_positions } =
         await import(`./pkg/axiom_netplay_browser.js?v=${v}`);
       const wasmUrl = new URL(
         `./pkg/axiom_netplay_browser_bg.wasm?v=${v}`, import.meta.url);
-      // wasm-bindgen's init takes a single options object ({ module_or_path }).
-      const initOptions = { module_or_path: wasmUrl };
+      const { startNetplay } = await import(`./netplay-client.js?v=${v}`);
 
       const status = document.getElementById("status");
       const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
+
+      // The authoritative server. By default we connect SAME-ORIGIN to /ws, so a
+      // single server that serves this page AND the game socket (e.g. the .NET
+      // example in examples/axiom-netplay-dotnet) just works. Override with
+      // ?server=<url> for a separate server (e.g. ?server=ws://127.0.0.1:9002).
+      function serverUrl() {
+        const q = new URLSearchParams(location.search).get("server");
+        if (q && q.length > 0) return q;
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        return `${proto}//${location.host}/ws`;
+      }
+
+      const params = new URLSearchParams(location.search);
+      // ?naive disables client-side prediction + interpolation (render the raw
+      // latest snapshot) so you can feel the difference vs the default.
+      const naive = params.has("naive");
+      // ?transport= selects the transport: websocket (default), webtransport
+      // (HTTP/3), or webrtc (unreliable UDP DataChannel).
+      const transportParam = params.get("transport");
+      const useWebTransport = transportParam === "webtransport";
+      const useWebRtc = transportParam === "webrtc";
+
+      async function resolveTransport() {
+        if (useWebRtc) {
+          // WebRTC: signal the SDP offer/answer over same-origin HTTP; the data
+          // channel is a direct (loopback) UDP flow — no cert, no HTTP/3.
+          return { transport: "webrtc", signalingUrl: `${location.origin}/rtc/offer` };
+        }
+        if (useWebTransport) {
+          // WebTransport: connect to the HTTP/3 endpoint (:8091), trusting the
+          // server's self-signed dev cert via the hash it publishes at /cert-hash.
+          const b64 = await (await fetch("/cert-hash")).text();
+          const hash = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
+          return { url: `https://${location.hostname}:8091/wt`, transport: "webtransport", serverCertificateHash: hash };
+        }
+        return { url: serverUrl(), transport: undefined };
+      }
 
       async function main() {
         if (!("gpu" in navigator)) {
@@ -68,23 +101,39 @@
           );
           return;
         }
-        try {
-          await init(initOptions);
-          start(); // connect to the relay, capture the keyboard, drive the loop
-          set(
-            "Connected. Open this page in a SECOND browser window to start —\n" +
-            "lockstep waits until both players are present (the screen stays\n" +
-            "black until then). Each window controls its OWN cube with the\n" +
-            "arrow keys (← → ↑ ↓); only inputs cross the wire, so the two\n" +
-            "screens stay identical by determinism. Red = player 1, blue = player 2.",
-            "ok"
-          );
-        } catch (e) {
-          set("Startup failed: " + e + "\n(is the relay running? `make relay`)", "err");
-          throw e;
-        }
+        await initWasm({ module_or_path: wasmUrl });
+        start();   // begin the wasm render loop (draws whatever positions we set)
+
+        // The netcode brain: prediction (own cube) + interpolation (other cube).
+        const t = await resolveTransport();
+        const client = startNetplay({
+          setPositions: set_positions, naive,
+          serverUrl: t.url, transport: t.transport,
+          serverCertificateHash: t.serverCertificateHash, signalingUrl: t.signalingUrl,
+        });
+
+        const transportLabel = useWebRtc ? "WebRTC (unreliable UDP)"
+          : useWebTransport ? "WebTransport (HTTP/3)" : "WebSocket (TCP)";
+        const mode = (naive
+          ? "NAIVE mode (no prediction/interpolation) — expect stutter + input lag."
+          : "Prediction + interpolation ON — your cube responds instantly, the other moves smoothly.")
+          + "  Transport: " + transportLabel + ".";
+        client.onStatus((s) => {
+          if (s === "connected") {
+            set(
+              "Connected. Open this page in a SECOND browser window to control the\n" +
+              "other cube. Arrow keys (← → ↑ ↓) move YOUR cube. Red = player 1,\n" +
+              "blue = player 2. The server is laggy on purpose.\n" + mode,
+              "ok"
+            );
+          } else if (s === "connecting") {
+            set("Connecting to the server…");
+          } else {
+            set("Disconnected. Is the server running? `make netplay-dotnet`", "err");
+          }
+        });
       }
-      main();
+      main().catch((e) => set("Startup failed: " + e, "err"));
     </script>
   </body>
 </html>

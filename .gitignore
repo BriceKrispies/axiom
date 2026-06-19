@@ -13,6 +13,16 @@
 /dist/
 **/dist/
 *.wasm
+
+# Vendored, built TypeScript SDK copied into a demo's web/ by `make netplay-build`
+**/web/vendor/
+
+# .NET build output (scoped to examples/ so it never matches Rust `src/bin/`)
+examples/**/bin/
+examples/**/obj/
+
+# Agent-bridge offscreen render output (frames/<tick>.png)
+/frames/
 wasm-pack.log
 
 # Node (web/editor tooling)

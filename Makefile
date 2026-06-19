@@ -18,8 +18,10 @@ WEB_DIR          := $(BROWSER_DEMO_DIR)/web
 PKG_DIR          := $(WEB_DIR)/pkg
 PORT             ?= 8000
 
-# The live 2-browser lockstep multiplayer demo (apps/axiom-netplay-browser +
-# the tools/axiom-netcode-relay server).
+# The live 2-browser SERVER-AUTHORITATIVE multiplayer demo
+# (apps/axiom-netplay-browser + the tools/axiom-netplay-server authoritative
+# server). The browser networking is the TypeScript @axiom/client SDK
+# (packages/axiom-client), built and vendored into the page by netplay-build.
 NETPLAY_DIR      := apps/axiom-netplay-browser
 NETPLAY_CRATE    := axiom-netplay-browser
 NETPLAY_ARTIFACT := target/$(WASM_TARGET)/release/axiom_netplay_browser.wasm
@@ -35,6 +37,14 @@ retro FPS_WEB         := $(retro FPS_DIR)/web
 retro FPS_PKG         := $(retro FPS_WEB)/pkg
 retro FPS_PORT        ?= 8000
 
+# The walkable Growth procedural-terrain viewer (apps/axiom-growth).
+GROWTH_DIR       := apps/axiom-growth
+GROWTH_CRATE     := axiom-growth
+GROWTH_ARTIFACT  := target/$(WASM_TARGET)/release/axiom_growth.wasm
+GROWTH_WEB       := $(GROWTH_DIR)/web
+GROWTH_PKG       := $(GROWTH_WEB)/pkg
+GROWTH_PORT      ?= 8000
+
 # The N-spinning-cubes load/stress visual (apps/axiom-stress-cubes-browser).
 STRESS_DIR       := apps/axiom-stress-cubes-browser
 STRESS_CRATE     := axiom-stress-cubes-browser
@@ -47,7 +57,7 @@ GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build relay retro_fps retro_fps-build stress stress-build gallery gallery-build help
+.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay retro_fps retro_fps-build retro-fps-hot stress stress-build growth growth-build agent agent-render agent-bridge gallery gallery-build help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -55,16 +65,21 @@ help:
 	@echo "  make demo-build    Rebuild the rotating-cube wasm bundle into web/pkg"
 	@echo "  make PORT=9000 demo   Serve on a different port"
 	@echo ""
-	@echo "  Live 2-browser lockstep multiplayer demo:"
-	@echo "  make relay         Run the WebSocket relay (ws://127.0.0.1:9001)"
-	@echo "  make netplay-build Rebuild the netplay wasm bundle into its web/pkg"
-	@echo "  make netplay       Serve the netplay page at http://localhost:$(NETPLAY_PORT)"
-	@echo "  (run 'make relay' in one shell and 'make netplay' in another, then"
-	@echo "   open the page in TWO WebGPU browsers and arrow-key your cube.)"
+	@echo "  Live 2-browser SERVER-AUTHORITATIVE multiplayer demo:"
+	@echo "  make netplay-build   Rebuild the netplay wasm bundle + vendor the @axiom/client SDK"
+	@echo "  make netplay-dotnet  Run the .NET 10 server: serves the client AND the game at http://localhost:8090"
+	@echo "  (run 'make netplay-build' once, then 'make netplay-dotnet' and open"
+	@echo "   http://localhost:8090 in TWO WebGPU browsers — one server does it all.)"
+	@echo ""
+	@echo "  Alternative (Rust server + separate static serve):"
+	@echo "  make netplay-server Run the Rust authoritative server (ws://127.0.0.1:9002)"
+	@echo "  make netplay        Serve the page at http://localhost:$(NETPLAY_PORT)"
+	@echo "  (then open http://localhost:$(NETPLAY_PORT)/?server=ws://127.0.0.1:9002 in two browsers.)"
 	@echo ""
 	@echo "  retro FPS-style first-person demo:"
 	@echo "  make retro_fps-build    Rebuild the retro_fps wasm bundle into its web/pkg"
 	@echo "  make retro_fps          Serve the retro_fps page at http://localhost:$(retro FPS_PORT)"
+	@echo "  make retro-fps-hot      Serve retro_fps with live level hot-reload at http://localhost:8080"
 	@echo ""
 	@echo "  Load/stress visual (N spinning cubes):"
 	@echo "  make stress-build  Rebuild the stress wasm bundle into its web/pkg"
@@ -94,26 +109,46 @@ demo-build:
 	cargo build -p $(BROWSER_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(PKG_DIR) $(WASM_ARTIFACT)
 
-# --- Live 2-browser lockstep multiplayer demo ---
+# --- Live 2-browser SERVER-AUTHORITATIVE multiplayer demo ---
 
-# The dumb broadcast relay: assigns each browser a peer id and forwards inputs.
-# Run this first, in its own shell; leave it running.
+# The authoritative game server: holds the state, accepts JoinRoom/ClientIntent,
+# and broadcasts ServerSnapshots over the axiom-net-protocol wire format. Run
+# this first, in its own shell; leave it running.
+netplay-server:
+	cargo run -p axiom-netplay-server
+
+# The .NET 10 example server (examples/axiom-netplay-dotnet): an all-in-one host
+# that SERVES the client (the built web/ dir) AND is the authoritative game
+# server on the same origin (WebSocket at /ws), speaking the axiom-net-protocol
+# wire format via a C# twin of the codec. Run `make netplay-build` first so the
+# wasm bundle + vendored SDK exist, then open http://localhost:8090.
+netplay-dotnet:
+	dotnet run --project examples/axiom-netplay-dotnet
+
+# The dumb lockstep broadcast relay (legacy tooling; the netplay demo no longer
+# uses it, but the tool is kept for lockstep experiments).
 relay:
 	cargo run -p axiom-netcode-relay
 
 # Rebuild the netplay wasm bundle (same raw cargo + wasm-bindgen flow as the
-# rotating-cube demo, for a Cargo.lock-exact binding generator).
+# rotating-cube demo) AND build + vendor the TypeScript @axiom/client SDK the
+# page uses for networking (compiled to ESM into web/vendor/axiom-client).
 netplay-build:
 	cargo build -p $(NETPLAY_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
+	npm --prefix packages/axiom-client install --no-audit --no-fund
+	npm --prefix packages/axiom-client run build
+	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_WEB)/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
+	cargo build -p axiom-netplay-ffi --release
 
-# Serve the netplay page. The relay (make relay) must already be running, then
-# open this URL in TWO WebGPU browser windows. Recipe lines are kept portable
-# (no sh-only test/||/{}) so make runs them under cmd.exe on Windows too; if the
-# bundle is missing the page reports it, so run `make netplay-build` first.
+# Serve the netplay page. The authoritative server (make netplay-server) must
+# already be running, then open this URL in TWO WebGPU browser windows. Recipe
+# lines are kept portable (no sh-only test/||/{}) so make runs them under cmd.exe
+# on Windows too; if the bundle is missing the page reports it, so run
+# `make netplay-build` first.
 netplay:
 	@echo Serving netplay at http://localhost:$(NETPLAY_PORT) - run make netplay-build first if blank
-	@echo Start the relay in another shell with:  make relay
+	@echo Start the authoritative server in another shell with:  make netplay-server
 	@echo Then open this URL in TWO WebGPU browser windows and arrow-key your cube.
 	uv run --no-project python -m http.server $(NETPLAY_PORT) --directory $(NETPLAY_WEB)
 
@@ -131,6 +166,16 @@ retro_fps:
 	@echo Open it in a WebGPU browser. Tank controls: arrows/WASD to move+turn, Space to fire.
 	uv run --no-project python -m http.server $(retro FPS_PORT) --directory $(retro FPS_WEB)
 
+# Serve the retro_fps page with LIVE LEVEL HOT-RELOAD. The axiom-dev-reload dev server
+# serves web/ (like `make retro_fps` does) and additionally watches level.axiom,
+# pushing every saved edit to the browser over SSE — edit a wall and watch it
+# update with no recompile and no reload. Run `make retro_fps-build` first; then open
+# http://localhost:8080 and edit apps/axiom-retro-fps-browser/level.axiom.
+retro-fps-hot:
+	@echo Serving retro_fps with hot-reload at http://localhost:8080 - run make retro_fps-build first if blank
+	@echo Edit apps/axiom-retro-fps-browser/level.axiom and save to reload the level live.
+	cargo run -p axiom-dev-reload
+
 # --- Load/stress visual (N spinning cubes) ---
 
 # Rebuild the stress wasm bundle (same raw cargo + wasm-bindgen flow).
@@ -144,6 +189,38 @@ stress:
 	@echo Serving stress visual at http://localhost:$(STRESS_PORT) - run make stress-build first if blank
 	@echo Open it in a WebGPU browser. Change cube count with ?cubes=N or the presets.
 	uv run --no-project python -m http.server $(STRESS_PORT) --directory $(STRESS_WEB)
+
+# --- Growth: the walkable procedural-terrain viewer (apps/axiom-growth) ---
+
+# Rebuild the Growth viewer wasm bundle (same raw cargo + wasm-bindgen flow).
+growth-build:
+	cargo build -p $(GROWTH_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(GROWTH_PKG) $(GROWTH_ARTIFACT)
+
+# Serve the Growth terrain viewer. Run `make growth-build` first if blank. Open
+# in a WebGPU browser; click the canvas to capture the mouse, then WASD + mouse
+# to walk around the generated terrain.
+growth:
+	@echo Serving Growth terrain viewer at http://localhost:$(GROWTH_PORT) - run make growth-build first if blank
+	@echo Open it in a WebGPU browser. Click to capture the mouse, WASD to move, mouse to look.
+	uv run --no-project python -m http.server $(GROWTH_PORT) --directory $(GROWTH_WEB)
+
+# --- Agent bridge: drive + watch the retro FPS game from outside the engine ---
+
+# Headless: a JSON-over-HTTP server that drives the REAL retro FPS game with no
+# browser, so an external agent can send inputs and read back structured state.
+#   curl -s -XPOST localhost:7878/step -d '{"keys":["forward"],"fire":true}'
+agent:
+	cargo run -p $(retro FPS_CRATE) --features agent --bin agent
+
+# Same, plus an offscreen wgpu render so `{"render":true}` returns a PNG path.
+agent-render:
+	cargo run -p $(retro FPS_CRATE) --features agent-render --bin agent
+
+# Bridge: relay HTTP actions to a LIVE browser opened with
+# ?agent=ws://127.0.0.1:7879, and stream its frames back (canvas snapshots).
+agent-bridge:
+	cargo run -p $(retro FPS_CRATE) --features agent --bin agent -- --bridge
 
 # --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
 
@@ -161,6 +238,9 @@ gallery-build:
 	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(retro FPS_PKG) $(retro FPS_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(STRESS_PKG) $(STRESS_ARTIFACT)
+	npm --prefix packages/axiom-client install --no-audit --no-fund
+	npm --prefix packages/axiom-client run build
+	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_WEB)/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
 	uv run --no-project python scripts/assemble_gallery.py
 
 # Serve the assembled gallery. Run `make gallery-build` first if dist/ is blank.

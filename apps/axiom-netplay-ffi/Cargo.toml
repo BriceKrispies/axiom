@@ -1,0 +1,30 @@
+[package]
+name = "axiom-netplay-ffi"
+description = "Axiom app: a C-ABI shared library (cdylib) that embeds the REAL Axiom engine for an external host (e.g. the .NET netplay server). It builds the netplay scene, applies per-player move intents, ticks the engine headlessly, and exposes the engine's actual rendered frame (per-cube MVP+colour instance floats) across the C boundary. The host owns the socket; this owns the authoritative simulation."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "axiom_netplay_ffi"
+# cdylib: a native shared library (.dll/.so/.dylib) the .NET host P/Invokes into.
+# rlib too so the safe inner Session has ordinary unit tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Embeds the engine umbrella (the `App`/`RunningApp`) natively — the same engine
+# the browser runs in wasm, here compiled native and driven headlessly as the
+# authority. An app may depend on the engine module.
+axiom = { path = "../../modules/axiom" }
+# The canonical wire codec, exposed across the C ABI so the .NET host has ONE
+# source of truth for the protocol (no hand-written C# twin). An app may depend
+# on multiple modules.
+axiom-net-protocol = { path = "../../modules/axiom-net-protocol" }
+
+[lints.rust]
+# The FFI boundary needs `unsafe` (extern "C" + raw pointers). This is an app at
+# the platform edge, not engine spine; the unsafe is confined to thin wrappers
+# over a safe, unit-tested inner Session.
+unsafe_code = "allow"
+missing_debug_implementations = "warn"

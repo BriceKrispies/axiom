@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -65,6 +71,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-client-core"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-crypto"
 version = "0.1.0"
 dependencies = [
@@ -99,17 +112,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-dev-reload"
+version = "0.1.0"
+dependencies = [
+ "tiny_http",
+]
+
+[[package]]
 name = "axiom-retro-fps-browser"
 version = "0.1.0"
 dependencies = [
  "axiom",
  "axiom-windowing",
+ "bytemuck",
  "console_error_panic_hook",
+ "js-sys",
+ "png",
+ "pollster",
  "serde",
  "serde_json",
  "tiny_http",
+ "tungstenite",
  "wasm-bindgen",
  "web-sys",
+ "wgpu",
 ]
 
 [[package]]
@@ -131,6 +157,19 @@ dependencies = [
  "axiom-kernel",
  "axiom-runtime",
  "axiom-zones",
+]
+
+[[package]]
+name = "axiom-growth"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -164,6 +203,13 @@ dependencies = [
  "axiom-kernel",
  "axiom-runtime",
  "axiom-zones",
+]
+
+[[package]]
+name = "axiom-net-protocol"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
 ]
 
 [[package]]
@@ -208,14 +254,38 @@ name = "axiom-netplay-browser"
 version = "0.1.0"
 dependencies = [
  "axiom",
- "axiom-crypto",
- "axiom-netcode",
  "axiom-windowing",
  "console_error_panic_hook",
- "getrandom",
- "js-sys",
  "wasm-bindgen",
- "web-sys",
+]
+
+[[package]]
+name = "axiom-netplay-ffi"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-net-protocol",
+]
+
+[[package]]
+name = "axiom-netplay-server"
+version = "0.1.0"
+dependencies = [
+ "axiom-net-protocol",
+ "futures-util",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
+name = "axiom-profile-runner"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-render",
+ "axiom-runtime",
+ "axiom-scene",
 ]
 
 [[package]]
@@ -483,6 +553,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32fast"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -591,10 +670,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "fdeflate"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
+dependencies = [
+ "simd-adler32",
+]
+
+[[package]]
 name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+
+[[package]]
+name = "flate2"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide",
+]
 
 [[package]]
 name = "foldhash"
@@ -677,10 +775,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "wasi",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -974,6 +1070,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "miniz_oxide"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
+dependencies = [
+ "adler2",
+ "simd-adler32",
+]
+
+[[package]]
 name = "mio"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1102,6 +1208,25 @@ name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+
+[[package]]
+name = "png"
+version = "0.17.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82151a2fc869e011c153adc57cf2789ccb8d9906ce52c0b39a6b5697749d7526"
+dependencies = [
+ "bitflags 1.3.2",
+ "crc32fast",
+ "fdeflate",
+ "flate2",
+ "miniz_oxide",
+]
+
+[[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "portable-atomic"
@@ -1349,6 +1474,12 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "rand_core",
 ]
+
+[[package]]
+name = "simd-adler32"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
 
 [[package]]
 name = "slab"

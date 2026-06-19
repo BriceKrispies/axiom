@@ -1,0 +1,19 @@
+[package]
+name = "axiom-dev-reload"
+description = "Repo tooling: a tiny native dev server for the retro FPS browser app. Serves the app's static web files and pushes the contents of a watched level file to connected browsers over Server-Sent Events whenever the file changes, powering live hot-reload. Outside the engine graph and the coverage gate (a Tool, by its tools/ location). Native only; depends on nothing engine — just tiny_http and std."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-dev-reload"
+path = "src/main.rs"
+
+[dependencies]
+# The only dependency: a tiny blocking HTTP server (no async runtime). Everything
+# else — file watching, SSE encoding, threading — is std.
+tiny_http = "0.12"
+
+[lints.rust]
+unsafe_code = "forbid"

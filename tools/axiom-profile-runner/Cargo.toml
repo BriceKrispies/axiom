@@ -1,0 +1,24 @@
+[package]
+name = "axiom-profile-runner"
+description = "Repo tooling: the first native CPU profiling vertical slice. Drives a deterministic native stress scenario over the public engine facades (runtime, scene, math, render) and reports wall-clock CPU time per named phase as JSON + Markdown. Outside the engine graph and the coverage gate (a Tool, by its tools/ location). Native only; no browser/WASM/GPU work."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-profile-runner"
+path = "src/main.rs"
+
+[dependencies]
+# Public engine facades the stress scenario composes. A tool may depend on any
+# layer or module (tools sit outside the engine graph); it composes them the
+# way an app would, but its purpose — wall-clock measurement — makes it tooling.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-scene = { path = "../../modules/axiom-scene" }
+axiom-render = { path = "../../modules/axiom-render" }
+
+[lints.rust]
+unsafe_code = "forbid"

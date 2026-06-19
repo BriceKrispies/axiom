@@ -1,0 +1,29 @@
+# Axiom app manifest — axiom-growth.
+#
+# Growth is the procedural-planet survival game described by
+# docs/growth-port/worldgen_simulator_requirements_audit.md. It is built as an
+# app (a composition leaf) on purpose: apps are exempt from the branchless and
+# 100%-coverage gates, so the worldgen/streaming/gameplay substrate can be built
+# here first and graduate proven primitives down into layers/modules later.
+#
+# It depends on the kernel and math layers (deterministic primitives and
+# geometry) for worldgen, and on two modules for the in-browser terrain viewer:
+# the `axiom` umbrella (`engine`) for the App/scene/camera authoring vocabulary
+# and the live wgpu backend, and `windowing` for the wasm32 presentation loop
+# (the viewer drives its own per-tick first-person input each frame, so it calls
+# `WindowingApi::run_web` directly rather than `App::run`). The viewer is the
+# wasm-only `web` arm; native builds use only the worldgen library.
+
+[app]
+name = "growth"
+crate_name = "axiom-growth"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = [
+    "engine",
+    "windowing",
+]
