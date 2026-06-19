@@ -54,6 +54,9 @@ BROWSER_ARGS = [
     "--enable-unsafe-webgpu",
     "--enable-features=Vulkan",
     "--use-gl=angle",
+    # Expose real local IPs in WebRTC ICE (default Chromium hides them behind
+    # mDNS .local names, which a same-host native peer can't resolve on loopback).
+    "--disable-features=WebRtcHideLocalIpsWithMdns",
 ]
 
 

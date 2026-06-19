@@ -14,9 +14,11 @@ change, commit it on `main` and push it to `origin/main`.
 
 This is only safe because `main` is protected by the gates that run on every
 commit: the architecture checker (the Layer Law and Module Law), the 100%
-coverage gate, and the lint ratchet. `main` is always green, always fully
-covered, and always structurally legal — those invariants are what let work
-land on `main` without a review branch. Do not push a commit that breaks them.
+coverage gate, the lint ratchet, and the `engine_no_branching` hard-ban gate
+(the Branchless Law). `main` is always green, always fully covered, always
+structurally legal, and always branchless across the spine — those invariants
+are what let work land on `main` without a review branch. Do not push a commit
+that breaks them.
 
 ## No Shortcuts — Fix Problems Structurally
 
@@ -621,6 +623,71 @@ Avoid:
 * side effects that are not visible in the API
 
 If nondeterminism is required, isolate it behind an explicit boundary and explain why it exists.
+
+## The Axiom Branchless Law
+
+> **Axiom's engine spine is branchless. Non-test code in every layer
+> (`crates/*`) and module (`modules/*`) contains zero control-flow
+> branching — no `if`/`else`, no `match`, no `for`/`while`/`loop`, no `&&`/`||`
+> short-circuits, no `?` desugaring, no `if let`/`while let`. This is an
+> invariant, on the same footing as the Layer Law, the Module Law, and the
+> Coverage Law.**
+
+This is **mechanically enforced** by the `engine_no_branching` dylint
+(`tools/lints/`) as a hard-ban gate with a **baseline of 0**: any branch in
+non-test spine code fails the lint, which fails the gate. It is not a ratchet
+toward zero — the spine is *at* zero and stays there. As of 2026-06-17 every
+layer and module is branchless; the milestone and method are recorded in
+[`docs/unbranching.md`](docs/unbranching.md).
+
+### Why branchless
+
+Branchless code is a forcing function for the rest of the architecture.
+Expressing logic as data transforms (iterator adapters, combinator chains,
+arithmetic/table selection) instead of hand-written control flow makes behavior
+flatter, more uniform, easier to make deterministic and replayable, and easier
+for a future agent to read cold. A branch is often a symptom: a data contract
+that should have carried its own discriminant, a lower layer that only offered a
+branchy API, an early-exit that should have been an iterator combinator. Removing
+the branch usually means fixing that deeper shape — which is exactly the
+No-Shortcuts rule applied to control flow.
+
+### What "branchless" means in practice
+
+* **Conditional value** → `cond.then_some(a).unwrap_or(b)`, table index
+  `[b, a][usize::from(cond)]`, or arithmetic, not `if`/`else`.
+* **Conditional side effect** → `cond.then(|| stmt);`, not `if cond { stmt }`.
+* **Iteration** → `for_each`/`map`/`fold`/`find`/`any`/`all`/`try_fold` and
+  other iterator adapters, not `for`/`while` with hand-rolled accumulation or
+  early-exit.
+* **`Option`/`Result` flow** → `map`/`and_then`/`map_or`/`ok_or` chains, not
+  `if let`, `match`, or `?`.
+* **Boolean combination** (RHS pure and always safe to evaluate) → `&`/`|`, not
+  `&&`/`||`. Never collapse a *guard* (`i < len && buf[i] == 0`) this way — keep
+  it as a combinator (`buf.get(i)…`).
+
+The full recipe catalog lives in `docs/unbranching.md`.
+
+### Branches are not "removed" by pushing them somewhere illegal
+
+The fix for a branch is a branchless rewrite *or* a structural change at the
+lowest correct layer (add a branchless primitive to the layer that only offered a
+branchy API; reshape a data contract so an enum carries its kind as a field
+instead of forcing a `match`). It is **never**: moving spine logic into an app to
+dodge the gate, an `#[escape_hatch]` used to silence rather than document a
+genuine exception, or contorting code past readability or other gates. If a
+branch genuinely cannot be removed without harming the design, that is a design
+signal — raise it and reshape, exactly as with the Coverage Law.
+
+### Scope, and the `#[strict]` zone
+
+The invariant covers the reusable spine — every layer and module. **Apps**
+(`apps/`) and **tooling** (`xtask`, `tools/`) are outside it: like the Coverage
+Law, the gate is scoped at the app/tooling edge, and the few remaining branches
+there are tracked in `docs/unbranching.md`. Tests are exempt and keep their
+branches — never rewrite a test to satisfy this lint. The `#[strict]` zone marker
+(see "Zone markers") labels code that is held to the branchless/primitive
+discipline.
 
 ## The Axiom Coverage Law
 

@@ -1,0 +1,12 @@
+# Keep the build context lean for the netplay container build (context = repo root).
+# NOTE: deliberately does NOT exclude apps/*/web/pkg or web/vendor — the server
+# serves those built assets.
+.git/
+target/
+**/node_modules/
+**/obj/
+examples/**/bin/
+packages/**/dist/
+scripts/.playwright-controller/
+dist/
+*.log

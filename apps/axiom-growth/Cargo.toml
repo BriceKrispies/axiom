@@ -1,0 +1,49 @@
+[package]
+name = "axiom-growth"
+description = "Growth: a deterministic procedural-planet survival game built as an Axiom app. Implements the worldgen/overworld/simulator requirements audit (docs/growth-port/worldgen_simulator_requirements_audit.md). Apps are composition leaves and are exempt from the branchless and 100%-coverage spine gates, so this is where the game lives until primitives graduate into layers/modules."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# `cdylib` for the wasm browser viewer (the `web` module's `#[wasm_bindgen]`
+# entry); `rlib` so the native test suite and the worldgen library API still
+# build and link as before.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+# The one engine crate an app imports for presentation: App/Window/Mesh/Material/
+# Camera/Controller/FirstPersonInput/Renderable/DirectionalLight all arrive
+# through the umbrella prelude. Used only by the wasm `web` arm, but a normal dep
+# so the crate-type = cdylib library links it; native builds simply never call
+# into the wasm-gated `run_web` path.
+axiom = { path = "../../modules/axiom" }
+
+# Browser entry only: the live presentation loop (axiom-windowing drives our own
+# per-tick first-person input each frame, which App::run does not), the
+# wasm-bindgen glue, a panic hook, and the DOM the viewer binds to. Confined to
+# wasm32, so native `cargo test --workspace` never compiles them.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageData",
+    "KeyboardEvent",
+    "MouseEvent",
+    "console",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

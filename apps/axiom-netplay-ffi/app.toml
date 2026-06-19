@@ -1,0 +1,20 @@
+# Axiom app manifest — axiom-netplay-ffi.
+#
+# A C-ABI shared library that embeds the REAL Axiom engine for an external host
+# (the .NET netplay server in examples/axiom-netplay-dotnet). It composes the
+# `engine` module (the umbrella `App`) and exposes the engine's authoritative,
+# headless per-frame output across a C boundary. The host owns the socket and
+# the protocol; this owns the simulation. It is a leaf composition root (an app),
+# depended on only by the external .NET process (not a Cargo crate), never by
+# engine code.
+
+[app]
+name = "netplay-ffi"
+crate_name = "axiom-netplay-ffi"
+
+allowed_layers = []
+
+allowed_modules = [
+    "engine",
+    "net-protocol",
+]

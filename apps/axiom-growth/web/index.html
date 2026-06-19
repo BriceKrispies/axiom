@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Growth</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: #15171c;
+        color: #d7dbe2;
+      }
+      h1 { font-size: 18px; font-weight: 650; margin: 0; }
+      .panel {
+        background: #1c1f26;
+        border: 1px solid #2a2e36;
+        border-radius: 10px;
+        padding: 18px 20px;
+      }
+      /* Each screen is a section; only one is shown at a time. */
+      .screen { display: none; flex-direction: column; align-items: center; gap: 12px; }
+      .screen.active { display: flex; }
+
+      /* --- CONFIG form --- */
+      form#config { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: center; min-width: 360px; }
+      form#config label { justify-self: end; color: #aab2c0; }
+      form#config input[type="text"], form#config select {
+        background: #0f1116; color: #e6e9ef; border: 1px solid #353a45;
+        border-radius: 6px; padding: 7px 9px; font: inherit; width: 100%;
+      }
+      .rowspan { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; }
+      .rowspan output { font-family: ui-monospace, monospace; color: #9fd1ff; min-width: 90px; text-align: right; }
+      button {
+        background: #2f6df0; color: #fff; border: 0; border-radius: 7px;
+        padding: 9px 18px; font: 600 14px system-ui; cursor: pointer;
+      }
+      button:hover { background: #3b79ff; }
+      button.ghost { background: #2a2e36; }
+      button.ghost:hover { background: #353b46; }
+
+      /* --- OVERWORLD map --- */
+      #axiom-growth-map {
+        image-rendering: pixelated;
+        width: 720px; max-width: 100%; height: auto; aspect-ratio: 2 / 1;
+        border: 1px solid #2a2e36; border-radius: 6px; background: #07101e;
+        cursor: crosshair;
+      }
+
+      /* --- first-person canvas --- */
+      #axiom-growth-canvas {
+        width: 960px; height: 600px; max-width: 100%;
+        border: 1px solid #2a2e36; border-radius: 6px; background: #000;
+        touch-action: none;
+      }
+      .hint { color: #9aa3b2; font-size: 13px; }
+      #status { font-family: ui-monospace, monospace; white-space: pre; min-height: 1.4em; }
+      .ok { color: #7fd17f; }
+      .err { color: #e07a7a; }
+      .controls { display: flex; gap: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — Growth</h1>
+
+    <!-- (A) CONFIG -->
+    <section id="screen-config" class="screen active">
+      <div class="panel">
+        <form id="config">
+          <label for="seed">Seed</label>
+          <input type="text" id="seed" value="growth-browser-viewer" />
+
+          <label for="preset">Preset</label>
+          <select id="preset">
+            <option value="earthlike">Earthlike</option>
+            <option value="ocean">Ocean World</option>
+            <option value="dry">Dry</option>
+          </select>
+
+          <label for="detail">Detail</label>
+          <div class="rowspan">
+            <input type="range" id="detail" min="256" max="40960" step="256" value="4096" style="flex:1" />
+            <output id="detail-out">4096 sites</output>
+          </div>
+
+          <div class="rowspan" style="justify-content:flex-end">
+            <button type="submit" id="generate">Generate planet</button>
+          </div>
+        </form>
+      </div>
+      <div class="hint">Generate a planet, then pick a spot on the world map to drop in.</div>
+    </section>
+
+    <!-- (B/C) OVERWORLD map + pick -->
+    <section id="screen-map" class="screen">
+      <canvas id="axiom-growth-map" width="720" height="360"></canvas>
+      <div class="hint">Click a <strong>land</strong> location to descend there · ocean clicks are rejected</div>
+      <div class="controls">
+        <button class="ghost" id="back-to-config">← New planet</button>
+      </div>
+    </section>
+
+    <!-- (D) first-person walkable view -->
+    <section id="screen-play" class="screen">
+      <canvas id="axiom-growth-canvas" width="960" height="600"></canvas>
+      <div class="hint">Click the canvas to capture the mouse · WASD / arrows to move · mouse to look · Esc to release</div>
+      <div class="controls">
+        <button class="ghost" id="back-to-map">← Back to map</button>
+      </div>
+    </section>
+
+    <div id="status">booting…</div>
+
+    <script type="module">
+      // Cache-bust both the JS glue and the wasm binary on every load.
+      const v = Date.now();
+      const { default: init, generate, is_land, descend } =
+        await import(`./pkg/axiom_growth.js?v=${v}`);
+      const wasmUrl = new URL(`./pkg/axiom_growth_bg.wasm?v=${v}`, import.meta.url);
+
+      const status = document.getElementById("status");
+      const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
+      const show = (id) => {
+        for (const s of document.querySelectorAll(".screen")) s.classList.remove("active");
+        document.getElementById(id).classList.add("active");
+      };
+
+      if (!("gpu" in navigator)) {
+        set("WebGPU is not available. Use a recent Chrome/Edge (or Firefox Nightly) over http://localhost.", "err");
+      }
+
+      try {
+        await init({ module_or_path: wasmUrl });
+      } catch (e) {
+        set("Startup failed: " + e, "err");
+        throw e;
+      }
+      set("Ready. Configure a planet and press Generate.", "ok");
+
+      const detail = document.getElementById("detail");
+      const detailOut = document.getElementById("detail-out");
+      const syncDetail = () => { detailOut.textContent = `${detail.value} sites`; };
+      detail.addEventListener("input", syncDetail);
+      syncDetail();
+
+      // (A) Generate → render overworld map → show map screen.
+      document.getElementById("config").addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        const seed = document.getElementById("seed").value || "growth";
+        const preset = document.getElementById("preset").value;
+        const sites = parseInt(detail.value, 10) || 4096;
+        set("Generating planet… (this may take a moment for high detail)");
+        // Defer so the status paints before the synchronous worldgen runs.
+        setTimeout(() => {
+          try {
+            generate(seed, preset, sites);
+            show("screen-map");
+            set("Planet generated. Click a land spot on the map to descend.", "ok");
+          } catch (e) {
+            set("Generate failed: " + e, "err");
+            throw e;
+          }
+        }, 30);
+      });
+
+      // (C) Pick a spot on the map → reject ocean, else (D) descend.
+      const mapCanvas = document.getElementById("axiom-growth-map");
+      let descended = false;
+      mapCanvas.addEventListener("click", (ev) => {
+        const rect = mapCanvas.getBoundingClientRect();
+        const u = (ev.clientX - rect.left) / rect.width;   // 0..1 left→right
+        const vv = (ev.clientY - rect.top) / rect.height;  // 0..1 top→bottom
+        if (!is_land(u, vv)) {
+          set("That's ocean — pick a land location (lighter terrain).", "err");
+          return;
+        }
+        show("screen-play");
+        set("Descending… click the canvas to capture the mouse, then walk with WASD.", "ok");
+        // The windowing loop never returns (it owns requestAnimationFrame), so
+        // run it after the screen swap paints. Only ever start it once.
+        setTimeout(() => {
+          if (descended) return;
+          descended = true;
+          try {
+            descend(u, vv);
+          } catch (e) {
+            set("Descend failed: " + e, "err");
+            throw e;
+          }
+        }, 30);
+      });
+
+      document.getElementById("back-to-config").addEventListener("click", () => {
+        show("screen-config");
+        set("Configure a planet and press Generate.", "ok");
+      });
+      // Back-to-map only re-shows the map (the GPU loop keeps running under it);
+      // a fresh descent requires regenerating, since the windowing loop is
+      // single-shot per page load.
+      document.getElementById("back-to-map").addEventListener("click", () => {
+        show("screen-map");
+        set("Pick another land spot, or start a new planet.", "ok");
+      });
+    </script>
+  </body>
+</html>

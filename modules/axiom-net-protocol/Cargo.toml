@@ -1,0 +1,27 @@
+[package]
+name = "axiom-net-protocol"
+description = "Axiom engine module: the stable, deterministic multiplayer wire/message contract. Protocol data only — versioned little-endian frames for the client↔server messages (JoinRoom, LeaveRoom, ClientIntent, Welcome, ServerSnapshot, ServerEvent, RejectedIntent), with bounded opaque payloads. No sockets, no browser APIs; the transport lives at the app/package edge."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. This module is *protocol data only*: it encodes/decodes the
+# stable wire contract and validates its fields. It opens no socket and touches
+# no platform API — the app (native) and the TypeScript package (browser) own
+# the transport.
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module"): it composes NO other module
+# (allowed_modules = []). It builds only on the kernel's deterministic
+# primitives — the binary writer/reader + schema version for the wire codec,
+# the result/error model for validation failures, and HandleId / FixedStep for
+# the two validated numeric fields (client id must be nonzero; fixed step must
+# be nonzero).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

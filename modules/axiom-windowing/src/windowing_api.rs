@@ -187,10 +187,25 @@ impl WindowingApi {
         }
     }
 
+    /// Replace the live binding's uploaded geometry mid-loop (recreate its
+    /// vertex + index buffers from a freshly-built mesh and update the index
+    /// count). wasm32 only, and a no-op when no live binding is initialised —
+    /// the `Option` is consumed with `iter_mut().for_each` (a combinator, not an
+    /// `if let`) so the streaming arm stays branchless in shape. The streaming
+    /// run loop calls this before [`Self::present_frame`] on the frames that
+    /// carry new geometry, sliding the terrain window without rebinding.
+    #[cfg(target_arch = "wasm32")]
+    pub fn replace_live_geometry(&mut self, vertices: &[f32], indices: &[u32]) {
+        self.live
+            .iter_mut()
+            .for_each(|live| live.replace_geometry(vertices, indices));
+    }
+
     /// Initialise the real wgpu binding from a canvas and the engine's cube
-    /// geometry (interleaved position+normal `vertices`, triangle-list
-    /// `indices`). wasm32 only; on success later [`Self::present_frame`] calls
-    /// draw real pixels. On failure the binding stays absent (not ready).
+    /// geometry (interleaved position+normal+colour `vertices`, 10 floats/vertex,
+    /// triangle-list `indices`). wasm32 only; on success later
+    /// [`Self::present_frame`] calls draw real pixels. On failure the binding
+    /// stays absent (not ready).
     #[cfg(target_arch = "wasm32")]
     pub async fn initialize_live(
         &mut self,
@@ -219,7 +234,8 @@ impl WindowingApi {
     }
 
     /// Drive the terminal web run loop. Initialise the live binding from the
-    /// canvas (looked up by id) and the engine's cube geometry, then present one
+    /// canvas (looked up by id) and the engine's geometry (interleaved
+    /// position+normal+colour `vertices`, 10 floats/vertex), then present one
     /// frame per `requestAnimationFrame`: each frame the loop owns the monotonic
     /// tick ([`Self::step`]), hands it to `frame_fn`, and presents the plain
     /// draw data it returns — `(clear_color, [mvp(16), colour(4)] per cube,
@@ -261,6 +277,74 @@ impl WindowingApi {
             *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
                 let tick = win.borrow_mut().step();
                 let (clear, instances, count) = (ff.borrow_mut())(tick);
+                let _ = win.borrow().present_frame(clear, &instances, count);
+                let next = f.borrow();
+                if let Some(cb) = next.as_ref() {
+                    let _ = request_animation_frame(cb);
+                }
+            }) as Box<dyn FnMut()>));
+            let initial = g.borrow();
+            if let Some(cb) = initial.as_ref() {
+                let _ = request_animation_frame(cb);
+            }
+        });
+        Ok(())
+    }
+
+    /// Drive the terminal web run loop **with streaming geometry**. Identical to
+    /// [`Self::run_web`] except the per-frame closure ALSO returns optional new
+    /// geometry: `(clear_color, [mvp(16), colour(4)] per cube, count,
+    /// Option<(vertices, indices)>)`. On the frames where it returns `Some`, the
+    /// live binding's vertex + index buffers are replaced *before* drawing that
+    /// frame (via [`Self::replace_live_geometry`]), so the uploaded mesh follows
+    /// the player while the camera stays continuous in world space. The new
+    /// geometry is interleaved position+normal+colour (10 floats/vertex), the
+    /// same layout `vertices` uses. wasm32 only; consumes the driver into the
+    /// loop. `run_web`'s own signature is left untouched, so its other callers
+    /// are unaffected. If init fails, nothing presents (the loop never starts).
+    #[cfg(target_arch = "wasm32")]
+    pub fn run_web_streaming<F>(
+        self,
+        canvas_id: &str,
+        vertices: Vec<f32>,
+        indices: Vec<u32>,
+        max_instances: u32,
+        frame_fn: F,
+    ) -> Result<(), wasm_bindgen::JsValue>
+    where
+        F: FnMut(u64) -> ([f32; 4], Vec<f32>, u32, Option<(Vec<f32>, Vec<u32>)>) + 'static,
+    {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::closure::Closure;
+
+        let canvas = find_canvas(canvas_id)?;
+        let frame_fn = Rc::new(RefCell::new(frame_fn));
+        let mut windowing = self;
+
+        wasm_bindgen_futures::spawn_local(async move {
+            if windowing
+                .initialize_live(canvas, &vertices, &indices, max_instances)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let windowing = Rc::new(RefCell::new(windowing));
+            let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
+            let g = f.clone();
+            let win = windowing.clone();
+            let ff = frame_fn.clone();
+            *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+                let tick = win.borrow_mut().step();
+                let (clear, instances, count, new_geometry) = (ff.borrow_mut())(tick);
+                // Slide the uploaded mesh on the frames that carry new geometry.
+                // The `Option` is consumed with `into_iter().for_each` (a
+                // combinator, not `if let`/`match`), so this stays branchless in
+                // shape; an empty option simply iterates zero times.
+                new_geometry.into_iter().for_each(|(v, i)| {
+                    win.borrow_mut().replace_live_geometry(&v, &i);
+                });
                 let _ = win.borrow().present_frame(clear, &instances, count);
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {

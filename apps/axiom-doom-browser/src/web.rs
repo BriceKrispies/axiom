@@ -10,12 +10,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use axiom::prelude::FrameOutcome;
 use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Element, KeyboardEvent, MouseEvent};
+use web_sys::{Element, EventSource, KeyboardEvent, MessageEvent, MouseEvent, WebSocket};
 
-use super::{build_doom_app, DoomGame, Intent, CANVAS_ID};
+use crate::level::LevelDoc;
+use super::{build_doom_app, reload_doom, DoomGame, Hud as GameHud, Intent, CANVAS_ID};
 
 /// Radians of look per pixel of mouse movement.
 const MOUSE_SENSITIVITY: f32 = 0.0025;
@@ -55,6 +57,17 @@ struct Look {
     pitch: f32,
 }
 
+/// The held input an external agent is driving over the bridge WebSocket, plus a
+/// one-shot request to attach a rendered image to the next observation. Merged
+/// into the per-frame intent so the agent and a local player can both drive.
+#[derive(Default, Clone, Copy)]
+struct Remote {
+    keys: Keys,
+    yaw: f32,
+    pitch: f32,
+    render_once: bool,
+}
+
 /// Log a line to the browser console, prefixed so the demo is easy to spot.
 fn log(msg: &str) {
     web_sys::console::log_1(&JsValue::from_str(&format!("[doom] {msg}")));
@@ -78,12 +91,25 @@ pub fn start() {
     install_mouse_look(&look);
     install_mouse_fire(&keys);
 
+    // Optional external-agent bridge: `?agent=ws://host:port` opens a control
+    // socket whose held input is merged into each frame and whose observations
+    // (HUD + frame hash, plus a canvas snapshot on request) are streamed back.
+    let remote = install_agent_bridge();
+
+    // Subscribe to live level edits (served over SSE by `axiom-dev-reload`); each
+    // saved `level.axiom` lands in this slot and is applied at the next frame.
+    let pending_level = install_level_reload();
+
     let hud = Hud::mount();
 
-    let mut game = DoomGame::new();
-    let mut running = build_doom_app();
+    let doc = LevelDoc::default();
+    let mut game = DoomGame::from_level(&doc);
+    let mut running = build_doom_app(&doc);
     let (vertices, indices) = running.mesh_vertex_stream();
-    let max_instances = running.renderable_count() as u32;
+    // Size the live backend's per-instance buffer to the grid's capacity (not the
+    // current renderable count), so a reload can add walls/enemies up to the full
+    // grid without exceeding the buffer.
+    let max_instances = doc.grid_capacity() as u32;
 
     let mut windowing = WindowingApi::new();
     windowing
@@ -97,6 +123,17 @@ pub fn start() {
         indices,
         max_instances,
         move |_raf_tick| {
+            // Apply a pending level edit at this tick boundary: rebuild the game
+            // and re-author the engine scene in place. The engine tick keeps
+            // counting (the host driver requires a monotone sequence); only the
+            // game and scene contents reset to the new document.
+            if let Some(text) = pending_level.borrow_mut().take() {
+                let new_doc = LevelDoc::parse(&text);
+                game = DoomGame::from_level(&new_doc);
+                reload_doom(&mut running, &new_doc);
+                log("level reloaded from edit");
+            }
+
             // Fold this frame's accumulated mouse-look into the held-key intent,
             // then reset the accumulator.
             let mut intent = keys.borrow().intent();
@@ -106,10 +143,20 @@ pub fn start() {
                 intent.look_pitch = l.pitch;
                 *l = Look::default();
             }
+            // Merge any agent-driven held input on top.
+            let render_now = remote
+                .as_ref()
+                .map(|r| merge_remote(&mut intent, &r.borrow()))
+                .unwrap_or(false);
+
             let commands = game.step(intent);
             let outcome = running.tick_with_controls(tick, &commands.enemies, &[commands.control]);
             tick += 1;
             hud.update(&commands.hud);
+
+            if let Some(r) = &remote {
+                send_observation(r, tick, &commands.hud, &outcome, render_now);
+            }
             (
                 outcome.clear_color(),
                 outcome.instance_floats(),
@@ -117,6 +164,196 @@ pub fn start() {
             )
         },
     );
+}
+
+/// Subscribe to live level edits over Server-Sent Events. The `axiom-dev-reload`
+/// dev server pushes the full contents of `level.axiom` on `/events` whenever the
+/// file changes; each message lands in the returned slot, which the frame loop
+/// drains and applies. If no `/events` endpoint is reachable (e.g. served by a
+/// plain static server), the slot simply never fills and the demo runs the
+/// built-in level — hot-reload is a dev convenience, never required.
+fn install_level_reload() -> Rc<RefCell<Option<String>>> {
+    let pending = Rc::new(RefCell::new(None::<String>));
+    match EventSource::new("/events") {
+        Ok(es) => {
+            let sink = pending.clone();
+            let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
+                if let Some(text) = e.data().as_string() {
+                    *sink.borrow_mut() = Some(text);
+                }
+            });
+            es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+            on_message.forget();
+            // Keep the EventSource alive for the lifetime of the page.
+            std::mem::forget(es);
+            log("level hot-reload: subscribed to /events");
+        }
+        Err(_) => log("level hot-reload unavailable (no /events endpoint)"),
+    }
+    pending
+}
+
+/// Merge the agent's held input into `intent`; returns whether a snapshot was
+/// requested for this frame's observation.
+fn merge_remote(intent: &mut Intent, remote: &Remote) -> bool {
+    intent.forward |= remote.keys.forward;
+    intent.backward |= remote.keys.backward;
+    intent.turn_left |= remote.keys.turn_left;
+    intent.turn_right |= remote.keys.turn_right;
+    intent.strafe_left |= remote.keys.strafe_left;
+    intent.strafe_right |= remote.keys.strafe_right;
+    intent.fire |= remote.keys.fire;
+    intent.look_yaw += remote.yaw;
+    intent.look_pitch += remote.pitch;
+    remote.render_once
+}
+
+/// Open the agent bridge socket if `?agent=<ws-url>` is present, wiring incoming
+/// action JSON into the shared [`Remote`] state. Returns `None` when no agent is
+/// configured (the demo then runs exactly as before).
+fn install_agent_bridge() -> Option<Rc<RefCell<Remote>>> {
+    let search = web_sys::window()?.location().search().ok()?;
+    let url = agent_url(&search)?;
+    let ws = WebSocket::new(&url).ok()?;
+    let remote = Rc::new(RefCell::new(Remote::default()));
+    let sink = remote.clone();
+    let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
+        if let Some(text) = e.data().as_string() {
+            apply_action_json(&sink, &text);
+        }
+    });
+    ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+    on_message.forget();
+    log(&format!("agent bridge connecting to {url}"));
+    // Stash the socket so the frame loop can send observations on it.
+    SOCKET.with(|s| *s.borrow_mut() = Some(ws));
+    Some(remote)
+}
+
+thread_local! {
+    /// The bridge socket (single-threaded wasm), used to send observations.
+    static SOCKET: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
+}
+
+/// Decode the `agent` query parameter (a URL-encoded ws/wss URL) from a
+/// `location.search` string, or `None` if absent.
+fn agent_url(search: &str) -> Option<String> {
+    let query = search.strip_prefix('?').unwrap_or(search);
+    let raw = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("agent="))
+        .filter(|raw| !raw.is_empty())?;
+    js_sys::decode_uri_component(raw)
+        .ok()
+        .map(String::from)
+        .filter(|url| !url.is_empty())
+}
+
+/// Apply one action JSON message into the shared remote state.
+fn apply_action_json(remote: &Rc<RefCell<Remote>>, text: &str) {
+    let Ok(value) = js_sys::JSON::parse(text) else {
+        return;
+    };
+    let mut r = Remote::default();
+    r.yaw = field_f32(&value, "yaw");
+    r.pitch = field_f32(&value, "pitch");
+    r.render_once = field_bool(&value, "render");
+    r.keys.fire = field_bool(&value, "fire");
+    if let Ok(keys) = js_sys::Reflect::get(&value, &JsValue::from_str("keys")) {
+        if let Ok(arr) = keys.dyn_into::<js_sys::Array>() {
+            arr.iter().for_each(|k| {
+                if let Some(name) = k.as_string() {
+                    set_remote_key(&mut r, &name);
+                }
+            });
+        }
+    }
+    *remote.borrow_mut() = r;
+}
+
+fn set_remote_key(r: &mut Remote, name: &str) {
+    match name {
+        "forward" | "up" => r.keys.forward = true,
+        "backward" | "back" | "down" => r.keys.backward = true,
+        "left" | "turn_left" => r.keys.turn_left = true,
+        "right" | "turn_right" => r.keys.turn_right = true,
+        "strafe_left" => r.keys.strafe_left = true,
+        "strafe_right" => r.keys.strafe_right = true,
+        "fire" => r.keys.fire = true,
+        _ => {}
+    }
+}
+
+fn field_f32(value: &JsValue, key: &str) -> f32 {
+    js_sys::Reflect::get(value, &JsValue::from_str(key))
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) as f32
+}
+
+fn field_bool(value: &JsValue, key: &str) -> bool {
+    js_sys::Reflect::get(value, &JsValue::from_str(key))
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Send one observation back to the agent: tick, HUD, draw count, a frame hash,
+/// and (when requested) a canvas-snapshot PNG data URL.
+fn send_observation(
+    remote: &Rc<RefCell<Remote>>,
+    tick: u64,
+    hud: &GameHud,
+    outcome: &FrameOutcome,
+    render: bool,
+) {
+    let hash = frame_hash(&outcome.instance_floats());
+    let image = render.then(snapshot_data_url).flatten();
+    let image_field = image
+        .map(|url| format!(",\"image\":\"{url}\""))
+        .unwrap_or_default();
+    let json = format!(
+        "{{\"tick\":{},\"hud\":{{\"hp\":{},\"score\":{},\"ammo\":{},\"enemies\":{}}},\
+         \"draw_count\":{},\"state_hash\":\"{hash}\"{image_field}}}",
+        tick,
+        hud.health.max(0),
+        hud.score,
+        hud.ammo,
+        hud.enemies_alive,
+        outcome.draws().len(),
+    );
+    if render {
+        remote.borrow_mut().render_once = false;
+    }
+    SOCKET.with(|s| {
+        if let Some(ws) = s.borrow().as_ref() {
+            let _ = ws.send_with_str(&json);
+        }
+    });
+}
+
+/// The current canvas as a PNG data URL (best effort; `None` if unavailable).
+fn snapshot_data_url() -> Option<String> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id(CANVAS_ID)?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .ok()?
+        .to_data_url()
+        .ok()
+}
+
+/// FNV-1a fingerprint of the packed instance floats — the same scheme the native
+/// agent uses, so a frame has one stable hash.
+fn frame_hash(floats: &[f32]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for f in floats {
+        for b in f.to_le_bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{h:016x}")
 }
 
 /// Map a key's pressed state into the shared key set. Matches on `key` (not

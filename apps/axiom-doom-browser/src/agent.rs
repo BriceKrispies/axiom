@@ -12,9 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{build_doom_app, DoomGame, Intent};
 
-#[cfg(feature = "agent-render")]
-mod render;
-
 /// One action from the agent: hold these `keys` this step, apply a mouse-look
 /// `yaw`/`pitch` delta, optionally `fire`, advance `steps` ticks, and optionally
 /// `render` an image. All fields default, so `{}` is a valid idle step.
@@ -102,6 +99,7 @@ fn frame_hash(floats: &[f32]) -> String {
 /// A live agent session: the real DOOM game plus its engine app, driven one
 /// action at a time. The agent's authority is identical to the browser's — same
 /// `DoomGame::step` → `tick_with_controls` path as `web.rs`.
+#[derive(Debug)]
 pub struct AgentSession {
     game: DoomGame,
     app: RunningApp,
@@ -113,7 +111,7 @@ impl AgentSession {
     /// Start a fresh game and advance one idle tick so there is a frame to read.
     pub fn new() -> Self {
         let mut game = DoomGame::new();
-        let mut app = build_doom_app();
+        let mut app = build_doom_app(&crate::level::LevelDoc::default());
         let cmd = game.step(Intent::default());
         let last = app.tick_with_controls(0, &cmd.enemies, &[cmd.control]);
         AgentSession {
@@ -129,7 +127,8 @@ impl AgentSession {
         *self = AgentSession::new();
     }
 
-    /// Apply `action` for `steps` ticks and return the resulting observation.
+    /// Apply `action` for `steps` ticks and return the resulting observation
+    /// (structured only; the bin adds an image when asked and able).
     pub fn step(&mut self, action: &Action) -> Observation {
         let intent = action_to_intent(action);
         let steps = action.steps.unwrap_or(1).max(1);
@@ -140,13 +139,12 @@ impl AgentSession {
                 .tick_with_controls(self.tick, &cmd.enemies, &[cmd.control]);
             self.tick += 1;
         }
-        self.observe(action.render)
+        self.observe()
     }
 
-    /// The current observation without stepping.
-    pub fn observe(&self, render: bool) -> Observation {
+    /// The current structured observation (no image).
+    pub fn observe(&self) -> Observation {
         let hud = self.game.hud();
-        let image = if render { self.render_image() } else { None };
         Observation {
             tick: self.tick.saturating_sub(1),
             hud: HudView {
@@ -157,20 +155,26 @@ impl AgentSession {
             },
             draw_count: self.last.draws().len(),
             state_hash: frame_hash(&self.last.instance_floats()),
-            image,
+            image: None,
         }
     }
 
-    /// Render the current frame to a PNG and return its path. Without the
-    /// `agent-render` feature there is no renderer, so this is always `None`.
-    #[cfg(feature = "agent-render")]
-    fn render_image(&self) -> Option<String> {
-        render::render_frame(&self.app, &self.last, self.tick.saturating_sub(1))
+    /// The current tick (the last advanced).
+    pub fn tick(&self) -> u64 {
+        self.tick.saturating_sub(1)
     }
 
-    #[cfg(not(feature = "agent-render"))]
-    fn render_image(&self) -> Option<String> {
-        None
+    /// The most recent frame, for the bin's offscreen renderer.
+    pub fn frame(&self) -> &FrameOutcome {
+        &self.last
+    }
+
+    /// The cube vertex stream, its indices, and the per-frame instance capacity —
+    /// the geometry the offscreen renderer uploads. (Kept in the lib so the bin's
+    /// wgpu code, which the cdylib must not link, stays out of the lib.)
+    pub fn geometry(&self) -> (Vec<f32>, Vec<u32>, u32) {
+        let (vertices, indices) = self.app.mesh_vertex_stream();
+        (vertices, indices, self.app.renderable_count() as u32)
     }
 }
 
@@ -230,14 +234,16 @@ mod tests {
 
     #[test]
     fn firing_at_a_lined_up_enemy_raises_the_score() {
-        // Walk forward into the room and fire down the lane a few times; with
-        // enemies chasing, some shot lands and the score climbs.
+        // Spin in place and fire: the enemies chase in to melee range and the
+        // sweeping aim cone catches them, so the score climbs. (Deterministic, so
+        // the budget is fixed; kept under the ~300-tick death window so a respawn
+        // can't reset the score mid-test.)
         let mut s = AgentSession::new();
         let start = s.step(&Action::default()).hud.score;
         let mut best = start;
-        for _ in 0..240 {
+        for _ in 0..250 {
             let obs = s.step(&Action {
-                keys: vec!["forward".into()],
+                keys: vec!["left".into()],
                 fire: true,
                 ..Action::default()
             });
@@ -249,7 +255,7 @@ mod tests {
     #[test]
     fn observation_serializes_without_an_image_by_default() {
         let s = AgentSession::new();
-        let json = serde_json::to_string(&s.observe(false)).unwrap();
+        let json = serde_json::to_string(&s.observe()).unwrap();
         assert!(json.contains("state_hash"));
         assert!(!json.contains("image"), "image omitted when not rendered");
     }

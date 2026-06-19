@@ -9,6 +9,15 @@
 //! [`web`] arm captures the keyboard, drives the live windowing loop, and paints
 //! the HUD into the DOM.
 //!
+//! ## The level is a live document, not a constant
+//!
+//! The level (grid + every gameplay/visual tunable) is a [`LevelDoc`] parsed from
+//! the editable `level.axiom` document (see [`level`]). The browser arm subscribes
+//! to that document over SSE (served by the `axiom-dev-reload` dev server) and, on
+//! every save, re-authors the running engine scene in place via
+//! [`reload_doom`] — so editing a wall hot-reloads the demo with no recompile and
+//! no page reload.
+//!
 //! ## Why this needs no per-frame engine "set transform"
 //!
 //! The app is the gameplay authority and stays byte-for-byte in sync with the
@@ -20,55 +29,21 @@
 
 use axiom::prelude::*;
 
+pub mod level;
+
+use level::{LevelDoc, MapData};
+
 /// The presentation canvas element id (must match the gallery/host page).
 pub const CANVAS_ID: &str = "axiom-doom-canvas";
-
-// --- Tunables (all per-tick; the sim runs at the engine's fixed step) ---
-
-const WALL_HEIGHT: f32 = 2.0;
-const EYE: f32 = 1.0;
-const MOVE_SPEED: f32 = 0.06;
-const TURN_SPEED: f32 = 0.045;
-const ENEMY_SPEED: f32 = 0.025;
-/// Pitch clamp, mirroring the engine's controller limit so the app's tracked
-/// pitch matches the camera (lets respawn snap the view level).
-const PITCH_LIMIT: f32 = 1.5;
-const ENEMY_Y: f32 = 0.5;
-const ENEMY_SCALE: f32 = 0.7;
-/// Where a dead enemy is parked: far below the floor, out of view.
-const PARK_Y: f32 = -1000.0;
-const FIRE_RANGE: f32 = 14.0;
-/// Half-angle of the aiming cone, in radians.
-const FIRE_HALF_ANGLE: f32 = 0.18;
-const FIRE_COOLDOWN: u32 = 10;
-const CONTACT_RADIUS: f32 = 0.7;
-/// Health lost per "bite", and the cooldown (ticks) between bites while a player
-/// stays in contact — so melee drains at a fair, survivable rate.
-const CONTACT_DAMAGE: i32 = 4;
-const HURT_COOLDOWN: u32 = 12;
-const MAX_HEALTH: i32 = 100;
-const START_AMMO: u32 = 50;
-const AMMO_PER_KILL: u32 = 5;
-const KILL_SCORE: u32 = 100;
-
-/// The level. `#` wall, `.` floor, `S` player start, `E` enemy spawn. Two rooms
-/// (split by the `#` column) joined by the open doorway row.
-const MAP: &[&str] = &[
-    "##################",
-    "#.......#.......E#",
-    "#.......#........#",
-    "#...E...#....E...#",
-    "#.......#........#",
-    "#................#",
-    "#.......#........#",
-    "#...E...#........#",
-    "#S......#........#",
-    "##################",
-];
 
 /// A linear colour channel from an authored literal.
 fn ch(value: f32) -> Ratio {
     Ratio::new(value).expect("authored colour channel is finite")
+}
+
+/// A linear-RGB [`Color`] from an authored triple.
+fn color_of(rgb: [f32; 3]) -> Color {
+    Color::linear_rgb(ch(rgb[0]), ch(rgb[1]), ch(rgb[2]))
 }
 
 /// Round a world coordinate to its grid cell index (cell centres are integers).
@@ -90,42 +65,6 @@ fn map_wall_at(map: &MapData, x: f32, z: f32) -> bool {
         .and_then(|line| line.get(col))
         .copied()
         .unwrap_or(true)
-}
-
-/// The parsed level: wall grid (row-major), the player start, and enemy spawns
-/// in row-major order (so enemy `i` here is [`Player`] index `i` in the scene).
-#[derive(Debug, Clone)]
-struct MapData {
-    width: usize,
-    height: usize,
-    walls: Vec<Vec<bool>>,
-    start: (f32, f32),
-    enemy_spawns: Vec<(f32, f32)>,
-}
-
-fn parse_map() -> MapData {
-    let height = MAP.len();
-    let width = MAP[0].len();
-    let mut walls = vec![vec![false; width]; height];
-    let mut start = (1.0, 1.0);
-    let mut enemy_spawns = Vec::new();
-    MAP.iter().enumerate().for_each(|(row, line)| {
-        line.chars().enumerate().for_each(|(col, c)| {
-            // Fieldless dispatch over the four map glyphs without branching: a
-            // cell is a wall iff it is '#'; a 'S'/'E' glyph writes the start /
-            // pushes a spawn, each gated by an equality `.then(..)`.
-            walls[row][col] = c == '#';
-            (c == 'S').then(|| start = (col as f32, row as f32));
-            (c == 'E').then(|| enemy_spawns.push((col as f32, row as f32)));
-        });
-    });
-    MapData {
-        width,
-        height,
-        walls,
-        start,
-        enemy_spawns,
-    }
 }
 
 /// An enemy's commanded engine pose plus its spawn and liveness. The `x,y,z`
@@ -189,12 +128,13 @@ pub struct StepCommands {
     pub hud: Hud,
 }
 
-/// The deterministic DOOM game state and per-tick simulation. Holds the level,
-/// the player pose (position + yaw), health/score/ammo, and the enemies. It is
-/// engine-agnostic apart from the input value types it emits.
+/// The deterministic DOOM game state and per-tick simulation. Holds the level
+/// document (grid + tunables), the player pose (position + yaw), health/score/
+/// ammo, and the enemies. It is engine-agnostic apart from the input value types
+/// it emits.
 #[derive(Debug, Clone)]
 pub struct DoomGame {
-    map: MapData,
+    level: LevelDoc,
     px: f32,
     pz: f32,
     yaw: f32,
@@ -208,32 +148,39 @@ pub struct DoomGame {
 }
 
 impl DoomGame {
-    /// Start a fresh game from the built-in level.
+    /// Start a fresh game from the built-in level document.
     pub fn new() -> Self {
-        let map = parse_map();
-        let enemies = map
+        Self::from_level(&LevelDoc::default())
+    }
+
+    /// Start a fresh game from a level document — the player at its start, full
+    /// health/ammo, and one live enemy per spawn (in row-major order, so enemy
+    /// `i` is [`Player`] index `i` in the scene).
+    pub fn from_level(doc: &LevelDoc) -> Self {
+        let enemies = doc
+            .map
             .enemy_spawns
             .iter()
             .map(|&(x, z)| Enemy {
                 x,
-                y: ENEMY_Y,
+                y: doc.tun.enemy_y,
                 z,
                 spawn: (x, z),
                 alive: true,
             })
             .collect();
         DoomGame {
-            px: map.start.0,
-            pz: map.start.1,
+            px: doc.map.start.0,
+            pz: doc.map.start.1,
             yaw: 0.0,
             pitch: 0.0,
-            health: MAX_HEALTH,
+            health: doc.tun.max_health,
             score: 0,
-            ammo: START_AMMO,
+            ammo: doc.tun.start_ammo,
             fire_cd: 0,
             hurt_cd: 0,
             enemies,
-            map,
+            level: doc.clone(),
         }
     }
 
@@ -249,7 +196,7 @@ impl DoomGame {
 
     /// Is the world cell containing `(x, z)` a wall (or out of bounds)?
     fn is_wall(&self, x: f32, z: f32) -> bool {
-        map_wall_at(&self.map, x, z)
+        map_wall_at(&self.level.map, x, z)
     }
 
     /// Is the straight segment from the player to `(tx, tz)` free of walls? A
@@ -280,16 +227,18 @@ impl DoomGame {
     fn live_step(&mut self, intent: Intent) -> StepCommands {
         self.fire_cd = self.fire_cd.saturating_sub(1);
         self.hurt_cd = self.hurt_cd.saturating_sub(1);
+        let tun = self.level.tun;
 
         // 1. Look: keypad/key turn plus mouse yaw; mouse pitch (clamped). Then
         //    move relative to the new yaw.
-        let yaw_delta =
-            (intent.turn_left as i32 - intent.turn_right as i32) as f32 * TURN_SPEED + intent.look_yaw;
+        let yaw_delta = (intent.turn_left as i32 - intent.turn_right as i32) as f32
+            * tun.turn_speed
+            + intent.look_yaw;
         let pitch_delta = intent.look_pitch;
         self.yaw += yaw_delta;
-        self.pitch = (self.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-        let forward = (intent.forward as i32 - intent.backward as i32) as f32 * MOVE_SPEED;
-        let strafe = (intent.strafe_right as i32 - intent.strafe_left as i32) as f32 * MOVE_SPEED;
+        self.pitch = (self.pitch + pitch_delta).clamp(-tun.pitch_limit, tun.pitch_limit);
+        let forward = (intent.forward as i32 - intent.backward as i32) as f32 * tun.move_speed;
+        let strafe = (intent.strafe_right as i32 - intent.strafe_left as i32) as f32 * tun.move_speed;
         let move_local = self.move_player(forward, strafe);
         let control = FirstPersonInput::new(
             0,
@@ -307,8 +256,8 @@ impl DoomGame {
         // 4. Contact damage: a periodic "bite" while a living enemy is in melee
         //    range, gated by a cooldown so standing in a crowd is survivable.
         ((self.hurt_cd == 0) & self.any_enemy_in_contact()).then(|| {
-            self.health -= CONTACT_DAMAGE;
-            self.hurt_cd = HURT_COOLDOWN;
+            self.health -= tun.contact_damage;
+            self.hurt_cd = tun.hurt_cooldown;
         });
 
         StepCommands {
@@ -354,10 +303,12 @@ impl DoomGame {
     /// the nearest eligible enemy. The "nearest eligible" search is a `fold` over
     /// the enemies, each eligibility test reduced to a boolean mask.
     fn fire_shot(&mut self) {
-        self.fire_cd = FIRE_COOLDOWN;
+        let tun = self.level.tun;
+        self.fire_cd = tun.fire_cooldown;
         self.ammo -= 1;
         let (fx, fz) = (-self.yaw.sin(), -self.yaw.cos());
-        let cone = FIRE_HALF_ANGLE.cos();
+        let cone = tun.fire_half_angle.cos();
+        let range = tun.fire_range;
         let best = self.enemies.iter().enumerate().fold(
             None::<(usize, f32)>,
             |best, (i, e)| {
@@ -368,19 +319,17 @@ impl DoomGame {
                 // `line_clear` is only reached when the cheap masks already hold
                 // (it is pure regardless), so a flat `&` chain is safe.
                 let eligible = e.alive
-                    & (1.0e-4..=FIRE_RANGE).contains(&dist)
+                    & (1.0e-4..=range).contains(&dist)
                     & (aim >= cone)
                     & self.line_clear(e.x, e.z);
                 let closer = best.is_none_or(|(_, d)| dist < d);
-                (eligible & closer)
-                    .then_some((i, dist))
-                    .or(best)
+                (eligible & closer).then_some((i, dist)).or(best)
             },
         );
         best.iter().for_each(|&(i, _)| {
             self.enemies[i].alive = false;
-            self.score += KILL_SCORE;
-            self.ammo += AMMO_PER_KILL;
+            self.score += tun.kill_score;
+            self.ammo += tun.ammo_per_kill;
         });
     }
 
@@ -391,7 +340,8 @@ impl DoomGame {
     /// always equals `target - current` — the engine node tracks it exactly.
     fn update_enemies(&mut self, respawning: bool) -> Vec<PlayerInput> {
         let (px, pz) = (self.px, self.pz);
-        let map = &self.map;
+        let tun = self.level.tun;
+        let map = &self.level.map;
         self.enemies
             .iter_mut()
             .enumerate()
@@ -400,14 +350,13 @@ impl DoomGame {
                 // selects the target without an `if`. All three candidate targets
                 // are pure to compute, so evaluating them unconditionally is safe.
                 e.alive |= respawning;
-                let respawn_t = (e.spawn.0, ENEMY_Y, e.spawn.1);
-                let chase_t = Self::chase(map, e, px, pz);
-                let park_t = (e.spawn.0, PARK_Y, e.spawn.1);
+                let respawn_t = (e.spawn.0, tun.enemy_y, e.spawn.1);
+                let chase_t = Self::chase(map, &tun, e, px, pz);
+                let park_t = (e.spawn.0, tun.park_y, e.spawn.1);
                 // alive ? (respawning ? respawn_t : chase_t) : park_t
                 let live_t = respawning.then_some(respawn_t).unwrap_or(chase_t);
                 let (tx, ty, tz) = e.alive.then_some(live_t).unwrap_or(park_t);
-                let input =
-                    PlayerInput::new(i as u32, Vec3::new(tx - e.x, ty - e.y, tz - e.z));
+                let input = PlayerInput::new(i as u32, Vec3::new(tx - e.x, ty - e.y, tz - e.z));
                 e.x = tx;
                 e.y = ty;
                 e.z = tz;
@@ -418,7 +367,7 @@ impl DoomGame {
 
     /// One chase step for a living enemy toward `(px, pz)`, with per-axis wall
     /// stops. Returns its new `(x, y, z)`.
-    fn chase(map: &MapData, e: &Enemy, px: f32, pz: f32) -> (f32, f32, f32) {
+    fn chase(map: &MapData, tun: &level::Tunables, e: &Enemy, px: f32, pz: f32) -> (f32, f32, f32) {
         let (dx, dz) = (px - e.x, pz - e.z);
         let len = (dx * dx + dz * dz).sqrt();
         // Too close to move: zero out the step (mask the normalized delta to 0).
@@ -430,8 +379,8 @@ impl DoomGame {
         let moving = (len >= 1.0e-4) as i32 as f32;
         let safe_len = len.max(1.0e-4);
         let (nx, nz) = (
-            dx / safe_len * ENEMY_SPEED * moving,
-            dz / safe_len * ENEMY_SPEED * moving,
+            dx / safe_len * tun.enemy_speed * moving,
+            dz / safe_len * tun.enemy_speed * moving,
         );
         let tx = Self::map_wall(map, e.x + nx, e.z)
             .then_some(e.x)
@@ -439,7 +388,7 @@ impl DoomGame {
         let tz = Self::map_wall(map, e.x, e.z + nz)
             .then_some(e.z)
             .unwrap_or(e.z + nz);
-        (tx, ENEMY_Y, tz)
+        (tx, tun.enemy_y, tz)
     }
 
     /// Wall lookup against a map (the static helper used by enemy chasing).
@@ -449,34 +398,36 @@ impl DoomGame {
 
     /// Is any living enemy within melee contact of the player?
     fn any_enemy_in_contact(&self) -> bool {
+        let radius = self.level.tun.contact_radius;
         self.enemies.iter().any(|e| {
             let (dx, dz) = (e.x - self.px, e.z - self.pz);
             // `&` over two pure tests (no guarded index): alive AND within range.
-            e.alive & ((dx * dx + dz * dz).sqrt() < CONTACT_RADIUS)
+            e.alive & ((dx * dx + dz * dz).sqrt() < radius)
         })
     }
 
     /// Death → reset: snap the camera back to the start (one corrective control),
     /// respawn every enemy at its spawn, and restore health/score/ammo.
     fn respawn(&mut self) -> StepCommands {
+        let tun = self.level.tun;
         // Correct yaw and pitch back to zero (look level, facing -Z). After the
         // yaw correction the frame is world-aligned, so the move back to start is
         // the world delta directly.
         let (yaw_delta, pitch_delta) = (-self.yaw, -self.pitch);
-        let (dx, dz) = (self.map.start.0 - self.px, self.map.start.1 - self.pz);
+        let (dx, dz) = (self.level.map.start.0 - self.px, self.level.map.start.1 - self.pz);
         let control = FirstPersonInput::new(
             0,
             Vec3::new(dx, 0.0, dz),
             Angle::radians(yaw_delta),
             Angle::radians(pitch_delta),
         );
-        self.px = self.map.start.0;
-        self.pz = self.map.start.1;
+        self.px = self.level.map.start.0;
+        self.pz = self.level.map.start.1;
         self.yaw = 0.0;
         self.pitch = 0.0;
-        self.health = MAX_HEALTH;
+        self.health = tun.max_health;
         self.score = 0;
-        self.ammo = START_AMMO;
+        self.ammo = tun.start_ammo;
         self.fire_cd = 0;
         self.hurt_cd = 0;
         let enemies = self.update_enemies(true);
@@ -494,106 +445,119 @@ impl Default for DoomGame {
     }
 }
 
-/// Build the engine app for the DOOM level: the cube-walled rooms, floor and
-/// ceiling, a first-person [`Controller`] camera at the start, a directional
+/// Build the engine app for a DOOM level document: the cube-walled rooms, floor
+/// and ceiling, a first-person [`Controller`] camera at the start, a directional
 /// light, and one enemy cube ([`Player`]) per spawn (in the same order
 /// [`DoomGame`] enumerates them, so indices line up).
-pub fn build_doom_app() -> RunningApp {
-    let map = parse_map();
+pub fn build_doom_app(doc: &LevelDoc) -> RunningApp {
     App::new()
         .window(
             Window::new(960, 600)
                 .with_surface_id(CANVAS_ID)
-                .with_clear_color(Color::linear_rgb(ch(0.02), ch(0.02), ch(0.03))),
+                .with_clear_color(color_of(doc.colors.clear)),
         )
         .add_plugins(DefaultPlugins)
-        .setup(move |world, meshes, materials| {
-            let cube = meshes.add(Mesh::cube());
-            let wall_a = materials.add(Material::lit(Color::linear_rgb(ch(0.40), ch(0.16), ch(0.16))));
-            let wall_b = materials.add(Material::lit(Color::linear_rgb(ch(0.20), ch(0.22), ch(0.30))));
-            let floor = materials.add(Material::lit(Color::linear_rgb(ch(0.10), ch(0.10), ch(0.12))));
-            let ceiling = materials.add(Material::lit(Color::linear_rgb(ch(0.05), ch(0.06), ch(0.09))));
-            let enemy = materials.add(Material::lit(Color::linear_rgb(ch(0.85), ch(0.20), ch(0.18))));
+        .setup(level_setup(doc.clone()))
+        .build()
+}
 
-            // Walls: one scaled cube per wall cell, two-tone by parity. The
-            // wall-cell filter replaces the `continue`; the parity selects the
-            // material via an index into a 2-tone table (no `if/else`).
-            map.walls.iter().enumerate().for_each(|(row, line)| {
-                line.iter()
-                    .enumerate()
-                    .filter(|&(_, &is_wall)| is_wall)
-                    .for_each(|(col, _)| {
-                        let mat = [wall_a, wall_b][(row + col) % 2];
-                        world.spawn((
-                            block(col as f32, WALL_HEIGHT * 0.5, row as f32, 1.0, WALL_HEIGHT, 1.0),
-                            Renderable {
-                                mesh: cube,
-                                material: mat,
-                            },
-                        ));
-                    });
-            });
+/// Re-author a running DOOM app onto a new level document: update the background
+/// colour and rebuild the scene (walls, floor/ceiling, enemies, camera, light)
+/// in place, keeping the engine ticking. This is the hot-reload entry the browser
+/// arm calls when a new `level.axiom` arrives over SSE.
+pub fn reload_doom(running: &mut RunningApp, doc: &LevelDoc) {
+    running.set_clear_color(color_of(doc.colors.clear).to_array());
+    running.reauthor(level_setup(doc.clone()));
+}
 
-            // Floor + ceiling: two big flat slabs spanning the whole grid.
-            let (cx, cz) = ((map.width as f32 - 1.0) * 0.5, (map.height as f32 - 1.0) * 0.5);
-            world.spawn((
-                block(cx, -0.05, cz, map.width as f32, 0.1, map.height as f32),
-                Renderable {
-                    mesh: cube,
-                    material: floor,
-                },
-            ));
-            world.spawn((
-                block(
-                    cx,
-                    WALL_HEIGHT + 0.05,
-                    cz,
-                    map.width as f32,
-                    0.1,
-                    map.height as f32,
-                ),
-                Renderable {
-                    mesh: cube,
-                    material: ceiling,
-                },
-            ));
+/// The scene-authoring closure for a level document: the cube-walled level, its
+/// floor/ceiling slabs, the enemy cubes, the first-person camera at the start,
+/// and the directional light. Shared by [`build_doom_app`] (initial build) and
+/// [`reload_doom`] (live re-author), so both produce an identical scene for a
+/// given document.
+fn level_setup(doc: LevelDoc) -> impl FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>) {
+    move |world, meshes, materials| {
+        let cube = meshes.add(Mesh::cube());
+        let wall_a = materials.add(Material::lit(color_of(doc.colors.wall_a)));
+        let wall_b = materials.add(Material::lit(color_of(doc.colors.wall_b)));
+        let floor = materials.add(Material::lit(color_of(doc.colors.floor)));
+        let ceiling = materials.add(Material::lit(color_of(doc.colors.ceiling)));
+        let enemy = materials.add(Material::lit(color_of(doc.colors.enemy)));
+        let wh = doc.tun.wall_height;
 
-            // Enemies: a red cube Player per spawn, in row-major (index) order.
-            map.enemy_spawns
-                .iter()
+        // Walls: one scaled cube per wall cell, two-tone by parity. The
+        // wall-cell filter replaces the `continue`; the parity selects the
+        // material via an index into a 2-tone table (no `if/else`).
+        doc.map.walls.iter().enumerate().for_each(|(row, line)| {
+            line.iter()
                 .enumerate()
-                .for_each(|(i, &(x, z))| {
+                .filter(|&(_, &is_wall)| is_wall)
+                .for_each(|(col, _)| {
+                    let mat = [wall_a, wall_b][(row + col) % 2];
                     world.spawn((
-                        block(x, ENEMY_Y, z, ENEMY_SCALE, ENEMY_SCALE, ENEMY_SCALE),
+                        block(col as f32, wh * 0.5, row as f32, 1.0, wh, 1.0),
                         Renderable {
                             mesh: cube,
-                            material: enemy,
+                            material: mat,
                         },
-                        Player::new(i as u32),
                     ));
                 });
+        });
 
-            // The first-person camera at the start, facing -Z (yaw 0).
-            world.spawn((
-                Transform::from_translation(Vec3::new(map.start.0, EYE, map.start.1)),
-                Camera::perspective(PerspectiveProjection {
-                    fov_y: Angle::degrees(70.0),
-                    near: Meters::new(0.05).expect("near plane is finite"),
-                    far: Meters::new(200.0).expect("far plane is finite"),
-                }),
-                Controller::new(0),
-            ));
+        // Floor + ceiling: two big flat slabs spanning the whole grid.
+        let (cx, cz) = (
+            (doc.map.width as f32 - 1.0) * 0.5,
+            (doc.map.height as f32 - 1.0) * 0.5,
+        );
+        let (gw, gh) = (doc.map.width as f32, doc.map.height as f32);
+        world.spawn((
+            block(cx, -0.05, cz, gw, 0.1, gh),
+            Renderable {
+                mesh: cube,
+                material: floor,
+            },
+        ));
+        world.spawn((
+            block(cx, wh + 0.05, cz, gw, 0.1, gh),
+            Renderable {
+                mesh: cube,
+                material: ceiling,
+            },
+        ));
 
+        // Enemies: a red cube Player per spawn, in row-major (index) order.
+        let scale = doc.tun.enemy_scale;
+        doc.map.enemy_spawns.iter().enumerate().for_each(|(i, &(x, z))| {
             world.spawn((
-                Transform::IDENTITY,
-                DirectionalLight {
-                    direction: Vec3::new(0.3, -1.0, 0.2),
-                    color: Color::WHITE,
-                    intensity: ch(1.0),
+                block(x, doc.tun.enemy_y, z, scale, scale, scale),
+                Renderable {
+                    mesh: cube,
+                    material: enemy,
                 },
+                Player::new(i as u32),
             ));
-        })
-        .build()
+        });
+
+        // The first-person camera at the start, facing -Z (yaw 0).
+        world.spawn((
+            Transform::from_translation(Vec3::new(doc.map.start.0, doc.tun.eye, doc.map.start.1)),
+            Camera::perspective(PerspectiveProjection {
+                fov_y: Angle::degrees(70.0),
+                near: Meters::new(0.05).expect("near plane is finite"),
+                far: Meters::new(200.0).expect("far plane is finite"),
+            }),
+            Controller::new(0),
+        ));
+
+        world.spawn((
+            Transform::IDENTITY,
+            DirectionalLight {
+                direction: Vec3::new(0.3, -1.0, 0.2),
+                color: Color::WHITE,
+                intensity: ch(1.0),
+            },
+        ));
+    }
 }
 
 /// A translated, axis-scaled cube transform (identity rotation).
@@ -614,25 +578,21 @@ pub mod agent;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use level::Tunables;
 
     fn idle() -> Intent {
         Intent::default()
     }
 
     #[test]
-    fn map_is_rectangular_with_a_start_and_enemies() {
-        let m = parse_map();
-        assert!(MAP.iter().all(|r| r.len() == m.width));
-        assert_eq!(m.height, MAP.len());
-        assert_eq!(m.enemy_spawns.len(), 4);
+    fn the_builtin_level_has_a_start_and_enemies() {
+        let doc = LevelDoc::default();
+        // The default grid is rectangular with a start and four enemy spawns.
+        assert!(doc.map.walls.iter().all(|r| r.len() == doc.map.width));
+        assert_eq!(doc.map.enemy_spawns.len(), 4);
         // The start cell is open floor.
-        assert!(!m.is_wall_start());
-    }
-
-    impl MapData {
-        fn is_wall_start(&self) -> bool {
-            self.walls[self.start.1 as usize][self.start.0 as usize]
-        }
+        let (sx, sz) = doc.map.start;
+        assert!(!doc.map.walls[sz as usize][sx as usize]);
     }
 
     #[test]
@@ -682,7 +642,7 @@ mod tests {
             look_pitch: 5.0,
             ..idle()
         });
-        assert_eq!(g.pitch, PITCH_LIMIT);
+        assert_eq!(g.pitch, Tunables::default().pitch_limit);
     }
 
     #[test]
@@ -693,7 +653,7 @@ mod tests {
             ..idle()
         });
         assert!(g.yaw > 0.0);
-        assert_eq!(cmd.control.yaw.as_radians(), TURN_SPEED);
+        assert_eq!(cmd.control.yaw.as_radians(), Tunables::default().turn_speed);
     }
 
     #[test]
@@ -709,9 +669,10 @@ mod tests {
             fire: true,
             ..idle()
         });
+        let tun = Tunables::default();
         assert_eq!(cmd.hud.enemies_alive, before - 1, "the lined-up enemy dies");
-        assert_eq!(cmd.hud.score, KILL_SCORE);
-        assert_eq!(cmd.hud.ammo, START_AMMO - 1 + AMMO_PER_KILL);
+        assert_eq!(cmd.hud.score, tun.kill_score);
+        assert_eq!(cmd.hud.ammo, tun.start_ammo - 1 + tun.ammo_per_kill);
     }
 
     #[test]
@@ -747,12 +708,14 @@ mod tests {
         // Drop the player onto a living enemy: contact damage ticks down, and at
         // zero the next step respawns at full health back at the start.
         let mut g = DoomGame::new();
+        let tun = Tunables::default();
         let spawn = g.enemies[0].spawn;
         g.px = spawn.0;
         g.pz = spawn.1;
         let mut saw_damage = false;
         // Enough ticks to drain full health through the hurt cooldown and die.
-        let max_ticks = (MAX_HEALTH / CONTACT_DAMAGE + 2) as usize * HURT_COOLDOWN as usize;
+        let max_ticks =
+            (tun.max_health / tun.contact_damage + 2) as usize * tun.hurt_cooldown as usize;
         for _ in 0..max_ticks {
             let h = g.health;
             g.step(idle());
@@ -762,8 +725,8 @@ mod tests {
         }
         assert!(saw_damage, "contact with an enemy costs health");
         // After enough contact the player died and respawned at the start.
-        assert_eq!(g.health, MAX_HEALTH);
-        assert_eq!((g.px, g.pz), g.map.start);
+        assert_eq!(g.health, tun.max_health);
+        assert_eq!((g.px, g.pz), g.level.map.start);
         assert_eq!(g.score, 0);
     }
 
@@ -802,19 +765,66 @@ mod tests {
     }
 
     #[test]
+    fn a_longer_wall_run_in_the_document_adds_wall_renderables() {
+        // Fill the second row entirely with walls; the scene gains the extra wall
+        // instances those new '#' cells produce.
+        let base = LevelDoc::default();
+        let base_walls: usize = base.map.walls.iter().flatten().filter(|&&w| w).count();
+        let doc = LevelDoc::parse(
+            "[map]\n\
+             ##################\n\
+             ##################\n\
+             #.......#........#\n\
+             #...E...#....E...#\n\
+             #.......#........#\n\
+             #................#\n\
+             #.......#........#\n\
+             #...E...#........#\n\
+             #S......#........#\n\
+             ##################\n",
+        );
+        let new_walls: usize = doc.map.walls.iter().flatten().filter(|&&w| w).count();
+        assert!(new_walls > base_walls, "filling a row adds walls");
+        // The realized scene reflects the new wall count (walls + floor + ceiling
+        // + one cube per enemy).
+        let app = build_doom_app(&doc);
+        assert_eq!(app.renderable_count(), new_walls + 2 + doc.map.enemy_spawns.len());
+    }
+
+    #[test]
+    fn reload_doom_reauthors_the_running_scene() {
+        // Start on the built-in level, then hot-reload onto a tiny level: the
+        // renderable count changes and the engine keeps ticking.
+        let mut running = build_doom_app(&LevelDoc::default());
+        let before = running.renderable_count();
+        let _ = running.tick(0);
+        let tiny = LevelDoc::parse("[map]\n#####\n#S.E#\n#####\n");
+        reload_doom(&mut running, &tiny);
+        let tiny_walls: usize = tiny.map.walls.iter().flatten().filter(|&&w| w).count();
+        assert_eq!(
+            running.renderable_count(),
+            tiny_walls + 2 + tiny.map.enemy_spawns.len()
+        );
+        assert_ne!(before, running.renderable_count());
+        // The next frame renders the reloaded scene at the continuing tick.
+        let frame = running.tick(1);
+        assert_eq!(frame.tick(), 1);
+    }
+
+    #[test]
     fn the_scene_has_walls_floor_ceiling_and_one_renderable_per_enemy() {
-        let app = build_doom_app();
-        let map = parse_map();
-        let wall_count: usize = map.walls.iter().flatten().filter(|&&w| w).count();
+        let doc = LevelDoc::default();
+        let app = build_doom_app(&doc);
+        let wall_count: usize = doc.map.walls.iter().flatten().filter(|&&w| w).count();
         // walls + floor + ceiling + one cube per enemy.
-        let expected = wall_count + 2 + map.enemy_spawns.len();
+        let expected = wall_count + 2 + doc.map.enemy_spawns.len();
         assert_eq!(app.renderable_count(), expected);
     }
 
     #[test]
     fn the_first_frame_draws_every_renderable_and_runs_deterministically() {
-        let mut a = build_doom_app();
-        let mut b = build_doom_app();
+        let mut a = build_doom_app(&LevelDoc::default());
+        let mut b = build_doom_app(&LevelDoc::default());
         let fa = a.tick(0);
         assert_eq!(fa.draws().len(), a.renderable_count());
         assert_eq!(fa, b.tick(0), "tick 0 replays byte-identically");

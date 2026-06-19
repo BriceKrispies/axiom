@@ -176,7 +176,6 @@ pub struct RunningApp {
 
 impl RunningApp {
     fn realize(app: App) -> Self {
-        let math = MathApi::new();
         let host_api = HostApi::new();
         let frame_api = FrameApi::new();
 
@@ -205,20 +204,46 @@ impl RunningApp {
             .expect("surface dimensions are valid");
         let aspect = surface.width() as f32 / surface.height() as f32;
 
-        // Run user setup: populate assets + author the scene as commands.
+        // Run user setup and realize the scene + resources (shared with the live
+        // `reauthor` path).
+        let authored = Self::author(app.setup, aspect);
+
+        RunningApp {
+            frame_api,
+            pipeline: RenderPipelineApi::new(),
+            webgpu: WebGpuApi::new_recording(),
+            runtime,
+            driver,
+            frame_builder,
+            viewport,
+            scene: authored.scene,
+            step_nanos: app.step_nanos,
+            render: app.render,
+            clear_color: surface.clear_color().to_array(),
+            light_direction: authored.light_direction,
+            meshes: authored.meshes,
+            materials: authored.materials,
+            renderables: authored.renderables,
+        }
+    }
+
+    /// Run a setup callback and realize it into the scene + resolved resources.
+    /// Shared by [`Self::realize`] (initial build) and [`Self::reauthor`] (live
+    /// rebuild): both turn an authoring closure into a fresh scene, the per-frame
+    /// light direction, the resolved mesh geometry and material colours, and the
+    /// renderable count.
+    fn author(setup: Option<SetupFn>, aspect: f32) -> AuthoredScene {
+        let math = MathApi::new();
         let mut commands = SceneCommands::new(aspect);
         let mut meshes: Assets<Mesh> = Assets::new();
         let mut materials: Assets<Material> = Assets::new();
-        app.setup
+        setup
             .into_iter()
             .for_each(|setup| setup(&mut commands, &mut meshes, &mut materials));
         let renderables = commands.renderable_count();
 
-        // Realize the scene; capture the per-frame light direction.
         let mut scene = SceneApi::new();
-        let light_direction = commands
-            .realize_into(&mut scene, &math)
-            .unwrap_or(Vec3::ZERO);
+        let light_direction = commands.realize_into(&mut scene, &math).unwrap_or(Vec3::ZERO);
 
         // Each material asset -> (handle id, colour); each mesh asset -> its own
         // resolved geometry keyed by handle id. The engine resolves a mesh by its
@@ -235,23 +260,45 @@ impl RunningApp {
             .map(|(i, mesh)| ((i + 1) as u64, mesh_geometry(mesh)))
             .collect();
 
-        RunningApp {
-            frame_api,
-            pipeline: RenderPipelineApi::new(),
-            webgpu: WebGpuApi::new_recording(),
-            runtime,
-            driver,
-            frame_builder,
-            viewport,
+        AuthoredScene {
             scene,
-            step_nanos: app.step_nanos,
-            render: app.render,
-            clear_color: surface.clear_color().to_array(),
             light_direction,
             meshes,
             materials,
             renderables,
         }
+    }
+
+    /// Re-author the scene in place while the app keeps running: re-run a setup
+    /// closure and replace the scene, light direction, resolved geometry/material
+    /// colours, and renderable count, **keeping** the runtime, host driver, frame
+    /// builder, and viewport — so the engine frame tick stays monotonic across the
+    /// reload (the host driver requires it). This is the write-side dual of
+    /// introspection: an external editor hands the engine a new scene description
+    /// at a tick boundary and the next frame renders it.
+    ///
+    /// Mesh *geometry* is not re-uploaded — the live windowing backend's vertex
+    /// buffer is fixed at startup. Reauthoring therefore changes instance
+    /// transforms, material colours, and the renderable count (bounded by the
+    /// instance-buffer capacity the backend was sized with), never the base mesh.
+    pub fn reauthor<F>(&mut self, setup: F)
+    where
+        F: FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>) + 'static,
+    {
+        let aspect =
+            self.viewport.physical_width() as f32 / self.viewport.physical_height() as f32;
+        let authored = Self::author(Some(Box::new(setup)), aspect);
+        self.scene = authored.scene;
+        self.light_direction = authored.light_direction;
+        self.meshes = authored.meshes;
+        self.materials = authored.materials;
+        self.renderables = authored.renderables;
+    }
+
+    /// Set the per-frame clear (background) colour. Used by a live reload to
+    /// update the background without rebuilding the running app.
+    pub fn set_clear_color(&mut self, color: [f32; 4]) {
+        self.clear_color = color;
     }
 
     /// How many renderables the scene draws each frame — the live backend's
@@ -260,20 +307,26 @@ impl RunningApp {
         self.renderables
     }
 
-    /// The first mesh's geometry as the live backend's vertex stream
-    /// (interleaved position+normal, 6 floats per vertex) plus its triangle-list
+    /// The first mesh's geometry as the live backend's vertex stream (interleaved
+    /// position+normal+colour, 10 floats per vertex) plus its triangle-list
     /// indices. Empty when the app registered no mesh. Plain data the windowing
-    /// backend uploads.
+    /// backend uploads. Per-vertex colour is opaque **white** here: the live
+    /// shader multiplies it by the per-instance (material) colour, so white keeps
+    /// the per-instance colour authoritative — the built-in cube renders exactly
+    /// as before. An app that wants true per-vertex colours builds its own stream
+    /// (see `axiom-growth`'s terrain).
     pub fn mesh_vertex_stream(&self) -> (Vec<f32>, Vec<u32>) {
         self.meshes.first().map_or_else(
             || (Vec::new(), Vec::new()),
             |(_, geom)| {
-                let mut vertices = Vec::with_capacity(geom.positions.len() * 6);
+                let mut vertices = Vec::with_capacity(geom.positions.len() * 10);
                 geom.positions
                     .iter()
                     .zip(geom.normals.iter())
                     .for_each(|(p, n)| {
-                        vertices.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z])
+                        vertices.extend_from_slice(&[
+                            p.x, p.y, p.z, n.x, n.y, n.z, 1.0, 1.0, 1.0, 1.0,
+                        ])
                     });
                 (vertices, geom.indices.clone())
             },
@@ -396,6 +449,18 @@ impl RunningApp {
             })
             .unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
     }
+}
+
+/// The product of running a setup closure: a realized scene plus the resolved
+/// resources and counts a [`RunningApp`] holds. Returned by [`RunningApp::author`]
+/// and consumed by both the initial build and a live [`RunningApp::reauthor`].
+#[derive(Debug)]
+struct AuthoredScene {
+    scene: SceneApi,
+    light_direction: Vec3,
+    meshes: Vec<(u64, MeshGeometry)>,
+    materials: Vec<(u64, [f32; 4])>,
+    renderables: usize,
 }
 
 /// One mesh's resolved geometry: the vertex streams the render pipeline uploads.
@@ -776,8 +841,56 @@ mod tests {
         assert_eq!(app.renderable_count(), 3);
         let (vertices, indices) = app.mesh_vertex_stream();
         assert!(!vertices.is_empty());
-        assert_eq!(vertices.len() % 6, 0); // position(3) + normal(3) per vertex
+        assert_eq!(vertices.len() % 10, 0); // position(3)+normal(3)+colour(4) per vertex
+        // Per-vertex colour defaults to opaque white so the per-instance colour
+        // stays authoritative (white * instance == instance).
+        assert_eq!(&vertices[6..10], &[1.0, 1.0, 1.0, 1.0]);
         assert!(!indices.is_empty());
+    }
+
+    #[test]
+    fn reauthor_replaces_the_scene_and_renderable_count_in_place() {
+        // Build a one-cube app, then re-author into the three-cube scene while
+        // keeping the running app: the renderable count and the rendered frame
+        // both change, and the engine keeps ticking monotonically.
+        let mut app = player_app().build();
+        assert_eq!(app.renderable_count(), 1);
+        let before = app.tick(0);
+
+        // Re-author with the three-cube authoring closure.
+        app.reauthor(|world, meshes, materials| {
+            let cube = meshes.add(Mesh::cube());
+            for offset_x in [-2.6_f32, 0.0, 2.6] {
+                let material = materials.add(Material::lit(Color::WHITE));
+                world.spawn((
+                    Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)),
+                    Renderable {
+                        mesh: cube,
+                        material,
+                    },
+                ));
+            }
+            world.spawn((
+                Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+                Camera::perspective(PerspectiveProjection {
+                    fov_y: Angle::degrees(60.0),
+                    near: Meters::new(0.1).expect("near plane is finite"),
+                    far: Meters::new(100.0).expect("far plane is finite"),
+                }),
+            ));
+        });
+        assert_eq!(app.renderable_count(), 3);
+        let after = app.tick(1);
+        assert_eq!(after.tick(), 1, "the frame tick keeps advancing across reload");
+        assert_ne!(before.draws().len(), after.draws().len());
+    }
+
+    #[test]
+    fn set_clear_color_changes_the_rendered_clear() {
+        let mut app = three_cube_app().build();
+        assert_eq!(app.tick(0).clear_color(), [0.05, 0.06, 0.08, 1.0]);
+        app.set_clear_color([0.5, 0.25, 0.125, 1.0]);
+        assert_eq!(app.tick(1).clear_color(), [0.5, 0.25, 0.125, 1.0]);
     }
 
     #[test]

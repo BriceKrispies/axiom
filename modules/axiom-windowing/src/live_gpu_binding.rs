@@ -2,16 +2,20 @@
 //!
 //! None of this compiles on native, so the deterministic core (and
 //! `cargo test --workspace` / the coverage gate) never pulls in wgpu. This is
-//! the thin, logic-free platform arm: it takes plain engine data (cube vertex
-//! streams + per-instance MVP/colour floats + a clear colour) and issues the
-//! real GPU calls. Every decision lives on the deterministic side.
+//! the thin, logic-free platform arm: it takes plain engine data (vertex streams
+//! of position+normal+colour + per-instance MVP/colour floats + a clear colour)
+//! and issues the real GPU calls. Every decision lives on the deterministic side.
 
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
 
-/// WGSL for the cubes: per-vertex position+normal, per-instance MVP (four
-/// columns) + colour.
+/// WGSL for the cubes/terrain: per-vertex position+normal+**colour**, per-instance
+/// MVP (four columns) + colour. The final base colour is the component-wise
+/// product of the per-vertex colour and the per-instance colour, so a mesh that
+/// supplies per-vertex white `(1,1,1,1)` renders exactly as the per-instance
+/// colour alone (the backward-compatible default), while a mesh that supplies
+/// real per-vertex colours and a white instance shows the per-vertex colours.
 const CUBE_WGSL: &str = r#"
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -23,17 +27,18 @@ struct VsOut {
 fn vs(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) m0: vec4<f32>,
-    @location(3) m1: vec4<f32>,
-    @location(4) m2: vec4<f32>,
-    @location(5) m3: vec4<f32>,
-    @location(6) color: vec4<f32>,
+    @location(2) vertex_color: vec4<f32>,
+    @location(3) m0: vec4<f32>,
+    @location(4) m1: vec4<f32>,
+    @location(5) m2: vec4<f32>,
+    @location(6) m3: vec4<f32>,
+    @location(7) instance_color: vec4<f32>,
 ) -> VsOut {
     let mvp = mat4x4<f32>(m0, m1, m2, m3);
     var out: VsOut;
     out.clip = mvp * vec4<f32>(position, 1.0);
     out.normal = normal;
-    out.color = color;
+    out.color = vertex_color * instance_color;
     return out;
 }
 
@@ -49,6 +54,8 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Bytes per instance: mvp(16 f32) + colour(4 f32) = 20 f32.
 const INSTANCE_STRIDE: u64 = 20 * 4;
+/// Bytes per vertex: position(3 f32) + normal(3 f32) + colour(4 f32) = 10 f32.
+const VERTEX_STRIDE: u64 = 10 * 4;
 
 /// The real, browser-owned GPU objects. Held only here, on wasm32.
 #[derive(Debug)]
@@ -70,8 +77,9 @@ impl LiveGpuBinding {
     /// Real GPU initialisation: instance → surface from canvas → adapter →
     /// device/queue → configure surface → upload the engine's cube geometry →
     /// build the instanced cube render pipeline + depth buffer. `vertices` is
-    /// the interleaved position+normal stream; `indices` the triangle list.
-    /// Errors are surfaced as `JsValue`; this never fakes success.
+    /// the interleaved position+normal+colour stream (10 floats/vertex);
+    /// `indices` the triangle list. Errors are surfaced as `JsValue`; this never
+    /// fakes success.
     pub async fn initialize(
         canvas: HtmlCanvasElement,
         width: u32,
@@ -164,9 +172,9 @@ impl LiveGpuBinding {
                 entry_point: Some("vs"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[
-                    // Per-vertex: position(3) + normal(3).
+                    // Per-vertex: position(3) + normal(3) + colour(4).
                     wgpu::VertexBufferLayout {
-                        array_stride: 24,
+                        array_stride: VERTEX_STRIDE,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &[
                             wgpu::VertexAttribute {
@@ -179,6 +187,11 @@ impl LiveGpuBinding {
                                 offset: 12,
                                 shader_location: 1,
                             },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x4,
+                                offset: 24,
+                                shader_location: 2,
+                            },
                         ],
                     },
                     // Per-instance: mvp columns (4 x vec4) + colour.
@@ -189,27 +202,27 @@ impl LiveGpuBinding {
                             wgpu::VertexAttribute {
                                 format: wgpu::VertexFormat::Float32x4,
                                 offset: 0,
-                                shader_location: 2,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 16,
                                 shader_location: 3,
                             },
                             wgpu::VertexAttribute {
                                 format: wgpu::VertexFormat::Float32x4,
-                                offset: 32,
+                                offset: 16,
                                 shader_location: 4,
                             },
                             wgpu::VertexAttribute {
                                 format: wgpu::VertexFormat::Float32x4,
-                                offset: 48,
+                                offset: 32,
                                 shader_location: 5,
                             },
                             wgpu::VertexAttribute {
                                 format: wgpu::VertexFormat::Float32x4,
-                                offset: 64,
+                                offset: 48,
                                 shader_location: 6,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x4,
+                                offset: 64,
+                                shader_location: 7,
                             },
                         ],
                     },
@@ -320,6 +333,33 @@ impl LiveGpuBinding {
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         Ok(())
+    }
+
+    /// Replace the uploaded geometry mid-loop: recreate the vertex + index
+    /// buffers from a freshly-built mesh (interleaved position+normal+colour
+    /// `vertices`, 10 floats/vertex; triangle-list `indices`) and update the
+    /// index count drawn each frame. The pipeline, instance buffer, surface and
+    /// depth view are untouched — only the static mesh window changes. Used by
+    /// the streaming run loop to slide the terrain around the player without
+    /// rebuilding the binding. Dropping the old buffers here frees their GPU
+    /// allocations; the new buffers carry the same `VERTEX` / `INDEX` usage and
+    /// layout the pipeline already expects.
+    pub fn replace_geometry(&mut self, vertices: &[f32], indices: &[u32]) {
+        self.vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("axiom-cube-vertices"),
+                contents: bytemuck::cast_slice(vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        self.index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("axiom-cube-indices"),
+                contents: bytemuck::cast_slice(indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+        self.index_count = indices.len() as u32;
     }
 }
 

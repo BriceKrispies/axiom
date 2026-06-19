@@ -1,0 +1,28 @@
+[package]
+name = "axiom-netplay-server"
+description = "Repo tooling: a minimal AUTHORITATIVE game server for the live netplay demo. Unlike the dumb lockstep relay, this server holds the authoritative state (two player cubes), accepts each client's JoinRoom (replying Welcome), integrates their ClientIntents, and broadcasts ServerSnapshots every fixed tick. It speaks the canonical wire format via the axiom-net-protocol module. Outside the engine graph and the coverage gate (a Tool, by its tools/ location)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-netplay-server"
+path = "src/main.rs"
+
+[dependencies]
+# The canonical multiplayer wire contract: the server encodes/decodes the exact
+# same frames the browser SDK does, so the two can never drift. A tool may depend
+# on a module (tools are outside the engine dependency graph).
+axiom-net-protocol = { path = "../../modules/axiom-net-protocol" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tokio-tungstenite = "0.24"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tokio-tungstenite = "0.24"
+
+[lints.rust]
+unsafe_code = "forbid"

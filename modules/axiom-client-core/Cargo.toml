@@ -1,0 +1,24 @@
+[package]
+name = "axiom-client-core"
+description = "Axiom engine module: the portable client-side multiplayer state machine. It opens no socket and knows nothing about the browser — it consumes the authoritative values a server sends (welcome, snapshots, rejections) and produces the outbound intents a client sends, tracking connection state, the monotonic client sequence, and the pending-intent queue. The transport and the wire codec live elsewhere (the app and axiom-net-protocol)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No sockets, no platform APIs, no wire codec: this is the
+# deterministic client state machine over plain primitives. The app translates
+# between this module and `axiom-net-protocol` (modules never depend on modules).
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module"): it composes NO other module
+# (allowed_modules = []) — in particular NOT axiom-net-protocol. It builds only
+# on the kernel: the deterministic `Tick` models the authoritative server tick
+# and orders snapshots (an out-of-order snapshot is rejected by Tick ordering).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
