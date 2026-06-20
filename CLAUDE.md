@@ -332,8 +332,18 @@ Hard rules (mechanically enforced):
 7. **Module-introduced capabilities are globally unique.** A capability
    string in one module's `introduced_capabilities` cannot also appear
    in another module's list.
-8. **Module `lib.rs` exposes exactly one public facade.** Multiple
-   top-level `pub use`/`pub` items in a module's `lib.rs` is rejected.
+8. **Module `lib.rs` exposes exactly one public facade, plus (optionally)
+   its identity vocabulary.** A module publishes one behavioral facade
+   (e.g. `SimCoreApi`) and may, alongside it, re-export the pure value-type
+   id newtypes that facade traffics in via a single `pub use ids::{…}`
+   (matched on a whole `ids` path segment). Those ids carry no behavior —
+   they are the nouns the facade returns, and a handle-based facade is
+   unusable if callers cannot name the handles it hands out (the same reason
+   the `ecs` layer exports `EntityHandle`). Any *other* additional top-level
+   `pub use`/`pub` item in a module's `lib.rs` is rejected
+   (`ModuleFacadeMustExportOne`). This is **not** a licence to widen the
+   surface: only the `ids` vocabulary is exempt; contract/behavioral types
+   still live behind the facade.
 9. **Browser/platform APIs are layer-host-only, plus the sanctioned
    `windowing` module.** A layer or module that references `web_sys`,
    `js_sys`, `wasm_bindgen`, `WebGPU`, `WebGL`, `requestAnimationFrame`,
@@ -826,6 +836,36 @@ defensively-`unreachable!` invariant, a platform arm compiled out), that
 is a deliberate, documented decision, justified in the code at the site
 and called out in review — not a silent suppression to make the gate
 pass.
+
+## The TypeScript SDK (`@axiom/client`)
+
+The one TypeScript package, `packages/axiom-client` (the multiplayer browser
+SDK), is held to TypeScript-native counterparts of the engine spine's laws — the
+same bar as the Rust spine, with a fully native toolchain:
+
+* **Compiler** — TypeScript 7.0 native (`tsgo`, from `@typescript/native-preview`),
+  not the JS `tsc`.
+* **Static analysis** — **Oxlint** (Rust-native) with every category
+  (`correctness`/`suspicious`/`pedantic`/`perf`/`style`/`restriction`/`nursery`)
+  set to `error` and `maxWarnings: 0`, plus type-aware rules via `tsgolint`
+  (typescript-go). This is the clippy + dylint analogue.
+* **Branchless Law** — `eslint-js/no-restricted-syntax` bans `if`/ternary/
+  `switch`/`for`/`while`/`&&`/`||`/`??`/`?.` in non-test code, the TS analogue of
+  the `engine_no_branching` dylint. Tests are exempt, exactly as on the Rust side.
+* **Coverage Law** — `node:test` built-in coverage gated at 100%
+  lines/branches/functions.
+
+Run the gates with `make ts-gate` (or `npm --prefix packages/axiom-client run
+gate`). The tools and how they map to the Rust laws are documented in
+`packages/axiom-client/STATIC_ANALYSIS.md`.
+
+**Status:** the tooling is in place and runs at full strength, but the SDK is not
+yet green — the branchless rewrite and the drive to 100% coverage are tracked in
+`docs/ts-sdk-hardening.md`. Until that lands, `ts-gate` reports red and is
+intentionally **not** wired into the blocking pre-commit hook or CI, exactly how
+the Rust spine ran its unbranching loop before `engine_no_branching` went hard.
+Do not relax the gate to make it pass; remediate the code (No-Shortcuts applies
+to the SDK too).
 
 ## Browser verification (Playwright controller)
 

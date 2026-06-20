@@ -57,7 +57,7 @@ GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay doom doom-build doom-hot stress stress-build growth growth-build agent agent-render agent-bridge gallery gallery-build help
+.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay doom doom-build doom-hot stress stress-build growth growth-build agent agent-render agent-bridge gallery gallery-build ts-gate help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -89,6 +89,9 @@ help:
 	@echo "  Mobile-first demo gallery (what deploy-pages.yml publishes):"
 	@echo "  make gallery-build Build both wasm demos and assemble $(DIST_DIR)/"
 	@echo "  make gallery       Serve $(DIST_DIR)/ at http://localhost:$(GALLERY_PORT)"
+	@echo ""
+	@echo "  TypeScript SDK gate (@axiom/client static-analysis/branchless/coverage laws):"
+	@echo "  make ts-gate       Run tsgo typecheck + Oxlint + 100% coverage for packages/axiom-client"
 
 # Serve the prebuilt wasm bundle. uv provides/manages the Python interpreter;
 # --no-project keeps it from trying to sync a Python project in the repo root.
@@ -248,3 +251,14 @@ gallery:
 	@echo Serving demo gallery at http://localhost:$(GALLERY_PORT) - run make gallery-build first if blank
 	@echo Open it in a WebGPU browser. Ctrl+C to stop.
 	uv run --no-project python -m http.server $(GALLERY_PORT) --directory $(DIST_DIR)
+
+# --- TypeScript SDK gate (the @axiom/client static-analysis/branchless/coverage laws) ---
+
+# Hold packages/axiom-client to TS-native versions of the engine's laws: tsgo
+# (TypeScript 7.0 native) typecheck, Oxlint with every category an error plus the
+# branch ban, and node:test 100% coverage. The TS counterpart of `bash
+# scripts/coverage.sh`. Run `npm --prefix packages/axiom-client install` once
+# first. NOTE: the SDK is not yet green (see docs/ts-sdk-hardening.md), so this
+# gate currently reports red and is deliberately not yet wired into pre-commit/CI.
+ts-gate:
+	bash scripts/ts-gate.sh

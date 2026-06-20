@@ -9,6 +9,7 @@
     "verbatimModuleSyntax": true,
     "rewriteRelativeImportExtensions": true,
     "declaration": true,
+    "rootDir": "src",
     "outDir": "dist",
     "skipLibCheck": true
   },
