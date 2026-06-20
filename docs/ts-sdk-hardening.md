@@ -5,31 +5,42 @@ brought up to TypeScript-native versions of the Rust engine spine's laws:
 maximum-strictness static analysis, the Branchless Law, and 100% coverage. This
 is the TS counterpart of `docs/unbranching.md`.
 
-**Phase 1 (tooling) is done** — the gates exist, run, and report at full
-strength (see `packages/axiom-client/STATIC_ANALYSIS.md`). This document tracks
-**Phase 2/3 (remediation to green)**: the backlog the gates surface, and how to
-clear it. Until it is green, the gate is deliberately not wired into the blocking
-pre-commit hook or CI (mirroring the Rust `--no-verify` unbranching loop).
+**Done — the SDK is green.** Phase 1 stood up the gates; Phase 2/3 rewrote the
+SDK to pass them. `tsgo` typecheck, Oxlint (every category an error + the branch
+ban), and `node:test` 100% coverage all pass, and the gate is wired into the
+pre-commit hook and CI. This document records how it was done; the tool↔law
+mapping and the documented exceptions live in
+`packages/axiom-client/STATIC_ANALYSIS.md`.
 
-## Current backlog (baseline snapshot)
+## Where it started (baseline snapshot)
 
-Run `npm --prefix packages/axiom-client run lint` and `… run coverage` for the
-live numbers. At Phase 1 close:
+At Phase 1 close the gates reported:
 
-| Gate                          | Status |
-|-------------------------------|--------|
-| `tsgo` typecheck              | ✅ green |
-| Oxlint (all categories error) | ❌ 454 findings in `src/`, 301 in `test/` |
-| Branch ban (subset of above)  | ❌ 53 findings in `src/` (`if`, `?:`, `switch`, `for`/`for...of`, `&&`/`||`/`??`, `?.`) |
-| Coverage (100%)               | ❌ 85.7% lines / 85.9% branches / 83.2% functions |
+| Gate                          | Then | Now |
+|-------------------------------|------|-----|
+| `tsgo` typecheck              | ✅   | ✅  |
+| Oxlint (all categories error) | ❌ 454 in `src/`, 301 in `test/` | ✅ 0 |
+| Branch ban (subset)           | ❌ 53 in `src/` | ✅ 0 |
+| Coverage (100%)               | ❌ 85.7% lines | ✅ 100% |
 
-Coverage gaps concentrate in `transport.ts` (52% lines — the WebTransport/WebRTC
-async arms are untested) and the `client.ts` message-dispatch arms.
+## How the branchless rewrite was done
 
-Top non-branch lint rules by volume: `prefer-readonly-parameter-types` (55),
-`no-magic-numbers` (42), `explicit-member-accessibility` (39), `id-length` (38),
-`func-style` (29), plus the `no-unsafe-*` / `no-floating-promises` /
-`switch-exhaustiveness-check` type-aware family.
+The enabling primitive is the **TypeScript assertion function** (`asserts cond`),
+which narrows types with no `if`/`?:`/`as`/`!`:
+
+- **Validation + dispatch** → `assert(cond, msg)` (branchless: `[msg].slice(Number(cond)).map(fail)`),
+  and `assertKind` (`asserts raw is DecodedKind`) over a `Set`, so `peekKind`
+  returns a narrowed kind and `decodeFrame` indexes a total `Record` instead of a `switch`.
+- **Selection** → `pick(options, index)` (a generic `asserts value is Value` gated
+  on an in-range numeric check) and `coalesce(value, fallback)` (array-destructuring
+  default, which applies exactly on `undefined`).
+- **Side-effect iteration** → `each` (a `.map` with a constant return — `.forEach`
+  is banned by `no-array-forEach`, `.reduce` by `no-array-reduce`, `for...of` by the
+  branch ban).
+- **Codec** → DataView byte writer/reader (no bitwise, no loops); the 4-arg
+  encoders (`encodeClientIntent`/`encodeWelcome`) take options objects (`max-params`).
+- **Absent collaborators** → null-objects (`NULL_TRANSPORT`, the WebSocket
+  `SocketSink`) instead of `?.`/`=== null` presence checks.
 
 ## Workstreams
 
@@ -81,21 +92,18 @@ beside architecture/coverage/dylint) and as a CI step in
 `.github/workflows/ci.yml`. Flip the branch ban to a permanent baseline-0
 invariant.
 
-## Design signal: the async transport layer
+## Design signal: the async transport layer (resolved)
 
-`transport.ts` (WebSocket/WebTransport/WebRTC) is built on `async`/`await`,
-`try`/`catch`, and Promise flow, which have no clean branchless form — and
-type-aware lint (`no-floating-promises`, `promise-function-async`,
-`no-unsafe-*` around the DOM streaming APIs) bites hardest here. This is the same
-question the Rust spine answered by scoping `engine_no_branching` out of apps and
-the platform `host` edge.
-
-**To settle in Phase 2, before mass-rewriting:** decide whether `transport.ts` is
-the SDK's "platform edge" (the browser-API boundary, scoped out of the branch ban
-the way `host`/`windowing` are on the Rust side — the protocol codec and client
-state machine stay fully branchless), or whether a small async-result combinator
-removes the branches without an exemption. Do not resolve it by quietly disabling
-the rule per-line. Pick the structural answer and write it down here.
+The browser transports (WebTransport stream reads, WebRTC negotiation) are built
+on `async`/`await` + stream loops with no clean branchless form. **Resolution:**
+they are the SDK's **platform edge** — `webtransport.ts`, `webrtc.ts`, and the
+transport-construction wiring `build-transport.ts` are isolated files, scoped out
+of the branch ban (plus the async/await + `no-unsafe-*` boundary rules) and out of
+the coverage gate, verified via Playwright — exactly as the Rust spine scopes its
+`host`/`windowing` layers out of `engine_no_branching`. The reusable spine (codec,
+client state machine, the default WebSocket transport) stays fully branchless and
+at 100% coverage. The exemptions are documented in `.oxlintrc.json` and
+`STATIC_ANALYSIS.md`; nothing was disabled per-line.
 
 ## Branchless recipe catalog (TypeScript)
 

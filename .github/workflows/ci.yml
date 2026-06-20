@@ -58,3 +58,17 @@ jobs:
 
       - name: Kernel wasm build
         run: cargo build --target wasm32-unknown-unknown -p axiom-kernel
+
+      # The TypeScript SDK (packages/axiom-client) is held to TS-native versions of
+      # the engine laws: tsgo typecheck, Oxlint (every category an error + the
+      # branch ban), and node:test 100% coverage. See packages/axiom-client/STATIC_ANALYSIS.md.
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: TypeScript SDK deps
+        run: npm --prefix packages/axiom-client install --no-audit --no-fund
+
+      - name: TypeScript SDK gate (tsgo + Oxlint + 100% coverage)
+        run: bash scripts/ts-gate.sh

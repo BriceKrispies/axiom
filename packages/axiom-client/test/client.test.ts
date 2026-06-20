@@ -1,54 +1,53 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mock, test } from "node:test";
 
-import { AxiomClient, type ConnectConfig } from "../src/index.ts";
 import {
+  AxiomClient,
+  type ConnectConfig,
+  decodeClientIntent,
   decodeJoinRoom,
   decodeLeaveRoom,
-  decodeClientIntent,
+  encodeJoinRoom,
   encodeRejectedIntent,
   encodeServerEvent,
   encodeServerSnapshot,
   encodeWelcome,
   KIND_JOIN_ROOM,
   REASON_MALFORMED,
+  type Transport,
+  type TransportHandlers,
 } from "../src/index.ts";
-import { FakeSocket } from "./fake_socket.ts";
+import { FakeSocket } from "./fake-socket.ts";
 
-const u8 = (...bytes: number[]) => Uint8Array.from(bytes);
+const u8 = (...bytes: number[]): Uint8Array => Uint8Array.from(bytes);
+const welcome = (clientId: number, serverTick: number): Uint8Array =>
+  encodeWelcome({ clientId, fixedStepNs: 16_666_667, protocolVersion: 1, serverTick });
 
-/** Connect a client through a FakeSocket and return both. */
 function connect(overrides: Partial<ConnectConfig> = {}): { client: AxiomClient; socket: FakeSocket } {
   let socket!: FakeSocket;
   const client = new AxiomClient();
   client.connect({
-    url: "wss://test/play",
     roomId: "lobby",
-    protocolVersion: 1,
-    socketFactory: (url) => {
+    socketFactory: (url): FakeSocket => {
       socket = new FakeSocket(url);
       return socket;
     },
+    url: "wss://test/play",
     ...overrides,
   });
   return { client, socket };
 }
 
-/** Drive a client all the way to "connected" (open + Welcome). */
 function connected(): { client: AxiomClient; socket: FakeSocket } {
   const pair = connect();
   pair.socket.open();
-  pair.socket.receive(encodeWelcome(1, 77, 0, 16_666_667));
+  pair.socket.receive(welcome(77, 0));
   return pair;
 }
 
-test("connect creates a client in connecting state", () => {
-  const { client } = connect();
+test("connect enters connecting and sends JoinRoom on open", () => {
+  const { client, socket } = connect();
   assert.equal(client.getStatus(), "connecting");
-});
-
-test("socket open sends JoinRoom", () => {
-  const { socket } = connect({ roomId: "lobby" });
   socket.open();
   assert.equal(socket.sent.length, 1);
   const join = decodeJoinRoom(socket.sent[0]!);
@@ -57,117 +56,145 @@ test("socket open sends JoinRoom", () => {
   assert.deepEqual(join.roomId, new TextEncoder().encode("lobby"));
 });
 
-test("status handler observes transitions", () => {
-  const seen: string[] = [];
-  const { socket } = connect();
-  // The first "connecting" fires inside connect(); register after to capture
-  // the connected transition, then assert the full path separately.
-  const client2 = new AxiomClient();
-  const statuses: string[] = [];
-  client2.onStatus((s) => statuses.push(s));
-  let inner!: FakeSocket;
-  client2.connect({ url: "u", roomId: "r", socketFactory: (u) => (inner = new FakeSocket(u)) });
-  inner.open();
-  inner.receive(encodeWelcome(1, 1, 0, 1));
-  assert.deepEqual(statuses, ["connecting", "connected"]);
-  // (the first `socket` is unused beyond construction)
-  assert.ok(seen.length === 0);
+test("connect accepts a Uint8Array roomId and an explicit protocol version", () => {
+  const { client, socket } = connect({ protocolVersion: 3, roomId: u8(1, 2, 3), token: u8(9) });
+  socket.open();
+  const join = decodeJoinRoom(socket.sent[0]!);
+  assert.equal(join.protocolVersion, 3);
+  assert.deepEqual(join.roomId, u8(1, 2, 3));
+  assert.deepEqual(join.token, u8(9));
+  assert.equal(client.getStatus(), "connecting");
 });
 
-test("Welcome transitions to connected", () => {
-  const { client, socket } = connect();
+test("Welcome transitions to connected and a duplicate Welcome is ignored", () => {
+  const statuses: string[] = [];
+  let socket!: FakeSocket;
+  const client = new AxiomClient();
+  client.onStatus((status): void => void statuses.push(status));
+  client.connect({
+    roomId: "lobby",
+    socketFactory: (url): FakeSocket => {
+      socket = new FakeSocket(url);
+      return socket;
+    },
+    url: "wss://test/play",
+  });
   socket.open();
-  assert.equal(client.getStatus(), "connecting");
-  socket.receive(encodeWelcome(1, 77, 12, 16_666_667));
+  socket.receive(welcome(77, 12));
   assert.equal(client.getStatus(), "connected");
   assert.equal(client.getServerTick(), 12);
+  assert.equal(client.getClientId(), 77);
+  // A second Welcome (unreliable path) is ignored: tick stays put.
+  socket.receive(welcome(88, 99));
+  assert.equal(client.getClientId(), 77);
+  assert.equal(client.getServerTick(), 12);
+  assert.deepEqual(statuses, ["connecting", "connected"]);
 });
 
-test("sendIntent rejects while disconnected", () => {
-  const client = new AxiomClient();
-  assert.equal(client.sendIntent(u8(1)), null);
-  assert.equal(client.getPendingIntentCount(), 0);
-});
+test("sendIntent returns 0 until connected, then the assigned sequence", () => {
+  const fresh = new AxiomClient();
+  assert.equal(fresh.sendIntent(u8(1)), 0);
+  assert.equal(fresh.getPendingIntentCount(), 0);
 
-test("sendIntent rejects while merely connecting", () => {
   const { client, socket } = connect();
-  socket.open(); // JoinRoom sent, but no Welcome yet
-  assert.equal(client.sendIntent(u8(1)), null);
-  assert.equal(client.getPendingIntentCount(), 0);
-});
+  socket.open(); // connecting, not yet welcomed
+  assert.equal(client.sendIntent(u8(1)), 0);
 
-test("sendIntent sends an encoded ClientIntent and returns its sequence", () => {
-  const { client, socket } = connected();
-  const before = socket.sent.length;
-  assert.equal(client.sendIntent(u8(4, 5, 6)), 1); // returns the assigned seq
-  assert.equal(socket.sent.length, before + 1);
+  socket.receive(welcome(1, 0));
+  assert.equal(client.sendIntent(u8(4, 5, 6)), 1);
   const intent = decodeClientIntent(socket.sent[socket.sent.length - 1]!);
   assert.equal(intent.clientSequence, 1);
   assert.deepEqual(intent.payload, u8(4, 5, 6));
-  assert.equal(client.getPendingIntentCount(), 1);
-  // The sequence increments.
   assert.equal(client.sendIntent(u8(7)), 2);
   assert.equal(client.getPendingIntentCount(), 2);
 });
 
-test("getClientId returns the server-assigned id after Welcome", () => {
-  const { client } = connected(); // connected() welcomes with clientId 77
-  assert.equal(client.getClientId(), 77);
-});
-
-test("Snapshot invokes the snapshot handler and acks pending intents", () => {
+test("Snapshot fires the handler, acks pending intents, and rejects older ticks", () => {
   const { client, socket } = connected();
-  const snapshots: number[] = [];
-  client.onSnapshot((s) => snapshots.push(s.serverTick));
-  client.sendIntent(u8(1)); // seq 1
-  client.sendIntent(u8(2)); // seq 2
+  const ticks: number[] = [];
+  client.onSnapshot((snapshot): void => void ticks.push(snapshot.serverTick));
+  client.sendIntent(u8(1));
+  client.sendIntent(u8(2));
   socket.receive(encodeServerSnapshot(5, 1, u8(0xaa)));
-  assert.deepEqual(snapshots, [5]);
+  assert.deepEqual(ticks, [5]);
   assert.equal(client.getServerTick(), 5);
   assert.equal(client.getLastAckedSequence(), 1);
-  assert.equal(client.getPendingIntentCount(), 1); // seq 2 still pending
+  assert.equal(client.getPendingIntentCount(), 1);
+  socket.receive(encodeServerSnapshot(4, 0, u8())); // older -> ignored
+  assert.equal(client.getServerTick(), 5);
+  socket.receive(encodeServerSnapshot(5, 0, u8())); // equal -> allowed
+  assert.deepEqual(ticks, [5, 5]);
 });
 
-test("an older snapshot is ignored, an equal tick is allowed", () => {
+test("Event fires the event handler", () => {
   const { client, socket } = connected();
-  socket.receive(encodeServerSnapshot(10, 0, u8()));
-  assert.equal(client.getServerTick(), 10);
-  socket.receive(encodeServerSnapshot(9, 0, u8())); // older → ignored
-  assert.equal(client.getServerTick(), 10);
-  socket.receive(encodeServerSnapshot(10, 0, u8())); // equal → allowed
-  assert.equal(client.getServerTick(), 10);
-});
-
-test("Event invokes the event handler", () => {
-  const { client, socket } = connected();
-  const events: number[] = [];
-  client.onEvent((e) => events.push(e.serverTick));
+  const ticks: number[] = [];
+  client.onEvent((event): void => void ticks.push(event.serverTick));
   socket.receive(encodeServerEvent(9, u8(1, 2)));
-  assert.deepEqual(events, [9]);
+  assert.deepEqual(ticks, [9]);
 });
 
-test("RejectedIntent updates pending state", () => {
+test("RejectedIntent drops the rejected sequence from pending", () => {
   const { client, socket } = connected();
-  client.sendIntent(u8(1)); // seq 1
-  client.sendIntent(u8(2)); // seq 2
-  assert.equal(client.getPendingIntentCount(), 2);
+  client.sendIntent(u8(1));
+  client.sendIntent(u8(2));
   socket.receive(encodeRejectedIntent(1, REASON_MALFORMED));
-  assert.equal(client.getPendingIntentCount(), 1); // only seq 2 remains
+  assert.equal(client.getPendingIntentCount(), 1);
 });
 
-test("disconnect closes the socket and moves to disconnected", () => {
+test("a server-sent client-kind frame is ignored, not fatal", () => {
+  const { client, socket } = connected();
+  socket.receive(encodeJoinRoom(1, u8(1), u8())); // client->server kind: ignored
+  assert.equal(client.getStatus(), "connected");
+});
+
+test("disconnect when connected sends LeaveRoom then closes", () => {
   const { client, socket } = connected();
   client.disconnect();
-  // LeaveRoom sent before close.
   const last = socket.sent[socket.sent.length - 1]!;
   assert.deepEqual(decodeLeaveRoom(last).roomId, new TextEncoder().encode("lobby"));
   assert.equal(socket.closed, true);
   assert.equal(client.getStatus(), "disconnected");
 });
 
-test("a server-sent client message is ignored, not fatal", () => {
+test("disconnect before connecting is a safe no-op close", () => {
+  const fresh = new AxiomClient();
+  assert.doesNotThrow(() => {
+    fresh.disconnect();
+  });
+  assert.equal(fresh.getStatus(), "disconnected");
+});
+
+test("a transport-driven close returns the client to disconnected", () => {
   const { client, socket } = connected();
-  // A ClientIntent frame should never come from the server; the client ignores it.
-  socket.receive(encodeRejectedIntent(0, 0)); // valid, to confirm liveness
+  socket.close(); // drives onClose
+  assert.equal(client.getStatus(), "disconnected");
+});
+
+test("an unreliable transport resends JoinRoom until welcomed, then stops", () => {
+  mock.timers.enable({ apis: ["setInterval"] });
+  let handlers!: TransportHandlers;
+  const sent: Uint8Array[] = [];
+  const unreliable: Transport = {
+    close: (): void => {
+      /* ignore */
+    },
+    open: (received): void => {
+      handlers = received;
+    },
+    reliable: false,
+    send: (data): void => void sent.push(data),
+  };
+  const client = new AxiomClient();
+  client.connect({ roomId: "lobby", transportFactory: (): Transport => unreliable, url: "u" });
+  handlers.onOpen();
+  assert.equal(sent.length, 1); // initial JoinRoom
+  mock.timers.tick(250);
+  assert.equal(sent.length, 2); // resent while still connecting
+  handlers.onMessage(welcome(1, 0));
   assert.equal(client.getStatus(), "connected");
+  mock.timers.tick(250); // first tick after welcome stops the timer
+  mock.timers.tick(250); // and no further resends happen
+  assert.equal(sent.length, 2);
+  mock.timers.reset();
 });
