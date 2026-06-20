@@ -1,66 +1,67 @@
-// Public entry point for the `@axiom/client` browser SDK.
-//
-// Re-exports the ergonomic client and the low-level protocol codec/constants so
-// game authors can use the high-level `AxiomClient` or drop down to the wire
-// format when they need to. The server stays authoritative; this package is glue
-// and ergonomics, not engine truth.
+/*
+ * Public entry point for the `@axiom/client` browser SDK.
+ *
+ * Re-exports the ergonomic client and the low-level protocol codec/constants so
+ * game authors can use the high-level `AxiomClient` or drop down to the wire
+ * format. The server stays authoritative; this package is glue and ergonomics,
+ * not engine truth.
+ */
 
 export { AxiomClient } from "./client.ts";
-export type { ClientStatus, ConnectConfig } from "./client.ts";
-export {
-  WebSocketTransport,
-  WebTransportTransport,
-  WebRtcTransport,
-} from "./transport.ts";
-export type {
-  Transport,
-  TransportKind,
-  TransportHandlers,
-  WebSocketLike,
-} from "./transport.ts";
+export type { ClientStatus, ConnectConfig } from "./client-config.ts";
+
+export { WebSocketTransport } from "./transport.ts";
+export type { SocketLike, Transport, TransportHandlers, TransportKind } from "./transport.ts";
+export { WebTransportTransport } from "./webtransport.ts";
+export { WebRtcTransport } from "./webrtc.ts";
+
+export { ProtocolError } from "./protocol-error.ts";
 
 export {
-  ProtocolError,
-  WIRE_MAJOR,
-  WIRE_MINOR,
-  KIND_JOIN_ROOM,
-  KIND_LEAVE_ROOM,
-  KIND_CLIENT_INTENT,
-  KIND_WELCOME,
-  KIND_SERVER_SNAPSHOT,
-  KIND_SERVER_EVENT,
-  KIND_REJECTED_INTENT,
-  MAX_ROOM_ID_LEN,
-  MAX_PAYLOAD_LEN,
-  REASON_UNSPECIFIED,
-  REASON_MALFORMED,
-  REASON_OUT_OF_ORDER,
-  REASON_NOT_IN_ROOM,
-  peekKind,
+  decodeClientIntent,
   decodeFrame,
-  encodeJoinRoom,
-  encodeLeaveRoom,
-  encodeClientIntent,
-  encodeWelcome,
-  encodeServerSnapshot,
-  encodeServerEvent,
-  encodeRejectedIntent,
   decodeJoinRoom,
   decodeLeaveRoom,
-  decodeClientIntent,
-  decodeWelcome,
-  decodeServerSnapshot,
-  decodeServerEvent,
   decodeRejectedIntent,
-} from "./protocol.ts";
+  decodeServerEvent,
+  decodeServerSnapshot,
+  decodeWelcome,
+  encodeClientIntent,
+  encodeJoinRoom,
+  encodeLeaveRoom,
+  encodeRejectedIntent,
+  encodeServerEvent,
+  encodeServerSnapshot,
+  encodeWelcome,
+  peekKind,
+} from "./codec.ts";
+export type { ClientIntentFields, WelcomeFields } from "./codec.ts";
 
+export {
+  KIND_CLIENT_INTENT,
+  KIND_JOIN_ROOM,
+  KIND_LEAVE_ROOM,
+  KIND_REJECTED_INTENT,
+  KIND_SERVER_EVENT,
+  KIND_SERVER_SNAPSHOT,
+  KIND_WELCOME,
+  MAX_PAYLOAD_LEN,
+  MAX_ROOM_ID_LEN,
+  REASON_MALFORMED,
+  REASON_NOT_IN_ROOM,
+  REASON_OUT_OF_ORDER,
+  REASON_UNSPECIFIED,
+  WIRE_MAJOR,
+  WIRE_MINOR,
+} from "./messages.ts";
 export type {
+  ClientIntentMessage,
+  DecodedKind,
   DecodedMessage,
   JoinRoomMessage,
   LeaveRoomMessage,
-  ClientIntentMessage,
-  WelcomeMessage,
-  ServerSnapshotMessage,
-  ServerEventMessage,
   RejectedIntentMessage,
-} from "./protocol.ts";
+  ServerEventMessage,
+  ServerSnapshotMessage,
+  WelcomeMessage,
+} from "./messages.ts";

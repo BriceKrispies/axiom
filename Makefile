@@ -258,7 +258,6 @@ gallery:
 # (TypeScript 7.0 native) typecheck, Oxlint with every category an error plus the
 # branch ban, and node:test 100% coverage. The TS counterpart of `bash
 # scripts/coverage.sh`. Run `npm --prefix packages/axiom-client install` once
-# first. NOTE: the SDK is not yet green (see docs/ts-sdk-hardening.md), so this
-# gate currently reports red and is deliberately not yet wired into pre-commit/CI.
+# first. The SDK is green and this gate is wired into pre-commit + CI as a hard gate.
 ts-gate:
 	bash scripts/ts-gate.sh

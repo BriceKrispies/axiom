@@ -51,13 +51,46 @@ Or from the repo root: `make ts-gate` (runs `scripts/ts-gate.sh`).
   `--test-coverage-lines/branches/functions=100` (test files excluded). Below
   100% on any metric exits non-zero.
 
+## Module layout
+
+The codec spine is split one-class-per-file (the lint forbids multiple classes
+per file): `messages.ts` (constants + decoded shapes), `byte-writer.ts` /
+`byte-reader.ts` (DataView-based, no bitwise), `protocol-error.ts` (the
+`assert`/`fail` branchless validation primitives), `codec.ts` (encoders/decoders +
+total-`Record` dispatch), `branchless.ts` (`pick`/`coalesce`/`each` selection
+primitives), `text.ts`, `transport.ts` (the WebSocket transport + `asUint8Array`),
+`client-config.ts`, and `client.ts` (the branchless state machine). `index.ts` is
+the public facade.
+
+## The platform edge
+
+`webtransport.ts`, `webrtc.ts`, and `build-transport.ts` bind browser-only APIs
+(`WebTransport`, `RTCPeerConnection`, `fetch`, `new WebSocket`) whose async/stream
+control flow has no clean branchless form. Like the Rust spine's `host`/`windowing`
+layers, they are the **platform edge**: a documented subset of rules (the branch
+ban, `no-async-await`, `await-in-loop`, the `no-unsafe-*` family) is scoped off for
+them in `.oxlintrc.json`, and they are **coverage-exempt** (excluded in the
+`coverage` script), verified instead via the Playwright browser path. Everything
+else stays fully branchless and at 100% node coverage.
+
+## Documented exceptions
+
+These are the only relaxations, each justified in `.oxlintrc.json`:
+
+- **`prefer-readonly-parameter-types` is off globally** — a TypeScript
+  type-system impossibility, not a code shape: a binary codec is built on
+  `Uint8Array`/`DataView`, which have no readonly form (`Readonly<Uint8Array>`
+  still exposes `set`/`fill`), and `readonly number[]` would destroy the binary
+  contract and performance.
+- **The platform-edge subset** (above), scoped to two/three files.
+- **Tests** keep the correctness/suspicious/perf/type-aware rules but relax the
+  production-ergonomics pedantic/style/restriction rules (byte-vector literals,
+  short conventional names, fixture array access), matching how clippy treats
+  Rust tests.
+
 ## Status
 
-**Phase 1 (tooling) is in place; the SDK is not yet green.** Turning these gates
-on at full strength surfaces the existing backlog (branchy control flow, typed-lint
-findings, and sub-100% coverage). The remediation — a branchless rewrite of
-`client.ts`/`protocol.ts`/`transport.ts` and the drive to 100% coverage — is
-tracked in [`../../docs/ts-sdk-hardening.md`](../../docs/ts-sdk-hardening.md).
-Until it lands, the gate is intentionally **not** wired into the blocking
-pre-commit hook or CI, mirroring how the Rust spine ran its unbranching loop
-before `engine_no_branching` went hard.
+**Green.** `tsgo` typecheck passes, Oxlint (every category an error + the branch
+ban) passes, and `node:test` coverage is **100%** lines/branches/functions across
+every spine file. The gate is wired into the pre-commit hook and CI. The history
+of the remediation is in [`../../docs/ts-sdk-hardening.md`](../../docs/ts-sdk-hardening.md).

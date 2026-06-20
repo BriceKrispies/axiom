@@ -859,13 +859,21 @@ Run the gates with `make ts-gate` (or `npm --prefix packages/axiom-client run
 gate`). The tools and how they map to the Rust laws are documented in
 `packages/axiom-client/STATIC_ANALYSIS.md`.
 
-**Status:** the tooling is in place and runs at full strength, but the SDK is not
-yet green — the branchless rewrite and the drive to 100% coverage are tracked in
-`docs/ts-sdk-hardening.md`. Until that lands, `ts-gate` reports red and is
-intentionally **not** wired into the blocking pre-commit hook or CI, exactly how
-the Rust spine ran its unbranching loop before `engine_no_branching` went hard.
-Do not relax the gate to make it pass; remediate the code (No-Shortcuts applies
-to the SDK too).
+The browser-only transports (`webtransport.ts`, `webrtc.ts`, `build-transport.ts`)
+are the SDK's **platform edge** — the analogue of the Rust spine's `host`/`windowing`
+layers. A documented subset of rules (the branch ban, async/await, `no-unsafe-*`)
+is scoped off for them and they are coverage-exempt (browser-only, verified via the
+Playwright path); everything else stays fully branchless and 100% covered. The one
+global rule exception is `prefer-readonly-parameter-types` (off), a TypeScript
+type-system impossibility for a `Uint8Array`/`DataView` codec — both documented in
+`.oxlintrc.json`.
+
+**Status:** green. `tsgo` typecheck, Oxlint (every category an error + the branch
+ban), and `node:test` 100% coverage all pass, and `ts-gate` is wired into the
+pre-commit hook and CI as a hard gate. Do not relax the gate to make a change pass;
+remediate the code (No-Shortcuts applies to the SDK too). The remediation history is
+in `docs/ts-sdk-hardening.md` and the tool↔law mapping in
+`packages/axiom-client/STATIC_ANALYSIS.md`.
 
 ## Browser verification (Playwright controller)
 

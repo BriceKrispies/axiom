@@ -16,11 +16,10 @@
 # in packages/axiom-client/devDependencies; run `npm --prefix packages/axiom-client
 # install` once first.
 #
-# NOTE (Phase 1): the SDK is not yet green — the branchless rewrite and the drive
-# to 100% coverage are tracked in docs/ts-sdk-hardening.md. Until that lands this
-# gate reports red; it is intentionally NOT wired into the blocking pre-commit
-# hook or CI yet (exactly how the Rust spine ran its unbranching loop before the
-# engine_no_branching gate went hard).
+# The SDK is green (branchless, maximally linted, 100% covered) and this gate is
+# wired into the pre-commit hook and CI as a hard gate. The remediation history is
+# in docs/ts-sdk-hardening.md; the tool<->law mapping and documented exceptions are
+# in packages/axiom-client/STATIC_ANALYSIS.md.
 set -euo pipefail
 
 pkg="packages/axiom-client"
