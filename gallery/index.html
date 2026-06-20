@@ -21,7 +21,11 @@
       for (const demo of DEMOS) {
         const card = document.createElement("a");
         card.className = "card";
-        card.href = `./demo.html?id=${encodeURIComponent(demo.id)}`;
+        // Self-hosted demos (demo.page) link to their own page; the rest open in
+        // the shared per-demo shell.
+        card.href = demo.page
+          ? `./${demo.page}`
+          : `./demo.html?id=${encodeURIComponent(demo.id)}`;
 
         const h2 = document.createElement("h2");
         h2.textContent = demo.title;

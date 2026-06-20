@@ -24,12 +24,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # The static gallery shell files copied verbatim to the dist root.
 GALLERY_FILES = ["index.html", "demo.html", "gallery.js", "keypad.js", "styles.css"]
 
-# demo id (== dist subdir) -> the app's wasm-bindgen output directory.
+# demo id (== dist subdir) -> the app's wasm-bindgen output directory. These
+# demos run in the shared per-demo shell (demo.html), so only their pkg is copied.
 DEMO_PKGS = {
     "rotating-cube": "apps/axiom-demo-rotating-cube-browser/web/pkg",
     "netplay": "apps/axiom-netplay-browser/web/pkg",
     "doom": "apps/axiom-doom-browser/web/pkg",
     "stress-cubes": "apps/axiom-stress-cubes-browser/web/pkg",
+}
+
+# Self-hosted demos own their page (a multi-screen flow that does not fit the
+# shared shell), so their whole web/ dir (index.html + pkg) is copied verbatim.
+# demo id (== dist subdir) -> the app's web/ directory.
+DEMO_PAGES = {
+    "growth": "apps/axiom-growth/web",
 }
 
 
@@ -54,6 +62,19 @@ def main() -> int:
             )
             return 1
         shutil.copytree(pkg, dist / demo_id / "pkg")
+
+    for demo_id, web_rel in DEMO_PAGES.items():
+        web = REPO_ROOT / web_rel
+        if not (web / "pkg").is_dir():
+            print(
+                f"error: {web_rel}/pkg not found — build the wasm bundles first "
+                f"(`make gallery-build`, or the cargo + wasm-bindgen steps in "
+                f"deploy-pages.yml).",
+                file=sys.stderr,
+            )
+            return 1
+        # Copy the whole self-hosted page (index.html + pkg + any assets).
+        shutil.copytree(web, dist / demo_id)
 
     print(f"assembled gallery into {dist}")
     return 0

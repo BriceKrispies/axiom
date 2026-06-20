@@ -237,10 +237,12 @@ gallery-build:
 	cargo build -p $(NETPLAY_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(DOOM_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(STRESS_CRATE) --target $(WASM_TARGET) --release
+	cargo build -p $(GROWTH_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(PKG_DIR) $(WASM_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(DOOM_PKG) $(DOOM_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(STRESS_PKG) $(STRESS_ARTIFACT)
+	wasm-bindgen --target web --out-dir $(GROWTH_PKG) $(GROWTH_ARTIFACT)
 	npm --prefix packages/axiom-client install --no-audit --no-fund
 	npm --prefix packages/axiom-client run build
 	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_WEB)/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
