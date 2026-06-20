@@ -82,6 +82,20 @@ export const DEMOS = [
     // cube count (read from `?cubes=`, default 2000).
     cubeStress: true,
   },
+  {
+    id: "growth",
+    title: "Growth (walkable terrain)",
+    blurb: "Generate a planet, pick a spot on its map, and walk the procedural terrain in first person.",
+    desc:
+      "A procedural-terrain world viewer on the engine: configure and generate a " +
+      "planet, descend onto a land spot from the overworld map, then walk its " +
+      "streamed LOD terrain. Desktop: click the canvas to capture the mouse, WASD/" +
+      "arrows to move, mouse to look, Esc to release. (WebGPU; desktop-oriented.)",
+    // Growth is self-hosted: its multi-screen flow (config form → overworld map →
+    // descend → first-person view) doesn't fit the shared single-canvas shell, so
+    // its card links to its own page (copied into dist/growth/ by the assembler).
+    page: "growth/index.html",
+  },
 ];
 
 /** Look a demo up by its `id`, or `null` when unknown. */
@@ -186,6 +200,11 @@ export async function bootDemo() {
   const demo = demoById(params.get("id"));
   if (!demo) {
     setStatus(status, "Unknown demo. Return to the gallery to pick one.", "err");
+    return;
+  }
+  // Self-hosted demos own their page; the shared shell just forwards to it.
+  if (demo.page) {
+    location.replace(`./${demo.page}`);
     return;
   }
   titleEl.textContent = demo.title;
