@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // Axiom @axiom/client static-analysis gate. The TS-native counterpart of the
+  // Rust spine's clippy/dylint + engine_no_branching laws. EVERY category is an
+  // error and maxWarnings is 0, so any finding fails the run. Type-aware rules
+  // run through tsgolint (typescript-go, TS 7). See STATIC_ANALYSIS.md.
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "style": "error",
+    "restriction": "error",
+    "nursery": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "maxWarnings": 0
+  },
+  "jsPlugins": [{ "name": "eslint-js", "specifier": "oxlint-plugin-eslint" }],
+  "rules": {
+    // The Branchless Law for TypeScript: the no-restricted-syntax analogue of the
+    // Rust engine_no_branching dylint. Every control-flow branch is banned.
+    "eslint-js/no-restricted-syntax": [
+      "error",
+      { "selector": "IfStatement", "message": "Branchless Law: no `if`. Use a table index `[b, a][Number(cond)]` or an iterator combinator. See docs/ts-sdk-hardening.md." },
+      { "selector": "ConditionalExpression", "message": "Branchless Law: no ternary `?:`. Select with a lookup table or arithmetic. See docs/ts-sdk-hardening.md." },
+      { "selector": "SwitchStatement", "message": "Branchless Law: no `switch`. Dispatch through a record/Map keyed by the discriminant. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForStatement", "message": "Branchless Law: no `for`. Use map/forEach/reduce/from over the iterable. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForInStatement", "message": "Branchless Law: no `for...in`. Iterate Object.keys/entries with array combinators. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForOfStatement", "message": "Branchless Law: no `for...of`. Use map/forEach/reduce over the iterable. See docs/ts-sdk-hardening.md." },
+      { "selector": "WhileStatement", "message": "Branchless Law: no `while`. Express the loop as an iterator/fold. See docs/ts-sdk-hardening.md." },
+      { "selector": "DoWhileStatement", "message": "Branchless Law: no `do...while`. Express the loop as an iterator/fold. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='&&']", "message": "Branchless Law: no `&&` short-circuit. Use `&` when the RHS is pure, or combinators for guards. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='||']", "message": "Branchless Law: no `||` short-circuit. Use `|` when the RHS is pure, or combinators. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='??']", "message": "Branchless Law: no `??`. Default through a value transform, not a short-circuit. See docs/ts-sdk-hardening.md." },
+      { "selector": "ChainExpression", "message": "Branchless Law: no optional chaining `?.`. Make presence explicit through a value transform. See docs/ts-sdk-hardening.md." }
+    ]
+  },
+  "overrides": [
+    {
+      // Tests keep their branches — the Branchless Law exempts tests exactly as
+      // the Rust engine_no_branching lint does. Every OTHER category still
+      // applies to tests (clippy lints Rust tests via --all-targets too).
+      "files": ["test/**/*.ts"],
+      "rules": {
+        "eslint-js/no-restricted-syntax": "off"
+      }
+    }
+  ]
+}

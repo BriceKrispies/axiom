@@ -88,12 +88,22 @@ npm test
 # → node --test "test/**/*.test.ts"
 ```
 
-Optional static type-checking (requires `npm install` for the dev-only
-TypeScript compiler):
+## Static analysis & gates
+
+This package is held to TypeScript-native versions of the Axiom engine's laws:
+maximum-strictness static analysis, a branch ban, and 100% coverage. After
+`npm install`:
 
 ```sh
-npm run typecheck
+npm run typecheck   # tsgo — TypeScript 7.0 native (Go) compiler
+npm run lint        # Oxlint — every category an error, plus the branch ban
+npm run coverage    # node:test built-in coverage, fails under 100%
+npm run gate        # all three in sequence (or: make ts-gate from the repo root)
 ```
+
+See [`STATIC_ANALYSIS.md`](STATIC_ANALYSIS.md) for how each maps to the Rust
+spine's gates, and [`../../docs/ts-sdk-hardening.md`](../../docs/ts-sdk-hardening.md)
+for the in-progress remediation to a fully-green gate.
 
 The tests prove: connect enters `connecting`; socket-open sends `JoinRoom`;
 `sendIntent` encodes a `ClientIntent` only when connected and rejects while

@@ -14,10 +14,17 @@
   ],
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json"
+    "typecheck": "tsgo --noEmit",
+    "build": "tsgo -p tsconfig.build.json",
+    "lint": "oxlint --type-aware --deny-warnings",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-exclude=\"test/**\" \"test/**/*.test.ts\"",
+    "gate": "npm run typecheck && npm run lint && npm run coverage"
   },
   "devDependencies": {
-    "typescript": "^5.7.0"
+    "@types/node": "^24.0.0",
+    "@typescript/native-preview": "7.0.0-dev.20260620.1",
+    "oxlint": "1.70.0",
+    "oxlint-plugin-eslint": "1.70.0",
+    "oxlint-tsgolint": "0.23.0"
   }
 }
