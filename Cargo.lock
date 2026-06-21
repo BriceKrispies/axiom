@@ -160,6 +160,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-gpu-backend"
+version = "0.1.0"
+dependencies = [
+ "axiom-host",
+ "axiom-kernel",
+ "bytemuck",
+ "wasm-bindgen",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
 name = "axiom-growth"
 version = "0.1.0"
 dependencies = [
@@ -320,6 +332,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-roomed-puzzle"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "console_error_panic_hook",
+ "serde",
+ "toml",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-runtime"
 version = "0.1.0"
 dependencies = [
@@ -338,6 +362,22 @@ dependencies = [
  "axiom-math",
  "axiom-runtime",
  "axiom-zones",
+]
+
+[[package]]
+name = "axiom-sim-core"
+version = "0.1.0"
+dependencies = [
+ "axiom-ecs",
+ "axiom-kernel",
+]
+
+[[package]]
+name = "axiom-sim-crucible"
+version = "0.1.0"
+dependencies = [
+ "axiom-ecs",
+ "axiom-sim-core",
 ]
 
 [[package]]
@@ -364,13 +404,12 @@ dependencies = [
 name = "axiom-windowing"
 version = "0.1.0"
 dependencies = [
+ "axiom-gpu-backend",
  "axiom-host",
  "axiom-kernel",
- "bytemuck",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu",
 ]
 
 [[package]]

@@ -1,32 +1,32 @@
-# Axiom module manifest — axiom-windowing (an ENGINE module).
+# Axiom module manifest — axiom-windowing (a FEATURE module).
 #
-# Windowing is the deterministic presentation driver. It is an *isolated engine
-# module* (allowed_modules = []): it composes no other module. It builds only on
-# the kernel and the host layer's deterministic presentation boundary
-# (HostPresentationRequest / HostSurfaceHandle / surface descriptor + adapter /
-# device requests), turning plain viewport dimensions into a validated
-# presentation request and driving the fixed per-frame tick loop.
+# Windowing is the deterministic presentation driver. It builds on the kernel and
+# the host layer's deterministic presentation boundary (HostPresentationRequest /
+# HostSurfaceHandle / surface descriptor + adapter / device requests), turning
+# plain viewport dimensions into a validated presentation request and driving the
+# fixed per-frame tick loop (canvas lookup + requestAnimationFrame + monotonic
+# tick).
 #
-# Why an engine module and not a feature module composing axiom-webgpu: module
-# contract types are not nameable across modules (axiom-webgpu exposes only its
-# WebGpuApi facade; GpuSubmission is threaded as an inferred local, never named).
-# The presentation backend therefore operates on plain, nameable data and the
-# host layer's presentation types — not on a webgpu module type — so windowing
-# needs no module dependency. The platform (wasm/wgpu) presentation arm plugs in
-# behind this deterministic core later; it is the one place that will hold
-# browser/GPU APIs, added to the source-hygiene platform allowlist when it lands.
+# It is a *feature module* because it composes one module: axiom-gpu-backend. The
+# run loop delegates each frame's real GPU draw to the backend's facade
+# (GpuBackendApi — a nameable facade, not a deeper contract type), constructing it
+# from the host-layer presentation request. The deterministic *what/when* stays
+# here; the impure wgpu *how* lives in the backend. Both are wasm32-gated platform
+# arms behind native-clean cores (PLATFORM_FACING_MODULES).
 
 [module]
 name = "windowing"
 crate_name = "axiom-windowing"
-kind = "engine-module"
+kind = "feature-module"
 
 allowed_layers = [
     "kernel",
     "host",
 ]
 
-allowed_modules = []
+allowed_modules = [
+    "gpu-backend",
+]
 
 introduced_capabilities = [
     "presentation-request-assembly",

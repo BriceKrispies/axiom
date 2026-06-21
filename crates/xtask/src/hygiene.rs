@@ -54,12 +54,13 @@ const BROWSER_API_NEEDLES: &[&str] = &[
 /// Layers that are explicitly allowed to reference platform APIs.
 const PLATFORM_FACING_LAYERS: &[&str] = &["host"];
 
-/// Modules that are explicitly allowed to reference platform APIs. The
-/// `windowing` module owns the live presentation arm (the real `wgpu` /
-/// `web-sys` binding), compiled only for `wasm32` behind its deterministic
-/// core — the one sanctioned platform-facing module (Module Law #9). Adding
-/// another entry here is a deliberate amendment, not a default.
-const PLATFORM_FACING_MODULES: &[&str] = &["windowing"];
+/// Modules that are explicitly allowed to reference platform APIs. Two modules
+/// own the live presentation arm (the real `wgpu` / `web-sys` binding), compiled
+/// only for `wasm32` behind their native-clean facades (Module Law #9):
+/// `windowing` drives the deterministic run loop + surface request, and
+/// `gpu-backend` owns the real wgpu device/pipeline/buffers it delegates each
+/// frame's draw to. Adding another entry here is a deliberate amendment.
+const PLATFORM_FACING_MODULES: &[&str] = &["windowing", "gpu-backend"];
 
 /// Run the centralized source-hygiene scan against every layer source dir
 /// and every module source dir, pushing violations into `report`.

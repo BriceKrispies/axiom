@@ -1,0 +1,37 @@
+[package]
+name = "axiom-gpu-backend"
+description = "Axiom engine module: the real wgpu presentation backend. Built from a host presentation request, it owns the browser's GPU device/pipeline/buffers and presents instanced draws. The native-clean facade (surface size + readiness + no-op present) is 100% testable on native; the real wgpu/web-sys arm is compiled only for wasm32 behind it."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. The native facade is browser-free and wasm-clean; the real
+# wgpu/web-sys arm never enters this rlib's native build.
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module", allowed_modules = []): it composes
+# NO other module. It builds on the host layer's deterministic presentation
+# boundary (HostPresentationRequest), reading the physical surface size from it.
+axiom-host = { path = "../../crates/axiom-host" }
+
+[dev-dependencies]
+# Tests construct a HostPresentationRequest via the host API, which takes a
+# kernel handle source. Test-only, so it never counts as a non-test dependency.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+# The live presentation arm: real wgpu + web-sys, pulled in ONLY for wasm32, so
+# native `cargo test`/coverage never compiles them and the facade stays
+# browser-free. This is a sanctioned platform-facing module (Module Law #9 /
+# PLATFORM_FACING_MODULES).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
+wgpu = "25"
+bytemuck = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

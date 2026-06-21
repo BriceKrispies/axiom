@@ -1,0 +1,32 @@
+# Axiom module manifest — axiom-gpu-backend (an ENGINE module).
+#
+# The real wgpu presentation backend. It is an *isolated engine module*
+# (allowed_modules = []): it composes no other module. It builds only on the host
+# layer's deterministic presentation boundary (HostPresentationRequest), reading
+# the physical surface size from it, and owns the browser's GPU device/pipeline/
+# buffers behind a native-clean facade.
+#
+# Why an engine module and not a feature module: it names no other module's
+# contract type. It consumes a host-LAYER value (HostPresentationRequest, which is
+# nameable across the engine graph) plus plain float streams. The deterministic
+# run loop lives in axiom-windowing, which depends on this module and delegates
+# each frame's draw to it.
+#
+# This is the second sanctioned platform-facing module (Module Law #9): its real
+# wgpu/web-sys arm is compiled only for wasm32, behind the facade, and is added to
+# the source-hygiene platform allowlist (PLATFORM_FACING_MODULES).
+
+[module]
+name = "gpu-backend"
+crate_name = "axiom-gpu-backend"
+kind = "engine-module"
+
+allowed_layers = [
+    "host",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "live-gpu-presentation",
+]
