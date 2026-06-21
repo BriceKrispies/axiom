@@ -5,6 +5,8 @@ use axiom_math::{Vec2, Vec3, Vec4};
 use crate::basic_lit_material::build_basic_lit_material;
 use crate::cube_mesh::build_cube_mesh;
 use crate::mesh_data::{MeshData, MeshInputVertex};
+use crate::plane_mesh::build_plane_mesh;
+use crate::sphere_mesh::build_sphere_mesh;
 use crate::resolved_resources::ResolvedResources;
 use crate::resource_id::ResourceId;
 use crate::resource_table::ResourceTable;
@@ -69,6 +71,20 @@ impl ResourcesApi {
     pub fn register_cube_mesh(&self, table: &mut ResourceTable) -> ResourceId {
         let (vertices, indices) = build_cube_mesh();
         self.register_mesh(table, "axiom.builtin.cube", &vertices, &indices)
+    }
+
+    /// Register the built-in unit plane (quad) mesh and return its [`ResourceId`].
+    /// A 1x1 quad in the XZ plane facing +Y — scale it into a ground plane.
+    pub fn register_plane_mesh(&self, table: &mut ResourceTable) -> ResourceId {
+        let (vertices, indices) = build_plane_mesh();
+        self.register_mesh(table, "axiom.builtin.plane", &vertices, &indices)
+    }
+
+    /// Register the built-in unit UV-sphere mesh and return its [`ResourceId`].
+    /// Radius 0.5 (diameter 1, matching the unit cube), smooth normals.
+    pub fn register_sphere_mesh(&self, table: &mut ResourceTable) -> ResourceId {
+        let (vertices, indices) = build_sphere_mesh();
+        self.register_mesh(table, "axiom.builtin.sphere", &vertices, &indices)
     }
 
     /// Register the built-in basic-lit material with the given base
@@ -230,6 +246,21 @@ mod tests {
         let id = api().register_cube_mesh(&mut t);
         assert!(id.is_valid());
         assert_eq!(t.mesh_count(), 1);
+    }
+
+    #[test]
+    fn plane_and_sphere_primitives_can_be_registered_and_resolve() {
+        let api = api();
+        let mut t = api.empty_table();
+        let plane = api.register_plane_mesh(&mut t);
+        let sphere = api.register_sphere_mesh(&mut t);
+        assert!(plane.is_valid());
+        assert!(sphere.is_valid());
+        assert_eq!(t.mesh_count(), 2);
+        let resolved = api.resolve(&t);
+        // The plane is a 4-vertex quad; the sphere has many more vertices.
+        assert_eq!(api.resolved_mesh_vertex_count(&resolved, plane.raw()), Some(4));
+        assert!(api.resolved_mesh_vertex_count(&resolved, sphere.raw()).unwrap() > 100);
     }
 
     #[test]

@@ -24,6 +24,7 @@ mod frame_outcome;
 mod handle;
 mod material;
 mod mesh;
+mod mesh_geometry;
 mod player;
 mod renderable;
 mod scene_commands;

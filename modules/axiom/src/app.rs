@@ -11,9 +11,8 @@
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
 use axiom_kernel::{Radians, Ratio};
-use axiom_math::{MathApi, Vec2, Vec3};
+use axiom_math::{MathApi, Vec3};
 use axiom_render_pipeline::RenderPipelineApi;
-use axiom_resources::ResourcesApi;
 use axiom_runtime::{Runtime, RuntimeConfig};
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
@@ -33,6 +32,7 @@ use crate::default_plugins::DefaultPlugins;
 use crate::frame_outcome::{DrawData, FrameOutcome};
 use crate::material::Material;
 use crate::mesh::Mesh;
+use crate::mesh_geometry::{mesh_geometry, MeshGeometry};
 use crate::player::PlayerInput;
 use crate::scene_commands::SceneCommands;
 use crate::window::Window;
@@ -122,12 +122,11 @@ impl App {
             .expect("surface dimensions are valid");
 
         let mut running = self.build();
-        let (vertices, indices) = running.mesh_vertex_stream();
+        let meshes = running.mesh_set();
         let max_instances = running.renderable_count() as u32;
-        let _ = windowing.run_web(&surface_id, vertices, indices, max_instances, move |tick| {
+        let _ = windowing.run_web_multi(&surface_id, meshes, max_instances, move |tick| {
             let outcome = running.tick(tick);
-            let count = outcome.draws().len() as u32;
-            (outcome.clear_color(), outcome.instance_floats(), count)
+            (outcome.clear_color(), outcome.mesh_batches())
         });
     }
 }
@@ -243,7 +242,9 @@ impl RunningApp {
         let renderables = commands.renderable_count();
 
         let mut scene = SceneApi::new();
-        let light_direction = commands.realize_into(&mut scene, &math).unwrap_or(Vec3::ZERO);
+        let light_direction = commands
+            .realize_into(&mut scene, &math)
+            .unwrap_or(Vec3::ZERO);
 
         // Each material asset -> (handle id, colour); each mesh asset -> its own
         // resolved geometry keyed by handle id. The engine resolves a mesh by its
@@ -285,8 +286,7 @@ impl RunningApp {
     where
         F: FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>) + 'static,
     {
-        let aspect =
-            self.viewport.physical_width() as f32 / self.viewport.physical_height() as f32;
+        let aspect = self.viewport.physical_width() as f32 / self.viewport.physical_height() as f32;
         let authored = Self::author(Some(Box::new(setup)), aspect);
         self.scene = authored.scene;
         self.light_direction = authored.light_direction;
@@ -324,13 +324,35 @@ impl RunningApp {
                     .iter()
                     .zip(geom.normals.iter())
                     .for_each(|(p, n)| {
-                        vertices.extend_from_slice(&[
-                            p.x, p.y, p.z, n.x, n.y, n.z, 1.0, 1.0, 1.0, 1.0,
-                        ])
+                        vertices
+                            .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, 1.0, 1.0, 1.0, 1.0])
                     });
                 (vertices, geom.indices.clone())
             },
         )
+    }
+
+    /// Every registered mesh's geometry as the multi-mesh live backend's upload
+    /// set: `(mesh_id, interleaved position+normal+colour vertices [10
+    /// floats/vertex], triangle indices)`. Per-vertex colour is opaque white (the
+    /// live shader multiplies it by the per-instance material colour, so white
+    /// keeps the material colour authoritative). The backend uploads these once
+    /// and draws each frame's per-mesh instance batches against them.
+    pub fn mesh_set(&self) -> Vec<(u64, Vec<f32>, Vec<u32>)> {
+        self.meshes
+            .iter()
+            .map(|(id, geom)| {
+                let mut vertices = Vec::with_capacity(geom.positions.len() * 10);
+                geom.positions
+                    .iter()
+                    .zip(geom.normals.iter())
+                    .for_each(|(p, n)| {
+                        vertices
+                            .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, 1.0, 1.0, 1.0, 1.0])
+                    });
+                (*id, vertices, geom.indices.clone())
+            })
+            .collect()
     }
 
     /// Drive one deterministic frame at `tick`: step the runtime, advance the
@@ -402,12 +424,9 @@ impl RunningApp {
         // return, without the branch in source.
         self.render
             .then(|| {
-                let mut frame = self.pipeline.new_frame(
-                    width,
-                    height,
-                    self.clear_color,
-                    self.light_direction,
-                );
+                let mut frame =
+                    self.pipeline
+                        .new_frame(width, height, self.clear_color, self.light_direction);
                 let pipeline = &mut self.pipeline;
                 self.meshes.iter().for_each(|(id, geometry)| {
                     pipeline.frame_add_mesh(
@@ -434,7 +453,10 @@ impl RunningApp {
                         let color = pipeline
                             .report_draw_color(&report, i)
                             .expect("draw index in range");
-                        DrawData::new(view_projection.multiply(world).as_cols_array(), color)
+                        let mesh_id = pipeline
+                            .report_draw_mesh_id(&report, i)
+                            .expect("draw index in range");
+                        DrawData::new(view_projection.multiply(world).as_cols_array(), color, mesh_id)
                     })
                     .collect();
 
@@ -461,70 +483,6 @@ struct AuthoredScene {
     meshes: Vec<(u64, MeshGeometry)>,
     materials: Vec<(u64, [f32; 4])>,
     renderables: usize,
-}
-
-/// One mesh's resolved geometry: the vertex streams the render pipeline uploads.
-#[derive(Debug)]
-struct MeshGeometry {
-    positions: Vec<Vec3>,
-    normals: Vec<Vec3>,
-    uvs: Vec<Vec2>,
-    indices: Vec<u32>,
-}
-
-/// Resolve a mesh description into renderable geometry by its kind. Each kind
-/// maps to an engine primitive; the built-in cube is the one kind today, and
-/// further primitives are added here. This mapping lives in the umbrella because
-/// it bridges the umbrella's `Mesh` enum to an `axiom-resources` primitive —
-/// neither module can name the other's types, so the composition is the feature
-/// module's job.
-fn mesh_geometry(mesh: &Mesh) -> MeshGeometry {
-    // `Mesh` has a single variant, so the former `match mesh { Mesh::Cube => … }`
-    // is an irrefutable bind, not a branch: destructure it directly and resolve
-    // the one built-in primitive. Adding a second kind reintroduces a real choice
-    // here (and the `let` will fail to compile, flagging the omission).
-    let Mesh::Cube = mesh;
-    cube_geometry()
-}
-
-/// The engine's built-in cube primitive. `axiom-resources` owns the cube mesh
-/// data; this only threads it into plain vertex streams the renderer uploads
-/// (the resources table is a local, so its un-nameable type never escapes here).
-fn cube_geometry() -> MeshGeometry {
-    let resources = ResourcesApi::new();
-    let mut table = resources.empty_table();
-    let id = resources.register_cube_mesh(&mut table).raw();
-    let resolved = resources.resolve(&table);
-    let vertex_count = resources
-        .resolved_mesh_vertex_count(&resolved, id)
-        .expect("cube mesh present");
-    let mut positions = Vec::with_capacity(vertex_count);
-    let mut normals = Vec::with_capacity(vertex_count);
-    let mut uvs = Vec::with_capacity(vertex_count);
-    (0..vertex_count).for_each(|v| {
-        let p = resources
-            .resolved_mesh_position_at(&resolved, id, v)
-            .expect("vertex in range");
-        let n = resources
-            .resolved_mesh_normal_at(&resolved, id, v)
-            .expect("vertex in range");
-        let u = resources
-            .resolved_mesh_uv_at(&resolved, id, v)
-            .expect("vertex in range");
-        positions.push(Vec3::new(p[0], p[1], p[2]));
-        normals.push(Vec3::new(n[0], n[1], n[2]));
-        uvs.push(Vec2::new(u[0], u[1]));
-    });
-    let indices = resources
-        .resolved_mesh_indices(&resolved, id)
-        .expect("cube mesh present")
-        .to_vec();
-    MeshGeometry {
-        positions,
-        normals,
-        uvs,
-        indices,
-    }
 }
 
 #[cfg(test)]
@@ -842,10 +800,18 @@ mod tests {
         let (vertices, indices) = app.mesh_vertex_stream();
         assert!(!vertices.is_empty());
         assert_eq!(vertices.len() % 10, 0); // position(3)+normal(3)+colour(4) per vertex
-        // Per-vertex colour defaults to opaque white so the per-instance colour
-        // stays authoritative (white * instance == instance).
+                                            // Per-vertex colour defaults to opaque white so the per-instance colour
+                                            // stays authoritative (white * instance == instance).
         assert_eq!(&vertices[6..10], &[1.0, 1.0, 1.0, 1.0]);
         assert!(!indices.is_empty());
+
+        // The multi-mesh upload set: three cubes share one mesh, so one entry,
+        // matching the single mesh_vertex_stream geometry.
+        let set = app.mesh_set();
+        assert_eq!(set.len(), 1);
+        assert_eq!(set[0].1.len() % 10, 0);
+        assert_eq!(set[0].1, vertices);
+        assert_eq!(set[0].2, indices);
     }
 
     #[test]
@@ -881,7 +847,11 @@ mod tests {
         });
         assert_eq!(app.renderable_count(), 3);
         let after = app.tick(1);
-        assert_eq!(after.tick(), 1, "the frame tick keeps advancing across reload");
+        assert_eq!(
+            after.tick(),
+            1,
+            "the frame tick keeps advancing across reload"
+        );
         assert_ne!(before.draws().len(), after.draws().len());
     }
 

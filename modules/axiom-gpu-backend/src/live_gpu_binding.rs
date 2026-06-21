@@ -6,6 +6,8 @@
 //! of position+normal+colour + per-instance MVP/colour floats + a clear colour)
 //! and issues the real GPU calls. Every decision lives on the deterministic side.
 
+use std::collections::HashMap;
+
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
@@ -57,7 +59,23 @@ const INSTANCE_STRIDE: u64 = 20 * 4;
 /// Bytes per vertex: position(3 f32) + normal(3 f32) + colour(4 f32) = 10 f32.
 const VERTEX_STRIDE: u64 = 10 * 4;
 
+/// One uploaded mesh's GPU buffers: its interleaved vertex stream and triangle
+/// index buffer, plus the index count to draw.
+#[derive(Debug)]
+struct MeshBuffers {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
 /// The real, browser-owned GPU objects. Held only here, on wasm32.
+///
+/// A frame is a list of per-mesh instance batches: distinct meshes are uploaded
+/// once into `meshes` (keyed by the mesh id the engine's command stream carries),
+/// and each frame the shared `instance_buffer` is filled with every batch's
+/// instances back-to-back; each batch is then drawn against its own mesh buffers
+/// using a byte-offset slice of the instance buffer (so no `firstInstance` is
+/// needed — WebGL-downlevel safe).
 #[derive(Debug)]
 pub struct LiveGpuBinding {
     surface: wgpu::Surface<'static>,
@@ -65,27 +83,44 @@ pub struct LiveGpuBinding {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
+    meshes: HashMap<u64, MeshBuffers>,
     instance_buffer: wgpu::Buffer,
     depth_view: wgpu::TextureView,
-    index_count: u32,
     max_instances: u32,
+}
+
+/// Build a mesh's GPU buffers from an interleaved vertex stream (10 floats/vertex:
+/// position+normal+colour) and a triangle-list index buffer.
+fn upload_mesh(device: &wgpu::Device, vertices: &[f32], indices: &[u32]) -> MeshBuffers {
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("axiom-mesh-vertices"),
+        contents: bytemuck::cast_slice(vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("axiom-mesh-indices"),
+        contents: bytemuck::cast_slice(indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    MeshBuffers {
+        vertex_buffer,
+        index_buffer,
+        index_count: indices.len() as u32,
+    }
 }
 
 impl LiveGpuBinding {
     /// Real GPU initialisation: instance → surface from canvas → adapter →
-    /// device/queue → configure surface → upload the engine's cube geometry →
-    /// build the instanced cube render pipeline + depth buffer. `vertices` is
-    /// the interleaved position+normal+colour stream (10 floats/vertex);
-    /// `indices` the triangle list. Errors are surfaced as `JsValue`; this never
-    /// fakes success.
+    /// device/queue → configure surface → upload every distinct mesh into the
+    /// mesh cache → build the instanced render pipeline + depth buffer. `meshes`
+    /// is the distinct geometry set as `(mesh_id, interleaved vertices [10
+    /// floats/vertex], triangle indices)`; per-frame draws reference these ids.
+    /// Errors are surfaced as `JsValue`; this never fakes success.
     pub async fn initialize(
         canvas: HtmlCanvasElement,
         width: u32,
         height: u32,
-        vertices: &[f32],
-        indices: &[u32],
+        meshes: &[(u64, Vec<f32>, Vec<u32>)],
         max_instances: u32,
     ) -> Result<LiveGpuBinding, JsValue> {
         let width = width.max(1);
@@ -134,18 +169,11 @@ impl LiveGpuBinding {
         };
         surface.configure(&device, &config);
 
-        // Upload the engine's cube geometry once (shared by all instances).
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("axiom-cube-vertices"),
-            contents: bytemuck::cast_slice(vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("axiom-cube-indices"),
-            contents: bytemuck::cast_slice(indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-        let index_count = indices.len() as u32;
+        // Upload every distinct mesh once into the cache (shared across frames).
+        let meshes: HashMap<u64, MeshBuffers> = meshes
+            .iter()
+            .map(|(id, vertices, indices)| (*id, upload_mesh(&device, vertices, indices)))
+            .collect();
 
         // Per-instance MVP + colour buffer, rewritten each frame.
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -263,27 +291,36 @@ impl LiveGpuBinding {
             queue,
             config,
             pipeline,
-            vertex_buffer,
-            index_buffer,
+            meshes,
             instance_buffer,
             depth_view,
-            index_count,
             max_instances,
         })
     }
 
-    /// Draw one real frame: write the engine's per-cube instances, clear, draw
-    /// all cubes instanced with depth testing, and present. Real pixels.
-    /// `instances` is `[mvp(16), colour(4)]` per cube.
-    pub fn render_frame(
-        &self,
-        instances: &[f32],
-        instance_count: u32,
-        clear: [f32; 4],
-    ) -> Result<(), JsValue> {
-        let instance_count = instance_count.min(self.max_instances);
+    /// Draw one real frame from per-mesh instance batches. Each batch is
+    /// `(mesh_id, instances [mvp(16)+colour(4) per instance], count)`. All
+    /// batches' instances are packed back-to-back into the shared instance
+    /// buffer (capped at `max_instances` total), then each batch is drawn against
+    /// its cached mesh buffers using a byte-offset slice of the instance buffer.
+    /// A batch whose `mesh_id` was never uploaded is skipped. Real pixels.
+    pub fn render_frame(&self, batches: &[(u64, Vec<f32>, u32)], clear: [f32; 4]) -> Result<(), JsValue> {
+        // Pack instances and record each batch's draw range (mesh id, byte
+        // offset into the instance buffer, instance count), capped at capacity.
+        let mut packed: Vec<f32> = Vec::new();
+        let mut draws: Vec<(u64, u64, u32)> = Vec::new();
+        let mut written: u32 = 0;
+        for (mesh_id, instances, count) in batches {
+            let room = self.max_instances.saturating_sub(written);
+            let count = (*count).min(room);
+            let floats = (count as usize) * 20;
+            let byte_offset = u64::from(written) * INSTANCE_STRIDE;
+            packed.extend_from_slice(&instances[..floats.min(instances.len())]);
+            draws.push((*mesh_id, byte_offset, count));
+            written += count;
+        }
         self.queue
-            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(instances));
+            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&packed));
 
         let frame = self
             .surface
@@ -295,11 +332,11 @@ impl LiveGpuBinding {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("axiom-cube-encoder"),
+                label: Some("axiom-frame-encoder"),
             });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("axiom-cube-pass"),
+                label: Some("axiom-frame-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -325,41 +362,30 @@ impl LiveGpuBinding {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..self.index_count, 0, 0..instance_count);
+            for (mesh_id, byte_offset, count) in &draws {
+                if let Some(mesh) = self.meshes.get(mesh_id) {
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, self.instance_buffer.slice(*byte_offset..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
+                }
+            }
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         Ok(())
     }
 
-    /// Replace the uploaded geometry mid-loop: recreate the vertex + index
-    /// buffers from a freshly-built mesh (interleaved position+normal+colour
-    /// `vertices`, 10 floats/vertex; triangle-list `indices`) and update the
-    /// index count drawn each frame. The pipeline, instance buffer, surface and
-    /// depth view are untouched — only the static mesh window changes. Used by
-    /// the streaming run loop to slide the terrain around the player without
-    /// rebuilding the binding. Dropping the old buffers here frees their GPU
-    /// allocations; the new buffers carry the same `VERTEX` / `INDEX` usage and
-    /// layout the pipeline already expects.
-    pub fn replace_geometry(&mut self, vertices: &[f32], indices: &[u32]) {
-        self.vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("axiom-cube-vertices"),
-                contents: bytemuck::cast_slice(vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        self.index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("axiom-cube-indices"),
-                contents: bytemuck::cast_slice(indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-        self.index_count = indices.len() as u32;
+    /// Replace one cached mesh's geometry mid-loop (recreate its vertex + index
+    /// buffers from a freshly-built mesh; interleaved position+normal+colour
+    /// `vertices`, 10 floats/vertex; triangle-list `indices`). The pipeline,
+    /// instance buffer, surface and depth view are untouched. Used by the
+    /// streaming run loop to slide the terrain mesh around the player without
+    /// rebuilding the binding. Dropping the old buffers frees their GPU
+    /// allocations.
+    pub fn replace_geometry(&mut self, mesh_id: u64, vertices: &[f32], indices: &[u32]) {
+        self.meshes
+            .insert(mesh_id, upload_mesh(&self.device, vertices, indices));
     }
 }
 
