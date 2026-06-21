@@ -3,21 +3,29 @@
 use std::collections::HashMap;
 
 /// One drawn object: its wgpu-ready model-view-projection matrix (column-major,
-/// 16 floats), its linear RGBA colour, and the id of the mesh it draws (so draws
-/// can be grouped into per-mesh instance batches).
+/// 16 floats), its linear RGBA colour, and the ids of the mesh it draws and the
+/// material it uses (so draws can be grouped into per-`(mesh, material)` instance
+/// batches and bound to the matching albedo texture).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawData {
     mvp: [f32; 16],
     color: [f32; 4],
     mesh_id: u64,
+    material_id: u64,
 }
 
 impl DrawData {
-    pub(crate) const fn new(mvp: [f32; 16], color: [f32; 4], mesh_id: u64) -> Self {
+    pub(crate) const fn new(
+        mvp: [f32; 16],
+        color: [f32; 4],
+        mesh_id: u64,
+        material_id: u64,
+    ) -> Self {
         DrawData {
             mvp,
             color,
             mesh_id,
+            material_id,
         }
     }
 
@@ -34,6 +42,11 @@ impl DrawData {
     /// The id of the mesh this object draws.
     pub const fn mesh_id(&self) -> u64 {
         self.mesh_id
+    }
+
+    /// The id of the material this object uses (selects its albedo texture).
+    pub const fn material_id(&self) -> u64 {
+        self.material_id
     }
 }
 
@@ -117,17 +130,19 @@ impl FrameOutcome {
         out
     }
 
-    /// Group the per-object draws into **per-mesh instance batches** for the
-    /// multi-mesh live backend: `(mesh_id, [mvp(16), colour(4)] per instance,
-    /// count)`, one entry per distinct mesh in first-appearance order. This is the
-    /// plain data the multi-mesh run loop presents each frame; the backend draws
-    /// each batch against the matching uploaded mesh.
-    pub fn mesh_batches(&self) -> Vec<(u64, Vec<f32>, u32)> {
-        let mut order: Vec<u64> = Vec::new();
-        let mut packed: HashMap<u64, Vec<f32>> = HashMap::new();
+    /// Group the per-object draws into **per-`(mesh, material)` instance batches**
+    /// for the multi-mesh, multi-material live backend: `(mesh_id, material_id,
+    /// [mvp(16), colour(4)] per instance, count)`, one entry per distinct
+    /// `(mesh, material)` pair in first-appearance order. This is the plain data
+    /// the multi-mesh run loop presents each frame; the backend draws each batch
+    /// against the matching uploaded mesh with the material's albedo bound.
+    pub fn mesh_batches(&self) -> Vec<(u64, u64, Vec<f32>, u32)> {
+        let mut order: Vec<(u64, u64)> = Vec::new();
+        let mut packed: HashMap<(u64, u64), Vec<f32>> = HashMap::new();
         self.draws.iter().for_each(|draw| {
-            let floats = packed.entry(draw.mesh_id).or_insert_with(|| {
-                order.push(draw.mesh_id);
+            let key = (draw.mesh_id, draw.material_id);
+            let floats = packed.entry(key).or_insert_with(|| {
+                order.push(key);
                 Vec::new()
             });
             floats.extend_from_slice(&draw.mvp);
@@ -135,10 +150,10 @@ impl FrameOutcome {
         });
         order
             .into_iter()
-            .map(|id| {
-                let floats = packed.remove(&id).unwrap_or_default();
+            .map(|(mesh_id, material_id)| {
+                let floats = packed.remove(&(mesh_id, material_id)).unwrap_or_default();
                 let count = (floats.len() / 20) as u32;
-                (id, floats, count)
+                (mesh_id, material_id, floats, count)
             })
             .collect()
     }
@@ -155,8 +170,8 @@ mod tests {
             0,
             [0.0; 4],
             vec![
-                DrawData::new([1.0; 16], [0.1, 0.2, 0.3, 1.0], 1),
-                DrawData::new([2.0; 16], [0.4, 0.5, 0.6, 1.0], 1),
+                DrawData::new([1.0; 16], [0.1, 0.2, 0.3, 1.0], 1, 1),
+                DrawData::new([2.0; 16], [0.4, 0.5, 0.6, 1.0], 1, 1),
             ],
             false,
             true,
@@ -180,36 +195,39 @@ mod tests {
     }
 
     #[test]
-    fn mesh_batches_group_draws_by_mesh_in_first_appearance_order() {
-        // Two meshes interleaved: mesh 7 (draws 0,2) then mesh 9 (draw 1).
+    fn mesh_batches_group_draws_by_mesh_and_material_in_first_appearance_order() {
+        // Same mesh 7, two materials: material 5 (draws 0,2) then material 6
+        // (draw 1) — so the (mesh, material) pair, not the mesh alone, keys a
+        // batch. A textured and an untextured material on one mesh must not merge.
         let outcome = FrameOutcome::new(
             0,
             0,
             [0.0; 4],
             vec![
-                DrawData::new([1.0; 16], [0.1, 0.2, 0.3, 1.0], 7),
-                DrawData::new([2.0; 16], [0.4, 0.5, 0.6, 1.0], 9),
-                DrawData::new([3.0; 16], [0.7, 0.8, 0.9, 1.0], 7),
+                DrawData::new([1.0; 16], [0.1, 0.2, 0.3, 1.0], 7, 5),
+                DrawData::new([2.0; 16], [0.4, 0.5, 0.6, 1.0], 7, 6),
+                DrawData::new([3.0; 16], [0.7, 0.8, 0.9, 1.0], 7, 5),
             ],
             true,
             false,
         );
-        // The per-draw accessors expose mvp/colour/mesh id.
+        // The per-draw accessors expose mvp/colour/mesh id/material id.
         assert_eq!(outcome.draws()[0].mesh_id(), 7);
-        assert_eq!(outcome.draws()[1].mesh_id(), 9);
+        assert_eq!(outcome.draws()[0].material_id(), 5);
+        assert_eq!(outcome.draws()[1].material_id(), 6);
         assert_eq!(outcome.draws()[0].mvp(), [1.0; 16]);
         assert_eq!(outcome.draws()[0].color(), [0.1, 0.2, 0.3, 1.0]);
 
         let batches = outcome.mesh_batches();
         assert_eq!(batches.len(), 2);
-        // First-appearance order: mesh 7 first (2 instances), then mesh 9 (1).
-        assert_eq!(batches[0].0, 7);
-        assert_eq!(batches[0].2, 2);
-        assert_eq!(batches[0].1.len(), 40); // 2 instances x 20 floats
-        assert_eq!(&batches[0].1[0..16], &[1.0; 16]);
-        assert_eq!(&batches[0].1[20..36], &[3.0; 16]);
-        assert_eq!(batches[1].0, 9);
-        assert_eq!(batches[1].2, 1);
-        assert_eq!(&batches[1].1[0..16], &[2.0; 16]);
+        // First-appearance order: (7,5) first (2 instances), then (7,6) (1).
+        assert_eq!((batches[0].0, batches[0].1), (7, 5));
+        assert_eq!(batches[0].3, 2);
+        assert_eq!(batches[0].2.len(), 40); // 2 instances x 20 floats
+        assert_eq!(&batches[0].2[0..16], &[1.0; 16]);
+        assert_eq!(&batches[0].2[20..36], &[3.0; 16]);
+        assert_eq!((batches[1].0, batches[1].1), (7, 6));
+        assert_eq!(batches[1].3, 1);
+        assert_eq!(&batches[1].2[0..16], &[2.0; 16]);
     }
 }

@@ -144,11 +144,7 @@ pub fn sample_region(atlas: &PlanetSurfaceAtlas, region: RegionId) -> SurfaceSam
     }
     let elevation = atlas.region_elevation.get(i).copied().unwrap_or(0.0);
     let moisture = atlas.region_moisture.get(i).copied().unwrap_or(0.0);
-    let latitude = atlas
-        .sites
-        .get(i)
-        .map(|&s| geo::latitude(s))
-        .unwrap_or(0.0);
+    let latitude = atlas.sites.get(i).map(|&s| geo::latitude(s)).unwrap_or(0.0);
     let temperature = derive_temperature(latitude, elevation);
     SurfaceSample {
         region,
@@ -275,7 +271,10 @@ mod tests {
         let lat = 0.2_f32;
         let low = derive_temperature(lat, 0.0);
         let high = derive_temperature(lat, 2.0);
-        assert!(high < low, "higher elevation must be colder: {high} !< {low}");
+        assert!(
+            high < low,
+            "higher elevation must be colder: {high} !< {low}"
+        );
     }
 
     #[test]

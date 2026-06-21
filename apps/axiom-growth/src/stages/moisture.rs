@@ -75,8 +75,10 @@ impl Stage for MoistureStage {
             }
         }
 
-        ctx.log
-            .push(format!("moisture: ocean-distance BFS, max_dist {}", max_dist));
+        ctx.log.push(format!(
+            "moisture: ocean-distance BFS, max_dist {}",
+            max_dist
+        ));
     }
 }
 
@@ -106,7 +108,10 @@ mod tests {
                 triangles: Vec::new(),
                 subdivisions: 0,
             },
-            graph: RegionGraph { offsets, neighbours },
+            graph: RegionGraph {
+                offsets,
+                neighbours,
+            },
             ..PlanetGlobe::default()
         };
         g.resize_fields();

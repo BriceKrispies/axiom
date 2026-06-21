@@ -35,12 +35,7 @@ impl GameWorldLocalMap {
 
         // Fallbacks: first land region, else region 0.
         let anchor_idx = best_idx
-            .or_else(|| {
-                atlas
-                    .region_elevation
-                    .iter()
-                    .position(|&e| e >= 0.0)
-            })
+            .or_else(|| atlas.region_elevation.iter().position(|&e| e >= 0.0))
             .unwrap_or(0);
 
         let dir = atlas
@@ -61,9 +56,7 @@ impl GameWorldLocalMap {
     /// is normalised (falling back to the north pole if it is degenerate) so the
     /// tangent basis is always well-formed. Audit: GW-E1 anchor (caller-chosen).
     pub fn anchored_at(atlas: &PlanetSurfaceAtlas, unit_dir: Vec3) -> Self {
-        let dir = unit_dir
-            .normalize()
-            .unwrap_or(Vec3::new(0.0, 1.0, 0.0));
+        let dir = unit_dir.normalize().unwrap_or(Vec3::new(0.0, 1.0, 0.0));
         let (east, north) = geo::tangent_basis(dir);
         Self {
             anchor_dir: [dir.x, dir.y, dir.z],
@@ -102,9 +95,7 @@ impl GameWorldLocalMap {
             return [dir.x, dir.y, dir.z];
         }
         // Unit tangent direction of travel.
-        let t_hat = tangent
-            .normalize()
-            .unwrap_or(east);
+        let t_hat = tangent.normalize().unwrap_or(east);
         // Exponential map: p = cos(theta) * dir + sin(theta) * t_hat.
         let theta = dist_m / r;
         let (s, c) = theta.sin_cos();
@@ -151,7 +142,11 @@ mod tests {
         let lm = GameWorldLocalMap::anchored_at(&atlas(), Vec3::new(0.3, 0.4, 0.5));
         let dir = Vec3::new(lm.anchor_dir[0], lm.anchor_dir[1], lm.anchor_dir[2]);
         let east = Vec3::new(lm.tangent_east[0], lm.tangent_east[1], lm.tangent_east[2]);
-        let north = Vec3::new(lm.tangent_north[0], lm.tangent_north[1], lm.tangent_north[2]);
+        let north = Vec3::new(
+            lm.tangent_north[0],
+            lm.tangent_north[1],
+            lm.tangent_north[2],
+        );
         assert!(dir.dot(east).abs() < 1.0e-4, "east _|_ anchor");
         assert!(dir.dot(north).abs() < 1.0e-4, "north _|_ anchor");
         assert!(east.dot(north).abs() < 1.0e-4, "east _|_ north");

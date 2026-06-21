@@ -59,12 +59,17 @@ impl GpuBackendApi {
         }
     }
 
-    /// Present one frame from per-mesh instance batches: each batch is
-    /// `(mesh_id, instance floats [mvp(16)+colour(4) per instance], count)`,
-    /// referencing a mesh uploaded at [`Self::initialize`]. Returns whether real
-    /// pixels were drawn — always `false` on native (headless), and on wasm32
-    /// `true` when a live binding rendered the frame.
-    pub fn present_frame(&self, clear_color: [f32; 4], batches: &[(u64, Vec<f32>, u32)]) -> bool {
+    /// Present one frame from per-`(mesh, material)` instance batches: each batch
+    /// is `(mesh_id, material_id, instance floats [mvp(16)+colour(4) per
+    /// instance], count)`, referencing a mesh and a material uploaded at
+    /// [`Self::initialize`]. The material selects the albedo texture/sampler bind
+    /// group. Returns whether real pixels were drawn — always `false` on native
+    /// (headless), and on wasm32 `true` when a live binding rendered the frame.
+    pub fn present_frame(
+        &self,
+        clear_color: [f32; 4],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+    ) -> bool {
         #[cfg(target_arch = "wasm32")]
         {
             return self
@@ -80,9 +85,11 @@ impl GpuBackendApi {
         }
     }
 
-    /// Initialise the real wgpu binding from a canvas and the engine's distinct
-    /// mesh set (`(mesh_id, interleaved position+normal+colour vertices [10
-    /// floats/vertex], triangle indices)`). wasm32 only; on success later
+    /// Initialise the real wgpu binding from a canvas, the engine's distinct mesh
+    /// set (`(mesh_id, interleaved position+normal+uv+colour vertices [12
+    /// floats/vertex], triangle indices)`), and the material set
+    /// (`(material_id, width, height, RGBA8 albedo pixels)`) — one bind group
+    /// (texture + sampler) is built per material. wasm32 only; on success later
     /// [`Self::present_frame`] calls draw real pixels. On failure the binding
     /// stays absent (not ready).
     #[cfg(target_arch = "wasm32")]
@@ -90,6 +97,7 @@ impl GpuBackendApi {
         &mut self,
         canvas: web_sys::HtmlCanvasElement,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
+        materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let binding = crate::live_gpu_binding::LiveGpuBinding::initialize(
@@ -97,6 +105,7 @@ impl GpuBackendApi {
             self.width,
             self.height,
             meshes,
+            materials,
             max_instances,
         )
         .await?;
@@ -163,8 +172,8 @@ mod tests {
         // On native there is no GPU binding: not ready, and present draws nothing.
         let backend = GpuBackendApi::new(&request(640, 480));
         assert!(!backend.binding_is_ready());
-        // One batch of one instance: mvp(16) + colour(4).
-        let batches = vec![(7_u64, vec![0.0_f32; 20], 1_u32)];
+        // One batch of one instance: mesh 7, material 5, mvp(16) + colour(4).
+        let batches = vec![(7_u64, 5_u64, vec![0.0_f32; 20], 1_u32)];
         assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &batches));
     }
 }

@@ -107,11 +107,7 @@ impl PlanetGlobe {
         if self.region_elevation.is_empty() {
             return 0.0;
         }
-        let land = self
-            .region_elevation
-            .iter()
-            .filter(|&&e| e >= 0.0)
-            .count();
+        let land = self.region_elevation.iter().filter(|&&e| e >= 0.0).count();
         land as f32 / self.region_elevation.len() as f32
     }
 }

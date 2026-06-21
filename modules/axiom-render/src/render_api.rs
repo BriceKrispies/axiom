@@ -113,6 +113,18 @@ impl RenderApi {
         input.add_material(RenderMaterial::new(id, base_color))
     }
 
+    /// Register a basic-lit material that samples albedo texture `texture_id`
+    /// (`0` = untextured).
+    pub fn add_input_textured_material(
+        &self,
+        input: &mut RenderInput,
+        id: u64,
+        base_color: Vec4,
+        texture_id: u64,
+    ) -> u32 {
+        input.add_material(RenderMaterial::new_textured(id, base_color, texture_id))
+    }
+
     pub fn add_input_object(
         &self,
         input: &mut RenderInput,
@@ -141,7 +153,10 @@ impl RenderApi {
         let mut list = RenderCommandList::with_capacity(3 + input.objects().len() * 3);
         list.push(RenderCommand::clear_frame(input.clear_color()));
         input.camera().map(|camera| {
-            list.push(RenderCommand::set_camera(camera.view(), camera.projection()));
+            list.push(RenderCommand::set_camera(
+                camera.view(),
+                camera.projection(),
+            ));
         });
         list.push(RenderCommand::set_pipeline(RenderPipelineKind::BASIC_LIT));
         input.objects().iter().for_each(|object| {
@@ -165,7 +180,10 @@ impl RenderApi {
                 })
                 .map(|(object, mesh, material)| {
                     list.push(RenderCommand::set_mesh(mesh.id()));
-                    list.push(RenderCommand::set_material(material.id()));
+                    list.push(RenderCommand::set_material(
+                        material.id(),
+                        material.texture_id(),
+                    ));
                     list.push(RenderCommand::draw_indexed(
                         mesh.indices().len() as u32,
                         object.world(),
@@ -203,6 +221,17 @@ impl RenderApi {
 
     pub fn command_material_id_at(&self, list: &RenderCommandList, idx: usize) -> Option<u64> {
         list.at(idx).and_then(RenderCommand::as_material_id)
+    }
+
+    /// The albedo texture id bound by the `SetMaterial` command at `idx` (`0` =
+    /// untextured), or `None` for any other kind. Lets the app thread the
+    /// material→texture binding into the backend's submission.
+    pub fn command_material_texture_id_at(
+        &self,
+        list: &RenderCommandList,
+        idx: usize,
+    ) -> Option<u64> {
+        list.at(idx).and_then(RenderCommand::as_material_texture_id)
     }
 
     pub fn command_draw_indexed_at(
@@ -436,6 +465,21 @@ mod cov {
         assert_eq!(api.command_pipeline_at(&list, 0), None);
         assert_eq!(api.command_mesh_id_at(&list, 0), None);
         assert_eq!(api.command_material_id_at(&list, 0), None);
+        assert_eq!(api.command_material_texture_id_at(&list, 0), None);
         assert_eq!(api.command_draw_indexed_at(&list, 0), None);
+    }
+
+    #[test]
+    fn textured_material_threads_its_texture_into_the_set_material_command() {
+        let api = api();
+        let mut input = api.new_input(100, 100);
+        let mesh_idx = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        // texture id 77 is carried on the material and surfaced on its command.
+        let mat_idx = api.add_input_textured_material(&mut input, 5, Vec4::ONE, 77);
+        api.add_input_object(&mut input, Mat4::IDENTITY, mesh_idx, mat_idx, true);
+        let list = api.build_command_list(&input);
+        // ClearFrame + SetPipeline + SetMesh + SetMaterial + DrawIndexed.
+        assert_eq!(api.command_material_id_at(&list, 3), Some(5));
+        assert_eq!(api.command_material_texture_id_at(&list, 3), Some(77));
     }
 }

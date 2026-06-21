@@ -29,6 +29,7 @@ mod player;
 mod renderable;
 mod scene_commands;
 mod spin;
+mod texture;
 mod window;
 
 pub mod prelude;

@@ -11,11 +11,11 @@
 
 use axiom_growth::gameworld;
 use axiom_growth::model_world::{GameWorldLocalMap, CHUNK_SIZE_CELLS, CHUNK_VERT_SIDE};
-use axiom_math::Vec3;
-use std::collections::HashMap;
 use axiom_growth::presets::PlanetPreset;
 use axiom_growth::sampler::{self, biome};
 use axiom_growth::Growth;
+use axiom_math::Vec3;
+use std::collections::HashMap;
 
 fn main() {
     let g = Growth::generate("axiom-growth-demo", PlanetPreset::Earthlike, 40_000);
@@ -63,7 +63,7 @@ fn render_globe(g: &Growth, size: usize, path: &str) {
                 continue; // outside the sphere
             }
             let sz = (1.0 - r2).sqrt(); // front hemisphere
-            // World direction of this surface point (rotate view → world).
+                                        // World direction of this surface point (rotate view → world).
             let dir = Vec3::new(
                 right[0] * sx + up[0] * sy + forward[0] * sz,
                 right[1] * sx + up[1] * sy + forward[1] * sz,
@@ -159,7 +159,12 @@ fn render_local(g: &Growth, path: &str) {
         hi = hi.max(v);
     }
     let span = (hi - lo).max(1.0);
-    eprintln!("local heightfield: min={:.1}m max={:.1}m span={:.1}m", lo, hi, hi - lo);
+    eprintln!(
+        "local heightfield: min={:.1}m max={:.1}m span={:.1}m",
+        lo,
+        hi,
+        hi - lo
+    );
 
     let scale = 5usize; // upscale for visibility
     let w = (grid - 1) * scale;
@@ -241,7 +246,12 @@ impl<'a> Terrain<'a> {
         localmap: &'a GameWorldLocalMap,
         seed: u64,
     ) -> Self {
-        Self { atlas, localmap, seed, cache: HashMap::new() }
+        Self {
+            atlas,
+            localmap,
+            seed,
+            cache: HashMap::new(),
+        }
     }
 
     /// Continuous terrain height at any world (x,z), by lazily generating the

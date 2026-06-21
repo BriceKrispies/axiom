@@ -112,7 +112,10 @@ pub fn build_locator(sites: &[Vec3]) -> RegionLocator {
             cell_regions[cell].push(i as u32);
         }
     }
-    RegionLocator { cell_regions, bands }
+    RegionLocator {
+        cell_regions,
+        bands,
+    }
 }
 
 #[cfg(test)]
@@ -120,7 +123,9 @@ mod tests {
     use super::*;
 
     fn dir(x: f32, y: f32, z: f32) -> Vec3 {
-        Vec3::new(x, y, z).normalize().unwrap_or(Vec3::new(1.0, 0.0, 0.0))
+        Vec3::new(x, y, z)
+            .normalize()
+            .unwrap_or(Vec3::new(1.0, 0.0, 0.0))
     }
 
     #[test]

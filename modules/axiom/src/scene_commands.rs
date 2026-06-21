@@ -98,8 +98,7 @@ impl SceneCommands {
                             .add_perspective_camera(
                                 math,
                                 node,
-                                Radians::new(p.fov_y.as_radians())
-                                    .expect("authored fov is finite"),
+                                Radians::new(p.fov_y.as_radians()).expect("authored fov is finite"),
                                 Ratio::new(self.aspect).expect("authored aspect is finite"),
                                 p.near,
                                 p.far,

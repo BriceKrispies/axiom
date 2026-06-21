@@ -116,13 +116,14 @@ mod tests {
                 triangles: Vec::new(),
                 subdivisions: 0,
             },
-            graph: RegionGraph { offsets, neighbours },
+            graph: RegionGraph {
+                offsets,
+                neighbours,
+            },
             ..PlanetGlobe::default()
         };
         g.resize_fields();
-        g.region_elevation = (0..n)
-            .map(|i| if i == 0 { -1.0 } else { 0.5 })
-            .collect();
+        g.region_elevation = (0..n).map(|i| if i == 0 { -1.0 } else { 0.5 }).collect();
         // Wind blows toward +x for all regions.
         g.region_wind = vec![Vec3::new(1.0, 0.0, 0.0); n];
         // Dry land, wet ocean to start.

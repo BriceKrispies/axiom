@@ -92,25 +92,28 @@ mod tests {
     #[test]
     fn latitude_poles_and_equator() {
         assert!(approx(latitude(Vec3::new(0.0, 1.0, 0.0)), PI / 2.0, 1.0e-5));
-        assert!(approx(latitude(Vec3::new(0.0, -1.0, 0.0)), -PI / 2.0, 1.0e-5));
+        assert!(approx(
+            latitude(Vec3::new(0.0, -1.0, 0.0)),
+            -PI / 2.0,
+            1.0e-5
+        ));
         assert!(approx(latitude(Vec3::new(1.0, 0.0, 0.0)), 0.0, 1.0e-5));
     }
 
     #[test]
     fn longitude_axes() {
         assert!(approx(longitude(Vec3::new(1.0, 0.0, 0.0)), 0.0, 1.0e-5));
-        assert!(approx(longitude(Vec3::new(0.0, 0.0, 1.0)), PI / 2.0, 1.0e-5));
+        assert!(approx(
+            longitude(Vec3::new(0.0, 0.0, 1.0)),
+            PI / 2.0,
+            1.0e-5
+        ));
         assert!(approx(longitude(Vec3::new(-1.0, 0.0, 0.0)), PI, 1.0e-5));
     }
 
     #[test]
     fn lat_lon_round_trip() {
-        let cases = [
-            (0.0_f32, 0.0_f32),
-            (0.5, 1.0),
-            (-0.8, -2.0),
-            (0.3, 3.0),
-        ];
+        let cases = [(0.0_f32, 0.0_f32), (0.5, 1.0), (-0.8, -2.0), (0.3, 3.0)];
         for (lat, lon) in cases {
             let d = unit_dir_from_lat_lon(lat, lon);
             assert!(approx(d.length(), 1.0, 1.0e-5), "must be unit length");

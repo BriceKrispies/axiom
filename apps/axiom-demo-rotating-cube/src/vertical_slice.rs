@@ -438,19 +438,14 @@ pub(crate) fn run_vertical_slice(
                             .flatten();
                         let draw = (kind == RenderApi::KIND_DRAW_INDEXED)
                             .then(|| {
-                                api.render_api.command_draw_indexed_at(&render_commands, i).map(
-                                    |(index_count, world)| {
+                                api.render_api
+                                    .command_draw_indexed_at(&render_commands, i)
+                                    .map(|(index_count, world)| {
                                         RenderCommandArtifact::draw_indexed(index_count, world)
-                                    },
-                                )
+                                    })
                             })
                             .flatten();
-                        clear
-                            .or(camera)
-                            .or(pipeline)
-                            .or(mesh)
-                            .or(material)
-                            .or(draw)
+                        clear.or(camera).or(pipeline).or(mesh).or(material).or(draw)
                     })
             })
             .collect(),
@@ -496,9 +491,11 @@ pub(crate) fn run_vertical_slice(
                     .map(|mesh_id| api.webgpu_api.submission_set_mesh(&mut submission, mesh_id))
             })
             .or_else(|| {
+                // The headless slice's artifacts carry no texture binding, so the
+                // backend material is untextured (texture id 0).
                 command.as_set_material().map(|material_id| {
                     api.webgpu_api
-                        .submission_set_material(&mut submission, material_id)
+                        .submission_set_material(&mut submission, material_id, 0)
                 })
             })
             .or_else(|| {

@@ -142,25 +142,29 @@ impl WindowingApi {
         self.frames_driven
     }
 
-    /// Drive the terminal web run loop over a **multi-mesh** scene. Construct the
-    /// GPU backend from the configured presentation request, upload the distinct
-    /// mesh set `meshes` (`(mesh_id, interleaved position+normal+colour vertices
-    /// [10 floats/vertex], triangle indices)`), then present one frame per
-    /// `requestAnimationFrame`: each frame the loop owns the monotonic tick
-    /// ([`Self::step`]), hands it to `frame_fn`, and delegates the per-mesh
-    /// instance batches it returns — `(clear_color, [(mesh_id, [mvp(16),colour(4)]
-    /// per instance, count)])` — to the backend. wasm32 only; consumes the driver
-    /// into the loop. If no surface is configured or init fails, nothing presents.
+    /// Drive the terminal web run loop over a **multi-mesh, multi-material**
+    /// scene. Construct the GPU backend from the configured presentation request,
+    /// upload the distinct mesh set `meshes` (`(mesh_id, interleaved
+    /// position+normal+uv+colour vertices [12 floats/vertex], triangle indices)`)
+    /// and the material set `materials` (`(material_id, width, height, RGBA8
+    /// albedo pixels)` — one albedo bind group per material), then present one
+    /// frame per `requestAnimationFrame`: each frame the loop owns the monotonic
+    /// tick ([`Self::step`]), hands it to `frame_fn`, and delegates the
+    /// per-`(mesh, material)` instance batches it returns — `(clear_color,
+    /// [(mesh_id, material_id, [mvp(16),colour(4)] per instance, count)])` — to
+    /// the backend. wasm32 only; consumes the driver into the loop. If no surface
+    /// is configured or init fails, nothing presents.
     #[cfg(target_arch = "wasm32")]
     pub fn run_web_multi<F>(
         self,
         canvas_id: &str,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
         frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
-        F: FnMut(u64) -> ([f32; 4], Vec<(u64, Vec<f32>, u32)>) + 'static,
+        F: FnMut(u64) -> ([f32; 4], Vec<(u64, u64, Vec<f32>, u32)>) + 'static,
     {
         use axiom_gpu_backend::GpuBackendApi;
         use std::cell::RefCell;
@@ -177,7 +181,7 @@ impl WindowingApi {
                 None => return,
             };
             if backend
-                .initialize(canvas, &meshes, max_instances)
+                .initialize(canvas, &meshes, &materials, max_instances)
                 .await
                 .is_err()
             {
@@ -209,7 +213,9 @@ impl WindowingApi {
 
     /// Drive the terminal web run loop over a **single mesh** (the
     /// back-compatible shape): equivalent to [`Self::run_web_multi`] with one
-    /// uploaded mesh whose instances are the flat `(clear_color, [mvp(16),
+    /// uploaded mesh and one untextured material (a 1×1 white albedo, so the
+    /// sampled albedo is `(1,1,1,1)` and the draw colour reduces to vertex ×
+    /// instance colour). Its instances are the flat `(clear_color, [mvp(16),
     /// colour(4)] per instance, count)` the closure returns. wasm32 only;
     /// consumes the driver into the loop.
     #[cfg(target_arch = "wasm32")]
@@ -225,26 +231,36 @@ impl WindowingApi {
         F: FnMut(u64) -> ([f32; 4], Vec<f32>, u32) + 'static,
     {
         const SINGLE_MESH_ID: u64 = 0;
+        const DEFAULT_MATERIAL_ID: u64 = 0;
         let meshes = vec![(SINGLE_MESH_ID, vertices, indices)];
-        self.run_web_multi(canvas_id, meshes, max_instances, move |tick| {
+        // One untextured material: a 1×1 opaque-white albedo.
+        let materials = vec![(DEFAULT_MATERIAL_ID, 1, 1, vec![255_u8, 255, 255, 255])];
+        self.run_web_multi(canvas_id, meshes, materials, max_instances, move |tick| {
             let (clear, instances, count) = frame_fn(tick);
-            (clear, vec![(SINGLE_MESH_ID, instances, count)])
+            (
+                clear,
+                vec![(SINGLE_MESH_ID, DEFAULT_MATERIAL_ID, instances, count)],
+            )
         })
     }
 
     /// Drive the terminal web run loop **with streaming geometry** (a single
-    /// mesh). Identical to [`Self::run_web`] except the per-frame closure ALSO
-    /// returns optional new geometry: `(clear_color, [mvp(16), colour(4)] per
-    /// instance, count, Option<(vertices, indices)>)`. On the frames where it
-    /// returns `Some`, the streamed mesh's buffers are replaced *before* drawing
-    /// that frame, so the uploaded mesh follows the player while the camera stays
-    /// continuous in world space. wasm32 only; consumes the driver into the loop.
+    /// mesh) textured by a single supplied `material` (`(width, height, RGBA8
+    /// albedo pixels)` — e.g. a biome atlas the terrain samples). Identical to
+    /// [`Self::run_web`] except the streamed mesh samples `material` instead of a
+    /// white default, and the per-frame closure ALSO returns optional new
+    /// geometry: `(clear_color, [mvp(16), colour(4)] per instance, count,
+    /// Option<(vertices, indices)>)`. On the frames where it returns `Some`, the
+    /// streamed mesh's buffers are replaced *before* drawing that frame, so the
+    /// uploaded mesh follows the player while the camera stays continuous in world
+    /// space. wasm32 only; consumes the driver into the loop.
     #[cfg(target_arch = "wasm32")]
     pub fn run_web_streaming<F>(
         self,
         canvas_id: &str,
         vertices: Vec<f32>,
         indices: Vec<u32>,
+        material: (u32, u32, Vec<u8>),
         max_instances: u32,
         frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
@@ -257,6 +273,7 @@ impl WindowingApi {
         use wasm_bindgen::closure::Closure;
 
         const STREAM_MESH_ID: u64 = 0;
+        const STREAM_MATERIAL_ID: u64 = 0;
         let canvas = find_canvas(canvas_id)?;
         let frame_fn = Rc::new(RefCell::new(frame_fn));
         let windowing = self;
@@ -267,8 +284,10 @@ impl WindowingApi {
                 None => return,
             };
             let meshes = vec![(STREAM_MESH_ID, vertices, indices)];
+            let (mat_w, mat_h, mat_pixels) = material;
+            let materials = vec![(STREAM_MATERIAL_ID, mat_w, mat_h, mat_pixels)];
             if backend
-                .initialize(canvas, &meshes, max_instances)
+                .initialize(canvas, &meshes, &materials, max_instances)
                 .await
                 .is_err()
             {
@@ -291,7 +310,7 @@ impl WindowingApi {
                 new_geometry.into_iter().for_each(|(v, i)| {
                     be.borrow_mut().replace_geometry(STREAM_MESH_ID, &v, &i);
                 });
-                let batches = vec![(STREAM_MESH_ID, instances, count)];
+                let batches = vec![(STREAM_MESH_ID, STREAM_MATERIAL_ID, instances, count)];
                 let _ = be.borrow().present_frame(clear, &batches);
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {

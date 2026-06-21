@@ -337,7 +337,11 @@ pub(crate) fn render_command_list_to_gpu_submission(
                         .as_set_camera()
                         .map(|(view, projection)| GpuCommandArtifact::set_camera(view, projection))
                 })
-                .or_else(|| command.as_set_pipeline().map(GpuCommandArtifact::set_pipeline))
+                .or_else(|| {
+                    command
+                        .as_set_pipeline()
+                        .map(GpuCommandArtifact::set_pipeline)
+                })
                 .or_else(|| command.as_set_mesh().map(GpuCommandArtifact::set_mesh))
                 .or_else(|| {
                     command
@@ -345,11 +349,9 @@ pub(crate) fn render_command_list_to_gpu_submission(
                         .map(GpuCommandArtifact::set_material)
                 })
                 .or_else(|| {
-                    command
-                        .as_draw_indexed()
-                        .map(|(index_count, world)| {
-                            GpuCommandArtifact::draw_indexed(index_count, world)
-                        })
+                    command.as_draw_indexed().map(|(index_count, world)| {
+                        GpuCommandArtifact::draw_indexed(index_count, world)
+                    })
                 })
                 .unwrap_or(GpuCommandArtifact::DEFAULT)
         })

@@ -5,9 +5,20 @@ use crate::ids::ChunkCoord;
 /// A player intent. Audit: interactions.xml / apply_intent.
 #[derive(Debug, Clone)]
 pub enum Intent {
-    Dig { coord: ChunkCoord, lx: u32, lz: u32 },
-    Place { coord: ChunkCoord, lx: u32, lz: u32, item: u32 },
-    Influence { target: u64 },
+    Dig {
+        coord: ChunkCoord,
+        lx: u32,
+        lz: u32,
+    },
+    Place {
+        coord: ChunkCoord,
+        lx: u32,
+        lz: u32,
+        item: u32,
+    },
+    Influence {
+        target: u64,
+    },
 }
 
 /// Routes an intent to its handler. Audit: GW-E10/E11. Scaffold.

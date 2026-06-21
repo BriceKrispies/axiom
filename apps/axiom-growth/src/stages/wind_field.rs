@@ -62,7 +62,8 @@ impl Stage for WindFieldStage {
             globe.region_wind[r] = wind.normalize().unwrap_or(east);
         }
 
-        ctx.log.push("wind_field: latitude-banded winds".to_string());
+        ctx.log
+            .push("wind_field: latitude-banded winds".to_string());
     }
 }
 
@@ -88,10 +89,10 @@ mod tests {
     #[test]
     fn winds_are_unit_and_tangent() {
         let sites = vec![
-            Vec3::new(1.0, 0.0, 0.0),           // equator
-            Vec3::new(0.5, 0.7, 0.5),           // mid-lat north
-            Vec3::new(0.2, -0.9, 0.2),          // high-lat south
-            Vec3::new(0.0, 0.0, 1.0),           // equator
+            Vec3::new(1.0, 0.0, 0.0),  // equator
+            Vec3::new(0.5, 0.7, 0.5),  // mid-lat north
+            Vec3::new(0.2, -0.9, 0.2), // high-lat south
+            Vec3::new(0.0, 0.0, 1.0),  // equator
         ];
         let normed: Vec<Vec3> = sites
             .into_iter()

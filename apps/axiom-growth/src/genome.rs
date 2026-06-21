@@ -30,7 +30,10 @@ pub struct MaterialWeights {
 impl Default for MaterialWeights {
     /// Earthlike default (`high_silicate=0.6`, `organic=0.3`). Audit: earthlike preset.
     fn default() -> Self {
-        Self { high_silicate: 0.6, organic: 0.3 }
+        Self {
+            high_silicate: 0.6,
+            organic: 0.3,
+        }
     }
 }
 
@@ -57,12 +60,21 @@ pub struct PlanetGenome {
 impl Default for PlanetGenome {
     fn default() -> Self {
         Self {
-            l_star: 3.828e26, semi_major_axis: 1.496e11, eccentricity: 0.0167,
-            s_eff: 1.0, mass_kg: 5.972e24, radius_m: 6_371_000.0,
-            rotation_period_s: 86_400.0, obliquity_rad: 0.4091,
-            surface_pressure_pa: 101_325.0, albedo: 0.3, greenhouse: 1.0,
-            water_fraction: 0.7, precipitation: 0.5,
-            material_weights: MaterialWeights::default(), schema_version: 1,
+            l_star: 3.828e26,
+            semi_major_axis: 1.496e11,
+            eccentricity: 0.0167,
+            s_eff: 1.0,
+            mass_kg: 5.972e24,
+            radius_m: 6_371_000.0,
+            rotation_period_s: 86_400.0,
+            obliquity_rad: 0.4091,
+            surface_pressure_pa: 101_325.0,
+            albedo: 0.3,
+            greenhouse: 1.0,
+            water_fraction: 0.7,
+            precipitation: 0.5,
+            material_weights: MaterialWeights::default(),
+            schema_version: 1,
         }
     }
 }
@@ -135,12 +147,20 @@ mod tests {
     fn default_derived_values_are_earthlike() {
         let g = PlanetGenome::default();
         // Earth surface gravity ~9.81 m/s^2.
-        assert!((g.gravity_m_s2() - 9.81).abs() < 0.3, "gravity {}", g.gravity_m_s2());
+        assert!(
+            (g.gravity_m_s2() - 9.81).abs() < 0.3,
+            "gravity {}",
+            g.gravity_m_s2()
+        );
         // Earth orbital period ~3.156e7 s (one year).
         let year = g.orbital_period_s();
         assert!((year - 3.156e7).abs() / 3.156e7 < 0.05, "period {year}");
         // Insolation at 1 AU around the Sun ~1.0.
-        assert!((g.insolation() - 1.0).abs() < 0.05, "insolation {}", g.insolation());
+        assert!(
+            (g.insolation() - 1.0).abs() < 0.05,
+            "insolation {}",
+            g.insolation()
+        );
         // Greenhouse-free Earth equilibrium temp ~255 K; with greenhouse=1.0 unchanged.
         let t = g.equilibrium_temperature_k();
         assert!((230.0..280.0).contains(&t), "T_eq {t}");

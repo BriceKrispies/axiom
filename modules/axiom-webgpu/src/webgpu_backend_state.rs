@@ -41,8 +41,8 @@ impl WebGpuBackendState {
     /// `GpuSubmissionStatus` for each `kind`, indexed by `self.kind`.
     const SUBMISSION_STATUSES: [GpuSubmissionStatus; 3] = [
         GpuSubmissionStatus::Recorded,           // KIND_RECORDING
-        GpuSubmissionStatus::LiveNotBound,        // KIND_LIVE_UNBOUND
-        GpuSubmissionStatus::LiveNotInitialized,  // KIND_LIVE_PRESENTATION_REQUESTED
+        GpuSubmissionStatus::LiveNotBound,       // KIND_LIVE_UNBOUND
+        GpuSubmissionStatus::LiveNotInitialized, // KIND_LIVE_PRESENTATION_REQUESTED
     ];
 
     /// Deterministic recorder. The default.

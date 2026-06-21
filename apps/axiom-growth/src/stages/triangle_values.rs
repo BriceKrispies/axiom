@@ -29,9 +29,8 @@ impl Stage for TriangleValuesStage {
                 globe.triangle_elevation[t] = 0.0;
                 continue;
             }
-            let sum = globe.region_elevation[a]
-                + globe.region_elevation[b]
-                + globe.region_elevation[c];
+            let sum =
+                globe.region_elevation[a] + globe.region_elevation[b] + globe.region_elevation[c];
             globe.triangle_elevation[t] = sum / 3.0;
         }
 

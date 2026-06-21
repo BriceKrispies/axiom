@@ -58,7 +58,8 @@ fn rotating_cubes_app() -> App {
                 ),
             ];
             cubes.into_iter().for_each(|(offset_x, axis, color)| {
-                let material = materials.add(Material::lit(color));
+                // Each cube wears a checkerboard albedo, tinted by its base colour.
+                let material = materials.add(Material::lit(color).with_texture(Texture::Checker));
                 world
                     .spawn(Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)))
                     .with_child((
@@ -71,11 +72,11 @@ fn rotating_cubes_app() -> App {
             });
             // A ground plane beneath the cubes (a distinct mesh: a scaled quad).
             let plane = meshes.add(Mesh::plane());
-            let ground = materials.add(Material::lit(Color::linear_rgb(
-                ch(0.18),
-                ch(0.20),
-                ch(0.24),
-            )));
+            // The ground shows a UV grid so the texture mapping is legible.
+            let ground = materials.add(
+                Material::lit(Color::linear_rgb(ch(0.18), ch(0.20), ch(0.24)))
+                    .with_texture(Texture::UvGrid),
+            );
             world.spawn((
                 Transform::combine(
                     Transform::from_translation(Vec3::new(0.0, -2.0, 0.0)),
@@ -88,11 +89,10 @@ fn rotating_cubes_app() -> App {
             ));
             // A sphere above the cubes (a third distinct mesh).
             let sphere = meshes.add(Mesh::sphere());
-            let sphere_material = materials.add(Material::lit(Color::linear_rgb(
-                ch(0.90),
-                ch(0.78),
-                ch(0.30),
-            )));
+            let sphere_material = materials.add(
+                Material::lit(Color::linear_rgb(ch(0.90), ch(0.78), ch(0.30)))
+                    .with_texture(Texture::Checker),
+            );
             world.spawn((
                 Transform::combine(
                     Transform::from_translation(Vec3::new(0.0, 2.6, 0.0)),
@@ -146,11 +146,14 @@ mod tests {
         assert_eq!(outcome.command_count(), 19);
         assert_eq!(outcome.draws().len(), 5);
         assert_eq!(outcome.clear_color(), [0.05, 0.06, 0.08, 1.0]);
-        // Three distinct meshes (cube, plane, sphere) are batched separately,
-        // covering 5 instances in total.
+        // Batches key on (mesh, material): the three cubes share the cube mesh but
+        // each has its own (distinctly-coloured) material, so they batch
+        // separately — 3 cube batches + 1 plane + 1 sphere = 5, one instance each.
         let batches = outcome.mesh_batches();
-        assert_eq!(batches.len(), 3);
-        assert_eq!(batches.iter().map(|batch| batch.2).sum::<u32>(), 5);
+        assert_eq!(batches.len(), 5);
+        assert_eq!(batches.iter().map(|batch| batch.3).sum::<u32>(), 5);
+        // Every draw carries a material id so the backend can bind its albedo.
+        assert!(outcome.draws().iter().all(|d| d.material_id() != 0));
     }
 
     #[test]

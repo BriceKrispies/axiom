@@ -113,7 +113,10 @@ mod tests {
                 triangles: Vec::new(),
                 subdivisions: 0,
             },
-            graph: RegionGraph { offsets, neighbours },
+            graph: RegionGraph {
+                offsets,
+                neighbours,
+            },
             ..PlanetGlobe::default()
         };
         g.resize_fields();
