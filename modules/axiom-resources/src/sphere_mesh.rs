@@ -88,10 +88,14 @@ mod tests {
     fn sphere_normals_are_unit_and_positions_on_the_radius() {
         let (vertices, _) = build_sphere_mesh();
         vertices.iter().for_each(|(pos, normal, _, _)| {
-            let nlen = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+            let nlen =
+                (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
             assert!((nlen - 1.0).abs() < 1e-4, "normal should be unit length");
             let plen = (pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]).sqrt();
-            assert!((plen - RADIUS).abs() < 1e-4, "position should lie on the radius");
+            assert!(
+                (plen - RADIUS).abs() < 1e-4,
+                "position should lie on the radius"
+            );
         });
     }
 

@@ -456,7 +456,11 @@ impl RunningApp {
                         let mesh_id = pipeline
                             .report_draw_mesh_id(&report, i)
                             .expect("draw index in range");
-                        DrawData::new(view_projection.multiply(world).as_cols_array(), color, mesh_id)
+                        DrawData::new(
+                            view_projection.multiply(world).as_cols_array(),
+                            color,
+                            mesh_id,
+                        )
                     })
                     .collect();
 

@@ -6,11 +6,11 @@ use crate::basic_lit_material::build_basic_lit_material;
 use crate::cube_mesh::build_cube_mesh;
 use crate::mesh_data::{MeshData, MeshInputVertex};
 use crate::plane_mesh::build_plane_mesh;
-use crate::sphere_mesh::build_sphere_mesh;
 use crate::resolved_resources::ResolvedResources;
 use crate::resource_id::ResourceId;
 use crate::resource_table::ResourceTable;
 use crate::solid_color_texture::build_solid_color_texture;
+use crate::sphere_mesh::build_sphere_mesh;
 use crate::vertex::Vertex;
 
 /// The only public export of `axiom-resources`.
@@ -259,8 +259,15 @@ mod tests {
         assert_eq!(t.mesh_count(), 2);
         let resolved = api.resolve(&t);
         // The plane is a 4-vertex quad; the sphere has many more vertices.
-        assert_eq!(api.resolved_mesh_vertex_count(&resolved, plane.raw()), Some(4));
-        assert!(api.resolved_mesh_vertex_count(&resolved, sphere.raw()).unwrap() > 100);
+        assert_eq!(
+            api.resolved_mesh_vertex_count(&resolved, plane.raw()),
+            Some(4)
+        );
+        assert!(
+            api.resolved_mesh_vertex_count(&resolved, sphere.raw())
+                .unwrap()
+                > 100
+        );
     }
 
     #[test]

@@ -304,7 +304,11 @@ impl LiveGpuBinding {
     /// buffer (capped at `max_instances` total), then each batch is drawn against
     /// its cached mesh buffers using a byte-offset slice of the instance buffer.
     /// A batch whose `mesh_id` was never uploaded is skipped. Real pixels.
-    pub fn render_frame(&self, batches: &[(u64, Vec<f32>, u32)], clear: [f32; 4]) -> Result<(), JsValue> {
+    pub fn render_frame(
+        &self,
+        batches: &[(u64, Vec<f32>, u32)],
+        clear: [f32; 4],
+    ) -> Result<(), JsValue> {
         // Pack instances and record each batch's draw range (mesh id, byte
         // offset into the instance buffer, instance count), capped at capacity.
         let mut packed: Vec<f32> = Vec::new();
