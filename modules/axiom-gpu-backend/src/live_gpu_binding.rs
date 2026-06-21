@@ -1,6 +1,6 @@
 //! The real wgpu presentation binding — **wasm32 only**.
 //!
-//! None of this compiles on native, so the deterministic core (and
+//! None of this compiles on native, so the deterministic engine (and
 //! `cargo test --workspace` / the coverage gate) never pulls in wgpu. This is
 //! the thin, logic-free platform arm: it takes plain engine data (vertex streams
 //! of position+normal+colour + per-instance MVP/colour floats + a clear colour)
