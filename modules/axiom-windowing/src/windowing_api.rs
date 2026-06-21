@@ -176,7 +176,11 @@ impl WindowingApi {
                 Some(request) => GpuBackendApi::new(request),
                 None => return,
             };
-            if backend.initialize(canvas, &meshes, max_instances).await.is_err() {
+            if backend
+                .initialize(canvas, &meshes, max_instances)
+                .await
+                .is_err()
+            {
                 return;
             }
             let windowing = Rc::new(RefCell::new(windowing));
@@ -263,7 +267,11 @@ impl WindowingApi {
                 None => return,
             };
             let meshes = vec![(STREAM_MESH_ID, vertices, indices)];
-            if backend.initialize(canvas, &meshes, max_instances).await.is_err() {
+            if backend
+                .initialize(canvas, &meshes, max_instances)
+                .await
+                .is_err()
+            {
                 return;
             }
             let windowing = Rc::new(RefCell::new(windowing));
