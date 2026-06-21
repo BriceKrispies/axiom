@@ -190,7 +190,14 @@ impl Growth {
     /// Apply a dig intent. Audit: GW-E4/E11/E15.
     pub fn dig(&mut self, coord: ChunkCoord, lx: u32, lz: u32) -> Vec<Diff> {
         let mut diffs = Vec::new();
-        dig::apply_dig(&mut self.store, &mut self.inventory, coord, lx, lz, &mut diffs);
+        dig::apply_dig(
+            &mut self.store,
+            &mut self.inventory,
+            coord,
+            lx,
+            lz,
+            &mut diffs,
+        );
         diffs
     }
 

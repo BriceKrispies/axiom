@@ -142,8 +142,13 @@ impl WebGpuApi {
         sub.push(GpuCommand::set_mesh(mesh_id));
     }
 
-    pub fn submission_set_material(&self, sub: &mut GpuSubmission, material_id: u64) {
-        sub.push(GpuCommand::set_material(material_id));
+    pub fn submission_set_material(
+        &self,
+        sub: &mut GpuSubmission,
+        material_id: u64,
+        material_texture_id: u64,
+    ) {
+        sub.push(GpuCommand::set_material(material_id, material_texture_id));
     }
 
     pub fn submission_draw_indexed(&self, sub: &mut GpuSubmission, index_count: u32, world: Mat4) {
@@ -195,6 +200,20 @@ impl WebGpuApi {
             .get(idx)
             .map(GpuCommand::kind_code)
     }
+
+    /// The albedo texture id (`0` = untextured) bound by the `SetMaterial`
+    /// command at `idx`, or `None` if that command is absent or another kind.
+    /// Makes the material→texture binding observable in the recorded receipt.
+    pub fn report_material_texture_at(
+        &self,
+        report: &GpuSubmissionReport,
+        idx: usize,
+    ) -> Option<u64> {
+        report
+            .submitted_commands()
+            .get(idx)
+            .and_then(GpuCommand::as_set_material_texture)
+    }
 }
 
 #[cfg(test)]
@@ -229,7 +248,7 @@ mod tests {
         api().submission_set_pipeline(&mut sub, 1);
         api().submission_set_camera(&mut sub, Mat4::IDENTITY, Mat4::IDENTITY);
         api().submission_set_mesh(&mut sub, 7);
-        api().submission_set_material(&mut sub, 9);
+        api().submission_set_material(&mut sub, 9, 4);
         api().submission_draw_indexed(&mut sub, 36, Mat4::IDENTITY);
         api().submission_present(&mut sub);
         let report = api().submit(sub);
@@ -239,6 +258,11 @@ mod tests {
         assert_eq!(api().report_present_count(&report), 1);
         assert_eq!(report.target_width(), 800);
         assert_eq!(report.target_height(), 600);
+        // The SetMaterial command (index 4) records its albedo texture binding.
+        assert_eq!(api().report_material_texture_at(&report, 4), Some(4));
+        // Non-SetMaterial / out-of-range indices report no texture binding.
+        assert_eq!(api().report_material_texture_at(&report, 0), None);
+        assert_eq!(api().report_material_texture_at(&report, 99), None);
     }
 
     #[test]

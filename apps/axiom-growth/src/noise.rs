@@ -138,7 +138,13 @@ pub struct Fbm {
 
 impl Fbm {
     pub fn new(seed: u64, octaves: u32, frequency: f32) -> Self {
-        Self { seed, octaves, frequency, lacunarity: 2.0, gain: 0.5 }
+        Self {
+            seed,
+            octaves,
+            frequency,
+            lacunarity: 2.0,
+            gain: 0.5,
+        }
     }
 
     /// Sample in roughly [-1, 1]. Sums `octaves` octaves of gradient noise,
@@ -176,9 +182,18 @@ impl Fbm {
             return self.sample(p);
         }
         // Three decorrelated offset fields built from distinct seeds.
-        let qx = Fbm { seed: mix64(self.seed ^ 0x1111_1111), ..self.clone() };
-        let qy = Fbm { seed: mix64(self.seed ^ 0x2222_2222), ..self.clone() };
-        let qz = Fbm { seed: mix64(self.seed ^ 0x3333_3333), ..self.clone() };
+        let qx = Fbm {
+            seed: mix64(self.seed ^ 0x1111_1111),
+            ..self.clone()
+        };
+        let qy = Fbm {
+            seed: mix64(self.seed ^ 0x2222_2222),
+            ..self.clone()
+        };
+        let qz = Fbm {
+            seed: mix64(self.seed ^ 0x3333_3333),
+            ..self.clone()
+        };
 
         let offset = Vec3::new(qx.sample(p), qy.sample(p), qz.sample(p)).mul_scalar(warp);
         let warped = p.add(offset);
@@ -207,7 +222,10 @@ mod tests {
         let p = Vec3::new(0.3, 0.7, -0.4);
         let a = value_noise(1, p);
         let b = value_noise(2, p);
-        assert!(a != b, "different seeds should generally differ: {a} vs {b}");
+        assert!(
+            a != b,
+            "different seeds should generally differ: {a} vs {b}"
+        );
     }
 
     #[test]
@@ -291,6 +309,9 @@ mod tests {
         let plain = f.sample(p);
         let warped = f.sample_warped(p, 1.5);
         assert!(warped >= -1.0 && warped <= 1.0);
-        assert!(plain != warped, "non-zero warp should generally change output");
+        assert!(
+            plain != warped,
+            "non-zero warp should generally change output"
+        );
     }
 }

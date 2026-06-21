@@ -61,7 +61,13 @@ impl ChunkStore {
     }
 
     /// Unload chunks outside `radius + margin`; preserve edited ones. Audit: GW-E9.
-    pub fn unload_far(&mut self, center: ChunkCoord, radius: i32, margin: i32, out: &mut Vec<Diff>) {
+    pub fn unload_far(
+        &mut self,
+        center: ChunkCoord,
+        radius: i32,
+        margin: i32,
+        out: &mut Vec<Diff>,
+    ) {
         let keep = radius + margin;
         let mut remove = Vec::new();
         for (&c, chunk) in &self.loaded {

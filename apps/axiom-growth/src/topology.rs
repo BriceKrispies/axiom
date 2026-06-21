@@ -240,12 +240,8 @@ pub fn validate_region_rings(globe: &PlanetGlobe) -> RingReport {
     let mut report = RingReport::default();
 
     // Pair-membership check: each triangle's 3 regions mutually adjacent.
-    let adjacent = |u: u32, v: u32| -> bool {
-        graph
-            .neighbours_of(RegionId(u))
-            .binary_search(&v)
-            .is_ok()
-    };
+    let adjacent =
+        |u: u32, v: u32| -> bool { graph.neighbours_of(RegionId(u)).binary_search(&v).is_ok() };
 
     // Edge -> count of incident triangles (undirected, ordered key).
     let mut edge_tris: HashMap<(u32, u32), u32> = HashMap::new();
@@ -302,11 +298,7 @@ mod tests {
         for n in 0..=4u32 {
             let ico = build_icosphere(n);
             let expected = 10usize * 4usize.pow(n) + 2;
-            assert_eq!(
-                ico.sites.len(),
-                expected,
-                "subdivision {n} vertex count"
-            );
+            assert_eq!(ico.sites.len(), expected, "subdivision {n} vertex count");
         }
     }
 
@@ -328,10 +320,7 @@ mod tests {
         let ico = build_icosphere(3);
         for (i, s) in ico.sites.iter().enumerate() {
             let len = s.length();
-            assert!(
-                (len - 1.0).abs() < 1.0e-4,
-                "site {i} length {len} not unit"
-            );
+            assert!((len - 1.0).abs() < 1.0e-4, "site {i} length {len} not unit");
         }
     }
 
@@ -373,10 +362,7 @@ mod tests {
         for a in 0..ico.sites.len() as u32 {
             for &b in graph.neighbours_of(RegionId(a)) {
                 let back = graph.neighbours_of(RegionId(b));
-                assert!(
-                    back.binary_search(&a).is_ok(),
-                    "asymmetric edge {a}->{b}"
-                );
+                assert!(back.binary_search(&a).is_ok(), "asymmetric edge {a}->{b}");
             }
         }
     }

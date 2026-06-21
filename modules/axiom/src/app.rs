@@ -35,6 +35,7 @@ use crate::mesh::Mesh;
 use crate::mesh_geometry::{mesh_geometry, MeshGeometry};
 use crate::player::PlayerInput;
 use crate::scene_commands::SceneCommands;
+use crate::texture::{texture_rgba, Texture};
 use crate::window::Window;
 
 /// The default fixed simulation step: 1 ms, matching the engine's slices.
@@ -123,8 +124,9 @@ impl App {
 
         let mut running = self.build();
         let meshes = running.mesh_set();
+        let materials = running.material_textures();
         let max_instances = running.renderable_count() as u32;
-        let _ = windowing.run_web_multi(&surface_id, meshes, max_instances, move |tick| {
+        let _ = windowing.run_web_multi(&surface_id, meshes, materials, max_instances, move |tick| {
             let outcome = running.tick(tick);
             (outcome.clear_color(), outcome.mesh_batches())
         });
@@ -165,9 +167,10 @@ pub struct RunningApp {
     clear_color: [f32; 4],
     light_direction: Vec3,
     // Each registered mesh's own resolved geometry (keyed by handle id) and each
-    // material's colour. The scene's renderables reference these ids.
+    // material's colour + optional albedo texture. The scene's renderables
+    // reference these ids.
     meshes: Vec<(u64, MeshGeometry)>,
-    materials: Vec<(u64, [f32; 4])>,
+    materials: Vec<(u64, [f32; 4], Option<Texture>)>,
     // How many renderables the scene draws each frame (the live backend's
     // per-instance buffer capacity).
     renderables: usize,
@@ -246,14 +249,13 @@ impl RunningApp {
             .realize_into(&mut scene, &math)
             .unwrap_or(Vec3::ZERO);
 
-        // Each material asset -> (handle id, colour); each mesh asset -> its own
-        // resolved geometry keyed by handle id. The engine resolves a mesh by its
-        // kind, so distinct meshes get distinct geometry (today the only built-in
-        // kind is the cube).
-        let materials: Vec<(u64, [f32; 4])> = materials
+        // Each material asset -> (handle id, colour, optional texture); each mesh
+        // asset -> its own resolved geometry keyed by handle id. The engine
+        // resolves a mesh by its kind, so distinct meshes get distinct geometry.
+        let materials: Vec<(u64, [f32; 4], Option<Texture>)> = materials
             .iter()
             .enumerate()
-            .map(|(i, m)| ((i + 1) as u64, m.base_color().to_array()))
+            .map(|(i, m)| ((i + 1) as u64, m.base_color().to_array(), m.texture()))
             .collect();
         let meshes: Vec<(u64, MeshGeometry)> = meshes
             .iter()
@@ -308,49 +310,48 @@ impl RunningApp {
     }
 
     /// The first mesh's geometry as the live backend's vertex stream (interleaved
-    /// position+normal+colour, 10 floats per vertex) plus its triangle-list
+    /// position+normal+uv+colour, 12 floats per vertex) plus its triangle-list
     /// indices. Empty when the app registered no mesh. Plain data the windowing
-    /// backend uploads. Per-vertex colour is opaque **white** here: the live
-    /// shader multiplies it by the per-instance (material) colour, so white keeps
+    /// backend uploads. The UV is the mesh's own texture coordinate; per-vertex
+    /// colour is opaque **white** here: the live shader multiplies the sampled
+    /// albedo by this and by the per-instance (material) colour, so white keeps
     /// the per-instance colour authoritative — the built-in cube renders exactly
     /// as before. An app that wants true per-vertex colours builds its own stream
     /// (see `axiom-growth`'s terrain).
     pub fn mesh_vertex_stream(&self) -> (Vec<f32>, Vec<u32>) {
         self.meshes.first().map_or_else(
             || (Vec::new(), Vec::new()),
-            |(_, geom)| {
-                let mut vertices = Vec::with_capacity(geom.positions.len() * 10);
-                geom.positions
-                    .iter()
-                    .zip(geom.normals.iter())
-                    .for_each(|(p, n)| {
-                        vertices
-                            .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, 1.0, 1.0, 1.0, 1.0])
-                    });
-                (vertices, geom.indices.clone())
-            },
+            |(_, geom)| (interleave_vertices(geom), geom.indices.clone()),
         )
     }
 
     /// Every registered mesh's geometry as the multi-mesh live backend's upload
-    /// set: `(mesh_id, interleaved position+normal+colour vertices [10
-    /// floats/vertex], triangle indices)`. Per-vertex colour is opaque white (the
-    /// live shader multiplies it by the per-instance material colour, so white
-    /// keeps the material colour authoritative). The backend uploads these once
-    /// and draws each frame's per-mesh instance batches against them.
+    /// set: `(mesh_id, interleaved position+normal+uv+colour vertices [12
+    /// floats/vertex], triangle indices)`. UV is the mesh's own texture
+    /// coordinate; per-vertex colour is opaque white (the live shader multiplies
+    /// the sampled albedo by this and by the per-instance material colour, so
+    /// white keeps the material colour authoritative). The backend uploads these
+    /// once and draws each frame's per-mesh instance batches against them.
     pub fn mesh_set(&self) -> Vec<(u64, Vec<f32>, Vec<u32>)> {
         self.meshes
             .iter()
-            .map(|(id, geom)| {
-                let mut vertices = Vec::with_capacity(geom.positions.len() * 10);
-                geom.positions
-                    .iter()
-                    .zip(geom.normals.iter())
-                    .for_each(|(p, n)| {
-                        vertices
-                            .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, 1.0, 1.0, 1.0, 1.0])
-                    });
-                (*id, vertices, geom.indices.clone())
+            .map(|(id, geom)| (*id, interleave_vertices(geom), geom.indices.clone()))
+            .collect()
+    }
+
+    /// Every registered material as the live backend's material set: `(material_id,
+    /// width, height, RGBA8 albedo pixels)`. A textured material resolves its
+    /// [`Texture`] to pixels; an untextured material gets a 1×1 opaque-white albedo
+    /// (so its sampled albedo is `(1,1,1,1)` and the draw colour reduces to base ×
+    /// per-vertex colour). The backend builds one albedo bind group per material.
+    pub fn material_textures(&self) -> Vec<(u64, u32, u32, Vec<u8>)> {
+        self.materials
+            .iter()
+            .map(|(id, _, texture)| {
+                let (w, h, pixels) = texture
+                    .map(texture_rgba)
+                    .unwrap_or_else(|| (1, 1, vec![255, 255, 255, 255]));
+                (*id, w, h, pixels)
             })
             .collect()
     }
@@ -438,9 +439,13 @@ impl RunningApp {
                         geometry.indices.clone(),
                     )
                 });
-                self.materials
-                    .iter()
-                    .for_each(|(id, color)| pipeline.frame_add_material(&mut frame, *id, *color));
+                self.materials.iter().for_each(|(id, color, texture)| {
+                    // The pipeline records the material→texture binding (for
+                    // receipt fidelity); the live albedo pixels are uploaded
+                    // separately via `material_textures`. `0` = untextured.
+                    let texture_id = texture.map(Texture::id).unwrap_or(0);
+                    pipeline.frame_add_textured_material(&mut frame, *id, *color, texture_id)
+                });
                 let report = pipeline.submit(&frame, &self.scene, &self.webgpu);
 
                 let view_projection = pipeline.report_view_projection(&report);
@@ -456,10 +461,14 @@ impl RunningApp {
                         let mesh_id = pipeline
                             .report_draw_mesh_id(&report, i)
                             .expect("draw index in range");
+                        let material_id = pipeline
+                            .report_draw_material_id(&report, i)
+                            .expect("draw index in range");
                         DrawData::new(
                             view_projection.multiply(world).as_cols_array(),
                             color,
                             mesh_id,
+                            material_id,
                         )
                     })
                     .collect();
@@ -477,6 +486,24 @@ impl RunningApp {
     }
 }
 
+/// Interleave one mesh's resolved geometry into the live backend's 12-float
+/// vertex stream: position(3) + normal(3) + uv(2) + opaque-white colour(4) per
+/// vertex. Shared by [`RunningApp::mesh_vertex_stream`] and
+/// [`RunningApp::mesh_set`].
+fn interleave_vertices(geom: &MeshGeometry) -> Vec<f32> {
+    let mut vertices = Vec::with_capacity(geom.positions.len() * 12);
+    geom.positions
+        .iter()
+        .zip(geom.normals.iter())
+        .zip(geom.uvs.iter())
+        .for_each(|((p, n), uv)| {
+            vertices.extend_from_slice(&[
+                p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0,
+            ])
+        });
+    vertices
+}
+
 /// The product of running a setup closure: a realized scene plus the resolved
 /// resources and counts a [`RunningApp`] holds. Returned by [`RunningApp::author`]
 /// and consumed by both the initial build and a live [`RunningApp::reauthor`].
@@ -485,7 +512,7 @@ struct AuthoredScene {
     scene: SceneApi,
     light_direction: Vec3,
     meshes: Vec<(u64, MeshGeometry)>,
-    materials: Vec<(u64, [f32; 4])>,
+    materials: Vec<(u64, [f32; 4], Option<Texture>)>,
     renderables: usize,
 }
 
@@ -803,19 +830,28 @@ mod tests {
         assert_eq!(app.renderable_count(), 3);
         let (vertices, indices) = app.mesh_vertex_stream();
         assert!(!vertices.is_empty());
-        assert_eq!(vertices.len() % 10, 0); // position(3)+normal(3)+colour(4) per vertex
-                                            // Per-vertex colour defaults to opaque white so the per-instance colour
-                                            // stays authoritative (white * instance == instance).
-        assert_eq!(&vertices[6..10], &[1.0, 1.0, 1.0, 1.0]);
+        // position(3)+normal(3)+uv(2)+colour(4) per vertex.
+        assert_eq!(vertices.len() % 12, 0);
+        // Per-vertex colour defaults to opaque white so the per-instance colour
+        // stays authoritative (white * instance == instance); it sits after the
+        // 2-float uv, at floats [8..12].
+        assert_eq!(&vertices[8..12], &[1.0, 1.0, 1.0, 1.0]);
         assert!(!indices.is_empty());
 
         // The multi-mesh upload set: three cubes share one mesh, so one entry,
         // matching the single mesh_vertex_stream geometry.
         let set = app.mesh_set();
         assert_eq!(set.len(), 1);
-        assert_eq!(set[0].1.len() % 10, 0);
+        assert_eq!(set[0].1.len() % 12, 0);
         assert_eq!(set[0].1, vertices);
         assert_eq!(set[0].2, indices);
+
+        // Each authored material resolves to a backend albedo (untextured here →
+        // 1x1 white), one entry per material.
+        let mats = app.material_textures();
+        assert_eq!(mats.len(), 3);
+        assert_eq!((mats[0].1, mats[0].2), (1, 1));
+        assert_eq!(mats[0].3, vec![255, 255, 255, 255]);
     }
 
     #[test]

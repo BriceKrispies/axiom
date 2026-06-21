@@ -90,6 +90,28 @@
             <output id="detail-out">4096 sites</output>
           </div>
 
+          <label for="viewdist">View distance</label>
+          <div class="rowspan">
+            <input type="range" id="viewdist" min="2" max="9" step="1" value="5" style="flex:1" />
+            <output id="viewdist-out">≈700 m</output>
+          </div>
+
+          <label for="quality">Quality</label>
+          <select id="quality">
+            <option value="low">Low — aggressive LOD, longest reach</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+            <option value="ultra">Ultra — full detail furthest out</option>
+          </select>
+
+          <div class="rowspan">
+            <span class="hint" style="grid-column:1 / -1">
+              View distance sets how many concentric LOD rings stream (draw distance);
+              Quality sets how far crisp 1 m terrain reaches before coarsening. These
+              apply when you descend.
+            </span>
+          </div>
+
           <div class="rowspan" style="justify-content:flex-end">
             <button type="submit" id="generate">Generate planet</button>
           </div>
@@ -121,7 +143,7 @@
     <script type="module">
       // Cache-bust both the JS glue and the wasm binary on every load.
       const v = Date.now();
-      const { default: init, generate, is_land, descend } =
+      const { default: init, generate, is_land, descend, set_terrain_config } =
         await import(`./pkg/axiom_growth.js?v=${v}`);
       const wasmUrl = new URL(`./pkg/axiom_growth_bg.wasm?v=${v}`, import.meta.url);
 
@@ -149,6 +171,42 @@
       const syncDetail = () => { detailOut.textContent = `${detail.value} sites`; };
       detail.addEventListener("input", syncDetail);
       syncDetail();
+
+      // --- Terrain LOD config (read at descend time). ---
+      // Base chunk size (m) and per-ring band width must match web.rs
+      // (CHUNK_M = 16, RING_BAND_CHUNKS = 3) so the metres estimate the slider
+      // shows matches TerrainConfig::draw_distance_m on the Rust side.
+      const CHUNK_M = 16, RING_BAND_CHUNKS = 3;
+      // Quality presets → [lod0_radius_chunks (full-detail reach), detail_bias_m].
+      // Aggressive (Low) = small near square + extra octave drop far out.
+      const QUALITY = {
+        low:    [2, 24],
+        medium: [4, 0],
+        high:   [8, 0],
+        ultra:  [14, 0],
+      };
+      const quality = document.getElementById("quality");
+      const viewdist = document.getElementById("viewdist");
+      const viewdistOut = document.getElementById("viewdist-out");
+      // Mirror of TerrainConfig::draw_distance_m: LOD0 square + each ring band.
+      const drawDistanceM = (lodLevels, lod0Radius) => {
+        let r = lod0Radius * CHUNK_M;
+        for (let L = 1; L <= lodLevels - 1; L++) r += RING_BAND_CHUNKS * CHUNK_M * (1 << L);
+        return r;
+      };
+      const terrainConfig = () => {
+        const lodLevels = parseInt(viewdist.value, 10) || 5;
+        const [lod0Radius, bias] = QUALITY[quality.value] ?? QUALITY.medium;
+        return { lodLevels, lod0Radius, bias };
+      };
+      const syncViewdist = () => {
+        const { lodLevels, lod0Radius } = terrainConfig();
+        const m = Math.round(drawDistanceM(lodLevels, lod0Radius));
+        viewdistOut.textContent = m >= 1000 ? `≈${(m / 1000).toFixed(1)} km` : `≈${m} m`;
+      };
+      viewdist.addEventListener("input", syncViewdist);
+      quality.addEventListener("change", syncViewdist);
+      syncViewdist();
 
       // (A) Generate → render overworld map → show map screen.
       document.getElementById("config").addEventListener("submit", (ev) => {
@@ -189,6 +247,9 @@
           if (descended) return;
           descended = true;
           try {
+            // Push the LOD config BEFORE descend reads it.
+            const { lodLevels, lod0Radius, bias } = terrainConfig();
+            set_terrain_config(lodLevels, lod0Radius, bias);
             descend(u, vv);
           } catch (e) {
             set("Descend failed: " + e, "err");

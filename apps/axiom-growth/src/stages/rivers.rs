@@ -60,8 +60,7 @@ impl Stage for RiverDownflowStage {
         // Computing receivers here validates that the drainage graph exists.
         let recv = compute_receivers(globe);
         let sinks = (0..n).filter(|&r| recv[r] as usize == r).count();
-        ctx.log
-            .push(format!("river_downflow: {} sinks", sinks));
+        ctx.log.push(format!("river_downflow: {} sinks", sinks));
     }
 }
 
@@ -184,7 +183,10 @@ mod tests {
                 triangles: vec![[0, 1, 2]],
                 subdivisions: 0,
             },
-            graph: RegionGraph { offsets, neighbours },
+            graph: RegionGraph {
+                offsets,
+                neighbours,
+            },
             ..PlanetGlobe::default()
         };
         g.resize_fields();

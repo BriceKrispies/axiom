@@ -10,7 +10,12 @@ pub struct WorldSeed {
 
 impl WorldSeed {
     pub fn from_value(value: u64) -> Self {
-        Self { value, height_scale: 1.0, octaves: 5, frequency: 1.5 }
+        Self {
+            value,
+            height_scale: 1.0,
+            octaves: 5,
+            frequency: 1.5,
+        }
     }
 
     /// Hash a string seed deterministically (FNV-1a). Empty → 0 (caller randomises).
@@ -26,7 +31,12 @@ impl WorldSeed {
     /// want a fresh random world per run should detect the empty string and
     /// substitute a randomised seed before calling generation.
     pub fn from_form(seed_str: &str, height_scale: f32, octaves: u32, frequency: f32) -> Self {
-        Self { value: fnv1a(seed_str), height_scale, octaves, frequency }
+        Self {
+            value: fnv1a(seed_str),
+            height_scale,
+            octaves,
+            frequency,
+        }
     }
 }
 

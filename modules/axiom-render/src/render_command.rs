@@ -24,6 +24,7 @@ pub struct RenderCommand {
     pipeline_id: u32,
     mesh_id: u64,
     material_id: u64,
+    material_texture_id: u64,
     index_count: u32,
     world: Mat4,
 }
@@ -48,6 +49,7 @@ impl RenderCommand {
         pipeline_id: 0,
         mesh_id: 0,
         material_id: 0,
+        material_texture_id: 0,
         index_count: 0,
         world: Mat4::IDENTITY,
     };
@@ -89,11 +91,13 @@ impl RenderCommand {
         }
     }
 
-    /// A `SetMaterial` command carrying its `material_id`.
-    pub const fn set_material(material_id: u64) -> Self {
+    /// A `SetMaterial` command carrying its `material_id` and the albedo
+    /// `material_texture_id` it samples (`0` = untextured).
+    pub const fn set_material(material_id: u64, material_texture_id: u64) -> Self {
         RenderCommand {
             kind: Self::KIND_SET_MATERIAL,
             material_id,
+            material_texture_id,
             ..Self::DEFAULT
         }
     }
@@ -136,6 +140,12 @@ impl RenderCommand {
     /// Extract this command's `SetMaterial` id, or `None`.
     pub fn as_material_id(&self) -> Option<u64> {
         (self.kind == Self::KIND_SET_MATERIAL).then_some(self.material_id)
+    }
+
+    /// Extract this command's `SetMaterial` albedo texture id (`0` =
+    /// untextured), or `None` for any other kind.
+    pub fn as_material_texture_id(&self) -> Option<u64> {
+        (self.kind == Self::KIND_SET_MATERIAL).then_some(self.material_texture_id)
     }
 
     /// Extract this command's `DrawIndexed` `(index_count, world)`, or `None`.
@@ -189,9 +199,12 @@ mod tests {
         assert_eq!(mesh.as_mesh_id(), Some(7));
         assert_eq!(mesh.as_pipeline(), None);
 
-        let material = RenderCommand::set_material(9);
+        let material = RenderCommand::set_material(9, 4);
         assert_eq!(material.as_material_id(), Some(9));
+        assert_eq!(material.as_material_texture_id(), Some(4));
         assert_eq!(material.as_mesh_id(), None);
+        // The texture accessor is gated on the SetMaterial kind.
+        assert_eq!(RenderCommand::set_mesh(7).as_material_texture_id(), None);
 
         let draw = RenderCommand::draw_indexed(36, Mat4::IDENTITY);
         assert_eq!(draw.as_draw_indexed(), Some((36, Mat4::IDENTITY)));

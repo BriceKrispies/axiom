@@ -28,4 +28,5 @@ pub use crate::player::{Player, PlayerInput};
 pub use crate::renderable::Renderable;
 pub use crate::scene_commands::SceneCommands;
 pub use crate::spin::Spin;
+pub use crate::texture::Texture;
 pub use crate::window::Window;

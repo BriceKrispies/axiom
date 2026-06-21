@@ -20,6 +20,8 @@
 //! `lib.rs` exposes **exactly one** facade: [`ResourcesApi`].
 
 mod basic_lit_material;
+mod biome_atlas_texture;
+mod checker_texture;
 mod cube_mesh;
 mod material_data;
 mod mesh_data;
@@ -31,6 +33,7 @@ mod resources_api;
 mod solid_color_texture;
 mod sphere_mesh;
 mod texture_data;
+mod uv_grid_texture;
 mod vertex;
 
 pub use resources_api::ResourcesApi;

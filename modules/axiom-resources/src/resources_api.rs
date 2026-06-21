@@ -2,7 +2,9 @@
 
 use axiom_math::{Vec2, Vec3, Vec4};
 
-use crate::basic_lit_material::build_basic_lit_material;
+use crate::basic_lit_material::{build_basic_lit_material, build_textured_lit_material};
+use crate::biome_atlas_texture::{biome_cell_origin, build_biome_atlas_texture};
+use crate::checker_texture::build_checker_texture;
 use crate::cube_mesh::build_cube_mesh;
 use crate::mesh_data::{MeshData, MeshInputVertex};
 use crate::plane_mesh::build_plane_mesh;
@@ -11,6 +13,7 @@ use crate::resource_id::ResourceId;
 use crate::resource_table::ResourceTable;
 use crate::solid_color_texture::build_solid_color_texture;
 use crate::sphere_mesh::build_sphere_mesh;
+use crate::uv_grid_texture::build_uv_grid_texture;
 use crate::vertex::Vertex;
 
 /// The only public export of `axiom-resources`.
@@ -88,7 +91,7 @@ impl ResourcesApi {
     }
 
     /// Register the built-in basic-lit material with the given base
-    /// colour.
+    /// colour and no texture.
     pub fn register_basic_lit_material(
         &self,
         table: &mut ResourceTable,
@@ -96,6 +99,18 @@ impl ResourcesApi {
     ) -> ResourceId {
         let id = table.next_id();
         table.insert_material(build_basic_lit_material(id, base_color))
+    }
+
+    /// Register a basic-lit material with the given base colour and an
+    /// optional albedo texture id (sampled × base colour × vertex colour).
+    pub fn register_textured_lit_material(
+        &self,
+        table: &mut ResourceTable,
+        base_color: Vec4,
+        texture: Option<ResourceId>,
+    ) -> ResourceId {
+        let id = table.next_id();
+        table.insert_material(build_textured_lit_material(id, base_color, texture))
     }
 
     /// Register a 2×2 solid-colour texture.
@@ -109,12 +124,58 @@ impl ResourcesApi {
         table.insert_texture(build_solid_color_texture(id, name, rgba))
     }
 
+    /// Register the built-in checkerboard texture (`a` is the origin cell
+    /// colour, `b` alternates with it). Tinted by the material base colour.
+    pub fn register_checker_texture(
+        &self,
+        table: &mut ResourceTable,
+        name: &'static str,
+        a: [u8; 4],
+        b: [u8; 4],
+    ) -> ResourceId {
+        let id = table.next_id();
+        table.insert_texture(build_checker_texture(id, name, a, b))
+    }
+
+    /// Register the built-in UV-grid texture (gradient + white grid lines).
+    pub fn register_uv_grid_texture(
+        &self,
+        table: &mut ResourceTable,
+        name: &'static str,
+    ) -> ResourceId {
+        let id = table.next_id();
+        table.insert_texture(build_uv_grid_texture(id, name))
+    }
+
+    /// Register the built-in 2×2 biome atlas texture (sand/grass/rock/snow).
+    pub fn register_biome_atlas_texture(
+        &self,
+        table: &mut ResourceTable,
+        name: &'static str,
+    ) -> ResourceId {
+        let id = table.next_id();
+        table.insert_texture(build_biome_atlas_texture(id, name))
+    }
+
+    /// The top-left UV of biome `biome`'s cell in the built-in biome atlas (a 2×2
+    /// packing of sand/grass/rock/snow). A terrain vertex tagged with `biome`
+    /// samples that biome by offsetting a fractional position within the
+    /// `0.5 × 0.5` cell starting here. Out-of-range biome ids wrap into the grid.
+    pub fn biome_atlas_cell_origin(&self, biome: u32) -> (f32, f32) {
+        biome_cell_origin(biome)
+    }
+
     // --- Snapshot ---
 
     pub fn resolve(&self, table: &ResourceTable) -> ResolvedResources {
         ResolvedResources::from_table(table)
     }
+}
 
+/// Inspection of a resolved snapshot: boundary primitives the app reads back
+/// without naming any resource-internal type. Split into its own `impl` block (one
+/// facade, grouped by responsibility) so neither block grows unwieldy.
+impl ResourcesApi {
     // --- Inspection methods on ResolvedResources (boundary primitives only) ---
 
     pub fn resolved_mesh_count(&self, resolved: &ResolvedResources) -> usize {
@@ -211,6 +272,54 @@ impl ResourcesApi {
                 let c = m.base_color();
                 [c.x, c.y, c.z, c.w]
             })
+    }
+
+    /// The albedo texture id a material samples, if any. `Some(None)` is
+    /// flattened to `None` — a missing material and an untextured material
+    /// both report "no texture".
+    pub fn resolved_material_texture_id(
+        &self,
+        resolved: &ResolvedResources,
+        material_id: u64,
+    ) -> Option<u64> {
+        resolved
+            .material_by_id(ResourceId::from_raw(material_id))
+            .and_then(|m| m.texture())
+            .map(|t| t.raw())
+    }
+
+    pub fn resolved_texture_count(&self, resolved: &ResolvedResources) -> usize {
+        resolved.texture_count()
+    }
+
+    pub fn resolved_texture_id_at(&self, resolved: &ResolvedResources, idx: usize) -> Option<u64> {
+        resolved.texture_at(idx).map(|t| t.id().raw())
+    }
+
+    pub fn resolved_texture_width(&self, resolved: &ResolvedResources, texture_id: u64) -> Option<u32> {
+        resolved
+            .texture_by_id(ResourceId::from_raw(texture_id))
+            .map(|t| t.width())
+    }
+
+    pub fn resolved_texture_height(
+        &self,
+        resolved: &ResolvedResources,
+        texture_id: u64,
+    ) -> Option<u32> {
+        resolved
+            .texture_by_id(ResourceId::from_raw(texture_id))
+            .map(|t| t.height())
+    }
+
+    pub fn resolved_texture_pixels<'a>(
+        &self,
+        resolved: &'a ResolvedResources,
+        texture_id: u64,
+    ) -> Option<&'a [u8]> {
+        resolved
+            .texture_by_id(ResourceId::from_raw(texture_id))
+            .map(|t| t.rgba8_pixels())
     }
 }
 
@@ -488,5 +597,68 @@ mod tests {
         assert!(api().resolved_mesh_position_at(&r, 1, 0).is_none());
         assert!(api().resolved_mesh_indices(&r, 1).is_none());
         assert!(api().resolved_material_base_color(&r, 1).is_none());
+    }
+
+    #[test]
+    fn procedural_textures_can_be_registered() {
+        let api = api();
+        let mut t = api.empty_table();
+        let checker = api.register_checker_texture(&mut t, "checker", [255; 4], [60, 60, 60, 255]);
+        let uv = api.register_uv_grid_texture(&mut t, "uv");
+        let biomes = api.register_biome_atlas_texture(&mut t, "biomes");
+        assert!(checker.is_valid() & uv.is_valid() & biomes.is_valid());
+        assert_eq!(t.texture_count(), 3);
+    }
+
+    #[test]
+    fn textured_material_threads_its_texture_id() {
+        let api = api();
+        let mut t = api.empty_table();
+        let tex = api.register_checker_texture(&mut t, "checker", [255; 4], [0, 0, 0, 255]);
+        let mat = api.register_textured_lit_material(&mut t, Vec4::ONE, Some(tex));
+        let untextured = api.register_textured_lit_material(&mut t, Vec4::ONE, None);
+        let r = api.resolve(&t);
+        assert_eq!(
+            api.resolved_material_texture_id(&r, mat.raw()),
+            Some(tex.raw())
+        );
+        // An untextured material and a missing material both report no texture.
+        assert_eq!(api.resolved_material_texture_id(&r, untextured.raw()), None);
+        assert_eq!(api.resolved_material_texture_id(&r, 9999), None);
+    }
+
+    #[test]
+    fn resolved_texture_inspection_returns_pixel_facts() {
+        let api = api();
+        let mut t = api.empty_table();
+        let tex = api.register_checker_texture(&mut t, "checker", [255; 4], [0, 0, 0, 255]);
+        let r = api.resolve(&t);
+        assert_eq!(api.resolved_texture_count(&r), 1);
+        assert_eq!(api.resolved_texture_id_at(&r, 0), Some(tex.raw()));
+        let w = api.resolved_texture_width(&r, tex.raw()).unwrap();
+        let h = api.resolved_texture_height(&r, tex.raw()).unwrap();
+        assert_eq!(
+            api.resolved_texture_pixels(&r, tex.raw()).unwrap().len(),
+            (w * h * 4) as usize
+        );
+    }
+
+    #[test]
+    fn biome_atlas_cell_origins_cover_the_grid() {
+        let api = api();
+        assert_eq!(api.biome_atlas_cell_origin(0), (0.0, 0.0));
+        assert_eq!(api.biome_atlas_cell_origin(3), (0.5, 0.5));
+        // Out-of-range biome ids wrap into the 4-cell grid.
+        assert_eq!(api.biome_atlas_cell_origin(4), api.biome_atlas_cell_origin(0));
+    }
+
+    #[test]
+    fn resolved_texture_accessors_handle_missing_ids() {
+        let r = api().resolve(&api().empty_table());
+        assert!(api().resolved_texture_id_at(&r, 0).is_none());
+        assert!(api().resolved_texture_width(&r, 1).is_none());
+        assert!(api().resolved_texture_height(&r, 1).is_none());
+        assert!(api().resolved_texture_pixels(&r, 1).is_none());
+        assert_eq!(api().resolved_texture_count(&r), 0);
     }
 }

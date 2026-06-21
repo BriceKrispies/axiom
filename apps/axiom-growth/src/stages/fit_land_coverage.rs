@@ -80,8 +80,8 @@ impl Stage for FitLandCoverageStage {
 mod tests {
     use super::*;
     use crate::model_planet::{Icosphere, RegionGraph};
-    use axiom_math::Vec3;
     use crate::rng::Rng;
+    use axiom_math::Vec3;
 
     fn globe_with_elev(elev: Vec<f32>) -> PlanetGlobe {
         let n = elev.len();

@@ -22,7 +22,8 @@ use crate::render_command_list::RenderCommandList;
 /// Magic + version prefixing every serialized receipt, so the byte format is
 /// self-describing and a format change is detectable.
 const RECEIPT_MAGIC: u32 = 0x4158_5243; // "AXRC" (Axiom Render Capture)
-const RECEIPT_VERSION: u32 = 1;
+// v2 adds the per-`SetMaterial` albedo texture id to the serialized stream.
+const RECEIPT_VERSION: u32 = 2;
 
 /// A deterministic capture of one frame's engine-owned render artifact.
 ///
@@ -85,9 +86,20 @@ impl RenderReceipt {
                         .for_each(|c| w.write_f32(*c));
                 })
             })
-            .or_else(|| command.as_pipeline().map(|pipeline_id| w.write_u32(pipeline_id)))
+            .or_else(|| {
+                command
+                    .as_pipeline()
+                    .map(|pipeline_id| w.write_u32(pipeline_id))
+            })
             .or_else(|| command.as_mesh_id().map(|mesh_id| w.write_u64(mesh_id)))
-            .or_else(|| command.as_material_id().map(|material_id| w.write_u64(material_id)))
+            .or_else(|| {
+                command.as_material_id().map(|material_id| {
+                    w.write_u64(material_id);
+                    // Same SetMaterial command, so the texture accessor is
+                    // always `Some`; `unwrap_or(0)` keeps it branchless.
+                    w.write_u64(command.as_material_texture_id().unwrap_or(0));
+                })
+            })
             .or_else(|| {
                 command.as_draw_indexed().map(|(index_count, world)| {
                     w.write_u32(index_count);
@@ -153,7 +165,7 @@ mod tests {
             RenderCommand::set_camera(Mat4::IDENTITY, Mat4::IDENTITY),
             RenderCommand::set_pipeline(1),
             RenderCommand::set_mesh(7),
-            RenderCommand::set_material(9),
+            RenderCommand::set_material(9, 11),
             RenderCommand::draw_indexed(36, Mat4::IDENTITY),
         ]
     }
@@ -179,6 +191,23 @@ mod tests {
         let b = RenderReceipt::capture(FrameIndex::new(0), Tick::new(0), &swapped);
         assert_ne!(a.bytes(), b.bytes());
         assert_ne!(a.hash(), b.hash());
+    }
+
+    #[test]
+    fn material_texture_id_is_part_of_the_capture() {
+        // Two SetMaterial commands that differ only in their albedo texture id
+        // must serialize to different bytes — the receipt captures the binding.
+        let a = RenderReceipt::capture(
+            FrameIndex::new(0),
+            Tick::new(0),
+            &list_with(&[RenderCommand::set_material(9, 1)]),
+        );
+        let b = RenderReceipt::capture(
+            FrameIndex::new(0),
+            Tick::new(0),
+            &list_with(&[RenderCommand::set_material(9, 2)]),
+        );
+        assert_ne!(a.bytes(), b.bytes());
     }
 
     #[test]

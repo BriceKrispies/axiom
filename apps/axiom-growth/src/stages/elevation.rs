@@ -7,10 +7,10 @@
 //! [`Fbm`] field keyed off `ctx.seed` adds fractal detail so the relief is not
 //! flat per plate. Writes `region_elevation`.
 
+use crate::ids::RegionId;
 use crate::model_planet::PlanetGlobe;
 use crate::noise::Fbm;
 use crate::pipeline::{GenContext, Stage};
-use crate::ids::RegionId;
 
 /// Height added at a plate boundary (mountain ridge / island arc).
 const BOUNDARY_UPLIFT: f32 = 0.55;
@@ -62,7 +62,8 @@ impl Stage for ElevationStage {
             globe.region_elevation[r] += uplift[r] + detail;
         }
 
-        ctx.log.push("elevation: boundary uplift + fbm detail".to_string());
+        ctx.log
+            .push("elevation: boundary uplift + fbm detail".to_string());
     }
 }
 
@@ -90,7 +91,10 @@ mod tests {
                 triangles: Vec::new(),
                 subdivisions: 0,
             },
-            graph: RegionGraph { offsets, neighbours },
+            graph: RegionGraph {
+                offsets,
+                neighbours,
+            },
             ..PlanetGlobe::default()
         };
         g.resize_fields();

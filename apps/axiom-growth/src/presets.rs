@@ -122,9 +122,10 @@ fn semi_major_axis_for_seff(l_star: f32, s_eff: f32) -> f32 {
 /// (all three presets currently declare high_silicate=0.6, organic=0.3).
 fn material_weights(preset: PlanetPreset) -> MaterialWeights {
     match preset {
-        PlanetPreset::Earthlike | PlanetPreset::OceanWorld | PlanetPreset::Dry => {
-            MaterialWeights { high_silicate: 0.6, organic: 0.3 }
-        }
+        PlanetPreset::Earthlike | PlanetPreset::OceanWorld | PlanetPreset::Dry => MaterialWeights {
+            high_silicate: 0.6,
+            organic: 0.3,
+        },
     }
 }
 
@@ -250,7 +251,11 @@ mod tests {
 
     #[test]
     fn same_preset_and_seed_is_identical_field_by_field() {
-        for preset in [PlanetPreset::Earthlike, PlanetPreset::OceanWorld, PlanetPreset::Dry] {
+        for preset in [
+            PlanetPreset::Earthlike,
+            PlanetPreset::OceanWorld,
+            PlanetPreset::Dry,
+        ] {
             let a = genome_for(preset, "deterministic-seed");
             let b = genome_for(preset, "deterministic-seed");
             assert_genome_eq(&a, &b);
@@ -268,9 +273,16 @@ mod tests {
             let grav = g.gravity_m_s2();
             assert!((8.5..=11.5).contains(&grav), "gravity {grav} seed {s}");
             // Water fraction in the earthlike band.
-            assert!((0.65..=0.75).contains(&g.water_fraction), "water {} seed {s}", g.water_fraction);
+            assert!(
+                (0.65..=0.75).contains(&g.water_fraction),
+                "water {} seed {s}",
+                g.water_fraction
+            );
             // Insolation in band.
-            assert!((0.85..=1.15).contains(&g.insolation()), "insolation seed {s}");
+            assert!(
+                (0.85..=1.15).contains(&g.insolation()),
+                "insolation seed {s}"
+            );
         }
     }
 
@@ -292,14 +304,22 @@ mod tests {
 
     #[test]
     fn derived_values_finite_and_sane() {
-        for preset in [PlanetPreset::Earthlike, PlanetPreset::OceanWorld, PlanetPreset::Dry] {
+        for preset in [
+            PlanetPreset::Earthlike,
+            PlanetPreset::OceanWorld,
+            PlanetPreset::Dry,
+        ] {
             let g = genome_for(preset, "sanity");
             let grav = g.gravity_m_s2();
             let temp = g.equilibrium_temperature_k();
             assert!(grav.is_finite() && grav > 0.0, "gravity {grav}");
             assert!(temp.is_finite() && temp > 0.0, "temp {temp}");
             // Earthlike-mass/radius gravity stays in a planetary range.
-            assert!((5.0..15.0).contains(&grav), "gravity {grav} for {:?}", preset);
+            assert!(
+                (5.0..15.0).contains(&grav),
+                "gravity {grav} for {:?}",
+                preset
+            );
             assert!(g.orbital_period_s().is_finite() && g.orbital_period_s() > 0.0);
             assert!(g.insolation().is_finite() && g.insolation() > 0.0);
         }
@@ -307,9 +327,19 @@ mod tests {
 
     #[test]
     fn material_weights_set_per_preset() {
-        for preset in [PlanetPreset::Earthlike, PlanetPreset::OceanWorld, PlanetPreset::Dry] {
+        for preset in [
+            PlanetPreset::Earthlike,
+            PlanetPreset::OceanWorld,
+            PlanetPreset::Dry,
+        ] {
             let g = genome_for(preset, "mat");
-            assert_eq!(g.material_weights, MaterialWeights { high_silicate: 0.6, organic: 0.3 });
+            assert_eq!(
+                g.material_weights,
+                MaterialWeights {
+                    high_silicate: 0.6,
+                    organic: 0.3
+                }
+            );
         }
     }
 }

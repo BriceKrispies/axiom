@@ -24,6 +24,7 @@ pub struct GpuCommand {
     projection: Mat4,
     mesh_id: u64,
     material_id: u64,
+    material_texture_id: u64,
     index_count: u32,
     world: Mat4,
 }
@@ -48,6 +49,7 @@ impl GpuCommand {
         projection: Mat4::IDENTITY,
         mesh_id: 0,
         material_id: 0,
+        material_texture_id: 0,
         index_count: 0,
         world: Mat4::IDENTITY,
     };
@@ -89,11 +91,14 @@ impl GpuCommand {
         }
     }
 
-    /// Bind a material's uniform group by opaque id.
-    pub const fn set_material(material_id: u64) -> Self {
+    /// Bind a material's uniform group by opaque id, together with the albedo
+    /// texture id it samples (`0` = untextured). The recording backend captures
+    /// both so a receipt reflects which texture each draw bound.
+    pub const fn set_material(material_id: u64, material_texture_id: u64) -> Self {
         GpuCommand {
             kind: Self::KIND_SET_MATERIAL,
             material_id,
+            material_texture_id,
             ..Self::ZEROED
         }
     }
@@ -144,6 +149,12 @@ impl GpuCommand {
     /// The material id, if this is a `set_material` command.
     pub fn as_set_material(&self) -> Option<u64> {
         (self.kind == Self::KIND_SET_MATERIAL).then_some(self.material_id)
+    }
+
+    /// The albedo texture id (`0` = untextured) bound by this `set_material`
+    /// command, or `None` for any other kind.
+    pub fn as_set_material_texture(&self) -> Option<u64> {
+        (self.kind == Self::KIND_SET_MATERIAL).then_some(self.material_texture_id)
     }
 
     /// The `(index_count, world)` pair, if this is a `draw_indexed` command.
@@ -199,7 +210,7 @@ mod cov {
             GpuCommand::KIND_SET_MESH
         );
         assert_eq!(
-            GpuCommand::set_material(9).kind_code(),
+            GpuCommand::set_material(9, 0).kind_code(),
             GpuCommand::KIND_SET_MATERIAL
         );
         assert_eq!(
@@ -220,7 +231,9 @@ mod cov {
             Some((Mat4::IDENTITY, Mat4::IDENTITY))
         );
         assert_eq!(GpuCommand::set_mesh(5).as_set_mesh(), Some(5));
-        assert_eq!(GpuCommand::set_material(9).as_set_material(), Some(9));
+        let material = GpuCommand::set_material(9, 4);
+        assert_eq!(material.as_set_material(), Some(9));
+        assert_eq!(material.as_set_material_texture(), Some(4));
         assert_eq!(
             GpuCommand::draw_indexed(36, Mat4::IDENTITY).as_draw_indexed(),
             Some((36, Mat4::IDENTITY))
@@ -235,6 +248,7 @@ mod cov {
         assert_eq!(present.as_set_camera(), None);
         assert_eq!(present.as_set_mesh(), None);
         assert_eq!(present.as_set_material(), None);
+        assert_eq!(present.as_set_material_texture(), None);
         assert_eq!(present.as_draw_indexed(), None);
     }
 }

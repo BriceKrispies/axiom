@@ -138,11 +138,59 @@ fn macro_height_m(atlas: &PlanetSurfaceAtlas, dir: [f32; 3]) -> f32 {
     sample_macro_continuous(atlas, dir) * MACRO_HEIGHT_SCALE_M
 }
 
+/// Octave budget for each detail layer at full detail (LOD 0 / collision).
+const MASK_OCTAVES: u32 = 3;
+const MOUNTAIN_OCTAVES: u32 = 5;
+const HILL_OCTAVES: u32 = 4;
+const FINE_OCTAVES: u32 = 3;
+
+/// How many octaves of an FBM layer survive a level-of-detail cap.
+///
+/// An FBM layer with base frequency `base_freq` (cycles/m) samples octave `o`
+/// (0-indexed) at frequency `base_freq * 2^o`, i.e. at wavelength
+/// `λ_o = 1 / (base_freq * 2^o)`. When the field is going to be *rendered* at a
+/// vertex spacing of `min_feature_m` metres, any octave whose wavelength is finer
+/// than that spacing cannot be represented — sampling it only aliases (and costs
+/// noise evals for detail no triangle can show). So we keep an octave only while
+/// `λ_o >= min_feature_m`:
+///
+/// ```text
+///   1 / (base_freq * 2^o) >= min_feature_m
+///   2^o <= 1 / (base_freq * min_feature_m)
+///   o   <= log2( 1 / (base_freq * min_feature_m) )
+/// ```
+///
+/// The kept count is `floor(that) + 1`, clamped into `[0, base_octaves]`. A
+/// `min_feature_m <= 0` means "no cap" and returns the full `base_octaves`
+/// (so `sample_height_m_lod(.., 0.0)` reproduces `sample_height_m` exactly). If
+/// even the base octave (o = 0, λ = 1/base_freq) is finer than the cap, the
+/// whole layer is dropped (count 0) — e.g. the ~40 m fine-roughness layer is
+/// elided wholesale once a far LOD samples at > 40 m spacing.
+fn lod_octaves(base_freq: f32, base_octaves: u32, min_feature_m: f32) -> u32 {
+    if min_feature_m <= 0.0 {
+        return base_octaves;
+    }
+    // Coarsest octave wavelength is 1/base_freq; if even that is finer than the
+    // cap the layer contributes nothing at this LOD.
+    let coarsest_wavelength_m = 1.0 / base_freq.max(f32::MIN_POSITIVE);
+    if coarsest_wavelength_m < min_feature_m {
+        return 0;
+    }
+    let ratio = 1.0 / (base_freq * min_feature_m);
+    // ratio >= 1 here (guarded above), so the log is >= 0.
+    let kept = ratio.log2().floor() as i64 + 1;
+    (kept.clamp(0, base_octaves as i64)) as u32
+}
+
 /// The "mountainousness" mask at a world position, in [MASK_FLOOR, 1].
 /// Low-frequency FBM remapped from [-1,1] to [0,1] then floored. Plains where
-/// it is near the floor; rugged ranges where it approaches 1.
-fn mountainousness(seed: u64, world_pos: Vec3) -> f32 {
-    let fbm = Fbm::new(seed ^ SEED_MASK, 3, MASK_FREQ_PER_M);
+/// it is near the floor; rugged ranges where it approaches 1. `min_feature_m`
+/// caps the finest octave used (0 = full detail); the mask is so long-wavelength
+/// (~6 km) that even aggressive LODs keep it, preserving the plains/range
+/// structure of far terrain.
+fn mountainousness(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
+    let octaves = lod_octaves(MASK_FREQ_PER_M, MASK_OCTAVES, min_feature_m).max(1);
+    let fbm = Fbm::new(seed ^ SEED_MASK, octaves, MASK_FREQ_PER_M);
     // Remap [-1,1] -> [0,1]. Square it to bias toward plains (most of the world
     // gentle) with occasional pronounced ranges -> stronger contrast/variety.
     let raw = (fbm.sample(world_pos) + 1.0) * 0.5;
@@ -152,9 +200,11 @@ fn mountainousness(seed: u64, world_pos: Vec3) -> f32 {
 
 /// Ridged value in [0,1] from an FBM sample: 1 - |fbm|, squared ("billowed") so
 /// ridgelines are sharp crests and valleys are broad. Domain-warped so ridges
-/// meander rather than aligning to the noise lattice.
-fn ridged_mountain(seed: u64, world_pos: Vec3) -> f32 {
-    let fbm = Fbm::new(seed ^ SEED_MOUNTAIN, 5, MOUNTAIN_FREQ_PER_M);
+/// meander rather than aligning to the noise lattice. `min_feature_m` caps the
+/// finest octave used (0 = full detail).
+fn ridged_mountain(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
+    let octaves = lod_octaves(MOUNTAIN_FREQ_PER_M, MOUNTAIN_OCTAVES, min_feature_m).max(1);
+    let fbm = Fbm::new(seed ^ SEED_MOUNTAIN, octaves, MOUNTAIN_FREQ_PER_M);
     let n = fbm.sample_warped(world_pos, MOUNTAIN_WARP);
     let ridged = 1.0 - n.abs();
     // Square to sharpen crests (billow). Result stays in [0,1].
@@ -165,20 +215,38 @@ fn ridged_mountain(seed: u64, world_pos: Vec3) -> f32 {
 /// position, so the field is identical wherever two chunks evaluate the same
 /// position. Audit: GW-E19. Mountains (mask-gated, ridged) + hills + fine
 /// roughness, all derived from the world seed only.
-fn detail_height_m(seed: u64, world_pos: Vec3) -> f32 {
+///
+/// `min_feature_m` is the level-of-detail cap: octaves (and whole layers) whose
+/// wavelength is finer than it are skipped (see [`lod_octaves`]). Pass `0.0` for
+/// full detail (collision and the near LOD 0 ring); pass the render spacing
+/// (`2^L` m for a LOD-L chunk) for the far rings, so each coarse chunk omits the
+/// sub-vertex detail it could only alias.
+fn detail_height_m(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
     // Mountain/ridge layer, gated by the mountainousness mask. Centred so it
     // contributes signed relief (peaks above, broad basins below).
-    let mask = mountainousness(seed, world_pos);
-    let ridge = ridged_mountain(seed, world_pos); // [0,1]
+    let mask = mountainousness(seed, world_pos, min_feature_m);
+    let ridge = ridged_mountain(seed, world_pos, min_feature_m); // [0,1]
     let mountain = (ridge - 0.5) * 2.0 * MOUNTAIN_AMPLITUDE_M * mask;
 
-    // Medium hills: signed FBM, full field everywhere.
-    let hill_fbm = Fbm::new(seed ^ SEED_HILL, 4, HILL_FREQ_PER_M);
-    let hill = hill_fbm.sample(world_pos) * HILL_AMPLITUDE_M;
+    // Medium hills: signed FBM, full field everywhere. Dropped entirely once the
+    // LOD spacing exceeds its ~200 m base wavelength.
+    let hill_octaves = lod_octaves(HILL_FREQ_PER_M, HILL_OCTAVES, min_feature_m);
+    let hill = if hill_octaves == 0 {
+        0.0
+    } else {
+        Fbm::new(seed ^ SEED_HILL, hill_octaves, HILL_FREQ_PER_M).sample(world_pos)
+            * HILL_AMPLITUDE_M
+    };
 
-    // Fine surface roughness: short wavelength, small amplitude.
-    let fine_fbm = Fbm::new(seed ^ SEED_FINE, 3, FINE_FREQ_PER_M);
-    let fine = fine_fbm.sample(world_pos) * FINE_AMPLITUDE_M;
+    // Fine surface roughness: short wavelength, small amplitude. The first layer
+    // to vanish with distance (its ~40 m wavelength is invisible at far LODs).
+    let fine_octaves = lod_octaves(FINE_FREQ_PER_M, FINE_OCTAVES, min_feature_m);
+    let fine = if fine_octaves == 0 {
+        0.0
+    } else {
+        Fbm::new(seed ^ SEED_FINE, fine_octaves, FINE_FREQ_PER_M).sample(world_pos)
+            * FINE_AMPLITUDE_M
+    };
 
     mountain + hill + fine
 }
@@ -186,6 +254,11 @@ fn detail_height_m(seed: u64, world_pos: Vec3) -> f32 {
 /// Continuous terrain height (metres) at a single world-metre position: macro
 /// regional base + the multi-scale detail field. This is the pure per-point
 /// query a renderer / raymarcher uses, and the heart of the SC-E8 guarantee.
+///
+/// **Full detail, always.** This is the authoritative height used for
+/// ground-follow / collision and for the near (LOD 0) render ring, so the player
+/// always walks on the same surface regardless of how the far terrain is drawn.
+/// Far render meshes use [`sample_height_m_lod`] instead.
 pub fn sample_height_m(
     atlas: &PlanetSurfaceAtlas,
     localmap: &GameWorldLocalMap,
@@ -193,11 +266,39 @@ pub fn sample_height_m(
     x_m: f32,
     z_m: f32,
 ) -> f32 {
+    sample_height_m_lod(atlas, localmap, seed, x_m, z_m, 0.0)
+}
+
+/// Continuous terrain height (metres) at a world-metre position, with a
+/// **level-of-detail cap** on the detail field. Identical to [`sample_height_m`]
+/// except that detail-noise octaves (and whole layers) whose wavelength is finer
+/// than `min_feature_m` are skipped (see [`lod_octaves`]).
+///
+/// This is the sampler the **far render meshes** use: a LOD-L chunk has vertex
+/// spacing `2^L` m and passes that spacing as `min_feature_m`, so it omits the
+/// sub-vertex detail it could only alias — which both speeds far chunks (fewer
+/// noise evals) and removes shimmer. The **macro** regional base is never capped:
+/// far terrain keeps the right large-scale shape; only fine relief drops out.
+///
+/// `min_feature_m <= 0.0` means "no cap" and reproduces [`sample_height_m`]
+/// bit-for-bit (LOD 0 and collision both take this path). Because the cap is a
+/// pure function of `min_feature_m` (not of chunk coordinate), two chunks at the
+/// *same* LOD still agree exactly on shared positions — coarse rings stay
+/// internally seamless; only across LOD boundaries do meshes differ (hidden by
+/// skirts in the viewer).
+pub fn sample_height_m_lod(
+    atlas: &PlanetSurfaceAtlas,
+    localmap: &GameWorldLocalMap,
+    seed: u64,
+    x_m: f32,
+    z_m: f32,
+    min_feature_m: f32,
+) -> f32 {
     let dir = localmap.world_metres_to_unit_dir(x_m, z_m);
     let macro_m = macro_height_m(atlas, dir);
     // Detail is sampled from the flat world-metre position (x, 0, z) so the
     // lattice is shared globally and continuous across chunk borders.
-    let detail = detail_height_m(seed, Vec3::new(x_m, 0.0, z_m));
+    let detail = detail_height_m(seed, Vec3::new(x_m, 0.0, z_m), min_feature_m);
     macro_m + detail
 }
 
@@ -210,7 +311,10 @@ pub fn generate_chunk(
     seed: u64,
 ) -> Chunk {
     let mut chunk = Chunk::new(coord);
-    debug_assert_eq!(chunk.height_samples.len(), CHUNK_VERT_SIDE * CHUNK_VERT_SIDE);
+    debug_assert_eq!(
+        chunk.height_samples.len(),
+        CHUNK_VERT_SIDE * CHUNK_VERT_SIDE
+    );
 
     let (origin_x, origin_z) = GameWorldLocalMap::chunk_origin_m(coord);
 
@@ -239,9 +343,13 @@ mod tests {
         let sites = vec![
             Vec3::new(0.0, 1.0, 0.0).normalize().unwrap_or(Vec3::UNIT_Y),
             Vec3::new(0.1, 1.0, 0.0).normalize().unwrap_or(Vec3::UNIT_Y),
-            Vec3::new(-0.1, 1.0, 0.0).normalize().unwrap_or(Vec3::UNIT_Y),
+            Vec3::new(-0.1, 1.0, 0.0)
+                .normalize()
+                .unwrap_or(Vec3::UNIT_Y),
             Vec3::new(0.0, 1.0, 0.1).normalize().unwrap_or(Vec3::UNIT_Y),
-            Vec3::new(0.0, 1.0, -0.1).normalize().unwrap_or(Vec3::UNIT_Y),
+            Vec3::new(0.0, 1.0, -0.1)
+                .normalize()
+                .unwrap_or(Vec3::UNIT_Y),
         ];
         let region_elevation = vec![0.30, 0.45, 0.20, 0.50, 0.10];
 
@@ -255,7 +363,10 @@ mod tests {
             0, // region 3
             0, // region 4
         ];
-        let graph = RegionGraph { offsets, neighbours };
+        let graph = RegionGraph {
+            offsets,
+            neighbours,
+        };
 
         PlanetSurfaceAtlas {
             sites,
@@ -370,7 +481,10 @@ mod tests {
         let atlas = synthetic_atlas();
         let s = atlas.sites[3];
         let m = sample_macro_continuous(&atlas, [s.x, s.y, s.z]);
-        assert!((m - 0.50).abs() < 1.0e-3, "expected site elevation, got {m}");
+        assert!(
+            (m - 0.50).abs() < 1.0e-3,
+            "expected site elevation, got {m}"
+        );
     }
 
     /// Dramatic terrain: somewhere within a 512 m span the relief (max - min)
@@ -471,6 +585,91 @@ mod tests {
         );
     }
 
+    /// LOD sampling with NO cap (`min_feature_m = 0`) must reproduce the
+    /// full-detail `sample_height_m` exactly — this is the invariant that lets
+    /// the near (LOD 0) render ring and collision share one surface.
+    #[test]
+    fn sample_height_m_lod_zero_cap_equals_full_detail() {
+        let atlas = synthetic_atlas();
+        let localmap = GameWorldLocalMap::anchored(&atlas);
+        let seed = 0x10D_0000u64;
+        // Scan a spread of world positions (non-integer so noise is non-trivial).
+        let mut iz = -200;
+        while iz <= 200 {
+            let mut ix = -200;
+            while ix <= 200 {
+                let x = ix as f32 + 0.37;
+                let z = iz as f32 - 0.11;
+                let full = sample_height_m(&atlas, &localmap, seed, x, z);
+                let lod0 = sample_height_m_lod(&atlas, &localmap, seed, x, z, 0.0);
+                assert_eq!(
+                    full, lod0,
+                    "LOD0 (no cap) must equal full detail at ({x},{z}): {full} vs {lod0}"
+                );
+                ix += 23;
+            }
+            iz += 23;
+        }
+    }
+
+    /// A large `min_feature_m` must yield a SMOOTHER field: with the fine and
+    /// hill octaves capped away, the high-frequency variance (mean squared
+    /// difference between neighbouring 1 m samples) must drop sharply versus the
+    /// full-detail field over the same window.
+    #[test]
+    fn sample_height_m_lod_large_cap_is_smoother() {
+        let atlas = synthetic_atlas();
+        let localmap = GameWorldLocalMap::anchored(&atlas);
+        let seed = 0x5_0000_533Du64; // arbitrary fixed seed
+
+        // Mean squared 1 m step over a window, at a given LOD cap. Smaller =>
+        // less fine detail (smoother).
+        let hf_variance = |cap: f32| -> f64 {
+            let mut sum_sq = 0.0_f64;
+            let mut n = 0u32;
+            let mut z = 0;
+            while z < 256 {
+                let mut x = 0;
+                while x < 256 {
+                    let a = sample_height_m_lod(&atlas, &localmap, seed, x as f32, z as f32, cap);
+                    let b =
+                        sample_height_m_lod(&atlas, &localmap, seed, (x + 1) as f32, z as f32, cap);
+                    let d = (a - b) as f64;
+                    sum_sq += d * d;
+                    n += 1;
+                    x += 1;
+                }
+                z += 1;
+            }
+            sum_sq / n as f64
+        };
+
+        let full = hf_variance(0.0); // full detail
+        let coarse = hf_variance(256.0); // far LOD: fine + hills capped away
+        assert!(
+            coarse < full * 0.5,
+            "large LOD cap should be much smoother: full HF variance {full}, capped {coarse}"
+        );
+    }
+
+    /// `lod_octaves` rule: an octave is kept only while its wavelength is at
+    /// least `min_feature_m`; whole layers vanish once even their coarsest
+    /// octave is finer than the cap.
+    #[test]
+    fn lod_octaves_caps_by_wavelength() {
+        // No cap => full budget.
+        assert_eq!(
+            lod_octaves(FINE_FREQ_PER_M, FINE_OCTAVES, 0.0),
+            FINE_OCTAVES
+        );
+        // Fine layer base wavelength is ~40 m; a 41 m cap drops it entirely.
+        assert_eq!(lod_octaves(FINE_FREQ_PER_M, FINE_OCTAVES, 41.0), 0);
+        // Just below 40 m keeps exactly the coarsest octave.
+        assert_eq!(lod_octaves(FINE_FREQ_PER_M, FINE_OCTAVES, 39.0), 1);
+        // The mask (~6 km wavelength) survives even an aggressive 256 m cap.
+        assert!(lod_octaves(MASK_FREQ_PER_M, MASK_OCTAVES, 256.0) >= 1);
+    }
+
     /// The anchor must land on a land region.
     #[test]
     fn anchor_prefers_land() {
@@ -483,5 +682,55 @@ mod tests {
         );
         let r = crate::sampler::locate_region(&atlas, d);
         assert!(atlas.region_elevation[r.index()] >= 0.0);
+    }
+
+    /// STREAMING seam guarantee (the invariant the wasm-only `web::build_terrain`
+    /// streaming path relies on): two terrain mesh windows centred at *different*
+    /// chunk-aligned world positions, each recentred vertically by the SAME fixed
+    /// global anchor height, produce IDENTICAL recentred heights wherever they
+    /// overlap. This is what lets the streamed mesh slide around the player while
+    /// staying seam-consistent with the original static mesh — heights are pure
+    /// functions of world position minus a constant, so a re-centre never moves a
+    /// shared point horizontally or vertically. `web::build_terrain` is wasm32-
+    /// only, so we exercise the underlying `sample_height_m` exactly as it does.
+    #[test]
+    fn streamed_window_recenter_is_seam_consistent() {
+        let atlas = synthetic_atlas();
+        let localmap = GameWorldLocalMap::anchored(&atlas);
+        let seed = 0x57EA_3007u64;
+
+        // The fixed global anchor: sampled once at the descent spot (world
+        // origin) and reused for every window, exactly like `web::descend`.
+        let anchor_h = sample_height_m(&atlas, &localmap, seed, 0.0, 0.0);
+
+        // Two windows whose centres differ by a chunk-aligned offset (the kind a
+        // re-centre produces). Their overlap is a band of shared world positions.
+        let recentred = |cx: f32, cz: f32, x: f32, z: f32| {
+            sample_height_m(&atlas, &localmap, seed, cx + x, cz + z) - anchor_h
+        };
+
+        // Sample a span of shared world positions and confirm both windows agree
+        // bit-for-bit on the recentred height (so no vertical jump on regen) and
+        // that the value is a pure function of the absolute world position.
+        let mut iz = -64;
+        while iz <= 64 {
+            let mut ix = -64;
+            while ix <= 64 {
+                let world_x = ix as f32;
+                let world_z = iz as f32;
+                // Window A centred at origin reaching out to (world_x, world_z).
+                let a = recentred(0.0, 0.0, world_x, world_z);
+                // Window B centred one chunk over, reaching the SAME world point.
+                let b = recentred(16.0, -16.0, world_x - 16.0, world_z + 16.0);
+                assert!(
+                    (a - b).abs() < 1.0e-3,
+                    "streamed re-centre seam mismatch at world ({world_x},{world_z}): \
+                     {a} vs {b} (delta {})",
+                    (a - b).abs()
+                );
+                ix += 16;
+            }
+            iz += 16;
+        }
     }
 }

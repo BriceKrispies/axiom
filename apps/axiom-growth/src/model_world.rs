@@ -59,7 +59,17 @@ impl Chunk {
 /// A diff emitted to presentation. Audit: GW DiffQueue (ChunkLoaded/Unloaded/CellChanged).
 #[derive(Debug, Clone)]
 pub enum Diff {
-    ChunkLoaded { coord: ChunkCoord, heights: Vec<f32> },
-    ChunkUnloaded { coord: ChunkCoord },
-    CellChanged { coord: ChunkCoord, lx: u32, lz: u32, new_height: f32 },
+    ChunkLoaded {
+        coord: ChunkCoord,
+        heights: Vec<f32>,
+    },
+    ChunkUnloaded {
+        coord: ChunkCoord,
+    },
+    CellChanged {
+        coord: ChunkCoord,
+        lx: u32,
+        lz: u32,
+        new_height: f32,
+    },
 }

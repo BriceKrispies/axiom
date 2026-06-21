@@ -59,6 +59,10 @@ impl ResolvedResources {
         self.materials.iter().find(|m| m.id() == id)
     }
 
+    pub fn texture_by_id(&self, id: ResourceId) -> Option<&TextureData> {
+        self.textures.iter().find(|t| t.id() == id)
+    }
+
     pub fn meshes(&self) -> &[MeshData] {
         &self.meshes
     }
@@ -164,6 +168,14 @@ mod cov {
         assert!(r.material_by_id(mat_id).is_some());
         assert!(r.material_by_id(ResourceId::from_raw(9999)).is_none());
         assert!(r.mesh_by_id(ResourceId::from_raw(9999)).is_none());
+    }
+
+    #[test]
+    fn texture_by_id_present_and_missing() {
+        let r = ResolvedResources::from_table(&table_with_texture());
+        let tex_id = r.texture_at(0).unwrap().id();
+        assert!(r.texture_by_id(tex_id).is_some());
+        assert!(r.texture_by_id(ResourceId::from_raw(9999)).is_none());
     }
 
     #[test]
