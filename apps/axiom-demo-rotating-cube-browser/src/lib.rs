@@ -69,6 +69,40 @@ fn rotating_cubes_app() -> App {
                         Spin::around(axis).period(360),
                     ));
             });
+            // A ground plane beneath the cubes (a distinct mesh: a scaled quad).
+            let plane = meshes.add(Mesh::plane());
+            let ground = materials.add(Material::lit(Color::linear_rgb(
+                ch(0.18),
+                ch(0.20),
+                ch(0.24),
+            )));
+            world.spawn((
+                Transform::combine(
+                    Transform::from_translation(Vec3::new(0.0, -2.0, 0.0)),
+                    Transform::from_scale(Vec3::new(30.0, 1.0, 30.0)),
+                ),
+                Renderable {
+                    mesh: plane,
+                    material: ground,
+                },
+            ));
+            // A sphere above the cubes (a third distinct mesh).
+            let sphere = meshes.add(Mesh::sphere());
+            let sphere_material = materials.add(Material::lit(Color::linear_rgb(
+                ch(0.90),
+                ch(0.78),
+                ch(0.30),
+            )));
+            world.spawn((
+                Transform::combine(
+                    Transform::from_translation(Vec3::new(0.0, 2.6, 0.0)),
+                    Transform::from_scale(Vec3::new(1.6, 1.6, 1.6)),
+                ),
+                Renderable {
+                    mesh: sphere,
+                    material: sphere_material,
+                },
+            ));
             world.spawn((
                 Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
                 Camera::perspective(PerspectiveProjection {
@@ -102,15 +136,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn authors_the_deterministic_three_cube_scene() {
+    fn authors_the_deterministic_multi_mesh_scene() {
         let mut app = rotating_cubes_app().build();
-        assert_eq!(app.renderable_count(), 3);
+        // 3 spinning cubes + a ground plane + a sphere.
+        assert_eq!(app.renderable_count(), 5);
         let outcome = app.tick(0);
-        // Clear + SetCamera + SetPipeline + 3 x (SetMesh + SetMaterial +
-        // DrawIndexed) + Present = 13.
-        assert_eq!(outcome.command_count(), 13);
-        assert_eq!(outcome.draws().len(), 3);
+        // Clear + SetCamera + SetPipeline + 5 x (SetMesh + SetMaterial +
+        // DrawIndexed) + Present = 19.
+        assert_eq!(outcome.command_count(), 19);
+        assert_eq!(outcome.draws().len(), 5);
         assert_eq!(outcome.clear_color(), [0.05, 0.06, 0.08, 1.0]);
+        // Three distinct meshes (cube, plane, sphere) are batched separately,
+        // covering 5 instances in total.
+        let batches = outcome.mesh_batches();
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches.iter().map(|batch| batch.2).sum::<u32>(), 5);
     }
 
     #[test]

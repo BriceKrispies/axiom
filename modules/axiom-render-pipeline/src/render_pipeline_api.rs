@@ -60,7 +60,7 @@ pub struct RenderReport {
     command_count: usize,
     clear_color: [f32; 4],
     view_projection: Mat4,
-    draws: Vec<(Mat4, [f32; 4])>,
+    draws: Vec<(Mat4, [f32; 4], u64)>,
     presented: bool,
     recorded: bool,
 }
@@ -286,23 +286,27 @@ impl RenderPipelineApi {
             .unwrap_or([0.0; 4]);
 
         // Per-draw data: walk the command list once. Each material command sets
-        // the colour the following draws use; each draw carries its world. The
-        // colour is state threaded across commands, so a `fold` carries
-        // `(current_color, draws)`: a material command replaces the colour (else
-        // keeps it via `map_or`), a draw command appends `(world, colour)`.
-        let (_, draws): ([f32; 4], Vec<(Mat4, [f32; 4])>) = (0..count).fold(
-            ([1.0_f32; 4], Vec::new()),
-            |(current_color, mut acc), i| {
+        // the colour, and each mesh command the mesh id, that the following draws
+        // use; each draw carries its world. Both are state threaded across
+        // commands, so a `fold` carries `(current_color, current_mesh, draws)`: a
+        // material/mesh command replaces its value (else keeps it via
+        // `map_or`/`unwrap_or`), a draw command appends `(world, colour, mesh)`.
+        let (_, _, draws): ([f32; 4], u64, Vec<(Mat4, [f32; 4], u64)>) = (0..count).fold(
+            ([1.0_f32; 4], 0_u64, Vec::new()),
+            |(current_color, current_mesh, mut acc), i| {
                 let next_color = render
                     .command_material_id_at(&commands, i)
                     .map_or(current_color, |id| {
                         material_color.get(&id).copied().unwrap_or([1.0; 4])
                     });
+                let next_mesh = render
+                    .command_mesh_id_at(&commands, i)
+                    .unwrap_or(current_mesh);
                 render
                     .command_draw_indexed_at(&commands, i)
                     .into_iter()
-                    .for_each(|(_, world)| acc.push((world, next_color)));
-                (next_color, acc)
+                    .for_each(|(_, world)| acc.push((world, next_color, next_mesh)));
+                (next_color, next_mesh, acc)
             },
         );
 
@@ -339,12 +343,18 @@ impl RenderPipelineApi {
 
     /// The world matrix of the `i`-th drawn object, if present.
     pub fn report_draw_world(&self, report: &RenderReport, i: usize) -> Option<Mat4> {
-        report.draws.get(i).map(|(world, _)| *world)
+        report.draws.get(i).map(|(world, _, _)| *world)
     }
 
     /// The colour of the `i`-th drawn object, if present.
     pub fn report_draw_color(&self, report: &RenderReport, i: usize) -> Option<[f32; 4]> {
-        report.draws.get(i).map(|(_, color)| *color)
+        report.draws.get(i).map(|(_, color, _)| *color)
+    }
+
+    /// The mesh id of the `i`-th drawn object, if present. Lets a caller group
+    /// draws by mesh for per-mesh instance batching.
+    pub fn report_draw_mesh_id(&self, report: &RenderReport, i: usize) -> Option<u64> {
+        report.draws.get(i).map(|(_, _, mesh_id)| *mesh_id)
     }
 
     pub fn report_presented(&self, report: &RenderReport) -> bool {
@@ -447,6 +457,9 @@ mod tests {
         assert!(api.report_draw_world(&report, 0).is_some());
         assert!(api.report_draw_world(&report, 9).is_none());
         assert!(api.report_draw_color(&report, 9).is_none());
+        // The draw carries its mesh id (mesh 1 in the scene), for batching.
+        assert_eq!(api.report_draw_mesh_id(&report, 0), Some(1));
+        assert!(api.report_draw_mesh_id(&report, 9).is_none());
         // A real camera makes the view-projection non-identity.
         assert_ne!(api.report_view_projection(&report), Mat4::IDENTITY);
         assert!(api.report_recorded(&report));

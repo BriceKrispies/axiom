@@ -23,11 +23,13 @@ mod basic_lit_material;
 mod cube_mesh;
 mod material_data;
 mod mesh_data;
+mod plane_mesh;
 mod resolved_resources;
 mod resource_id;
 mod resource_table;
 mod resources_api;
 mod solid_color_texture;
+mod sphere_mesh;
 mod texture_data;
 mod vertex;
 

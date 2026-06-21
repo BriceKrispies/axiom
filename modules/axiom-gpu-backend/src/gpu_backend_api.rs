@@ -59,45 +59,44 @@ impl GpuBackendApi {
         }
     }
 
-    /// Present one frame: the engine's per-instance floats (`[mvp(16), colour(4)]`
-    /// each) and a clear colour. Returns whether real pixels were drawn — always
-    /// `false` on native (headless), and on wasm32 `true` when a live binding
-    /// rendered the frame.
-    pub fn present_frame(&self, clear_color: [f32; 4], instances: &[f32], instance_count: u32) -> bool {
+    /// Present one frame from per-mesh instance batches: each batch is
+    /// `(mesh_id, instance floats [mvp(16)+colour(4) per instance], count)`,
+    /// referencing a mesh uploaded at [`Self::initialize`]. Returns whether real
+    /// pixels were drawn — always `false` on native (headless), and on wasm32
+    /// `true` when a live binding rendered the frame.
+    pub fn present_frame(&self, clear_color: [f32; 4], batches: &[(u64, Vec<f32>, u32)]) -> bool {
         #[cfg(target_arch = "wasm32")]
         {
             return self
                 .live
                 .as_ref()
-                .map(|live| live.render_frame(instances, instance_count, clear_color).is_ok())
+                .map(|live| live.render_frame(batches, clear_color).is_ok())
                 .unwrap_or(false);
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let _ = (clear_color, instances, instance_count);
+            let _ = (clear_color, batches);
             false
         }
     }
 
-    /// Initialise the real wgpu binding from a canvas and the engine's geometry
-    /// (interleaved position+normal+colour `vertices`, 10 floats/vertex,
-    /// triangle-list `indices`). wasm32 only; on success later
+    /// Initialise the real wgpu binding from a canvas and the engine's distinct
+    /// mesh set (`(mesh_id, interleaved position+normal+colour vertices [10
+    /// floats/vertex], triangle indices)`). wasm32 only; on success later
     /// [`Self::present_frame`] calls draw real pixels. On failure the binding
     /// stays absent (not ready).
     #[cfg(target_arch = "wasm32")]
     pub async fn initialize(
         &mut self,
         canvas: web_sys::HtmlCanvasElement,
-        vertices: &[f32],
-        indices: &[u32],
+        meshes: &[(u64, Vec<f32>, Vec<u32>)],
         max_instances: u32,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let binding = crate::live_gpu_binding::LiveGpuBinding::initialize(
             canvas,
             self.width,
             self.height,
-            vertices,
-            indices,
+            meshes,
             max_instances,
         )
         .await?;
@@ -105,17 +104,16 @@ impl GpuBackendApi {
         Ok(())
     }
 
-    /// Replace the live binding's uploaded geometry mid-loop (recreate its vertex
-    /// + index buffers from a freshly-built mesh). wasm32 only, and a no-op when
+    /// Replace one cached mesh's geometry mid-loop. wasm32 only, and a no-op when
     /// no live binding is initialised — the `Option` is consumed with
     /// `iter_mut().for_each` (a combinator, not an `if let`). The streaming run
     /// loop calls this before [`Self::present_frame`] on frames carrying new
-    /// geometry, sliding the terrain window without rebinding.
+    /// geometry, sliding the terrain mesh without rebinding.
     #[cfg(target_arch = "wasm32")]
-    pub fn replace_geometry(&mut self, vertices: &[f32], indices: &[u32]) {
+    pub fn replace_geometry(&mut self, mesh_id: u64, vertices: &[f32], indices: &[u32]) {
         self.live
             .iter_mut()
-            .for_each(|live| live.replace_geometry(vertices, indices));
+            .for_each(|live| live.replace_geometry(mesh_id, vertices, indices));
     }
 }
 
@@ -165,7 +163,8 @@ mod tests {
         // On native there is no GPU binding: not ready, and present draws nothing.
         let backend = GpuBackendApi::new(&request(640, 480));
         assert!(!backend.binding_is_ready());
-        let instances = [0.0_f32; 20]; // one instance: mvp(16) + colour(4)
-        assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &instances, 1));
+        // One batch of one instance: mvp(16) + colour(4).
+        let batches = vec![(7_u64, vec![0.0_f32; 20], 1_u32)];
+        assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &batches));
     }
 }
