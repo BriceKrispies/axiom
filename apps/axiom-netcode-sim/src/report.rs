@@ -87,8 +87,9 @@ impl SimReport {
             self.min_confirmed,
             self.max_confirmed,
             self.all_agree.then_some("YES").unwrap_or("NO"),
-            self.first_divergence
-                .map_or(String::new(), |t| format!(" (first divergence at tick {t})"))
+            self.first_divergence.map_or(String::new(), |t| format!(
+                " (first divergence at tick {t})"
+            ))
         );
         println!(
             "{:>4}  {:<16} {:>9} {:>6} {:>20} {:>20} {:>6}",

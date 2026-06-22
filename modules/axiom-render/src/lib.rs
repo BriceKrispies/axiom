@@ -14,8 +14,11 @@
 //!
 //! ## What this module is not
 //! Not a renderer with a backend. Not a scene module. Not a resources
-//! module. Not a WebGPU module. Not an asset loader. The module
-//! imports no host APIs and no other module.
+//! module. Not a WebGPU module. Not an asset loader. It imports no other
+//! module. Its only host-layer coupling is producing the backend-neutral
+//! [`axiom_host::FramePacket`] from a command list
+//! ([`RenderApi::build_frame_packet`](crate::RenderApi::build_frame_packet));
+//! it consumes none of host's presentation/stepping/surface APIs.
 //!
 //! ## Frame capture boundary
 //! [`RenderApi`] can also capture a deterministic, engine-owned

@@ -1,6 +1,8 @@
 //! Directional / point light component.
 
-use axiom_kernel::{FieldSchema, Ratio, TypeSchema};
+use axiom_kernel::{
+    BinaryReader, BinaryWriter, FieldSchema, KernelResult, Ratio, Reflect, TypeSchema,
+};
 use axiom_math::{MathApi, Vec3};
 
 use crate::light_kind::LightKind;
@@ -50,9 +52,7 @@ impl Light {
             .iter()
             .all(|&component| math.validate_finite(component).is_ok())
             .then_some(())
-            .ok_or_else(|| {
-                SceneError::invalid_light_parameters("light parameters must be finite")
-            })
+            .ok_or_else(|| SceneError::invalid_light_parameters("light parameters must be finite"))
             .and_then(|()| {
                 // Colour components must be non-negative (the inverse of the
                 // original `x < 0 || y < 0 || z < 0` reject); operands are pure
@@ -67,9 +67,7 @@ impl Light {
             })
             .and_then(|()| {
                 (intensity.get() >= 0.0).then_some(()).ok_or_else(|| {
-                    SceneError::invalid_light_parameters(
-                        "light intensity must be non-negative",
-                    )
+                    SceneError::invalid_light_parameters("light intensity must be non-negative")
                 })
             })
             .map(|()| Light {
@@ -89,6 +87,30 @@ impl Light {
 
     pub const fn intensity(&self) -> Ratio {
         self.intensity
+    }
+}
+
+impl Reflect for Light {
+    const SCHEMA: TypeSchema = Light::SCHEMA;
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.kind.reflect_write(writer);
+        self.color.reflect_write(writer);
+        self.intensity.reflect_write(writer);
+    }
+
+    /// Reconstruct directly from the stored fields (the colour was finite and
+    /// non-negative when first built; `Ratio` re-validates finiteness on read).
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        LightKind::reflect_read(reader).and_then(|kind| {
+            Vec3::reflect_read(reader).and_then(|color| {
+                Ratio::reflect_read(reader).map(|intensity| Light {
+                    kind,
+                    color,
+                    intensity,
+                })
+            })
+        })
     }
 }
 
@@ -178,5 +200,20 @@ mod tests {
         assert_eq!(Light::SCHEMA.name(), "Light");
         assert_eq!(Light::SCHEMA.fields().len(), 3);
         assert_eq!(Light::SCHEMA.fields()[1].name(), "color");
+    }
+
+    #[test]
+    fn reflect_round_trips_both_kinds_and_rejects_truncation() {
+        let d = Light::directional(&math(), Vec3::new(0.2, 0.4, 0.6), rat(3.0)).unwrap();
+        let p = Light::point(&math(), Vec3::new(1.0, 0.0, 0.0), rat(1.0)).unwrap();
+        for light in [d, p] {
+            let mut w = BinaryWriter::new();
+            light.reflect_write(&mut w);
+            assert_eq!(
+                Light::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap(),
+                light
+            );
+        }
+        assert!(Light::reflect_read(&mut BinaryReader::new(&[])).is_err());
     }
 }

@@ -54,6 +54,11 @@ impl<T> ComponentColumn<T> {
         self.entries.iter().map(|(id, c)| (*id, c))
     }
 
+    /// Iterate `(entity, &mut component)` in ascending entity-id order.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (EntityId, &mut T)> {
+        self.entries.iter_mut().map(|(id, c)| (*id, c))
+    }
+
     /// The number of entities in this column.
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -92,9 +97,7 @@ impl<T: Reflect> ComponentColumn<T> {
         reader.read_u32().and_then(|count| {
             (0..count).try_fold(ComponentColumn::new(), |mut column, _| {
                 EntityId::reflect_read(reader)
-                    .and_then(|entity| {
-                        T::reflect_read(reader).map(|component| (entity, component))
-                    })
+                    .and_then(|entity| T::reflect_read(reader).map(|component| (entity, component)))
                     .map(|(entity, component)| {
                         column.insert(entity, component);
                         column
@@ -210,5 +213,22 @@ mod tests {
         col.insert(e(2), 20);
         let ids: Vec<(u64, i32)> = col.iter().map(|(id, v)| (id.raw(), *v)).collect();
         assert_eq!(ids, vec![(1, 10), (2, 20), (3, 30)]);
+    }
+
+    #[test]
+    fn iter_mut_is_ascending_and_mutates() {
+        let mut col: ComponentColumn<i32> = ComponentColumn::new();
+        col.insert(e(2), 20);
+        col.insert(e(1), 10);
+        let ids: Vec<u64> = col
+            .iter_mut()
+            .map(|(id, v)| {
+                *v += 1;
+                id.raw()
+            })
+            .collect();
+        assert_eq!(ids, vec![1, 2]);
+        assert_eq!(col.get(e(1)), Some(&11));
+        assert_eq!(col.get(e(2)), Some(&21));
     }
 }

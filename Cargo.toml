@@ -25,9 +25,12 @@ members = [
     "modules/axiom-render-pipeline",
     "modules/axiom-windowing",
     "modules/axiom-gpu-backend",
+    "modules/axiom-canvas2d-backend",
     "modules/axiom-netcode",
     "modules/axiom-net-protocol",
     "modules/axiom-client-core",
+    "modules/axiom-sim-core",
+    "modules/axiom-recording",
     "modules/axiom",
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",
@@ -38,12 +41,24 @@ members = [
     "apps/axiom-netplay-browser",
     "apps/axiom-netplay-ffi",
     "apps/axiom-growth",
+    "apps/axiom-roomed-puzzle",
+    "apps/axiom-sim-crucible",
     "crates/xtask",
     "tools/axiom-netcode-relay",
     "tools/axiom-netplay-server",
     "tools/axiom-profile-runner",
     "tools/axiom-dev-reload",
 ]
+
+# `tools/axiom-shot` is deliberately NOT a workspace member. It enables
+# `axiom-gpu-backend`'s `offscreen` feature (native wgpu), and Cargo feature
+# unification would otherwise turn that feature on for the module during
+# `cargo test --workspace` / the coverage + dylint gates — pulling the wgpu
+# off-screen code into the module's *native* build, where it can't be covered or
+# kept branchless. Keeping the screenshot tool out of the workspace confines that
+# feature to the tool's own build. Run it with:
+#   cargo run --manifest-path tools/axiom-shot/Cargo.toml --release -- [out.png] [tick]
+exclude = ["tools/axiom-shot"]
 
 [workspace.package]
 edition = "2021"

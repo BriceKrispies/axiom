@@ -232,7 +232,10 @@ fn set_i32(slot: &mut i32, value: &str) {
 /// Parse a whitespace-separated RGB triple; keep the default unless all three
 /// channels parse.
 fn set_rgb(slot: &mut Rgb, value: &str) {
-    let parts: Vec<f32> = value.split_whitespace().filter_map(|c| c.parse().ok()).collect();
+    let parts: Vec<f32> = value
+        .split_whitespace()
+        .filter_map(|c| c.parse().ok())
+        .collect();
     if let [r, g, b] = parts[..] {
         *slot = [r, g, b];
     }
@@ -347,7 +350,8 @@ mod tests {
 
     #[test]
     fn comments_before_the_map_are_ignored_but_walls_in_the_map_are_not() {
-        let doc = LevelDoc::parse("# this is a comment\nwall_height = 1.0\n[map]\n####\n#SE#\n####\n");
+        let doc =
+            LevelDoc::parse("# this is a comment\nwall_height = 1.0\n[map]\n####\n#SE#\n####\n");
         assert_eq!(doc.tun.wall_height, 1.0);
         // The leading '#' rows are walls, not comments.
         assert!(doc.map.walls[0].iter().all(|&w| w));

@@ -1,6 +1,6 @@
 //! A data-declared spin: a node that rotates about an axis over time.
 
-use axiom_kernel::{FieldSchema, TypeSchema};
+use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 use axiom_math::{Quat, Vec3};
 
 /// A spin component: the node's local transform becomes a pure rotation about
@@ -39,6 +39,21 @@ impl Spin {
         let fraction = (tick % period as u64) as f32 / period as f32;
         let angle = fraction * std::f32::consts::TAU;
         Quat::from_axis_angle(self.axis, angle).ok()
+    }
+}
+
+impl Reflect for Spin {
+    const SCHEMA: TypeSchema = Spin::SCHEMA;
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.axis.reflect_write(writer);
+        self.period_ticks.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        Vec3::reflect_read(reader).and_then(|axis| {
+            u32::reflect_read(reader).map(|period_ticks| Spin { axis, period_ticks })
+        })
     }
 }
 
@@ -81,5 +96,15 @@ mod tests {
         assert_eq!(Spin::SCHEMA.name(), "Spin");
         assert_eq!(Spin::SCHEMA.fields().len(), 2);
         assert_eq!(Spin::SCHEMA.fields()[0].name(), "axis");
+    }
+
+    #[test]
+    fn reflect_round_trips_and_rejects_truncation() {
+        let s = Spin::new(Vec3::new(0.0, 1.0, 0.0), 240);
+        let mut w = BinaryWriter::new();
+        s.reflect_write(&mut w);
+        let got = Spin::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap();
+        assert_eq!(got, s);
+        assert!(Spin::reflect_read(&mut BinaryReader::new(&[])).is_err());
     }
 }

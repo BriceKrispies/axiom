@@ -1,7 +1,9 @@
 //! The single public facade of the `axiom-scene` module.
 
 use axiom_frame::{FrameCommand, FrameContext};
-use axiom_kernel::{Meters, Radians, Ratio, Reflect, TypeSchema};
+use axiom_kernel::{
+    BinaryReader, BinaryWriter, KernelResult, Meters, Radians, Ratio, Reflect, TypeSchema,
+};
 use axiom_math::{Mat4, MathApi, Transform, Vec3};
 
 use crate::camera::Camera;
@@ -116,12 +118,10 @@ impl SceneApi {
 
     /// Compute the projection matrix for the camera on `node`.
     pub fn camera_projection_matrix(&self, math: &MathApi, node: SceneNodeId) -> SceneResult<Mat4> {
-        self.scene
-            .camera(node)
-            .map_or_else(
-                || Err(SceneError::missing_camera("node has no camera")),
-                |camera| camera.projection_matrix(math),
-            )
+        self.scene.camera(node).map_or_else(
+            || Err(SceneError::missing_camera("node has no camera")),
+            |camera| camera.projection_matrix(math),
+        )
     }
 
     // --- Lights ---
@@ -173,7 +173,8 @@ impl SceneApi {
         mesh: MeshRef,
         material: MaterialRef,
     ) -> SceneResult<()> {
-        Renderable::new(mesh, material).and_then(|renderable| self.scene.add_renderable(node, renderable))
+        Renderable::new(mesh, material)
+            .and_then(|renderable| self.scene.add_renderable(node, renderable))
     }
 
     /// Remove the renderable on `node`.
@@ -284,6 +285,30 @@ impl SceneApi {
             Renderable::SCHEMA,
             Spin::SCHEMA,
         ]
+    }
+}
+
+/// Scene state serialization (for fork / replay). Kept in its own `impl` block so
+/// neither block exceeds the engine's impl-block size budget.
+impl SceneApi {
+    /// Serialize the scene's full restorable state to bytes: entity identity,
+    /// every component column, and the persistent `players` / `controllers` maps.
+    /// Deterministic and self-contained — feed the bytes to [`Self::restore_state`]
+    /// (here or in a fresh `SceneApi` with the same systems) to reconstruct the
+    /// scene exactly. Transient per-frame command queues are not included.
+    pub fn snapshot_state(&self) -> Vec<u8> {
+        let mut writer = BinaryWriter::new();
+        self.scene.write_state(&mut writer);
+        writer.into_bytes()
+    }
+
+    /// Restore the scene from bytes produced by [`Self::snapshot_state`]. A
+    /// truncated or version-incompatible buffer returns a deterministic error and
+    /// leaves the scene's identity/columns as far as the read progressed (callers
+    /// fork into a fresh scene, so partial state is never observed live).
+    pub fn restore_state(&mut self, bytes: &[u8]) -> KernelResult<()> {
+        let mut reader = BinaryReader::new(bytes);
+        self.scene.read_state(&mut reader)
     }
 }
 
@@ -473,6 +498,28 @@ mod tests {
         let snap = a.snapshot();
         assert_eq!(snap.nodes().len(), 1);
         assert_eq!(snap.lights().len(), 1);
+    }
+
+    #[test]
+    fn snapshot_state_round_trips_through_bytes_and_rejects_truncation() {
+        let mut a = api();
+        let n = a.create_node_with_transform(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
+        a.add_directional_light(&math(), n, Vec3::ONE, rat(2.0))
+            .unwrap();
+        let bytes = a.snapshot_state();
+
+        let mut restored = api();
+        restored.restore_state(&bytes).unwrap();
+        let original = a.snapshot();
+        let after = restored.snapshot();
+        assert_eq!(after.nodes().len(), original.nodes().len());
+        assert_eq!(after.lights().len(), original.lights().len());
+        assert_eq!(
+            after.nodes()[0].world().translation.x,
+            original.nodes()[0].world().translation.x
+        );
+        // A truncated buffer is a deterministic error, not a panic.
+        assert!(restored.restore_state(&[9, 9]).is_err());
     }
 
     #[test]

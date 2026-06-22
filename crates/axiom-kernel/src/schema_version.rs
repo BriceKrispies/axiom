@@ -45,9 +45,11 @@ impl SchemaVersion {
 
     /// Read a version previously written with [`Self::write_to`].
     pub fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        reader
-            .read_u16()
-            .and_then(|major| reader.read_u16().map(|minor| SchemaVersion { major, minor }))
+        reader.read_u16().and_then(|major| {
+            reader
+                .read_u16()
+                .map(|minor| SchemaVersion { major, minor })
+        })
     }
 }
 

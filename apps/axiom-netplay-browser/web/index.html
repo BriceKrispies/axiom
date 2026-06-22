@@ -92,11 +92,18 @@
         return { url: serverUrl(), transport: undefined };
       }
 
+      // WebGPU preferred; the engine falls back to WebGL2 when it is absent
+      // (see docs/render-fallback.md). Only bail when neither is available.
+      const hasRenderBackend = ("gpu" in navigator) || (() => {
+        try { return !!document.createElement("canvas").getContext("webgl2"); }
+        catch { return false; }
+      })();
+
       async function main() {
-        if (!("gpu" in navigator)) {
+        if (!hasRenderBackend) {
           set(
-            "WebGPU is not available in this browser.\n" +
-            "Use a recent Chrome/Edge (or Firefox Nightly) over http://localhost.",
+            "Neither WebGPU nor WebGL2 is available in this browser.\n" +
+            "Use a recent Chrome/Edge, Firefox, or Safari over http://localhost.",
             "err"
           );
           return;

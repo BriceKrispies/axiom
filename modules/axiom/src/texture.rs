@@ -154,7 +154,10 @@ mod tests {
 
     #[test]
     fn resolution_is_deterministic() {
-        assert_eq!(texture_rgba(Texture::Checker), texture_rgba(Texture::Checker));
+        assert_eq!(
+            texture_rgba(Texture::Checker),
+            texture_rgba(Texture::Checker)
+        );
     }
 
     #[test]

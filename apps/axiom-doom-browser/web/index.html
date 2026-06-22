@@ -39,9 +39,16 @@
       const status = document.getElementById("status");
       const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
 
+      // WebGPU preferred; the engine falls back to WebGL2 when it is absent
+      // (see docs/render-fallback.md). Only bail when neither is available.
+      const hasRenderBackend = ("gpu" in navigator) || (() => {
+        try { return !!document.createElement("canvas").getContext("webgl2"); }
+        catch { return false; }
+      })();
+
       async function main() {
-        if (!("gpu" in navigator)) {
-          set("WebGPU is not available. Use a recent Chrome/Edge, Android Chrome, or iOS Safari 18.2+.", "err");
+        if (!hasRenderBackend) {
+          set("Neither WebGPU nor WebGL2 is available. Use a recent Chrome/Edge, Firefox, or Safari.", "err");
           return;
         }
         try {

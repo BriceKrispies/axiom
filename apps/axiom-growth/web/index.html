@@ -154,8 +154,18 @@
         document.getElementById(id).classList.add("active");
       };
 
-      if (!("gpu" in navigator)) {
-        set("WebGPU is not available. Use a recent Chrome/Edge (or Firefox Nightly) over http://localhost.", "err");
+      // WebGPU preferred; the engine falls back to WebGL2, then to a software
+      // Canvas 2D rasterizer (see docs/render-fallback.md). Append
+      // ?backend=canvas2d to force the Canvas 2D path. Only warn when not even a
+      // 2D context is available (effectively never).
+      const hasRenderBackend = ("gpu" in navigator) || (() => {
+        try {
+          const c = document.createElement("canvas");
+          return !!(c.getContext("webgl2") || c.getContext("2d"));
+        } catch { return false; }
+      })();
+      if (!hasRenderBackend) {
+        set("No render backend (WebGPU, WebGL2, or Canvas 2D) is available.", "err");
       }
 
       try {

@@ -1,6 +1,6 @@
 //! Renderable scene reference: opaque mesh + material id pair, stored per node.
 
-use axiom_kernel::{FieldSchema, TypeSchema};
+use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 
 use crate::material_ref::MaterialRef;
 use crate::mesh_ref::MeshRef;
@@ -72,6 +72,30 @@ impl Renderable {
     }
 }
 
+impl Reflect for Renderable {
+    const SCHEMA: TypeSchema = Renderable::SCHEMA;
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.mesh.reflect_write(writer);
+        self.material.reflect_write(writer);
+        self.visible.reflect_write(writer);
+    }
+
+    /// Reconstruct directly (bypassing `new`'s ref-validation): a snapshot is the
+    /// engine's own bytes, restored as-stored.
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        MeshRef::reflect_read(reader).and_then(|mesh| {
+            MaterialRef::reflect_read(reader).and_then(|material| {
+                bool::reflect_read(reader).map(|visible| Renderable {
+                    mesh,
+                    material,
+                    visible,
+                })
+            })
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,5 +143,17 @@ mod tests {
         assert_eq!(Renderable::SCHEMA.name(), "Renderable");
         assert_eq!(Renderable::SCHEMA.fields().len(), 3);
         assert_eq!(Renderable::SCHEMA.fields()[2].name(), "visible");
+    }
+
+    #[test]
+    fn reflect_round_trips_visibility_and_refs_and_rejects_truncation() {
+        let mut r = Renderable::new(MeshRef::from_raw(7), MaterialRef::from_raw(9)).unwrap();
+        r.set_visible(false);
+        let mut w = BinaryWriter::new();
+        r.reflect_write(&mut w);
+        let got = Renderable::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap();
+        assert_eq!(got, r);
+        assert!(!got.visible());
+        assert!(Renderable::reflect_read(&mut BinaryReader::new(&[])).is_err());
     }
 }

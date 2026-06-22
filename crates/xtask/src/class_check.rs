@@ -57,16 +57,27 @@ fn check_module_facades_export_one(index: &ManifestIndex, report: &mut CheckRepo
                     .map(str::trim)
                     .filter(|line| line.starts_with("pub ") & !line.starts_with("pub(crate)"))
                     .collect();
-                (public_exports.len() != 1).then(|| {
+                // A module exposes exactly one behavioral facade, plus (optionally) a
+                // re-export of its identity vocabulary — the pure value-type id
+                // newtypes the facade traffics in (`pub use ids::{…}`). Those ids
+                // carry no behavior, and a handle-based facade is unusable if callers
+                // cannot name the handles it returns. Every other public item counts
+                // toward the single-facade limit.
+                let facade_exports: Vec<&str> = public_exports
+                    .iter()
+                    .copied()
+                    .filter(|line| !is_identity_vocabulary_export(line))
+                    .collect();
+                (facade_exports.len() != 1).then(|| {
                     report.push(
                         Violation::new(
                             ViolationKind::ModuleFacadeMustExportOne,
                             m.module.name.clone(),
                             format!(
-                                "module `{}` must publicly export exactly one facade from lib.rs, found {}: {:?}",
+                                "module `{}` must publicly export exactly one facade from lib.rs (an `ids` identity-vocabulary re-export is also allowed), found {} facade item(s): {:?}",
                                 m.module.name,
-                                public_exports.len(),
-                                public_exports
+                                facade_exports.len(),
+                                facade_exports
                             ),
                         )
                         .at(lib_rs.clone(), 1),
@@ -74,6 +85,22 @@ fn check_module_facades_export_one(index: &ManifestIndex, report: &mut CheckRepo
                 });
             });
     });
+}
+
+/// Whether a top-level `pub` line re-exports a module's identity vocabulary — a
+/// `pub use` path containing an `ids` segment (e.g. `pub use ids::{FactId, …};`
+/// or `pub use crate::ids::*;`). These value-type id newtypes are the nouns a
+/// facade returns; a module may publish them alongside its one behavioral facade
+/// without counting as a second facade. Matching is on a whole path segment, so
+/// unrelated paths like `fluids::` are not misclassified.
+fn is_identity_vocabulary_export(line: &str) -> bool {
+    line.trim()
+        .strip_prefix("pub use ")
+        .map(|rest| {
+            rest.split(|c: char| !(c.is_alphanumeric() | (c == '_')))
+                .any(|segment| segment == "ids")
+        })
+        .unwrap_or(false)
 }
 
 fn classify_all(

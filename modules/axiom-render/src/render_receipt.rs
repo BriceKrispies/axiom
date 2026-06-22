@@ -22,7 +22,7 @@ use crate::render_command_list::RenderCommandList;
 /// Magic + version prefixing every serialized receipt, so the byte format is
 /// self-describing and a format change is detectable.
 const RECEIPT_MAGIC: u32 = 0x4158_5243; // "AXRC" (Axiom Render Capture)
-// v2 adds the per-`SetMaterial` albedo texture id to the serialized stream.
+                                        // v2 adds the per-`SetMaterial` albedo texture id to the serialized stream.
 const RECEIPT_VERSION: u32 = 2;
 
 /// A deterministic capture of one frame's engine-owned render artifact.
@@ -166,7 +166,7 @@ mod tests {
             RenderCommand::set_pipeline(1),
             RenderCommand::set_mesh(7),
             RenderCommand::set_material(9, 11),
-            RenderCommand::draw_indexed(36, Mat4::IDENTITY),
+            RenderCommand::draw_indexed(7, 36, Mat4::IDENTITY),
         ]
     }
 

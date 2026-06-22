@@ -133,9 +133,7 @@ impl Session {
         // `verified` is true iff the peer is in the roster AND its signature
         // matches; absent key folds to `false` via `unwrap_or`.
         let verified = key
-            .map(|verifying_key| {
-                verifying_key.verify(&message.signed_bytes(), message.signature())
-            })
+            .map(|verifying_key| verifying_key.verify(&message.signed_bytes(), message.signature()))
             .unwrap_or(false);
         // The three outcomes are mutually exclusive by construction, applied as
         // separate guarded statements (no `if`): unknown peer, bad signature, or

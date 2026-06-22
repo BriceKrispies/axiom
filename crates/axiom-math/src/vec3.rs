@@ -121,9 +121,7 @@ impl Vec3 {
         valid
             .then_some(len)
             .map(|len| Vec3::new(self.x / len, self.y / len, self.z / len))
-            .ok_or_else(|| {
-                MathError::normalize_zero_length("cannot normalize zero-length Vec3")
-            })
+            .ok_or_else(|| MathError::normalize_zero_length("cannot normalize zero-length Vec3"))
     }
 
     /// Euclidean distance between `self` and `other`.

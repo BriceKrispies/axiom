@@ -1,0 +1,23 @@
+# axiom-shot — native off-screen screenshot tool.
+#
+# Renders an engine scene to a PNG headlessly via `axiom-gpu-backend`'s native
+# `offscreen` arm — the SAME `scene_renderer` the browser uses, so a screenshot
+# matches what the browser presents (no separate renderer to drift).
+#
+# NOT a workspace member (see the root Cargo.toml `exclude`): enabling the
+# `offscreen` feature here must not unify into the module during the workspace
+# coverage/dylint gates. It is therefore its own standalone workspace.
+[package]
+name = "axiom-shot"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+# The engine umbrella: author a scene and pull its neutral render data.
+axiom = { path = "../../modules/axiom" }
+# The real GPU backend, with its native off-screen render path enabled.
+axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["offscreen"] }
+# PNG encode of the read-back pixels.
+png = "0.17"

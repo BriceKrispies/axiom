@@ -164,9 +164,43 @@ impl WindowingApi {
         frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
-        F: FnMut(u64) -> ([f32; 4], Vec<(u64, u64, Vec<f32>, u32)>) + 'static,
+        F: FnMut(
+                u64,
+            ) -> (
+                [f32; 4],
+                Vec<(u32, [f32; 3], [f32; 3], f32)>,
+                [f32; 16],
+                Vec<(u64, u64, Vec<f32>, u32)>,
+            ) + 'static,
     {
-        use axiom_gpu_backend::GpuBackendApi;
+        // Scrub-only (no fork hooks). The forkable variant lives in `run_web_forkable`.
+        self.drive_web_multi(canvas_id, meshes, materials, max_instances, frame_fn, None, None)
+    }
+
+    /// The shared multi-mesh web run loop, parameterized by the optional fork
+    /// hooks. `run_web_multi` (scrub-only) and `run_web_forkable` (single-mesh,
+    /// forkable) both funnel through here.
+    #[cfg(target_arch = "wasm32")]
+    fn drive_web_multi<F>(
+        self,
+        canvas_id: &str,
+        meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        max_instances: u32,
+        frame_fn: F,
+        snapshot: Option<crate::frame_scrubber::SnapshotHook>,
+        restore: Option<crate::frame_scrubber::RestoreHook>,
+    ) -> Result<(), wasm_bindgen::JsValue>
+    where
+        F: FnMut(
+                u64,
+            ) -> (
+                [f32; 4],
+                Vec<(u32, [f32; 3], [f32; 3], f32)>,
+                [f32; 16],
+                Vec<(u64, u64, Vec<f32>, u32)>,
+            ) + 'static,
+    {
         use std::cell::RefCell;
         use std::rc::Rc;
         use wasm_bindgen::closure::Closure;
@@ -174,21 +208,34 @@ impl WindowingApi {
         let canvas = find_canvas(canvas_id)?;
         let frame_fn = Rc::new(RefCell::new(frame_fn));
         let windowing = self;
+        let force_canvas = force_canvas2d();
 
         wasm_bindgen_futures::spawn_local(async move {
-            let mut backend = match windowing.surface.as_ref() {
-                Some(request) => GpuBackendApi::new(request),
+            let request = match windowing.surface.as_ref() {
+                Some(request) => *request,
                 None => return,
             };
-            if backend
-                .initialize(canvas, &meshes, &materials, max_instances)
-                .await
-                .is_err()
+            let width = request.descriptor().viewport().physical_width();
+            let height = request.descriptor().viewport().physical_height();
+            let backend = match select_backend(
+                force_canvas,
+                &request,
+                canvas,
+                &meshes,
+                &materials,
+                max_instances,
+            )
+            .await
             {
-                return;
-            }
+                Some(backend) => Rc::new(backend),
+                None => return,
+            };
+
             let windowing = Rc::new(RefCell::new(windowing));
-            let backend = Rc::new(RefCell::new(backend));
+            // The shared dev frame-scrubber overlay (records each presented frame;
+            // re-presents it while scrubbing; forks when hooks are present).
+            // `None` if there is no DOM.
+            let scrubber = crate::frame_scrubber::FrameScrubber::mount(snapshot, restore);
             let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
             let g = f.clone();
             let win = windowing.clone();
@@ -196,8 +243,23 @@ impl WindowingApi {
             let ff = frame_fn.clone();
             *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
                 let tick = win.borrow_mut().step();
-                let (clear, batches) = (ff.borrow_mut())(tick);
-                let _ = be.borrow().present_frame(clear, &batches);
+                // Live: step the app and record this frame. Scrubbing: freeze the
+                // app (don't call its closure) and re-present the recorded frame.
+                let scrubbing = scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+                let present = if scrubbing {
+                    scrubber
+                        .as_ref()
+                        .and_then(|s| s.scrub_frame())
+                        .unwrap_or_else(|| ([0.0; 4], Vec::new(), [0.0; 16], Vec::new()))
+                } else {
+                    let (clear, lights, light_vp, batches) = (ff.borrow_mut())(tick);
+                    if let Some(s) = scrubber.as_ref() {
+                        s.record(tick, clear, &lights, light_vp, &batches);
+                    }
+                    (clear, lights, light_vp, batches)
+                };
+                let (clear, lights, light_vp, batches) = present;
+                be.present(tick, width, height, clear, &lights, light_vp, &batches);
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
                     let _ = request_animation_frame(cb);
@@ -235,13 +297,67 @@ impl WindowingApi {
         let meshes = vec![(SINGLE_MESH_ID, vertices, indices)];
         // One untextured material: a 1×1 opaque-white albedo.
         let materials = vec![(DEFAULT_MATERIAL_ID, 1, 1, vec![255_u8, 255, 255, 255])];
+        // Identity light view-projection ⇒ the shadow map is unused (single-mesh
+        // apps are unshadowed, matching their previous look).
+        const NO_SHADOW: [f32; 16] = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
         self.run_web_multi(canvas_id, meshes, materials, max_instances, move |tick| {
             let (clear, instances, count) = frame_fn(tick);
+            // One default directional light (the back-compatible fixed look).
+            let lights = vec![(0_u32, [0.4, 0.7, 0.6], [1.0, 1.0, 1.0], 1.0_f32)];
             (
                 clear,
+                lights,
+                NO_SHADOW,
                 vec![(SINGLE_MESH_ID, DEFAULT_MATERIAL_ID, instances, count)],
             )
         })
+    }
+
+    /// Like [`Self::run_web`] (single mesh) but **forkable**: the dev scrubber
+    /// records the app's sim state every frame via `snapshot` and grows a
+    /// `⏏ fork` button that restores the selected frame's recorded state via
+    /// `restore` and resumes live play from it (a new timeline branch).
+    #[cfg(target_arch = "wasm32")]
+    pub fn run_web_forkable<F>(
+        self,
+        canvas_id: &str,
+        vertices: Vec<f32>,
+        indices: Vec<u32>,
+        max_instances: u32,
+        mut frame_fn: F,
+        snapshot: std::rc::Rc<dyn Fn() -> Vec<u8>>,
+        restore: std::rc::Rc<dyn Fn(&[u8])>,
+    ) -> Result<(), wasm_bindgen::JsValue>
+    where
+        F: FnMut(u64) -> ([f32; 4], Vec<f32>, u32) + 'static,
+    {
+        const SINGLE_MESH_ID: u64 = 0;
+        const DEFAULT_MATERIAL_ID: u64 = 0;
+        let meshes = vec![(SINGLE_MESH_ID, vertices, indices)];
+        let materials = vec![(DEFAULT_MATERIAL_ID, 1, 1, vec![255_u8, 255, 255, 255])];
+        const NO_SHADOW: [f32; 16] = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        self.drive_web_multi(
+            canvas_id,
+            meshes,
+            materials,
+            max_instances,
+            move |tick| {
+                let (clear, instances, count) = frame_fn(tick);
+                let lights = vec![(0_u32, [0.4, 0.7, 0.6], [1.0, 1.0, 1.0], 1.0_f32)];
+                (
+                    clear,
+                    lights,
+                    NO_SHADOW,
+                    vec![(SINGLE_MESH_ID, DEFAULT_MATERIAL_ID, instances, count)],
+                )
+            },
+            Some(snapshot),
+            Some(restore),
+        )
     }
 
     /// Drive the terminal web run loop **with streaming geometry** (a single
@@ -265,9 +381,17 @@ impl WindowingApi {
         frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
-        F: FnMut(u64) -> ([f32; 4], Vec<f32>, u32, Option<(Vec<f32>, Vec<u32>)>) + 'static,
+        F: FnMut(
+                u64,
+            ) -> (
+                [f32; 4],
+                Vec<(u32, [f32; 3], [f32; 3], f32)>,
+                [f32; 16],
+                Vec<f32>,
+                u32,
+                Option<(Vec<f32>, Vec<u32>)>,
+            ) + 'static,
     {
-        use axiom_gpu_backend::GpuBackendApi;
         use std::cell::RefCell;
         use std::rc::Rc;
         use wasm_bindgen::closure::Closure;
@@ -277,24 +401,34 @@ impl WindowingApi {
         let canvas = find_canvas(canvas_id)?;
         let frame_fn = Rc::new(RefCell::new(frame_fn));
         let windowing = self;
+        let force_canvas = force_canvas2d();
 
         wasm_bindgen_futures::spawn_local(async move {
-            let mut backend = match windowing.surface.as_ref() {
-                Some(request) => GpuBackendApi::new(request),
+            let request = match windowing.surface.as_ref() {
+                Some(request) => *request,
                 None => return,
             };
+            let width = request.descriptor().viewport().physical_width();
+            let height = request.descriptor().viewport().physical_height();
             let meshes = vec![(STREAM_MESH_ID, vertices, indices)];
             let (mat_w, mat_h, mat_pixels) = material;
             let materials = vec![(STREAM_MATERIAL_ID, mat_w, mat_h, mat_pixels)];
-            if backend
-                .initialize(canvas, &meshes, &materials, max_instances)
-                .await
-                .is_err()
+            let backend = match select_backend(
+                force_canvas,
+                &request,
+                canvas,
+                &meshes,
+                &materials,
+                max_instances,
+            )
+            .await
             {
-                return;
-            }
+                Some(backend) => Rc::new(RefCell::new(backend)),
+                None => return,
+            };
             let windowing = Rc::new(RefCell::new(windowing));
-            let backend = Rc::new(RefCell::new(backend));
+            // The shared dev frame-scrubber overlay (see `run_web_multi`).
+            let scrubber = crate::frame_scrubber::FrameScrubber::mount(None, None);
             let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
             let g = f.clone();
             let win = windowing.clone();
@@ -302,16 +436,33 @@ impl WindowingApi {
             let ff = frame_fn.clone();
             *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
                 let tick = win.borrow_mut().step();
-                let (clear, instances, count, new_geometry) = (ff.borrow_mut())(tick);
-                // Slide the streamed mesh on the frames that carry new geometry.
-                // The `Option` is consumed with `into_iter().for_each` (a
-                // combinator, not `if let`/`match`); an empty option iterates zero
-                // times.
-                new_geometry.into_iter().for_each(|(v, i)| {
-                    be.borrow_mut().replace_geometry(STREAM_MESH_ID, &v, &i);
-                });
-                let batches = vec![(STREAM_MESH_ID, STREAM_MATERIAL_ID, instances, count)];
-                let _ = be.borrow().present_frame(clear, &batches);
+                // Scrubbing freezes the app (its closure, and so its streamed
+                // geometry, is not called) and re-presents the recorded frame.
+                let scrubbing = scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+                let present = if scrubbing {
+                    scrubber
+                        .as_ref()
+                        .and_then(|s| s.scrub_frame())
+                        .unwrap_or_else(|| ([0.0; 4], Vec::new(), [0.0; 16], Vec::new()))
+                } else {
+                    let (clear, lights, light_vp, instances, count, new_geometry) =
+                        (ff.borrow_mut())(tick);
+                    // Slide the streamed mesh on the frames that carry new geometry.
+                    // The `Option` is consumed with `into_iter().for_each` (a
+                    // combinator, not `if let`/`match`); an empty option iterates
+                    // zero times.
+                    new_geometry.into_iter().for_each(|(v, i)| {
+                        be.borrow_mut().replace_geometry(STREAM_MESH_ID, &v, &i);
+                    });
+                    let batches = vec![(STREAM_MESH_ID, STREAM_MATERIAL_ID, instances, count)];
+                    if let Some(s) = scrubber.as_ref() {
+                        s.record(tick, clear, &lights, light_vp, &batches);
+                    }
+                    (clear, lights, light_vp, batches)
+                };
+                let (clear, lights, light_vp, batches) = present;
+                be.borrow()
+                    .present(tick, width, height, clear, &lights, light_vp, &batches);
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
                     let _ = request_animation_frame(cb);
@@ -329,6 +480,187 @@ impl WindowingApi {
 impl Default for WindowingApi {
     fn default() -> Self {
         WindowingApi::new()
+    }
+}
+
+/// The selected live presentation backend: the GPU (WebGPU/WebGL2) path or the
+/// software Canvas 2D fallback. Both present the engine's per-frame data; the GPU
+/// arm takes the instance batches directly (its proven route), while the Canvas
+/// arm rasterizes the backend-neutral [`axiom_host::FramePacket`] reconstructed
+/// from those same batches. wasm32 only.
+#[cfg(target_arch = "wasm32")]
+enum LiveBackend {
+    Gpu(axiom_gpu_backend::GpuBackendApi),
+    Canvas(axiom_canvas2d_backend::Canvas2dBackendApi),
+}
+
+#[cfg(target_arch = "wasm32")]
+impl LiveBackend {
+    /// Present one frame. The GPU arm draws the instance `batches` directly; the
+    /// Canvas arm rasterizes a frame packet reconstructed from them.
+    #[allow(clippy::too_many_arguments)]
+    fn present(
+        &self,
+        tick: u64,
+        width: u32,
+        height: u32,
+        clear: [f32; 4],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_vp: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+    ) {
+        match self {
+            LiveBackend::Gpu(backend) => {
+                let _ = backend.present_frame(clear, lights, light_vp, batches);
+            }
+            LiveBackend::Canvas(backend) => {
+                let packet = frame_packet_from_batches(
+                    tick, width, height, clear, lights, light_vp, batches,
+                );
+                let _ = backend.present_packet(&packet);
+            }
+        }
+    }
+
+    /// Replace one mesh's geometry mid-loop (streaming terrain).
+    fn replace_geometry(&mut self, mesh_id: u64, vertices: &[f32], indices: &[u32]) {
+        match self {
+            LiveBackend::Gpu(backend) => backend.replace_geometry(mesh_id, vertices, indices),
+            LiveBackend::Canvas(backend) => backend.replace_geometry(mesh_id, vertices, indices),
+        }
+    }
+}
+
+/// Whether the page asked to force the Canvas 2D backend (`?backend=canvas2d`),
+/// so it can be exercised even where a GPU is available. wasm32 only.
+#[cfg(target_arch = "wasm32")]
+fn force_canvas2d() -> bool {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .map(|search| search.contains("backend=canvas2d"))
+        .unwrap_or(false)
+}
+
+/// Reconstruct the backend-neutral frame packet from the per-`(mesh, material)`
+/// instance batches the run loop produces: each 36-float instance is
+/// `mvp(16) | world(16) | colour(4)`. Object ids are assigned in draw order.
+/// wasm32 only.
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
+fn frame_packet_from_batches(
+    tick: u64,
+    width: u32,
+    height: u32,
+    clear: [f32; 4],
+    lights: &[(u32, [f32; 3], [f32; 3], f32)],
+    light_vp: [f32; 16],
+    batches: &[(u64, u64, Vec<f32>, u32)],
+) -> axiom_host::FramePacket {
+    use axiom_host::{FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport};
+    let mut draws = Vec::new();
+    let mut object_id: u64 = 0;
+    for (mesh_id, material_id, floats, count) in batches {
+        for i in 0..*count {
+            let off = (i as usize) * 36;
+            let mvp: [f32; 16] = floats[off..off + 16].try_into().unwrap_or([0.0; 16]);
+            let world: [f32; 16] = floats[off + 16..off + 32].try_into().unwrap_or([0.0; 16]);
+            let color: [f32; 4] = floats[off + 32..off + 36].try_into().unwrap_or([1.0; 4]);
+            draws.push(FrameDrawItem::new(
+                object_id, *mesh_id, *material_id, world, mvp, color,
+            ));
+            object_id += 1;
+        }
+    }
+    let frame_lights = lights
+        .iter()
+        .map(|(kind, vec, color, intensity)| {
+            FrameLight::new(*kind, *vec, [color[0], color[1], color[2], *intensity])
+        })
+        .collect();
+    let directional = lights.iter().filter(|(kind, ..)| *kind == 0).count() as u32;
+    let point = lights.iter().filter(|(kind, ..)| *kind == 1).count() as u32;
+    let features = FrameFeatureSet::new(false, directional > 0, directional, point);
+    FramePacket::new(
+        tick,
+        tick,
+        FrameViewport::new(width, height),
+        clear,
+        None,
+        draws,
+        frame_lights,
+        light_vp,
+        features,
+    )
+}
+
+/// Select the live backend without poisoning the canvas: a forced Canvas 2D run
+/// never gives the canvas a GPU context; otherwise try the GPU (WebGPU→WebGL2)
+/// and fall back to Canvas 2D only when it has no device. wasm32 only.
+#[cfg(target_arch = "wasm32")]
+async fn select_backend(
+    force_canvas: bool,
+    request: &axiom_host::HostPresentationRequest,
+    canvas: web_sys::HtmlCanvasElement,
+    meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    materials: &[(u64, u32, u32, Vec<u8>)],
+    max_instances: u32,
+) -> Option<LiveBackend> {
+    if force_canvas {
+        return make_canvas(request, &canvas, meshes).map(LiveBackend::Canvas);
+    }
+    let mut gpu = axiom_gpu_backend::GpuBackendApi::new(request);
+    // Clone the canvas handle so a GPU failure leaves the element available for
+    // the Canvas 2D fallback.
+    if gpu
+        .initialize(canvas.clone(), meshes, materials, max_instances)
+        .await
+        .is_ok()
+    {
+        return Some(LiveBackend::Gpu(gpu));
+    }
+    make_canvas(request, &canvas, meshes).map(LiveBackend::Canvas)
+}
+
+/// Build a Canvas 2D backend: size from the request, upload the meshes, bind the
+/// canvas's 2D context. `None` if the context cannot be acquired. wasm32 only.
+#[cfg(target_arch = "wasm32")]
+fn make_canvas(
+    request: &axiom_host::HostPresentationRequest,
+    canvas: &web_sys::HtmlCanvasElement,
+    meshes: &[(u64, Vec<f32>, Vec<u32>)],
+) -> Option<axiom_canvas2d_backend::Canvas2dBackendApi> {
+    let mut backend = axiom_canvas2d_backend::Canvas2dBackendApi::new(request);
+    backend.load_meshes(meshes);
+    // The forced-fallback default is the Low tier; `?quality=ultralow|low|medium|high`
+    // (or 0..3) overrides it for testing/perf comparison.
+    backend.set_quality_level(canvas_quality_level().unwrap_or(1));
+    backend
+        .attach_canvas(canvas)
+        .ok()
+        .map(|()| backend)
+        .inspect(|_| {
+            // Mirror the GPU arm's "render backend = …" line so the browser /
+            // Playwright can confirm which path is live.
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                "axiom: render backend = Canvas2d profile = LowPolyFramebuffer \
+                 (software z-buffer rasterizer, putImageData blit)",
+            ));
+        })
+}
+
+/// Parse the Canvas 2D quality tier from `?quality=` (`ultralow|low|medium|high`
+/// or `0..3`), or `None` to use the default. wasm32 only — the platform edge, so
+/// ordinary control flow is fine here.
+#[cfg(target_arch = "wasm32")]
+fn canvas_quality_level() -> Option<u8> {
+    let search = web_sys::window()?.location().search().ok()?;
+    let value = search.split("quality=").nth(1)?.split('&').next()?;
+    match value {
+        "ultralow" | "0" => Some(0),
+        "low" | "1" => Some(1),
+        "medium" | "2" => Some(2),
+        "high" | "3" => Some(3),
+        _ => None,
     }
 }
 

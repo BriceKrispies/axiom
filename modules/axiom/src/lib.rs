@@ -26,6 +26,7 @@ mod material;
 mod mesh;
 mod mesh_geometry;
 mod player;
+mod point_light;
 mod renderable;
 mod scene_commands;
 mod spin;

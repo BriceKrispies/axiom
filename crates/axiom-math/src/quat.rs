@@ -192,9 +192,7 @@ impl Quat {
                 let c = self.conjugate();
                 Quat::new(c.x / ls, c.y / ls, c.z / ls, c.w / ls)
             })
-            .ok_or_else(|| {
-                MathError::normalize_zero_length("cannot invert zero-length quaternion")
-            })
+            .ok_or_else(|| MathError::normalize_zero_length("cannot invert zero-length quaternion"))
     }
 
     /// Hamilton product: `self * other` rotates first by `other`, then by

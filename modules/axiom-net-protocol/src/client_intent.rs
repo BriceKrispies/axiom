@@ -137,7 +137,10 @@ mod tests {
     fn every_truncated_prefix_is_rejected() {
         let bytes = sample().encode();
         (0..bytes.len()).for_each(|k| {
-            assert!(ClientIntent::decode(&bytes[..k]).is_err(), "prefix {k} must fail");
+            assert!(
+                ClientIntent::decode(&bytes[..k]).is_err(),
+                "prefix {k} must fail"
+            );
         });
         assert!(ClientIntent::decode(&bytes).is_ok());
     }

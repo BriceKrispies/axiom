@@ -147,8 +147,7 @@ impl Transform {
                         ))
                     })
             });
-        let non_uniform =
-            (self.scale.x != self.scale.y) | (self.scale.y != self.scale.z);
+        let non_uniform = (self.scale.x != self.scale.y) | (self.scale.y != self.scale.z);
         scale_check
             .map(Err)
             .or_else(|| {

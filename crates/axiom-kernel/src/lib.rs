@@ -32,8 +32,10 @@ mod result;
 // --- Deterministic time model ---
 mod fixed_step;
 mod frame_index;
+mod replay_timeline;
 mod simulation_clock;
 mod tick;
+mod tick_divider;
 
 // --- Deterministic random source ---
 mod deterministic_rng;
@@ -112,6 +114,12 @@ pub use fixed_step::FixedStep;
 pub use frame_index::FrameIndex;
 pub use simulation_clock::SimulationClock;
 pub use tick::Tick;
+// Deterministic replay primitives — the data companions to the clock: an ordered
+// recording replayed by a saturating cursor, and a fixed-step sub-rate divider
+// (fire every N ticks). `ReplayTimeline<T>` is the kernel's first type-generic
+// primitive (the replayed item is the caller's; see ARCHITECTURE.md).
+pub use replay_timeline::ReplayTimeline;
+pub use tick_divider::TickDivider;
 
 // Deterministic random source — a seeded generator higher layers and modules
 // use for replayable simulation, fuzzing, and adversarial-network models.

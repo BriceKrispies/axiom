@@ -60,7 +60,7 @@ const PLATFORM_FACING_LAYERS: &[&str] = &["host"];
 /// `windowing` drives the deterministic run loop + surface request, and
 /// `gpu-backend` owns the real wgpu device/pipeline/buffers it delegates each
 /// frame's draw to. Adding another entry here is a deliberate amendment.
-const PLATFORM_FACING_MODULES: &[&str] = &["windowing", "gpu-backend"];
+const PLATFORM_FACING_MODULES: &[&str] = &["windowing", "gpu-backend", "canvas2d-backend"];
 
 /// Run the centralized source-hygiene scan against every layer source dir
 /// and every module source dir, pushing violations into `report`.

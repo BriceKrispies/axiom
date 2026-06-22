@@ -1097,8 +1097,27 @@ pub fn descend(u: f32, v: f32) {
                 assemble_chunks(&loaded)
             });
 
+            // Lighting: a slowly-arcing sun (day/night sweep) plus a warm point
+            // light hovering over the player (a "torch"), illuminating nearby
+            // terrain. The terrain instance's world matrix is identity, so the
+            // shader's world position is the terrain's world coordinates and the
+            // point light attenuates correctly by distance.
+            let sun_t = tick as f32 * 0.0009;
+            let to_sun = [0.55 * sun_t.cos(), 0.78, 0.55 * sun_t.sin()];
+            let lights = vec![
+                (0_u32, to_sun, [1.0, 0.95, 0.85], 1.2_f32),
+                (
+                    1_u32,
+                    [player_x, 5.0, player_z],
+                    [1.0, 0.55, 0.2],
+                    12.0_f32,
+                ),
+            ];
+
             (
                 outcome.clear_color(),
+                lights,
+                outcome.light_view_proj(),
                 outcome.instance_floats(),
                 outcome.draws().len() as u32,
                 new_geometry,

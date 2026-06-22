@@ -72,7 +72,9 @@ mod tests {
 
     #[test]
     fn decode_rejects_a_wrong_kind() {
-        let other = crate::join_room::JoinRoom::new(1, b"r", b"").unwrap().encode();
+        let other = crate::join_room::JoinRoom::new(1, b"r", b"")
+            .unwrap()
+            .encode();
         assert_eq!(
             LeaveRoom::decode(&other).unwrap_err().code(),
             KernelErrorCode::InvalidDiscriminant
@@ -83,7 +85,10 @@ mod tests {
     fn every_truncated_prefix_is_rejected() {
         let bytes = sample().encode();
         (0..bytes.len()).for_each(|k| {
-            assert!(LeaveRoom::decode(&bytes[..k]).is_err(), "prefix {k} must fail");
+            assert!(
+                LeaveRoom::decode(&bytes[..k]).is_err(),
+                "prefix {k} must fail"
+            );
         });
         assert!(LeaveRoom::decode(&bytes).is_ok());
     }

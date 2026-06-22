@@ -378,15 +378,20 @@ pub(crate) fn run_vertical_slice(
             Vec4::new(c[0], c[1], c[2], c[3]),
         );
     });
-    render_input_artifact.objects.iter().for_each(|object| {
-        api.render_api.add_input_object(
-            &mut render_input,
-            object.world,
-            object.mesh_idx,
-            object.material_idx,
-            object.visible,
-        );
-    });
+    render_input_artifact
+        .objects
+        .iter()
+        .enumerate()
+        .for_each(|(i, object)| {
+            api.render_api.add_input_object(
+                &mut render_input,
+                i as u64,
+                object.world,
+                object.mesh_idx,
+                object.material_idx,
+                object.visible,
+            );
+        });
 
     // ---- 12. Compile the render command list (un-nameable value). ----
     let render_commands = api.render_api.build_command_list(&render_input);

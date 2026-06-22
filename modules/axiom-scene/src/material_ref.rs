@@ -1,5 +1,7 @@
 //! Opaque reference to a material resource owned outside the scene module.
 
+use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult, Reflect, TypeSchema};
+
 /// An opaque, stable reference to a material resource.
 ///
 /// `axiom-scene` does not own materials; a [`MaterialRef`] is just a
@@ -24,6 +26,18 @@ impl MaterialRef {
     }
 }
 
+impl Reflect for MaterialRef {
+    const SCHEMA: TypeSchema = TypeSchema::new("MaterialRef", &[]);
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.0.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        u64::reflect_read(reader).map(MaterialRef)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,5 +58,18 @@ mod tests {
     #[test]
     fn ordering_is_numeric() {
         assert!(MaterialRef::from_raw(1) < MaterialRef::from_raw(2));
+    }
+
+    #[test]
+    fn reflect_round_trips_and_rejects_truncation() {
+        let m = MaterialRef::from_raw(99);
+        let mut w = BinaryWriter::new();
+        m.reflect_write(&mut w);
+        assert_eq!(
+            MaterialRef::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap(),
+            m
+        );
+        assert!(MaterialRef::reflect_read(&mut BinaryReader::new(&[])).is_err());
+        assert_eq!(<MaterialRef as Reflect>::SCHEMA.name(), "MaterialRef");
     }
 }

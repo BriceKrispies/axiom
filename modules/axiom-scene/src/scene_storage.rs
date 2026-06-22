@@ -9,8 +9,10 @@
 
 use std::collections::BTreeMap;
 
-use axiom_ecs::{ComponentColumn, EntityRegistry, WorldStep, WorldSystem};
-use axiom_kernel::EntityId;
+use axiom_ecs::{ColumnSet, ComponentColumn, EntityRegistry, ErasedColumn, WorldStep, WorldSystem};
+use axiom_kernel::{
+    BinaryReader, BinaryWriter, EntityId, FieldSchema, KernelResult, Reflect, TypeSchema,
+};
 use axiom_math::{Quat, Transform, Vec3};
 
 use crate::camera::Camera;
@@ -60,6 +62,62 @@ pub struct ControllerState {
     pub(crate) index: u32,
     pub(crate) yaw: f32,
     pub(crate) pitch: f32,
+}
+
+impl Reflect for ControllerState {
+    const SCHEMA: TypeSchema = TypeSchema::new(
+        "ControllerState",
+        &[
+            FieldSchema::new("index", "u32"),
+            FieldSchema::new("yaw", "f32"),
+            FieldSchema::new("pitch", "f32"),
+        ],
+    );
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.index.reflect_write(writer);
+        self.yaw.reflect_write(writer);
+        self.pitch.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        u32::reflect_read(reader).and_then(|index| {
+            f32::reflect_read(reader).and_then(|yaw| {
+                f32::reflect_read(reader).map(|pitch| ControllerState { index, yaw, pitch })
+            })
+        })
+    }
+}
+
+/// Exposes the scene's component columns as the type-erased set the generic
+/// [`axiom_ecs::World`] serializes. The two non-column maps (`players`,
+/// `controllers`) carry persistent state too, but they are not columns — the
+/// scene serializes them alongside this set (see `Scene::write_state`). The
+/// transient `pending_*` queues are never serialized.
+impl ColumnSet for SceneStorage {
+    fn columns(&self) -> Vec<(&'static str, &dyn ErasedColumn)> {
+        vec![
+            ("locals", &self.locals),
+            ("worlds", &self.worlds),
+            ("parents", &self.parents),
+            ("cameras", &self.cameras),
+            ("lights", &self.lights),
+            ("renderables", &self.renderables),
+            ("spins", &self.spins),
+        ]
+    }
+
+    fn columns_mut(&mut self) -> Vec<(&'static str, &mut dyn ErasedColumn)> {
+        vec![
+            ("locals", &mut self.locals),
+            ("worlds", &mut self.worlds),
+            ("parents", &mut self.parents),
+            ("cameras", &mut self.cameras),
+            ("lights", &mut self.lights),
+            ("renderables", &mut self.renderables),
+            ("spins", &mut self.spins),
+        ]
+    }
 }
 
 /// How far the camera may pitch up or down (radians, ~86°), short of straight
@@ -176,8 +234,7 @@ impl WorldSystem<SceneStorage> for ControllerSystem {
                             .get_mut(&entity)
                             .expect("entity was just resolved from this map");
                         state.yaw += yaw_delta;
-                        state.pitch =
-                            (state.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+                        state.pitch = (state.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
                         // Unit quaternions built directly (`(axis·sin(θ/2),
                         // cos(θ/2))`) — infallible, so there is no unreachable
                         // error arm.
@@ -212,14 +269,21 @@ impl WorldSystem<SceneStorage> for ControllerSystem {
 pub(crate) fn propagate(ids: impl Iterator<Item = EntityId>, storage: &mut SceneStorage) {
     let mut worlds: BTreeMap<EntityId, Transform> = BTreeMap::new();
     ids.for_each(|id| {
-        storage.locals.get(id).copied().into_iter().for_each(|local| {
-            let world = storage
-                .parents
-                .get(id)
-                .and_then(|p| worlds.get(p).copied())
-                .map_or(local, |parent_world| Transform::combine(parent_world, local));
-            worlds.insert(id, world);
-        });
+        storage
+            .locals
+            .get(id)
+            .copied()
+            .into_iter()
+            .for_each(|local| {
+                let world = storage
+                    .parents
+                    .get(id)
+                    .and_then(|p| worlds.get(p).copied())
+                    .map_or(local, |parent_world| {
+                        Transform::combine(parent_world, local)
+                    });
+                worlds.insert(id, world);
+            });
     });
     worlds.into_iter().for_each(|(id, world)| {
         storage.worlds.insert(id, world);
@@ -287,7 +351,10 @@ mod tests {
 
         let local = storage.locals.get(e(1)).unwrap();
         assert!(local.rotation.w.abs() < 0.999, "the node yawed");
-        assert!(local.translation.x < -0.9, "forward followed the new facing");
+        assert!(
+            local.translation.x < -0.9,
+            "forward followed the new facing"
+        );
         assert!(local.translation.z.abs() < 1.0e-5);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().yaw, quarter);
         // The queue drained.
@@ -334,16 +401,15 @@ mod tests {
         storage.controllers.insert(e(1), ctrl(0));
         // A huge upward pitch clamps to +PITCH_LIMIT and tilts the rotation (the
         // X component of a pitch-about-X quaternion becomes non-zero).
-        storage
-            .pending_controls
-            .push((0, Vec3::ZERO, 0.0, 10.0));
+        storage.pending_controls.push((0, Vec3::ZERO, 0.0, 10.0));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, PITCH_LIMIT);
-        assert!(storage.locals.get(e(1)).unwrap().rotation.x.abs() > 0.1, "pitched");
+        assert!(
+            storage.locals.get(e(1)).unwrap().rotation.x.abs() > 0.1,
+            "pitched"
+        );
         // A huge downward pitch clamps to -PITCH_LIMIT (the other clamp arm).
-        storage
-            .pending_controls
-            .push((0, Vec3::ZERO, 0.0, -20.0));
+        storage.pending_controls.push((0, Vec3::ZERO, 0.0, -20.0));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, -PITCH_LIMIT);
     }
@@ -361,8 +427,14 @@ mod tests {
             .push((0, Vec3::new(0.0, 0.0, -1.0), 0.0, 1.2));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         let local = storage.locals.get(e(1)).unwrap();
-        assert!(local.translation.y.abs() < 1.0e-6, "forward stayed horizontal");
-        assert!((local.translation.z + 1.0).abs() < 1.0e-5, "moved forward on -Z");
+        assert!(
+            local.translation.y.abs() < 1.0e-6,
+            "forward stayed horizontal"
+        );
+        assert!(
+            (local.translation.z + 1.0).abs() < 1.0e-5,
+            "moved forward on -Z"
+        );
     }
 
     #[test]

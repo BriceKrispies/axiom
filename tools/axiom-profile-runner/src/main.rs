@@ -93,8 +93,9 @@ fn main() {
     let json_path = config.out.join(JSON_FILE);
     let md_path = config.out.join(MD_FILE);
     let csv_path = config.out.join(CSV_FILE);
-    if let Err(message) = write_reports(&config, &report, &json_path, &json, &md_path, &md, &csv_path)
-    {
+    if let Err(message) = write_reports(
+        &config, &report, &json_path, &json, &md_path, &md, &csv_path,
+    ) {
         eprintln!("error: {message}");
         std::process::exit(1);
     }
@@ -175,11 +176,16 @@ fn write_reports(
     md: &str,
     csv_path: &Path,
 ) -> Result<(), String> {
-    std::fs::create_dir_all(&config.out)
-        .map_err(|e| format!("could not create output directory {}: {e}", config.out.display()))?;
+    std::fs::create_dir_all(&config.out).map_err(|e| {
+        format!(
+            "could not create output directory {}: {e}",
+            config.out.display()
+        )
+    })?;
     std::fs::write(json_path, json)
         .map_err(|e| format!("could not write {}: {e}", json_path.display()))?;
-    std::fs::write(md_path, md).map_err(|e| format!("could not write {}: {e}", md_path.display()))?;
+    std::fs::write(md_path, md)
+        .map_err(|e| format!("could not write {}: {e}", md_path.display()))?;
     if config.csv {
         std::fs::write(csv_path, report.to_csv())
             .map_err(|e| format!("could not write {}: {e}", csv_path.display()))?;
@@ -195,7 +201,10 @@ fn build_profile() -> &'static str {
 }
 
 fn git_commit_hash() -> Option<String> {
-    let output = Command::new("git").args(["rev-parse", "HEAD"]).output().ok()?;
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
     match output.status.success() {
         true => {
             let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -221,7 +230,9 @@ fn print_summary(
     println!("  mode: {mode}");
     println!(
         "  object_count={}  measured_frames={}  warmup_frames={}  profile={}",
-        report.object_count, report.measured_frame_count, report.warmup_frame_count,
+        report.object_count,
+        report.measured_frame_count,
+        report.warmup_frame_count,
         report.build_profile
     );
     println!(
@@ -282,7 +293,11 @@ mod tests {
     use super::*;
 
     fn args(items: &[&str]) -> impl Iterator<Item = String> {
-        items.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_iter()
+        items
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     #[test]
@@ -299,8 +314,17 @@ mod tests {
     #[test]
     fn parse_args_reads_every_flag() {
         let config = parse_args(args(&[
-            "--objects", "100", "--frames", "5", "--warmup-frames", "7", "--focus-phase",
-            "render_command_build", "--csv", "--out", "some/dir",
+            "--objects",
+            "100",
+            "--frames",
+            "5",
+            "--warmup-frames",
+            "7",
+            "--focus-phase",
+            "render_command_build",
+            "--csv",
+            "--out",
+            "some/dir",
         ]))
         .expect("flags are valid");
         assert_eq!(config.objects, 100);
@@ -321,7 +345,10 @@ mod tests {
     fn parse_args_rejects_invalid_focus_phase_with_clear_error() {
         let err = parse_args(args(&["--focus-phase", "gpu_timing"])).unwrap_err();
         assert!(err.contains("gpu_timing"));
-        assert!(err.contains("transform_update"), "error names the allowed values");
+        assert!(
+            err.contains("transform_update"),
+            "error names the allowed values"
+        );
     }
 
     #[test]

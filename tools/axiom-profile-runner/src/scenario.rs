@@ -150,15 +150,21 @@ pub fn run(config: ScenarioConfig) -> ScenarioOutput {
     let setup_start = Instant::now();
 
     let render_api = RenderApi::new();
-    let mut runtime = Runtime::new(
-        RuntimeConfig::new(FIXED_STEP_NANOS).with_diagnostics_enabled(false),
-    )
-    .expect("fixed step is a valid runtime config");
-    runtime.initialize().expect("runtime initialize cannot fail");
+    let mut runtime =
+        Runtime::new(RuntimeConfig::new(FIXED_STEP_NANOS).with_diagnostics_enabled(false))
+            .expect("fixed step is a valid runtime config");
+    runtime
+        .initialize()
+        .expect("runtime initialize cannot fail");
     runtime.start().expect("runtime start cannot fail");
     runtime
         .scheduler_mut()
-        .register(HandleId::from_raw(1), "stress-step", 1, Box::new(StressStepSystem))
+        .register(
+            HandleId::from_raw(1),
+            "stress-step",
+            1,
+            Box::new(StressStepSystem),
+        )
         .expect("registering the single stress system cannot fail");
 
     let mut scene = SceneApi::new();
@@ -168,7 +174,9 @@ pub fn run(config: ScenarioConfig) -> ScenarioOutput {
         .map(|i| {
             let local = Transform::from_translation(lattice_translation(i, side));
             let id = scene.create_node_with_transform(local);
-            scene.set_parent(id, root).expect("root and child were just created");
+            scene
+                .set_parent(id, root)
+                .expect("root and child were just created");
             id
         })
         .collect();
@@ -264,7 +272,10 @@ pub fn run(config: ScenarioConfig) -> ScenarioOutput {
     // A single representative transform+bounds+cull pass: gives an accurate
     // visible-object count for the notes, and the stable visible set the
     // render focus mode reuses each iteration.
-    let stable_worlds = tf_iter(&mut Phase::new("warmup", kind::HARNESS), &mut ChurnCounters::default());
+    let stable_worlds = tf_iter(
+        &mut Phase::new("warmup", kind::HARNESS),
+        &mut ChurnCounters::default(),
+    );
     let stable_visible: Vec<Mat4> = stable_worlds
         .iter()
         .filter(|m| {
@@ -284,7 +295,9 @@ pub fn run(config: ScenarioConfig) -> ScenarioOutput {
             let mut warm = FullSink::new();
             let mut full_iter = |s: &mut FullSink| {
                 let t = Instant::now();
-                runtime.step().expect("a started runtime steps deterministically");
+                runtime
+                    .step()
+                    .expect("a started runtime steps deterministically");
                 s.runtime_step.record(t.elapsed().as_nanos());
 
                 let worlds = tf_iter(&mut s.transform, &mut s.churn);
@@ -309,8 +322,16 @@ pub fn run(config: ScenarioConfig) -> ScenarioOutput {
                 s.visibility.record(t.elapsed().as_nanos());
 
                 render_command_build_workload(
-                    &render_api, &cube, view, projection, light_dir, light_color, base_color,
-                    &visible, &mut s.render, &mut s.churn,
+                    &render_api,
+                    &cube,
+                    view,
+                    projection,
+                    light_dir,
+                    light_color,
+                    base_color,
+                    &visible,
+                    &mut s.render,
+                    &mut s.churn,
                 );
             };
 
@@ -361,15 +382,31 @@ pub fn run(config: ScenarioConfig) -> ScenarioOutput {
 
             (0..warmup).for_each(|_| {
                 render_command_build_workload(
-                    &render_api, &cube, view, projection, light_dir, light_color, base_color,
-                    &stable_visible, &mut warm, &mut warm_churn,
+                    &render_api,
+                    &cube,
+                    view,
+                    projection,
+                    light_dir,
+                    light_color,
+                    base_color,
+                    &stable_visible,
+                    &mut warm,
+                    &mut warm_churn,
                 );
             });
             (0..measured).for_each(|_| {
                 let t = Instant::now();
                 render_command_build_workload(
-                    &render_api, &cube, view, projection, light_dir, light_color, base_color,
-                    &stable_visible, &mut phase, &mut churn,
+                    &render_api,
+                    &cube,
+                    view,
+                    projection,
+                    light_dir,
+                    light_color,
+                    base_color,
+                    &stable_visible,
+                    &mut phase,
+                    &mut churn,
                 );
                 frames.record(t.elapsed().as_nanos());
             });
@@ -464,8 +501,8 @@ fn render_command_build_workload(
 
     // render_object_push
     let t = Instant::now();
-    visible_worlds.iter().for_each(|w| {
-        render_api.add_input_object(&mut input, *w, MESH_IDX, MATERIAL_IDX, true);
+    visible_worlds.iter().enumerate().for_each(|(i, w)| {
+        render_api.add_input_object(&mut input, i as u64, *w, MESH_IDX, MATERIAL_IDX, true);
     });
     churn.render_objects_pushed += visible_worlds.len() as u64;
     phase.record_subphase(RC_PUSH, t.elapsed().as_nanos());
@@ -530,7 +567,12 @@ fn unit_cube() -> CubeMesh {
         4, 5, 1, 4, 1, 0,
         3, 2, 6, 3, 6, 7,
     ];
-    CubeMesh { positions, normals, uvs, indices }
+    CubeMesh {
+        positions,
+        normals,
+        uvs,
+        indices,
+    }
 }
 
 fn build_notes(config: &ScenarioConfig, object_count: usize, visible_count: usize) -> Vec<String> {
@@ -602,14 +644,20 @@ mod tests {
     #[test]
     fn focus_phase_parses_known_values_and_rejects_unknown() {
         assert_eq!(FocusPhase::parse("full"), Ok(FocusPhase::Full));
-        assert_eq!(FocusPhase::parse("transform_update"), Ok(FocusPhase::TransformUpdate));
+        assert_eq!(
+            FocusPhase::parse("transform_update"),
+            Ok(FocusPhase::TransformUpdate)
+        );
         assert_eq!(
             FocusPhase::parse("render_command_build"),
             Ok(FocusPhase::RenderCommandBuild)
         );
         let err = FocusPhase::parse("gpu").unwrap_err();
         assert!(err.contains("gpu"));
-        assert!(err.contains("transform_update"), "error lists the allowed values");
+        assert!(
+            err.contains("transform_update"),
+            "error lists the allowed values"
+        );
     }
 
     #[test]
@@ -627,10 +675,18 @@ mod tests {
                 "render_command_build",
             ]
         );
-        let transform = out.phases.iter().find(|p| p.name == "transform_update").unwrap();
+        let transform = out
+            .phases
+            .iter()
+            .find(|p| p.name == "transform_update")
+            .unwrap();
         assert_eq!(transform.subphases.len(), 5);
         assert_eq!(transform.kind, kind::REAL_ENGINE_MODEL);
-        let render = out.phases.iter().find(|p| p.name == "render_command_build").unwrap();
+        let render = out
+            .phases
+            .iter()
+            .find(|p| p.name == "render_command_build")
+            .unwrap();
         assert_eq!(render.subphases.len(), 4);
         assert_eq!(render.kind, kind::REAL_ENGINE);
         // Composite parent totals equal the exact sum of their subphases.
@@ -721,6 +777,9 @@ mod tests {
         let cube = unit_cube();
         assert_eq!(cube.positions.len(), 8);
         assert_eq!(cube.indices.len(), 36);
-        assert!(cube.indices.iter().all(|&i| (i as usize) < cube.positions.len()));
+        assert!(cube
+            .indices
+            .iter()
+            .all(|&i| (i as usize) < cube.positions.len()));
     }
 }

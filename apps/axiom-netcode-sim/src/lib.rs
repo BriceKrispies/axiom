@@ -94,8 +94,7 @@ impl Peer {
         // tag before touching `input_rng`.
         let random_walk = (kind == ScriptKind::RandomWalk)
             .then(|| {
-                let mut axis =
-                    || (self.input_rng.next_bounded(3) as i32 - 1) as f32 * MOVE_SPEED;
+                let mut axis = || (self.input_rng.next_bounded(3) as i32 - 1) as f32 * MOVE_SPEED;
                 let (x, y) = (axis(), axis());
                 Vec3::new(x, y, 0.0)
             })
@@ -297,9 +296,7 @@ fn convergence(peers: &[Peer]) -> (bool, Option<u64>) {
         .filter(|p| !p.cheat.corrupts_sim())
         .for_each(|p| {
             p.hashes.iter().for_each(|(&tick, &hash)| {
-                let diverged = consensus
-                    .get(&tick)
-                    .map_or(false, |seen| *seen != hash);
+                let diverged = consensus.get(&tick).map_or(false, |seen| *seen != hash);
                 consensus.entry(tick).or_insert(hash);
                 diverged.then(|| {
                     first = Some(first.map_or(tick, |f| f.min(tick)));

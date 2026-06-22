@@ -187,9 +187,7 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
                     .filter_map(|(dep_key, value)| {
                         // A renamed dep (`package = "…"`) resolves to that name;
                         // otherwise the key is the crate name.
-                        let resolved = value
-                            .package_override()
-                            .unwrap_or_else(|| dep_key.clone());
+                        let resolved = value.package_override().unwrap_or_else(|| dep_key.clone());
                         dir_by_name.contains_key(&resolved).then_some(resolved)
                     })
                     .collect::<BTreeSet<String>>()
@@ -243,12 +241,15 @@ fn load_via_cargo(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
             let status = output.status;
             let stdout = output.stdout;
             let stderr = output.stderr;
-            status.success().then_some(stdout).ok_or_else(|| MetadataError {
-                message: format!(
-                    "`cargo metadata` exited with status {status}: {}",
-                    String::from_utf8_lossy(&stderr)
-                ),
-            })
+            status
+                .success()
+                .then_some(stdout)
+                .ok_or_else(|| MetadataError {
+                    message: format!(
+                        "`cargo metadata` exited with status {status}: {}",
+                        String::from_utf8_lossy(&stderr)
+                    ),
+                })
         })
         .and_then(|stdout| {
             parse_metadata(&stdout).map(|mut g| {

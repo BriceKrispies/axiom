@@ -49,16 +49,30 @@ fn build_scene() -> RunningApp {
         .add_plugins(DefaultPlugins)
         .setup(|world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
-            let red = materials.add(Material::lit(Color::linear_rgb(ch(0.90), ch(0.27), ch(0.27))));
-            let blue = materials.add(Material::lit(Color::linear_rgb(ch(0.30), ch(0.45), ch(0.95))));
+            let red = materials.add(Material::lit(Color::linear_rgb(
+                ch(0.90),
+                ch(0.27),
+                ch(0.27),
+            )));
+            let blue = materials.add(Material::lit(Color::linear_rgb(
+                ch(0.30),
+                ch(0.45),
+                ch(0.95),
+            )));
             world.spawn((
                 Transform::from_translation(Vec3::new(-1.5, 0.0, 0.0)),
-                Renderable { mesh: cube, material: red },
+                Renderable {
+                    mesh: cube,
+                    material: red,
+                },
                 Player::new(0),
             ));
             world.spawn((
                 Transform::from_translation(Vec3::new(1.5, 0.0, 0.0)),
-                Renderable { mesh: cube, material: blue },
+                Renderable {
+                    mesh: cube,
+                    material: blue,
+                },
                 Player::new(1),
             ));
             world.spawn((
@@ -150,7 +164,12 @@ impl Session {
 
     /// The authoritative positions `[p0x, p0y, p1x, p1y]`.
     pub fn positions(&self) -> [f32; 4] {
-        [self.pos[0][0], self.pos[0][1], self.pos[1][0], self.pos[1][1]]
+        [
+            self.pos[0][0],
+            self.pos[0][1],
+            self.pos[1][0],
+            self.pos[1][1],
+        ]
     }
 }
 

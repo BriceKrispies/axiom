@@ -14,6 +14,9 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-frame = { path = "../../crates/axiom-frame" }
+# Render compiles a RenderCommandList into the backend-neutral host::FramePacket
+# (build_frame_packet) — the single artifact every render backend consumes.
+axiom-host = { path = "../../crates/axiom-host" }
 
 [lints.rust]
 unsafe_code = "forbid"

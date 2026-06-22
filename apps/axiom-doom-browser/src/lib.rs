@@ -79,6 +79,33 @@ struct Enemy {
     alive: bool,
 }
 
+/// A little-endian, bounds-checked cursor over [`DoomGame::write_state`] bytes.
+struct StateReader<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
+
+impl StateReader<'_> {
+    fn take<const N: usize>(&mut self) -> Option<[u8; N]> {
+        let end = self.at + N;
+        let slice = self.bytes.get(self.at..end)?;
+        self.at = end;
+        slice.try_into().ok()
+    }
+    fn f32(&mut self) -> Option<f32> {
+        self.take::<4>().map(f32::from_le_bytes)
+    }
+    fn i32(&mut self) -> Option<i32> {
+        self.take::<4>().map(i32::from_le_bytes)
+    }
+    fn u32(&mut self) -> Option<u32> {
+        self.take::<4>().map(u32::from_le_bytes)
+    }
+    fn u8(&mut self) -> Option<u8> {
+        self.take::<1>().map(|b| b[0])
+    }
+}
+
 /// One tick of held controls, decoded from the keyboard / on-screen pad.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Intent {
@@ -194,6 +221,87 @@ impl DoomGame {
         }
     }
 
+    /// Serialize the mutable game state (player pose, vitals, cooldowns, and every
+    /// enemy) to little-endian bytes. The immutable `level` document is not
+    /// included — a fork restores into the same level. Pairs with
+    /// [`DoomGame::read_state`] to fork-and-resume from a recorded frame.
+    pub fn write_state(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.px.to_le_bytes());
+        bytes.extend_from_slice(&self.pz.to_le_bytes());
+        bytes.extend_from_slice(&self.yaw.to_le_bytes());
+        bytes.extend_from_slice(&self.pitch.to_le_bytes());
+        bytes.extend_from_slice(&self.health.to_le_bytes());
+        bytes.extend_from_slice(&self.score.to_le_bytes());
+        bytes.extend_from_slice(&self.ammo.to_le_bytes());
+        bytes.extend_from_slice(&self.fire_cd.to_le_bytes());
+        bytes.extend_from_slice(&self.hurt_cd.to_le_bytes());
+        bytes.extend_from_slice(&(self.enemies.len() as u32).to_le_bytes());
+        for e in &self.enemies {
+            bytes.extend_from_slice(&e.x.to_le_bytes());
+            bytes.extend_from_slice(&e.y.to_le_bytes());
+            bytes.extend_from_slice(&e.z.to_le_bytes());
+            bytes.extend_from_slice(&e.spawn.0.to_le_bytes());
+            bytes.extend_from_slice(&e.spawn.1.to_le_bytes());
+            bytes.push(u8::from(e.alive));
+        }
+        bytes
+    }
+
+    /// Restore mutable game state from bytes produced by [`DoomGame::write_state`],
+    /// keeping the current `level`. Returns `false` (leaving `self` unchanged) if
+    /// the buffer is truncated/malformed, so a bad fork never corrupts the game.
+    pub fn read_state(&mut self, bytes: &[u8]) -> bool {
+        let mut r = StateReader { bytes, at: 0 };
+        let parsed = (|| {
+            let px = r.f32()?;
+            let pz = r.f32()?;
+            let yaw = r.f32()?;
+            let pitch = r.f32()?;
+            let health = r.i32()?;
+            let score = r.u32()?;
+            let ammo = r.u32()?;
+            let fire_cd = r.u32()?;
+            let hurt_cd = r.u32()?;
+            let count = r.u32()?;
+            let mut enemies = Vec::new();
+            for _ in 0..count {
+                let x = r.f32()?;
+                let y = r.f32()?;
+                let z = r.f32()?;
+                let sx = r.f32()?;
+                let sz = r.f32()?;
+                let alive = r.u8()? != 0;
+                enemies.push(Enemy {
+                    x,
+                    y,
+                    z,
+                    spawn: (sx, sz),
+                    alive,
+                });
+            }
+            Some((
+                px, pz, yaw, pitch, health, score, ammo, fire_cd, hurt_cd, enemies,
+            ))
+        })();
+        match parsed {
+            Some((px, pz, yaw, pitch, health, score, ammo, fire_cd, hurt_cd, enemies)) => {
+                self.px = px;
+                self.pz = pz;
+                self.yaw = yaw;
+                self.pitch = pitch;
+                self.health = health;
+                self.score = score;
+                self.ammo = ammo;
+                self.fire_cd = fire_cd;
+                self.hurt_cd = hurt_cd;
+                self.enemies = enemies;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Is the world cell containing `(x, z)` a wall (or out of bounds)?
     fn is_wall(&self, x: f32, z: f32) -> bool {
         map_wall_at(&self.level.map, x, z)
@@ -238,7 +346,8 @@ impl DoomGame {
         self.yaw += yaw_delta;
         self.pitch = (self.pitch + pitch_delta).clamp(-tun.pitch_limit, tun.pitch_limit);
         let forward = (intent.forward as i32 - intent.backward as i32) as f32 * tun.move_speed;
-        let strafe = (intent.strafe_right as i32 - intent.strafe_left as i32) as f32 * tun.move_speed;
+        let strafe =
+            (intent.strafe_right as i32 - intent.strafe_left as i32) as f32 * tun.move_speed;
         let move_local = self.move_player(forward, strafe);
         let control = FirstPersonInput::new(
             0,
@@ -309,9 +418,11 @@ impl DoomGame {
         let (fx, fz) = (-self.yaw.sin(), -self.yaw.cos());
         let cone = tun.fire_half_angle.cos();
         let range = tun.fire_range;
-        let best = self.enemies.iter().enumerate().fold(
-            None::<(usize, f32)>,
-            |best, (i, e)| {
+        let best = self
+            .enemies
+            .iter()
+            .enumerate()
+            .fold(None::<(usize, f32)>, |best, (i, e)| {
                 let (dx, dz) = (e.x - self.px, e.z - self.pz);
                 let dist = (dx * dx + dz * dz).sqrt();
                 let aim = (fx * dx + fz * dz) / dist;
@@ -324,8 +435,7 @@ impl DoomGame {
                     & self.line_clear(e.x, e.z);
                 let closer = best.is_none_or(|(_, d)| dist < d);
                 (eligible & closer).then_some((i, dist)).or(best)
-            },
-        );
+            });
         best.iter().for_each(|&(i, _)| {
             self.enemies[i].alive = false;
             self.score += tun.kill_score;
@@ -414,7 +524,10 @@ impl DoomGame {
         // yaw correction the frame is world-aligned, so the move back to start is
         // the world delta directly.
         let (yaw_delta, pitch_delta) = (-self.yaw, -self.pitch);
-        let (dx, dz) = (self.level.map.start.0 - self.px, self.level.map.start.1 - self.pz);
+        let (dx, dz) = (
+            self.level.map.start.0 - self.px,
+            self.level.map.start.1 - self.pz,
+        );
         let control = FirstPersonInput::new(
             0,
             Vec3::new(dx, 0.0, dz),
@@ -475,7 +588,9 @@ pub fn reload_doom(running: &mut RunningApp, doc: &LevelDoc) {
 /// and the directional light. Shared by [`build_doom_app`] (initial build) and
 /// [`reload_doom`] (live re-author), so both produce an identical scene for a
 /// given document.
-fn level_setup(doc: LevelDoc) -> impl FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>) {
+fn level_setup(
+    doc: LevelDoc,
+) -> impl FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>) {
     move |world, meshes, materials| {
         let cube = meshes.add(Mesh::cube());
         let wall_a = materials.add(Material::lit(color_of(doc.colors.wall_a)));
@@ -527,16 +642,20 @@ fn level_setup(doc: LevelDoc) -> impl FnOnce(&mut SceneCommands, &mut Assets<Mes
 
         // Enemies: a red cube Player per spawn, in row-major (index) order.
         let scale = doc.tun.enemy_scale;
-        doc.map.enemy_spawns.iter().enumerate().for_each(|(i, &(x, z))| {
-            world.spawn((
-                block(x, doc.tun.enemy_y, z, scale, scale, scale),
-                Renderable {
-                    mesh: cube,
-                    material: enemy,
-                },
-                Player::new(i as u32),
-            ));
-        });
+        doc.map
+            .enemy_spawns
+            .iter()
+            .enumerate()
+            .for_each(|(i, &(x, z))| {
+                world.spawn((
+                    block(x, doc.tun.enemy_y, z, scale, scale, scale),
+                    Renderable {
+                        mesh: cube,
+                        material: enemy,
+                    },
+                    Player::new(i as u32),
+                ));
+            });
 
         // The first-person camera at the start, facing -Z (yaw 0).
         world.spawn((
@@ -609,7 +728,10 @@ mod tests {
         // The player slides to the floor-cell boundary (~x=0.5) but the west wall
         // (column 0) stops it there — it never crosses into the wall cell.
         assert!(g.px >= 0.49, "the west wall blocks leftward strafing");
-        assert!(!g.is_wall(g.px, g.pz), "the player never ends inside a wall");
+        assert!(
+            !g.is_wall(g.px, g.pz),
+            "the player never ends inside a wall"
+        );
     }
 
     #[test]
@@ -788,7 +910,10 @@ mod tests {
         // The realized scene reflects the new wall count (walls + floor + ceiling
         // + one cube per enemy).
         let app = build_doom_app(&doc);
-        assert_eq!(app.renderable_count(), new_walls + 2 + doc.map.enemy_spawns.len());
+        assert_eq!(
+            app.renderable_count(),
+            new_walls + 2 + doc.map.enemy_spawns.len()
+        );
     }
 
     #[test]

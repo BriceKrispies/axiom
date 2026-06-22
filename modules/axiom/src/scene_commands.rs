@@ -119,6 +119,19 @@ impl SceneCommands {
                             .expect("authored light parameters are valid");
                         light_direction = Some(l.direction);
                     });
+                (component.kind() == NodeComponent::KIND_POINT_LIGHT)
+                    .then(|| component.as_point_light())
+                    .flatten()
+                    .inspect(|l| {
+                        scene
+                            .add_point_light(
+                                math,
+                                node,
+                                Vec3::new(l.color.r.get(), l.color.g.get(), l.color.b.get()),
+                                l.intensity,
+                            )
+                            .expect("authored point-light parameters are valid");
+                    });
                 (component.kind() == NodeComponent::KIND_SPIN)
                     .then(|| component.as_spin())
                     .flatten()
@@ -255,6 +268,24 @@ mod tests {
         assert_eq!(cmds.realize_into(&mut scene, &math()), None);
         assert_eq!(scene.snapshot().nodes().len(), 1);
         assert_eq!(scene.snapshot().cameras().len(), 1);
+    }
+
+    #[test]
+    fn realizes_a_point_light_without_a_frame_direction() {
+        use crate::point_light::PointLight;
+        let mut cmds = SceneCommands::new(1.0);
+        cmds.spawn((
+            Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)),
+            PointLight {
+                color: Color::WHITE,
+                intensity: Ratio::new(2.0).unwrap(),
+            },
+        ));
+        let mut scene = SceneApi::new();
+        // A point light contributes a scene light but no frame sun direction.
+        let dir = cmds.realize_into(&mut scene, &math());
+        assert_eq!(dir, None);
+        assert_eq!(scene.snapshot().lights().len(), 1);
     }
 
     #[test]

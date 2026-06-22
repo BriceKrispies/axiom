@@ -1,6 +1,6 @@
 //! Type-erased access to a component column for whole-world operations.
 
-use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult, Reflect, TypeSchema};
+use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, KernelResult, Reflect, TypeSchema};
 
 use crate::component_column::ComponentColumn;
 
@@ -24,6 +24,10 @@ pub trait ErasedColumn {
 
     /// Replace the column's contents with a column read from the reader.
     fn read_replace(&mut self, reader: &mut BinaryReader<'_>) -> KernelResult<()>;
+
+    /// Remove `entity`'s component from this column, if present. The seam that
+    /// lets the world clean every column on despawn without knowing the type.
+    fn remove_entity(&mut self, entity: EntityId);
 }
 
 impl<T: Reflect> ErasedColumn for ComponentColumn<T> {
@@ -41,6 +45,10 @@ impl<T: Reflect> ErasedColumn for ComponentColumn<T> {
 
     fn read_replace(&mut self, reader: &mut BinaryReader<'_>) -> KernelResult<()> {
         ComponentColumn::<T>::reflect_read(reader).map(|column| *self = column)
+    }
+
+    fn remove_entity(&mut self, entity: EntityId) {
+        let _ = self.remove(entity);
     }
 }
 
@@ -84,5 +92,21 @@ mod tests {
         let mut col: ComponentColumn<u32> = ComponentColumn::new();
         let erased: &mut dyn ErasedColumn = &mut col;
         assert!(erased.read_replace(&mut BinaryReader::new(&[])).is_err());
+    }
+
+    #[test]
+    fn remove_entity_drops_the_row() {
+        let mut col: ComponentColumn<u32> = ComponentColumn::new();
+        col.insert(e(1), 10);
+        col.insert(e(2), 20);
+        {
+            let erased: &mut dyn ErasedColumn = &mut col;
+            erased.remove_entity(e(1));
+            // Removing an absent entity is a clean no-op.
+            erased.remove_entity(e(9));
+        }
+        assert_eq!(col.entry_count(), 1);
+        assert!(col.get(e(1)).is_none());
+        assert_eq!(col.get(e(2)), Some(&20));
     }
 }

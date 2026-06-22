@@ -294,6 +294,18 @@ fn lib_exports_are_curated_set() {
         "pub use host_power_preference::HostPowerPreference;",
         "pub use host_surface_descriptor::HostSurfaceDescriptor;",
         "pub use host_surface_handle::HostSurfaceHandle;",
+        // Backend-neutral frame presentation packet + uniform submission report.
+        "pub use frame_packet::FrameCamera;",
+        "pub use frame_packet::FrameDrawItem;",
+        "pub use frame_packet::FrameFeatureSet;",
+        "pub use frame_packet::FrameLight;",
+        "pub use frame_packet::FramePacket;",
+        "pub use frame_packet::FrameViewport;",
+        "pub use frame_raster_stats::FrameDepthCueStats;",
+        "pub use frame_raster_stats::FrameRasterStats;",
+        "pub use frame_submission_report::BackendKind;",
+        "pub use frame_submission_report::FrameFeature;",
+        "pub use frame_submission_report::FrameSubmissionReport;",
     ];
     expected.sort();
 

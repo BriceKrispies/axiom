@@ -262,6 +262,13 @@ fn two_pub_exports() -> &'static str {
     "pub use self::a::A;\npub use self::b::B;\nmod a { pub struct A; }\nmod b { pub struct B; }\n"
 }
 
+// A lib.rs that exports one facade plus an identity-vocabulary re-export
+// (`pub use ids::…`). The ids carry no behavior, so this is the canonical shape
+// for a handle-based module and must NOT trigger `ModuleFacadeMustExportOne`.
+fn facade_plus_id_vocabulary() -> &'static str {
+    "pub use self::inner::Facade;\npub use self::ids::Id;\nmod inner { pub struct Facade; }\nmod ids { pub struct Id; }\n"
+}
+
 // A lib.rs that imports the kernel layer's prefix (satisfies
 // MissingPreviousImport for a non-kernel layer).
 fn lib_using_axiomkernel() -> &'static str {
@@ -845,6 +852,38 @@ fn case_p_module_facade_must_export_one() {
     assert!(
         report.has_kind(ViolationKind::ModuleFacadeMustExportOne),
         "violations: {:?}",
+        report.violations()
+    );
+}
+
+#[test]
+fn case_module_facade_plus_id_vocabulary_ok() {
+    let f = Fixture::new("module_facade_plus_ids");
+    f.workspace(&["crates/kernel", "modules/scene"])
+        .layer_crate(
+            "crates/kernel",
+            "mfi-kernel",
+            "kernel",
+            0,
+            None,
+            &[],
+            &[],
+            "pub struct K;\n",
+        )
+        .module_crate(
+            "modules/scene",
+            "mfi-scene",
+            "scene",
+            &["kernel"],
+            &[],
+            &["scene-graph"],
+            &[("mfi-kernel", "../../crates/kernel")],
+            facade_plus_id_vocabulary(),
+        );
+    let report = check_architecture(&f.root);
+    assert!(
+        !report.has_kind(ViolationKind::ModuleFacadeMustExportOne),
+        "one facade + an `ids` vocabulary re-export must be allowed; violations: {:?}",
         report.violations()
     );
 }

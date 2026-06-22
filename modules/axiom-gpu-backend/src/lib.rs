@@ -28,9 +28,25 @@
 
 mod gpu_backend_api;
 
-// The real wgpu binding — compiled only for wasm32, behind the facade. Never
-// enters the native build or the coverage gate.
+// Pure, native-testable adapter from the backend-neutral host::FramePacket to
+// the live path's instance-batch + light shape. No GPU/browser code, so it
+// builds and is covered on native exactly as on wasm.
+mod frame_packet_adapter;
+
+// The shared, target-agnostic renderer (pipeline + caches + draw). Compiled only
+// where a real GPU is in play — wasm32 (the live arm) or the native `offscreen`
+// feature (the screenshot tool) — so the default native build, coverage gate, and
+// branchless lint never see this wgpu code.
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
+mod scene_renderer;
+
+// The real wgpu swap-chain binding — compiled only for wasm32, behind the facade.
 #[cfg(target_arch = "wasm32")]
 mod live_gpu_binding;
+
+// The native off-screen renderer — compiled only behind the `offscreen` feature
+// (non-wasm). Drives the same `scene_renderer` as the live arm.
+#[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
+mod offscreen;
 
 pub use gpu_backend_api::GpuBackendApi;

@@ -1,0 +1,23 @@
+[package]
+name = "axiom-sim-crucible"
+description = "The Axiom Simulation Crucible: a tiny deterministic, headless proof app that composes the ECS + sim-core substrate into an explainable, replayable causal chain (a creature picks up a transferable residue, grooms it to a mouth route, ingests it, a generic effect rule updates a fact). It uses only generic substrate mechanisms — body surfaces, residues, interaction routes, transfer rules, the process scheduler, effect batches, and the causal journal — with the concrete scenario (cat/beer/paw/tavern) confined to this app. Apps are composition leaves, exempt from the branchless and 100%-coverage spine gates."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# A library (the testable crucible: scenario, run loop, report, replay) plus a
+# thin binary that runs it headlessly and prints the structured report.
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# The two substrate crates the app composes: the ECS layer (entity registry +
+# generational handles) and the sim-core module (the SimCoreApi facade). No
+# browser/GPU/scene/physics deps — this is a headless deterministic app.
+axiom-ecs = { path = "../../crates/axiom-ecs" }
+axiom-sim-core = { path = "../../modules/axiom-sim-core" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

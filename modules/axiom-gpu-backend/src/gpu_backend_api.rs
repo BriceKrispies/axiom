@@ -1,6 +1,6 @@
 //! The single GPU-backend facade: own the real wgpu binding and present frames.
 
-use axiom_host::HostPresentationRequest;
+use axiom_host::{FramePacket, HostPresentationRequest};
 
 /// The real GPU presentation backend for one surface.
 ///
@@ -68,6 +68,8 @@ impl GpuBackendApi {
     pub fn present_frame(
         &self,
         clear_color: [f32; 4],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
     ) -> bool {
         #[cfg(target_arch = "wasm32")]
@@ -75,14 +77,66 @@ impl GpuBackendApi {
             return self
                 .live
                 .as_ref()
-                .map(|live| live.render_frame(batches, clear_color).is_ok())
+                .map(|live| {
+                    live.render_frame(lights, light_view_proj, batches, clear_color)
+                        .is_ok()
+                })
                 .unwrap_or(false);
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let _ = (clear_color, batches);
+            let _ = (clear_color, lights, light_view_proj, batches);
             false
         }
+    }
+
+    /// Present one frame from the backend-neutral [`axiom_host::FramePacket`] —
+    /// the single artifact this backend and the future Canvas 2D backend both
+    /// consume. It derives the live path's instance batches + lights from the
+    /// packet (see [`crate::frame_packet_adapter`]) and presents them through the
+    /// exact same path as [`Self::present_frame`], so behaviour is unchanged.
+    /// Returns whether real pixels were drawn — always `false` on native.
+    pub fn present_packet(&self, packet: &FramePacket) -> bool {
+        let batches = crate::frame_packet_adapter::frame_packet_to_batches(packet);
+        let lights = crate::frame_packet_adapter::frame_packet_lights(packet);
+        self.present_frame(
+            packet.clear_color(),
+            &lights,
+            packet.light_view_proj(),
+            &batches,
+        )
+    }
+
+    /// Render one frame **off-screen** to `width * height * 4` RGBA8 bytes,
+    /// headless, on native — the screenshot path. It builds a throwaway GPU device
+    /// and draws `meshes` / `materials` / `lights` / `batches` (the same data
+    /// [`Self::present_frame`] takes, plus the mesh/material sets from
+    /// [`Self::initialize`]) through the **same** [`crate::scene_renderer`] the
+    /// browser arm uses, then reads the pixels back. `None` if no native GPU
+    /// adapter is available. Compiled only behind the `offscreen` feature, so it
+    /// never enters the engine's default build or gates.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_offscreen_rgba(
+        width: u32,
+        height: u32,
+        meshes: &[(u64, Vec<f32>, Vec<u32>)],
+        materials: &[(u64, u32, u32, Vec<u8>)],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_view_proj: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+        clear: [f32; 4],
+    ) -> Option<Vec<u8>> {
+        crate::offscreen::render_to_rgba(
+            width,
+            height,
+            meshes,
+            materials,
+            lights,
+            light_view_proj,
+            batches,
+            clear,
+        )
     }
 
     /// Initialise the real wgpu binding from a canvas, the engine's distinct mesh
@@ -172,8 +226,39 @@ mod tests {
         // On native there is no GPU binding: not ready, and present draws nothing.
         let backend = GpuBackendApi::new(&request(640, 480));
         assert!(!backend.binding_is_ready());
-        // One batch of one instance: mesh 7, material 5, mvp(16) + colour(4).
-        let batches = vec![(7_u64, 5_u64, vec![0.0_f32; 20], 1_u32)];
-        assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &batches));
+        // One batch of one instance: mesh 7, material 5, mvp(16)+world(16)+colour(4).
+        let batches = vec![(7_u64, 5_u64, vec![0.0_f32; 36], 1_u32)];
+        let lights = vec![(0_u32, [0.0, 1.0, 0.0], [1.0, 1.0, 1.0], 1.0_f32)];
+        let light_vp = [0.0_f32; 16];
+        assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &lights, light_vp, &batches));
+    }
+
+    #[test]
+    fn present_packet_consumes_a_frame_packet_and_no_ops_on_native() {
+        use axiom_host::{
+            FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
+        };
+        // A packet with one draw + one light flows through the packet→batches
+        // adapter and the same present path; on native it draws nothing.
+        let backend = GpuBackendApi::new(&request(640, 480));
+        let packet = FramePacket::new(
+            1,
+            60,
+            FrameViewport::new(640, 480),
+            [0.1, 0.2, 0.3, 1.0],
+            None,
+            vec![FrameDrawItem::new(
+                7,
+                11,
+                13,
+                [9.0; 16],
+                [1.0; 16],
+                [0.4, 0.5, 0.6, 1.0],
+            )],
+            vec![FrameLight::new(0, [0.0, 1.0, 0.0], [1.0, 1.0, 1.0, 1.0])],
+            [0.0; 16],
+            FrameFeatureSet::new(false, false, 1, 0),
+        );
+        assert!(!backend.present_packet(&packet));
     }
 }

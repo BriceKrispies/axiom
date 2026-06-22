@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Roomed Puzzle</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        /* Reserve a fixed strip on the right for the pinned side panel, so the
+           board never reflows as the panel's text changes. */
+        align-items: center; gap: 14px; padding: 24px 372px 24px 24px;
+        font: 14px/1.5 system-ui, sans-serif; background: #15171c; color: #d7dbe2;
+      }
+      h1 { font-size: 18px; font-weight: 650; margin: 0; }
+      .layout { display: flex; justify-content: center; }
+      /* The control panels are anchored to the right edge at a fixed width and
+         scroll within themselves — fully out of the board's flow, so changing
+         text (validation, status) never moves or resizes the rest of the page. */
+      .side {
+        position: fixed; top: 72px; right: 24px; width: 332px;
+        max-height: calc(100vh - 96px); overflow-y: auto;
+        display: flex; flex-direction: column; gap: 14px;
+      }
+      .panel {
+        background: #1c1f26; border: 1px solid #2a2e36; border-radius: 10px;
+        padding: 16px 18px; width: 100%; box-sizing: border-box;
+      }
+      #axiom-puzzle-canvas {
+        width: 480px; height: 480px; max-width: 90vw; image-rendering: pixelated;
+        border: 1px solid #2a2e36; border-radius: 8px; background: #15171c; cursor: crosshair;
+      }
+      button {
+        background: #2f6df0; color: #fff; border: 0; border-radius: 7px;
+        padding: 8px 14px; font: 600 13px system-ui; cursor: pointer;
+      }
+      button:hover { background: #3b79ff; }
+      button:disabled { background: #2a2e36; color: #6b7280; cursor: not-allowed; }
+      button.ghost { background: #2a2e36; }
+      button.ghost:hover { background: #353b46; }
+      .palette { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0 14px; }
+      .palette button { background: #2a2e36; }
+      .palette button.sel { background: #2f6df0; outline: 2px solid #9fd1ff; }
+      label { display: block; color: #aab2c0; margin: 10px 0 4px; }
+      input[type="text"] {
+        width: 100%; box-sizing: border-box; background: #0f1116; color: #e6e9ef;
+        border: 1px solid #353a45; border-radius: 6px; padding: 7px 9px; font: inherit;
+      }
+      textarea {
+        width: 100%; box-sizing: border-box; height: 150px; resize: vertical;
+        background: #0f1116; color: #cfe3ff; border: 1px solid #353a45; border-radius: 6px;
+        padding: 8px; font: 12px/1.4 ui-monospace, monospace;
+      }
+      #validation { white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; color: #e0b552; min-height: 2.4em; }
+      #validation.valid { color: #7fd17f; }
+      .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+      .hint { color: #9aa3b2; font-size: 12px; }
+      #status { font: 13px ui-monospace, monospace; color: #9fd1ff; min-height: 1.4em; }
+      .legend { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-size: 12px; color: #aab2c0; margin-top: 10px; }
+      .sw { width: 14px; height: 14px; border-radius: 3px; align-self: center; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — Roomed Puzzle</h1>
+    <div id="boot" class="hint">booting…</div>
+
+    <div class="layout">
+      <div class="board"><canvas id="axiom-puzzle-canvas" width="480" height="480"></canvas></div>
+    </div>
+
+    <div class="side">
+      <!-- EDIT panel -->
+      <section id="panel-edit" class="panel">
+        <strong>Edit mode</strong>
+        <div class="hint">Click a cell to paint the selected tile.</div>
+        <div class="palette" id="palette">
+          <button data-kind="floor">Floor (erase)</button>
+          <button data-kind="wall">Wall</button>
+          <button data-kind="entrance">Entrance</button>
+          <button data-kind="exit">Exit</button>
+          <button data-kind="button">Button</button>
+          <button data-kind="door">Door</button>
+        </div>
+        <label for="group">Button/Door group</label>
+        <input type="text" id="group" value="main" />
+        <label for="title">Title</label>
+        <input type="text" id="title" value="Button Door" />
+
+        <label>Validation</label>
+        <div id="validation">…</div>
+        <div class="row">
+          <button id="btn-playtest">▶ Playtest</button>
+        </div>
+
+        <label for="toml">Level TOML</label>
+        <textarea id="toml" spellcheck="false"></textarea>
+        <div class="row">
+          <button class="ghost" id="btn-export">Export ⤓</button>
+          <button class="ghost" id="btn-import">Import ⤒</button>
+        </div>
+        <div id="io-msg" class="hint"></div>
+      </section>
+
+      <!-- PLAYTEST panel -->
+      <section id="panel-play" class="panel" style="display:none">
+        <strong>Playtest mode</strong>
+        <div id="status">Reach the exit.</div>
+        <div class="hint">
+          <strong>Arrows / WASD</strong> move ·
+          <strong>q</strong> leave a ghost &amp; reset ·
+          <strong>r</strong> restart fresh
+        </div>
+        <div class="legend">
+          <span class="sw" style="background:#3f7fe0"></span><span>Live player (solid)</span>
+          <span class="sw" style="background:#54c6d6;opacity:.55"></span><span>Ghost (translucent)</span>
+          <span class="sw" style="background:#a23b3b"></span><span>Button</span>
+          <span class="sw" style="background:#7a5a36"></span><span>Door (raised = closed)</span>
+          <span class="sw" style="background:#b8902f"></span><span>Exit</span>
+        </div>
+        <div class="row">
+          <button class="ghost" id="btn-edit">◀ Back to edit</button>
+        </div>
+      </section>
+    </div>
+
+    <script type="module">
+      const v = Date.now();
+      const wasm = await import(`./pkg/axiom_roomed_puzzle.js?v=${v}`);
+      const wasmUrl = new URL(`./pkg/axiom_roomed_puzzle_bg.wasm?v=${v}`, import.meta.url);
+      const boot = document.getElementById("boot");
+      try {
+        await wasm.default({ module_or_path: wasmUrl });
+      } catch (e) {
+        boot.textContent = "Startup failed: " + e;
+        boot.style.color = "#e07a7a";
+        throw e;
+      }
+      wasm.start();
+      boot.style.display = "none";
+
+      // --- Palette selection ---
+      const palette = document.getElementById("palette");
+      const buttons = [...palette.querySelectorAll("button")];
+      const selectKind = (kind) => {
+        wasm.select_tile(kind);
+        buttons.forEach((b) => b.classList.toggle("sel", b.dataset.kind === kind));
+      };
+      buttons.forEach((b) => b.addEventListener("click", () => selectKind(b.dataset.kind)));
+      selectKind("wall"); // matches the editor's default selection
+
+      // --- Group / title ---
+      document.getElementById("group").addEventListener("input", (e) => wasm.set_group(e.target.value));
+      document.getElementById("title").addEventListener("input", (e) => wasm.set_title(e.target.value));
+
+      // --- Export / import TOML ---
+      const toml = document.getElementById("toml");
+      const ioMsg = document.getElementById("io-msg");
+      document.getElementById("btn-export").addEventListener("click", () => {
+        toml.value = wasm.export_toml();
+        ioMsg.textContent = "Exported current level.";
+      });
+      document.getElementById("btn-import").addEventListener("click", () => {
+        const err = wasm.import_toml(toml.value);
+        ioMsg.textContent = err ? "Import error: " + err : "Imported level.";
+        ioMsg.style.color = err ? "#e07a7a" : "#7fd17f";
+        document.getElementById("title").value = ""; // refreshed below from the level
+      });
+
+      // --- Validation panel colour follows validity ---
+      const validation = document.getElementById("validation");
+      const syncValidationColour = () => validation.classList.toggle("valid", wasm.can_playtest());
+
+      // --- Mode switching ---
+      const panelEdit = document.getElementById("panel-edit");
+      const panelPlay = document.getElementById("panel-play");
+      const showMode = (mode) => {
+        panelEdit.style.display = mode === "edit" ? "" : "none";
+        panelPlay.style.display = mode === "playtest" ? "" : "none";
+      };
+      document.getElementById("btn-playtest").addEventListener("click", () => {
+        if (wasm.enter_playtest()) showMode("playtest");
+      });
+      document.getElementById("btn-edit").addEventListener("click", () => {
+        wasm.enter_edit();
+        showMode("edit");
+      });
+
+      // --- Live status line + validation colour (cheap poll) ---
+      const status = document.getElementById("status");
+      setInterval(() => {
+        if (wasm.current_mode() === "playtest") status.textContent = wasm.status_line();
+        else syncValidationColour();
+      }, 120);
+      syncValidationColour();
+    </script>
+  </body>
+</html>

@@ -157,7 +157,10 @@ impl FrameTimings {
     }
 
     pub fn over(&self, threshold_ns: u128) -> u64 {
-        self.durations_ns.iter().filter(|&&d| d > threshold_ns).count() as u64
+        self.durations_ns
+            .iter()
+            .filter(|&&d| d > threshold_ns)
+            .count() as u64
     }
 }
 
@@ -184,13 +187,19 @@ impl ChurnCounters {
     /// `(label, value)` pairs in a stable order, for serialization.
     pub fn entries(&self) -> Vec<(&'static str, u64)> {
         vec![
-            ("transform_scratch_maps_allocated", self.transform_scratch_maps_allocated),
+            (
+                "transform_scratch_maps_allocated",
+                self.transform_scratch_maps_allocated,
+            ),
             ("transform_parent_lookups", self.transform_parent_lookups),
             ("world_transforms_written", self.world_transforms_written),
             ("mesh_vec_clones", self.mesh_vec_clones),
             ("render_inputs_created", self.render_inputs_created),
             ("render_objects_pushed", self.render_objects_pushed),
-            ("render_command_lists_built", self.render_command_lists_built),
+            (
+                "render_command_lists_built",
+                self.render_command_lists_built,
+            ),
         ]
     }
 }
@@ -231,11 +240,7 @@ impl ProfileReport {
     }
 
     pub fn to_json(&self) -> String {
-        let phases_json: Vec<String> = self
-            .phases
-            .iter()
-            .map(|p| self.phase_to_json(p))
-            .collect();
+        let phases_json: Vec<String> = self.phases.iter().map(|p| self.phase_to_json(p)).collect();
         let churn_json = json_object(
             self.churn
                 .entries()
@@ -328,14 +333,21 @@ impl ProfileReport {
             self.focus_phase,
             match self.focus_phase.as_str() {
                 "full" => "full per-frame loop.",
-                _ => "FOCUSED phase run: only this phase's workload was measured, not a full frame.",
+                _ =>
+                    "FOCUSED phase run: only this phase's workload was measured, not a full frame.",
             }
         ));
 
         out.push_str("## Run\n\n");
         out.push_str(&format!("- object_count: {}\n", self.object_count));
-        out.push_str(&format!("- measured_frame_count: {}\n", self.measured_frame_count));
-        out.push_str(&format!("- warmup_frame_count: {}\n", self.warmup_frame_count));
+        out.push_str(&format!(
+            "- measured_frame_count: {}\n",
+            self.measured_frame_count
+        ));
+        out.push_str(&format!(
+            "- warmup_frame_count: {}\n",
+            self.warmup_frame_count
+        ));
         out.push_str(&format!("- build_profile: {}\n", self.build_profile));
         out.push_str(&format!(
             "- git_commit_hash: {}\n",
@@ -344,7 +356,10 @@ impl ProfileReport {
         out.push('\n');
 
         out.push_str("## Measured iteration timing\n\n");
-        out.push_str(&format!("- total_wall_time_ns: {}\n", self.total_wall_time_ns));
+        out.push_str(&format!(
+            "- total_wall_time_ns: {}\n",
+            self.total_wall_time_ns
+        ));
         out.push_str(&format!(
             "- average_measured_iteration_time_ns: {}\n",
             self.frames.average_ns()
@@ -541,7 +556,12 @@ mod tests {
     fn subphase_percentages_are_correct_and_sum_to_one_hundred() {
         let phase = composite_phase(
             "render_command_build",
-            &[("create", 100, 1), ("clone", 300, 1), ("push", 500, 1), ("finalize", 100, 1)],
+            &[
+                ("create", 100, 1),
+                ("clone", 300, 1),
+                ("push", 500, 1),
+                ("finalize", 100, 1),
+            ],
         );
         assert_eq!(phase.total_ns, 1000);
         let pcts: Vec<f64> = phase
@@ -552,7 +572,10 @@ mod tests {
         assert_eq!(pcts[0], 10.0);
         assert_eq!(pcts[2], 50.0);
         let sum: f64 = pcts.iter().sum();
-        assert!((sum - 100.0).abs() < 1e-9, "subphase percents summed to {sum}");
+        assert!(
+            (sum - 100.0).abs() < 1e-9,
+            "subphase percents summed to {sum}"
+        );
     }
 
     #[test]
@@ -617,7 +640,9 @@ mod tests {
     #[test]
     fn csv_has_phase_and_subphase_and_churn_rows() {
         let csv = sample_report("full").to_csv();
-        assert!(csv.starts_with("section,name,kind,parent,total_ns,average_ns,sample_count,percent\n"));
+        assert!(
+            csv.starts_with("section,name,kind,parent,total_ns,average_ns,sample_count,percent\n")
+        );
         assert!(csv.contains("phase,render_command_build,real_engine,,"));
         assert!(csv.contains("subphase,create,,render_command_build,"));
         assert!(csv.contains("churn,mesh_vec_clones,,,4,,,"));
@@ -640,7 +665,12 @@ mod tests {
     fn sample_report(focus: &str) -> ProfileReport {
         let render = composite_phase(
             "render_command_build",
-            &[("create", 100, 1), ("clone", 300, 1), ("push", 500, 1), ("finalize", 100, 1)],
+            &[
+                ("create", 100, 1),
+                ("clone", 300, 1),
+                ("push", 500, 1),
+                ("finalize", 100, 1),
+            ],
         );
         let mut bounds = Phase::new("bounds_update_placeholder", kind::PLACEHOLDER);
         bounds.record(200);

@@ -61,13 +61,19 @@ mod tests {
 
     #[test]
     fn bounded_payload_is_accepted() {
-        assert_eq!(OpaquePayload::new(&[1, 2, 3]).unwrap().as_bytes(), &[1, 2, 3]);
+        assert_eq!(
+            OpaquePayload::new(&[1, 2, 3]).unwrap().as_bytes(),
+            &[1, 2, 3]
+        );
     }
 
     #[test]
     fn max_length_payload_is_accepted() {
         let exact = vec![0u8; MAX_PAYLOAD_LEN];
-        assert_eq!(OpaquePayload::new(&exact).unwrap().as_bytes().len(), MAX_PAYLOAD_LEN);
+        assert_eq!(
+            OpaquePayload::new(&exact).unwrap().as_bytes().len(),
+            MAX_PAYLOAD_LEN
+        );
     }
 
     #[test]
