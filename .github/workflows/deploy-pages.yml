@@ -72,6 +72,8 @@ jobs:
           cargo build -p axiom-retro-fps-browser --target wasm32-unknown-unknown --release
           cargo build -p axiom-stress-cubes-browser --target wasm32-unknown-unknown --release
           cargo build -p axiom-growth --target wasm32-unknown-unknown --release
+          cargo build -p axiom-roomed-puzzle --target wasm32-unknown-unknown --release
+          cargo build -p axiom-quintet --target wasm32-unknown-unknown --release
           wasm-bindgen --target web \
             --out-dir apps/axiom-demo-rotating-cube-browser/web/pkg \
             target/wasm32-unknown-unknown/release/axiom_demo_rotating_cube_browser.wasm
@@ -87,6 +89,12 @@ jobs:
           wasm-bindgen --target web \
             --out-dir apps/axiom-growth/web/pkg \
             target/wasm32-unknown-unknown/release/axiom_growth.wasm
+          wasm-bindgen --target web \
+            --out-dir apps/axiom-roomed-puzzle/web/pkg \
+            target/wasm32-unknown-unknown/release/axiom_roomed_puzzle.wasm
+          wasm-bindgen --target web \
+            --out-dir apps/axiom-quintet/web/pkg \
+            target/wasm32-unknown-unknown/release/axiom_quintet.wasm
 
       # Same assembler the Makefile uses, so dist/ is identical locally and here.
       - name: Assemble dist/
