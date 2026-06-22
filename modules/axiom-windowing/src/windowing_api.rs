@@ -242,10 +242,22 @@ impl WindowingApi {
             let be = backend.clone();
             let ff = frame_fn.clone();
             *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+                let scrubbing = scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+                let paused = scrubber.as_ref().map(|s| !s.is_active()).unwrap_or(false);
+                // Focus lost while live: PAUSE the whole game — don't advance the
+                // tick, don't step the app, don't present. The last frame holds on
+                // screen until focus returns. (Scrubbing keeps presenting recorded
+                // frames; it ignores the pause.)
+                if paused && !scrubbing {
+                    let next = f.borrow();
+                    next.as_ref().into_iter().for_each(|cb| {
+                        let _ = request_animation_frame(cb);
+                    });
+                    return;
+                }
                 let tick = win.borrow_mut().step();
                 // Live: step the app and record this frame. Scrubbing: freeze the
                 // app (don't call its closure) and re-present the recorded frame.
-                let scrubbing = scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
                 let present = if scrubbing {
                     scrubber
                         .as_ref()
@@ -435,10 +447,21 @@ impl WindowingApi {
             let be = backend.clone();
             let ff = frame_fn.clone();
             *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+                let scrubbing = scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+                let paused = scrubber.as_ref().map(|s| !s.is_active()).unwrap_or(false);
+                // Focus lost while live: PAUSE the game — don't advance the tick,
+                // don't step the app (so no streamed geometry, no sim), don't
+                // present. The last frame holds until focus returns.
+                if paused && !scrubbing {
+                    let next = f.borrow();
+                    next.as_ref().into_iter().for_each(|cb| {
+                        let _ = request_animation_frame(cb);
+                    });
+                    return;
+                }
                 let tick = win.borrow_mut().step();
                 // Scrubbing freezes the app (its closure, and so its streamed
                 // geometry, is not called) and re-presents the recorded frame.
-                let scrubbing = scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
                 let present = if scrubbing {
                     scrubber
                         .as_ref()

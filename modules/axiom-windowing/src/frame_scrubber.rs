@@ -144,6 +144,13 @@ impl FrameScrubber {
         self.recorder.borrow().is_live()
     }
 
+    /// Whether the game is focused/running. Cleared on focus loss (Escape /
+    /// window blur / tab hidden) and set again on return; while false the run
+    /// loop freezes the game entirely (no tick, no app step, no present).
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.get()
+    }
+
     /// Record one live frame's present arguments (encoded as the opaque render
     /// artifact). Recording errors (e.g. an over-budget frame) are non-fatal.
     pub(crate) fn record(
