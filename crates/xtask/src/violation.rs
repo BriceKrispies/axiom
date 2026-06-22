@@ -65,7 +65,8 @@ pub enum ViolationKind {
     ModuleDependsOnModuleNotAllowed,
     /// A `module.toml` names a layer in `allowed_layers` that does not exist.
     ModuleAllowedLayerUnknown,
-    /// A module crate's `lib.rs` does not publicly export exactly one item.
+    /// A module crate's `lib.rs` does not publicly export exactly one facade
+    /// (an `ids` identity-vocabulary re-export alongside it is allowed).
     ModuleFacadeMustExportOne,
     /// Two modules declare the same `name`.
     DuplicateModuleName,

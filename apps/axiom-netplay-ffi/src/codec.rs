@@ -101,7 +101,8 @@ pub unsafe extern "C" fn axiom_encode_welcome(
     cap: usize,
 ) -> isize {
     copy_out(
-        NetProtocolApi::encode_welcome(protocol_version, client_id, server_tick, fixed_step_ns).ok(),
+        NetProtocolApi::encode_welcome(protocol_version, client_id, server_tick, fixed_step_ns)
+            .ok(),
         out,
         cap,
     )
@@ -141,7 +142,10 @@ pub unsafe extern "C" fn axiom_encode_rejected(
     cap: usize,
 ) -> isize {
     copy_out(
-        Some(NetProtocolApi::encode_rejected_intent(client_sequence, reason_code)),
+        Some(NetProtocolApi::encode_rejected_intent(
+            client_sequence,
+            reason_code,
+        )),
         out,
         cap,
     )
@@ -171,13 +175,7 @@ mod tests {
 
         let (mut seq, mut dx, mut dy) = (0u64, 0.0f32, 0.0f32);
         let ok = unsafe {
-            axiom_decode_client_intent(
-                frame.as_ptr(),
-                frame.len(),
-                &mut seq,
-                &mut dx,
-                &mut dy,
-            )
+            axiom_decode_client_intent(frame.as_ptr(), frame.len(), &mut seq, &mut dx, &mut dy)
         };
         assert_eq!(ok, 1);
         assert_eq!(seq, 9);
@@ -187,7 +185,10 @@ mod tests {
     #[test]
     fn join_version_and_snapshot_and_rejected() {
         let join = NetProtocolApi::encode_join_room(1, b"lobby", b"").unwrap();
-        assert_eq!(unsafe { axiom_decode_join_version(join.as_ptr(), join.len()) }, 1);
+        assert_eq!(
+            unsafe { axiom_decode_join_version(join.as_ptr(), join.len()) },
+            1
+        );
 
         let mut buf = [0u8; 256];
         let n = unsafe {

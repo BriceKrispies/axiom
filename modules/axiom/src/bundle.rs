@@ -13,6 +13,7 @@ use crate::camera::Camera;
 use crate::controller::Controller;
 use crate::directional_light::DirectionalLight;
 use crate::player::Player;
+use crate::point_light::PointLight;
 use crate::renderable::Renderable;
 use crate::spin::Spin;
 
@@ -29,6 +30,7 @@ pub struct NodeComponent {
     renderable: Option<Renderable>,
     camera: Option<Camera>,
     light: Option<DirectionalLight>,
+    point_light: Option<PointLight>,
     spin: Option<Spin>,
     player: Option<Player>,
     controller: Option<Controller>,
@@ -43,6 +45,7 @@ impl NodeComponent {
     pub(crate) const KIND_SPIN: u8 = 3;
     pub(crate) const KIND_PLAYER: u8 = 4;
     pub(crate) const KIND_CONTROLLER: u8 = 5;
+    pub(crate) const KIND_POINT_LIGHT: u8 = 6;
 
     /// The all-`None` base used by every constructor; each then fills in its one
     /// payload field and sets its `kind`.
@@ -51,6 +54,7 @@ impl NodeComponent {
         renderable: None,
         camera: None,
         light: None,
+        point_light: None,
         spin: None,
         player: None,
         controller: None,
@@ -84,6 +88,15 @@ impl NodeComponent {
         NodeComponent {
             kind: Self::KIND_LIGHT,
             light: Some(light),
+            ..Self::EMPTY
+        }
+    }
+
+    /// A point-light component.
+    pub(crate) fn point_light(point_light: PointLight) -> Self {
+        NodeComponent {
+            kind: Self::KIND_POINT_LIGHT,
+            point_light: Some(point_light),
             ..Self::EMPTY
         }
     }
@@ -128,6 +141,11 @@ impl NodeComponent {
     /// The directional-light payload, present iff `kind == KIND_LIGHT`.
     pub(crate) fn as_light(&self) -> Option<&DirectionalLight> {
         self.light.as_ref()
+    }
+
+    /// The point-light payload, present iff `kind == KIND_POINT_LIGHT`.
+    pub(crate) fn as_point_light(&self) -> Option<&PointLight> {
+        self.point_light.as_ref()
     }
 
     /// The spin payload, present iff `kind == KIND_SPIN`.
@@ -195,6 +213,12 @@ impl Bundle for Camera {
 impl Bundle for DirectionalLight {
     fn apply(self, command: &mut SpawnCommand) {
         command.components.push(NodeComponent::light(self));
+    }
+}
+
+impl Bundle for PointLight {
+    fn apply(self, command: &mut SpawnCommand) {
+        command.components.push(NodeComponent::point_light(self));
     }
 }
 

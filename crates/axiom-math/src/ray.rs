@@ -39,9 +39,7 @@ impl Ray {
             .and_then(|()| {
                 direction
                     .normalize()
-                    .map_err(|_| {
-                        MathError::invalid_ray_direction("Ray direction must be non-zero")
-                    })
+                    .map_err(|_| MathError::invalid_ray_direction("Ray direction must be non-zero"))
                     .map(|dir| Ray {
                         origin,
                         direction: dir,

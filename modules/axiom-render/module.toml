@@ -10,6 +10,10 @@ allowed_layers = [
     "runtime",
     "math",
     "frame",
+    # build_frame_packet returns host::FramePacket — the backend-neutral frame
+    # artifact both the GPU backend (now) and the Canvas 2D backend (later)
+    # consume. host is the lowest layer both backend modules can name.
+    "host",
 ]
 
 allowed_modules = []
@@ -19,4 +23,5 @@ introduced_capabilities = [
     "backend-neutral-render-commands",
     "basic-lit-pipeline-marker",
     "deterministic-command-list",
+    "backend-neutral-frame-packet",
 ]

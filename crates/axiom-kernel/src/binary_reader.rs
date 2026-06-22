@@ -67,9 +67,8 @@ impl<'a> BinaryReader<'a> {
 
     /// Read a little-endian `u64`.
     pub fn read_u64(&mut self) -> KernelResult<u64> {
-        self.take(8).map(|b| {
-            u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
-        })
+        self.take(8)
+            .map(|b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
     }
 
     /// Read a little-endian `i32`.

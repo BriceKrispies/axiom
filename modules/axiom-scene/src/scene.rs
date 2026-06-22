@@ -9,10 +9,10 @@
 //! world-system), so on-demand updates and per-frame advances run identical
 //! logic.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axiom_frame::FrameContext;
-use axiom_kernel::EntityId;
+use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, KernelResult, Reflect};
 use axiom_math::{Transform, Vec3};
 
 use crate::camera::Camera;
@@ -371,6 +371,77 @@ impl Scene {
     pub(crate) fn snapshot(&self) -> SceneSnapshot {
         SceneSnapshot::from_scene(self)
     }
+}
+
+/// Scene state (de)serialization for fork / replay. Kept in its own `impl` block
+/// so neither block exceeds the engine's impl-block size budget.
+impl Scene {
+    /// Serialize the scene's full restorable state: the ECS world snapshot
+    /// (entity identity + every component column) followed by the two persistent
+    /// non-column maps — `players` and `controllers` (the latter carries each
+    /// first-person camera's accumulated yaw/pitch). The transient per-frame
+    /// `pending_*` command queues are deliberately omitted; they are re-staged
+    /// from frame commands every tick and carry no state across frames.
+    pub(crate) fn write_state(&self, writer: &mut BinaryWriter) {
+        self.world.write_snapshot(writer);
+        let storage = self.world.storage();
+        writer.write_u32(storage.players.len() as u32);
+        storage.players.iter().for_each(|(entity, &index)| {
+            entity.reflect_write(writer);
+            index.reflect_write(writer);
+        });
+        writer.write_u32(storage.controllers.len() as u32);
+        storage.controllers.iter().for_each(|(entity, state)| {
+            entity.reflect_write(writer);
+            state.reflect_write(writer);
+        });
+    }
+
+    /// Restore a scene from bytes produced by [`Self::write_state`]: the ECS world
+    /// (identity + columns) then the `players` and `controllers` maps. Systems are
+    /// untouched (they are code, not state). A truncated/incompatible buffer
+    /// returns a deterministic error rather than panicking.
+    pub(crate) fn read_state(&mut self, reader: &mut BinaryReader<'_>) -> KernelResult<()> {
+        self.world
+            .read_snapshot(reader)
+            .and_then(|()| read_players(reader))
+            .and_then(|players| read_controllers(reader).map(|controllers| (players, controllers)))
+            .map(|(players, controllers)| {
+                let storage = self.world.storage_mut();
+                storage.players = players;
+                storage.controllers = controllers;
+            })
+    }
+}
+
+/// Read the `players` map: a count then that many `(entity, index)` pairs.
+fn read_players(reader: &mut BinaryReader<'_>) -> KernelResult<BTreeMap<EntityId, u32>> {
+    reader.read_u32().and_then(|count| {
+        (0..count).try_fold(BTreeMap::new(), |mut players, _| {
+            EntityId::reflect_read(reader).and_then(|entity| {
+                u32::reflect_read(reader).map(|index| {
+                    players.insert(entity, index);
+                    players
+                })
+            })
+        })
+    })
+}
+
+/// Read the `controllers` map: a count then that many `(entity, state)` pairs.
+fn read_controllers(
+    reader: &mut BinaryReader<'_>,
+) -> KernelResult<BTreeMap<EntityId, ControllerState>> {
+    reader.read_u32().and_then(|count| {
+        (0..count).try_fold(BTreeMap::new(), |mut controllers, _| {
+            EntityId::reflect_read(reader).and_then(|entity| {
+                ControllerState::reflect_read(reader).map(|state| {
+                    controllers.insert(entity, state);
+                    controllers
+                })
+            })
+        })
+    })
 }
 
 impl Default for Scene {
@@ -806,5 +877,98 @@ mod frame_tests {
         let snap = s.advance(0, &ctx);
         let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
         assert_eq!(child.world().translation.x, 0.0);
+    }
+
+    #[test]
+    fn write_state_read_state_round_trips_full_scene_and_resumes_deterministically() {
+        use crate::controller_command::encode_controller;
+        use crate::material_ref::MaterialRef;
+        use crate::mesh_ref::MeshRef;
+        use crate::player_command::encode_move;
+        use axiom_kernel::{Meters, Radians, Ratio};
+        use axiom_math::MathApi;
+
+        let math = MathApi::new();
+        let mut s = Scene::new();
+        // One of each persistent column plus both non-column maps: a camera +
+        // first-person controller node, a light, a spinning renderable, a player.
+        let cam = s.create_node(Transform::from_translation(Vec3::new(0.0, 1.0, 5.0)));
+        s.add_camera(
+            cam,
+            Camera::perspective(
+                &math,
+                Radians::new(1.2).unwrap(),
+                Ratio::new(1.5).unwrap(),
+                Meters::new(0.1).unwrap(),
+                Meters::new(100.0).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        s.add_controller(cam, 0).unwrap();
+        let light = s.create_node(Transform::IDENTITY);
+        s.add_light(
+            light,
+            Light::directional(&math, Vec3::ONE, Ratio::new(1.0).unwrap()).unwrap(),
+        )
+        .unwrap();
+        let cube = s.create_node(Transform::IDENTITY);
+        s.add_renderable(
+            cube,
+            Renderable::new(MeshRef::from_raw(1), MaterialRef::from_raw(1)).unwrap(),
+        )
+        .unwrap();
+        s.add_spin(cube, Spin::new(Vec3::UNIT_Y, 120)).unwrap();
+        let player = s.create_node(Transform::IDENTITY);
+        s.add_player(player, 1).unwrap();
+
+        // Drive a controller look + a player move so the controller accumulates
+        // yaw/pitch and the player translates — genuine per-frame state.
+        let look = encode_controller(0, 0, Vec3::new(0.0, 0.0, -1.0), 0.5, 0.3);
+        let mv = encode_move(1, 1, Vec3::new(2.0, 0.0, 0.0));
+        let frame = engine_frame_with(1_000, true, vec![look, mv]);
+        s.advance(7, &FrameContext::new(&frame));
+
+        // Serialize, then restore into a fresh scene with the same systems.
+        let mut writer = BinaryWriter::new();
+        s.write_state(&mut writer);
+        let bytes = writer.into_bytes();
+        let mut restored = Scene::new();
+        restored
+            .read_state(&mut BinaryReader::new(&bytes))
+            .unwrap();
+
+        // Identity, columns, and both maps survive the round-trip.
+        assert_eq!(restored.node_count(), s.node_count());
+        assert_eq!(
+            restored.world.storage().controllers,
+            s.world.storage().controllers
+        );
+        assert_eq!(restored.world.storage().players, s.world.storage().players);
+        // The accumulated controller orientation (yaw/pitch) was preserved.
+        let ctrl = restored.world.storage().controllers.values().next().unwrap();
+        assert_eq!(ctrl.yaw, 0.5);
+        assert_eq!(ctrl.pitch, 0.3);
+
+        // Resuming the restored scene equals resuming the original: forking is
+        // deterministic.
+        let next = engine_frame(1_000, true);
+        s.advance(8, &FrameContext::new(&next));
+        restored.advance(8, &FrameContext::new(&next));
+        assert_eq!(
+            restored.world.storage().controllers,
+            s.world.storage().controllers
+        );
+        assert_eq!(
+            restored.local(player).unwrap().translation.x,
+            s.local(player).unwrap().translation.x
+        );
+        assert_eq!(restored.local(cube).unwrap(), s.local(cube).unwrap());
+    }
+
+    #[test]
+    fn read_state_rejects_truncated_bytes() {
+        let mut s = Scene::new();
+        assert!(s.read_state(&mut BinaryReader::new(&[1, 2, 3])).is_err());
     }
 }

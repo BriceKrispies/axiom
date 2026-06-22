@@ -28,9 +28,7 @@ impl HostSurfaceHandle {
     pub(crate) fn new(id: HandleId) -> HostResult<Self> {
         id.is_valid()
             .then_some(HostSurfaceHandle { id })
-            .ok_or_else(|| {
-                HostError::invalid_surface_handle("surface handle id must be non-null")
-            })
+            .ok_or_else(|| HostError::invalid_surface_handle("surface handle id must be non-null"))
     }
 
     /// The stable kernel identity of this surface handle.

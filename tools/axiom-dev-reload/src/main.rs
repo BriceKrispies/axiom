@@ -230,10 +230,7 @@ fn serve_events(request: tiny_http::Request, level_file: &Path, clients: &Client
     // connect, before any file change.
     let _ = tx.send(read_level(level_file));
 
-    clients
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .push(tx);
+    clients.lock().unwrap_or_else(|p| p.into_inner()).push(tx);
 
     let mut writer = request.into_writer();
 
@@ -246,7 +243,11 @@ fn serve_events(request: tiny_http::Request, level_file: &Path, clients: &Client
         "Connection: keep-alive\r\n",
         "\r\n",
     );
-    if writer.write_all(head.as_bytes()).and_then(|()| writer.flush()).is_err() {
+    if writer
+        .write_all(head.as_bytes())
+        .and_then(|()| writer.flush())
+        .is_err()
+    {
         return;
     }
 
@@ -254,7 +255,11 @@ fn serve_events(request: tiny_http::Request, level_file: &Path, clients: &Client
     // Any socket error means the client hung up: stop and let the writer drop.
     for payload in rx {
         let event = encode_sse_event(&payload);
-        if writer.write_all(&event).and_then(|()| writer.flush()).is_err() {
+        if writer
+            .write_all(&event)
+            .and_then(|()| writer.flush())
+            .is_err()
+        {
             return;
         }
     }
@@ -369,9 +374,15 @@ mod tests {
     fn content_types_cover_known_extensions() {
         assert_eq!(content_type_for(Path::new("a/index.html")), "text/html");
         assert_eq!(content_type_for(Path::new("a/app.js")), "text/javascript");
-        assert_eq!(content_type_for(Path::new("a/app.wasm")), "application/wasm");
+        assert_eq!(
+            content_type_for(Path::new("a/app.wasm")),
+            "application/wasm"
+        );
         assert_eq!(content_type_for(Path::new("a/style.css")), "text/css");
-        assert_eq!(content_type_for(Path::new("a/data.json")), "application/json");
+        assert_eq!(
+            content_type_for(Path::new("a/data.json")),
+            "application/json"
+        );
         assert_eq!(
             content_type_for(Path::new("a/thing.bin")),
             "application/octet-stream"

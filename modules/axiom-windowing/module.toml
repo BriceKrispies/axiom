@@ -26,9 +26,12 @@ allowed_layers = [
 
 allowed_modules = [
     "gpu-backend",
+    "canvas2d-backend",
+    "recording",
 ]
 
 introduced_capabilities = [
     "presentation-request-assembly",
     "fixed-tick-presentation-loop",
+    "frame-scrubber-overlay",
 ]

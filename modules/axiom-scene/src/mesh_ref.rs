@@ -1,5 +1,7 @@
 //! Opaque reference to a mesh resource owned outside the scene module.
 
+use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult, Reflect, TypeSchema};
+
 /// An opaque, stable reference to a mesh resource.
 ///
 /// `axiom-scene` does not own meshes; a [`MeshRef`] is just a `u64`
@@ -25,6 +27,18 @@ impl MeshRef {
     }
 }
 
+impl Reflect for MeshRef {
+    const SCHEMA: TypeSchema = TypeSchema::new("MeshRef", &[]);
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.0.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        u64::reflect_read(reader).map(MeshRef)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,5 +59,18 @@ mod tests {
     #[test]
     fn ordering_is_numeric() {
         assert!(MeshRef::from_raw(1) < MeshRef::from_raw(2));
+    }
+
+    #[test]
+    fn reflect_round_trips_and_rejects_truncation() {
+        let m = MeshRef::from_raw(11);
+        let mut w = BinaryWriter::new();
+        m.reflect_write(&mut w);
+        assert_eq!(
+            MeshRef::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap(),
+            m
+        );
+        assert!(MeshRef::reflect_read(&mut BinaryReader::new(&[])).is_err());
+        assert_eq!(<MeshRef as Reflect>::SCHEMA.name(), "MeshRef");
     }
 }

@@ -1,0 +1,872 @@
+//! The target-agnostic scene renderer shared by every GPU arm.
+//!
+//! This owns the *one* definition of how Axiom draws a frame: the WGSL shaders,
+//! the vertex/instance buffer layouts, the material (albedo) + lighting + shadow
+//! bind groups, the mesh/material caches, the directional **shadow-map depth
+//! pre-pass**, and the per-frame instance packing + draw loop. It records into a
+//! caller-supplied colour + depth [`wgpu::TextureView`] and knows nothing about
+//! *where* those come from — a swap-chain surface (the wasm
+//! [`crate::live_gpu_binding`]) or an off-screen texture read back to a PNG (the
+//! native [`crate::offscreen`]). Both arms run byte-identical rendering; there is
+//! no second hand-synced copy of the pipeline to drift.
+//!
+//! Compiled only where a real GPU is in play — `wasm32` (the live browser arm) or
+//! the native `offscreen` feature (the screenshot tool) — so the default native
+//! build, the coverage gate, and the branchless lint never see this wgpu code.
+
+use std::collections::HashMap;
+
+use wgpu::util::DeviceExt;
+
+/// WGSL for the lit/textured/shadowed main pass: per-vertex position+normal+uv+
+/// colour, per-instance MVP + world matrix + colour, a material albedo texture
+/// (group 0), a lighting uniform (group 1), and a shadow map + light
+/// view-projection (group 2). Each directional light is attenuated by a PCF
+/// shadow lookup; point lights attenuate by distance.
+const SCENE_WGSL: &str = r#"
+@group(0) @binding(0) var albedo_tex: texture_2d<f32>;
+@group(0) @binding(1) var albedo_sampler: sampler;
+
+struct Light {
+    // xyz = to-light direction (directional) or world position (point); w = kind (0 dir, 1 point).
+    v: vec4<f32>,
+    // rgb = colour; w = intensity.
+    col: vec4<f32>,
+};
+struct Lights {
+    count: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    items: array<Light, 16>,
+};
+@group(1) @binding(0) var<uniform> lights: Lights;
+
+@group(2) @binding(0) var shadow_map: texture_depth_2d;
+@group(2) @binding(1) var shadow_samp: sampler_comparison;
+struct ShadowU { light_vp: mat4x4<f32> };
+@group(2) @binding(2) var<uniform> shadow: ShadowU;
+
+struct VsOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) normal: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) world_pos: vec3<f32>,
+};
+
+@vertex
+fn vs(
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) vertex_color: vec4<f32>,
+    @location(4) m0: vec4<f32>,
+    @location(5) m1: vec4<f32>,
+    @location(6) m2: vec4<f32>,
+    @location(7) m3: vec4<f32>,
+    @location(8) w0: vec4<f32>,
+    @location(9) w1: vec4<f32>,
+    @location(10) w2: vec4<f32>,
+    @location(11) w3: vec4<f32>,
+    @location(12) instance_color: vec4<f32>,
+) -> VsOut {
+    let mvp = mat4x4<f32>(m0, m1, m2, m3);
+    let world = mat4x4<f32>(w0, w1, w2, w3);
+    var out: VsOut;
+    out.clip = mvp * vec4<f32>(position, 1.0);
+    out.world_pos = (world * vec4<f32>(position, 1.0)).xyz;
+    out.normal = (world * vec4<f32>(normal, 0.0)).xyz;
+    out.uv = uv;
+    out.color = vertex_color * instance_color;
+    return out;
+}
+
+// Fraction of the directional light reaching `world_pos` (1 = fully lit, 0 =
+// fully shadowed), via a 3x3 PCF lookup into the shadow map. Fragments outside
+// the shadow frustum (uv out of range or beyond the far plane) are treated as
+// lit, so geometry past the shadow box (e.g. distant terrain) is not darkened.
+//
+// The PCF loop runs unconditionally (uniform control flow) and the frustum test
+// is applied with `select` afterwards — `textureSampleCompare` uses implicit
+// derivatives and so must not sit behind a possibly-non-uniform branch (an early
+// `return` here is rejected by the browser's WGSL validator, though native wgpu
+// accepts it).
+fn shadow_factor(world_pos: vec3<f32>) -> f32 {
+    let clip = shadow.light_vp * vec4<f32>(world_pos, 1.0);
+    let ndc = clip.xyz / clip.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+    let dim = vec2<f32>(textureDimensions(shadow_map));
+    let texel = 1.0 / dim;
+    let bias = 0.0015;
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let off = vec2<f32>(f32(dx), f32(dy)) * texel;
+            sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, ndc.z - bias);
+        }
+    }
+    let outside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0;
+    return select(sum / 9.0, 1.0, outside);
+}
+
+@fragment
+fn fs(in: VsOut) -> @location(0) vec4<f32> {
+    let albedo = textureSample(albedo_tex, albedo_sampler, in.uv);
+    let base = albedo * in.color;
+    let N = normalize(in.normal);
+    let shade = shadow_factor(in.world_pos);
+    // Ambient term so unlit faces are not pure black.
+    var lit = base.rgb * 0.12;
+    for (var i: u32 = 0u; i < lights.count; i = i + 1u) {
+        let lt = lights.items[i];
+        var L = normalize(lt.v.xyz);
+        var atten = 1.0;
+        if (lt.v.w > 0.5) {
+            // Point light: direction + distance attenuation from world position.
+            let d = lt.v.xyz - in.world_pos;
+            let dist = length(d);
+            L = d / max(dist, 0.0001);
+            atten = 1.0 / (1.0 + 0.09 * dist + 0.032 * dist * dist);
+        } else {
+            // Directional light: cast shadows from the shadow map.
+            atten = shade;
+        }
+        let diffuse = max(dot(N, L), 0.0) * atten;
+        lit = lit + base.rgb * lt.col.rgb * lt.col.w * diffuse;
+    }
+    return vec4<f32>(lit, base.a);
+}
+"#;
+
+/// WGSL for the shadow depth pre-pass: project each instance through the light
+/// view-projection and the per-instance world matrix; depth-only, no fragment
+/// output. Reads only position (per-vertex) and the world columns (per-instance).
+const SHADOW_WGSL: &str = r#"
+struct ShadowU { light_vp: mat4x4<f32> };
+@group(0) @binding(0) var<uniform> shadow: ShadowU;
+
+@vertex
+fn vs(
+    @location(0) position: vec3<f32>,
+    @location(1) w0: vec4<f32>,
+    @location(2) w1: vec4<f32>,
+    @location(3) w2: vec4<f32>,
+    @location(4) w3: vec4<f32>,
+) -> @builtin(position) vec4<f32> {
+    let world = mat4x4<f32>(w0, w1, w2, w3);
+    return shadow.light_vp * world * vec4<f32>(position, 1.0);
+}
+"#;
+
+/// Depth-buffer format used by both the camera depth and the shadow map.
+pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Square resolution of the directional shadow map.
+const SHADOW_SIZE: u32 = 2048;
+/// Maximum lights uploaded per frame (must match the WGSL `array<Light, 16>`).
+const MAX_LIGHTS: usize = 16;
+/// Lighting uniform size in bytes: a 16-byte header (count + padding) plus
+/// `MAX_LIGHTS` × two `vec4`s (32 bytes each) — std140-compatible.
+const LIGHTS_UBO_BYTES: u64 = 16 + (MAX_LIGHTS as u64) * 32;
+/// Floats per instance: mvp(16) + world(16) + colour(4) = 36.
+const INSTANCE_FLOATS: usize = 36;
+/// Bytes per instance.
+const INSTANCE_STRIDE: u64 = (INSTANCE_FLOATS as u64) * 4;
+/// Bytes per vertex: position(3) + normal(3) + uv(2) + colour(4) = 12 f32.
+const VERTEX_STRIDE: u64 = 12 * 4;
+/// Byte offset of the world matrix within an instance (after the 16-float mvp).
+const WORLD_OFFSET: u64 = 16 * 4;
+
+/// One uploaded mesh's GPU buffers: its interleaved vertex stream and triangle
+/// index buffer, plus the index count to draw.
+#[derive(Debug)]
+struct MeshBuffers {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
+/// The shared, surface-free renderer: pipelines + caches + per-frame buffers +
+/// shadow map. Its [`Self::record`] draws into any colour/depth view; the
+/// surface-vs-offscreen plumbing lives in the callers.
+#[derive(Debug)]
+pub(crate) struct SceneRenderer {
+    pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
+    meshes: HashMap<u64, MeshBuffers>,
+    /// One albedo bind group (texture + sampler) per material id.
+    materials: HashMap<u64, wgpu::BindGroup>,
+    lights_buffer: wgpu::Buffer,
+    lights_bind_group: wgpu::BindGroup,
+    /// The directional light view-projection uniform (shared by the shadow pass
+    /// and the main pass's PCF lookup), rewritten each frame.
+    light_vp_buffer: wgpu::Buffer,
+    /// Group 0 of the shadow pass: just the light view-projection.
+    shadow_pass_bind_group: wgpu::BindGroup,
+    /// Group 2 of the main pass: shadow map + comparison sampler + light VP.
+    shadow_sample_bind_group: wgpu::BindGroup,
+    shadow_view: wgpu::TextureView,
+    instance_buffer: wgpu::Buffer,
+    max_instances: u32,
+}
+
+impl SceneRenderer {
+    /// Build both pipelines (for the given colour target `format`), the shadow
+    /// map, upload every distinct mesh and material, and allocate the per-frame
+    /// lighting + light-VP + instance buffers. `meshes` is `(mesh_id, 12-float
+    /// vertices, indices)`; `materials` is `(material_id, width, height, RGBA8)`.
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        meshes: &[(u64, Vec<f32>, Vec<u32>)],
+        materials: &[(u64, u32, u32, Vec<u8>)],
+        max_instances: u32,
+    ) -> SceneRenderer {
+        let max_instances = max_instances.max(1);
+
+        let meshes: HashMap<u64, MeshBuffers> = meshes
+            .iter()
+            .map(|(id, vertices, indices)| (*id, upload_mesh(device, vertices, indices)))
+            .collect();
+
+        // Material albedo bind group layout (group 0): texture + sampler.
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("axiom-material-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let materials: HashMap<u64, wgpu::BindGroup> = materials
+            .iter()
+            .map(|(id, w, h, rgba8)| {
+                (
+                    *id,
+                    upload_material(device, queue, &material_layout, *w, *h, rgba8),
+                )
+            })
+            .collect();
+
+        // Lighting uniform (group 1): the frame's lights, rewritten each frame.
+        let lights_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("axiom-lights-layout"),
+            entries: &[uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
+        });
+        let lights_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("axiom-lights-ubo"),
+            size: LIGHTS_UBO_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let lights_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("axiom-lights-bind-group"),
+            layout: &lights_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: lights_buffer.as_entire_binding(),
+            }],
+        });
+
+        // Light view-projection uniform (one mat4 = 64 bytes), shared by the
+        // shadow depth pass and the main pass's shadow lookup.
+        let light_vp_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("axiom-light-vp-ubo"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Shadow map (a depth texture rendered from the light's POV).
+        let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("axiom-shadow-map"),
+            size: wgpu::Extent3d {
+                width: SHADOW_SIZE,
+                height: SHADOW_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("axiom-shadow-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+
+        // Shadow pass bind group layout (group 0): just the light VP.
+        let shadow_pass_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("axiom-shadow-pass-layout"),
+            entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
+        });
+        let shadow_pass_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("axiom-shadow-pass-bind-group"),
+            layout: &shadow_pass_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_vp_buffer.as_entire_binding(),
+            }],
+        });
+
+        // Main pass shadow-sampling bind group layout (group 2): shadow depth
+        // texture + comparison sampler + light VP.
+        let shadow_sample_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("axiom-shadow-sample-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                    uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
+                ],
+            },
+        );
+        let shadow_sample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("axiom-shadow-sample-bind-group"),
+            layout: &shadow_sample_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: light_vp_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("axiom-instances"),
+            size: INSTANCE_STRIDE * max_instances as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let pipeline = build_main_pipeline(
+            device,
+            format,
+            &material_layout,
+            &lights_layout,
+            &shadow_sample_layout,
+        );
+        let shadow_pipeline = build_shadow_pipeline(device, &shadow_pass_layout);
+
+        SceneRenderer {
+            pipeline,
+            shadow_pipeline,
+            meshes,
+            materials,
+            lights_buffer,
+            lights_bind_group,
+            light_vp_buffer,
+            shadow_pass_bind_group,
+            shadow_sample_bind_group,
+            shadow_view,
+            instance_buffer,
+            max_instances,
+        }
+    }
+
+    /// Record + submit one frame: a directional **shadow depth pre-pass** (the
+    /// scene rendered from the light's POV through `light_view_proj`), then the
+    /// main pass into `color_view` (cleared to `clear`) with depth `depth_view`.
+    /// `lights` is uploaded into the lighting uniform; `batches`
+    /// (`(mesh_id, material_id, [mvp(16)+world(16)+colour(4)] per instance,
+    /// count)`) are packed once and drawn in both passes. A batch whose mesh or
+    /// material id was never uploaded is skipped. The caller owns presenting /
+    /// reading back `color_view`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn record(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_view_proj: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+        clear: [f32; 4],
+    ) {
+        queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights));
+        queue.write_buffer(&self.light_vp_buffer, 0, bytemuck::cast_slice(&light_view_proj));
+
+        // Pack instances back-to-back; record each batch's (mesh, material, byte
+        // offset, count), capped at the instance-buffer capacity.
+        let mut packed: Vec<f32> = Vec::new();
+        let mut draws: Vec<(u64, u64, u64, u32)> = Vec::new();
+        let mut written: u32 = 0;
+        for (mesh_id, material_id, instances, count) in batches {
+            let room = self.max_instances.saturating_sub(written);
+            let count = (*count).min(room);
+            let floats = (count as usize) * INSTANCE_FLOATS;
+            let byte_offset = u64::from(written) * INSTANCE_STRIDE;
+            packed.extend_from_slice(&instances[..floats.min(instances.len())]);
+            draws.push((*mesh_id, *material_id, byte_offset, count));
+            written += count;
+        }
+        queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&packed));
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("axiom-frame-encoder"),
+        });
+
+        // --- Shadow depth pre-pass: scene depth from the light's POV. ---
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("axiom-shadow-pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.shadow_pipeline);
+            pass.set_bind_group(0, &self.shadow_pass_bind_group, &[]);
+            for (mesh_id, _material_id, byte_offset, count) in &draws {
+                if let Some(mesh) = self.meshes.get(mesh_id) {
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, self.instance_buffer.slice(*byte_offset..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
+                }
+            }
+        }
+
+        // --- Main pass: lit + textured + shadowed. ---
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("axiom-frame-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: clear[0] as f64,
+                            g: clear[1] as f64,
+                            b: clear[2] as f64,
+                            a: clear[3] as f64,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(1, &self.lights_bind_group, &[]);
+            pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+            for (mesh_id, material_id, byte_offset, count) in &draws {
+                if let (Some(mesh), Some(material)) =
+                    (self.meshes.get(mesh_id), self.materials.get(material_id))
+                {
+                    pass.set_bind_group(0, material, &[]);
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, self.instance_buffer.slice(*byte_offset..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
+                }
+            }
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    /// Replace one cached mesh's geometry mid-loop (12-float position+normal+uv+
+    /// colour `vertices`, triangle-list `indices`). Used by terrain streaming.
+    pub(crate) fn replace_geometry(
+        &mut self,
+        device: &wgpu::Device,
+        mesh_id: u64,
+        vertices: &[f32],
+        indices: &[u32],
+    ) {
+        self.meshes
+            .insert(mesh_id, upload_mesh(device, vertices, indices));
+    }
+}
+
+/// A uniform-buffer bind group layout entry at `binding` for the given stages.
+fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// Per-vertex layout: position(3) + normal(3) + uv(2) + colour(4).
+fn vertex_layout() -> [wgpu::VertexAttribute; 4] {
+    [
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 0,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 12,
+            shader_location: 1,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x2,
+            offset: 24,
+            shader_location: 2,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 32,
+            shader_location: 3,
+        },
+    ]
+}
+
+/// Build the main (lit/textured/shadowed) pipeline for colour target `format`.
+fn build_main_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    material_layout: &wgpu::BindGroupLayout,
+    lights_layout: &wgpu::BindGroupLayout,
+    shadow_sample_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("axiom-scene-shader"),
+        source: wgpu::ShaderSource::Wgsl(SCENE_WGSL.into()),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("axiom-scene-pl"),
+        bind_group_layouts: &[material_layout, lights_layout, shadow_sample_layout],
+        push_constant_ranges: &[],
+    });
+    // Per-instance attributes: mvp columns (loc 4-7), world columns (loc 8-11),
+    // then colour (loc 12) — one Float32x4 every 16 bytes, derived from the
+    // 36-float instance stride so the layout cannot drift from the packing.
+    let instance_attrs: Vec<wgpu::VertexAttribute> = (0..9)
+        .map(|i| wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: (i as u64) * 16,
+            shader_location: 4 + i,
+        })
+        .collect();
+    let vertex_attrs = vertex_layout();
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("axiom-scene-pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attrs,
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: INSTANCE_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &instance_attrs,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
+/// Build the depth-only shadow pipeline (light-space projection, no fragment).
+fn build_shadow_pipeline(
+    device: &wgpu::Device,
+    shadow_pass_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("axiom-shadow-shader"),
+        source: wgpu::ShaderSource::Wgsl(SHADOW_WGSL.into()),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("axiom-shadow-pl"),
+        bind_group_layouts: &[shadow_pass_layout],
+        push_constant_ranges: &[],
+    });
+    // Position from the vertex buffer (loc 0); the four world-matrix columns from
+    // the instance buffer (loc 1-4) at the world offset within the 36-float stride.
+    let position_attr = [wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 0,
+        shader_location: 0,
+    }];
+    let world_attrs: Vec<wgpu::VertexAttribute> = (0..4)
+        .map(|i| wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: WORLD_OFFSET + (i as u64) * 16,
+            shader_location: 1 + i,
+        })
+        .collect();
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("axiom-shadow-pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &position_attr,
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: INSTANCE_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &world_attrs,
+                },
+            ],
+        },
+        fragment: None,
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            // A slope-scaled depth bias reduces shadow acne on the depth pass.
+            bias: wgpu::DepthBiasState {
+                constant: 2,
+                slope_scale: 2.0,
+                clamp: 0.0,
+            },
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
+/// Build a mesh's GPU buffers from an interleaved 12-float vertex stream and a
+/// triangle-list index buffer.
+fn upload_mesh(device: &wgpu::Device, vertices: &[f32], indices: &[u32]) -> MeshBuffers {
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("axiom-mesh-vertices"),
+        contents: bytemuck::cast_slice(vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("axiom-mesh-indices"),
+        contents: bytemuck::cast_slice(indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    MeshBuffers {
+        vertex_buffer,
+        index_buffer,
+        index_count: indices.len() as u32,
+    }
+}
+
+/// Build a material's albedo bind group from RGBA8 pixels (sRGB texture + repeat
+/// nearest sampler), bound at group 0 (binding 0 = texture, 1 = sampler).
+fn upload_material(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    width: u32,
+    height: u32,
+    rgba8: &[u8],
+) -> wgpu::BindGroup {
+    let width = width.max(1);
+    let height = height.max(1);
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("axiom-material-albedo"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba8,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * width),
+            rows_per_image: Some(height),
+        },
+        size,
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("axiom-material-sampler"),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("axiom-material-bind-group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    })
+}
+
+/// Pack the frame's lights into the std140 lighting-uniform byte layout: a
+/// 16-byte header (light count `u32` + 12 bytes padding) then `MAX_LIGHTS`
+/// entries of two `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb,
+/// intensity)`. Entries past the count stay zero. Capped at `MAX_LIGHTS`.
+fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)]) -> Vec<u8> {
+    let count = lights.len().min(MAX_LIGHTS);
+    let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
+    bytes.extend_from_slice(&(count as u32).to_le_bytes());
+    bytes.extend_from_slice(&[0u8; 12]);
+    (0..MAX_LIGHTS).for_each(|i| {
+        let (kind, vec, color, intensity) = lights
+            .get(i)
+            .copied()
+            .unwrap_or((0, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0));
+        [
+            vec[0],
+            vec[1],
+            vec[2],
+            kind as f32,
+            color[0],
+            color[1],
+            color[2],
+            intensity,
+        ]
+        .iter()
+        .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));
+    });
+    bytes
+}
+
+/// Create a depth-buffer texture view of the given size (the camera depth buffer
+/// each arm attaches; the shadow map is created internally).
+pub(crate) fn create_depth_view(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("axiom-depth"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}

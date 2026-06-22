@@ -140,7 +140,9 @@ pub fn find_public_export(text: &str, name: &str) -> Option<usize> {
                             .filter(|after_kw| {
                                 after_kw.chars().next().is_some_and(char::is_whitespace)
                             })
-                            .is_some_and(|after_kw| first_ident(after_kw.trim_start()) == Some(name))
+                            .is_some_and(|after_kw| {
+                                first_ident(after_kw.trim_start()) == Some(name)
+                            })
                     })
                 },
                 |use_rest| reexports_name(use_rest, name),
@@ -187,7 +189,10 @@ pub fn references_symbol(text: &str, symbol: &str) -> bool {
         .filter(|&start| text.is_char_boundary(start) & bytes[start..].starts_with(sym))
         .any(|start| {
             let end = start + sym.len();
-            let left_ok = (start == 0) | start.checked_sub(1).is_none_or(|i| !is_ident_char(bytes[i]));
+            let left_ok = (start == 0)
+                | start
+                    .checked_sub(1)
+                    .is_none_or(|i| !is_ident_char(bytes[i]));
             let right_ok = (end >= bytes.len()) | bytes.get(end).is_none_or(|&b| !is_ident_char(b));
             left_ok & right_ok
         })
@@ -288,20 +293,18 @@ fn item_end(bytes: &[u8], attr_start: usize) -> usize {
         .map(|rel| attr_start + rel);
 
     delim.map_or(bytes.len(), |start| {
-        // A `;` ends the item right there; a `{` opens a brace block to match.
-        (bytes[start] == b';').then_some(start + 1).unwrap_or_else(|| {
-            // Walk forward tracking brace depth; the item ends one past the `}`
-            // that returns depth to 0. `scan` carries the running depth so the
-            // match-position search stays a pure iterator chain.
-            bytes[start..]
-                .iter()
-                .scan(0u32, |depth, &b| {
-                    *depth = *depth + u32::from(b == b'{') - u32::from(b == b'}');
-                    Some((b, *depth))
-                })
-                .position(|(b, depth)| (b == b'}') & (depth == 0))
-                .map_or(bytes.len(), |rel| start + rel + 1)
-        })
+        // Walk forward from the delimiter tracking brace depth; the item ends one
+        // past the first depth-0 `;` (a `;`-item ends at its own delimiter) or the
+        // depth-0 `}` that closes a `{ … }` block. `scan` carries the running depth
+        // so this stays a single pure iterator chain with no per-case branch.
+        bytes[start..]
+            .iter()
+            .scan(0u32, |depth, &b| {
+                *depth = *depth + u32::from(b == b'{') - u32::from(b == b'}');
+                Some((b, *depth))
+            })
+            .position(|(b, depth)| (depth == 0) & ((b == b';') | (b == b'}')))
+            .map_or(bytes.len(), |rel| start + rel + 1)
     })
 }
 
@@ -356,8 +359,7 @@ fn collect_into(dir: &Path, out: &mut Vec<PathBuf>) {
             // A directory recurses; a `.rs` file is collected; anything else is
             // ignored. The two effects are sequenced (not nested) so neither
             // closure aliases `out`.
-            path.is_dir()
-                .then(|| collect_into(&path, out));
+            path.is_dir().then(|| collect_into(&path, out));
             ((!path.is_dir()) & (path.extension().and_then(|e| e.to_str()) == Some("rs")))
                 .then(|| out.push(path.clone()));
         });

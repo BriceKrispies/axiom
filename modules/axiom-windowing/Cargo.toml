@@ -27,13 +27,29 @@ axiom-host = { path = "../../crates/axiom-host" }
 # platform-facing module (Module Law #9 / PLATFORM_FACING_MODULES).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axiom-gpu-backend = { path = "../axiom-gpu-backend" }
+# The software last-resort backend windowing selects when there is no GPU (or
+# when `?backend=canvas2d` forces it). Composed only in the wasm32 run loop.
+axiom-canvas2d-backend = { path = "../axiom-canvas2d-backend" }
+# The deterministic frame recorder, composed ONLY in the wasm32 run loop to drive
+# the dev frame-scrubber overlay every browser game shares (it records each
+# presented frame and re-presents it while scrubbing). Pure + native-clean, but
+# pulled in only for wasm32 so the native core stays free of it (and the
+# genuine-dependency lint, which runs on native, never sees an unused edge).
+axiom-recording = { path = "../axiom-recording" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "Window",
     "Document",
     "Element",
+    "EventTarget",
     "HtmlCanvasElement",
+    "HtmlElement",
+    "Node",
+    "MouseEvent",
+    "KeyboardEvent",
+    "Location",
+    "console",
 ] }
 
 [lints.rust]

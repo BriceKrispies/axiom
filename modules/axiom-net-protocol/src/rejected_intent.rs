@@ -87,7 +87,10 @@ mod tests {
 
     #[test]
     fn round_trips() {
-        assert_eq!(RejectedIntent::decode(&sample().encode()).unwrap(), sample());
+        assert_eq!(
+            RejectedIntent::decode(&sample().encode()).unwrap(),
+            sample()
+        );
     }
 
     #[test]
@@ -119,7 +122,9 @@ mod tests {
 
     #[test]
     fn decode_rejects_a_wrong_kind() {
-        let other = crate::server_event::ServerEvent::new(1, b"").unwrap().encode();
+        let other = crate::server_event::ServerEvent::new(1, b"")
+            .unwrap()
+            .encode();
         assert_eq!(
             RejectedIntent::decode(&other).unwrap_err().code(),
             KernelErrorCode::InvalidDiscriminant
@@ -130,7 +135,10 @@ mod tests {
     fn every_truncated_prefix_is_rejected() {
         let bytes = sample().encode();
         (0..bytes.len()).for_each(|k| {
-            assert!(RejectedIntent::decode(&bytes[..k]).is_err(), "prefix {k} must fail");
+            assert!(
+                RejectedIntent::decode(&bytes[..k]).is_err(),
+                "prefix {k} must fail"
+            );
         });
         assert!(RejectedIntent::decode(&bytes).is_ok());
     }

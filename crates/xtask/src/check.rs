@@ -211,12 +211,15 @@ fn dfs_cycle<'a>(
             .then(|| {
                 // Back-edge: build the cycle from where `next` sits on the stack.
                 let start = stack.iter().position(|n| *n == next).unwrap_or(0);
-                let mut cycle: Vec<String> =
-                    stack[start..].iter().map(|s| s.to_string()).collect();
+                let mut cycle: Vec<String> = stack[start..].iter().map(|s| s.to_string()).collect();
                 cycle.push(next.to_string());
                 cycle
             })
-            .or_else(|| (col == 0).then(|| dfs_cycle(next, adj, color, stack)).flatten())
+            .or_else(|| {
+                (col == 0)
+                    .then(|| dfs_cycle(next, adj, color, stack))
+                    .flatten()
+            })
     });
     stack.pop();
     // Only mark this node done when no cycle was found through it (matching the
@@ -468,8 +471,8 @@ fn is_test_module_file(path: &Path, test_module_names: &BTreeSet<String>) -> boo
     // A `NAME/mod.rs` directory module is named by its parent dir; otherwise by
     // the file stem.
     let name = is_mod_rs
-        .then(|| path.parent().and_then(|p| p.file_name()))
-        .unwrap_or_else(|| path.file_stem());
+        .then_some(path.parent().and_then(|p| p.file_name()))
+        .unwrap_or(path.file_stem());
     name.and_then(|n| n.to_str())
         .is_some_and(|n| test_module_names.contains(n))
 }

@@ -119,6 +119,37 @@ fn rotating_cubes_app() -> App {
                     intensity: ch(1.0),
                 },
             ));
+            // Three orbiting coloured point lights: each is a point light offset
+            // on a spinning parent, so it circles the cubes. Their moving coloured
+            // highlights are the visible Stage-3 result over the old fixed light.
+            let orbit_lights = [
+                (
+                    Vec3::UNIT_Y,
+                    Color::linear_rgb(ch(0.95), ch(0.25), ch(0.25)),
+                    200,
+                ),
+                (
+                    Vec3::UNIT_Y,
+                    Color::linear_rgb(ch(0.25), ch(0.95), ch(0.35)),
+                    320,
+                ),
+                (
+                    Vec3::UNIT_Y,
+                    Color::linear_rgb(ch(0.30), ch(0.45), ch(0.98)),
+                    260,
+                ),
+            ];
+            orbit_lights.into_iter().for_each(|(axis, color, period)| {
+                world
+                    .spawn((Transform::IDENTITY, Spin::around(axis).period(period)))
+                    .with_child((
+                        Transform::from_translation(Vec3::new(4.5, 1.2, 0.0)),
+                        PointLight {
+                            color,
+                            intensity: ch(9.0),
+                        },
+                    ));
+            });
         })
 }
 
@@ -154,6 +185,10 @@ mod tests {
         assert_eq!(batches.iter().map(|batch| batch.3).sum::<u32>(), 5);
         // Every draw carries a material id so the backend can bind its albedo.
         assert!(outcome.draws().iter().all(|d| d.material_id() != 0));
+        // The frame resolves four lights: the directional sun + three orbiting
+        // point lights. Exactly one is directional (kind 0), three are point.
+        assert_eq!(outcome.lights().len(), 4);
+        assert_eq!(outcome.lights().iter().filter(|l| l.kind() == 1).count(), 3);
     }
 
     #[test]

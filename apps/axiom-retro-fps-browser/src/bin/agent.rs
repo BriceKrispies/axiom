@@ -27,14 +27,21 @@ fn main() {
     // `--bridge [http_addr] [ws_addr]`: drive a live browser instead of an
     // in-process headless game.
     if args.iter().any(|a| a == "--bridge") {
-        let rest: Vec<&String> = args.iter().skip_while(|a| *a != "--bridge").skip(1).collect();
+        let rest: Vec<&String> = args
+            .iter()
+            .skip_while(|a| *a != "--bridge")
+            .skip(1)
+            .collect();
         let http = rest.first().map(|s| s.as_str()).unwrap_or(DEFAULT_ADDR);
         let ws = rest.get(1).map(|s| s.as_str()).unwrap_or(DEFAULT_WS_ADDR);
         bridge::run(http, ws);
         return;
     }
 
-    let addr = args.get(1).cloned().unwrap_or_else(|| DEFAULT_ADDR.to_string());
+    let addr = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| DEFAULT_ADDR.to_string());
     let server = Server::http(&addr).expect("agent: failed to bind the listen address");
     println!("axiom-retro_fps agent listening on http://{addr}");
     println!("  POST /step {{action}}   POST /reset   GET /state");

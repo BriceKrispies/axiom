@@ -1,0 +1,52 @@
+[package]
+name = "axiom-roomed-puzzle"
+description = "Roomed Puzzle: a deterministic top-down 2D grid puzzle built as an Axiom app. A solid player walks a 10x10 room; pressing q freezes the current life into a ghost that replays the recorded path on a fixed-step cadence, so ghosts can hold buttons that open doors for the live player. The deterministic game core is pure Rust on the kernel's fixed-step time primitives; the in-browser editor/playtest surface is the wasm-only `web` arm (a 2D canvas, the sanctioned axiom-growth pattern). Apps are composition leaves, exempt from the branchless and 100%-coverage spine gates."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# `cdylib` for the wasm browser editor/playtest surface (the `web` module's
+# `#[wasm_bindgen]` entries); `rlib` so the native test suite still builds and
+# exercises the deterministic game core.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The one engine layer this app genuinely builds on: the kernel's deterministic
+# fixed-step time primitives (`FixedStep`, `Tick`, `SimulationClock`) are the
+# clock that paces ghost replay — the game core never reads a wall clock. Listed
+# in app.toml's `allowed_layers`.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+# Standard, hand-editable level format. `toml` + `serde` are already the repo's
+# manifest-parsing stack (see crates/xtask); we reuse the same versions. Used by
+# the level codec in both native tests and the wasm editor, so they are normal
+# (not wasm-gated) dependencies.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Browser entry only: the wasm-bindgen glue, a panic hook, and the DOM/2D-canvas
+# the editor/playtest surface binds to. Confined to wasm32, so native
+# `cargo test --workspace` never compiles them and the deterministic core stays
+# browser-free.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "DomRect",
+    "KeyboardEvent",
+    "MouseEvent",
+    "console",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

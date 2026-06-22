@@ -30,8 +30,14 @@ pub const INITIAL_POSITIONS: [f32; 4] = [-1.5, 0.0, 1.5, 0.0];
 /// sits exactly at `target`. A zero delta (target == current) holds it still.
 pub fn inputs_to_targets(current: [f32; 4], target: [f32; 4]) -> [PlayerInput; 2] {
     [
-        PlayerInput::new(0, Vec3::new(target[0] - current[0], target[1] - current[1], 0.0)),
-        PlayerInput::new(1, Vec3::new(target[2] - current[2], target[3] - current[3], 0.0)),
+        PlayerInput::new(
+            0,
+            Vec3::new(target[0] - current[0], target[1] - current[1], 0.0),
+        ),
+        PlayerInput::new(
+            1,
+            Vec3::new(target[2] - current[2], target[3] - current[3], 0.0),
+        ),
     ]
 }
 
@@ -120,7 +126,7 @@ mod tests {
         let inputs = inputs_to_targets(INITIAL_POSITIONS, [-1.0, 0.5, 2.0, -0.5]);
         assert_eq!(inputs[0].delta, Vec3::new(0.5, 0.5, 0.0)); // -1.0 - (-1.5)
         assert_eq!(inputs[1].delta, Vec3::new(0.5, -0.5, 0.0)); // 2.0 - 1.5
-        // No change → zero deltas (cubes hold still).
+                                                                // No change → zero deltas (cubes hold still).
         let still = inputs_to_targets(INITIAL_POSITIONS, INITIAL_POSITIONS);
         assert_eq!(still[0].delta, Vec3::ZERO);
         assert_eq!(still[1].delta, Vec3::ZERO);

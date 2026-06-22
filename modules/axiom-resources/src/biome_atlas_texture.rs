@@ -34,10 +34,7 @@ pub fn biome_cell_origin(biome: u32) -> (f32, f32) {
     let b = biome & 3;
     let cx = b % ATLAS_COLS;
     let cy = b / ATLAS_COLS;
-    (
-        cx as f32 / ATLAS_COLS as f32,
-        cy as f32 / ATLAS_ROWS as f32,
-    )
+    (cx as f32 / ATLAS_COLS as f32, cy as f32 / ATLAS_ROWS as f32)
 }
 
 /// Build the canonical `SIZE`×`SIZE` biome atlas.

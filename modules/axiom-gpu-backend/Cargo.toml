@@ -17,6 +17,20 @@ crate-type = ["rlib"]
 # boundary (HostPresentationRequest), reading the physical surface size from it.
 axiom-host = { path = "../../crates/axiom-host" }
 
+# wgpu + bytemuck are optional here so that on NATIVE they are pulled in only by
+# the `offscreen` feature (the screenshot path); on wasm32 they are required
+# unconditionally via the target table below. pollster drives the native
+# off-screen device/readback (block_on) and is offscreen-only.
+wgpu = { version = "25", optional = true }
+bytemuck = { version = "1", optional = true }
+pollster = { version = "0.4", optional = true }
+
+[features]
+# Native off-screen rendering (the `axiom-shot` screenshot tool). Off by default,
+# so the engine's default native build, coverage gate, and branchless lint never
+# compile the wgpu off-screen arm — the same exemption the wasm arm has.
+offscreen = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+
 [dev-dependencies]
 # Tests construct a HostPresentationRequest via the host API, which takes a
 # kernel handle source. Test-only, so it never counts as a non-test dependency.
@@ -25,11 +39,18 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 # The live presentation arm: real wgpu + web-sys, pulled in ONLY for wasm32, so
 # native `cargo test`/coverage never compiles them and the facade stays
 # browser-free. This is a sanctioned platform-facing module (Module Law #9 /
-# PLATFORM_FACING_MODULES).
+# PLATFORM_FACING_MODULES). wgpu/bytemuck are required unconditionally on wasm32
+# (the live arm always needs them, regardless of the `offscreen` feature).
+#
+# The `webgl` feature compiles wgpu's WebGL2 (GLES3) backend ALONGSIDE the
+# default WebGPU backend, so the live arm can fall back to WebGL2 when a browser
+# has no WebGPU (`live_gpu_binding::initialize` probes WebGPU first, then GL).
+# It is additive — `webgpu` stays on via wgpu's default features. See
+# docs/render-fallback.md.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
-wgpu = "25"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "console"] }
+wgpu = { version = "25", features = ["webgl"] }
 bytemuck = "1"
 
 [lints.rust]

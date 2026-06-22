@@ -98,7 +98,9 @@ impl MetricReport {
                     .and_then(|tag| {
                         (tag == 0)
                             .then(|| reader.read_u64().map(|i| MetricValue::integer(i as i64)))
-                            .or_else(|| (tag == 1).then(|| reader.read_f32().map(MetricValue::float)))
+                            .or_else(|| {
+                                (tag == 1).then(|| reader.read_f32().map(MetricValue::float))
+                            })
                             .unwrap_or_else(|| {
                                 Err(KernelError::new(
                                     KernelErrorScope::Binary,
@@ -111,15 +113,14 @@ impl MetricReport {
                         // Optional tick: the presence-tag pattern, with
                         // `transpose` folded into the chain to leave no `?`.
                         reader.read_bool().and_then(|has_tick| {
-                            has_tick
-                                .then(|| reader.read_u64())
-                                .transpose()
-                                .map(|tick| MetricReport {
+                            has_tick.then(|| reader.read_u64()).transpose().map(|tick| {
+                                MetricReport {
                                     name,
                                     is_counter,
                                     value,
                                     tick,
-                                })
+                                }
+                            })
                         })
                     })
             })

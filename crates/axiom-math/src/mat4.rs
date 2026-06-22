@@ -106,10 +106,8 @@ impl Mat4 {
     /// `fovy_radians` is in `(0, π)`. Otherwise returns
     /// [`crate::math_error_code::MathErrorCode::InvalidMatrixOperation`].
     pub fn perspective(fovy_radians: f32, aspect: f32, near: f32, far: f32) -> MathResult<Mat4> {
-        let all_finite = fovy_radians.is_finite()
-            & aspect.is_finite()
-            & near.is_finite()
-            & far.is_finite();
+        let all_finite =
+            fovy_radians.is_finite() & aspect.is_finite() & near.is_finite() & far.is_finite();
         let fovy_in_range = (fovy_radians > 0.0) & (fovy_radians < std::f32::consts::PI);
         let bounds_ok = (aspect > 0.0) & (near > 0.0) & (far > near);
         (!all_finite)
@@ -131,7 +129,12 @@ impl Mat4 {
             .unwrap_or_else(|| Self::perspective_unchecked(fovy_radians, aspect, near, far))
     }
 
-    fn perspective_unchecked(fovy_radians: f32, aspect: f32, near: f32, far: f32) -> MathResult<Mat4> {
+    fn perspective_unchecked(
+        fovy_radians: f32,
+        aspect: f32,
+        near: f32,
+        far: f32,
+    ) -> MathResult<Mat4> {
         let f = 1.0 / (fovy_radians * 0.5).tan();
         let nf = 1.0 / (near - far);
         Ok(Mat4::from_cols_array([
@@ -327,7 +330,9 @@ impl Mat4 {
 
     /// Append the 16 column-major `f32` elements in order.
     pub fn write_to(self, writer: &mut BinaryWriter) {
-        self.data.into_iter().for_each(|elem| writer.write_f32(elem));
+        self.data
+            .into_iter()
+            .for_each(|elem| writer.write_f32(elem));
     }
 
     /// Read 16 column-major `f32` elements in order.

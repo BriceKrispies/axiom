@@ -52,21 +52,15 @@ fn run_loop() {
     // The cubes' currently-rendered positions; each frame we move them to target.
     let mut current = INITIAL_POSITIONS;
 
-    let _ = windowing.run_web(
-        CANVAS_ID,
-        vertices,
-        indices,
-        max_instances,
-        move |tick| {
-            let target = TARGET.with(|t| t.get());
-            let inputs = inputs_to_targets(current, target);
-            current = target;
-            let outcome = running.tick_with(tick, &inputs);
-            (
-                outcome.clear_color(),
-                outcome.instance_floats(),
-                outcome.draws().len() as u32,
-            )
-        },
-    );
+    let _ = windowing.run_web(CANVAS_ID, vertices, indices, max_instances, move |tick| {
+        let target = TARGET.with(|t| t.get());
+        let inputs = inputs_to_targets(current, target);
+        current = target;
+        let outcome = running.tick_with(tick, &inputs);
+        (
+            outcome.clear_color(),
+            outcome.instance_floats(),
+            outcome.draws().len() as u32,
+        )
+    });
 }

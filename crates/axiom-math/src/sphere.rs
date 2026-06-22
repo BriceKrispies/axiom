@@ -32,9 +32,9 @@ impl Sphere {
                 "sphere center components must be finite",
             )))
             .or_else(|| {
-                (center_finite & !radius.is_finite()).then_some(Err(
-                    MathError::non_finite_scalar("sphere radius must be finite"),
-                ))
+                (center_finite & !radius.is_finite()).then_some(Err(MathError::non_finite_scalar(
+                    "sphere radius must be finite",
+                )))
             })
             .or_else(|| {
                 (center_finite & radius.is_finite() & (radius < 0.0)).then_some(Err(

@@ -147,13 +147,16 @@ impl FrameReport {
         // expression threaded into the same chain.
         SchemaVersion::read_from(reader)
             .and_then(|version| {
-                SCHEMA.is_compatible_with(version).then_some(()).ok_or_else(|| {
-                    KernelError::new(
-                        KernelErrorScope::Binary,
-                        KernelErrorCode::SchemaVersionMismatch,
-                        "FrameReport schema major version is incompatible",
-                    )
-                })
+                SCHEMA
+                    .is_compatible_with(version)
+                    .then_some(())
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            KernelErrorScope::Binary,
+                            KernelErrorCode::SchemaVersionMismatch,
+                            "FrameReport schema major version is incompatible",
+                        )
+                    })
             })
             .and_then(|()| reader.read_u64())
             .and_then(|engine_frame_index| {

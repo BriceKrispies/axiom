@@ -7,13 +7,17 @@ use axiom_kernel::{
 };
 
 use crate::column_set::ColumnSet;
+use crate::entity_handle::EntityHandle;
 use crate::entity_registry::EntityRegistry;
 use crate::schedule_phase::SchedulePhase;
 use crate::world_step::WorldStep;
 use crate::world_system::WorldSystem;
 
-/// Wire schema version of a serialized world.
+/// Wire schema version of a serialized world (component columns only).
 const WORLD_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
+
+/// Wire schema version of a full world snapshot (entity identity + columns).
+const SNAPSHOT_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 
 /// The single deterministic world model: an [`EntityRegistry`] of live
 /// entities, a consumer-defined component storage `S` (a struct of
@@ -87,9 +91,9 @@ impl<S> World<S> {
         self.entities.spawn()
     }
 
-    /// Remove an entity from the live set (column cleanup is the consumer's).
-    pub fn despawn(&mut self, entity: EntityId) -> bool {
-        self.entities.despawn(entity)
+    /// Mint and register a new entity, returning its generational handle.
+    pub fn spawn_handle(&mut self) -> EntityHandle {
+        self.entities.spawn_handle()
     }
 
     /// The live entity registry.
@@ -158,6 +162,78 @@ impl<S: Default> Default for World<S> {
 }
 
 impl<S: ColumnSet> World<S> {
+    /// Remove an entity from the live set **and** drop all of its component data
+    /// from every column (via [`ColumnSet::remove_entity`]). Returns whether the
+    /// entity existed; despawning an absent entity is a clean `false` no-op. No
+    /// orphan component rows remain after despawn.
+    pub fn despawn(&mut self, entity: EntityId) -> bool {
+        let existed = self.entities.despawn(entity);
+        existed.then(|| self.storage.remove_entity(entity));
+        existed
+    }
+
+    /// Despawn the entity named by `handle`, but only if the handle is current.
+    /// A stale handle cannot remove the new occupant of its slot — it is a clean
+    /// `false` no-op. On success the slot's components are cleaned, exactly like
+    /// [`Self::despawn`].
+    pub fn despawn_handle(&mut self, handle: EntityHandle) -> bool {
+        let current = self.entities.is_current(handle);
+        current.then(|| self.despawn(handle.id()));
+        current
+    }
+
+    /// Serialize a full world snapshot: a schema header, the entity-identity state
+    /// (live slots, generations, free list, next slot), then every component
+    /// column. Unlike [`Self::serialize`] this captures entity identity, so a
+    /// restore reproduces future spawns exactly. Systems are not serialized.
+    pub fn write_snapshot(&self, writer: &mut BinaryWriter) {
+        SNAPSHOT_SCHEMA.write_to(writer);
+        self.entities.serialize(writer);
+        let columns = self.storage.columns();
+        writer.write_u32(columns.len() as u32);
+        columns
+            .into_iter()
+            .for_each(|(_, column)| column.write(writer));
+    }
+
+    /// Restore a world from bytes produced by [`Self::write_snapshot`]: the entity
+    /// registry and every component column are replaced. Systems are untouched.
+    pub fn read_snapshot(&mut self, reader: &mut BinaryReader<'_>) -> KernelResult<()> {
+        SchemaVersion::read_from(reader)
+            .and_then(|version| {
+                SNAPSHOT_SCHEMA
+                    .is_compatible_with(version)
+                    .then_some(())
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            KernelErrorScope::Binary,
+                            KernelErrorCode::SchemaVersionMismatch,
+                            "world snapshot schema major version is incompatible",
+                        )
+                    })
+            })
+            .and_then(|()| EntityRegistry::deserialize(reader))
+            .and_then(|entities| {
+                self.entities = entities;
+                reader.read_u32().map(|count| count as usize)
+            })
+            .and_then(|count| {
+                let columns = self.storage.columns_mut();
+                (count == columns.len()).then_some(columns).ok_or_else(|| {
+                    KernelError::new(
+                        KernelErrorScope::Binary,
+                        KernelErrorCode::TruncatedData,
+                        "snapshot column count does not match the storage",
+                    )
+                })
+            })
+            .and_then(|columns| {
+                columns
+                    .into_iter()
+                    .try_for_each(|(_, column)| column.read_replace(reader))
+            })
+    }
+
     /// Serialize the whole world's component state: a schema header, the column
     /// count, then each column's bytes in `columns()` order.
     pub fn serialize(&self, writer: &mut BinaryWriter) {
@@ -189,15 +265,13 @@ impl<S: ColumnSet> World<S> {
             .and_then(|()| reader.read_u32().map(|count| count as usize))
             .and_then(|count| {
                 let columns = self.storage.columns_mut();
-                (count == columns.len())
-                    .then_some(columns)
-                    .ok_or_else(|| {
-                        KernelError::new(
-                            KernelErrorScope::Binary,
-                            KernelErrorCode::TruncatedData,
-                            "serialized world column count does not match the storage",
-                        )
-                    })
+                (count == columns.len()).then_some(columns).ok_or_else(|| {
+                    KernelError::new(
+                        KernelErrorScope::Binary,
+                        KernelErrorCode::TruncatedData,
+                        "serialized world column count does not match the storage",
+                    )
+                })
             })
             .and_then(|columns| {
                 columns
@@ -327,20 +401,31 @@ mod serial_tests {
 mod tests {
     use super::*;
     use crate::component_column::ComponentColumn;
+    use crate::erased_column::ErasedColumn;
     use crate::fixtures;
 
     /// A tiny two-column storage: a source value and a doubled mirror.
     #[derive(Default)]
     struct Storage {
-        value: ComponentColumn<i32>,
-        doubled: ComponentColumn<i32>,
+        value: ComponentColumn<u32>,
+        doubled: ComponentColumn<u32>,
+    }
+
+    impl ColumnSet for Storage {
+        fn columns(&self) -> Vec<(&'static str, &dyn ErasedColumn)> {
+            vec![("value", &self.value), ("doubled", &self.doubled)]
+        }
+
+        fn columns_mut(&mut self) -> Vec<(&'static str, &mut dyn ErasedColumn)> {
+            vec![("value", &mut self.value), ("doubled", &mut self.doubled)]
+        }
     }
 
     /// A system that writes `doubled = value * 2` for every entity with a value.
     struct DoubleValues;
     impl WorldSystem<Storage> for DoubleValues {
         fn run(&self, _step: &WorldStep, entities: &EntityRegistry, storage: &mut Storage) {
-            let pairs: Vec<(EntityId, i32)> = entities
+            let pairs: Vec<(EntityId, u32)> = entities
                 .iter()
                 .filter_map(|e| storage.value.get(e).map(|v| (e, *v)))
                 .collect();
@@ -356,7 +441,7 @@ mod tests {
         fn run(&self, step: &WorldStep, entities: &EntityRegistry, storage: &mut Storage) {
             let ids: Vec<EntityId> = entities.iter().collect();
             for e in ids {
-                storage.doubled.insert(e, step.tick() as i32);
+                storage.doubled.insert(e, step.tick() as u32);
             }
         }
     }
@@ -364,7 +449,7 @@ mod tests {
     /// Appends `mark` as a decimal digit onto `doubled` each run, so the final
     /// value encodes the exact sequence of systems that ran (e.g. `12` = a
     /// `Mark(1)` then a `Mark(2)`).
-    struct Mark(i32);
+    struct Mark(u32);
     impl WorldSystem<Storage> for Mark {
         fn run(&self, _step: &WorldStep, entities: &EntityRegistry, storage: &mut Storage) {
             let ids: Vec<EntityId> = entities.iter().collect();
@@ -375,7 +460,7 @@ mod tests {
         }
     }
 
-    fn world_with_one_value(v: i32) -> (World<Storage>, EntityId) {
+    fn world_with_one_value(v: u32) -> (World<Storage>, EntityId) {
         let mut world: World<Storage> = World::new();
         world.register_system(Box::new(DoubleValues));
         let e = world.spawn();
@@ -489,5 +574,148 @@ mod tests {
         let s = format!("{world:?}");
         assert!(s.contains("World"));
         assert!(s.contains("entities"));
+    }
+
+    #[test]
+    fn despawn_removes_all_component_rows() {
+        let mut world: World<Storage> = World::new();
+        let e = world.spawn();
+        world.storage_mut().value.insert(e, 7);
+        world.storage_mut().doubled.insert(e, 14);
+        assert!(world.despawn(e));
+        assert!(!world.entities().contains(e));
+        assert!(world.storage().value.get(e).is_none(), "value row cleaned");
+        assert!(
+            world.storage().doubled.get(e).is_none(),
+            "doubled row cleaned"
+        );
+        // Despawning an absent entity is a clean no-op (no cleanup performed).
+        assert!(!world.despawn(e));
+    }
+
+    #[test]
+    fn spawn_handle_is_current_and_despawn_handle_invalidates_it() {
+        let mut world: World<Storage> = World::new();
+        let handle = world.spawn_handle();
+        world.storage_mut().value.insert(handle.id(), 5);
+        assert!(world.entities().is_current(handle));
+        assert!(world.despawn_handle(handle));
+        assert!(world.entities().is_stale(handle));
+        assert!(
+            world.storage().value.get(handle.id()).is_none(),
+            "components cleaned"
+        );
+        // The stale handle cannot despawn again.
+        assert!(!world.despawn_handle(handle));
+    }
+
+    #[test]
+    fn stale_handle_cannot_despawn_the_reused_slot() {
+        let mut world: World<Storage> = World::new();
+        let first = world.spawn_handle();
+        assert!(world.despawn_handle(first));
+        let second = world.spawn_handle(); // reuses the slot at a bumped generation
+        world.storage_mut().value.insert(second.id(), 99);
+        // The old handle is stale and must not affect the new occupant.
+        assert!(!world.despawn_handle(first));
+        assert!(world.entities().is_current(second));
+        assert_eq!(world.storage().value.get(second.id()), Some(&99));
+    }
+
+    #[test]
+    fn snapshot_round_trips_identity_and_components() {
+        let mut world: World<Storage> = World::new();
+        let a = world.spawn();
+        let b = world.spawn();
+        world.spawn();
+        world.storage_mut().value.insert(a, 10);
+        world.storage_mut().value.insert(b, 20);
+        world.despawn(b); // frees slot b, cleans its component
+
+        let mut writer = BinaryWriter::new();
+        world.write_snapshot(&mut writer);
+        let bytes = writer.into_bytes();
+
+        let mut restored: World<Storage> = World::new();
+        restored
+            .read_snapshot(&mut BinaryReader::new(&bytes))
+            .unwrap();
+        assert_eq!(restored.entity_count(), 2, "live entity set restored");
+        assert_eq!(restored.storage().value.get(a), Some(&10));
+        assert!(restored.storage().value.get(b).is_none());
+    }
+
+    #[test]
+    fn snapshot_restore_preserves_future_spawn_determinism() {
+        let mut world: World<Storage> = World::new();
+        world.spawn();
+        let b = world.spawn();
+        world.spawn();
+        world.despawn(b);
+
+        let mut writer = BinaryWriter::new();
+        world.write_snapshot(&mut writer);
+        let bytes = writer.into_bytes();
+        let mut restored: World<Storage> = World::new();
+        restored
+            .read_snapshot(&mut BinaryReader::new(&bytes))
+            .unwrap();
+
+        let from_world = world.spawn_handle();
+        let from_restored = restored.spawn_handle();
+        assert_eq!(from_world.id(), from_restored.id());
+        assert_eq!(from_world.generation(), from_restored.generation());
+        assert_eq!(
+            (from_restored.id().raw(), from_restored.generation()),
+            (2, 1)
+        );
+    }
+
+    #[test]
+    fn read_snapshot_rejects_incompatible_schema() {
+        let mut w = BinaryWriter::new();
+        SchemaVersion::new(SNAPSHOT_SCHEMA.major() + 1, 0).write_to(&mut w);
+        let bytes = w.into_bytes();
+        let mut world: World<Storage> = World::new();
+        assert_eq!(
+            world
+                .read_snapshot(&mut BinaryReader::new(&bytes))
+                .unwrap_err()
+                .code(),
+            KernelErrorCode::SchemaVersionMismatch
+        );
+    }
+
+    #[test]
+    fn read_snapshot_rejects_wrong_column_count() {
+        let mut w = BinaryWriter::new();
+        SNAPSHOT_SCHEMA.write_to(&mut w);
+        EntityRegistry::new().serialize(&mut w);
+        w.write_u32(99); // storage has 2 columns, not 99
+        let bytes = w.into_bytes();
+        let mut world: World<Storage> = World::new();
+        assert_eq!(
+            world
+                .read_snapshot(&mut BinaryReader::new(&bytes))
+                .unwrap_err()
+                .code(),
+            KernelErrorCode::TruncatedData
+        );
+    }
+
+    #[test]
+    fn read_snapshot_rejects_truncation_at_every_prefix() {
+        let mut world: World<Storage> = World::new();
+        let a = world.spawn();
+        world.storage_mut().value.insert(a, 1);
+        let mut w = BinaryWriter::new();
+        world.write_snapshot(&mut w);
+        let bytes = w.into_bytes();
+        for len in 0..bytes.len() {
+            let mut fresh: World<Storage> = World::new();
+            assert!(fresh
+                .read_snapshot(&mut BinaryReader::new(&bytes[..len]))
+                .is_err());
+        }
     }
 }

@@ -80,7 +80,9 @@ fn read_compatible_version(reader: &mut BinaryReader<'_>) -> KernelResult<()> {
 
 /// Accept a kind byte only if it is one of the known, contiguous discriminants.
 fn validate_known_kind(kind: u8) -> KernelResult<u8> {
-    (kind <= KIND_MAX).then_some(kind).ok_or_else(unknown_kind_error)
+    (kind <= KIND_MAX)
+        .then_some(kind)
+        .ok_or_else(unknown_kind_error)
 }
 
 fn version_error() -> KernelError {
@@ -147,7 +149,9 @@ mod tests {
         w.write_u8(200); // far outside the known range
         let mut r = BinaryReader::new(w.as_bytes());
         assert_eq!(
-            read_expected_kind(&mut r, KIND_JOIN_ROOM).unwrap_err().code(),
+            read_expected_kind(&mut r, KIND_JOIN_ROOM)
+                .unwrap_err()
+                .code(),
             KernelErrorCode::InvalidDiscriminant
         );
     }
@@ -164,7 +168,9 @@ mod tests {
         );
         let mut r = BinaryReader::new(&bytes);
         assert_eq!(
-            read_expected_kind(&mut r, KIND_JOIN_ROOM).unwrap_err().code(),
+            read_expected_kind(&mut r, KIND_JOIN_ROOM)
+                .unwrap_err()
+                .code(),
             KernelErrorCode::SchemaVersionMismatch
         );
     }

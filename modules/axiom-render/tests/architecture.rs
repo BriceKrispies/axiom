@@ -146,10 +146,36 @@ fn no_scene_or_resources_or_webgpu_or_other_module_imports() {
 }
 
 #[test]
-fn no_host_layer_import() {
+fn host_dependency_is_limited_to_the_neutral_frame_packet() {
+    // axiom-render compiles a RenderCommandList into the backend-neutral
+    // `axiom_host::FramePacket` (RenderApi::build_frame_packet) — the single
+    // artifact every render backend consumes. That is the ONLY sanctioned reason
+    // render names the host layer: it produces host's neutral, primitive-only
+    // frame-packet value types. render must still NOT become a host/presentation
+    // CONSUMER — it may not touch host's facade, stepping, or surface/
+    // presentation-request APIs. This narrows (does not remove) the original
+    // "render imports no host APIs" boundary to exactly the neutral packet
+    // vocabulary the slice contract requires.
     assert_absent(
-        &["axiom_host", "axiom-host"],
-        "axiom-render should not depend on axiom-host",
+        &[
+            "HostApi",
+            "HostStepDriver",
+            "HostStepPlan",
+            "HostBoundaryConfig",
+            "HostFrameInput",
+            "HostFrameReport",
+            "HostLifecycleSignal",
+            "HostPresentationRequest",
+            "HostPresentationTarget",
+            "HostPresentationReport",
+            "HostSurfaceHandle",
+            "HostSurfaceDescriptor",
+            "HostAdapterRequest",
+            "HostDeviceRequest",
+            "HostViewport",
+        ],
+        "axiom-render may name host's neutral FramePacket types but must not \
+         consume host's presentation/stepping/surface APIs",
     );
 }
 

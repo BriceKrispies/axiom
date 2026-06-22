@@ -49,7 +49,7 @@ fn cube_capture(api: &RenderApi, frame: u64, tick: u64, world: Mat4) -> (Vec<u8>
         (0..36).collect(),
     );
     let material = api.add_input_basic_lit_material(&mut input, 1, Vec4::new(0.8, 0.4, 0.2, 1.0));
-    api.add_input_object(&mut input, world, mesh, material, true);
+    api.add_input_object(&mut input, 1, world, mesh, material, true);
 
     let list = api.build_command_list(&input);
     let receipt = api.capture_receipt(FrameIndex::new(frame), Tick::new(tick), &list);
@@ -83,11 +83,11 @@ fn two_object_capture(api: &RenderApi, swap: bool) -> Vec<u8> {
     let mat_a = api.add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
     let mat_b = api.add_input_basic_lit_material(&mut input, 2, Vec4::new(0.1, 0.2, 0.3, 1.0));
     if swap {
-        api.add_input_object(&mut input, Mat4::IDENTITY, mesh_b, mat_b, true);
-        api.add_input_object(&mut input, Mat4::IDENTITY, mesh_a, mat_a, true);
+        api.add_input_object(&mut input, 2, Mat4::IDENTITY, mesh_b, mat_b, true);
+        api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh_a, mat_a, true);
     } else {
-        api.add_input_object(&mut input, Mat4::IDENTITY, mesh_a, mat_a, true);
-        api.add_input_object(&mut input, Mat4::IDENTITY, mesh_b, mat_b, true);
+        api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh_a, mat_a, true);
+        api.add_input_object(&mut input, 2, Mat4::IDENTITY, mesh_b, mat_b, true);
     }
     let list = api.build_command_list(&input);
     let receipt = api.capture_receipt(FrameIndex::new(0), Tick::new(0), &list);

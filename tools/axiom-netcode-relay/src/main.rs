@@ -170,13 +170,10 @@ async fn run_relay(listener: TcpListener) {
 /// if the game is already full.
 async fn claim_slot(relay: &Relay) -> Option<(u64, bool)> {
     let mut slots = relay.slots.lock().await;
-    slots
-        .iter()
-        .position(|taken| !*taken)
-        .map(|free| {
-            slots[free] = true;
-            ((free + 1) as u64, slots.iter().all(|taken| *taken))
-        })
+    slots.iter().position(|taken| !*taken).map(|free| {
+        slots[free] = true;
+        ((free + 1) as u64, slots.iter().all(|taken| *taken))
+    })
 }
 
 /// Release a slot when its peer leaves.
@@ -211,15 +208,13 @@ async fn serve_peer(stream: TcpStream, relay: Arc<Relay>, rx: broadcast::Receive
     futures_util::future::OptionFuture::from((!sent_ok).then(|| free_slot(&relay, id))).await;
     // Serve the peer iff the send succeeded — the old fall-through continuation,
     // lifted whole into a gated async block so the `if` keyword disappears.
-    futures_util::future::OptionFuture::from(sent_ok.then(|| async move {
+    futures_util::future::OptionFuture::from(sent_ok.then_some(async move {
         println!("relay: peer {id} connected");
         // Completing the pair starts both clients together (no early-input loss).
-        all_filled
-            .then(|| {
-                println!("relay: both players present — sending go");
-                let _ = relay.tx.send(Bus::go());
-            })
-            .unwrap_or(());
+        all_filled.then(|| {
+            println!("relay: both players present — sending go");
+            let _ = relay.tx.send(Bus::go());
+        });
 
         bridge_peer(sink, source, &relay, rx, id).await;
         free_slot(&relay, id).await;
@@ -335,8 +330,7 @@ type PeerSink =
     futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<TcpStream>, Message>;
 
 /// This peer's inbound socket half.
-type PeerSource =
-    futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>;
+type PeerSource = futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>;
 
 /// Map one inbound socket item to an `Action`: broadcast a binary frame, ignore a
 /// text/ping/pong, or stop the bridge (the socket closed or errored). Built from
@@ -349,9 +343,10 @@ fn inbound_action(incoming: Result<Message, tokio_tungstenite::tungstenite::Erro
         // above turns it into the `None` -> stop path).
         .map(|msg| {
             msg.is_close().then(Action::stop).unwrap_or_else(|| {
-                msg.is_binary()
-                    .then(|| Action::broadcast(msg.into_data().to_vec()))
-                    .unwrap_or_else(Action::noop)
+                let is_binary = msg.is_binary();
+                is_binary
+                    .then_some(Action::broadcast(msg.into_data().to_vec()))
+                    .unwrap_or(Action::noop())
             })
         })
         .unwrap_or_else(Action::stop)
@@ -360,7 +355,10 @@ fn inbound_action(incoming: Result<Message, tokio_tungstenite::tungstenite::Erro
 /// Map one bus item to an `Action`: send "go", relay another peer's frame, or do
 /// nothing (our own echo, or a `Lagged` tick — we keep going either way). The bus
 /// being *closed* is signalled by the stream ending, not by an item here.
-fn bus_action(relayed: Result<Bus, tokio_stream::wrappers::errors::BroadcastStreamRecvError>, id: u64) -> Action {
+fn bus_action(
+    relayed: Result<Bus, tokio_stream::wrappers::errors::BroadcastStreamRecvError>,
+    id: u64,
+) -> Action {
     relayed
         .map(|bus| {
             let from = bus.from;
@@ -368,8 +366,8 @@ fn bus_action(relayed: Result<Bus, tokio_stream::wrappers::errors::BroadcastStre
                 .map(|data| {
                     // Another peer's frame is relayed; our own echo is skipped.
                     (from != id)
-                        .then(|| Action::relay(from, data))
-                        .unwrap_or_else(Action::noop)
+                        .then_some(Action::relay(from, data))
+                        .unwrap_or(Action::noop())
                 })
                 // No payload == the "go" start signal.
                 .unwrap_or_else(Action::go)
@@ -398,8 +396,7 @@ async fn perform_action(
         .map(|data| {
             *sent_in += 1;
             ((*sent_in == 1) | sent_in.is_multiple_of(300))
-                .then(|| println!("relay: peer {id} -> {sent_in} input frames forwarded"))
-                .unwrap_or(());
+                .then(|| println!("relay: peer {id} -> {sent_in} input frames forwarded"));
             let _ = tx.send(Bus::data(id, data));
         })
         .unwrap_or(());
@@ -428,9 +425,7 @@ async fn send_relayed(
 ) -> Result<(), ()> {
     let to_send = relay_to.map(|(from, data)| {
         *sent_out += 1;
-        (*sent_out == 1)
-            .then(|| println!("relay: peer {id} <- first frame from peer {from}"))
-            .unwrap_or(());
+        (*sent_out == 1).then(|| println!("relay: peer {id} <- first frame from peer {from}"));
         Message::binary(data)
     });
     futures_util::future::OptionFuture::from(to_send.map(|msg| sink.send(msg)))

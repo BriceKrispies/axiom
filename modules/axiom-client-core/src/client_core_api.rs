@@ -107,7 +107,11 @@ impl ClientCoreApi {
     /// snapshot's tick is **not older** than the latest applied tick (an equal
     /// tick is allowed and idempotent). Returns whether it was applied; a
     /// snapshot before `Welcome`, or an older snapshot, returns `false`.
-    pub fn accept_snapshot(&mut self, server_tick: u64, last_accepted_client_sequence: u64) -> bool {
+    pub fn accept_snapshot(
+        &mut self,
+        server_tick: u64,
+        last_accepted_client_sequence: u64,
+    ) -> bool {
         let tick = Tick::new(server_tick);
         let ok = (self.state == ConnectionState::Connected) & (tick >= self.latest_server_tick);
         ok.then(|| {
@@ -309,7 +313,7 @@ mod tests {
         }); // 1,2,3
         assert!(c.accept_rejected_intent(2));
         assert_eq!(c.pending_intent_count(), 2); // 1 and 3 remain
-        // Rejecting an absent sequence is a harmless no-op (still Connected).
+                                                 // Rejecting an absent sequence is a harmless no-op (still Connected).
         assert!(c.accept_rejected_intent(99));
         assert_eq!(c.pending_intent_count(), 2);
     }

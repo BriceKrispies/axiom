@@ -71,6 +71,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-canvas2d-backend"
+version = "0.1.0"
+dependencies = [
+ "axiom-host",
+ "axiom-kernel",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-client-core"
 version = "0.1.0"
 dependencies = [
@@ -123,6 +133,7 @@ name = "axiom-retro-fps-browser"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-recording",
  "axiom-windowing",
  "bytemuck",
  "console_error_panic_hook",
@@ -166,6 +177,7 @@ dependencies = [
  "axiom-host",
  "axiom-kernel",
  "bytemuck",
+ "pollster",
  "wasm-bindgen",
  "web-sys",
  "wgpu",
@@ -301,10 +313,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-recording"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-render"
 version = "0.1.0"
 dependencies = [
  "axiom-frame",
+ "axiom-host",
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
@@ -332,6 +352,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-roomed-puzzle"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "console_error_panic_hook",
+ "serde",
+ "toml",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-runtime"
 version = "0.1.0"
 dependencies = [
@@ -350,6 +382,22 @@ dependencies = [
  "axiom-math",
  "axiom-runtime",
  "axiom-zones",
+]
+
+[[package]]
+name = "axiom-sim-core"
+version = "0.1.0"
+dependencies = [
+ "axiom-ecs",
+ "axiom-kernel",
+]
+
+[[package]]
+name = "axiom-sim-crucible"
+version = "0.1.0"
+dependencies = [
+ "axiom-ecs",
+ "axiom-sim-core",
 ]
 
 [[package]]
@@ -376,9 +424,11 @@ dependencies = [
 name = "axiom-windowing"
 version = "0.1.0"
 dependencies = [
+ "axiom-canvas2d-backend",
  "axiom-gpu-backend",
  "axiom-host",
  "axiom-kernel",
+ "axiom-recording",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -1925,6 +1975,7 @@ dependencies = [
  "thiserror 2.0.18",
  "wgpu-core-deps-apple",
  "wgpu-core-deps-emscripten",
+ "wgpu-core-deps-wasm",
  "wgpu-core-deps-windows-linux-android",
  "wgpu-hal",
  "wgpu-types",
@@ -1944,6 +1995,15 @@ name = "wgpu-core-deps-emscripten"
 version = "25.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f09ad7aceb3818e52539acc679f049d3475775586f3f4e311c30165cf2c00445"
+dependencies = [
+ "wgpu-hal",
+]
+
+[[package]]
+name = "wgpu-core-deps-wasm"
+version = "25.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eca8809ad123f6c7f2c5e01a2c7117c4fdfd02f70bd422ee2533f69dfa98756c"
 dependencies = [
  "wgpu-hal",
 ]

@@ -128,7 +128,7 @@ mod tests {
             vec![0],
         ));
         let mat = i.add_material(RenderMaterial::new(3, Vec4::ONE));
-        i.add_object(RenderObject::new(Mat4::IDENTITY, m, mat, true));
+        i.add_object(RenderObject::new(1, Mat4::IDENTITY, m, mat, true));
         assert_eq!(i.clear_color(), [0.1, 0.2, 0.3, 1.0]);
         assert!(i.camera().is_some());
         assert_eq!(i.meshes().len(), 1);

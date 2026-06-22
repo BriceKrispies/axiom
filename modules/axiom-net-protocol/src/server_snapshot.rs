@@ -96,7 +96,10 @@ mod tests {
 
     #[test]
     fn round_trips() {
-        assert_eq!(ServerSnapshot::decode(&sample().encode()).unwrap(), sample());
+        assert_eq!(
+            ServerSnapshot::decode(&sample().encode()).unwrap(),
+            sample()
+        );
     }
 
     #[test]
@@ -110,7 +113,9 @@ mod tests {
 
     #[test]
     fn decode_rejects_a_wrong_kind() {
-        let other = crate::server_event::ServerEvent::new(1, b"").unwrap().encode();
+        let other = crate::server_event::ServerEvent::new(1, b"")
+            .unwrap()
+            .encode();
         assert_eq!(
             ServerSnapshot::decode(&other).unwrap_err().code(),
             KernelErrorCode::InvalidDiscriminant
@@ -121,7 +126,10 @@ mod tests {
     fn every_truncated_prefix_is_rejected() {
         let bytes = sample().encode();
         (0..bytes.len()).for_each(|k| {
-            assert!(ServerSnapshot::decode(&bytes[..k]).is_err(), "prefix {k} must fail");
+            assert!(
+                ServerSnapshot::decode(&bytes[..k]).is_err(),
+                "prefix {k} must fail"
+            );
         });
         assert!(ServerSnapshot::decode(&bytes).is_ok());
     }

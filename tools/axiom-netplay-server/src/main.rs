@@ -144,12 +144,9 @@ async fn tick_loop(game: Shared) {
             g.clients
                 .iter()
                 .map(|c| {
-                    let bytes = NetProtocolApi::encode_server_snapshot(
-                        tick,
-                        c.last_accepted_seq,
-                        &payload,
-                    )
-                    .expect("snapshot payload is within the protocol bound");
+                    let bytes =
+                        NetProtocolApi::encode_server_snapshot(tick, c.last_accepted_seq, &payload)
+                            .expect("snapshot payload is within the protocol bound");
                     (c.sink.clone(), bytes)
                 })
                 .collect()
@@ -209,7 +206,13 @@ async fn serve(stream: TcpStream, game: Shared) {
     };
 
     // 3. Send Welcome. If the socket is already gone, unregister and bail.
-    if sink.lock().await.send(Message::binary(welcome)).await.is_err() {
+    if sink
+        .lock()
+        .await
+        .send(Message::binary(welcome))
+        .await
+        .is_err()
+    {
         game.lock().await.clients.retain(|c| c.id != id);
         return;
     }
@@ -349,8 +352,14 @@ mod tests {
     fn pack_positions_is_four_little_endian_floats() {
         let bytes = pack_positions(&[[1.0, 2.0], [3.0, 4.0]]);
         assert_eq!(bytes.len(), 16);
-        assert_eq!(f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]), 1.0);
-        assert_eq!(f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]), 4.0);
+        assert_eq!(
+            f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            1.0
+        );
+        assert_eq!(
+            f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
+            4.0
+        );
     }
 
     /// End-to-end: a client joins, is welcomed, sends an intent, and sees the
@@ -395,8 +404,7 @@ mod tests {
         let mut moved = false;
         for _ in 0..120 {
             let snap = next_binary(&mut ws).await;
-            let (_tick, last_acked, state) =
-                NetProtocolApi::decode_server_snapshot(&snap).unwrap();
+            let (_tick, last_acked, state) = NetProtocolApi::decode_server_snapshot(&snap).unwrap();
             let p0x = f32::from_le_bytes([state[0], state[1], state[2], state[3]]);
             if last_acked == 1 && p0x > -1.5 {
                 assert!((p0x - (-1.4)).abs() < 1e-4, "player 0 moved right by 0.1");
@@ -404,7 +412,10 @@ mod tests {
                 break;
             }
         }
-        assert!(moved, "an authoritative snapshot reflected the client's intent");
+        assert!(
+            moved,
+            "an authoritative snapshot reflected the client's intent"
+        );
     }
 
     async fn next_binary(

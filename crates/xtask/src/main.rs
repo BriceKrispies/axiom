@@ -95,16 +95,20 @@ fn parse_root(rest: &[String]) -> Result<PathBuf, String> {
                 // arg must itself be `--root`, otherwise it is unexpected.
                 state
                     .awaiting_value
-                    .then(|| Ok(State {
-                        root: Some(PathBuf::from(arg)),
-                        awaiting_value: false,
-                    }))
+                    .then(|| {
+                        Ok(State {
+                            root: Some(PathBuf::from(arg)),
+                            awaiting_value: false,
+                        })
+                    })
                     .unwrap_or_else(|| {
                         (arg.as_str() == "--root")
-                            .then(|| Ok(State {
-                                root: state.root.clone(),
-                                awaiting_value: true,
-                            }))
+                            .then(|| {
+                                Ok(State {
+                                    root: state.root.clone(),
+                                    awaiting_value: true,
+                                })
+                            })
                             .unwrap_or_else(|| Err(format!("unexpected argument `{arg}`")))
                     })
             })

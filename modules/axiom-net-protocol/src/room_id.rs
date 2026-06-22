@@ -23,15 +23,13 @@ impl RoomId {
     pub(crate) fn new(bytes: &[u8]) -> KernelResult<Self> {
         let len = bytes.len();
         let valid = (len != 0) & (len <= MAX_ROOM_ID_LEN);
-        valid
-            .then(|| RoomId(bytes.to_vec()))
-            .ok_or_else(|| {
-                KernelError::new(
-                    KernelErrorScope::Message,
-                    KernelErrorCode::OutOfBounds,
-                    "room id must be non-empty and within the maximum length",
-                )
-            })
+        valid.then(|| RoomId(bytes.to_vec())).ok_or_else(|| {
+            KernelError::new(
+                KernelErrorScope::Message,
+                KernelErrorCode::OutOfBounds,
+                "room id must be non-empty and within the maximum length",
+            )
+        })
     }
 
     /// The room id bytes.
@@ -78,7 +76,10 @@ mod tests {
     #[test]
     fn max_length_id_is_accepted() {
         let exact = vec![b'y'; MAX_ROOM_ID_LEN];
-        assert_eq!(RoomId::new(&exact).unwrap().as_bytes().len(), MAX_ROOM_ID_LEN);
+        assert_eq!(
+            RoomId::new(&exact).unwrap().as_bytes().len(),
+            MAX_ROOM_ID_LEN
+        );
     }
 
     #[test]

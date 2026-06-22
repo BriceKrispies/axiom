@@ -35,9 +35,9 @@ pub(crate) fn decode_move(command: &FrameCommand) -> Option<(u32, Vec3)> {
         .and_then(|mut r| {
             r.read_u32().ok().and_then(|player| {
                 r.read_f32().ok().and_then(|x| {
-                    r.read_f32().ok().and_then(|y| {
-                        r.read_f32().ok().map(|z| (player, Vec3::new(x, y, z)))
-                    })
+                    r.read_f32()
+                        .ok()
+                        .and_then(|y| r.read_f32().ok().map(|z| (player, Vec3::new(x, y, z))))
                 })
             })
         })

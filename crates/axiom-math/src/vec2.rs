@@ -84,9 +84,7 @@ impl Vec2 {
         valid
             .then_some(len)
             .map(|len| Vec2::new(self.x / len, self.y / len))
-            .ok_or_else(|| {
-                MathError::normalize_zero_length("cannot normalize zero-length Vec2")
-            })
+            .ok_or_else(|| MathError::normalize_zero_length("cannot normalize zero-length Vec2"))
     }
 
     /// Euclidean distance between `self` and `other`.
@@ -126,8 +124,7 @@ impl Reflect for Vec2 {
     }
 
     fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        f32::reflect_read(reader)
-            .and_then(|x| f32::reflect_read(reader).map(|y| Vec2::new(x, y)))
+        f32::reflect_read(reader).and_then(|x| f32::reflect_read(reader).map(|y| Vec2::new(x, y)))
     }
 }
 

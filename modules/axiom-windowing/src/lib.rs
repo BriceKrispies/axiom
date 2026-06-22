@@ -27,4 +27,9 @@
 
 mod windowing_api;
 
+// The shared dev frame-scrubber overlay, mounted by the wasm32 run loop so every
+// browser game gets it. Platform-edge (owns DOM), so wasm32-only and internal.
+#[cfg(target_arch = "wasm32")]
+mod frame_scrubber;
+
 pub use windowing_api::WindowingApi;

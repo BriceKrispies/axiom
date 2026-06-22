@@ -29,6 +29,9 @@
 //! `tests/architecture.rs::lib_exports_are_curated_set` — any accidental
 //! widening fails the build.
 
+mod frame_packet;
+mod frame_raster_stats;
+mod frame_submission_report;
 mod host_adapter_request;
 mod host_alpha_mode;
 mod host_api;
@@ -94,3 +97,19 @@ pub use host_presentation_status::HostPresentationStatus;
 pub use host_presentation_target::HostPresentationTarget;
 pub use host_surface_descriptor::HostSurfaceDescriptor;
 pub use host_surface_handle::HostSurfaceHandle;
+
+// Backend-neutral frame presentation packet + uniform submission report. The
+// single artifact every render backend (GPU now, Canvas 2D later) consumes /
+// returns. Primitive-only, browser/GPU-free — derived from a render command
+// list by axiom-render. See frame_packet.rs / frame_submission_report.rs.
+pub use frame_packet::FrameCamera;
+pub use frame_packet::FrameDrawItem;
+pub use frame_packet::FrameFeatureSet;
+pub use frame_packet::FrameLight;
+pub use frame_packet::FramePacket;
+pub use frame_packet::FrameViewport;
+pub use frame_raster_stats::FrameDepthCueStats;
+pub use frame_raster_stats::FrameRasterStats;
+pub use frame_submission_report::BackendKind;
+pub use frame_submission_report::FrameFeature;
+pub use frame_submission_report::FrameSubmissionReport;

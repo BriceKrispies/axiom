@@ -82,14 +82,14 @@ impl RuntimeScheduler {
                 RuntimeErrorCode::DuplicateSystemId,
                 "system id is already registered",
             ));
-        let duplicate_order = self
-            .entries
-            .iter()
-            .any(|e| e.order == order)
-            .then_some(RuntimeError::new(
-                RuntimeErrorCode::DuplicateSystemOrder,
-                "another system already uses this order value",
-            ));
+        let duplicate_order =
+            self.entries
+                .iter()
+                .any(|e| e.order == order)
+                .then_some(RuntimeError::new(
+                    RuntimeErrorCode::DuplicateSystemOrder,
+                    "another system already uses this order value",
+                ));
         // The first duplicate (id, then order) wins; absent both, register.
         duplicate_id.or(duplicate_order).map_or_else(
             || {
@@ -142,15 +142,19 @@ impl RuntimeScheduler {
         // `stop_on_error`, it yields `ControlFlow::Break` and the remaining
         // systems are never touched — the branchless equivalent of the old
         // `if failed && stop_on_error { break }`.
-        let _walk: std::ops::ControlFlow<()> =
-            self.entries.iter_mut().try_fold((), |(), entry| {
-                let result = entry.system.run(ctx);
-                let failed = result.is_err();
-                outcomes.push(SystemOutcome::new(entry.id, entry.name, entry.order, result));
-                (failed & stop_on_error)
-                    .then_some(std::ops::ControlFlow::Break(()))
-                    .unwrap_or(std::ops::ControlFlow::Continue(()))
-            });
+        let _walk: std::ops::ControlFlow<()> = self.entries.iter_mut().try_fold((), |(), entry| {
+            let result = entry.system.run(ctx);
+            let failed = result.is_err();
+            outcomes.push(SystemOutcome::new(
+                entry.id,
+                entry.name,
+                entry.order,
+                result,
+            ));
+            (failed & stop_on_error)
+                .then_some(std::ops::ControlFlow::Break(()))
+                .unwrap_or(std::ops::ControlFlow::Continue(()))
+        });
         outcomes
     }
 }

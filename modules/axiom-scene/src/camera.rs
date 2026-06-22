@@ -1,6 +1,9 @@
 //! Perspective camera component.
 
-use axiom_kernel::{FieldSchema, Meters, Radians, Ratio, TypeSchema};
+use axiom_kernel::{
+    BinaryReader, BinaryWriter, FieldSchema, KernelResult, Meters, Radians, Ratio, Reflect,
+    TypeSchema,
+};
 use axiom_math::{Mat4, MathApi};
 
 use crate::scene_error::SceneError;
@@ -92,6 +95,35 @@ impl Camera {
                 "camera projection was rejected by the math layer",
                 cause,
             )
+        })
+    }
+}
+
+impl Reflect for Camera {
+    const SCHEMA: TypeSchema = Camera::SCHEMA;
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.fovy_radians.reflect_write(writer);
+        self.aspect.reflect_write(writer);
+        self.near.reflect_write(writer);
+        self.far.reflect_write(writer);
+    }
+
+    /// Reconstruct directly from the stored intrinsics. The quantity types
+    /// re-validate finiteness on read; the perspective *relationship* was
+    /// validated when the camera was first built.
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        Radians::reflect_read(reader).and_then(|fovy_radians| {
+            Ratio::reflect_read(reader).and_then(|aspect| {
+                Meters::reflect_read(reader).and_then(|near| {
+                    Meters::reflect_read(reader).map(|far| Camera {
+                        fovy_radians,
+                        aspect,
+                        near,
+                        far,
+                    })
+                })
+            })
         })
     }
 }
@@ -194,5 +226,15 @@ mod tests {
         assert_eq!(Camera::SCHEMA.fields().len(), 4);
         assert_eq!(Camera::SCHEMA.fields()[0].name(), "fovy_radians");
         assert_eq!(Camera::SCHEMA.fields()[3].name(), "far");
+    }
+
+    #[test]
+    fn reflect_round_trips_and_rejects_truncation() {
+        let c = Camera::perspective(&math(), rad(1.2), rat(16.0 / 9.0), m(0.5), m(500.0)).unwrap();
+        let mut w = BinaryWriter::new();
+        c.reflect_write(&mut w);
+        let got = Camera::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap();
+        assert_eq!(got, c);
+        assert!(Camera::reflect_read(&mut BinaryReader::new(&[])).is_err());
     }
 }

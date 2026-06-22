@@ -21,17 +21,31 @@
 //! physics, animation, and gameplay without any of them depending on each other.
 //!
 //! ## Public surface
-//! [`World`] (the facade), [`EntityRegistry`] (live entities), [`ComponentColumn`]
-//! (a sparse per-type store), [`WorldSystem`] (per-frame behavior), and
-//! [`SchedulePhase`] (whether a system runs at startup or every update). Curated
-//! set enforced by `tests/architecture.rs::lib_exports_are_curated_set`.
+//! [`EcsApi`] is the documented entry point that constructs the layer's
+//! primitives. Those primitives stay public so consumers can name them:
+//! [`World`] (the world model) over a [`ColumnSet`] of [`ComponentColumn`]s,
+//! [`EntityRegistry`] minting generational [`EntityHandle`]s, [`Query`] over
+//! columns, [`CommandBuffer`] (+ [`CommandReport`]/[`CommandOutcome`]) for
+//! barrier-applied structural change, [`EventBuffer`],
+//! [`TrackedColumn`] (+ [`ChangeKind`]) for change detection, [`ReplayLog`],
+//! [`ComponentTypeId`], [`WorldSystem`]/[`WorldStep`]/[`SchedulePhase`], and
+//! [`ErasedColumn`]/[`DynamicComponents`]. Curated set enforced by
+//! `tests/architecture.rs::lib_exports_are_curated_set`.
 
 mod column_set;
+mod command_buffer;
 mod component_column;
+mod component_type_id;
 mod dynamic_components;
+mod ecs_api;
+mod entity_handle;
 mod entity_registry;
 mod erased_column;
+mod event_buffer;
+mod query;
+mod replay_log;
 mod schedule_phase;
+mod tracked_column;
 mod world;
 mod world_step;
 mod world_system;
@@ -40,11 +54,19 @@ mod world_system;
 mod fixtures;
 
 pub use column_set::ColumnSet;
+pub use command_buffer::{CommandBuffer, CommandOutcome, CommandReport};
 pub use component_column::ComponentColumn;
+pub use component_type_id::ComponentTypeId;
 pub use dynamic_components::DynamicComponents;
+pub use ecs_api::EcsApi;
+pub use entity_handle::EntityHandle;
 pub use entity_registry::EntityRegistry;
 pub use erased_column::ErasedColumn;
+pub use event_buffer::EventBuffer;
+pub use query::Query;
+pub use replay_log::ReplayLog;
 pub use schedule_phase::SchedulePhase;
+pub use tracked_column::{ChangeKind, TrackedColumn};
 pub use world::World;
 pub use world_step::WorldStep;
 pub use world_system::WorldSystem;

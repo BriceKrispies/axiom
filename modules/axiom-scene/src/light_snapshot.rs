@@ -33,6 +33,16 @@ impl LightSnapshot {
         self.kind
     }
 
+    /// Whether this is a point light. A boolean primitive so a consumer that
+    /// cannot name [`LightKind`] across the module facade (only `SceneApi` is
+    /// exported) can still branch directional-vs-point — a directional light's
+    /// geometry is a world direction, a point light's is its node's world
+    /// position. Branchless at the call site via the bool.
+    pub const fn is_point(&self) -> bool {
+        // Fieldless-enum predicate by integer discriminant, no `match`.
+        (self.kind as u8) == (LightKind::Point as u8)
+    }
+
     pub const fn color(&self) -> Vec3 {
         self.color
     }
@@ -62,6 +72,25 @@ mod tests {
         assert_eq!(s.kind(), LightKind::Point);
         assert_eq!(s.color().x, 0.5);
         assert_eq!(s.intensity().get(), 3.0);
+        assert!(s.is_point());
+    }
+
+    #[test]
+    fn is_point_distinguishes_the_two_kinds() {
+        let dir = LightSnapshot::new(
+            SceneNodeId::from_raw(1),
+            LightKind::Directional,
+            Vec3::ONE,
+            rat(1.0),
+        );
+        let pt = LightSnapshot::new(
+            SceneNodeId::from_raw(1),
+            LightKind::Point,
+            Vec3::ONE,
+            rat(1.0),
+        );
+        assert!(!dir.is_point());
+        assert!(pt.is_point());
     }
 
     #[test]

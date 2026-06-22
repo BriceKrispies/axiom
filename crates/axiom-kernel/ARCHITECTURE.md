@@ -47,6 +47,13 @@ Determinism is the kernel's reason to exist. Concretely:
   whose order is not guaranteed.
 - **Checked arithmetic.** Tick/offset/length math is saturating or checked and
   surfaces overflow as a `KernelError`, never a silent wrap or panic.
+- **Replay is a primitive, not an afterthought.** Time has a *data* companion:
+  `ReplayTimeline<T>` records a sequence and replays it through a saturating
+  cursor (deterministic, rewindable, never panics or runs off the end), and
+  `TickDivider` runs work at a whole-number sub-rate of the fixed step (fire
+  every N ticks). Together with `Tick`/`SimulationClock`/`FixedStep` they let any
+  layer record-and-replay deterministically without re-rolling cursor/cadence
+  math by hand.
 
 ## Public surface: facade + curated primitives
 
@@ -78,6 +85,15 @@ The trade-off is enforced rather than left to discipline:
   feature semantics; domain quantities (light intensity, colour channels,
   viewport pixels) deliberately stay out of the kernel and live in the
   layer/module that owns that domain. Each is the only public type in its file.
+- The **deterministic replay primitives** (`ReplayTimeline<T>`, `TickDivider`)
+  are the data half of the clock: higher layers store and replay recorded
+  sequences (ghost paths, input timelines, demos) and schedule sub-rate work on
+  the fixed step. `ReplayTimeline<T>` is, deliberately, the kernel's **first
+  type-generic primitive** — the recorded item belongs to the caller (a move, a
+  command, an event), not the kernel, so genericity is essential here and the
+  alternative (an opaque byte buffer) would be strictly worse. It carries no
+  domain semantics: cadence lives in `TickDivider`, meaning stays with the
+  caller, and each remains the only public type in its file.
 - The binary-serialization primitives (`BinaryWriter`, `BinaryReader`,
   `SchemaVersion`) and layer-manifest types are nameable, because higher layers
   build and **version** their own wire formats on them — e.g. Layer 5

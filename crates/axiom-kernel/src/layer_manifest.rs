@@ -113,11 +113,9 @@ impl LayerManifest {
                 "the kernel layer (index 0) must declare no dependencies",
             ))
             .and_then(|()| {
-                self.dependencies
-                    .iter()
-                    .try_for_each(|dependency| {
-                        LayerImportRule::validate(self.index, dependency.layer())
-                    })
+                self.dependencies.iter().try_for_each(|dependency| {
+                    LayerImportRule::validate(self.index, dependency.layer())
+                })
             })
     }
 }

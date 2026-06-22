@@ -296,7 +296,11 @@ impl ResourcesApi {
         resolved.texture_at(idx).map(|t| t.id().raw())
     }
 
-    pub fn resolved_texture_width(&self, resolved: &ResolvedResources, texture_id: u64) -> Option<u32> {
+    pub fn resolved_texture_width(
+        &self,
+        resolved: &ResolvedResources,
+        texture_id: u64,
+    ) -> Option<u32> {
         resolved
             .texture_by_id(ResourceId::from_raw(texture_id))
             .map(|t| t.width())
@@ -649,7 +653,10 @@ mod tests {
         assert_eq!(api.biome_atlas_cell_origin(0), (0.0, 0.0));
         assert_eq!(api.biome_atlas_cell_origin(3), (0.5, 0.5));
         // Out-of-range biome ids wrap into the 4-cell grid.
-        assert_eq!(api.biome_atlas_cell_origin(4), api.biome_atlas_cell_origin(0));
+        assert_eq!(
+            api.biome_atlas_cell_origin(4),
+            api.biome_atlas_cell_origin(0)
+        );
     }
 
     #[test]

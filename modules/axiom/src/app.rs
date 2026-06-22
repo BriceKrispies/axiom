@@ -10,7 +10,7 @@
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
-use axiom_kernel::{Radians, Ratio};
+use axiom_kernel::{KernelResult, Radians, Ratio};
 use axiom_math::{MathApi, Vec3};
 use axiom_render_pipeline::RenderPipelineApi;
 use axiom_runtime::{Runtime, RuntimeConfig};
@@ -29,7 +29,7 @@ const DEFAULT_SURFACE_ID: &str = "axiom-surface";
 use crate::assets::Assets;
 use crate::controller::FirstPersonInput;
 use crate::default_plugins::DefaultPlugins;
-use crate::frame_outcome::{DrawData, FrameOutcome};
+use crate::frame_outcome::{DrawData, FrameOutcome, LightData};
 use crate::material::Material;
 use crate::mesh::Mesh;
 use crate::mesh_geometry::{mesh_geometry, MeshGeometry};
@@ -126,10 +126,21 @@ impl App {
         let meshes = running.mesh_set();
         let materials = running.material_textures();
         let max_instances = running.renderable_count() as u32;
-        let _ = windowing.run_web_multi(&surface_id, meshes, materials, max_instances, move |tick| {
-            let outcome = running.tick(tick);
-            (outcome.clear_color(), outcome.mesh_batches())
-        });
+        let _ =
+            windowing.run_web_multi(&surface_id, meshes, materials, max_instances, move |tick| {
+                let outcome = running.tick(tick);
+                let lights = outcome
+                    .lights()
+                    .iter()
+                    .map(|l| (l.kind(), l.vec(), l.color(), l.intensity()))
+                    .collect();
+                (
+                    outcome.clear_color(),
+                    lights,
+                    outcome.light_view_proj(),
+                    outcome.mesh_batches(),
+                )
+            });
     }
 }
 
@@ -466,10 +477,23 @@ impl RunningApp {
                             .expect("draw index in range");
                         DrawData::new(
                             view_projection.multiply(world).as_cols_array(),
+                            world.as_cols_array(),
                             color,
                             mesh_id,
                             material_id,
                         )
+                    })
+                    .collect();
+
+                // The frame's resolved lights (directional + point), threaded to
+                // the live backend's lighting uniform.
+                let light_count = pipeline.report_light_count(&report);
+                let lights: Vec<LightData> = (0..light_count)
+                    .map(|i| {
+                        let (kind, vec, color, intensity) = pipeline
+                            .report_light_at(&report, i)
+                            .expect("light index in range");
+                        LightData::new(kind, vec, color, intensity)
                     })
                     .collect();
 
@@ -478,11 +502,31 @@ impl RunningApp {
                     pipeline.report_command_count(&report),
                     pipeline.report_clear_color(&report),
                     draws,
+                    lights,
+                    pipeline.report_light_view_proj(&report),
                     pipeline.report_presented(&report),
                     pipeline.report_recorded(&report),
                 )
             })
             .unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
+    }
+
+    /// Serialize the durable simulation state — the scene world (entity identity,
+    /// component columns, and the player/controller maps) — to bytes, so a caller
+    /// can record it per frame and later fork from a recorded frame. The per-frame
+    /// engine machinery (runtime, driver, frame builder) is deliberately excluded:
+    /// under continue-forward resume the tick keeps advancing and only the scene
+    /// state is restored. Pair with [`Self::restore_sim`].
+    pub fn snapshot_sim(&self) -> Vec<u8> {
+        self.scene.snapshot_state()
+    }
+
+    /// Restore the simulation state from bytes produced by [`Self::snapshot_sim`]
+    /// — forking the world to that recorded frame. Live play then resumes from the
+    /// restored scene with the tick continuing forward. A truncated or
+    /// version-incompatible buffer returns a deterministic error.
+    pub fn restore_sim(&mut self, bytes: &[u8]) -> KernelResult<()> {
+        self.scene.restore_state(bytes)
     }
 }
 
@@ -497,9 +541,8 @@ fn interleave_vertices(geom: &MeshGeometry) -> Vec<f32> {
         .zip(geom.normals.iter())
         .zip(geom.uvs.iter())
         .for_each(|((p, n), uv)| {
-            vertices.extend_from_slice(&[
-                p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0,
-            ])
+            vertices
+                .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0])
         });
     vertices
 }
@@ -670,6 +713,34 @@ mod tests {
             still.draws(),
             "a camera move must change the rendered frame"
         );
+    }
+
+    #[test]
+    fn snapshot_sim_round_trips_through_restore_into_a_fresh_app() {
+        // Drive the camera a few frames so the controller accumulates real state,
+        // snapshot the sim, then restore those bytes into a FRESH app and confirm
+        // it re-serializes byte-identically — the fork reproduces the exact world.
+        let mut app = controller_app().build();
+        (0..3).for_each(|i| {
+            app.tick_with_controls(
+                i,
+                &[],
+                &[FirstPersonInput::new(
+                    0,
+                    Vec3::new(0.0, 0.0, -0.3),
+                    Angle::radians(0.2),
+                    Angle::radians(0.1),
+                )],
+            );
+        });
+        let bytes = app.snapshot_sim();
+
+        let mut forked = controller_app().build();
+        forked.restore_sim(&bytes).unwrap();
+        assert_eq!(forked.snapshot_sim(), bytes);
+
+        // A truncated buffer is a deterministic error, not a panic.
+        assert!(forked.restore_sim(&[7, 7, 7]).is_err());
     }
 
     #[test]

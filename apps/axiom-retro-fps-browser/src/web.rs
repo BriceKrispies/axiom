@@ -7,17 +7,17 @@
 //! Touch/keyboard: the gallery's synthetic-key on-screen pad — ←/→ turn, ↑/↓
 //! move, FIRE — and arrows/WASD/Space — all still work alongside the mouse.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use axiom::prelude::FrameOutcome;
+use axiom::prelude::{FrameOutcome, RunningApp};
 use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, EventSource, KeyboardEvent, MessageEvent, MouseEvent, WebSocket};
 
-use crate::level::LevelDoc;
 use super::{build_retro_fps_app, reload_retro_fps, RetroFpsGame, Hud as GameHud, Intent, CANVAS_ID};
+use crate::level::LevelDoc;
 
 /// Radians of look per pixel of mouse movement.
 const MOUSE_SENSITIVITY: f32 = 0.0025;
@@ -103,9 +103,10 @@ pub fn start() {
     let hud = Hud::mount();
 
     let doc = LevelDoc::default();
-    let mut game = RetroFpsGame::from_level(&doc);
-    let mut running = build_retro_fps_app(&doc);
-    let (vertices, indices) = running.mesh_vertex_stream();
+    let game = Rc::new(RefCell::new(RetroFpsGame::from_level(&doc)));
+    let running_app = build_retro_fps_app(&doc);
+    let (vertices, indices) = running_app.mesh_vertex_stream();
+    let running = Rc::new(RefCell::new(running_app));
     // Size the live backend's per-instance buffer to the grid's capacity (not the
     // current renderable count), so a reload can add walls/enemies up to the full
     // grid without exceeding the buffer.
@@ -116,21 +117,28 @@ pub fn start() {
         .configure_surface(960, 600)
         .expect("surface dimensions are valid");
 
-    let mut tick: u64 = 0;
-    let _ = windowing.run_web(
-        CANVAS_ID,
-        vertices,
-        indices,
-        max_instances,
-        move |_raf_tick| {
+    let tick = Rc::new(Cell::new(0_u64));
+
+    // Fork hooks for the scrubber: snapshot serializes the engine scene
+    // (`snapshot_sim`) framed with the retro FPS game state (`write_state`); restore
+    // splits the two back apart and reinstates both, so a fork resumes the live
+    // game from the recorded frame's exact state.
+    let snapshot = make_snapshot(&running, &game);
+    let restore = make_restore(&running, &game);
+
+    let frame = {
+        let game = game.clone();
+        let running = running.clone();
+        let tick = tick.clone();
+        move |_raf_tick: u64| {
             // Apply a pending level edit at this tick boundary: rebuild the game
             // and re-author the engine scene in place. The engine tick keeps
             // counting (the host driver requires a monotone sequence); only the
             // game and scene contents reset to the new document.
             if let Some(text) = pending_level.borrow_mut().take() {
                 let new_doc = LevelDoc::parse(&text);
-                game = RetroFpsGame::from_level(&new_doc);
-                reload_retro_fps(&mut running, &new_doc);
+                *game.borrow_mut() = RetroFpsGame::from_level(&new_doc);
+                reload_retro_fps(&mut running.borrow_mut(), &new_doc);
                 log("level reloaded from edit");
             }
 
@@ -149,21 +157,77 @@ pub fn start() {
                 .map(|r| merge_remote(&mut intent, &r.borrow()))
                 .unwrap_or(false);
 
-            let commands = game.step(intent);
-            let outcome = running.tick_with_controls(tick, &commands.enemies, &[commands.control]);
-            tick += 1;
+            let commands = game.borrow_mut().step(intent);
+            let now = tick.get();
+            let outcome =
+                running
+                    .borrow_mut()
+                    .tick_with_controls(now, &commands.enemies, &[commands.control]);
+            tick.set(now + 1);
             hud.update(&commands.hud);
 
             if let Some(r) = &remote {
-                send_observation(r, tick, &commands.hud, &outcome, render_now);
+                send_observation(r, tick.get(), &commands.hud, &outcome, render_now);
             }
             (
                 outcome.clear_color(),
                 outcome.instance_floats(),
                 outcome.draws().len() as u32,
             )
-        },
+        }
+    };
+
+    let _ = windowing.run_web_forkable(
+        CANVAS_ID,
+        vertices,
+        indices,
+        max_instances,
+        frame,
+        snapshot,
+        restore,
     );
+}
+
+/// Build the scrubber's snapshot hook: serialize the engine scene + retro FPS game
+/// state for the current frame, framed as `[u32 scene_len][scene][game]`.
+fn make_snapshot(
+    running: &Rc<RefCell<RunningApp>>,
+    game: &Rc<RefCell<RetroFpsGame>>,
+) -> Rc<dyn Fn() -> Vec<u8>> {
+    let running = running.clone();
+    let game = game.clone();
+    Rc::new(move || {
+        let scene = running.borrow().snapshot_sim();
+        let game_bytes = game.borrow().write_state();
+        let mut out = Vec::with_capacity(4 + scene.len() + game_bytes.len());
+        out.extend_from_slice(&(scene.len() as u32).to_le_bytes());
+        out.extend_from_slice(&scene);
+        out.extend_from_slice(&game_bytes);
+        out
+    })
+}
+
+/// Build the scrubber's restore hook: split `[u32 scene_len][scene][game]` and
+/// reinstate both the engine scene (`restore_sim`) and the retro FPS game state
+/// (`read_state`). A malformed buffer is ignored.
+fn make_restore(
+    running: &Rc<RefCell<RunningApp>>,
+    game: &Rc<RefCell<RetroFpsGame>>,
+) -> Rc<dyn Fn(&[u8])> {
+    let running = running.clone();
+    let game = game.clone();
+    Rc::new(move |bytes: &[u8]| {
+        let split = bytes
+            .get(0..4)
+            .and_then(|h| <[u8; 4]>::try_from(h).ok())
+            .map(u32::from_le_bytes)
+            .map(|n| n as usize)
+            .and_then(|n| bytes.get(4..4 + n).map(|scene| (scene, &bytes[4 + n..])));
+        if let Some((scene, game_bytes)) = split {
+            let _ = running.borrow_mut().restore_sim(scene);
+            game.borrow_mut().read_state(game_bytes);
+        }
+    })
 }
 
 /// Subscribe to live level edits over Server-Sent Events. The `axiom-dev-reload`
@@ -538,7 +602,9 @@ impl Hud {
              border-radius:8px;white-space:nowrap;",
         )
         .expect("style hint");
-        hint.set_text_content(Some("Click to look · WASD move · click to fire · Esc to release"));
+        hint.set_text_content(Some(
+            "Click to look · WASD move · click to fire · Esc to release",
+        ));
         wrap.append_child(&hint).expect("append hint");
 
         Hud { bar, hint }

@@ -117,15 +117,13 @@ fn inject(item: TokenStream, injected: proc_macro2::TokenStream) -> TokenStream 
                 let with_body = m.content.as_mut().map(|(_brace, items)| {
                     items.insert(0, syn::parse_quote! { #injected_for_mod });
                 });
-                with_body
-                    .map(|()| quote! { #m })
-                    .unwrap_or_else(|| {
-                        syn::Error::new_spanned(
-                            &m,
-                            "a zone marker on a module requires an inline `mod name { ... }` body",
-                        )
-                        .to_compile_error()
-                    })
+                with_body.map(|()| quote! { #m }).unwrap_or_else(|| {
+                    syn::Error::new_spanned(
+                        &m,
+                        "a zone marker on a module requires an inline `mod name { ... }` body",
+                    )
+                    .to_compile_error()
+                })
             })
         })
         .or_else(|_| {

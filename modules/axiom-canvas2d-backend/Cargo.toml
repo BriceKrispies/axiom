@@ -1,0 +1,44 @@
+[package]
+name = "axiom-canvas2d-backend"
+description = "Axiom engine module: the software, last-resort Canvas 2D presentation backend. A pure, native-testable rasterizer turns a backend-neutral host::FramePacket into 2D draw ops; the thin wasm32 arm interprets them against a CanvasRenderingContext2d. Same shared frame structure as the GPU backend, degraded but recognizable."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. The rasterizer core is browser-free and wasm-clean; the real
+# web-sys arm never enters this rlib's native build.
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module", allowed_modules = []): it composes
+# NO other module. It builds on the host layer's deterministic presentation
+# boundary (HostPresentationRequest) and consumes the backend-neutral
+# host::FramePacket, returning a host::FrameSubmissionReport.
+axiom-host = { path = "../../crates/axiom-host" }
+
+[dev-dependencies]
+# Tests construct a HostPresentationRequest via the host API, which takes a
+# kernel handle source. Test-only, so it never counts as a non-test dependency.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+# The live presentation arm: real web-sys, pulled in ONLY for wasm32, so native
+# `cargo test`/coverage never compiles it and the facade stays browser-free.
+# Sanctioned platform-facing module (Module Law #9 / PLATFORM_FACING_MODULES).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "CssStyleDeclaration",
+    "CanvasRenderingContext2d",
+    "ImageData",
+    "Window",
+    "Performance",
+    "console",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

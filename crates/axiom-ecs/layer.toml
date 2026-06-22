@@ -23,7 +23,7 @@ crate_name = "axiom-ecs"
 depends_on = ["kernel", "frame"]
 meaningful_dependency = "ECS consumes the kernel `EntityId` for stable, ordered, serializable entity identity, and the frame contract (`FrameContext`) to advance its registered world systems once per engine frame — gated on `is_skipped` / `runtime_step_count`, the same way `axiom-scene::advance` is — exposing the single generic world store every feature module and app composes on."
 
-introduced_capabilities = ["World", "EntityRegistry", "ComponentColumn", "WorldSystem", "WorldStep", "SchedulePhase", "ErasedColumn", "ColumnSet", "DynamicComponents"]
+introduced_capabilities = ["EcsApi", "World", "EntityRegistry", "EntityHandle", "ComponentColumn", "ComponentTypeId", "Query", "CommandBuffer", "EventBuffer", "TrackedColumn", "ReplayLog", "WorldSystem", "WorldStep", "SchedulePhase", "ErasedColumn", "ColumnSet", "DynamicComponents"]
 
 consumed_capabilities = ["EntityId", "FrameContext"]
 

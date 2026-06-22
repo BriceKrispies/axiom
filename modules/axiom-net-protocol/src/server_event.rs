@@ -92,7 +92,9 @@ mod tests {
 
     #[test]
     fn decode_rejects_a_wrong_kind() {
-        let other = crate::server_snapshot::ServerSnapshot::new(1, 1, b"").unwrap().encode();
+        let other = crate::server_snapshot::ServerSnapshot::new(1, 1, b"")
+            .unwrap()
+            .encode();
         assert_eq!(
             ServerEvent::decode(&other).unwrap_err().code(),
             KernelErrorCode::InvalidDiscriminant
@@ -103,7 +105,10 @@ mod tests {
     fn every_truncated_prefix_is_rejected() {
         let bytes = sample().encode();
         (0..bytes.len()).for_each(|k| {
-            assert!(ServerEvent::decode(&bytes[..k]).is_err(), "prefix {k} must fail");
+            assert!(
+                ServerEvent::decode(&bytes[..k]).is_err(),
+                "prefix {k} must fail"
+            );
         });
         assert!(ServerEvent::decode(&bytes).is_ok());
     }

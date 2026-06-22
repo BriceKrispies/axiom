@@ -152,9 +152,9 @@ impl Simulant for MockSimulant {
         let s = inputs.iter().fold(seed, |acc, (peer, kind, payload)| {
             let acc = acc.rotate_left(7) ^ peer.wrapping_mul(0xD1B5_4A32_D192_ED03);
             let acc = acc.wrapping_add(*kind as u64);
-            payload
-                .iter()
-                .fold(acc, |a, &b| (a ^ b as u64).wrapping_mul(0x0000_0100_0000_01B3))
+            payload.iter().fold(acc, |a, &b| {
+                (a ^ b as u64).wrapping_mul(0x0000_0100_0000_01B3)
+            })
         });
         self.state = s;
         s.to_le_bytes().to_vec()

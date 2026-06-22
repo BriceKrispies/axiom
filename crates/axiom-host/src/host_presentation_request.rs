@@ -49,8 +49,7 @@ impl HostPresentationRequest {
         // reject null ids and the fields are private), so the only binding
         // failure that can actually occur is an inconsistent adapter/device
         // pairing.
-        let inconsistent =
-            device.require_presentation() & !adapter.require_presentation_surface();
+        let inconsistent = device.require_presentation() & !adapter.require_presentation_surface();
         (!inconsistent)
             .then_some(HostPresentationRequest {
                 target,

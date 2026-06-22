@@ -222,7 +222,10 @@ mod tests {
             NetProtocolApi::message_kind(&bytes).unwrap(),
             NetProtocolApi::KIND_LEAVE_ROOM
         );
-        assert_eq!(NetProtocolApi::decode_leave_room(&bytes).unwrap(), b"lobby".to_vec());
+        assert_eq!(
+            NetProtocolApi::decode_leave_room(&bytes).unwrap(),
+            b"lobby".to_vec()
+        );
     }
 
     #[test]
@@ -293,7 +296,9 @@ mod tests {
     #[test]
     fn encoders_surface_validation_failures() {
         assert_eq!(
-            NetProtocolApi::encode_join_room(0, b"r", b"").unwrap_err().code(),
+            NetProtocolApi::encode_join_room(0, b"r", b"")
+                .unwrap_err()
+                .code(),
             KernelErrorCode::InvalidId
         );
         assert_eq!(
@@ -302,7 +307,9 @@ mod tests {
         );
         let big = vec![0u8; NetProtocolApi::MAX_PAYLOAD_LEN + 1];
         assert_eq!(
-            NetProtocolApi::encode_server_event(0, &big).unwrap_err().code(),
+            NetProtocolApi::encode_server_event(0, &big)
+                .unwrap_err()
+                .code(),
             KernelErrorCode::OutOfBounds
         );
     }
@@ -313,7 +320,9 @@ mod tests {
         // A Welcome frame is server→client; decoding it as a client→server
         // ClientIntent must fail on the kind discriminant.
         assert_eq!(
-            NetProtocolApi::decode_client_intent(&welcome).unwrap_err().code(),
+            NetProtocolApi::decode_client_intent(&welcome)
+                .unwrap_err()
+                .code(),
             KernelErrorCode::InvalidDiscriminant
         );
     }
