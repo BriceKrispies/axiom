@@ -111,6 +111,22 @@ export const DEMOS = [
     // panel) owns its own page, copied into dist/roomed-puzzle/ by the assembler.
     page: "roomed-puzzle/index.html",
   },
+  {
+    id: "quintet",
+    title: "Quintet",
+    blurb: "Drag 5-cell blocks onto a 10×10 board and fill rows and columns to clear them for score.",
+    desc:
+      "A deterministic block-breaking placement game on the engine. Drag the " +
+      "generated quintet (a 5-cell polyomino) from the side panel onto the 10×10 " +
+      "board; fill any whole row or column to clear it, and clear several lines at " +
+      "once for bonus points. Every offered piece is a real orthogonally-connected " +
+      "pentomino guaranteed to fit somewhere — generation is seeded from the board, " +
+      "score, and move count, so a given state always yields the same next piece. " +
+      "When nothing fits, the board reports a stuck state and you press Reset.",
+    // Self-hosted: the drag-and-drop canvas game owns its own page, copied into
+    // dist/quintet/ by the assembler.
+    page: "quintet/index.html",
+  },
 ];
 
 /** Look a demo up by its `id`, or `null` when unknown. */

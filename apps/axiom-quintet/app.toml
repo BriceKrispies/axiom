@@ -1,0 +1,29 @@
+# Axiom app manifest — axiom-quintet.
+#
+# Quintet is a block-breaking placement game: drag a generated 5-cell quintet
+# onto a 10x10 board, fill whole rows/columns to clear them for score. It is
+# built as an app — a composition leaf — on purpose: apps are exempt from the
+# branchless and 100%-coverage spine gates, so the gameplay rules (board, piece
+# masks, placement, clearing, scoring, generation) live here.
+#
+# It depends on exactly ONE engine layer, the kernel, and genuinely so: the
+# kernel's `DeterministicRng` is the seeded pseudo-random source that makes
+# quintet generation a pure function of (board, score, move-count). The game
+# never reads a wall clock or unseeded entropy.
+#
+# It depends on NO module. The game is a 2D grid: it renders itself on a 2D
+# `<canvas>` in its wasm-only `web` arm (the same app-local presentation pattern
+# axiom-roomed-puzzle and axiom-growth use), not through the engine's 3D
+# instanced-cube render path. Declaring the `engine`/`windowing` modules here
+# would be a ceremonial dependency, so they are omitted. See ARCHITECTURE.md for
+# the full rationale.
+
+[app]
+name = "quintet"
+crate_name = "axiom-quintet"
+
+allowed_layers = [
+    "kernel",
+]
+
+allowed_modules = []

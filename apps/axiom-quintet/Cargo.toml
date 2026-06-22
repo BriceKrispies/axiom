@@ -1,0 +1,43 @@
+[package]
+name = "axiom-quintet"
+description = "Quintet: a deterministic block-breaking placement game built as an Axiom app. Drag a generated 5-cell quintet onto a 10x10 board; fill rows and columns to clear them for score. Every generated quintet is a real orthogonally-connected pentomino that is guaranteed to fit somewhere on the current board — generation is deterministic, seeded from the board, score, and move count via the kernel's DeterministicRng, so a given game state always produces the same next piece. The pure game core is plain Rust on the kernel; the in-browser surface is the wasm-only `web` arm (a 2D canvas with pointer drag-and-drop). Apps are composition leaves, exempt from the branchless and 100%-coverage spine gates."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# `cdylib` for the wasm browser surface (the `web` module's `#[wasm_bindgen]`
+# entries); `rlib` so the native test suite still builds and exercises the
+# deterministic game core.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The one engine layer this app genuinely builds on: the kernel's deterministic
+# pseudo-random source (`DeterministicRng`) is what makes quintet generation a
+# pure function of board state, score, and move count — the game never reads a
+# wall clock or unseeded entropy. Listed in app.toml's `allowed_layers`.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+# Browser entry only: the wasm-bindgen glue, a panic hook, and the DOM/2D-canvas
+# the play surface binds to. Confined to wasm32, so native
+# `cargo test --workspace` never compiles them and the deterministic core stays
+# browser-free.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "DomRect",
+    "MouseEvent",
+    "console",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
