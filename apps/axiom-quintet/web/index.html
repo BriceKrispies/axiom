@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Quintet</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 14px; padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif; background: #15171c; color: #d7dbe2;
+      }
+      h1 { font-size: 20px; font-weight: 700; margin: 0; }
+      .sub { color: #9aa3b2; font-size: 13px; max-width: 720px; text-align: center; }
+      #axiom-quintet-canvas {
+        max-width: 96vw; image-rendering: pixelated;
+        border: 1px solid #2a2e36; border-radius: 10px; background: #15171c;
+        cursor: grab; touch-action: none;
+      }
+      #axiom-quintet-canvas:active { cursor: grabbing; }
+      #status {
+        font: 13px ui-monospace, monospace; color: #9fd1ff; min-height: 1.4em;
+        text-align: center;
+      }
+      .row { display: flex; gap: 10px; align-items: center; }
+      button {
+        background: #2f6df0; color: #fff; border: 0; border-radius: 7px;
+        padding: 9px 16px; font: 600 13px system-ui; cursor: pointer;
+      }
+      button:hover { background: #3b79ff; }
+      .hint { color: #9aa3b2; font-size: 12px; }
+      #boot { color: #9aa3b2; }
+    </style>
+  </head>
+  <body>
+    <h1>Quintet</h1>
+    <div class="sub">
+      Drag the generated <strong>quintet</strong> (a 5-cell block) from the panel onto the
+      10×10 board. Fill any whole row or column to clear it — clear several at once for
+      bonus points. Every piece is guaranteed to fit somewhere.
+    </div>
+    <div id="boot" class="hint">booting…</div>
+
+    <canvas id="axiom-quintet-canvas" width="640" height="488"></canvas>
+
+    <div id="status">Drag the quintet onto the board.</div>
+    <div class="row">
+      <button id="btn-reset">↺ Reset board</button>
+    </div>
+
+    <script type="module">
+      const v = Date.now();
+      const wasm = await import(`./pkg/axiom_quintet.js?v=${v}`);
+      const wasmUrl = new URL(`./pkg/axiom_quintet_bg.wasm?v=${v}`, import.meta.url);
+      const boot = document.getElementById("boot");
+      try {
+        await wasm.default({ module_or_path: wasmUrl });
+      } catch (e) {
+        boot.textContent = "Startup failed: " + e;
+        boot.style.color = "#e07a7a";
+        throw e;
+      }
+      wasm.start();
+      boot.style.display = "none";
+
+      document.getElementById("btn-reset").addEventListener("click", () => wasm.reset());
+    </script>
+  </body>
+</html>

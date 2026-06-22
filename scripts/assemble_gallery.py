@@ -39,6 +39,7 @@ DEMO_PKGS = {
 DEMO_PAGES = {
     "growth": "apps/axiom-growth/web",
     "roomed-puzzle": "apps/axiom-roomed-puzzle/web",
+    "quintet": "apps/axiom-quintet/web",
 }
 
 
