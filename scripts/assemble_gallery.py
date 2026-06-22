@@ -38,6 +38,7 @@ DEMO_PKGS = {
 # demo id (== dist subdir) -> the app's web/ directory.
 DEMO_PAGES = {
     "growth": "apps/axiom-growth/web",
+    "roomed-puzzle": "apps/axiom-roomed-puzzle/web",
 }
 
 

@@ -53,6 +53,13 @@ STRESS_WEB       := $(STRESS_DIR)/web
 STRESS_PKG       := $(STRESS_WEB)/pkg
 STRESS_PORT      ?= 8000
 
+# The roomed-puzzle editor/playtest browser app (apps/axiom-roomed-puzzle).
+ROOMED_DIR       := apps/axiom-roomed-puzzle
+ROOMED_CRATE     := axiom-roomed-puzzle
+ROOMED_ARTIFACT  := target/$(WASM_TARGET)/release/axiom_roomed_puzzle.wasm
+ROOMED_WEB       := $(ROOMED_DIR)/web
+ROOMED_PKG       := $(ROOMED_WEB)/pkg
+
 GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
@@ -238,11 +245,13 @@ gallery-build:
 	cargo build -p $(DOOM_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(STRESS_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(GROWTH_CRATE) --target $(WASM_TARGET) --release
+	cargo build -p $(ROOMED_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(PKG_DIR) $(WASM_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(DOOM_PKG) $(DOOM_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(STRESS_PKG) $(STRESS_ARTIFACT)
 	wasm-bindgen --target web --out-dir $(GROWTH_PKG) $(GROWTH_ARTIFACT)
+	wasm-bindgen --target web --out-dir $(ROOMED_PKG) $(ROOMED_ARTIFACT)
 	npm --prefix packages/axiom-client install --no-audit --no-fund
 	npm --prefix packages/axiom-client run build
 	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_WEB)/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"

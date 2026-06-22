@@ -96,6 +96,21 @@ export const DEMOS = [
     // its card links to its own page (copied into dist/growth/ by the assembler).
     page: "growth/index.html",
   },
+  {
+    id: "roomed-puzzle",
+    title: "Roomed Puzzle",
+    blurb: "Leave ghosts of your past runs on the buttons, then walk the live block through the doors they open.",
+    desc:
+      "A deterministic top-down grid puzzle on the engine. Walk a block one cell " +
+      "at a time (WASD / arrows); press Q to freeze the current run into a ghost " +
+      "that replays your exact path on a fixed 0.5s step, and R to restart. " +
+      "Ghosts are solid and hold buttons open — so the way through a locked door " +
+      "is to leave a ghost on the button and walk the live block through. " +
+      "Includes an in-browser level editor + playtest with TOML import/export.",
+    // Self-hosted: the editor/playtest flow (canvas + TOML textarea + validation
+    // panel) owns its own page, copied into dist/roomed-puzzle/ by the assembler.
+    page: "roomed-puzzle/index.html",
+  },
 ];
 
 /** Look a demo up by its `id`, or `null` when unknown. */
