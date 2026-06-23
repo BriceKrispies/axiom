@@ -71,6 +71,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-browser-dev-harness"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-canvas2d-backend"
 version = "0.1.0"
 dependencies = [

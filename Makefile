@@ -67,11 +67,19 @@ QUINTET_ARTIFACT := target/$(WASM_TARGET)/release/axiom_quintet.wasm
 QUINTET_WEB      := $(QUINTET_DIR)/web
 QUINTET_PKG      := $(QUINTET_WEB)/pkg
 
+# The browser debug-overlay developer harness (apps/axiom-browser-dev-harness).
+HARNESS_DIR      := apps/axiom-browser-dev-harness
+HARNESS_CRATE    := axiom-browser-dev-harness
+HARNESS_ARTIFACT := target/$(WASM_TARGET)/release/axiom_browser_dev_harness.wasm
+HARNESS_WEB      := $(HARNESS_DIR)/web
+HARNESS_PKG      := $(HARNESS_WEB)/pkg
+HARNESS_PORT     ?= 8000
+
 GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay doom doom-build doom-hot stress stress-build growth growth-build agent agent-render agent-bridge gallery gallery-build ts-gate help
+.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay doom doom-build doom-hot stress stress-build growth growth-build harness harness-build agent agent-render agent-bridge gallery gallery-build ts-gate help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -99,6 +107,11 @@ help:
 	@echo "  make stress-build  Rebuild the stress wasm bundle into its web/pkg"
 	@echo "  make stress        Serve the stress page at http://localhost:$(STRESS_PORT)"
 	@echo "  (open with ?cubes=N, or click the presets, to change the cube count.)"
+	@echo ""
+	@echo "  Browser debug-overlay developer harness:"
+	@echo "  make harness-build Rebuild the harness wasm bundle into its web/pkg"
+	@echo "  make harness       Serve the harness page at http://localhost:$(HARNESS_PORT)"
+	@echo "  (press the backquote key in the page to open the debug overlay.)"
 	@echo ""
 	@echo "  Mobile-first demo gallery (what deploy-pages.yml publishes):"
 	@echo "  make gallery-build Build both wasm demos and assemble $(DIST_DIR)/"
@@ -221,6 +234,21 @@ growth:
 	@echo Serving Growth terrain viewer at http://localhost:$(GROWTH_PORT) - run make growth-build first if blank
 	@echo Open it in a WebGPU browser. Click to capture the mouse, WASD to move, mouse to look.
 	uv run --no-project python -m http.server $(GROWTH_PORT) --directory $(GROWTH_WEB)
+
+# --- Browser debug-overlay developer harness (apps/axiom-browser-dev-harness) ---
+
+# Rebuild the harness wasm bundle (same raw cargo + wasm-bindgen flow).
+harness-build:
+	cargo build -p $(HARNESS_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(HARNESS_PKG) $(HARNESS_ARTIFACT)
+
+# Serve the harness page. Run `make harness-build` first if blank. Open in any
+# browser and press the backquote (`) key to toggle the debug overlay; type
+# `help` in its console.
+harness:
+	@echo Serving debug-overlay harness at http://localhost:$(HARNESS_PORT) - run make harness-build first if blank
+	@echo Press the backquote key in the page to open the overlay. Ctrl+C to stop.
+	uv run --no-project python -m http.server $(HARNESS_PORT) --directory $(HARNESS_WEB)
 
 # --- Agent bridge: drive + watch the DOOM game from outside the engine ---
 
