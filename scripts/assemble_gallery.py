@@ -40,6 +40,10 @@ DEMO_PAGES = {
     "growth": "apps/axiom-growth/web",
     "roomed-puzzle": "apps/axiom-roomed-puzzle/web",
     "quintet": "apps/axiom-quintet/web",
+    # The debug-overlay developer harness owns its own page; its pkg is also
+    # loaded by the shared shell (gallery.js) to mount the overlay over every
+    # other demo, so it must ship even though it is self-hosted.
+    "harness": "apps/axiom-browser-dev-harness/web",
 }
 
 
