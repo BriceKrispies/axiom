@@ -127,6 +127,22 @@ export const DEMOS = [
     // dist/quintet/ by the assembler.
     page: "quintet/index.html",
   },
+  {
+    id: "harness",
+    title: "Debug Overlay",
+    blurb: "A backquote-toggled developer debug overlay + command console for the engine's browser surface.",
+    desc:
+      "Developer tooling on the engine surface: a debug overlay with live frame / " +
+      "fps / backend read-outs and a tiny command console (help, overlay.*, " +
+      "diagnostics.snapshot, backend.report, …). Press the backquote key (`) to " +
+      "toggle it; Shift / Ctrl / Alt + backquote cycle density, pin, or focus the " +
+      "console. Values come from a replaceable stub provider for now. The same " +
+      "overlay also rides on top of the other demos in this gallery — open any of " +
+      "them and press backquote.",
+    // Self-hosted: the harness owns its page (a split light/dark canvas + the
+    // overlay), copied into dist/harness/ by the assembler.
+    page: "harness/index.html",
+  },
 ];
 
 /** Look a demo up by its `id`, or `null` when unknown. */
@@ -216,6 +232,26 @@ function mountCubeBar(host, demo, current) {
   requestAnimationFrame(loop);
 }
 
+// Load the standalone debug-overlay harness wasm as a second module and mount
+// its backquote-toggled overlay on top of the current demo. Fire-and-forget:
+// failures here (e.g. a gallery built without the harness bundle) only warn —
+// they never block or break the demo. The overlay shows its own stub
+// diagnostics; it does not read the demo's engine state.
+async function mountDebugOverlay() {
+  try {
+    const v = Date.now();
+    const overlay = await import(`./harness/pkg/axiom_browser_dev_harness.js?v=${v}`);
+    const wasmUrl = new URL(
+      `./harness/pkg/axiom_browser_dev_harness_bg.wasm?v=${v}`,
+      import.meta.url,
+    );
+    await overlay.default({ module_or_path: wasmUrl });
+    overlay.start();
+  } catch (e) {
+    console.warn("[gallery] debug overlay unavailable:", e);
+  }
+}
+
 /**
  * Boot the demo named by `?id=` into the page. Mirrors the per-app index.html
  * boot logic (cache-bust, dynamic import, init({module_or_path}), start()), but
@@ -240,6 +276,11 @@ export async function bootDemo() {
   }
   titleEl.textContent = demo.title;
   document.title = "Axiom — " + demo.title;
+
+  // Mount the developer debug overlay over this shared-shell demo (press ` to
+  // open it). Fire-and-forget so it never blocks or breaks the demo — it even
+  // mounts when the demo itself can't start (e.g. no WebGPU available).
+  mountDebugOverlay();
 
   // The canvas the engine binds its surface to; id must match the Rust app.
   const canvas = document.createElement("canvas");
