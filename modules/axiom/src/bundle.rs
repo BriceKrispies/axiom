@@ -14,6 +14,7 @@ use crate::controller::Controller;
 use crate::directional_light::DirectionalLight;
 use crate::player::Player;
 use crate::point_light::PointLight;
+use crate::procanim::ProcAnim;
 use crate::renderable::Renderable;
 use crate::spin::Spin;
 
@@ -32,6 +33,7 @@ pub struct NodeComponent {
     light: Option<DirectionalLight>,
     point_light: Option<PointLight>,
     spin: Option<Spin>,
+    procanim: Option<ProcAnim>,
     player: Option<Player>,
     controller: Option<Controller>,
 }
@@ -46,6 +48,7 @@ impl NodeComponent {
     pub(crate) const KIND_PLAYER: u8 = 4;
     pub(crate) const KIND_CONTROLLER: u8 = 5;
     pub(crate) const KIND_POINT_LIGHT: u8 = 6;
+    pub(crate) const KIND_PROCANIM: u8 = 7;
 
     /// The all-`None` base used by every constructor; each then fills in its one
     /// payload field and sets its `kind`.
@@ -56,6 +59,7 @@ impl NodeComponent {
         light: None,
         point_light: None,
         spin: None,
+        procanim: None,
         player: None,
         controller: None,
     };
@@ -110,6 +114,15 @@ impl NodeComponent {
         }
     }
 
+    /// A procedural-animation component.
+    pub(crate) fn procanim(procanim: ProcAnim) -> Self {
+        NodeComponent {
+            kind: Self::KIND_PROCANIM,
+            procanim: Some(procanim),
+            ..Self::EMPTY
+        }
+    }
+
     /// A player-marker component.
     pub(crate) fn player(player: Player) -> Self {
         NodeComponent {
@@ -151,6 +164,11 @@ impl NodeComponent {
     /// The spin payload, present iff `kind == KIND_SPIN`.
     pub(crate) fn as_spin(&self) -> Option<&Spin> {
         self.spin.as_ref()
+    }
+
+    /// The procedural-animation payload, present iff `kind == KIND_PROCANIM`.
+    pub(crate) fn as_procanim(&self) -> Option<&ProcAnim> {
+        self.procanim.as_ref()
     }
 
     /// The player payload, present iff `kind == KIND_PLAYER`.
@@ -225,6 +243,12 @@ impl Bundle for PointLight {
 impl Bundle for Spin {
     fn apply(self, command: &mut SpawnCommand) {
         command.components.push(NodeComponent::spin(self));
+    }
+}
+
+impl Bundle for ProcAnim {
+    fn apply(self, command: &mut SpawnCommand) {
+        command.components.push(NodeComponent::procanim(self));
     }
 }
 
