@@ -6,10 +6,11 @@
 # branchless and 100%-coverage spine gates, so the gameplay rules (board, piece
 # masks, placement, clearing, scoring, generation) live here.
 #
-# It depends on exactly ONE engine layer, the kernel, and genuinely so: the
-# kernel's `DeterministicRng` is the seeded pseudo-random source that makes
-# quintet generation a pure function of (board, score, move-count). The game
-# never reads a wall clock or unseeded entropy.
+# Its content is procedurally generated through the engine substrate (roadmap
+# Phase 8): generation encodes the game state into a `space` content Address and
+# evaluates a single-draw `proc` recipe at it (digesting the board with the
+# kernel's `StableHash`), so the next piece is a pure function of (board, score,
+# move-count). The game never reads a wall clock or unseeded entropy.
 #
 # It depends on NO module. The game is a 2D grid: it renders itself on a 2D
 # `<canvas>` in its wasm-only `web` arm (the same app-local presentation pattern
@@ -24,6 +25,8 @@ crate_name = "axiom-quintet"
 
 allowed_layers = [
     "kernel",
+    "space",
+    "proc",
 ]
 
 allowed_modules = []

@@ -1,8 +1,13 @@
 //! Deterministic generation of the next quintet — always one that fits.
 //!
-//! Generation is a pure function of `(board, score, move-count)`: those are
-//! folded into a seed for the kernel's [`DeterministicRng`], so a given game
-//! state always produces the same next piece and a whole game is replayable.
+//! Generation is a pure function of `(board, score, move-count)`, routed through
+//! the engine's procedural-generation substrate (Phase 8 of the procgen roadmap:
+//! this app's content is now recipe-driven). The game state is encoded into a
+//! content [`Address`], a single-`draw` [`Recipe`] is evaluated at that address
+//! under a fixed root seed ([`ProcApi`]), and the artifact's drawn word selects
+//! one of the shapes that fit. So a given game state always produces the same next
+//! piece and a whole game is replayable — now on `space`/`entropy`/`proc` rather
+//! than a hand-rolled seed fed to a raw RNG.
 //!
 //! The shape pool is the [`catalog`] of every distinct *fixed* pentomino (all
 //! rotations and reflections) — each one a real 5-cell orthogonally-connected
@@ -11,8 +16,11 @@
 //! on the current board ([`can_place_anywhere`]); the generator picks one of
 //! those. If *no* shape fits, the board is stuck and generation yields `None`.
 
-use axiom_kernel::DeterministicRng;
 use std::collections::BTreeSet;
+
+use axiom_kernel::StableHash;
+use axiom_proc::{ProcApi, Recipe};
+use axiom_space::{Address, SpaceApi};
 
 use crate::board::{Board, BOARD_SIZE};
 use crate::placement::can_place_anywhere;
@@ -55,28 +63,53 @@ pub fn placeable_shapes(board: &Board) -> Vec<QuintetMask> {
         .collect()
 }
 
+/// The fixed root world seed for quintet generation ("Quintet" in ASCII). The
+/// game state supplies the *address*, the recipe supplies the *version*; this is
+/// the constant seed they are keyed under.
+const GENERATION_SEED: u64 = 0x0051_7569_6e74_6574;
+/// The piece-selection recipe version. Bump it to deliberately re-key generation
+/// (and re-golden) — versioning is a first-class input.
+const PIECE_RECIPE_VERSION: u32 = 1;
+
+/// The piece-selection recipe: a single entropy draw whose value selects a shape.
+/// Trivial by design — the substrate, not the recipe, is what this migration
+/// proves; a richer recipe slots in here without touching the call site.
+fn piece_recipe() -> Recipe {
+    let mut recipe = Recipe::new(PIECE_RECIPE_VERSION);
+    recipe.draw();
+    recipe
+}
+
+/// Encode the game state `(board, score, moves)` into a content address: the
+/// board occupancy is digested into one key, then score and moves are appended as
+/// child segments, so distinct states are distinct sites.
+fn site(board: &Board, score: u64, moves: u64) -> Address {
+    let mut occupancy = Vec::with_capacity((BOARD_SIZE * BOARD_SIZE) as usize);
+    for y in 0..BOARD_SIZE as i32 {
+        for x in 0..BOARD_SIZE as i32 {
+            occupancy.push(u8::from(board.is_filled(x, y)));
+        }
+    }
+    let board_key = StableHash::of_bytes(&occupancy).raw();
+    let board_site = SpaceApi::child(&SpaceApi::root(), board_key);
+    let score_site = SpaceApi::child(&board_site, score);
+    SpaceApi::child(&score_site, moves)
+}
+
 /// The next quintet for this board, or `None` when the board is stuck (no shape
-/// fits anywhere). The choice is deterministic in `(board, score, moves)`.
+/// fits anywhere). The choice is deterministic in `(board, score, moves)`,
+/// produced by evaluating [`piece_recipe`] at the state's [`site`] and reducing
+/// the artifact's drawn word over the placeable shapes.
 pub fn generate(board: &Board, score: u64, moves: u64) -> Option<QuintetMask> {
     let placeable = placeable_shapes(board);
     (!placeable.is_empty()).then(|| {
-        let mut rng = DeterministicRng::seeded(seed(board, score, moves));
-        let index = rng.next_bounded(placeable.len() as u64) as usize;
+        let address = site(board, score, moves);
+        let (artifact, _trace) = ProcApi::evaluate(&piece_recipe(), GENERATION_SEED, &address)
+            .expect("the single-draw piece recipe is a valid DAG");
+        let draw = artifact.words()[0];
+        let index = (draw % placeable.len() as u64) as usize;
         placeable[index].clone()
     })
-}
-
-/// Fold the board occupancy, score, and move count into a 64-bit seed (an
-/// FNV-1a hash over the cells, mixed with score and moves).
-fn seed(board: &Board, score: u64, moves: u64) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for y in 0..BOARD_SIZE as i32 {
-        for x in 0..BOARD_SIZE as i32 {
-            hash ^= board.is_filled(x, y) as u64;
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-    hash ^ score.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ moves.rotate_left(32)
 }
 
 #[cfg(test)]
@@ -117,6 +150,27 @@ mod tests {
         let board = Board::empty();
         let differ = (0..32).any(|m| generate(&board, 0, 0) != generate(&board, 0, m));
         assert!(differ, "the move counter must influence generation");
+    }
+
+    #[test]
+    fn recipe_driven_generation_reproduces_across_a_state_sweep() {
+        // Phase 8: every (board, score, moves) state reproduces its piece exactly
+        // when re-evaluated — the substrate keying is fully deterministic.
+        let board = Board::empty();
+        for state in 0..64u64 {
+            let (score, moves) = (state, state * 3 + 1);
+            assert_eq!(generate(&board, score, moves), generate(&board, score, moves));
+        }
+    }
+
+    #[test]
+    fn perturbing_then_restoring_the_state_restores_the_piece() {
+        // Phase 8 metamorphic: a changed state can change the piece, and restoring
+        // the exact state restores the exact piece (the address keys it).
+        let board = Board::empty();
+        let base = generate(&board, 4, 9);
+        assert!((0..32).any(|m| generate(&board, 4, m) != base));
+        assert_eq!(generate(&board, 4, 9), base);
     }
 
     #[test]

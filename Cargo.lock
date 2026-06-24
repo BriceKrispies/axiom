@@ -362,6 +362,8 @@ name = "axiom-quintet"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
+ "axiom-proc",
+ "axiom-space",
  "console_error_panic_hook",
  "wasm-bindgen",
  "web-sys",
