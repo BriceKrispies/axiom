@@ -71,6 +71,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-biome"
+version = "0.1.0"
+dependencies = [
+ "axiom-entropy",
+ "axiom-kernel",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-browser-dev-harness"
 version = "0.1.0"
 dependencies = [
