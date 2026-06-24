@@ -49,6 +49,7 @@ members = [
     "apps/axiom-quintet",
     "apps/axiom-sim-crucible",
     "apps/axiom-browser-dev-harness",
+    "apps/axiom-proc-playground",
     "crates/xtask",
     "tools/axiom-netcode-relay",
     "tools/axiom-netplay-server",
