@@ -1,0 +1,5 @@
+[app]
+name = "proc-playground"
+crate_name = "axiom-proc-playground"
+allowed_layers = ["kernel", "space", "proc", "proc-validate"]
+allowed_modules = []
