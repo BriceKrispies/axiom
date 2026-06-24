@@ -10,7 +10,7 @@
 use crate::board::Board;
 use crate::clearing::{resolve_clears, ClearOutcome};
 use crate::generation::generate;
-use crate::placement::{can_place, commit};
+use crate::placement::{can_place, commit, nearest_valid_anchor};
 use crate::quintet::QuintetMask;
 
 /// The result of attempting to place the current quintet.
@@ -83,6 +83,17 @@ impl QuintetGame {
         self.current
             .as_ref()
             .is_some_and(|mask| can_place(&self.board, mask, anchor_x, anchor_y))
+    }
+
+    /// The valid anchor for the current quintet nearest to `desired`, within a
+    /// Chebyshev `radius`, or `None` when no legal spot is that close (or the
+    /// game is stuck). This drives the "magnetic shadow": the drag preview snaps
+    /// to the closest spot the piece actually fits instead of going red on a
+    /// small misalignment.
+    pub fn snap_anchor(&self, desired: (i32, i32), radius: i32) -> Option<(i32, i32)> {
+        self.current
+            .as_ref()
+            .and_then(|mask| nearest_valid_anchor(&self.board, mask, desired, radius))
     }
 
     /// Try to place the current quintet at `(anchor_x, anchor_y)`. On success the
@@ -181,6 +192,27 @@ mod tests {
         assert_eq!(game.moves(), 0);
         assert!(!game.is_stuck());
         assert!(game.current().is_some());
+    }
+
+    #[test]
+    fn snap_anchor_finds_a_nearby_fit_and_is_none_when_stuck() {
+        let game = QuintetGame::new();
+        // On a fresh empty board there is always a fit near the centre.
+        let snapped = game
+            .snap_anchor((4, 4), 2)
+            .expect("a fit exists near (4,4)");
+        assert!(game.can_place_current(snapped.0, snapped.1));
+
+        // A stuck game snaps to nothing.
+        let mut stuck = QuintetGame::new();
+        for y in 0..BOARD_SIZE as i32 {
+            for x in 0..BOARD_SIZE as i32 {
+                stuck.board.fill(x, y);
+            }
+        }
+        stuck.current = generate(&stuck.board, stuck.score, stuck.moves);
+        assert!(stuck.is_stuck());
+        assert_eq!(stuck.snap_anchor((4, 4), 2), None);
     }
 
     #[test]

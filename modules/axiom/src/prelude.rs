@@ -17,6 +17,7 @@ pub use crate::app::{App, RunningApp};
 pub use crate::assets::Assets;
 pub use crate::camera::{Camera, PerspectiveProjection};
 pub use crate::color::Color;
+pub use crate::contact_shadow_caster::ContactShadowCaster;
 pub use crate::controller::{Controller, FirstPersonInput};
 pub use crate::default_plugins::DefaultPlugins;
 pub use crate::directional_light::DirectionalLight;

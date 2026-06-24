@@ -80,9 +80,9 @@ mod tests {
         // world [9;16]/[8;16]/[7;16]. A textured + an untextured material on one
         // mesh must not merge (the pair, not the mesh, keys a batch).
         let draws = vec![
-            FrameDrawItem::new(0, 7, 5, [9.0; 16], [1.0; 16], [0.1, 0.2, 0.3, 1.0]),
-            FrameDrawItem::new(1, 7, 6, [8.0; 16], [2.0; 16], [0.4, 0.5, 0.6, 1.0]),
-            FrameDrawItem::new(2, 7, 5, [7.0; 16], [3.0; 16], [0.7, 0.8, 0.9, 1.0]),
+            FrameDrawItem::new(0, 7, 5, [9.0; 16], [1.0; 16], [0.1, 0.2, 0.3, 1.0], false),
+            FrameDrawItem::new(1, 7, 6, [8.0; 16], [2.0; 16], [0.4, 0.5, 0.6, 1.0], false),
+            FrameDrawItem::new(2, 7, 5, [7.0; 16], [3.0; 16], [0.7, 0.8, 0.9, 1.0], false),
         ];
         let batches = frame_packet_to_batches(&packet(draws, Vec::new()));
 

@@ -1,0 +1,20 @@
+[package]
+name = "axiom-interface"
+description = "Axiom engine layer: the deterministic, renderer-neutral, platform-neutral interface-surface layer. Owns neutral interface primitives — panels (identified by the kernel's HandleId), integer layout rectangles, visibility, pinning, focus, keyboard/text input as data, a command-console model, and neutral interface draw descriptions. No DOM, no renderer, no debug semantics."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# A root-adjacent layer: it adapts the kernel's HandleId into stable panel/node
+# identity and uses KernelResult/KernelError for fallible operations. It depends
+# on NOTHING else — no runtime/math/host/frame/ecs/introspect, no module, no app.
+axiom-kernel = { path = "../axiom-kernel" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

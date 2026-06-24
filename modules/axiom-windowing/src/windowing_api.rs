@@ -132,6 +132,62 @@ impl WindowingApi {
         tick
     }
 
+    /// Install unified pointer capture (mouse + touch + pen) on the canvas with
+    /// the given id, returning a handle whose [`samples`] the app reads each
+    /// frame and feeds to `axiom_input::TouchControls`. `None` if no such canvas
+    /// exists. wasm32 only — the capture owns DOM PointerEvent listeners.
+    ///
+    /// [`samples`]: crate::pointer_capture::PointerCapture::samples
+    #[cfg(target_arch = "wasm32")]
+    pub fn install_pointer_capture(
+        canvas_id: &str,
+    ) -> Option<crate::pointer_capture::PointerCapture> {
+        find_canvas(canvas_id)
+            .ok()
+            .map(|canvas| crate::pointer_capture::PointerCapture::install(&canvas))
+    }
+
+    /// Read the device safe-area insets (notch / rounded-corner / home-indicator
+    /// margins) the browser exposes via the CSS `env(safe-area-inset-*)` values,
+    /// in CSS pixels `(top, right, bottom, left)`. These are the host facts a
+    /// caller turns into an [`axiom_host::HostSafeAreaInsets`] to attach to its
+    /// viewport (`HostViewport::with_safe_area_insets`), so engine-side UI can be
+    /// laid out clear of system intrusions. Reads via a hidden probe element whose
+    /// padding resolves the `env()` values; `None` if there is no DOM. wasm32 only.
+    #[cfg(target_arch = "wasm32")]
+    pub fn read_safe_area_insets() -> Option<(f32, f32, f32, f32)> {
+        let document = web_sys::window()?.document()?;
+        let body = document.body()?;
+        let probe = document.create_element("div").ok()?;
+        probe
+            .set_attribute(
+                "style",
+                "position:fixed;visibility:hidden;pointer-events:none;top:0;left:0;\
+                 padding-top:env(safe-area-inset-top);\
+                 padding-right:env(safe-area-inset-right);\
+                 padding-bottom:env(safe-area-inset-bottom);\
+                 padding-left:env(safe-area-inset-left);",
+            )
+            .ok()?;
+        body.append_child(&probe).ok()?;
+        let style = web_sys::window()?.get_computed_style(&probe).ok()??;
+        let read = |name: &str| -> f32 {
+            style
+                .get_property_value(name)
+                .ok()
+                .and_then(|v| v.trim_end_matches("px").trim().parse::<f32>().ok())
+                .unwrap_or(0.0)
+        };
+        let insets = (
+            read("padding-top"),
+            read("padding-right"),
+            read("padding-bottom"),
+            read("padding-left"),
+        );
+        let _ = body.remove_child(&probe);
+        Some(insets)
+    }
+
     /// The next tick this driver will hand out.
     pub fn next_tick(&self) -> u64 {
         self.next_tick
@@ -171,6 +227,10 @@ impl WindowingApi {
                 Vec<(u32, [f32; 3], [f32; 3], f32)>,
                 [f32; 16],
                 Vec<(u64, u64, Vec<f32>, u32)>,
+                // Camera view-projection + per-instance contact-shadow caster flags
+                // (batch-expansion order) for the Canvas planar-shadow pass.
+                [f32; 16],
+                Vec<bool>,
             ) + 'static,
     {
         // Scrub-only (no fork hooks). The forkable variant lives in `run_web_forkable`.
@@ -199,6 +259,11 @@ impl WindowingApi {
                 Vec<(u32, [f32; 3], [f32; 3], f32)>,
                 [f32; 16],
                 Vec<(u64, u64, Vec<f32>, u32)>,
+                // The camera view-projection and the per-instance contact-shadow
+                // caster flags (in batch-expansion order) the Canvas planar-shadow
+                // pass needs; the GPU arm ignores both.
+                [f32; 16],
+                Vec<bool>,
             ) + 'static,
     {
         use std::cell::RefCell;
@@ -217,17 +282,22 @@ impl WindowingApi {
             };
             let width = request.descriptor().viewport().physical_width();
             let height = request.descriptor().viewport().physical_height();
+            // Shared so a device-loss rebuild can re-upload the same scene to a
+            // fresh backend (the canvas is a cheap handle; the mesh/material data
+            // is reference-counted).
+            let meshes = Rc::new(meshes);
+            let materials = Rc::new(materials);
             let backend = match select_backend(
                 force_canvas,
                 &request,
-                canvas,
-                &meshes,
-                &materials,
+                canvas.clone(),
+                &meshes[..],
+                &materials[..],
                 max_instances,
             )
             .await
             {
-                Some(backend) => Rc::new(backend),
+                Some(backend) => Rc::new(RefCell::new(backend)),
                 None => return,
             };
 
@@ -236,6 +306,9 @@ impl WindowingApi {
             // re-presents it while scrubbing; forks when hooks are present).
             // `None` if there is no DOM.
             let scrubber = crate::frame_scrubber::FrameScrubber::mount(snapshot, restore);
+            // Set while a device-loss rebuild is in flight, so a surface that
+            // keeps failing every frame spawns exactly one rebuild, not a storm.
+            let reinitializing = Rc::new(std::cell::Cell::new(false));
             let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
             let g = f.clone();
             let win = windowing.clone();
@@ -256,22 +329,67 @@ impl WindowingApi {
                     return;
                 }
                 let tick = win.borrow_mut().step();
+                const IDENTITY_VP: [f32; 16] = [
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+                ];
                 // Live: step the app and record this frame. Scrubbing: freeze the
                 // app (don't call its closure) and re-present the recorded frame.
+                // The canvas planar-shadow inputs (camera + casters) are not
+                // recorded, so scrubbed frames present without contact shadows (a
+                // dev-only path); live frames carry the real values.
                 let present = if scrubbing {
                     scrubber
                         .as_ref()
                         .and_then(|s| s.scrub_frame())
-                        .unwrap_or_else(|| ([0.0; 4], Vec::new(), [0.0; 16], Vec::new()))
+                        .map(|(clear, lights, light_vp, batches)| {
+                            (clear, lights, light_vp, batches, IDENTITY_VP, Vec::<bool>::new())
+                        })
+                        .unwrap_or_else(|| {
+                            ([0.0; 4], Vec::new(), [0.0; 16], Vec::new(), IDENTITY_VP, Vec::new())
+                        })
                 } else {
-                    let (clear, lights, light_vp, batches) = (ff.borrow_mut())(tick);
+                    let (clear, lights, light_vp, batches, camera_vp, casters) =
+                        (ff.borrow_mut())(tick);
                     if let Some(s) = scrubber.as_ref() {
                         s.record(tick, clear, &lights, light_vp, &batches);
                     }
-                    (clear, lights, light_vp, batches)
+                    (clear, lights, light_vp, batches, camera_vp, casters)
                 };
-                let (clear, lights, light_vp, batches) = present;
-                be.present(tick, width, height, clear, &lights, light_vp, &batches);
+                let (clear, lights, light_vp, batches, camera_vp, casters) = present;
+                // Present; an unrecoverable GPU-surface loss (a backgrounded mobile
+                // tab whose context was destroyed) rebuilds the backend off-loop —
+                // re-probing WebGPU → WebGL2 → Canvas2D — and swaps it in, so play
+                // resumes instead of going black.
+                let lost = be
+                    .borrow()
+                    .present(
+                        tick, width, height, clear, &lights, light_vp, &batches, camera_vp,
+                        &casters,
+                    )
+                    .is_err();
+                if lost && !reinitializing.get() {
+                    reinitializing.set(true);
+                    let be = be.clone();
+                    let canvas = canvas.clone();
+                    let meshes = meshes.clone();
+                    let materials = materials.clone();
+                    let flag = reinitializing.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let rebuilt = select_backend(
+                            force_canvas,
+                            &request,
+                            canvas,
+                            &meshes[..],
+                            &materials[..],
+                            max_instances,
+                        )
+                        .await;
+                        rebuilt
+                            .into_iter()
+                            .for_each(|backend| *be.borrow_mut() = backend);
+                        flag.set(false);
+                    });
+                }
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
                     let _ = request_animation_frame(cb);
@@ -323,6 +441,10 @@ impl WindowingApi {
                 lights,
                 NO_SHADOW,
                 vec![(SINGLE_MESH_ID, DEFAULT_MATERIAL_ID, instances, count)],
+                // Single-mesh apps mark no contact-shadow casters, so the camera
+                // is unused (identity) and the caster list is empty.
+                NO_SHADOW,
+                Vec::new(),
             )
         })
     }
@@ -343,7 +465,10 @@ impl WindowingApi {
         restore: std::rc::Rc<dyn Fn(&[u8])>,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
-        F: FnMut(u64) -> ([f32; 4], Vec<f32>, u32) + 'static,
+        // The closure returns the single-mesh instances plus the camera
+        // view-projection and per-instance contact-shadow caster flags (in
+        // instance order) the Canvas planar-shadow pass needs.
+        F: FnMut(u64) -> ([f32; 4], Vec<f32>, u32, [f32; 16], Vec<bool>) + 'static,
     {
         const SINGLE_MESH_ID: u64 = 0;
         const DEFAULT_MATERIAL_ID: u64 = 0;
@@ -358,13 +483,15 @@ impl WindowingApi {
             materials,
             max_instances,
             move |tick| {
-                let (clear, instances, count) = frame_fn(tick);
+                let (clear, instances, count, camera_vp, casters) = frame_fn(tick);
                 let lights = vec![(0_u32, [0.4, 0.7, 0.6], [1.0, 1.0, 1.0], 1.0_f32)];
                 (
                     clear,
                     lights,
                     NO_SHADOW,
                     vec![(SINGLE_MESH_ID, DEFAULT_MATERIAL_ID, instances, count)],
+                    camera_vp,
+                    casters,
                 )
             },
             Some(snapshot),
@@ -484,8 +611,19 @@ impl WindowingApi {
                     (clear, lights, light_vp, batches)
                 };
                 let (clear, lights, light_vp, batches) = present;
-                be.borrow()
-                    .present(tick, width, height, clear, &lights, light_vp, &batches);
+                // The streaming path relies on the binding's own reconfigure-and-
+                // retry for the common backgrounded-tab case; an unrecoverable loss
+                // is ignored here (a full rebuild would discard the streamed-in
+                // geometry), so the present result is explicitly dropped.
+                // Streaming terrain marks no contact-shadow casters: identity
+                // camera, empty caster list (the Canvas planar-shadow pass is a
+                // no-op for it).
+                const NO_CAMERA: [f32; 16] = [
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+                ];
+                let _ = be.borrow().present(
+                    tick, width, height, clear, &lights, light_vp, &batches, NO_CAMERA, &[],
+                );
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
                     let _ = request_animation_frame(cb);
@@ -520,7 +658,10 @@ enum LiveBackend {
 #[cfg(target_arch = "wasm32")]
 impl LiveBackend {
     /// Present one frame. The GPU arm draws the instance `batches` directly; the
-    /// Canvas arm rasterizes a frame packet reconstructed from them.
+    /// Canvas arm rasterizes a frame packet reconstructed from them. Returns
+    /// `Err` only when the GPU surface is **unrecoverably lost** (the run loop
+    /// then rebuilds the backend); a transient hiccup the binding reconfigured
+    /// around, and the always-software Canvas arm, return `Ok`.
     #[allow(clippy::too_many_arguments)]
     fn present(
         &self,
@@ -531,16 +672,27 @@ impl LiveBackend {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_vp: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
-    ) {
+        camera_view_proj: [f32; 16],
+        casters: &[bool],
+    ) -> Result<(), wasm_bindgen::JsValue> {
         match self {
             LiveBackend::Gpu(backend) => {
-                let _ = backend.present_frame(clear, lights, light_vp, batches);
+                backend.present_frame_result(clear, lights, light_vp, batches)
             }
             LiveBackend::Canvas(backend) => {
                 let packet = frame_packet_from_batches(
-                    tick, width, height, clear, lights, light_vp, batches,
+                    tick,
+                    width,
+                    height,
+                    clear,
+                    lights,
+                    light_vp,
+                    batches,
+                    camera_view_proj,
+                    casters,
                 );
                 let _ = backend.present_packet(&packet);
+                Ok(())
             }
         }
     }
@@ -578,8 +730,12 @@ fn frame_packet_from_batches(
     lights: &[(u32, [f32; 3], [f32; 3], f32)],
     light_vp: [f32; 16],
     batches: &[(u64, u64, Vec<f32>, u32)],
+    camera_view_proj: [f32; 16],
+    casters: &[bool],
 ) -> axiom_host::FramePacket {
-    use axiom_host::{FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport};
+    use axiom_host::{
+        FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
+    };
     let mut draws = Vec::new();
     let mut object_id: u64 = 0;
     for (mesh_id, material_id, floats, count) in batches {
@@ -588,8 +744,11 @@ fn frame_packet_from_batches(
             let mvp: [f32; 16] = floats[off..off + 16].try_into().unwrap_or([0.0; 16]);
             let world: [f32; 16] = floats[off + 16..off + 32].try_into().unwrap_or([0.0; 16]);
             let color: [f32; 4] = floats[off + 32..off + 36].try_into().unwrap_or([1.0; 4]);
+            // The caster flags arrive in the same instance order the batches expand
+            // (see `FrameOutcome::mesh_batch_casters`); a missing flag defaults off.
+            let casts = casters.get(object_id as usize).copied().unwrap_or(false);
             draws.push(FrameDrawItem::new(
-                object_id, *mesh_id, *material_id, world, mvp, color,
+                object_id, *mesh_id, *material_id, world, mvp, color, casts,
             ));
             object_id += 1;
         }
@@ -603,12 +762,19 @@ fn frame_packet_from_batches(
     let directional = lights.iter().filter(|(kind, ..)| *kind == 0).count() as u32;
     let point = lights.iter().filter(|(kind, ..)| *kind == 1).count() as u32;
     let features = FrameFeatureSet::new(false, directional > 0, directional, point);
+    // The Canvas backend's planar-shadow pass projects caster geometry through the
+    // camera, so the packet carries the real camera (view/projection are unused by
+    // the software path, so identity is fine; only the view-projection is read).
+    let identity = [
+        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0_f32,
+    ];
+    let camera = Some(FrameCamera::new(identity, identity, camera_view_proj));
     FramePacket::new(
         tick,
         tick,
         FrameViewport::new(width, height),
         clear,
-        None,
+        camera,
         draws,
         frame_lights,
         light_vp,

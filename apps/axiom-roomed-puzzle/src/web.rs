@@ -26,15 +26,28 @@
 //! stays deterministic and replayable regardless of the display refresh rate.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use axiom_host::{HostSafeAreaInsets, HostViewport, Pixels};
+use axiom_input::TouchControls;
+use axiom_kernel::Ratio;
+use axiom_layout::{
+    solve, Direction, LayoutRect, LayoutStyle, LayoutTree, LayoutTreeBuilder, NodeId,
+};
+use axiom_math::Vec2;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, KeyboardEvent, MouseEvent};
+use web_sys::{
+    CanvasRenderingContext2d, HtmlCanvasElement, HtmlElement, KeyboardEvent, MouseEvent,
+    PointerEvent,
+};
 
 use crate::actor_state::ActorKind;
 use crate::app::{Mode, RoomedPuzzleApp};
+use crate::game_command::PuzzleCommand;
 use crate::game_state::TICKS_PER_SECOND;
+use crate::input_mapping::command_for_swipe;
 use crate::group_id::GroupId;
 use crate::render_model::{Elevation, RenderActor, RenderTile};
 use crate::tile_kind::TileKind;
@@ -57,7 +70,27 @@ thread_local! {
     /// The single app instance, shared across the DOM callbacks (single-threaded
     /// wasm, so a plain `RefCell` is enough).
     static APP: RefCell<RoomedPuzzleApp> = RefCell::new(RoomedPuzzleApp::new());
+
+    /// The touch-input synthesizer (swipe scheme), shared across the pointer
+    /// callbacks. Holds the in-progress gesture's anchor between events.
+    static SWIPE: RefCell<TouchControls> = RefCell::new(TouchControls::new());
+
+    /// The set of currently-down pointers (by browser pointer id) in physical
+    /// canvas pixels, the neutral samples fed to [`TouchControls::swipe`].
+    static DOWN_POINTERS: RefCell<BTreeMap<i32, (f32, f32)>> = RefCell::new(BTreeMap::new());
+
+    /// The last `(css_w, css_h, cols, rows)` the layout was solved for, so the
+    /// engine layout is recomputed + reapplied only when the window or grid changes.
+    static LAST_LAYOUT: RefCell<Option<(u32, u32, u32, u32)>> = RefCell::new(None);
 }
+
+/// The fixed panel width (landscape) / height (portrait) the layout reserves for
+/// the editor/playtest side panel, in logical pixels.
+const PANEL_BASIS: f32 = 340.0;
+/// Layout node ids for the board and the side panel.
+const NODE_ROOT: u32 = 0;
+const NODE_BOARD: u32 = 1;
+const NODE_PANEL: u32 = 2;
 
 /// Log a line to the browser console, prefixed so it is easy to spot.
 fn log(msg: &str) {
@@ -91,9 +124,32 @@ pub fn start() {
     console_error_panic_hook::set_once();
     install_canvas_click();
     install_keyboard();
+    install_swipe();
     start_run_loop();
     refresh_editor_ui();
     log("ready");
+}
+
+/// Leave a ghost and reset the current life (the `q` action), wired to the
+/// on-screen Playtest button so touch users have the action keyboard `q` gives.
+#[wasm_bindgen]
+pub fn playtest_freeze() {
+    APP.with(|app| {
+        if let Some(session) = app.borrow_mut().playtest_mut() {
+            session.apply(PuzzleCommand::ResetLifeFromRecording);
+        }
+    });
+}
+
+/// Restart the level fresh (the `r` action), wired to the on-screen Playtest
+/// button so touch users have the action keyboard `r` gives.
+#[wasm_bindgen]
+pub fn playtest_restart() {
+    APP.with(|app| {
+        if let Some(session) = app.borrow_mut().playtest_mut() {
+            session.apply(PuzzleCommand::RestartLevelFresh);
+        }
+    });
 }
 
 // ===========================================================================
@@ -268,6 +324,87 @@ fn install_keyboard() {
     cb.forget();
 }
 
+/// Install unified pointer (touch / mouse / pen) swipe handling on the canvas: in
+/// playtest mode a swipe steps the player one cell in the swiped direction, so
+/// the puzzle is playable without a keyboard. Edit-mode click-painting is
+/// untouched (it runs in the other mode). PointerEvents are the one browser API
+/// that reports touch, mouse, and pen as one shape — the same neutral
+/// `(position, is_down)` samples the engine's `axiom-input` module consumes.
+fn install_swipe() {
+    let Some((canvas, _)) = canvas_context() else {
+        return;
+    };
+    // down / move: record this pointer's physical position, then evaluate.
+    for name in ["pointerdown", "pointermove"] {
+        let target = canvas.clone();
+        let cb = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
+            e.prevent_default();
+            let pos = pointer_position(&target, &e);
+            DOWN_POINTERS.with(|p| {
+                p.borrow_mut().insert(e.pointer_id(), pos);
+            });
+            process_swipe(&target);
+        });
+        canvas
+            .add_event_listener_with_callback(name, cb.as_ref().unchecked_ref())
+            .expect("pointer listener installs");
+        cb.forget();
+    }
+    // up / cancel / leave: the pointer lifts — drop it, then evaluate. This is the
+    // frame on which the swipe gesture completes.
+    for name in ["pointerup", "pointercancel", "pointerleave"] {
+        let target = canvas.clone();
+        let cb = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
+            e.prevent_default();
+            DOWN_POINTERS.with(|p| {
+                p.borrow_mut().remove(&e.pointer_id());
+            });
+            process_swipe(&target);
+        });
+        canvas
+            .add_event_listener_with_callback(name, cb.as_ref().unchecked_ref())
+            .expect("pointer listener installs");
+        cb.forget();
+    }
+}
+
+/// Feed the current down-pointer set to the swipe synthesizer; on a completed
+/// swipe (playtest mode only), step the player one cell. A no-op in edit mode, so
+/// it never interferes with the click painter.
+fn process_swipe(canvas: &HtmlCanvasElement) {
+    if APP.with(|app| app.borrow().mode()) != Mode::Playtest {
+        return;
+    }
+    let surface = Vec2::new(canvas.width() as f32, canvas.height() as f32);
+    let samples: Vec<(Vec2, bool)> = DOWN_POINTERS.with(|p| {
+        p.borrow()
+            .values()
+            .map(|(x, y)| (Vec2::new(*x, *y), true))
+            .collect()
+    });
+    let command = SWIPE
+        .with(|s| s.borrow_mut().swipe(surface, &samples))
+        .and_then(command_for_swipe);
+    if let Some(command) = command {
+        APP.with(|app| {
+            if let Some(session) = app.borrow_mut().playtest_mut() {
+                session.apply(command);
+            }
+        });
+    }
+}
+
+/// A pointer event's client coordinates → physical canvas pixels (the backing
+/// store the swipe synthesizer measures in), independent of CSS scaling.
+fn pointer_position(canvas: &HtmlCanvasElement, e: &PointerEvent) -> (f32, f32) {
+    let rect = canvas.get_bounding_client_rect();
+    let sx = canvas.width() as f64 / rect.width().max(1.0);
+    let sy = canvas.height() as f64 / rect.height().max(1.0);
+    let x = (e.client_x() as f64 - rect.left()) * sx;
+    let y = (e.client_y() as f64 - rect.top()) * sy;
+    (x as f32, y as f32)
+}
+
 // ===========================================================================
 // The fixed-step run loop.
 // ===========================================================================
@@ -315,6 +452,129 @@ fn request_frame(cb: Option<&Closure<dyn FnMut(f64)>>) {
 }
 
 // ===========================================================================
+// Engine-driven responsive layout (mobile-first).
+// ===========================================================================
+
+/// The side-panel element id (must match `web/index.html`).
+const SIDE_ID: &str = "side";
+
+/// Recompute and apply the on-screen layout from the live viewport — but only when
+/// the window size or grid changed. The engine's `axiom-layout` solver decides
+/// where the board and the side panel go: side-by-side in landscape, the panel
+/// stacked *below* the board in portrait, the whole thing inset by the device safe
+/// area. We just apply the solved rectangles to the DOM. The board node carries the
+/// grid's aspect ratio, so its fixed-resolution (`pixelated`) canvas scales crisply
+/// to whatever cell it is given.
+fn sync_layout(cols: u32, rows: u32) {
+    let win = window();
+    let css_w = win
+        .inner_width()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+        .max(1.0);
+    let css_h = win
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+        .max(1.0);
+    let key = (css_w as u32, css_h as u32, cols, rows);
+    if LAST_LAYOUT.with(|last| *last.borrow() == Some(key)) {
+        return;
+    }
+    LAST_LAYOUT.with(|last| *last.borrow_mut() = Some(key));
+
+    let dpr = win.device_pixel_ratio().max(0.5) as f32;
+    let scale = Ratio::new(dpr).unwrap_or_else(|_| Ratio::new(1.0).expect("unit ratio is finite"));
+    let viewport = HostViewport::new(css_w as u32, css_h as u32, scale)
+        .expect("a positive viewport is valid")
+        .with_safe_area_insets(read_safe_area_insets());
+
+    let result = solve(&viewport, &build_layout_tree(cols, rows));
+    position_element(CANVAS_ID, result.rect(NodeId::from_raw(NODE_BOARD)));
+    position_element(SIDE_ID, result.rect(NodeId::from_raw(NODE_PANEL)));
+}
+
+/// The layout tree: an adaptive root (row in landscape, column in portrait) with a
+/// grid-aspect board that grows to fill, and a fixed-size side panel.
+fn build_layout_tree(cols: u32, rows: u32) -> LayoutTree {
+    let mut builder = LayoutTreeBuilder::new();
+    let mut root_style = LayoutStyle::new();
+    root_style.direction = Direction::Adaptive;
+    let root = builder.root(NodeId::from_raw(NODE_ROOT), root_style);
+
+    let mut board = LayoutStyle::new();
+    board.grow = Ratio::new(1.0).expect("unit grow is finite");
+    board.aspect = Ratio::new(cols.max(1) as f32 / rows.max(1) as f32).ok();
+    builder.child(root, NodeId::from_raw(NODE_BOARD), board);
+
+    let mut panel = LayoutStyle::new();
+    panel.basis = Pixels::new(PANEL_BASIS).expect("finite panel basis");
+    builder.child(root, NodeId::from_raw(NODE_PANEL), panel);
+
+    builder.build()
+}
+
+/// Apply a solved rect to a DOM element's absolute position + size (logical px).
+fn position_element(id: &str, rect: Option<LayoutRect>) {
+    let element = document()
+        .get_element_by_id(id)
+        .and_then(|e| e.dyn_into::<HtmlElement>().ok());
+    rect.zip(element).into_iter().for_each(|(r, el)| {
+        let style = el.style();
+        let _ = style.set_property("left", &format!("{}px", r.left().get()));
+        let _ = style.set_property("top", &format!("{}px", r.top().get()));
+        let _ = style.set_property("width", &format!("{}px", r.width().get()));
+        let _ = style.set_property("height", &format!("{}px", r.height().get()));
+    });
+}
+
+/// Read the device safe-area insets the browser exposes via the CSS
+/// `env(safe-area-inset-*)` values, in logical pixels, by measuring a hidden probe
+/// element. Falls back to no insets on any failure.
+fn read_safe_area_insets() -> HostSafeAreaInsets {
+    let doc = document();
+    let values = doc
+        .create_element("div")
+        .ok()
+        .map(|probe| {
+            let _ = probe.set_attribute(
+                "style",
+                "position:fixed;visibility:hidden;top:0;left:0;\
+                 padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);\
+                 padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);",
+            );
+            let _ = doc.body().map(|b| b.append_child(&probe));
+            let read = window()
+                .get_computed_style(&probe)
+                .ok()
+                .flatten()
+                .map(|cs| {
+                    let edge = |name: &str| {
+                        cs.get_property_value(name)
+                            .ok()
+                            .and_then(|v| v.trim_end_matches("px").trim().parse::<f32>().ok())
+                            .unwrap_or(0.0)
+                    };
+                    (
+                        edge("padding-top"),
+                        edge("padding-right"),
+                        edge("padding-bottom"),
+                        edge("padding-left"),
+                    )
+                })
+                .unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let _ = doc.body().map(|b| b.remove_child(&probe));
+            read
+        })
+        .unwrap_or((0.0, 0.0, 0.0, 0.0));
+    let edge = |v: f32| Pixels::new(v.max(0.0)).unwrap_or_else(|_| Pixels::new(0.0).expect("zero"));
+    HostSafeAreaInsets::new(edge(values.0), edge(values.1), edge(values.2), edge(values.3))
+        .unwrap_or_else(|_| HostSafeAreaInsets::none())
+}
+
+// ===========================================================================
 // Rendering — top-down depth cues on a 2D canvas.
 // ===========================================================================
 
@@ -324,6 +584,9 @@ fn draw(app: &RoomedPuzzleApp) {
         return;
     };
     let model = app.render_model();
+    // Let the engine place the board + side panel for the current viewport (the
+    // canvas keeps its fixed grid resolution; the engine sizes its CSS box).
+    sync_layout(model.width as u32, model.height as u32);
     let want_w = (model.width as f64 * CELL_PX) as u32;
     let want_h = (model.height as f64 * CELL_PX) as u32;
     if canvas.width() != want_w {

@@ -1,0 +1,49 @@
+# Axiom layer manifest — axiom-interface.
+#
+# A root-adjacent layer: Axiom layers are a DAG (no index, no "previous layer"),
+# so this declares only the lower layer it genuinely adapts — the kernel. It is
+# NOT appended above introspect; it sits beside crypto/runtime as a kernel
+# adapter. The browser/native rendering of its neutral draw descriptions lives in
+# a platform-facing module that consumes this layer, never here.
+
+[layer]
+name = "interface"
+crate_name = "axiom-interface"
+depends_on = ["kernel"]
+
+meaningful_dependency = """
+Interface adapts the kernel's HandleId — its stable, ordered, hashable opaque
+identity — into stable panel and interface-node identity (PanelId is a HandleId
+newtype, and InterfaceApi mints one per panel). It turns that kernel identity
+primitive into renderer-neutral, platform-neutral interface primitives: panels,
+integer layout rectangles, visibility, pinning, focus, keyboard/text input events
+as data, a command-console model, and neutral interface draw descriptions. It owns
+no DOM, no renderer, no browser binding, and no debug semantics. (The kernel's
+result/error types are available for any future fallible operation; the current
+surface is infallible — panel lookups degrade to no-ops — so it does not yet use
+them, to avoid a ceremonial dependency.)
+"""
+
+introduced_capabilities = [
+  "InterfaceApi",
+  "PanelId",
+  "InterfaceDrawList",
+  "InterfaceDrawItem",
+  "InterfaceInputEvent",
+  "ParsedCommand",
+  "CommandOutcome",
+  "CommandTable",
+  "CommandSpec",
+]
+
+consumed_capabilities = ["HandleId"]
+
+# Proof that the kernel dependency is genuine: InterfaceApi mints panel identity
+# from HandleId, and PanelId is a HandleId newtype.
+[[proof_exports]]
+export = "InterfaceApi"
+must_reference = ["HandleId"]
+
+[[proof_exports]]
+export = "PanelId"
+must_reference = ["HandleId"]

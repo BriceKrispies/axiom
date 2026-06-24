@@ -52,6 +52,7 @@ mod depth_buffer;
 mod frame_packet_raster;
 mod low_poly_raster_options;
 mod mesh_cache;
+mod planar_shadow;
 mod projection;
 mod raster_triangle;
 mod raster_vertex;

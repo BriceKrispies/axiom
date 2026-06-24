@@ -161,8 +161,6 @@ fn vs(
 
 /// Depth-buffer format used by both the camera depth and the shadow map.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-/// Square resolution of the directional shadow map.
-const SHADOW_SIZE: u32 = 2048;
 /// Maximum lights uploaded per frame (must match the WGSL `array<Light, 16>`).
 const MAX_LIGHTS: usize = 16;
 /// Lighting uniform size in bytes: a 16-byte header (count + padding) plus
@@ -222,8 +220,12 @@ impl SceneRenderer {
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
+        shadow_size: u32,
     ) -> SceneRenderer {
         let max_instances = max_instances.max(1);
+        // The shadow-atlas edge length is the device tier's choice
+        // (`HostDeviceProfile::shadow_map_size`), floored to a usable minimum.
+        let shadow_size = shadow_size.max(1);
 
         let meshes: HashMap<u64, MeshBuffers> = meshes
             .iter()
@@ -295,8 +297,8 @@ impl SceneRenderer {
         let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("axiom-shadow-map"),
             size: wgpu::Extent3d {
-                width: SHADOW_SIZE,
-                height: SHADOW_SIZE,
+                width: shadow_size,
+                height: shadow_size,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,

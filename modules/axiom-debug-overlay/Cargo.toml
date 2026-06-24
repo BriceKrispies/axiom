@@ -1,0 +1,45 @@
+[package]
+name = "axiom-debug-overlay"
+description = "Axiom engine module: a developer debug overlay + command console for the browser engine surface. A pure, native-testable, branchless overlay state machine that composes axiom-interface for its generic windowing (panels, visibility/pin/focus, drag, console model, command dispatch, neutral draw list) and adds the debug-specific density, diagnostics model, command set, and Backquote binding behind one facade; the thin wasm32 arm renders the layer's draw list to real DOM. The overlay only ever consumes host-supplied diagnostics — it is a read-out, never engine state."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. The overlay state machine is browser-free and wasm-clean; the
+# real web-sys DOM arm never enters this rlib's native build or the coverage gate.
+crate-type = ["rlib"]
+
+# An *engine module* (kind = "engine-module", allowed_modules = []) that composes
+# the `interface` layer for all generic windowing, and otherwise consumes only
+# primitive diagnostics values handed in by the app, so it names no other module's
+# type. (Apps translate engine facts into these primitives — the Module Law's
+# app-as-translator rule.)
+[dependencies]
+axiom-interface = { path = "../../crates/axiom-interface" }
+
+# The live DOM arm: real web-sys, pulled in ONLY for wasm32, so native
+# `cargo test`/coverage never compiles it and the facade stays browser-free.
+# Sanctioned platform-facing module (Module Law #9 / PLATFORM_FACING_MODULES).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "HtmlHeadElement",
+    "HtmlInputElement",
+    "KeyboardEvent",
+    "PointerEvent",
+    "Event",
+    "EventTarget",
+    "console",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

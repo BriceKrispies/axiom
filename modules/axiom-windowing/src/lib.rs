@@ -32,4 +32,10 @@ mod windowing_api;
 #[cfg(target_arch = "wasm32")]
 mod frame_scrubber;
 
+// Unified pointer capture (mouse + touch + pen) for mobile-first input. Owns DOM
+// PointerEvent listeners, so wasm32-only and internal; reached through the
+// `WindowingApi` facade and fed to the `axiom-input` synthesizer by the app.
+#[cfg(target_arch = "wasm32")]
+mod pointer_capture;
+
 pub use windowing_api::WindowingApi;

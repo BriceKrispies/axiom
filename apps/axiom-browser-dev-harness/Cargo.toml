@@ -1,6 +1,6 @@
 [package]
 name = "axiom-browser-dev-harness"
-description = "Axiom browser/WASM developer harness: a debug overlay + tiny command console, toggled by the physical Backquote key, mounted over a bare canvas. App-side developer tooling only — the deterministic engine spine never learns about the DOM, keyboard, CSS, or command text. The overlay logic (density, command registry, keyboard mapping, diagnostics snapshot) is pure and native-tested; the DOM controller is the thin wasm32 edge."
+description = "Axiom browser/WASM developer harness for the debug overlay. A thin app: it mounts the axiom-debug-overlay module's overlay over a bare canvas and feeds it real browser-side diagnostics (RAF-measured fps/frame-time, a frame counter, document visibility, and a navigator.gpu capability probe with the engine's webgpu→webgl2 fallback semantics). All overlay logic now lives in the module; this app is just the host that wires it up."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -9,32 +9,23 @@ rust-version.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# This app has NO engine dependencies: the overlay reports diagnostics through a
-# replaceable stub provider, so nothing engine-shaped is needed to drive the
-# overlay machinery. All non-DOM logic compiles + tests on native; the DOM glue
-# is confined to wasm32 below.
-
-# Browser entry only: the wasm-bindgen glue, a panic hook, and the DOM surface
-# the overlay is drawn into. Confined to wasm32, so native `cargo test
-# --workspace` never compiles them — and never needs a browser to test the
-# overlay's logic.
+# Browser entry only: the overlay module (composed via its DebugOverlayApi
+# facade — Module Law: apps compose modules), the wasm-bindgen glue, a panic
+# hook, and the bits of web-sys the harness needs to MEASURE real diagnostics
+# (RAF, the performance clock, document visibility, the navigator.gpu probe). The
+# overlay is used only from the wasm entry, so — like retro_fps's windowing dep — it
+# lives here, confined to wasm32, and native `cargo test --workspace` compiles
+# nothing of this app.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = [
     "Window",
+    "Navigator",
     "Document",
-    "Element",
-    "Node",
-    "HtmlElement",
-    "HtmlHeadElement",
-    "HtmlInputElement",
-    "KeyboardEvent",
-    "Event",
-    "EventTarget",
     "Performance",
-    "console",
 ] }
 
 [lints.rust]

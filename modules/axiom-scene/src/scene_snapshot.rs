@@ -62,6 +62,7 @@ impl SceneSnapshot {
                     r.mesh(),
                     r.material(),
                     r.visible(),
+                    r.casts_contact_shadow(),
                 ));
             });
         });
@@ -273,6 +274,7 @@ mod cov {
             MeshRef::from_raw(1),
             MaterialRef::from_raw(1),
             true,
+            false,
         )
     }
 

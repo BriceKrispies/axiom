@@ -412,6 +412,26 @@ impl Scene {
                 storage.controllers = controllers;
             })
     }
+
+    /// Mark whether the renderable on `node` casts a contact shadow (a discrete
+    /// dynamic object opts in; level geometry stays `false`). Lives in this second
+    /// `impl Scene` block so the main block stays within the impl-size budget.
+    pub(crate) fn set_renderable_casts_contact_shadow(
+        &mut self,
+        node: SceneNodeId,
+        casts: bool,
+    ) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .renderables
+            .get_mut(Self::entity(node))
+            .map(|r| r.set_casts_contact_shadow(casts))
+            .ok_or_else(|| {
+                SceneError::missing_renderable(
+                    "set_renderable_casts_contact_shadow: node has no renderable",
+                )
+            })
+    }
 }
 
 /// Read the `players` map: a count then that many `(entity, index)` pairs.
@@ -681,12 +701,17 @@ mod tests {
                 .code(),
             SceneErrorCode::MissingNode
         );
-        // Toggle visibility present + missing.
+        // Toggle visibility + contact-shadow casting, present + missing. (The
+        // caster value flowing through to a snapshot is asserted in the
+        // render-pipeline tests.)
         s.set_renderable_visible(n, false).unwrap();
+        s.set_renderable_casts_contact_shadow(n, true).unwrap();
         assert_eq!(
-            s.set_renderable_visible(SceneNodeId::from_raw(99), true)
-                .unwrap_err()
-                .code(),
+            s.set_renderable_visible(SceneNodeId::from_raw(99), true).unwrap_err().code(),
+            SceneErrorCode::MissingRenderable
+        );
+        assert_eq!(
+            s.set_renderable_casts_contact_shadow(SceneNodeId::from_raw(99), true).unwrap_err().code(),
             SceneErrorCode::MissingRenderable
         );
         s.remove_renderable(n).unwrap();

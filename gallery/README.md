@@ -23,15 +23,22 @@ drives the demos with **no changes to engine/app input code**.
 
 ## Build & preview locally
 
-The deploy bundle is assembled into `dist/` by the same `wasm-bindgen` flow the
-demos already use:
+`make gallery` is the **main driver** — the one command to browse the whole
+engine surface during development. It builds every browser demo's wasm bundle
+(the same `wasm-bindgen` flow the demos already use), assembles the deploy bundle
+into `dist/`, and serves it locally:
 
 ```sh
-make gallery-build     # build both wasm demos + assemble dist/
-make gallery           # serve dist/ at http://localhost:8000
+make gallery           # build ALL demos + assemble dist/ + serve at http://localhost:8000
 ```
 
-Then open <http://localhost:8000/> in a WebGPU browser.
+Then open <http://localhost:8000/> in a WebGPU browser. Two narrower targets back
+it, for when you don't need the full cycle:
+
+```sh
+make gallery-serve     # re-serve the already-built dist/ WITHOUT rebuilding (fast restart)
+make gallery-build     # build all demos + assemble dist/ only, no serve (what deploy-pages.yml runs)
+```
 
 ## Adding a demo
 
@@ -39,8 +46,11 @@ Then open <http://localhost:8000/> in a WebGPU browser.
    surface to a canvas id (see the two existing browser apps).
 2. Add an entry to `DEMOS` in `gallery.js` (`id`, `title`, `dir`, `jsModule`,
    `canvasId`, and the `buttons` its keypad should show — empty for none).
-3. Add its build + a `cp` into `dist/<dir>/pkg` to the deploy workflow and the
-   `gallery-build` make recipe.
+3. Wire its build into three places (kept in lockstep): a `cargo build` +
+   `wasm-bindgen` pair in the `gallery-build` make recipe and in
+   `deploy-pages.yml`, and an entry in `scripts/assemble_gallery.py`
+   (`DEMO_PKGS` for a shared-shell demo, or `DEMO_PAGES` for a self-hosted page)
+   so the assembler copies it into `dist/`.
 
 ## Netplay relay
 

@@ -118,9 +118,11 @@ impl FrameLight {
 
 /// One drawn object: a stable identity, the mesh and material it references (by
 /// id, resolved against the backend's uploaded resource tables), its world and
-/// model-view-projection matrices (column-major, 16 floats each), and its linear
-/// RGBA colour. Objects appear in the packet in deterministic command-list draw
-/// order.
+/// model-view-projection matrices (column-major, 16 floats each), its linear
+/// RGBA colour, and whether it casts a contact shadow (a discrete, dynamic
+/// object the scene marked as a shadow-caster — level geometry leaves this
+/// `false`, so a backend that grounds objects with shadows knows what to ground).
+/// Objects appear in the packet in deterministic command-list draw order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameDrawItem {
     object_id: u64,
@@ -129,11 +131,13 @@ pub struct FrameDrawItem {
     world: [f32; 16],
     mvp: [f32; 16],
     color: [f32; 4],
+    casts_contact_shadow: bool,
 }
 
 impl FrameDrawItem {
     /// A draw item with its stable `object_id`, `mesh_id`, `material_id`,
-    /// column-major `world` and `mvp` matrices, and linear RGBA `color`.
+    /// column-major `world` and `mvp` matrices, linear RGBA `color`, and whether
+    /// it `casts_contact_shadow`.
     pub const fn new(
         object_id: u64,
         mesh_id: u64,
@@ -141,6 +145,7 @@ impl FrameDrawItem {
         world: [f32; 16],
         mvp: [f32; 16],
         color: [f32; 4],
+        casts_contact_shadow: bool,
     ) -> Self {
         FrameDrawItem {
             object_id,
@@ -149,6 +154,7 @@ impl FrameDrawItem {
             world,
             mvp,
             color,
+            casts_contact_shadow,
         }
     }
 
@@ -180,6 +186,13 @@ impl FrameDrawItem {
     /// The linear RGBA colour.
     pub const fn color(&self) -> [f32; 4] {
         self.color
+    }
+
+    /// Whether this draw is a discrete, dynamic object the scene marked as a
+    /// contact-shadow caster. Level geometry (walls, floors) is `false`; a
+    /// backend that grounds objects with shadows only shadows the `true` ones.
+    pub const fn casts_contact_shadow(&self) -> bool {
+        self.casts_contact_shadow
     }
 }
 
@@ -371,17 +384,25 @@ mod tests {
 
     #[test]
     fn draw_item_accessors_round_trip() {
-        let d = FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0]);
+        let d = FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], true);
         assert_eq!(d.object_id(), 7);
         assert_eq!(d.mesh_id(), 11);
         assert_eq!(d.material_id(), 13);
         assert_eq!(d.world(), mat(9.0));
         assert_eq!(d.mvp(), mat(5.0));
         assert_eq!(d.color(), [0.1, 0.2, 0.3, 1.0]);
+        assert!(d.casts_contact_shadow());
         assert_ne!(
             d,
-            FrameDrawItem::new(8, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0])
+            FrameDrawItem::new(8, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], true)
         );
+        // The caster flag participates in equality.
+        assert_ne!(
+            d,
+            FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], false)
+        );
+        assert!(!FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], false)
+            .casts_contact_shadow());
         assert!(format!("{d:?}").contains("FrameDrawItem"));
     }
 
@@ -411,6 +432,7 @@ mod tests {
                 mat(9.0),
                 mat(5.0),
                 [0.4, 0.5, 0.6, 1.0],
+                false,
             )],
             vec![FrameLight::new(0, [0.0, -1.0, 0.0], [1.0, 1.0, 1.0, 1.0])],
             mat(7.0),

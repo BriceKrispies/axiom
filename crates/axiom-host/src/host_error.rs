@@ -91,6 +91,11 @@ impl HostError {
         HostError::new(HostErrorCode::NonFinitePixels, message)
     }
 
+    /// Shorthand for [`HostErrorCode::InvalidSafeAreaInsets`].
+    pub const fn invalid_safe_area_insets(message: &'static str) -> Self {
+        HostError::new(HostErrorCode::InvalidSafeAreaInsets, message)
+    }
+
     /// The machine-readable host error code.
     pub const fn code(&self) -> HostErrorCode {
         self.code
@@ -160,6 +165,10 @@ mod tests {
         assert_eq!(
             HostError::non_finite_pixels("").code(),
             HostErrorCode::NonFinitePixels
+        );
+        assert_eq!(
+            HostError::invalid_safe_area_insets("").code(),
+            HostErrorCode::InvalidSafeAreaInsets
         );
     }
 

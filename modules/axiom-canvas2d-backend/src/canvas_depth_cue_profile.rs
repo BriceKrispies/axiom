@@ -51,10 +51,14 @@ pub(crate) struct CanvasDepthCueProfile {
     pub(crate) height_tint_strength: f32,
     pub(crate) low_height_color: [f32; 4],
     pub(crate) high_height_color: [f32; 4],
-    // Contact-shadow blobs (important objects only).
+    // Planar projected contact shadows (marked dynamic objects only): each
+    // caster's geometry is projected along the directional light onto the ground
+    // plane and rasterized depth-tested, so walls occlude the shadow and it never
+    // paints onto a wall face. `depth_bias` (NDC) lets the floor-coplanar shadow
+    // win the depth test against the floor it lands on.
     pub(crate) enable_contact_shadows: bool,
     pub(crate) contact_shadow_alpha: f32,
-    pub(crate) contact_shadow_max_radius_px: f32,
+    pub(crate) contact_shadow_depth_bias: f32,
     // Depth-weighted silhouette outlines (important objects only).
     pub(crate) enable_depth_outlines: bool,
     pub(crate) near_outline_alpha: f32,
@@ -106,7 +110,7 @@ impl CanvasDepthCueProfile {
 
             enable_contact_shadows: true,
             contact_shadow_alpha: 0.32,
-            contact_shadow_max_radius_px: 14.0,
+            contact_shadow_depth_bias: 0.002,
 
             enable_depth_outlines: true,
             near_outline_alpha: 0.5,

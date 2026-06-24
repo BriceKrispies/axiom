@@ -191,6 +191,16 @@ impl SceneApi {
         self.scene.set_renderable_visible(node, visible)
     }
 
+    /// Mark whether the renderable on `node` is a discrete dynamic object that
+    /// grounds itself with a contact shadow (level geometry stays `false`).
+    pub fn set_renderable_casts_contact_shadow(
+        &mut self,
+        node: SceneNodeId,
+        casts: bool,
+    ) -> SceneResult<()> {
+        self.scene.set_renderable_casts_contact_shadow(node, casts)
+    }
+
     // --- Spin (data-declared rotation, animated by the engine) ---
 
     /// Give `node` a spin: a pure rotation about `axis`, one revolution every
@@ -462,7 +472,16 @@ mod tests {
             SceneErrorCode::InvalidRenderableReference
         );
         a.set_renderable_visibility(n, false).unwrap();
+        a.set_renderable_casts_contact_shadow(n, true).unwrap();
         a.remove_renderable(n).unwrap();
+        // Marking a caster on a node with no renderable is a missing-renderable
+        // error (the delegated scene path's failure arm).
+        assert_eq!(
+            a.set_renderable_casts_contact_shadow(n, true)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingRenderable
+        );
     }
 
     #[test]

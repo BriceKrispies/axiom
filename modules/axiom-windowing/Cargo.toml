@@ -48,6 +48,9 @@ web-sys = { version = "0.3", features = [
     "Node",
     "MouseEvent",
     "KeyboardEvent",
+    "PointerEvent",
+    "DomRect",
+    "CssStyleDeclaration",
     "Location",
     "console",
 ] }

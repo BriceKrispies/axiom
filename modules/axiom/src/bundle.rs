@@ -10,6 +10,7 @@
 use axiom_math::Transform;
 
 use crate::camera::Camera;
+use crate::contact_shadow_caster::ContactShadowCaster;
 use crate::controller::Controller;
 use crate::directional_light::DirectionalLight;
 use crate::player::Player;
@@ -46,6 +47,7 @@ impl NodeComponent {
     pub(crate) const KIND_PLAYER: u8 = 4;
     pub(crate) const KIND_CONTROLLER: u8 = 5;
     pub(crate) const KIND_POINT_LIGHT: u8 = 6;
+    pub(crate) const KIND_CONTACT_SHADOW_CASTER: u8 = 7;
 
     /// The all-`None` base used by every constructor; each then fills in its one
     /// payload field and sets its `kind`.
@@ -124,6 +126,15 @@ impl NodeComponent {
         NodeComponent {
             kind: Self::KIND_CONTROLLER,
             controller: Some(controller),
+            ..Self::EMPTY
+        }
+    }
+
+    /// A contact-shadow-caster marker component. It carries no data — the kind
+    /// is the whole signal — so there is no payload to store or read back.
+    pub(crate) fn contact_shadow_caster() -> Self {
+        NodeComponent {
+            kind: Self::KIND_CONTACT_SHADOW_CASTER,
             ..Self::EMPTY
         }
     }
@@ -240,6 +251,14 @@ impl Bundle for Controller {
     }
 }
 
+impl Bundle for ContactShadowCaster {
+    fn apply(self, command: &mut SpawnCommand) {
+        command
+            .components
+            .push(NodeComponent::contact_shadow_caster());
+    }
+}
+
 impl<A: Bundle, B: Bundle> Bundle for (A, B) {
     fn apply(self, command: &mut SpawnCommand) {
         self.0.apply(command);
@@ -252,5 +271,14 @@ impl<A: Bundle, B: Bundle, C: Bundle> Bundle for (A, B, C) {
         self.0.apply(command);
         self.1.apply(command);
         self.2.apply(command);
+    }
+}
+
+impl<A: Bundle, B: Bundle, C: Bundle, D: Bundle> Bundle for (A, B, C, D) {
+    fn apply(self, command: &mut SpawnCommand) {
+        self.0.apply(command);
+        self.1.apply(command);
+        self.2.apply(command);
+        self.3.apply(command);
     }
 }

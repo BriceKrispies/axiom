@@ -640,7 +640,10 @@ fn level_setup(
             },
         ));
 
-        // Enemies: a red cube Player per spawn, in row-major (index) order.
+        // Enemies: a red cube Player per spawn, in row-major (index) order. Each is
+        // a discrete dynamic object, so it is marked a contact-shadow caster — the
+        // Canvas 2D backend grounds it with a real, depth-tested planar shadow on
+        // the floor (the walls, being level geometry, cast none).
         let scale = doc.tun.enemy_scale;
         doc.map
             .enemy_spawns
@@ -654,6 +657,7 @@ fn level_setup(
                         material: enemy,
                     },
                     Player::new(i as u32),
+                    ContactShadowCaster,
                 ));
             });
 

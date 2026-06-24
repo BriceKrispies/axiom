@@ -2,34 +2,41 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Axiom — Roomed Puzzle</title>
     <style>
       :root { color-scheme: dark; }
-      body {
-        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
-        /* Reserve a fixed strip on the right for the pinned side panel, so the
-           board never reflows as the panel's text changes. */
-        align-items: center; gap: 14px; padding: 24px 372px 24px 24px;
+      html, body {
+        margin: 0; height: 100%; overflow: hidden;
         font: 14px/1.5 system-ui, sans-serif; background: #15171c; color: #d7dbe2;
       }
-      h1 { font-size: 18px; font-weight: 650; margin: 0; }
-      .layout { display: flex; justify-content: center; }
-      /* The control panels are anchored to the right edge at a fixed width and
-         scroll within themselves — fully out of the board's flow, so changing
-         text (validation, status) never moves or resizes the rest of the page. */
-      .side {
-        position: fixed; top: 72px; right: 24px; width: 332px;
-        max-height: calc(100vh - 96px); overflow-y: auto;
-        display: flex; flex-direction: column; gap: 14px;
+      /* The full-viewport stage. The ENGINE decides where the board canvas and the
+         side panel go — `axiom-layout`'s solver, driven each frame from the live
+         window size + orientation + safe-area insets (see `sync_layout` in
+         src/web.rs) — and we apply the solved rectangles to these absolutely-
+         positioned elements. No CSS breakpoints: in landscape the panel sits beside
+         the board, in portrait it stacks below it, always inside the safe area. */
+      #stage { position: fixed; inset: 0; }
+      #axiom-puzzle-canvas {
+        position: absolute; box-sizing: border-box;
+        image-rendering: pixelated; border: 1px solid #2a2e36; border-radius: 8px;
+        background: #15171c; cursor: crosshair;
+        /* Swipes drive the game, so the browser must not treat them as scroll /
+           pinch-zoom gestures on the board. */
+        touch-action: none;
+      }
+      #side {
+        position: absolute; box-sizing: border-box; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 14px; padding: 10px;
+        background: #15171c;
       }
       .panel {
         background: #1c1f26; border: 1px solid #2a2e36; border-radius: 10px;
-        padding: 16px 18px; width: 100%; box-sizing: border-box;
+        padding: 14px 16px; width: 100%; box-sizing: border-box;
       }
-      #axiom-puzzle-canvas {
-        width: 480px; height: 480px; max-width: 90vw; image-rendering: pixelated;
-        border: 1px solid #2a2e36; border-radius: 8px; background: #15171c; cursor: crosshair;
+      #boot {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        color: #9aa3b2; font-size: 13px; background: #15171c; z-index: 20;
       }
       button {
         background: #2f6df0; color: #fff; border: 0; border-radius: 7px;
@@ -62,14 +69,9 @@
     </style>
   </head>
   <body>
-    <h1>Axiom — Roomed Puzzle</h1>
-    <div id="boot" class="hint">booting…</div>
-
-    <div class="layout">
-      <div class="board"><canvas id="axiom-puzzle-canvas" width="480" height="480"></canvas></div>
-    </div>
-
-    <div class="side">
+    <div id="stage">
+      <canvas id="axiom-puzzle-canvas" width="480" height="480"></canvas>
+      <div id="side">
       <!-- EDIT panel -->
       <section id="panel-edit" class="panel">
         <strong>Edit mode</strong>
@@ -107,9 +109,13 @@
         <strong>Playtest mode</strong>
         <div id="status">Reach the exit.</div>
         <div class="hint">
-          <strong>Arrows / WASD</strong> move ·
+          <strong>Arrows / WASD</strong> or <strong>swipe</strong> to move ·
           <strong>q</strong> leave a ghost &amp; reset ·
           <strong>r</strong> restart fresh
+        </div>
+        <div class="row">
+          <button id="btn-freeze">⏏ Leave ghost</button>
+          <button id="btn-restart">↺ Restart</button>
         </div>
         <div class="legend">
           <span class="sw" style="background:#3f7fe0"></span><span>Live player (solid)</span>
@@ -122,7 +128,9 @@
           <button class="ghost" id="btn-edit">◀ Back to edit</button>
         </div>
       </section>
+      </div>
     </div>
+    <div id="boot">booting…</div>
 
     <script type="module">
       const v = Date.now();
@@ -185,6 +193,10 @@
         wasm.enter_edit();
         showMode("edit");
       });
+
+      // --- Playtest action buttons (touch parity for the q / r keys) ---
+      document.getElementById("btn-freeze").addEventListener("click", () => wasm.playtest_freeze());
+      document.getElementById("btn-restart").addEventListener("click", () => wasm.playtest_restart());
 
       // --- Live status line + validation colour (cheap poll) ---
       const status = document.getElementById("status");
