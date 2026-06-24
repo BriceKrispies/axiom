@@ -17,6 +17,7 @@ use axiom_math::{Quat, Transform, Vec3};
 
 use crate::camera::Camera;
 use crate::light::Light;
+use crate::procanim::ProcAnim;
 use crate::renderable::Renderable;
 use crate::spin::Spin;
 
@@ -35,6 +36,7 @@ pub struct SceneStorage {
     pub lights: ComponentColumn<Light>,
     pub renderables: ComponentColumn<Renderable>,
     pub spins: ComponentColumn<Spin>,
+    pub procanims: ComponentColumn<ProcAnim>,
     /// Controllable nodes, keyed entity → player index. Authored once; the
     /// bridge that lets a per-tick move command address a node by player index.
     pub players: BTreeMap<EntityId, u32>,
@@ -104,6 +106,7 @@ impl ColumnSet for SceneStorage {
             ("lights", &self.lights),
             ("renderables", &self.renderables),
             ("spins", &self.spins),
+            ("procanims", &self.procanims),
         ]
     }
 
@@ -116,6 +119,7 @@ impl ColumnSet for SceneStorage {
             ("lights", &mut self.lights),
             ("renderables", &mut self.renderables),
             ("spins", &mut self.spins),
+            ("procanims", &mut self.procanims),
         ]
     }
 }
@@ -158,6 +162,30 @@ impl WorldSystem<SceneStorage> for SpinSystem {
                 spin.rotation_at(step.tick())
                     .map(|q| (entity, Transform::from_rotation(q)))
             })
+            .collect();
+        updates.into_iter().for_each(|(entity, local)| {
+            storage.locals.insert(entity, local);
+        });
+    }
+}
+
+/// The procedural-animation system: drives each entity with a [`ProcAnim`]
+/// component to its animated local transform (resting pose + bob + spin) for the
+/// frame tick. Runs alongside [`SpinSystem`], before [`TransformPropagation`], so
+/// the animated locals propagate this frame. Generalizes the spin system to
+/// *positioned* nodes: it composes the animation around each node's resting pose
+/// (so a wall at a grid cell keeps its place) instead of overwriting the local
+/// with a pure rotation. Every [`ProcAnim`] yields a transform, so none is
+/// skipped.
+#[derive(Debug)]
+pub struct ProcAnimSystem;
+
+impl WorldSystem<SceneStorage> for ProcAnimSystem {
+    fn run(&self, step: &WorldStep, _entities: &EntityRegistry, storage: &mut SceneStorage) {
+        let updates: Vec<(EntityId, Transform)> = storage
+            .procanims
+            .iter()
+            .map(|(entity, anim)| (entity, anim.local_at(step.tick())))
             .collect();
         updates.into_iter().for_each(|(entity, local)| {
             storage.locals.insert(entity, local);
@@ -318,6 +346,7 @@ mod tests {
         assert!(s.lights.is_empty());
         assert!(s.renderables.is_empty());
         assert!(s.spins.is_empty());
+        assert!(s.procanims.is_empty());
         assert!(s.players.is_empty());
         assert!(s.pending_moves.is_empty());
         assert!(s.controllers.is_empty());
@@ -550,6 +579,32 @@ mod tests {
     #[test]
     fn spin_system_debug_is_renderable() {
         assert!(format!("{:?}", SpinSystem).contains("SpinSystem"));
+    }
+
+    #[test]
+    fn procanim_system_animates_a_positioned_node_around_its_resting_pose() {
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        // e1 rests at (1, 2, 3); a bob of 0.5 along +Y with a 4-tick period.
+        let base = Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
+        storage.locals.insert(e(1), base);
+        storage
+            .procanims
+            .insert(e(1), ProcAnim::new(base, 0.5, 4, Vec3::UNIT_Y, 8, 0));
+
+        // Tick 1 of a 4-tick bob → sin(π/2) = 1 → full +0.5 on Y; X and Z keep the
+        // resting place (a positioned node is animated, never relocated).
+        ProcAnimSystem.run(&WorldStep::new(1), &reg, &mut storage);
+
+        let local = storage.locals.get(e(1)).unwrap();
+        assert!((local.translation.y - 2.5).abs() < 1.0e-5);
+        assert_eq!(local.translation.x, 1.0);
+        assert_eq!(local.translation.z, 3.0);
+    }
+
+    #[test]
+    fn procanim_system_debug_is_renderable() {
+        assert!(format!("{:?}", ProcAnimSystem).contains("ProcAnimSystem"));
     }
 
     #[test]

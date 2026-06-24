@@ -39,6 +39,7 @@ mod material_ref;
 mod mesh_ref;
 mod node_snapshot;
 mod player_command;
+mod procanim;
 mod renderable;
 mod renderable_snapshot;
 mod scene;
