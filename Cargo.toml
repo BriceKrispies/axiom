@@ -40,7 +40,6 @@ members = [
     "modules/axiom-biome",
     "modules/axiom-levelgen",
     "modules/axiom-worldsave",
-    "modules/axiom-procanim",
     "modules/axiom",
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",

@@ -16,6 +16,7 @@ use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
+use crate::procanim::ProcAnim;
 use crate::spin::Spin;
 
 /// The only public export of `axiom-scene`: a **stateful scene handle**.
@@ -191,20 +192,6 @@ impl SceneApi {
         self.scene.set_renderable_visible(node, visible)
     }
 
-    // --- Spin (data-declared rotation, animated by the engine) ---
-
-    /// Give `node` a spin: a pure rotation about `axis`, one revolution every
-    /// `period_ticks` frames, animated by the engine's spin system each
-    /// [`Self::advance`].
-    pub fn add_spin(
-        &mut self,
-        node: SceneNodeId,
-        axis: Vec3,
-        period_ticks: u32,
-    ) -> SceneResult<()> {
-        self.scene.add_spin(node, Spin::new(axis, period_ticks))
-    }
-
     // --- Players (controllable nodes moved by per-tick commands) ---
 
     /// Mark `node` as the controllable node for `player` index. Per-tick move
@@ -284,7 +271,56 @@ impl SceneApi {
             Light::SCHEMA,
             Renderable::SCHEMA,
             Spin::SCHEMA,
+            ProcAnim::SCHEMA,
         ]
+    }
+}
+
+/// Data-declared animation authoring: attach the engine's tick-driven animation
+/// components (spin, procedural bob/spin) to a node. Kept in its own `impl` block
+/// so neither authoring block exceeds the engine's impl-block size budget.
+impl SceneApi {
+    /// Give `node` a spin: a pure rotation about `axis`, one revolution every
+    /// `period_ticks` frames, animated by the engine's spin system each
+    /// [`Self::advance`].
+    pub fn add_spin(
+        &mut self,
+        node: SceneNodeId,
+        axis: Vec3,
+        period_ticks: u32,
+    ) -> SceneResult<()> {
+        self.scene.add_spin(node, Spin::new(axis, period_ticks))
+    }
+
+    /// Give `node` a procedural animation around its resting pose `base` (the
+    /// transform it was created with): a bob of `bob_amplitude` along +Y every
+    /// `bob_period` ticks plus a revolution about `spin_axis` every `spin_period`
+    /// ticks, offset by `phase`. Animated each [`Self::advance`] by the engine's
+    /// procedural-animation system — a *positioned* node (a wall at a grid cell)
+    /// comes alive without leaving its place. An app draws the per-node
+    /// `phase`/period variety from the procedural-generation substrate so a whole
+    /// scene never animates in lockstep.
+    pub fn add_procanim(
+        &mut self,
+        node: SceneNodeId,
+        base: Transform,
+        bob_amplitude: Meters,
+        bob_period: u32,
+        spin_axis: Vec3,
+        spin_period: u32,
+        phase: u32,
+    ) -> SceneResult<()> {
+        self.scene.add_procanim(
+            node,
+            ProcAnim::new(
+                base,
+                bob_amplitude.get(),
+                bob_period,
+                spin_axis,
+                spin_period,
+                phase,
+            ),
+        )
     }
 }
 
@@ -479,14 +515,29 @@ mod tests {
     }
 
     #[test]
+    fn add_procanim_valid_and_missing_node() {
+        let mut a = api();
+        let n = a.create_node();
+        a.add_procanim(n, Transform::IDENTITY, m(0.5), 60, Vec3::UNIT_Y, 120, 0)
+            .unwrap();
+        assert_eq!(
+            a.add_procanim(SceneNodeId::from_raw(99), Transform::IDENTITY, m(0.5), 60, Vec3::UNIT_Y, 120, 0)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingNode
+        );
+    }
+
+    #[test]
     fn component_schemas_describe_the_standard_components() {
         let schemas = api().component_schemas();
-        assert_eq!(schemas.len(), 5);
+        assert_eq!(schemas.len(), 6);
         assert_eq!(schemas[0].name(), "Transform");
         assert_eq!(schemas[1].name(), "Camera");
         assert_eq!(schemas[2].name(), "Light");
         assert_eq!(schemas[3].name(), "Renderable");
         assert_eq!(schemas[4].name(), "Spin");
+        assert_eq!(schemas[5].name(), "ProcAnim");
     }
 
     #[test]
