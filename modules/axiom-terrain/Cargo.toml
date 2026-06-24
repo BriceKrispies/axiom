@@ -1,0 +1,16 @@
+[package]
+name = "axiom-terrain"
+description = "Axiom engine module: deterministic value-noise heightfields on the procedural-generation substrate. TerrainApi::heightfield generates a width x height grid of integer heights by bilinearly interpolating lattice values, each drawn from an entropy stream keyed by its (seed, lattice-Address, version). Because lattice values are a pure function of WORLD lattice coordinates, adjacent tiles share a seamless edge (the seam-coherence invariant). This is where coherent noise graduates from apps/axiom-growth into a reusable, branchless, integer-only engine module (Phase 9)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-entropy = { path = "../../crates/axiom-entropy" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
