@@ -1,0 +1,26 @@
+# Axiom module manifest — axiom-levelgen (a FEATURE module).
+#
+# The composition tier of the procedural-generation pivot (roadmap Phase 9): a
+# feature module is the only crate allowed to depend on several domain modules at
+# once. levelgen composes terrain + biome + placement into one World - the same
+# way modules/axiom-render-pipeline composes the slice modules. An engine module
+# could never do this (allowed_modules must be empty); a feature module is the
+# sanctioned exception.
+#
+# It depends on the kernel + space layers (for the World's digest and the content
+# Address it keys by) and on exactly the three domain modules it lists. It may be
+# depended on only by apps (or another feature module). One facade, branchless,
+# 100%-covered like every module.
+
+[module]
+name = "levelgen"
+crate_name = "axiom-levelgen"
+kind = "feature-module"
+
+allowed_layers = ["kernel", "space"]
+
+allowed_modules = ["terrain", "biome", "placement"]
+
+introduced_capabilities = [
+    "world-recipe",
+]
