@@ -21,7 +21,12 @@ impl Artifact {
     /// changes, so stored goldens are invalidated deliberately, not silently.
     const SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 
-    pub(crate) fn new(generator_version: u32, words: Vec<u64>) -> Self {
+    /// Construct an artifact directly from its neutral words and generator
+    /// version. Evaluation uses this to package its output; `proc-validate` uses
+    /// it to produce a repaired artifact. The artifact is just data — its byte
+    /// form is identical however it was made — so construction does not claim the
+    /// words were *evaluated*; determinism remains a property of `ProcApi`.
+    pub fn from_words(generator_version: u32, words: Vec<u64>) -> Self {
         Artifact {
             generator_version,
             words,
