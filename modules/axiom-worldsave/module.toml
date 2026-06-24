@@ -1,0 +1,25 @@
+# Axiom module manifest — axiom-worldsave (a FEATURE module).
+#
+# The save/delta model that realizes the procedural-generation payoff (roadmap
+# Phase 12): a save stores only seed + version + address + dimensions + player
+# deltas, never the full world. It is a feature module (kind = "feature-module")
+# because it composes the levelgen world recipe; restore regenerates that world and
+# replays the deltas on top.
+#
+# It depends on the kernel + space layers (digest/serialization and the content
+# Address a save keys) and on exactly one module, levelgen. The same {seed, deltas}
+# shape underlies lockstep multiplayer (seed + command stream, never full state),
+# but integrating the netcode stacks is left as the documented next step.
+
+[module]
+name = "worldsave"
+crate_name = "axiom-worldsave"
+kind = "feature-module"
+
+allowed_layers = ["kernel", "space"]
+
+allowed_modules = ["levelgen"]
+
+introduced_capabilities = [
+    "world-save-delta",
+]
