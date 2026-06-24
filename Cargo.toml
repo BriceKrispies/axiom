@@ -36,6 +36,7 @@ members = [
     "modules/axiom-sim-core",
     "modules/axiom-recording",
     "modules/axiom-placement",
+    "modules/axiom-terrain",
     "modules/axiom",
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",

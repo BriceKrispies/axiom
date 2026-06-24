@@ -1,0 +1,26 @@
+# Axiom module manifest — axiom-terrain (an ENGINE module).
+#
+# A DOMAIN generator on the procedural-generation substrate (roadmap Phase 9):
+# coherent value-noise heightfields. This is where the noise that lived ad hoc in
+# apps/axiom-growth graduates into a reusable, spine-tested engine module. It is
+# an *isolated engine module* (allowed_modules = []) and depends on no other
+# module.
+#
+# It consumes space (the lattice Address each noise value is keyed by) and entropy
+# (the keyed stream those values are drawn from), plus the kernel for a
+# heightfield's canonical bytes + digest. It does NOT use proc: noise is a spatial
+# field, not a sequential recipe, so declaring proc would be ceremonial. Integer-
+# only (no naked floats - heights are i32), branchless, 100%-covered.
+
+[module]
+name = "terrain"
+crate_name = "axiom-terrain"
+kind = "engine-module"
+
+allowed_layers = ["kernel", "space", "entropy"]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "heightfield-noise",
+]
