@@ -60,6 +60,7 @@ members = [
     "tools/axiom-profile-runner",
     "tools/axiom-dev-reload",
     "tools/axiom-proc-inspect",
+    "tools/axiom-proc-fuzz",
 ]
 
 # `tools/axiom-shot` is deliberately NOT a workspace member. It enables

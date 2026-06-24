@@ -358,6 +358,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-proc-fuzz"
+version = "0.1.0"
+dependencies = [
+ "axiom-biome",
+ "axiom-kernel",
+ "axiom-levelgen",
+ "axiom-placement",
+ "axiom-proc",
+ "axiom-space",
+ "axiom-terrain",
+]
+
+[[package]]
 name = "axiom-proc-inspect"
 version = "0.1.0"
 dependencies = [
