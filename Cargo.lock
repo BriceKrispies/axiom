@@ -171,6 +171,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-entropy"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-frame"
 version = "0.1.0"
 dependencies = [

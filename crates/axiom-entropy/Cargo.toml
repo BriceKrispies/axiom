@@ -1,0 +1,15 @@
+[package]
+name = "axiom-entropy"
+description = "Axiom layer: explicit deterministic entropy streams. EntropyApi expands one root seed into an independent, reproducible stream per (seed, Address, version) - so two sites never share state and a site's stream is identical on every run and platform. It routes and keys the kernel's existing DeterministicRng (no new RNG algorithm, no noise functions, no ambient entropy); fork(salt) derives isolated sub-streams. depends_on = kernel + space."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-space = { path = "../axiom-space" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
