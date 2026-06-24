@@ -94,6 +94,20 @@ fn showcase_app() -> App {
                     material: sphere_material,
                 },
             ));
+            // A procedurally-animated cube (ProcAnim): the engine's scene system
+            // bobs it on +Y and spins it from the tick, so it sits at a different
+            // pose every frame — the proc-driven rendering capability, on screen.
+            let proc_material =
+                materials.add(Material::lit(Color::linear_rgb(ch(0.95), ch(0.55), ch(0.12))));
+            world.spawn((
+                Transform::from_translation(Vec3::new(0.0, -0.6, 3.4)),
+                Renderable {
+                    mesh: cube,
+                    material: proc_material,
+                },
+                ProcAnim::bob(Meters::new(1.6).expect("finite bob"), 120)
+                    .spin(Vec3::UNIT_Y, 180),
+            ));
             world.spawn((
                 Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
                 Camera::perspective(PerspectiveProjection {
