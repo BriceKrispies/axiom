@@ -358,6 +358,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-proc-inspect"
+version = "0.1.0"
+dependencies = [
+ "axiom-proc",
+ "axiom-proc-validate",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-proc-playground"
 version = "0.1.0"
 dependencies = [

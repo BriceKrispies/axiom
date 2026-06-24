@@ -1,0 +1,15 @@
+[package]
+name = "axiom-proc-inspect"
+description = "Axiom tool: a CLI that dumps the provenance of a generation. Given a seed and a content-address path, it evaluates a sample proc recipe, validates the artifact, and prints the full seed -> address -> artifact -> trace -> validation chain (words, per-node decisions, constraint verdicts, and the stable digests that index each boundary). Repo tooling, outside the engine dependency graph - exempt from the coverage and branchless gates - so an agent can inspect any artifact's provenance from (seed, address)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-proc = { path = "../../crates/axiom-proc" }
+axiom-proc-validate = { path = "../../crates/axiom-proc-validate" }
+
+[lints.rust]
+unsafe_code = "forbid"
