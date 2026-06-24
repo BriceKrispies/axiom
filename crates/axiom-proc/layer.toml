@@ -1,0 +1,37 @@
+# Axiom layer manifest — axiom-proc.
+#
+# The procedural-generation graph core: a versioned recipe DAG evaluated
+# deterministically over an address-keyed entropy stream into a neutral artifact
+# + trace. depends_on = kernel (digest/serialization/schema), space (the Address
+# it evaluates AT), and entropy (the keyed stream it draws). It is domain-free -
+# no terrain/biome/noise/geometry; those are Phase 9 domain modules built ON it.
+# math is intentionally NOT declared: evaluation references no geometry.
+
+[layer]
+name = "proc"
+crate_name = "axiom-proc"
+depends_on = ["kernel", "space", "entropy"]
+
+meaningful_dependency = """
+Proc adapts entropy's address-keyed stream, space's Address, and the kernel's
+serialization + digest into a deterministic recipe-graph evaluator. ProcApi
+validates a Recipe as a DAG, keys an EntropyApi stream by
+(seed, address, recipe.version), evaluates the generic nodes branchlessly (a table
+dispatch over the op discriminant), and emits a neutral Artifact + ProcTrace whose
+canonical bytes (BinaryWriter, SchemaVersion-stamped) carry a StableHash digest.
+Evaluation is resumable and budget-independent. It owns no domain content - the
+artifact is opaque words; meaning is a domain module's job.
+"""
+
+introduced_capabilities = ["ProcApi", "Recipe", "Artifact", "ProcTrace", "Evaluation"]
+consumed_capabilities = ["EntropyApi", "EntropyStream", "Address", "StableHash", "BinaryWriter", "SchemaVersion"]
+
+# Proof the dependencies are genuine: ProcApi keys an entropy stream by a space
+# Address; Artifact digests its canonical bytes with the kernel StableHash.
+[[proof_exports]]
+export = "ProcApi"
+must_reference = ["EntropyApi", "Address"]
+
+[[proof_exports]]
+export = "Artifact"
+must_reference = ["StableHash"]

@@ -19,6 +19,7 @@ members = [
     "crates/axiom-introspect",
     "crates/axiom-space",
     "crates/axiom-entropy",
+    "crates/axiom-proc",
     "crates/axiom-zones",
     "modules/axiom-scene",
     "modules/axiom-resources",
