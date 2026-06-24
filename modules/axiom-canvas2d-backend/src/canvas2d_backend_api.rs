@@ -103,26 +103,42 @@ impl Canvas2dBackendApi {
     /// target (so the whole path is native-tested); the resulting framebuffer is
     /// blitted by the `wasm32` arm and discarded on native.
     pub fn present_packet(&self, packet: &FramePacket) -> FrameSubmissionReport {
-        // v1 ships a single visual profile; this field is the seam where a
-        // future profile would select a different rasterization strategy.
-        let _ = self.profile;
         // Wall-clock timing is read only on wasm (`now_ms` is 0.0 on native, so
         // the native path stays deterministic and timer-free); the pure
         // rasterizer never reads a clock.
-        // Fog recedes toward the *frame's* sky: override the cue profile's fog
-        // colour with the packet clear colour each frame (the "default to the
-        // frame clear colour" rule), leaving every other cue knob as configured.
-        let mut cues = self.options.depth_cues();
-        cues.fog.color = packet.clear_color();
-        let options = self.options.with_depth_cues(cues);
-
         let t0 = now_ms();
-        let result = SoftwareRasterizer::new(options).rasterize_packet(packet, &self.meshes);
+        let result = self.rasterize(packet);
         let t1 = now_ms();
         self.blit(result.rgba_bytes(), result.width(), result.height());
         let t2 = now_ms();
         log_timing(&result, t1 - t0, t2 - t1);
         self.report(packet, &result)
+    }
+
+    /// Rasterize one [`FramePacket`] into the low-poly framebuffer and return the
+    /// finished image as `(rgba8 bytes, width, height)` — the *exact* pixels the
+    /// `wasm32` arm would blit, with no canvas touched. This is the software
+    /// analogue of [`axiom_gpu_backend::GpuBackendApi::render_offscreen_rgba`]:
+    /// it lets a headless tool or test capture and inspect the Canvas 2D image
+    /// natively (e.g. to reproduce a rendering artifact without a browser).
+    pub fn render_offscreen_rgba(&self, packet: &FramePacket) -> (Vec<u8>, u32, u32) {
+        let result = self.rasterize(packet);
+        (result.rgba_bytes().to_vec(), result.width(), result.height())
+    }
+
+    /// The shared rasterization step behind both [`Self::present_packet`] and
+    /// [`Self::render_offscreen_rgba`]: build the per-frame cue options (the fog
+    /// recedes toward the *frame's* sky — override the cue profile's fog colour
+    /// with the packet clear colour each frame, leaving every other knob as
+    /// configured) and run the pure software z-buffer rasterizer.
+    fn rasterize(&self, packet: &FramePacket) -> SoftwareRasterResult {
+        // v1 ships a single visual profile; this field is the seam where a
+        // future profile would select a different rasterization strategy.
+        let _ = self.profile;
+        let mut cues = self.options.depth_cues();
+        cues.fog.color = packet.clear_color();
+        let options = self.options.with_depth_cues(cues);
+        SoftwareRasterizer::new(options).rasterize_packet(packet, &self.meshes)
     }
 
     /// Build the uniform host report from the rasterizer result and the packet's
@@ -361,7 +377,7 @@ mod tests {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(800, 600));
         backend.load_meshes(&[ground(7)]);
-        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 0.0, 0.0, 1.0])];
+        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 0.0, 0.0, 1.0], false)];
         let report = backend.present_packet(&packet(draws, FrameFeatureSet::new(false, false, 0, 0)));
 
         assert_eq!(report.backend(), BackendKind::Canvas2d);
@@ -382,11 +398,37 @@ mod tests {
     }
 
     #[test]
+    fn render_offscreen_rgba_returns_the_blittable_framebuffer() {
+        use axiom_host::{FrameDrawItem, FrameFeatureSet};
+        let mut backend = Canvas2dBackendApi::new(&request(800, 600));
+        backend.load_meshes(&[ground(7)]);
+        // Low tier → a 240×135 internal framebuffer (the forced-fallback default).
+        backend.set_quality_level(1);
+        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 0.0, 0.0, 1.0], false)];
+        let p = packet(draws, FrameFeatureSet::new(false, false, 0, 0));
+
+        let (rgba, w, h) = backend.render_offscreen_rgba(&p);
+        // The dimensions are the internal raster resolution, and the buffer is a
+        // tight RGBA8 image of exactly that size.
+        assert_eq!((w, h), (240, 135));
+        assert_eq!(rgba.len() as u32, w * h * 4);
+        // It is the same framebuffer `present_packet` would blit: same size, and
+        // every pixel opaque.
+        let report = backend.present_packet(&p);
+        assert_eq!(report.raster().framebuffer_width, w);
+        assert_eq!(report.raster().framebuffer_height, h);
+        assert!(rgba.chunks_exact(4).all(|px| px[3] == 255));
+        // Pure function of the packet: identical bytes every call.
+        let (again, _, _) = backend.render_offscreen_rgba(&p);
+        assert_eq!(rgba, again);
+    }
+
+    #[test]
     fn set_quality_level_changes_the_internal_resolution() {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(800, 600));
         backend.load_meshes(&[ground(7)]);
-        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0; 4])];
+        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0; 4], false)];
         // Level 0 → UltraLow 160×90.
         backend.set_quality_level(0);
         let r0 = backend.present_packet(&packet(draws.clone(), FrameFeatureSet::new(false, false, 0, 0)));
@@ -404,7 +446,7 @@ mod tests {
     fn unknown_mesh_is_skipped_without_critical_violation() {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let backend = Canvas2dBackendApi::new(&request(640, 480));
-        let draws = vec![FrameDrawItem::new(1, 404, 9, IDENTITY, IDENTITY, [1.0; 4])];
+        let draws = vec![FrameDrawItem::new(1, 404, 9, IDENTITY, IDENTITY, [1.0; 4], false)];
         let report = backend.present_packet(&packet(draws, FrameFeatureSet::new(false, false, 0, 0)));
         assert_eq!(report.submitted_draws(), 0);
         assert_eq!(report.skipped_draws(), 1);
@@ -417,7 +459,7 @@ mod tests {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(320, 180));
         backend.load_meshes(&[ground(7)]);
-        let draws = vec![FrameDrawItem::new(1, 7, 13, IDENTITY, IDENTITY, [1.0; 4])];
+        let draws = vec![FrameDrawItem::new(1, 7, 13, IDENTITY, IDENTITY, [1.0; 4], false)];
         let report = backend.present_packet(&packet(draws, FrameFeatureSet::new(true, true, 1, 0)));
         assert!(report
             .degraded_features()
@@ -431,7 +473,7 @@ mod tests {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(320, 180));
         backend.load_meshes(&[ground(7)]);
-        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0; 4])];
+        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0; 4], false)];
         let p = packet(draws, FrameFeatureSet::new(false, false, 0, 0));
         assert_eq!(backend.present_packet(&p).submitted_draws(), 1);
 

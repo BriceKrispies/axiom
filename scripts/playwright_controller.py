@@ -43,6 +43,17 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("AXIOM_PW_PORT", "8787"))
 HEADLESS = os.environ.get("AXIOM_PW_HEADLESS", "1") != "0"
 
+
+def _viewport():
+    """Optional fixed viewport from AXIOM_PW_VIEWPORT="WxH" (e.g. mobile 390x844)."""
+    raw = os.environ.get("AXIOM_PW_VIEWPORT", "").lower().split("x")
+    if len(raw) == 2 and raw[0].isdigit() and raw[1].isdigit():
+        return {"width": int(raw[0]), "height": int(raw[1])}
+    return None
+
+
+VIEWPORT = _viewport()
+
 STATE_DIR = Path(__file__).resolve().parent / ".playwright-controller"
 LOG_FILE = STATE_DIR / "commands.log"
 DAEMON_LOG = STATE_DIR / "daemon.log"
@@ -120,7 +131,9 @@ class Daemon:
         except Exception:
             pass
         self.browser = self._launch_browser()
-        self.context = self.browser.new_context()
+        self.context = self.browser.new_context(
+            **({"viewport": VIEWPORT} if VIEWPORT else {})
+        )
         self.page = self.context.new_page()
         self.console = []
         self.page.on(

@@ -19,6 +19,14 @@ crate-type = ["cdylib", "rlib"]
 # wall clock or unseeded entropy. Listed in app.toml's `allowed_layers`.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
+# The engine's responsive layout solver + the host viewport facts it consumes.
+# The `web` arm builds a HostViewport from the live window/DPR/safe-area, declares
+# a board+tray tree, and draws each into its solved rectangle — so the board sits
+# beside the piece tray in landscape and stacks above a larger tray in portrait,
+# all decided by the engine. Listed in app.toml's `allowed_layers`.
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-layout = { path = "../../crates/axiom-layout" }
+
 # Browser entry only: the wasm-bindgen glue, a panic hook, and the DOM/2D-canvas
 # the play surface binds to. Confined to wasm32, so native
 # `cargo test --workspace` never compiles them and the deterministic core stays
@@ -33,8 +41,10 @@ web-sys = { version = "0.3", features = [
     "HtmlElement",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
+    "CssStyleDeclaration",
     "DomRect",
     "MouseEvent",
+    "PointerEvent",
     "console",
 ] }
 

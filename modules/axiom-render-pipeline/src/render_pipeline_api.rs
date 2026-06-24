@@ -106,7 +106,11 @@ pub struct RenderReport {
     command_count: usize,
     clear_color: [f32; 4],
     view_projection: Mat4,
-    draws: Vec<(Mat4, [f32; 4], u64, u64)>,
+    /// One `(world, colour, mesh_id, material_id, casts_contact_shadow)` per
+    /// drawn (visible) object, in submission order. The caster flag is the
+    /// scene's per-renderable contact-shadow mark, carried so a grounding
+    /// backend (the software canvas) knows which objects to shadow.
+    draws: Vec<(Mat4, [f32; 4], u64, u64, bool)>,
     /// The frame's resolved lights: `(kind, vec, colour, intensity)` where
     /// `kind` is `0` directional / `1` point, and `vec` is the world-space
     /// to-light direction (directional) or the light's world position (point).
@@ -355,37 +359,34 @@ impl RenderPipelineApi {
             .command_clear_color_at(&commands, 0)
             .unwrap_or([0.0; 4]);
 
-        // Per-draw data: walk the command list once. Each material command sets
-        // the colour and material id, and each mesh command the mesh id, that the
-        // following draws use; each draw carries its world. All are state threaded
-        // across commands, so a `fold` carries
-        // `(current_color, current_mesh, current_material, draws)`: a material/mesh
-        // command replaces its value (else keeps it via `map_or`/`unwrap_or`), a
-        // draw command appends `(world, colour, mesh, material)`.
-        let (_, _, _, draws): ([f32; 4], u64, u64, Vec<(Mat4, [f32; 4], u64, u64)>) = (0..count)
-            .fold(
-                ([1.0_f32; 4], 0_u64, 0_u64, Vec::new()),
-                |(current_color, current_mesh, current_material, mut acc), i| {
-                    let next_color = render
-                        .command_material_id_at(&commands, i)
-                        .map_or(current_color, |id| {
-                            material_color.get(&id).copied().unwrap_or([1.0; 4])
-                        });
-                    let next_material = render
-                        .command_material_id_at(&commands, i)
-                        .unwrap_or(current_material);
-                    let next_mesh = render
-                        .command_mesh_id_at(&commands, i)
-                        .unwrap_or(current_mesh);
-                    render
-                        .command_draw_indexed_at(&commands, i)
-                        .into_iter()
-                        .for_each(|(_, world)| {
-                            acc.push((world, next_color, next_mesh, next_material))
-                        });
-                    (next_color, next_mesh, next_material, acc)
-                },
-            );
+        // Per-draw data: one entry per *visible* renderable, in snapshot order —
+        // the same set and order the command list draws (a visible renderable
+        // always resolves its mesh/material above, so it always produces a draw).
+        // Sourcing it straight from the snapshot (rather than re-folding the GPU
+        // command stream) is what lets each draw carry the renderable's
+        // `casts_contact_shadow` mark, which the command stream does not encode.
+        let draws: Vec<(Mat4, [f32; 4], u64, u64, bool)> = snapshot
+            .renderables()
+            .iter()
+            .filter(|renderable| renderable.visible())
+            .map(|renderable| {
+                let world = snapshot
+                    .node(renderable.node())
+                    .expect("renderable node is present in the snapshot")
+                    .world()
+                    .to_matrix();
+                let mesh_id = renderable.mesh().raw();
+                let material_id = renderable.material().raw();
+                let color = material_color.get(&material_id).copied().unwrap_or([1.0; 4]);
+                (
+                    world,
+                    color,
+                    mesh_id,
+                    material_id,
+                    renderable.casts_contact_shadow(),
+                )
+            })
+            .collect();
 
         // Resolve the frame's lights: directional → world to-light direction
         // (`-sun`, normalised in the shader); point → its node's world position.
@@ -451,18 +452,18 @@ impl RenderPipelineApi {
 
     /// The world matrix of the `i`-th drawn object, if present.
     pub fn report_draw_world(&self, report: &RenderReport, i: usize) -> Option<Mat4> {
-        report.draws.get(i).map(|(world, _, _, _)| *world)
+        report.draws.get(i).map(|(world, _, _, _, _)| *world)
     }
 
     /// The colour of the `i`-th drawn object, if present.
     pub fn report_draw_color(&self, report: &RenderReport, i: usize) -> Option<[f32; 4]> {
-        report.draws.get(i).map(|(_, color, _, _)| *color)
+        report.draws.get(i).map(|(_, color, _, _, _)| *color)
     }
 
     /// The mesh id of the `i`-th drawn object, if present. Lets a caller group
     /// draws by mesh for per-mesh instance batching.
     pub fn report_draw_mesh_id(&self, report: &RenderReport, i: usize) -> Option<u64> {
-        report.draws.get(i).map(|(_, _, mesh_id, _)| *mesh_id)
+        report.draws.get(i).map(|(_, _, mesh_id, _, _)| *mesh_id)
     }
 
     /// The material id of the `i`-th drawn object, if present. Lets a caller
@@ -471,7 +472,14 @@ impl RenderPipelineApi {
         report
             .draws
             .get(i)
-            .map(|(_, _, _, material_id)| *material_id)
+            .map(|(_, _, _, material_id, _)| *material_id)
+    }
+
+    /// Whether the `i`-th drawn object is a contact-shadow caster (a discrete
+    /// dynamic object the scene marked), if present. A grounding backend shadows
+    /// only the `true` draws; level geometry is `false`.
+    pub fn report_draw_casts_shadow(&self, report: &RenderReport, i: usize) -> Option<bool> {
+        report.draws.get(i).map(|(_, _, _, _, casts)| *casts)
     }
 
     /// The directional shadow caster's wgpu-ready light view-projection
@@ -577,6 +585,46 @@ mod tests {
     }
 
     #[test]
+    fn caster_mark_is_reported_and_invisible_renderables_are_filtered() {
+        use axiom_math::Transform;
+        let api = RenderPipelineApi::new();
+        let mut scene = SceneApi::new();
+        let mesh = scene.mesh_ref(1);
+        let material = scene.material_ref(2);
+        // A visible renderable marked as a contact-shadow caster.
+        let caster =
+            scene.create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)));
+        scene.add_renderable(caster, mesh, material).unwrap();
+        scene
+            .set_renderable_casts_contact_shadow(caster, true)
+            .unwrap();
+        // An invisible renderable: still gets a render object (and so needs assets)
+        // but contributes no draw, so it never reaches the per-draw caster list.
+        let hidden = scene.create_node();
+        scene.add_renderable(hidden, mesh, material).unwrap();
+        scene.set_renderable_visibility(hidden, false).unwrap();
+
+        let camera = scene
+            .create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
+        scene
+            .add_perspective_camera(
+                &math(),
+                camera,
+                Radians::new(std::f32::consts::FRAC_PI_3).unwrap(),
+                Ratio::new(4.0 / 3.0).unwrap(),
+                Meters::new(0.1).unwrap(),
+                Meters::new(100.0).unwrap(),
+            )
+            .unwrap();
+        scene.update_world_transforms();
+
+        let report = api.submit(&frame_with_assets(&api), &scene, &WebGpuApi::new_recording());
+        // Only the visible renderable is drawn, and it is reported as a caster.
+        assert_eq!(api.report_draw_count(&report), 1);
+        assert_eq!(api.report_draw_casts_shadow(&report, 0), Some(true));
+    }
+
+    #[test]
     fn renders_a_scene_to_a_recording_submission() {
         let api = RenderPipelineApi::new();
         let scene = cube_scene();
@@ -603,6 +651,9 @@ mod tests {
         // ...and its material id (material 2 in the scene), for texture binding.
         assert_eq!(api.report_draw_material_id(&report, 0), Some(2));
         assert!(api.report_draw_material_id(&report, 9).is_none());
+        // A plain renderable is not a contact-shadow caster.
+        assert_eq!(api.report_draw_casts_shadow(&report, 0), Some(false));
+        assert!(api.report_draw_casts_shadow(&report, 9).is_none());
         // The frame resolves its one directional light: kind 0, to-light dir is
         // the negated frame sun direction (0.3, -1.0, 0.4).
         assert_eq!(api.report_light_count(&report), 1);

@@ -1,17 +1,10 @@
 # Axiom app manifest — axiom-browser-dev-harness.
 #
-# A developer harness that mounts the browser debug overlay + command console
-# over a bare canvas. It is *app-side developer tooling*: the deterministic
-# engine spine knows nothing about the DOM, keyboard events, CSS, or command
-# text — all of that lives here, in an app, the only tier permitted to touch
-# `web_sys` outside the platform-facing `host` layer / `windowing` module
-# (Module Law #9).
-#
-# It composes NO engine module or layer: the overlay reports diagnostics about
-# the engine surface through a replaceable *stub* provider, so the harness needs
-# no engine dependency to exercise the overlay machinery. It names no layer and
-# no module, and depends on no other app — apps are leaves in the dependency
-# graph.
+# A thin developer harness that mounts the `debug-overlay` module's overlay +
+# command console over a bare canvas and feeds it real browser-side diagnostics.
+# All overlay logic lives in the module (its branchless, 100%-covered core + the
+# wasm DOM arm); this app only composes it and supplies the measured values. It
+# names no layer and depends on no other app — apps are leaves in the graph.
 
 [app]
 name = "browser-dev-harness"
@@ -19,4 +12,6 @@ crate_name = "axiom-browser-dev-harness"
 
 allowed_layers = []
 
-allowed_modules = []
+allowed_modules = [
+    "debug-overlay",
+]

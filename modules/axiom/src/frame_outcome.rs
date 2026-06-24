@@ -15,6 +15,7 @@ pub struct DrawData {
     color: [f32; 4],
     mesh_id: u64,
     material_id: u64,
+    casts_contact_shadow: bool,
 }
 
 impl DrawData {
@@ -24,6 +25,7 @@ impl DrawData {
         color: [f32; 4],
         mesh_id: u64,
         material_id: u64,
+        casts_contact_shadow: bool,
     ) -> Self {
         DrawData {
             mvp,
@@ -31,6 +33,7 @@ impl DrawData {
             color,
             mesh_id,
             material_id,
+            casts_contact_shadow,
         }
     }
 
@@ -57,6 +60,13 @@ impl DrawData {
     /// The id of the material this object uses (selects its albedo texture).
     pub const fn material_id(&self) -> u64 {
         self.material_id
+    }
+
+    /// Whether this draw is a discrete dynamic object the scene marked as a
+    /// contact-shadow caster (level geometry is `false`). A grounding backend
+    /// (the software canvas) projects a shadow only for the `true` draws.
+    pub const fn casts_contact_shadow(&self) -> bool {
+        self.casts_contact_shadow
     }
 }
 
@@ -114,6 +124,7 @@ pub struct FrameOutcome {
     draws: Vec<DrawData>,
     lights: Vec<LightData>,
     light_view_proj: [f32; 16],
+    camera_view_proj: [f32; 16],
     presented: bool,
     recorded: bool,
 }
@@ -127,6 +138,7 @@ impl FrameOutcome {
         draws: Vec<DrawData>,
         lights: Vec<LightData>,
         light_view_proj: [f32; 16],
+        camera_view_proj: [f32; 16],
         presented: bool,
         recorded: bool,
     ) -> Self {
@@ -137,6 +149,7 @@ impl FrameOutcome {
             draws,
             lights,
             light_view_proj,
+            camera_view_proj,
             presented,
             recorded,
         }
@@ -156,6 +169,7 @@ impl FrameOutcome {
             clear_color,
             Vec::new(),
             Vec::new(),
+            Self::IDENTITY_MAT4,
             Self::IDENTITY_MAT4,
             false,
             false,
@@ -192,6 +206,15 @@ impl FrameOutcome {
     /// this and re-projects fragments into it; identity disables shadows.
     pub fn light_view_proj(&self) -> [f32; 16] {
         self.light_view_proj
+    }
+
+    /// The camera's column-major view-projection (`projection * view`, with the
+    /// backend depth remap baked in — the same matrix used to build each draw's
+    /// `mvp`). A backend that needs to rasterize world-space geometry it derives
+    /// itself (e.g. the canvas planar-shadow projection of an object onto the
+    /// ground) projects through this. Identity in a simulation-only frame.
+    pub fn camera_view_proj(&self) -> [f32; 16] {
+        self.camera_view_proj
     }
 
     /// Whether the backend presented real pixels.
@@ -248,6 +271,29 @@ impl FrameOutcome {
             })
             .collect()
     }
+
+    /// The per-instance `casts_contact_shadow` flags in the SAME order
+    /// [`Self::mesh_batches`] lays its instances out (each `(mesh, material)`
+    /// batch in first-appearance order, instances within it in draw order). A
+    /// backend that expands the batches back into per-object draws (the canvas
+    /// path) indexes this by the running instance position to recover each draw's
+    /// caster mark, which the float-packed batches cannot carry.
+    pub fn mesh_batch_casters(&self) -> Vec<bool> {
+        let mut order: Vec<(u64, u64)> = Vec::new();
+        let mut packed: HashMap<(u64, u64), Vec<bool>> = HashMap::new();
+        self.draws.iter().for_each(|draw| {
+            let key = (draw.mesh_id, draw.material_id);
+            let casts = packed.entry(key).or_insert_with(|| {
+                order.push(key);
+                Vec::new()
+            });
+            casts.push(draw.casts_contact_shadow);
+        });
+        order
+            .into_iter()
+            .flat_map(|key| packed.remove(&key).unwrap_or_default())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -261,14 +307,19 @@ mod tests {
             0,
             [0.0; 4],
             vec![
-                DrawData::new([1.0; 16], [9.0; 16], [0.1, 0.2, 0.3, 1.0], 1, 1),
-                DrawData::new([2.0; 16], [8.0; 16], [0.4, 0.5, 0.6, 1.0], 1, 1),
+                DrawData::new([1.0; 16], [9.0; 16], [0.1, 0.2, 0.3, 1.0], 1, 1, false),
+                DrawData::new([2.0; 16], [8.0; 16], [0.4, 0.5, 0.6, 1.0], 1, 1, true),
             ],
             Vec::new(),
             [0.0; 16],
+            [4.0; 16],
             false,
             true,
         );
+        // The camera view-projection and per-draw caster flags round-trip.
+        assert_eq!(outcome.camera_view_proj(), [4.0; 16]);
+        assert!(!outcome.draws()[0].casts_contact_shadow());
+        assert!(outcome.draws()[1].casts_contact_shadow());
         let floats = outcome.instance_floats();
         assert_eq!(floats.len(), 72); // 2 draws x (16 mvp + 16 world + 4 colour)
         assert_eq!(&floats[0..16], &[1.0; 16]); // mvp 0
@@ -302,11 +353,12 @@ mod tests {
             0,
             [0.0; 4],
             vec![
-                DrawData::new([1.0; 16], [9.0; 16], [0.1, 0.2, 0.3, 1.0], 7, 5),
-                DrawData::new([2.0; 16], [8.0; 16], [0.4, 0.5, 0.6, 1.0], 7, 6),
-                DrawData::new([3.0; 16], [7.0; 16], [0.7, 0.8, 0.9, 1.0], 7, 5),
+                DrawData::new([1.0; 16], [9.0; 16], [0.1, 0.2, 0.3, 1.0], 7, 5, true),
+                DrawData::new([2.0; 16], [8.0; 16], [0.4, 0.5, 0.6, 1.0], 7, 6, false),
+                DrawData::new([3.0; 16], [7.0; 16], [0.7, 0.8, 0.9, 1.0], 7, 5, true),
             ],
             Vec::new(),
+            [0.0; 16],
             [0.0; 16],
             true,
             false,
@@ -330,6 +382,10 @@ mod tests {
         assert_eq!((batches[1].0, batches[1].1), (7, 6));
         assert_eq!(batches[1].3, 1);
         assert_eq!(&batches[1].2[0..16], &[2.0; 16]);
+
+        // The caster flags follow the same expansion order: batch (7,5) holds
+        // draws 0 and 2 (both casters), then batch (7,6) holds draw 1 (not).
+        assert_eq!(outcome.mesh_batch_casters(), vec![true, true, false]);
     }
 
     #[test]
@@ -344,6 +400,7 @@ mod tests {
                 LightData::new(1, [2.0, 3.0, -4.0], [1.0, 0.0, 0.0], 2.5),
             ],
             [5.0; 16],
+            [0.0; 16],
             false,
             true,
         );

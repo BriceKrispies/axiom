@@ -329,6 +329,12 @@ impl RenderApi {
                             world.as_cols_array(),
                             view_proj.multiply(world).as_cols_array(),
                             material_base_color(input, next_material),
+                            // The render-input draw stream carries no contact-shadow
+                            // marker (it is gameplay/scene metadata the render layer
+                            // is intentionally blind to); the live canvas path that
+                            // grounds objects builds its packet from the per-draw
+                            // scene data instead. This producer defaults to `false`.
+                            false,
                         ));
                     });
                 (next_mesh, next_material, acc)

@@ -14,17 +14,44 @@ use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
 use crate::scene_renderer::{create_depth_view, SceneRenderer};
+use crate::surface_recovery::{RecoveryAction, SurfaceStatus};
+use crate::upscale::UpscaleBlit;
 
 /// The real, browser-owned GPU objects (surface + device + queue) plus the shared
-/// [`SceneRenderer`] and a depth view sized to the surface. Each frame: pack the
-/// batches into the renderer, record into the acquired swap-chain view, present.
+/// [`SceneRenderer`]. Each frame the scene is recorded into an **intermediate
+/// colour target** sized to the device tier's render resolution (with a matching
+/// depth view), then the [`UpscaleBlit`] samples that target across the acquired
+/// swap-chain texture, upscaling it on present.
+///
+/// The surface `config` is retained so the binding can **reconfigure and
+/// re-acquire** the drawing context after a backgrounded mobile browser drops it
+/// (the surface then reports `Lost`/`Outdated`) — see [`Self::render_frame`].
 #[derive(Debug)]
 pub struct LiveGpuBinding {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    config: wgpu::SurfaceConfiguration,
+    /// The reduced-resolution colour target the scene is rendered into (then
+    /// upscaled to the swapchain). Sized `render_width × render_height`.
+    intermediate_view: wgpu::TextureView,
+    /// The depth buffer for the scene pass, sized to the intermediate target.
     depth_view: wgpu::TextureView,
+    /// Presents `intermediate_view` to the swapchain with a linear upscale.
+    upscale: UpscaleBlit,
     renderer: SceneRenderer,
+}
+
+/// Translate a `wgpu` surface acquisition failure into the engine's
+/// [`SurfaceStatus`], whose [`SurfaceStatus::recovery_action`] decides what to do.
+fn classify(error: &wgpu::SurfaceError) -> SurfaceStatus {
+    match error {
+        wgpu::SurfaceError::Timeout => SurfaceStatus::Timeout,
+        wgpu::SurfaceError::Outdated => SurfaceStatus::Outdated,
+        wgpu::SurfaceError::Lost => SurfaceStatus::Lost,
+        wgpu::SurfaceError::OutOfMemory => SurfaceStatus::OutOfMemory,
+        _ => SurfaceStatus::Other,
+    }
 }
 
 impl LiveGpuBinding {
@@ -42,16 +69,25 @@ impl LiveGpuBinding {
     /// it does not we fall back to wgpu's WebGL2 backend. The same shared
     /// [`SceneRenderer`], shaders, and instancing run unchanged on either, since
     /// the renderer is already held to `downlevel_webgl2_defaults` limits.
+    #[allow(clippy::too_many_arguments)]
     pub async fn initialize(
         canvas: HtmlCanvasElement,
         width: u32,
         height: u32,
+        render_width: u32,
+        render_height: u32,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
+        shadow_size: u32,
     ) -> Result<LiveGpuBinding, JsValue> {
         let width = width.max(1);
         let height = height.max(1);
+        // The scene renders at the device tier's resolution (`render_size`),
+        // never larger than the swapchain; it is upscaled to `width × height` on
+        // present.
+        let render_width = render_width.max(1).min(width);
+        let render_height = render_height.max(1).min(height);
 
         // Probe WebGPU *fully* — adapter AND device — on its own instance, with no
         // canvas (`navigator.gpu` needs none), so the probe never acquires the
@@ -141,23 +177,81 @@ impl LiveGpuBinding {
         };
         surface.configure(&device, &config);
 
-        let renderer =
-            SceneRenderer::new(&device, &queue, format, meshes, materials, max_instances);
-        let depth_view = create_depth_view(&device, width, height);
+        let renderer = SceneRenderer::new(
+            &device,
+            &queue,
+            format,
+            meshes,
+            materials,
+            max_instances,
+            shadow_size,
+        );
+
+        // The intermediate colour target the scene renders into (then upscaled to
+        // the swapchain). Same format as the surface, plus `TEXTURE_BINDING` so the
+        // blit can sample it. Its depth view matches it, not the swapchain.
+        let intermediate = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("axiom-render-target"),
+            size: wgpu::Extent3d {
+                width: render_width,
+                height: render_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let intermediate_view = intermediate.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = create_depth_view(&device, render_width, render_height);
+        let upscale = UpscaleBlit::new(&device, format, &intermediate_view);
 
         Ok(LiveGpuBinding {
             surface,
             device,
             queue,
+            config,
+            intermediate_view,
             depth_view,
+            upscale,
             renderer,
         })
     }
 
+    /// Acquire the next swap-chain texture, **recovering a dropped context** when
+    /// the browser backgrounded the tab (a mobile-first necessity). On a
+    /// `Lost`/`Outdated`/other failure the surface is reconfigured with its stored
+    /// config — re-acquiring the WebGPU/WebGL context — and acquisition is retried
+    /// once; a `Timeout` skips the frame; `OutOfMemory` signals a full rebuild. The
+    /// returned `Ok(None)` means "skip this frame cleanly" (the context will be
+    /// healthy again shortly), `Err` means the binding must be reinitialised.
+    fn acquire_texture(&self) -> Result<Option<wgpu::SurfaceTexture>, JsValue> {
+        match self.surface.get_current_texture() {
+            Ok(frame) => Ok(Some(frame)),
+            Err(error) => match classify(&error).recovery_action() {
+                RecoveryAction::SkipFrame => Ok(None),
+                RecoveryAction::Reconfigure => {
+                    // Re-acquire the dropped drawing context, then retry once. A
+                    // still-failing acquisition skips this frame; the next frame
+                    // tries again from a freshly configured surface.
+                    self.surface.configure(&self.device, &self.config);
+                    Ok(self.surface.get_current_texture().ok())
+                }
+                RecoveryAction::Reinitialize => Err(JsValue::from_str(
+                    "gpu surface unrecoverable (out of memory): binding needs reinitialize",
+                )),
+            },
+        }
+    }
+
     /// Draw + present one real frame from per-`(mesh, material)` instance batches
-    /// and the frame's `lights`. Delegates the whole draw to the shared
-    /// [`SceneRenderer`]; this arm only acquires and presents the swap-chain
-    /// texture. Real pixels.
+    /// and the frame's `lights`. The scene is recorded into the reduced-resolution
+    /// intermediate target by the shared [`SceneRenderer`], then the
+    /// [`UpscaleBlit`] samples it across the acquired swap-chain texture (upscaling
+    /// on present). Real pixels. A frame skipped for surface recovery (see
+    /// [`Self::acquire_texture`]) presents nothing and returns `Ok`.
     pub fn render_frame(
         &self,
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
@@ -165,23 +259,33 @@ impl LiveGpuBinding {
         batches: &[(u64, u64, Vec<f32>, u32)],
         clear: [f32; 4],
     ) -> Result<(), JsValue> {
-        let frame = self
-            .surface
-            .get_current_texture()
-            .map_err(|e| JsValue::from_str(&format!("get_current_texture failed: {e}")))?;
+        let frame = match self.acquire_texture()? {
+            Some(frame) => frame,
+            None => return Ok(()),
+        };
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        // Render the scene at tier resolution into the intermediate target
+        // (renderer owns its own encoder + submit), ...
         self.renderer.record(
             &self.device,
             &self.queue,
-            &view,
+            &self.intermediate_view,
             &self.depth_view,
             lights,
             light_view_proj,
             batches,
             clear,
         );
+        // ... then upscale-blit it across the full swapchain view and present.
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("axiom-upscale-encoder"),
+            });
+        self.upscale.record(&mut encoder, &view);
+        self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         Ok(())
     }

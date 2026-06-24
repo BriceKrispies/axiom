@@ -24,6 +24,8 @@ crate_name = "axiom-quintet"
 
 allowed_layers = [
     "kernel",
+    "host",
+    "layout",
 ]
 
 allowed_modules = []

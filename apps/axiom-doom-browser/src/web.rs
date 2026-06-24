@@ -169,10 +169,21 @@ pub fn start() {
             if let Some(r) = &remote {
                 send_observation(r, tick.get(), &commands.hud, &outcome, render_now);
             }
+            // `instance_floats` packs draws in submission order into one batch, so
+            // the caster flags ride in that same draw order (not the grouped
+            // `mesh_batch_casters` order). The camera drives the Canvas backend's
+            // planar contact shadows under the enemy cubes.
+            let casters = outcome
+                .draws()
+                .iter()
+                .map(|d| d.casts_contact_shadow())
+                .collect();
             (
                 outcome.clear_color(),
                 outcome.instance_floats(),
                 outcome.draws().len() as u32,
+                outcome.camera_view_proj(),
+                casters,
             )
         }
     };

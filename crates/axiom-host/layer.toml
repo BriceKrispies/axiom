@@ -11,6 +11,8 @@
 # `tests/architecture.rs::lib_exports_are_curated_set`):
 #   - host-boundary-contracts
 #   - viewport-validation
+#   - display-orientation
+#   - safe-area-insets
 #   - explicit-host-frame-input
 #   - lifecycle-signals
 #   - deterministic-host-step-planning
@@ -33,7 +35,13 @@ meaningful_dependency = "Host consumes runtime (`Runtime`, `RuntimeStepRecord`, 
 # Public Rust surface is the curated list in `lib.rs`; the architecture
 # checker only needs the facade plus the driver to prove the layer's
 # adapter role.
-introduced_capabilities = ["HostApi", "HostStepDriver", "Pixels"]
+introduced_capabilities = [
+    "HostApi",
+    "HostStepDriver",
+    "Pixels",
+    "Orientation",
+    "HostSafeAreaInsets",
+]
 
 consumed_capabilities = [
     "Runtime",

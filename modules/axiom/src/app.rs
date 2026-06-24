@@ -139,6 +139,11 @@ impl App {
                     lights,
                     outcome.light_view_proj(),
                     outcome.mesh_batches(),
+                    // The camera and the per-instance caster flags (in the same
+                    // order `mesh_batches` lays its instances out) drive the Canvas
+                    // backend's planar contact shadows.
+                    outcome.camera_view_proj(),
+                    outcome.mesh_batch_casters(),
                 )
             });
     }
@@ -460,27 +465,20 @@ impl RunningApp {
                 let report = pipeline.submit(&frame, &self.scene, &self.webgpu);
 
                 let view_projection = pipeline.report_view_projection(&report);
-                let draw_count = pipeline.report_draw_count(&report);
-                let draws: Vec<DrawData> = (0..draw_count)
+                // One DrawData per drawn object (submission order): mvp, world,
+                // colour, mesh/material ids, and the contact-shadow caster mark.
+                let draws: Vec<DrawData> = (0..pipeline.report_draw_count(&report))
                     .map(|i| {
                         let world = pipeline
                             .report_draw_world(&report, i)
                             .expect("draw index in range");
-                        let color = pipeline
-                            .report_draw_color(&report, i)
-                            .expect("draw index in range");
-                        let mesh_id = pipeline
-                            .report_draw_mesh_id(&report, i)
-                            .expect("draw index in range");
-                        let material_id = pipeline
-                            .report_draw_material_id(&report, i)
-                            .expect("draw index in range");
                         DrawData::new(
                             view_projection.multiply(world).as_cols_array(),
                             world.as_cols_array(),
-                            color,
-                            mesh_id,
-                            material_id,
+                            pipeline.report_draw_color(&report, i).expect("draw in range"),
+                            pipeline.report_draw_mesh_id(&report, i).expect("draw in range"),
+                            pipeline.report_draw_material_id(&report, i).expect("draw in range"),
+                            pipeline.report_draw_casts_shadow(&report, i).expect("draw in range"),
                         )
                     })
                     .collect();
@@ -504,6 +502,7 @@ impl RunningApp {
                     draws,
                     lights,
                     pipeline.report_light_view_proj(&report),
+                    view_projection.as_cols_array(),
                     pipeline.report_presented(&report),
                     pipeline.report_recorded(&report),
                 )

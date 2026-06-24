@@ -3,7 +3,9 @@
 use axiom_kernel::Ratio;
 
 use crate::host_error::HostError;
+use crate::host_orientation::Orientation;
 use crate::host_result::HostResult;
+use crate::host_safe_area_insets::HostSafeAreaInsets;
 use crate::pixels::Pixels;
 
 /// Viewport / surface metadata supplied by the host.
@@ -29,6 +31,7 @@ pub struct HostViewport {
     physical_width: u32,
     physical_height: u32,
     scale_factor: Ratio,
+    safe_area_insets: HostSafeAreaInsets,
 }
 
 impl HostViewport {
@@ -87,6 +90,7 @@ impl HostViewport {
                         physical_width: physical_width as u32,
                         physical_height: physical_height as u32,
                         scale_factor,
+                        safe_area_insets: HostSafeAreaInsets::none(),
                     })
             })
     }
@@ -140,6 +144,7 @@ impl HostViewport {
                         physical_width,
                         physical_height,
                         scale_factor,
+                        safe_area_insets: HostSafeAreaInsets::none(),
                     })
             })
     }
@@ -162,6 +167,29 @@ impl HostViewport {
 
     pub const fn scale_factor(&self) -> Ratio {
         self.scale_factor
+    }
+
+    /// Attach host-supplied safe-area insets, replacing the default
+    /// [`HostSafeAreaInsets::none`] this viewport was constructed with. Mirrors
+    /// [`crate::HostFrameInput::with_presentation_nanos`]: the base constructors
+    /// stay small, and the optional cutout fact is layered on by the adapter
+    /// that actually has it.
+    pub const fn with_safe_area_insets(mut self, insets: HostSafeAreaInsets) -> Self {
+        self.safe_area_insets = insets;
+        self
+    }
+
+    /// The host-supplied safe-area insets in effect for this surface. Defaults
+    /// to [`HostSafeAreaInsets::none`] when the host supplied no cutout data.
+    pub const fn safe_area_insets(&self) -> HostSafeAreaInsets {
+        self.safe_area_insets
+    }
+
+    /// The surface orientation, derived from the physical pixel extents. A
+    /// pure function of the dimensions the engine renders into, so it can never
+    /// disagree with them (see [`Orientation`]).
+    pub fn orientation(&self) -> Orientation {
+        Orientation::from_extents(self.physical_width, self.physical_height)
     }
 
     /// `physical_width / physical_height` as a [`Ratio`]. Both dimensions are
@@ -279,6 +307,40 @@ mod tests {
     fn from_physical_rejects_zero_dimensions() {
         let err = HostViewport::from_physical(0, 100, ratio(1.0)).unwrap_err();
         assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
+    }
+
+    #[test]
+    fn default_safe_area_insets_are_none() {
+        let v = HostViewport::new(800, 600, ratio(1.0)).unwrap();
+        assert_eq!(v.safe_area_insets(), HostSafeAreaInsets::none());
+    }
+
+    #[test]
+    fn with_safe_area_insets_attaches_them() {
+        let insets = HostSafeAreaInsets::new(
+            Pixels::new(44.0).unwrap(),
+            Pixels::new(0.0).unwrap(),
+            Pixels::new(34.0).unwrap(),
+            Pixels::new(0.0).unwrap(),
+        )
+        .unwrap();
+        let v = HostViewport::new(390, 844, ratio(3.0))
+            .unwrap()
+            .with_safe_area_insets(insets);
+        assert_eq!(v.safe_area_insets(), insets);
+        // The other viewport facts survive the builder untouched.
+        assert_eq!(v.logical_width(), 390);
+        assert_eq!(v.logical_height(), 844);
+    }
+
+    #[test]
+    fn orientation_tracks_physical_extents() {
+        let landscape = HostViewport::new(1600, 900, ratio(1.0)).unwrap();
+        assert_eq!(landscape.orientation(), Orientation::Landscape);
+        let portrait = HostViewport::new(390, 844, ratio(1.0)).unwrap();
+        assert_eq!(portrait.orientation(), Orientation::Portrait);
+        let square = HostViewport::new(512, 512, ratio(1.0)).unwrap();
+        assert_eq!(square.orientation(), Orientation::Square);
     }
 }
 

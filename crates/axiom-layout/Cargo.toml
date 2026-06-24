@@ -1,0 +1,25 @@
+[package]
+name = "axiom-layout"
+description = "Axiom layer: the deterministic, mobile-first responsive layout solver. Given the host viewport facts (size, orientation, safe-area insets) and a flat flex/constraint node tree, it computes a placed rectangle per node — the engine deciding how to order and place on-screen regions, mobile-first by default, instead of per-app CSS. Pure data in, placed rects out: no browser, no renderer, no app concepts."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free and wasm-clean: it consumes already-measured host
+# viewport facts and emits rectangles, so it runs and is tested on native exactly
+# as it drives the web.
+crate-type = ["rlib"]
+
+[dependencies]
+# Layer dependencies (Layer Law: only lower layers). `host` supplies the viewport
+# facts the solver consumes (HostViewport / Orientation / HostSafeAreaInsets) and
+# the `Pixels` quantity it emits; `kernel` supplies `Ratio` (aspect ratios + flex
+# weights) and the result types. Both are genuinely used.
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-host = { path = "../axiom-host" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

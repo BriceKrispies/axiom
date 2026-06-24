@@ -144,6 +144,40 @@ impl Default for DrawAcc {
     }
 }
 
+/// The frame's directional lighting input for the per-triangle shading cue: a
+/// normalized world to-light direction, a linear-RGB colour, and an intensity.
+/// Taken from the frame's real scene light, so the Canvas backend shades from
+/// the same sun the GPU path does instead of a fixed fake direction.
+struct SceneLight {
+    dir: [f32; 3],
+    color: [f32; 3],
+    intensity: f32,
+}
+
+/// The frame's primary directional light (the first `kind == 0` light in the
+/// packet) as a [`SceneLight`], or — when the frame authored no directional
+/// light — the profile's configured fallback direction at neutral white, unit
+/// intensity. Resolved once per frame.
+fn scene_light(packet: &FramePacket, cues: &CanvasDepthCueProfile) -> SceneLight {
+    packet
+        .lights()
+        .iter()
+        .find(|l| l.kind() == 0)
+        .map(|l| {
+            let ci = l.color_intensity();
+            SceneLight {
+                dir: normalize3(l.vec()),
+                color: [ci[0], ci[1], ci[2]],
+                intensity: ci[3],
+            }
+        })
+        .unwrap_or_else(|| SceneLight {
+            dir: normalize3(cues.lighting.direction),
+            color: [1.0, 1.0, 1.0],
+            intensity: 1.0,
+        })
+}
+
 /// Project + classify + cull every draw in `packet` against `cache`, applying
 /// terrain LOD and the frame pixel budget, into screen-space triangles.
 pub(crate) fn convert(
@@ -157,8 +191,9 @@ pub(crate) fn convert(
     let cap = options.max_triangles_per_terrain_draw();
     let budget = options.pixel_budget();
     let cues = options.depth_cues();
-    // Normalize the fake light once per frame, not per triangle.
-    let light_dir = normalize3(cues.lighting.direction);
+    // Resolve the real scene directional light once per frame (its direction,
+    // colour, and intensity drive the per-triangle shading below).
+    let light = scene_light(packet, &cues);
 
     let (mut frame, _spent) = packet.draws().iter().fold(
         (
@@ -172,7 +207,7 @@ pub(crate) fn convert(
         |(mut frame, spent), draw| {
             let drawn = cache
                 .get(draw.mesh_id())
-                .map(|geo| convert_draw(geo, draw, w, h, screen_px2, cap, &cues, light_dir));
+                .map(|geo| convert_draw(geo, draw, w, h, screen_px2, cap, &cues, &light));
             frame.stats.skipped_draws += u32::from(drawn.is_none());
             let next = drawn.into_iter().fold(spent, |spent, dc| {
                 frame.stats.projected_draws += 1;
@@ -218,7 +253,7 @@ fn convert_draw(
     screen_px2: f32,
     cap: u32,
     cues: &CanvasDepthCueProfile,
-    light_dir: [f32; 3],
+    light: &SceneLight,
 ) -> DrawConversion {
     let mvp = draw.mvp();
     let world = draw.world();
@@ -236,7 +271,7 @@ fn convert_draw(
         },
         |mut acc, tri| {
             let proj = project_triangle_cued(
-                geo, tri, &mvp, &world, color, object_id, cues, light_dir, w, h,
+                geo, tri, &mvp, &world, color, object_id, cues, light, w, h,
             );
             acc.invalid += u32::from(proj.is_none());
             proj.into_iter().for_each(|pt| {
@@ -294,7 +329,8 @@ fn convert_draw(
         .map(|c| {
             let base = RasterTriangle::base_color(&c.verts);
             let hf = height_factor(c.world_y, y_min, y_max);
-            let (shaded, _applied) = shade_triangle(base, c.brightness, hf, c.mean_depth, cues);
+            let (shaded, _applied) =
+                shade_triangle(base, c.brightness, light.color, hf, c.mean_depth, cues);
             RasterTriangle::shaded(c.verts, shaded)
         })
         .collect();
@@ -342,7 +378,7 @@ fn project_triangle_cued(
     draw_color: [f32; 4],
     object_id: u64,
     cues: &CanvasDepthCueProfile,
-    light_dir: [f32; 3],
+    light: &SceneLight,
     w: u32,
     h: u32,
 ) -> Option<ProjectedTriangle> {
@@ -366,7 +402,7 @@ fn project_triangle_cued(
     vertex(0).zip(vertex(1)).zip(vertex(2)).map(|((a, b), c)| {
         let verts = [a, b, c];
         let normal = face_normal_world(&model, world);
-        let brightness = lighting_brightness(normal, light_dir, cues);
+        let brightness = lighting_brightness(normal, light.dir, light.intensity, cues);
         let mean_model = [
             (model[0][0] + model[1][0] + model[2][0]) / 3.0,
             (model[0][1] + model[1][1] + model[2][1]) / 3.0,
@@ -508,7 +544,7 @@ mod tests {
     }
 
     fn draw(object_id: u64, mesh_id: u64) -> FrameDrawItem {
-        FrameDrawItem::new(object_id, mesh_id, 9, IDENTITY, IDENTITY, [1.0; 4])
+        FrameDrawItem::new(object_id, mesh_id, 9, IDENTITY, IDENTITY, [1.0; 4], false)
     }
 
     fn packet(draws: Vec<FrameDrawItem>) -> FramePacket {
@@ -552,7 +588,7 @@ mod tests {
     #[test]
     fn one_mesh_produces_raster_triangles_with_resolved_colour() {
         let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
-        let d = FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 0.0, 0.0, 1.0]);
+        let d = FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 0.0, 0.0, 1.0], false);
         let out = convert(&packet(vec![d]), &cache, &opts());
         assert_eq!(out.stats.projected_draws, 1);
         assert_eq!(out.stats.projected_triangles, 2);
@@ -576,7 +612,7 @@ mod tests {
     #[test]
     fn invalid_projection_is_culled_and_counted_no_nans() {
         let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
-        let zero_mvp = FrameDrawItem::new(1, 7, 9, IDENTITY, [0.0; 16], [1.0; 4]);
+        let zero_mvp = FrameDrawItem::new(1, 7, 9, IDENTITY, [0.0; 16], [1.0; 4], false);
         let out = convert(&packet(vec![zero_mvp]), &cache, &opts());
         assert_eq!(out.stats.projected_draws, 1);
         assert_eq!(out.stats.projected_triangles, 0);
@@ -743,6 +779,36 @@ mod tests {
         // Lighting scales the flat colour, so the shaded triangle differs.
         assert_ne!(on.triangles[0].color(), off.triangles[0].color());
         assert_eq!(off.triangles[0].color(), [0.6, 0.6, 0.6, 1.0]);
+    }
+
+    #[test]
+    fn convert_shades_from_the_scene_directional_light() {
+        use axiom_host::FrameLight;
+        // A white ground quad (normal +Z) lit by a RED directional light whose
+        // to-light direction is +Z (straight at the quad).
+        let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
+        let mut cues = CanvasDepthCueProfile::low_poly_framebuffer();
+        cues.enable_height_tint = false;
+        cues.enable_distance_detail_falloff = false;
+        cues.lighting.banded = false;
+        let red_light = FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]);
+        let p = FramePacket::new(
+            3,
+            180,
+            FrameViewport::new(320, 180),
+            [0.4, 0.6, 0.9, 1.0],
+            Some(FrameCamera::new(IDENTITY, IDENTITY, IDENTITY)),
+            vec![draw(1, 7)],
+            vec![red_light],
+            IDENTITY,
+            FrameFeatureSet::new(false, false, 1, 0),
+        );
+        let out = convert(&p, &cache, &opts_cued(cues));
+        // The white surface is tinted by the red light: red survives, G/B vanish.
+        let c = out.triangles[0].color();
+        assert!(c[0] > 0.0, "red channel lit");
+        assert!(c[1].abs() < 1e-6, "green removed by the red light");
+        assert!(c[2].abs() < 1e-6, "blue removed by the red light");
     }
 
     #[test]

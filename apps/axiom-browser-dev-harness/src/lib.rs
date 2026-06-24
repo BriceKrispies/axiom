@@ -1,61 +1,26 @@
-//! # Axiom — Browser Debug Overlay & Command Console (developer harness)
+//! # Axiom — Browser Debug Overlay developer harness
 //!
-//! A developer debug overlay for the live browser/WASM engine surface, plus a
-//! tiny in-overlay command console, mounted over a bare canvas by this harness
-//! app. Toggle it with the physical **Backquote** (`` ` ``) key.
+//! A thin host for the [`axiom_debug_overlay`] module: it mounts the overlay +
+//! command console over a bare canvas and feeds it **real** browser-side
+//! diagnostics. The overlay's whole state machine (density, command registry,
+//! console history, keyboard classification) — and its DOM binding — live in the
+//! module, behind the `DebugOverlayApi` facade; this app only measures values and
+//! pushes them in.
 //!
-//! ## Architectural placement — this is *app-side developer tooling*
+//! ## Where the diagnostics come from (real, not stub)
+//! Every value the harness feeds is measured, probed, or an honest constant —
+//! there is no fabricated stub provider:
+//! - **fps / frame time** — measured from `requestAnimationFrame` deltas.
+//! - **frame index** — the RAF frame counter.
+//! - **visibility** — `document`'s hidden flag.
+//! - **renderer backend / fallback** — a real `navigator.gpu` capability probe,
+//!   reporting the engine's actual WebGPU→WebGL2 fallback choice.
+//! - engine-internal fields the harness genuinely cannot observe without running
+//!   the engine (sim ticks, GPU submissions, worker messages) are honest zeroes;
+//!   absent subsystems (storage/audio/network) are honest `none`.
 //!
-//! The deterministic engine spine (kernel / runtime / math / the layers and
-//! modules) must never learn about the DOM, keyboard events, CSS, canvas,
-//! WebGPU, browser timing, or command text. So none of that lives in a layer or
-//! a module — it lives here, in an **app**, the only tier permitted to reference
-//! `web_sys` outside the platform-facing `host` layer and `windowing` module
-//! (Module Law #9). Apps are also outside the Branchless and Coverage laws,
-//! which is why this code reads as ordinary idiomatic Rust.
-//!
-//! ## The split: pure logic (native-tested) vs. the DOM edge (wasm-only)
-//!
-//! Everything that *decides* — density cycling, keyboard-shortcut
-//! classification, the command registry/dispatcher, the diagnostics snapshot —
-//! is pure, deterministic, browser-free Rust that compiles on **native** and is
-//! covered by ordinary `#[test]`s run under `cargo test --workspace`. The DOM
-//! controller ([`debug_overlay::DebugOverlayController`]) and the
-//! `#[wasm_bindgen]` entry are the thin nondeterministic edge, compiled only for
-//! `wasm32` and verified in a real browser (see `DEBUG_OVERLAY.md`).
-//!
-//! ```text
-//! browser keydown ─▶ browser_keyboard_shortcut::classify ─▶ OverlayShortcut
-//!                                                              │
-//!   console submit ─▶ CommandRegistry::execute ─▶ CommandResult│
-//!                                                              ▼
-//!                                                        OverlayState  (pure)
-//!                                                              │
-//!                                       DebugOverlayController.sync (DOM, wasm)
-//! ```
-//!
-//! ## Diagnostics are host-fed, never engine state
-//!
-//! The overlay only ever *reads* a [`browser_diagnostics::BrowserDiagnosticsSnapshot`]
-//! handed to it by the host. The values here come from a replaceable
-//! [`browser_diagnostics::StubDiagnosticsProvider`]; a real host swaps in its own
-//! provider. The overlay must never become a source of deterministic engine
-//! state — it is a read-out, not a model.
+//! All of this is the nondeterministic browser edge, so it is confined to the
+//! `wasm32` [`web`] module; native `cargo test` compiles nothing here.
 
-// The pure, browser-free overlay logic. `pub` so it is the crate's tested public
-// API on every target (and so it is never dead code on a native build).
-pub mod browser_diagnostics;
-pub mod browser_keyboard_shortcut;
-pub mod debug_command;
-pub mod debug_command_registry;
-pub mod debug_console;
-pub mod debug_overlay_density;
-pub mod debug_overlay_state;
-
-// The DOM edge: the controller that projects pure overlay state onto real DOM
-// nodes, and the `#[wasm_bindgen]` browser entry that mounts it. Compiled only
-// for the browser; never seen by native `cargo test`.
-#[cfg(target_arch = "wasm32")]
-pub mod debug_overlay;
 #[cfg(target_arch = "wasm32")]
 mod web;

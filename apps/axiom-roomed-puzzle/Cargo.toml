@@ -19,6 +19,11 @@ crate-type = ["cdylib", "rlib"]
 # in app.toml's `allowed_layers`.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
+# The math layer, for `Vec2` — the value type the input module's swipe synthesis
+# traffics in. Used natively by `command_for_swipe` (and its tests), so it is a
+# normal dependency. Listed in app.toml's `allowed_layers`.
+axiom-math = { path = "../../crates/axiom-math" }
+
 # Standard, hand-editable level format. `toml` + `serde` are already the repo's
 # manifest-parsing stack (see crates/xtask); we reuse the same versions. Used by
 # the level codec in both native tests and the wasm editor, so they are normal
@@ -33,6 +38,17 @@ toml = "0.8"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
+# The mobile-first touch input synthesizer (an engine module). Used only by the
+# wasm `web` arm, which feeds it neutral pointer samples and turns a swipe into a
+# move. Listed in app.toml's `allowed_modules`.
+axiom-input = { path = "../../modules/axiom-input" }
+# The engine's responsive layout solver + the host viewport facts it consumes.
+# The `web` arm builds a HostViewport from the live window/DPR/safe-area, declares
+# a board+panel tree, and applies the solved rects to the DOM — so placement is the
+# engine's decision, mobile-first, not per-app CSS. Listed in app.toml's
+# `allowed_layers`.
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-layout = { path = "../../crates/axiom-layout" }
 web-sys = { version = "0.3", features = [
     "Window",
     "Document",
@@ -41,9 +57,11 @@ web-sys = { version = "0.3", features = [
     "HtmlElement",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
+    "CssStyleDeclaration",
     "DomRect",
     "KeyboardEvent",
     "MouseEvent",
+    "PointerEvent",
     "console",
 ] }
 

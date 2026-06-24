@@ -1,12 +1,16 @@
 //! The in-browser (WASM) play surface — **`wasm32` only**.
 //!
 //! A thin 2D-`<canvas>` adapter over the pure [`QuintetGame`]. It draws the
-//! board, the generator panel (the current quintet in a 5×5 mini-grid), the
-//! score, and — while the player drags — a snapped placement preview and the
-//! floating piece. Pointer drag-and-drop is the only input: press on the
-//! generator piece to pick it up, drag over the board (the preview snaps to the
-//! nearest cell and reads green when valid / red when not), and release to drop.
-//! A valid drop commits the piece; an invalid drop returns it to the panel.
+//! board, the piece tray (the current quintet in a 5×5 grid), the score, and —
+//! while the player drags — a snapped placement preview and the floating piece.
+//! **PointerEvent** drag-and-drop (mouse, touch, and pen alike): press on the tray
+//! piece to pick it up, drag over the board (the preview snaps to the nearest cell
+//! and reads green when valid / red when not), and release to drop.
+//!
+//! The on-screen placement is **engine-decided**: each frame the `axiom-layout`
+//! solver, driven from the live window size + orientation + safe-area, places a
+//! board region and a tray region — side-by-side in landscape, the tray stacked
+//! *below* a larger board in portrait — and we draw each part into its rectangle.
 //!
 //! Every rule lives in the browser-free core; this file makes no gameplay
 //! decisions of its own. It is never compiled on native, so the core and
@@ -15,9 +19,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use axiom_host::{HostSafeAreaInsets, HostViewport, Pixels};
+use axiom_kernel::Ratio;
+use axiom_layout::{solve, Direction, Insets, LayoutRect, LayoutStyle, LayoutTree, LayoutTreeBuilder, NodeId};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, MouseEvent};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, PointerEvent};
 
 use crate::board::BOARD_SIZE;
 use crate::game::{PlaceResult, QuintetGame};
@@ -28,25 +35,14 @@ const CANVAS_ID: &str = "axiom-quintet-canvas";
 /// The status / stuck-message element id.
 const STATUS_ID: &str = "status";
 
-/// Pixels per board cell.
-const CELL_PX: f64 = 44.0;
-/// Outer margin around the board.
-const MARGIN: f64 = 24.0;
-/// Gap between the board and the generator panel.
-const PANEL_GAP: f64 = 48.0;
-/// Pixels per cell in the 5×5 generator mini-grid.
-const MINI_PX: f64 = 28.0;
+/// How far (in cells, Chebyshev) the drag shadow hunts for a valid spot before
+/// giving up and showing red — the "magnetic" snap range.
+const SNAP_RADIUS: i32 = 2;
 
-/// The board's pixel span.
-const BOARD_PX: f64 = CELL_PX * BOARD_SIZE as f64;
-/// Left edge of the generator panel.
-const PANEL_X: f64 = MARGIN + BOARD_PX + PANEL_GAP;
-/// Top of the generator mini-grid (room above for its label).
-const PANEL_GRID_Y: f64 = MARGIN + 36.0;
-
-/// Canvas backing-store width and height.
-const CANVAS_W: u32 = (PANEL_X + MINI_PX * 5.0 + MARGIN) as u32;
-const CANVAS_H: u32 = (MARGIN * 2.0 + BOARD_PX) as u32;
+/// Layout node ids for the engine layout tree.
+const NODE_ROOT: u32 = 0;
+const NODE_BOARD: u32 = 1;
+const NODE_TRAY: u32 = 2;
 
 // --- Palette --------------------------------------------------------------
 const BG: &str = "#15171c";
@@ -63,6 +59,45 @@ const INVALID_FILL: &str = "#c0392b";
 const TEXT: &str = "#d7dbe2";
 const TEXT_DIM: &str = "#9aa3b2";
 
+/// The engine-solved on-screen layout, in canvas backing-store (device) pixels:
+/// where the board grid and the 5×5 tray grid sit, and their cell sizes. A larger
+/// `mini` (tray cell) in portrait is what makes the piece bigger on a phone.
+#[derive(Clone, Copy)]
+struct Layout {
+    canvas_w: f64,
+    canvas_h: f64,
+    board_x: f64,
+    board_y: f64,
+    cell: f64,
+    tray_x: f64,
+    tray_y: f64,
+    mini: f64,
+}
+
+impl Layout {
+    /// A 1×1 placeholder used before the first solve (and as a div-by-zero guard).
+    const PLACEHOLDER: Layout = Layout {
+        canvas_w: 1.0,
+        canvas_h: 1.0,
+        board_x: 0.0,
+        board_y: 0.0,
+        cell: 1.0,
+        tray_x: 0.0,
+        tray_y: 0.0,
+        mini: 1.0,
+    };
+
+    /// Baseline for the "NEXT QUINTET" label, just above the tray grid.
+    fn label_y(&self) -> f64 {
+        self.tray_y - self.mini * 0.35
+    }
+
+    /// Top of the score read-out, below the tray grid.
+    fn score_y(&self) -> f64 {
+        self.tray_y + self.mini * 5.0 + self.mini * 0.9
+    }
+}
+
 /// The interactive UI state: the pure game plus the current drag.
 struct Ui {
     game: QuintetGame,
@@ -78,6 +113,13 @@ thread_local! {
         dragging: false,
         pointer: (0.0, 0.0),
     });
+
+    /// The current engine-solved layout, recomputed when the window size changes.
+    static LAYOUT: RefCell<Layout> = const { RefCell::new(Layout::PLACEHOLDER) };
+
+    /// The last `(css_w, css_h)` the layout was solved for, so it is recomputed +
+    /// the canvas resized only when the window changes.
+    static LAST_SIZE: RefCell<Option<(u32, u32)>> = const { RefCell::new(None) };
 }
 
 fn window() -> web_sys::Window {
@@ -98,15 +140,11 @@ fn canvas_context() -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
 // Browser entry point.
 // ===========================================================================
 
-/// Boot the play surface: size the canvas, install pointer handlers and the
-/// reset hook, start the draw loop, and refresh the status line.
+/// Boot the play surface: install pointer handlers, start the draw loop (which
+/// drives the responsive layout), and refresh the status line.
 #[wasm_bindgen]
 pub fn start() {
     console_error_panic_hook::set_once();
-    if let Some((canvas, _)) = canvas_context() {
-        canvas.set_width(CANVAS_W);
-        canvas.set_height(CANVAS_H);
-    }
     install_pointer();
     start_run_loop();
     refresh_status();
@@ -129,83 +167,241 @@ fn log(msg: &str) {
 }
 
 // ===========================================================================
-// Pointer drag-and-drop.
+// Engine-driven responsive layout (mobile-first).
 // ===========================================================================
 
-/// Convert a mouse event's client coordinates into canvas backing-store
+/// Recompute the layout from the live viewport and resize the canvas — but only
+/// when the window size changed. The engine's `axiom-layout` solver decides where
+/// the board and tray go (row in landscape, column — tray below the board — in
+/// portrait); we project the solved rects into canvas backing-store pixels.
+fn sync_layout() {
+    let Some((canvas, _)) = canvas_context() else {
+        return;
+    };
+    let win = window();
+    let css_w = win
+        .inner_width()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+        .max(1.0);
+    let css_h = win
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+        .max(1.0);
+    let key = (css_w as u32, css_h as u32);
+    if LAST_SIZE.with(|last| *last.borrow() == Some(key)) {
+        return;
+    }
+    LAST_SIZE.with(|last| *last.borrow_mut() = Some(key));
+
+    let dpr = win.device_pixel_ratio().max(0.5);
+    let cw = (css_w * dpr).max(1.0) as u32;
+    let ch = (css_h * dpr).max(1.0) as u32;
+    canvas.set_width(cw);
+    canvas.set_height(ch);
+
+    let scale = Ratio::new(dpr as f32).unwrap_or_else(|_| Ratio::new(1.0).expect("unit ratio"));
+    let viewport = HostViewport::new(css_w as u32, css_h as u32, scale)
+        .expect("a positive viewport is valid")
+        .with_safe_area_insets(read_safe_area_insets());
+    let result = solve(&viewport, &build_layout_tree());
+    let board = rect_device_px(result.rect(NodeId::from_raw(NODE_BOARD)), dpr);
+    let tray = rect_device_px(result.rect(NodeId::from_raw(NODE_TRAY)), dpr);
+
+    // The board node carries aspect 1.0, so its rect is square: cell = side / 10.
+    let cell = board.2 / BOARD_SIZE as f64;
+    // Fit a centred 5×5 grid in the tray, leaving a margin for the label + score.
+    let mini = ((tray.2 * 0.92).min(tray.3 * 0.62) / 5.0).max(1.0);
+    let grid = mini * 5.0;
+    let tray_x = tray.0 + (tray.2 - grid) * 0.5;
+    let tray_y = tray.1 + (tray.3 - grid) * 0.5;
+
+    LAYOUT.with(|layout| {
+        *layout.borrow_mut() = Layout {
+            canvas_w: cw as f64,
+            canvas_h: ch as f64,
+            board_x: board.0,
+            board_y: board.1,
+            cell,
+            tray_x,
+            tray_y,
+            mini,
+        };
+    });
+}
+
+/// A solved rect → `(x, y, w, h)` in device pixels (logical × dpr), or a 1×1
+/// placeholder if the node was not placed.
+fn rect_device_px(rect: Option<LayoutRect>, dpr: f64) -> (f64, f64, f64, f64) {
+    rect.map(|r| {
+        (
+            r.left().get() as f64 * dpr,
+            r.top().get() as f64 * dpr,
+            r.width().get() as f64 * dpr,
+            r.height().get() as f64 * dpr,
+        )
+    })
+    .unwrap_or((0.0, 0.0, 1.0, 1.0))
+}
+
+/// The layout tree: an adaptive root (board beside tray in landscape, board above
+/// tray in portrait). The board grows and stays square (the 10×10 grid); the tray
+/// takes a smaller share. The root reserves space at the top for the HUD overlay.
+fn build_layout_tree() -> LayoutTree {
+    let px = |v: f32| Pixels::new(v).expect("finite pixel length");
+    let mut builder = LayoutTreeBuilder::new();
+
+    let mut root = LayoutStyle::new();
+    root.direction = Direction::Adaptive;
+    root.gap = px(14.0);
+    // Top inset clears the HUD bar (status + reset); the rest is a small margin.
+    root.padding = Insets::new(px(52.0), px(12.0), px(12.0), px(12.0));
+    let root_id = builder.root(NodeId::from_raw(NODE_ROOT), root);
+
+    let mut board = LayoutStyle::new();
+    board.grow = Ratio::new(3.0).expect("finite grow");
+    board.aspect = Ratio::new(1.0).ok();
+    board.min_main = px(120.0);
+    builder.child(root_id, NodeId::from_raw(NODE_BOARD), board);
+
+    let mut tray = LayoutStyle::new();
+    tray.grow = Ratio::new(2.0).expect("finite grow");
+    tray.min_main = px(120.0);
+    builder.child(root_id, NodeId::from_raw(NODE_TRAY), tray);
+
+    builder.build()
+}
+
+/// Read the device safe-area insets via the CSS `env(safe-area-inset-*)` values by
+/// measuring a hidden probe element. Falls back to no insets on any failure.
+fn read_safe_area_insets() -> HostSafeAreaInsets {
+    let doc = document();
+    let values = doc
+        .create_element("div")
+        .ok()
+        .map(|probe| {
+            let _ = probe.set_attribute(
+                "style",
+                "position:fixed;visibility:hidden;top:0;left:0;\
+                 padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);\
+                 padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);",
+            );
+            let _ = doc.body().map(|b| b.append_child(&probe));
+            let read = window()
+                .get_computed_style(&probe)
+                .ok()
+                .flatten()
+                .map(|cs| {
+                    let edge = |name: &str| {
+                        cs.get_property_value(name)
+                            .ok()
+                            .and_then(|v| v.trim_end_matches("px").trim().parse::<f32>().ok())
+                            .unwrap_or(0.0)
+                    };
+                    (
+                        edge("padding-top"),
+                        edge("padding-right"),
+                        edge("padding-bottom"),
+                        edge("padding-left"),
+                    )
+                })
+                .unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let _ = doc.body().map(|b| b.remove_child(&probe));
+            read
+        })
+        .unwrap_or((0.0, 0.0, 0.0, 0.0));
+    let edge = |v: f32| Pixels::new(v.max(0.0)).unwrap_or_else(|_| Pixels::new(0.0).expect("zero"));
+    HostSafeAreaInsets::new(edge(values.0), edge(values.1), edge(values.2), edge(values.3))
+        .unwrap_or_else(|_| HostSafeAreaInsets::none())
+}
+
+// ===========================================================================
+// Pointer drag-and-drop (mouse + touch + pen via PointerEvent).
+// ===========================================================================
+
+/// Convert a pointer event's client coordinates into canvas backing-store
 /// coordinates, accounting for any CSS scaling of the canvas element.
-fn to_canvas_coords(canvas: &HtmlCanvasElement, e: &MouseEvent) -> (f64, f64) {
+fn to_canvas_coords(canvas: &HtmlCanvasElement, e: &PointerEvent) -> (f64, f64) {
     let rect = canvas.get_bounding_client_rect();
-    let sx = canvas.width() as f64 / rect.width();
-    let sy = canvas.height() as f64 / rect.height();
+    let sx = canvas.width() as f64 / rect.width().max(1.0);
+    let sy = canvas.height() as f64 / rect.height().max(1.0);
     (
         (e.client_x() as f64 - rect.left()) * sx,
         (e.client_y() as f64 - rect.top()) * sy,
     )
 }
 
-/// Is the canvas point inside the generator mini-grid (the pick-up zone)?
-fn in_generator(px: f64, py: f64) -> bool {
-    px >= PANEL_X
-        && px < PANEL_X + MINI_PX * 5.0
-        && py >= PANEL_GRID_Y
-        && py < PANEL_GRID_Y + MINI_PX * 5.0
+/// Is the canvas point inside the tray's 5×5 grid (the pick-up zone)?
+fn in_generator(px: f64, py: f64, layout: &Layout) -> bool {
+    px >= layout.tray_x
+        && px < layout.tray_x + layout.mini * 5.0
+        && py >= layout.tray_y
+        && py < layout.tray_y + layout.mini * 5.0
 }
 
 /// The board cell under a canvas point (may be out of bounds).
-fn board_cell(px: f64, py: f64) -> (i32, i32) {
+fn board_cell(px: f64, py: f64, layout: &Layout) -> (i32, i32) {
     (
-        ((px - MARGIN) / CELL_PX).floor() as i32,
-        ((py - MARGIN) / CELL_PX).floor() as i32,
+        ((px - layout.board_x) / layout.cell).floor() as i32,
+        ((py - layout.board_y) / layout.cell).floor() as i32,
     )
 }
 
-/// The snapped board anchor for the dragged piece: the piece is centred on the
-/// board cell under the pointer.
-fn snapped_anchor(mask: &QuintetMask, px: f64, py: f64) -> (i32, i32) {
-    let (cx, cy) = board_cell(px, py);
+/// The snapped board anchor for the dragged piece (centred on the cell under the
+/// pointer).
+fn snapped_anchor(mask: &QuintetMask, px: f64, py: f64, layout: &Layout) -> (i32, i32) {
+    let (cx, cy) = board_cell(px, py, layout);
     (cx - mask.width() / 2, cy - mask.height() / 2)
 }
 
-/// Install the mouse-based drag handlers: pick up on the generator piece, track
-/// the drag on the window, and drop on release.
+/// Install the PointerEvent drag handlers on the canvas, with pointer capture so a
+/// touch/mouse drag keeps tracking even if it leaves the element. Works for mouse,
+/// touch, and pen with one code path.
 fn install_pointer() {
     let Some((canvas, _)) = canvas_context() else {
         return;
     };
 
-    // Press on the generator piece → start dragging.
+    // Press on the tray piece → capture the pointer and start dragging.
     let down_canvas = canvas.clone();
-    let down = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
+    let down = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
+        e.prevent_default();
+        let _ = down_canvas.set_pointer_capture(e.pointer_id());
         let (px, py) = to_canvas_coords(&down_canvas, &e);
+        let layout = LAYOUT.with(|l| *l.borrow());
         UI.with(|ui| {
             let mut ui = ui.borrow_mut();
             ui.pointer = (px, py);
-            if !ui.game.is_stuck() && in_generator(px, py) {
+            if !ui.game.is_stuck() && in_generator(px, py, &layout) {
                 ui.dragging = true;
             }
         });
     });
     canvas
-        .add_event_listener_with_callback("mousedown", down.as_ref().unchecked_ref())
-        .expect("mousedown listener installs");
+        .add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref())
+        .expect("pointerdown listener installs");
     down.forget();
 
-    // Move anywhere → update the pointer (drag follows the cursor off-canvas too).
+    // Move → update the pointer (capture routes moves here even off-element).
     let move_canvas = canvas.clone();
-    let moved = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
+    let moved = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
         let (px, py) = to_canvas_coords(&move_canvas, &e);
         UI.with(|ui| ui.borrow_mut().pointer = (px, py));
     });
-    window()
-        .add_event_listener_with_callback("mousemove", moved.as_ref().unchecked_ref())
-        .expect("mousemove listener installs");
+    canvas
+        .add_event_listener_with_callback("pointermove", moved.as_ref().unchecked_ref())
+        .expect("pointermove listener installs");
     moved.forget();
 
     // Release → drop the piece if the snapped placement is valid.
     let up_canvas = canvas.clone();
-    let up = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
+    let up = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
+        let _ = up_canvas.release_pointer_capture(e.pointer_id());
         let (px, py) = to_canvas_coords(&up_canvas, &e);
+        let layout = LAYOUT.with(|l| *l.borrow());
         let placed = UI.with(|ui| {
             let mut ui = ui.borrow_mut();
             ui.pointer = (px, py);
@@ -213,8 +409,11 @@ fn install_pointer() {
                 return false;
             }
             ui.dragging = false;
-            let anchor = ui.game.current().map(|mask| snapped_anchor(mask, px, py));
-            match anchor {
+            let desired = ui
+                .game
+                .current()
+                .map(|mask| snapped_anchor(mask, px, py, &layout));
+            match desired.and_then(|d| ui.game.snap_anchor(d, SNAP_RADIUS)) {
                 Some((ax, ay)) => matches!(ui.game.try_place(ax, ay), PlaceResult::Placed(_)),
                 None => false,
             }
@@ -223,10 +422,19 @@ fn install_pointer() {
             refresh_status();
         }
     });
-    window()
-        .add_event_listener_with_callback("mouseup", up.as_ref().unchecked_ref())
-        .expect("mouseup listener installs");
+    canvas
+        .add_event_listener_with_callback("pointerup", up.as_ref().unchecked_ref())
+        .expect("pointerup listener installs");
     up.forget();
+
+    // Cancel (e.g. a touch interrupted) → abandon the drag.
+    let cancel = Closure::<dyn FnMut(PointerEvent)>::new(move |_e: PointerEvent| {
+        UI.with(|ui| ui.borrow_mut().dragging = false);
+    });
+    canvas
+        .add_event_listener_with_callback("pointercancel", cancel.as_ref().unchecked_ref())
+        .expect("pointercancel listener installs");
+    cancel.forget();
 }
 
 // ===========================================================================
@@ -237,7 +445,9 @@ fn start_run_loop() {
     let frame = Rc::new(RefCell::new(None::<Closure<dyn FnMut()>>));
     let frame_outer = frame.clone();
     *frame_outer.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
-        UI.with(|ui| draw(&ui.borrow()));
+        sync_layout();
+        let layout = LAYOUT.with(|l| *l.borrow());
+        UI.with(|ui| draw(&ui.borrow(), &layout));
         request_frame(frame.borrow().as_ref());
     }));
     request_frame(frame_outer.borrow().as_ref());
@@ -253,20 +463,20 @@ fn request_frame(cb: Option<&Closure<dyn FnMut()>>) {
 // Rendering.
 // ===========================================================================
 
-fn draw(ui: &Ui) {
+fn draw(ui: &Ui, layout: &Layout) {
     let Some((_, ctx)) = canvas_context() else {
         return;
     };
 
     ctx.set_global_alpha(1.0);
     ctx.set_fill_style_str(BG);
-    ctx.fill_rect(0.0, 0.0, CANVAS_W as f64, CANVAS_H as f64);
+    ctx.fill_rect(0.0, 0.0, layout.canvas_w, layout.canvas_h);
 
-    draw_board(&ctx, ui);
-    draw_drag_preview(&ctx, ui);
-    draw_generator(&ctx, ui);
-    draw_floating_piece(&ctx, ui);
-    draw_score(&ctx, ui);
+    draw_board(&ctx, ui, layout);
+    draw_drag_preview(&ctx, ui, layout);
+    draw_generator(&ctx, ui, layout);
+    draw_floating_piece(&ctx, ui, layout);
+    draw_score(&ctx, ui, layout);
 }
 
 /// A single beveled block (filled board cell or piece cell).
@@ -279,7 +489,7 @@ fn draw_block(
     light: &str,
     dark: &str,
 ) {
-    let inset = 1.0;
+    let inset = (size * 0.03).max(1.0);
     let px = x + inset;
     let py = y + inset;
     let s = size - inset * 2.0;
@@ -297,66 +507,71 @@ fn draw_block(
     ctx.fill_rect(px + s - bevel, py, bevel, s);
 }
 
-fn draw_board(ctx: &CanvasRenderingContext2d, ui: &Ui) {
+fn draw_board(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
+    let cell = layout.cell;
     ctx.set_global_alpha(1.0);
     for y in 0..BOARD_SIZE as i32 {
         for x in 0..BOARD_SIZE as i32 {
-            let px = MARGIN + x as f64 * CELL_PX;
-            let py = MARGIN + y as f64 * CELL_PX;
+            let px = layout.board_x + x as f64 * cell;
+            let py = layout.board_y + y as f64 * cell;
             if ui.game.board().is_filled(x, y) {
-                draw_block(ctx, px, py, CELL_PX, BLOCK_FILL, BLOCK_LIGHT, BLOCK_DARK);
+                draw_block(ctx, px, py, cell, BLOCK_FILL, BLOCK_LIGHT, BLOCK_DARK);
             } else {
                 ctx.set_fill_style_str(EMPTY_FILL);
-                ctx.fill_rect(px + 1.0, py + 1.0, CELL_PX - 2.0, CELL_PX - 2.0);
+                ctx.fill_rect(px + 1.0, py + 1.0, cell - 2.0, cell - 2.0);
             }
         }
     }
     // Board frame.
+    let span = cell * BOARD_SIZE as f64;
     ctx.set_stroke_style_str(GRID_LINE);
     ctx.set_line_width(1.0);
-    ctx.stroke_rect(MARGIN - 0.5, MARGIN - 0.5, BOARD_PX + 1.0, BOARD_PX + 1.0);
+    ctx.stroke_rect(layout.board_x - 0.5, layout.board_y - 0.5, span + 1.0, span + 1.0);
 }
 
-/// While dragging, paint the snapped placement preview onto the board — green
-/// when the whole placement is valid, red otherwise.
-fn draw_drag_preview(ctx: &CanvasRenderingContext2d, ui: &Ui) {
+/// While dragging, paint the magnetic placement shadow onto the board (green at
+/// the nearest valid anchor within [`SNAP_RADIUS`], else red at the cursor).
+fn draw_drag_preview(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
     if !ui.dragging {
         return;
     }
     let Some(mask) = ui.game.current() else {
         return;
     };
-    let (ax, ay) = snapped_anchor(mask, ui.pointer.0, ui.pointer.1);
-    let valid = ui.game.can_place_current(ax, ay);
-    let color = if valid { VALID_FILL } else { INVALID_FILL };
+    let desired = snapped_anchor(mask, ui.pointer.0, ui.pointer.1, layout);
+    let (anchor, color) = match ui.game.snap_anchor(desired, SNAP_RADIUS) {
+        Some(snapped) => (snapped, VALID_FILL),
+        None => (desired, INVALID_FILL),
+    };
+    let cell = layout.cell;
     ctx.set_global_alpha(0.55);
     ctx.set_fill_style_str(color);
     for &(mx, my) in mask.cells() {
-        let (bx, by) = (ax + mx, ay + my);
+        let (bx, by) = (anchor.0 + mx, anchor.1 + my);
         if bx >= 0 && by >= 0 && bx < BOARD_SIZE as i32 && by < BOARD_SIZE as i32 {
-            let px = MARGIN + bx as f64 * CELL_PX;
-            let py = MARGIN + by as f64 * CELL_PX;
-            ctx.fill_rect(px + 1.0, py + 1.0, CELL_PX - 2.0, CELL_PX - 2.0);
+            let px = layout.board_x + bx as f64 * cell;
+            let py = layout.board_y + by as f64 * cell;
+            ctx.fill_rect(px + 1.0, py + 1.0, cell - 2.0, cell - 2.0);
         }
     }
     ctx.set_global_alpha(1.0);
 }
 
-/// The generator panel: a label and the current quintet in a 5×5 mini-grid (or a
-/// stuck message).
-fn draw_generator(ctx: &CanvasRenderingContext2d, ui: &Ui) {
+/// The tray: a label and the current quintet in a 5×5 grid (or a stuck message).
+fn draw_generator(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
+    let mini = layout.mini;
     ctx.set_global_alpha(1.0);
     ctx.set_fill_style_str(TEXT_DIM);
-    ctx.set_font("600 13px system-ui, sans-serif");
-    let _ = ctx.fill_text("NEXT QUINTET", PANEL_X, MARGIN + 16.0);
+    ctx.set_font(&format!("600 {}px system-ui, sans-serif", (mini * 0.42).max(11.0) as i32));
+    let _ = ctx.fill_text("NEXT QUINTET", layout.tray_x, layout.label_y());
 
     // The 5×5 backing grid.
     for gy in 0..5 {
         for gx in 0..5 {
-            let px = PANEL_X + gx as f64 * MINI_PX;
-            let py = PANEL_GRID_Y + gy as f64 * MINI_PX;
+            let px = layout.tray_x + gx as f64 * mini;
+            let py = layout.tray_y + gy as f64 * mini;
             ctx.set_fill_style_str(EMPTY_FILL);
-            ctx.fill_rect(px + 1.0, py + 1.0, MINI_PX - 2.0, MINI_PX - 2.0);
+            ctx.fill_rect(px + 1.0, py + 1.0, mini - 2.0, mini - 2.0);
         }
     }
 
@@ -365,59 +580,57 @@ fn draw_generator(ctx: &CanvasRenderingContext2d, ui: &Ui) {
             // Centre the shape within the 5×5 preview.
             let off_x = (5 - mask.width()) / 2;
             let off_y = (5 - mask.height()) / 2;
-            // Dim the panel piece while it is being dragged out.
             ctx.set_global_alpha(if ui.dragging { 0.3 } else { 1.0 });
             for &(mx, my) in mask.cells() {
-                let px = PANEL_X + (off_x + mx) as f64 * MINI_PX;
-                let py = PANEL_GRID_Y + (off_y + my) as f64 * MINI_PX;
-                draw_block(ctx, px, py, MINI_PX, PIECE_FILL, PIECE_LIGHT, PIECE_DARK);
+                let px = layout.tray_x + (off_x + mx) as f64 * mini;
+                let py = layout.tray_y + (off_y + my) as f64 * mini;
+                draw_block(ctx, px, py, mini, PIECE_FILL, PIECE_LIGHT, PIECE_DARK);
             }
             ctx.set_global_alpha(1.0);
         }
         None => {
             ctx.set_fill_style_str(INVALID_FILL);
-            ctx.set_font("600 14px system-ui, sans-serif");
-            let _ = ctx.fill_text("No quintet fits", PANEL_X, PANEL_GRID_Y + MINI_PX * 2.5);
+            ctx.set_font(&format!("600 {}px system-ui, sans-serif", (mini * 0.5).max(12.0) as i32));
             let _ = ctx.fill_text(
-                "— press Reset",
-                PANEL_X,
-                PANEL_GRID_Y + MINI_PX * 2.5 + 20.0,
+                "No quintet fits — press Reset",
+                layout.tray_x,
+                layout.tray_y + mini * 2.5,
             );
         }
     }
 }
 
-/// While dragging, draw a translucent copy of the piece following the cursor so
-/// the interaction is unmistakable.
-fn draw_floating_piece(ctx: &CanvasRenderingContext2d, ui: &Ui) {
+/// While dragging, draw a translucent copy of the piece following the cursor at
+/// board-cell size, so the interaction reads clearly.
+fn draw_floating_piece(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
     if !ui.dragging {
         return;
     }
     let Some(mask) = ui.game.current() else {
         return;
     };
-    let half_w = mask.width() as f64 * CELL_PX / 2.0;
-    let half_h = mask.height() as f64 * CELL_PX / 2.0;
-    let origin_x = ui.pointer.0 - half_w;
-    let origin_y = ui.pointer.1 - half_h;
+    let cell = layout.cell;
+    let origin_x = ui.pointer.0 - mask.width() as f64 * cell / 2.0;
+    let origin_y = ui.pointer.1 - mask.height() as f64 * cell / 2.0;
     ctx.set_global_alpha(0.7);
     for &(mx, my) in mask.cells() {
-        let px = origin_x + mx as f64 * CELL_PX;
-        let py = origin_y + my as f64 * CELL_PX;
-        draw_block(ctx, px, py, CELL_PX, PIECE_FILL, PIECE_LIGHT, PIECE_DARK);
+        let px = origin_x + mx as f64 * cell;
+        let py = origin_y + my as f64 * cell;
+        draw_block(ctx, px, py, cell, PIECE_FILL, PIECE_LIGHT, PIECE_DARK);
     }
     ctx.set_global_alpha(1.0);
 }
 
-fn draw_score(ctx: &CanvasRenderingContext2d, ui: &Ui) {
-    let y = PANEL_GRID_Y + MINI_PX * 5.0 + 44.0;
+fn draw_score(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
+    let mini = layout.mini;
+    let y = layout.score_y();
     ctx.set_global_alpha(1.0);
     ctx.set_fill_style_str(TEXT_DIM);
-    ctx.set_font("600 13px system-ui, sans-serif");
-    let _ = ctx.fill_text("SCORE", PANEL_X, y);
+    ctx.set_font(&format!("600 {}px system-ui, sans-serif", (mini * 0.42).max(11.0) as i32));
+    let _ = ctx.fill_text("SCORE", layout.tray_x, y);
     ctx.set_fill_style_str(TEXT);
-    ctx.set_font("700 34px system-ui, sans-serif");
-    let _ = ctx.fill_text(&ui.game.score().to_string(), PANEL_X, y + 36.0);
+    ctx.set_font(&format!("700 {}px system-ui, sans-serif", (mini * 1.1).max(24.0) as i32));
+    let _ = ctx.fill_text(&ui.game.score().to_string(), layout.tray_x, y + mini * 1.3);
 }
 
 // ===========================================================================

@@ -1,13 +1,13 @@
 # Browser Debug Overlay & Command Console
 
 A developer debug overlay for the live browser/WASM engine surface, plus a tiny
-in-overlay command console. It is mounted over a bare canvas by this harness app
-(`apps/axiom-browser-dev-harness`).
+in-overlay command console. The overlay itself is the **`axiom-debug-overlay`
+engine module**; this harness app (`apps/axiom-browser-dev-harness`) is a thin
+host that mounts it over a bare canvas and feeds it real diagnostics.
 
 ## Keyboard contract
 
-All four shortcuts use the **physical** key (`KeyboardEvent.code == "Backquote"`),
-not `KeyboardEvent.key`, so they work on every layout:
+All four shortcuts use the **physical** key (`KeyboardEvent.code == "Backquote"`):
 
 | Shortcut            | Action                                  |
 | ------------------- | --------------------------------------- |
@@ -16,98 +16,94 @@ not `KeyboardEvent.key`, so they work on every layout:
 | `Ctrl` + `` ` ``    | Pin / unpin the overlay                 |
 | `Alt` + `` ` ``     | Open the overlay and focus the console  |
 
-Rules:
+Rules: Backquote is **not** stolen while a normal `input`/`textarea`/
+`contenteditable` is focused — except the overlay's own console; `preventDefault`
+fires only for handled chords; a held meta key (Cmd/Win) is left to the OS; a
+pinned overlay ignores the toggle's hide (unpin, or run `overlay.hide`).
 
-- Backquote is **not** stolen while a normal `input` / `textarea` /
-  `contenteditable` element is focused — **except** when the overlay's own
-  console input owns focus (then `` ` `` still drives the overlay).
-- `preventDefault` is called **only** for a Backquote chord the overlay actually
-  handles. A held platform meta key (Cmd/Win) is left to the OS.
-- **Pinning protects against an accidental close**: a pinned overlay ignores the
-  `` ` `` toggle's hide. Unpin with `Ctrl` + `` ` ``, or run `overlay.hide`.
+## Moving the window
 
-## Overlay
+Drag the **title bar** (the green header) to move the overlay anywhere on screen
+— it clamps to stay within the viewport. The position + drag math is the module's
+pure, branchless `DragState`; the wasm arm wires it to header pointer events
+(mouse, touch, and pen, via Pointer Capture).
 
-- Hidden by default; lightweight `position: fixed` panel at the top-left, over
-  the canvas — it never resizes or replaces the canvas.
-- `pointer-events: none`, so it does **not** block game input; only the console
-  input opts back in, and only keystrokes are captured while it is focused.
-- Sharp rectangular styling (no rounded corners, no pills), monospace, high
-  contrast, compact spacing, ~360px wide (verbose is wider). Readable over both
-  light and dark scenes. Styles live in one injected `<style>` block owned by the
-  overlay (`OVERLAY_CSS` in `src/debug_overlay.rs`).
+## Console commands
 
-### Density modes
+`>` prompt at the bottom; Enter submits, Escape blurs (overlay stays open),
+ArrowUp/ArrowDown walk the in-memory history. Routed through a **real registry**
+— no `eval`/`Function`/dynamic import; unknown commands return a clean error;
+empty input is ignored.
+
+`help`, `clear`, `overlay.compact`, `overlay.normal`, `overlay.verbose`,
+`overlay.pin`, `overlay.unpin`, `overlay.hide`, `diagnostics.snapshot`,
+`backend.report`, `replay.mark` (stub), `perf.mark` (stub).
+
+## Density modes
 
 - **compact** — title, fps, frame time, renderer backend, fallback count.
 - **normal** — the core diagnostics read-out plus the command-history count.
 - **verbose** — everything in normal, plus the raw backend selection, the
   overlay's own debug state, and a command-history preview.
 
-## Command console
+## Architecture & boundaries
 
-Lives at the bottom of the overlay with a `>` prompt. Enter submits, Escape blurs
-(the overlay stays open), ArrowUp/ArrowDown walk the in-memory history. The last
-few results render above the input.
+The overlay lives in `modules/axiom-debug-overlay`, the **fourth sanctioned
+platform-facing module** (Module Law #9, alongside `windowing`/`gpu-backend`/
+`canvas2d-backend`). It is held to the full engine spine discipline:
 
-Commands are **stubbed but routed through a real registry/dispatcher** — there is
-no `eval`, `Function` constructor, dynamic import, or arbitrary script execution.
-Parsing trims whitespace and splits the command name from its arguments; an empty
-line does nothing; an unknown command returns a clean error.
+- **One facade** (`DebugOverlayApi`) — Module Law #8. Diagnostics cross it as
+  primitives (booleans, integers, `&str`, tuples); **no naked float** crosses
+  (timing is integer-encoded `fps_milli` / `frame_time_micros`, so the
+  `engine_no_unitless_float_public_api` lint is satisfied).
+- **Branchless core** — the whole state machine (density, command
+  registry/dispatch, console history, keyboard classification, the diagnostics
+  model) is branchless (`toggle` is `!visible | pinned`, density cycling and
+  shortcut dispatch are `const` tables indexed by an enum discriminant, …).
+- **100% covered** — every region/line/function of the pure core is exercised by
+  native tests.
+- **DOM in the wasm arm only** — `web_sys` lives in `dom_binding.rs`
+  (`#[cfg(target_arch = "wasm32")]`), behind the native-clean facade, exactly
+  like windowing's live presentation arm. It never enters the native build, the
+  coverage gate, or the branchless lint.
 
-| Command                | Effect                                              |
-| ---------------------- | --------------------------------------------------- |
-| `help`                 | List the available commands                         |
-| `clear`                | Clear the command output                            |
-| `overlay.compact`      | Set density to compact                              |
-| `overlay.normal`       | Set density to normal                               |
-| `overlay.verbose`      | Set density to verbose                              |
-| `overlay.pin`          | Pin the overlay                                     |
-| `overlay.unpin`        | Unpin the overlay                                   |
-| `overlay.hide`         | Hide the overlay                                    |
-| `diagnostics.snapshot` | Print a text snapshot of the current diagnostics    |
-| `backend.report`       | Print renderer/canvas/sim/storage/audio/network     |
-| `replay.mark`          | Acknowledge a replay marker (stub)                  |
-| `perf.mark`            | Acknowledge a performance marker (stub)             |
+The deterministic engine spine (kernel/runtime/math, the layers) still knows
+nothing about the DOM, keyboard, CSS, or command text.
 
-## Architecture & boundaries (important)
+## Diagnostics are real, fed by the host — never engine state
 
-This is **app-side developer tooling**. The deterministic engine spine — the
-kernel, runtime, math, and every layer/module — never learns about the DOM,
-keyboard events, CSS, canvas, WebGPU, browser timing, or command text. All of
-that lives here, in an app: the only tier permitted to reference `web_sys`
-outside the platform-facing `host` layer and `windowing` module (Module Law #9).
+The overlay only ever *reads* diagnostics pushed in through the facade; it is a
+read-out, never a source of engine state. This harness feeds **real** values —
+there is no stub provider:
 
-- **The overlay consumes host diagnostics; it must never become deterministic
-  engine state.** It only ever *reads* a `BrowserDiagnosticsSnapshot`.
-- **Browser/DOM APIs stay in the browser host/app surface** (`src/debug_overlay.rs`
-  and `src/web.rs`, both `#[cfg(target_arch = "wasm32")]`).
-- **Future diagnostics are fed in through `BrowserDiagnosticsSnapshot`**, never
-  hardcoded into the overlay. Today the values come from the replaceable
-  `StubDiagnosticsProvider`; a real host implements `DiagnosticsProvider` and
-  swaps it in, with no overlay changes.
+- **fps / frame time** — measured from `requestAnimationFrame` deltas.
+- **frame index** — the RAF frame counter.
+- **visibility** — `document`'s hidden flag.
+- **renderer backend / fallback** — a real `navigator.gpu` capability probe,
+  reporting the engine's actual WebGPU→WebGL2 fallback choice.
+- Fields the harness can't observe without running the engine (sim ticks, GPU
+  submissions, worker messages) are honest zeroes; absent subsystems
+  (storage/audio/network) are honest `none`.
 
-### What's tested where
+A different host (a real engine app) implements the same `set_frame` /
+`set_backends` / `set_counters` / … seam with its own real engine facts — the
+overlay code does not change.
 
-The pure logic — density cycling, command parsing/registry/dispatch, console
-history navigation, keyboard-shortcut classification, the diagnostics snapshot —
-is browser-free Rust that compiles on **native** and is fully unit-tested under
-`cargo test --workspace` (plus an end-to-end `tests/overlay_pipeline.rs`). The DOM
-controller (`DebugOverlayController`) and the `#[wasm_bindgen]` entry are the thin
-`wasm32` edge.
+## Browser verification
 
-### Browser verification
-
-There is no automated browser/e2e test harness wired into the native test suite
-yet, so **browser-level verification of the live DOM is pending**. To check it by
-hand, build and serve the harness and drive it with the repo's Playwright
-controller:
+No automated browser/e2e harness is wired into the native suite yet, so
+DOM-level verification is by hand. Build and serve, then drive it with the
+Playwright controller:
 
 ```sh
 make harness-build      # cargo build --target wasm32 + wasm-bindgen into web/pkg
-make harness            # serve apps/axiom-browser-dev-harness/web at http://localhost:8000
+make harness            # serve apps/axiom-browser-dev-harness/web (use HARNESS_PORT to avoid clashes)
 
 uv run scripts/playwright_controller.py goto http://localhost:8000/
-uv run scripts/playwright_controller.py eval "(() => { const e = new KeyboardEvent('keydown', {code:'Backquote', bubbles:true}); window.dispatchEvent(e); return !!document.getElementById('axiom-debug-overlay') && !document.getElementById('axiom-debug-overlay').hasAttribute('hidden'); })()"
+uv run scripts/playwright_controller.py eval "(() => { window.dispatchEvent(new KeyboardEvent('keydown',{code:'Backquote',bubbles:true})); const e=document.getElementById('axiom-debug-overlay'); return !!e && !e.hasAttribute('hidden'); })()"
 uv run scripts/playwright_controller.py screenshot overlay
 ```
+
+The same overlay also rides on top of the other gallery demos (the shared shell
+loads this wasm and mounts it), where the measured fps reflects that demo's real
+frame rate.

@@ -25,6 +25,14 @@ crate_name = "axiom-roomed-puzzle"
 
 allowed_layers = [
     "kernel",
+    "math",
+    "host",
+    "layout",
 ]
 
-allowed_modules = []
+# The mobile-first touch input synthesizer. The wasm `web` arm feeds it neutral
+# pointer samples and maps a completed swipe to a one-cell move, so the puzzle is
+# playable by touch (not only keyboard). Composed by the app, not the spine.
+allowed_modules = [
+    "input",
+]

@@ -81,46 +81,6 @@ pub(crate) fn apply_vertical_grade(fb: &mut SoftwareFramebuffer, cues: &CanvasDe
     })
 }
 
-/// Contact-shadow post-pass: a dark, flattened, translucent ellipse under each
-/// important object (anchored at the bottom of its screen bbox, so it reads as a
-/// ground shadow). Cheap (an ellipse fill), deterministic, clipped to the
-/// framebuffer. Returns `(shadows drawn, pixels darkened)`.
-pub(crate) fn apply_contact_shadows(
-    fb: &mut SoftwareFramebuffer,
-    overlays: &[DrawOverlay],
-    cues: &CanvasDepthCueProfile,
-) -> (u32, u64) {
-    let (w, h) = (fb.width(), fb.height());
-    let alpha = cues.contact_shadow_alpha.clamp(0.0, 1.0);
-    let max_r = cues.contact_shadow_max_radius_px;
-    let rgba = fb.rgba_mut();
-    overlays.iter().fold((0_u32, 0_u64), |(count, pixels), o| {
-        let [minx, _miny, maxx, maxy] = o.bbox;
-        let cx = (minx + maxx) * 0.5;
-        let cy = maxy; // the object's base on screen (y grows down)
-        let rx = ((maxx - minx) * 0.5).clamp(1.0, max_r.max(1.0));
-        let ry = (rx * 0.35).max(1.0);
-        let x0 = clamp_axis(cx - rx, w);
-        let x1 = clamp_axis(cx + rx, w);
-        let y0 = clamp_axis(cy - ry, h);
-        let y1 = clamp_axis(cy + ry, h);
-        let drawn = (y0..y1 + 1).fold(0_u64, |acc, py| {
-            (x0..x1 + 1).fold(acc, |acc, px| {
-                let dx = (px as f32 + 0.5 - cx) / rx;
-                let dy = (py as f32 + 0.5 - cy) / ry;
-                let inside = (dx * dx + dy * dy) <= 1.0;
-                let t = alpha * f32::from(u8::from(inside));
-                let off = (py as usize * w as usize + px as usize) * 4;
-                rgba[off] = blend_byte(rgba[off], 0.0, t);
-                rgba[off + 1] = blend_byte(rgba[off + 1], 0.0, t);
-                rgba[off + 2] = blend_byte(rgba[off + 2], 0.0, t);
-                acc + u64::from(inside)
-            })
-        });
-        (count + 1, pixels + drawn)
-    })
-}
-
 /// Outline post-pass: stroke each important object's screen bounding box with a
 /// depth-weighted dark border (near objects stronger than far). Bounds-based,
 /// not image-wide edge detection. Returns `(objects outlined, pixels written)`.
@@ -207,33 +167,6 @@ mod tests {
         assert_eq!(px(&bytes, 1, 0, 0)[0], 255);
         assert!(px(&bytes, 1, 0, 3)[0] < 255);
         assert!(touched > 0);
-    }
-
-    #[test]
-    fn contact_shadow_darkens_under_an_overlay_and_clips() {
-        let mut fb = SoftwareFramebuffer::new(16, 16);
-        fb.clear([1.0, 1.0, 1.0, 1.0]);
-        let overlay = DrawOverlay {
-            bbox: [4.0, 4.0, 10.0, 10.0],
-            mean_depth: 0.2,
-            object_id: 7,
-        };
-        let (count, pixels) = apply_contact_shadows(&mut fb, &[overlay], &cues());
-        assert_eq!(count, 1);
-        assert!(pixels > 0);
-        // An overlay anchored at the screen edge clips safely (no panic, ≥0 px).
-        let mut fb2 = SoftwareFramebuffer::new(16, 16);
-        fb2.clear([1.0, 1.0, 1.0, 1.0]);
-        let edge = DrawOverlay {
-            bbox: [14.0, 14.0, 30.0, 30.0],
-            mean_depth: 0.2,
-            object_id: 8,
-        };
-        let (c2, _) = apply_contact_shadows(&mut fb2, &[edge], &cues());
-        assert_eq!(c2, 1);
-        // No overlays → nothing drawn.
-        let mut fb3 = SoftwareFramebuffer::new(8, 8);
-        assert_eq!(apply_contact_shadows(&mut fb3, &[], &cues()), (0, 0));
     }
 
     #[test]

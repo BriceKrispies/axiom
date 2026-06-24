@@ -79,10 +79,20 @@ GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay doom doom-build doom-hot stress stress-build growth growth-build harness harness-build agent agent-render agent-bridge gallery gallery-build ts-gate help
+.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay doom doom-build doom-hot stress stress-build growth growth-build harness harness-build agent agent-render agent-bridge gallery gallery-build gallery-serve ts-gate help
 
 help:
 	@echo "Axiom tooling targets:"
+	@echo ""
+	@echo "  ===> MAIN DRIVER — the demo gallery (build everything + serve locally):"
+	@echo "  make gallery        Build EVERY browser demo, assemble dist/, and serve at http://localhost:$(GALLERY_PORT)"
+	@echo "  make gallery-serve  Re-serve the already-built dist/ WITHOUT rebuilding (fast restart)"
+	@echo "  make gallery-build  Build all demos + assemble dist/ only, no serve (what deploy-pages.yml runs)"
+	@echo "  make GALLERY_PORT=9000 gallery   Serve on a different port"
+	@echo "  (this is the one command to browse the whole engine surface; the per-demo"
+	@echo "   targets below are for iterating on a single app in isolation.)"
+	@echo ""
+	@echo "  Individual demos (the gallery already builds all of these):"
 	@echo "  make demo          Serve the browser rotating-cube slice at http://localhost:$(PORT) (uses uv)"
 	@echo "  make demo-build    Rebuild the rotating-cube wasm bundle into web/pkg"
 	@echo "  make PORT=9000 demo   Serve on a different port"
@@ -112,10 +122,6 @@ help:
 	@echo "  make harness-build Rebuild the harness wasm bundle into its web/pkg"
 	@echo "  make harness       Serve the harness page at http://localhost:$(HARNESS_PORT)"
 	@echo "  (press the backquote key in the page to open the debug overlay.)"
-	@echo ""
-	@echo "  Mobile-first demo gallery (what deploy-pages.yml publishes):"
-	@echo "  make gallery-build Build both wasm demos and assemble $(DIST_DIR)/"
-	@echo "  make gallery       Serve $(DIST_DIR)/ at http://localhost:$(GALLERY_PORT)"
 	@echo ""
 	@echo "  TypeScript SDK gate (@axiom/client static-analysis/branchless/coverage laws):"
 	@echo "  make ts-gate       Run tsgo typecheck + Oxlint + 100% coverage for packages/axiom-client"
@@ -269,11 +275,13 @@ agent-bridge:
 
 # --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
 
-# Build both wasm demos and assemble the static gallery bundle into dist/. Uses
-# the same raw cargo + wasm-bindgen flow as the per-demo builds, then a portable
+# Build EVERY browser demo's wasm bundle, build + vendor the @axiom/client SDK
+# the netplay demo needs, and assemble the static gallery into dist/. Uses the
+# same raw cargo + wasm-bindgen flow as the per-demo builds, then the portable
 # Python assembler (scripts/assemble_gallery.py) so dist/ is identical locally
-# and in CI. Recipe stays portable (cargo/wasm-bindgen/uv run all work under
-# cmd.exe on Windows too).
+# and in CI. This is the build half of `make gallery`; CI's deploy-pages.yml runs
+# the equivalent steps. Recipe stays portable (cargo/wasm-bindgen/npm/uv run all
+# work under cmd.exe on Windows too).
 gallery-build:
 	cargo build -p $(BROWSER_CRATE) --target $(WASM_TARGET) --release
 	cargo build -p $(NETPLAY_CRATE) --target $(WASM_TARGET) --release
@@ -296,9 +304,20 @@ gallery-build:
 	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_WEB)/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
 	uv run --no-project python scripts/assemble_gallery.py
 
-# Serve the assembled gallery. Run `make gallery-build` first if dist/ is blank.
-gallery:
-	@echo Serving demo gallery at http://localhost:$(GALLERY_PORT) - run make gallery-build first if blank
+# THE MAIN DRIVER. One command to browse the whole engine surface during
+# development: it builds EVERY browser demo, assembles the static gallery into
+# dist/, and serves it locally. It depends on gallery-build, so cargo's
+# incremental compilation keeps re-runs fast after the first build. To re-serve
+# WITHOUT rebuilding (e.g. after only restarting the server), use
+# `make gallery-serve`.
+gallery: gallery-build
+	@echo Gallery built into $(DIST_DIR)/. Serving at http://localhost:$(GALLERY_PORT) - open in a WebGPU browser. Ctrl+C to stop.
+	uv run --no-project python -m http.server $(GALLERY_PORT) --directory $(DIST_DIR)
+
+# Serve the already-assembled gallery WITHOUT rebuilding (fast restart). Run
+# `make gallery` (or `make gallery-build`) first if dist/ is missing or stale.
+gallery-serve:
+	@echo Serving prebuilt gallery at http://localhost:$(GALLERY_PORT) - run make gallery first if blank
 	@echo Open it in a WebGPU browser. Ctrl+C to stop.
 	uv run --no-project python -m http.server $(GALLERY_PORT) --directory $(DIST_DIR)
 

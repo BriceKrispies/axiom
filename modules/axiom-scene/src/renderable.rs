@@ -19,6 +19,7 @@ pub struct Renderable {
     mesh: MeshRef,
     material: MaterialRef,
     visible: bool,
+    casts_contact_shadow: bool,
 }
 
 impl Renderable {
@@ -29,10 +30,14 @@ impl Renderable {
             FieldSchema::new("mesh", "u64"),
             FieldSchema::new("material", "u64"),
             FieldSchema::new("visible", "bool"),
+            FieldSchema::new("casts_contact_shadow", "bool"),
         ],
     );
 
-    /// Build a renderable, rejecting an invalid mesh or material ref.
+    /// Build a renderable, rejecting an invalid mesh or material ref. It is
+    /// visible and (by default) *not* a contact-shadow caster — level geometry
+    /// casts no grounding shadow; a discrete dynamic object opts in via
+    /// [`Self::set_casts_contact_shadow`].
     pub fn new(mesh: MeshRef, material: MaterialRef) -> SceneResult<Self> {
         mesh.is_valid()
             .then_some(())
@@ -52,6 +57,7 @@ impl Renderable {
                 mesh,
                 material,
                 visible: true,
+                casts_contact_shadow: false,
             })
     }
 
@@ -70,6 +76,16 @@ impl Renderable {
     pub(crate) fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
     }
+
+    /// Whether this renderable is a discrete, dynamic object that grounds itself
+    /// with a contact shadow (level geometry stays `false`).
+    pub const fn casts_contact_shadow(&self) -> bool {
+        self.casts_contact_shadow
+    }
+
+    pub(crate) fn set_casts_contact_shadow(&mut self, casts: bool) {
+        self.casts_contact_shadow = casts;
+    }
 }
 
 impl Reflect for Renderable {
@@ -79,6 +95,7 @@ impl Reflect for Renderable {
         self.mesh.reflect_write(writer);
         self.material.reflect_write(writer);
         self.visible.reflect_write(writer);
+        self.casts_contact_shadow.reflect_write(writer);
     }
 
     /// Reconstruct directly (bypassing `new`'s ref-validation): a snapshot is the
@@ -86,10 +103,13 @@ impl Reflect for Renderable {
     fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
         MeshRef::reflect_read(reader).and_then(|mesh| {
             MaterialRef::reflect_read(reader).and_then(|material| {
-                bool::reflect_read(reader).map(|visible| Renderable {
-                    mesh,
-                    material,
-                    visible,
+                bool::reflect_read(reader).and_then(|visible| {
+                    bool::reflect_read(reader).map(|casts_contact_shadow| Renderable {
+                        mesh,
+                        material,
+                        visible,
+                        casts_contact_shadow,
+                    })
                 })
             })
         })
@@ -107,6 +127,18 @@ mod tests {
         assert_eq!(r.mesh().raw(), 2);
         assert_eq!(r.material().raw(), 3);
         assert!(r.visible());
+        // A fresh renderable is not a contact-shadow caster until opted in.
+        assert!(!r.casts_contact_shadow());
+    }
+
+    #[test]
+    fn set_casts_contact_shadow_round_trips() {
+        let mut r = Renderable::new(MeshRef::from_raw(2), MaterialRef::from_raw(3)).unwrap();
+        assert!(!r.casts_contact_shadow());
+        r.set_casts_contact_shadow(true);
+        assert!(r.casts_contact_shadow());
+        r.set_casts_contact_shadow(false);
+        assert!(!r.casts_contact_shadow());
     }
 
     #[test]
@@ -141,19 +173,23 @@ mod tests {
     #[test]
     fn schema_names_the_renderable_fields() {
         assert_eq!(Renderable::SCHEMA.name(), "Renderable");
-        assert_eq!(Renderable::SCHEMA.fields().len(), 3);
+        assert_eq!(Renderable::SCHEMA.fields().len(), 4);
         assert_eq!(Renderable::SCHEMA.fields()[2].name(), "visible");
+        assert_eq!(Renderable::SCHEMA.fields()[3].name(), "casts_contact_shadow");
     }
 
     #[test]
-    fn reflect_round_trips_visibility_and_refs_and_rejects_truncation() {
+    fn reflect_round_trips_visibility_caster_and_refs_and_rejects_truncation() {
         let mut r = Renderable::new(MeshRef::from_raw(7), MaterialRef::from_raw(9)).unwrap();
         r.set_visible(false);
+        r.set_casts_contact_shadow(true);
         let mut w = BinaryWriter::new();
         r.reflect_write(&mut w);
         let got = Renderable::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap();
         assert_eq!(got, r);
         assert!(!got.visible());
+        assert!(got.casts_contact_shadow());
+        // Truncation at every field boundary is rejected (no partial restore).
         assert!(Renderable::reflect_read(&mut BinaryReader::new(&[])).is_err());
     }
 }

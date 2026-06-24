@@ -17,6 +17,7 @@ mod assets;
 mod bundle;
 mod camera;
 mod color;
+mod contact_shadow_caster;
 mod controller;
 mod default_plugins;
 mod directional_light;

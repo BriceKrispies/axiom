@@ -1,0 +1,57 @@
+# Axiom layer manifest — axiom-layout.
+#
+# The deterministic, mobile-first responsive layout solver. It consumes the host
+# boundary's viewport facts — size, orientation, and safe-area insets — and a flat
+# flex/constraint node tree, and produces a placed rectangle per node. It is the
+# engine's single home for "how on-screen regions are ordered and placed", so apps
+# (and a future interface adoption) stop hand-rolling responsive CSS: the engine
+# decides placement, mobile-first by default (safe-area inset, orientation-driven
+# stacking, free-space distribution), from the viewport facts at runtime.
+#
+# It owns NO browser, NO renderer, NO app/gameplay concepts — pure data in
+# (HostViewport + a node tree), placed rects out.
+
+[layer]
+name = "layout"
+crate_name = "axiom-layout"
+depends_on = ["kernel", "host"]
+
+meaningful_dependency = """
+Layout consumes the host boundary's viewport facts — HostViewport (logical size),
+Orientation, HostSafeAreaInsets — as the inputs that drive responsive, mobile-first
+placement, and emits the host Pixels quantity for every solved edge, so a placed
+rect can never carry a non-finite coordinate. It adapts those facts (plus a flat
+flex node tree) into a deterministic LayoutResult: one placed rectangle per node,
+recalculated whenever the viewport changes. It builds on the kernel Ratio quantity
+for aspect ratios and flex-grow weights, and the kernel result types its own
+fallible constructors return. It turns 'a viewport changed' into 'here is exactly
+where every region now goes', which neither host nor kernel provides.
+"""
+
+introduced_capabilities = [
+  "solve",
+  "LayoutTree",
+  "LayoutTreeBuilder",
+  "LayoutStyle",
+  "LayoutResult",
+  "LayoutRect",
+  "NodeId",
+  "Direction",
+  "FlexWrap",
+  "Justify",
+  "Align",
+  "CrossSize",
+  "Insets",
+]
+
+consumed_capabilities = ["HostViewport", "Orientation", "HostSafeAreaInsets", "Pixels"]
+
+# Each proof export is a real public export whose source references a depended-layer
+# symbol. `solve` names HostViewport (its input); LayoutRect names Pixels (its edges).
+[[proof_exports]]
+export = "solve"
+must_reference = ["HostViewport"]
+
+[[proof_exports]]
+export = "LayoutRect"
+must_reference = ["Pixels"]

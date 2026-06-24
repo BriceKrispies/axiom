@@ -15,6 +15,20 @@ use axiom_host::{FramePacket, HostPresentationRequest};
 pub struct GpuBackendApi {
     width: u32,
     height: u32,
+    // The render-target size the device tier renders the 3D scene at before
+    // upscaling to the (`width`×`height`) swapchain on present
+    // (`HostDeviceProfile::render_size`). Equal to the surface size on an
+    // in-budget surface; smaller on a high-DPR phone the tier caps. Stored from
+    // the request at construction so the tier decision is observable and
+    // native-testable, even though the intermediate target only exists on wasm32.
+    render_width: u32,
+    render_height: u32,
+    // The shadow-atlas edge length this backend's device tier asked for
+    // (`HostDeviceProfile::shadow_map_size`), read from the presentation
+    // request at construction and handed to the renderer on initialise. Stored
+    // here so the tier decision is observable — and native-testable — even
+    // though the renderer that consumes it only exists on wasm32.
+    shadow_size: u32,
     // The real GPU binding, present only once initialised on wasm32. Its absence
     // is what "not ready" means; native never has one.
     #[cfg(target_arch = "wasm32")]
@@ -27,9 +41,15 @@ impl GpuBackendApi {
     /// so this runs and is tested on native exactly as on the web.
     pub fn new(request: &HostPresentationRequest) -> Self {
         let viewport = request.descriptor().viewport();
+        let width = viewport.physical_width();
+        let height = viewport.physical_height();
+        let (render_width, render_height) = request.device().profile().render_size(width, height);
         GpuBackendApi {
-            width: viewport.physical_width(),
-            height: viewport.physical_height(),
+            width,
+            height,
+            render_width,
+            render_height,
+            shadow_size: request.device().profile().shadow_map_size(),
             #[cfg(target_arch = "wasm32")]
             live: None,
         }
@@ -43,6 +63,26 @@ impl GpuBackendApi {
     /// The physical surface height the backend will bind.
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    /// The shadow-atlas edge length the backend's device tier selected. This is
+    /// the tier's [`axiom_host::HostDeviceProfile::shadow_map_size`], carried
+    /// from the presentation request to the renderer at initialise time.
+    pub fn shadow_size(&self) -> u32 {
+        self.shadow_size
+    }
+
+    /// The render-target width the device tier renders the scene at before
+    /// upscaling to the swapchain — the tier's
+    /// [`axiom_host::HostDeviceProfile::render_size`] applied to the surface.
+    pub fn render_width(&self) -> u32 {
+        self.render_width
+    }
+
+    /// The render-target height the device tier renders the scene at before
+    /// upscaling to the swapchain.
+    pub fn render_height(&self) -> u32 {
+        self.render_height
     }
 
     /// Whether a live GPU binding is initialised and could present real pixels.
@@ -88,6 +128,27 @@ impl GpuBackendApi {
             let _ = (clear_color, lights, light_view_proj, batches);
             false
         }
+    }
+
+    /// Like [`Self::present_frame`] but **surfaces a device-loss error** instead
+    /// of flattening it to a bool, so the run loop can rebuild the binding when
+    /// the GPU surface is unrecoverably lost — a backgrounded mobile tab whose
+    /// drawing context the browser destroyed. `Ok(())` when the frame presented,
+    /// was cleanly skipped for a transient surface hiccup the binding already
+    /// reconfigured around, or there is no live binding; `Err` only on an
+    /// unrecoverable loss. wasm32 only.
+    #[cfg(target_arch = "wasm32")]
+    pub fn present_frame_result(
+        &self,
+        clear_color: [f32; 4],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_view_proj: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        self.live
+            .as_ref()
+            .map(|live| live.render_frame(lights, light_view_proj, batches, clear_color))
+            .unwrap_or(Ok(()))
     }
 
     /// Present one frame from the backend-neutral [`axiom_host::FramePacket`] —
@@ -158,9 +219,12 @@ impl GpuBackendApi {
             canvas,
             self.width,
             self.height,
+            self.render_width,
+            self.render_height,
             meshes,
             materials,
             max_instances,
+            self.shadow_size,
         )
         .await?;
         self.live = Some(binding);
@@ -192,6 +256,16 @@ mod tests {
     /// Build a validated presentation request the way windowing does, so the
     /// native backend can be constructed and exercised end-to-end.
     fn request(width: u32, height: u32) -> HostPresentationRequest {
+        request_with_profile(width, height, HostDeviceProfile::Baseline)
+    }
+
+    /// As [`request`], but with an explicit device tier, so the tier→renderer
+    /// wiring (shadow-atlas size) can be exercised on native.
+    fn request_with_profile(
+        width: u32,
+        height: u32,
+        profile: HostDeviceProfile,
+    ) -> HostPresentationRequest {
         let host = HostApi::new();
         let kernel = KernelApi::new();
         let viewport = host
@@ -208,9 +282,58 @@ mod tests {
             HostColorFormat::Bgra8UnormSrgb,
         );
         let adapter = host.adapter_request(HostPowerPreference::HighPerformance, true);
-        let device = host.device_request(true, HostDeviceProfile::Baseline);
+        let device = host.device_request(true, profile);
         host.presentation_request(target, surface, descriptor, adapter, device)
             .expect("valid request")
+    }
+
+    #[test]
+    fn new_carries_the_device_tier_shadow_size() {
+        // The mobile-first Baseline tier asks the renderer for the 1024² shadow
+        // atlas; ExtendedLimits opts up to 2048². The backend reads this from the
+        // presentation request's device profile at construction and will hand it
+        // to the renderer on initialise.
+        let baseline = GpuBackendApi::new(&request_with_profile(
+            800,
+            600,
+            HostDeviceProfile::Baseline,
+        ));
+        assert_eq!(baseline.shadow_size(), 1024);
+        let extended = GpuBackendApi::new(&request_with_profile(
+            800,
+            600,
+            HostDeviceProfile::ExtendedLimits,
+        ));
+        assert_eq!(extended.shadow_size(), 2048);
+    }
+
+    #[test]
+    fn new_carries_the_device_tier_render_size() {
+        // An in-budget surface (under the Baseline 1600 cap) renders 1:1.
+        let small = GpuBackendApi::new(&request_with_profile(
+            960,
+            600,
+            HostDeviceProfile::Baseline,
+        ));
+        assert_eq!((small.render_width(), small.render_height()), (960, 600));
+        // A large (high-DPR) surface is rendered smaller, aspect preserved, then
+        // upscaled on present: 3000×1500 → 1600×800 under the Baseline cap.
+        let large = GpuBackendApi::new(&request_with_profile(
+            3000,
+            1500,
+            HostDeviceProfile::Baseline,
+        ));
+        assert_eq!((large.render_width(), large.render_height()), (1600, 800));
+        // ExtendedLimits' 4096 cap leaves the same large surface 1:1.
+        let extended = GpuBackendApi::new(&request_with_profile(
+            3000,
+            1500,
+            HostDeviceProfile::ExtendedLimits,
+        ));
+        assert_eq!(
+            (extended.render_width(), extended.render_height()),
+            (3000, 1500)
+        );
     }
 
     #[test]
@@ -254,6 +377,7 @@ mod tests {
                 [9.0; 16],
                 [1.0; 16],
                 [0.4, 0.5, 0.6, 1.0],
+                false,
             )],
             vec![FrameLight::new(0, [0.0, 1.0, 0.0], [1.0, 1.0, 1.0, 1.0])],
             [0.0; 16],

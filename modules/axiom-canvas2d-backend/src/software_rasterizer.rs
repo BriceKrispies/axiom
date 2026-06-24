@@ -32,13 +32,12 @@ use axiom_host::FramePacket;
 
 use crate::canvas_depth_cue::to_byte;
 use crate::canvas_policy::CanvasDebugOverlay;
-use crate::canvas_post_pass::{
-    apply_contact_shadows, apply_fog, apply_outlines, apply_vertical_grade, clamp_axis,
-};
+use crate::canvas_post_pass::{apply_fog, apply_outlines, apply_vertical_grade, clamp_axis};
 use crate::depth_buffer::DepthBuffer;
 use crate::frame_packet_raster::{convert, ConversionStats};
 use crate::low_poly_raster_options::LowPolyRasterOptions;
 use crate::mesh_cache::MeshCache;
+use crate::planar_shadow::apply_planar_shadows;
 use crate::raster_triangle::RasterTriangle;
 use crate::software_framebuffer::SoftwareFramebuffer;
 
@@ -136,10 +135,22 @@ impl SoftwareRasterizer {
             .then(|| apply_vertical_grade(&mut self.framebuffer, &cues))
             .unwrap_or(0);
 
-        // 8a. contact-shadow blobs under important objects.
+        // 8a. planar projected contact shadows for marked caster objects:
+        // project each caster's geometry along the light onto the ground plane and
+        // rasterize it depth-tested against the finished scene (so walls occlude
+        // it and it lands on the floor, never on a wall face).
         let (shadows, shadow_px) = cues
             .enable_contact_shadows
-            .then(|| apply_contact_shadows(&mut self.framebuffer, &converted.overlays, &cues))
+            .then(|| {
+                apply_planar_shadows(
+                    &mut self.framebuffer,
+                    &self.depth,
+                    packet,
+                    cache,
+                    cues.contact_shadow_alpha,
+                    cues.contact_shadow_depth_bias,
+                )
+            })
             .unwrap_or((0, 0));
 
         // 8b. depth-weighted silhouette outlines for important objects.
@@ -629,7 +640,7 @@ mod tests {
     }
 
     fn draw(object_id: u64, mesh_id: u64, color: [f32; 4]) -> FrameDrawItem {
-        FrameDrawItem::new(object_id, mesh_id, 9, IDENTITY, IDENTITY, color)
+        FrameDrawItem::new(object_id, mesh_id, 9, IDENTITY, IDENTITY, color, false)
     }
 
     /// A mid-coverage gameplay object (emits a contact-shadow / outline anchor).
@@ -707,7 +718,7 @@ mod tests {
     #[test]
     fn invalid_projection_does_not_create_nans() {
         let cache = MeshCache::load(&[ground(7, [1.0; 4])]);
-        let d = FrameDrawItem::new(1, 7, 9, IDENTITY, [0.0; 16], [1.0; 4]);
+        let d = FrameDrawItem::new(1, 7, 9, IDENTITY, [0.0; 16], [1.0; 4], false);
         let result = SoftwareRasterizer::new(opts(32, 32))
             .rasterize_packet(&packet(vec![d], [0.1, 0.1, 0.1, 1.0]), &cache);
         assert_eq!(result.conversion().skipped_invalid_projection_triangles, 2);
@@ -783,21 +794,45 @@ mod tests {
     }
 
     #[test]
-    fn contact_shadow_drawn_for_gameplay_object_not_terrain() {
+    fn marked_caster_gets_a_planar_shadow_unmarked_draw_does_not() {
+        use axiom_host::FrameLight;
         let mut c = cues_off();
         c.enable_contact_shadows = true;
-        // Gameplay object → contact shadow.
-        let obj = MeshCache::load(&[gameplay_object(8, [0.8, 0.3, 0.2, 1.0])]);
-        let r = SoftwareRasterizer::new(opts_cued(64, 64, c))
-            .rasterize_packet(&packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]), &obj);
+        // A flat caster triangle at world y=0.5, a top-down camera (screen = world
+        // x,z; depth = world y), and a straight-down directional light — so the
+        // projected ground shadow has screen area and a finite depth.
+        let topdown = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        let mut verts = Vec::new();
+        verts.extend_from_slice(&vertex([-0.3, 0.5, -0.3], [1.0; 4]));
+        verts.extend_from_slice(&vertex([0.3, 0.5, -0.3], [1.0; 4]));
+        verts.extend_from_slice(&vertex([0.0, 0.5, 0.3], [1.0; 4]));
+        let cache = MeshCache::load(&[(8, verts, vec![0, 1, 2])]);
+        let cam = Some(FrameCamera::new(IDENTITY, IDENTITY, topdown));
+        let light = vec![FrameLight::new(0, [0.0, 1.0, 0.0], [1.0, 1.0, 1.0, 1.0])];
+        let build = |casts: bool| {
+            FramePacket::new(
+                2,
+                120,
+                FrameViewport::new(64, 64),
+                [0.3, 0.3, 0.3, 1.0],
+                cam,
+                vec![FrameDrawItem::new(42, 8, 9, IDENTITY, IDENTITY, [1.0; 4], casts)],
+                light.clone(),
+                IDENTITY,
+                FrameFeatureSet::new(false, false, 1, 0),
+            )
+        };
+        // A marked caster casts a planar ground shadow...
+        let r = SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(true), &cache);
         assert_eq!(r.contact_shadows_drawn(), 1);
         assert!(r.contact_shadow_pixels() > 0);
-        // Terrain (critical) → no overlay → no shadow.
-        let terrain = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0])]);
-        let rt = SoftwareRasterizer::new(opts_cued(64, 64, c))
-            .rasterize_packet(&packet(vec![draw(1, 7, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]), &terrain);
-        assert_eq!(rt.contact_shadows_drawn(), 0);
-        assert_eq!(rt.contact_shadow_pixels(), 0);
+        // ...an unmarked draw (e.g. a wall) casts none.
+        let r0 =
+            SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(false), &cache);
+        assert_eq!(r0.contact_shadows_drawn(), 0);
+        assert_eq!(r0.contact_shadow_pixels(), 0);
     }
 
     #[test]

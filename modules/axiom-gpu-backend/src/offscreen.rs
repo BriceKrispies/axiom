@@ -70,7 +70,19 @@ pub(crate) fn render_to_rgba(
     let depth_view = create_depth_view(&device, width, height);
 
     let max_instances: u32 = batches.iter().map(|(_, _, _, count)| *count).sum();
-    let renderer = SceneRenderer::new(&device, &queue, COLOR_FORMAT, meshes, materials, max_instances);
+    // The off-screen screenshot path is a verification tool, not a live mobile
+    // surface, so it renders the crisp `ExtendedLimits` shadow atlas — keeping
+    // captured pixels stable independent of the live default tier.
+    let shadow_size = axiom_host::HostDeviceProfile::ExtendedLimits.shadow_map_size();
+    let renderer = SceneRenderer::new(
+        &device,
+        &queue,
+        COLOR_FORMAT,
+        meshes,
+        materials,
+        max_instances,
+        shadow_size,
+    );
     renderer.record(
         &device,
         &queue,

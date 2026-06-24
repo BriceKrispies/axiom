@@ -74,6 +74,7 @@ dependencies = [
 name = "axiom-browser-dev-harness"
 version = "0.1.0"
 dependencies = [
+ "axiom-debug-overlay",
  "console_error_panic_hook",
  "js-sys",
  "wasm-bindgen",
@@ -103,6 +104,16 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "ed25519-dalek",
+]
+
+[[package]]
+name = "axiom-debug-overlay"
+version = "0.1.0"
+dependencies = [
+ "axiom-interface",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -215,6 +226,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-input"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
+name = "axiom-interface"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-introspect"
 version = "0.1.0"
 dependencies = [
@@ -229,6 +255,14 @@ dependencies = [
 [[package]]
 name = "axiom-kernel"
 version = "0.1.0"
+
+[[package]]
+name = "axiom-layout"
+version = "0.1.0"
+dependencies = [
+ "axiom-host",
+ "axiom-kernel",
+]
 
 [[package]]
 name = "axiom-math"
@@ -326,7 +360,9 @@ dependencies = [
 name = "axiom-quintet"
 version = "0.1.0"
 dependencies = [
+ "axiom-host",
  "axiom-kernel",
+ "axiom-layout",
  "console_error_panic_hook",
  "wasm-bindgen",
  "web-sys",
@@ -375,7 +411,11 @@ dependencies = [
 name = "axiom-roomed-puzzle"
 version = "0.1.0"
 dependencies = [
+ "axiom-host",
+ "axiom-input",
  "axiom-kernel",
+ "axiom-layout",
+ "axiom-math",
  "console_error_panic_hook",
  "serde",
  "toml",

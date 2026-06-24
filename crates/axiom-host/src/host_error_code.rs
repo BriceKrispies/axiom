@@ -41,6 +41,9 @@ pub enum HostErrorCode {
     /// A [`crate::Pixels`] quantity was constructed from a non-finite value
     /// (NaN or infinity).
     NonFinitePixels = 11,
+    /// A [`crate::HostSafeAreaInsets`] was constructed with a negative edge
+    /// inset (an inset into the surface cannot be negative).
+    InvalidSafeAreaInsets = 12,
 }
 
 impl HostErrorCode {
@@ -62,6 +65,7 @@ mod tests {
         assert_eq!(HostErrorCode::InvalidSurfaceHandle.raw(), 9);
         assert_eq!(HostErrorCode::InvalidPresentationRequest.raw(), 10);
         assert_eq!(HostErrorCode::NonFinitePixels.raw(), 11);
+        assert_eq!(HostErrorCode::InvalidSafeAreaInsets.raw(), 12);
     }
 
     #[test]

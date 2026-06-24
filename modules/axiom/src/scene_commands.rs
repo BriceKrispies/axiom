@@ -157,6 +157,15 @@ impl SceneCommands {
                             .expect("controller attaches to a just-created node");
                     });
             });
+            // A `ContactShadowCaster` marker (in any tuple position) flags the
+            // node's renderable as a shadow caster. Done after the component loop
+            // so the renderable exists regardless of marker order; a marker on a
+            // node with no renderable is a harmless no-op.
+            command
+                .components
+                .iter()
+                .any(|c| c.kind() == NodeComponent::KIND_CONTACT_SHADOW_CASTER)
+                .then(|| scene.set_renderable_casts_contact_shadow(node, true).ok());
             nodes.push(node);
         });
         light_direction
@@ -268,6 +277,43 @@ mod tests {
         assert_eq!(cmds.realize_into(&mut scene, &math()), None);
         assert_eq!(scene.snapshot().nodes().len(), 1);
         assert_eq!(scene.snapshot().cameras().len(), 1);
+    }
+
+    #[test]
+    fn a_contact_shadow_caster_marker_flags_only_its_renderable() {
+        use crate::contact_shadow_caster::ContactShadowCaster;
+        let mut cmds = SceneCommands::new(1.0);
+        let mesh: Handle<Mesh> = {
+            let mut a = crate::assets::Assets::new();
+            a.add(Mesh::cube())
+        };
+        let material: Handle<Material> = {
+            let mut a = crate::assets::Assets::new();
+            a.add(Material::lit(Color::WHITE))
+        };
+        // One renderable marked as a caster, spawned as a 4-component bundle
+        // (exercises `Bundle for (A, B, C, D)`)...
+        cmds.spawn((
+            Transform::IDENTITY,
+            Renderable { mesh, material },
+            crate::spin::Spin::around(Vec3::UNIT_Y).period(60),
+            ContactShadowCaster,
+        ));
+        // ...and one plain renderable (the marker-absent / casts=false path).
+        cmds.spawn(Renderable { mesh, material });
+
+        let mut scene = SceneApi::new();
+        cmds.realize_into(&mut scene, &math());
+        let snap = scene.snapshot();
+        assert_eq!(snap.renderables().len(), 2);
+        // Exactly the marked renderable is a contact-shadow caster.
+        assert_eq!(
+            snap.renderables()
+                .iter()
+                .filter(|r| r.casts_contact_shadow())
+                .count(),
+            1
+        );
     }
 
     #[test]

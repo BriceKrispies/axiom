@@ -1,0 +1,23 @@
+[package]
+name = "axiom-input"
+description = "Axiom engine module: device-agnostic intent synthesis. Turns a neutral pointer/touch stream (mouse, touch, or pen — all the same shape) and an on-screen virtual-control layout into a normalized movement vector and look deltas. The browser event capture lives at the platform edge (the windowing module); this module is the pure, deterministic synthesis core every app composes instead of hand-rolling pointer-lock + WASD."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No browser APIs: it consumes already-decoded pointer samples,
+# so it runs and is tested on native exactly as it drives the web.
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module", allowed_modules = []): it composes
+# NO other module. It builds on the math layer (`Vec2` for the move vector and
+# pointer positions) and the kernel (`Radians` for look deltas).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
