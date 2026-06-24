@@ -13,11 +13,15 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# The one engine layer this app genuinely builds on: the kernel's deterministic
-# pseudo-random source (`DeterministicRng`) is what makes quintet generation a
-# pure function of board state, score, and move count — the game never reads a
-# wall clock or unseeded entropy. Listed in app.toml's `allowed_layers`.
+# The procedural-generation substrate this app's content is now driven by
+# (roadmap Phase 8): `space` (the content Address the game state encodes into),
+# `proc` (the single-draw recipe evaluated at that address to pick the next
+# piece), and the kernel's `StableHash` (digesting the board occupancy into the
+# address key). Generation stays a pure function of (board, score, move-count) —
+# no wall clock, no unseeded entropy. Listed in app.toml's `allowed_layers`.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-proc = { path = "../../crates/axiom-proc" }
 
 # Browser entry only: the wasm-bindgen glue, a panic hook, and the DOM/2D-canvas
 # the play surface binds to. Confined to wasm32, so native
