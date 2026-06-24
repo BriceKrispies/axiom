@@ -421,6 +421,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-space"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-stress-cubes-browser"
 version = "0.1.0"
 dependencies = [

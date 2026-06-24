@@ -1,0 +1,33 @@
+# Axiom layer manifest — axiom-space.
+#
+# A root-adjacent layer: Axiom layers are a DAG (no index, no "previous layer"),
+# so this declares only the lower layer it genuinely adapts — the kernel. It sits
+# beside crypto/runtime as a kernel adapter, NOT stacked above introspect. It is
+# the deterministic content-addressing primitive every future procedural-
+# generation layer (entropy, proc) and domain generator keys by.
+
+[layer]
+name = "space"
+crate_name = "axiom-space"
+depends_on = ["kernel"]
+
+meaningful_dependency = """
+Space adapts the kernel's StableHash (the canonical-bytes digest), BinaryWriter /
+BinaryReader (canonical little-endian serialization), and KernelResult into a
+deterministic, hashable, serializable Address — the stable name for what/where
+content is generated. SpaceApi mints addresses (root/child/parent over a
+hierarchical u64 key-path), digests them through StableHash, and round-trips them
+through the kernel's binary primitives, so the same address always serializes to
+the same bytes and the same digest on every platform. It owns no geometry (that
+is math) and no domain meaning: an address names a site, it does not generate one.
+"""
+
+introduced_capabilities = ["SpaceApi", "Address"]
+consumed_capabilities = ["StableHash", "BinaryWriter", "BinaryReader", "KernelResult"]
+
+# Proof that the kernel dependency is genuine: SpaceApi::digest returns a kernel
+# StableHash computed over an address's canonical bytes, and its serialization
+# round-trips through BinaryWriter/BinaryReader.
+[[proof_exports]]
+export = "SpaceApi"
+must_reference = ["StableHash"]
