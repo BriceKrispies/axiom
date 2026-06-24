@@ -27,6 +27,7 @@ mod mesh;
 mod mesh_geometry;
 mod player;
 mod point_light;
+mod procanim;
 mod renderable;
 mod scene_commands;
 mod spin;
