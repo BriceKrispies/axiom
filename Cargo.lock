@@ -248,6 +248,17 @@ name = "axiom-kernel"
 version = "0.1.0"
 
 [[package]]
+name = "axiom-levelgen"
+version = "0.1.0"
+dependencies = [
+ "axiom-biome",
+ "axiom-kernel",
+ "axiom-placement",
+ "axiom-space",
+ "axiom-terrain",
+]
+
+[[package]]
 name = "axiom-math"
 version = "0.1.0"
 dependencies = [

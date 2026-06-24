@@ -38,6 +38,7 @@ members = [
     "modules/axiom-placement",
     "modules/axiom-terrain",
     "modules/axiom-biome",
+    "modules/axiom-levelgen",
     "modules/axiom",
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",
