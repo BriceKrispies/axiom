@@ -320,6 +320,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-placement"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-proc",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-proc"
 version = "0.1.0"
 dependencies = [
