@@ -9,9 +9,7 @@
 //!
 //! Byte equality is the source of truth; the hashes (FNV-1a) are diagnostics.
 
-use axiom_kernel::{FrameIndex, Tick};
-
-use crate::hash::{hash_bytes, hash_words};
+use axiom_kernel::{FrameIndex, StableHash, Tick};
 
 /// One frame's deterministic artifact set. Equality compares the frame identity,
 /// every byte array, and every hash (so it is exactly byte-for-byte identity).
@@ -41,18 +39,19 @@ impl FrameCapture {
         state_bytes: Vec<u8>,
         render_bytes: Vec<u8>,
     ) -> Self {
-        let input_hash = hash_bytes(&input_bytes);
-        let runtime_hash = hash_bytes(&runtime_bytes);
-        let state_hash = hash_bytes(&state_bytes);
-        let render_hash = hash_bytes(&render_bytes);
-        let final_hash = hash_words(&[
+        let input_hash = StableHash::of_bytes(&input_bytes).raw();
+        let runtime_hash = StableHash::of_bytes(&runtime_bytes).raw();
+        let state_hash = StableHash::of_bytes(&state_bytes).raw();
+        let render_hash = StableHash::of_bytes(&render_bytes).raw();
+        let final_hash = StableHash::of_words(&[
             frame_index.raw(),
             tick.raw(),
             input_hash,
             runtime_hash,
             state_hash,
             render_hash,
-        ]);
+        ])
+        .raw();
         FrameCapture {
             frame_index,
             tick,
