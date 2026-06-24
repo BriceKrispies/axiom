@@ -559,6 +559,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-worldsave"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-levelgen",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-zones"
 version = "0.1.0"
 dependencies = [
