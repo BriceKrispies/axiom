@@ -73,6 +73,9 @@ mod reflect;
 mod schema_version;
 mod type_schema;
 
+// --- Stable hashing ---
+mod stable_hash;
+
 // --- Layer contract model ---
 mod layer_capability;
 mod layer_dependency;
@@ -152,6 +155,13 @@ pub use schema_version::SchemaVersion;
 // makes engine data (e.g. ECS components) serializable and describable.
 pub use reflect::Reflect;
 pub use type_schema::{FieldSchema, TypeSchema};
+
+// Stable hashing — a deterministic FNV-1a digest over canonical bytes. The
+// shared primitive the recording module's determinism reports and the
+// procedural-generation provenance both index artifacts with, so a digest
+// computed in one place matches another. A diagnostic index, never the
+// determinism proof (byte equality proves; a hash only labels/locates).
+pub use stable_hash::StableHash;
 
 // Layer-contract primitives — layers carry their own manifests and need to
 // construct dependencies and capabilities by code to validate them in tests.
