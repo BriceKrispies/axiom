@@ -27,7 +27,6 @@ mod determinism_report;
 mod error;
 mod frame_capture;
 mod frame_timeline;
-mod hash;
 mod recording_api;
 mod timeline_mode;
 
