@@ -1,0 +1,15 @@
+[package]
+name = "axiom-proc-validate"
+description = "Axiom layer: constraints, scoring, validation, and bounded repair over proc artifacts. ProcValidateApi validates an Artifact's neutral words against generic, domain-free Constraints (min count / max value / non-zero), producing a deterministic ValidationReport (per-constraint verdict + score). repair() applies a single bounded pass of word-level fixes and returns a re-validatable artifact. Domain rules ('rivers reach the sea') are a terrain module's job, not this layer's. depends_on = kernel + proc."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-proc = { path = "../axiom-proc" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

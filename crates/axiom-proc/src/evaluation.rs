@@ -71,7 +71,7 @@ impl Evaluation {
     /// done so far; call it once [`Self::is_done`].
     pub fn into_output(self) -> (Artifact, ProcTrace) {
         (
-            Artifact::new(self.generator_version, self.values),
+            Artifact::from_words(self.generator_version, self.values),
             ProcTrace::new(self.steps),
         )
     }

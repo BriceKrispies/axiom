@@ -1,0 +1,36 @@
+# Axiom layer manifest — axiom-proc-validate.
+#
+# Makes generated artifacts trustworthy: declarative constraints, scoring,
+# validation verdicts, and a single bounded repair pass over proc artifacts.
+# depends_on = kernel (digest + serialization for the report) and proc (the
+# Artifact it validates and the repaired artifact it builds). It owns NO domain
+# rules ("rivers reach the sea" is a terrain module's job) and never generates new
+# content beyond bounded word-level repair.
+
+[layer]
+name = "proc-validate"
+crate_name = "axiom-proc-validate"
+depends_on = ["kernel", "proc"]
+
+meaningful_dependency = """
+Proc-validate adapts proc's Artifact and the kernel's serialization + digest into
+deterministic validation and bounded repair. ProcValidateApi reads an Artifact's
+neutral words, evaluates generic Constraints (min-count / max-value / non-zero)
+branchlessly into a ValidationReport whose canonical bytes (BinaryWriter) carry a
+StableHash digest, and repairs a failing artifact by a single bounded pass of
+word-level fixes, returning a new Artifact (built via Artifact::from_words). It
+owns no domain rules and never loops to a fixpoint.
+"""
+
+introduced_capabilities = ["ProcValidateApi", "ValidationReport", "Constraint"]
+consumed_capabilities = ["Artifact", "StableHash", "BinaryWriter"]
+
+# Proof the dependencies are genuine: ProcValidateApi validates and rebuilds a
+# proc Artifact; ValidationReport digests its canonical bytes with kernel StableHash.
+[[proof_exports]]
+export = "ProcValidateApi"
+must_reference = ["Artifact"]
+
+[[proof_exports]]
+export = "ValidationReport"
+must_reference = ["StableHash"]
