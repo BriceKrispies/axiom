@@ -19,14 +19,15 @@ use crate::camera::Camera;
 use crate::controller_command::decode_controller;
 use crate::light::Light;
 use crate::player_command::decode_move;
+use crate::procanim::ProcAnim;
 use crate::renderable::Renderable;
 use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
 use crate::scene_storage::{
-    propagate, ControllerState, ControllerSystem, PlayerMoveSystem, SceneStorage, SpinSystem,
-    TransformPropagation,
+    propagate, ControllerState, ControllerSystem, PlayerMoveSystem, ProcAnimSystem, SceneStorage,
+    SpinSystem, TransformPropagation,
 };
 use crate::spin::Spin;
 
@@ -44,12 +45,14 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// Construct an empty scene with the standard systems registered: spin runs
-    /// first (it drives local rotations from the tick), then transform
+    /// Construct an empty scene with the standard systems registered: the
+    /// tick-driven animation systems (spin, then procedural bob/spin) run first,
+    /// then the per-tick player-move and controller systems, then transform
     /// propagation turns locals into world transforms.
     pub fn new() -> Self {
         let mut world = World::new();
         world.register_system(Box::new(SpinSystem));
+        world.register_system(Box::new(ProcAnimSystem));
         world.register_system(Box::new(PlayerMoveSystem));
         world.register_system(Box::new(ControllerSystem));
         world.register_system(Box::new(TransformPropagation));
@@ -293,18 +296,6 @@ impl Scene {
             })
     }
 
-    pub(crate) fn add_spin(&mut self, node: SceneNodeId, spin: Spin) -> SceneResult<()> {
-        self.is_node(node)
-            .then_some(())
-            .ok_or_else(|| SceneError::missing_node("add_spin: node id not in scene"))
-            .map(|()| {
-                self.world
-                    .storage_mut()
-                    .spins
-                    .insert(Self::entity(node), spin);
-            })
-    }
-
     /// Mark `node` as the controllable node for `player` index, so per-tick move
     /// commands addressed to that index translate it (via [`PlayerMoveSystem`]).
     pub(crate) fn add_player(&mut self, node: SceneNodeId, player: u32) -> SceneResult<()> {
@@ -370,6 +361,35 @@ impl Scene {
     /// A deterministic value snapshot of the scene's current state.
     pub(crate) fn snapshot(&self) -> SceneSnapshot {
         SceneSnapshot::from_scene(self)
+    }
+}
+
+/// Data-declared animation authoring: attach the engine's tick-driven animation
+/// components to a node. Kept in its own `impl` block so neither block exceeds the
+/// engine's impl-block size budget.
+impl Scene {
+    pub(crate) fn add_spin(&mut self, node: SceneNodeId, spin: Spin) -> SceneResult<()> {
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_spin: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .spins
+                    .insert(Self::entity(node), spin);
+            })
+    }
+
+    pub(crate) fn add_procanim(&mut self, node: SceneNodeId, anim: ProcAnim) -> SceneResult<()> {
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_procanim: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .procanims
+                    .insert(Self::entity(node), anim);
+            })
     }
 }
 

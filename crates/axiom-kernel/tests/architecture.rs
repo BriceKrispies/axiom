@@ -148,6 +148,7 @@ fn lib_exports_are_curated_set() {
         "pub use schema_version::SchemaVersion;",
         "pub use reflect::Reflect;",
         "pub use type_schema::{FieldSchema, TypeSchema};",
+        "pub use stable_hash::StableHash;",
         "pub use layer_capability::LayerCapability;",
         "pub use layer_dependency::LayerDependency;",
         "pub use layer_manifest::LayerManifest;",

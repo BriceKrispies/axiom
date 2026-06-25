@@ -1,0 +1,16 @@
+[package]
+name = "axiom-proc"
+description = "Axiom layer: the procedural-generation graph core. A Recipe is a versioned DAG of generic, domain-free nodes (const / entropy-draw / combine); ProcApi evaluates it deterministically over an address-keyed entropy stream into a neutral Artifact (opaque u64 words + canonical bytes + stable digest) and a ProcTrace (the decision log). Evaluation is resumable and budget-independent: stepping one node at a time yields byte-identical output to evaluating all at once. Domain-free - what the words mean is a domain module's job. depends_on = kernel + space + entropy."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-space = { path = "../axiom-space" }
+axiom-entropy = { path = "../axiom-entropy" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

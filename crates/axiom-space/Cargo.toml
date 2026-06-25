@@ -1,0 +1,14 @@
+[package]
+name = "axiom-space"
+description = "Axiom layer: deterministic content addressing. A stable, hashable, serializable Address names what/where content is generated (a hierarchical u64 key-path); SpaceApi mints, navigates, digests, and serializes addresses through the kernel's StableHash + BinaryWriter/BinaryReader. Root-adjacent (depends_on = kernel). It owns no geometry (that is math) and no domain meaning — an address names a site, it does not generate one. The shared addressing primitive every future generator keys its entropy and artifacts by."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../axiom-kernel" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

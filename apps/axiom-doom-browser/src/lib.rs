@@ -36,6 +36,16 @@ use level::{LevelDoc, MapData};
 /// The presentation canvas element id (must match the gallery/host page).
 pub const CANVAS_ID: &str = "axiom-doom-canvas";
 
+/// Proc-driven rendering: the level is **procedurally animated** as data. Every
+/// wall, floor and ceiling cube carries a [`ProcAnim`] the engine's scene system
+/// evaluates each tick (so the whole rendered scene is a deterministic function of
+/// the frame), giving the environment a living vertical bob. `BOB_PERIOD` ticks per
+/// cycle; walls bob by `WALL_BOB`, the slabs by `SLAB_BOB`; a per-cell phase wave
+/// ripples it across the grid so nothing pulses in lockstep.
+const BOB_PERIOD: u32 = 90;
+const WALL_BOB: f32 = 0.16;
+const SLAB_BOB: f32 = 0.1;
+
 /// A linear colour channel from an authored literal.
 fn ch(value: f32) -> Ratio {
     Ratio::new(value).expect("authored colour channel is finite")
@@ -599,6 +609,8 @@ fn level_setup(
         let ceiling = materials.add(Material::lit(color_of(doc.colors.ceiling)));
         let enemy = materials.add(Material::lit(color_of(doc.colors.enemy)));
         let wh = doc.tun.wall_height;
+        let wall_bob = Meters::new(WALL_BOB).expect("wall bob is finite");
+        let slab_bob = Meters::new(SLAB_BOB).expect("slab bob is finite");
 
         // Walls: one scaled cube per wall cell, two-tone by parity. The
         // wall-cell filter replaces the `continue`; the parity selects the
@@ -615,6 +627,10 @@ fn level_setup(
                             mesh: cube,
                             material: mat,
                         },
+                        // A per-cell phase wave ripples the bob diagonally across
+                        // the grid (deterministic in the cell's row+col).
+                        ProcAnim::bob(wall_bob, BOB_PERIOD)
+                            .phase((row + col) as u32 * 8 % BOB_PERIOD),
                     ));
                 });
         });
@@ -631,6 +647,7 @@ fn level_setup(
                 mesh: cube,
                 material: floor,
             },
+            ProcAnim::bob(slab_bob, BOB_PERIOD),
         ));
         world.spawn((
             block(cx, wh + 0.05, cz, gw, 0.1, gh),
@@ -638,6 +655,8 @@ fn level_setup(
                 mesh: cube,
                 material: ceiling,
             },
+            // A half-period offset from the floor, so the room breathes.
+            ProcAnim::bob(slab_bob, BOB_PERIOD).phase(BOB_PERIOD / 2),
         ));
 
         // Enemies: a red cube Player per spawn, in row-major (index) order. Each is

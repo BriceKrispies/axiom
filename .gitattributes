@@ -1,0 +1,10 @@
+# Golden corpora are byte-exact baselines: a procedural/determinism golden is
+# only meaningful if it round-trips byte-for-byte. Mark every committed golden
+# blob as binary so git never applies line-ending (LF<->CRLF) or other text
+# normalization to it, on any platform. Without this, a golden that happens to
+# contain no NUL byte could be silently CRLF-converted on a Windows checkout and
+# no longer match the bytes a generator produces.
+*.bin binary
+
+# Golden corpus directories (any extension) are stored verbatim.
+**/tests/golden/** binary

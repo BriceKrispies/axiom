@@ -1,0 +1,16 @@
+[package]
+name = "axiom-biome"
+description = "Axiom engine module: deterministic biome classification on the procedural-generation substrate. BiomeApi classifies an (elevation, moisture) pair into one of six biome codes via a branchless Whittaker-style band lookup, and generates a BiomeMap by drawing per-cell elevation/moisture from an entropy stream keyed by a content address. Domain rules live here (the elevation/moisture thresholds), not in the generic proc-validate layer. Integer-only, branchless, one facade (biome codes are u8 with named constants)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-entropy = { path = "../../crates/axiom-entropy" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
