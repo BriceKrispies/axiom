@@ -79,16 +79,18 @@ GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay retro_fps retro_fps-build retro-fps-hot stress stress-build growth growth-build harness harness-build agent agent-render agent-bridge gallery gallery-build gallery-serve package ts-gate help
+.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay retro_fps retro_fps-build retro-fps-hot stress stress-build growth growth-build harness harness-build agent agent-render agent-bridge gallery gallery-build gallery-serve gallery-fast gallery-fast-build package ts-gate help
 
 help:
 	@echo "Axiom tooling targets:"
 	@echo ""
-	@echo "  ===> MAIN DRIVER — the demo gallery (build everything + serve locally):"
-	@echo "  make gallery        Build EVERY browser demo, assemble dist/, and serve at http://localhost:$(GALLERY_PORT)"
+	@echo "  ===> MAIN DRIVER — the demo gallery (PACKAGE every demo + serve locally):"
+	@echo "  make gallery        PACKAGE every demo (wasm + wasm2js fallback), assemble dist/, serve at http://localhost:$(GALLERY_PORT)"
+	@echo "  make gallery-fast   Quick wasm-only gallery (no fallback, normal incremental build) — seconds, for iteration"
 	@echo "  make gallery-serve  Re-serve the already-built dist/ WITHOUT rebuilding (fast restart)"
-	@echo "  make gallery-build  Build all demos + assemble dist/ only, no serve (what deploy-pages.yml runs)"
+	@echo "  make gallery-build  Package all demos + assemble dist/ only, no serve"
 	@echo "  make GALLERY_PORT=9000 gallery   Serve on a different port"
+	@echo "  (make gallery is slow the first time — it rebuilds std MVP so the wasm2js fallback is possible.)"
 	@echo "  (this is the one command to browse the whole engine surface; the per-demo"
 	@echo "   targets below are for iterating on a single app in isolation.)"
 	@echo ""
@@ -280,34 +282,23 @@ agent-bridge:
 
 # --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
 
-# Build EVERY browser demo's wasm bundle, build + vendor the @axiom/client SDK
-# the netplay demo needs, and assemble the static gallery into dist/. Uses the
-# same raw cargo + wasm-bindgen flow as the per-demo builds, then the portable
-# Python assembler (scripts/assemble_gallery.py) so dist/ is identical locally
-# and in CI. This is the build half of `make gallery`; CI's deploy-pages.yml runs
-# the equivalent steps. Recipe stays portable (cargo/wasm-bindgen/npm/uv run all
-# work under cmd.exe on Windows too).
+# PACKAGE every browser demo into dist/ via scripts/package_gallery.py: each demo
+# gets a capability-detecting loader over a wasm fast-path (wasm-opt -Oz) PLUS a
+# Binaryen wasm2js fallback for browsers with no WebAssembly. First it installs the
+# pinned Binaryen toolchain and builds + vendors the @axiom/client SDK the netplay
+# demo needs (the packager then copies that vendored web/ into dist/netplay/).
+#
+# This is the build half of `make gallery`. Because every app is rebuilt MVP via
+# nightly `-Z build-std` (so the wasm2js fallback is possible), the FIRST run is slow
+# — it compiles std MVP once into the shared target/package-mvp dir; re-runs are
+# incremental. Needs a nightly toolchain with rust-src. (`make gallery-fast` keeps
+# the old quick --target web flow with no fallback for tight iteration.)
 gallery-build:
-	cargo build -p $(BROWSER_CRATE) --target $(WASM_TARGET) --release
-	cargo build -p $(NETPLAY_CRATE) --target $(WASM_TARGET) --release
-	cargo build -p $(retro FPS_CRATE) --target $(WASM_TARGET) --release
-	cargo build -p $(STRESS_CRATE) --target $(WASM_TARGET) --release
-	cargo build -p $(GROWTH_CRATE) --target $(WASM_TARGET) --release
-	cargo build -p $(ROOMED_CRATE) --target $(WASM_TARGET) --release
-	cargo build -p $(QUINTET_CRATE) --target $(WASM_TARGET) --release
-	cargo build -p $(HARNESS_CRATE) --target $(WASM_TARGET) --release
-	wasm-bindgen --target web --out-dir $(PKG_DIR) $(WASM_ARTIFACT)
-	wasm-bindgen --target web --out-dir $(NETPLAY_PKG) $(NETPLAY_ARTIFACT)
-	wasm-bindgen --target web --out-dir $(retro FPS_PKG) $(retro FPS_ARTIFACT)
-	wasm-bindgen --target web --out-dir $(STRESS_PKG) $(STRESS_ARTIFACT)
-	wasm-bindgen --target web --out-dir $(GROWTH_PKG) $(GROWTH_ARTIFACT)
-	wasm-bindgen --target web --out-dir $(ROOMED_PKG) $(ROOMED_ARTIFACT)
-	wasm-bindgen --target web --out-dir $(QUINTET_PKG) $(QUINTET_ARTIFACT)
-	wasm-bindgen --target web --out-dir $(HARNESS_PKG) $(HARNESS_ARTIFACT)
+	npm --prefix scripts/packaging install --no-audit --no-fund
 	npm --prefix packages/axiom-client install --no-audit --no-fund
 	npm --prefix packages/axiom-client run build
 	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_WEB)/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
-	uv run --no-project python scripts/assemble_gallery.py
+	uv run --no-project python scripts/package_gallery.py
 
 # THE MAIN DRIVER. One command to browse the whole engine surface during
 # development: it builds EVERY browser demo, assembles the static gallery into
@@ -324,6 +315,18 @@ gallery: gallery-build
 gallery-serve:
 	@echo Serving prebuilt gallery at http://localhost:$(GALLERY_PORT) - run make gallery first if blank
 	@echo Open it in a WebGPU browser. Ctrl+C to stop.
+	uv run --no-project python -m http.server $(GALLERY_PORT) --directory $(DIST_DIR)
+
+# Fast iteration variant of the gallery: packages every demo wasm-only (a normal
+# incremental release build through the same loader, NO MVP/build-std rebuild and NO
+# wasm2js fallback), then serves dist/. Seconds, not minutes — use this while
+# iterating; use `make gallery` for the deploy-grade bundles with the fallback.
+gallery-fast-build:
+	npm --prefix scripts/packaging install --no-audit --no-fund
+	uv run --no-project python scripts/package_gallery.py --fast
+
+gallery-fast: gallery-fast-build
+	@echo Fast gallery (wasm-only) built into $(DIST_DIR)/. Serving at http://localhost:$(GALLERY_PORT) - Ctrl+C to stop.
 	uv run --no-project python -m http.server $(GALLERY_PORT) --directory $(DIST_DIR)
 
 # --- Package a single game into a self-contained, droppable bundle ---

@@ -3,9 +3,11 @@
 // and the shared per-demo boot shell. It is plain ES modules served statically;
 // it imports nothing from the engine.
 //
-// Each demo's wasm bundle is produced by `wasm-bindgen --target web` exactly as
-// `make demo-build` / `make netplay-build` do, and dropped at
-// `./<dir>/pkg/<jsModule>.js` + `_bg.wasm` by the deploy workflow.
+// Each demo is PACKAGED by scripts/package_gallery.py (`make gallery`): every
+// `./<dir>/` carries a capability-detecting loader (`axiom-loader.js`) over a wasm
+// fast-path plus a wasm2js fallback for browsers with no WebAssembly. The loader is
+// API-compatible with the old `wasm-bindgen --target web` glue, so booting is still
+// `import(loader)` -> `default()` -> `start()`.
 
 import { renderKeypad } from "./keypad.js";
 
@@ -240,12 +242,8 @@ function mountCubeBar(host, demo, current) {
 async function mountDebugOverlay() {
   try {
     const v = Date.now();
-    const overlay = await import(`./harness/pkg/axiom_browser_dev_harness.js?v=${v}`);
-    const wasmUrl = new URL(
-      `./harness/pkg/axiom_browser_dev_harness_bg.wasm?v=${v}`,
-      import.meta.url,
-    );
-    await overlay.default({ module_or_path: wasmUrl });
+    const overlay = await import(`./harness/axiom-loader.js?v=${v}`);
+    await overlay.default();
     overlay.start();
   } catch (e) {
     console.warn("[gallery] debug overlay unavailable:", e);
@@ -314,15 +312,13 @@ export async function bootDemo() {
   }
 
   try {
-    // Cache-bust the JS glue and the wasm binary on every load (the dev/static
-    // server may send no cache headers), matching the per-app pages.
+    // Boot through the packaged capability-detecting loader: it picks the wasm
+    // fast-path or the wasm2js fallback itself. API-compatible with the old
+    // --target web glue (default() + start()), so the boot shape is unchanged.
+    // Cache-bust on every load (the dev/static server may send no cache headers).
     const v = Date.now();
-    const mod = await import(`./${demo.dir}/pkg/${demo.jsModule}.js?v=${v}`);
-    const wasmUrl = new URL(
-      `./${demo.dir}/pkg/${demo.jsModule}_bg.wasm?v=${v}`,
-      import.meta.url,
-    );
-    await mod.default({ module_or_path: wasmUrl });
+    const mod = await import(`./${demo.dir}/axiom-loader.js?v=${v}`);
+    await mod.default();
     if (cubeCount != null) {
       mod.start(cubeCount);
     } else {

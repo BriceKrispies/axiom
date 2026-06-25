@@ -2,9 +2,15 @@
 # (gallery/) to GitHub Pages on every push to main.
 #
 # This is repo tooling, NOT part of the engine dependency graph — same status as
-# the CI workflow, the Makefile, and scripts/. It builds each browser app for
-# wasm32 with the exact wasm-bindgen generator pinned in Cargo.lock (matching
-# `make demo-build` / `make netplay-build`), assembles dist/, and deploys it.
+# the CI workflow, the Makefile, and scripts/. It PACKAGES each browser app
+# (scripts/package_gallery.py) into dist/ behind the shared capability-detecting
+# loader, matching `make gallery`, and deploys it.
+#
+# It runs the FAST packaging path (`--fast`: a normal wasm-bindgen build behind the
+# loader, no wasm2js fallback), to keep the deploy quick and on stable. `make gallery`
+# locally builds the deploy-grade bundles WITH the wasm2js fallback; to deploy those,
+# switch the package step to drop `--fast` and add a nightly toolchain + rust-src
+# (the fallback needs the MVP `-Z build-std` rebuild).
 #
 # One-time setup: enable Pages in repo Settings → Pages → Source: GitHub Actions.
 name: deploy-pages
@@ -65,44 +71,16 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-pages-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build wasm demos
+      # Package every demo into dist/ behind the shared loader (scripts/package_gallery.py,
+      # the same driver `make gallery` uses). `--fast` keeps this on stable with no
+      # wasm2js fallback; it also builds + vendors the @axiom/client SDK netplay needs.
+      - name: Package the gallery (dist/)
         run: |
-          cargo build -p axiom-demo-rotating-cube-browser --target wasm32-unknown-unknown --release
-          cargo build -p axiom-netplay-browser --target wasm32-unknown-unknown --release
-          cargo build -p axiom-retro-fps-browser --target wasm32-unknown-unknown --release
-          cargo build -p axiom-stress-cubes-browser --target wasm32-unknown-unknown --release
-          cargo build -p axiom-growth --target wasm32-unknown-unknown --release
-          cargo build -p axiom-roomed-puzzle --target wasm32-unknown-unknown --release
-          cargo build -p axiom-quintet --target wasm32-unknown-unknown --release
-          cargo build -p axiom-browser-dev-harness --target wasm32-unknown-unknown --release
-          wasm-bindgen --target web \
-            --out-dir apps/axiom-demo-rotating-cube-browser/web/pkg \
-            target/wasm32-unknown-unknown/release/axiom_demo_rotating_cube_browser.wasm
-          wasm-bindgen --target web \
-            --out-dir apps/axiom-netplay-browser/web/pkg \
-            target/wasm32-unknown-unknown/release/axiom_netplay_browser.wasm
-          wasm-bindgen --target web \
-            --out-dir apps/axiom-retro-fps-browser/web/pkg \
-            target/wasm32-unknown-unknown/release/axiom_retro_fps_browser.wasm
-          wasm-bindgen --target web \
-            --out-dir apps/axiom-stress-cubes-browser/web/pkg \
-            target/wasm32-unknown-unknown/release/axiom_stress_cubes_browser.wasm
-          wasm-bindgen --target web \
-            --out-dir apps/axiom-growth/web/pkg \
-            target/wasm32-unknown-unknown/release/axiom_growth.wasm
-          wasm-bindgen --target web \
-            --out-dir apps/axiom-roomed-puzzle/web/pkg \
-            target/wasm32-unknown-unknown/release/axiom_roomed_puzzle.wasm
-          wasm-bindgen --target web \
-            --out-dir apps/axiom-quintet/web/pkg \
-            target/wasm32-unknown-unknown/release/axiom_quintet.wasm
-          wasm-bindgen --target web \
-            --out-dir apps/axiom-browser-dev-harness/web/pkg \
-            target/wasm32-unknown-unknown/release/axiom_browser_dev_harness.wasm
-
-      # Same assembler the Makefile uses, so dist/ is identical locally and here.
-      - name: Assemble dist/
-        run: python3 scripts/assemble_gallery.py
+          npm --prefix scripts/packaging install --no-audit --no-fund
+          npm --prefix packages/axiom-client install --no-audit --no-fund
+          npm --prefix packages/axiom-client run build
+          python3 -c "import shutil, pathlib; d=pathlib.Path('apps/axiom-netplay-browser/web/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
+          python3 scripts/package_gallery.py --fast
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
