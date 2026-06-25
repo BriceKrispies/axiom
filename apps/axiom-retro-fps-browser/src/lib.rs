@@ -36,16 +36,6 @@ use level::{LevelDoc, MapData};
 /// The presentation canvas element id (must match the gallery/host page).
 pub const CANVAS_ID: &str = "axiom-retro-fps-canvas";
 
-/// Proc-driven rendering: the level is **procedurally animated** as data. Every
-/// wall, floor and ceiling cube carries a [`ProcAnim`] the engine's scene system
-/// evaluates each tick (so the whole rendered scene is a deterministic function of
-/// the frame), giving the environment a living vertical bob. `BOB_PERIOD` ticks per
-/// cycle; walls bob by `WALL_BOB`, the slabs by `SLAB_BOB`; a per-cell phase wave
-/// ripples it across the grid so nothing pulses in lockstep.
-const BOB_PERIOD: u32 = 90;
-const WALL_BOB: f32 = 0.16;
-const SLAB_BOB: f32 = 0.1;
-
 /// A linear colour channel from an authored literal.
 fn ch(value: f32) -> Ratio {
     Ratio::new(value).expect("authored colour channel is finite")
@@ -609,8 +599,6 @@ fn level_setup(
         let ceiling = materials.add(Material::lit(color_of(doc.colors.ceiling)));
         let enemy = materials.add(Material::lit(color_of(doc.colors.enemy)));
         let wh = doc.tun.wall_height;
-        let wall_bob = Meters::new(WALL_BOB).expect("wall bob is finite");
-        let slab_bob = Meters::new(SLAB_BOB).expect("slab bob is finite");
 
         // Walls: one scaled cube per wall cell, two-tone by parity. The
         // wall-cell filter replaces the `continue`; the parity selects the
@@ -627,10 +615,6 @@ fn level_setup(
                             mesh: cube,
                             material: mat,
                         },
-                        // A per-cell phase wave ripples the bob diagonally across
-                        // the grid (deterministic in the cell's row+col).
-                        ProcAnim::bob(wall_bob, BOB_PERIOD)
-                            .phase((row + col) as u32 * 8 % BOB_PERIOD),
                     ));
                 });
         });
@@ -647,7 +631,6 @@ fn level_setup(
                 mesh: cube,
                 material: floor,
             },
-            ProcAnim::bob(slab_bob, BOB_PERIOD),
         ));
         world.spawn((
             block(cx, wh + 0.05, cz, gw, 0.1, gh),
@@ -655,8 +638,6 @@ fn level_setup(
                 mesh: cube,
                 material: ceiling,
             },
-            // A half-period offset from the floor, so the room breathes.
-            ProcAnim::bob(slab_bob, BOB_PERIOD).phase(BOB_PERIOD / 2),
         ));
 
         // Enemies: a red cube Player per spawn, in row-major (index) order. Each is
@@ -957,6 +938,19 @@ mod tests {
         // The next frame renders the reloaded scene at the continuing tick.
         let frame = running.tick(1);
         assert_eq!(frame.tick(), 1);
+    }
+
+    #[test]
+    fn the_level_geometry_stays_still_across_ticks() {
+        // Walls/floor/ceiling are static architecture: with no input, the rendered
+        // instance transforms must be byte-identical from one tick to a much later
+        // one. Guards against re-introducing a per-frame geometry animation (e.g. a
+        // wall bob) — the scene system would otherwise move them every frame.
+        let mut running = build_retro_fps_app(&LevelDoc::default());
+        let at_0 = running.tick(0).instance_floats();
+        let at_22 = running.tick(22).instance_floats();
+        assert!(!at_0.is_empty(), "the level renders geometry");
+        assert_eq!(at_0, at_22, "static geometry must not move between frames");
     }
 
     #[test]
