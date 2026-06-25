@@ -103,6 +103,16 @@ The trade-off is enforced rather than left to discipline:
   only through `KernelApi` methods that return them (usable via inference, just
   not nameable). This keeps the visible surface aligned with what higher layers
   actually need.
+- **`StableHash`** is the deterministic FNV-1a digest over canonical bytes — the
+  digest companion to the serialization primitives above. It is curated (not
+  facade-only) because higher layers and modules *name* it: the `recording`
+  module's determinism reports and the procedural-generation layers' artifact and
+  trace **provenance** index serialized bytes with it, and a digest computed in
+  one place must equal one computed in another, which only a single shared
+  primitive guarantees. It is a *diagnostic index, never the determinism proof* —
+  byte equality proves; a digest only labels and locates bytes (the stance
+  `modules/axiom-recording` already takes). It carries no domain semantics: it
+  hashes opaque bytes and knows nothing about what they encode.
 
 ## Logging and telemetry as structured data
 

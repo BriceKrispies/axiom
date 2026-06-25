@@ -1,0 +1,16 @@
+[package]
+name = "axiom-worldsave"
+description = "Axiom FEATURE module: the save/delta model. A Save stores only what cannot be regenerated - the seed, the generator version, the world's address + dimensions, and the player's deltas (cell biome overrides) - never the full world. WorldSaveApi::restore regenerates the levelgen world from the seed and replays the deltas on top, so a world reproduces from a tiny save byte-for-byte. This is the procedural-generation payoff (and the same shape lockstep multiplayer uses: seed + command/delta stream, never full state)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-levelgen = { path = "../axiom-levelgen" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

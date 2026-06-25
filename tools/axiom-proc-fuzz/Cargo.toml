@@ -1,0 +1,19 @@
+[package]
+name = "axiom-proc-fuzz"
+description = "Axiom tool: the procedural-generation determinism / fuzz / replay gate harness. It seed-sweeps every generator (proc recipes, terrain, biome, placement, levelgen worlds) and asserts byte-identical regeneration; fuzzes randomly-built recipes (via a seeded RNG, so the fuzz itself is reproducible) and asserts they never panic and reproduce or are cleanly rejected; and long-run-replays worlds (generate -> serialize -> regenerate -> byte-equal). Repo tooling, outside the engine graph; its property tests run under `cargo test --workspace` (the CI gate)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-proc = { path = "../../crates/axiom-proc" }
+axiom-terrain = { path = "../../modules/axiom-terrain" }
+axiom-biome = { path = "../../modules/axiom-biome" }
+axiom-placement = { path = "../../modules/axiom-placement" }
+axiom-levelgen = { path = "../../modules/axiom-levelgen" }
+
+[lints.rust]
+unsafe_code = "forbid"

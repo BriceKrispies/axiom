@@ -1,0 +1,18 @@
+[package]
+name = "axiom-levelgen"
+description = "Axiom FEATURE module: a composed world recipe. LevelGenApi::generate folds the three domain generators into one World - a terrain heightfield (elevation), a second terrain field (moisture), a biome map classified from the two, and a placement of scattered objects - all keyed deterministically by (seed, address). This is the sanctioned multi-module composition tier (kind = feature-module): it is the only crate allowed to depend on terrain + biome + placement together, the way the render-pipeline feature module composes the slice modules."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-terrain = { path = "../axiom-terrain" }
+axiom-biome = { path = "../axiom-biome" }
+axiom-placement = { path = "../axiom-placement" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

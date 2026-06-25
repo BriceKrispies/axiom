@@ -140,6 +140,22 @@ impl SceneCommands {
                             .add_spin(node, s.axis, s.period_ticks)
                             .expect("spin attaches to a just-created node");
                     });
+                (component.kind() == NodeComponent::KIND_PROCANIM)
+                    .then(|| component.as_procanim())
+                    .flatten()
+                    .inspect(|p| {
+                        scene
+                            .add_procanim(
+                                node,
+                                command.transform,
+                                p.bob_amplitude,
+                                p.bob_period,
+                                p.spin_axis,
+                                p.spin_period,
+                                p.phase,
+                            )
+                            .expect("procanim attaches to a just-created node");
+                    });
                 (component.kind() == NodeComponent::KIND_PLAYER)
                     .then(|| component.as_player())
                     .flatten()
@@ -339,6 +355,24 @@ mod tests {
         let mut cmds = SceneCommands::new(1.0);
         cmds.spawn(Transform::IDENTITY);
         let mut scene = SceneApi::new();
+        assert_eq!(cmds.realize_into(&mut scene, &math()), None);
+        assert_eq!(scene.snapshot().nodes().len(), 1);
+    }
+
+    #[test]
+    fn realizes_a_procanim_node_around_its_spawn_transform() {
+        use crate::procanim::ProcAnim;
+        let mut cmds = SceneCommands::new(4.0 / 3.0);
+        // A positioned node carrying a bob+spin procedural animation; the spawn
+        // transform is the resting pose the animation composes around.
+        cmds.spawn((
+            Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)),
+            ProcAnim::bob(Meters::new(0.5).unwrap(), 120)
+                .spin(Vec3::UNIT_Y, 240)
+                .phase(7),
+        ));
+        let mut scene = SceneApi::new();
+        // The ProcAnim arm of realize_into runs add_procanim without error.
         assert_eq!(cmds.realize_into(&mut scene, &math()), None);
         assert_eq!(scene.snapshot().nodes().len(), 1);
     }
