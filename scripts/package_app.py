@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Package a single Axiom browser app into a self-contained, droppable bundle.
 
-Repo tooling (alongside ``assemble_gallery.py`` and the Makefile), NOT part of the
+Repo tooling (alongside ``package_gallery.py`` and the Makefile), NOT part of the
 engine dependency graph. It turns one ``apps/<app>`` crate into a directory you can
 serve from any static host, with a built-in capability ladder:
 
@@ -235,46 +235,55 @@ def emit_inline_html(
     (out / "index.html").write_text(html, encoding="utf-8")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Package one Axiom browser app into a self-contained bundle.")
-    parser.add_argument("app", help="app crate dir (apps/axiom-quintet) or short name (quintet)")
-    parser.add_argument("--out", help="output dir (default: dist-app/<name>)")
-    parser.add_argument("--inline", action="store_true", help="emit a single self-contained index.html")
-    parser.add_argument("--no-fallback", action="store_true", help="skip the wasm2js fallback (wasm-only bundle)")
-    parser.add_argument("--keep-temp", action="store_true", help="keep the intermediate build dir for inspection")
-    args = parser.parse_args()
+def package(
+    app_dir: Path,
+    *,
+    out: Path,
+    inline: bool = False,
+    has_fallback: bool = True,
+    fast: bool = False,
+    target_dir: Path | None = None,
+    keep_temp: bool = False,
+) -> Path:
+    """Package one app crate into ``out``. Reusable from package_gallery.py too.
 
-    app_dir = resolve_app(args.app)
+    ``fast=True`` skips the wasm2js fallback and the slow MVP/``build-std`` rebuild:
+    it does a normal incremental release build (reference-types and all), so the
+    bundle is wasm-only but builds in seconds — for tight gallery iteration. The
+    output still goes through the same loader, so the page boot path is identical.
+
+    The default (``fast=False``) path needs the genuinely-MVP module for wasm2js, so
+    it rebuilds std MVP via nightly ``-Z build-std`` into ``target_dir`` (default
+    ``target/package-mvp``), shared across apps so std compiles once. Returns ``out``.
+    """
     name = crate_name(app_dir)
     snake = name.replace("-", "_")
-    bundle_id = name.removeprefix("axiom-")
     if not (app_dir / "web" / "index.html").is_file():
         sys.exit(f"error: {app_dir}/web/index.html not found — not a browser app.")
+    has_fallback = has_fallback and not fast
+    tmp = Path(tempfile.mkdtemp(prefix=f"axiom-pkg-{name.removeprefix('axiom-')}-"))
 
-    out = Path(args.out).resolve() if args.out else (REPO_ROOT / "dist-app" / bundle_id)
-    has_fallback = not args.no_fallback
-    tmp = Path(tempfile.mkdtemp(prefix=f"axiom-pkg-{bundle_id}-"))
-
-    print(f"Packaging {name} -> {out}")
-    print(f"  (MVP build via nightly -Z build-std; this is a full rebuild and is slow the first time)")
-
+    print(f"Packaging {name} -> {out}{'  (fast: wasm-only)' if fast else ''}")
     try:
-        # 1. MVP build, std included, reference-types off, build paths anonymized.
+        # 1. Build the wasm. fast = normal incremental release build (shares the main
+        # target dir). Otherwise an MVP build with std rebuilt and reference-types off
+        # (what wasm2js requires), paths anonymized, into the shared package-mvp dir.
         env = os.environ.copy()
-        env["CARGO_TARGET_DIR"] = str(tmp / "target")
-        home = str(Path.home())
-        env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(
-            [MVP_TARGET_FEATURES, f"--remap-path-prefix={home}=~"]
-        )
-        run(
-            [
-                "cargo", "+nightly", "build", "-p", name,
-                "--target", WASM_TARGET, "--release",
-                "-Z", "build-std=std,panic_abort",
-            ],
-            env=env,
-        )
-        built = tmp / "target" / WASM_TARGET / "release" / f"{snake}.wasm"
+        if fast:
+            target_dir = target_dir or (REPO_ROOT / "target")
+            env["CARGO_TARGET_DIR"] = str(target_dir)
+            run(["cargo", "build", "-p", name, "--target", WASM_TARGET, "--release"], env=env)
+        else:
+            target_dir = target_dir or (REPO_ROOT / "target" / "package-mvp")
+            env["CARGO_TARGET_DIR"] = str(target_dir)
+            home = str(Path.home())
+            env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join([MVP_TARGET_FEATURES, f"--remap-path-prefix={home}=~"])
+            run(
+                ["cargo", "+nightly", "build", "-p", name, "--target", WASM_TARGET, "--release",
+                 "-Z", "build-std=std,panic_abort"],
+                env=env,
+            )
+        built = target_dir / WASM_TARGET / "release" / f"{snake}.wasm"
         if not built.is_file():
             sys.exit(f"error: expected wasm not produced at {built}")
 
@@ -283,7 +292,7 @@ def main() -> int:
         run(["wasm-bindgen", "--target", "bundler", "--out-dir", str(pkg), str(built)])
         bg_wasm = pkg / f"{snake}_bg.wasm"
 
-        # 3. Fast-path wasm: size-optimized (into tmp; placed below by the chosen mode).
+        # 3. Fast-path wasm: size-optimized.
         fast_wasm = tmp / f"{snake}_bg.opt.wasm"
         run(binaryen("wasm-opt", "-Oz", str(bg_wasm), "-o", str(fast_wasm)))
 
@@ -303,7 +312,7 @@ def main() -> int:
         wasm2js_js = wasm2js_path.read_text(encoding="utf-8") if has_fallback else None
 
         # 5. Emit the bundle in the chosen shape.
-        if args.inline:
+        if inline:
             wasm_b64 = base64.b64encode(fast_wasm.read_bytes()).decode("ascii")
             emit_inline_html(app_dir, out, snake, glue_js, wasm2js_js, wasm_b64)
         else:
@@ -313,25 +322,63 @@ def main() -> int:
             (out / f"{snake}_bg.js").write_text(glue_js, encoding="utf-8")
             (out / "axiom-loader.js").write_text(loader_source(snake, has_fallback=has_fallback), encoding="utf-8")
             emit_index_html(app_dir, out, snake)
-
-        def kb(p: Path) -> str:
-            return f"{p.stat().st_size / 1024:.0f} KB" if p.is_file() else "—"
-
-        print(f"\npackaged {name} -> {out}")
-        if args.inline:
-            print(f"  index.html  {kb(out / 'index.html')}  (single self-contained file)")
-        else:
-            print(f"  index.html            {kb(out / 'index.html')}")
-            print(f"  {snake}_bg.wasm       {kb(out / f'{snake}_bg.wasm')}  (fast path)")
-            if has_fallback:
-                print(f"  {snake}_bg.wasm2js.js {kb(out / f'{snake}_bg.wasm2js.js')}  (fallback)")
-        print(f"\n  serve with:  uv run --no-project python -m http.server 8000 --directory {out}")
-        return 0
+        return out
     finally:
-        if args.keep_temp:
+        if keep_temp:
             print(f"  (kept temp build dir: {tmp})")
         else:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Package one Axiom browser app into a self-contained bundle.")
+    parser.add_argument("app", help="app crate dir (apps/axiom-quintet) or short name (quintet)")
+    parser.add_argument("--out", help="output dir (default: dist-app/<name>)")
+    parser.add_argument("--inline", action="store_true", help="emit a single self-contained index.html")
+    parser.add_argument("--no-fallback", action="store_true", help="skip the wasm2js fallback (wasm-only bundle)")
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="quick wasm-only build: normal incremental release build, no MVP/build-std, no wasm2js",
+    )
+    parser.add_argument(
+        "--target-dir",
+        help="cargo target dir for the MVP build (default: target/package-mvp, persistent + "
+        "shared so std/deps are compiled once across repeated runs and across apps)",
+    )
+    parser.add_argument("--keep-temp", action="store_true", help="keep the intermediate build dir for inspection")
+    args = parser.parse_args()
+
+    app_dir = resolve_app(args.app)
+    bundle_id = crate_name(app_dir).removeprefix("axiom-")
+    out = Path(args.out).resolve() if args.out else (REPO_ROOT / "dist-app" / bundle_id)
+    print("  (MVP build via nightly -Z build-std; slow the first time — it compiles std)")
+    package(
+        app_dir,
+        out=out,
+        inline=args.inline,
+        has_fallback=not args.no_fallback,
+        fast=args.fast,
+        target_dir=Path(args.target_dir).resolve() if args.target_dir else None,
+        keep_temp=args.keep_temp,
+    )
+
+    snake = crate_name(app_dir).replace("-", "_")
+    has_fallback = not args.no_fallback and not args.fast
+
+    def kb(p: Path) -> str:
+        return f"{p.stat().st_size / 1024:.0f} KB" if p.is_file() else "—"
+
+    print(f"\npackaged -> {out}")
+    if args.inline:
+        print(f"  index.html  {kb(out / 'index.html')}  (single self-contained file)")
+    else:
+        print(f"  index.html            {kb(out / 'index.html')}")
+        print(f"  {snake}_bg.wasm       {kb(out / f'{snake}_bg.wasm')}  (fast path)")
+        if has_fallback:
+            print(f"  {snake}_bg.wasm2js.js {kb(out / f'{snake}_bg.wasm2js.js')}  (fallback)")
+    print(f"\n  serve with:  uv run --no-project python -m http.server 8000 --directory {out}")
+    return 0
 
 
 if __name__ == "__main__":

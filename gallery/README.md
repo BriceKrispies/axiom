@@ -24,20 +24,24 @@ drives the demos with **no changes to engine/app input code**.
 ## Build & preview locally
 
 `make gallery` is the **main driver** — the one command to browse the whole
-engine surface during development. It builds every browser demo's wasm bundle
-(the same `wasm-bindgen` flow the demos already use), assembles the deploy bundle
-into `dist/`, and serves it locally:
+engine surface during development. It PACKAGES every browser demo
+(`scripts/package_gallery.py`): each `dist/<id>/` gets a capability-detecting
+loader over a wasm fast-path PLUS a Binaryen wasm2js fallback for browsers with no
+WebAssembly. It then serves `dist/` locally:
 
 ```sh
-make gallery           # build ALL demos + assemble dist/ + serve at http://localhost:8000
+make gallery           # PACKAGE all demos (wasm + wasm2js fallback) + serve at http://localhost:8000
 ```
 
-Then open <http://localhost:8000/> in a WebGPU browser. Two narrower targets back
-it, for when you don't need the full cycle:
+Then open <http://localhost:8000/> in a WebGPU browser. Because the full packaging
+rebuilds std MVP (so the wasm2js fallback is possible — see
+`scripts/package_app.py`), the first `make gallery` is slow. Narrower targets back
+it:
 
 ```sh
+make gallery-fast      # quick wasm-only gallery (no fallback, normal incremental build) — for iteration
 make gallery-serve     # re-serve the already-built dist/ WITHOUT rebuilding (fast restart)
-make gallery-build     # build all demos + assemble dist/ only, no serve (what deploy-pages.yml runs)
+make gallery-build     # package all demos into dist/ only, no serve
 ```
 
 ## Adding a demo
@@ -46,11 +50,10 @@ make gallery-build     # build all demos + assemble dist/ only, no serve (what d
    surface to a canvas id (see the two existing browser apps).
 2. Add an entry to `DEMOS` in `gallery.js` (`id`, `title`, `dir`, `jsModule`,
    `canvasId`, and the `buttons` its keypad should show — empty for none).
-3. Wire its build into three places (kept in lockstep): a `cargo build` +
-   `wasm-bindgen` pair in the `gallery-build` make recipe and in
-   `deploy-pages.yml`, and an entry in `scripts/assemble_gallery.py`
-   (`DEMO_PKGS` for a shared-shell demo, or `DEMO_PAGES` for a self-hosted page)
-   so the assembler copies it into `dist/`.
+3. Add an entry to `GALLERY_APPS` in `scripts/package_gallery.py` mapping the
+   demo `id` to its `apps/<crate>` dir, so the packager builds it into `dist/`.
+   (Shared-shell demos boot through `demo.html`; self-hosted demos set `page:` in
+   the `DEMOS` manifest and own their `index.html`.)
 
 ## Netplay relay
 
