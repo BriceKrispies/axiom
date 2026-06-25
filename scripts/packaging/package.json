@@ -1,0 +1,8 @@
+{
+  "name": "axiom-packaging-tools",
+  "private": true,
+  "description": "Repo tooling (NOT part of the engine dependency graph): pins the Binaryen toolchain (wasm-opt + wasm2js) that scripts/package_app.py uses to optimize a packaged app's wasm and emit its no-WebAssembly wasm2js fallback. Mirrors the 'npm is repo tooling' status of packages/axiom-client's gate stack.",
+  "devDependencies": {
+    "binaryen": "123.0.0"
+  }
+}

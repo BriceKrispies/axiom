@@ -79,7 +79,7 @@ GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay retro_fps retro_fps-build retro-fps-hot stress stress-build growth growth-build harness harness-build agent agent-render agent-bridge gallery gallery-build gallery-serve ts-gate help
+.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay retro_fps retro_fps-build retro-fps-hot stress stress-build growth growth-build harness harness-build agent agent-render agent-bridge gallery gallery-build gallery-serve package ts-gate help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -122,6 +122,11 @@ help:
 	@echo "  make harness-build Rebuild the harness wasm bundle into its web/pkg"
 	@echo "  make harness       Serve the harness page at http://localhost:$(HARNESS_PORT)"
 	@echo "  (press the backquote key in the page to open the debug overlay.)"
+	@echo ""
+	@echo "  Package ONE game into a self-contained, droppable bundle (wasm + wasm2js fallback):"
+	@echo "  make package APP=quintet           Build dist-app/quintet/ (loader picks wasm or wasm2js)"
+	@echo "  make package APP=quintet INLINE=1  Single self-contained index.html"
+	@echo "  (needs a nightly toolchain with rust-src; first build rebuilds std and is slow.)"
 	@echo ""
 	@echo "  TypeScript SDK gate (@axiom/client static-analysis/branchless/coverage laws):"
 	@echo "  make ts-gate       Run tsgo typecheck + Oxlint + 100% coverage for packages/axiom-client"
@@ -320,6 +325,26 @@ gallery-serve:
 	@echo Serving prebuilt gallery at http://localhost:$(GALLERY_PORT) - run make gallery first if blank
 	@echo Open it in a WebGPU browser. Ctrl+C to stop.
 	uv run --no-project python -m http.server $(GALLERY_PORT) --directory $(DIST_DIR)
+
+# --- Package a single game into a self-contained, droppable bundle ---
+
+# Build ONE browser app into dist-app/<name>/: a wasm fast-path (wasm-opt -Oz) plus a
+# Binaryen wasm2js fallback for browsers with no WebAssembly, behind a
+# capability-detecting loader that prints one console.warn line when it falls back.
+# (The engine's own WebGPU->WebGL2->Canvas2D backend fallback is orthogonal and lives
+# in axiom-windowing; together they let even a no-wasm, no-WebGPU browser run a game.)
+#
+# APP is a short name (quintet) or an app dir (apps/axiom-quintet). Set INLINE=1 for a
+# single self-contained index.html. The wasm2js fallback requires an MVP build, which
+# needs a nightly toolchain with rust-src (-Z build-std); this target installs the
+# pinned Binaryen toolchain on first run. The first build is slow (it rebuilds std).
+#
+#   make package APP=quintet
+#   make package APP=quintet INLINE=1
+APP ?= quintet
+package:
+	npm --prefix scripts/packaging install --no-audit --no-fund
+	uv run --no-project python scripts/package_app.py $(APP) $(if $(INLINE),--inline,)
 
 # --- TypeScript SDK gate (the @axiom/client static-analysis/branchless/coverage laws) ---
 
