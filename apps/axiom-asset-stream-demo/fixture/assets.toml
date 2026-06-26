@@ -1,0 +1,87 @@
+# Authored asset set for the asset-stream demo fixture.
+#
+# Packed by `tools/axiom-asset-pack` into the app's `web/` dir as `manifest.bin`
+# plus the copied blob files, ready for the runtime streaming brain to consume via
+# `AssetsApi::from_manifest_bytes`. This is the human-authored producer input; the
+# packer computes each blob's size + content hash and writes the manifest in the
+# format owned by `axiom-assets` (`AssetsApi::encode_manifest`).
+#
+# The set is a small DAG with varied priorities to exercise the scheduler's
+# ordering: roots dispatch highest-priority-first, dependents only after their
+# deps are ready. The streaming-order proof the e2e test asserts:
+#   - "hero" (3) depends on "atlas" (1)            → 3 ready after 1
+#   - "material" (4) depends on "palette" (2) + "hero" (3) → 4 ready after 2 and 3
+#
+# Schema + CLI are the `tools/axiom-asset-pack` contract: `make asset-stream-pack`
+# runs `axiom-asset-pack <this-file> web/`, where the optional second arg overrides
+# the tool's TOML `out_dir` (omitted here) and points output at the served web/ dir.
+# The app itself only consumes the emitted `manifest.bin` + the locators inside it,
+# so it stays agnostic to this authoring schema.
+
+[[asset]]
+id = 1
+kind = 1            # texture
+priority = 10
+source = "src/atlas.bin"
+
+[[asset]]
+id = 2
+kind = 1            # texture
+priority = 20
+source = "src/palette.bin"
+
+[[asset]]
+id = 3
+kind = 2            # mesh
+priority = 5
+source = "src/hero.bin"
+dependencies = [1]  # hero mesh needs the atlas texture
+
+[[asset]]
+id = 4
+kind = 3            # material
+priority = 30
+source = "src/material.bin"
+dependencies = [2, 3]  # material needs the palette and the hero mesh
+
+[[asset]]
+id = 5
+kind = 4            # sound
+priority = 1
+source = "src/theme.bin"
+
+# Assets 6-10 widen the set so a small worker pool (default 3) has MORE eligible
+# roots than workers — the pending queue genuinely fills and the pool drains it.
+# Roots: 1, 2, 5, 6, 7, 8 (six) vs. 3 workers → real queueing + parallelism.
+
+[[asset]]
+id = 6
+kind = 2            # mesh (level geometry)
+priority = 15
+source = "src/level.bin"
+
+[[asset]]
+id = 7
+kind = 1            # texture (props atlas)
+priority = 12
+source = "src/props.bin"
+
+[[asset]]
+id = 8
+kind = 4            # sound (ambient bank)
+priority = 8
+source = "src/ambient.bin"
+
+[[asset]]
+id = 9
+kind = 3            # material (needs the level mesh + props texture)
+priority = 25
+source = "src/shader.bin"
+dependencies = [6, 7]
+
+[[asset]]
+id = 10
+kind = 5            # prefab (needs the ambient sound)
+priority = 3
+source = "src/prefab.bin"
+dependencies = [8]

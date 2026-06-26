@@ -58,7 +58,7 @@ fn cube_color(i: u32, total: u32) -> Color {
 fn stress_cubes_app(cubes: u32) -> App {
     let cubes = cubes.clamp(MIN_CUBES, MAX_CUBES);
     let cols = (cubes as f32).sqrt().ceil() as u32;
-    let rows = (cubes + cols - 1) / cols;
+    let rows = cubes.div_ceil(cols);
 
     // Centre the grid on the origin.
     let x0 = -((cols - 1) as f32) * SPACING / 2.0;

@@ -7,16 +7,16 @@ use crate::body_plan::BodyPlanRegistry;
 use crate::causal::{CausalEventKind, CausalJournal};
 use crate::cause::CauseRef;
 use crate::definition::DefinitionRegistry;
-use crate::effect::{Effect, EffectBatch, EffectReport, EffectResult};
-use crate::fact::{FactKind, FactStore, FactValue};
+use crate::effect::{EffectBatch, EffectReport, EffectResult};
+use crate::fact::{FactStore, FactValue};
 use crate::ids::{BodyId, BodyPlanId, WoundId};
 use crate::ids::{DefinitionId, FactId, ProcessId, RelationId, ResidueId};
 use crate::interaction::{InteractionRecord, InteractionStore};
 use crate::material::MaterialCatalog;
 use crate::material_effect::{MaterialEffectResult, MaterialEffectRuleStore};
-use crate::process::{ProcessKind, ProcessQueue, ProcessState, WakeTick};
+use crate::process::{ProcessKind, ProcessQueue};
 use crate::quantity::{Quantity, QuantityUnit};
-use crate::relation::{RelationKind, RelationStore};
+use crate::relation::RelationStore;
 use crate::residue::{ResidueLocation, ResidueState, ResidueStore};
 use crate::tissue::TissueRegistry;
 use crate::transfer::{TransferOutcome, TransferResult, TransferRule};
@@ -201,7 +201,7 @@ impl SimWorld {
         cause: Option<CauseRef>,
         tick: u64,
     ) -> Option<BodyId> {
-        let owner_ok = owner.map_or(true, |handle| registry.is_current(handle));
+        let owner_ok = owner.is_none_or(|handle| registry.is_current(handle));
         owner_ok
             .then(|| self.body_plans.get(plan).cloned())
             .flatten()
@@ -229,15 +229,14 @@ impl SimWorld {
             .part(part)
             .map(|p| p.body() == body)
             .unwrap_or(false);
-        let tissue_ok = tissue.map_or(true, |t| self.tissues.get(t).is_some());
+        let tissue_ok = tissue.is_none_or(|t| self.tissues.get(t).is_some());
         let subject = self.bodies.get(body).and_then(crate::body::Body::owner);
         (body_ok & part_ok & tissue_ok).then(|| {
             let id = self.wounds.create(spec);
             self.journal.append(
                 CausalEventKind::new(event_kind),
                 tick,
-                subject,
-                None,
+                (subject, None),
                 cause,
                 event_code,
                 None,
@@ -282,7 +281,7 @@ impl SimWorld {
             .next();
         let target_sum = existing.and_then(|(_, tq)| moved_q.and_then(|m| tq.add(m)));
         let target_id = existing.map(|(tid, _)| tid);
-        let units_ok = rule.lossy() | existing.map_or(true, |_| target_sum.is_some());
+        let units_ok = rule.lossy() | existing.is_none_or(|_| target_sum.is_some());
 
         let outcome = (!route_ok)
             .then_some(TransferOutcome::RouteMismatch)
@@ -296,14 +295,13 @@ impl SimWorld {
 
         applied.then(|| new_source.map(|ns| self.residues.set_quantity(sid, ns, tick)));
         let deposit = applied & !rule.lossy();
-        let updated = deposit
-            .then(|| {
-                target_id
-                    .zip(target_sum)
-                    .map(|(tid, sum)| self.residues.set_quantity(tid, sum, tick))
-                    .is_some()
-            })
-            .unwrap_or(false);
+        let updated_opt = deposit.then(|| {
+            target_id
+                .zip(target_sum)
+                .map(|(tid, sum)| self.residues.set_quantity(tid, sum, tick))
+                .is_some()
+        });
+        let updated = updated_opt.unwrap_or(false);
         (deposit & !updated).then(|| {
             moved_q.map(|m| {
                 self.residues.create(
@@ -320,8 +318,7 @@ impl SimWorld {
             self.journal.append(
                 CausalEventKind::new(event_kind),
                 tick,
-                Some(interaction.primary()),
-                interaction.secondary(),
+                (Some(interaction.primary()), interaction.secondary()),
                 interaction.cause(),
                 event_code,
                 Some(FactValue::Signed(desired)),
@@ -391,8 +388,7 @@ impl SimWorld {
         self.journal.append(
             CausalEventKind::new(code),
             tick.raw(),
-            Some(subject),
-            None,
+            (Some(subject), None),
             Some(CauseRef::Process(process)),
             process.raw(),
             Some(FactValue::Unsigned(process.raw())),
@@ -410,8 +406,7 @@ impl SimWorld {
         self.journal.append(
             CausalEventKind::new(code),
             tick.raw(),
-            None,
-            None,
+            (None, None),
             cause,
             payload,
             Some(FactValue::Unsigned(payload)),
@@ -429,8 +424,7 @@ impl SimWorld {
         self.journal.append(
             CausalEventKind::new(SCHED_PROCESS_WOKE),
             tick.raw(),
-            Some(subject),
-            None,
+            (Some(subject), None),
             Some(CauseRef::Process(process)),
             process.raw(),
             Some(FactValue::Unsigned(u64::from(reason.code()))),
@@ -466,8 +460,11 @@ impl SimWorld {
     pub(crate) fn cancel_scheduler_process(&mut self, process: ProcessId, tick: SimTick) -> bool {
         let subject = self.scheduler.subject(process);
         let canceled = self.scheduler.cancel(process, tick);
-        (canceled.then_some(subject).flatten())
-            .map(|s| self.journal_sched_event(SCHED_PROCESS_CANCELED, process, s, tick));
+        canceled
+            .then_some(subject)
+            .flatten()
+            .into_iter()
+            .for_each(|s| self.journal_sched_event(SCHED_PROCESS_CANCELED, process, s, tick));
         canceled
     }
 
@@ -558,9 +555,12 @@ impl SimWorld {
             .map(|process| {
                 self.scheduler
                     .schedule_wake(process, tick, WakeReason::DirtyDependency);
-                self.scheduler.subject(process).map(|subject| {
-                    self.journal_sched_event(SCHED_WOKEN_BY_DIRTY, process, subject, tick)
-                });
+                self.scheduler
+                    .subject(process)
+                    .into_iter()
+                    .for_each(|subject| {
+                        self.journal_sched_event(SCHED_WOKEN_BY_DIRTY, process, subject, tick);
+                    });
             })
             .count()
     }
@@ -613,11 +613,11 @@ impl SimWorld {
             let reschedule = (!any_failed).then(|| disposition.as_reschedule()).flatten();
             let transition = self.scheduler.finalize(process, target, reschedule, tick);
             let produced = report.len();
-            transition.map(|t| {
+            transition.into_iter().for_each(|t| {
                 self.scheduler
-                    .record_execution(ProcessExecutionRecord::new(process, produced, t))
+                    .record_execution(ProcessExecutionRecord::new(process, produced, t));
             });
-            subject.map(|s| {
+            subject.into_iter().for_each(|s| {
                 self.journal_sched_event(SCHED_PRODUCED_EFFECTS, process, s, tick);
                 self.journal_sched_event(SCHED_EFFECTS_APPLIED, process, s, tick);
                 self.journal_sched_event(TRANSITION_CODE[target.code() as usize], process, s, tick);
@@ -628,7 +628,7 @@ impl SimWorld {
 
     /// Apply a batch of effects in FIFO order at this explicit boundary,
     /// returning the per-effect outcomes. Each effect is dispatched by its tag
-    /// through [`APPLY`]; stale-entity effects are `Skipped`, invalid-id effects
+    /// through [`effect_apply::APPLY`]; stale-entity effects are `Skipped`, invalid-id effects
     /// `Failed`, never a panic.
     pub(crate) fn apply_effects(
         &mut self,
@@ -640,7 +640,7 @@ impl SimWorld {
             .into_iter()
             .map(|effect| {
                 let tag = effect.tag();
-                APPLY[tag as usize](self, effect, registry)
+                effect_apply::APPLY[tag as usize](self, effect, registry)
             })
             .collect();
         EffectReport::from_results(results)
@@ -672,529 +672,7 @@ const TRANSITION_CODE: [u32; 7] = [
     SCHED_PROCESS_FAILED,    // Failed
 ];
 
-/// The apply dispatch table, indexed by an effect's tag (see `effect.rs`).
-const APPLY: [fn(&mut SimWorld, Effect, &EntityRegistry) -> EffectResult; 8] = [
-    apply_add_fact,
-    apply_update_fact,
-    apply_remove_fact,
-    apply_add_relation,
-    apply_remove_relation,
-    apply_schedule_process,
-    apply_cancel_process,
-    apply_emit_causal_event,
-];
-
-fn apply_add_fact(world: &mut SimWorld, effect: Effect, registry: &EntityRegistry) -> EffectResult {
-    effect
-        .subject()
-        .zip(effect.value())
-        .map_or(EffectResult::Failed, |(subject, value)| {
-            let live = registry.is_current(subject);
-            live.then(|| {
-                let id = world.facts.insert(
-                    FactKind::new(effect.kind_code()),
-                    subject,
-                    value,
-                    effect.cause(),
-                    effect.tick(),
-                );
-                world
-                    .dirty
-                    .mark_fact(id, effect.kind_code(), DirtyKind::Added, effect.cause());
-                world
-                    .dirty
-                    .mark_subject(subject, DirtyKind::Added, effect.cause());
-            });
-            [EffectResult::Skipped, EffectResult::Applied][live as usize]
-        })
-}
-
-fn apply_update_fact(
-    world: &mut SimWorld,
-    effect: Effect,
-    _registry: &EntityRegistry,
-) -> EffectResult {
-    effect
-        .target_id()
-        .zip(effect.value())
-        .map_or(EffectResult::Failed, |(raw, value)| {
-            let id = FactId::from_raw(raw);
-            let updated = world.facts.update(id, value, effect.tick());
-            let touched = updated
-                .then(|| {
-                    world
-                        .facts
-                        .get(id)
-                        .map(|fact| (fact.kind().code(), fact.subject()))
-                })
-                .flatten();
-            touched.map(|(kind_code, subject)| {
-                world
-                    .dirty
-                    .mark_fact(id, kind_code, DirtyKind::Updated, effect.cause());
-                world
-                    .dirty
-                    .mark_subject(subject, DirtyKind::Updated, effect.cause());
-            });
-            [EffectResult::Failed, EffectResult::Applied][updated as usize]
-        })
-}
-
-fn apply_remove_fact(
-    world: &mut SimWorld,
-    effect: Effect,
-    _registry: &EntityRegistry,
-) -> EffectResult {
-    effect.target_id().map_or(EffectResult::Failed, |raw| {
-        let id = FactId::from_raw(raw);
-        let removed = world.facts.remove(id);
-        let was = removed.is_some();
-        removed.map(|fact| {
-            world
-                .dirty
-                .mark_fact(id, fact.kind().code(), DirtyKind::Removed, fact.cause());
-            world
-                .dirty
-                .mark_subject(fact.subject(), DirtyKind::Removed, fact.cause());
-        });
-        [EffectResult::Failed, EffectResult::Applied][was as usize]
-    })
-}
-
-fn apply_add_relation(
-    world: &mut SimWorld,
-    effect: Effect,
-    registry: &EntityRegistry,
-) -> EffectResult {
-    let endpoints = effect.endpoints().to_vec();
-    let live = endpoints.iter().all(|endpoint| {
-        endpoint
-            .as_entity()
-            .map_or(true, |handle| registry.is_current(handle))
-    });
-    live.then(|| {
-        let id = world.relations.insert(
-            RelationKind::new(effect.kind_code()),
-            endpoints,
-            effect.strength(),
-            effect.cause(),
-        );
-        world
-            .dirty
-            .mark_relation(id, effect.kind_code(), DirtyKind::Added, effect.cause());
-    });
-    [EffectResult::Skipped, EffectResult::Applied][live as usize]
-}
-
-fn apply_remove_relation(
-    world: &mut SimWorld,
-    effect: Effect,
-    _registry: &EntityRegistry,
-) -> EffectResult {
-    effect.target_id().map_or(EffectResult::Failed, |raw| {
-        let id = RelationId::from_raw(raw);
-        let removed = world.relations.remove(id);
-        let was = removed.is_some();
-        removed.map(|relation| {
-            world.dirty.mark_relation(
-                id,
-                relation.kind().code(),
-                DirtyKind::Removed,
-                relation.cause(),
-            )
-        });
-        [EffectResult::Failed, EffectResult::Applied][was as usize]
-    })
-}
-
-fn apply_schedule_process(
-    world: &mut SimWorld,
-    effect: Effect,
-    registry: &EntityRegistry,
-) -> EffectResult {
-    effect.subject().map_or(EffectResult::Failed, |subject| {
-        let live = registry.is_current(subject);
-        live.then(|| {
-            world.processes.schedule(
-                ProcessKind::new(effect.kind_code()),
-                subject,
-                ProcessState::new(effect.state()),
-                WakeTick::new(effect.wake()),
-                effect.cause(),
-            )
-        });
-        [EffectResult::Skipped, EffectResult::Applied][live as usize]
-    })
-}
-
-fn apply_cancel_process(
-    world: &mut SimWorld,
-    effect: Effect,
-    _registry: &EntityRegistry,
-) -> EffectResult {
-    effect.target_id().map_or(EffectResult::Failed, |raw| {
-        let cancelled = world.processes.cancel(ProcessId::from_raw(raw));
-        [EffectResult::Failed, EffectResult::Applied][cancelled as usize]
-    })
-}
-
-fn apply_emit_causal_event(
-    world: &mut SimWorld,
-    effect: Effect,
-    _registry: &EntityRegistry,
-) -> EffectResult {
-    world.journal.append(
-        CausalEventKind::new(effect.kind_code()),
-        effect.tick(),
-        effect.subject(),
-        effect.secondary(),
-        effect.cause(),
-        effect.code(),
-        effect.payload(),
-    );
-    EffectResult::Applied
-}
+mod effect_apply;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::fact::FactValue;
-    use crate::relation::RelationEndpoint;
-
-    fn batch() -> EffectBatch {
-        EffectBatch::new()
-    }
-
-    #[test]
-    fn add_fact_applies_for_live_and_skips_for_dead_subjects() {
-        let mut reg = EntityRegistry::new();
-        let live = reg.spawn_handle();
-        let dead = reg.spawn_handle();
-        reg.despawn_handle(dead);
-        let mut world = SimWorld::new();
-
-        let mut b = batch();
-        b.add_fact(1, live, FactValue::Unsigned(7), None, 0);
-        b.add_fact(1, dead, FactValue::Unsigned(8), None, 0);
-        let report = world.apply_effects(b, &reg);
-        assert_eq!(report.result(0), Some(EffectResult::Applied));
-        assert_eq!(report.result(1), Some(EffectResult::Skipped));
-        assert_eq!(
-            world.facts().len(),
-            1,
-            "the dead-subject fact was not added"
-        );
-    }
-
-    #[test]
-    fn update_and_remove_fact_fail_cleanly_for_invalid_ids() {
-        let mut reg = EntityRegistry::new();
-        let a = reg.spawn_handle();
-        let mut world = SimWorld::new();
-        let id = world
-            .facts_mut()
-            .insert(FactKind::new(1), a, FactValue::Unsigned(1), None, 0);
-
-        let mut b = batch();
-        b.update_fact(id, FactValue::Unsigned(2), 1); // valid -> Applied
-        b.update_fact(FactId::from_raw(999), FactValue::Unsigned(3), 1); // invalid -> Failed
-        b.remove_fact(id); // valid -> Applied
-        b.remove_fact(FactId::from_raw(999)); // invalid -> Failed
-        let report = world.apply_effects(b, &reg);
-        assert_eq!(report.result(0), Some(EffectResult::Applied));
-        assert_eq!(report.result(1), Some(EffectResult::Failed));
-        assert_eq!(report.result(2), Some(EffectResult::Applied));
-        assert_eq!(report.result(3), Some(EffectResult::Failed));
-        assert!(world.facts().is_empty());
-    }
-
-    #[test]
-    fn relation_effects_apply_skip_and_fail() {
-        let mut reg = EntityRegistry::new();
-        let a = reg.spawn_handle();
-        let dead = reg.spawn_handle();
-        reg.despawn_handle(dead);
-        let mut world = SimWorld::new();
-
-        let mut b = batch();
-        b.add_relation(
-            1,
-            vec![RelationEndpoint::entity(a), RelationEndpoint::symbol(9)],
-            None,
-            None,
-        ); // Applied
-        b.add_relation(1, vec![RelationEndpoint::entity(dead)], None, None); // Skipped
-        let report = world.apply_effects(b, &reg);
-        assert_eq!(report.result(0), Some(EffectResult::Applied));
-        assert_eq!(report.result(1), Some(EffectResult::Skipped));
-        assert_eq!(world.relations().len(), 1);
-
-        let live_id = world.relations().iter().next().unwrap().id();
-        let mut b2 = batch();
-        b2.remove_relation(live_id); // Applied
-        b2.remove_relation(RelationId::from_raw(999)); // Failed
-        let report2 = world.apply_effects(b2, &reg);
-        assert_eq!(report2.result(0), Some(EffectResult::Applied));
-        assert_eq!(report2.result(1), Some(EffectResult::Failed));
-    }
-
-    #[test]
-    fn process_effects_apply_skip_and_fail() {
-        let mut reg = EntityRegistry::new();
-        let a = reg.spawn_handle();
-        let dead = reg.spawn_handle();
-        reg.despawn_handle(dead);
-        let mut world = SimWorld::new();
-
-        let mut b = batch();
-        b.schedule_process(1, a, 0, 5, None); // Applied
-        b.schedule_process(1, dead, 0, 5, None); // Skipped
-        let report = world.apply_effects(b, &reg);
-        assert_eq!(report.result(0), Some(EffectResult::Applied));
-        assert_eq!(report.result(1), Some(EffectResult::Skipped));
-        assert_eq!(world.processes().len(), 1);
-
-        let pid = world.processes().iter().next().unwrap().id();
-        let mut b2 = batch();
-        b2.cancel_process(pid); // Applied
-        b2.cancel_process(ProcessId::from_raw(999)); // Failed
-        let report2 = world.apply_effects(b2, &reg);
-        assert_eq!(report2.result(0), Some(EffectResult::Applied));
-        assert_eq!(report2.result(1), Some(EffectResult::Failed));
-    }
-
-    #[test]
-    fn emit_causal_event_always_applies() {
-        let reg = EntityRegistry::new();
-        let mut world = SimWorld::new();
-        let mut b = batch();
-        b.emit_causal_event(1, 3, None, None, None, 42, None);
-        let report = world.apply_effects(b, &reg);
-        assert_eq!(report.result(0), Some(EffectResult::Applied));
-        assert_eq!(world.journal().len(), 1);
-    }
-
-    #[test]
-    fn empty_batch_applies_nothing() {
-        let reg = EntityRegistry::new();
-        let mut world = SimWorld::new();
-        let report = world.apply_effects(batch(), &reg);
-        assert!(report.is_empty());
-    }
-
-    // ---- Phase 3: transfers ----
-
-    use crate::definition::{DefinitionKind, PropertySet, TagSet};
-    use crate::interaction::{InteractionKind, InteractionParams, InteractionRoute};
-    use crate::transfer::{TransferMode, TransferOutcome};
-
-    fn vol(amount: i64) -> Quantity {
-        Quantity::new(QuantityUnit::Volume, amount).unwrap()
-    }
-
-    /// Fresh world with substance-x, a source residue of 10 Volume, and a touch
-    /// interaction referencing it. Returns (world, interaction, source, dst).
-    fn transfer_setup() -> (SimWorld, InteractionRecord, ResidueId, ResidueLocation) {
-        let mut reg = EntityRegistry::new();
-        let a = reg.spawn_handle();
-        let mut world = SimWorld::new();
-        let sub = world
-            .definitions_mut()
-            .register(
-                DefinitionKind::Substance,
-                "substance-x",
-                TagSet::new(),
-                PropertySet::new(),
-            )
-            .unwrap();
-        let src_loc = ResidueLocation::symbol(1);
-        let dst = ResidueLocation::symbol(2);
-        let source =
-            world
-                .residues_mut()
-                .create(sub, vol(10), src_loc, ResidueState::new(0), None, 0);
-        let id = world.interactions_mut().create(InteractionParams {
-            kind: InteractionKind::new(1),
-            route: InteractionRoute::Touch,
-            primary: a,
-            secondary: None,
-            material: Some(sub),
-            residue: Some(source),
-            quantity: None,
-            location: Some(dst),
-            tick: 0,
-            cause: Some(CauseRef::Command),
-        });
-        let interaction = *world.interactions().get(id).unwrap();
-        (world, interaction, source, dst)
-    }
-
-    fn rule(
-        world: &mut SimWorld,
-        mode: TransferMode,
-        route: InteractionRoute,
-        lossy: bool,
-    ) -> TransferRule {
-        let id = world.transfers_mut().register(mode, route, lossy).unwrap();
-        *world.transfers().get(id).unwrap()
-    }
-
-    #[test]
-    fn transfer_applies_and_conserves_quantity() {
-        let (mut world, interaction, source, dst) = transfer_setup();
-        let r = rule(
-            &mut world,
-            TransferMode::fixed(4),
-            InteractionRoute::Touch,
-            false,
-        );
-        let result = world.apply_transfer(r, &interaction, dst, 1, 0xABC, 5);
-        assert_eq!(result.outcome(), TransferOutcome::Applied);
-        assert_eq!(result.moved(), Some(vol(4)));
-        // Source reduced, target created — total conserved at 10.
-        assert_eq!(world.residues().get(source).unwrap().quantity().amount(), 6);
-        let deposited: i64 = world
-            .residues()
-            .by_location(dst)
-            .map(|res| res.quantity().amount())
-            .sum();
-        assert_eq!(deposited, 4);
-        assert_eq!(6 + deposited, 10, "quantity conserved");
-        assert_eq!(world.journal().len(), 1, "transfer emitted a causal event");
-    }
-
-    #[test]
-    fn transfer_into_existing_target_accumulates() {
-        let (mut world, interaction, _source, dst) = transfer_setup();
-        let r = rule(
-            &mut world,
-            TransferMode::fixed(3),
-            InteractionRoute::Touch,
-            false,
-        );
-        world.apply_transfer(r, &interaction, dst, 1, 0, 1);
-        world.apply_transfer(r, &interaction, dst, 1, 0, 2);
-        let deposited: i64 = world
-            .residues()
-            .by_location(dst)
-            .map(|res| res.quantity().amount())
-            .sum();
-        assert_eq!(
-            deposited, 6,
-            "two fixed-3 transfers accumulate into one target residue"
-        );
-    }
-
-    #[test]
-    fn lossy_transfer_does_not_deposit() {
-        let (mut world, interaction, source, dst) = transfer_setup();
-        let r = rule(
-            &mut world,
-            TransferMode::fixed(4),
-            InteractionRoute::Touch,
-            true,
-        );
-        let result = world.apply_transfer(r, &interaction, dst, 1, 0, 1);
-        assert_eq!(result.outcome(), TransferOutcome::Applied);
-        assert_eq!(world.residues().get(source).unwrap().quantity().amount(), 6);
-        assert_eq!(
-            world.residues().by_location(dst).count(),
-            0,
-            "lossy transfer destroys the moved amount"
-        );
-    }
-
-    #[test]
-    fn transfer_route_mismatch_fails_cleanly() {
-        let (mut world, interaction, source, dst) = transfer_setup();
-        let r = rule(
-            &mut world,
-            TransferMode::fixed(4),
-            InteractionRoute::Adjacent,
-            false,
-        );
-        let result = world.apply_transfer(r, &interaction, dst, 1, 0, 1);
-        assert_eq!(result.outcome(), TransferOutcome::RouteMismatch);
-        assert_eq!(result.moved(), None);
-        assert_eq!(
-            world.residues().get(source).unwrap().quantity().amount(),
-            10,
-            "no change on mismatch"
-        );
-    }
-
-    #[test]
-    fn transfer_insufficient_quantity_fails_cleanly() {
-        let (mut world, interaction, source, dst) = transfer_setup();
-        let r = rule(
-            &mut world,
-            TransferMode::fixed(99),
-            InteractionRoute::Touch,
-            false,
-        );
-        let result = world.apply_transfer(r, &interaction, dst, 1, 0, 1);
-        assert_eq!(result.outcome(), TransferOutcome::InsufficientQuantity);
-        assert_eq!(
-            world.residues().get(source).unwrap().quantity().amount(),
-            10
-        );
-    }
-
-    #[test]
-    fn transfer_invalid_source_fails_cleanly() {
-        let (mut world, mut interaction, _source, dst) = transfer_setup();
-        // Point the interaction at a non-existent residue.
-        let bad = world.interactions_mut().create(InteractionParams {
-            kind: interaction.kind(),
-            route: InteractionRoute::Touch,
-            primary: interaction.primary(),
-            secondary: None,
-            material: interaction.material(),
-            residue: Some(ResidueId::from_raw(9999)),
-            quantity: None,
-            location: Some(dst),
-            tick: 0,
-            cause: None,
-        });
-        interaction = *world.interactions().get(bad).unwrap();
-        let r = rule(
-            &mut world,
-            TransferMode::fixed(1),
-            InteractionRoute::Touch,
-            false,
-        );
-        assert_eq!(
-            world
-                .apply_transfer(r, &interaction, dst, 1, 0, 1)
-                .outcome(),
-            TransferOutcome::InvalidSource
-        );
-    }
-
-    #[test]
-    fn transfer_incompatible_units_fails_cleanly() {
-        let (mut world, interaction, _source, dst) = transfer_setup();
-        // Pre-place a same-substance residue at dst, but in Mass (incompatible).
-        let sub = world.residues().get(_source).unwrap().definition();
-        world.residues_mut().create(
-            sub,
-            Quantity::new(QuantityUnit::Mass, 1).unwrap(),
-            dst,
-            ResidueState::new(0),
-            None,
-            0,
-        );
-        let r = rule(
-            &mut world,
-            TransferMode::fixed(4),
-            InteractionRoute::Touch,
-            false,
-        );
-        assert_eq!(
-            world
-                .apply_transfer(r, &interaction, dst, 1, 0, 1)
-                .outcome(),
-            TransferOutcome::IncompatibleUnits
-        );
-    }
-}
+mod tests;

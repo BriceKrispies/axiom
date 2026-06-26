@@ -74,10 +74,10 @@ impl<S> World<S> {
     /// in registration order.
     pub fn register_system_in(&mut self, phase: SchedulePhase, system: Box<dyn WorldSystem<S>>) {
         let is_startup = phase == SchedulePhase::Startup;
-        let target = is_startup
-            .then_some(&mut self.startup)
-            .unwrap_or(&mut self.update);
-        target.push(system);
+        // Branchless target select: index a two-slot table of the phase buckets
+        // (slot 0 = update, slot 1 = startup) by the boolean, as a place so the
+        // chosen `&mut Vec` is reborrowed for the push, never moved out.
+        [&mut self.update, &mut self.startup][usize::from(is_startup)].push(system);
     }
 
     /// The number of registered systems across all phases.

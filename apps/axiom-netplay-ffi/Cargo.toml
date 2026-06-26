@@ -9,8 +9,18 @@ rust-version.workspace = true
 [lib]
 name = "axiom_netplay_ffi"
 # cdylib: a native shared library (.dll/.so/.dylib) the .NET host P/Invokes into.
-# rlib too so the safe inner Session has ordinary unit tests.
+# rlib too so the safe inner Session has ordinary unit tests AND the out-of-process
+# worker binary can reuse it directly.
 crate-type = ["cdylib", "rlib"]
+
+# The out-of-process worker: the same Session, served over a local socket instead
+# of the in-process C ABI. A server-side native binary (never wasm); the host
+# spawns one per room for crash isolation. It lives in this app crate (reusing its
+# own rlib) because nothing may depend on an app — a separate worker app could not
+# depend on this one.
+[[bin]]
+name = "axiom-netplay-worker"
+path = "src/bin/worker.rs"
 
 [dependencies]
 # Embeds the engine umbrella (the `App`/`RunningApp`) natively — the same engine
@@ -21,6 +31,11 @@ axiom = { path = "../../modules/axiom" }
 # source of truth for the protocol (no hand-written C# twin). An app may depend
 # on multiple modules.
 axiom-net-protocol = { path = "../../modules/axiom-net-protocol" }
+# Kernel deterministic primitives the worker-control surface is built on:
+# StableHash (per-tick state hash), BinaryWriter/BinaryReader + SchemaVersion
+# (canonical replay-record codec), and KernelResult (engine error model). An app
+# may depend on layers directly.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
 
 [lints.rust]
 # The FFI boundary needs `unsafe` (extern "C" + raw pointers). This is an app at

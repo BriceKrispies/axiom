@@ -70,6 +70,19 @@
       // ?naive disables client-side prediction + interpolation (render the raw
       // latest snapshot) so you can feel the difference vs the default.
       const naive = params.has("naive");
+
+      // Which room to join. An explicit ?room=<id> wins; otherwise ask the
+      // matchmaker (POST /matchmake) for a room with a free slot. A director
+      // (scaled-out) answer also carries the owning node's URL to connect to.
+      async function resolveRoom() {
+        const explicit = params.get("room");
+        if (explicit) return { roomId: explicit };
+        try {
+          const r = await fetch("/matchmake", { method: "POST" });
+          if (r.ok) return await r.json();   // { roomId, nodeUrl? }
+        } catch (_) { /* fall through to the default room */ }
+        return { roomId: "lobby" };
+      }
       // ?transport= selects the transport: websocket (default), webtransport
       // (HTTP/3), or webrtc (unreliable UDP DataChannel).
       const transportParam = params.get("transport");
@@ -111,12 +124,15 @@
         await initWasm({ module_or_path: wasmUrl });
         start();   // begin the wasm render loop (draws whatever positions we set)
 
-        // The netcode brain: prediction (own cube) + interpolation (other cube).
+        // Ask the matchmaker which room to join (and, when scaled out, which node
+        // hosts it). The netcode brain then does prediction + interpolation.
+        const match = await resolveRoom();           // { roomId, nodeUrl? }
         const t = await resolveTransport();
         const client = startNetplay({
           setPositions: set_positions, naive,
-          serverUrl: t.url, transport: t.transport,
+          serverUrl: match.nodeUrl || t.url, transport: t.transport,
           serverCertificateHash: t.serverCertificateHash, signalingUrl: t.signalingUrl,
+          roomId: match.roomId,
         });
 
         const transportLabel = useWebRtc ? "WebRTC (unreliable UDP)"

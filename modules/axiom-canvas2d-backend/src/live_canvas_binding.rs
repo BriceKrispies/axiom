@@ -68,8 +68,7 @@ impl LiveCanvasBinding {
             self.canvas.set_width(width);
             self.canvas.set_height(height);
         }
-        if let Ok(image) =
-            ImageData::new_with_u8_clamped_array_and_sh(Clamped(rgba), width, height)
+        if let Ok(image) = ImageData::new_with_u8_clamped_array_and_sh(Clamped(rgba), width, height)
         {
             let _ = self.ctx.put_image_data(&image, 0.0, 0.0);
         }

@@ -47,8 +47,8 @@ use crate::actor_state::ActorKind;
 use crate::app::{Mode, RoomedPuzzleApp};
 use crate::game_command::PuzzleCommand;
 use crate::game_state::TICKS_PER_SECOND;
-use crate::input_mapping::command_for_swipe;
 use crate::group_id::GroupId;
+use crate::input_mapping::command_for_swipe;
 use crate::render_model::{Elevation, RenderActor, RenderTile};
 use crate::tile_kind::TileKind;
 
@@ -570,8 +570,13 @@ fn read_safe_area_insets() -> HostSafeAreaInsets {
         })
         .unwrap_or((0.0, 0.0, 0.0, 0.0));
     let edge = |v: f32| Pixels::new(v.max(0.0)).unwrap_or_else(|_| Pixels::new(0.0).expect("zero"));
-    HostSafeAreaInsets::new(edge(values.0), edge(values.1), edge(values.2), edge(values.3))
-        .unwrap_or_else(|_| HostSafeAreaInsets::none())
+    HostSafeAreaInsets::new(
+        edge(values.0),
+        edge(values.1),
+        edge(values.2),
+        edge(values.3),
+    )
+    .unwrap_or_else(|_| HostSafeAreaInsets::none())
 }
 
 // ===========================================================================

@@ -62,7 +62,10 @@ fn cell_height(seed: u64, wx: u32, wy: u32) -> i32 {
 /// entropy stream keyed by the lattice site, so it is global (shared by every
 /// heightfield covering it) and reproducible.
 fn lattice_value(seed: u64, lx: u32, ly: u32) -> i64 {
-    let site = SpaceApi::child(&SpaceApi::child(&SpaceApi::root(), u64::from(lx)), u64::from(ly));
+    let site = SpaceApi::child(
+        &SpaceApi::child(&SpaceApi::root(), u64::from(lx)),
+        u64::from(ly),
+    );
     let mut stream = EntropyApi::stream(seed, &site, TERRAIN_VERSION);
     (stream.next_u64() % HEIGHT_RANGE) as i64
 }
@@ -95,7 +98,11 @@ mod tests {
         let a = TerrainApi::heightfield(seed, 0, 0, 16, 6); // world x 0..15
         let b = TerrainApi::heightfield(seed, 15, 0, 16, 6); // world x 15..30
         for cy in 0..6 {
-            assert_eq!(a.at(15, cy), b.at(0, cy), "shared world column 15 must be seamless");
+            assert_eq!(
+                a.at(15, cy),
+                b.at(0, cy),
+                "shared world column 15 must be seamless"
+            );
         }
     }
 

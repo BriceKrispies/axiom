@@ -80,14 +80,14 @@ impl DynamicComponents {
     fn has_bytes(&self, name: &'static str, entity: EntityId) -> bool {
         self.columns
             .get(name)
-            .map_or(false, |column| column.entries.contains_key(&entity))
+            .is_some_and(|column| column.entries.contains_key(&entity))
     }
 
     /// Remove `entity`'s bytes under `name`, returning whether they existed.
     fn take_bytes(&mut self, name: &'static str, entity: EntityId) -> bool {
         self.columns
             .get_mut(name)
-            .map_or(false, |column| column.entries.remove(&entity).is_some())
+            .is_some_and(|column| column.entries.remove(&entity).is_some())
     }
 
     // ---- typed shell: the only generic part is Reflect (de)serialization ----

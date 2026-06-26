@@ -134,17 +134,15 @@ impl Crucible {
         let interaction = self
             .api
             .record_surface_interaction(
-                scenario::interaction_kind(),
-                action.route,
-                action.primary,
-                action.target_surface,
-                Some(action.material),
-                Some(source),
-                None,
-                action.interaction_event_kind,
-                action.interaction_event_code,
-                tick,
-                Some(cause),
+                (scenario::interaction_kind(), action.route),
+                (action.primary, action.target_surface),
+                (Some(action.material), Some(source), None),
+                (
+                    action.interaction_event_kind,
+                    action.interaction_event_code,
+                    tick,
+                    Some(cause),
+                ),
             )
             .expect("surface interaction records");
         self.pending_interaction = Some(interaction);

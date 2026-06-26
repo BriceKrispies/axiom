@@ -124,47 +124,47 @@ impl SoftwareRasterizer {
         let cues = self.options.depth_cues();
 
         // 6. depth fog: mix each pixel toward the fog colour by its final depth.
-        let fog_px = cues
-            .fog.enabled
-            .then(|| apply_fog(&mut self.framebuffer, &self.depth, &cues))
-            .unwrap_or(0);
+        let fog_opt = cues
+            .fog
+            .enabled
+            .then(|| apply_fog(&mut self.framebuffer, &self.depth, &cues));
+        let fog_px = fog_opt.unwrap_or(0);
 
         // 7. vertical colour grade: a faint lower-screen darkening anchor.
-        let grade_px = cues
+        let grade_opt = cues
             .enable_vertical_grade
-            .then(|| apply_vertical_grade(&mut self.framebuffer, &cues))
-            .unwrap_or(0);
+            .then(|| apply_vertical_grade(&mut self.framebuffer, &cues));
+        let grade_px = grade_opt.unwrap_or(0);
 
         // 8a. planar projected contact shadows for marked caster objects:
         // project each caster's geometry along the light onto the ground plane and
         // rasterize it depth-tested against the finished scene (so walls occlude
         // it and it lands on the floor, never on a wall face).
-        let (shadows, shadow_px) = cues
-            .enable_contact_shadows
-            .then(|| {
-                apply_planar_shadows(
-                    &mut self.framebuffer,
-                    &self.depth,
-                    packet,
-                    cache,
-                    cues.contact_shadow_alpha,
-                    cues.contact_shadow_depth_bias,
-                )
-            })
-            .unwrap_or((0, 0));
+        let shadows_opt = cues.enable_contact_shadows.then(|| {
+            apply_planar_shadows(
+                &mut self.framebuffer,
+                &self.depth,
+                packet,
+                cache,
+                cues.contact_shadow_alpha,
+                cues.contact_shadow_depth_bias,
+            )
+        });
+        let (shadows, shadow_px) = shadows_opt.unwrap_or((0, 0));
 
         // 8b. depth-weighted silhouette outlines for important objects.
-        let (outlined, outline_px) = cues
+        let outlined_opt = cues
             .enable_depth_outlines
-            .then(|| apply_outlines(&mut self.framebuffer, &converted.overlays, &cues))
-            .unwrap_or((0, 0));
+            .then(|| apply_outlines(&mut self.framebuffer, &converted.overlays, &cues));
+        let (outlined, outline_px) = outlined_opt.unwrap_or((0, 0));
 
         // The far-horizon silhouette is a documented seam, disabled by default:
         // deriving a clean far-terrain band needs neutral far-band data the
         // FramePacket does not carry (see ARCHITECTURE.md). Its knobs are read so
         // they stay live, but it draws nothing yet.
         let _ = cues.horizon_alpha;
-        let horizon = u32::from(cues.enable_horizon_silhouette) * 0;
+        let _ = cues.enable_horizon_silhouette;
+        let horizon: u32 = 0;
 
         // Debug overlays applied as post-passes over the finished framebuffer.
         (overlay == CanvasDebugOverlay::DepthBuffer)
@@ -404,9 +404,8 @@ fn row_span(l: (f32, f32, f32), a: (f32, f32, f32), minx: u32, maxx: u32) -> (u3
     let xl = left(xz0, a.0).max(left(xz1, a.1)).max(left(xz2, a.2));
     let xr = right(xz0, a.0).min(right(xz1, a.1)).min(right(xz2, a.2));
     // A horizontal edge on the outside (a==0, l<0) empties the whole row.
-    let h_empty = ((a.0 == 0.0) & (l.0 < 0.0))
-        | ((a.1 == 0.0) & (l.1 < 0.0))
-        | ((a.2 == 0.0) & (l.2 < 0.0));
+    let h_empty =
+        ((a.0 == 0.0) & (l.0 < 0.0)) | ((a.1 == 0.0) & (l.1 < 0.0)) | ((a.2 == 0.0) & (l.2 < 0.0));
     let lo = minx as i64;
     let hi = maxx as i64;
     let s = ((xl.floor() as i64) - 1).clamp(lo, hi) as u32;
@@ -427,9 +426,15 @@ fn screen_bbox(tri: &RasterTriangle, w: u32, h: u32) -> (u32, u32, u32, u32) {
     let xs = [v[0].x(), v[1].x(), v[2].x()];
     let ys = [v[0].y(), v[1].y(), v[2].y()];
     let minx = clamp_axis(xs.iter().copied().fold(f32::INFINITY, f32::min).floor(), w);
-    let maxx = clamp_axis(xs.iter().copied().fold(f32::NEG_INFINITY, f32::max).ceil(), w);
+    let maxx = clamp_axis(
+        xs.iter().copied().fold(f32::NEG_INFINITY, f32::max).ceil(),
+        w,
+    );
     let miny = clamp_axis(ys.iter().copied().fold(f32::INFINITY, f32::min).floor(), h);
-    let maxy = clamp_axis(ys.iter().copied().fold(f32::NEG_INFINITY, f32::max).ceil(), h);
+    let maxy = clamp_axis(
+        ys.iter().copied().fold(f32::NEG_INFINITY, f32::max).ceil(),
+        h,
+    );
     (minx, maxx, miny, maxy)
 }
 
@@ -513,7 +518,12 @@ mod tests {
 
     #[test]
     fn simple_triangle_fills_expected_pixels_and_counts_candidates() {
-        let t = tri([[1.0, 1.0], [9.0, 1.0], [1.0, 9.0]], 0.5, [1.0, 0.0, 0.0, 1.0], 7);
+        let t = tri(
+            [[1.0, 1.0], [9.0, 1.0], [1.0, 9.0]],
+            0.5,
+            [1.0, 0.0, 0.0, 1.0],
+            7,
+        );
         let (bytes, stats) = rasterize_one(&t, &ctx(10, 10));
         assert_eq!(px(&bytes, 10, 2, 2), [255, 0, 0, 255]);
         assert_eq!(px(&bytes, 10, 8, 8), [0, 0, 0, 255]);
@@ -527,7 +537,12 @@ mod tests {
     #[test]
     fn golden_small_triangle_matches_hand_computed_pixels() {
         // A unit-ish right triangle covering pixel centres (0.5,0.5) and (1.5,0.5).
-        let t = tri([[0.0, 0.0], [3.0, 0.0], [0.0, 3.0]], 0.5, [0.0, 1.0, 0.0, 1.0], 1);
+        let t = tri(
+            [[0.0, 0.0], [3.0, 0.0], [0.0, 3.0]],
+            0.5,
+            [0.0, 1.0, 0.0, 1.0],
+            1,
+        );
         let (bytes, _) = rasterize_one(&t, &ctx(4, 4));
         // (0,0): bary inside → green. (3,3): outside → black.
         assert_eq!(px(&bytes, 4, 0, 0), [0, 255, 0, 255]);
@@ -554,7 +569,11 @@ mod tests {
             rasterize_triangle(rgba, dep, &c, &far, &mut s);
             rasterize_triangle(rgba, dep, &c, &near, &mut s);
         }
-        assert_eq!(px(&fb.into_rgba_bytes(), 10, 1, 1), [255, 0, 0, 255], "near wins");
+        assert_eq!(
+            px(&fb.into_rgba_bytes(), 10, 1, 1),
+            [255, 0, 0, 255],
+            "near wins"
+        );
 
         let mut fb2 = SoftwareFramebuffer::new(10, 10);
         let mut depth2 = DepthBuffer::new(10, 10);
@@ -566,7 +585,11 @@ mod tests {
             rasterize_triangle(rgba, dep, &c, &near, &mut s2);
             rasterize_triangle(rgba, dep, &c, &far, &mut s2);
         }
-        assert_eq!(px(&fb2.into_rgba_bytes(), 10, 1, 1), [255, 0, 0, 255], "near still wins");
+        assert_eq!(
+            px(&fb2.into_rgba_bytes(), 10, 1, 1),
+            [255, 0, 0, 255],
+            "near still wins"
+        );
     }
 
     #[test]
@@ -597,8 +620,10 @@ mod tests {
         c.fog.far = 1.0;
         c.fog.strength = 1.0;
         c.fog.color = [0.0, 0.0, 1.0, 1.0];
-        let result = SoftwareRasterizer::new(opts_cued(16, 16, c))
-            .rasterize_packet(&packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 1.0, 1.0]), &cache);
+        let result = SoftwareRasterizer::new(opts_cued(16, 16, c)).rasterize_packet(
+            &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 1.0, 1.0]),
+            &cache,
+        );
         // Centre pixel: red mixed halfway toward blue fog → ~[128,0,128].
         let p = px(result.rgba_bytes(), 16, 8, 8);
         assert!(p[0] > 100, "red dimmed by fog");
@@ -673,7 +698,14 @@ mod tests {
     }
 
     fn opts(w: u32, h: u32) -> LowPolyRasterOptions {
-        LowPolyRasterOptions::new(w, h, CanvasDebugOverlay::None, 200_000, 8_000_000, cues_off())
+        LowPolyRasterOptions::new(
+            w,
+            h,
+            CanvasDebugOverlay::None,
+            200_000,
+            8_000_000,
+            cues_off(),
+        )
     }
 
     /// Options with one cue toggled on (others off), at `w×h`.
@@ -685,7 +717,10 @@ mod tests {
     fn packet_rasterizes_and_reports_full_stats() {
         let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
         let result = SoftwareRasterizer::new(opts(64, 36)).rasterize_packet(
-            &packet(vec![draw(42, 7, [0.2, 0.8, 0.3, 1.0])], [0.0, 0.0, 0.0, 1.0]),
+            &packet(
+                vec![draw(42, 7, [0.2, 0.8, 0.3, 1.0])],
+                [0.0, 0.0, 0.0, 1.0],
+            ),
             &cache,
         );
         assert_eq!(result.conversion().projected_draws, 1);
@@ -706,9 +741,15 @@ mod tests {
 
     #[test]
     fn overlapping_grounds_reject_occluded_fragments() {
-        let cache = MeshCache::load(&[ground(7, [0.4, 0.4, 0.4, 1.0]), ground(8, [0.8, 0.1, 0.1, 1.0])]);
+        let cache = MeshCache::load(&[
+            ground(7, [0.4, 0.4, 0.4, 1.0]),
+            ground(8, [0.8, 0.1, 0.1, 1.0]),
+        ]);
         let result = SoftwareRasterizer::new(opts(40, 40)).rasterize_packet(
-            &packet(vec![draw(1, 7, [1.0; 4]), draw(2, 8, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
+            &packet(
+                vec![draw(1, 7, [1.0; 4]), draw(2, 8, [1.0; 4])],
+                [0.0, 0.0, 0.0, 1.0],
+            ),
             &cache,
         );
         assert!(result.depth_rejected_pixels() > 0);
@@ -733,9 +774,18 @@ mod tests {
     #[test]
     fn depth_buffer_overlay_is_grayscale_mid_for_centre_depth() {
         let cache = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0])]);
-        let o = LowPolyRasterOptions::new(32, 32, CanvasDebugOverlay::DepthBuffer, 200_000, 8_000_000, cues_off());
-        let result = SoftwareRasterizer::new(o)
-            .rasterize_packet(&packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]), &cache);
+        let o = LowPolyRasterOptions::new(
+            32,
+            32,
+            CanvasDebugOverlay::DepthBuffer,
+            200_000,
+            8_000_000,
+            cues_off(),
+        );
+        let result = SoftwareRasterizer::new(o).rasterize_packet(
+            &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
+            &cache,
+        );
         let p = px(result.rgba_bytes(), 32, 16, 16);
         assert_eq!(p[0], p[1]);
         assert_eq!(p[1], p[2]);
@@ -746,10 +796,23 @@ mod tests {
     #[test]
     fn triangle_edges_overlay_paints_only_edges() {
         let cache = MeshCache::load(&[ground(7, [0.9, 0.9, 0.9, 1.0])]);
-        let o = LowPolyRasterOptions::new(40, 40, CanvasDebugOverlay::TriangleEdges, 200_000, 8_000_000, cues_off());
-        let result = SoftwareRasterizer::new(o)
-            .rasterize_packet(&packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]), &cache);
-        let painted = result.rgba_bytes().chunks_exact(4).filter(|p| p[0] > 0).count();
+        let o = LowPolyRasterOptions::new(
+            40,
+            40,
+            CanvasDebugOverlay::TriangleEdges,
+            200_000,
+            8_000_000,
+            cues_off(),
+        );
+        let result = SoftwareRasterizer::new(o).rasterize_packet(
+            &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
+            &cache,
+        );
+        let painted = result
+            .rgba_bytes()
+            .chunks_exact(4)
+            .filter(|p| p[0] > 0)
+            .count();
         assert!(painted > 0);
         assert!(painted < 40 * 40 / 2, "interior not filled");
         assert!(result.depth_written_pixels() > painted as u64);
@@ -758,9 +821,18 @@ mod tests {
     #[test]
     fn bounds_overlay_strokes_a_border() {
         let cache = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0])]);
-        let o = LowPolyRasterOptions::new(40, 40, CanvasDebugOverlay::Bounds, 200_000, 8_000_000, cues_off());
-        let result = SoftwareRasterizer::new(o)
-            .rasterize_packet(&packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]), &cache);
+        let o = LowPolyRasterOptions::new(
+            40,
+            40,
+            CanvasDebugOverlay::Bounds,
+            200_000,
+            8_000_000,
+            cues_off(),
+        );
+        let result = SoftwareRasterizer::new(o).rasterize_packet(
+            &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
+            &cache,
+        );
         let white = result
             .rgba_bytes()
             .chunks_exact(4)
@@ -785,11 +857,16 @@ mod tests {
         let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
         let mut c = cues_off();
         c.enable_vertical_grade = true;
-        let result = SoftwareRasterizer::new(opts_cued(8, 16, c))
-            .rasterize_packet(&packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]), &cache);
+        let result = SoftwareRasterizer::new(opts_cued(8, 16, c)).rasterize_packet(
+            &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
+            &cache,
+        );
         let top = px(result.rgba_bytes(), 8, 4, 0)[0];
         let bottom = px(result.rgba_bytes(), 8, 4, 15)[0];
-        assert!(bottom < top, "lower screen darker: top {top} bottom {bottom}");
+        assert!(
+            bottom < top,
+            "lower screen darker: top {top} bottom {bottom}"
+        );
         assert!(result.vertical_grade_applied_pixels() > 0);
     }
 
@@ -818,14 +895,17 @@ mod tests {
                 FrameViewport::new(64, 64),
                 [0.3, 0.3, 0.3, 1.0],
                 cam,
-                vec![FrameDrawItem::new(42, 8, 9, IDENTITY, IDENTITY, [1.0; 4], casts)],
+                vec![FrameDrawItem::new(
+                    42, 8, 9, IDENTITY, IDENTITY, [1.0; 4], casts,
+                )],
                 light.clone(),
                 IDENTITY,
                 FrameFeatureSet::new(false, false, 1, 0),
             )
         };
         // A marked caster casts a planar ground shadow...
-        let r = SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(true), &cache);
+        let r =
+            SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(true), &cache);
         assert_eq!(r.contact_shadows_drawn(), 1);
         assert!(r.contact_shadow_pixels() > 0);
         // ...an unmarked draw (e.g. a wall) casts none.
@@ -838,8 +918,10 @@ mod tests {
     #[test]
     fn disabling_contact_shadows_draws_none() {
         let obj = MeshCache::load(&[gameplay_object(8, [0.8, 0.3, 0.2, 1.0])]);
-        let r = SoftwareRasterizer::new(opts_cued(64, 64, cues_off()))
-            .rasterize_packet(&packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]), &obj);
+        let r = SoftwareRasterizer::new(opts_cued(64, 64, cues_off())).rasterize_packet(
+            &packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]),
+            &obj,
+        );
         assert_eq!(r.contact_shadows_drawn(), 0);
         assert_eq!(r.contact_shadow_pixels(), 0);
     }
@@ -850,8 +932,10 @@ mod tests {
         let mut oc = cues_off();
         oc.enable_depth_outlines = true;
         let obj = MeshCache::load(&[gameplay_object(8, [0.8, 0.3, 0.2, 1.0])]);
-        let r = SoftwareRasterizer::new(opts_cued(64, 64, oc))
-            .rasterize_packet(&packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]), &obj);
+        let r = SoftwareRasterizer::new(opts_cued(64, 64, oc)).rasterize_packet(
+            &packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]),
+            &obj,
+        );
         assert_eq!(r.outlined_objects(), 1);
         assert!(r.outline_pixels() > 0);
     }
@@ -862,7 +946,11 @@ mod tests {
         let p = packet(vec![draw(1, 7, [1.0; 4])], [0.4, 0.6, 0.9, 1.0]);
         let on = SoftwareRasterizer::new(opts_cued(48, 48, cues_on())).rasterize_packet(&p, &cache);
         let off = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache);
-        assert_ne!(on.rgba_bytes(), off.rgba_bytes(), "depth cues change the image");
+        assert_ne!(
+            on.rgba_bytes(),
+            off.rgba_bytes(),
+            "depth cues change the image"
+        );
         // Submitted draw/object counts are unchanged by the cue stage.
         assert_eq!(
             on.conversion().projected_draws,

@@ -17,21 +17,30 @@
 //! record and compare exactly like populated ones, so the game's determinism is
 //! still proven end-to-end through the recorder.
 
-use axiom_retro_fps_browser::{RetroFpsGame, Hud, Intent};
+use axiom_retro_fps_browser::level::LevelDoc;
+use axiom_retro_fps_browser::{apply_lifecycle, build_retro_fps_app, RetroFpsGame, Hud, Intent};
 use axiom_recording::RecordingApi;
 
 /// A fixed scenario of held-input intents, one per tick. Fixing these fixes the
 /// whole run, exactly as a recorded input track would.
 fn scenario() -> Vec<Intent> {
-    let mut forward = Intent::default();
-    forward.forward = true;
-    let mut turn = Intent::default();
-    turn.turn_left = true;
-    let mut fire = Intent::default();
-    fire.fire = true;
-    let mut strafe_fire = Intent::default();
-    strafe_fire.strafe_right = true;
-    strafe_fire.fire = true;
+    let forward = Intent {
+        forward: true,
+        ..Default::default()
+    };
+    let turn = Intent {
+        turn_left: true,
+        ..Default::default()
+    };
+    let fire = Intent {
+        fire: true,
+        ..Default::default()
+    };
+    let strafe_fire = Intent {
+        strafe_right: true,
+        fire: true,
+        ..Default::default()
+    };
     vec![
         Intent::default(),
         forward,
@@ -73,9 +82,14 @@ fn encode_hud(h: &Hud) -> Vec<u8> {
 /// input + state artifacts (render/runtime left empty — see the module note).
 fn record_run() -> RecordingApi {
     let mut recorder = RecordingApi::native().expect("native recorder budget is valid");
-    let mut game = RetroFpsGame::new();
+    let doc = LevelDoc::default();
+    let mut game = RetroFpsGame::from_level(&doc);
+    let (mut app, assets) = build_retro_fps_app(&doc);
+    game.bind_entities(&app);
     scenario().into_iter().enumerate().for_each(|(i, intent)| {
-        let commands = game.step(intent);
+        let commands = game.step(intent, &app);
+        apply_lifecycle(&mut game, &mut app, &assets, &commands);
+        app.tick_with_controls(i as u64, &commands.enemies, &[commands.control]);
         let frame = i as u64;
         recorder
             .record_frame(
@@ -119,12 +133,17 @@ fn a_diverging_input_track_is_detected() {
     let original = record_run();
 
     let mut perturbed = RecordingApi::native().unwrap();
-    let mut game = RetroFpsGame::new();
+    let doc = LevelDoc::default();
+    let mut game = RetroFpsGame::from_level(&doc);
+    let (mut app, assets) = build_retro_fps_app(&doc);
+    game.bind_entities(&app);
     scenario().into_iter().enumerate().for_each(|(i, intent)| {
         let mut intent = intent;
         // Force-fire on the very first frame only.
         intent.fire = intent.fire || i == 0;
-        let commands = game.step(intent);
+        let commands = game.step(intent, &app);
+        apply_lifecycle(&mut game, &mut app, &assets, &commands);
+        app.tick_with_controls(i as u64, &commands.enemies, &[commands.control]);
         let frame = i as u64;
         perturbed
             .record_frame(
@@ -143,17 +162,28 @@ fn a_diverging_input_track_is_detected() {
     assert!(report.first_mismatching_frame().is_some());
 }
 
-/// Run the fixed scenario and return the game's serialized state at every frame
-/// boundary (state *before* applying intent `i` is `states[i]`), plus the final
-/// state after the whole scenario.
-fn states_per_frame() -> (Vec<Vec<u8>>, Vec<u8>) {
-    let mut game = RetroFpsGame::new();
+/// Per-frame paired (game-state, engine-scene) snapshots, plus the final game state.
+type StatesPerFrame = (Vec<(Vec<u8>, Vec<u8>)>, Vec<u8>);
+
+/// Run the fixed scenario and return, at every frame boundary, the paired
+/// (game-state, engine-scene) snapshot *before* applying intent `i`, plus the
+/// final game state. Fork-and-resume now restores BOTH halves: the game's
+/// spatial decisions depend on the engine's enemy positions, so the engine scene
+/// must be forked alongside the game (exactly what the browser scrubber does).
+fn states_per_frame() -> StatesPerFrame {
+    let doc = LevelDoc::default();
+    let mut game = RetroFpsGame::from_level(&doc);
+    let (mut app, assets) = build_retro_fps_app(&doc);
+    game.bind_entities(&app);
     let states = scenario()
         .into_iter()
-        .map(|intent| {
-            let before = game.write_state();
-            game.step(intent);
-            before
+        .enumerate()
+        .map(|(i, intent)| {
+            let snap = (game.write_state(), app.snapshot_sim());
+            let commands = game.step(intent, &app);
+            apply_lifecycle(&mut game, &mut app, &assets, &commands);
+            app.tick_with_controls(i as u64, &commands.enemies, &[commands.control]);
+            snap
         })
         .collect();
     (states, game.write_state())
@@ -161,20 +191,31 @@ fn states_per_frame() -> (Vec<Vec<u8>>, Vec<u8>) {
 
 #[test]
 fn forking_from_a_recorded_frame_and_replaying_reproduces_the_timeline() {
-    // Capture the state at the start of frame K, then fork a fresh game to it and
-    // replay the SAME remaining intents — the resulting end state must be
-    // byte-identical to the un-forked run. This is the heart of fork-and-resume.
+    // Capture the paired state at the start of frame K, fork a fresh game+engine
+    // to it, and replay the SAME remaining intents — the resulting end game state
+    // must be byte-identical to the un-forked run. This is fork-and-resume.
     let (states, original_end) = states_per_frame();
     let fork_at = 3;
 
-    let mut forked = RetroFpsGame::new();
-    assert!(forked.read_state(&states[fork_at]));
-    // Replay the tail of the scenario from the fork point.
+    let doc = LevelDoc::default();
+    let mut forked = RetroFpsGame::from_level(&doc);
+    let (mut app, assets) = build_retro_fps_app(&doc);
+    assert!(forked.read_state(&states[fork_at].0));
+    app.restore_sim(&states[fork_at].1)
+        .expect("engine fork snapshot round-trips");
+    // Re-bind the forked game's enemies to the restored scene's nodes (handles
+    // aren't serialized), so its spatial hits classify when the fork resumes.
+    forked.bind_entities(&app);
+    // Replay the tail on the forked app's own fresh tick sequence (movement is
+    // tick-independent — no spin/procanim — so the scene evolution reproduces).
     scenario()
         .into_iter()
         .skip(fork_at)
-        .for_each(|intent| {
-            forked.step(intent);
+        .enumerate()
+        .for_each(|(j, intent)| {
+            let commands = forked.step(intent, &app);
+            apply_lifecycle(&mut forked, &mut app, &assets, &commands);
+            app.tick_with_controls(j as u64, &commands.enemies, &[commands.control]);
         });
     assert_eq!(forked.write_state(), original_end);
 }
@@ -186,14 +227,25 @@ fn forking_then_diverging_branches_away_from_the_original() {
     let (states, original_end) = states_per_frame();
     let fork_at = 3;
 
-    let mut branch = RetroFpsGame::new();
-    assert!(branch.read_state(&states[fork_at]));
-    scenario().into_iter().skip(fork_at).for_each(|intent| {
-        // Inject an extra forward press the original tail never had.
-        let mut intent = intent;
-        intent.forward = true;
-        branch.step(intent);
-    });
+    let doc = LevelDoc::default();
+    let mut branch = RetroFpsGame::from_level(&doc);
+    let (mut app, assets) = build_retro_fps_app(&doc);
+    assert!(branch.read_state(&states[fork_at].0));
+    app.restore_sim(&states[fork_at].1)
+        .expect("engine fork snapshot round-trips");
+    branch.bind_entities(&app);
+    scenario()
+        .into_iter()
+        .skip(fork_at)
+        .enumerate()
+        .for_each(|(j, intent)| {
+            // Inject an extra forward press the original tail never had.
+            let mut intent = intent;
+            intent.forward = true;
+            let commands = branch.step(intent, &app);
+            apply_lifecycle(&mut branch, &mut app, &assets, &commands);
+            app.tick_with_controls(j as u64, &commands.enemies, &[commands.control]);
+        });
     assert_ne!(branch.write_state(), original_end);
 }
 

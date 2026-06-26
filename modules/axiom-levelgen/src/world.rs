@@ -64,9 +64,13 @@ impl World {
         writer.write_u32(self.width);
         writer.write_u32(self.height);
         writer.write_u64(self.heights.len() as u64);
-        self.heights.iter().for_each(|&h| writer.write_u32(h as u32));
+        self.heights
+            .iter()
+            .for_each(|&h| writer.write_u32(h as u32));
         writer.write_u64(self.biomes.len() as u64);
-        self.biomes.iter().for_each(|&b| writer.write_u32(u32::from(b)));
+        self.biomes
+            .iter()
+            .for_each(|&b| writer.write_u32(u32::from(b)));
         writer.write_u64(self.objects.len() as u64);
         self.objects.iter().for_each(|&(x, y)| {
             writer.write_u32(x);

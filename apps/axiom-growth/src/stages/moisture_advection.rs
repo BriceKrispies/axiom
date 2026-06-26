@@ -41,16 +41,16 @@ impl Stage for MoistureAdvectionStage {
 
         let mut next = globe.region_moisture.clone();
         for _ in 0..PASSES {
-            for r in 0..region_count {
+            for (r, slot) in next.iter_mut().enumerate() {
                 if globe.region_elevation[r] < 0.0 {
-                    next[r] = 1.0; // ocean source
+                    *slot = 1.0; // ocean source
                     continue;
                 }
                 let site = globe.topology.sites[r];
                 let wind = globe.region_wind[r];
                 let neighbours = globe.graph.neighbours_of(RegionId(r as u32));
                 if neighbours.is_empty() {
-                    next[r] = globe.region_moisture[r];
+                    *slot = globe.region_moisture[r];
                     continue;
                 }
                 // Most-upwind neighbour: the one the wind blows from. The wind
@@ -70,9 +70,9 @@ impl Stage for MoistureAdvectionStage {
                 if let Some(up) = best {
                     let upwind_m = globe.region_moisture[up];
                     let here = globe.region_moisture[r];
-                    next[r] = (here + ADVECT * (upwind_m - here)).clamp(0.0, 1.0);
+                    *slot = (here + ADVECT * (upwind_m - here)).clamp(0.0, 1.0);
                 } else {
-                    next[r] = globe.region_moisture[r];
+                    *slot = globe.region_moisture[r];
                 }
             }
             globe.region_moisture.copy_from_slice(&next);

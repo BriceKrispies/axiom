@@ -62,29 +62,49 @@ mod tests {
     #[test]
     fn bare_chord_routes() {
         assert!(event().routes_global_hotkey());
-        assert!(InterfaceInputEvent { ctrl: true, ..event() }.routes_global_hotkey());
+        assert!(InterfaceInputEvent {
+            ctrl: true,
+            ..event()
+        }
+        .routes_global_hotkey());
     }
 
     #[test]
     fn meta_chord_is_left_to_the_os() {
-        assert!(!InterfaceInputEvent { meta: true, ..event() }.routes_global_hotkey());
+        assert!(!InterfaceInputEvent {
+            meta: true,
+            ..event()
+        }
+        .routes_global_hotkey());
     }
 
     #[test]
     fn text_field_blocks_unless_the_console_owns_focus() {
-        assert!(!InterfaceInputEvent { in_text_field: true, ..event() }.routes_global_hotkey());
-        assert!(
-            InterfaceInputEvent { in_text_field: true, console_focus: true, ..event() }
-                .routes_global_hotkey()
-        );
+        assert!(!InterfaceInputEvent {
+            in_text_field: true,
+            ..event()
+        }
+        .routes_global_hotkey());
+        assert!(InterfaceInputEvent {
+            in_text_field: true,
+            console_focus: true,
+            ..event()
+        }
+        .routes_global_hotkey());
     }
 
     #[test]
     fn console_keys_classify_or_pass_through() {
         assert_eq!(classify_console_key("Enter"), Some(ConsoleKey::Submit));
         assert_eq!(classify_console_key("Escape"), Some(ConsoleKey::Dismiss));
-        assert_eq!(classify_console_key("ArrowUp"), Some(ConsoleKey::HistoryPrev));
-        assert_eq!(classify_console_key("ArrowDown"), Some(ConsoleKey::HistoryNext));
+        assert_eq!(
+            classify_console_key("ArrowUp"),
+            Some(ConsoleKey::HistoryPrev)
+        );
+        assert_eq!(
+            classify_console_key("ArrowDown"),
+            Some(ConsoleKey::HistoryNext)
+        );
         assert_eq!(classify_console_key("a"), None);
     }
 }

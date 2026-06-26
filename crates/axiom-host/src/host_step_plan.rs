@@ -87,10 +87,8 @@ impl HostStepPlan {
                 let clamped = raw_steps.min(config.max_steps_per_frame() as u64);
                 let steps = clamped as u32;
                 let consumed_nanos = (steps as u64).saturating_mul(fixed);
-                let retained_nanos = config
-                    .retain_accumulator()
-                    .then(|| total.saturating_sub(consumed_nanos))
-                    .unwrap_or(0);
+                let retained_nanos = [0, total.saturating_sub(consumed_nanos)]
+                    [usize::from(config.retain_accumulator())];
 
                 HostStepPlan {
                     sequence,
@@ -134,10 +132,7 @@ impl HostStepPlan {
 }
 
 fn retained_after_skip(config: &HostBoundaryConfig, accumulator: u64, elapsed: u64) -> u64 {
-    config
-        .retain_accumulator()
-        .then(|| accumulator.saturating_add(elapsed))
-        .unwrap_or(0)
+    [0, accumulator.saturating_add(elapsed)][usize::from(config.retain_accumulator())]
 }
 
 #[cfg(test)]

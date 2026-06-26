@@ -1,0 +1,44 @@
+[package]
+name = "axiom-asset-stream-demo"
+description = "Axiom browser/WASM demo of runtime asset streaming. The page boots fast (interactive before any asset loads), then streams game assets in the background — async and in parallel — driven by the deterministic scheduler in the `axiom-assets` module. The module owns the streaming brain (priority + dependency ordering within a concurrency budget) and no I/O; this app is the host edge that performs the `fetch`es the scheduler asks for and feeds the completions back at each tick. No 3D rendering: fetched bytes are opaque blobs (decoding into meshes/textures is out of scope), so the demo proves the streaming pipeline end-to-end against real network fetches."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Browser entry only. The deterministic streaming brain (`axiom-assets`, via its
+# `AssetsApi` facade — Module Law: apps compose modules) and the `AssetId`
+# identity primitive (`axiom-kernel`), plus the wasm-bindgen glue, a panic hook,
+# `wasm-bindgen-futures` (to drive the async/parallel `fetch`es), and the bits of
+# web-sys the demo needs to fetch blobs and reflect progress into the DOM/window.
+# The streaming is only driven from the wasm entry, so — like the other browser
+# apps — these deps are confined to wasm32, and native `cargo test --workspace`
+# compiles nothing of this app.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-assets = { path = "../../modules/axiom-assets" }
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Headers",
+    "Location",
+    "Request",
+    "RequestInit",
+    "Response",
+    # The worker-pool variant (pool.rs / workers.html): N background Web Workers
+    # each fetch+decode one asset off the main thread; the main thread schedules.
+    "Worker",
+    "MessageEvent",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

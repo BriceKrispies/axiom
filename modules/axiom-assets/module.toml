@@ -1,0 +1,18 @@
+# Axiom module manifest — axiom-assets.
+
+[module]
+name = "assets"
+crate_name = "axiom-assets"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "asset-streaming-manifest",
+    "asset-load-state-machine",
+    "asset-load-scheduler",
+]

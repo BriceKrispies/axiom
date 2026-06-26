@@ -12,7 +12,9 @@
 name = "netplay-ffi"
 crate_name = "axiom-netplay-ffi"
 
-allowed_layers = []
+allowed_layers = [
+    "kernel",
+]
 
 allowed_modules = [
     "engine",

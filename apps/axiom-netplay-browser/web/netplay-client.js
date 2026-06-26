@@ -21,8 +21,9 @@ const clamp = (v) => Math.max(-LIMIT, Math.min(LIMIT, v));
  * Start the netcode. `setPositions(p0x,p0y,p1x,p1y)` is the wasm renderer entry.
  * Returns the AxiomClient so the page can attach a status handler.
  */
-export function startNetplay({ setPositions, serverUrl, naive, transport, serverCertificateHash, signalingUrl }) {
+export function startNetplay({ setPositions, serverUrl, naive, transport, serverCertificateHash, signalingUrl, roomId }) {
   const client = new AxiomClient();
+  const room = roomId || "lobby";   // which authoritative room to join (matchmaker-assigned)
 
   let myPlayer = -1;                       // 0 or 1 once Welcome arrives
   let predicted = { x: 0, y: 0 };          // our own cube, predicted locally
@@ -67,7 +68,7 @@ export function startNetplay({ setPositions, serverUrl, naive, transport, server
     predicted = { x, y };
   });
 
-  client.connect({ url: serverUrl, roomId: "lobby", protocolVersion: 1, transport, serverCertificateHash, signalingUrl });
+  client.connect({ url: serverUrl, roomId: room, protocolVersion: 1, transport, serverCertificateHash, signalingUrl });
 
   // Input + prediction at ~60 Hz: send the held-key delta, and immediately apply
   // it locally so our own cube responds with zero round-trip delay.
@@ -100,7 +101,7 @@ export function startNetplay({ setPositions, serverUrl, naive, transport, server
     setPositions(pos[0], pos[1], pos[2], pos[3]);
     // Debug state (handy for inspecting prediction vs authoritative).
     window.__net = {
-      myPlayer, naive: !!naive, predicted, authoritative,
+      myPlayer, naive: !!naive, predicted, authoritative, room,
       pending: unacked.length,
       serverTick: client.getServerTick(),
       acked: client.getLastAckedSequence(),

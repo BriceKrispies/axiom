@@ -63,7 +63,10 @@ mod tests {
     fn clear_far_initializes_every_pixel_to_far() {
         let mut b = DepthBuffer::new(3, 2);
         // Scribble through the slice, then clear back to far.
-        b.slice_mut().iter_mut().enumerate().for_each(|(i, d)| *d = i as f32);
+        b.slice_mut()
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, d)| *d = i as f32);
         b.clear_far();
         (0..3).for_each(|x| (0..2).for_each(|y| assert_eq!(b.depth_at(x, y), f32::INFINITY)));
     }

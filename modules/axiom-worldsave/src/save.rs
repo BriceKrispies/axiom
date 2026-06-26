@@ -73,7 +73,9 @@ impl Save {
         writer.write_u32(self.height);
         let address_bytes = SpaceApi::to_bytes(&self.address);
         writer.write_u64(address_bytes.len() as u64);
-        address_bytes.iter().for_each(|&byte| writer.write_u32(u32::from(byte)));
+        address_bytes
+            .iter()
+            .for_each(|&byte| writer.write_u32(u32::from(byte)));
         writer.write_u64(self.overrides.len() as u64);
         self.overrides.iter().for_each(|&(index, code)| {
             writer.write_u32(index);

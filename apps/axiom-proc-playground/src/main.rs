@@ -35,9 +35,9 @@ fn playground_constraints() -> [Constraint; 2] {
 
 /// A content address built from a site path.
 fn site(segments: &[u64]) -> Address {
-    segments
-        .iter()
-        .fold(SpaceApi::root(), |address, &segment| SpaceApi::child(&address, segment))
+    segments.iter().fold(SpaceApi::root(), |address, &segment| {
+        SpaceApi::child(&address, segment)
+    })
 }
 
 /// Run the full pipeline at `(seed, address)`: evaluate the recipe, then validate

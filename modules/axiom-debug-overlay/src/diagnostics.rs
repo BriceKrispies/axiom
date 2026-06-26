@@ -58,7 +58,11 @@ impl Diagnostics {
 
     /// `fps` formatted for display (one decimal), from the integer `fps_milli`.
     pub(crate) fn fps_text(&self) -> String {
-        format!("{}.{}", self.fps_milli / 1000, (self.fps_milli % 1000) / 100)
+        format!(
+            "{}.{}",
+            self.fps_milli / 1000,
+            (self.fps_milli % 1000) / 100
+        )
     }
 
     /// `frame_time` formatted for display (two decimals), from microseconds.
@@ -138,7 +142,10 @@ impl Diagnostics {
             format!("webgpu_submissions={}", self.webgpu_submissions),
             format!("canvas2d_frames={}", self.canvas2d_frames),
             format!("worker_msgs={}", self.worker_text()),
-            format!("fallbacks={} ({})", self.fallback_count, self.fallback_reason),
+            format!(
+                "fallbacks={} ({})",
+                self.fallback_count, self.fallback_reason
+            ),
             format!("visibility={}", self.visibility_state),
         ]
         .join("\n")
@@ -204,17 +211,34 @@ mod tests {
         assert_eq!(
             labels,
             vec![
-                "frame", "tick", "fps", "frame ms", "sim ticks", "renderer",
-                "canvas owner", "sim owner", "storage", "audio", "network",
-                "webgpu subs", "canvas2d frames", "worker msgs", "fallbacks",
-                "fallback reason", "visibility",
+                "frame",
+                "tick",
+                "fps",
+                "frame ms",
+                "sim ticks",
+                "renderer",
+                "canvas owner",
+                "sim owner",
+                "storage",
+                "audio",
+                "network",
+                "webgpu subs",
+                "canvas2d frames",
+                "worker msgs",
+                "fallbacks",
+                "fallback reason",
+                "visibility",
             ]
         );
     }
 
     #[test]
     fn compact_rows_are_the_four_at_a_glance_fields() {
-        let labels: Vec<String> = sample().compact_rows().into_iter().map(|(l, _)| l).collect();
+        let labels: Vec<String> = sample()
+            .compact_rows()
+            .into_iter()
+            .map(|(l, _)| l)
+            .collect();
         assert_eq!(labels, vec!["fps", "frame ms", "renderer", "fallbacks"]);
     }
 
@@ -223,7 +247,9 @@ mod tests {
         let d = sample();
         assert!(d.backend_select_text().contains("webgl2"));
         assert!(d.snapshot_text().contains("renderer=webgl2"));
-        assert!(d.snapshot_text().contains("fallbacks=1 (webgpu device failed)"));
+        assert!(d
+            .snapshot_text()
+            .contains("fallbacks=1 (webgpu device failed)"));
         assert!(d.backend_report_text().contains("renderer: webgl2"));
     }
 }

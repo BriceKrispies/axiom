@@ -90,6 +90,6 @@ mod tests {
     fn standard_room_constants() {
         assert_eq!(GRID_WIDTH, 10);
         assert_eq!(GRID_HEIGHT, 10);
-        assert!(MAX_DIMENSION >= GRID_WIDTH && MAX_DIMENSION >= GRID_HEIGHT);
+        const { assert!(MAX_DIMENSION >= GRID_WIDTH && MAX_DIMENSION >= GRID_HEIGHT) };
     }
 }

@@ -38,7 +38,7 @@ impl Stage for ElevationStage {
         // Boundary uplift falls off with how many neighbours share the plate:
         // an isolated seam region is a peak; an interior region is unchanged.
         let mut uplift = vec![0.0f32; region_count];
-        for r in 0..region_count {
+        for (r, slot) in uplift.iter_mut().enumerate() {
             let my_plate = globe.region_plate[r];
             let neighbours = globe.graph.neighbours_of(RegionId(r as u32));
             if neighbours.is_empty() {
@@ -52,14 +52,14 @@ impl Stage for ElevationStage {
             }
             if foreign > 0 {
                 let frac = foreign as f32 / neighbours.len() as f32;
-                uplift[r] = BOUNDARY_UPLIFT * frac;
+                *slot = BOUNDARY_UPLIFT * frac;
             }
         }
 
-        for r in 0..region_count {
+        for (r, &up) in uplift.iter().enumerate() {
             let site = globe.topology.sites[r];
             let detail = fbm.sample(site) * DETAIL_AMPLITUDE;
-            globe.region_elevation[r] += uplift[r] + detail;
+            globe.region_elevation[r] += up + detail;
         }
 
         ctx.log

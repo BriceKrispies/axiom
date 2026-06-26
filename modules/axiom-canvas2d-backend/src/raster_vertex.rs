@@ -70,8 +70,14 @@ mod tests {
         assert_eq!(v.depth(), 0.25);
         assert_eq!(v.color(), [0.1, 0.2, 0.3, 1.0]);
         assert_eq!(v.object_id(), 77);
-        assert_eq!(v, RasterVertex::new(12.0, 34.0, 0.25, [0.1, 0.2, 0.3, 1.0], 77));
-        assert_ne!(v, RasterVertex::new(0.0, 34.0, 0.25, [0.1, 0.2, 0.3, 1.0], 77));
+        assert_eq!(
+            v,
+            RasterVertex::new(12.0, 34.0, 0.25, [0.1, 0.2, 0.3, 1.0], 77)
+        );
+        assert_ne!(
+            v,
+            RasterVertex::new(0.0, 34.0, 0.25, [0.1, 0.2, 0.3, 1.0], 77)
+        );
         assert!(format!("{v:?}").contains("RasterVertex"));
     }
 }

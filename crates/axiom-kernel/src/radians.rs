@@ -81,7 +81,10 @@ mod tests {
         let mut w = BinaryWriter::new();
         r.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Radians::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), r);
+        assert_eq!(
+            Radians::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            r
+        );
         assert!(Radians::reflect_read(&mut BinaryReader::new(&[])).is_err());
         let mut bad = BinaryWriter::new();
         bad.write_f32(f32::NEG_INFINITY);

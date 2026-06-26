@@ -13,7 +13,7 @@ impl GameWorldLocalMap {
     pub fn anchored(atlas: &PlanetSurfaceAtlas) -> Self {
         // Prefer land near mid-latitude. We score every region and keep the best;
         // this is deterministic and independent of region ordering.
-        const TARGET_LAT_RAD: f32 = 0.5236; // ~30 degrees.
+        const TARGET_LAT_RAD: f32 = std::f32::consts::FRAC_PI_6; // ~30 degrees.
         let mut best_idx: Option<usize> = None;
         let mut best_score = f32::INFINITY;
         for (i, site) in atlas.sites.iter().enumerate() {

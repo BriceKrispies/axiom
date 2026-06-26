@@ -86,7 +86,7 @@ impl SimReport {
             self.peers.len(),
             self.min_confirmed,
             self.max_confirmed,
-            self.all_agree.then_some("YES").unwrap_or("NO"),
+            ["NO", "YES"][usize::from(self.all_agree)],
             self.first_divergence.map_or(String::new(), |t| format!(
                 " (first divergence at tick {t})"
             ))

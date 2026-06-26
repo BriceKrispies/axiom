@@ -68,10 +68,12 @@ impl Constraint {
 /// score is the count of satisfying words (or the word count, for `MinCount`) — a
 /// stable, ordered measure. Branchless table dispatch.
 fn evaluate_one(constraint: &Constraint, words: &[u64]) -> (bool, u64) {
-    const EVALS: [fn(&Constraint, &[u64]) -> (bool, u64); 3] =
-        [eval_min_count, eval_max_value, eval_non_zero];
+    const EVALS: [ConstraintEval; 3] = [eval_min_count, eval_max_value, eval_non_zero];
     EVALS[constraint.kind as usize](constraint, words)
 }
+
+/// One constraint evaluator: `(satisfied, score)` for a constraint over `words`.
+type ConstraintEval = fn(&Constraint, &[u64]) -> (bool, u64);
 
 fn eval_min_count(constraint: &Constraint, words: &[u64]) -> (bool, u64) {
     let count = words.len() as u64;
@@ -79,7 +81,10 @@ fn eval_min_count(constraint: &Constraint, words: &[u64]) -> (bool, u64) {
 }
 
 fn eval_max_value(constraint: &Constraint, words: &[u64]) -> (bool, u64) {
-    let satisfying = words.iter().filter(|&&word| word <= constraint.threshold).count() as u64;
+    let satisfying = words
+        .iter()
+        .filter(|&&word| word <= constraint.threshold)
+        .count() as u64;
     (satisfying == words.len() as u64, satisfying)
 }
 
@@ -107,10 +112,12 @@ pub(crate) fn evaluate(words: &[u64], constraints: &[Constraint]) -> ValidationR
 
 /// Apply one constraint's bounded word-level repair. Branchless table dispatch.
 fn repair_one(constraint: &Constraint, words: Vec<u64>) -> Vec<u64> {
-    const REPAIRS: [fn(&Constraint, Vec<u64>) -> Vec<u64>; 3] =
-        [repair_min_count, repair_max_value, repair_non_zero];
+    const REPAIRS: [ConstraintRepair; 3] = [repair_min_count, repair_max_value, repair_non_zero];
     REPAIRS[constraint.kind as usize](constraint, words)
 }
+
+/// One constraint repairer: rewrites `words` to satisfy a constraint.
+type ConstraintRepair = fn(&Constraint, Vec<u64>) -> Vec<u64>;
 
 fn repair_min_count(_constraint: &Constraint, words: Vec<u64>) -> Vec<u64> {
     // Structural: repair never invents words, so a too-short artifact is left as
@@ -134,5 +141,7 @@ fn repair_non_zero(_constraint: &Constraint, words: Vec<u64>) -> Vec<u64> {
 pub(crate) fn repair_words(words: &[u64], constraints: &[Constraint]) -> Vec<u64> {
     constraints
         .iter()
-        .fold(words.to_vec(), |words, constraint| repair_one(constraint, words))
+        .fold(words.to_vec(), |words, constraint| {
+            repair_one(constraint, words)
+        })
 }

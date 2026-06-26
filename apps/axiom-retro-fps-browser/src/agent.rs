@@ -10,13 +10,31 @@
 use axiom::prelude::{FrameOutcome, RunningApp};
 use serde::{Deserialize, Serialize};
 
-use crate::{build_retro_fps_app, RetroFpsGame, Intent};
+use crate::{build_retro_fps_app, RetroFpsAssets, RetroFpsGame, Intent};
 
-/// One action from the agent: hold these `keys` this step, apply a mouse-look
-/// `yaw`/`pitch` delta, optionally `fire`, advance `steps` ticks, and optionally
-/// `render` an image. All fields default, so `{}` is a valid idle step.
+/// An absolute player pose: world position `(x, z)`, look `yaw`/`pitch` (radians).
+/// Sent in an [`Action`]'s `teleport` to stand the player somewhere exactly, and
+/// returned in every [`Observation`] so a session always knows where it is and
+/// which way it looks — the readout that makes a view-dependent artifact
+/// reproducible at an exact pose.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Pose {
+    pub x: f32,
+    pub z: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+/// One action from the agent: optionally `teleport` to an absolute pose first,
+/// then hold these `keys` this step, apply a mouse-look `yaw`/`pitch` delta,
+/// optionally `fire`, advance `steps` ticks, and optionally `render` an image. All
+/// fields default, so `{}` is a valid idle step.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Action {
+    /// Teleport to this absolute pose before stepping (a debug "stand here, look
+    /// there" — ignores walls). `None` leaves the player where they are.
+    #[serde(default)]
+    pub teleport: Option<Pose>,
     /// How many ticks to advance with this action (default 1).
     pub steps: Option<u32>,
     /// Held movement keys: `forward`, `backward`, `left`, `right`,
@@ -52,6 +70,8 @@ pub struct HudView {
 #[derive(Debug, Clone, Serialize)]
 pub struct Observation {
     pub tick: u64,
+    /// Where the player stands + looks after this step (the reproducibility readout).
+    pub pose: Pose,
     pub hud: HudView,
     pub draw_count: usize,
     pub state_hash: String,
@@ -103,6 +123,7 @@ fn frame_hash(floats: &[f32]) -> String {
 pub struct AgentSession {
     game: RetroFpsGame,
     app: RunningApp,
+    assets: RetroFpsAssets,
     tick: u64,
     last: FrameOutcome,
 }
@@ -111,12 +132,16 @@ impl AgentSession {
     /// Start a fresh game and advance one idle tick so there is a frame to read.
     pub fn new() -> Self {
         let mut game = RetroFpsGame::new();
-        let mut app = build_retro_fps_app(&crate::level::LevelDoc::default());
-        let cmd = game.step(Intent::default());
+        let (mut app, assets) = build_retro_fps_app(&crate::level::LevelDoc::default());
+        // Bind the enemies to their engine Entities so hits classify from tick 0.
+        game.bind_entities(&app);
+        let cmd = game.step(Intent::default(), &app);
+        crate::apply_lifecycle(&mut game, &mut app, &assets, &cmd);
         let last = app.tick_with_controls(0, &cmd.enemies, &[cmd.control]);
         AgentSession {
             game,
             app,
+            assets,
             tick: 1,
             last,
         }
@@ -130,10 +155,21 @@ impl AgentSession {
     /// Apply `action` for `steps` ticks and return the resulting observation
     /// (structured only; the bin adds an image when asked and able).
     pub fn step(&mut self, action: &Action) -> Observation {
+        // A teleport is a debug "stand here, look there" snap: set the player pose
+        // and apply the one corrective control that jumps the engine camera there,
+        // idling a tick (no enemy moves, no movement keys) so the frame reflects
+        // the new pose. Render the result to screenshot an exact view.
+        if let Some(p) = action.teleport {
+            let control = self.game.teleport(p.x, p.z, p.yaw, p.pitch);
+            self.last = self.app.tick_with_controls(self.tick, &[], &[control]);
+            self.tick += 1;
+            return self.observe();
+        }
         let intent = action_to_intent(action);
         let steps = action.steps.unwrap_or(1).max(1);
         for _ in 0..steps {
-            let cmd = self.game.step(intent);
+            let cmd = self.game.step(intent, &self.app);
+            crate::apply_lifecycle(&mut self.game, &mut self.app, &self.assets, &cmd);
             self.last = self
                 .app
                 .tick_with_controls(self.tick, &cmd.enemies, &[cmd.control]);
@@ -145,8 +181,10 @@ impl AgentSession {
     /// The current structured observation (no image).
     pub fn observe(&self) -> Observation {
         let hud = self.game.hud();
+        let (x, z, yaw, pitch) = self.game.pose();
         Observation {
             tick: self.tick.saturating_sub(1),
+            pose: Pose { x, z, yaw, pitch },
             hud: HudView {
                 hp: hud.health.max(0),
                 score: hud.score,

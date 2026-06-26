@@ -64,14 +64,12 @@ impl PointerCapture {
 
         for name in ["pointerdown", "pointermove"] {
             let cb = Closure::wrap(Box::new(track.clone()) as Box<dyn FnMut(PointerEvent)>);
-            let _ = canvas
-                .add_event_listener_with_callback(name, cb.as_ref().unchecked_ref());
+            let _ = canvas.add_event_listener_with_callback(name, cb.as_ref().unchecked_ref());
             closures.push(cb);
         }
         for name in ["pointerup", "pointercancel", "pointerleave"] {
             let cb = Closure::wrap(Box::new(release.clone()) as Box<dyn FnMut(PointerEvent)>);
-            let _ = canvas
-                .add_event_listener_with_callback(name, cb.as_ref().unchecked_ref());
+            let _ = canvas.add_event_listener_with_callback(name, cb.as_ref().unchecked_ref());
             closures.push(cb);
         }
 

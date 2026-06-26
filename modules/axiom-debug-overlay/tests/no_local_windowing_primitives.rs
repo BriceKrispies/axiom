@@ -47,7 +47,10 @@ fn read_src_files() -> Vec<(String, String)> {
             files.push((name, strip_line_comments(&body)));
         }
     }
-    assert!(!files.is_empty(), "expected overlay src/ to contain Rust files");
+    assert!(
+        !files.is_empty(),
+        "expected overlay src/ to contain Rust files"
+    );
     files
 }
 
@@ -68,7 +71,13 @@ fn overlay_declares_no_generic_windowing_primitive() {
 #[test]
 fn the_deleted_primitive_modules_are_gone() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for stale in ["drag.rs", "console.rs", "command.rs", "command_registry.rs", "keyboard.rs"] {
+    for stale in [
+        "drag.rs",
+        "console.rs",
+        "command.rs",
+        "command_registry.rs",
+        "keyboard.rs",
+    ] {
         assert!(
             !src.join(stale).exists(),
             "{stale} should have been deleted — its concern moved to axiom-interface"
@@ -79,7 +88,9 @@ fn the_deleted_primitive_modules_are_gone() {
 #[test]
 fn overlay_actually_composes_the_interface_layer() {
     let files = read_src_files();
-    let references_layer = files.iter().any(|(_, body)| body.contains("axiom_interface"));
+    let references_layer = files
+        .iter()
+        .any(|(_, body)| body.contains("axiom_interface"));
     assert!(
         references_layer,
         "the overlay must compose axiom-interface — no source file references the layer"

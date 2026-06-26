@@ -87,7 +87,10 @@ mod tests {
         // one biome (not a single flat category), and every code is a known biome.
         let w = LevelGenApi::generate(7, &site(&[1, 2]), 32, 32);
         let first = w.biomes()[0];
-        assert!(w.biomes().iter().any(|&b| b != first), "terrain should yield varied biomes");
+        assert!(
+            w.biomes().iter().any(|&b| b != first),
+            "terrain should yield varied biomes"
+        );
         assert!(w.biomes().iter().all(|&b| b <= BiomeApi::PEAK));
     }
 

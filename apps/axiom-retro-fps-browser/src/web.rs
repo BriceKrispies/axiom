@@ -11,6 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use axiom::prelude::{FrameOutcome, RunningApp};
+use axiom_debug_overlay::DebugOverlayApi;
 use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -73,6 +74,28 @@ fn log(msg: &str) {
     web_sys::console::log_1(&JsValue::from_str(&format!("[retro_fps] {msg}")));
 }
 
+/// Format the player pose as debug-overlay read-out rows: the standing position
+/// `(x, z)`, the look angles `(yaw, pitch)` in radians, and the unit look
+/// direction as a world `x/y/z` vector. With yaw=0 looking −Z and +pitch looking
+/// up, the forward vector is `(−sin yaw·cos pitch, sin pitch, −cos yaw·cos pitch)`.
+/// These are the exact numbers an agent reproduction teleports to.
+fn pose_rows(px: f32, pz: f32, yaw: f32, pitch: f32) -> Vec<(String, String)> {
+    let (cp, sp) = (pitch.cos(), pitch.sin());
+    let (cy, sy) = (yaw.cos(), yaw.sin());
+    let (fx, fy, fz) = (-sy * cp, sp, -cy * cp);
+    vec![
+        ("pos x z".to_string(), format!("{px:.3}  {pz:.3}")),
+        (
+            "look yaw pitch".to_string(),
+            format!("{yaw:.3}  {pitch:.3}"),
+        ),
+        (
+            "dir x y z".to_string(),
+            format!("{fx:+.2} {fy:+.2} {fz:+.2}"),
+        ),
+    ]
+}
+
 /// The browser entry: build the game + engine app, capture the keyboard, mount
 /// the HUD, and drive the live windowing loop.
 #[wasm_bindgen]
@@ -102,11 +125,24 @@ pub fn start() {
 
     let hud = Hud::mount();
 
+    // The developer debug overlay: a Backquote-toggled read-out the frame loop
+    // pushes the live player pose into (position + look direction), so a
+    // view-dependent rendering artifact can be reproduced at an exact pose. Shown
+    // by default while we hunt the "huge wall" flash; press ` to hide it.
+    let mut overlay = DebugOverlayApi::new();
+    overlay.mount_to_body();
+    overlay.show();
+
     let doc = LevelDoc::default();
     let game = Rc::new(RefCell::new(RetroFpsGame::from_level(&doc)));
-    let running_app = build_retro_fps_app(&doc);
+    let (running_app, initial_assets) = build_retro_fps_app(&doc);
+    // Bind each enemy to its engine Entity so the game classifies raycast/overlap
+    // hits from the first tick. The runtime-respawn handles (cube + enemy material)
+    // are held alongside, refreshed whenever a reload re-authors the scene.
+    game.borrow_mut().bind_entities(&running_app);
     let (vertices, indices) = running_app.mesh_vertex_stream();
     let running = Rc::new(RefCell::new(running_app));
+    let assets = Rc::new(Cell::new(initial_assets));
     // Size the live backend's per-instance buffer to the grid's capacity (not the
     // current renderable count), so a reload can add walls/enemies up to the full
     // grid without exceeding the buffer.
@@ -129,6 +165,7 @@ pub fn start() {
     let frame = {
         let game = game.clone();
         let running = running.clone();
+        let assets = assets.clone();
         let tick = tick.clone();
         move |_raf_tick: u64| {
             // Apply a pending level edit at this tick boundary: rebuild the game
@@ -138,7 +175,10 @@ pub fn start() {
             if let Some(text) = pending_level.borrow_mut().take() {
                 let new_doc = LevelDoc::parse(&text);
                 *game.borrow_mut() = RetroFpsGame::from_level(&new_doc);
-                reload_retro_fps(&mut running.borrow_mut(), &new_doc);
+                let new_assets = reload_retro_fps(&mut running.borrow_mut(), &new_doc);
+                assets.set(new_assets);
+                // Re-bind the new scene's enemy nodes to the rebuilt game.
+                game.borrow_mut().bind_entities(&running.borrow());
                 log("level reloaded from edit");
             }
 
@@ -157,14 +197,29 @@ pub fn start() {
                 .map(|r| merge_remote(&mut intent, &r.borrow()))
                 .unwrap_or(false);
 
-            let commands = game.borrow_mut().step(intent);
+            // The game asks the engine for its spatial answers (walls, hitscan,
+            // contact), so step borrows the running app; that borrow is dropped
+            // before the app is mutated (despawns) and ticked.
+            let commands = {
+                let app = running.borrow();
+                game.borrow_mut().step(intent, &*app)
+            };
             let now = tick.get();
-            let outcome =
-                running
-                    .borrow_mut()
-                    .tick_with_controls(now, &commands.enemies, &[commands.control]);
+            let outcome = {
+                let mut app = running.borrow_mut();
+                // Despawn enemies killed this tick / spawn any a respawn revived,
+                // rebinding fresh nodes back into the game.
+                super::apply_lifecycle(&mut game.borrow_mut(), &mut app, &assets.get(), &commands);
+                app.tick_with_controls(now, &commands.enemies, &[commands.control])
+            };
             tick.set(now + 1);
             hud.update(&commands.hud);
+
+            // Surface the post-step player pose in the debug overlay so a bad view
+            // can be read off exactly (position + look direction) and handed back
+            // for an exact-pose reproduction.
+            let (px, pz, yaw, pitch) = game.borrow().pose();
+            overlay.set_app_rows(&pose_rows(px, pz, yaw, pitch));
 
             if let Some(r) = &remote {
                 send_observation(r, tick.get(), &commands.hud, &outcome, render_now);
@@ -237,6 +292,10 @@ fn make_restore(
         if let Some((scene, game_bytes)) = split {
             let _ = running.borrow_mut().restore_sim(scene);
             game.borrow_mut().read_state(game_bytes);
+            // The restored game's enemies have no Entity (handles aren't
+            // serialized); re-bind them to the restored scene's nodes so spatial
+            // hits classify correctly when the fork resumes.
+            game.borrow_mut().bind_entities(&running.borrow());
         }
     })
 }

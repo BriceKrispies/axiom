@@ -217,7 +217,14 @@ mod tests {
     fn final_hash_is_deterministic_and_identity_sensitive() {
         let a = cap(b"i", b"r", b"s", b"d");
         // Same payload, different frame identity → different final hash.
-        let b = FrameCapture::new(FrameIndex::new(5), Tick::new(40), b"i".to_vec(), b"r".to_vec(), b"s".to_vec(), b"d".to_vec());
+        let b = FrameCapture::new(
+            FrameIndex::new(5),
+            Tick::new(40),
+            b"i".to_vec(),
+            b"r".to_vec(),
+            b"s".to_vec(),
+            b"d".to_vec(),
+        );
         assert_ne!(a.final_hash(), b.final_hash());
         assert_ne!(a, b);
     }

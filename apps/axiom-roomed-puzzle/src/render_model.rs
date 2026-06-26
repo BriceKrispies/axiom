@@ -218,11 +218,13 @@ mod tests {
 
     #[test]
     fn ghosts_are_more_transparent_than_the_player() {
-        assert!(GHOST_ALPHA < PLAYER_ALPHA);
-        assert!(
-            GHOST_ALPHA > 0.0,
-            "ghosts are still visibly solid, not invisible"
-        );
+        const { assert!(GHOST_ALPHA < PLAYER_ALPHA) };
+        const {
+            assert!(
+                GHOST_ALPHA > 0.0,
+                "ghosts are still visibly solid, not invisible"
+            )
+        };
     }
 
     #[test]

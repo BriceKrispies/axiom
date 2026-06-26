@@ -337,9 +337,9 @@ mod tests {
         // The facade is a zero-sized namespace; constructing it is harmless and
         // keeps it usable as a value where a handle is expected. Exercise the
         // derived Default/Clone/Copy so they are covered.
-        let api = NetProtocolApi::default();
+        let api = <NetProtocolApi as Default>::default();
         let copied = api;
-        let cloned = api.clone();
+        let cloned = Clone::clone(&api);
         assert_eq!(format!("{copied:?}"), format!("{cloned:?}"));
     }
 }

@@ -123,9 +123,13 @@ mod tests {
         // Root is index 0 with no parent; every child's parent index precedes it.
         assert_eq!(tree.nodes()[0].id(), id(0));
         assert!(tree.nodes()[0].parent().is_none());
-        tree.nodes().iter().enumerate().skip(1).for_each(|(i, node)| {
-            assert!(node.parent().expect("non-root has a parent") < i);
-        });
+        tree.nodes()
+            .iter()
+            .enumerate()
+            .skip(1)
+            .for_each(|(i, node)| {
+                assert!(node.parent().expect("non-root has a parent") < i);
+            });
     }
 
     #[test]
@@ -137,7 +141,10 @@ mod tests {
         let child = b.child(root, id(6), LayoutStyle::new());
         let tree = b.build();
         assert_eq!(tree.nodes()[root].id(), id(5));
-        assert_eq!(tree.nodes()[root].style().direction, crate::style_enums::Direction::Column);
+        assert_eq!(
+            tree.nodes()[root].style().direction,
+            crate::style_enums::Direction::Column
+        );
         assert_eq!(tree.nodes()[child].parent(), Some(root));
     }
 

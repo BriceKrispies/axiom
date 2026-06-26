@@ -71,6 +71,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-asset-pack"
+version = "0.1.0"
+dependencies = [
+ "axiom-assets",
+ "axiom-kernel",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "axiom-asset-stream-demo"
+version = "0.1.0"
+dependencies = [
+ "axiom-assets",
+ "axiom-kernel",
+ "console_error_panic_hook",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "axiom-assets"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-biome"
 version = "0.1.0"
 dependencies = [
@@ -83,6 +113,7 @@ dependencies = [
 name = "axiom-browser-dev-harness"
 version = "0.1.0"
 dependencies = [
+ "axiom-debug-overlay",
  "console_error_panic_hook",
  "js-sys",
  "wasm-bindgen",
@@ -112,6 +143,16 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "ed25519-dalek",
+]
+
+[[package]]
+name = "axiom-debug-overlay"
+version = "0.1.0"
+dependencies = [
+ "axiom-interface",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -152,6 +193,7 @@ name = "axiom-retro-fps-browser"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-debug-overlay",
  "axiom-recording",
  "axiom-windowing",
  "bytemuck",
@@ -232,6 +274,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-input"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
+name = "axiom-interface"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-introspect"
 version = "0.1.0"
 dependencies = [
@@ -246,6 +303,14 @@ dependencies = [
 [[package]]
 name = "axiom-kernel"
 version = "0.1.0"
+
+[[package]]
+name = "axiom-layout"
+version = "0.1.0"
+dependencies = [
+ "axiom-host",
+ "axiom-kernel",
+]
 
 [[package]]
 name = "axiom-levelgen"
@@ -326,7 +391,20 @@ name = "axiom-netplay-ffi"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-kernel",
  "axiom-net-protocol",
+]
+
+[[package]]
+name = "axiom-netplay-load"
+version = "0.1.0"
+dependencies = [
+ "axiom-client-core",
+ "axiom-net-protocol",
+ "futures-util",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -412,7 +490,9 @@ dependencies = [
 name = "axiom-quintet"
 version = "0.1.0"
 dependencies = [
+ "axiom-host",
  "axiom-kernel",
+ "axiom-layout",
  "axiom-proc",
  "axiom-space",
  "console_error_panic_hook",
@@ -463,7 +543,11 @@ dependencies = [
 name = "axiom-roomed-puzzle"
 version = "0.1.0"
 dependencies = [
+ "axiom-host",
+ "axiom-input",
  "axiom-kernel",
+ "axiom-layout",
+ "axiom-math",
  "console_error_panic_hook",
  "serde",
  "toml",

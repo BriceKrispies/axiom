@@ -65,9 +65,18 @@ mod tests {
 
     #[test]
     fn from_label_round_trips_every_density_and_rejects_unknown() {
-        assert_eq!(OverlayDensity::from_label("compact"), Some(OverlayDensity::Compact));
-        assert_eq!(OverlayDensity::from_label("normal"), Some(OverlayDensity::Normal));
-        assert_eq!(OverlayDensity::from_label("verbose"), Some(OverlayDensity::Verbose));
+        assert_eq!(
+            OverlayDensity::from_label("compact"),
+            Some(OverlayDensity::Compact)
+        );
+        assert_eq!(
+            OverlayDensity::from_label("normal"),
+            Some(OverlayDensity::Normal)
+        );
+        assert_eq!(
+            OverlayDensity::from_label("verbose"),
+            Some(OverlayDensity::Verbose)
+        );
         assert_eq!(OverlayDensity::from_label("nope"), None);
     }
 

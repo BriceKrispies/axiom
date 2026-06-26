@@ -92,32 +92,68 @@ impl FrameScrubber {
 
         // Reverse playback: enter scrub at the newest frame (if live) and arm the
         // auto-rewind flag; the run loop walks one frame older each tick.
-        add_button(&document, &panel, &recorder, &reverse, &active, &status, "◀◀ rev", |r, rev| {
-            r.latest_frame_index()
-                .into_iter()
-                .for_each(|latest| {
+        add_button(
+            &document,
+            &panel,
+            &recorder,
+            &reverse,
+            &active,
+            &status,
+            "◀◀ rev",
+            |r, rev| {
+                r.latest_frame_index().into_iter().for_each(|latest| {
                     let _ = r.enter_scrub(latest.raw());
                 });
-            rev.set(true);
-        });
+                rev.set(true);
+            },
+        );
         // Manual controls cancel reverse playback.
-        add_button(&document, &panel, &recorder, &reverse, &active, &status, "◀ back", |r, rev| {
-            rev.set(false);
-            let _ = r.step_back();
-        });
-        add_button(&document, &panel, &recorder, &reverse, &active, &status, "fwd ▶", |r, rev| {
-            rev.set(false);
-            let _ = r.step_forward();
-        });
-        add_button(&document, &panel, &recorder, &reverse, &active, &status, "▶ live", |r, rev| {
-            rev.set(false);
-            r.resume();
-        });
+        add_button(
+            &document,
+            &panel,
+            &recorder,
+            &reverse,
+            &active,
+            &status,
+            "◀ back",
+            |r, rev| {
+                rev.set(false);
+                let _ = r.step_back();
+            },
+        );
+        add_button(
+            &document,
+            &panel,
+            &recorder,
+            &reverse,
+            &active,
+            &status,
+            "fwd ▶",
+            |r, rev| {
+                rev.set(false);
+                let _ = r.step_forward();
+            },
+        );
+        add_button(
+            &document,
+            &panel,
+            &recorder,
+            &reverse,
+            &active,
+            &status,
+            "▶ live",
+            |r, rev| {
+                rev.set(false);
+                r.resume();
+            },
+        );
         // Fork: only when the run loop is forkable (the app supplied a restore
         // hook). Restores the selected frame's recorded state into the live app
         // and resumes play from it — a new timeline branch.
         restore.into_iter().for_each(|restore| {
-            add_fork_button(&document, &panel, &recorder, &reverse, &active, &status, restore);
+            add_fork_button(
+                &document, &panel, &recorder, &reverse, &active, &status, restore,
+            );
         });
 
         body.append_child(&panel).ok()?;
@@ -167,7 +203,11 @@ impl FrameScrubber {
             let render_bytes = encode(clear, lights, light_vp, batches);
             // Capture the app's sim state for this frame (empty when not forkable);
             // it rides in the recorder's `state_bytes` slot for a later fork.
-            let state_bytes = self.snapshot.as_ref().map(|snap| snap()).unwrap_or_default();
+            let state_bytes = self
+                .snapshot
+                .as_ref()
+                .map(|snap| snap())
+                .unwrap_or_default();
             let _ = self.recorder.borrow_mut().record_frame(
                 frame,
                 frame,
@@ -356,8 +396,10 @@ fn install_focus_listeners(
         act.set(!doc.hidden());
         on_refresh();
     });
-    let _ = document
-        .add_event_listener_with_callback("visibilitychange", on_visibility.as_ref().unchecked_ref());
+    let _ = document.add_event_listener_with_callback(
+        "visibilitychange",
+        on_visibility.as_ref().unchecked_ref(),
+    );
     on_visibility.forget();
 }
 
@@ -438,13 +480,15 @@ fn encode(clear: [f32; 4], lights: &[Light], light_vp: [f32; 16], batches: &[Bat
         put_f32(&mut bytes, *intensity);
     });
     put_u32(&mut bytes, batches.len() as u32);
-    batches.iter().for_each(|(mesh, material, instances, count)| {
-        put_u64(&mut bytes, *mesh);
-        put_u64(&mut bytes, *material);
-        put_u32(&mut bytes, *count);
-        put_u32(&mut bytes, instances.len() as u32);
-        instances.iter().for_each(|f| put_f32(&mut bytes, *f));
-    });
+    batches
+        .iter()
+        .for_each(|(mesh, material, instances, count)| {
+            put_u64(&mut bytes, *mesh);
+            put_u64(&mut bytes, *material);
+            put_u32(&mut bytes, *count);
+            put_u32(&mut bytes, instances.len() as u32);
+            instances.iter().for_each(|f| put_f32(&mut bytes, *f));
+        });
     bytes
 }
 

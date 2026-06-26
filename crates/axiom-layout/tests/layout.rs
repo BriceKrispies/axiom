@@ -66,15 +66,20 @@ fn lone_root_fills_the_viewport() {
 
 #[test]
 fn root_is_inset_by_the_safe_area() {
-    let viewport = vp(400, 800)
-        .with_safe_area_insets(
-            HostSafeAreaInsets::new(px(44.0), px(0.0), px(34.0), px(0.0)).unwrap(),
-        );
+    let viewport = vp(400, 800).with_safe_area_insets(
+        HostSafeAreaInsets::new(px(44.0), px(0.0), px(34.0), px(0.0)).unwrap(),
+    );
     let mut b = LayoutTreeBuilder::new();
     b.root(id(0), LayoutStyle::new());
     let result = solve(&viewport, &b.build());
     // 44px reserved at the top, 34px at the bottom; full width.
-    assert_rect(result.rect(id(0)).unwrap(), 0.0, 44.0, 400.0, 800.0 - 44.0 - 34.0);
+    assert_rect(
+        result.rect(id(0)).unwrap(),
+        0.0,
+        44.0,
+        400.0,
+        800.0 - 44.0 - 34.0,
+    );
 }
 
 #[test]
@@ -142,8 +147,20 @@ fn justify_center_end_and_space_between() {
         solve(&vp(600, 200), &b.build())
     };
     // 200px of content, 400px free. Center → 200 leading. End → 400 leading.
-    assert_rect(make(Justify::Center).rect(id(1)).unwrap(), 200.0, 0.0, 100.0, 200.0);
-    assert_rect(make(Justify::End).rect(id(1)).unwrap(), 400.0, 0.0, 100.0, 200.0);
+    assert_rect(
+        make(Justify::Center).rect(id(1)).unwrap(),
+        200.0,
+        0.0,
+        100.0,
+        200.0,
+    );
+    assert_rect(
+        make(Justify::End).rect(id(1)).unwrap(),
+        400.0,
+        0.0,
+        100.0,
+        200.0,
+    );
     // SpaceBetween → first at start, second pushed to the far end (400 between).
     let sb = make(Justify::SpaceBetween);
     assert_rect(sb.rect(id(1)).unwrap(), 0.0, 0.0, 100.0, 200.0);
@@ -163,11 +180,35 @@ fn align_positions_a_fixed_cross_child() {
         solve(&vp(400, 300), &b.build())
     };
     // 100px-tall child in a 300px line: Start → y0, Center → y100, End → y200.
-    assert_rect(make(Align::Start).rect(id(1)).unwrap(), 0.0, 0.0, 400.0, 100.0);
-    assert_rect(make(Align::Center).rect(id(1)).unwrap(), 0.0, 100.0, 400.0, 100.0);
-    assert_rect(make(Align::End).rect(id(1)).unwrap(), 0.0, 200.0, 400.0, 100.0);
+    assert_rect(
+        make(Align::Start).rect(id(1)).unwrap(),
+        0.0,
+        0.0,
+        400.0,
+        100.0,
+    );
+    assert_rect(
+        make(Align::Center).rect(id(1)).unwrap(),
+        0.0,
+        100.0,
+        400.0,
+        100.0,
+    );
+    assert_rect(
+        make(Align::End).rect(id(1)).unwrap(),
+        0.0,
+        200.0,
+        400.0,
+        100.0,
+    );
     // Stretch overrides the fixed cross size, filling the line.
-    assert_rect(make(Align::Stretch).rect(id(1)).unwrap(), 0.0, 0.0, 400.0, 300.0);
+    assert_rect(
+        make(Align::Stretch).rect(id(1)).unwrap(),
+        0.0,
+        0.0,
+        400.0,
+        300.0,
+    );
 }
 
 #[test]
@@ -183,7 +224,13 @@ fn gap_and_padding_are_applied() {
     // Content box is inset 10 each side → 980×580 at (10,10); 20px gap between two
     // equal children: each = (980-20)/2 = 480.
     assert_rect(result.rect(id(1)).unwrap(), 10.0, 10.0, 480.0, 580.0);
-    assert_rect(result.rect(id(2)).unwrap(), 10.0 + 480.0 + 20.0, 10.0, 480.0, 580.0);
+    assert_rect(
+        result.rect(id(2)).unwrap(),
+        10.0 + 480.0 + 20.0,
+        10.0,
+        480.0,
+        580.0,
+    );
 }
 
 #[test]
@@ -247,8 +294,6 @@ fn wrap_breaks_children_into_equal_height_rows() {
 #[test]
 fn nested_containers_propagate_top_down() {
     // root → middle (a column container) → two grandchildren.
-    let mut middle_style = LayoutStyle::new();
-    middle_style.direction = Direction::Column;
     let mut b = LayoutTreeBuilder::new();
     let root = b.root(id(0), LayoutStyle::new());
     let middle = b.child(root, id(1), {

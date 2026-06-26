@@ -37,7 +37,10 @@ impl HeightField {
     pub fn at(&self, cx: u32, cy: u32) -> i32 {
         let valid = (cx < self.width) & (cy < self.height);
         let index = valid.then(|| (cy as usize) * (self.width as usize) + (cx as usize));
-        index.and_then(|i| self.heights.get(i)).copied().unwrap_or(0)
+        index
+            .and_then(|i| self.heights.get(i))
+            .copied()
+            .unwrap_or(0)
     }
 
     /// The heights, row-major.
@@ -52,7 +55,9 @@ impl HeightField {
         writer.write_u32(self.width);
         writer.write_u32(self.height);
         writer.write_u64(self.heights.len() as u64);
-        self.heights.iter().for_each(|&h| writer.write_u32(h as u32));
+        self.heights
+            .iter()
+            .for_each(|&h| writer.write_u32(h as u32));
         writer.into_bytes()
     }
 

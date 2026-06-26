@@ -1,0 +1,1 @@
+axiom-asset-stream-demo fixture blob: material (id 4, depends on palette id 2 and hero id 3). Opaque bytes streamed only after both dependencies are ready.

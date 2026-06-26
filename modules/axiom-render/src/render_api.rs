@@ -141,7 +141,13 @@ impl RenderApi {
         material_idx: u32,
         visible: bool,
     ) {
-        input.add_object(RenderObject::new(id, world, mesh_idx, material_idx, visible));
+        input.add_object(RenderObject::new(
+            id,
+            world,
+            mesh_idx,
+            material_idx,
+            visible,
+        ));
     }
 
     // --- Compilation ---
@@ -160,7 +166,7 @@ impl RenderApi {
     pub fn build_command_list(&self, input: &RenderInput) -> RenderCommandList {
         let mut list = RenderCommandList::with_capacity(3 + input.objects().len() * 3);
         list.push(RenderCommand::clear_frame(input.clear_color()));
-        input.camera().map(|camera| {
+        input.camera().into_iter().for_each(|camera| {
             list.push(RenderCommand::set_camera(
                 camera.view(),
                 camera.projection(),
@@ -186,7 +192,8 @@ impl RenderApi {
                         .get(object.material_idx() as usize)
                         .map(|material| (object, mesh, material))
                 })
-                .map(|(object, mesh, material)| {
+                .into_iter()
+                .for_each(|(object, mesh, material)| {
                     list.push(RenderCommand::set_mesh(mesh.id()));
                     list.push(RenderCommand::set_material(
                         material.id(),
@@ -749,7 +756,10 @@ mod frame_packet_cov {
         let list = api().build_command_list(&input);
         // Index 0 is ClearFrame → None; the final command is the draw → Some(7).
         assert_eq!(api().command_draw_object_id_at(&list, 0), None);
-        assert_eq!(api().command_draw_object_id_at(&list, list.len() - 1), Some(7));
+        assert_eq!(
+            api().command_draw_object_id_at(&list, list.len() - 1),
+            Some(7)
+        );
     }
 
     #[test]

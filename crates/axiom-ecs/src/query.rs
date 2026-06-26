@@ -41,9 +41,60 @@ impl Query {
             .filter(move |(entity, _, _)| registry.contains(*entity))
     }
 
+    /// Live entities that have all three of `A`, `B`, and `C`, as
+    /// `(entity, &a, &b, &c)` ascending — the three-way intersection.
+    pub fn three<'a, A, B, C>(
+        registry: &'a EntityRegistry,
+        a: &'a ComponentColumn<A>,
+        b: &'a ComponentColumn<B>,
+        c: &'a ComponentColumn<C>,
+    ) -> impl Iterator<Item = (EntityId, &'a A, &'a B, &'a C)> {
+        a.iter()
+            .filter_map(move |(entity, av)| b.get(entity).map(move |bv| (entity, av, bv)))
+            .filter_map(move |(entity, av, bv)| c.get(entity).map(move |cv| (entity, av, bv, cv)))
+            .filter(move |(entity, _, _, _)| registry.contains(*entity))
+    }
+
+    /// Live entities that have all four of `A`, `B`, `C`, and `D`, as
+    /// `(entity, &a, &b, &c, &d)` ascending — the four-way intersection.
+    pub fn four<'a, A, B, C, D>(
+        registry: &'a EntityRegistry,
+        a: &'a ComponentColumn<A>,
+        b: &'a ComponentColumn<B>,
+        c: &'a ComponentColumn<C>,
+        d: &'a ComponentColumn<D>,
+    ) -> impl Iterator<Item = (EntityId, &'a A, &'a B, &'a C, &'a D)> {
+        a.iter()
+            .filter_map(move |(entity, av)| b.get(entity).map(move |bv| (entity, av, bv)))
+            .filter_map(move |(entity, av, bv)| c.get(entity).map(move |cv| (entity, av, bv, cv)))
+            .filter_map(move |(entity, av, bv, cv)| {
+                d.get(entity).map(move |dv| (entity, av, bv, cv, dv))
+            })
+            .filter(move |(entity, _, _, _, _)| registry.contains(*entity))
+    }
+
+    /// Live entities that have `A`, each paired with `B` if present:
+    /// `(entity, &a, Option<&b>)` ascending — a left join, the optional-component
+    /// query. The base set is entities with `A`; `B` is looked up per entity.
+    pub fn two_opt<'a, A, B>(
+        registry: &'a EntityRegistry,
+        a: &'a ComponentColumn<A>,
+        b: &'a ComponentColumn<B>,
+    ) -> impl Iterator<Item = (EntityId, &'a A, Option<&'a B>)> {
+        a.iter()
+            .filter(move |(entity, _)| registry.contains(*entity))
+            .map(move |(entity, av)| (entity, av, b.get(entity)))
+    }
+
     /// Live entities that have component `T`, as `(entity, &mut component)`
     /// ascending. The registry is borrowed immutably and the column mutably, so
     /// there is no aliasing.
+    ///
+    /// This is the only *mutable* query: a multi-column mutable join (yielding
+    /// `&mut A` and `&mut B` from two columns at once) cannot be expressed as a
+    /// safe `Iterator` (it would need a lending iterator or `unsafe`). To mutate
+    /// across columns, drive one column — collect the ids you need, or iterate one
+    /// mutably — and reach the others by id with [`ComponentColumn::get_mut`].
     pub fn one_mut<'a, T>(
         registry: &'a EntityRegistry,
         column: &'a mut ComponentColumn<T>,
@@ -60,7 +111,7 @@ mod tests {
 
     #[test]
     fn debug_and_default_are_available() {
-        let query = Query::default();
+        let query = <Query as Default>::default();
         assert!(format!("{query:?}").contains("Query"));
     }
 
@@ -169,5 +220,75 @@ mod tests {
         assert_eq!(ids, vec![2], "the dead entity's row is skipped");
         assert_eq!(values.get(a), Some(&1), "skipped row is untouched");
         assert_eq!(values.get(b), Some(&102));
+    }
+
+    #[test]
+    fn three_yields_intersection_excluding_missing_and_dead() {
+        let mut registry = EntityRegistry::new();
+        let a = registry.spawn(); // 1: has all three
+        let b = registry.spawn(); // 2: missing `cs` -> filter_map c None arm
+        let c = registry.spawn(); // 3: missing `bs` -> filter_map b None arm
+        let d = registry.spawn(); // 4: has all three but is despawned
+        let mut xs: ComponentColumn<i32> = ComponentColumn::new();
+        let mut ys: ComponentColumn<i32> = ComponentColumn::new();
+        let mut zs: ComponentColumn<i32> = ComponentColumn::new();
+        [a, b, c, d].iter().for_each(|&e| {
+            xs.insert(e, 1);
+        });
+        xs.insert(a, 10);
+        ys.insert(a, 20);
+        zs.insert(a, 30);
+        ys.insert(b, 21); // b: x,y but no z
+        zs.insert(c, 32); // c: x,z but no y
+        ys.insert(d, 24);
+        zs.insert(d, 34);
+        registry.despawn(d);
+        let got: Vec<(u64, i32, i32, i32)> = Query::three(&registry, &xs, &ys, &zs)
+            .map(|(id, x, y, z)| (id.raw(), *x, *y, *z))
+            .collect();
+        assert_eq!(got, vec![(1, 10, 20, 30)]);
+    }
+
+    #[test]
+    fn four_yields_intersection_excluding_missing_and_dead() {
+        let mut registry = EntityRegistry::new();
+        let a = registry.spawn(); // 1: all four
+        let b = registry.spawn(); // 2: missing the 4th -> filter_map d None arm
+        let c = registry.spawn(); // 3: all four but despawned
+        let mut w: ComponentColumn<i32> = ComponentColumn::new();
+        let mut x: ComponentColumn<i32> = ComponentColumn::new();
+        let mut y: ComponentColumn<i32> = ComponentColumn::new();
+        let mut z: ComponentColumn<i32> = ComponentColumn::new();
+        [a, b, c].iter().for_each(|&e| {
+            w.insert(e, 1);
+            x.insert(e, 2);
+            y.insert(e, 3);
+        });
+        z.insert(a, 4);
+        z.insert(c, 4); // b has no z
+        registry.despawn(c);
+        let got: Vec<(u64, i32, i32, i32, i32)> = Query::four(&registry, &w, &x, &y, &z)
+            .map(|(id, w, x, y, z)| (id.raw(), *w, *x, *y, *z))
+            .collect();
+        assert_eq!(got, vec![(1, 1, 2, 3, 4)]);
+    }
+
+    #[test]
+    fn two_opt_pairs_present_and_absent_and_excludes_dead() {
+        let mut registry = EntityRegistry::new();
+        let a = registry.spawn(); // 1: has b (Some)
+        let b = registry.spawn(); // 2: no b (None arm)
+        let c = registry.spawn(); // 3: has a-column but despawned
+        let mut xs: ComponentColumn<i32> = ComponentColumn::new();
+        let mut ys: ComponentColumn<&'static str> = ComponentColumn::new();
+        xs.insert(a, 10);
+        xs.insert(b, 20);
+        xs.insert(c, 30);
+        ys.insert(a, "a");
+        registry.despawn(c);
+        let got: Vec<(u64, i32, Option<&str>)> = Query::two_opt(&registry, &xs, &ys)
+            .map(|(id, x, y)| (id.raw(), *x, y.copied()))
+            .collect();
+        assert_eq!(got, vec![(1, 10, Some("a")), (2, 20, None)]);
     }
 }

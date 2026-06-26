@@ -19,12 +19,12 @@ fn time_grid(
     g: &Growth,
     lm: &GameWorldLocalMap,
     seed: u64,
-    cx: f32,
-    cz: f32,
+    center: (f32, f32),
     sx: usize,
     sz: usize,
     runs: usize,
 ) -> (f64, usize) {
+    let (cx, cz) = center;
     let halfx = (sx as f32 - 1.0) * 0.5;
     let halfz = (sz as f32 - 1.0) * 0.5;
     let mut best = f64::MAX;
@@ -61,13 +61,13 @@ fn main() {
     let seed = g.seed.value;
 
     // warm caches / branch predictor
-    let _ = time_grid(&g, &lm, seed, 0.0, 0.0, 64, 64, 1);
+    let _ = time_grid(&g, &lm, seed, (0.0, 0.0), 64, 64, 1);
 
     println!("\n=== Streaming terrain regeneration cost (sample_height_m field) ===");
     println!("(AREA_HALF_M=160 → a 321×321 vertex window; RECENTER_THRESHOLD≈80 m)\n");
 
     // The CURRENT behaviour: regenerate the entire window in one frame.
-    let (ms_full, n_full) = time_grid(&g, &lm, seed, 0.0, 0.0, 321, 321, 5);
+    let (ms_full, n_full) = time_grid(&g, &lm, seed, (0.0, 0.0), 321, 321, 5);
     report(
         "FULL window regen (current, per edge cross)",
         ms_full,
@@ -76,7 +76,7 @@ fn main() {
 
     // What an incremental/chunked approach would do instead: only the new
     // leading strip exposed by sliding the window one 16 m chunk.
-    let (ms_strip, n_strip) = time_grid(&g, &lm, seed, 0.0, 0.0, 17, 321, 5);
+    let (ms_strip, n_strip) = time_grid(&g, &lm, seed, (0.0, 0.0), 17, 321, 5);
     report(
         "leading STRIP only (1 chunk, incremental)",
         ms_strip,
@@ -84,7 +84,7 @@ fn main() {
     );
 
     // A single chunk's worth (what a per-chunk streamer regenerates per step).
-    let (ms_chunk, n_chunk) = time_grid(&g, &lm, seed, 0.0, 0.0, 17, 17, 8);
+    let (ms_chunk, n_chunk) = time_grid(&g, &lm, seed, (0.0, 0.0), 17, 17, 8);
     report("one 16 m CHUNK (per-chunk streamer)", ms_chunk, n_chunk);
 
     println!("\nnote: build_terrain also computes per-vertex normals (≈ same number");

@@ -1,0 +1,1 @@
+axiom-asset-stream-demo fixture blob: hero (mesh, id 3, depends on atlas id 1). Opaque bytes streamed only after the atlas texture is ready.

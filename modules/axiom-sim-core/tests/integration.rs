@@ -39,8 +39,7 @@ fn run_chain() -> (Vec<u64>, Vec<u64>, u64) {
     batch.emit_causal_event(
         EVENT_KIND,
         1,
-        Some(a),
-        None,
+        (Some(a), None),
         Some(api.cause_process(p)),
         EVENT_CODE,
         Some(api.value_unsigned(1)),
@@ -157,14 +156,14 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
         .record_interaction(
             1,
             ROUTE_TOUCH,
-            actor_a,
-            None,
-            Some(substance_x),
-            Some(residue_x),
-            None,
-            Some(target_location),
-            1,
-            Some(api.cause_command()),
+            (actor_a, None),
+            (
+                Some(substance_x),
+                Some(residue_x),
+                None,
+                Some(target_location),
+            ),
+            (1, Some(api.cause_command())),
         )
         .unwrap();
 
@@ -204,27 +203,23 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
     // 8. Material effect rules observe the contact-transferable tag on this route:
     //    one updates fact-x, one emits a causal event chained to the transfer.
     api.register_material_effect_rule(
-        Some(SimCoreApi::TAG_CONTACT_TRANSFERABLE),
-        ROUTE_TOUCH,
-        SimCoreApi::EFFECT_UPDATE_FACT,
-        0,
-        Some(api.value_unsigned(1)),
-        0,
-        0,
-        0,
-        0,
+        (
+            Some(SimCoreApi::TAG_CONTACT_TRANSFERABLE),
+            ROUTE_TOUCH,
+            SimCoreApi::EFFECT_UPDATE_FACT,
+        ),
+        (0, Some(api.value_unsigned(1)), 0, 0),
+        (0, 0),
     )
     .unwrap();
     api.register_material_effect_rule(
-        Some(SimCoreApi::TAG_CONTACT_TRANSFERABLE),
-        ROUTE_TOUCH,
-        SimCoreApi::EFFECT_EMIT_CAUSAL_EVENT,
-        EFFECT_EVENT_KIND,
-        None,
-        0,
-        0x77,
-        0,
-        0,
+        (
+            Some(SimCoreApi::TAG_CONTACT_TRANSFERABLE),
+            ROUTE_TOUCH,
+            SimCoreApi::EFFECT_EMIT_CAUSAL_EVENT,
+        ),
+        (EFFECT_EVENT_KIND, None, 0, 0x77),
+        (0, 0),
     )
     .unwrap();
 
@@ -356,9 +351,7 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
     api.add_body_plan_part(
         draft,
         "test-core",
-        SimCoreApi::PART_CORE,
-        0,
-        0,
+        (SimCoreApi::PART_CORE, 0, 0),
         &[],
         &[(covering, 0)],
         &[(SimCoreApi::SURFACE_OUTER, true)],
@@ -367,9 +360,7 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
     api.add_body_plan_part(
         draft,
         "test-extremity",
-        SimCoreApi::PART_EXTREMITY,
-        0,
-        0,
+        (SimCoreApi::PART_EXTREMITY, 0, 0),
         &[],
         &[(covering, 0)],
         &[(SimCoreApi::SURFACE_OUTER, true)],
@@ -378,9 +369,7 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
     api.add_body_plan_part(
         draft,
         "test-mouth",
-        SimCoreApi::PART_MOUTH,
-        0,
-        0,
+        (SimCoreApi::PART_MOUTH, 0, 0),
         &[],
         &[],
         &[(SimCoreApi::SURFACE_MOUTH, true)],
@@ -404,17 +393,10 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
     // 6. record a touch interaction targeting the extremity surface (refs source).
     let interaction = api
         .record_surface_interaction(
-            1,
-            ROUTE_TOUCH,
-            actor_a,
-            surface,
-            Some(substance_x),
-            Some(source),
-            None,
-            10,
-            0xB0,
-            1,
-            Some(api.cause_command()),
+            (1, ROUTE_TOUCH),
+            (actor_a, surface),
+            (Some(substance_x), Some(source), None),
+            (10, 0xB0, 1, Some(api.cause_command())),
         )
         .unwrap();
 
@@ -453,18 +435,11 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
     // 11 & 12. wound on the extremity, queryable every way.
     let wound = api
         .create_wound(
-            body,
-            extremity,
-            Some(covering),
-            SimCoreApi::DAMAGE_CUT,
-            5,
-            None,
-            None,
+            (body, extremity, Some(covering)),
+            (SimCoreApi::DAMAGE_CUT, 5),
+            (None, None),
             &[(covering, 5)],
-            30,
-            0xB2,
-            2,
-            Some(api.cause_command()),
+            (30, 0xB2, 2, Some(api.cause_command())),
         )
         .unwrap();
     assert_eq!(api.wounds_by_body(body), vec![wound]);

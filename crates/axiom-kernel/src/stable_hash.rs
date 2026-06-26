@@ -41,11 +41,9 @@ impl StableHash {
     /// Digest a byte slice. Empty input digests to the FNV offset basis. Pure,
     /// branchless (a `fold`).
     pub fn of_bytes(bytes: &[u8]) -> Self {
-        StableHash(
-            bytes
-                .iter()
-                .fold(FNV_OFFSET, |acc, &b| (acc ^ u64::from(b)).wrapping_mul(FNV_PRIME)),
-        )
+        StableHash(bytes.iter().fold(FNV_OFFSET, |acc, &b| {
+            (acc ^ u64::from(b)).wrapping_mul(FNV_PRIME)
+        }))
     }
 
     /// Digest a sequence of 64-bit words — the order-sensitive way to fold
@@ -72,10 +70,19 @@ mod tests {
 
     #[test]
     fn of_bytes_is_deterministic_and_byte_sensitive() {
-        assert_eq!(StableHash::of_bytes(b"axiom"), StableHash::of_bytes(b"axiom"));
-        assert_ne!(StableHash::of_bytes(b"alpha"), StableHash::of_bytes(b"beta"));
+        assert_eq!(
+            StableHash::of_bytes(b"axiom"),
+            StableHash::of_bytes(b"axiom")
+        );
+        assert_ne!(
+            StableHash::of_bytes(b"alpha"),
+            StableHash::of_bytes(b"beta")
+        );
         // Order matters (FNV-1a is sequential).
-        assert_ne!(StableHash::of_bytes(&[1, 2, 3]), StableHash::of_bytes(&[3, 2, 1]));
+        assert_ne!(
+            StableHash::of_bytes(&[1, 2, 3]),
+            StableHash::of_bytes(&[3, 2, 1])
+        );
     }
 
     #[test]
@@ -87,8 +94,14 @@ mod tests {
 
     #[test]
     fn of_words_is_deterministic_and_order_sensitive() {
-        assert_eq!(StableHash::of_words(&[1, 2, 3]), StableHash::of_words(&[1, 2, 3]));
-        assert_ne!(StableHash::of_words(&[1, 2, 3]), StableHash::of_words(&[3, 2, 1]));
+        assert_eq!(
+            StableHash::of_words(&[1, 2, 3]),
+            StableHash::of_words(&[1, 2, 3])
+        );
+        assert_ne!(
+            StableHash::of_words(&[1, 2, 3]),
+            StableHash::of_words(&[3, 2, 1])
+        );
     }
 
     #[test]

@@ -225,10 +225,22 @@ mod tests {
         assert!(px(CanvasQualityPreset::Low) < px(CanvasQualityPreset::Medium));
         assert!(px(CanvasQualityPreset::Medium) < px(CanvasQualityPreset::High));
         // Levels resolve deterministically and clamp.
-        assert_eq!(CanvasQualityPreset::from_level(0), CanvasQualityPreset::UltraLow);
+        assert_eq!(
+            CanvasQualityPreset::from_level(0),
+            CanvasQualityPreset::UltraLow
+        );
         assert_eq!(CanvasQualityPreset::from_level(1), CanvasQualityPreset::Low);
-        assert_eq!(CanvasQualityPreset::from_level(3), CanvasQualityPreset::High);
-        assert_eq!(CanvasQualityPreset::from_level(99), CanvasQualityPreset::High);
-        assert_eq!(CanvasQualityPreset::from_level(1), CanvasQualityPreset::from_level(1));
+        assert_eq!(
+            CanvasQualityPreset::from_level(3),
+            CanvasQualityPreset::High
+        );
+        assert_eq!(
+            CanvasQualityPreset::from_level(99),
+            CanvasQualityPreset::High
+        );
+        assert_eq!(
+            CanvasQualityPreset::from_level(1),
+            CanvasQualityPreset::from_level(1)
+        );
     }
 }

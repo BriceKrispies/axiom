@@ -142,7 +142,6 @@ fn constraints(preset: PlanetPreset) -> Constraints {
             pressure_min: 70_000.0,
             pressure_max: 140_000.0,
             eccentricity_max: 0.2,
-            ..Constraints::ANY
         },
         // ocean_world declares only surface_temp_max="320".
         PlanetPreset::OceanWorld => Constraints {
@@ -158,12 +157,14 @@ fn constraints(preset: PlanetPreset) -> Constraints {
 /// ocean_world and dry override only the knobs they declare in XML; the rest
 /// fall back to the earthlike-shaped baseline so the genome is always complete.
 fn sample_once(preset: PlanetPreset, rng: &mut Rng) -> PlanetGenome {
-    let mut g = PlanetGenome::default();
-    g.material_weights = material_weights(preset);
-
     // Shared earthlike-shaped baseline knobs (all presets inherit these unless
-    // they override below).
-    g.l_star = uniform(rng, 3.4452e26, 4.2108e26);
+    // they override below). material_weights is rng-free; l_star is the first
+    // rng draw, so listing it first in the literal preserves the draw order.
+    let mut g = PlanetGenome {
+        material_weights: material_weights(preset),
+        l_star: uniform(rng, 3.4452e26, 4.2108e26),
+        ..Default::default()
+    };
     let s_eff_target = normal_clamped(rng, 1.0, 0.15, 0.8, 1.2);
     g.eccentricity = uniform(rng, 0.0, 0.08);
     g.mass_kg = uniform(rng, 4.7776e24, 7.1664e24);

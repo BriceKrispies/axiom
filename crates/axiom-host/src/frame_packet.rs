@@ -378,7 +378,10 @@ mod tests {
         assert_eq!(l.vec(), [2.0, 3.0, -4.0]);
         // Colour in [0..3], intensity in [3].
         assert_eq!(l.color_intensity(), [1.0, 0.0, 0.0, 2.5]);
-        assert_ne!(l, FrameLight::new(0, [2.0, 3.0, -4.0], [1.0, 0.0, 0.0, 2.5]));
+        assert_ne!(
+            l,
+            FrameLight::new(0, [2.0, 3.0, -4.0], [1.0, 0.0, 0.0, 2.5])
+        );
         assert!(format!("{l:?}").contains("FrameLight"));
     }
 
@@ -401,8 +404,10 @@ mod tests {
             d,
             FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], false)
         );
-        assert!(!FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], false)
-            .casts_contact_shadow());
+        assert!(
+            !FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], false)
+                .casts_contact_shadow()
+        );
         assert!(format!("{d:?}").contains("FrameDrawItem"));
     }
 
@@ -447,7 +452,10 @@ mod tests {
         assert_eq!(p.tick(), 240);
         assert_eq!(p.viewport(), FrameViewport::new(800, 600));
         assert_eq!(p.clear_color(), [0.1, 0.2, 0.3, 1.0]);
-        assert_eq!(p.camera(), Some(FrameCamera::new(mat(1.0), mat(2.0), mat(3.0))));
+        assert_eq!(
+            p.camera(),
+            Some(FrameCamera::new(mat(1.0), mat(2.0), mat(3.0)))
+        );
         assert_eq!(p.draws().len(), 1);
         assert_eq!(p.draws()[0].object_id(), 7);
         assert_eq!(p.lights().len(), 1);

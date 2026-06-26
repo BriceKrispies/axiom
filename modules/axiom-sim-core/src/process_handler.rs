@@ -229,14 +229,16 @@ fn run_update_fact(spec: &HandlerSpec, _ctx: &ProcessContext) -> ProcessOutput {
     let mut effects = EffectBatch::new();
     spec.fact
         .zip(spec.value)
-        .map(|(fact, value)| effects.update_fact(fact, value, spec.tick));
+        .into_iter()
+        .for_each(|(fact, value)| effects.update_fact(fact, value, spec.tick));
     ProcessOutput::new(effects, ProcessDisposition::complete())
 }
 
 fn run_add_fact(spec: &HandlerSpec, ctx: &ProcessContext) -> ProcessOutput {
     let mut effects = EffectBatch::new();
     spec.value
-        .map(|value| effects.add_fact(spec.kind, ctx.subject(), value, None, spec.tick));
+        .into_iter()
+        .for_each(|value| effects.add_fact(spec.kind, ctx.subject(), value, None, spec.tick));
     ProcessOutput::new(effects, ProcessDisposition::complete())
 }
 

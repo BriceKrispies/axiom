@@ -123,7 +123,11 @@ impl Canvas2dBackendApi {
     /// natively (e.g. to reproduce a rendering artifact without a browser).
     pub fn render_offscreen_rgba(&self, packet: &FramePacket) -> (Vec<u8>, u32, u32) {
         let result = self.rasterize(packet);
-        (result.rgba_bytes().to_vec(), result.width(), result.height())
+        (
+            result.rgba_bytes().to_vec(),
+            result.width(),
+            result.height(),
+        )
     }
 
     /// The shared rasterization step behind both [`Self::present_packet`] and
@@ -349,7 +353,10 @@ mod tests {
         (id, v, vec![0, 1, 2, 0, 2, 3])
     }
 
-    fn packet(draws: Vec<axiom_host::FrameDrawItem>, features: axiom_host::FrameFeatureSet) -> FramePacket {
+    fn packet(
+        draws: Vec<axiom_host::FrameDrawItem>,
+        features: axiom_host::FrameFeatureSet,
+    ) -> FramePacket {
         use axiom_host::{FrameCamera, FrameViewport};
         FramePacket::new(
             2,
@@ -377,8 +384,17 @@ mod tests {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(800, 600));
         backend.load_meshes(&[ground(7)]);
-        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 0.0, 0.0, 1.0], false)];
-        let report = backend.present_packet(&packet(draws, FrameFeatureSet::new(false, false, 0, 0)));
+        let draws = vec![FrameDrawItem::new(
+            1,
+            7,
+            9,
+            IDENTITY,
+            IDENTITY,
+            [1.0, 0.0, 0.0, 1.0],
+            false,
+        )];
+        let report =
+            backend.present_packet(&packet(draws, FrameFeatureSet::new(false, false, 0, 0)));
 
         assert_eq!(report.backend(), BackendKind::Canvas2d);
         assert_eq!(report.frame_index(), 2);
@@ -404,7 +420,15 @@ mod tests {
         backend.load_meshes(&[ground(7)]);
         // Low tier → a 240×135 internal framebuffer (the forced-fallback default).
         backend.set_quality_level(1);
-        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 0.0, 0.0, 1.0], false)];
+        let draws = vec![FrameDrawItem::new(
+            1,
+            7,
+            9,
+            IDENTITY,
+            IDENTITY,
+            [1.0, 0.0, 0.0, 1.0],
+            false,
+        )];
         let p = packet(draws, FrameFeatureSet::new(false, false, 0, 0));
 
         let (rgba, w, h) = backend.render_offscreen_rgba(&p);
@@ -428,10 +452,15 @@ mod tests {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(800, 600));
         backend.load_meshes(&[ground(7)]);
-        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0; 4], false)];
+        let draws = vec![FrameDrawItem::new(
+            1, 7, 9, IDENTITY, IDENTITY, [1.0; 4], false,
+        )];
         // Level 0 → UltraLow 160×90.
         backend.set_quality_level(0);
-        let r0 = backend.present_packet(&packet(draws.clone(), FrameFeatureSet::new(false, false, 0, 0)));
+        let r0 = backend.present_packet(&packet(
+            draws.clone(),
+            FrameFeatureSet::new(false, false, 0, 0),
+        ));
         assert_eq!(r0.raster().framebuffer_width, 160);
         assert_eq!(r0.raster().framebuffer_height, 90);
         // Level 2 → Medium 320×180 (more candidate pixels than UltraLow).
@@ -446,8 +475,11 @@ mod tests {
     fn unknown_mesh_is_skipped_without_critical_violation() {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let backend = Canvas2dBackendApi::new(&request(640, 480));
-        let draws = vec![FrameDrawItem::new(1, 404, 9, IDENTITY, IDENTITY, [1.0; 4], false)];
-        let report = backend.present_packet(&packet(draws, FrameFeatureSet::new(false, false, 0, 0)));
+        let draws = vec![FrameDrawItem::new(
+            1, 404, 9, IDENTITY, IDENTITY, [1.0; 4], false,
+        )];
+        let report =
+            backend.present_packet(&packet(draws, FrameFeatureSet::new(false, false, 0, 0)));
         assert_eq!(report.submitted_draws(), 0);
         assert_eq!(report.skipped_draws(), 1);
         assert_eq!(report.critical_coverage_skipped(), 0);
@@ -459,7 +491,9 @@ mod tests {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(320, 180));
         backend.load_meshes(&[ground(7)]);
-        let draws = vec![FrameDrawItem::new(1, 7, 13, IDENTITY, IDENTITY, [1.0; 4], false)];
+        let draws = vec![FrameDrawItem::new(
+            1, 7, 13, IDENTITY, IDENTITY, [1.0; 4], false,
+        )];
         let report = backend.present_packet(&packet(draws, FrameFeatureSet::new(true, true, 1, 0)));
         assert!(report
             .degraded_features()
@@ -473,7 +507,9 @@ mod tests {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(320, 180));
         backend.load_meshes(&[ground(7)]);
-        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0; 4], false)];
+        let draws = vec![FrameDrawItem::new(
+            1, 7, 9, IDENTITY, IDENTITY, [1.0; 4], false,
+        )];
         let p = packet(draws, FrameFeatureSet::new(false, false, 0, 0));
         assert_eq!(backend.present_packet(&p).submitted_draws(), 1);
 

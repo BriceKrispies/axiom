@@ -48,14 +48,13 @@ impl FrameTimeline {
     /// successful return `len() <= max_frames` and `current_bytes() <= max_bytes`.
     pub(crate) fn push_frame(&mut self, capture: FrameCapture) -> KernelResult<()> {
         let too_big = capture.byte_len() > self.max_bytes;
-        too_big
-            .then(|| Err(capture_too_large()))
-            .unwrap_or_else(|| {
-                self.current_bytes = self.current_bytes.saturating_add(capture.byte_len());
-                self.captures.push_back(capture);
-                self.evict();
-                Ok(())
-            })
+        let rejected = too_big.then(|| Err(capture_too_large()));
+        rejected.unwrap_or_else(|| {
+            self.current_bytes = self.current_bytes.saturating_add(capture.byte_len());
+            self.captures.push_back(capture);
+            self.evict();
+            Ok(())
+        })
     }
 
     /// Evict the smallest prefix of oldest captures so that both bounds hold.
@@ -256,7 +255,10 @@ mod tests {
         t.push_frame(cap(1, 10)).unwrap();
         t.push_frame(cap(2, 10)).unwrap(); // evicts frame 0
         assert_eq!(t.len(), 2);
-        assert_eq!(t.current_bytes(), cap(1, 10).byte_len() + cap(2, 10).byte_len());
+        assert_eq!(
+            t.current_bytes(),
+            cap(1, 10).byte_len() + cap(2, 10).byte_len()
+        );
     }
 
     #[test]
@@ -293,8 +295,14 @@ mod tests {
     fn previous_and_next_navigation() {
         let mut t = FrameTimeline::new(8, 1 << 20).unwrap();
         (1..4).for_each(|f| t.push_frame(cap(f, 0)).unwrap()); // 1,2,3
-        assert_eq!(t.previous_frame_index(FrameIndex::new(2)).unwrap(), FrameIndex::new(1));
-        assert_eq!(t.next_frame_index(FrameIndex::new(2)).unwrap(), FrameIndex::new(3));
+        assert_eq!(
+            t.previous_frame_index(FrameIndex::new(2)).unwrap(),
+            FrameIndex::new(1)
+        );
+        assert_eq!(
+            t.next_frame_index(FrameIndex::new(2)).unwrap(),
+            FrameIndex::new(3)
+        );
         // Edges + missing selection.
         assert!(t.previous_frame_index(FrameIndex::new(1)).is_err());
         assert!(t.next_frame_index(FrameIndex::new(3)).is_err());

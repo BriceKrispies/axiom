@@ -14,7 +14,7 @@ pub fn subdivisions_for_target(target: u32) -> u32 {
     let mut n = 0u32;
     while n < 9 {
         let regions = 10u64 * 4u64.pow(n) + 2;
-        if regions as u64 >= target as u64 {
+        if regions >= target as u64 {
             break;
         }
         n += 1;

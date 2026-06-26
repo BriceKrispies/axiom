@@ -96,11 +96,11 @@ impl MaterialEffectRule {
     /// Whether this rule matches `interaction` (route matches and, if a tag is
     /// required, the interaction's material carries it).
     fn matches(&self, interaction: &InteractionRecord, definitions: &DefinitionRegistry) -> bool {
-        let tag_ok = self.params.match_tag.as_deref().map_or(true, |tag| {
+        let tag_ok = self.params.match_tag.as_deref().is_none_or(|tag| {
             interaction
                 .material()
                 .and_then(|def| definitions.get(def))
-                .map_or(false, |definition| definition.has_tag(tag))
+                .is_some_and(|definition| definition.has_tag(tag))
         });
         (self.params.match_route == interaction.route()) & tag_ok
     }
@@ -142,8 +142,7 @@ impl MaterialEffectRule {
             batch.emit_causal_event(
                 p.concept_code,
                 tick,
-                Some(primary),
-                interaction.secondary(),
+                (Some(primary), interaction.secondary()),
                 cause,
                 p.event_code,
                 p.value,

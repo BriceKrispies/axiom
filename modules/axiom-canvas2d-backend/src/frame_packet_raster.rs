@@ -11,8 +11,13 @@
 //! the object id — but only for triangles that will actually contribute pixels:
 //!
 //! * **Missing mesh** ⇒ the draw is skipped (`skipped_draws`).
-//! * **Invalid projection** (a vertex at/behind the near plane) ⇒ that triangle
-//!   is culled (`skipped_invalid_projection_triangles`) — never a NaN pixel.
+//! * **Near-plane straddle** (a vertex at/in front of the camera's near plane) ⇒
+//!   the triangle is *clipped* against the near plane in clip space, **before** the
+//!   perspective divide, yielding 0–2 screen triangles. This is the structural fix
+//!   for the Canvas-only "giant phantom wall": a vertex with a near-zero `cw`
+//!   divided by `1/cw` smears across the screen, where the GPU's hardware clip
+//!   never does. A triangle entirely at/behind the near plane yields 0 triangles
+//!   and is counted `skipped_invalid_projection_triangles` — never a NaN pixel.
 //! * **Degenerate** (near-zero area) ⇒ culled (`skipped_degenerate_triangles`).
 //! * **Off-screen** (bounding box entirely outside the framebuffer) ⇒ culled
 //!   (`culled_triangles`).
@@ -39,7 +44,7 @@ use crate::canvas_depth_cue_profile::CanvasDepthCueProfile;
 use crate::canvas_policy::{classify, CanvasFallbackImportance};
 use crate::low_poly_raster_options::LowPolyRasterOptions;
 use crate::mesh_cache::{MeshCache, MeshGeometry};
-use crate::projection::project_vertex;
+use crate::projection::{clip_coords, clip_to_screen};
 use crate::raster_triangle::RasterTriangle;
 use crate::raster_vertex::RasterVertex;
 
@@ -49,6 +54,72 @@ const AREA_EPS: f32 = 1e-6;
 /// rasterizing; smaller ones are sub-pixel (invisible) and culled. Critical
 /// coverage is exempt (its small triangles are handled by LOD, never lost).
 const MIN_TRIANGLE_AREA: f32 = 0.5;
+
+/// The near-plane clip threshold in homogeneous `w`. A clip-space vertex is kept
+/// only where `cw >= W_NEAR`; the rest of its triangle is clipped away at the
+/// `cw = W_NEAR` plane. For a standard perspective projection `cw` is the world
+/// distance in front of the camera, so this is a near plane ~`W_NEAR` world units
+/// out — small enough never to over-clip a real app's near plane (retro FPS's is 0.05),
+/// large enough that the surviving `1/cw` divide stays finite and bounded. It is
+/// the clip-space analogue of the GPU's hardware near-plane clip, which is why the
+/// GPU path never showed the phantom-wall smear this prevents.
+const W_NEAR: f32 = 1e-2;
+
+/// A clip-space vertex carrying its resolved flat colour, threaded through the
+/// near-plane clip so interpolated (clipped) vertices keep a correct colour.
+#[derive(Debug, Clone, Copy)]
+struct ClipVertex {
+    clip: [f32; 4],
+    color: [f32; 4],
+}
+
+/// Linear interpolation between two clip-space vertices at parameter `t` — the
+/// new vertex an edge contributes where it crosses the near plane.
+fn lerp_clip(a: &ClipVertex, b: &ClipVertex, t: f32) -> ClipVertex {
+    let mix = |x: f32, y: f32| x + (y - x) * t;
+    ClipVertex {
+        clip: [
+            mix(a.clip[0], b.clip[0]),
+            mix(a.clip[1], b.clip[1]),
+            mix(a.clip[2], b.clip[2]),
+            mix(a.clip[3], b.clip[3]),
+        ],
+        color: [
+            mix(a.color[0], b.color[0]),
+            mix(a.color[1], b.color[1]),
+            mix(a.color[2], b.color[2]),
+            mix(a.color[3], b.color[3]),
+        ],
+    }
+}
+
+/// Clip a triangle against the near plane `cw >= W_NEAR` (Sutherland–Hodgman, one
+/// plane), returning the clipped convex polygon as 0, 3, or 4 clip-space vertices.
+/// Walking the three edges, each emits its start vertex when that vertex is inside,
+/// then the near-plane intersection when the edge crosses — so an all-outside
+/// triangle yields nothing, an all-inside one yields its 3 vertices unchanged, and
+/// a straddling one yields the 3-or-4-vertex front piece with finite `cw`.
+fn clip_near(tri: &[ClipVertex; 3]) -> Vec<ClipVertex> {
+    (0..3)
+        .flat_map(|i| {
+            let cur = tri[i];
+            let nxt = tri[(i + 1) % 3];
+            let cur_in = cur.clip[3] >= W_NEAR;
+            let nxt_in = nxt.clip[3] >= W_NEAR;
+            let crosses = cur_in ^ nxt_in;
+            // Parameter where this edge meets cw = W_NEAR. Only used when the edge
+            // crosses, where the endpoints straddle the plane so the denominator is
+            // non-zero; otherwise the value is discarded with the `then`.
+            let t = (W_NEAR - cur.clip[3]) / (nxt.clip[3] - cur.clip[3]);
+            [
+                cur_in.then_some(cur),
+                crosses.then(|| lerp_clip(&cur, &nxt, t)),
+            ]
+            .into_iter()
+            .flatten()
+        })
+        .collect()
+}
 
 /// Geometry-conversion accounting for one frame. All neutral counts/flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -228,8 +299,9 @@ pub(crate) fn convert(
                 frame.stats.height_tinted_triangles += u32::from(keep) * dc.height_tinted;
                 frame.stats.distance_falloff_applied_triangles += u32::from(keep) * dc.falloff;
                 keep.then(|| dc.overlay.map(|o| frame.overlays.push(o)));
-                let kept = keep.then_some(dc.triangles).unwrap_or_default();
-                let cost = keep.then_some(dc.est_cost).unwrap_or(0);
+                let kept_opt = keep.then_some(dc.triangles);
+                let kept = kept_opt.unwrap_or_default();
+                let cost = [0, dc.est_cost][usize::from(keep)];
                 frame.triangles.extend(kept);
                 spent + cost
             });
@@ -270,11 +342,12 @@ fn convert_draw(
             ..DrawAcc::default()
         },
         |mut acc, tri| {
-            let proj = project_triangle_cued(
-                geo, tri, &mvp, &world, color, object_id, cues, light, w, h,
-            );
-            acc.invalid += u32::from(proj.is_none());
-            proj.into_iter().for_each(|pt| {
+            // 0, 1, or 2 screen triangles after the near-plane clip; empty means the
+            // whole triangle was at/behind the near plane (counted invalid).
+            let tris =
+                project_triangle_cued(geo, tri, &mvp, &world, color, object_id, cues, light, w, h);
+            acc.invalid += u32::from(tris.is_empty());
+            tris.into_iter().for_each(|pt| {
                 acc.projected += 1;
                 let area = triangle_area(&pt.verts);
                 let degenerate = area < AREA_EPS;
@@ -313,8 +386,11 @@ fn convert_draw(
     let pre = acc.candidates.len();
     let keep = decimation_keep(is_critical, pre, cap);
     (pre > keep).then(|| {
-        acc.candidates
-            .sort_by(|a, b| b.area.partial_cmp(&a.area).unwrap_or(core::cmp::Ordering::Equal))
+        acc.candidates.sort_by(|a, b| {
+            b.area
+                .partial_cmp(&a.area)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        })
     });
     acc.candidates.truncate(keep);
     let decimated = (pre - acc.candidates.len()) as u32;
@@ -337,7 +413,8 @@ fn convert_draw(
 
     let n = triangles.len() as u32;
     let is_gameplay = importance == CanvasFallbackImportance::GameplayObject;
-    let overlay = (is_gameplay & !triangles.is_empty()).then(|| draw_overlay(&triangles, object_id));
+    let overlay =
+        (is_gameplay & !triangles.is_empty()).then(|| draw_overlay(&triangles, object_id));
 
     DrawConversion {
         triangles,
@@ -350,9 +427,9 @@ fn convert_draw(
         culled: acc.offscreen + min_culled,
         decimated,
         est_cost,
-        lit: cues.lighting.enabled.then_some(n).unwrap_or(0),
-        height_tinted: cues.enable_height_tint.then_some(n).unwrap_or(0),
-        falloff: cues.enable_distance_detail_falloff.then_some(n).unwrap_or(0),
+        lit: [0, n][usize::from(cues.lighting.enabled)],
+        height_tinted: [0, n][usize::from(cues.enable_height_tint)],
+        falloff: [0, n][usize::from(cues.enable_distance_detail_falloff)],
     }
 }
 
@@ -364,11 +441,14 @@ struct ProjectedTriangle {
     mean_depth: f32,
 }
 
-/// Project one triangle's vertices and gather its depth-cue inputs; `None` if any
-/// vertex is at/behind the near plane (the triangle is culled rather than
-/// producing NaN pixels). The world-space face normal (for fake lighting) and
-/// the world-space mean elevation (for the height tint) come from the model
-/// positions read here, so projection pays for them once.
+/// Project one triangle, **near-plane-clipping it in clip space before the
+/// perspective divide**, into the 0, 1, or 2 screen-space triangles the clip
+/// yields (0 = the whole triangle is at/behind the near plane; 2 = it straddled
+/// and the front piece is a quad). Clipping here — not culling whole straddling
+/// triangles, and not dividing a near-zero `cw` — is what keeps a wall edge that
+/// crosses the camera plane from smearing across the screen. The flat per-triangle
+/// cue inputs (face-normal brightness, world elevation) are computed once from the
+/// model triangle and shared by every clipped piece.
 #[allow(clippy::too_many_arguments)]
 fn project_triangle_cued(
     geo: &MeshGeometry,
@@ -381,48 +461,59 @@ fn project_triangle_cued(
     light: &SceneLight,
     w: u32,
     h: u32,
-) -> Option<ProjectedTriangle> {
+) -> Vec<ProjectedTriangle> {
     let model = [
         geo.position(tri[0]),
         geo.position(tri[1]),
         geo.position(tri[2]),
     ];
-    let vertex = |k: usize| {
-        project_vertex(mvp, model[k], w, h).map(|p| {
-            let mc = geo.color(tri[k]);
-            let color = [
+    // Resolve each vertex to clip space + its flat colour, then clip the triangle
+    // against the near plane (still homogeneous — no divide yet).
+    let clip_verts: [ClipVertex; 3] = [0, 1, 2].map(|k| {
+        let mc = geo.color(tri[k]);
+        ClipVertex {
+            clip: clip_coords(mvp, model[k]),
+            color: [
                 mc[0] * draw_color[0],
                 mc[1] * draw_color[1],
                 mc[2] * draw_color[2],
                 mc[3] * draw_color[3],
-            ];
-            RasterVertex::new(p[0], p[1], p[2], color, object_id)
-        })
-    };
-    vertex(0).zip(vertex(1)).zip(vertex(2)).map(|((a, b), c)| {
-        let verts = [a, b, c];
-        let normal = face_normal_world(&model, world);
-        let brightness = lighting_brightness(normal, light.dir, light.intensity, cues);
-        let mean_model = [
-            (model[0][0] + model[1][0] + model[2][0]) / 3.0,
-            (model[0][1] + model[1][1] + model[2][1]) / 3.0,
-            (model[0][2] + model[1][2] + model[2][2]) / 3.0,
-        ];
+            ],
+        }
+    });
+    // Flat per-triangle cue inputs (shared by every clipped piece).
+    let normal = face_normal_world(&model, world);
+    let brightness = lighting_brightness(normal, light.dir, light.intensity, cues);
+    let mean_model = [
+        (model[0][0] + model[1][0] + model[2][0]) / 3.0,
+        (model[0][1] + model[1][1] + model[2][1]) / 3.0,
+        (model[0][2] + model[1][2] + model[2][2]) / 3.0,
+    ];
+    let elevation = world_y(mean_model, world);
+
+    // Fan-triangulate the clipped convex polygon (0/3/4 verts) from vertex 0, and
+    // only now perspective-divide each surviving (cw >= W_NEAR) vertex to screen.
+    let poly = clip_near(&clip_verts);
+    let fan = 1..poly.len().saturating_sub(1);
+    fan.map(|i| {
+        let verts = [poly[0], poly[i], poly[i + 1]].map(|cv| {
+            let p = clip_to_screen(cv.clip, w, h);
+            RasterVertex::new(p[0], p[1], p[2], cv.color, object_id)
+        });
         ProjectedTriangle {
             verts,
             brightness,
-            world_y: world_y(mean_model, world),
-            mean_depth: (a.depth() + b.depth() + c.depth()) / 3.0,
+            world_y: elevation,
+            mean_depth: (verts[0].depth() + verts[1].depth() + verts[2].depth()) / 3.0,
         }
     })
+    .collect()
 }
 
 /// A gameplay object's screen footprint (bbox + mean depth) from its triangles.
 fn draw_overlay(triangles: &[RasterTriangle], object_id: u64) -> DrawOverlay {
-    let (minx, miny, maxx, maxy, dsum, count) = triangles
-        .iter()
-        .flat_map(|t| t.vertices().iter())
-        .fold(
+    let (minx, miny, maxx, maxy, dsum, count) =
+        triangles.iter().flat_map(|t| t.vertices().iter()).fold(
             (
                 f32::INFINITY,
                 f32::INFINITY,
@@ -464,7 +555,7 @@ fn on_screen(v: &[RasterVertex; 3], w: u32, h: u32) -> bool {
 /// and over `cap`, when the `cap` largest-area triangles are kept.
 fn decimation_keep(is_critical: bool, total: usize, cap: u32) -> usize {
     let over = is_critical & (total > cap as usize);
-    over.then_some(cap as usize).unwrap_or(total)
+    [total, cap as usize][usize::from(over)]
 }
 
 /// Screen-space area (px²) of a projected triangle.
@@ -475,363 +566,4 @@ fn triangle_area(v: &[RasterVertex; 3]) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::canvas_policy::CanvasDebugOverlay;
-    use axiom_host::{FrameCamera, FrameFeatureSet, FramePacket, FrameViewport};
-
-    const IDENTITY: [f32; 16] = [
-        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-    ];
-
-    fn vertex(pos: [f32; 3], color: [f32; 4]) -> [f32; 12] {
-        [
-            pos[0], pos[1], pos[2], 0.0, 1.0, 0.0, 0.0, 0.0, color[0], color[1], color[2], color[3],
-        ]
-    }
-
-    /// A full-screen quad (2 triangles) over NDC [-1,1]² → big coverage → critical.
-    fn ground(id: u64, color: [f32; 4]) -> (u64, Vec<f32>, Vec<u32>) {
-        let mut v = Vec::new();
-        v.extend_from_slice(&vertex([-1.0, -1.0, 0.0], color));
-        v.extend_from_slice(&vertex([1.0, -1.0, 0.0], color));
-        v.extend_from_slice(&vertex([1.0, 1.0, 0.0], color));
-        v.extend_from_slice(&vertex([-1.0, 1.0, 0.0], color));
-        (id, v, vec![0, 1, 2, 0, 2, 3])
-    }
-
-    /// A dense n×n ground grid (2n² triangles), all critical coverage.
-    fn dense_ground(id: u64, n: usize) -> (u64, Vec<f32>, Vec<u32>) {
-        let color = [0.2, 0.6, 0.3, 1.0];
-        let mut verts = Vec::new();
-        (0..=n).for_each(|iy| {
-            (0..=n).for_each(|ix| {
-                let x = -1.0 + 2.0 * ix as f32 / n as f32;
-                let y = -1.0 + 2.0 * iy as f32 / n as f32;
-                verts.extend_from_slice(&vertex([x, y, 0.0], color));
-            })
-        });
-        let stride = (n + 1) as u32;
-        let mut indices = Vec::new();
-        (0..n).for_each(|iy| {
-            (0..n).for_each(|ix| {
-                let i = iy as u32 * stride + ix as u32;
-                indices.extend_from_slice(&[i, i + 1, i + stride, i + 1, i + 1 + stride, i + stride]);
-            })
-        });
-        (id, verts, indices)
-    }
-
-    /// A tiny triangle near a corner — sub-pixel (≈0.1 px²) and non-critical.
-    fn tiny(id: u64) -> (u64, Vec<f32>, Vec<u32>) {
-        let c = [1.0, 1.0, 1.0, 1.0];
-        let d = 0.002;
-        let mut v = Vec::new();
-        v.extend_from_slice(&vertex([-1.0, -1.0, 0.0], c));
-        v.extend_from_slice(&vertex([-1.0 + d, -1.0, 0.0], c));
-        v.extend_from_slice(&vertex([-1.0, -1.0 + d, 0.0], c));
-        (id, v, vec![0, 1, 2])
-    }
-
-    /// A mesh entirely off the right of the screen (NDC x in [2,3]).
-    fn offscreen(id: u64) -> (u64, Vec<f32>, Vec<u32>) {
-        let c = [1.0, 1.0, 1.0, 1.0];
-        let mut v = Vec::new();
-        v.extend_from_slice(&vertex([2.0, -1.0, 0.0], c));
-        v.extend_from_slice(&vertex([3.0, -1.0, 0.0], c));
-        v.extend_from_slice(&vertex([2.0, 1.0, 0.0], c));
-        (id, v, vec![0, 1, 2])
-    }
-
-    fn draw(object_id: u64, mesh_id: u64) -> FrameDrawItem {
-        FrameDrawItem::new(object_id, mesh_id, 9, IDENTITY, IDENTITY, [1.0; 4], false)
-    }
-
-    fn packet(draws: Vec<FrameDrawItem>) -> FramePacket {
-        FramePacket::new(
-            3,
-            180,
-            FrameViewport::new(320, 180),
-            [0.4, 0.6, 0.9, 1.0],
-            Some(FrameCamera::new(IDENTITY, IDENTITY, IDENTITY)),
-            draws,
-            Vec::new(),
-            IDENTITY,
-            FrameFeatureSet::new(false, false, 0, 0),
-        )
-    }
-
-    /// A depth-cue profile with every cue disabled — for tests that assert raw
-    /// (un-shaded) colours and counts.
-    fn cues_off() -> CanvasDepthCueProfile {
-        let mut p = CanvasDepthCueProfile::low_poly_framebuffer();
-        p.fog.enabled = false;
-        p.lighting.enabled = false;
-        p.enable_height_tint = false;
-        p.enable_contact_shadows = false;
-        p.enable_depth_outlines = false;
-        p.enable_distance_detail_falloff = false;
-        p.enable_horizon_silhouette = false;
-        p.enable_vertical_grade = false;
-        p
-    }
-
-    fn opts() -> LowPolyRasterOptions {
-        LowPolyRasterOptions::default().with_depth_cues(cues_off())
-    }
-
-    /// Default 320×180 options with the given cue profile.
-    fn opts_cued(cues: CanvasDepthCueProfile) -> LowPolyRasterOptions {
-        LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 200_000, 8_000_000, cues)
-    }
-
-    #[test]
-    fn one_mesh_produces_raster_triangles_with_resolved_colour() {
-        let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
-        let d = FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 0.0, 0.0, 1.0], false);
-        let out = convert(&packet(vec![d]), &cache, &opts());
-        assert_eq!(out.stats.projected_draws, 1);
-        assert_eq!(out.stats.projected_triangles, 2);
-        assert_eq!(out.stats.skipped_draws, 0);
-        assert_eq!(out.triangles.len(), 2);
-        assert_eq!(out.triangles[0].color(), [1.0, 0.0, 0.0, 1.0]);
-        assert_eq!(out.triangles[0].object_id(), 1);
-        assert_eq!(out.stats.rasterized_objects, 1);
-    }
-
-    #[test]
-    fn missing_mesh_increments_skipped_draws() {
-        let cache = MeshCache::default();
-        let out = convert(&packet(vec![draw(1, 404)]), &cache, &opts());
-        assert_eq!(out.stats.projected_draws, 0);
-        assert_eq!(out.stats.skipped_draws, 1);
-        assert_eq!(out.stats.rasterized_objects, 0);
-        assert!(out.triangles.is_empty());
-    }
-
-    #[test]
-    fn invalid_projection_is_culled_and_counted_no_nans() {
-        let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
-        let zero_mvp = FrameDrawItem::new(1, 7, 9, IDENTITY, [0.0; 16], [1.0; 4], false);
-        let out = convert(&packet(vec![zero_mvp]), &cache, &opts());
-        assert_eq!(out.stats.projected_draws, 1);
-        assert_eq!(out.stats.projected_triangles, 0);
-        assert_eq!(out.stats.skipped_invalid_projection_triangles, 2);
-        assert!(out.triangles.is_empty());
-    }
-
-    #[test]
-    fn offscreen_triangle_is_culled_before_raster() {
-        let cache = MeshCache::load(&[offscreen(7)]);
-        let out = convert(&packet(vec![draw(1, 7)]), &cache, &opts());
-        assert_eq!(out.stats.projected_triangles, 1);
-        assert_eq!(out.stats.culled_triangles, 1);
-        assert!(out.triangles.is_empty());
-    }
-
-    #[test]
-    fn sub_pixel_non_critical_triangle_is_culled() {
-        let cache = MeshCache::load(&[tiny(7)]);
-        let out = convert(&packet(vec![draw(1, 7)]), &cache, &opts());
-        assert_eq!(out.stats.projected_triangles, 1);
-        assert_eq!(out.stats.culled_triangles, 1, "sub-pixel decorative triangle culled");
-        assert!(out.triangles.is_empty());
-    }
-
-    #[test]
-    fn critical_terrain_is_preserved_and_not_decimated_under_the_cap() {
-        let cache = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0])]);
-        let out = convert(&packet(vec![draw(1, 7)]), &cache, &opts());
-        assert_eq!(out.stats.terrain_draws_preserved, 1);
-        assert_eq!(out.stats.terrain_triangles_decimated, 0);
-        assert_eq!(out.stats.critical_coverage_skipped, 0);
-        assert_eq!(out.triangles.len(), 2);
-    }
-
-    #[test]
-    fn critical_terrain_over_cap_is_decimated_but_preserved() {
-        // 10×10 grid = 200 triangles; cap at 50 → keep the 50 largest.
-        let cache = MeshCache::load(&[dense_ground(7, 10)]);
-        let o = LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 50, 8_000_000, cues_off());
-        let out = convert(&packet(vec![draw(1, 7)]), &cache, &o);
-        assert_eq!(out.stats.terrain_draws_preserved, 1);
-        assert_eq!(out.stats.critical_coverage_skipped, 0);
-        assert_eq!(out.triangles.len(), 50);
-        assert_eq!(out.stats.terrain_triangles_decimated, 150);
-    }
-
-    #[test]
-    fn decimation_keep_is_all_unless_critical_and_over_cap() {
-        assert_eq!(decimation_keep(false, 10_000, 50), 10_000);
-        assert_eq!(decimation_keep(true, 30, 50), 30);
-        assert_eq!(decimation_keep(true, 200, 50), 50);
-        assert_eq!(decimation_keep(true, 200, 0), 0);
-    }
-
-    #[test]
-    fn decorative_draw_skipped_once_budget_exhausted_critical_kept() {
-        // Tiny budget: the first (critical) ground spends past it, so a later
-        // decorative object is skipped — but terrain is never skipped.
-        let cache = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0]), small_decorative(8)]);
-        let o = LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 200_000, 10, cues_off());
-        let out = convert(&packet(vec![draw(1, 7), draw(2, 8)]), &cache, &o);
-        assert!(out.stats.budget_exhausted, "budget exceeded by terrain");
-        assert_eq!(out.stats.skipped_decorative_draws, 1);
-        assert_eq!(out.stats.terrain_draws_preserved, 1);
-        assert_eq!(out.stats.critical_coverage_skipped, 0);
-        // Terrain still produced triangles; the decorative object did not.
-        assert!(!out.triangles.is_empty());
-        assert!(out.triangles.iter().all(|t| t.object_id() == 1));
-    }
-
-    /// A small decorative quad: visible, several px² per triangle (so it is not
-    /// sub-pixel-culled), but its total coverage fraction is below the gameplay
-    /// threshold ⇒ Decorative (skippable under budget).
-    fn small_decorative(id: u64) -> (u64, Vec<f32>, Vec<u32>) {
-        let c = [0.9, 0.2, 0.2, 1.0];
-        let s = 0.03;
-        let mut v = Vec::new();
-        v.extend_from_slice(&vertex([-s, -s, 0.0], c));
-        v.extend_from_slice(&vertex([s, -s, 0.0], c));
-        v.extend_from_slice(&vertex([s, s, 0.0], c));
-        v.extend_from_slice(&vertex([-s, s, 0.0], c));
-        (id, v, vec![0, 1, 2, 0, 2, 3])
-    }
-
-    #[test]
-    fn deterministic_for_same_inputs() {
-        let cache = MeshCache::load(&[dense_ground(7, 8)]);
-        let p = packet(vec![draw(1, 7)]);
-        let a = convert(&p, &cache, &opts());
-        let b = convert(&p, &cache, &opts());
-        assert_eq!(a.triangles, b.triangles);
-        assert_eq!(a.stats, b.stats);
-    }
-
-    #[test]
-    fn decimation_keeps_the_largest_triangles_first() {
-        // Two big triangles + many tiny ones, critical, tiny cap → big ones survive.
-        let big = [1.0, 1.0, 1.0, 1.0];
-        let mut verts = Vec::new();
-        verts.extend_from_slice(&vertex([-1.0, -1.0, 0.0], big));
-        verts.extend_from_slice(&vertex([1.0, -1.0, 0.0], big));
-        verts.extend_from_slice(&vertex([0.0, 1.0, 0.0], big));
-        verts.extend_from_slice(&vertex([-1.0, 1.0, 0.0], big));
-        verts.extend_from_slice(&vertex([1.0, 1.0, 0.0], big));
-        verts.extend_from_slice(&vertex([0.0, -1.0, 0.0], big));
-        (0..30).for_each(|k| {
-            let o = -1.0 + 0.001 * k as f32;
-            verts.extend_from_slice(&vertex([o, -1.0, 0.0], big));
-            verts.extend_from_slice(&vertex([o + 0.02, -1.0, 0.0], big));
-            verts.extend_from_slice(&vertex([o, -0.98, 0.0], big));
-        });
-        let mut indices = vec![0, 1, 2, 3, 4, 5];
-        (0..30u32).for_each(|k| {
-            let i = 6 + k * 3;
-            indices.extend_from_slice(&[i, i + 1, i + 2]);
-        });
-        let cache = MeshCache::load(&[(7, verts, indices)]);
-        let o = LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 2, 8_000_000, cues_off());
-        let out = convert(&packet(vec![draw(1, 7)]), &cache, &o);
-        assert_eq!(out.triangles.len(), 2);
-        let kept: f32 = out.triangles.iter().map(|t| triangle_area(t.vertices())).sum();
-        assert!(kept > 1000.0, "kept the big triangles, area {kept}");
-    }
-
-    /// A mid-coverage object — between the gameplay and critical fractions, so it
-    /// classifies as a `GameplayObject` (emits a contact-shadow / outline anchor).
-    fn gameplay_object(id: u64) -> (u64, Vec<f32>, Vec<u32>) {
-        let c = [0.8, 0.3, 0.2, 1.0];
-        let s = 0.15;
-        let mut v = Vec::new();
-        v.extend_from_slice(&vertex([-s, -s, 0.0], c));
-        v.extend_from_slice(&vertex([s, -s, 0.0], c));
-        v.extend_from_slice(&vertex([s, s, 0.0], c));
-        v.extend_from_slice(&vertex([-s, s, 0.0], c));
-        (id, v, vec![0, 1, 2, 0, 2, 3])
-    }
-
-    #[test]
-    fn cue_counters_count_triangles_when_enabled_and_zero_when_off() {
-        let cache = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0])]);
-        let on = convert(
-            &packet(vec![draw(1, 7)]),
-            &cache,
-            &opts_cued(CanvasDepthCueProfile::low_poly_framebuffer()),
-        );
-        assert_eq!(on.stats.lit_triangles, 2);
-        assert_eq!(on.stats.height_tinted_triangles, 2);
-        assert_eq!(on.stats.distance_falloff_applied_triangles, 2);
-        let off = convert(&packet(vec![draw(1, 7)]), &cache, &opts());
-        assert_eq!(off.stats.lit_triangles, 0);
-        assert_eq!(off.stats.height_tinted_triangles, 0);
-        assert_eq!(off.stats.distance_falloff_applied_triangles, 0);
-    }
-
-    #[test]
-    fn lighting_changes_the_triangle_colour_versus_base() {
-        let cache = MeshCache::load(&[ground(7, [0.6, 0.6, 0.6, 1.0])]);
-        let mut lit = CanvasDepthCueProfile::low_poly_framebuffer();
-        lit.enable_height_tint = false;
-        lit.enable_distance_detail_falloff = false;
-        let on = convert(&packet(vec![draw(1, 7)]), &cache, &opts_cued(lit));
-        let off = convert(&packet(vec![draw(1, 7)]), &cache, &opts());
-        // Lighting scales the flat colour, so the shaded triangle differs.
-        assert_ne!(on.triangles[0].color(), off.triangles[0].color());
-        assert_eq!(off.triangles[0].color(), [0.6, 0.6, 0.6, 1.0]);
-    }
-
-    #[test]
-    fn convert_shades_from_the_scene_directional_light() {
-        use axiom_host::FrameLight;
-        // A white ground quad (normal +Z) lit by a RED directional light whose
-        // to-light direction is +Z (straight at the quad).
-        let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
-        let mut cues = CanvasDepthCueProfile::low_poly_framebuffer();
-        cues.enable_height_tint = false;
-        cues.enable_distance_detail_falloff = false;
-        cues.lighting.banded = false;
-        let red_light = FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]);
-        let p = FramePacket::new(
-            3,
-            180,
-            FrameViewport::new(320, 180),
-            [0.4, 0.6, 0.9, 1.0],
-            Some(FrameCamera::new(IDENTITY, IDENTITY, IDENTITY)),
-            vec![draw(1, 7)],
-            vec![red_light],
-            IDENTITY,
-            FrameFeatureSet::new(false, false, 1, 0),
-        );
-        let out = convert(&p, &cache, &opts_cued(cues));
-        // The white surface is tinted by the red light: red survives, G/B vanish.
-        let c = out.triangles[0].color();
-        assert!(c[0] > 0.0, "red channel lit");
-        assert!(c[1].abs() < 1e-6, "green removed by the red light");
-        assert!(c[2].abs() < 1e-6, "blue removed by the red light");
-    }
-
-    #[test]
-    fn gameplay_object_emits_one_overlay_terrain_does_not() {
-        let p = CanvasDepthCueProfile::low_poly_framebuffer();
-        let obj = MeshCache::load(&[gameplay_object(8)]);
-        let out = convert(&packet(vec![draw(42, 8)]), &obj, &opts_cued(p));
-        assert_eq!(out.overlays.len(), 1, "gameplay object emits an overlay anchor");
-        assert_eq!(out.overlays[0].object_id, 42);
-        // Critical terrain emits no contact-shadow/outline anchor.
-        let terrain = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0])]);
-        let t = convert(&packet(vec![draw(1, 7)]), &terrain, &opts_cued(p));
-        assert!(t.overlays.is_empty());
-    }
-
-    #[test]
-    fn deterministic_with_cues_enabled() {
-        let cache = MeshCache::load(&[dense_ground(7, 8)]);
-        let p = packet(vec![draw(1, 7)]);
-        let o = opts_cued(CanvasDepthCueProfile::low_poly_framebuffer());
-        let a = convert(&p, &cache, &o);
-        let b = convert(&p, &cache, &o);
-        assert_eq!(a.triangles, b.triangles);
-        assert_eq!(a.stats, b.stats);
-    }
-}
+mod tests;

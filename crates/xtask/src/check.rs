@@ -470,9 +470,8 @@ fn is_test_module_file(path: &Path, test_module_names: &BTreeSet<String>) -> boo
     let is_mod_rs = path.file_name().and_then(|n| n.to_str()) == Some("mod.rs");
     // A `NAME/mod.rs` directory module is named by its parent dir; otherwise by
     // the file stem.
-    let name = is_mod_rs
-        .then_some(path.parent().and_then(|p| p.file_name()))
-        .unwrap_or(path.file_stem());
+    let name =
+        [path.file_stem(), path.parent().and_then(|p| p.file_name())][usize::from(is_mod_rs)];
     name.and_then(|n| n.to_str())
         .is_some_and(|n| test_module_names.contains(n))
 }

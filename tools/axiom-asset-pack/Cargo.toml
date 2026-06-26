@@ -1,0 +1,40 @@
+# axiom-asset-pack — native asset packer (the producer side of the runtime
+# asset-streaming pipeline whose deterministic core is `modules/axiom-assets`).
+#
+# It reads a human-authored TOML asset set, copies each source blob into an
+# output directory under an id-based filename, computes a deterministic content
+# hash + size for every blob, and emits the engine's Axiom-native binary manifest
+# (`manifest.bin`) via the FORMAT OWNED BY `axiom-assets`
+# (`AssetsApi::encode_manifest`). The output round-trips through
+# `AssetsApi::from_manifest_bytes`, so the runtime streaming brain consumes it
+# directly.
+#
+# A Tool (lives under tools/): outside the engine dependency graph and the
+# coverage/branchless gates. It MAY depend on engine crates (kernel + the assets
+# module); the ban is on engine code depending on a tool, never the reverse.
+[package]
+name = "axiom-asset-pack"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-asset-pack"
+path = "src/main.rs"
+
+[lib]
+name = "axiom_asset_pack"
+path = "src/lib.rs"
+
+[dependencies]
+# The manifest format + validation are OWNED here — reuse, never reinvent.
+axiom-assets = { path = "../../modules/axiom-assets" }
+# AssetId identity primitive + the StableHash deterministic content digest.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+# Readable, derive-based TOML input — the format every Axiom manifest uses.
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"

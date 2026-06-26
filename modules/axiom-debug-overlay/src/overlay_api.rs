@@ -197,7 +197,12 @@ impl DebugOverlayApi {
         self.state.borrow_mut().blur_console();
         self.repaint();
     }
+}
 
+// Diagnostics ingestion + DOM mounting, in a second `impl` block so neither
+// block exceeds the engine's per-impl item budget (a structural split, not a
+// behavioural one — the surface is unchanged).
+impl DebugOverlayApi {
     // --- diagnostics in (primitives only) -----------------------------------
 
     /// Live per-frame counters. Timing is integer-encoded: `fps_milli` is
@@ -210,9 +215,13 @@ impl DebugOverlayApi {
         fps_milli: u32,
         frame_time_micros: u32,
     ) {
-        self.state
-            .borrow_mut()
-            .set_frame(frame_index, tick, sim_ticks, fps_milli, frame_time_micros);
+        self.state.borrow_mut().set_frame(
+            frame_index,
+            tick,
+            sim_ticks,
+            fps_milli,
+            frame_time_micros,
+        );
         self.repaint();
     }
 
@@ -226,9 +235,14 @@ impl DebugOverlayApi {
         audio: &str,
         network: &str,
     ) {
-        self.state
-            .borrow_mut()
-            .set_backends(renderer, canvas_owner, sim_owner, storage, audio, network);
+        self.state.borrow_mut().set_backends(
+            renderer,
+            canvas_owner,
+            sim_owner,
+            storage,
+            audio,
+            network,
+        );
         self.repaint();
     }
 
@@ -240,9 +254,12 @@ impl DebugOverlayApi {
         worker_in: u64,
         worker_out: u64,
     ) {
-        self.state
-            .borrow_mut()
-            .set_counters(webgpu_submissions, canvas2d_frames, worker_in, worker_out);
+        self.state.borrow_mut().set_counters(
+            webgpu_submissions,
+            canvas2d_frames,
+            worker_in,
+            worker_out,
+        );
         self.repaint();
     }
 
@@ -255,6 +272,15 @@ impl DebugOverlayApi {
     /// Document visibility state (e.g. `visible`/`hidden`).
     pub fn set_visibility(&self, visibility_state: &str) {
         self.state.borrow_mut().set_visibility(visibility_state);
+        self.repaint();
+    }
+
+    /// Replace the app-specific read-out rows shown below the engine diagnostics:
+    /// `(label, value)` pairs the app formats itself (e.g. a game's player pose, as
+    /// `("pos", "1.0 8.0")`). The overlay never interprets them, so any app can
+    /// surface its own state without widening this API.
+    pub fn set_app_rows(&self, rows: &[(String, String)]) {
+        self.state.borrow_mut().set_app_rows(rows);
         self.repaint();
     }
 
@@ -401,7 +427,14 @@ mod tests {
     fn diagnostics_setters_are_reflected_in_the_rows() {
         let api = DebugOverlayApi::new();
         api.set_frame(120, 119, 2, 59_940, 16_680);
-        api.set_backends("webgl2", "axiom-windowing", "axiom-runtime", "none", "none", "none");
+        api.set_backends(
+            "webgl2",
+            "axiom-windowing",
+            "axiom-runtime",
+            "none",
+            "none",
+            "none",
+        );
         api.set_counters(7, 0, 1, 2);
         api.set_fallback(1, "webgpu device failed");
         api.set_visibility("visible");
@@ -428,5 +461,27 @@ mod tests {
             .recent_results()
             .iter()
             .any(|(_, _, msg)| msg.contains("renderer: webgl2")));
+    }
+
+    #[test]
+    fn app_rows_surface_through_the_api_and_replace() {
+        let api = DebugOverlayApi::new();
+        api.set_density("normal");
+        api.set_app_rows(&[
+            ("pos".to_string(), "1.0 8.0".to_string()),
+            ("look".to_string(), "0.00 0.00".to_string()),
+        ]);
+        let value = |label: &str| {
+            api.visible_rows()
+                .into_iter()
+                .find(|(l, _)| l == label)
+                .map(|(_, v)| v)
+        };
+        assert_eq!(value("pos"), Some("1.0 8.0".to_string()));
+        assert_eq!(value("look"), Some("0.00 0.00".to_string()));
+        // A later push replaces the rows wholesale.
+        api.set_app_rows(&[("pos".to_string(), "2.0 7.0".to_string())]);
+        assert_eq!(value("pos"), Some("2.0 7.0".to_string()));
+        assert_eq!(value("look"), None);
     }
 }

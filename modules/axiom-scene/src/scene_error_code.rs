@@ -32,6 +32,8 @@ pub enum SceneErrorCode {
     /// A renderable was constructed with an invalid mesh or material
     /// reference (the invalid sentinel `0`).
     InvalidRenderableReference = 9,
+    /// A bounds operation referenced a node with no bounding volume.
+    MissingBounds = 10,
 }
 
 impl SceneErrorCode {
@@ -48,6 +50,7 @@ mod tests {
     fn discriminants_are_stable() {
         assert_eq!(SceneErrorCode::MissingNode.raw(), 1);
         assert_eq!(SceneErrorCode::InvalidRenderableReference.raw(), 9);
+        assert_eq!(SceneErrorCode::MissingBounds.raw(), 10);
     }
 
     #[test]

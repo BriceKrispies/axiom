@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Runtime Asset Streaming (demo)</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 14px; padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif; background: #15171c; color: #d7dbe2;
+      }
+      h1 { font-size: 18px; font-weight: 700; margin: 0; }
+      .sub { color: #9aa3b2; font-size: 13px; max-width: 720px; text-align: center; }
+      #boot { font: 13px ui-monospace, monospace; color: #9fd1ff; min-height: 1.4em; }
+      #status { font: 13px ui-monospace, monospace; color: #cfe9d6; min-height: 1.4em; }
+      table {
+        border-collapse: collapse; font: 13px ui-monospace, monospace;
+        min-width: 560px; max-width: 96vw;
+      }
+      caption { text-align: left; color: #9aa3b2; padding-bottom: 6px; }
+      th, td {
+        border: 1px solid #2a2e36; padding: 4px 10px; text-align: left;
+      }
+      th { background: #1c1f26; color: #aeb6c4; font-weight: 600; }
+      /* Status colors keyed off the data-state the wasm app writes per row. */
+      tr[data-state="0"] td { color: #7c8493; }
+      tr[data-state="1"] td { color: #e6c35c; }
+      tr[data-state="2"] td { color: #6fd089; }
+      tr[data-state="3"] td { color: #e07a7a; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — Runtime Asset Streaming</h1>
+    <div class="sub">
+      The engine boots fast — this page is interactive before any asset finishes —
+      then streams assets in the background, async and in parallel, driven by the
+      deterministic scheduler in the <code>axiom-assets</code> module (priority +
+      dependency order within a concurrency budget). The app performs the fetches
+      the scheduler asks for and feeds the outcomes back each frame. Fetched bytes
+      are opaque blobs here; decoding is out of scope.
+    </div>
+
+    <div id="boot">booting…</div>
+    <div id="status">waiting for manifest…</div>
+
+    <table>
+      <caption>Assets (status updates live as each blob streams in)</caption>
+      <thead>
+        <tr><th>id</th><th>locator</th><th>kind</th><th>deps</th><th>status</th></tr>
+      </thead>
+      <tbody id="assets"></tbody>
+    </table>
+
+    <script type="module">
+      // Cache-bust the JS glue + wasm on every load (the dev/static server sends
+      // no cache headers), matching the other Axiom browser apps.
+      const v = Date.now();
+      const boot = document.getElementById("boot");
+      try {
+        const wasm = await import(`./pkg/axiom_asset_stream_demo.js?v=${v}`);
+        const wasmUrl = new URL(
+          `./pkg/axiom_asset_stream_demo_bg.wasm?v=${v}`,
+          import.meta.url,
+        );
+        await wasm.default({ module_or_path: wasmUrl });
+        wasm.start();
+      } catch (e) {
+        boot.textContent = "Startup failed: " + e;
+        boot.style.color = "#e07a7a";
+        throw e;
+      }
+    </script>
+  </body>
+</html>

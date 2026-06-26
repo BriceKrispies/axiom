@@ -12,14 +12,14 @@ namespace Axiom.Netplay;
 /// same host, over loopback), so it works on Windows 10 with no QUIC/WSL gap and
 /// no manual cert (DTLS is self-negotiated). One HTTP POST exchanges the SDP
 /// offer/answer (non-trickle ICE); the data channel then bridges to the same
-/// transport-neutral <see cref="Game.RunSessionAsync"/>.
+/// transport-neutral <see cref="Room.RunSessionAsync"/>.
 /// </summary>
 public static class WebRtcServer
 {
     private sealed record SdpMessage(string type, string sdp);
 
-    /// <summary>Handle a browser's SDP offer: build a peer + data channel, wire it to the game, return the answer.</summary>
-    public static async Task<IResult> HandleOfferAsync(HttpContext context, Game game, ILogger logger, CancellationToken ct)
+    /// <summary>Handle a browser's SDP offer: build a peer + data channel, wire it to the room, return the answer.</summary>
+    public static async Task<IResult> HandleOfferAsync(HttpContext context, RoomRegistry registry, ILogger logger, CancellationToken ct)
     {
         var offer = await context.Request.ReadFromJsonAsync<SdpMessage>(ct);
         if (offer is null) return Results.BadRequest();
@@ -47,7 +47,7 @@ public static class WebRtcServer
 
             dc.onopen += () => _ = Task.Run(async () =>
             {
-                try { await game.RunSessionAsync(read, send, "webrtc", logger, ct); }
+                try { await registry.ServeAsync(read, send, "webrtc", ct); }
                 finally { pc.close(); }
             });
         };

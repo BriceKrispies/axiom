@@ -79,8 +79,8 @@ impl CanvasDepthCueProfile {
     /// The shipping **subtle** depth-cue set for the `LowPolyFramebuffer`
     /// profile: modest fog, gentle lighting, light height tint, contact shadows
     /// + outlines for gameplay objects, distance falloff, a faint vertical
-    /// grade. The horizon silhouette ships **off** — see the renderer's
-    /// `ARCHITECTURE.md` for the neutral far-terrain band data it would need.
+    ///   grade. The horizon silhouette ships **off** — see the renderer's
+    ///   `ARCHITECTURE.md` for the neutral far-terrain band data it would need.
     pub(crate) fn low_poly_framebuffer() -> Self {
         CanvasDepthCueProfile {
             fog: FogCue {

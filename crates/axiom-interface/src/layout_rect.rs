@@ -12,7 +12,12 @@ pub(crate) struct Rect {
 
 impl Rect {
     pub(crate) fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Rect { x, y, width, height }
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     pub(crate) fn position(self) -> (i32, i32) {
@@ -60,8 +65,14 @@ mod tests {
     fn clamp_keeps_within_bounds() {
         let r = Rect::new(500, 400, 360, 0);
         assert_eq!(r.clamped(1000, 800).position(), (500, 400));
-        assert_eq!(r.with_position(-50, -50).clamped(1000, 800).position(), (0, 0));
-        assert_eq!(r.with_position(5000, 5000).clamped(1000, 800).position(), (1000, 800));
+        assert_eq!(
+            r.with_position(-50, -50).clamped(1000, 800).position(),
+            (0, 0)
+        );
+        assert_eq!(
+            r.with_position(5000, 5000).clamped(1000, 800).position(),
+            (1000, 800)
+        );
     }
 
     #[test]

@@ -26,7 +26,6 @@ enemy_speed     = 0.025
 pitch_limit     = 1.5
 enemy_y         = 0.5
 enemy_scale     = 0.7
-park_y          = -1000.0
 
 # --- Combat / scoring ---
 fire_range      = 14.0

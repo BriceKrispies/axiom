@@ -1,0 +1,20 @@
+[package]
+name = "axiom-assets"
+description = "Axiom engine module: the deterministic runtime asset-streaming brain. Parses an Axiom-native binary manifest and drives a dependency-ordered, priority-and-concurrency-budgeted load-state machine from per-frame completions. Owns no I/O — the app performs the (async, parallel) fetches and feeds completions back — so streaming timing enters as explicit, replayable data."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+# An isolated engine module (kind = "engine-module", allowed_modules = []) that
+# depends only on the kernel: it builds on AssetId, the BinaryWriter/BinaryReader
+# codec, SchemaVersion, and the kernel error model, and nothing else.
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

@@ -104,12 +104,12 @@ impl CausalJournal {
     }
 
     /// Append a causal event, minting and returning its deterministic id.
+    /// `parties` is `(subject, secondary)` — the primary and secondary entities.
     pub fn append(
         &mut self,
         kind: CausalEventKind,
         tick: u64,
-        subject: Option<EntityHandle>,
-        secondary: Option<EntityHandle>,
+        parties: (Option<EntityHandle>, Option<EntityHandle>),
         parent: Option<CauseRef>,
         code: u64,
         payload: Option<FactValue>,
@@ -122,8 +122,8 @@ impl CausalJournal {
                 id,
                 kind,
                 tick,
-                subject,
-                secondary,
+                subject: parties.0,
+                secondary: parties.1,
                 parent,
                 code,
                 payload,
@@ -190,8 +190,7 @@ mod tests {
         let id = journal.append(
             CausalEventKind::new(1),
             42,
-            Some(a),
-            Some(b),
+            (Some(a), Some(b)),
             Some(parent),
             0xABCD,
             Some(FactValue::Unsigned(9)),
@@ -218,18 +217,16 @@ mod tests {
         let e1 = journal.append(
             CausalEventKind::new(1),
             0,
-            Some(a),
-            None,
+            (Some(a), None),
             Some(parent),
             1,
             None,
         );
-        let _e2 = journal.append(CausalEventKind::new(1), 0, Some(b), None, None, 2, None);
+        let _e2 = journal.append(CausalEventKind::new(1), 0, (Some(b), None), None, 2, None);
         let e3 = journal.append(
             CausalEventKind::new(1),
             0,
-            Some(a),
-            None,
+            (Some(a), None),
             Some(parent),
             3,
             None,
@@ -250,12 +247,11 @@ mod tests {
     fn parent_child_chain_links_events() {
         let mut journal = CausalJournal::new();
         // A root event, then a child whose parent is the root event.
-        let root = journal.append(CausalEventKind::new(1), 0, None, None, None, 1, None);
+        let root = journal.append(CausalEventKind::new(1), 0, (None, None), None, 1, None);
         let child = journal.append(
             CausalEventKind::new(2),
             1,
-            None,
-            None,
+            (None, None),
             Some(CauseRef::Event(root)),
             2,
             None,

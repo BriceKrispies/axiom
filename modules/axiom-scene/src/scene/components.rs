@@ -1,0 +1,226 @@
+//! Component attachment on scene nodes — the camera, light, and renderable
+//! facts keyed by node entity. A child module so it reaches `Scene`'s private
+//! internals while keeping `scene.rs` within the per-file size budget, and so
+//! neither `impl Scene` block exceeds the engine's impl-block size budget.
+
+use super::Scene;
+use crate::camera::Camera;
+use crate::light::Light;
+use crate::renderable::Renderable;
+use crate::scene_error::SceneError;
+use crate::scene_node_id::SceneNodeId;
+use crate::scene_result::SceneResult;
+
+impl Scene {
+    pub(crate) fn add_camera(&mut self, node: SceneNodeId, camera: Camera) -> SceneResult<()> {
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_camera: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .cameras
+                    .insert(Self::entity(node), camera);
+            })
+    }
+
+    pub(crate) fn camera(&self, node: SceneNodeId) -> Option<&Camera> {
+        self.world.storage().cameras.get(Self::entity(node))
+    }
+
+    pub(crate) fn remove_camera(&mut self, node: SceneNodeId) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .cameras
+            .remove(Self::entity(node))
+            .map(|_| ())
+            .ok_or_else(|| SceneError::missing_camera("remove_camera: node has no camera"))
+    }
+
+    pub(crate) fn add_light(&mut self, node: SceneNodeId, light: Light) -> SceneResult<()> {
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_light: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .lights
+                    .insert(Self::entity(node), light);
+            })
+    }
+
+    pub(crate) fn remove_light(&mut self, node: SceneNodeId) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .lights
+            .remove(Self::entity(node))
+            .map(|_| ())
+            .ok_or_else(|| SceneError::missing_light("remove_light: node has no light"))
+    }
+
+    pub(crate) fn add_renderable(
+        &mut self,
+        node: SceneNodeId,
+        renderable: Renderable,
+    ) -> SceneResult<()> {
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_renderable: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .renderables
+                    .insert(Self::entity(node), renderable);
+            })
+    }
+
+    pub(crate) fn remove_renderable(&mut self, node: SceneNodeId) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .renderables
+            .remove(Self::entity(node))
+            .map(|_| ())
+            .ok_or_else(|| {
+                SceneError::missing_renderable("remove_renderable: node has no renderable")
+            })
+    }
+
+    pub(crate) fn set_renderable_visible(
+        &mut self,
+        node: SceneNodeId,
+        visible: bool,
+    ) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .renderables
+            .get_mut(Self::entity(node))
+            .map(|r| r.set_visible(visible))
+            .ok_or_else(|| {
+                SceneError::missing_renderable("set_renderable_visible: node has no renderable")
+            })
+    }
+
+    /// Mark whether the renderable on `node` casts a contact shadow (a discrete
+    /// dynamic object opts in; level geometry stays `false`).
+    pub(crate) fn set_renderable_casts_contact_shadow(
+        &mut self,
+        node: SceneNodeId,
+        casts: bool,
+    ) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .renderables
+            .get_mut(Self::entity(node))
+            .map(|r| r.set_casts_contact_shadow(casts))
+            .ok_or_else(|| {
+                SceneError::missing_renderable(
+                    "set_renderable_casts_contact_shadow: node has no renderable",
+                )
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::material_ref::MaterialRef;
+    use crate::mesh_ref::MeshRef;
+    use crate::scene_error_code::SceneErrorCode;
+    use axiom_kernel::{Meters, Radians, Ratio};
+    use axiom_math::{MathApi, Transform, Vec3};
+
+    fn math() -> MathApi {
+        MathApi::new()
+    }
+
+    fn node(s: &mut Scene) -> SceneNodeId {
+        s.create_node(Transform::IDENTITY)
+    }
+
+    #[test]
+    fn add_and_remove_camera() {
+        let mut s = Scene::new();
+        let n = node(&mut s);
+        let cam = Camera::perspective(
+            &math(),
+            Radians::new(std::f32::consts::FRAC_PI_2).unwrap(),
+            Ratio::new(1.0).unwrap(),
+            Meters::new(0.1).unwrap(),
+            Meters::new(100.0).unwrap(),
+        )
+        .unwrap();
+        s.add_camera(n, cam).unwrap();
+        assert_eq!(s.camera_count(), 1);
+        // Missing node.
+        assert_eq!(
+            s.add_camera(SceneNodeId::from_raw(99), cam)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingNode
+        );
+        s.remove_camera(n).unwrap();
+        assert_eq!(s.camera_count(), 0);
+        // Removing absent camera fails.
+        assert_eq!(
+            s.remove_camera(n).unwrap_err().code(),
+            SceneErrorCode::MissingCamera
+        );
+    }
+
+    #[test]
+    fn add_and_remove_light() {
+        let mut s = Scene::new();
+        let n = node(&mut s);
+        let l = Light::directional(&math(), Vec3::ONE, Ratio::new(1.0).unwrap()).unwrap();
+        s.add_light(n, l).unwrap();
+        assert_eq!(s.light_count(), 1);
+        assert_eq!(
+            s.add_light(SceneNodeId::from_raw(99), l)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingNode
+        );
+        s.remove_light(n).unwrap();
+        assert_eq!(
+            s.remove_light(n).unwrap_err().code(),
+            SceneErrorCode::MissingLight
+        );
+    }
+
+    #[test]
+    fn add_remove_and_toggle_renderable() {
+        let mut s = Scene::new();
+        let n = node(&mut s);
+        let r = Renderable::new(MeshRef::from_raw(1), MaterialRef::from_raw(2)).unwrap();
+        s.add_renderable(n, r).unwrap();
+        assert_eq!(s.renderable_count(), 1);
+        assert_eq!(
+            s.add_renderable(SceneNodeId::from_raw(99), r)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingNode
+        );
+        // Toggle visibility + contact-shadow casting, present + missing. (The
+        // caster value flowing through to a snapshot is asserted in the
+        // render-pipeline tests.)
+        s.set_renderable_visible(n, false).unwrap();
+        s.set_renderable_casts_contact_shadow(n, true).unwrap();
+        assert_eq!(
+            s.set_renderable_visible(SceneNodeId::from_raw(99), true)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingRenderable
+        );
+        assert_eq!(
+            s.set_renderable_casts_contact_shadow(SceneNodeId::from_raw(99), true)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingRenderable
+        );
+        s.remove_renderable(n).unwrap();
+        assert_eq!(
+            s.remove_renderable(n).unwrap_err().code(),
+            SceneErrorCode::MissingRenderable
+        );
+    }
+}

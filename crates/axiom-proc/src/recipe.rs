@@ -26,7 +26,11 @@ impl Recipe {
 
     fn push(&mut self, op: NodeOp, immediate: u64, inputs: [usize; 2]) -> usize {
         let index = self.nodes.len();
-        self.nodes.push(RecipeNode { op, immediate, inputs });
+        self.nodes.push(RecipeNode {
+            op,
+            immediate,
+            inputs,
+        });
         index
     }
 
