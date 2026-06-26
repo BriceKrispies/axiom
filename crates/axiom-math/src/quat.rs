@@ -150,7 +150,7 @@ impl Quat {
 
     /// Branchless choose: `self` when `cond`, else `other`.
     fn select(self, cond: bool, other: Quat) -> Quat {
-        cond.then_some(self).unwrap_or(other)
+        [other, self][usize::from(cond)]
     }
 
     /// Squared length (`x² + y² + z² + w²`).

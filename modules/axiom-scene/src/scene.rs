@@ -9,18 +9,15 @@
 //! world-system), so on-demand updates and per-frame advances run identical
 //! logic.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use axiom_frame::FrameContext;
 use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, KernelResult, Reflect};
 use axiom_math::{Transform, Vec3};
 
-use crate::camera::Camera;
 use crate::controller_command::decode_controller;
-use crate::light::Light;
 use crate::player_command::decode_move;
 use crate::procanim::ProcAnim;
-use crate::renderable::Renderable;
 use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
@@ -32,6 +29,24 @@ use crate::scene_storage::{
 use crate::spin::Spin;
 
 use axiom_ecs::World;
+
+/// Bounding volumes and the spatial queries (raycast / overlap) over them —
+/// Category 2 of the game vocabulary. A child module so it reaches `Scene`'s
+/// internals while keeping this file within the engine's per-file size budget.
+mod queries;
+
+/// Runtime node lifecycle (despawn) — Category 3 of the game vocabulary. A child
+/// module for the same reason.
+mod lifecycle;
+
+/// Component attachment (camera / light / renderable) on nodes. A child module
+/// so neither `impl Scene` block exceeds the impl-block size budget and this
+/// file stays within the per-file size budget.
+mod components;
+
+/// Parent/child hierarchy linkage and its cycle guard. A child module for the
+/// same size-budget reasons.
+mod hierarchy;
 
 /// The deterministic 3D scene: an [`axiom_ecs::World<SceneStorage>`].
 ///
@@ -133,6 +148,46 @@ impl Scene {
             .ok_or_else(|| SceneError::missing_node("scene does not contain that node"))
     }
 
+    /// Every node's `(id, local transform)`, in ascending node-id order — the
+    /// enumeration behind typed `query::<Transform>()`. Reads the `locals` column
+    /// (entity present ⟺ live node), so it lists exactly the live nodes.
+    pub(crate) fn node_transforms(&self) -> Vec<(SceneNodeId, Transform)> {
+        self.world
+            .storage()
+            .locals
+            .iter()
+            .map(|(entity, local)| (SceneNodeId::from_raw(entity.raw()), *local))
+            .collect()
+    }
+
+    /// The local-space translation of the node marked with `player` index, if
+    /// such a node exists. Player nodes are unparented, so this is also their
+    /// world translation. It resolves the index exactly as the player-move system
+    /// does (deterministic `BTreeMap` scan), giving a read-only projection of
+    /// authoritative scene state — not a separate, divergeable source of truth.
+    pub(crate) fn player_translation(&self, player: u32) -> Option<Vec3> {
+        let storage = self.world.storage();
+        storage
+            .players
+            .iter()
+            .find_map(|(&entity, &index)| (index == player).then_some(entity))
+            .and_then(|entity| storage.locals.get(entity).map(|local| local.translation))
+    }
+
+    /// The node handle marked with `player` index, if any. Resolves the index the
+    /// same deterministic way [`Self::player_translation`] does, but hands back
+    /// the node's [`SceneNodeId`] — so a caller that authored players by index can
+    /// recover the first-class handle to address them by Entity afterward.
+    pub(crate) fn player_entity(&self, player: u32) -> Option<SceneNodeId> {
+        self.world
+            .storage()
+            .players
+            .iter()
+            .find_map(|(&entity, &index)| {
+                (index == player).then(|| SceneNodeId::from_raw(entity.raw()))
+            })
+    }
+
     pub(crate) fn parent_of(&self, id: SceneNodeId) -> Option<SceneNodeId> {
         self.world
             .storage()
@@ -141,160 +196,7 @@ impl Scene {
             .map(|p| SceneNodeId::from_raw(p.raw()))
     }
 
-    // --- Hierarchy ---
-
-    pub(crate) fn set_parent(
-        &mut self,
-        child: SceneNodeId,
-        parent: SceneNodeId,
-    ) -> SceneResult<()> {
-        (child != parent)
-            .then_some(())
-            .ok_or_else(|| {
-                SceneError::self_parenting("set_parent: a node cannot be its own parent")
-            })
-            .and_then(|()| {
-                self.is_node(child)
-                    .then_some(())
-                    .ok_or_else(|| SceneError::missing_node("set_parent: child id not in scene"))
-            })
-            .and_then(|()| {
-                self.is_node(parent)
-                    .then_some(())
-                    .ok_or_else(|| SceneError::missing_node("set_parent: parent id not in scene"))
-            })
-            .and_then(|()| {
-                (!self.would_introduce_cycle(Self::entity(child), Self::entity(parent)))
-                    .then_some(())
-                    .ok_or_else(|| {
-                        SceneError::hierarchy_cycle(
-                            "set_parent: assignment would introduce a cycle",
-                        )
-                    })
-            })
-            .map(|()| {
-                self.world
-                    .storage_mut()
-                    .parents
-                    .insert(Self::entity(child), Self::entity(parent));
-            })
-    }
-
-    pub(crate) fn clear_parent(&mut self, child: SceneNodeId) -> SceneResult<()> {
-        self.is_node(child)
-            .then_some(())
-            .ok_or_else(|| SceneError::missing_node("clear_parent: child id not in scene"))
-            .map(|()| {
-                self.world.storage_mut().parents.remove(Self::entity(child));
-            })
-    }
-
-    /// Walk upward from `new_parent`; the assignment cycles iff we reach
-    /// `child` (a direct ancestor loop) or revisit a node (a pre-existing
-    /// cycle, only reachable by corrupting the parents column directly).
-    fn would_introduce_cycle(&self, child: EntityId, new_parent: EntityId) -> bool {
-        let parents = &self.world.storage().parents;
-        // Walk the ancestor chain from `new_parent` as a lazy iterator, halting
-        // the moment a node repeats (a pre-existing cycle) so the walk is finite.
-        // The assignment cycles iff that finite walk visits `child`.
-        let mut visited: BTreeSet<EntityId> = BTreeSet::new();
-        std::iter::successors(Some(new_parent), |&id| parents.get(id).copied())
-            // Each step is a cycle hit iff it reaches `child` or revisits a node;
-            // `scan` yields one bool per visited ancestor and `any` short-circuits
-            // on the first hit, so the lazy walk never runs past the first repeat.
-            .scan((), |(), id| Some((id == child) | !visited.insert(id)))
-            .any(|hit| hit)
-    }
-
-    // --- Components ---
-
-    pub(crate) fn add_camera(&mut self, node: SceneNodeId, camera: Camera) -> SceneResult<()> {
-        self.is_node(node)
-            .then_some(())
-            .ok_or_else(|| SceneError::missing_node("add_camera: node id not in scene"))
-            .map(|()| {
-                self.world
-                    .storage_mut()
-                    .cameras
-                    .insert(Self::entity(node), camera);
-            })
-    }
-
-    pub(crate) fn camera(&self, node: SceneNodeId) -> Option<&Camera> {
-        self.world.storage().cameras.get(Self::entity(node))
-    }
-
-    pub(crate) fn remove_camera(&mut self, node: SceneNodeId) -> SceneResult<()> {
-        self.world
-            .storage_mut()
-            .cameras
-            .remove(Self::entity(node))
-            .map(|_| ())
-            .ok_or_else(|| SceneError::missing_camera("remove_camera: node has no camera"))
-    }
-
-    pub(crate) fn add_light(&mut self, node: SceneNodeId, light: Light) -> SceneResult<()> {
-        self.is_node(node)
-            .then_some(())
-            .ok_or_else(|| SceneError::missing_node("add_light: node id not in scene"))
-            .map(|()| {
-                self.world
-                    .storage_mut()
-                    .lights
-                    .insert(Self::entity(node), light);
-            })
-    }
-
-    pub(crate) fn remove_light(&mut self, node: SceneNodeId) -> SceneResult<()> {
-        self.world
-            .storage_mut()
-            .lights
-            .remove(Self::entity(node))
-            .map(|_| ())
-            .ok_or_else(|| SceneError::missing_light("remove_light: node has no light"))
-    }
-
-    pub(crate) fn add_renderable(
-        &mut self,
-        node: SceneNodeId,
-        renderable: Renderable,
-    ) -> SceneResult<()> {
-        self.is_node(node)
-            .then_some(())
-            .ok_or_else(|| SceneError::missing_node("add_renderable: node id not in scene"))
-            .map(|()| {
-                self.world
-                    .storage_mut()
-                    .renderables
-                    .insert(Self::entity(node), renderable);
-            })
-    }
-
-    pub(crate) fn remove_renderable(&mut self, node: SceneNodeId) -> SceneResult<()> {
-        self.world
-            .storage_mut()
-            .renderables
-            .remove(Self::entity(node))
-            .map(|_| ())
-            .ok_or_else(|| {
-                SceneError::missing_renderable("remove_renderable: node has no renderable")
-            })
-    }
-
-    pub(crate) fn set_renderable_visible(
-        &mut self,
-        node: SceneNodeId,
-        visible: bool,
-    ) -> SceneResult<()> {
-        self.world
-            .storage_mut()
-            .renderables
-            .get_mut(Self::entity(node))
-            .map(|r| r.set_visible(visible))
-            .ok_or_else(|| {
-                SceneError::missing_renderable("set_renderable_visible: node has no renderable")
-            })
-    }
+    // --- Players / controllers (per-tick command-driven node marks) ---
 
     /// Mark `node` as the controllable node for `player` index, so per-tick move
     /// commands addressed to that index translate it (via [`PlayerMoveSystem`]).
@@ -432,26 +334,6 @@ impl Scene {
                 storage.controllers = controllers;
             })
     }
-
-    /// Mark whether the renderable on `node` casts a contact shadow (a discrete
-    /// dynamic object opts in; level geometry stays `false`). Lives in this second
-    /// `impl Scene` block so the main block stays within the impl-size budget.
-    pub(crate) fn set_renderable_casts_contact_shadow(
-        &mut self,
-        node: SceneNodeId,
-        casts: bool,
-    ) -> SceneResult<()> {
-        self.world
-            .storage_mut()
-            .renderables
-            .get_mut(Self::entity(node))
-            .map(|r| r.set_casts_contact_shadow(casts))
-            .ok_or_else(|| {
-                SceneError::missing_renderable(
-                    "set_renderable_casts_contact_shadow: node has no renderable",
-                )
-            })
-    }
 }
 
 /// Read the `players` map: a count then that many `(entity, index)` pairs.
@@ -494,12 +376,6 @@ impl Default for Scene {
 mod tests {
     use super::*;
     use crate::scene_error_code::SceneErrorCode;
-    use axiom_kernel::{Meters, Radians, Ratio};
-    use axiom_math::{MathApi, Vec3};
-
-    fn math() -> MathApi {
-        MathApi::new()
-    }
 
     fn node(s: &mut Scene) -> SceneNodeId {
         s.create_node(Transform::IDENTITY)
@@ -565,183 +441,6 @@ mod tests {
     }
 
     #[test]
-    fn set_parent_links_and_parent_of_reports_it() {
-        let mut s = Scene::new();
-        let p = node(&mut s);
-        let c = node(&mut s);
-        s.set_parent(c, p).unwrap();
-        assert_eq!(s.parent_of(c), Some(p));
-        assert_eq!(s.parent_of(p), None);
-    }
-
-    #[test]
-    fn self_parenting_fails() {
-        let mut s = Scene::new();
-        let n = node(&mut s);
-        assert_eq!(
-            s.set_parent(n, n).unwrap_err().code(),
-            SceneErrorCode::SelfParenting
-        );
-    }
-
-    #[test]
-    fn set_parent_missing_child_or_parent_fails() {
-        let mut s = Scene::new();
-        let p = node(&mut s);
-        assert_eq!(
-            s.set_parent(SceneNodeId::from_raw(99), p)
-                .unwrap_err()
-                .code(),
-            SceneErrorCode::MissingNode
-        );
-        let c = node(&mut s);
-        assert_eq!(
-            s.set_parent(c, SceneNodeId::from_raw(99))
-                .unwrap_err()
-                .code(),
-            SceneErrorCode::MissingNode
-        );
-    }
-
-    #[test]
-    fn cycle_assignment_is_rejected() {
-        // chain: a <- b <- c ; making a a child of c would loop.
-        let mut s = Scene::new();
-        let a = node(&mut s);
-        let b = node(&mut s);
-        let c = node(&mut s);
-        s.set_parent(b, a).unwrap();
-        s.set_parent(c, b).unwrap();
-        assert_eq!(
-            s.set_parent(a, c).unwrap_err().code(),
-            SceneErrorCode::HierarchyCycle
-        );
-    }
-
-    #[test]
-    fn preexisting_cycle_trips_the_visited_guard() {
-        // Corrupt the parents column into a 2-cycle (a->b->a), unreachable via
-        // the public API, then walk from `a` looking for an unrelated child:
-        // the walk revisits `a` and the visited-guard returns true.
-        let mut s = Scene::new();
-        let a = node(&mut s);
-        let b = node(&mut s);
-        s.world
-            .storage_mut()
-            .parents
-            .insert(Scene::entity(a), Scene::entity(b));
-        s.world
-            .storage_mut()
-            .parents
-            .insert(Scene::entity(b), Scene::entity(a));
-        assert!(s.would_introduce_cycle(Scene::entity(SceneNodeId::from_raw(99)), Scene::entity(a)));
-    }
-
-    #[test]
-    fn clear_parent_present_and_missing() {
-        let mut s = Scene::new();
-        let p = node(&mut s);
-        let c = node(&mut s);
-        s.set_parent(c, p).unwrap();
-        s.clear_parent(c).unwrap();
-        assert_eq!(s.parent_of(c), None);
-        // Clearing a root (no parent) still succeeds.
-        s.clear_parent(p).unwrap();
-        // Missing node fails.
-        assert_eq!(
-            s.clear_parent(SceneNodeId::from_raw(99))
-                .unwrap_err()
-                .code(),
-            SceneErrorCode::MissingNode
-        );
-    }
-
-    #[test]
-    fn add_and_remove_camera() {
-        let mut s = Scene::new();
-        let n = node(&mut s);
-        let cam = Camera::perspective(
-            &math(),
-            Radians::new(std::f32::consts::FRAC_PI_2).unwrap(),
-            Ratio::new(1.0).unwrap(),
-            Meters::new(0.1).unwrap(),
-            Meters::new(100.0).unwrap(),
-        )
-        .unwrap();
-        s.add_camera(n, cam).unwrap();
-        assert_eq!(s.camera_count(), 1);
-        // Missing node.
-        assert_eq!(
-            s.add_camera(SceneNodeId::from_raw(99), cam)
-                .unwrap_err()
-                .code(),
-            SceneErrorCode::MissingNode
-        );
-        s.remove_camera(n).unwrap();
-        assert_eq!(s.camera_count(), 0);
-        // Removing absent camera fails.
-        assert_eq!(
-            s.remove_camera(n).unwrap_err().code(),
-            SceneErrorCode::MissingCamera
-        );
-    }
-
-    #[test]
-    fn add_and_remove_light() {
-        let mut s = Scene::new();
-        let n = node(&mut s);
-        let l = Light::directional(&math(), Vec3::ONE, Ratio::new(1.0).unwrap()).unwrap();
-        s.add_light(n, l).unwrap();
-        assert_eq!(s.light_count(), 1);
-        assert_eq!(
-            s.add_light(SceneNodeId::from_raw(99), l)
-                .unwrap_err()
-                .code(),
-            SceneErrorCode::MissingNode
-        );
-        s.remove_light(n).unwrap();
-        assert_eq!(
-            s.remove_light(n).unwrap_err().code(),
-            SceneErrorCode::MissingLight
-        );
-    }
-
-    #[test]
-    fn add_remove_and_toggle_renderable() {
-        use crate::material_ref::MaterialRef;
-        use crate::mesh_ref::MeshRef;
-        let mut s = Scene::new();
-        let n = node(&mut s);
-        let r = Renderable::new(MeshRef::from_raw(1), MaterialRef::from_raw(2)).unwrap();
-        s.add_renderable(n, r).unwrap();
-        assert_eq!(s.renderable_count(), 1);
-        assert_eq!(
-            s.add_renderable(SceneNodeId::from_raw(99), r)
-                .unwrap_err()
-                .code(),
-            SceneErrorCode::MissingNode
-        );
-        // Toggle visibility + contact-shadow casting, present + missing. (The
-        // caster value flowing through to a snapshot is asserted in the
-        // render-pipeline tests.)
-        s.set_renderable_visible(n, false).unwrap();
-        s.set_renderable_casts_contact_shadow(n, true).unwrap();
-        assert_eq!(
-            s.set_renderable_visible(SceneNodeId::from_raw(99), true).unwrap_err().code(),
-            SceneErrorCode::MissingRenderable
-        );
-        assert_eq!(
-            s.set_renderable_casts_contact_shadow(SceneNodeId::from_raw(99), true).unwrap_err().code(),
-            SceneErrorCode::MissingRenderable
-        );
-        s.remove_renderable(n).unwrap();
-        assert_eq!(
-            s.remove_renderable(n).unwrap_err().code(),
-            SceneErrorCode::MissingRenderable
-        );
-    }
-
-    #[test]
     fn add_spin_present_and_missing() {
         let mut s = Scene::new();
         let n = node(&mut s);
@@ -770,6 +469,9 @@ mod tests {
 #[cfg(test)]
 mod frame_tests {
     use super::*;
+    use crate::camera::Camera;
+    use crate::light::Light;
+    use crate::renderable::Renderable;
     use axiom_frame::FrameApi;
     use axiom_host::{
         HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
@@ -979,9 +681,7 @@ mod frame_tests {
         s.write_state(&mut writer);
         let bytes = writer.into_bytes();
         let mut restored = Scene::new();
-        restored
-            .read_state(&mut BinaryReader::new(&bytes))
-            .unwrap();
+        restored.read_state(&mut BinaryReader::new(&bytes)).unwrap();
 
         // Identity, columns, and both maps survive the round-trip.
         assert_eq!(restored.node_count(), s.node_count());
@@ -991,7 +691,13 @@ mod frame_tests {
         );
         assert_eq!(restored.world.storage().players, s.world.storage().players);
         // The accumulated controller orientation (yaw/pitch) was preserved.
-        let ctrl = restored.world.storage().controllers.values().next().unwrap();
+        let ctrl = restored
+            .world
+            .storage()
+            .controllers
+            .values()
+            .next()
+            .unwrap();
         assert_eq!(ctrl.yaw, 0.5);
         assert_eq!(ctrl.pitch, 0.3);
 

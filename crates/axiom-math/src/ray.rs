@@ -62,9 +62,11 @@ impl Ray {
         self.origin.add(self.direction.mul_scalar(t))
     }
 
-    /// Slab-test ray/Aabb intersection. Returns `true` when the ray enters the
-    /// box at a non-negative parameter.
-    pub fn intersect_aabb(&self, aabb: &Aabb) -> bool {
+    /// The ray/Aabb slab overlap range `(tmin, tmax)` when the ray's line
+    /// crosses the box, or `None` on a miss. The shared core of
+    /// [`Self::intersect_aabb`] (boolean form) and [`Self::intersect_aabb_entry`]
+    /// (entry-distance form), so the slab arithmetic lives in exactly one place.
+    fn slab_range(&self, aabb: &Aabb) -> Option<(f32, f32)> {
         let min = aabb.min();
         let max = aabb.max();
         let ds = [self.direction.x, self.direction.y, self.direction.z];
@@ -72,34 +74,48 @@ impl Ray {
         let los = [min.x, min.y, min.z];
         let his = [max.x, max.y, max.z];
         // Fold the slab test over the three axes, carrying (tmin, tmax). Any
-        // axis that proves a miss short-circuits via `Err(false)`, mirroring the
+        // axis that proves a miss short-circuits via `Err(())`, mirroring the
         // original mid-loop `return false`. All scalar conditionals are replaced
         // by `min`/`max` (bit-identical for the finite/inf values that arise
         // here, since no operand is NaN) and boolean algebra.
-        let folded = (0..3).try_fold((0.0f32, f32::INFINITY), |(tmin, tmax), i| {
-            let d = ds[i];
-            let o = os[i];
-            let lo = los[i];
-            let hi = his[i];
-            let parallel = d.abs() < 1.0e-20;
-            let parallel_miss = parallel & ((o < lo) | (o > hi));
-            // Non-parallel slab update. Computed unconditionally (pure, no
-            // panic); only applied when `!parallel`.
-            let inv = 1.0 / d;
-            let raw_t1 = (lo - o) * inv;
-            let raw_t2 = (hi - o) * inv;
-            let t1 = raw_t1.min(raw_t2); // post-swap lower bound
-            let t2 = raw_t1.max(raw_t2); // post-swap upper bound
-            let updated_tmin = tmin.max(t1);
-            let updated_tmax = tmax.min(t2);
-            let next_tmin = parallel.then_some(tmin).unwrap_or(updated_tmin);
-            let next_tmax = parallel.then_some(tmax).unwrap_or(updated_tmax);
-            let slab_miss = !parallel & (next_tmin > next_tmax);
-            (parallel_miss | slab_miss)
-                .then_some(Err(false))
-                .unwrap_or(Ok((next_tmin, next_tmax)))
-        });
-        folded.map_or(false, |(_, tmax)| tmax >= 0.0)
+        (0..3)
+            .try_fold((0.0f32, f32::INFINITY), |(tmin, tmax), i| {
+                let d = ds[i];
+                let o = os[i];
+                let lo = los[i];
+                let hi = his[i];
+                let parallel = d.abs() < 1.0e-20;
+                let parallel_miss = parallel & ((o < lo) | (o > hi));
+                // Non-parallel slab update. Computed unconditionally (pure, no
+                // panic); only applied when `!parallel`.
+                let inv = 1.0 / d;
+                let raw_t1 = (lo - o) * inv;
+                let raw_t2 = (hi - o) * inv;
+                let t1 = raw_t1.min(raw_t2); // post-swap lower bound
+                let t2 = raw_t1.max(raw_t2); // post-swap upper bound
+                let updated_tmin = tmin.max(t1);
+                let updated_tmax = tmax.min(t2);
+                let next_tmin = [updated_tmin, tmin][usize::from(parallel)];
+                let next_tmax = [updated_tmax, tmax][usize::from(parallel)];
+                let slab_miss = !parallel & (next_tmin > next_tmax);
+                [Ok((next_tmin, next_tmax)), Err(())][usize::from(parallel_miss | slab_miss)]
+            })
+            .ok()
+    }
+
+    /// Slab-test ray/Aabb intersection. Returns `true` when the ray enters the
+    /// box at a non-negative parameter.
+    pub fn intersect_aabb(&self, aabb: &Aabb) -> bool {
+        self.slab_range(aabb).is_some_and(|(_, tmax)| tmax >= 0.0)
+    }
+
+    /// The distance along the ray at which it first enters `aabb`, or `None` if
+    /// it never does. Clamped to `0` when the origin is already inside the box,
+    /// so the result is always a non-negative entry distance — the form a
+    /// nearest-hit query folds over to pick the closest of several boxes.
+    pub fn intersect_aabb_entry(&self, aabb: &Aabb) -> Option<f32> {
+        self.slab_range(aabb)
+            .and_then(|(tmin, tmax)| (tmax >= 0.0).then_some(tmin.max(0.0)))
     }
 
     /// Geometric ray/sphere intersection test.
@@ -454,5 +470,39 @@ mod cov {
         // is not it; instead start beyond x=7 heading +X: never re-enters.
         let r2 = ray(Vec3::new(8.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
         assert!(!r2.intersect_aabb(&aabb));
+    }
+
+    // intersect_aabb_entry: a frontal hit returns the entry distance.
+    #[test]
+    fn intersect_aabb_entry_returns_front_face_distance() {
+        let aabb = Aabb::new(Vec3::new(3.0, -1.0, -1.0), Vec3::new(7.0, 1.0, 1.0)).unwrap();
+        let r = ray(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(r.intersect_aabb_entry(&aabb), Some(3.0));
+    }
+
+    // Origin inside the box clamps the entry distance to 0 (the `tmin.max(0.0)`
+    // arm), distinguishing it from the negative raw tmin.
+    #[test]
+    fn intersect_aabb_entry_clamps_to_zero_when_inside() {
+        let aabb = Aabb::new(Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        let r = ray(Vec3::new(1.0, 1.0, 1.0), Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(r.intersect_aabb_entry(&aabb), Some(0.0));
+    }
+
+    // A clean miss is `None` (the slab_range `None` arm).
+    #[test]
+    fn intersect_aabb_entry_miss_is_none() {
+        let aabb = Aabb::new(Vec3::new(1.0, -1.0, -1.0), Vec3::new(2.0, 1.0, 1.0)).unwrap();
+        let r = ray(Vec3::ZERO, Vec3::UNIT_Y);
+        assert_eq!(r.intersect_aabb_entry(&aabb), None);
+    }
+
+    // A box entirely behind the origin overlaps the ray's line but at negative
+    // parameters: `tmax < 0` takes the `then_some` false arm -> `None`.
+    #[test]
+    fn intersect_aabb_entry_behind_origin_is_none() {
+        let aabb = Aabb::new(Vec3::new(-6.0, -1.0, -1.0), Vec3::new(-4.0, 1.0, 1.0)).unwrap();
+        let r = ray(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(r.intersect_aabb_entry(&aabb), None);
     }
 }

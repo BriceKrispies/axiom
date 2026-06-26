@@ -24,7 +24,7 @@ fn hash_cell(seed: u64, xi: i32, yi: i32, zi: i32) -> u64 {
     // Fold the (possibly negative) lattice coordinates into the 64-bit space
     // and run them through the avalanche mixer one component at a time so that
     // adjacent cells decorrelate fully.
-    let mut h = seed ^ 0xA0761D_6478BD_642Fu64;
+    let mut h = seed ^ 0xA076_1D64_78BD_642F_u64;
     h = mix64(h ^ (xi as i64 as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93));
     h = mix64(h ^ (yi as i64 as u64).wrapping_mul(0xCA01_F4D2_2A3B_C9D1));
     h = mix64(h ^ (zi as i64 as u64).wrapping_mul(0x9E37_79B1_85EB_CA87));
@@ -234,7 +234,7 @@ mod tests {
             let f = i as f32;
             let p = Vec3::new(f * 0.131, -f * 0.077, f * 0.213);
             let n = value_noise(7, p);
-            assert!(n >= -1.0 && n <= 1.0, "value_noise out of range: {n}");
+            assert!((-1.0..=1.0).contains(&n), "value_noise out of range: {n}");
         }
     }
 
@@ -264,7 +264,7 @@ mod tests {
             let t = i as f32;
             let p = Vec3::new(t * 0.017, t * 0.029 - 5.0, -t * 0.011);
             let n = f.sample(p);
-            assert!(n >= -1.0 && n <= 1.0, "fbm out of range: {n}");
+            assert!((-1.0..=1.0).contains(&n), "fbm out of range: {n}");
         }
     }
 
@@ -308,7 +308,7 @@ mod tests {
         let p = Vec3::new(2.5, -3.5, 0.75);
         let plain = f.sample(p);
         let warped = f.sample_warped(p, 1.5);
-        assert!(warped >= -1.0 && warped <= 1.0);
+        assert!((-1.0..=1.0).contains(&warped));
         assert!(
             plain != warped,
             "non-zero warp should generally change output"

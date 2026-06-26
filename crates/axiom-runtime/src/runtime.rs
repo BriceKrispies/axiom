@@ -234,11 +234,7 @@ impl Runtime {
     fn emit_step_summary(&mut self, diagnostics: &RuntimeDiagnostics) {
         use axiom_kernel::{LogField, LogLevel, LogRecord, TelemetryMetric};
 
-        let level = diagnostics
-            .errors()
-            .is_empty()
-            .then_some(LogLevel::Info)
-            .unwrap_or(LogLevel::Error);
+        let level = [LogLevel::Error, LogLevel::Info][usize::from(diagnostics.errors().is_empty())];
         let record = LogRecord::new(level, "runtime.step", 1, "runtime step completed")
             .at(diagnostics.step().tick(), diagnostics.step().frame())
             .with_field(LogField::u64("sequence", diagnostics.step().sequence()))

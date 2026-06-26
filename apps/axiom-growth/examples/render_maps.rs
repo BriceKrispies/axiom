@@ -3,9 +3,9 @@
 //! Axiom-growth has no renderer yet (presentation is the deferred layer), so
 //! this example visualises the real simulation output directly:
 //!   - overworld.png : equirectangular biome/elevation map of the whole planet
-//!                     (sampled via the surface atlas + sampler).
+//!     (sampled via the surface atlas + sampler).
 //!   - local.png     : hillshaded heightfield of the streamed game-world chunks
-//!                     around the play anchor (the "local worldgen").
+//!     around the play anchor (the "local worldgen").
 //!
 //! Run: cargo run -p axiom-growth --example render_maps
 
@@ -123,76 +123,6 @@ fn color_for(biome_id: u32, elevation: f32, moisture: f32) -> (u8, u8, u8) {
         (v * (1.0 - snow) + 250.0 * snow) as u8
     };
     (mix(base.0), mix(base.1), mix(base.2))
-}
-
-// ---------------------------------------------------------------------------
-// Local: hillshaded heightfield of streamed chunks around the anchor.
-// ---------------------------------------------------------------------------
-fn render_local(g: &Growth, path: &str) {
-    let localmap = GameWorldLocalMap::anchored(&g.atlas);
-    let chunks_side = 8i32; // 8x8 chunks around the anchor
-    let cells = CHUNK_SIZE_CELLS as i32;
-    let grid = (chunks_side * cells) as usize + 1; // shared-edge vertex grid
-    let mut height = vec![0f32; grid * grid];
-
-    let half = chunks_side / 2;
-    for cz in -half..(chunks_side - half) {
-        for cx in -half..(chunks_side - half) {
-            let coord = axiom_growth::ids::ChunkCoord::new(cx, cz);
-            let chunk = gameworld::generate_chunk(coord, &g.atlas, &localmap, g.seed.value);
-            for lz in 0..CHUNK_VERT_SIDE {
-                for lx in 0..CHUNK_VERT_SIDE {
-                    let gx = ((cx + half) * cells) as usize + lx;
-                    let gz = ((cz + half) * cells) as usize + lz;
-                    if gx < grid && gz < grid {
-                        height[gz * grid + gx] = chunk.height_samples[lz * CHUNK_VERT_SIDE + lx];
-                    }
-                }
-            }
-        }
-    }
-
-    // normalise + hillshade
-    let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
-    for &v in &height {
-        lo = lo.min(v);
-        hi = hi.max(v);
-    }
-    let span = (hi - lo).max(1.0);
-    eprintln!(
-        "local heightfield: min={:.1}m max={:.1}m span={:.1}m",
-        lo,
-        hi,
-        hi - lo
-    );
-
-    let scale = 5usize; // upscale for visibility
-    let w = (grid - 1) * scale;
-    let img_h = w;
-    let mut rgb = vec![0u8; w * img_h * 3];
-    let light = normalize3([-0.5, 0.8, 0.4]);
-    for py in 0..img_h {
-        for px in 0..w {
-            let gx = px / scale;
-            let gz = py / scale;
-            // central-difference normal (1 m spacing)
-            let hl = height[gz * grid + gx.saturating_sub(1)];
-            let hr = height[gz * grid + (gx + 1).min(grid - 1)];
-            let hd = height[gz.saturating_sub(1) * grid + gx];
-            let hu = height[(gz + 1).min(grid - 1) * grid + gx];
-            let n = normalize3([hl - hr, 2.0, hd - hu]);
-            let shade = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]).clamp(0.15, 1.0);
-            let t = ((height[gz * grid + gx] - lo) / span).clamp(0.0, 1.0);
-            // elevation ramp (green lowlands → brown → white peaks), shaded
-            let (r, gg, b) = ramp(t);
-            let i = (py * w + px) * 3;
-            rgb[i] = (r as f32 * shade) as u8;
-            rgb[i + 1] = (gg as f32 * shade) as u8;
-            rgb[i + 2] = (b as f32 * shade) as u8;
-        }
-    }
-    write_png(path, w, img_h, &rgb);
-    eprintln!("wrote {} ({}x{})", path, w, img_h);
 }
 
 fn ramp(t: f32) -> (u8, u8, u8) {
@@ -337,7 +267,7 @@ fn render_firstperson(g: &Growth, path: &str) {
     }
 
     let mut ybuf = vec![h_img as i32; w]; // skyline occlusion buffer
-    for col in 0..w {
+    for (col, slot) in ybuf.iter_mut().enumerate() {
         let ang = yaw + ((col as f32 + 0.5) / w as f32 - 0.5) * hfov;
         let (dx, dz) = (ang.sin(), ang.cos());
         let mut d = 1.0f32;
@@ -347,7 +277,7 @@ fn render_firstperson(g: &Growth, path: &str) {
             let wz = cam_z + dz * d;
             let hgt = terr.height(wx, wz);
             let sy = (horizon - ((hgt - eye) / d) * proj) as i32;
-            if sy < ybuf[col] {
+            if sy < *slot {
                 let n = normalize3([
                     terr.height(wx - 2.0, wz) - terr.height(wx + 2.0, wz),
                     8.0,
@@ -361,14 +291,14 @@ fn render_firstperson(g: &Growth, path: &str) {
                 let cg = lerpf(bg as f32 * lambert, sky_horizon[1] as f32, fog);
                 let cb = lerpf(bb as f32 * lambert, sky_horizon[2] as f32, fog);
                 let top = sy.max(0);
-                let bottom = ybuf[col].min(h_img as i32);
+                let bottom = (*slot).min(h_img as i32);
                 for py in top..bottom {
                     let i = (py as usize * w + col) * 3;
                     rgb[i] = cr as u8;
                     rgb[i + 1] = cg as u8;
                     rgb[i + 2] = cb as u8;
                 }
-                ybuf[col] = sy;
+                *slot = sy;
             }
             d += step;
             step *= 1.012; // distance LOD

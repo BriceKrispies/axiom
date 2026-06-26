@@ -31,7 +31,14 @@ impl WorldSaveApi {
         height: u32,
         overrides: &[(u32, u8)],
     ) -> Save {
-        Save::new(seed, WORLD_VERSION, width, height, address.clone(), overrides.to_vec())
+        Save::new(
+            seed,
+            WORLD_VERSION,
+            width,
+            height,
+            address.clone(),
+            overrides.to_vec(),
+        )
     }
 
     /// Restore the world from a save: regenerate the levelgen world from the seed,
@@ -47,7 +54,13 @@ impl WorldSaveApi {
                 .into_iter()
                 .for_each(|cell| *cell = code);
         });
-        SavedWorld::new(width, height, world.heights().to_vec(), biomes, world.objects().to_vec())
+        SavedWorld::new(
+            width,
+            height,
+            world.heights().to_vec(),
+            biomes,
+            world.objects().to_vec(),
+        )
     }
 }
 
@@ -85,7 +98,8 @@ mod tests {
     fn an_override_replaces_only_its_cells_biome() {
         let address = site(&[1, 2]);
         let base = WorldSaveApi::restore(&WorldSaveApi::save(7, &address, 16, 16, &[]));
-        let edited = WorldSaveApi::restore(&WorldSaveApi::save(7, &address, 16, 16, &[(5, FOREST)]));
+        let edited =
+            WorldSaveApi::restore(&WorldSaveApi::save(7, &address, 16, 16, &[(5, FOREST)]));
         assert_eq!(edited.biomes()[5], FOREST);
         assert_eq!(base.heights(), edited.heights()); // terrain unchanged
         assert_eq!(base.objects(), edited.objects()); // objects unchanged
@@ -104,7 +118,10 @@ mod tests {
         let save_len = save.to_bytes().len();
         let world_len = world.to_bytes().len();
         // A 56-byte save regenerates a >4KB world: at least a 4x reduction.
-        assert!(save_len * 4 < world_len, "a save must be far smaller than its world");
+        assert!(
+            save_len * 4 < world_len,
+            "a save must be far smaller than its world"
+        );
     }
 
     #[test]
@@ -118,8 +135,14 @@ mod tests {
     #[test]
     fn distinct_seeds_or_addresses_save_to_distinct_worlds() {
         let base = WorldSaveApi::restore(&WorldSaveApi::save(7, &site(&[1, 2]), 16, 16, &[]));
-        assert_ne!(base, WorldSaveApi::restore(&WorldSaveApi::save(8, &site(&[1, 2]), 16, 16, &[])));
-        assert_ne!(base, WorldSaveApi::restore(&WorldSaveApi::save(7, &site(&[1, 3]), 16, 16, &[])));
+        assert_ne!(
+            base,
+            WorldSaveApi::restore(&WorldSaveApi::save(8, &site(&[1, 2]), 16, 16, &[]))
+        );
+        assert_ne!(
+            base,
+            WorldSaveApi::restore(&WorldSaveApi::save(7, &site(&[1, 3]), 16, 16, &[]))
+        );
     }
 
     #[test]

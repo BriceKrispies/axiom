@@ -80,7 +80,7 @@ impl Panel {
 
     pub(crate) fn toggle_pin(&mut self) {
         let was_pinned = self.pinned;
-        self.visible = self.visible | !was_pinned;
+        self.visible |= !was_pinned;
         self.pinned = !was_pinned;
     }
 
@@ -109,7 +109,7 @@ impl Panel {
 
     pub(crate) fn drag_update(&mut self, pointer_x: i32, pointer_y: i32, max_x: i32, max_y: i32) {
         let grab = self.drag_grab;
-        grab.map(|(grab_x, grab_y)| {
+        grab.into_iter().for_each(|(grab_x, grab_y)| {
             self.rect = self
                 .rect
                 .with_position(pointer_x - grab_x, pointer_y - grab_y)

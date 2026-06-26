@@ -1,0 +1,39 @@
+# Sample asset set for axiom-asset-pack.
+#
+# Pack it with (from the repo root):
+#   cargo run -p axiom-asset-pack -- tools/axiom-asset-pack/sample/pack.toml
+#
+# It produces, alongside this file:
+#   sample/dist/manifest.bin      (the Axiom-native binary manifest)
+#   sample/dist/blobs/1.mesh      (copy of assets/hero.mesh)
+#   sample/dist/blobs/2.tex       (copy of assets/hero.tex)
+#   sample/dist/blobs/3.mat       (copy of assets/hero.mat)
+#
+# Paths (out_dir, source) are resolved relative to THIS file's directory.
+
+out_dir  = "dist"
+blob_dir = "blobs"
+
+# A mesh (kind 1), no dependencies — a streaming root.
+[[asset]]
+id           = 1
+kind         = 1            # app-defined: 1 = mesh
+priority     = 100
+source       = "assets/hero.mesh"
+dependencies = []
+
+# A texture (kind 2), no dependencies — a streaming root.
+[[asset]]
+id           = 2
+kind         = 2            # app-defined: 2 = texture
+priority     = 80
+source       = "assets/hero.tex"
+dependencies = []
+
+# A material (kind 3) that needs both the mesh and the texture ready first.
+[[asset]]
+id           = 3
+kind         = 3            # app-defined: 3 = material
+priority     = 50
+source       = "assets/hero.mat"
+dependencies = [1, 2]

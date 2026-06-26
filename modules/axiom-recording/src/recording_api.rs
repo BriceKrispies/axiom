@@ -132,10 +132,7 @@ impl RecordingApi {
 
     /// The current playback mode, constructed from the cursor on demand.
     pub fn mode(&self) -> TimelineMode {
-        [
-            TimelineMode::scrubbing(self.selected),
-            TimelineMode::live(),
-        ][usize::from(self.live)]
+        [TimelineMode::scrubbing(self.selected), TimelineMode::live()][usize::from(self.live)]
     }
 
     /// Whether the recorder is following live frames.

@@ -22,8 +22,9 @@ impl EntropyApi {
     /// identity, and the generator `version`. Bumping `version` re-keys the
     /// stream (a versioned behavior change); restoring it restores the stream.
     pub fn stream(seed: u64, address: &Address, version: u32) -> EntropyStream {
-        let key = StableHash::of_words(&[seed, SpaceApi::digest(address).raw(), u64::from(version)])
-            .raw();
+        let key =
+            StableHash::of_words(&[seed, SpaceApi::digest(address).raw(), u64::from(version)])
+                .raw();
         EntropyStream::from_key(key)
     }
 }

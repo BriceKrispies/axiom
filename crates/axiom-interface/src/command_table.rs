@@ -34,7 +34,9 @@ pub struct CommandTable<C: 'static> {
 
 impl<C> core::fmt::Debug for CommandTable<C> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("CommandTable").field("commands", &self.specs.len()).finish()
+        f.debug_struct("CommandTable")
+            .field("commands", &self.specs.len())
+            .finish()
     }
 }
 
@@ -60,7 +62,10 @@ impl<C: 'static> CommandTable<C> {
 
     /// Every command's `(name, summary)`, in declaration order (for a `help`).
     pub fn summaries(&self) -> Vec<(&'static str, &'static str)> {
-        self.specs.iter().map(|spec| (spec.name, spec.summary)).collect()
+        self.specs
+            .iter()
+            .map(|spec| (spec.name, spec.summary))
+            .collect()
     }
 }
 
@@ -83,8 +88,16 @@ mod tests {
     }
 
     const TEST_SPECS: &[CommandSpec<Ctx>] = &[
-        CommandSpec { name: "inc", summary: "increment", handler: cmd_inc },
-        CommandSpec { name: "reset", summary: "reset", handler: cmd_reset },
+        CommandSpec {
+            name: "inc",
+            summary: "increment",
+            handler: cmd_inc,
+        },
+        CommandSpec {
+            name: "reset",
+            summary: "reset",
+            handler: cmd_reset,
+        },
     ];
 
     #[test]
@@ -112,7 +125,10 @@ mod tests {
     #[test]
     fn summaries_list_every_command() {
         let table = CommandTable::new(TEST_SPECS);
-        assert_eq!(table.summaries(), vec![("inc", "increment"), ("reset", "reset")]);
+        assert_eq!(
+            table.summaries(),
+            vec![("inc", "increment"), ("reset", "reset")]
+        );
     }
 
     #[test]

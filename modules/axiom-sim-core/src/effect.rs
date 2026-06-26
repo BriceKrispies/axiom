@@ -247,21 +247,21 @@ impl EffectBatch {
         });
     }
 
-    /// Stage an emit-causal-event effect.
+    /// Stage an emit-causal-event effect. `parties` is `(subject, secondary)` —
+    /// the primary and secondary entities.
     pub fn emit_causal_event(
         &mut self,
         kind_code: u32,
         tick: u64,
-        subject: Option<EntityHandle>,
-        secondary: Option<EntityHandle>,
+        parties: (Option<EntityHandle>, Option<EntityHandle>),
         parent: Option<CauseRef>,
         code: u64,
         payload: Option<FactValue>,
     ) {
         self.effects.push(Effect {
             kind_code,
-            subject,
-            secondary,
+            subject: parties.0,
+            secondary: parties.1,
             cause: parent,
             tick,
             code,
@@ -367,7 +367,7 @@ mod tests {
         batch.remove_relation(RelationId::from_raw(1));
         batch.schedule_process(3, a, 0, 5, None);
         batch.cancel_process(ProcessId::from_raw(1));
-        batch.emit_causal_event(4, 0, Some(a), None, Some(CauseRef::Command), 7, None);
+        batch.emit_causal_event(4, 0, (Some(a), None), Some(CauseRef::Command), 7, None);
         assert_eq!(batch.len(), 8);
         let kinds: Vec<EffectKind> = batch
             .into_effects()

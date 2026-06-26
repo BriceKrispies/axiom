@@ -52,17 +52,29 @@ mod tests {
 
     #[test]
     fn each_modifier_selects_its_action() {
-        assert_eq!(classify_backquote(event()), Some(OverlayShortcut::ToggleOverlay));
         assert_eq!(
-            classify_backquote(InterfaceInputEvent { shift: true, ..event() }),
+            classify_backquote(event()),
+            Some(OverlayShortcut::ToggleOverlay)
+        );
+        assert_eq!(
+            classify_backquote(InterfaceInputEvent {
+                shift: true,
+                ..event()
+            }),
             Some(OverlayShortcut::CycleDensity)
         );
         assert_eq!(
-            classify_backquote(InterfaceInputEvent { ctrl: true, ..event() }),
+            classify_backquote(InterfaceInputEvent {
+                ctrl: true,
+                ..event()
+            }),
             Some(OverlayShortcut::TogglePinned)
         );
         assert_eq!(
-            classify_backquote(InterfaceInputEvent { alt: true, ..event() }),
+            classify_backquote(InterfaceInputEvent {
+                alt: true,
+                ..event()
+            }),
             Some(OverlayShortcut::FocusConsole)
         );
     }
@@ -70,20 +82,37 @@ mod tests {
     #[test]
     fn modifier_priority_is_shift_then_ctrl_then_alt() {
         assert_eq!(
-            classify_backquote(InterfaceInputEvent { shift: true, ctrl: true, ..event() }),
+            classify_backquote(InterfaceInputEvent {
+                shift: true,
+                ctrl: true,
+                ..event()
+            }),
             Some(OverlayShortcut::CycleDensity)
         );
         assert_eq!(
-            classify_backquote(InterfaceInputEvent { ctrl: true, alt: true, ..event() }),
+            classify_backquote(InterfaceInputEvent {
+                ctrl: true,
+                alt: true,
+                ..event()
+            }),
             Some(OverlayShortcut::TogglePinned)
         );
     }
 
     #[test]
     fn non_routing_chords_select_nothing() {
-        assert_eq!(classify_backquote(InterfaceInputEvent { meta: true, ..event() }), None);
         assert_eq!(
-            classify_backquote(InterfaceInputEvent { in_text_field: true, ..event() }),
+            classify_backquote(InterfaceInputEvent {
+                meta: true,
+                ..event()
+            }),
+            None
+        );
+        assert_eq!(
+            classify_backquote(InterfaceInputEvent {
+                in_text_field: true,
+                ..event()
+            }),
             None
         );
         // A foreign text field with the console focused still routes.

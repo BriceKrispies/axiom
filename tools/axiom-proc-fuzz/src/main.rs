@@ -26,9 +26,9 @@ use axiom_terrain::TerrainApi;
 
 /// A content address from a segment path.
 fn site(segments: &[u64]) -> Address {
-    segments
-        .iter()
-        .fold(SpaceApi::root(), |address, &segment| SpaceApi::child(&address, segment))
+    segments.iter().fold(SpaceApi::root(), |address, &segment| {
+        SpaceApi::child(&address, segment)
+    })
 }
 
 /// The fixed recipe the proc sweep evaluates (exercises every node op).
@@ -47,12 +47,13 @@ fn sample_recipe() -> Recipe {
 fn all_reproduce(seed: u64) -> bool {
     let address = site(&[seed % 7, seed % 13]);
     let recipe = sample_recipe();
-    let proc_ok = ProcApi::evaluate(&recipe, seed, &address).map(|(a, t)| (a.to_bytes(), t.to_bytes()))
+    let proc_ok = ProcApi::evaluate(&recipe, seed, &address)
+        .map(|(a, t)| (a.to_bytes(), t.to_bytes()))
         == ProcApi::evaluate(&recipe, seed, &address).map(|(a, t)| (a.to_bytes(), t.to_bytes()));
     let terrain_ok = TerrainApi::heightfield(seed, 0, 0, 12, 8).to_bytes()
         == TerrainApi::heightfield(seed, 0, 0, 12, 8).to_bytes();
-    let biome_ok =
-        BiomeApi::map(seed, &address, 48).to_bytes() == BiomeApi::map(seed, &address, 48).to_bytes();
+    let biome_ok = BiomeApi::map(seed, &address, 48).to_bytes()
+        == BiomeApi::map(seed, &address, 48).to_bytes();
     let placement_ok = PlacementApi::scatter(seed, &address, 16, 12, 8).to_bytes()
         == PlacementApi::scatter(seed, &address, 16, 12, 8).to_bytes();
     let world_ok = LevelGenApi::generate(seed, &address, 16, 16).to_bytes()
@@ -68,7 +69,8 @@ fn sweep(count: u64) -> u64 {
 fn main() {
     let count = 2000u64;
     let reproduced = sweep(count);
-    let verdict = ["DRIFT DETECTED", "OK (every generator byte-identical)"][(reproduced == count) as usize];
+    let verdict =
+        ["DRIFT DETECTED", "OK (every generator byte-identical)"][(reproduced == count) as usize];
     println!("axiom proc-fuzz — procedural-generation determinism gate");
     println!("  seed sweep      : {reproduced}/{count} seeds reproduced across all generators");
     println!("  result          : {verdict}");
@@ -124,8 +126,10 @@ mod tests {
             let recipe = random_recipe(&mut rng);
             // Never panics: an invalid recipe is None, a valid one evaluates; and
             // re-evaluating yields the identical outcome.
-            let first = ProcApi::evaluate(&recipe, 7, &address).map(|(a, t)| (a.to_bytes(), t.to_bytes()));
-            let again = ProcApi::evaluate(&recipe, 7, &address).map(|(a, t)| (a.to_bytes(), t.to_bytes()));
+            let first =
+                ProcApi::evaluate(&recipe, 7, &address).map(|(a, t)| (a.to_bytes(), t.to_bytes()));
+            let again =
+                ProcApi::evaluate(&recipe, 7, &address).map(|(a, t)| (a.to_bytes(), t.to_bytes()));
             assert_eq!(first, again);
         }
     }

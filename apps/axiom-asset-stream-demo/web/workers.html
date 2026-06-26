@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Asset Streaming on a Worker Pool (demo)</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 14px; padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif; background: #15171c; color: #d7dbe2;
+      }
+      h1 { font-size: 18px; font-weight: 700; margin: 0; }
+      .sub { color: #9aa3b2; font-size: 13px; max-width: 760px; text-align: center; }
+      #boot { font: 13px ui-monospace, monospace; color: #9fd1ff; min-height: 1.4em; }
+      #status { font: 13px ui-monospace, monospace; color: #cfe9d6; min-height: 1.4em; }
+      #pool-stats { font: 13px ui-monospace, monospace; color: #e6c35c; min-height: 1.4em; }
+      .panels { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+      table {
+        border-collapse: collapse; font: 13px ui-monospace, monospace;
+        min-width: 520px; max-width: 96vw;
+      }
+      caption { text-align: left; color: #9aa3b2; padding-bottom: 6px; }
+      th, td { border: 1px solid #2a2e36; padding: 4px 10px; text-align: left; }
+      th { background: #1c1f26; color: #aeb6c4; font-weight: 600; }
+      tr[data-state="0"] td { color: #7c8493; }
+      tr[data-state="1"] td { color: #e6c35c; }
+      tr[data-state="2"] td { color: #6fd089; }
+      tr[data-state="3"] td { color: #e07a7a; }
+      ul#workers { list-style: none; margin: 0; padding: 0; font: 13px ui-monospace, monospace; min-width: 240px; }
+      ul#workers li { border: 1px solid #2a2e36; padding: 4px 10px; margin-bottom: 4px; border-radius: 4px; }
+      ul#workers li[data-busy="1"] { color: #e6c35c; border-color: #4a4326; background: #211e14; }
+      ul#workers li[data-busy="0"] { color: #7c8493; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — Asset Streaming on a Worker Pool</h1>
+    <div class="sub">
+      The engine skeleton boots first — this page is interactive immediately — then
+      a pool of background <strong>Web Workers</strong> streams the assets. Each
+      worker <code>fetch</code>es and decodes one asset off the main thread; the
+      main thread only runs the deterministic <code>axiom-assets</code> scheduler,
+      handing queued jobs to whichever workers are idle. CPU-heavy decode never
+      blocks the frame. Set the pool size with <code>?workers=N</code> (default 3).
+    </div>
+
+    <div id="boot">booting…</div>
+    <div id="status">waiting for manifest…</div>
+    <div id="pool-stats">pool: starting…</div>
+
+    <div class="panels">
+      <table>
+        <caption>Assets (scheduler state — updates live as each streams in)</caption>
+        <thead>
+          <tr><th>id</th><th>locator</th><th>kind</th><th>deps</th><th>status</th></tr>
+        </thead>
+        <tbody id="assets"></tbody>
+      </table>
+
+      <div>
+        <div style="color:#9aa3b2; padding-bottom:6px;">Worker pool (live)</div>
+        <ul id="workers"></ul>
+      </div>
+    </div>
+
+    <script type="module">
+      // Cache-bust the JS glue + wasm on every load (the static server sends no
+      // cache headers), matching the other Axiom browser apps.
+      const v = Date.now();
+      const boot = document.getElementById("boot");
+      try {
+        const wasm = await import(`./pkg/axiom_asset_stream_demo.js?v=${v}`);
+        const wasmUrl = new URL(
+          `./pkg/axiom_asset_stream_demo_bg.wasm?v=${v}`,
+          import.meta.url,
+        );
+        await wasm.default({ module_or_path: wasmUrl });
+        wasm.start_pool();
+      } catch (e) {
+        boot.textContent = "Startup failed: " + e;
+        boot.style.color = "#e07a7a";
+        throw e;
+      }
+    </script>
+  </body>
+</html>

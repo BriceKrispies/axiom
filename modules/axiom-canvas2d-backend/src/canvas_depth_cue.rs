@@ -63,15 +63,9 @@ pub(crate) fn lighting_brightness(
     profile: &CanvasDepthCueProfile,
 ) -> f32 {
     let raw = dot3(normal, light_dir).max(0.0);
-    let lit = profile
-        .lighting.banded
-        .then(|| band(raw, profile.lighting.band_count))
-        .unwrap_or(raw);
+    let lit = [raw, band(raw, profile.lighting.band_count)][usize::from(profile.lighting.banded)];
     let brightness = profile.lighting.ambient + lit * profile.lighting.diffuse * intensity;
-    profile
-        .lighting.enabled
-        .then(|| brightness.clamp(0.0, MAX_BRIGHTNESS))
-        .unwrap_or(1.0)
+    [1.0, brightness.clamp(0.0, MAX_BRIGHTNESS)][usize::from(profile.lighting.enabled)]
 }
 
 /// Quantize `x ∈ [0,1]` into `count` bands (floor); `count` is treated as ≥ 1.
@@ -84,9 +78,7 @@ fn band(x: f32, count: u32) -> f32 {
 /// draw (`max == min`) maps to `0.0` deterministically (no tint gradient).
 pub(crate) fn height_factor(y: f32, y_min: f32, y_max: f32) -> f32 {
     let span = y_max - y_min;
-    (span > NORMAL_EPS)
-        .then(|| ((y - y_min) / span).clamp(0.0, 1.0))
-        .unwrap_or(0.0)
+    [0.0, ((y - y_min) / span).clamp(0.0, 1.0)][usize::from(span > NORMAL_EPS)]
 }
 
 /// Compose all **per-triangle** cues onto a base linear RGBA colour in the
@@ -104,7 +96,7 @@ pub(crate) fn shade_triangle(
     // untouched). The colour tint applies only when lighting is on, so a disabled
     // light is a true no-op (neutral white).
     let lit = profile.lighting.enabled;
-    let tint = lit.then_some(light_color).unwrap_or([1.0, 1.0, 1.0]);
+    let tint = [[1.0, 1.0, 1.0], light_color][usize::from(lit)];
     let after_light = [
         base[0] * brightness * tint[0],
         base[1] * brightness * tint[1],
@@ -115,7 +107,7 @@ pub(crate) fn shade_triangle(
     // 4. height/elevation tint: mix toward the elevation colour.
     let tinted = profile.enable_height_tint;
     let tint = mix4(profile.low_height_color, profile.high_height_color, hfactor);
-    let s = tinted.then_some(profile.height_tint_strength).unwrap_or(0.0);
+    let s = [0.0, profile.height_tint_strength][usize::from(tinted)];
     let after_tint = [
         mix(after_light[0], tint[0], s),
         mix(after_light[1], tint[1], s),
@@ -127,7 +119,7 @@ pub(crate) fn shade_triangle(
     let falloff_on = profile.enable_distance_detail_falloff;
     let t = falloff_t(depth, profile);
     let lum = luminance(after_tint);
-    let f = falloff_on.then_some(t).unwrap_or(0.0);
+    let f = [0.0, t][usize::from(falloff_on)];
     let after_falloff = [
         mix(after_tint[0], lum, f),
         mix(after_tint[1], lum, f),
@@ -149,7 +141,7 @@ pub(crate) fn shade_triangle(
 /// the profile's falloff range. Safe for an inverted/degenerate range.
 fn falloff_t(depth: f32, profile: &CanvasDepthCueProfile) -> f32 {
     let span = (profile.detail_falloff_far - profile.detail_falloff_near).abs();
-    let inv = (span > NORMAL_EPS).then(|| 1.0 / span).unwrap_or(0.0);
+    let inv = [0.0, 1.0 / span][usize::from(span > NORMAL_EPS)];
     // Desaturate up to ~22% at the far end — "slightly less saturated", subtle.
     ((depth - profile.detail_falloff_near) * inv).clamp(0.0, 1.0) * 0.22
 }
@@ -158,7 +150,7 @@ fn falloff_t(depth: f32, profile: &CanvasDepthCueProfile) -> f32 {
 /// `fog_strength` far. Deterministic for any (even inverted) fog range.
 pub(crate) fn fog_mix(depth: f32, profile: &CanvasDepthCueProfile) -> f32 {
     let span = (profile.fog.far - profile.fog.near).abs();
-    let inv = (span > NORMAL_EPS).then(|| 1.0 / span).unwrap_or(0.0);
+    let inv = [0.0, 1.0 / span][usize::from(span > NORMAL_EPS)];
     ((depth - profile.fog.near) * inv).clamp(0.0, 1.0) * profile.fog.strength.clamp(0.0, 1.0)
 }
 
@@ -212,7 +204,7 @@ fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
 /// Normalize a vector; a (near-)zero vector returns zero (NaN-safe).
 pub(crate) fn normalize3(v: [f32; 3]) -> [f32; 3] {
     let len2 = dot3(v, v);
-    let inv = (len2 > NORMAL_EPS).then(|| len2.sqrt().recip()).unwrap_or(0.0);
+    let inv = [0.0, len2.sqrt().recip()][usize::from(len2 > NORMAL_EPS)];
     [v[0] * inv, v[1] * inv, v[2] * inv]
 }
 
@@ -269,7 +261,10 @@ mod tests {
     fn disabled_lighting_is_unity() {
         let mut p = profile();
         p.lighting.enabled = false;
-        assert_eq!(lighting_brightness([0.0, 1.0, 0.0], [0.0, 1.0, 0.0], 1.0, &p), 1.0);
+        assert_eq!(
+            lighting_brightness([0.0, 1.0, 0.0], [0.0, 1.0, 0.0], 1.0, &p),
+            1.0
+        );
     }
 
     #[test]
@@ -377,7 +372,7 @@ mod tests {
         let base = [1.0, 0.0, 0.0, 1.0]; // saturated red
         let (near, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], 0.0, 0.0, &p); // depth 0 → t 0
         let (far, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], 0.0, 1.0, &p); // depth 1 → t max
-        // Far red channel is pulled toward luminance (lower); near is unchanged.
+                                                                                 // Far red channel is pulled toward luminance (lower); near is unchanged.
         assert!((near[0] - 1.0).abs() < 1e-6);
         assert!(far[0] < near[0]);
     }
@@ -392,7 +387,7 @@ mod tests {
         assert_eq!(fog_mix(1.0, &p), 1.0); // far: full fog
         assert_eq!(fog_mix(-5.0, &p), 0.0); // clamps below
         assert_eq!(fog_mix(9.0, &p), 1.0); // clamps above
-        // Degenerate range → 0 (safe), never NaN.
+                                           // Degenerate range → 0 (safe), never NaN.
         p.fog.far = 0.0;
         assert_eq!(fog_mix(0.5, &p), 0.0);
     }

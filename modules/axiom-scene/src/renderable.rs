@@ -175,7 +175,10 @@ mod tests {
         assert_eq!(Renderable::SCHEMA.name(), "Renderable");
         assert_eq!(Renderable::SCHEMA.fields().len(), 4);
         assert_eq!(Renderable::SCHEMA.fields()[2].name(), "visible");
-        assert_eq!(Renderable::SCHEMA.fields()[3].name(), "casts_contact_shadow");
+        assert_eq!(
+            Renderable::SCHEMA.fields()[3].name(),
+            "casts_contact_shadow"
+        );
     }
 
     #[test]

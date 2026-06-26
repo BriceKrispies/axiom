@@ -137,7 +137,10 @@ mod tests {
                 addresses.push(SpaceApi::child(&depth1, y));
             }
         }
-        let digests: HashSet<u64> = addresses.iter().map(|a| SpaceApi::digest(a).raw()).collect();
+        let digests: HashSet<u64> = addresses
+            .iter()
+            .map(|a| SpaceApi::digest(a).raw())
+            .collect();
         assert_eq!(digests.len(), addresses.len());
     }
 }

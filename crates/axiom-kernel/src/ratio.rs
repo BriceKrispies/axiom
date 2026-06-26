@@ -84,7 +84,10 @@ mod tests {
         let mut w = BinaryWriter::new();
         r.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Ratio::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), r);
+        assert_eq!(
+            Ratio::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            r
+        );
         // A truncated stream errs rather than panicking.
         assert!(Ratio::reflect_read(&mut BinaryReader::new(&[])).is_err());
         // A non-finite scalar in the stream is rejected on read.

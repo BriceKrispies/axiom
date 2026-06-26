@@ -56,18 +56,21 @@ pub(crate) fn apply_planar_shadows(
     // A ground shadow needs the camera view-projection and a directional light
     // with a usable vertical component; `and_then` collapses all three absent
     // cases (no camera / no directional light / horizontal light) to "no setup".
-    let setup = packet.camera().map(|c| c.view_proj()).and_then(|view_proj| {
-        packet
-            .lights()
-            .iter()
-            .find(|l| l.kind() == 0)
-            .map(|l| l.vec())
-            .and_then(|to_light| {
-                // The light *travels* opposite the to-light direction.
-                let travel = [-to_light[0], -to_light[1], -to_light[2]];
-                (travel[1].abs() > LIGHT_Y_EPS).then_some((view_proj, travel))
-            })
-    });
+    let setup = packet
+        .camera()
+        .map(|c| c.view_proj())
+        .and_then(|view_proj| {
+            packet
+                .lights()
+                .iter()
+                .find(|l| l.kind() == 0)
+                .map(|l| l.vec())
+                .and_then(|to_light| {
+                    // The light *travels* opposite the to-light direction.
+                    let travel = [-to_light[0], -to_light[1], -to_light[2]];
+                    (travel[1].abs() > LIGHT_Y_EPS).then_some((view_proj, travel))
+                })
+        });
     setup
         .map(|(view_proj, travel)| {
             // Casters whose geometry the backend actually holds.
@@ -82,7 +85,9 @@ pub(crate) fn apply_planar_shadows(
             // is empty anyway, so the value is never used.
             let ground = casters.iter().fold(f32::INFINITY, |acc, d| {
                 let world = d.world();
-                let geo = cache.get(d.mesh_id()).expect("casters filtered to present meshes");
+                let geo = cache
+                    .get(d.mesh_id())
+                    .expect("casters filtered to present meshes");
                 geo.indices().iter().fold(acc, |acc, &idx| {
                     acc.min(world_point(&world, geo.position(idx))[1])
                 })
@@ -90,7 +95,9 @@ pub(crate) fn apply_planar_shadows(
             let rgba = fb.rgba_mut();
             casters.iter().fold((0_u32, 0_u64), |(count, pixels), d| {
                 let world = d.world();
-                let geo = cache.get(d.mesh_id()).expect("casters filtered to present meshes");
+                let geo = cache
+                    .get(d.mesh_id())
+                    .expect("casters filtered to present meshes");
                 let drawn = geo.indices().chunks_exact(3).fold(0_u64, |acc, tri| {
                     // Project each vertex: model → world → ground plane → screen.
                     let vertex = |k: usize| {
@@ -157,13 +164,19 @@ fn rasterize_shadow_triangle(
     let valid = area.abs() > AREA_EPS;
     // Signed inverse area makes the barycentric inside-test winding-independent;
     // `0` for a degenerate triangle forces every `l_i` to 0 → no coverage.
-    let inv_area = valid.then(|| 1.0 / area).unwrap_or(0.0);
+    let inv_area = [0.0, 1.0 / area][usize::from(valid)];
     let xs = [v[0][0], v[1][0], v[2][0]];
     let ys = [v[0][1], v[1][1], v[2][1]];
     let minx = clamp_axis(xs.iter().copied().fold(f32::INFINITY, f32::min).floor(), w);
-    let maxx = clamp_axis(xs.iter().copied().fold(f32::NEG_INFINITY, f32::max).ceil(), w);
+    let maxx = clamp_axis(
+        xs.iter().copied().fold(f32::NEG_INFINITY, f32::max).ceil(),
+        w,
+    );
     let miny = clamp_axis(ys.iter().copied().fold(f32::INFINITY, f32::min).floor(), h);
-    let maxy = clamp_axis(ys.iter().copied().fold(f32::NEG_INFINITY, f32::max).ceil(), h);
+    let maxy = clamp_axis(
+        ys.iter().copied().fold(f32::NEG_INFINITY, f32::max).ceil(),
+        h,
+    );
     (miny..maxy + 1).fold(0_u64, |acc, py| {
         (minx..maxx + 1).fold(acc, |acc, px| {
             let fx = px as f32 + 0.5;
@@ -195,9 +208,7 @@ fn blend_toward_black(rgba: &mut [u8], off: usize, t: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_host::{
-        FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FrameViewport,
-    };
+    use axiom_host::{FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FrameViewport};
 
     const ID16: [f32; 16] = [
         1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
@@ -211,7 +222,9 @@ mod tests {
     ];
 
     fn vtx(p: [f32; 3]) -> [f32; 12] {
-        [p[0], p[1], p[2], 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+        [
+            p[0], p[1], p[2], 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+        ]
     }
 
     /// A flat triangle at world y=0.5 spanning x,z in [-0.3, 0.3].
@@ -284,7 +297,10 @@ mod tests {
         let (count, pixels) = apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002);
         assert_eq!(count, 1, "the caster was processed");
         assert_eq!(pixels, 0, "but every shadow pixel is occluded");
-        assert!(fb.into_rgba_bytes().iter().all(|&b| b == 255), "nothing darkened");
+        assert!(
+            fb.into_rgba_bytes().iter().all(|&b| b == 255),
+            "nothing darkened"
+        );
     }
 
     #[test]
@@ -293,7 +309,10 @@ mod tests {
         let mut fb = white_fb();
         let depth = DepthBuffer::new(16, 16);
         let p = packet(vec![caster_draw(7, false)], topdown_cam(), down_light());
-        assert_eq!(apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002), (0, 0));
+        assert_eq!(
+            apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002),
+            (0, 0)
+        );
     }
 
     #[test]
@@ -302,7 +321,10 @@ mod tests {
         let mut fb = white_fb();
         let depth = DepthBuffer::new(16, 16);
         let p = packet(vec![caster_draw(404, true)], topdown_cam(), down_light());
-        assert_eq!(apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002), (0, 0));
+        assert_eq!(
+            apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002),
+            (0, 0)
+        );
     }
 
     #[test]
@@ -311,7 +333,10 @@ mod tests {
         let mut fb = white_fb();
         let depth = DepthBuffer::new(16, 16);
         let p = packet(vec![caster_draw(7, true)], None, down_light());
-        assert_eq!(apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002), (0, 0));
+        assert_eq!(
+            apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002),
+            (0, 0)
+        );
     }
 
     #[test]
@@ -322,7 +347,10 @@ mod tests {
         // Only a point light (kind 1) — no sun to cast from.
         let lights = vec![FrameLight::new(1, [0.0, 5.0, 0.0], [1.0, 1.0, 1.0, 1.0])];
         let p = packet(vec![caster_draw(7, true)], topdown_cam(), lights);
-        assert_eq!(apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002), (0, 0));
+        assert_eq!(
+            apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002),
+            (0, 0)
+        );
     }
 
     #[test]
@@ -333,7 +361,10 @@ mod tests {
         // `to-light` purely horizontal → travel horizontal → no vertical component.
         let lights = vec![FrameLight::new(0, [1.0, 0.0, 0.0], [1.0, 1.0, 1.0, 1.0])];
         let p = packet(vec![caster_draw(7, true)], topdown_cam(), lights);
-        assert_eq!(apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002), (0, 0));
+        assert_eq!(
+            apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002),
+            (0, 0)
+        );
     }
 
     #[test]
@@ -354,7 +385,10 @@ mod tests {
         let depth = DepthBuffer::new(16, 16);
         // Collinear (zero-area) triangle → no coverage.
         let v = [[2.0, 2.0, 0.5], [6.0, 2.0, 0.5], [4.0, 2.0, 0.5]];
-        assert_eq!(rasterize_shadow_triangle(&mut rgba, &depth, 16, 16, v, 0.5, 0.002), 0);
+        assert_eq!(
+            rasterize_shadow_triangle(&mut rgba, &depth, 16, 16, v, 0.5, 0.002),
+            0
+        );
         assert!(rgba.iter().all(|&b| b == 255), "nothing darkened");
     }
 

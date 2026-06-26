@@ -17,7 +17,13 @@ pub struct RenderObject {
 }
 
 impl RenderObject {
-    pub const fn new(id: u64, world: Mat4, mesh_idx: u32, material_idx: u32, visible: bool) -> Self {
+    pub const fn new(
+        id: u64,
+        world: Mat4,
+        mesh_idx: u32,
+        material_idx: u32,
+        visible: bool,
+    ) -> Self {
         RenderObject {
             id,
             world,

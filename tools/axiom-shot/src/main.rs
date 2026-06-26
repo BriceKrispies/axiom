@@ -15,20 +15,25 @@
 //! that backend, so this reproduces backend-specific rendering artifacts (e.g.
 //! the Canvas 2D contact-shadow blobs) headlessly, with no browser.
 //!
-//! It can also drive the first-person camera itself: `--script` is a sequence of
-//! `ticks:held-inputs` phases applied as `FirstPersonInput` to controller 0 (the
-//! engine's first-person camera, e.g. the DOOM player), so an app can be walked
-//! to an arbitrary vantage point and shot.
+//! It can also drive the first-person camera itself, two ways:
+//!
+//!   * `--script` is a sequence of `ticks:held-inputs` phases applied as
+//!     `FirstPersonInput` to controller 0 (the engine's first-person camera, e.g.
+//!     the DOOM player), so an app can be walked to an arbitrary vantage point.
+//!   * `--pose "x,z,yaw,pitch"` (DOOM only) teleports controller 0 to an absolute
+//!     pose at tick 0 — the exact pose a player reads off the debug overlay — so a
+//!     view-dependent artifact reproduces faithfully in one shot, no blind walking.
 //!
 //! Usage:
 //!   cargo run --manifest-path tools/axiom-shot/Cargo.toml --release -- \
 //!     [--app showcase|doom] [--backend gpu|canvas2d] [--tick N] [--out PATH] \
-//!     [--quality 0..3] [--script "ticks:key=val,...;ticks:key=val,..."]
+//!     [--quality 0..3] [--script "ticks:key=val,...;..."] [--pose "x,z,yaw,pitch"]
 //!
 //! Script keys (per-tick held values): `forward`, `back`, `strafe_left`,
 //! `strafe_right` (move deltas), `yaw`, `pitch` (look deltas, radians/tick).
 //! Example (walk the DOOM player up the room, then turn right to face the
 //! dividing wall):  `--script "83:forward=0.06;35:yaw=-0.045"`.
+//! Example (reproduce an exact overlay pose):  `--pose "6.4,5.0,-1.57,0.0"`.
 
 use axiom::prelude::*;
 use axiom_canvas2d_backend::Canvas2dBackendApi;
@@ -177,20 +182,36 @@ fn showcase_app() -> App {
 /// default level is used).
 fn build_app(name: &str, level: Option<&str>) -> RunningApp {
     match name {
-        "doom" => {
-            let doc = match level {
-                Some(path) => axiom_doom_browser::level::LevelDoc::parse(
-                    &std::fs::read_to_string(path).expect("read --level file"),
-                ),
-                None => axiom_doom_browser::level::LevelDoc::default(),
-            };
-            axiom_doom_browser::build_doom_app(&doc)
-        }
+        "doom" => axiom_doom_browser::build_doom_app(&doom_doc(level)),
         "showcase" => showcase_app().build(),
         other => {
             eprintln!("axiom-shot: unknown --app '{other}', falling back to 'showcase'");
             showcase_app().build()
         }
+    }
+}
+
+/// The DOOM level document for `--level PATH` (else the built-in default). Shared
+/// by `build_app` and the `--pose` teleport path so both read the same level.
+fn doom_doc(level: Option<&str>) -> axiom_doom_browser::level::LevelDoc {
+    match level {
+        Some(path) => axiom_doom_browser::level::LevelDoc::parse(
+            &std::fs::read_to_string(path).expect("read --level file"),
+        ),
+        None => axiom_doom_browser::level::LevelDoc::default(),
+    }
+}
+
+/// Parse a `--pose "x,z,yaw,pitch"` argument (world position + look angles in
+/// radians) into its four floats, or `None` if it is not exactly four numbers.
+fn parse_pose(s: &str) -> Option<(f32, f32, f32, f32)> {
+    let v: Vec<f32> = s
+        .split(',')
+        .filter_map(|p| p.trim().parse().ok())
+        .collect();
+    match v.as_slice() {
+        [x, z, yaw, pitch] => Some((*x, *z, *yaw, *pitch)),
+        _ => None,
     }
 }
 
@@ -251,6 +272,19 @@ fn main() {
         .and_then(|t| t.parse::<u64>().ok())
         .unwrap_or_else(|| controls.len().saturating_sub(1) as u64);
 
+    // `--pose "x,z,yaw,pitch"` (DOOM only): snap controller 0 to an absolute pose
+    // at tick 0 via the game's one corrective teleport control — the exact pose a
+    // player reads off the debug overlay — so a view-dependent artifact reproduces
+    // faithfully in one shot, no blind walking. Overrides the script at tick 0.
+    let teleport = match (app.as_str(), flag(&args, "--pose").as_deref().and_then(parse_pose)) {
+        ("doom", Some((x, z, yaw, pitch))) => {
+            let mut game =
+                axiom_doom_browser::DoomGame::from_level(&doom_doc(flag(&args, "--level").as_deref()));
+            Some(game.teleport(x, z, yaw, pitch))
+        }
+        _ => None,
+    };
+
     // Drive the engine to `render_tick`, applying the scripted control for each
     // tick (controller 0). The meshes are static, so they are pulled once.
     let mut running = build_app(&app, flag(&args, "--level").as_deref());
@@ -258,9 +292,12 @@ fn main() {
     let materials = running.material_textures();
     let mut outcome = None;
     for t in 0..=render_tick {
-        let frame = match controls.get(t as usize).copied() {
-            Some(c) => running.tick_with_controls(t, &[], std::slice::from_ref(&c)),
-            None => running.tick(t),
+        let frame = match (t, teleport) {
+            (0, Some(c)) => running.tick_with_controls(0, &[], std::slice::from_ref(&c)),
+            _ => match controls.get(t as usize).copied() {
+                Some(c) => running.tick_with_controls(t, &[], std::slice::from_ref(&c)),
+                None => running.tick(t),
+            },
         };
         outcome = Some(frame);
     }

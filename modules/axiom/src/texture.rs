@@ -51,10 +51,12 @@ impl Texture {
 /// `match`ing (branchless). The table order must match the variant order
 /// (Checker = 0, UvGrid = 1, BiomeAtlas = 2).
 pub(crate) fn texture_rgba(texture: Texture) -> (u32, u32, Vec<u8>) {
-    let generators: [fn() -> (u32, u32, Vec<u8>); 3] =
-        [checker_rgba, uv_grid_rgba, biome_atlas_rgba];
+    let generators: [TextureGenerator; 3] = [checker_rgba, uv_grid_rgba, biome_atlas_rgba];
     generators[texture as usize]()
 }
+
+/// One texture generator: yields `(width, height, RGBA8 pixels)`.
+type TextureGenerator = fn() -> (u32, u32, Vec<u8>);
 
 /// The built-in checkerboard as resolved RGBA8. The resources table/resolved
 /// types are not nameable across the module boundary, so the register→resolve→

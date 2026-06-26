@@ -63,6 +63,12 @@ const OVERLAY_CSS: &str = r#"
   background: #04120f; border: 1px solid #0f3d33; border-radius: 0; padding: 2px 5px; outline: none;
 }
 .axiom-dbg-input:focus { border-color: #00e6a8; background: #06201a; }
+/* Click-to-copy: rows and console result lines are clickable (the overlay is
+   otherwise click-through). Hover highlights the target; the cursor signals it. */
+.axiom-dbg-key, .axiom-dbg-val, .axiom-dbg-result {
+  pointer-events: auto; cursor: pointer;
+}
+.axiom-dbg-rows > :hover, .axiom-dbg-result:hover { background: rgba(0, 230, 168, 0.18); }
 "#;
 
 /// The mounted DOM node handles. Every field is a cheap web_sys clone of the same
@@ -92,6 +98,7 @@ pub(crate) struct Binding {
     pointer_down: Closure<dyn FnMut(PointerEvent)>,
     pointer_move: Closure<dyn FnMut(PointerEvent)>,
     pointer_up: Closure<dyn FnMut(PointerEvent)>,
+    copy_click: Closure<dyn FnMut(web_sys::Event)>,
 }
 
 impl Binding {
@@ -107,19 +114,31 @@ impl Binding {
 
     /// Remove the listeners, the overlay nodes, and the injected style.
     pub(crate) fn unmount(self) {
-        let _ = window()
-            .remove_event_listener_with_callback("keydown", self.window_keydown.as_ref().unchecked_ref());
+        let _ = window().remove_event_listener_with_callback(
+            "keydown",
+            self.window_keydown.as_ref().unchecked_ref(),
+        );
+        let _ = self.nodes.input.remove_event_listener_with_callback(
+            "keydown",
+            self.input_keydown.as_ref().unchecked_ref(),
+        );
+        let header = &self.nodes.header;
+        let _ = header.remove_event_listener_with_callback(
+            "pointerdown",
+            self.pointer_down.as_ref().unchecked_ref(),
+        );
+        let _ = header.remove_event_listener_with_callback(
+            "pointermove",
+            self.pointer_move.as_ref().unchecked_ref(),
+        );
+        let _ = header.remove_event_listener_with_callback(
+            "pointerup",
+            self.pointer_up.as_ref().unchecked_ref(),
+        );
         let _ = self
             .nodes
-            .input
-            .remove_event_listener_with_callback("keydown", self.input_keydown.as_ref().unchecked_ref());
-        let header = &self.nodes.header;
-        let _ = header
-            .remove_event_listener_with_callback("pointerdown", self.pointer_down.as_ref().unchecked_ref());
-        let _ = header
-            .remove_event_listener_with_callback("pointermove", self.pointer_move.as_ref().unchecked_ref());
-        let _ = header
-            .remove_event_listener_with_callback("pointerup", self.pointer_up.as_ref().unchecked_ref());
+            .root
+            .remove_event_listener_with_callback("click", self.copy_click.as_ref().unchecked_ref());
         let _ = self.nodes.parent.remove_child(&self.nodes.root);
         if let Some(style_parent) = self.nodes.style.parent_node() {
             let _ = style_parent.remove_child(&self.nodes.style);
@@ -141,6 +160,7 @@ pub(crate) fn mount(state: &Rc<RefCell<OverlayState>>, parent: &Element) -> Bind
     let window_keydown = install_window_keydown(state, &nodes);
     let input_keydown = install_input_keydown(state, &nodes);
     let (pointer_down, pointer_move, pointer_up) = install_drag(state, &nodes);
+    let copy_click = install_copy_click(state, &nodes);
     Binding {
         nodes,
         window_keydown,
@@ -148,6 +168,7 @@ pub(crate) fn mount(state: &Rc<RefCell<OverlayState>>, parent: &Element) -> Bind
         pointer_down,
         pointer_move,
         pointer_up,
+        copy_click,
     }
 }
 
@@ -202,6 +223,9 @@ fn install_input_keydown(
             "Enter" => {
                 let raw = nodes.input.value();
                 state.borrow_mut().submit_command(&raw);
+                // A `copy` command queues clipboard text; flush it here, inside
+                // the keydown — the user gesture `navigator.clipboard` requires.
+                flush_clipboard(&state);
                 nodes.input.set_value("");
             }
             "Escape" => {
@@ -258,24 +282,35 @@ fn sync_nodes(nodes: &Nodes, state: &OverlayState) {
         return;
     }
     // Density class drives the CSS width (so it survives a left/top-only drag).
-    nodes
-        .root
-        .set_class_name(&format!("axiom-dbg-overlay axiom-dbg--{}", state.density_label()));
-    clear_children(&nodes.rows);
-    clear_children(&nodes.results);
-    let document = document();
+    nodes.root.set_class_name(&format!(
+        "axiom-dbg-overlay axiom-dbg--{}",
+        state.density_label()
+    ));
+    // Collect the row cells and console result lines as specs, then RECONCILE the
+    // DOM in place (reuse existing nodes, only update changed text/attrs) instead
+    // of clear-and-rebuild. The overlay repaints every frame; rebuilding would
+    // destroy the very nodes a user is clicking (a mousedown then mouseup on a
+    // replaced node fires no `click`), making click-to-copy unreliable — and it
+    // churns the DOM 60×/sec for nothing.
+    let mut row_cells: Vec<ChildSpec> = Vec::new();
+    let mut result_lines: Vec<ChildSpec> = Vec::new();
     for item in state.draw_list().items() {
         match item {
             InterfaceDrawItem::Panel { x, y, .. } => {
-                let _ = nodes.root.set_attribute("style", &format!("left:{x}px;top:{y}px;"));
+                let _ = nodes
+                    .root
+                    .set_attribute("style", &format!("left:{x}px;top:{y}px;"));
             }
             InterfaceDrawItem::Header { primary, secondary } => {
                 nodes.header_title.set_text_content(Some(primary));
                 nodes.header_status.set_text_content(Some(secondary));
             }
             InterfaceDrawItem::Row { label, value } => {
-                let _ = nodes.rows.append_child(&make_div(&document, "axiom-dbg-key", label));
-                let _ = nodes.rows.append_child(&make_div(&document, "axiom-dbg-val", value));
+                // Both cells carry the whole row's copy text, so clicking either
+                // the key or the value copies "label: value".
+                let copy = format!("{label}: {value}");
+                row_cells.push(ChildSpec::copyable("axiom-dbg-key", label, &copy));
+                row_cells.push(ChildSpec::copyable("axiom-dbg-val", value, &copy));
             }
             InterfaceDrawItem::ConsoleLine { ok, text } => {
                 let class = if *ok {
@@ -283,11 +318,57 @@ fn sync_nodes(nodes: &Nodes, state: &OverlayState) {
                 } else {
                     "axiom-dbg-result err"
                 };
-                let _ = nodes.results.append_child(&make_div(&document, class, text));
+                result_lines.push(ChildSpec::copyable(class, text, text));
             }
             InterfaceDrawItem::ConsoleInput { prompt, .. } => {
                 nodes.prompt.set_text_content(Some(prompt));
             }
+        }
+    }
+    let document = document();
+    reconcile_children(&document, &nodes.rows, &row_cells);
+    reconcile_children(&document, &nodes.results, &result_lines);
+}
+
+/// One desired child `div`: its class, text, and the click-to-copy payload.
+struct ChildSpec {
+    class: String,
+    text: String,
+    copy: String,
+}
+
+impl ChildSpec {
+    fn copyable(class: &str, text: &str, copy: &str) -> Self {
+        ChildSpec {
+            class: class.to_string(),
+            text: text.to_string(),
+            copy: copy.to_string(),
+        }
+    }
+}
+
+/// Update `container`'s children to match `specs`, reusing existing element nodes
+/// by position (so node identity is stable across the per-frame repaint) and only
+/// creating/removing nodes when the count changes.
+fn reconcile_children(document: &Document, container: &Element, specs: &[ChildSpec]) {
+    let existing = container.children();
+    for (index, spec) in specs.iter().enumerate() {
+        let element = existing.item(index as u32).unwrap_or_else(|| {
+            let created = make_div(document, &spec.class, "");
+            let _ = container.append_child(&created);
+            created
+        });
+        element.set_class_name(&spec.class);
+        element.set_text_content(Some(&spec.text));
+        set_copy(&element, &spec.copy);
+    }
+    // Drop any trailing nodes left over from a longer previous render.
+    while existing.length() as usize > specs.len() {
+        match container.last_element_child() {
+            Some(extra) => {
+                let _ = container.remove_child(&extra);
+            }
+            None => break,
         }
     }
 }
@@ -340,7 +421,9 @@ fn build_dom(document: &Document, parent: &Element) -> Nodes {
 }
 
 fn make_console_input(document: &Document) -> HtmlInputElement {
-    let element = document.create_element("input").expect("create console input");
+    let element = document
+        .create_element("input")
+        .expect("create console input");
     element.set_id(CONSOLE_INPUT_ID);
     element.set_class_name("axiom-dbg-input");
     let _ = element.set_attribute("type", "text");
@@ -373,10 +456,11 @@ fn make_div(document: &Document, class: &str, text: &str) -> Element {
     element
 }
 
-fn clear_children(element: &Element) {
-    while let Some(child) = element.last_child() {
-        let _ = element.remove_child(&child);
-    }
+/// Mark `element` as click-to-copy: a `data-copy` payload the delegated click
+/// listener reads, plus a hover title affordance.
+fn set_copy(element: &Element, text: &str) {
+    let _ = element.set_attribute("data-copy", text);
+    let _ = element.set_attribute("title", "click to copy");
 }
 
 fn set_hidden(element: &Element, hidden: bool) {
@@ -407,7 +491,9 @@ fn install_drag(
         Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             event.prevent_default();
             let _ = header.set_pointer_capture(event.pointer_id());
-            state.borrow_mut().drag_begin(event.client_x(), event.client_y());
+            state
+                .borrow_mut()
+                .drag_begin(event.client_x(), event.client_y());
         })
     };
 
@@ -435,7 +521,8 @@ fn install_drag(
     };
 
     let _ = header.add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref());
-    let _ = header.add_event_listener_with_callback("pointermove", dragging.as_ref().unchecked_ref());
+    let _ =
+        header.add_event_listener_with_callback("pointermove", dragging.as_ref().unchecked_ref());
     let _ = header.add_event_listener_with_callback("pointerup", up.as_ref().unchecked_ref());
     (down, dragging, up)
 }
@@ -444,9 +531,20 @@ fn install_drag(
 /// overlay's own size.
 fn drag_bounds(root: &Element) -> (i32, i32) {
     let window = window();
-    let viewport_w = window.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
-    let viewport_h = window.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
-    (viewport_w - root.client_width(), viewport_h - root.client_height())
+    let viewport_w = window
+        .inner_width()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) as i32;
+    let viewport_h = window
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) as i32;
+    (
+        viewport_w - root.client_width(),
+        viewport_h - root.client_height(),
+    )
 }
 
 /// Write the current panel position onto the overlay root as inline `left`/`top`
@@ -454,6 +552,46 @@ fn drag_bounds(root: &Element) -> (i32, i32) {
 fn apply_position(root: &Element, state: &OverlayState) {
     let (x, y) = state.position();
     let _ = root.set_attribute("style", &format!("left:{x}px;top:{y}px;"));
+}
+
+/// One delegated `click` listener on the overlay root: a click on any element
+/// carrying a `data-copy` payload (the diagnostics rows and console result lines,
+/// tagged by [`set_copy`]) queues that text and flushes it to the clipboard.
+/// Click is a user gesture, so `navigator.clipboard` is permitted here. Other
+/// clicks (header, console input, empty area) carry no `data-copy` and are no-ops.
+fn install_copy_click(
+    state: &Rc<RefCell<OverlayState>>,
+    nodes: &Nodes,
+) -> Closure<dyn FnMut(web_sys::Event)> {
+    let state = state.clone();
+    let callback = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+        let copied = event
+            .target()
+            .and_then(|target| target.dyn_into::<Element>().ok())
+            .and_then(|element| element.closest("[data-copy]").ok().flatten())
+            .and_then(|element| element.get_attribute("data-copy"));
+        if let Some(text) = copied {
+            state.borrow_mut().request_clipboard(text);
+            flush_clipboard(&state);
+        }
+    });
+    let _ = nodes
+        .root
+        .add_event_listener_with_callback("click", callback.as_ref().unchecked_ref());
+    callback
+}
+
+/// Drain the overlay's pending clipboard requests and write each to the system
+/// clipboard via `navigator.clipboard.writeText`. Must be called from inside a
+/// user gesture (the console keydown, or a row/result click). The returned
+/// Promise is intentionally dropped — the copy proceeds, and a failure (e.g. an
+/// insecure context) is silently ignored so it never disrupts the console.
+fn flush_clipboard(state: &Rc<RefCell<OverlayState>>) {
+    let requests = state.borrow_mut().take_clipboard_requests();
+    let clipboard = window().navigator().clipboard();
+    for text in &requests {
+        let _ = clipboard.write_text(text);
+    }
 }
 
 fn window() -> Window {

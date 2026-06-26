@@ -62,6 +62,31 @@ pub unsafe extern "C" fn axiom_decode_join_version(ptr: *const u8, len: usize) -
         .unwrap_or(0)
 }
 
+/// Decode the room id of a `JoinRoom` frame into `out` (capacity `cap`),
+/// returning the room-id byte count, or `-1` if the frame is not a valid
+/// `JoinRoom` or the buffer is too small. The host routes a connection to a room
+/// by these bytes — the wire already carries the id; this surfaces it through the
+/// one canonical codec instead of a hand-written twin.
+///
+/// # Safety
+/// `ptr`/`len` must describe a readable buffer (or `ptr` null); `out`/`cap` must
+/// describe a writable buffer.
+#[no_mangle]
+pub unsafe extern "C" fn axiom_decode_join_room_id(
+    ptr: *const u8,
+    len: usize,
+    out: *mut u8,
+    cap: usize,
+) -> isize {
+    copy_out(
+        view(ptr, len)
+            .and_then(|b| NetProtocolApi::decode_join_room(b).ok())
+            .map(|(_version, room, _token)| room),
+        out,
+        cap,
+    )
+}
+
 /// Decode a `ClientIntent`, writing its sequence and unpacked `(dx, dy)` delta.
 /// Returns `1` on success, `0` on failure.
 ///
@@ -78,9 +103,9 @@ pub unsafe extern "C" fn axiom_decode_client_intent(
     match view(ptr, len).and_then(|b| NetProtocolApi::decode_client_intent(b).ok()) {
         Some((seq, _predicted, _last_seen, payload)) => {
             let (dx, dy) = unpack_delta(&payload);
-            out_seq.as_mut().map(|p| *p = seq);
-            out_dx.as_mut().map(|p| *p = dx);
-            out_dy.as_mut().map(|p| *p = dy);
+            out_seq.as_mut().into_iter().for_each(|p| *p = seq);
+            out_dx.as_mut().into_iter().for_each(|p| *p = dx);
+            out_dy.as_mut().into_iter().for_each(|p| *p = dy);
             1
         }
         None => 0,
@@ -151,9 +176,142 @@ pub unsafe extern "C" fn axiom_encode_rejected(
     )
 }
 
+/// Encode a `JoinRoom` (client → server) into `out`; returns the byte count or
+/// `-1`. Exposed so a non-Rust client (or a host test) can build the first frame
+/// through the one canonical codec — never a hand-written twin.
+///
+/// # Safety
+/// `room_id`/`token`/`out` describe valid buffers (each may be null with length 0).
+#[no_mangle]
+pub unsafe extern "C" fn axiom_encode_join_room(
+    protocol_version: u32,
+    room_id: *const u8,
+    room_id_len: usize,
+    token: *const u8,
+    token_len: usize,
+    out: *mut u8,
+    cap: usize,
+) -> isize {
+    let room = view(room_id, room_id_len).unwrap_or(&[]);
+    let tok = view(token, token_len).unwrap_or(&[]);
+    copy_out(
+        NetProtocolApi::encode_join_room(protocol_version, room, tok).ok(),
+        out,
+        cap,
+    )
+}
+
+/// Encode a `ClientIntent` (client → server) into `out`; returns the byte count
+/// or `-1`. The opaque `payload` is the ruleset move bytes.
+///
+/// # Safety
+/// `payload`/`out` describe valid buffers (`payload` may be null with length 0).
+#[no_mangle]
+pub unsafe extern "C" fn axiom_encode_client_intent(
+    client_sequence: u64,
+    predicted_client_tick: u64,
+    last_seen_server_tick: u64,
+    payload: *const u8,
+    payload_len: usize,
+    out: *mut u8,
+    cap: usize,
+) -> isize {
+    let p = view(payload, payload_len).unwrap_or(&[]);
+    copy_out(
+        NetProtocolApi::encode_client_intent(
+            client_sequence,
+            predicted_client_tick,
+            last_seen_server_tick,
+            p,
+        )
+        .ok(),
+        out,
+        cap,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn join_room_and_client_intent_encode_and_peek_back() {
+        let mut buf = [0u8; 128];
+        let n = unsafe {
+            axiom_encode_join_room(
+                1,
+                b"lobby".as_ptr(),
+                5,
+                std::ptr::null(),
+                0,
+                buf.as_mut_ptr(),
+                buf.len(),
+            )
+        };
+        assert!(n > 0);
+        assert_eq!(
+            unsafe { axiom_decode_join_version(buf.as_ptr(), n as usize) },
+            1
+        );
+
+        let payload = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        let n = unsafe {
+            axiom_encode_client_intent(
+                9,
+                0,
+                0,
+                payload.as_ptr(),
+                payload.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+            )
+        };
+        assert!(n > 0);
+        assert_eq!(
+            unsafe { axiom_msg_kind(buf.as_ptr(), n as usize) },
+            NetProtocolApi::KIND_CLIENT_INTENT as i32
+        );
+    }
+
+    #[test]
+    fn join_room_id_decodes_through_the_c_abi() {
+        // A real JoinRoom carrying room id "room-7" → the host reads those bytes
+        // to route the connection.
+        let frame = NetProtocolApi::encode_join_room(1, b"room-7", b"").unwrap();
+        let mut out = [0u8; 64];
+        let n = unsafe {
+            axiom_decode_join_room_id(frame.as_ptr(), frame.len(), out.as_mut_ptr(), out.len())
+        };
+        assert_eq!(n, 6);
+        assert_eq!(&out[..n as usize], b"room-7");
+
+        // A non-JoinRoom frame (a Welcome) yields -1, not a room id.
+        let welcome = NetProtocolApi::encode_welcome(1, 1, 0, 1).unwrap();
+        assert_eq!(
+            unsafe {
+                axiom_decode_join_room_id(
+                    welcome.as_ptr(),
+                    welcome.len(),
+                    out.as_mut_ptr(),
+                    out.len(),
+                )
+            },
+            -1
+        );
+        // A too-small output buffer is reported as -1, never a partial write.
+        let mut tiny = [0u8; 3];
+        assert_eq!(
+            unsafe {
+                axiom_decode_join_room_id(
+                    frame.as_ptr(),
+                    frame.len(),
+                    tiny.as_mut_ptr(),
+                    tiny.len(),
+                )
+            },
+            -1
+        );
+    }
 
     #[test]
     fn welcome_encodes_and_peeks_back_as_a_welcome() {

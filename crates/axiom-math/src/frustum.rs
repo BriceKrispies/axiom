@@ -93,11 +93,11 @@ impl Frustum {
             let n = plane.normal();
             // p-vertex: corner that maximizes signed distance. Each axis picks
             // `max` when the normal component is >= 0, else `min` — the same
-            // selection the `if` did, expressed branchlessly.
+            // selection the `if` did, expressed branchlessly as a table index.
             let p_vertex = Vec3::new(
-                (n.x >= 0.0).then_some(aabb.max().x).unwrap_or(aabb.min().x),
-                (n.y >= 0.0).then_some(aabb.max().y).unwrap_or(aabb.min().y),
-                (n.z >= 0.0).then_some(aabb.max().z).unwrap_or(aabb.min().z),
+                [aabb.min().x, aabb.max().x][usize::from(n.x >= 0.0)],
+                [aabb.min().y, aabb.max().y][usize::from(n.y >= 0.0)],
+                [aabb.min().z, aabb.max().z][usize::from(n.z >= 0.0)],
             );
             plane.signed_distance_to_point(p_vertex) >= 0.0
         })

@@ -85,7 +85,7 @@ impl FrameBuilder {
         //    the same `EngineFrame` the original did.
         let sequence_rejected = self
             .last_host_sequence
-            .map_or(false, |last| report.sequence() <= last);
+            .is_some_and(|last| report.sequence() <= last);
 
         sequence_rejected
             .then_some(())

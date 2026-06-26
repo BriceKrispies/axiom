@@ -129,7 +129,7 @@ mod tests {
         let snapped = nearest_valid_anchor(&board, &m, (0, 0), 2).expect("a fit is nearby");
         assert!(can_place(&board, &m, snapped.0, snapped.1));
         // It is within the search radius of the desired anchor.
-        assert!((snapped.0 - 0).abs() <= 2 && (snapped.1 - 0).abs() <= 2);
+        assert!(snapped.0.abs() <= 2 && snapped.1.abs() <= 2);
     }
 
     #[test]

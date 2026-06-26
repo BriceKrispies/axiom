@@ -44,7 +44,10 @@ impl MeshGeometry {
     /// The position of vertex `idx`, or the origin when `idx` is out of range
     /// (a malformed index never panics — it degrades to a point at the origin).
     pub(crate) fn position(&self, idx: u32) -> [f32; 3] {
-        self.positions.get(idx as usize).copied().unwrap_or([0.0; 3])
+        self.positions
+            .get(idx as usize)
+            .copied()
+            .unwrap_or([0.0; 3])
     }
 
     /// The linear RGBA colour of vertex `idx`, or opaque white when out of range.

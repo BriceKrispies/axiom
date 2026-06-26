@@ -31,11 +31,11 @@ impl Stage for ErosionStage {
 
         let mut next = globe.region_elevation.clone();
         for _ in 0..iters {
-            for r in 0..region_count {
+            for (r, slot) in next.iter_mut().enumerate() {
                 let h = globe.region_elevation[r];
                 let neighbours = globe.graph.neighbours_of(RegionId(r as u32));
                 if neighbours.is_empty() {
-                    next[r] = h;
+                    *slot = h;
                     continue;
                 }
                 // Lowest downhill neighbour.
@@ -48,7 +48,7 @@ impl Stage for ErosionStage {
                 }
                 let slope = h - min_h;
                 // Incise proportional to slope; only erodes where there is a drop.
-                next[r] = if slope > 0.0 {
+                *slot = if slope > 0.0 {
                     h - EROSION_K * slope
                 } else {
                     h

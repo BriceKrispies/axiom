@@ -79,7 +79,8 @@ mod tests {
     fn distinct_seeds_or_sites_scatter_differently() {
         let base = PlacementApi::scatter(7, &site(&[3, 9]), 12, 16, 16);
         assert_ne!(base, PlacementApi::scatter(8, &site(&[3, 9]), 12, 16, 16)); // seed
-        assert_ne!(base, PlacementApi::scatter(7, &site(&[3, 10]), 12, 16, 16)); // site
+        assert_ne!(base, PlacementApi::scatter(7, &site(&[3, 10]), 12, 16, 16));
+        // site
     }
 
     #[test]

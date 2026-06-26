@@ -17,4 +17,5 @@ allowed_layers = []
 allowed_modules = [
     "engine",
     "windowing",
+    "debug-overlay",
 ]

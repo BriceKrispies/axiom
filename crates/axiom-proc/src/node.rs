@@ -38,9 +38,12 @@ pub(crate) struct RecipeNode {
 /// How many of a node's `inputs` each op consumes (indexed by `op as usize`).
 const ARITY: [usize; 4] = [0, 0, 2, 2];
 
+/// One node op implementation: folds a node + its resolved input values + the
+/// entropy stream into a single output word.
+type NodeOpFn = fn(&RecipeNode, &[u64], &mut EntropyStream) -> u64;
+
 /// The op implementations, indexed by `op as usize` — a branchless dispatch table.
-const OPS: [fn(&RecipeNode, &[u64], &mut EntropyStream) -> u64; 4] =
-    [op_const, op_draw, op_add, op_xor];
+const OPS: [NodeOpFn; 4] = [op_const, op_draw, op_add, op_xor];
 
 fn op_const(node: &RecipeNode, _values: &[u64], _stream: &mut EntropyStream) -> u64 {
     node.immediate

@@ -251,9 +251,8 @@ impl ProcessScheduler {
     /// (`false` if the process is unknown or already subscribed).
     pub(crate) fn subscribe(&mut self, process: ProcessId, dependency: ProcessDependency) -> bool {
         let exists = self.processes.contains_key(&process);
-        exists
-            .then(|| self.dependencies.subscribe(process, dependency))
-            .unwrap_or(false)
+        let subscribed = exists.then(|| self.dependencies.subscribe(process, dependency));
+        subscribed.unwrap_or(false)
     }
 
     /// A process's dependencies, ascending.
@@ -330,7 +329,7 @@ impl ProcessScheduler {
             .processes
             .get_mut(&process)
             .and_then(|sched| sched.lifecycle.transition(target, None, tick));
-        reschedule.map(|at| {
+        reschedule.into_iter().for_each(|at| {
             self.wake_queue
                 .schedule(process, at, WakeReason::Rescheduled)
         });

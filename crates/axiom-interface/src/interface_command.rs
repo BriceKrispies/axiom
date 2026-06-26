@@ -45,20 +45,23 @@ pub struct CommandOutcome {
 }
 
 impl CommandOutcome {
-    pub fn ok(command: impl Into<String>, message: impl Into<String>) -> Self {
+    /// Construct an outcome with an explicit success flag — the branchless
+    /// primitive both [`Self::ok`] and [`Self::error`] specialize, and the form
+    /// a caller holding a `bool` selects with directly (no `if`).
+    pub(crate) fn new(ok: bool, command: impl Into<String>, message: impl Into<String>) -> Self {
         CommandOutcome {
             command: command.into(),
-            ok: true,
+            ok,
             message: message.into(),
         }
     }
 
+    pub fn ok(command: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(true, command, message)
+    }
+
     pub fn error(command: impl Into<String>, message: impl Into<String>) -> Self {
-        CommandOutcome {
-            command: command.into(),
-            ok: false,
-            message: message.into(),
-        }
+        Self::new(false, command, message)
     }
 
     pub fn command(&self) -> &str {

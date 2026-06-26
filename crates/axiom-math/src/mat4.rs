@@ -317,7 +317,7 @@ impl Mat4 {
         // Select the divisor branchlessly: 1.0 leaves the components unchanged
         // (the affine branch), v.w performs the perspective divide. Dividing by
         // 1.0 is always finite, so this is safe for the non-divide case.
-        let divisor = needs_divide.then_some(v.w).unwrap_or(1.0);
+        let divisor = [1.0, v.w][usize::from(needs_divide)];
         Vec3::new(v.x / divisor, v.y / divisor, v.z / divisor)
     }
 

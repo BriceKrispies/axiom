@@ -60,7 +60,12 @@ mod tests {
         assert!(!m.is_live());
         // The selection is carried in the constructed variant; comparing against
         // the expected variant verifies it without an (uncoverable) panic arm.
-        assert_eq!(m, TimelineMode::Scrubbing { selected_frame: FrameIndex::new(12) });
+        assert_eq!(
+            m,
+            TimelineMode::Scrubbing {
+                selected_frame: FrameIndex::new(12)
+            }
+        );
         assert_ne!(m, TimelineMode::scrubbing(FrameIndex::new(13)));
     }
 

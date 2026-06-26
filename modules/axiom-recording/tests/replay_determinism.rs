@@ -17,12 +17,7 @@ use axiom_recording::RecordingApi;
 /// A fixed scenario of synthetic input packets (one per frame). These are the
 /// only nondeterminism source a real sim would have; fixing them fixes the run.
 const SCENARIO: [&[u8]; 6] = [
-    b"start",
-    b"move:+1",
-    b"move:+3",
-    b"wait",
-    b"move:-2",
-    b"stop",
+    b"start", b"move:+1", b"move:+3", b"wait", b"move:-2", b"stop",
 ];
 
 /// A tiny, fully deterministic "simulation": an accumulator advanced by hashing

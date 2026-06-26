@@ -344,9 +344,10 @@ fn inbound_action(incoming: Result<Message, tokio_tungstenite::tungstenite::Erro
         .map(|msg| {
             msg.is_close().then(Action::stop).unwrap_or_else(|| {
                 let is_binary = msg.is_binary();
-                is_binary
-                    .then_some(Action::broadcast(msg.into_data().to_vec()))
-                    .unwrap_or(Action::noop())
+                [Action::noop(), Action::broadcast(msg.into_data().to_vec())]
+                    .into_iter()
+                    .nth(usize::from(is_binary))
+                    .unwrap_or_else(Action::noop)
             })
         })
         .unwrap_or_else(Action::stop)
@@ -365,9 +366,10 @@ fn bus_action(
             bus.payload
                 .map(|data| {
                     // Another peer's frame is relayed; our own echo is skipped.
-                    (from != id)
-                        .then_some(Action::relay(from, data))
-                        .unwrap_or(Action::noop())
+                    [Action::noop(), Action::relay(from, data)]
+                        .into_iter()
+                        .nth(usize::from(from != id))
+                        .unwrap_or_else(Action::noop)
                 })
                 // No payload == the "go" start signal.
                 .unwrap_or_else(Action::go)

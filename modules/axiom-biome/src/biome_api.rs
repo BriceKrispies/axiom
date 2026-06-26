@@ -42,9 +42,12 @@ impl BiomeApi {
     pub fn classify(elevation: u32, moisture: u32) -> u8 {
         // `(elev_band, moist_band)` -> biome, indexed by `elev_band * 2 + moist_band`.
         const BIOME_TABLE: [u8; 6] = [
-            BiomeApi::BEACH, BiomeApi::OCEAN, // low:  dry, wet
-            BiomeApi::DESERT, BiomeApi::FOREST, // mid:  dry, wet
-            BiomeApi::PEAK, BiomeApi::MOUNTAIN, // high: dry, wet
+            BiomeApi::BEACH,
+            BiomeApi::OCEAN, // low:  dry, wet
+            BiomeApi::DESERT,
+            BiomeApi::FOREST, // mid:  dry, wet
+            BiomeApi::PEAK,
+            BiomeApi::MOUNTAIN, // high: dry, wet
         ];
         let elev_band = band(elevation, &[ELEV_LOW, ELEV_HIGH]);
         let moist_band = band(moisture, &[MOIST_WET]);

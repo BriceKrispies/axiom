@@ -20,7 +20,10 @@ mod tests {
     #[test]
     fn marker_is_a_zero_data_value() {
         // It is a pure marker: all instances are equal and it is `Default`.
-        assert_eq!(ContactShadowCaster, ContactShadowCaster::default());
+        assert_eq!(
+            ContactShadowCaster,
+            <ContactShadowCaster as Default>::default()
+        );
         assert_eq!(core::mem::size_of::<ContactShadowCaster>(), 0);
         assert!(format!("{:?}", ContactShadowCaster).contains("ContactShadowCaster"));
     }

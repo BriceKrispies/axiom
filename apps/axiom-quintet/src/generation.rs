@@ -84,7 +84,7 @@ fn piece_recipe() -> Recipe {
 /// board occupancy is digested into one key, then score and moves are appended as
 /// child segments, so distinct states are distinct sites.
 fn site(board: &Board, score: u64, moves: u64) -> Address {
-    let mut occupancy = Vec::with_capacity((BOARD_SIZE * BOARD_SIZE) as usize);
+    let mut occupancy = Vec::with_capacity(BOARD_SIZE * BOARD_SIZE);
     for y in 0..BOARD_SIZE as i32 {
         for x in 0..BOARD_SIZE as i32 {
             occupancy.push(u8::from(board.is_filled(x, y)));
@@ -159,7 +159,10 @@ mod tests {
         let board = Board::empty();
         for state in 0..64u64 {
             let (score, moves) = (state, state * 3 + 1);
-            assert_eq!(generate(&board, score, moves), generate(&board, score, moves));
+            assert_eq!(
+                generate(&board, score, moves),
+                generate(&board, score, moves)
+            );
         }
     }
 

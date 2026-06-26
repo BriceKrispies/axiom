@@ -92,23 +92,21 @@ impl Peer {
         // The RNG must only advance when this peer actually random-walks, or the
         // seeded stream (and thus the replay) would drift; gate the draw on the
         // tag before touching `input_rng`.
-        let random_walk = (kind == ScriptKind::RandomWalk)
-            .then(|| {
-                let mut axis = || (self.input_rng.next_bounded(3) as i32 - 1) as f32 * MOVE_SPEED;
-                let (x, y) = (axis(), axis());
-                Vec3::new(x, y, 0.0)
-            })
-            .unwrap_or(Vec3::ZERO);
+        let random_walk = (kind == ScriptKind::RandomWalk).then(|| {
+            let mut axis = || (self.input_rng.next_bounded(3) as i32 - 1) as f32 * MOVE_SPEED;
+            let (x, y) = (axis(), axis());
+            Vec3::new(x, y, 0.0)
+        });
 
-        let oscillate = (kind == ScriptKind::Oscillate)
-            .then(|| {
-                let p = self.cfg.input.period().max(1);
-                let a = std::f32::consts::TAU * (tick % p) as f32 / p as f32;
-                Vec3::new(a.cos() * MOVE_SPEED, a.sin() * MOVE_SPEED, 0.0)
-            })
-            .unwrap_or(Vec3::ZERO);
+        let oscillate = (kind == ScriptKind::Oscillate).then(|| {
+            let p = self.cfg.input.period().max(1);
+            let a = std::f32::consts::TAU * (tick % p) as f32 / p as f32;
+            Vec3::new(a.cos() * MOVE_SPEED, a.sin() * MOVE_SPEED, 0.0)
+        });
 
-        scripted.add(random_walk).add(oscillate)
+        scripted
+            .add(random_walk.unwrap_or(Vec3::ZERO))
+            .add(oscillate.unwrap_or(Vec3::ZERO))
     }
 
     /// The extra bad frames this peer injects this tick (empty if honest).
@@ -219,7 +217,7 @@ fn deliver_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
 
 /// Diverge a corrupt peer's reported state so its beacon mismatches.
 fn perturb(mut bytes: Vec<u8>) -> Vec<u8> {
-    bytes.first_mut().map(|b| *b ^= 0xFF);
+    bytes.first_mut().into_iter().for_each(|b| *b ^= 0xFF);
     bytes.is_empty().then(|| bytes.push(0xAB));
     bytes
 }
@@ -241,11 +239,8 @@ fn confirm_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
             peer.net.ready_tick().map(|tick| {
                 let inputs = peer.net.confirm_tick(tick);
                 let stepped = peer.sim.step(tick, &inputs);
-                let bytes = peer
-                    .cheat
-                    .corrupts_sim()
-                    .then(|| perturb(stepped.clone()))
-                    .unwrap_or(stepped);
+                let corrupted = peer.cheat.corrupts_sim().then(|| perturb(stepped.clone()));
+                let bytes = corrupted.unwrap_or(stepped);
                 let beacon = peer.net.record_local_hash(tick, &bytes);
                 let hash = peer.net.digest(&bytes);
                 peer.hashes.insert(tick, hash);
@@ -255,7 +250,8 @@ fn confirm_phase(peers: &mut [Peer], net: &mut ModeledNetwork, t: u64) {
                 peer.last_hash_prefix = u32::from_le_bytes([hash[0], hash[1], hash[2], hash[3]]);
                 peer.submit_time
                     .get(&tick)
-                    .map(|submitted_at| peer.latencies.push(t - submitted_at));
+                    .into_iter()
+                    .for_each(|submitted_at| peer.latencies.push(t - submitted_at));
                 let peak = peer.net.buffered_inputs();
                 peer.buffer_peak = peer.buffer_peak.max(peak);
                 net.broadcast(i, &beacon, t);
@@ -296,7 +292,7 @@ fn convergence(peers: &[Peer]) -> (bool, Option<u64>) {
         .filter(|p| !p.cheat.corrupts_sim())
         .for_each(|p| {
             p.hashes.iter().for_each(|(&tick, &hash)| {
-                let diverged = consensus.get(&tick).map_or(false, |seen| *seen != hash);
+                let diverged = consensus.get(&tick).is_some_and(|seen| *seen != hash);
                 consensus.entry(tick).or_insert(hash);
                 diverged.then(|| {
                     first = Some(first.map_or(tick, |f| f.min(tick)));
@@ -319,7 +315,7 @@ fn stream_line(peers: &[Peer], net: &ModeledNetwork, t: u64) {
             .map(|p| p.net.confirmed_tick())
             .min()
             .unwrap_or(0);
-        floor.checked_sub(1).map_or(true, |prev| {
+        floor.checked_sub(1).is_none_or(|prev| {
             active
                 .iter()
                 .filter_map(|p| p.hashes.get(&prev))
@@ -331,7 +327,7 @@ fn stream_line(peers: &[Peer], net: &ModeledNetwork, t: u64) {
     println!(
         "tick {t:>4}: confirmed=[{}] agree={} inflight={}",
         cursors.join(","),
-        agree.then_some("OK").unwrap_or("XX"),
+        ["XX", "OK"][usize::from(agree)],
         net.inflight_count()
     );
 }

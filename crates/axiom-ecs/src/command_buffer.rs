@@ -15,13 +15,39 @@ struct Command {
 }
 
 /// The outcome of applying one command, in the same FIFO position it was queued.
+///
+/// Exactly one of the four fields is `Some`, identifying the command kind:
+/// spawn, despawn, component-insert, or component-remove. Insert/remove come from
+/// [`crate::ComponentCommandBuffer`]; spawn/despawn from [`CommandBuffer`].
 #[derive(Debug, Clone, Copy)]
 pub struct CommandOutcome {
     spawned: Option<EntityHandle>,
     despawned: Option<bool>,
+    inserted: Option<bool>,
+    removed: Option<bool>,
 }
 
 impl CommandOutcome {
+    /// A component-insert outcome: `replaced` is whether a previous value existed.
+    pub(crate) fn from_insert(replaced: bool) -> Self {
+        CommandOutcome {
+            spawned: None,
+            despawned: None,
+            inserted: Some(replaced),
+            removed: None,
+        }
+    }
+
+    /// A component-remove outcome: `existed` is whether a value was present.
+    pub(crate) fn from_remove(existed: bool) -> Self {
+        CommandOutcome {
+            spawned: None,
+            despawned: None,
+            inserted: None,
+            removed: Some(existed),
+        }
+    }
+
     /// The handle a spawn command produced, if this outcome was a spawn.
     pub fn spawned(&self) -> Option<EntityHandle> {
         self.spawned
@@ -31,6 +57,16 @@ impl CommandOutcome {
     /// `Some(false)` means the target handle was stale/dead — a clean no-op.
     pub fn despawned(&self) -> Option<bool> {
         self.despawned
+    }
+
+    /// For a component-insert command: whether it replaced an existing value.
+    pub fn inserted(&self) -> Option<bool> {
+        self.inserted
+    }
+
+    /// For a component-remove command: whether a value was present and removed.
+    pub fn removed(&self) -> Option<bool> {
+        self.removed
     }
 }
 
@@ -43,6 +79,12 @@ pub struct CommandReport {
 }
 
 impl CommandReport {
+    /// Build a report from outcomes in application order. Used by the command
+    /// buffers (this crate) to return their per-command results.
+    pub(crate) fn from_outcomes(outcomes: Vec<CommandOutcome>) -> Self {
+        CommandReport { outcomes }
+    }
+
     /// The handles produced by spawn commands, in application order.
     pub fn spawned(&self) -> impl Iterator<Item = EntityHandle> + '_ {
         self.outcomes.iter().filter_map(CommandOutcome::spawned)
@@ -133,6 +175,8 @@ impl CommandBuffer {
                     .target
                     .filter(|_| command.despawn)
                     .map(|handle| world.despawn_handle(handle)),
+                inserted: None,
+                removed: None,
             })
             .collect();
         CommandReport { outcomes }

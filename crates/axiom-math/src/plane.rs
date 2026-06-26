@@ -72,8 +72,8 @@ impl Plane {
         // of On reproduces the if / else-if / else exactly.
         let front = s > epsilon.value();
         let back = (!front) & (s < -epsilon.value());
-        let back_or_on = back.then_some(PlaneSide::Back).unwrap_or(PlaneSide::On);
-        front.then_some(PlaneSide::Front).unwrap_or(back_or_on)
+        let back_or_on = [PlaneSide::On, PlaneSide::Back][usize::from(back)];
+        [back_or_on, PlaneSide::Front][usize::from(front)]
     }
 }
 

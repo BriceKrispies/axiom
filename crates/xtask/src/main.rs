@@ -22,13 +22,12 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         },
         |cmd| {
-            (cmd == "check-architecture")
-                .then(|| run_check(&args[1..]))
-                .unwrap_or_else(|| {
-                    eprintln!("xtask: unknown command `{cmd}`");
-                    print_usage();
-                    ExitCode::from(2)
-                })
+            let checked = (cmd == "check-architecture").then(|| run_check(&args[1..]));
+            checked.unwrap_or_else(|| {
+                eprintln!("xtask: unknown command `{cmd}`");
+                print_usage();
+                ExitCode::from(2)
+            })
         },
     )
 }
@@ -93,32 +92,29 @@ fn parse_root(rest: &[String]) -> Result<PathBuf, String> {
             state.and_then(|state| {
                 // When awaiting a value, this arg is the `--root` path; else this
                 // arg must itself be `--root`, otherwise it is unexpected.
-                state
-                    .awaiting_value
-                    .then(|| {
+                let as_value = state.awaiting_value.then(|| {
+                    Ok(State {
+                        root: Some(PathBuf::from(arg)),
+                        awaiting_value: false,
+                    })
+                });
+                as_value.unwrap_or_else(|| {
+                    let as_flag = (arg.as_str() == "--root").then(|| {
                         Ok(State {
-                            root: Some(PathBuf::from(arg)),
-                            awaiting_value: false,
+                            root: state.root.clone(),
+                            awaiting_value: true,
                         })
-                    })
-                    .unwrap_or_else(|| {
-                        (arg.as_str() == "--root")
-                            .then(|| {
-                                Ok(State {
-                                    root: state.root.clone(),
-                                    awaiting_value: true,
-                                })
-                            })
-                            .unwrap_or_else(|| Err(format!("unexpected argument `{arg}`")))
-                    })
+                    });
+                    as_flag.unwrap_or_else(|| Err(format!("unexpected argument `{arg}`")))
+                })
             })
         })
         .and_then(|state| {
             // A dangling `--root` with no following value is an error.
-            state
+            let dangling = state
                 .awaiting_value
-                .then(|| Err("--root requires a path argument".to_string()))
-                .unwrap_or_else(|| Ok(state.root.unwrap_or_else(default_repo_root)))
+                .then(|| Err("--root requires a path argument".to_string()));
+            dangling.unwrap_or_else(|| Ok(state.root.unwrap_or_else(default_repo_root)))
         })
 }
 

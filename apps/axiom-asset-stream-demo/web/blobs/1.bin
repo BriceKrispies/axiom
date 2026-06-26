@@ -1,0 +1,1 @@
+axiom-asset-stream-demo fixture blob: atlas (texture, id 1). Opaque bytes — the demo does not decode them; it only proves the streaming fetch pipeline.

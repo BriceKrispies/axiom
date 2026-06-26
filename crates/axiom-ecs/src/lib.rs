@@ -25,16 +25,19 @@
 //! primitives. Those primitives stay public so consumers can name them:
 //! [`World`] (the world model) over a [`ColumnSet`] of [`ComponentColumn`]s,
 //! [`EntityRegistry`] minting generational [`EntityHandle`]s, [`Query`] over
-//! columns, [`CommandBuffer`] (+ [`CommandReport`]/[`CommandOutcome`]) for
+//! columns (with [`QueryFilterExt`] presence filters), [`CommandBuffer`] /
+//! [`ComponentCommandBuffer`] (+ [`CommandReport`]/[`CommandOutcome`]) for
 //! barrier-applied structural change, [`EventBuffer`],
 //! [`TrackedColumn`] (+ [`ChangeKind`]) for change detection, [`ReplayLog`],
 //! [`ComponentTypeId`], [`WorldSystem`]/[`WorldStep`]/[`SchedulePhase`], and
 //! [`ErasedColumn`]/[`DynamicComponents`]. Curated set enforced by
 //! `tests/architecture.rs::lib_exports_are_curated_set`.
 
+mod change_query;
 mod column_set;
 mod command_buffer;
 mod component_column;
+mod component_command_buffer;
 mod component_type_id;
 mod dynamic_components;
 mod ecs_api;
@@ -43,6 +46,7 @@ mod entity_registry;
 mod erased_column;
 mod event_buffer;
 mod query;
+mod query_filter;
 mod replay_log;
 mod schedule_phase;
 mod tracked_column;
@@ -56,6 +60,7 @@ mod fixtures;
 pub use column_set::ColumnSet;
 pub use command_buffer::{CommandBuffer, CommandOutcome, CommandReport};
 pub use component_column::ComponentColumn;
+pub use component_command_buffer::ComponentCommandBuffer;
 pub use component_type_id::ComponentTypeId;
 pub use dynamic_components::DynamicComponents;
 pub use ecs_api::EcsApi;
@@ -64,6 +69,7 @@ pub use entity_registry::EntityRegistry;
 pub use erased_column::ErasedColumn;
 pub use event_buffer::EventBuffer;
 pub use query::Query;
+pub use query_filter::QueryFilterExt;
 pub use replay_log::ReplayLog;
 pub use schedule_phase::SchedulePhase;
 pub use tracked_column::{ChangeKind, TrackedColumn};

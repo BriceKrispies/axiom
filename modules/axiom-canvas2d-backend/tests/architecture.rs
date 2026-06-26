@@ -45,7 +45,10 @@ fn lib_rs_exports_only_the_facade() {
         .map(str::trim)
         .filter(|l| l.starts_with("pub ") && !l.starts_with("pub(crate)"))
         .collect();
-    assert_eq!(actual, vec!["pub use canvas2d_backend_api::Canvas2dBackendApi;"]);
+    assert_eq!(
+        actual,
+        vec!["pub use canvas2d_backend_api::Canvas2dBackendApi;"]
+    );
 }
 
 #[test]

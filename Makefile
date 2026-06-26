@@ -75,11 +75,20 @@ HARNESS_WEB      := $(HARNESS_DIR)/web
 HARNESS_PKG      := $(HARNESS_WEB)/pkg
 HARNESS_PORT     ?= 8000
 
+# The runtime asset-streaming demo (apps/axiom-asset-stream-demo).
+ASSETSTREAM_DIR      := apps/axiom-asset-stream-demo
+ASSETSTREAM_CRATE    := axiom-asset-stream-demo
+ASSETSTREAM_ARTIFACT := target/$(WASM_TARGET)/release/axiom_asset_stream_demo.wasm
+ASSETSTREAM_WEB      := $(ASSETSTREAM_DIR)/web
+ASSETSTREAM_PKG      := $(ASSETSTREAM_WEB)/pkg
+ASSETSTREAM_FIXTURE  := $(ASSETSTREAM_DIR)/fixture/assets.toml
+ASSETSTREAM_PORT     ?= 8000
+
 GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay doom doom-build doom-hot stress stress-build growth growth-build harness harness-build agent agent-render agent-bridge gallery gallery-build gallery-serve gallery-fast gallery-fast-build package ts-gate help
+.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay doom doom-build doom-hot stress stress-build growth growth-build harness harness-build asset-stream asset-stream-build asset-stream-pack agent agent-render agent-bridge gallery gallery-build gallery-serve gallery-fast gallery-fast-build package e2e e2e-netplay e2e-matchmaking e2e-scaleout netplay-cluster netplay-load ts-gate help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -110,6 +119,8 @@ help:
 	@echo "  make netplay        Serve the page at http://localhost:$(NETPLAY_PORT)"
 	@echo "  (then open http://localhost:$(NETPLAY_PORT)/?server=ws://127.0.0.1:9002 in two browsers.)"
 	@echo ""
+	@echo "  make netplay-load   Load-test a running node/cluster (ARGS=\"<soak|matchmake|scaleout|resilience> ...\")"
+	@echo ""
 	@echo "  DOOM-style first-person demo:"
 	@echo "  make doom-build    Rebuild the doom wasm bundle into its web/pkg"
 	@echo "  make doom          Serve the doom page at http://localhost:$(DOOM_PORT)"
@@ -123,12 +134,22 @@ help:
 	@echo "  Browser debug-overlay developer harness:"
 	@echo "  make harness-build Rebuild the harness wasm bundle into its web/pkg"
 	@echo "  make harness       Serve the harness page at http://localhost:$(HARNESS_PORT)"
-	@echo "  (press the backquote key in the page to open the debug overlay.)"
+	@echo "  Runtime asset-streaming demo:"
+	@echo "  make asset-stream-pack  Pack the fixture (manifest.bin + blobs) into web/"
+	@echo "  make asset-stream-build Rebuild the asset-stream wasm bundle into web/pkg"
+	@echo "  make asset-stream       Serve the asset-stream pages at http://localhost:$(ASSETSTREAM_PORT)"
+	@echo "  (/ = main-thread fetch loop; /workers.html = Web Worker POOL — ?workers=N, default 3.)"
+	@echo "  (both boot instantly, then stream the fixture's assets in parallel.)"
 	@echo ""
 	@echo "  Package ONE game into a self-contained, droppable bundle (wasm + wasm2js fallback):"
 	@echo "  make package APP=quintet           Build dist-app/quintet/ (loader picks wasm or wasm2js)"
 	@echo "  make package APP=quintet INLINE=1  Single self-contained index.html"
 	@echo "  (needs a nightly toolchain with rust-src; first build rebuilds std and is slow.)"
+	@echo ""
+	@echo "  Browser end-to-end smoke tests (pytest-playwright):"
+	@echo "  make e2e           Build+serve the gallery and drive every non-multiplayer demo in a real browser"
+	@echo "  AXIOM_E2E_REUSE=1 make e2e   Reuse a gallery already serving on :8000 (skip the rebuild)"
+	@echo "  make e2e-netplay   Build the worker+ .NET server and prove server-authoritative multiplayer in a browser"
 	@echo ""
 	@echo "  TypeScript SDK gate (@axiom/client static-analysis/branchless/coverage laws):"
 	@echo "  make ts-gate       Run tsgo typecheck + Oxlint + 100% coverage for packages/axiom-client"
@@ -263,6 +284,24 @@ harness:
 	@echo Press the backquote key in the page to open the overlay. Ctrl+C to stop.
 	uv run --no-project python -m http.server $(HARNESS_PORT) --directory $(HARNESS_WEB)
 
+# --- Runtime asset-streaming demo (apps/axiom-asset-stream-demo) ---
+
+# Pack the authored fixture (fixture/assets.toml) into the app's web/ dir as
+# manifest.bin + the copied blobs, using the parallel-built packer tool. Run this
+# before asset-stream-build so the served page has a manifest to fetch.
+asset-stream-pack:
+	cargo run -p axiom-asset-pack -- $(ASSETSTREAM_FIXTURE) $(ASSETSTREAM_WEB)
+
+# Rebuild the asset-stream demo wasm bundle (same raw cargo + wasm-bindgen flow).
+asset-stream-build:
+	cargo build -p $(ASSETSTREAM_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(ASSETSTREAM_PKG) $(ASSETSTREAM_ARTIFACT)
+
+# Serve the demo page. Run `make asset-stream-pack asset-stream-build` first.
+asset-stream:
+	@echo Serving asset-stream demo at http://localhost:$(ASSETSTREAM_PORT) - run make asset-stream-pack asset-stream-build first
+	uv run --no-project python -m http.server $(ASSETSTREAM_PORT) --directory $(ASSETSTREAM_WEB)
+
 # --- Agent bridge: drive + watch the DOOM game from outside the engine ---
 
 # Headless: a JSON-over-HTTP server that drives the REAL DOOM game with no
@@ -348,6 +387,58 @@ APP ?= quintet
 package:
 	npm --prefix scripts/packaging install --no-audit --no-fund
 	uv run --no-project python scripts/package_app.py $(APP) $(if $(INLINE),--inline,)
+
+# --- Browser end-to-end smoke tests (pytest-playwright) ---
+
+# Drive the gallery in a real browser: enter every non-multiplayer demo (default +
+# ?backend=canvas2d), assert it loaded (ready signal, no FATAL console error) and the
+# canvas actually painted. conftest.py builds the fast gallery + serves dist/ on :8000
+# for the session. uv resolves the test deps ephemerally; the first run also downloads
+# Chromium. Set AXIOM_E2E_REUSE=1 to reuse a gallery already serving on :8000.
+E2E_UV := uv run --no-project --with pytest --with pytest-playwright --with pillow
+e2e:
+	$(E2E_UV) python -m playwright install chromium
+	$(E2E_UV) pytest e2e -q --ignore=e2e/test_netplay.py --ignore=e2e/test_matchmaking.py --ignore=e2e/test_scaleout.py
+
+# Drive the SERVER-AUTHORITATIVE multiplayer demo end-to-end: builds the native
+# worker cdylib + the .NET 10 server, serves the prebuilt client, and proves in a
+# real browser that the server ticks authoritatively, accepts only intents, clamps
+# the player to the field wall, and that client prediction reconciles. Needs the
+# .NET 10 SDK and a prebuilt wasm bundle — run `make netplay-build` first.
+e2e-netplay:
+	$(E2E_UV) python -m playwright install chromium
+	$(E2E_UV) pytest e2e/test_netplay.py -q
+
+# Prove HTTP matchmaking end-to-end: the /matchmake endpoint fills rooms compactly,
+# and the browser POSTs it on load, joins the assigned room, and plays.
+e2e-matchmaking:
+	$(E2E_UV) python -m playwright install chromium
+	$(E2E_UV) pytest e2e/test_matchmaking.py -q
+
+# Prove horizontal SCALEOUT end-to-end: a director + two game nodes; rooms
+# distribute across both nodes and the browser is redirected to a node and plays.
+e2e-scaleout:
+	$(E2E_UV) python -m playwright install chromium
+	$(E2E_UV) pytest e2e/test_scaleout.py -q
+
+# Run a local scaleout cluster (1 director + 2 nodes) for manual play. Open
+# http://localhost:8100 in two browser windows. Run `make netplay-build` once first.
+netplay-cluster:
+	cargo build -p axiom-netplay-ffi --release
+	uv run --no-project python scripts/netplay_cluster.py
+
+# Headless load generator (tools/axiom-netplay-load): opens many concurrent
+# WebSocket players speaking the real wire protocol to stress a running node or
+# cluster. Start a server first (e.g. `make netplay-dotnet`, or a cluster with
+# `make netplay-cluster`), set AXIOM_LAG_MS=16 to disable the demo's snapshot lag,
+# then point the tool at it. `make netplay-load` runs a default single-node soak;
+# override the scenario/flags with ARGS, e.g.:
+#   make netplay-load ARGS="matchmake --requests 500"
+#   make netplay-load ARGS="scaleout --target http://localhost:8100 --players 40"
+#   make netplay-load ARGS="resilience --players 4 --rooms 2 --kill-every 3"
+NETPLAY_LOAD_ARGS ?= soak --players 100 --rooms 50 --duration 10 --min-tick-advance 200
+netplay-load:
+	cargo run -q -p axiom-netplay-load -- $(if $(ARGS),$(ARGS),$(NETPLAY_LOAD_ARGS))
 
 # --- TypeScript SDK gate (the @axiom/client static-analysis/branchless/coverage laws) ---
 

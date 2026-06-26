@@ -10,7 +10,12 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InterfaceDrawItem {
     /// The panel background at an integer position + size.
-    Panel { x: i32, y: i32, width: i32, height: i32 },
+    Panel {
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    },
     /// The header / title bar: a primary (left) and secondary (right) label.
     Header { primary: String, secondary: String },
     /// A label/value read-out row.
@@ -55,7 +60,12 @@ mod tests {
     #[test]
     fn list_exposes_its_items_in_order() {
         let list = InterfaceDrawList::new(vec![
-            InterfaceDrawItem::Panel { x: 8, y: 8, width: 360, height: 0 },
+            InterfaceDrawItem::Panel {
+                x: 8,
+                y: 8,
+                width: 360,
+                height: 0,
+            },
             InterfaceDrawItem::Header {
                 primary: "T".to_string(),
                 secondary: "S".to_string(),
@@ -65,7 +75,12 @@ mod tests {
         assert!(!list.is_empty());
         assert_eq!(
             list.items()[0],
-            InterfaceDrawItem::Panel { x: 8, y: 8, width: 360, height: 0 }
+            InterfaceDrawItem::Panel {
+                x: 8,
+                y: 8,
+                width: 360,
+                height: 0
+            }
         );
     }
 
@@ -80,11 +95,28 @@ mod tests {
     #[test]
     fn every_item_kind_clones_compares_and_debugs() {
         let items = vec![
-            InterfaceDrawItem::Panel { x: 1, y: 2, width: 3, height: 4 },
-            InterfaceDrawItem::Header { primary: "p".to_string(), secondary: "s".to_string() },
-            InterfaceDrawItem::Row { label: "l".to_string(), value: "v".to_string() },
-            InterfaceDrawItem::ConsoleLine { ok: true, text: "t".to_string() },
-            InterfaceDrawItem::ConsoleInput { prompt: ">".to_string(), focused: false },
+            InterfaceDrawItem::Panel {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            },
+            InterfaceDrawItem::Header {
+                primary: "p".to_string(),
+                secondary: "s".to_string(),
+            },
+            InterfaceDrawItem::Row {
+                label: "l".to_string(),
+                value: "v".to_string(),
+            },
+            InterfaceDrawItem::ConsoleLine {
+                ok: true,
+                text: "t".to_string(),
+            },
+            InterfaceDrawItem::ConsoleInput {
+                prompt: ">".to_string(),
+                focused: false,
+            },
         ];
         items.iter().for_each(|item| {
             assert_eq!(item.clone(), *item);

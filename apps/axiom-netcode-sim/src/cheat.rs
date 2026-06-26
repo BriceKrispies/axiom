@@ -159,14 +159,18 @@ impl CheatState {
             })
             .unwrap_or_default();
         let out_of_window = (self.kind == StateKind::OutOfWindow)
-            .then(|| self.first.clone().into_iter().collect::<Vec<_>>())
-            .unwrap_or_default();
+            .then(|| self.first.clone())
+            .flatten()
+            .into_iter()
+            .collect::<Vec<_>>();
         let malformed = (self.kind == StateKind::Malformed)
             .then(|| {
-                let bytes: Vec<u8> = (0..12).map(|_| rng.next_bounded(256) as u8).collect();
-                vec![bytes]
+                (0..12)
+                    .map(|_| rng.next_bounded(256) as u8)
+                    .collect::<Vec<u8>>()
             })
-            .unwrap_or_default();
+            .into_iter()
+            .collect::<Vec<_>>();
         [forge, flood, out_of_window, malformed].concat()
     }
 }

@@ -74,6 +74,10 @@ mutants.out/
 mutants.out.old/
 mutants-out*/
 
+# Cloned upstream repos kept locally as read-only reference (e.g. bevyengine/bevy
+# for the ECS gap analysis in docs/ecs-gap-analysis.md). Never part of the build.
+/reference/
+
 # Local agent / tooling state
 .claude/settings.local.json
 

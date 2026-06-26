@@ -1,23 +1,29 @@
 //! The single public facade of the `axiom-scene` module.
 
-use axiom_frame::{FrameCommand, FrameContext};
+use axiom_frame::FrameContext;
 use axiom_kernel::{
     BinaryReader, BinaryWriter, KernelResult, Meters, Radians, Ratio, Reflect, TypeSchema,
 };
 use axiom_math::{Mat4, MathApi, Transform, Vec3};
 
+use crate::bounds::Bounds;
 use crate::camera::Camera;
 use crate::light::Light;
 use crate::material_ref::MaterialRef;
 use crate::mesh_ref::MeshRef;
+use crate::procanim::ProcAnim;
 use crate::renderable::Renderable;
 use crate::scene::Scene;
 use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
-use crate::procanim::ProcAnim;
 use crate::spin::Spin;
+
+/// The players-and-controllers arm of the facade (per-tick command-driven node
+/// marks). A child module so neither `impl SceneApi` block exceeds the engine's
+/// impl-block size budget.
+mod players;
 
 /// The only public export of `axiom-scene`: a **stateful scene handle**.
 ///
@@ -75,6 +81,12 @@ impl SceneApi {
     /// propagation, falling back to the local transform before any).
     pub fn world_transform(&self, id: SceneNodeId) -> SceneResult<Transform> {
         self.scene.world_transform(id)
+    }
+
+    /// Every node's `(id, local transform)`, in ascending node-id order — the
+    /// enumeration behind a consumer's typed `query::<Transform>()`.
+    pub fn node_transforms(&self) -> Vec<(SceneNodeId, Transform)> {
+        self.scene.node_transforms()
     }
 
     /// A node's parent, if any.
@@ -202,53 +214,6 @@ impl SceneApi {
         self.scene.set_renderable_casts_contact_shadow(node, casts)
     }
 
-    // --- Players (controllable nodes moved by per-tick commands) ---
-
-    /// Mark `node` as the controllable node for `player` index. Per-tick move
-    /// commands addressed to that index translate it during [`Self::advance`].
-    pub fn add_player(&mut self, node: SceneNodeId, player: u32) -> SceneResult<()> {
-        self.scene.add_player(node, player)
-    }
-
-    /// Encode a per-tick move for `player` by `delta` (a translation delta) as a
-    /// [`FrameCommand`] to hand to the frame builder. The scene decodes these in
-    /// [`Self::advance`] and applies them to the addressed player's node.
-    pub fn move_command(&self, sequence: u64, player: u32, delta: Vec3) -> FrameCommand {
-        crate::player_command::encode_move(sequence, player, delta)
-    }
-
-    // --- Controllers (first-person nodes yawed + moved by per-tick commands) ---
-
-    /// Mark `node` as the first-person controller for `index`. Per-tick
-    /// controller commands addressed to that index yaw it about +Y and move it
-    /// along its own facing during [`Self::advance`].
-    pub fn add_controller(&mut self, node: SceneNodeId, index: u32) -> SceneResult<()> {
-        self.scene.add_controller(node, index)
-    }
-
-    /// Encode a per-tick first-person input for controller `index`: a `yaw`/`pitch`
-    /// look delta (yaw about +Y, pitch about local +X, clamped by the scene) plus
-    /// a `move_local` translation in the node's own frame (local -Z is forward,
-    /// local +X is right), as a [`FrameCommand`] to hand to the frame builder.
-    /// The scene decodes these in [`Self::advance`] and applies them to the
-    /// addressed controller's node — moving in the yaw-only horizontal frame.
-    pub fn controller_command(
-        &self,
-        sequence: u64,
-        index: u32,
-        move_local: Vec3,
-        yaw: Radians,
-        pitch: Radians,
-    ) -> FrameCommand {
-        crate::controller_command::encode_controller(
-            sequence,
-            index,
-            move_local,
-            yaw.get(),
-            pitch.get(),
-        )
-    }
-
     // --- Propagation / frame integration ---
 
     /// Recompute every node's world transform now.
@@ -282,7 +247,90 @@ impl SceneApi {
             Renderable::SCHEMA,
             Spin::SCHEMA,
             ProcAnim::SCHEMA,
+            Bounds::SCHEMA,
         ]
+    }
+}
+
+/// Bounding volumes and spatial reasoning — Category 2 of the game vocabulary
+/// (see `docs/game-vocabulary.md`). The engine answers "what is where" so an app
+/// never reimplements geometry: collision tests, hitscan/line-of-sight, and
+/// proximity all reduce to these two queries. These are spatial *queries*
+/// (picking/overlap) over scene bounding volumes — not physics. Kept in its own
+/// `impl` block so neither block exceeds the engine's impl-size budget.
+impl SceneApi {
+    /// Attach an axis-aligned bounding volume to `node`, given its local
+    /// `half_extents` (sized by the node's world scale at query time), so the
+    /// spatial queries below can hit it.
+    pub fn add_bounds(&mut self, node: SceneNodeId, half_extents: Vec3) -> SceneResult<()> {
+        self.scene.add_bounds(node, Bounds::new(half_extents))
+    }
+
+    /// Remove the bounding volume on `node`.
+    pub fn remove_bounds(&mut self, node: SceneNodeId) -> SceneResult<()> {
+        self.scene.remove_bounds(node)
+    }
+
+    /// The half-extents of `node`'s bounding volume, if any — the typed read
+    /// behind a consumer's `get::<Bounds>()`.
+    pub fn bounds_half_extents(&self, node: SceneNodeId) -> Option<Vec3> {
+        self.scene.bounds_half_extents(node)
+    }
+
+    /// Every bounded node's `(id, half-extents)`, in ascending node-id order — the
+    /// enumeration behind a consumer's `query::<Bounds>()`.
+    pub fn bounded_nodes(&self) -> Vec<(SceneNodeId, Vec3)> {
+        self.scene.bounded_nodes()
+    }
+
+    /// The player index marked on `node`, if any — used to classify a raycast /
+    /// overlap hit as a player-marked actor versus plain geometry.
+    pub fn player_index(&self, node: SceneNodeId) -> Option<u32> {
+        self.scene.player_index(node)
+    }
+
+    /// The node handle marked with `player` index, if any. Lets a caller that
+    /// authored players by index recover the first-class [`SceneNodeId`] to
+    /// address them by handle (despawn, transform, queries) afterward.
+    pub fn player_entity(&self, player: u32) -> Option<SceneNodeId> {
+        self.scene.player_entity(player)
+    }
+
+    /// Despawn the node marked with `player` index — removing it from the scene
+    /// (every component column) and its player/controller marks. Returns whether
+    /// such a node existed; despawning an absent index is a clean `false`, so it
+    /// is safe to call every tick. The runtime counterpart to authoring a node:
+    /// the engine owns object lifetime, so a game never fakes removal (e.g. by
+    /// parking a corpse off-screen).
+    pub fn despawn_player(&mut self, player: u32) -> bool {
+        self.scene.despawn_player(player)
+    }
+
+    /// Despawn `node` by its handle — the Entity-addressed counterpart to
+    /// [`Self::despawn_player`]. Returns whether `node` named a live node.
+    pub fn despawn_node(&mut self, node: SceneNodeId) -> bool {
+        self.scene.despawn_node(node)
+    }
+
+    /// Cast a ray from `origin` along `direction`, returning the nearest bounded
+    /// node it enters within `max_distance` (or `None`). The single primitive
+    /// behind hitscan, line-of-sight, and picking. Reads *propagated* world
+    /// transforms, so advance (or [`Self::update_world_transforms`]) before
+    /// querying; a zero/non-finite direction yields `None`.
+    pub fn raycast(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        max_distance: Meters,
+    ) -> Option<SceneNodeId> {
+        self.scene.raycast(origin, direction, max_distance.get())
+    }
+
+    /// Every bounded node whose world box overlaps the query box (centered at
+    /// `center`, of `half_extents`), in ascending node-id order. The single
+    /// primitive behind collision tests and proximity/contact checks.
+    pub fn overlap_box(&self, center: Vec3, half_extents: Vec3) -> Vec<SceneNodeId> {
+        self.scene.overlap_box(center, half_extents)
     }
 }
 
@@ -303,9 +351,9 @@ impl SceneApi {
     }
 
     /// Give `node` a procedural animation around its resting pose `base` (the
-    /// transform it was created with): a bob of `bob_amplitude` along +Y every
-    /// `bob_period` ticks plus a revolution about `spin_axis` every `spin_period`
-    /// ticks, offset by `phase`. Animated each [`Self::advance`] by the engine's
+    /// transform it was created with): a `bob` of `(amplitude, period_ticks)`
+    /// along +Y plus a `spin` of `(axis, period_ticks)` revolution, offset by
+    /// `phase`. Animated each [`Self::advance`] by the engine's
     /// procedural-animation system — a *positioned* node (a wall at a grid cell)
     /// comes alive without leaving its place. An app draws the per-node
     /// `phase`/period variety from the procedural-generation substrate so a whole
@@ -314,22 +362,13 @@ impl SceneApi {
         &mut self,
         node: SceneNodeId,
         base: Transform,
-        bob_amplitude: Meters,
-        bob_period: u32,
-        spin_axis: Vec3,
-        spin_period: u32,
+        bob: (Meters, u32),
+        spin: (Vec3, u32),
         phase: u32,
     ) -> SceneResult<()> {
         self.scene.add_procanim(
             node,
-            ProcAnim::new(
-                base,
-                bob_amplitude.get(),
-                bob_period,
-                spin_axis,
-                spin_period,
-                phase,
-            ),
+            ProcAnim::new(base, bob.0.get(), bob.1, spin.0, spin.1, phase),
         )
     }
 }
@@ -394,6 +433,42 @@ mod tests {
         let node = s.create_node();
         assert!(s.add_player(node, 0).is_ok());
         assert!(s.add_player(SceneNodeId::from_raw(404), 1).is_err());
+    }
+
+    #[test]
+    fn despawn_player_removes_a_marked_node_and_is_idempotent_through_the_facade() {
+        let mut s = api();
+        let node = s.create_node();
+        s.add_player(node, 0).unwrap();
+        assert_eq!(s.snapshot().nodes().len(), 1);
+        // Despawning the marked node removes it; a second despawn is a clean false.
+        assert!(s.despawn_player(0));
+        assert_eq!(s.snapshot().nodes().len(), 0);
+        assert!(!s.despawn_player(0));
+    }
+
+    #[test]
+    fn player_entity_recovers_the_handle_and_despawn_node_removes_it() {
+        let mut s = api();
+        let node = s.create_node();
+        s.add_player(node, 2).unwrap();
+        // The handle authored by player index is recoverable; an unknown index is None.
+        assert_eq!(s.player_entity(2), Some(node));
+        assert_eq!(s.player_entity(9), None);
+        // Despawning by that handle removes the node; a repeat is a clean false.
+        assert!(s.despawn_node(node));
+        assert_eq!(s.snapshot().nodes().len(), 0);
+        assert!(!s.despawn_node(node));
+    }
+
+    #[test]
+    fn player_translation_reads_the_marked_node_and_is_none_for_unknown() {
+        let mut s = api();
+        let node =
+            s.create_node_with_transform(Transform::from_translation(Vec3::new(-1.5, 0.0, 0.0)));
+        s.add_player(node, 0).expect("node exists");
+        assert_eq!(s.player_translation(0), Some(Vec3::new(-1.5, 0.0, 0.0)));
+        assert_eq!(s.player_translation(7), None);
     }
 
     #[test]
@@ -537,10 +612,52 @@ mod tests {
     fn add_procanim_valid_and_missing_node() {
         let mut a = api();
         let n = a.create_node();
-        a.add_procanim(n, Transform::IDENTITY, m(0.5), 60, Vec3::UNIT_Y, 120, 0)
+        a.add_procanim(n, Transform::IDENTITY, (m(0.5), 60), (Vec3::UNIT_Y, 120), 0)
             .unwrap();
         assert_eq!(
-            a.add_procanim(SceneNodeId::from_raw(99), Transform::IDENTITY, m(0.5), 60, Vec3::UNIT_Y, 120, 0)
+            a.add_procanim(
+                SceneNodeId::from_raw(99),
+                Transform::IDENTITY,
+                (m(0.5), 60),
+                (Vec3::UNIT_Y, 120),
+                0
+            )
+            .unwrap_err()
+            .code(),
+            SceneErrorCode::MissingNode
+        );
+    }
+
+    #[test]
+    fn bounds_and_spatial_queries_through_the_facade() {
+        let mut a = api();
+        let n = a.create_node_with_transform(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
+        a.add_bounds(n, Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        a.update_world_transforms();
+        // raycast finds it; overlap_box finds it.
+        assert_eq!(
+            a.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), m(100.0)),
+            Some(n)
+        );
+        assert_eq!(
+            a.overlap_box(Vec3::new(3.0, 0.0, 0.0), Vec3::new(0.1, 0.1, 0.1)),
+            vec![n]
+        );
+        // A bare node is classified as geometry (no player index); marking it a
+        // player makes `player_index` report it — the hit classifier.
+        assert_eq!(a.player_index(n), None);
+        a.add_player(n, 5).unwrap();
+        assert_eq!(a.player_index(n), Some(5));
+        // A zero direction passes the `None` straight through the facade.
+        assert_eq!(a.raycast(Vec3::ZERO, Vec3::ZERO, m(100.0)), None);
+        // Remove, then a second remove and a missing-node add both error.
+        a.remove_bounds(n).unwrap();
+        assert_eq!(
+            a.remove_bounds(n).unwrap_err().code(),
+            SceneErrorCode::MissingBounds
+        );
+        assert_eq!(
+            a.add_bounds(SceneNodeId::from_raw(404), Vec3::ONE)
                 .unwrap_err()
                 .code(),
             SceneErrorCode::MissingNode
@@ -548,15 +665,40 @@ mod tests {
     }
 
     #[test]
+    fn typed_component_enumeration_lists_nodes_and_bounds() {
+        let mut a = api();
+        let n0 =
+            a.create_node_with_transform(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
+        let n1 =
+            a.create_node_with_transform(Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)));
+        a.add_bounds(n1, Vec3::new(0.5, 0.5, 0.5)).unwrap();
+
+        // node_transforms lists every node's local transform, ascending id.
+        let transforms = a.node_transforms();
+        assert_eq!(transforms.len(), 2);
+        assert_eq!(transforms[0].0, n0);
+        assert_eq!(transforms[0].1.translation, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(transforms[1].0, n1);
+
+        // bounds_half_extents reads one node's bounds; the unbounded node is None.
+        assert_eq!(a.bounds_half_extents(n1), Some(Vec3::new(0.5, 0.5, 0.5)));
+        assert_eq!(a.bounds_half_extents(n0), None);
+
+        // bounded_nodes lists only the bounded node.
+        assert_eq!(a.bounded_nodes(), vec![(n1, Vec3::new(0.5, 0.5, 0.5))]);
+    }
+
+    #[test]
     fn component_schemas_describe_the_standard_components() {
         let schemas = api().component_schemas();
-        assert_eq!(schemas.len(), 6);
+        assert_eq!(schemas.len(), 7);
         assert_eq!(schemas[0].name(), "Transform");
         assert_eq!(schemas[1].name(), "Camera");
         assert_eq!(schemas[2].name(), "Light");
         assert_eq!(schemas[3].name(), "Renderable");
         assert_eq!(schemas[4].name(), "Spin");
         assert_eq!(schemas[5].name(), "ProcAnim");
+        assert_eq!(schemas[6].name(), "Bounds");
     }
 
     #[test]

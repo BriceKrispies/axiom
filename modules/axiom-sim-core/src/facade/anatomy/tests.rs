@@ -22,9 +22,7 @@ fn built() -> (SimCoreApi, EntityRegistry, crate::ids::BodyId, EntityHandle) {
     api.add_body_plan_part(
         draft,
         "test-core",
-        SimCoreApi::PART_CORE,
-        0,
-        0,
+        (SimCoreApi::PART_CORE, 0, 0),
         &[],
         &[(covering, 0)],
         &[(SimCoreApi::SURFACE_OUTER, true)],
@@ -34,9 +32,7 @@ fn built() -> (SimCoreApi, EntityRegistry, crate::ids::BodyId, EntityHandle) {
     api.add_body_plan_part(
         draft,
         "test-extremity",
-        SimCoreApi::PART_EXTREMITY,
-        1, // bilateral
-        1, // group
+        (SimCoreApi::PART_EXTREMITY, 1, 1), // bilateral, group
         &[10],
         &[(covering, 0)],
         &[(SimCoreApi::SURFACE_OUTER, true)],
@@ -46,9 +42,7 @@ fn built() -> (SimCoreApi, EntityRegistry, crate::ids::BodyId, EntityHandle) {
     api.add_body_plan_part(
         draft,
         "test-mouth",
-        SimCoreApi::PART_MOUTH,
-        0,
-        0,
+        (SimCoreApi::PART_MOUTH, 0, 0),
         &[],
         &[],
         &[(SimCoreApi::SURFACE_MOUTH, true)],
@@ -119,36 +113,34 @@ fn body_plan_building_and_queries() {
     let mut api = SimCoreApi::new();
     let draft = api.begin_body_plan();
     let core = api
-        .add_body_plan_part(draft, "c", SimCoreApi::PART_CORE, 0, 0, &[], &[], &[])
+        .add_body_plan_part(draft, "c", (SimCoreApi::PART_CORE, 0, 0), &[], &[], &[])
         .unwrap();
     let limb = api
-        .add_body_plan_part(draft, "l", SimCoreApi::PART_LIMB, 1, 2, &[5, 6], &[], &[])
+        .add_body_plan_part(draft, "l", (SimCoreApi::PART_LIMB, 1, 2), &[5, 6], &[], &[])
         .unwrap();
     assert_eq!((core, limb), (0, 1));
     // Invalid arms: duplicate name, bad kind code, bad symmetry code, bad surface code, unknown draft.
     assert!(api
-        .add_body_plan_part(draft, "c", SimCoreApi::PART_HEAD, 0, 0, &[], &[], &[])
+        .add_body_plan_part(draft, "c", (SimCoreApi::PART_HEAD, 0, 0), &[], &[], &[])
         .is_none());
     assert!(api
-        .add_body_plan_part(draft, "x", 250, 0, 0, &[], &[], &[])
+        .add_body_plan_part(draft, "x", (250, 0, 0), &[], &[], &[])
         .is_none());
     assert!(api
-        .add_body_plan_part(draft, "y", SimCoreApi::PART_CORE, 250, 0, &[], &[], &[])
+        .add_body_plan_part(draft, "y", (SimCoreApi::PART_CORE, 250, 0), &[], &[], &[])
         .is_none());
     assert!(api
         .add_body_plan_part(
             draft,
             "z",
-            SimCoreApi::PART_CORE,
-            0,
-            0,
+            (SimCoreApi::PART_CORE, 0, 0),
             &[],
             &[],
             &[(250, true)]
         )
         .is_none());
     assert!(api
-        .add_body_plan_part(9999, "w", SimCoreApi::PART_CORE, 0, 0, &[], &[], &[])
+        .add_body_plan_part(9999, "w", (SimCoreApi::PART_CORE, 0, 0), &[], &[], &[])
         .is_none());
     assert!(api.connect_body_plan_parts(draft, core, limb));
     assert!(!api.connect_body_plan_parts(draft, core, 99));
@@ -309,17 +301,10 @@ fn body_routes_validate_and_record() {
     let before = api.causal_event_count();
     let interaction = api
         .record_surface_interaction(
-            1,
-            0,
-            actor,
-            outer,
-            None,
-            None,
-            None,
-            1,
-            0xAB,
-            3,
-            Some(api.cause_command()),
+            (1, 0),
+            (actor, outer),
+            (None, None, None),
+            (1, 0xAB, 3, Some(api.cause_command())),
         )
         .unwrap();
     assert!(api.interaction(interaction).is_some());
@@ -330,30 +315,28 @@ fn body_routes_validate_and_record() {
     );
     // Touch cannot target the mouth surface (surface-contact !-> mouth).
     assert!(api
-        .record_surface_interaction(1, 0, actor, mouth, None, None, None, 1, 0, 3, None)
+        .record_surface_interaction((1, 0), (actor, mouth), (None, None, None), (1, 0, 3, None))
         .is_none());
     // Ingestion (route 1 -> ingestion-entry) can target the mouth surface.
     assert!(api
-        .record_surface_interaction(1, 1, actor, mouth, None, None, None, 1, 0, 3, None)
+        .record_surface_interaction((1, 1), (actor, mouth), (None, None, None), (1, 0, 3, None))
         .is_some());
     // Invalid interaction-route code fails cleanly.
     assert!(api
-        .record_surface_interaction(1, 250, actor, outer, None, None, None, 1, 0, 3, None)
+        .record_surface_interaction(
+            (1, 250),
+            (actor, outer),
+            (None, None, None),
+            (1, 0, 3, None)
+        )
         .is_none());
     // Unknown surface fails cleanly.
     assert!(api
         .record_surface_interaction(
-            1,
-            0,
-            actor,
-            crate::ids::BodySurfaceId::from_raw(9999),
-            None,
-            None,
-            None,
-            1,
-            0,
-            3,
-            None
+            (1, 0),
+            (actor, crate::ids::BodySurfaceId::from_raw(9999)),
+            (None, None, None),
+            (1, 0, 3, None)
         )
         .is_none());
 }
@@ -366,18 +349,11 @@ fn wounds_through_the_facade() {
     let before = api.causal_event_count();
     let wound = api
         .create_wound(
-            body,
-            part,
-            Some(tissue),
-            SimCoreApi::DAMAGE_CUT,
-            5,
-            None,
-            None,
+            (body, part, Some(tissue)),
+            (SimCoreApi::DAMAGE_CUT, 5),
+            (None, None),
             &[(tissue, 5)],
-            1,
-            0xCC,
-            7,
-            Some(api.cause_command()),
+            (1, 0xCC, 7, Some(api.cause_command())),
         )
         .unwrap();
     assert_eq!(
@@ -401,54 +377,39 @@ fn wounds_through_the_facade() {
     // Invalid references fail cleanly.
     assert!(api
         .create_wound(
-            crate::ids::BodyId::from_raw(0),
-            part,
-            None,
-            SimCoreApi::DAMAGE_CUT,
-            1,
-            None,
-            None,
+            (crate::ids::BodyId::from_raw(0), part, None),
+            (SimCoreApi::DAMAGE_CUT, 1),
+            (None, None),
             &[],
-            1,
-            0,
-            0,
-            None
+            (1, 0, 0, None)
         )
         .is_none());
     assert!(api
         .create_wound(
-            body,
-            crate::ids::BodyPartId::from_raw(0),
-            None,
-            SimCoreApi::DAMAGE_CUT,
-            1,
-            None,
-            None,
+            (body, crate::ids::BodyPartId::from_raw(0), None),
+            (SimCoreApi::DAMAGE_CUT, 1),
+            (None, None),
             &[],
-            1,
-            0,
-            0,
-            None
+            (1, 0, 0, None)
         )
         .is_none());
     assert!(api
         .create_wound(
-            body,
-            part,
-            Some(crate::ids::TissueId::from_raw(0)),
-            SimCoreApi::DAMAGE_CUT,
-            1,
-            None,
-            None,
+            (body, part, Some(crate::ids::TissueId::from_raw(0))),
+            (SimCoreApi::DAMAGE_CUT, 1),
+            (None, None),
             &[],
-            1,
-            0,
-            0,
-            None
+            (1, 0, 0, None)
         )
         .is_none());
     assert!(api
-        .create_wound(body, part, None, 250, 1, None, None, &[], 1, 0, 0, None)
+        .create_wound(
+            (body, part, None),
+            (250, 1),
+            (None, None),
+            &[],
+            (1, 0, 0, None)
+        )
         .is_none());
 }
 

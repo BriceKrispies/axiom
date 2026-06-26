@@ -53,7 +53,8 @@ impl SoftwareFramebuffer {
         inside
             .then_some(idx)
             .and_then(|i| self.rgba.get_mut(i..i + 4))
-            .map(|slot| slot.copy_from_slice(&bytes));
+            .into_iter()
+            .for_each(|slot| slot.copy_from_slice(&bytes));
     }
 
     /// The raw RGBA8 slice (row-major) for the rasterizer's inline pixel writes —
@@ -72,7 +73,12 @@ impl SoftwareFramebuffer {
 /// Linear `0.0..=1.0` RGBA → clamped, rounded RGBA8 bytes.
 fn to_rgba8(color: [f32; 4]) -> [u8; 4] {
     let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-    [byte(color[0]), byte(color[1]), byte(color[2]), byte(color[3])]
+    [
+        byte(color[0]),
+        byte(color[1]),
+        byte(color[2]),
+        byte(color[3]),
+    ]
 }
 
 #[cfg(test)]
@@ -94,7 +100,8 @@ mod tests {
         let bytes = fb.into_rgba_bytes();
         // 0.5 * 255 + 0.5 = 128 (rounded). Every pixel is the clear colour.
         assert_eq!(bytes.len(), 2 * 2 * 4);
-        (0..2).for_each(|x| (0..2).for_each(|y| assert_eq!(px(&bytes, 2, x, y), [255, 0, 128, 255])));
+        (0..2)
+            .for_each(|x| (0..2).for_each(|y| assert_eq!(px(&bytes, 2, x, y), [255, 0, 128, 255])));
     }
 
     #[test]

@@ -9,6 +9,7 @@
 
 use axiom_math::Transform;
 
+use crate::bounds::Bounds;
 use crate::camera::Camera;
 use crate::contact_shadow_caster::ContactShadowCaster;
 use crate::controller::Controller;
@@ -37,6 +38,7 @@ pub struct NodeComponent {
     procanim: Option<ProcAnim>,
     player: Option<Player>,
     controller: Option<Controller>,
+    bounds: Option<Bounds>,
 }
 
 impl NodeComponent {
@@ -51,6 +53,7 @@ impl NodeComponent {
     pub(crate) const KIND_POINT_LIGHT: u8 = 6;
     pub(crate) const KIND_CONTACT_SHADOW_CASTER: u8 = 7;
     pub(crate) const KIND_PROCANIM: u8 = 8;
+    pub(crate) const KIND_BOUNDS: u8 = 9;
 
     /// The all-`None` base used by every constructor; each then fills in its one
     /// payload field and sets its `kind`.
@@ -64,6 +67,7 @@ impl NodeComponent {
         procanim: None,
         player: None,
         controller: None,
+        bounds: None,
     };
 
     /// Which kind of component this is (see the `KIND_*` tags).
@@ -152,6 +156,19 @@ impl NodeComponent {
         }
     }
 
+    /// A bounds component (an axis-aligned bounding volume for spatial queries).
+    pub(crate) fn bounds(bounds: Bounds) -> Self {
+        NodeComponent {
+            kind: Self::KIND_BOUNDS,
+            bounds: Some(bounds),
+            ..Self::EMPTY
+        }
+    }
+}
+
+/// Typed payload accessors — one per kind. Split into a second `impl` block so
+/// neither block exceeds the engine's impl-size budget.
+impl NodeComponent {
     /// The renderable payload, present iff `kind == KIND_RENDERABLE`.
     pub(crate) fn as_renderable(&self) -> Option<&Renderable> {
         self.renderable.as_ref()
@@ -190,6 +207,11 @@ impl NodeComponent {
     /// The controller payload, present iff `kind == KIND_CONTROLLER`.
     pub(crate) fn as_controller(&self) -> Option<&Controller> {
         self.controller.as_ref()
+    }
+
+    /// The bounds payload, present iff `kind == KIND_BOUNDS`.
+    pub(crate) fn as_bounds(&self) -> Option<&Bounds> {
+        self.bounds.as_ref()
     }
 }
 
@@ -283,6 +305,12 @@ impl Bundle for ContactShadowCaster {
     }
 }
 
+impl Bundle for Bounds {
+    fn apply(self, command: &mut SpawnCommand) {
+        command.components.push(NodeComponent::bounds(self));
+    }
+}
+
 impl<A: Bundle, B: Bundle> Bundle for (A, B) {
     fn apply(self, command: &mut SpawnCommand) {
         self.0.apply(command);
@@ -304,5 +332,15 @@ impl<A: Bundle, B: Bundle, C: Bundle, D: Bundle> Bundle for (A, B, C, D) {
         self.1.apply(command);
         self.2.apply(command);
         self.3.apply(command);
+    }
+}
+
+impl<A: Bundle, B: Bundle, C: Bundle, D: Bundle, E: Bundle> Bundle for (A, B, C, D, E) {
+    fn apply(self, command: &mut SpawnCommand) {
+        self.0.apply(command);
+        self.1.apply(command);
+        self.2.apply(command);
+        self.3.apply(command);
+        self.4.apply(command);
     }
 }

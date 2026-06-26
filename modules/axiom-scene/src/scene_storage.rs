@@ -15,6 +15,7 @@ use axiom_kernel::{
 };
 use axiom_math::{Quat, Transform, Vec3};
 
+use crate::bounds::Bounds;
 use crate::camera::Camera;
 use crate::light::Light;
 use crate::procanim::ProcAnim;
@@ -37,6 +38,9 @@ pub struct SceneStorage {
     pub renderables: ComponentColumn<Renderable>,
     pub spins: ComponentColumn<Spin>,
     pub procanims: ComponentColumn<ProcAnim>,
+    /// Axis-aligned bounding volumes, keyed by node entity. The queryable
+    /// spatial extent the [`crate::SceneApi`] raycast / overlap queries fold over.
+    pub bounds: ComponentColumn<Bounds>,
     /// Controllable nodes, keyed entity → player index. Authored once; the
     /// bridge that lets a per-tick move command address a node by player index.
     pub players: BTreeMap<EntityId, u32>,
@@ -107,6 +111,7 @@ impl ColumnSet for SceneStorage {
             ("renderables", &self.renderables),
             ("spins", &self.spins),
             ("procanims", &self.procanims),
+            ("bounds", &self.bounds),
         ]
     }
 
@@ -120,6 +125,7 @@ impl ColumnSet for SceneStorage {
             ("renderables", &mut self.renderables),
             ("spins", &mut self.spins),
             ("procanims", &mut self.procanims),
+            ("bounds", &mut self.bounds),
         ]
     }
 }
@@ -347,6 +353,7 @@ mod tests {
         assert!(s.renderables.is_empty());
         assert!(s.spins.is_empty());
         assert!(s.procanims.is_empty());
+        assert!(s.bounds.is_empty());
         assert!(s.players.is_empty());
         assert!(s.pending_moves.is_empty());
         assert!(s.controllers.is_empty());
@@ -664,5 +671,46 @@ mod tests {
     #[test]
     fn transform_propagation_debug_is_renderable() {
         assert!(format!("{:?}", TransformPropagation).contains("TransformPropagation"));
+    }
+
+    /// End-to-end proof that the ECS component-command seam drives a real module's
+    /// storage: `ComponentCommandBuffer<SceneStorage>` stages typed inserts/removes
+    /// against `SceneStorage`'s own columns via field selectors, applied at a
+    /// barrier — no `TypeId`/`unsafe`/downcast.
+    #[test]
+    fn component_command_buffer_drives_scene_storage_columns() {
+        use crate::bounds::Bounds;
+        use axiom_ecs::{ComponentCommandBuffer, World};
+        use axiom_math::Transform;
+
+        let mut world: World<SceneStorage> = World::new();
+        let entity = world.spawn_handle().id();
+
+        let mut buffer = ComponentCommandBuffer::new();
+        let local = buffer.insert_component(
+            entity,
+            Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)),
+            |s: &mut SceneStorage| &mut s.locals,
+        );
+        let bound = buffer.insert_component(
+            entity,
+            Bounds::new(Vec3::new(0.5, 0.5, 0.5)),
+            |s: &mut SceneStorage| &mut s.bounds,
+        );
+        // Deferred: nothing is applied until the barrier.
+        assert!(world.storage().locals.get(entity).is_none());
+
+        let report = buffer.apply(&mut world);
+        assert_eq!(report.outcome(local).unwrap().inserted(), Some(false));
+        assert_eq!(report.outcome(bound).unwrap().inserted(), Some(false));
+        assert!(world.storage().locals.get(entity).is_some());
+        assert!(world.storage().bounds.get(entity).is_some());
+
+        // Remove the bounds through the seam.
+        let mut remover = ComponentCommandBuffer::new();
+        let removed = remover.remove_component(entity, |s: &mut SceneStorage| &mut s.bounds);
+        let report = remover.apply(&mut world);
+        assert_eq!(report.outcome(removed).unwrap().removed(), Some(true));
+        assert!(world.storage().bounds.get(entity).is_none());
     }
 }

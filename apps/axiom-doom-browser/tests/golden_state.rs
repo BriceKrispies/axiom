@@ -15,20 +15,29 @@
 
 use std::path::PathBuf;
 
-use axiom_doom_browser::{DoomGame, Hud, Intent};
+use axiom_doom_browser::level::LevelDoc;
+use axiom_doom_browser::{apply_lifecycle, build_doom_app, DoomGame, Hud, Intent};
 
 /// The same fixed scenario the replay-determinism test uses: one held-input
 /// intent per tick. Fixing these fixes the whole run.
 fn scenario() -> Vec<Intent> {
-    let mut forward = Intent::default();
-    forward.forward = true;
-    let mut turn = Intent::default();
-    turn.turn_left = true;
-    let mut fire = Intent::default();
-    fire.fire = true;
-    let mut strafe_fire = Intent::default();
-    strafe_fire.strafe_right = true;
-    strafe_fire.fire = true;
+    let forward = Intent {
+        forward: true,
+        ..Default::default()
+    };
+    let turn = Intent {
+        turn_left: true,
+        ..Default::default()
+    };
+    let fire = Intent {
+        fire: true,
+        ..Default::default()
+    };
+    let strafe_fire = Intent {
+        strafe_right: true,
+        fire: true,
+        ..Default::default()
+    };
     vec![
         Intent::default(),
         forward,
@@ -83,14 +92,21 @@ fn assert_golden(name: &str, actual: &[u8]) {
 /// every frame (length-prefixed so frame boundaries are recoverable) and the
 /// HUD projection after each step.
 fn run_canonical() -> (Vec<u8>, Vec<u8>) {
-    let mut game = DoomGame::new();
+    // Drive the real game-against-engine loop: the game asks the engine for its
+    // spatial answers, then the engine applies the commands so its world tracks.
+    let doc = LevelDoc::default();
+    let mut game = DoomGame::from_level(&doc);
+    let (mut app, assets) = build_doom_app(&doc);
+    game.bind_entities(&app);
     let mut states = Vec::new();
     let mut huds = Vec::new();
-    for intent in scenario() {
+    for (tick, intent) in scenario().into_iter().enumerate() {
         let before = game.write_state();
         states.extend_from_slice(&(before.len() as u32).to_le_bytes());
         states.extend_from_slice(&before);
-        let commands = game.step(intent);
+        let commands = game.step(intent, &app);
+        apply_lifecycle(&mut game, &mut app, &assets, &commands);
+        app.tick_with_controls(tick as u64, &commands.enemies, &[commands.control]);
         huds.extend_from_slice(&encode_hud(&commands.hud));
     }
     // The final state after the whole scenario.
@@ -123,7 +139,10 @@ fn a_perturbed_scenario_yields_different_bytes() {
     // Force-fire on frame 0 only — the state/HUD bytes must differ, proving the
     // golden is sensitive to a genuine input change (not a constant).
     let (baseline_states, _) = run_canonical();
-    let mut game = DoomGame::new();
+    let doc = LevelDoc::default();
+    let mut game = DoomGame::from_level(&doc);
+    let (mut app, assets) = build_doom_app(&doc);
+    game.bind_entities(&app);
     let mut states = Vec::new();
     for (i, intent) in scenario().into_iter().enumerate() {
         let mut intent = intent;
@@ -131,7 +150,9 @@ fn a_perturbed_scenario_yields_different_bytes() {
         let before = game.write_state();
         states.extend_from_slice(&(before.len() as u32).to_le_bytes());
         states.extend_from_slice(&before);
-        game.step(intent);
+        let commands = game.step(intent, &app);
+        apply_lifecycle(&mut game, &mut app, &assets, &commands);
+        app.tick_with_controls(i as u64, &commands.enemies, &[commands.control]);
     }
     let end = game.write_state();
     states.extend_from_slice(&(end.len() as u32).to_le_bytes());

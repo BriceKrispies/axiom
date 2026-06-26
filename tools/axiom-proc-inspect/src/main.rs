@@ -40,9 +40,9 @@ fn constraints() -> [Constraint; 2] {
 
 /// Build a content address from a segment path.
 fn site(segments: &[u64]) -> Address {
-    segments
-        .iter()
-        .fold(SpaceApi::root(), |address, &segment| SpaceApi::child(&address, segment))
+    segments.iter().fold(SpaceApi::root(), |address, &segment| {
+        SpaceApi::child(&address, segment)
+    })
 }
 
 /// Parse `[seed] [addr-seg ...]` from the argument list, defaulting the seed to
@@ -68,14 +68,23 @@ fn provenance_report(seed: u64, address: &Address) -> String {
     out.push_str(&format!("  recipe nodes    : {}\n\n", recipe.len()));
 
     out.push_str(&format!("  artifact words  : {:?}\n", artifact.words()));
-    out.push_str(&format!("  artifact digest : {:#018x}\n\n", artifact.digest().raw()));
+    out.push_str(&format!(
+        "  artifact digest : {:#018x}\n\n",
+        artifact.digest().raw()
+    ));
 
     out.push_str(&format!("  trace ({} steps):\n", trace.steps().len()));
     push_trace(&mut out, &trace);
-    out.push_str(&format!("  trace digest    : {:#018x}\n\n", trace.digest().raw()));
+    out.push_str(&format!(
+        "  trace digest    : {:#018x}\n\n",
+        trace.digest().raw()
+    ));
 
     push_validation(&mut out, &report);
-    out.push_str(&format!("  report digest   : {:#018x}\n", report.digest().raw()));
+    out.push_str(&format!(
+        "  report digest   : {:#018x}\n",
+        report.digest().raw()
+    ));
     out
 }
 
@@ -92,7 +101,9 @@ fn push_validation(out: &mut String, report: &ValidationReport) {
         report.total_score()
     ));
     for &(kind, satisfied, score) in report.verdicts() {
-        out.push_str(&format!("    constraint kind={kind} satisfied={satisfied} score={score}\n"));
+        out.push_str(&format!(
+            "    constraint kind={kind} satisfied={satisfied} score={score}\n"
+        ));
     }
 }
 
@@ -113,7 +124,15 @@ mod tests {
         let b = provenance_report(2026, &address);
         assert_eq!(a, b);
         // The report names every boundary of the chain.
-        for needle in ["seed", "address", "artifact digest", "trace", "trace digest", "validation", "report digest"] {
+        for needle in [
+            "seed",
+            "address",
+            "artifact digest",
+            "trace",
+            "trace digest",
+            "validation",
+            "report digest",
+        ] {
             assert!(a.contains(needle), "report should mention `{needle}`");
         }
     }

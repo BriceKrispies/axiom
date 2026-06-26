@@ -132,8 +132,8 @@ impl TouchControls {
 
         // Reset the gesture state on lift (branchless): clear when lifted, keep
         // the just-latched start/last while the gesture is still in progress.
-        self.swipe_start = lifted.then_some(None).unwrap_or(self.swipe_start);
-        self.swipe_last = lifted.then_some(None).unwrap_or(self.swipe_last);
+        self.swipe_start = [self.swipe_start, None][usize::from(lifted)];
+        self.swipe_last = [self.swipe_last, None][usize::from(lifted)];
         result
     }
 }
@@ -270,11 +270,17 @@ mod tests {
         let mut controls = TouchControls::new();
         controls.update(
             surface(),
-            &[(Vec2::new(200.0, 300.0), true), (Vec2::new(700.0, 300.0), true)],
+            &[
+                (Vec2::new(200.0, 300.0), true),
+                (Vec2::new(700.0, 300.0), true),
+            ],
         );
         let f = controls.update(
             surface(),
-            &[(Vec2::new(254.0, 300.0), true), (Vec2::new(720.0, 300.0), true)],
+            &[
+                (Vec2::new(254.0, 300.0), true),
+                (Vec2::new(720.0, 300.0), true),
+            ],
         );
         assert!(approx(f.move_vector().x, 0.5));
         assert!(approx(f.yaw().get(), -0.1));

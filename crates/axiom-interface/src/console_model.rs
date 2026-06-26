@@ -89,7 +89,11 @@ mod tests {
     fn results_append_clear_and_window() {
         let mut c = ConsoleModel::new();
         (0..5).for_each(|i| c.append_result(CommandOutcome::ok(format!("c{i}"), "m")));
-        let recent: Vec<&str> = c.recent_results(3).iter().map(CommandOutcome::command).collect();
+        let recent: Vec<&str> = c
+            .recent_results(3)
+            .iter()
+            .map(CommandOutcome::command)
+            .collect();
         assert_eq!(recent, vec!["c2", "c3", "c4"]);
         c.clear_results();
         assert!(c.recent_results(3).is_empty());
@@ -98,7 +102,9 @@ mod tests {
     #[test]
     fn recall_walks_history_both_ways() {
         let mut c = ConsoleModel::new();
-        ["first", "second", "third"].iter().for_each(|cmd| c.record(cmd));
+        ["first", "second", "third"]
+            .iter()
+            .for_each(|cmd| c.record(cmd));
         assert_eq!(c.recall_prev(), Some("third".to_string()));
         assert_eq!(c.recall_prev(), Some("second".to_string()));
         assert_eq!(c.recall_prev(), Some("first".to_string()));
@@ -120,8 +126,13 @@ mod tests {
     fn recent_history_windows_the_tail() {
         let mut c = ConsoleModel::new();
         assert!(c.recent_history(4).is_empty());
-        ["a", "b", "c", "d", "e"].iter().for_each(|cmd| c.record(cmd));
-        assert_eq!(c.recent_history(3), &["c".to_string(), "d".to_string(), "e".to_string()]);
+        ["a", "b", "c", "d", "e"]
+            .iter()
+            .for_each(|cmd| c.record(cmd));
+        assert_eq!(
+            c.recent_history(3),
+            &["c".to_string(), "d".to_string(), "e".to_string()]
+        );
         assert_eq!(c.recent_history(10).len(), 5);
     }
 }

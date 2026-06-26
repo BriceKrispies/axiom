@@ -80,11 +80,11 @@ impl Stage for RainShadowStage {
             }
         }
 
-        for r in 0..region_count {
+        for (r, &dr) in delta.iter().enumerate() {
             if globe.region_elevation[r] < 0.0 {
                 continue;
             }
-            let m = globe.region_moisture[r] + delta[r];
+            let m = globe.region_moisture[r] + dr;
             globe.region_moisture[r] = m.clamp(0.0, 1.0);
         }
 

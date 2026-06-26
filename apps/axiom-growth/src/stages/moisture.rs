@@ -32,9 +32,9 @@ impl Stage for MoistureStage {
         let mut dist = vec![unreached; region_count];
         let mut queue: VecDeque<usize> = VecDeque::new();
 
-        for r in 0..region_count {
+        for (r, slot) in dist.iter_mut().enumerate() {
             if globe.region_elevation[r] < 0.0 {
-                dist[r] = 0;
+                *slot = 0;
                 queue.push_back(r);
             }
         }
@@ -63,12 +63,8 @@ impl Stage for MoistureStage {
             }
         } else {
             let denom = if max_dist == 0 { 1.0 } else { max_dist as f32 };
-            for r in 0..region_count {
-                let d = if dist[r] == unreached {
-                    max_dist
-                } else {
-                    dist[r]
-                };
+            for (r, &dr) in dist.iter().enumerate() {
+                let d = if dr == unreached { max_dist } else { dr };
                 // Nearer ocean = wetter; clamp to [0,1].
                 let m = 1.0 - (d as f32 / denom);
                 globe.region_moisture[r] = m.clamp(0.0, 1.0);

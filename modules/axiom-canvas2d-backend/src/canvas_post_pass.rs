@@ -66,7 +66,10 @@ pub(crate) fn apply_fog(
 /// Vertical colour-grade post-pass: darken each pixel toward black by its screen
 /// `y` (`vertical_grade_mix` = `(y/h)·strength`) — a faint lower-screen anchor.
 /// Returns the count of pixels touched (every row below the top).
-pub(crate) fn apply_vertical_grade(fb: &mut SoftwareFramebuffer, cues: &CanvasDepthCueProfile) -> u64 {
+pub(crate) fn apply_vertical_grade(
+    fb: &mut SoftwareFramebuffer,
+    cues: &CanvasDepthCueProfile,
+) -> u64 {
     let (w, h) = (fb.width(), fb.height());
     let rgba = fb.rgba_mut();
     (0..h).fold(0_u64, |acc, y| {

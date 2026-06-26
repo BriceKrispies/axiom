@@ -151,9 +151,10 @@ impl RuntimeScheduler {
                 entry.order,
                 result,
             ));
-            (failed & stop_on_error)
-                .then_some(std::ops::ControlFlow::Break(()))
-                .unwrap_or(std::ops::ControlFlow::Continue(()))
+            [
+                std::ops::ControlFlow::Continue(()),
+                std::ops::ControlFlow::Break(()),
+            ][usize::from(failed & stop_on_error)]
         });
         outcomes
     }

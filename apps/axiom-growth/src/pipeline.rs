@@ -62,10 +62,13 @@ impl std::fmt::Debug for dyn Stage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissingStage(pub String);
 
+/// Constructs a fresh boxed stage on demand (one entry per registered id).
+type StageFactory = Box<dyn Fn() -> Box<dyn Stage>>;
+
 /// Maps stage ids to constructors so a pipeline can be built from a data list.
 #[derive(Default)]
 pub struct StageRegistry {
-    factories: HashMap<&'static str, Box<dyn Fn() -> Box<dyn Stage>>>,
+    factories: HashMap<&'static str, StageFactory>,
 }
 
 impl std::fmt::Debug for StageRegistry {

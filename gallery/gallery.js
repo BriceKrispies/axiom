@@ -157,6 +157,18 @@ const setStatus = (el, msg, cls) => {
   el.className = "status" + (cls ? " " + cls : "");
 };
 
+// True when the browser can create a WebGL2 context — the engine's fallback
+// render path when WebGPU (navigator.gpu) is absent. Probed off a throwaway
+// canvas so the shell's boot gate reflects the engine's real capability rather
+// than assuming WebGPU is the only path.
+function hasWebgl2() {
+  try {
+    return !!document.createElement("canvas").getContext("webgl2");
+  } catch {
+    return false;
+  }
+}
+
 // Mount the netplay relay bar: a tiny form to point the demo at a hosted relay
 // (the static deploy has none of its own). Reloads with `?relay=<url>` applied.
 function mountRelayBar(host, demo, currentRelay) {
@@ -301,11 +313,20 @@ export async function bootDemo() {
     mountCubeBar(document.getElementById("controls"), demo, cubeCount);
   }
 
-  if (!("gpu" in navigator)) {
+  // The engine selects a render backend at runtime: WebGPU → WebGL2 → Canvas2d
+  // (and `?backend=canvas2d` forces the software rasterizer, which needs no GPU
+  // at all). So the shell must only refuse to boot when there is genuinely NO
+  // path — not when WebGPU alone is missing. A WebGPU-only gate wrongly blocked
+  // WebGL2-capable browsers (e.g. WebKit, which exposes WebGL2 but no
+  // navigator.gpu) and even blocked the forced-canvas2d path. Let the engine
+  // pick the backend; it logs its own `axiom: FATAL — no render backend` if all
+  // of them fail.
+  const forcedCanvas2d = params.get("backend") === "canvas2d";
+  if (!forcedCanvas2d && !("gpu" in navigator) && !hasWebgl2()) {
     setStatus(
       status,
-      "WebGPU is not available in this browser. Use a recent Chrome/Edge, " +
-        "Android Chrome, or iOS Safari 18.2+.",
+      "No WebGPU or WebGL2 support in this browser. Use a recent Chrome/Edge, " +
+        "Firefox, Android Chrome, or iOS Safari 18.2+.",
       "err",
     );
     return;

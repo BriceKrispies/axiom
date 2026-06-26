@@ -10,12 +10,14 @@ use crate::panel_id::PanelId;
 /// How many console result lines a panel renders above its input.
 pub(crate) const RECENT_RESULTS: usize = 5;
 
-/// The panels, the focus owner, and the next raw id to mint.
+/// The panels, the focus owner, the next raw id to mint, and the pending
+/// clipboard-copy requests awaiting a platform host to drain them.
 #[derive(Debug)]
 pub(crate) struct InterfaceState {
     panels: Vec<Panel>,
     focus: FocusState,
     next_raw: u64,
+    clipboard: Vec<String>,
 }
 
 impl InterfaceState {
@@ -25,6 +27,7 @@ impl InterfaceState {
             panels: Vec::new(),
             focus: FocusState::new(),
             next_raw: 1,
+            clipboard: Vec::new(),
         }
     }
 
@@ -53,6 +56,16 @@ impl InterfaceState {
 
     pub(crate) fn focus_mut(&mut self) -> &mut FocusState {
         &mut self.focus
+    }
+
+    /// Queue one clipboard-copy request as plain data.
+    pub(crate) fn request_clipboard(&mut self, text: String) {
+        self.clipboard.push(text);
+    }
+
+    /// Drain every queued clipboard request in order, leaving the queue empty.
+    pub(crate) fn take_clipboard_requests(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.clipboard)
     }
 
     /// The deterministic, ordered draw list for one panel — empty if the panel is

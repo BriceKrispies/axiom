@@ -1,6 +1,7 @@
 //! The curated entry point for constructing ECS primitives.
 
 use crate::command_buffer::CommandBuffer;
+use crate::component_command_buffer::ComponentCommandBuffer;
 use crate::entity_registry::EntityRegistry;
 use crate::event_buffer::EventBuffer;
 use crate::replay_log::ReplayLog;
@@ -29,9 +30,15 @@ impl EcsApi {
         EntityRegistry::new()
     }
 
-    /// A new, empty command buffer.
+    /// A new, empty command buffer (spawn/despawn).
     pub fn command_buffer(&self) -> CommandBuffer {
         CommandBuffer::new()
+    }
+
+    /// A new, empty component-command buffer for typed component insert/remove
+    /// against a consumer storage `S`.
+    pub fn component_command_buffer<S>(&self) -> ComponentCommandBuffer<S> {
+        ComponentCommandBuffer::new()
     }
 
     /// A new, empty replay log.
@@ -63,6 +70,7 @@ mod tests {
         assert!(api.world::<Storage>().is_empty());
         assert!(api.registry().is_empty());
         assert!(api.command_buffer().is_empty());
+        assert!(api.component_command_buffer::<Storage>().is_empty());
         assert!(api.replay_log().is_empty());
         assert!(api.event_buffer::<u32>().is_empty());
         assert!(api.tracked_column::<u32>().is_empty());
@@ -70,7 +78,7 @@ mod tests {
 
     #[test]
     fn default_and_debug() {
-        let api = EcsApi::default();
+        let api = <EcsApi as Default>::default();
         assert!(format!("{api:?}").contains("EcsApi"));
         assert!(api.registry().is_empty());
     }

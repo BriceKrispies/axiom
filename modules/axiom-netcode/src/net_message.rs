@@ -174,8 +174,9 @@ impl NetMessage {
     /// `then(..).unwrap_or_else(..)` builds exactly one payload — the EXACT bytes
     /// that kind has always produced — with no `match`.
     pub(crate) fn signed_bytes(&self) -> Vec<u8> {
-        (self.kind == KIND_INPUT)
-            .then(|| Self::input_signing_payload(self.peer, self.tick, &self.command))
+        let input_payload = (self.kind == KIND_INPUT)
+            .then(|| Self::input_signing_payload(self.peer, self.tick, &self.command));
+        input_payload
             .unwrap_or_else(|| Self::beacon_signing_payload(self.peer, self.tick, &self.hash))
     }
 

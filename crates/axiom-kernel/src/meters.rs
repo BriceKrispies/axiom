@@ -84,7 +84,10 @@ mod tests {
         let mut w = BinaryWriter::new();
         m.reflect_write(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Meters::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(), m);
+        assert_eq!(
+            Meters::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
+            m
+        );
         assert!(Meters::reflect_read(&mut BinaryReader::new(&[])).is_err());
         let mut bad = BinaryWriter::new();
         bad.write_f32(f32::INFINITY);

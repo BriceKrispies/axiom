@@ -1106,12 +1106,7 @@ pub fn descend(u: f32, v: f32) {
             let to_sun = [0.55 * sun_t.cos(), 0.78, 0.55 * sun_t.sin()];
             let lights = vec![
                 (0_u32, to_sun, [1.0, 0.95, 0.85], 1.2_f32),
-                (
-                    1_u32,
-                    [player_x, 5.0, player_z],
-                    [1.0, 0.55, 0.2],
-                    12.0_f32,
-                ),
+                (1_u32, [player_x, 5.0, player_z], [1.0, 0.55, 0.2], 12.0_f32),
             ];
 
             (

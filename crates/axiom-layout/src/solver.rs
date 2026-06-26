@@ -34,7 +34,9 @@ pub fn solve(viewport: &HostViewport, tree: &LayoutTree) -> LayoutResult {
             result
         })
         .unwrap_or_default();
-    (0..nodes.len()).fold(seeded, |result, i| place_children(result, nodes, i, is_landscape))
+    (0..nodes.len()).fold(seeded, |result, i| {
+        place_children(result, nodes, i, is_landscape)
+    })
 }
 
 /// The root content rect: the viewport's logical box, inset by the safe area.
@@ -177,7 +179,10 @@ fn layout_line(
     let count = members.len();
     let gaps_total = gap * (count.saturating_sub(1) as f32);
 
-    let bases: Vec<f32> = members.iter().map(|&j| child_base(&children[j].1)).collect();
+    let bases: Vec<f32> = members
+        .iter()
+        .map(|&j| child_base(&children[j].1))
+        .collect();
     let sum_grow: f32 = members
         .iter()
         .map(|&j| children[j].1.grow.get().max(0.0))
@@ -188,14 +193,17 @@ fn layout_line(
         .zip(bases.iter())
         .map(|(&j, &base)| {
             let style = &children[j].1;
-            clamp_main(base + free * style.grow.get().max(0.0) / sum_grow.max(TINY), style)
+            clamp_main(
+                base + free * style.grow.get().max(0.0) / sum_grow.max(TINY),
+                style,
+            )
         })
         .collect();
 
     let free_after = (main_extent - mains.iter().sum::<f32>() - gaps_total).max(0.0);
     let leading = parent.justify.leading_fraction() * free_after;
-    let between = parent.justify.between_fraction() * free_after
-        / (count.saturating_sub(1).max(1) as f32);
+    let between =
+        parent.justify.between_fraction() * free_after / (count.saturating_sub(1).max(1) as f32);
     let line_cross_origin = cross_origin + (line as f32) * line_cross;
 
     members
@@ -207,8 +215,8 @@ fn layout_line(
             let trailing = ((k + 1 < count) as u32 as f32) * (gap + between);
             *cursor = main_pos + main_size + trailing;
             let style = &children[j].1;
-            let cross_size = [style.cross.resolve(line_cross), line_cross]
-                [parent.align.stretches() as usize];
+            let cross_size =
+                [style.cross.resolve(line_cross), line_cross][parent.align.stretches() as usize];
             let cross_pos =
                 line_cross_origin + parent.align.leading_fraction() * (line_cross - cross_size);
             let rect = apply_aspect(

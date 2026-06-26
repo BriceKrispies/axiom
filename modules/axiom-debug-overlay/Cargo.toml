@@ -30,6 +30,7 @@ web-sys = { version = "0.3", features = [
     "Document",
     "Element",
     "Node",
+    "HtmlCollection",
     "HtmlElement",
     "HtmlHeadElement",
     "HtmlInputElement",
@@ -37,6 +38,8 @@ web-sys = { version = "0.3", features = [
     "PointerEvent",
     "Event",
     "EventTarget",
+    "Navigator",
+    "Clipboard",
     "console",
 ] }
 

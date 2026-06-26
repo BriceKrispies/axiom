@@ -103,6 +103,15 @@ The trade-off is enforced rather than left to discipline:
   only through `KernelApi` methods that return them (usable via inference, just
   not nameable). This keeps the visible surface aligned with what higher layers
   actually need.
+- The **identity primitives** (`EntityId`, `HandleId`, `MessageId`, `AssetId`)
+  are nameable for the same reason: higher layers and modules store them in
+  fields, mint them, and key deterministic collections on them. `AssetId` was
+  defined long before it was surfaced; it is now re-exported because the
+  `axiom-assets` module (the runtime asset-streaming brain) builds its manifest,
+  load-state machine, and dependency graph on it — exactly the "identity
+  primitive future asset layers may build on" the type was introduced for. Like
+  the others it carries no content or loading semantics; those live in
+  `axiom-assets`.
 - **`StableHash`** is the deterministic FNV-1a digest over canonical bytes — the
   digest companion to the serialization primitives above. It is curated (not
   facade-only) because higher layers and modules *name* it: the `recording`

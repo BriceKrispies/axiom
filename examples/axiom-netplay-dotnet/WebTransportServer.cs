@@ -14,7 +14,7 @@ namespace Axiom.Netplay;
 /// exposes reliable bidirectional **streams** (not datagrams), so this carries
 /// the same byte frames the WebSocket path does, length-prefixed (a stream is a
 /// byte stream, not message-framed). One accepted stream per session feeds the
-/// transport-neutral <see cref="Game.RunSessionAsync"/>.
+/// transport-neutral <see cref="RoomRegistry.ServeAsync"/>.
 /// </summary>
 public static class WebTransportServer
 {
@@ -41,8 +41,8 @@ public static class WebTransportServer
         return (cert, hash);
     }
 
-    /// <summary>Accept a WebTransport session + its first bidi stream, then run a game session over it.</summary>
-    public static async Task HandleAsync(IHttpWebTransportFeature feature, Game game, ILogger logger, CancellationToken ct)
+    /// <summary>Accept a WebTransport session + its first bidi stream, then run a room session over it.</summary>
+    public static async Task HandleAsync(IHttpWebTransportFeature feature, RoomRegistry registry, ILogger logger, CancellationToken ct)
     {
         var session = await feature.AcceptAsync();
         ConnectionContext? stream = await session.AcceptStreamAsync(ct);
@@ -51,7 +51,7 @@ public static class WebTransportServer
         {
             var read = FramedReader(stream.Transport.Input);
             var send = FramedSender(stream.Transport.Output);
-            await game.RunSessionAsync(read, send, "wt", logger, ct);
+            await registry.ServeAsync(read, send, "wt", ct);
         }
         finally
         {

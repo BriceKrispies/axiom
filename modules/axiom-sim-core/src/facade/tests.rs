@@ -1,6 +1,7 @@
 //! Facade tests (a child of `facade`, so `use super::*` sees its private items).
 
 use super::*;
+use crate::transfer::TransferMode;
 
 #[test]
 fn new_and_default_are_empty() {
@@ -64,8 +65,7 @@ fn reference_getters_and_iteration_are_reachable() {
     let e = api.append_causal_event(
         11,
         1,
-        Some(a),
-        Some(b),
+        (Some(a), Some(b)),
         None,
         88,
         Some(api.value_bool(true)),
@@ -235,8 +235,9 @@ fn causal_events_through_the_facade() {
     let mut reg = EntityRegistry::new();
     let a = reg.spawn_handle();
     let mut api = SimCoreApi::new();
-    let root = api.append_causal_event(1, 0, Some(a), None, None, 1, None);
-    let child = api.append_causal_event(2, 1, Some(a), None, Some(api.cause_event(root)), 2, None);
+    let root = api.append_causal_event(1, 0, (Some(a), None), None, 1, None);
+    let child =
+        api.append_causal_event(2, 1, (Some(a), None), Some(api.cause_event(root)), 2, None);
     assert_eq!(api.causal_event_count(), 2);
     assert_eq!(api.events_by_subject(a), vec![root, child]);
     assert_eq!(api.events_by_parent(api.cause_event(root)), vec![child]);
@@ -344,14 +345,9 @@ fn interactions_through_the_facade_validate_routes() {
         .record_interaction(
             1,
             touch,
-            a,
-            Some(b),
-            None,
-            None,
-            None,
-            None,
-            0,
-            Some(api.cause_command()),
+            (a, Some(b)),
+            (None, None, None, None),
+            (0, Some(api.cause_command())),
         )
         .unwrap();
     assert_eq!(api.interaction(i).unwrap().primary(), a);
@@ -361,7 +357,7 @@ fn interactions_through_the_facade_validate_routes() {
     assert_eq!(api.all_interaction_ids(), vec![i]);
     // An out-of-range route code fails cleanly.
     assert!(api
-        .record_interaction(1, 250, a, None, None, None, None, None, 0, None)
+        .record_interaction(1, 250, (a, None), (None, None, None, None), (0, None))
         .is_none());
     assert!(api.interactions_by_route(250).is_empty());
 }
@@ -398,15 +394,13 @@ fn material_effect_rules_through_the_facade() {
     let touch = 0u8;
     let rule = api
         .register_material_effect_rule(
-            Some(SimCoreApi::TAG_CONTACT_TRANSFERABLE),
-            touch,
-            SimCoreApi::EFFECT_ADD_FACT,
-            1,
-            Some(api.value_unsigned(1)),
-            0,
-            0,
-            0,
-            0,
+            (
+                Some(SimCoreApi::TAG_CONTACT_TRANSFERABLE),
+                touch,
+                SimCoreApi::EFFECT_ADD_FACT,
+            ),
+            (1, Some(api.value_unsigned(1)), 0, 0),
+            (0, 0),
         )
         .unwrap();
     assert_eq!(api.material_effect_rule_count(), 1);
@@ -414,9 +408,13 @@ fn material_effect_rules_through_the_facade() {
     assert_eq!(api.all_material_effect_rule_ids(), vec![rule]);
     // Invalid route / effect-kind code fail cleanly.
     assert!(api
-        .register_material_effect_rule(None, 250, SimCoreApi::EFFECT_ADD_FACT, 1, None, 0, 0, 0, 0)
+        .register_material_effect_rule(
+            (None, 250, SimCoreApi::EFFECT_ADD_FACT),
+            (1, None, 0, 0),
+            (0, 0)
+        )
         .is_none());
     assert!(api
-        .register_material_effect_rule(None, touch, 250, 1, None, 0, 0, 0, 0)
+        .register_material_effect_rule((None, touch, 250), (1, None, 0, 0), (0, 0))
         .is_none());
 }

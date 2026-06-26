@@ -293,11 +293,8 @@ mod tests {
         // atlas; ExtendedLimits opts up to 2048². The backend reads this from the
         // presentation request's device profile at construction and will hand it
         // to the renderer on initialise.
-        let baseline = GpuBackendApi::new(&request_with_profile(
-            800,
-            600,
-            HostDeviceProfile::Baseline,
-        ));
+        let baseline =
+            GpuBackendApi::new(&request_with_profile(800, 600, HostDeviceProfile::Baseline));
         assert_eq!(baseline.shadow_size(), 1024);
         let extended = GpuBackendApi::new(&request_with_profile(
             800,
@@ -310,11 +307,8 @@ mod tests {
     #[test]
     fn new_carries_the_device_tier_render_size() {
         // An in-budget surface (under the Baseline 1600 cap) renders 1:1.
-        let small = GpuBackendApi::new(&request_with_profile(
-            960,
-            600,
-            HostDeviceProfile::Baseline,
-        ));
+        let small =
+            GpuBackendApi::new(&request_with_profile(960, 600, HostDeviceProfile::Baseline));
         assert_eq!((small.render_width(), small.render_height()), (960, 600));
         // A large (high-DPR) surface is rendered smaller, aspect preserved, then
         // upscaled on present: 3000×1500 → 1600×800 under the Baseline cap.
@@ -358,9 +352,7 @@ mod tests {
 
     #[test]
     fn present_packet_consumes_a_frame_packet_and_no_ops_on_native() {
-        use axiom_host::{
-            FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
-        };
+        use axiom_host::{FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport};
         // A packet with one draw + one light flows through the packet→batches
         // adapter and the same present path; on native it draws nothing.
         let backend = GpuBackendApi::new(&request(640, 480));

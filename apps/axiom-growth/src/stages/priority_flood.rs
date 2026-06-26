@@ -67,9 +67,9 @@ impl Stage for PriorityFloodStage {
 
         // Ocean cells are the outlets; seed them at their own elevation.
         let mut has_ocean = false;
-        for r in 0..region_count {
+        for (r, slot) in visited.iter_mut().enumerate() {
             if globe.region_elevation[r] < 0.0 {
-                visited[r] = true;
+                *slot = true;
                 has_ocean = true;
                 heap.push(Cell {
                     level: globe.region_elevation[r],

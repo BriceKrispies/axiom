@@ -57,10 +57,10 @@ impl HostLifecycleState {
             (FOCUSED, 0),   // Unfocused      -> focused = false
             (0, SHUTDOWN),  // ShutdownRequested -> shutdown = true
         ];
-        let bits = (self.visible as u8) * VISIBLE
-            | (self.focused as u8) * FOCUSED
-            | (self.suspended as u8) * SUSPENDED
-            | (self.shutdown_requested as u8) * SHUTDOWN;
+        let bits = ((self.visible as u8) * VISIBLE)
+            | ((self.focused as u8) * FOCUSED)
+            | ((self.suspended as u8) * SUSPENDED)
+            | ((self.shutdown_requested as u8) * SHUTDOWN);
         let (clear, set) = TRANSITION[signal as usize];
         let next = (bits & !clear) | set;
         HostLifecycleState {

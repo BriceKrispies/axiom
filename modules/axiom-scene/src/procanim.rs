@@ -53,7 +53,14 @@ impl ProcAnim {
         spin_period: u32,
         phase: u32,
     ) -> Self {
-        ProcAnim { base, bob_amplitude, bob_period, spin_axis, spin_period, phase }
+        ProcAnim {
+            base,
+            bob_amplitude,
+            bob_period,
+            spin_axis,
+            spin_period,
+            phase,
+        }
     }
 
     /// The animated local transform at frame `tick`: the resting pose with the
@@ -62,9 +69,9 @@ impl ProcAnim {
     /// zero period is treated as one; a degenerate `spin_axis` yields no spin
     /// (identity rotation) while the bob still applies.
     pub fn local_at(&self, tick: u64) -> Transform {
-        let bob =
-            (fraction(tick + self.phase as u64, self.bob_period) * std::f32::consts::TAU).sin()
-                * self.bob_amplitude;
+        let bob = (fraction(tick + self.phase as u64, self.bob_period) * std::f32::consts::TAU)
+            .sin()
+            * self.bob_amplitude;
         let spin = fraction(tick, self.spin_period) * std::f32::consts::TAU;
         let rotation = Quat::from_axis_angle(self.spin_axis, spin).unwrap_or(Quat::IDENTITY);
         let base = self.base;

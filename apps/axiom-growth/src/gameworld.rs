@@ -20,10 +20,10 @@
 //!     mask so ridgelines and peaks appear in rugged regions only,
 //!   * a medium hill layer,
 //!   * a fine roughness layer.
-//! Per-layer per-metre slope is kept bounded (amplitude * 2*pi*frequency * a
-//! small gradient constant) so the SUM of all layers stays under the SC-E8 6 m
-//! adjacent-vertex budget. All layers derive sub-seeds from the world seed only
-//! (never the chunk coord), preserving the bit-identical seam property.
+//!     Per-layer per-metre slope is kept bounded (amplitude * 2*pi*frequency * a
+//!     small gradient constant) so the SUM of all layers stays under the SC-E8 6 m
+//!     adjacent-vertex budget. All layers derive sub-seeds from the world seed only
+//!     (never the chunk coord), preserving the bit-identical seam property.
 use crate::ids::ChunkCoord;
 use crate::model_planet::PlanetSurfaceAtlas;
 use crate::model_world::{Chunk, GameWorldLocalMap, CELL_SIZE_M, CHUNK_VERT_SIDE};
@@ -470,7 +470,7 @@ mod tests {
             .unwrap_or(Vec3::UNIT_Y);
         let m = sample_macro_continuous(&atlas, [dir.x, dir.y, dir.z]);
         assert!(
-            m >= 0.10 - 1.0e-4 && m <= 0.50 + 1.0e-4,
+            (0.10 - 1.0e-4..=0.50 + 1.0e-4).contains(&m),
             "IDW blend {m} out of neighbour range"
         );
     }

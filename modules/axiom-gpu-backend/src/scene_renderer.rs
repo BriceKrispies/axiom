@@ -321,10 +321,11 @@ impl SceneRenderer {
         });
 
         // Shadow pass bind group layout (group 0): just the light VP.
-        let shadow_pass_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("axiom-shadow-pass-layout"),
-            entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
-        });
+        let shadow_pass_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("axiom-shadow-pass-layout"),
+                entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
+            });
         let shadow_pass_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("axiom-shadow-pass-bind-group"),
             layout: &shadow_pass_layout,
@@ -336,8 +337,8 @@ impl SceneRenderer {
 
         // Main pass shadow-sampling bind group layout (group 2): shadow depth
         // texture + comparison sampler + light VP.
-        let shadow_sample_layout = device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
+        let shadow_sample_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("axiom-shadow-sample-layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
@@ -358,8 +359,7 @@ impl SceneRenderer {
                     },
                     uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
                 ],
-            },
-        );
+            });
         let shadow_sample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("axiom-shadow-sample-bind-group"),
             layout: &shadow_sample_layout,
@@ -432,7 +432,11 @@ impl SceneRenderer {
         clear: [f32; 4],
     ) {
         queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights));
-        queue.write_buffer(&self.light_vp_buffer, 0, bytemuck::cast_slice(&light_view_proj));
+        queue.write_buffer(
+            &self.light_vp_buffer,
+            0,
+            bytemuck::cast_slice(&light_view_proj),
+        );
 
         // Pack instances back-to-back; record each batch's (mesh, material, byte
         // offset, count), capped at the instance-buffer capacity.
@@ -829,10 +833,11 @@ fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)]) -> Vec<u8> {
     bytes.extend_from_slice(&(count as u32).to_le_bytes());
     bytes.extend_from_slice(&[0u8; 12]);
     (0..MAX_LIGHTS).for_each(|i| {
-        let (kind, vec, color, intensity) = lights
-            .get(i)
-            .copied()
-            .unwrap_or((0, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0));
+        let (kind, vec, color, intensity) =
+            lights
+                .get(i)
+                .copied()
+                .unwrap_or((0, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0));
         [
             vec[0],
             vec[1],

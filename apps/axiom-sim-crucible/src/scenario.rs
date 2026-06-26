@@ -142,9 +142,7 @@ pub fn build(api: &mut SimCoreApi, reg: &mut EntityRegistry) -> ScenarioRefs {
     api.add_body_plan_part(
         draft,
         "core",
-        SimCoreApi::PART_CORE,
-        0,
-        0,
+        (SimCoreApi::PART_CORE, 0, 0),
         &[],
         &[(fur, 0)],
         &[(SimCoreApi::SURFACE_OUTER, true)],
@@ -153,9 +151,7 @@ pub fn build(api: &mut SimCoreApi, reg: &mut EntityRegistry) -> ScenarioRefs {
     api.add_body_plan_part(
         draft,
         "paw",
-        SimCoreApi::PART_EXTREMITY,
-        0,
-        0,
+        (SimCoreApi::PART_EXTREMITY, 0, 0),
         &[],
         &[(fur, 0)],
         &[(SimCoreApi::SURFACE_OUTER, true)],
@@ -164,9 +160,7 @@ pub fn build(api: &mut SimCoreApi, reg: &mut EntityRegistry) -> ScenarioRefs {
     api.add_body_plan_part(
         draft,
         "head",
-        SimCoreApi::PART_MOUTH,
-        0,
-        0,
+        (SimCoreApi::PART_MOUTH, 0, 0),
         &[],
         &[],
         &[(SimCoreApi::SURFACE_MOUTH, true)],
@@ -238,27 +232,28 @@ pub fn build(api: &mut SimCoreApi, reg: &mut EntityRegistry) -> ScenarioRefs {
     // Generic material effect rules: any intoxicant entering via ingestion sets the
     // intoxication fact and emits a causal event. Matched by tag + route, not names.
     api.register_material_effect_rule(
-        Some(SimCoreApi::TAG_INTOXICANT),
-        ROUTE_INGESTION,
-        SimCoreApi::EFFECT_UPDATE_FACT,
-        0,
-        Some(api.value_unsigned(INTOX_VALUE)),
-        0,
-        0,
-        0,
-        0,
+        (
+            Some(SimCoreApi::TAG_INTOXICANT),
+            ROUTE_INGESTION,
+            SimCoreApi::EFFECT_UPDATE_FACT,
+        ),
+        (0, Some(api.value_unsigned(INTOX_VALUE)), 0, 0),
+        (0, 0),
     )
     .expect("update-fact effect rule");
     api.register_material_effect_rule(
-        Some(SimCoreApi::TAG_INTOXICANT),
-        ROUTE_INGESTION,
-        SimCoreApi::EFFECT_EMIT_CAUSAL_EVENT,
-        KIND_INTOX_EFFECT,
-        Some(api.value_unsigned(INTOX_VALUE)),
-        0,
-        CODE_INTOX_EFFECT,
-        0,
-        0,
+        (
+            Some(SimCoreApi::TAG_INTOXICANT),
+            ROUTE_INGESTION,
+            SimCoreApi::EFFECT_EMIT_CAUSAL_EVENT,
+        ),
+        (
+            KIND_INTOX_EFFECT,
+            Some(api.value_unsigned(INTOX_VALUE)),
+            0,
+            CODE_INTOX_EFFECT,
+        ),
+        (0, 0),
     )
     .expect("emit-event effect rule");
 

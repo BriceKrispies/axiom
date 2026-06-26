@@ -25,13 +25,18 @@
 //! wall-clock time, no randomness.
 //!
 //! ## Public surface
-//! `lib.rs` exposes **exactly one** facade: [`SceneApi`]. Every other
-//! type is reachable only through the facade — internal modules each
-//! own one primary public thing but are never re-exported here.
+//! `lib.rs` exposes **exactly one** behavioral facade — [`SceneApi`] — plus its
+//! **identity vocabulary**: the [`SceneNodeId`] handle the facade hands back and
+//! takes (Module Law #8, the same reason the `ecs` layer exports `EntityHandle`).
+//! A handle-based world is unusable if callers can't name the handles it returns
+//! — this is what lets an app hold a spawned entity, mutate it, and despawn it.
+//! Every other type stays reachable only through the facade.
 
+mod bounds;
 mod camera;
 mod camera_snapshot;
 mod controller_command;
+mod ids;
 mod light;
 mod light_kind;
 mod light_snapshot;
@@ -52,4 +57,5 @@ mod scene_snapshot;
 mod scene_storage;
 mod spin;
 
+pub use ids::SceneNodeId;
 pub use scene_api::SceneApi;

@@ -61,7 +61,9 @@ impl EntityRegistry {
     /// (see [`crate::World::despawn`]).
     pub fn despawn(&mut self, slot: EntityId) -> bool {
         let generation = self.live.remove(&slot);
-        generation.map(|g| self.free.push(EntityHandle::new(slot, g.wrapping_add(1))));
+        generation
+            .into_iter()
+            .for_each(|g| self.free.push(EntityHandle::new(slot, g.wrapping_add(1))));
         generation.is_some()
     }
 

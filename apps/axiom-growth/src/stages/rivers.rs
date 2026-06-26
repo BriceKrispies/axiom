@@ -23,7 +23,7 @@ use crate::pipeline::{GenContext, Stage};
 fn compute_receivers(globe: &PlanetGlobe) -> Vec<u32> {
     let n = globe.region_count();
     let mut recv = vec![0u32; n];
-    for r in 0..n {
+    for (r, slot) in recv.iter_mut().enumerate() {
         let h = globe.region_elevation[r];
         let mut best = r as u32;
         let mut best_h = h;
@@ -34,7 +34,7 @@ fn compute_receivers(globe: &PlanetGlobe) -> Vec<u32> {
                 best = nb;
             }
         }
-        recv[r] = best;
+        *slot = best;
     }
     recv
 }

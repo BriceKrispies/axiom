@@ -21,7 +21,9 @@ use std::rc::Rc;
 
 use axiom_host::{HostSafeAreaInsets, HostViewport, Pixels};
 use axiom_kernel::Ratio;
-use axiom_layout::{solve, Direction, Insets, LayoutRect, LayoutStyle, LayoutTree, LayoutTreeBuilder, NodeId};
+use axiom_layout::{
+    solve, Direction, Insets, LayoutRect, LayoutStyle, LayoutTree, LayoutTreeBuilder, NodeId,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, PointerEvent};
@@ -314,8 +316,13 @@ fn read_safe_area_insets() -> HostSafeAreaInsets {
         })
         .unwrap_or((0.0, 0.0, 0.0, 0.0));
     let edge = |v: f32| Pixels::new(v.max(0.0)).unwrap_or_else(|_| Pixels::new(0.0).expect("zero"));
-    HostSafeAreaInsets::new(edge(values.0), edge(values.1), edge(values.2), edge(values.3))
-        .unwrap_or_else(|_| HostSafeAreaInsets::none())
+    HostSafeAreaInsets::new(
+        edge(values.0),
+        edge(values.1),
+        edge(values.2),
+        edge(values.3),
+    )
+    .unwrap_or_else(|_| HostSafeAreaInsets::none())
 }
 
 // ===========================================================================
@@ -526,7 +533,12 @@ fn draw_board(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
     let span = cell * BOARD_SIZE as f64;
     ctx.set_stroke_style_str(GRID_LINE);
     ctx.set_line_width(1.0);
-    ctx.stroke_rect(layout.board_x - 0.5, layout.board_y - 0.5, span + 1.0, span + 1.0);
+    ctx.stroke_rect(
+        layout.board_x - 0.5,
+        layout.board_y - 0.5,
+        span + 1.0,
+        span + 1.0,
+    );
 }
 
 /// While dragging, paint the magnetic placement shadow onto the board (green at
@@ -562,7 +574,10 @@ fn draw_generator(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
     let mini = layout.mini;
     ctx.set_global_alpha(1.0);
     ctx.set_fill_style_str(TEXT_DIM);
-    ctx.set_font(&format!("600 {}px system-ui, sans-serif", (mini * 0.42).max(11.0) as i32));
+    ctx.set_font(&format!(
+        "600 {}px system-ui, sans-serif",
+        (mini * 0.42).max(11.0) as i32
+    ));
     let _ = ctx.fill_text("NEXT QUINTET", layout.tray_x, layout.label_y());
 
     // The 5×5 backing grid.
@@ -590,7 +605,10 @@ fn draw_generator(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
         }
         None => {
             ctx.set_fill_style_str(INVALID_FILL);
-            ctx.set_font(&format!("600 {}px system-ui, sans-serif", (mini * 0.5).max(12.0) as i32));
+            ctx.set_font(&format!(
+                "600 {}px system-ui, sans-serif",
+                (mini * 0.5).max(12.0) as i32
+            ));
             let _ = ctx.fill_text(
                 "No quintet fits — press Reset",
                 layout.tray_x,
@@ -626,10 +644,16 @@ fn draw_score(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
     let y = layout.score_y();
     ctx.set_global_alpha(1.0);
     ctx.set_fill_style_str(TEXT_DIM);
-    ctx.set_font(&format!("600 {}px system-ui, sans-serif", (mini * 0.42).max(11.0) as i32));
+    ctx.set_font(&format!(
+        "600 {}px system-ui, sans-serif",
+        (mini * 0.42).max(11.0) as i32
+    ));
     let _ = ctx.fill_text("SCORE", layout.tray_x, y);
     ctx.set_fill_style_str(TEXT);
-    ctx.set_font(&format!("700 {}px system-ui, sans-serif", (mini * 1.1).max(24.0) as i32));
+    ctx.set_font(&format!(
+        "700 {}px system-ui, sans-serif",
+        (mini * 1.1).max(24.0) as i32
+    ));
     let _ = ctx.fill_text(&ui.game.score().to_string(), layout.tray_x, y + mini * 1.3);
 }
 

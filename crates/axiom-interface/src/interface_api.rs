@@ -45,25 +45,40 @@ impl InterfaceApi {
     // --- visibility ---------------------------------------------------------
 
     pub fn is_visible(&self, panel: PanelId) -> bool {
-        self.state.panel(panel).map(Panel::is_visible).unwrap_or(false)
+        self.state
+            .panel(panel)
+            .map(Panel::is_visible)
+            .unwrap_or(false)
     }
 
     pub fn show(&mut self, panel: PanelId) {
-        self.state.panel_mut(panel).into_iter().for_each(Panel::show);
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(Panel::show);
     }
 
     pub fn hide(&mut self, panel: PanelId) {
-        self.state.panel_mut(panel).into_iter().for_each(Panel::hide);
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(Panel::hide);
     }
 
     pub fn toggle(&mut self, panel: PanelId) {
-        self.state.panel_mut(panel).into_iter().for_each(Panel::toggle);
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(Panel::toggle);
     }
 
     // --- pin ----------------------------------------------------------------
 
     pub fn is_pinned(&self, panel: PanelId) -> bool {
-        self.state.panel(panel).map(Panel::is_pinned).unwrap_or(false)
+        self.state
+            .panel(panel)
+            .map(Panel::is_pinned)
+            .unwrap_or(false)
     }
 
     pub fn pin(&mut self, panel: PanelId) {
@@ -71,18 +86,27 @@ impl InterfaceApi {
     }
 
     pub fn unpin(&mut self, panel: PanelId) {
-        self.state.panel_mut(panel).into_iter().for_each(Panel::unpin);
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(Panel::unpin);
     }
 
     pub fn toggle_pin(&mut self, panel: PanelId) {
-        self.state.panel_mut(panel).into_iter().for_each(Panel::toggle_pin);
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(Panel::toggle_pin);
     }
 
     // --- focus --------------------------------------------------------------
 
     /// Show the panel and give its console focus (transferring focus to it).
     pub fn focus_console(&mut self, panel: PanelId) {
-        self.state.panel_mut(panel).into_iter().for_each(Panel::show);
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(Panel::show);
         self.state.focus_mut().focus(panel);
     }
 
@@ -97,11 +121,17 @@ impl InterfaceApi {
     // --- layout / drag ------------------------------------------------------
 
     pub fn panel_position(&self, panel: PanelId) -> (i32, i32) {
-        self.state.panel(panel).map(Panel::position).unwrap_or((0, 0))
+        self.state
+            .panel(panel)
+            .map(Panel::position)
+            .unwrap_or((0, 0))
     }
 
     pub fn is_dragging(&self, panel: PanelId) -> bool {
-        self.state.panel(panel).map(Panel::is_dragging).unwrap_or(false)
+        self.state
+            .panel(panel)
+            .map(Panel::is_dragging)
+            .unwrap_or(false)
     }
 
     pub fn drag_begin(&mut self, panel: PanelId, pointer_x: i32, pointer_y: i32) {
@@ -111,7 +141,14 @@ impl InterfaceApi {
             .for_each(|p| p.drag_begin(pointer_x, pointer_y));
     }
 
-    pub fn drag_update(&mut self, panel: PanelId, pointer_x: i32, pointer_y: i32, max_x: i32, max_y: i32) {
+    pub fn drag_update(
+        &mut self,
+        panel: PanelId,
+        pointer_x: i32,
+        pointer_y: i32,
+        max_x: i32,
+        max_y: i32,
+    ) {
         self.state
             .panel_mut(panel)
             .into_iter()
@@ -119,11 +156,17 @@ impl InterfaceApi {
     }
 
     pub fn drag_end(&mut self, panel: PanelId) {
-        self.state.panel_mut(panel).into_iter().for_each(Panel::drag_end);
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(Panel::drag_end);
     }
 
     pub fn set_panel_width(&mut self, panel: PanelId, width: i32) {
-        self.state.panel_mut(panel).into_iter().for_each(|p| p.set_width(width));
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(|p| p.set_width(width));
     }
 }
 
@@ -153,11 +196,15 @@ impl InterfaceApi {
     }
 
     pub fn console_recall_prev(&mut self, panel: PanelId) -> Option<String> {
-        self.state.panel_mut(panel).and_then(|p| p.console_mut().recall_prev())
+        self.state
+            .panel_mut(panel)
+            .and_then(|p| p.console_mut().recall_prev())
     }
 
     pub fn console_recall_next(&mut self, panel: PanelId) -> Option<String> {
-        self.state.panel_mut(panel).and_then(|p| p.console_mut().recall_next())
+        self.state
+            .panel_mut(panel)
+            .and_then(|p| p.console_mut().recall_next())
     }
 
     /// Apply a console navigation/dismiss key (Escape / arrows). Returns the
@@ -167,10 +214,14 @@ impl InterfaceApi {
         classify_console_key(key).and_then(|console_key| self.apply_console_key(panel, console_key))
     }
 
-    pub fn console_append_result(&mut self, panel: PanelId, ok: bool, command: &str, message: &str) {
-        let outcome = ok
-            .then(|| CommandOutcome::ok(command, message))
-            .unwrap_or_else(|| CommandOutcome::error(command, message));
+    pub fn console_append_result(
+        &mut self,
+        panel: PanelId,
+        ok: bool,
+        command: &str,
+        message: &str,
+    ) {
+        let outcome = CommandOutcome::new(ok, command, message);
         self.state
             .panel_mut(panel)
             .into_iter()
@@ -192,7 +243,13 @@ impl InterfaceApi {
                 p.console()
                     .recent_results(RECENT_RESULTS)
                     .iter()
-                    .map(|o| (o.succeeded(), o.command().to_string(), o.message().to_string()))
+                    .map(|o| {
+                        (
+                            o.succeeded(),
+                            o.command().to_string(),
+                            o.message().to_string(),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -208,17 +265,41 @@ impl InterfaceApi {
     }
 
     pub fn set_panel_rows(&mut self, panel: PanelId, rows: &[(String, String)]) {
-        self.state.panel_mut(panel).into_iter().for_each(|p| p.set_rows(rows));
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(|p| p.set_rows(rows));
     }
 
     pub fn panel_rows(&self, panel: PanelId) -> Vec<(String, String)> {
-        self.state.panel(panel).map(|p| p.rows().to_vec()).unwrap_or_default()
+        self.state
+            .panel(panel)
+            .map(|p| p.rows().to_vec())
+            .unwrap_or_default()
     }
 
     // --- draw ---------------------------------------------------------------
 
     pub fn draw_list(&self, panel: PanelId) -> InterfaceDrawList {
         self.state.draw_list(panel)
+    }
+
+    // --- clipboard ----------------------------------------------------------
+
+    /// Queue `text` to be copied to the platform clipboard. Like the draw list,
+    /// this is a renderer-/platform-neutral *output channel*: the layer only
+    /// records the request as data and never touches a browser API, so any
+    /// interface can ask for a copy. A platform host realizes it by draining
+    /// [`Self::take_clipboard_requests`] and performing the actual copy.
+    pub fn request_clipboard(&mut self, text: String) {
+        self.state.request_clipboard(text);
+    }
+
+    /// Drain every pending clipboard request in order, clearing the queue. The
+    /// platform host calls this and writes each string to the real clipboard
+    /// (on a single-slot system clipboard, the last one wins).
+    pub fn take_clipboard_requests(&mut self) -> Vec<String> {
+        self.state.take_clipboard_requests()
     }
 
     // --- console-key dispatch (branchless table over the discriminant) ------
@@ -339,13 +420,32 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_requests_queue_in_order_and_drain_once() {
+        let mut api = InterfaceApi::new();
+        // Nothing queued yet.
+        assert!(api.take_clipboard_requests().is_empty());
+        api.request_clipboard("alpha".to_string());
+        api.request_clipboard("beta".to_string());
+        // Drained in request order...
+        assert_eq!(
+            api.take_clipboard_requests(),
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+        // ...and draining clears the queue.
+        assert!(api.take_clipboard_requests().is_empty());
+    }
+
+    #[test]
     fn console_navigate_maps_every_key() {
         let (mut api, p) = one_panel();
         api.console_record(p, "alpha");
         // Submit yields None (the consumer submits).
         assert_eq!(api.console_navigate(p, "Enter"), None);
         // ArrowUp recalls; ArrowDown returns toward the live line.
-        assert_eq!(api.console_navigate(p, "ArrowUp"), Some("alpha".to_string()));
+        assert_eq!(
+            api.console_navigate(p, "ArrowUp"),
+            Some("alpha".to_string())
+        );
         assert_eq!(api.console_navigate(p, "ArrowDown"), Some(String::new()));
         // Ordinary typing is not a console key.
         assert_eq!(api.console_navigate(p, "x"), None);
@@ -360,7 +460,13 @@ mod tests {
         let (mut api, p) = one_panel();
         api.show(p);
         api.set_panel_header(p, "Title", "status");
-        api.set_panel_rows(p, &[("a".to_string(), "1".to_string()), ("b".to_string(), "2".to_string())]);
+        api.set_panel_rows(
+            p,
+            &[
+                ("a".to_string(), "1".to_string()),
+                ("b".to_string(), "2".to_string()),
+            ],
+        );
         api.console_append_result(p, true, "help", "ok");
         api.focus_console(p);
         assert_eq!(api.panel_rows(p).len(), 2);
@@ -370,16 +476,42 @@ mod tests {
         use crate::draw_list::InterfaceDrawItem;
         // Panel, Header, 2 Rows, 1 ConsoleLine, ConsoleInput — in that fixed order.
         assert_eq!(items.len(), 6);
-        assert_eq!(items[0], InterfaceDrawItem::Panel { x: 8, y: 8, width: 360, height: 0 });
+        assert_eq!(
+            items[0],
+            InterfaceDrawItem::Panel {
+                x: 8,
+                y: 8,
+                width: 360,
+                height: 0
+            }
+        );
         assert_eq!(
             items[1],
-            InterfaceDrawItem::Header { primary: "Title".to_string(), secondary: "status".to_string() }
+            InterfaceDrawItem::Header {
+                primary: "Title".to_string(),
+                secondary: "status".to_string()
+            }
         );
-        assert_eq!(items[2], InterfaceDrawItem::Row { label: "a".to_string(), value: "1".to_string() });
-        assert_eq!(items[4], InterfaceDrawItem::ConsoleLine { ok: true, text: "help: ok".to_string() });
+        assert_eq!(
+            items[2],
+            InterfaceDrawItem::Row {
+                label: "a".to_string(),
+                value: "1".to_string()
+            }
+        );
+        assert_eq!(
+            items[4],
+            InterfaceDrawItem::ConsoleLine {
+                ok: true,
+                text: "help: ok".to_string()
+            }
+        );
         assert_eq!(
             items[5],
-            InterfaceDrawItem::ConsoleInput { prompt: ">".to_string(), focused: true }
+            InterfaceDrawItem::ConsoleInput {
+                prompt: ">".to_string(),
+                focused: true
+            }
         );
     }
 

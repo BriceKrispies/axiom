@@ -59,9 +59,8 @@ impl HostDeviceProfile {
     pub fn render_size(self, physical_width: u32, physical_height: u32) -> (u32, u32) {
         let longest = physical_width.max(physical_height).max(1);
         let capped = longest.min(self.max_render_dimension());
-        let scale = |axis: u32| {
-            (((axis as u64) * (capped as u64)) / (longest as u64)).max(1) as u32
-        };
+        let scale =
+            |axis: u32| (((axis as u64) * (capped as u64)) / (longest as u64)).max(1) as u32;
         (scale(physical_width), scale(physical_height))
     }
 }
@@ -94,14 +93,20 @@ mod tests {
     #[test]
     fn baseline_caps_the_render_dimension_lower() {
         assert_eq!(HostDeviceProfile::Baseline.max_render_dimension(), 1600);
-        assert_eq!(HostDeviceProfile::ExtendedLimits.max_render_dimension(), 4096);
+        assert_eq!(
+            HostDeviceProfile::ExtendedLimits.max_render_dimension(),
+            4096
+        );
     }
 
     #[test]
     fn render_size_leaves_a_within_cap_surface_untouched() {
         // The demo canvases (960×600) are well under every cap, so the engine's
         // default tier renders them 1:1 — no mobile-first change degrades them.
-        assert_eq!(HostDeviceProfile::Baseline.render_size(960, 600), (960, 600));
+        assert_eq!(
+            HostDeviceProfile::Baseline.render_size(960, 600),
+            (960, 600)
+        );
         assert_eq!(
             HostDeviceProfile::ExtendedLimits.render_size(960, 600),
             (960, 600)

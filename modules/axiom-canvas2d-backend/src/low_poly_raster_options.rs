@@ -180,7 +180,8 @@ mod tests {
     #[test]
     fn new_round_trips_every_field() {
         let cues = CanvasDepthCueProfile::low_poly_framebuffer();
-        let o = LowPolyRasterOptions::new(64, 48, CanvasDebugOverlay::DepthBuffer, 128, 5_000, cues);
+        let o =
+            LowPolyRasterOptions::new(64, 48, CanvasDebugOverlay::DepthBuffer, 128, 5_000, cues);
         assert_eq!(o.framebuffer_width(), 64);
         assert_eq!(o.framebuffer_height(), 48);
         assert_eq!(o.debug_overlay(), CanvasDebugOverlay::DepthBuffer);

@@ -7,6 +7,7 @@
 //! - |lat| < 30 deg  : trade winds, blowing toward the west (east-to-west).
 //! - 30 .. 60 deg    : westerlies, blowing toward the east.
 //! - > 60 deg        : polar easterlies, toward the west.
+//!
 //! Writes unit `region_wind` (the tangent direction the wind blows toward).
 
 use crate::geo::{latitude, tangent_basis};

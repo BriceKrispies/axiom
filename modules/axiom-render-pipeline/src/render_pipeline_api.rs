@@ -33,10 +33,8 @@ fn shadow_light_view_proj(direction: Vec3) -> Option<Mat4> {
     const NEAR: f32 = 0.1;
     const FAR: f32 = 100.0;
 
-    let len = (direction.x * direction.x
-        + direction.y * direction.y
-        + direction.z * direction.z)
-        .sqrt();
+    let len =
+        (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z).sqrt();
     let n = Vec3::new(direction.x / len, direction.y / len, direction.z / len);
     let eye = Vec3::new(
         -n.x * SHADOW_DISTANCE,
@@ -377,7 +375,10 @@ impl RenderPipelineApi {
                     .to_matrix();
                 let mesh_id = renderable.mesh().raw();
                 let material_id = renderable.material().raw();
-                let color = material_color.get(&material_id).copied().unwrap_or([1.0; 4]);
+                let color = material_color
+                    .get(&material_id)
+                    .copied()
+                    .unwrap_or([1.0; 4]);
                 (
                     world,
                     color,
@@ -604,8 +605,8 @@ mod tests {
         scene.add_renderable(hidden, mesh, material).unwrap();
         scene.set_renderable_visibility(hidden, false).unwrap();
 
-        let camera = scene
-            .create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
+        let camera =
+            scene.create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
         scene
             .add_perspective_camera(
                 &math(),
@@ -618,7 +619,11 @@ mod tests {
             .unwrap();
         scene.update_world_transforms();
 
-        let report = api.submit(&frame_with_assets(&api), &scene, &WebGpuApi::new_recording());
+        let report = api.submit(
+            &frame_with_assets(&api),
+            &scene,
+            &WebGpuApi::new_recording(),
+        );
         // Only the visible renderable is drawn, and it is reported as a caster.
         assert_eq!(api.report_draw_count(&report), 1);
         assert_eq!(api.report_draw_casts_shadow(&report, 0), Some(true));

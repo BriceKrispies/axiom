@@ -53,6 +53,10 @@ impl SceneError {
         SceneError::new(SceneErrorCode::MissingRenderable, message)
     }
 
+    pub const fn missing_bounds(message: &'static str) -> Self {
+        SceneError::new(SceneErrorCode::MissingBounds, message)
+    }
+
     pub const fn self_parenting(message: &'static str) -> Self {
         SceneError::new(SceneErrorCode::SelfParenting, message)
     }
@@ -137,6 +141,10 @@ mod tests {
         assert_eq!(
             SceneError::missing_renderable("").code(),
             SceneErrorCode::MissingRenderable
+        );
+        assert_eq!(
+            SceneError::missing_bounds("").code(),
+            SceneErrorCode::MissingBounds
         );
         assert_eq!(
             SceneError::self_parenting("").code(),

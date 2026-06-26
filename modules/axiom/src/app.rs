@@ -9,8 +9,8 @@
 //! platform surface or a wall clock — the platform loop lives in `axiom-windowing`.
 
 use axiom_frame::{FrameApi, FrameBuilder};
-use axiom_host::{HostApi, HostFrameInput, HostLifecycleSignal, HostStepDriver, HostViewport};
-use axiom_kernel::{KernelResult, Radians, Ratio};
+use axiom_host::{HostApi, HostLifecycleSignal, HostStepDriver, HostViewport};
+use axiom_kernel::{KernelResult, Ratio};
 use axiom_math::{MathApi, Vec3};
 use axiom_render_pipeline::RenderPipelineApi;
 use axiom_runtime::{Runtime, RuntimeConfig};
@@ -27,16 +27,29 @@ use axiom_windowing::WindowingApi;
 const DEFAULT_SURFACE_ID: &str = "axiom-surface";
 
 use crate::assets::Assets;
-use crate::controller::FirstPersonInput;
 use crate::default_plugins::DefaultPlugins;
-use crate::frame_outcome::{DrawData, FrameOutcome, LightData};
 use crate::material::Material;
 use crate::mesh::Mesh;
 use crate::mesh_geometry::{mesh_geometry, MeshGeometry};
-use crate::player::PlayerInput;
 use crate::scene_commands::SceneCommands;
-use crate::texture::{texture_rgba, Texture};
+use crate::texture::Texture;
 use crate::window::Window;
+
+/// The engine's spatial-reasoning queries on [`RunningApp`] (raycast / overlap),
+/// in a child module so this file stays within the per-file size budget.
+mod queries;
+
+/// Typed component access by `Entity` (`get`/`set`/`query`) lives in a sibling
+/// child module, keeping this file within the per-file size budget.
+mod components;
+
+/// The per-frame `tick` family lives in a sibling child module, keeping this
+/// file within the per-file size budget.
+mod frame;
+
+/// The live-backend resource exports (mesh streams, material albedos) live in a
+/// sibling child module, keeping this file within the per-file size budget.
+mod resources;
 
 /// The default fixed simulation step: 1 ms, matching the engine's slices.
 const DEFAULT_STEP_NANOS: u64 = 1_000_000;
@@ -264,6 +277,10 @@ impl RunningApp {
         let light_direction = commands
             .realize_into(&mut scene, &math)
             .unwrap_or(Vec3::ZERO);
+        // Propagate world transforms once at author time so the spatial queries
+        // ([`RunningApp::raycast`] / `overlap_box`) answer correctly from the
+        // very first frame, before any `tick` has advanced the scene.
+        scene.update_world_transforms();
 
         // Each material asset -> (handle id, colour, optional texture); each mesh
         // asset -> its own resolved geometry keyed by handle id. The engine
@@ -325,191 +342,6 @@ impl RunningApp {
         self.renderables
     }
 
-    /// The first mesh's geometry as the live backend's vertex stream (interleaved
-    /// position+normal+uv+colour, 12 floats per vertex) plus its triangle-list
-    /// indices. Empty when the app registered no mesh. Plain data the windowing
-    /// backend uploads. The UV is the mesh's own texture coordinate; per-vertex
-    /// colour is opaque **white** here: the live shader multiplies the sampled
-    /// albedo by this and by the per-instance (material) colour, so white keeps
-    /// the per-instance colour authoritative — the built-in cube renders exactly
-    /// as before. An app that wants true per-vertex colours builds its own stream
-    /// (see `axiom-growth`'s terrain).
-    pub fn mesh_vertex_stream(&self) -> (Vec<f32>, Vec<u32>) {
-        self.meshes.first().map_or_else(
-            || (Vec::new(), Vec::new()),
-            |(_, geom)| (interleave_vertices(geom), geom.indices.clone()),
-        )
-    }
-
-    /// Every registered mesh's geometry as the multi-mesh live backend's upload
-    /// set: `(mesh_id, interleaved position+normal+uv+colour vertices [12
-    /// floats/vertex], triangle indices)`. UV is the mesh's own texture
-    /// coordinate; per-vertex colour is opaque white (the live shader multiplies
-    /// the sampled albedo by this and by the per-instance material colour, so
-    /// white keeps the material colour authoritative). The backend uploads these
-    /// once and draws each frame's per-mesh instance batches against them.
-    pub fn mesh_set(&self) -> Vec<(u64, Vec<f32>, Vec<u32>)> {
-        self.meshes
-            .iter()
-            .map(|(id, geom)| (*id, interleave_vertices(geom), geom.indices.clone()))
-            .collect()
-    }
-
-    /// Every registered material as the live backend's material set: `(material_id,
-    /// width, height, RGBA8 albedo pixels)`. A textured material resolves its
-    /// [`Texture`] to pixels; an untextured material gets a 1×1 opaque-white albedo
-    /// (so its sampled albedo is `(1,1,1,1)` and the draw colour reduces to base ×
-    /// per-vertex colour). The backend builds one albedo bind group per material.
-    pub fn material_textures(&self) -> Vec<(u64, u32, u32, Vec<u8>)> {
-        self.materials
-            .iter()
-            .map(|(id, _, texture)| {
-                let (w, h, pixels) = texture
-                    .map(texture_rgba)
-                    .unwrap_or_else(|| (1, 1, vec![255, 255, 255, 255]));
-                (*id, w, h, pixels)
-            })
-            .collect()
-    }
-
-    /// Drive one deterministic frame at `tick`: step the runtime, advance the
-    /// scene at the tick, and (when rendering is enabled) submit the frame and
-    /// summarise the per-object draws. Browser-free and fully replayable — the
-    /// outcome is a pure function of `tick`. The caller (the run loop) owns the
-    /// monotonic tick and must pass `0, 1, 2, …` in order.
-    pub fn tick(&mut self, tick: u64) -> FrameOutcome {
-        self.tick_with_controls(tick, &[], &[])
-    }
-
-    /// Drive one deterministic frame at `tick`, applying `inputs` (per-player
-    /// move deltas) to the simulation before stepping. The input-free
-    /// [`Self::tick`] is `tick_with(tick, &[])`. Like `tick`, the outcome is a
-    /// pure function of `tick` and `inputs`, so two peers given the same
-    /// confirmed inputs produce byte-identical frames.
-    pub fn tick_with(&mut self, tick: u64, inputs: &[PlayerInput]) -> FrameOutcome {
-        self.tick_with_controls(tick, inputs, &[])
-    }
-
-    /// Drive one deterministic frame at `tick`, applying both per-player move
-    /// `inputs` and first-person `controls` to the simulation before stepping.
-    /// [`Self::tick`] and [`Self::tick_with`] are the empty-`controls` cases. A
-    /// `control` yaws and moves its addressed [`crate::prelude::Controller`] node
-    /// along its own facing — the first-person camera path — while `inputs`
-    /// translate [`crate::prelude::Player`] nodes in world space. The outcome
-    /// stays a pure function of `tick`, `inputs`, and `controls`.
-    pub fn tick_with_controls(
-        &mut self,
-        tick: u64,
-        inputs: &[PlayerInput],
-        controls: &[FirstPersonInput],
-    ) -> FrameOutcome {
-        let width = self.viewport.physical_width();
-        let height = self.viewport.physical_height();
-
-        let host_input = HostFrameInput::new(tick + 1, self.step_nanos, self.viewport);
-        let host_report = self
-            .driver
-            .drive(&mut self.runtime, host_input)
-            .expect("driver inputs are deterministic and valid");
-        let mut commands: Vec<_> = inputs
-            .iter()
-            .enumerate()
-            .map(|(i, input)| self.scene.move_command(i as u64, input.player, input.delta))
-            .collect();
-        let scene = &self.scene;
-        commands.extend(controls.iter().enumerate().map(|(j, control)| {
-            let yaw = Radians::new(control.yaw.as_radians()).expect("authored yaw is finite");
-            let pitch = Radians::new(control.pitch.as_radians()).expect("authored pitch is finite");
-            scene.controller_command(
-                (inputs.len() + j) as u64,
-                control.index,
-                control.move_local,
-                yaw,
-                pitch,
-            )
-        }));
-        let engine_frame = self
-            .frame_builder
-            .build(&host_report, commands)
-            .expect("host report sequence is monotone");
-        let frame_ctx = self.frame_api.frame_context(&engine_frame);
-        self.scene.advance(tick, &frame_ctx);
-
-        // `then` keeps the render path lazy: it runs (with all its side effects)
-        // only when rendering is enabled; otherwise the simulation-only outcome is
-        // produced. Behaviourally identical to the former `if !self.render` early
-        // return, without the branch in source.
-        self.render
-            .then(|| {
-                let mut frame =
-                    self.pipeline
-                        .new_frame(width, height, self.clear_color, self.light_direction);
-                let pipeline = &mut self.pipeline;
-                self.meshes.iter().for_each(|(id, geometry)| {
-                    pipeline.frame_add_mesh(
-                        &mut frame,
-                        *id,
-                        geometry.positions.clone(),
-                        geometry.normals.clone(),
-                        geometry.uvs.clone(),
-                        geometry.indices.clone(),
-                    )
-                });
-                self.materials.iter().for_each(|(id, color, texture)| {
-                    // The pipeline records the material→texture binding (for
-                    // receipt fidelity); the live albedo pixels are uploaded
-                    // separately via `material_textures`. `0` = untextured.
-                    let texture_id = texture.map(Texture::id).unwrap_or(0);
-                    pipeline.frame_add_textured_material(&mut frame, *id, *color, texture_id)
-                });
-                let report = pipeline.submit(&frame, &self.scene, &self.webgpu);
-
-                let view_projection = pipeline.report_view_projection(&report);
-                // One DrawData per drawn object (submission order): mvp, world,
-                // colour, mesh/material ids, and the contact-shadow caster mark.
-                let draws: Vec<DrawData> = (0..pipeline.report_draw_count(&report))
-                    .map(|i| {
-                        let world = pipeline
-                            .report_draw_world(&report, i)
-                            .expect("draw index in range");
-                        DrawData::new(
-                            view_projection.multiply(world).as_cols_array(),
-                            world.as_cols_array(),
-                            pipeline.report_draw_color(&report, i).expect("draw in range"),
-                            pipeline.report_draw_mesh_id(&report, i).expect("draw in range"),
-                            pipeline.report_draw_material_id(&report, i).expect("draw in range"),
-                            pipeline.report_draw_casts_shadow(&report, i).expect("draw in range"),
-                        )
-                    })
-                    .collect();
-
-                // The frame's resolved lights (directional + point), threaded to
-                // the live backend's lighting uniform.
-                let light_count = pipeline.report_light_count(&report);
-                let lights: Vec<LightData> = (0..light_count)
-                    .map(|i| {
-                        let (kind, vec, color, intensity) = pipeline
-                            .report_light_at(&report, i)
-                            .expect("light index in range");
-                        LightData::new(kind, vec, color, intensity)
-                    })
-                    .collect();
-
-                FrameOutcome::new(
-                    tick,
-                    pipeline.report_command_count(&report),
-                    pipeline.report_clear_color(&report),
-                    draws,
-                    lights,
-                    pipeline.report_light_view_proj(&report),
-                    view_projection.as_cols_array(),
-                    pipeline.report_presented(&report),
-                    pipeline.report_recorded(&report),
-                )
-            })
-            .unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
-    }
-
     /// Serialize the durable simulation state — the scene world (entity identity,
     /// component columns, and the player/controller maps) — to bytes, so a caller
     /// can record it per frame and later fork from a recorded frame. The per-frame
@@ -527,23 +359,6 @@ impl RunningApp {
     pub fn restore_sim(&mut self, bytes: &[u8]) -> KernelResult<()> {
         self.scene.restore_state(bytes)
     }
-}
-
-/// Interleave one mesh's resolved geometry into the live backend's 12-float
-/// vertex stream: position(3) + normal(3) + uv(2) + opaque-white colour(4) per
-/// vertex. Shared by [`RunningApp::mesh_vertex_stream`] and
-/// [`RunningApp::mesh_set`].
-fn interleave_vertices(geom: &MeshGeometry) -> Vec<f32> {
-    let mut vertices = Vec::with_capacity(geom.positions.len() * 12);
-    geom.positions
-        .iter()
-        .zip(geom.normals.iter())
-        .zip(geom.uvs.iter())
-        .for_each(|((p, n), uv)| {
-            vertices
-                .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0])
-        });
-    vertices
 }
 
 /// The product of running a setup closure: a realized scene plus the resolved
@@ -564,7 +379,9 @@ mod tests {
     use crate::angle::Angle;
     use crate::camera::{Camera, PerspectiveProjection};
     use crate::color::Color;
+    use crate::controller::FirstPersonInput;
     use crate::directional_light::DirectionalLight;
+    use crate::player::PlayerInput;
     use crate::renderable::Renderable;
     use crate::spin::Spin;
     use axiom_kernel::Meters;

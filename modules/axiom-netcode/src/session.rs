@@ -160,9 +160,10 @@ impl Session {
                 .command()
                 .expect("an input-kind frame always carries a command")
                 .clone();
-            self.in_input_window(tick)
-                .then(|| self.timeline.insert(tick, peer, command))
-                .unwrap_or_else(|| self.rejections.out_of_window += 1)
+            let admitted = self
+                .in_input_window(tick)
+                .then(|| self.timeline.insert(tick, peer, command));
+            admitted.unwrap_or_else(|| self.rejections.out_of_window += 1)
         });
         // HashBeacon: take the hash (present iff this is a beacon frame) and
         // admit it to the table iff in the beacon window.
@@ -170,11 +171,10 @@ impl Session {
             let hash = *message
                 .hash()
                 .expect("a beacon-kind frame always carries a hash");
-            self.in_beacon_window(tick)
-                .then(|| {
-                    self.hashes.insert((tick, peer), hash);
-                })
-                .unwrap_or_else(|| self.rejections.out_of_window += 1)
+            let admitted = self.in_beacon_window(tick).then(|| {
+                self.hashes.insert((tick, peer), hash);
+            });
+            admitted.unwrap_or_else(|| self.rejections.out_of_window += 1)
         });
     }
 
@@ -195,15 +195,15 @@ impl Session {
         // `&` not `&&`: `has_all` is a pure read, always safe to evaluate. The
         // `then(..).unwrap_or_default()` runs the mutating body only when the
         // tick is exactly next and complete — identical to the original guard.
-        ((tick == self.confirmed) & self.timeline.has_all(tick, &self.peers))
-            .then(|| {
+        let confirmed =
+            ((tick == self.confirmed) & self.timeline.has_all(tick, &self.peers)).then(|| {
                 let ordered = self.timeline.ordered_at(tick);
                 self.timeline.remove_tick(tick);
                 self.confirmed = self.confirmed.saturating_add(1);
                 self.prune_stale_hashes();
                 ordered
-            })
-            .unwrap_or_default()
+            });
+        confirmed.unwrap_or_default()
     }
 
     /// Drop hash beacons that have fallen out of the (backward) admission window.
@@ -237,9 +237,8 @@ impl Session {
                     .get(&(tick, *peer))
                     .map_or(Err(SyncStatus::Pending), |hash| {
                         agreed.map_or(Ok(Some(*hash)), |first| {
-                            (*hash == first)
-                                .then_some(Ok(agreed))
-                                .unwrap_or(Err(SyncStatus::Desync { tick }))
+                            [Err(SyncStatus::Desync { tick }), Ok(agreed)]
+                                [usize::from(*hash == first)]
                         })
                     })
             })

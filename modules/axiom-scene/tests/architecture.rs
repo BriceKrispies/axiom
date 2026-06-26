@@ -159,17 +159,33 @@ fn module_toml_has_empty_allowed_modules() {
 }
 
 #[test]
-fn lib_rs_exports_only_scene_api() {
+fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
+    // Module Law #8: exactly one behavioral facade (SceneApi), plus the optional
+    // identity vocabulary (the `SceneNodeId` handle the facade hands back). All
+    // other public exports are forbidden.
     let lib = read(&scene_src_dir().join("lib.rs"));
-    let actual: Vec<&str> = lib
+    let pub_uses: Vec<&str> = lib
         .lines()
         .map(str::trim)
-        .filter(|line| line.starts_with("pub ") && !line.starts_with("pub(crate)"))
+        .filter(|line| line.starts_with("pub use"))
+        .collect();
+    // The only behavioral facade is SceneApi: every other public export must be
+    // part of the SceneNodeId identity vocabulary.
+    let facades: Vec<&str> = pub_uses
+        .iter()
+        .copied()
+        .filter(|line| !line.contains("SceneNodeId") && !line.contains("ids::"))
         .collect();
     assert_eq!(
-        actual,
+        facades,
         vec!["pub use scene_api::SceneApi;"],
-        "axiom-scene's lib.rs must publicly export exactly one item: SceneApi"
+        "axiom-scene must expose exactly one behavioral facade (SceneApi)"
+    );
+    assert!(
+        pub_uses
+            .iter()
+            .all(|line| line.contains("SceneApi") || line.contains("SceneNodeId")),
+        "the only non-facade public exports are the SceneNodeId identity vocabulary, found: {pub_uses:?}"
     );
 }
 

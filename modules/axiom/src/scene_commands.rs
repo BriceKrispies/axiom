@@ -148,10 +148,8 @@ impl SceneCommands {
                             .add_procanim(
                                 node,
                                 command.transform,
-                                p.bob_amplitude,
-                                p.bob_period,
-                                p.spin_axis,
-                                p.spin_period,
+                                (p.bob_amplitude, p.bob_period),
+                                (p.spin_axis, p.spin_period),
                                 p.phase,
                             )
                             .expect("procanim attaches to a just-created node");
@@ -171,6 +169,14 @@ impl SceneCommands {
                         scene
                             .add_controller(node, c.index)
                             .expect("controller attaches to a just-created node");
+                    });
+                (component.kind() == NodeComponent::KIND_BOUNDS)
+                    .then(|| component.as_bounds())
+                    .flatten()
+                    .inspect(|b| {
+                        scene
+                            .add_bounds(node, b.half_extents)
+                            .expect("bounds attaches to a just-created node");
                     });
             });
             // A `ContactShadowCaster` marker (in any tuple position) flags the

@@ -168,17 +168,17 @@ impl SimCoreApi {
 
     /// Add a part to a draft. `None` if the draft is unknown, the kind/symmetry/
     /// surface codes are out of range, or the part name duplicates an existing one.
+    /// `part_codes` is `(kind_code, symmetry_code, group)`.
     pub fn add_body_plan_part(
         &mut self,
         draft: u32,
         name: &str,
-        kind_code: u8,
-        symmetry_code: u8,
-        group: u32,
+        part_codes: (u8, u8, u32),
         capabilities: &[u32],
         tissue_layers: &[(TissueId, u32)],
         surfaces: &[(u8, bool)],
     ) -> Option<u32> {
+        let (kind_code, symmetry_code, group) = part_codes;
         let kind = BodyPlanPartKind::from_code(kind_code);
         let symmetry = BodyPlanSymmetry::from_code(symmetry_code);
         let surface_specs: Option<Vec<SurfaceSpec>> = surfaces
@@ -472,20 +472,20 @@ impl SimCoreApi {
     /// causal event. The interaction's location is the surface's residue location.
     /// `None` if the route code is invalid, the surface is unknown, or the route
     /// cannot target the surface kind.
+    /// `codes` is `(kind_code, route_code)`; `target` is `(primary, surface)`;
+    /// `substance` is `(material, residue, quantity)`; `event` is
+    /// `(event_kind, event_code, tick, cause)`.
     pub fn record_surface_interaction(
         &mut self,
-        kind_code: u32,
-        route_code: u8,
-        primary: EntityHandle,
-        surface: BodySurfaceId,
-        material: Option<DefinitionId>,
-        residue: Option<ResidueId>,
-        quantity: Option<Quantity>,
-        event_kind: u32,
-        event_code: u64,
-        tick: u64,
-        cause: Option<CauseRef>,
+        codes: (u32, u8),
+        target: (EntityHandle, BodySurfaceId),
+        substance: (Option<DefinitionId>, Option<ResidueId>, Option<Quantity>),
+        event: (u32, u64, u64, Option<CauseRef>),
     ) -> Option<InteractionId> {
+        let (kind_code, route_code) = codes;
+        let (primary, surface) = target;
+        let (material, residue, quantity) = substance;
+        let (event_kind, event_code, tick, cause) = event;
         let route = InteractionRoute::from_code(route_code);
         let surface_kind = self.world.bodies().surface(surface).map(BodySurface::kind);
         route.zip(surface_kind).and_then(|(route, kind)| {
@@ -510,8 +510,7 @@ impl SimCoreApi {
                 self.world.journal_mut().append(
                     crate::causal::CausalEventKind::new(event_kind),
                     tick,
-                    Some(primary),
-                    None,
+                    (Some(primary), None),
                     cause,
                     event_code,
                     None,
@@ -543,21 +542,21 @@ impl SimCoreApi {
     /// Create a wound on a body part, validating the body/part/tissue references
     /// and emitting a causal event. `None` if the damage-mode code is out of range
     /// or any reference is invalid.
+    /// `site` is `(body, part, tissue)`; `damage_codes` is `(mode_code, severity)`;
+    /// `substance` is `(material, residue)`; `event` is
+    /// `(event_kind, event_code, tick, cause)`.
     pub fn create_wound(
         &mut self,
-        body: BodyId,
-        part: BodyPartId,
-        tissue: Option<TissueId>,
-        mode_code: u8,
-        severity: u32,
-        material: Option<DefinitionId>,
-        residue: Option<ResidueId>,
+        site: (BodyId, BodyPartId, Option<TissueId>),
+        damage_codes: (u8, u32),
+        substance: (Option<DefinitionId>, Option<ResidueId>),
         tissue_damage: &[(TissueId, u32)],
-        event_kind: u32,
-        event_code: u64,
-        tick: u64,
-        cause: Option<CauseRef>,
+        event: (u32, u64, u64, Option<CauseRef>),
     ) -> Option<WoundId> {
+        let (body, part, tissue) = site;
+        let (mode_code, severity) = damage_codes;
+        let (material, residue) = substance;
+        let (event_kind, event_code, tick, cause) = event;
         let damage: Vec<TissueDamage> = tissue_damage
             .iter()
             .map(|(t, s)| TissueDamage::new(*t, DamageSeverity::new(*s)))

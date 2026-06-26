@@ -10,31 +10,50 @@
 /// and culled.
 const NEAR_W_EPS: f32 = 1e-6;
 
+/// Transform `position` by column-major `mvp` into clip space `[cx, cy, cz, cw]`,
+/// **without** the perspective divide. These are the homogeneous coordinates the
+/// near-plane clip (`frame_packet_raster::clip_near`) operates on: clipping must
+/// happen here, before the divide, because a vertex at/behind the camera plane has
+/// `cw ≤ 0` and dividing by it is exactly what smears a vertex across the screen.
+pub(crate) fn clip_coords(mvp: &[f32; 16], position: [f32; 3]) -> [f32; 4] {
+    let [x, y, z] = position;
+    [
+        mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12],
+        mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13],
+        mvp[2] * x + mvp[6] * y + mvp[10] * z + mvp[14],
+        mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15],
+    ]
+}
+
+/// Perspective-divide a clip-space coordinate and map it to the `width`×`height`
+/// viewport: `[screen_x, screen_y, ndc_depth]` in device pixels (depth is the NDC
+/// z, larger = farther). The caller guarantees `clip[3]` (`cw`) is positive —
+/// vertices at/behind the near plane are removed by the clip first — so the divide
+/// is finite and bounded.
+pub(crate) fn clip_to_screen(clip: [f32; 4], width: u32, height: u32) -> [f32; 3] {
+    let inv = 1.0 / clip[3];
+    let ndc_x = clip[0] * inv;
+    let ndc_y = clip[1] * inv;
+    let ndc_z = clip[2] * inv;
+    let screen_x = (ndc_x * 0.5 + 0.5) * width as f32;
+    // NDC up is +y; screen down is +y — flip.
+    let screen_y = (ndc_y * -0.5 + 0.5) * height as f32;
+    [screen_x, screen_y, ndc_z]
+}
+
 /// Project `position` through column-major `mvp` into the `width`×`height`
-/// viewport, returning `[screen_x, screen_y, ndc_depth]` in device pixels (depth
-/// is the NDC z, larger = farther), or `None` when the vertex is at/behind the
-/// near plane.
+/// viewport, returning `[screen_x, screen_y, ndc_depth]` in device pixels, or
+/// `None` when the vertex is at/behind the near plane. This per-vertex form (cull,
+/// no clip) backs the planar-shadow ground projection; the main triangle path
+/// near-plane-*clips* via [`clip_coords`] + [`clip_to_screen`] instead.
 pub(crate) fn project_vertex(
     mvp: &[f32; 16],
     position: [f32; 3],
     width: u32,
     height: u32,
 ) -> Option<[f32; 3]> {
-    let [x, y, z] = position;
-    let clip_x = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
-    let clip_y = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
-    let clip_z = mvp[2] * x + mvp[6] * y + mvp[10] * z + mvp[14];
-    let clip_w = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
-    (clip_w > NEAR_W_EPS).then(|| {
-        let inv = 1.0 / clip_w;
-        let ndc_x = clip_x * inv;
-        let ndc_y = clip_y * inv;
-        let ndc_z = clip_z * inv;
-        let screen_x = (ndc_x * 0.5 + 0.5) * width as f32;
-        // NDC up is +y; screen down is +y — flip.
-        let screen_y = (ndc_y * -0.5 + 0.5) * height as f32;
-        [screen_x, screen_y, ndc_z]
-    })
+    let clip = clip_coords(mvp, position);
+    (clip[3] > NEAR_W_EPS).then(|| clip_to_screen(clip, width, height))
 }
 
 #[cfg(test)]

@@ -5,12 +5,15 @@
 //! list. This file holds only what is debug-specific; the panel does the rest.
 //! Branchless throughout.
 
-use axiom_interface::{CommandTable, InterfaceApi, InterfaceDrawList, ParsedCommand, PanelId};
+use axiom_interface::{CommandTable, InterfaceApi, InterfaceDrawList, PanelId, ParsedCommand};
 
 use crate::backquote::OverlayShortcut;
 use crate::diagnostics::Diagnostics;
 use crate::overlay_commands::OVERLAY_SPECS;
 use crate::overlay_density::OverlayDensity;
+
+/// One density's row builder: renders the overlay's `(label, value)` rows.
+type RowBuilder = fn(&OverlayState) -> Vec<(String, String)>;
 
 /// The overlay panel's header title.
 const OVERLAY_TITLE: &str = "Axiom Debug Overlay";
@@ -27,6 +30,10 @@ pub(crate) struct OverlayState {
     panel: PanelId,
     density: OverlayDensity,
     diagnostics: Diagnostics,
+    /// App-pushed read-out rows (label, value), shown below the engine diagnostics
+    /// in normal/verbose. The overlay stays generic — it never interprets these;
+    /// a game (e.g. DOOM) formats and pushes its own state, like the player pose.
+    app_rows: Vec<(String, String)>,
 }
 
 impl OverlayState {
@@ -38,6 +45,7 @@ impl OverlayState {
             panel,
             density: OverlayDensity::default(),
             diagnostics: Diagnostics::placeholder(),
+            app_rows: Vec::new(),
         };
         state.refresh_panel();
         state
@@ -171,7 +179,8 @@ impl OverlayState {
     }
 
     fn run_command(&mut self, parsed: &ParsedCommand) {
-        self.interface.console_record(self.panel, &parsed.canonical());
+        self.interface
+            .console_record(self.panel, &parsed.canonical());
         let outcome = CommandTable::new(OVERLAY_SPECS).dispatch(self, parsed);
         // A silent success (empty message, e.g. `clear`) leaves no echo line, so a
         // side-effect-only command doesn't clutter the log; errors always show.
@@ -251,6 +260,14 @@ impl OverlayState {
         self.diagnostics.visibility_state = visibility_state.to_string();
         self.refresh_panel();
     }
+
+    /// Replace the app-pushed read-out rows (see [`Self::app_rows`]). An app calls
+    /// this each frame with its own `(label, value)` pairs already formatted to
+    /// strings, so no float crosses the boundary and the overlay stays generic.
+    pub(crate) fn set_app_rows(&mut self, rows: &[(String, String)]) {
+        self.app_rows = rows.to_vec();
+        self.refresh_panel();
+    }
 }
 
 // The presentation surface the wasm `dom_binding` arm reads: drag plumbing driven
@@ -272,7 +289,8 @@ impl OverlayState {
     }
 
     pub(crate) fn drag_update(&mut self, pointer_x: i32, pointer_y: i32, max_x: i32, max_y: i32) {
-        self.interface.drag_update(self.panel, pointer_x, pointer_y, max_x, max_y);
+        self.interface
+            .drag_update(self.panel, pointer_x, pointer_y, max_x, max_y);
     }
 
     pub(crate) fn drag_end(&mut self) {
@@ -292,9 +310,10 @@ impl OverlayState {
 impl OverlayState {
     /// The header's right-hand status: density, plus a pin marker when pinned.
     pub(crate) fn header_status(&self) -> String {
-        self.is_pinned()
-            .then(|| format!("{} • pinned", self.density.label()))
-            .unwrap_or_else(|| self.density.label().to_string())
+        let pinned = self
+            .is_pinned()
+            .then(|| format!("{} • pinned", self.density.label()));
+        pinned.unwrap_or_else(|| self.density.label().to_string())
     }
 
     /// Push the current header + rows + density width into the panel, so the
@@ -303,7 +322,8 @@ impl OverlayState {
         let status = self.header_status();
         let rows = self.rows();
         let width = DENSITY_WIDTH[self.density as usize];
-        self.interface.set_panel_header(self.panel, OVERLAY_TITLE, &status);
+        self.interface
+            .set_panel_header(self.panel, OVERLAY_TITLE, &status);
         self.interface.set_panel_rows(self.panel, &rows);
         self.interface.set_panel_width(self.panel, width);
     }
@@ -311,7 +331,7 @@ impl OverlayState {
     /// The ordered rows to render at the current density. Branchless: the
     /// fieldless density discriminant indexes a `const` table of row builders.
     pub(crate) fn rows(&self) -> Vec<(String, String)> {
-        const BUILDERS: [fn(&OverlayState) -> Vec<(String, String)>; 3] = [
+        const BUILDERS: [RowBuilder; 3] = [
             OverlayState::compact_rows,
             OverlayState::normal_rows,
             OverlayState::verbose_rows,
@@ -325,13 +345,20 @@ impl OverlayState {
 
     fn normal_rows(&self) -> Vec<(String, String)> {
         let mut rows = self.diagnostics.core_rows();
-        rows.push(("cmd history".to_string(), self.command_history_count().to_string()));
+        rows.push((
+            "cmd history".to_string(),
+            self.command_history_count().to_string(),
+        ));
+        rows.extend(self.app_rows.iter().cloned());
         rows
     }
 
     fn verbose_rows(&self) -> Vec<(String, String)> {
         let mut rows = self.normal_rows();
-        rows.push(("backend select".to_string(), self.diagnostics.backend_select_text()));
+        rows.push((
+            "backend select".to_string(),
+            self.diagnostics.backend_select_text(),
+        ));
         rows.push(("overlay state".to_string(), self.debug_state_text()));
         rows.push(("history".to_string(), self.history_preview()));
         rows
@@ -348,11 +375,31 @@ impl OverlayState {
     }
 
     fn history_preview(&self) -> String {
-        let preview = self.interface.console_recent_history(self.panel, HISTORY_PREVIEW);
-        preview
-            .is_empty()
-            .then(|| "(none)".to_string())
-            .unwrap_or_else(|| preview.join(" | "))
+        let preview = self
+            .interface
+            .console_recent_history(self.panel, HISTORY_PREVIEW);
+        let none = preview.is_empty().then(|| "(none)".to_string());
+        none.unwrap_or_else(|| preview.join(" | "))
+    }
+}
+
+/// Clipboard plumbing — delegated to the interface layer's neutral outbox.
+impl OverlayState {
+    /// Queue `text` for the platform clipboard. The pure core only records the
+    /// request as data; a platform host drains and performs the real copy.
+    pub(crate) fn request_clipboard(&mut self, text: String) {
+        self.interface.request_clipboard(text);
+    }
+
+    /// Drain the pending clipboard requests. Only the wasm DOM arm needs this
+    /// (it calls it inside the console keydown, then writes each to
+    /// `navigator.clipboard`); the native build performs no clipboard copy, so
+    /// this is `wasm32`-only — keeping it out of the native impl surface and the
+    /// coverage gate. The reusable, native-tested drain lives on
+    /// [`axiom_interface::InterfaceApi`].
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn take_clipboard_requests(&mut self) -> Vec<String> {
+        self.interface.take_clipboard_requests()
     }
 }
 
@@ -471,7 +518,11 @@ mod tests {
         let mut s = OverlayState::new();
         s.set_density(OverlayDensity::Verbose);
         let history_value = |s: &OverlayState| {
-            s.rows().into_iter().find(|(label, _)| label == "history").unwrap().1
+            s.rows()
+                .into_iter()
+                .find(|(label, _)| label == "history")
+                .unwrap()
+                .1
         };
         assert_eq!(history_value(&s), "(none)");
         s.submit_command("help");
@@ -484,8 +535,34 @@ mod tests {
         let mut s = OverlayState::new();
         s.set_density(OverlayDensity::Compact);
         s.set_frame(7, 6, 1, 30_000, 16_680);
-        let fps = s.rows().into_iter().find(|(label, _)| label == "fps").unwrap().1;
+        let fps = s
+            .rows()
+            .into_iter()
+            .find(|(label, _)| label == "fps")
+            .unwrap()
+            .1;
         assert_eq!(fps, "30.0");
+    }
+
+    #[test]
+    fn app_rows_render_below_diagnostics_in_normal_but_not_compact() {
+        let mut s = OverlayState::new();
+        s.set_app_rows(&[
+            ("pos".to_string(), "1.0 8.0".to_string()),
+            ("look".to_string(), "0.00 0.00".to_string()),
+        ]);
+        // Normal density shows them, after the engine diagnostics.
+        let rows = s.rows();
+        assert!(rows.iter().any(|(l, v)| l == "pos" && v == "1.0 8.0"));
+        assert!(rows.iter().any(|(l, v)| l == "look" && v == "0.00 0.00"));
+        // Compact stays the minimal four rows (no app rows).
+        s.set_density(OverlayDensity::Compact);
+        assert_eq!(labels(&s).len(), 4);
+        // Replacing them swaps the read-out.
+        s.set_density(OverlayDensity::Normal);
+        s.set_app_rows(&[("pos".to_string(), "2.0 3.0".to_string())]);
+        assert!(s.rows().iter().any(|(l, v)| l == "pos" && v == "2.0 3.0"));
+        assert!(!s.rows().iter().any(|(l, _)| l == "look"));
     }
 
     #[test]
@@ -530,7 +607,10 @@ mod tests {
         assert_eq!(s.density_label(), "compact");
         s.submit_command("help");
         assert_eq!(s.command_history_count(), 2);
-        assert!(s.recent_results().iter().any(|(ok, cmd, _)| *ok && cmd == "help"));
+        assert!(s
+            .recent_results()
+            .iter()
+            .any(|(ok, cmd, _)| *ok && cmd == "help"));
         s.submit_command("   "); // ignored entirely
         assert_eq!(s.command_history_count(), 2);
     }
@@ -541,7 +621,9 @@ mod tests {
         s.submit_command("bogus");
         assert_eq!(s.command_history_count(), 1);
         let results = s.recent_results();
-        assert!(results.iter().any(|(ok, cmd, msg)| !ok && cmd == "bogus" && msg.contains("unknown")));
+        assert!(results
+            .iter()
+            .any(|(ok, cmd, msg)| !ok && cmd == "bogus" && msg.contains("unknown")));
     }
 
     #[test]
@@ -556,13 +638,47 @@ mod tests {
     #[test]
     fn diagnostics_snapshot_and_backend_report_echo_state() {
         let mut s = OverlayState::new();
-        s.set_backends("webgl2", "axiom-windowing", "axiom-runtime", "none", "none", "none");
-        assert!(s.diagnostics().backend_report_text().contains("renderer: webgl2"));
+        s.set_backends(
+            "webgl2",
+            "axiom-windowing",
+            "axiom-runtime",
+            "none",
+            "none",
+            "none",
+        );
+        assert!(s
+            .diagnostics()
+            .backend_report_text()
+            .contains("renderer: webgl2"));
         s.submit_command("diagnostics.snapshot");
         s.submit_command("backend.report");
         let results = s.recent_results();
-        assert!(results.iter().any(|(_, cmd, _)| cmd == "diagnostics.snapshot"));
-        assert!(results.iter().any(|(_, _, msg)| msg.contains("renderer: webgl2")));
+        assert!(results
+            .iter()
+            .any(|(_, cmd, _)| cmd == "diagnostics.snapshot"));
+        assert!(results
+            .iter()
+            .any(|(_, _, msg)| msg.contains("renderer: webgl2")));
+    }
+
+    #[test]
+    fn copy_command_copies_args_or_falls_back_to_the_snapshot() {
+        let mut s = OverlayState::new();
+        // `copy <text…>` copies the literal joined arguments ("hello world" = 11
+        // chars); the outcome reports the count, distinguishing it from the
+        // snapshot arm.
+        s.submit_command("copy hello world");
+        assert!(s.recent_results().iter().any(|(ok, cmd, msg)| *ok
+            && cmd == "copy"
+            && msg == "copied 11 chars to the clipboard"));
+        // Bare `copy` falls back to the (longer, multi-line) diagnostics snapshot.
+        let snapshot_len = s.diagnostics().snapshot_text().chars().count();
+        let expected = format!("copied {snapshot_len} chars to the clipboard");
+        s.submit_command("copy");
+        assert!(s
+            .recent_results()
+            .iter()
+            .any(|(ok, cmd, msg)| *ok && cmd == "copy" && *msg == expected));
     }
 
     #[test]
@@ -610,7 +726,15 @@ mod tests {
         use axiom_interface::InterfaceDrawItem;
         // Panel, Header, 4 compact rows, the focused input marker (no results yet).
         assert_eq!(items.len(), 7);
-        assert_eq!(items[0], InterfaceDrawItem::Panel { x: 8, y: 8, width: 360, height: 0 });
+        assert_eq!(
+            items[0],
+            InterfaceDrawItem::Panel {
+                x: 8,
+                y: 8,
+                width: 360,
+                height: 0
+            }
+        );
         assert_eq!(
             items[1],
             InterfaceDrawItem::Header {
@@ -620,7 +744,10 @@ mod tests {
         );
         assert_eq!(
             items[6],
-            InterfaceDrawItem::ConsoleInput { prompt: ">".to_string(), focused: true }
+            InterfaceDrawItem::ConsoleInput {
+                prompt: ">".to_string(),
+                focused: true
+            }
         );
     }
 
@@ -630,6 +757,14 @@ mod tests {
         s.set_density(OverlayDensity::Verbose);
         s.show();
         let list = s.draw_list();
-        assert_eq!(list.items()[0], axiom_interface::InterfaceDrawItem::Panel { x: 8, y: 8, width: 460, height: 0 });
+        assert_eq!(
+            list.items()[0],
+            axiom_interface::InterfaceDrawItem::Panel {
+                x: 8,
+                y: 8,
+                width: 460,
+                height: 0
+            }
+        );
     }
 }

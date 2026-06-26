@@ -13,7 +13,11 @@ use axiom_kernel::{KernelError, KernelErrorCode, KernelErrorScope};
 
 /// Build a recording error with a static diagnostic message.
 fn mem_error(message: &'static str) -> KernelError {
-    KernelError::new(KernelErrorScope::Memory, KernelErrorCode::OutOfBounds, message)
+    KernelError::new(
+        KernelErrorScope::Memory,
+        KernelErrorCode::OutOfBounds,
+        message,
+    )
 }
 
 /// `max_frames` was zero (a timeline must retain at least one frame).
