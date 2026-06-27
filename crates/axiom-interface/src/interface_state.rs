@@ -103,6 +103,12 @@ fn panel_items(panel: &Panel, focused: bool) -> Vec<InterfaceDrawItem> {
             value: value.clone(),
         });
     });
+    panel.actions().iter().for_each(|(action, label)| {
+        items.push(InterfaceDrawItem::Button {
+            action: *action,
+            label: label.clone(),
+        });
+    });
     panel
         .console()
         .recent_results(RECENT_RESULTS)

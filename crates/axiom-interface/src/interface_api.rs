@@ -168,6 +168,16 @@ impl InterfaceApi {
             .into_iter()
             .for_each(|p| p.set_width(width));
     }
+
+    /// Place the panel's top-left corner at `(x, y)` (an explicit, unclamped
+    /// placement — the sibling of [`Self::set_panel_width`]). A consumer uses this
+    /// to seed a panel's initial position; drag still clamps to the viewport.
+    pub fn set_panel_position(&mut self, panel: PanelId, x: i32, y: i32) {
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(|p| p.set_position(x, y));
+    }
 }
 
 impl InterfaceApi {
@@ -276,6 +286,16 @@ impl InterfaceApi {
             .panel(panel)
             .map(|p| p.rows().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Set the panel's clickable action buttons: `(consumer-defined id, label)`,
+    /// in render order. Each becomes an [`crate::InterfaceDrawItem::Button`]; the
+    /// consumer maps a clicked id back to behaviour (this layer stays neutral).
+    pub fn set_panel_actions(&mut self, panel: PanelId, actions: &[(u32, &str)]) {
+        self.state
+            .panel_mut(panel)
+            .into_iter()
+            .for_each(|p| p.set_actions(actions));
     }
 
     // --- draw ---------------------------------------------------------------
@@ -397,6 +417,9 @@ mod tests {
         api.drag_end(p);
         assert!(!api.is_dragging(p));
         api.set_panel_width(p, 460);
+        // An explicit placement moves the top-left corner directly (no clamp).
+        api.set_panel_position(p, 24, 600);
+        assert_eq!(api.panel_position(p), (24, 600));
     }
 
     #[test]
@@ -467,6 +490,7 @@ mod tests {
                 ("b".to_string(), "2".to_string()),
             ],
         );
+        api.set_panel_actions(p, &[(10, "rev"), (11, "fwd")]);
         api.console_append_result(p, true, "help", "ok");
         api.focus_console(p);
         assert_eq!(api.panel_rows(p).len(), 2);
@@ -474,8 +498,23 @@ mod tests {
         let list = api.draw_list(p);
         let items = list.items();
         use crate::draw_list::InterfaceDrawItem;
-        // Panel, Header, 2 Rows, 1 ConsoleLine, ConsoleInput — in that fixed order.
-        assert_eq!(items.len(), 6);
+        // Panel, Header, 2 Rows, 2 Buttons, 1 ConsoleLine, ConsoleInput — in that
+        // fixed order (buttons follow the rows, before the console output).
+        assert_eq!(items.len(), 8);
+        assert_eq!(
+            items[4],
+            InterfaceDrawItem::Button {
+                action: 10,
+                label: "rev".to_string()
+            }
+        );
+        assert_eq!(
+            items[5],
+            InterfaceDrawItem::Button {
+                action: 11,
+                label: "fwd".to_string()
+            }
+        );
         assert_eq!(
             items[0],
             InterfaceDrawItem::Panel {
@@ -500,14 +539,14 @@ mod tests {
             }
         );
         assert_eq!(
-            items[4],
+            items[6],
             InterfaceDrawItem::ConsoleLine {
                 ok: true,
                 text: "help: ok".to_string()
             }
         );
         assert_eq!(
-            items[5],
+            items[7],
             InterfaceDrawItem::ConsoleInput {
                 prompt: ">".to_string(),
                 focused: true
@@ -549,11 +588,13 @@ mod tests {
         api.drag_update(ghost, 2, 2, 10, 10);
         api.drag_end(ghost);
         api.set_panel_width(ghost, 100);
+        api.set_panel_position(ghost, 5, 5);
         api.console_record(ghost, "x");
         api.console_append_result(ghost, true, "c", "m");
         api.console_clear_results(ghost);
         api.set_panel_header(ghost, "a", "b");
         api.set_panel_rows(ghost, &[]);
+        api.set_panel_actions(ghost, &[(0, "x")]);
         assert!(api.draw_list(ghost).is_empty());
     }
 

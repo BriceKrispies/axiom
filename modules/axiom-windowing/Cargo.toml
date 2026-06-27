@@ -36,6 +36,11 @@ axiom-canvas2d-backend = { path = "../axiom-canvas2d-backend" }
 # pulled in only for wasm32 so the native core stays free of it (and the
 # genuine-dependency lint, which runs on native, never sees an unused edge).
 axiom-recording = { path = "../axiom-recording" }
+# The neutral interface layer (panels / draw list / drag / buttons) the dev
+# frame-scrubber overlay is built on. wasm32-only for the same reason as the
+# others: the native core stays free of it and the genuine-dependency lint never
+# sees an unused edge.
+axiom-interface = { path = "../../crates/axiom-interface" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
