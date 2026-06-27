@@ -23,6 +23,8 @@ pub(crate) struct Panel {
     header_primary: String,
     header_secondary: String,
     rows: Vec<(String, String)>,
+    /// Clickable action buttons: `(consumer-defined id, label)`, in render order.
+    actions: Vec<(u32, String)>,
     console: ConsoleModel,
 }
 
@@ -37,6 +39,7 @@ impl Panel {
             header_primary: String::new(),
             header_secondary: String::new(),
             rows: Vec::new(),
+            actions: Vec::new(),
             console: ConsoleModel::new(),
         }
     }
@@ -98,6 +101,10 @@ impl Panel {
         self.rect = self.rect.with_width(width);
     }
 
+    pub(crate) fn set_position(&mut self, x: i32, y: i32) {
+        self.rect = self.rect.with_position(x, y);
+    }
+
     pub(crate) fn is_dragging(&self) -> bool {
         self.drag_grab.is_some()
     }
@@ -142,6 +149,17 @@ impl Panel {
 
     pub(crate) fn rows(&self) -> &[(String, String)] {
         &self.rows
+    }
+
+    pub(crate) fn set_actions(&mut self, actions: &[(u32, &str)]) {
+        self.actions = actions
+            .iter()
+            .map(|(action, label)| (*action, label.to_string()))
+            .collect();
+    }
+
+    pub(crate) fn actions(&self) -> &[(u32, String)] {
+        &self.actions
     }
 
     pub(crate) fn console(&self) -> &ConsoleModel {
@@ -218,6 +236,12 @@ mod tests {
         assert_eq!(p.header_secondary(), "status");
         p.set_rows(&[("a".to_string(), "1".to_string())]);
         assert_eq!(p.rows(), &[("a".to_string(), "1".to_string())]);
+        assert!(p.actions().is_empty());
+        p.set_actions(&[(0, "rev"), (1, "fwd")]);
+        assert_eq!(
+            p.actions(),
+            &[(0, "rev".to_string()), (1, "fwd".to_string())]
+        );
         p.console_mut().record("help");
         assert_eq!(p.console().history_len(), 1);
     }

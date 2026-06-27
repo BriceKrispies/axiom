@@ -20,6 +20,11 @@ pub enum InterfaceDrawItem {
     Header { primary: String, secondary: String },
     /// A label/value read-out row.
     Row { label: String, value: String },
+    /// A clickable action button. `action` is a consumer-defined id: this layer
+    /// only stores and emits the button; a platform backend renders it and routes
+    /// a click back to the consumer, which maps the id to a meaning. The layer
+    /// stays neutral about behaviour.
+    Button { action: u32, label: String },
     /// A console result line (`ok` selects success vs error styling).
     ConsoleLine { ok: bool, text: String },
     /// The console input marker: a prompt and whether it currently has focus.
@@ -108,6 +113,10 @@ mod tests {
             InterfaceDrawItem::Row {
                 label: "l".to_string(),
                 value: "v".to_string(),
+            },
+            InterfaceDrawItem::Button {
+                action: 7,
+                label: "go".to_string(),
             },
             InterfaceDrawItem::ConsoleLine {
                 ok: true,

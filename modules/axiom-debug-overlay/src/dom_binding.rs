@@ -323,6 +323,9 @@ fn sync_nodes(nodes: &Nodes, state: &OverlayState) {
             InterfaceDrawItem::ConsoleInput { prompt, .. } => {
                 nodes.prompt.set_text_content(Some(prompt));
             }
+            // The overlay never sets panel actions, so it emits no buttons; the
+            // arm exists only to keep the match exhaustive.
+            InterfaceDrawItem::Button { .. } => {}
         }
     }
     let document = document();

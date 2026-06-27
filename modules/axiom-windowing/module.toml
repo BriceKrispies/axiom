@@ -22,6 +22,9 @@ kind = "feature-module"
 allowed_layers = [
     "kernel",
     "host",
+    # The neutral interface layer (panels / draw list / drag / buttons) that the
+    # wasm frame-scrubber overlay is built on. Consumed only in the wasm32 arm.
+    "interface",
 ]
 
 allowed_modules = [
