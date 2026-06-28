@@ -68,6 +68,7 @@ members = [
     "apps/axiom-browser-dev-harness",
     "apps/axiom-proc-playground",
     "apps/axiom-asset-stream-demo",
+    "apps/axiom-game-runtime",
     "crates/xtask",
     "tools/axiom-asset-pack",
     "tools/axiom-netcode-relay",

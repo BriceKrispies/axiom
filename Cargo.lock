@@ -264,6 +264,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-game-runtime"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "axiom-gpu-backend"
 version = "0.1.0"
 dependencies = [

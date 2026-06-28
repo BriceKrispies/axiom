@@ -22,19 +22,25 @@
 # in packages/axiom-client/STATIC_ANALYSIS.md.
 set -euo pipefail
 
-pkg="packages/axiom-client"
+# The two TypeScript packages held to the spine's TS-native laws: the netcode
+# client SDK and the Phaser-style game-authoring SDK. Both run the same
+# tsgo + Oxlint(branch-ban) + 100%-coverage stack.
+pkgs=("packages/axiom-client" "packages/axiom-game")
 
 # The gate is never silently skipped: a missing toolchain is a hard failure.
 command -v npm >/dev/null 2>&1 || { echo 'npm is not installed.' >&2; exit 2; }
-test -d "$pkg/node_modules" || { echo "deps missing — run: npm --prefix $pkg install" >&2; exit 2; }
 
-echo "ts-gate [1/3] typecheck (tsgo / TypeScript 7.0) ..."
-npm --prefix "$pkg" run --silent typecheck
+for pkg in "${pkgs[@]}"; do
+  test -d "$pkg/node_modules" || { echo "deps missing — run: npm --prefix $pkg install" >&2; exit 2; }
 
-echo "ts-gate [2/3] lint (Oxlint — all categories error + branch ban) ..."
-npm --prefix "$pkg" run --silent lint
+  echo "ts-gate [$pkg 1/3] typecheck (tsgo / TypeScript 7.0) ..."
+  npm --prefix "$pkg" run --silent typecheck
 
-echo "ts-gate [3/3] coverage (100% gate) ..."
-npm --prefix "$pkg" run --silent coverage
+  echo "ts-gate [$pkg 2/3] lint (Oxlint — all categories error + branch ban) ..."
+  npm --prefix "$pkg" run --silent lint
+
+  echo "ts-gate [$pkg 3/3] coverage (100% gate) ..."
+  npm --prefix "$pkg" run --silent coverage
+done
 
 echo "ts-gate: all TypeScript gates green."

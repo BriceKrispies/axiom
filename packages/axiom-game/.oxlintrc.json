@@ -1,0 +1,118 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // Axiom @axiom/game static-analysis gate. The TS-native counterpart of the
+  // Rust spine's clippy/dylint + engine_no_branching laws, identical to
+  // @axiom/client's: EVERY category is an error and maxWarnings is 0, so any
+  // finding fails the run. Type-aware rules run through tsgolint (typescript-go,
+  // TS 7). See packages/axiom-client/STATIC_ANALYSIS.md.
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "style": "error",
+    "restriction": "error",
+    "nursery": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "maxWarnings": 0
+  },
+  // The SDK runs in the browser; tests run in Node. Declaring the environments
+  // gives no-undef the right global set (requestAnimationFrame, performance, ...).
+  // This is environment configuration, not a rule relaxation.
+  "env": {
+    "browser": true,
+    "es2024": true,
+    "node": true
+  },
+  "jsPlugins": [{ "name": "eslint-js", "specifier": "oxlint-plugin-eslint" }],
+  "rules": {
+    // The ONE rule disabled globally, for the same kind of reason @axiom/client
+    // disables it: the SDK threads inherently MUTABLE, stateful objects across its
+    // boundaries — the live `GameLoop`, the callback `GameRegistry`, the wasm
+    // `NativeBridge`, and `Uint8Array` snapshots. A deeply-`readonly` parameter
+    // type is a TypeScript impossibility for a class instance with methods or a
+    // typed array (`Readonly<Uint8Array>` still exposes `set`/`fill`), so the rule
+    // fires on every loop/registry/bridge parameter with no code change that
+    // satisfies it. Per CLAUDE.md's "genuinely un-fixable -> documented decision",
+    // it is disabled here with justification rather than suppressed at call sites.
+    "typescript/prefer-readonly-parameter-types": "off",
+
+    // The Branchless Law for TypeScript: the no-restricted-syntax analogue of the
+    // Rust engine_no_branching dylint. Every control-flow branch is banned. Same
+    // block as @axiom/client.
+    "eslint-js/no-restricted-syntax": [
+      "error",
+      { "selector": "IfStatement", "message": "Branchless Law: no `if`. Use a table index `[b, a][Number(cond)]` or an iterator combinator. See docs/ts-sdk-hardening.md." },
+      { "selector": "ConditionalExpression", "message": "Branchless Law: no ternary `?:`. Select with a lookup table or arithmetic. See docs/ts-sdk-hardening.md." },
+      { "selector": "SwitchStatement", "message": "Branchless Law: no `switch`. Dispatch through a record/Map keyed by the discriminant. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForStatement", "message": "Branchless Law: no `for`. Use map/forEach/reduce/from over the iterable. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForInStatement", "message": "Branchless Law: no `for...in`. Iterate Object.keys/entries with array combinators. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForOfStatement", "message": "Branchless Law: no `for...of`. Use map/forEach/reduce over the iterable. See docs/ts-sdk-hardening.md." },
+      { "selector": "WhileStatement", "message": "Branchless Law: no `while`. Express the loop as an iterator/fold. See docs/ts-sdk-hardening.md." },
+      { "selector": "DoWhileStatement", "message": "Branchless Law: no `do...while`. Express the loop as an iterator/fold. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='&&']", "message": "Branchless Law: no `&&` short-circuit. Use `&` when the RHS is pure, or combinators for guards. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='||']", "message": "Branchless Law: no `||` short-circuit. Use `|` when the RHS is pure, or combinators. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='??']", "message": "Branchless Law: no `??`. Default through a value transform, not a short-circuit. See docs/ts-sdk-hardening.md." },
+      { "selector": "ChainExpression", "message": "Branchless Law: no optional chaining `?.`. Make presence explicit through a value transform. See docs/ts-sdk-hardening.md." }
+    ]
+  },
+  "overrides": [
+    {
+      // Tests keep their branches — the Branchless Law exempts tests exactly as
+      // the Rust engine_no_branching lint does. Same relaxations as @axiom/client:
+      // the production-ergonomics pedantic/style/restriction rules hostile to
+      // readable test code are relaxed; the bug-catching rules stay on.
+      "files": ["test/**/*.ts"],
+      "rules": {
+        "eslint-js/no-restricted-syntax": "off",
+        "eslint/capitalized-comments": "off",
+        "eslint/class-methods-use-this": "off",
+        "eslint/func-style": "off",
+        "eslint/id-length": "off",
+        "eslint/init-declarations": "off",
+        "eslint/max-lines": "off",
+        "eslint/max-lines-per-function": "off",
+        "eslint/max-statements": "off",
+        "eslint/no-inline-comments": "off",
+        "eslint/no-magic-numbers": "off",
+        "eslint/no-plusplus": "off",
+        "eslint/no-undefined": "off",
+        "eslint/no-void": "off",
+        "eslint/sort-imports": "off",
+        "oxc/no-rest-spread-properties": "off",
+        "typescript/no-floating-promises": "off",
+        "typescript/no-non-null-assertion": "off",
+        "unicorn/number-literal-case": "off",
+        "unicorn/prefer-at": "off",
+        "unicorn/prefer-spread": "off"
+      }
+    },
+    {
+      // The platform edge: raf-loop.ts is the browser-API boundary (the
+      // requestAnimationFrame + performance.now() impure driver and the real wasm
+      // bridge load). This is @axiom/game's analogue of @axiom/client's
+      // webtransport.ts/webrtc.ts and the Rust spine's host/windowing layers,
+      // which sit outside the strict spine laws. Only the rules the RAF/clock
+      // boundary genuinely fights are scoped off here, documented; every
+      // general-quality rule still applies. This file is also coverage-exempt
+      // (browser-only, verified via the Playwright path) — see its
+      // --test-coverage-exclude in package.json and STATIC_ANALYSIS.md.
+      //   - branch ban / optional chaining: the RAF drive + running-state gate
+      //   - async-await: the wasm module load is async
+      "files": ["src/raf-loop.ts"],
+      "rules": {
+        "eslint-js/no-restricted-syntax": "off",
+        "eslint/no-await-in-loop": "off",
+        "oxc/no-async-await": "off",
+        "oxc/no-optional-chaining": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-type-assertion": "off"
+      }
+    }
+  ]
+}

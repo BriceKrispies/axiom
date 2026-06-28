@@ -1,0 +1,25 @@
+[package]
+name = "axiom-game-runtime"
+description = "Axiom wasm-bindgen game runtime: the native boundary the TypeScript authoring SDK (@axiom/game) drives. Owns a deterministic fixed-step accumulator over a RunningApp (banks real elapsed nanoseconds into whole fixed ticks) and the JS-facing game object. Depends only on the `axiom` umbrella; the deterministic core is the rlib part, slice-tested natively, and the wasm32 entry is the requestAnimationFrame-bound boundary the SDK binds."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The one engine crate an app imports. The fixed-step accumulator (FrameAccumulator,
+# StepBudget) and the App/RunningApp surface all arrive through `axiom::prelude`.
+axiom = { path = "../../modules/axiom" }
+
+# Browser entry only: the wasm-bindgen export macro + a panic hook. Confined to
+# wasm32, so native `cargo test --workspace` never compiles them.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
