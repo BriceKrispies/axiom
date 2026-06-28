@@ -1,0 +1,21 @@
+# Axiom tick engine module manifest.
+#
+# axiom-tick is an *isolated* engine module: it builds the game-API timers and
+# tick-driven state machines on top of the kernel deterministic Tick /
+# TickDelta time and the generic TickSchedule scheduling primitive. It never
+# depends on another module, an app, or a tool, and owns no domain meaning — no
+# scene, render, asset, input, physics, or gameplay concept. The current tick is
+# supplied by the caller each step, so the module reads no clock.
+[module]
+name = "tick"
+crate_name = "axiom-tick"
+kind = "engine-module"
+allowed_layers = [
+  "kernel",
+]
+allowed_modules = []
+introduced_capabilities = [
+  "tick-timers",
+  "tick-state-machines",
+  "tick-facade",
+]

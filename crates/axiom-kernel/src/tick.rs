@@ -1,5 +1,7 @@
 //! A simulation tick count — a deterministic, data-supplied unit of progress.
 
+use crate::tick_delta::TickDelta;
+
 /// A monotonic count of fixed simulation steps that have elapsed.
 ///
 /// A `Tick` is pure data: it never reads a clock. It is supplied and advanced
@@ -25,6 +27,21 @@ impl Tick {
     /// The next tick. Saturating, so it is total and never panics.
     pub const fn next(self) -> Self {
         Tick(self.0.saturating_add(1))
+    }
+
+    /// The tick `delta` steps after this one. Saturating, so it is total and
+    /// never panics — a deadline at `now.add(n)` that would overflow clamps to
+    /// `u64::MAX`. This is where a `TickDelta` offset is applied to a `Tick`, so
+    /// callers never hand-roll tick arithmetic.
+    pub const fn add(self, delta: TickDelta) -> Self {
+        Tick(self.0.saturating_add(delta.raw()))
+    }
+
+    /// The non-negative number of ticks from `earlier` up to this tick.
+    /// Saturating, so a tick before `earlier` yields a zero delta rather than
+    /// wrapping — total and panic-free.
+    pub const fn delta_since(self, earlier: Tick) -> TickDelta {
+        TickDelta::new(self.0.saturating_sub(earlier.0))
     }
 }
 
@@ -56,5 +73,23 @@ mod tests {
     #[test]
     fn ordering_is_numeric() {
         assert!(Tick::new(1) < Tick::new(2));
+    }
+
+    #[test]
+    fn add_delta_advances_and_saturates() {
+        assert_eq!(Tick::new(10).add(TickDelta::new(5)), Tick::new(15));
+        assert_eq!(Tick::new(7).add(TickDelta::new(0)), Tick::new(7));
+        assert_eq!(
+            Tick::new(u64::MAX).add(TickDelta::new(1)),
+            Tick::new(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn delta_since_measures_and_saturates() {
+        assert_eq!(Tick::new(12).delta_since(Tick::new(5)), TickDelta::new(7));
+        assert_eq!(Tick::new(5).delta_since(Tick::new(5)), TickDelta::new(0));
+        // An earlier "now" yields a zero delta, never a wrap.
+        assert_eq!(Tick::new(3).delta_since(Tick::new(9)), TickDelta::new(0));
     }
 }

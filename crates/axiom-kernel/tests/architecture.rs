@@ -136,6 +136,8 @@ fn lib_exports_are_curated_set() {
         "pub use tick::Tick;",
         "pub use replay_timeline::ReplayTimeline;",
         "pub use tick_divider::TickDivider;",
+        "pub use tick_delta::TickDelta;",
+        "pub use tick_schedule::TickSchedule;",
         "pub use deterministic_rng::DeterministicRng;",
         "pub use meters::Meters;",
         "pub use radians::Radians;",

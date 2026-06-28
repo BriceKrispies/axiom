@@ -705,6 +705,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-tick"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-tween"
 version = "0.1.0"
 dependencies = [

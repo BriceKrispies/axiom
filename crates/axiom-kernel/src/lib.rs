@@ -36,7 +36,9 @@ mod frame_index;
 mod replay_timeline;
 mod simulation_clock;
 mod tick;
+mod tick_delta;
 mod tick_divider;
+mod tick_schedule;
 
 // --- Deterministic random source ---
 mod deterministic_rng;
@@ -117,6 +119,15 @@ pub use tick::Tick;
 // primitive (the replayed item is the caller's; see ARCHITECTURE.md).
 pub use replay_timeline::ReplayTimeline;
 pub use tick_divider::TickDivider;
+// Deterministic tick-scheduling primitives — the `(tick, id)`-ordered wake
+// schedule and its companion tick offset. A `TickSchedule<Id, P>` arms ids to
+// wake at future ticks and pops them due in a stable `(tick, id)` order; a
+// `TickDelta` is the typed offset applied to a `Tick`. Two engine consumers name
+// them: sim-core's process wake queue and the `axiom-tick` timers facade (see
+// ARCHITECTURE.md). `TickSchedule` is type-generic for the same reason
+// `ReplayTimeline` is — the id and payload belong to the caller.
+pub use tick_delta::TickDelta;
+pub use tick_schedule::TickSchedule;
 
 // Deterministic random source — a seeded generator higher layers and modules
 // use for replayable simulation, fuzzing, and adversarial-network models.

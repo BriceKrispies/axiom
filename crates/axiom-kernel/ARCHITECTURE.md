@@ -94,6 +94,28 @@ The trade-off is enforced rather than left to discipline:
   alternative (an opaque byte buffer) would be strictly worse. It carries no
   domain semantics: cadence lives in `TickDivider`, meaning stays with the
   caller, and each remains the only public type in its file.
+- The **deterministic tick-scheduling primitives** (`TickSchedule<Id, P>`,
+  `TickDelta`) are the *scheduling* half of the clock. A `TickSchedule<Id, P>` is
+  a `(Tick, Id)`-ordered schedule holding at most one pending entry per id:
+  `schedule` arms (or re-arms) an id to wake at a future tick carrying a
+  caller-defined payload, `pop_due` removes and returns every entry due at or
+  before a supplied tick in stable ascending `(tick, id)` order (ties break by a
+  total order on `Id`, never insertion/hash order), and `cancel`/`pending`/
+  `peek_due` round it out. It reads **no clock** — the current tick is always
+  supplied as data — and owns **no domain meaning**: it is pure tick + identity
+  ordering, the kernel's sanctioned remit of "deterministic time/tick primitives
+  over stable IDs." It is curated (not facade-only) and **type-generic** for the
+  same reason `ReplayTimeline<T>` is — the id and payload belong to the caller,
+  not the kernel. Two engine consumers name it: `axiom-sim-core`'s process wake
+  queue (`Id = ProcessId`, `P = WakeReason`) re-bases onto it, and the
+  `axiom-tick` timers facade (`Id = TimerId`, `P = (TickDelta, repeating)`)
+  projects it; when one primitive is needed by two consumers it belongs in the
+  shared root, not a third module. `TickDelta` is its companion — the typed
+  non-negative offset between two `Tick`s (`Tick::add(delta)`,
+  `Tick::delta_since(earlier)`, both saturating) so a deadline offset or an
+  elapsed-ticks count crosses a higher API as a typed integer quantity, never a
+  bare `u64` and never a float. Like the other time primitives they carry no
+  feature semantics, and each is the only public type in its file.
 - The binary-serialization primitives (`BinaryWriter`, `BinaryReader`,
   `SchemaVersion`) are nameable, because higher layers
   build and **version** their own wire formats on them — e.g.
