@@ -1,0 +1,20 @@
+# Axiom app manifest — axiom-game-runtime.
+#
+# The wasm-bindgen native boundary the TypeScript authoring SDK (@axiom/game)
+# drives. It composes a single module — the `axiom` umbrella (`engine`) — which
+# internally pulls in the slice modules, the fixed-step `frame` accumulator, and
+# (on wasm32) the live windowing/wgpu backend. The app names no layer directly:
+# the authoring vocabulary (App/RunningApp/FrameAccumulator/StepBudget/...) all
+# arrives through `axiom::prelude`. The deterministic stepping core is the rlib,
+# native slice-tested; the wasm `start`/`WasmGame` entry is the boundary the SDK
+# binds. It is a leaf in the dependency graph — nothing depends on it.
+
+[app]
+name = "game-runtime"
+crate_name = "axiom-game-runtime"
+
+allowed_layers = []
+
+allowed_modules = [
+    "engine",
+]

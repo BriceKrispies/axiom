@@ -15,6 +15,12 @@ pub use axiom_scene::SceneNodeId as Entity;
 // channels/intensities, `Meters` for camera clip planes. Re-exported so an app
 // depends only on `axiom`.
 pub use axiom_kernel::{Meters, Ratio};
+// The deterministic fixed-step accumulator and its integer step budget, from the
+// `frame` layer the umbrella already composes. An app driving its own variable-dt
+// run loop (a wasm `requestAnimationFrame` host) banks real elapsed time into
+// whole fixed steps through these, so they belong in the one authoring barrel an
+// app imports — re-exported, not re-derived (the loop arithmetic lives in `frame`).
+pub use axiom_frame::{FrameAccumulator, StepBudget};
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
 
 pub use crate::angle::Angle;
