@@ -58,7 +58,7 @@ fn sphere_sphere_contact_response_through_step() {
     // 0.8 apart, radii sum 1.0). With no gravity the only effect is the position
     // correction pushing the dynamic sphere out along +X.
     let build = || {
-        let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let stat = api.create_static_body(Transform::IDENTITY).unwrap();
         let dynamic = api
@@ -92,7 +92,7 @@ fn sphere_plane_contact_response_through_step() {
     // A dynamic sphere penetrating a static ground plane. Gravity pulls it down;
     // the solver must cancel the approaching velocity so it does not free-fall.
     let build = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let ground = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
@@ -128,7 +128,7 @@ fn sphere_box_contact_response_through_step() {
     // A dynamic sphere resting on the top face of a static box. The box collider is
     // attached first, so the box is contact body A and the sphere body B.
     let build = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let block = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_box_collider(block, Vec3::new(1.0, 1.0, 1.0), material, false)
@@ -163,7 +163,7 @@ fn box_plane_contact_response_through_step() {
     // A dynamic box penetrating a static ground plane. The plane collider is
     // attached first (body A); the box is the dynamic body B.
     let build = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let ground = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)

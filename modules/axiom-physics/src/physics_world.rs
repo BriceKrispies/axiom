@@ -58,7 +58,13 @@ type ApplyFn = fn(Vec3, PhysicsBodyHandle, &mut PhysicsBody) -> Option<PhysicsEv
 
 /// The command-apply table, indexed by `PhysicsCommandKind as usize`. Its order
 /// is locked to the `PhysicsCommandKind` discriminants in `physics_command.rs`.
-const APPLY_TABLE: [ApplyFn; 4] = [apply_force_cmd, apply_impulse_cmd, enable_cmd, disable_cmd];
+const APPLY_TABLE: [ApplyFn; 5] = [
+    apply_force_cmd,
+    apply_impulse_cmd,
+    enable_cmd,
+    disable_cmd,
+    apply_torque_cmd,
+];
 
 fn apply_force_cmd(
     vector: Vec3,
@@ -66,6 +72,15 @@ fn apply_force_cmd(
     target: &mut PhysicsBody,
 ) -> Option<PhysicsEvent> {
     target.forces_mut().apply_force(vector);
+    None
+}
+
+fn apply_torque_cmd(
+    vector: Vec3,
+    _body: PhysicsBodyHandle,
+    target: &mut PhysicsBody,
+) -> Option<PhysicsEvent> {
+    target.forces_mut().apply_torque(vector);
     None
 }
 
@@ -108,6 +123,7 @@ struct SubstepCounts {
     broad_phase_pair_count: u32,
     contact_pair_count: u32,
     solved_contact_count: u32,
+    frictioned_contact_count: u32,
 }
 
 impl SubstepCounts {
@@ -117,6 +133,7 @@ impl SubstepCounts {
             broad_phase_pair_count: 0,
             contact_pair_count: 0,
             solved_contact_count: 0,
+            frictioned_contact_count: 0,
         }
     }
 
@@ -126,6 +143,8 @@ impl SubstepCounts {
             broad_phase_pair_count: self.broad_phase_pair_count + other.broad_phase_pair_count,
             contact_pair_count: self.contact_pair_count + other.contact_pair_count,
             solved_contact_count: self.solved_contact_count + other.solved_contact_count,
+            frictioned_contact_count: self.frictioned_contact_count
+                + other.frictioned_contact_count,
         }
     }
 }
@@ -245,6 +264,13 @@ impl PhysicsWorld {
         let handle = PhysicsColliderHandle::from_raw(self.next_collider_id);
         self.colliders
             .push(PhysicsCollider::new(handle, body, shape, material, is_trigger));
+        // Derive the body's inverse inertia from this collider's shape + mass, so
+        // a torque produces the correct angular acceleration. An immovable body
+        // (zero mass) derives zero inertia and is unaffected.
+        self.body_at_mut(body).into_iter().for_each(|b| {
+            let updated = b.mass_properties().with_inertia_for(shape);
+            b.set_mass_properties(updated);
+        });
         self.events.push(PhysicsEvent::ColliderAttached {
             collider: handle,
             body,
@@ -278,6 +304,21 @@ impl PhysicsWorld {
             PhysicsError::impulse_on_non_dynamic_body("impulse requires a dynamic body"),
         )
         .map(|()| self.commands.push(PhysicsCommand::apply_impulse(body, impulse)))
+    }
+
+    /// Queue a torque on a dynamic, enabled body (validated immediately), rejected
+    /// on a non-dynamic or disabled body exactly like a force.
+    pub(crate) fn enqueue_apply_torque(
+        &mut self,
+        body: PhysicsBodyHandle,
+        torque: Vec3,
+    ) -> PhysicsResult<()> {
+        self.validate_dynamic_target(
+            body,
+            torque,
+            PhysicsError::force_on_non_dynamic_body("torque requires a dynamic body"),
+        )
+        .map(|()| self.commands.push(PhysicsCommand::apply_torque(body, torque)))
     }
 
     /// Validate a force/impulse target: the vector is finite, the body exists, it
@@ -398,9 +439,16 @@ impl PhysicsWorld {
     fn run_substep(&mut self, dt: f32) -> (SubstepCounts, Vec<ContactManifold>) {
         let pairs = broad_phase_pair::detect_pairs(&self.colliders, &self.bodies);
         let manifolds = contact_pair::generate_contacts(&pairs, &self.colliders, &self.bodies);
-        let integration_count =
-            integrator::integrate_velocities(&mut self.bodies, self.config.gravity(), dt);
+        let integration_count = integrator::integrate_velocities(
+            &mut self.bodies,
+            self.config.gravity(),
+            dt,
+            self.config.linear_damping(),
+            self.config.angular_damping(),
+        );
         let solved_contact_count = contact_solver::count_solved_contacts(&self.bodies, &manifolds);
+        let frictioned_contact_count =
+            contact_solver::count_frictioned_contacts(&self.bodies, &self.colliders, &manifolds);
         contact_solver::solve(
             &mut self.bodies,
             &self.colliders,
@@ -414,6 +462,7 @@ impl PhysicsWorld {
             broad_phase_pair_count: pairs.len() as u32,
             contact_pair_count: manifolds.len() as u32,
             solved_contact_count,
+            frictioned_contact_count,
         };
         (counts, manifolds)
     }
@@ -449,6 +498,7 @@ impl PhysicsWorld {
             agg.broad_phase_pair_count,
             agg.contact_pair_count,
             agg.solved_contact_count,
+            agg.frictioned_contact_count,
             self.config.solver_iterations(),
             substeps,
         );

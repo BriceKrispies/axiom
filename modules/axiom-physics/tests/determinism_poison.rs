@@ -40,7 +40,7 @@ fn snapshot_is_finite(api: &PhysicsApi) -> bool {
 
 /// A gravity-free world with a single unit-mass dynamic body at the origin.
 fn lone_dynamic() -> (PhysicsApi, PhysicsBodyHandle) {
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let body = api
         .create_dynamic_body(Transform::IDENTITY, ratio(1.0))
         .unwrap();
@@ -93,7 +93,7 @@ fn extreme_finite_gravity_does_not_poison_state() {
     // and position both reach -f32::MAX, still finite). The second step adds
     // another -f32::MAX of velocity, overflowing to -inf, and must be rejected.
     let mut api =
-        PhysicsApi::with_config(Vec3::new(0.0, -f32::MAX, 0.0), 8, 16, 16, 1, true).unwrap();
+        PhysicsApi::with_config(Vec3::new(0.0, -f32::MAX, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let _body = api
         .create_dynamic_body(Transform::IDENTITY, ratio(1.0))
         .unwrap();
@@ -112,7 +112,7 @@ fn solver_impulse_overflow_is_rejected_or_kept_finite() {
     // impulse may overflow; whichever way it resolves, the world must remain honest:
     // either it commits a fully finite state, or it rejects with a non-finite-step
     // error. It must never silently store a poisoned body.
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
     let a = api
         .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)), ratio(1.0))
@@ -155,7 +155,7 @@ fn replay_after_extreme_rejected_input_remains_deterministic() {
     // queues no command), a following normal step must commit, and two independent
     // worlds must agree byte-for-byte through the whole sequence.
     let scenario = || {
-        let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
         let body = api
             .create_dynamic_body(Transform::IDENTITY, ratio(1.0))
             .unwrap();
@@ -197,4 +197,43 @@ fn snapshot_never_contains_non_finite_values_after_public_operations() {
     // commits a finite (if extreme) velocity, and the snapshot stays finite.
     api.step(tenth_second()).unwrap();
     assert!(snapshot_is_finite(&api), "committing an extreme-but-finite value stays finite");
+}
+
+#[test]
+fn a_perturbed_angular_or_friction_replay_is_detected() {
+    // The angular + friction paths are a pure function of world state, so two
+    // identical runs agree byte-for-byte — and any perturbation of the angular
+    // drive (a different torque) is *detected* as a divergent snapshot/record.
+    let run = |torque_y: f32, friction: f32| {
+        let mut api =
+            PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.1))
+                .unwrap();
+        let material = PhysicsApi::material(ratio(friction), ratio(0.0), ratio(1.0)).unwrap();
+        let ground = api.create_static_body(Transform::IDENTITY).unwrap();
+        api.attach_plane_collider(ground, Vec3::new(0.0, 1.0, 0.0), Meters::new(0.0).unwrap(), material, false)
+            .unwrap();
+        let ball = api
+            .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.6, 0.0)), ratio(1.0))
+            .unwrap();
+        api.attach_sphere_collider(ball, Meters::new(0.5).unwrap(), material, false)
+            .unwrap();
+        api.apply_impulse(ball, Vec3::new(2.0, 0.0, 0.0)).unwrap();
+        api.apply_torque(ball, Vec3::new(0.0, torque_y, 0.0)).unwrap();
+        for _ in 0..12 {
+            api.step(tenth_second()).unwrap();
+        }
+        (api.snapshot(), api.latest_step_record())
+    };
+    // Same inputs replay byte-equal (same-binary determinism over the new paths).
+    assert_eq!(run(3.0, 0.7), run(3.0, 0.7), "identical spin+friction runs agree");
+    // A perturbed torque is detected as a divergent replay.
+    assert_ne!(run(3.0, 0.7), run(3.5, 0.7), "a perturbed torque diverges");
+    // A perturbed friction is detected too.
+    assert_ne!(run(3.0, 0.7), run(3.0, 0.1), "a perturbed friction diverges");
+    // And the snapshots stay finite throughout (no poison from the extra ops).
+    let (snap, _) = run(3.0, 0.7);
+    assert!(snap.bodies().iter().all(|b| {
+        let r = b.transform().rotation;
+        [r.x, r.y, r.z, r.w].iter().all(|f| f.is_finite())
+    }));
 }

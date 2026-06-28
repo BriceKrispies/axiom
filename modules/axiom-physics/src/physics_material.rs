@@ -8,10 +8,11 @@ use crate::physics_result::PhysicsResult;
 /// The surface response parameters of a [`crate::PhysicsApi`] collider.
 ///
 /// `restitution` is resolved live by the contact solver — a bouncy material
-/// rebounds off any surface. `friction` is validated and stored but not yet
-/// dynamically solved (no tangential impulse is applied; a documented deferral —
-/// see `ROADMAP.md`). Each value is carried by a kernel [`Ratio`] (a finite
-/// scalar); `PhysicsMaterial` additionally enforces the physical ranges below.
+/// rebounds off any surface. `friction` is resolved live too: the solver's
+/// tangential pass applies a Coulomb-clamped friction impulse using the combined
+/// coefficient `sqrt(μ_a·μ_b)`. Each value is carried by a kernel [`Ratio`] (a
+/// finite scalar); `PhysicsMaterial` additionally enforces the physical ranges
+/// below.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PhysicsMaterial {
     friction: Ratio,

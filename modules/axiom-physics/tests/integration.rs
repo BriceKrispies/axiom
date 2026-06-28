@@ -433,7 +433,7 @@ fn zero_length_step_is_rejected() {
 #[test]
 fn body_capacity_is_enforced() {
     let mut api =
-        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 1, 1, 1, true).unwrap();
+        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 1, 1, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     assert!(api.create_static_body(Transform::IDENTITY).is_ok());
     assert!(
         api.create_static_body(Transform::IDENTITY).is_err(),
@@ -444,7 +444,7 @@ fn body_capacity_is_enforced() {
 #[test]
 fn collider_capacity_is_enforced() {
     let mut api =
-        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 4, 1, 1, true).unwrap();
+        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 4, 1, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let body = api.create_static_body(Transform::IDENTITY).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
     assert!(api
@@ -459,9 +459,9 @@ fn collider_capacity_is_enforced() {
 #[test]
 fn invalid_configuration_is_rejected() {
     // Zero capacities / iterations are invalid.
-    assert!(PhysicsApi::with_config(Vec3::ZERO, 0, 1, 1, 1, true).is_err());
+    assert!(PhysicsApi::with_config(Vec3::ZERO, 0, 1, 1, 1, true, ratio(0.0), ratio(0.0)).is_err());
     // Non-finite gravity is invalid.
-    assert!(PhysicsApi::with_config(Vec3::new(f32::NAN, 0.0, 0.0), 1, 1, 1, 1, true).is_err());
+    assert!(PhysicsApi::with_config(Vec3::new(f32::NAN, 0.0, 0.0), 1, 1, 1, 1, true, ratio(0.0), ratio(0.0)).is_err());
 }
 
 #[test]

@@ -4,13 +4,13 @@ use axiom_math::Vec3;
 
 /// The forces staged on a rigid body between steps.
 ///
-/// `force` is a continuous force integrated over the step (it produces an
+/// `force` is a continuous force integrated over the step (it produces a linear
 /// acceleration `force * inverse_mass`); `impulse` is an instantaneous change
 /// applied once at the next step (a velocity change `impulse * inverse_mass`);
-/// `torque` is the angular analogue, **reserved** for the deferred angular
-/// dynamics — no torque source is applied yet, so it stays zero (see
-/// `ROADMAP.md`). [`ForceAccumulator::clear`] resets all three after each step,
-/// so forces never silently persist across steps.
+/// `torque` is the angular analogue of `force` — a continuous torque integrated
+/// over the step into an angular acceleration `inverse_inertia ⊙ torque`.
+/// [`ForceAccumulator::clear`] resets all three after each step, so forces never
+/// silently persist across steps.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ForceAccumulator {
     force: Vec3,
@@ -38,6 +38,12 @@ impl ForceAccumulator {
         self.impulse = self.impulse.add(impulse);
     }
 
+    /// Add a continuous torque (applied over the step during integration, the
+    /// angular analogue of [`ForceAccumulator::apply_force`]).
+    pub(crate) fn apply_torque(&mut self, torque: Vec3) {
+        self.torque = self.torque.add(torque);
+    }
+
     /// Reset every accumulated force, impulse, and torque to zero.
     pub(crate) fn clear(&mut self) {
         self.force = Vec3::ZERO;
@@ -54,6 +60,11 @@ impl ForceAccumulator {
     pub(crate) fn impulse(&self) -> Vec3 {
         self.impulse
     }
+
+    /// The accumulated continuous torque.
+    pub(crate) fn torque(&self) -> Vec3 {
+        self.torque
+    }
 }
 
 #[cfg(test)]
@@ -65,17 +76,21 @@ mod tests {
         let a = ForceAccumulator::new();
         assert_eq!(a.force(), Vec3::ZERO);
         assert_eq!(a.impulse(), Vec3::ZERO);
+        assert_eq!(a.torque(), Vec3::ZERO);
     }
 
     #[test]
-    fn forces_and_impulses_accumulate_additively() {
+    fn forces_impulses_and_torques_accumulate_additively() {
         let mut a = ForceAccumulator::new();
         a.apply_force(Vec3::new(1.0, 0.0, 0.0));
         a.apply_force(Vec3::new(0.0, 2.0, 0.0));
         a.apply_impulse(Vec3::new(0.0, 0.0, 3.0));
         a.apply_impulse(Vec3::new(0.0, 0.0, 1.0));
+        a.apply_torque(Vec3::new(0.5, 0.0, 0.0));
+        a.apply_torque(Vec3::new(0.0, 0.5, 0.0));
         assert_eq!(a.force(), Vec3::new(1.0, 2.0, 0.0));
         assert_eq!(a.impulse(), Vec3::new(0.0, 0.0, 4.0));
+        assert_eq!(a.torque(), Vec3::new(0.5, 0.5, 0.0));
     }
 
     #[test]
@@ -83,9 +98,11 @@ mod tests {
         let mut a = ForceAccumulator::new();
         a.apply_force(Vec3::new(5.0, 5.0, 5.0));
         a.apply_impulse(Vec3::new(5.0, 5.0, 5.0));
+        a.apply_torque(Vec3::new(5.0, 5.0, 5.0));
         a.clear();
         assert_eq!(a.force(), Vec3::ZERO);
         assert_eq!(a.impulse(), Vec3::ZERO);
+        assert_eq!(a.torque(), Vec3::ZERO);
     }
 
     #[test]

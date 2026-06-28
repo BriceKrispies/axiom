@@ -35,7 +35,7 @@ fn ball_on_plane(
     iterations: u32,
 ) -> (PhysicsApi, PhysicsBodyHandle) {
     let mut api =
-        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), iterations, 16, 16, substeps, true).unwrap();
+        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), iterations, 16, 16, substeps, true, ratio(0.0), ratio(0.0)).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
     let ground = api.create_static_body(Transform::IDENTITY).unwrap();
     api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
@@ -74,7 +74,7 @@ fn contact_step_reports_nonzero_solved_contacts() {
 fn solver_config_iteration_count_is_metadata_not_work_proof() {
     // A zero-contact step still reports the configured iteration budget (5) while
     // honestly reporting zero solved contacts.
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 5, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 5, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
     api.step(tenth_second()).unwrap();
     let record = api.latest_step_record();

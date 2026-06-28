@@ -45,7 +45,7 @@ fn enabled(api: &PhysicsApi, h: PhysicsBodyHandle) -> bool {
 /// A gravity-free world with a single dynamic body that has been disabled and the
 /// disable committed by a step (so the body's `enabled` flag is genuinely false).
 fn disabled_world() -> (PhysicsApi, PhysicsBodyHandle) {
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let body = api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
     api.disable_body(body).unwrap();
     api.step(tenth_second()).unwrap();
@@ -75,7 +75,7 @@ fn apply_impulse_to_disabled_body_returns_error() {
 fn disabled_dynamic_body_does_not_integrate() {
     // Under gravity, a disabled dynamic body stays exactly put and is not counted
     // as integrated.
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let body = api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
     api.disable_body(body).unwrap();
     for _ in 0..10 {
@@ -89,7 +89,7 @@ fn disabled_dynamic_body_does_not_integrate() {
 fn disabled_body_is_skipped_by_broad_phase() {
     // Two overlapping spheres on different bodies form one broad pair while both are
     // enabled; disabling one removes the pair entirely.
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
     let a = api
         .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)), ratio(1.0))

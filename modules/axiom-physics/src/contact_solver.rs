@@ -7,16 +7,28 @@
 //!    iterations (from `PhysicsConfig::solver_iterations`). Each iteration walks
 //!    the manifolds in their stable sorted order and applies a normal impulse that
 //!    removes the approaching relative velocity, scaled by `1 + restitution` so a
-//!    bouncy material rebounds. Impulses are distributed by inverse mass, so a
-//!    static or kinematic body (zero inverse mass) is never moved.
+//!    bouncy material rebounds, then a **tangential friction impulse** along a
+//!    deterministic tangent basis, bounded by the Coulomb cone `|j_t| <= μ·j_n`.
+//!    Impulses are distributed by inverse mass, so a static or kinematic body
+//!    (zero inverse mass) is never moved.
 //! 2. **Position correction** ([`correct_positions`]) — a Baumgarte-style push
 //!    that removes residual penetration beyond a small slop, again split by
 //!    inverse mass, so resting stacks do not sink.
 //!
-//! Friction is **not** resolved: material friction is validated and stored but
-//! applies no tangential impulse yet (a documented deferral — see `ROADMAP.md`).
+//! ## Friction (deterministic, branchless)
+//! The friction impulse needs a tangent direction. It is derived **only from the
+//! contact normal** — never from discovery order or an iterative search that could
+//! pick a different basis per run — by crossing the normal with the world axis it
+//! is *least* aligned with (the smallest absolute component), then completing an
+//! orthonormal pair. The combined coefficient is the geometric mean
+//! `sqrt(μ_a·μ_b)` of the two colliders' frictions, and the Coulomb clamp
+//! `|j_t| <= μ·j_n` is applied with `clamp` (min/max), never a branch. The
+//! friction pass walks the same stable handle-sorted manifold order as the normal
+//! pass, so the result stays a pure function of world state.
+//!
 //! Every operation is branchless: contact gating is arithmetic
-//! (`approaching.then(..)`, `(depth - slop).max(0.0)`), never control flow.
+//! (`approaching.then(..)`, `(depth - slop).max(0.0)`, the Coulomb `clamp`),
+//! never control flow.
 
 use axiom_math::{Transform, Vec3};
 
@@ -32,6 +44,10 @@ const PENETRATION_SLOP: f32 = 0.01;
 
 /// The fraction of remaining penetration removed per step by position correction.
 const CORRECTION_BETA: f32 = 0.2;
+
+/// The world axes, indexed `x = 0, y = 1, z = 2`. The tangent-basis construction
+/// crosses the normal with the axis it is least aligned with.
+const AXES: [Vec3; 3] = [Vec3::UNIT_X, Vec3::UNIT_Y, Vec3::UNIT_Z];
 
 /// The dense slice index of a body handle. Handles are 1-based and allocated in
 /// creation order with no removal, so handle `h` always lives at slice index
@@ -84,12 +100,30 @@ fn restitution_of(colliders: &[PhysicsCollider], handle: PhysicsColliderHandle) 
         .map_or(0.0, |c| c.material().restitution().get())
 }
 
+/// The friction stored on a collider (`0` if the handle is absent).
+fn friction_of(colliders: &[PhysicsCollider], handle: PhysicsColliderHandle) -> f32 {
+    collider_index(handle)
+        .and_then(|i| colliders.get(i))
+        .map_or(0.0, |c| c.material().friction().get())
+}
+
 /// `true` iff the two bodies of `manifold` are approaching along the contact
 /// normal (the condition under which the solver applies a normal impulse).
 fn is_approaching(bodies: &[PhysicsBody], manifold: &ContactManifold) -> bool {
     let (va, _) = body_state(bodies, manifold.body_a());
     let (vb, _) = body_state(bodies, manifold.body_b());
     vb.subtract(va).dot(manifold.normal()) < 0.0
+}
+
+/// The squared tangential relative speed at a contact (the part of `vb - va`
+/// perpendicular to the normal). Friction only does work when this is nonzero.
+fn tangential_speed_squared(bodies: &[PhysicsBody], manifold: &ContactManifold) -> f32 {
+    let (va, _) = body_state(bodies, manifold.body_a());
+    let (vb, _) = body_state(bodies, manifold.body_b());
+    let n = manifold.normal();
+    let relative = vb.subtract(va);
+    let normal_part = n.mul_scalar(relative.dot(n));
+    relative.subtract(normal_part).length_squared()
 }
 
 /// The number of contacts the solver will actually resolve — the manifolds whose
@@ -103,6 +137,27 @@ pub(crate) fn count_solved_contacts(bodies: &[PhysicsBody], manifolds: &[Contact
         .count() as u32
 }
 
+/// The number of contacts that will receive a genuine tangential friction impulse
+/// — those that are approaching (so a normal impulse, and thus a Coulomb cone,
+/// exists), have a positive combined friction, and have nonzero tangential
+/// relative speed. Measured once before the passes, mirroring
+/// [`count_solved_contacts`], so it is an honest report for the step record's
+/// `frictioned_contact_count`.
+pub(crate) fn count_frictioned_contacts(
+    bodies: &[PhysicsBody],
+    colliders: &[PhysicsCollider],
+    manifolds: &[ContactManifold],
+) -> u32 {
+    manifolds
+        .iter()
+        .filter(|manifold| {
+            is_approaching(bodies, manifold)
+                & (combined_friction(colliders, manifold) > 0.0)
+                & (tangential_speed_squared(bodies, manifold) > 0.0)
+        })
+        .count() as u32
+}
+
 /// The combined restitution of a contact — the larger of the two colliders'
 /// restitutions, so a bouncy body rebounds off any surface.
 fn combined_restitution(colliders: &[PhysicsCollider], manifold: &ContactManifold) -> f32 {
@@ -110,19 +165,91 @@ fn combined_restitution(colliders: &[PhysicsCollider], manifold: &ContactManifol
         .max(restitution_of(colliders, manifold.collider_b()))
 }
 
-/// Apply one normal-impulse pass for a single manifold.
-fn solve_contact(bodies: &mut [PhysicsBody], manifold: &ContactManifold, restitution: f32) {
+/// The combined friction of a contact — the geometric mean `sqrt(μ_a·μ_b)` of the
+/// two colliders' friction coefficients (the standard rule: a zero on either side
+/// gives a frictionless contact).
+fn combined_friction(colliders: &[PhysicsCollider], manifold: &ContactManifold) -> f32 {
+    (friction_of(colliders, manifold.collider_a()) * friction_of(colliders, manifold.collider_b()))
+        .sqrt()
+}
+
+/// A deterministic orthonormal tangent basis `(t1, t2)` for a unit contact
+/// `normal`. `t1 = normalize(reference × normal)` where `reference` is the world
+/// axis the normal is *least* aligned with (smallest absolute component) — so the
+/// cross is well-conditioned and never near-degenerate — and `t2 = normal × t1`.
+fn tangent_basis(normal: Vec3) -> (Vec3, Vec3) {
+    let ax = normal.x.abs();
+    let ay = normal.y.abs();
+    let az = normal.z.abs();
+    let pick_x = (ax <= ay) & (ax <= az);
+    let pick_y = (!pick_x) & (ay <= az);
+    // Arithmetic index select (x -> 0, y -> 1, z -> 2): when `pick_x`, the leading
+    // factor is 0; otherwise it is 1 scaled by `1 + (not pick_y)` to land on 1 or 2.
+    let index = (!pick_x as usize) * (1 + (!pick_y as usize));
+    let reference = AXES[index];
+    let t1 = normalize_or_zero(reference.cross(normal));
+    let t2 = normal.cross(t1);
+    (t1, t2)
+}
+
+/// Unit-normalize `v`, dividing by a length clamped to [`f32::MIN_POSITIVE`] so a
+/// near-degenerate vector yields a finite (effectively zero) tangent rather than a
+/// `NaN`.
+fn normalize_or_zero(v: Vec3) -> Vec3 {
+    v.mul_scalar(1.0 / v.length().max(f32::MIN_POSITIVE))
+}
+
+/// Apply one friction impulse along tangent `axis`, clamped to the Coulomb cone
+/// `[-bound, bound]`. Reads the (post-normal-impulse) velocities so it resists the
+/// residual tangential motion.
+fn apply_friction_axis(
+    bodies: &mut [PhysicsBody],
+    manifold: &ContactManifold,
+    axis: Vec3,
+    inverse_sum: f32,
+    inv_a: f32,
+    inv_b: f32,
+    bound: f32,
+) {
+    let (va, _) = body_state(bodies, manifold.body_a());
+    let (vb, _) = body_state(bodies, manifold.body_b());
+    let relative = vb.subtract(va).dot(axis);
+    // Coulomb clamp to `[-bound, bound]` via `max`/`min` (never `f32::clamp`,
+    // which panics on a NaN bound that a finite-but-extreme input can produce).
+    // A non-finite result here is caught and rolled back by the world's atomic
+    // finiteness check, so it can never poison committed state.
+    let magnitude = (-relative / inverse_sum).max(-bound).min(bound);
+    add_velocity(bodies, manifold.body_a(), axis.mul_scalar(-magnitude * inv_a));
+    add_velocity(bodies, manifold.body_b(), axis.mul_scalar(magnitude * inv_b));
+}
+
+/// Apply one normal-plus-friction impulse pass for a single manifold.
+fn solve_contact(
+    bodies: &mut [PhysicsBody],
+    manifold: &ContactManifold,
+    restitution: f32,
+    friction: f32,
+) {
     let (va, inv_a) = body_state(bodies, manifold.body_a());
     let (vb, inv_b) = body_state(bodies, manifold.body_b());
     let normal = manifold.normal();
     let relative = vb.subtract(va).dot(normal);
-    let inverse_sum = inv_a + inv_b;
-    let approaching = relative < 0.0;
-    let magnitude = approaching
-        .then(|| -(1.0 + restitution) * relative / inverse_sum.max(f32::MIN_POSITIVE))
-        .unwrap_or(0.0);
+    let inverse_sum = (inv_a + inv_b).max(f32::MIN_POSITIVE);
+    // Arithmetic gate: a separating contact (`relative >= 0`) zeroes the impulse,
+    // so only an approaching contact pushes apart. The flag multiply is exact
+    // (`* 1.0` / `* 0.0`), matching the prior `then(..).unwrap_or(0.0)` form.
+    let approaching = (relative < 0.0) as u8 as f32;
+    let magnitude = -(1.0 + restitution) * relative / inverse_sum * approaching;
     add_velocity(bodies, manifold.body_a(), normal.mul_scalar(-magnitude * inv_a));
     add_velocity(bodies, manifold.body_b(), normal.mul_scalar(magnitude * inv_b));
+
+    // Friction: tangential impulses bounded by the Coulomb cone μ·j_n. The bound
+    // is zero when friction is zero or the contact is separating (magnitude 0),
+    // so the friction pass is then an exact no-op.
+    let (t1, t2) = tangent_basis(normal);
+    let bound = friction * magnitude;
+    apply_friction_axis(bodies, manifold, t1, inverse_sum, inv_a, inv_b, bound);
+    apply_friction_axis(bodies, manifold, t2, inverse_sum, inv_a, inv_b, bound);
 }
 
 /// Resolve contact velocities over `iterations` sequential-impulse passes,
@@ -138,7 +265,8 @@ pub(crate) fn solve(
     (0..iterations).for_each(|_| {
         manifolds.iter().for_each(|manifold| {
             let restitution = combined_restitution(colliders, manifold);
-            solve_contact(bodies, manifold, restitution);
+            let friction = combined_friction(colliders, manifold);
+            solve_contact(bodies, manifold, restitution, friction);
         });
     });
     iterations
@@ -199,8 +327,17 @@ mod tests {
     }
 
     fn collider(collider_raw: u64, body_raw: u64, restitution: f32) -> PhysicsCollider {
+        collider_with(collider_raw, body_raw, restitution, 0.0)
+    }
+
+    fn collider_with(
+        collider_raw: u64,
+        body_raw: u64,
+        restitution: f32,
+        friction: f32,
+    ) -> PhysicsCollider {
         let material = PhysicsMaterial::new(
-            Ratio::new(0.0).unwrap(),
+            Ratio::new(friction).unwrap(),
             Ratio::new(restitution).unwrap(),
             Ratio::new(1.0).unwrap(),
         )
@@ -265,6 +402,72 @@ mod tests {
         let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
         assert_eq!(solve(&mut bodies, &colliders, &[manifold(0.1)], 0), 0);
         assert_eq!(bodies[0].linear_velocity(), Vec3::new(0.0, -2.0, 0.0));
+    }
+
+    #[test]
+    fn friction_removes_tangential_velocity_within_the_cone() {
+        // A approaches the static floor (-Y, normal impulse magnitude 2) while
+        // sliding sideways (+X) at 1.5 < cone bound μ·j_n = 2. The slide is fully
+        // absorbed; the normal velocity is removed as before.
+        let mut bodies = [dynamic(1, Vec3::new(1.5, -2.0, 0.0)), static_body(2)];
+        let colliders = [collider_with(1, 1, 0.0, 1.0), collider_with(2, 2, 0.0, 1.0)];
+        solve(&mut bodies, &colliders, &[manifold(0.1)], 8);
+        assert!(bodies[0].linear_velocity().y.abs() < 1.0e-5, "normal cancelled");
+        assert!(
+            bodies[0].linear_velocity().x.abs() < 1.0e-4,
+            "within-cone friction kills the slide"
+        );
+        assert_eq!(bodies[1].linear_velocity(), Vec3::ZERO, "static body fixed");
+    }
+
+    #[test]
+    fn zero_friction_leaves_tangential_velocity_untouched() {
+        let mut bodies = [dynamic(1, Vec3::new(3.0, -2.0, 0.0)), static_body(2)];
+        let colliders = [collider_with(1, 1, 0.0, 0.0), collider_with(2, 2, 0.0, 0.0)];
+        solve(&mut bodies, &colliders, &[manifold(0.1)], 8);
+        assert!(bodies[0].linear_velocity().y.abs() < 1.0e-5, "normal cancelled");
+        // The frictionless slide is exactly preserved.
+        assert_eq!(bodies[0].linear_velocity().x, 3.0);
+    }
+
+    #[test]
+    fn friction_is_capped_by_the_coulomb_cone() {
+        // A fast slide with low friction: the tangential velocity is reduced but
+        // not eliminated (the cone μ·j_n cannot remove the whole slide in one step).
+        let mut bodies = [dynamic(1, Vec3::new(10.0, -1.0, 0.0)), static_body(2)];
+        let colliders = [collider_with(1, 1, 0.0, 0.2), collider_with(2, 2, 0.0, 0.2)];
+        solve(&mut bodies, &colliders, &[manifold(0.1)], 1);
+        let vx = bodies[0].linear_velocity().x;
+        assert!(vx < 10.0 && vx > 0.0, "slide reduced but not removed, got {vx}");
+    }
+
+    #[test]
+    fn tangent_basis_is_orthonormal_for_each_dominant_normal_axis() {
+        for n in [Vec3::UNIT_X, Vec3::UNIT_Y, Vec3::UNIT_Z, Vec3::new(0.0, -1.0, 0.0)] {
+            let (t1, t2) = tangent_basis(n);
+            assert!((t1.length() - 1.0).abs() < 1.0e-6, "t1 unit for {n:?}");
+            assert!((t2.length() - 1.0).abs() < 1.0e-6, "t2 unit for {n:?}");
+            assert!(t1.dot(n).abs() < 1.0e-6, "t1 ⟂ n for {n:?}");
+            assert!(t2.dot(n).abs() < 1.0e-6, "t2 ⟂ n for {n:?}");
+            assert!(t1.dot(t2).abs() < 1.0e-6, "t1 ⟂ t2 for {n:?}");
+        }
+    }
+
+    #[test]
+    fn count_frictioned_contacts_counts_only_pressed_sliding_frictional_contacts() {
+        let colliders = [collider_with(1, 1, 0.0, 0.5), collider_with(2, 2, 0.0, 0.5)];
+        // Approaching + sliding + friction -> counted.
+        let sliding = [dynamic(1, Vec3::new(2.0, -2.0, 0.0)), static_body(2)];
+        assert_eq!(count_frictioned_contacts(&sliding, &colliders, &[manifold(0.1)]), 1);
+        // Approaching but no tangential motion -> not counted.
+        let straight = [dynamic(1, Vec3::new(0.0, -2.0, 0.0)), static_body(2)];
+        assert_eq!(count_frictioned_contacts(&straight, &colliders, &[manifold(0.1)]), 0);
+        // Separating -> not counted even while sliding.
+        let separating = [dynamic(1, Vec3::new(2.0, 3.0, 0.0)), static_body(2)];
+        assert_eq!(count_frictioned_contacts(&separating, &colliders, &[manifold(0.1)]), 0);
+        // Frictionless material -> not counted even while pressed and sliding.
+        let frictionless = [collider_with(1, 1, 0.0, 0.0), collider_with(2, 2, 0.0, 0.0)];
+        assert_eq!(count_frictioned_contacts(&sliding, &frictionless, &[manifold(0.1)]), 0);
     }
 
     #[test]
