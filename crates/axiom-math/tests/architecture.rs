@@ -270,6 +270,7 @@ fn lib_exports_exactly_math_api() {
         "pub use math_error::MathError;",
         "pub use math_error_code::MathErrorCode;",
         "pub use math_result::MathResult;",
+        "pub use mat3::Mat3;",
         "pub use mat4::Mat4;",
         "pub use quat::Quat;",
         "pub use transform::Transform;",

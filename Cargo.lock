@@ -246,6 +246,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-draw2d"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
 name = "axiom-ecs"
 version = "0.1.0"
 dependencies = [
