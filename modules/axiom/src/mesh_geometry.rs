@@ -25,9 +25,11 @@ pub(crate) struct MeshGeometry {
 pub(crate) fn mesh_geometry(mesh: &Mesh) -> MeshGeometry {
     // `Mesh` is a fieldless enum, so `*mesh as usize` is its discriminant: index
     // a generator table instead of `match`ing (branchless). The table order must
-    // match the variant order (Cube=0, Plane=1, Sphere=2); adding a `Mesh`
-    // variant requires adding its generator at the same index, or this panics.
-    let generators: [fn() -> MeshGeometry; 3] = [cube_geometry, plane_geometry, sphere_geometry];
+    // match the variant order (Cube=0, Plane=1, Sphere=2, Cylinder=3); adding a
+    // `Mesh` variant requires adding its generator at the same index, or this
+    // panics.
+    let generators: [fn() -> MeshGeometry; 4] =
+        [cube_geometry, plane_geometry, sphere_geometry, cylinder_geometry];
     generators[*mesh as usize]()
 }
 
@@ -149,6 +151,44 @@ fn sphere_geometry() -> MeshGeometry {
     }
 }
 
+/// The engine's built-in cylinder primitive. Mirrors [`sphere_geometry`].
+fn cylinder_geometry() -> MeshGeometry {
+    let resources = ResourcesApi::new();
+    let mut table = resources.empty_table();
+    let id = resources.register_cylinder_mesh(&mut table).raw();
+    let resolved = resources.resolve(&table);
+    let vertex_count = resources
+        .resolved_mesh_vertex_count(&resolved, id)
+        .expect("cylinder mesh present");
+    let mut positions = Vec::with_capacity(vertex_count);
+    let mut normals = Vec::with_capacity(vertex_count);
+    let mut uvs = Vec::with_capacity(vertex_count);
+    (0..vertex_count).for_each(|v| {
+        let p = resources
+            .resolved_mesh_position_at(&resolved, id, v)
+            .expect("vertex in range");
+        let n = resources
+            .resolved_mesh_normal_at(&resolved, id, v)
+            .expect("vertex in range");
+        let u = resources
+            .resolved_mesh_uv_at(&resolved, id, v)
+            .expect("vertex in range");
+        positions.push(Vec3::new(p[0], p[1], p[2]));
+        normals.push(Vec3::new(n[0], n[1], n[2]));
+        uvs.push(Vec2::new(u[0], u[1]));
+    });
+    let indices = resources
+        .resolved_mesh_indices(&resolved, id)
+        .expect("cylinder mesh present")
+        .to_vec();
+    MeshGeometry {
+        positions,
+        normals,
+        uvs,
+        indices,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,10 +199,13 @@ mod tests {
         let cube = mesh_geometry(&Mesh::Cube);
         let plane = mesh_geometry(&Mesh::Plane);
         let sphere = mesh_geometry(&Mesh::Sphere);
+        let cylinder = mesh_geometry(&Mesh::Cylinder);
         assert_eq!(cube.positions.len(), 24);
         assert_eq!(plane.positions.len(), 4);
         assert!(sphere.positions.len() > 100);
-        [&cube, &plane, &sphere].into_iter().for_each(|g| {
+        // Cylinder: 4 rings of 17 + 2 cap centers = 70 vertices.
+        assert_eq!(cylinder.positions.len(), 70);
+        [&cube, &plane, &sphere, &cylinder].into_iter().for_each(|g| {
             assert_eq!(g.positions.len(), g.normals.len());
             assert_eq!(g.positions.len(), g.uvs.len());
             assert!(!g.indices.is_empty());

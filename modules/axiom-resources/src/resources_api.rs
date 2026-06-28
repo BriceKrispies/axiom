@@ -6,6 +6,7 @@ use crate::basic_lit_material::{build_basic_lit_material, build_textured_lit_mat
 use crate::biome_atlas_texture::{biome_cell_origin, build_biome_atlas_texture};
 use crate::checker_texture::build_checker_texture;
 use crate::cube_mesh::build_cube_mesh;
+use crate::cylinder_mesh::build_cylinder_mesh;
 use crate::mesh_data::{MeshData, MeshInputVertex};
 use crate::plane_mesh::build_plane_mesh;
 use crate::resolved_resources::ResolvedResources;
@@ -88,6 +89,13 @@ impl ResourcesApi {
     pub fn register_sphere_mesh(&self, table: &mut ResourceTable) -> ResourceId {
         let (vertices, indices) = build_sphere_mesh();
         self.register_mesh(table, "axiom.builtin.sphere", &vertices, &indices)
+    }
+
+    /// Register the built-in unit cylinder mesh and return its [`ResourceId`].
+    /// Radius 0.5, height 1 (±0.5 on Y), radial side wall + two end caps.
+    pub fn register_cylinder_mesh(&self, table: &mut ResourceTable) -> ResourceId {
+        let (vertices, indices) = build_cylinder_mesh();
+        self.register_mesh(table, "axiom.builtin.cylinder", &vertices, &indices)
     }
 
     /// Register the built-in basic-lit material with the given base

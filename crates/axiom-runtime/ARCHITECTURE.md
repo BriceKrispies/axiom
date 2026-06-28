@@ -1,9 +1,9 @@
-# Axiom Runtime — Architecture (Layer 01)
+# Axiom Runtime — Architecture
 
 ## What the runtime is
 
-The runtime is the **deterministic engine execution substrate**. It sits one
-layer above the kernel and adapts the kernel's primitive types into:
+The runtime is the **deterministic engine execution substrate**. It depends on
+the kernel and adapts the kernel's primitive types into:
 
 - a strict **lifecycle** state machine (`Created → Initialized → Running ↔ Paused → Stopped` and `→ Failed`),
 - **deterministic fixed-timestep stepping** built on the kernel `SimulationClock`,
@@ -56,7 +56,7 @@ native main loop) lives one or more layers above.
 
 A future layer typically:
 
-1. Declares a `layer.toml` with `previous = "runtime"`.
+1. Declares a `layer.toml` listing `runtime` in its `depends_on`.
 2. Imports `Runtime`, `RuntimeConfig`, `RuntimeSystem`, `RuntimeContext`, and
    `HandleId` from the runtime/kernel crates.
 3. Implements `RuntimeSystem` for whatever it owns (e.g. an ECS world tick,

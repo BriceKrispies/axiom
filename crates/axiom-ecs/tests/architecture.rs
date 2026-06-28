@@ -1,4 +1,4 @@
-//! Mechanical architecture enforcement for Axiom Layer 05 (axiom-ecs).
+//! Mechanical architecture enforcement for axiom-ecs (an Axiom layer).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +31,29 @@ fn ecs_source_files() -> Vec<PathBuf> {
     collect_rs(&ecs_src_dir(), &mut files);
     assert!(!files.is_empty(), "expected ecs source files");
     files.sort();
+    files
+}
+
+/// Files reached only through a `#[cfg(test)] mod NAME;` declaration in
+/// `lib.rs`. They are test-only, and test code is exempt from the
+/// `depends_on` import rule, so the import-legality scan — which governs the
+/// non-test engine spine — skips them. (`fixtures.rs` legitimately uses
+/// `axiom-host` to build real `EngineFrame`s for the layer's own tests.)
+fn test_only_module_files() -> Vec<PathBuf> {
+    let lib = read(&ecs_src_dir().join("lib.rs"));
+    let mut prev_is_cfg_test = false;
+    let mut files = Vec::new();
+    for line in lib.lines() {
+        let trimmed = line.trim();
+        if prev_is_cfg_test && trimmed.starts_with("mod ") {
+            let name = trimmed
+                .trim_start_matches("mod ")
+                .trim_end_matches(';')
+                .trim();
+            files.push(ecs_src_dir().join(format!("{name}.rs")));
+        }
+        prev_is_cfg_test = trimmed == "#[cfg(test)]";
+    }
     files
 }
 
@@ -225,7 +248,7 @@ fn lib_exports_are_curated_set() {
 }
 
 #[test]
-fn lower_layers_do_not_import_axiom_ecs() {
+fn other_layers_do_not_import_axiom_ecs() {
     for layer in [
         "axiom-kernel",
         "axiom-runtime",
@@ -237,15 +260,19 @@ fn lower_layers_do_not_import_axiom_ecs() {
             &sibling_src_dir(layer),
             layer,
             &["axiom_ecs", "axiom-ecs"],
-            "no lower layer may import axiom-ecs (Layer 05)",
+            "no other layer may import axiom-ecs",
         );
     }
 }
 
 #[test]
-fn ecs_only_imports_legal_lower_layers() {
+fn ecs_only_imports_declared_dependencies() {
     let mut illegal = Vec::new();
+    let test_only = test_only_module_files();
     for path in ecs_source_files() {
+        if test_only.contains(&path) {
+            continue;
+        }
         let stripped = strip_comments_and_strings(&read(&path));
         for line in stripped.lines() {
             let trimmed = line.trim();
@@ -255,9 +282,6 @@ fn ecs_only_imports_legal_lower_layers() {
             for chunk in trimmed.split(|c: char| !c.is_alphanumeric() && c != '_') {
                 if chunk.starts_with("axiom_")
                     && chunk != "axiom_kernel"
-                    && chunk != "axiom_runtime"
-                    && chunk != "axiom_math"
-                    && chunk != "axiom_host"
                     && chunk != "axiom_frame"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
@@ -267,7 +291,7 @@ fn ecs_only_imports_legal_lower_layers() {
     }
     assert!(
         illegal.is_empty(),
-        "axiom-ecs may only import axiom-kernel/runtime/math/host/frame:\n{}",
+        "axiom-ecs may only import axiom-kernel/frame:\n{}",
         illegal.join("\n")
     );
 }

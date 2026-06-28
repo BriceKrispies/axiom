@@ -31,7 +31,7 @@ leaves outside the branchless/coverage gates, so the worker lives there.
 ## Why NOT elsewhere (v1)
 
 - **Not the kernel / a layer**: no networking, no sessions, no game rules ever
-  go in the spine. The worker is a leaf, not part of the ordered engine spine.
+  go in the spine. The worker is a leaf, not part of the engine layer DAG.
 - **Not a module**: engine modules cannot hold sockets, cannot do `unsafe` FFI,
   cannot depend on other modules, and must be branchless + 100% covered. Game
   schema (the intent payload meaning) must not enter `axiom-net-protocol` or any

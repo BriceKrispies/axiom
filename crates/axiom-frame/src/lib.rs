@@ -1,10 +1,10 @@
-//! # Axiom Frame — Layer 04
+//! # Axiom Frame
 //!
-//! The canonical engine frame boundary. Adapts host frame reports
-//! (Layer 03), runtime step records (Layer 01), viewport facts
-//! (Layer 03), and math primitives (Layer 02) into a stable per-frame
-//! contract — the [`EngineFrame`] and [`FrameContext`] every future
-//! engine system reads from.
+//! The canonical engine frame boundary. Adapts host frame reports and
+//! viewport facts (host), runtime step records (runtime), and math
+//! primitives (math) into a stable per-frame contract — the
+//! [`EngineFrame`] and [`FrameContext`] every future engine system reads
+//! from. It depends on the `kernel`, `runtime`, and `host` layers.
 //!
 //! ## What this layer is
 //! - The single place where a [`axiom_host::HostFrameReport`] is turned

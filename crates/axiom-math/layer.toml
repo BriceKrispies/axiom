@@ -1,4 +1,4 @@
-# Axiom layer manifest — Layer 02 (axiom-math).
+# Axiom layer manifest — axiom-math.
 #
 # Math is the deterministic numeric / geometric substrate every later engine
 # layer (rendering, scene, physics, animation, culling, picking, tooling)
@@ -6,7 +6,7 @@
 # assets, physics, animation, audio, input, plugins, editor, or game framework
 # concepts.
 #
-# Layer-02 logical capabilities (documentation only — Rust public surface is
+# Math logical capabilities (documentation only — Rust public surface is
 # the single `MathApi` facade, enforced by the architecture checker):
 #   - deterministic-scalar-policy
 #   - vector-math
@@ -36,8 +36,8 @@ consumed_capabilities = [
     "Tick",
 ]
 
-# Each proof export is a real Layer-02 public export whose source must
-# reference at least one previous-layer (kernel or runtime) symbol.
+# Each proof export is a real public export whose source must
+# reference at least one depended-layer (kernel or runtime) symbol.
 [[proof_exports]]
 export = "MathApi"
 must_reference = ["KernelApi", "RuntimeContext", "TelemetryMetric"]

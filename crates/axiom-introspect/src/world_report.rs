@@ -10,7 +10,7 @@ const SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 /// A small, inspectable summary of the ECS world at an instant: how many
 /// entities it holds and how many systems it advances.
 ///
-/// This is the introspection layer's adapter over the world layer (Layer 05):
+/// This is the introspection layer's adapter over the ecs layer:
 /// the world is foundational, and observability sits on top of it. It is a live
 /// summary of "how big is the world right now". Like [`crate::FrameReport`] it
 /// is serializable through the kernel binary primitives, so an agent can read

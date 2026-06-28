@@ -1,7 +1,7 @@
-# Design Plan — `axiom-introspect` (Layer 05): the engine introspection surface
+# Design Plan — `axiom-introspect`: the engine introspection surface
 
 **Status:** Phases 0–1 implemented (+ headless demo wiring); Phases 2–4 pending.
-The `axiom-introspect` layer (Layer 05), the de-lossied frame contract, and the
+The `axiom-introspect` layer, the de-lossied frame contract, and the
 demo's `IntrospectApi` wiring are landed and fully covered. `FrameDiff`/failure
 queries (Phase 2), the browser query bridge (Phase 3), and host-injected perf
 timing (Phase 4) remain.
@@ -45,7 +45,7 @@ an agent reads — plus one determinism trap to avoid (timing).
 
 ## 2. Architectural placement — a new layer
 
-**Decision: a new Layer 05, crate `axiom-introspect`, `previous = "frame"`.**
+**Decision: a new layer, crate `axiom-introspect`, declaring `depends_on = ["frame", …]`.**
 
 Rejected alternatives:
 
@@ -58,8 +58,8 @@ Rejected alternatives:
   spine infrastructure every future app, layer, and agent builds on. If it were
   a module, no future layer could ever consume it. Foundational ⇒ layer.
 
-`introspect` is an honest semantic adapter over Layer 04: it consumes
-`EngineFrame` / `FrameContext` (its N-1, the canonical per-frame facts) and,
+`introspect` is an honest semantic adapter over the `frame` layer: it consumes
+`EngineFrame` / `FrameContext` (the canonical per-frame facts) and,
 legally, the kernel telemetry/log records (the emitted observability stream),
 and produces a higher-level, *answerable* model of engine state and history.
 Broad and shallow; satisfies the Layer Law.
@@ -69,10 +69,9 @@ Broad and shallow; satisfies the Layer Law.
 ```toml
 [layer]
 name = "introspect"
-index = 5
-previous = "frame"
 crate_name = "axiom-introspect"
-allowed_dependencies = ["kernel", "runtime", "math", "host", "frame"]
+depends_on = ["kernel", "runtime", "math", "host", "frame"]
+meaningful_dependency = "Introspect consumes the frame contract (`EngineFrame`/`FrameContext`) and the kernel observability/serialization vocabulary (`TelemetryMetric`, `LogRecord`, `SchemaVersion`) to produce a queryable, versioned, replay-diffable model of engine state and history."
 introduced_capabilities = ["IntrospectApi", "FrameReport", "FrameHistory", "FrameDiff"]
 consumed_capabilities = ["EngineFrame", "FrameContext", "TelemetryMetric", "LogRecord", "SchemaVersion"]
 
@@ -82,7 +81,7 @@ must_reference = ["EngineFrame"]
 # ...one per introduced capability, each referencing a frame/kernel symbol.
 ```
 
-### Prerequisite that touches Layer 04
+### Prerequisite that touches the `frame` layer
 
 The frame contract must stop discarding per-system diagnostics. Either enrich
 `FrameStepSummary` or add a sibling `FrameStepReport` carrying the system

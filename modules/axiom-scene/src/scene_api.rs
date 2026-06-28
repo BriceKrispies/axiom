@@ -28,7 +28,7 @@ mod players;
 
 /// The only public export of `axiom-scene`: a **stateful scene handle**.
 ///
-/// `SceneApi` *owns* the scene — an ECS world (Layer 05) where nodes are
+/// `SceneApi` *owns* the scene — an ECS world (the ecs layer) where nodes are
 /// entities and every node fact is a component column. A consumer builds it
 /// **once** and holds it across frames, mutating it incrementally and calling
 /// [`Self::advance`] each tick; the world is durable authored state, not

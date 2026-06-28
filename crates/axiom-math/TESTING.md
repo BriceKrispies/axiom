@@ -1,6 +1,6 @@
 # Axiom Math — Testing Discipline
 
-Layer 02 owns the engine's deterministic math substrate. Its testing rules
+`axiom-math` owns the engine's deterministic math substrate. Its testing rules
 are deliberately conservative — once rendering, physics, and scene layers
 start trusting these primitives, regressions here are very expensive.
 
@@ -108,15 +108,7 @@ the build). It asserts:
   `Material`, `Mesh`, `Asset`, `Physics`, `Animator`, `Audio`, `Input*`,
   `Plugin`, `EditorPanel`, `GameLoop`) appears anywhere in math source.
 
-`tests/manifest.rs` proves the layer-manifest contract:
-
-- the math manifest validates with index 2, the two legal dependencies,
-  and the eight documented capabilities,
-- depending on itself is rejected as `SelfImport`,
-- depending on a future layer (index 3+) is rejected as `ForwardImport`,
-- duplicate dependencies and duplicate capabilities are both rejected.
-
-In addition, the workspace's `cargo xtask check-architecture` test
+The workspace's `cargo xtask check-architecture` test
 (`real_repo_layers_pass`) validates the real `crates/axiom-math/layer.toml`
 against the Axiom Layer Law on every workspace test run, so the manifest
 on disk cannot drift from the code.

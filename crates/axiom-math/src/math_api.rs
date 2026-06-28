@@ -1,10 +1,10 @@
-//! The Layer-02 math facade.
+//! The math facade.
 
 use axiom_kernel::{KernelApi, Radians, Tick};
 use axiom_runtime::RuntimeContext;
-// `TelemetryMetric` is the previous-layer-adjacent primitive Math hands to the
-// runtime sink; importing it here is what makes Math a real semantic adapter
-// over the runtime's telemetry surface (not just over the kernel facade).
+// `TelemetryMetric` is the kernel primitive Math hands to the runtime sink;
+// importing it here is what makes Math a real semantic adapter over the
+// runtime's telemetry surface (not just over the kernel facade).
 use axiom_kernel::TelemetryMetric;
 
 use crate::aabb::Aabb;

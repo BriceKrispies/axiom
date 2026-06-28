@@ -1,6 +1,6 @@
 # Axiom Host — Testing Discipline
 
-Layer 03 is the boundary between deterministic engine code and the
+`axiom-host` is the boundary between deterministic engine code and the
 outside world. Its tests have to prove that the boundary itself is
 deterministic — same data in, same plan and same report out, every run,
 every platform.
@@ -134,7 +134,7 @@ Every host error code has a direct test:
 
 ## Logging / telemetry determinism
 
-Layer 03 deliberately ships **zero** ambient logging or telemetry today.
+`axiom-host` deliberately ships **zero** ambient logging or telemetry today.
 Diagnostics are emitted by the runtime through the kernel sinks; the
 host layer surfaces them via `HostFrameReport::step_records`. If a
 future iteration adds host-level telemetry it must follow the kernel's
@@ -168,20 +168,7 @@ asserts:
   finiteness is carried by the kernel `Ratio` quantity type — no
   `axiom-math` dependency).
 
-`tests/manifest.rs` proves the layer-manifest contract:
-
-- the host manifest validates with index 3, the two legal
-  dependencies (kernel, runtime), and the eight documented
-  capabilities,
-- runtime (the immediate previous layer) is accepted as a dependency
-  on its own,
-- depending on itself is rejected as `SelfImport`,
-- depending on a future layer (index 4+) is rejected as
-  `ForwardImport`,
-- duplicate dependencies and duplicate capabilities are both
-  rejected.
-
-In addition, `cargo xtask check-architecture` (and the workspace's
+`cargo xtask check-architecture` (and the workspace's
 `real_repo_layers_pass` test that wraps it) validates the real
 `crates/axiom-host/layer.toml` against the Axiom Layer Law on every
 workspace test run, so the manifest on disk cannot drift from the code.

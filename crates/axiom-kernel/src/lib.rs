@@ -1,9 +1,9 @@
-//! # Axiom Kernel — Layer 00
+//! # Axiom Kernel
 //!
-//! The kernel is the deterministic runtime substrate every future Axiom layer
-//! is allowed to trust. It defines time, identity, errors, memory addressing,
-//! messaging, binary serialization, the layer contract, structured logging and
-//! telemetry — and nothing else.
+//! The kernel is the deterministic runtime substrate every Axiom layer is
+//! allowed to trust. It is a root of the layer DAG (it depends on nothing). It
+//! defines time, identity, errors, memory addressing, messaging, binary
+//! serialization, structured logging and telemetry — and nothing else.
 //!
 //! ## Hard rules (enforced by `tests/architecture.rs`)
 //! - Deterministic: same inputs always produce the same outputs.
@@ -16,9 +16,10 @@
 //! ## Public surface
 //! [`KernelApi`] is the kernel's primary facade and entry point. In addition,
 //! a curated set of *primitive* types is re-exported at the crate root because
-//! future layers must be able to *name* the deterministic primitives they
-//! adapt — for example, Layer 1 (`axiom-runtime`) stores a [`SimulationClock`]
-//! field and constructs [`LogRecord`] values. The approved set is enforced by
+//! the layers that depend on the kernel must be able to *name* the
+//! deterministic primitives they adapt — for example, `axiom-runtime` stores a
+//! [`SimulationClock`] field and constructs [`LogRecord`] values. The approved
+//! set is enforced by
 //! `tests/architecture.rs::lib_exports_are_curated_set` so accidental new
 //! surface still fails the build. Every other type remains private to the
 //! crate.
@@ -50,7 +51,6 @@ mod asset_id;
 mod entity_id;
 mod handle_id;
 mod id_macro;
-mod layer_id;
 mod message_id;
 mod resource_id;
 
@@ -75,12 +75,6 @@ mod type_schema;
 
 // --- Stable hashing ---
 mod stable_hash;
-
-// --- Layer contract model ---
-mod layer_capability;
-mod layer_dependency;
-mod layer_import_rule;
-mod layer_manifest;
 
 // --- Structured logging model ---
 mod in_memory_log_sink;
@@ -165,12 +159,6 @@ pub use type_schema::{FieldSchema, TypeSchema};
 // computed in one place matches another. A diagnostic index, never the
 // determinism proof (byte equality proves; a hash only labels/locates).
 pub use stable_hash::StableHash;
-
-// Layer-contract primitives — layers carry their own manifests and need to
-// construct dependencies and capabilities by code to validate them in tests.
-pub use layer_capability::LayerCapability;
-pub use layer_dependency::LayerDependency;
-pub use layer_manifest::LayerManifest;
 
 // Structured logging — layers construct records and hand them to sinks via the
 // facade; the kernel never prints.

@@ -111,7 +111,7 @@ error: test failed, to rerun pass `-p axiom-ecs --lib`
 
 ## 1. What is `axiom-introspect`?
 
-- **Kind:** an **engine layer** (the ordered spine), *not* a module, app helper,
+- **Kind:** an **engine layer** (part of the layer DAG), *not* a module, app helper,
   or tool. It has a `layer.toml`, lives under `crates/`, and is governed by the
   Layer Law.
 - **Manifest:** `crates/axiom-introspect/layer.toml`
@@ -119,12 +119,13 @@ error: test failed, to rerun pass `-p axiom-ecs --lib`
   `depends_on = ["kernel", "frame", "ecs"]`). Cargo manifest:
   `crates/axiom-introspect/Cargo.toml` (`crate-type = ["rlib"]`,
   `unsafe_code = "forbid"`).
-- **Layer numbering is inconsistent in the prose** (a documentation nit, not a
-  structural problem): `lib.rs` and the Cargo description say "Layer 05",
-  `layer.toml` and `tests/architecture.rs` say "Layer 06". The mechanical checker
-  uses the dependency graph, not a number, so this is cosmetic. The memory of
-  record places it last in `kernel → runtime → math → host → frame → ecs →
-  introspect`.
+- **Stray "Layer NN" numbering lingers in the prose** (a documentation nit, not a
+  structural problem): `lib.rs`, the Cargo description, `layer.toml`, and
+  `tests/architecture.rs` still carry leftover layer numbers from the old linear
+  model. There is no layer index under the DAG model — the mechanical checker
+  uses the `depends_on` graph, not a number. `axiom-introspect` declares
+  `depends_on = ["kernel", "frame", "ecs"]`, sitting directly on top of the
+  `frame` and `ecs` layers (and the `kernel` root).
 - **Runtime dependencies (genuinely used in non-test code):**
   - `axiom-kernel` — `BinaryWriter`/`BinaryReader`/`SchemaVersion`,
     `KernelError`/`KernelErrorCode`/`KernelErrorScope`/`KernelResult`,
@@ -372,8 +373,9 @@ All introspection tests live inside the crate (unit `#[cfg(test)]` per file +
 | **No console / placeholder macros** | ✅ | `no_console_printing`, `no_placeholder_macros`. |
 | **Coverage Law (100%)** | ✅ (per record) | The layer landed at 100% and its tests deliberately cover both arms of each codec branch. (Not re-measured in this read-only pass; the spine gate would catch a regression.) |
 
-**No violations found.** One cosmetic inconsistency: the "Layer 05" vs "Layer 06"
-prose mismatch (§1).
+**No violations found.** One cosmetic inconsistency: the leftover "Layer NN"
+numbering still in the prose (§1), a stale linear-model remnant the DAG model
+no longer uses.
 
 ---
 

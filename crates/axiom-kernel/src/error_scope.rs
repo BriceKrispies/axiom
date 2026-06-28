@@ -14,7 +14,9 @@ pub enum KernelErrorScope {
     Memory = 3,
     Message = 4,
     Binary = 5,
-    Layer = 6,
+    // Scope 6 (`Layer`) was retired with the kernel's index-based
+    // layer-contract model; the layer graph is now a DAG owned by `layer.toml`
+    // + the architecture checker, not a runtime kernel concern.
     Scalar = 7,
 }
 
@@ -36,7 +38,6 @@ mod tests {
         assert_eq!(KernelErrorScope::Memory.raw(), 3);
         assert_eq!(KernelErrorScope::Message.raw(), 4);
         assert_eq!(KernelErrorScope::Binary.raw(), 5);
-        assert_eq!(KernelErrorScope::Layer.raw(), 6);
         assert_eq!(KernelErrorScope::Scalar.raw(), 7);
     }
 
@@ -48,6 +49,6 @@ mod tests {
 
     #[test]
     fn ordering_follows_discriminant() {
-        assert!(KernelErrorScope::Time < KernelErrorScope::Layer);
+        assert!(KernelErrorScope::Time < KernelErrorScope::Scalar);
     }
 }

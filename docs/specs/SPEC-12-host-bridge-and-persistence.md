@@ -24,7 +24,7 @@ host plumbing that rides the same seam or is host policy, not engine surface.
 ## 2. Current state (verified)
 
 - **The host *stepping* boundary exists; the *session* boundary does not.**
-  `axiom-host` (Layer 03) is the sanctioned platform-facing layer. Its `HostApi`
+  `axiom-host` is the sanctioned platform-facing layer. Its `HostApi`
   facade owns viewport validation (`HostViewport`), explicit per-frame input
   (`HostFrameInput`, host supplies every timestamp), lifecycle
   (`HostLifecycleState`/`Signal`), the deterministic step planner/driver
@@ -59,7 +59,7 @@ host plumbing that rides the same seam or is host policy, not engine surface.
 The seam splits into a **neutral data half** (in the spine) and a **platform
 half** (outside it), exactly as SPEC-00 split the loop into accumulator + app.
 
-1. **Neutral session seam — extend `axiom-host` (Layer 03).** Two new
+1. **Neutral session seam — extend `axiom-host`.** Two new
    primitive-only, browser-free data contracts and the facade methods that mint
    and validate them:
    - **`HostSessionConfig`** — the validated *input*: a `seed` plus opaque

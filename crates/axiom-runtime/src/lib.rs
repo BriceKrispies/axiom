@@ -1,9 +1,9 @@
-//! # Axiom Runtime — Layer 01
+//! # Axiom Runtime
 //!
 //! The runtime is the deterministic engine substrate that adapts the kernel
-//! (Layer 00) into lifecycle, fixed-timestep stepping, ordered scheduling,
-//! FIFO command/event queues, and replay-ready step records. It is the
-//! foundation every later engine layer will build on.
+//! into lifecycle, fixed-timestep stepping, ordered scheduling, FIFO
+//! command/event queues, and replay-ready step records. It depends on the
+//! `kernel` layer and is the foundation many other engine layers build on.
 //!
 //! ## What this layer owns
 //! - [`Runtime`] — owns runtime state and drives deterministic stepping.

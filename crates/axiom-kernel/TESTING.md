@@ -12,14 +12,13 @@ Coverage maps one-to-one onto the public surface:
 | Concept | What the tests prove |
 |---------|----------------------|
 | `SimulationClock` | initial state is zero; one advance moves tick/frame/time; `advance_by(n)` equals `n` single advances; two clocks stay bit-identical; overflow is reported, not wrapped |
-| ID types (`EntityId`, `ResourceId`, `AssetId`, `HandleId`, `LayerId`, `MessageId`) | null is invalid and zero; `from_raw` round-trips; ordering/equality are numeric; binary serialization round-trips to exactly 8 bytes |
+| ID types (`EntityId`, `ResourceId`, `AssetId`, `HandleId`, `MessageId`) | null is invalid and zero; `from_raw` round-trips; ordering/equality are numeric; binary serialization round-trips to exactly 8 bytes |
 | `KernelError` | identity is `(scope, code)`; equality ignores the human message; differing scope/code compare unequal |
 | `MemoryRange` | `end`, half-open `contains_offset`/`contains_range`, `overlaps`, alignment, and `checked_shift` overflow |
 | `Alignment` | powers of two accepted; zero and non-powers rejected; boundary check correct |
 | `MessageQueue` | FIFO `pop` order; `peek` does not consume; empty `pop`; `clear` |
 | `BinaryWriter`/`BinaryReader` | little-endian layout; all primitives + length-prefixed slices round-trip; **out-of-bounds reads fail via `KernelResult` without advancing**; truncated slices fail |
 | `SchemaVersion` | accessors; compatibility by major only; serialization round-trip |
-| `LayerManifest` / `LayerImportRule` | kernel has no imports; self-import fails; forward-import fails; valid earlier-layer import succeeds; duplicate dependency/capability rejected |
 | `LogRecord` / `InMemoryLogSink` | builder captures level/scope/code/tick/frame/fields; identical inputs produce equal records; sink captures in order, deterministically |
 | `TelemetryMetric` / `InMemoryTelemetrySink` | counter and gauge construction; deterministic capture; `counter_total` sums only matching counters |
 | `KernelApi` facade | smoke test reaching every capability through the single public entry point |

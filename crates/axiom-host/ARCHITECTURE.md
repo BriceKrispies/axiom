@@ -1,16 +1,15 @@
-# Axiom Host — Layer 03 Architecture
+# Axiom Host — Architecture
 
 `axiom-host` is the deterministic platform/host boundary of the Axiom
-engine. It sits fourth in the chain:
+engine. It depends on kernel and runtime:
 
 ```
-Layer 00  axiom-kernel    (time, identity, errors, binary, logging, telemetry)
-Layer 01  axiom-runtime   (lifecycle, fixed-step scheduling, queues, context)
-Layer 02  axiom-math      (scalars, vectors, matrices, transforms, geometry)
-Layer 03  axiom-host      ← this crate
+axiom-host depends on:
+  axiom-kernel   (time, identity, errors, binary, logging, telemetry)
+  axiom-runtime  (lifecycle, fixed-step scheduling, queues, context)
 ```
 
-## What Layer 03 is
+## What axiom-host is
 
 The boundary between deterministic engine code and the world outside it.
 
@@ -87,7 +86,7 @@ gives us:
 
 This layer never compiles in a browser binding. It uses no `web_sys`, no
 `js_sys`, no `wasm_bindgen`, no `wgpu`, no `winit`. A future
-`axiom-browser` adapter crate (Layer 04+ — not yet built) will translate
+`axiom-browser` adapter crate (not yet built) will translate
 browser events into the deterministic data types this layer defines and
 hand them to a `HostStepDriver`. The opposite arrangement — making the
 host layer itself depend on the browser — would force every replay test,
@@ -100,7 +99,7 @@ them appear here.
 
 ## What nondeterminism is allowed to enter, and how
 
-Layer 03 is the *only* layer that accepts inputs an engine outside of it
+Host is the *only* layer that accepts inputs an engine outside of it
 generated:
 
 - **Wall-clock time** enters only as `HostFrameInput::elapsed_nanos`
@@ -114,7 +113,7 @@ generated:
   construction, and the viewport additionally enforces positivity.
 - **Lifecycle and visibility** enter only as `HostLifecycleSignal`
   values. The signal alphabet is closed: any future signal requires a
-  layer-03 change. Keyboard, mouse, touch, gamepad, and any other input
+  host-layer change. Keyboard, mouse, touch, gamepad, and any other input
   mapping are deliberately out of scope.
 
 Once data is inside the layer, it is plain values — `Copy`/`Clone` where
@@ -153,7 +152,7 @@ touch gesture recognition. None of that is host-boundary work. The
 lifecycle alphabet in `HostLifecycleSignal` is intentionally coarse —
 visibility, focus, suspension, shutdown — because those are the facts
 the engine boundary needs to decide whether to step at all. A future
-input layer (Layer N) will accept its own input events as data, in the
+input layer will accept its own input events as data, in the
 same deterministic style, and route them through the runtime context.
 
 ## How it consumes `axiom-runtime` and `axiom-kernel`
@@ -170,8 +169,8 @@ property of the kernel `Ratio` quantity type:
   quotient is provably finite and the `Ratio::new` invariant holds by
   construction.
 
-Runtime is the layer the host *drives*, and is the immediate previous
-layer the host adapts:
+Runtime is the layer the host *drives*, and is a depended layer the
+host adapts:
 
 - `HostBoundaryConfig::validate` calls `KernelApi::fixed_step` (via the
   same path `RuntimeConfig::validate` uses) so the host and runtime

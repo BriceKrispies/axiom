@@ -23,6 +23,7 @@ mod basic_lit_material;
 mod biome_atlas_texture;
 mod checker_texture;
 mod cube_mesh;
+mod cylinder_mesh;
 mod material_data;
 mod mesh_data;
 mod plane_mesh;

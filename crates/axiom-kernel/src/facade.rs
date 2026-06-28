@@ -12,8 +12,6 @@ use crate::fixed_step::FixedStep;
 use crate::handle_id::HandleId;
 use crate::in_memory_log_sink::InMemoryLogSink;
 use crate::in_memory_telemetry_sink::InMemoryTelemetrySink;
-use crate::layer_id::LayerId;
-use crate::layer_manifest::LayerManifest;
 use crate::log_record::LogRecord;
 use crate::log_sink::LogSink;
 use crate::message_id::MessageId;
@@ -74,16 +72,6 @@ impl KernelApi {
     /// kernel never exports them externally.
     pub fn record_metric(&self, sink: &mut impl TelemetrySink, metric: TelemetryMetric) {
         sink.record(metric);
-    }
-
-    /// The canonical kernel (Layer 00) manifest.
-    pub fn kernel_manifest(&self) -> LayerManifest {
-        LayerManifest::kernel()
-    }
-
-    /// Begin a manifest for a higher layer at `index` named `name`.
-    pub fn layer_manifest(&self, index: u16, name: &'static str) -> LayerManifest {
-        LayerManifest::new(index, name)
     }
 
     /// Construct a validated fixed timestep of `nanos` nanoseconds.
@@ -155,11 +143,6 @@ impl KernelApi {
         HandleId::from_raw(raw)
     }
 
-    /// Construct a [`LayerId`] from a raw value.
-    pub const fn layer_id(&self, raw: u64) -> LayerId {
-        LayerId::from_raw(raw)
-    }
-
     /// Construct a [`MessageId`] from a raw value.
     pub const fn message_id(&self, raw: u64) -> MessageId {
         MessageId::from_raw(raw)
@@ -179,12 +162,9 @@ mod tests {
     use crate::tick::Tick;
 
     #[test]
-    fn facade_exposes_schema_and_kernel_manifest() {
+    fn facade_exposes_schema_version() {
         let api = KernelApi::new();
         assert_eq!(api.schema_version(), SchemaVersion::new(0, 1));
-        let manifest = api.kernel_manifest();
-        assert_eq!(manifest.name(), "axiom-kernel");
-        assert!(manifest.validate().is_ok());
     }
 
     #[test]
@@ -283,24 +263,12 @@ mod tests {
     }
 
     #[test]
-    fn facade_validates_a_higher_layer_manifest() {
-        use crate::layer_dependency::LayerDependency;
-        let api = KernelApi::new();
-        let manifest = api
-            .layer_manifest(1, "axiom-fake")
-            .with_dependency(LayerDependency::new(0))
-            .unwrap();
-        assert!(manifest.validate().is_ok());
-    }
-
-    #[test]
     fn facade_id_constructors_cover_every_id_type() {
         let api = KernelApi::new();
         assert!(api.entity_id(1).is_valid());
         assert!(api.resource_id(1).is_valid());
         assert!(api.asset_id(1).is_valid());
         assert!(api.handle_id(1).is_valid());
-        assert!(api.layer_id(1).is_valid());
         assert!(api.message_id(1).is_valid());
     }
 }

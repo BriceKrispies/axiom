@@ -12,11 +12,8 @@ use axiom_kernel::KernelApi;
 fn the_only_public_name_drives_every_capability() {
     let api = KernelApi::new();
 
-    // Schema + kernel manifest.
+    // Schema.
     assert_eq!(api.schema_version().major(), 0);
-    let manifest = api.kernel_manifest();
-    assert_eq!(manifest.name(), "axiom-kernel");
-    manifest.validate().expect("kernel manifest is valid");
 
     // Deterministic clock.
     let step = api.fixed_step(16_666_667).expect("positive step");

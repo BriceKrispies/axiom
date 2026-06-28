@@ -409,7 +409,7 @@ fn check_proof_exports(
                             ViolationKind::ProofReferenceMissing,
                             name,
                             format!(
-                                "proof export `{}` does not reference any required previous-layer symbol \
+                                "proof export `{}` does not reference any required depended-layer symbol \
                                  {:?}; its implementation must use at least one of them",
                                 pe.export, pe.must_reference
                             ),

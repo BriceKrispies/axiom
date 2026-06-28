@@ -7,9 +7,9 @@
 /// engine resolves it into real mesh data (via `axiom-resources`) when the app
 /// runs. Scaling is the node `Transform`'s job, so primitives need no size param.
 ///
-/// This is a fieldless enum whose discriminant order (Cube=0, Plane=1, Sphere=2)
-/// is the index into the resolver's generator table — adding a variant means
-/// adding its generator at the matching index.
+/// This is a fieldless enum whose discriminant order (Cube=0, Plane=1, Sphere=2,
+/// Cylinder=3) is the index into the resolver's generator table — adding a
+/// variant means adding its generator at the matching index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mesh {
     /// The engine's built-in unit cube (±0.5 on each axis).
@@ -18,6 +18,8 @@ pub enum Mesh {
     Plane,
     /// The engine's built-in unit UV sphere (radius 0.5).
     Sphere,
+    /// The engine's built-in unit cylinder (radius 0.5, height 1).
+    Cylinder,
 }
 
 impl Mesh {
@@ -35,6 +37,11 @@ impl Mesh {
     pub const fn sphere() -> Self {
         Mesh::Sphere
     }
+
+    /// The built-in unit cylinder.
+    pub const fn cylinder() -> Self {
+        Mesh::Cylinder
+    }
 }
 
 #[cfg(test)]
@@ -46,13 +53,15 @@ mod tests {
         assert_eq!(Mesh::cube(), Mesh::Cube);
         assert_eq!(Mesh::plane(), Mesh::Plane);
         assert_eq!(Mesh::sphere(), Mesh::Sphere);
+        assert_eq!(Mesh::cylinder(), Mesh::Cylinder);
     }
 
     #[test]
     fn discriminant_order_indexes_the_generator_table() {
-        // The resolver indexes a 3-entry generator table by `mesh as usize`.
+        // The resolver indexes a 4-entry generator table by `mesh as usize`.
         assert_eq!(Mesh::Cube as usize, 0);
         assert_eq!(Mesh::Plane as usize, 1);
         assert_eq!(Mesh::Sphere as usize, 2);
+        assert_eq!(Mesh::Cylinder as usize, 3);
     }
 }

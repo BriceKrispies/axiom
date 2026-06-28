@@ -16,8 +16,8 @@ SPEC-00: 0 of the contract's entry points exist in TS today).
 
 ## 2. Current state (verified)
 
-- **Vector/matrix/quat/transform algebra: present.** `axiom-math` (Layer 02,
-  facade `MathApi`) exposes `Vec2`/`Vec3`/`Vec4`, `Mat4`, `Quat`, `Transform`
+- **Vector/matrix/quat/transform algebra: present.** `axiom-math`
+  (facade `MathApi`) exposes `Vec2`/`Vec3`/`Vec4`, `Mat4`, `Quat`, `Transform`
   with full algebra (constructors, dot/normalize/length, perspective/ortho/
   look-at, axis-angle, TRS compose).
 - **Pure geometry primitives: present.** `Aabb` (`contains_point`, `overlaps`,
@@ -43,7 +43,7 @@ SPEC-00: 0 of the contract's entry points exist in TS today).
 
 One layer extension, one module extension, one projection — **no new layer**.
 
-1. **Scalar helpers — extend the `axiom-math` layer (Layer 02).** Add `clamp`,
+1. **Scalar helpers — extend the `axiom-math` layer.** Add `clamp`,
    `lerp`, `normalize_angle` to the `MathApi` facade. Under the Layer Law this is
    the lowest correct home: `axiom-math` already *owns the scalar policy* (the
    `Scalar` finite-validation discipline), and these are operations over that

@@ -43,8 +43,8 @@ is a determinism break.
 
 ## Architectural placement rules (recap of the Laws these specs obey)
 
-- **Layers** (`crates/<name>/` + `layer.toml`) are the ordered spine; a layer
-  imports only lower layers it genuinely uses. New broadly-shared *primitives*
+- **Layers** (`crates/<name>/` + `layer.toml`) form a DAG; a layer imports only
+  the layers it declares in `depends_on` and genuinely uses. New broadly-shared *primitives*
   go in the kernel, not a new ceremonial layer.
 - **Engine modules** (`modules/<name>/` + `module.toml`, `allowed_modules = []`)
   are isolated capabilities exposing **one** facade. They never import another

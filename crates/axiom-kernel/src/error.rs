@@ -101,13 +101,13 @@ mod tests {
     #[test]
     fn accessors_return_constructed_parts() {
         let e = KernelError::new(
-            KernelErrorScope::Layer,
-            KernelErrorCode::SelfImport,
-            "layer imported itself",
+            KernelErrorScope::Memory,
+            KernelErrorCode::OutOfBounds,
+            "read past end of buffer",
         );
-        assert_eq!(e.scope(), KernelErrorScope::Layer);
-        assert_eq!(e.code(), KernelErrorCode::SelfImport);
-        assert_eq!(e.message(), "layer imported itself");
+        assert_eq!(e.scope(), KernelErrorScope::Memory);
+        assert_eq!(e.code(), KernelErrorCode::OutOfBounds);
+        assert_eq!(e.message(), "read past end of buffer");
     }
 }
 

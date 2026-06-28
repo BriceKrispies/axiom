@@ -633,8 +633,8 @@ fn check_forward_dependencies(
                             });
                     })
                 });
-            // Pairs not listed above are allowed: layer→layer (layer-law
-            // ordering), {layer,module,app}→support, tool→* (tools depend on
+            // Pairs not listed above are allowed: layer→layer (the layer DAG,
+            // validated by depends_on), {layer,module,app}→support, tool→* (tools depend on
             // anything), and support→* (support depends only on externals).
                 });
         });
