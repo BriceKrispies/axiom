@@ -47,6 +47,7 @@ members = [
     "modules/axiom-worldsave",
     "modules/axiom-physics",
     "modules/axiom-audio",
+    "modules/axiom-draw2d",
     "modules/axiom-agent",
     "modules/axiom-agent-harness",
     "modules/axiom-perception",

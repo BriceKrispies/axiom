@@ -29,6 +29,7 @@ mod vec4;
 
 mod quat;
 
+mod mat3;
 mod mat4;
 
 mod transform;
@@ -64,6 +65,7 @@ pub use math_result::MathResult;
 // store transforms, build cameras, declare bounds, and so on. None of
 // them carry hidden state; they are plain data with deterministic
 // methods.
+pub use mat3::Mat3;
 pub use mat4::Mat4;
 pub use quat::Quat;
 pub use transform::Transform;
