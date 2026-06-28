@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 
 use axiom_ecs::EntityHandle;
+use axiom_kernel::{Tick, TickSchedule};
 
 use crate::ids::ProcessId;
 use crate::process::ProcessKind;
@@ -20,8 +21,8 @@ use crate::process_handler::{HandlerSpec, ProcessOutput};
 use crate::process_lifecycle::{
     ProcessExecutionRecord, ProcessLifecycle, ProcessStatus, ProcessTransition,
 };
-use crate::process_wake_queue::{ProcessWakeQueue, WakeReason};
 use crate::sim_tick::SimTick;
+use crate::wake_reason::WakeReason;
 
 /// A scheduler-managed process: its kind, subject, lifecycle, and handler spec.
 #[derive(Debug, Clone, Copy)]
@@ -156,7 +157,11 @@ fn is_terminal(status: ProcessStatus) -> bool {
 #[derive(Debug, Clone, Default)]
 pub struct ProcessScheduler {
     processes: BTreeMap<ProcessId, SchedProcess>,
-    wake_queue: ProcessWakeQueue,
+    // The kernel's deterministic `(tick, id)`-ordered schedule, keyed on
+    // `ProcessId` and carrying a `WakeReason` payload. sim-core no longer owns a
+    // bespoke wake queue: the ordering/bookkeeping live in the kernel primitive,
+    // converting `SimTick` <-> kernel `Tick` (both `u64` newtypes) at this seam.
+    wake_queue: TickSchedule<ProcessId, WakeReason>,
     dependencies: DependencySet,
     pending: Vec<(ProcessId, ProcessOutput)>,
     executions: Vec<ProcessExecutionRecord>,
@@ -168,7 +173,7 @@ impl ProcessScheduler {
     pub fn new() -> Self {
         ProcessScheduler {
             processes: BTreeMap::new(),
-            wake_queue: ProcessWakeQueue::new(),
+            wake_queue: TickSchedule::new(),
             dependencies: DependencySet::new(),
             pending: Vec::new(),
             executions: Vec::new(),
@@ -223,7 +228,8 @@ impl ProcessScheduler {
     ) -> bool {
         let exists = self.processes.contains_key(&process);
         exists.then(|| {
-            self.wake_queue.schedule(process, tick, reason);
+            self.wake_queue
+                .schedule(process, Tick::new(tick.raw()), reason);
             self.processes
                 .get_mut(&process)
                 .map(|p| p.lifecycle.transition(ProcessStatus::Sleeping, None, tick));
@@ -280,12 +286,10 @@ impl ProcessScheduler {
     /// `Running`, and return the runnable due processes in `(tick, id)` order.
     /// Terminal/missing entries are skipped (clean dead-entry handling).
     pub(crate) fn take_due(&mut self, tick: SimTick) -> Vec<DueProcess> {
-        let entries = self.wake_queue.pop_due(tick);
+        let entries = self.wake_queue.pop_due(Tick::new(tick.raw()));
         entries
             .into_iter()
-            .filter_map(|entry| {
-                let process = entry.process();
-                let reason = entry.reason();
+            .filter_map(|(process, reason)| {
                 self.processes.get_mut(&process).and_then(|sched| {
                     let alive = !is_terminal(sched.lifecycle.status());
                     alive.then(|| {
@@ -331,7 +335,7 @@ impl ProcessScheduler {
             .and_then(|sched| sched.lifecycle.transition(target, None, tick));
         reschedule.into_iter().for_each(|at| {
             self.wake_queue
-                .schedule(process, at, WakeReason::Rescheduled)
+                .schedule(process, Tick::new(at.raw()), WakeReason::Rescheduled)
         });
         transition
     }
@@ -348,12 +352,18 @@ impl ProcessScheduler {
 
     /// The pending wake tick of a process, if any.
     pub fn pending_wake(&self, process: ProcessId) -> Option<SimTick> {
-        self.wake_queue.pending_tick(process)
+        self.wake_queue
+            .pending(process)
+            .map(|tick| SimTick::new(tick.raw()))
     }
 
     /// The processes due at or before `tick`, without consuming them (inspection).
     pub fn due_processes(&self, tick: SimTick) -> Vec<ProcessId> {
-        self.wake_queue.due_at(tick)
+        self.wake_queue
+            .peek_due(Tick::new(tick.raw()))
+            .into_iter()
+            .map(|(process, _)| process)
+            .collect()
     }
 
     /// The number of pending wakes in the queue.

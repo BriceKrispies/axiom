@@ -60,7 +60,6 @@ mod process;
 mod process_dependency;
 mod process_handler;
 mod process_lifecycle;
-mod process_wake_queue;
 mod quantity;
 mod relation;
 mod residue;
@@ -69,6 +68,7 @@ mod sim_tick;
 mod sim_world;
 mod tissue;
 mod transfer;
+mod wake_reason;
 mod wound;
 
 pub use facade::SimCoreApi;

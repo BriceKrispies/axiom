@@ -27,7 +27,7 @@ use crate::dirty_set::{DirtyKind, DirtySet};
 use crate::process_dependency::{DependencyKind, ProcessDependency};
 use crate::process_handler::{HandlerSpec, ProcessContext, ProcessHandler};
 use crate::process_lifecycle::{ProcessExecutionRecord, ProcessStatus};
-use crate::process_wake_queue::WakeReason;
+use crate::wake_reason::WakeReason;
 use crate::scheduler::{
     ProcessExecutionOrder, ProcessScheduler, SchedulerBoundary, SchedulerStep, SchedulerStepResult,
 };

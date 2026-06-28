@@ -51,6 +51,7 @@ members = [
     "modules/axiom-perception",
     "modules/axiom-grid",
     "modules/axiom-tween",
+    "modules/axiom-tick",
     "modules/axiom",
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",
