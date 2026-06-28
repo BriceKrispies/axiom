@@ -1,12 +1,16 @@
 //! Station 6 — Replay Bay.
 //!
-//! Determinism made visible. The bay itself is a simple scripted scenario (a
-//! sphere shoved sideways by an impulse, then falling onto a floor), but its real
-//! job is to be run inside the [`Crucible`]'s two-world harness: the visible world
-//! and the hidden replay world receive byte-identical inputs and therefore stay in
-//! perfect sync — and a deliberate perturbation in the replay world is *detected*
-//! (the projected states stop matching). This is the proof that "deterministic"
-//! means same-binary replay, the property the physics module actually guarantees.
+//! Determinism made visible. The bay scripts a sphere shoved sideways onto a
+//! frictional floor (so the solver's tangential friction pass bleeds off the
+//! slide) **and** a second sphere driven by a torque (so the angular integrator
+//! advances its orientation). Its real job is to run inside the [`Crucible`]'s
+//! two-world harness: the visible world and the hidden replay world receive
+//! byte-identical inputs and therefore stay in perfect sync — including their
+//! rotation and angular-velocity state, which the projected `BodyState` now
+//! carries — and a deliberate perturbation in the replay world is *detected* (the
+//! projected states stop matching). This is the proof that "deterministic" means
+//! same-binary replay, the property the physics module guarantees, now extended
+//! to the friction and angular paths.
 
 use axiom::prelude::Vec3;
 
@@ -17,6 +21,9 @@ use crate::physics_crucible_app::CrucibleWorld;
 
 /// The step at which the bay shoves its sphere sideways (deterministic input).
 const SHOVE_STEP: u64 = 2;
+
+/// The step at which the bay spins up its second sphere with a torque.
+const SPIN_STEP: u64 = 1;
 
 /// Station 6 — the replay proof scenario.
 #[derive(Debug, Default)]
@@ -29,9 +36,15 @@ impl Station for ReplayBay {
 
     fn populate(&self, world: &mut CrucibleWorld) {
         world.spawn(self.id(), BodySpec::static_plane(Vec3::UNIT_Y, 0.0));
+        // Index 1: the shoved slider — falls onto the floor and grips via friction.
         world.spawn(
             self.id(),
             BodySpec::dynamic_sphere(Vec3::new(-2.0, 4.0, 0.0), 0.5, 1.0),
+        );
+        // Index 2: a free spinner driven by a torque (proves angular replay).
+        world.spawn(
+            self.id(),
+            BodySpec::dynamic_sphere(Vec3::new(2.0, 4.0, 0.0), 0.5, 1.0),
         );
     }
 
@@ -39,6 +52,11 @@ impl Station for ReplayBay {
         if step == SHOVE_STEP {
             if let Some(ball) = world.nth_body(self.id(), 1) {
                 world.apply_impulse(ball, Vec3::new(3.0, 0.0, 0.0));
+            }
+        }
+        if step == SPIN_STEP {
+            if let Some(spinner) = world.nth_body(self.id(), 2) {
+                world.apply_torque(spinner, Vec3::new(0.0, 2.0, 0.0));
             }
         }
     }
@@ -82,12 +100,34 @@ mod tests {
     }
 
     #[test]
+    fn the_torqued_sphere_acquires_spin_and_advances_its_orientation() {
+        let bay = ReplayBay;
+        let mut world = CrucibleWorld::new();
+        bay.populate(&mut world);
+        let spinner = world.nth_body(CrucibleStation::ReplayBay, 2).unwrap();
+        for n in 0..10 {
+            bay.script(&mut world, n);
+            world.step(n);
+        }
+        let state = world
+            .body_states()
+            .into_iter()
+            .find(|b| b.handle == spinner)
+            .unwrap();
+        // The torque about +Y produced angular velocity and rotated the body away
+        // from the identity orientation [0, 0, 0, 1].
+        assert!(state.angular.y > 0.0, "torque produced +Y spin: {:?}", state.angular);
+        assert!(state.rotation[1].abs() > 0.0, "orientation advanced: {:?}", state.rotation);
+        assert_ne!(state.rotation, [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
     fn identical_worlds_stay_in_perfect_sync() {
         let mut crucible = Crucible::new(only_replay());
         crucible.run();
         assert!(
             crucible.replay_matches(),
-            "two identically-driven worlds must agree"
+            "two identically-driven worlds must agree (translation, rotation, spin)"
         );
     }
 

@@ -1,6 +1,6 @@
 //! A single rigid body's mutable simulation state.
 
-use axiom_math::{Transform, Vec3};
+use axiom_math::{Quat, Transform, Vec3};
 
 use crate::force_accumulator::ForceAccumulator;
 use crate::mass_properties::MassProperties;
@@ -13,9 +13,10 @@ use crate::physics_body_kind::PhysicsBodyKind;
 /// gameplay — only its own deterministic transform, velocities, accumulated
 /// forces, and mass.
 ///
-/// Angular state (`angular_velocity`) is stored and surfaced in snapshots, but
-/// the integrator never changes it and never rotates the body — rotational
-/// dynamics are a documented deferral (see `ARCHITECTURE.md` / `ROADMAP.md`).
+/// Angular state (`angular_velocity`) is integrated from accumulated torque and
+/// the body's inverse inertia, and the integrator advances the transform's
+/// orientation from it each step (see `integrator.rs`); both are surfaced in
+/// snapshots.
 #[derive(Debug, Clone)]
 pub(crate) struct PhysicsBody {
     handle: PhysicsBodyHandle,
@@ -71,8 +72,18 @@ impl PhysicsBody {
         self.angular_velocity
     }
 
+    pub(crate) fn set_angular_velocity(&mut self, velocity: Vec3) {
+        self.angular_velocity = velocity;
+    }
+
     pub(crate) fn mass_properties(&self) -> MassProperties {
         self.mass_properties
+    }
+
+    /// Replace the body's mass properties. Used when a collider is attached to a
+    /// dynamic body so the body's inverse inertia reflects the collider's shape.
+    pub(crate) fn set_mass_properties(&mut self, mass_properties: MassProperties) {
+        self.mass_properties = mass_properties;
     }
 
     pub(crate) fn enabled(&self) -> bool {
@@ -92,15 +103,17 @@ impl PhysicsBody {
     }
 
     /// `true` iff every component of this body's stored simulation state
-    /// (translation, scale, linear and angular velocity) is finite. The
-    /// integrator only ever writes translation and linear velocity, but checking
-    /// all four guarantees a committed body — and therefore every snapshot — can
-    /// never carry a `NaN`/`±∞`. Orientation is never mutated, so it stays the
-    /// validated finite value it was created with.
+    /// (translation, scale, orientation, and linear and angular velocity) is
+    /// finite. The integrator now writes translation, linear velocity, the
+    /// orientation quaternion, and angular velocity, so all five are screened —
+    /// guaranteeing a committed body, and therefore every snapshot, can never
+    /// carry a `NaN`/`±∞` (the orientation integrate clamps its normalize divide,
+    /// but checking it here keeps the atomic-rollback guarantee total).
     pub(crate) fn is_finite_state(&self) -> bool {
         let t = self.transform;
         vec3_is_finite(t.translation)
             & vec3_is_finite(t.scale)
+            & quat_is_finite(t.rotation)
             & vec3_is_finite(self.linear_velocity)
             & vec3_is_finite(self.angular_velocity)
     }
@@ -109,6 +122,11 @@ impl PhysicsBody {
 /// `true` iff every component of `v` is finite.
 fn vec3_is_finite(v: Vec3) -> bool {
     v.x.is_finite() & v.y.is_finite() & v.z.is_finite()
+}
+
+/// `true` iff every component of orientation quaternion `q` is finite.
+fn quat_is_finite(q: Quat) -> bool {
+    q.x.is_finite() & q.y.is_finite() & q.z.is_finite() & q.w.is_finite()
 }
 
 #[cfg(test)]
@@ -142,14 +160,32 @@ mod tests {
         assert_eq!(b.transform().translation, Vec3::new(1.0, 2.0, 3.0));
         b.set_linear_velocity(Vec3::new(4.0, 0.0, 0.0));
         assert_eq!(b.linear_velocity(), Vec3::new(4.0, 0.0, 0.0));
+        b.set_angular_velocity(Vec3::new(0.0, 5.0, 0.0));
+        assert_eq!(b.angular_velocity(), Vec3::new(0.0, 5.0, 0.0));
         b.set_enabled(false);
         assert!(!b.enabled());
-        b.forces_mut().apply_force(Vec3::ONE);
-        assert_eq!(b.forces().force(), Vec3::ONE);
+        b.forces_mut().apply_torque(Vec3::ONE);
+        assert_eq!(b.forces().torque(), Vec3::ONE);
     }
 
     #[test]
-    fn is_finite_state_detects_a_non_finite_velocity_or_transform() {
+    fn set_mass_properties_updates_inverse_inertia() {
+        use crate::physics_collider_shape::PhysicsColliderShape;
+        use axiom_kernel::Meters;
+        let mut b = dynamic_body();
+        assert_eq!(b.mass_properties().inverse_inertia(), Vec3::ZERO);
+        let sphere = PhysicsColliderShape::sphere(Meters::new(1.0).unwrap()).unwrap();
+        let mp = b.mass_properties().with_inertia_for(sphere);
+        b.set_mass_properties(mp);
+        // mass 2, radius 1: I = 0.4*2 = 0.8 -> inverse 1.25 on every axis.
+        let inv = b.mass_properties().inverse_inertia();
+        assert!((inv.x - 1.25).abs() < 1.0e-6);
+        assert!((inv.y - 1.25).abs() < 1.0e-6);
+        assert!((inv.z - 1.25).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn is_finite_state_detects_a_non_finite_velocity_transform_or_rotation() {
         let mut b = dynamic_body();
         assert!(b.is_finite_state());
         b.set_linear_velocity(Vec3::new(f32::INFINITY, 0.0, 0.0));
@@ -157,6 +193,14 @@ mod tests {
         let mut c = dynamic_body();
         c.set_transform(Transform::from_translation(Vec3::new(f32::NAN, 0.0, 0.0)));
         assert!(!c.is_finite_state());
+        // A non-finite angular velocity is caught.
+        let mut d = dynamic_body();
+        d.set_angular_velocity(Vec3::new(0.0, f32::NAN, 0.0));
+        assert!(!d.is_finite_state());
+        // A non-finite orientation quaternion is caught.
+        let mut e = dynamic_body();
+        e.set_transform(Transform::from_rotation(Quat::new(f32::NAN, 0.0, 0.0, 1.0)));
+        assert!(!e.is_finite_state());
     }
 
     #[test]

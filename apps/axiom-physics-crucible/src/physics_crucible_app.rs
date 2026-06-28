@@ -162,6 +162,11 @@ impl CrucibleWorld {
             .expect("apply impulse");
     }
 
+    /// Queue a continuous torque on a body (applied at the next step).
+    pub fn apply_torque(&mut self, body: PhysicsBodyHandle, torque: Vec3) {
+        self.physics.apply_torque(body, torque).expect("apply torque");
+    }
+
     /// Queue enabling a body.
     pub fn enable(&mut self, body: PhysicsBodyHandle) {
         self.physics.enable_body(body).expect("enable body");
@@ -190,11 +195,16 @@ impl CrucibleWorld {
             .snapshot()
             .bodies()
             .iter()
-            .map(|b| BodyState {
-                handle: b.handle(),
-                translation: b.transform().translation,
-                linear_velocity: b.linear_velocity(),
-                enabled: b.enabled(),
+            .map(|b| {
+                let r = b.transform().rotation;
+                BodyState {
+                    handle: b.handle(),
+                    translation: b.transform().translation,
+                    linear_velocity: b.linear_velocity(),
+                    rotation: [r.x, r.y, r.z, r.w],
+                    angular: b.angular_velocity(),
+                    enabled: b.enabled(),
+                }
             })
             .collect()
     }
@@ -230,6 +240,7 @@ impl CrucibleWorld {
             broad_phase_pair_count: r.broad_phase_pair_count(),
             contact_pair_count: r.contact_pair_count(),
             solved_contact_count: r.solved_contact_count(),
+            frictioned_contact_count: r.frictioned_contact_count(),
             solver_iteration_count: r.solver_iteration_count(),
             substep_count: r.substep_count(),
         }

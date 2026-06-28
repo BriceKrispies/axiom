@@ -54,6 +54,7 @@ mod tests {
             broad_phase_pair_count: 0,
             contact_pair_count: 0,
             solved_contact_count: 0,
+            frictioned_contact_count: 0,
             solver_iteration_count: 8,
             substep_count: 1,
         }
@@ -74,6 +75,8 @@ mod tests {
             handle: PhysicsBodyHandle::from_raw(1),
             translation: Vec3::ZERO,
             linear_velocity: Vec3::ZERO,
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            angular: Vec3::ZERO,
             enabled: true,
         }
     }

@@ -100,7 +100,7 @@ fn shape_kind_is_observable_without_naming_internal_enum() {
 #[test]
 fn latest_contact_report_exposes_contact_point_and_normal() {
     // A sphere penetrating a static plane; after a step the contact is reported.
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let mat = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
     let ground = api.create_static_body(Transform::IDENTITY).unwrap();
     api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), mat, false).unwrap();
@@ -129,7 +129,7 @@ fn contact_report_order_is_deterministic() {
     // Two spheres resting on a plane produce two sphere/plane contacts; their
     // report order (by ascending collider handle) must be identical across worlds.
     let run = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
         let mat = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let ground = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), mat, false).unwrap();
@@ -156,7 +156,7 @@ fn contact_report_order_is_deterministic() {
 
 #[test]
 fn integration_surface_does_not_mutate_world() {
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let mat = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
     let ground = api.create_static_body(Transform::IDENTITY).unwrap();
     api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), mat, false).unwrap();

@@ -115,6 +115,8 @@ mod tests {
             handle: PhysicsBodyHandle::from_raw(handle),
             translation: Vec3::new(1.0, 2.0, 3.0),
             linear_velocity: Vec3::ZERO,
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            angular: Vec3::ZERO,
             enabled,
         }
     }

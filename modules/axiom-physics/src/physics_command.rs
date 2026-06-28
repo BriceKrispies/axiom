@@ -11,7 +11,7 @@ use axiom_math::Vec3;
 
 use crate::physics_body_handle::PhysicsBodyHandle;
 
-/// The four deterministic command kinds. The discriminant order is load-bearing:
+/// The five deterministic command kinds. The discriminant order is load-bearing:
 /// it indexes the command-apply table in `physics_world.rs`, so the two must stay
 /// in lock-step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +24,8 @@ pub(crate) enum PhysicsCommandKind {
     EnableBody,
     /// Disable a body.
     DisableBody,
+    /// Add a continuous torque to a dynamic body.
+    ApplyTorque,
 }
 
 /// One queued command: a kind discriminant plus a flat payload (`body`, and a
@@ -51,6 +53,15 @@ impl PhysicsCommand {
             kind: PhysicsCommandKind::ApplyImpulse,
             body,
             vector: impulse,
+        }
+    }
+
+    /// Stage a continuous torque on `body`.
+    pub(crate) fn apply_torque(body: PhysicsBodyHandle, torque: Vec3) -> Self {
+        PhysicsCommand {
+            kind: PhysicsCommandKind::ApplyTorque,
+            body,
+            vector: torque,
         }
     }
 
@@ -104,6 +115,10 @@ mod tests {
         assert_eq!(j.kind(), PhysicsCommandKind::ApplyImpulse);
         assert_eq!(j.vector(), Vec3::new(0.0, 2.0, 0.0));
 
+        let t = PhysicsCommand::apply_torque(b, Vec3::new(0.0, 0.0, 3.0));
+        assert_eq!(t.kind(), PhysicsCommandKind::ApplyTorque);
+        assert_eq!(t.vector(), Vec3::new(0.0, 0.0, 3.0));
+
         assert_eq!(
             PhysicsCommand::enable_body(b).kind(),
             PhysicsCommandKind::EnableBody
@@ -121,6 +136,7 @@ mod tests {
         assert_eq!(PhysicsCommandKind::ApplyImpulse as usize, 1);
         assert_eq!(PhysicsCommandKind::EnableBody as usize, 2);
         assert_eq!(PhysicsCommandKind::DisableBody as usize, 3);
+        assert_eq!(PhysicsCommandKind::ApplyTorque as usize, 4);
     }
 
     #[test]

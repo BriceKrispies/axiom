@@ -38,7 +38,12 @@ impl PhysicsApi {
 
     /// Create a world from an explicit configuration, rejecting invalid values.
     /// The configuration is passed as primitive value types (the internal
-    /// `PhysicsConfig` is not part of the public surface).
+    /// `PhysicsConfig` is not part of the public surface). `linear_damping` and
+    /// `angular_damping` are per-step velocity-decay fractions in `[0, 1]`
+    /// (`Ratio`): `0` means no decay (a free body coasts forever, the engine's
+    /// prior behaviour) and `1` brings the corresponding velocity to rest in a
+    /// single step.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_config(
         gravity: Vec3,
         solver_iterations: u32,
@@ -46,6 +51,8 @@ impl PhysicsApi {
         max_colliders: u32,
         max_substeps: u32,
         sleeping_disabled: bool,
+        linear_damping: Ratio,
+        angular_damping: Ratio,
     ) -> PhysicsResult<Self> {
         PhysicsConfig::new(
             gravity,
@@ -54,6 +61,8 @@ impl PhysicsApi {
             max_colliders,
             max_substeps,
             sleeping_disabled,
+            linear_damping,
+            angular_damping,
         )
         .map(|config| PhysicsApi {
             world: PhysicsWorld::new(config),
@@ -154,6 +163,15 @@ impl PhysicsApi {
         self.world.enqueue_apply_impulse(body, impulse)
     }
 
+    /// Queue a continuous torque on a dynamic body (the angular analogue of
+    /// [`PhysicsApi::apply_force`]; applied over the next step and drained FIFO).
+    /// Rejected on a non-dynamic or disabled body, exactly like a force. The
+    /// resulting angular acceleration is `inverse_inertia ⊙ torque`, where the
+    /// body's inverse inertia is derived from its collider's shape and mass.
+    pub fn apply_torque(&mut self, body: PhysicsBodyHandle, torque: Vec3) -> PhysicsResult<()> {
+        self.world.enqueue_apply_torque(body, torque)
+    }
+
     /// Queue enabling a body.
     pub fn enable_body(&mut self, body: PhysicsBodyHandle) -> PhysicsResult<()> {
         self.world.enqueue_enable(body)
@@ -234,6 +252,15 @@ impl Default for PhysicsApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_kernel::{FrameIndex, Tick};
+
+    fn zero() -> Ratio {
+        Ratio::new(0.0).unwrap()
+    }
+
+    fn step() -> RuntimeStep {
+        RuntimeStep::new(FrameIndex::new(0), Tick::new(0), 100_000_000, 0)
+    }
 
     #[test]
     fn default_and_new_agree_and_are_debuggable() {
@@ -245,7 +272,27 @@ mod tests {
 
     #[test]
     fn with_config_rejects_invalid_configuration() {
-        assert!(PhysicsApi::with_config(Vec3::ZERO, 0, 1, 1, 1, true).is_err());
-        assert!(PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).is_ok());
+        assert!(PhysicsApi::with_config(Vec3::ZERO, 0, 1, 1, 1, true, zero(), zero()).is_err());
+        assert!(
+            PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, zero(), zero())
+                .is_ok()
+        );
+        // Damping outside [0, 1] is rejected at construction.
+        let bad = Ratio::new(2.0).unwrap();
+        assert!(PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, bad, zero()).is_err());
+    }
+
+    #[test]
+    fn apply_torque_is_accepted_on_a_dynamic_body_and_rejected_otherwise() {
+        let mut api = PhysicsApi::new();
+        let dynamic = api
+            .create_dynamic_body(Transform::IDENTITY, Ratio::new(1.0).unwrap())
+            .unwrap();
+        assert!(api.apply_torque(dynamic, Vec3::new(0.0, 1.0, 0.0)).is_ok());
+        let ground = api.create_static_body(Transform::IDENTITY).unwrap();
+        assert!(api.apply_torque(ground, Vec3::new(0.0, 1.0, 0.0)).is_err());
+        // The queued torque is drained and applied on the next step.
+        api.step(step()).unwrap();
+        assert_eq!(api.latest_step_record().command_count(), 1);
     }
 }

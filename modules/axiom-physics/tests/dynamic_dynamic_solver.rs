@@ -63,7 +63,7 @@ fn two_spheres(
     mass_b: f32,
     restitution: f32,
 ) -> (PhysicsApi, PhysicsBodyHandle, PhysicsBodyHandle) {
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(restitution), ratio(1.0)).unwrap();
     let a = api
         .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)), ratio(mass_a))
@@ -188,7 +188,7 @@ fn two_dynamic_spheres_settle_into_a_resting_stack() {
     // A static ground plane plus two vertically stacked dynamic spheres. Under
     // gravity they must come to rest in a stable stack (bottom ~0.5, top ~1.5),
     // never sinking through the plane and never going non-finite.
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
 
     let ground = api.create_static_body(Transform::IDENTITY).unwrap();

@@ -26,18 +26,20 @@
 //!
 //! ## Current scope
 //! A deterministic rigid-body world with a live collision pipeline:
-//! semi-implicit linear integration, an `O(n²)` AABB broad phase, a narrow phase
-//! generating contacts for sphere/sphere, sphere/plane, sphere/box, and box/plane
-//! pairs, and a sequential-impulse solver with restitution and Baumgarte position
-//! correction, all run under deterministic substepping with atomic non-finite
-//! rollback. Spatial queries answer exact sphere/box/plane tests, and per-step
-//! diagnostic counts and lifecycle events are reported.
+//! semi-implicit integration of both **linear and angular** motion (orientation is
+//! integrated from accumulated torque and a per-shape diagonal inverse inertia),
+//! per-world linear/angular **damping**, an `O(n²)` AABB broad phase, a narrow
+//! phase generating contacts for sphere/sphere, sphere/plane, sphere/box, and
+//! box/plane pairs, and a sequential-impulse solver with restitution, a
+//! deterministic **tangential friction** pass (Coulomb-clamped), and Baumgarte
+//! position correction, all run under deterministic substepping with atomic
+//! non-finite rollback. Spatial queries answer exact sphere/box/plane tests, and
+//! per-step diagnostic counts and lifecycle events are reported.
 //!
 //! Genuinely deferred (do not assume these exist yet — see `ARCHITECTURE.md` and
-//! `ROADMAP.md`): friction (validated and stored, but no tangential impulse is
-//! solved), capsule and box/box contacts, collision/trigger lifecycle events, and
-//! angular/rotational dynamics (angular velocity and torque are stored but never
-//! integrated).
+//! `ROADMAP.md`): capsule and box/box contacts, oriented-box (rotated) contacts,
+//! collision/trigger lifecycle events, and cross-instance (cross-build) f32
+//! determinism — replay is proven **same-binary** only.
 //!
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** behavioral facade — [`PhysicsApi`] — plus its

@@ -13,11 +13,18 @@ use axiom::prelude::Vec3;
 use axiom_physics::PhysicsBodyHandle;
 
 /// One body's state, projected from the physics snapshot.
+///
+/// `rotation` is the orientation quaternion projected as `[x, y, z, w]` — kept as
+/// a plain array so the projection never has to name the math `Quat` type, while
+/// still letting the two-world replay compare angular state exactly. `angular` is
+/// the angular velocity.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BodyState {
     pub handle: PhysicsBodyHandle,
     pub translation: Vec3,
     pub linear_velocity: Vec3,
+    pub rotation: [f32; 4],
+    pub angular: Vec3,
     pub enabled: bool,
 }
 
@@ -45,6 +52,7 @@ pub struct StepCounts {
     pub broad_phase_pair_count: u32,
     pub contact_pair_count: u32,
     pub solved_contact_count: u32,
+    pub frictioned_contact_count: u32,
     pub solver_iteration_count: u32,
     pub substep_count: u32,
 }
@@ -125,6 +133,7 @@ impl CrucibleReport {
         mix(c.broad_phase_pair_count as u64);
         mix(c.contact_pair_count as u64);
         mix(c.solved_contact_count as u64);
+        mix(c.frictioned_contact_count as u64);
         mix(c.solver_iteration_count as u64);
         mix(c.substep_count as u64);
         mix(self.live_contact_count as u64);
@@ -149,6 +158,7 @@ impl CrucibleReport {
             format!("broad_phase_pair_count: {}", c.broad_phase_pair_count),
             format!("contact_pair_count:     {}", c.contact_pair_count),
             format!("solved_contact_count:   {}", c.solved_contact_count),
+            format!("frictioned_contacts:    {}", c.frictioned_contact_count),
             format!(
                 "solver_iteration_count: {} (configured budget, not work)",
                 c.solver_iteration_count
@@ -162,9 +172,10 @@ impl CrucibleReport {
                 None => "query_hit_count:        unavailable (no probe this frame)".to_string(),
             },
             format!("replay_match:           {}", self.replay_match),
-            // Honest gaps: physics does not surface these (see README / physics ROADMAP).
-            "angular_state:          unavailable (rotational dynamics deferred)".to_string(),
-            "friction_impulse:       unavailable (tangential solve deferred)".to_string(),
+            // Angular dynamics and friction now resolve live (SPEC-10); angular
+            // state rides each body's projected rotation/angular fields and
+            // friction work is the `frictioned_contacts` count above.
+            // Honest remaining gap: physics does not surface these yet.
             "collision_events:       unavailable (lifecycle events deferred)".to_string(),
         ]
     }
@@ -196,6 +207,7 @@ mod tests {
             broad_phase_pair_count: 5,
             contact_pair_count: 2,
             solved_contact_count: 1,
+            frictioned_contact_count: 1,
             solver_iteration_count: 8,
             substep_count: 1,
         }
@@ -206,6 +218,8 @@ mod tests {
             handle: PhysicsBodyHandle::from_raw(raw),
             translation: Vec3::new(0.0, raw as f32, 0.0),
             linear_velocity: Vec3::ZERO,
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            angular: Vec3::ZERO,
             enabled: true,
         }
     }
@@ -236,11 +250,13 @@ mod tests {
     }
 
     #[test]
-    fn lines_mark_deferred_fields_unavailable() {
+    fn lines_report_friction_work_and_mark_remaining_gaps_unavailable() {
         let report = CrucibleReport::build(1, &[state(1)], &counts(), &[], 0, false);
         let text = report.render();
+        // Friction now resolves live, so its work is reported, not "unavailable".
+        assert!(text.contains("frictioned_contacts:    1"));
+        // Lifecycle events remain a documented gap.
         assert!(text.contains("collision_events:       unavailable"));
-        assert!(text.contains("friction_impulse:       unavailable"));
         assert!(text.contains("query_hit_count:        unavailable"));
         assert!(text.contains("replay_match:           false"));
     }

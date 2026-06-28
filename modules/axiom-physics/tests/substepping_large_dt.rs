@@ -48,7 +48,7 @@ fn vel(api: &PhysicsApi, h: PhysicsBodyHandle) -> Vec3 {
 
 #[test]
 fn max_substeps_is_consumed_by_step() {
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 5, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 5, true, ratio(0.0), ratio(0.0)).unwrap();
     api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
     api.step(tenth_second()).unwrap();
     assert_eq!(api.latest_step_record().substep_count(), 5, "the configured substeps are run");
@@ -60,7 +60,7 @@ fn max_substeps_one_preserves_existing_behavior() {
     // v = g*dt, then position += v*dt = g*dt^2. Compute the expected value with the
     // identical f32 arithmetic the integrator uses.
     let gravity_y = -10.0_f32;
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, gravity_y, 0.0), 8, 16, 16, 1, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::new(0.0, gravity_y, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let body = api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
     api.step(tenth_second()).unwrap();
 
@@ -76,7 +76,7 @@ fn large_step_is_substepped_and_does_not_tunnel_through_plane() {
     // A sphere given a strong downward velocity above a static plane. Over a single
     // huge step it would shoot far below the plane; substepping catches the contact.
     let build = |substeps: u32| {
-        let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, substeps, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, substeps, true, ratio(0.0), ratio(0.0)).unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let ground = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
@@ -108,7 +108,7 @@ fn large_step_is_substepped_and_does_not_tunnel_through_plane() {
 fn commands_apply_once_across_substeps() {
     // A single queued impulse must be applied once before substepping, not once per
     // substep. With 4 substeps and mass 1, the velocity must be exactly the impulse.
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 4, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 4, true, ratio(0.0), ratio(0.0)).unwrap();
     let body = api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
     api.apply_impulse(body, Vec3::new(10.0, 0.0, 0.0)).unwrap();
     api.step(tenth_second()).unwrap();
@@ -118,7 +118,7 @@ fn commands_apply_once_across_substeps() {
 
 #[test]
 fn step_completed_event_emits_once_for_outer_step() {
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 3, true).unwrap();
+    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 3, true, ratio(0.0), ratio(0.0)).unwrap();
     api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
     api.drain_events(); // clear the BodyCreated event
     api.step(tenth_second()).unwrap();
@@ -135,7 +135,7 @@ fn substep_remainder_distribution_is_deterministic() {
     // 3 substeps over 1e9 ns (not divisible by 3): the remainder is distributed
     // deterministically across substeps, so two fresh worlds must agree exactly.
     let run = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 3, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 3, true, ratio(0.0), ratio(0.0)).unwrap();
         let body = api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
         api.apply_force(body, Vec3::new(1.0, 0.0, 0.0)).unwrap();
         api.step(step_of(1_000_000_000)).unwrap();
@@ -147,7 +147,7 @@ fn substep_remainder_distribution_is_deterministic() {
 #[test]
 fn substepped_world_replays_identically() {
     let run = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 6, true).unwrap();
+        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 6, true, ratio(0.0), ratio(0.0)).unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.3), ratio(1.0)).unwrap();
         let ground = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
@@ -168,7 +168,7 @@ fn substepped_world_replays_identically() {
 #[test]
 fn zero_or_invalid_max_substeps_still_fails_validation() {
     assert!(
-        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 0, true).is_err(),
+        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 0, true, ratio(0.0), ratio(0.0)).is_err(),
         "max_substeps = 0 must be rejected"
     );
 }
