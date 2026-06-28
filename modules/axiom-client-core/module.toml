@@ -31,4 +31,6 @@ introduced_capabilities = [
     "monotonic-client-intent-sequence",
     "pending-intent-tracking",
     "authoritative-server-tick-tracking",
+    "unacked-intent-resimulation-cursor",
+    "interpolation-delay-cursor",
 ]

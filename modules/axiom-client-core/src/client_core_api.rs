@@ -31,7 +31,7 @@ pub struct ClientCoreApi {
     next_client_sequence: u64,
     latest_server_tick: Tick,
     last_acked_client_sequence: u64,
-    pending: Vec<u64>,
+    pending: Vec<(u64, Vec<u8>)>,
 }
 
 impl ClientCoreApi {
@@ -91,12 +91,13 @@ impl ClientCoreApi {
         (self.state == ConnectionState::Connected).then(|| {
             let sequence = self.next_client_sequence;
             self.next_client_sequence = self.next_client_sequence.saturating_add(1);
-            self.pending.push(sequence);
+            let body = payload.to_vec();
+            self.pending.push((sequence, body.clone()));
             (
                 sequence,
                 predicted_client_tick,
                 last_seen_server_tick,
-                payload.to_vec(),
+                body,
             )
         })
     }
@@ -118,7 +119,7 @@ impl ClientCoreApi {
             self.latest_server_tick = tick;
             self.last_acked_client_sequence = last_accepted_client_sequence;
             self.pending
-                .retain(|&sequence| sequence > last_accepted_client_sequence);
+                .retain(|(sequence, _)| *sequence > last_accepted_client_sequence);
         });
         ok
     }
@@ -128,7 +129,10 @@ impl ClientCoreApi {
     /// `Connected`; a rejection before `Welcome` returns `false`.
     pub fn accept_rejected_intent(&mut self, client_sequence: u64) -> bool {
         let ok = self.state == ConnectionState::Connected;
-        ok.then(|| self.pending.retain(|&sequence| sequence != client_sequence));
+        ok.then(|| {
+            self.pending
+                .retain(|(sequence, _)| *sequence != client_sequence)
+        });
         ok
     }
 
@@ -170,6 +174,25 @@ impl ClientCoreApi {
     /// The newest client sequence the server has acknowledged via a snapshot.
     pub fn last_acked_client_sequence(&self) -> u64 {
         self.last_acked_client_sequence
+    }
+
+    /// The ordered, still-unacknowledged intents — the **resimulation cursor**.
+    ///
+    /// After the client snaps to an authoritative snapshot, these are exactly the
+    /// `(client_sequence, payload)` pairs, in send order, that must be replayed on
+    /// top of that snapshot to reconcile. A snapshot acking sequence `k` has
+    /// already dropped everything `<= k`, so what remains is precisely the intents
+    /// `> k`; a rejection drops exactly its one sequence.
+    pub fn unacked_intents(&self) -> &[(u64, Vec<u8>)] {
+        &self.pending
+    }
+
+    /// The render-time interpolation cursor: the latest authoritative tick set
+    /// back by `delay_ticks`, **saturating at 0**. Presentation interpolates
+    /// remote entities toward this past tick so a late snapshot never stutters;
+    /// the value is presentation-only and never re-enters a fixed update.
+    pub fn interpolation_tick(&self, delay_ticks: u64) -> u64 {
+        self.latest_server_tick.raw().saturating_sub(delay_ticks)
     }
 }
 
@@ -354,6 +377,57 @@ mod tests {
         assert_eq!(c.latest_server_tick(), 3);
         c.accept_snapshot(8, 0);
         assert_eq!(c.latest_server_tick(), 8);
+    }
+
+    #[test]
+    fn unacked_intents_are_exactly_the_intents_after_the_acked_sequence_in_order() {
+        let mut c = connected();
+        c.next_intent(0, 0, b"a"); // seq 1
+        c.next_intent(0, 0, b"b"); // seq 2
+        c.next_intent(0, 0, b"c"); // seq 3
+        c.next_intent(0, 0, b"d"); // seq 4
+                                   // Before any ack, every intent is unacked, in send order with its payload.
+        assert_eq!(
+            c.unacked_intents(),
+            &[
+                (1, b"a".to_vec()),
+                (2, b"b".to_vec()),
+                (3, b"c".to_vec()),
+                (4, b"d".to_vec()),
+            ]
+        );
+        // Ack up to sequence 2: exactly the intents > 2 remain, in order.
+        assert!(c.accept_snapshot(10, 2));
+        assert_eq!(
+            c.unacked_intents(),
+            &[(3, b"c".to_vec()), (4, b"d".to_vec())]
+        );
+    }
+
+    #[test]
+    fn unacked_intents_drops_exactly_a_rejected_sequence() {
+        let mut c = connected();
+        c.next_intent(0, 0, b"a"); // seq 1
+        c.next_intent(0, 0, b"b"); // seq 2
+        c.next_intent(0, 0, b"c"); // seq 3
+        assert!(c.accept_rejected_intent(2));
+        // Only sequence 2 is gone; 1 and 3 remain with their payloads, in order.
+        assert_eq!(
+            c.unacked_intents(),
+            &[(1, b"a".to_vec()), (3, b"c".to_vec())]
+        );
+    }
+
+    #[test]
+    fn interpolation_tick_subtracts_the_delay_and_saturates_at_zero() {
+        let mut c = connected();
+        c.accept_snapshot(10, 0);
+        // Within range: latest_server_tick - delay.
+        assert_eq!(c.interpolation_tick(4), 6);
+        // Equal to the tick: zero, not negative.
+        assert_eq!(c.interpolation_tick(10), 0);
+        // Beyond the tick: saturates at 0 rather than underflowing.
+        assert_eq!(c.interpolation_tick(25), 0);
     }
 
     #[test]

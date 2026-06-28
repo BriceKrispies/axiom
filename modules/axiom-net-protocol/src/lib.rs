@@ -41,6 +41,7 @@
 
 mod client_id;
 mod client_intent;
+mod client_intent_for;
 mod frame;
 mod join_room;
 mod leave_room;
@@ -51,6 +52,7 @@ mod rejected_intent;
 mod room_id;
 mod server_event;
 mod server_snapshot;
+mod server_snapshot_for;
 mod welcome;
 
 pub use net_protocol_api::NetProtocolApi;
