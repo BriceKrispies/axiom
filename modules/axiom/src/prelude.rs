@@ -21,6 +21,17 @@ pub use axiom_kernel::{Meters, Ratio};
 // whole fixed steps through these, so they belong in the one authoring barrel an
 // app imports — re-exported, not re-derived (the loop arithmetic lives in `frame`).
 pub use axiom_frame::{FrameAccumulator, StepBudget};
+// The embed seam (SPEC-12), from the `host` layer the umbrella already composes:
+// the inbound session identity (`HostSessionConfig` = seed + opaque params) an app
+// decodes before tick 0, and the outbound terminal outcome (`HostOutcome`) it
+// reports once. `Score` is the single sanctioned f64 boundary. These are the
+// author-facing `getSessionConfig`/`reportOutcome` vocabulary, so they belong in
+// the one barrel an app imports. The browser channel that carries them
+// (`postMessage`, `window.location.search`) is the app's platform edge, never here.
+pub use axiom_host::{
+    HostApi, HostMetrics, HostOutcome, HostOutcomeSet, HostParamValue, HostSessionConfig,
+    HostSessionParams, PlayerId, Score,
+};
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
 
 pub use crate::angle::Angle;

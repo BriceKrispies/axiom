@@ -45,7 +45,11 @@ mod host_frame_input;
 mod host_frame_report;
 mod host_lifecycle_signal;
 mod host_lifecycle_state;
+mod host_metrics;
 mod host_orientation;
+mod host_outcome;
+mod host_outcome_set;
+mod host_param_value;
 mod host_power_preference;
 mod host_present_mode;
 mod host_presentation_report;
@@ -54,6 +58,8 @@ mod host_presentation_status;
 mod host_presentation_target;
 mod host_result;
 mod host_safe_area_insets;
+mod host_session_config;
+mod host_session_params;
 mod host_skip_reason;
 mod host_step_driver;
 mod host_step_plan;
@@ -61,6 +67,8 @@ mod host_surface_descriptor;
 mod host_surface_handle;
 mod host_viewport;
 mod pixels;
+mod player_id;
+mod score;
 
 // --- Curated public surface ---
 
@@ -83,6 +91,20 @@ pub use host_step_driver::HostStepDriver;
 pub use host_step_plan::HostStepPlan;
 pub use host_viewport::HostViewport;
 pub use pixels::Pixels;
+
+// Embed-seam boundary data types (SPEC-12): the inbound session identity and
+// the outbound terminal outcome the platform arm decodes/forwards. Primitive-
+// only, browser-free — the same discipline as every other host boundary type.
+// `Score` is the single sanctioned f64 boundary (a quantity newtype, like
+// `Pixels`); no naked float appears elsewhere on this surface.
+pub use host_metrics::HostMetrics;
+pub use host_outcome::HostOutcome;
+pub use host_outcome_set::HostOutcomeSet;
+pub use host_param_value::HostParamValue;
+pub use host_session_config::HostSessionConfig;
+pub use host_session_params::HostSessionParams;
+pub use player_id::PlayerId;
+pub use score::Score;
 
 // Presentation-boundary data types future browser/WASM adapters and a future
 // axiom-webgpu live mode must be able to name. None of these contain

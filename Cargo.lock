@@ -270,6 +270,7 @@ dependencies = [
  "axiom",
  "console_error_panic_hook",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
