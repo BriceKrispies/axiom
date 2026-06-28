@@ -157,6 +157,89 @@ impl Default for WindowingApi {
     }
 }
 
+/// The smoothing window for the frame-cadence read-out, in microseconds. Frame
+/// deltas accumulate until this much wall-clock has elapsed, then the read-out is
+/// recomputed over that window — so the displayed fps/frame-time is a stable mean,
+/// not a single jittery frame.
+///
+/// Like [`FrameClock`], this is consumed in production only by the `wasm32` live
+/// loop, so it reads as dead code on the native build (the native tests below
+/// still exercise it, keeping it covered) — the same wasm-arm-only idiom the
+/// overlay's draw plumbing uses.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+const FRAME_CLOCK_WINDOW_MICROS: u64 = 250_000;
+
+/// A windowed frame-cadence accumulator: the deterministic half of "what fps /
+/// frame-time is the live loop running at".
+///
+/// It is the engine's single owner of that measurement. The wall-clock *read*
+/// that produces each timestamp is a nondeterministic host concern and lives in
+/// the `wasm32` live loop (`web.rs`); this accumulator is fed those integer
+/// microsecond timestamps and is therefore pure, target-independent, branchless,
+/// and fully covered on native — exactly the deterministic/nondeterministic split
+/// the rest of the module keeps. An engine-driven app reads the smoothed
+/// `(fps_milli, frame_micros)` out of the run loop and feeds it to a diagnostics
+/// surface (e.g. the debug overlay); nothing here knows about that consumer.
+///
+/// Timing is integer-encoded so no naked float crosses any boundary: `fps_milli`
+/// is frames-per-second × 1000, `frame_micros` is the mean frame time in
+/// microseconds.
+///
+/// Consumed in production only by the `wasm32` live loop (the native tests below
+/// cover every line), so it is `dead_code`-allowed on native — the same idiom the
+/// overlay's wasm-only draw plumbing uses.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Debug, Default)]
+pub(crate) struct FrameClock {
+    /// The previous frame's timestamp (µs); `None` before the first frame.
+    last_micros: Option<u64>,
+    /// Wall-clock accumulated in the current window (µs).
+    window_micros: u64,
+    /// Frames accumulated in the current window.
+    window_frames: u32,
+    /// Last computed read-out: frames-per-second × 1000.
+    fps_milli: u32,
+    /// Last computed read-out: mean frame time (µs).
+    frame_micros: u32,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+impl FrameClock {
+    /// Record a frame observed at `now_micros` (a monotone wall clock in
+    /// microseconds) and return the current `(fps_milli, frame_micros)` read-out.
+    ///
+    /// The read-out is recomputed only when the window fills, so the first
+    /// `FRAME_CLOCK_WINDOW_MICROS` of play reports zeros (an honest "not measured
+    /// yet"), then a smoothed mean thereafter. Branchless: the window-full
+    /// predicate selects, per field, between the freshly-computed value and the
+    /// retained one (and resets the accumulators) via `then_some`/`unwrap_or`.
+    pub(crate) fn record(&mut self, now_micros: u64) -> (u32, u32) {
+        // We measure *intervals*, not frames: N timestamps bound N-1 deltas. The
+        // first observation only seeds the clock — it has no predecessor, so it
+        // contributes neither a delta nor an interval count. Counting it would be
+        // a fencepost error that over-reports fps by one frame per window.
+        let had_prev = self.last_micros.is_some();
+        let delta = now_micros.saturating_sub(self.last_micros.unwrap_or(now_micros));
+        self.last_micros = Some(now_micros);
+        self.window_micros += delta;
+        self.window_frames += u32::from(had_prev);
+
+        let full = self.window_micros >= FRAME_CLOCK_WINDOW_MICROS;
+        // `max(1)` keeps both divisions total before the first interval lands
+        // (window_frames/window_micros are then 0); it never alters a real,
+        // full-window result, where both are already >= 1.
+        let intervals = u64::from(self.window_frames).max(1);
+        let fps = (intervals * 1_000_000_000 / self.window_micros.max(1)) as u32;
+        let mean = (self.window_micros / intervals) as u32;
+
+        self.fps_milli = full.then_some(fps).unwrap_or(self.fps_milli);
+        self.frame_micros = full.then_some(mean).unwrap_or(self.frame_micros);
+        self.window_micros = full.then_some(0).unwrap_or(self.window_micros);
+        self.window_frames = full.then_some(0).unwrap_or(self.window_frames);
+        (self.fps_milli, self.frame_micros)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +302,59 @@ mod tests {
         assert_eq!(w.step(), 2);
         assert_eq!(w.next_tick(), 3);
         assert_eq!(w.frames_driven(), 3);
+    }
+
+    /// Record `count` frames spaced `delta` µs apart, continuing from `now`;
+    /// returns the final read-out and the advanced clock time.
+    fn drive(clock: &mut FrameClock, now: &mut u64, delta: u64, count: u32) -> (u32, u32) {
+        let mut last = (0_u32, 0_u32);
+        (0..count).for_each(|_| {
+            last = clock.record(*now);
+            *now += delta;
+        });
+        last
+    }
+
+    #[test]
+    fn frame_clock_reports_zero_until_the_window_fills() {
+        // The first frame only seeds the clock (no predecessor, no interval), and
+        // within the window the read-out stays the honest "not measured yet" zero.
+        let mut clock = FrameClock::default();
+        assert_eq!(clock.record(0), (0, 0));
+        // A handful of sub-window frames (16 ms steps) keep the read-out at zero.
+        assert_eq!(clock.record(16_000), (0, 0));
+        assert_eq!(clock.record(32_000), (0, 0));
+    }
+
+    #[test]
+    fn frame_clock_smooths_a_steady_60hz_cadence_once_the_window_fills() {
+        // A steady 16_667 µs cadence (60 Hz) drives several full windows; the
+        // trailing read-out is ~60.0 fps and ~16_667 µs mean frame time. The
+        // interval-counting fix is what keeps this at 60 (not ~64).
+        let mut clock = FrameClock::default();
+        let mut now = 0_u64;
+        let (fps_milli, frame_micros) = drive(&mut clock, &mut now, 16_667, 60);
+        assert!((59_800..=60_200).contains(&fps_milli), "fps_milli={fps_milli}");
+        assert!(
+            (16_600..=16_700).contains(&frame_micros),
+            "frame_micros={frame_micros}"
+        );
+    }
+
+    #[test]
+    fn frame_clock_resets_the_window_so_a_new_cadence_takes_over() {
+        // Drive a 60 Hz phase, then a 30 Hz phase. If the window accumulated
+        // forever the read-out would barely move; because it resets per window,
+        // the trailing read-out reflects the *new* 30 Hz cadence.
+        let mut clock = FrameClock::default();
+        let mut now = 0_u64;
+        let sixty = drive(&mut clock, &mut now, 16_667, 60);
+        assert!((59_800..=60_200).contains(&sixty.0), "sixty={sixty:?}");
+        let (fps_milli, frame_micros) = drive(&mut clock, &mut now, 33_333, 60);
+        assert!((29_800..=30_200).contains(&fps_milli), "fps_milli={fps_milli}");
+        assert!(
+            (33_200..=33_400).contains(&frame_micros),
+            "frame_micros={frame_micros}"
+        );
     }
 }

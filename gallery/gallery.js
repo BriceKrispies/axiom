@@ -130,6 +130,30 @@ export const DEMOS = [
     page: "quintet/index.html",
   },
   {
+    id: "physics-crucible",
+    title: "Physics Crucible",
+    blurb: "A live six-station physics proving room: watch bodies fall, bounce, and pile — then kick them and watch it re-settle.",
+    desc:
+      "A hostile test chamber for the engine's deterministic rigid-body physics, " +
+      "driven entirely through its public PhysicsApi and simulated live. Six stations " +
+      "sit in a grid: Body Bay (static / dynamic / kinematic / disabled bodies), " +
+      "Contact Bay (sphere/plane, sphere/sphere, sphere/box, box/plane contacts), " +
+      "Material Bay (a restitution bounce ladder), Query Bay (raycast + overlap-" +
+      "sphere), Stress Bay (a deterministic sphere pile), and Replay Bay (a second " +
+      "hidden world kept byte-identical to prove same-input determinism). The camera " +
+      "orbits while the physics plays out; colour encodes each body's role and " +
+      "markers show contacts. ▲ / Space / K kick every dynamic body upward so the " +
+      "pile scatters and re-settles; ▼ / R reset and re-drop. The room loops on its " +
+      "own. (WebGPU, with a WebGL2 / Canvas2D fallback.)",
+    dir: "physics-crucible",
+    jsModule: "axiom_physics_crucible",
+    canvasId: "axiom-physics-crucible-canvas",
+    buttons: [
+      { key: "ArrowUp", label: "KICK", pos: "up" },
+      { key: "ArrowDown", label: "RESET", pos: "down" },
+    ],
+  },
+  {
     id: "harness",
     title: "Debug Overlay",
     blurb: "A backquote-toggled developer debug overlay + command console for the engine's browser surface.",

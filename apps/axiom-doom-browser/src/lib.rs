@@ -311,6 +311,21 @@ impl DoomGame {
         (self.px, self.pz, self.yaw, self.pitch)
     }
 
+    /// The number of enemy slots (live or dead). Their stable [`Player`] indices
+    /// are `0..enemy_count()` — the subject ids a perceiving agent tracks them by
+    /// (a respawn reuses the same index, so the id is stable across a kill).
+    pub fn enemy_count(&self) -> usize {
+        self.enemies.len()
+    }
+
+    /// The world Y a perception/aim ray is cast at — the enemy centre height, so a
+    /// horizontal probe meets both enemy boxes and full-height walls (the same
+    /// height [`Self::fire_shot`] aims at). The perception adapter casts its sight
+    /// rays from here.
+    pub fn sight_height(&self) -> f32 {
+        self.level.tun.enemy_y
+    }
+
     /// Teleport the player to an absolute pose, returning the one corrective
     /// [`FirstPersonInput`] that moves the engine's camera there in a single tick.
     /// The controller applies the yaw first, then moves by `Ry(-yaw)·move_local`,
@@ -913,10 +928,21 @@ fn block(x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32) -> Transform {
 #[cfg(target_arch = "wasm32")]
 mod web;
 
-// The native agent bridge (drive the game from JSON, read back state/images).
-// Native + `agent`-feature only, so the wasm build and default gates skip it.
+// The DOOM agent: drives the real game through the reusable `axiom-agent` module
+// (observe → decide → emit player-equivalent intents) and owns the app-side
+// translation between the module's neutral contracts and the DOOM `Intent`. The
+// native HTTP bridge bin sits on top of it. Native + `agent`-feature only, so the
+// wasm build and default gates skip it.
 #[cfg(all(feature = "agent", not(target_arch = "wasm32")))]
 pub mod agent;
+
+// Live, game-agnostic perception: the app-side sense adapter that casts the
+// reusable `axiom-perception` ray-fan against this game's engine world, classifies
+// hits by their entity-native `Tag`, tracks moving enemies, and feeds the neutral
+// facts through the same `axiom-agent` loop — so the agent genuinely sees and
+// reasons about what it sees. Native + `agent`-feature only.
+#[cfg(all(feature = "agent", not(target_arch = "wasm32")))]
+pub mod perception;
 
 #[cfg(test)]
 mod tests {

@@ -54,6 +54,12 @@ const AREA_EPS: f32 = 1e-6;
 /// rasterizing; smaller ones are sub-pixel (invisible) and culled. Critical
 /// coverage is exempt (its small triangles are handled by LOD, never lost).
 const MIN_TRIANGLE_AREA: f32 = 0.5;
+/// Minimum *total* on-screen coverage (px²) below which a draw is genuinely
+/// negligible noise. At or above it the draw is visible and must render at least
+/// its footprint: even when every one of its triangles is individually sub-pixel
+/// (a finely-tessellated object — e.g. a distant sphere), the per-triangle cull
+/// must not be allowed to erase the whole draw. See the rescue in `convert_draw`.
+const MIN_VISIBLE_COVERAGE: f32 = 1.0;
 
 /// The near-plane clip threshold in homogeneous `w`. A clip-space vertex is kept
 /// only where `cw >= W_NEAR`; the rest of its triangle is clipped away at the
@@ -375,25 +381,11 @@ fn convert_draw(
     let importance = classify(coverage, screen_px2);
     let is_critical = importance == CanvasFallbackImportance::CriticalCoverage;
 
-    // Sub-pixel cull for non-critical draws (in place); critical keeps all.
-    let before_min = acc.candidates.len();
-    acc.candidates
-        .retain(|c| is_critical | (c.area >= MIN_TRIANGLE_AREA));
-    let min_culled = (before_min - acc.candidates.len()) as u32;
-
-    // Coverage-preserving LOD: keep the `cap` largest when a critical draw is
-    // over the cap (sort + truncate in place; sort only then).
-    let pre = acc.candidates.len();
-    let keep = decimation_keep(is_critical, pre, cap);
-    (pre > keep).then(|| {
-        acc.candidates.sort_by(|a, b| {
-            b.area
-                .partial_cmp(&a.area)
-                .unwrap_or(core::cmp::Ordering::Equal)
-        })
-    });
-    acc.candidates.truncate(keep);
-    let decimated = (pre - acc.candidates.len()) as u32;
+    // Cull sub-pixel detail, rescue a visible draw that would otherwise vanish,
+    // and decimate a preserved draw to the cap (see `prune_candidates`).
+    let (kept, min_culled, decimated) =
+        prune_candidates(core::mem::take(&mut acc.candidates), is_critical, coverage, cap);
+    acc.candidates = kept;
     let est_cost: u64 = acc.candidates.iter().map(|c| c.area as u64).sum();
 
     // Bake the per-triangle depth cues into each flat colour (lighting → height
@@ -551,10 +543,53 @@ fn on_screen(v: &[RasterVertex; 3], w: u32, h: u32) -> bool {
     (maxx >= 0.0) & (minx < w as f32) & (maxy >= 0.0) & (miny < h as f32)
 }
 
-/// How many triangles to keep: all of them, unless the draw is critical coverage
-/// and over `cap`, when the `cap` largest-area triangles are kept.
-fn decimation_keep(is_critical: bool, total: usize, cap: u32) -> usize {
-    let over = is_critical & (total > cap as usize);
+/// Decide which projected triangles of one draw survive, returning the kept
+/// candidates plus the `(sub_pixel_culled, decimated)` diagnostic counts.
+///
+/// Sub-pixel triangles (< `MIN_TRIANGLE_AREA`) are culled for cost — but a draw
+/// with real on-screen coverage is **never** culled to nothing. When the
+/// per-triangle cull would empty a draw whose *total* coverage is visible
+/// (≥ `MIN_VISIBLE_COVERAGE`), every triangle is kept instead (collectively they
+/// paint its footprint, exactly as a coarse mesh of the same size does) so a
+/// finely-tessellated object can't vanish by tessellation. A preserved draw
+/// (critical coverage, or a rescued visible one) over `cap` is then decimated to
+/// its `cap` largest-area triangles, bounding cost while keeping the silhouette.
+fn prune_candidates(
+    candidates: Vec<Candidate>,
+    is_critical: bool,
+    coverage: f32,
+    cap: u32,
+) -> (Vec<Candidate>, u32, u32) {
+    let before_min = candidates.len();
+    let survivors = candidates
+        .iter()
+        .filter(|c| is_critical | (c.area >= MIN_TRIANGLE_AREA))
+        .count();
+    let keep_all = (survivors == 0) & (coverage >= MIN_VISIBLE_COVERAGE);
+    let mut kept: Vec<Candidate> = candidates
+        .into_iter()
+        .filter(|c| keep_all | is_critical | (c.area >= MIN_TRIANGLE_AREA))
+        .collect();
+    let min_culled = (before_min - kept.len()) as u32;
+    let pre = kept.len();
+    let keep = decimation_keep(is_critical | keep_all, pre, cap);
+    (pre > keep).then(|| {
+        kept.sort_by(|a, b| {
+            b.area
+                .partial_cmp(&a.area)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        })
+    });
+    kept.truncate(keep);
+    let decimated = (pre - kept.len()) as u32;
+    (kept, min_culled, decimated)
+}
+
+/// How many triangles to keep: all of them, unless the draw is *preserved*
+/// (critical coverage, or a rescued visible draw) and over `cap`, when the `cap`
+/// largest-area triangles are kept.
+fn decimation_keep(is_preserved: bool, total: usize, cap: u32) -> usize {
+    let over = is_preserved & (total > cap as usize);
     [total, cap as usize][usize::from(over)]
 }
 

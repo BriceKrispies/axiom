@@ -14,8 +14,11 @@
 #   - per-system-report
 #   - retained-frame-history
 #   - frame-report-serialization
+#   - history-window-serialization
+#   - frame-diff + failure-queries
+#   - deterministic-frame-timing
 #   - engine-introspection-facade
-#   - world-observation
+#   - world-observation + world-serialization
 
 [layer]
 name = "introspect"
@@ -25,7 +28,7 @@ meaningful_dependency = "Introspect consumes the frame contract (`EngineFrame` a
 
 # Public Rust surface is the curated list in `lib.rs`; the checker needs the
 # facade plus the report type to prove the layer's adapter role over frame.
-introduced_capabilities = ["IntrospectApi", "FrameReport", "SystemReport", "MetricReport", "FrameHistory", "WorldReport"]
+introduced_capabilities = ["IntrospectApi", "FrameReport", "SystemReport", "MetricReport", "FrameHistory", "WorldReport", "WorldTag", "FrameDiff"]
 
 consumed_capabilities = [
     "EngineFrame",
@@ -52,6 +55,12 @@ must_reference = ["World"]
 [[proof_exports]]
 export = "FrameReport"
 must_reference = ["EngineFrame"]
+
+# `WorldTag` is an inert semantic noun serialized through the kernel binary
+# primitives (a depended root layer), the same adapter shape as the reports.
+[[proof_exports]]
+export = "WorldTag"
+must_reference = ["BinaryWriter"]
 
 [[proof_exports]]
 export = "IntrospectApi"

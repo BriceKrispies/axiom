@@ -12,10 +12,29 @@
 name = "doom-browser-demo"
 crate_name = "axiom-doom-browser"
 
-allowed_layers = []
+# The interface layer supplies the keybinding primitive (Keymap/KeyBinding +
+# InterfaceInputEvent) the wasm keyboard listener resolves movement keys through.
+# The kernel + runtime layers are named directly (under the native `agent`
+# feature) only to build the explicit `Tick` / `RuntimeStep` vocabulary that
+# `axiom-agent`'s `AgentApi::step` consumes — those types are not re-exported
+# through `axiom::prelude`, exactly as the physics-crucible app names them for
+# `PhysicsApi::step`. All deliberate, legal app→layer edges.
+allowed_layers = ["interface", "kernel", "runtime"]
 
+# `agent` is the reusable embodied-agent module: the app drives the same DOOM
+# engine through `AgentApi` (observe → decide → emit player-equivalent intents)
+# and owns the translation between the module's neutral contracts and the DOOM
+# `Intent`. Composed under the native `agent` feature; proven byte-identical to
+# the bespoke bridge by the `agent_module_parity` test.
+# `perception` is the reusable, game-agnostic sense model: the app casts its
+# ray-fan against the DOOM engine world (`raycast_hit`), classifies hits by their
+# entity-native `Tag`, tracks moving enemies, and feeds the neutral facts to
+# `agent`. The per-game sense adapter lives in `src/perception.rs`; the module
+# itself knows nothing of DOOM. Composed under the native `agent` feature.
 allowed_modules = [
     "engine",
     "windowing",
     "debug-overlay",
+    "agent",
+    "perception",
 ]

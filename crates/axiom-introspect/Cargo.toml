@@ -1,6 +1,6 @@
 [package]
 name = "axiom-introspect"
-description = "Axiom Layer 06: the engine introspection surface. Adapts the frame contract into a retained, byte-serializable, queryable per-frame model, and observes the ECS world, so an agent can interrogate a running engine."
+description = "Axiom Layer 06: the engine introspection surface. Adapts the frame contract into a retained, byte-serializable, queryable per-frame model (with frame timing, history-window snapshots, diffs, and failure queries), and observes the ECS world, so an agent can interrogate a running engine."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true

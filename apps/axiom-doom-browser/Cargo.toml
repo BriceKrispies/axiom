@@ -25,8 +25,21 @@ required-features = ["agent"]
 [features]
 # Headless agent server (structured state). Native-only deps, pulled in only when
 # building the agent bin — off by default, so coverage/test/clippy/wasm are
-# untouched.
-agent = ["dep:tiny_http", "dep:serde", "dep:serde_json", "dep:tungstenite"]
+# untouched. The DOOM agent (`src/agent.rs`) drives the game entirely through the
+# reusable `axiom-agent` module; it needs the `kernel`/`runtime` layers directly
+# to build the explicit `Tick`/`RuntimeStep` vocabulary `AgentApi::step` consumes
+# (not re-exported through `axiom::prelude`), exactly as the physics-crucible app
+# does for physics. Locked by the `agent_golden` test.
+agent = [
+    "dep:tiny_http",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:tungstenite",
+    "dep:axiom-agent",
+    "dep:axiom-perception",
+    "dep:axiom-kernel",
+    "dep:axiom-runtime",
+]
 # Adds the native offscreen wgpu renderer so the agent can read back images.
 agent-render = ["agent", "dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:png"]
 
@@ -45,6 +58,18 @@ axiom = { path = "../../modules/axiom" }
 # Native agent-bridge deps (optional; enabled by the `agent` feature). Confined to
 # non-wasm so the browser build never sees them.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The reusable embodied-agent substrate, plus the two layers whose explicit
+# vocabulary its facade traffics in (`AgentApi::step` consumes a `RuntimeStep`,
+# stamped with a kernel `Tick`). The app translates DOOM state into the module's
+# neutral observation and lowers its emitted intents back into the DOOM `Intent` —
+# all in the app, never in the module. Optional + native, like the rest of `agent`.
+axiom-agent = { path = "../../modules/axiom-agent", optional = true }
+# The reusable, game-agnostic perception model (ray-fan sight, view-cone cull,
+# subject tracking, neutral fact vocabulary). The app casts its rays against the
+# DOOM engine world and feeds the facts to `axiom-agent`. Optional + native.
+axiom-perception = { path = "../../modules/axiom-perception", optional = true }
+axiom-kernel = { path = "../../crates/axiom-kernel", optional = true }
+axiom-runtime = { path = "../../crates/axiom-runtime", optional = true }
 tiny_http = { version = "0.12", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
@@ -70,6 +95,11 @@ axiom-windowing = { path = "../../modules/axiom-windowing" }
 # pushes the live player pose into, so a view-dependent artifact can be pinned to
 # an exact position + look direction. Browser-only, like the windowing surface.
 axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+# The interface layer's keybinding primitive (Keymap/KeyBinding + the
+# InterfaceInputEvent chord/routing rule). The keyboard listener resolves the
+# live WASD/arrow/space movement keys through a shared Keymap instead of a
+# hand-rolled match. Used only by the wasm `web` arm, so it is wasm32-only.
+axiom-interface = { path = "../../crates/axiom-interface" }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 console_error_panic_hook = "0.1"

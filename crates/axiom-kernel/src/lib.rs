@@ -153,7 +153,9 @@ pub use binary_writer::BinaryWriter;
 pub use schema_version::SchemaVersion;
 // Reflection: a type describes its shape (TypeSchema) and round-trips its
 // values. The composable formalization of the write_to/read_from idiom that
-// makes engine data (e.g. ECS components) serializable and describable.
+// makes engine data (e.g. ECS components) serializable and describable. The
+// branchless tagged-union (enum) read-dispatch helper lives on `BinaryReader`
+// as `read_tagged`, alongside its sibling primitive reads.
 pub use reflect::Reflect;
 pub use type_schema::{FieldSchema, TypeSchema};
 

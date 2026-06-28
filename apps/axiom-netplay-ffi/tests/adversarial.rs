@@ -53,7 +53,10 @@ fn impossible_movement_is_rejected_or_clamped_by_ruleset() {
         s.submit_intent(0, 1, 0, &encode_move(1000.0, 1000.0)),
         REASON_IMPOSSIBLE_MOVEMENT
     );
-    // The illegal intent moved nothing.
+    // Consume the first advance (which runs the empty startup phase and flips the
+    // world's `startup_done` bit — now part of the hashed snapshot).
+    s.advance();
+    // The illegal intent moved nothing, so a further empty tick preserves the hash.
     let before = s.state_hash();
     let (_, after) = s.advance();
     assert_eq!(before, after);

@@ -78,16 +78,18 @@ impl Scene {
         Aabb::from_center_extents(world.translation, extents).ok()
     }
 
-    /// The nearest bounded node whose box the ray enters within `max_distance`,
-    /// or `None`. A `fold` over every bounded node that keeps the closest entry
-    /// distance — the branchless nearest-of-many pattern. A zero/non-finite
-    /// `direction` yields `None` (no ray).
-    pub(crate) fn raycast(
+    /// The nearest bounded node whose box the ray enters within `max_distance`
+    /// paired with the **world-space entry point** on its box, or `None`. A `fold`
+    /// over every bounded node that keeps the closest entry distance — the
+    /// branchless nearest-of-many pattern — then evaluates the ray at that entry
+    /// distance for the exact hit point (the distance the agent reads is
+    /// `‖point − origin‖`). A zero/non-finite `direction` yields `None` (no ray).
+    pub(crate) fn raycast_hit(
         &self,
         origin: Vec3,
         direction: Vec3,
         max_distance: f32,
-    ) -> Option<SceneNodeId> {
+    ) -> Option<(SceneNodeId, Vec3)> {
         let storage = self.world.storage();
         Ray::new(origin, direction).ok().and_then(|ray| {
             // The live `bounds` × `worlds` join: only nodes with both a bounding
@@ -107,8 +109,21 @@ impl Scene {
                         })
                     },
                 )
-                .map(|(entity, _)| SceneNodeId::from_raw(entity.raw()))
+                .map(|(entity, t)| (SceneNodeId::from_raw(entity.raw()), ray.point_at(t)))
         })
+    }
+
+    /// The nearest bounded node the ray enters within `max_distance`, id only —
+    /// the convenience over [`Self::raycast_hit`] for callers that don't need the
+    /// hit point (picking, plain line-of-sight).
+    pub(crate) fn raycast(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        max_distance: f32,
+    ) -> Option<SceneNodeId> {
+        self.raycast_hit(origin, direction, max_distance)
+            .map(|(node, _point)| node)
     }
 
     /// The player index marked on `node`, if any. Lets a caller classify a
@@ -199,6 +214,27 @@ mod tests {
         s.update_world_transforms();
         // The nearer box is returned (far is kept as best then never beats it).
         assert_eq!(s.raycast(Vec3::ZERO, dir, 100.0), Some(near));
+    }
+
+    #[test]
+    fn raycast_hit_returns_the_node_and_the_exact_entry_point() {
+        let mut s = Scene::new();
+        // A unit box centered at x=3 is entered at its near face x=2.5.
+        let n = at(&mut s, 3.0, 0.0, 0.0);
+        s.add_bounds(n, unit()).unwrap();
+        s.update_world_transforms();
+        let (node, point) = s
+            .raycast_hit(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 100.0)
+            .expect("the ray enters the box");
+        assert_eq!(node, n);
+        assert!((point.x - 2.5).abs() < 1.0e-5, "entry on the near face");
+        assert!(point.y.abs() < 1.0e-5 && point.z.abs() < 1.0e-5);
+        // Distance the agent derives is the entry distance: ‖point‖² = 2.5².
+        assert!((point.dot(point) - 6.25).abs() < 1.0e-4);
+        // A miss yields no hit (the delegating `raycast` shares this path).
+        assert!(s
+            .raycast_hit(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), 100.0)
+            .is_none());
     }
 
     #[test]

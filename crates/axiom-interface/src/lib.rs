@@ -24,8 +24,9 @@
 //! ## Public surface
 //! One behavioral facade, [`InterfaceApi`], plus the neutral value vocabulary it
 //! traffics in: [`PanelId`], [`InterfaceInputEvent`], [`InterfaceDrawList`] /
-//! [`InterfaceDrawItem`], and the console-command shape a consumer composes —
-//! [`ParsedCommand`], [`CommandOutcome`], [`CommandTable`] / [`CommandSpec`].
+//! [`InterfaceDrawItem`], the keybinding primitive [`Keymap`] / [`KeyBinding`],
+//! and the console-command shape a consumer composes — [`ParsedCommand`],
+//! [`CommandOutcome`], [`CommandTable`] / [`CommandSpec`].
 
 mod command_table;
 mod console_model;
@@ -35,6 +36,7 @@ mod input_event;
 mod interface_api;
 mod interface_command;
 mod interface_state;
+mod keymap;
 mod layout_rect;
 mod panel;
 mod panel_id;
@@ -47,4 +49,6 @@ pub use input_event::InterfaceInputEvent;
 pub use interface_api::InterfaceApi;
 pub use interface_command::CommandOutcome;
 pub use interface_command::ParsedCommand;
+pub use keymap::KeyBinding;
+pub use keymap::Keymap;
 pub use panel_id::PanelId;

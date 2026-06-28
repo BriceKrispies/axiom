@@ -1,5 +1,11 @@
 //! A seeded, fully deterministic pseudo-random generator.
 
+use crate::binary_reader::BinaryReader;
+use crate::binary_writer::BinaryWriter;
+use crate::reflect::Reflect;
+use crate::result::KernelResult;
+use crate::type_schema::{FieldSchema, TypeSchema};
+
 /// A deterministic pseudo-random number generator.
 ///
 /// This is a *seeded* generator: its entire output is a pure function of the
@@ -20,6 +26,21 @@ impl DeterministicRng {
     /// seed produce byte-identical sequences.
     pub const fn seeded(seed: u64) -> Self {
         DeterministicRng { state: seed }
+    }
+
+    /// The generator's current internal state — the single value that fully
+    /// determines its future sequence. Capturing this (and restoring it via
+    /// [`Self::from_state`]) snapshots an in-flight generator so a restored
+    /// session continues the *identical* sequence.
+    pub const fn state(&self) -> u64 {
+        self.state
+    }
+
+    /// Reconstruct a generator at an exact internal state captured by
+    /// [`Self::state`]. Unlike [`Self::seeded`] (which begins a fresh sequence
+    /// from a seed), this resumes an in-flight sequence mid-stream.
+    pub const fn from_state(state: u64) -> Self {
+        DeterministicRng { state }
     }
 
     /// Advance the generator and return the next 64-bit value (`splitmix64`).
@@ -43,6 +64,23 @@ impl DeterministicRng {
     /// drop/delay decisions in a modelled network.
     pub fn next_bool_in_thousand(&mut self, per_mille: u32) -> bool {
         self.next_bounded(1000) < per_mille as u64
+    }
+}
+
+/// The generator round-trips through its single `u64` of state, so a snapshot can
+/// embed a live RNG and a restore resumes the identical sequence — the capability
+/// any game with randomness (loot, spawns, shuffles, crits) needs to replay,
+/// rewind, or recover correctly.
+impl Reflect for DeterministicRng {
+    const SCHEMA: TypeSchema =
+        TypeSchema::new("DeterministicRng", &[FieldSchema::new("state", "u64")]);
+
+    fn reflect_write(&self, writer: &mut BinaryWriter) {
+        self.state.reflect_write(writer);
+    }
+
+    fn reflect_read(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+        u64::reflect_read(reader).map(DeterministicRng::from_state)
     }
 }
 
@@ -99,6 +137,65 @@ mod tests {
                 "1000 per-mille is always true"
             );
         }
+    }
+
+    #[test]
+    fn state_and_from_state_capture_the_exact_position() {
+        let mut rng = DeterministicRng::seeded(0xFEED);
+        (0..5).for_each(|_| {
+            rng.next_u64();
+        });
+        // from_state(state()) reproduces the generator exactly.
+        let mut resumed = DeterministicRng::from_state(rng.state());
+        assert_eq!(resumed.state(), rng.state());
+        assert_eq!(resumed.next_u64(), {
+            let mut original = DeterministicRng::from_state(rng.state());
+            original.next_u64()
+        });
+    }
+
+    #[test]
+    fn reflect_round_trips_the_state() {
+        let mut rng = DeterministicRng::seeded(0x1234_5678);
+        (0..3).for_each(|_| {
+            rng.next_u64();
+        });
+        let mut w = BinaryWriter::new();
+        rng.reflect_write(&mut w);
+        let bytes = w.into_bytes();
+        let restored = DeterministicRng::reflect_read(&mut BinaryReader::new(&bytes)).unwrap();
+        assert_eq!(restored.state(), rng.state());
+    }
+
+    #[test]
+    fn a_restored_generator_continues_the_identical_sequence() {
+        // Draw a prefix, snapshot mid-stream, then assert the restored generator's
+        // next draws are byte-identical to the original's continuation.
+        let mut original = DeterministicRng::seeded(0xABCD_EF01);
+        (0..8).for_each(|_| {
+            original.next_u64();
+        });
+        let mut w = BinaryWriter::new();
+        original.reflect_write(&mut w);
+        let mut restored =
+            DeterministicRng::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap();
+        let continuation: Vec<u64> = (0..16).map(|_| original.next_u64()).collect();
+        let replayed: Vec<u64> = (0..16).map(|_| restored.next_u64()).collect();
+        assert_eq!(continuation, replayed);
+    }
+
+    #[test]
+    fn reflect_read_propagates_truncation() {
+        assert!(DeterministicRng::reflect_read(&mut BinaryReader::new(&[])).is_err());
+    }
+
+    #[test]
+    fn reflect_schema_names_its_state_field() {
+        assert_eq!(<DeterministicRng as Reflect>::SCHEMA.name(), "DeterministicRng");
+        assert_eq!(
+            <DeterministicRng as Reflect>::SCHEMA.fields()[0].name(),
+            "state"
+        );
     }
 
     #[test]

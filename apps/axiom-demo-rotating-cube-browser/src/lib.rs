@@ -153,6 +153,15 @@ fn rotating_cubes_app() -> App {
         })
 }
 
+/// Test-only public accessor: builds the exact `App` the wasm `start` entry
+/// runs, so out-of-crate integration tests (notably the data-package equivalence
+/// test in `tests/scene_manifest_matches_runtime.rs`) can author the scene on
+/// native without the browser. Not referenced at runtime.
+#[doc(hidden)]
+pub fn rotating_cubes_app_for_test() -> App {
+    rotating_cubes_app()
+}
+
 /// Browser entry: author the scene and drive the terminal web run loop. Called
 /// from the page once WebGPU is confirmed available.
 #[cfg(target_arch = "wasm32")]

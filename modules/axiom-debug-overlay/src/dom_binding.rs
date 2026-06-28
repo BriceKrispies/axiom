@@ -4,7 +4,7 @@
 //! only for `wasm32`, behind the facade, so it never enters the native build, the
 //! coverage gate, or the branchless lint (exactly like windowing's live arm). It
 //! holds no decision logic: "what to draw" is the draw list, and every "what
-//! should happen" is delegated to the pure core ([`classify_backquote`],
+//! should happen" is delegated to the pure core ([`OverlayState::apply_key`],
 //! [`OverlayState::submit_command`], [`OverlayState::apply_shortcut`]).
 
 use std::cell::RefCell;
@@ -15,7 +15,6 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, Element, HtmlInputElement, KeyboardEvent, PointerEvent, Window};
 
-use crate::backquote::{classify_backquote, OverlayShortcut};
 use crate::overlay_state::OverlayState;
 
 const OVERLAY_ID: &str = "axiom-debug-overlay";
@@ -179,24 +178,30 @@ fn install_window_keydown(
     let state = state.clone();
     let nodes = nodes.clone();
     let callback = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
-        if event.code() == "Backquote" {
-            let (in_text_field, console_focus) = active_focus();
-            let chord = InterfaceInputEvent {
-                shift: event.shift_key(),
-                ctrl: event.ctrl_key(),
-                alt: event.alt_key(),
-                meta: event.meta_key(),
-                in_text_field,
-                console_focus,
-            };
-            if let Some(shortcut) = classify_backquote(chord) {
-                event.prevent_default();
-                state.borrow_mut().apply_shortcut(shortcut);
-                if shortcut == OverlayShortcut::FocusConsole {
-                    let _ = nodes.input.focus();
-                }
-                sync_nodes(&nodes, &state.borrow());
+        let (in_text_field, console_focus) = active_focus();
+        let chord = InterfaceInputEvent {
+            shift: event.shift_key(),
+            ctrl: event.ctrl_key(),
+            alt: event.alt_key(),
+            meta: event.meta_key(),
+            in_text_field,
+            console_focus,
+        };
+        // The overlay's keymap resolves the physical key code; an unbound key
+        // yields `None` and this is a no-op. The bound chords (Backquote +
+        // modifiers) apply their action and are consumed.
+        let action = state.borrow_mut().apply_key(&event.code(), chord);
+        if let Some(_action) = action {
+            event.prevent_default();
+            // Reflect the pure model's console-focus onto the real input: opening
+            // the overlay (or the explicit focus chord) lands the caret in the
+            // box; closing it releases focus. The model owns the decision.
+            if state.borrow().is_console_focused() {
+                let _ = nodes.input.focus();
+            } else {
+                let _ = nodes.input.blur();
             }
+            sync_nodes(&nodes, &state.borrow());
         }
     });
     window()
@@ -377,6 +382,13 @@ fn reconcile_children(document: &Document, container: &Element, specs: &[ChildSp
 }
 
 fn build_dom(document: &Document, parent: &Element) -> Nodes {
+    // Idempotent at the DOM level: drop any pre-existing overlay root before
+    // building a fresh one, so the page never stacks two overlays painting their
+    // values on top of each other. This mirrors the dedup `inject_style` already
+    // does for the stylesheet, and guards the case where the app's loader runs
+    // `start()` more than once (e.g. a wasm → wasm2js fallback that re-inits, or
+    // an HMR reload) and so mounts a second `DebugOverlayApi` over the first.
+    remove_existing(document, OVERLAY_ID);
     let root = document.create_element("div").expect("create overlay root");
     root.set_id(OVERLAY_ID);
     root.set_class_name("axiom-dbg-overlay axiom-dbg--normal");
@@ -447,6 +459,16 @@ fn inject_style(document: &Document) {
     style.set_text_content(Some(OVERLAY_CSS));
     if let Some(head) = document.head() {
         let _ = head.append_child(&style);
+    }
+}
+
+/// Detach any element with `id` already in the document (and its parent), so a
+/// rebuild starts from a clean slate. Used to keep the overlay mount idempotent.
+fn remove_existing(document: &Document, id: &str) {
+    if let Some(existing) = document.get_element_by_id(id) {
+        if let Some(parent) = existing.parent_node() {
+            let _ = parent.remove_child(&existing);
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-//! Mechanical architecture enforcement for Axiom Layer 05 (axiom-introspect).
+//! Mechanical architecture enforcement for Axiom Layer 06 (axiom-introspect).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -205,11 +205,13 @@ fn lib_exports_are_curated_set() {
 
     let mut expected: Vec<&str> = vec![
         "pub use introspect_api::IntrospectApi;",
+        "pub use frame_diff::FrameDiff;",
         "pub use frame_history::FrameHistory;",
         "pub use frame_report::FrameReport;",
         "pub use metric_report::MetricReport;",
         "pub use system_report::SystemReport;",
         "pub use world_report::WorldReport;",
+        "pub use world_tag::WorldTag;",
     ];
     expected.sort();
 

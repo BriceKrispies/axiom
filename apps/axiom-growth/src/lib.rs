@@ -40,6 +40,34 @@ pub mod chunkstore;
 pub mod gameworld;
 pub mod localmap;
 
+// --- scenic composition (Everest-scale mountain vista) ---
+pub mod vista;
+
+// --- native terrain mesh generation (the far scenic massif), shared by the wasm
+// viewer and the headless screenshot capture ---
+pub mod terrain_mesh;
+
+// --- native first-person ground-walk sim (shared by the wasm viewer + the
+// headless agent driver) ---
+pub mod ground;
+
+// --- data-driven semantic world tags (the agent's "nouns"), fed to
+// axiom-introspect so a directive can be resolved by name (native, `agent`) ---
+#[cfg(feature = "agent")]
+pub mod world_tags;
+
+// --- the reusable axiom-agent driver (native, `agent` feature only): walks the
+// ground sim through axiom-agent-harness, e.g. holding forward to the summit ---
+#[cfg(feature = "agent")]
+pub mod agent;
+
+// --- live, game-agnostic perception (native, `agent` feature only): the
+// heightfield sense adapter that casts the reusable `axiom-perception` ray-fan
+// against the terrain (by marching the sampler) — the SAME module the DOOM agent
+// casts against its scene, proving perception is agnostic of the world's shape ---
+#[cfg(feature = "agent")]
+pub mod perception;
+
 // --- gameplay + qa + moddability ---
 pub mod defs;
 pub mod determinism;

@@ -43,6 +43,11 @@ impl BinaryWriter {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
 
+    /// Append a little-endian `i64` (two's-complement).
+    pub fn write_i64(&mut self, value: i64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
     /// Append a little-endian `f32` (IEEE-754 bit pattern).
     pub fn write_f32(&mut self, value: f32) {
         self.bytes.extend_from_slice(&value.to_le_bytes());
@@ -140,6 +145,7 @@ mod tests {
             w.write_u64(0x1122_3344_5566_7788);
             w.write_f32(1.5);
             w.write_i32(-7);
+            w.write_i64(-9_000_000_000);
         }
         assert_eq!(a.into_bytes(), b.into_bytes());
     }

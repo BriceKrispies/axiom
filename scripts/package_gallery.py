@@ -44,6 +44,7 @@ GALLERY_APPS = {
     "growth": "apps/axiom-growth",
     "roomed-puzzle": "apps/axiom-roomed-puzzle",
     "quintet": "apps/axiom-quintet",
+    "physics-crucible": "apps/axiom-physics-crucible",
     "harness": "apps/axiom-browser-dev-harness",
 }
 

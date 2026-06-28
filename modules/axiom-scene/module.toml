@@ -31,4 +31,6 @@ introduced_capabilities = [
     "renderable-scene-references",
     "deterministic-scene-snapshots",
     "scene-frame-system",
+    "semantic-tag-components",
+    "raycast-hit-point",
 ]

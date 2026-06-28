@@ -1,0 +1,32 @@
+# Axiom module manifest — axiom-agent-harness (a FEATURE module).
+#
+# Feature modules are the sanctioned composition tier: unlike isolated engine
+# modules, a feature module may depend on the modules listed in
+# `allowed_modules`. This one composes the `agent` engine module into a reusable,
+# game-agnostic harness for driving any first-person Axiom game: it owns the
+# first-person held-control vocabulary and the per-tick observe -> decide ->
+# lower-to-control pipeline, so an app drives an agent through one facade
+# (`AgentHarnessApi`) without re-implementing the neutral<->game translation by
+# hand. The app supplies its game state as primitives (including the player's
+# height) and gets back a held-control bitmask to apply.
+
+[module]
+name = "agent-harness"
+crate_name = "axiom-agent-harness"
+kind = "feature-module"
+
+allowed_layers = [
+    "kernel",
+    "runtime",
+]
+
+# The engine module this feature module composes.
+allowed_modules = [
+    "agent",
+]
+
+introduced_capabilities = [
+    "first-person-agent-control",
+    "held-control-decision",
+    "goal-seek-decision",
+]

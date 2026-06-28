@@ -5,9 +5,12 @@
 //! list. This file holds only what is debug-specific; the panel does the rest.
 //! Branchless throughout.
 
-use axiom_interface::{CommandTable, InterfaceApi, InterfaceDrawList, PanelId, ParsedCommand};
+use axiom_interface::{
+    CommandTable, InterfaceApi, InterfaceDrawList, InterfaceInputEvent, Keymap, PanelId,
+    ParsedCommand,
+};
 
-use crate::backquote::OverlayShortcut;
+use crate::backquote::backquote_keymap;
 use crate::diagnostics::Diagnostics;
 use crate::overlay_commands::OVERLAY_SPECS;
 use crate::overlay_density::OverlayDensity;
@@ -34,6 +37,9 @@ pub(crate) struct OverlayState {
     /// in normal/verbose. The overlay stays generic — it never interprets these;
     /// a game (e.g. DOOM) formats and pushes its own state, like the player pose.
     app_rows: Vec<(String, String)>,
+    /// The `` ` `` hotkey bindings (interface-layer [`Keymap`]); resolved against
+    /// each keydown by [`Self::apply_key`].
+    keymap: Keymap,
 }
 
 impl OverlayState {
@@ -46,6 +52,7 @@ impl OverlayState {
             density: OverlayDensity::default(),
             diagnostics: Diagnostics::placeholder(),
             app_rows: Vec::new(),
+            keymap: backquote_keymap(),
         };
         state.refresh_panel();
         state
@@ -69,7 +76,18 @@ impl OverlayState {
 
     pub(crate) fn toggle(&mut self) {
         self.interface.toggle(self.panel);
-        self.refresh_panel();
+        // Opening the overlay lands the caret in its console; closing releases it —
+        // so the same `` ` `` that reveals the panel also focuses the command input.
+        self.sync_console_focus_to_visibility();
+    }
+
+    /// Reconcile console focus with the panel's visibility: a freshly-opened
+    /// overlay focuses its console, a freshly-closed one blurs it. Branchless —
+    /// the visibility bit indexes the focus/blur op (each of which repaints).
+    fn sync_console_focus_to_visibility(&mut self) {
+        const SYNC: [fn(&mut OverlayState); 2] =
+            [OverlayState::blur_console, OverlayState::focus_console];
+        SYNC[usize::from(self.is_visible())](self);
     }
 
     // --- pin (delegated) ----------------------------------------------------
@@ -117,18 +135,32 @@ impl OverlayState {
         self.refresh_panel();
     }
 
-    /// Apply a classified Backquote shortcut. Branchless: the fieldless
-    /// [`OverlayShortcut`] discriminant indexes a `const` table of state ops (each
-    /// of which refreshes the panel), so the facade and the wasm keydown listener
-    /// share one dispatch.
-    pub(crate) fn apply_shortcut(&mut self, shortcut: OverlayShortcut) {
+    /// Resolve a pressed key `code` + chord through the overlay's [`Keymap`],
+    /// honoring the global-hotkey routing guard, and apply the matched action.
+    /// Returns the action id that fired (or `None`). Branchless — the facade and
+    /// the wasm keydown listener share this one dispatch.
+    pub(crate) fn apply_key(&mut self, code: &str, chord: InterfaceInputEvent) -> Option<u32> {
+        let action = chord
+            .routes_global_hotkey()
+            .then(|| self.keymap.resolve(code, chord))
+            .flatten();
+        action.into_iter().for_each(|a| self.apply_shortcut(a));
+        action
+    }
+
+    /// Apply a resolved overlay action id. Branchless: the action indexes a `const`
+    /// table of state ops (each of which refreshes the panel); an out-of-range id
+    /// (never produced by the keymap) is a clean no-op via `get`.
+    pub(crate) fn apply_shortcut(&mut self, action: u32) {
         const OPS: [fn(&mut OverlayState); 4] = [
             OverlayState::toggle,
             OverlayState::cycle_density,
             OverlayState::toggle_pin,
             OverlayState::focus_console,
         ];
-        OPS[shortcut as usize](self);
+        OPS.get(action as usize)
+            .into_iter()
+            .for_each(|op| op(self));
     }
 }
 
@@ -426,13 +458,16 @@ mod tests {
     #[test]
     fn toggle_covers_all_three_cases() {
         let mut s = OverlayState::new();
-        s.toggle(); // hidden -> show
+        s.toggle(); // hidden -> show + focus the console
         assert!(s.is_visible());
-        s.toggle(); // visible + unpinned -> hide
+        assert!(s.is_console_focused());
+        s.toggle(); // visible + unpinned -> hide + blur the console
         assert!(!s.is_visible());
+        assert!(!s.is_console_focused());
         s.pin();
-        s.toggle(); // visible + pinned -> stay
+        s.toggle(); // visible + pinned -> stay visible, console refocused
         assert!(s.is_visible());
+        assert!(s.is_console_focused());
     }
 
     #[test]
@@ -574,16 +609,35 @@ mod tests {
     }
 
     #[test]
-    fn apply_shortcut_dispatches_each_arm() {
+    fn apply_key_resolves_each_backquote_chord_and_ignores_others() {
         let mut s = OverlayState::new();
-        s.apply_shortcut(OverlayShortcut::ToggleOverlay);
+        let chord = |shift, ctrl, alt| InterfaceInputEvent {
+            shift,
+            ctrl,
+            alt,
+            meta: false,
+            in_text_field: false,
+            console_focus: false,
+        };
+        // Plain ` toggles; Shift cycles density; Ctrl pins; Alt focuses console.
+        // Opening via the plain chord also lands focus in the console.
+        assert_eq!(s.apply_key("Backquote", chord(false, false, false)), Some(0));
         assert!(s.is_visible());
-        s.apply_shortcut(OverlayShortcut::CycleDensity);
-        assert_eq!(s.density_label(), "verbose");
-        s.apply_shortcut(OverlayShortcut::TogglePinned);
-        assert!(s.is_pinned());
-        s.apply_shortcut(OverlayShortcut::FocusConsole);
         assert!(s.is_console_focused());
+        assert_eq!(s.apply_key("Backquote", chord(true, false, false)), Some(1));
+        assert_eq!(s.density_label(), "verbose");
+        assert_eq!(s.apply_key("Backquote", chord(false, true, false)), Some(2));
+        assert!(s.is_pinned());
+        assert_eq!(s.apply_key("Backquote", chord(false, false, true)), Some(3));
+        assert!(s.is_console_focused());
+        // An unbound key resolves to nothing.
+        assert_eq!(s.apply_key("KeyW", chord(false, false, false)), None);
+        // A meta chord is left to the OS (routing guard), even on `Backquote`.
+        let meta = InterfaceInputEvent {
+            meta: true,
+            ..chord(false, false, false)
+        };
+        assert_eq!(s.apply_key("Backquote", meta), None);
     }
 
     #[test]

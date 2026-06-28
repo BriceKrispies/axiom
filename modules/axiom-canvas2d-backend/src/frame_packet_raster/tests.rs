@@ -165,7 +165,8 @@ fn sub_pixel_non_critical_triangle_is_culled() {
     assert_eq!(out.stats.projected_triangles, 1);
     assert_eq!(
         out.stats.culled_triangles, 1,
-        "sub-pixel decorative triangle culled"
+        "a genuinely negligible draw (total coverage well below MIN_VISIBLE_COVERAGE) \
+         is not rescued — its lone sub-pixel triangle is culled"
     );
     assert!(out.triangles.is_empty());
 }
@@ -200,7 +201,8 @@ fn critical_terrain_over_cap_is_decimated_but_preserved() {
 }
 
 #[test]
-fn decimation_keep_is_all_unless_critical_and_over_cap() {
+fn decimation_keep_is_all_unless_preserved_and_over_cap() {
+    // `is_preserved` = critical coverage OR a rescued visible draw.
     assert_eq!(decimation_keep(false, 10_000, 50), 10_000);
     assert_eq!(decimation_keep(true, 30, 50), 30);
     assert_eq!(decimation_keep(true, 200, 50), 50);
@@ -281,6 +283,67 @@ fn decimation_keeps_the_largest_triangles_first() {
         .map(|t| triangle_area(t.vertices()))
         .sum();
     assert!(kept > 1000.0, "kept the big triangles, area {kept}");
+}
+
+/// A finely-tessellated small object: an n×n grid over a tiny quad (NDC
+/// half-size `s`) so its TOTAL on-screen coverage is visible (≥ MIN_VISIBLE_COVERAGE)
+/// but every one of its 2n² triangles is individually sub-pixel (< MIN_TRIANGLE_AREA).
+/// This is the screen shape a distant sphere takes — the case the per-triangle
+/// sub-pixel cull would erase entirely, and the rescue must preserve.
+fn fine_object(id: u64, n: usize, s: f32) -> (u64, Vec<f32>, Vec<u32>) {
+    let color = [0.8, 0.4, 0.3, 1.0];
+    let mut verts = Vec::new();
+    (0..=n).for_each(|iy| {
+        (0..=n).for_each(|ix| {
+            let x = -s + 2.0 * s * ix as f32 / n as f32;
+            let y = -s + 2.0 * s * iy as f32 / n as f32;
+            verts.extend_from_slice(&vertex([x, y, 0.0], color));
+        })
+    });
+    let stride = (n + 1) as u32;
+    let mut indices = Vec::new();
+    (0..n).for_each(|iy| {
+        (0..n).for_each(|ix| {
+            let i = iy as u32 * stride + ix as u32;
+            indices.extend_from_slice(&[i, i + 1, i + stride, i + 1, i + 1 + stride, i + stride]);
+        })
+    });
+    (id, verts, indices)
+}
+
+#[test]
+fn finely_tessellated_visible_draw_is_rescued_not_emptied() {
+    // 6×6 grid over an s=0.014 quad → 72 triangles, total coverage ≈11 px²
+    // (visible, ≥ MIN_VISIBLE_COVERAGE), each triangle ≈0.16 px² (< MIN_TRIANGLE_AREA).
+    // Classifies Decorative — NOT critical — so the old per-triangle cull would
+    // empty it; the rescue keeps every triangle so the object still paints.
+    let cache = MeshCache::load(&[fine_object(7, 6, 0.014)]);
+    let out = convert(&packet(vec![draw(1, 7)]), &cache, &opts());
+    assert_eq!(out.stats.projected_triangles, 72);
+    assert_eq!(out.triangles.len(), 72, "rescued: all triangles kept");
+    assert_eq!(out.stats.culled_triangles, 0, "nothing sub-pixel-culled");
+    assert_eq!(out.stats.terrain_draws_preserved, 0, "rescued, not critical");
+    assert!(
+        out.triangles
+            .iter()
+            .all(|t| triangle_area(t.vertices()) < MIN_TRIANGLE_AREA),
+        "every kept triangle is individually sub-pixel — kept only by the rescue"
+    );
+    assert_eq!(out.stats.rasterized_objects, 1);
+}
+
+#[test]
+fn rescued_over_tessellated_draw_is_decimated_to_cap() {
+    // Same finely-tessellated visible draw (72 sub-pixel triangles), but a tiny
+    // cap of 8 → the rescue keeps it visible while decimation bounds its cost to
+    // the 8 largest triangles (silhouette-preserving), exactly as for terrain.
+    let cache = MeshCache::load(&[fine_object(7, 6, 0.014)]);
+    let o = LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 8, 8_000_000, cues_off());
+    let out = convert(&packet(vec![draw(1, 7)]), &cache, &o);
+    assert_eq!(out.triangles.len(), 8, "rescued draw bounded to the cap");
+    assert_eq!(out.stats.terrain_triangles_decimated, 64);
+    assert_eq!(out.stats.culled_triangles, 0, "decimation is not culling");
+    assert_eq!(out.stats.rasterized_objects, 1);
 }
 
 /// A mid-coverage object — between the gameplay and critical fractions, so it

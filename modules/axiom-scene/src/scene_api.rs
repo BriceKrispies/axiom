@@ -19,6 +19,7 @@ use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
 use crate::spin::Spin;
+use crate::tag::Tag;
 
 /// The players-and-controllers arm of the facade (per-tick command-driven node
 /// marks). A child module so neither `impl SceneApi` block exceeds the engine's
@@ -248,6 +249,7 @@ impl SceneApi {
             Spin::SCHEMA,
             ProcAnim::SCHEMA,
             Bounds::SCHEMA,
+            Tag::SCHEMA,
         ]
     }
 }
@@ -324,6 +326,38 @@ impl SceneApi {
         max_distance: Meters,
     ) -> Option<SceneNodeId> {
         self.scene.raycast(origin, direction, max_distance.get())
+    }
+
+    /// Cast a ray and return the nearest bounded node **with the world-space entry
+    /// point** on its box (or `None`). The hit point carries the exact distance a
+    /// perceiving agent reads — `‖point − origin‖` — which [`Self::raycast`]
+    /// (id only) discards. Same propagation requirement and miss conditions.
+    pub fn raycast_hit(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        max_distance: Meters,
+    ) -> Option<(SceneNodeId, Vec3)> {
+        self.scene
+            .raycast_hit(origin, direction, max_distance.get())
+    }
+
+    /// Attach (or replace) the coarse semantic kind on `node` — the engine-native
+    /// "what is this thing" a perceiving agent reads off a hit (wall/enemy/door…),
+    /// whose code vocabulary the app owns.
+    pub fn add_tag(&mut self, node: SceneNodeId, kind_code: u32) -> SceneResult<()> {
+        self.scene.add_tag(node, kind_code)
+    }
+
+    /// The coarse kind code tagged on `node`, if any — classifies a raycast /
+    /// overlap hit without the app keeping a side table of entity kinds.
+    pub fn tag_of(&self, node: SceneNodeId) -> Option<u32> {
+        self.scene.tag_of(node)
+    }
+
+    /// Every node tagged with `kind_code`, in ascending node-id order.
+    pub fn tagged_nodes(&self, kind_code: u32) -> Vec<SceneNodeId> {
+        self.scene.tagged_nodes(kind_code)
     }
 
     /// Every bounded node whose world box overlaps the query box (centered at
@@ -665,6 +699,39 @@ mod tests {
     }
 
     #[test]
+    fn raycast_hit_and_tags_classify_through_the_facade() {
+        let mut a = api();
+        let wall = a.create_node_with_transform(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
+        a.add_bounds(wall, Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        a.add_tag(wall, 1).unwrap(); // 1 = "wall" in this game's vocabulary
+        a.update_world_transforms();
+
+        // The hit carries the node and the exact entry point (near face x=2.5),
+        // and the agent classifies it by reading its tag.
+        let (node, point) = a
+            .raycast_hit(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), m(100.0))
+            .expect("ray hits the wall");
+        assert_eq!(node, wall);
+        assert!((point.x - 2.5).abs() < 1.0e-5);
+        assert_eq!(a.tag_of(node), Some(1));
+
+        // tagged_nodes enumerates by kind; an untagged node reads None.
+        let untagged = a.create_node();
+        assert_eq!(a.tag_of(untagged), None);
+        assert_eq!(a.tagged_nodes(1), vec![wall]);
+        assert!(a.tagged_nodes(2).is_empty());
+        // Tagging a missing node errors.
+        assert_eq!(
+            a.add_tag(SceneNodeId::from_raw(404), 9).unwrap_err().code(),
+            SceneErrorCode::MissingNode
+        );
+        // A miss passes None straight through.
+        assert!(a
+            .raycast_hit(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), m(100.0))
+            .is_none());
+    }
+
+    #[test]
     fn typed_component_enumeration_lists_nodes_and_bounds() {
         let mut a = api();
         let n0 =
@@ -691,7 +758,7 @@ mod tests {
     #[test]
     fn component_schemas_describe_the_standard_components() {
         let schemas = api().component_schemas();
-        assert_eq!(schemas.len(), 7);
+        assert_eq!(schemas.len(), 8);
         assert_eq!(schemas[0].name(), "Transform");
         assert_eq!(schemas[1].name(), "Camera");
         assert_eq!(schemas[2].name(), "Light");
@@ -699,6 +766,7 @@ mod tests {
         assert_eq!(schemas[4].name(), "Spin");
         assert_eq!(schemas[5].name(), "ProcAnim");
         assert_eq!(schemas[6].name(), "Bounds");
+        assert_eq!(schemas[7].name(), "Tag");
     }
 
     #[test]

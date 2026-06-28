@@ -9,6 +9,7 @@
 //!   curl -s localhost:7878/state
 
 use axiom_doom_browser::agent::{Action, AgentSession, Observation};
+use axiom_doom_browser::perception::DoomPerceiver;
 use tiny_http::{Header, Method, Response, Server};
 
 // The offscreen renderer lives in the bin (not the lib) so wgpu's symbols never
@@ -24,6 +25,19 @@ const DEFAULT_WS_ADDR: &str = "127.0.0.1:7879";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // `--perceive [ticks]`: run the live perception demo — the agent sees walls
+    // and tracks moving enemies, printing what it perceives each tick. No server.
+    if args.iter().any(|a| a == "--perceive") {
+        let ticks = args
+            .iter()
+            .skip_while(|a| *a != "--perceive")
+            .nth(1)
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(180);
+        run_perception_demo(ticks);
+        return;
+    }
+
     // `--bridge [http_addr] [ws_addr]`: drive a live browser instead of an
     // in-process headless game.
     if args.iter().any(|a| a == "--bridge") {
@@ -55,6 +69,27 @@ fn main() {
             .with_header(header);
         let _ = req.respond(response);
     }
+}
+
+/// Run the headless perception demo: advance the perceiver `ticks` ticks and
+/// print, each tick, what the agent sees (the wall ahead and its distance, every
+/// visible enemy, and the velocity of each tracked moving enemy). Pure perception
+/// — there is no scripted route here; the agent reacts to what it perceives.
+fn run_perception_demo(ticks: u32) {
+    println!("axiom-doom perception demo — the agent sees and tracks ({ticks} ticks)");
+    let mut perceiver = DoomPerceiver::new();
+    for _ in 0..ticks {
+        let sight = perceiver.advance();
+        // Only print ticks where something noteworthy is perceived, so the stream
+        // reads as "the agent noticed X" rather than a wall of identical lines.
+        if !sight.visible.is_empty() || !sight.tracked.is_empty() {
+            println!("tick {}:", perceiver.tick());
+            for line in sight.report_lines() {
+                println!("{line}");
+            }
+        }
+    }
+    println!("done.");
 }
 
 /// Route one request to the session, returning `(status, json_body)`.

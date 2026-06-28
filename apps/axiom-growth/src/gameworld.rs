@@ -294,12 +294,39 @@ pub fn sample_height_m_lod(
     z_m: f32,
     min_feature_m: f32,
 ) -> f32 {
+    sample_height_m_lod_vista(atlas, localmap, seed, x_m, z_m, min_feature_m, None)
+}
+
+/// Continuous terrain height (metres) at a world-metre position, optionally
+/// composited with a [`crate::vista::MountainVistaPlan`].
+///
+/// This is the single seam where the scenic "Everest-scale mountain vista" enters
+/// the world: when `vista` is `Some`, the base terrain (macro regional base + the
+/// multi-scale detail field, exactly as [`sample_height_m_lod`] computes it) is
+/// passed through [`crate::vista::vista_height_m`], which flattens the spawn
+/// shelf, raises the analytic massif, and carves the route — so collision,
+/// ground-follow, and every render LOD see one consistent world. When `vista` is
+/// `None` the result is bit-for-bit identical to the plain base terrain, so all
+/// existing (non-scenic) callers are unaffected.
+pub fn sample_height_m_lod_vista(
+    atlas: &PlanetSurfaceAtlas,
+    localmap: &GameWorldLocalMap,
+    seed: u64,
+    x_m: f32,
+    z_m: f32,
+    min_feature_m: f32,
+    vista: Option<&crate::vista::MountainVistaPlan>,
+) -> f32 {
     let dir = localmap.world_metres_to_unit_dir(x_m, z_m);
     let macro_m = macro_height_m(atlas, dir);
     // Detail is sampled from the flat world-metre position (x, 0, z) so the
     // lattice is shared globally and continuous across chunk borders.
     let detail = detail_height_m(seed, Vec3::new(x_m, 0.0, z_m), min_feature_m);
-    macro_m + detail
+    let base = macro_m + detail;
+    match vista {
+        Some(plan) => crate::vista::vista_height_m(plan, base, x_m, z_m),
+        None => base,
+    }
 }
 
 /// Generate one chunk's height grid from the atlas. Audit: GW-E2 pipeline

@@ -1,0 +1,24 @@
+[package]
+name = "axiom-agent-harness"
+description = "Axiom feature module: the reusable, game-agnostic glue for driving any first-person Axiom game with the axiom-agent substrate. Owns the first-person control vocabulary and the per-tick observe -> decide -> lower-to-control pipeline (composing axiom-agent), so apps drive an agent through one facade without re-implementing the translation DOOM hand-rolled."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib, browser-free and wasm-clean. It composes the axiom-agent engine
+# module plus the kernel/runtime layers; apps depend on it, never the reverse.
+crate-type = ["rlib"]
+
+[dependencies]
+# A feature module (kind = "feature-module"): it composes the `agent` engine
+# module (listed in module.toml's allowed_modules) plus the kernel + runtime
+# layers it needs to mint the Tick / RuntimeStep that drive one agent decision.
+axiom-agent = { path = "../axiom-agent" }
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

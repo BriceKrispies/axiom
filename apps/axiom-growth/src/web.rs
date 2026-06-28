@@ -47,17 +47,23 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use axiom::prelude::*;
-use axiom_math::Quat;
+use axiom_interface::{InterfaceInputEvent, KeyBinding, Keymap};
 use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData, KeyboardEvent, MouseEvent};
+use web_sys::{
+    CanvasRenderingContext2d, HtmlCanvasElement, ImageData, KeyboardEvent, MessageEvent,
+    MouseEvent, WebSocket,
+};
 
-use crate::gameworld::{sample_height_m, sample_height_m_lod};
+use crate::gameworld::{sample_height_m, sample_height_m_lod_vista};
 use crate::geo;
+use crate::ground::{self, PlayerState};
 use crate::model_world::{GameWorldLocalMap, CELL_SIZE_M, CHUNK_SIZE_CELLS, CHUNK_VERT_SIDE};
 use crate::presets::PlanetPreset;
 use crate::sampler::{self, biome};
+use crate::terrain_mesh::{build_far_field_mesh, BIOME_TILE_M, VERT_FLOATS};
+use crate::vista::{MountainVistaPlan, VistaConfig, VistaDirector};
 use crate::Growth;
 
 /// The presentation canvas element id (must match `web/index.html`).
@@ -90,13 +96,8 @@ const CHUNK_M: f32 = CHUNK_SIZE_CELLS as f32 * CELL_SIZE_M;
 /// matches the relief a walkable region spans (hills ±55 m plus mountain flank).
 const RELIEF_SPAN_M: f32 = 120.0;
 
-/// Floats per terrain vertex: position(3) + normal(3) + biome colour(4).
-const VERT_FLOATS: usize = 12;
-
-/// World-space size, in metres, of one biome-atlas cell tile on the terrain. The
-/// biome's atlas cell repeats every `BIOME_TILE_M` metres so the surface texture
-/// reads as a fine-grained material rather than one stretched swatch.
-const BIOME_TILE_M: f32 = 3.0;
+// The vertex layout (`VERT_FLOATS`) and biome tiling (`BIOME_TILE_M`) live in the
+// shared native `terrain_mesh` module, imported above.
 /// Vertices a single chunk emits (`CHUNK_VERT_SIDE`² = 17² = 289). Adjacent
 /// chunks duplicate their shared edge vertices, which is harmless because
 /// identical world positions/normals/colours produce no visible seam.
@@ -251,23 +252,12 @@ pub fn set_terrain_config(lod_levels: u32, lod0_radius_chunks: u32, detail_bias_
     TERRAIN_CONFIG.with(|c| *c.borrow_mut() = cfg);
 }
 
-/// Eye height above the terrain surface (human ~1.7 m).
-const EYE_HEIGHT_M: f32 = 1.7;
-
-/// Metres walked per held movement tick, and radians turned per key tick.
-const MOVE_SPEED: f32 = 0.6;
-const TURN_SPEED: f32 = 0.03;
 /// Radians of look per pixel of mouse movement.
 const MOUSE_SENSITIVITY: f32 = 0.0025;
 
 /// Log a line to the browser console, prefixed so the viewer is easy to spot.
 fn log(msg: &str) {
     web_sys::console::log_1(&JsValue::from_str(&format!("[growth] {msg}")));
-}
-
-/// A linear colour channel from a known-finite literal.
-fn ch(value: f32) -> Ratio {
-    Ratio::new(value).expect("authored colour channel is finite")
 }
 
 // ===========================================================================
@@ -406,9 +396,7 @@ fn biome_color(biome_id: u32, elevation: f32) -> [u8; 3] {
 /// top→bottom) to a unit direction on the planet. The inverse of the
 /// equirectangular projection used by [`render_overworld_map`].
 fn click_to_dir(u: f32, v: f32) -> axiom_math::Vec3 {
-    let lat = std::f32::consts::FRAC_PI_2 - v.clamp(0.0, 1.0) * std::f32::consts::PI;
-    let lon = -std::f32::consts::PI + u.clamp(0.0, 1.0) * std::f32::consts::TAU;
-    geo::unit_dir_from_lat_lon(lat, lon)
+    ground::map_pick_to_dir(u, v)
 }
 
 /// Is the planet's surface at normalised map click `(u, v)` land (elevation ≥ 0)?
@@ -524,6 +512,7 @@ fn gen_chunk(
     chunk_z: i32,
     lod: u8,
     anchor_h: f32,
+    vista: Option<&MountainVistaPlan>,
 ) -> ChunkMesh {
     let atlas = &growth.atlas;
     let size_m = chunk_size_m(lod);
@@ -542,7 +531,7 @@ fn gen_chunk(
             let az = i / APRON;
             let x_m = origin_x + (ax as f32 - 1.0) * spacing;
             let z_m = origin_z + (az as f32 - 1.0) * spacing;
-            sample_height_m_lod(atlas, localmap, seed, x_m, z_m, min_feature_m)
+            sample_height_m_lod_vista(atlas, localmap, seed, x_m, z_m, min_feature_m, vista)
         })
         .collect();
 
@@ -728,6 +717,69 @@ fn total_vertices(loaded: &HashMap<ChunkKey, ChunkMesh>) -> usize {
     loaded.len() * VERTS_PER_CHUNK
 }
 
+// The far scenic mesh — the distant Everest-scale massif + atmospheric far ground —
+// is built by the shared native `terrain_mesh::build_far_field_mesh`, imported
+// above. It is appended to the streamed near chunks by `assemble_with_far` below.
+
+/// Assemble the streamed chunks, then append the static far scenic mesh (its
+/// local indices offset past the chunk vertices). One mesh / one instance, so the
+/// far mountain is just more triangles in the terrain buffer.
+fn assemble_with_far(
+    loaded: &HashMap<ChunkKey, ChunkMesh>,
+    far: &(Vec<f32>, Vec<u32>),
+) -> (Vec<f32>, Vec<u32>) {
+    let (mut vertices, mut indices) = assemble_chunks(loaded);
+    let base = (vertices.len() / VERT_FLOATS) as u32;
+    vertices.extend_from_slice(&far.0);
+    indices.extend(far.1.iter().map(|i| i + base));
+    (vertices, indices)
+}
+
+/// Log the accepted vista's scoring data to the browser console (the app's
+/// existing debug channel), so a reviewer can see WHY the composition was chosen:
+/// spawn, base, peak, the initial view ray, prominence/distance/flatness scores,
+/// the visibility and walkability results, the route, and the band altitudes.
+fn log_vista(plan: &MountainVistaPlan) {
+    let d = &plan.debug;
+    log(&format!(
+        "[vista] accept={} spawn=({:.0},{:.0}) shelf={:.0}m view=({:.2},{:.2}) \
+         base=({:.0},{:.0})@{:.0}m peak=({:.0},{:.0})@{:.0}m dist={:.0}m(range {:.0}..{:.0}) \
+         prominence={:.0}m flatness={:.2} dist_score={:.2} base_vis={} silhouette={} \
+         path_to_base={} path_to_summit={} walkable={} route_pts={} \
+         cloud_band={:.0}..{:.0}m veg<{:.0}m rock<{:.0}m snow>{:.0}m fp={:#018x}",
+        d.accept,
+        plan.spawn_xz.0,
+        plan.spawn_xz.1,
+        plan.shelf_height_m,
+        plan.view_dir_xz.0,
+        plan.view_dir_xz.1,
+        plan.base_xz.0,
+        plan.base_xz.1,
+        plan.base_height_m,
+        plan.peak_xz.0,
+        plan.peak_xz.1,
+        plan.peak_height_m,
+        plan.distance_m,
+        plan.distance_range_m.0,
+        plan.distance_range_m.1,
+        plan.prominence_m,
+        d.flatness,
+        d.distance_score,
+        d.base_visibility,
+        d.silhouette_visibility,
+        plan.path_to_base,
+        plan.path_to_summit,
+        d.path_walkability,
+        plan.route.len(),
+        plan.cloud_band_m.0,
+        plan.cloud_band_m.1,
+        plan.vegetation_line_m,
+        plan.rockline_m,
+        plan.snowline_m,
+        d.fingerprint,
+    ));
+}
+
 /// The set of `(cx, cz, lod)` chunk keys that should be loaded for a player at
 /// world position `(px, pz)` under `cfg` — the concentric LOD rings.
 ///
@@ -792,62 +844,28 @@ fn lod_chunk_set(px: f32, pz: f32, cfg: &TerrainConfig) -> Vec<ChunkKey> {
 /// eye height, and a directional light. The terrain geometry is uploaded — and
 /// re-uploaded as the player walks — separately through `run_web_streaming`;
 /// this renderable exists so the engine produces the one MVP the terrain needs.
-/// The camera starts at `(0, eye_y, 0)` facing -Z; the per-frame loop drives it
-/// across the surface.
-fn build_viewer_app(eye_y: f32) -> RunningApp {
-    let clear = Color::linear_rgb(ch(0.45), ch(0.62), ch(0.85)); // sky
-    App::new()
-        .window(
-            Window::new(SURFACE_W, SURFACE_H)
-                .with_surface_id(CANVAS_ID)
-                .with_clear_color(clear),
-        )
-        .add_plugins(DefaultPlugins)
-        .setup(move |world, meshes, materials| {
-            let mesh = meshes.add(Mesh::cube());
-            // White material: the live shader multiplies the per-instance
-            // (material) colour by the per-vertex colour, so a white instance lets
-            // the terrain's per-vertex biome colours show true.
-            let material = materials.add(Material::lit(Color::WHITE));
-            world.spawn((Transform::IDENTITY, Renderable { mesh, material }));
-            world.spawn((
-                Transform::from_translation(Vec3::new(0.0, eye_y, 0.0)),
-                Camera::perspective(PerspectiveProjection {
-                    fov_y: Angle::degrees(70.0),
-                    near: Meters::new(0.1).expect("near plane is finite"),
-                    far: Meters::new(2000.0).expect("far plane is finite"),
-                }),
-                Controller::new(0),
-            ));
-            world.spawn((
-                Transform::IDENTITY,
-                DirectionalLight {
-                    direction: Vec3::new(0.35, -1.0, 0.25),
-                    color: Color::WHITE,
-                    intensity: ch(1.0),
-                },
-            ));
-        })
-        .build()
+/// The camera starts at `(spawn_x, eye_y, spawn_z)` facing -Z — which the
+/// [`VistaDirector`] authors the mountain along, so the player begins facing the
+/// base — and the per-frame loop drives it across the surface.
+///
+/// The far plane reaches well past the scenic mountain's distance (kilometres
+/// away) so the Everest-scale massif renders from the spawn; the atmospheric
+/// fade baked into the far scenic mesh dissolves it into the sky before the far
+/// plane, hiding the cut.
+fn build_viewer_app(spawn_x: f32, spawn_z: f32, eye_y: f32) -> RunningApp {
+    // The scene authoring lives in `ground::build_first_person_app`, shared with
+    // the headless sim, so the live viewer and the agent driver build the exact
+    // same camera/controller/light over the same terrain renderable.
+    ground::build_first_person_app(CANVAS_ID, SURFACE_W, SURFACE_H, spawn_x, spawn_z, eye_y)
 }
 
 // ===========================================================================
 // (D) DESCEND — build the local world at the picked spot and walk it.
 // ===========================================================================
 
-/// The walking player's authoritative state, owned by the app (NOT the engine's
-/// free-fly controller). The engine integrates horizontal movement and look; we
-/// own these so we can sample the ground under `(x, z)` and seat the camera on
-/// it. `engine_y` mirrors the camera's current engine-space Y so we can feed the
-/// exact vertical correction each frame.
-#[derive(Clone, Copy)]
-struct Player {
-    x: f32,
-    z: f32,
-    yaw: f32,
-    pitch: f32,
-    engine_y: f32,
-}
+// The walking player's authoritative state is `ground::PlayerState` (shared with
+// the headless `GroundSim`), so the wasm viewer and the agent driver integrate
+// movement + ground-follow through one function and walk identically.
 
 /// Held movement/turn keys, polled each frame.
 #[derive(Default, Clone, Copy)]
@@ -858,6 +876,22 @@ struct Keys {
     strafe_right: bool,
     turn_left: bool,
     turn_right: bool,
+}
+
+impl Keys {
+    /// The union of two key sets — used to fold a remote agent's held controls
+    /// into the local keyboard each frame, so the live bridge and the human can
+    /// both drive the viewer.
+    fn merged(self, other: Keys) -> Keys {
+        Keys {
+            forward: self.forward || other.forward,
+            backward: self.backward || other.backward,
+            strafe_left: self.strafe_left || other.strafe_left,
+            strafe_right: self.strafe_right || other.strafe_right,
+            turn_left: self.turn_left || other.turn_left,
+            turn_right: self.turn_right || other.turn_right,
+        }
+    }
 }
 
 /// Mouse-look deltas accumulated between frames (radians), drained each tick.
@@ -894,14 +928,27 @@ pub fn descend(u: f32, v: f32) {
     };
 
     let localmap = GameWorldLocalMap::anchored_at(&growth.atlas, dir);
-
-    // The fixed global vertical reference: the true surface height at the descent
-    // spot (world origin). EVERY mesh — the first and every re-centred one — is
-    // recentred by THIS value, so regenerated windows never jump in Y. It is
-    // sampled once here and never re-derived per regen.
-    let anchor_h = anchor_height_m(&growth, &localmap, 0.0, 0.0);
-
     let seed = growth.seed.value;
+
+    // Compose the scenic mountain vista deterministically for this descent: a
+    // flat landing shelf, an Everest-scale massif authored along local -Z (so the
+    // player begins facing its base), a carved winding route up it, and the
+    // atmospheric band altitudes. The plan is composited into every height sample
+    // (collision + chunks + far mesh) so the whole world is one composition. It
+    // is shared (Rc) into the streaming closure. See `vista.rs`.
+    let plan = Rc::new(VistaDirector::plan(
+        &growth.atlas,
+        &localmap,
+        seed,
+        VistaConfig::default(),
+    ));
+    log_vista(&plan);
+    let (spawn_x, spawn_z) = plan.spawn_xz;
+
+    // The fixed global vertical reference: the shelf altitude at the spawn. EVERY
+    // mesh is recentred by this, so the flat landing shelf sits at recentred
+    // y = 0 and regenerated windows never jump in Y.
+    let anchor_h = plan.shelf_height_m;
 
     // Read the distance-LOD config JS pushed via set_terrain_config (or default).
     let cfg = TERRAIN_CONFIG.with(|c| *c.borrow());
@@ -914,34 +961,49 @@ pub fn descend(u: f32, v: f32) {
     ));
 
     // Initial load: pre-generate the FULL desired LOD ring set around the spawn
-    // (player at world origin) with NO per-frame cap — the one-time "load". The
-    // combined buffer assembled from these is the geometry handed to
-    // `run_web_streaming`; the closure then streams incrementally from here.
+    // (composited with the vista) with NO per-frame cap — the one-time "load" —
+    // plus the static far scenic mesh (the distant mountain + atmospheric far
+    // ground) that lives BEYOND the streamed chunk radius so the Everest-scale
+    // massif is visible from the spawn. The combined buffer is handed to
+    // `run_web_streaming`; the closure streams the near chunks incrementally and
+    // re-appends the static far mesh on every rebuild.
     let mut loaded: HashMap<ChunkKey, ChunkMesh> = HashMap::new();
-    for (cx, cz, lod) in lod_chunk_set(0.0, 0.0, &cfg) {
+    for (cx, cz, lod) in lod_chunk_set(spawn_x, spawn_z, &cfg) {
         loaded.insert(
             (cx, cz, lod),
-            gen_chunk(&growth, &localmap, seed, &cfg, cx, cz, lod, anchor_h),
+            gen_chunk(
+                &growth,
+                &localmap,
+                seed,
+                &cfg,
+                cx,
+                cz,
+                lod,
+                anchor_h,
+                Some(plan.as_ref()),
+            ),
         );
     }
-    let (init_vertices, init_indices) = assemble_chunks(&loaded);
+    let far_field = Rc::new(build_far_field_mesh(&growth, &localmap, seed, &plan, anchor_h));
+    let (init_vertices, init_indices) = assemble_with_far(&loaded, &far_field);
     log(&format!(
-        "[lod] chunks={} verts={} draw={:.0}m (initial, anchor_h={:.1}m)",
+        "[lod] chunks={} verts={} far_verts={} draw={:.0}m (initial, anchor_h={:.1}m)",
         loaded.len(),
         init_vertices.len() / VERT_FLOATS,
+        far_field.0.len() / VERT_FLOATS,
         cfg.draw_distance_m(),
         anchor_h
     ));
 
-    // The player starts at the anchor (spawn origin), eye at recentred ground 0.
-    let start_ground = 0.0; // chunks are recentred so the anchor surface is y = 0.
-    let eye_y = start_ground + EYE_HEIGHT_M;
-    let mut running = build_viewer_app(eye_y);
+    // The player starts on the shelf (recentred ground 0), facing the mountain
+    // base (`view_yaw == 0` ⇒ local -Z, the authoring heading).
+    let eye_y = ground::EYE_HEIGHT_M; // shelf is recentred so the spawn surface is y = 0.
+    let mut running = build_viewer_app(spawn_x, spawn_z, eye_y);
 
-    let player = Rc::new(RefCell::new(Player {
-        x: 0.0,
-        z: 0.0,
-        yaw: 0.0,
+    let player = Rc::new(RefCell::new(PlayerState {
+        x: spawn_x,
+        z: spawn_z,
+        yaw: plan.view_yaw,
         pitch: 0.0,
         engine_y: eye_y,
     }));
@@ -953,6 +1015,14 @@ pub fn descend(u: f32, v: f32) {
     let look = Rc::new(RefCell::new(Look::default()));
     install_pointer_lock();
     install_mouse_look(&look);
+
+    // Live agent bridge: if the page was opened with `?agent=ws://host:port`, open
+    // a WebSocket to an external agent driver. Each frame the viewer reports an
+    // observation (the player's pose + HEIGHT + the summit goal) and the bridge
+    // pushes back held controls, which are merged into the keyboard — so an
+    // `axiom-agent` process climbs the *live* 3D view. Absent the query param this
+    // is `None` and the viewer behaves exactly as before.
+    let agent_bridge = connect_agent_bridge();
 
     let mut windowing = WindowingApi::new();
     windowing
@@ -967,7 +1037,11 @@ pub fn descend(u: f32, v: f32) {
         Texture::BiomeAtlas.rgba(), // the terrain's albedo: the biome atlas
         1,                          // one renderable (the terrain) -> one instance
         move |_raf_tick| {
-            let k = *keys.borrow();
+            // Local keyboard, with any remote agent controls folded in.
+            let k = match &agent_bridge {
+                Some(b) => keys.borrow().merged(*b.remote.borrow()),
+                None => *keys.borrow(),
+            };
             let (look_yaw, look_pitch) = {
                 let mut l = look.borrow_mut();
                 let v = (l.yaw, l.pitch);
@@ -975,54 +1049,56 @@ pub fn descend(u: f32, v: f32) {
                 v
             };
 
-            // --- 1. Update look (yaw/pitch) from keys + mouse. ---
-            let key_yaw = (k.turn_left as i32 - k.turn_right as i32) as f32 * TURN_SPEED;
+            // --- 1-4. Look + move + ground-follow, through the one shared native
+            // integration (`ground::step_first_person`), so the live viewer walks
+            // exactly as the headless `GroundSim` the agent drives. Keys → axes:
+            // forward/back, strafe right/left, and key-turn folded into the look. ---
+            let key_yaw = (k.turn_left as i32 - k.turn_right as i32) as f32 * ground::TURN_SPEED;
             let yaw_delta = key_yaw + look_yaw;
-            let pitch_delta = look_pitch;
+            let forward_axis = (k.forward as i32 - k.backward as i32) as f32;
+            let strafe_axis = (k.strafe_right as i32 - k.strafe_left as i32) as f32;
 
             let mut p = player.borrow_mut();
-            p.yaw += yaw_delta;
-            // The engine clamps pitch internally; mirror a sane clamp so our
-            // tracked pitch matches the engine's accumulated value.
-            p.pitch = (p.pitch + pitch_delta).clamp(-1.5, 1.5);
-
-            // --- 2. Integrate horizontal movement, exactly as the engine will. ---
-            // Local frame: -Z forward, +X right. The engine yaw-rotates this
-            // (yaw-only, so it stays horizontal) and adds it to the camera. We
-            // mirror that same rotation into our (x, z) so we stay in lock-step.
-            let forward = (k.forward as i32 - k.backward as i32) as f32 * MOVE_SPEED;
-            let strafe = (k.strafe_right as i32 - k.strafe_left as i32) as f32 * MOVE_SPEED;
-            let move_local = Vec3::new(strafe, 0.0, -forward);
-            let yh = p.yaw * 0.5;
-            let yaw_q = Quat::new(0.0, yh.sin(), 0.0, yh.cos());
-            let world_step = yaw_q.rotate(move_local);
-            p.x += world_step.x;
-            p.z += world_step.z;
-
-            // --- 3. Sample the ground under the new (x, z) and seat the eye. ---
-            // sample_height_m is absolute; the mesh is recentred by anchor_h, so
-            // the mesh-space surface is (sampled - anchor_h), eye is + EYE_HEIGHT.
-            let sampled = sample_height_m(&growth.atlas, &localmap, seed, p.x, p.z);
-            let desired_y = sampled - anchor_h + EYE_HEIGHT_M;
-
-            // --- 4. Drive the camera: horizontal step + vertical correction. ---
-            // The engine's controller does translation += yaw.rotate(move_local).
-            // A +Y yaw rotation preserves the Y component, so a move_local.y of
-            // (desired_y - engine_y) lands the camera exactly on the surface.
-            let dy = desired_y - p.engine_y;
-            p.engine_y = desired_y;
-            let control = FirstPersonInput::new(
-                0,
-                Vec3::new(strafe, dy, -forward),
-                Angle::radians(yaw_delta),
-                Angle::radians(pitch_delta),
+            let out = ground::step_first_person(
+                &mut p,
+                forward_axis,
+                strafe_axis,
+                yaw_delta,
+                look_pitch,
+                &growth.atlas,
+                &localmap,
+                seed,
+                plan.as_ref(),
+                anchor_h,
             );
+            let control = out.control;
             let player_x = p.x;
             let player_z = p.z;
+            let player_yaw = p.yaw;
             drop(p);
 
             let outcome = running.tick_with_controls(tick, &[], &[control]);
             tick += 1;
+
+            // Report this frame's observation to the live agent bridge (if any):
+            // the player's pose + HEIGHT and the summit as the goal, so an external
+            // agent can decide the next held controls.
+            if let Some(bridge) = &agent_bridge {
+                let above = out.ground_height_m - plan.shelf_height_m;
+                let (peak_x, peak_z) = plan.peak_xz;
+                let dist = ((player_x - peak_x).powi(2) + (player_z - peak_z).powi(2)).sqrt();
+                let reached =
+                    dist <= ground::MOVE_SPEED * 1.5 || above >= plan.prominence_m * 0.99;
+                let obs = format!(
+                    "{{\"tick\":{tick},\"x\":{player_x},\"z\":{player_z},\"yaw\":{player_yaw},\
+                     \"ground_height_m\":{ground},\"height_above_spawn_m\":{above},\
+                     \"distance_to_peak_m\":{dist},\"peak_x\":{peak_x},\"peak_z\":{peak_z},\
+                     \"peak_height_m\":{peak_h},\"reached_summit\":{reached}}}",
+                    ground = out.ground_height_m,
+                    peak_h = plan.peak_height_m,
+                );
+                let _ = bridge.socket.send_with_str(&obs);
+            }
 
             // --- 5. Stream the terrain incrementally as LOD ring chunks. The
             // player lives in continuous world space; each frame we recompute the
@@ -1061,7 +1137,17 @@ pub fn descend(u: f32, v: f32) {
             for &(cx, cz, lod) in missing.iter().take(MAX_GEN_PER_FRAME) {
                 loaded.insert(
                     (cx, cz, lod),
-                    gen_chunk(&growth, &localmap, seed, &cfg, cx, cz, lod, anchor_h),
+                    gen_chunk(
+                        &growth,
+                        &localmap,
+                        seed,
+                        &cfg,
+                        cx,
+                        cz,
+                        lod,
+                        anchor_h,
+                        Some(plan.as_ref()),
+                    ),
                 );
             }
 
@@ -1094,7 +1180,7 @@ pub fn descend(u: f32, v: f32) {
                     total_vertices(&loaded),
                     cfg.draw_distance_m(),
                 ));
-                assemble_chunks(&loaded)
+                assemble_with_far(&loaded, &far_field)
             });
 
             // Lighting: a slowly-arcing sun (day/night sweep) plus a warm point
@@ -1143,27 +1229,168 @@ fn pointer_is_locked() -> bool {
         .is_some()
 }
 
-/// Map held keys into the shared key set. Matches on `key` so WASD + arrows work.
+/// Movement action ids — the neutral `u32`s the viewer [`Keymap`] resolves to, one
+/// per [`Keys`] field [`apply_movement`] toggles.
+const FORWARD: u32 = 0;
+const BACKWARD: u32 = 1;
+const STRAFE_LEFT: u32 = 2;
+const STRAFE_RIGHT: u32 = 3;
+const TURN_LEFT: u32 = 4;
+const TURN_RIGHT: u32 = 5;
+
+/// The viewer's movement bindings as an interface-layer [`Keymap`]. Built from
+/// modifier-insensitive [`KeyBinding::key`] rows matched on the logical `key()`,
+/// so WASD + arrows both drive it.
+fn growth_keymap() -> Keymap {
+    Keymap::new(&[
+        KeyBinding::key("w", FORWARD),
+        KeyBinding::key("W", FORWARD),
+        KeyBinding::key("ArrowUp", FORWARD),
+        KeyBinding::key("s", BACKWARD),
+        KeyBinding::key("S", BACKWARD),
+        KeyBinding::key("ArrowDown", BACKWARD),
+        KeyBinding::key("a", STRAFE_LEFT),
+        KeyBinding::key("A", STRAFE_LEFT),
+        KeyBinding::key("d", STRAFE_RIGHT),
+        KeyBinding::key("D", STRAFE_RIGHT),
+        KeyBinding::key("ArrowLeft", TURN_LEFT),
+        KeyBinding::key("ArrowRight", TURN_RIGHT),
+    ])
+}
+
+/// Apply a resolved movement action to the shared key set at `pressed`.
+fn apply_movement(k: &mut Keys, action: u32, pressed: bool) {
+    match action {
+        FORWARD => k.forward = pressed,
+        BACKWARD => k.backward = pressed,
+        STRAFE_LEFT => k.strafe_left = pressed,
+        STRAFE_RIGHT => k.strafe_right = pressed,
+        TURN_LEFT => k.turn_left = pressed,
+        _ => k.turn_right = pressed,
+    }
+}
+
+/// Map held keys into the shared key set, resolving through the shared
+/// interface-layer [`Keymap`]. Matches on `key` so WASD + arrows work. Keydown
+/// only sets held state when the chord routes as a game hotkey (no meta held);
+/// keyup always resolves so a key released while a modifier is down never leaves
+/// movement stuck on.
 fn install_key_listener(keys: &Rc<RefCell<Keys>>, event: &str, pressed: bool) {
     let keys = keys.clone();
+    let keymap = growth_keymap();
     let callback = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
-        let mut k = keys.borrow_mut();
-        match e.key().as_str() {
-            "w" | "W" | "ArrowUp" => k.forward = pressed,
-            "s" | "S" | "ArrowDown" => k.backward = pressed,
-            "a" | "A" => k.strafe_left = pressed,
-            "d" | "D" => k.strafe_right = pressed,
-            "ArrowLeft" => k.turn_left = pressed,
-            "ArrowRight" => k.turn_right = pressed,
-            _ => return,
-        }
-        e.prevent_default();
+        let chord = InterfaceInputEvent {
+            shift: e.shift_key(),
+            ctrl: e.ctrl_key(),
+            alt: e.alt_key(),
+            meta: e.meta_key(),
+            in_text_field: false,
+            console_focus: false,
+        };
+        let routes = !pressed || chord.routes_global_hotkey();
+        let action = routes.then(|| keymap.resolve(&e.key(), chord)).flatten();
+        action
+            .into_iter()
+            .for_each(|a| apply_movement(&mut keys.borrow_mut(), a, pressed));
+        action.into_iter().for_each(|_| e.prevent_default());
     });
     web_sys::window()
         .expect("a browser window")
         .add_event_listener_with_callback(event, callback.as_ref().unchecked_ref())
         .expect("key listener installs");
     callback.forget();
+}
+
+// ===========================================================================
+// Live agent bridge — drive the in-browser viewer from an external agent.
+//
+// When the page is opened with `?agent=ws://host:port`, the viewer connects a
+// WebSocket to an `axiom-agent` driver (the `agent` bin's `--bridge` mode). The
+// driver sends held-control JSON (`{"keys":[…]}`) which is merged into the
+// keyboard each frame, and the viewer streams an observation (pose + HEIGHT +
+// summit goal) back every frame. This is the live counterpart of the headless
+// `GroundSim` climb — the same neutral control vocabulary, over a socket.
+// ===========================================================================
+
+/// The live agent bridge: the held controls the driver pushes (merged into the
+/// keyboard each frame) and the socket the viewer reports observations on.
+struct AgentBridge {
+    remote: Rc<RefCell<Keys>>,
+    socket: WebSocket,
+}
+
+/// The `agent` WebSocket URL from the page query string (`?agent=ws://host:port`),
+/// URL-decoded; `None` when the param is absent (the normal, un-driven viewer).
+fn agent_ws_url() -> Option<String> {
+    let search = web_sys::window()?.location().search().ok()?;
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .find_map(|kv| {
+            let mut it = kv.splitn(2, '=');
+            let key = it.next()?;
+            let val = it.next()?;
+            (key == "agent").then(|| val.to_string())
+        })
+        .map(|raw| {
+            js_sys::decode_uri_component(&raw)
+                .ok()
+                .and_then(|d| d.as_string())
+                .unwrap_or(raw)
+        })
+}
+
+/// Open the live agent bridge if `?agent=` is present: connect the WebSocket and
+/// install the message handler that decodes pushed controls into `remote`.
+fn connect_agent_bridge() -> Option<AgentBridge> {
+    let url = agent_ws_url()?;
+    let socket = match WebSocket::new(&url) {
+        Ok(ws) => ws,
+        Err(e) => {
+            log(&format!("agent bridge: failed to open {url}: {e:?}"));
+            return None;
+        }
+    };
+    log(&format!("agent bridge: connecting to {url}"));
+    let remote = Rc::new(RefCell::new(Keys::default()));
+    let remote_cb = remote.clone();
+    let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
+        if let Some(text) = e.data().as_string() {
+            let mut next = Keys::default();
+            apply_remote_keys(&mut next, &text);
+            *remote_cb.borrow_mut() = next;
+        }
+    });
+    socket.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+    on_message.forget();
+    Some(AgentBridge { remote, socket })
+}
+
+/// Decode a `{"keys":[…]}` control message into the held key set. Unknown shapes
+/// or names are ignored (the keys simply stay unset), so a malformed push can
+/// never wedge movement.
+fn apply_remote_keys(k: &mut Keys, json: &str) {
+    let Ok(parsed) = js_sys::JSON::parse(json) else {
+        return;
+    };
+    let Ok(keys_val) = js_sys::Reflect::get(&parsed, &JsValue::from_str("keys")) else {
+        return;
+    };
+    if !keys_val.is_array() {
+        return;
+    }
+    js_sys::Array::from(&keys_val)
+        .iter()
+        .filter_map(|v| v.as_string())
+        .for_each(|name| match name.as_str() {
+            "forward" => k.forward = true,
+            "backward" => k.backward = true,
+            "turn_left" | "left" => k.turn_left = true,
+            "turn_right" | "right" => k.turn_right = true,
+            "strafe_left" => k.strafe_left = true,
+            "strafe_right" => k.strafe_right = true,
+            _ => {}
+        });
 }
 
 /// Capture the pointer when the canvas is clicked (classic FPS mouse-look).

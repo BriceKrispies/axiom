@@ -21,9 +21,36 @@ crate_name = "axiom-growth"
 allowed_layers = [
     "kernel",
     "math",
+    # The keybinding primitive (Keymap/KeyBinding + InterfaceInputEvent) the wasm
+    # viewer's keyboard listener resolves movement keys through.
+    "interface",
+    # The host-layer `FramePacket` the Canvas 2D screenshot backend consumes.
+    # Optional/native, only pulled in by the `agent` feature.
+    "host",
+    # Layer 06 introspect: holds the world's semantic tags (the "nouns") the
+    # agent driver resolves high-level directives against. Optional/native, only
+    # pulled in by the `agent` feature.
+    "introspect",
 ]
 
 allowed_modules = [
     "engine",
     "windowing",
+    # The reusable agent harness (a feature module composing `axiom-agent`): the
+    # native `agent` driver walks the headless ground sim through it, holding
+    # forward to the summit and reading the player's height. Optional/native, only
+    # pulled in by the `agent` feature.
+    "agent-harness",
+    # The engine's native off-screen GPU backend (the same one `tools/axiom-shot`
+    # uses): the `agent` driver renders the mountain to PNG screenshots through it.
+    # Optional/native, only pulled in by the `agent` feature.
+    "gpu-backend",
+    # The software Canvas 2D backend (the other `axiom-shot` arm): the `agent`
+    # driver can render the same screenshots through it. Optional/native.
+    "canvas2d-backend",
+    # The reusable, game-agnostic perception model. The native sense adapter casts
+    # its ray-fan against the heightfield (marching the terrain sampler) — the same
+    # module DOOM casts against its scene, proving perception is agnostic of the
+    # world representation. Optional/native, only pulled in by the `agent` feature.
+    "perception",
 ]

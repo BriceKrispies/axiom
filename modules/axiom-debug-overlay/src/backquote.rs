@@ -1,16 +1,21 @@
-//! The overlay's **Backquote binding** — the debug-specific mapping of a
-//! `` ` `` chord to an overlay action.
+//! The overlay's **Backquote keymap** — the debug-specific mapping of `` ` ``
+//! chords to overlay actions, expressed as data over the interface layer's
+//! [`Keymap`] primitive (matched on the physical `KeyboardEvent.code == "Backquote"`).
 //!
-//! The neutral question "should this chord route as a global hotkey at all?"
-//! belongs to `axiom-interface` ([`InterfaceInputEvent::routes_global_hotkey`]).
-//! *Which* action each modifier selects is a debug-overlay policy, so it stays
-//! here: plain → toggle, Shift → cycle density, Ctrl → pin, Alt → focus console.
-//! Branchless: mutually-exclusive modifier masks sum to a table index.
+//! The neutral "should this chord route as a global hotkey?" rule
+//! ([`axiom_interface::InterfaceInputEvent::routes_global_hotkey`]) and the
+//! key→action lookup ([`Keymap::resolve`]) both live in `axiom-interface`; this
+//! file only declares the overlay's specific bindings: plain → toggle,
+//! Shift → cycle density, Ctrl → pin, Alt → focus console. Each resolves to the
+//! matching [`OverlayShortcut`] discriminant, which doubles as the keymap action
+//! id and the op-table index in
+//! [`crate::overlay_state::OverlayState::apply_shortcut`].
 
-use axiom_interface::InterfaceInputEvent;
+use axiom_interface::{KeyBinding, Keymap};
 
 /// An overlay action selected by a Backquote chord. Discriminants are explicit so
-/// the value indexes the op table in [`crate::overlay_state::OverlayState::apply_shortcut`].
+/// the value is both the keymap action id and the index of the state op the
+/// overlay runs for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OverlayShortcut {
     ToggleOverlay = 0,
@@ -19,110 +24,38 @@ pub(crate) enum OverlayShortcut {
     FocusConsole = 3,
 }
 
-/// Classify a Backquote chord. `None` when the chord should be left alone (a meta
-/// chord, or a foreign text field without console focus); otherwise the modifier
-/// selects the action.
-pub(crate) fn classify_backquote(event: InterfaceInputEvent) -> Option<OverlayShortcut> {
-    event
-        .routes_global_hotkey()
-        .then(|| shortcut_for(event.shift, event.ctrl, event.alt))
-}
-
-/// Select the action from the modifiers, with priority Shift > Ctrl > Alt > none.
-/// The masks are mutually exclusive, so their weighted sum is the table index.
-fn shortcut_for(shift: bool, ctrl: bool, alt: bool) -> OverlayShortcut {
-    const TABLE: [OverlayShortcut; 4] = [
-        OverlayShortcut::ToggleOverlay,
-        OverlayShortcut::CycleDensity,
-        OverlayShortcut::TogglePinned,
-        OverlayShortcut::FocusConsole,
-    ];
-    let index =
-        (shift as usize) + ((!shift & ctrl) as usize) * 2 + ((!shift & !ctrl & alt) as usize) * 3;
-    TABLE[index]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn event() -> InterfaceInputEvent {
-        InterfaceInputEvent::default()
-    }
-
-    #[test]
-    fn each_modifier_selects_its_action() {
-        assert_eq!(
-            classify_backquote(event()),
-            Some(OverlayShortcut::ToggleOverlay)
-        );
-        assert_eq!(
-            classify_backquote(InterfaceInputEvent {
-                shift: true,
-                ..event()
-            }),
-            Some(OverlayShortcut::CycleDensity)
-        );
-        assert_eq!(
-            classify_backquote(InterfaceInputEvent {
-                ctrl: true,
-                ..event()
-            }),
-            Some(OverlayShortcut::TogglePinned)
-        );
-        assert_eq!(
-            classify_backquote(InterfaceInputEvent {
-                alt: true,
-                ..event()
-            }),
-            Some(OverlayShortcut::FocusConsole)
-        );
-    }
-
-    #[test]
-    fn modifier_priority_is_shift_then_ctrl_then_alt() {
-        assert_eq!(
-            classify_backquote(InterfaceInputEvent {
-                shift: true,
-                ctrl: true,
-                ..event()
-            }),
-            Some(OverlayShortcut::CycleDensity)
-        );
-        assert_eq!(
-            classify_backquote(InterfaceInputEvent {
-                ctrl: true,
-                alt: true,
-                ..event()
-            }),
-            Some(OverlayShortcut::TogglePinned)
-        );
-    }
-
-    #[test]
-    fn non_routing_chords_select_nothing() {
-        assert_eq!(
-            classify_backquote(InterfaceInputEvent {
-                meta: true,
-                ..event()
-            }),
-            None
-        );
-        assert_eq!(
-            classify_backquote(InterfaceInputEvent {
-                in_text_field: true,
-                ..event()
-            }),
-            None
-        );
-        // A foreign text field with the console focused still routes.
-        assert_eq!(
-            classify_backquote(InterfaceInputEvent {
-                in_text_field: true,
-                console_focus: true,
-                ..event()
-            }),
-            Some(OverlayShortcut::ToggleOverlay)
-        );
-    }
+/// The overlay's Backquote bindings as a [`Keymap`]: each exact modifier chord on
+/// the physical `Backquote` key selects one [`OverlayShortcut`] (by discriminant).
+/// Priority is gone — a multi-modifier combo simply matches no chord.
+pub(crate) fn backquote_keymap() -> Keymap {
+    Keymap::new(&[
+        KeyBinding::chord(
+            "Backquote",
+            false,
+            false,
+            false,
+            OverlayShortcut::ToggleOverlay as u32,
+        ),
+        KeyBinding::chord(
+            "Backquote",
+            true,
+            false,
+            false,
+            OverlayShortcut::CycleDensity as u32,
+        ),
+        KeyBinding::chord(
+            "Backquote",
+            false,
+            true,
+            false,
+            OverlayShortcut::TogglePinned as u32,
+        ),
+        KeyBinding::chord(
+            "Backquote",
+            false,
+            false,
+            true,
+            OverlayShortcut::FocusConsole as u32,
+        ),
+    ])
 }
