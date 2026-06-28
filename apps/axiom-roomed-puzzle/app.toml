@@ -28,6 +28,9 @@ allowed_layers = [
     "math",
     "host",
     "layout",
+    # The keybinding primitive (Keymap/KeyBinding + InterfaceInputEvent)
+    # `command_for_key` resolves keys through.
+    "interface",
 ]
 
 # The mobile-first touch input synthesizer. The wasm `web` arm feeds it neutral

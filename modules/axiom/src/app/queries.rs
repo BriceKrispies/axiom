@@ -29,6 +29,32 @@ impl RunningApp {
         self.scene.overlap_box(center, half_extents)
     }
 
+    /// Cast a ray and return the nearest bounded node **with the world-space entry
+    /// point** on its box (or `None`) — [`Self::raycast`] plus the exact hit point,
+    /// whose distance from `origin` a perceiving agent reads as "how far is the
+    /// thing in front of me".
+    pub fn raycast_hit(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        max_distance: Meters,
+    ) -> Option<(Entity, Vec3)> {
+        self.scene.raycast_hit(origin, direction, max_distance)
+    }
+
+    /// Attach (or replace) a coarse semantic kind on `entity` — the engine-native
+    /// "what is this thing" a perceiving agent reads off a hit, whose code
+    /// vocabulary the game owns. Returns whether `entity` named a live node.
+    pub fn tag(&mut self, entity: Entity, kind_code: u32) -> bool {
+        self.scene.add_tag(entity, kind_code).is_ok()
+    }
+
+    /// The coarse kind code tagged on `entity`, if any — classifies a raycast /
+    /// overlap hit (an untagged hit is plain geometry).
+    pub fn tag_of(&self, entity: Entity) -> Option<u32> {
+        self.scene.tag_of(entity)
+    }
+
     /// Despawn `entity` — Category 3 (lifecycle). The engine owns object lifetime,
     /// so a game removes a killed actor for real instead of faking it (parking a
     /// corpse off-screen). Returns whether `entity` named a live node; despawning
@@ -154,6 +180,55 @@ mod tests {
         assert!(app
             .overlap_box(Vec3::ZERO, Vec3::new(0.2, 0.2, 0.2))
             .is_empty());
+    }
+
+    #[test]
+    fn raycast_hit_and_tags_classify_what_the_agent_sees() {
+        let mut app = App::new()
+            .window(Window::new(64, 64))
+            .add_plugins(DefaultPlugins)
+            .setup(|world, meshes, materials| {
+                let cube = meshes.add(Mesh::cube());
+                let material = materials.add(Material::lit(Color::WHITE));
+                // A wall (untagged geometry) east, an enemy (player 0) north.
+                world.spawn((
+                    Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)),
+                    Renderable { mesh: cube, material },
+                    Bounds::new(Vec3::new(0.5, 0.5, 0.5)),
+                ));
+                world.spawn((
+                    Transform::from_translation(Vec3::new(0.0, 0.0, -3.0)),
+                    Renderable { mesh: cube, material },
+                    Player::new(0),
+                    Bounds::new(Vec3::new(0.5, 0.5, 0.5)),
+                ));
+            })
+            .build();
+        let reach = Meters::new(100.0).unwrap();
+        let enemy = app.player_entity(0).expect("enemy is player 0");
+        // Tag the enemy (entity-native classification); the wall stays untagged.
+        assert!(app.tag(enemy, 2)); // 2 = "enemy" in this game's vocabulary
+        assert!(!app.tag(Entity::from_raw(9999), 2)); // missing node -> false
+
+        // North hits the enemy: the agent reads the exact point and its kind.
+        let (north_node, north_point) = app
+            .raycast_hit(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), reach)
+            .expect("ray hits the enemy");
+        assert_eq!(north_node, enemy);
+        assert!((north_point.z + 2.5).abs() < 1.0e-5, "entry on the near face");
+        assert_eq!(app.tag_of(north_node), Some(2));
+
+        // East hits the wall: a real hit, but untagged -> plain geometry.
+        let (east_node, _point) = app
+            .raycast_hit(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach)
+            .expect("ray hits the wall");
+        assert_ne!(east_node, enemy);
+        assert_eq!(app.tag_of(east_node), None);
+
+        // Up hits nothing.
+        assert!(app
+            .raycast_hit(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), reach)
+            .is_none());
     }
 
     /// A shared cell the `setup` closure writes the captured handles into.

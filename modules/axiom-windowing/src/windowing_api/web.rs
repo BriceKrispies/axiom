@@ -83,7 +83,7 @@ impl WindowingApi {
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
-        frame_fn: F,
+        mut frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
         F: FnMut(
@@ -100,12 +100,14 @@ impl WindowingApi {
             ) + 'static,
     {
         // Scrub-only (no fork hooks). The forkable variant lives in `run_web_forkable`.
+        // This variant's public closure takes only the frame identity; the engine's
+        // cadence read-out is dropped here (multi-mesh apps don't surface it).
         self.drive_web_multi(
             canvas_id,
             meshes,
             materials,
             max_instances,
-            frame_fn,
+            move |tick, _fps_milli, _frame_micros| frame_fn(tick),
             None,
             None,
         )
@@ -126,8 +128,17 @@ impl WindowingApi {
         restore: Option<crate::frame_scrubber::RestoreHook>,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
+        // The closure is handed this frame's identity and the engine's live
+        // cadence read-out — `(frame_index, fps_milli, frame_micros)` — so a
+        // consumer can surface real timing (e.g. the debug overlay) instead of
+        // measuring its own parallel clock. `fps_milli` is fps × 1000 and
+        // `frame_micros` is the mean frame time in microseconds (integer-encoded,
+        // so no naked float crosses the boundary); both are zero until the first
+        // smoothing window fills.
         F: FnMut(
                 u64,
+                u32,
+                u32,
             ) -> (
                 [f32; 4],
                 Vec<(u32, [f32; 3], [f32; 3], f32)>,
@@ -188,6 +199,11 @@ impl WindowingApi {
             let win = windowing.clone();
             let be = backend.clone();
             let ff = frame_fn.clone();
+            // The engine's single live-cadence accumulator: fed one wall-clock
+            // read per *live* frame (scrub/pause frames don't run the app, so they
+            // don't pollute the measured fps), it produces the smoothed read-out
+            // handed to the app closure.
+            let mut frame_clock = super::FrameClock::default();
             *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
                 let scrubbing = scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
                 let paused = scrubber.as_ref().map(|s| !s.is_active()).unwrap_or(false);
@@ -236,8 +252,12 @@ impl WindowingApi {
                             )
                         })
                 } else {
+                    // Measure this live frame's wall-clock and fold it into the
+                    // engine's cadence read-out, then hand the app its frame
+                    // identity (`tick`) and the smoothed `(fps_milli, frame_micros)`.
+                    let (fps_milli, frame_micros) = frame_clock.record(perf_now_micros());
                     let (clear, lights, light_vp, batches, camera_vp, casters) =
-                        (ff.borrow_mut())(tick);
+                        (ff.borrow_mut())(tick, fps_milli, frame_micros);
                     if let Some(s) = scrubber.as_ref() {
                         s.record(tick, clear, &lights, light_vp, &batches);
                     }
@@ -353,10 +373,12 @@ impl WindowingApi {
         restore: std::rc::Rc<dyn Fn(&[u8])>,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
-        // The closure returns the single-mesh instances plus the camera
-        // view-projection and per-instance contact-shadow caster flags (in
-        // instance order) the Canvas planar-shadow pass needs.
-        F: FnMut(u64) -> ([f32; 4], Vec<f32>, u32, [f32; 16], Vec<bool>) + 'static,
+        // The closure is handed this frame's identity plus the engine's live
+        // cadence read-out — `(frame_index, fps_milli, frame_micros)` — and returns
+        // the single-mesh instances plus the camera view-projection and
+        // per-instance contact-shadow caster flags (in instance order) the Canvas
+        // planar-shadow pass needs.
+        F: FnMut(u64, u32, u32) -> ([f32; 4], Vec<f32>, u32, [f32; 16], Vec<bool>) + 'static,
     {
         const SINGLE_MESH_ID: u64 = 0;
         const DEFAULT_MATERIAL_ID: u64 = 0;
@@ -370,8 +392,9 @@ impl WindowingApi {
             meshes,
             materials,
             max_instances,
-            move |tick| {
-                let (clear, instances, count, camera_vp, casters) = frame_fn(tick);
+            move |tick, fps_milli, frame_micros| {
+                let (clear, instances, count, camera_vp, casters) =
+                    frame_fn(tick, fps_milli, frame_micros);
                 let lights = vec![(0_u32, [0.4, 0.7, 0.6], [1.0, 1.0, 1.0], 1.0_f32)];
                 (
                     clear,
@@ -594,6 +617,20 @@ impl LiveBackend {
             LiveBackend::Canvas(backend) => backend.replace_geometry(mesh_id, vertices, indices),
         }
     }
+}
+
+/// The live wall clock in integer microseconds, read from the browser's
+/// high-resolution `performance.now()` (milliseconds, sub-ms precision). This is
+/// the module's one nondeterministic time source; it exists only here, in the
+/// `wasm32` live arm, and feeds the deterministic [`super::FrameClock`]. `0` if
+/// there is no DOM/performance clock (the read-out then reports zero, an honest
+/// "not measured"). wasm32 only.
+#[cfg(target_arch = "wasm32")]
+fn perf_now_micros() -> u64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| (p.now() * 1000.0) as u64)
+        .unwrap_or(0)
 }
 
 /// Whether the page asked to force the Canvas 2D backend (`?backend=canvas2d`),

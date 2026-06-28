@@ -77,6 +77,12 @@ impl<'a> BinaryReader<'a> {
             .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
+    /// Read a little-endian `i64` (two's-complement).
+    pub fn read_i64(&mut self) -> KernelResult<i64> {
+        self.take(8)
+            .map(|b| i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    }
+
     /// Read a little-endian `f32`.
     pub fn read_f32(&mut self) -> KernelResult<f32> {
         self.take(4)
@@ -118,6 +124,37 @@ impl<'a> BinaryReader<'a> {
                 .and_then(|()| self.take(len))
         })
     }
+
+    /// Read a tagged union (enum) value branchlessly: a leading `u8` tag selects
+    /// one of `readers` to decode the body. This is the sanctioned shape for an
+    /// enum [`crate::reflect::Reflect`] — the write side just `write_u8(tag)` then
+    /// the variant body, and the read side indexes a fixed dispatch table by the
+    /// tag (no `match`). A tag past the end of the table is a deterministic
+    /// [`KernelErrorCode::InvalidDiscriminant`] error, never a panic, so a corrupt
+    /// or forward-versioned byte stream is rejected cleanly.
+    ///
+    /// ```ignore
+    /// fn reflect_read(r: &mut BinaryReader<'_>) -> KernelResult<Self> {
+    ///     r.read_tagged(&[read_variant_0, read_variant_1])
+    /// }
+    /// ```
+    pub fn read_tagged<T>(
+        &mut self,
+        readers: &[fn(&mut BinaryReader<'_>) -> KernelResult<T>],
+    ) -> KernelResult<T> {
+        self.read_u8().and_then(|tag| {
+            readers
+                .get(tag as usize)
+                .ok_or_else(|| {
+                    KernelError::new(
+                        KernelErrorScope::Binary,
+                        KernelErrorCode::InvalidDiscriminant,
+                        "tagged-union tag out of range",
+                    )
+                })
+                .and_then(|read| read(self))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +170,7 @@ mod tests {
         w.write_u32(0xDEAD_BEEF);
         w.write_u64(0x0102_0304_0506_0708);
         w.write_i32(-42);
+        w.write_i64(-9_000_000_000);
         w.write_f32(2.5);
         w.write_bool(true);
         let bytes = w.into_bytes();
@@ -143,6 +181,7 @@ mod tests {
         assert_eq!(r.read_u32().unwrap(), 0xDEAD_BEEF);
         assert_eq!(r.read_u64().unwrap(), 0x0102_0304_0506_0708);
         assert_eq!(r.read_i32().unwrap(), -42);
+        assert_eq!(r.read_i64().unwrap(), -9_000_000_000);
         assert_eq!(r.read_f32().unwrap(), 2.5);
         assert!(r.read_bool().unwrap());
         assert_eq!(r.remaining(), 0);
@@ -204,6 +243,7 @@ mod cov {
         w.write_u32(0x0304_0506);
         w.write_u64(0x0708_090A_0B0C_0D0E);
         w.write_i32(-5);
+        w.write_i64(-6_000_000_000);
         w.write_f32(1.5);
         w.write_bool(true);
         w.write_byte_slice(&[9, 8, 7]);
@@ -213,6 +253,7 @@ mod cov {
         assert_eq!(r.read_u32().unwrap(), 0x0304_0506);
         assert_eq!(r.read_u64().unwrap(), 0x0708_090A_0B0C_0D0E);
         assert_eq!(r.read_i32().unwrap(), -5);
+        assert_eq!(r.read_i64().unwrap(), -6_000_000_000);
         assert_eq!(r.read_f32().unwrap(), 1.5);
         assert!(r.read_bool().unwrap());
         assert_eq!(r.read_byte_slice().unwrap(), &[9, 8, 7]);
@@ -247,6 +288,7 @@ mod cov2 {
         assert!(BinaryReader::new(&[0u8, 1, 2]).read_u32().is_err());
         assert!(BinaryReader::new(&[0u8; 7]).read_u64().is_err());
         assert!(BinaryReader::new(&[0u8, 1, 2]).read_i32().is_err());
+        assert!(BinaryReader::new(&[0u8; 7]).read_i64().is_err());
         assert!(BinaryReader::new(&[0u8, 1, 2]).read_f32().is_err());
         assert!(BinaryReader::new(&[0u8; 0]).read_bool().is_err());
         assert!(BinaryReader::new(&[0u8; 0]).read_byte_slice().is_err());

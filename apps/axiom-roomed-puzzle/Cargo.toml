@@ -24,6 +24,12 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 # normal dependency. Listed in app.toml's `allowed_layers`.
 axiom-math = { path = "../../crates/axiom-math" }
 
+# The interface layer's keybinding primitive (Keymap/KeyBinding +
+# InterfaceInputEvent). `command_for_key` resolves keys through a shared Keymap.
+# Used natively (the mapping is browser-free and unit-tested), so it is a normal
+# dependency. Listed in app.toml's `allowed_layers`.
+axiom-interface = { path = "../../crates/axiom-interface" }
+
 # Standard, hand-editable level format. `toml` + `serde` are already the repo's
 # manifest-parsing stack (see crates/xtask); we reuse the same versions. Used by
 # the level codec in both native tests and the wasm editor, so they are normal

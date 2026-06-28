@@ -17,7 +17,6 @@ use std::rc::Rc;
 
 use axiom_interface::InterfaceInputEvent;
 
-use crate::backquote::classify_backquote;
 use crate::overlay_state::OverlayState;
 
 /// A developer debug overlay + command console for the browser engine surface.
@@ -154,19 +153,17 @@ impl DebugOverlayApi {
         in_text_field: bool,
         console_owns_focus: bool,
     ) -> bool {
-        let shortcut = classify_backquote(InterfaceInputEvent {
+        let chord = InterfaceInputEvent {
             shift,
             ctrl,
             alt,
             meta,
             in_text_field,
             console_focus: console_owns_focus,
-        });
-        shortcut
-            .into_iter()
-            .for_each(|s| self.state.borrow_mut().apply_shortcut(s));
+        };
+        let action = self.state.borrow_mut().apply_key("Backquote", chord);
         self.repaint();
-        shortcut.is_some()
+        action.is_some()
     }
 
     // --- console keys -------------------------------------------------------

@@ -30,6 +30,8 @@ introduced_capabilities = [
   "InterfaceDrawList",
   "InterfaceDrawItem",
   "InterfaceInputEvent",
+  "Keymap",
+  "KeyBinding",
   "ParsedCommand",
   "CommandOutcome",
   "CommandTable",

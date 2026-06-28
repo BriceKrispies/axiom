@@ -1,0 +1,23 @@
+[package]
+name = "axiom-agent"
+description = "Axiom engine module: a deterministic embodied-agent substrate. Turns a bounded, game-neutral Observation into player-equivalent ActionIntents through a deterministic brain, and records one DecisionReport per step. Owns neutral contracts only — apps translate their own scene/sim/render/game state into Observations and translate the emitted intents back into real input."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free, GPU-free, wasm-clean, deterministic, headless.
+crate-type = ["rlib"]
+
+# An isolated engine module (kind = "engine-module", allowed_modules = []) that
+# composes only completed layers: the kernel (Tick identity + result/error model)
+# and the runtime (the deterministic RuntimeStep that drives one agent decision).
+# It depends on no other module, no app, no tool, and no external crate.
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

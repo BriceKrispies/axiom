@@ -10,16 +10,21 @@ use crate::metric_report::MetricReport;
 use crate::system_report::SystemReport;
 
 /// The wire schema version of a [`FrameReport`]. Bumped on incompatible
-/// layout changes; the major component gates compatibility.
-const SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
+/// layout changes; the major component gates compatibility. Bumped to 2.0 when
+/// the deterministic frame timing was added to the layout.
+const SCHEMA: SchemaVersion = SchemaVersion::new(2, 0);
 
 /// The answerable picture of one engine frame: identity, lifecycle, viewport
-/// size, skip status, and the ordered per-system reports recovered from the
-/// frame contract.
+/// size, skip status, the deterministic frame timing, and the ordered per-system
+/// reports and telemetry metrics recovered from the frame contract.
 ///
-/// Plain, owned data with no floating-point fields, so two reports built from
-/// equal frames are equal and serialize to identical bytes — the property that
-/// lets an agent diff "tick N vs tick M" exactly.
+/// Almost all fields are integers, and the one float — a metric value inside
+/// [`MetricReport`] — is encoded through its fixed [`BinaryWriter::write_f32`]
+/// bit pattern, so two reports built from equal frames serialize to identical
+/// bytes. That byte-stability is the property that lets an agent diff "tick N vs
+/// tick M" exactly. The type is `PartialEq` (not `Eq`) precisely because of that
+/// float: value equality follows IEEE semantics even though the *bytes* are
+/// stable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameReport {
     engine_frame_index: u64,
@@ -29,6 +34,10 @@ pub struct FrameReport {
     lifecycle: FrameLifecycleState,
     viewport_width: u32,
     viewport_height: u32,
+    host_elapsed_nanos: u64,
+    consumed_nanos: u64,
+    retained_nanos: u64,
+    fixed_step_nanos: u64,
     systems: Vec<SystemReport>,
     metrics: Vec<MetricReport>,
 }
@@ -47,6 +56,7 @@ impl FrameReport {
             .iter()
             .flat_map(|summary| summary.metrics().iter().map(MetricReport::from_metric))
             .collect();
+        let timing = frame.timing();
         FrameReport {
             engine_frame_index: frame.engine_frame_index(),
             host_frame_sequence: frame.host_frame_sequence(),
@@ -55,6 +65,10 @@ impl FrameReport {
             lifecycle: frame.lifecycle(),
             viewport_width: frame.viewport().logical_width(),
             viewport_height: frame.viewport().logical_height(),
+            host_elapsed_nanos: timing.host_elapsed_nanos(),
+            consumed_nanos: timing.consumed_nanos(),
+            retained_nanos: timing.retained_nanos(),
+            fixed_step_nanos: timing.fixed_step_nanos(),
             systems,
             metrics,
         }
@@ -95,6 +109,27 @@ impl FrameReport {
         self.viewport_height
     }
 
+    /// The host-supplied elapsed nanoseconds this frame was driven with — the
+    /// deterministic timing the host injected as data (never a wall-clock read).
+    pub const fn host_elapsed_nanos(&self) -> u64 {
+        self.host_elapsed_nanos
+    }
+
+    /// The nanoseconds actually consumed by this frame's fixed runtime steps.
+    pub const fn consumed_nanos(&self) -> u64 {
+        self.consumed_nanos
+    }
+
+    /// The leftover nanoseconds carried forward to the next frame.
+    pub const fn retained_nanos(&self) -> u64 {
+        self.retained_nanos
+    }
+
+    /// The fixed runtime step duration in nanoseconds.
+    pub const fn fixed_step_nanos(&self) -> u64 {
+        self.fixed_step_nanos
+    }
+
     /// The ordered per-system reports for this frame.
     pub fn systems(&self) -> &[SystemReport] {
         &self.systems
@@ -120,7 +155,7 @@ impl FrameReport {
         Self::read_from(&mut reader)
     }
 
-    fn write_to(&self, writer: &mut BinaryWriter) {
+    pub(crate) fn write_to(&self, writer: &mut BinaryWriter) {
         SCHEMA.write_to(writer);
         writer.write_u64(self.engine_frame_index);
         writer.write_u64(self.host_frame_sequence);
@@ -129,6 +164,10 @@ impl FrameReport {
         writer.write_u8(lifecycle_to_u8(self.lifecycle));
         writer.write_u32(self.viewport_width);
         writer.write_u32(self.viewport_height);
+        writer.write_u64(self.host_elapsed_nanos);
+        writer.write_u64(self.consumed_nanos);
+        writer.write_u64(self.retained_nanos);
+        writer.write_u64(self.fixed_step_nanos);
         writer.write_u32(self.systems.len() as u32);
         self.systems
             .iter()
@@ -139,7 +178,7 @@ impl FrameReport {
             .for_each(|metric| metric.write_to(writer));
     }
 
-    fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
+    pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
         // A fully branchless sequential decode: each field's read is chained
         // through `and_then`, so the first error short-circuits the rest and
         // the reader advances field-by-field exactly as `write_to` laid them
@@ -169,6 +208,10 @@ impl FrameReport {
                                 .and_then(|lifecycle| {
                                     reader.read_u32().and_then(|viewport_width| {
                                         reader.read_u32().and_then(|viewport_height| {
+                                            reader.read_u64().and_then(|host_elapsed_nanos| {
+                                            reader.read_u64().and_then(|consumed_nanos| {
+                                            reader.read_u64().and_then(|retained_nanos| {
+                                            reader.read_u64().and_then(|fixed_step_nanos| {
                                             reader.read_u32().and_then(|count| {
                                                 (0..count)
                                                     .map(|_| SystemReport::read_from(reader))
@@ -188,12 +231,17 @@ impl FrameReport {
                                                                     lifecycle,
                                                                     viewport_width,
                                                                     viewport_height,
+                                                                    host_elapsed_nanos,
+                                                                    consumed_nanos,
+                                                                    retained_nanos,
+                                                                    fixed_step_nanos,
                                                                     systems,
                                                                     metrics,
                                                                 })
                                                         })
                                                     })
                                             })
+                                            })})})})
                                         })
                                     })
                                 })
@@ -250,6 +298,10 @@ mod tests {
             lifecycle,
             viewport_width: 320,
             viewport_height: 200,
+            host_elapsed_nanos: 2_000,
+            consumed_nanos: 2_000,
+            retained_nanos: 0,
+            fixed_step_nanos: 1_000,
             systems: Vec::new(),
             metrics: Vec::new(),
         }
@@ -265,6 +317,36 @@ mod tests {
         assert_eq!(report.viewport_width(), 320);
         assert_eq!(report.viewport_height(), 200);
         assert!(report.systems().is_empty());
+    }
+
+    #[test]
+    fn from_frame_captures_the_deterministic_timing() {
+        // The single fixed-step active frame: one step consumed the fixed step
+        // duration, nothing retained. The timing is host-injected data, so it is
+        // exact and replay-stable — never a wall-clock read.
+        let frame = &fixtures::active_engine_frames(1)[0];
+        let report = FrameReport::from_frame(frame);
+        let timing = frame.timing();
+        assert_eq!(report.host_elapsed_nanos(), timing.host_elapsed_nanos());
+        assert_eq!(report.consumed_nanos(), timing.consumed_nanos());
+        assert_eq!(report.retained_nanos(), timing.retained_nanos());
+        assert_eq!(report.fixed_step_nanos(), timing.fixed_step_nanos());
+        // The fixed step is genuinely non-zero, so the accessor proves a value,
+        // not a default.
+        assert!(report.fixed_step_nanos() > 0);
+    }
+
+    #[test]
+    fn equal_float_metric_frames_serialize_byte_identically() {
+        // The failing fixture carries a float metric (`cube.angle_deg`). Two
+        // reports built from independent-but-equal frames must serialize to the
+        // exact same bytes — the float rides through its fixed bit pattern, so
+        // the agent byte channel is replay-diffable even with floats present.
+        let a = FrameReport::from_frame(&fixtures::failing_engine_frame());
+        let b = FrameReport::from_frame(&fixtures::failing_engine_frame());
+        assert_eq!(a, b);
+        assert!(!a.metrics().is_empty(), "the fixture carries a float metric");
+        assert_eq!(a.to_bytes(), b.to_bytes());
     }
 
     #[test]

@@ -9,7 +9,7 @@
 //! unit tests.
 
 use axiom::prelude::{App, Player, PlayerInput, RunningApp, Transform, Vec3};
-use axiom_kernel::StableHash;
+use axiom_kernel::{DeterministicRng, StableHash};
 use axiom_net_protocol::NetProtocolApi;
 
 use crate::replay::{AcceptedIntent, ReplayRecord, TickRecord};
@@ -47,6 +47,12 @@ pub struct Session {
     history: Vec<TickRecord>,
     /// The initial state hash (captured at construction), for replay identity.
     initial_hash: u64,
+    /// The host's deterministic random source, seeded from `seed`. Carried inside
+    /// the full session snapshot ([`Self::snapshot_session`]) so a restored or
+    /// recovered worker continues the identical random sequence rather than
+    /// diverging. (The cube ruleset draws none today; the field future-proofs an
+    /// rng-using ruleset and proves the snapshot path carries it.)
+    rng: DeterministicRng,
     /// The most recent error `(code, message)`, surfaced via the C ABI.
     last_error: Option<(u32, String)>,
 }
@@ -68,6 +74,7 @@ impl Session {
             rejected_since_advance: 0,
             history: Vec::new(),
             initial_hash,
+            rng: DeterministicRng::seeded(seed),
             last_error: None,
         }
     }
@@ -127,6 +134,35 @@ impl Session {
         let ok = self.restore(bytes);
         self.tick = [self.tick, tick][usize::from(ok)];
         ok
+    }
+
+    /// The **full session** snapshot — the durable sim state AND the host RNG —
+    /// as one opaque, versioned blob the embedding host stores verbatim for
+    /// persistence, rewind, or crash recovery. The RNG lives inside the blob, so a
+    /// restored worker continues the identical random sequence. Distinct from
+    /// [`Self::snapshot`] (the scene-only bytes the per-tick replay/hash machinery
+    /// uses).
+    pub fn snapshot_session(&self) -> Vec<u8> {
+        self.app.snapshot_session(&self.rng)
+    }
+
+    /// Restore a full session from [`Self::snapshot_session`] bytes — forking the
+    /// sim AND resuming the captured RNG. Returns `false` and records the error on
+    /// a truncated / incompatible buffer (no panic).
+    pub fn restore_session(&mut self, bytes: &[u8]) -> bool {
+        self.app
+            .restore_session(bytes)
+            .map(|rng| {
+                self.rng = rng;
+                true
+            })
+            .unwrap_or_else(|_| {
+                self.record_error(
+                    crate::status::STATUS_ERR_DESERIALIZE as u32,
+                    "restore_session rejected the snapshot bytes",
+                );
+                false
+            })
     }
 
     /// Validate and (if accepted) queue a player intent for the next tick.
@@ -381,6 +417,11 @@ mod tests {
     #[test]
     fn advancing_an_empty_tick_preserves_the_hash_deterministically() {
         let mut s = session();
+        // The first advance runs the (empty) startup phase, which flips the
+        // world's `startup_done` bit — genuine state, now carried in the snapshot
+        // and therefore the hash. Measure across a *post-startup* empty tick, where
+        // nothing changes.
+        s.advance();
         let before = s.state_hash();
         let (_, after) = s.advance();
         assert_eq!(before, after);
@@ -398,6 +439,29 @@ mod tests {
         assert!(fresh.restore(&bytes));
         assert_eq!(fresh.snapshot(), bytes);
         assert_eq!(fresh.state_hash(), hash);
+    }
+
+    #[test]
+    fn session_snapshot_carries_and_resumes_the_rng() {
+        let mut s = session();
+        s.submit_intent(1, 1, 0, &move_payload(0.0, 0.5));
+        s.advance();
+        // Advance the host RNG, then bundle the full session (sim + rng).
+        (0..5).for_each(|_| {
+            s.rng.next_u64();
+        });
+        let blob = s.snapshot_session();
+
+        // Restore into a session built with a DIFFERENT seed: if the blob did not
+        // carry the rng, the continuation would diverge — it does not.
+        let mut fresh = Session::new(0x9999, 2, 16_666_667);
+        assert!(fresh.restore_session(&blob));
+        let original: Vec<u64> = (0..8).map(|_| s.rng.next_u64()).collect();
+        let replayed: Vec<u64> = (0..8).map(|_| fresh.rng.next_u64()).collect();
+        assert_eq!(original, replayed, "the session blob carries and resumes the rng");
+
+        // A bad buffer is rejected (recorded), not a panic.
+        assert!(!fresh.restore_session(&[1, 2, 3]));
     }
 
     #[test]

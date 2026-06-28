@@ -1,0 +1,23 @@
+[package]
+name = "axiom-physics"
+description = "Axiom Phase 1 deterministic rigid-body physics engine module (linear integration scaffold; no collision solving yet)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. Browser-free, GPU-free, wasm-clean, deterministic.
+crate-type = ["rlib"]
+
+[dependencies]
+# Physics is an isolated engine module that builds only on completed layers:
+# the kernel (identity, dimensioned scalars, deterministic fixed step, errors),
+# the runtime (deterministic stepping vocabulary), and math (Vec3 / Transform).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

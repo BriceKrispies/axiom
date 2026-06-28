@@ -182,12 +182,14 @@ impl<S: ColumnSet> World<S> {
         current
     }
 
-    /// Serialize a full world snapshot: a schema header, the entity-identity state
-    /// (live slots, generations, free list, next slot), then every component
-    /// column. Unlike [`Self::serialize`] this captures entity identity, so a
-    /// restore reproduces future spawns exactly. Systems are not serialized.
+    /// Serialize a full world snapshot: a schema header, the startup-phase flag, the
+    /// entity-identity state (live slots, generations, free list, next slot), then
+    /// every component column. Unlike [`Self::serialize`] this captures entity
+    /// identity, so a restore reproduces future spawns exactly. Systems are not
+    /// serialized.
     pub fn write_snapshot(&self, writer: &mut BinaryWriter) {
         SNAPSHOT_SCHEMA.write_to(writer);
+        writer.write_bool(self.startup_done);
         self.entities.serialize(writer);
         let columns = self.storage.columns();
         writer.write_u32(columns.len() as u32);
@@ -197,7 +199,18 @@ impl<S: ColumnSet> World<S> {
     }
 
     /// Restore a world from bytes produced by [`Self::write_snapshot`]: the entity
-    /// registry and every component column are replaced. Systems are untouched.
+    /// registry, every component column, and the startup-phase flag are replaced.
+    /// Systems are untouched.
+    ///
+    /// The serialized `startup_done` bit is restored faithfully, so the restored
+    /// world's startup phase matches the source's. A snapshot taken mid-session
+    /// (after startup ran) restores as **done**, which is what stops a restored
+    /// world from re-running its `Startup` systems on the next active advance — a
+    /// startup system that *authors* (spawns scene geometry, players, …) would
+    /// otherwise double-initialize on top of the restored state. A snapshot taken
+    /// before startup restores as **not done**, so a fresh-baseline restore still
+    /// runs its authoring startup — the bit travels with the data rather than being
+    /// assumed.
     pub fn read_snapshot(&mut self, reader: &mut BinaryReader<'_>) -> KernelResult<()> {
         SchemaVersion::read_from(reader)
             .and_then(|version| {
@@ -212,26 +225,31 @@ impl<S: ColumnSet> World<S> {
                         )
                     })
             })
-            .and_then(|()| EntityRegistry::deserialize(reader))
-            .and_then(|entities| {
+            .and_then(|()| reader.read_bool())
+            .and_then(|started| EntityRegistry::deserialize(reader).map(|entities| (started, entities)))
+            .and_then(|(started, entities)| {
                 self.entities = entities;
-                reader.read_u32().map(|count| count as usize)
+                reader.read_u32().map(|count| (started, count as usize))
             })
-            .and_then(|count| {
+            .and_then(|(started, count)| {
                 let columns = self.storage.columns_mut();
-                (count == columns.len()).then_some(columns).ok_or_else(|| {
-                    KernelError::new(
-                        KernelErrorScope::Binary,
-                        KernelErrorCode::TruncatedData,
-                        "snapshot column count does not match the storage",
-                    )
-                })
+                (count == columns.len())
+                    .then_some((started, columns))
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            KernelErrorScope::Binary,
+                            KernelErrorCode::TruncatedData,
+                            "snapshot column count does not match the storage",
+                        )
+                    })
             })
-            .and_then(|columns| {
+            .and_then(|(started, columns)| {
                 columns
                     .into_iter()
                     .try_for_each(|(_, column)| column.read_replace(reader))
+                    .map(|()| started)
             })
+            .map(|started| self.startup_done = started)
     }
 
     /// Serialize the whole world's component state: a schema header, the column
@@ -672,6 +690,74 @@ mod tests {
     }
 
     #[test]
+    fn restore_of_a_post_startup_snapshot_re_runs_update_but_not_startup() {
+        // `Mark(n)` does `doubled = doubled*10 + n` for every entity when it runs.
+        // Startup `Mark(7)` runs once; Update `Mark(3)` runs every active advance.
+        let mut world: World<Storage> = World::new();
+        world.register_system_in(SchedulePhase::Startup, Box::new(Mark(7)));
+        world.register_system_in(SchedulePhase::Update, Box::new(Mark(3)));
+        let e = world.spawn();
+        let frame = fixtures::active_engine_frame();
+        // First active advance: startup (0 -> 7) then update (7 -> 73).
+        world.advance(0, &FrameContext::new(&frame));
+        assert_eq!(world.storage().doubled.get(e), Some(&73));
+
+        let mut writer = BinaryWriter::new();
+        world.write_snapshot(&mut writer);
+        let bytes = writer.into_bytes();
+
+        // Restore into a FRESH world carrying the same two systems.
+        let mut restored: World<Storage> = World::new();
+        restored.register_system_in(SchedulePhase::Startup, Box::new(Mark(7)));
+        restored.register_system_in(SchedulePhase::Update, Box::new(Mark(3)));
+        restored
+            .read_snapshot(&mut BinaryReader::new(&bytes))
+            .unwrap();
+        assert_eq!(restored.storage().doubled.get(e), Some(&73), "restored state");
+
+        // The snapshot was taken mid-session, so the restored world is past
+        // startup: advancing runs ONLY update (73 -> 733). A re-run of startup
+        // would instead give 73*10 + 7 = 737 (then update -> 7373).
+        restored.advance(1, &FrameContext::new(&frame));
+        assert_eq!(
+            restored.storage().doubled.get(e),
+            Some(&733),
+            "post-startup restore: update re-runs, startup must not"
+        );
+    }
+
+    #[test]
+    fn restore_of_a_pre_startup_snapshot_still_runs_startup() {
+        // A snapshot taken BEFORE the first advance carries `startup_done == false`.
+        // Restoring it must reproduce that — a fresh-baseline restore still runs its
+        // authoring startup on the next advance. (The old unconditional
+        // `startup_done = true` on restore wrongly suppressed it.)
+        let mut world: World<Storage> = World::new();
+        world.register_system_in(SchedulePhase::Startup, Box::new(Mark(7)));
+        let e = world.spawn();
+
+        let mut writer = BinaryWriter::new();
+        world.write_snapshot(&mut writer); // never advanced: startup not yet done
+        let bytes = writer.into_bytes();
+
+        let mut restored: World<Storage> = World::new();
+        restored.register_system_in(SchedulePhase::Startup, Box::new(Mark(7)));
+        restored
+            .read_snapshot(&mut BinaryReader::new(&bytes))
+            .unwrap();
+        // Startup has NOT run yet in the restored world.
+        assert_eq!(restored.storage().doubled.get(e), None, "pre-startup state");
+
+        let frame = fixtures::active_engine_frame();
+        restored.advance(0, &FrameContext::new(&frame));
+        assert_eq!(
+            restored.storage().doubled.get(e),
+            Some(&7),
+            "pre-startup restore: startup must still run on the next advance"
+        );
+    }
+
+    #[test]
     fn read_snapshot_rejects_incompatible_schema() {
         let mut w = BinaryWriter::new();
         SchemaVersion::new(SNAPSHOT_SCHEMA.major() + 1, 0).write_to(&mut w);
@@ -690,6 +776,7 @@ mod tests {
     fn read_snapshot_rejects_wrong_column_count() {
         let mut w = BinaryWriter::new();
         SNAPSHOT_SCHEMA.write_to(&mut w);
+        w.write_bool(true); // startup_done bit
         EntityRegistry::new().serialize(&mut w);
         w.write_u32(99); // storage has 2 columns, not 99
         let bytes = w.into_bytes();

@@ -71,6 +71,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-agent"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-agent-harness"
+version = "0.1.0"
+dependencies = [
+ "axiom-agent",
+ "axiom-kernel",
+ "axiom-runtime",
+]
+
+[[package]]
 name = "axiom-asset-pack"
 version = "0.1.0"
 dependencies = [
@@ -178,6 +195,8 @@ version = "0.1.0"
 dependencies = [
  "axiom",
  "console_error_panic_hook",
+ "serde",
+ "toml",
  "wasm-bindgen",
 ]
 
@@ -193,8 +212,13 @@ name = "axiom-retro-fps-browser"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-agent",
  "axiom-debug-overlay",
+ "axiom-interface",
+ "axiom-kernel",
+ "axiom-perception",
  "axiom-recording",
+ "axiom-runtime",
  "axiom-windowing",
  "bytemuck",
  "console_error_panic_hook",
@@ -257,10 +281,24 @@ name = "axiom-growth"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-agent-harness",
+ "axiom-canvas2d-backend",
+ "axiom-gpu-backend",
+ "axiom-host",
+ "axiom-interface",
+ "axiom-introspect",
  "axiom-kernel",
  "axiom-math",
+ "axiom-perception",
  "axiom-windowing",
  "console_error_panic_hook",
+ "js-sys",
+ "png",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "toml",
+ "tungstenite",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -418,6 +456,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-perception"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
+name = "axiom-physics"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-physics-crucible"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-kernel",
+ "axiom-physics",
+ "axiom-runtime",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-placement"
 version = "0.1.0"
 dependencies = [
@@ -545,6 +614,7 @@ version = "0.1.0"
 dependencies = [
  "axiom-host",
  "axiom-input",
+ "axiom-interface",
  "axiom-kernel",
  "axiom-layout",
  "axiom-math",
@@ -635,6 +705,7 @@ dependencies = [
  "axiom-canvas2d-backend",
  "axiom-gpu-backend",
  "axiom-host",
+ "axiom-interface",
  "axiom-kernel",
  "axiom-recording",
  "wasm-bindgen",

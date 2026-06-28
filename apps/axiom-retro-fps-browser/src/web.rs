@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 use axiom::prelude::{FrameOutcome, RunningApp};
 use axiom_debug_overlay::DebugOverlayApi;
+use axiom_interface::{InterfaceInputEvent, KeyBinding, Keymap};
 use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -96,6 +97,20 @@ fn pose_rows(px: f32, pz: f32, yaw: f32, pitch: f32) -> Vec<(String, String)> {
     ]
 }
 
+/// The current document visibility (`"visible"`/`"hidden"`) for the overlay's
+/// visibility row, defaulting to `"visible"` when there is no document.
+fn document_visibility() -> &'static str {
+    let hidden = web_sys::window()
+        .and_then(|window| window.document())
+        .map(|document| document.hidden())
+        .unwrap_or(false);
+    if hidden {
+        "hidden"
+    } else {
+        "visible"
+    }
+}
+
 /// The browser entry: build the game + engine app, capture the keyboard, mount
 /// the HUD, and drive the live windowing loop.
 #[wasm_bindgen]
@@ -127,11 +142,11 @@ pub fn start() {
 
     // The developer debug overlay: a Backquote-toggled read-out the frame loop
     // pushes the live player pose into (position + look direction), so a
-    // view-dependent rendering artifact can be reproduced at an exact pose. Shown
-    // by default while we hunt the "huge wall" flash; press ` to hide it.
+    // view-dependent rendering artifact can be reproduced at an exact pose. Hidden
+    // by default; press ` to toggle it on/off (Shift+` density, Ctrl+` pin,
+    // Alt+` console).
     let mut overlay = DebugOverlayApi::new();
     overlay.mount_to_body();
-    overlay.show();
 
     let doc = LevelDoc::default();
     let game = Rc::new(RefCell::new(RetroFpsGame::from_level(&doc)));
@@ -167,7 +182,12 @@ pub fn start() {
         let running = running.clone();
         let assets = assets.clone();
         let tick = tick.clone();
-        move |_raf_tick: u64| {
+        // The windowing loop hands each live frame its engine-owned identity and
+        // cadence read-out: `frame_index` is the loop's frame counter (it advances
+        // across scrubs/forks, unlike the game's sim tick), and the timing pair is
+        // the smoothed fps×1000 / mean frame-µs the loop measures. We surface both
+        // in the debug overlay below.
+        move |frame_index: u64, fps_milli: u32, frame_micros: u32| {
             // Apply a pending level edit at this tick boundary: rebuild the game
             // and re-author the engine scene in place. The engine tick keeps
             // counting (the host driver requires a monotone sequence); only the
@@ -214,6 +234,15 @@ pub fn start() {
             };
             tick.set(now + 1);
             hud.update(&commands.hud);
+
+            // Feed the engine's live frame diagnostics into the overlay so its
+            // frame/tick/fps/frame-ms rows read real values: `frame_index` is the
+            // windowing frame counter, `now` is the game sim tick (the overlay
+            // shows them as distinct fields because they diverge across a scrub or
+            // fork), and the cadence pair comes straight from the loop's clock.
+            // retro FPS steps the sim exactly once per frame, so `sim ticks` is 1.
+            overlay.set_frame(frame_index, now, 1, fps_milli, frame_micros);
+            overlay.set_visibility(document_visibility());
 
             // Surface the post-step player pose in the debug overlay so a bad view
             // can be read off exactly (position + look direction) and handed back
@@ -490,24 +519,74 @@ fn frame_hash(floats: &[f32]) -> String {
     format!("{h:016x}")
 }
 
-/// Map a key's pressed state into the shared key set. Matches on `key` (not
-/// `code`) so the gallery's synthetic-keyboard on-screen pad drives it too.
+/// Movement action ids — the neutral `u32`s the retro_fps [`Keymap`] resolves to, one
+/// per [`Keys`] field [`apply_movement`] toggles.
+const FORWARD: u32 = 0;
+const BACKWARD: u32 = 1;
+const TURN_LEFT: u32 = 2;
+const TURN_RIGHT: u32 = 3;
+const STRAFE_LEFT: u32 = 4;
+const STRAFE_RIGHT: u32 = 5;
+const FIRE: u32 = 6;
+
+/// The retro_fps movement bindings as an interface-layer [`Keymap`]. Built from
+/// modifier-insensitive [`KeyBinding::key`] rows matched on the logical `key()`
+/// (not `code`), so the gallery's synthetic-keyboard on-screen pad drives it too.
+fn retro_fps_keymap() -> Keymap {
+    Keymap::new(&[
+        KeyBinding::key("ArrowUp", FORWARD),
+        KeyBinding::key("w", FORWARD),
+        KeyBinding::key("W", FORWARD),
+        KeyBinding::key("ArrowDown", BACKWARD),
+        KeyBinding::key("s", BACKWARD),
+        KeyBinding::key("S", BACKWARD),
+        KeyBinding::key("ArrowLeft", TURN_LEFT),
+        KeyBinding::key("ArrowRight", TURN_RIGHT),
+        KeyBinding::key("a", STRAFE_LEFT),
+        KeyBinding::key("A", STRAFE_LEFT),
+        KeyBinding::key("d", STRAFE_RIGHT),
+        KeyBinding::key("D", STRAFE_RIGHT),
+        KeyBinding::key(" ", FIRE),
+    ])
+}
+
+/// Apply a resolved movement action to the shared key set at `pressed`.
+fn apply_movement(k: &mut Keys, action: u32, pressed: bool) {
+    match action {
+        FORWARD => k.forward = pressed,
+        BACKWARD => k.backward = pressed,
+        TURN_LEFT => k.turn_left = pressed,
+        TURN_RIGHT => k.turn_right = pressed,
+        STRAFE_LEFT => k.strafe_left = pressed,
+        STRAFE_RIGHT => k.strafe_right = pressed,
+        _ => k.fire = pressed,
+    }
+}
+
+/// Map a key's pressed state into the shared key set, resolving it through the
+/// shared interface-layer [`Keymap`]. Matches on `key` (not `code`) so the
+/// gallery's synthetic-keyboard on-screen pad drives it too. Keydown only sets
+/// held state when the chord routes as a game hotkey (no meta held); keyup always
+/// resolves so a key released while a modifier is down never leaves movement stuck.
 fn install_key_listener(keys: &Rc<RefCell<Keys>>, event: &str, pressed: bool) {
     let keys = keys.clone();
+    let keymap = retro_fps_keymap();
     let callback = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
-        let mut k = keys.borrow_mut();
-        match e.key().as_str() {
-            "ArrowUp" | "w" | "W" => k.forward = pressed,
-            "ArrowDown" | "s" | "S" => k.backward = pressed,
-            "ArrowLeft" => k.turn_left = pressed,
-            "ArrowRight" => k.turn_right = pressed,
-            "a" | "A" => k.strafe_left = pressed,
-            "d" | "D" => k.strafe_right = pressed,
-            " " => k.fire = pressed,
-            _ => return,
-        }
+        let chord = InterfaceInputEvent {
+            shift: e.shift_key(),
+            ctrl: e.ctrl_key(),
+            alt: e.alt_key(),
+            meta: e.meta_key(),
+            in_text_field: false,
+            console_focus: false,
+        };
+        let routes = !pressed || chord.routes_global_hotkey();
+        let action = routes.then(|| keymap.resolve(&e.key(), chord)).flatten();
+        action
+            .into_iter()
+            .for_each(|a| apply_movement(&mut keys.borrow_mut(), a, pressed));
         // Stop the browser from scrolling on the arrow keys / space.
-        e.prevent_default();
+        action.into_iter().for_each(|_| e.prevent_default());
     });
     web_sys::window()
         .expect("a browser window")

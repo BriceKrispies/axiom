@@ -21,6 +21,7 @@ use crate::light::Light;
 use crate::procanim::ProcAnim;
 use crate::renderable::Renderable;
 use crate::spin::Spin;
+use crate::tag::Tag;
 
 /// The scene's component storage: one sparse column per standard component
 /// type. This is the `S` the generic [`axiom_ecs::World<S>`] holds.
@@ -41,6 +42,9 @@ pub struct SceneStorage {
     /// Axis-aligned bounding volumes, keyed by node entity. The queryable
     /// spatial extent the [`crate::SceneApi`] raycast / overlap queries fold over.
     pub bounds: ComponentColumn<Bounds>,
+    /// Coarse semantic kinds, keyed by node entity — what each thing *is*, the
+    /// classification a perceiving agent reads off a raycast / overlap hit.
+    pub tags: ComponentColumn<Tag>,
     /// Controllable nodes, keyed entity → player index. Authored once; the
     /// bridge that lets a per-tick move command address a node by player index.
     pub players: BTreeMap<EntityId, u32>,
@@ -112,6 +116,7 @@ impl ColumnSet for SceneStorage {
             ("spins", &self.spins),
             ("procanims", &self.procanims),
             ("bounds", &self.bounds),
+            ("tags", &self.tags),
         ]
     }
 
@@ -126,6 +131,7 @@ impl ColumnSet for SceneStorage {
             ("spins", &mut self.spins),
             ("procanims", &mut self.procanims),
             ("bounds", &mut self.bounds),
+            ("tags", &mut self.tags),
         ]
     }
 }
@@ -354,6 +360,7 @@ mod tests {
         assert!(s.spins.is_empty());
         assert!(s.procanims.is_empty());
         assert!(s.bounds.is_empty());
+        assert!(s.tags.is_empty());
         assert!(s.players.is_empty());
         assert!(s.pending_moves.is_empty());
         assert!(s.controllers.is_empty());

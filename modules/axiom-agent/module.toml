@@ -1,0 +1,26 @@
+# Axiom agent engine module manifest.
+#
+# axiom-agent is an *isolated* engine module: it composes completed layers
+# (kernel, runtime) into a deterministic embodied-agent substrate. It never
+# depends on another module, an app, or a tool, and it never touches a scene,
+# renderer, asset, physics, input device, or game loop. Composition — translating
+# real game state into an Observation, and an emitted ActionIntent back into
+# concrete input — is the job of an app, never of this module.
+[module]
+name = "agent"
+crate_name = "axiom-agent"
+kind = "engine-module"
+allowed_layers = [
+  "kernel",
+  "runtime",
+]
+allowed_modules = []
+introduced_capabilities = [
+  "agent-runtime",
+  "bounded-observation",
+  "player-equivalent-intents",
+  "deterministic-agent-decision",
+  "agent-replay-brain",
+  "agent-scripted-brain",
+  "decision-reporting",
+]

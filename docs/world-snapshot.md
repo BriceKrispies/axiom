@@ -1,7 +1,8 @@
 # World → bytes / restore: full-session snapshot spec
 
-**Status:** design / scoping. **Audience:** an agent implementing deterministic
-full-session snapshot+restore for Axiom-embedded games.
+**Status:** **implemented** (the §5 checklist landed; deferred items noted in §6).
+**Audience:** an agent implementing deterministic full-session snapshot+restore
+for Axiom-embedded games.
 
 This documents exactly what Axiom needs to implement so a running game session
 can be serialized to an opaque byte buffer and restored byte-faithfully — the
@@ -12,6 +13,30 @@ room workers.
 The headline: **most of this already exists, is layered correctly, and is
 covered by truncation/schema/round-trip tests.** This is an extension job, not a
 from-scratch serialization system.
+
+> **Implementation note (landed).** The five gaps below are implemented:
+> - **A** — `DeterministicRng::state()` / `from_state()` + `Reflect`
+>   (`crates/axiom-kernel/src/deterministic_rng.rs`), with round-trip and
+>   sequence-continuation tests.
+> - **B** — `RunningApp::snapshot_session(&DeterministicRng)` /
+>   `restore_session(&[u8]) -> KernelResult<DeterministicRng>`
+>   (`modules/axiom/src/app.rs`): the host owns the RNG; the engine bundles it
+>   beside the durable sim state in one versioned blob.
+> - **C** — `Reflect` for `i32` / `i64` / `u8` and the branchless tagged-union
+>   read-dispatch helper `BinaryReader::read_tagged` (§3), using the existing
+>   `InvalidDiscriminant` error code (`crates/axiom-kernel/src/binary_reader.rs`;
+>   `write_i64`/`read_i64` added to the binary primitives).
+> - **D** — `axiom_session_snapshot_len` / `axiom_session_snapshot_write` /
+>   `axiom_session_restore` over the C ABI (`apps/axiom-netplay-ffi/src/ffi.rs`);
+>   the `Session` now owns a seeded RNG carried inside the blob.
+> - **E** — `World::write_snapshot`/`read_snapshot` serialize the `startup_done`
+>   bit faithfully (the *restore-implies-started* rule, carried by the data rather
+>   than assumed): a mid-session snapshot restores as started, so a restored scene
+>   never re-runs its authoring startup systems, while a pre-startup snapshot still
+>   runs them (`crates/axiom-ecs/src/world.rs`).
+>
+> Deferred (see §6): a `#[derive(Reflect)]` macro, `Reflect` for
+> `Option`/`Vec`/`String`, and the sim-core enum codecs.
 
 ---
 
@@ -171,6 +196,16 @@ double-initialization unless one of:
 cleaner discipline — but it must be a *stated, tested* invariant, because the
 snapshot drops it today.
 
+**Resolved — (e2):** `write_snapshot`/`read_snapshot` now serialize and restore the
+`startup_done` bit, so the restored world's startup phase matches the source's
+faithfully. A mid-session snapshot (the scene's normal case) restores as *started*
+and never re-runs authoring startup; a pre-startup snapshot restores as *not
+started* and still runs it. This is the *restore-implies-started* rule done without
+the shortcut of an unconditional `startup_done = true` on restore (which would
+silently skip startup for a fresh-baseline snapshot of the general `World`
+primitive). Tested by `restore_of_a_post_startup_snapshot_re_runs_update_but_not_startup`
+and `restore_of_a_pre_startup_snapshot_still_runs_startup` (`world.rs`).
+
 ---
 
 ## 3. The branchless tagged-union codec (the one non-trivial pattern)
@@ -181,6 +216,12 @@ and the **Branchless Law** forbids `match` on that tag in spine code. The
 sanctioned shape is a **read-dispatch table** indexed by the tag, with clean
 out-of-range rejection:
 
+This shape is provided once, branchlessly, by `BinaryReader::read_tagged` (a
+sibling of the other primitive reads), so an enum's `reflect_read` is a single
+call. An out-of-range tag is a deterministic `KernelErrorCode::InvalidDiscriminant`
+(an unknown discriminant in an otherwise well-formed buffer — distinct from
+`TruncatedData`, which means the bytes ran out).
+
 ```rust
 // Write: tag byte, then the variant body.
 fn reflect_write(&self, w: &mut BinaryWriter) {
@@ -190,15 +231,7 @@ fn reflect_write(&self, w: &mut BinaryWriter) {
 
 // Read: index a fixed table of per-variant readers; out-of-range → error, not panic.
 fn reflect_read(r: &mut BinaryReader<'_>) -> KernelResult<Self> {
-    const READERS: &[fn(&mut BinaryReader<'_>) -> KernelResult<Self>] =
-        &[read_v0, read_v1, read_v2];
-    r.read_u8().and_then(|tag| {
-        READERS.get(tag as usize)
-            .ok_or_else(|| KernelError::new(
-                KernelErrorScope::Binary, KernelErrorCode::TruncatedData,
-                "tagged-union tag out of range"))
-            .and_then(|read| read(r))
-    })
+    r.read_tagged(&[read_v0, read_v1, read_v2])
 }
 ```
 
@@ -245,3 +278,29 @@ Net: **one moderate task (the value-codec breadth) and four small ones.** The
 serialization engine itself already exists — layered, versioned, and tested. The
 work is extending its value coverage, adding RNG state, deciding the startup-phase
 invariant, and exposing it across the embedding boundary.
+
+**All five landed.** Item 1 (RNG), item 2 (`i32`/`i64`/`u8` + the
+`BinaryReader::read_tagged` tagged-union helper), item 3
+(`RunningApp::snapshot_session`/`restore_session`), item 4 (§E —
+*restore implies started*, done by serializing the `startup_done` bit faithfully,
+with both post-startup and pre-startup regression tests), and item 5 (the
+`axiom_session_*` C ABI + a round-trip test). Every spine addition is branchless
+and 100% covered; the netplay-FFI calls (an app) carry their own
+round-trip/rng-continuity tests.
+
+---
+
+## 6. Deferred (explicitly out of this scope)
+
+These were called out as optional/beyond the §5 checklist and remain future work:
+
+- **`#[derive(Reflect)]` proc-macro** — ergonomics only; composite `Reflect` impls
+  stay hand-written (the `ControllerState` pattern) until a derive is justified.
+- **`Reflect` for `Option<T>` / `Vec<T>` / `String`** — no current spine consumer;
+  add them with the type that first needs them.
+- **The sim-core enum codecs + `SimWorld` snapshot** — `FactValue` / `Effect` /
+  `CauseRef` etc. are their own pass per `modules/axiom-sim-core/PHASE_2_DEFERRED.md`.
+  They now have the foundation they were waiting on: `i64` `Reflect` and the
+  sanctioned `BinaryReader::read_tagged` tagged-union helper.
+- **An engine-owned RNG *draw* API** — the host owns and draws its RNG; the engine
+  only captures/bundles its state. A game draws via its own `DeterministicRng`.

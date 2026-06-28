@@ -44,5 +44,8 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 # Renderable apps the tool can screenshot (rlib). Apps are leaves; depending on
 # them here is fine because this tool is outside the engine workspace/graph.
 axiom-retro-fps-browser = { path = "../../apps/axiom-retro-fps-browser" }
+# The physics crucible proof app: a deterministic physics proving room rendered as
+# debug geometry (`--app physics-crucible`).
+axiom-physics-crucible = { path = "../../apps/axiom-physics-crucible" }
 # PNG encode of the read-back / rasterized pixels.
 png = "0.17"

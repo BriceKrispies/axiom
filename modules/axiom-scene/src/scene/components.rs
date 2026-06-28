@@ -10,6 +10,7 @@ use crate::renderable::Renderable;
 use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
+use crate::tag::Tag;
 
 impl Scene {
     pub(crate) fn add_camera(&mut self, node: SceneNodeId, camera: Camera) -> SceneResult<()> {
@@ -118,6 +119,42 @@ impl Scene {
                 )
             })
     }
+
+    /// Attach (or replace) the coarse semantic kind on `node` — what the thing
+    /// *is*, the classification a perceiving agent reads off a hit.
+    pub(crate) fn add_tag(&mut self, node: SceneNodeId, kind_code: u32) -> SceneResult<()> {
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_tag: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .tags
+                    .insert(Self::entity(node), Tag::new(kind_code));
+            })
+    }
+
+    /// The coarse kind code tagged on `node`, if any — the typed read behind a
+    /// consumer's `get::<Tag>()`, letting it classify a raycast / overlap hit.
+    pub(crate) fn tag_of(&self, node: SceneNodeId) -> Option<u32> {
+        self.world
+            .storage()
+            .tags
+            .get(Self::entity(node))
+            .map(Tag::kind_code)
+    }
+
+    /// Every node tagged with `kind_code`, in ascending node-id order — the
+    /// enumeration behind a consumer's "find all of kind K" query.
+    pub(crate) fn tagged_nodes(&self, kind_code: u32) -> Vec<SceneNodeId> {
+        self.world
+            .storage()
+            .tags
+            .iter()
+            .filter(|(_, tag)| tag.kind_code() == kind_code)
+            .map(|(entity, _)| SceneNodeId::from_raw(entity.raw()))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -221,6 +258,38 @@ mod tests {
         assert_eq!(
             s.remove_renderable(n).unwrap_err().code(),
             SceneErrorCode::MissingRenderable
+        );
+    }
+
+    #[test]
+    fn add_tag_reads_back_and_enumerates_by_kind() {
+        let mut s = Scene::new();
+        let wall = node(&mut s);
+        let enemy_a = node(&mut s);
+        let enemy_b = node(&mut s);
+        s.add_tag(wall, 1).unwrap();
+        s.add_tag(enemy_a, 2).unwrap();
+        s.add_tag(enemy_b, 2).unwrap();
+
+        // Read back a single node's kind (present + untagged node).
+        assert_eq!(s.tag_of(wall), Some(1));
+        assert_eq!(s.tag_of(enemy_a), Some(2));
+        let untagged = node(&mut s);
+        assert_eq!(s.tag_of(untagged), None);
+
+        // Enumerate by kind (deterministic ascending id order).
+        assert_eq!(s.tagged_nodes(2), vec![enemy_a, enemy_b]);
+        assert_eq!(s.tagged_nodes(1), vec![wall]);
+        assert!(s.tagged_nodes(99).is_empty());
+
+        // Re-tagging replaces the kind.
+        s.add_tag(enemy_a, 1).unwrap();
+        assert_eq!(s.tag_of(enemy_a), Some(1));
+
+        // Tagging a missing node is a clean error.
+        assert_eq!(
+            s.add_tag(SceneNodeId::from_raw(9999), 5).unwrap_err().code(),
+            SceneErrorCode::MissingNode
         );
     }
 }

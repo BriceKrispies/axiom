@@ -1,0 +1,28 @@
+# Axiom app manifest — axiom-physics-crucible (Physics Crucible proof app).
+#
+# A rendered, deterministic physics proving room. It is a composition leaf that
+# drives `axiom-physics` (the `physics` module) through its public `PhysicsApi`
+# facade ONLY, and renders the result with the `axiom` umbrella (`engine`). The
+# app owns all translation glue between physics snapshots and renderable debug
+# geometry — physics never imports render/scene, and render never imports physics.
+# It names the kernel + runtime layers directly only to build the explicit
+# `RuntimeStep` / handle vocabulary that `PhysicsApi::step` consumes (those types
+# are not re-exported through `axiom::prelude`). Nothing depends on this app.
+
+[app]
+name = "physics-crucible"
+crate_name = "axiom-physics-crucible"
+
+allowed_layers = [
+    "kernel",
+    "runtime",
+]
+
+allowed_modules = [
+    "engine",
+    "physics",
+    # The live browser arm drives the windowing render loop itself (stepping
+    # physics + re-authoring the scene each frame), exactly as the retro FPS browser
+    # app does — so it depends on the windowing module directly on wasm32.
+    "windowing",
+]

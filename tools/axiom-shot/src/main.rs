@@ -182,8 +182,9 @@ fn showcase_app() -> App {
 /// default level is used).
 fn build_app(name: &str, level: Option<&str>) -> RunningApp {
     match name {
-        "retro_fps" => axiom_retro_fps_browser::build_retro_fps_app(&retro_fps_doc(level)),
+        "retro_fps" => axiom_retro_fps_browser::build_retro_fps_app(&retro_fps_doc(level)).0,
         "showcase" => showcase_app().build(),
+        "physics-crucible" => axiom_physics_crucible::build_physics_crucible(),
         other => {
             eprintln!("axiom-shot: unknown --app '{other}', falling back to 'showcase'");
             showcase_app().build()

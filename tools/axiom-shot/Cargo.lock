@@ -80,6 +80,7 @@ version = "0.1.0"
 dependencies = [
  "axiom",
  "axiom-debug-overlay",
+ "axiom-interface",
  "axiom-windowing",
  "console_error_panic_hook",
  "js-sys",
@@ -143,6 +144,29 @@ dependencies = [
  "axiom-kernel",
  "axiom-runtime",
  "axiom-zones",
+]
+
+[[package]]
+name = "axiom-physics"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-physics-crucible"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-kernel",
+ "axiom-physics",
+ "axiom-runtime",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -213,6 +237,7 @@ dependencies = [
  "axiom-gpu-backend",
  "axiom-host",
  "axiom-kernel",
+ "axiom-physics-crucible",
  "png",
 ]
 
@@ -234,6 +259,7 @@ dependencies = [
  "axiom-canvas2d-backend",
  "axiom-gpu-backend",
  "axiom-host",
+ "axiom-interface",
  "axiom-kernel",
  "axiom-recording",
  "wasm-bindgen",

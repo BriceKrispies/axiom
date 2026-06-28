@@ -10,7 +10,10 @@
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{HostApi, HostLifecycleSignal, HostStepDriver, HostViewport};
-use axiom_kernel::{KernelResult, Ratio};
+use axiom_kernel::{
+    BinaryReader, BinaryWriter, DeterministicRng, KernelError, KernelErrorCode, KernelErrorScope,
+    KernelResult, Ratio, Reflect, SchemaVersion,
+};
 use axiom_math::{MathApi, Vec3};
 use axiom_render_pipeline::RenderPipelineApi;
 use axiom_runtime::{Runtime, RuntimeConfig};
@@ -53,6 +56,11 @@ mod resources;
 
 /// The default fixed simulation step: 1 ms, matching the engine's slices.
 const DEFAULT_STEP_NANOS: u64 = 1_000_000;
+
+/// The wire schema for a full [`RunningApp::snapshot_session`] buffer (the sim
+/// state + RNG aggregate). Independent of the inner sim/world schema, so the
+/// embedding contract can version without disturbing the scene format.
+const SESSION_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 
 /// A user setup callback: populates the asset collections and authors the scene.
 type SetupFn = Box<dyn FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>)>;
@@ -359,6 +367,54 @@ impl RunningApp {
     pub fn restore_sim(&mut self, bytes: &[u8]) -> KernelResult<()> {
         self.scene.restore_state(bytes)
     }
+
+    /// Serialize a full **session snapshot** — the durable sim state ([`Self::snapshot_sim`])
+    /// *and* the host's deterministic random generator — into one opaque, versioned
+    /// buffer. This is the embedding contract an authoritative host stores verbatim
+    /// for persistence, room rewind, crash recovery, or an out-of-process worker:
+    /// one buffer in, one buffer out. The RNG lives **inside** the blob, so a
+    /// restored session continues the identical random sequence (loot, spawns,
+    /// crits) rather than diverging. The host owns the generator and hands it in;
+    /// [`Self::restore_session`] hands it back. Layout:
+    /// `[session schema][length-prefixed sim bytes][rng state]`.
+    pub fn snapshot_session(&self, rng: &DeterministicRng) -> Vec<u8> {
+        let mut writer = BinaryWriter::new();
+        SESSION_SCHEMA.write_to(&mut writer);
+        writer.write_byte_slice(&self.snapshot_sim());
+        rng.reflect_write(&mut writer);
+        writer.into_bytes()
+    }
+
+    /// Restore a session from bytes produced by [`Self::snapshot_session`]: the sim
+    /// state is forked to the recorded frame and the captured generator is returned
+    /// for the host to resume from. A truncated or version-incompatible buffer
+    /// returns a deterministic error, never a panic.
+    ///
+    /// The whole header — schema, the length-prefixed sim slice, *and* the trailing
+    /// rng state — is decoded **before** the sim is mutated, so a buffer that is
+    /// truncated anywhere fails with the live app left untouched. (The only
+    /// mutation, `restore_sim`, is the final step.)
+    pub fn restore_session(&mut self, bytes: &[u8]) -> KernelResult<DeterministicRng> {
+        let mut reader = BinaryReader::new(bytes);
+        SchemaVersion::read_from(&mut reader)
+            .and_then(|version| {
+                SESSION_SCHEMA
+                    .is_compatible_with(version)
+                    .then_some(())
+                    .ok_or_else(|| {
+                        KernelError::new(
+                            KernelErrorScope::Binary,
+                            KernelErrorCode::SchemaVersionMismatch,
+                            "session snapshot schema major version is incompatible",
+                        )
+                    })
+            })
+            .and_then(|()| reader.read_byte_slice())
+            .and_then(|world_bytes| {
+                DeterministicRng::reflect_read(&mut reader).map(|rng| (world_bytes, rng))
+            })
+            .and_then(|(world_bytes, rng)| self.restore_sim(world_bytes).map(|()| rng))
+    }
 }
 
 /// The product of running a setup closure: a realized scene plus the resolved
@@ -557,6 +613,89 @@ mod tests {
 
         // A truncated buffer is a deterministic error, not a panic.
         assert!(forked.restore_sim(&[7, 7, 7]).is_err());
+    }
+
+    #[test]
+    fn snapshot_session_round_trips_the_sim_and_continues_the_rng() {
+        // Drive the sim, advance the host RNG, then bundle both into one session
+        // blob. Restoring into a fresh app forks the world AND hands back the
+        // generator, so the restored session continues the identical sequence.
+        let mut app = controller_app().build();
+        (0..3).for_each(|i| {
+            app.tick_with_controls(
+                i,
+                &[],
+                &[FirstPersonInput::new(
+                    0,
+                    Vec3::new(0.0, 0.0, -0.3),
+                    Angle::radians(0.2),
+                    Angle::radians(0.1),
+                )],
+            );
+        });
+        let mut rng = DeterministicRng::seeded(0xC0FFEE);
+        (0..5).for_each(|_| {
+            rng.next_u64();
+        });
+        let blob = app.snapshot_session(&rng);
+
+        let mut forked = controller_app().build();
+        let mut restored_rng = forked.restore_session(&blob).unwrap();
+        // The sim forked exactly: re-snapshotting the session is byte-identical.
+        assert_eq!(forked.snapshot_session(&restored_rng), blob);
+        // The generator resumes the identical continuation of the original.
+        let original: Vec<u64> = (0..8).map(|_| rng.next_u64()).collect();
+        let replayed: Vec<u64> = (0..8).map(|_| restored_rng.next_u64()).collect();
+        assert_eq!(original, replayed);
+    }
+
+    #[test]
+    fn restore_session_rejects_an_incompatible_schema() {
+        // A buffer whose major version is one ahead is rejected deterministically.
+        let mut writer = BinaryWriter::new();
+        SchemaVersion::new(SESSION_SCHEMA.major() + 1, 0).write_to(&mut writer);
+        let mut app = controller_app().build();
+        assert_eq!(
+            app.restore_session(&writer.into_bytes()).unwrap_err().code(),
+            KernelErrorCode::SchemaVersionMismatch
+        );
+    }
+
+    #[test]
+    fn restore_session_rejects_truncation_at_every_prefix() {
+        // Drive the source app so its sim state differs from a fresh target — a
+        // partial restore would therefore be *visible* as a changed target sim.
+        let mut app = controller_app().build();
+        (0..3).for_each(|i| {
+            app.tick_with_controls(
+                i,
+                &[],
+                &[FirstPersonInput::new(
+                    0,
+                    Vec3::new(0.0, 0.0, -0.4),
+                    Angle::radians(0.3),
+                    Angle::radians(0.0),
+                )],
+            );
+        });
+        let blob = app.snapshot_session(&DeterministicRng::seeded(7));
+
+        let mut forked = controller_app().build();
+        let baseline = forked.snapshot_sim();
+        // Every strictly-truncated prefix is a deterministic error, never a panic,
+        // and — because the only mutation is the final `restore_sim` — leaves the
+        // target's sim byte-for-byte untouched (no half-applied restore).
+        (0..blob.len()).for_each(|len| {
+            assert!(forked.restore_session(&blob[..len]).is_err());
+            assert_eq!(
+                forked.snapshot_sim(),
+                baseline,
+                "a failed restore must not mutate the live sim (prefix len {len})"
+            );
+        });
+        // The full buffer restores cleanly and forks the source's sim.
+        assert!(forked.restore_session(&blob).is_ok());
+        assert_eq!(forked.snapshot_sim(), app.snapshot_sim());
     }
 
     #[test]

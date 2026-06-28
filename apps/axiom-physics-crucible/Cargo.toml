@@ -1,0 +1,45 @@
+[package]
+name = "axiom-physics-crucible"
+description = "The Axiom Physics Crucible: a rendered, deterministic physics proving room. A composition-leaf app that drives axiom-physics through its public PhysicsApi facade across six scripted stations (Body, Contact, Material, Query, Stress, Replay), translates each PhysicsSnapshot into renderable debug geometry, and runs a hidden replay world in lock-step to make determinism visible. Physics and the renderer stay separate modules; the app owns every boundary. Apps are composition leaves, exempt from the branchless and 100%-coverage spine gates."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Both a library and a browser/WASM demo: the rlib is the testable crucible
+# harness (scenarios, two worlds, replay, report, physics-to-render translation)
+# plus the `build_physics_crucible` render entry the axiom-shot screenshot tool
+# composes into a real frame; the cdylib is the gallery demo, whose wasm `start`
+# entry calls `App::run` to present the room live through the engine's windowing.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The engine umbrella: author the room scene, spawn debug geometry, drive frames.
+axiom = { path = "../../modules/axiom" }
+# The physics module under test, composed only through its PhysicsApi facade.
+axiom-physics = { path = "../../modules/axiom-physics" }
+# The explicit fixed-step the physics facade consumes (RuntimeStep) and the handle
+# vocabulary it is built from (FrameIndex / Tick) — not surfaced via axiom::prelude.
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+# Browser/live arm only. Confined to wasm32, so native `cargo test --workspace`
+# never compiles it. The wasm `start` drives the live wgpu/WebGL2 render loop
+# itself through `axiom-windowing` (stepping physics + re-authoring the scene each
+# frame — exactly what `App::run` does not allow), and reads keyboard/keypad input
+# off `web-sys`.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

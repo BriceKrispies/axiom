@@ -264,6 +264,70 @@ pub unsafe extern "C" fn axiom_sim_snapshot_write(
     })
 }
 
+// --- full session snapshot (sim + rng): the persistence / recovery aggregate ---
+//
+// Distinct from the scene-only `axiom_sim_snapshot_*` pair above (which the
+// per-tick replay/hash machinery uses): this carries the durable sim state AND
+// the host RNG in one opaque, versioned blob the embedding host stores verbatim
+// and hands back on restore — so a recovered worker continues the identical
+// random sequence rather than diverging.
+
+/// Write the full session-snapshot length (in bytes) to `out_len`.
+///
+/// # Safety
+/// `sim` is a valid handle; `out_len` is valid.
+#[no_mangle]
+pub unsafe extern "C" fn axiom_session_snapshot_len(sim: *mut Session, out_len: *mut usize) -> i32 {
+    run(sim, || {
+        let s = sess(sim)?;
+        let len_out = out_len.as_mut().ok_or(STATUS_ERR_INVALID_ARG)?;
+        *len_out = s.snapshot_session().len();
+        Ok(())
+    })
+}
+
+/// Write the full session-snapshot bytes into a caller buffer. Query
+/// [`axiom_session_snapshot_len`] first; a short buffer fails with
+/// [`STATUS_ERR_BUFFER_TOO_SMALL`] without writing.
+///
+/// # Safety
+/// `sim` is a valid handle; `out_ptr`/`out_capacity` describe a writable buffer;
+/// `out_written` is valid.
+#[no_mangle]
+pub unsafe extern "C" fn axiom_session_snapshot_write(
+    sim: *mut Session,
+    out_ptr: *mut u8,
+    out_capacity: usize,
+    out_written: *mut usize,
+) -> i32 {
+    run(sim, || {
+        let s = sess(sim)?;
+        let bytes = s.snapshot_session();
+        copy_out(&bytes, out_ptr, out_capacity, out_written)
+    })
+}
+
+/// Restore a full session (sim + rng) from a buffer produced by
+/// [`axiom_session_snapshot_write`]. Fails with [`STATUS_ERR_DESERIALIZE`] on a
+/// truncated / incompatible buffer.
+///
+/// # Safety
+/// `sim` is a valid handle; `ptr`/`len` describe a readable buffer (or null/0).
+#[no_mangle]
+pub unsafe extern "C" fn axiom_session_restore(
+    sim: *mut Session,
+    ptr: *const u8,
+    len: usize,
+) -> i32 {
+    run(sim, || {
+        let s = sess(sim)?;
+        let bytes = in_slice(ptr, len)?;
+        s.restore_session(bytes)
+            .then_some(())
+            .ok_or(STATUS_ERR_DESERIALIZE)
+    })
+}
+
 /// Write the current authoritative state hash to `out_hash`.
 ///
 /// # Safety
@@ -542,6 +606,62 @@ mod tests {
             assert_eq!(axiom_sim_state_hash(sim, &mut direct_hash), STATUS_OK);
             assert_eq!(hash, direct_hash);
             axiom_sim_destroy(sim);
+        }
+    }
+
+    #[test]
+    fn session_snapshot_round_trips_through_the_c_abi() {
+        let sim = axiom_sim_create(1, 2, 16_666_667);
+        unsafe {
+            // Drive a tick so the sim carries real state.
+            let p = payload(0.4, 0.0);
+            let mut reason: u32 = 0;
+            let (mut tick, mut hash) = (0u64, 0u64);
+            axiom_sim_submit_intent(sim, 0, 1, 0, p.as_ptr(), p.len(), &mut reason);
+            axiom_sim_advance_tick(sim, 1, &mut tick, &mut hash);
+
+            // Size-probe, reject a short buffer, then fill a host-owned buffer.
+            let mut len: usize = 0;
+            assert_eq!(axiom_session_snapshot_len(sim, &mut len), STATUS_OK);
+            assert!(len > 0);
+            let mut tiny = vec![0u8; len - 1];
+            let mut written: usize = 0;
+            assert_eq!(
+                axiom_session_snapshot_write(sim, tiny.as_mut_ptr(), tiny.len(), &mut written),
+                STATUS_ERR_BUFFER_TOO_SMALL
+            );
+            let mut buf = vec![0u8; len];
+            assert_eq!(
+                axiom_session_snapshot_write(sim, buf.as_mut_ptr(), buf.len(), &mut written),
+                STATUS_OK
+            );
+            assert_eq!(written, len);
+
+            // Restore into a fresh sim (different seed) and re-snapshot: the blob
+            // carries the full session, so the re-snapshot is byte-identical.
+            let fresh = axiom_sim_create(9, 2, 16_666_667);
+            assert_eq!(
+                axiom_session_restore(fresh, buf.as_ptr(), buf.len()),
+                STATUS_OK
+            );
+            let mut len2: usize = 0;
+            assert_eq!(axiom_session_snapshot_len(fresh, &mut len2), STATUS_OK);
+            let mut buf2 = vec![0u8; len2];
+            let mut written2: usize = 0;
+            assert_eq!(
+                axiom_session_snapshot_write(fresh, buf2.as_mut_ptr(), buf2.len(), &mut written2),
+                STATUS_OK
+            );
+            assert_eq!(buf2, buf, "restored session re-snapshots byte-identically");
+
+            // Garbage is a clean deserialize error, never a panic.
+            let garbage = [1u8, 2, 3, 4, 5];
+            assert_eq!(
+                axiom_session_restore(fresh, garbage.as_ptr(), garbage.len()),
+                STATUS_ERR_DESERIALIZE
+            );
+            axiom_sim_destroy(sim);
+            axiom_sim_destroy(fresh);
         }
     }
 
