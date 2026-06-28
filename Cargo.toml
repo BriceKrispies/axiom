@@ -49,6 +49,8 @@ members = [
     "modules/axiom-agent",
     "modules/axiom-agent-harness",
     "modules/axiom-perception",
+    "modules/axiom-grid",
+    "modules/axiom-tween",
     "modules/axiom",
     "apps/axiom-demo-rotating-cube",
     "apps/axiom-demo-rotating-cube-browser",

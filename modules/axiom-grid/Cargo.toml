@@ -1,0 +1,25 @@
+[package]
+name = "axiom-grid"
+description = "Axiom engine module: a first-class integer grid plus the deterministic pathfinding and steering that read it. Owns Grid<T> (the board), TileSpace (tile<->world mapping with snap-to-cell), and the sim-class path queries (distance field, path, reachable, step_toward). The substrate every tile, board, and procedural-level game stands on; pure value types in, byte-reproducible paths out."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No browser APIs, no engine state: every query is a pure
+# function of (grid, cells, passable), so it runs and is tested on native
+# exactly as it drives the web.
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module", allowed_modules = []): it composes
+# NO other module. It builds on the math layer (`Vec2` for tile<->world geometry)
+# and the kernel (`Meters` for the dimensioned cell size, `StableHash` for the
+# deterministic board state hash).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

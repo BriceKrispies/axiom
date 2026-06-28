@@ -3,6 +3,8 @@
 //! `Scene`'s private internals while keeping `scene.rs` within the per-file size
 //! budget.
 
+use std::collections::BTreeSet;
+
 use axiom_kernel::EntityId;
 
 use super::Scene;
@@ -32,6 +34,33 @@ impl Scene {
             .is_node(node)
             .then(|| self.despawn_entity(Self::entity(node)));
         despawned.unwrap_or(false)
+    }
+
+    /// Despawn `node` and its entire subtree, returning whether `node` named a
+    /// live node — the cascade the contract's `World.despawn` requires so that
+    /// removing a parent takes its attached parts with it. Descendants are
+    /// collected from the child→parent column via a bounded ancestor walk (a
+    /// corrupted cyclic column still terminates) and removed before the node.
+    pub(crate) fn despawn_subtree(&mut self, node: SceneNodeId) -> bool {
+        let target = Self::entity(node);
+        let descendants: Vec<EntityId> = {
+            let parents = &self.world.storage().parents;
+            parents
+                .iter()
+                .filter_map(|(child, _parent)| {
+                    std::iter::successors(parents.get(child).copied(), |&id| {
+                        parents.get(id).copied()
+                    })
+                    .scan(BTreeSet::new(), |seen, id| seen.insert(id).then_some(id))
+                    .any(|id| id == target)
+                    .then_some(child)
+                })
+                .collect()
+        };
+        descendants.into_iter().for_each(|descendant| {
+            self.despawn_node(SceneNodeId::from_raw(descendant.raw()));
+        });
+        self.despawn_node(node)
     }
 
     /// Remove `entity` from the world (every component column, via the ECS) and
@@ -101,5 +130,33 @@ mod tests {
         assert!(s.despawn_player(3));
         assert_eq!(s.node_count(), 0);
         assert_eq!(s.player_translation(3), None);
+    }
+
+    #[test]
+    fn despawn_subtree_removes_node_and_all_descendants() {
+        let mut s = Scene::new();
+        let root = s.create_node(Transform::IDENTITY);
+        let child = s.create_node(Transform::IDENTITY);
+        let grandchild = s.create_node(Transform::IDENTITY);
+        let bystander = s.create_node(Transform::IDENTITY);
+        s.set_parent(child, root).unwrap();
+        s.set_parent(grandchild, child).unwrap();
+        assert_eq!(s.node_count(), 4);
+
+        // Despawning the root cascades to child and grandchild; bystander remains.
+        assert!(s.despawn_subtree(root));
+        assert_eq!(s.node_count(), 1);
+        assert!(s
+            .world_transform(SceneNodeId::from_raw(child.raw()))
+            .is_err());
+        assert!(s
+            .world_transform(SceneNodeId::from_raw(grandchild.raw()))
+            .is_err());
+        assert!(s.world_transform(bystander).is_ok());
+
+        // An absent node is a clean false; a leaf despawns like despawn_node.
+        assert!(!s.despawn_subtree(SceneNodeId::from_raw(999)));
+        assert!(s.despawn_subtree(bystander));
+        assert_eq!(s.node_count(), 0);
     }
 }

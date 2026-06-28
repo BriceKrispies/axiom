@@ -27,6 +27,9 @@ pub enum MathErrorCode {
     /// Deserialization could not be completed; the wrapped `KernelError`
     /// preserves the kernel binary-reader cause.
     DeserializationFailed = 8,
+    /// A scalar operation was given an inverted range (e.g. `clamp` with
+    /// `lo > hi`); the layer rejects it rather than silently swapping bounds.
+    InvalidScalarRange = 9,
 }
 
 impl MathErrorCode {
@@ -44,6 +47,7 @@ mod tests {
     fn discriminants_are_stable() {
         assert_eq!(MathErrorCode::DivideByZero.raw(), 1);
         assert_eq!(MathErrorCode::DeserializationFailed.raw(), 8);
+        assert_eq!(MathErrorCode::InvalidScalarRange.raw(), 9);
     }
 
     #[test]

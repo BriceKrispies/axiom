@@ -366,6 +366,29 @@ impl SceneApi {
     pub fn overlap_box(&self, center: Vec3, half_extents: Vec3) -> Vec<SceneNodeId> {
         self.scene.overlap_box(center, half_extents)
     }
+
+    /// Every bounded node whose world box overlaps the query sphere (centered at
+    /// `center`, of `radius`), in ascending node-id order — the radial companion
+    /// to [`Self::overlap_box`] for proximity, pickup, and blast-radius checks.
+    /// Reads *propagated* world transforms, so advance (or
+    /// [`Self::update_world_transforms`]) before querying.
+    pub fn overlap_circle(&self, center: Vec3, radius: Meters) -> Vec<SceneNodeId> {
+        self.scene.overlap_circle(center, radius.get())
+    }
+
+    /// The direct children of `node`, in ascending node-id order (empty for a leaf
+    /// or a node not in the scene) — the reverse of [`Self::parent_of`], for
+    /// walking a formation or attached-part hierarchy.
+    pub fn children_of(&self, node: SceneNodeId) -> Vec<SceneNodeId> {
+        self.scene.children_of(node)
+    }
+
+    /// Despawn `node` and its whole subtree, returning whether `node` named a live
+    /// node. Despawning a parent removes every descendant with it, so attached
+    /// parts never outlive their owner.
+    pub fn despawn_subtree(&mut self, node: SceneNodeId) -> bool {
+        self.scene.despawn_subtree(node)
+    }
 }
 
 /// Data-declared animation authoring: attach the engine's tick-driven animation
@@ -696,6 +719,34 @@ mod tests {
                 .code(),
             SceneErrorCode::MissingNode
         );
+    }
+
+    #[test]
+    fn radial_overlap_hierarchy_and_subtree_despawn_through_the_facade() {
+        let mut a = api();
+        // A bounded node 3m out: a circle that reaches it finds it; one that
+        // stops short does not.
+        let n = a.create_node_with_transform(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
+        a.add_bounds(n, Vec3::new(0.5, 0.5, 0.5)).unwrap();
+        a.update_world_transforms();
+        assert_eq!(a.overlap_circle(Vec3::ZERO, m(3.0)), vec![n]);
+        assert!(a.overlap_circle(Vec3::ZERO, m(1.0)).is_empty());
+
+        // A parent with two children: children_of lists them ascending; a leaf
+        // and a missing node report none.
+        let parent = a.create_node();
+        let first = a.create_node();
+        let second = a.create_node();
+        a.set_parent(first, parent).unwrap();
+        a.set_parent(second, parent).unwrap();
+        assert_eq!(a.children_of(parent), vec![first, second]);
+        assert!(a.children_of(first).is_empty());
+
+        // Despawning the parent cascades to both children; a repeat is a clean
+        // false.
+        assert!(a.despawn_subtree(parent));
+        assert!(a.children_of(parent).is_empty());
+        assert!(!a.despawn_subtree(parent));
     }
 
     #[test]

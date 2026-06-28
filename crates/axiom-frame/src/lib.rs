@@ -31,6 +31,7 @@
 //! accidental widening fails the build.
 
 mod engine_frame;
+mod frame_accumulator;
 mod frame_api;
 mod frame_builder;
 mod frame_command;
@@ -45,6 +46,7 @@ mod frame_step_summary;
 mod frame_system_report;
 mod frame_timing;
 mod frame_viewport;
+mod step_budget;
 
 // --- Curated public surface ---
 
@@ -53,6 +55,7 @@ pub use frame_api::FrameApi;
 
 // Frame boundary data types future engine systems must be able to name.
 pub use engine_frame::EngineFrame;
+pub use frame_accumulator::FrameAccumulator;
 pub use frame_builder::FrameBuilder;
 pub use frame_command::FrameCommand;
 pub use frame_command_queue::FrameCommandQueue;
@@ -66,3 +69,4 @@ pub use frame_step_summary::FrameStepSummary;
 pub use frame_system_report::FrameSystemReport;
 pub use frame_timing::FrameTiming;
 pub use frame_viewport::FrameViewport;
+pub use step_budget::StepBudget;
