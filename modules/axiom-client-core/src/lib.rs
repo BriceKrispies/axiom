@@ -16,12 +16,19 @@
 //!   to each outbound intent;
 //! - the **latest authoritative server tick**, advanced only by snapshots and
 //!   never allowed to go backwards;
-//! - the **pending-intent queue** — the sequences sent but not yet acknowledged,
-//!   in insertion order — drained when a snapshot acknowledges them or a
-//!   rejection removes one.
+//! - the **pending-intent queue** — the `(sequence, payload)` pairs sent but not
+//!   yet acknowledged, in insertion order — drained when a snapshot acknowledges
+//!   them or a rejection removes one. Retaining the payloads makes the queue the
+//!   **resimulation cursor**: `unacked_intents` is exactly the ordered intents to
+//!   replay on top of a freshly-snapped authoritative snapshot;
+//! - the **interpolation cursor** (`interpolation_tick`) — the latest
+//!   authoritative tick set back by a presentation delay, saturating at 0.
 //!
-//! There is deliberately **no prediction and no rollback** here: tracking
-//! pending intents is the whole of the first version's client logic.
+//! The simulation itself still runs elsewhere: this module performs **no
+//! prediction step and no rollback**. It only holds the reconciliation
+//! bookkeeping — which intents to replay, and which past tick to interpolate
+//! toward — so a predicted client built on top of it has the exact cursor it
+//! needs without this module ever touching game state.
 //!
 //! ## Why the boundary is plain primitives
 //! An engine module may never depend on another module, so this module does not

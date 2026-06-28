@@ -6,7 +6,7 @@
 //! bytes, and the branchless read/write/peek helpers the message modules and the
 //! [`crate::net_protocol_api::NetProtocolApi`] facade build on. Keeping the
 //! header in one place means the in-memory kind and the on-wire byte can never
-//! drift across the seven messages.
+//! drift across the messages.
 
 use axiom_kernel::{
     BinaryReader, BinaryWriter, KernelError, KernelErrorCode, KernelErrorScope, KernelResult,
@@ -31,9 +31,13 @@ pub(crate) const KIND_WELCOME: u8 = 3;
 pub(crate) const KIND_SERVER_SNAPSHOT: u8 = 4;
 pub(crate) const KIND_SERVER_EVENT: u8 = 5;
 pub(crate) const KIND_REJECTED_INTENT: u8 = 6;
+/// Per-player-addressed `ClientIntent` (carries the originating player id).
+pub(crate) const KIND_CLIENT_INTENT_FOR: u8 = 7;
+/// Per-player-addressed `ServerSnapshot` (carries per-player acknowledgements).
+pub(crate) const KIND_SERVER_SNAPSHOT_FOR: u8 = 8;
 
 /// The largest valid kind byte — the upper bound of the contiguous range.
-pub(crate) const KIND_MAX: u8 = KIND_REJECTED_INTENT;
+pub(crate) const KIND_MAX: u8 = KIND_SERVER_SNAPSHOT_FOR;
 
 /// Write the frame header (`WIRE_VERSION` then `kind`) to `writer`. Each message
 /// encoder calls this before writing its body.
@@ -194,6 +198,8 @@ mod tests {
             KIND_SERVER_SNAPSHOT,
             KIND_SERVER_EVENT,
             KIND_REJECTED_INTENT,
+            KIND_CLIENT_INTENT_FOR,
+            KIND_SERVER_SNAPSHOT_FOR,
         ];
         kinds.iter().for_each(|&kind| {
             let mut w = BinaryWriter::new();

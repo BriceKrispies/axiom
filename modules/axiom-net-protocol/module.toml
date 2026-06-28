@@ -29,4 +29,5 @@ introduced_capabilities = [
     "client-to-server-messages",
     "server-to-client-messages",
     "bounded-opaque-payloads",
+    "per-player-addressed-messages",
 ]
