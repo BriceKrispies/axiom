@@ -282,6 +282,15 @@ fn lib_exports_are_curated_set() {
         "pub use host_step_driver::HostStepDriver;",
         "pub use host_step_plan::HostStepPlan;",
         "pub use host_viewport::HostViewport;",
+        // Embed-seam boundary (SPEC-12).
+        "pub use host_metrics::HostMetrics;",
+        "pub use host_outcome::HostOutcome;",
+        "pub use host_outcome_set::HostOutcomeSet;",
+        "pub use host_param_value::HostParamValue;",
+        "pub use host_session_config::HostSessionConfig;",
+        "pub use host_session_params::HostSessionParams;",
+        "pub use player_id::PlayerId;",
+        "pub use score::Score;",
         // Presentation boundary.
         "pub use host_adapter_request::HostAdapterRequest;",
         "pub use host_alpha_mode::HostAlphaMode;",

@@ -22,6 +22,13 @@ use axiom::prelude::*;
 mod runtime;
 pub use runtime::GameRuntime;
 
+/// The embed seam (SPEC-12): decode the inbound session config, latch the single
+/// outbound outcome. Pure, native-testable core; the browser channel that carries
+/// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on
+/// a non-wasm build it is exercised solely by the slice tests below.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod embed;
+
 /// The `#[wasm_bindgen]` boundary the TS SDK binds — compiled only for `wasm32`,
 /// so native `cargo test` never touches the browser glue.
 #[cfg(target_arch = "wasm32")]
@@ -104,5 +111,38 @@ mod tests {
         // A steady one-step-per-frame budget runs exactly one tick per frame.
         assert_eq!(ticks, 30);
         assert_eq!(drive(), (ticks, snapshot));
+    }
+
+    #[test]
+    fn the_embed_seam_reads_a_seed_and_reports_one_outcome() {
+        use crate::embed::{decode_session_config, OutcomeLatch};
+
+        // Inbound: a host-supplied query decodes to a session config carrying a
+        // seed and opaque params — resolved before tick 0 (SPEC-12 §6).
+        let config = decode_session_config("?seed=5&mode=ranked");
+        assert_eq!(config.seed(), 5);
+        assert_eq!(
+            config.params().get("mode"),
+            Some(&HostParamValue::Text(String::from("ranked")))
+        );
+
+        // Advance the authored game BY the seed: run exactly `seed` deterministic
+        // fixed ticks of the demo game.
+        let mut rt = GameRuntime::new(demo_app().build(), STEP_60HZ, u32::MAX);
+        (0..config.seed()).for_each(|_step| {
+            rt.advance(STEP_60HZ);
+        });
+        assert_eq!(rt.tick(), 5);
+
+        // Outbound: mint exactly one terminal outcome derived from the final
+        // deterministic state and latch it. A second report is a no-op, so the
+        // game cannot report two terminal states.
+        let host = HostApi::new();
+        let outcome = host.outcome(rt.tick() > 0, Score::new(rt.tick() as f64));
+        let mut latch = OutcomeLatch::new();
+        assert!(latch.report(outcome.clone()));
+        assert!(!latch.report(host.outcome(false, Score::new(0.0))));
+        assert_eq!(latch.reported(), Some(&outcome));
+        assert_eq!(latch.reported().map(HostOutcome::score), Some(Score::new(5.0)));
     }
 }

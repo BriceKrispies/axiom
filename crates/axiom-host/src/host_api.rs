@@ -13,17 +13,24 @@ use crate::host_frame_input::HostFrameInput;
 use crate::host_frame_report::HostFrameReport;
 use crate::host_lifecycle_signal::HostLifecycleSignal;
 use crate::host_lifecycle_state::HostLifecycleState;
+use crate::host_metrics::HostMetrics;
+use crate::host_outcome::HostOutcome;
+use crate::host_outcome_set::HostOutcomeSet;
 use crate::host_power_preference::HostPowerPreference;
 use crate::host_present_mode::HostPresentMode;
 use crate::host_presentation_report::HostPresentationReport;
 use crate::host_presentation_request::HostPresentationRequest;
 use crate::host_presentation_target::HostPresentationTarget;
 use crate::host_result::HostResult;
+use crate::host_session_config::HostSessionConfig;
+use crate::host_session_params::HostSessionParams;
 use crate::host_step_driver::HostStepDriver;
 use crate::host_step_plan::HostStepPlan;
 use crate::host_surface_descriptor::HostSurfaceDescriptor;
 use crate::host_surface_handle::HostSurfaceHandle;
 use crate::host_viewport::HostViewport;
+use crate::player_id::PlayerId;
+use crate::score::Score;
 
 /// The primary entry point to the Axiom host boundary.
 ///
@@ -240,6 +247,40 @@ impl HostApi {
         request: &HostPresentationRequest,
     ) -> HostPresentationReport {
         HostPresentationReport::from_request(request)
+    }
+
+    // --- Embed seam (SPEC-12) ---
+    //
+    // The inbound session identity the platform arm decoded, and the outbound
+    // terminal outcome the engine mints once. The facade only carries already-
+    // decoded data: it never reads a URL, a clock, or `localStorage` — those are
+    // the runtime app's job.
+
+    /// Carry a session config from a `seed` and already-decoded opaque `params`.
+    /// The `seed` is the determinism input fixed before tick 0 (SPEC-12 §6).
+    pub fn session_config(&self, seed: u64, params: HostSessionParams) -> HostSessionConfig {
+        HostSessionConfig::new(seed, params)
+    }
+
+    /// Mint a terminal outcome with no metrics. `score` rides the [`Score`]
+    /// boundary newtype, so no naked `f64` crosses the facade.
+    pub fn outcome(&self, won: bool, score: Score) -> HostOutcome {
+        HostOutcome::new(won, score, HostMetrics::new())
+    }
+
+    /// Mint a terminal outcome carrying named metrics.
+    pub fn outcome_with_metrics(
+        &self,
+        won: bool,
+        score: Score,
+        metrics: HostMetrics,
+    ) -> HostOutcome {
+        HostOutcome::new(won, score, metrics)
+    }
+
+    /// Carry per-player terminal outcomes (SPEC-12 §16.6) in stable seat order.
+    pub fn outcome_set(&self, entries: Vec<(PlayerId, HostOutcome)>) -> HostOutcomeSet {
+        HostOutcomeSet::new(entries)
     }
 }
 
@@ -497,6 +538,47 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(err.code(), HostErrorCode::InvalidPresentationRequest);
+    }
+
+    // --- Embed seam (facade level) ---
+
+    use crate::host_param_value::HostParamValue;
+
+    #[test]
+    fn facade_mints_a_session_config_from_seed_and_params() {
+        let params = HostSessionParams::new()
+            .with(String::from("mode"), HostParamValue::Text(String::from("ranked")));
+        let config = api().session_config(7, params.clone());
+        assert_eq!(config.seed(), 7);
+        assert_eq!(config.params(), &params);
+    }
+
+    #[test]
+    fn facade_mints_an_outcome_with_empty_metrics() {
+        let outcome = api().outcome(true, Score::new(42.0));
+        assert_eq!(
+            outcome,
+            HostOutcome::new(true, Score::new(42.0), HostMetrics::new())
+        );
+        assert!(outcome.metrics().is_empty());
+    }
+
+    #[test]
+    fn facade_mints_an_outcome_with_metrics() {
+        let metrics = HostMetrics::new().with(String::from("kills"), Score::new(3.0));
+        let outcome = api().outcome_with_metrics(false, Score::new(9.0), metrics.clone());
+        assert_eq!(outcome, HostOutcome::new(false, Score::new(9.0), metrics));
+    }
+
+    #[test]
+    fn facade_carries_a_per_player_outcome_set() {
+        let entries = vec![
+            (PlayerId::new(0), api().outcome(true, Score::new(10.0))),
+            (PlayerId::new(1), api().outcome(false, Score::new(4.0))),
+        ];
+        let set = api().outcome_set(entries.clone());
+        assert_eq!(set, HostOutcomeSet::new(entries));
+        assert_eq!(set.get(PlayerId::new(0)), Some(&api().outcome(true, Score::new(10.0))));
     }
 
     #[test]
