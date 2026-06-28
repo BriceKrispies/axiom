@@ -19,16 +19,18 @@ crate-type = ["cdylib", "rlib"]
 # in app.toml's `allowed_layers`.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
-# The math layer, for `Vec2` — the value type the input module's swipe synthesis
-# traffics in. Used natively by `command_for_swipe` (and its tests), so it is a
-# normal dependency. Listed in app.toml's `allowed_layers`.
-axiom-math = { path = "../../crates/axiom-math" }
-
 # The interface layer's keybinding primitive (Keymap/KeyBinding +
 # InterfaceInputEvent). `command_for_key` resolves keys through a shared Keymap.
 # Used natively (the mapping is browser-free and unit-tested), so it is a normal
 # dependency. Listed in app.toml's `allowed_layers`.
 axiom-interface = { path = "../../crates/axiom-interface" }
+
+# The engine input module: its per-tick `InputState` facade quantizes a touch
+# gesture to a cardinal `SwipeDir`. `command_for_swipe` maps that `SwipeDir` to a
+# move and is browser-free + unit-tested natively, so the (pure, kernel+math)
+# module is a normal dependency. The wasm `web` arm additionally feeds it the live
+# pointer samples. Listed in app.toml's `allowed_modules`.
+axiom-input = { path = "../../modules/axiom-input" }
 
 # Standard, hand-editable level format. `toml` + `serde` are already the repo's
 # manifest-parsing stack (see crates/xtask); we reuse the same versions. Used by
@@ -44,10 +46,11 @@ toml = "0.8"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
-# The mobile-first touch input synthesizer (an engine module). Used only by the
-# wasm `web` arm, which feeds it neutral pointer samples and turns a swipe into a
-# move. Listed in app.toml's `allowed_modules`.
-axiom-input = { path = "../../modules/axiom-input" }
+# The math layer, for `Vec2` — the canvas surface size and the neutral pointer
+# samples the `web` arm feeds into the input module's `DeviceFrame`. Only the wasm
+# arm builds these vectors now (the native swipe→move mapping reads a `SwipeDir`),
+# so it is wasm-gated. Listed in app.toml's `allowed_layers`.
+axiom-math = { path = "../../crates/axiom-math" }
 # The engine's responsive layout solver + the host viewport facts it consumes.
 # The `web` arm builds a HostViewport from the live window/DPR/safe-area, declares
 # a board+panel tree, and applies the solved rects to the DOM — so placement is the

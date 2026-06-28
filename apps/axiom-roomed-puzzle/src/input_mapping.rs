@@ -7,8 +7,8 @@
 //! dominant axis picks the move direction. `Tick` is never an input — it is
 //! issued by the run loop.
 
+use axiom_input::SwipeDir;
 use axiom_interface::{InterfaceInputEvent, KeyBinding, Keymap};
-use axiom_math::Vec2;
 
 use crate::direction::Direction;
 use crate::game_command::PuzzleCommand;
@@ -71,24 +71,18 @@ pub fn command_for_key(key: &str) -> Option<PuzzleCommand> {
         .and_then(command_for_action)
 }
 
-/// The command a completed swipe maps to, from its direction vector (screen
-/// space: +x is right, +y is down). The dominant axis chooses the cardinal
-/// move; a zero vector is not a swipe and maps to nothing. `q`/`r` are not
-/// swipe-reachable — they have on-screen buttons instead.
-pub fn command_for_swipe(direction: Vec2) -> Option<PuzzleCommand> {
-    if direction.x == 0.0 && direction.y == 0.0 {
-        return None;
-    }
-    let dir = if direction.x.abs() >= direction.y.abs() {
-        if direction.x >= 0.0 {
-            Direction::Right
-        } else {
-            Direction::Left
-        }
-    } else if direction.y >= 0.0 {
-        Direction::Down
-    } else {
-        Direction::Up
+/// The command a completed swipe maps to. The engine's [`InputState`] already
+/// quantizes the gesture to a cardinal [`SwipeDir`] (screen space: `+y` is down),
+/// so this is a direct cardinal→move mapping. `q`/`r` are not swipe-reachable —
+/// they have on-screen buttons instead.
+///
+/// [`InputState`]: axiom_input::InputState
+pub fn command_for_swipe(direction: SwipeDir) -> Option<PuzzleCommand> {
+    let dir = match direction {
+        SwipeDir::Up => Direction::Up,
+        SwipeDir::Down => Direction::Down,
+        SwipeDir::Left => Direction::Left,
+        SwipeDir::Right => Direction::Right,
     };
     Some(PuzzleCommand::Move(dir))
 }
@@ -134,28 +128,22 @@ mod tests {
     }
 
     #[test]
-    fn swipes_map_to_the_dominant_cardinal() {
+    fn swipes_map_to_their_cardinal() {
         assert_eq!(
-            command_for_swipe(Vec2::new(1.0, 0.0)),
+            command_for_swipe(SwipeDir::Right),
             Some(PuzzleCommand::Move(Direction::Right))
         );
         assert_eq!(
-            command_for_swipe(Vec2::new(-1.0, 0.1)),
+            command_for_swipe(SwipeDir::Left),
             Some(PuzzleCommand::Move(Direction::Left))
         );
-        // Screen +y is down, so a negative y is an upward swipe.
         assert_eq!(
-            command_for_swipe(Vec2::new(0.1, -1.0)),
+            command_for_swipe(SwipeDir::Up),
             Some(PuzzleCommand::Move(Direction::Up))
         );
         assert_eq!(
-            command_for_swipe(Vec2::new(0.0, 1.0)),
+            command_for_swipe(SwipeDir::Down),
             Some(PuzzleCommand::Move(Direction::Down))
         );
-    }
-
-    #[test]
-    fn a_zero_swipe_is_ignored() {
-        assert_eq!(command_for_swipe(Vec2::ZERO), None);
     }
 }

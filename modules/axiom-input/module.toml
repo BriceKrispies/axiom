@@ -1,18 +1,19 @@
 # Axiom module manifest — axiom-input (an ENGINE module).
 #
-# Device-agnostic intent synthesis. The platform edge (the windowing module)
-# decodes raw browser PointerEvents — mouse, touch, and pen, which arrive in one
-# unified shape — into neutral pointer samples; this module turns those samples,
-# plus an on-screen virtual-control layout, into a normalized movement vector and
-# look deltas an app maps to its first-person controller. It replaces the
-# per-app, desktop-only pointer-lock + WASD decode and the gallery's synthetic-key
-# keypad shim: touch is the primary input, and a mouse is just one more pointer
-# source feeding the same synthesis.
+# Owns the engine's input contract: the per-tick INTENT SNAPSHOT the simulation
+# reads. The platform edge (the windowing module) decodes raw browser
+# Keyboard/Pointer events into a neutral, recordable `DeviceFrame` (the keys down
+# this frame + pointer samples + surface); this module folds each frame, at a
+# tick boundary, into a deterministic snapshot of author-defined ACTIONS —
+# keyboard state + press/release edges, an action-binding table, pointer/click,
+# the directional swipe, and a tick-stamped press for timing windows. Gameplay
+# reads only action names against a fixed `Tick`, never a physical key, so input
+# is replayable and net-serializable.
 #
 # It is an ISOLATED engine module: it composes no other module
 # (`allowed_modules = []`) and never touches a browser API (Module Law #9). Its
-# whole surface is one facade, `TouchControls`, whose `update` returns a
-# control frame reached only through it.
+# whole surface is one behavioural facade, `InputState`, plus the pure `ids`
+# value-type vocabulary it traffics in (Module Law #8).
 
 [module]
 name = "input"
@@ -27,6 +28,7 @@ allowed_layers = [
 allowed_modules = []
 
 introduced_capabilities = [
-    "virtual-touch-controls",
-    "pointer-intent-synthesis",
+    "input-intent-snapshot",
+    "action-binding-table",
+    "pointer-swipe-synthesis",
 ]
