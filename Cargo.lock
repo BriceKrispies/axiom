@@ -118,6 +118,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-audio"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-biome"
 version = "0.1.0"
 dependencies = [

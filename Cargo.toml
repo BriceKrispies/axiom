@@ -46,6 +46,7 @@ members = [
     "modules/axiom-levelgen",
     "modules/axiom-worldsave",
     "modules/axiom-physics",
+    "modules/axiom-audio",
     "modules/axiom-agent",
     "modules/axiom-agent-harness",
     "modules/axiom-perception",

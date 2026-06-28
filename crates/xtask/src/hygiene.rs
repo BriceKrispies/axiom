@@ -59,13 +59,16 @@ const PLATFORM_FACING_LAYERS: &[&str] = &["host"];
 /// facade (Module Law #9): `windowing` drives the run loop + surface request,
 /// `gpu-backend` owns the real wgpu device/pipeline/buffers, `canvas2d-backend`
 /// the software `CanvasRenderingContext2d` fallback, and `debug-overlay` the
-/// developer overlay's DOM binding (keyboard + nodes). Adding another entry here
-/// is a deliberate amendment.
+/// developer overlay's DOM binding (keyboard + nodes), and `audio` the real Web
+/// Audio arm (`AudioContext` / oscillator / gain / buffer / analyser nodes)
+/// behind a native-clean, branchless, 100%-covered audio-bookkeeping core. Adding
+/// another entry here is a deliberate amendment.
 const PLATFORM_FACING_MODULES: &[&str] = &[
     "windowing",
     "gpu-backend",
     "canvas2d-backend",
     "debug-overlay",
+    "audio",
 ];
 
 /// Run the centralized source-hygiene scan against every layer source dir
