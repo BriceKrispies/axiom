@@ -1,4 +1,4 @@
-# Axiom layer manifest — Layer 03 (axiom-host).
+# Axiom layer manifest — axiom-host.
 #
 # Host is the deterministic platform boundary. It accepts externally supplied
 # host facts as explicit data, validates them, and adapts them into runtime
@@ -6,7 +6,7 @@
 # any browser/DOM/WebGPU/WebGL/JS/wall-clock/OS API itself — those belong to
 # future browser/native adapter layers built on this boundary.
 #
-# Layer-03 logical capabilities (documentation only — Rust public surface is
+# Host logical capabilities (documentation only — Rust public surface is
 # the curated re-export list in `lib.rs`, enforced by the layer's own
 # `tests/architecture.rs::lib_exports_are_curated_set`):
 #   - host-boundary-contracts
@@ -52,8 +52,8 @@ consumed_capabilities = [
     "TelemetryMetric",
 ]
 
-# Each proof export is a real Layer-03 public export whose source must
-# reference at least one previous-layer (kernel/runtime) symbol. The driver
+# Each proof export is a real public export whose source must
+# reference at least one depended-layer (kernel/runtime) symbol. The driver
 # names `Runtime` (it steps it); the facade names `KernelApi` (it routes
 # identity/boundary-config validation through the kernel facade).
 [[proof_exports]]

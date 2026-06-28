@@ -1,15 +1,15 @@
-# Axiom layer manifest — Layer 05 (axiom-ecs).
+# Axiom layer manifest — axiom-ecs.
 #
 # ECS is the engine's world model: the single place entities and their
 # component data live. It is generic — a consumer supplies the component row
 # type `R` — and deterministic (entities are ordered by stable `EntityId`). It
 # advances its registered systems once per engine frame, gated by the frame's
-# lifecycle/step state, which is its semantic adapter over Layer 04 (frame).
+# lifecycle/step state, which is its semantic adapter over frame.
 #
 # It knows nothing about scenes, transforms, rendering, physics, or any concrete
 # component — those are defined by the apps/modules that build on it.
 #
-# Layer-05 logical capabilities (documentation only — Rust public surface is the
+# ECS logical capabilities (documentation only — Rust public surface is the
 # curated re-export list in `lib.rs`):
 #   - generic-entity-component-store
 #   - deterministic-entity-ordering
@@ -27,8 +27,8 @@ introduced_capabilities = ["EcsApi", "World", "EntityRegistry", "EntityHandle", 
 
 consumed_capabilities = ["EntityId", "FrameContext"]
 
-# `World::advance` consumes `FrameContext` (Layer 04) to gate per-frame system
-# execution — the honest adapter over the previous layer.
+# `World::advance` consumes `FrameContext` (frame) to gate per-frame system
+# execution — the honest adapter over frame.
 [[proof_exports]]
 export = "World"
 must_reference = ["FrameContext"]

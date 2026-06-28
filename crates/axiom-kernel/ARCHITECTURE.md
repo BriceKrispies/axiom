@@ -1,11 +1,11 @@
-# Axiom Kernel — Architecture (Layer 00)
+# Axiom Kernel — Architecture
 
 ## What the kernel is
 
-The kernel is **Layer 00**: the deterministic runtime substrate that every
-future Axiom layer is allowed to trust. It defines a small set of primitives —
-time, identity, errors, memory addressing, messaging, binary serialization, the
-layer contract, structured logging and telemetry — and nothing else.
+The kernel is a **root layer**: the deterministic runtime substrate that every
+other Axiom layer is allowed to trust. It defines a small set of primitives —
+time, identity, errors, memory addressing, messaging, binary serialization,
+structured logging and telemetry — and nothing else.
 
 The kernel is a pure-Rust library with **zero external dependencies**. It is
 written to compile unchanged for native test runs and for
@@ -61,7 +61,7 @@ Determinism is the kernel's reason to exist. Concretely:
 capabilities through it. In addition, a **curated set** of primitive types is
 re-exported at the crate root so future layers can *name* them (store them in
 fields, construct them, pattern-match on them). The original "one public
-export" rule was over-strict in practice: Layer 1's `Runtime` must hold a
+export" rule was over-strict in practice: the runtime layer's `Runtime` must hold a
 `SimulationClock` field and build `LogRecord` values from kernel data, neither
 of which is possible if the types aren't nameable.
 
@@ -80,7 +80,7 @@ The trade-off is enforced rather than left to discipline:
   `fovy: Radians`, a viewport's `aspect: Ratio`, a clip plane's `near: Meters`).
   They live in the kernel — not a separate layer — because they are *core scalars
   required broadly across the engine*, the kernel's sanctioned remit, and because
-  the strictly-linear Layer Law cannot host a broadly-shared primitive without a
+  the Layer Law's DAG cannot host a broadly-shared primitive without a
   fake adjacent-layer dependency. They carry **no** unit *algebra* and no
   feature semantics; domain quantities (light intensity, colour channels,
   viewport pixels) deliberately stay out of the kernel and live in the
@@ -95,9 +95,9 @@ The trade-off is enforced rather than left to discipline:
   domain semantics: cadence lives in `TickDivider`, meaning stays with the
   caller, and each remains the only public type in its file.
 - The binary-serialization primitives (`BinaryWriter`, `BinaryReader`,
-  `SchemaVersion`) and layer-manifest types are nameable, because higher layers
-  build and **version** their own wire formats on them — e.g. Layer 5
-  (`axiom-introspect`) stamps a `SchemaVersion` header on its serialized
+  `SchemaVersion`) are nameable, because higher layers
+  build and **version** their own wire formats on them — e.g.
+  `axiom-introspect` stamps a `SchemaVersion` header on its serialized
   `FrameReport` and reads it back through a `BinaryReader`. Memory-addressing
   types (offsets, lengths, ranges) remain crate-internal: they are reachable
   only through `KernelApi` methods that return them (usable via inference, just
@@ -139,21 +139,14 @@ The kernel performs **no I/O** for observability. Instead:
 
 This makes the log/telemetry stream itself a deterministic, assertable artifact.
 
-## The future-layer import rule
+## The layer dependency graph
 
-Layers are ordinals: the kernel is index `0`. The single rule
-`LayerImportRule::validate(importer, target)` permits an import **iff**
-`target < importer`. From that one rule:
-
-- a layer cannot import itself (`target == importer` → `SelfImport`);
-- a layer cannot import a future/higher layer (`target > importer` →
-  `ForwardImport`);
-- the kernel (index `0`) can import nothing, since no index is `< 0`.
-
-`LayerManifest` additionally rejects the kernel declaring *any* dependency
-(`KernelMustNotImport`) and rejects duplicate dependencies/capabilities. The
-canonical kernel manifest is `LayerManifest::kernel()` — index `0`, name
-`"axiom-kernel"`, no dependencies.
+The layer DAG is not owned by kernel code. Each layer declares its direct
+dependencies in its own `layer.toml`, and `cargo xtask check-architecture`
+(repo tooling) verifies that those `depends_on` edges form a DAG, that every
+import is declared, and that each declared dependency is genuinely used. The
+kernel is simply a root of that graph: it declares no dependencies and imports
+nothing.
 
 ## Dependency policy
 

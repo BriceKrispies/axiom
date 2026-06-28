@@ -1,4 +1,4 @@
-//! Mechanical architecture enforcement for Axiom Layer 04 (axiom-frame).
+//! Mechanical architecture enforcement for axiom-frame (an Axiom layer).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -235,7 +235,7 @@ fn no_higher_engine_layer_concepts() {
             "egui",
             "bevy",
         ],
-        "axiom-frame must not import any higher-layer engine concept",
+        "axiom-frame must not import a layer it does not declare in depends_on",
     );
 }
 
@@ -300,7 +300,7 @@ fn axiom_kernel_does_not_import_axiom_frame() {
         &sibling_src_dir("axiom-kernel"),
         "axiom-kernel",
         &["axiom_frame", "axiom-frame"],
-        "axiom-kernel (Layer 00) must not import axiom-frame (Layer 04)",
+        "axiom-kernel must not import axiom-frame",
     );
 }
 
@@ -310,7 +310,7 @@ fn axiom_runtime_does_not_import_axiom_frame() {
         &sibling_src_dir("axiom-runtime"),
         "axiom-runtime",
         &["axiom_frame", "axiom-frame"],
-        "axiom-runtime (Layer 01) must not import axiom-frame (Layer 04)",
+        "axiom-runtime must not import axiom-frame",
     );
 }
 
@@ -320,7 +320,7 @@ fn axiom_math_does_not_import_axiom_frame() {
         &sibling_src_dir("axiom-math"),
         "axiom-math",
         &["axiom_frame", "axiom-frame"],
-        "axiom-math (Layer 02) must not import axiom-frame (Layer 04)",
+        "axiom-math must not import axiom-frame",
     );
 }
 
@@ -330,12 +330,12 @@ fn axiom_host_does_not_import_axiom_frame() {
         &sibling_src_dir("axiom-host"),
         "axiom-host",
         &["axiom_frame", "axiom-frame"],
-        "axiom-host (Layer 03) must not import axiom-frame (Layer 04)",
+        "axiom-host must not import axiom-frame",
     );
 }
 
 #[test]
-fn frame_only_imports_legal_lower_layers() {
+fn frame_only_imports_declared_dependencies() {
     let mut illegal = Vec::new();
     for path in frame_source_files() {
         let stripped = strip_comments_and_strings(&read(&path));

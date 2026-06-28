@@ -23,16 +23,9 @@ pub enum KernelErrorCode {
     TruncatedData = 6,
     /// A schema version was incompatible with the reader.
     SchemaVersionMismatch = 7,
-    /// A layer declared the same dependency more than once.
-    DuplicateDependency = 8,
-    /// A layer declared the same capability more than once.
-    DuplicateCapability = 9,
-    /// A layer attempted to import itself.
-    SelfImport = 10,
-    /// A layer attempted to import a higher (future) layer.
-    ForwardImport = 11,
-    /// The kernel layer (index 0) declared a dependency; it must import nothing.
-    KernelMustNotImport = 12,
+    // Codes 8–12 were retired with the kernel's index-based layer-contract
+    // model; the layer graph is now a DAG owned by `layer.toml` + the
+    // architecture checker (repo tooling), not a runtime kernel concern.
     /// A dimensioned scalar quantity was built from a non-finite value (NaN or
     /// infinity).
     NonFiniteScalar = 13,
@@ -59,7 +52,6 @@ mod tests {
     fn discriminants_are_stable() {
         assert_eq!(KernelErrorCode::InvalidFixedStep.raw(), 1);
         assert_eq!(KernelErrorCode::OutOfBounds.raw(), 5);
-        assert_eq!(KernelErrorCode::KernelMustNotImport.raw(), 12);
         assert_eq!(KernelErrorCode::NonFiniteScalar.raw(), 13);
         assert_eq!(KernelErrorCode::InvalidDiscriminant.raw(), 14);
         assert_eq!(KernelErrorCode::InvalidTickDivider.raw(), 15);
@@ -67,7 +59,7 @@ mod tests {
 
     #[test]
     fn codes_are_distinct() {
-        assert_ne!(KernelErrorCode::SelfImport, KernelErrorCode::ForwardImport);
+        assert_ne!(KernelErrorCode::InvalidId, KernelErrorCode::OutOfBounds);
     }
 
     #[test]

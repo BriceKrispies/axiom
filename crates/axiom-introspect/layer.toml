@@ -1,13 +1,13 @@
-# Axiom layer manifest — Layer 06 (axiom-introspect).
+# Axiom layer manifest — axiom-introspect.
 #
 # Introspect is the engine's agent-facing observability boundary. It adapts the
 # frame contract into a retained, byte-serializable model of what the engine
-# just did, and now also observes the ECS world (Layer 05) it sits directly on
+# just did, and now also observes the ECS world (ecs) it sits directly on
 # top of — the right direction: observability depends on the world, never the
 # reverse. It records; it never reaches around its inputs at runtime, never
 # reads a wall clock, and never touches a browser/GPU API.
 #
-# Layer-06 logical capabilities (documentation only — Rust public surface is
+# Introspect logical capabilities (documentation only — Rust public surface is
 # the curated re-export list in `lib.rs`, enforced by the layer's own
 # `tests/architecture.rs::lib_exports_are_curated_set`):
 #   - per-frame-report
@@ -45,9 +45,9 @@ consumed_capabilities = [
     "World",
 ]
 
-# `WorldReport` is the adapter over the previous layer (ecs): it observes a
+# `WorldReport` is the adapter over a depended layer (ecs): it observes a
 # `World`. The frame-derived reports still reference frame symbols (a legal
-# lower layer), but the *previous-layer* proof is `WorldReport` -> `World`.
+# depended layer), but the *depended-layer* proof is `WorldReport` -> `World`.
 [[proof_exports]]
 export = "WorldReport"
 must_reference = ["World"]

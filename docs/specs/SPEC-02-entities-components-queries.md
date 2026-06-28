@@ -20,7 +20,7 @@ says must live in a single layer.
 
 ## 2. Current state (verified)
 
-- **Entity lifecycle exists, deterministic.** `axiom-ecs` (Layer 05)
+- **Entity lifecycle exists, deterministic.** `axiom-ecs`
   `EntityRegistry` mints generational [`EntityHandle`]s from raw id 1, ascending
   by slot (a `BTreeMap`), recycling freed slots at a bumped generation — a stale
   handle is detectably invalid (`is_current`/`is_stale`). `World::spawn` /
@@ -71,7 +71,7 @@ world model is one layer (`axiom-ecs`) by the Module Law's "shared primitive →
 lower layer, not a third module" rule, and the hierarchy is already the scene
 module's job.
 
-1. **`axiom-ecs` (Layer 05) — extend `DynamicComponents`** with gap 3 (kind-keyed
+1. **`axiom-ecs` — extend `DynamicComponents`** with gap 3 (kind-keyed
    presence enumeration + intersection). This is the lowest correct layer: the
    dynamic store already owns the kind→column map; "which entities have this kind"
    is a read over data it already holds, not a new concept. `sim`-class,

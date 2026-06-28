@@ -1,17 +1,16 @@
-# Axiom Frame — Layer 04 Architecture
+# Axiom Frame — Architecture
 
 `axiom-frame` is the canonical engine frame boundary of the Axiom engine.
-It sits fifth in the chain:
+It depends on kernel, runtime, and host:
 
 ```
-Layer 00  axiom-kernel    (time, identity, errors, binary, logging, telemetry)
-Layer 01  axiom-runtime   (lifecycle, fixed-step scheduling, queues, context)
-Layer 02  axiom-math      (scalars, vectors, matrices, transforms, geometry)
-Layer 03  axiom-host      (deterministic host boundary, runtime step driver)
-Layer 04  axiom-frame     ← this crate
+axiom-frame depends on:
+  axiom-kernel   (time, identity, errors, binary, logging, telemetry)
+  axiom-runtime  (lifecycle, fixed-step scheduling, queues, context)
+  axiom-host     (deterministic host boundary, runtime step driver)
 ```
 
-## What Layer 04 is
+## What axiom-frame is
 
 The single place that answers the one question every future engine system
 will ask:
@@ -21,7 +20,7 @@ will ask:
 
 The answer is an [`EngineFrame`]. Each frame carries:
 
-- an engine frame index (the layer-04 monotonic counter),
+- an engine frame index (this layer's monotonic counter),
 - the host frame sequence the engine frame was adapted from,
 - an ordered list of [`FrameStepSummary`]s (one per `Runtime::step`),
 - a frame-stable [`FrameViewport`] snapshot,
@@ -62,7 +61,7 @@ or debug overlay would have to know about `HostFrameInput`, accumulators,
 and the runtime driver, when all it actually needs is "the engine frame
 to read this update."
 
-Layer 04 sits one step above the host boundary specifically so:
+Frame sits above the host boundary specifically so:
 
 - the engine's per-frame contract has one shape (`EngineFrame`),
 - the contract is **immutable** (no setters, no mutation, no rebuilds),
@@ -80,19 +79,19 @@ contract this layer publishes is the only one those systems get to use.
 
 The contract is:
 
-- a function of explicit lower-layer inputs (`HostFrameReport`,
+- a function of explicit depended-layer inputs (`HostFrameReport`,
   `RuntimeStepRecord`, and a fixed step value),
 - byte-identical for byte-identical inputs,
 - expressed in terms of value types with stable equality.
 
-## What lower-layer data it consumes
+## What depended-layer data it consumes
 
 - **From `axiom-host`:** [`HostFrameReport`] (which carries the host
   frame sequence, the host step plan, the ordered runtime step records,
   the host viewport, and the lifecycle state after the frame),
   [`HostViewport`], [`HostLifecycleState`], and [`HostSkipReason`].
 - **From `axiom-runtime`:** [`RuntimeStepRecord`] (read through the host
-  report; layer 04 does not call `Runtime::step` itself), and the
+  report; frame does not call `Runtime::step` itself), and the
   underlying [`RuntimeStep`] / `FrameIndex` / `Tick` identities.
 - **From `axiom-kernel`:** the deterministic primitives that flow
   through the layers above (FrameIndex, Tick), reached transitively
@@ -141,8 +140,8 @@ browser-specific concern lives in the future adapter crate, not here.
 Rendering needs a backend (`wgpu` or `webgl2`), a swapchain, a shader
 compiler, a frame-graph, and a material/mesh model. None of that
 belongs in the engine frame boundary — the boundary's job is to deliver
-the *frame contract*, not to act on it. A future renderer crate (Layer
-N) will accept a `FrameContext`, build its own draw stream from the
+the *frame contract*, not to act on it. A future renderer crate
+will accept a `FrameContext`, build its own draw stream from the
 viewport, lifecycle, step summaries, and commands carried on the frame,
 and submit work to the backend. Letting any of that leak in here would
 re-couple the boundary to a backend it must stay agnostic of.

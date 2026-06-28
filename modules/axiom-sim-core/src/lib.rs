@@ -27,7 +27,7 @@
 //! creatures, bodies-of-a-species, fluids simulation, toxicology, combat, jobs,
 //! needs, thoughts, history, AI, gameplay, scene graph, rendering, physics, input,
 //! audio, or browser/GPU APIs. It references ECS entity handles
-//! (Layer 05) but does not own the ECS; entity liveness is checked against a
+//! (the ecs layer) but does not own the ECS; entity liveness is checked against a
 //! borrowed `axiom_ecs::EntityRegistry`. It uses only logical ticks — never
 //! wall-clock time — and no randomness.
 //!

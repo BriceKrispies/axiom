@@ -1,11 +1,11 @@
-# Axiom layer manifest — Layer 04 (axiom-frame).
+# Axiom layer manifest — axiom-frame.
 #
 # Frame is the canonical engine frame boundary. It adapts host frame reports
-# (Layer 03), runtime step records (Layer 01), and viewport facts (Layer 03)
+# (host), runtime step records (runtime), and viewport facts (host)
 # into a stable per-frame contract — the `EngineFrame` and `FrameContext`
 # future engine systems consume.
 #
-# Layer-04 logical capabilities (documentation only — Rust public surface is
+# Frame logical capabilities (documentation only — Rust public surface is
 # the curated re-export list in `lib.rs`, enforced by the layer's own
 # `tests/architecture.rs::lib_exports_are_curated_set`):
 #   - canonical-engine-frame
@@ -40,8 +40,8 @@ consumed_capabilities = [
     "TelemetryMetric",
 ]
 
-# Each proof export is a real Layer-04 public export whose source file must
-# reference at least one previous-layer (host) symbol. Listing only host
+# Each proof export is a real public export whose source file must
+# reference at least one depended-layer (host) symbol. Listing only host
 # symbols here proves all three files use axiom-host directly through its
 # public API, as required.
 [[proof_exports]]

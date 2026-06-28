@@ -39,7 +39,7 @@ impl LayerManifest {
 /// The `[layer]` table.
 ///
 /// Layers form a directed *acyclic* graph, not a strict line: each layer lists
-/// the lower layers it directly depends on in `depends_on` and must genuinely
+/// the layers it directly depends on in `depends_on` and must genuinely
 /// use each one (the latter enforced by the `engine_genuine_dependency` dylint).
 /// A layer with an empty `depends_on` is a root (e.g. the kernel).
 #[derive(Debug, Clone, Deserialize)]
@@ -48,7 +48,7 @@ pub struct LayerSection {
     pub name: String,
     #[serde(default)]
     pub crate_name: Option<String>,
-    /// The lower layers this layer directly depends on. These are exactly the
+    /// The layers this layer directly depends on. These are exactly the
     /// layers it may import, and each must be genuinely used.
     #[serde(default)]
     pub depends_on: Vec<String>,

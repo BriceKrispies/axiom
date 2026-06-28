@@ -1,4 +1,4 @@
-//! Mechanical architecture enforcement for Axiom Layer 02 (axiom-math).
+//! Mechanical architecture enforcement for axiom-math (an Axiom layer).
 //!
 //! These tests scan the math layer's own source tree (and the source trees of
 //! the layers below it) and fail the build if any hard architecture rule is
@@ -229,7 +229,7 @@ fn no_engine_layer_concepts_higher_than_math() {
     ];
     assert_absent(
         forbidden,
-        "axiom-math must not import any higher-layer engine concept",
+        "axiom-math must not import a layer it does not declare in depends_on",
     );
 }
 
@@ -298,7 +298,7 @@ fn axiom_kernel_does_not_import_axiom_math() {
         &kernel_src_dir(),
         "axiom-kernel",
         &["axiom_math", "axiom-math"],
-        "axiom-kernel (Layer 00) must not import axiom-math (Layer 02)",
+        "axiom-kernel must not import axiom-math",
     );
 }
 
@@ -308,12 +308,12 @@ fn axiom_runtime_does_not_import_axiom_math() {
         &runtime_src_dir(),
         "axiom-runtime",
         &["axiom_math", "axiom-math"],
-        "axiom-runtime (Layer 01) must not import axiom-math (Layer 02)",
+        "axiom-runtime must not import axiom-math",
     );
 }
 
 #[test]
-fn math_only_imports_legal_lower_layers() {
+fn math_only_imports_declared_dependencies() {
     // axiom-math may only import axiom-kernel and axiom-runtime.
     let mut illegal = Vec::new();
     for path in math_source_files() {

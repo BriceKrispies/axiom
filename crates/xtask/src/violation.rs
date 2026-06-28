@@ -29,7 +29,7 @@ pub enum ViolationKind {
     /// `proof_exports.export` is not a public export of the layer.
     MissingProofExport,
     /// A proof export exists but its implementation does not reference any of its
-    /// required previous-layer `must_reference` symbols.
+    /// required depended-layer `must_reference` symbols.
     ProofReferenceMissing,
 
     // --- Module / app / tool classification and dependency rules ---

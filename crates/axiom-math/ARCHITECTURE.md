@@ -1,21 +1,21 @@
-# Axiom Math — Layer 02 Architecture
+# Axiom Math — Architecture
 
 `axiom-math` is the deterministic numeric and geometric substrate of the
-Axiom engine. It is the third layer in the chain:
+Axiom engine. It depends on kernel and runtime:
 
 ```
-Layer 00  axiom-kernel    (time, identity, errors, binary, logging, telemetry)
-Layer 01  axiom-runtime   (lifecycle, fixed-step scheduling, queues, context)
-Layer 02  axiom-math      ← this crate
+axiom-math depends on:
+  axiom-kernel   (time, identity, errors, binary, logging, telemetry)
+  axiom-runtime  (lifecycle, fixed-step scheduling, queues, context)
 ```
 
 Every later layer (rendering, scene, physics, animation, culling, picking,
-tooling, editor) will build on the primitives this layer defines. Layer 02 is
+tooling, editor) will build on the primitives this layer defines. Math is
 therefore the last place where it is reasonable to enforce determinism,
 checked failure, and a small public surface "by hand"; once higher layers
 start importing math, those properties have to hold uniformly.
 
-## What Layer 02 is
+## What axiom-math is
 
 A small library of *deterministic, allocation-free, browser-free* math types
 and the checked operations on them:
@@ -47,7 +47,7 @@ and the checked operations on them:
 The entire public surface is the single facade `MathApi`. `lib.rs` exports
 nothing else.
 
-## What Layer 02 is not allowed to know
+## What axiom-math is not allowed to know
 
 The kernel's hard rules apply to math directly, and the layer's tests
 (`tests/architecture.rs`) enforce them mechanically:
@@ -69,8 +69,8 @@ The kernel's hard rules apply to math directly, and the layer's tests
   `misc` module — the project's agentic-development discipline forbids them.
 
 The kernel and runtime crates must not import math, and math must not
-import any layer above `axiom-runtime`. Both directions are scanned in
-`tests/architecture.rs`.
+import any layer other than the `kernel` and `runtime` it declares in
+`depends_on`. Both directions are scanned in `tests/architecture.rs`.
 
 ## Deterministic scalar policy
 

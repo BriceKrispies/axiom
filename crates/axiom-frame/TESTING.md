@@ -1,6 +1,6 @@
 # Axiom Frame — Testing Discipline
 
-Layer 04 publishes the engine's canonical per-frame contract. Once
+`axiom-frame` publishes the engine's canonical per-frame contract. Once
 renderer / scene / picking / animation layers depend on it, any
 nondeterminism here is a multiplier on every consumer. The tests have
 to prove the contract is deterministic — same inputs in, same
@@ -65,7 +65,7 @@ equal (`repeated_builder_use_with_identical_input_is_deterministic`).
 - different host viewports producing different snapshots;
 - the `InvalidViewport` error code being distinct (its shape is pinned
   via the shorthand constructor since fabricating a non-finite host
-  viewport is impossible — Layer 03 rejects it first).
+  viewport is impossible — the host layer rejects it first).
 
 ## Timing summary tests
 
@@ -157,7 +157,7 @@ Every frame error code has a direct test:
 
 ## Logging / telemetry determinism
 
-Layer 04 deliberately ships **zero** ambient logging or telemetry today.
+`axiom-frame` deliberately ships **zero** ambient logging or telemetry today.
 The runtime emits diagnostics through its own kernel sinks; the frame
 layer's own diagnostic surface is the typed `FrameDiagnostics` struct,
 which is plain data with no IO. If a future iteration adds frame-level
@@ -193,20 +193,7 @@ asserts:
 - `axiom-frame` imports only `axiom_kernel`, `axiom_runtime`, and
   `axiom_host`.
 
-`tests/manifest.rs` proves the layer-manifest contract:
-
-- the frame manifest validates with index 4, the three legal
-  dependencies (kernel, runtime, host), and the nine documented
-  capabilities;
-- host (the immediate previous layer) is accepted as a dependency on
-  its own;
-- depending on itself is rejected as `SelfImport`;
-- depending on a future layer (index 5+) is rejected as
-  `ForwardImport`;
-- duplicate dependencies and duplicate capabilities are both
-  rejected.
-
-In addition, `cargo xtask check-architecture` (and the workspace's
+`cargo xtask check-architecture` (and the workspace's
 `real_repo_layers_pass` test that wraps it) validates the real
 `crates/axiom-frame/layer.toml` against the Axiom Layer Law on every
 workspace test run, so the manifest on disk cannot drift from the code.

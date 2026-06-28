@@ -207,7 +207,7 @@ fn scene_imports_only_legal_layers() {
                     && chunk != "axiom_runtime"
                     && chunk != "axiom_math"
                     && chunk != "axiom_frame"
-                    // The scene is an ECS world (Layer 05): nodes are entities,
+                    // The scene is an ECS world (the ecs layer): nodes are entities,
                     // node facts are component columns.
                     && chunk != "axiom_ecs"
                     // axiom_host appears only in #[cfg(test)] blocks because it

@@ -1,4 +1,4 @@
-//! Mechanical architecture enforcement for Axiom Layer 03 (axiom-host).
+//! Mechanical architecture enforcement for axiom-host (an Axiom layer).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -237,7 +237,7 @@ fn no_higher_engine_layer_concepts() {
             "egui",
             "bevy",
         ],
-        "axiom-host must not import any higher-layer engine concept",
+        "axiom-host must not import a layer it does not declare in depends_on",
     );
 }
 
@@ -324,7 +324,7 @@ fn axiom_kernel_does_not_import_axiom_host() {
         &sibling_src_dir("axiom-kernel"),
         "axiom-kernel",
         &["axiom_host", "axiom-host"],
-        "axiom-kernel (Layer 00) must not import axiom-host (Layer 03)",
+        "axiom-kernel must not import axiom-host",
     );
 }
 
@@ -334,7 +334,7 @@ fn axiom_runtime_does_not_import_axiom_host() {
         &sibling_src_dir("axiom-runtime"),
         "axiom-runtime",
         &["axiom_host", "axiom-host"],
-        "axiom-runtime (Layer 01) must not import axiom-host (Layer 03)",
+        "axiom-runtime must not import axiom-host",
     );
 }
 
@@ -344,12 +344,12 @@ fn axiom_math_does_not_import_axiom_host() {
         &sibling_src_dir("axiom-math"),
         "axiom-math",
         &["axiom_host", "axiom-host"],
-        "axiom-math (Layer 02) must not import axiom-host (Layer 03)",
+        "axiom-math must not import axiom-host",
     );
 }
 
 #[test]
-fn host_only_imports_legal_lower_layers() {
+fn host_only_imports_declared_dependencies() {
     let mut illegal = Vec::new();
     for path in host_source_files() {
         let stripped = strip_comments_and_strings(&read(&path));

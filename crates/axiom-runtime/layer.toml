@@ -1,4 +1,4 @@
-# Axiom layer manifest — Layer 01 (the runtime).
+# Axiom layer manifest — the runtime.
 #
 # The runtime is the deterministic engine execution substrate. It adapts the
 # kernel's deterministic primitives (clock/ticks, structured results,
@@ -52,7 +52,7 @@ consumed_capabilities = [
     "TelemetrySink",
 ]
 
-# Each block names a public Layer 01 export and the kernel symbols its
+# Each block names a public runtime export and the kernel symbols its
 # implementation must reference. The architecture checker follows the
 # `pub use module::Type;` re-export in lib.rs to the module file and asserts
 # the named kernel symbol appears there.

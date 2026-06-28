@@ -105,11 +105,11 @@ If something is exciting, it probably does not belong in the kernel.
 
 ## Layer Rules
 
-A layer may only import from the kernel and earlier layers.
+A layer may only import the layers it declares in `depends_on` (which form a DAG rooted at the kernel).
 
-A layer must provide a meaningful engine capability that builds on what came before it.
+A layer must provide a meaningful engine capability that builds on the layers it depends on.
 
-A layer that does not meaningfully use the previous layers is suspicious. Either it is misplaced, unnecessary, or it should be a feature module.
+A layer that does not meaningfully use the layers it declares in `depends_on` is suspicious. Either it is misplaced, unnecessary, or it should be a feature module.
 
 Layers should be broad and shallow. Do not create tiny ceremonial layers just to feel organized.
 
@@ -276,13 +276,14 @@ checker (`cargo xtask check-architecture`) classifies every workspace
 package as exactly one of them and fails the build if classification or
 the per-category rules below are violated.
 
-> **Layers are the ordered engine spine. Modules are isolated capabilities.
+> **Layers are the engine's layer DAG. Modules are isolated capabilities.
 > Apps compose modules. Tools are repo tooling.**
 >
-> - **Layers** (`crates/<name>/` + `layer.toml`) form a strictly ordered
->   chain (kernel → runtime → math → host → frame → …). Each layer may
->   import only lower-indexed layers, must directly use the layer at
->   index N-1, and is governed by the Layer Law above.
+> - **Layers** (`crates/<name>/` + `layer.toml`) form a directed acyclic
+>   graph keyed on each layer's `depends_on` (the kernel is a root; e.g.
+>   `math` depends on `kernel` and `runtime`). Each layer may import only
+>   the layers it declares in `depends_on`, must genuinely use each one,
+>   and is governed by the Layer Law above.
 > - **Modules** (`modules/<name>/` + `module.toml`) come in two kinds, both
 >   exposing exactly one public facade from `lib.rs`:
 >   - **Engine modules** (the default) are *isolated* capabilities (e.g.
@@ -307,8 +308,8 @@ the per-category rules below are violated.
 Hard rules (mechanically enforced):
 
 1. **Layers must never import modules.** A layer's Cargo deps must contain
-   only lower-indexed layer crates — never a module crate, an app crate,
-   or a tool crate.
+   only the layer crates it declares in `depends_on` — never a module
+   crate, an app crate, or a tool crate.
 2. **Engine modules must never depend on other modules.** For an engine
    module, `allowed_modules` in `module.toml` must be empty; its Cargo
    deps must contain only its `allowed_layers`. If two engine modules want
@@ -419,7 +420,7 @@ allowed_modules = ["scene", "render"]
 ### Repo structure summary
 
 ```text
-crates/    # layers (ordered spine) + the axiom-zones support crate
+crates/    # layers (the layer DAG) + the axiom-zones support crate
 modules/   # isolated capabilities (future)
 apps/      # composition roots (future)
 tools/     # repo tooling (future) — incl. tools/lints (dylint rulebook)
@@ -579,7 +580,7 @@ Dependency direction is not negotiable.
 Allowed:
 
 * kernel imports nothing from Axiom layers
-* layer N imports only kernel and layers before N
+* a layer imports only the layers it declares in `depends_on` (a DAG rooted at the kernel)
 * feature modules import kernel and completed layers
 * tooling imports runtime code when appropriate
 * tests import whatever they need to validate behavior
@@ -587,7 +588,7 @@ Allowed:
 Forbidden:
 
 * kernel importing layers
-* earlier layers importing later layers
+* a layer importing a layer outside its `depends_on`
 * layers importing feature modules
 * runtime code importing editor/tooling code
 * portable engine code importing browser-specific APIs

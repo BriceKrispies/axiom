@@ -1,4 +1,4 @@
-//! Mechanical architecture enforcement for the Axiom kernel (Layer 00).
+//! Mechanical architecture enforcement for the Axiom kernel (a root of the layer DAG).
 //!
 //! These tests scan the kernel's own source tree and fail the build if any of
 //! the hard architecture rules are violated. They are intentionally crude
@@ -150,9 +150,6 @@ fn lib_exports_are_curated_set() {
         "pub use reflect::Reflect;",
         "pub use type_schema::{FieldSchema, TypeSchema};",
         "pub use stable_hash::StableHash;",
-        "pub use layer_capability::LayerCapability;",
-        "pub use layer_dependency::LayerDependency;",
-        "pub use layer_manifest::LayerManifest;",
         "pub use in_memory_log_sink::InMemoryLogSink;",
         "pub use log_field::LogField;",
         "pub use log_level::LogLevel;",
