@@ -4,6 +4,14 @@
 > today; `partial` = a related capability exists but not in the form a game needs; `missing` = no
 > equivalent. ⚠ marks a **determinism hazard** — a capability whose current implementation breaks
 > a deterministic, replayable, authoritative engine.
+>
+> **2026-06-28 reconciliation.** The status column was re-verified against the tree during the spec
+> build ([`specs/`](specs/)). Four cells were corrected: *clamp/lerp/sine/angle* `have`→`missing`
+> (no scalar helpers exist in `axiom-math`; games fall back to `std`), *Frame command queue*
+> `missing`→`have` (`axiom-frame::FrameCommandQueue`), *Timer/countdown/cooldown* `have`→`partial`
+> (the fixed-step tick counter exists but there is no `Timers` primitive), and *Keyboard*
+> `have`→`partial` (`axiom-input` is touch-only; key→action binding lives in the `axiom-interface`
+> UI layer, not an engine input facade).
 
 ## The games
 
@@ -77,7 +85,7 @@
 
 | Primitive | What it does | Needed by | Axiom | n |
 |---|---|---|---|---|
-| clamp / lerp / sine / angle | scalar interpolation helpers | TF BC LL NC NI RH 1v1 PM NR | have | 9 |
+| clamp / lerp / sine / angle | scalar interpolation helpers | TF BC LL NC NI RH 1v1 PM NR | missing | 9 |
 | Grid / tilemap | 2D integer cell map | TF BC BB LL NI PM NR | missing | 7 |
 | AABB / point-in-rect | box overlap hit test | BC NC NI 1v1 | partial | 4 |
 | Circle / sphere overlap | distance-based hit test | LL 1v1 PM NR | partial | 4 |
@@ -107,7 +115,7 @@
 
 | Primitive | What it does | Needed by | Axiom | n |
 |---|---|---|---|---|
-| Timer / countdown / cooldown | timestamp-gated events | all 11 | have | 11 |
+| Timer / countdown / cooldown | timestamp-gated events | all 11 | partial | 11 |
 | Spawn / despawn + pool | entity lifecycle, object pool | BB NC NI RH 1v1 PM NR | have | 7 |
 | Game-flow state machine | menu / playing / over | NC NI RH 1v1 PM NR | partial | 6 |
 | Variable-dt loop ⚠ | RAF with dt cap | NC NI RH 1v1 NR | partial | 5 |
@@ -116,13 +124,13 @@
 | Per-entity state machine | poses / AI modes / round phases | NC 1v1 PM NR | partial | 4 |
 | Flip-book animation | frame-swap sprite cycles | NI 1v1 PM | missing | 3 |
 | Fixed-step tick | deterministic simulation cadence | NC PM NR | have | 3 |
-| Frame command queue | FIFO command bus | NR | missing | 1 |
+| Frame command queue | FIFO command bus | NR | have | 1 |
 
 ### Input
 
 | Primitive | What it does | Needed by | Axiom | n |
 |---|---|---|---|---|
-| Keyboard | state-map, edge detect, repeat suppress | RS LL NC NI RH 1v1 PM NR | have | 8 |
+| Keyboard | state-map, edge detect, repeat suppress | RS LL NC NI RH 1v1 PM NR | partial | 8 |
 | Pointer / click | mouse/tap on elements & canvas | TF BC BB RS LL RH | have | 6 |
 | Touch / swipe / gesture | mobile directional input | LL BB RH PM | have | 4 |
 | Key→action bindings | data-driven remappable controls | NC NI RH NR | partial | 4 |

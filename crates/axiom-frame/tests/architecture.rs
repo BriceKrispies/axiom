@@ -269,6 +269,7 @@ fn lib_exports_are_curated_set() {
     let mut expected: Vec<&str> = vec![
         "pub use frame_api::FrameApi;",
         "pub use engine_frame::EngineFrame;",
+        "pub use frame_accumulator::FrameAccumulator;",
         "pub use frame_builder::FrameBuilder;",
         "pub use frame_command::FrameCommand;",
         "pub use frame_command_queue::FrameCommandQueue;",
@@ -282,6 +283,7 @@ fn lib_exports_are_curated_set() {
         "pub use frame_system_report::FrameSystemReport;",
         "pub use frame_timing::FrameTiming;",
         "pub use frame_viewport::FrameViewport;",
+        "pub use step_budget::StepBudget;",
     ];
     expected.sort();
 

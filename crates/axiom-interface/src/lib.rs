@@ -40,6 +40,8 @@ mod keymap;
 mod layout_rect;
 mod panel;
 mod panel_id;
+mod ui_geometry;
+mod ui_surface;
 
 pub use command_table::CommandSpec;
 pub use command_table::CommandTable;
@@ -52,3 +54,7 @@ pub use interface_command::ParsedCommand;
 pub use keymap::KeyBinding;
 pub use keymap::Keymap;
 pub use panel_id::PanelId;
+pub use ui_geometry::{
+    PointerSnapshot, UiColor, UiFill, UiRect, UiSpriteOpts, UiTextOpts, UiUnit, UiViewport,
+};
+pub use ui_surface::{UiDrawItem, UiDrawList, UiSurface};

@@ -9,7 +9,7 @@
 
 use axiom_ecs::Query;
 use axiom_kernel::EntityId;
-use axiom_math::{Aabb, Ray, Transform, Vec3};
+use axiom_math::{Aabb, Ray, Sphere, Transform, Vec3};
 
 use super::Scene;
 use crate::bounds::Bounds;
@@ -149,6 +149,26 @@ impl Scene {
                     .filter_map(|(entity, bounds, world)| {
                         Self::world_aabb(world, bounds)
                             .filter(|aabb| aabb.overlaps(&query))
+                            .map(|_| SceneNodeId::from_raw(entity.raw()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every bounded node whose world box overlaps the query sphere (centered at
+    /// `center`, of `radius`), in ascending node-id order — the radial companion
+    /// to [`Self::overlap_box`] for proximity/blast-radius checks. A degenerate
+    /// (negative / non-finite radius) query yields an empty result.
+    pub(crate) fn overlap_circle(&self, center: Vec3, radius: f32) -> Vec<SceneNodeId> {
+        let storage = self.world.storage();
+        Sphere::new(center, radius)
+            .ok()
+            .map(|query| {
+                Query::two(self.world.entities(), &storage.bounds, &storage.worlds)
+                    .filter_map(|(entity, bounds, world)| {
+                        Self::world_aabb(world, bounds)
+                            .filter(|aabb| query.intersects_aabb(aabb))
                             .map(|_| SceneNodeId::from_raw(entity.raw()))
                     })
                     .collect()
@@ -298,6 +318,22 @@ mod tests {
         assert!(s
             .overlap_box(Vec3::ZERO, Vec3::new(-1.0, 0.0, 0.0))
             .is_empty());
+    }
+
+    #[test]
+    fn overlap_circle_includes_within_radius_excludes_distant_and_rejects_degenerate() {
+        let mut s = Scene::new();
+        let near = at(&mut s, 0.0, 0.0, 0.0);
+        let far = at(&mut s, 10.0, 0.0, 0.0);
+        s.add_bounds(near, unit()).unwrap();
+        s.add_bounds(far, unit()).unwrap();
+        s.update_world_transforms();
+        // A unit sphere at the origin reaches `near` (box at origin), not `far`.
+        assert_eq!(s.overlap_circle(Vec3::ZERO, 1.0), vec![near]);
+        // A wide sphere reaches both (far box near-face at x=9.5, within 9.5).
+        assert_eq!(s.overlap_circle(Vec3::ZERO, 9.5), vec![near, far]);
+        // A degenerate (negative) radius yields nothing.
+        assert!(s.overlap_circle(Vec3::ZERO, -1.0).is_empty());
     }
 
     #[test]

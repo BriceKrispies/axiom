@@ -1,0 +1,37 @@
+# Axiom module manifest — axiom-tween (an ENGINE module).
+#
+# Generic display-value animation: a number from->to over a duration under an
+# ease curve, advanced by a presentation interval the app supplies. It owns the
+# ease functions and a tween table keyed by `TweenId`, and yields the current
+# sampled value + completion per tween.
+#
+# It is an ISOLATED engine module (`allowed_modules = []`) with one behavioral
+# facade, `TweenApi`. It is deliberately NOT housed in `axiom-interface`: tween is
+# non-UI value interpolation, and a non-UI consumer (a 2D surface fading a
+# sprite, a 3D presentation tweening a value) must not drag in the interactive-
+# panel layer to animate a number. Each presentation surface is driven *alongside*
+# tween by the app (modules never import modules), so "reused by 2D and UI both"
+# is an app-tier composition, not a module dependency.
+#
+# It is PURE — no platform arm, no Web API, only arithmetic over a fed-in clock —
+# so it is a deterministic, fully-covered, branchless core with nothing compiled
+# out. Presentation-class: every output is display-only and must never be read
+# back into a `sim` API. The author's onUpdate/onComplete closures are NOT native
+# data: they live app-side keyed by `TweenId`; this module hands back samples and
+# the app fires the closures.
+
+[module]
+name = "tween"
+crate_name = "axiom-tween"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "tween-table",
+    "easing-curves",
+]

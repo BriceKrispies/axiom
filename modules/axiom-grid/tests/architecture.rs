@@ -1,0 +1,407 @@
+//! Architecture-boundary tests for the `axiom-grid` engine module.
+//!
+//! The workspace `xtask` checker enforces the global Module Law (allowed layers,
+//! no module-to-module deps, single facade). These per-module tests are the
+//! second line of defence: they scan this crate's `src/` tree for forbidden
+//! tokens so module-internal regressions fail at `cargo test` time. Tests are
+//! exempt from the Branchless Law, so this file uses ordinary control flow.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+// Facade-only imports for the determinism check below: the module is driven
+// solely through `GridApi` plus the value-type vocabulary it traffics in.
+use axiom_grid::{Cell, GridApi};
+
+fn src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn module_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .map(PathBuf::from)
+        .expect("repo root is two levels above modules/axiom-grid")
+}
+
+fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).expect("directory must exist") {
+        let path = entry.expect("readable dir entry").path();
+        if path.is_dir() {
+            collect_rs(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+}
+
+fn source_files() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_rs(&src_dir(), &mut files);
+    assert!(!files.is_empty(), "expected grid source files");
+    files.sort();
+    files
+}
+
+fn read(path: &Path) -> String {
+    fs::read_to_string(path).expect("source must be valid UTF-8")
+}
+
+fn strip_comments_and_strings(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    let mut in_char = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            if c == '\\' {
+                chars.next();
+                continue;
+            }
+            if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if in_char {
+            if c == '\\' {
+                chars.next();
+                continue;
+            }
+            if c == '\'' {
+                in_char = false;
+            }
+            continue;
+        }
+        if c == '/' && chars.peek() == Some(&'/') {
+            for next in chars.by_ref() {
+                if next == '\n' {
+                    out.push('\n');
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '"' {
+            in_string = true;
+            continue;
+        }
+        if c == '\'' {
+            in_char = true;
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn assert_absent(forbidden: &[&str], why: &str) {
+    let mut violations = Vec::new();
+    for path in source_files() {
+        let stripped = strip_comments_and_strings(&read(&path));
+        for needle in forbidden {
+            if stripped.contains(needle) {
+                violations.push(format!(
+                    "axiom-grid {}: contains forbidden `{}`",
+                    path.display(),
+                    needle
+                ));
+            }
+        }
+    }
+    assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
+}
+
+fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &str) {
+    let mut files = Vec::new();
+    if dir.is_dir() {
+        collect_rs(&dir, &mut files);
+    }
+    files.sort();
+    let mut violations = Vec::new();
+    for path in &files {
+        let stripped = strip_comments_and_strings(&read(path));
+        for needle in forbidden {
+            if stripped.contains(needle) {
+                violations.push(format!(
+                    "{label} {}: contains forbidden `{}`",
+                    path.display(),
+                    needle
+                ));
+            }
+        }
+    }
+    assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
+}
+
+// ---------- manifest + facade ----------
+
+#[test]
+fn module_toml_exists_and_is_isolated() {
+    let manifest = module_root().join("module.toml");
+    assert!(manifest.is_file(), "expected modules/axiom-grid/module.toml");
+    let stripped = strip_comments_and_strings(&fs::read_to_string(&manifest).unwrap());
+    assert!(
+        stripped.contains("allowed_modules = []"),
+        "axiom-grid must declare `allowed_modules = []`"
+    );
+}
+
+#[test]
+fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
+    // Module Law #8: exactly one behavioral facade (GridApi), plus the identity
+    // vocabulary (the value types). All other public exports forbidden.
+    let lib = read(&src_dir().join("lib.rs"));
+    let pub_uses: Vec<&str> = lib
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("pub use"))
+        .collect();
+    let facades: Vec<&str> = pub_uses
+        .iter()
+        .copied()
+        .filter(|line| !line.contains("ids::"))
+        .collect();
+    assert_eq!(
+        facades,
+        vec!["pub use grid_api::GridApi;"],
+        "axiom-grid must expose exactly one behavioral facade (GridApi)"
+    );
+    let id_lines = pub_uses.iter().filter(|line| line.contains("ids::")).count();
+    assert_eq!(
+        id_lines, 1,
+        "axiom-grid re-exports its identity vocabulary via exactly one `pub use ids::{{…}}` line"
+    );
+}
+
+// ---------- legal layer imports only ----------
+
+#[test]
+fn grid_imports_only_legal_layers() {
+    let mut illegal = Vec::new();
+    for path in source_files() {
+        let stripped = strip_comments_and_strings(&read(&path));
+        for line in stripped.lines() {
+            let trimmed = line.trim();
+            if !trimmed.contains("axiom_") {
+                continue;
+            }
+            for chunk in trimmed.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                if chunk.starts_with("axiom_")
+                    && chunk != "axiom_kernel"
+                    && chunk != "axiom_math"
+                    && chunk != "axiom_grid"
+                {
+                    illegal.push(format!("{}: {}", path.display(), trimmed));
+                }
+            }
+        }
+    }
+    assert!(
+        illegal.is_empty(),
+        "axiom-grid may only import axiom-kernel, axiom-math:\n{}",
+        illegal.join("\n")
+    );
+}
+
+#[test]
+fn grid_imports_no_other_modules() {
+    let modules_dir = repo_root().join("modules");
+    let other_modules: Vec<String> = fs::read_dir(&modules_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().replace('-', "_"))
+        .filter(|name| name != "axiom_grid")
+        .collect();
+    assert!(!other_modules.is_empty(), "expected sibling modules to exist");
+    let mut violations = Vec::new();
+    for path in source_files() {
+        let stripped = strip_comments_and_strings(&read(&path));
+        let tokens: std::collections::HashSet<&str> = stripped
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .collect();
+        for other in &other_modules {
+            if tokens.contains(other.as_str()) {
+                violations.push(format!(
+                    "{}: references other module `{}`",
+                    path.display(),
+                    other
+                ));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "axiom-grid must not depend on any other module:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn no_layer_imports_axiom_grid() {
+    for layer in ["axiom-kernel", "axiom-math", "axiom-runtime", "axiom-frame", "axiom-ecs"] {
+        let src = repo_root().join("crates").join(layer).join("src");
+        assert_absent_in_other(
+            src,
+            layer,
+            &["axiom_grid", "axiom-grid"],
+            &format!("layer `{layer}` must not import axiom-grid"),
+        );
+    }
+}
+
+// ---------- source hygiene: platform / determinism / foreign concepts ----------
+
+#[test]
+fn no_browser_or_js_bindgen_apis() {
+    assert_absent(
+        &["web_sys", "js_sys", "wasm_bindgen", "wasm-bindgen"],
+        "axiom-grid must not reference browser / JS bindings",
+    );
+}
+
+#[test]
+fn no_dom_canvas_or_webgpu_apis() {
+    assert_absent(
+        &[
+            "HtmlCanvas",
+            "canvas",
+            "requestAnimationFrame",
+            "document.",
+            "window.",
+            "wgpu",
+            "WebGPU",
+            "WebGL",
+        ],
+        "axiom-grid must not reference DOM/canvas/WebGPU/WebGL",
+    );
+}
+
+#[test]
+fn no_wall_clock_time_or_randomness() {
+    assert_absent(
+        &[
+            "std::time",
+            "SystemTime",
+            "Instant",
+            "chrono",
+            "rand::",
+            "thread_rng",
+            "getrandom",
+        ],
+        "axiom-grid is a pure function of (grid, cells, passable) — no time, no randomness",
+    );
+}
+
+#[test]
+fn no_threads_async_or_console() {
+    assert_absent(
+        &[
+            "thread::spawn",
+            "tokio",
+            "async_std",
+            "std::net",
+            "std::process",
+            "println!",
+            "eprintln!",
+            "print!",
+            "eprint!",
+            "dbg!",
+            "todo!",
+            "unimplemented!",
+        ],
+        "axiom-grid must not spawn threads, use async/net/process, print, or stub",
+    );
+}
+
+#[test]
+fn no_global_mutable_or_nondeterministic_collections() {
+    assert_absent(
+        &[
+            "static mut",
+            "lazy_static",
+            "once_cell",
+            "OnceLock",
+            "HashMap",
+            "HashSet",
+        ],
+        "axiom-grid must use no global mutable state and no hash-iteration collections",
+    );
+}
+
+#[test]
+fn no_foreign_engine_subsystem_concepts() {
+    // Grid owns the board/tile/path nouns; it must not absorb the concepts owned
+    // by other subsystems, nor reference foreign engine crates. Notably it must
+    // not become a navmesh/agent: `agent` decides, `grid` computes the route.
+    assert_absent(
+        &[
+            "axiom_scene",
+            "axiom_render",
+            "axiom_physics",
+            "axiom_agent",
+            "navmesh",
+            "Renderable",
+            "RigidBody",
+            "petgraph",
+        ],
+        "axiom-grid must not absorb foreign subsystem concepts or external engines",
+    );
+}
+
+#[test]
+fn no_junk_drawer_modules() {
+    for path in source_files() {
+        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        for banned in ["utils", "helpers", "common", "misc", "shared", "prelude"] {
+            assert_ne!(name, banned, "axiom-grid must not have a `{banned}` module");
+        }
+    }
+}
+
+#[test]
+fn every_source_module_is_declared_in_lib_rs() {
+    let lib = strip_comments_and_strings(&read(&src_dir().join("lib.rs")));
+    let mut missing = Vec::new();
+    for entry in fs::read_dir(src_dir()).expect("src dir must exist") {
+        let path = entry.expect("readable dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if stem == "lib" {
+            continue;
+        }
+        let decl = format!("mod {stem};");
+        if !lib.contains(&decl) {
+            missing.push(format!("{stem} (expected `{decl}` in lib.rs)"));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "every src/*.rs file must be declared in lib.rs — orphan modules:\n{}",
+        missing.join("\n")
+    );
+}
+
+// ---------- facade-level determinism proof ----------
+
+/// Two independently-built identical boards, queried for the same path, must
+/// return byte-identical routes — the replay invariant, through the facade.
+#[test]
+fn identical_boards_resolve_identical_paths() {
+    let build = || {
+        let api = GridApi::new();
+        let mut g = GridApi::create(4, 4, 0u32);
+        g.set(1, 1, 1);
+        g.set(2, 1, 1);
+        api.path(&g, Cell::new(0, 0), Cell::new(3, 3), |v| v == 0)
+    };
+    assert_eq!(build(), build());
+    assert!(build().is_some(), "an open path must exist around the wall");
+}

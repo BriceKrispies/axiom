@@ -1,0 +1,37 @@
+# Axiom module manifest — axiom-grid (an ENGINE module).
+#
+# A first-class integer grid plus the pathfinding and steering that read it: the
+# board (`Grid<T>`), the tile<->world mapping (`TileSpace`), and the authoritative
+# path queries (distance field, path, reachable, step_toward). This is the
+# substrate every tile, board, and procedural-level game stands on.
+#
+# It is an ISOLATED engine module: it composes no other module
+# (`allowed_modules = []`) and never touches a browser API (Module Law #9). Its
+# whole behavioral surface is one facade, `GridApi`; `Grid`, `Cell`, `TileSpace`,
+# and `Dist` are the pure value-type vocabulary it hands back and takes in (the
+# `pub use ids::{…}` carve-out), carrying data, not engine state.
+#
+# Why a module, not a layer or kernel addition: a grid is a gameplay substrate,
+# not an always-true engine primitive (it is exciting and domain-shaped, so it
+# fails the kernel bar), and no lower layer genuinely *uses* a grid, so wedging it
+# into the spine would manufacture a ceremonial edge. It is exactly an isolated
+# capability with one facade.
+
+[module]
+name = "grid"
+crate_name = "axiom-grid"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "integer-grid",
+    "tile-space",
+    "grid-pathfinding",
+    "grid-steering",
+]

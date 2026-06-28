@@ -75,6 +75,20 @@ impl Scene {
             .scan((), |(), id| Some((id == child) | !visited.insert(id)))
             .any(|hit| hit)
     }
+
+    /// The direct children of `node`, in ascending node-id order — the reverse of
+    /// [`Scene::parent_of`]. Empty when `node` has no children or names no node.
+    pub(crate) fn children_of(&self, node: SceneNodeId) -> Vec<SceneNodeId> {
+        let target = Self::entity(node);
+        self.world
+            .storage()
+            .parents
+            .iter()
+            .filter_map(|(child, parent)| {
+                (*parent == target).then_some(SceneNodeId::from_raw(child.raw()))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -177,5 +191,21 @@ mod tests {
                 .code(),
             SceneErrorCode::MissingNode
         );
+    }
+
+    #[test]
+    fn children_of_lists_direct_children_ascending_and_empty_otherwise() {
+        let mut s = Scene::new();
+        let parent = node(&mut s);
+        let first = node(&mut s);
+        let second = node(&mut s);
+        let leaf = node(&mut s);
+        s.set_parent(first, parent).unwrap();
+        s.set_parent(second, parent).unwrap();
+        // Direct children in ascending id order.
+        assert_eq!(s.children_of(parent), vec![first, second]);
+        // A leaf and a missing node both have no children.
+        assert!(s.children_of(leaf).is_empty());
+        assert!(s.children_of(SceneNodeId::from_raw(999)).is_empty());
     }
 }

@@ -4,6 +4,7 @@ use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult};
 
 use crate::approx_eq::ApproxEq;
 use crate::epsilon::Epsilon;
+use crate::aabb::Aabb;
 use crate::math_error::MathError;
 use crate::math_result::MathResult;
 use crate::ray::Ray;
@@ -70,6 +71,20 @@ impl Sphere {
     /// Whether `ray` enters this sphere at a non-negative parameter `t >= 0`.
     pub fn intersects_ray(&self, ray: &Ray) -> bool {
         ray.intersect_sphere(self)
+    }
+
+    /// Whether this sphere intersects `aabb` — true iff the closest point on the
+    /// box to the sphere center lies within the radius (touching counts). The
+    /// box-aware companion to [`Self::overlaps`] (sphere–sphere), used by the
+    /// scene's radial overlap query.
+    pub fn intersects_aabb(&self, aabb: &Aabb) -> bool {
+        let (min, max) = (aabb.min(), aabb.max());
+        let closest = Vec3::new(
+            self.center.x.clamp(min.x, max.x),
+            self.center.y.clamp(min.y, max.y),
+            self.center.z.clamp(min.z, max.z),
+        );
+        closest.subtract(self.center).length_squared() <= self.radius * self.radius
     }
 
     /// Append `center` (three `f32`) then `radius` (one `f32`).
@@ -243,5 +258,25 @@ mod cov {
         let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
         let b = Sphere::new(Vec3::new(2.0, 2.0, 2.0), 3.0).unwrap();
         assert!(a.overlaps(&b));
+    }
+
+    #[test]
+    fn intersects_aabb_covers_inside_near_and_far() {
+        // Unit box centered at the origin (corners ±1).
+        let box_ = Aabb::from_center_extents(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        // Center inside the box -> closest point is the center itself.
+        assert!(Sphere::new(Vec3::ZERO, 0.1).unwrap().intersects_aabb(&box_));
+        // Center outside but within radius of the +x face (face at x=1).
+        assert!(Sphere::new(Vec3::new(1.4, 0.0, 0.0), 0.5)
+            .unwrap()
+            .intersects_aabb(&box_));
+        // Just touching the face (distance 0.5 == radius 0.5).
+        assert!(Sphere::new(Vec3::new(1.5, 0.0, 0.0), 0.5)
+            .unwrap()
+            .intersects_aabb(&box_));
+        // Outside, beyond the radius.
+        assert!(!Sphere::new(Vec3::new(3.0, 0.0, 0.0), 0.5)
+            .unwrap()
+            .intersects_aabb(&box_));
     }
 }

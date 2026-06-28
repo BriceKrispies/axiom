@@ -1,6 +1,6 @@
 //! The Layer-02 math facade.
 
-use axiom_kernel::{KernelApi, Tick};
+use axiom_kernel::{KernelApi, Radians, Tick};
 use axiom_runtime::RuntimeContext;
 // `TelemetryMetric` is the previous-layer-adjacent primitive Math hands to the
 // runtime sink; importing it here is what makes Math a real semantic adapter
@@ -12,6 +12,8 @@ use crate::approx_eq::ApproxEq;
 use crate::epsilon::Epsilon;
 use crate::frustum::Frustum;
 use crate::mat4::Mat4;
+use crate::math_error::MathError;
+use crate::math_error_code::MathErrorCode;
 use crate::math_result::MathResult;
 use crate::plane::Plane;
 use crate::plane_side::PlaneSide;
@@ -260,6 +262,41 @@ impl MathApi {
             Some(tick),
         ));
     }
+
+    /// Clamp `v` into `[lo, hi]`. Rejects any non-finite argument
+    /// ([`MathErrorCode::NonFiniteScalar`]) or an inverted range `lo > hi`
+    /// ([`MathErrorCode::InvalidScalarRange`]) — the layer corrects nothing
+    /// silently. The contract's `clamp`.
+    pub fn clamp(&self, v: f32, lo: f32, hi: f32) -> MathResult<f32> {
+        Scalar::validate_finite(v)
+            .and(Scalar::validate_finite(lo))
+            .and(Scalar::validate_finite(hi))
+            .and_then(|_| {
+                (lo <= hi).then_some(v.max(lo).min(hi)).ok_or_else(|| {
+                    MathError::new(MathErrorCode::InvalidScalarRange, "clamp requires lo <= hi")
+                })
+            })
+    }
+
+    /// Linear interpolation `a + (b - a) * t`. Rejects non-finite arguments and a
+    /// non-finite result (overflow) as [`MathErrorCode::NonFiniteScalar`]. The
+    /// contract's `lerp`; `t` outside `[0, 1]` extrapolates, by design.
+    pub fn lerp(&self, a: f32, b: f32, t: f32) -> MathResult<f32> {
+        Scalar::validate_finite(a)
+            .and(Scalar::validate_finite(b))
+            .and(Scalar::validate_finite(t))
+            .and_then(|_| Scalar::validate_finite(a + (b - a) * t))
+    }
+
+    /// Wrap `angle` into `(-π, π]` by arithmetic range reduction (no `sin`/`cos`),
+    /// so the result is exact and identical across machines (§17.6). The
+    /// contract's `normalizeAngle`.
+    pub fn normalize_angle(&self, angle: Radians) -> Radians {
+        let x = angle.get();
+        let wrapped = x
+            - core::f32::consts::TAU * ((x - core::f32::consts::PI) / core::f32::consts::TAU).ceil();
+        Radians::new(wrapped).expect("wrapping a finite angle yields a finite angle")
+    }
 }
 
 #[cfg(test)]
@@ -267,6 +304,76 @@ mod tests {
     use super::*;
     use axiom_kernel::{FrameIndex, KernelApi};
     use axiom_runtime::{RuntimeCommandQueue, RuntimeEventQueue, RuntimeStep};
+    use crate::math_error_code::MathErrorCode;
+
+    #[test]
+    fn clamp_holds_interior_and_pins_both_bounds() {
+        let m = api();
+        assert_eq!(m.clamp(5.0, 0.0, 10.0).unwrap(), 5.0); // interior
+        assert_eq!(m.clamp(-3.0, 0.0, 10.0).unwrap(), 0.0); // below -> lo
+        assert_eq!(m.clamp(42.0, 0.0, 10.0).unwrap(), 10.0); // above -> hi
+        assert_eq!(m.clamp(0.0, 0.0, 10.0).unwrap(), 0.0); // at lo
+        assert_eq!(m.clamp(10.0, 0.0, 10.0).unwrap(), 10.0); // at hi
+    }
+
+    #[test]
+    fn clamp_rejects_non_finite_and_inverted_range() {
+        let m = api();
+        assert_eq!(
+            m.clamp(f32::NAN, 0.0, 1.0).unwrap_err().code(),
+            MathErrorCode::NonFiniteScalar
+        );
+        assert_eq!(
+            m.clamp(0.5, 1.0, 0.0).unwrap_err().code(),
+            MathErrorCode::InvalidScalarRange
+        );
+    }
+
+    #[test]
+    fn lerp_hits_endpoints_midpoint_and_extrapolates() {
+        let m = api();
+        assert_eq!(m.lerp(2.0, 6.0, 0.0).unwrap(), 2.0);
+        assert_eq!(m.lerp(2.0, 6.0, 1.0).unwrap(), 6.0);
+        assert_eq!(m.lerp(2.0, 6.0, 0.5).unwrap(), 4.0);
+        assert_eq!(m.lerp(0.0, 10.0, 2.0).unwrap(), 20.0); // extrapolation
+    }
+
+    #[test]
+    fn lerp_rejects_non_finite_input_and_overflowing_result() {
+        let m = api();
+        assert_eq!(
+            m.lerp(f32::INFINITY, 0.0, 0.5).unwrap_err().code(),
+            MathErrorCode::NonFiniteScalar
+        );
+        // Finite inputs whose interpolation overflows to ±Inf are rejected.
+        assert_eq!(
+            m.lerp(f32::MAX, f32::MIN, f32::MAX).unwrap_err().code(),
+            MathErrorCode::NonFiniteScalar
+        );
+    }
+
+    #[test]
+    fn normalize_angle_wraps_into_half_open_interval() {
+        let m = api();
+        let pi = core::f32::consts::PI;
+        let tau = core::f32::consts::TAU;
+        let wrap = |a: f32| m.normalize_angle(axiom_kernel::Radians::new(a).unwrap()).get();
+        let approx = |a: f32, b: f32| (a - b).abs() < 1.0e-4;
+
+        assert!(approx(wrap(0.0), 0.0));
+        assert!(approx(wrap(pi), pi)); // +π stays (closed end)
+        assert!(approx(wrap(-pi), pi)); // -π maps to +π (open end)
+        assert!(approx(wrap(3.0 * pi / 2.0), -pi / 2.0));
+        assert!(approx(wrap(tau), 0.0));
+        // Idempotence: re-wrapping a wrapped angle is a no-op.
+        assert!(approx(wrap(wrap(5.0)), wrap(5.0)));
+        // Every wrapped value lies in (-π, π].
+        (-20..=20).for_each(|k| {
+            let w = wrap(k as f32);
+            assert!(w > -pi - 1.0e-4);
+            assert!(w <= pi + 1.0e-4);
+        });
+    }
 
     fn api() -> MathApi {
         MathApi::new()

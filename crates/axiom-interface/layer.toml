@@ -36,6 +36,9 @@ introduced_capabilities = [
   "CommandOutcome",
   "CommandTable",
   "CommandSpec",
+  "UiSurface",
+  "UiDrawList",
+  "UiDrawItem",
 ]
 
 consumed_capabilities = ["HandleId"]

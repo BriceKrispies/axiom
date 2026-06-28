@@ -1,0 +1,21 @@
+[package]
+name = "axiom-tween"
+description = "Axiom engine module: generic display-value animation. A number from->to over a duration under an ease curve, advanced by a fed-in presentation interval. Pure arithmetic with no UI and no platform arm — the shared tween/easing primitive every presentation surface (2D, HUD, 3D) is driven alongside by the app. Presentation-class: branchless and fully covered, but its outputs are display-only and never re-enter sim."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module", allowed_modules = []): it composes
+# NO other module. It builds only on the kernel — `HandleId` backs the opaque
+# `TweenId` the table is keyed by. Time is integer nanoseconds and values are a
+# float-newtype, so it needs nothing from math.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

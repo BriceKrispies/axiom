@@ -141,6 +141,33 @@ impl DynamicComponents {
     pub fn is_empty(&self) -> bool {
         self.columns.is_empty()
     }
+
+    /// The entities carrying component kind `name`, in ascending id order; empty
+    /// when the kind is unknown. The presence enumeration behind `World.query`
+    /// over app-declared opaque components — the dynamic mirror of the static
+    /// [`crate::Query`], reading entity ids in `BTreeMap` order so the result is
+    /// reproducible run-to-run and across machines.
+    pub fn entities_with(&self, name: &'static str) -> impl Iterator<Item = EntityId> + '_ {
+        self.columns
+            .get(name)
+            .into_iter()
+            .flat_map(|column| column.entries.keys().copied())
+    }
+
+    /// The entities carrying *every* kind in `names`, in ascending id order — the
+    /// intersection behind `World.query(...kinds)`. An empty `names` yields no
+    /// entities (the absence of any constraint is defined as no rows, not all
+    /// rows); an unknown kind makes the intersection empty.
+    pub fn entities_with_all(&self, names: &[&'static str]) -> Vec<EntityId> {
+        names
+            .first()
+            .map(|&first| {
+                self.entities_with(first)
+                    .filter(|&entity| names.iter().all(|&name| self.has_bytes(name, entity)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -227,6 +254,50 @@ mod tests {
         assert_eq!(description[0].0, "Clash");
         assert_eq!(description[0].1.name(), "Clash");
         assert_eq!(description[0].2, 2);
+    }
+
+    // A second component type with a distinct schema name, for intersection.
+    // A zero-field marker: the intersection query reads only *presence*
+    // (`has_bytes`), never a decoded field, so a fallible field decode here would
+    // be an error arm no test can reach — the marker shape removes it.
+    struct Other;
+    impl Reflect for Other {
+        const SCHEMA: TypeSchema = TypeSchema::new("Other", &[]);
+        fn reflect_write(&self, _w: &mut BinaryWriter) {}
+        fn reflect_read(_r: &mut BinaryReader<'_>) -> KernelResult<Self> {
+            Ok(Other)
+        }
+    }
+
+    #[test]
+    fn entities_with_enumerates_a_kind_ascending() {
+        let mut store = DynamicComponents::new();
+        store.insert(e(3), One(30));
+        store.insert(e(1), One(10));
+        let ids: Vec<EntityId> = store.entities_with("Clash").collect();
+        assert_eq!(ids, vec![e(1), e(3)]); // ascending, insertion-order independent
+        assert!(store.entities_with("Unknown").next().is_none());
+    }
+
+    #[test]
+    fn entities_with_all_intersects_kinds_ascending() {
+        let mut store = DynamicComponents::new();
+        store.insert(e(1), One(1));
+        store.insert(e(2), One(2));
+        store.insert(e(2), Other);
+        store.insert(e(3), Other);
+        // Only e2 carries both kinds.
+        assert_eq!(store.entities_with_all(&["Clash", "Other"]), vec![e(2)]);
+        // The intersection entity actually carries an `Other` (round-trips
+        // through `Other::reflect_read`); an entity carrying only `Clash` reads
+        // back no `Other` (the absent arm of the same read).
+        assert!(store.get::<Other>(e(2)).unwrap().is_some());
+        assert!(store.get::<Other>(e(1)).unwrap().is_none());
+        // A single kind is just its column, ascending.
+        assert_eq!(store.entities_with_all(&["Clash"]), vec![e(1), e(2)]);
+        // Empty names -> no rows; an unknown kind -> empty intersection.
+        assert!(store.entities_with_all(&[]).is_empty());
+        assert!(store.entities_with_all(&["Unknown", "Clash"]).is_empty());
     }
 
     #[test]
