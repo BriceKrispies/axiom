@@ -1,37 +1,49 @@
 //! # Axiom Input — Engine Module
 //!
-//! Device-agnostic intent synthesis. A *pointer* here is a single contact —
-//! a mouse with its primary button down, a finger, or a pen tip — all reduced
-//! to the same neutral shape `(position, is_down)` by the platform edge before
-//! it reaches this module. From a frame's worth of those samples plus a virtual
-//! on-screen layout, [`TouchControls`] synthesizes input for two schemes: the
-//! analog first-person scheme (`update` — a left-thumb **move vector** and a
-//! right-thumb **look** drag) and a discrete grid scheme (`swipe` — one
-//! directional flick per gesture, for turn-based games). An app uses whichever
-//! fits; both share the one facade.
+//! Owns the engine's **input contract**: the per-tick *intent snapshot* the
+//! simulation reads. Raw device events are impure and arrive at presentation
+//! rate; this module's sampling boundary turns them into a deterministic,
+//! tick-indexed snapshot of author-defined *actions* — so gameplay reads only
+//! action names against a fixed [`Tick`], never a physical key and never a
+//! wall-clock event (SPEC-05 §17.3).
 //!
-//! ## Why this exists
-//! Before this module, every interactive app hand-rolled desktop-only input:
-//! `requestPointerLock` + `movementX/Y` + WASD `KeyboardEvent`s, none of which
-//! exist on a touchscreen. The gallery faked mobile support with a JS shim that
-//! synthesized `KeyboardEvent`s from on-screen buttons. This module makes touch
-//! the *primary* input and a mouse just one more pointer source feeding the same
-//! synthesis — the mobile-first inversion, done once, in a reusable place.
+//! ## What it folds in
+//! - A guard-free **action-binding table**: [`InputState::bind_action`] maps
+//!   neutral [`KeyToken`]s to an [`ActionId`]; the simulation queries the action,
+//!   never the key. (The interface layer's keymap is *UI hotkey* routing with
+//!   text-field/console guards — a different home; this module owns its own
+//!   sim-class table and never depends on that layer.)
+//! - **Keyboard edge detection** as pure tick arithmetic over down-sets:
+//!   [`InputState::pressed`]/[`InputState::released`] are the set-difference of
+//!   this tick's down-set against the previous tick's. Auto-repeat is suppressed
+//!   structurally — an edge is a transition, not a level.
+//! - **Pointer/click** ([`InputState::pointer`], [`InputState::pointer_pressed`])
+//!   and the directional **swipe** ([`InputState::swipe`]) synthesized from
+//!   neutral `(position, is_down)` samples.
+//! - Tick-stamped press ([`InputState::pressed_at_tick`]) for rhythm/reaction
+//!   timing windows.
 //!
-//! ## What this module is / is not
-//! - It **is** a pure, deterministic synthesis core: same surface + same pointer
-//!   samples in, same control frame out, fully testable on native.
+//! ## What it is / is not
+//! - It **is** a pure, deterministic sampling core: the same [`DeviceFrame`]
+//!   sequence reproduces byte-identical snapshots and reads, fully testable on
+//!   native exactly as it drives the web.
 //! - It is **not** a browser event source. It never references `web_sys` /
-//!   PointerEvents / the DOM (Module Law #9). The capture that produces its
-//!   pointer samples lives in the platform-facing `windowing` module.
-//! - It is **not** a controller/camera system: it produces *intent* (a move
-//!   vector, look deltas); the app maps that onto its `FirstPersonInput`.
+//!   `KeyboardEvent` / `PointerEvent` / the DOM (Module Law #9). The capture that
+//!   decodes raw events into neutral [`DeviceFrame`]s lives in the
+//!   platform-facing `windowing` module / host.
 //!
 //! ## Public surface
-//! `lib.rs` exposes **exactly one** facade: [`TouchControls`]. The control frame
-//! it returns is reached only through it.
+//! `lib.rs` exposes **exactly one** behavioural facade — [`InputState`] — plus
+//! the pure `ids` value-type vocabulary that facade traffics in. Every contract
+//! is reached through the facade.
 
-mod control_frame;
-mod touch_controls;
+mod action_id;
+mod device_frame;
+mod ids;
+mod input_state;
+mod key_token;
+mod swipe_dir;
+mod swipe_synth;
 
-pub use touch_controls::TouchControls;
+pub use ids::{ActionId, DeviceFrame, KeyToken, Pointer, SwipeDir, Tick};
+pub use input_state::InputState;

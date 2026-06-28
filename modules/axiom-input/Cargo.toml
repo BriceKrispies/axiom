@@ -1,6 +1,6 @@
 [package]
 name = "axiom-input"
-description = "Axiom engine module: device-agnostic intent synthesis. Turns a neutral pointer/touch stream (mouse, touch, or pen — all the same shape) and an on-screen virtual-control layout into a normalized movement vector and look deltas. The browser event capture lives at the platform edge (the windowing module); this module is the pure, deterministic synthesis core every app composes instead of hand-rolling pointer-lock + WASD."
+description = "Axiom engine module: the engine's input contract. Folds a neutral, recordable DeviceFrame (keys down + pointer samples + surface) at each tick boundary into a deterministic per-tick intent snapshot of author-defined actions — keyboard edges, an action-binding table, pointer/click, swipe, and tick-stamped press. Gameplay reads only action names against a fixed Tick, so input is replayable and net-serializable. The browser event capture lives at the platform edge (the windowing module); this is the pure sampling core every app composes."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true

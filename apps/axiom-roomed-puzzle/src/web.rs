@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use axiom_host::{HostSafeAreaInsets, HostViewport, Pixels};
-use axiom_input::TouchControls;
+use axiom_input::{DeviceFrame, InputState, Tick};
 use axiom_kernel::Ratio;
 use axiom_layout::{
     solve, Direction, LayoutRect, LayoutStyle, LayoutTree, LayoutTreeBuilder, NodeId,
@@ -71,12 +71,12 @@ thread_local! {
     /// wasm, so a plain `RefCell` is enough).
     static APP: RefCell<RoomedPuzzleApp> = RefCell::new(RoomedPuzzleApp::new());
 
-    /// The touch-input synthesizer (swipe scheme), shared across the pointer
-    /// callbacks. Holds the in-progress gesture's anchor between events.
-    static SWIPE: RefCell<TouchControls> = RefCell::new(TouchControls::new());
+    /// The engine input state (swipe scheme), shared across the pointer
+    /// callbacks. Holds the in-progress gesture's state between events.
+    static INPUT: RefCell<InputState> = RefCell::new(InputState::new());
 
     /// The set of currently-down pointers (by browser pointer id) in physical
-    /// canvas pixels, the neutral samples fed to [`TouchControls::swipe`].
+    /// canvas pixels, the neutral samples folded into the engine `DeviceFrame`.
     static DOWN_POINTERS: RefCell<BTreeMap<i32, (f32, f32)>> = RefCell::new(BTreeMap::new());
 
     /// The last `(css_w, css_h, cols, rows)` the layout was solved for, so the
@@ -382,8 +382,15 @@ fn process_swipe(canvas: &HtmlCanvasElement) {
             .map(|(x, y)| (Vec2::new(*x, *y), true))
             .collect()
     });
-    let command = SWIPE
-        .with(|s| s.borrow_mut().swipe(surface, &samples))
+    // Fold the pointer samples into the engine's per-tick snapshot and read the
+    // completed swipe. The gesture is purely pointer-driven, so the tick is a
+    // constant here (this app reads no keyboard actions through `InputState`).
+    let command = INPUT
+        .with(|s| {
+            let mut input = s.borrow_mut();
+            input.sample(Tick::ZERO, &DeviceFrame::new(surface, &[], &samples));
+            input.swipe()
+        })
         .and_then(command_for_swipe);
     if let Some(command) = command {
         APP.with(|app| {
