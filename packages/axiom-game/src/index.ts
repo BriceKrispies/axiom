@@ -103,6 +103,9 @@ export type {
   ToneSpec,
 } from "./host-binding.ts";
 
+// The 2D drawing seam (SPEC-04 §10), behind `Frame` — `HostBridge` extends it.
+export type { Draw2dBridge, EmitterConfig, ShapeStyle } from "./draw2d-binding.ts";
+
 // Wave 4 TAIL — the pump-driven and retained-object surfaces.
 
 export { makeTime } from "./time.ts";
@@ -195,6 +198,7 @@ export type {
   Mat4,
   PlayerId,
   Quat,
+  Rect,
   Result,
   Rgba,
   Seconds,

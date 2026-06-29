@@ -2,6 +2,7 @@
 // the math / host-bridge / bindAction free-function tests. Kept in its own file
 // so each fake is one class (max-classes-per-file).
 
+import type { EmitterConfig, ShapeStyle } from "../src/draw2d-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -18,7 +19,7 @@ import type {
   MaterialDescriptor,
   PerspectiveSpec,
 } from "../src/host-descriptors.ts";
-import type { Cell, Entity, Handle, Mat4, Quat, Vec3 } from "../src/vocabulary.ts";
+import type { Cell, Entity, Handle, Mat4, Quat, Rect, Vec2, Vec3 } from "../src/vocabulary.ts";
 
 export class FakeHost implements HostBridge {
   public clampReturn = 0;
@@ -59,6 +60,17 @@ export class FakeHost implements HostBridge {
   public materials: MaterialDescriptor[] = [];
   public cameras: CameraDescriptor[] = [];
   public lights: LightDescriptor[] = [];
+
+  // --- 2D drawing call log (SPEC-04); emitters/targets/textures get incrementing handles ---
+  public draw2dRects: { bounds: Rect; style: ShapeStyle }[] = [];
+  public draw2dCircles: { center: Vec2; radius: number; style: ShapeStyle }[] = [];
+  public draw2dEmitters: EmitterConfig[] = [];
+  public draw2dEmits: { id: Handle; at: Vec2; direction: Vec2 }[] = [];
+  public draw2dAdvances: number[] = [];
+  public draw2dTargets: { width: number; height: number }[] = [];
+  public draw2dBegins: Handle[] = [];
+  public draw2dEnds = 0;
+  public draw2dFinishReturn: readonly number[] = [];
 
   public clamp(value: number, low: number, high: number): number {
     this.clampCalls.push([value, low, high]);
@@ -296,6 +308,49 @@ export class FakeHost implements HostBridge {
       0,
       0,
     ];
+  }
+
+  // --- 2D drawing (records the marshalled call; mints a handle for the id-returning verbs) ---
+  public draw2dRect(bounds: Rect, style: ShapeStyle): void {
+    this.draw2dRects.push({ bounds, style });
+  }
+
+  public draw2dCircle(center: Vec2, radius: number, style: ShapeStyle): void {
+    this.draw2dCircles.push({ center, radius, style });
+  }
+
+  public draw2dCreateEmitter(config: EmitterConfig): Handle {
+    this.draw2dEmitters.push(config);
+    return this.mint();
+  }
+
+  public draw2dEmit(id: Handle, at: Vec2, direction: Vec2): void {
+    this.draw2dEmits.push({ at, direction, id });
+  }
+
+  public draw2dAdvanceParticles(dtSeconds: number): void {
+    this.draw2dAdvances.push(dtSeconds);
+  }
+
+  public draw2dCreateRenderTarget(width: number, height: number): Handle {
+    this.draw2dTargets.push({ height, width });
+    return this.mint();
+  }
+
+  public draw2dBeginTarget(target: Handle): void {
+    this.draw2dBegins.push(target);
+  }
+
+  public draw2dEndTarget(): void {
+    this.draw2dEnds += 1;
+  }
+
+  public draw2dTargetTexture(target: Handle): Handle {
+    return target;
+  }
+
+  public draw2dFinish(): readonly number[] {
+    return this.draw2dFinishReturn;
   }
 
   private mint(): Handle {
