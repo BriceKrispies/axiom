@@ -1,193 +1,151 @@
 /*
- * The browser boot harness for the @axiom/game hot-reload spike.
+ * The browser boot harness for the @axiom/game hot-reload dev loop.
  *
- * This is the "host"/platform edge the SDK is meant to be driven by — it is NOT
- * engine spine, so it lives in an app `web/` dir, outside the branchless + 100%
- * coverage gates, and uses ordinary `if`/`?.` control flow.
+ * This is the host / platform edge — NOT engine spine — so it lives in an app
+ * `web/` dir, outside the branchless + coverage gates, and uses ordinary control
+ * flow.
  *
- * What it proves about the dev UX:
- *   1. The WASM *engine* (apps/axiom-game-runtime) is loaded ONCE and stays
- *      alive for the whole session — the heavy, stateful runtime (deterministic
- *      fixed-step accumulator + seeded RNG).
- *   2. The game *author's* code (./game.ts) is plain JS layered on top, hot-
- *      swapped via a fresh dynamic `import()` whenever the dev server signals a
- *      change over Server-Sent Events. No page reload, no WASM rebuild.
- *   3. The swap goes through the real SDK seam: `defaultRegistry.reset()` then
- *      re-running the author module's `onFixedUpdate` registrations.
+ * It drives the REAL engine path, not a stand-in:
+ *   - `createGame()` mints the per-game registry the author registers into;
+ *   - `boot()` (the SDK's own platform-edge aggregator) installs the real host
+ *     channel (`hostFromWasm`), builds the real `GameLoop` over the real
+ *     `NativeBridge` (`bridgeFromWasm`), wires DOM input, and drives `rAF`;
+ *   - the author draws through the real `frame.rect/circle/line/…` 2D surface,
+ *     which records into the native `draw2d` builder.
  *
- * The render path here (a canvas2d painter calling the author's exported `draw`)
- * is a deliberate spike stand-in for the not-yet-wired 2D surface. The dev-UX
- * machinery is identical regardless of what the author eventually draws into.
+ * The one piece the engine does not yet do itself is PRESENT the 2D surface to a
+ * browser canvas. `frame.finish()` now returns a self-describing geometry stream
+ * (see apps/axiom-game-runtime/src/draw2d.rs `draw2d_finish`); the `present`
+ * function below is the canvas2d interpreter for it. It is registered as the LAST
+ * `onRender`, so it runs after the author's draws each frame, drains the builder,
+ * and rasterizes.
+ *
+ * Hot reload is deterministic re-run (Mode B): on each save the dev server pushes
+ * a `reload` event; we tear down the loop, mint a FRESH `WasmGame` (same seed) +
+ * `createGame`, re-import the author module, and re-run from tick 0 with the new
+ * logic. The wasm MODULE stays loaded; only a fresh game instance is made — so a
+ * deterministic engine re-derives the same run under the edited rules.
  */
 
-import {
-  type Frame,
-  type NativeBridge,
-  type SimContext,
-  type StepBudget,
-  GameRegistry,
-  TickPump,
-  makeFrame,
-  makeSim,
-  stepFrame,
-  useRegistry,
-} from "@axiom/game";
+import { boot } from "/vendor/axiom-game/boot.js";
+import { type Frame, createGame, onRender } from "@axiom/game";
 
 import initWasm, { WasmGame } from "/pkg/axiom_game_runtime.js";
 
-/** The author module shape the harness consumes: a presentation hook. */
-interface AuthorModule {
-  readonly draw?: (ctx: CanvasRenderingContext2D, width: number, height: number, frame: Frame) => void;
-}
-
 const FIXED_HZ = 60;
+const SEED = 1n;
 const NANOS_PER_SECOND = 1_000_000_000;
-const NANOS_PER_MILLI = 1_000_000;
 const MAX_STEPS_PER_FRAME = 8;
+const TAU = Math.PI * 2;
 
-/*
- * Adapt the wasm `WasmGame` to the `NativeBridge` the SDK projects its `Sim` over.
- * Today the runtime implements the deterministic accumulator (`advance`),
- * `snapshot`, and the full RNG seam (SPEC-01); the world / input / physics /
- * timer / tween methods are not wired through wasm yet, so they throw if an
- * author reaches for them. Completing them is the game-side bridge work this
- * spike deliberately sidesteps — the dev-UX loop only needs the live seam.
- */
-const makeBridge = (game: WasmGame): NativeBridge => {
-  const notWired =
-    (name: string) =>
-    (): never => {
-      throw new Error(`@axiom/game bridge.${name} is not wired through wasm yet (spike: RNG + advance only)`);
-    };
-  return {
-    advance: (elapsedNanos: number): StepBudget => {
-      const report = game.advance(BigInt(Math.round(elapsedNanos)));
-      return {
-        fixedStepNanos: Number(report.fixed_step_nanos),
-        remainderNanos: Number(report.remainder_nanos),
-        steps: report.steps,
-      };
-    },
-    snapshot: (): Uint8Array => game.snapshot(),
+// --- the canvas2d interpreter for the draw2d command stream ---------------------
+// Kinds + payload layout mirror apps/axiom-game-runtime/src/draw2d.rs `draw2d_finish`.
+const KIND_RECT = 1;
+const KIND_CIRCLE = 2;
+const KIND_ELLIPSE = 3;
+const KIND_LINE = 4;
+const KIND_PARTICLE = 8;
 
-    // Deterministic RNG (SPEC-01) — genuinely served by the live wasm engine.
-    rngUnit: (stream: number): number => game.rngUnit(stream),
-    rngBelow: (stream: number, maxExclusive: number): number => game.rngBelow(stream, maxExclusive),
-    rngWeighted: (stream: number, weights: readonly number[]): number =>
-      game.rngWeighted(stream, Float64Array.from(weights)),
-    rngPermutation: (stream: number, length: number): readonly number[] => game.rngPermutation(stream, length),
-    rngStream: (parent: number, name: string): number => game.rngStream(parent, name),
-
-    // Not wired through wasm in this spike (game-side bridge completion work).
-    worldSpawn: notWired("worldSpawn"),
-    worldDespawn: notWired("worldDespawn"),
-    worldDespawnSubtree: notWired("worldDespawnSubtree"),
-    worldGet: notWired("worldGet"),
-    worldSet: notWired("worldSet"),
-    worldQuery: notWired("worldQuery"),
-    worldChildrenOf: notWired("worldChildrenOf"),
-    worldAlive: notWired("worldAlive"),
-    worldHas: notWired("worldHas"),
-    worldParentOf: notWired("worldParentOf"),
-    worldRemove: notWired("worldRemove"),
-    worldSetParent: notWired("worldSetParent"),
-    worldWorldTransform: notWired("worldWorldTransform"),
-    inputIsDown: notWired("inputIsDown"),
-    inputPressed: notWired("inputPressed"),
-    inputReleased: notWired("inputReleased"),
-    inputPointer: notWired("inputPointer"),
-    inputPointerPressed: notWired("inputPointerPressed"),
-    inputSwipe: notWired("inputSwipe"),
-    inputPressedAtTick: notWired("inputPressedAtTick"),
-    timerAfter: notWired("timerAfter"),
-    timerEvery: notWired("timerEvery"),
-    timerCancel: notWired("timerCancel"),
-    timersDue: notWired("timersDue"),
-    machineCreate: notWired("machineCreate"),
-    machineCurrent: notWired("machineCurrent"),
-    machineTransition: notWired("machineTransition"),
-    machineTicksInState: notWired("machineTicksInState"),
-    tweenAdd: notWired("tweenAdd"),
-    tweenCancel: notWired("tweenCancel"),
-    tweenActive: notWired("tweenActive"),
-    tweenValue: notWired("tweenValue"),
-    tweenCompleted: notWired("tweenCompleted"),
-    physicsSetConfig: notWired("physicsSetConfig"),
-    physicsAddBody: notWired("physicsAddBody"),
-    physicsApplyImpulse: notWired("physicsApplyImpulse"),
-    physicsApplyForce: notWired("physicsApplyForce"),
-    physicsApplyTorque: notWired("physicsApplyTorque"),
-    physicsSetVelocity: notWired("physicsSetVelocity"),
-    physicsSetAngularVelocity: notWired("physicsSetAngularVelocity"),
-  };
+/** A packed `0xRRGGBBAA` value as a CSS `rgba()` string. */
+const cssColor = (packed: number): string => {
+  const v = packed >>> 0;
+  return `rgba(${(v >>> 24) & 0xff},${(v >>> 16) & 0xff},${(v >>> 8) & 0xff},${(v & 0xff) / 255})`;
 };
 
-const boot = async (): Promise<void> => {
+/** Trace `path`, then fill (if the fill is not fully transparent) and stroke (if width > 0). */
+const fillStroke = (
+  ctx: CanvasRenderingContext2D,
+  path: () => void,
+  fillRGBA: number,
+  strokeRGBA: number,
+  strokeWidth: number,
+): void => {
+  ctx.beginPath();
+  path();
+  if (fillRGBA !== 0) {
+    ctx.fillStyle = cssColor(fillRGBA);
+    ctx.fill();
+  }
+  if (strokeWidth > 0) {
+    ctx.strokeStyle = cssColor(strokeRGBA);
+    ctx.lineWidth = strokeWidth;
+    ctx.stroke();
+  }
+};
+
+/** Rasterize one finished draw2d command stream onto `ctx`. */
+const present = (list: readonly number[], ctx: CanvasRenderingContext2D, width: number, height: number): void => {
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#07090e";
+  ctx.fillRect(0, 0, width, height);
+  let i = 0;
+  while (i < list.length) {
+    const kind = list[i];
+    const len = list[i + 3];
+    const p = list.slice(i + 4, i + 4 + len);
+    if (kind === KIND_RECT) {
+      ctx.globalAlpha = p[7];
+      fillStroke(ctx, () => ctx.rect(p[0], p[1], p[2], p[3]), p[4], p[5], p[6]);
+    } else if (kind === KIND_CIRCLE) {
+      ctx.globalAlpha = p[6];
+      fillStroke(ctx, () => ctx.arc(p[0], p[1], p[2], 0, TAU), p[3], p[4], p[5]);
+    } else if (kind === KIND_ELLIPSE) {
+      ctx.globalAlpha = p[8];
+      fillStroke(ctx, () => ctx.ellipse(p[0], p[1], p[2], p[3], p[4], 0, TAU), p[5], p[6], p[7]);
+    } else if (kind === KIND_LINE) {
+      ctx.globalAlpha = p[6];
+      ctx.strokeStyle = cssColor(p[4]);
+      ctx.lineWidth = p[5] || 1;
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1]);
+      ctx.lineTo(p[2], p[3]);
+      ctx.stroke();
+    } else if (kind === KIND_PARTICLE) {
+      ctx.globalAlpha = p[4];
+      ctx.fillStyle = cssColor(p[3]);
+      ctx.fillRect(p[0] - p[2] / 2, p[1] - p[2] / 2, p[2], p[2]);
+    }
+    i += 4 + len;
+  }
+  ctx.globalAlpha = 1;
+};
+
+const boot_ = async (): Promise<void> => {
   const canvas = document.getElementById("c") as HTMLCanvasElement;
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
   const status = document.getElementById("status") as HTMLSpanElement;
 
-  const resize = (): void => {
-    const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
-    canvas.width = Math.floor(globalThis.innerWidth * dpr);
-    canvas.height = Math.floor(globalThis.innerHeight * dpr);
-  };
-  globalThis.addEventListener("resize", resize);
-  resize();
-
-  // 1) Load the heavy, stateful WASM engine — ONCE. It survives every hot reload.
+  // Load the wasm engine MODULE once; each (re)load mints a fresh game instance.
   await initWasm();
   const fixedStepNanos = BigInt(Math.round(NANOS_PER_SECOND / FIXED_HZ));
-  const game = new WasmGame(fixedStepNanos, MAX_STEPS_PER_FRAME);
-  const bridge = makeBridge(game);
-  const context: SimContext = { bridge, fixedHz: FIXED_HZ, pump: new TickPump(bridge, FIXED_HZ) };
 
-  // 2) The hot-swappable author layer. `useRegistry` is the real SDK seam: mint a
-  //    FRESH per-game registry and make the free `onFixedUpdate`/`onRender` target
-  //    it, then re-import so the author module's top-level registrations land in
-  //    the new registry. The old one is simply discarded — no reset, no leak.
-  let registry = new GameRegistry();
-  let author: AuthorModule = {};
-  const loadAuthor = async (version: number): Promise<void> => {
-    registry = new GameRegistry();
-    useRegistry(registry);
-    author = (await import(`/dist/game.js?v=${version}`)) as AuthorModule;
+  let teardown: (() => void) | undefined;
+  const load = async (version: number): Promise<void> => {
+    teardown?.();
+    const game = new WasmGame(fixedStepNanos, MAX_STEPS_PER_FRAME);
+    const app = createGame({ fixedHz: FIXED_HZ, seed: SEED, surface: "c" });
+    // The author module registers its onFixedUpdate / onRender into the active
+    // (this game's) registry as an import side effect.
+    await import(`/dist/game.js?v=${version}`);
+    // Register the presenter LAST so it runs after the author's draws, drains the
+    // draw2d builder via `finish()`, and rasterizes the result.
+    onRender((frame: Frame): void => {
+      present(frame.finish(), ctx, canvas.width, canvas.height);
+      status.textContent = `live · deterministic re-run · loop tick ${frame.tick}`;
+    });
+    app.start();
+    teardown = boot(game as unknown as Parameters<typeof boot>[0], app, { canvas });
   };
-  await loadAuthor(0);
+  await load(0);
 
-  // 3) Subscribe to the dev server's reload stream. Each save → fresh author
-  //    module, engine untouched.
+  // Each save → fresh deterministic run with the new author logic.
   const events = new EventSource("/events");
   events.addEventListener("reload", (event: MessageEvent<string>): void => {
-    void loadAuthor(Number(event.data)).then((): void => {
-      status.textContent = `hot-reloaded @ engine tick ${Number(game.current_tick)}`;
+    void load(Number(event.data)).then((): void => {
       status.classList.add("flash");
       globalThis.setTimeout((): void => status.classList.remove("flash"), 400);
     });
   });
-
-  // 4) The frame loop: real wasm `advance` → registered fixed updates → author draw.
-  let startTick = 0;
-  let last = performance.now();
-  const frame = (now: number): void => {
-    const elapsedNanos = (now - last) * NANOS_PER_MILLI;
-    last = now;
-    const budget = bridge.advance(elapsedNanos);
-    startTick = stepFrame({
-      budget,
-      fixedUpdates: registry.fixedUpdates(),
-      makeFrame,
-      makeSim: (tick: number) => makeSim(context, tick),
-      renders: registry.renders(),
-      startTick,
-    });
-    author.draw?.(ctx, canvas.width, canvas.height, makeFrame(startTick));
-    if (!status.classList.contains("flash")) {
-      status.textContent = `live · engine tick ${Number(game.current_tick)} · seed ${game.seed}`;
-    }
-    requestAnimationFrame(frame);
-  };
-  requestAnimationFrame(frame);
 };
 
-void boot();
+void boot_();

@@ -16,13 +16,14 @@
 //! `&[f64]` config slice (count, lifetime, speed, spread, gravityX, gravityY,
 //! size, colorStart, colorEnd, layer) — one slice keeps the call within the
 //! engine's argument-count budget. Handles cross as raw `u64` (`f64` at the JS
-//! edge). [`Self::draw2d_finish`] returns the sorted command list as a flat
-//! `[kind, layer, submission, …]` triple per command — the deterministic shape a
-//! `Frame` consumer reads (full per-shape geometry rides the typed `as_*`
-//! accessors on the host contract, a follow-up the boundary does not yet flatten).
+//! edge). [`GameBridge::draw2d_finish`] returns the sorted command list as a flat,
+//! self-describing `[kind, layer, submission, len, …geometry]` stream — the
+//! deterministic `(kind, layer, submission)` ordering a `Frame` consumer always
+//! read, now followed by the `len` per-shape geometry columns a 2D presenter
+//! rasterizes (see that method for the per-kind payload layout).
 
 use axiom_draw2d::{EmitterConfig, EmitterId};
-use axiom_host::{Common2d, Fill2d, Rect, RenderTargetId, Rgba, Stroke2d};
+use axiom_host::{Common2d, Draw2dCommand, Fill2d, Rect, RenderTargetId, Rgba, Stroke2d};
 use axiom_kernel::{Meters, Radians, Ratio, Seconds};
 use axiom_math::Vec2;
 
@@ -70,6 +71,28 @@ fn rgba(packed: u32) -> Rgba {
 /// The per-draw [`Common2d`] (z-layer + alpha) from boundary scalars.
 fn common(layer: i32, alpha: f64) -> Common2d {
     Common2d::new(layer, Ratio::finite_or_zero(alpha as f32))
+}
+
+/// Pack a resolved [`Rgba`] (channels in `0..1`) back to a `0xRRGGBBAA` u32, as
+/// the `f64` the boundary carries — the inverse of the inbound [`rgba`] unpack.
+fn pack_rgba(color: Rgba) -> f64 {
+    let [r, g, b, a] = color.channels();
+    let quantize = |value: f32| ((value.clamp(0.0, 1.0) * 255.0).round() as u32) & 0xFF;
+    f64::from((quantize(r) << 24) | (quantize(g) << 16) | (quantize(b) << 8) | quantize(a))
+}
+
+/// The `[fillRGBA, strokeRGBA, strokeWidth]` columns of a filled shape's style. A
+/// missing fill colour (a gradient paint, or a stroke-only shape) or a missing
+/// stroke packs as transparent `0` / zero width — the same "composites nothing"
+/// convention the inbound [`styled_fill`] uses.
+fn fill_columns(fill: Option<Fill2d>) -> [f64; 3] {
+    let fill_rgba = fill.and_then(|f| f.fill_color).map_or(0.0, pack_rgba);
+    let stroke = fill.and_then(|f| f.stroke);
+    [
+        fill_rgba,
+        stroke.map_or(0.0, |s| pack_rgba(s.color)),
+        stroke.map_or(0.0, |s| f64::from(s.width.get())),
+    ]
 }
 
 impl GameBridge {
@@ -172,22 +195,101 @@ impl GameBridge {
             .line(vec2(a), vec2(b), rgba(color), meters(width), common(layer, alpha));
     }
 
-    /// Finish the frame and return the layer-sorted main command list as a flat
-    /// `[kind, layer, submission, …]` triple per command (`draw2dFinish`). Resets
-    /// the per-frame surface for the next frame (particles persist).
+    /// Finish the frame and return the layer-sorted main command list as a flat,
+    /// self-describing stream a 2D presenter can rasterize (`draw2dFinish`). Each
+    /// command is `[kind, layer, submission, len, …geometry]`: the `len` payload
+    /// columns that follow depend on `kind`, so a consumer can advance by
+    /// `4 + len` past a kind it does not handle. Geometry is in the surface's own
+    /// units; colours are packed `0xRRGGBBAA`; `alpha` is the resolved `0..1`:
+    ///
+    /// - `RECT`     (1): `[minX, minY, sizeW, sizeH, fillRGBA, strokeRGBA, strokeWidth, alpha]`
+    /// - `CIRCLE`   (2): `[centerX, centerY, radius, fillRGBA, strokeRGBA, strokeWidth, alpha]`
+    /// - `ELLIPSE`  (3): `[centerX, centerY, rx, ry, rotation, fillRGBA, strokeRGBA, strokeWidth, alpha]`
+    /// - `LINE`     (4): `[aX, aY, bX, bY, colorRGBA, width, alpha]`
+    /// - `PARTICLE` (8): `[centerX, centerY, size, colorRGBA, alpha]`
+    /// - other kinds (path / sprite / text): `len = 0` — their ordering is kept,
+    ///   their geometry is not yet flattened across the boundary.
+    ///
+    /// Resets the per-frame surface for the next frame (particles persist). The
+    /// `(kind, layer, submission)` prefix preserves the deterministic ordering the
+    /// list always carried; the geometry is purely additive.
     pub fn draw2d_finish(&mut self) -> Vec<f64> {
-        self.draw2d
-            .finish()
-            .commands()
-            .iter()
-            .flat_map(|cmd| {
-                [
-                    f64::from(cmd.kind_code()),
-                    f64::from(cmd.layer()),
-                    f64::from(cmd.submission_index()),
-                ]
-            })
-            .collect()
+        let list = self.draw2d.finish();
+        let mut out: Vec<f64> = Vec::new();
+        for cmd in list.commands() {
+            let alpha = f64::from(cmd.alpha().get());
+            let style = fill_columns(cmd.fill());
+            let payload: Vec<f64> = match cmd.kind_code() {
+                Draw2dCommand::KIND_RECT => {
+                    let r = cmd.as_rect().expect("a RECT command carries rect geometry");
+                    vec![
+                        f64::from(r.min.x),
+                        f64::from(r.min.y),
+                        f64::from(r.size.x),
+                        f64::from(r.size.y),
+                        style[0],
+                        style[1],
+                        style[2],
+                        alpha,
+                    ]
+                }
+                Draw2dCommand::KIND_CIRCLE => {
+                    let (center, radius) = cmd.as_circle().expect("a CIRCLE command carries circle geometry");
+                    vec![
+                        f64::from(center.x),
+                        f64::from(center.y),
+                        f64::from(radius.get()),
+                        style[0],
+                        style[1],
+                        style[2],
+                        alpha,
+                    ]
+                }
+                Draw2dCommand::KIND_ELLIPSE => {
+                    let (center, rx, ry, rotation) = cmd.as_ellipse().expect("an ELLIPSE command carries ellipse geometry");
+                    vec![
+                        f64::from(center.x),
+                        f64::from(center.y),
+                        f64::from(rx.get()),
+                        f64::from(ry.get()),
+                        f64::from(rotation.get()),
+                        style[0],
+                        style[1],
+                        style[2],
+                        alpha,
+                    ]
+                }
+                Draw2dCommand::KIND_LINE => {
+                    let (a, b, color, width) = cmd.as_line().expect("a LINE command carries line geometry");
+                    vec![
+                        f64::from(a.x),
+                        f64::from(a.y),
+                        f64::from(b.x),
+                        f64::from(b.y),
+                        pack_rgba(color),
+                        f64::from(width.get()),
+                        alpha,
+                    ]
+                }
+                Draw2dCommand::KIND_PARTICLE_QUAD => {
+                    let (center, size, color) = cmd.as_particle().expect("a PARTICLE_QUAD command carries particle geometry");
+                    vec![
+                        f64::from(center.x),
+                        f64::from(center.y),
+                        f64::from(size.get()),
+                        pack_rgba(color),
+                        alpha,
+                    ]
+                }
+                _ => Vec::new(),
+            };
+            out.push(f64::from(cmd.kind_code()));
+            out.push(f64::from(cmd.layer()));
+            out.push(f64::from(cmd.submission_index()));
+            out.push(payload.len() as f64);
+            out.extend(payload);
+        }
+        out
     }
 }
 
@@ -290,6 +392,8 @@ mod wasm_exports {
 
 #[cfg(test)]
 mod tests {
+    use axiom_host::Draw2dCommand;
+
     use crate::{demo_app, GameBridge};
 
     const STEP: u64 = 1_000_000;
@@ -330,18 +434,33 @@ mod tests {
         b.draw2d_finish()
     }
 
+    /// Decode the self-describing list into `(kind, layer, payload)` records by
+    /// walking the `[kind, layer, submission, len, …payload]` stream.
+    fn records(list: &[f64]) -> Vec<(u32, i32, Vec<f64>)> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < list.len() {
+            let kind = list[i] as u32;
+            let layer = list[i + 1] as i32;
+            let len = list[i + 3] as usize;
+            out.push((kind, layer, list[i + 4..i + 4 + len].to_vec()));
+            i += 4 + len;
+        }
+        out
+    }
+
     #[test]
     fn a_frame_builds_a_layer_sorted_command_list_and_replays() {
         let list = frame();
+        let recs = records(&list);
         // The render-target rect routes off the main list; the main list holds the
-        // circle + 3 particle quads = 4 commands × 3 columns.
-        assert_eq!(list.len(), 12);
-        // Layer-sorted: the layer-1 circle (KIND_CIRCLE = 2) precedes the layer-5
-        // particle quads (KIND_PARTICLE_QUAD = 8).
-        assert_eq!(list[0], 2.0); // first command kind = circle
-        assert_eq!(list[1], 1.0); // its layer
-        assert_eq!(list[3], 8.0); // next command kind = particle quad
-        assert_eq!(list[4], 5.0); // particle layer
+        // circle + 3 particle quads, layer-sorted: the layer-1 circle
+        // (KIND_CIRCLE = 2) precedes the layer-5 particle quads (KIND_PARTICLE_QUAD = 8).
+        let kinds_layers: Vec<(u32, i32)> = recs.iter().map(|(k, l, _)| (*k, *l)).collect();
+        assert_eq!(kinds_layers, vec![(2, 1), (8, 5), (8, 5), (8, 5)]);
+        // Each circle carries its 7 geometry columns; each particle quad its 5.
+        assert_eq!(recs[0].2.len(), 7);
+        assert_eq!(recs[1].2.len(), 5);
         // Same facade calls + same dt ⇒ byte-identical command list.
         assert_eq!(frame(), list);
     }
@@ -352,14 +471,32 @@ mod tests {
         // An ellipse on layer 0 and a line on layer 2, submitted line-first.
         b.draw2d_line(&[0.0, 0.0], &[10.0, 0.0], 0xffff_00ff, 2.0, 2, 1.0);
         b.draw2d_ellipse(&[5.0, 5.0, 4.0, 2.0, 0.5], 0x00ff_00ff, 0xff00_00ff, 1.0, 0, 1.0);
-        let list = b.draw2d_finish();
-        // 2 commands × 3 columns; layer-sorted so the layer-0 ellipse (KIND 3)
-        // precedes the layer-2 line (KIND 4).
-        assert_eq!(list.len(), 6);
-        assert_eq!(list[0], 3.0); // KIND_ELLIPSE
-        assert_eq!(list[1], 0.0); // its layer
-        assert_eq!(list[3], 4.0); // KIND_LINE
-        assert_eq!(list[4], 2.0); // its layer
+        let recs = records(&b.draw2d_finish());
+        // Layer-sorted so the layer-0 ellipse (KIND 3, 9 geometry columns)
+        // precedes the layer-2 line (KIND 4, 7 geometry columns).
+        let kinds_layers: Vec<(u32, i32)> = recs.iter().map(|(k, l, _)| (*k, *l)).collect();
+        assert_eq!(kinds_layers, vec![(3, 0), (4, 2)]);
+        assert_eq!(recs[0].2.len(), 9);
+        assert_eq!(recs[1].2.len(), 7);
+    }
+
+    #[test]
+    fn shape_geometry_and_colors_flatten_into_the_payload() {
+        let mut b = bridge();
+        // A red-filled, blue-stroked rect; a green circle; a yellow line.
+        b.draw2d_rect(&[1.0, 2.0, 30.0, 40.0], 0xff00_00ff, 0x0000_ffff, 3.0, 0, 1.0);
+        b.draw2d_circle(&[5.0, 6.0], 7.0, 0x00ff_00ff, 0, 0.0, 0, 0.5);
+        b.draw2d_line(&[0.0, 0.0], &[8.0, 9.0], 0xffff_00ff, 2.0, 0, 1.0);
+        let recs = records(&b.draw2d_finish());
+        // RECT: [minX, minY, w, h, fillRGBA, strokeRGBA, strokeWidth, alpha].
+        assert_eq!(recs[0].0, Draw2dCommand::KIND_RECT);
+        assert_eq!(recs[0].2, vec![1.0, 2.0, 30.0, 40.0, f64::from(0xff00_00ffu32), f64::from(0x0000_ffffu32), 3.0, 1.0]);
+        // CIRCLE: [cx, cy, r, fillRGBA, strokeRGBA, strokeWidth, alpha]; alpha 0.5.
+        assert_eq!(recs[1].0, Draw2dCommand::KIND_CIRCLE);
+        assert_eq!(recs[1].2, vec![5.0, 6.0, 7.0, f64::from(0x00ff_00ffu32), 0.0, 0.0, 0.5]);
+        // LINE: [aX, aY, bX, bY, colorRGBA, width, alpha]; a line carries no fill.
+        assert_eq!(recs[2].0, Draw2dCommand::KIND_LINE);
+        assert_eq!(recs[2].2, vec![0.0, 0.0, 8.0, 9.0, f64::from(0xffff_00ffu32), 2.0, 1.0]);
     }
 
     #[test]
