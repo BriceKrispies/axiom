@@ -9,6 +9,13 @@
 //! wasm32 and the native SSE2/NEON backends, the tests assert *exact* results
 //! (including `to_bits`) and pass on both targets. Run both with
 //! `scripts/wasm-test.ps1` (or `.sh`).
+//!
+//! The cross-platform **physics-determinism golden** lives in
+//! [`physics_golden`]: it replays a fixed `axiom-physics` scenario and asserts the
+//! per-tick `StableHash` sequence is byte-identical natively and on wasm32 — the
+//! empirical proof of the same premise this proof crate was built to test.
+
+pub mod physics_golden;
 
 /// One fixed-step semi-implicit Euler integration of a particle under constant
 /// acceleration, using only `{+, -, *}`. Deterministic and FMA-free.
