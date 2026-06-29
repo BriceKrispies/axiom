@@ -1,8 +1,8 @@
 //! The `#[wasm_bindgen]` boundary the TypeScript SDK binds — `wasm32`-only.
 //!
-//! This is deliberately thin: the deterministic work lives in [`GameRuntime`],
+//! This is deliberately thin: the deterministic work lives in [`GameBridge`],
 //! tested natively. Here we only expose a JS-constructable [`WasmGame`] that wraps
-//! a runtime and a per-frame [`WasmGame::advance`] the host's
+//! that bridge and a per-frame [`WasmGame::advance`] the host's
 //! `requestAnimationFrame` loop calls with the elapsed nanoseconds it measured.
 //! `advance` hands back the integer [`StepReport`] so the JS presentation layer
 //! computes its own interpolation fraction (`remainder_nanos / fixed_step_nanos`)
@@ -17,10 +17,10 @@
 
 use wasm_bindgen::prelude::*;
 
-use axiom::prelude::{HostApi, HostOutcome, Score};
+use axiom::prelude::HostOutcome;
 
-use crate::embed::{decode_session_config, OutcomeLatch};
-use crate::{demo_app, GameRuntime};
+use crate::embed::decode_session_config;
+use crate::{demo_app, GameBridge};
 
 /// Read the inbound host query string (`window.location.search`). Returns an
 /// empty string if there is no window/location, so the decode falls back to the
@@ -48,6 +48,7 @@ fn post_outcome_to_parent(outcome: &HostOutcome) {
 /// platform-edge bridge reads these and computes the `0..1` interpolation
 /// fraction itself (float math is unconstrained at the presentation boundary).
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct StepReport {
     steps: u32,
     remainder_nanos: u64,
@@ -83,43 +84,45 @@ impl StepReport {
 /// fixed for the whole session and read via [`Self::seed`]. The single terminal
 /// outcome is emitted once through [`Self::report_outcome`].
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct WasmGame {
-    runtime: GameRuntime,
-    seed: u64,
-    outcome: OutcomeLatch,
+    bridge: GameBridge,
 }
 
 #[wasm_bindgen]
 impl WasmGame {
-    /// Build the deterministic demo game and wrap it in a fixed-step runtime.
-    /// Installs the panic hook so a Rust panic surfaces as a readable JS error,
-    /// and decodes the inbound session config (seed + params) before tick 0.
+    /// Build the deterministic demo game and wrap it in the bridge core. Installs
+    /// the panic hook so a Rust panic surfaces as a readable JS error, and decodes
+    /// the inbound session config (seed + params) before tick 0 — the seed keys
+    /// the bridge's RNG hub for the whole session.
     #[wasm_bindgen(constructor)]
     pub fn new(fixed_step_nanos: u64, max_steps: u32) -> WasmGame {
         console_error_panic_hook::set_once();
         let config = decode_session_config(&host_query());
         WasmGame {
-            runtime: GameRuntime::new(demo_app().build(), fixed_step_nanos, max_steps),
-            seed: config.seed(),
-            outcome: OutcomeLatch::new(),
+            bridge: GameBridge::new(
+                demo_app().build(),
+                config.seed(),
+                fixed_step_nanos,
+                max_steps,
+            ),
         }
     }
 
-    /// The host-supplied session seed, fixed before tick 0 (the determinism
-    /// input the sim's `Rng` is seeded from). Constant for the whole session.
+    /// The host-supplied session seed, fixed before tick 0 (the determinism input
+    /// the bridge's `Rng` is seeded from). Constant for the whole session.
     #[wasm_bindgen(getter)]
     pub fn seed(&self) -> u64 {
-        self.seed
+        self.bridge.seed()
     }
 
     /// Report the terminal outcome (`reportOutcome`, SPEC-12 §4.2). The first
     /// call latches and forwards exactly one [`HostOutcome`] to the parent frame;
     /// any later call is a no-op. Returns whether this call was the one accepted.
     pub fn report_outcome(&mut self, won: bool, score: f64) -> bool {
-        let outcome = HostApi::new().outcome(won, Score::new(score));
-        let accepted = self.outcome.report(outcome);
+        let accepted = self.bridge.report_outcome(won, score);
         if accepted {
-            if let Some(latched) = self.outcome.reported() {
+            if let Some(latched) = self.bridge.reported_outcome() {
                 post_outcome_to_parent(latched);
             }
         }
@@ -129,7 +132,7 @@ impl WasmGame {
     /// Bank `elapsed_nanos` of real host time, run the resulting whole fixed
     /// ticks, and report the integer budget for the SDK to interpolate with.
     pub fn advance(&mut self, elapsed_nanos: u64) -> StepReport {
-        let budget = self.runtime.advance(elapsed_nanos);
+        let budget = self.bridge.advance(elapsed_nanos);
         StepReport {
             steps: budget.steps(),
             remainder_nanos: budget.remainder_nanos(),
@@ -140,13 +143,63 @@ impl WasmGame {
     /// The monotonic count of fixed ticks driven so far.
     #[wasm_bindgen(getter)]
     pub fn current_tick(&self) -> u64 {
-        self.runtime.tick()
+        self.bridge.tick()
     }
 
     /// The durable simulation state as opaque bytes — the host stores or compares
     /// these to checkpoint or verify determinism.
     pub fn snapshot(&self) -> Vec<u8> {
-        self.runtime.snapshot_sim()
+        self.bridge.snapshot_sim()
+    }
+
+    // --- Deterministic RNG seam (SPEC-01) ---
+    //
+    // The `NativeBridge` rng methods, marshalled to the bridge's seeded
+    // [`crate::RngHub`]. The `js_name` is the camelCase identifier the TS
+    // `bridgeFromWasm` adapter forwards verbatim (`game.rngUnit`, ...). Stream
+    // ids are opaque JS numbers the hub owns; id `0` is the root.
+
+    /// A uniform float in `[0, 1)` from `stream` (`Rng::unit`).
+    #[wasm_bindgen(js_name = rngUnit)]
+    pub fn rng_unit(&mut self, stream: u32) -> f64 {
+        self.bridge.rng_unit(stream)
+    }
+
+    /// A uniform integer in `[0, max_exclusive)` from `stream` (`Rng::int`).
+    #[wasm_bindgen(js_name = rngBelow)]
+    pub fn rng_below(&mut self, stream: u32, max_exclusive: u32) -> u32 {
+        self.bridge.rng_below(stream, u64::from(max_exclusive)) as u32
+    }
+
+    /// The index `weights` selects, drawn proportionally to the weights, from
+    /// `stream` (`Rng::weighted`). JS weights are plain numbers; each is floored
+    /// to a non-negative integer weight (the exact, cross-machine form the
+    /// entropy facade selects over).
+    #[wasm_bindgen(js_name = rngWeighted)]
+    pub fn rng_weighted(&mut self, stream: u32, weights: &[f64]) -> u32 {
+        let weights: Vec<u64> = weights.iter().map(|&w| w.max(0.0) as u64).collect();
+        self.bridge.rng_weighted(stream, &weights)
+    }
+
+    /// A Fisher-Yates permutation of `[0, length)` the core drew from `stream`
+    /// (`Rng::permutation`). Returned as a real JS `number[]` (not a typed array)
+    /// so it matches the contract's `readonly number[]` and the projection can map
+    /// the author's array through it.
+    #[wasm_bindgen(js_name = rngPermutation)]
+    pub fn rng_permutation(&mut self, stream: u32, length: u32) -> Vec<JsValue> {
+        self.bridge
+            .rng_permutation(stream, length)
+            .into_iter()
+            .map(|index| JsValue::from_f64(f64::from(index)))
+            .collect()
+    }
+
+    /// Resolve the deterministic id of the named sub-stream of `parent`
+    /// (`Rng::stream`). Idempotent: the same `(parent, name)` resolves to the same
+    /// id.
+    #[wasm_bindgen(js_name = rngStream)]
+    pub fn rng_stream(&mut self, parent: u32, name: String) -> u32 {
+        self.bridge.rng_stream(parent, &name)
     }
 }
 
