@@ -127,12 +127,15 @@ fn module_toml_exists_and_is_isolated() {
 }
 
 #[test]
-fn lib_rs_exports_exactly_one_facade_and_no_data_vocabulary() {
-    // Module Law #8: exactly one behavioral facade (Draw2dApi). The 2D draw
-    // contract's value vocabulary is host-owned now (relocated to axiom-host so
-    // the render backends that depend on host can name it), so this module
-    // re-exports NO data types — not even an `ids` line. Callers reach the
-    // vocabulary via `use axiom_host::{…}`.
+fn lib_rs_exports_exactly_one_facade_plus_its_id_vocabulary() {
+    // Module Law #8: exactly one behavioral facade (Draw2dApi), plus — and only —
+    // the module's `ids` identity vocabulary (`pub use ids::{…}`). The 2D *draw
+    // contract's* value vocabulary stays host-owned (relocated to axiom-host so
+    // the render backends that depend on host can name it); callers reach it via
+    // `use axiom_host::{…}`. The one module-owned vocabulary is the particle
+    // surface's nouns (EmitterId handle + EmitterConfig recipe), which the facade
+    // returns/accepts and a caller must be able to name — exactly the sanctioned
+    // `ids` exemption.
     let lib = read(&src_dir().join("lib.rs"));
     let pub_items: Vec<&str> = lib
         .lines()
@@ -141,8 +144,11 @@ fn lib_rs_exports_exactly_one_facade_and_no_data_vocabulary() {
         .collect();
     assert_eq!(
         pub_items,
-        vec!["pub use draw2d_api::Draw2dApi;"],
-        "axiom-draw2d's lib.rs must expose exactly one public item: the Draw2dApi facade"
+        vec![
+            "pub use draw2d_api::Draw2dApi;",
+            "pub use ids::{EmitterConfig, EmitterId};",
+        ],
+        "axiom-draw2d's lib.rs must expose the Draw2dApi facade plus only its `ids` vocabulary"
     );
 }
 
@@ -321,8 +327,11 @@ fn every_source_module_is_declared_in_lib_rs() {
 /// *only* way to extract draw state is `finish(&mut self) -> Draw2dList`, which
 /// consumes the frame and yields the neutral list. There must be **no immutable
 /// (`&self`) getter that returns accumulated draw state** — the only read-only
-/// method is the pure `measure_text` (a metric of caller-supplied input, not
-/// stored draw state). This is the no-read-back proof.
+/// methods are *pure functions of their arguments* that read no stored draw
+/// state: `measure_text` (a metric of caller-supplied input) and `target_texture`
+/// (the handle naming a render target's surface, a pure function of the id). In
+/// particular there is **no** getter that returns particle or accumulated-command
+/// state. This is the no-read-back proof.
 #[test]
 fn facade_has_no_sim_readable_draw_state_getter() {
     let src = strip_comments_and_strings(&read(&src_dir().join("draw2d_api.rs")));
@@ -343,9 +352,11 @@ fn facade_has_no_sim_readable_draw_state_getter() {
     immutable_readers.sort();
     assert_eq!(
         immutable_readers,
-        vec!["measure_text".to_string()],
-        "the only immutable-self facade method may be the pure `measure_text`; any other \
-         `&self` getter would be a sim-readable read-back path into presentation draw state"
+        vec!["measure_text".to_string(), "target_texture".to_string()],
+        "the only immutable-self facade methods may be the pure `measure_text` and \
+         `target_texture` (each a pure function of its arguments, reading no stored draw \
+         state); any other `&self` getter would be a sim-readable read-back path into \
+         presentation draw state"
     );
     // And the sole list producer consumes the frame via `&mut self`.
     assert!(

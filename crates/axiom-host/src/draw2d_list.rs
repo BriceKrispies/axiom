@@ -6,8 +6,18 @@ use axiom_math::Vec2;
 
 use crate::camera2d::Camera2d;
 use crate::draw2d_command::Draw2dCommand;
-use crate::handles::PaintId;
+use crate::handles::{PaintId, RenderTargetId, TextureId};
 use crate::paint::{GradientStop, Paint2d, PaintTable};
+
+/// One off-screen render target (§10.3): a named nested [`Draw2dList`] the
+/// backend rasterizes into an off-screen surface of the given pixel size. Pure
+/// data — the backend owns the real surface; this only holds the routed draws.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct RenderTarget {
+    width: u32,
+    height: u32,
+    list: Draw2dList,
+}
 
 /// A frame's 2D draw commands after the `(layer, submission)` sort, plus the
 /// per-frame paint table and the resolved camera.
@@ -28,6 +38,7 @@ pub struct Draw2dList {
     commands: Vec<Draw2dCommand>,
     paints: PaintTable,
     camera: Option<Camera2d>,
+    targets: Vec<RenderTarget>,
 }
 
 impl Draw2dList {
@@ -56,11 +67,72 @@ impl Draw2dList {
         self.commands.push(command);
     }
 
+    /// Register an off-screen render target (§10.3) of `width`×`height` pixels,
+    /// returning its [`RenderTargetId`] (producer side). The target starts as an
+    /// empty nested list; draws are routed into it via
+    /// [`Draw2dList::push_command_routed`].
+    pub fn create_render_target(&mut self, width: u32, height: u32) -> RenderTargetId {
+        let id = RenderTargetId::from_raw(self.targets.len() as u32);
+        self.targets.push(RenderTarget {
+            width,
+            height,
+            list: Draw2dList::default(),
+        });
+        id
+    }
+
+    /// Append a built [`Draw2dCommand`] either into a render target's nested list
+    /// (when `route` is `Some` and names a real target) or into the main list
+    /// (producer side). Branchless: the two field borrows are disjoint, so the
+    /// command lands in exactly one sink with no control flow.
+    pub fn push_command_routed(&mut self, route: Option<RenderTargetId>, command: Draw2dCommand) {
+        let Draw2dList {
+            commands, targets, ..
+        } = self;
+        route
+            .and_then(|t| targets.get_mut(t.raw() as usize))
+            .map(|rt| &mut rt.list.commands)
+            .unwrap_or(commands)
+            .push(command);
+    }
+
     /// Stable-sort the accumulated commands by `(layer, submission)` so equal
     /// layers keep submit order — the one finalize step the builder triggers.
+    /// Each render target's nested list is sorted the same way.
     pub fn sort_commands(&mut self) {
         self.commands
             .sort_by_key(|c| (c.layer(), c.submission_index()));
+        self.targets
+            .iter_mut()
+            .for_each(|rt| rt.list.sort_commands());
+    }
+
+    /// The number of registered render targets.
+    pub fn render_target_count(&self) -> usize {
+        self.targets.len()
+    }
+
+    /// The [`TextureId`] naming a render target's off-screen surface. A total
+    /// function of the id (render-target ids are minted only by
+    /// [`Draw2dList::create_render_target`], so they are always valid): the
+    /// texture is the target's table slot, the stable name a later draw binds.
+    pub fn target_texture(&self, target: RenderTargetId) -> TextureId {
+        TextureId::from_raw(u64::from(target.raw()))
+    }
+
+    /// The `(width, height)` of a render target, or `None` if the id is unknown.
+    pub fn target_dimensions(&self, target: RenderTargetId) -> Option<(u32, u32)> {
+        self.targets
+            .get(target.raw() as usize)
+            .map(|rt| (rt.width, rt.height))
+    }
+
+    /// The commands routed into a render target (after the sort), or `None` if
+    /// the id is unknown. The 2D peer of [`Draw2dList::commands`] for a target.
+    pub fn target_commands(&self, target: RenderTargetId) -> Option<&[Draw2dCommand]> {
+        self.targets
+            .get(target.raw() as usize)
+            .map(|rt| rt.list.commands())
     }
 
     /// The number of draw commands.
@@ -183,6 +255,60 @@ mod tests {
         assert_eq!(list.paint_linear(lin), Some((Vec2::ZERO, Vec2::new(1.0, 0.0))));
         assert_eq!(list.paint_radial(rad), Some((Vec2::ONE, meters(4.0))));
         assert_eq!(list.paint_stops(lin).map(|s| s.len()), Some(2));
+    }
+
+    #[test]
+    fn render_targets_mint_ids_and_route_commands_into_nested_lists() {
+        let mut list = Draw2dList::default();
+        assert_eq!(list.render_target_count(), 0);
+        let a = list.create_render_target(64, 32);
+        let b = list.create_render_target(128, 128);
+        assert_eq!(a, RenderTargetId::from_raw(0));
+        assert_eq!(b, RenderTargetId::from_raw(1));
+        assert_eq!(list.render_target_count(), 2);
+
+        // A routed draw lands in the target's nested list, not the main list.
+        list.push_command_routed(Some(a), rect_cmd(0, 0));
+        // A None route lands in the main list.
+        list.push_command_routed(None, rect_cmd(1, 0));
+        // An unknown target id falls back to the main list (no panic, no branch).
+        list.push_command_routed(Some(RenderTargetId::from_raw(99)), rect_cmd(2, 0));
+
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.target_commands(a).map(<[_]>::len), Some(1));
+        assert_eq!(list.target_commands(b).map(<[_]>::len), Some(0));
+    }
+
+    #[test]
+    fn render_target_lookups_are_total_and_honest() {
+        let mut list = Draw2dList::default();
+        let id = list.create_render_target(40, 20);
+        // target_texture is a total function of the id (slot 0 -> texture 0).
+        assert_eq!(list.target_texture(id), TextureId::from_raw(0));
+        // Known id resolves dimensions / commands; an unknown one yields None.
+        assert_eq!(list.target_dimensions(id), Some((40, 20)));
+        assert_eq!(list.target_commands(id), Some(&[][..]));
+        let unknown = RenderTargetId::from_raw(7);
+        assert_eq!(list.target_dimensions(unknown), None);
+        assert_eq!(list.target_commands(unknown), None);
+    }
+
+    #[test]
+    fn sort_commands_also_sorts_each_nested_target_list() {
+        let mut list = Draw2dList::default();
+        let t = list.create_render_target(16, 16);
+        // Route draws into the target out of layer order, with a tie on layer 0.
+        list.push_command_routed(Some(t), rect_cmd(0, 2));
+        list.push_command_routed(Some(t), rect_cmd(1, 0));
+        list.push_command_routed(Some(t), rect_cmd(2, 0));
+        list.sort_commands();
+        let ordered: Vec<(i32, u32)> = list
+            .target_commands(t)
+            .unwrap()
+            .iter()
+            .map(|c| (c.layer(), c.submission_index()))
+            .collect();
+        assert_eq!(ordered, vec![(0, 1), (0, 2), (2, 0)]);
     }
 
     #[test]

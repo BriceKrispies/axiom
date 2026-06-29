@@ -58,6 +58,16 @@ struct Text2d {
     opts: TextDraw2d,
 }
 
+/// Particle-quad payload (§10.1): a single presentation-only particle resolved
+/// to a centred quad with its faded colour. Carries its own colour (like a
+/// [`Line2d`]), not a `Fill2d`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ParticleQuad2d {
+    center: Vec2,
+    size: Meters,
+    color: Rgba,
+}
+
 /// One backend-neutral 2D draw command.
 ///
 /// A **tagged struct**, not a data-carrying enum: `kind` selects which payload
@@ -82,6 +92,7 @@ pub struct Draw2dCommand {
     path: Option<Path2d>,
     sprite: Option<Sprite2d>,
     text: Option<Text2d>,
+    particle: Option<ParticleQuad2d>,
 }
 
 impl Draw2dCommand {
@@ -99,6 +110,8 @@ impl Draw2dCommand {
     pub const KIND_SPRITE: u32 = 6;
     /// A run of glyph quads against a baked font atlas.
     pub const KIND_TEXT_GLYPHS: u32 = 7;
+    /// A presentation-only particle quad (§10.1).
+    pub const KIND_PARTICLE_QUAD: u32 = 8;
 
     /// The discriminant code (one of the `KIND_*` constants).
     pub const fn kind_code(&self) -> u32 {
@@ -171,6 +184,11 @@ impl Draw2dCommand {
     pub fn as_text(&self) -> Option<(GlyphRun, TextDraw2d)> {
         self.text.as_ref().map(|t| (t.run.clone(), t.opts))
     }
+
+    /// The `PARTICLE_QUAD` `(center, size, color)`, or `None`.
+    pub fn as_particle(&self) -> Option<(Vec2, Meters, Rgba)> {
+        self.particle.map(|p| (p.center, p.size, p.color))
+    }
 }
 
 /// The per-draw header every command constructor takes: the submit index, the
@@ -200,6 +218,7 @@ impl Draw2dCommand {
             path: None,
             sprite: None,
             text: None,
+            particle: None,
         }
     }
 
@@ -274,6 +293,18 @@ impl Draw2dCommand {
             ..Self::empty(Self::KIND_TEXT_GLYPHS, header)
         }
     }
+
+    /// A presentation-only particle-quad command (carries its own faded colour).
+    pub fn particle_quad(header: Draw2dHeader, center: Vec2, size: Meters, color: Rgba) -> Self {
+        Draw2dCommand {
+            particle: Some(ParticleQuad2d {
+                center,
+                size,
+                color,
+            }),
+            ..Self::empty(Self::KIND_PARTICLE_QUAD, header)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -330,6 +361,24 @@ mod tests {
         assert_eq!(c.as_line(), None);
         assert_eq!(c.as_path(), None);
         assert_eq!(c.as_sprite(), None);
+        assert_eq!(c.as_text(), None);
+        assert_eq!(c.as_particle(), None);
+    }
+
+    #[test]
+    fn particle_quad_command_round_trips_and_carries_its_own_color() {
+        let c = Draw2dCommand::particle_quad(
+            header(8),
+            Vec2::new(7.0, 8.0),
+            meters(0.5),
+            color(),
+        );
+        assert_eq!(c.kind_code(), Draw2dCommand::KIND_PARTICLE_QUAD);
+        assert_eq!(c.submission_index(), 8);
+        assert_eq!(c.as_particle(), Some((Vec2::new(7.0, 8.0), meters(0.5), color())));
+        // A particle carries no Fill2d and is none of the other kinds.
+        assert_eq!(c.fill(), None);
+        assert_eq!(c.as_rect(), None);
         assert_eq!(c.as_text(), None);
     }
 

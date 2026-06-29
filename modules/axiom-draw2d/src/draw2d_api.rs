@@ -2,10 +2,14 @@
 
 use axiom_host::{
     Camera2d, Common2d, Draw2dCommand, Draw2dList, Fill2d, FontHandle, GlyphRun, GradientStop,
-    PaintId, Rect, Rgba, SpriteDraw2d, TextDraw2d, TextMetrics, TextureId, TransformDepth,
+    PaintId, Rect, RenderTargetId, Rgba, SpriteDraw2d, TextDraw2d, TextMetrics, TextureId,
+    TransformDepth,
 };
-use axiom_kernel::{Meters, Radians, Ratio};
+use axiom_kernel::{Meters, Radians, Ratio, Seconds};
 use axiom_math::{Mat3, Vec2};
+
+use crate::ids::{EmitterConfig, EmitterId};
+use crate::particles::{ParticleField, ParticleQuad};
 
 /// The only public export of `axiom-draw2d`.
 ///
@@ -25,12 +29,20 @@ use axiom_math::{Mat3, Vec2};
 /// Presentation-class: the only caller is `onRender`. Nothing it produces is
 /// authoritative, and there is **no getter that returns draw state into a
 /// sim-readable form** — the facade hands out a `Draw2dList` and never reads it
-/// back.
+/// back. The particle field (§10.1) is the sharpest case of this rule: it is a
+/// private field with no read-back path, so a particle can never be queried by,
+/// or feed, sim.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Draw2dApi {
     list: Draw2dList,
     transform_stack: Vec<Mat3>,
     next_submission: u32,
+    /// The live, presentation-only particle system (§10.1). Persists across
+    /// frames (particles outlive a single `finish`); never exposed.
+    particles: ParticleField,
+    /// The render target (§10.3) draws currently route into, if any. `None`
+    /// routes to the main list.
+    active_target: Option<RenderTargetId>,
 }
 
 impl Draw2dApi {
@@ -54,6 +66,13 @@ impl Draw2dApi {
         let header = (self.next_submission, self.current_transform(), common);
         self.next_submission += 1;
         header
+    }
+
+    /// Append a built command, routing it into the active render target (§10.3)
+    /// when one is open, else the main list. Branchless — the host owns the sink
+    /// selection.
+    fn route(&mut self, cmd: Draw2dCommand) {
+        self.list.push_command_routed(self.active_target, cmd);
     }
 
     // --- Camera + transform stack ---
@@ -83,13 +102,13 @@ impl Draw2dApi {
     /// Draw a filled/stroked rectangle.
     pub fn rect(&mut self, r: Rect, style: Fill2d, common: Common2d) {
         let cmd = Draw2dCommand::rect(self.next_header(common), r, style);
-        self.list.push_command(cmd);
+        self.route(cmd);
     }
 
     /// Draw a filled/stroked circle.
     pub fn circle(&mut self, center: Vec2, radius: Meters, style: Fill2d, common: Common2d) {
         let cmd = Draw2dCommand::circle(self.next_header(common), center, radius, style);
-        self.list.push_command(cmd);
+        self.route(cmd);
     }
 
     /// Draw a filled/stroked (optionally rotated) ellipse.
@@ -103,19 +122,19 @@ impl Draw2dApi {
         common: Common2d,
     ) {
         let cmd = Draw2dCommand::ellipse(self.next_header(common), center, rx, ry, rotation, style);
-        self.list.push_command(cmd);
+        self.route(cmd);
     }
 
     /// Draw a straight line segment with its own colour and width.
     pub fn line(&mut self, a: Vec2, b: Vec2, color: Rgba, width: Meters, common: Common2d) {
         let cmd = Draw2dCommand::line(self.next_header(common), a, b, color, width);
-        self.list.push_command(cmd);
+        self.route(cmd);
     }
 
     /// Draw a polyline / polygon through `points` (closed when `closed`).
     pub fn path(&mut self, points: &[Vec2], style: Fill2d, common: Common2d, closed: bool) {
         let cmd = Draw2dCommand::path(self.next_header(common), points.to_vec(), style, closed);
-        self.list.push_command(cmd);
+        self.route(cmd);
     }
 
     // --- Sprites + text ---
@@ -124,14 +143,14 @@ impl Draw2dApi {
     /// `opts`; placement on the current transform).
     pub fn sprite(&mut self, texture: TextureId, opts: SpriteDraw2d, common: Common2d) {
         let cmd = Draw2dCommand::sprite(self.next_header(common), texture, opts);
-        self.list.push_command(cmd);
+        self.route(cmd);
     }
 
     /// Draw a glyph run as `KIND_TEXT_GLYPHS` — glyph sub-rects against a baked
     /// font atlas, the same shape as a sprite draw.
     pub fn text(&mut self, run: GlyphRun, opts: TextDraw2d, common: Common2d) {
         let cmd = Draw2dCommand::text(self.next_header(common), run, opts);
-        self.list.push_command(cmd);
+        self.route(cmd);
     }
 
     /// Measure a glyph run against `font` (width = sum of advances, height =
@@ -158,16 +177,77 @@ impl Draw2dApi {
         self.list.register_radial(center, radius, stops.to_vec())
     }
 
+    // --- Particles (§10.1, presentation-only) ---
+
+    /// Register a particle emitter, returning its [`EmitterId`]. The emitter is a
+    /// recipe; nothing is spawned until [`Self::emit`].
+    pub fn create_emitter(&mut self, config: EmitterConfig) -> EmitterId {
+        self.particles.create_emitter(config)
+    }
+
+    /// Spawn a burst from emitter `id` at `at`, flying along `direction`. The
+    /// particles live in the presentation-only field; an unknown id is a no-op.
+    pub fn emit(&mut self, id: EmitterId, at: Vec2, direction: Vec2) {
+        self.particles.emit(id, at, direction);
+    }
+
+    /// Step the live particles by the **presentation** delta `dt` (real
+    /// frame-delta, never a sim tick) and append each survivor as a
+    /// `KIND_PARTICLE_QUAD` command into the list (routed like any other draw),
+    /// before [`Self::finish`]'s layer sort. Particle alpha rides on the faded
+    /// quad colour, so each quad's [`Common2d`] alpha is full.
+    pub fn advance_particles(&mut self, dt: Seconds) {
+        self.particles.advance(dt);
+        self.particles.quads().into_iter().for_each(|q| {
+            let ParticleQuad {
+                center,
+                size,
+                color,
+                layer,
+            } = q;
+            let header = self.next_header(Common2d::new(layer, Ratio::finite_or_zero(1.0)));
+            self.route(Draw2dCommand::particle_quad(header, center, size, color));
+        });
+    }
+
+    // --- Render targets (§10.3) ---
+
+    /// Create an off-screen render target of `width`×`height` pixels, returning
+    /// its [`RenderTargetId`]. A render target is a named nested list; the backend
+    /// owns the actual surface.
+    pub fn create_render_target(&mut self, width: u32, height: u32) -> RenderTargetId {
+        self.list.create_render_target(width, height)
+    }
+
+    /// Route subsequent draws into `target` until the matching [`Self::end_target`].
+    pub fn begin_target(&mut self, target: RenderTargetId) {
+        self.active_target = Some(target);
+    }
+
+    /// Stop routing into a render target; subsequent draws return to the main list.
+    pub fn end_target(&mut self) {
+        self.active_target = None;
+    }
+
+    /// The [`TextureId`] naming `target`'s off-screen surface — the handle a later
+    /// draw binds to sample the rendered target.
+    pub fn target_texture(&self, target: RenderTargetId) -> TextureId {
+        self.list.target_texture(target)
+    }
+
     // --- Finalize ---
 
     /// Finish the frame: take the accumulated list, **stable-sort it by
     /// `(layer, submission)`** so equal layers keep call order, and yield the
-    /// neutral host-owned [`Draw2dList`]. Resets the surface for the next frame.
+    /// neutral host-owned [`Draw2dList`]. Resets the per-frame surface (transform
+    /// stack, submit counter, open render target) for the next frame. The live
+    /// particle field persists — particles outlive a single frame.
     pub fn finish(&mut self) -> Draw2dList {
         let mut out = std::mem::take(&mut self.list);
         out.sort_commands();
         self.transform_stack.clear();
         self.next_submission = 0;
+        self.active_target = None;
         out
     }
 }
@@ -195,6 +275,28 @@ mod tests {
 
     fn common(layer: i32) -> Common2d {
         Common2d::new(layer, ratio(1.0))
+    }
+
+    fn seconds(v: f32) -> Seconds {
+        Seconds::new(v).unwrap()
+    }
+
+    fn clear() -> Rgba {
+        Rgba::new(ratio(0.0), ratio(0.0), ratio(0.0), ratio(0.0))
+    }
+
+    fn emitter(count: u32, layer: i32) -> EmitterConfig {
+        EmitterConfig {
+            count,
+            lifetime: seconds(2.0),
+            speed: meters(10.0),
+            spread: ratio(0.25),
+            gravity: Vec2::new(0.0, -4.0),
+            size: meters(0.5),
+            color_start: red(),
+            color_end: clear(),
+            layer,
+        }
     }
 
     fn unit_rect() -> Rect {
@@ -374,5 +476,96 @@ mod tests {
         assert_eq!(second.camera(), None);
         assert_eq!(second.paint_count(), 0);
         assert_eq!(second.at(0).unwrap().submission_index(), 0);
+    }
+
+    #[test]
+    fn advance_particles_appends_quads_that_evolve_and_fade() {
+        let mut api = Draw2dApi::new();
+        let id = api.create_emitter(emitter(3, 5));
+        api.emit(id, Vec2::ZERO, Vec2::new(1.0, 0.0));
+        api.advance_particles(seconds(0.5));
+        let list = api.finish();
+        // One KIND_PARTICLE_QUAD per emitted particle.
+        assert_eq!(list.len(), 3);
+        let (center, size, color) = list.at(0).unwrap().as_particle().unwrap();
+        assert_eq!(list.at(0).unwrap().kind_code(), Draw2dCommand::KIND_PARTICLE_QUAD);
+        // Real work: the particle moved along +x and its colour faded toward the
+        // (transparent) end colour, so alpha dropped below the start's 1.0.
+        assert!(center.x > 0.0, "particle integrated along the emit direction");
+        assert_eq!(size, meters(0.5));
+        assert!(color.a.get() < 1.0, "colour faded toward color_end");
+    }
+
+    #[test]
+    fn particles_are_deterministic_across_identical_runs() {
+        let run = || {
+            let mut api = Draw2dApi::new();
+            let id = api.create_emitter(emitter(6, 2));
+            api.emit(id, Vec2::new(1.0, 2.0), Vec2::new(0.0, 1.0));
+            api.advance_particles(seconds(0.25));
+            api.advance_particles(seconds(0.25));
+            api.finish()
+        };
+        // Same facade calls + same dt stream ⇒ byte-identical draw lists.
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn layer_sort_still_holds_with_particle_quads() {
+        let mut api = Draw2dApi::new();
+        // A background rect on layer 0, particles on layer 5.
+        api.rect(unit_rect(), Fill2d::color(red()), common(0));
+        let id = api.create_emitter(emitter(2, 5));
+        api.emit(id, Vec2::ZERO, Vec2::new(1.0, 0.0));
+        api.advance_particles(seconds(0.5));
+        let list = api.finish();
+        let kinds: Vec<u32> = list.commands().iter().map(Draw2dCommand::kind_code).collect();
+        // The low-layer rect sorts before the higher-layer particle quads.
+        assert_eq!(
+            kinds,
+            vec![
+                Draw2dCommand::KIND_RECT,
+                Draw2dCommand::KIND_PARTICLE_QUAD,
+                Draw2dCommand::KIND_PARTICLE_QUAD,
+            ]
+        );
+    }
+
+    #[test]
+    fn render_target_routes_draws_into_a_nested_list() {
+        let mut api = Draw2dApi::new();
+        let target = api.create_render_target(64, 32);
+        // While the target is open, draws route into it, not the main list.
+        api.begin_target(target);
+        api.rect(unit_rect(), Fill2d::color(red()), common(0));
+        api.end_target();
+        // After end_target, draws return to the main list.
+        api.circle(Vec2::ZERO, meters(1.0), Fill2d::color(red()), common(0));
+        let list = api.finish();
+        // The main list holds only the circle; the target holds the rect.
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.at(0).unwrap().kind_code(), Draw2dCommand::KIND_CIRCLE);
+        let routed = list.target_commands(target).unwrap();
+        assert_eq!(routed.len(), 1);
+        assert_eq!(routed[0].kind_code(), Draw2dCommand::KIND_RECT);
+    }
+
+    #[test]
+    fn target_texture_names_the_targets_surface_and_lists_are_byte_stable() {
+        let build = || {
+            let mut api = Draw2dApi::new();
+            let target = api.create_render_target(16, 16);
+            api.begin_target(target);
+            api.rect(unit_rect(), Fill2d::color(red()), common(1));
+            api.end_target();
+            (api.target_texture(target), api.finish())
+        };
+        let (tex_a, list_a) = build();
+        let (tex_b, list_b) = build();
+        // The handle naming the off-screen surface is the target's slot texture.
+        assert_eq!(tex_a, TextureId::from_raw(0));
+        assert_eq!(tex_a, tex_b);
+        // Byte-stable across identical runs.
+        assert_eq!(list_a, list_b);
     }
 }

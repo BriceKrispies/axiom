@@ -142,6 +142,7 @@ fn lib_exports_are_curated_set() {
         "pub use meters::Meters;",
         "pub use radians::Radians;",
         "pub use ratio::Ratio;",
+        "pub use seconds::Seconds;",
         "pub use asset_id::AssetId;",
         "pub use entity_id::EntityId;",
         "pub use handle_id::HandleId;",
