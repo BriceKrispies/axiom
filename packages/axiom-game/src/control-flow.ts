@@ -79,3 +79,16 @@ export const orElse = <Value>(value: Value | undefined, fallback: Value): Value 
 export const whenPresent = <Value>(value: Value | undefined, effect: (value: Value) => void): void => {
   each([value].filter((candidate): candidate is Value => candidate !== ABSENT), effect);
 };
+
+/*
+ * Narrow a present optional to its value, throwing {@link AuthoringError} with
+ * `message` when it is absent — the branchless "require this optional is here"
+ * form. The `assert` (itself branchless) narrows `value` past the captured
+ * `ABSENT` sentinel, so a required-but-unset field fails loudly instead of leaking
+ * `undefined`.
+ */
+export const present = <Value>(value: Value | undefined, message: string): Value => {
+  const found = [value].filter((candidate): candidate is Value => candidate !== ABSENT);
+  assert(found.length > 0, message);
+  return pick(found, 0);
+};

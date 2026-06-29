@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createGame, type GameConfig } from "../src/game.ts";
-import { defaultRegistry, onFixedUpdate, onRender } from "../src/registry.ts";
+import { activeRegistry, onFixedUpdate, onRender } from "../src/registry.ts";
 
 const config = (): GameConfig => ({ fixedHz: 60, seed: 4660n, surface: "#stage" });
 
@@ -26,16 +26,30 @@ test("the game lifecycle walks idle -> running -> paused -> running -> stopped",
   assert.equal(game.status, "stopped");
 });
 
-test("creating a game resets the default authoring registry", () => {
-  const log: number[] = [];
+test("each createGame mints its own registry the free functions target (SPEC-14 §9)", () => {
+  // The free onFixedUpdate/onRender target the active registry — this game's own.
+  const first = createGame(config());
+  assert.equal(activeRegistry(), first.registry);
   onFixedUpdate(() => {
-    log.push(1);
+    // a registration on the first game's registry
   });
   onRender(() => {
-    log.push(2);
+    // a render on the first game's registry
   });
-  assert.ok(defaultRegistry.fixedUpdates().length > 0);
-  createGame(config());
-  assert.equal(defaultRegistry.fixedUpdates().length, 0);
-  assert.equal(defaultRegistry.renders().length, 0);
+  assert.equal(first.registry.fixedUpdates().length, 1);
+  assert.equal(first.registry.renders().length, 1);
+
+  // A second game gets its OWN fresh registry; the first keeps its registrations
+  // (the per-game fix: a second game no longer clears the first's set).
+  const second = createGame(config());
+  assert.equal(activeRegistry(), second.registry);
+  assert.equal(second.registry.fixedUpdates().length, 0);
+  assert.equal(first.registry.fixedUpdates().length, 1);
+
+  // The free functions now target the second (active) registry only.
+  onFixedUpdate(() => {
+    // lands on the second game's registry
+  });
+  assert.equal(second.registry.fixedUpdates().length, 1);
+  assert.equal(first.registry.fixedUpdates().length, 1);
 });

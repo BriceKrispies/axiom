@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { GameLoop } from "../src/game-loop.ts";
 import { stepFrame } from "../src/loop-core.ts";
 import { GameRegistry } from "../src/registry.ts";
+import { Scene } from "../src/scene.ts";
 import { makeFrame, makeSim, type SimContext } from "../src/sim.ts";
 import { TickPump } from "../src/pump.ts";
 import { interpolationAlpha, type StepBudget } from "../src/step-budget.ts";
@@ -108,9 +109,36 @@ test("a GameRegistry collects fixed-update and render callbacks in order", () =>
   });
   assert.equal(registry.fixedUpdates().length, 2);
   assert.equal(registry.renders().length, 1);
-  registry.reset();
-  assert.equal(registry.fixedUpdates().length, 0);
-  assert.equal(registry.renders().length, 0);
+  assert.deepEqual(order, []);
+});
+
+test("GameLoop drives the mounted scene: create once, update per tick, assets from preload", () => {
+  const calls: string[] = [];
+  class DrivenScene extends Scene {
+    public override preload(): readonly string[] {
+      return ["atlas"];
+    }
+
+    public override create(): readonly number[] {
+      calls.push("create");
+      return [];
+    }
+
+    public override update(tick: number): readonly number[] {
+      calls.push(`u${tick}`);
+      return [];
+    }
+  }
+  const fake = new FakeBridge();
+  fake.budgets = [budget(2, 0, 1000), budget(1, 0, 1000)];
+  const loop = new GameLoop(fake, 60, new GameRegistry()).mount(new DrivenScene());
+
+  loop.advance(1000);
+  // `preload` ran at start, so the declared assets are available after the first frame.
+  assert.deepEqual(loop.assets(), ["atlas"]);
+  loop.advance(1000);
+  // `create` ran exactly once (before the first fixed update); `update` runs per tick.
+  assert.deepEqual(calls, ["create", "u0", "u1", "u2"]);
 });
 
 test("GameLoop drives the bridge budget through the registry and tracks the tick", () => {
