@@ -176,6 +176,12 @@ impl MathApi {
         Mat4::look_at(eye, target, up)
     }
 
+    /// General 4×4 inverse. Returns `None` when `m` is singular (its
+    /// determinant is too close to zero to invert). See [`Mat4::inverse`].
+    pub fn mat4_invert(&self, m: Mat4) -> Option<Mat4> {
+        m.inverse()
+    }
+
     // --- Transforms ---
 
     pub fn transform_identity(&self) -> Transform {
@@ -484,6 +490,18 @@ mod tests {
         assert!(m
             .mat4_look_at(m.vec3(0.0, 0.0, 5.0), m.vec3_zero(), m.vec3_unit_y(),)
             .is_ok());
+    }
+
+    #[test]
+    fn mat4_invert_round_trips_invertible_and_rejects_singular() {
+        let m = api();
+        let eps = m.epsilon(1.0e-5).unwrap();
+        // Invertible: inverting a translation then composing yields identity.
+        let t = m.mat4_translation(m.vec3(3.0, -4.0, 5.0));
+        let inv = m.mat4_invert(t).unwrap();
+        assert!(t.multiply(inv).approx_eq(&Mat4::IDENTITY, eps));
+        // Singular: the zero matrix has no inverse.
+        assert!(m.mat4_invert(Mat4::ZERO).is_none());
     }
 
     #[test]
