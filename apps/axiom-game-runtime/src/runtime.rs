@@ -74,6 +74,20 @@ impl GameRuntime {
         self.tick
     }
 
+    /// Borrow the wrapped [`RunningApp`] — the retained world the bridge reads
+    /// (queries, component gets, children) between steps.
+    pub fn app(&self) -> &RunningApp {
+        &self.app
+    }
+
+    /// Mutably borrow the wrapped [`RunningApp`] — the retained world the bridge
+    /// mutates (spawn / despawn / component set) between steps. The fixed-step
+    /// loop owns *when* the app ticks; this exposes *what* world it ticks so the
+    /// composing bridge can host SPEC-02's retained game world over it.
+    pub fn app_mut(&mut self) -> &mut RunningApp {
+        &mut self.app
+    }
+
     /// Serialize the durable simulation state of the wrapped app (the scene
     /// world), so a caller can compare or replay it. Delegates to
     /// [`RunningApp::snapshot_sim`]; two runtimes fed identical elapsed-time

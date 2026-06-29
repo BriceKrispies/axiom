@@ -201,6 +201,72 @@ impl WasmGame {
     pub fn rng_stream(&mut self, parent: u32, name: String) -> u32 {
         self.bridge.rng_stream(parent, &name)
     }
+
+    // --- Retained ECS world seam (SPEC-02) ---
+    //
+    // The `NativeBridge` world methods, marshalled to the bridge's retained world
+    // over the app's dynamic component store. Entity handles cross as JS `number`s
+    // (f64) so they match the contract's `Entity = number`; a component crosses as
+    // a `(kind: string, fields: Uint8Array)` pair per the convention in
+    // [`crate::world`]. `worldSpawn` is composed at the TS edge from
+    // `worldSpawn`(empty) + a `worldSet` per component, so the boundary stays
+    // scalar / byte / string only.
+
+    /// Spawn a bare entity, returning its id as a JS number (`worldSpawn`'s root).
+    #[wasm_bindgen(js_name = worldSpawn)]
+    pub fn world_spawn(&mut self) -> f64 {
+        self.bridge.world_spawn() as f64
+    }
+
+    /// Despawn one entity (`worldDespawn`); a stale handle is a clean no-op.
+    #[wasm_bindgen(js_name = worldDespawn)]
+    pub fn world_despawn(&mut self, entity: f64) {
+        self.bridge.world_despawn(entity as u64);
+    }
+
+    /// Despawn an entity and its whole subtree (`worldDespawnSubtree`).
+    #[wasm_bindgen(js_name = worldDespawnSubtree)]
+    pub fn world_despawn_subtree(&mut self, entity: f64) {
+        self.bridge.world_despawn_subtree(entity as u64);
+    }
+
+    /// Set (or replace) `entity`'s component of `kind` from its field `bytes`
+    /// (`worldSet`). An unknown kind / stale entity / bad bytes is a clean no-op.
+    #[wasm_bindgen(js_name = worldSet)]
+    pub fn world_set(&mut self, entity: f64, kind: String, bytes: &[u8]) {
+        self.bridge.world_set(entity as u64, &kind, bytes);
+    }
+
+    /// Read `entity`'s component of `kind` as field bytes (`worldGet`) — an empty
+    /// buffer on a miss / dead entity / unknown kind (the TS edge maps `[]` →
+    /// the empty `Result`).
+    #[wasm_bindgen(js_name = worldGet)]
+    pub fn world_get(&self, entity: f64, kind: String) -> Vec<u8> {
+        self.bridge.world_get(entity as u64, &kind)
+    }
+
+    /// Every entity carrying *all* the named `kinds`, in ascending-id order
+    /// (`worldQuery`). Returned as a real JS `number[]`.
+    #[wasm_bindgen(js_name = worldQuery)]
+    pub fn world_query(&self, kinds: Vec<String>) -> Vec<JsValue> {
+        let refs: Vec<&str> = kinds.iter().map(String::as_str).collect();
+        self.bridge
+            .world_query(&refs)
+            .into_iter()
+            .map(|id| JsValue::from_f64(id as f64))
+            .collect()
+    }
+
+    /// The direct children of `entity`, in ascending-id order (`worldChildrenOf`),
+    /// as a real JS `number[]`.
+    #[wasm_bindgen(js_name = worldChildrenOf)]
+    pub fn world_children_of(&self, entity: f64) -> Vec<JsValue> {
+        self.bridge
+            .world_children_of(entity as u64)
+            .into_iter()
+            .map(|id| JsValue::from_f64(id as f64))
+            .collect()
+    }
 }
 
 /// Page entry: install the panic hook. The page then constructs a [`WasmGame`]

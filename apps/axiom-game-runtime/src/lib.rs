@@ -35,6 +35,13 @@ pub use rng::RngHub;
 mod bridge;
 pub use bridge::GameBridge;
 
+/// The retained-world component vocabulary (SPEC-02) and the branchless
+/// kind→codec dispatch the bridge routes `worldSet`/`worldGet` through. Defines
+/// the closed game-component `Reflect` types (`Transform`/`Velocity`/`Sprite`/…)
+/// whose schema names are the TS `Component.kind` keys, and documents the
+/// `(kind, bytes)` marshalling convention every later subsystem reuses.
+mod world;
+
 /// The embed seam (SPEC-12): decode the inbound session config, latch the single
 /// outbound outcome. Pure, native-testable core; the browser channel that carries
 /// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on
