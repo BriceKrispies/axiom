@@ -101,6 +101,14 @@ impl SceneApi {
         self.scene.parent_of(id)
     }
 
+    /// Whether `id` names a live node — an entity that has been created and not
+    /// despawned. A despawned or never-created handle reads `false`, so a holder
+    /// of a stale [`SceneNodeId`] (e.g. across the wasm boundary) can check
+    /// liveness before addressing it.
+    pub fn is_alive(&self, id: SceneNodeId) -> bool {
+        self.scene.is_node(id)
+    }
+
     // --- Hierarchy ---
 
     /// Make `child` a child of `parent`. Rejects self-parenting, cycles, and
@@ -578,6 +586,19 @@ mod tests {
         assert_eq!(a.world_transform(c).unwrap().translation.x, 1.0);
         a.clear_parent(c).unwrap();
         assert_eq!(a.parent_of(c), None);
+    }
+
+    #[test]
+    fn is_alive_tracks_spawn_and_despawn_and_is_false_for_absent() {
+        let mut a = api();
+        // An never-created handle is not alive.
+        assert!(!a.is_alive(SceneNodeId::from_raw(404)));
+        // A created node is alive...
+        let n = a.create_node();
+        assert!(a.is_alive(n));
+        // ...and stops being alive once despawned.
+        assert!(a.despawn_node(n));
+        assert!(!a.is_alive(n));
     }
 
     #[test]
