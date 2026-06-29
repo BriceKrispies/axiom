@@ -154,6 +154,30 @@
         "eslint/max-params": "off",
         "typescript/no-unsafe-type-assertion": "off"
       }
+    },
+    {
+      // The wasm<->HOST adapter edge: wasm-host.ts builds the `HostBridge` (the
+      // free math3d / grid / audio / 3D surface) from the raw wasm exports — the
+      // sibling of wasm-bridge.ts's `NativeBridge` builder, split into its own file
+      // so neither adapter swells past budget. Same edge, same scoping rationale:
+      // coverage-exempt (its correctness is the live wasm byte layout, Playwright-
+      // proven — see the --test-coverage-exclude in package.json) but the
+      // Branchless Law stays ON (every selection is a control-flow.ts combinator).
+      // The same three rules are scoped off for the identical reasons:
+      //   - no-unsafe-type-assertion: the byte boundary is untyped (the `Quat`
+      //     4-tuple assertion);
+      //   - max-lines: the one adapter carries the whole host boundary (math +
+      //     grid + audio + the documented deferred stubs);
+      //   - max-params: the scalar-vector wasm signatures are inherently >3 args
+      //     (`mat4Perspective(fovy,aspect,near,far)`, the grid
+      //     `(cols,rows,mask,start,goal)` queries); the `HostBridge`-facing arrows
+      //     stay <=3 args.
+      "files": ["src/wasm-host.ts"],
+      "rules": {
+        "eslint/max-lines": "off",
+        "eslint/max-params": "off",
+        "typescript/no-unsafe-type-assertion": "off"
+      }
     }
   ]
 }

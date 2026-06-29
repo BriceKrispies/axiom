@@ -289,9 +289,12 @@ name = "axiom-game-runtime"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-audio",
  "axiom-entropy",
+ "axiom-grid",
  "axiom-input",
  "axiom-kernel",
+ "axiom-math",
  "axiom-physics",
  "axiom-runtime",
  "axiom-space",

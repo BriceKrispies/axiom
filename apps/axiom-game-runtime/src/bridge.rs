@@ -52,7 +52,9 @@
 //! [`advance`]: GameBridge::advance
 
 use axiom::prelude::{Entity, HostApi, HostOutcome, RunningApp, Score, StepBudget};
+use axiom_grid::GridApi;
 
+use crate::audio::AudioState;
 use crate::embed::OutcomeLatch;
 use crate::input::InputBridge;
 use crate::physics::PhysicsState;
@@ -74,6 +76,12 @@ pub struct GameBridge {
     pub(crate) physics: PhysicsState,
     pub(crate) input: InputBridge,
     pub(crate) time: TimeBridge,
+    /// The deterministic grid / pathfinding core (SPEC-06), forwarded to by the
+    /// `grid_*` methods in [`crate::grid`]. Stateless, so the queries are pure.
+    pub(crate) grid: GridApi,
+    /// The neutral audio mixer core + live output arm (SPEC-08), driven by the
+    /// `*_sound` / `*_tone` / `*_music` / mix methods in [`crate::audio`].
+    pub(crate) audio: AudioState,
 }
 
 impl GameBridge {
@@ -90,6 +98,8 @@ impl GameBridge {
             physics: PhysicsState::new(),
             input: InputBridge::new(),
             time: TimeBridge::new(fixed_step_nanos),
+            grid: GridApi::new(),
+            audio: AudioState::new(),
         }
     }
 
@@ -112,6 +122,10 @@ impl GameBridge {
         );
         self.time
             .pump(start, budget.steps(), budget.fixed_step_nanos());
+        // Drain the audio batch accumulated this frame into the live output (the
+        // wasm Web Audio arm; a no-op on native). Presentation-only — it reads no
+        // sim state and feeds none back, so it never perturbs determinism.
+        self.realize_audio();
         budget
     }
 

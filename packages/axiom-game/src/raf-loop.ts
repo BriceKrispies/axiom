@@ -19,6 +19,14 @@ import type { GameLoop } from "./game-loop.ts";
 
 export type { WasmGameExport } from "./wasm-bridge.ts";
 export { bridgeFromWasm } from "./wasm-bridge.ts";
+/*
+ * The host-channel counterpart of `bridgeFromWasm`: builds the installed
+ * `HostBridge` (math3d / grid / audio) the free authoring surface projects
+ * through. Re-exported beside the `NativeBridge` builder so the boot path has one
+ * platform-edge import for both wasm adapters.
+ */
+export type { WasmHostExport } from "./wasm-host.ts";
+export { hostFromWasm } from "./wasm-host.ts";
 
 const NANOS_PER_MILLI = 1_000_000;
 
