@@ -173,25 +173,25 @@ impl Draw2dCommand {
     }
 }
 
-/// The facade-derived per-draw header: the submit index, the baked transform,
-/// and the caller's resolved [`Common2d`]. Built once by the facade and stamped
-/// onto each command, so the constructors stay small (no 8-argument signatures).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Stamp {
-    pub(crate) submission: u32,
-    pub(crate) transform: Mat3,
-    pub(crate) common: Common2d,
-}
+/// The per-draw header every command constructor takes: the submit index, the
+/// baked transform, and the resolved [`Common2d`]. Carried as one tuple so the
+/// `axiom-draw2d` builder (which lives in another crate and owns the submit
+/// counter + transform stack) can stamp a command in one call without the
+/// constructors growing 8-argument signatures.
+type Draw2dHeader = (u32, Mat3, Common2d);
 
-/// Crate-internal constructors used by the facade. External callers never build
-/// a command; they receive them from `Draw2dList`.
+/// Public constructors used by the `axiom-draw2d` builder to assemble this
+/// host-owned contract. External *consumers* never build a command directly;
+/// they receive them from a [`Draw2dList`]. Each constructor takes a
+/// [`Draw2dHeader`] plus only the public value types its kind needs.
 impl Draw2dCommand {
-    fn empty(kind: u32, stamp: Stamp) -> Self {
+    fn empty(kind: u32, header: Draw2dHeader) -> Self {
+        let (submission, transform, common) = header;
         Draw2dCommand {
             kind,
-            submission: stamp.submission,
-            transform: stamp.transform,
-            common: stamp.common,
+            submission,
+            transform,
+            common,
             fill: None,
             rect: None,
             circle: None,
@@ -203,24 +203,27 @@ impl Draw2dCommand {
         }
     }
 
-    pub(crate) fn rect(stamp: Stamp, r: Rect, fill: Fill2d) -> Self {
+    /// A filled/stroked rectangle command.
+    pub fn rect(header: Draw2dHeader, r: Rect, fill: Fill2d) -> Self {
         Draw2dCommand {
             rect: Some(r),
             fill: Some(fill),
-            ..Self::empty(Self::KIND_RECT, stamp)
+            ..Self::empty(Self::KIND_RECT, header)
         }
     }
 
-    pub(crate) fn circle(stamp: Stamp, center: Vec2, radius: Meters, fill: Fill2d) -> Self {
+    /// A filled/stroked circle command.
+    pub fn circle(header: Draw2dHeader, center: Vec2, radius: Meters, fill: Fill2d) -> Self {
         Draw2dCommand {
             circle: Some(Circle2d { center, radius }),
             fill: Some(fill),
-            ..Self::empty(Self::KIND_CIRCLE, stamp)
+            ..Self::empty(Self::KIND_CIRCLE, header)
         }
     }
 
-    pub(crate) fn ellipse(
-        stamp: Stamp,
+    /// A filled/stroked (optionally rotated) ellipse command.
+    pub fn ellipse(
+        header: Draw2dHeader,
         center: Vec2,
         rx: Meters,
         ry: Meters,
@@ -235,36 +238,40 @@ impl Draw2dCommand {
                 rotation,
             }),
             fill: Some(fill),
-            ..Self::empty(Self::KIND_ELLIPSE, stamp)
+            ..Self::empty(Self::KIND_ELLIPSE, header)
         }
     }
 
-    pub(crate) fn line(stamp: Stamp, a: Vec2, b: Vec2, color: Rgba, width: Meters) -> Self {
+    /// A straight line-segment command (carries its own colour + width).
+    pub fn line(header: Draw2dHeader, a: Vec2, b: Vec2, color: Rgba, width: Meters) -> Self {
         Draw2dCommand {
             line: Some(Line2d { a, b, color, width }),
-            ..Self::empty(Self::KIND_LINE, stamp)
+            ..Self::empty(Self::KIND_LINE, header)
         }
     }
 
-    pub(crate) fn path(stamp: Stamp, points: Vec<Vec2>, fill: Fill2d, closed: bool) -> Self {
+    /// A polyline/polygon command.
+    pub fn path(header: Draw2dHeader, points: Vec<Vec2>, fill: Fill2d, closed: bool) -> Self {
         Draw2dCommand {
             path: Some(Path2d { points, closed }),
             fill: Some(fill),
-            ..Self::empty(Self::KIND_PATH, stamp)
+            ..Self::empty(Self::KIND_PATH, header)
         }
     }
 
-    pub(crate) fn sprite(stamp: Stamp, texture: TextureId, opts: SpriteDraw2d) -> Self {
+    /// A textured sprite command.
+    pub fn sprite(header: Draw2dHeader, texture: TextureId, opts: SpriteDraw2d) -> Self {
         Draw2dCommand {
             sprite: Some(Sprite2d { texture, opts }),
-            ..Self::empty(Self::KIND_SPRITE, stamp)
+            ..Self::empty(Self::KIND_SPRITE, header)
         }
     }
 
-    pub(crate) fn text(stamp: Stamp, run: GlyphRun, opts: TextDraw2d) -> Self {
+    /// A glyph-run text command.
+    pub fn text(header: Draw2dHeader, run: GlyphRun, opts: TextDraw2d) -> Self {
         Draw2dCommand {
             text: Some(Text2d { run, opts }),
-            ..Self::empty(Self::KIND_TEXT_GLYPHS, stamp)
+            ..Self::empty(Self::KIND_TEXT_GLYPHS, header)
         }
     }
 }
@@ -303,17 +310,13 @@ mod tests {
         Rect::new(Vec2::ZERO, Vec2::new(4.0, 3.0))
     }
 
-    fn stamp(submission: u32) -> Stamp {
-        Stamp {
-            submission,
-            transform: Mat3::IDENTITY,
-            common: common(),
-        }
+    fn header(submission: u32) -> (u32, Mat3, Common2d) {
+        (submission, Mat3::IDENTITY, common())
     }
 
     #[test]
     fn rect_command_round_trips_and_reports_none_elsewhere() {
-        let c = Draw2dCommand::rect(stamp(0), rect_geom(), fill());
+        let c = Draw2dCommand::rect(header(0), rect_geom(), fill());
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_RECT);
         assert_eq!(c.submission_index(), 0);
         assert_eq!(c.transform(), Mat3::IDENTITY);
@@ -332,7 +335,7 @@ mod tests {
 
     #[test]
     fn circle_command_round_trips() {
-        let c = Draw2dCommand::circle(stamp(1), Vec2::new(2.0, 3.0), meters(5.0), fill());
+        let c = Draw2dCommand::circle(header(1), Vec2::new(2.0, 3.0), meters(5.0), fill());
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_CIRCLE);
         assert_eq!(c.as_circle(), Some((Vec2::new(2.0, 3.0), meters(5.0))));
         assert_eq!(c.as_rect(), None);
@@ -342,7 +345,7 @@ mod tests {
     #[test]
     fn ellipse_command_round_trips() {
         let c = Draw2dCommand::ellipse(
-            stamp(2),
+            header(2),
             Vec2::new(1.0, 1.0),
             meters(4.0),
             meters(2.0),
@@ -360,7 +363,7 @@ mod tests {
     #[test]
     fn line_command_carries_its_own_color_and_has_no_fill() {
         let c = Draw2dCommand::line(
-            stamp(3),
+            header(3),
             Vec2::ZERO,
             Vec2::new(10.0, 0.0),
             color(),
@@ -379,7 +382,7 @@ mod tests {
     #[test]
     fn path_command_round_trips_points_and_closed() {
         let pts = vec![Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(1.0, 1.0)];
-        let c = Draw2dCommand::path(stamp(4), pts.clone(), fill(), true);
+        let c = Draw2dCommand::path(header(4), pts.clone(), fill(), true);
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_PATH);
         assert_eq!(c.as_path(), Some((pts, true)));
         assert_eq!(c.as_circle(), None);
@@ -389,7 +392,7 @@ mod tests {
     #[test]
     fn sprite_command_round_trips() {
         let opts = SpriteDraw2d::new(rect_geom(), Vec2::new(0.5, 0.5), color(), false, true);
-        let c = Draw2dCommand::sprite(stamp(5), TextureId::from_raw(9), opts);
+        let c = Draw2dCommand::sprite(header(5), TextureId::from_raw(9), opts);
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_SPRITE);
         assert_eq!(c.as_sprite(), Some((TextureId::from_raw(9), opts)));
         // A sprite carries no Fill2d (it tints via its own opts).
@@ -404,7 +407,7 @@ mod tests {
             meters(12.0),
         );
         let opts = TextDraw2d::new(FontHandle::from_raw(1), color(), TextAlign::LEFT);
-        let c = Draw2dCommand::text(stamp(6), run.clone(), opts);
+        let c = Draw2dCommand::text(header(6), run.clone(), opts);
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_TEXT_GLYPHS);
         assert_eq!(c.as_text(), Some((run, opts)));
         assert_eq!(c.as_sprite(), None);
@@ -415,11 +418,7 @@ mod tests {
     fn shadow_is_carried_through_common() {
         let s = Shadow2d::new(color(), meters(3.0));
         let c = Draw2dCommand::rect(
-            Stamp {
-                submission: 0,
-                transform: Mat3::IDENTITY,
-                common: Common2d::with_shadow(2, ratio(0.5), s),
-            },
+            (0, Mat3::IDENTITY, Common2d::with_shadow(2, ratio(0.5), s)),
             rect_geom(),
             fill(),
         );

@@ -1,6 +1,6 @@
 [package]
 name = "axiom-draw2d"
-description = "Axiom SPEC-04 neutral 2D draw-list module: compiles author 2D-draw calls (shapes/sprites/text/gradients/camera+transform) into a deterministic, layer-sorted, hashable Draw2dList. Rasterizes nothing."
+description = "Axiom SPEC-04 2D draw-list builder: the Draw2dApi facade compiles author 2D-draw calls (shapes/sprites/text/gradients/camera+transform) into the deterministic, layer-sorted, host-owned Draw2dList contract. Owns only the builder; the neutral contract types live in axiom-host. Rasterizes nothing."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -12,10 +12,13 @@ crate-type = ["rlib"]
 
 [dependencies]
 # An isolated engine module that builds only on completed layers:
-# the kernel (ids, dimensioned scalars Ratio/Radians/Meters) and math
-# (Vec2 / Mat3 for the 2D transform stack). No other module, app, or tool.
+# the kernel (ids, dimensioned scalars Ratio/Radians/Meters), math (Vec2 / Mat3
+# for the 2D transform stack), and host (the relocated neutral 2D draw contract
+# the Draw2dApi builder assembles and returns — Draw2dList and its value
+# vocabulary). No other module, app, or tool.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
+axiom-host = { path = "../../crates/axiom-host" }
 
 [lints.rust]
 unsafe_code = "forbid"

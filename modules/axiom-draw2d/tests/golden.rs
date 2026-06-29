@@ -10,9 +10,10 @@
 //!  3. **Presentation-exclusion** — see `architecture.rs`
 //!     `facade_has_no_sim_readable_draw_state_getter` (structural, no read-back).
 
-use axiom_draw2d::{
-    Common2d, Draw2dApi, Draw2dCommand, Fill2d, FontHandle, Glyph2d, GlyphRun, GradientStop, Rect,
-    Rgba, Shadow2d, SpriteDraw2d, TextAlign, TextDraw2d, TextureId,
+use axiom_draw2d::Draw2dApi;
+use axiom_host::{
+    Common2d, Draw2dCommand, Fill2d, FontHandle, Glyph2d, GlyphRun, GradientStop, Rect, Rgba,
+    Shadow2d, SpriteDraw2d, TextAlign, TextDraw2d, TextureId,
 };
 use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::{Mat3, Vec2};
@@ -89,7 +90,7 @@ fn finish_stably_sorts_by_layer_then_submit_order() {
 /// A rich, deterministic frame exercising every landed surface: camera, the
 /// transform stack (push/pop), every shape kind, sprite, text, and both
 /// gradient kinds referenced by a fill.
-fn render_a_frame() -> axiom_draw2d::Draw2dList {
+fn render_a_frame() -> axiom_host::Draw2dList {
     let mut api = Draw2dApi::new();
     api.set_camera2d(Vec2::new(3.0, 4.0), ratio(1.5));
 

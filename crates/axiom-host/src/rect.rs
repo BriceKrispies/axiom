@@ -4,9 +4,9 @@ use axiom_math::Vec2;
 
 /// An axis-aligned rectangle given by its minimum corner and its size.
 ///
-/// Used both as a shape's destination ([`crate::Draw2dApi::rect`]) and as a
-/// sprite/glyph atlas sub-rect ([`crate::SpriteDraw2d::source`]). Pure data in
-/// the draw surface's own units; the backend interprets it.
+/// Used both as a shape's destination (a rect draw) and as a sprite/glyph atlas
+/// sub-rect ([`crate::SpriteDraw2d::source`]). Pure data in the draw surface's
+/// own units; the backend interprets it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
     pub min: Vec2,

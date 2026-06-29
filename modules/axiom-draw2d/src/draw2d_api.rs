@@ -1,27 +1,26 @@
 //! The single public facade of the `axiom-draw2d` module.
 
+use axiom_host::{
+    Camera2d, Common2d, Draw2dCommand, Draw2dList, Fill2d, FontHandle, GlyphRun, GradientStop,
+    PaintId, Rect, Rgba, SpriteDraw2d, TextDraw2d, TextMetrics, TextureId, TransformDepth,
+};
 use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::{Mat3, Vec2};
 
-use crate::camera2d::Camera2d;
-use crate::common2d::Common2d;
-use crate::draw2d_command::{Draw2dCommand, Stamp};
-use crate::draw2d_list::Draw2dList;
-use crate::fill2d::Fill2d;
-use crate::handles::{FontHandle, PaintId, TextureId, TransformDepth};
-use crate::paint::{GradientStop, Paint2d, PaintTable};
-use crate::rect::Rect;
-use crate::rgba::Rgba;
-use crate::sprite_draw2d::SpriteDraw2d;
-use crate::text2d::{GlyphRun, TextDraw2d, TextMetrics};
-
 /// The only public export of `axiom-draw2d`.
 ///
-/// Accumulates a frame's 2D draws into an ordered list, then yields the
-/// neutral, layer-sorted [`Draw2dList`] contract. Shape mirrors `RenderApi`:
+/// Accumulates a frame's 2D draws onto a host-owned [`Draw2dList`] in progress,
+/// then yields the neutral, layer-sorted contract. Shape mirrors `RenderApi`:
 /// typed builders in, opaque `KIND_*`-tagged [`Draw2dCommand`]s out, branchless
 /// `as_*` accessors for the consumer. It **rasterizes nothing** — turning the
 /// list into pixels (and the alpha-blend fix) is the backends' job.
+///
+/// This module owns only the *builder*; the neutral contract types
+/// ([`Draw2dList`], [`Draw2dCommand`], and the value vocabulary) live in the
+/// host layer (`axiom_host`), so the render backends that depend on host can
+/// name and rasterize them. The builder adds the authoring ergonomics the
+/// contract deliberately does not carry: the transform stack and the submit
+/// counter. Callers `use axiom_host::{…}` for the value vocabulary they pass in.
 ///
 /// Presentation-class: the only caller is `onRender`. Nothing it produces is
 /// authoritative, and there is **no getter that returns draw state into a
@@ -29,10 +28,8 @@ use crate::text2d::{GlyphRun, TextDraw2d, TextMetrics};
 /// back.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Draw2dApi {
-    commands: Vec<Draw2dCommand>,
+    list: Draw2dList,
     transform_stack: Vec<Mat3>,
-    paints: PaintTable,
-    camera: Option<Camera2d>,
     next_submission: u32,
 }
 
@@ -51,23 +48,19 @@ impl Draw2dApi {
             .unwrap_or(Mat3::IDENTITY)
     }
 
-    /// Build the per-draw header (submit index + baked transform + the caller's
-    /// resolved common attributes) and advance the submission counter.
-    fn next_stamp(&mut self, common: Common2d) -> Stamp {
-        let stamp = Stamp {
-            submission: self.next_submission,
-            transform: self.current_transform(),
-            common,
-        };
+    /// Build the per-draw header tuple (submit index + baked transform + the
+    /// caller's resolved common attributes) and advance the submission counter.
+    fn next_header(&mut self, common: Common2d) -> (u32, Mat3, Common2d) {
+        let header = (self.next_submission, self.current_transform(), common);
         self.next_submission += 1;
-        stamp
+        header
     }
 
     // --- Camera + transform stack ---
 
     /// Set the 2D camera for this frame (centre + zoom).
     pub fn set_camera2d(&mut self, center: Vec2, zoom: Ratio) {
-        self.camera = Some(Camera2d::new(center, zoom));
+        self.list.set_camera(Camera2d::new(center, zoom));
     }
 
     /// Push `m` onto the transform stack, composing it onto the current top
@@ -89,14 +82,14 @@ impl Draw2dApi {
 
     /// Draw a filled/stroked rectangle.
     pub fn rect(&mut self, r: Rect, style: Fill2d, common: Common2d) {
-        let cmd = Draw2dCommand::rect(self.next_stamp(common), r, style);
-        self.commands.push(cmd);
+        let cmd = Draw2dCommand::rect(self.next_header(common), r, style);
+        self.list.push_command(cmd);
     }
 
     /// Draw a filled/stroked circle.
     pub fn circle(&mut self, center: Vec2, radius: Meters, style: Fill2d, common: Common2d) {
-        let cmd = Draw2dCommand::circle(self.next_stamp(common), center, radius, style);
-        self.commands.push(cmd);
+        let cmd = Draw2dCommand::circle(self.next_header(common), center, radius, style);
+        self.list.push_command(cmd);
     }
 
     /// Draw a filled/stroked (optionally rotated) ellipse.
@@ -109,20 +102,20 @@ impl Draw2dApi {
         style: Fill2d,
         common: Common2d,
     ) {
-        let cmd = Draw2dCommand::ellipse(self.next_stamp(common), center, rx, ry, rotation, style);
-        self.commands.push(cmd);
+        let cmd = Draw2dCommand::ellipse(self.next_header(common), center, rx, ry, rotation, style);
+        self.list.push_command(cmd);
     }
 
     /// Draw a straight line segment with its own colour and width.
     pub fn line(&mut self, a: Vec2, b: Vec2, color: Rgba, width: Meters, common: Common2d) {
-        let cmd = Draw2dCommand::line(self.next_stamp(common), a, b, color, width);
-        self.commands.push(cmd);
+        let cmd = Draw2dCommand::line(self.next_header(common), a, b, color, width);
+        self.list.push_command(cmd);
     }
 
     /// Draw a polyline / polygon through `points` (closed when `closed`).
     pub fn path(&mut self, points: &[Vec2], style: Fill2d, common: Common2d, closed: bool) {
-        let cmd = Draw2dCommand::path(self.next_stamp(common), points.to_vec(), style, closed);
-        self.commands.push(cmd);
+        let cmd = Draw2dCommand::path(self.next_header(common), points.to_vec(), style, closed);
+        self.list.push_command(cmd);
     }
 
     // --- Sprites + text ---
@@ -130,15 +123,15 @@ impl Draw2dApi {
     /// Draw a textured sprite (source sub-rect / anchor / tint / flips ride on
     /// `opts`; placement on the current transform).
     pub fn sprite(&mut self, texture: TextureId, opts: SpriteDraw2d, common: Common2d) {
-        let cmd = Draw2dCommand::sprite(self.next_stamp(common), texture, opts);
-        self.commands.push(cmd);
+        let cmd = Draw2dCommand::sprite(self.next_header(common), texture, opts);
+        self.list.push_command(cmd);
     }
 
     /// Draw a glyph run as `KIND_TEXT_GLYPHS` — glyph sub-rects against a baked
     /// font atlas, the same shape as a sprite draw.
     pub fn text(&mut self, run: GlyphRun, opts: TextDraw2d, common: Common2d) {
-        let cmd = Draw2dCommand::text(self.next_stamp(common), run, opts);
-        self.commands.push(cmd);
+        let cmd = Draw2dCommand::text(self.next_header(common), run, opts);
+        self.list.push_command(cmd);
     }
 
     /// Measure a glyph run against `font` (width = sum of advances, height =
@@ -152,7 +145,7 @@ impl Draw2dApi {
     /// Register a linear gradient, returning its [`PaintId`]. A command's
     /// [`Fill2d`] references the paint by id; it never inlines stops.
     pub fn linear_gradient(&mut self, from: Vec2, to: Vec2, stops: &[GradientStop]) -> PaintId {
-        self.paints.register(Paint2d::linear(from, to, stops.to_vec()))
+        self.list.register_linear(from, to, stops.to_vec())
     }
 
     /// Register a radial gradient, returning its [`PaintId`].
@@ -162,32 +155,27 @@ impl Draw2dApi {
         radius: Meters,
         stops: &[GradientStop],
     ) -> PaintId {
-        self.paints
-            .register(Paint2d::radial(center, radius, stops.to_vec()))
+        self.list.register_radial(center, radius, stops.to_vec())
     }
 
     // --- Finalize ---
 
-    /// Finish the frame: **stable-sort by `(layer, submission)`** so equal
-    /// layers keep call order, then yield the neutral [`Draw2dList`] (commands,
-    /// paint table, resolved camera). Resets the surface for the next frame.
+    /// Finish the frame: take the accumulated list, **stable-sort it by
+    /// `(layer, submission)`** so equal layers keep call order, and yield the
+    /// neutral host-owned [`Draw2dList`]. Resets the surface for the next frame.
     pub fn finish(&mut self) -> Draw2dList {
-        let mut commands = std::mem::take(&mut self.commands);
-        commands.sort_by_key(|c| (c.layer(), c.submission_index()));
-        let paints = std::mem::take(&mut self.paints);
-        let camera = self.camera.take();
+        let mut out = std::mem::take(&mut self.list);
+        out.sort_commands();
         self.transform_stack.clear();
         self.next_submission = 0;
-        Draw2dList::new(commands, paints, camera)
+        out
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common2d::Shadow2d;
-    use crate::fill2d::Stroke2d;
-    use crate::text2d::{Glyph2d, TextAlign};
+    use axiom_host::{Glyph2d, Shadow2d, Stroke2d, TextAlign};
 
     fn ratio(v: f32) -> Ratio {
         Ratio::new(v).unwrap()

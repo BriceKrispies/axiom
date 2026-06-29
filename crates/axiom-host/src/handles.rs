@@ -1,9 +1,9 @@
-//! Opaque value-type id handles the [`crate::Draw2dApi`] facade traffics in.
+//! Opaque value-type id handles the neutral 2D draw contract traffics in.
 //!
 //! All four are plain `Copy` newtypes carrying no behaviour — the nouns the
-//! facade returns ([`TransformDepth`], [`PaintId`]) or accepts
-//! ([`TextureId`], [`FontHandle`]). They are re-exported as the crate's
-//! identity vocabulary via the single `pub use ids::{…}` line in `lib.rs`.
+//! `axiom-draw2d` builder returns ([`TransformDepth`], [`PaintId`]) or accepts
+//! ([`TextureId`], [`FontHandle`]). They are part of the host-owned neutral 2D
+//! draw contract every render backend names.
 
 /// A texture the backend will bind, resolved **in the app** (fetch/decode) and
 /// named here by a stable id. `axiom-draw2d` never loads pixels; it only names
@@ -41,9 +41,8 @@ impl FontHandle {
     }
 }
 
-/// A marker into the transform stack returned by
-/// [`crate::Draw2dApi::push_transform`]: the stack depth to restore to with
-/// [`crate::Draw2dApi::pop_transform`].
+/// A marker into the transform stack returned when the `axiom-draw2d` builder
+/// pushes a transform: the stack depth to restore to on the matching pop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransformDepth(usize);
 
@@ -59,10 +58,10 @@ impl TransformDepth {
     }
 }
 
-/// A handle into a frame's paint table, returned by
-/// [`crate::Draw2dApi::linear_gradient`] / [`crate::Draw2dApi::radial_gradient`]
-/// and referenced from a [`crate::Fill2d`]. A zero-based index into the per-frame
-/// table; it is only valid within the frame that minted it.
+/// A handle into a frame's paint table, returned when the `axiom-draw2d`
+/// builder registers a linear/radial gradient and referenced from a
+/// [`crate::Fill2d`]. A zero-based index into the per-frame table; it is only
+/// valid within the frame that minted it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PaintId(u32);
 
