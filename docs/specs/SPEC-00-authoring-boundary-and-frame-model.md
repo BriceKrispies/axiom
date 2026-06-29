@@ -21,14 +21,21 @@ All 11 games need a loop and an outcome seam. None of them should write it.
   `FixedStep` from `fixed_step_nanos`) advances exactly one deterministic step;
   `axiom-frame` owns the per-frame envelope (`FrameContext`, `FrameCommandQueue`,
   `frame_timing`). This is the real engine loop.
-- **No author loop, no `createGame`, no `Sim`, no `onFixedUpdate`/`onRender`.**
-  The loop is driven today only by app `main`s and `axiom-windowing`'s live
-  binding. There is no registration API and no presentation/sim callback split.
-- **No TS authoring package.** `packages/axiom-client` exports `AxiomClient`,
-  transports, and the wire codec — nothing game-authoring.
-- **Variable-dt accumulator: missing.** The core is strict fixed-step; the
-  contract's "0..N fixed updates then one render with `alpha`" accumulator is not
-  implemented anywhere.
+- **Author loop, `createGame`, `Sim`, `onFixedUpdate`/`onRender`: landed.**
+  `@axiom/game` exposes `createGame`/`onFixedUpdate`/`onRender` and the pure
+  branchless `stepFrame`/`GameLoop` core (driven by a `NativeBridge`), with the
+  presentation/sim callback split made explicit. The platform-edge RAF driver
+  drives the loop.
+- **TS authoring package: landed.** `packages/axiom-game` (`@axiom/game`) is the
+  authoring surface (held to the TS spine laws), distinct from
+  `packages/axiom-client` (the netcode transport).
+- **Variable-dt accumulator: landed.** `axiom-frame::FrameAccumulator` folds a
+  real elapsed interval into an integer `StepBudget` (`steps` + `remainder_nanos`
+  + `fixed_step_nanos`). Per the §4.1 refinement it is **integer-pure** — it does
+  not carry `alpha: Ratio`; the presentation boundary computes the `0..1`
+  fraction from `remainder_nanos / fixed_step_nanos` itself.
+- **One genuine gap remains:** the `Rect` core value-type (§5) is still absent
+  from the shipped value vocabulary — every other §0–§2 piece is now in place.
 
 ## 3. Architectural placement
 

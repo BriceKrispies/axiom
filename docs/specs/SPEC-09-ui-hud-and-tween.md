@@ -174,10 +174,23 @@ style records, reused unchanged; the app translates them onto `UiFill`/`UiTextOp
 ## 6. Determinism
 
 - **Presentation-excluded (§17.5).** The Ui surface draws in screen space, is
-  camera-independent, and reads a presentation pointer snapshot; tweens advance on
-  the **presentation clock** (a fed-in elapsed interval). **No** value from either
-  may be read back into a `sim`-class API — a HUD readout reflects sim state, it
-  never sets it; a tweened display value never feeds a fixed update.
+  camera-independent, and reads a presentation pointer snapshot. **No** value from
+  either the Ui surface or a tween may be read back into a `sim`-class API — a HUD
+  readout reflects sim state, it never sets it; a tweened display value never feeds
+  a fixed update.
+- **As-shipped, tweens advance on the FIXED SIM TICK, not the presentation clock.**
+  The native `TweenApi` core is itself **clock-neutral** — `advance(elapsed_nanos)`
+  takes an opaque elapsed interval and `TweenSpec.duration_nanos` is in nanoseconds,
+  so the core does not know which clock drives it. The shipped runtime, however,
+  pumps it on the fixed tick: `apps/axiom-game-runtime/src/time.rs` converts an
+  author's whole-tick `duration` to nanoseconds against the fixed step and calls
+  `TweenApi::advance(fixed_step_nanos)` once per fixed tick inside the step loop
+  (the same cadence as the SPEC-07 timer wheel), and `@axiom/game`'s `tweens.ts`
+  samples through that per-tick `TickPump`. So in the current build a tween's
+  progress is a deterministic function of the tick count, not of real frame time.
+  (A future presentation-clock variant could feed the same clock-neutral core a
+  real frame-delta instead; the contract above describes that intended split, but
+  the runtime as shipped is tick-driven.)
 - **Spine discipline still holds.** Both cores are deterministic given their
   inputs (same pointer snapshot ⇒ same `button` result; same elapsed sequence ⇒
   same samples — and, like the SPEC-00 accumulator, sampling at total elapsed `T`

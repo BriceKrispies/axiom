@@ -1,7 +1,7 @@
 # SPEC-14 — TypeScript authoring SDK (`@axiom/game`)
 
-> Status: Landed
-> Landed (2026-06-28): `@axiom/game` ships the `Scene` shell + the seven factory namespaces, now wired to the real subsystem projections (`this.add`/`physics`/`input`/`tweens`/`sound`/`time`/`cameras`) backed by `apps/axiom-game-runtime` (`WasmGame`). Gate green: tsgo + Oxlint (every category an error + the branch ban) + 100% `node:test`. The §2 stubs are now filled.
+> Status: Partial — loop + Sim-level projections landed; the `Scene` factories are still M0 stubs and the `Scene` lifecycle is not driven by the loop.
+> Landed (2026-06-28): `@axiom/game` ships `createGame`/`onFixedUpdate`/`onRender`, the pure `stepFrame`/`GameLoop` core, and the **Sim-level** subsystem projections (e.g. `Sim.tweens`, the bridged math/grid/audio surface) backed by `apps/axiom-game-runtime` (`WasmGame`). Gate green: tsgo + Oxlint (every category an error + the branch ban) + 100% `node:test`. **Still stubs:** the `Scene` shell's seven `this.*` factory namespaces (`add`/`physics`/`input`/`tweens`/`sound`/`time`/`cameras`) remain M0 discriminated placeholders (`{ subsystem: "…" }`) — none spawn/animate/route input — and the `Scene` lifecycle is **not** driven by the loop (`GameLoop` never calls `Scene.create`/`update`; `Scene` is only re-exported). The §2 `Scene`-factory stubs are **not** yet filled.
 > Contract: §1–§4   Vocabulary: Phaser-style `Scene`, `createGame`, factory namespaces, the retained-ECS game object   Determinism: boundary (projects through SPEC-00)
 
 ## 1. Summary

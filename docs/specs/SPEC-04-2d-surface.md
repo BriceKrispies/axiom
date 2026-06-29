@@ -14,8 +14,9 @@ need a 2D drawing surface — to paint shapes, text/score HUDs, sprites,
 backgrounds, gradients, glow, and particle bursts — and **today none of it
 exists**. The contract's `Frame` 2D interface (§10) is entirely unbacked: there
 is no author-facing 2D draw at all, no text rendering anywhere in the tree, no
-2D shape/gradient/particle/transform primitives, no per-draw layer/z ordering,
-and no alpha blending (the GPU backend is hardcoded `REPLACE`).
+2D shape/gradient/particle/transform primitives, and no per-draw layer/z
+ordering. (The GPU blend gap that originally motivated this spec has since been
+closed — the 3D main pass now uses `ALPHA_BLENDING`; see §2.)
 
 The two existing "2D backends" (`axiom-canvas2d-backend`, `axiom-gpu-backend`)
 are **3D-scene → 2D-framebuffer rasterizers** — they consume a 3D `FramePacket`
@@ -46,10 +47,14 @@ presentation clock and never re-enters sim** (§17.5).
   `measureText`. The vocabulary's `n=11` text gap is real and total.
 - **No 2D shapes / gradients / particles / transform stack.** None of these
   primitives exist in any form.
-- **Blend is hardcoded `REPLACE`** in the GPU backend
-  (`scene_renderer.rs:643`, `upscale.rs:134` both `wgpu::BlendState::REPLACE`).
-  There is **no alpha blending** — opaque overwrite only. The 2D surface's
-  `alpha`/`shadow`/gradients are unimplementable without a real blend path.
+- **Alpha blending now exists in the GPU backend (the original premise is
+  fixed).** The 3D main pass uses `wgpu::BlendState::ALPHA_BLENDING`
+  (`scene_renderer.rs` `blend_state`, with an `additive` seam for glow), so an
+  `alpha`/`shadow`/gradient draw composites rather than overwriting. Only the
+  upscale blit retains `REPLACE` (`upscale.rs:134`) — correct, since a full-frame
+  blit needs no compositing. The 2D surface's blend dependency is therefore
+  satisfied at the backend level; what is missing is the 2D draw-list itself and
+  the per-draw blend-mode selection that rides on its resolved `alpha`/shadow.
 - **Draw order = submit order.** Both backends present commands in list order
   with depth sorting on the *3D* z, not a 2D `layer`. There is **no layer/z
   reorder** for 2D draws — confirming the contract's `layer` field must be
