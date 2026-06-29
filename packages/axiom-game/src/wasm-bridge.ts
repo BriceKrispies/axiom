@@ -31,7 +31,7 @@
  */
 
 import type { Component, Handle, Result, Ticks, Vec2, Vec3 } from "./vocabulary.ts";
-import type { NativeBridge, PointerSample, Swipe } from "./native-bridge.ts";
+import type { NativeBridge, PointerSample, Swipe, TweenCurve } from "./native-bridge.ts";
 import { each, orElse, pick } from "./control-flow.ts";
 import type { StepBudget } from "./step-budget.ts";
 
@@ -62,6 +62,7 @@ export interface WasmGameExport
     | "physicsApplyTorque"
     | "physicsSetVelocity"
     | "physicsSetAngularVelocity"
+    | "tweenAdd"
     | "worldSpawn"
     | "worldDespawn"
     | "worldDespawnSubtree"
@@ -102,6 +103,14 @@ export interface WasmGameExport
   readonly physicsApplyTorque: (body: Handle, x: number, y: number, z: number) => void;
   readonly physicsSetVelocity: (body: Handle, x: number, y: number, z: number) => void;
   readonly physicsSetAngularVelocity: (body: Handle, x: number, y: number, z: number) => void;
+  // Tweens (SPEC-09): the `TweenCurve` struct crosses as scalar `(from, to, durationTicks, easeIndex)`.
+  readonly tweenAdd: (
+    tick: Ticks,
+    from: number,
+    to: number,
+    durationTicks: Ticks,
+    easeIndex: number,
+  ) => Handle;
   // Retained world (SPEC-02): `(kind, fields-bytes)`; entities cross as numbers.
   readonly worldSpawn: () => number;
   readonly worldDespawn: (entity: number) => void;
@@ -376,6 +385,12 @@ const adaptPhysicsSetAngularVelocity =
     game.physicsSetAngularVelocity(body, velocity.x, velocity.y, velocity.z);
   };
 
+/** Adapt `tweenAdd`: destructure the `TweenCurve` struct into the scalar boundary args. */
+const adaptTweenAdd =
+  (game: WasmGameExport) =>
+  (tick: Ticks, curve: TweenCurve): Handle =>
+    game.tweenAdd(tick, curve.from, curve.to, curve.durationTicks, curve.easeIndex);
+
 /** Adapt the snake_case wasm `WasmGame` to the loop core's camelCase NativeBridge. */
 export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   advance: adaptAdvance(game),
@@ -408,7 +423,7 @@ export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   timerEvery: game.timerEvery,
   timersDue: game.timersDue,
   tweenActive: game.tweenActive,
-  tweenAdd: game.tweenAdd,
+  tweenAdd: adaptTweenAdd(game),
   tweenCancel: game.tweenCancel,
   tweenCompleted: game.tweenCompleted,
   tweenValue: game.tweenValue,

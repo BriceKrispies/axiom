@@ -295,6 +295,8 @@ dependencies = [
  "axiom-physics",
  "axiom-runtime",
  "axiom-space",
+ "axiom-tick",
+ "axiom-tween",
  "console_error_panic_hook",
  "wasm-bindgen",
  "web-sys",

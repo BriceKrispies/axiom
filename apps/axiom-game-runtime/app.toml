@@ -32,4 +32,9 @@ allowed_modules = [
     "physics",
     # The per-tick intent-snapshot facade (SPEC-05) the bridge samples each tick.
     "input",
+    # Timers + state machines (SPEC-07): the deterministic tick wheel the bridge
+    # pumps once per fixed tick.
+    "tick",
+    # Tick-sampled tweens (SPEC-09): the eased-curve table the bridge samples.
+    "tween",
 ]

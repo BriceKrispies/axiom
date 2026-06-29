@@ -56,6 +56,13 @@ mod physics;
 /// Native-testable; the `wasm32` boundary marshals to it through `GameBridge`.
 mod input;
 
+/// Timers + state machines (SPEC-07) and tick-sampled tweens (SPEC-09): the
+/// deterministic `axiom-tick` timer wheel + state machines and the `axiom-tween`
+/// eased-curve table composed into [`GameBridge`], pumped once per fixed tick
+/// inside the loop and projected to the TS `NativeBridge` timer / machine / tween
+/// reads. Native-testable; the `wasm32` boundary marshals to it through `GameBridge`.
+mod time;
+
 /// The embed seam (SPEC-12): decode the inbound session config, latch the single
 /// outbound outcome. Pure, native-testable core; the browser channel that carries
 /// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on
