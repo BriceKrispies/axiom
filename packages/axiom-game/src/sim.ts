@@ -19,7 +19,7 @@
  */
 
 import { type Add, makeAdd } from "./game-object.ts";
-import type { EmitterConfig, ShapeStyle } from "./draw2d-binding.ts";
+import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle } from "./draw2d-binding.ts";
 import type { Handle, Rect, Vec2 } from "./vocabulary.ts";
 import { type Input, makeInput } from "./input.ts";
 import { type Physics, makePhysics } from "./physics.ts";
@@ -60,19 +60,26 @@ export interface Sim {
  * `axiom-draw2d` builder (through the installed `HostBridge`), so nothing is
  * rasterized in TS. The surface is only legal from `onRender`; it never feeds sim.
  *
- * Today's verbs are exactly those the Wave-2 `draw2d*` exports back: filled `rect`
- * and `circle`, the particle system (`createEmitter`/`emit`/`advanceParticles`),
- * and render targets (`createRenderTarget`/`drawTo`/`targetTexture`), plus `finish`
- * to drain the layer-sorted command list. `sprite`/`text`/`camera2D`/`measureText`
- * and gradient/stroke/shadow fills (SPEC-04 §4.2) await their draw2d exports.
+ * Today's verbs are those the Wave-2.5 `draw2d*` exports back: the 2D `camera2D`;
+ * filled / stroked `rect`, `circle`, and `ellipse`; the self-coloured `line`; the
+ * particle system (`createEmitter`/`emit`/`advanceParticles`); and render targets
+ * (`createRenderTarget`/`drawTo`/`targetTexture`), plus `finish` to drain the
+ * layer-sorted command list. `sprite`/`text`/`measureText`, `path`, and
+ * gradient/shadow fills (SPEC-04 §4.2) await their draw2d exports.
  */
 export interface Frame {
   /** The latest completed fixed tick this frame presents. */
   readonly tick: number;
-  /** Draw a filled rectangle (SPEC-04 §10). */
+  /** Set the 2D camera — world `center` + `zoom` (SPEC-04 §10). */
+  readonly camera2D: (view: { center: Vec2; zoom: number }) => void;
+  /** Draw a filled / stroked rectangle (SPEC-04 §10). */
   readonly rect: (bounds: Rect, style: ShapeStyle) => void;
-  /** Draw a filled circle centred at `center` (SPEC-04 §10). */
+  /** Draw a filled / stroked circle centred at `center` (SPEC-04 §10). */
   readonly circle: (center: Vec2, radius: number, style: ShapeStyle) => void;
+  /** Draw a filled / stroked (optionally rotated) ellipse (SPEC-04 §10). */
+  readonly ellipse: (center: Vec2, radii: EllipseRadii, style: ShapeStyle) => void;
+  /** Draw a straight line segment of its own colour + width (SPEC-04 §10). */
+  readonly line: (from: Vec2, to: Vec2, style: LineStyle) => void;
   /** Register a particle emitter, returning its handle (SPEC-04 §10.1). */
   readonly createEmitter: (config: EmitterConfig) => Handle;
   /** Spawn a particle burst from `id` at `at` flying along `direction` (SPEC-04 §10.1). */
@@ -126,6 +133,9 @@ export const makeFrame = (tick: number): Frame => ({
   advanceParticles: (dtSeconds: number): void => {
     boundHost().draw2dAdvanceParticles(dtSeconds);
   },
+  camera2D: (view: { center: Vec2; zoom: number }): void => {
+    boundHost().draw2dCamera2d(view.center, view.zoom);
+  },
   circle: (center: Vec2, radius: number, style: ShapeStyle): void => {
     boundHost().draw2dCircle(center, radius, style);
   },
@@ -136,10 +146,16 @@ export const makeFrame = (tick: number): Frame => ({
     draw(makeFrame(tick));
     boundHost().draw2dEndTarget();
   },
+  ellipse: (center: Vec2, radii: EllipseRadii, style: ShapeStyle): void => {
+    boundHost().draw2dEllipse(center, radii, style);
+  },
   emit: (id: Handle, at: Vec2, direction: Vec2): void => {
     boundHost().draw2dEmit(id, at, direction);
   },
   finish: (): readonly number[] => boundHost().draw2dFinish(),
+  line: (from: Vec2, to: Vec2, style: LineStyle): void => {
+    boundHost().draw2dLine(from, to, style);
+  },
   rect: (bounds: Rect, style: ShapeStyle): void => {
     boundHost().draw2dRect(bounds, style);
   },

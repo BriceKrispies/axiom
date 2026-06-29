@@ -28,8 +28,11 @@ const emitterConfig: EmitterConfig = {
 test("the unbound 2D surface is inert until a host is bound", () => {
   const inert = boundHost();
   assert.doesNotThrow(() => {
+    inert.draw2dCamera2d({ x: 0, y: 0 }, 1);
     inert.draw2dRect({ height: 1, width: 1, x: 0, y: 0 }, { fill: RED });
     inert.draw2dCircle({ x: 0, y: 0 }, 1, { fill: RED });
+    inert.draw2dEllipse({ x: 0, y: 0 }, { rotation: 0, rx: 2, ry: 1 }, { fill: RED });
+    inert.draw2dLine({ x: 0, y: 0 }, { x: 1, y: 1 }, { color: RED, width: 1 });
     inert.draw2dEmit(0, { x: 0, y: 0 }, { x: 1, y: 0 });
     inert.draw2dAdvanceParticles(0.016);
     inert.draw2dBeginTarget(0);
@@ -51,6 +54,22 @@ test("frame.rect and frame.circle forward the geometry and style to the bridge",
     { bounds: { height: 4, width: 3, x: 1, y: 2 }, style: { alpha: 0.5, fill: RED, layer: 2 } },
   ]);
   assert.deepEqual(host.draw2dCircles, [{ center: { x: 5, y: 6 }, radius: 7, style: { fill: GREEN } }]);
+});
+
+test("frame.camera2D, ellipse, and line forward to the bridge", () => {
+  const host = new FakeHost();
+  bindNative(host);
+  const frame = makeFrame(4);
+  frame.camera2D({ center: { x: 3, y: 4 }, zoom: 2 });
+  frame.ellipse({ x: 5, y: 6 }, { rotation: 0.5, rx: 4, ry: 2 }, { fill: RED, layer: 1, stroke: GREEN, strokeWidth: 2 });
+  frame.line({ x: 0, y: 0 }, { x: 10, y: 0 }, { alpha: 0.5, color: GREEN, width: 3 });
+  assert.deepEqual(host.draw2dCameras, [{ center: { x: 3, y: 4 }, zoom: 2 }]);
+  assert.deepEqual(host.draw2dEllipses, [
+    { center: { x: 5, y: 6 }, radii: { rotation: 0.5, rx: 4, ry: 2 }, style: { fill: RED, layer: 1, stroke: GREEN, strokeWidth: 2 } },
+  ]);
+  assert.deepEqual(host.draw2dLines, [
+    { from: { x: 0, y: 0 }, style: { alpha: 0.5, color: GREEN, width: 3 }, to: { x: 10, y: 0 } },
+  ]);
 });
 
 test("frame particle verbs forward to the emitter bridge", () => {

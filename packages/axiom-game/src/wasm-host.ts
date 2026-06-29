@@ -71,7 +71,7 @@ import {
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
 import type { Cell, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
-import type { EmitterConfig, ShapeStyle } from "./draw2d-binding.ts";
+import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle } from "./draw2d-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -148,9 +148,12 @@ export interface WasmHostExport {
   readonly playTone: (waveIndex: number, freq: number, duration: number, volume: number) => number;
   readonly setMasterVolume: (volume: number) => void;
   readonly setMuted: (muted: boolean) => void;
-  // Draw2d (SPEC-04 §10): colours arrive packed as a `0xRRGGBBAA` u32; points/bounds/emitter-config cross as `Float64Array` slices; handles cross as numbers; `draw2dFinish` returns the flat command list.
-  readonly draw2dRect: (bounds: Float64Array, fill: number, layer: number, alpha: number) => void;
-  readonly draw2dCircle: (center: Float64Array, radius: number, fill: number, layer: number, alpha: number) => void;
+  // Draw2d (SPEC-04 §10): colours arrive packed as a `0xRRGGBBAA` u32; points/bounds/emitter-config/ellipse-geom cross as `Float64Array` slices; handles cross as numbers; `draw2dFinish` returns the flat command list.
+  readonly draw2dCamera2d: (center: Float64Array, zoom: number) => void;
+  readonly draw2dRect: (bounds: Float64Array, fill: number, stroke: number, strokeWidth: number, layer: number, alpha: number) => void;
+  readonly draw2dCircle: (center: Float64Array, radius: number, fill: number, stroke: number, strokeWidth: number, layer: number, alpha: number) => void;
+  readonly draw2dEllipse: (geom: Float64Array, fill: number, stroke: number, strokeWidth: number, layer: number, alpha: number) => void;
+  readonly draw2dLine: (from: Float64Array, to: Float64Array, color: number, width: number, layer: number, alpha: number) => void;
   readonly draw2dCreateEmitter: (config: Float64Array) => number;
   readonly draw2dEmit: (id: number, at: Float64Array, direction: Float64Array) => void;
   readonly draw2dAdvanceParticles: (dt: number) => void;
@@ -418,9 +421,64 @@ const packEmitter = (config: EmitterConfig): Float64Array => {
 };
 
 /** The 2D drawing `HostBridge` ops (SPEC-04 §10), every one forwarding to the native `axiom-draw2d` builder via the Wave-2 `draw2d*` exports. */
-const draw2dBridge = (game: WasmHostExport): Pick<
+/** The default radians an ellipse's omitted `rotation` resolves to (axis-aligned). */
+const NO_ROTATION = 0;
+
+/** The 2D shape `HostBridge` ops (SPEC-04 §10): camera + the filled/stroked shapes + the self-coloured line, every one packing its colours to `0xRRGGBBAA` and defaulting `stroke`/`strokeWidth`/`layer`/`alpha` host-side. */
+const draw2dShapeBridge = (game: WasmHostExport): Pick<
   HostBridge,
-  | "draw2dRect" | "draw2dCircle" | "draw2dCreateEmitter" | "draw2dEmit" | "draw2dAdvanceParticles"
+  "draw2dCamera2d" | "draw2dRect" | "draw2dCircle" | "draw2dEllipse" | "draw2dLine"
+> => ({
+  draw2dCamera2d: (center: Vec2, zoom: number): void => {
+    game.draw2dCamera2d(packVec2(center), zoom);
+  },
+  draw2dCircle: (center: Vec2, radius: number, style: ShapeStyle): void => {
+    game.draw2dCircle(
+      packVec2(center),
+      radius,
+      packRgba(style.fill),
+      packRgba(orElse(style.stroke, TRANSPARENT)),
+      orElse(style.strokeWidth, NO_STROKE_WIDTH),
+      orElse(style.layer, DEFAULT_LAYER),
+      orElse(style.alpha, FULL_ALPHA),
+    );
+  },
+  draw2dEllipse: (center: Vec2, radii: EllipseRadii, style: ShapeStyle): void => {
+    game.draw2dEllipse(
+      Float64Array.from([center.x, center.y, radii.rx, radii.ry, orElse(radii.rotation, NO_ROTATION)]),
+      packRgba(style.fill),
+      packRgba(orElse(style.stroke, TRANSPARENT)),
+      orElse(style.strokeWidth, NO_STROKE_WIDTH),
+      orElse(style.layer, DEFAULT_LAYER),
+      orElse(style.alpha, FULL_ALPHA),
+    );
+  },
+  draw2dLine: (from: Vec2, to: Vec2, style: LineStyle): void => {
+    game.draw2dLine(
+      packVec2(from),
+      packVec2(to),
+      packRgba(style.color),
+      style.width,
+      orElse(style.layer, DEFAULT_LAYER),
+      orElse(style.alpha, FULL_ALPHA),
+    );
+  },
+  draw2dRect: (bounds: Rect, style: ShapeStyle): void => {
+    game.draw2dRect(
+      packRect(bounds),
+      packRgba(style.fill),
+      packRgba(orElse(style.stroke, TRANSPARENT)),
+      orElse(style.strokeWidth, NO_STROKE_WIDTH),
+      orElse(style.layer, DEFAULT_LAYER),
+      orElse(style.alpha, FULL_ALPHA),
+    );
+  },
+});
+
+/** The 2D particle + render-target + finalize `HostBridge` ops (SPEC-04 §10.1 / §10.3), forwarding to the native `axiom-draw2d` builder. */
+const draw2dSystemBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  | "draw2dCreateEmitter" | "draw2dEmit" | "draw2dAdvanceParticles"
   | "draw2dCreateRenderTarget" | "draw2dBeginTarget" | "draw2dEndTarget" | "draw2dTargetTexture" | "draw2dFinish"
 > => ({
   draw2dAdvanceParticles: (dtSeconds: number): void => {
@@ -428,15 +486,6 @@ const draw2dBridge = (game: WasmHostExport): Pick<
   },
   draw2dBeginTarget: (target: Handle): void => {
     game.draw2dBeginTarget(target);
-  },
-  draw2dCircle: (center: Vec2, radius: number, style: ShapeStyle): void => {
-    game.draw2dCircle(
-      packVec2(center),
-      radius,
-      packRgba(style.fill),
-      orElse(style.layer, DEFAULT_LAYER),
-      orElse(style.alpha, FULL_ALPHA),
-    );
   },
   draw2dCreateEmitter: (config: EmitterConfig): Handle => game.draw2dCreateEmitter(packEmitter(config)),
   draw2dCreateRenderTarget: (width: number, height: number): Handle => game.draw2dCreateRenderTarget(width, height),
@@ -447,16 +496,16 @@ const draw2dBridge = (game: WasmHostExport): Pick<
     game.draw2dEndTarget();
   },
   draw2dFinish: (): readonly number[] => [...game.draw2dFinish()],
-  draw2dRect: (bounds: Rect, style: ShapeStyle): void => {
-    game.draw2dRect(
-      packRect(bounds),
-      packRgba(style.fill),
-      orElse(style.layer, DEFAULT_LAYER),
-      orElse(style.alpha, FULL_ALPHA),
-    );
-  },
   draw2dTargetTexture: (target: Handle): Handle => game.draw2dTargetTexture(target),
 });
+
+/** The whole 2D drawing `HostBridge` (SPEC-04 §10): the shape verbs + the particle/render-target/finalize verbs, every one forwarding to the native `axiom-draw2d` builder via the Wave-2.5 `draw2d*` exports. */
+const draw2dBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  | "draw2dCamera2d" | "draw2dRect" | "draw2dCircle" | "draw2dEllipse" | "draw2dLine"
+  | "draw2dCreateEmitter" | "draw2dEmit" | "draw2dAdvanceParticles"
+  | "draw2dCreateRenderTarget" | "draw2dBeginTarget" | "draw2dEndTarget" | "draw2dTargetTexture" | "draw2dFinish"
+> => Object.assign(draw2dShapeBridge(game), draw2dSystemBridge(game));
 
 /** The 3D scene-authoring `HostBridge` ops (SPEC-11), forwarding to the native runtime scene authoring on `RunningApp` (`add_mesh` / `add_material` / `set_camera` / `add_light`). */
 const scene3dBridge = (game: WasmHostExport): Pick<

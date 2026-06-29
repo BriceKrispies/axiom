@@ -22,8 +22,8 @@
 //! accessors on the host contract, a follow-up the boundary does not yet flatten).
 
 use axiom_draw2d::{EmitterConfig, EmitterId};
-use axiom_host::{Common2d, Fill2d, Rect, RenderTargetId, Rgba};
-use axiom_kernel::{Meters, Ratio, Seconds};
+use axiom_host::{Common2d, Fill2d, Rect, RenderTargetId, Rgba, Stroke2d};
+use axiom_kernel::{Meters, Radians, Ratio, Seconds};
 use axiom_math::Vec2;
 
 use crate::GameBridge;
@@ -41,6 +41,19 @@ fn meters(value: f64) -> Meters {
 /// A finite [`Seconds`] from a boundary scalar (non-finite ⇒ zero).
 fn seconds(value: f64) -> Seconds {
     Seconds::new(value as f32).unwrap_or_else(|_| Seconds::new(0.0).expect("0.0 is finite"))
+}
+
+/// A finite [`Radians`] from a boundary scalar (non-finite ⇒ zero).
+fn radians(value: f64) -> Radians {
+    Radians::new(value as f32).unwrap_or_else(|_| Radians::new(0.0).expect("0.0 is finite"))
+}
+
+/// A [`Fill2d`] from a packed solid fill plus a packed stroke colour + width. The
+/// stroke is always attached — a transparent (`0x00000000`) colour with a `0`
+/// width composites nothing, so an unstroked shape needs no branch at the
+/// boundary.
+fn styled_fill(fill: u32, stroke: u32, stroke_width: f64) -> Fill2d {
+    Fill2d::color(rgba(fill)).with_stroke(Stroke2d::new(rgba(stroke), meters(stroke_width)))
 }
 
 /// A `Vec2` from a 2-element boundary slice (missing entries read `0`).
@@ -112,24 +125,51 @@ impl GameBridge {
         self.draw2d.target_texture(RenderTargetId::from_raw(target as u32)).raw()
     }
 
-    /// Draw a filled rectangle (`draw2dRect`); `bounds = [x, y, w, h]`.
-    pub fn draw2d_rect(&mut self, bounds: &[f64], fill: u32, layer: i32, alpha: f64) {
+    /// Set the 2D camera (`draw2dCamera2d`); `center = [x, y]`, `zoom` a positive
+    /// scale (non-finite ⇒ zero).
+    pub fn draw2d_camera2d(&mut self, center: &[f64], zoom: f64) {
+        self.draw2d
+            .set_camera2d(vec2(center), Ratio::finite_or_zero(zoom as f32));
+    }
+
+    /// Draw a filled / stroked rectangle (`draw2dRect`); `bounds = [x, y, w, h]`.
+    pub fn draw2d_rect(&mut self, bounds: &[f64], fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
         let rect = Rect::new(
             Vec2::new(at(bounds, 0) as f32, at(bounds, 1) as f32),
             Vec2::new(at(bounds, 2) as f32, at(bounds, 3) as f32),
         );
         self.draw2d
-            .rect(rect, Fill2d::color(rgba(fill)), common(layer, alpha));
+            .rect(rect, styled_fill(fill, stroke, stroke_width), common(layer, alpha));
     }
 
-    /// Draw a filled circle (`draw2dCircle`); `center = [x, y]`.
-    pub fn draw2d_circle(&mut self, center: &[f64], radius: f64, fill: u32, layer: i32, alpha: f64) {
+    /// Draw a filled / stroked circle (`draw2dCircle`); `center = [x, y]`.
+    pub fn draw2d_circle(&mut self, center: &[f64], radius: f64, fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
         self.draw2d.circle(
             vec2(center),
             meters(radius),
-            Fill2d::color(rgba(fill)),
+            styled_fill(fill, stroke, stroke_width),
             common(layer, alpha),
         );
+    }
+
+    /// Draw a filled / stroked (optionally rotated) ellipse (`draw2dEllipse`);
+    /// `geom = [centerX, centerY, rx, ry, rotation]` (rotation in radians).
+    pub fn draw2d_ellipse(&mut self, geom: &[f64], fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
+        self.draw2d.ellipse(
+            Vec2::new(at(geom, 0) as f32, at(geom, 1) as f32),
+            meters(at(geom, 2)),
+            meters(at(geom, 3)),
+            radians(at(geom, 4)),
+            styled_fill(fill, stroke, stroke_width),
+            common(layer, alpha),
+        );
+    }
+
+    /// Draw a straight line segment (`draw2dLine`) of its own `color` and `width`;
+    /// `a = [x, y]`, `b = [x, y]`.
+    pub fn draw2d_line(&mut self, a: &[f64], b: &[f64], color: u32, width: f64, layer: i32, alpha: f64) {
+        self.draw2d
+            .line(vec2(a), vec2(b), rgba(color), meters(width), common(layer, alpha));
     }
 
     /// Finish the frame and return the layer-sorted main command list as a flat
@@ -201,23 +241,43 @@ mod wasm_exports {
             self.bridge.draw2d_target_texture(target as u64) as f64
         }
 
-        /// Draw a filled rectangle (`draw2dRect`).
-        #[wasm_bindgen(js_name = draw2dRect)]
-        pub fn draw2d_rect(&mut self, bounds: &[f64], fill: u32, layer: i32, alpha: f64) {
-            self.bridge.draw2d_rect(bounds, fill, layer, alpha);
+        /// Set the 2D camera (`draw2dCamera2d`).
+        #[wasm_bindgen(js_name = draw2dCamera2d)]
+        pub fn draw2d_camera2d(&mut self, center: &[f64], zoom: f64) {
+            self.bridge.draw2d_camera2d(center, zoom);
         }
 
-        /// Draw a filled circle (`draw2dCircle`).
+        /// Draw a filled / stroked rectangle (`draw2dRect`).
+        #[wasm_bindgen(js_name = draw2dRect)]
+        pub fn draw2d_rect(&mut self, bounds: &[f64], fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
+            self.bridge.draw2d_rect(bounds, fill, stroke, stroke_width, layer, alpha);
+        }
+
+        /// Draw a filled / stroked circle (`draw2dCircle`).
         #[wasm_bindgen(js_name = draw2dCircle)]
         pub fn draw2d_circle(
             &mut self,
             center: &[f64],
             radius: f64,
             fill: u32,
+            stroke: u32,
+            stroke_width: f64,
             layer: i32,
             alpha: f64,
         ) {
-            self.bridge.draw2d_circle(center, radius, fill, layer, alpha);
+            self.bridge.draw2d_circle(center, radius, fill, stroke, stroke_width, layer, alpha);
+        }
+
+        /// Draw a filled / stroked ellipse (`draw2dEllipse`).
+        #[wasm_bindgen(js_name = draw2dEllipse)]
+        pub fn draw2d_ellipse(&mut self, geom: &[f64], fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
+            self.bridge.draw2d_ellipse(geom, fill, stroke, stroke_width, layer, alpha);
+        }
+
+        /// Draw a straight line segment (`draw2dLine`).
+        #[wasm_bindgen(js_name = draw2dLine)]
+        pub fn draw2d_line(&mut self, a: &[f64], b: &[f64], color: u32, width: f64, layer: i32, alpha: f64) {
+            self.bridge.draw2d_line(a, b, color, width, layer, alpha);
         }
 
         /// Finish the frame, returning the flat command list (`draw2dFinish`).
@@ -258,11 +318,12 @@ mod tests {
     /// and a 3-particle burst (layer 5). Returns the flat finished command list.
     fn frame() -> Vec<f64> {
         let mut b = bridge();
+        b.draw2d_camera2d(&[0.0, 0.0], 1.0);
         let target = b.draw2d_create_render_target(64, 32);
         b.draw2d_begin_target(target);
-        b.draw2d_rect(&[0.0, 0.0, 10.0, 10.0], 0xff00_00ff, 0, 1.0);
+        b.draw2d_rect(&[0.0, 0.0, 10.0, 10.0], 0xff00_00ff, 0x0000_00ff, 1.0, 0, 1.0);
         b.draw2d_end_target();
-        b.draw2d_circle(&[1.0, 1.0], 2.0, 0x00ff_00ff, 1, 1.0);
+        b.draw2d_circle(&[1.0, 1.0], 2.0, 0x00ff_00ff, 0, 0.0, 1, 1.0);
         let e = b.draw2d_create_emitter(&emitter());
         b.draw2d_emit(e, &[0.0, 0.0], &[1.0, 0.0]);
         b.draw2d_advance_particles(0.5);
@@ -283,6 +344,22 @@ mod tests {
         assert_eq!(list[4], 5.0); // particle layer
         // Same facade calls + same dt ⇒ byte-identical command list.
         assert_eq!(frame(), list);
+    }
+
+    #[test]
+    fn ellipse_and_line_verbs_record_their_kinds_in_layer_order() {
+        let mut b = bridge();
+        // An ellipse on layer 0 and a line on layer 2, submitted line-first.
+        b.draw2d_line(&[0.0, 0.0], &[10.0, 0.0], 0xffff_00ff, 2.0, 2, 1.0);
+        b.draw2d_ellipse(&[5.0, 5.0, 4.0, 2.0, 0.5], 0x00ff_00ff, 0xff00_00ff, 1.0, 0, 1.0);
+        let list = b.draw2d_finish();
+        // 2 commands × 3 columns; layer-sorted so the layer-0 ellipse (KIND 3)
+        // precedes the layer-2 line (KIND 4).
+        assert_eq!(list.len(), 6);
+        assert_eq!(list[0], 3.0); // KIND_ELLIPSE
+        assert_eq!(list[1], 0.0); // its layer
+        assert_eq!(list[3], 4.0); // KIND_LINE
+        assert_eq!(list[4], 2.0); // its layer
     }
 
     #[test]
