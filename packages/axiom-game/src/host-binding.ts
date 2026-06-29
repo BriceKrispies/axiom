@@ -28,6 +28,7 @@ import {
   ZERO_VEC3,
 } from "./host-descriptors.ts";
 import type { Cell, Entity, Handle, Mat4, PlayerId, Quat, Result, Vec3 } from "./vocabulary.ts";
+import { type Draw2dBridge, UNBOUND_DRAW2D } from "./draw2d-binding.ts";
 
 /** Host-supplied session configuration: a seed plus opaque parameters (SPEC-12). */
 export interface SessionConfig {
@@ -84,8 +85,8 @@ export interface Outcome {
   readonly metrics?: Record<string, number>;
 }
 
-/** The native channel the free authoring functions project (SPEC-03/05/12 §4.2). */
-export interface HostBridge {
+/** The native channel the free authoring functions project (SPEC-03/05/12 §4.2). Extends the 2D drawing channel (SPEC-04, `draw2d-binding.ts`). */
+export interface HostBridge extends Draw2dBridge {
   /** Constrain `value` to `[low, high]` (native `MathApi`). */
   readonly clamp: (value: number, low: number, high: number) => number;
   /** Wrap `angle` to `(-π, π]` (native `MathApi`). */
@@ -197,9 +198,11 @@ const UNBOUND_SCALAR = 0;
  * The inert host used before `bindNative`: every read returns a neutral value
  * and every signal is a no-op. This keeps the free surface total (no `null`
  * bridge to branch on) and makes "called before the app bound a host" a quiet,
- * observable no-op rather than a crash.
+ * observable no-op rather than a crash. The non-2D defaults live here; the 2D
+ * surface (`UNBOUND_DRAW2D`) is composed in below, the same Object.assign
+ * partition the wasm host adapter uses.
  */
-const UNBOUND_HOST: HostBridge = {
+const UNBOUND_HOST_BASE = {
   addLight: (): Entity => UNBOUND_HANDLE,
   bindAction: (): void => {
     // No-op until a host is bound
@@ -261,6 +264,9 @@ const UNBOUND_HOST: HostBridge = {
   v3Scale: (): Vec3 => ZERO_VEC3,
   v3Sub: (): Vec3 => ZERO_VEC3,
 };
+
+/** The full inert channel: the non-2D defaults composed with the inert 2D surface, so `boundHost()` is a total `HostBridge` before any `bindNative`. */
+const UNBOUND_HOST: HostBridge = Object.assign(UNBOUND_HOST_BASE, UNBOUND_DRAW2D);
 
 /** The mutable session: the bound host and whether a terminal outcome was emitted. */
 const session: { host: HostBridge; outcomeEmitted: boolean } = {

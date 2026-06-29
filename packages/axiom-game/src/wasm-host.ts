@@ -29,7 +29,11 @@
  *     `Cell[]` / a distance `number[]` / a single `Cell`;
  *   - audio (SPEC-08): handles cross as numbers; the option records destructure
  *     into the scalar `(volume, pitch, loop)` / `(at, volume)` args, and the tone
- *     `wave` string resolves to its dense index by `indexOf` (a table select).
+ *     `wave` string resolves to its dense index by `indexOf` (a table select);
+ *   - draw2d (SPEC-04): a colour packs to a `0xRRGGBBAA` u32, a point/`Rect`/
+ *     emitter-recipe to a `Float64Array` slice, and `layer`/`alpha`/`gravity`
+ *     default here (the audio-style host-side defaulting); `draw2dFinish`'s flat
+ *     `Vec<f64>` command list reshapes to a `number[]`.
  *
  * ## Deferred host methods (documented, not silent)
  * Three host groups are NOT wired here, each for a concrete structural reason; the
@@ -58,7 +62,8 @@ import {
   type MaterialDescriptor,
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Entity, Handle, Mat4, Quat, Vec3 } from "./vocabulary.ts";
+import type { Cell, Entity, Handle, Mat4, Quat, Rect, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
+import type { EmitterConfig, ShapeStyle } from "./draw2d-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -133,6 +138,17 @@ export interface WasmHostExport {
   readonly playTone: (waveIndex: number, freq: number, duration: number, volume: number) => number;
   readonly setMasterVolume: (volume: number) => void;
   readonly setMuted: (muted: boolean) => void;
+  // Draw2d (SPEC-04 §10): colours arrive packed as a `0xRRGGBBAA` u32; points/bounds/emitter-config cross as `Float64Array` slices; handles cross as numbers; `draw2dFinish` returns the flat command list.
+  readonly draw2dRect: (bounds: Float64Array, fill: number, layer: number, alpha: number) => void;
+  readonly draw2dCircle: (center: Float64Array, radius: number, fill: number, layer: number, alpha: number) => void;
+  readonly draw2dCreateEmitter: (config: Float64Array) => number;
+  readonly draw2dEmit: (id: number, at: Float64Array, direction: Float64Array) => void;
+  readonly draw2dAdvanceParticles: (dt: number) => void;
+  readonly draw2dCreateRenderTarget: (width: number, height: number) => number;
+  readonly draw2dBeginTarget: (target: number) => void;
+  readonly draw2dEndTarget: () => void;
+  readonly draw2dTargetTexture: (target: number) => number;
+  readonly draw2dFinish: () => Float64Array;
 }
 
 /** The component indices a vector / quaternion result is unpacked at. */
@@ -149,6 +165,25 @@ const NO_CROSSFADE = 0;
 const DEFERRED_HANDLE = 0;
 /** The wave kinds in their dense native index order (SPEC-08 `Wave`). */
 const WAVE_KINDS: readonly ToneSpec["wave"][] = ["sine", "square", "sawtooth", "triangle"];
+
+/*
+ * Draw2d boundary constants (SPEC-04 §10). A colour packs `[r, g, b, a]` (each in
+ * `[0, 1]`) into a `0xRRGGBBAA` u32 by positional scale — `r` is the high byte —
+ * mirroring `apps/axiom-game-runtime/src/draw2d.rs`'s `rgba()` unpacker. Arithmetic
+ * scaling (not bit-shifts) keeps the codec free of bitwise operators.
+ */
+const RED_SCALE = 16_777_216;
+const GREEN_SCALE = 65_536;
+const BLUE_SCALE = 256;
+const ALPHA_SCALE = 1;
+const RGBA_SCALES: readonly number[] = [RED_SCALE, GREEN_SCALE, BLUE_SCALE, ALPHA_SCALE];
+/** A colour channel's 8-bit maximum. */
+const CHANNEL_MAX = 255;
+/** The default z-layer / fully-opaque alpha a 2D draw resolves to when omitted. */
+const DEFAULT_LAYER = 0;
+const FULL_ALPHA = 1;
+/** No gravity — the emitter default when `gravity` is omitted. */
+const NO_GRAVITY: Vec2 = { x: 0, y: 0 };
 
 /** The absent `Result` value, materialized without the lint-banned `undefined` literal. */
 const absent = <Value>(slot?: Value): Value | undefined => slot;
@@ -284,6 +319,77 @@ const audioBridge = (game: WasmHostExport): Pick<
   },
 });
 
+/** One colour channel (`0..1`) as its `0..255` byte. */
+const byteOf = (channel: number): number => Math.round(channel * CHANNEL_MAX);
+
+/** Pack an `Rgba` into the boundary `0xRRGGBBAA` u32 by positional scale (no bitwise). */
+const packRgba = (color: Rgba): number =>
+  [...color].reduce((packed, channel, index): number => packed + byteOf(channel) * pick(RGBA_SCALES, index), 0);
+
+/** A `Vec2` as the boundary `[x, y]` slice. */
+const packVec2 = (vector: Vec2): Float64Array => Float64Array.from([vector.x, vector.y]);
+
+/** A `Rect` as the boundary `[x, y, w, h]` bounds slice. */
+const packRect = (rect: Rect): Float64Array => Float64Array.from([rect.x, rect.y, rect.width, rect.height]);
+
+/** Flatten an `EmitterConfig` to the boundary `[count, lifetime, speed, spread, gravityX, gravityY, size, colorStart, colorEnd, layer]` slice. */
+const packEmitter = (config: EmitterConfig): Float64Array => {
+  const gravity = orElse(config.gravity, NO_GRAVITY);
+  return Float64Array.from([
+    config.count,
+    config.lifetimeSeconds,
+    config.speed,
+    config.spread,
+    gravity.x,
+    gravity.y,
+    config.size,
+    packRgba(config.colorStart),
+    packRgba(config.colorEnd),
+    orElse(config.layer, DEFAULT_LAYER),
+  ]);
+};
+
+/** The 2D drawing `HostBridge` ops (SPEC-04 §10), every one forwarding to the native `axiom-draw2d` builder via the Wave-2 `draw2d*` exports. */
+const draw2dBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  | "draw2dRect" | "draw2dCircle" | "draw2dCreateEmitter" | "draw2dEmit" | "draw2dAdvanceParticles"
+  | "draw2dCreateRenderTarget" | "draw2dBeginTarget" | "draw2dEndTarget" | "draw2dTargetTexture" | "draw2dFinish"
+> => ({
+  draw2dAdvanceParticles: (dtSeconds: number): void => {
+    game.draw2dAdvanceParticles(dtSeconds);
+  },
+  draw2dBeginTarget: (target: Handle): void => {
+    game.draw2dBeginTarget(target);
+  },
+  draw2dCircle: (center: Vec2, radius: number, style: ShapeStyle): void => {
+    game.draw2dCircle(
+      packVec2(center),
+      radius,
+      packRgba(style.fill),
+      orElse(style.layer, DEFAULT_LAYER),
+      orElse(style.alpha, FULL_ALPHA),
+    );
+  },
+  draw2dCreateEmitter: (config: EmitterConfig): Handle => game.draw2dCreateEmitter(packEmitter(config)),
+  draw2dCreateRenderTarget: (width: number, height: number): Handle => game.draw2dCreateRenderTarget(width, height),
+  draw2dEmit: (id: Handle, at: Vec2, direction: Vec2): void => {
+    game.draw2dEmit(id, packVec2(at), packVec2(direction));
+  },
+  draw2dEndTarget: (): void => {
+    game.draw2dEndTarget();
+  },
+  draw2dFinish: (): readonly number[] => [...game.draw2dFinish()],
+  draw2dRect: (bounds: Rect, style: ShapeStyle): void => {
+    game.draw2dRect(
+      packRect(bounds),
+      packRgba(style.fill),
+      orElse(style.layer, DEFAULT_LAYER),
+      orElse(style.alpha, FULL_ALPHA),
+    );
+  },
+  draw2dTargetTexture: (target: Handle): Handle => game.draw2dTargetTexture(target),
+});
+
 /** The deferred host methods (see header) — the inert defaults that keep the `HostBridge` total. */
 const deferredBridge = (): Pick<
   HostBridge,
@@ -321,8 +427,15 @@ const deferredBridge = (): Pick<
  * Build the installed `HostBridge` from the raw `WasmGame` exports — the host
  * counterpart of `bridgeFromWasm`. The app calls `bindNative(hostFromWasm(game))`
  * once at boot so the free authoring surface projects through the live wasm core.
- * The four groups partition the `HostBridge` keys, so their `Object.assign`
- * intersection is exactly a `HostBridge` (no cast, no banned object spread).
+ * The five groups partition the `HostBridge` keys, so their `Object.assign`
+ * intersection is exactly a `HostBridge` (no cast, no banned object spread). The
+ * audio + deferred pair is folded into one inner assign to keep each `Object.assign`
+ * within its typed (≤4-source) overload — five flat sources fall to the `any` one.
  */
 export const hostFromWasm = (game: WasmHostExport): HostBridge =>
-  Object.assign(mathBridge(game), gridBridge(game), audioBridge(game), deferredBridge());
+  Object.assign(
+    mathBridge(game),
+    gridBridge(game),
+    draw2dBridge(game),
+    Object.assign(audioBridge(game), deferredBridge()),
+  );

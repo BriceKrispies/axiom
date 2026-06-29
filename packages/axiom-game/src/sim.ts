@@ -19,6 +19,8 @@
  */
 
 import { type Add, makeAdd } from "./game-object.ts";
+import type { EmitterConfig, ShapeStyle } from "./draw2d-binding.ts";
+import type { Handle, Rect, Vec2 } from "./vocabulary.ts";
 import { type Input, makeInput } from "./input.ts";
 import { type Physics, makePhysics } from "./physics.ts";
 import { type Rng, makeRng } from "./rng.ts";
@@ -27,6 +29,7 @@ import { type Tweens, makeTweens } from "./tweens.ts";
 import { type World, makeWorld } from "./world.ts";
 import type { NativeBridge } from "./native-bridge.ts";
 import type { TickPump } from "./pump.ts";
+import { boundHost } from "./host-binding.ts";
 
 /** The deterministic simulation view handed to a fixed update. */
 export interface Sim {
@@ -50,10 +53,40 @@ export interface Sim {
   readonly tweens: Tweens;
 }
 
-/** The presentation view handed to a render — interpolated with `alpha`. */
+/*
+ * The presentation view handed to a render — interpolated with `alpha`. Beyond the
+ * latest `tick`, it is the author's 2D drawing surface (SPEC-04 §10): an
+ * immediate-mode, presentation-class facade whose every verb forwards to the native
+ * `axiom-draw2d` builder (through the installed `HostBridge`), so nothing is
+ * rasterized in TS. The surface is only legal from `onRender`; it never feeds sim.
+ *
+ * Today's verbs are exactly those the Wave-2 `draw2d*` exports back: filled `rect`
+ * and `circle`, the particle system (`createEmitter`/`emit`/`advanceParticles`),
+ * and render targets (`createRenderTarget`/`drawTo`/`targetTexture`), plus `finish`
+ * to drain the layer-sorted command list. `sprite`/`text`/`camera2D`/`measureText`
+ * and gradient/stroke/shadow fills (SPEC-04 §4.2) await their draw2d exports.
+ */
 export interface Frame {
   /** The latest completed fixed tick this frame presents. */
   readonly tick: number;
+  /** Draw a filled rectangle (SPEC-04 §10). */
+  readonly rect: (bounds: Rect, style: ShapeStyle) => void;
+  /** Draw a filled circle centred at `center` (SPEC-04 §10). */
+  readonly circle: (center: Vec2, radius: number, style: ShapeStyle) => void;
+  /** Register a particle emitter, returning its handle (SPEC-04 §10.1). */
+  readonly createEmitter: (config: EmitterConfig) => Handle;
+  /** Spawn a particle burst from `id` at `at` flying along `direction` (SPEC-04 §10.1). */
+  readonly emit: (id: Handle, at: Vec2, direction: Vec2) => void;
+  /** Step live particles by the presentation delta and append their quads (SPEC-04 §10.1). */
+  readonly advanceParticles: (dtSeconds: number) => void;
+  /** Create an off-screen render target, returning its handle (SPEC-04 §10.3). */
+  readonly createRenderTarget: (width: number, height: number) => Handle;
+  /** Route the draws made inside `draw` into `target` (SPEC-04 §10.3). */
+  readonly drawTo: (target: Handle, draw: (frame: Frame) => void) => void;
+  /** The texture handle naming `target`'s off-screen surface (SPEC-04 §10.3). */
+  readonly targetTexture: (target: Handle) => Handle;
+  /** Finish the frame: the layer-sorted neutral command list `[kind, layer, submission, …]`. */
+  readonly finish: () => readonly number[];
 }
 
 /** One second expressed in seconds — the numerator of `dt = 1 second / fixedHz`. */
@@ -82,5 +115,34 @@ export const makeSim = (context: SimContext, tick: number): Sim => ({
   world: makeWorld(context.bridge),
 });
 
-/** Build the presentation `Frame` for the latest completed `tick`. */
-export const makeFrame = (tick: number): Frame => ({ tick });
+/*
+ * Build the presentation `Frame` for the latest completed `tick`. The 2D draw
+ * verbs read the installed `HostBridge` at call time (the presentation channel
+ * `bindNative` installs), exactly as the free `sound`/`scene3d` surfaces do, so
+ * `makeFrame` needs no bridge argument. `drawTo` brackets the author's draws with
+ * `beginTarget`/`endTarget` and hands them the same per-tick surface.
+ */
+export const makeFrame = (tick: number): Frame => ({
+  advanceParticles: (dtSeconds: number): void => {
+    boundHost().draw2dAdvanceParticles(dtSeconds);
+  },
+  circle: (center: Vec2, radius: number, style: ShapeStyle): void => {
+    boundHost().draw2dCircle(center, radius, style);
+  },
+  createEmitter: (config: EmitterConfig): Handle => boundHost().draw2dCreateEmitter(config),
+  createRenderTarget: (width: number, height: number): Handle => boundHost().draw2dCreateRenderTarget(width, height),
+  drawTo: (target: Handle, draw: (frame: Frame) => void): void => {
+    boundHost().draw2dBeginTarget(target);
+    draw(makeFrame(tick));
+    boundHost().draw2dEndTarget();
+  },
+  emit: (id: Handle, at: Vec2, direction: Vec2): void => {
+    boundHost().draw2dEmit(id, at, direction);
+  },
+  finish: (): readonly number[] => boundHost().draw2dFinish(),
+  rect: (bounds: Rect, style: ShapeStyle): void => {
+    boundHost().draw2dRect(bounds, style);
+  },
+  targetTexture: (target: Handle): Handle => boundHost().draw2dTargetTexture(target),
+  tick,
+});

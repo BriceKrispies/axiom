@@ -50,6 +50,14 @@ export interface Cell {
   readonly y: number;
 }
 
+/** An axis-aligned 2D rectangle (SPEC-04 §10) — origin `(x, y)` plus `width`/`height`. */
+export interface Rect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /*
  * A 4-channel colour (SPEC-11), as a positional `[r, g, b, a]` tuple. It is a
  * tuple rather than an `{ r, g, b, a }` record because the SDK's `id-length` law
