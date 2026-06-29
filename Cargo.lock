@@ -290,6 +290,7 @@ version = "0.1.0"
 dependencies = [
  "axiom",
  "axiom-entropy",
+ "axiom-input",
  "axiom-kernel",
  "axiom-physics",
  "axiom-runtime",

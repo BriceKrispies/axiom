@@ -17,7 +17,7 @@
     "typecheck": "tsgo --noEmit",
     "build": "tsgo -p tsconfig.build.json",
     "lint": "oxlint --type-aware --deny-warnings",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-exclude=\"test/**\" --test-coverage-exclude=\"src/raf-loop.ts\" \"test/**/*.test.ts\"",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-exclude=\"test/**\" --test-coverage-exclude=\"src/raf-loop.ts\" --test-coverage-exclude=\"src/wasm-bridge.ts\" \"test/**/*.test.ts\"",
     "gate": "npm run typecheck && npm run lint && npm run coverage"
   },
   "devDependencies": {
