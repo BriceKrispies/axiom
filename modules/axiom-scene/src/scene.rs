@@ -104,7 +104,7 @@ impl Scene {
     }
 
     /// Whether `id` names a live node (an entity with a local transform).
-    fn is_node(&self, id: SceneNodeId) -> bool {
+    pub(crate) fn is_node(&self, id: SceneNodeId) -> bool {
         self.world.storage().locals.contains(Self::entity(id))
     }
 
