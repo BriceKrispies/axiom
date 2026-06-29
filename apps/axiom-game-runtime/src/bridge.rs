@@ -8,28 +8,35 @@
 //! query string, the outbound `postMessage`). Nothing here touches a browser
 //! symbol or a wall clock.
 //!
-//! It composes three deterministic pieces, each over a real facade:
+//! It composes the deterministic pieces, each over a real facade:
 //! - the fixed-step [`GameRuntime`] (the `frame` accumulator → tick loop), which
-//!   banks real elapsed nanoseconds into whole deterministic ticks;
+//!   banks real elapsed nanoseconds into whole deterministic ticks **and** owns
+//!   the [`RunningApp`] the retained world lives in;
 //! - the [`RngHub`] (SPEC-01), the session-seeded entropy streams the `Rng`
 //!   projection draws from, over `axiom-entropy`;
 //! - the [`OutcomeLatch`] (SPEC-12), the emit-exactly-once terminal outcome.
 //!
-//! ## Landed vs deferred surface
-//! This core lands the deterministic spine the rest of the bridge hangs off:
-//! the fixed-step loop, the RNG seam, and the host outcome channel. The remaining
-//! `NativeBridge` / `HostBridge` methods are deferred behind explicit structural
-//! blockers, documented in [`crate::wasm`] and the slice report — chiefly the
-//! retained world (the seam's opaque, `kind`-keyed dynamic component store has no
-//! home in the engine's statically-typed ECS, and inventing one inside this app
-//! would be a primitive built at the wrong layer), with physics depending on it
-//! and input/tween/tick/grid/3D/audio/net following as later increments.
+//! ## Retained world (SPEC-02)
+//! The `world*` methods host the TS `NativeBridge` retained world over the app's
+//! dynamic, schema-name-keyed component store (`RunningApp::set_dynamic` /
+//! `query_dynamic` / `despawn_subtree`, landed in the `axiom` umbrella). The
+//! opaque component vocabulary the seam needs is **not** a new ECS primitive
+//! invented in this app — it is the engine's existing dynamic arm, which this
+//! app merely *populates* with its closed game-component `Reflect` types
+//! ([`crate::world`]). A component crosses the boundary as a `(kind, bytes)`
+//! pair; the convention is documented in [`crate::world`]. Entity handles cross
+//! as their raw `u64` id (the `wasm32` shell narrows them to JS numbers).
+//! `worldSpawn` is composed at the TS edge from `world_spawn` + per-component
+//! `world_set`, so this core exposes only scalar / byte / string methods.
+//!
+//! Input / tween / tick / grid / 3D / audio / net remain later increments.
 
-use axiom::prelude::{HostApi, HostOutcome, RunningApp, Score, StepBudget};
+use axiom::prelude::{Entity, HostApi, HostOutcome, RunningApp, Score, StepBudget};
 
 use crate::embed::OutcomeLatch;
 use crate::rng::RngHub;
 use crate::runtime::GameRuntime;
+use crate::world;
 
 /// The deterministic native core: the fixed-step loop, the seeded RNG hub, the
 /// session seed (fixed before tick 0), and the terminal-outcome latch. Construct
@@ -116,6 +123,71 @@ impl GameBridge {
     /// browser arm forwards to the parent frame.
     pub fn reported_outcome(&self) -> Option<&HostOutcome> {
         self.outcome.reported()
+    }
+
+    // --- Retained world (SPEC-02) ---
+    //
+    // The TS `NativeBridge` world surface over the app's dynamic component store.
+    // Entity handles cross as their raw `u64` id; components as `(kind, bytes)`.
+
+    /// Spawn a bare entity carrying no components, returning its raw id
+    /// (`worldSpawn`'s root, which the TS edge then dresses with `world_set`s).
+    pub fn world_spawn(&mut self) -> u64 {
+        self.runtime.app_mut().spawn_empty().raw()
+    }
+
+    /// Despawn one entity, returning whether it named a live node (`worldDespawn`;
+    /// a stale handle is a clean `false`).
+    pub fn world_despawn(&mut self, entity: u64) -> bool {
+        self.runtime.app_mut().despawn(Entity::from_raw(entity))
+    }
+
+    /// Despawn an entity and its whole subtree (`worldDespawnSubtree`), returning
+    /// whether `entity` named a live node.
+    pub fn world_despawn_subtree(&mut self, entity: u64) -> bool {
+        self.runtime
+            .app_mut()
+            .despawn_subtree(Entity::from_raw(entity))
+    }
+
+    /// Set (or replace) `entity`'s component of `kind` from its field `bytes`
+    /// (`worldSet`). An unknown kind, a stale entity, or undecodable bytes are all
+    /// a clean `false`.
+    pub fn world_set(&mut self, entity: u64, kind: &str, bytes: &[u8]) -> bool {
+        world::world_set(self.runtime.app_mut(), Entity::from_raw(entity), kind, bytes)
+    }
+
+    /// Read `entity`'s component of `kind` as field bytes (`worldGet`) — an empty
+    /// buffer on a miss / dead entity / unknown kind (the TS edge maps it to the
+    /// empty `Result`).
+    pub fn world_get(&self, entity: u64, kind: &str) -> Vec<u8> {
+        world::world_get(self.runtime.app(), Entity::from_raw(entity), kind)
+    }
+
+    /// Every entity carrying *all* of `kinds`, in ascending-id order
+    /// (`worldQuery`). An unknown kind makes the result empty (nothing can carry a
+    /// kind the engine was never given).
+    pub fn world_query(&self, kinds: &[&str]) -> Vec<u64> {
+        world::static_kinds(kinds)
+            .map(|resolved| {
+                self.runtime
+                    .app()
+                    .query_dynamic(&resolved)
+                    .into_iter()
+                    .map(Entity::raw)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The direct children of `entity`, in ascending-id order (`worldChildrenOf`).
+    pub fn world_children_of(&self, entity: u64) -> Vec<u64> {
+        self.runtime
+            .app()
+            .children_of(Entity::from_raw(entity))
+            .into_iter()
+            .map(Entity::raw)
+            .collect()
     }
 }
 
@@ -213,5 +285,104 @@ mod tests {
         assert_eq!(b.rng_weighted(0, &[0, 1, 0]), 1);
         let perm = b.rng_permutation(0, 8);
         assert_eq!(perm.len(), 8);
+    }
+
+    use axiom::prelude::{BinaryReader, Reflect};
+    use crate::world::{Transform2D, Velocity2D};
+
+    /// A `Transform` component's bytes with the given position (defaults for the
+    /// rest), for driving `world_set` over the byte boundary.
+    fn transform_bytes(x: f32, y: f32) -> Vec<u8> {
+        world::encode(&Transform2D {
+            x,
+            y,
+            rotation: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+        })
+    }
+
+    /// A deterministic fingerprint of the *observable* retained-world state: the
+    /// `Transform`/`Velocity` query results (ascending-id) plus each entity's
+    /// component reads, folded with FNV-1a. This is the keystone determinism probe
+    /// — it sees exactly what an author sees through the world surface.
+    fn world_state_hash(b: &GameBridge, entities: &[u64]) -> u64 {
+        let mut buf: Vec<u8> = Vec::new();
+        ["Transform", "Velocity"].iter().for_each(|kind| {
+            b.world_query(&[kind])
+                .iter()
+                .for_each(|&e| buf.extend_from_slice(&e.to_le_bytes()));
+            buf.push(0xFF); // a kind separator so two queries can't alias.
+        });
+        entities.iter().for_each(|&e| {
+            buf.extend_from_slice(&b.world_get(e, "Transform"));
+            buf.extend_from_slice(&b.world_get(e, "Velocity"));
+        });
+        fnv1a(&buf)
+    }
+
+    /// Drive a scripted retained-world session: spawn 5 entities, then over 8
+    /// ticks set each entity's `Transform` (and the even ones' `Velocity`) to a
+    /// tick/index-derived value, despawning one entity midway. Returns the per-tick
+    /// observable-state hash sequence.
+    fn world_session_hashes() -> Vec<u64> {
+        let mut b = bridge(7);
+        let entities: Vec<u64> = (0..5u32).map(|_| b.world_spawn()).collect();
+        (0..8u32)
+            .map(|tick| {
+                b.advance(STEP);
+                entities.iter().enumerate().for_each(|(i, &e)| {
+                    let fx = tick as f32 + i as f32;
+                    b.world_set(e, "Transform", &transform_bytes(fx, fx * 2.0));
+                    (i % 2 == 0).then(|| {
+                        b.world_set(e, "Velocity", &world::encode(&Velocity2D { x: fx, y: -fx }))
+                    });
+                });
+                (tick == 3).then(|| b.world_despawn(entities[2]));
+                world_state_hash(&b, &entities)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_retained_world_replays_to_a_byte_identical_state_hash_sequence() {
+        // The keystone proof: the same scripted spawn/set/despawn sequence over the
+        // retained world produces a byte-identical per-tick observable-state hash
+        // sequence across two independent runs.
+        let first = world_session_hashes();
+        assert_eq!(first, world_session_hashes());
+        // The world genuinely evolves (positions change every tick, an entity is
+        // removed), so the fingerprint is not constant — this is real work.
+        assert!(first.iter().any(|&hash| hash != first[0]));
+    }
+
+    #[test]
+    fn world_reads_back_the_last_value_set_and_queries_track_lifecycle() {
+        let mut b = bridge(1);
+        let a = b.world_spawn();
+        let c = b.world_spawn();
+        // Distinct live entities; a Transform set on each reads back the last value.
+        assert_ne!(a, c);
+        assert!(b.world_set(a, "Transform", &transform_bytes(3.0, 4.0)));
+        assert!(b.world_set(a, "Transform", &transform_bytes(7.0, 8.0))); // replace
+        let got = Transform2D::reflect_read(&mut BinaryReader::new(&b.world_get(a, "Transform")))
+            .unwrap();
+        assert_eq!((got.x, got.y), (7.0, 8.0));
+        // Both carry Transform ⇒ both appear in the query, ascending-id order.
+        assert!(b.world_set(c, "Transform", &transform_bytes(1.0, 1.0)));
+        assert_eq!(b.world_query(&["Transform"]), vec![a, c]);
+        // Only `a` carries Velocity ⇒ the two-kind intersection is just `a`.
+        assert!(b.world_set(a, "Velocity", &world::encode(&Velocity2D { x: 1.0, y: 2.0 })));
+        assert_eq!(b.world_query(&["Transform", "Velocity"]), vec![a]);
+        // An unknown kind in the query makes it empty (closed vocabulary).
+        assert!(b.world_query(&["Transform", "ghost"]).is_empty());
+        // Despawn removes `a` from the world: its reads go empty and it leaves the
+        // query; `c` is untouched.
+        assert!(b.world_despawn(a));
+        assert!(b.world_get(a, "Transform").is_empty());
+        assert_eq!(b.world_query(&["Transform"]), vec![c]);
+        // A stale despawn is a clean false; a leaf has no children.
+        assert!(!b.world_despawn(a));
+        assert!(b.world_children_of(c).is_empty());
     }
 }
