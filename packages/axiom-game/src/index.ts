@@ -135,6 +135,9 @@ export {
 
 export { orElse, whenPresent } from "./branchless.ts";
 
+// The capstone sample game (a top-down arena over the surfaces above; replay-proven in test/arena.test.ts).
+export { Arena } from "./sample/arena.ts";
+
 // Wave 4 FINAL — grid/path (SPEC-06), 3D (SPEC-11), netcode (SPEC-13).
 
 export {
