@@ -16,7 +16,8 @@
 use axiom_kernel::Ratio;
 
 use crate::ids::{
-    AudioSeconds, Envelope, Hertz, Lfo, MusicOpts, PlayOpts, SoundId, ToneSpec, VoiceId,
+    AnalyserId, AudioInput, AudioSeconds, Band, BandLayout, Envelope, Hertz, Lfo, MusicOpts,
+    PlayOpts, SoundId, ToneSpec, VoiceId,
 };
 
 // The `wasm32`-only live Web Audio arm: it realizes a `ScheduledBatch` into real
@@ -79,6 +80,21 @@ pub(crate) enum AudioCommand {
         voice: VoiceId,
         /// The resolved (clamped, wave-labelled) tone.
         tone: ResolvedTone,
+    },
+    /// Open a live capture stream (§13.1). The arm performs the actual
+    /// `getUserMedia`; the core only names the input handle, exactly once.
+    OpenInput {
+        /// The capture-stream handle this open allocates.
+        input: AudioInput,
+    },
+    /// Create a frequency analyser over a capture `input` (§13.1). The arm builds
+    /// the `AnalyserNode`; the core only names the handles. The analyser's live
+    /// magnitudes never flow back through the core (§17.5 determinism wall).
+    CreateAnalyser {
+        /// The analyser handle this creation allocates.
+        id: AnalyserId,
+        /// The capture input the analyser observes.
+        input: AudioInput,
     },
 }
 
@@ -155,6 +171,9 @@ pub struct AudioApi {
     muted: bool,
     /// Commands accumulated since the last drain.
     pending: Vec<AudioCommand>,
+    /// The single opened capture input (§13.1), allocated lazily by
+    /// [`Self::open_audio_input`] so opening is idempotent — one stream per mix.
+    input: Option<AudioInput>,
 }
 
 /// Clamp a ratio into `0..1`, branchlessly. The input is already finite (it came
@@ -196,6 +215,21 @@ fn resolve_tone(spec: ToneSpec) -> ResolvedTone {
     }
 }
 
+/// The low edge of the analyser's fixed audible range (§13.1 band layout), in Hz.
+const BAND_MIN_HZ: f32 = 20.0;
+/// The high edge of the analyser's fixed audible range (§13.1 band layout), in Hz.
+const BAND_MAX_HZ: f32 = 20_000.0;
+
+/// The log-spaced position of band edge `index` of `count`:
+/// `min * (max/min)^(index/count)`. Computed in `f64` for accuracy and narrowed
+/// to the `Hertz` boundary. Only ever called with `count >= 1` (the `0..count`
+/// range is empty when `count == 0`), so the division is always well-defined.
+fn band_edge(index: u32, count: u32) -> Hertz {
+    let fraction = f64::from(index) / f64::from(count);
+    let ratio = f64::from(BAND_MAX_HZ) / f64::from(BAND_MIN_HZ);
+    Hertz::new((f64::from(BAND_MIN_HZ) * ratio.powf(fraction)) as f32)
+}
+
 impl AudioApi {
     /// A fresh mixer: full master volume, unmuted, nothing pending, handles at 0.
     pub fn new() -> Self {
@@ -204,6 +238,7 @@ impl AudioApi {
             master_volume: Ratio::new(1.0).expect("1.0 is a finite ratio"),
             muted: false,
             pending: Vec::new(),
+            input: None,
         }
     }
 
@@ -274,6 +309,57 @@ impl AudioApi {
             tone: resolve_tone(spec),
         });
         voice
+    }
+
+    /// Open the live capture input (§13.1), returning its handle. Opening is
+    /// **idempotent** — one capture stream per mix: the first call allocates a
+    /// handle and records one [`AudioCommand::OpenInput`]; later calls return the
+    /// same handle and record nothing. (The real `getUserMedia` is the wasm arm,
+    /// which later drains the `OpenInput` request.) Branchless: a fresh handle is
+    /// allocated only when none exists (`Option::then`), the request is pushed only
+    /// on that drain (`Option::into_iter().for_each`), and the resolved handle is
+    /// the existing one or the fresh one (`Option::or`).
+    pub fn open_audio_input(&mut self) -> AudioInput {
+        let fresh = self
+            .input
+            .is_none()
+            .then(|| AudioInput::from_raw(self.alloc_handle()));
+        fresh
+            .into_iter()
+            .for_each(|input| self.pending.push(AudioCommand::OpenInput { input }));
+        let resolved = self.input.or(fresh).expect("an input handle exists after open");
+        self.input = Some(resolved);
+        resolved
+    }
+
+    /// Create a frequency analyser over a capture `input` (§13.1), returning its
+    /// handle and recording one [`AudioCommand::CreateAnalyser`]. The core only
+    /// names the handles; the `wasm32` arm realizes the `AnalyserNode`. The
+    /// analyser's live magnitudes never flow back through the core (§17.5 wall) —
+    /// the only analysis math the core owns is the deterministic [`Self::band_layout`].
+    pub fn create_analyser(&mut self, input: AudioInput) -> AnalyserId {
+        let id = AnalyserId::from_raw(self.alloc_handle());
+        self.pending.push(AudioCommand::CreateAnalyser { id, input });
+        id
+    }
+
+    /// The deterministic, log-spaced frequency-band layout for an analyser of
+    /// `count` bands across the audible range `[20 Hz, 20 kHz]` — the core's only
+    /// analysis math. Each band spans an equal frequency *ratio* (the perceptual
+    /// spacing an analyser wants); band `i` covers `[edge(i), edge(i+1))`. This is
+    /// pure layout metadata (identical for a given `count`), **not** live analysis
+    /// values, so it does not breach the §17.5 determinism wall.
+    ///
+    /// `count == 0` is rejected branchlessly: the range `0..0` is empty, so a
+    /// zero-band request yields an empty [`BandLayout`] with no control flow.
+    pub fn band_layout(count: u32) -> BandLayout {
+        let bands = (0..count)
+            .map(|i| Band {
+                low: band_edge(i, count),
+                high: band_edge(i + 1, count),
+            })
+            .collect::<Vec<Band>>();
+        BandLayout::from_bands(bands)
     }
 
     /// Set the master volume, clamped to 0..1 and folded into the mix state.
@@ -615,11 +701,97 @@ mod tests {
             crossfade: AudioSeconds::ZERO,
         });
         let _ = a.play_tone(basic_tone(Wave::Sine));
+        let input = a.open_audio_input();
+        let _ = a.create_analyser(input);
         let rendered = format!("{:?}", a.take_pending());
-        ["Load", "PlaySample", "Stop", "PlayMusic", "PlayTone", "ScheduledBatch"]
-            .into_iter()
-            .for_each(|needle| {
-                assert!(rendered.contains(needle), "Debug missing `{needle}`: {rendered}");
-            });
+        [
+            "Load",
+            "PlaySample",
+            "Stop",
+            "PlayMusic",
+            "PlayTone",
+            "OpenInput",
+            "CreateAnalyser",
+            "ScheduledBatch",
+        ]
+        .into_iter()
+        .for_each(|needle| {
+            assert!(rendered.contains(needle), "Debug missing `{needle}`: {rendered}");
+        });
+    }
+
+    #[test]
+    fn open_audio_input_is_idempotent_and_records_open_once() {
+        let mut a = AudioApi::new();
+        // First open allocates a handle (the first valid handle is 1) and records
+        // exactly one OpenInput command.
+        let first = a.open_audio_input();
+        assert_eq!(first.raw(), 1);
+        let batch = a.take_pending();
+        assert_eq!(batch.commands, vec![AudioCommand::OpenInput { input: first }]);
+        // Re-opening returns the same handle and records nothing: one stream / mix.
+        let second = a.open_audio_input();
+        assert_eq!(second, first);
+        assert!(a.take_pending().commands.is_empty());
+    }
+
+    #[test]
+    fn create_analyser_allocates_distinct_handles_and_records_the_request() {
+        let mut a = AudioApi::new();
+        let input = a.open_audio_input();
+        let _ = a.take_pending();
+        let an0 = a.create_analyser(input);
+        let an1 = a.create_analyser(input);
+        // Analyser handles are monotonic and distinct (input=1, then 2, then 3).
+        assert_eq!(an0.raw(), 2);
+        assert_eq!(an1.raw(), 3);
+        assert_ne!(an0, an1);
+        let batch = a.take_pending();
+        assert_eq!(
+            batch.commands,
+            vec![
+                AudioCommand::CreateAnalyser { id: an0, input },
+                AudioCommand::CreateAnalyser { id: an1, input },
+            ]
+        );
+    }
+
+    #[test]
+    fn band_layout_produces_ordered_log_spaced_bands_and_rejects_zero() {
+        // A zero-band request is rejected branchlessly: empty layout, no edges.
+        assert!(AudioApi::band_layout(0).bands().is_empty());
+        assert_eq!(AudioApi::band_layout(0).count(), 0);
+
+        // `count` bands => `count` bands whose edges chain contiguously and ascend
+        // across the fixed audible range [20 Hz, 20 kHz].
+        let layout = AudioApi::band_layout(4);
+        let bands = layout.bands();
+        assert_eq!(layout.count(), 4);
+        assert_eq!(bands.len(), 4);
+        // First low edge is 20 Hz; last high edge is 20 kHz (the range ends).
+        assert!((bands[0].low.get() - 20.0).abs() < 1e-3);
+        assert!((bands[3].high.get() - 20_000.0).abs() < 1e-2);
+        // Each band's high edge is the next band's low edge (contiguous), and every
+        // edge strictly ascends (log spacing over a positive range).
+        bands.windows(2).for_each(|pair| {
+            assert_eq!(pair[0].high, pair[1].low);
+        });
+        bands.iter().for_each(|b| {
+            assert!(b.high.get() > b.low.get());
+        });
+        // Equal frequency *ratios* per band (the log-spacing property): every
+        // band spans the same multiplicative factor (here 20000/20 = 1000, ^(1/4)).
+        let factor = bands[0].high.get() / bands[0].low.get();
+        bands.iter().for_each(|b| {
+            assert!((b.high.get() / b.low.get() - factor).abs() < 1e-3);
+        });
+    }
+
+    #[test]
+    fn band_layout_is_deterministic_for_a_given_count() {
+        // Pure layout math: same count => byte-equal layout (the determinism the
+        // core owns; live magnitudes never come from here).
+        assert_eq!(AudioApi::band_layout(8), AudioApi::band_layout(8));
+        assert_ne!(AudioApi::band_layout(8), AudioApi::band_layout(16));
     }
 }

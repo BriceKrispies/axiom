@@ -55,10 +55,60 @@ audio_handle! {
 }
 
 audio_handle! {
-    /// A live audio capture stream (microphone / system), §13.1. Produced only by
-    /// the `wasm32` capture arm; it is part of the vocabulary so callers can name
-    /// what `createAnalyser` consumes.
+    /// A live audio capture stream (microphone / system), §13.1. The core
+    /// allocates and names it (so callers can name what `createAnalyser`
+    /// consumes); the `wasm32` capture arm later realizes the real stream.
     AudioInput
+}
+
+audio_handle! {
+    /// A live frequency analyser (FFT) created over an [`AudioInput`], §13.1.
+    /// Returned by `create_analyser`; the core only names the handle and records
+    /// the request, while the `wasm32` arm realizes the `AnalyserNode`. The
+    /// analyser's live magnitudes never flow back through the core (§13.1 / §17.5
+    /// wall) — only its deterministic [`BandLayout`] is core-owned.
+    AnalyserId
+}
+
+/// One frequency band of an analyser's [`BandLayout`]: the half-open Hz range
+/// `[low, high)` that one analysis bucket aggregates. Pure value data — band
+/// *edges* (in [`Hertz`]), never live magnitudes. Its fields are public the same
+/// way [`Envelope`]/[`Lfo`] are: it is a noun, not behavior.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Band {
+    /// The inclusive low edge of the band.
+    pub low: Hertz,
+    /// The exclusive high edge of the band.
+    pub high: Hertz,
+}
+
+/// The deterministic frequency-band layout of an analyser: the ordered,
+/// log-spaced [`Band`]s spanning the audible range. This is layout *metadata* —
+/// identical for a given band count, computed by pure math in the core — **not**
+/// live analysis values, so exposing it does not breach the §13.1 determinism
+/// wall (no live magnitude/level ever crosses back into a sim-readable form).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BandLayout {
+    /// The ordered bands, low edge ascending; empty for a zero-band request.
+    bands: Vec<Band>,
+}
+
+impl BandLayout {
+    /// Wrap an ordered band list. Crate-internal: only the core's `band_layout`
+    /// math constructs a layout, so the ordering invariant has one owner.
+    pub(crate) fn from_bands(bands: Vec<Band>) -> Self {
+        BandLayout { bands }
+    }
+
+    /// The ordered bands, low edge ascending.
+    pub fn bands(&self) -> &[Band] {
+        &self.bands
+    }
+
+    /// How many bands the layout has.
+    pub fn count(&self) -> usize {
+        self.bands.len()
+    }
 }
 
 /// A time on the **audio clock**, in real seconds — the clock the platform
@@ -207,20 +257,51 @@ mod tests {
         let s = SoundId::from_raw(7);
         let v = VoiceId::from_raw(7);
         let i = AudioInput::from_raw(9);
+        let an = AnalyserId::from_raw(3);
         assert_eq!(s.raw(), 7);
         assert_eq!(v.raw(), 7);
         assert_eq!(i.raw(), 9);
+        assert_eq!(an.raw(), 3);
         // Same-type equality holds; Debug renders the wrapper name.
         assert_eq!(s, SoundId::from_raw(7));
         assert_ne!(s, SoundId::from_raw(8));
         assert_eq!(v, VoiceId::from_raw(7));
         assert_ne!(i, AudioInput::from_raw(1));
+        assert_eq!(an, AnalyserId::from_raw(3));
+        assert_ne!(an, AnalyserId::from_raw(4));
         assert!(format!("{s:?}").starts_with("SoundId"));
         assert!(format!("{v:?}").starts_with("VoiceId"));
         assert!(format!("{i:?}").starts_with("AudioInput"));
+        assert!(format!("{an:?}").starts_with("AnalyserId"));
         // Copy semantics: using the value twice is fine.
         let copy = s;
         assert_eq!(copy, s);
+    }
+
+    #[test]
+    fn band_layout_exposes_its_ordered_bands_and_count() {
+        let low = Band {
+            low: Hertz::new(20.0),
+            high: Hertz::new(200.0),
+        };
+        let high = Band {
+            low: Hertz::new(200.0),
+            high: Hertz::new(2000.0),
+        };
+        let layout = BandLayout::from_bands(vec![low, high]);
+        assert_eq!(layout.count(), 2);
+        assert_eq!(layout.bands(), &[low, high]);
+        // The empty layout (a zero-band request) reports no bands.
+        let empty = BandLayout::from_bands(Vec::new());
+        assert_eq!(empty.count(), 0);
+        assert!(empty.bands().is_empty());
+        // Value semantics: Clone + PartialEq + Debug on the band and the layout.
+        assert_eq!(layout.clone(), layout);
+        assert_ne!(layout, empty);
+        assert_eq!(low, low);
+        assert_ne!(low, high);
+        assert!(format!("{low:?}").starts_with("Band"));
+        assert!(format!("{layout:?}").starts_with("BandLayout"));
     }
 
     #[test]
