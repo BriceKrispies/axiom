@@ -13,7 +13,13 @@
 name = "game-runtime"
 crate_name = "axiom-game-runtime"
 
-allowed_layers = []
+# The RNG seam marshals the real entropy facade keyed at the root address, so the
+# app composes the `entropy` and `space` layers directly (the umbrella does not
+# pull them in). Everything else still arrives through `axiom::prelude`.
+allowed_layers = [
+    "entropy",
+    "space",
+]
 
 allowed_modules = [
     "engine",

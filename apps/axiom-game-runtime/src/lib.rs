@@ -22,6 +22,19 @@ use axiom::prelude::*;
 mod runtime;
 pub use runtime::GameRuntime;
 
+/// The deterministic RNG seam (SPEC-01) the TS `Rng` projection drives, routed
+/// over the real `axiom-entropy` facade. Native-testable; the `wasm32` boundary
+/// marshals to it through [`GameBridge`].
+mod rng;
+pub use rng::RngHub;
+
+/// The deterministic native core the `wasm32` boundary marshals to — the
+/// fixed-step loop, the seeded RNG hub, and the terminal-outcome latch composed
+/// into one [`GameBridge`]. The rlib heart proven by the slice tests in
+/// `bridge.rs`; the thin JS-marshalling shell lives in [`wasm`].
+mod bridge;
+pub use bridge::GameBridge;
+
 /// The embed seam (SPEC-12): decode the inbound session config, latch the single
 /// outbound outcome. Pure, native-testable core; the browser channel that carries
 /// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on

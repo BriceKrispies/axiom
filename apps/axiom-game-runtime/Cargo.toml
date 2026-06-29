@@ -14,6 +14,14 @@ crate-type = ["cdylib", "rlib"]
 # StepBudget) and the App/RunningApp surface all arrive through `axiom::prelude`.
 axiom = { path = "../../modules/axiom" }
 
+# The deterministic RNG seam (SPEC-01) the bridge marshals: the real entropy
+# facade (`axiom-entropy`) keyed at the root address (`axiom-space`). These are
+# layers the umbrella does not compose, so the app — a leaf composition root —
+# depends on them directly (the legal app-composes-layers path). Native, so the
+# slice determinism test drives the exact draw path the browser binds.
+axiom-entropy = { path = "../../crates/axiom-entropy" }
+axiom-space = { path = "../../crates/axiom-space" }
+
 # Browser entry only: the wasm-bindgen export macro + a panic hook, plus the
 # bits of web-sys the embed-seam host channel needs — read the inbound query
 # string off `window.location`, post the outbound outcome to the parent frame.
