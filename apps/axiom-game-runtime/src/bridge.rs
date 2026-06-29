@@ -69,6 +69,7 @@
 //! [`advance`]: GameBridge::advance
 
 use axiom::prelude::{Entity, HostApi, HostOutcome, RunningApp, Score, StepBudget};
+use axiom_draw2d::Draw2dApi;
 use axiom_grid::GridApi;
 
 use crate::audio::AudioState;
@@ -78,6 +79,7 @@ use crate::physics::PhysicsState;
 use crate::rng::RngHub;
 use crate::runtime::GameRuntime;
 use crate::time::TimeBridge;
+use crate::ui::UiState;
 use crate::world;
 
 /// The deterministic native core: the fixed-step loop, the seeded RNG hub, the
@@ -99,6 +101,12 @@ pub struct GameBridge {
     /// The neutral audio mixer core + live output arm (SPEC-08), driven by the
     /// `*_sound` / `*_tone` / `*_music` / mix methods in [`crate::audio`].
     pub(crate) audio: AudioState,
+    /// The immediate-mode UI surface + encoded draw log (SPEC-09), driven by the
+    /// `ui_*` methods in [`crate::ui`].
+    pub(crate) ui: UiState,
+    /// The 2D draw builder (SPEC-10: particles / render targets / shapes), driven
+    /// by the `draw2d_*` methods in [`crate::draw2d`].
+    pub(crate) draw2d: Draw2dApi,
 }
 
 impl GameBridge {
@@ -117,6 +125,8 @@ impl GameBridge {
             time: TimeBridge::new(fixed_step_nanos),
             grid: GridApi::new(),
             audio: AudioState::new(),
+            ui: UiState::new(),
+            draw2d: Draw2dApi::new(),
         }
     }
 
@@ -258,6 +268,71 @@ impl GameBridge {
             .into_iter()
             .map(Entity::raw)
             .collect()
+    }
+
+    // --- Hierarchy + liveness reads (SPEC-02) ---
+    //
+    // The remaining `NativeBridge` world surface over the engine's Entity-addressed
+    // scene seam: liveness, kind-keyed presence/removal, parent linking, and the
+    // authoritative world transform. Entity handles cross as raw ids; an optional
+    // read is the empty-is-absent `Vec<f64>` the rest of the boundary uses.
+
+    /// Whether `entity` names a live node (`worldAlive`); a stale handle is `false`.
+    pub fn world_alive(&self, entity: u64) -> bool {
+        self.runtime.app().is_alive(Entity::from_raw(entity))
+    }
+
+    /// Whether `entity` carries a component of `kind` (`worldHas`); an unknown
+    /// kind / dead entity / absent component is a clean `false`.
+    pub fn world_has(&self, entity: u64, kind: &str) -> bool {
+        world::world_has(self.runtime.app(), Entity::from_raw(entity), kind)
+    }
+
+    /// Remove `entity`'s component of `kind` (`worldRemove`), returning whether it
+    /// existed.
+    pub fn world_remove(&mut self, entity: u64, kind: &str) -> bool {
+        world::world_remove(self.runtime.app_mut(), Entity::from_raw(entity), kind)
+    }
+
+    /// Re-parent `child` under `parent` (`worldSetParent`); self-parenting, a
+    /// cycle, or a stale handle is a clean `false`. World transforms refresh so a
+    /// later `world_world_transform` read reflects the new chain.
+    pub fn world_set_parent(&mut self, child: u64, parent: u64) -> bool {
+        self.runtime
+            .app_mut()
+            .set_parent(Entity::from_raw(child), Entity::from_raw(parent))
+    }
+
+    /// `entity`'s parent as `[]` (root / absent) or `[parent]` (`worldParentOf`).
+    pub fn world_parent_of(&self, entity: u64) -> Vec<f64> {
+        self.runtime
+            .app()
+            .parent_of(Entity::from_raw(entity))
+            .map(|parent| vec![parent.raw() as f64])
+            .unwrap_or_default()
+    }
+
+    /// `entity`'s authoritative world transform (`worldWorldTransform`) as `[]`
+    /// (absent) or the flat 10-tuple `[tx, ty, tz, qx, qy, qz, qw, sx, sy, sz]`.
+    pub fn world_world_transform(&self, entity: u64) -> Vec<f64> {
+        self.runtime
+            .app()
+            .world_transform(Entity::from_raw(entity))
+            .map(|t| {
+                vec![
+                    f64::from(t.translation.x),
+                    f64::from(t.translation.y),
+                    f64::from(t.translation.z),
+                    f64::from(t.rotation.x),
+                    f64::from(t.rotation.y),
+                    f64::from(t.rotation.z),
+                    f64::from(t.rotation.w),
+                    f64::from(t.scale.x),
+                    f64::from(t.scale.y),
+                    f64::from(t.scale.z),
+                ]
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -454,5 +529,33 @@ mod tests {
         // A stale despawn is a clean false; a leaf has no children.
         assert!(!b.world_despawn(a));
         assert!(b.world_children_of(c).is_empty());
+    }
+
+    #[test]
+    fn world_hierarchy_liveness_presence_and_transform_reads() {
+        let mut b = bridge(1);
+        let parent = b.world_spawn();
+        let child = b.world_spawn();
+        // Liveness: live spawns are alive; a stale handle is not.
+        assert!(b.world_alive(parent));
+        assert!(!b.world_alive(9999));
+        // Kind-keyed presence + removal over the closed vocabulary.
+        assert!(b.world_set(child, "Transform", &transform_bytes(2.0, 3.0)));
+        assert!(b.world_has(child, "Transform"));
+        assert!(!b.world_has(child, "Velocity"));
+        assert!(!b.world_has(child, "ghost")); // unknown kind ⇒ clean false
+        assert!(b.world_remove(child, "Transform"));
+        assert!(!b.world_has(child, "Transform"));
+        assert!(!b.world_remove(child, "Transform")); // already gone ⇒ false
+        assert!(!b.world_remove(child, "ghost")); // unknown kind ⇒ false
+        // Parent linking: none initially, then `child` under `parent`.
+        assert!(b.world_parent_of(child).is_empty());
+        assert!(b.world_set_parent(child, parent));
+        assert_eq!(b.world_parent_of(child), vec![parent as f64]);
+        // Self-parenting is rejected as a clean false.
+        assert!(!b.world_set_parent(parent, parent));
+        // World transform is the flat 10-tuple for a live node, empty for a stale one.
+        assert_eq!(b.world_world_transform(parent).len(), 10);
+        assert!(b.world_world_transform(9999).is_empty());
     }
 }

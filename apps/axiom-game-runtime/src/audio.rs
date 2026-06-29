@@ -34,7 +34,9 @@
 //! carried verbatim as a finite ratio (the core records it; its resample meaning
 //! is a wasm-arm choice).
 
-use axiom_audio::{AudioApi, AudioSeconds, Hertz, MusicOpts, PlayOpts, SoundId, ToneSpec, VoiceId, Wave};
+use axiom_audio::{
+    AudioApi, AudioInput, AudioSeconds, Hertz, MusicOpts, PlayOpts, SoundId, ToneSpec, VoiceId, Wave,
+};
 use axiom_kernel::Ratio;
 
 use crate::GameBridge;
@@ -145,6 +147,30 @@ impl AudioState {
         self.api.set_muted(muted);
     }
 
+    /// Open the live capture input (§13.1), returning its raw handle
+    /// (`audioOpenInput`). Idempotent in the core — one stream per mix.
+    fn open_input(&mut self) -> u64 {
+        self.api.open_audio_input().raw()
+    }
+
+    /// Create a frequency analyser over capture `input`, returning its raw handle
+    /// (`audioCreateAnalyser`). The core names the handle; the wasm arm realizes
+    /// the live `AnalyserNode`. Live magnitudes never flow back (§17.5 wall).
+    fn create_analyser(&mut self, input: u64) -> u64 {
+        self.api.create_analyser(AudioInput::from_raw(input)).raw()
+    }
+
+    /// The deterministic, log-spaced band layout for an analyser of `count` bands
+    /// (`audioBandLayout`), flattened to `[low0, high0, low1, high1, …]` Hz. Pure
+    /// layout metadata — never a live magnitude — so it is fully native-testable.
+    fn band_layout(count: u32) -> Vec<f64> {
+        AudioApi::band_layout(count)
+            .bands()
+            .iter()
+            .flat_map(|band| [f64::from(band.low.get()), f64::from(band.high.get())])
+            .collect()
+    }
+
     /// Drain the accumulated batch into the live `AudioContext` (browser playback),
     /// opening the context on first use. The deterministic core stays untouched;
     /// only the realized Web Audio nodes are a side effect. Native builds have no
@@ -202,6 +228,22 @@ impl GameBridge {
     /// Mute or unmute all output (`setMuted`).
     pub fn set_muted(&mut self, muted: bool) {
         self.audio.set_muted(muted);
+    }
+
+    /// Open the live capture input (`audioOpenInput`).
+    pub fn audio_open_input(&mut self) -> u64 {
+        self.audio.open_input()
+    }
+
+    /// Create a frequency analyser over capture `input` (`audioCreateAnalyser`).
+    pub fn audio_create_analyser(&mut self, input: u64) -> u64 {
+        self.audio.create_analyser(input)
+    }
+
+    /// The analyser band layout for `count` bands as flat `[low, high, …]` Hz
+    /// (`audioBandLayout`).
+    pub fn audio_band_layout(&self, count: u32) -> Vec<f64> {
+        AudioState::band_layout(count)
     }
 
     /// Drain the audio batch into the live output (browser playback; no-op native).
@@ -265,6 +307,25 @@ mod wasm_exports {
         pub fn set_muted(&mut self, muted: bool) {
             self.bridge.set_muted(muted);
         }
+
+        /// Open the live capture input (`audioOpenInput`).
+        #[wasm_bindgen(js_name = audioOpenInput)]
+        pub fn audio_open_input(&mut self) -> f64 {
+            self.bridge.audio_open_input() as f64
+        }
+
+        /// Create a frequency analyser over a capture input (`audioCreateAnalyser`).
+        #[wasm_bindgen(js_name = audioCreateAnalyser)]
+        pub fn audio_create_analyser(&mut self, input: f64) -> f64 {
+            self.bridge.audio_create_analyser(input as u64) as f64
+        }
+
+        /// The analyser band layout for `count` bands, flat `[low, high, …]` Hz
+        /// (`audioBandLayout`).
+        #[wasm_bindgen(js_name = audioBandLayout)]
+        pub fn audio_band_layout(&self, count: u32) -> Vec<f64> {
+            self.bridge.audio_band_layout(count)
+        }
     }
 }
 
@@ -326,6 +387,26 @@ mod tests {
             ]
         };
         assert_eq!(script(), script());
+    }
+
+    #[test]
+    fn analyser_handles_are_distinct_and_band_layout_is_deterministic() {
+        let mut b = bridge();
+        // The capture input and analyser are real, non-zero, distinct handles.
+        let input = b.audio_open_input();
+        let analyser = b.audio_create_analyser(input);
+        assert_ne!(input, 0);
+        assert_ne!(analyser, 0);
+        assert_ne!(input, analyser);
+        // The band layout is 2 edges per band, ascending, and identical for a given
+        // count across two reads (pure layout metadata, no live magnitude).
+        let layout = b.audio_band_layout(4);
+        assert_eq!(layout.len(), 8);
+        assert!(layout.windows(2).all(|w| w[0] <= w[1]));
+        assert_eq!(layout, b.audio_band_layout(4));
+        assert_ne!(layout, b.audio_band_layout(8));
+        // A zero-band request is the empty layout.
+        assert!(b.audio_band_layout(0).is_empty());
     }
 
     /// `realize` is a clean no-op on native (no `AudioContext`): draining the

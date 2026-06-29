@@ -19,7 +19,7 @@ use wasm_bindgen::prelude::*;
 
 use axiom::prelude::HostOutcome;
 
-use crate::embed::decode_session_config;
+use crate::embed::{decode_session_config, session_params_json};
 use crate::{demo_app, GameBridge};
 
 /// Read the inbound host query string (`window.location.search`). Returns an
@@ -31,17 +31,24 @@ fn host_query() -> String {
         .unwrap_or_default()
 }
 
+/// Post a raw JSON `payload` to the parent frame (the embed host channel,
+/// SPEC-12). Best-effort: if there is no parent window (top-level, not embedded)
+/// the post is simply skipped.
+fn post_to_parent(payload: &str) {
+    let parent = web_sys::window().and_then(|window| window.parent().ok().flatten());
+    if let Some(parent) = parent {
+        let _ = parent.post_message(&JsValue::from_str(payload), "*");
+    }
+}
+
 /// Forward `outcome` to the parent frame as a JSON `"complete"` message — the one
-/// universal word every hosted game speaks. Best-effort: if there is no parent
-/// window (top-level, not embedded) the post is simply skipped.
+/// universal word every hosted game speaks.
 fn post_outcome_to_parent(outcome: &HostOutcome) {
     let won = outcome.won();
     let score = outcome.score().get();
-    let payload = format!("{{\"type\":\"complete\",\"won\":{won},\"score\":{score}}}");
-    let parent = web_sys::window().and_then(|window| window.parent().ok().flatten());
-    if let Some(parent) = parent {
-        let _ = parent.post_message(&JsValue::from_str(&payload), "*");
-    }
+    post_to_parent(&format!(
+        "{{\"type\":\"complete\",\"won\":{won},\"score\":{score}}}"
+    ));
 }
 
 /// The integer step budget one `advance` produced, marshalled to JS. The SDK's
@@ -87,6 +94,9 @@ impl StepReport {
 #[derive(Debug)]
 pub struct WasmGame {
     pub(crate) bridge: GameBridge,
+    /// The raw inbound host query string, kept so [`Self::session_params`] can
+    /// re-project the opaque params map the game interprets.
+    query: String,
 }
 
 #[wasm_bindgen]
@@ -98,7 +108,8 @@ impl WasmGame {
     #[wasm_bindgen(constructor)]
     pub fn new(fixed_step_nanos: u64, max_steps: u32) -> WasmGame {
         console_error_panic_hook::set_once();
-        let config = decode_session_config(&host_query());
+        let query = host_query();
+        let config = decode_session_config(&query);
         WasmGame {
             bridge: GameBridge::new(
                 demo_app().build(),
@@ -106,6 +117,7 @@ impl WasmGame {
                 fixed_step_nanos,
                 max_steps,
             ),
+            query,
         }
     }
 
@@ -114,6 +126,37 @@ impl WasmGame {
     #[wasm_bindgen(getter)]
     pub fn seed(&self) -> u64 {
         self.bridge.seed()
+    }
+
+    /// The decoded opaque session params as a JSON object string `{"k":"v",…}`
+    /// (`sessionParams`, SPEC-12 §6). The engine never interprets a param — the
+    /// game's TS edge `JSON.parse`s this into its own shape. `seed` is excluded
+    /// (read via [`Self::seed`]).
+    #[wasm_bindgen(js_name = sessionParams)]
+    pub fn session_params(&self) -> String {
+        session_params_json(&self.query)
+    }
+
+    /// Tell the parent frame the game has booted and is ready to be shown
+    /// (`notifyReady`, SPEC-12) — a JSON `"ready"` message on the host channel.
+    #[wasm_bindgen(js_name = notifyReady)]
+    pub fn notify_ready(&self) {
+        post_to_parent("{\"type\":\"ready\"}");
+    }
+
+    /// Re-post the latched terminal outcome to the parent frame, if one has been
+    /// reported (`reportOutcomes`) — a host-requested flush. Returns whether an
+    /// outcome existed to forward. The single emit-once latch is unchanged; this
+    /// only re-sends what [`Self::report_outcome`] already latched.
+    #[wasm_bindgen(js_name = reportOutcomes)]
+    pub fn report_outcomes(&self) -> bool {
+        match self.bridge.reported_outcome() {
+            Some(outcome) => {
+                post_outcome_to_parent(outcome);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Report the terminal outcome (`reportOutcome`, SPEC-12 §4.2). The first
@@ -266,6 +309,44 @@ impl WasmGame {
             .into_iter()
             .map(|id| JsValue::from_f64(id as f64))
             .collect()
+    }
+
+    /// Whether `entity` names a live node (`worldAlive`).
+    #[wasm_bindgen(js_name = worldAlive)]
+    pub fn world_alive(&self, entity: f64) -> bool {
+        self.bridge.world_alive(entity as u64)
+    }
+
+    /// Whether `entity` carries a component of `kind` (`worldHas`).
+    #[wasm_bindgen(js_name = worldHas)]
+    pub fn world_has(&self, entity: f64, kind: String) -> bool {
+        self.bridge.world_has(entity as u64, &kind)
+    }
+
+    /// Remove `entity`'s component of `kind` (`worldRemove`).
+    #[wasm_bindgen(js_name = worldRemove)]
+    pub fn world_remove(&mut self, entity: f64, kind: String) {
+        self.bridge.world_remove(entity as u64, &kind);
+    }
+
+    /// Re-parent `child` under `parent` (`worldSetParent`); a rejected link is a
+    /// clean no-op.
+    #[wasm_bindgen(js_name = worldSetParent)]
+    pub fn world_set_parent(&mut self, child: f64, parent: f64) {
+        self.bridge.world_set_parent(child as u64, parent as u64);
+    }
+
+    /// `entity`'s parent as `[]` / `[parent]` (`worldParentOf`).
+    #[wasm_bindgen(js_name = worldParentOf)]
+    pub fn world_parent_of(&self, entity: f64) -> Vec<f64> {
+        self.bridge.world_parent_of(entity as u64)
+    }
+
+    /// `entity`'s authoritative world transform (`worldWorldTransform`) as `[]`
+    /// or the flat 10-tuple `[tx, ty, tz, qx, qy, qz, qw, sx, sy, sz]`.
+    #[wasm_bindgen(js_name = worldWorldTransform)]
+    pub fn world_world_transform(&self, entity: f64) -> Vec<f64> {
+        self.bridge.world_world_transform(entity as u64)
     }
 }
 
