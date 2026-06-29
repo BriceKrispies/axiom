@@ -1,6 +1,7 @@
 # SPEC-12 — Host bridge & persistence
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): `axiom-host` gained `HostSessionConfig`/`HostOutcome`/`HostOutcomeSet` (plus the `Score`/`Pixels` host quantity newtypes); `@axiom/game` projects `getSessionConfig`/`notifyReady`/`reportOutcome`/`reportOutcomes` (emit-exactly-once). The live `postMessage`/URL-param/`localStorage` channel lives in the runtime app's wasm arm, browser-proven. The §2 gaps below are now closed.
 > Contract: §15, §16.6   Vocabulary: the embed seam (Outcome report, localStorage, fetch record-gameplay, URL-param config injection, external reward/webhook, postMessage capability bridge, JWT handshake)   Determinism: boundary
 
 ## 1. Summary

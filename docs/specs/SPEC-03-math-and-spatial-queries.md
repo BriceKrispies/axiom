@@ -1,6 +1,7 @@
 # SPEC-03 — Math & spatial queries
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): `axiom-math::MathApi::{clamp, lerp, normalize_angle}` + `axiom-scene::SceneApi::overlap_circle`; `@axiom/game` exports `clamp`/`lerp`/`normalizeAngle`/`overlapCircle` and the `v2` helpers, routed to native math. The §2 gaps below are now closed.
 > Contract: §5   Vocabulary: clamp, lerp, normalizeAngle, Vec/Mat4/Quat, AABB/point-in-rect/circle overlap, Raycast   Determinism: sim
 
 ## 1. Summary

@@ -1,6 +1,7 @@
 # SPEC-06 — Grid, pathfinding, tile space
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): new module `axiom-grid` (`GridApi` + `Grid`/`Cell`/`TileSpace`/`Dist`); `@axiom/game` projects `createGrid`/`tileSpace` and the native `gridPath`/`gridReachable`/`gridDistanceField`/`stepToward` (the BFS/wavefront runs native-side; the projection forwards a passability mask). The §2 greenfield is now built.
 > Contract: §6–§7   Vocabulary: Grid/tilemap, Tile↔pixel + center-snap, BFS pathfinding, Agent steering / best-first step, Circle overlap (have)   Determinism: sim
 
 ## 1. Summary

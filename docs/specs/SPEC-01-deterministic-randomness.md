@@ -1,6 +1,7 @@
 # SPEC-01 — Deterministic randomness
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): `axiom-entropy::EntropyStream` gained `unit`/`int`/`ratio_bool`/`pick_index`/`weighted_index`/`shuffle`/`named`; `@axiom/game` (`makeRng`/`StreamRng`) projects the `Rng` interface over a native stream — no TS PRNG. The §2 gaps below are now closed.
 > Contract: §3, §17   Vocabulary: Seeded PRNG (have), Fisher-Yates shuffle (missing), Weighted pick (partial)   Determinism: sim
 
 ## 1. Summary

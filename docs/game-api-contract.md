@@ -13,6 +13,43 @@ implementation.
 
 ---
 
+## Status: implemented (2026-06-28)
+
+**This contract is now realized.** The SPEC-00..14 program
+([`specs/`](specs/)) has landed on `main`: every entry below is backed by a
+native facade and projected into the `@axiom/game` TypeScript SDK.
+
+The authoring surface a game is actually written in is the **Phaser-style
+`Scene`** class (SPEC-14): an author subclasses `Scene` and reaches the engine
+through factory namespaces (`this.add`, `this.physics`, `this.input`,
+`this.tweens`, `this.sound`, `this.time`, `this.cameras`). The functional
+primitives in this document — `createGame`/`onFixedUpdate`/`onRender`, `Sim`,
+`World`, `Rng`, `Frame`, `Ui`, `NetSim` — are the **lower layer** that `Scene`
+and its factories ride on; both ship together as `@axiom/game`. The
+deterministic native core (the `axiom-frame` accumulator + `apps/axiom-game-runtime`'s
+`WasmGame`) runs underneath.
+
+Documented deferrals (the contract is honest about what is *not* yet pixels):
+
+- **§10 2D surface.** The neutral, ordered draw-list (`axiom-draw2d` →
+  host-owned `Draw2dList`) is complete for every shape, sprite, text, and
+  gradient. The **software backend rasterizes rect + sprite with src-over alpha
+  compositing**; circle/line/path/gradient/stroke/text glyph-runs are
+  recognised but skipped (deferred). **§10.1 particles and §10.3 render-targets**
+  are deferred pending a kernel `Seconds` scalar.
+- **§11 3D.** `cylinder`, `emissive`/`roughness`/`opacity`, and a hemisphere
+  ambient term landed; `v3`/`mat4`/`quat` route to the native `MathApi` (no TS
+  twin). `opacity` is carried but **3D translucency does not blend yet** (needs
+  back-to-front ordering). `MeshData` deferred.
+- **§16 multiplayer.** `NetSim`/`joinRoom`/`configureNet` landed; **physics
+  net-prediction is OFF by decision** (authority/non-physics state only),
+  because cross-instance deterministic physics (§17.6 / SPEC-10) is unresolved.
+  Delta encoding and JWT verification are follow-ups.
+- The wasm runtime bridge and live browser presentation/audio are
+  **browser-proven** — the native sandbox cannot run browser WebGPU / Web Audio.
+
+---
+
 ## 0. Foundations
 
 ### 0.1 Two contracts, one engine

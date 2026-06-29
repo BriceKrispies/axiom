@@ -1,6 +1,7 @@
 # SPEC-05 — Input (keyboard, bindings, pointer, timing)
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): `axiom-input::InputState` (`bind_action`/`sample`/`is_down`/`pressed`/`released`/`axis`/`pointer`/`pointer_pressed`/`swipe`/`pressed_at_tick`) replaced the `TouchControls` facade; `@axiom/game` `Sim.input` (`SnapshotInput`) + `bindAction` project it. The §2 gaps below are now closed.
 > Contract: §8   Vocabulary: Keyboard, Pointer/click, Touch/swipe/gesture, Key→action bindings, Charge/hold-release, Buffered direction, Timing-window hit   Determinism: sim
 
 ## 1. Summary

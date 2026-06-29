@@ -1,6 +1,7 @@
 # SPEC-07 — Timers & state machines
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): kernel `TickSchedule` (the extracted `(Tick, Id)` wake queue) + new module `axiom-tick` (`TickApi`: `after`/`every`/`cancel`/`due`, `create_machine`/`transition`/`drain_events`); `@axiom/game` `Sim.time` (`makeTime`) + `BridgeStateMachine`, dispatched by the per-tick `TickPump`. The §2 gaps below are now closed.
 > Contract: §9   Vocabulary: Timer / countdown / cooldown (claims have, actually missing), Game-flow state machine (partial), Per-entity state machine (partial)   Determinism: sim
 
 ## 1. Summary

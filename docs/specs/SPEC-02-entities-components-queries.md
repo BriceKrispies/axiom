@@ -1,6 +1,7 @@
 # SPEC-02 — Entities, components, queries, hierarchy
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): `axiom-ecs::DynamicComponents::{entities_with, entities_with_all}` + `axiom-scene::SceneApi::{children_of, despawn_subtree}`; `@axiom/game` `Sim.world` (`makeWorld`/`BridgeWorld`) projects the `World` surface. The §2 gaps below are now closed.
 > Contract: §4, §4.1   Vocabulary: Spawn/despawn + pooling, Offset-group / formation (transform hierarchy)   Determinism: sim
 
 ## 1. Summary

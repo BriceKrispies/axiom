@@ -1,6 +1,7 @@
 # SPEC-09 — UI/HUD overlay & tween/easing
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): `axiom-interface` gained the immediate-mode `UiSurface`; new module `axiom-tween` (`TweenApi` + `ease`); `@axiom/game` `Sim.tweens` (`makeTweens`/`EASES`) sampled by the `TickPump`. `solveLayout` projects the already-landed `axiom-layout::solve`. The §2 gaps below are now closed.
 > Contract: §14, §12   Vocabulary: Overlay screens/modals, Responsive layout solver, Canvas-drawn HUD, Stat/leaderboard panels, Floating popups/toasts, Immediate-mode button, Tween/easing, Flip-book   Determinism: presentation
 
 ## 1. Summary
@@ -249,5 +250,3 @@ style records, reused unchanged; the app translates them onto `UiFill`/`UiTextOp
 - **Flip-book.** Frame-stepped sprite animation is SPEC-04's concern (the 2D
   surface), not this spec; a HUD that flip-books an icon composes SPEC-04's
   flip-book with `Ui.sprite`. Noted here only to fix the boundary.
-</content>
-</invoke>

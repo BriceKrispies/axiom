@@ -94,20 +94,44 @@ is tracked here and is the single index of the program.
 
 | Spec | Subsystem | Contract | Determinism | Placement (new \| extend) | Status |
 |------|-----------|----------|-------------|---------------------------|--------|
-| [00](SPEC-00-authoring-boundary-and-frame-model.md) | Authoring boundary & frame model | §0–§2 | boundary | **new** TS `@axiom/game` SDK + wasm boundary app | Draft |
-| [01](SPEC-01-deterministic-randomness.md) | Deterministic randomness | §3, §17 | sim | extend `axiom-entropy` + projection | Draft |
-| [02](SPEC-02-entities-components-queries.md) | Entities, components, queries, hierarchy | §4 | sim | extend `axiom-ecs` / `axiom-scene` + projection | Draft |
-| [03](SPEC-03-math-and-spatial-queries.md) | Math & spatial queries | §5 | sim | extend `axiom-math` (scalar helpers) + projection | Draft |
-| [04](SPEC-04-2d-surface.md) | 2D surface (shapes/text/sprites/particles) | §10 | presentation | **new** module `axiom-draw2d` + backend arms | Draft |
-| [05](SPEC-05-input.md) | Input (keyboard, bindings, pointer, timing) | §8 | sim | extend `axiom-input` module | Draft |
-| [06](SPEC-06-grid-pathfinding-tilespace.md) | Grid, pathfinding, tile space | §6–§7 | sim | **new** module `axiom-grid` | Draft |
-| [07](SPEC-07-timers-and-state-machines.md) | Timers & state machines | §9 | sim | **new** module `axiom-tick` | Draft |
-| [08](SPEC-08-audio.md) | Audio (synthesis, playback, analysis) | §13 | presentation | **new** module `axiom-audio` + platform arm | Draft |
-| [09](SPEC-09-ui-hud-and-tween.md) | UI/HUD overlay & tween/easing | §14, §12 | presentation | extend `axiom-interface` + **new** `axiom-tween` | Draft |
-| [10](SPEC-10-physics-extensions.md) | Physics extensions (angular, friction) | impl §10 | sim | extend `axiom-physics` module | Draft |
-| [11](SPEC-11-3d-scene-surface.md) | 3D scene authoring surface | §11 | presentation | extend `axiom` / `axiom-render` / `axiom-scene` | Draft |
-| [12](SPEC-12-host-bridge-and-persistence.md) | Host bridge & persistence | §15 | boundary | extend `axiom-host` + platform arm + TS bridge | Draft |
-| [13](SPEC-13-multiplayer-netcode-authoring.md) | Multiplayer & netcode authoring | §16 | sim | extend `axiom-net-protocol`/`-netcode`/`-client-core` + projection | Draft |
+| [00](SPEC-00-authoring-boundary-and-frame-model.md) | Authoring boundary & frame model | §0–§2 | boundary | **new** TS `@axiom/game` SDK + wasm boundary app | **Landed** |
+| [01](SPEC-01-deterministic-randomness.md) | Deterministic randomness | §3, §17 | sim | extend `axiom-entropy` + projection | **Landed** |
+| [02](SPEC-02-entities-components-queries.md) | Entities, components, queries, hierarchy | §4 | sim | extend `axiom-ecs` / `axiom-scene` + projection | **Landed** |
+| [03](SPEC-03-math-and-spatial-queries.md) | Math & spatial queries | §5 | sim | extend `axiom-math` (scalar helpers) + projection | **Landed** |
+| [04](SPEC-04-2d-surface.md) | 2D surface (shapes/text/sprites/particles) | §10 | presentation | **new** module `axiom-draw2d` + backend arms | **Landed** ¹ |
+| [05](SPEC-05-input.md) | Input (keyboard, bindings, pointer, timing) | §8 | sim | extend `axiom-input` module | **Landed** |
+| [06](SPEC-06-grid-pathfinding-tilespace.md) | Grid, pathfinding, tile space | §6–§7 | sim | **new** module `axiom-grid` | **Landed** |
+| [07](SPEC-07-timers-and-state-machines.md) | Timers & state machines | §9 | sim | **new** module `axiom-tick` (+ kernel `TickSchedule`) | **Landed** |
+| [08](SPEC-08-audio.md) | Audio (synthesis, playback, analysis) | §13 | presentation | **new** module `axiom-audio` + platform arm | **Landed** ² |
+| [09](SPEC-09-ui-hud-and-tween.md) | UI/HUD overlay & tween/easing | §14, §12 | presentation | extend `axiom-interface` + **new** `axiom-tween` | **Landed** |
+| [10](SPEC-10-physics-extensions.md) | Physics extensions (angular, friction) | impl §10 | sim | extend `axiom-physics` module | **Landed** ³ |
+| [11](SPEC-11-3d-scene-surface.md) | 3D scene authoring surface | §11 | presentation | extend `axiom` / `axiom-render` / `axiom-scene` | **Landed** ⁴ |
+| [12](SPEC-12-host-bridge-and-persistence.md) | Host bridge & persistence | §15 | boundary | extend `axiom-host` + platform arm + TS bridge | **Landed** |
+| [13](SPEC-13-multiplayer-netcode-authoring.md) | Multiplayer & netcode authoring | §16 | sim | extend `axiom-net-protocol`/`-netcode`/`-client-core` + projection | **Landed** ⁵ |
+| [14](SPEC-14-typescript-authoring-sdk.md) | TypeScript authoring SDK (`@axiom/game`) | §1–§4 | boundary | `@axiom/game` `Scene` + factories (in SPEC-00's pkg/app) | **Landed** |
+
+Every spec's implementation has **landed on `main`**: the native facades, the
+`@axiom/game` TypeScript projections, and the backend rasterizers. The wasm
+runtime bridge and live browser presentation are browser-proven (the native
+sandbox cannot run browser WebGPU / Web Audio). Documented deferrals:
+
+- ¹ **SPEC-04** — the neutral `Draw2dList` core is complete (all shapes, sprite,
+  text, gradients, camera/transform, layer sort). The software backend rasterizes
+  **rect + sprite with src-over alpha compositing**; circle/line/path/gradient/
+  stroke/text glyph-runs are recognised but skipped (deferred). **Particles (§10.1)
+  and render-targets (§10.3)** are deferred at the facade pending a kernel
+  `Seconds` scalar.
+- ² **SPEC-08** — neutral core + Web Audio arm landed; live playback and the
+  optional §13.1 analyser are browser-proven only.
+- ³ **SPEC-10** — `apply_torque` + friction + damping landed; determinism stays
+  **same-binary only** (cross-platform f32 §17.6 unresolved), so SPEC-13 must not
+  predict physics.
+- ⁴ **SPEC-11** — cylinder + emissive/roughness/opacity + hemisphere ambient
+  landed; `opacity` is carried but **3D translucency does not blend yet** (needs
+  back-to-front ordering). `MeshData` deferred.
+- ⁵ **SPEC-13** — per-player spine + `NetSim`/`joinRoom`/`configureNet` landed;
+  **physics net-prediction is OFF by decision** (authority/non-physics state only).
+  Delta encoding, JWT verification, and unreliable transports are follow-ups.
 
 ## Cross-cutting law: determinism & replay (contract §17)
 
