@@ -130,6 +130,14 @@ pub fn item_has_marker(cx: &LateContext<'_>, item: &Item<'_>, marker: &str) -> b
 }
 
 /// Is the item at `def_id` named exactly `name`?
+///
+/// Uses `opt_item_name` rather than `item_name`: a module's `item_ids` include
+/// nameless defs such as `use` re-exports, and `item_name` *panics* (ICEs) on a
+/// def with no name. `opt_item_name` yields `None` for those, so a nameless
+/// sibling of a marker const can never crash a zone walk — it simply isn't the
+/// marker.
 pub fn def_named(cx: &LateContext<'_>, def_id: DefId, name: &str) -> bool {
-    cx.tcx.item_name(def_id).as_str() == name
+    cx.tcx
+        .opt_item_name(def_id)
+        .is_some_and(|item| item.as_str() == name)
 }

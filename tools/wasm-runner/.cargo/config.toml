@@ -1,0 +1,6 @@
+# When `cargo test --target wasm32-unknown-unknown` is run from this crate, use
+# `wasm-bindgen-test-runner` (which executes the wasm test binary under node) as
+# the target runner. `scripts/wasm-test.*` also sets the equivalent env var, so
+# the runner works whether invoked from here or from the repo root.
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"
