@@ -29,6 +29,14 @@ allowed_layers = [
     # re-exports the value types but not the `MathApi` facade or `Quat`, so this
     # leaf app names the `math` layer directly.
     "math",
+    # UI (SPEC-09): the immediate-mode `axiom-interface` HUD surface the `ui*` verbs
+    # bind over, and the responsive `axiom-layout` flex solver `uiSolveLayout` uses.
+    "interface",
+    "layout",
+    # Host: the `axiom-draw2d` value vocabulary (Rect/Fill2d/Common2d/Rgba/
+    # RenderTargetId) the `draw2d*` verbs marshal, plus the Pixels/HostViewport the
+    # layout solver takes.
+    "host",
 ]
 
 allowed_modules = [
@@ -48,4 +56,7 @@ allowed_modules = [
     # Audio (SPEC-08): the neutral mixer core the `playSound`/`playTone`/… host ops
     # drive; the live Web Audio output is the app's `wasm32` arm.
     "audio",
+    # 2D drawing (SPEC-10): the `axiom-draw2d` builder (particles / render targets /
+    # shapes) the `draw2d*` verbs forward to.
+    "draw2d",
 ]

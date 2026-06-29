@@ -6,7 +6,7 @@
 //! keeping `app.rs` within the per-file size budget.
 
 use axiom_kernel::Meters;
-use axiom_math::Vec3;
+use axiom_math::{Transform, Vec3};
 use axiom_scene::SceneNodeId as Entity;
 
 use super::RunningApp;
@@ -103,6 +103,44 @@ impl RunningApp {
         });
         self.scene.update_world_transforms();
         node
+    }
+
+    /// Every bounded node whose world box overlaps the query sphere (centered at
+    /// `center`, of `radius`), as [`Entity`] handles in ascending order — the
+    /// radial companion to [`Self::overlap_box`] for proximity/blast checks. The
+    /// engine owns the box↔sphere test; the caller classifies the returned hits.
+    pub fn overlap_circle(&self, center: Vec3, radius: Meters) -> Vec<Entity> {
+        self.scene.overlap_circle(center, radius)
+    }
+
+    /// Whether `entity` names a live node — created and not despawned. A stale
+    /// handle (e.g. one held across the wasm boundary after a despawn) reads
+    /// `false`, so a holder can check liveness before addressing it.
+    pub fn is_alive(&self, entity: Entity) -> bool {
+        self.scene.is_alive(entity)
+    }
+
+    /// The parent of `entity` in the scene hierarchy, if any (`None` for a root
+    /// or an absent node) — the read side of the attached-part hierarchy.
+    pub fn parent_of(&self, entity: Entity) -> Option<Entity> {
+        self.scene.parent_of(entity)
+    }
+
+    /// Re-parent `child` under `parent`, returning whether the link was made
+    /// (self-parenting, a cycle, or a missing id is a clean `false`). World
+    /// transforms refresh so a subsequent [`Self::world_transform`] read reflects
+    /// the new parent chain immediately.
+    pub fn set_parent(&mut self, child: Entity, parent: Entity) -> bool {
+        let linked = self.scene.set_parent(child, parent).is_ok();
+        self.scene.update_world_transforms();
+        linked
+    }
+
+    /// The authoritative world-space [`Transform`] of `entity` (the most recent
+    /// propagated value), or `None` for an absent node — how a holder reads where
+    /// a node ended up after parenting and per-tick simulation.
+    pub fn world_transform(&self, entity: Entity) -> Option<Transform> {
+        self.scene.world_transform(entity).ok()
     }
 }
 
@@ -320,5 +358,57 @@ mod tests {
         // A move advances the authoritative translation read back from the engine.
         app.tick_with(0, &[PlayerInput::new(0, Vec3::new(1.5, 0.0, 0.0))]);
         assert_eq!(app.player_translation(0), Some(Vec3::new(1.5, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn overlap_circle_liveness_and_world_transform_round_trip() {
+        let (mut app, cube, material) = app_with_handles();
+        // A bounded node three units down -Z.
+        let target = app.spawn(
+            Spawn::new(
+                Transform::from_translation(Vec3::new(0.0, 0.0, -3.0)),
+                cube,
+                material,
+            )
+            .with_bounds(Vec3::new(0.5, 0.5, 0.5)),
+        );
+        // overlap_circle finds the bounded node near its centre and nothing at the
+        // origin (the box↔sphere test the engine owns).
+        assert_eq!(
+            app.overlap_circle(Vec3::new(0.0, 0.0, -3.0), Meters::new(1.0).unwrap()),
+            vec![target]
+        );
+        assert!(app
+            .overlap_circle(Vec3::ZERO, Meters::new(0.5).unwrap())
+            .is_empty());
+        // Liveness: a live node is true, a stale handle false.
+        assert!(app.is_alive(target));
+        assert!(!app.is_alive(Entity::from_raw(9999)));
+        // World transform reflects the authored position; an absent node is None.
+        assert_eq!(
+            app.world_transform(target).map(|t| t.translation),
+            Some(Vec3::new(0.0, 0.0, -3.0))
+        );
+        assert_eq!(app.world_transform(Entity::from_raw(9999)), None);
+        // Despawn flips liveness.
+        assert!(app.despawn(target));
+        assert!(!app.is_alive(target));
+    }
+
+    #[test]
+    fn set_parent_links_children_and_rejects_self_parenting() {
+        let mut app = App::new()
+            .window(Window::new(64, 64))
+            .add_plugins(DefaultPlugins)
+            .build();
+        let parent = app.spawn_empty();
+        let child = app.spawn_empty();
+        // A fresh node has no parent.
+        assert_eq!(app.parent_of(child), None);
+        // Linking succeeds and the read side reflects it.
+        assert!(app.set_parent(child, parent));
+        assert_eq!(app.parent_of(child), Some(parent));
+        // Self-parenting is rejected as a clean false.
+        assert!(!app.set_parent(parent, parent));
     }
 }

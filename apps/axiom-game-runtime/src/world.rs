@@ -243,12 +243,25 @@ fn get_of<T: Reflect>(app: &RunningApp, entity: Entity) -> Option<Vec<u8>> {
     app.get_dynamic::<T>(entity).map(|value| encode(&value))
 }
 
+/// Whether `entity` carries a `T`. One row's `has` half, monomorphized per type.
+fn has_of<T: Reflect>(app: &RunningApp, entity: Entity) -> bool {
+    app.has_dynamic::<T>(entity)
+}
+
+/// Remove `entity`'s `T`, returning whether it existed. One row's `remove` half,
+/// monomorphized per component type.
+fn remove_of<T: Reflect>(app: &mut RunningApp, entity: Entity) -> bool {
+    app.remove_dynamic::<T>(entity)
+}
+
 /// One row of the kind→codec dispatch table: the schema-name key plus the
-/// monomorphized set/get the boundary routes to.
+/// monomorphized set/get/has/remove the boundary routes to.
 struct ComponentCodec {
     kind: &'static str,
     set: fn(&mut RunningApp, Entity, &[u8]) -> bool,
     get: fn(&RunningApp, Entity) -> Option<Vec<u8>>,
+    has: fn(&RunningApp, Entity) -> bool,
+    remove: fn(&mut RunningApp, Entity) -> bool,
 }
 
 /// The closed game-component vocabulary, in a fixed order. The `kind` is the
@@ -258,31 +271,43 @@ const CODECS: &[ComponentCodec] = &[
         kind: "Transform",
         set: set_of::<Transform2D>,
         get: get_of::<Transform2D>,
+        has: has_of::<Transform2D>,
+        remove: remove_of::<Transform2D>,
     },
     ComponentCodec {
         kind: "Velocity",
         set: set_of::<Velocity2D>,
         get: get_of::<Velocity2D>,
+        has: has_of::<Velocity2D>,
+        remove: remove_of::<Velocity2D>,
     },
     ComponentCodec {
         kind: "Sprite",
         set: set_of::<Sprite>,
         get: get_of::<Sprite>,
+        has: has_of::<Sprite>,
+        remove: remove_of::<Sprite>,
     },
     ComponentCodec {
         kind: "Text",
         set: set_of::<Text>,
         get: get_of::<Text>,
+        has: has_of::<Text>,
+        remove: remove_of::<Text>,
     },
     ComponentCodec {
         kind: "Rectangle",
         set: set_of::<Rectangle>,
         get: get_of::<Rectangle>,
+        has: has_of::<Rectangle>,
+        remove: remove_of::<Rectangle>,
     },
     ComponentCodec {
         kind: "Image",
         set: set_of::<Image>,
         get: get_of::<Image>,
+        has: has_of::<Image>,
+        remove: remove_of::<Image>,
     },
 ];
 
@@ -304,6 +329,26 @@ pub fn world_get(app: &RunningApp, entity: Entity, kind: &str) -> Vec<u8> {
         .find(|codec| codec.kind == kind)
         .and_then(|codec| (codec.get)(app, entity))
         .unwrap_or_default()
+}
+
+/// Whether `entity` carries a component of `kind` (`worldHas`) — a clean `false`
+/// for an unknown kind, a dead entity, or an absent component.
+pub fn world_has(app: &RunningApp, entity: Entity, kind: &str) -> bool {
+    CODECS
+        .iter()
+        .find(|codec| codec.kind == kind)
+        .map(|codec| (codec.has)(app, entity))
+        .unwrap_or(false)
+}
+
+/// Remove `entity`'s component of `kind` (`worldRemove`), returning whether it
+/// existed — a clean `false` for an unknown kind / dead entity / absent component.
+pub fn world_remove(app: &mut RunningApp, entity: Entity, kind: &str) -> bool {
+    CODECS
+        .iter()
+        .find(|codec| codec.kind == kind)
+        .map(|codec| (codec.remove)(app, entity))
+        .unwrap_or(false)
 }
 
 /// Resolve a runtime `kind` string to the `&'static str` schema name the engine's

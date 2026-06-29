@@ -81,6 +81,29 @@ mod mathbridge;
 /// Native-tested for deterministic handle allocation; playback is browser-proven.
 mod audio;
 
+/// Scene spatial queries (game-vocabulary Category 2): `overlapCircle` /
+/// `overlapBox` / `raycast` forwarding to the engine's Entity-addressed query
+/// surface on `RunningApp`. Native-tested against a bounded scene; the `wasm32`
+/// boundary marshals to it through [`GameBridge`].
+mod query;
+
+/// 3D scene authoring: `createMesh` / `createMaterial` / `setCamera3D` /
+/// `addLight` over `RunningApp`'s runtime authoring, returning engine handles.
+/// Native-tested for stable handle allocation; the `wasm32` boundary marshals to it.
+mod scene3d;
+
+/// UI surface + responsive layout (SPEC-09): the immediate-mode `axiom-interface`
+/// `UiSurface` (button hit-testing + viewport) plus the bridge-owned encoded draw
+/// log, and the pure `axiom-layout` flex solver. Native-tested for a deterministic
+/// draw log + a solved layout; the `wasm32` boundary marshals to it.
+mod ui;
+
+/// 2D drawing (SPEC-10): particles, render targets, and shapes over the
+/// `axiom-draw2d` builder, yielding the neutral layer-sorted command list.
+/// Presentation-only; native-tested for a deterministic command list; the
+/// `wasm32` boundary marshals to it.
+mod draw2d;
+
 /// The embed seam (SPEC-12): decode the inbound session config, latch the single
 /// outbound outcome. Pure, native-testable core; the browser channel that carries
 /// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on

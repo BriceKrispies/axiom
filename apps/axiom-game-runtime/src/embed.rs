@@ -24,17 +24,45 @@ use axiom::prelude::{
 /// value that parses as an `f64` is a [`HostParamValue::Number`], otherwise
 /// [`HostParamValue::Text`]. Parameter order follows the query string, which the
 /// stable-ordered [`HostSessionParams`] preserves.
-pub(crate) fn decode_session_config(raw_query: &str) -> HostSessionConfig {
-    let trimmed = raw_query.strip_prefix('?').unwrap_or(raw_query);
-    // Every non-empty `key=value` pair, in query order.
-    let pairs: Vec<(&str, &str)> = trimmed
+/// Split a URL query string into its non-empty `(key, value)` pairs, in query
+/// order — the one parse both [`decode_session_config`] and [`session_params_json`]
+/// share, so the two views of the query can never drift.
+fn query_pairs(raw_query: &str) -> Vec<(&str, &str)> {
+    raw_query
+        .strip_prefix('?')
+        .unwrap_or(raw_query)
         .split('&')
         .filter(|pair| !pair.is_empty())
         .map(|pair| {
             let mut kv = pair.splitn(2, '=');
             (kv.next().unwrap_or(""), kv.next().unwrap_or(""))
         })
-        .collect();
+        .collect()
+}
+
+/// A JSON string literal for `value` with the two structural characters escaped,
+/// so an opaque param value can never break the emitted object.
+fn json_string(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+/// Project the inbound query's opaque params (every non-`seed` key) into a JSON
+/// object string `{"key":"value",…}` in query order — the `sessionParams` map the
+/// host channel hands the game. Values stay strings: the engine never interprets
+/// a param (SPEC-12 §6), so the game's TS edge parses them into its own shape.
+pub(crate) fn session_params_json(raw_query: &str) -> String {
+    let body = query_pairs(raw_query)
+        .iter()
+        .filter(|(key, _)| (*key != "seed") & !key.is_empty())
+        .map(|(key, value)| format!("{}:{}", json_string(key), json_string(value)))
+        .collect::<Vec<String>>()
+        .join(",");
+    format!("{{{body}}}")
+}
+
+pub(crate) fn decode_session_config(raw_query: &str) -> HostSessionConfig {
+    let pairs = query_pairs(raw_query);
     // `seed` is the last `seed=` value parsed as u64 (absent/unparsable ⇒ 0).
     let seed = pairs
         .iter()
@@ -109,6 +137,23 @@ mod tests {
     fn decode_defaults_seed_to_zero_when_absent_or_unparsable() {
         assert_eq!(decode_session_config("").seed(), 0);
         assert_eq!(decode_session_config("seed=not-a-number").seed(), 0);
+    }
+
+    #[test]
+    fn session_params_json_projects_non_seed_params_in_order_and_escapes() {
+        // `seed` is dropped; the rest become a JSON object in query order.
+        assert_eq!(
+            session_params_json("?seed=5&mode=ranked&lives=3"),
+            r#"{"mode":"ranked","lives":"3"}"#
+        );
+        // No params ⇒ the empty object.
+        assert_eq!(session_params_json("?seed=1"), "{}");
+        assert_eq!(session_params_json(""), "{}");
+        // A value carrying a quote/backslash is escaped, never breaking the object.
+        assert_eq!(
+            session_params_json("tag=a\"b\\c"),
+            r#"{"tag":"a\"b\\c"}"#
+        );
     }
 
     #[test]

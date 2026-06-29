@@ -19,14 +19,12 @@
 //! (Carrying each vector as one slice — rather than flat scalar components — also
 //! keeps every method within the engine's argument-count budget.)
 //!
-//! ## Known facade gap (root-cause fix belongs in `axiom-math`, not here)
-//! `mat4Invert` has **no** faithful primitive: `axiom-math` exposes no general
-//! 4×4 matrix inverse (only `Quat::inverse` and the uniform-scale-TRS
-//! `Transform::inverse`), and re-deriving one here would be exactly the math
-//! re-implementation SPEC-03 §3.2 forbids. So `mat4Invert` is **deferred**: it is
-//! not exported from this boundary, and the TS host edge documents it as awaiting
-//! a `Mat4::inverse` (or `MathApi::mat4_invert`) primitive in the math layer. See
-//! the final report.
+//! ## `mat4Invert` (closed gap)
+//! `mat4Invert` now forwards to the math layer's general 4×4 inverse
+//! (`MathApi::mat4_invert` / `Mat4::inverse`), landed as a Wave-1 primitive — so
+//! nothing is re-derived here. A singular / non-finite matrix (which the facade
+//! returns `None` for) falls back to the identity, the inert boundary value the
+//! other `mat4` ops use.
 
 use axiom_kernel::Radians;
 use axiom_math::{Mat4, MathApi, Quat, Vec3};
@@ -156,6 +154,13 @@ impl GameBridge {
     /// through the math layer's `Transform::to_matrix`.
     pub fn mat4_from_trs(&self, t: &[f64], r: &[f64], s: &[f64]) -> Vec<f64> {
         mat_out(MathApi::new().transform(v3_in(t), quat_in(r), v3_in(s)).to_matrix())
+    }
+
+    /// The inverse of a 4×4 matrix (`mat4Invert`), through the math layer's
+    /// general inverse; a singular / non-finite matrix (which the facade rejects)
+    /// falls back to the identity (the inert boundary value).
+    pub fn mat4_invert(&self, m: &[f64]) -> Vec<f64> {
+        mat_out(MathApi::new().mat4_invert(mat_in(m)).unwrap_or(Mat4::IDENTITY))
     }
 
     // --- quat (quaternion) ops (SPEC-11 §4.2) ---
@@ -301,6 +306,12 @@ mod wasm_exports {
             self.bridge.mat4_from_trs(t, r, s)
         }
 
+        /// The inverse of a 4×4 matrix (`mat4Invert`).
+        #[wasm_bindgen(js_name = mat4Invert)]
+        pub fn mat4_invert(&self, m: &[f64]) -> Vec<f64> {
+            self.bridge.mat4_invert(m)
+        }
+
         /// The identity quaternion (`quatIdentity`).
         #[wasm_bindgen(js_name = quatIdentity)]
         pub fn quat_identity(&self) -> Vec<f64> {
@@ -407,6 +418,23 @@ mod tests {
             b.mat4_from_trs(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0, 1.0], &[2.0, 2.0, 2.0]),
             promote(trs)
         );
+    }
+
+    #[test]
+    fn mat4_invert_matches_axiom_math_and_falls_back_on_singular() {
+        let b = bridge();
+        let m = MathApi::new();
+        let promote =
+            |mat: Mat4| mat.as_cols_array().iter().copied().map(f64::from).collect::<Vec<f64>>();
+        // A translation matrix inverts to its negation — the same value the facade
+        // (the single source of truth) produces; no inverse is re-derived here.
+        let translate = Mat4::translation(Vec3::new(3.0, -4.0, 5.0));
+        assert_eq!(
+            b.mat4_invert(&promote(translate)),
+            promote(m.mat4_invert(translate).unwrap())
+        );
+        // The zero matrix is singular ⇒ the facade returns None ⇒ identity fallback.
+        assert_eq!(b.mat4_invert(&promote(Mat4::ZERO)), promote(Mat4::IDENTITY));
     }
 
     #[test]

@@ -61,6 +61,23 @@ axiom-audio = { path = "../../modules/axiom-audio" }
 # this leaf app names the `math` layer directly (the legal app-composes-layers path).
 axiom-math = { path = "../../crates/axiom-math" }
 
+# UI (SPEC-09): the immediate-mode `axiom-interface` HUD surface (the `ui*` verbs
+# bind over) and the responsive `axiom-layout` flex solver (`uiSolveLayout`). Both
+# are layers the umbrella does not re-export, so this leaf app names them directly.
+axiom-interface = { path = "../../crates/axiom-interface" }
+axiom-layout = { path = "../../crates/axiom-layout" }
+
+# Host (the platform/value-type layer): the `axiom-draw2d` value vocabulary
+# (`Rect`/`Fill2d`/`Common2d`/`Rgba`/`RenderTargetId`) the 2D draw verbs marshal,
+# and the `Pixels`/`HostViewport` the layout solver takes. A layer the umbrella
+# does not re-export, so this leaf app names it directly.
+axiom-host = { path = "../../crates/axiom-host" }
+
+# 2D drawing (SPEC-10): the `axiom-draw2d` builder (particles / render targets /
+# shapes) the `draw2d*` verbs forward to. An isolated engine module the umbrella
+# does not re-export, so this leaf app composes it directly.
+axiom-draw2d = { path = "../../modules/axiom-draw2d" }
+
 # Browser entry only: the wasm-bindgen export macro + a panic hook, plus the
 # bits of web-sys the embed-seam host channel (inbound query string, outbound
 # outcome) and the live audio arm (`AudioContext` the SPEC-08 batch realizes into)
