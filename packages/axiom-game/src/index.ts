@@ -29,12 +29,22 @@
  *   - audio (SPEC-08) — the `loadSound`/`playSound`/`playTone`/… free functions,
  *     presentation-side over the `HostBridge`.
  *
- * Deferred to a later wave (documented in the report) — the larger "tail" of the
- * surface: SPEC-06 grid/path, SPEC-11 3D (`createMesh`/`v3`/`mat4`/`quat`), and
- * SPEC-13 `NetSim`/`joinRoom` netcode. They are additive bridge projections that
- * land on the same seam; nothing here changes shape when they arrive. The pump
- * mechanism this wave introduces is what SPEC-06/11/13 (and a future Scene↔loop
- * binding) build their per-tick wiring on.
+ * Wave 4 FINAL completes the authoring surface with the last three projections,
+ * all bridge-backed and fully covered against a fake bridge (no wasm):
+ *   - SPEC-06 grid/path — `createGrid`/`Grid`/`tileSpace`/`TileSpace` plus the
+ *     authoritative `gridPath`/`gridReachable`/`gridDistanceField`/`stepToward`
+ *     queries, whose BFS / wavefront runs native-side (the projection feeds the
+ *     core a passability mask and forwards the cell sequence / distance field);
+ *   - SPEC-11 3D — `createMesh`/`createMaterial`/`setCamera3D`/`addLight`, and the
+ *     `v3`/`mat4`/`quat` namespaces, every op of which routes to the NATIVE
+ *     `MathApi` (one deterministic source of truth; no TS math twin);
+ *   - SPEC-13 netcode — `NetSim` (the `Sim` widened with player addressing),
+ *     `Intent`, `joinRoom(JoinConfig) → NetClient`, and `configureNet`, projected
+ *     over a `NetTransport`/`NetParticipants` seam the runtime binds over
+ *     `@axiom/client` (physics prediction stays OFF — authority state only).
+ *
+ * With these landed, the @axiom/game authoring surface is contract-complete modulo
+ * the wasm runtime bridge (`apps/axiom-game-runtime`) that implements the seams.
  */
 
 export { createGame } from "./game.ts";
@@ -125,13 +135,56 @@ export {
 
 export { orElse, whenPresent } from "./branchless.ts";
 
+// Wave 4 FINAL — grid/path (SPEC-06), 3D (SPEC-11), netcode (SPEC-13).
+
+export {
+  BridgeGrid,
+  createGrid,
+  gridDistanceField,
+  gridPath,
+  gridReachable,
+  stepToward,
+  tileSpace,
+} from "./grid.ts";
+export type { CellPair, Grid, TileSpace } from "./grid.ts";
+
 export type {
+  CameraDescriptor,
+  GridField,
+  LightDescriptor,
+  MaterialDescriptor,
+  PerspectiveSpec,
+} from "./host-descriptors.ts";
+
+export { mat4, quat, v3 } from "./math3d.ts";
+
+export { addLight, createMaterial, createMesh, setCamera3D } from "./scene3d.ts";
+export type { Camera3D, Light, MaterialSpec, MeshKind } from "./scene3d.ts";
+
+export { bindNetTransport, boundNetConfig, configureNet, joinRoom, makeNetSim } from "./net.ts";
+export type {
+  ConnStatus,
+  Intent,
+  JoinConfig,
+  NetClient,
+  NetConfig,
+  NetParticipants,
+  NetSim,
+  NetTransport,
+  NetTransportFactory,
+} from "./net.ts";
+
+export type {
+  Cell,
   Component,
   ComponentKind,
   Entity,
   Handle,
+  Mat4,
   PlayerId,
+  Quat,
   Result,
+  Rgba,
   Seconds,
   Ticks,
   Vec2,

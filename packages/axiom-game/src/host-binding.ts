@@ -16,7 +16,18 @@
  * one place: `bindNative` opens a fresh session, so it also clears the latch.
  */
 
-import type { Entity, Handle, PlayerId } from "./vocabulary.ts";
+import {
+  type CameraDescriptor,
+  type GridField,
+  IDENTITY_MAT4,
+  IDENTITY_QUAT,
+  type LightDescriptor,
+  type MaterialDescriptor,
+  ORIGIN_CELL,
+  type PerspectiveSpec,
+  ZERO_VEC3,
+} from "./host-descriptors.ts";
+import type { Cell, Entity, Handle, Mat4, PlayerId, Quat, Result, Vec3 } from "./vocabulary.ts";
 
 /** Host-supplied session configuration: a seed plus opaque parameters (SPEC-12). */
 export interface SessionConfig {
@@ -109,6 +120,68 @@ export interface HostBridge {
   readonly setMasterVolume: (volume: number) => void;
   /** Mute or unmute all output. */
   readonly setMuted: (muted: boolean) => void;
+
+  // Grid / pathfinding (SPEC-06): the native `axiom-grid` core owns the BFS/wavefront; the projection feeds it a `GridField` (dims + passability mask) and forwards the cell sequence / distances. Pure functions of their args.
+  /** The shortest cell path `start`→`goal`, or the empty value when unreachable. */
+  readonly gridPath: (field: GridField, start: Cell, goal: Cell) => Result<readonly Cell[]>;
+  /** Whether `goal` is reachable from `start`. */
+  readonly gridReachable: (field: GridField, start: Cell, goal: Cell) => boolean;
+  /** The row-major BFS distance field from `start` (`Infinity` at unreachable cells). */
+  readonly gridDistanceField: (field: GridField, start: Cell) => readonly number[];
+  /** The single best next cell stepping `from` toward `target` (stays put with no passable neighbour). */
+  readonly gridStepToward: (field: GridField, from: Cell, target: Cell) => Cell;
+
+  // 3D scene authoring (SPEC-11): mesh/material/camera/light marshal to the existing scene/render facades; handles are opaque, kinds are dense table indices the projection resolves from the contract's string discriminant.
+  /** Create a primitive mesh by its dense kind index (0=box, 1=sphere, 2=cylinder); return its handle. */
+  readonly createMesh: (meshKind: number) => Handle;
+  /** Create a lit material from its resolved descriptor; return its handle. */
+  readonly createMaterial: (material: MaterialDescriptor) => Handle;
+  /** Build the perspective camera node (look-at + intrinsics) from its descriptor. */
+  readonly setCamera3D: (camera: CameraDescriptor) => void;
+  /** Add a light from its descriptor; return its entity. */
+  readonly addLight: (light: LightDescriptor) => Entity;
+
+  // 3D math (SPEC-11): every `v3`/`mat4`/`quat` op routes here — the native `MathApi` is the ONE deterministic source of truth (SPEC-03 §3.2); never a TS re-implementation.
+  /** Vector sum. */
+  readonly v3Add: (lhs: Vec3, rhs: Vec3) => Vec3;
+  /** Vector difference. */
+  readonly v3Sub: (lhs: Vec3, rhs: Vec3) => Vec3;
+  /** Scalar multiple of a vector. */
+  readonly v3Scale: (vector: Vec3, scalar: number) => Vec3;
+  /** Dot product. */
+  readonly v3Dot: (lhs: Vec3, rhs: Vec3) => number;
+  /** Cross product. */
+  readonly v3Cross: (lhs: Vec3, rhs: Vec3) => Vec3;
+  /** Euclidean length. */
+  readonly v3Len: (vector: Vec3) => number;
+  /** Unit vector in the same direction. */
+  readonly v3Normalize: (vector: Vec3) => Vec3;
+  /** Distance between two points. */
+  readonly v3Dist: (lhs: Vec3, rhs: Vec3) => number;
+  /** Linear blend between two vectors. */
+  readonly v3Lerp: (lhs: Vec3, rhs: Vec3, fraction: number) => Vec3;
+  /** The 4×4 identity matrix. */
+  readonly mat4Identity: () => Mat4;
+  /** Matrix product `lhs · rhs`. */
+  readonly mat4Multiply: (lhs: Mat4, rhs: Mat4) => Mat4;
+  /** A right-handed perspective projection matrix from its spec. */
+  readonly mat4Perspective: (spec: PerspectiveSpec) => Mat4;
+  /** A right-handed look-at view matrix. */
+  readonly mat4LookAt: (eye: Vec3, target: Vec3, up: Vec3) => Mat4;
+  /** Matrix inverse. */
+  readonly mat4Invert: (matrix: Mat4) => Mat4;
+  /** A TRS (translate · rotate · scale) composition matrix. */
+  readonly mat4FromTRS: (translation: Vec3, rotation: Quat, scale: Vec3) => Mat4;
+  /** The identity quaternion. */
+  readonly quatIdentity: () => Quat;
+  /** A quaternion from intrinsic Euler angles (radians). */
+  readonly quatFromEuler: (pitch: number, yaw: number, roll: number) => Quat;
+  /** Quaternion product (composition of rotations). */
+  readonly quatMultiply: (lhs: Quat, rhs: Quat) => Quat;
+  /** The unit quaternion in the same direction. */
+  readonly quatNormalize: (quaternion: Quat) => Quat;
+  /** The rotation matrix of a quaternion. */
+  readonly quatToMat4: (quaternion: Quat) => Mat4;
 }
 
 /** The seed reported before a host binds — a neutral, inert default. */
@@ -117,6 +190,9 @@ const UNBOUND_SEED = 0n;
 /** The handle returned by handle-minting reads before a host binds (a null handle). */
 const UNBOUND_HANDLE = 0;
 
+/** The neutral scalar an inert numeric math read returns before a host binds. */
+const UNBOUND_SCALAR = 0;
+
 /*
  * The inert host used before `bindNative`: every read returns a neutral value
  * and every signal is a no-op. This keeps the free surface total (no `null`
@@ -124,12 +200,25 @@ const UNBOUND_HANDLE = 0;
  * observable no-op rather than a crash.
  */
 const UNBOUND_HOST: HostBridge = {
+  addLight: (): Entity => UNBOUND_HANDLE,
   bindAction: (): void => {
     // No-op until a host is bound
   },
   clamp: (value: number): number => value,
+  createMaterial: (): Handle => UNBOUND_HANDLE,
+  createMesh: (): Handle => UNBOUND_HANDLE,
   getSessionConfig: (): SessionConfig => ({ params: {}, seed: UNBOUND_SEED }),
+  gridDistanceField: (): readonly number[] => [],
+  gridPath: (): Result<readonly Cell[]> => [],
+  gridReachable: (): boolean => false,
+  gridStepToward: (): Cell => ORIGIN_CELL,
   loadSound: (): Handle => UNBOUND_HANDLE,
+  mat4FromTRS: (): Mat4 => IDENTITY_MAT4,
+  mat4Identity: (): Mat4 => IDENTITY_MAT4,
+  mat4Invert: (): Mat4 => IDENTITY_MAT4,
+  mat4LookAt: (): Mat4 => IDENTITY_MAT4,
+  mat4Multiply: (): Mat4 => IDENTITY_MAT4,
+  mat4Perspective: (): Mat4 => IDENTITY_MAT4,
   normalizeAngle: (angle: number): number => angle,
   notifyReady: (): void => {
     // No-op until a host is bound
@@ -138,6 +227,11 @@ const UNBOUND_HOST: HostBridge = {
   playMusic: (): Handle => UNBOUND_HANDLE,
   playSound: (): Handle => UNBOUND_HANDLE,
   playTone: (): Handle => UNBOUND_HANDLE,
+  quatFromEuler: (): Quat => IDENTITY_QUAT,
+  quatIdentity: (): Quat => IDENTITY_QUAT,
+  quatMultiply: (): Quat => IDENTITY_QUAT,
+  quatNormalize: (): Quat => IDENTITY_QUAT,
+  quatToMat4: (): Mat4 => IDENTITY_MAT4,
   reportOutcome: (): void => {
     // No-op until a host is bound
   },
@@ -145,6 +239,9 @@ const UNBOUND_HOST: HostBridge = {
     // No-op until a host is bound
   },
   scheduleSound: (): Handle => UNBOUND_HANDLE,
+  setCamera3D: (): void => {
+    // No-op until a host is bound
+  },
   setMasterVolume: (): void => {
     // No-op until a host is bound
   },
@@ -154,6 +251,15 @@ const UNBOUND_HOST: HostBridge = {
   stopVoice: (): void => {
     // No-op until a host is bound
   },
+  v3Add: (): Vec3 => ZERO_VEC3,
+  v3Cross: (): Vec3 => ZERO_VEC3,
+  v3Dist: (): number => UNBOUND_SCALAR,
+  v3Dot: (): number => UNBOUND_SCALAR,
+  v3Len: (): number => UNBOUND_SCALAR,
+  v3Lerp: (): Vec3 => ZERO_VEC3,
+  v3Normalize: (): Vec3 => ZERO_VEC3,
+  v3Scale: (): Vec3 => ZERO_VEC3,
+  v3Sub: (): Vec3 => ZERO_VEC3,
 };
 
 /** The mutable session: the bound host and whether a terminal outcome was emitted. */

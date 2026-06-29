@@ -11,7 +11,14 @@ import type {
   SoundOptions,
   ToneSpec,
 } from "../src/host-binding.ts";
-import type { Entity, Handle } from "../src/vocabulary.ts";
+import type {
+  CameraDescriptor,
+  GridField,
+  LightDescriptor,
+  MaterialDescriptor,
+  PerspectiveSpec,
+} from "../src/host-descriptors.ts";
+import type { Cell, Entity, Handle, Mat4, Quat, Vec3 } from "../src/vocabulary.ts";
 
 export class FakeHost implements HostBridge {
   public clampReturn = 0;
@@ -36,6 +43,22 @@ export class FakeHost implements HostBridge {
   public masterVolumes: number[] = [];
   public muteStates: boolean[] = [];
   private nextHandle = 1;
+
+  // --- grid / pathfinding: scripted returns + recorded fields/endpoints ---
+  public gridPathReturn: readonly Cell[] | undefined = [];
+  public gridReachableReturn = false;
+  public gridDistanceReturn: readonly number[] = [];
+  public gridStepReturn: Cell = { x: 0, y: 0 };
+  public gridPathCalls: { field: GridField; start: Cell; goal: Cell }[] = [];
+  public gridReachableCalls: { field: GridField; start: Cell; goal: Cell }[] = [];
+  public gridDistanceCalls: { field: GridField; start: Cell }[] = [];
+  public gridStepCalls: { field: GridField; from: Cell; target: Cell }[] = [];
+
+  // --- 3D scene authoring call log; handles/entities get incrementing ids ---
+  public meshKinds: number[] = [];
+  public materials: MaterialDescriptor[] = [];
+  public cameras: CameraDescriptor[] = [];
+  public lights: LightDescriptor[] = [];
 
   public clamp(value: number, low: number, high: number): number {
     this.clampCalls.push([value, low, high]);
@@ -107,6 +130,172 @@ export class FakeHost implements HostBridge {
 
   public setMuted(muted: boolean): void {
     this.muteStates.push(muted);
+  }
+
+  // --- grid / pathfinding (records the field the projection built, returns scripted) ---
+  public gridPath(field: GridField, start: Cell, goal: Cell): readonly Cell[] | undefined {
+    this.gridPathCalls.push({ field, goal, start });
+    return this.gridPathReturn;
+  }
+
+  public gridReachable(field: GridField, start: Cell, goal: Cell): boolean {
+    this.gridReachableCalls.push({ field, goal, start });
+    return this.gridReachableReturn;
+  }
+
+  public gridDistanceField(field: GridField, start: Cell): readonly number[] {
+    this.gridDistanceCalls.push({ field, start });
+    return this.gridDistanceReturn;
+  }
+
+  public gridStepToward(field: GridField, from: Cell, target: Cell): Cell {
+    this.gridStepCalls.push({ field, from, target });
+    return this.gridStepReturn;
+  }
+
+  // --- 3D scene authoring (records the marshalled descriptor, mints a handle/entity) ---
+  public createMesh(meshKind: number): Handle {
+    this.meshKinds.push(meshKind);
+    return this.mint();
+  }
+
+  public createMaterial(material: MaterialDescriptor): Handle {
+    this.materials.push(material);
+    return this.mint();
+  }
+
+  public setCamera3D(camera: CameraDescriptor): void {
+    this.cameras.push(camera);
+  }
+
+  public addLight(light: LightDescriptor): Entity {
+    this.lights.push(light);
+    return this.mint();
+  }
+
+  // --- 3D math (deterministic, input-derived returns: the projection only forwards) ---
+  public v3Add(lhs: Vec3, rhs: Vec3): Vec3 {
+    return { x: lhs.x + rhs.x, y: lhs.y + rhs.y, z: lhs.z + rhs.z };
+  }
+
+  public v3Sub(lhs: Vec3, rhs: Vec3): Vec3 {
+    return { x: lhs.x - rhs.x, y: lhs.y - rhs.y, z: lhs.z - rhs.z };
+  }
+
+  public v3Scale(vector: Vec3, scalar: number): Vec3 {
+    return { x: vector.x * scalar, y: vector.y * scalar, z: vector.z * scalar };
+  }
+
+  public v3Dot(lhs: Vec3, rhs: Vec3): number {
+    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+  }
+
+  public v3Cross(lhs: Vec3, rhs: Vec3): Vec3 {
+    return {
+      x: lhs.y * rhs.z - lhs.z * rhs.y,
+      y: lhs.z * rhs.x - lhs.x * rhs.z,
+      z: lhs.x * rhs.y - lhs.y * rhs.x,
+    };
+  }
+
+  public v3Len(vector: Vec3): number {
+    return Math.hypot(vector.x, vector.y, vector.z);
+  }
+
+  public v3Normalize(vector: Vec3): Vec3 {
+    const length = Math.hypot(vector.x, vector.y, vector.z);
+    return { x: vector.x / length, y: vector.y / length, z: vector.z / length };
+  }
+
+  public v3Dist(lhs: Vec3, rhs: Vec3): number {
+    return Math.hypot(lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z);
+  }
+
+  public v3Lerp(lhs: Vec3, rhs: Vec3, fraction: number): Vec3 {
+    return {
+      x: lhs.x + (rhs.x - lhs.x) * fraction,
+      y: lhs.y + (rhs.y - lhs.y) * fraction,
+      z: lhs.z + (rhs.z - lhs.z) * fraction,
+    };
+  }
+
+  public mat4Identity(): Mat4 {
+    return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  }
+
+  // Elementwise sum: a deterministic function of BOTH operands (proves forwarding).
+  public mat4Multiply(lhs: Mat4, rhs: Mat4): Mat4 {
+    return lhs.map((value, index) => value + (rhs[index] ?? 0));
+  }
+
+  public mat4Perspective(spec: PerspectiveSpec): Mat4 {
+    return [spec.fovY, spec.aspect, spec.near, spec.far, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  }
+
+  public mat4LookAt(eye: Vec3, target: Vec3, up: Vec3): Mat4 {
+    return [eye.x, eye.y, eye.z, target.x, target.y, target.z, up.x, up.y, up.z, 0, 0, 0, 0, 0, 0, 0];
+  }
+
+  public mat4Invert(matrix: Mat4): Mat4 {
+    return matrix.map((value) => -value);
+  }
+
+  public mat4FromTRS(translation: Vec3, rotation: Quat, scale: Vec3): Mat4 {
+    return [
+      translation.x,
+      translation.y,
+      translation.z,
+      rotation[0],
+      rotation[1],
+      rotation[2],
+      rotation[3],
+      scale.x,
+      scale.y,
+      scale.z,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ];
+  }
+
+  public quatIdentity(): Quat {
+    return [0, 0, 0, 1];
+  }
+
+  public quatFromEuler(pitch: number, yaw: number, roll: number): Quat {
+    return [pitch, yaw, roll, 0];
+  }
+
+  public quatMultiply(lhs: Quat, rhs: Quat): Quat {
+    return [lhs[0] * rhs[0], lhs[1] * rhs[1], lhs[2] * rhs[2], lhs[3] * rhs[3]];
+  }
+
+  public quatNormalize(quaternion: Quat): Quat {
+    return [quaternion[0], quaternion[1], quaternion[2], quaternion[3]];
+  }
+
+  public quatToMat4(quaternion: Quat): Mat4 {
+    return [
+      quaternion[0],
+      quaternion[1],
+      quaternion[2],
+      quaternion[3],
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ];
   }
 
   private mint(): Handle {

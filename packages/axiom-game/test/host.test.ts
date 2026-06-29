@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { getSessionConfig, notifyReady, reportOutcome, reportOutcomes } from "../src/host.ts";
 import { bindNative, boundHost } from "../src/host-binding.ts";
+import type { Vec3 } from "../src/vocabulary.ts";
 import { FakeHost } from "./fake-host.ts";
 
 const won = { score: 1, won: true };
@@ -34,6 +35,53 @@ test("the unbound host surface is inert until a host is bound", () => {
     inert.setMasterVolume(1);
     inert.setMuted(true);
   });
+});
+
+// The inert GRID / 3D / math surfaces (SPEC-06/11) before any host is bound: every
+// read is a neutral total value, every signal a no-op. Runs before bindNative below.
+test("the unbound grid / 3D / math surface is inert until a host is bound", () => {
+  const inert = boundHost();
+  const one: Vec3 = { x: 1, y: 1, z: 1 };
+  const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+  const field = { cols: 1, passable: [true], rows: 1 };
+  const origin = { x: 0, y: 0 };
+
+  // Grid queries return neutral empties / origin.
+  assert.deepEqual(inert.gridPath(field, origin, origin), []);
+  assert.equal(inert.gridReachable(field, origin, origin), false);
+  assert.deepEqual(inert.gridDistanceField(field, origin), []);
+  assert.deepEqual(inert.gridStepToward(field, origin, origin), { x: 0, y: 0 });
+
+  // 3D authoring mints a null handle / entity and no-ops the camera.
+  assert.equal(inert.createMesh(0), 0);
+  assert.equal(inert.createMaterial({ baseColor: [1, 1, 1, 1], emissive: [0, 0, 0, 0], opacity: 1, roughness: 1 }), 0);
+  assert.equal(inert.addLight({ color: [1, 1, 1, 1], intensity: 1, kind: 0, vector: one }), 0);
+  assert.doesNotThrow(() => {
+    inert.setCamera3D({ far: 1, fovY: 1, near: 1, position: one, target: one });
+  });
+
+  // 3D math returns zero vectors / scalars / identity matrices / identity quaternion.
+  assert.deepEqual(inert.v3Add(one, one), { x: 0, y: 0, z: 0 });
+  assert.deepEqual(inert.v3Sub(one, one), { x: 0, y: 0, z: 0 });
+  assert.deepEqual(inert.v3Scale(one, 2), { x: 0, y: 0, z: 0 });
+  assert.deepEqual(inert.v3Cross(one, one), { x: 0, y: 0, z: 0 });
+  assert.deepEqual(inert.v3Normalize(one), { x: 0, y: 0, z: 0 });
+  assert.deepEqual(inert.v3Lerp(one, one, 0.5), { x: 0, y: 0, z: 0 });
+  assert.equal(inert.v3Dot(one, one), 0);
+  assert.equal(inert.v3Len(one), 0);
+  assert.equal(inert.v3Dist(one, one), 0);
+  assert.deepEqual(inert.mat4Identity(), identity);
+  assert.deepEqual(inert.mat4Multiply(identity, identity), identity);
+  assert.deepEqual(inert.mat4Perspective({ aspect: 1, far: 1, fovY: 1, near: 1 }), identity);
+  assert.deepEqual(inert.mat4LookAt(one, one, one), identity);
+  assert.deepEqual(inert.mat4Invert(identity), identity);
+  assert.deepEqual(inert.mat4FromTRS(one, [0, 0, 0, 1], one), identity);
+  assert.deepEqual(inert.quatIdentity(), [0, 0, 0, 1]);
+  assert.deepEqual(inert.quatFromEuler(1, 1, 1), [0, 0, 0, 1]);
+  assert.deepEqual(inert.quatMultiply([1, 0, 0, 0], [0, 1, 0, 0]), [0, 0, 0, 1]);
+  assert.deepEqual(inert.quatNormalize([1, 0, 0, 0]), [0, 0, 0, 1]);
+  assert.deepEqual(inert.quatToMat4([0, 0, 0, 1]), identity);
 });
 
 test("getSessionConfig forwards the host's constant session config", () => {
