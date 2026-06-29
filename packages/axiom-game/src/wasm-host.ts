@@ -1,0 +1,328 @@
+/*
+ * The wasm↔HOST adapter: it builds a `HostBridge` from the raw `WasmGame` exports
+ * `apps/axiom-game-runtime` produces — the sibling of `wasm-bridge.ts`
+ * (`bridgeFromWasm`, which builds the `NativeBridge`). This is the piece the
+ * earlier keystone waves left open: the `HostBridge` is what the FREE authoring
+ * surface (`math3d`'s `v3`/`mat4`/`quat`, `grid.ts`, `sound.ts`, the 3D `scene3d`
+ * create* methods, `clamp`/`normalizeAngle`) projects through, installed once at
+ * boot by `bindNative`.
+ *
+ * Like `wasm-bridge.ts` / `raf-loop.ts` it is the wasm-binding platform edge: it
+ * is coverage-exempt (its correctness is the exact byte layout of the live wasm
+ * boundary, verified via the Playwright path, not a fake — see the
+ * `--test-coverage-exclude` in package.json) and keeps the Branchless Law ON
+ * (every selection is a `pick`/`orElse` combinator from `control-flow.ts`, never
+ * an `if`/`?:`/`??`). It lives in its own file rather than swelling
+ * `wasm-bridge.ts` past its budget; it is scoped in `.oxlintrc.json` exactly like
+ * `wasm-bridge.ts` (`max-lines`/`max-params`/`no-unsafe-type-assertion` off — the
+ * one adapter carries the whole host boundary, the scalar-vector wasm signatures
+ * are inherently >3 args, and the byte boundary is untyped).
+ *
+ * ## Boundary conventions this adapter reshapes (the Rust half is the matching
+ * `apps/axiom-game-runtime/src/{mathbridge,grid,audio}.rs`)
+ *   - math (SPEC-03/11): a `Vec3`/`Mat4`/`Quat` crosses as a `Float64Array` slice
+ *     (`[x,y,z]` / 16 column-major / `[x,y,z,w]`); the edge packs the contract's
+ *     `{x,y,z}` / `number[]` / `[x,y,z,w]` into a slice and unpacks the result;
+ *   - grid (SPEC-06): a query crosses as `(cols, rows, passable-bytes, …cells)`;
+ *     the edge flattens `GridField.passable` to a `Uint8Array` mask and the cells
+ *     to `[x,y]` int slices, and reshapes the flat `Float64Array` result into
+ *     `Cell[]` / a distance `number[]` / a single `Cell`;
+ *   - audio (SPEC-08): handles cross as numbers; the option records destructure
+ *     into the scalar `(volume, pitch, loop)` / `(at, volume)` args, and the tone
+ *     `wave` string resolves to its dense index by `indexOf` (a table select).
+ *
+ * ## Deferred host methods (documented, not silent)
+ * Three host groups are NOT wired here, each for a concrete structural reason; the
+ * builder fills them with the same inert values the unbound default uses, so the
+ * `HostBridge` stays total:
+ *   - **3D scene authoring** (`createMesh`/`createMaterial`/`setCamera3D`/
+ *     `addLight`): `RunningApp` exposes no *runtime* mesh/material/light/camera
+ *     authoring that returns a handle (the demo scene is built once at `setup`).
+ *     Wiring it needs incremental `RunningApp::add_*`/`set_camera` methods in the
+ *     `axiom` engine module — out of scope for an app-only change. See SPEC-11.
+ *   - **`mat4Invert`**: `axiom-math` exposes no general 4×4 inverse (only
+ *     `Quat::inverse` and the uniform-scale-TRS `Transform::inverse`); a TS
+ *     re-derivation would violate the single-math-source rule. Awaits a
+ *     `Mat4::inverse` primitive in the math layer.
+ *   - **`overlapCircle` + the SPEC-12 outbound channel** (`getSessionConfig`/
+ *     `notifyReady`/`reportOutcome`/`reportOutcomes`) and `bindAction`: these
+ *     belong to the spatial-query / embed / input waves, wired through their own
+ *     boundary work, not this grid/math/audio increment.
+ */
+
+import {
+  type CameraDescriptor,
+  type GridField,
+  IDENTITY_MAT4,
+  type LightDescriptor,
+  type MaterialDescriptor,
+  type PerspectiveSpec,
+} from "./host-descriptors.ts";
+import type { Cell, Entity, Handle, Mat4, Quat, Vec3 } from "./vocabulary.ts";
+import type {
+  HostBridge,
+  MusicOptions,
+  ScheduleOptions,
+  SessionConfig,
+  SoundOptions,
+  ToneSpec,
+} from "./host-binding.ts";
+import { orElse, pick } from "./control-flow.ts";
+
+/*
+ * The raw host-facing `WasmGame` exports this adapter reads. Vectors/matrices/
+ * quaternions and grid results come back as `Float64Array`; handles and scalars
+ * as numbers; `gridReachable` as a boolean. Cells/vectors are passed in as the
+ * matching `Float64Array` / `Int32Array` slices.
+ */
+export interface WasmHostExport {
+  // Math — v3 (SPEC-11 §4.2)
+  readonly v3Add: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
+  readonly v3Sub: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
+  readonly v3Scale: (vector: Float64Array, scalar: number) => Float64Array;
+  readonly v3Dot: (lhs: Float64Array, rhs: Float64Array) => number;
+  readonly v3Cross: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
+  readonly v3Len: (vector: Float64Array) => number;
+  readonly v3Normalize: (vector: Float64Array) => Float64Array;
+  readonly v3Dist: (lhs: Float64Array, rhs: Float64Array) => number;
+  readonly v3Lerp: (lhs: Float64Array, rhs: Float64Array, fraction: number) => Float64Array;
+  // Math — mat4 (SPEC-11 §4.2); `mat4Invert` is deferred (see header).
+  readonly mat4Identity: () => Float64Array;
+  readonly mat4Multiply: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
+  readonly mat4Perspective: (fovy: number, aspect: number, near: number, far: number) => Float64Array;
+  readonly mat4LookAt: (eye: Float64Array, target: Float64Array, up: Float64Array) => Float64Array;
+  readonly mat4FromTRS: (translation: Float64Array, rotation: Float64Array, scale: Float64Array) => Float64Array;
+  // Math — quat (SPEC-11 §4.2)
+  readonly quatIdentity: () => Float64Array;
+  readonly quatFromEuler: (pitch: number, yaw: number, roll: number) => Float64Array;
+  readonly quatMultiply: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
+  readonly quatNormalize: (quaternion: Float64Array) => Float64Array;
+  readonly quatToMat4: (quaternion: Float64Array) => Float64Array;
+  // Math — scalar (SPEC-03 §4.2)
+  readonly clamp: (value: number, low: number, high: number) => number;
+  readonly normalizeAngle: (angle: number) => number;
+  // Grid (SPEC-06 §4.2)
+  readonly gridPath: (
+    cols: number,
+    rows: number,
+    mask: Uint8Array,
+    start: Int32Array,
+    goal: Int32Array,
+  ) => Float64Array;
+  readonly gridReachable: (
+    cols: number,
+    rows: number,
+    mask: Uint8Array,
+    start: Int32Array,
+    goal: Int32Array,
+  ) => boolean;
+  readonly gridDistanceField: (cols: number, rows: number, mask: Uint8Array, start: Int32Array) => Float64Array;
+  readonly gridStepToward: (
+    cols: number,
+    rows: number,
+    mask: Uint8Array,
+    from: Int32Array,
+    target: Int32Array,
+  ) => Float64Array;
+  // Audio (SPEC-08 §4.2)
+  readonly loadSound: (url: string) => number;
+  readonly playSound: (id: number, volume: number, pitch: number, looping: boolean) => number;
+  readonly scheduleSound: (id: number, at: number, volume: number) => number;
+  readonly stopVoice: (voice: number) => void;
+  readonly playMusic: (urls: readonly string[], looping: boolean, crossfade: number) => number;
+  readonly playTone: (waveIndex: number, freq: number, duration: number, volume: number) => number;
+  readonly setMasterVolume: (volume: number) => void;
+  readonly setMuted: (muted: boolean) => void;
+}
+
+/** The component indices a vector / quaternion result is unpacked at. */
+const Z_INDEX = 2;
+const W_INDEX = 3;
+/** The two scalars per flat cell in a grid path / step result. */
+const CELL_STRIDE = 2;
+/** Default per-voice / playlist option values (the host defaults SPEC-08 wave-side). */
+const FULL_VOLUME = 1;
+const UNCHANGED_PITCH = 1;
+const NO_LOOP = false;
+const NO_CROSSFADE = 0;
+/** The handle minting methods that are deferred return the null handle. */
+const DEFERRED_HANDLE = 0;
+/** The wave kinds in their dense native index order (SPEC-08 `Wave`). */
+const WAVE_KINDS: readonly ToneSpec["wave"][] = ["sine", "square", "sawtooth", "triangle"];
+
+/** The absent `Result` value, materialized without the lint-banned `undefined` literal. */
+const absent = <Value>(slot?: Value): Value | undefined => slot;
+
+/** Pack a `Vec3` into the boundary `[x, y, z]` slice. */
+const packVec3 = (vector: Vec3): Float64Array => Float64Array.from([vector.x, vector.y, vector.z]);
+
+/** Unpack a boundary `[x, y, z]` slice into a `Vec3`. */
+const unpackVec3 = (raw: Float64Array): Vec3 => {
+  const values = [...raw];
+  return { x: pick(values, 0), y: pick(values, 1), z: pick(values, Z_INDEX) };
+};
+
+/** A boundary `Mat4` is the 16 column-major numbers verbatim. */
+const unpackMat4 = (raw: Float64Array): Mat4 => [...raw];
+
+/** Unpack a boundary `[x, y, z, w]` slice into a `Quat`. */
+const unpackQuat = (raw: Float64Array): Quat => {
+  const values = [...raw];
+  return [pick(values, 0), pick(values, 1), pick(values, Z_INDEX), pick(values, W_INDEX)] as Quat;
+};
+
+/** Flatten a `GridField`'s passability mask to the boundary byte array. */
+const maskOf = (field: GridField): Uint8Array => Uint8Array.from(field.passable.map(Number));
+
+/** A cell as the boundary `[x, y]` int slice. */
+const cellSlice = (cell: Cell): Int32Array => Int32Array.from([cell.x, cell.y]);
+
+/** Reshape a flat `[x0, y0, x1, y1, …]` result into `Cell[]`. */
+const toCells = (raw: Float64Array): readonly Cell[] => {
+  const values = [...raw];
+  return Array.from({ length: values.length / CELL_STRIDE }, (_unused, index): Cell => ({
+    x: pick(values, index * CELL_STRIDE),
+    y: pick(values, index * CELL_STRIDE + 1),
+  }));
+};
+
+/** The math `HostBridge` ops (v3 / mat4 / quat / scalar), every one forwarding to the native `MathApi`. */
+const mathBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  | "v3Add" | "v3Sub" | "v3Scale" | "v3Dot" | "v3Cross" | "v3Len" | "v3Normalize" | "v3Dist" | "v3Lerp"
+  | "mat4Identity" | "mat4Multiply" | "mat4Perspective" | "mat4LookAt" | "mat4Invert" | "mat4FromTRS"
+  | "quatIdentity" | "quatFromEuler" | "quatMultiply" | "quatNormalize" | "quatToMat4"
+  | "clamp" | "normalizeAngle"
+> => ({
+  clamp: (value: number, low: number, high: number): number => game.clamp(value, low, high),
+  mat4FromTRS: (translation: Vec3, rotation: Quat, scale: Vec3): Mat4 =>
+    unpackMat4(game.mat4FromTRS(packVec3(translation), Float64Array.from(rotation), packVec3(scale))),
+  mat4Identity: (): Mat4 => unpackMat4(game.mat4Identity()),
+  // Deferred: no general 4x4 inverse in axiom-math (see header) — inert identity.
+  mat4Invert: (): Mat4 => IDENTITY_MAT4,
+  mat4LookAt: (eye: Vec3, target: Vec3, up: Vec3): Mat4 =>
+    unpackMat4(game.mat4LookAt(packVec3(eye), packVec3(target), packVec3(up))),
+  mat4Multiply: (lhs: Mat4, rhs: Mat4): Mat4 =>
+    unpackMat4(game.mat4Multiply(Float64Array.from(lhs), Float64Array.from(rhs))),
+  mat4Perspective: (spec: PerspectiveSpec): Mat4 =>
+    unpackMat4(game.mat4Perspective(spec.fovY, spec.aspect, spec.near, spec.far)),
+  normalizeAngle: (angle: number): number => game.normalizeAngle(angle),
+  quatFromEuler: (pitch: number, yaw: number, roll: number): Quat =>
+    unpackQuat(game.quatFromEuler(pitch, yaw, roll)),
+  quatIdentity: (): Quat => unpackQuat(game.quatIdentity()),
+  quatMultiply: (lhs: Quat, rhs: Quat): Quat =>
+    unpackQuat(game.quatMultiply(Float64Array.from(lhs), Float64Array.from(rhs))),
+  quatNormalize: (quaternion: Quat): Quat => unpackQuat(game.quatNormalize(Float64Array.from(quaternion))),
+  quatToMat4: (quaternion: Quat): Mat4 => unpackMat4(game.quatToMat4(Float64Array.from(quaternion))),
+  v3Add: (lhs: Vec3, rhs: Vec3): Vec3 => unpackVec3(game.v3Add(packVec3(lhs), packVec3(rhs))),
+  v3Cross: (lhs: Vec3, rhs: Vec3): Vec3 => unpackVec3(game.v3Cross(packVec3(lhs), packVec3(rhs))),
+  v3Dist: (lhs: Vec3, rhs: Vec3): number => game.v3Dist(packVec3(lhs), packVec3(rhs)),
+  v3Dot: (lhs: Vec3, rhs: Vec3): number => game.v3Dot(packVec3(lhs), packVec3(rhs)),
+  v3Len: (vector: Vec3): number => game.v3Len(packVec3(vector)),
+  v3Lerp: (lhs: Vec3, rhs: Vec3, fraction: number): Vec3 =>
+    unpackVec3(game.v3Lerp(packVec3(lhs), packVec3(rhs), fraction)),
+  v3Normalize: (vector: Vec3): Vec3 => unpackVec3(game.v3Normalize(packVec3(vector))),
+  v3Scale: (vector: Vec3, scalar: number): Vec3 => unpackVec3(game.v3Scale(packVec3(vector), scalar)),
+  v3Sub: (lhs: Vec3, rhs: Vec3): Vec3 => unpackVec3(game.v3Sub(packVec3(lhs), packVec3(rhs))),
+});
+
+/** The grid `HostBridge` ops (SPEC-06), forwarding to the native `axiom-grid` BFS / wavefront core. */
+const gridBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  "gridPath" | "gridReachable" | "gridDistanceField" | "gridStepToward"
+> => ({
+  gridDistanceField: (field: GridField, start: Cell): readonly number[] => [
+    ...game.gridDistanceField(field.cols, field.rows, maskOf(field), cellSlice(start)),
+  ],
+  gridPath: (field: GridField, start: Cell, goal: Cell): readonly Cell[] | undefined => {
+    const cells = toCells(game.gridPath(field.cols, field.rows, maskOf(field), cellSlice(start), cellSlice(goal)));
+    // An empty result means unreachable, which the contract maps to the empty Result.
+    return pick<() => readonly Cell[] | undefined>(
+      [(): readonly Cell[] | undefined => absent<readonly Cell[]>(), (): readonly Cell[] => cells],
+      Number(cells.length > 0),
+    )();
+  },
+  gridReachable: (field: GridField, start: Cell, goal: Cell): boolean =>
+    game.gridReachable(field.cols, field.rows, maskOf(field), cellSlice(start), cellSlice(goal)),
+  gridStepToward: (field: GridField, from: Cell, target: Cell): Cell => {
+    const step = [...game.gridStepToward(field.cols, field.rows, maskOf(field), cellSlice(from), cellSlice(target))];
+    return { x: pick(step, 0), y: pick(step, 1) };
+  },
+});
+
+/** The audio `HostBridge` ops (SPEC-08), forwarding to the native `axiom-audio` mixer core. */
+const audioBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  "loadSound" | "playSound" | "stopVoice" | "playMusic" | "playTone" | "scheduleSound" | "setMasterVolume" | "setMuted"
+> => ({
+  loadSound: (url: string): Handle => game.loadSound(url),
+  playMusic: (urls: readonly string[], opts?: MusicOptions): Handle => {
+    const options = orElse(opts, {});
+    return game.playMusic(urls, orElse(options.loop, NO_LOOP), orElse(options.crossfadeSeconds, NO_CROSSFADE));
+  },
+  playSound: (id: Handle, opts?: SoundOptions): Handle => {
+    const options = orElse(opts, {});
+    return game.playSound(
+      id,
+      orElse(options.volume, FULL_VOLUME),
+      orElse(options.pitch, UNCHANGED_PITCH),
+      orElse(options.loop, NO_LOOP),
+    );
+  },
+  playTone: (spec: ToneSpec): Handle =>
+    game.playTone(WAVE_KINDS.indexOf(spec.wave), spec.freq, spec.duration, orElse(spec.volume, FULL_VOLUME)),
+  scheduleSound: (id: Handle, atSeconds: number, opts?: ScheduleOptions): Handle =>
+    game.scheduleSound(id, atSeconds, orElse(orElse(opts, {}).volume, FULL_VOLUME)),
+  setMasterVolume: (volume: number): void => {
+    game.setMasterVolume(volume);
+  },
+  setMuted: (muted: boolean): void => {
+    game.setMuted(muted);
+  },
+  stopVoice: (voice: Handle): void => {
+    game.stopVoice(voice);
+  },
+});
+
+/** The deferred host methods (see header) — the inert defaults that keep the `HostBridge` total. */
+const deferredBridge = (): Pick<
+  HostBridge,
+  | "createMesh" | "createMaterial" | "setCamera3D" | "addLight" | "overlapCircle"
+  | "bindAction" | "getSessionConfig" | "notifyReady" | "reportOutcome" | "reportOutcomes"
+> => ({
+  // 3D scene authoring (SPEC-11): RunningApp has no runtime create* surface yet.
+  addLight: (_light: LightDescriptor): Entity => DEFERRED_HANDLE,
+  // SPEC-05 input bind: belongs to the input boundary wave.
+  bindAction: (): void => {
+    // Deferred to the input wave.
+  },
+  createMaterial: (_material: MaterialDescriptor): Handle => DEFERRED_HANDLE,
+  createMesh: (_meshKind: number): Handle => DEFERRED_HANDLE,
+  // SPEC-12 inbound: belongs to the embed-channel wave.
+  getSessionConfig: (): SessionConfig => ({ params: {}, seed: 0n }),
+  // SPEC-12 outbound: belongs to the embed-channel wave.
+  notifyReady: (): void => {
+    // Deferred to the embed wave.
+  },
+  // SPEC-03 spatial query: belongs to the scene-overlap wave.
+  overlapCircle: (): readonly Entity[] => [],
+  reportOutcome: (): void => {
+    // Deferred to the embed wave.
+  },
+  reportOutcomes: (): void => {
+    // Deferred to the embed wave.
+  },
+  setCamera3D: (_camera: CameraDescriptor): void => {
+    // Deferred until RunningApp exposes runtime camera authoring.
+  },
+});
+
+/**
+ * Build the installed `HostBridge` from the raw `WasmGame` exports — the host
+ * counterpart of `bridgeFromWasm`. The app calls `bindNative(hostFromWasm(game))`
+ * once at boot so the free authoring surface projects through the live wasm core.
+ * The four groups partition the `HostBridge` keys, so their `Object.assign`
+ * intersection is exactly a `HostBridge` (no cast, no banned object spread).
+ */
+export const hostFromWasm = (game: WasmHostExport): HostBridge =>
+  Object.assign(mathBridge(game), gridBridge(game), audioBridge(game), deferredBridge());

@@ -47,16 +47,32 @@ axiom-input = { path = "../../modules/axiom-input" }
 axiom-tick = { path = "../../modules/axiom-tick" }
 axiom-tween = { path = "../../modules/axiom-tween" }
 
+# Grid / pathfinding (SPEC-06) and audio (SPEC-08): the deterministic
+# `axiom-grid` BFS/wavefront core and the neutral `axiom-audio` mixer core the
+# bridge composes for the `gridPath`/… and `playSound`/… host surfaces. Both are
+# isolated engine modules the umbrella does not re-export, so this leaf app
+# composes them directly (the legal app-composes-modules path).
+axiom-grid = { path = "../../modules/axiom-grid" }
+axiom-audio = { path = "../../modules/axiom-audio" }
+
+# Math (SPEC-03 / SPEC-11): the single deterministic math source of truth. The
+# prelude re-exports the value types (`Vec3`/`Mat4`/`Transform`) but NOT the
+# `MathApi` facade or `Quat`, which the `v3`/`mat4`/`quat` host ops forward to, so
+# this leaf app names the `math` layer directly (the legal app-composes-layers path).
+axiom-math = { path = "../../crates/axiom-math" }
+
 # Browser entry only: the wasm-bindgen export macro + a panic hook, plus the
-# bits of web-sys the embed-seam host channel needs — read the inbound query
-# string off `window.location`, post the outbound outcome to the parent frame.
-# Confined to wasm32, so native `cargo test --workspace` never compiles them.
+# bits of web-sys the embed-seam host channel (inbound query string, outbound
+# outcome) and the live audio arm (`AudioContext` the SPEC-08 batch realizes into)
+# need. Confined to wasm32, so native `cargo test --workspace` never compiles them.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = [
     "Window",
     "Location",
+    "AudioContext",
+    "BaseAudioContext",
 ] }
 
 [lints.rust]

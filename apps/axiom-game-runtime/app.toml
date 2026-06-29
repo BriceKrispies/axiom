@@ -24,6 +24,11 @@ allowed_layers = [
     # the umbrella does not re-export, so this leaf app names them directly.
     "runtime",
     "kernel",
+    # Math (SPEC-03 / SPEC-11): the single deterministic math source of truth the
+    # `v3`/`mat4`/`quat`/`clamp`/`normalizeAngle` host ops forward to. The prelude
+    # re-exports the value types but not the `MathApi` facade or `Quat`, so this
+    # leaf app names the `math` layer directly.
+    "math",
 ]
 
 allowed_modules = [
@@ -37,4 +42,10 @@ allowed_modules = [
     "tick",
     # Tick-sampled tweens (SPEC-09): the eased-curve table the bridge samples.
     "tween",
+    # Grid / pathfinding (SPEC-06): the deterministic BFS/wavefront core the
+    # `gridPath`/`gridReachable`/`gridDistanceField`/`gridStepToward` host ops use.
+    "grid",
+    # Audio (SPEC-08): the neutral mixer core the `playSound`/`playTone`/… host ops
+    # drive; the live Web Audio output is the app's `wasm32` arm.
+    "audio",
 ]

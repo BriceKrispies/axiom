@@ -63,6 +63,24 @@ mod input;
 /// reads. Native-testable; the `wasm32` boundary marshals to it through `GameBridge`.
 mod time;
 
+/// Grid / pathfinding (SPEC-06): the deterministic `axiom-grid` BFS / wavefront
+/// core composed into [`GameBridge`], projected to the TS `HostBridge` grid
+/// surface. Pure functions of a passability mask + endpoint cells; native-tested
+/// against a known board, the `wasm32` boundary marshals to it through `GameBridge`.
+mod grid;
+
+/// 3D / scalar math (SPEC-03 / SPEC-11): the `v3` / `mat4` / `quat` ops projected
+/// to the TS `HostBridge` math surface, every one forwarding to `axiom-math` (the
+/// single deterministic source of truth — no math re-implementation). Native-tested
+/// against `MathApi` directly; the `wasm32` boundary marshals to it through `GameBridge`.
+mod mathbridge;
+
+/// Audio (SPEC-08): the neutral `axiom-audio` mixer core composed into
+/// [`GameBridge`] (handle allocation, tone/playlist/scheduling bookkeeping), with
+/// the live Web Audio output realized in the `#[cfg(target_arch = "wasm32")]` arm.
+/// Native-tested for deterministic handle allocation; playback is browser-proven.
+mod audio;
+
 /// The embed seam (SPEC-12): decode the inbound session config, latch the single
 /// outbound outcome. Pure, native-testable core; the browser channel that carries
 /// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on
