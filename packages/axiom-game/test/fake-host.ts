@@ -2,7 +2,7 @@
 // the math / host-bridge / bindAction free-function tests. Kept in its own file
 // so each fake is one class (max-classes-per-file).
 
-import type { EmitterConfig, ShapeStyle } from "../src/draw2d-binding.ts";
+import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle } from "../src/draw2d-binding.ts";
 import type { UiStyle, UiTextOpts, UiViewport } from "../src/ui-binding.ts";
 import type {
   HostBridge,
@@ -67,8 +67,11 @@ export class FakeHost implements HostBridge {
   public lights: LightDescriptor[] = [];
 
   // --- 2D drawing call log (SPEC-04); emitters/targets/textures get incrementing handles ---
+  public draw2dCameras: { center: Vec2; zoom: number }[] = [];
   public draw2dRects: { bounds: Rect; style: ShapeStyle }[] = [];
   public draw2dCircles: { center: Vec2; radius: number; style: ShapeStyle }[] = [];
+  public draw2dEllipses: { center: Vec2; radii: EllipseRadii; style: ShapeStyle }[] = [];
+  public draw2dLines: { from: Vec2; to: Vec2; style: LineStyle }[] = [];
   public draw2dEmitters: EmitterConfig[] = [];
   public draw2dEmits: { id: Handle; at: Vec2; direction: Vec2 }[] = [];
   public draw2dAdvances: number[] = [];
@@ -338,12 +341,24 @@ export class FakeHost implements HostBridge {
   }
 
   // --- 2D drawing (records the marshalled call; mints a handle for the id-returning verbs) ---
+  public draw2dCamera2d(center: Vec2, zoom: number): void {
+    this.draw2dCameras.push({ center, zoom });
+  }
+
   public draw2dRect(bounds: Rect, style: ShapeStyle): void {
     this.draw2dRects.push({ bounds, style });
   }
 
   public draw2dCircle(center: Vec2, radius: number, style: ShapeStyle): void {
     this.draw2dCircles.push({ center, radius, style });
+  }
+
+  public draw2dEllipse(center: Vec2, radii: EllipseRadii, style: ShapeStyle): void {
+    this.draw2dEllipses.push({ center, radii, style });
+  }
+
+  public draw2dLine(from: Vec2, to: Vec2, style: LineStyle): void {
+    this.draw2dLines.push({ from, style, to });
   }
 
   public draw2dCreateEmitter(config: EmitterConfig): Handle {

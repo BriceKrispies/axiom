@@ -15,16 +15,52 @@
 import type { Handle, Rect, Rgba, Vec2 } from "./vocabulary.ts";
 
 /*
- * The per-shape 2D fill + layer/alpha a Wave-2 draw carries (SPEC-04 §10). Wave-2's
- * `draw2dRect`/`draw2dCircle` exports take a single solid `fill` colour plus a
- * `layer`/`alpha`; the spec's `stroke`/`strokeWidth`/`shadow` and a gradient
- * (`Paint`) fill have no draw2d export yet, so they are not modelled here (see
- * SPEC-04 §4.2). `layer`/`alpha` default host-side (the adapter), exactly as the
- * audio option records default — `layer` to 0, `alpha` to fully opaque.
+ * The per-shape 2D fill + stroke + layer/alpha a Wave-2.5 draw carries (SPEC-04
+ * §10). `draw2dRect`/`draw2dCircle`/`draw2dEllipse` take a solid `fill` colour, an
+ * optional `stroke` colour + `strokeWidth`, and a `layer`/`alpha`. The spec's
+ * `shadow` and a gradient (`Paint`) fill still have no draw2d export (see SPEC-04
+ * §4.2). `stroke`/`strokeWidth`/`layer`/`alpha` default host-side (the adapter),
+ * exactly as the audio option records default — a transparent stroke of width 0,
+ * `layer` 0, `alpha` fully opaque.
  */
 export interface ShapeStyle {
   /** The solid fill colour. */
   readonly fill: Rgba;
+  /** The outline colour (default: none — transparent). */
+  readonly stroke?: Rgba;
+  /** The outline width (default: 0 — no stroke). */
+  readonly strokeWidth?: number;
+  /** The explicit z-order (default: 0). */
+  readonly layer?: number;
+  /** The draw opacity in `[0, 1]` (default: 1). */
+  readonly alpha?: number;
+}
+
+/*
+ * An ellipse's radii + rotation (SPEC-04 §10), bundled into one record so the
+ * `ellipse` verb stays within the SDK's ≤3-parameter budget (the contract's flat
+ * `rx, ry, rotation` arguments collapse into this geometry record). `rotation`
+ * defaults host-side to 0 (an axis-aligned ellipse).
+ */
+export interface EllipseRadii {
+  /** The semi-axis along local x. */
+  readonly rx: number;
+  /** The semi-axis along local y. */
+  readonly ry: number;
+  /** The counter-clockwise rotation in radians (default: 0). */
+  readonly rotation?: number;
+}
+
+/*
+ * The per-line style a `draw2dLine` carries (SPEC-04 §10): a line owns its colour
+ * and width directly (it has no fill/stroke split), plus the common `layer`/`alpha`
+ * that default host-side.
+ */
+export interface LineStyle {
+  /** The line colour. */
+  readonly color: Rgba;
+  /** The line width. */
+  readonly width: number;
   /** The explicit z-order (default: 0). */
   readonly layer?: number;
   /** The draw opacity in `[0, 1]` (default: 1). */
@@ -60,10 +96,16 @@ export interface EmitterConfig {
 
 /** The 2D drawing channel (SPEC-04 §10): shapes, particles, and render targets. */
 export interface Draw2dBridge {
-  /** Draw a filled rectangle (`draw2dRect`). */
+  /** Set the 2D camera — world `center` + `zoom` (`draw2dCamera2d`). */
+  readonly draw2dCamera2d: (center: Vec2, zoom: number) => void;
+  /** Draw a filled / stroked rectangle (`draw2dRect`). */
   readonly draw2dRect: (bounds: Rect, style: ShapeStyle) => void;
-  /** Draw a filled circle (`draw2dCircle`). */
+  /** Draw a filled / stroked circle (`draw2dCircle`). */
   readonly draw2dCircle: (center: Vec2, radius: number, style: ShapeStyle) => void;
+  /** Draw a filled / stroked (optionally rotated) ellipse (`draw2dEllipse`). */
+  readonly draw2dEllipse: (center: Vec2, radii: EllipseRadii, style: ShapeStyle) => void;
+  /** Draw a straight line segment of its own colour + width (`draw2dLine`). */
+  readonly draw2dLine: (from: Vec2, to: Vec2, style: LineStyle) => void;
   /** Register a particle emitter, returning its handle (`draw2dCreateEmitter`, §10.1). */
   readonly draw2dCreateEmitter: (config: EmitterConfig) => Handle;
   /** Spawn a burst from emitter `id` at `at` flying along `direction` (`draw2dEmit`, §10.1). */
@@ -97,11 +139,17 @@ export const UNBOUND_DRAW2D: Draw2dBridge = {
   draw2dBeginTarget: (): void => {
     // No-op until a host is bound
   },
+  draw2dCamera2d: (): void => {
+    // No-op until a host is bound
+  },
   draw2dCircle: (): void => {
     // No-op until a host is bound
   },
   draw2dCreateEmitter: (): Handle => UNBOUND_HANDLE,
   draw2dCreateRenderTarget: (): Handle => UNBOUND_HANDLE,
+  draw2dEllipse: (): void => {
+    // No-op until a host is bound
+  },
   draw2dEmit: (): void => {
     // No-op until a host is bound
   },
@@ -109,6 +157,9 @@ export const UNBOUND_DRAW2D: Draw2dBridge = {
     // No-op until a host is bound
   },
   draw2dFinish: (): readonly number[] => [],
+  draw2dLine: (): void => {
+    // No-op until a host is bound
+  },
   draw2dRect: (): void => {
     // No-op until a host is bound
   },
