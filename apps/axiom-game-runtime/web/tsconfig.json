@@ -1,0 +1,22 @@
+{
+  "// note": "Compiles the harness + author game (web/src/*.ts) to web/dist/*.js. The dev server runs `tsgo -p` on this. `@axiom/game` resolves to the package's built declarations for typecheck; the emitted JS keeps the bare specifier, resolved in the browser by the import map in index.html.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": true,
+    "strict": true,
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@axiom/game": ["../../../packages/axiom-game/dist/index.d.ts"],
+      "/pkg/axiom_game_runtime.js": ["./pkg/axiom_game_runtime.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

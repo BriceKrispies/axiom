@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom @axiom/game — hot-reload spike</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #07090e; overflow: hidden; }
+      #c { display: block; width: 100vw; height: 100vh; }
+      #hud {
+        position: fixed; left: 12px; bottom: 10px; right: 12px;
+        font: 12px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        color: #8aa0c0; text-shadow: 0 1px 2px #000; pointer-events: none;
+        display: flex; justify-content: space-between; gap: 16px;
+      }
+      #hud b { color: #d8e6ff; font-weight: 600; }
+      #status { transition: color .2s; }
+      .flash { color: #7CFFB2 !important; }
+    </style>
+
+    <!--
+      No bundler. The browser loads the @axiom/game SDK as native ES modules
+      straight out of its `dist/` build, resolved by this import map. The author's
+      game and the boot harness are emitted next to it under /dist by the dev
+      server's tsgo compile.
+    -->
+    <script type="importmap">
+      { "imports": { "@axiom/game": "/vendor/axiom-game/index.js" } }
+    </script>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="hud">
+      <span id="status">booting…</span>
+      <span>edit <b>apps/axiom-game-runtime/web/src/game.ts</b> and save — the browser updates live</span>
+    </div>
+    <script type="module" src="/dist/harness.js"></script>
+  </body>
+</html>
