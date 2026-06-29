@@ -7,10 +7,12 @@ import {
   decodeClientIntent,
   decodeJoinRoom,
   decodeLeaveRoom,
+  encodeClientIntentFor,
   encodeJoinRoom,
   encodeRejectedIntent,
   encodeServerEvent,
   encodeServerSnapshot,
+  encodeServerSnapshotFor,
   encodeWelcome,
   KIND_JOIN_ROOM,
   REASON_MALFORMED,
@@ -149,6 +151,24 @@ test("RejectedIntent drops the rejected sequence from pending and notifies onRej
 test("a server-sent client-kind frame is ignored, not fatal", () => {
   const { client, socket } = connected();
   socket.receive(encodeJoinRoom(1, u8(1), u8())); // client->server kind: ignored
+  assert.equal(client.getStatus(), "connected");
+});
+
+test("per-player frames are ignored by this single-seat client, not fatal", () => {
+  const { client, socket } = connected();
+  const snapshots: number[] = [];
+  client.onSnapshot((snapshot): void => void snapshots.push(snapshot.serverTick));
+  socket.receive(encodeClientIntentFor({
+    clientSequence: 1,
+    lastSeenServerTick: 0,
+    payload: u8(),
+    player: 2,
+    predictedClientTick: 0,
+  }));
+  socket.receive(encodeServerSnapshotFor(99, [{ player: 2, sequence: 1 }], u8(0xaa)));
+  // Neither advances the single-seat snapshot state nor fires a handler.
+  assert.deepEqual(snapshots, []);
+  assert.equal(client.getServerTick(), 0);
   assert.equal(client.getStatus(), "connected");
 });
 

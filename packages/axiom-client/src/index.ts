@@ -38,13 +38,24 @@ export {
 export type { ClientIntentFields, WelcomeFields } from "./codec.ts";
 
 export {
+  decodeClientIntentFor,
+  decodeServerSnapshotFor,
+  encodeClientIntentFor,
+  encodeServerSnapshotFor,
+} from "./per-player-codec.ts";
+export type { ClientIntentForFields } from "./per-player-codec.ts";
+
+export {
   KIND_CLIENT_INTENT,
+  KIND_CLIENT_INTENT_FOR,
   KIND_JOIN_ROOM,
   KIND_LEAVE_ROOM,
   KIND_REJECTED_INTENT,
   KIND_SERVER_EVENT,
   KIND_SERVER_SNAPSHOT,
+  KIND_SERVER_SNAPSHOT_FOR,
   KIND_WELCOME,
+  MAX_ACKS,
   MAX_PAYLOAD_LEN,
   MAX_ROOM_ID_LEN,
   REASON_MALFORMED,
@@ -55,13 +66,16 @@ export {
   WIRE_MINOR,
 } from "./messages.ts";
 export type {
+  ClientIntentForMessage,
   ClientIntentMessage,
   DecodedKind,
   DecodedMessage,
   JoinRoomMessage,
   LeaveRoomMessage,
+  PlayerAck,
   RejectedIntentMessage,
   ServerEventMessage,
+  ServerSnapshotForMessage,
   ServerSnapshotMessage,
   WelcomeMessage,
 } from "./messages.ts";
