@@ -1,7 +1,8 @@
 # SPEC-05 — Input (keyboard, bindings, pointer, timing)
 
-> Status: Landed
-> Landed (2026-06-28): `axiom-input::InputState` (`bind_action`/`sample`/`is_down`/`pressed`/`released`/`axis`/`pointer`/`pointer_pressed`/`swipe`/`pressed_at_tick`) replaced the `TouchControls` facade; `@axiom/game` `Sim.input` (`SnapshotInput`) + `bindAction` project it. The §2 gaps below are now closed.
+> Status: Partial — native module landed, but input is **not carried across the
+> wasm boundary**. See README footnote ⁸ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed (2026-06-28, native): `axiom-input::InputState` (`bind_action`/`sample`/`is_down`/`pressed`/`released`/`axis`/`pointer`/`pointer_pressed`/`swipe`/`pressed_at_tick`) replaced the `TouchControls` facade; `@axiom/game` `Sim.input` (`SnapshotInput`) + `bindAction` project it at the type level. **Gap:** `WasmGame` (the real seam the SDK binds) exposes no input method, so `Sim.input` is non-functional in the live browser until the boundary carries the per-tick intent snapshot.
 > Contract: §8   Vocabulary: Keyboard, Pointer/click, Touch/swipe/gesture, Key→action bindings, Charge/hold-release, Buffered direction, Timing-window hit   Determinism: sim
 
 ## 1. Summary

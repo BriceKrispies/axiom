@@ -12,7 +12,7 @@
  * descends named, independent, reproducible sub-streams.
  */
 
-import { each, pick } from "./branchless.ts";
+import { each, pick } from "./control-flow.ts";
 import type { NativeBridge } from "./native-bridge.ts";
 
 /** The default probability `bool()` uses — an even coin (SPEC-01 §4.2). */

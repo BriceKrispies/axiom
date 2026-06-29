@@ -1,9 +1,10 @@
 /*
- * Branchless selection primitives. `pick` indexes an options array (asserting the
- * index is in range, which also narrows away the `noUncheckedIndexedAccess`
- * `undefined`); `coalesce` defaults an optional value via a destructuring default,
- * which applies exactly when the value is undefined. Together they replace the
- * `if`/`?:`/`??` the Branchless Law forbids with table selection.
+ * The branchless control-flow operators the client spine is written in. The
+ * Branchless Law (TS) forbids `for`/`if`/`?:`, so conditional iteration and
+ * selection are expressed here as total, pure operators over arrays:
+ *   - `pick` indexes an options array (asserting the index is in range, which
+ *     also narrows away the `noUncheckedIndexedAccess` `undefined`),
+ *   - `each` runs a side effect per element (no `for`/`forEach`/`reduce`).
  */
 
 import { assert } from "./protocol-error.ts";
@@ -25,12 +26,6 @@ export const pick = <Value>(options: readonly Value[], index: number): Value => 
   const chosen = options[index];
   assertPresent(chosen, index < options.length);
   return chosen;
-};
-
-/** Branchlessly default an optional `value` to `fallback` when it is absent. */
-export const coalesce = <Value>(value: Value | undefined, fallback: Value): Value => {
-  const [resolved = fallback] = [value];
-  return resolved;
 };
 
 const SIDE_EFFECT = 0;

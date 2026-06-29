@@ -13,7 +13,7 @@
  */
 
 import type { Component, Result } from "./vocabulary.ts";
-import { each, pick } from "./branchless.ts";
+import { each, pick } from "./control-flow.ts";
 import type { GameLoop } from "./game-loop.ts";
 import type { NativeBridge } from "./native-bridge.ts";
 import type { StepBudget } from "./step-budget.ts";

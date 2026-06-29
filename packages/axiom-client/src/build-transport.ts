@@ -11,16 +11,15 @@ import { type SocketLike, type Transport, type TransportKind, WebSocketTransport
 import type { ConnectConfig } from "./client-config.ts";
 import { WebRtcTransport } from "./webrtc.ts";
 import { WebTransportTransport } from "./webtransport.ts";
-import { coalesce } from "./branchless.ts";
 
 const DEFAULT_TRANSPORT: TransportKind = "websocket";
 
 const browserSocket = (url: string): SocketLike => new WebSocket(url) as unknown as SocketLike;
 
 const builders: Record<TransportKind, (config: ConnectConfig) => Transport> = {
-  webrtc: (config): Transport => new WebRtcTransport(coalesce(config.signalingUrl, config.url)),
+  webrtc: (config): Transport => new WebRtcTransport(config.signalingUrl ?? config.url),
   websocket: (config): Transport => {
-    const factory = coalesce(config.socketFactory, browserSocket);
+    const factory = config.socketFactory ?? browserSocket;
     return new WebSocketTransport((): SocketLike => factory(config.url));
   },
   webtransport: (config): Transport =>
@@ -33,5 +32,5 @@ export const buildTransport = (config: ConnectConfig): Transport => {
   if (override) {
     return override(config);
   }
-  return builders[coalesce(config.transport, DEFAULT_TRANSPORT)](config);
+  return builders[config.transport ?? DEFAULT_TRANSPORT](config);
 };

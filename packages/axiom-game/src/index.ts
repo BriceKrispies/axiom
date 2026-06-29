@@ -133,7 +133,7 @@ export {
   stopVoice,
 } from "./sound.ts";
 
-export { orElse, whenPresent } from "./branchless.ts";
+export { orElse, whenPresent } from "./control-flow.ts";
 
 // The capstone sample game (a top-down arena over the surfaces above; replay-proven in test/arena.test.ts).
 export { Arena } from "./sample/arena.ts";

@@ -1,7 +1,9 @@
 # SPEC-13 — Multiplayer & netcode authoring
 
-> Status: Landed (with deferrals — see below)
-> Landed (2026-06-28): per-player addressing on `axiom-net-protocol` + the resimulation cursor on `axiom-client-core`; `@axiom/game` projects `NetSim`/`joinRoom`/`configureNet`/`Intent` over `@axiom/client`. The §2 missing authoring surface is now built.
+> Status: Partial — per-player Rust spine landed; TS authoring surface + proofs
+> largely unbuilt. See README footnote ⁵ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed (2026-06-28, native): per-player addressing on `axiom-net-protocol` + the resimulation cursor on `axiom-client-core`; `@axiom/game` projects `NetSim`/`joinRoom`/`configureNet`/`Intent` over `@axiom/client`.
+> **Not yet built (undeferred until now):** the TS `onSnapshot`/`onRestore` author hooks, the `Intent`-derived wire codec, the per-player message twin (`ClientIntentFor`/`ServerSnapshotFor` have no TS decoder), `hostRoom`, and `matchmake` are **not** projected; the §7 cross-instance determinism golden and byte-parity fixture are not implemented; and `tools/axiom-netplay-server` still runs hard-coded movement (decoding the anonymous `ClientIntent`), not the authored `onFixedUpdate` callback.
 > Deferred (by decision): **physics net-prediction is OFF** — the default `configureNet` predicts/interpolates nothing (authority/non-physics state only), because cross-platform deterministic physics (SPEC-10 §17.6) is unresolved. Delta encoding (full snapshot ships first), JWT *verification* (host policy), and unreliable transports remain follow-ups.
 > Contract: §16(.1–.6)   Vocabulary: WebSocket realtime snapshot/delta/ack, client prediction/reconciliation, per-player intent stream, rooms/authority, JWT handshake, matchmaking   Determinism: sim
 

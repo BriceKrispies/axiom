@@ -1,7 +1,8 @@
 # SPEC-02 — Entities, components, queries, hierarchy
 
-> Status: Landed
-> Landed (2026-06-28): `axiom-ecs::DynamicComponents::{entities_with, entities_with_all}` + `axiom-scene::SceneApi::{children_of, despawn_subtree}`; `@axiom/game` `Sim.world` (`makeWorld`/`BridgeWorld`) projects the `World` surface. The §2 gaps below are now closed.
+> Status: Partial — native facade landed; TS `World` projection incomplete. See
+> README footnote ⁶ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed (2026-06-28, native): `axiom-ecs::DynamicComponents::{entities_with, entities_with_all}` + `axiom-scene::SceneApi::{children_of, despawn_subtree}`; `@axiom/game` `Sim.world` (`makeWorld`/`BridgeWorld`) projects **7 of 12** §4.2 `World` methods. Not yet bridged: `alive`/`has`/`remove`/`setParent`/`parentOf`/`worldTransform` and the `Transform` value type — so the §7 hierarchy/lifecycle proof cannot run.
 > Contract: §4, §4.1   Vocabulary: Spawn/despawn + pooling, Offset-group / formation (transform hierarchy)   Determinism: sim
 
 ## 1. Summary

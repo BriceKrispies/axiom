@@ -1,15 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  AuthoringError,
-  assert as branchlessAssert,
-  each,
-  fail,
-  orElse,
-  pick,
-  whenPresent,
-} from "../src/branchless.ts";
+import { AuthoringError } from "../src/authoring-error.ts";
+import { each, orElse, pick, whenPresent } from "../src/control-flow.ts";
 
 test("each runs the effect for every value in order", () => {
   const seen: number[] = [];
@@ -25,19 +18,6 @@ test("pick selects the in-range element", () => {
 
 test("pick throws an AuthoringError when the index is out of range", () => {
   assert.throws(() => pick(["a"], 3), AuthoringError);
-});
-
-test("assert is a no-op when the condition holds and throws when it fails", () => {
-  assert.doesNotThrow(() => {
-    branchlessAssert(true, "unreachable");
-  });
-  assert.throws(() => {
-    branchlessAssert(false, "boom");
-  }, new AuthoringError("boom"));
-});
-
-test("fail always throws an AuthoringError carrying the message", () => {
-  assert.throws(() => fail("nope"), new AuthoringError("nope"));
 });
 
 test("orElse keeps a present value and falls back when absent", () => {

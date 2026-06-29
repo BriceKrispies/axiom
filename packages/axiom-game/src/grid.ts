@@ -28,7 +28,7 @@
  */
 
 import type { Cell, Result, Vec2 } from "./vocabulary.ts";
-import { each, orElse, pick } from "./branchless.ts";
+import { each, orElse, pick } from "./control-flow.ts";
 import type { GridField } from "./host-descriptors.ts";
 import { boundHost } from "./host-binding.ts";
 

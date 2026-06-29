@@ -1,13 +1,19 @@
 /*
- * Branchless primitives for the authoring spine — the @axiom/client `each`/`pick`
- * counterparts re-stated for this SDK. They replace the `for`/`if`/`?:` the
- * Branchless Law (TS) forbids with iterator and table-selection forms:
+ * The branchless control-flow operators the authoring spine is written in. The
+ * Branchless Law (TS) forbids `for`/`if`/`?:`/`??`, so conditional iteration and
+ * selection are expressed here as total, pure operators over arrays:
  *   - `each` runs a side effect per element (no `for`/`forEach`),
- *   - `assert` throws on a false condition with no `if` (it slices a one-element
- *     array to length 0 or 1),
  *   - `pick` selects `options[index]`, asserting the index is in range, which
- *     also narrows away the `noUncheckedIndexedAccess` `undefined`.
+ *     also narrows away the `noUncheckedIndexedAccess` `undefined`,
+ *   - `orElse` defaults an absent optional to a fallback,
+ *   - `whenPresent` runs an effect only for a present optional.
+ *
+ * These are the @axiom/client `pick`/`each` counterparts re-stated for this SDK;
+ * `orElse`/`whenPresent` are part of the public authoring vocabulary (re-exported
+ * from `index.ts`).
  */
+
+import { assert } from "./authoring-error.ts";
 
 const SIDE_EFFECT = 0;
 
@@ -21,31 +27,6 @@ export const each = <Value>(values: readonly Value[], effect: (value: Value) => 
     effect(value);
     return SIDE_EFFECT;
   });
-};
-
-/** Thrown when an authoring call is given an out-of-range index or count. */
-export class AuthoringError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "AuthoringError";
-  }
-}
-
-/** Always throw an {@link AuthoringError}; typed `never` so it composes in expressions. */
-export const fail = (message: string): never => {
-  throw new AuthoringError(message);
-};
-
-/*
- * Branchlessly assert a condition, throwing {@link AuthoringError} when it is
- * false. Slicing `[message]` to length `Number(condition)` yields `[]` (true ->
- * no throw) or `[message]` (false -> `map` calls `fail`).
- */
-export const assert: (condition: boolean, message: string) => asserts condition = (
-  condition,
-  message,
-): void => {
-  [message].slice(Number(condition)).map((reason): never => fail(reason));
 };
 
 /*

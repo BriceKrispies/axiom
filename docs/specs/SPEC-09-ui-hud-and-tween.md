@@ -1,7 +1,8 @@
 # SPEC-09 — UI/HUD overlay & tween/easing
 
-> Status: Landed
-> Landed (2026-06-28): `axiom-interface` gained the immediate-mode `UiSurface`; new module `axiom-tween` (`TweenApi` + `ease`); `@axiom/game` `Sim.tweens` (`makeTweens`/`EASES`) sampled by the `TickPump`. `solveLayout` projects the already-landed `axiom-layout::solve`. The §2 gaps below are now closed.
+> Status: Partial — native `UiSurface` + `axiom-tween` landed; TS UI surface absent.
+> See README footnote ⁹ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed (2026-06-28, native): `axiom-interface` gained the immediate-mode `UiSurface`; new module `axiom-tween` (`TweenApi` + `ease`); `@axiom/game` `Sim.tweens` (`makeTweens`/`EASES`) sampled by the `TickPump`. **Gaps:** there is **no TS `Ui` overlay surface** (rect/text/sprite/button/viewport) in `@axiom/game`, and `solveLayout`/`LayoutNode` — claimed to project `axiom-layout::solve` — exist in **no source file** (Rust or TS); they are referenced only by this spec and the contract.
 > Contract: §14, §12   Vocabulary: Overlay screens/modals, Responsive layout solver, Canvas-drawn HUD, Stat/leaderboard panels, Floating popups/toasts, Immediate-mode button, Tween/easing, Flip-book   Determinism: presentation
 
 ## 1. Summary

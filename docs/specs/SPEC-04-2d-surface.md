@@ -1,7 +1,9 @@
 # SPEC-04 — 2D surface (shapes / text / sprites / gradients / particles)
 
-> Status: Landed (with deferrals — see below)
-> Landed (2026-06-28): `axiom-draw2d::Draw2dApi` builds the full neutral draw-list — `rect`/`circle`/`ellipse`/`line`/`path`/`sprite`/`text`+`measure_text`/`linear`+`radial` gradients + the camera/transform stack + the `(layer, submission)` stable sort — and `Draw2dList`/`Draw2dCommand` are **host-owned** (`crates/axiom-host`, the 2D peer of `FramePacket`). The software backend (`axiom-canvas2d-backend::draw2d_raster`) rasterizes **filled rect + sprite with src-over alpha compositing**.
+> Status: Partial (native core landed; TS projection absent + deferrals). See
+> README footnote ¹ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed (2026-06-28, native): `axiom-draw2d::Draw2dApi` builds the full neutral draw-list — `rect`/`circle`/`ellipse`/`line`/`path`/`sprite`/`text`+`measure_text`/`linear`+`radial` gradients + the camera/transform stack + the `(layer, submission)` stable sort — and `Draw2dList`/`Draw2dCommand` are **host-owned** (`crates/axiom-host`, the 2D peer of `FramePacket`). The software backend (`axiom-canvas2d-backend::draw2d_raster`) rasterizes **filled rect + sprite with src-over alpha compositing**.
+> **Not yet built (undeferred until now):** the TS projection — `@axiom/game`'s `Frame` exposes only `{ tick }`, none of the §4.2 2D draw methods; the §10.2 flip-book sampler (`sampleAnimation`); and the GPU backend's `present_draw2d` (a no-op).
 > Deferred (documented in `draw2d_raster.rs`): backend rasterization of circle/ellipse/line/path/gradient(paint) fills/stroke/text glyph-runs (their `KIND_*` commands are recognised and skipped, never mis-rasterized), and exact rotated rasterization. **Particles (§10.1) and render-targets (§10.3) are deferred** at the facade pending a kernel `Seconds` dimensioned scalar. Live browser raster is browser-proven (sandbox cannot run browser WebGPU).
 > Contract: §10 (incl. §10.1 particles, §10.2 flip-book, §10.3 render targets)   Vocabulary: Text/glyph/emoji, 2D shapes, gradients, alpha blending, layer/z-order, glow/shadow, particle system, 2D transform stack, sprite/image draw, off-screen baked layer, DPR/responsive   Determinism: presentation
 
