@@ -112,6 +112,40 @@ fn assert_absent(forbidden: &[&str], why: &str) {
     assert_absent_in(&host_src_dir(), "axiom-host", forbidden, why);
 }
 
+/// Like `assert_absent`, but treats each needle as a *whole type-path token*: it
+/// flags a match only when the needle is NOT immediately followed by an
+/// identifier-continuation character. This bans a renderer type named exactly
+/// `Texture` (`foo::Texture`, `foo::Texture)`, `foo::Texture,`) while allowing
+/// the host-owned `TextureId` 2D-draw handle (`foo::TextureId`) — a distinct
+/// value-type whose `Id` suffix the naive substring scan would false-match.
+fn assert_absent_type_tokens(forbidden: &[&str], why: &str) {
+    let mut files = Vec::new();
+    collect_rs(&host_src_dir(), &mut files);
+    files.sort();
+    let mut violations = Vec::new();
+    for path in &files {
+        let stripped = strip_comments_and_strings(&read(path));
+        for needle in forbidden {
+            let mut rest = stripped.as_str();
+            while let Some(pos) = rest.find(needle) {
+                let after = &rest[pos + needle.len()..];
+                let next_is_ident = after
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '_');
+                if !next_is_ident {
+                    violations.push(format!(
+                        "axiom-host {}: contains forbidden type token `{needle}`",
+                        path.display()
+                    ));
+                }
+                rest = &rest[pos + needle.len()..];
+            }
+        }
+    }
+    assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
+}
+
 #[test]
 fn no_browser_or_js_bindgen_apis() {
     assert_absent(
@@ -193,7 +227,12 @@ fn no_global_mutable_state() {
 
 #[test]
 fn no_renderer_or_shader_concepts() {
-    assert_absent(
+    // Whole-type-token scan: `::Texture` is banned as a type name, but the
+    // host-owned `TextureId` 2D-draw handle (relocated from axiom-draw2d) is
+    // allowed — its `Id` suffix makes it a distinct value type, not a renderer
+    // resource. Renderer GPU types are independently banned by the wgpu/WebGPU
+    // hygiene tests and the import-allowlist test.
+    assert_absent_type_tokens(
         &[
             "::Renderer",
             "::RenderPipeline",
@@ -317,6 +356,27 @@ fn lib_exports_are_curated_set() {
         "pub use frame_submission_report::BackendKind;",
         "pub use frame_submission_report::FrameFeature;",
         "pub use frame_submission_report::FrameSubmissionReport;",
+        // Backend-neutral 2D draw contract (SPEC-04), relocated from axiom-draw2d.
+        "pub use camera2d::Camera2d;",
+        "pub use common2d::Common2d;",
+        "pub use common2d::Shadow2d;",
+        "pub use draw2d_command::Draw2dCommand;",
+        "pub use draw2d_list::Draw2dList;",
+        "pub use fill2d::Fill2d;",
+        "pub use fill2d::Stroke2d;",
+        "pub use handles::FontHandle;",
+        "pub use handles::PaintId;",
+        "pub use handles::TextureId;",
+        "pub use handles::TransformDepth;",
+        "pub use paint::GradientStop;",
+        "pub use rect::Rect;",
+        "pub use rgba::Rgba;",
+        "pub use sprite_draw2d::SpriteDraw2d;",
+        "pub use text2d::Glyph2d;",
+        "pub use text2d::GlyphRun;",
+        "pub use text2d::TextAlign;",
+        "pub use text2d::TextDraw2d;",
+        "pub use text2d::TextMetrics;",
     ];
     expected.sort();
 
@@ -371,6 +431,7 @@ fn host_only_imports_declared_dependencies() {
                 if chunk.starts_with("axiom_")
                     && chunk != "axiom_kernel"
                     && chunk != "axiom_runtime"
+                    && chunk != "axiom_math"
                     && chunk != "axiom_host"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
@@ -380,7 +441,7 @@ fn host_only_imports_declared_dependencies() {
     }
     assert!(
         illegal.is_empty(),
-        "axiom-host may only import axiom-kernel and axiom-runtime:\n{}",
+        "axiom-host may only import axiom-kernel, axiom-runtime, and axiom-math:\n{}",
         illegal.join("\n")
     );
 }

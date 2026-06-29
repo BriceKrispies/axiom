@@ -29,8 +29,8 @@
 [layer]
 name = "host"
 crate_name = "axiom-host"
-depends_on = ["kernel", "runtime"]
-meaningful_dependency = "Host consumes runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `HandleId`, `Tick`, `TelemetryMetric`) for telemetry routing and for minting the stable opaque identities behind `HostPresentationTarget` / `HostSurfaceHandle` — and validates host-supplied viewport scale factors through the kernel `Ratio` quantity type at its boundary. It exposes the deterministic host boundary (stepping plus presentation) every future browser/native adapter will sit on top of."
+depends_on = ["kernel", "runtime", "math"]
+meaningful_dependency = "Host consumes runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `HandleId`, `Tick`, `TelemetryMetric`) for telemetry routing and for minting the stable opaque identities behind `HostPresentationTarget` / `HostSurfaceHandle` — and validates host-supplied viewport scale factors through the kernel `Ratio` quantity type at its boundary. It also consumes math (`Vec2`, `Mat3`) for the backend-neutral 2D draw contract (`Draw2dList` and the value vocabulary it carries: baked transforms, geometry, gradient axes), relocated here so the render backends that depend on host can name and rasterize it. It exposes the deterministic host boundary (stepping, presentation, plus the neutral 2D draw contract) every future browser/native adapter and render backend will sit on top of."
 
 # Public Rust surface is the curated list in `lib.rs`; the architecture
 # checker only needs the facade plus the driver to prove the layer's
@@ -41,6 +41,26 @@ introduced_capabilities = [
     "Pixels",
     "Orientation",
     "HostSafeAreaInsets",
+    "Draw2dList",
+    "Draw2dCommand",
+    "Camera2d",
+    "Common2d",
+    "Shadow2d",
+    "Fill2d",
+    "Stroke2d",
+    "SpriteDraw2d",
+    "TextDraw2d",
+    "GlyphRun",
+    "Glyph2d",
+    "TextMetrics",
+    "TextAlign",
+    "Rect",
+    "Rgba",
+    "GradientStop",
+    "PaintId",
+    "FontHandle",
+    "TextureId",
+    "TransformDepth",
 ]
 
 consumed_capabilities = [
@@ -50,12 +70,15 @@ consumed_capabilities = [
     "KernelApi",
     "Tick",
     "TelemetryMetric",
+    "Vec2",
+    "Mat3",
 ]
 
 # Each proof export is a real public export whose source must
-# reference at least one depended-layer (kernel/runtime) symbol. The driver
+# reference at least one depended-layer (kernel/runtime/math) symbol. The driver
 # names `Runtime` (it steps it); the facade names `KernelApi` (it routes
-# identity/boundary-config validation through the kernel facade).
+# identity/boundary-config validation through the kernel facade); `Draw2dList`
+# names math `Vec2` (its paint/geometry accessors return math vectors).
 [[proof_exports]]
 export = "HostApi"
 must_reference = ["KernelApi"]
@@ -63,3 +86,7 @@ must_reference = ["KernelApi"]
 [[proof_exports]]
 export = "HostStepDriver"
 must_reference = ["Runtime"]
+
+[[proof_exports]]
+export = "Draw2dList"
+must_reference = ["Vec2"]

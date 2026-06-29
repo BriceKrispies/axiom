@@ -127,29 +127,22 @@ fn module_toml_exists_and_is_isolated() {
 }
 
 #[test]
-fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
-    // Module Law #8: exactly one behavioral facade (Draw2dApi), plus the
-    // value-type vocabulary via a single `pub use ids::{…}` line.
+fn lib_rs_exports_exactly_one_facade_and_no_data_vocabulary() {
+    // Module Law #8: exactly one behavioral facade (Draw2dApi). The 2D draw
+    // contract's value vocabulary is host-owned now (relocated to axiom-host so
+    // the render backends that depend on host can name it), so this module
+    // re-exports NO data types — not even an `ids` line. Callers reach the
+    // vocabulary via `use axiom_host::{…}`.
     let lib = read(&src_dir().join("lib.rs"));
-    let pub_uses: Vec<&str> = lib
+    let pub_items: Vec<&str> = lib
         .lines()
         .map(str::trim)
-        .filter(|line| line.starts_with("pub use"))
-        .collect();
-    let facades: Vec<&str> = pub_uses
-        .iter()
-        .copied()
-        .filter(|line| !line.contains("ids::"))
+        .filter(|line| line.starts_with("pub use") || line.starts_with("pub "))
         .collect();
     assert_eq!(
-        facades,
+        pub_items,
         vec!["pub use draw2d_api::Draw2dApi;"],
-        "axiom-draw2d must expose exactly one behavioral facade (Draw2dApi)"
-    );
-    let id_lines = pub_uses.iter().filter(|line| line.contains("ids::")).count();
-    assert_eq!(
-        id_lines, 1,
-        "axiom-draw2d re-exports its value vocabulary via exactly one `pub use ids::{{…}}` line"
+        "axiom-draw2d's lib.rs must expose exactly one public item: the Draw2dApi facade"
     );
 }
 
@@ -169,6 +162,7 @@ fn draw2d_imports_only_legal_layers() {
                 if chunk.starts_with("axiom_")
                     && chunk != "axiom_kernel"
                     && chunk != "axiom_math"
+                    && chunk != "axiom_host"
                     && chunk != "axiom_draw2d"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
@@ -178,7 +172,7 @@ fn draw2d_imports_only_legal_layers() {
     }
     assert!(
         illegal.is_empty(),
-        "axiom-draw2d may only import axiom-kernel and axiom-math:\n{}",
+        "axiom-draw2d may only import axiom-kernel, axiom-math, and axiom-host:\n{}",
         illegal.join("\n")
     );
 }

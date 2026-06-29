@@ -48,8 +48,8 @@ impl GlyphRun {
     ///
     /// The run is already shaped against a baked font, so `font` does not change
     /// the measurement of an already-resolved run (the advances are the metric
-    /// table's output); it is accepted for API symmetry with
-    /// [`crate::Draw2dApi::text`] and to name which atlas shaped the run.
+    /// table's output); it is accepted for API symmetry with the builder's text
+    /// draw and to name which atlas shaped the run.
     pub fn measure(&self, font: FontHandle) -> TextMetrics {
         let _ = font;
         let total: f32 = self.glyphs.iter().map(|g| g.advance.get()).sum();

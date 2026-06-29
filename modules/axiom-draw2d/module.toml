@@ -1,8 +1,11 @@
 # Axiom draw2d engine module manifest.
 #
 # axiom-draw2d is an *isolated* engine module (SPEC-04): it composes completed
-# layers (kernel, math) into a neutral, ordered, hashable 2D draw-list — the 2D
-# peer of the RenderCommandList in axiom-render. It never depends on another
+# layers (kernel, math, host) and exposes the Draw2dApi *builder*, which compiles
+# author 2D-draw calls into the neutral, ordered, hashable 2D draw-list. The
+# draw-list contract itself (Draw2dList and its value vocabulary) lives in the
+# host layer, so the render backends that depend on host can name and rasterize
+# it — the 2D peer of the host FramePacket. This module never depends on another
 # module, an app, or a tool, and it rasterizes nothing: turning the list into
 # pixels (and the alpha-blend fix) is the job of the backends, and cross-module
 # translation (list -> backend submission) is the job of an app.
@@ -13,6 +16,7 @@ kind = "engine-module"
 allowed_layers = [
   "kernel",
   "math",
+  "host",
 ]
 allowed_modules = []
 introduced_capabilities = [

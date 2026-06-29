@@ -25,13 +25,23 @@
 //! ## Public surface
 //! `lib.rs` exposes the [`HostApi`] facade plus the curated set of host
 //! boundary data types future adapters must be able to *name* (store,
-//! construct, match on). The curated set is locked down by
-//! `tests/architecture.rs::lib_exports_are_curated_set` — any accidental
-//! widening fails the build.
+//! construct, match on). This includes the backend-neutral 2D draw contract
+//! ([`Draw2dList`] and the value vocabulary it carries), relocated here from
+//! the `axiom-draw2d` module so the render backends that depend on host can
+//! name and rasterize it — the same role [`FramePacket`] already plays. Host
+//! owns the *contract*, not a renderer: it rasterizes nothing. The curated set
+//! is locked down by `tests/architecture.rs::lib_exports_are_curated_set` —
+//! any accidental widening fails the build.
 
+mod camera2d;
+mod common2d;
+mod draw2d_command;
+mod draw2d_list;
+mod fill2d;
 mod frame_packet;
 mod frame_raster_stats;
 mod frame_submission_report;
+mod handles;
 mod host_adapter_request;
 mod host_alpha_mode;
 mod host_api;
@@ -66,9 +76,14 @@ mod host_step_plan;
 mod host_surface_descriptor;
 mod host_surface_handle;
 mod host_viewport;
+mod paint;
 mod pixels;
 mod player_id;
+mod rect;
+mod rgba;
 mod score;
+mod sprite_draw2d;
+mod text2d;
 
 // --- Curated public surface ---
 
@@ -139,3 +154,30 @@ pub use frame_raster_stats::FrameRasterStats;
 pub use frame_submission_report::BackendKind;
 pub use frame_submission_report::FrameFeature;
 pub use frame_submission_report::FrameSubmissionReport;
+
+// Backend-neutral 2D draw contract (SPEC-04), relocated here from the
+// axiom-draw2d module so both render backends (Canvas 2D, GPU) — which already
+// depend on host — can name and rasterize it, exactly as they name FramePacket.
+// axiom-draw2d keeps only the Draw2dApi *builder*, which assembles these
+// host-owned types through their producer constructors. Primitive-only — no
+// GPU/DOM/font/scene types.
+pub use camera2d::Camera2d;
+pub use common2d::Common2d;
+pub use common2d::Shadow2d;
+pub use draw2d_command::Draw2dCommand;
+pub use draw2d_list::Draw2dList;
+pub use fill2d::Fill2d;
+pub use fill2d::Stroke2d;
+pub use handles::FontHandle;
+pub use handles::PaintId;
+pub use handles::TextureId;
+pub use handles::TransformDepth;
+pub use paint::GradientStop;
+pub use rect::Rect;
+pub use rgba::Rgba;
+pub use sprite_draw2d::SpriteDraw2d;
+pub use text2d::Glyph2d;
+pub use text2d::GlyphRun;
+pub use text2d::TextAlign;
+pub use text2d::TextDraw2d;
+pub use text2d::TextMetrics;

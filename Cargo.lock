@@ -249,6 +249,7 @@ dependencies = [
 name = "axiom-draw2d"
 version = "0.1.0"
 dependencies = [
+ "axiom-host",
  "axiom-kernel",
  "axiom-math",
 ]
@@ -345,6 +346,7 @@ name = "axiom-host"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
+ "axiom-math",
  "axiom-runtime",
 ]
 
