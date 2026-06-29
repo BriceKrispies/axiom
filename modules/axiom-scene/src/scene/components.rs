@@ -3,6 +3,8 @@
 //! internals while keeping `scene.rs` within the per-file size budget, and so
 //! neither `impl Scene` block exceeds the engine's impl-block size budget.
 
+use axiom_kernel::Reflect;
+
 use super::Scene;
 use crate::camera::Camera;
 use crate::light::Light;
@@ -153,6 +155,63 @@ impl Scene {
             .iter()
             .filter(|(_, tag)| tag.kind_code() == kind_code)
             .map(|(entity, _)| SceneNodeId::from_raw(entity.raw()))
+            .collect()
+    }
+
+    /// Set (or replace) `node`'s app-defined component of type `T`, stored
+    /// type-erased in the scene's dynamic arm. Returns whether `node` named a live
+    /// node; a stale handle is a clean `false`, so a dynamic component is never
+    /// attached to a dead/absent entity (which keeps every `query_dynamic` result
+    /// live, since despawn clears the entity's dynamic components).
+    pub(crate) fn set_dynamic<T: Reflect>(&mut self, node: SceneNodeId, value: T) -> bool {
+        self.is_node(node)
+            .then(|| {
+                self.world
+                    .storage_mut()
+                    .dynamic
+                    .insert(Self::entity(node), value);
+            })
+            .is_some()
+    }
+
+    /// Read `node`'s dynamic component of type `T`, deserialized to an owned value
+    /// — `None` if absent, or if the stored bytes do not decode as `T` (a graceful
+    /// miss, never UB).
+    pub(crate) fn get_dynamic<T: Reflect>(&self, node: SceneNodeId) -> Option<T> {
+        self.world
+            .storage()
+            .dynamic
+            .get(Self::entity(node))
+            .ok()
+            .flatten()
+    }
+
+    /// Whether `node` carries a dynamic component of type `T`.
+    pub(crate) fn has_dynamic<T: Reflect>(&self, node: SceneNodeId) -> bool {
+        self.world
+            .storage()
+            .dynamic
+            .contains::<T>(Self::entity(node))
+    }
+
+    /// Remove `node`'s dynamic component of type `T`, returning whether it existed.
+    pub(crate) fn remove_dynamic<T: Reflect>(&mut self, node: SceneNodeId) -> bool {
+        self.world
+            .storage_mut()
+            .dynamic
+            .remove::<T>(Self::entity(node))
+    }
+
+    /// Every node carrying *all* the dynamic component kinds named in `kinds` (by
+    /// `Reflect` schema name), in ascending node-id order — the dynamic mirror of a
+    /// typed `query`, behind a retained world's `query(...kinds)`.
+    pub(crate) fn query_dynamic(&self, kinds: &[&'static str]) -> Vec<SceneNodeId> {
+        self.world
+            .storage()
+            .dynamic
+            .entities_with_all(kinds)
+            .into_iter()
+            .map(|entity| SceneNodeId::from_raw(entity.raw()))
             .collect()
     }
 }

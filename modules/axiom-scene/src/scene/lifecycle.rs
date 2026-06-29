@@ -71,6 +71,9 @@ impl Scene {
             let storage = self.world.storage_mut();
             storage.players.remove(&entity);
             storage.controllers.remove(&entity);
+            // Drop the entity's app-defined dynamic components too, so a reused
+            // id (the registry recycles slots) never inherits stale components.
+            storage.dynamic.remove_entity(entity);
         }
         self.world.despawn(entity)
     }
