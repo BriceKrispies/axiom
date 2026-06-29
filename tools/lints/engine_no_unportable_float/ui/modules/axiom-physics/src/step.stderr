@@ -1,0 +1,35 @@
+warning: this float op is not bit-reproducible across targets; it is banned in the deterministic step path
+  --> $DIR/step.rs:12:7
+   |
+LL |     v.mul_add(dt, p)
+   |       ^^^^^^^
+   |
+   = help: use only `{+, -, *, /, sqrt, min, max}` here (e.g. `a * b + c` instead of `a.mul_add(b, c)`); precompute any trig at authoring time outside the step
+   = note: `#[warn(engine_no_unportable_float)]` on by default
+
+warning: this float op is not bit-reproducible across targets; it is banned in the deterministic step path
+  --> $DIR/step.rs:17:11
+   |
+LL |     theta.sin() + theta.cos()
+   |           ^^^
+   |
+   = help: use only `{+, -, *, /, sqrt, min, max}` here (e.g. `a * b + c` instead of `a.mul_add(b, c)`); precompute any trig at authoring time outside the step
+
+warning: this float op is not bit-reproducible across targets; it is banned in the deterministic step path
+  --> $DIR/step.rs:17:25
+   |
+LL |     theta.sin() + theta.cos()
+   |                         ^^^
+   |
+   = help: use only `{+, -, *, /, sqrt, min, max}` here (e.g. `a * b + c` instead of `a.mul_add(b, c)`); precompute any trig at authoring time outside the step
+
+warning: this float op is not bit-reproducible across targets; it is banned in the deterministic step path
+  --> $DIR/step.rs:21:7
+   |
+LL |     x.exp()
+   |       ^^^
+   |
+   = help: use only `{+, -, *, /, sqrt, min, max}` here (e.g. `a * b + c` instead of `a.mul_add(b, c)`); precompute any trig at authoring time outside the step
+
+warning: 4 warnings emitted
+

@@ -28,6 +28,7 @@ members = [
     "engine_no_recursion",
     "engine_no_branching",
     "engine_no_unitless_float_public_api",
+    "engine_no_unportable_float",
     "engine_no_large_files",
     "engine_no_large_functions",
     "engine_no_large_structs",
