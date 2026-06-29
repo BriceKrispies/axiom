@@ -29,11 +29,23 @@
 //! `worldSpawn` is composed at the TS edge from `world_spawn` + per-component
 //! `world_set`, so this core exposes only scalar / byte / string methods.
 //!
-//! Input / tween / tick / grid / 3D / audio / net remain later increments.
+//! ## Input (SPEC-05)
+//! The `input_*` methods host the TS `NativeBridge` input surface over the
+//! engine's `axiom-input` intent-snapshot facade ([`crate::input`]): the browser
+//! arm feeds raw key/pointer events through the injection path, [`advance`] folds
+//! the live device frame into the per-tick snapshot, and the reads project the
+//! resolved intent. Action names cross as strings; edges/holds as booleans;
+//! optional reads (pointer / press-start / pressed-at-tick) as a `Vec<f64>` that
+//! is empty when absent; a swipe as its direction string.
+//!
+//! Tween / tick / grid / 3D / audio / net remain later increments.
+//!
+//! [`advance`]: GameBridge::advance
 
 use axiom::prelude::{Entity, HostApi, HostOutcome, RunningApp, Score, StepBudget};
 
 use crate::embed::OutcomeLatch;
+use crate::input::InputBridge;
 use crate::physics::PhysicsState;
 use crate::rng::RngHub;
 use crate::runtime::GameRuntime;
@@ -50,6 +62,7 @@ pub struct GameBridge {
     seed: u64,
     outcome: OutcomeLatch,
     pub(crate) physics: PhysicsState,
+    pub(crate) input: InputBridge,
 }
 
 impl GameBridge {
@@ -64,6 +77,7 @@ impl GameBridge {
             seed,
             outcome: OutcomeLatch::new(),
             physics: PhysicsState::new(),
+            input: InputBridge::new(),
         }
     }
 
@@ -76,7 +90,9 @@ impl GameBridge {
     /// ticks; returns the integer [`StepBudget`] for the presentation layer to
     /// interpolate with. Delegates to [`GameRuntime::advance`].
     pub fn advance(&mut self, elapsed_nanos: u64) -> StepBudget {
+        let start = self.runtime.tick();
         let budget = self.runtime.advance(elapsed_nanos);
+        self.input.sample(start, budget.steps());
         self.physics.step_and_writeback(
             self.runtime.app_mut(),
             budget.steps(),

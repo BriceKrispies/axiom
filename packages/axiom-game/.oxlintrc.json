@@ -128,6 +128,32 @@
         "typescript/no-unsafe-member-access": "off",
         "typescript/no-unsafe-type-assertion": "off"
       }
+    },
+    {
+      // The wasm<->bridge ADAPTER edge: wasm-bridge.ts builds a `NativeBridge`
+      // from the raw wasm exports (the byte/scalar/string marshalling extracted
+      // out of raf-loop.ts so each per-subsystem binding has room to land). Like
+      // raf-loop.ts it is the wasm-binding boundary — coverage-exempt (its
+      // correctness is the exact live wasm byte layout, verified via the
+      // Playwright path, not a fake) — see the --test-coverage-exclude in
+      // package.json. UNLIKE raf-loop.ts it KEEPS the Branchless Law on: every
+      // selection is a control-flow.ts combinator (pick/orElse/each). Only the two
+      // rules the boundary genuinely cannot meet are scoped off, each documented
+      // in-file:
+      //   - no-unsafe-type-assertion: the byte codec asserts `Component`<->record
+      //     and the swipe string->union (the wasm boundary is untyped bytes).
+      //   - max-lines: the one adapter file carries the whole boundary (codec +
+      //     world + input + physics), past the single-subsystem 300-line budget.
+      //   - max-params: the scalar-vector wasm signatures are inherently >3 args
+      //     (`physicsSetConfig(gx,gy,gz,lin,ang)`, the `(body,x,y,z)` vector
+      //     verbs) — this is the exact constraint that deferred physics's TS
+      //     binding in P3; the `NativeBridge`-facing arrows stay <=3 args.
+      "files": ["src/wasm-bridge.ts"],
+      "rules": {
+        "eslint/max-lines": "off",
+        "eslint/max-params": "off",
+        "typescript/no-unsafe-type-assertion": "off"
+      }
     }
   ]
 }

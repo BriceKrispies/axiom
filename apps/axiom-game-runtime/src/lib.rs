@@ -49,6 +49,13 @@ mod world;
 /// convention and the physics-facade gaps it works within.
 mod physics;
 
+/// Input (SPEC-05): the deterministic per-tick intent snapshot over
+/// `axiom-input` composed into [`GameBridge`] — a live device-state accumulator
+/// the browser feeds raw key/pointer events into, sampled once per fixed tick
+/// inside the loop, and projected to the TS `NativeBridge` input reads.
+/// Native-testable; the `wasm32` boundary marshals to it through `GameBridge`.
+mod input;
+
 /// The embed seam (SPEC-12): decode the inbound session config, latch the single
 /// outbound outcome. Pure, native-testable core; the browser channel that carries
 /// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on

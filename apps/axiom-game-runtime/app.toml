@@ -30,4 +30,6 @@ allowed_modules = [
     "engine",
     # The deterministic rigid-body physics world (SPEC-10) the bridge composes.
     "physics",
+    # The per-tick intent-snapshot facade (SPEC-05) the bridge samples each tick.
+    "input",
 ]
