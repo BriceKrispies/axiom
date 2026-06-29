@@ -16,13 +16,27 @@ path = "src/main.rs"
 # on a module (tools are outside the engine dependency graph).
 axiom-net-protocol = { path = "../../modules/axiom-net-protocol" }
 
+# The engine umbrella module: the authority runs the AUTHORED game headlessly
+# through `App`/`RunningApp::tick_with` + `snapshot_sim` (the same deterministic
+# fixed-step surface `apps/axiom-game-runtime`'s `GameRuntime` wraps). A tool may
+# depend on a module; it may NOT depend on the `axiom-game-runtime` app, so the
+# authority composes this umbrella directly (SPEC-13 §3.5).
+axiom = { path = "../../modules/axiom" }
+
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+# Stream wrappers used to drive the accept loop, the fixed-step tick, and the
+# per-peer bridge as branchless data transforms (the Branchless Law's gate fires
+# in tools too — see `tools/axiom-netcode-relay`).
+tokio-stream = { version = "0.1.18", default-features = false, features = ["net", "sync", "time"] }
 tokio-tungstenite = "0.24"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 tokio-tungstenite = "0.24"
+# The kernel's platform-stable digest (`StableHash`), used by the SPEC-13 §7
+# cross-instance determinism golden to fingerprint each `ServerSnapshotFor`.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
 
 [lints.rust]
 unsafe_code = "forbid"

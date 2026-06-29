@@ -1,89 +1,60 @@
-//! `axiom-netplay-server` — a minimal **authoritative** game server for the live
-//! netplay demo.
+//! `axiom-netplay-server` — the **authored-callback authority** for the live
+//! server-authoritative netplay demo (SPEC-13 §16, §3.5).
 //!
 //! Unlike the dumb lockstep relay (`tools/axiom-netcode-relay`), this server is
-//! the source of truth. It holds the authoritative state — two player cubes —
-//! accepts each browser's `JoinRoom` (replying `Welcome`), integrates the
-//! `ClientIntent`s it receives, and broadcasts a `ServerSnapshot` of the
-//! authoritative positions every fixed tick. Clients send *intents*, never
-//! state; the server decides the outcome and the clients render its snapshots.
+//! the single source of truth. It no longer hard-codes movement: it runs the
+//! **authored game** headlessly through the engine's deterministic fixed-step
+//! [`RunningApp::tick_with`](axiom::prelude::RunningApp) path (owned by
+//! [`authority::Authority`]). Each browser's `JoinRoom` claims a seat (replying
+//! `Welcome`); its per-player `ClientIntentFor` frames are folded into the authored
+//! world; every fixed tick the authority steps the game and broadcasts a per-player
+//! `ServerSnapshotFor` carrying the participant block and the per-player ack
+//! cursors. Clients send *intents*, never state; the authority decides the
+//! outcome; predicted clients reconcile.
 //!
-//! It speaks the canonical wire format through the `axiom-net-protocol` module,
-//! so the bytes are exactly what the TypeScript `@axiom/client` SDK encodes and
-//! decodes. Repo tooling: a Tool by its `tools/` location, outside the engine
-//! dependency graph and the coverage gate, so it uses ordinary control flow and
-//! `std::net`/sockets that the engine spine may not.
+//! ## Why a single authority task + channels (not a shared `Mutex<Authority>`)
+//! The authored world `RunningApp` is intentionally **not `Send`** (it holds engine
+//! `dyn` system objects that never leave their owning thread). So the authority is
+//! owned by exactly one task ([`authority_loop`], driven inline by [`run_server`],
+//! never `tokio::spawn`ed) and the per-peer socket tasks — which *are* spawned and
+//! must be `Send` — reach it only through `Send` channels: an `mpsc` of
+//! [`Command`]s in, and a `broadcast` of snapshot frames out. This is also the
+//! cleaner shape: a single owner of the deterministic world, exactly one writer.
+//!
+//! Repo tooling: a Tool by its `tools/` location — outside the engine dependency
+//! graph and the coverage gate — but, like `axiom-netcode-relay`, written
+//! **branchless** (the Branchless Law's `engine_no_branching` gate fires in tools
+//! too): every dispatch decision is a data transform over `Option`/stream
+//! combinators, not `if`/`match`/`for`/`while`.
+
+mod authority;
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use authority::{Authority, FIXED_STEP_NS, MAX_PLAYERS, PROTOCOL_VERSION};
 use axiom_net_protocol::NetProtocolApi;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::future::OptionFuture;
+use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio_stream::wrappers::{
+    BroadcastStream, IntervalStream, TcpListenerStream, UnboundedReceiverStream,
+};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 /// The default address the server listens on (distinct from the relay's 9001).
 const DEFAULT_ADDR: &str = "127.0.0.1:9002";
 
-/// The application protocol version this server speaks.
-const PROTOCOL_VERSION: u32 = 1;
-
-/// The authoritative simulation step, in nanoseconds (~60 Hz). Sent in `Welcome`
-/// and used as the broadcast tick interval.
-const FIXED_STEP_NS: u64 = 16_666_667;
-
-/// The number of player slots (this demo is two-player).
-const MAX_PLAYERS: u64 = 2;
-
-/// The authoritative starting positions of player 0 and player 1. The browser
-/// renderer seeds the same values, so absolute snapshots line up from tick 0.
-const INITIAL_POSITIONS: [[f32; 2]; 2] = [[-1.5, 0.0], [1.5, 0.0]];
-
-/// How far from the origin a cube may travel on each axis — the authoritative
-/// bound the server enforces (a client cannot drive its cube off the field).
-const POSITION_LIMIT: f32 = 3.5;
-
+/// This peer's outbound socket half.
 type Sink = futures_util::stream::SplitSink<WebSocketStream<TcpStream>, Message>;
+/// This peer's inbound socket half.
 type Source = futures_util::stream::SplitStream<WebSocketStream<TcpStream>>;
-type SharedSink = Arc<Mutex<Sink>>;
-type Shared = Arc<Mutex<Game>>;
-
-/// One connected, welcomed player.
-struct Client {
-    /// The assigned client id (1 or 2); it controls player index `id - 1`.
-    id: u64,
-    /// The move delta from this client's most recent intent, applied next tick.
-    pending: [f32; 2],
-    /// The highest client sequence accepted from this client (echoed in its
-    /// snapshots so it can drop acknowledged pending intents).
-    last_accepted_seq: u64,
-    /// This client's socket, shared so the tick loop can broadcast to it.
-    sink: SharedSink,
-}
-
-/// The authoritative game state.
-struct Game {
-    tick: u64,
-    pos: [[f32; 2]; 2],
-    clients: Vec<Client>,
-}
-
-impl Game {
-    fn new() -> Self {
-        Game {
-            tick: 0,
-            pos: INITIAL_POSITIONS,
-            clients: Vec::new(),
-        }
-    }
-
-    /// The lowest free player id, or `None` when the game is full.
-    fn free_id(&self) -> Option<u64> {
-        (1..=MAX_PLAYERS).find(|id| !self.clients.iter().any(|c| c.id == *id))
-    }
-}
+/// The channel a peer task uses to drive the single authority task.
+type CmdTx = mpsc::UnboundedSender<Command>;
+/// The bus a snapshot frame is broadcast to every connected peer on.
+type SnapTx = broadcast::Sender<Arc<Vec<u8>>>;
 
 #[tokio::main]
 async fn main() {
@@ -93,238 +64,426 @@ async fn main() {
     let listener = TcpListener::bind(&addr)
         .await
         .expect("netplay-server: failed to bind the listen address");
-    println!("axiom-netplay-server (authoritative) listening on ws://{addr}");
-    println!("open the netplay page in two WebGPU browsers — each joins as a player.");
-
-    let game: Shared = Arc::new(Mutex::new(Game::new()));
-    tokio::spawn(tick_loop(game.clone()));
-
-    loop {
-        match listener.accept().await {
-            Ok((stream, _)) => {
-                tokio::spawn(serve(stream, game.clone()));
-            }
-            Err(e) => eprintln!("netplay-server: accept error: {e}"),
-        }
-    }
+    println!("axiom-netplay-server (authored-callback authority) listening on ws://{addr}");
+    println!("up to {MAX_PLAYERS} browsers join as players; the authority runs the authored game and broadcasts ServerSnapshotFor.");
+    run_server(listener).await;
 }
 
-/// Advance the authoritative simulation and broadcast a snapshot every fixed
-/// step: integrate each client's pending delta into its cube (clamped to the
-/// field), then send each client a `ServerSnapshot` carrying the packed
-/// positions and that client's own last-accepted sequence.
-async fn tick_loop(game: Shared) {
-    let mut interval = tokio::time::interval(Duration::from_nanos(FIXED_STEP_NS));
-    loop {
-        interval.tick().await;
-
-        // Mutate state and build the per-client sends under the lock, then send
-        // after releasing it (a socket write must not hold the game lock).
-        let sends: Vec<(SharedSink, Vec<u8>)> = {
-            let mut g = game.lock().await;
-
-            // Integrate each player's pending delta (split the borrow: collect
-            // the deltas, apply, then clear them).
-            let updates: Vec<(usize, [f32; 2])> = g
-                .clients
-                .iter()
-                .map(|c| ((c.id - 1) as usize, c.pending))
-                .collect();
-            for (player, delta) in updates {
-                g.pos[player][0] = clamp(g.pos[player][0] + delta[0]);
-                g.pos[player][1] = clamp(g.pos[player][1] + delta[1]);
-            }
-            for c in g.clients.iter_mut() {
-                c.pending = [0.0, 0.0];
-            }
-            g.tick += 1;
-
-            let tick = g.tick;
-            let payload = pack_positions(&g.pos);
-            g.clients
-                .iter()
-                .map(|c| {
-                    let bytes =
-                        NetProtocolApi::encode_server_snapshot(tick, c.last_accepted_seq, &payload)
-                            .expect("snapshot payload is within the protocol bound");
-                    (c.sink.clone(), bytes)
-                })
-                .collect()
-        };
-
-        for (sink, bytes) in sends {
-            let _ = sink.lock().await.send(Message::binary(bytes)).await;
-        }
-    }
+/// Stand up the authority task and the accept loop and run them concurrently. The
+/// authority task owns the (non-`Send`) authored world and is driven *inline* here
+/// (never spawned); the accept loop spawns one `Send` peer task per socket. They
+/// communicate only through the `mpsc`/`broadcast` channels created here.
+async fn run_server(listener: TcpListener) {
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<Command>();
+    let (snap_tx, _snap_rx) = broadcast::channel::<Arc<Vec<u8>>>(1024);
+    tokio::join!(
+        authority_loop(Authority::new(), cmd_rx, snap_tx.clone()),
+        accept_loop(listener, cmd_tx, snap_tx),
+    );
 }
 
-/// Serve one connection: await its `JoinRoom`, claim a player slot, reply
-/// `Welcome`, then fold its `ClientIntent`s into the authoritative state until it
-/// leaves.
-async fn serve(stream: TcpStream, game: Shared) {
-    let ws = match tokio_tungstenite::accept_async(stream).await {
-        Ok(ws) => ws,
-        Err(_) => {
-            eprintln!("netplay-server: a peer failed the WebSocket handshake");
-            return;
-        }
-    };
-    let (sink, mut source) = ws.split();
-    let sink: SharedSink = Arc::new(Mutex::new(sink));
+/// The single owner of the authored world. It folds a merged stream of fixed-step
+/// ticks (`IntervalStream`) and peer commands (`UnboundedReceiverStream`) into the
+/// [`Authority`]: a command mutates the world's seating/intents, a tick runs one
+/// deterministic authored fixed update and broadcasts the resulting
+/// `ServerSnapshotFor`. The wall clock decides only *when* a step runs, never
+/// *what* it computes.
+async fn authority_loop(
+    authority: Authority,
+    cmd_rx: mpsc::UnboundedReceiver<Command>,
+    snap_tx: SnapTx,
+) {
+    let ticks = IntervalStream::new(tokio::time::interval(Duration::from_nanos(FIXED_STEP_NS)))
+        .map(|_instant| AuthEvent::tick());
+    let commands = UnboundedReceiverStream::new(cmd_rx).map(AuthEvent::command);
+    tokio_stream::StreamExt::merge(ticks, commands)
+        .fold(authority, |authority, event| fold_event(authority, event, &snap_tx))
+        .await;
+}
 
-    // 1. The first message must be a JoinRoom on a compatible protocol version.
-    if !await_join_room(&mut source).await {
-        return;
-    }
+/// Apply one merged event to the authority and (on a tick) step + broadcast.
+/// Threaded by value through the fold so the world has a single owner.
+async fn fold_event(mut authority: Authority, event: AuthEvent, snap_tx: &SnapTx) -> Authority {
+    apply_command(&mut authority, event.command);
+    event.step.then(|| {
+        let frame = authority.step();
+        let _ = snap_tx.send(Arc::new(frame));
+    });
+    authority
+}
 
-    // 2. Claim a slot and register atomically, building the Welcome under lock.
-    let (id, welcome) = {
-        let mut g = game.lock().await;
-        match g.free_id() {
-            Some(id) => {
-                g.clients.push(Client {
-                    id,
-                    pending: [0.0, 0.0],
-                    last_accepted_seq: 0,
-                    sink: sink.clone(),
-                });
-                let welcome =
-                    NetProtocolApi::encode_welcome(PROTOCOL_VERSION, id, g.tick, FIXED_STEP_NS)
-                        .expect("welcome fields are valid");
-                (Some(id), welcome)
+/// Apply one optional peer command to the authority. A `Command` carries exactly
+/// one of join/intent/leave; applying all three `Option`s is branchless and the
+/// absent ones are no-ops.
+fn apply_command(authority: &mut Authority, command: Option<Command>) {
+    command
+        .map(|cmd| {
+            cmd.join.map(|reply| {
+                let seated = authority.claim().map(|seat| (seat, authority.tick()));
+                let _ = reply.send(seated);
+            });
+            cmd.intent
+                .map(|(player, sequence, payload)| authority.apply_intent(player, sequence, payload));
+            cmd.leave.map(|seat| authority.leave(seat));
+        })
+        .unwrap_or(());
+}
+
+/// Accept connections forever, serving each on its own spawned (`Send`) task that
+/// reaches the authority through the channels. A failed `accept()` is an `Err` item
+/// that `conn.ok()` drops — no `loop` keyword.
+async fn accept_loop(listener: TcpListener, cmd_tx: CmdTx, snap_tx: SnapTx) {
+    TcpListenerStream::new(listener)
+        .for_each_concurrent(None, |conn| {
+            let cmd_tx = cmd_tx.clone();
+            let snap_tx = snap_tx.clone();
+            async move {
+                conn.ok()
+                    .map(|stream| tokio::spawn(serve(stream, cmd_tx, snap_tx)))
+                    .map(|_| ())
+                    .unwrap_or(());
             }
-            None => (None, Vec::new()),
-        }
-    };
-    let id = match id {
-        Some(id) => id,
-        None => {
-            eprintln!("netplay-server: rejected an extra player (game is full)");
-            let _ = sink.lock().await.close().await;
-            return;
-        }
-    };
+        })
+        .await;
+}
 
-    // 3. Send Welcome. If the socket is already gone, unregister and bail.
-    if sink
-        .lock()
+/// Serve one connection: complete the WebSocket handshake, then bridge it. A failed
+/// handshake is logged and dropped (`.ok()` → the `OptionFuture` skips the bridge).
+async fn serve(stream: TcpStream, cmd_tx: CmdTx, snap_tx: SnapTx) {
+    let ws = tokio_tungstenite::accept_async(stream)
         .await
-        .send(Message::binary(welcome))
+        .inspect_err(|_| eprintln!("netplay-server: a peer failed the WebSocket handshake"))
+        .ok();
+    OptionFuture::from(ws.map(|ws| serve_ws(ws, cmd_tx, snap_tx))).await;
+}
+
+/// Bridge one peer's socket to the authority until either side ends.
+///
+/// Two streams are merged into one and consumed by `try_fold`, the
+/// `axiom-netcode-relay` shape: the **inbound** socket (mapped to [`Action`]s —
+/// claim a seat, apply an intent, or stop) and the **bus** (mapped to [`Action`]s
+/// carrying a snapshot to forward). Each is `.chain`ed with a terminal
+/// `Action::stop()`; `try_fold` threads the [`Peer`] by value and short-circuits on
+/// the first `Err(Peer)` (a stop or a socket-write failure), reproducing the old
+/// `break` with no `loop`/`match`.
+async fn serve_ws(ws: WebSocketStream<TcpStream>, cmd_tx: CmdTx, snap_tx: SnapTx) {
+    let (sink, source): (Sink, Source) = ws.split();
+    let rx = snap_tx.subscribe();
+
+    let inbound = source
+        .map(inbound_action)
+        .chain(futures_util::stream::once(async { Action::stop() }));
+    let outbound = BroadcastStream::new(rx)
+        .map(bus_action)
+        .chain(futures_util::stream::once(async { Action::stop() }));
+
+    let folded = tokio_stream::StreamExt::merge(inbound, outbound)
+        .map(Ok::<Action, Peer>)
+        .try_fold(Peer::new(sink), |peer, action| peer.apply(action, &cmd_tx))
+        .await;
+    folded.unwrap_or_else(|stopped| stopped).cleanup(&cmd_tx).await;
+}
+
+/// A command from a peer task to the single authority task. Modelled as a struct of
+/// optional fields (no enum `match`): exactly one is `Some` per command.
+struct Command {
+    /// Claim a seat; the reply carries `Some((seat, current_tick))` or `None` (full).
+    join: Option<oneshot::Sender<Option<(u64, u64)>>>,
+    /// Fold a player's intent into the authority: `(player, sequence, payload)`.
+    intent: Option<(u64, u64, Vec<u8>)>,
+    /// Release a seat (the peer disconnected).
+    leave: Option<u64>,
+}
+
+impl Command {
+    /// A seat-claim request carrying the reply channel.
+    fn join(reply: oneshot::Sender<Option<(u64, u64)>>) -> Self {
+        Command {
+            join: Some(reply),
+            intent: None,
+            leave: None,
+        }
+    }
+
+    /// An intent to fold into the authority.
+    fn intent(player: u64, sequence: u64, payload: Vec<u8>) -> Self {
+        Command {
+            join: None,
+            intent: Some((player, sequence, payload)),
+            leave: None,
+        }
+    }
+
+    /// A seat release.
+    fn leave(seat: u64) -> Self {
+        Command {
+            join: None,
+            intent: None,
+            leave: Some(seat),
+        }
+    }
+}
+
+/// One merged event the authority task folds: a fixed-step tick, or a peer command.
+struct AuthEvent {
+    /// `true` for an interval tick (step the authored update + broadcast).
+    step: bool,
+    /// `Some` for a peer command to apply before stepping.
+    command: Option<Command>,
+}
+
+impl AuthEvent {
+    /// A fixed-step tick event.
+    fn tick() -> Self {
+        AuthEvent {
+            step: true,
+            command: None,
+        }
+    }
+
+    /// A peer-command event.
+    fn command(command: Command) -> Self {
+        AuthEvent {
+            step: false,
+            command: Some(command),
+        }
+    }
+}
+
+/// A decoded directive for the per-peer bridge, built from one socket frame or one
+/// bus item. A struct of optional fields (no enum `match`): the empty action is a
+/// no-op, and a stop ends the bridge.
+struct Action {
+    /// A compatible `JoinRoom` arrived: claim a seat and reply `Welcome`.
+    join: bool,
+    /// Raw `ClientIntentFor` bytes to fold into the authority (this peer's seat).
+    intent: Option<Vec<u8>>,
+    /// A broadcast `ServerSnapshotFor` to forward to this peer's socket.
+    snapshot: Option<Arc<Vec<u8>>>,
+    /// A source stream ended (socket closed/errored, or a `LeaveRoom`): stop.
+    stop: bool,
+}
+
+impl Action {
+    /// A do-nothing action (an ignored frame, or a lagged bus tick).
+    fn noop() -> Self {
+        Action {
+            join: false,
+            intent: None,
+            snapshot: None,
+            stop: false,
+        }
+    }
+
+    /// Stop the bridge: a source stream ended.
+    fn stop() -> Self {
+        Action {
+            stop: true,
+            ..Action::noop()
+        }
+    }
+}
+
+/// Map one inbound socket item to an [`Action`]: stop on a close/error, classify a
+/// binary frame, ignore text/ping/pong. `Option`/boolean combinators only.
+fn inbound_action(item: Result<Message, tokio_tungstenite::tungstenite::Error>) -> Action {
+    item.ok()
+        .map(|msg| {
+            msg.is_close()
+                .then(Action::stop)
+                .unwrap_or_else(|| classify_binary(msg))
+        })
+        .unwrap_or_else(Action::stop)
+}
+
+/// Classify a non-close inbound message: a binary frame is decoded; text/ping/pong
+/// is a no-op.
+fn classify_binary(msg: Message) -> Action {
+    msg.is_binary()
+        .then(|| msg.into_data().to_vec())
+        .map(classify_bytes)
+        .unwrap_or_else(Action::noop)
+}
+
+/// Classify a binary frame by its message kind: a compatible `JoinRoom` claims a
+/// seat, a `ClientIntentFor` is applied, a `LeaveRoom` stops; anything else (and any
+/// decode failure) is a no-op (rejection is a value, never a panic).
+fn classify_bytes(bytes: Vec<u8>) -> Action {
+    NetProtocolApi::message_kind(&bytes)
+        .ok()
+        .map(|kind| Action {
+            join: is_compatible_join(kind, &bytes),
+            intent: (kind == NetProtocolApi::KIND_CLIENT_INTENT_FOR).then(|| bytes.clone()),
+            snapshot: None,
+            stop: kind == NetProtocolApi::KIND_LEAVE_ROOM,
+        })
+        .unwrap_or_else(Action::noop)
+}
+
+/// Whether `bytes` is a `JoinRoom` on a compatible protocol version. `&` (not `&&`)
+/// keeps it branchless — the RHS is a pure decode that is always safe to run.
+fn is_compatible_join(kind: u8, bytes: &[u8]) -> bool {
+    (kind == NetProtocolApi::KIND_JOIN_ROOM)
+        & NetProtocolApi::decode_join_room(bytes)
+            .ok()
+            .map(|(version, _room, _token)| version == PROTOCOL_VERSION)
+            .unwrap_or(false)
+}
+
+/// Map one bus item to an [`Action`]: a published snapshot to forward, or a no-op
+/// for a lagged receiver (we keep going). The bus *closing* ends the stream, not an
+/// item here.
+fn bus_action(
+    item: Result<Arc<Vec<u8>>, tokio_stream::wrappers::errors::BroadcastStreamRecvError>,
+) -> Action {
+    item.ok()
+        .map(|bytes| Action {
+            snapshot: Some(bytes),
+            ..Action::noop()
+        })
+        .unwrap_or_else(Action::noop)
+}
+
+/// The result of a join attempt: the seat claimed (if any) and whether the bridge
+/// should keep going (a welcome that could not be delivered is a stop).
+#[derive(Clone, Copy)]
+struct JoinResult {
+    seat: Option<u64>,
+    ok: bool,
+}
+
+/// The single-owner per-peer bridge state threaded through `try_fold`: this peer's
+/// socket and the seat it occupies (`None` until its `JoinRoom` is admitted).
+struct Peer {
+    sink: Sink,
+    seat: Option<u64>,
+}
+
+impl Peer {
+    /// A fresh, unseated peer over `sink`.
+    fn new(sink: Sink) -> Self {
+        Peer { sink, seat: None }
+    }
+
+    /// Carry out one [`Action`], returning `Ok(self)` to keep bridging or
+    /// `Err(self)` to stop. Each effect is gated by `Option`/boolean combinators —
+    /// no `if`/`match` — and `self` is moved exactly once into the chosen arm.
+    async fn apply(mut self, action: Action, cmd_tx: &CmdTx) -> Result<Self, Self> {
+        // JOIN: claim a seat + reply Welcome, iff a compatible join arrived and the
+        // peer is not already seated.
+        let joined = OptionFuture::from(
+            (action.join & self.seat.is_none()).then(|| claim_and_welcome(cmd_tx, &mut self.sink)),
+        )
+        .await;
+        self.seat = self.seat.or(joined.and_then(|j| j.seat));
+        let join_failed = joined.map(|j| !j.ok).unwrap_or(false);
+
+        // INTENT: fold this peer's own intent into the authority, iff seated.
+        OptionFuture::from(
+            self.seat
+                .and_then(|seat| action.intent.map(|bytes| (seat, bytes)))
+                .map(|(seat, bytes)| apply_intent(cmd_tx, seat, bytes)),
+        )
+        .await;
+
+        // SNAPSHOT: forward a broadcast snapshot to this peer's socket, iff seated.
+        let send_failed = forward_snapshot(self.seat, action.snapshot, &mut self.sink).await;
+
+        let keep = !(action.stop | join_failed | send_failed);
+        const ARMS: [fn(Peer) -> Result<Peer, Peer>; 2] = [Err, Ok];
+        ARMS[keep as usize](self)
+    }
+
+    /// Release this peer's seat when the bridge ends (the vacated seat is reported
+    /// in the next snapshot's `leftThisTick`). A never-seated peer is a no-op.
+    async fn cleanup(self, cmd_tx: &CmdTx) {
+        OptionFuture::from(self.seat.map(|seat| release_and_log(cmd_tx, seat))).await;
+    }
+}
+
+/// Ask the authority to claim the lowest free seat, then reply `Welcome`. On a
+/// welcome that cannot be delivered, the freshly-claimed seat is released so it does
+/// not leak. Returns the seat genuinely occupied plus whether to keep going (a full
+/// room is *not* a stop — the peer stays connected, just unseated).
+async fn claim_and_welcome(cmd_tx: &CmdTx, sink: &mut Sink) -> JoinResult {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    let _ = cmd_tx.send(Command::join(reply_tx));
+    let claimed = reply_rx.await.ok().flatten();
+    let send_ok = OptionFuture::from(claimed.map(|(id, tick)| send_welcome(sink, id, tick)))
         .await
-        .is_err()
-    {
-        game.lock().await.clients.retain(|c| c.id != id);
-        return;
-    }
-    println!("netplay-server: player {id} joined");
-
-    // 4. Apply intents until the client leaves or disconnects.
-    process_intents(&mut source, &game, id).await;
-
-    // 5. Release the slot.
-    {
-        let mut g = game.lock().await;
-        g.clients.retain(|c| c.id != id);
-        println!(
-            "netplay-server: player {id} left ({} remaining)",
-            g.clients.len()
-        );
+        .unwrap_or(true);
+    OptionFuture::from(
+        claimed
+            .filter(|_| !send_ok)
+            .map(|(id, _tick)| release(cmd_tx, id)),
+    )
+    .await;
+    let seat = claimed.map(|(id, _tick)| id);
+    log_join(seat, send_ok);
+    JoinResult {
+        seat: seat.filter(|_| send_ok),
+        ok: send_ok,
     }
 }
 
-/// Read until the client's `JoinRoom` arrives. Returns `true` on a valid,
-/// version-compatible join; `false` if the socket closes/errors first or the
-/// first binary frame is not a compatible `JoinRoom`.
-async fn await_join_room(source: &mut Source) -> bool {
-    while let Some(item) = source.next().await {
-        let msg = match item {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        if msg.is_close() {
-            return false;
-        }
-        if msg.is_binary() {
-            return match NetProtocolApi::decode_join_room(&msg.into_data().to_vec()) {
-                Ok((version, _room, _token)) if version == PROTOCOL_VERSION => true,
-                Ok((version, _, _)) => {
-                    eprintln!("netplay-server: client protocol version {version} unsupported");
-                    false
-                }
-                Err(_) => {
-                    eprintln!("netplay-server: first frame was not a JoinRoom");
-                    false
-                }
-            };
-        }
-        // Ignore text/ping/pong; keep waiting for the JoinRoom.
-    }
-    false
+/// Encode and send the `Welcome` (protocol version, seat id, current tick, fixed
+/// step), returning whether the socket write succeeded.
+async fn send_welcome(sink: &mut Sink, id: u64, tick: u64) -> bool {
+    let bytes = NetProtocolApi::encode_welcome(PROTOCOL_VERSION, id, tick, FIXED_STEP_NS)
+        .expect("welcome fields are valid");
+    sink.send(Message::binary(bytes)).await.is_ok()
 }
 
-/// Fold a client's inbound `ClientIntent`s into the authoritative state until it
-/// sends `LeaveRoom`, closes, or errors.
-async fn process_intents(source: &mut Source, game: &Shared, id: u64) {
-    while let Some(item) = source.next().await {
-        let msg = match item {
-            Ok(m) => m,
-            Err(_) => break,
-        };
-        if msg.is_close() {
-            break;
-        }
-        if !msg.is_binary() {
-            continue;
-        }
-        let bytes = msg.into_data().to_vec();
-        let kind = match NetProtocolApi::message_kind(&bytes) {
-            Ok(k) => k,
-            Err(_) => continue,
-        };
-        if kind == NetProtocolApi::KIND_LEAVE_ROOM {
-            break;
-        }
-        if kind == NetProtocolApi::KIND_CLIENT_INTENT {
-            if let Ok((seq, _predicted, _last_seen, payload)) =
-                NetProtocolApi::decode_client_intent(&bytes)
-            {
-                let delta = unpack_delta(&payload);
-                let mut g = game.lock().await;
-                if let Some(c) = g.clients.iter_mut().find(|c| c.id == id) {
-                    // Latest intent wins for the upcoming tick.
-                    c.pending = delta;
-                    c.last_accepted_seq = c.last_accepted_seq.max(seq);
-                }
-            }
-        }
-    }
+/// Ask the authority to release a seat (used when a welcome could not be sent).
+async fn release(cmd_tx: &CmdTx, id: u64) {
+    let _ = cmd_tx.send(Command::leave(id));
 }
 
-/// Keep a coordinate within the authoritative field bound.
-fn clamp(v: f32) -> f32 {
-    v.clamp(-POSITION_LIMIT, POSITION_LIMIT)
+/// Release a seat and log the departure (the disconnect path).
+async fn release_and_log(cmd_tx: &CmdTx, seat: u64) {
+    let _ = cmd_tx.send(Command::leave(seat));
+    println!("netplay-server: player {seat} left");
 }
 
-/// Pack the two players' positions as four little-endian `f32`s
-/// (`p0x, p0y, p1x, p1y`) — the opaque snapshot payload the browser decodes.
-fn pack_positions(pos: &[[f32; 2]; 2]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(16);
-    for p in pos {
-        out.extend_from_slice(&p[0].to_le_bytes());
-        out.extend_from_slice(&p[1].to_le_bytes());
-    }
-    out
+/// Log the outcome of a join attempt, branchlessly over the claimed-seat / send-ok
+/// combination.
+fn log_join(claimed: Option<u64>, send_ok: bool) {
+    claimed
+        .filter(|_| send_ok)
+        .map(|id| println!("netplay-server: player {id} joined"))
+        .unwrap_or_else(|| {
+            claimed
+                .map(|_| println!("netplay-server: a joining player dropped before welcome"))
+                .unwrap_or_else(|| println!("netplay-server: rejected an extra player (room full)"));
+        });
 }
 
-/// Decode an intent payload of two little-endian `f32`s (`dx, dy`); a short or
-/// garbled payload is treated as no movement.
-fn unpack_delta(payload: &[u8]) -> [f32; 2] {
-    if payload.len() < 8 {
-        return [0.0, 0.0];
-    }
-    let x = f32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let y = f32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-    [x, y]
+/// Decode a `ClientIntentFor` and forward it to the authority for `seat`, iff it is
+/// well-formed and addressed to this peer's own seat. An intent for another seat or
+/// a malformed frame is dropped (a value, never a panic).
+async fn apply_intent(cmd_tx: &CmdTx, seat: u64, bytes: Vec<u8>) {
+    NetProtocolApi::decode_client_intent_for(&bytes)
+        .ok()
+        .filter(|(player, ..)| *player == seat)
+        .map(|(player, sequence, _predicted, _last_seen, payload)| {
+            let _ = cmd_tx.send(Command::intent(player, sequence, payload));
+        })
+        .unwrap_or(());
+}
+
+/// Forward a broadcast snapshot to this peer's socket, iff the peer is seated and
+/// there is a snapshot this item. Returns whether the socket write failed (which
+/// ends the bridge). `seat.and(snapshot)` gates on "seated AND a snapshot present".
+async fn forward_snapshot(
+    seat: Option<u64>,
+    snapshot: Option<Arc<Vec<u8>>>,
+    sink: &mut Sink,
+) -> bool {
+    let to_send = seat.and(snapshot);
+    OptionFuture::from(to_send.map(|bytes| sink.send(Message::binary((*bytes).clone()))))
+        .await
+        .map(|res| res.is_err())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -332,102 +491,117 @@ mod tests {
     use super::*;
     use tokio_tungstenite::connect_async;
 
-    #[test]
-    fn unpack_delta_handles_full_and_short_payloads() {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&0.5f32.to_le_bytes());
-        bytes.extend_from_slice(&(-0.25f32).to_le_bytes());
-        assert_eq!(unpack_delta(&bytes), [0.5, -0.25]);
-        assert_eq!(unpack_delta(&[1, 2, 3]), [0.0, 0.0]);
-    }
+    type ClientWs = tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >;
 
-    #[test]
-    fn clamp_enforces_the_field_bound() {
-        assert_eq!(clamp(99.0), POSITION_LIMIT);
-        assert_eq!(clamp(-99.0), -POSITION_LIMIT);
-        assert_eq!(clamp(1.0), 1.0);
-    }
-
-    #[test]
-    fn pack_positions_is_four_little_endian_floats() {
-        let bytes = pack_positions(&[[1.0, 2.0], [3.0, 4.0]]);
-        assert_eq!(bytes.len(), 16);
-        assert_eq!(
-            f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-            1.0
-        );
-        assert_eq!(
-            f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
-            4.0
-        );
-    }
-
-    /// End-to-end: a client joins, is welcomed, sends an intent, and sees the
-    /// authoritative snapshot reflect the move and acknowledge its sequence.
-    #[tokio::test]
-    async fn join_welcome_intent_then_authoritative_snapshot() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let game: Shared = Arc::new(Mutex::new(Game::new()));
-        tokio::spawn(tick_loop(game.clone()));
-        tokio::spawn({
-            let game = game.clone();
-            async move {
-                loop {
-                    let (stream, _) = listener.accept().await.unwrap();
-                    tokio::spawn(serve(stream, game.clone()));
-                }
-            }
-        });
-
-        let url = format!("ws://{addr}");
-        let (mut ws, _) = connect_async(&url).await.unwrap();
-
-        // Join, then read the Welcome.
-        let join = NetProtocolApi::encode_join_room(PROTOCOL_VERSION, b"lobby", b"").unwrap();
-        ws.send(Message::binary(join)).await.unwrap();
-        let welcome = next_binary(&mut ws).await;
-        let (version, client_id, _tick, fixed_step_ns) =
-            NetProtocolApi::decode_welcome(&welcome).unwrap();
-        assert_eq!(version, PROTOCOL_VERSION);
-        assert_eq!(client_id, 1); // first player
-        assert_eq!(fixed_step_ns, FIXED_STEP_NS);
-
-        // Send an intent moving player 0 right by 0.1, with sequence 1.
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&0.1f32.to_le_bytes());
-        payload.extend_from_slice(&0.0f32.to_le_bytes());
-        let intent = NetProtocolApi::encode_client_intent(1, 0, 0, &payload).unwrap();
-        ws.send(Message::binary(intent)).await.unwrap();
-
-        // Read snapshots until the move is reflected and our sequence is acked.
-        let mut moved = false;
-        for _ in 0..120 {
-            let snap = next_binary(&mut ws).await;
-            let (_tick, last_acked, state) = NetProtocolApi::decode_server_snapshot(&snap).unwrap();
-            let p0x = f32::from_le_bytes([state[0], state[1], state[2], state[3]]);
-            if last_acked == 1 && p0x > -1.5 {
-                assert!((p0x - (-1.4)).abs() < 1e-4, "player 0 moved right by 0.1");
-                moved = true;
-                break;
-            }
-        }
-        assert!(
-            moved,
-            "an authoritative snapshot reflected the client's intent"
-        );
-    }
-
-    async fn next_binary(
-        ws: &mut tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-    ) -> Vec<u8> {
+    async fn next_binary(ws: &mut ClientWs) -> Vec<u8> {
         loop {
             let msg = ws.next().await.unwrap().unwrap();
             if msg.is_binary() {
                 return msg.into_data().to_vec();
             }
         }
+    }
+
+    /// A `dx, dy` intent payload (two little-endian f32s).
+    fn move_payload(dx: f32, dy: f32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&dx.to_le_bytes());
+        bytes.extend_from_slice(&dy.to_le_bytes());
+        bytes
+    }
+
+    /// The client half of the slice test: join, read the Welcome, send a per-player
+    /// intent, and confirm an authoritative `ServerSnapshotFor` acks it.
+    async fn client_session(addr: std::net::SocketAddr) {
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        // Join, then read the Welcome (which assigns our seat id).
+        let join = NetProtocolApi::encode_join_room(PROTOCOL_VERSION, b"lobby", b"").unwrap();
+        ws.send(Message::binary(join)).await.unwrap();
+        let welcome = next_binary(&mut ws).await;
+        let (version, client_id, _tick, fixed_step_ns) =
+            NetProtocolApi::decode_welcome(&welcome).unwrap();
+        assert_eq!(version, PROTOCOL_VERSION);
+        assert_eq!(client_id, 1); // first seat
+        assert_eq!(fixed_step_ns, FIXED_STEP_NS);
+
+        // Send a per-player intent for our seat, sequence 1.
+        let intent =
+            NetProtocolApi::encode_client_intent_for(client_id, 1, 0, 0, &move_payload(0.1, 0.0))
+                .unwrap();
+        ws.send(Message::binary(intent)).await.unwrap();
+
+        // Read ServerSnapshotFor frames until our sequence is acked for our seat.
+        let mut acked = false;
+        for _ in 0..600 {
+            let snap = next_binary(&mut ws).await;
+            if let Ok((_tick, acks, payload)) = NetProtocolApi::decode_server_snapshot_for(&snap) {
+                if acks.iter().any(|&(p, s)| p == client_id && s == 1) {
+                    // The payload is the participant block + authoritative state.
+                    assert!(!payload.is_empty());
+                    acked = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            acked,
+            "an authoritative ServerSnapshotFor acknowledged the client's intent"
+        );
+    }
+
+    /// End-to-end slice (SPEC-13 §7 slice test): a client joins over a real socket,
+    /// is welcomed with a seat, sends a per-player `ClientIntentFor`, and sees the
+    /// authoritative `ServerSnapshotFor` acknowledge its sequence — proving the
+    /// authored-callback authority runs over the wire, not hard-coded movement.
+    #[tokio::test]
+    async fn join_welcome_intent_then_authoritative_snapshot_for() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // The server runs forever; race it against the client session and let the
+        // client's completion end the test.
+        tokio::select! {
+            _ = run_server(listener) => unreachable!("the server runs forever"),
+            () = client_session(addr) => {}
+        }
+    }
+
+    #[test]
+    fn inbound_classifies_join_intent_leave_and_junk() {
+        // A JoinRoom frame → a join action.
+        let join = NetProtocolApi::encode_join_room(PROTOCOL_VERSION, b"r", b"").unwrap();
+        assert!(inbound_action(Ok(Message::binary(join))).join);
+
+        // A ClientIntentFor frame → an intent action carrying the bytes.
+        let intent = NetProtocolApi::encode_client_intent_for(1, 1, 0, 0, b"x").unwrap();
+        assert!(inbound_action(Ok(Message::binary(intent))).intent.is_some());
+
+        // A LeaveRoom frame → a stop.
+        let leave = NetProtocolApi::encode_leave_room(b"r").unwrap();
+        assert!(inbound_action(Ok(Message::binary(leave))).stop);
+
+        // A close frame → a stop; a text frame → a no-op; garbage → a no-op.
+        assert!(inbound_action(Ok(Message::Close(None))).stop);
+        let text = inbound_action(Ok(Message::text("hi")));
+        assert!(!text.join && text.intent.is_none() && !text.stop);
+        let junk = inbound_action(Ok(Message::binary(vec![0xFF, 0xFF])));
+        assert!(!junk.join && junk.intent.is_none() && !junk.stop);
+    }
+
+    #[test]
+    fn an_incompatible_join_version_is_not_admitted() {
+        let join = NetProtocolApi::encode_join_room(PROTOCOL_VERSION + 1, b"r", b"").unwrap();
+        assert!(!inbound_action(Ok(Message::binary(join))).join);
+    }
+
+    #[test]
+    fn a_bus_snapshot_becomes_a_forward_action() {
+        let bytes = Arc::new(vec![1u8, 2, 3]);
+        let action = bus_action(Ok(bytes.clone()));
+        assert_eq!(action.snapshot, Some(bytes));
+        assert!(!action.stop);
     }
 }

@@ -504,9 +504,12 @@ dependencies = [
 name = "axiom-netplay-server"
 version = "0.1.0"
 dependencies = [
+ "axiom",
+ "axiom-kernel",
  "axiom-net-protocol",
  "futures-util",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite",
 ]
 
