@@ -18,10 +18,16 @@ export const KIND_WELCOME = 3;
 export const KIND_SERVER_SNAPSHOT = 4;
 export const KIND_SERVER_EVENT = 5;
 export const KIND_REJECTED_INTENT = 6;
+/** Per-player-addressed client intent (carries the originating player id). */
+export const KIND_CLIENT_INTENT_FOR = 7;
+/** Per-player-addressed server snapshot (carries per-player acknowledgements). */
+export const KIND_SERVER_SNAPSHOT_FOR = 8;
 
 /** Documented size bounds (must match the Rust module). */
 export const MAX_ROOM_ID_LEN = 64;
 export const MAX_PAYLOAD_LEN = 65_536;
+/** The maximum number of per-player acknowledgements a single snapshot may carry. */
+export const MAX_ACKS = 4096;
 
 /** Well-known machine-readable reject reasons. */
 export const REASON_UNSPECIFIED = 0;
@@ -37,7 +43,9 @@ export type DecodedKind =
   | typeof KIND_WELCOME
   | typeof KIND_SERVER_SNAPSHOT
   | typeof KIND_SERVER_EVENT
-  | typeof KIND_REJECTED_INTENT;
+  | typeof KIND_REJECTED_INTENT
+  | typeof KIND_CLIENT_INTENT_FOR
+  | typeof KIND_SERVER_SNAPSHOT_FOR;
 
 export interface JoinRoomMessage {
   readonly kind: typeof KIND_JOIN_ROOM;
@@ -79,6 +87,25 @@ export interface RejectedIntentMessage {
   readonly clientSequence: number;
   readonly reasonCode: number;
 }
+/** One per-player acknowledgement carried by a {@link ServerSnapshotForMessage}. */
+export interface PlayerAck {
+  readonly player: number;
+  readonly sequence: number;
+}
+export interface ClientIntentForMessage {
+  readonly kind: typeof KIND_CLIENT_INTENT_FOR;
+  readonly player: number;
+  readonly clientSequence: number;
+  readonly predictedClientTick: number;
+  readonly lastSeenServerTick: number;
+  readonly payload: Uint8Array;
+}
+export interface ServerSnapshotForMessage {
+  readonly kind: typeof KIND_SERVER_SNAPSHOT_FOR;
+  readonly serverTick: number;
+  readonly acks: readonly PlayerAck[];
+  readonly payload: Uint8Array;
+}
 
 export type DecodedMessage =
   | JoinRoomMessage
@@ -87,4 +114,6 @@ export type DecodedMessage =
   | WelcomeMessage
   | ServerSnapshotMessage
   | ServerEventMessage
-  | RejectedIntentMessage;
+  | RejectedIntentMessage
+  | ClientIntentForMessage
+  | ServerSnapshotForMessage;

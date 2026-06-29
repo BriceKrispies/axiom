@@ -2,77 +2,45 @@
  * The wire encoder/decoder: a dependency-free twin of the `axiom-net-protocol`
  * Rust module, byte-for-byte. Each encoder validates its fields and writes a
  * header + body; each decoder validates the version and kind, then reads the
- * body. Dispatch is a total lookup table keyed by the message kind, so there is
- * no `switch`.
+ * body. The shared frame envelope and field validators live in `frame.ts`; the
+ * per-player-addressed twins live in `per-player-codec.ts`. Dispatch is a total
+ * lookup table keyed by the message kind, so there is no `switch`.
  */
 
-import { type ByteReader, byteReader } from "./byte-reader.ts";
-import { type ByteWriter, byteWriter } from "./byte-writer.ts";
 import {
   type ClientIntentMessage,
   type DecodedKind,
   type DecodedMessage,
   type JoinRoomMessage,
   KIND_CLIENT_INTENT,
+  KIND_CLIENT_INTENT_FOR,
   KIND_JOIN_ROOM,
   KIND_LEAVE_ROOM,
   KIND_REJECTED_INTENT,
   KIND_SERVER_EVENT,
   KIND_SERVER_SNAPSHOT,
+  KIND_SERVER_SNAPSHOT_FOR,
   KIND_WELCOME,
   type LeaveRoomMessage,
-  MAX_PAYLOAD_LEN,
-  MAX_ROOM_ID_LEN,
   type RejectedIntentMessage,
   type ServerEventMessage,
   type ServerSnapshotMessage,
-  WIRE_MAJOR,
-  WIRE_MINOR,
   type WelcomeMessage,
 } from "./messages.ts";
+import {
+  assertClientId,
+  assertFixedStep,
+  assertPayload,
+  assertProtocolVersion,
+  assertRoomId,
+  readCompatibleVersion,
+  readExpectedKind,
+  writeHeader,
+} from "./frame.ts";
+import { decodeClientIntentFor, decodeServerSnapshotFor } from "./per-player-codec.ts";
 import { assert } from "./protocol-error.ts";
-
-const ZERO = 0;
-
-// --- field validation (mirrors the Rust validators) ---
-
-const assertProtocolVersion = (value: number): void => {
-  assert(value !== ZERO, "protocol version must be nonzero");
-};
-const assertClientId = (value: number): void => {
-  assert(value !== ZERO, "client id must be nonzero");
-};
-const assertFixedStep = (value: number): void => {
-  assert(value !== ZERO, "fixed step must be nonzero");
-};
-const assertRoomId = (bytes: Uint8Array): void => {
-  assert(bytes.length !== ZERO, "room id must be non-empty");
-  assert(bytes.length <= MAX_ROOM_ID_LEN, "room id exceeds the maximum length");
-};
-const assertPayload = (bytes: Uint8Array): void => {
-  assert(bytes.length <= MAX_PAYLOAD_LEN, "opaque payload exceeds the maximum byte length");
-};
-
-// --- header read/write ---
-
-const writeHeader = (writer: ByteWriter, kind: number): void => {
-  writer.u16(WIRE_MAJOR);
-  writer.u16(WIRE_MINOR);
-  writer.u8(kind);
-};
-
-const readCompatibleVersion = (reader: ByteReader): void => {
-  const major = reader.u16();
-  // Minor is read to advance the cursor but is not compatibility-checked.
-  reader.u16();
-  assert(major === WIRE_MAJOR, `incompatible wire version major ${major}`);
-};
-
-const readExpectedKind = (reader: ByteReader, expected: number): void => {
-  readCompatibleVersion(reader);
-  const kind = reader.u8();
-  assert(kind === expected, `expected message kind ${expected}, got ${kind}`);
-};
+import { byteReader } from "./byte-reader.ts";
+import { byteWriter } from "./byte-writer.ts";
 
 // --- field bundles for encoders that carry more than three values ---
 
@@ -256,6 +224,8 @@ const KIND_SET: ReadonlySet<number> = new Set<number>([
   KIND_SERVER_SNAPSHOT,
   KIND_SERVER_EVENT,
   KIND_REJECTED_INTENT,
+  KIND_CLIENT_INTENT_FOR,
+  KIND_SERVER_SNAPSHOT_FOR,
 ]);
 
 // Narrow a raw byte to a DecodedKind, throwing when it is not a known kind.
@@ -280,6 +250,8 @@ const DECODERS: Readonly<Record<DecodedKind, (bytes: Uint8Array) => DecodedMessa
   [KIND_SERVER_SNAPSHOT]: decodeServerSnapshot,
   [KIND_SERVER_EVENT]: decodeServerEvent,
   [KIND_REJECTED_INTENT]: decodeRejectedIntent,
+  [KIND_CLIENT_INTENT_FOR]: decodeClientIntentFor,
+  [KIND_SERVER_SNAPSHOT_FOR]: decodeServerSnapshotFor,
 };
 
 /** Decode any frame, dispatching on its validated kind. */

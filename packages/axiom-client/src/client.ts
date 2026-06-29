@@ -29,11 +29,13 @@ import {
   type DecodedKind,
   type DecodedMessage,
   KIND_CLIENT_INTENT,
+  KIND_CLIENT_INTENT_FOR,
   KIND_JOIN_ROOM,
   KIND_LEAVE_ROOM,
   KIND_REJECTED_INTENT,
   KIND_SERVER_EVENT,
   KIND_SERVER_SNAPSHOT,
+  KIND_SERVER_SNAPSHOT_FOR,
   KIND_WELCOME,
   type ServerSnapshotMessage,
   type WelcomeMessage,
@@ -223,22 +225,22 @@ export class AxiomClient {
 
   private handleInbound(bytes: Uint8Array): void {
     const message = decodeFrame(bytes);
+    /*
+     * Per-player frames are not consumed by this single-seat client: the
+     * addressed intent is client->server (never received here, like
+     * KIND_CLIENT_INTENT), and per-seat snapshot acks are not wired into this
+     * client's single-sequence model. Both map to NOOP.
+     */
     const handlers: Readonly<Record<DecodedKind, (decoded: DecodedMessage) => void>> = {
       [KIND_JOIN_ROOM]: NOOP,
       [KIND_LEAVE_ROOM]: NOOP,
       [KIND_CLIENT_INTENT]: NOOP,
-      [KIND_WELCOME]: (decoded): void => {
-        this.onWelcome(decoded);
-      },
-      [KIND_SERVER_SNAPSHOT]: (decoded): void => {
-        this.onSnapshotMessage(decoded);
-      },
-      [KIND_SERVER_EVENT]: (decoded): void => {
-        this.onEventMessage(decoded);
-      },
-      [KIND_REJECTED_INTENT]: (decoded): void => {
-        this.onRejection(decoded);
-      },
+      [KIND_CLIENT_INTENT_FOR]: NOOP,
+      [KIND_SERVER_SNAPSHOT_FOR]: NOOP,
+      [KIND_WELCOME]: (decoded): void => { this.onWelcome(decoded); },
+      [KIND_SERVER_SNAPSHOT]: (decoded): void => { this.onSnapshotMessage(decoded); },
+      [KIND_SERVER_EVENT]: (decoded): void => { this.onEventMessage(decoded); },
+      [KIND_REJECTED_INTENT]: (decoded): void => { this.onRejection(decoded); },
     };
     handlers[message.kind](message);
   }
