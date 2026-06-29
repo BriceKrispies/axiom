@@ -189,15 +189,22 @@ fn sliding_box(friction: f32, steps: u32) -> (PhysicsApi, PhysicsBodyHandle) {
 #[test]
 fn friction_grips_a_sliding_box_but_frictionless_keeps_sliding() {
     // High friction: gravity presses the box into the floor each step, and the
-    // per-step Coulomb friction bleeds off the slide until it grips.
+    // per-step Coulomb friction at the below-centre contact both bleeds off the
+    // slide *and* — now that a friction impulse carries its contact-lever torque —
+    // rolls the box forward about -Z. So the slide is reduced and the box spins up.
     let (gripped, body) = sliding_box(1.0, 12);
     let vx_gripped = linear_velocity(&gripped, body).x;
-    assert!(vx_gripped.abs() < 0.5, "high friction grips the slide, got {vx_gripped}");
+    let spin_gripped = angular_velocity(&gripped, body).z;
+    assert!(vx_gripped < 4.0, "high friction bleeds off the slide, got {vx_gripped}");
+    assert!(spin_gripped < 0.0, "friction torque rolls the box forward (-Z), got {spin_gripped}");
 
-    // Frictionless: the slide is conserved (gravity only changes the vertical).
+    // Frictionless: the slide is conserved (gravity only changes the vertical) and,
+    // with no tangential impulse, the box never picks up spin.
     let (frictionless, body) = sliding_box(0.0, 12);
     let vx_free = linear_velocity(&frictionless, body).x;
     assert!(vx_free > 5.5, "a frictionless box keeps sliding, got {vx_free}");
+    assert_eq!(angular_velocity(&frictionless, body).z, 0.0, "frictionless never rolls");
+    assert!(vx_gripped < vx_free, "friction slows the box more than no friction does");
 }
 
 #[test]

@@ -6,11 +6,25 @@
 //! 1. **Velocity solve** ([`solve`]) — a fixed number of sequential-impulse
 //!    iterations (from `PhysicsConfig::solver_iterations`). Each iteration walks
 //!    the manifolds in their stable sorted order and applies a normal impulse that
-//!    removes the approaching relative velocity, scaled by `1 + restitution` so a
-//!    bouncy material rebounds, then a **tangential friction impulse** along a
-//!    deterministic tangent basis, bounded by the Coulomb cone `|j_t| <= μ·j_n`.
-//!    Impulses are distributed by inverse mass, so a static or kinematic body
-//!    (zero inverse mass) is never moved.
+//!    removes the approaching relative velocity **at the contact point**, scaled by
+//!    `1 + restitution` so a bouncy material rebounds, then a **tangential friction
+//!    impulse** along a deterministic tangent basis, bounded by the Coulomb cone
+//!    `|j_t| <= μ·j_n`. Each impulse is split into a **linear** half distributed by
+//!    inverse mass and an **angular** half about the contact lever arm distributed
+//!    by inverse inertia, so an off-centre hit induces spin while a static or
+//!    kinematic body (zero inverse mass *and* zero inverse inertia) is never moved
+//!    or spun.
+//!
+//! ## Contact-point angular term (deterministic, branchless)
+//! A contact at world point `p` has lever arms `r_a = p - centre_a` and
+//! `r_b = p - centre_b`. The velocity the solver drives to zero is the velocity
+//! **at the contact point**, `(v_b + ω_b×r_b) - (v_a + ω_a×r_a)`, and the
+//! effective-mass denominator gains the rotational coupling
+//! `n·((I⁻¹_a (r_a×n))×r_a) + n·((I⁻¹_b (r_b×n))×r_b)` along the impulse axis `n`
+//! (the same per-axis form for each friction tangent). The angular half of an
+//! impulse `J` is `ω += I⁻¹·(r × J)`, applied with the diagonal world inverse
+//! inertia the integrator uses. An immovable body's zero inverse inertia makes
+//! both its coupling term and its angular delta vanish exactly — no branch needed.
 //! 2. **Position correction** ([`correct_positions`]) — a Baumgarte-style push
 //!    that removes residual penetration beyond a small slop, again split by
 //!    inverse mass, so resting stacks do not sink.
@@ -79,6 +93,61 @@ fn add_velocity(bodies: &mut [PhysicsBody], handle: PhysicsBodyHandle, delta: Ve
         .and_then(|i| bodies.get_mut(i))
         .into_iter()
         .for_each(|b| b.set_linear_velocity(b.linear_velocity().add(delta)));
+}
+
+/// A body's `(angular_velocity, inverse_inertia, centre)` for the contact-point
+/// angular terms, or `(ZERO, ZERO, ZERO)` if the handle is somehow absent
+/// (unreachable: manifold bodies always exist). `centre` is the body's transform
+/// translation (its centre of mass); `inverse_inertia` is the diagonal world
+/// inverse inertia the integrator already consumes.
+fn body_angular(bodies: &[PhysicsBody], handle: PhysicsBodyHandle) -> (Vec3, Vec3, Vec3) {
+    body_index(handle)
+        .and_then(|i| bodies.get(i))
+        .map_or((Vec3::ZERO, Vec3::ZERO, Vec3::ZERO), |b| {
+            (
+                b.angular_velocity(),
+                b.mass_properties().inverse_inertia(),
+                b.transform().translation,
+            )
+        })
+}
+
+/// Apply a diagonal world inverse inertia to an angular vector — the same
+/// componentwise product the integrator uses to turn a torque into an angular
+/// acceleration. An immovable body's zero inverse inertia yields the zero vector.
+fn apply_inverse_inertia(inverse_inertia: Vec3, v: Vec3) -> Vec3 {
+    Vec3::new(
+        inverse_inertia.x * v.x,
+        inverse_inertia.y * v.y,
+        inverse_inertia.z * v.z,
+    )
+}
+
+/// One body's contribution to a contact's effective-mass denominator along
+/// `axis`: `axis · ((I⁻¹ (r × axis)) × r)`, the rotational coupling that resists
+/// an impulse applied at lever arm `r`. An immovable body (zero inverse inertia)
+/// contributes exactly zero, with no branch.
+fn angular_effective_mass(inverse_inertia: Vec3, r: Vec3, axis: Vec3) -> f32 {
+    let coupled = apply_inverse_inertia(inverse_inertia, r.cross(axis));
+    axis.dot(coupled.cross(r))
+}
+
+/// Add the angular half of an impulse to a body's angular velocity:
+/// `ω += I⁻¹·(r × impulse)` (no-op for an absent handle; an immovable body's zero
+/// inverse inertia makes the delta vanish exactly).
+fn add_angular_velocity(
+    bodies: &mut [PhysicsBody],
+    handle: PhysicsBodyHandle,
+    r: Vec3,
+    impulse: Vec3,
+) {
+    body_index(handle)
+        .and_then(|i| bodies.get_mut(i))
+        .into_iter()
+        .for_each(|b| {
+            let delta = apply_inverse_inertia(b.mass_properties().inverse_inertia(), r.cross(impulse));
+            b.set_angular_velocity(b.angular_velocity().add(delta));
+        });
 }
 
 /// Translate a body by `delta` (orientation/scale preserved; no-op for an absent
@@ -200,27 +269,41 @@ fn normalize_or_zero(v: Vec3) -> Vec3 {
 }
 
 /// Apply one friction impulse along tangent `axis`, clamped to the Coulomb cone
-/// `[-bound, bound]`. Reads the (post-normal-impulse) velocities so it resists the
-/// residual tangential motion.
+/// `[-bound, bound]`. Reads the (post-normal-impulse) linear *and angular*
+/// velocities so it resists the residual tangential motion at the contact point,
+/// and splits the impulse into a linear half (by inverse mass) and an angular half
+/// (the torque `r × J` about the contact lever, by inverse inertia).
 fn apply_friction_axis(
     bodies: &mut [PhysicsBody],
     manifold: &ContactManifold,
     axis: Vec3,
-    inverse_sum: f32,
+    r_a: Vec3,
+    r_b: Vec3,
     inv_a: f32,
     inv_b: f32,
     bound: f32,
 ) {
     let (va, _) = body_state(bodies, manifold.body_a());
     let (vb, _) = body_state(bodies, manifold.body_b());
-    let relative = vb.subtract(va).dot(axis);
+    let (wa, inv_ia, _) = body_angular(bodies, manifold.body_a());
+    let (wb, inv_ib, _) = body_angular(bodies, manifold.body_b());
+    // Tangential relative velocity *at the contact point* (linear + angular lever).
+    let relative = vb.add(wb.cross(r_b)).subtract(va.add(wa.cross(r_a))).dot(axis);
+    let k = (inv_a
+        + inv_b
+        + angular_effective_mass(inv_ia, r_a, axis)
+        + angular_effective_mass(inv_ib, r_b, axis))
+    .max(f32::MIN_POSITIVE);
     // Coulomb clamp to `[-bound, bound]` via `max`/`min` (never `f32::clamp`,
     // which panics on a NaN bound that a finite-but-extreme input can produce).
     // A non-finite result here is caught and rolled back by the world's atomic
     // finiteness check, so it can never poison committed state.
-    let magnitude = (-relative / inverse_sum).max(-bound).min(bound);
-    add_velocity(bodies, manifold.body_a(), axis.mul_scalar(-magnitude * inv_a));
-    add_velocity(bodies, manifold.body_b(), axis.mul_scalar(magnitude * inv_b));
+    let magnitude = (-relative / k).max(-bound).min(bound);
+    let impulse = axis.mul_scalar(magnitude);
+    add_velocity(bodies, manifold.body_a(), impulse.mul_scalar(-inv_a));
+    add_velocity(bodies, manifold.body_b(), impulse.mul_scalar(inv_b));
+    add_angular_velocity(bodies, manifold.body_a(), r_a, impulse.mul_scalar(-1.0));
+    add_angular_velocity(bodies, manifold.body_b(), r_b, impulse);
 }
 
 /// Apply one normal-plus-friction impulse pass for a single manifold.
@@ -232,24 +315,40 @@ fn solve_contact(
 ) {
     let (va, inv_a) = body_state(bodies, manifold.body_a());
     let (vb, inv_b) = body_state(bodies, manifold.body_b());
+    let (wa, inv_ia, ca) = body_angular(bodies, manifold.body_a());
+    let (wb, inv_ib, cb) = body_angular(bodies, manifold.body_b());
     let normal = manifold.normal();
-    let relative = vb.subtract(va).dot(normal);
-    let inverse_sum = (inv_a + inv_b).max(f32::MIN_POSITIVE);
+    // Lever arms from each body's centre of mass to the world contact point.
+    let r_a = manifold.point().subtract(ca);
+    let r_b = manifold.point().subtract(cb);
+    // Relative normal velocity *at the contact point* — the linear approach plus
+    // each body's angular contribution `ω × r` at the lever arm.
+    let relative = vb.add(wb.cross(r_b)).subtract(va.add(wa.cross(r_a))).dot(normal);
+    // Effective mass: the linear inverse-mass sum plus the rotational coupling of
+    // each body's lever arm. An immovable body contributes zero to both halves.
+    let k = (inv_a
+        + inv_b
+        + angular_effective_mass(inv_ia, r_a, normal)
+        + angular_effective_mass(inv_ib, r_b, normal))
+    .max(f32::MIN_POSITIVE);
     // Arithmetic gate: a separating contact (`relative >= 0`) zeroes the impulse,
     // so only an approaching contact pushes apart. The flag multiply is exact
     // (`* 1.0` / `* 0.0`), matching the prior `then(..).unwrap_or(0.0)` form.
     let approaching = (relative < 0.0) as u8 as f32;
-    let magnitude = -(1.0 + restitution) * relative / inverse_sum * approaching;
-    add_velocity(bodies, manifold.body_a(), normal.mul_scalar(-magnitude * inv_a));
-    add_velocity(bodies, manifold.body_b(), normal.mul_scalar(magnitude * inv_b));
+    let magnitude = -(1.0 + restitution) * relative / k * approaching;
+    let impulse = normal.mul_scalar(magnitude);
+    add_velocity(bodies, manifold.body_a(), impulse.mul_scalar(-inv_a));
+    add_velocity(bodies, manifold.body_b(), impulse.mul_scalar(inv_b));
+    add_angular_velocity(bodies, manifold.body_a(), r_a, impulse.mul_scalar(-1.0));
+    add_angular_velocity(bodies, manifold.body_b(), r_b, impulse);
 
     // Friction: tangential impulses bounded by the Coulomb cone μ·j_n. The bound
     // is zero when friction is zero or the contact is separating (magnitude 0),
     // so the friction pass is then an exact no-op.
     let (t1, t2) = tangent_basis(normal);
     let bound = friction * magnitude;
-    apply_friction_axis(bodies, manifold, t1, inverse_sum, inv_a, inv_b, bound);
-    apply_friction_axis(bodies, manifold, t2, inverse_sum, inv_a, inv_b, bound);
+    apply_friction_axis(bodies, manifold, t1, r_a, r_b, inv_a, inv_b, bound);
+    apply_friction_axis(bodies, manifold, t2, r_a, r_b, inv_a, inv_b, bound);
 }
 
 /// Resolve contact velocities over `iterations` sequential-impulse passes,
@@ -306,6 +405,32 @@ mod tests {
         let mut b = PhysicsBody::from_desc(PhysicsBodyHandle::from_raw(raw), desc);
         b.set_linear_velocity(velocity);
         b
+    }
+
+    /// A dynamic body with a unit-sphere inverse inertia, so an off-centre contact
+    /// can actually induce angular velocity (the plain `dynamic` body is inertia
+    /// free and never spins).
+    fn dynamic_spinning(raw: u64, velocity: Vec3) -> PhysicsBody {
+        let mut b = dynamic(raw, velocity);
+        let sphere = PhysicsColliderShape::sphere(Meters::new(1.0).unwrap()).unwrap();
+        let mp = b.mass_properties().with_inertia_for(sphere);
+        b.set_mass_properties(mp);
+        b
+    }
+
+    // The dynamic-A-over-static-B manifold (normal A->B points down) with an
+    // explicit world contact `point`, so a test can place the contact off the
+    // bodies' centre line and exercise the lever-arm angular term.
+    fn manifold_at(point: Vec3) -> ContactManifold {
+        ContactManifold::new(
+            PhysicsColliderHandle::from_raw(1),
+            PhysicsColliderHandle::from_raw(2),
+            PhysicsBodyHandle::from_raw(1),
+            PhysicsBodyHandle::from_raw(2),
+            Vec3::new(0.0, -1.0, 0.0),
+            0.1,
+            point,
+        )
     }
 
     // Two dynamic bodies A (handle 1) and B (handle 2); normal A->B points down.
@@ -532,5 +657,79 @@ mod tests {
         // Momentum conserved: 1*(-4) == 1*(-1) + 3*(-1).
         let p = bodies[0].linear_velocity().y + 3.0 * bodies[1].linear_velocity().y;
         assert!((p - (-4.0)).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn off_center_normal_impulse_induces_spin_with_correct_sign() {
+        // A sphere driving down (-Y) onto a static floor, contacting at +X of its
+        // centre. The upward reaction at +X torques it about +Z.
+        let mut bodies = [dynamic_spinning(1, Vec3::new(0.0, -2.0, 0.0)), static_body(2)];
+        let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
+        solve(&mut bodies, &colliders, &[manifold_at(Vec3::new(1.0, 0.0, 0.0))], 1);
+        let w = bodies[0].angular_velocity();
+        assert!(w.z > 0.0, "off-centre hit spins about +Z, got {w:?}");
+        // The static floor never spins (zero inverse inertia), despite a real lever.
+        assert_eq!(bodies[1].angular_velocity(), Vec3::ZERO);
+        // The normal impulse still pushes the body up (the downward approach is
+        // reduced); the residual reflects the share that became spin, since the
+        // impulse is split between the linear and angular halves.
+        let vy = bodies[0].linear_velocity().y;
+        assert!(vy > -2.0 && vy < 0.0, "downward approach reduced but not reversed, got {vy}");
+    }
+
+    #[test]
+    fn center_line_normal_impulse_induces_no_spin() {
+        // Contact exactly at the body centre: the lever arm is zero, so the normal
+        // impulse produces no torque even with a non-zero inverse inertia.
+        let mut bodies = [dynamic_spinning(1, Vec3::new(0.0, -2.0, 0.0)), static_body(2)];
+        let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
+        solve(&mut bodies, &colliders, &[manifold_at(Vec3::ZERO)], 4);
+        assert_eq!(bodies[0].angular_velocity(), Vec3::ZERO, "centre hit never spins");
+        assert!(bodies[0].linear_velocity().y.abs() < 1.0e-5, "normal still cancelled");
+    }
+
+    #[test]
+    fn an_immovable_body_never_spins_from_an_off_center_contact() {
+        // A is the immovable (static) body and B the dynamic one. The off-centre
+        // point gives A a real lever arm, but its zero inverse inertia makes the
+        // angular delta vanish, while B genuinely acquires spin.
+        let mut bodies = [static_body(1), dynamic_spinning(2, Vec3::new(0.0, 2.0, 0.0))];
+        let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
+        solve(&mut bodies, &colliders, &[manifold_at(Vec3::new(1.0, 0.0, 0.0))], 1);
+        assert_eq!(bodies[0].angular_velocity(), Vec3::ZERO, "immovable body never spins");
+        assert!(bodies[1].angular_velocity().length() > 0.0, "dynamic body does spin");
+    }
+
+    #[test]
+    fn a_friction_tangent_induces_spin_about_the_contact_lever() {
+        // A sphere pressed down (-Y) onto a frictional floor while sliding in +X,
+        // contacting directly below its centre. The normal impulse is along the
+        // lever (no normal torque), so the only spin comes from the friction
+        // tangent opposing the +X slide at a point below centre -> rolls about -Z.
+        let mut bodies = [dynamic_spinning(1, Vec3::new(2.0, -2.0, 0.0)), static_body(2)];
+        let colliders = [collider_with(1, 1, 0.0, 1.0), collider_with(2, 2, 0.0, 1.0)];
+        solve(&mut bodies, &colliders, &[manifold_at(Vec3::new(0.0, -0.5, 0.0))], 1);
+        let w = bodies[0].angular_velocity();
+        assert!(w.z < 0.0, "ground friction on a +X slide rolls the ball about -Z, got {w:?}");
+        assert!(w.x.abs() < 1.0e-6 && w.y.abs() < 1.0e-6, "spin only about Z, got {w:?}");
+    }
+
+    #[test]
+    fn an_off_center_dynamic_pair_conserves_momentum_and_counter_spins() {
+        // Two equal dynamic spheres meeting head-on along Y, contacting off-centre
+        // in +X. Equal-and-opposite impulses at one point conserve linear momentum
+        // (zero here) and produce equal-and-opposite spin.
+        let mut bodies = [
+            dynamic_spinning(1, Vec3::new(0.0, -2.0, 0.0)),
+            dynamic_spinning(2, Vec3::new(0.0, 2.0, 0.0)),
+        ];
+        let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
+        solve(&mut bodies, &colliders, &[manifold_at(Vec3::new(1.0, 0.0, 0.0))], 4);
+        let momentum = bodies[0].linear_velocity().add(bodies[1].linear_velocity());
+        assert!(momentum.length() < 1.0e-5, "linear momentum conserved, got {momentum:?}");
+        let wa = bodies[0].angular_velocity();
+        let wb = bodies[1].angular_velocity();
+        assert!(wa.z.abs() > 1.0e-4, "the pair acquires spin, got {wa:?}");
+        assert!((wa.z + wb.z).abs() < 1.0e-6, "equal and opposite spin, got {wa:?} {wb:?}");
     }
 }
