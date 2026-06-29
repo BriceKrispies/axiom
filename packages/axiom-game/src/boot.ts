@@ -26,7 +26,6 @@ import { type WasmHostExport, hostFromWasm } from "./wasm-host.ts";
 import type { Game } from "./game.ts";
 import { GameLoop } from "./game-loop.ts";
 import { bindNative } from "./host-binding.ts";
-import { defaultRegistry } from "./registry.ts";
 import { driveRaf } from "./raf-loop.ts";
 import { loadSound } from "./sound.ts";
 
@@ -46,7 +45,7 @@ export interface BootOptions {
  */
 export const boot = (game: BootGame, app: Game, options: BootOptions): (() => void) => {
   bindNative(hostFromWasm(game));
-  const loop = new GameLoop(bridgeFromWasm(game), app.config.fixedHz, defaultRegistry);
+  const loop = new GameLoop(bridgeFromWasm(game), app.config.fixedHz, app.registry);
   const stopInput = driveDomInput(game, options.canvas);
   const stopRaf = driveRaf(loop, (): boolean => app.status === "running");
   // Preload declared sound assets (a plain loop — the branch ban is off at this edge).

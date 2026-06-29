@@ -3,11 +3,17 @@
  * `Game` an author starts/pauses/resumes/stops. The lifecycle here is a pure
  * status state machine — the actual clock-driven loop is wired by the platform
  * edge (`raf-loop.ts`), which reads `game.status` to gate whether a frame runs.
- * Creating a game resets the default callback registry so each game starts with a
- * clean `onFixedUpdate`/`onRender` set.
+ *
+ * SPEC-14 §9 behavior change — per-game registry. `createGame` no longer RESETS a
+ * shared module-global registry; it MINTS a fresh `GameRegistry`, hangs it on the
+ * returned `Game` (`game.registry`), and installs it as the ACTIVE registry the
+ * free `onFixedUpdate`/`onRender` target (`useRegistry`). Each game thus owns its
+ * own registration set — two games created in sequence no longer clobber one
+ * another — and the platform edge builds the `GameLoop` from `game.registry`
+ * rather than a global (see `boot.ts`).
  */
 
-import { defaultRegistry } from "./registry.ts";
+import { GameRegistry, useRegistry } from "./registry.ts";
 
 /** The presentation surface, fixed cadence, and seed an author configures. */
 export interface GameConfig {
@@ -36,15 +42,19 @@ export interface Game {
   readonly status: GameStatus;
   /** The configuration this game was created with. */
   readonly config: GameConfig;
+  /** This game's own callback registry — the loop is driven from it (SPEC-14 §9). */
+  readonly registry: GameRegistry;
 }
 
 /** The concrete lifecycle state machine `createGame` returns. */
 class GameImpl implements Game {
   #status: GameStatus = "idle";
   readonly #config: GameConfig;
+  readonly #registry: GameRegistry;
 
-  public constructor(config: GameConfig) {
+  public constructor(config: GameConfig, registry: GameRegistry) {
     this.#config = config;
+    this.#registry = registry;
   }
 
   public start(): void {
@@ -70,10 +80,19 @@ class GameImpl implements Game {
   public get config(): GameConfig {
     return this.#config;
   }
+
+  public get registry(): GameRegistry {
+    return this.#registry;
+  }
 }
 
-/** Create a game from its config, resetting the default authoring registry. */
+/*
+ * Create a game from its config. Mints this game's own `GameRegistry` and installs
+ * it as the active registry the free `onFixedUpdate`/`onRender` target, so author
+ * registrations after `createGame` land on this game's set (SPEC-14 §9).
+ */
 export const createGame = (config: GameConfig): Game => {
-  defaultRegistry.reset();
-  return new GameImpl(config);
+  const registry = new GameRegistry();
+  useRegistry(registry);
+  return new GameImpl(config, registry);
 };

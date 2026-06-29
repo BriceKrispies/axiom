@@ -81,6 +81,7 @@ import type {
   SoundOptions,
   ToneSpec,
 } from "./host-binding.ts";
+import type { UiBridge, UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
 import { orElse, pick } from "./control-flow.ts";
 
 /*
@@ -186,6 +187,20 @@ export interface WasmHostExport {
   readonly notifyReady: () => void;
   readonly report_outcome: (won: boolean, score: number) => boolean;
   readonly reportOutcomes: () => boolean;
+  /*
+   * Screen-space UI / HUD (SPEC-09 §4.2): a viewport / pointer / bounds crosses as a
+   * `Float64Array` slice, a colour packed as a `0xRRGGBBAA` u32, a texture as a number.
+   * `uiViewport` returns `[width, height]`; `uiDrawList` the accumulated byte log;
+   * `uiSolveLayout` the flat `NODE_STRIDE`-wide table → the flat `[x, y, w, h]…` rects.
+   */
+  readonly uiBeginFrame: (viewport: Float64Array, pointer: Float64Array, pressed: boolean) => void;
+  readonly uiRect: (bounds: Float64Array, fill: number, stroke: number, strokeWidth: number) => void;
+  readonly uiText: (value: string, pos: Float64Array, color: number, size: number) => void;
+  readonly uiSprite: (texture: number, bounds: Float64Array) => void;
+  readonly uiButton: (bounds: Float64Array, label: string, fill: number, stroke: number, sw: number) => boolean;
+  readonly uiViewport: () => Float64Array;
+  readonly uiDrawList: () => Uint8Array;
+  readonly uiSolveLayout: (vw: number, vh: number, nodes: Float64Array) => Float64Array;
 }
 
 /** The component indices a vector / quaternion result is unpacked at. */
@@ -227,6 +242,10 @@ const DEFAULT_LAYER = 0;
 const FULL_ALPHA = 1;
 /** No gravity — the emitter default when `gravity` is omitted. */
 const NO_GRAVITY: Vec2 = { x: 0, y: 0 };
+/** The transparent colour a UI style's omitted `stroke` defaults to (packs to `0x00000000`). */
+const TRANSPARENT: Rgba = [0, 0, 0, 0];
+/** The stroke width a UI style's omitted `strokeWidth` defaults to. */
+const NO_STROKE_WIDTH = 0;
 
 /** The absent `Result` value, materialized without the lint-banned `undefined` literal. */
 const absent = <Value>(slot?: Value): Value | undefined => slot;
@@ -511,13 +530,50 @@ const channelBridge = (game: WasmHostExport): Pick<
   },
 });
 
+/** The screen-space UI `HostBridge` ops (SPEC-09), forwarding to the native `axiom-interface` `UiSurface` + `axiom-layout::solve` via the Wave-2 `ui*` exports. Colours pack to `0xRRGGBBAA`; `stroke`/`strokeWidth` default host-side; `uiViewport` unpacks `[width, height]`. */
+const uiBridge = (game: WasmHostExport): UiBridge => ({
+  uiBeginFrame: (viewport: UiViewport, pointer: Vec2, pressed: boolean): void => {
+    game.uiBeginFrame(Float64Array.from([viewport.width, viewport.height]), packVec2(pointer), pressed);
+  },
+  uiButton: (bounds: Rect, label: string, style: UiStyle): boolean =>
+    game.uiButton(
+      packRect(bounds),
+      label,
+      packRgba(style.fill),
+      packRgba(orElse(style.stroke, TRANSPARENT)),
+      orElse(style.strokeWidth, NO_STROKE_WIDTH),
+    ),
+  uiDrawList: (): Uint8Array => game.uiDrawList(),
+  uiRect: (bounds: Rect, style: UiStyle): void => {
+    game.uiRect(
+      packRect(bounds),
+      packRgba(style.fill),
+      packRgba(orElse(style.stroke, TRANSPARENT)),
+      orElse(style.strokeWidth, NO_STROKE_WIDTH),
+    );
+  },
+  uiSolveLayout: (viewport: UiViewport, nodes: readonly number[]): readonly number[] => [
+    ...game.uiSolveLayout(viewport.width, viewport.height, Float64Array.from(nodes)),
+  ],
+  uiSprite: (texture: Handle, bounds: Rect): void => {
+    game.uiSprite(texture, packRect(bounds));
+  },
+  uiText: (value: string, opts: UiTextOpts): void => {
+    game.uiText(value, Float64Array.from([opts.x, opts.y]), packRgba(opts.color), opts.size);
+  },
+  uiViewport: (): UiViewport => {
+    const size = [...game.uiViewport()];
+    return { height: pick(size, 1), width: pick(size, 0) };
+  },
+});
+
 /**
  * Build the installed `HostBridge` from the raw `WasmGame` exports — the host
  * counterpart of `bridgeFromWasm`. The app calls `bindNative(hostFromWasm(game))`
  * once at boot so the free authoring surface projects through the live wasm core.
- * The seven groups partition the `HostBridge` keys, so their `Object.assign`
+ * The eight groups partition the `HostBridge` keys, so their `Object.assign`
  * intersection is exactly a `HostBridge` (no cast, no banned object spread). The
- * audio + scene/query/channel quartet is folded into one inner assign so each
+ * audio + scene/query/channel/ui groups are folded into nested inner assigns so each
  * `Object.assign` stays within its typed (≤4-source) overload (math/grid/draw2d +
  * the inner result = four outer sources).
  */
@@ -526,5 +582,10 @@ export const hostFromWasm = (game: WasmHostExport): HostBridge =>
     mathBridge(game),
     gridBridge(game),
     draw2dBridge(game),
-    Object.assign(audioBridge(game), scene3dBridge(game), queryBridge(game), channelBridge(game)),
+    Object.assign(
+      audioBridge(game),
+      scene3dBridge(game),
+      queryBridge(game),
+      Object.assign(channelBridge(game), uiBridge(game)),
+    ),
   );

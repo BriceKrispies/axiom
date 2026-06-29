@@ -51,7 +51,10 @@ export { createGame } from "./game.ts";
 export type { Game, GameConfig, GameStatus } from "./game.ts";
 
 export { GameLoop } from "./game-loop.ts";
-export { onFixedUpdate, onRender, GameRegistry, defaultRegistry } from "./registry.ts";
+export { onFixedUpdate, onRender, GameRegistry, activeRegistry, useRegistry } from "./registry.ts";
+
+export { mountScene } from "./scene-runtime.ts";
+export type { MountedScene } from "./scene-runtime.ts";
 
 export { stepFrame } from "./loop-core.ts";
 export type { FixedUpdate, FrameStep, Render } from "./loop-core.ts";
@@ -65,15 +68,14 @@ export type { StepBudget } from "./step-budget.ts";
 export type { BodyKind, NativeBridge, PointerSample, Swipe, TweenCurve } from "./native-bridge.ts";
 
 export { Scene } from "./scene.ts";
-export type {
-  AddFactory,
-  CamerasFactory,
-  InputFactory,
-  PhysicsFactory,
-  SoundFactory,
-  TimeFactory,
-  TweensFactory,
-} from "./scene.ts";
+export type { Cameras, SceneFactories, Sound } from "./scene.ts";
+
+// SPEC-09 — the screen-space UI / HUD authoring surface + the flex layout solver.
+export { makeUi } from "./ui.ts";
+export type { Ui } from "./ui.ts";
+export type { UiBridge, UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
+export { solveLayout } from "./ui-layout.ts";
+export type { LayoutNode } from "./ui-layout.ts";
 
 // Wave 4 — the projected subsystem surfaces.
 

@@ -10,7 +10,8 @@
  * runtime-app bridge implements both this and `NativeBridge` on one object; a
  * test installs a fake. Before `bindNative`, an inert default makes every free
  * call a safe no-op returning a neutral value, so the surface never throws on an
- * unbound host — it is simply silent until the app binds it.
+ * unbound host — it is simply silent until the app binds it. This mirrors the
+ * `registry.ts` active-registry holder that backs the free `onFixedUpdate`/`onRender`.
  *
  * Session state (the bound bridge and the terminal-outcome latch) lives here in
  * one place: `bindNative` opens a fresh session, so it also clears the latch.
@@ -25,6 +26,7 @@ import type {
 } from "./host-descriptors.ts";
 import type { Cell, Entity, Handle, Mat4, PlayerId, Quat, RayHit, Result, Vec3 } from "./vocabulary.ts";
 import { type Draw2dBridge, UNBOUND_DRAW2D } from "./draw2d-binding.ts";
+import { UNBOUND_UI, type UiBridge } from "./ui-binding.ts";
 import { UNBOUND_HOST_BASE } from "./unbound-host.ts";
 
 /** Host-supplied session configuration: a seed plus opaque parameters (SPEC-12). */
@@ -82,8 +84,8 @@ export interface Outcome {
   readonly metrics?: Record<string, number>;
 }
 
-/** The native channel the free authoring functions project (SPEC-03/05/12 §4.2). Extends the 2D drawing channel (SPEC-04, `draw2d-binding.ts`). */
-export interface HostBridge extends Draw2dBridge {
+/** The native channel the free authoring functions project (SPEC-03/05/12 §4.2). Extends the 2D drawing channel (SPEC-04, `draw2d-binding.ts`) and the screen-space UI channel (SPEC-09, `ui-binding.ts`). */
+export interface HostBridge extends Draw2dBridge, UiBridge {
   /** Constrain `value` to `[low, high]` (native `MathApi`). */
   readonly clamp: (value: number, low: number, high: number) => number;
   /** Wrap `angle` to `(-π, π]` (native `MathApi`). */
@@ -186,8 +188,8 @@ export interface HostBridge extends Draw2dBridge {
   readonly quatToMat4: (quaternion: Quat) => Mat4;
 }
 
-/** The full inert channel: the non-2D defaults (`unbound-host.ts`) composed with the inert 2D surface, so `boundHost()` is a total `HostBridge` before any `bindNative`. */
-const UNBOUND_HOST: HostBridge = Object.assign(UNBOUND_HOST_BASE, UNBOUND_DRAW2D);
+/** The full inert channel: the non-2D defaults (`unbound-host.ts`) composed with the inert 2D (`UNBOUND_DRAW2D`) and UI (`UNBOUND_UI`) surfaces, so `boundHost()` is a total `HostBridge` before any `bindNative`. */
+const UNBOUND_HOST: HostBridge = Object.assign(UNBOUND_HOST_BASE, UNBOUND_DRAW2D, UNBOUND_UI);
 
 /** The mutable session: the bound host and whether a terminal outcome was emitted. */
 const session: { host: HostBridge; outcomeEmitted: boolean } = {

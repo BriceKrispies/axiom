@@ -3,6 +3,7 @@
 // so each fake is one class (max-classes-per-file).
 
 import type { EmitterConfig, ShapeStyle } from "../src/draw2d-binding.ts";
+import type { UiStyle, UiTextOpts, UiViewport } from "../src/ui-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -75,6 +76,18 @@ export class FakeHost implements HostBridge {
   public draw2dBegins: Handle[] = [];
   public draw2dEnds = 0;
   public draw2dFinishReturn: readonly number[] = [];
+
+  // --- UI surface (SPEC-09): records the marshalled calls; scriptable button/viewport/draw-list/layout returns ---
+  public uiBeginFrames: { viewport: UiViewport; pointer: Vec2; pressed: boolean }[] = [];
+  public uiRects: { bounds: Rect; style: UiStyle }[] = [];
+  public uiTexts: { value: string; opts: UiTextOpts }[] = [];
+  public uiSprites: { texture: Handle; bounds: Rect }[] = [];
+  public uiButtons: { bounds: Rect; label: string; style: UiStyle }[] = [];
+  public uiButtonReturn = false;
+  public uiViewportReturn: UiViewport = { height: 0, width: 0 };
+  public uiDrawListReturn: Uint8Array = new Uint8Array();
+  public uiSolveLayoutReturn: readonly number[] = [];
+  public uiSolveLayoutCalls: { viewport: UiViewport; nodes: readonly number[] }[] = [];
 
   public clamp(value: number, low: number, high: number): number {
     this.clampCalls.push([value, low, high]);
@@ -365,6 +378,41 @@ export class FakeHost implements HostBridge {
 
   public draw2dFinish(): readonly number[] {
     return this.draw2dFinishReturn;
+  }
+
+  // --- UI surface (records the marshalled call; returns the scripted value for the read-back verbs) ---
+  public uiBeginFrame(viewport: UiViewport, pointer: Vec2, pressed: boolean): void {
+    this.uiBeginFrames.push({ pointer, pressed, viewport });
+  }
+
+  public uiRect(bounds: Rect, style: UiStyle): void {
+    this.uiRects.push({ bounds, style });
+  }
+
+  public uiText(value: string, opts: UiTextOpts): void {
+    this.uiTexts.push({ opts, value });
+  }
+
+  public uiSprite(texture: Handle, bounds: Rect): void {
+    this.uiSprites.push({ bounds, texture });
+  }
+
+  public uiButton(bounds: Rect, label: string, style: UiStyle): boolean {
+    this.uiButtons.push({ bounds, label, style });
+    return this.uiButtonReturn;
+  }
+
+  public uiViewport(): UiViewport {
+    return this.uiViewportReturn;
+  }
+
+  public uiDrawList(): Uint8Array {
+    return this.uiDrawListReturn;
+  }
+
+  public uiSolveLayout(viewport: UiViewport, nodes: readonly number[]): readonly number[] {
+    this.uiSolveLayoutCalls.push({ nodes, viewport });
+    return this.uiSolveLayoutReturn;
   }
 
   private mint(): Handle {

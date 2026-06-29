@@ -1,10 +1,18 @@
 /*
  * The callback registry behind the free `onFixedUpdate`/`onRender` authoring
  * functions (SPEC-00 §4.2). A `GameRegistry` collects the fixed-update and render
- * callbacks an author registers; the loop core reads them back. The module-level
- * default registry backs the Phaser-style free functions; tests use a fresh
- * `GameRegistry` for isolation. (Module-global registration is a deliberate M0
- * simplification — see SPEC-14 §9.)
+ * callbacks an author registers; the loop core reads them back.
+ *
+ * SPEC-14 §9 fix — per-game registry. The free `onFixedUpdate`/`onRender` retain
+ * their Phaser-style module-level shape, but they no longer push into one shared
+ * singleton that `createGame` *resets*: instead each `createGame` mints its OWN
+ * fresh `GameRegistry` and installs it as the ACTIVE registry (`useRegistry`), and
+ * the free functions delegate to whichever registry is active. Two games created
+ * in sequence therefore get independent registries — the first keeps its
+ * registrations instead of being silently cleared — closing the "two live games
+ * share the global" debt without changing the author-facing free-function surface.
+ * The active pointer lives in one mutable holder here, exactly as the bound host
+ * lives in `host-binding.ts`'s `session`.
  */
 
 import type { FixedUpdate, Render } from "./loop-core.ts";
@@ -33,23 +41,29 @@ export class GameRegistry {
   public renders(): readonly Render[] {
     return this.#renders;
   }
-
-  /** Drop every registration — used when a fresh game starts over the global registry. */
-  public reset(): void {
-    this.#fixedUpdates.length = 0;
-    this.#renders.length = 0;
-  }
 }
 
-/** The default registry the free authoring functions target. */
-export const defaultRegistry = new GameRegistry();
+/*
+ * The active registry the free authoring functions target. `createGame` swaps this
+ * to each new game's fresh registry (a per-game registry, not a reset singleton).
+ * One mutable holder, mirroring `host-binding.ts`'s `session.host`.
+ */
+const state: { active: GameRegistry } = { active: new GameRegistry() };
 
-/** Register a fixed update on the default registry (SPEC-00 §4.2 `onFixedUpdate`). */
-export const onFixedUpdate = (callback: FixedUpdate): void => {
-  defaultRegistry.onFixedUpdate(callback);
+/** The registry the free `onFixedUpdate`/`onRender` currently target. */
+export const activeRegistry = (): GameRegistry => state.active;
+
+/** Install `registry` as the active one the free authoring functions target (called by `createGame`). */
+export const useRegistry = (registry: GameRegistry): void => {
+  state.active = registry;
 };
 
-/** Register a render on the default registry (SPEC-00 §4.2 `onRender`). */
+/** Register a fixed update on the active registry (SPEC-00 §4.2 `onFixedUpdate`). */
+export const onFixedUpdate = (callback: FixedUpdate): void => {
+  state.active.onFixedUpdate(callback);
+};
+
+/** Register a render on the active registry (SPEC-00 §4.2 `onRender`). */
 export const onRender = (callback: Render): void => {
-  defaultRegistry.onRender(callback);
+  state.active.onRender(callback);
 };
