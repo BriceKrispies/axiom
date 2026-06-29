@@ -35,23 +35,31 @@
  *     default here (the audio-style host-side defaulting); `draw2dFinish`'s flat
  *     `Vec<f64>` command list reshapes to a `number[]`.
  *
- * ## Deferred host methods (documented, not silent)
- * Three host groups are NOT wired here, each for a concrete structural reason; the
- * builder fills them with the same inert values the unbound default uses, so the
- * `HostBridge` stays total:
- *   - **3D scene authoring** (`createMesh`/`createMaterial`/`setCamera3D`/
- *     `addLight`): `RunningApp` exposes no *runtime* mesh/material/light/camera
- *     authoring that returns a handle (the demo scene is built once at `setup`).
- *     Wiring it needs incremental `RunningApp::add_*`/`set_camera` methods in the
- *     `axiom` engine module — out of scope for an app-only change. See SPEC-11.
+ * ## Now-wired host groups (Wave 3b) and the partials they carry
+ * The spatial-query (SPEC-03), 3D-authoring (SPEC-11), input-bind (SPEC-05) and
+ * embed-channel (SPEC-12) groups are bound here over the matching Rust exports
+ * (`apps/axiom-game-runtime/src/{query,scene3d,input}.rs` + `wasm.rs`). Where a
+ * Wave-2 export carries less than the contract descriptor, the edge forwards the
+ * subset the export accepts (documented, not silent):
+ *   - **`createMaterial`** consumes only the base-colour `[r,g,b]`; emissive /
+ *     roughness / opacity are dropped (the native `add_material` takes a lit
+ *     colour only).
+ *   - **`setCamera3D`** sends the eye position + vertical FOV (converted radians →
+ *     degrees) + near/far; the look-at `target` is dropped (the native
+ *     `set_camera` places from translation only).
+ *   - **`addLight`** binds the directional arm only (direction + colour +
+ *     intensity); the `kind` discriminant is dropped (the native `add_light`
+ *     mints a `DirectionalLight`).
+ *   - **`raycast`** — the native export returns `[entity, x, y, z]` (no distance),
+ *     so the `RayHit.distance` is closed at the edge with the native `v3Dist`
+ *     (the single math source of truth), never a TS re-derivation.
+ *   - **`reportOutcomes`** re-flushes the single latched outcome; the per-player
+ *     `results` map is dropped (the native channel is single-outcome).
+ * One group stays deferred:
  *   - **`mat4Invert`**: `axiom-math` exposes no general 4×4 inverse (only
  *     `Quat::inverse` and the uniform-scale-TRS `Transform::inverse`); a TS
  *     re-derivation would violate the single-math-source rule. Awaits a
  *     `Mat4::inverse` primitive in the math layer.
- *   - **`overlapCircle` + the SPEC-12 outbound channel** (`getSessionConfig`/
- *     `notifyReady`/`reportOutcome`/`reportOutcomes`) and `bindAction`: these
- *     belong to the spatial-query / embed / input waves, wired through their own
- *     boundary work, not this grid/math/audio increment.
  */
 
 import {
@@ -62,11 +70,12 @@ import {
   type MaterialDescriptor,
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Entity, Handle, Mat4, Quat, Rect, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Cell, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
 import type { EmitterConfig, ShapeStyle } from "./draw2d-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
+  Outcome,
   ScheduleOptions,
   SessionConfig,
   SoundOptions,
@@ -149,6 +158,34 @@ export interface WasmHostExport {
   readonly draw2dEndTarget: () => void;
   readonly draw2dTargetTexture: (target: number) => number;
   readonly draw2dFinish: () => Float64Array;
+  /*
+   * 3D scene authoring (SPEC-11 §4.2): a mesh kind crosses as its `string` name, a
+   * colour/position/direction as a `Float64Array` slice; each call returns the
+   * engine handle / light-node id it minted as a number.
+   */
+  readonly createMesh: (kind: string) => number;
+  readonly createMaterial: (rgb: Float64Array) => number;
+  readonly setCamera3D: (position: Float64Array, fovDeg: number, near: number, far: number) => void;
+  readonly addLight: (direction: Float64Array, rgb: Float64Array, intensity: number) => number;
+  /*
+   * Spatial queries (SPEC-03 §4.2): a point/direction crosses as a 3-element
+   * `Float64Array`; overlaps return the matching entity ids as a flat
+   * `Float64Array`; `raycast` returns `[]` or `[entity, hitX, hitY, hitZ]`.
+   */
+  readonly overlapCircle: (center: Float64Array, radius: number) => Float64Array;
+  readonly overlapBox: (center: Float64Array, halfExtents: Float64Array) => Float64Array;
+  readonly raycast: (origin: Float64Array, direction: Float64Array, maxDistance: number) => Float64Array;
+  // Input bind (SPEC-05 §4.2): the action name + the physical key tokens.
+  readonly bindAction: (action: string, keys: readonly string[]) => void;
+  /*
+   * Embed host channel (SPEC-12 §4.2): the inbound seed (a `bigint` getter) +
+   * opaque params JSON, the readiness signal, and the single-outcome reporters.
+   */
+  readonly seed: bigint;
+  readonly sessionParams: () => string;
+  readonly notifyReady: () => void;
+  readonly report_outcome: (won: boolean, score: number) => boolean;
+  readonly reportOutcomes: () => boolean;
 }
 
 /** The component indices a vector / quaternion result is unpacked at. */
@@ -161,10 +198,16 @@ const FULL_VOLUME = 1;
 const UNCHANGED_PITCH = 1;
 const NO_LOOP = false;
 const NO_CROSSFADE = 0;
-/** The handle minting methods that are deferred return the null handle. */
-const DEFERRED_HANDLE = 0;
 /** The wave kinds in their dense native index order (SPEC-08 `Wave`). */
 const WAVE_KINDS: readonly ToneSpec["wave"][] = ["sine", "square", "sawtooth", "triangle"];
+/** The native mesh-kind names, indexed by the dense `HostBridge.createMesh` kind (0=box→cube, 1=sphere, 2=cylinder). */
+const MESH_NAMES: readonly string[] = ["cube", "sphere", "cylinder"];
+/** The `[r, g, b]` channel count of an `Rgba` the native lit-colour authoring consumes (alpha dropped). */
+const RGB_LENGTH = 3;
+/** Degrees in a half turn — the numerator of the radians→degrees scale the native camera's degree FOV needs. */
+const DEGREES_PER_HALF_TURN = 180;
+/** Radians → degrees, for the native camera's degree-valued vertical FOV. */
+const RAD_TO_DEG = DEGREES_PER_HALF_TURN / Math.PI;
 
 /*
  * Draw2d boundary constants (SPEC-04 §10). A colour packs `[r, g, b, a]` (each in
@@ -190,6 +233,12 @@ const absent = <Value>(slot?: Value): Value | undefined => slot;
 
 /** Pack a `Vec3` into the boundary `[x, y, z]` slice. */
 const packVec3 = (vector: Vec3): Float64Array => Float64Array.from([vector.x, vector.y, vector.z]);
+
+/** Pack an `Rgba`'s linear `[r, g, b]` channels into the boundary colour slice (alpha dropped — native lit colour). */
+const packRgb = (color: Rgba): Float64Array => Float64Array.from([...color].slice(0, RGB_LENGTH));
+
+/** Parse the wasm host channel's opaque session-params JSON object string into the contract record (the byte boundary is untyped). */
+const parseParams = (json: string): SessionConfig["params"] => JSON.parse(json) as SessionConfig["params"];
 
 /** Unpack a boundary `[x, y, z]` slice into a `Vec3`. */
 const unpackVec3 = (raw: Float64Array): Vec3 => {
@@ -390,36 +439,75 @@ const draw2dBridge = (game: WasmHostExport): Pick<
   draw2dTargetTexture: (target: Handle): Handle => game.draw2dTargetTexture(target),
 });
 
-/** The deferred host methods (see header) — the inert defaults that keep the `HostBridge` total. */
-const deferredBridge = (): Pick<
+/** The 3D scene-authoring `HostBridge` ops (SPEC-11), forwarding to the native runtime scene authoring on `RunningApp` (`add_mesh` / `add_material` / `set_camera` / `add_light`). */
+const scene3dBridge = (game: WasmHostExport): Pick<
   HostBridge,
-  | "createMesh" | "createMaterial" | "setCamera3D" | "addLight" | "overlapCircle"
-  | "bindAction" | "getSessionConfig" | "notifyReady" | "reportOutcome" | "reportOutcomes"
+  "createMesh" | "createMaterial" | "setCamera3D" | "addLight"
 > => ({
-  // 3D scene authoring (SPEC-11): RunningApp has no runtime create* surface yet.
-  addLight: (_light: LightDescriptor): Entity => DEFERRED_HANDLE,
-  // SPEC-05 input bind: belongs to the input boundary wave.
-  bindAction: (): void => {
-    // Deferred to the input wave.
+  // Directional arm only: the native `add_light` mints a `DirectionalLight` (the `kind` discriminant is dropped — see header).
+  addLight: (light: LightDescriptor): Entity =>
+    game.addLight(packVec3(light.vector), packRgb(light.color), light.intensity),
+  // Base colour only: emissive / roughness / opacity are dropped (native lit-colour authoring — see header).
+  createMaterial: (material: MaterialDescriptor): Handle => game.createMaterial(packRgb(material.baseColor)),
+  createMesh: (meshKind: number): Handle => game.createMesh(pick(MESH_NAMES, meshKind)),
+  // Position + degree FOV + near/far: the look-at `target` is dropped (native `set_camera` places from translation — see header).
+  setCamera3D: (camera: CameraDescriptor): void => {
+    game.setCamera3D(packVec3(camera.position), camera.fovY * RAD_TO_DEG, camera.near, camera.far);
   },
-  createMaterial: (_material: MaterialDescriptor): Handle => DEFERRED_HANDLE,
-  createMesh: (_meshKind: number): Handle => DEFERRED_HANDLE,
-  // SPEC-12 inbound: belongs to the embed-channel wave.
-  getSessionConfig: (): SessionConfig => ({ params: {}, seed: 0n }),
-  // SPEC-12 outbound: belongs to the embed-channel wave.
+});
+
+/** The spatial-query `HostBridge` ops (SPEC-03), forwarding to the native `axiom-scene` Entity-addressed query surface (`overlap_circle` / `overlap_box` / `raycast_hit`). */
+const queryBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  "overlapCircle" | "overlapBox" | "raycast"
+> => ({
+  overlapBox: (center: Vec3, halfExtents: Vec3): readonly Entity[] => [
+    ...game.overlapBox(packVec3(center), packVec3(halfExtents)),
+  ],
+  // The 2D circle query lifts to the scene's z=0 plane (the native query is a sphere over committed bounds).
+  overlapCircle: (centerX: number, centerY: number, radius: number): readonly Entity[] => [
+    ...game.overlapCircle(Float64Array.from([centerX, centerY, 0]), radius),
+  ],
+  raycast: (origin: Vec3, direction: Vec3, maxDistance: number): Result<RayHit> => {
+    const originSlice = packVec3(origin);
+    const raw = [...game.raycast(originSlice, packVec3(direction), maxDistance)];
+    /*
+     * Empty = a miss (the empty `Result`); else `[entity, x, y, z]`. The native
+     * export omits the distance, so it is closed here with the native `v3Dist` —
+     * the one math source of truth.
+     */
+    return pick<() => Result<RayHit>>(
+      [
+        (): Result<RayHit> => absent<RayHit>(),
+        (): RayHit => {
+          const point = unpackVec3(Float64Array.from(raw.slice(1)));
+          return { distance: game.v3Dist(originSlice, packVec3(point)), entity: pick(raw, 0), point };
+        },
+      ],
+      Number(raw.length > 0),
+    )();
+  },
+});
+
+/** The embed host-channel `HostBridge` ops (SPEC-12) + the input `bindAction` (SPEC-05), forwarding to the wasm host channel. */
+const channelBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  "bindAction" | "getSessionConfig" | "notifyReady" | "reportOutcome" | "reportOutcomes"
+> => ({
+  bindAction: (action: string, keys: readonly string[]): void => {
+    game.bindAction(action, keys);
+  },
+  getSessionConfig: (): SessionConfig => ({ params: parseParams(game.sessionParams()), seed: game.seed }),
   notifyReady: (): void => {
-    // Deferred to the embed wave.
+    game.notifyReady();
   },
-  // SPEC-03 spatial query: belongs to the scene-overlap wave.
-  overlapCircle: (): readonly Entity[] => [],
-  reportOutcome: (): void => {
-    // Deferred to the embed wave.
+  // The single terminal outcome (`metrics` is presentation-only, not carried by the native channel).
+  reportOutcome: (outcome: Outcome): void => {
+    game.report_outcome(outcome.won, outcome.score);
   },
+  // Re-flush the single latched outcome; the per-player `results` map is dropped (single-outcome channel — see header).
   reportOutcomes: (): void => {
-    // Deferred to the embed wave.
-  },
-  setCamera3D: (_camera: CameraDescriptor): void => {
-    // Deferred until RunningApp exposes runtime camera authoring.
+    game.reportOutcomes();
   },
 });
 
@@ -427,15 +515,16 @@ const deferredBridge = (): Pick<
  * Build the installed `HostBridge` from the raw `WasmGame` exports — the host
  * counterpart of `bridgeFromWasm`. The app calls `bindNative(hostFromWasm(game))`
  * once at boot so the free authoring surface projects through the live wasm core.
- * The five groups partition the `HostBridge` keys, so their `Object.assign`
+ * The seven groups partition the `HostBridge` keys, so their `Object.assign`
  * intersection is exactly a `HostBridge` (no cast, no banned object spread). The
- * audio + deferred pair is folded into one inner assign to keep each `Object.assign`
- * within its typed (≤4-source) overload — five flat sources fall to the `any` one.
+ * audio + scene/query/channel quartet is folded into one inner assign so each
+ * `Object.assign` stays within its typed (≤4-source) overload (math/grid/draw2d +
+ * the inner result = four outer sources).
  */
 export const hostFromWasm = (game: WasmHostExport): HostBridge =>
   Object.assign(
     mathBridge(game),
     gridBridge(game),
     draw2dBridge(game),
-    Object.assign(audioBridge(game), deferredBridge()),
+    Object.assign(audioBridge(game), scene3dBridge(game), queryBridge(game), channelBridge(game)),
   );

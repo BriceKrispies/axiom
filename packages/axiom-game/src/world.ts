@@ -13,7 +13,7 @@
  * (SPEC-02 §5).
  */
 
-import type { Component, ComponentKind, Entity, Result } from "./vocabulary.ts";
+import type { Component, ComponentKind, Entity, Result, Transform } from "./vocabulary.ts";
 import type { NativeBridge } from "./native-bridge.ts";
 
 /** The entity/component/query/hierarchy surface for the running tick (SPEC-02 §4.2). */
@@ -32,6 +32,18 @@ export interface World {
   readonly query: (...kinds: ComponentKind[]) => readonly Entity[];
   /** The direct children of `entity`, in stable order. */
   readonly childrenOf: (entity: Entity) => readonly Entity[];
+  /** Whether `entity` names a live node (a stale handle is `false`). */
+  readonly alive: (entity: Entity) => boolean;
+  /** Whether `entity` carries a component of `kind`. */
+  readonly has: (entity: Entity, kind: ComponentKind) => boolean;
+  /** Remove a component from `entity` (a stale handle / absent component is a clean no-op). */
+  readonly remove: (entity: Entity, kind: ComponentKind) => void;
+  /** Re-parent `child` under `parent` (a self-parent / cycle / stale handle is a clean no-op). */
+  readonly setParent: (child: Entity, parent: Entity) => void;
+  /** `entity`'s parent, or the empty value at a root / on a stale handle. */
+  readonly parentOf: (entity: Entity) => Result<Entity>;
+  /** `entity`'s resolved (composed) world transform this tick, or the empty value on a stale handle. */
+  readonly worldTransform: (entity: Entity) => Result<Transform>;
 }
 
 /** The `World` projection bound to the native store. */
@@ -68,6 +80,30 @@ export class BridgeWorld implements World {
 
   public childrenOf(entity: Entity): readonly Entity[] {
     return this.#bridge.worldChildrenOf(entity);
+  }
+
+  public alive(entity: Entity): boolean {
+    return this.#bridge.worldAlive(entity);
+  }
+
+  public has(entity: Entity, kind: ComponentKind): boolean {
+    return this.#bridge.worldHas(entity, kind);
+  }
+
+  public remove(entity: Entity, kind: ComponentKind): void {
+    this.#bridge.worldRemove(entity, kind);
+  }
+
+  public setParent(child: Entity, parent: Entity): void {
+    this.#bridge.worldSetParent(child, parent);
+  }
+
+  public parentOf(entity: Entity): Result<Entity> {
+    return this.#bridge.worldParentOf(entity);
+  }
+
+  public worldTransform(entity: Entity): Result<Transform> {
+    return this.#bridge.worldWorldTransform(entity);
   }
 }
 

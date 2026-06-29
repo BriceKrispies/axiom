@@ -22,6 +22,7 @@ import type {
   Handle,
   Result,
   Ticks,
+  Transform,
   Vec2,
   Vec3,
 } from "./vocabulary.ts";
@@ -81,6 +82,18 @@ export interface NativeBridge {
   readonly worldQuery: (kinds: readonly ComponentKind[]) => readonly Entity[];
   /** The direct children of `entity`, in stable order (scene `children_of`). */
   readonly worldChildrenOf: (entity: Entity) => readonly Entity[];
+  /** Whether `entity` names a live node (a stale handle is `false`). */
+  readonly worldAlive: (entity: Entity) => boolean;
+  /** Whether `entity` carries a component of `kind` (a dead entity / unknown kind is `false`). */
+  readonly worldHas: (entity: Entity, kind: ComponentKind) => boolean;
+  /** Remove `entity`'s component of `kind` (a stale handle / absent component is a clean no-op). */
+  readonly worldRemove: (entity: Entity, kind: ComponentKind) => void;
+  /** Re-parent `child` under `parent` (a self-parent / cycle / stale handle is a clean no-op). */
+  readonly worldSetParent: (child: Entity, parent: Entity) => void;
+  /** `entity`'s parent, or the empty value at a root / on a stale handle. */
+  readonly worldParentOf: (entity: Entity) => Result<Entity>;
+  /** `entity`'s resolved (composed) world transform for this tick, or the empty value on a stale handle. */
+  readonly worldWorldTransform: (entity: Entity) => Result<Transform>;
 
   // Input snapshot (SPEC-05): every read is scoped to a tick's snapshot.
   /** Whether `action` is held at `tick`. */

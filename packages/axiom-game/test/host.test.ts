@@ -17,6 +17,8 @@ test("the unbound host surface is inert until a host is bound", () => {
   assert.equal(inert.clamp(5, 0, 10), 5);
   assert.equal(inert.normalizeAngle(7), 7);
   assert.deepEqual(inert.overlapCircle(0, 0, 1), []);
+  assert.deepEqual(inert.overlapBox({ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 }), []);
+  assert.equal(inert.raycast({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, 1), undefined);
   assert.deepEqual(inert.getSessionConfig(), { params: {}, seed: 0n });
   assert.doesNotThrow(() => {
     inert.bindAction("noop", ["KeyN"]);
