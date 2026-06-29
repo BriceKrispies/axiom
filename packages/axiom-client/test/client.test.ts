@@ -134,12 +134,16 @@ test("Event fires the event handler", () => {
   assert.deepEqual(ticks, [9]);
 });
 
-test("RejectedIntent drops the rejected sequence from pending", () => {
+test("RejectedIntent drops the rejected sequence from pending and notifies onRejected", () => {
   const { client, socket } = connected();
+  const reasons: number[] = [];
+  client.onRejected((reasonCode): void => void reasons.push(reasonCode));
   client.sendIntent(u8(1));
   client.sendIntent(u8(2));
   socket.receive(encodeRejectedIntent(1, REASON_MALFORMED));
   assert.equal(client.getPendingIntentCount(), 1);
+  // The registered observer sees the authority's machine-readable reason code.
+  assert.deepEqual(reasons, [REASON_MALFORMED]);
 });
 
 test("a server-sent client-kind frame is ignored, not fatal", () => {

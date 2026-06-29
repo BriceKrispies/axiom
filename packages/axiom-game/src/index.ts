@@ -165,6 +165,15 @@ export { addLight, createMaterial, createMesh, setCamera3D } from "./scene3d.ts"
 export type { Camera3D, Light, MaterialSpec, MeshKind } from "./scene3d.ts";
 
 export { bindNetTransport, boundNetConfig, configureNet, joinRoom, makeNetSim } from "./net.ts";
+
+/*
+ * The `@axiom/client` binding for the net seam (SPEC-13): the runtime adapts a real
+ * `AxiomClient` into the `NetTransport` factory, and owns the deterministic
+ * flat-`Intent` wire codec. The covered spine binds against the injected
+ * `AxiomClientLike`; the app supplies the real client at boot (see axiom-net.ts).
+ */
+export { axiomNetFactory, decodeIntent, encodeIntent, netTransportFromClient } from "./axiom-net.ts";
+export type { AxiomClientLike } from "./axiom-net.ts";
 export type {
   ConnStatus,
   Intent,

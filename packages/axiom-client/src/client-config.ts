@@ -42,3 +42,5 @@ export interface ConnectConfig {
 export type SnapshotHandler = (snapshot: ServerSnapshotMessage) => void;
 export type EventHandler = (event: ServerEventMessage) => void;
 export type StatusHandler = (status: ClientStatus) => void;
+/** Observes a server-rejected intent, carrying the machine-readable `REASON_*` code. */
+export type RejectionHandler = (reasonCode: number) => void;

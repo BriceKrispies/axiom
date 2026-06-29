@@ -18,6 +18,7 @@ import {
   type ClientStatus,
   type ConnectConfig,
   type EventHandler,
+  type RejectionHandler,
   STATUS_CONNECTED,
   STATUS_CONNECTING,
   STATUS_DISCONNECTED,
@@ -76,6 +77,7 @@ export class AxiomClient {
   private readonly snapshotHandlers: SnapshotHandler[] = [];
   private readonly eventHandlers: EventHandler[] = [];
   private readonly statusHandlers: StatusHandler[] = [];
+  private readonly rejectionHandlers: RejectionHandler[] = [];
 
   /** Open a connection and join the room once the transport opens. */
   public connect(config: ConnectConfig): void {
@@ -153,6 +155,11 @@ export class AxiomClient {
   /** Register a handler for connection-status changes. */
   public onStatus(handler: StatusHandler): void {
     this.statusHandlers.push(handler);
+  }
+
+  /** Register a handler for a server-rejected intent (the authority's reason code). */
+  public onRejected(handler: RejectionHandler): void {
+    this.rejectionHandlers.push(handler);
   }
 
   /** The current connection status. */
@@ -269,27 +276,22 @@ export class AxiomClient {
     this.latestServerTick = snapshot.serverTick;
     this.lastAckedClientSequence = snapshot.lastAcceptedClientSequence;
     this.pending = this.pending.filter((seq): boolean => seq > snapshot.lastAcceptedClientSequence);
-    each(this.snapshotHandlers, (handler): void => {
-      handler(snapshot);
-    });
+    each(this.snapshotHandlers, (handler): void => { handler(snapshot); });
   }
 
   private onEventMessage(message: DecodedMessage): void {
     assert(message.kind === KIND_SERVER_EVENT, "dispatch guarantees an event");
-    each(this.eventHandlers, (handler): void => {
-      handler(message);
-    });
+    each(this.eventHandlers, (handler): void => { handler(message); });
   }
 
   private onRejection(message: DecodedMessage): void {
     assert(message.kind === KIND_REJECTED_INTENT, "dispatch guarantees a rejection");
     this.pending = this.pending.filter((seq): boolean => seq !== message.clientSequence);
+    each(this.rejectionHandlers, (handler): void => { handler(message.reasonCode); });
   }
 
   private setStatus(status: ClientStatus): void {
     this.status = status;
-    each(this.statusHandlers, (handler): void => {
-      handler(status);
-    });
+    each(this.statusHandlers, (handler): void => { handler(status); });
   }
 }
