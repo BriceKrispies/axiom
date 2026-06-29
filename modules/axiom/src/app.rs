@@ -52,6 +52,12 @@ mod components;
 /// keeping this file within the per-file size budget.
 mod dynamic_world;
 
+/// Incremental runtime scene authoring (`add_mesh`/`add_material`/`add_light`/
+/// `set_camera`) — growing the live world a piece at a time after the app is
+/// running — lives in a sibling child module, keeping this file within the
+/// per-file size budget.
+mod authoring;
+
 /// The per-frame `tick` family lives in a sibling child module, keeping this
 /// file within the per-file size budget.
 mod frame;
