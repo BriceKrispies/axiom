@@ -47,7 +47,24 @@
 //! that recorded frame. Ids and ticks cross as numbers, a fired-id / active-id /
 //! completed-id list as a `Vec<u64>`, a tween value as `f64`.
 //!
-//! Grid / 3D / audio / net remain later increments.
+//! ## Grid, math, and audio (SPEC-06 / SPEC-03 / SPEC-11 / SPEC-08)
+//! The `grid` / `mathbridge` / `audio` modules host the TS `HostBridge` query and
+//! presentation surface: deterministic `axiom-grid` pathfinding ([`crate::grid`]),
+//! `v3`/`mat4`/`quat`/scalar ops forwarding to `axiom-math` ([`crate::mathbridge`]),
+//! and the neutral `axiom-audio` mixer core whose live Web Audio output is the
+//! `wasm32` arm ([`crate::audio`]). 3D scene authoring (`createMesh`/`createMaterial`/
+//! `setCamera3D`/`addLight`) and `mat4Invert` stay deferred behind documented engine
+//! gaps (no runtime scene authoring on `RunningApp`; no `Mat4::inverse` in the math
+//! layer) — a follow-up engine phase adds those primitives, not this app.
+//!
+//! ## Net (SPEC-13)
+//! Net is **not** bridged through this wasm core. The browser already has a
+//! complete, independent client — `@axiom/client` (`AxiomClient` + its own wire
+//! codec + transports) — so `@axiom/game`'s `NetTransport` seam binds over it at the
+//! TS edge (`packages/axiom-game/src/axiom-net.ts`), and the Rust
+//! `axiom-net-protocol`/`axiom-client-core` crates stay the server/native substrate.
+//! Re-implementing a net codec + socket here would duplicate that single source of
+//! truth, so this core deliberately owns no net state.
 //!
 //! [`advance`]: GameBridge::advance
 
