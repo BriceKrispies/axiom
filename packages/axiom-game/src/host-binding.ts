@@ -16,12 +16,54 @@
  * one place: `bindNative` opens a fresh session, so it also clears the latch.
  */
 
-import type { Entity, PlayerId } from "./vocabulary.ts";
+import type { Entity, Handle, PlayerId } from "./vocabulary.ts";
 
 /** Host-supplied session configuration: a seed plus opaque parameters (SPEC-12). */
 export interface SessionConfig {
   readonly seed: bigint;
   readonly params: Record<string, string | number>;
+}
+
+/** Per-voice playback options (SPEC-08); each field defaults host-side when absent. */
+export interface SoundOptions {
+  readonly volume?: number;
+  readonly pitch?: number;
+  readonly loop?: boolean;
+}
+
+/** Music-playlist options (SPEC-08): loop the list and crossfade between tracks. */
+export interface MusicOptions {
+  readonly loop?: boolean;
+  readonly crossfadeSeconds?: number;
+}
+
+/** An ADSR amplitude envelope for a synthesized tone (SPEC-08). */
+export interface ToneEnvelope {
+  readonly attack: number;
+  readonly decay: number;
+  readonly sustain: number;
+  readonly release: number;
+}
+
+/** A low-frequency oscillator modulating a tone's frequency (SPEC-08). */
+export interface ToneLfo {
+  readonly freq: number;
+  readonly depth: number;
+}
+
+/** A neutral synthesis description — wave kind as a field, never a branch (SPEC-08). */
+export interface ToneSpec {
+  readonly wave: "sawtooth" | "sine" | "square" | "triangle";
+  readonly freq: number;
+  readonly duration: number;
+  readonly envelope?: ToneEnvelope;
+  readonly volume?: number;
+  readonly lfo?: ToneLfo;
+}
+
+/** Scheduled-playback options (SPEC-08): the gain to start a deferred voice at. */
+export interface ScheduleOptions {
+  readonly volume?: number;
 }
 
 /** The terminal result of a game / a player's room (SPEC-12 §15). */
@@ -49,10 +91,31 @@ export interface HostBridge {
   readonly reportOutcome: (outcome: Outcome) => void;
   /** Forward the per-player room outcomes to the host channel (SPEC-12 §16.6). */
   readonly reportOutcomes: (results: Readonly<Record<PlayerId, Outcome>>) => void;
+
+  // Audio (SPEC-08): presentation-side; handles are opaque, never read back into sim.
+  /** Register a sound asset by URL, returning its handle immediately (app owns fetch/decode). */
+  readonly loadSound: (url: string) => Handle;
+  /** Start a voice playing sound `id`; return the voice handle. */
+  readonly playSound: (id: Handle, opts?: SoundOptions) => Handle;
+  /** Stop a playing voice (a stale handle is a clean no-op). */
+  readonly stopVoice: (voice: Handle) => void;
+  /** Start a music playlist (crossfaded), returning its voice handle. */
+  readonly playMusic: (urls: readonly string[], opts?: MusicOptions) => Handle;
+  /** Synthesize and play a tone from its neutral spec; return the voice handle. */
+  readonly playTone: (spec: ToneSpec) => Handle;
+  /** Schedule sound `id` to start at `atSeconds` on the audio clock; return the voice handle. */
+  readonly scheduleSound: (id: Handle, atSeconds: number, opts?: ScheduleOptions) => Handle;
+  /** Set the master output gain in `[0, 1]`. */
+  readonly setMasterVolume: (volume: number) => void;
+  /** Mute or unmute all output. */
+  readonly setMuted: (muted: boolean) => void;
 }
 
 /** The seed reported before a host binds — a neutral, inert default. */
 const UNBOUND_SEED = 0n;
+
+/** The handle returned by handle-minting reads before a host binds (a null handle). */
+const UNBOUND_HANDLE = 0;
 
 /*
  * The inert host used before `bindNative`: every read returns a neutral value
@@ -66,15 +129,29 @@ const UNBOUND_HOST: HostBridge = {
   },
   clamp: (value: number): number => value,
   getSessionConfig: (): SessionConfig => ({ params: {}, seed: UNBOUND_SEED }),
+  loadSound: (): Handle => UNBOUND_HANDLE,
   normalizeAngle: (angle: number): number => angle,
   notifyReady: (): void => {
     // No-op until a host is bound
   },
   overlapCircle: (): readonly Entity[] => [],
+  playMusic: (): Handle => UNBOUND_HANDLE,
+  playSound: (): Handle => UNBOUND_HANDLE,
+  playTone: (): Handle => UNBOUND_HANDLE,
   reportOutcome: (): void => {
     // No-op until a host is bound
   },
   reportOutcomes: (): void => {
+    // No-op until a host is bound
+  },
+  scheduleSound: (): Handle => UNBOUND_HANDLE,
+  setMasterVolume: (): void => {
+    // No-op until a host is bound
+  },
+  setMuted: (): void => {
+    // No-op until a host is bound
+  },
+  stopVoice: (): void => {
     // No-op until a host is bound
   },
 };

@@ -15,8 +15,28 @@
  * own arrays using the *indices* the native core chose, never re-deciding them.
  */
 
-import type { Component, ComponentKind, Entity, Result, Ticks, Vec2 } from "./vocabulary.ts";
+import type {
+  Component,
+  ComponentKind,
+  Entity,
+  Handle,
+  Result,
+  Ticks,
+  Vec2,
+  Vec3,
+} from "./vocabulary.ts";
 import type { StepBudget } from "./step-budget.ts";
+
+/** A rigid-body kind the native physics core integrates (SPEC-10). */
+export type BodyKind = "dynamic" | "kinematic" | "static";
+
+/** A tween's native curve: endpoints, whole-tick duration, and dense ease index (SPEC-09). */
+export interface TweenCurve {
+  readonly from: number;
+  readonly to: number;
+  readonly durationTicks: Ticks;
+  readonly easeIndex: number;
+}
 
 /** A pointer sample for one tick: position plus pressed state (SPEC-05). */
 export interface PointerSample {
@@ -77,4 +97,52 @@ export interface NativeBridge {
   readonly inputSwipe: (tick: Ticks) => Result<Swipe>;
   /** The tick `action` was most recently pressed at, or `null` if never. */
   readonly inputPressedAtTick: (tick: Ticks, action: string) => Result<Ticks>;
+
+  // Tick-scheduled callbacks (SPEC-07): the native TickApi owns the schedule and reports the due ids each tick; the TS pump holds the author closures.
+  /** Schedule a one-shot timer registered at `tick`, due `delay` ticks later; return its id. */
+  readonly timerAfter: (tick: Ticks, delay: Ticks) => Handle;
+  /** Schedule a repeating timer registered at `tick`, firing every `interval` ticks; return its id. */
+  readonly timerEvery: (tick: Ticks, interval: Ticks) => Handle;
+  /** Cancel a timer so it never fires again (a stale id is a clean no-op). */
+  readonly timerCancel: (id: Handle) => void;
+  /** The timer ids due to fire on `tick`, in stable schedule order. */
+  readonly timersDue: (tick: Ticks) => readonly Handle[];
+
+  // Tick-driven state machine (SPEC-07): dense state indices, entry-tick tracked native-side.
+  /** Create a machine of `stateCount` states starting in `initial`, entered at `tick`; return its id. */
+  readonly machineCreate: (tick: Ticks, stateCount: number, initial: number) => Handle;
+  /** The current dense state index of machine `id`. */
+  readonly machineCurrent: (id: Handle) => number;
+  /** Move machine `id` to state `to`, recording `tick` as the new entry tick. */
+  readonly machineTransition: (id: Handle, tick: Ticks, to: number) => void;
+  /** How many ticks machine `id` has been in its current state as of `tick`. */
+  readonly machineTicksInState: (id: Handle, tick: Ticks) => Ticks;
+
+  // Tick-sampled tweens (SPEC-09): the native TweenApi owns the eased curve.
+  /** Add a tween from its curve, registered at `tick`; return its id. */
+  readonly tweenAdd: (tick: Ticks, curve: TweenCurve) => Handle;
+  /** Cancel a tween so it stops sampling (a stale id is a clean no-op). */
+  readonly tweenCancel: (id: Handle) => void;
+  /** The tween ids to sample on `tick`, in stable schedule order. */
+  readonly tweenActive: (tick: Ticks) => readonly Handle[];
+  /** The eased value of tween `id` at `tick`. */
+  readonly tweenValue: (id: Handle, tick: Ticks) => number;
+  /** The tween ids that reach their end on `tick`, in stable schedule order. */
+  readonly tweenCompleted: (tick: Ticks) => readonly Handle[];
+
+  // Physics bodies (SPEC-10): a body wraps an entity; impulses/forces are native-side.
+  /** Set the physics world config: gravity vector plus linear/angular damping ratios. */
+  readonly physicsSetConfig: (gravity: Vec3, linearDamping: number, angularDamping: number) => void;
+  /** Attach a `kind` body to `entity`; return the body handle. */
+  readonly physicsAddBody: (entity: Entity, kind: BodyKind) => Handle;
+  /** Apply an instantaneous impulse to `body`. */
+  readonly physicsApplyImpulse: (body: Handle, impulse: Vec3) => void;
+  /** Apply a continuous force to `body`. */
+  readonly physicsApplyForce: (body: Handle, force: Vec3) => void;
+  /** Apply a torque to `body` (SPEC-10 angular). */
+  readonly physicsApplyTorque: (body: Handle, torque: Vec3) => void;
+  /** Set `body`'s linear velocity. */
+  readonly physicsSetVelocity: (body: Handle, velocity: Vec3) => void;
+  /** Set `body`'s angular velocity. */
+  readonly physicsSetAngularVelocity: (body: Handle, velocity: Vec3) => void;
 }

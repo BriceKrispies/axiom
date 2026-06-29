@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { AuthoringError, assert as branchlessAssert, each, fail, pick } from "../src/branchless.ts";
+import {
+  AuthoringError,
+  assert as branchlessAssert,
+  each,
+  fail,
+  orElse,
+  pick,
+  whenPresent,
+} from "../src/branchless.ts";
 
 test("each runs the effect for every value in order", () => {
   const seen: number[] = [];
@@ -30,4 +38,22 @@ test("assert is a no-op when the condition holds and throws when it fails", () =
 
 test("fail always throws an AuthoringError carrying the message", () => {
   assert.throws(() => fail("nope"), new AuthoringError("nope"));
+});
+
+test("orElse keeps a present value and falls back when absent", () => {
+  assert.equal(orElse("here", "fallback"), "here");
+  assert.equal(orElse(undefined, "fallback"), "fallback");
+  // A falsy-but-present value (0) is kept — presence, not truthiness, decides.
+  assert.equal(orElse(0, 7), 0);
+});
+
+test("whenPresent runs the effect only for a present value", () => {
+  const seen: string[] = [];
+  whenPresent("x", (value) => {
+    seen.push(value);
+  });
+  whenPresent(undefined, (value: string) => {
+    seen.push(value);
+  });
+  assert.deepEqual(seen, ["x"]);
 });
