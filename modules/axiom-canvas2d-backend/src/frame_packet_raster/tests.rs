@@ -412,11 +412,15 @@ fn convert_shades_from_the_scene_directional_light() {
         FrameFeatureSet::new(false, false, 1, 0),
     );
     let out = convert(&p, &cache, &opts_cued(cues));
-    // The white surface is tinted by the red light: red survives, G/B vanish.
+    // The red light tints only the DIFFUSE term; the hemisphere ambient (sky/
+    // ground, untinted by the scene light) still reaches green/blue. So red is the
+    // brightest channel and green/blue retain just the (smaller) ambient floor —
+    // the corrected lighting model (ambient is its own sky/ground colour now).
     let c = out.triangles[0].color();
-    assert!(c[0] > 0.0, "red channel lit");
-    assert!(c[1].abs() < 1e-6, "green removed by the red light");
-    assert!(c[2].abs() < 1e-6, "blue removed by the red light");
+    assert!(c[0] > c[1], "red lit brightest by the red light");
+    assert!(c[0] > c[2], "red lit brighter than blue");
+    assert!(c[1] > 0.0, "green retains hemisphere ambient");
+    assert!(c[2] > 0.0, "blue retains hemisphere ambient");
 }
 
 #[test]

@@ -116,8 +116,14 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let base = albedo * in.color;
     let N = normalize(in.normal);
     let shade = shadow_factor(in.world_pos);
-    // Ambient term so unlit faces are not pure black.
-    var lit = base.rgb * 0.12;
+    // Hemisphere ambient: a cool sky overhead, a warm-dark ground below, blended
+    // by the surface normal's up-component (N.y) — replaces the old flat 0.12
+    // ambient so unlit faces pick up sky vs ground colour. Defaulted to match the
+    // canvas software path's `hemisphere_ambient` (sky/ground colours x 0.6).
+    let sky = vec3<f32>(0.55, 0.65, 0.85);
+    let ground = vec3<f32>(0.30, 0.26, 0.22);
+    let hemi = mix(ground, sky, clamp(N.y * 0.5 + 0.5, 0.0, 1.0)) * 0.6;
+    var lit = base.rgb * hemi;
     for (var i: u32 = 0u; i < lights.count; i = i + 1u) {
         let lt = lights.items[i];
         var L = normalize(lt.v.xyz);
@@ -586,6 +592,28 @@ fn vertex_layout() -> [wgpu::VertexAttribute; 4] {
     ]
 }
 
+/// The colour-target blend state, selected per draw from its resolved alpha:
+/// straight **alpha blending** for the common translucent/opaque case (so a
+/// material `opacity` / 2D `alpha` composites — replacing the hardcoded
+/// `REPLACE`), or **additive** blending for glow draws. The 3D main pass uses
+/// straight alpha; `additive` is the seam a per-draw glow pass selects.
+fn blend_state(additive: bool) -> wgpu::BlendState {
+    let alpha = wgpu::BlendState::ALPHA_BLENDING;
+    let add = wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        },
+    };
+    [alpha, add][additive as usize]
+}
+
 /// Build the main (lit/textured/shadowed) pipeline for colour target `format`.
 fn build_main_pipeline(
     device: &wgpu::Device,
@@ -640,7 +668,11 @@ fn build_main_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::REPLACE),
+                // Straight alpha blending (was the hardcoded REPLACE): the
+                // lowest-correct-layer fix so a material's `opacity` and the 2D
+                // surface's `alpha` actually composite instead of overwriting.
+                // `blend_state` selects per draw — additive is available for glow.
+                blend: Some(blend_state(false)),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

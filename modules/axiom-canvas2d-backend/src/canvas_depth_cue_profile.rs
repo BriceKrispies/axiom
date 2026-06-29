@@ -34,10 +34,16 @@ pub(crate) struct FogCue {
 pub(crate) struct LightingCue {
     pub(crate) enabled: bool,
     pub(crate) direction: [f32; 3],
+    /// Hemisphere-ambient exposure: the scalar the sky/ground ambient colour is
+    /// multiplied by (it replaced the old flat ambient grey).
     pub(crate) ambient: f32,
     pub(crate) diffuse: f32,
     pub(crate) banded: bool,
     pub(crate) band_count: u32,
+    /// Hemisphere ambient colour an up-facing surface receives (the sky term).
+    pub(crate) sky_color: [f32; 3],
+    /// Hemisphere ambient colour a down-facing surface receives (the ground term).
+    pub(crate) ground_color: [f32; 3],
 }
 
 /// Configuration for every Canvas depth cue. `Copy` — pure scalars and small
@@ -101,6 +107,10 @@ impl CanvasDepthCueProfile {
                 diffuse: 0.5,
                 banded: false,
                 band_count: 4,
+                // Defaulted hemisphere colours: a cool sky overhead, a warm-dark
+                // ground below, so the term works with zero author input.
+                sky_color: [0.55, 0.65, 0.85],
+                ground_color: [0.30, 0.26, 0.22],
             },
 
             enable_height_tint: true,

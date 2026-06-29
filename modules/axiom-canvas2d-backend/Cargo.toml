@@ -18,6 +18,12 @@ crate-type = ["rlib"]
 # host::FramePacket, returning a host::FrameSubmissionReport.
 axiom-host = { path = "../../crates/axiom-host" }
 
+# The neutral 2D draw contract (host::Draw2dList) carries math's Mat3 / Vec2 (the
+# per-command baked transform and rect corners); the software Draw2dList consumer
+# names and uses them directly. `math` is a layer below `host`, so depending on
+# it is legal under the Module Law and is declared in allowed_layers.
+axiom-math = { path = "../../crates/axiom-math" }
+
 [dev-dependencies]
 # Tests construct a HostPresentationRequest via the host API, which takes a
 # kernel handle source. Test-only, so it never counts as a non-test dependency.

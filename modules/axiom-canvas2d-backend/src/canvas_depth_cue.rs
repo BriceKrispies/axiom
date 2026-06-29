@@ -50,12 +50,13 @@ pub(crate) fn world_y(point: [f32; 3], world: &[f32; 16]) -> f32 {
     world[1] * point[0] + world[5] * point[1] + world[9] * point[2] + world[13]
 }
 
-/// Triangle brightness from a world-space normal, the (normalized) to-light
-/// direction, and the light's `intensity`: `ambient + max(dot, 0) * diffuse *
+/// The **diffuse** brightness from a world-space normal, the (normalized)
+/// to-light direction, and the light's `intensity`: `max(dot, 0) * diffuse *
 /// intensity`, optionally quantized into `lighting_band_count` bands, clamped to
-/// a safe range. The `ambient`/`diffuse` knobs are the profile's exposure
-/// controls; the direction and intensity come from the frame's real scene light.
-/// `1.0` (no-op) when lighting is disabled.
+/// a safe range. The ambient floor is no longer folded in here — it is supplied
+/// separately as the directional [`hemisphere_ambient`] colour, so `shade_triangle`
+/// can give sky/ground colour to unlit faces instead of a single grey. `1.0`
+/// (no-op) when lighting is disabled.
 pub(crate) fn lighting_brightness(
     normal: [f32; 3],
     light_dir: [f32; 3],
@@ -64,8 +65,26 @@ pub(crate) fn lighting_brightness(
 ) -> f32 {
     let raw = dot3(normal, light_dir).max(0.0);
     let lit = [raw, band(raw, profile.lighting.band_count)][usize::from(profile.lighting.banded)];
-    let brightness = profile.lighting.ambient + lit * profile.lighting.diffuse * intensity;
+    let brightness = lit * profile.lighting.diffuse * intensity;
     [1.0, brightness.clamp(0.0, MAX_BRIGHTNESS)][usize::from(profile.lighting.enabled)]
+}
+
+/// The **hemisphere ambient** colour for a world-space `normal`: a sky/ground
+/// gradient by the normal's up-component (`normal.y`), scaled by the profile's
+/// ambient exposure. An up-facing surface (`normal.y = +1`) receives `sky_color`,
+/// a down-facing one (`normal.y = -1`) `ground_color`, blended at the horizon.
+/// This replaces the old flat ambient scalar so unlit faces pick up sky vs ground
+/// colour — the canvas counterpart of the GPU shader's hemisphere term.
+pub(crate) fn hemisphere_ambient(normal: [f32; 3], profile: &CanvasDepthCueProfile) -> [f32; 3] {
+    let t = (normal[1] * 0.5 + 0.5).clamp(0.0, 1.0);
+    let amb = profile.lighting.ambient;
+    let g = profile.lighting.ground_color;
+    let s = profile.lighting.sky_color;
+    [
+        mix(g[0], s[0], t) * amb,
+        mix(g[1], s[1], t) * amb,
+        mix(g[2], s[2], t) * amb,
+    ]
 }
 
 /// Quantize `x ∈ [0,1]` into `count` bands (floor); `count` is treated as ≥ 1.
@@ -88,19 +107,24 @@ pub(crate) fn shade_triangle(
     base: [f32; 4],
     brightness: f32,
     light_color: [f32; 3],
+    ambient: [f32; 3],
     hfactor: f32,
     depth: f32,
     profile: &CanvasDepthCueProfile,
 ) -> ([f32; 4], TriangleCuesApplied) {
-    // 3. lighting: multiply RGB by brightness and the scene light's colour (alpha
-    // untouched). The colour tint applies only when lighting is on, so a disabled
-    // light is a true no-op (neutral white).
+    // 3. lighting: multiply RGB by a per-channel factor = hemisphere ambient +
+    // diffuse·(scene light colour) (alpha untouched). When lighting is disabled
+    // the factor is unity, so a disabled light is a true no-op (base survives).
     let lit = profile.lighting.enabled;
-    let tint = [[1.0, 1.0, 1.0], light_color][usize::from(lit)];
+    let factor = [
+        [1.0, ambient[0] + brightness * light_color[0]][usize::from(lit)],
+        [1.0, ambient[1] + brightness * light_color[1]][usize::from(lit)],
+        [1.0, ambient[2] + brightness * light_color[2]][usize::from(lit)],
+    ];
     let after_light = [
-        base[0] * brightness * tint[0],
-        base[1] * brightness * tint[1],
-        base[2] * brightness * tint[2],
+        base[0] * factor[0],
+        base[1] * factor[1],
+        base[2] * factor[2],
         base[3],
     ];
 
@@ -240,8 +264,9 @@ mod tests {
         let toward = lighting_brightness(light, light, 1.0, &p); // normal == light dir
         let away = lighting_brightness([-light[0], -light[1], -light[2]], light, 1.0, &p);
         assert!(toward > away);
-        // Ambient floor: even the away-facing triangle is not black.
-        assert!(away >= p.lighting.ambient - 1e-6);
+        // Diffuse-only now (the ambient floor moved to `hemisphere_ambient`): a
+        // face turned fully away from the light has zero diffuse brightness.
+        assert_eq!(away, 0.0);
     }
 
     #[test]
@@ -252,9 +277,9 @@ mod tests {
         let dim = lighting_brightness(n, l, 0.5, &p);
         let bright = lighting_brightness(n, l, 2.0, &p);
         assert!(bright > dim);
-        // normal·light == 1, so dim == ambient + 1·diffuse·0.5 (intensity scales
-        // only the diffuse term, not the ambient floor).
-        assert!((dim - (p.lighting.ambient + p.lighting.diffuse * 0.5)).abs() < 1e-6);
+        // normal·light == 1, so dim == 1·diffuse·0.5 (the diffuse term scales with
+        // intensity; ambient is now a separate hemisphere colour, not folded here).
+        assert!((dim - p.lighting.diffuse * 0.5).abs() < 1e-6);
     }
 
     #[test]
@@ -283,7 +308,7 @@ mod tests {
     #[test]
     fn brightness_clamps_to_safe_range() {
         let mut p = profile();
-        p.lighting.ambient = 10.0;
+        // A runaway diffuse gain (dot == 1, intensity 1) saturates past the cap.
         p.lighting.diffuse = 10.0;
         let b = lighting_brightness([0.0, 1.0, 0.0], [0.0, 1.0, 0.0], 1.0, &p);
         assert_eq!(b, MAX_BRIGHTNESS);
@@ -307,7 +332,8 @@ mod tests {
         p.enable_height_tint = false;
         p.enable_distance_detail_falloff = false;
         // brightness 0.5 halves rgb (white light = no tint), alpha unchanged.
-        let (c, applied) = shade_triangle([0.8, 0.4, 0.2, 1.0], 0.5, [1.0, 1.0, 1.0], 0.0, 0.0, &p);
+        let (c, applied) =
+            shade_triangle([0.8, 0.4, 0.2, 1.0], 0.5, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p);
         assert!((c[0] - 0.4).abs() < 1e-6);
         assert!((c[1] - 0.2).abs() < 1e-6);
         assert!((c[2] - 0.1).abs() < 1e-6);
@@ -323,13 +349,15 @@ mod tests {
         p.enable_height_tint = false;
         p.enable_distance_detail_falloff = false;
         // Lit: a red light zeroes the green/blue channels of a white surface.
-        let (lit, _) = shade_triangle([1.0, 1.0, 1.0, 1.0], 1.0, [1.0, 0.0, 0.0], 0.0, 0.0, &p);
+        let (lit, _) =
+            shade_triangle([1.0, 1.0, 1.0, 1.0], 1.0, [1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p);
         assert!((lit[0] - 1.0).abs() < 1e-6);
         assert!(lit[1].abs() < 1e-6);
         assert!(lit[2].abs() < 1e-6);
         // Disabled lighting: the colour tint is neutral (white), so base survives.
         p.lighting.enabled = false;
-        let (off, _) = shade_triangle([1.0, 1.0, 1.0, 1.0], 1.0, [1.0, 0.0, 0.0], 0.0, 0.0, &p);
+        let (off, _) =
+            shade_triangle([1.0, 1.0, 1.0, 1.0], 1.0, [1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p);
         assert_eq!(off, [1.0, 1.0, 1.0, 1.0]);
     }
 
@@ -340,7 +368,7 @@ mod tests {
         p.enable_distance_detail_falloff = false;
         p.height_tint_strength = 0.0;
         let base = [0.3, 0.5, 0.7, 1.0];
-        let (c, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], 1.0, 0.0, &p);
+        let (c, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 1.0, 0.0, &p);
         assert!((c[0] - base[0]).abs() < 1e-6);
         assert!((c[1] - base[1]).abs() < 1e-6);
         assert!((c[2] - base[2]).abs() < 1e-6);
@@ -355,10 +383,12 @@ mod tests {
         p.high_height_color = [1.0, 1.0, 1.0, 1.0];
         p.low_height_color = [0.0, 0.0, 0.0, 1.0];
         // hfactor 1 → tint == high colour → full mix yields the high colour.
-        let (hi, _) = shade_triangle([0.5, 0.5, 0.5, 1.0], 1.0, [1.0, 1.0, 1.0], 1.0, 0.0, &p);
+        let (hi, _) =
+            shade_triangle([0.5, 0.5, 0.5, 1.0], 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 1.0, 0.0, &p);
         assert!((hi[0] - 1.0).abs() < 1e-6);
         // hfactor 0 → tint == low colour.
-        let (lo, _) = shade_triangle([0.5, 0.5, 0.5, 1.0], 1.0, [1.0, 1.0, 1.0], 0.0, 0.0, &p);
+        let (lo, _) =
+            shade_triangle([0.5, 0.5, 0.5, 1.0], 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p);
         assert!((lo[0] - 0.0).abs() < 1e-6);
     }
 
@@ -370,8 +400,8 @@ mod tests {
         p.detail_falloff_near = 0.0;
         p.detail_falloff_far = 1.0;
         let base = [1.0, 0.0, 0.0, 1.0]; // saturated red
-        let (near, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], 0.0, 0.0, &p); // depth 0 → t 0
-        let (far, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], 0.0, 1.0, &p); // depth 1 → t max
+        let (near, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p); // depth 0 → t 0
+        let (far, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 1.0, &p); // depth 1 → t max
                                                                                  // Far red channel is pulled toward luminance (lower); near is unchanged.
         assert!((near[0] - 1.0).abs() < 1e-6);
         assert!(far[0] < near[0]);
@@ -409,7 +439,42 @@ mod tests {
         let mut p = profile();
         p.enable_height_tint = false;
         p.enable_distance_detail_falloff = false;
-        let (c, _) = shade_triangle([0.6, 0.4, 0.2, 1.0], 0.5, [1.0, 1.0, 1.0], 0.0, 0.5, &p);
+        let (c, _) =
+            shade_triangle([0.6, 0.4, 0.2, 1.0], 0.5, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 0.5, &p);
         assert_eq!(c, [0.3, 0.2, 0.1, 1.0]);
+    }
+
+    #[test]
+    fn hemisphere_ambient_gives_sky_up_and_ground_down() {
+        let p = profile();
+        let amb = p.lighting.ambient;
+        // An up-facing normal (normal.y = +1) receives the sky colour × exposure.
+        let sky = hemisphere_ambient([0.0, 1.0, 0.0], &p);
+        assert!((sky[0] - p.lighting.sky_color[0] * amb).abs() < 1e-6);
+        assert!((sky[1] - p.lighting.sky_color[1] * amb).abs() < 1e-6);
+        assert!((sky[2] - p.lighting.sky_color[2] * amb).abs() < 1e-6);
+        // A down-facing normal (normal.y = -1) receives the ground colour.
+        let ground = hemisphere_ambient([0.0, -1.0, 0.0], &p);
+        assert!((ground[0] - p.lighting.ground_color[0] * amb).abs() < 1e-6);
+        assert!((ground[2] - p.lighting.ground_color[2] * amb).abs() < 1e-6);
+        // The sky term is cooler/bluer than the warm ground term.
+        assert!(sky[2] > ground[2]);
+        // The horizon (normal.y = 0) is the midpoint blend.
+        let horizon = hemisphere_ambient([1.0, 0.0, 0.0], &p);
+        assert!((horizon[0] - (sky[0] + ground[0]) * 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn shade_applies_hemisphere_ambient_to_unlit_faces() {
+        // With zero diffuse brightness, the surface is lit only by the hemisphere
+        // ambient: base × ambient colour. A grey surface picks up the sky tint.
+        let mut p = profile();
+        p.enable_height_tint = false;
+        p.enable_distance_detail_falloff = false;
+        let ambient = [0.4, 0.5, 0.8];
+        let (c, _) = shade_triangle([1.0, 1.0, 1.0, 1.0], 0.0, [1.0, 1.0, 1.0], ambient, 0.0, 0.0, &p);
+        assert!((c[0] - 0.4).abs() < 1e-6);
+        assert!((c[1] - 0.5).abs() < 1e-6);
+        assert!((c[2] - 0.8).abs() < 1e-6);
     }
 }
