@@ -4,7 +4,7 @@
 > README footnote ⁴ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
 > Landed (2026-06-28, native): `Mesh::Cylinder` + `Material` `emissive`/`roughness`/`opacity` fields + the hemisphere-ambient term (GPU shader and canvas2d `hemisphere_ambient`); `@axiom/game` projects `createMesh`/`createMaterial`/`setCamera3D`/`addLight` and the `v3`/`mat4`/`quat` namespaces — **routed to the native `MathApi`, no TS math twin**.
 > **Not yet built (undeferred until now):** the §7 end-to-end render-one-frame slice proof (the "nova-roll" smoke path is unimplemented — `apps/axiom-game-runtime` has no such test), and the GPU↔canvas2d backend-parity test for a cylinder + emissive draw.
-> Deferred: `opacity` is **carried on the receipt but does not blend yet** — 3D translucency needs back-to-front draw ordering (canvas2d 3D-translucency deferred). `MeshData` (author-supplied vertex data) deferred until a game needs non-catalog geometry.
+> Deferred: `opacity` is **carried on the `RenderMaterial` receipt but does not yet affect the rendered pixel** — and the reason is **no longer "blending is off."** The GPU main pass now uses `ALPHA_BLENDING` (see SPEC-04 §2); a translucent material still renders opaque because **`opacity` is never plumbed into the shader's `base.a`** — the fragment shader's `base.a` comes from `albedo.a * instance_color.a`, and the material's separate `opacity` field is not threaded into that instance/material color alpha. So wiring `opacity` through to the alpha channel (not a blend-state change) is the remaining work; 3D translucency may additionally want back-to-front draw ordering (canvas2d 3D-translucency deferred). `MeshData` (author-supplied vertex data) deferred until a game needs non-catalog geometry.
 > Contract: §11   Vocabulary: Procedural geometry, Perspective camera, 3D mesh raster, Materials, Lighting   Determinism: presentation
 
 ## 1. Summary
@@ -62,12 +62,18 @@ Gaps to close (all small, all named by contract §11):
   no opacity setter.
 - **No hemisphere lighting term.** Ambient is a single flat scalar (`0.12`); the
   vocabulary's "hemisphere" sky/ground gradient term is absent.
-- **Opacity does not blend.** The GPU pipeline hardcodes
-  `blend: Some(wgpu::BlendState::REPLACE)` (`scene_renderer.rs`), so even though
-  the fragment shader emits `base.a`, a translucent material renders opaque. Real
-  transparency depends on **SPEC-04**'s alpha-blending decision (the 2D surface
-  spec owns the blend-state surface); this spec must not silently bolt a second
-  blend path onto the 3D pipeline.
+- **Opacity does not yet affect the pixel — but not because blending is off.**
+  The GPU main pass now uses `wgpu::BlendState::ALPHA_BLENDING` (`scene_renderer.rs`
+  `blend_state`; SPEC-04 §2 closed the old hardcoded-`REPLACE` gap). The remaining
+  defect is that **`opacity` is never plumbed into the shader's `base.a`**: the
+  fragment shader computes `base = albedo * in.color` and returns `vec4(lit,
+  base.a)`, where `in.color` is `vertex_color * instance_color` — and the
+  material's separate `opacity` field is not threaded into that instance/material
+  color alpha (the app sets the instance color from the material's base-color `w`,
+  not from `opacity`). So a translucent material renders opaque because its alpha
+  never reaches the fragment, not because the pipeline overwrites. The fix is to
+  carry `opacity` into `base.a`; 3D translucency may additionally want
+  back-to-front draw ordering — but it no longer waits on a blend-state change.
 - **The whole TS 3D surface is absent.** No `createMesh`, `createMaterial`,
   `setCamera3D`, `addLight`, no `v3`/`mat4`/`quat` namespaces (consistent with
   SPEC-00: 0 contract entry points exist in TS today).
@@ -99,13 +105,16 @@ isolated engine module. Three small extensions plus one projection:
    presentation shading inside the platform-facing backend that already owns the
    lit pipeline; nothing new crosses a module boundary. The hemisphere colours are
    a render input the app supplies (a scene/light parameter), not new geometry.
-4. **Opacity actually blending — owned by SPEC-04, consumed here.** This spec
-   *declares the dependency*: translucent 3D materials only show once the GPU
-   pipeline grows an alpha-blend state. That blend-state surface is SPEC-04's
-   (the 2D surface, where alpha/`shadow`/paints live); SPEC-11 wires the
-   `opacity` field through and renders it correctly **after** SPEC-04 lands the
-   blend path. Until then `opacity` is carried but visually REPLACE (documented,
-   not silently dropped).
+4. **Opacity actually affecting the pixel — the blend state has landed; the
+   remaining work is plumbing.** SPEC-04 already grew the GPU alpha-blend state
+   (`ALPHA_BLENDING` on the main pass), so the old "needs a blend path" dependency
+   is **closed**. What remains is to thread the material's `opacity` into the
+   shader's `base.a` (today `base.a = albedo.a * instance_color.a`, and `opacity`
+   never reaches the instance/material color alpha). This is a render-pipeline /
+   backend plumbing fix inside the pass that already owns the lit shader — not a
+   blend-state change and not a second blend path. Until that plumbing lands,
+   `opacity` is carried on the receipt but renders opaque (documented, not silently
+   dropped).
 5. **TS projection — `@axiom/game` SDK + `apps/axiom-game-runtime` (SPEC-00).**
    `createMesh`/`createMaterial`/`setCamera3D`/`addLight` marshal to the existing
    scene/material/mesh facades across the wasm boundary; `v3`/`mat4`/`quat` route
@@ -220,10 +229,11 @@ existing display model, listed here for contract completeness.
     not coverage theater).
 - **Backend parity:** the GPU and canvas2d paths agree on a cylinder + emissive
   material draw (reuse the `axiom-shot` headless harness, both backends).
-- **Opacity dependency gate:** a translucent-material test asserts the `opacity`
-  field is *carried* on the receipt today, and is annotated as blocked on SPEC-04
-  for the actual blended pixel result — no opaque-looking pass pretending to be
-  transparent.
+- **Opacity gate:** a translucent-material test asserts the `opacity` field is
+  *carried* on the receipt today. The blend state has landed (SPEC-04 §2,
+  `ALPHA_BLENDING`), so the remaining gate is the plumbing fix that threads
+  `opacity` into the shader's `base.a` — until then the test annotates `opacity`
+  as carried-but-opaque, no opaque-looking pass pretending to be transparent.
 - **TS projection:** tsgo + Oxlint (branch ban) + 100% `node:test`. A cross-check
   asserts the `v3`/`mat4`/`quat` TS surface and native `MathApi` agree on a vector
   of sample inputs (no second implementation to drift). A slice test in
@@ -236,8 +246,9 @@ existing display model, listed here for contract completeness.
   `emissive`/`roughness`/`opacity` material fields have no new dependency — extend
   the umbrella + render contract immediately.
 - **Hemisphere term** depends only on the existing backends.
-- **Opacity *blending*** depends on **SPEC-04** (alpha blend state). Carry the
-  field now; render it correctly after SPEC-04.
+- **Opacity rendering:** the SPEC-04 alpha blend state has landed, so this no
+  longer waits on a blend path. The field is carried now; rendering it correctly
+  needs the plumbing fix that threads `opacity` into the shader's `base.a` (§3.4).
 - **TS projection** depends on **SPEC-00** (handle tables, wasm boundary,
   `@axiom/game`), **SPEC-02** (`World`/`Entity`/`Renderable` component), and
   **SPEC-03** (the `v3`/`mat4`/`quat` namespaces are *declared* by SPEC-03 to be

@@ -1,7 +1,7 @@
 # SPEC-08 — Audio (synthesis, playback, scheduling, analysis)
 
-> Status: Landed
-> Landed (2026-06-28): new module `axiom-audio` (`AudioApi` neutral core + `#[cfg(target_arch = "wasm32")]` Web Audio arm; `"audio"` added to `PLATFORM_FACING_MODULES`); `@axiom/game` projects `loadSound`/`playSound`/`playTone`/`playMusic`/`scheduleSound`/`setMasterVolume`/`setMuted`. Live playback and the optional §13.1 analyser are browser-proven — the native sandbox cannot run browser Web Audio. The §2 greenfield is now built.
+> Status: Landed (core); tones realized in the wasm arm, sample/music/stop + analyser not yet realized
+> Landed (2026-06-28): new module `axiom-audio` (`AudioApi` neutral core + `#[cfg(target_arch = "wasm32")]` Web Audio arm; `"audio"` added to `PLATFORM_FACING_MODULES`); `@axiom/game` projects `loadSound`/`playSound`/`playTone`/`playMusic`/`scheduleSound`/`setMasterVolume`/`setMuted`. **Realized in the wasm arm: TONE synthesis only** (oscillator + gain + master gain); `Load`/`PlaySample`/`PlayMusic`/`Stop` are recognised commands but **no-op arms** awaiting the app's decoded `AudioBuffer` registry (§9). **The §13.1 analyser is a stub** — `open_audio_input` mints a handle but opens no stream, and there is no `AnalyserNode` read, no `bands`/`level`. The native core (the §2 greenfield) is built and covered; the live realization of samples/music/stop + the analyser is not yet done. The native sandbox cannot run browser Web Audio.
 > Contract: §13(.1)   Vocabulary: Audio-clock scheduling, Synthesis, Mute/volume, Sample/playlist playback, LFO, Live capture+FFT   Determinism: presentation
 
 ## 1. Summary

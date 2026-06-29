@@ -200,9 +200,11 @@ Conventions (deterministic, documented):
   contact: equal sphere centres, or a sphere centre inside a box.
 
 A `ContactManifold` carries both colliders, both bodies, the unit normal, the
-penetration depth, and a world contact point. The contact point is part of the
-manifold's data and identity today but has **no accessor yet** — it will be
-consumed when angular/friction dynamics land.
+penetration depth, and a world contact point. The contact point is surfaced to
+apps through `latest_contacts()` (`ContactReport`), but is **not yet used inside
+the solver**: the landed friction solver derives its tangent basis from the
+contact normal alone, and the contact point will be consumed when
+**contact-induced angular dynamics** land (a contact lever arm needs the point).
 
 ### Contact solver (`contact_solver.rs`)
 
@@ -213,29 +215,45 @@ A deterministic **sequential-impulse** solver in two stages:
    applies a normal impulse that removes the approaching relative velocity,
    scaled by `1 + combined_restitution` — where the combined restitution is the
    **larger** of the two colliders' restitutions, so a bouncy body rebounds off
-   any surface. Impulses are split by inverse mass, so a static or kinematic body
-   (zero inverse mass) is never moved. A separating contact gets no impulse.
+   any surface — **then a tangential friction impulse** (see below). Impulses are
+   split by inverse mass, so a static or kinematic body (zero inverse mass) is
+   never moved. A separating contact gets no impulse.
 2. **Position correction** (`correct_positions`) is a Baumgarte-style push
    (slop `0.01 m`, beta `0.2`) that removes the residual penetration beyond the
    slop, again split by inverse mass, so resting stacks neither sink nor jitter.
 
-Gating is arithmetic (`approaching.then(…)`, `(depth - slop).max(0.0)`), never
-control flow.
+Gating is arithmetic (`approaching.then(…)`, `(depth - slop).max(0.0)`, the
+Coulomb `clamp`), never control flow.
 
-> **Friction is not resolved in Phase 2.** Material friction is validated and
-> stored but applies **no tangential impulse** yet — a documented later-phase
-> item. Only normal impulses and positional correction are applied.
+> **Friction is resolved (tangential solver landed).** Material friction is no
+> longer merely stored: after the normal impulse, `solve_contact` applies a
+> **tangential friction impulse** along a deterministic orthonormal tangent basis
+> derived **only from the contact normal** (`tangent_basis` crosses the normal
+> with the world axis it is least aligned with, then completes the pair — so the
+> basis is a pure function of world state, never of discovery order). The combined
+> coefficient is the geometric mean `sqrt(μ_a·μ_b)` of the two colliders'
+> frictions, and the impulse is clamped to the Coulomb cone `|j_t| ≤ μ·j_n` with
+> `max`/`min` (never a branch, and never `f32::clamp`, which would panic on a NaN
+> bound). The friction pass walks the same stable handle-sorted manifold order as
+> the normal pass. The step record's `frictioned_contact_count` reports the
+> contacts that received a genuine tangential impulse (approaching, positive
+> combined friction, nonzero tangential speed). **The friction impulse is linear
+> only** — it changes linear velocities; the contact solver applies no *angular*
+> impulse, so a frictional slide does not (yet) induce spin (see below).
 
-### The linear integrator (`integrator.rs`)
+### The integrator (`integrator.rs`)
 
 Semi-implicit (symplectic) Euler over the explicit fixed step, split so the
-solver runs between the two halves:
+solver runs between the two halves. It now integrates **both** linear and angular
+motion:
 
 - `integrate_velocities` applies gravity, accumulated force, and impulse to each
-  enabled dynamic body's linear velocity, then clears the accumulators, and
+  enabled dynamic body's linear velocity **and accumulated torque (scaled by the
+  body's diagonal inverse inertia) to its angular velocity**, then decays both by
+  the configured per-step **linear/angular damping**, clears the accumulators, and
   returns the count of bodies that actually integrated;
 - `integrate_positions` advances each enabled dynamic body's translation by its
-  (now solved) velocity.
+  (now solved) linear velocity **and its orientation by its angular velocity**.
 
 Motion is gated **arithmetically, not by a branch**: an `active_factor` of `1.0`
 for an enabled dynamic body and `0.0` otherwise multiplies every contribution, so
@@ -243,19 +261,30 @@ static, kinematic, and disabled bodies collapse to "no change" with zero control
 flow. Static and kinematic bodies additionally carry **zero inverse mass**, so
 even the force/impulse terms vanish.
 
-The integrator is **linear only**: orientation is never integrated. Angular
-velocity and torque are stored on a body but no rotational dynamics are applied —
-a documented limitation.
+**Orientation integration (landed, deterministic, NaN-safe).** Orientation
+advances by `q' = normalize(q + 0.5·dt·(ω_quat ⊗ q))`, where `ω_quat` is the pure
+quaternion `(ω, 0)`, using `Quat::multiply` in a fixed factor order. The normalize
+divides by a length clamped to `f32::MIN_POSITIVE`, so a degenerate quaternion can
+never yield a `NaN`, and an inactive body keeps its exact stored orientation
+(the candidate is selected away by table index, not a branch). So a body **does**
+acquire rotation through simulation — from an applied torque.
 
-### Phase-2 pose simplification: translation only
+> **Where angular dynamics stop today.** Torque (`apply_torque`) spins a body and
+> orientation integrates, but the **contact solver applies no angular impulse** —
+> a collision or frictional slide changes only linear velocities, so contacts do
+> not yet induce spin. Contact-coupled angular response is the remaining angular
+> gap.
+
+### Pose simplification: collider placement is translation-only
 
 A collider is placed at its owning body's **translation**, and **body rotation and
-scale are ignored** (`world_aabb` builds `center ± half_extents`, the contact
-generators read body `translation`, and position correction preserves
-`rotation`/`scale`). This is internally consistent: with no angular integration a
-body never acquires a rotation through simulation, so axis-aligned geometry is
-exact for the current motion model. Oriented-box contacts and rotational dynamics
-arrive together in a later phase.
+scale are ignored for collision** (`world_aabb` builds `center ± half_extents`,
+the contact generators read body `translation`, and position correction preserves
+`rotation`/`scale`). Note this is now a genuine *approximation* rather than a
+consequence of "no rotation": a body **can** acquire an orientation through
+torque-driven angular integration, but its collider's world AABB and contact
+geometry do not rotate with it. Oriented-box contacts (and contact-induced
+angular response) remain a later-phase item.
 
 ### Spatial queries (`physics_query.rs`)
 
@@ -282,6 +311,8 @@ Shape handling dispatches on `kind().index()` into per-kind function tables, not
 Each step records the real pipeline counts, summed across the step's substeps:
 `broad_phase_pair_count`, `contact_pair_count`, `solved_contact_count` (contacts
 the solver actually resolved — approaching contacts that received an impulse),
+`frictioned_contact_count` (contacts that received a genuine tangential friction
+impulse — approaching, positive combined friction, nonzero tangential speed),
 the integrated-body count, body / collider / dynamic-body counts, commands
 drained, events emitted, and `substep_count`. `solver_iteration_count` is the
 **configured** sequential-impulse budget — diagnostic metadata, **not** a measure
@@ -358,15 +389,18 @@ app, test app, or WASM app can each drive the same world.
 Scheduled, in order, in [`ROADMAP.md`](ROADMAP.md). Each is genuinely **not**
 implemented yet (and is never claimed to be):
 
-- **friction** — tangential contact impulses (friction is stored but unresolved);
+- **contact-induced angular impulse** — torque + orientation integration + angular
+  damping are landed and a body spins from `apply_torque`, but the **contact solver
+  applies no angular impulse**, so collisions and frictional slides do not yet
+  induce spin (the per-step angular dynamics from contacts are the open piece);
 - **capsule contacts** — every capsule pairing produces no contact, and capsule is
   excluded from exact queries;
-- **box/box contacts** — oriented or AABB;
+- **box/box contacts** — oriented or AABB; collider placement is translation-only,
+  so a body's orientation does not rotate its collider geometry;
 - **collision / trigger lifecycle events** — no contact persistence across steps,
   so contact enter/stay/exit and trigger overlap events are not emitted (the
   `latest_contacts()` report exposes the current step's contacts, but there is no
   cross-step event stream yet);
-- **angular / rotational dynamics** — orientation is never integrated;
 - **true continuous collision detection** — substepping mitigates large-dt
   tunnelling but is not CCD;
 - **sleeping**;

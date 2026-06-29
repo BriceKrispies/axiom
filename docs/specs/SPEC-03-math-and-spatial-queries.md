@@ -2,7 +2,7 @@
 
 > Status: Partial — native facade landed; TS projection incomplete + a determinism
 > risk. See README footnote ⁷ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
-> Landed (2026-06-28, native): `axiom-math::MathApi::{clamp, lerp, normalize_angle}` + `axiom-scene::SceneApi::{overlap_circle, overlap_box, raycast}`; `@axiom/game` exports only `clamp`/`normalizeAngle`/`overlapCircle`. **Not yet projected**: the `v2` vector namespace, the pure predicates (`aabbOverlap`/`pointInRect`/`circleOverlap`), and `overlapBox`/`raycast` (native side exists). **TS `lerp` is re-implemented in JS f64** rather than routed to the authoritative native f32 — a sim-class determinism risk to fix.
+> Landed (2026-06-28, native): `axiom-math::MathApi::{clamp, lerp, normalize_angle}` + `axiom-scene::SceneApi::{overlap_circle, overlap_box, raycast}`; `@axiom/game` exports `clamp`/`normalizeAngle` routed to native. **Exported-but-not-wired (deferred)**: `overlapCircle` is a no-op STUB in the runtime app (`wasm-host.ts` `deferredBridge` returns `[]`; the native `axiom-scene::overlap_circle` is never bridged), and `overlapBox`/`raycast`/the `v2` vector namespace/the pure predicates (`aabbOverlap`/`pointInRect`/`circleOverlap`) are likewise not yet projected (the native side exists). **TS `lerp` is still a JS f64 reimplementation** rather than routed to the authoritative native f32 — a sim-class determinism risk to fix.
 > Contract: §5   Vocabulary: clamp, lerp, normalizeAngle, Vec/Mat4/Quat, AABB/point-in-rect/circle overlap, Raycast   Determinism: sim
 
 ## 1. Summary

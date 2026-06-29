@@ -1,8 +1,9 @@
 # SPEC-05 — Input (keyboard, bindings, pointer, timing)
 
-> Status: Partial — native module landed, but input is **not carried across the
-> wasm boundary**. See README footnote ⁸ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
-> Landed (2026-06-28, native): `axiom-input::InputState` (`bind_action`/`sample`/`is_down`/`pressed`/`released`/`axis`/`pointer`/`pointer_pressed`/`swipe`/`pressed_at_tick`) replaced the `TouchControls` facade; `@axiom/game` `Sim.input` (`SnapshotInput`) + `bindAction` project it at the type level. **Gap:** `WasmGame` (the real seam the SDK binds) exposes no input method, so `Sim.input` is non-functional in the live browser until the boundary carries the per-tick intent snapshot.
+> Status: Partial — native module landed and the wasm boundary carries input, but
+> the **live browser path is still dead at the platform edge**. See README
+> footnote ⁸ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed (2026-06-28, native): `axiom-input::InputState` (`bind_action`/`sample`/`is_down`/`pressed`/`released`/`axis`/`pointer`/`pointer_pressed`/`swipe`/`pressed_at_tick`) replaced the `TouchControls` facade; `@axiom/game` `Sim.input` (`SnapshotInput`) + `bindAction` project it, and the boundary carries input — the `NativeBridge` exposes per-tick input reads and `WasmGame` exposes `inputKey`/`bindAction`/the snapshot-read methods. **Gap (two distinct platform-edge causes):** the live browser path does not yet function because (a) the host `bindAction` is a **deferred no-op** in `wasm-host.ts` (`deferredBridge`), so author bindings never reach the native `InputState`; and (b) there are **no DOM event listeners** feeding neutral device events (`KeyboardEvent`/`PointerEvent` → `DeviceFrame`) into `sample`, so no device input enters the per-tick snapshot. Both are app/platform-edge wiring, not native gaps.
 > Contract: §8   Vocabulary: Keyboard, Pointer/click, Touch/swipe/gesture, Key→action bindings, Charge/hold-release, Buffered direction, Timing-window hit   Determinism: sim
 
 ## 1. Summary

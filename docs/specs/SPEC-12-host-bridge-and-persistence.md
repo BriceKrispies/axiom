@@ -1,7 +1,7 @@
 # SPEC-12 — Host bridge & persistence
 
-> Status: Landed
-> Landed (2026-06-28): `axiom-host` gained `HostSessionConfig`/`HostOutcome`/`HostOutcomeSet` (plus the `Score`/`Pixels` host quantity newtypes); `@axiom/game` projects `getSessionConfig`/`notifyReady`/`reportOutcome`/`reportOutcomes` (emit-exactly-once). The live `postMessage`/URL-param/`localStorage` channel lives in the runtime app's wasm arm, browser-proven. The §2 gaps below are now closed.
+> Status: Partial — native seam landed and native-tested; the TS contract path is **not yet bound to the live channel**.
+> Landed (2026-06-28, native): `axiom-host` gained `HostSessionConfig`/`HostOutcome`/`HostOutcomeSet` (plus the `Score`/`Pixels` host quantity newtypes), and the Rust wasm arm's inbound decode + emit-once outcome latch exist and are native-tested; `@axiom/game` declares the `getSessionConfig`/`notifyReady`/`reportOutcome`/`reportOutcomes` projection. **Gap:** the TS↔wasm binding is **STUBBED** — `wasm-host.ts` `deferredBridge()` returns inert no-ops for `getSessionConfig` (empty `{seed: 0n, params: {}}`), `notifyReady`, `reportOutcome`, and `reportOutcomes`, and `notifyReady`/`reportOutcomes` have **no `WasmGame` export at all**. So the live `postMessage`/URL-param/`localStorage` channel is not yet wired to the engine's `HostOutcome`; the native seam works in native tests, but the author-facing path does not reach the live channel.
 > Contract: §15, §16.6   Vocabulary: the embed seam (Outcome report, localStorage, fetch record-gameplay, URL-param config injection, external reward/webhook, postMessage capability bridge, JWT handshake)   Determinism: boundary
 
 ## 1. Summary
