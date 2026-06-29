@@ -42,6 +42,13 @@ pub use bridge::GameBridge;
 /// `(kind, bytes)` marshalling convention every later subsystem reuses.
 mod world;
 
+/// Physics (SPEC-10): a deterministic rigid-body world over `axiom-physics`
+/// composed into [`GameBridge`], stepped inside the fixed-step loop and written
+/// back to each bodied entity's `Transform`. Native-testable; the `wasm32`
+/// boundary marshals to it through `GameBridge`. See [`physics`] for the boundary
+/// convention and the physics-facade gaps it works within.
+mod physics;
+
 /// The embed seam (SPEC-12): decode the inbound session config, latch the single
 /// outbound outcome. Pure, native-testable core; the browser channel that carries
 /// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on
