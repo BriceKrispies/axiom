@@ -99,6 +99,7 @@
         "oxc/no-rest-spread-properties": "off",
         "typescript/no-floating-promises": "off",
         "typescript/no-non-null-assertion": "off",
+        "typescript/promise-function-async": "off",
         "unicorn/number-literal-case": "off",
         "unicorn/prefer-at": "off",
         "unicorn/prefer-spread": "off"
@@ -204,6 +205,24 @@
         "typescript/no-unsafe-call": "off",
         "typescript/no-unsafe-member-access": "off",
         "typescript/no-unsafe-type-assertion": "off"
+      }
+    },
+    {
+      // net-room.ts hosts `matchmake` (SPEC-13 §16.6), the ONE inherently-async
+      // surface in the SDK spine: matchmaking is a host HTTP round-trip, so its
+      // contract returns `Promise<Match>`. The spine's Branchless Law analogue bans
+      // the `async` keyword (`oxc/no-async-await`), which makes `promise-function-
+      // async` — the rule that DEMANDS `async` on any promise-returning function —
+      // unsatisfiable for a function that legitimately forwards an async seam's
+      // promise. So `promise-function-async` (alone) is scoped off here, the same
+      // "genuinely un-fixable -> documented decision" judgement CLAUDE.md sanctions
+      // for `prefer-readonly-parameter-types`. UNLIKE the platform edges above this
+      // file stays fully BRANCHLESS and 100% COVERED — `matchmake` is a pure seam
+      // forward (the real HTTP is the bound `Matchmaker` the runtime supplies), so a
+      // fake matchmaker covers it via `.then`; nothing else is relaxed.
+      "files": ["src/net-room.ts"],
+      "rules": {
+        "typescript/promise-function-async": "off"
       }
     }
   ]

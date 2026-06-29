@@ -16,10 +16,21 @@
  *   - `configureNet(NetConfig)` — prediction/interpolation are CONFIGURED, not
  *     authored (§16.5). Physics prediction defaults OFF: the default config
  *     predicts nothing and interpolates nothing — authority/non-physics state only.
+ *     NOTE (2026-06-29): the cross-target `f32` determinism golden came back GREEN
+ *     (commit 5980a0f), which is the §17.6 prerequisite local-player prediction was
+ *     blocked on — so prediction is now UNBLOCKED for a future opt-in. It stays OFF
+ *     by default here; turning it on is a deliberate later change (resimulation
+ *     wiring + a reconciliation drift=0 proof), not flipped on in this surface.
+ *   - `onSnapshot(() => Uint8Array)` / `onRestore(bytes => void)` — the extra
+ *     authoritative-state hooks (§16.5): the author appends bytes the authority
+ *     packs into each snapshot, and restores them on a client reconcile. Stored on
+ *     the session; the runtime drains them via `boundNetSnapshot`/`boundNetRestore`.
  *
  * Everything is pure forwarding (no control flow): `NetClient`/`NetSim` re-expose
  * the seam's per-tick reads, and the inert pre-bind transport returns neutral
- * values so the surface is total before the runtime binds.
+ * values so the surface is total before the runtime binds. The sibling lobby
+ * surface (`hostRoom`/`matchmake`) lives in `net-room.ts`, and the authority-
+ * snapshot participant decoder (`makeNetParticipants`) in `net-participants.ts`.
  */
 
 import type { PlayerId, Result, Ticks } from "./vocabulary.ts";
@@ -176,10 +187,28 @@ const INERT_FACTORY: NetTransportFactory = (): NetTransport => INERT_TRANSPORT;
 /** The default network configuration — predict nothing, interpolate nothing (authority state only). */
 const DEFAULT_NET_CONFIG: NetConfig = { interpolateRemote: false, predictLocalPlayer: false };
 
-/** The mutable net session: the bound transport factory and the current config. */
-const netSession: { factory: NetTransportFactory; config: NetConfig } = {
+/** The empty author-snapshot bytes the default `onSnapshot` contributes (no extra author state). */
+const NO_SNAPSHOT_BYTES = new Uint8Array();
+
+/** The default author-snapshot hook — contributes no extra bytes until `onSnapshot` is set. */
+const DEFAULT_SNAPSHOT: () => Uint8Array = (): Uint8Array => NO_SNAPSHOT_BYTES;
+
+/** The default author-restore hook — a no-op until `onRestore` is set. */
+const DEFAULT_RESTORE: (bytes: Uint8Array) => void = (): void => {
+  // No author restore hook until onRestore is called
+};
+
+/** The mutable net session: the bound transport factory, the config, and the snapshot/restore hooks. */
+const netSession: {
+  factory: NetTransportFactory;
+  config: NetConfig;
+  snapshot: () => Uint8Array;
+  restore: (bytes: Uint8Array) => void;
+} = {
   config: DEFAULT_NET_CONFIG,
   factory: INERT_FACTORY,
+  restore: DEFAULT_RESTORE,
+  snapshot: DEFAULT_SNAPSHOT,
 };
 
 /** Install the runtime's real transport factory (its `@axiom/client` binding), once at boot. */
@@ -194,6 +223,24 @@ export const configureNet = (config: NetConfig): void => {
 
 /** The current network configuration (the default until `configureNet`). */
 export const boundNetConfig = (): NetConfig => netSession.config;
+
+/** Register the author's extra-state snapshot hook (SPEC-13 §16.5): bytes the authority appends per snapshot. */
+export const onSnapshot = (callback: () => Uint8Array): void => {
+  netSession.snapshot = callback;
+};
+
+/** Register the author's extra-state restore hook (SPEC-13 §16.5): applied on a client reconcile. */
+export const onRestore = (callback: (bytes: Uint8Array) => void): void => {
+  netSession.restore = callback;
+};
+
+/** Collect the author's extra snapshot bytes — the runtime appends these to the authoritative snapshot. */
+export const boundNetSnapshot = (): Uint8Array => netSession.snapshot();
+
+/** Deliver restored snapshot bytes to the author's hook — the runtime calls this on reconcile. */
+export const boundNetRestore = (bytes: Uint8Array): void => {
+  netSession.restore(bytes);
+};
 
 /** Join a room, returning a `NetClient` over the bound transport (SPEC-13 §4.2). */
 export const joinRoom = (config: JoinConfig): NetClient => {

@@ -10,9 +10,13 @@ import {
   type NetTransportFactory,
   bindNetTransport,
   boundNetConfig,
+  boundNetRestore,
+  boundNetSnapshot,
   configureNet,
   joinRoom,
   makeNetSim,
+  onRestore,
+  onSnapshot,
 } from "../src/net.ts";
 import type { SimContext } from "../src/sim.ts";
 import { TickPump } from "../src/pump.ts";
@@ -132,4 +136,28 @@ test("configureNet replaces the active network config", () => {
     interpolationDelayTicks: 3,
     predictLocalPlayer: true,
   });
+});
+
+// Runs BEFORE onSnapshot/onRestore are registered: the default snapshot hook
+// contributes no bytes and the default restore hook is a no-op (the surface is
+// total before the author registers extra authoritative state).
+test("before onSnapshot/onRestore, the snapshot is empty and restore is a no-op", () => {
+  assert.deepEqual(boundNetSnapshot(), new Uint8Array());
+  assert.doesNotThrow(() => {
+    boundNetRestore(Uint8Array.from([1, 2, 3]));
+  });
+});
+
+test("onSnapshot/onRestore register the author's extra-state hooks the runtime drains", () => {
+  const extra = Uint8Array.from([9, 8, 7]);
+  onSnapshot((): Uint8Array => extra);
+  assert.deepEqual(boundNetSnapshot(), extra);
+
+  const restored: Uint8Array[] = [];
+  onRestore((bytes): void => {
+    restored.push(bytes);
+  });
+  const snapshot = Uint8Array.from([5, 6]);
+  boundNetRestore(snapshot);
+  assert.deepEqual(restored, [snapshot]);
 });
