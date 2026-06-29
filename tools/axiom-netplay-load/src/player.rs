@@ -165,6 +165,10 @@ async fn drive(ws: Ws, room_id: String, duration: Duration, intent_hz: f64) -> P
     let deadline = Instant::now() + duration;
     let mut ticker = tokio::time::interval(Duration::from_secs_f64(1.0 / intent_hz));
     let mut local_tick: u64 = 0;
+    // This player's authoritative seat (the `Welcome` client id). Every
+    // `ClientIntentFor` is addressed to it so the authority folds the intent into
+    // the matching seat. Zero until welcomed — and no intents flow before then.
+    let mut my_player: u64 = 0;
 
     loop {
         tokio::select! {
@@ -172,7 +176,7 @@ async fn drive(ws: Ws, room_id: String, duration: Duration, intent_hz: f64) -> P
             item = read.next() => match item {
                 None => break,
                 Some(Err(_)) => break,
-                Some(Ok(msg)) => handle_inbound(msg, &mut client, &mut latency, &mut report),
+                Some(Ok(msg)) => handle_inbound(msg, &mut client, &mut latency, &mut report, &mut my_player),
             },
             _ = ticker.tick() => {
                 local_tick += 1;
@@ -181,7 +185,7 @@ async fn drive(ws: Ws, room_id: String, duration: Duration, intent_hz: f64) -> P
                 match client.next_intent(local_tick, last_seen, &payload) {
                     None => {} // not welcomed yet
                     Some((seq, predicted, seen, body)) => {
-                        let frame = NetProtocolApi::encode_client_intent(seq, predicted, seen, &body)
+                        let frame = NetProtocolApi::encode_client_intent_for(my_player, seq, predicted, seen, &body)
                             .expect("a synthetic move is always within the protocol bound");
                         latency.on_send(seq, Instant::now());
                         match write.send(Message::binary(frame)).await {
@@ -198,12 +202,15 @@ async fn drive(ws: Ws, room_id: String, duration: Duration, intent_hz: f64) -> P
     report
 }
 
-/// Apply one inbound frame to the client state machine and the report.
+/// Apply one inbound frame to the client state machine and the report. `my_player`
+/// is this player's authoritative seat, learned from `Welcome` and used to pick
+/// this seat's own acknowledgement out of a `ServerSnapshotFor`'s per-player acks.
 fn handle_inbound(
     msg: Message,
     client: &mut ClientCoreApi,
     latency: &mut Latency,
     report: &mut PlayerReport,
+    my_player: &mut u64,
 ) {
     if !msg.is_binary() {
         return;
@@ -215,15 +222,23 @@ fn handle_inbound(
     };
     match kind {
         k if k == NetProtocolApi::KIND_WELCOME => {
-            if let Ok((_v, _id, server_tick, _step)) = NetProtocolApi::decode_welcome(&data) {
+            if let Ok((_v, id, server_tick, _step)) = NetProtocolApi::decode_welcome(&data) {
                 client.accept_welcome(server_tick);
+                *my_player = id;
                 report.welcomed = true;
             }
         }
-        k if k == NetProtocolApi::KIND_SERVER_SNAPSHOT => {
-            if let Ok((server_tick, acked, _payload)) =
-                NetProtocolApi::decode_server_snapshot(&data)
+        k if k == NetProtocolApi::KIND_SERVER_SNAPSHOT_FOR => {
+            if let Ok((server_tick, acks, _payload)) =
+                NetProtocolApi::decode_server_snapshot_for(&data)
             {
+                // Pick this seat's own ack out of the per-player ack list (absent
+                // when the authority carried no ack for us this tick → 0).
+                let acked = acks
+                    .iter()
+                    .find(|&&(player, _)| player == *my_player)
+                    .map(|&(_, sequence)| sequence)
+                    .unwrap_or(0);
                 client.accept_snapshot(server_tick, acked);
                 latency.on_ack(acked, Instant::now());
                 report.snapshots += 1;
@@ -318,12 +333,20 @@ mod tests {
         client.connect();
         let mut latency = Latency::new();
         let mut report = PlayerReport::failed("x".to_string());
-        handle_inbound(Message::text("hi"), &mut client, &mut latency, &mut report);
+        let mut my_player = 0u64;
+        handle_inbound(
+            Message::text("hi"),
+            &mut client,
+            &mut latency,
+            &mut report,
+            &mut my_player,
+        );
         handle_inbound(
             Message::binary(vec![9, 9, 9]),
             &mut client,
             &mut latency,
             &mut report,
+            &mut my_player,
         );
         assert_eq!(report.snapshots, 0);
     }
@@ -345,22 +368,28 @@ mod tests {
             error: None,
         };
 
+        let mut my_player = 0u64;
         let welcome = NetProtocolApi::encode_welcome(PROTOCOL_VERSION, 1, 10, 16_666_667).unwrap();
         handle_inbound(
             Message::binary(welcome),
             &mut client,
             &mut latency,
             &mut report,
+            &mut my_player,
         );
         assert!(client.is_connected());
         assert!(report.welcomed);
+        assert_eq!(my_player, 1, "the welcome assigns this player its seat");
 
-        let snap = NetProtocolApi::encode_server_snapshot(11, 0, b"\0\0\0\0\0\0\0\0").unwrap();
+        // A per-player ServerSnapshotFor acking our seat (1) at sequence 0.
+        let snap =
+            NetProtocolApi::encode_server_snapshot_for(11, &[(1, 0)], b"\0\0\0\0\0\0\0\0").unwrap();
         handle_inbound(
             Message::binary(snap),
             &mut client,
             &mut latency,
             &mut report,
+            &mut my_player,
         );
         assert_eq!(report.snapshots, 1);
         assert_eq!(report.first_tick_seen, 11);
@@ -372,6 +401,7 @@ mod tests {
             &mut client,
             &mut latency,
             &mut report,
+            &mut my_player,
         );
         assert_eq!(report.rejects, 1);
     }
@@ -383,9 +413,9 @@ mod tests {
     use tokio::net::TcpListener;
 
     /// A minimal authoritative mock: await the client's `JoinRoom`, optionally send
-    /// `Welcome`, then broadcast `ServerSnapshot`s every ~16ms acking the highest
-    /// `ClientIntent` sequence seen. `welcome = false` stays silent after the join
-    /// (models a server that admits no one).
+    /// `Welcome` (seat 1), then broadcast per-player `ServerSnapshotFor`s every ~16ms
+    /// acking the highest `ClientIntentFor` sequence seen for seat 1. `welcome =
+    /// false` stays silent after the join (models a server that admits no one).
     async fn mock_serve(ws: WebSocketStream<TcpStream>, welcome: bool, run: std::time::Duration) {
         let (mut write, mut read) = ws.split();
         // Wait for the first binary frame (the JoinRoom).
@@ -409,8 +439,8 @@ mod tests {
         let reader = tokio::spawn(async move {
             while let Some(Ok(m)) = read.next().await {
                 if m.is_binary() {
-                    if let Ok((seq, _, _, _)) =
-                        NetProtocolApi::decode_client_intent(&m.into_data().to_vec())
+                    if let Ok((_player, seq, _, _, _)) =
+                        NetProtocolApi::decode_client_intent_for(&m.into_data().to_vec())
                     {
                         reader_seq.fetch_max(seq, Ordering::Relaxed);
                     }
@@ -427,7 +457,7 @@ mod tests {
                 _ = ticker.tick() => {
                     tick += 1;
                     let acked = last_seq.load(Ordering::Relaxed);
-                    let snap = NetProtocolApi::encode_server_snapshot(tick, acked, &[0u8; 16]).unwrap();
+                    let snap = NetProtocolApi::encode_server_snapshot_for(tick, &[(1, acked)], &[0u8; 16]).unwrap();
                     if write.send(Message::binary(snap)).await.is_err() {
                         break;
                     }
