@@ -23,6 +23,17 @@ test("the unbound host surface is inert until a host is bound", () => {
     inert.reportOutcome(won);
     inert.reportOutcomes({});
   });
+  // The inert audio surface returns a null handle and no-ops every signal.
+  assert.equal(inert.loadSound("s.wav"), 0);
+  assert.equal(inert.playSound(0), 0);
+  assert.equal(inert.playMusic(["a", "b"]), 0);
+  assert.equal(inert.playTone({ duration: 1, freq: 440, wave: "sine" }), 0);
+  assert.equal(inert.scheduleSound(0, 1), 0);
+  assert.doesNotThrow(() => {
+    inert.stopVoice(0);
+    inert.setMasterVolume(1);
+    inert.setMuted(true);
+  });
 });
 
 test("getSessionConfig forwards the host's constant session config", () => {

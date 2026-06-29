@@ -4,7 +4,8 @@ import { test } from "node:test";
 import { GameLoop } from "../src/game-loop.ts";
 import { stepFrame } from "../src/loop-core.ts";
 import { GameRegistry } from "../src/registry.ts";
-import { makeFrame, makeSim } from "../src/sim.ts";
+import { makeFrame, makeSim, type SimContext } from "../src/sim.ts";
+import { TickPump } from "../src/pump.ts";
 import { interpolationAlpha, type StepBudget } from "../src/step-budget.ts";
 import { FakeBridge } from "./fake-bridge.ts";
 
@@ -14,13 +15,20 @@ const budget = (steps: number, remainderNanos: number, fixedStepNanos: number): 
   steps,
 });
 
+// Build a SimContext over a bridge at `fixedHz` (with its own standalone pump).
+const contextOf = (bridge: FakeBridge, fixedHz: number): SimContext => ({
+  bridge,
+  fixedHz,
+  pump: new TickPump(bridge, fixedHz),
+});
+
 // A bitwise-free polynomial rolling hash over a tick sequence — the per-tick
 // "state hash" the determinism proof compares across two runs.
 const hashSeq = (values: readonly number[]): number =>
   values.reduce((hash, value) => (hash * 131 + value + 7) % 2_000_000_011, 17);
 
 test("makeSim derives constant dt and wires the real subsystem projections", () => {
-  const sim = makeSim(new FakeBridge(), 60, 7);
+  const sim = makeSim(contextOf(new FakeBridge(), 60), 7);
   assert.equal(sim.tick, 7);
   assert.equal(sim.dt, 1 / 60);
   assert.equal(typeof sim.rng.next, "function");
@@ -48,7 +56,7 @@ test("stepFrame runs N fixed updates then one render with alpha", () => {
       },
     ],
     makeFrame,
-    makeSim: (tick) => makeSim(fake, 50, tick),
+    makeSim: (tick) => makeSim(contextOf(fake, 50), tick),
     renders: [
       (_frame, alpha): void => {
         alphas.push(alpha);
@@ -73,7 +81,7 @@ test("stepFrame with zero steps renders once and advances no tick", () => {
       },
     ],
     makeFrame,
-    makeSim: (tick) => makeSim(fake, 50, tick),
+    makeSim: (tick) => makeSim(contextOf(fake, 50), tick),
     renders: [
       (): void => {
         renders += 1;

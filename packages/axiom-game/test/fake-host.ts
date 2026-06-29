@@ -2,8 +2,16 @@
 // the math / host-bridge / bindAction free-function tests. Kept in its own file
 // so each fake is one class (max-classes-per-file).
 
-import type { HostBridge, Outcome, SessionConfig } from "../src/host-binding.ts";
-import type { Entity } from "../src/vocabulary.ts";
+import type {
+  HostBridge,
+  MusicOptions,
+  Outcome,
+  ScheduleOptions,
+  SessionConfig,
+  SoundOptions,
+  ToneSpec,
+} from "../src/host-binding.ts";
+import type { Entity, Handle } from "../src/vocabulary.ts";
 
 export class FakeHost implements HostBridge {
   public clampReturn = 0;
@@ -17,6 +25,17 @@ export class FakeHost implements HostBridge {
   public bindings: (readonly [string, readonly string[]])[] = [];
   public outcomes: Outcome[] = [];
   public outcomeSets: Readonly<Record<number, Outcome>>[] = [];
+
+  // --- audio call log; voices/sounds get incrementing handles ---
+  public loadedUrls: string[] = [];
+  public playedSounds: (readonly [Handle, SoundOptions | undefined])[] = [];
+  public stoppedVoices: Handle[] = [];
+  public playedMusic: (readonly [readonly string[], MusicOptions | undefined])[] = [];
+  public playedTones: ToneSpec[] = [];
+  public scheduledSounds: (readonly [Handle, number, ScheduleOptions | undefined])[] = [];
+  public masterVolumes: number[] = [];
+  public muteStates: boolean[] = [];
+  private nextHandle = 1;
 
   public clamp(value: number, low: number, high: number): number {
     this.clampCalls.push([value, low, high]);
@@ -51,5 +70,48 @@ export class FakeHost implements HostBridge {
 
   public reportOutcomes(results: Readonly<Record<number, Outcome>>): void {
     this.outcomeSets.push(results);
+  }
+
+  public loadSound(url: string): Handle {
+    this.loadedUrls.push(url);
+    return this.mint();
+  }
+
+  public playSound(id: Handle, opts?: SoundOptions): Handle {
+    this.playedSounds.push([id, opts]);
+    return this.mint();
+  }
+
+  public stopVoice(voice: Handle): void {
+    this.stoppedVoices.push(voice);
+  }
+
+  public playMusic(urls: readonly string[], opts?: MusicOptions): Handle {
+    this.playedMusic.push([urls, opts]);
+    return this.mint();
+  }
+
+  public playTone(spec: ToneSpec): Handle {
+    this.playedTones.push(spec);
+    return this.mint();
+  }
+
+  public scheduleSound(id: Handle, atSeconds: number, opts?: ScheduleOptions): Handle {
+    this.scheduledSounds.push([id, atSeconds, opts]);
+    return this.mint();
+  }
+
+  public setMasterVolume(volume: number): void {
+    this.masterVolumes.push(volume);
+  }
+
+  public setMuted(muted: boolean): void {
+    this.muteStates.push(muted);
+  }
+
+  private mint(): Handle {
+    const id = this.nextHandle;
+    this.nextHandle += 1;
+    return id;
   }
 }
