@@ -12,6 +12,25 @@
 > (the fixed-step tick counter exists but there is no `Timers` primitive), and *Keyboard*
 > `have`→`partial` (`axiom-input` is touch-only; key→action binding lives in the `axiom-interface`
 > UI layer, not an engine input facade).
+>
+> **2026-06-28 — the spec program landed.** The per-domain tables below are the
+> *gap analysis at spec-authoring time*; they are no longer current. The
+> SPEC-00..14 program ([`specs/`](specs/)) has since landed every `missing`/
+> `partial` capability on `main`. Where it now lives:
+> - **2D surface** → the host-owned `Draw2dList` draw-list (built by the
+>   `axiom-draw2d` module; rasterized by the canvas2d/gpu backends — rect+sprite
+>   +alpha so far, other primitives + particles/render-targets deferred).
+> - **Audio / grid / tween** → new isolated engine modules `axiom-audio`,
+>   `axiom-grid`, `axiom-tween`; **timers + state machines** → `axiom-tick` over a
+>   new kernel **`TickSchedule`** primitive.
+> - **Scalar helpers** (`clamp`/`lerp`/`normalize_angle`) → `axiom-math`;
+>   **`overlap_circle`** → `axiom-scene`; **input** → `axiom-input::InputState`;
+>   **physics** angular/friction/damping → `axiom-physics`; **host seam**
+>   (`HostSessionConfig`/`HostOutcome` + the **`Score`/`Pixels` quantity
+>   newtypes**) → `axiom-host`.
+> - **The TS authoring API** → the Phaser-style `@axiom/game` SDK projecting all
+>   of the above. See [`game-api-contract.md`](game-api-contract.md) for the
+>   landed-vs-deferred summary; the deferrals are tracked there and per-spec.
 
 ## The games
 
@@ -218,15 +237,19 @@
 - WebSocket netcode: snapshot / delta / ack *(neon-clash)*
 - Input intent synthesis + responsive layout solver
 
-### Must be added (ranked by reach)
-1. **A 2D surface** — sprites, shapes, text, gradients, transforms, particles *(9 games)*
-2. **Tilemap / grid** + tile-center movement *(7 games)*
-3. **An audio subsystem** — synthesis, sample/playlist, mute *(4 games; 0 today)*
-4. **BFS pathfinding** + agent steering *(last-light, pointman, nova-roll)*
-5. **Tween / easing** + flip-book animation
-6. **Physics gaps** — friction, torque, angular, damping *(nova-roll)*
-7. **HUD / overlay model** + the outcome-report seam, standardised
-8. **The TS authoring API** that projects all of the above to game devs
+### Added — the SPEC-00..14 program (landed 2026-06-28, ranked by original reach)
+1. **A 2D surface** — `axiom-draw2d` neutral draw-list + backend raster *(9 games)*.
+   Deferred: backend raster beyond rect+sprite+alpha; particles; render-targets.
+2. **Tilemap / grid** + tile-center movement — `axiom-grid` *(7 games)*.
+3. **An audio subsystem** — `axiom-audio` (core + Web Audio arm) *(4 games)*.
+4. **BFS pathfinding** + steering — `axiom-grid` (`gridPath`/`gridDistanceField`/`stepToward`).
+5. **Tween / easing** — `axiom-tween`; flip-book sampler is part of the 2D surface.
+6. **Physics gaps** — friction, torque, angular, damping in `axiom-physics`.
+   Deferred: cross-platform f32 determinism (so netplay does not predict physics).
+7. **HUD / overlay model** — `axiom-interface`'s `UiSurface`; the outcome-report
+   seam standardised in `axiom-host` (`HostOutcome`).
+8. **The TS authoring API** — the `@axiom/game` Phaser-style SDK projecting all
+   of the above.
 
 ---
 

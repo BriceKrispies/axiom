@@ -1,6 +1,7 @@
 # SPEC-00 — Authoring boundary & frame model
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): `axiom-frame::FrameAccumulator` (integer `StepBudget`, no `alpha: Ratio`), `apps/axiom-game-runtime` (`WasmGame`), and `@axiom/game` (`createGame`/`onFixedUpdate`/`onRender`/`GameLoop`/`stepFrame`). The wasm bridge and a live browser run are browser-proven — the native sandbox cannot run browser WebGPU. The §2 gaps below are now closed.
 > Contract: §0–§2   Vocabulary: Variable-dt loop, Fixed-step tick, Game-flow state machine, the embed seam   Determinism: boundary
 
 ## 1. Summary

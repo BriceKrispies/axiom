@@ -1,6 +1,7 @@
 # SPEC-08 — Audio (synthesis, playback, scheduling, analysis)
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): new module `axiom-audio` (`AudioApi` neutral core + `#[cfg(target_arch = "wasm32")]` Web Audio arm; `"audio"` added to `PLATFORM_FACING_MODULES`); `@axiom/game` projects `loadSound`/`playSound`/`playTone`/`playMusic`/`scheduleSound`/`setMasterVolume`/`setMuted`. Live playback and the optional §13.1 analyser are browser-proven — the native sandbox cannot run browser Web Audio. The §2 greenfield is now built.
 > Contract: §13(.1)   Vocabulary: Audio-clock scheduling, Synthesis, Mute/volume, Sample/playlist playback, LFO, Live capture+FFT   Determinism: presentation
 
 ## 1. Summary

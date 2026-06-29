@@ -1,6 +1,8 @@
 # SPEC-10 — Physics extensions (angular, friction, damping)
 
-> Status: Draft
+> Status: Landed (with deferral — see below)
+> Landed (2026-06-28): `axiom-physics` gained `apply_torque`, the friction (tangential) solver pass, and linear/angular damping folded into `with_config` (`Ratio`); `@axiom/game` `Sim.physics` projects `applyImpulse`/`applyForce`/`applyTorque` + world `setConfig`. The §2 gaps below are now closed.
+> Deferred (by decision): determinism stays **same-binary only** — cross-platform f32 bit-determinism (§17.6) is unresolved, so SPEC-13 must not predict physics (its net-prediction defaults OFF). Full inertia tensor and oriented-box contacts remain follow-ups.
 > Contract: §18 impl-order #10 (rigid-body completion)   Vocabulary: Rigid-body physics (partial — angular deferred), Friction/damping/brake (missing/partial), Knockback/impulse (have), Ballistic/jump arcs (compose)   Determinism: sim
 
 ## 1. Summary

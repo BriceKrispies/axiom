@@ -1,6 +1,7 @@
 # SPEC-14 — TypeScript authoring SDK (`@axiom/game`)
 
-> Status: Draft
+> Status: Landed
+> Landed (2026-06-28): `@axiom/game` ships the `Scene` shell + the seven factory namespaces, now wired to the real subsystem projections (`this.add`/`physics`/`input`/`tweens`/`sound`/`time`/`cameras`) backed by `apps/axiom-game-runtime` (`WasmGame`). Gate green: tsgo + Oxlint (every category an error + the branch ban) + 100% `node:test`. The §2 stubs are now filled.
 > Contract: §1–§4   Vocabulary: Phaser-style `Scene`, `createGame`, factory namespaces, the retained-ECS game object   Determinism: boundary (projects through SPEC-00)
 
 ## 1. Summary

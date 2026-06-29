@@ -1,6 +1,8 @@
 # SPEC-13 — Multiplayer & netcode authoring
 
-> Status: Draft
+> Status: Landed (with deferrals — see below)
+> Landed (2026-06-28): per-player addressing on `axiom-net-protocol` + the resimulation cursor on `axiom-client-core`; `@axiom/game` projects `NetSim`/`joinRoom`/`configureNet`/`Intent` over `@axiom/client`. The §2 missing authoring surface is now built.
+> Deferred (by decision): **physics net-prediction is OFF** — the default `configureNet` predicts/interpolates nothing (authority/non-physics state only), because cross-platform deterministic physics (SPEC-10 §17.6) is unresolved. Delta encoding (full snapshot ships first), JWT *verification* (host policy), and unreliable transports remain follow-ups.
 > Contract: §16(.1–.6)   Vocabulary: WebSocket realtime snapshot/delta/ack, client prediction/reconciliation, per-player intent stream, rooms/authority, JWT handshake, matchmaking   Determinism: sim
 
 ## 1. Summary
@@ -306,5 +308,3 @@ branchless, 100% covered.
   `WebTransport` / `WebRtc` unreliable) does `joinRoom` pick, and is it author-
   configurable via `JoinConfig`? Reliable WebSocket is the safe default; unreliable
   transports interact with snapshot/ack semantics and need their own proof.
-</content>
-</invoke>
