@@ -12,6 +12,20 @@ publish = false
 
 [workspace]
 
+[dependencies]
+# Cross-workspace PATH deps into the engine spine (a path dep across workspaces is
+# legal in cargo, and this crate is repo tooling — it is NOT in the root
+# `cargo metadata`, so it never widens the engine dependency graph, the Module
+# Law's classifier, or the coverage gate). These are the exact layers the physics
+# step path is built on: the deterministic rigid-body world (`axiom-physics`), its
+# kernel identity/scalar/`StableHash`/canonical-byte primitives, the runtime fixed
+# step, and `math`'s `Vec3`/`Transform`. The cross-target f32 golden replays a
+# fixed physics scenario over them and hashes the per-tick state.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-physics = { path = "../../modules/axiom-physics" }
+
 [dev-dependencies]
 # Pinned so the `wasm-bindgen` it pulls (0.2.122) matches the installed
 # `wasm-bindgen-test-runner` / `wasm-bindgen` CLI (0.2.122) — the build and the
