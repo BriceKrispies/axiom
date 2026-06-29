@@ -39,6 +39,6 @@ mod ids;
 
 pub use audio_api::AudioApi;
 pub use ids::{
-    AudioInput, AudioSeconds, Envelope, Hertz, Lfo, MusicOpts, PlayOpts, SoundId, ToneSpec, VoiceId,
-    Wave,
+    AnalyserId, AudioInput, AudioSeconds, Band, BandLayout, Envelope, Hertz, Lfo, MusicOpts,
+    PlayOpts, SoundId, ToneSpec, VoiceId, Wave,
 };

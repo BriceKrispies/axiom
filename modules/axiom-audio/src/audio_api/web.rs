@@ -11,15 +11,15 @@
 //! tone-synthesis path is realized in full (oscillator + gain + ADSR); sample and
 //! music playback realize their gain/scheduling envelope and leave the decoded
 //! `AudioBuffer` lookup to the app (§9 decode-ownership). The §13.1 live
-//! capture + analyser path is the deferred, optional last arm — `open_audio_input`
-//! requests the stream and `analyser_level` reads an `AnalyserNode`, both behind a
-//! handle, with FFT band layout deferred to a follow-up.
+//! capture + analyser path is the deferred, optional last arm: the core already
+//! owns handle allocation, the `OpenInput` / `CreateAnalyser` command requests,
+//! and the deterministic `band_layout` math; this arm will later drain those
+//! commands into a real `getUserMedia` stream + `AnalyserNode` (a follow-up).
 
 use wasm_bindgen::JsValue;
 use web_sys::{AudioContext, GainNode, OscillatorType};
 
 use super::{AudioCommand, ScheduledBatch};
-use crate::ids::AudioInput;
 
 impl crate::AudioApi {
     /// Drain everything pending and realize it into `ctx`: apply the folded master
@@ -32,14 +32,6 @@ impl crate::AudioApi {
         master.gain().set_value(batch.master_gain.get());
         master.connect_with_audio_node(&ctx.destination())?;
         realize_batch(ctx, &master, &batch)
-    }
-
-    /// Open a live capture stream (§13.1), returning the handle the future
-    /// analyser path consumes. User-gated; this arm wires the request and the
-    /// handle, with the FFT band layout deferred.
-    #[cfg(target_arch = "wasm32")]
-    pub fn open_audio_input(&mut self, raw: u64) -> AudioInput {
-        AudioInput::from_raw(raw)
     }
 }
 
@@ -64,13 +56,15 @@ fn realize_batch(
                 osc.start_with_when(now)?;
                 osc.stop_with_when(now + f64::from(tone.duration.seconds()))?;
             }
-            // Sample/music realization needs the app's decoded AudioBuffer (§9);
-            // the core has already scheduled the *what/when*, so the gain/timing
-            // wiring lands here once the buffer registry is plumbed.
+            // Sample/music realization needs the app's decoded AudioBuffer (§9),
+            // and the §13.1 capture/analyser commands realize once getUserMedia +
+            // the AnalyserNode are wired; the core has already named every handle.
             AudioCommand::Load { .. }
             | AudioCommand::PlaySample { .. }
             | AudioCommand::PlayMusic { .. }
-            | AudioCommand::Stop { .. } => {}
+            | AudioCommand::Stop { .. }
+            | AudioCommand::OpenInput { .. }
+            | AudioCommand::CreateAnalyser { .. } => {}
         }
     }
     Ok(())
