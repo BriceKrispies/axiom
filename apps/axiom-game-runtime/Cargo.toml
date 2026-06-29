@@ -22,6 +22,15 @@ axiom = { path = "../../modules/axiom" }
 axiom-entropy = { path = "../../crates/axiom-entropy" }
 axiom-space = { path = "../../crates/axiom-space" }
 
+# Physics (SPEC-10): the deterministic rigid-body world the bridge composes into
+# the fixed-step loop. `RuntimeStep` (the explicit step identity `PhysicsApi::step`
+# takes) comes from the `runtime` layer, and its `FrameIndex`/`Tick` identities
+# from the `kernel` layer — both layers the umbrella does not re-export, so this
+# leaf app depends on them directly (the legal app-composes-layers path).
+axiom-physics = { path = "../../modules/axiom-physics" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
 # Browser entry only: the wasm-bindgen export macro + a panic hook, plus the
 # bits of web-sys the embed-seam host channel needs — read the inbound query
 # string off `window.location`, post the outbound outcome to the parent frame.

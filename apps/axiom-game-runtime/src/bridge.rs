@@ -34,6 +34,7 @@
 use axiom::prelude::{Entity, HostApi, HostOutcome, RunningApp, Score, StepBudget};
 
 use crate::embed::OutcomeLatch;
+use crate::physics::PhysicsState;
 use crate::rng::RngHub;
 use crate::runtime::GameRuntime;
 use crate::world;
@@ -44,10 +45,11 @@ use crate::world;
 /// and the per-frame step ceiling.
 #[derive(Debug)]
 pub struct GameBridge {
-    runtime: GameRuntime,
+    pub(crate) runtime: GameRuntime,
     rng: RngHub,
     seed: u64,
     outcome: OutcomeLatch,
+    pub(crate) physics: PhysicsState,
 }
 
 impl GameBridge {
@@ -61,6 +63,7 @@ impl GameBridge {
             rng: RngHub::new(seed),
             seed,
             outcome: OutcomeLatch::new(),
+            physics: PhysicsState::new(),
         }
     }
 
@@ -73,7 +76,13 @@ impl GameBridge {
     /// ticks; returns the integer [`StepBudget`] for the presentation layer to
     /// interpolate with. Delegates to [`GameRuntime::advance`].
     pub fn advance(&mut self, elapsed_nanos: u64) -> StepBudget {
-        self.runtime.advance(elapsed_nanos)
+        let budget = self.runtime.advance(elapsed_nanos);
+        self.physics.step_and_writeback(
+            self.runtime.app_mut(),
+            budget.steps(),
+            budget.fixed_step_nanos(),
+        );
+        budget
     }
 
     /// The monotonic count of fixed ticks driven so far.

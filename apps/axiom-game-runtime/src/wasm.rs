@@ -86,7 +86,7 @@ impl StepReport {
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct WasmGame {
-    bridge: GameBridge,
+    pub(crate) bridge: GameBridge,
 }
 
 #[wasm_bindgen]

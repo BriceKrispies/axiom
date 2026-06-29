@@ -19,8 +19,15 @@ crate_name = "axiom-game-runtime"
 allowed_layers = [
     "entropy",
     "space",
+    # Physics (SPEC-10) steps over an explicit `RuntimeStep` (runtime layer) whose
+    # `FrameIndex`/`Tick` identities come from the kernel layer; both are layers
+    # the umbrella does not re-export, so this leaf app names them directly.
+    "runtime",
+    "kernel",
 ]
 
 allowed_modules = [
     "engine",
+    # The deterministic rigid-body physics world (SPEC-10) the bridge composes.
+    "physics",
 ]

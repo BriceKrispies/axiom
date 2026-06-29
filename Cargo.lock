@@ -290,6 +290,9 @@ version = "0.1.0"
 dependencies = [
  "axiom",
  "axiom-entropy",
+ "axiom-kernel",
+ "axiom-physics",
+ "axiom-runtime",
  "axiom-space",
  "console_error_panic_hook",
  "wasm-bindgen",
