@@ -47,6 +47,7 @@ mod deterministic_rng;
 mod meters;
 mod radians;
 mod ratio;
+mod seconds;
 
 // --- Stable ID model ---
 mod asset_id;
@@ -140,6 +141,11 @@ pub use deterministic_rng::DeterministicRng;
 pub use meters::Meters;
 pub use radians::Radians;
 pub use ratio::Ratio;
+// `Seconds` is the presentation frame-delta duration — the wall-clock `dt` an
+// `onRender` pass feeds a visual-only system (particles, easing). It is
+// deliberately distinct from the deterministic sim `Tick`/`TickDelta` and from
+// an audio-clock second; see seconds.rs.
+pub use seconds::Seconds;
 
 // Identity primitives used by higher layers.
 pub use asset_id::AssetId;

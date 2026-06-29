@@ -28,4 +28,6 @@ introduced_capabilities = [
   "2d-gradients",
   "2d-camera-transform-stack",
   "2d-layer-sort",
+  "2d-particles",
+  "2d-render-targets",
 ]

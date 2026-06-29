@@ -77,6 +77,27 @@ impl PaintId {
     }
 }
 
+/// A handle into a frame's render-target table, returned when the `axiom-draw2d`
+/// builder creates an off-screen render target (§10.3). A render target is a
+/// *named nested [`crate::Draw2dList`]* the backend rasterizes into an off-screen
+/// surface; its [`TextureId`] (via [`crate::Draw2dList::target_texture`]) names
+/// that surface for a later draw. A zero-based index into the per-frame table;
+/// only valid within the frame that minted it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RenderTargetId(u32);
+
+impl RenderTargetId {
+    /// Construct from a raw zero-based index.
+    pub const fn from_raw(raw: u32) -> Self {
+        RenderTargetId(raw)
+    }
+
+    /// The underlying zero-based index.
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +125,13 @@ mod tests {
     fn paint_id_round_trips() {
         assert_eq!(PaintId::from_raw(0).raw(), 0);
         assert_ne!(PaintId::from_raw(0), PaintId::from_raw(1));
+    }
+
+    #[test]
+    fn render_target_id_round_trips() {
+        assert_eq!(RenderTargetId::from_raw(2).raw(), 2);
+        assert_eq!(RenderTargetId::from_raw(2), RenderTargetId::from_raw(2));
+        assert_ne!(RenderTargetId::from_raw(2), RenderTargetId::from_raw(3));
+        assert!(RenderTargetId::from_raw(0) < RenderTargetId::from_raw(1));
     }
 }

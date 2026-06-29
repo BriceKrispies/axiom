@@ -32,25 +32,30 @@
 //! **nothing it produces is authoritative**. The facade exposes no getter that
 //! returns draw state into a sim-readable form — there is no read-back path.
 //!
-//! ## Deferred in this slice (documented, follow-up)
-//! The §4.1 priority core landed: shapes (`rect`/`circle`/`ellipse`/`line`/
-//! `path`), `sprite`, `text` + `measure_text`, `linear`/`radial` gradients, the
-//! camera + transform stack, and the `(layer, submission)` sort. Two §4.1 items
-//! are **deliberately deferred** to keep this slice fully covered and branchless:
-//! - **Particles (§10.1)** — needs a kernel `Seconds` dimensioned scalar
-//!   (absent today) for the presentation-`dt` step; adding it is a kernel-layer
-//!   change beyond this module slice.
-//! - **Render targets (§10.3)** — nested off-screen draw-lists / routing.
-//!
-//! Both are additive: they extend the builder and the command set without
-//! reshaping the host-owned contract.
+//! ## Particles (§10.1) and render targets (§10.3)
+//! Both §4.1 follow-ups now land, additively — they extend the builder and the
+//! command set without reshaping the host-owned contract:
+//! - **Particles** — [`Draw2dApi::create_emitter`] / [`Draw2dApi::emit`] /
+//!   [`Draw2dApi::advance_particles`] step a private, presentation-only particle
+//!   field on the kernel [`axiom_kernel::Seconds`] *presentation* delta (never a
+//!   sim tick) and append each survivor as a `KIND_PARTICLE_QUAD` command. The
+//!   field is deterministic as a function of its inputs; it has **no read-back
+//!   getter**, so a particle can never feed sim (SPEC-04 §6, §17.5).
+//! - **Render targets** — [`Draw2dApi::create_render_target`] /
+//!   [`Draw2dApi::begin_target`] / [`Draw2dApi::end_target`] /
+//!   [`Draw2dApi::target_texture`] route draws into a named nested
+//!   `axiom_host::Draw2dList`; the backend owns the off-screen surface.
 //!
 //! ## Public surface
-//! `lib.rs` exposes **exactly one** behavioral facade — [`Draw2dApi`]
-//! (Module Law #8). The value-type vocabulary it traffics in lives in the host
-//! layer, so there is no `ids` re-export here: callers reach it via
-//! `use axiom_host::{Draw2dList, Common2d, Fill2d, Rect, Rgba, …}`.
+//! `lib.rs` exposes **exactly one** behavioral facade — [`Draw2dApi`] — alongside
+//! its identity vocabulary (Module Law #8): the [`EmitterId`] handle and
+//! [`EmitterConfig`] recipe the particle methods traffic in (`pub use ids::{…}`).
+//! The neutral draw-contract value types still live in the host layer; callers
+//! reach them via `use axiom_host::{Draw2dList, Common2d, Fill2d, Rect, Rgba, …}`.
 
 mod draw2d_api;
+mod ids;
+mod particles;
 
 pub use draw2d_api::Draw2dApi;
+pub use ids::{EmitterConfig, EmitterId};

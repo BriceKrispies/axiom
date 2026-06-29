@@ -366,6 +366,7 @@ fn lib_exports_are_curated_set() {
         "pub use fill2d::Stroke2d;",
         "pub use handles::FontHandle;",
         "pub use handles::PaintId;",
+        "pub use handles::RenderTargetId;",
         "pub use handles::TextureId;",
         "pub use handles::TransformDepth;",
         "pub use paint::GradientStop;",
