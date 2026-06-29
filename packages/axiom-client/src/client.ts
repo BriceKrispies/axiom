@@ -38,8 +38,8 @@ import {
   type WelcomeMessage,
 } from "./messages.ts";
 import { NULL_TRANSPORT, type Transport } from "./transport.ts";
-import { coalesce, each, pick } from "./branchless.ts";
 import { decodeFrame, encodeClientIntent, encodeJoinRoom, encodeLeaveRoom } from "./codec.ts";
+import { each, pick } from "./control-flow.ts";
 import { assert } from "./protocol-error.ts";
 import { buildTransport } from "./build-transport.ts";
 import { toBytes } from "./text.ts";
@@ -79,10 +79,15 @@ export class AxiomClient {
 
   /** Open a connection and join the room once the transport opens. */
   public connect(config: ConnectConfig): void {
-    this.protocolVersion = coalesce(config.protocolVersion, DEFAULT_PROTOCOL_VERSION);
+    /*
+     * Destructuring defaults supply the optional fields branchlessly (they apply
+     * exactly when the field is `undefined`) — no `??`/`?:` under the Branchless Law.
+     */
+    const { protocolVersion = DEFAULT_PROTOCOL_VERSION, token = new Uint8Array() } = config;
+    this.protocolVersion = protocolVersion;
     this.roomId = toBytes(config.roomId);
-    const token = toBytes(coalesce(config.token, new Uint8Array()));
-    this.joinFrame = encodeJoinRoom(this.protocolVersion, this.roomId, token);
+    const tokenBytes = toBytes(token);
+    this.joinFrame = encodeJoinRoom(this.protocolVersion, this.roomId, tokenBytes);
     const transport = buildTransport(config);
     this.transport = transport;
     this.setStatus(STATUS_CONNECTING);

@@ -18,7 +18,7 @@
 import type { CameraDescriptor, LightDescriptor, MaterialDescriptor } from "./host-descriptors.ts";
 import type { Entity, Handle, Rgba, Vec3 } from "./vocabulary.ts";
 import { boundHost } from "./host-binding.ts";
-import { orElse } from "./branchless.ts";
+import { orElse } from "./control-flow.ts";
 
 /** A primitive mesh kind (SPEC-11 §4.2). `"box"` is the engine `Cube`. */
 export type MeshKind = "box" | "cylinder" | "sphere";

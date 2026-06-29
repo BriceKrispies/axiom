@@ -22,7 +22,7 @@
 import { BridgeStateMachine, type StateMachine, type StateNode, type TickDriven } from "./state-machine.ts";
 import { EASES, type TweenSpec } from "./tweens.ts";
 import type { Handle, Ticks } from "./vocabulary.ts";
-import { each, orElse, whenPresent } from "./branchless.ts";
+import { each, orElse, whenPresent } from "./control-flow.ts";
 import type { NativeBridge } from "./native-bridge.ts";
 
 /** A no-op completion sink — the default when a tween declares no `onComplete`. */

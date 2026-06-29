@@ -15,7 +15,7 @@
 import type { NativeBridge, PointerSample, Swipe } from "./native-bridge.ts";
 import type { Result, Ticks, Vec2 } from "./vocabulary.ts";
 import { boundHost } from "./host-binding.ts";
-import { pick } from "./branchless.ts";
+import { pick } from "./control-flow.ts";
 
 /** An action name — the only input vocabulary gameplay reads (SPEC-05 §4.2). */
 export type Action = string;

@@ -28,7 +28,7 @@
 import type { Body, PhysicsConfig } from "../physics.ts";
 import type { Component, Vec2 } from "../vocabulary.ts";
 import type { GameObject, RectangleStyle } from "../game-object.ts";
-import { each, pick } from "../branchless.ts";
+import { each, pick } from "../control-flow.ts";
 import type { Sim } from "../sim.ts";
 import type { World } from "../world.ts";
 import { bindAction } from "../input.ts";

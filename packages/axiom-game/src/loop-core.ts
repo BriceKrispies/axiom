@@ -9,7 +9,7 @@
 
 import type { Frame, Sim } from "./sim.ts";
 import { type StepBudget, interpolationAlpha } from "./step-budget.ts";
-import { each } from "./branchless.ts";
+import { each } from "./control-flow.ts";
 
 /** A registered fixed-update callback: the only place sim state changes. */
 export type FixedUpdate = (sim: Sim) => void;

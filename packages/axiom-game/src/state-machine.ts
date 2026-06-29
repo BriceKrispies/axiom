@@ -19,7 +19,7 @@
  */
 
 import type { Handle, Ticks } from "./vocabulary.ts";
-import { pick, whenPresent } from "./branchless.ts";
+import { pick, whenPresent } from "./control-flow.ts";
 import type { NativeBridge } from "./native-bridge.ts";
 
 /** The author-facing state machine surface (SPEC-07 §4.2). */

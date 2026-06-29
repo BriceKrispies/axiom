@@ -1,7 +1,9 @@
 # SPEC-11 — 3D scene authoring surface
 
-> Status: Landed (with deferrals — see below)
-> Landed (2026-06-28): `Mesh::Cylinder` + `Material` `emissive`/`roughness`/`opacity` fields + the hemisphere-ambient term (GPU shader and canvas2d `hemisphere_ambient`); `@axiom/game` projects `createMesh`/`createMaterial`/`setCamera3D`/`addLight` and the `v3`/`mat4`/`quat` namespaces — **routed to the native `MathApi`, no TS math twin**. The §2 gaps below are now closed.
+> Status: Partial (native landed; render proof + backend-parity missing). See
+> README footnote ⁴ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed (2026-06-28, native): `Mesh::Cylinder` + `Material` `emissive`/`roughness`/`opacity` fields + the hemisphere-ambient term (GPU shader and canvas2d `hemisphere_ambient`); `@axiom/game` projects `createMesh`/`createMaterial`/`setCamera3D`/`addLight` and the `v3`/`mat4`/`quat` namespaces — **routed to the native `MathApi`, no TS math twin**.
+> **Not yet built (undeferred until now):** the §7 end-to-end render-one-frame slice proof (the "nova-roll" smoke path is unimplemented — `apps/axiom-game-runtime` has no such test), and the GPU↔canvas2d backend-parity test for a cylinder + emissive draw.
 > Deferred: `opacity` is **carried on the receipt but does not blend yet** — 3D translucency needs back-to-front draw ordering (canvas2d 3D-translucency deferred). `MeshData` (author-supplied vertex data) deferred until a game needs non-catalog geometry.
 > Contract: §11   Vocabulary: Procedural geometry, Perspective camera, 3D mesh raster, Materials, Lighting   Determinism: presentation
 

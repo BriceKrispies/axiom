@@ -12,7 +12,7 @@
 
 import { type Outcome, type SessionConfig, boundHost, latchOutcome } from "./host-binding.ts";
 import type { PlayerId } from "./vocabulary.ts";
-import { each } from "./branchless.ts";
+import { each } from "./control-flow.ts";
 
 /** Read the host's session configuration (seed + opaque params), SPEC-12 §4.2. */
 export const getSessionConfig = (): SessionConfig => boundHost().getSessionConfig();
