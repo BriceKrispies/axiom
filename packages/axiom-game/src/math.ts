@@ -1,16 +1,18 @@
 /*
- * The math and spatial-query free functions (SPEC-03 §4.2). Anything the native
- * core owns is projected through the installed `HostBridge` (`host-binding.ts`):
- * `clamp` and `normalizeAngle` come from the native `MathApi`, and
- * `overlapCircle` is a scene query over the committed transforms for the current
- * tick — none of these are re-implemented in TS where a native source exists.
+ * The pure scalar-math free functions (SPEC-03 §4.2 / §5). `clamp` and
+ * `normalizeAngle` come from the native `MathApi` through the installed
+ * `HostBridge` (`host-binding.ts`) — the one deterministic source of truth, never
+ * re-implemented in TS. The stateful scene queries (`overlapCircle`/`overlapBox`/
+ * `raycast`) live in `query.ts`, beside this scalar surface.
  *
  * `lerp` is the one local helper: a single bit-trivial affine blend
  * (`start + (end - start) * t`) with no native state to consult, so it stays in
- * the TS layer rather than paying a bridge crossing.
+ * the TS layer rather than paying a bridge crossing. (The native `MathApi`
+ * exposes no standalone scalar `lerp` export today — only `clamp` /
+ * `normalizeAngle` — so routing it native would need a new Wave-2 export; see the
+ * agent report's gap note.)
  */
 
-import type { Entity, Vec2 } from "./vocabulary.ts";
 import { boundHost } from "./host-binding.ts";
 
 /** Constrain `value` to `[low, high]` (native `MathApi`, SPEC-03 §4.2). */
@@ -23,7 +25,3 @@ export const lerp = (start: number, end: number, fraction: number): number =>
 
 /** Wrap `angle` to `(-π, π]` (native `MathApi`, SPEC-03 §4.2). */
 export const normalizeAngle = (angle: number): number => boundHost().normalizeAngle(angle);
-
-/** Entities whose committed transform overlaps the circle, in stable order (SPEC-03 §4.2). */
-export const overlapCircle = (center: Vec2, radius: number): readonly Entity[] =>
-  boundHost().overlapCircle(center.x, center.y, radius);

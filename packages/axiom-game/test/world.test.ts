@@ -74,3 +74,56 @@ test("despawnSubtree removes the entity and its whole subtree", () => {
   world.despawnSubtree(root);
   assert.deepEqual(world.query("node"), [sibling]);
 });
+
+test("alive is true for a live entity and false for a despawned / stale handle", () => {
+  const world = makeWorld(new FakeBridge());
+  const entity = world.spawn(health(1));
+  assert.equal(world.alive(entity), true);
+  assert.equal(world.alive(9999), false);
+  world.despawn(entity);
+  assert.equal(world.alive(entity), false);
+});
+
+test("has reports component presence and remove clears it", () => {
+  const world = makeWorld(new FakeBridge());
+  const entity = world.spawn(health(3), { kind: "enemy" });
+  assert.equal(world.has(entity, "health"), true);
+  assert.equal(world.has(entity, "absent"), false);
+  world.remove(entity, "health");
+  assert.equal(world.has(entity, "health"), false);
+  assert.equal(world.get(entity, "health"), undefined);
+  // Still carries the kind that was not removed.
+  assert.equal(world.has(entity, "enemy"), true);
+});
+
+test("setParent links a child and parentOf reads it back (root is the empty value)", () => {
+  const world = makeWorld(new FakeBridge());
+  const parent = world.spawn({ kind: "node" });
+  const child = world.spawn({ kind: "node" });
+  assert.equal(world.parentOf(child), undefined);
+  world.setParent(child, parent);
+  assert.equal(world.parentOf(child), parent);
+  assert.deepEqual(world.childrenOf(parent), [child]);
+});
+
+test("worldTransform reads the resolved transform for a live node, empty for a stale one", () => {
+  const fake = new FakeBridge();
+  const world = makeWorld(fake);
+  const entity = world.spawn({ kind: "node" });
+  // A live node with no scripted override reads the identity pose the bridge returns.
+  assert.deepEqual(world.worldTransform(entity), {
+    position: { x: 0, y: 0, z: 0 },
+    rotation: [0, 0, 0, 1],
+    scale: { x: 1, y: 1, z: 1 },
+  });
+  // A scripted bridge transform is forwarded verbatim (the projection adds no logic).
+  const composed = {
+    position: { x: 1, y: 2, z: 3 },
+    rotation: [0, 0, 0, 1] as const,
+    scale: { x: 1, y: 1, z: 1 },
+  };
+  fake.transforms.set(entity, composed);
+  assert.deepEqual(world.worldTransform(entity), composed);
+  // A stale handle is the empty value, never a throw.
+  assert.equal(world.worldTransform(9999), undefined);
+});

@@ -178,6 +178,33 @@
         "eslint/max-params": "off",
         "typescript/no-unsafe-type-assertion": "off"
       }
+    },
+    {
+      // The platform-edge BOOT path: dom-input.ts (DOM key/pointer events → the
+      // wasm input exports) and boot.ts (the bindNative + GameLoop + driveRaf +
+      // driveDomInput + asset-preload aggregator the browser page calls). These are
+      // @axiom/game's analogue of @axiom/client's webtransport.ts/build-transport.ts
+      // and the Rust spine's host/windowing layers — they bind real browser
+      // event/timer APIs and the live wasm object, which sit outside the strict
+      // spine laws. Only the rules that boundary genuinely fights are scoped off,
+      // documented; every general-quality rule (id-length, return types, …) still
+      // applies. Both files are ALSO coverage-exempt (browser-only, verified via the
+      // Playwright path) — see their --test-coverage-exclude in package.json. The
+      // exemption is scoped to EXACTLY these two files; nothing else is relaxed.
+      //   - branch ban / optional chaining: the event wiring + running-state gate + `?? []`
+      //   - async-await + unsafe-*: the DOM event / live-wasm boundary is untyped at its edge
+      "files": ["src/dom-input.ts", "src/boot.ts"],
+      "rules": {
+        "eslint-js/no-restricted-syntax": "off",
+        "eslint/no-await-in-loop": "off",
+        "oxc/no-async-await": "off",
+        "oxc/no-optional-chaining": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-type-assertion": "off"
+      }
     }
   ]
 }

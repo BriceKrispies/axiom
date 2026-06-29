@@ -16,19 +16,16 @@
  * one place: `bindNative` opens a fresh session, so it also clears the latch.
  */
 
-import {
-  type CameraDescriptor,
-  type GridField,
-  IDENTITY_MAT4,
-  IDENTITY_QUAT,
-  type LightDescriptor,
-  type MaterialDescriptor,
-  ORIGIN_CELL,
-  type PerspectiveSpec,
-  ZERO_VEC3,
+import type {
+  CameraDescriptor,
+  GridField,
+  LightDescriptor,
+  MaterialDescriptor,
+  PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Entity, Handle, Mat4, PlayerId, Quat, Result, Vec3 } from "./vocabulary.ts";
+import type { Cell, Entity, Handle, Mat4, PlayerId, Quat, RayHit, Result, Vec3 } from "./vocabulary.ts";
 import { type Draw2dBridge, UNBOUND_DRAW2D } from "./draw2d-binding.ts";
+import { UNBOUND_HOST_BASE } from "./unbound-host.ts";
 
 /** Host-supplied session configuration: a seed plus opaque parameters (SPEC-12). */
 export interface SessionConfig {
@@ -91,8 +88,12 @@ export interface HostBridge extends Draw2dBridge {
   readonly clamp: (value: number, low: number, high: number) => number;
   /** Wrap `angle` to `(-π, π]` (native `MathApi`). */
   readonly normalizeAngle: (angle: number) => number;
-  /** Entities whose committed transform overlaps the circle, in stable order. */
+  /** Entities whose committed transform overlaps the circle, in stable order (SPEC-03). */
   readonly overlapCircle: (centerX: number, centerY: number, radius: number) => readonly Entity[];
+  /** Entities whose committed bounds overlap the query box, in stable order (SPEC-03). */
+  readonly overlapBox: (center: Vec3, halfExtents: Vec3) => readonly Entity[];
+  /** The nearest bounded ray hit, or the empty value on a miss (SPEC-03). */
+  readonly raycast: (origin: Vec3, direction: Vec3, maxDistance: number) => Result<RayHit>;
   /** Bind an action name to the physical `keys` that trigger it (SPEC-05). */
   readonly bindAction: (action: string, keys: readonly string[]) => void;
   /** The host's session configuration, constant for the whole session (SPEC-12). */
@@ -185,87 +186,7 @@ export interface HostBridge extends Draw2dBridge {
   readonly quatToMat4: (quaternion: Quat) => Mat4;
 }
 
-/** The seed reported before a host binds — a neutral, inert default. */
-const UNBOUND_SEED = 0n;
-
-/** The handle returned by handle-minting reads before a host binds (a null handle). */
-const UNBOUND_HANDLE = 0;
-
-/** The neutral scalar an inert numeric math read returns before a host binds. */
-const UNBOUND_SCALAR = 0;
-
-/*
- * The inert host used before `bindNative`: every read returns a neutral value
- * and every signal is a no-op. This keeps the free surface total (no `null`
- * bridge to branch on) and makes "called before the app bound a host" a quiet,
- * observable no-op rather than a crash. The non-2D defaults live here; the 2D
- * surface (`UNBOUND_DRAW2D`) is composed in below, the same Object.assign
- * partition the wasm host adapter uses.
- */
-const UNBOUND_HOST_BASE = {
-  addLight: (): Entity => UNBOUND_HANDLE,
-  bindAction: (): void => {
-    // No-op until a host is bound
-  },
-  clamp: (value: number): number => value,
-  createMaterial: (): Handle => UNBOUND_HANDLE,
-  createMesh: (): Handle => UNBOUND_HANDLE,
-  getSessionConfig: (): SessionConfig => ({ params: {}, seed: UNBOUND_SEED }),
-  gridDistanceField: (): readonly number[] => [],
-  gridPath: (): Result<readonly Cell[]> => [],
-  gridReachable: (): boolean => false,
-  gridStepToward: (): Cell => ORIGIN_CELL,
-  loadSound: (): Handle => UNBOUND_HANDLE,
-  mat4FromTRS: (): Mat4 => IDENTITY_MAT4,
-  mat4Identity: (): Mat4 => IDENTITY_MAT4,
-  mat4Invert: (): Mat4 => IDENTITY_MAT4,
-  mat4LookAt: (): Mat4 => IDENTITY_MAT4,
-  mat4Multiply: (): Mat4 => IDENTITY_MAT4,
-  mat4Perspective: (): Mat4 => IDENTITY_MAT4,
-  normalizeAngle: (angle: number): number => angle,
-  notifyReady: (): void => {
-    // No-op until a host is bound
-  },
-  overlapCircle: (): readonly Entity[] => [],
-  playMusic: (): Handle => UNBOUND_HANDLE,
-  playSound: (): Handle => UNBOUND_HANDLE,
-  playTone: (): Handle => UNBOUND_HANDLE,
-  quatFromEuler: (): Quat => IDENTITY_QUAT,
-  quatIdentity: (): Quat => IDENTITY_QUAT,
-  quatMultiply: (): Quat => IDENTITY_QUAT,
-  quatNormalize: (): Quat => IDENTITY_QUAT,
-  quatToMat4: (): Mat4 => IDENTITY_MAT4,
-  reportOutcome: (): void => {
-    // No-op until a host is bound
-  },
-  reportOutcomes: (): void => {
-    // No-op until a host is bound
-  },
-  scheduleSound: (): Handle => UNBOUND_HANDLE,
-  setCamera3D: (): void => {
-    // No-op until a host is bound
-  },
-  setMasterVolume: (): void => {
-    // No-op until a host is bound
-  },
-  setMuted: (): void => {
-    // No-op until a host is bound
-  },
-  stopVoice: (): void => {
-    // No-op until a host is bound
-  },
-  v3Add: (): Vec3 => ZERO_VEC3,
-  v3Cross: (): Vec3 => ZERO_VEC3,
-  v3Dist: (): number => UNBOUND_SCALAR,
-  v3Dot: (): number => UNBOUND_SCALAR,
-  v3Len: (): number => UNBOUND_SCALAR,
-  v3Lerp: (): Vec3 => ZERO_VEC3,
-  v3Normalize: (): Vec3 => ZERO_VEC3,
-  v3Scale: (): Vec3 => ZERO_VEC3,
-  v3Sub: (): Vec3 => ZERO_VEC3,
-};
-
-/** The full inert channel: the non-2D defaults composed with the inert 2D surface, so `boundHost()` is a total `HostBridge` before any `bindNative`. */
+/** The full inert channel: the non-2D defaults (`unbound-host.ts`) composed with the inert 2D surface, so `boundHost()` is a total `HostBridge` before any `bindNative`. */
 const UNBOUND_HOST: HostBridge = Object.assign(UNBOUND_HOST_BASE, UNBOUND_DRAW2D);
 
 /** The mutable session: the bound host and whether a terminal outcome was emitted. */

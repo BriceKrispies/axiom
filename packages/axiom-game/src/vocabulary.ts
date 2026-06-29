@@ -82,6 +82,40 @@ export type Mat4 = readonly number[];
  */
 export type Quat = readonly [number, number, number, number];
 
+/*
+ * A resolved scene transform (SPEC-02 §4.2): the composed world `position` /
+ * `rotation` / `scale` `worldTransform` reads back for a node this tick. It is
+ * the projection of the native authoritative world transform (the flat
+ * `[tx,ty,tz, qx,qy,qz,qw, sx,sy,sz]` tuple `worldWorldTransform` returns), so
+ * `rotation` is the 3D `Quat` form (SPEC-02 names `number` for the 2D shorthand
+ * and "quaternion form for 3D"; the native channel is the 3D form). Plain value
+ * records only, so it marshals 1:1 across the wasm boundary; never re-derived in
+ * TS.
+ */
+export interface Transform {
+  /** The world-space position. */
+  readonly position: Vec3;
+  /** The world-space rotation (quaternion). */
+  readonly rotation: Quat;
+  /** The world-space scale. */
+  readonly scale: Vec3;
+}
+
+/*
+ * The nearest bounded ray hit a `raycast` reports (SPEC-03 §5): the `entity` the
+ * ray struck, the world-space `point` it entered, and the `distance` from the
+ * ray origin to that point. A pure value record; a miss is the empty `Result`,
+ * never a throw (§0.2).
+ */
+export interface RayHit {
+  /** The entity the ray struck. */
+  readonly entity: Entity;
+  /** The world-space entry point on the entity's bounds. */
+  readonly point: Vec3;
+  /** The distance from the ray origin to `point`. */
+  readonly distance: number;
+}
+
 /** An optional value: present `Value`, or `undefined` on a miss (SPEC-02 §5, contract `T | null`). */
 export type Result<Value> = Value | undefined;
 

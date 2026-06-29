@@ -30,7 +30,7 @@
  * so they forward unchanged.
  */
 
-import type { Component, Handle, Result, Ticks, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Component, Handle, Quat, Result, Ticks, Transform, Vec2, Vec3 } from "./vocabulary.ts";
 import type { NativeBridge, PointerSample, Swipe, TweenCurve } from "./native-bridge.ts";
 import { each, orElse, pick } from "./control-flow.ts";
 import type { StepBudget } from "./step-budget.ts";
@@ -70,6 +70,8 @@ export interface WasmGameExport
     | "worldSet"
     | "worldQuery"
     | "worldChildrenOf"
+    | "worldParentOf"
+    | "worldWorldTransform"
   > {
   readonly advance: (elapsedNanos: bigint) => {
     readonly fixed_step_nanos: bigint;
@@ -119,6 +121,14 @@ export interface WasmGameExport
   readonly worldSet: (entity: number, kind: string, fields: Uint8Array) => void;
   readonly worldQuery: (kinds: readonly string[]) => readonly number[];
   readonly worldChildrenOf: (entity: number) => readonly number[];
+  /*
+   * Hierarchy + liveness (SPEC-02): `worldParentOf` returns `[]` / `[parent]` and
+   * `worldWorldTransform` returns `[]` / the flat 10-tuple — the same
+   * empty-is-absent shape the input reads use, mapped to the `Result` empty value
+   * here.
+   */
+  readonly worldParentOf: (entity: number) => Float64Array;
+  readonly worldWorldTransform: (entity: number) => Float64Array;
 }
 
 /*
@@ -308,6 +318,40 @@ const adaptWorldSpawn =
     return entity;
   };
 
+/** The flat-world-transform indices: `[tx,ty,tz, qx,qy,qz,qw, sx,sy,sz]` (SPEC-02). */
+const TRANSFORM_PZ = 2;
+const TRANSFORM_RX = 3;
+const TRANSFORM_RY = 4;
+const TRANSFORM_RZ = 5;
+const TRANSFORM_RW = 6;
+const TRANSFORM_SX = 7;
+const TRANSFORM_SY = 8;
+const TRANSFORM_SZ = 9;
+
+/** Adapt `worldParentOf`: the boundary `[]` / `[parent]` (empty = root / absent) to a `Result<Entity>`. */
+const adaptWorldParentOf =
+  (game: WasmGameExport) =>
+  (entity: number): Result<number> =>
+    fromScalars(game.worldParentOf(entity), (values): number => pick(values, 0));
+
+/** Adapt `worldWorldTransform`: the boundary `[]` / flat 10-tuple to a `Result<Transform>`. */
+const adaptWorldWorldTransform =
+  (game: WasmGameExport) =>
+  (entity: number): Result<Transform> =>
+    fromScalars(
+      game.worldWorldTransform(entity),
+      (values): Transform => ({
+        position: { x: pick(values, 0), y: pick(values, 1), z: pick(values, TRANSFORM_PZ) },
+        rotation: [
+          pick(values, TRANSFORM_RX),
+          pick(values, TRANSFORM_RY),
+          pick(values, TRANSFORM_RZ),
+          pick(values, TRANSFORM_RW),
+        ] as Quat,
+        scale: { x: pick(values, TRANSFORM_SX), y: pick(values, TRANSFORM_SY), z: pick(values, TRANSFORM_SZ) },
+      }),
+    );
+
 /** Adapt `inputPointer`: the boundary `[x, y, down]` (empty = absent) to a `PointerSample`. */
 const adaptInputPointer =
   (game: WasmGameExport) =>
@@ -427,11 +471,17 @@ export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   tweenCancel: game.tweenCancel,
   tweenCompleted: game.tweenCompleted,
   tweenValue: game.tweenValue,
+  worldAlive: game.worldAlive,
   worldChildrenOf: game.worldChildrenOf,
   worldDespawn: game.worldDespawn,
   worldDespawnSubtree: game.worldDespawnSubtree,
   worldGet: adaptWorldGet(game),
+  worldHas: game.worldHas,
+  worldParentOf: adaptWorldParentOf(game),
   worldQuery: game.worldQuery,
+  worldRemove: game.worldRemove,
   worldSet: adaptWorldSet(game),
+  worldSetParent: game.worldSetParent,
   worldSpawn: adaptWorldSpawn(game),
+  worldWorldTransform: adaptWorldWorldTransform(game),
 });

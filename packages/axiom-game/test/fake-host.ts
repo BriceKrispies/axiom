@@ -19,7 +19,7 @@ import type {
   MaterialDescriptor,
   PerspectiveSpec,
 } from "../src/host-descriptors.ts";
-import type { Cell, Entity, Handle, Mat4, Quat, Rect, Vec2, Vec3 } from "../src/vocabulary.ts";
+import type { Cell, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Vec2, Vec3 } from "../src/vocabulary.ts";
 
 export class FakeHost implements HostBridge {
   public clampReturn = 0;
@@ -30,6 +30,10 @@ export class FakeHost implements HostBridge {
   public clampCalls: (readonly [number, number, number])[] = [];
   public normalizeCalls: number[] = [];
   public overlapCalls: (readonly [number, number, number])[] = [];
+  public overlapBoxReturn: readonly Entity[] = [];
+  public overlapBoxCalls: { center: Vec3; halfExtents: Vec3 }[] = [];
+  public raycastReturn: Result<RayHit> = undefined;
+  public raycastCalls: { origin: Vec3; direction: Vec3; maxDistance: number }[] = [];
   public bindings: (readonly [string, readonly string[]])[] = [];
   public outcomes: Outcome[] = [];
   public outcomeSets: Readonly<Record<number, Outcome>>[] = [];
@@ -85,6 +89,16 @@ export class FakeHost implements HostBridge {
   public overlapCircle(centerX: number, centerY: number, radius: number): readonly Entity[] {
     this.overlapCalls.push([centerX, centerY, radius]);
     return this.overlapReturn;
+  }
+
+  public overlapBox(center: Vec3, halfExtents: Vec3): readonly Entity[] {
+    this.overlapBoxCalls.push({ center, halfExtents });
+    return this.overlapBoxReturn;
+  }
+
+  public raycast(origin: Vec3, direction: Vec3, maxDistance: number): Result<RayHit> {
+    this.raycastCalls.push({ direction, maxDistance, origin });
+    return this.raycastReturn;
   }
 
   public bindAction(action: string, keys: readonly string[]): void {

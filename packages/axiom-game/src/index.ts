@@ -86,7 +86,9 @@ export type { World } from "./world.ts";
 export { makeInput, SnapshotInput, bindAction } from "./input.ts";
 export type { Action, Input } from "./input.ts";
 
-export { clamp, lerp, normalizeAngle, overlapCircle } from "./math.ts";
+export { clamp, lerp, normalizeAngle } from "./math.ts";
+
+export { overlapBox, overlapCircle, raycast } from "./query.ts";
 
 export { getSessionConfig, notifyReady, reportOutcome, reportOutcomes } from "./host.ts";
 
@@ -198,11 +200,13 @@ export type {
   Mat4,
   PlayerId,
   Quat,
+  RayHit,
   Rect,
   Result,
   Rgba,
   Seconds,
   Ticks,
+  Transform,
   Vec2,
   Vec3,
 } from "./vocabulary.ts";

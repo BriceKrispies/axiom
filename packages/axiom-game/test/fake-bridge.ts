@@ -13,10 +13,19 @@ import type {
   Handle,
   Result,
   Ticks,
+  Transform,
   Vec2,
   Vec3,
 } from "../src/vocabulary.ts";
 import type { StepBudget } from "../src/step-budget.ts";
+
+// The identity world transform the fake returns for a live node with no scripted
+// override — the obvious neutral pose for a hierarchy/transform read test.
+const IDENTITY_TRANSFORM: Transform = {
+  position: { x: 0, y: 0, z: 0 },
+  rotation: [0, 0, 0, 1],
+  scale: { x: 1, y: 1, z: 1 },
+};
 
 const FIRST_ENTITY = 1;
 
@@ -82,6 +91,9 @@ export class FakeBridge implements NativeBridge {
   private readonly parents = new Map<Entity, Entity>();
   private readonly order: Entity[] = [];
   public lastSpawn: readonly Component[] | undefined = undefined;
+  // Scriptable world-transform returns: a live entity with no override reads the
+  // identity pose; a dead entity is the empty Result.
+  public readonly transforms = new Map<Entity, Transform>();
   private nextEntity = FIRST_ENTITY;
 
   // --- input snapshot, keyed by tick ---
@@ -211,6 +223,43 @@ export class FakeBridge implements NativeBridge {
 
   public worldChildrenOf(entity: Entity): readonly Entity[] {
     return this.order.filter((candidate) => this.parents.get(candidate) === entity);
+  }
+
+  public worldAlive(entity: Entity): boolean {
+    return this.alive.has(entity);
+  }
+
+  public worldHas(entity: Entity, kind: ComponentKind): boolean {
+    const column = this.columns.get(entity);
+    if (!this.alive.has(entity) || column === undefined) {
+      return false;
+    }
+    return column.has(kind);
+  }
+
+  public worldRemove(entity: Entity, kind: ComponentKind): void {
+    const column = this.columns.get(entity);
+    if (this.alive.has(entity) && column !== undefined) {
+      column.delete(kind);
+    }
+  }
+
+  public worldSetParent(child: Entity, parent: Entity): void {
+    // Self-parenting is rejected (mirrors the native scene), like `link` otherwise.
+    if (child !== parent) {
+      this.parents.set(child, parent);
+    }
+  }
+
+  public worldParentOf(entity: Entity): Result<Entity> {
+    return this.parents.get(entity);
+  }
+
+  public worldWorldTransform(entity: Entity): Result<Transform> {
+    if (!this.alive.has(entity)) {
+      return undefined;
+    }
+    return this.transforms.get(entity) ?? IDENTITY_TRANSFORM;
   }
 
   // Test helper: wire `child` under `parent` (the projected surface omits
