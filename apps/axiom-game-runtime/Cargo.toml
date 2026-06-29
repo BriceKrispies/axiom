@@ -38,6 +38,15 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 # `axiom::prelude` already on the deps above.
 axiom-input = { path = "../../modules/axiom-input" }
 
+# Timers + state machines (SPEC-07) and tweens (SPEC-09): the deterministic,
+# wall-clock-free `axiom-tick` timer wheel + state machines and the `axiom-tween`
+# eased-curve table the bridge pumps once per fixed tick. Both are isolated engine
+# modules the umbrella does not re-export, so this leaf app composes them directly
+# (the legal app-composes-modules path). `Tick`/`TickDelta` arrive through
+# `axiom-kernel` already on the deps above.
+axiom-tick = { path = "../../modules/axiom-tick" }
+axiom-tween = { path = "../../modules/axiom-tween" }
+
 # Browser entry only: the wasm-bindgen export macro + a panic hook, plus the
 # bits of web-sys the embed-seam host channel needs — read the inbound query
 # string off `window.location`, post the outbound outcome to the parent frame.

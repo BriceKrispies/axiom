@@ -38,7 +38,16 @@
 //! optional reads (pointer / press-start / pressed-at-tick) as a `Vec<f64>` that
 //! is empty when absent; a swipe as its direction string.
 //!
-//! Tween / tick / grid / 3D / audio / net remain later increments.
+//! ## Time, state machines, and tweens (SPEC-07 / SPEC-09)
+//! The `timer_*` / `machine_*` / `tween_*` methods host the TS `NativeBridge`
+//! timer, state-machine, and tween surface over the deterministic `axiom-tick`
+//! timer wheel + state machines and the `axiom-tween` eased-curve table
+//! ([`crate::time`]). Both schedules are **mutating** per-tick reads, so [`advance`]
+//! pumps them once per fixed tick and records what fired; the read methods report
+//! that recorded frame. Ids and ticks cross as numbers, a fired-id / active-id /
+//! completed-id list as a `Vec<u64>`, a tween value as `f64`.
+//!
+//! Grid / 3D / audio / net remain later increments.
 //!
 //! [`advance`]: GameBridge::advance
 
@@ -49,6 +58,7 @@ use crate::input::InputBridge;
 use crate::physics::PhysicsState;
 use crate::rng::RngHub;
 use crate::runtime::GameRuntime;
+use crate::time::TimeBridge;
 use crate::world;
 
 /// The deterministic native core: the fixed-step loop, the seeded RNG hub, the
@@ -63,6 +73,7 @@ pub struct GameBridge {
     outcome: OutcomeLatch,
     pub(crate) physics: PhysicsState,
     pub(crate) input: InputBridge,
+    pub(crate) time: TimeBridge,
 }
 
 impl GameBridge {
@@ -78,6 +89,7 @@ impl GameBridge {
             outcome: OutcomeLatch::new(),
             physics: PhysicsState::new(),
             input: InputBridge::new(),
+            time: TimeBridge::new(fixed_step_nanos),
         }
     }
 
@@ -98,6 +110,8 @@ impl GameBridge {
             budget.steps(),
             budget.fixed_step_nanos(),
         );
+        self.time
+            .pump(start, budget.steps(), budget.fixed_step_nanos());
         budget
     }
 
