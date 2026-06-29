@@ -171,7 +171,25 @@ export { mat4, quat, v3 } from "./math3d.ts";
 export { addLight, createMaterial, createMesh, setCamera3D } from "./scene3d.ts";
 export type { Camera3D, Light, MaterialSpec, MeshKind } from "./scene3d.ts";
 
-export { bindNetTransport, boundNetConfig, configureNet, joinRoom, makeNetSim } from "./net.ts";
+export {
+  bindNetTransport,
+  boundNetConfig,
+  boundNetRestore,
+  boundNetSnapshot,
+  configureNet,
+  joinRoom,
+  makeNetSim,
+  onRestore,
+  onSnapshot,
+} from "./net.ts";
+
+// SPEC-13 §16.3/§16.6 — the room hosting + matchmaking lobby surface (seam-bound, inert until the runtime binds).
+export { bindMatchmaker, bindRoomHost, hostRoom, matchmake } from "./net-room.ts";
+export type { Match, Matchmaker, MatchmakeOptions, Room, RoomConfig, RoomHostFactory, RoomId } from "./net-room.ts";
+
+// SPEC-13 §16.1/§16.5 — the authority-snapshot participant-block decoder feeding makeNetSim each snapshot.
+export { makeNetParticipants } from "./net-participants.ts";
+export type { DecodedSnapshot } from "./net-participants.ts";
 
 /*
  * The `@axiom/client` binding for the net seam (SPEC-13): the runtime adapts a real
