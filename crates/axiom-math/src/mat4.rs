@@ -7,6 +7,7 @@ use crate::epsilon::Epsilon;
 use crate::math_error::MathError;
 use crate::math_result::MathResult;
 use crate::quat::Quat;
+use crate::scalar::Scalar;
 use crate::vec3::Vec3;
 use crate::vec4::Vec4;
 
@@ -295,6 +296,96 @@ impl Mat4 {
                 elem(3, 3),
             ],
         }
+    }
+
+    /// General 4×4 inverse via the cofactor/adjugate ÷ determinant method.
+    ///
+    /// Returns `None` when the matrix is singular — when `|det|` does not
+    /// exceed [`Scalar::DEFAULT_EPSILON`], or when `det` is non-finite (the
+    /// `> ε` test already rejects `NaN`; the explicit finiteness guard also
+    /// rejects `±∞`). It is pure `+,-,*,/` arithmetic — no `mul_add`, no
+    /// transcendentals — so the result is deterministic and the whole body is
+    /// branchless. Storage stays column-major in, column-major out:
+    /// `cof[i]` is the cofactor that, divided by `det`, yields inverse
+    /// element `i` (the adjugate, i.e. the transpose of the cofactor matrix).
+    #[axiom_zones::strict]
+    pub fn inverse(&self) -> Option<Mat4> {
+        let m = &self.data;
+        let cof = [
+            m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15]
+                + m[9] * m[7] * m[14]
+                + m[13] * m[6] * m[11]
+                - m[13] * m[7] * m[10],
+            -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15]
+                - m[9] * m[3] * m[14]
+                - m[13] * m[2] * m[11]
+                + m[13] * m[3] * m[10],
+            m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15]
+                + m[5] * m[3] * m[14]
+                + m[13] * m[2] * m[7]
+                - m[13] * m[3] * m[6],
+            -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11]
+                - m[5] * m[3] * m[10]
+                - m[9] * m[2] * m[7]
+                + m[9] * m[3] * m[6],
+            -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15]
+                - m[8] * m[7] * m[14]
+                - m[12] * m[6] * m[11]
+                + m[12] * m[7] * m[10],
+            m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15]
+                + m[8] * m[3] * m[14]
+                + m[12] * m[2] * m[11]
+                - m[12] * m[3] * m[10],
+            -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15]
+                - m[4] * m[3] * m[14]
+                - m[12] * m[2] * m[7]
+                + m[12] * m[3] * m[6],
+            m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11]
+                + m[4] * m[3] * m[10]
+                + m[8] * m[2] * m[7]
+                - m[8] * m[3] * m[6],
+            m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15]
+                + m[8] * m[7] * m[13]
+                + m[12] * m[5] * m[11]
+                - m[12] * m[7] * m[9],
+            -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15]
+                - m[8] * m[3] * m[13]
+                - m[12] * m[1] * m[11]
+                + m[12] * m[3] * m[9],
+            m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15]
+                + m[4] * m[3] * m[13]
+                + m[12] * m[1] * m[7]
+                - m[12] * m[3] * m[5],
+            -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11]
+                - m[4] * m[3] * m[9]
+                - m[8] * m[1] * m[7]
+                + m[8] * m[3] * m[5],
+            -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14]
+                - m[8] * m[6] * m[13]
+                - m[12] * m[5] * m[10]
+                + m[12] * m[6] * m[9],
+            m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14]
+                + m[8] * m[2] * m[13]
+                + m[12] * m[1] * m[10]
+                - m[12] * m[2] * m[9],
+            -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14]
+                - m[4] * m[2] * m[13]
+                - m[12] * m[1] * m[6]
+                + m[12] * m[2] * m[5],
+            m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10]
+                + m[4] * m[2] * m[9]
+                + m[8] * m[1] * m[6]
+                - m[8] * m[2] * m[5],
+        ];
+        // Laplace expansion of the determinant along the first row, reusing the
+        // cofactors already computed for the adjugate.
+        let det = m[0] * cof[0] + m[1] * cof[4] + m[2] * cof[8] + m[3] * cof[12];
+        (det.is_finite() & (det.abs() > Scalar::DEFAULT_EPSILON)).then(|| {
+            let inv_det = 1.0 / det;
+            Mat4 {
+                data: cof.map(|c| c * inv_det),
+            }
+        })
     }
 
     /// Multiply a column vector by this matrix.
@@ -789,5 +880,64 @@ mod cov {
         ]);
         let r = m.transform_point(Vec3::new(3.0, 7.0, 9.0));
         assert!(r.approx_eq(&Vec3::new(1.5, 3.5, 4.5), eps5()));
+    }
+
+    #[test]
+    fn inverse_of_identity_is_identity() {
+        let inv = Mat4::IDENTITY.inverse().unwrap();
+        assert!(inv.approx_eq(&Mat4::IDENTITY, eps5()));
+    }
+
+    #[test]
+    fn inverse_of_translation_is_negated_translation() {
+        let t = Vec3::new(10.0, -20.0, 30.0);
+        let m = Mat4::translation(t);
+        let inv = m.inverse().unwrap();
+        // The inverse of a pure translation is the translation by -t.
+        assert!(inv.approx_eq(&Mat4::translation(t.mul_scalar(-1.0)), eps5()));
+        // And it round-trips a point back to itself.
+        let p = Vec3::new(1.0, 2.0, 3.0);
+        assert!(inv.transform_point(m.transform_point(p)).approx_eq(&p, eps5()));
+    }
+
+    #[test]
+    fn inverse_of_general_matrix_times_self_is_identity() {
+        // A general invertible affine matrix: scale, then rotate, then
+        // translate (det = 2*3*4 = 24, comfortably non-singular).
+        let q = Quat::from_axis_angle(Vec3::new(1.0, 2.0, 3.0), 0.9).unwrap();
+        let m = Mat4::translation(Vec3::new(5.0, -3.0, 2.0))
+            .multiply(Mat4::from_quaternion(q))
+            .multiply(Mat4::scale(Vec3::new(2.0, 3.0, 4.0)));
+        let inv = m.inverse().unwrap();
+        // M * M⁻¹ ≈ I and M⁻¹ * M ≈ I.
+        assert!(m.multiply(inv).approx_eq(&Mat4::IDENTITY, eps5()));
+        assert!(inv.multiply(m).approx_eq(&Mat4::IDENTITY, eps5()));
+    }
+
+    #[test]
+    fn inverse_of_singular_matrix_is_none() {
+        // Zero matrix: det = 0.
+        assert!(Mat4::ZERO.inverse().is_none());
+        // Rank-deficient: two identical columns force det = 0.
+        let rank_deficient = Mat4::from_cols_array([
+            1.0, 2.0, 3.0, 4.0, //
+            1.0, 2.0, 3.0, 4.0, // duplicate of column 0
+            9.0, 8.0, 7.0, 6.0, //
+            0.0, 1.0, 0.0, 1.0, //
+        ]);
+        assert!(rank_deficient.inverse().is_none());
+    }
+
+    #[test]
+    fn inverse_of_non_finite_matrix_is_none() {
+        // A NaN entry propagates into det, which is then non-finite; the
+        // finiteness guard (and the `> ε` test) rejects it.
+        let m = Mat4::from_cols_array([
+            f32::NAN, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0, //
+        ]);
+        assert!(m.inverse().is_none());
     }
 }
