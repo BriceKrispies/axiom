@@ -21,6 +21,10 @@ kind = "engine-module"
 
 allowed_layers = [
     "host",
+    # The neutral 2D draw contract (host::Draw2dList) is expressed in math's
+    # Mat3 / Vec2 (each command's baked transform and rect corners), so the
+    # software Draw2dList consumer genuinely names and uses the math layer.
+    "math",
 ]
 
 allowed_modules = []

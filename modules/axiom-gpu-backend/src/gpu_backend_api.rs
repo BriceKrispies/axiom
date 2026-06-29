@@ -1,6 +1,6 @@
 //! The single GPU-backend facade: own the real wgpu binding and present frames.
 
-use axiom_host::{FramePacket, HostPresentationRequest};
+use axiom_host::{Draw2dList, FramePacket, HostPresentationRequest};
 
 /// The real GPU presentation backend for one surface.
 ///
@@ -166,6 +166,17 @@ impl GpuBackendApi {
             packet.light_view_proj(),
             &batches,
         )
+    }
+
+    /// Present a host-neutral [`Draw2dList`] through the GPU backend — the 2D
+    /// peer of [`Self::present_packet`]. The live wgpu 2D raster is the
+    /// browser/`offscreen` platform arm (alpha-blended, outside the coverage
+    /// gate); the native facade is a no-op returning `false` (no GPU), naming the
+    /// neutral list the live arm consumes. Today the software Canvas 2D backend
+    /// owns the covered 2D raster; this is the wgpu entry point alongside it.
+    pub fn present_draw2d(&self, list: &Draw2dList) -> bool {
+        let _ = list;
+        false
     }
 
     /// Render one frame **off-screen** to `width * height * 4` RGBA8 bytes,
@@ -376,5 +387,15 @@ mod tests {
             FrameFeatureSet::new(false, false, 1, 0),
         );
         assert!(!backend.present_packet(&packet));
+    }
+
+    #[test]
+    fn present_draw2d_consumes_a_list_and_no_ops_on_native() {
+        // The 2D entry point names the neutral Draw2dList; on native (no GPU) it
+        // is a no-op, exactly like present_packet. The live alpha-blended wgpu 2D
+        // raster is the exempt browser/offscreen arm.
+        let backend = GpuBackendApi::new(&request(640, 480));
+        let list = Draw2dList::default();
+        assert!(!backend.present_draw2d(&list));
     }
 }

@@ -3,11 +3,12 @@
 use std::collections::HashSet;
 
 use axiom_host::{
-    BackendKind, FrameDepthCueStats, FrameFeature, FramePacket, FrameRasterStats,
+    BackendKind, Draw2dList, FrameDepthCueStats, FrameFeature, FramePacket, FrameRasterStats,
     FrameSubmissionReport, HostPresentationRequest,
 };
 
 use crate::canvas_policy::{CanvasQualityPreset, CanvasVisualProfile};
+use crate::draw2d_raster::Draw2dTextures;
 use crate::low_poly_raster_options::LowPolyRasterOptions;
 use crate::mesh_cache::MeshCache;
 use crate::software_rasterizer::{SoftwareRasterResult, SoftwareRasterizer};
@@ -28,6 +29,9 @@ pub struct Canvas2dBackendApi {
     profile: CanvasVisualProfile,
     options: LowPolyRasterOptions,
     meshes: MeshCache,
+    // CPU sprite/atlas textures the 2D Draw2dList consumer samples (uploaded by
+    // the app, the same fetch-in-the-app rule the mesh/material path follows).
+    textures: Draw2dTextures,
     // The real 2D context, present only once attached on wasm32. Its absence is
     // what "not yet bound" means; native never has one.
     #[cfg(target_arch = "wasm32")]
@@ -48,9 +52,28 @@ impl Canvas2dBackendApi {
             profile: CanvasVisualProfile::LowPolyFramebuffer,
             options: LowPolyRasterOptions::default(),
             meshes: MeshCache::default(),
+            textures: Draw2dTextures::default(),
             #[cfg(target_arch = "wasm32")]
             binding: None,
         }
+    }
+
+    /// Upload the CPU sprite/atlas textures the 2D [`Draw2dList`] sprite path
+    /// samples, as `(texture_id, width, height, RGBA8 pixels)` — the same upload
+    /// shape as the 3D material set. Resolved in the app (fetch/decode); the
+    /// backend only ever names the id.
+    pub fn load_textures(&mut self, textures: &[(u64, u32, u32, Vec<u8>)]) {
+        self.textures = Draw2dTextures::load(textures);
+    }
+
+    /// Composite a host-neutral [`Draw2dList`] onto a fresh framebuffer at the
+    /// canvas display size and return the finished `(rgba8 bytes, width, height)`
+    /// — the 2D analogue of [`Self::render_offscreen_rgba`]. Each command's
+    /// resolved `layer` (the list is pre-sorted), `alpha`, and baked transform are
+    /// honoured, with **src-over alpha compositing** so translucent draws blend
+    /// over what is beneath them. Pure; no canvas touched, so it is native-tested.
+    pub fn render_draw2d_rgba(&self, list: &Draw2dList) -> (Vec<u8>, u32, u32) {
+        crate::draw2d_raster::render(list, self.width, self.height, &self.textures)
     }
 
     /// Upload the mesh set the rasterizer will project, in the GPU backend's
@@ -516,5 +539,38 @@ mod tests {
         let (_, v, i) = ground(7);
         backend.replace_geometry(7, &v, &i);
         assert_eq!(backend.present_packet(&p).submitted_draws(), 1);
+    }
+
+    #[test]
+    fn renders_a_draw2d_list_with_a_sprite_at_the_canvas_size() {
+        use axiom_host::{Common2d, Draw2dCommand, SpriteDraw2d, TextureId};
+        use axiom_math::Vec2;
+
+        let mut backend = Canvas2dBackendApi::new(&request(4, 4));
+        // A 1×1 opaque red texture, blitted as a 1×1 sprite at the origin.
+        backend.load_textures(&[(3, 1, 1, vec![255, 0, 0, 255])]);
+        let one = Ratio::new(1.0).expect("finite");
+        let opts = SpriteDraw2d::new(
+            axiom_host::Rect::new(Vec2::ZERO, Vec2::ONE),
+            Vec2::ZERO,
+            axiom_host::Rgba::new(one, one, one, one),
+            false,
+            false,
+        );
+        let mut list = Draw2dList::default();
+        list.push_command(Draw2dCommand::sprite(
+            (0, axiom_math::Mat3::IDENTITY, Common2d::new(0, one)),
+            TextureId::from_raw(3),
+            opts,
+        ));
+        list.sort_commands();
+
+        let (rgba, w, h) = backend.render_draw2d_rgba(&list);
+        assert_eq!((w, h), (4, 4));
+        assert_eq!(rgba.len() as u32, w * h * 4);
+        // Pixel (0,0) is the opaque red sprite; an untouched pixel is transparent.
+        assert_eq!(&rgba[0..4], &[255, 0, 0, 255]);
+        let untouched = ((3 * 4 + 3) * 4) as usize;
+        assert_eq!(&rgba[untouched..untouched + 4], &[0, 0, 0, 0]);
     }
 }

@@ -59,6 +59,11 @@ mod raster_vertex;
 mod software_framebuffer;
 mod software_rasterizer;
 
+// The host-neutral 2D draw-list (`host::Draw2dList`) software consumer: composites
+// the layer-sorted 2D commands onto a framebuffer with src-over alpha blending.
+// Pure, native-testable, fully covered — the 2D peer of the FramePacket raster.
+mod draw2d_raster;
+
 // The real Canvas 2D presentation arm — compiled only for wasm32, behind the
 // facade. A thin `putImageData` blit of the rasterizer's RGBA bytes.
 #[cfg(target_arch = "wasm32")]

@@ -38,7 +38,8 @@ use std::collections::HashSet;
 use axiom_host::{FrameDrawItem, FramePacket};
 
 use crate::canvas_depth_cue::{
-    face_normal_world, height_factor, lighting_brightness, normalize3, shade_triangle, world_y,
+    face_normal_world, height_factor, hemisphere_ambient, lighting_brightness, normalize3,
+    shade_triangle, world_y,
 };
 use crate::canvas_depth_cue_profile::CanvasDepthCueProfile;
 use crate::canvas_policy::{classify, CanvasFallbackImportance};
@@ -191,6 +192,7 @@ struct Candidate {
     area: f32,
     verts: [RasterVertex; 3],
     brightness: f32,
+    ambient: [f32; 3],
     world_y: f32,
     mean_depth: f32,
 }
@@ -367,6 +369,7 @@ fn convert_draw(
                         area,
                         verts: pt.verts,
                         brightness: pt.brightness,
+                        ambient: pt.ambient,
                         world_y: pt.world_y,
                         mean_depth: pt.mean_depth,
                     });
@@ -398,7 +401,7 @@ fn convert_draw(
             let base = RasterTriangle::base_color(&c.verts);
             let hf = height_factor(c.world_y, y_min, y_max);
             let (shaded, _applied) =
-                shade_triangle(base, c.brightness, light.color, hf, c.mean_depth, cues);
+                shade_triangle(base, c.brightness, light.color, c.ambient, hf, c.mean_depth, cues);
             RasterTriangle::shaded(c.verts, shaded)
         })
         .collect();
@@ -429,6 +432,7 @@ fn convert_draw(
 struct ProjectedTriangle {
     verts: [RasterVertex; 3],
     brightness: f32,
+    ambient: [f32; 3],
     world_y: f32,
     mean_depth: f32,
 }
@@ -476,6 +480,9 @@ fn project_triangle_cued(
     // Flat per-triangle cue inputs (shared by every clipped piece).
     let normal = face_normal_world(&model, world);
     let brightness = lighting_brightness(normal, light.dir, light.intensity, cues);
+    // Hemisphere ambient (sky/ground by the face normal) — replaces the old flat
+    // ambient grey, shared by every clipped piece of this triangle.
+    let ambient = hemisphere_ambient(normal, cues);
     let mean_model = [
         (model[0][0] + model[1][0] + model[2][0]) / 3.0,
         (model[0][1] + model[1][1] + model[2][1]) / 3.0,
@@ -495,6 +502,7 @@ fn project_triangle_cued(
         ProjectedTriangle {
             verts,
             brightness,
+            ambient,
             world_y: elevation,
             mean_depth: (verts[0].depth() + verts[1].depth() + verts[2].depth()) / 3.0,
         }
