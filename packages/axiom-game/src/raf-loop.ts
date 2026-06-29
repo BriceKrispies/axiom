@@ -16,14 +16,18 @@ import type { GameLoop } from "./game-loop.ts";
 import type { NativeBridge } from "./native-bridge.ts";
 import type { StepBudget } from "./step-budget.ts";
 
-/** The raw `WasmGame` exports `apps/axiom-game-runtime` produces (snake_case getters). */
-export interface WasmGameExport {
+/*
+ * The raw `WasmGame` exports `apps/axiom-game-runtime` produces. Only `advance`
+ * needs adapting (its `StepReport` uses snake_case bigint fields); the rng / ECS
+ * world / input snapshot methods already match the `NativeBridge` shape the Sim
+ * projections expect, so the bridge forwards them unchanged.
+ */
+export interface WasmGameExport extends Omit<NativeBridge, "advance"> {
   readonly advance: (elapsedNanos: bigint) => {
     readonly fixed_step_nanos: bigint;
     readonly remainder_nanos: bigint;
     readonly steps: number;
   };
-  readonly snapshot: () => Uint8Array;
 }
 
 /** Adapt the snake_case wasm `WasmGame` to the loop core's camelCase NativeBridge. */
@@ -36,9 +40,26 @@ export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
       steps: report.steps,
     };
   },
-  snapshot(): Uint8Array {
-    return game.snapshot();
-  },
+  inputIsDown: game.inputIsDown,
+  inputPointer: game.inputPointer,
+  inputPointerPressed: game.inputPointerPressed,
+  inputPressed: game.inputPressed,
+  inputPressedAtTick: game.inputPressedAtTick,
+  inputReleased: game.inputReleased,
+  inputSwipe: game.inputSwipe,
+  rngBelow: game.rngBelow,
+  rngPermutation: game.rngPermutation,
+  rngStream: game.rngStream,
+  rngUnit: game.rngUnit,
+  rngWeighted: game.rngWeighted,
+  snapshot: game.snapshot,
+  worldChildrenOf: game.worldChildrenOf,
+  worldDespawn: game.worldDespawn,
+  worldDespawnSubtree: game.worldDespawnSubtree,
+  worldGet: game.worldGet,
+  worldQuery: game.worldQuery,
+  worldSet: game.worldSet,
+  worldSpawn: game.worldSpawn,
 });
 
 const NANOS_PER_MILLI = 1_000_000;

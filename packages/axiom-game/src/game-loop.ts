@@ -35,7 +35,7 @@ export class GameLoop {
       budget,
       fixedUpdates: this.#registry.fixedUpdates(),
       makeFrame,
-      makeSim: (tick): ReturnType<typeof makeSim> => makeSim(this.#fixedHz, tick),
+      makeSim: (tick): ReturnType<typeof makeSim> => makeSim(this.#bridge, this.#fixedHz, tick),
       renders: this.#registry.renders(),
       startTick: this.#tick,
     });

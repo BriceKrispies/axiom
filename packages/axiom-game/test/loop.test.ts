@@ -3,10 +3,10 @@ import { test } from "node:test";
 
 import { GameLoop } from "../src/game-loop.ts";
 import { stepFrame } from "../src/loop-core.ts";
-import type { NativeBridge } from "../src/native-bridge.ts";
 import { GameRegistry } from "../src/registry.ts";
 import { makeFrame, makeSim } from "../src/sim.ts";
 import { interpolationAlpha, type StepBudget } from "../src/step-budget.ts";
+import { FakeBridge } from "./fake-bridge.ts";
 
 const budget = (steps: number, remainderNanos: number, fixedStepNanos: number): StepBudget => ({
   fixedStepNanos,
@@ -14,41 +14,18 @@ const budget = (steps: number, remainderNanos: number, fixedStepNanos: number): 
   steps,
 });
 
-// A fake native bridge: replays a scripted budget per advance() and a fixed
-// snapshot — no wasm needed, exactly how @axiom/client tests against a fake socket.
-class FakeBridge implements NativeBridge {
-  private readonly budgets: readonly StepBudget[];
-  private readonly snap: Uint8Array;
-  private index = 0;
-
-  public constructor(budgets: readonly StepBudget[], snap: Uint8Array) {
-    this.budgets = budgets;
-    this.snap = snap;
-  }
-
-  public advance(): StepBudget {
-    const next = this.budgets[this.index]!;
-    this.index += 1;
-    return next;
-  }
-
-  public snapshot(): Uint8Array {
-    return this.snap;
-  }
-}
-
 // A bitwise-free polynomial rolling hash over a tick sequence — the per-tick
 // "state hash" the determinism proof compares across two runs.
 const hashSeq = (values: readonly number[]): number =>
   values.reduce((hash, value) => (hash * 131 + value + 7) % 2_000_000_011, 17);
 
-test("makeSim derives constant dt and exposes the subsystem stubs", () => {
-  const sim = makeSim(60, 7);
+test("makeSim derives constant dt and wires the real subsystem projections", () => {
+  const sim = makeSim(new FakeBridge(), 60, 7);
   assert.equal(sim.tick, 7);
   assert.equal(sim.dt, 1 / 60);
-  assert.equal(sim.rng.subsystem, "rng");
-  assert.equal(sim.input.subsystem, "input");
-  assert.equal(sim.world.subsystem, "world");
+  assert.equal(typeof sim.rng.next, "function");
+  assert.equal(typeof sim.input.isDown, "function");
+  assert.equal(typeof sim.world.spawn, "function");
 });
 
 test("makeFrame carries the latest completed tick", () => {
@@ -60,6 +37,7 @@ test("interpolationAlpha is remainder over fixed step", () => {
 });
 
 test("stepFrame runs N fixed updates then one render with alpha", () => {
+  const fake = new FakeBridge();
   const sims: number[] = [];
   const alphas: number[] = [];
   const next = stepFrame({
@@ -70,7 +48,7 @@ test("stepFrame runs N fixed updates then one render with alpha", () => {
       },
     ],
     makeFrame,
-    makeSim: (tick) => makeSim(50, tick),
+    makeSim: (tick) => makeSim(fake, 50, tick),
     renders: [
       (_frame, alpha): void => {
         alphas.push(alpha);
@@ -84,6 +62,7 @@ test("stepFrame runs N fixed updates then one render with alpha", () => {
 });
 
 test("stepFrame with zero steps renders once and advances no tick", () => {
+  const fake = new FakeBridge();
   const sims: number[] = [];
   let renders = 0;
   const next = stepFrame({
@@ -94,7 +73,7 @@ test("stepFrame with zero steps renders once and advances no tick", () => {
       },
     ],
     makeFrame,
-    makeSim: (tick) => makeSim(50, tick),
+    makeSim: (tick) => makeSim(fake, 50, tick),
     renders: [
       (): void => {
         renders += 1;
@@ -132,12 +111,10 @@ test("GameLoop drives the bridge budget through the registry and tracks the tick
   registry.onFixedUpdate((sim) => {
     ticks.push(sim.tick);
   });
-  const snap = Uint8Array.from([1, 2, 3]);
-  const loop = new GameLoop(
-    new FakeBridge([budget(2, 0, 1000), budget(1, 0, 1000)], snap),
-    60,
-    registry,
-  );
+  const fake = new FakeBridge();
+  fake.budgets = [budget(2, 0, 1000), budget(1, 0, 1000)];
+  fake.snap = Uint8Array.from([1, 2, 3]);
+  const loop = new GameLoop(fake, 60, registry);
 
   const first = loop.advance(2000);
   assert.equal(first.steps, 2);
@@ -164,7 +141,9 @@ test("a headless game reproduces its tick count and per-tick state-hash on repla
       renders += 1;
     });
     const budgets = Array.from({ length: 8 }, () => budget(1, 0, 1000));
-    const loop = new GameLoop(new FakeBridge(budgets, Uint8Array.of()), 30, registry);
+    const fake = new FakeBridge();
+    fake.budgets = budgets;
+    const loop = new GameLoop(fake, 30, registry);
     const stepped = budgets.map(() => loop.advance(1000));
     assert.equal(stepped.length, budgets.length);
     return { hashes, renders, ticks: loop.tick };

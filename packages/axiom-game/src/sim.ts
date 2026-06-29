@@ -1,26 +1,16 @@
 /*
  * The `Sim` handed to every fixed update and the `Frame` handed to every render
  * (SPEC-00 §4.2). `Sim` exposes no wall-clock accessor — elapsed simulated time
- * is `tick * dt`, constant per game. The `rng`/`input`/`world` members are typed
- * STUBS at M0: discriminated placeholders the later subsystem specs (SPEC-01 rng,
- * SPEC-05 input, SPEC-02 world) fill in, projecting each subsystem's §4.2 surface
- * into the namespace named here.
+ * is `tick * dt`, constant per game. Its `rng`/`input`/`world` members are the
+ * real subsystem projections (SPEC-01 rng, SPEC-05 input, SPEC-02 world) built
+ * over the `NativeBridge`: `rng` is the game's root stream, `input` is bound to
+ * the running tick's snapshot, and `world` is the retained ECS surface.
  */
 
-/** Deterministic RNG surface — filled by SPEC-01. */
-export interface RngStub {
-  readonly subsystem: "rng";
-}
-
-/** Input surface — filled by SPEC-05. */
-export interface InputStub {
-  readonly subsystem: "input";
-}
-
-/** Retained ECS world surface — filled by SPEC-02. */
-export interface WorldStub {
-  readonly subsystem: "world";
-}
+import { type Input, makeInput } from "./input.ts";
+import { type Rng, makeRng } from "./rng.ts";
+import { type World, makeWorld } from "./world.ts";
+import type { NativeBridge } from "./native-bridge.ts";
 
 /** The deterministic simulation view handed to a fixed update. */
 export interface Sim {
@@ -28,9 +18,12 @@ export interface Sim {
   readonly tick: number;
   /** The constant fixed timestep in seconds (`1 / fixedHz`). */
   readonly dt: number;
-  readonly rng: RngStub;
-  readonly input: InputStub;
-  readonly world: WorldStub;
+  /** The game's root deterministic RNG stream (SPEC-01). */
+  readonly rng: Rng;
+  /** Input over this tick's snapshot (SPEC-05). */
+  readonly input: Input;
+  /** The retained ECS world (SPEC-02). */
+  readonly world: World;
 }
 
 /** The presentation view handed to a render — interpolated with `alpha`. */
@@ -42,13 +35,13 @@ export interface Frame {
 /** One second expressed in seconds — the numerator of `dt = 1 second / fixedHz`. */
 const ONE_SECOND_IN_SECONDS = 1;
 
-/** Build the deterministic `Sim` for `tick` at a `fixedHz` cadence. */
-export const makeSim = (fixedHz: number, tick: number): Sim => ({
+/** Build the deterministic `Sim` for `tick` at a `fixedHz` cadence over `bridge`. */
+export const makeSim = (bridge: NativeBridge, fixedHz: number, tick: number): Sim => ({
   dt: ONE_SECOND_IN_SECONDS / fixedHz,
-  input: { subsystem: "input" },
-  rng: { subsystem: "rng" },
+  input: makeInput(bridge, tick),
+  rng: makeRng(bridge),
   tick,
-  world: { subsystem: "world" },
+  world: makeWorld(bridge),
 });
 
 /** Build the presentation `Frame` for the latest completed `tick`. */

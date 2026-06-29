@@ -39,6 +39,21 @@
     // it is disabled here with justification rather than suppressed at call sites.
     "typescript/prefer-readonly-parameter-types": "off",
 
+    // id-length, scoped to the two irreducible domain names this SDK cannot
+    // rename: the geometric vector components `x`/`y`/`z` (SPEC-03 `Vec2`/`Vec3`
+    // are the engine's neutral spatial vocabulary; `center.x` is the contract).
+    // Every other identifier still owes a >= 2-char name. This is a narrowed
+    // exception, not a disable — the same "genuinely un-fixable -> documented"
+    // judgement CLAUDE.md sanctions.
+    "eslint/id-length": ["error", { "exceptions": ["x", "y", "z"] }],
+
+    // no-magic-numbers, with the three conventional non-magic integers allowed:
+    // SPEC-05 mandates the `axis(): -1 | 0 | 1` literal-type union (and its
+    // `[-1, 0, 1]` step table), where -1/0/1 ARE the named values. These three
+    // are the universal "not magic" constants; every other number still owes a
+    // name.
+    "eslint/no-magic-numbers": ["error", { "ignore": [-1, 0, 1], "ignoreNumericLiteralTypes": true }],
+
     // The Branchless Law for TypeScript: the no-restricted-syntax analogue of the
     // Rust engine_no_branching dylint. Every control-flow branch is banned. Same
     // block as @axiom/client.
