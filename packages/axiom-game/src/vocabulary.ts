@@ -44,6 +44,36 @@ export interface Vec3 {
   readonly z: number;
 }
 
+/** An integer tile coordinate (SPEC-06 §5) — the cell newtype the grid queries traffic in. */
+export interface Cell {
+  readonly x: number;
+  readonly y: number;
+}
+
+/*
+ * A 4-channel colour (SPEC-11), as a positional `[r, g, b, a]` tuple. It is a
+ * tuple rather than an `{ r, g, b, a }` record because the SDK's `id-length` law
+ * admits only the geometric `x`/`y`/`z` single-letter names; `[r, g, b, a]` is
+ * the conventional WebGL/CSS colour shape and crosses the wasm boundary as four
+ * plain numbers (SPEC-11 §5 "plain number records").
+ */
+export type Rgba = readonly [number, number, number, number];
+
+/*
+ * A 4×4 matrix (SPEC-11), a 16-element row-major number array — the neutral
+ * `Mat4` value the native `MathApi` produces and consumes. Plain numbers only, so
+ * it marshals 1:1 across the wasm boundary (SPEC-11 §5); never re-derived in TS.
+ */
+export type Mat4 = readonly number[];
+
+/*
+ * A quaternion (SPEC-11), as a positional `[x, y, z, w]` tuple (vector part then
+ * scalar `w`). A tuple — not an `{ x, y, z, w }` record — so the scalar `w` needs
+ * no `id-length` exception; it is the neutral value the native `MathApi` returns
+ * and is never re-implemented in TS.
+ */
+export type Quat = readonly [number, number, number, number];
+
 /** An optional value: present `Value`, or `undefined` on a miss (SPEC-02 §5, contract `T | null`). */
 export type Result<Value> = Value | undefined;
 
