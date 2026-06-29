@@ -26,6 +26,12 @@ use crate::tag::Tag;
 /// impl-block size budget.
 mod players;
 
+/// The dynamic, kind-keyed component arm of the facade (`set_dynamic`/
+/// `get_dynamic`/`query_dynamic`, …) — app-defined components stored type-erased
+/// by `Reflect` schema name. A child module so neither this file nor the main
+/// `impl SceneApi` block exceeds the engine's size budgets.
+mod dynamic;
+
 /// The only public export of `axiom-scene`: a **stateful scene handle**.
 ///
 /// `SceneApi` *owns* the scene — an ECS world (the ecs layer) where nodes are

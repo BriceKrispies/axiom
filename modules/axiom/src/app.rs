@@ -46,6 +46,12 @@ mod queries;
 /// child module, keeping this file within the per-file size budget.
 mod components;
 
+/// The dynamic, kind-keyed retained-world surface (`spawn_empty`/`set_dynamic`/
+/// `query_dynamic`/`despawn_subtree`/`children_of`) — the app-blind component arm
+/// a wasm-boundary game world is built on — lives in a sibling child module,
+/// keeping this file within the per-file size budget.
+mod dynamic_world;
+
 /// The per-frame `tick` family lives in a sibling child module, keeping this
 /// file within the per-file size budget.
 mod frame;

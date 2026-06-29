@@ -168,6 +168,17 @@ impl DynamicComponents {
             })
             .unwrap_or_default()
     }
+
+    /// Drop every component `entity` carries, across all columns — the dynamic
+    /// mirror of [`crate::ColumnSet::remove_entity`]. A retained world calls this
+    /// when an entity is despawned so that a later reuse of its id (the registry
+    /// recycles slots) starts with no stale dynamic components bleeding in.
+    /// Untouched columns and other entities' rows are unaffected.
+    pub fn remove_entity(&mut self, entity: EntityId) {
+        self.columns.values_mut().for_each(|column| {
+            column.entries.remove(&entity);
+        });
+    }
 }
 
 #[cfg(test)]
@@ -316,5 +327,26 @@ mod tests {
         // Reading `One` from the zero-byte `Marker` entry wants 4 bytes it
         // doesn't have -> a clean decode error, never UB (closure -> Err).
         assert!(store.get::<One>(e(1)).is_err());
+    }
+
+    #[test]
+    fn remove_entity_clears_every_column_for_that_entity_only() {
+        let mut store = DynamicComponents::new();
+        // e1 carries both kinds; e2 carries only `Clash`.
+        store.insert(e(1), One(1));
+        store.insert(e(1), Other);
+        store.insert(e(2), One(2));
+
+        store.remove_entity(e(1));
+
+        // e1 is gone from both columns; e2's `Clash` row is untouched.
+        assert!(!store.contains::<One>(e(1)));
+        assert!(!store.contains::<Other>(e(1)));
+        assert_eq!(store.get::<One>(e(2)).unwrap().map(|o| o.0), Some(2));
+        // The columns themselves remain (removal empties rows, not the schema).
+        assert_eq!(store.component_types(), 2);
+        // Removing an entity with no rows anywhere is a clean no-op.
+        store.remove_entity(e(9));
+        assert_eq!(store.entities_with_all(&["Clash"]), vec![e(2)]);
     }
 }

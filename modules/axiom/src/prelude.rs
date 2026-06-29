@@ -33,6 +33,12 @@ pub use axiom_host::{
     HostSessionParams, PlayerId, Score,
 };
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
+// The reflection machinery an app needs to declare its **own** dynamic component
+// vocabulary — the `Reflect` game structs a retained world stores by schema name
+// (the dynamic peer of the typed `Component` surface). Re-exported so an app
+// depends only on `axiom`: `Reflect` is the trait, and the rest are the
+// (de)serialization primitives its hand-written impls call.
+pub use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 
 pub use crate::angle::Angle;
 pub use crate::app::{App, RunningApp};

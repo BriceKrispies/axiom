@@ -9,7 +9,10 @@
 
 use std::collections::BTreeMap;
 
-use axiom_ecs::{ColumnSet, ComponentColumn, EntityRegistry, ErasedColumn, WorldStep, WorldSystem};
+use axiom_ecs::{
+    ColumnSet, ComponentColumn, DynamicComponents, EntityRegistry, ErasedColumn, WorldStep,
+    WorldSystem,
+};
 use axiom_kernel::{
     BinaryReader, BinaryWriter, EntityId, FieldSchema, KernelResult, Reflect, TypeSchema,
 };
@@ -45,6 +48,16 @@ pub struct SceneStorage {
     /// Coarse semantic kinds, keyed by node entity — what each thing *is*, the
     /// classification a perceiving agent reads off a raycast / overlap hit.
     pub tags: ComponentColumn<Tag>,
+    /// App-defined components the engine was never told about at compile time,
+    /// keyed by node entity and stored type-erased (by `Reflect` schema name).
+    /// This is the scene's *open* component arm — the home for a retained world
+    /// authored over the wasm boundary (`@axiom/game`'s `world.set(e, {kind,…})`),
+    /// where the schema is a closed game vocabulary the engine need not name. The
+    /// engine's typed columns above stay the zero-cost borrowed path; this serves
+    /// the app-blind path. Cleared per-entity on despawn (see
+    /// `Scene::despawn_entity`). Not yet folded into `write_state` — bridge-authored
+    /// dynamic components do not survive snapshot/restore yet (tracked follow-up).
+    pub dynamic: DynamicComponents,
     /// Controllable nodes, keyed entity → player index. Authored once; the
     /// bridge that lets a per-tick move command address a node by player index.
     pub players: BTreeMap<EntityId, u32>,
