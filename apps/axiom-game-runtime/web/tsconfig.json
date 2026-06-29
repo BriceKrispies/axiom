@@ -15,6 +15,7 @@
     "types": [],
     "paths": {
       "@axiom/game": ["../../../packages/axiom-game/dist/index.d.ts"],
+      "/vendor/axiom-game/boot.js": ["../../../packages/axiom-game/dist/boot.d.ts"],
       "/pkg/axiom_game_runtime.js": ["./pkg/axiom_game_runtime.d.ts"]
     }
   },

@@ -435,7 +435,16 @@ const adaptTweenAdd =
   (tick: Ticks, curve: TweenCurve): Handle =>
     game.tweenAdd(tick, curve.from, curve.to, curve.durationTicks, curve.easeIndex);
 
-/** Adapt the snake_case wasm `WasmGame` to the loop core's camelCase NativeBridge. */
+/*
+ * Adapt the snake_case wasm `WasmGame` to the loop core's camelCase NativeBridge.
+ *
+ * Methods that already match the `NativeBridge` shape are forwarded `.bind(game)`,
+ * NOT as bare `game.method` references: a wasm-bindgen export is a prototype method
+ * that reads `this.__wbg_ptr`, so a bare reference invoked as `bridge.method(…)`
+ * loses its receiver and traps as "null pointer passed to rust". Binding pins the
+ * receiver; the `adapt*` wrappers already call `game.method(…)` explicitly and so
+ * need no bind.
+ */
 export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   advance: adaptAdvance(game),
   inputIsDown: (tick: Ticks, action: string): boolean => game.inputIsDown(tick, action),
@@ -445,43 +454,43 @@ export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   inputPressedAtTick: adaptInputPressedAtTick(game),
   inputReleased: (tick: Ticks, action: string): boolean => game.inputReleased(tick, action),
   inputSwipe: adaptInputSwipe(game),
-  machineCreate: game.machineCreate,
-  machineCurrent: game.machineCurrent,
-  machineTicksInState: game.machineTicksInState,
-  machineTransition: game.machineTransition,
-  physicsAddBody: game.physicsAddBody,
+  machineCreate: game.machineCreate.bind(game),
+  machineCurrent: game.machineCurrent.bind(game),
+  machineTicksInState: game.machineTicksInState.bind(game),
+  machineTransition: game.machineTransition.bind(game),
+  physicsAddBody: game.physicsAddBody.bind(game),
   physicsApplyForce: adaptPhysicsApplyForce(game),
   physicsApplyImpulse: adaptPhysicsApplyImpulse(game),
   physicsApplyTorque: adaptPhysicsApplyTorque(game),
   physicsSetAngularVelocity: adaptPhysicsSetAngularVelocity(game),
   physicsSetConfig: adaptPhysicsSetConfig(game),
   physicsSetVelocity: adaptPhysicsSetVelocity(game),
-  rngBelow: game.rngBelow,
-  rngPermutation: game.rngPermutation,
-  rngStream: game.rngStream,
-  rngUnit: game.rngUnit,
-  rngWeighted: game.rngWeighted,
-  snapshot: game.snapshot,
-  timerAfter: game.timerAfter,
-  timerCancel: game.timerCancel,
-  timerEvery: game.timerEvery,
-  timersDue: game.timersDue,
-  tweenActive: game.tweenActive,
+  rngBelow: game.rngBelow.bind(game),
+  rngPermutation: game.rngPermutation.bind(game),
+  rngStream: game.rngStream.bind(game),
+  rngUnit: game.rngUnit.bind(game),
+  rngWeighted: game.rngWeighted.bind(game),
+  snapshot: game.snapshot.bind(game),
+  timerAfter: game.timerAfter.bind(game),
+  timerCancel: game.timerCancel.bind(game),
+  timerEvery: game.timerEvery.bind(game),
+  timersDue: game.timersDue.bind(game),
+  tweenActive: game.tweenActive.bind(game),
   tweenAdd: adaptTweenAdd(game),
-  tweenCancel: game.tweenCancel,
-  tweenCompleted: game.tweenCompleted,
-  tweenValue: game.tweenValue,
-  worldAlive: game.worldAlive,
-  worldChildrenOf: game.worldChildrenOf,
-  worldDespawn: game.worldDespawn,
-  worldDespawnSubtree: game.worldDespawnSubtree,
+  tweenCancel: game.tweenCancel.bind(game),
+  tweenCompleted: game.tweenCompleted.bind(game),
+  tweenValue: game.tweenValue.bind(game),
+  worldAlive: game.worldAlive.bind(game),
+  worldChildrenOf: game.worldChildrenOf.bind(game),
+  worldDespawn: game.worldDespawn.bind(game),
+  worldDespawnSubtree: game.worldDespawnSubtree.bind(game),
   worldGet: adaptWorldGet(game),
-  worldHas: game.worldHas,
+  worldHas: game.worldHas.bind(game),
   worldParentOf: adaptWorldParentOf(game),
-  worldQuery: game.worldQuery,
-  worldRemove: game.worldRemove,
+  worldQuery: game.worldQuery.bind(game),
+  worldRemove: game.worldRemove.bind(game),
   worldSet: adaptWorldSet(game),
-  worldSetParent: game.worldSetParent,
+  worldSetParent: game.worldSetParent.bind(game),
   worldSpawn: adaptWorldSpawn(game),
   worldWorldTransform: adaptWorldWorldTransform(game),
 });
