@@ -24,7 +24,7 @@ import type {
   MaterialDescriptor,
   PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Entity, Handle, Mat4, PlayerId, Quat, RayHit, Result, Vec3 } from "./vocabulary.ts";
+import type { Cell, Circle, Entity, Handle, Mat4, PlayerId, Quat, RayHit, Rect, Result, Vec2, Vec3 } from "./vocabulary.ts";
 import { type Draw2dBridge, UNBOUND_DRAW2D } from "./draw2d-binding.ts";
 import { UNBOUND_UI, type UiBridge } from "./ui-binding.ts";
 import { UNBOUND_HOST_BASE } from "./unbound-host.ts";
@@ -88,8 +88,36 @@ export interface Outcome {
 export interface HostBridge extends Draw2dBridge, UiBridge {
   /** Constrain `value` to `[low, high]` (native `MathApi`). */
   readonly clamp: (value: number, low: number, high: number) => number;
+  /** Linear blend `start + (end - start) * fraction` (native `MathApi`, SPEC-03 §4.2). */
+  readonly lerp: (start: number, end: number, fraction: number) => number;
   /** Wrap `angle` to `(-π, π]` (native `MathApi`). */
   readonly normalizeAngle: (angle: number) => number;
+
+  // 2D math (SPEC-03 §4.2): the `v2` vector algebra over `Vec2`, every op routed to the native `MathApi` (one deterministic source of truth, never a TS re-implementation).
+  /** Vector sum. */
+  readonly v2Add: (lhs: Vec2, rhs: Vec2) => Vec2;
+  /** Vector difference. */
+  readonly v2Sub: (lhs: Vec2, rhs: Vec2) => Vec2;
+  /** Scalar multiple of a vector. */
+  readonly v2Scale: (vector: Vec2, scalar: number) => Vec2;
+  /** Dot product. */
+  readonly v2Dot: (lhs: Vec2, rhs: Vec2) => number;
+  /** Euclidean length. */
+  readonly v2Len: (vector: Vec2) => number;
+  /** Unit vector in the same direction. */
+  readonly v2Normalize: (vector: Vec2) => Vec2;
+  /** Distance between two points. */
+  readonly v2Dist: (lhs: Vec2, rhs: Vec2) => number;
+  /** Linear blend between two vectors. */
+  readonly v2Lerp: (lhs: Vec2, rhs: Vec2, fraction: number) => Vec2;
+
+  // Pure predicates (SPEC-03 §4.2): stateless geometry routed to the native `axiom-math` `Aabb` / `Sphere`.
+  /** Whether rects `lhs` and `rhs` share any point. */
+  readonly aabbOverlap: (lhs: Rect, rhs: Rect) => boolean;
+  /** Whether `point` lies inside `rect`. */
+  readonly pointInRect: (point: Vec2, rect: Rect) => boolean;
+  /** Whether circles `lhs` and `rhs` share any point. */
+  readonly circleOverlap: (lhs: Circle, rhs: Circle) => boolean;
   /** Entities whose committed transform overlaps the circle, in stable order (SPEC-03). */
   readonly overlapCircle: (centerX: number, centerY: number, radius: number) => readonly Entity[];
   /** Entities whose committed bounds overlap the query box, in stable order (SPEC-03). */

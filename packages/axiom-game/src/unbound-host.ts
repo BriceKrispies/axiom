@@ -6,8 +6,8 @@
  * onto this base in `host-binding.ts`.
  */
 
-import type { Cell, Entity, Handle, Mat4, Quat, RayHit, Result, Vec3 } from "./vocabulary.ts";
-import { IDENTITY_MAT4, IDENTITY_QUAT, ORIGIN_CELL, ZERO_VEC3 } from "./host-descriptors.ts";
+import type { Cell, Entity, Handle, Mat4, Quat, RayHit, Result, Vec2, Vec3 } from "./vocabulary.ts";
+import { IDENTITY_MAT4, IDENTITY_QUAT, ORIGIN_CELL, ZERO_VEC2, ZERO_VEC3 } from "./host-descriptors.ts";
 import type { SessionConfig } from "./host-binding.ts";
 
 /** The seed reported before a host binds — a neutral, inert default. */
@@ -31,10 +31,12 @@ const absent = <Value>(slot?: Value): Value | undefined => slot;
  * adapter uses.
  */
 export const UNBOUND_HOST_BASE = {
+  aabbOverlap: (): boolean => false,
   addLight: (): Entity => UNBOUND_HANDLE,
   bindAction: (): void => {
     // No-op until a host is bound
   },
+  circleOverlap: (): boolean => false,
   clamp: (value: number): number => value,
   createMaterial: (): Handle => UNBOUND_HANDLE,
   createMesh: (): Handle => UNBOUND_HANDLE,
@@ -43,6 +45,7 @@ export const UNBOUND_HOST_BASE = {
   gridPath: (): Result<readonly Cell[]> => [],
   gridReachable: (): boolean => false,
   gridStepToward: (): Cell => ORIGIN_CELL,
+  lerp: (start: number): number => start,
   loadSound: (): Handle => UNBOUND_HANDLE,
   mat4FromTRS: (): Mat4 => IDENTITY_MAT4,
   mat4Identity: (): Mat4 => IDENTITY_MAT4,
@@ -59,6 +62,7 @@ export const UNBOUND_HOST_BASE = {
   playMusic: (): Handle => UNBOUND_HANDLE,
   playSound: (): Handle => UNBOUND_HANDLE,
   playTone: (): Handle => UNBOUND_HANDLE,
+  pointInRect: (): boolean => false,
   quatFromEuler: (): Quat => IDENTITY_QUAT,
   quatIdentity: (): Quat => IDENTITY_QUAT,
   quatMultiply: (): Quat => IDENTITY_QUAT,
@@ -84,6 +88,14 @@ export const UNBOUND_HOST_BASE = {
   stopVoice: (): void => {
     // No-op until a host is bound
   },
+  v2Add: (): Vec2 => ZERO_VEC2,
+  v2Dist: (): number => UNBOUND_SCALAR,
+  v2Dot: (): number => UNBOUND_SCALAR,
+  v2Len: (): number => UNBOUND_SCALAR,
+  v2Lerp: (): Vec2 => ZERO_VEC2,
+  v2Normalize: (): Vec2 => ZERO_VEC2,
+  v2Scale: (): Vec2 => ZERO_VEC2,
+  v2Sub: (): Vec2 => ZERO_VEC2,
   v3Add: (): Vec3 => ZERO_VEC3,
   v3Cross: (): Vec3 => ZERO_VEC3,
   v3Dist: (): number => UNBOUND_SCALAR,

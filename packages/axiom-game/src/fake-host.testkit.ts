@@ -20,11 +20,12 @@ import type {
   MaterialDescriptor,
   PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Cell, Circle, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Vec2, Vec3 } from "./vocabulary.ts";
 
 export class FakeHost implements HostBridge {
   public clampReturn = 0;
   public normalizeReturn = 0;
+  public lerpCalls: (readonly [number, number, number])[] = [];
   public overlapReturn: readonly Entity[] = [];
   public config: SessionConfig = { params: {}, seed: 0n };
   public readyCount = 0;
@@ -100,6 +101,71 @@ export class FakeHost implements HostBridge {
   public normalizeAngle(angle: number): number {
     this.normalizeCalls.push(angle);
     return this.normalizeReturn;
+  }
+
+  // lerp computes the affine blend (the same value the native MathApi::lerp yields)
+  // and records the call, so a test can assert BOTH the forwarded result and that
+  // the SDK crossed the bridge (no local TS re-implementation).
+  public lerp(start: number, end: number, fraction: number): number {
+    this.lerpCalls.push([start, end, fraction]);
+    return start + (end - start) * fraction;
+  }
+
+  // --- 2D math (deterministic, input-derived returns: the projection only forwards) ---
+  public v2Add(lhs: Vec2, rhs: Vec2): Vec2 {
+    return { x: lhs.x + rhs.x, y: lhs.y + rhs.y };
+  }
+
+  public v2Sub(lhs: Vec2, rhs: Vec2): Vec2 {
+    return { x: lhs.x - rhs.x, y: lhs.y - rhs.y };
+  }
+
+  public v2Scale(vector: Vec2, scalar: number): Vec2 {
+    return { x: vector.x * scalar, y: vector.y * scalar };
+  }
+
+  public v2Dot(lhs: Vec2, rhs: Vec2): number {
+    return lhs.x * rhs.x + lhs.y * rhs.y;
+  }
+
+  public v2Len(vector: Vec2): number {
+    return Math.hypot(vector.x, vector.y);
+  }
+
+  public v2Normalize(vector: Vec2): Vec2 {
+    const length = Math.hypot(vector.x, vector.y);
+    return { x: vector.x / length, y: vector.y / length };
+  }
+
+  public v2Dist(lhs: Vec2, rhs: Vec2): number {
+    return Math.hypot(lhs.x - rhs.x, lhs.y - rhs.y);
+  }
+
+  public v2Lerp(lhs: Vec2, rhs: Vec2, fraction: number): Vec2 {
+    return { x: lhs.x + (rhs.x - lhs.x) * fraction, y: lhs.y + (rhs.y - lhs.y) * fraction };
+  }
+
+  // --- pure predicates (the same geometry the native Aabb / Sphere computes) ---
+  public aabbOverlap(lhs: Rect, rhs: Rect): boolean {
+    return (
+      lhs.x <= rhs.x + rhs.width &&
+      lhs.x + lhs.width >= rhs.x &&
+      lhs.y <= rhs.y + rhs.height &&
+      lhs.y + lhs.height >= rhs.y
+    );
+  }
+
+  public pointInRect(point: Vec2, rect: Rect): boolean {
+    return (
+      point.x >= rect.x &&
+      point.x <= rect.x + rect.width &&
+      point.y >= rect.y &&
+      point.y <= rect.y + rect.height
+    );
+  }
+
+  public circleOverlap(lhs: Circle, rhs: Circle): boolean {
+    return Math.hypot(lhs.center.x - rhs.center.x, lhs.center.y - rhs.center.y) <= lhs.radius + rhs.radius;
   }
 
   public overlapCircle(centerX: number, centerY: number, radius: number): readonly Entity[] {

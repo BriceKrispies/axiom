@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import type {
   Cell,
+  Circle,
   Component,
   ComponentKind,
   Entity,
@@ -45,11 +46,14 @@ test("the geometric records expose their declared fields", () => {
   const vec3: Vec3 = { x: 1, y: 2, z: 3 };
   const cell: Cell = { x: 4, y: 5 };
   const rect: Rect = { height: 40, width: 30, x: 10, y: 20 };
+  const circle: Circle = { center: { x: 1, y: 2 }, radius: 3 };
   assert.deepEqual(vec2, { x: 1, y: 2 });
   assert.equal(vec3.z, 3);
   assert.deepEqual(cell, { x: 4, y: 5 });
   assert.equal(rect.width, 30);
   assert.equal(rect.height, 40);
+  assert.deepEqual(circle.center, { x: 1, y: 2 });
+  assert.equal(circle.radius, 3);
 });
 
 test("the positional colour and math tuples carry plain numbers", () => {
