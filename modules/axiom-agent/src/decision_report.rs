@@ -29,6 +29,9 @@ impl DecisionReport {
     pub const BRAIN_KIND_SCRIPTED: u16 = 1;
     /// The replay brain decided.
     pub const BRAIN_KIND_REPLAY: u16 = 2;
+    /// The hold-set brain decided (emits one press-control intent per held
+    /// control, so one decision carries several simultaneous controls).
+    pub const BRAIN_KIND_HOLD_SET: u16 = 3;
 
     /// Unset / no reason recorded.
     pub const REASON_NO_REASON: u16 = 0;
@@ -44,6 +47,8 @@ impl DecisionReport {
     pub const REASON_REPLAY_COMPLETE: u16 = 5;
     /// The action budget was zero, so no action could be emitted.
     pub const REASON_ACTION_BUDGET_ZERO: u16 = 6;
+    /// A hold-set step emitted one press-control intent per held control.
+    pub const REASON_HOLD_SET_EMITTED: u16 = 7;
 
     /// Assemble a report. Built only by the agent runtime, from a completed
     /// decision.
@@ -149,6 +154,7 @@ mod tests {
         assert_eq!(DecisionReport::BRAIN_KIND_NONE, 0);
         assert_eq!(DecisionReport::BRAIN_KIND_SCRIPTED, 1);
         assert_eq!(DecisionReport::BRAIN_KIND_REPLAY, 2);
+        assert_eq!(DecisionReport::BRAIN_KIND_HOLD_SET, 3);
         assert_eq!(DecisionReport::REASON_NO_REASON, 0);
         assert_eq!(DecisionReport::REASON_NO_MATCHING_RULE, 1);
         assert_eq!(DecisionReport::REASON_MATCHED_RULE, 2);
@@ -156,6 +162,7 @@ mod tests {
         assert_eq!(DecisionReport::REASON_REPLAY_EMPTY, 4);
         assert_eq!(DecisionReport::REASON_REPLAY_COMPLETE, 5);
         assert_eq!(DecisionReport::REASON_ACTION_BUDGET_ZERO, 6);
+        assert_eq!(DecisionReport::REASON_HOLD_SET_EMITTED, 7);
     }
 
     #[test]
@@ -168,6 +175,7 @@ mod tests {
             DecisionReport::REASON_REPLAY_EMPTY,
             DecisionReport::REASON_REPLAY_COMPLETE,
             DecisionReport::REASON_ACTION_BUDGET_ZERO,
+            DecisionReport::REASON_HOLD_SET_EMITTED,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort_unstable();

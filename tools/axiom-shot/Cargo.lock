@@ -60,6 +60,7 @@ name = "axiom-canvas2d-backend"
 version = "0.1.0"
 dependencies = [
  "axiom-host",
+ "axiom-math",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -123,6 +124,7 @@ name = "axiom-host"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
+ "axiom-math",
  "axiom-runtime",
 ]
 
@@ -191,6 +193,7 @@ dependencies = [
 name = "axiom-render-pipeline"
 version = "0.1.0"
 dependencies = [
+ "axiom-host",
  "axiom-math",
  "axiom-render",
  "axiom-scene",

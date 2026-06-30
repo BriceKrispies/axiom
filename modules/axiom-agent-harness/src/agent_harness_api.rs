@@ -265,8 +265,10 @@ impl AgentHarnessApi {
         let (report, mut queue) =
             AgentApi::step(agent_id, profile, &mut brain, &observation, &mut memory, step);
 
-        // Lower the emitted neutral intent back to a held-control bitmask.
-        let control = queue.pop().map(|intent| intent.control_code()).unwrap_or(0);
+        // Lower the emitted neutral intents back to a held-control bitmask: the
+        // OR of every intent this tick emitted, so a multi-intent decision holds
+        // all its controls (not just the first).
+        let control = queue.combined_control_code();
         (
             control,
             report.reason_code(),

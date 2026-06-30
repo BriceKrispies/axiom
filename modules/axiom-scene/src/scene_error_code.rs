@@ -34,6 +34,11 @@ pub enum SceneErrorCode {
     InvalidRenderableReference = 9,
     /// A bounds operation referenced a node with no bounding volume.
     MissingBounds = 10,
+    /// An SDF-shape operation referenced a node with no SDF shape.
+    MissingSdfShape = 11,
+    /// An SDF shape was constructed with non-finite or non-positive
+    /// dimensions, or a non-finite / negative colour.
+    InvalidSdfShapeParameters = 12,
 }
 
 impl SceneErrorCode {
@@ -51,6 +56,8 @@ mod tests {
         assert_eq!(SceneErrorCode::MissingNode.raw(), 1);
         assert_eq!(SceneErrorCode::InvalidRenderableReference.raw(), 9);
         assert_eq!(SceneErrorCode::MissingBounds.raw(), 10);
+        assert_eq!(SceneErrorCode::MissingSdfShape.raw(), 11);
+        assert_eq!(SceneErrorCode::InvalidSdfShapeParameters.raw(), 12);
     }
 
     #[test]

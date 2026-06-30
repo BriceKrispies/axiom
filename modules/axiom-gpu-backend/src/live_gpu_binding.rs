@@ -258,6 +258,7 @@ impl LiveGpuBinding {
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
         clear: [f32; 4],
+        sdf: Option<&axiom_host::SdfScene>,
     ) -> Result<(), JsValue> {
         let frame = match self.acquire_texture()? {
             Some(frame) => frame,
@@ -277,6 +278,7 @@ impl LiveGpuBinding {
             light_view_proj,
             batches,
             clear,
+            sdf,
         );
         // ... then upscale-blit it across the full swapchain view and present.
         let mut encoder = self

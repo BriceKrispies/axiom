@@ -126,6 +126,24 @@ fn showcase_app() -> App {
                     material: sphere_material,
                 },
             ));
+            // A raymarched SDF sphere (no mesh): the engine marches it and depth-
+            // composites it with the rasterized meshes — on the GPU backend and,
+            // preserving the software-fallback property, on the Canvas 2D backend.
+            world.spawn((
+                Transform::from_translation(Vec3::new(-4.6, 1.6, 0.0)),
+                SdfShape::sphere(
+                    Meters::new(1.3).expect("finite radius"),
+                    Color::linear_rgb(ch(0.20), ch(0.85), ch(0.90)),
+                ),
+            ));
+            // A raymarched SDF box on the other side, to show box SDF + occlusion.
+            world.spawn((
+                Transform::from_translation(Vec3::new(4.7, 1.4, 0.0)),
+                SdfShape::cuboid(
+                    Vec3::new(0.9, 0.9, 0.9),
+                    Color::linear_rgb(ch(0.95), ch(0.45), ch(0.85)),
+                ),
+            ));
             // A procedurally-animated cube (ProcAnim): the engine's scene system
             // bobs it on +Y and spins it from the tick, so it sits at a different
             // pose every frame — the proc-driven rendering capability, on screen.
@@ -338,6 +356,7 @@ fn render_gpu(
         outcome.light_view_proj(),
         &batches,
         outcome.clear_color(),
+        outcome.sdf_scene(),
     )
     .expect("a native GPU adapter is required to render a GPU screenshot");
     (pixels, WIDTH, HEIGHT)
@@ -403,7 +422,7 @@ fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
         identity,
         outcome.camera_view_proj(),
     ));
-    FramePacket::new(
+    let packet = FramePacket::new(
         outcome.tick(),
         outcome.tick(),
         FrameViewport::new(w, h),
@@ -413,7 +432,13 @@ fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
         lights,
         outcome.light_view_proj(),
         features,
-    )
+    );
+    // Attach the frame's SDF scene (if any) so the Canvas2D backend marches and
+    // composites the raymarched shapes against the rasterized meshes.
+    match outcome.sdf_scene() {
+        Some(scene) => packet.with_sdf(scene.clone()),
+        None => packet,
+    }
 }
 
 /// Build the validated host presentation request the Canvas 2D backend is sized

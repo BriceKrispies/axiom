@@ -39,6 +39,7 @@ use crate::low_poly_raster_options::LowPolyRasterOptions;
 use crate::mesh_cache::MeshCache;
 use crate::planar_shadow::apply_planar_shadows;
 use crate::raster_triangle::RasterTriangle;
+use crate::sdf_raymarch::apply_sdf_raymarch;
 use crate::software_framebuffer::SoftwareFramebuffer;
 
 /// Barycentric distance to an edge below which a pixel is "on the edge" (the
@@ -117,6 +118,11 @@ impl SoftwareRasterizer {
                 .for_each(|t| rasterize_triangle(rgba, dep, &ctx, t, &mut p));
         }
 
+        // SDF raymarch pass: composite the frame's SDF scene over the meshes,
+        // depth-tested *and* depth-writing against the same buffer, so the fog /
+        // shadow post-passes below still occlude against SDF surfaces.
+        sdf_pass(&mut self.framebuffer, &mut self.depth, packet);
+
         // --- Depth-cue post-passes (the per-pixel + per-object cues; the
         // per-triangle cues — lighting, height tint, falloff — are already baked
         // into each triangle's flat colour during conversion). Documented order:
@@ -190,6 +196,19 @@ impl SoftwareRasterizer {
             horizon_silhouette_drawn: horizon,
         }
     }
+}
+
+/// Composite the frame's SDF scene over the already-rasterized meshes,
+/// depth-tested and depth-writing against the same buffer. Runs only when the
+/// frame carries an SDF scene; the scene is self-contained (it carries its own
+/// `view_proj` for the depth projection), so no `FrameCamera` is consulted.
+/// Returns the count of composited SDF pixels (`0` when the frame carries no
+/// SDF scene).
+pub(crate) fn sdf_pass(framebuffer: &mut SoftwareFramebuffer, depth: &mut DepthBuffer, packet: &FramePacket) -> u64 {
+    packet
+        .sdf()
+        .map(|scene| apply_sdf_raymarch(framebuffer, depth, scene, packet.lights()))
+        .unwrap_or(0)
 }
 
 /// The finished frame: the RGBA8 framebuffer bytes (the blit source), the

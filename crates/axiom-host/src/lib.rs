@@ -82,6 +82,7 @@ mod player_id;
 mod rect;
 mod rgba;
 mod score;
+mod sdf_scene;
 mod sprite_draw2d;
 mod text2d;
 
@@ -154,6 +155,12 @@ pub use frame_raster_stats::FrameRasterStats;
 pub use frame_submission_report::BackendKind;
 pub use frame_submission_report::FrameFeature;
 pub use frame_submission_report::FrameSubmissionReport;
+
+// Backend-neutral SDF raymarch contract: the raymarch peer of FramePacket's
+// triangle draws, carried as an optional FramePacket arm. Both render backends
+// (GPU now, Canvas 2D) march the same primitive-only data. See sdf_scene.rs.
+pub use sdf_scene::SdfPrimitive;
+pub use sdf_scene::SdfScene;
 
 // Backend-neutral 2D draw contract (SPEC-04), relocated here from the
 // axiom-draw2d module so both render backends (Canvas 2D, GPU) — which already

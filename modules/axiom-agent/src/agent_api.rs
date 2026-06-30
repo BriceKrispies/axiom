@@ -15,6 +15,7 @@ use crate::agent_memory::AgentMemory;
 use crate::agent_profile::AgentProfile;
 use crate::agent_runtime::AgentRuntime;
 use crate::decision_report::DecisionReport;
+use crate::hold_set_brain::HoldSetBrain;
 use crate::observation::{Observation, ObservationFact};
 use crate::observation_builder::ObservationBuilder;
 use crate::observation_channel::ObservationChannel;
@@ -42,6 +43,8 @@ impl AgentApi {
     pub const BRAIN_KIND_SCRIPTED: u16 = DecisionReport::BRAIN_KIND_SCRIPTED;
     /// The replay brain decided.
     pub const BRAIN_KIND_REPLAY: u16 = DecisionReport::BRAIN_KIND_REPLAY;
+    /// The hold-set brain decided (one press-control intent per held control).
+    pub const BRAIN_KIND_HOLD_SET: u16 = DecisionReport::BRAIN_KIND_HOLD_SET;
     /// Unset / no reason recorded.
     pub const REASON_NO_REASON: u16 = DecisionReport::REASON_NO_REASON;
     /// No scripted rule matched.
@@ -56,6 +59,8 @@ impl AgentApi {
     pub const REASON_REPLAY_COMPLETE: u16 = DecisionReport::REASON_REPLAY_COMPLETE;
     /// The action budget was zero, so no action could be emitted.
     pub const REASON_ACTION_BUDGET_ZERO: u16 = DecisionReport::REASON_ACTION_BUDGET_ZERO;
+    /// A hold-set step emitted one press-control intent per held control.
+    pub const REASON_HOLD_SET_EMITTED: u16 = DecisionReport::REASON_HOLD_SET_EMITTED;
 }
 
 impl AgentApi {
@@ -256,6 +261,14 @@ impl AgentApi {
         ReplayBrain::new(intents)
     }
 
+    /// A hold-set brain that emits one `press_control` intent per control in
+    /// `controls` **every tick** — a genuine multi-intent decision (e.g. forward +
+    /// turn at once). Pair it with [`ActionQueue::combined_control_code`] to fold
+    /// the emitted intents back into one held-control bitmask.
+    pub fn hold_set_brain(controls: Vec<u32>) -> HoldSetBrain {
+        HoldSetBrain::new(controls)
+    }
+
     // --- stepping ---
 
     /// Step `brain` once: observe, decide, emit player-equivalent intents, and
@@ -276,9 +289,29 @@ impl AgentApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_kernel::FrameIndex;
 
     #[test]
     fn debug_derive_is_exercised() {
         assert!(format!("{:?}", AgentApi).contains("AgentApi"));
+    }
+
+    #[test]
+    fn hold_set_brain_facade_steps_a_multi_intent_decision() {
+        // The facade path for the multi-intent capability: a hold-set brain over
+        // two controls, stepped through `AgentApi::step`, reports two emitted
+        // actions in one tick and the queue folds them into one combined bitmask.
+        let agent_id = AgentApi::create_agent_id(1);
+        let profile = AgentApi::debug_perfect_profile();
+        let mut brain = AgentApi::hold_set_brain(vec![0b001, 0b010]);
+        let mut memory = AgentApi::empty_memory(1);
+        let observation = AgentApi::empty_observation(agent_id, Tick::new(0));
+        let step = RuntimeStep::new(FrameIndex::new(0), Tick::new(0), 16_666_667, 0);
+        let (report, queue) =
+            AgentApi::step(agent_id, profile, &mut brain, &observation, &mut memory, step);
+        assert_eq!(report.selected_brain_kind_code(), AgentApi::BRAIN_KIND_HOLD_SET);
+        assert_eq!(report.emitted_action_count(), 2);
+        assert_eq!(report.reason_code(), AgentApi::REASON_HOLD_SET_EMITTED);
+        assert_eq!(queue.combined_control_code(), 0b011);
     }
 }

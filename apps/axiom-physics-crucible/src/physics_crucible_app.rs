@@ -13,8 +13,8 @@
 
 use axiom::prelude::{
     Angle, App, Assets, Camera, Color, DefaultPlugins, DirectionalLight, Material, Mesh,
-    PerspectiveProjection, PointLight, Renderable, RunningApp, SceneCommands, Texture, Transform,
-    Vec3, Window,
+    PerspectiveProjection, PointLight, Renderable, RunningApp, SceneCommands, SdfShape, Texture,
+    Transform, Vec3, Window,
 };
 use axiom_kernel::{FrameIndex, Meters, Ratio, Tick};
 use axiom_physics::{PhysicsApi, PhysicsBodyHandle};
@@ -634,6 +634,17 @@ pub fn author_live(
             color: Color::WHITE,
             intensity: ch(40.0),
         },
+    ));
+    // A raymarched SDF sphere floating over the crucible — the live proof that the
+    // SDF pass composites with the physics meshes through the real browser run
+    // loop (GPU arm, and the Canvas2D software fallback). Its node transform
+    // places it; the engine marches and depth-composites it against the meshes.
+    world.spawn((
+        Transform::from_translation(Vec3::new(0.0, 9.0, 0.0)),
+        SdfShape::sphere(
+            Meters::new(1.8).expect("crucible SDF sphere radius is finite"),
+            color3([0.10, 0.80, 0.75]),
+        ),
     ));
 }
 

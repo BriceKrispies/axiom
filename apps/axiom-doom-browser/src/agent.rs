@@ -94,6 +94,20 @@ const CONTROL_STRAFE_LEFT: u32 = 1 << 4;
 const CONTROL_STRAFE_RIGHT: u32 = 1 << 5;
 const CONTROL_FIRE: u32 = 1 << 6;
 
+/// Every DOOM control bit, in stable order — used to split a combined control
+/// bitmask into one held control per set bit, so the agent emits a genuine
+/// *multi-intent* decision (one `press_control` per active control) that the
+/// agent substrate carries together and the queue recombines.
+const CONTROL_BITS: [u32; 7] = [
+    CONTROL_FORWARD,
+    CONTROL_BACKWARD,
+    CONTROL_TURN_LEFT,
+    CONTROL_TURN_RIGHT,
+    CONTROL_STRAFE_LEFT,
+    CONTROL_STRAFE_RIGHT,
+    CONTROL_FIRE,
+];
+
 /// Neutral observation-fact kinds the app fills (its own code vocabulary). The
 /// agent's brain ignores the observation content, but the app builds a real
 /// observation each tick so the `observe → decide` half of the loop is genuinely
@@ -184,7 +198,15 @@ fn micro(value: f32) -> i64 {
 fn decide_intent(px: f32, pz: f32, yaw: f32, hud: Hud, control_code: u32, tick: u64) -> Intent {
     let agent_id = AgentApi::create_agent_id(AGENT_RAW_ID);
     let profile = AgentApi::debug_perfect_profile();
-    let mut brain = AgentApi::replay_brain(vec![AgentApi::press_control_intent(control_code)]);
+    // Split the commanded control bitmask into one held control per set bit, so
+    // the agent emits a real multi-intent decision: `{"keys":["forward","left"]}`
+    // becomes two `press_control` intents this tick, not one pre-combined intent.
+    let held: Vec<u32> = CONTROL_BITS
+        .iter()
+        .copied()
+        .filter(|bit| control_code & bit != 0)
+        .collect();
+    let mut brain = AgentApi::hold_set_brain(held);
     let mut memory = AgentApi::empty_memory(1);
 
     // Observe: translate the live DOOM state into a neutral observation.
@@ -220,9 +242,10 @@ fn decide_intent(px: f32, pz: f32, yaw: f32, hud: Hud, control_code: u32, tick: 
     let (_report, mut queue) =
         AgentApi::step(agent_id, profile, &mut brain, &observation, &mut memory, step);
 
-    // Lower the emitted neutral intent back into the concrete DOOM Intent.
-    let neutral = queue.pop().unwrap_or_else(AgentApi::noop_intent);
-    intent_of_control_code(neutral.control_code())
+    // Recombine the tick's emitted intents into one held-control bitmask and lower
+    // it back into the concrete DOOM Intent — N simultaneous controls applied
+    // together (the OR is identical to the commanded `control_code`).
+    intent_of_control_code(queue.combined_control_code())
 }
 
 /// A deterministic FNV-1a fingerprint of the frame's packed instance floats —

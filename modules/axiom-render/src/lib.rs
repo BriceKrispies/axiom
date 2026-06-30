@@ -40,5 +40,6 @@ mod render_mesh;
 mod render_object;
 mod render_pipeline_kind;
 mod render_receipt;
+mod render_sdf;
 
 pub use render_api::RenderApi;

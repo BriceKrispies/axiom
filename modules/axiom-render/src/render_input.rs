@@ -5,6 +5,7 @@ use crate::render_light::RenderLight;
 use crate::render_material::RenderMaterial;
 use crate::render_mesh::RenderMesh;
 use crate::render_object::RenderObject;
+use crate::render_sdf::RenderSdf;
 
 /// The scene-independent input the renderer turns into a
 /// [`crate::RenderCommandList`].
@@ -24,6 +25,7 @@ pub struct RenderInput {
     materials: Vec<RenderMaterial>,
     lights: Vec<RenderLight>,
     objects: Vec<RenderObject>,
+    sdf_shapes: Vec<RenderSdf>,
 }
 
 impl RenderInput {
@@ -37,6 +39,7 @@ impl RenderInput {
             materials: Vec::new(),
             lights: Vec::new(),
             objects: Vec::new(),
+            sdf_shapes: Vec::new(),
         }
     }
 
@@ -66,6 +69,10 @@ impl RenderInput {
 
     pub(crate) fn add_object(&mut self, object: RenderObject) {
         self.objects.push(object);
+    }
+
+    pub(crate) fn add_sdf_shape(&mut self, shape: RenderSdf) {
+        self.sdf_shapes.push(shape);
     }
 
     pub const fn viewport_width(&self) -> u32 {
@@ -99,6 +106,10 @@ impl RenderInput {
     pub fn objects(&self) -> &[RenderObject] {
         &self.objects
     }
+
+    pub fn sdf_shapes(&self) -> &[RenderSdf] {
+        &self.sdf_shapes
+    }
 }
 
 #[cfg(test)]
@@ -129,11 +140,13 @@ mod tests {
         ));
         let mat = i.add_material(RenderMaterial::new(3, Vec4::ONE));
         i.add_object(RenderObject::new(1, Mat4::IDENTITY, m, mat, true));
+        i.add_sdf_shape(RenderSdf::new(0, Mat4::IDENTITY, Vec3::ONE, Vec4::ONE));
         assert_eq!(i.clear_color(), [0.1, 0.2, 0.3, 1.0]);
         assert!(i.camera().is_some());
         assert_eq!(i.meshes().len(), 1);
         assert_eq!(i.materials().len(), 1);
         assert_eq!(i.objects().len(), 1);
+        assert_eq!(i.sdf_shapes().len(), 1);
     }
 
     #[test]

@@ -13,12 +13,13 @@
     "src"
   ],
   "scripts": {
-    "test": "node --test \"test/**/*.test.ts\"",
+    "test": "node --test \"src/**/*.test.ts\"",
     "typecheck": "tsgo --noEmit",
     "build": "tsgo -p tsconfig.build.json",
     "lint": "oxlint --type-aware --deny-warnings",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-exclude=\"test/**\" --test-coverage-exclude=\"src/webtransport.ts\" --test-coverage-exclude=\"src/webrtc.ts\" --test-coverage-exclude=\"src/build-transport.ts\" \"test/**/*.test.ts\"",
-    "gate": "npm run typecheck && npm run lint && npm run coverage"
+    "colocation": "node ../../scripts/ts-colocation-check.mjs .",
+    "coverage": "node ../../scripts/ts-coverage.mjs .",
+    "gate": "npm run typecheck && npm run lint && npm run colocation && npm run coverage"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

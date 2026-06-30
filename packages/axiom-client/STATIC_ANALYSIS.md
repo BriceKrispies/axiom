@@ -15,6 +15,7 @@ fully native toolchain.
 | `engine_no_branching` dylint      | **`no-restricted-syntax`** branch ban (via `oxlint-plugin-eslint`) |
 | typed lints (real type info)      | **Oxlint type-aware** via `tsgolint` (typescript-go, TS 7)   |
 | `cargo-llvm-cov` 100% gate        | **`node:test`** built-in coverage at 100% lines/branches/functions |
+| (the coverage law's structural floor) | **co-location gate** — every `src/<name>.ts` must have a sibling `src/<name>.test.ts` |
 
 The whole static-analysis stack is native (Rust linter + Go type engine) — there
 is no JavaScript `typescript` install.
@@ -25,11 +26,13 @@ is no JavaScript `typescript` install.
 npm install              # once: resolves tsgo + oxlint + tsgolint + plugin
 npm run typecheck        # tsgo --noEmit (strict tsconfig)
 npm run lint             # oxlint --type-aware --deny-warnings
-npm run coverage         # node:test, fails under 100%
-npm run gate             # all three in sequence (typecheck → lint → coverage)
+npm run colocation       # every src file has a sibling *.test.ts (../../scripts/ts-colocation-check.mjs)
+npm run coverage         # node:test, fails under 100% (../../scripts/ts-coverage.mjs)
+npm run gate             # all four in sequence (typecheck → lint → colocation → coverage)
 ```
 
-Or from the repo root: `make ts-gate` (runs `scripts/ts-gate.sh`).
+Or from the repo root: `make ts-gate` (runs `scripts/ts-gate.sh` over **both**
+TS packages — `@axiom/client` and `@axiom/game` — with the same four-stage gate).
 
 ## What each gate enforces
 
@@ -46,9 +49,22 @@ Or from the repo root: `make ts-gate` (runs `scripts/ts-gate.sh`).
 - **Branch ban** — `eslint-js/no-restricted-syntax` bans `if`, ternary `?:`,
   `switch`, `for`/`for...in`/`for...of`, `while`/`do...while`, `&&`/`||`/`??`,
   and optional chaining `?.`. Tests are exempt (an `overrides` block turns the
-  rule off for `test/**`), exactly as the Rust Branchless Law exempts tests.
-- **Coverage** — `node --test --experimental-test-coverage` with
-  `--test-coverage-lines/branches/functions=100` (test files excluded). Below
+  rule off for `**/*.test.ts` and `**/*.testkit.ts`), exactly as the Rust
+  Branchless Law exempts tests.
+- **Co-location** — `scripts/ts-colocation-check.mjs` fails unless **every**
+  `src/<name>.ts` has a sibling `src/<name>.test.ts`. This is the structural
+  floor under the coverage law: `node --test` coverage only reports files that a
+  test actually *imports*, so a file no test touches is silently invisible (not
+  failing). Forcing a co-located test per source file pulls every file into the
+  report, so the 100% gate genuinely bites. Test-tier files (`*.test.ts`,
+  `*.testkit.ts`) and the platform-edge files listed in `test-exempt.json` are
+  exempt; the checker also fails on a stale exempt entry or an exempt file that
+  *does* have a test (keeping the exemption list honest).
+- **Coverage** — `scripts/ts-coverage.mjs` runs `node --test
+  --experimental-test-coverage` with `--test-coverage-lines/branches/functions=100`.
+  Test-tier files are excluded, and the platform-edge exclusions are read from the
+  **same** `test-exempt.json` the co-location gate uses — one list, so a file can
+  never be dropped from coverage without being declared exempt in the open. Below
   100% on any metric exits non-zero.
 
 ## Module layout
@@ -69,9 +85,11 @@ the public facade.
 control flow has no clean branchless form. Like the Rust spine's `host`/`windowing`
 layers, they are the **platform edge**: a documented subset of rules (the branch
 ban, `no-async-await`, `await-in-loop`, the `no-unsafe-*` family) is scoped off for
-them in `.oxlintrc.json`, and they are **coverage-exempt** (excluded in the
-`coverage` script), verified instead via the Playwright browser path. Everything
-else stays fully branchless and at 100% node coverage.
+them in `.oxlintrc.json`, and they are **coverage- and co-location-exempt**
+(declared once in `test-exempt.json`, which both the coverage runner and the
+co-location gate read), verified instead via the Playwright browser path.
+Everything else stays fully branchless, at 100% node coverage, and carries a
+co-located unit test.
 
 ## Documented exceptions
 
@@ -91,6 +109,10 @@ These are the only relaxations, each justified in `.oxlintrc.json`:
 ## Status
 
 **Green.** `tsgo` typecheck passes, Oxlint (every category an error + the branch
-ban) passes, and `node:test` coverage is **100%** lines/branches/functions across
-every spine file. The gate is wired into the pre-commit hook and CI. The history
-of the remediation is in [`../../docs/ts-sdk-hardening.md`](../../docs/ts-sdk-hardening.md).
+ban) passes, the co-location gate passes (every `src/<name>.ts` has a sibling
+`src/<name>.test.ts`), and `node:test` coverage is **100%** lines/branches/functions
+across every spine file — for **both** `@axiom/client` and `@axiom/game`. Tests are
+co-located beside the source they exercise (one `*.test.ts` per file), with shared
+fixtures as `*.testkit.ts`. The four-stage gate is wired into the pre-commit hook
+and CI. The history of the remediation is in
+[`../../docs/ts-sdk-hardening.md`](../../docs/ts-sdk-hardening.md).

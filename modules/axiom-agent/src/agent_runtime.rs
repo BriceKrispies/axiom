@@ -185,6 +185,31 @@ mod tests {
     }
 
     #[test]
+    fn hold_set_brain_step_emits_multiple_intents_in_one_tick() {
+        // The multi-intent capability end-to-end: a hold-set brain holding two
+        // controls produces a decision with TWO emitted intents in a single step,
+        // reported as such, and the queue folds them into one combined bitmask —
+        // the agent doing more than one thing at the same time, deterministically.
+        use crate::hold_set_brain::HoldSetBrain;
+        let mut brain = HoldSetBrain::new(vec![0b0001, 0b0100]);
+        let mut memory = AgentMemory::empty_with_capacity(2);
+        let (report, queue) = AgentRuntime::step(
+            AgentId::from_raw(1),
+            AgentProfile::debug_perfect(),
+            &mut brain,
+            &observation_with_fact(100),
+            &mut memory,
+            step_at(3),
+        );
+        assert_eq!(report.selected_brain_kind_code(), DecisionReport::BRAIN_KIND_HOLD_SET);
+        assert_eq!(report.emitted_action_count(), 2, "two controls → two intents this tick");
+        assert_eq!(report.first_emitted_action_kind_code(), ActionIntent::KIND_PRESS_CONTROL);
+        assert_eq!(report.reason_code(), DecisionReport::REASON_HOLD_SET_EMITTED);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.combined_control_code(), 0b0101, "the two held controls combine");
+    }
+
+    #[test]
     fn debug_derive_is_exercised() {
         assert!(format!("{:?}", AgentRuntime).contains("AgentRuntime"));
     }

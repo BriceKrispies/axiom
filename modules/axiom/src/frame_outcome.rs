@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use axiom_host::SdfScene;
+
 /// One drawn object: its wgpu-ready model-view-projection matrix and its
 /// world (model) matrix (both column-major, 16 floats), its linear RGBA colour,
 /// and the ids of the mesh it draws and the material it uses. The world matrix
@@ -125,6 +127,10 @@ pub struct FrameOutcome {
     lights: Vec<LightData>,
     light_view_proj: [f32; 16],
     camera_view_proj: [f32; 16],
+    /// The frame's backend-neutral SDF scene, if it carries any SDF shapes and a
+    /// camera — the raymarched primitives a live/canvas backend composites with
+    /// the meshes. `None` when the frame has no SDF content.
+    sdf: Option<SdfScene>,
     presented: bool,
     recorded: bool,
 }
@@ -139,6 +145,7 @@ impl FrameOutcome {
         lights: Vec<LightData>,
         light_view_proj: [f32; 16],
         camera_view_proj: [f32; 16],
+        sdf: Option<SdfScene>,
         presented: bool,
         recorded: bool,
     ) -> Self {
@@ -150,6 +157,7 @@ impl FrameOutcome {
             lights,
             light_view_proj,
             camera_view_proj,
+            sdf,
             presented,
             recorded,
         }
@@ -171,6 +179,7 @@ impl FrameOutcome {
             Vec::new(),
             Self::IDENTITY_MAT4,
             Self::IDENTITY_MAT4,
+            None,
             false,
             false,
         )
@@ -215,6 +224,14 @@ impl FrameOutcome {
     /// ground) projects through this. Identity in a simulation-only frame.
     pub fn camera_view_proj(&self) -> [f32; 16] {
         self.camera_view_proj
+    }
+
+    /// The frame's backend-neutral SDF scene, if it carries SDF shapes and a
+    /// camera. A live/canvas backend attaches this to its `FramePacket`
+    /// (`FramePacket::with_sdf`) to march and composite the raymarched shapes
+    /// against the rasterized meshes; `None` means no SDF content this frame.
+    pub fn sdf_scene(&self) -> Option<&SdfScene> {
+        self.sdf.as_ref()
     }
 
     /// Whether the backend presented real pixels.
@@ -313,6 +330,7 @@ mod tests {
             Vec::new(),
             [0.0; 16],
             [4.0; 16],
+            None,
             false,
             true,
         );
@@ -328,6 +346,28 @@ mod tests {
         assert_eq!(&floats[36..52], &[2.0; 16]); // mvp 1
         assert_eq!(&floats[52..68], &[8.0; 16]); // world 1
         assert_eq!(&floats[68..72], &[0.4, 0.5, 0.6, 1.0]); // colour 1
+    }
+
+    #[test]
+    fn sdf_scene_round_trips_present_and_absent() {
+        let scene = SdfScene::new(Vec::new(), [0.0; 16], [0.0; 16], [1.0, 2.0, 3.0], [100.0, 0.001, 0.0, 0.0]);
+        let with = FrameOutcome::new(
+            0,
+            0,
+            [0.0; 4],
+            Vec::new(),
+            Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
+            Some(scene.clone()),
+            false,
+            false,
+        );
+        assert_eq!(with.sdf_scene(), Some(&scene));
+        // A simulation-only frame carries no SDF scene.
+        assert!(FrameOutcome::simulation_only(0, [0.0; 4])
+            .sdf_scene()
+            .is_none());
     }
 
     #[test]
@@ -360,6 +400,7 @@ mod tests {
             Vec::new(),
             [0.0; 16],
             [0.0; 16],
+            None,
             true,
             false,
         );
@@ -401,6 +442,7 @@ mod tests {
             ],
             [5.0; 16],
             [0.0; 16],
+            None,
             false,
             true,
         );

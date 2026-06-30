@@ -151,8 +151,8 @@ help:
 	@echo "  AXIOM_E2E_REUSE=1 make e2e   Reuse a gallery already serving on :8000 (skip the rebuild)"
 	@echo "  make e2e-netplay   Build the worker+ .NET server and prove server-authoritative multiplayer in a browser"
 	@echo ""
-	@echo "  TypeScript SDK gate (@axiom/client static-analysis/branchless/coverage laws):"
-	@echo "  make ts-gate       Run tsgo typecheck + Oxlint + 100% coverage for packages/axiom-client"
+	@echo "  TypeScript SDK gate (@axiom/client + @axiom/game static-analysis/branchless/coverage laws):"
+	@echo "  make ts-gate       Run tsgo typecheck + Oxlint + co-location + 100% coverage for both TS packages"
 
 # Serve the prebuilt wasm bundle. uv provides/manages the Python interpreter;
 # --no-project keeps it from trying to sync a Python project in the repo root.

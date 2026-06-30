@@ -13,8 +13,11 @@ crate-type = ["rlib"]
 
 [dependencies]
 # A *feature module* (kind = "feature-module"): it composes the engine modules
-# listed in `module.toml`'s `allowed_modules`, plus the math layer.
+# listed in `module.toml`'s `allowed_modules`, plus the math and host layers.
+# The host layer supplies `SdfScene` — the backend-neutral SDF contract this
+# pipeline assembles (via `axiom-render`) and reports for the live/canvas path.
 axiom-math = { path = "../../crates/axiom-math" }
+axiom-host = { path = "../../crates/axiom-host" }
 axiom-scene = { path = "../axiom-scene" }
 axiom-render = { path = "../axiom-render" }
 axiom-webgpu = { path = "../axiom-webgpu" }

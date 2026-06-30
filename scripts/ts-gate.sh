@@ -33,13 +33,16 @@ command -v npm >/dev/null 2>&1 || { echo 'npm is not installed.' >&2; exit 2; }
 for pkg in "${pkgs[@]}"; do
   test -d "$pkg/node_modules" || { echo "deps missing — run: npm --prefix $pkg install" >&2; exit 2; }
 
-  echo "ts-gate [$pkg 1/3] typecheck (tsgo / TypeScript 7.0) ..."
+  echo "ts-gate [$pkg 1/4] typecheck (tsgo / TypeScript 7.0) ..."
   npm --prefix "$pkg" run --silent typecheck
 
-  echo "ts-gate [$pkg 2/3] lint (Oxlint — all categories error + branch ban) ..."
+  echo "ts-gate [$pkg 2/4] lint (Oxlint — all categories error + branch ban) ..."
   npm --prefix "$pkg" run --silent lint
 
-  echo "ts-gate [$pkg 3/3] coverage (100% gate) ..."
+  echo "ts-gate [$pkg 3/4] co-location (every src file has a sibling *.test.ts) ..."
+  npm --prefix "$pkg" run --silent colocation
+
+  echo "ts-gate [$pkg 4/4] coverage (100% gate) ..."
   npm --prefix "$pkg" run --silent coverage
 done
 

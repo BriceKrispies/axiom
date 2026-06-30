@@ -12,6 +12,7 @@ use crate::renderable::Renderable;
 use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
+use crate::sdf_shape::SdfShape;
 use crate::tag::Tag;
 
 impl Scene {
@@ -85,6 +86,29 @@ impl Scene {
             .map(|_| ())
             .ok_or_else(|| {
                 SceneError::missing_renderable("remove_renderable: node has no renderable")
+            })
+    }
+
+    pub(crate) fn add_sdf_shape(&mut self, node: SceneNodeId, shape: SdfShape) -> SceneResult<()> {
+        self.is_node(node)
+            .then_some(())
+            .ok_or_else(|| SceneError::missing_node("add_sdf_shape: node id not in scene"))
+            .map(|()| {
+                self.world
+                    .storage_mut()
+                    .sdf_shapes
+                    .insert(Self::entity(node), shape);
+            })
+    }
+
+    pub(crate) fn remove_sdf_shape(&mut self, node: SceneNodeId) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .sdf_shapes
+            .remove(Self::entity(node))
+            .map(|_| ())
+            .ok_or_else(|| {
+                SceneError::missing_sdf_shape("remove_sdf_shape: node has no sdf shape")
             })
     }
 
@@ -317,6 +341,29 @@ mod tests {
         assert_eq!(
             s.remove_renderable(n).unwrap_err().code(),
             SceneErrorCode::MissingRenderable
+        );
+    }
+
+    #[test]
+    fn add_and_remove_sdf_shape() {
+        let mut s = Scene::new();
+        let n = node(&mut s);
+        let shape = SdfShape::sphere(&math(), Meters::new(1.0).unwrap(), Vec3::ONE).unwrap();
+        s.add_sdf_shape(n, shape).unwrap();
+        assert_eq!(s.sdf_shape_count(), 1);
+        // Missing node is rejected.
+        assert_eq!(
+            s.add_sdf_shape(SceneNodeId::from_raw(99), shape)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingNode
+        );
+        s.remove_sdf_shape(n).unwrap();
+        assert_eq!(s.sdf_shape_count(), 0);
+        // Removing an absent shape fails.
+        assert_eq!(
+            s.remove_sdf_shape(n).unwrap_err().code(),
+            SceneErrorCode::MissingSdfShape
         );
     }
 
