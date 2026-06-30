@@ -41,9 +41,6 @@
  * (`apps/axiom-game-runtime/src/{query,scene3d,input}.rs` + `wasm.rs`). Where a
  * Wave-2 export carries less than the contract descriptor, the edge forwards the
  * subset the export accepts (documented, not silent):
- *   - **`createMaterial`** consumes only the base-colour `[r,g,b]`; emissive /
- *     roughness / opacity are dropped (the native `add_material` takes a lit
- *     colour only).
  *   - **`setCamera3D`** sends the eye position + look-at `target` + vertical FOV
  *     (converted radians → degrees) + near/far; the native `set_camera` aims the
  *     camera from the position toward the target (world up = +Y).
@@ -195,7 +192,12 @@ export interface WasmHostExport {
    * engine handle / light-node id it minted as a number.
    */
   readonly createMesh: (kind: string) => number;
-  readonly createMaterial: (rgb: Float64Array) => number;
+  readonly createMaterial: (
+    rgb: Float64Array,
+    emissive: Float64Array,
+    roughness: number,
+    opacity: number,
+  ) => number;
   readonly setCamera3D: (
     position: Float64Array,
     target: Float64Array,
@@ -728,8 +730,9 @@ const scene3dBridge = (game: WasmHostExport): Pick<
   },
   createController: (spec: ControllerSpec, index: number): Entity =>
     game.spawnController(packVec3(spec.position), spec.fovY * RAD_TO_DEG, spec.near, spec.far, index),
-  // Base colour only: emissive / roughness / opacity are dropped (native lit-colour authoring — see header).
-  createMaterial: (material: MaterialDescriptor): Handle => game.createMaterial(packRgb(material.baseColor)),
+  // Full catalog surface: base colour + emissive (linear `[r,g,b]`) + roughness + opacity, all threaded to the native lit material (see header).
+  createMaterial: (material: MaterialDescriptor): Handle =>
+    game.createMaterial(packRgb(material.baseColor), packRgb(material.emissive), material.roughness, material.opacity),
   createMesh: (meshKind: number): Handle => game.createMesh(pick(MESH_NAMES, meshKind)),
   // Eye position + look-at target + degree FOV + near/far: the native `set_camera` aims from position toward target (world up = +Y — see header).
   setCamera3D: (camera: CameraDescriptor): void => {

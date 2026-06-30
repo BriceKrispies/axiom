@@ -32,10 +32,11 @@ const DEFAULT_SURFACE_ID: &str = "axiom-surface";
 use crate::assets::Assets;
 use crate::default_plugins::DefaultPlugins;
 use crate::material::Material;
+// NOTE: `Texture` is no longer named here — the material store holds the full
+// `Material` value (it carries its own optional texture plus the catalog fields).
 use crate::mesh::Mesh;
 use crate::mesh_geometry::{mesh_geometry, MeshGeometry};
 use crate::scene_commands::SceneCommands;
-use crate::texture::Texture;
 use crate::window::Window;
 
 /// The engine's spatial-reasoning queries on [`RunningApp`] (raycast / overlap),
@@ -220,10 +221,11 @@ pub struct RunningApp {
     clear_color: [f32; 4],
     light_direction: Vec3,
     // Each registered mesh's own resolved geometry (keyed by handle id) and each
-    // material's colour + optional albedo texture. The scene's renderables
-    // reference these ids.
+    // registered `Material` (keyed by handle id), held in full so its base colour,
+    // optional albedo texture, AND its catalog surface (emissive / roughness /
+    // opacity) all reach the render path. The scene's renderables reference these ids.
     meshes: Vec<(u64, MeshGeometry)>,
-    materials: Vec<(u64, [f32; 4], Option<Texture>)>,
+    materials: Vec<(u64, Material)>,
     // How many renderables the scene draws each frame (the live backend's
     // per-instance buffer capacity).
     renderables: usize,
@@ -306,13 +308,13 @@ impl RunningApp {
         // very first frame, before any `tick` has advanced the scene.
         scene.update_world_transforms();
 
-        // Each material asset -> (handle id, colour, optional texture); each mesh
+        // Each material asset -> (handle id, the full `Material`); each mesh
         // asset -> its own resolved geometry keyed by handle id. The engine
         // resolves a mesh by its kind, so distinct meshes get distinct geometry.
-        let materials: Vec<(u64, [f32; 4], Option<Texture>)> = materials
+        let materials: Vec<(u64, Material)> = materials
             .iter()
             .enumerate()
-            .map(|(i, m)| ((i + 1) as u64, m.base_color().to_array(), m.texture()))
+            .map(|(i, m)| ((i + 1) as u64, *m))
             .collect();
         let meshes: Vec<(u64, MeshGeometry)> = meshes
             .iter()
@@ -441,7 +443,7 @@ struct AuthoredScene {
     scene: SceneApi,
     light_direction: Vec3,
     meshes: Vec<(u64, MeshGeometry)>,
-    materials: Vec<(u64, [f32; 4], Option<Texture>)>,
+    materials: Vec<(u64, Material)>,
     renderables: usize,
 }
 

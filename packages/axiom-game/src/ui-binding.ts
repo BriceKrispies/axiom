@@ -19,8 +19,7 @@
  * `stroke`/`strokeWidth` the `uiRect`/`uiButton` exports carry beyond it. `ShapeStyle`'s
  * `layer`/`alpha` model SPEC-09's `Common`, but the Wave-2 `uiRect`/`uiButton` exports
  * carry only `fill`/`stroke`/`strokeWidth`, so `layer`/`alpha` are dropped at the edge
- * (a documented partial, exactly like `createMaterial` dropping emissive — see
- * `wasm-host.ts`).
+ * (a documented partial of the kind `wasm-host.ts` records for each host group).
  */
 
 import type { Handle, Rect, Rgba, Vec2 } from "./vocabulary.ts";

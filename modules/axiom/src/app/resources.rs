@@ -48,8 +48,9 @@ impl RunningApp {
     pub fn material_textures(&self) -> Vec<(u64, u32, u32, Vec<u8>)> {
         self.materials
             .iter()
-            .map(|(id, _, texture)| {
-                let (w, h, pixels) = texture
+            .map(|(id, material)| {
+                let (w, h, pixels) = material
+                    .texture()
                     .map(texture_rgba)
                     .unwrap_or_else(|| (1, 1, vec![255, 255, 255, 255]));
                 (*id, w, h, pixels)

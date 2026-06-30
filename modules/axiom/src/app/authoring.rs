@@ -50,13 +50,13 @@ impl RunningApp {
 
     /// Register `material` into the running app's material store and return a
     /// stable [`Handle<Material>`] addressing it — the runtime counterpart to
-    /// `materials.add(..)` in `setup`. The stored entry is the material's base
-    /// colour plus its optional albedo texture, exactly as the initial build
-    /// records it.
+    /// `materials.add(..)` in `setup`. The store keeps the full [`Material`] — its
+    /// base colour, optional albedo texture, AND its catalog surface (emissive /
+    /// roughness / opacity) — so an authored translucent / emissive / rough
+    /// material reaches the renderer intact, exactly as the initial build records it.
     pub fn add_material(&mut self, material: Material) -> Handle<Material> {
         let id = self.materials.len() as u64 + 1;
-        self.materials
-            .push((id, material.base_color().to_array(), material.texture()));
+        self.materials.push((id, material));
         Handle::new(id)
     }
 

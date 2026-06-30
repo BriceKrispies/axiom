@@ -16,21 +16,16 @@ crate-type = ["rlib"]
 # listed in `module.toml`'s `allowed_modules`, plus the math and host layers.
 # The host layer supplies `SdfScene` — the backend-neutral SDF contract this
 # pipeline assembles (via `axiom-render`) and reports for the live/canvas path.
+# The kernel root supplies `Ratio` — the sanitized catalog scalar
+# (`roughness` / `opacity`) the material asset boundary threads into the render
+# layer's fully-specified lit material. The lib now names it, so it is a runtime
+# dependency (and `kernel` is listed in `module.toml`'s `allowed_layers`).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-scene = { path = "../axiom-scene" }
 axiom-render = { path = "../axiom-render" }
 axiom-webgpu = { path = "../axiom-webgpu" }
-
-[dev-dependencies]
-# Test-only: scene's camera/light constructors now take kernel quantity types
-# (Radians/Ratio/Meters), which the lib only ever flows through (never names).
-# The tests must *mint* those typed values to build a scene, so they need to
-# name the kernel types. This is a dev-dependency: it lives behind
-# `#[cfg(test)]`, is ignored by the architecture checker (dev-deps don't
-# load-bear — see crates/xtask/src/cargo_metadata.rs), and does NOT widen the
-# module's runtime `allowed_layers`.
-axiom-kernel = { path = "../../crates/axiom-kernel" }
 
 [lints.rust]
 unsafe_code = "forbid"
