@@ -35,7 +35,7 @@ mod common;
 use axiom_canvas2d_backend::Canvas2dBackendApi;
 use axiom_gpu_backend::GpuBackendApi;
 use axiom_host::{Common2d, Draw2dCommand, Draw2dList, Fill2d, Rect, Rgba, SpriteDraw2d, TextureId};
-use axiom_kernel::Ratio;
+use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::{Mat3, Vec2};
 
 const W: u32 = 64;
@@ -100,6 +100,44 @@ fn scene() -> Draw2dList {
         Rect::new(Vec2::new(24.0, 24.0), Vec2::new(32.0, 32.0)),
         Fill2d::color(rgba(0.1, 0.9, 0.1, 1.0)),
     ));
+
+    // --- Shape-parity additions (SPEC-04 §7): the round/oriented kinds the GPU
+    // arm now rasterizes via analytic per-pixel coverage. Each is OPAQUE on a top
+    // layer, so a covered pixel is the shape colour on BOTH backends (an exact
+    // overwrite) and only the shared analytic coverage boundary is under test —
+    // proving the GPU's conic/capsule discard matches the software per-pixel test.
+
+    // Layer 4: a filled circle (conic coverage; integer centre + radius).
+    list.push_command(Draw2dCommand::circle(
+        header(4, 4, 1.0),
+        Vec2::new(16.0, 18.0),
+        Meters::new(6.0).expect("finite"),
+        Fill2d::color(rgba(0.9, 0.9, 0.1, 1.0)),
+    ));
+    // Layer 5: a rotated ellipse (conic coverage with a 45° local rotation).
+    list.push_command(Draw2dCommand::ellipse(
+        header(5, 5, 1.0),
+        Vec2::new(46.0, 18.0),
+        Meters::new(9.0).expect("finite"),
+        Meters::new(3.0).expect("finite"),
+        Radians::new(std::f32::consts::FRAC_PI_4).expect("finite"),
+        Fill2d::color(rgba(0.1, 0.85, 0.9, 1.0)),
+    ));
+    // Layer 6: a thick diagonal line (capsule coverage with round caps).
+    list.push_command(Draw2dCommand::line(
+        header(6, 6, 1.0),
+        Vec2::new(6.0, 54.0),
+        Vec2::new(30.0, 60.0),
+        rgba(0.95, 0.95, 0.95, 1.0),
+        Meters::new(3.0).expect("finite"),
+    ));
+    // Layer 7: a particle quad (the centred-square `fill_rect` peer).
+    list.push_command(Draw2dCommand::particle_quad(
+        header(7, 7, 1.0),
+        Vec2::new(46.0, 50.0),
+        Meters::new(4.0).expect("finite"),
+        rgba(0.9, 0.5, 0.1, 1.0),
+    ));
     list.sort_commands();
     list
 }
@@ -132,6 +170,27 @@ fn gpu_and_software_2d_alpha_blend_match() {
     let overlap_sw = px(&sw_px, 30, 30);
     assert!(overlap_sw[0] > 60 && overlap_sw[1] > 60, "software overlap blended: {overlap_sw:?}");
     assert!(overlap_sw[0] < 220 && overlap_sw[1] < 220, "software overlap is a mix: {overlap_sw:?}");
+
+    // Sanity: each new shape actually rasterized (its interior centre reads the
+    // shape colour) on BOTH backends — proving the analytic coverage filled the
+    // shape rather than discarding everything.
+    let circle_sw = px(&sw_px, 16, 18);
+    let circle_gpu = px(&gpu_px, 16, 18);
+    assert!(circle_sw[0] > 200 && circle_sw[1] > 200 && circle_sw[2] < 60, "software circle: {circle_sw:?}");
+    assert!(circle_gpu[0] > 200 && circle_gpu[1] > 200 && circle_gpu[2] < 60, "gpu circle: {circle_gpu:?}");
+    let ellipse_sw = px(&sw_px, 46, 18);
+    let ellipse_gpu = px(&gpu_px, 46, 18);
+    assert!(ellipse_sw[2] > 200 && ellipse_sw[0] < 60, "software ellipse: {ellipse_sw:?}");
+    assert!(ellipse_gpu[2] > 200 && ellipse_gpu[0] < 60, "gpu ellipse: {ellipse_gpu:?}");
+    let particle_sw = px(&sw_px, 46, 50);
+    let particle_gpu = px(&gpu_px, 46, 50);
+    assert!(particle_sw[0] > 200 && particle_sw[2] < 60, "software particle: {particle_sw:?}");
+    assert!(particle_gpu[0] > 200 && particle_gpu[2] < 60, "gpu particle: {particle_gpu:?}");
+    // The line is thin; sample a point on the segment midline (round(18,57)).
+    let line_sw = px(&sw_px, 18, 57);
+    let line_gpu = px(&gpu_px, 18, 57);
+    assert!(line_sw[0] > 200 && line_sw[1] > 200 && line_sw[2] > 200, "software line: {line_sw:?}");
+    assert!(line_gpu[0] > 200 && line_gpu[1] > 200 && line_gpu[2] > 200, "gpu line: {line_gpu:?}");
 
     // Tight pixel parity across the whole frame.
     let maxd = common::max_channel_diff(&gpu_px, &sw_px);

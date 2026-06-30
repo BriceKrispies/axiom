@@ -52,6 +52,8 @@ struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) field: vec4<f32>,
+    @location(3) kind: f32,
 };
 
 @vertex
@@ -59,6 +61,8 @@ fn vs(
     @location(0) pos: vec2<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) field: vec4<f32>,
+    @location(4) kind: f32,
 ) -> VsOut {
     var out: VsOut;
     let ndc = vec2<f32>(
@@ -68,11 +72,32 @@ fn vs(
     out.clip = vec4<f32>(ndc, 0.0, 1.0);
     out.uv = uv;
     out.color = color;
+    out.field = field;
+    out.kind = kind;
     return out;
 }
 
+// Analytic per-pixel coverage for the round shapes, fed by the covered core's
+// per-vertex `field`/`kind` (see `draw2d_geometry`). The field is interpolated
+// affinely (clip.w == 1), so each fragment sees the exact value at its pixel
+// centre — reproducing the software rasterizer's per-pixel test byte-for-byte:
+//   * conic (circle/ellipse, kind > 0.5): inside when `s² + t² ≤ 1`, with
+//     `(s, t) = field.xy`.
+//   * capsule (line, and the always-inside plain rect/sprite/particle, kind ≤ 0.5):
+//     inside when `(along − clamp(along,0,len))² + perp² ≤ half_width²`, with
+//     `field = (along, perp, len, half_width)`. A plain quad carries the
+//     always-inside `(0,0,0,HUGE)`, so nothing is discarded.
+// Outside coverage `discard`s the fragment, leaving the destination untouched —
+// exactly the software path's "do not composite this pixel".
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
+    let clamped = clamp(in.field.x, 0.0, in.field.z);
+    let dax = in.field.x - clamped;
+    let cap_d2 = dax * dax + in.field.y * in.field.y;
+    let inside_capsule = cap_d2 <= in.field.w * in.field.w;
+    let inside_conic = dot(in.field.xy, in.field.xy) <= 1.0;
+    let keep = select(inside_capsule, inside_conic, in.kind > 0.5);
+    if (!keep) { discard; }
     return textureSample(tex, samp, in.uv) * in.color;
 }
 "#;
@@ -394,6 +419,16 @@ fn build_pipeline(
             format: wgpu::VertexFormat::Float32x4,
             offset: 16,
             shader_location: 2,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 32,
+            shader_location: 3,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32,
+            offset: 48,
+            shader_location: 4,
         },
     ];
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
