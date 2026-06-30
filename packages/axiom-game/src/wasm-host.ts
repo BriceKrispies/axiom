@@ -70,7 +70,7 @@ import {
   type MaterialDescriptor,
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Cell, Circle, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
 import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle } from "./draw2d-binding.ts";
 import type {
   HostBridge,
@@ -91,6 +91,15 @@ import { orElse, pick } from "./control-flow.ts";
  * matching `Float64Array` / `Int32Array` slices.
  */
 export interface WasmHostExport {
+  // Math — v2 (SPEC-03 §4.2)
+  readonly v2Add: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
+  readonly v2Sub: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
+  readonly v2Scale: (vector: Float64Array, scalar: number) => Float64Array;
+  readonly v2Dot: (lhs: Float64Array, rhs: Float64Array) => number;
+  readonly v2Len: (vector: Float64Array) => number;
+  readonly v2Normalize: (vector: Float64Array) => Float64Array;
+  readonly v2Dist: (lhs: Float64Array, rhs: Float64Array) => number;
+  readonly v2Lerp: (lhs: Float64Array, rhs: Float64Array, fraction: number) => Float64Array;
   // Math — v3 (SPEC-11 §4.2)
   readonly v3Add: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
   readonly v3Sub: (lhs: Float64Array, rhs: Float64Array) => Float64Array;
@@ -115,7 +124,16 @@ export interface WasmHostExport {
   readonly quatToMat4: (quaternion: Float64Array) => Float64Array;
   // Math — scalar (SPEC-03 §4.2)
   readonly clamp: (value: number, low: number, high: number) => number;
+  readonly lerp: (start: number, end: number, fraction: number) => number;
   readonly normalizeAngle: (angle: number) => number;
+  /*
+   * Pure predicates (SPEC-03 §4.2): a rect crosses as a `[x, y, w, h]` slice, a
+   * circle as a `[centerX, centerY, radius]` slice, a point as a `[x, y]` slice;
+   * each returns a boolean.
+   */
+  readonly aabbOverlap: (lhs: Float64Array, rhs: Float64Array) => boolean;
+  readonly pointInRect: (point: Float64Array, rect: Float64Array) => boolean;
+  readonly circleOverlap: (lhs: Float64Array, rhs: Float64Array) => boolean;
   // Grid (SPEC-06 §4.2)
   readonly gridPath: (
     cols: number,
@@ -262,6 +280,22 @@ const absent = <Value>(slot?: Value): Value | undefined => slot;
 /** Pack a `Vec3` into the boundary `[x, y, z]` slice. */
 const packVec3 = (vector: Vec3): Float64Array => Float64Array.from([vector.x, vector.y, vector.z]);
 
+/** A `Vec2` as the boundary `[x, y]` slice. */
+const packVec2 = (vector: Vec2): Float64Array => Float64Array.from([vector.x, vector.y]);
+
+/** Unpack a boundary `[x, y]` slice into a `Vec2`. */
+const unpackVec2 = (raw: Float64Array): Vec2 => {
+  const values = [...raw];
+  return { x: pick(values, 0), y: pick(values, 1) };
+};
+
+/** A `Rect` as the boundary `[x, y, w, h]` bounds slice. */
+const packRect = (rect: Rect): Float64Array => Float64Array.from([rect.x, rect.y, rect.width, rect.height]);
+
+/** A `Circle` as the boundary `[centerX, centerY, radius]` slice. */
+const packCircle = (circle: Circle): Float64Array =>
+  Float64Array.from([circle.center.x, circle.center.y, circle.radius]);
+
 /** Pack an `Rgba`'s linear `[r, g, b]` channels into the boundary colour slice (alpha dropped — native lit colour). */
 const packRgb = (color: Rgba): Float64Array => Float64Array.from([...color].slice(0, RGB_LENGTH));
 
@@ -298,8 +332,30 @@ const toCells = (raw: Float64Array): readonly Cell[] => {
   }));
 };
 
-/** The math `HostBridge` ops (v3 / mat4 / quat / scalar), every one forwarding to the native `MathApi`. */
-const mathBridge = (game: WasmHostExport): Pick<
+/** The 2D math + predicate `HostBridge` ops (SPEC-03 §4.2): the `v2` algebra, the scalar `lerp`, and the pure `Aabb`/`Sphere` predicates, every one forwarding to the native math (one deterministic source of truth). */
+const math2dBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  | "v2Add" | "v2Sub" | "v2Scale" | "v2Dot" | "v2Len" | "v2Normalize" | "v2Dist" | "v2Lerp"
+  | "lerp" | "aabbOverlap" | "pointInRect" | "circleOverlap"
+> => ({
+  aabbOverlap: (lhs: Rect, rhs: Rect): boolean => game.aabbOverlap(packRect(lhs), packRect(rhs)),
+  circleOverlap: (lhs: Circle, rhs: Circle): boolean =>
+    game.circleOverlap(packCircle(lhs), packCircle(rhs)),
+  lerp: (start: number, end: number, fraction: number): number => game.lerp(start, end, fraction),
+  pointInRect: (point: Vec2, rect: Rect): boolean => game.pointInRect(packVec2(point), packRect(rect)),
+  v2Add: (lhs: Vec2, rhs: Vec2): Vec2 => unpackVec2(game.v2Add(packVec2(lhs), packVec2(rhs))),
+  v2Dist: (lhs: Vec2, rhs: Vec2): number => game.v2Dist(packVec2(lhs), packVec2(rhs)),
+  v2Dot: (lhs: Vec2, rhs: Vec2): number => game.v2Dot(packVec2(lhs), packVec2(rhs)),
+  v2Len: (vector: Vec2): number => game.v2Len(packVec2(vector)),
+  v2Lerp: (lhs: Vec2, rhs: Vec2, fraction: number): Vec2 =>
+    unpackVec2(game.v2Lerp(packVec2(lhs), packVec2(rhs), fraction)),
+  v2Normalize: (vector: Vec2): Vec2 => unpackVec2(game.v2Normalize(packVec2(vector))),
+  v2Scale: (vector: Vec2, scalar: number): Vec2 => unpackVec2(game.v2Scale(packVec2(vector), scalar)),
+  v2Sub: (lhs: Vec2, rhs: Vec2): Vec2 => unpackVec2(game.v2Sub(packVec2(lhs), packVec2(rhs))),
+});
+
+/** The 3D math `HostBridge` ops (SPEC-11 §4.2): the `v3`/`mat4`/`quat` algebra + the scalar `clamp`/`normalizeAngle`, every one forwarding to the native `MathApi`. */
+const mathCoreBridge = (game: WasmHostExport): Pick<
   HostBridge,
   | "v3Add" | "v3Sub" | "v3Scale" | "v3Dot" | "v3Cross" | "v3Len" | "v3Normalize" | "v3Dist" | "v3Lerp"
   | "mat4Identity" | "mat4Multiply" | "mat4Perspective" | "mat4LookAt" | "mat4Invert" | "mat4FromTRS"
@@ -337,6 +393,17 @@ const mathBridge = (game: WasmHostExport): Pick<
   v3Scale: (vector: Vec3, scalar: number): Vec3 => unpackVec3(game.v3Scale(packVec3(vector), scalar)),
   v3Sub: (lhs: Vec3, rhs: Vec3): Vec3 => unpackVec3(game.v3Sub(packVec3(lhs), packVec3(rhs))),
 });
+
+/** The whole math `HostBridge` (the 3D-core + 2D groups), split so each forwarder group stays within the per-function line budget; composed here into the full math surface. */
+const mathBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  | "v2Add" | "v2Sub" | "v2Scale" | "v2Dot" | "v2Len" | "v2Normalize" | "v2Dist" | "v2Lerp"
+  | "v3Add" | "v3Sub" | "v3Scale" | "v3Dot" | "v3Cross" | "v3Len" | "v3Normalize" | "v3Dist" | "v3Lerp"
+  | "mat4Identity" | "mat4Multiply" | "mat4Perspective" | "mat4LookAt" | "mat4Invert" | "mat4FromTRS"
+  | "quatIdentity" | "quatFromEuler" | "quatMultiply" | "quatNormalize" | "quatToMat4"
+  | "clamp" | "lerp" | "normalizeAngle"
+  | "aabbOverlap" | "pointInRect" | "circleOverlap"
+> => Object.assign(mathCoreBridge(game), math2dBridge(game));
 
 /** The grid `HostBridge` ops (SPEC-06), forwarding to the native `axiom-grid` BFS / wavefront core. */
 const gridBridge = (game: WasmHostExport): Pick<
@@ -402,12 +469,6 @@ const byteOf = (channel: number): number => Math.round(channel * CHANNEL_MAX);
 /** Pack an `Rgba` into the boundary `0xRRGGBBAA` u32 by positional scale (no bitwise). */
 const packRgba = (color: Rgba): number =>
   [...color].reduce((packed, channel, index): number => packed + byteOf(channel) * pick(RGBA_SCALES, index), 0);
-
-/** A `Vec2` as the boundary `[x, y]` slice. */
-const packVec2 = (vector: Vec2): Float64Array => Float64Array.from([vector.x, vector.y]);
-
-/** A `Rect` as the boundary `[x, y, w, h]` bounds slice. */
-const packRect = (rect: Rect): Float64Array => Float64Array.from([rect.x, rect.y, rect.width, rect.height]);
 
 /** Flatten an `EmitterConfig` to the boundary `[count, lifetime, speed, spread, gravityX, gravityY, size, colorStart, colorEnd, layer]` slice. */
 const packEmitter = (config: EmitterConfig): Float64Array => {

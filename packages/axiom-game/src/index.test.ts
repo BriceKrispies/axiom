@@ -36,9 +36,12 @@ const FUNCTION_EXPORTS = [
   "SnapshotInput",
   "bindAction",
   // math + query
+  "aabbOverlap",
+  "circleOverlap",
   "clamp",
   "lerp",
   "normalizeAngle",
+  "pointInRect",
   "overlapBox",
   "overlapCircle",
   "raycast",
@@ -104,7 +107,7 @@ const FUNCTION_EXPORTS = [
   "netTransportFromClient",
 ] as const satisfies readonly (keyof typeof game)[];
 
-const OBJECT_EXPORTS = ["EASES", "mat4", "quat", "v3"] as const satisfies readonly (keyof typeof game)[];
+const OBJECT_EXPORTS = ["EASES", "mat4", "quat", "v2", "v3"] as const satisfies readonly (keyof typeof game)[];
 
 test("every documented function/class export is present and callable", () => {
   for (const name of FUNCTION_EXPORTS) {

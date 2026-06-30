@@ -59,6 +59,20 @@ export interface Rect {
 }
 
 /*
+ * A 2D circle (SPEC-03 §4.2) — a `center` point plus a `radius`. The neutral
+ * value the `circleOverlap` predicate compares: the SDK bundles the contract's
+ * `(aCenter, aR, bCenter, bR)` into two `Circle` records so the authoring call
+ * stays within the ≤3-parameter law (the same record-bundling the camera /
+ * perspective descriptors use); the geometry still routes to the native `Sphere`.
+ */
+export interface Circle {
+  /** The circle center. */
+  readonly center: Vec2;
+  /** The circle radius. */
+  readonly radius: number;
+}
+
+/*
  * A 4-channel colour (SPEC-11), as a positional `[r, g, b, a]` tuple. It is a
  * tuple rather than an `{ r, g, b, a }` record because the SDK's `id-length` law
  * admits only the geometric `x`/`y`/`z` single-letter names; `[r, g, b, a]` is

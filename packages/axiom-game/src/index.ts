@@ -88,7 +88,7 @@ export type { World } from "./world.ts";
 export { makeInput, SnapshotInput, bindAction } from "./input.ts";
 export type { Action, Input } from "./input.ts";
 
-export { clamp, lerp, normalizeAngle } from "./math.ts";
+export { aabbOverlap, circleOverlap, clamp, lerp, normalizeAngle, pointInRect, v2 } from "./math.ts";
 
 export { overlapBox, overlapCircle, raycast } from "./query.ts";
 
@@ -213,6 +213,7 @@ export type {
 
 export type {
   Cell,
+  Circle,
   Component,
   ComponentKind,
   Entity,

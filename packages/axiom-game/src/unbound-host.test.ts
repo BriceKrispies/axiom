@@ -12,21 +12,38 @@ import { UNBOUND_HOST_BASE } from "./unbound-host.ts";
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const zero = { x: 0, y: 0, z: 0 };
 
+const zero2 = { x: 0, y: 0 };
+
 test("the numeric math reads pass through or return the neutral scalar", () => {
   assert.equal(UNBOUND_HOST_BASE.clamp(5), 5); // identity passthrough
+  assert.equal(UNBOUND_HOST_BASE.lerp(5), 5); // identity passthrough (inert start)
   assert.equal(UNBOUND_HOST_BASE.normalizeAngle(7), 7); // identity passthrough
+  assert.equal(UNBOUND_HOST_BASE.v2Dot(), 0);
+  assert.equal(UNBOUND_HOST_BASE.v2Len(), 0);
+  assert.equal(UNBOUND_HOST_BASE.v2Dist(), 0);
   assert.equal(UNBOUND_HOST_BASE.v3Dot(), 0);
   assert.equal(UNBOUND_HOST_BASE.v3Len(), 0);
   assert.equal(UNBOUND_HOST_BASE.v3Dist(), 0);
 });
 
 test("the vector reads return the zero vector", () => {
+  assert.deepEqual(UNBOUND_HOST_BASE.v2Add(), zero2);
+  assert.deepEqual(UNBOUND_HOST_BASE.v2Sub(), zero2);
+  assert.deepEqual(UNBOUND_HOST_BASE.v2Scale(), zero2);
+  assert.deepEqual(UNBOUND_HOST_BASE.v2Normalize(), zero2);
+  assert.deepEqual(UNBOUND_HOST_BASE.v2Lerp(), zero2);
   assert.deepEqual(UNBOUND_HOST_BASE.v3Add(), zero);
   assert.deepEqual(UNBOUND_HOST_BASE.v3Sub(), zero);
   assert.deepEqual(UNBOUND_HOST_BASE.v3Scale(), zero);
   assert.deepEqual(UNBOUND_HOST_BASE.v3Cross(), zero);
   assert.deepEqual(UNBOUND_HOST_BASE.v3Normalize(), zero);
   assert.deepEqual(UNBOUND_HOST_BASE.v3Lerp(), zero);
+});
+
+test("the pure predicates return false until a host is bound", () => {
+  assert.equal(UNBOUND_HOST_BASE.aabbOverlap(), false);
+  assert.equal(UNBOUND_HOST_BASE.pointInRect(), false);
+  assert.equal(UNBOUND_HOST_BASE.circleOverlap(), false);
 });
 
 test("the matrix reads return the identity matrix", () => {

@@ -8,7 +8,7 @@
  * tuples that marshal 1:1 across the wasm boundary.
  */
 
-import type { Cell, Mat4, Quat, Rgba, Vec3 } from "./vocabulary.ts";
+import type { Cell, Mat4, Quat, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
 
 /** A grid plus its row-major passability mask — the field a path query runs over (SPEC-06). */
 export interface GridField {
@@ -69,6 +69,9 @@ export interface PerspectiveSpec {
   /** The far clip distance. */
   readonly far: number;
 }
+
+/** The zero vector an inert `v2` read returns before a host binds. */
+export const ZERO_VEC2: Vec2 = { x: 0, y: 0 };
 
 /** The zero vector an inert `v3` read returns before a host binds. */
 export const ZERO_VEC3: Vec3 = { x: 0, y: 0, z: 0 };
