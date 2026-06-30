@@ -41,6 +41,8 @@ export interface Input {
   readonly released: (action: Action) => boolean;
   /** `-1`, `0`, or `+1` from a negative/positive action pair. */
   readonly axis: (neg: Action, pos: Action) => -1 | 0 | 1;
+  /** This tick's relative look (mouse / pointer-lock) as a raw-pixel `(dx, dy)` delta — `(0, 0)` when none. A game scales it by its own sensitivity and applies it to its yaw/pitch. */
+  readonly look: () => Vec2;
   /** The pointer sample this tick, or the empty value when there is no pointer. */
   readonly pointer: () => Result<PointerSample>;
   /** The position a pointer-press began at this tick, or the empty value. */
@@ -76,6 +78,10 @@ export class SnapshotInput implements Input {
   public axis(neg: Action, pos: Action): -1 | 0 | 1 {
     const difference = Number(this.isDown(pos)) - Number(this.isDown(neg));
     return pick(AXIS_STEPS, difference + AXIS_BIAS);
+  }
+
+  public look(): Vec2 {
+    return this.#bridge.inputLookDelta(this.#tick);
   }
 
   public pointer(): Result<PointerSample> {

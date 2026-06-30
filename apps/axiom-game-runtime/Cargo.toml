@@ -85,9 +85,17 @@ axiom-draw2d = { path = "../../modules/axiom-draw2d" }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
+# The live presentation arm (SPEC-11 3D): the windowing module binds a real
+# wgpu/WebGL2/Canvas2D surface to the canvas and presents the authored 3D scene
+# each frame. wasm32-only (its live arm is gated on wasm32); the deterministic
+# scene authoring + render summary it presents lives in `axiom` on every target.
+axiom-windowing = { path = "../../modules/axiom-windowing" }
 web-sys = { version = "0.3", features = [
     "Window",
     "Location",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
     "AudioContext",
     "BaseAudioContext",
 ] }

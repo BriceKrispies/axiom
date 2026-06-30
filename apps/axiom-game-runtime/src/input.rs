@@ -62,11 +62,19 @@ pub(crate) struct InputBridge {
     keys: Vec<String>,
     pointer: Option<(Vec2, bool)>,
     surface: Vec2,
+    /// Relative look (mouse / pointer-lock) accumulated between fixed ticks, in raw
+    /// device pixels — the analogue of the held-key set for an analog channel.
+    live_look: Vec2,
+    /// The look accumulated *for the current tick*: `commit_look` snapshots
+    /// `live_look` here once per `advance` and zeroes the accumulator, so a read
+    /// after `advance` sees this frame's relative look exactly once (the same
+    /// fold-then-reset the original mouse-look loop does each frame).
+    look: Vec2,
 }
 
 impl InputBridge {
-    /// A fresh input bridge: no bindings, no keys down, no pointer, the default
-    /// surface.
+    /// A fresh input bridge: no bindings, no keys down, no pointer, no look, the
+    /// default surface.
     pub(crate) fn new() -> Self {
         InputBridge {
             state: InputState::new(),
@@ -74,7 +82,30 @@ impl InputBridge {
             keys: Vec::new(),
             pointer: None,
             surface: default_surface(),
+            live_look: Vec2::ZERO,
+            look: Vec2::ZERO,
         }
+    }
+
+    /// Accumulate one relative look sample (raw device pixels: `dx` rightward,
+    /// `dy` downward) into the live look — the pointer-lock `mousemove` feed.
+    fn accumulate_look(&mut self, dx: f64, dy: f64) {
+        self.live_look = Vec2::new(self.live_look.x + dx as f32, self.live_look.y + dy as f32);
+    }
+
+    /// Snapshot the live look into this tick's `look` and zero the accumulator —
+    /// run once per [`crate::GameBridge::advance`], so the relative look is read
+    /// for exactly one tick and never double-applied across frames.
+    pub(crate) fn commit_look(&mut self) {
+        self.look = self.live_look;
+        self.live_look = Vec2::ZERO;
+    }
+
+    /// This tick's relative look as `[dx, dy]` raw device pixels — the value the
+    /// `look()` projection reads back. A game scales it by its own sensitivity and
+    /// applies it to its yaw/pitch (the engine clamps pitch on the controller).
+    fn look_delta(&self) -> Vec<f64> {
+        vec![f64::from(self.look.x), f64::from(self.look.y)]
     }
 
     /// Resolve `name` to its stable action id, interning a fresh id (the next
@@ -247,6 +278,17 @@ impl GameBridge {
         self.input.set_surface(width, height);
     }
 
+    /// Accumulate one relative look sample (raw pixels) into the live look
+    /// (`inputLook`) — the pointer-lock mouse feed. Drained once per `advance`.
+    pub fn input_look(&mut self, dx: f64, dy: f64) {
+        self.input.accumulate_look(dx, dy);
+    }
+
+    /// This tick's relative look as `[dx, dy]` raw device pixels (`inputLookDelta`).
+    pub fn input_look_delta(&self) -> Vec<f64> {
+        self.input.look_delta()
+    }
+
     /// Whether `action` is held this tick (`inputIsDown`).
     pub fn input_is_down(&self, action: &str) -> bool {
         self.input.is_down_action(action)
@@ -330,6 +372,20 @@ mod wasm_exports {
         #[wasm_bindgen(js_name = inputSetSurface)]
         pub fn input_set_surface(&mut self, width: f64, height: f64) {
             self.bridge.input_set_surface(width, height);
+        }
+
+        /// Accumulate one relative look sample in raw device pixels (`inputLook`):
+        /// `dx` rightward, `dy` downward — the pointer-lock mouse-move feed.
+        #[wasm_bindgen(js_name = inputLook)]
+        pub fn input_look(&mut self, dx: f64, dy: f64) {
+            self.bridge.input_look(dx, dy);
+        }
+
+        /// This tick's relative look as `[dx, dy]` raw device pixels
+        /// (`inputLookDelta`).
+        #[wasm_bindgen(js_name = inputLookDelta)]
+        pub fn input_look_delta(&self, _tick: f64) -> Vec<f64> {
+            self.bridge.input_look_delta()
         }
 
         // The reads carry the `NativeBridge`'s `tick` first arg for contract
@@ -621,6 +677,20 @@ mod tests {
         b.advance(STEP);
         assert_eq!(b.input_swipe(), "right");
         assert!(b.input_pointer_sample().is_empty());
+    }
+
+    #[test]
+    fn relative_look_accumulates_between_ticks_and_drains_each_advance() {
+        let mut b = bridge();
+        // Two pointer-lock move samples accumulate before the tick (sum = (7, -2)).
+        b.input_look(5.0, -3.0);
+        b.input_look(2.0, 1.0);
+        b.advance(STEP); // commits the accumulated look for this tick
+        assert_eq!(b.input_look_delta(), vec![7.0, -2.0]);
+        // With no new samples the next advance drains the look back to zero, so a
+        // relative delta is never double-applied across frames.
+        b.advance(STEP);
+        assert_eq!(b.input_look_delta(), vec![0.0, 0.0]);
     }
 
     #[test]

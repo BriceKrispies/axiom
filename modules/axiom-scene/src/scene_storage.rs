@@ -279,46 +279,61 @@ impl WorldSystem<SceneStorage> for ControllerSystem {
         controls
             .into_iter()
             .for_each(|(index, move_local, yaw_delta, pitch_delta)| {
-                // Resolve the controller index to its node (deterministic: BTreeMap
-                // iter). An input for an unknown index resolves to `None` and is
-                // ignored.
-                storage
-                    .controllers
-                    .iter()
-                    .find_map(|(&e, s)| (s.index == index).then_some(e))
-                    .into_iter()
-                    .for_each(|entity| {
-                        let state = storage
-                            .controllers
-                            .get_mut(&entity)
-                            .expect("entity was just resolved from this map");
-                        state.yaw += yaw_delta;
-                        state.pitch = (state.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-                        // Unit quaternions built directly (`(axis·sin(θ/2),
-                        // cos(θ/2))`) — infallible, so there is no unreachable
-                        // error arm.
-                        let (yh, ph) = (state.yaw * 0.5, state.pitch * 0.5);
-                        let yaw = Quat::new(0.0, yh.sin(), 0.0, yh.cos());
-                        let pitch = Quat::new(ph.sin(), 0.0, 0.0, ph.cos());
-
-                        let mut local = storage
-                            .locals
-                            .get(entity)
-                            .copied()
-                            .unwrap_or(Transform::IDENTITY);
-                        // View orientation: yaw then pitch.
-                        local.rotation = yaw.multiply(pitch);
-                        // Movement uses the yaw-only frame, so it stays horizontal.
-                        let step = yaw.rotate(move_local);
-                        local.translation = Vec3::new(
-                            local.translation.x + step.x,
-                            local.translation.y + step.y,
-                            local.translation.z + step.z,
-                        );
-                        storage.locals.insert(entity, local);
-                    });
+                apply_controller(storage, index, move_local, yaw_delta, pitch_delta);
             });
     }
+}
+
+/// Apply one first-person input to controller `index`'s node: accumulate `yaw`
+/// (about world +Y) and `pitch` (about local +X, clamped to [`PITCH_LIMIT`]) into
+/// its [`ControllerState`], rebuild the node rotation as `yaw·pitch`, and move it
+/// by `move_local` rotated by the **yaw only** (so looking up/down never tilts
+/// movement). Resolving the index is deterministic (BTreeMap iter); an input for
+/// an unknown index resolves to `None` and is ignored. Shared by
+/// [`ControllerSystem`] (the per-tick drain) and the on-demand
+/// [`crate::scene::Scene::control_now`] (the immediate, zero-lag path) so the two
+/// never diverge.
+pub(crate) fn apply_controller(
+    storage: &mut SceneStorage,
+    index: u32,
+    move_local: Vec3,
+    yaw_delta: f32,
+    pitch_delta: f32,
+) {
+    storage
+        .controllers
+        .iter()
+        .find_map(|(&e, s)| (s.index == index).then_some(e))
+        .into_iter()
+        .for_each(|entity| {
+            let state = storage
+                .controllers
+                .get_mut(&entity)
+                .expect("entity was just resolved from this map");
+            state.yaw += yaw_delta;
+            state.pitch = (state.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+            // Unit quaternions built directly (`(axis·sin(θ/2), cos(θ/2))`) —
+            // infallible, so there is no unreachable error arm.
+            let (yh, ph) = (state.yaw * 0.5, state.pitch * 0.5);
+            let yaw = Quat::new(0.0, yh.sin(), 0.0, yh.cos());
+            let pitch = Quat::new(ph.sin(), 0.0, 0.0, ph.cos());
+
+            let mut local = storage
+                .locals
+                .get(entity)
+                .copied()
+                .unwrap_or(Transform::IDENTITY);
+            // View orientation: yaw then pitch.
+            local.rotation = yaw.multiply(pitch);
+            // Movement uses the yaw-only frame, so it stays horizontal.
+            let step = yaw.rotate(move_local);
+            local.translation = Vec3::new(
+                local.translation.x + step.x,
+                local.translation.y + step.y,
+                local.translation.z + step.z,
+            );
+            storage.locals.insert(entity, local);
+        });
 }
 
 /// Compute world transforms for `ids` (in the given order) from `locals` +

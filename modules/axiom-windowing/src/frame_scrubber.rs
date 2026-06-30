@@ -6,13 +6,34 @@
 //! `App::run`). Mounting the scrubber there means a uniform dev overlay appears
 //! on *all* game screens without any per-app wiring.
 //!
-//! Each live frame it records the exact data handed to the backend's `present`
-//! (clear colour, lights, light view-projection, draw batches) into an
-//! `axiom-recording` timeline as opaque bytes. When the user scrubs (Back / Fwd /
-//! Live), the run loop stops calling the app's frame closure — freezing the live
-//! sim — and re-presents the recorded frame instead. The timeline is never
-//! mutated and no frame is forked; this is purely a read-only view over already
-//! presented frames.
+//! Each live frame it records the exact data handed to the backend's present
+//! into an `axiom-recording` timeline as opaque bytes. There are two recording
+//! arms, one per present shape: the **3D** arm ([`FrameScrubber::record`] /
+//! [`FrameScrubber::scrub_frame`]) carries `(clear, lights, light view-projection,
+//! draw batches)` and round-trips them through [`encode`]/[`decode`]; the **2D**
+//! arm ([`FrameScrubber::record_2d`] / [`FrameScrubber::scrub_2d_frame`]) carries
+//! `(clear, Draw2dList)`. A given presenter only ever drives one arm — a 2D game's
+//! `present_2d` uses the 2D arm, a 3D run loop uses the 3D arm — so they share one
+//! recorder/timeline without tagging frame kinds. When the user scrubs (Back / Fwd
+//! / Live), the run loop stops calling the app's frame closure — freezing the live
+//! sim — and re-presents the recorded frame instead. The timeline is never mutated
+//! and no frame is forked; this is purely a read-only view over already presented
+//! frames.
+//!
+//! ## Why the 2D arm keeps a clone store
+//! The recorder accounts memory, computes hashes, and evicts over an *opaque byte*
+//! payload, so the 2D arm still encodes each frame's `Draw2dList` to bytes
+//! ([`encode_2d`]) — that is what makes the overlay's frames / range / mem / hash
+//! read-outs grow exactly as they do for a 3D game. But this `windowing` module is
+//! only allowed to depend on the kernel, the host layer, and the interface layer —
+//! **not** on `axiom-math` — so it cannot *rebuild* a `Draw2dList` from those bytes
+//! (reconstructing the host 2D contract would mean naming the `Vec2`/`Mat3`
+//! primitives it is built from). Reading a list needs no math name (field access +
+//! `as_cols_array`), but writing one back does. So the exact frame is replayed from
+//! a parallel store of `Draw2dList` clones ([`FrameScrubber::frames_2d`]) kept
+//! position-aligned with the recorder's timeline (trimmed to its retained length on
+//! every record, so it never outgrows the budget). Replay is therefore byte-exact
+//! by construction (a clone), and the byte payload drives only the bookkeeping.
 //!
 //! ## Built on the interface layer
 //! The overlay's *model* is an [`axiom_interface`] panel: its header (mode), its
@@ -28,6 +49,7 @@
 //! the live run loop — it never enters the deterministic native core.
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use axiom_interface::{InterfaceApi, InterfaceDrawItem, PanelId};
@@ -108,6 +130,16 @@ struct Shared {
 pub(crate) struct FrameScrubber {
     shared: Shared,
     snapshot: Option<SnapshotHook>,
+    /// The authoritative recorded 2D frames — each `(frame index, clear colour,
+    /// the exact Draw2dList)` — kept position-aligned with the recorder's
+    /// timeline. The recorder's opaque bytes drive its memory/hash/eviction
+    /// bookkeeping; the exact frame replayed while scrubbing comes from here,
+    /// because this module cannot rebuild a `Draw2dList` from bytes without
+    /// naming the `axiom-math` primitives it is built from (see the module docs).
+    /// Trimmed to the timeline's retained length on every record, so it never
+    /// outgrows the recorder's budget. Empty for a 3D presenter (which uses the
+    /// byte-decoding 3D arm instead).
+    frames_2d: RefCell<VecDeque<(u64, [f32; 4], axiom_host::Draw2dList)>>,
 }
 
 impl FrameScrubber {
@@ -161,7 +193,11 @@ impl FrameScrubber {
         install_drag(&window, &shared);
         install_focus_listeners(&window, &document, &shared);
 
-        let scrubber = FrameScrubber { shared, snapshot };
+        let scrubber = FrameScrubber {
+            shared,
+            snapshot,
+            frames_2d: RefCell::new(VecDeque::new()),
+        };
         repaint(&scrubber.shared);
         Some(scrubber)
     }
@@ -217,6 +253,59 @@ impl FrameScrubber {
     pub(crate) fn scrub_frame(&self) -> Option<PresentArgs> {
         tick_reverse(&self.shared);
         selected_present(&self.shared)
+    }
+
+    /// Record one live **2D** frame — the 2D peer of [`Self::record`]. The frame's
+    /// `(clear, list)` is encoded to the recorder's opaque bytes (for the memory /
+    /// hash / eviction bookkeeping the overlay reads out) and the exact list is
+    /// stashed in the clone store for byte-exact replay while scrubbing. Skips
+    /// recording while paused (game unfocused): the frame still presents live, but
+    /// the timeline does not grow. Recording errors (e.g. an over-budget frame) are
+    /// non-fatal and leave the clone store untouched (so it stays aligned).
+    pub(crate) fn record_2d(&self, frame: u64, clear: [f32; 4], list: &axiom_host::Draw2dList) {
+        self.shared.active.get().then(|| {
+            let render_bytes = encode_2d(clear, list);
+            // Capture the app's sim state for this frame (empty when not forkable);
+            // it rides in the recorder's `state_bytes` slot for a later fork.
+            let state_bytes = self
+                .snapshot
+                .as_ref()
+                .map(|snap| snap())
+                .unwrap_or_default();
+            let recorded = self
+                .shared
+                .recorder
+                .borrow_mut()
+                .record_frame(frame, frame, Vec::new(), Vec::new(), state_bytes, render_bytes)
+                .is_ok();
+            // Mirror the push only when the recorder actually retained the frame,
+            // then trim the store's front to the timeline's retained length so the
+            // two stay position-aligned through the recorder's FIFO eviction.
+            recorded.then(|| {
+                let retained = self.shared.recorder.borrow().frame_count();
+                let mut store = self.frames_2d.borrow_mut();
+                store.push_back((frame, clear, list.clone()));
+                while store.len() > retained {
+                    store.pop_front();
+                }
+            });
+        });
+        repaint(&self.shared);
+    }
+
+    /// The **2D** frame to present this scrub tick — the 2D peer of
+    /// [`Self::scrub_frame`]. First advance auto-rewind (if armed), then return the
+    /// selected recorded frame's `(clear, Draw2dList)` from the clone store (looked
+    /// up by index with the same first-match semantics the recorder's `get_frame`
+    /// uses). `None` if the frame was evicted or nothing is recorded.
+    pub(crate) fn scrub_2d_frame(&self) -> Option<([f32; 4], axiom_host::Draw2dList)> {
+        tick_reverse(&self.shared);
+        let selected = self.shared.recorder.borrow().selected_frame()?;
+        self.frames_2d
+            .borrow()
+            .iter()
+            .find(|(frame, ..)| *frame == selected.raw())
+            .map(|(_, clear, list)| (*clear, list.clone()))
     }
 }
 
@@ -712,6 +801,230 @@ fn put_u32(bytes: &mut Vec<u8>, value: u32) {
 }
 fn put_u64(bytes: &mut Vec<u8>, value: u64) {
     bytes.extend_from_slice(&value.to_le_bytes());
+}
+fn put_i32(bytes: &mut Vec<u8>, value: i32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+fn put_u8(bytes: &mut Vec<u8>, value: u8) {
+    bytes.push(value);
+}
+
+// ----- 2D present (clear + Draw2dList) → opaque recorder bytes -----
+//
+// This is a *one-way* read of the host's 2D draw contract into deterministic
+// bytes: it drives the recorder's memory/hash/eviction bookkeeping only — the
+// frame replayed while scrubbing comes from the clone store, not from decoding
+// these bytes (see the module docs for why this module can read the contract but
+// not rebuild it). Reading needs no `axiom-math` name: vectors are read through
+// their public `x`/`y` fields and the baked transform through `as_cols_array`,
+// so nothing here forces a cross-layer import.
+
+/// Encode the 4 colour channels of an [`axiom_host::Rgba`].
+fn put_rgba(bytes: &mut Vec<u8>, color: axiom_host::Rgba) {
+    let [r, g, b, a] = color.channels();
+    put_f32(bytes, r);
+    put_f32(bytes, g);
+    put_f32(bytes, b);
+    put_f32(bytes, a);
+}
+
+/// Encode an [`axiom_host::Rect`] as `min.xy` then `size.xy`.
+fn put_rect(bytes: &mut Vec<u8>, rect: axiom_host::Rect) {
+    put_f32(bytes, rect.min.x);
+    put_f32(bytes, rect.min.y);
+    put_f32(bytes, rect.size.x);
+    put_f32(bytes, rect.size.y);
+}
+
+/// Encode the present arguments of a 2D frame into the recorder's opaque render
+/// bytes: the clear colour followed by the full layer-sorted list.
+fn encode_2d(clear: [f32; 4], list: &axiom_host::Draw2dList) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    clear.iter().for_each(|f| put_f32(&mut bytes, *f));
+    encode_list(&mut bytes, list);
+    bytes
+}
+
+/// Encode a [`axiom_host::Draw2dList`]: camera, paint table, commands, and each
+/// off-screen render target (dimensions + its routed commands). Render targets
+/// only ever carry routed commands (the builder has no way to nest paints / a
+/// camera / sub-targets into one), so encoding their command lists is faithful to
+/// anything a list can actually hold.
+fn encode_list(bytes: &mut Vec<u8>, list: &axiom_host::Draw2dList) {
+    match list.camera() {
+        Some(camera) => {
+            put_u8(bytes, 1);
+            put_f32(bytes, camera.center.x);
+            put_f32(bytes, camera.center.y);
+            put_f32(bytes, camera.zoom.get());
+        }
+        None => put_u8(bytes, 0),
+    }
+
+    let paint_count = list.paint_count() as u32;
+    put_u32(bytes, paint_count);
+    (0..paint_count).for_each(|raw| {
+        let id = axiom_host::PaintId::from_raw(raw);
+        match list.paint_linear(id) {
+            Some((from, to)) => {
+                put_u8(bytes, 0);
+                put_f32(bytes, from.x);
+                put_f32(bytes, from.y);
+                put_f32(bytes, to.x);
+                put_f32(bytes, to.y);
+            }
+            None => {
+                put_u8(bytes, 1);
+                // A paint is linear xor radial; if not linear it is radial. The
+                // `unwrap_or` keeps this total without a panic on the impossible
+                // arm (a registered id is always one or the other).
+                let (center, radius) = list
+                    .paint_radial(id)
+                    .map(|(c, r)| (c.x, c.y, r.get()))
+                    .map(|(x, y, r)| ((x, y), r))
+                    .unwrap_or(((0.0, 0.0), 0.0));
+                put_f32(bytes, center.0);
+                put_f32(bytes, center.1);
+                put_f32(bytes, radius);
+            }
+        }
+        let stops = list.paint_stops(id).unwrap_or_default();
+        put_u32(bytes, stops.len() as u32);
+        stops.iter().for_each(|stop| {
+            put_f32(bytes, stop.offset.get());
+            put_rgba(bytes, stop.color);
+        });
+    });
+
+    put_u32(bytes, list.commands().len() as u32);
+    list.commands()
+        .iter()
+        .for_each(|command| encode_command(bytes, command));
+
+    let target_count = list.render_target_count() as u32;
+    put_u32(bytes, target_count);
+    (0..target_count).for_each(|raw| {
+        let id = axiom_host::RenderTargetId::from_raw(raw);
+        let (width, height) = list.target_dimensions(id).unwrap_or((0, 0));
+        put_u32(bytes, width);
+        put_u32(bytes, height);
+        let commands = list.target_commands(id).unwrap_or(&[]);
+        put_u32(bytes, commands.len() as u32);
+        commands
+            .iter()
+            .for_each(|command| encode_command(bytes, command));
+    });
+}
+
+/// Encode one [`axiom_host::Draw2dCommand`]: its kind, submit index, baked
+/// transform, resolved common attributes (layer / alpha / shadow), fill, and the
+/// one geometry payload its kind selects. Every `as_*` accessor returns `Some`
+/// only for the matching kind, so exactly one geometry block is emitted.
+fn encode_command(bytes: &mut Vec<u8>, command: &axiom_host::Draw2dCommand) {
+    put_u32(bytes, command.kind_code());
+    put_u32(bytes, command.submission_index());
+    command
+        .transform()
+        .as_cols_array()
+        .iter()
+        .for_each(|f| put_f32(bytes, *f));
+    put_i32(bytes, command.layer());
+    put_f32(bytes, command.alpha().get());
+    match command.shadow() {
+        Some(shadow) => {
+            put_u8(bytes, 1);
+            put_rgba(bytes, shadow.color);
+            put_f32(bytes, shadow.blur.get());
+        }
+        None => put_u8(bytes, 0),
+    }
+    match command.fill() {
+        Some(fill) => {
+            put_u8(bytes, 1);
+            match fill.fill_color {
+                Some(color) => {
+                    put_u8(bytes, 1);
+                    put_rgba(bytes, color);
+                }
+                None => put_u8(bytes, 0),
+            }
+            match fill.fill_paint {
+                Some(paint) => {
+                    put_u8(bytes, 1);
+                    put_u32(bytes, paint.raw());
+                }
+                None => put_u8(bytes, 0),
+            }
+            match fill.stroke {
+                Some(stroke) => {
+                    put_u8(bytes, 1);
+                    put_rgba(bytes, stroke.color);
+                    put_f32(bytes, stroke.width.get());
+                }
+                None => put_u8(bytes, 0),
+            }
+        }
+        None => put_u8(bytes, 0),
+    }
+
+    command.as_rect().into_iter().for_each(|r| put_rect(bytes, r));
+    command.as_circle().into_iter().for_each(|(center, radius)| {
+        put_f32(bytes, center.x);
+        put_f32(bytes, center.y);
+        put_f32(bytes, radius.get());
+    });
+    command
+        .as_ellipse()
+        .into_iter()
+        .for_each(|(center, rx, ry, rotation)| {
+            put_f32(bytes, center.x);
+            put_f32(bytes, center.y);
+            put_f32(bytes, rx.get());
+            put_f32(bytes, ry.get());
+            put_f32(bytes, rotation.get());
+        });
+    command.as_line().into_iter().for_each(|(a, b, color, width)| {
+        put_f32(bytes, a.x);
+        put_f32(bytes, a.y);
+        put_f32(bytes, b.x);
+        put_f32(bytes, b.y);
+        put_rgba(bytes, color);
+        put_f32(bytes, width.get());
+    });
+    command.as_path().into_iter().for_each(|(points, closed)| {
+        put_u32(bytes, points.len() as u32);
+        points.iter().for_each(|p| {
+            put_f32(bytes, p.x);
+            put_f32(bytes, p.y);
+        });
+        put_u8(bytes, u8::from(closed));
+    });
+    command.as_sprite().into_iter().for_each(|(texture, opts)| {
+        put_u64(bytes, texture.raw());
+        put_rect(bytes, opts.source);
+        put_f32(bytes, opts.anchor.x);
+        put_f32(bytes, opts.anchor.y);
+        put_rgba(bytes, opts.tint);
+        put_u8(bytes, u8::from(opts.flip_x));
+        put_u8(bytes, u8::from(opts.flip_y));
+    });
+    command.as_text().into_iter().for_each(|(run, opts)| {
+        put_u32(bytes, run.glyphs.len() as u32);
+        run.glyphs.iter().for_each(|glyph| {
+            put_rect(bytes, glyph.source);
+            put_f32(bytes, glyph.advance.get());
+        });
+        put_f32(bytes, run.line_height.get());
+        put_u64(bytes, opts.font.raw());
+        put_rgba(bytes, opts.color);
+        put_u8(bytes, opts.align.raw());
+    });
+    command.as_particle().into_iter().for_each(|(center, size, color)| {
+        put_f32(bytes, center.x);
+        put_f32(bytes, center.y);
+        put_f32(bytes, size.get());
+        put_rgba(bytes, color);
+    });
 }
 
 /// A tiny bounds-checked little-endian reader over the recorded payload.

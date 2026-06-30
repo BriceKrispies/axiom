@@ -18,7 +18,56 @@ export interface DomInputTarget {
   readonly inputPointerEvent: (x: number, y: number, down: boolean) => void;
   readonly inputPointerClear: () => void;
   readonly inputSetSurface: (width: number, height: number) => void;
+  /** Accumulate one relative look sample (raw device pixels: `dx` rightward, `dy` downward). */
+  readonly inputLook: (dx: number, dy: number) => void;
 }
+
+/** The synthetic key token a left mouse button reports while the pointer is locked (so a game can bind "fire" to it). */
+const MOUSE_PRIMARY_TOKEN = "Mouse0";
+/** The left mouse button number (`MouseEvent.button`). */
+const PRIMARY_BUTTON = 0;
+
+/** Whether the pointer is currently locked to an element (classic FPS mouse-look capture). */
+const pointerIsLocked = (): boolean => Boolean(document.pointerLockElement);
+
+/*
+ * The pointer-lock mouse-look + mouse-fire listeners, as `[node, type, handler]`
+ * registrations (kept here so `driveDomInput` stays within its size budget).
+ * Clicking the canvas captures the pointer; while locked, raw mouse movement
+ * accumulates as the relative look and the left button reports the synthetic
+ * `Mouse0` key, so a game binds "fire" to it exactly as the original DOOM does.
+ */
+const mouseLookRegistrations = (
+  target: DomInputTarget,
+  canvas: HTMLCanvasElement,
+): readonly [EventTarget, string, EventListener][] => {
+  const onCanvasClick = (): void => {
+    canvas.requestPointerLock().catch((): void => {
+      // The newer spec returns a promise; a denied lock request is a non-issue.
+    });
+  };
+  const onMouseMove = (event: MouseEvent): void => {
+    if (pointerIsLocked()) {
+      target.inputLook(event.movementX, event.movementY);
+    }
+  };
+  const onMouseDown = (event: MouseEvent): void => {
+    if (event.button === PRIMARY_BUTTON && pointerIsLocked()) {
+      target.inputKey(MOUSE_PRIMARY_TOKEN, true);
+    }
+  };
+  const onMouseUp = (event: MouseEvent): void => {
+    if (event.button === PRIMARY_BUTTON) {
+      target.inputKey(MOUSE_PRIMARY_TOKEN, false);
+    }
+  };
+  return [
+    [canvas, "click", onCanvasClick as EventListener],
+    [globalThis, "mousemove", onMouseMove as EventListener],
+    [globalThis, "mousedown", onMouseDown as EventListener],
+    [globalThis, "mouseup", onMouseUp as EventListener],
+  ];
+};
 
 /*
  * Attach key listeners to `window` and pointer listeners to `canvas`, forwarding
@@ -41,7 +90,7 @@ export const driveDomInput = (target: DomInputTarget, canvas: HTMLCanvasElement)
   const onPointerLeave = (): void => {
     target.inputPointerClear();
   };
-  // Each listener as a [node, type, handler] registration, so add and remove walk one list.
+  // Each listener is a [node, type, handler] registration (key/pointer set, then the pointer-lock mouse set).
   const registrations: readonly [EventTarget, string, EventListener][] = [
     [globalThis, "keydown", onKeyDown as EventListener],
     [globalThis, "keyup", onKeyUp as EventListener],
@@ -49,6 +98,7 @@ export const driveDomInput = (target: DomInputTarget, canvas: HTMLCanvasElement)
     [canvas, "pointerdown", onPointer as EventListener],
     [canvas, "pointerup", onPointer as EventListener],
     [canvas, "pointerleave", onPointerLeave as EventListener],
+    ...mouseLookRegistrations(target, canvas),
   ];
   for (const [node, type, handler] of registrations) {
     node.addEventListener(type, handler);

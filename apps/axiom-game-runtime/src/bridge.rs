@@ -68,7 +68,7 @@
 //!
 //! [`advance`]: GameBridge::advance
 
-use axiom::prelude::{Entity, HostApi, HostOutcome, RunningApp, Score, StepBudget};
+use axiom::prelude::{Entity, FrameOutcome, HostApi, HostOutcome, RunningApp, Score, StepBudget};
 use axiom_draw2d::Draw2dApi;
 use axiom_grid::GridApi;
 
@@ -147,6 +147,9 @@ impl GameBridge {
         let start = self.runtime.tick();
         let budget = self.runtime.advance(elapsed_nanos);
         self.input.sample(start, budget.steps());
+        // Snapshot the frame's accumulated relative look into this tick's read and
+        // zero the accumulator (the fold-then-reset the original mouse-look does).
+        self.input.commit_look();
         self.physics.step_and_writeback(
             self.runtime.app_mut(),
             budget.steps(),
@@ -164,6 +167,31 @@ impl GameBridge {
     /// The monotonic count of fixed ticks driven so far.
     pub fn tick(&self) -> u64 {
         self.runtime.tick()
+    }
+
+    /// Render the current 3D scene state at the current tick and return the
+    /// summarised [`FrameOutcome`] — the present half of a frame (SPEC-11). The
+    /// wasm boundary calls this once per host frame, *after* the author's per-frame
+    /// scene mutations (camera / node transforms), so the presented pixels reflect
+    /// the very latest authored state; it steps no simulation (see
+    /// [`RunningApp::render`](axiom::prelude::RunningApp)). The native slice tests
+    /// drive the same path a browser presents.
+    pub fn render_frame(&mut self) -> FrameOutcome {
+        let tick = self.runtime.tick();
+        self.runtime.app_mut().render(tick)
+    }
+
+    /// The live-backend mesh upload set for the current scene (`(mesh_id,
+    /// interleaved vertices, indices)`) — what the windowing presenter uploads once
+    /// when the surface is bound.
+    pub fn mesh_set(&self) -> Vec<(u64, Vec<f32>, Vec<u32>)> {
+        self.runtime.app().mesh_set()
+    }
+
+    /// The live-backend material upload set for the current scene (`(material_id,
+    /// width, height, RGBA8 albedo)`) — uploaded once when the surface is bound.
+    pub fn material_set(&self) -> Vec<(u64, u32, u32, Vec<u8>)> {
+        self.runtime.app().material_textures()
     }
 
     /// The durable simulation state as opaque bytes (checkpoint / determinism).
@@ -398,6 +426,23 @@ mod tests {
         // A different session seed re-keys the RNG, so the folded-in draw — and
         // thus the whole per-tick hash sequence — diverges from seed 7's run.
         assert_ne!(per_tick_hashes(7), per_tick_hashes(8));
+    }
+
+    #[test]
+    fn render_frame_summarises_the_authored_scene_without_stepping() {
+        // The present half the wasm boundary drives: the demo scene (one cube,
+        // a camera, a light) renders one draw and one light, and rendering twice at
+        // the same tick perturbs no simulation state (it is pure present).
+        let mut b = bridge(3);
+        let before = b.snapshot_sim();
+        let outcome = b.render_frame();
+        assert_eq!(outcome.draws().len(), 1, "the demo cube renders one draw");
+        assert_eq!(outcome.lights().len(), 1, "the demo directional light resolves");
+        // The upload sets the presenter binds are non-empty for the demo scene.
+        assert_eq!(b.mesh_set().len(), 1);
+        assert_eq!(b.material_set().len(), 1);
+        assert_eq!(b.render_frame(), outcome, "render is idempotent at a fixed tick");
+        assert_eq!(before, b.snapshot_sim(), "render steps no simulation");
     }
 
     #[test]

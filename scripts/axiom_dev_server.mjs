@@ -25,10 +25,18 @@ import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const WEB_ROOT = join(REPO_ROOT, "apps", "axiom-game-runtime", "web");
+// Which app's web/ dir to serve + hot-reload. Defaults to the 2D hot-reload
+// harness; set AXIOM_DEV_APP=axiom-doom-ts-browser for the TS-only 3D DOOM app.
+// Both are authored purely in TypeScript over @axiom/game and drive the SAME
+// axiom-game-runtime wasm, so /pkg is served from the one canonical build below.
+const APP = process.env.AXIOM_DEV_APP ?? "axiom-game-runtime";
+const WEB_ROOT = join(REPO_ROOT, "apps", APP, "web");
 const SRC_DIR = join(WEB_ROOT, "src");
 const TSCONFIG = join(WEB_ROOT, "tsconfig.json");
 const VENDOR_DIR = join(REPO_ROOT, "packages", "axiom-game", "dist");
+// The shared wasm engine: built once into the game-runtime app's web/pkg and
+// served at /pkg for whichever app is active (the runtime is game-agnostic).
+const PKG_DIR = join(REPO_ROOT, "apps", "axiom-game-runtime", "web", "pkg");
 const TSGO = join(
   REPO_ROOT,
   "packages",
@@ -133,7 +141,13 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // Everything else: the app's web/ dir (index.html, /dist/*.js, /pkg/*).
+  // The shared wasm engine build (game-agnostic), served from its canonical pkg/.
+  if (path.startsWith("/pkg/")) {
+    await serveFile(PKG_DIR, path.slice("/pkg/".length), res);
+    return;
+  }
+
+  // Everything else: the active app's web/ dir (index.html, /dist/*.js, /assets/*).
   await serveFile(WEB_ROOT, path === "/" ? "index.html" : path, res);
 });
 
@@ -166,9 +180,9 @@ const main = async () => {
     }
   });
   server.listen(PORT, () => {
-    console.log(`\n  serving  http://localhost:${PORT}`);
+    console.log(`\n  serving  http://localhost:${PORT}  (app: ${APP})`);
     console.log(`  watching ${SRC_DIR}`);
-    console.log(`  edit apps/axiom-game-runtime/web/src/game.ts and save\n`);
+    console.log(`  edit apps/${APP}/web/src/game.ts and save\n`);
   });
 };
 

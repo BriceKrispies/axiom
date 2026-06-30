@@ -50,19 +50,23 @@ impl GameRuntime {
     }
 
     /// Bank `elapsed_nanos` of real host time, run exactly `budget.steps()`
-    /// deterministic fixed ticks on the wrapped app (advancing the monotonic
+    /// deterministic fixed *steps* on the wrapped app (advancing the monotonic
     /// tick counter), and return the [`StepBudget`] so the caller can compute its
     /// own presentation-only interpolation fraction.
     ///
-    /// The tick loop is a `fold` over `0..budget.steps()` — no `for`/`while`/`if`
-    /// — so the drive is a pure data transform: the same elapsed-time sequence
-    /// drives the same total tick count regardless of how it was chunked across
-    /// frames, the invariant a deterministic replay relies on.
+    /// This drives [`RunningApp::step`](axiom::prelude::RunningApp) — the
+    /// simulation half **without rendering** — not the fused `tick`. Rendering is
+    /// the presentation layer's job (the TS SDK calls `render` once per presented
+    /// frame), so an N-tick catch-up frame does N cheap steps and a single render,
+    /// not N wasted renders. The tick loop is a `fold` over `0..budget.steps()` —
+    /// no `for`/`while`/`if` — so the same elapsed-time sequence drives the same
+    /// total tick count regardless of how it was chunked across frames, the
+    /// invariant a deterministic replay relies on.
     pub fn advance(&mut self, elapsed_nanos: u64) -> StepBudget {
         let budget = self.accumulator.advance(elapsed_nanos, self.max_steps);
         let app = &mut self.app;
         self.tick = (0..budget.steps()).fold(self.tick, |tick, _step| {
-            app.tick(tick);
+            app.step(tick, &[], &[]);
             tick + 1
         });
         budget

@@ -47,6 +47,13 @@ pub struct WindowingApi {
     surface: Option<HostPresentationRequest>,
     next_tick: u64,
     frames_driven: u64,
+    // The live presenter for a caller-owned frame loop (see
+    // `bind_present_surface` / `present_frame` in the wasm32 `web` arm). A shared
+    // slot so the asynchronous backend init can fill it off-loop; empty until then
+    // and on any host that never binds a surface. wasm32 only — no GPU/browser
+    // object exists in the native deterministic core.
+    #[cfg(target_arch = "wasm32")]
+    presenter: std::rc::Rc<std::cell::RefCell<Option<web::LivePresenter>>>,
 }
 
 impl WindowingApi {
@@ -56,6 +63,8 @@ impl WindowingApi {
             surface: None,
             next_tick: 0,
             frames_driven: 0,
+            #[cfg(target_arch = "wasm32")]
+            presenter: std::rc::Rc::new(std::cell::RefCell::new(None)),
         }
     }
 

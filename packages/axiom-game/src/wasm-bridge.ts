@@ -36,7 +36,7 @@ import { each, orElse, pick } from "./control-flow.ts";
 import type { StepBudget } from "./step-budget.ts";
 
 /*
- * The raw `WasmGame` exports. `advance` adapts its snake_case bigint `StepReport`;
+ * The raw `WasmGame` exports. `advance` adapts its snake_case f64 `StepReport`;
  * the retained-world methods speak `(kind, fields-bytes)`; the input reads carry
  * the `NativeBridge` `tick` arg but return boundary primitives (`number[]` empty =
  * absent, `string` `""` = absent); the physics vector verbs take scalar `(x, y,
@@ -50,6 +50,7 @@ export interface WasmGameExport
     NativeBridge,
     | "advance"
     | "inputIsDown"
+    | "inputLookDelta"
     | "inputPressed"
     | "inputReleased"
     | "inputPointer"
@@ -73,15 +74,16 @@ export interface WasmGameExport
     | "worldParentOf"
     | "worldWorldTransform"
   > {
-  readonly advance: (elapsedNanos: bigint) => {
-    readonly fixed_step_nanos: bigint;
-    readonly remainder_nanos: bigint;
+  readonly advance: (elapsedNanos: number) => {
+    readonly fixed_step_nanos: number;
+    readonly remainder_nanos: number;
     readonly steps: number;
   };
   // Input reads (SPEC-05): booleans match; optional reads return empty `number[]` / `""` = absent.
   readonly inputIsDown: (tick: Ticks, action: string) => boolean;
   readonly inputPressed: (tick: Ticks, action: string) => boolean;
   readonly inputReleased: (tick: Ticks, action: string) => boolean;
+  readonly inputLookDelta: (tick: Ticks) => Float64Array;
   readonly inputPointer: (tick: Ticks) => Float64Array;
   readonly inputPointerPressed: (tick: Ticks) => Float64Array;
   readonly inputSwipe: (tick: Ticks) => string;
@@ -91,6 +93,7 @@ export interface WasmGameExport
   readonly inputPointerEvent: (x: number, y: number, down: boolean) => void;
   readonly inputPointerClear: () => void;
   readonly inputSetSurface: (width: number, height: number) => void;
+  readonly inputLook: (dx: number, dy: number) => void;
   readonly bindAction: (action: string, keys: readonly string[]) => void;
   // Physics (SPEC-10): a `Vec3` crosses as scalar `(x, y, z)`.
   readonly physicsSetConfig: (
@@ -282,14 +285,19 @@ const fromScalars = <Value>(raw: Float64Array, build: (values: readonly number[]
 /** The `down` axis index in a pointer sample's `[x, y, down]` boundary array. */
 const POINTER_DOWN = 2;
 
-/** Adapt the snake_case wasm `advance` (snake_case bigint `StepReport`) to the camelCase `StepBudget`. */
+/*
+ * Adapt the snake_case wasm `advance` to the camelCase `StepBudget`. The nanos
+ * fields cross as f64 `number`s (not BigInt i64) so the Binaryen `wasm2js`
+ * fallback — which legalizes i64 into i32 pairs and has no BigInt ABI — can run;
+ * the elapsed delta is passed as a rounded integer `number`, no `BigInt(...)` wrap.
+ */
 const adaptAdvance =
   (game: WasmGameExport) =>
   (elapsedNanos: number): StepBudget => {
-    const report = game.advance(BigInt(Math.round(elapsedNanos)));
+    const report = game.advance(Math.round(elapsedNanos));
     return {
-      fixedStepNanos: Number(report.fixed_step_nanos),
-      remainderNanos: Number(report.remainder_nanos),
+      fixedStepNanos: report.fixed_step_nanos,
+      remainderNanos: report.remainder_nanos,
       steps: report.steps,
     };
   };
@@ -351,6 +359,14 @@ const adaptWorldWorldTransform =
         scale: { x: pick(values, TRANSFORM_SX), y: pick(values, TRANSFORM_SY), z: pick(values, TRANSFORM_SZ) },
       }),
     );
+
+/** Adapt `inputLookDelta`: the boundary `[dx, dy]` slice to a `Vec2` (always present — `(0, 0)` when there was no look). */
+const adaptInputLookDelta =
+  (game: WasmGameExport) =>
+  (tick: Ticks): Vec2 => {
+    const values = [...game.inputLookDelta(tick)];
+    return { x: pick(values, 0), y: pick(values, 1) };
+  };
 
 /** Adapt `inputPointer`: the boundary `[x, y, down]` (empty = absent) to a `PointerSample`. */
 const adaptInputPointer =
@@ -448,6 +464,7 @@ const adaptTweenAdd =
 export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   advance: adaptAdvance(game),
   inputIsDown: (tick: Ticks, action: string): boolean => game.inputIsDown(tick, action),
+  inputLookDelta: adaptInputLookDelta(game),
   inputPointer: adaptInputPointer(game),
   inputPointerPressed: adaptInputPointerPressed(game),
   inputPressed: (tick: Ticks, action: string): boolean => game.inputPressed(tick, action),

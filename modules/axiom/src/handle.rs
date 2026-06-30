@@ -28,6 +28,17 @@ impl<T> Handle<T> {
     pub const fn id(self) -> u64 {
         self.id
     }
+
+    /// Reconstruct a handle from a raw slot id — the inverse of [`Self::id`], for
+    /// a caller that addresses an asset by an id that crossed a boundary as a plain
+    /// `u64` (e.g. the wasm authoring bridge, which hands the TS SDK mesh/material
+    /// ids and later spawns renderables from them). The mirror of
+    /// [`crate::prelude::Entity::from_raw`]; like it, this does not check the id
+    /// names a live slot — an id that no `Assets<T>` minted simply resolves to no
+    /// asset at use, drawing nothing rather than erroring.
+    pub const fn from_raw(id: u64) -> Self {
+        Handle::new(id)
+    }
 }
 
 impl<T> Clone for Handle<T> {
@@ -65,6 +76,15 @@ mod tests {
     fn id_round_trips() {
         let h: Handle<NotCopyable> = Handle::new(7);
         assert_eq!(h.id(), 7);
+    }
+
+    #[test]
+    fn from_raw_is_the_inverse_of_id() {
+        // A handle reconstructed from a raw id addresses the same slot — the
+        // round-trip the wasm authoring bridge relies on.
+        let h: Handle<NotCopyable> = Handle::from_raw(9);
+        assert_eq!(h.id(), 9);
+        assert_eq!(h, Handle::new(9));
     }
 
     // The explicit `.clone()` is the point: it exercises `Handle`'s hand-written

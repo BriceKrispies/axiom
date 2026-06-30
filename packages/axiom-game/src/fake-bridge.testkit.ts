@@ -144,6 +144,7 @@ export class FakeBridge implements NativeBridge {
   public pointers = new Map<Ticks, PointerSample>();
   public pressedStarts = new Map<Ticks, Vec2>();
   public swipes = new Map<Ticks, Swipe>();
+  public looks = new Map<Ticks, Vec2>();
   public pressedAt = new Map<string, Ticks>();
 
   // --- tick-scheduled timers ---
@@ -360,6 +361,10 @@ export class FakeBridge implements NativeBridge {
 
   public inputReleased(tick: Ticks, action: string): boolean {
     return this.releasedEdges.has(`${tick}|${action}`);
+  }
+
+  public inputLookDelta(tick: Ticks): Vec2 {
+    return this.looks.get(tick) ?? { x: 0, y: 0 };
   }
 
   public inputPointer(tick: Ticks): Result<PointerSample> {

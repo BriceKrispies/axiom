@@ -23,8 +23,8 @@ use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
 use crate::scene_storage::{
-    propagate, ControllerState, ControllerSystem, PlayerMoveSystem, ProcAnimSystem, SceneStorage,
-    SpinSystem, TransformPropagation,
+    apply_controller, propagate, ControllerState, ControllerSystem, PlayerMoveSystem,
+    ProcAnimSystem, SceneStorage, SpinSystem, TransformPropagation,
 };
 use crate::spin::Spin;
 
@@ -233,6 +233,18 @@ impl Scene {
                     },
                 );
             })
+    }
+
+    /// Apply one first-person controller input to controller `index`'s node
+    /// **immediately** — accumulate yaw/pitch, rebuild the node rotation, move it
+    /// along the yaw-only frame — then recompute world transforms now. The
+    /// zero-lag path a host that owns its own frame loop uses to drive the camera
+    /// between ticks (the SDK's `RunningApp::control`); it reuses the exact logic
+    /// the per-tick [`ControllerSystem`] runs, so the two never diverge. An unknown
+    /// index is a no-op.
+    pub(crate) fn control_now(&mut self, index: u32, move_local: Vec3, yaw_delta: f32, pitch_delta: f32) {
+        apply_controller(self.world.storage_mut(), index, move_local, yaw_delta, pitch_delta);
+        self.update_world_transforms();
     }
 
     // --- Transform propagation ---

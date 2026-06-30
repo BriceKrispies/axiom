@@ -67,6 +67,30 @@ top) and save. The browser re-runs within a few hundred milliseconds.
   first code to drive the real wasm bridge, surfacing the bug; the fix binds the
   receiver in `packages/axiom-game/src/wasm-bridge.ts`.
 
+## Packaging into a droppable bundle
+
+`make package APP=game-runtime` (scripts/package_app.py) bakes this dev loop into a
+static bundle: it builds the `@axiom/game` SDK, compiles `web/src` with tsgo, copies
+the vendored SDK + author module in, and drops the capability-detecting loader in AT
+`/pkg/axiom_game_runtime.js` — the exact glue path the harness imports — so a browser
+WITH WebAssembly runs the wasm fast-path. The bundle uses absolute `/pkg`, `/vendor`,
+`/dist` URLs, so serve it from a domain root. The live SSE hot-reload (`/events`) is a
+dev-server feature absent from the bundle; the harness closes that stream when it
+fails to open, so a static bundle does not retry the missing endpoint.
+
+**Known fallback gap (a design signal, not a wiring bug).** The wasm2js fallback (for
+a browser with *no* WebAssembly at all) is emitted, detected, and loaded — it prints
+the one `console.warn` — but cannot yet *execute* for this app: its wasm-bindgen glue
+crosses `u64` values (`fixed_step_nanos`, ticks, `seed`) on the JS boundary using the
+**BigInt i64 ABI**, whereas Binaryen's `wasm2js` legalizes i64 to split-`i32` pairs.
+The two ABIs are incompatible (`new WasmGame(fixedStepNanos)` throws "Cannot mix
+BigInt and other types" inside a wasm2js legalstub). game-runtime is the first
+packaged app to expose `u64` on the boundary, so it is the first to surface this. The
+correct fix is structural and spine-wide: drop `BigInt`/i64 from the `@axiom/game`
+wasm boundary (nanos and tick counts fit in an `f64`'s 2^53), which touches the SDK's
+`wasm-bridge.ts`/`wasm-host.ts`/… and the Rust wasm signatures — out of scope for a
+single app-packaging change. The wasm fast-path (the common case) is fully working.
+
 ## Known limitations (out of scope for this harness)
 
 - The presenter handles the flattened kinds (rect / circle / ellipse / line /

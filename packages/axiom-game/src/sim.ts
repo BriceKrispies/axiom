@@ -19,8 +19,8 @@
  */
 
 import { type Add, makeAdd } from "./game-object.ts";
-import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle } from "./draw2d-binding.ts";
-import type { Handle, Rect, Vec2 } from "./vocabulary.ts";
+import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteOpts, TextMetrics, TextOpts } from "./draw2d-binding.ts";
+import type { FontSpec, Handle, Rect, TextureId, Vec2 } from "./vocabulary.ts";
 import { type Input, makeInput } from "./input.ts";
 import { type Physics, makePhysics } from "./physics.ts";
 import { type Rng, makeRng } from "./rng.ts";
@@ -80,6 +80,12 @@ export interface Frame {
   readonly ellipse: (center: Vec2, radii: EllipseRadii, style: ShapeStyle) => void;
   /** Draw a straight line segment of its own colour + width (SPEC-04 §10). */
   readonly line: (from: Vec2, to: Vec2, style: LineStyle) => void;
+  /** Draw a textured sprite (SPEC-04 §4.2). */
+  readonly sprite: (texture: TextureId, opts: SpriteOpts) => void;
+  /** Draw a line of text in `opts.font` (SPEC-04 §4.2). */
+  readonly text: (value: string, opts: TextOpts) => void;
+  /** Measure `value` in `font` (SPEC-04 §4.2). */
+  readonly measureText: (value: string, font: FontSpec) => TextMetrics;
   /** Register a particle emitter, returning its handle (SPEC-04 §10.1). */
   readonly createEmitter: (config: EmitterConfig) => Handle;
   /** Spawn a particle burst from `id` at `at` flying along `direction` (SPEC-04 §10.1). */
@@ -156,9 +162,16 @@ export const makeFrame = (tick: number): Frame => ({
   line: (from: Vec2, to: Vec2, style: LineStyle): void => {
     boundHost().draw2dLine(from, to, style);
   },
+  measureText: (value: string, font: FontSpec): TextMetrics => boundHost().draw2dMeasureText(value, font),
   rect: (bounds: Rect, style: ShapeStyle): void => {
     boundHost().draw2dRect(bounds, style);
   },
+  sprite: (texture: TextureId, opts: SpriteOpts): void => {
+    boundHost().draw2dSprite(texture, opts);
+  },
   targetTexture: (target: Handle): Handle => boundHost().draw2dTargetTexture(target),
+  text: (value: string, opts: TextOpts): void => {
+    boundHost().draw2dText(value, opts);
+  },
   tick,
 });

@@ -117,9 +117,132 @@ impl WindowingApi {
         )
     }
 
+    /// Bind a live presenter to the canvas for a host that owns its **own** frame
+    /// loop (e.g. the `@axiom/game` TS SDK, which banks real elapsed time into
+    /// fixed ticks itself). It selects the live backend (WebGPU → WebGL2 → Canvas
+    /// 2D) and uploads the mesh set `meshes` and material set `materials` once,
+    /// then stores the presenter in this driver so [`Self::present_frame`] can
+    /// present each frame — the run loops above own the rAF loop; this hands that
+    /// ownership to the caller while reusing the identical backend selection,
+    /// present, and device-loss-recovery path.
+    ///
+    /// The backend init is asynchronous (a GPU device request), so this returns
+    /// immediately and fills the presenter slot off-loop: until it resolves,
+    /// [`Self::present_frame`] is a no-op (the first frames simply don't paint).
+    /// Requires a configured surface ([`Self::configure_surface`]); a missing
+    /// surface or canvas id leaves the slot empty (presenting stays a no-op).
+    /// wasm32 only — the presenter lives entirely behind this facade, never
+    /// crossing the module boundary as a second public type.
+    #[cfg(target_arch = "wasm32")]
+    pub fn bind_present_surface(
+        &self,
+        canvas_id: &str,
+        meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        max_instances: u32,
+    ) {
+        let request = match self.surface.as_ref() {
+            Some(request) => *request,
+            None => return,
+        };
+        let canvas = match find_canvas(canvas_id) {
+            Ok(canvas) => canvas,
+            Err(_) => return,
+        };
+        let slot = self.presenter.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let presenter =
+                LivePresenter::bind(request, canvas, meshes, materials, max_instances).await;
+            *slot.borrow_mut() = presenter;
+        });
+    }
+
+    /// Present one resolved frame through the bound presenter (a no-op until
+    /// [`Self::bind_present_surface`]'s backend init has resolved). The arguments
+    /// are the per-frame data a caller-owned loop produces — the same shape the
+    /// internal run loops feed the backend; see [`LivePresenter::present`]. wasm32
+    /// only.
+    #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn present_frame(
+        &self,
+        tick: u64,
+        clear: [f32; 4],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_vp: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+        camera_view_proj: [f32; 16],
+        casters: &[bool],
+        sdf: Option<axiom_host::SdfScene>,
+    ) {
+        self.presenter
+            .borrow()
+            .as_ref()
+            .into_iter()
+            .for_each(|presenter| {
+                presenter.present(
+                    tick,
+                    clear,
+                    lights,
+                    light_vp,
+                    batches,
+                    camera_view_proj,
+                    casters,
+                    sdf.clone(),
+                );
+            });
+    }
+
+    /// Present one resolved **2D** frame through the bound presenter (a no-op until
+    /// [`Self::bind_present_surface`]'s backend init has resolved). It hands the
+    /// layer-sorted [`axiom_host::Draw2dList`] and its sprite/atlas `textures` to
+    /// the backend the cascade selected, so a 2D game rides the identical WebGPU →
+    /// WebGL2 → Canvas 2D fallback as a 3D one — the engine, not the app, owns the
+    /// pixels. `textures_generation` versions the set so the backend re-uploads it
+    /// only on change (see [`LivePresenter::present_2d`]). `clear` is the background
+    /// colour. `tick` is the frame's identity the dev scrubber records under (the
+    /// 2D peer of the `tick` [`Self::present_frame`] takes), so the overlay's
+    /// frames/range/mem/hash grow and Back/Fwd/Live/Rev scrub the recorded 2D
+    /// frames. Bind a 2D surface by calling [`Self::bind_present_surface`] with
+    /// empty mesh/material sets. wasm32 only.
+    #[cfg(target_arch = "wasm32")]
+    pub fn present_2d(
+        &self,
+        tick: u64,
+        list: &axiom_host::Draw2dList,
+        textures: &[(u64, u32, u32, Vec<u8>)],
+        textures_generation: u32,
+        clear: [f32; 4],
+    ) {
+        self.presenter
+            .borrow()
+            .as_ref()
+            .into_iter()
+            .for_each(|presenter| {
+                presenter.present_2d(tick, list, textures, textures_generation, clear);
+            });
+    }
+
+    /// Whether a caller-owned loop should keep stepping the game this frame —
+    /// `true` when live and focused, `false` while the bound presenter's scrubber
+    /// overlay is scrubbing or after focus loss (Escape / blur). `true` when no
+    /// surface is bound (a 2D game pays nothing). The host gates its `advance` on
+    /// this; [`Self::present_frame`] keeps painting regardless. wasm32 only.
+    #[cfg(target_arch = "wasm32")]
+    pub fn is_interactive(&self) -> bool {
+        self.presenter
+            .borrow()
+            .as_ref()
+            .map(LivePresenter::is_interactive)
+            .unwrap_or(true)
+    }
+
     /// The shared multi-mesh web run loop, parameterized by the optional fork
     /// hooks. `run_web_multi` (scrub-only) and `run_web_forkable` (single-mesh,
-    /// forkable) both funnel through here.
+    /// forkable) both funnel through here. It owns the rAF loop and resolves each
+    /// frame (live / scrubbed / paused), then delegates the actual present — and
+    /// the off-loop device-loss rebuild — to a [`LivePresenter`], the same backend
+    /// path [`Self::present_surface`] hands to a caller-owned loop.
     #[cfg(target_arch = "wasm32")]
     fn drive_web_multi<F>(
         self,
@@ -165,46 +288,30 @@ impl WindowingApi {
         let canvas = find_canvas(canvas_id)?;
         let frame_fn = Rc::new(RefCell::new(frame_fn));
         let windowing = self;
-        let force_canvas = force_canvas2d();
 
         wasm_bindgen_futures::spawn_local(async move {
             let request = match windowing.surface.as_ref() {
                 Some(request) => *request,
                 None => return,
             };
-            let width = request.descriptor().viewport().physical_width();
-            let height = request.descriptor().viewport().physical_height();
-            // Shared so a device-loss rebuild can re-upload the same scene to a
-            // fresh backend (the canvas is a cheap handle; the mesh/material data
-            // is reference-counted).
-            let meshes = Rc::new(meshes);
-            let materials = Rc::new(materials);
-            let backend = match select_backend_or_report(
-                force_canvas,
-                &request,
-                canvas.clone(),
-                &meshes[..],
-                &materials[..],
-                max_instances,
-            )
-            .await
-            {
-                Some(backend) => Rc::new(RefCell::new(backend)),
-                None => return,
-            };
+            // The live presenter owns the selected backend, the uploaded scene, and
+            // the device-loss rebuild — the same path `present_surface` hands a
+            // caller-owned loop. The rAF loop here only resolves each frame and
+            // delegates the present.
+            let presenter =
+                match LivePresenter::bind(request, canvas, meshes, materials, max_instances).await {
+                    Some(presenter) => presenter,
+                    None => return,
+                };
 
             let windowing = Rc::new(RefCell::new(windowing));
             // The shared dev frame-scrubber overlay (records each presented frame;
             // re-presents it while scrubbing; forks when hooks are present).
             // `None` if there is no DOM.
             let scrubber = crate::frame_scrubber::FrameScrubber::mount(snapshot, restore);
-            // Set while a device-loss rebuild is in flight, so a surface that
-            // keeps failing every frame spawns exactly one rebuild, not a storm.
-            let reinitializing = Rc::new(std::cell::Cell::new(false));
             let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
             let g = f.clone();
             let win = windowing.clone();
-            let be = backend.clone();
             let ff = frame_fn.clone();
             // The engine's single live-cadence accumulator: fed one wall-clock
             // read per *live* frame (scrub/pause frames don't run the app, so they
@@ -275,40 +382,9 @@ impl WindowingApi {
                     (clear, lights, light_vp, batches, camera_vp, casters, sdf)
                 };
                 let (clear, lights, light_vp, batches, camera_vp, casters, sdf) = present;
-                // Present; an unrecoverable GPU-surface loss (a backgrounded mobile
-                // tab whose context was destroyed) rebuilds the backend off-loop —
-                // re-probing WebGPU → WebGL2 → Canvas2D — and swaps it in, so play
-                // resumes instead of going black.
-                let lost = be
-                    .borrow()
-                    .present(
-                        tick, width, height, clear, &lights, light_vp, &batches, camera_vp,
-                        &casters, sdf,
-                    )
-                    .is_err();
-                if lost && !reinitializing.get() {
-                    reinitializing.set(true);
-                    let be = be.clone();
-                    let canvas = canvas.clone();
-                    let meshes = meshes.clone();
-                    let materials = materials.clone();
-                    let flag = reinitializing.clone();
-                    wasm_bindgen_futures::spawn_local(async move {
-                        let rebuilt = select_backend(
-                            force_canvas,
-                            &request,
-                            canvas,
-                            &meshes[..],
-                            &materials[..],
-                            max_instances,
-                        )
-                        .await;
-                        rebuilt
-                            .into_iter()
-                            .for_each(|backend| *be.borrow_mut() = backend);
-                        flag.set(false);
-                    });
-                }
+                presenter.present(
+                    tick, clear, &lights, light_vp, &batches, camera_vp, &casters, sdf,
+                );
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
                     let _ = request_animation_frame(cb);
@@ -574,6 +650,290 @@ impl WindowingApi {
     }
 }
 
+/// A live presenter bound to a canvas: the selected backend, the scene it
+/// uploaded, and the device-loss rebuild state — everything needed to present one
+/// resolved frame on demand. The windowing run loops construct one internally and
+/// drive it from their own rAF loop; [`WindowingApi::bind_present_surface`] stores
+/// one inside the facade for a caller that owns its frame loop (the TS SDK). Either
+/// way the present and the off-loop WebGPU → WebGL2 → Canvas 2D rebuild are this
+/// one path. Crate-internal: it never crosses the module boundary as a public
+/// type (it lives behind [`WindowingApi`], the module's one facade). wasm32 only.
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct LivePresenter {
+    backend: std::rc::Rc<std::cell::RefCell<LiveBackend>>,
+    canvas: web_sys::HtmlCanvasElement,
+    request: axiom_host::HostPresentationRequest,
+    // Reference-counted so a device-loss rebuild re-uploads the same scene to a
+    // fresh backend without re-cloning the (potentially large) vertex/pixel data.
+    meshes: std::rc::Rc<Vec<(u64, Vec<f32>, Vec<u32>)>>,
+    materials: std::rc::Rc<Vec<(u64, u32, u32, Vec<u8>)>>,
+    max_instances: u32,
+    width: u32,
+    height: u32,
+    force_canvas: bool,
+    // Set while a rebuild is in flight, so a surface that keeps failing every frame
+    // spawns exactly one rebuild, not a storm.
+    reinitializing: std::rc::Rc<std::cell::Cell<bool>>,
+    // The shared dev frame-scrubber overlay (record each presented frame; freeze +
+    // re-present recorded frames while scrubbing; freeze on Escape / blur). The SAME
+    // overlay the engine's own run loops mount — a caller-owned loop gets it by
+    // binding here. `None` if there is no DOM. Scrub-only (no fork hooks).
+    scrubber: Option<crate::frame_scrubber::FrameScrubber>,
+    // The 2D sprite/atlas-texture generation last uploaded to the backend (see
+    // `present_2d`). `u32::MAX` until the first present, so the first 2D frame
+    // always uploads the caller's current set — which also re-applies it after an
+    // async (re)bind, since a fresh presenter starts here. Bumped by the caller
+    // when it adds a texture; the backend re-upload then happens at most once per
+    // change, never per frame.
+    applied_texture_generation: std::cell::Cell<u32>,
+}
+
+// The live backends hold no `Debug`; the presenter is a field of the
+// `Debug`-deriving `WindowingApi`, so give it an opaque, data-free `Debug`.
+#[cfg(target_arch = "wasm32")]
+impl std::fmt::Debug for LivePresenter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LivePresenter")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl LivePresenter {
+    /// Bind a presenter to `canvas`: select the backend (WebGPU → WebGL2 → Canvas
+    /// 2D), upload the mesh set `meshes` and material set `materials` once, and
+    /// capture the rebuild inputs. `None` if no backend could be built.
+    async fn bind(
+        request: axiom_host::HostPresentationRequest,
+        canvas: web_sys::HtmlCanvasElement,
+        meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        max_instances: u32,
+    ) -> Option<LivePresenter> {
+        use std::cell::{Cell, RefCell};
+        use std::rc::Rc;
+
+        let force_canvas = force_canvas2d();
+        let width = request.descriptor().viewport().physical_width();
+        let height = request.descriptor().viewport().physical_height();
+        let meshes = Rc::new(meshes);
+        let materials = Rc::new(materials);
+        let backend = select_backend_or_report(
+            force_canvas,
+            &request,
+            canvas.clone(),
+            &meshes[..],
+            &materials[..],
+            max_instances,
+        )
+        .await?;
+        Some(LivePresenter {
+            backend: Rc::new(RefCell::new(backend)),
+            canvas,
+            request,
+            meshes,
+            materials,
+            max_instances,
+            width,
+            height,
+            force_canvas,
+            reinitializing: Rc::new(Cell::new(false)),
+            // Mount the scrub-only dev overlay (no fork hooks) so a caller-owned
+            // loop gets the frame slider + Escape/blur freeze the engine's own run
+            // loops have.
+            scrubber: crate::frame_scrubber::FrameScrubber::mount(None, None),
+            // No 2D textures applied yet; the first `present_2d` uploads the set.
+            applied_texture_generation: Cell::new(u32::MAX),
+        })
+    }
+
+    /// Present one **2D** frame, routed through the dev frame-scrubber overlay
+    /// exactly as [`Self::present`] routes a 3D frame. `textures` is the caller's
+    /// current sprite/atlas set and `textures_generation` its version; the set is
+    /// (re)uploaded to the backend only when the version changed since the last
+    /// present — so a steady stream of frames uploads no textures, while a freshly
+    /// (re)bound backend re-uploads once. Then, while **live**, the frame is
+    /// recorded under `tick` and the live `list` is painted; while **scrubbing**,
+    /// the live `list` is ignored and the selected recorded frame is re-presented
+    /// instead (the sim is frozen by the host, which gates its `advance` on
+    /// [`Self::is_interactive`]). A scrubbed-to frame re-samples the *current*
+    /// uploaded texture set (a dev-only simplification, mirroring the 3D scrub
+    /// path's reuse of the live camera/casters): recorded frames carry their draw
+    /// list, not a snapshot of every sprite atlas.
+    pub fn present_2d(
+        &self,
+        tick: u64,
+        list: &axiom_host::Draw2dList,
+        textures: &[(u64, u32, u32, Vec<u8>)],
+        textures_generation: u32,
+        clear: [f32; 4],
+    ) {
+        (self.applied_texture_generation.get() != textures_generation).then(|| {
+            self.backend.borrow_mut().load_2d_textures(textures);
+            self.applied_texture_generation.set(textures_generation);
+        });
+        let scrubbing = self.scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+        match scrubbing {
+            true => {
+                // Re-present the selected recorded 2D frame; nothing to present if
+                // the timeline is empty or the payload was evicted.
+                self.scrubber
+                    .as_ref()
+                    .and_then(|s| s.scrub_2d_frame())
+                    .into_iter()
+                    .for_each(|(rclear, rlist)| {
+                        self.backend.borrow().present_2d(&rlist, rclear);
+                    });
+            }
+            false => {
+                // Record this live frame (a no-op while unfocused) then present it.
+                self.scrubber
+                    .as_ref()
+                    .into_iter()
+                    .for_each(|s| s.record_2d(tick, clear, list));
+                self.backend.borrow().present_2d(list, clear);
+            }
+        }
+    }
+
+    /// Whether the caller-owned loop should keep stepping the game this frame: true
+    /// when live AND focused, false while scrubbing or after focus loss (Escape /
+    /// blur / tab hidden). The host gates its `advance` on this so the sim freezes
+    /// exactly when the overlay says it should, while [`Self::present`] keeps
+    /// painting (the frozen frame, or the scrubbed-to recorded frame).
+    pub fn is_interactive(&self) -> bool {
+        self.scrubber
+            .as_ref()
+            .map(|s| s.is_live() & s.is_active())
+            .unwrap_or(true)
+    }
+
+    /// Present `tick`'s backend frame and recover from an unrecoverable GPU-surface
+    /// loss by rebuilding the backend off-loop (re-probing WebGPU → WebGL2 → Canvas
+    /// 2D); at most one rebuild is in flight at a time.
+    #[allow(clippy::too_many_arguments)]
+    fn present_to_backend(
+        &self,
+        tick: u64,
+        clear: [f32; 4],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_vp: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+        camera_view_proj: [f32; 16],
+        casters: &[bool],
+        sdf: Option<axiom_host::SdfScene>,
+    ) {
+        let lost = self
+            .backend
+            .borrow()
+            .present(
+                tick,
+                self.width,
+                self.height,
+                clear,
+                lights,
+                light_vp,
+                batches,
+                camera_view_proj,
+                casters,
+                sdf,
+            )
+            .is_err();
+        if lost && !self.reinitializing.get() {
+            self.reinitializing.set(true);
+            let be = self.backend.clone();
+            let canvas = self.canvas.clone();
+            let meshes = self.meshes.clone();
+            let materials = self.materials.clone();
+            let flag = self.reinitializing.clone();
+            let request = self.request;
+            let force_canvas = self.force_canvas;
+            let max_instances = self.max_instances;
+            wasm_bindgen_futures::spawn_local(async move {
+                let rebuilt = select_backend(
+                    force_canvas,
+                    &request,
+                    canvas,
+                    &meshes[..],
+                    &materials[..],
+                    max_instances,
+                )
+                .await;
+                rebuilt
+                    .into_iter()
+                    .for_each(|backend| *be.borrow_mut() = backend);
+                flag.set(false);
+            });
+        }
+    }
+
+    /// Present one resolved frame to the bound surface. The arguments are the same
+    /// per-frame data the run loop produces: the clear colour, the resolved lights
+    /// (`(kind, geometry-vec, colour, intensity)`), the shadow light
+    /// view-projection, the per-`(mesh, material)` instance `batches` (`[mvp(16),
+    /// world(16), colour(4)]` per instance), the camera view-projection and
+    /// per-instance contact-shadow caster flags the Canvas planar-shadow pass
+    /// needs, and the frame's optional SDF scene. An unrecoverable GPU-surface loss
+    /// (a backgrounded mobile tab whose context was destroyed) rebuilds the backend
+    /// off-loop — re-probing WebGPU → WebGL2 → Canvas 2D — and swaps it in, so play
+    /// resumes instead of going black; at most one rebuild is in flight at a time.
+    /// Present one frame to the bound surface, routed through the scrubber overlay
+    /// exactly as the engine's run loops do: while **live**, record this frame and
+    /// present the current scene; while **scrubbing**, ignore the live args and
+    /// re-present the selected recorded frame (the sim is frozen by the host, which
+    /// gates its `advance` on [`Self::is_interactive`]). The live args are the same
+    /// per-frame data the run loop produces — the clear colour, the resolved lights,
+    /// the shadow light view-projection, the per-`(mesh, material)` instance
+    /// `batches`, the camera view-projection + per-instance contact-shadow caster
+    /// flags, and the frame's optional SDF scene.
+    #[allow(clippy::too_many_arguments)]
+    pub fn present(
+        &self,
+        tick: u64,
+        clear: [f32; 4],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_vp: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+        camera_view_proj: [f32; 16],
+        casters: &[bool],
+        sdf: Option<axiom_host::SdfScene>,
+    ) {
+        let scrubbing = self.scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+        // The identity view-projection a re-presented (scrubbed) frame uses — its
+        // recorded args carry no camera/casters, matching the run loop's scrub path.
+        const IDENTITY_VP: [f32; 16] = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        match scrubbing {
+            true => {
+                // Re-present the selected recorded frame; nothing to present if the
+                // timeline is empty or the payload was evicted.
+                self.scrubber
+                    .as_ref()
+                    .and_then(|s| s.scrub_frame())
+                    .into_iter()
+                    .for_each(|(rclear, rlights, rlight_vp, rbatches)| {
+                        self.present_to_backend(
+                            tick, rclear, &rlights, rlight_vp, &rbatches, IDENTITY_VP, &[], None,
+                        );
+                    });
+            }
+            false => {
+                // Record this live frame (a no-op while unfocused) then present it.
+                self.scrubber
+                    .as_ref()
+                    .into_iter()
+                    .for_each(|s| s.record(tick, clear, lights, light_vp, batches));
+                self.present_to_backend(
+                    tick, clear, lights, light_vp, batches, camera_view_proj, casters, sdf,
+                );
+            }
+        }
+    }
+}
+
 /// The selected live presentation backend: the GPU (WebGPU/WebGL2) path or the
 /// software Canvas 2D fallback. Both present the engine's per-frame data; the GPU
 /// arm takes the instance batches directly (its proven route), while the Canvas
@@ -626,6 +986,32 @@ impl LiveBackend {
                 let _ = backend.present_packet(&packet);
                 Ok(())
             }
+        }
+    }
+
+    /// Present one **2D** frame: rasterize the layer-sorted
+    /// [`axiom_host::Draw2dList`] over `clear` through whichever backend won the
+    /// cascade — the GPU arm draws it via the live wgpu 2D pipeline (a non-sRGB
+    /// swap-chain view, byte-matching the software path), the Canvas arm composites
+    /// it on the CPU and blits. So a 2D game rides the identical WebGPU → WebGL2 →
+    /// Canvas 2D fallback as a 3D one. Both arms own their surface recovery
+    /// internally, so this returns nothing.
+    fn present_2d(&self, list: &axiom_host::Draw2dList, clear: [f32; 4]) {
+        match self {
+            LiveBackend::Gpu(backend) => {
+                let _ = backend.present_draw2d(list, clear);
+            }
+            LiveBackend::Canvas(backend) => backend.present_draw2d(list, clear),
+        }
+    }
+
+    /// Upload (replacing) the CPU sprite/atlas textures the 2D sprite/text path
+    /// samples, as `(texture_id, width, height, RGBA8)` — forwarded to whichever
+    /// backend won the cascade (the 2D peer of the 3D material upload).
+    fn load_2d_textures(&mut self, textures: &[(u64, u32, u32, Vec<u8>)]) {
+        match self {
+            LiveBackend::Gpu(backend) => backend.load_draw2d_textures(textures),
+            LiveBackend::Canvas(backend) => backend.load_textures(textures),
         }
     }
 

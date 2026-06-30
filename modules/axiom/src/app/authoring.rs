@@ -29,6 +29,7 @@ use axiom_scene::SceneNodeId as Entity;
 
 use super::RunningApp;
 use crate::camera::Camera;
+use crate::controller::FirstPersonInput;
 use crate::directional_light::DirectionalLight;
 use crate::handle::Handle;
 use crate::material::Material;
@@ -82,10 +83,11 @@ impl RunningApp {
 
     /// Set (replacing any existing one) the active camera: drop every camera
     /// already in the scene, then spawn a fresh camera node carrying `camera` at
-    /// `transform`. The render path uses the scene's first camera, so removing the
-    /// others guarantees the new one is the camera every subsequent frame renders
-    /// through. The projection resolves against the current viewport aspect.
-    pub fn set_camera(&mut self, camera: Camera, transform: Transform) {
+    /// `transform`, and return its [`Entity`]. The render path uses the scene's
+    /// first camera, so removing the others guarantees the new one is the camera
+    /// every subsequent frame renders through. The projection resolves against the
+    /// current viewport aspect.
+    pub fn set_camera(&mut self, camera: Camera, transform: Transform) -> Entity {
         let math = MathApi::new();
         let existing: Vec<Entity> = self
             .scene
@@ -113,6 +115,34 @@ impl RunningApp {
             )
             .expect("authored camera intrinsics are valid");
         self.scene.update_world_transforms();
+        node
+    }
+
+    /// Spawn the active camera as a **first-person controller** for `index`: set
+    /// the camera at `transform` (dropping any existing one) and mark its node a
+    /// [`crate::prelude::Controller`], returning the node. The returned controller
+    /// is then driven each frame with [`Self::control`] — the engine yaws, pitches,
+    /// and moves the camera node itself, so a game never re-authors the camera
+    /// transform; it just hands the engine a per-frame [`FirstPersonInput`].
+    pub fn spawn_controller(&mut self, camera: Camera, transform: Transform, index: u32) -> Entity {
+        let node = self.set_camera(camera, transform);
+        self.scene
+            .add_controller(node, index)
+            .expect("the controller node was just created");
+        node
+    }
+
+    /// Apply one first-person input to the controller **immediately** (zero-lag):
+    /// yaw and pitch the camera node (pitch clamped by the engine) and move it
+    /// along its yaw-only frame, recomputing world transforms now. The per-frame
+    /// drive a host that owns its own loop calls instead of re-authoring the
+    /// camera — the engine owns the camera; the game owns only the
+    /// [`FirstPersonInput`] intent.
+    pub fn control(&mut self, input: FirstPersonInput) {
+        let yaw = Radians::new(input.yaw.as_radians()).expect("authored yaw is finite");
+        let pitch = Radians::new(input.pitch.as_radians()).expect("authored pitch is finite");
+        self.scene
+            .control_now(input.index, input.move_local, yaw, pitch);
     }
 }
 
@@ -233,5 +263,50 @@ mod tests {
         assert_ne!(far, near, "set_camera replaces the active camera");
         // Exactly one camera remains in the scene after the replacement.
         assert_eq!(app.tick(3).camera_view_proj(), far);
+    }
+
+    #[test]
+    fn spawn_controller_drives_the_camera_immediately_via_first_person_input() {
+        let mut app = empty_render_app();
+        let cam = app.spawn_controller(camera(), Transform::from_translation(Vec3::new(0.0, 1.0, 5.0)), 0);
+        // The controller node IS the active camera (its view-projection is non-identity).
+        assert_ne!(app.tick(0).camera_view_proj(), [0.0; 16]);
+
+        // Move forward one unit (local -Z) with no turn: the camera node slides to
+        // z = 4 IMMEDIATELY — no tick, no re-authoring the camera transform.
+        app.control(FirstPersonInput::new(
+            0,
+            Vec3::new(0.0, 0.0, -1.0),
+            Angle::radians(0.0),
+            Angle::radians(0.0),
+        ));
+        assert_eq!(
+            app.world_transform(cam).map(|t| t.translation),
+            Some(Vec3::new(0.0, 1.0, 4.0)),
+            "forward at yaw 0 moves the camera node along -Z, applied now"
+        );
+
+        // Yaw 90° then move forward again: the move frame rotates with the yaw, so
+        // this step lands off the z axis (x changes) — proving the engine, not the
+        // game, rotates the movement.
+        app.control(FirstPersonInput::new(
+            0,
+            Vec3::new(0.0, 0.0, -1.0),
+            Angle::radians(std::f32::consts::FRAC_PI_2),
+            Angle::radians(0.0),
+        ));
+        let turned = app.world_transform(cam).expect("controller node is live").translation;
+        assert!(turned.x.abs() > 0.5, "yaw rotated the move frame off the z axis");
+
+        // An input for an unknown controller index is a clean no-op (the camera
+        // node does not move).
+        let before = app.world_transform(cam).map(|t| t.translation);
+        app.control(FirstPersonInput::new(
+            9,
+            Vec3::new(0.0, 0.0, -1.0),
+            Angle::radians(0.0),
+            Angle::radians(0.0),
+        ));
+        assert_eq!(app.world_transform(cam).map(|t| t.translation), before);
     }
 }

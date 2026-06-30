@@ -19,12 +19,14 @@
 
 import type {
   CameraDescriptor,
+  ControllerInput,
+  ControllerSpec,
   GridField,
   LightDescriptor,
   MaterialDescriptor,
   PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Circle, Entity, Handle, Mat4, PlayerId, Quat, RayHit, Rect, Result, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, PlayerId, Quat, RayHit, Rect, Result, TextureId, Transform, Vec2, Vec3 } from "./vocabulary.ts";
 import { type Draw2dBridge, UNBOUND_DRAW2D } from "./draw2d-binding.ts";
 import { UNBOUND_UI, type UiBridge } from "./ui-binding.ts";
 import { UNBOUND_HOST_BASE } from "./unbound-host.ts";
@@ -92,6 +94,12 @@ export interface HostBridge extends Draw2dBridge, UiBridge {
   readonly lerp: (start: number, end: number, fraction: number) => number;
   /** Wrap `angle` to `(-π, π]` (native `MathApi`). */
   readonly normalizeAngle: (angle: number) => number;
+
+  // Presentation assets (SPEC-04 §10): the app resolves the bytes (fetch/decode); the engine only names the stable handle.
+  /** Register `url` as a texture and return its stable handle (`loadTexture`). */
+  readonly loadTexture: (url: string) => TextureId;
+  /** Register `url` as a font and return its `FontSpec` (`loadFont`). */
+  readonly loadFont: (url: string) => FontSpec;
 
   // 2D math (SPEC-03 §4.2): the `v2` vector algebra over `Vec2`, every op routed to the native `MathApi` (one deterministic source of truth, never a TS re-implementation).
   /** Vector sum. */
@@ -172,6 +180,18 @@ export interface HostBridge extends Draw2dBridge, UiBridge {
   readonly setCamera3D: (camera: CameraDescriptor) => void;
   /** Add a light from its descriptor; return its entity. */
   readonly addLight: (light: LightDescriptor) => Entity;
+  /** Spawn a renderable node from a `(mesh, material)` handle pair at `transform`; return its entity. */
+  readonly spawnRenderable: (mesh: Handle, material: Handle, transform: Transform) => Entity;
+  /** Overwrite a node's transform — the per-frame move / rotate / scale a game applies to a renderable. */
+  readonly setNodeTransform: (entity: Entity, transform: Transform) => void;
+  /** Set a node's collision bounds to an axis-aligned box of `halfExtents`, so it answers `overlapBox` / `raycast`. */
+  readonly setNodeBounds: (entity: Entity, halfExtents: Vec3) => void;
+  /** Clear the whole 3D scene, leaving a blank scene to author from. */
+  readonly clearScene: () => void;
+  /** Spawn the active camera as a first-person controller `index` at `spec`; return its entity. */
+  readonly createController: (spec: ControllerSpec, index: number) => Entity;
+  /** Apply one frame's first-person input to a controller immediately (yaw/pitch/move the camera node now). */
+  readonly controlFirstPerson: (input: ControllerInput) => void;
 
   // 3D math (SPEC-11): every `v3`/`mat4`/`quat` op routes here — the native `MathApi` is the ONE deterministic source of truth (SPEC-03 §3.2); never a TS re-implementation.
   /** Vector sum. */

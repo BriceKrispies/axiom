@@ -117,9 +117,10 @@ const GRADIENT_TEXTURE_BASE: u64 = 0x00E0_0000;
 /// `r,g,b,a` + analytic coverage `field` (`vec4`) + coverage `kind` (`f32`). A
 /// layout constant the platform-arm renderer (vertex stride) and the tests (vertex
 /// indexing) read; it has no consumer in the default no-GPU build, so it is
-/// compiled only where one exists — the same `any(test, …)` gating
-/// `surface_recovery` uses.
-#[cfg(any(test, all(not(target_arch = "wasm32"), feature = "offscreen")))]
+/// compiled only where the wgpu renderer that reads it exists — the live wasm32
+/// arm or the native `offscreen` feature (plus `test`), matching `draw2d_renderer`'s
+/// own `cfg`.
+#[cfg(any(test, target_arch = "wasm32", feature = "offscreen"))]
 pub(crate) const VERTEX_FLOATS: usize = 13;
 /// Vertices per quad (two triangles share the four corners via the index buffer).
 pub(crate) const VERTS_PER_QUAD: usize = 4;

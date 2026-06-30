@@ -303,6 +303,18 @@ impl GameBridge {
         vec![f64::from(width), f64::from(height)]
     }
 
+    /// Finish the frame and return the layer-sorted [`axiom_host::Draw2dList`]
+    /// itself, for the engine's live 2D presenter (`axiom-windowing`) to rasterize
+    /// through the same WebGPU → WebGL2 → Canvas 2D cascade a 3D scene uses. This is
+    /// the structured peer of [`Self::draw2d_finish`] (which flattens the same list
+    /// to the numeric stream the TS `Frame.finish` contract carries); both drain the
+    /// per-frame surface (particles persist), so a frame uses exactly one of them.
+    /// The browser boot path drives this via [`crate::wasm::WasmGame`]; the flat
+    /// variant remains for the SDK's neutral `Frame.finish` contract and its tests.
+    pub fn draw2d_finish_list(&mut self) -> axiom_host::Draw2dList {
+        self.draw2d.finish()
+    }
+
     /// Finish the frame and return the layer-sorted main command list as a flat,
     /// self-describing stream a 2D presenter can rasterize (`draw2dFinish`). Each
     /// command is `[kind, layer, submission, len, …geometry]`: the `len` payload
@@ -678,6 +690,74 @@ mod tests {
         // LINE: [aX, aY, bX, bY, colorRGBA, width, alpha]; a line carries no fill.
         assert_eq!(recs[2].0, Draw2dCommand::KIND_LINE);
         assert_eq!(recs[2].2, vec![0.0, 0.0, 8.0, 9.0, f64::from(0xffff_00ffu32), 2.0, 1.0]);
+    }
+
+    #[test]
+    fn sprite_flattens_its_transform_source_anchor_tint_and_flips() {
+        let mut b = bridge();
+        // A sprite at (10, 20), scale (2, 3), centred anchor, 16×16 source sub-rect,
+        // white tint, no flips, layer 0, opaque.
+        b.draw2d_sprite(
+            0x1000_0000,
+            &[10.0, 20.0, 0.0, 2.0, 3.0, 0.5, 0.5, 0.0, 0.0, 16.0, 16.0, f64::from(u32::MAX), 0.0, 0.0, 0.0, 1.0],
+        );
+        let recs = records(&b.draw2d_finish());
+        assert_eq!(recs.len(), 1);
+        let (kind, _layer, p) = &recs[0];
+        assert_eq!(*kind, Draw2dCommand::KIND_SPRITE);
+        assert_eq!(p.len(), 17);
+        // texId, then the baked affine: translate (10,20) · scale (2,3) ⇒
+        // [a=2, b=0, c=0, d=3, tx=10, ty=20].
+        assert_eq!(p[0], f64::from(0x1000_0000u32));
+        assert_eq!(&p[1..7], &[2.0, 0.0, 0.0, 3.0, 10.0, 20.0]);
+        // source sub-rect, anchor, white tint, no flips, opaque.
+        assert_eq!(&p[7..11], &[0.0, 0.0, 16.0, 16.0]);
+        assert_eq!(&p[11..13], &[0.5, 0.5]);
+        assert_eq!(p[13], f64::from(u32::MAX));
+        assert_eq!(&p[14..17], &[0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn text_flattens_a_glyph_run_against_the_baked_atlas() {
+        let mut b = bridge();
+        // "Hi" at (5, 6), size 16, red, left-aligned, layer 1, opaque.
+        b.draw2d_text("Hi", &[5.0, 6.0, 16.0, f64::from(0xff00_00ffu32), 0.0, 1.0, 1.0]);
+        let recs = records(&b.draw2d_finish());
+        let (kind, layer, p) = &recs[0];
+        assert_eq!(*kind, Draw2dCommand::KIND_TEXT_GLYPHS);
+        assert_eq!(*layer, 1);
+        // Header: atlas texId, translation affine (5,6), red, align 0, line height
+        // 16, opaque, then a glyph count of 2.
+        assert_eq!(p[0], f64::from(crate::font::FONT_ATLAS_TEXTURE.raw() as u32));
+        assert_eq!(&p[1..7], &[1.0, 0.0, 0.0, 1.0, 5.0, 6.0]);
+        assert_eq!(p[7], f64::from(0xff00_00ffu32));
+        assert_eq!(&p[8..12], &[0.0, 16.0, 1.0, 2.0]); // align, lineHeight, alpha, glyphCount
+        assert_eq!(p.len(), 12 + 2 * 5);
+        // 'H' (code 72) is atlas cell 40 → column 8, row 2 → source (64, 32, 8, 16),
+        // advance 8 (= size · 0.5).
+        assert_eq!(&p[12..17], &[64.0, 32.0, 8.0, 16.0, 8.0]);
+    }
+
+    #[test]
+    fn measure_text_is_monospace() {
+        let b = bridge();
+        // 5 chars · size 20 · 0.5 advance ratio = 50 wide, 20 tall.
+        assert_eq!(b.draw2d_measure_text("score", 20.0), vec![50.0, 20.0]);
+        assert_eq!(b.draw2d_measure_text("", 16.0), vec![0.0, 16.0]);
+    }
+
+    #[test]
+    fn a_sprite_and_text_frame_replays_byte_identically() {
+        let build = || {
+            let mut b = bridge();
+            b.draw2d_sprite(
+                0x1000_0000,
+                &[1.0, 2.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, f64::from(u32::MAX), 0.0, 0.0, 0.0, 1.0],
+            );
+            b.draw2d_text("HUD", &[0.0, 0.0, 12.0, f64::from(u32::MAX), 1.0, 5.0, 1.0]);
+            b.draw2d_finish()
+        };
+        assert_eq!(build(), build());
     }
 
     #[test]

@@ -147,6 +147,8 @@ const heldDifference = (intent: Intent, neg: Action, pos: Action): number =>
 const intentInput = (intent: Intent): Input => ({
   axis: (neg: Action, pos: Action): -1 | 0 | 1 => pick(AXIS_STEPS, heldDifference(intent, neg, pos) + AXIS_BIAS),
   isDown: (action: Action): boolean => Boolean(intent[action]),
+  // A networked flat intent carries held keys, not analog look — the neutral delta.
+  look: (): Vec2 => ({ x: 0, y: 0 }),
   pointer: (): Result<PointerSample> => absent<PointerSample>(),
   pointerPressed: (): Result<Vec2> => absent<Vec2>(),
   pressed: (): boolean => false,

@@ -6,7 +6,7 @@
  * onto this base in `host-binding.ts`.
  */
 
-import type { Cell, Entity, Handle, Mat4, Quat, RayHit, Result, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Cell, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Result, Vec2, Vec3 } from "./vocabulary.ts";
 import { IDENTITY_MAT4, IDENTITY_QUAT, ORIGIN_CELL, ZERO_VEC2, ZERO_VEC3 } from "./host-descriptors.ts";
 import type { SessionConfig } from "./host-binding.ts";
 
@@ -18,6 +18,9 @@ const UNBOUND_HANDLE = 0;
 
 /** The neutral scalar an inert numeric math read returns before a host binds. */
 const UNBOUND_SCALAR = 0;
+
+/** The built-in monospace font an inert `loadFont` returns before a host binds. */
+const UNBOUND_FONT: FontSpec = { family: "monospace", size: 16 };
 
 /** The absent `Result` value (no `undefined` literal — the lint bans it). */
 const absent = <Value>(slot?: Value): Value | undefined => slot;
@@ -38,6 +41,13 @@ export const UNBOUND_HOST_BASE = {
   },
   circleOverlap: (): boolean => false,
   clamp: (value: number): number => value,
+  clearScene: (): void => {
+    // No-op until a host is bound
+  },
+  controlFirstPerson: (): void => {
+    // No-op until a host is bound
+  },
+  createController: (): Entity => UNBOUND_HANDLE,
   createMaterial: (): Handle => UNBOUND_HANDLE,
   createMesh: (): Handle => UNBOUND_HANDLE,
   getSessionConfig: (): SessionConfig => ({ params: {}, seed: UNBOUND_SEED }),
@@ -46,7 +56,9 @@ export const UNBOUND_HOST_BASE = {
   gridReachable: (): boolean => false,
   gridStepToward: (): Cell => ORIGIN_CELL,
   lerp: (start: number): number => start,
+  loadFont: (): FontSpec => UNBOUND_FONT,
   loadSound: (): Handle => UNBOUND_HANDLE,
+  loadTexture: (): Handle => UNBOUND_HANDLE,
   mat4FromTRS: (): Mat4 => IDENTITY_MAT4,
   mat4Identity: (): Mat4 => IDENTITY_MAT4,
   mat4Invert: (): Mat4 => IDENTITY_MAT4,
@@ -85,6 +97,13 @@ export const UNBOUND_HOST_BASE = {
   setMuted: (): void => {
     // No-op until a host is bound
   },
+  setNodeBounds: (): void => {
+    // No-op until a host is bound
+  },
+  setNodeTransform: (): void => {
+    // No-op until a host is bound
+  },
+  spawnRenderable: (): Entity => UNBOUND_HANDLE,
   stopVoice: (): void => {
     // No-op until a host is bound
   },

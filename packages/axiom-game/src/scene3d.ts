@@ -15,8 +15,8 @@
  * an unsafe cast) and `orElse`-defaulting to whichever channel is present.
  */
 
-import type { CameraDescriptor, LightDescriptor, MaterialDescriptor } from "./host-descriptors.ts";
-import type { Entity, Handle, Rgba, Vec3 } from "./vocabulary.ts";
+import type { CameraDescriptor, ControllerSpec, LightDescriptor, MaterialDescriptor } from "./host-descriptors.ts";
+import type { Entity, Handle, Rgba, Transform, Vec3 } from "./vocabulary.ts";
 import { boundHost } from "./host-binding.ts";
 import { orElse } from "./control-flow.ts";
 
@@ -106,4 +106,85 @@ export const addLight = (light: Light): Entity => {
     vector: orElse(channels.direction, orElse(channels.position, ORIGIN)),
   };
   return boundHost().addLight(descriptor);
+};
+
+/*
+ * Spawn a renderable node from a `(mesh, material)` handle pair at `transform`,
+ * returning its `Entity` (SPEC-11). The handles are the ones [`createMesh`] /
+ * [`createMaterial`] returned; the node draws every frame and can be moved with
+ * [`setNodeTransform`] or made solid to queries with [`setNodeBounds`]. This is
+ * the verb that actually *places* geometry in the world — `createMesh` only
+ * registers the shape.
+ */
+export const spawnRenderable = (mesh: Handle, material: Handle, transform: Transform): Entity =>
+  boundHost().spawnRenderable(mesh, material, transform);
+
+/*
+ * Overwrite a node's transform (SPEC-11) — the per-frame move / rotate / scale a
+ * game applies to a renderable (an enemy walking, a platform sliding). The write
+ * is committed immediately, so a spatial query or the present render this frame
+ * sees the node at its new pose.
+ */
+export const setNodeTransform = (entity: Entity, transform: Transform): void => {
+  boundHost().setNodeTransform(entity, transform);
+};
+
+/*
+ * Set a node's collision bounds to an axis-aligned box of `halfExtents` (SPEC-11),
+ * so it answers `overlapBox` / `raycast` — how a level's walls become solid and an
+ * enemy becomes a hitscan target.
+ */
+export const setNodeBounds = (entity: Entity, halfExtents: Vec3): void => {
+  boundHost().setNodeBounds(entity, halfExtents);
+};
+
+/*
+ * Clear the whole 3D scene (SPEC-11), leaving a blank scene to author from. A 3D
+ * game calls this once at startup before building its own scene, so the runtime's
+ * default content does not bleed through; afterwards [`createMesh`] /
+ * [`createMaterial`] mint fresh 1-based handles.
+ */
+export const clearScene = (): void => {
+  boundHost().clearScene();
+};
+
+/** The default controller index — most games drive a single first-person camera. */
+const ROOT_CONTROLLER = 0;
+
+/** One frame's first-person input for a controller (SPEC-11): a local-frame move plus yaw/pitch deltas. */
+export interface FirstPersonControl {
+  /** The controller this input drives (default: the root controller). */
+  readonly index?: number;
+  /** Translation in the camera's own frame: `-Z` forward, `+X` right. */
+  readonly moveLocal: Vec3;
+  /** Yaw delta about world `+Y`, in radians. */
+  readonly yawDelta: number;
+  /** Pitch delta about local `+X`, in radians (the engine clamps it). */
+  readonly pitchDelta: number;
+}
+
+/*
+ * Spawn the active camera as a first-person **controller** (SPEC-11) and return
+ * its `Entity`. The engine then owns the camera node: [`controlFirstPerson`] yaws,
+ * pitches, and moves it each frame, so a game never re-authors the camera
+ * transform — it just hands the engine a per-frame intent. This is the
+ * engine-driven counterpart to setting the camera with [`setCamera3D`] every tick.
+ */
+export const createController = (spec: ControllerSpec, index?: number): Entity =>
+  boundHost().createController(spec, orElse(index, ROOT_CONTROLLER));
+
+/*
+ * Apply one frame's first-person input to a controller (SPEC-11), **immediately**
+ * — the engine yaws/pitches (clamped) and moves the camera node now, with no
+ * one-frame lag and no camera re-authoring. The move is in the camera's own frame
+ * (`-Z` forward); a game collision-resolves it in world space and rotates it into
+ * the local frame before handing it over (the engine then re-applies only the yaw).
+ */
+export const controlFirstPerson = (control: FirstPersonControl): void => {
+  boundHost().controlFirstPerson({
+    index: orElse(control.index, ROOT_CONTROLLER),
+    moveLocal: control.moveLocal,
+    pitchDelta: control.pitchDelta,
+    yawDelta: control.yawDelta,
+  });
 };

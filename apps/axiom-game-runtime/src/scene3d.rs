@@ -17,9 +17,10 @@
 //! `Handle` id, or a light node [`Entity`](axiom::prelude::Entity) id.
 
 use axiom::prelude::{
-    Angle, Camera, Color, DirectionalLight, Material, Mesh, Meters, PerspectiveProjection, Ratio,
-    Transform, Vec3,
+    Angle, Bounds, Camera, Color, DirectionalLight, Entity, FirstPersonInput, Handle, Material,
+    Mesh, Meters, PerspectiveProjection, Ratio, Spawn, Transform, Vec3,
 };
+use axiom_math::Quat;
 
 use crate::GameBridge;
 
@@ -46,6 +47,20 @@ fn color(s: &[f64]) -> Color {
         channel(*s.first().unwrap_or(&0.0)),
         channel(*s.get(1).unwrap_or(&0.0)),
         channel(*s.get(2).unwrap_or(&0.0)),
+    )
+}
+
+/// A [`Transform`] from the flat 10-tuple `[tx, ty, tz, qx, qy, qz, qw, sx, sy,
+/// sz]` the boundary uses — the exact shape `worldWorldTransform` reads back, so
+/// an author can round-trip a node's pose. Missing entries read `0` (a table read,
+/// never a branch); the SDK always sends a valid (identity-by-default) quaternion,
+/// so no normalisation guard is needed here.
+fn transform_from_tuple(t: &[f64]) -> Transform {
+    let g = |i: usize| *t.get(i).unwrap_or(&0.0) as f32;
+    Transform::new(
+        Vec3::new(g(0), g(1), g(2)),
+        Quat::new(g(3), g(4), g(5), g(6)),
+        Vec3::new(g(7), g(8), g(9)),
     )
 }
 
@@ -103,6 +118,89 @@ impl GameBridge {
             .add_light(light, Transform::IDENTITY)
             .raw()
     }
+
+    /// Spawn a renderable node from a `(mesh, material)` handle pair at the
+    /// flat-10-tuple `transform` (`spawnRenderable`), returning its entity id. The
+    /// handles are the ones [`Self::create_mesh`] / [`Self::create_material`]
+    /// minted; the node draws every frame and can be moved with
+    /// [`Self::set_node_transform`] or bounded with [`Self::set_node_bounds`].
+    pub fn spawn_renderable(&mut self, mesh_id: u64, material_id: u64, transform: &[f64]) -> u64 {
+        self.runtime
+            .app_mut()
+            .spawn(Spawn::new(
+                transform_from_tuple(transform),
+                Handle::from_raw(mesh_id),
+                Handle::from_raw(material_id),
+            ))
+            .raw()
+    }
+
+    /// Overwrite `entity`'s local transform from the flat 10-tuple
+    /// (`setNodeTransform`) — the per-frame move/rotate/scale a game applies to a
+    /// renderable (e.g. an enemy walking, the player camera following). A stale
+    /// handle is a clean `false`.
+    pub fn set_node_transform(&mut self, entity: u64, transform: &[f64]) -> bool {
+        let app = self.runtime.app_mut();
+        let moved = app.set::<Transform>(Entity::from_raw(entity), transform_from_tuple(transform));
+        // A bare `set::<Transform>` defers world-transform propagation to the next
+        // tick; commit it now so a query (or the present render) this frame sees the
+        // node at its new pose, the move-then-look-then-shoot loop a game runs.
+        app.update_world_transforms();
+        moved
+    }
+
+    /// Set `entity`'s collision bounds to an axis-aligned box of `half_extents`
+    /// (`setNodeBounds`), so it participates in the `overlapBox` / `raycast`
+    /// queries. A stale handle is a clean `false`.
+    pub fn set_node_bounds(&mut self, entity: u64, half_extents: &[f64]) -> bool {
+        self.runtime
+            .app_mut()
+            .set::<Bounds>(Entity::from_raw(entity), Bounds::new(v3(half_extents)))
+    }
+
+    /// Clear the whole 3D scene (`clearScene`): drop every renderable, light, and
+    /// camera and reset the mesh/material stores, leaving a blank scene to author
+    /// from. A 3D game calls this once at startup before building its own scene, so
+    /// the runtime's default demo content does not bleed through. After it,
+    /// [`Self::create_mesh`] / [`Self::create_material`] mint 1-based handles again.
+    pub fn clear_scene(&mut self) {
+        self.runtime.app_mut().reauthor(|_scene, _meshes, _materials| {});
+    }
+
+    /// Spawn the active camera as a first-person **controller** at `position` with
+    /// the given perspective intrinsics, marked controller `index`
+    /// (`createController`). Returns the controller node's entity id. Unlike
+    /// [`Self::set_camera_3d`], its orientation is not a look-at target — the engine
+    /// drives it from per-frame [`Self::control_first_person`] inputs.
+    pub fn spawn_controller(&mut self, position: &[f64], fov_deg: f64, near: f64, far: f64, index: u32) -> u64 {
+        let projection = PerspectiveProjection {
+            fov_y: Angle::degrees(fov_deg as f32),
+            near: meters(near),
+            far: meters(far),
+        };
+        self.runtime
+            .app_mut()
+            .spawn_controller(
+                Camera::perspective(projection),
+                Transform::from_translation(v3(position)),
+                index,
+            )
+            .raw()
+    }
+
+    /// Apply one first-person input to controller `index` **immediately**
+    /// (`controlFirstPerson`): move by `move_local` in the node's own frame (-Z
+    /// forward, +X right) and yaw/pitch by the given radian deltas. The engine yaws,
+    /// pitches (clamped), and moves the camera node now — zero lag, no camera
+    /// re-authoring.
+    pub fn control_first_person(&mut self, index: u32, move_local: &[f64], yaw: f64, pitch: f64) {
+        self.runtime.app_mut().control(FirstPersonInput::new(
+            index,
+            v3(move_local),
+            Angle::radians(yaw as f32),
+            Angle::radians(pitch as f32),
+        ));
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -143,6 +241,56 @@ mod wasm_exports {
         #[wasm_bindgen(js_name = addLight)]
         pub fn add_light(&mut self, direction: &[f64], rgb: &[f64], intensity: f64) -> f64 {
             self.bridge.add_light(direction, rgb, intensity) as f64
+        }
+
+        /// Spawn a renderable node from a `(mesh, material)` handle pair at the
+        /// flat 10-tuple `transform`, returning its entity id (`spawnRenderable`).
+        #[wasm_bindgen(js_name = spawnRenderable)]
+        pub fn spawn_renderable(&mut self, mesh_id: f64, material_id: f64, transform: &[f64]) -> f64 {
+            self.bridge
+                .spawn_renderable(mesh_id as u64, material_id as u64, transform) as f64
+        }
+
+        /// Overwrite a node's local transform from the flat 10-tuple
+        /// (`setNodeTransform`). A stale handle is a clean no-op.
+        #[wasm_bindgen(js_name = setNodeTransform)]
+        pub fn set_node_transform(&mut self, entity: f64, transform: &[f64]) {
+            self.bridge.set_node_transform(entity as u64, transform);
+        }
+
+        /// Set a node's collision bounds to a box of `half_extents`
+        /// (`setNodeBounds`). A stale handle is a clean no-op.
+        #[wasm_bindgen(js_name = setNodeBounds)]
+        pub fn set_node_bounds(&mut self, entity: f64, half_extents: &[f64]) {
+            self.bridge.set_node_bounds(entity as u64, half_extents);
+        }
+
+        /// Clear the whole 3D scene, leaving a blank scene to author (`clearScene`).
+        #[wasm_bindgen(js_name = clearScene)]
+        pub fn clear_scene(&mut self) {
+            self.bridge.clear_scene();
+        }
+
+        /// Spawn the active camera as a first-person controller, returning its
+        /// entity id (`createController`).
+        #[wasm_bindgen(js_name = spawnController)]
+        pub fn spawn_controller(
+            &mut self,
+            position: &[f64],
+            fov_deg: f64,
+            near: f64,
+            far: f64,
+            index: u32,
+        ) -> f64 {
+            self.bridge
+                .spawn_controller(position, fov_deg, near, far, index) as f64
+        }
+
+        /// Apply one first-person input to a controller immediately
+        /// (`controlFirstPerson`): `move_local` plus yaw/pitch radian deltas.
+        #[wasm_bindgen(js_name = controlFirstPerson)]
+        pub fn control_first_person(&mut self, index: u32, move_local: &[f64], yaw: f64, pitch: f64) {
+            self.bridge.control_first_person(index, move_local, yaw, pitch);
         }
     }
 }
@@ -228,5 +376,54 @@ mod tests {
         let light = b.add_light(&[0.0, -1.0, 0.0], &[1.0, 1.0, 1.0], 1.0);
         // The returned id names a live scene node (the bridge's world-liveness read).
         assert!(b.world_alive(light));
+    }
+
+    /// The identity-rotation flat 10-tuple for a node at `(x, y, z)` with uniform
+    /// `scale` — the boundary shape `spawnRenderable` / `setNodeTransform` take.
+    fn pose(x: f64, y: f64, z: f64, scale: f64) -> [f64; 10] {
+        [x, y, z, 0.0, 0.0, 0.0, 1.0, scale, scale, scale]
+    }
+
+    #[test]
+    fn a_spawned_renderable_draws_and_can_be_moved_and_cleared() {
+        let mut b = bridge();
+        b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
+        let cube = b.create_mesh("cube");
+        let red = b.create_material(&[0.9, 0.1, 0.1]);
+        // Spawning a renderable from the (mesh, material) handles makes the scene
+        // draw exactly one object.
+        let node = b.spawn_renderable(cube, red, &pose(0.0, 0.0, 0.0, 1.0));
+        assert!(b.world_alive(node));
+        assert_eq!(b.runtime.app_mut().tick(0).draws().len(), 1);
+        // It is bounded and movable: setting a transform relocates the node, which
+        // a world-transform read reflects.
+        assert!(b.set_node_bounds(node, &[0.5, 0.5, 0.5]));
+        assert!(b.set_node_transform(node, &pose(3.0, 0.0, -2.0, 1.0)));
+        let world = b.world_world_transform(node);
+        assert_eq!((world[0], world[1], world[2]), (3.0, 0.0, -2.0));
+        // Clearing the scene drops the node and everything else.
+        b.clear_scene();
+        assert!(!b.world_alive(node));
+        assert!(b.runtime.app_mut().tick(1).draws().is_empty());
+    }
+
+    #[test]
+    fn a_spawned_controller_is_driven_immediately_by_first_person_input() {
+        let mut b = bridge();
+        let cam = b.spawn_controller(&[0.0, 1.0, 5.0], 70.0, 0.1, 100.0, 0);
+        assert!(b.world_alive(cam));
+        // Forward (local -Z) at yaw 0 moves the camera node to z = 4 immediately —
+        // no tick, the engine controller applies it now.
+        b.control_first_person(0, &[0.0, 0.0, -1.0], 0.0, 0.0);
+        let world = b.world_world_transform(cam);
+        assert_eq!((world[0], world[1], world[2]), (0.0, 1.0, 4.0));
+    }
+
+    #[test]
+    fn set_node_transform_and_bounds_on_a_stale_handle_are_clean_no_ops() {
+        let mut b = bridge();
+        // No node `999` exists, so both writes report a clean miss.
+        assert!(!b.set_node_transform(999, &pose(1.0, 1.0, 1.0, 1.0)));
+        assert!(!b.set_node_bounds(999, &[1.0, 1.0, 1.0]));
     }
 }

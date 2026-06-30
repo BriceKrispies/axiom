@@ -2,7 +2,7 @@
 // the math / host-bridge / bindAction free-function tests. Kept in its own file
 // so each fake is one class (max-classes-per-file).
 
-import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation } from "./draw2d-binding.ts";
+import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation, SpriteOpts, TextMetrics, TextOpts } from "./draw2d-binding.ts";
 import type { UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
 import type {
   HostBridge,
@@ -15,12 +15,14 @@ import type {
 } from "./host-binding.ts";
 import type {
   CameraDescriptor,
+  ControllerInput,
+  ControllerSpec,
   GridField,
   LightDescriptor,
   MaterialDescriptor,
   PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Circle, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Rect, Result, Transform, Vec2, Vec3 } from "./vocabulary.ts";
 
 export class FakeHost implements HostBridge {
   public clampReturn = 0;
@@ -66,6 +68,12 @@ export class FakeHost implements HostBridge {
   public materials: MaterialDescriptor[] = [];
   public cameras: CameraDescriptor[] = [];
   public lights: LightDescriptor[] = [];
+  public spawns: { mesh: Handle; material: Handle; transform: Transform }[] = [];
+  public nodeTransforms: { entity: Entity; transform: Transform }[] = [];
+  public nodeBounds: { entity: Entity; halfExtents: Vec3 }[] = [];
+  public sceneClears = 0;
+  public controllers: { spec: ControllerSpec; index: number }[] = [];
+  public controls: ControllerInput[] = [];
 
   // --- 2D drawing call log (SPEC-04); emitters/targets/textures get incrementing handles ---
   public draw2dCameras: { center: Vec2; zoom: number }[] = [];
@@ -81,6 +89,15 @@ export class FakeHost implements HostBridge {
   public draw2dEnds = 0;
   public draw2dFinishReturn: readonly number[] = [];
   public draw2dSamples: { anim: SpriteAnimation; elapsedSeconds: number; looping: boolean }[] = [];
+  public draw2dSpriteCalls: { texture: Handle; opts: SpriteOpts }[] = [];
+  public draw2dTextCalls: { value: string; opts: TextOpts }[] = [];
+  public measureTextReturn: TextMetrics = { height: 0, width: 0 };
+  public measureTextCalls: { value: string; font: FontSpec }[] = [];
+
+  // --- presentation assets (SPEC-04 §10): records the loaded urls; textures mint handles ---
+  public loadedTextureUrls: string[] = [];
+  public loadedFontUrls: string[] = [];
+  public fontReturn: FontSpec = { family: "monospace", size: 16 };
 
   // --- UI surface (SPEC-09): records the marshalled calls; scriptable button/viewport/draw-list/layout returns ---
   public uiBeginFrames: { viewport: UiViewport; pointer: Vec2; pressed: boolean }[] = [];
@@ -281,6 +298,32 @@ export class FakeHost implements HostBridge {
     return this.mint();
   }
 
+  public spawnRenderable(mesh: Handle, material: Handle, transform: Transform): Entity {
+    this.spawns.push({ material, mesh, transform });
+    return this.mint();
+  }
+
+  public setNodeTransform(entity: Entity, transform: Transform): void {
+    this.nodeTransforms.push({ entity, transform });
+  }
+
+  public setNodeBounds(entity: Entity, halfExtents: Vec3): void {
+    this.nodeBounds.push({ entity, halfExtents });
+  }
+
+  public clearScene(): void {
+    this.sceneClears += 1;
+  }
+
+  public createController(spec: ControllerSpec, index: number): Entity {
+    this.controllers.push({ index, spec });
+    return this.mint();
+  }
+
+  public controlFirstPerson(input: ControllerInput): void {
+    this.controls.push(input);
+  }
+
   // --- 3D math (deterministic, input-derived returns: the projection only forwards) ---
   public v3Add(lhs: Vec3, rhs: Vec3): Vec3 {
     return { x: lhs.x + rhs.x, y: lhs.y + rhs.y, z: lhs.z + rhs.z };
@@ -459,6 +502,29 @@ export class FakeHost implements HostBridge {
 
   public draw2dFinish(): readonly number[] {
     return this.draw2dFinishReturn;
+  }
+
+  public draw2dSprite(texture: Handle, opts: SpriteOpts): void {
+    this.draw2dSpriteCalls.push({ opts, texture });
+  }
+
+  public draw2dText(value: string, opts: TextOpts): void {
+    this.draw2dTextCalls.push({ opts, value });
+  }
+
+  public draw2dMeasureText(value: string, font: FontSpec): TextMetrics {
+    this.measureTextCalls.push({ font, value });
+    return this.measureTextReturn;
+  }
+
+  public loadTexture(url: string): Handle {
+    this.loadedTextureUrls.push(url);
+    return this.mint();
+  }
+
+  public loadFont(url: string): FontSpec {
+    this.loadedFontUrls.push(url);
+    return this.fontReturn;
   }
 
   // The reference flip-book sampler the native Draw2dApi::sample_animation owns:

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { type SimContext, makeFrame, makeSim } from "./sim.ts";
-import type { EmitterConfig, LineStyle, ShapeStyle } from "./draw2d-binding.ts";
+import type { EmitterConfig, LineStyle, ShapeStyle, SpriteOpts, TextOpts } from "./draw2d-binding.ts";
 import { FakeBridge } from "./fake-bridge.testkit.ts";
 import { FakeHost } from "./fake-host.testkit.ts";
 import { ROOT_STREAM } from "./rng.ts";
@@ -139,6 +139,24 @@ test("makeFrame presents the latest tick and forwards every draw verb to the bou
   assert.deepEqual(host.draw2dEmitters, [emitterConfig]);
   assert.deepEqual(host.draw2dEmits, [{ at: { x: 1, y: 1 }, direction: { x: 0, y: 1 }, id: emitter }]);
   assert.deepEqual(host.draw2dAdvances, [0.016]);
+});
+
+test("makeFrame forwards sprite / text / measureText to the bound host", () => {
+  const host = new FakeHost();
+  host.measureTextReturn = { height: 16, width: 40 };
+  bindNative(host);
+  const frame = makeFrame(5);
+
+  const spriteOpts: SpriteOpts = { pos: { x: 10, y: 20 }, scale: { x: 2, y: 2 } };
+  const textOpts: TextOpts = { color: [1, 1, 1, 1], font: { family: "monospace", size: 16 }, pos: { x: 1, y: 2 } };
+  frame.sprite(7, spriteOpts);
+  frame.text("HP", textOpts);
+  const metrics = frame.measureText("HP", { family: "monospace", size: 16 });
+
+  assert.deepEqual(host.draw2dSpriteCalls, [{ opts: spriteOpts, texture: 7 }]);
+  assert.deepEqual(host.draw2dTextCalls, [{ opts: textOpts, value: "HP" }]);
+  assert.deepEqual(host.measureTextCalls, [{ font: { family: "monospace", size: 16 }, value: "HP" }]);
+  assert.deepEqual(metrics, { height: 16, width: 40 });
 });
 
 test("makeFrame brackets a render target and reports the finished command list", () => {
