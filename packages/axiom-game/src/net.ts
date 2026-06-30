@@ -43,6 +43,13 @@ export type ConnStatus = "connected" | "connecting" | "disconnected";
 /** One flat per-tick command record (SPEC-13 §4.2 / §16.2); the engine derives its wire codec. */
 export type Intent = Record<string, boolean | number | string>;
 
+/**
+ * Which carrier `joinRoom` wires (SPEC-13 §16.4): the default reliable, ordered
+ * transport, or the unreliable `datagram` carrier (drop/reorder-tolerant — the
+ * newest-wins core already tolerates it). Selected via `configureNet({ transport })`.
+ */
+export type NetCarrier = "reliable" | "datagram";
+
 /** The room-join configuration (SPEC-13 §4.2); `token` is an opaque JWT. */
 export interface JoinConfig {
   /** The authority endpoint URL. */
@@ -61,6 +68,8 @@ export interface NetConfig {
   readonly interpolateRemote: boolean;
   /** Render-time interpolation delay in ticks. */
   readonly interpolationDelayTicks?: number;
+  /** The carrier `joinRoom` wires (SPEC-13 §16.4); defaults to `"reliable"` when unset. */
+  readonly transport?: NetCarrier;
 }
 
 /** The client handle `joinRoom` returns (SPEC-13 §4.2). */

@@ -219,6 +219,10 @@ export type { Match, Matchmaker, MatchmakeOptions, Room, RoomConfig, RoomHostFac
 export { makeNetParticipants } from "./net-participants.ts";
 export type { DecodedSnapshot } from "./net-participants.ts";
 
+// SPEC-13 §16.5 — the delta-transparent inbound-snapshot path: a delta frame reconstructs the same full participant state a full keyframe carries, so the author always sees full state.
+export { makeSnapshotIntake, reconstructSnapshot } from "./net-snapshot.ts";
+export type { SnapshotFrameKind, SnapshotIntake } from "./net-snapshot.ts";
+
 /*
  * The `@axiom/client` binding for the net seam (SPEC-13): the runtime adapts a real
  * `AxiomClient` into the `NetTransport` factory, and owns the deterministic
@@ -226,11 +230,12 @@ export type { DecodedSnapshot } from "./net-participants.ts";
  * `AxiomClientLike`; the app supplies the real client at boot (see axiom-net.ts).
  */
 export { axiomNetFactory, decodeIntent, encodeIntent, netTransportFromClient } from "./axiom-net.ts";
-export type { AxiomClientLike } from "./axiom-net.ts";
+export type { AxiomClientLike, NetBind, PredictionGate } from "./axiom-net.ts";
 export type {
   ConnStatus,
   Intent,
   JoinConfig,
+  NetCarrier,
   NetClient,
   NetConfig,
   NetParticipants,

@@ -36,9 +36,12 @@
  *
  *   import { AxiomClient } from "@axiom/client";
  *   import { axiomNetFactory } from "@axiom/game";
- *   bindNetTransport(axiomNetFactory((config) => {
+ *   bindNetTransport(axiomNetFactory((config, carrier) => {
  *     const client = new AxiomClient();
- *     client.connect({ roomId: config.roomId, token: config.token, url: config.url });
+ *     // The SDK resolves `carrier` from `configureNet({ transport })`; the app maps a
+ *     // "datagram" carrier to the unreliable `DatagramTransport` via connect's
+ *     // `transportFactory` (the browser-only step), else the reliable default.
+ *     client.connect({ ...config, transportFactory: carrierTransport(carrier) });
  *     return client;
  *   }));
  *
@@ -53,9 +56,17 @@
  * single-seat / local `NetParticipants` `net.ts` already documents.
  */
 
-import type { ConnStatus, Intent, JoinConfig, NetTransport, NetTransportFactory } from "./net.ts";
+import {
+  type ConnStatus,
+  type Intent,
+  type JoinConfig,
+  type NetCarrier,
+  type NetTransport,
+  type NetTransportFactory,
+  boundNetConfig,
+} from "./net.ts";
 import type { PlayerId, Result } from "./vocabulary.ts";
-import { pick } from "./control-flow.ts";
+import { orElse, pick } from "./control-flow.ts";
 
 /*
  * The subset of `AxiomClient` (`@axiom/client`) this adapter drives. A real
@@ -75,8 +86,21 @@ export interface AxiomClientLike {
   readonly onStatus: (handler: (status: ConnStatus) => void) => void;
   /** Register a rejected-intent observer (the authority's `REASON_*` code). */
   readonly onRejected: (handler: (reasonCode: number) => void) => void;
+  /** The client-side prediction facade (`AxiomClient.predicting()`) the net config toggles. */
+  readonly predicting: () => PredictionGate;
   /** Send `LeaveRoom` (when connected) and close the connection. */
   readonly disconnect: () => void;
+}
+
+/**
+ * The prediction-toggle subset of `@axiom/client`'s `Prediction` facade this
+ * binding drives: `configureNet({ predictLocalPlayer })` flows to `setEnabled`
+ * once at join. The actual resimulation replay (`Prediction.resimulate`) is
+ * consumed by the runtime loop, exactly as the authority loop is runtime-tier.
+ */
+export interface PredictionGate {
+  /** Opt the local player's prediction on/off (default off — authoritative-only). */
+  readonly setEnabled: (enabled: boolean) => void;
 }
 
 /** The byte width of a `u32` field-count / length prefix or an `f32`-sized scalar. */
@@ -241,12 +265,30 @@ export const netTransportFromClient = (client: AxiomClientLike): NetTransport =>
   status: (): ConnStatus => client.getStatus(),
 });
 
+/** The default carrier when the net config selects none — the reliable, ordered transport. */
+const DEFAULT_CARRIER: NetCarrier = "reliable";
+
+/** The configured carrier (SPEC-13 §16.4), resolving an unset selection to reliable branchlessly. */
+const configuredCarrier = (): NetCarrier => orElse(boundNetConfig().transport, DEFAULT_CARRIER);
+
+/**
+ * Opens an `@axiom/client` for a join — the one browser-only step the app supplies.
+ * It receives the resolved carrier so the app can wire the reliable transport or a
+ * `DatagramTransport` into `client.connect`; the SDK owns the carrier SELECTION,
+ * the app owns the concrete (browser) transport construction.
+ */
+export type NetBind = (config: JoinConfig, carrier: NetCarrier) => AxiomClientLike;
+
 /*
  * The runtime's `NetTransportFactory` over `@axiom/client`: each `joinRoom` opens a
- * client for the config (the `open` callback the app supplies — the one browser-only
- * step) and wraps it as a `NetTransport`. Pass this to `bindNetTransport`.
+ * client for the config + the configured carrier, applies the configured local-player
+ * prediction toggle, and wraps it as a `NetTransport`. Pass this to `bindNetTransport`.
+ * Both `configureNet` projections (prediction §16.5, carrier §16.4) land here.
  */
 export const axiomNetFactory =
-  (open: (config: JoinConfig) => AxiomClientLike): NetTransportFactory =>
-  (config: JoinConfig): NetTransport =>
-    netTransportFromClient(open(config));
+  (open: NetBind): NetTransportFactory =>
+  (config: JoinConfig): NetTransport => {
+    const client = open(config, configuredCarrier());
+    client.predicting().setEnabled(boundNetConfig().predictLocalPlayer);
+    return netTransportFromClient(client);
+  };

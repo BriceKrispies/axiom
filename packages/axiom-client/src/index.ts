@@ -55,6 +55,10 @@ export {
 } from "./snapshot-delta.ts";
 export type { ServerSnapshotForDeltaFields } from "./snapshot-delta.ts";
 
+// The prediction core (Rust twin): the pure resimulation fold plus the `Prediction` facade `predicting()` returns.
+export { resimulate } from "./prediction.ts";
+export type { Prediction } from "./prediction.ts";
+
 export {
   KIND_CLIENT_INTENT,
   KIND_CLIENT_INTENT_FOR,
