@@ -13,6 +13,28 @@
  */
 
 import type { FontSpec, Handle, Rect, Rgba, Seconds, TextureId, Vec2 } from "./vocabulary.ts";
+import { pick } from "./control-flow.ts";
+
+/*
+ * A scalar-or-`[min, max]` emitter field (SPEC-04 §10.1). The contract's
+ * `lifetime` / `speed` / `size` are `[min, max]` ranges from which each particle
+ * draws a deterministic in-range value (native-side); a single `number` is the
+ * backward-compatible degenerate range `[v, v]`. {@link rangeOf} resolves either
+ * form to a `[min, max]` pair branchlessly.
+ */
+export type RangeOrScalar = number | readonly [number, number];
+
+/*
+ * Resolve a {@link RangeOrScalar} to its `[min, max]` pair without a branch:
+ * `[value].flat()` is `[v]` for a scalar (so `min = max = v`, the degenerate
+ * range) or `[min, max]` for a tuple. Reading index `0` and index `length - 1`
+ * yields both endpoints for either shape — the scalar's single element answers
+ * both `pick`s, the tuple's two answer one each.
+ */
+export const rangeOf = (value: RangeOrScalar): readonly [number, number] => {
+  const flat = [value].flat();
+  return [pick(flat, 0), pick(flat, flat.length - 1)];
+};
 
 /*
  * The per-shape 2D fill + stroke + layer/alpha a Wave-2.5 draw carries (SPEC-04
@@ -68,24 +90,25 @@ export interface LineStyle {
 }
 
 /*
- * A particle-emitter recipe (SPEC-04 §10.1). Wave-2's `draw2dCreateEmitter` takes a
- * single `lifetimeSeconds`/`speed`/`size` scalar (not the spec's `[min, max]`
- * ranges — the ranged form awaits a richer export), and `gravity`/`layer` default
- * host-side (the adapter) to no gravity / layer 0.
+ * A particle-emitter recipe (SPEC-04 §10.1). `lifetimeSeconds` / `speed` / `size`
+ * are each a {@link RangeOrScalar}: a `[min, max]` range from which every particle
+ * draws a deterministic in-range value (native-side, §6), or a single scalar `v`
+ * for the degenerate `[v, v]` range (the backward-compatible fixed-value form).
+ * `gravity` / `layer` default host-side (the adapter) to no gravity / layer 0.
  */
 export interface EmitterConfig {
   /** How many particles a burst spawns. */
   readonly count: number;
-  /** Each particle's lifetime in seconds. */
-  readonly lifetimeSeconds: number;
-  /** The initial particle speed. */
-  readonly speed: number;
+  /** Each particle's lifetime in seconds — a `[min, max]` range or a fixed scalar. */
+  readonly lifetimeSeconds: RangeOrScalar;
+  /** The initial particle speed — a `[min, max]` range or a fixed scalar. */
+  readonly speed: RangeOrScalar;
   /** The emission cone half-angle (radians). */
   readonly spread: number;
   /** A constant acceleration applied each step (default: none). */
   readonly gravity?: Vec2;
-  /** The particle quad size. */
-  readonly size: number;
+  /** The particle quad size — a `[min, max]` range or a fixed scalar. */
+  readonly size: RangeOrScalar;
   /** The colour at spawn. */
   readonly colorStart: Rgba;
   /** The colour at death (the particle fades between the two). */

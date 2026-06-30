@@ -54,8 +54,9 @@
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** behavioral facade — [`Draw2dApi`] — alongside
 //! its identity vocabulary (Module Law #8): the [`EmitterId`] handle and
-//! [`EmitterConfig`] recipe the particle methods traffic in, and the
-//! [`SpriteAnimation`] recipe the flip-book sampler reads (`pub use ids::{…}`).
+//! [`EmitterConfig`] recipe (with its `[min, max]` [`Range`] fields) the particle
+//! methods traffic in, and the [`SpriteAnimation`] recipe the flip-book sampler
+//! reads (`pub use ids::{…}`).
 //! The neutral draw-contract value types still live in the host layer; callers
 //! reach them via `use axiom_host::{Draw2dList, Common2d, Fill2d, Rect, Rgba, …}`.
 
@@ -64,4 +65,4 @@ mod ids;
 mod particles;
 
 pub use draw2d_api::Draw2dApi;
-pub use ids::{EmitterConfig, EmitterId, SpriteAnimation};
+pub use ids::{EmitterConfig, EmitterId, Range, SpriteAnimation};

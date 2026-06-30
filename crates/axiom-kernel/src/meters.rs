@@ -34,6 +34,17 @@ impl Meters {
         ][value.is_finite() as usize]
     }
 
+    /// Construct a length from a *computed* scalar, mapping any non-finite result
+    /// (NaN / ±infinity) to `0.0` so the constructor is **total** — it never
+    /// fails. This is the sanctioned path for values produced by arithmetic
+    /// (interpolation between two endpoints, a deterministic in-range pick, a
+    /// scale) where a fallible [`Meters::new`] would leave an unreachable error
+    /// arm: the inputs are already finite, so the sanitizing branch exists only as
+    /// a defined fallback. Mirrors [`crate::Ratio::finite_or_zero`].
+    pub const fn finite_or_zero(value: f32) -> Self {
+        Meters([0.0, value][value.is_finite() as usize])
+    }
+
     /// The underlying scalar value, in metres.
     pub const fn get(self) -> f32 {
         self.0
@@ -76,6 +87,18 @@ mod tests {
             Meters::new(f32::INFINITY).unwrap_err().code(),
             KernelErrorCode::NonFiniteScalar
         );
+    }
+
+    #[test]
+    fn finite_or_zero_passes_finite_and_sanitizes_nonfinite() {
+        // Finite values pass through unchanged (including negatives and zero).
+        assert_eq!(Meters::finite_or_zero(2.5).get(), 2.5);
+        assert_eq!(Meters::finite_or_zero(-0.25).get(), -0.25);
+        assert_eq!(Meters::finite_or_zero(0.0).get(), 0.0);
+        // The non-finite fallback maps to a finite zero.
+        assert_eq!(Meters::finite_or_zero(f32::NAN).get(), 0.0);
+        assert_eq!(Meters::finite_or_zero(f32::INFINITY).get(), 0.0);
+        assert_eq!(Meters::finite_or_zero(f32::NEG_INFINITY).get(), 0.0);
     }
 
     #[test]

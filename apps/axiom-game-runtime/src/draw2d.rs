@@ -13,16 +13,18 @@
 //! ## Boundary convention (the established slice / scalar / handle rule)
 //! A point / bounds crosses as a `&[f64]` slice (`bounds = [x, y, w, h]`); a
 //! colour as its packed `0xRRGGBBAA` `u32`; an emitter recipe as one flat
-//! `&[f64]` config slice (count, lifetime, speed, spread, gravityX, gravityY,
-//! size, colorStart, colorEnd, layer) — one slice keeps the call within the
-//! engine's argument-count budget. Handles cross as raw `u64` (`f64` at the JS
+//! `&[f64]` config slice (count, lifetimeMin, lifetimeMax, speedMin, speedMax,
+//! spread, gravityX, gravityY, sizeMin, sizeMax, colorStart, colorEnd, layer) —
+//! the ranged `[min, max]` fields (SPEC-04 §10.1) each cross as their two
+//! endpoints, and one slice keeps the call within the engine's argument-count
+//! budget. Handles cross as raw `u64` (`f64` at the JS
 //! edge). [`GameBridge::draw2d_finish`] returns the sorted command list as a flat,
 //! self-describing `[kind, layer, submission, len, …geometry]` stream — the
 //! deterministic `(kind, layer, submission)` ordering a `Frame` consumer always
 //! read, now followed by the `len` per-shape geometry columns a 2D presenter
 //! rasterizes (see that method for the per-kind payload layout).
 
-use axiom_draw2d::{Draw2dApi, EmitterConfig, EmitterId, SpriteAnimation};
+use axiom_draw2d::{Draw2dApi, EmitterConfig, EmitterId, Range, SpriteAnimation};
 use axiom_host::{
     Common2d, Draw2dCommand, Fill2d, Rect, RenderTargetId, Rgba, SpriteDraw2d, Stroke2d, TextAlign,
     TextDraw2d, TextureId,
@@ -125,19 +127,23 @@ fn fill_columns(fill: Option<Fill2d>) -> [f64; 3] {
 
 impl GameBridge {
     /// Register a particle emitter from a flat config slice (`draw2dCreateEmitter`)
-    /// `[count, lifetime, speed, spread, gravityX, gravityY, size, colorStart,
-    /// colorEnd, layer]`; returns its raw [`EmitterId`].
+    /// `[count, lifetimeMin, lifetimeMax, speedMin, speedMax, spread, gravityX,
+    /// gravityY, sizeMin, sizeMax, colorStart, colorEnd, layer]`; returns its raw
+    /// [`EmitterId`]. The `lifetime` / `speed` / `size` fields cross as their two
+    /// `[min, max]` range endpoints (SPEC-04 §10.1 ranged fields); the TS facade
+    /// resolves a scalar `v` to the degenerate `[v, v]` before packing, so a fixed
+    /// value is just a zero-width range here.
     pub fn draw2d_create_emitter(&mut self, config: &[f64]) -> u64 {
         let recipe = EmitterConfig {
             count: at(config, 0) as u32,
-            lifetime: seconds(at(config, 1)),
-            speed: meters(at(config, 2)),
-            spread: Ratio::finite_or_zero(at(config, 3) as f32),
-            gravity: Vec2::new(at(config, 4) as f32, at(config, 5) as f32),
-            size: meters(at(config, 6)),
-            color_start: rgba(at(config, 7) as u32),
-            color_end: rgba(at(config, 8) as u32),
-            layer: at(config, 9) as i32,
+            lifetime: Range::new(seconds(at(config, 1)), seconds(at(config, 2))),
+            speed: Range::new(meters(at(config, 3)), meters(at(config, 4))),
+            spread: Ratio::finite_or_zero(at(config, 5) as f32),
+            gravity: Vec2::new(at(config, 6) as f32, at(config, 7) as f32),
+            size: Range::new(meters(at(config, 8)), meters(at(config, 9))),
+            color_start: rgba(at(config, 10) as u32),
+            color_end: rgba(at(config, 11) as u32),
+            layer: at(config, 12) as i32,
         };
         u64::from(self.draw2d.create_emitter(recipe).raw())
     }
@@ -595,19 +601,40 @@ mod tests {
         GameBridge::new(demo_app().build(), 0, STEP, 1)
     }
 
-    /// A particle emitter recipe: 3 particles, layer 5, opaque→clear fade.
-    fn emitter() -> [f64; 10] {
+    /// A particle emitter recipe: 3 particles, layer 5, opaque→clear fade. The
+    /// `lifetime` / `speed` / `size` fields cross as `[min, max]` endpoints
+    /// (SPEC-04 §10.1); here each is a degenerate fixed `[v, v]` range.
+    fn emitter() -> [f64; 13] {
         [
             3.0,                  // count
-            2.0,                  // lifetime
-            10.0,                 // speed
+            2.0,                  // lifetimeMin
+            2.0,                  // lifetimeMax
+            10.0,                 // speedMin
+            10.0,                 // speedMax
             0.25,                 // spread
             0.0,                  // gravityX
             -4.0,                 // gravityY
-            0.5,                  // size
+            0.5,                  // sizeMin
+            0.5,                  // sizeMax
             f64::from(u32::MAX),  // colorStart 0xffffffff
             0.0,                  // colorEnd   0x00000000
             5.0,                  // layer
+        ]
+    }
+
+    /// A particle emitter recipe whose `size` spans a real `[0.2, 0.8]` range, so
+    /// the burst's particle quads take distinct, deterministic in-range sizes.
+    fn ranged_emitter() -> [f64; 13] {
+        [
+            4.0, // count
+            2.0, 2.0, // lifetime [min, max]
+            10.0, 10.0, // speed [min, max]
+            0.0, // spread (clean jet, so size is the only varying field)
+            0.0, 0.0, // gravity
+            0.2, 0.8, // size [min, max]
+            f64::from(u32::MAX),
+            f64::from(u32::MAX),
+            5.0,
         ]
     }
 
@@ -656,6 +683,28 @@ mod tests {
         assert_eq!(recs[1].2.len(), 5);
         // Same facade calls + same dt ⇒ byte-identical command list.
         assert_eq!(frame(), list);
+    }
+
+    #[test]
+    fn ranged_emitter_picks_distinct_in_range_particle_sizes_and_replays() {
+        // SPEC-04 §10.1: a `[0.2, 0.8]` size range gives each particle a distinct,
+        // deterministic in-range quad size across the wasm boundary.
+        let burst = || {
+            let mut b = bridge();
+            let e = b.draw2d_create_emitter(&ranged_emitter());
+            b.draw2d_emit(e, &[0.0, 0.0], &[1.0, 0.0]);
+            b.draw2d_advance_particles(0.1);
+            records(&b.draw2d_finish())
+        };
+        let recs = burst();
+        // Each record is a particle quad `[cx, cy, size, colorRGBA, alpha]`.
+        let sizes: Vec<f64> = recs.iter().map(|(_, _, p)| p[2]).collect();
+        assert_eq!(sizes.len(), 4);
+        assert!(sizes.iter().all(|&s| (0.2..0.8).contains(&s)), "in range: {sizes:?}");
+        assert!(sizes.iter().any(|&s| s != sizes[0]), "sizes vary: {sizes:?}");
+        // §6 determinism-as-function: the same emit reproduces the byte-identical
+        // flattened particle stream.
+        assert_eq!(burst(), recs);
     }
 
     #[test]

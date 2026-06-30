@@ -285,6 +285,7 @@ impl Draw2dApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::Range;
     use axiom_host::{Glyph2d, Shadow2d, Stroke2d, TextAlign};
 
     fn ratio(v: f32) -> Ratio {
@@ -318,11 +319,11 @@ mod tests {
     fn emitter(count: u32, layer: i32) -> EmitterConfig {
         EmitterConfig {
             count,
-            lifetime: seconds(2.0),
-            speed: meters(10.0),
+            lifetime: Range::exact(seconds(2.0)),
+            speed: Range::exact(meters(10.0)),
             spread: ratio(0.25),
             gravity: Vec2::new(0.0, -4.0),
-            size: meters(0.5),
+            size: Range::exact(meters(0.5)),
             color_start: red(),
             color_end: clear(),
             layer,
