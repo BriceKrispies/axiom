@@ -58,6 +58,7 @@ mod raster_triangle;
 mod raster_vertex;
 mod sdf_raymarch;
 mod software_framebuffer;
+mod software_raster_result;
 mod software_rasterizer;
 
 // The host-neutral 2D draw-list (`host::Draw2dList`) software consumer: composites

@@ -29,6 +29,7 @@
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** facade: [`RenderApi`].
 
+mod draw_order;
 mod render_api;
 mod render_camera;
 mod render_command;
