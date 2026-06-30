@@ -10,6 +10,39 @@ as **done** and the code does **not** back it, **and** no footnote/deferral note
 discloses it. Documented deferrals (README ¹–⁵ and per-spec notes) are *not*
 counted as gaps. Four auditor over-reports were refuted and dropped.
 
+## Remediation status (2026-06-30)
+
+**The gaps below have since been closed.** A re-verification against the
+advanced tree found most were already addressed by in-flight TS-projection work;
+the genuine remainder was then implemented:
+
+- **SPEC-02** — full 12-method `World` (+ `Transform` value type) and the §7
+  hierarchy/lifecycle proof: **closed**.
+- **SPEC-03** — `v2` namespace, the pure predicates, `overlapBox`/`overlapCircle`/
+  `raycast`, and `lerp` routed to native f32 (determinism smell fixed): **closed**.
+- **SPEC-04** — full `Frame` 2D projection + §10.2 `sampleAnimation` +
+  `measureText`/`loadFont`/`loadTexture`; GPU `present_draw2d` now rasterizes
+  rect+sprite at proven parity with software (§7 both-backends proof); the §7
+  marshalled-list proof landed. Residual deferrals: GPU circle/ellipse/line/
+  particle, and both-backends path/gradient/text-glyph raster.
+- **SPEC-05** — input crosses the wasm boundary (injection + reads), host
+  `bindAction` wired, DOM edge feeding `sample`; §7 cross-chunk + snapshot-stream
+  replay proofs landed: **closed**.
+- **SPEC-09** — TS `Ui` overlay + `solveLayout`/`LayoutNode` + the §7 button
+  truth-table and presentation-leak proofs: **closed**.
+- **SPEC-11** — §7 render-one-frame slice ("nova-roll") + GPU↔canvas2d parity
+  (cylinder+emissive) via `axiom-shot`: **closed**. Residual deferral: 3D
+  translucency blend + `MeshData`.
+- **SPEC-13** — the whole TS authoring surface (`onSnapshot`/`onRestore`, intent
+  codec, per-player twin, `hostRoom`/`matchmake`, `NetParticipants`), the
+  cross-instance determinism golden, and the authored-callback netplay-server:
+  **closed**. Deferrals by decision: physics net-prediction OFF, delta/JWT/
+  unreliable transport.
+
+The medium/low proof-rigor items and the documented deferrals (§"Real but
+already-disclosed") that were not in scope remain as noted. The original audit
+findings below are preserved as the historical record.
+
 ## Headline
 
 The **native Rust sim spine is solid** — nearly every spec's §4.1 facade matches

@@ -96,18 +96,18 @@ is tracked here and is the single index of the program.
 |------|-----------|----------|-------------|---------------------------|--------|
 | [00](SPEC-00-authoring-boundary-and-frame-model.md) | Authoring boundary & frame model | §0–§2 | boundary | **new** TS `@axiom/game` SDK + wasm boundary app | **Landed** |
 | [01](SPEC-01-deterministic-randomness.md) | Deterministic randomness | §3, §17 | sim | extend `axiom-entropy` + projection | **Landed** |
-| [02](SPEC-02-entities-components-queries.md) | Entities, components, queries, hierarchy | §4 | sim | extend `axiom-ecs` / `axiom-scene` + projection | **Partial** ⁶ |
-| [03](SPEC-03-math-and-spatial-queries.md) | Math & spatial queries | §5 | sim | extend `axiom-math` (scalar helpers) + projection | **Partial** ⁷ |
-| [04](SPEC-04-2d-surface.md) | 2D surface (shapes/text/sprites/particles) | §10 | presentation | **new** module `axiom-draw2d` + backend arms | **Partial** ¹ |
-| [05](SPEC-05-input.md) | Input (keyboard, bindings, pointer, timing) | §8 | sim | extend `axiom-input` module | **Partial** ⁸ |
+| [02](SPEC-02-entities-components-queries.md) | Entities, components, queries, hierarchy | §4 | sim | extend `axiom-ecs` / `axiom-scene` + projection | **Landed** |
+| [03](SPEC-03-math-and-spatial-queries.md) | Math & spatial queries | §5 | sim | extend `axiom-math` (scalar helpers) + projection | **Landed** |
+| [04](SPEC-04-2d-surface.md) | 2D surface (shapes/text/sprites/particles) | §10 | presentation | **new** module `axiom-draw2d` + backend arms | **Landed** ¹ |
+| [05](SPEC-05-input.md) | Input (keyboard, bindings, pointer, timing) | §8 | sim | extend `axiom-input` module | **Landed** |
 | [06](SPEC-06-grid-pathfinding-tilespace.md) | Grid, pathfinding, tile space | §6–§7 | sim | **new** module `axiom-grid` | **Landed** |
 | [07](SPEC-07-timers-and-state-machines.md) | Timers & state machines | §9 | sim | **new** module `axiom-tick` (+ kernel `TickSchedule`) | **Landed** |
 | [08](SPEC-08-audio.md) | Audio (synthesis, playback, analysis) | §13 | presentation | **new** module `axiom-audio` + platform arm | **Landed** ² |
-| [09](SPEC-09-ui-hud-and-tween.md) | UI/HUD overlay & tween/easing | §14, §12 | presentation | extend `axiom-interface` + **new** `axiom-tween` | **Partial** ⁹ |
+| [09](SPEC-09-ui-hud-and-tween.md) | UI/HUD overlay & tween/easing | §14, §12 | presentation | extend `axiom-interface` + **new** `axiom-tween` | **Landed** |
 | [10](SPEC-10-physics-extensions.md) | Physics extensions (angular, friction) | impl §10 | sim | extend `axiom-physics` module | **Landed** ³ |
-| [11](SPEC-11-3d-scene-surface.md) | 3D scene authoring surface | §11 | presentation | extend `axiom` / `axiom-render` / `axiom-scene` | **Partial** ⁴ |
+| [11](SPEC-11-3d-scene-surface.md) | 3D scene authoring surface | §11 | presentation | extend `axiom` / `axiom-render` / `axiom-scene` | **Landed** ⁴ |
 | [12](SPEC-12-host-bridge-and-persistence.md) | Host bridge & persistence | §15 | boundary | extend `axiom-host` + platform arm + TS bridge | **Landed** |
-| [13](SPEC-13-multiplayer-netcode-authoring.md) | Multiplayer & netcode authoring | §16 | sim | extend `axiom-net-protocol`/`-netcode`/`-client-core` + projection | **Partial** ⁵ |
+| [13](SPEC-13-multiplayer-netcode-authoring.md) | Multiplayer & netcode authoring | §16 | sim | extend `axiom-net-protocol`/`-netcode`/`-client-core` + projection | **Landed** ⁵ |
 | [14](SPEC-14-typescript-authoring-sdk.md) | TypeScript authoring SDK (`@axiom/game`) | §1–§4 | boundary | `@axiom/game` `Scene` + factories (in SPEC-00's pkg/app) | **Landed** |
 
 Every spec's **native facade has landed on `main`**, and the sim spine (the
@@ -118,23 +118,29 @@ projection, the wasm boundary, or a promised proof is still missing). The wasm
 runtime bridge and live browser presentation are browser-proven (the native
 sandbox cannot run browser WebGPU / Web Audio).
 
-A 2026-06-29 adversarial spec-vs-implementation audit catalogues the precise
-gaps behind every **Partial** — see
-[`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
-The dominant gap is the **`@axiom/game` TypeScript projection**: several native
-facades have no (or partial) TS surface, and per this directory's own rule *a
-native facade with no TS projection is half-built*. Status notes:
+A 2026-06-29 adversarial spec-vs-implementation audit catalogued the precise
+gaps behind every then-**Partial** spec — see
+[`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md)
+(and its **2026-06-30 remediation note**). As of 2026-06-30 those gaps are
+**closed**: SPEC-02 (full 12-method `World` + hierarchy/lifecycle proof),
+SPEC-03 (`v2` namespace + pure predicates + `lerp` routed to native f32),
+SPEC-05 (input carried across the wasm boundary + replay proofs), SPEC-09
+(`Ui` overlay + `solveLayout` + button truth-table/presentation-leak proofs),
+and SPEC-13 (the whole multiplayer TS authoring surface + cross-instance
+determinism golden + authored netplay-server) are now **Landed**. SPEC-04 and
+SPEC-11 are Landed with the residual deferrals noted below. Status notes:
 
-- ¹ **SPEC-04** (Partial) — the neutral `Draw2dList` core is complete (all shapes,
-  sprite, text, gradients, camera/transform, layer sort). **The TS projection is
-  absent**: `@axiom/game`'s `Frame` exposes only `{ tick }` — none of the §4.2 2D
-  draw methods exist. The software backend rasterizes **rect + sprite (src-over
-  alpha)**; circle/line/path/gradient/stroke/text are skipped, and the **GPU
-  backend `present_draw2d` is a no-op**. The §10.2 flip-book sampler
-  (`sampleAnimation`) is **landed** end-to-end — the pure native
-  `Draw2dApi::sample_animation`, the `draw2dSampleAnimation` wasm bridge, and the
-  `@axiom/game` `sampleAnimation` projection — on the now-present kernel `Seconds`
-  scalar (the same scalar that unblocked §10.1 particles and §10.3 render targets).
+- ¹ **SPEC-04** (Landed) — the neutral `Draw2dList` core, the full `@axiom/game`
+  `Frame` 2D projection (shapes, sprite, particles, render targets, camera/
+  transform, layer sort), and the §10.2 `sampleAnimation` flip-book sampler are
+  all landed, plus the `measureText`/`loadFont`/`loadTexture` handle seams. The
+  **software** backend rasterizes rect / circle / ellipse / line / particle /
+  sprite (per-shape fill + stroke, src-over alpha); the **GPU** backend now
+  rasterizes **rect + sprite (alpha, layer sort)** in its wgpu offscreen/`wasm32`
+  platform arm, proven at parity with software on that subset (the §7
+  both-backends alpha proof passes). Still deferred: GPU raster of
+  circle/ellipse/line/particle (the software backend has them), and on **both**
+  backends path / gradient / text glyph-run raster (recognised, not drawn).
 - ² **SPEC-08** (Landed) — neutral core + Web Audio arm landed; in the wasm arm
   only `PlayTone` produces sound — `Load`/`PlaySample`/`PlayMusic`/`Stop` are
   currently no-ops. Live playback and the optional §13.1 analyser are
@@ -144,37 +150,19 @@ native facade with no TS projection is half-built*. Status notes:
   must not predict physics. The TS `Sim.physics` adds bodies but **does not yet
   project colliders/materials/friction** (§4.2's "already projected on collider
   attach").
-- ⁴ **SPEC-11** (Partial) — cylinder + emissive/roughness/opacity + hemisphere
-  ambient landed (Rust); `opacity` is carried but **3D translucency does not blend
-  yet** (needs back-to-front ordering); `MeshData` deferred. **No end-to-end
-  render-one-frame slice proof** exists (the "nova-roll" smoke path is
-  unimplemented), and there is **no GPU↔canvas2d backend-parity test**.
-- ⁵ **SPEC-13** (Partial) — per-player Rust spine landed; **physics net-prediction
-  is OFF by decision** (authority/non-physics state only); delta encoding, JWT
-  verification, and unreliable transports are follow-ups. **The TS authoring
-  surface is largely unbuilt**: `onSnapshot`/`onRestore`, the `Intent`-derived wire
-  codec, the per-player message twin (`ClientIntentFor`/`ServerSnapshotFor`),
-  `hostRoom`, and `matchmake` are not projected; the cross-instance determinism
-  golden and the byte-parity fixture are not implemented; and
-  `tools/axiom-netplay-server` still runs hard-coded movement, not the authored
-  callback.
-- ⁶ **SPEC-02** (Partial) — native `axiom-ecs`/`axiom-scene` landed; the
-  `@axiom/game` `World` projects only 7 of the 12 §4.2 methods —
-  `alive`/`has`/`remove`/`setParent`/`parentOf`/`worldTransform` and the
-  `Transform` value type are not bridged, so the hierarchy/lifecycle proof cannot
-  run.
-- ⁷ **SPEC-03** (Partial) — native `axiom-math` + scene queries landed; the TS
-  projection ships only `clamp`/`lerp`/`normalizeAngle`/`overlapCircle`. The `v2`
-  vector namespace, the pure predicates (`aabbOverlap`/`pointInRect`/
-  `circleOverlap`), and `overlapBox`/`raycast` are unbuilt. **TS `lerp` is
-  re-implemented in JS (f64) rather than routed to the authoritative native f32** —
-  a sim-class determinism risk to fix, not just a missing test.
-- ⁸ **SPEC-05** (Partial) — the native `axiom-input` module landed, but **input is
-  not carried across the wasm boundary**: `WasmGame` exposes no input method, so
-  the `Sim.input` surface is non-functional in the live browser.
-- ⁹ **SPEC-09** (Partial) — native `axiom-tween` + `UiSurface` landed, but **no TS
-  `Ui` overlay surface exists**, and `solveLayout`/`LayoutNode` are referenced by
-  the spec and contract yet exist in **no source file** (Rust or TS).
+- ⁴ **SPEC-11** (Landed) — cylinder + emissive/roughness/opacity + hemisphere
+  ambient landed; the §7 render-one-frame slice ("nova-roll") and the
+  GPU↔canvas2d backend-parity proof (cylinder+emissive) are landed (driven via
+  `axiom-shot`). Still deferred: **3D translucency blending** (`opacity` is
+  carried but not yet blended — needs back-to-front ordering) and author-supplied
+  `MeshData`.
+- ⁵ **SPEC-13** (Landed) — the per-player Rust spine, the full TS authoring
+  surface (`onSnapshot`/`onRestore`, the `Intent`-derived wire codec, the
+  per-player `ClientIntentFor`/`ServerSnapshotFor` twin, `hostRoom`, `matchmake`),
+  the cross-instance determinism golden, and the authored-callback netplay-server
+  are all landed. Deferred by decision: **physics net-prediction is OFF**
+  (authority/non-physics state only), and delta encoding, JWT verification, and
+  unreliable transports are follow-ups.
 
 ## Cross-cutting law: determinism & replay (contract §17)
 

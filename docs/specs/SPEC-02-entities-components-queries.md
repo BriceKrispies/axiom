@@ -1,8 +1,6 @@
 # SPEC-02 — Entities, components, queries, hierarchy
 
-> Status: Partial — native facade landed; TS `World` projection incomplete. See
-> README footnote ⁶ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
-> Landed (2026-06-28, native): `axiom-ecs::DynamicComponents::{entities_with, entities_with_all}` + `axiom-scene::SceneApi::{children_of, despawn_subtree}`; `@axiom/game` `Sim.world` (`makeWorld`/`BridgeWorld`) projects **7 of 12** §4.2 `World` methods. Not yet bridged: `alive`/`has`/`remove`/`setParent`/`parentOf`/`worldTransform` and the `Transform` value type — so the §7 hierarchy/lifecycle proof cannot run.
+> Status: Landed (2026-06-30). Native `axiom-ecs`/`axiom-scene` facade + the full 12-method `@axiom/game` `World` (incl. `alive`/`has`/`remove`/`setParent`/`parentOf`/`worldTransform` and the `Transform` value type) + the §7 hierarchy/lifecycle proof (parent → composed `worldTransform` → `despawnSubtree` → child gone). See the README ledger and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
 > Contract: §4, §4.1   Vocabulary: Spawn/despawn + pooling, Offset-group / formation (transform hierarchy)   Determinism: sim
 
 ## 1. Summary
