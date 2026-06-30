@@ -41,6 +41,9 @@ axiom-canvas2d-backend = { path = "../../modules/axiom-canvas2d-backend" }
 # consumes and the validated presentation request it is sized from.
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-kernel = { path = "../../crates/axiom-kernel" }
+# Math layer: the 2D parity proof authors a `Draw2dList` whose commands carry
+# math's Mat3 / Vec2 (baked transforms + rect corners).
+axiom-math = { path = "../../crates/axiom-math" }
 # Renderable apps the tool can screenshot (rlib). Apps are leaves; depending on
 # them here is fine because this tool is outside the engine workspace/graph.
 axiom-retro-fps-browser = { path = "../../apps/axiom-retro-fps-browser" }

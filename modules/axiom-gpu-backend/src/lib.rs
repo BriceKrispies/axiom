@@ -33,6 +33,28 @@ mod gpu_backend_api;
 // builds and is covered on native exactly as on wasm.
 mod frame_packet_adapter;
 
+// The COVERED CORE of the GPU 2D raster arm: walk a layer-sorted host::Draw2dList
+// into backend-neutral quad geometry (positions, UVs, alpha-folded colours, and a
+// per-quad texture). Pure, branchless, fully covered on native — the 2D peer of
+// `frame_packet_adapter`. Referenced by `GpuBackendApi::present_draw2d` (default
+// build) and the off-screen 2D entry, so it is never dead code.
+mod draw2d_geometry;
+
+// The coverage-EXEMPT platform arm of the GPU 2D raster: the real wgpu pipeline
+// that draws the covered core's geometry, alpha-blended, to a wgpu colour target.
+// The 2D peer of `scene_renderer`; compiled only behind the native `offscreen`
+// feature (the screenshot tool + parity proofs). When the live browser run loop
+// routes GPU 2D it reuses this same renderer (add `target_arch = "wasm32"` here),
+// exactly as the live 3D binding and the off-screen path share `scene_renderer`.
+#[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
+mod draw2d_renderer;
+
+// The native off-screen 2D capture entry — `offscreen` feature, non-wasm. Renders
+// a Draw2dList's geometry into a linear RGBA8 texture and reads it back; drives
+// `axiom-shot` and the SPEC-04 alpha-blend parity proof.
+#[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
+mod draw2d_offscreen;
+
 // The deterministic surface-recovery decision (what to do when the GPU surface
 // is lost/outdated — as a backgrounded mobile browser does). Pure data → action,
 // but its only non-test consumer is the wasm-only live binding, so it is compiled

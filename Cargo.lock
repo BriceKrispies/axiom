@@ -315,6 +315,7 @@ version = "0.1.0"
 dependencies = [
  "axiom-host",
  "axiom-kernel",
+ "axiom-math",
  "bytemuck",
  "pollster",
  "wasm-bindgen",
