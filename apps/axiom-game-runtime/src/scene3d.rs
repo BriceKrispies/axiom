@@ -18,7 +18,7 @@
 
 use axiom::prelude::{
     Angle, Bounds, Camera, Color, DirectionalLight, Entity, FirstPersonInput, Handle, Material,
-    Mesh, Meters, PerspectiveProjection, Ratio, Spawn, Transform, Vec3,
+    Mesh, MeshData, Meters, PerspectiveProjection, Ratio, Spawn, Transform, Vec2, Vec3,
 };
 use axiom_math::Quat;
 
@@ -39,6 +39,22 @@ fn channel(value: f64) -> Ratio {
 fn v3(s: &[f64]) -> Vec3 {
     let [x, y, z]: [f32; 3] = core::array::from_fn(|i| *s.get(i).unwrap_or(&0.0) as f32);
     Vec3::new(x, y, z)
+}
+
+/// A flat `[x,y,z, …]` boundary slice as a `Vec<Vec3>` (a trailing partial triple
+/// is dropped — the SDK always sends whole triples).
+fn v3_list(s: &[f64]) -> Vec<Vec3> {
+    s.chunks_exact(3)
+        .map(|c| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32))
+        .collect()
+}
+
+/// A flat `[u,v, …]` boundary slice as a `Vec<Vec2>` (a trailing partial pair is
+/// dropped — the SDK always sends whole pairs).
+fn v2_list(s: &[f64]) -> Vec<Vec2> {
+    s.chunks_exact(2)
+        .map(|c| Vec2::new(c[0] as f32, c[1] as f32))
+        .collect()
 }
 
 /// A lit material colour from a 3-element linear `[r, g, b]` slice.
@@ -77,6 +93,28 @@ impl GameBridge {
             .nth(index)
             .unwrap_or_else(Mesh::cube);
         self.runtime.app_mut().add_mesh(mesh).id()
+    }
+
+    /// Register an author-supplied mesh from flat vertex arrays (`createMeshData`):
+    /// `positions` / `normals` as flat `[x,y,z, …]` triples, `uvs` as flat
+    /// `[u,v, …]` pairs (an empty slice ⇒ each vertex's UV defaults to the
+    /// origin), and `indices` a triangle list into the vertices. The engine
+    /// validates the geometry and threads it through the same resolved-geometry
+    /// store the primitive `create_mesh` uses, so the returned handle spawns
+    /// exactly like a catalog mesh. Malformed geometry yields `0` — the null
+    /// handle the SDK reads as "no mesh" — never a panic at the boundary.
+    pub fn create_mesh_data(
+        &mut self,
+        positions: &[f64],
+        normals: &[f64],
+        uvs: &[f64],
+        indices: &[u32],
+    ) -> u64 {
+        let data = MeshData::new(v3_list(positions), v3_list(normals), v2_list(uvs), indices.to_vec());
+        self.runtime
+            .app_mut()
+            .add_mesh_data(data)
+            .map_or(0, |handle| handle.id())
     }
 
     /// Register a fully-specified lit material and return its handle id
@@ -226,6 +264,22 @@ mod wasm_exports {
             self.bridge.create_mesh(&kind) as f64
         }
 
+        /// Register an author-supplied mesh from flat vertex arrays
+        /// (`createMeshData`): `positions` / `normals` flat `[x,y,z,…]` triples,
+        /// `uvs` flat `[u,v,…]` pairs (empty ⇒ origin per vertex), `indices` a
+        /// triangle list. Returns the mesh handle id, or `0` on malformed geometry.
+        #[wasm_bindgen(js_name = createMeshData)]
+        pub fn create_mesh_data(
+            &mut self,
+            positions: &[f64],
+            normals: &[f64],
+            uvs: &[f64],
+            indices: &[u32],
+        ) -> f64 {
+            self.bridge
+                .create_mesh_data(positions, normals, uvs, indices) as f64
+        }
+
         /// Register a fully-specified lit material (`createMaterial`): linear base
         /// colour `[r, g, b]`, linear `emissive` `[r, g, b]`, `roughness`, and
         /// `opacity` (`1` opaque).
@@ -351,6 +405,45 @@ mod tests {
         // byte-identically on a second bridge.
         assert_ne!(ids[5], 0);
         assert_eq!(ids, authoring_ids());
+    }
+
+    #[test]
+    fn create_mesh_data_authors_a_renderable_custom_mesh() {
+        // SPEC-11 §9 over the bridge: a mesh authored from explicit flat vertex
+        // arrays (a single triangle) mints a handle and spawns + draws exactly
+        // like a catalog primitive — proving author geometry rides the same rails.
+        let mut b = bridge();
+        b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
+        let positions = [-0.5, -0.5, 0.0, 0.5, -0.5, 0.0, 0.0, 0.5, 0.0];
+        let normals = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let uvs = [0.0, 0.0, 1.0, 0.0, 0.5, 1.0];
+        let mesh = b.create_mesh_data(&positions, &normals, &uvs, &[0, 1, 2]);
+        assert_eq!(mesh, 1, "the authored mesh mints a 1-based handle");
+        let white = b.create_material(&[1.0, 1.0, 1.0], &[0.0, 0.0, 0.0], 1.0, 1.0);
+        let node = b.spawn_renderable(mesh, white, &pose(0.0, 0.0, 0.0, 1.0));
+        assert!(b.world_alive(node));
+        assert_eq!(b.runtime.app_mut().tick(0).draws().len(), 1, "the custom mesh renders");
+    }
+
+    #[test]
+    fn create_mesh_data_with_empty_uvs_is_accepted() {
+        // Omitted UVs (an empty slice) default origin per vertex — still valid.
+        let mut b = bridge();
+        let positions = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let normals = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let mesh = b.create_mesh_data(&positions, &normals, &[], &[0, 1, 2]);
+        assert_eq!(mesh, 1, "a UV-less authored mesh is still registered");
+    }
+
+    #[test]
+    fn create_mesh_data_rejects_malformed_geometry_with_the_null_handle() {
+        // An out-of-range index is rejected at the engine boundary; the bridge
+        // returns 0 (the null handle) rather than panicking across wasm.
+        let mut b = bridge();
+        let positions = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let normals = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let mesh = b.create_mesh_data(&positions, &normals, &[], &[0, 1, 9]);
+        assert_eq!(mesh, 0, "malformed author geometry is the null handle");
     }
 
     #[test]

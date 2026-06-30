@@ -32,6 +32,18 @@ export interface MaterialDescriptor {
   readonly opacity: number;
 }
 
+/** Resolved author mesh geometry (SPEC-11 §11) — optional UVs already defaulted to `[]`. */
+export interface MeshDataDescriptor {
+  /** The per-vertex positions. */
+  readonly positions: readonly Vec3[];
+  /** The per-vertex normals (one per position). */
+  readonly normals: readonly Vec3[];
+  /** The per-vertex UVs (`[]` ⇒ the engine defaults each vertex to the origin). */
+  readonly uvs: readonly Vec2[];
+  /** The triangle-list indices into the vertices. */
+  readonly indices: readonly number[];
+}
+
 /** A perspective camera placement (SPEC-11) — look-at endpoints plus intrinsics. */
 export interface CameraDescriptor {
   /** The eye position. */

@@ -8,6 +8,7 @@ import {
   createController,
   createMaterial,
   createMesh,
+  createMeshData,
   setCamera3D,
   setNodeBounds,
   setNodeTransform,
@@ -32,6 +33,85 @@ test("createMesh resolves each primitive to its dense native kind index", () => 
   const cylinder = createMesh("cylinder");
   assert.deepEqual(host.meshKinds, [0, 1, 2]);
   assert.deepEqual([box, sphere, cylinder], [1, 2, 3]); // distinct opaque handles
+});
+
+test("createMeshData forwards author geometry with explicit UVs and returns a handle", () => {
+  const host = new FakeHost();
+  bindNative(host);
+  const handle = createMeshData({
+    indices: [0, 1, 2],
+    normals: [
+      { x: 0, y: 0, z: 1 },
+      { x: 0, y: 0, z: 1 },
+      { x: 0, y: 0, z: 1 },
+    ],
+    positions: [
+      { x: 0, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0 },
+      { x: 0, y: 1, z: 0 },
+    ],
+    uvs: [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 0, y: 1 },
+    ],
+  });
+  assert.equal(handle, 1); // a fresh opaque mesh handle
+  assert.deepEqual(host.meshDatas, [
+    {
+      indices: [0, 1, 2],
+      normals: [
+        { x: 0, y: 0, z: 1 },
+        { x: 0, y: 0, z: 1 },
+        { x: 0, y: 0, z: 1 },
+      ],
+      positions: [
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 1, z: 0 },
+      ],
+      uvs: [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0, y: 1 },
+      ],
+    },
+  ]);
+});
+
+test("createMeshData defaults omitted UVs to the empty list the engine fills", () => {
+  const host = new FakeHost();
+  bindNative(host);
+  createMeshData({
+    indices: [0, 1, 2],
+    normals: [
+      { x: 0, y: 0, z: 1 },
+      { x: 0, y: 0, z: 1 },
+      { x: 0, y: 0, z: 1 },
+    ],
+    positions: [
+      { x: 0, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0 },
+      { x: 0, y: 1, z: 0 },
+    ],
+  });
+  // The optional `uvs` resolves to `[]` (the engine fills the origin per vertex).
+  assert.deepEqual(host.meshDatas, [
+    {
+      indices: [0, 1, 2],
+      normals: [
+        { x: 0, y: 0, z: 1 },
+        { x: 0, y: 0, z: 1 },
+        { x: 0, y: 0, z: 1 },
+      ],
+      positions: [
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 1, z: 0 },
+      ],
+      uvs: [],
+    },
+  ]);
 });
 
 test("createMaterial forwards all fields and defaults the optional ones", () => {

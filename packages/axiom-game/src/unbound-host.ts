@@ -50,6 +50,7 @@ export const UNBOUND_HOST_BASE = {
   createController: (): Entity => UNBOUND_HANDLE,
   createMaterial: (): Handle => UNBOUND_HANDLE,
   createMesh: (): Handle => UNBOUND_HANDLE,
+  createMeshData: (): Handle => UNBOUND_HANDLE,
   getSessionConfig: (): SessionConfig => ({ params: {}, seed: UNBOUND_SEED }),
   gridDistanceField: (): readonly number[] => [],
   gridPath: (): Result<readonly Cell[]> => [],

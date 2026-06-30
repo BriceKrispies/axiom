@@ -191,12 +191,13 @@ export {
   createController,
   createMaterial,
   createMesh,
+  createMeshData,
   setCamera3D,
   setNodeBounds,
   setNodeTransform,
   spawnRenderable,
 } from "./scene3d.ts";
-export type { Camera3D, FirstPersonControl, Light, MaterialSpec, MeshKind } from "./scene3d.ts";
+export type { Camera3D, FirstPersonControl, Light, MaterialSpec, MeshData, MeshKind } from "./scene3d.ts";
 export type { ControllerSpec } from "./host-descriptors.ts";
 
 export {

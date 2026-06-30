@@ -20,6 +20,7 @@ import type {
   GridField,
   LightDescriptor,
   MaterialDescriptor,
+  MeshDataDescriptor,
   PerspectiveSpec,
 } from "./host-descriptors.ts";
 import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Rect, Result, Transform, Vec2, Vec3 } from "./vocabulary.ts";
@@ -65,6 +66,7 @@ export class FakeHost implements HostBridge {
 
   // --- 3D scene authoring call log; handles/entities get incrementing ids ---
   public meshKinds: number[] = [];
+  public meshDatas: MeshDataDescriptor[] = [];
   public materials: MaterialDescriptor[] = [];
   public cameras: CameraDescriptor[] = [];
   public lights: LightDescriptor[] = [];
@@ -281,6 +283,11 @@ export class FakeHost implements HostBridge {
   // --- 3D scene authoring (records the marshalled descriptor, mints a handle/entity) ---
   public createMesh(meshKind: number): Handle {
     this.meshKinds.push(meshKind);
+    return this.mint();
+  }
+
+  public createMeshData(data: MeshDataDescriptor): Handle {
+    this.meshDatas.push(data);
     return this.mint();
   }
 
