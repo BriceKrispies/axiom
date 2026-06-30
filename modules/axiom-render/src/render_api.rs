@@ -130,6 +130,29 @@ impl RenderApi {
         input.add_material(RenderMaterial::new_textured(id, base_color, texture_id))
     }
 
+    /// Register a fully-specified lit material: `base_color`, `emissive`
+    /// self-illumination, `roughness`, `opacity` (`1` opaque — folded into the
+    /// per-draw alpha so a translucent material blends), and an albedo
+    /// `texture_id` (`0` = untextured). This is the render-layer authoring
+    /// surface for the SPEC-11 material catalog, including the **opacity** the
+    /// umbrella `Material` carries but whose asset-registration boundary does not
+    /// yet thread to the renderer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_input_lit_material(
+        &self,
+        input: &mut RenderInput,
+        id: u64,
+        base_color: Vec4,
+        emissive: Vec3,
+        roughness: Ratio,
+        opacity: Ratio,
+        texture_id: u64,
+    ) -> u32 {
+        input.add_material(RenderMaterial::new_lit(
+            id, base_color, emissive, roughness, opacity, texture_id,
+        ))
+    }
+
     /// Add an object to draw. `id` is a stable, caller-supplied identity (e.g. a
     /// scene node id) that rides through to the object's `DrawIndexed` command
     /// and into the backend-neutral frame packet, so a backend can preserve
@@ -169,17 +192,12 @@ impl RenderApi {
 
     // --- Compilation ---
 
-    /// Build a deterministic [`RenderCommandList`] from a
-    /// [`RenderInput`]. The emitted order is:
-    ///
-    /// 1. `ClearFrame`
-    /// 2. `SetCamera` (only if a camera is present)
-    /// 3. `SetPipeline { BASIC_LIT }`
-    /// 4. For each visible object in `input.objects()`, in input
-    ///    order:
-    ///    - `SetMesh`
-    ///    - `SetMaterial`
-    ///    - `DrawIndexed`
+    /// Build a deterministic [`RenderCommandList`] from a [`RenderInput`]:
+    /// `ClearFrame`, then `SetCamera` (if present), `SetPipeline { BASIC_LIT }`,
+    /// and the drawable objects as `SetMesh` / `SetMaterial` / `DrawIndexed` —
+    /// **alpha-ordered** by [`crate::draw_order`] (opaque first in submission
+    /// order, then translucent back-to-front by camera depth; stable, so a tick
+    /// is reproducible).
     pub fn build_command_list(&self, input: &RenderInput) -> RenderCommandList {
         let mut list = RenderCommandList::with_capacity(3 + input.objects().len() * 3);
         list.push(RenderCommand::clear_frame(input.clear_color()));
@@ -190,39 +208,15 @@ impl RenderApi {
             ));
         });
         list.push(RenderCommand::set_pipeline(RenderPipelineKind::BASIC_LIT));
-        input.objects().iter().for_each(|object| {
-            // An object emits commands only when it is visible AND both its
-            // mesh and material indices resolve. `Option`-combinators carry
-            // each gate: a failed gate yields `None` and pushes nothing.
-            object
-                .visible()
-                .then_some(object)
-                .and_then(|object| {
-                    input
-                        .meshes()
-                        .get(object.mesh_idx() as usize)
-                        .map(|mesh| (object, mesh))
-                })
-                .and_then(|(object, mesh)| {
-                    input
-                        .materials()
-                        .get(object.material_idx() as usize)
-                        .map(|material| (object, mesh, material))
-                })
-                .into_iter()
-                .for_each(|(object, mesh, material)| {
-                    list.push(RenderCommand::set_mesh(mesh.id()));
-                    list.push(RenderCommand::set_material(
-                        material.id(),
-                        material.texture_id(),
-                    ));
-                    list.push(RenderCommand::draw_indexed(
-                        object.id(),
-                        mesh.indices().len() as u32,
-                        object.world(),
-                    ));
-                });
-        });
+        // The drawable objects, resolved + alpha-ordered by `draw_order` (opaque
+        // first in submission order, then translucent back-to-front).
+        crate::draw_order::ordered_draws(input)
+            .iter()
+            .for_each(|d| {
+                list.push(RenderCommand::set_mesh(d.mesh_id));
+                list.push(RenderCommand::set_material(d.material_id, d.texture_id));
+                list.push(RenderCommand::draw_indexed(d.object_id, d.index_count, d.world));
+            });
         list
     }
 
@@ -495,11 +489,12 @@ impl RenderApi {
     }
 }
 
-/// The linear RGBA base colour of the material with `material_id` in `input`,
-/// or opaque white when no such material exists. Resolved from the render
-/// input's material table the command's `SetMaterial` selected by id — the same
-/// fallback the render pipeline uses (`material_color.get(id).unwrap_or([1.0;
-/// 4])`).
+/// The linear RGBA per-draw colour of the material with `material_id` in `input`,
+/// or opaque white when no such material exists. The material's separate
+/// `opacity` is **folded into the alpha** (`alpha = base_color.a × opacity`), so
+/// the neutral `FrameDrawItem.color` every backend consumes carries the
+/// translucency — the GPU's `base.a = albedo.a × instance_color.a` and the
+/// Canvas 2D src-over composite both blend without further per-backend plumbing.
 fn material_base_color(input: &RenderInput, material_id: u64) -> [f32; 4] {
     input
         .materials()
@@ -507,7 +502,7 @@ fn material_base_color(input: &RenderInput, material_id: u64) -> [f32; 4] {
         .find(|m| m.id() == material_id)
         .map(|m| {
             let c = m.base_color();
-            [c.x, c.y, c.z, c.w]
+            [c.x, c.y, c.z, c.w * m.opacity().get()]
         })
         .unwrap_or([1.0; 4])
 }
@@ -958,5 +953,48 @@ mod frame_packet_cov {
         assert_eq!(material_base_color(&input, 9), [0.2, 0.4, 0.6, 1.0]);
         // …and an absent id falls back to opaque white.
         assert_eq!(material_base_color(&input, 404), [1.0, 1.0, 1.0, 1.0]);
+    }
+}
+
+/// SPEC-11 §3.4 translucency: the material `opacity`→per-draw alpha fold. (The
+/// back-to-front translucent draw ordering is tested in `draw_order`.)
+#[cfg(test)]
+mod translucency_cov {
+    use super::*;
+
+    fn api() -> RenderApi {
+        RenderApi::new()
+    }
+
+    fn half() -> Ratio {
+        Ratio::new(0.5).expect("finite")
+    }
+
+    fn one() -> Ratio {
+        Ratio::new(1.0).expect("finite")
+    }
+
+    #[test]
+    fn opacity_folds_into_the_per_draw_alpha() {
+        let api = api();
+        let mut input = api.new_input(64, 64);
+        api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
+        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        // base-colour alpha 1.0 × opacity 0.5 → folded draw alpha 0.5.
+        let mat = api.add_input_lit_material(
+            &mut input,
+            7,
+            Vec4::new(0.2, 0.4, 0.6, 1.0),
+            Vec3::ZERO,
+            one(),
+            half(),
+            0,
+        );
+        api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh, mat, true);
+        // The free resolver folds opacity into the alpha…
+        assert_eq!(material_base_color(&input, 7), [0.2, 0.4, 0.6, 0.5]);
+        // …and the neutral packet draw carries that folded alpha.
+        let packet = api.build_frame_packet(&input, 0, 0, [0.0; 16]);
+        assert_eq!(packet.draws()[0].color(), [0.2, 0.4, 0.6, 0.5]);
     }
 }

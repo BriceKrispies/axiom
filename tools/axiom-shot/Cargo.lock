@@ -243,6 +243,7 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-physics-crucible",
+ "axiom-render",
  "png",
 ]
 

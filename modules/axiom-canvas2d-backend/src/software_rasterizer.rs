@@ -34,13 +34,17 @@ use crate::canvas_depth_cue::to_byte;
 use crate::canvas_policy::CanvasDebugOverlay;
 use crate::canvas_post_pass::{apply_fog, apply_outlines, apply_vertical_grade, clamp_axis};
 use crate::depth_buffer::DepthBuffer;
-use crate::frame_packet_raster::{convert, ConversionStats};
+use crate::frame_packet_raster::convert;
 use crate::low_poly_raster_options::LowPolyRasterOptions;
 use crate::mesh_cache::MeshCache;
 use crate::planar_shadow::apply_planar_shadows;
 use crate::raster_triangle::RasterTriangle;
 use crate::sdf_raymarch::apply_sdf_raymarch;
 use crate::software_framebuffer::SoftwareFramebuffer;
+// The finished-frame result type lives in its own file (file-size budget) but is
+// re-exported here so its long-standing `software_rasterizer::SoftwareRasterResult`
+// path — used by the backend facade and a draw2d doc link — stays valid.
+pub(crate) use crate::software_raster_result::SoftwareRasterResult;
 
 /// Barycentric distance to an edge below which a pixel is "on the edge" (the
 /// `TriangleEdges` wireframe overlay).
@@ -211,109 +215,6 @@ pub(crate) fn sdf_pass(framebuffer: &mut SoftwareFramebuffer, depth: &mut DepthB
         .unwrap_or(0)
 }
 
-/// The finished frame: the RGBA8 framebuffer bytes (the blit source), the
-/// framebuffer size, the conversion stats, and the per-pixel raster stats.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SoftwareRasterResult {
-    rgba: Vec<u8>,
-    width: u32,
-    height: u32,
-    conv: ConversionStats,
-    rasterized_triangles: u32,
-    candidate_pixels: u64,
-    depth_tested_pixels: u64,
-    depth_written_pixels: u64,
-    depth_fog_applied_pixels: u64,
-    vertical_grade_applied_pixels: u64,
-    contact_shadows_drawn: u32,
-    contact_shadow_pixels: u64,
-    outlined_objects: u32,
-    outline_pixels: u64,
-    horizon_silhouette_drawn: u32,
-}
-
-impl SoftwareRasterResult {
-    /// The framebuffer RGBA8 bytes (row-major, top-left origin) — the blit source.
-    pub(crate) fn rgba_bytes(&self) -> &[u8] {
-        &self.rgba
-    }
-
-    /// Framebuffer width in pixels.
-    pub(crate) fn width(&self) -> u32 {
-        self.width
-    }
-
-    /// Framebuffer height in pixels.
-    pub(crate) fn height(&self) -> u32 {
-        self.height
-    }
-
-    /// The geometry-conversion stats (projection / cull / LOD / budget).
-    pub(crate) fn conversion(&self) -> &ConversionStats {
-        &self.conv
-    }
-
-    /// Triangles actually rasterized (post-cull, non-degenerate).
-    pub(crate) fn rasterized_triangles(&self) -> u32 {
-        self.rasterized_triangles
-    }
-
-    /// Pixels examined inside triangle bounding boxes (the raster work proxy).
-    pub(crate) fn candidate_pixels(&self) -> u64 {
-        self.candidate_pixels
-    }
-
-    /// Fragments that reached the depth test (covered an in-bounds pixel).
-    pub(crate) fn depth_tested_pixels(&self) -> u64 {
-        self.depth_tested_pixels
-    }
-
-    /// Fragments that passed the depth test and wrote.
-    pub(crate) fn depth_written_pixels(&self) -> u64 {
-        self.depth_written_pixels
-    }
-
-    /// Fragments that failed the depth test (occluded).
-    pub(crate) fn depth_rejected_pixels(&self) -> u64 {
-        self.depth_tested_pixels - self.depth_written_pixels
-    }
-
-    /// Pixels mixed toward the fog colour by the depth-fog post-pass.
-    pub(crate) fn depth_fog_applied_pixels(&self) -> u64 {
-        self.depth_fog_applied_pixels
-    }
-
-    /// Pixels adjusted by the camera-relative vertical colour grade.
-    pub(crate) fn vertical_grade_applied_pixels(&self) -> u64 {
-        self.vertical_grade_applied_pixels
-    }
-
-    /// Contact-shadow blobs drawn (one per important object).
-    pub(crate) fn contact_shadows_drawn(&self) -> u32 {
-        self.contact_shadows_drawn
-    }
-
-    /// Framebuffer pixels darkened by contact-shadow blobs.
-    pub(crate) fn contact_shadow_pixels(&self) -> u64 {
-        self.contact_shadow_pixels
-    }
-
-    /// Important objects given a depth-weighted silhouette outline.
-    pub(crate) fn outlined_objects(&self) -> u32 {
-        self.outlined_objects
-    }
-
-    /// Framebuffer pixels written by object outlines.
-    pub(crate) fn outline_pixels(&self) -> u64 {
-        self.outline_pixels
-    }
-
-    /// Far horizon/terrain silhouette bands drawn (0 when the cue is off).
-    pub(crate) fn horizon_silhouette_drawn(&self) -> u32 {
-        self.horizon_silhouette_drawn
-    }
-}
-
 /// Rasterize one **non-degenerate** triangle into the colour + depth slices,
 /// updating `stats`. Pure, branchless, NaN-safe (callers guarantee area ≠ 0).
 fn rasterize_triangle(
@@ -328,8 +229,24 @@ fn rasterize_triangle(
     let (x1, y1, z1) = (v[1].x(), v[1].y(), v[1].depth());
     let (x2, y2, z2) = (v[2].x(), v[2].y(), v[2].depth());
     let c = tri.color();
-    // Flat colour → bytes ONCE per triangle (no per-pixel float work).
+    // Flat colour → bytes ONCE per triangle.
     let base = [to_byte(c[0]), to_byte(c[1]), to_byte(c[2]), to_byte(c[3])];
+    // Straight (non-premultiplied) src-over alpha, the SPEC-11 §3.4 translucency
+    // fold on the software path: a covered fragment composites the draw colour
+    // OVER the existing pixel by the colour's alpha (`out = src·a + dst·(1−a)`),
+    // instead of overwriting it. The per-triangle src contribution (`base·a`) and
+    // `1−a` are precomputed here; only the `dst·(1−a)` term is per-pixel. The
+    // alpha channel composites against full opacity (`255·a`), so a translucent
+    // draw over the opaque background stays opaque. An opaque draw (`a == 1`)
+    // reduces to the previous straight overwrite exactly, byte-for-byte.
+    let a = c[3].clamp(0.0, 1.0);
+    let inv = 1.0 - a;
+    let src = [
+        base[0] as f32 * a,
+        base[1] as f32 * a,
+        base[2] as f32 * a,
+        255.0 * a,
+    ];
     let inv_area = 1.0 / edge(x0, y0, x1, y1, x2, y2);
     // Per-pixel (x) and per-row (y) steps of each barycentric l_i = e_i·inv_area.
     let a0 = (y1 - y2) * inv_area;
@@ -381,10 +298,18 @@ fn rasterize_triangle(
             let mask = [true, edge_pixel, true, true][ctx.overlay_idx];
             let wi = (pass & mask) as usize;
             let off = idx * 4;
-            rgba[off] = [rgba[off], base[0]][wi];
-            rgba[off + 1] = [rgba[off + 1], base[1]][wi];
-            rgba[off + 2] = [rgba[off + 2], base[2]][wi];
-            rgba[off + 3] = [rgba[off + 3], base[3]][wi];
+            // src-over composite each channel against the current pixel; the
+            // `[old, blended][wi]` select keeps the depth/overlay masking exact.
+            let blended = [
+                (src[0] + rgba[off] as f32 * inv + 0.5) as u8,
+                (src[1] + rgba[off + 1] as f32 * inv + 0.5) as u8,
+                (src[2] + rgba[off + 2] as f32 * inv + 0.5) as u8,
+                (src[3] + rgba[off + 3] as f32 * inv + 0.5) as u8,
+            ];
+            rgba[off] = [rgba[off], blended[0]][wi];
+            rgba[off + 1] = [rgba[off + 1], blended[1]][wi];
+            rgba[off + 2] = [rgba[off + 2], blended[2]][wi];
+            rgba[off + 3] = [rgba[off + 3], blended[3]][wi];
 
             cand += 1;
             tested += u64::from(inside);
@@ -609,6 +534,56 @@ mod tests {
             [255, 0, 0, 255],
             "near still wins"
         );
+    }
+
+    #[test]
+    fn translucent_triangle_composites_over_existing_pixels() {
+        // An opaque white triangle (far), then a half-opacity red triangle (near)
+        // over it: the covered pixel is a 50/50 src-over blend (red OVER white),
+        // not a pure-red overwrite — and the result stays opaque.
+        let pts = [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
+        let white = tri(pts, 0.9, [1.0, 1.0, 1.0, 1.0], 1);
+        let glass_red = tri(pts, 0.1, [1.0, 0.0, 0.0, 0.5], 2);
+        let c = ctx(10, 10);
+        let mut fb = SoftwareFramebuffer::new(10, 10);
+        let mut depth = DepthBuffer::new(10, 10);
+        fb.clear([0.0, 0.0, 0.0, 1.0]);
+        depth.clear_far();
+        let mut s = PixelStats::default();
+        {
+            let (rgba, dep) = (fb.rgba_mut(), depth.slice_mut());
+            rasterize_triangle(rgba, dep, &c, &white, &mut s);
+            rasterize_triangle(rgba, dep, &c, &glass_red, &mut s);
+        }
+        let p = px(&fb.into_rgba_bytes(), 10, 1, 1);
+        // 0.5·red(255,0,0) + 0.5·white(255,255,255) ≈ (255, 128, 128), opaque.
+        assert_eq!(p[0], 255, "red full {p:?}");
+        assert!((120..=135).contains(&p[1]), "green mid {p:?}");
+        assert!((120..=135).contains(&p[2]), "blue mid {p:?}");
+        assert_eq!(p[3], 255, "result stays opaque {p:?}");
+        // A pure overwrite would have been [255,0,0,255]; the blend differs.
+        assert_ne!(p, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn fully_transparent_triangle_leaves_the_pixel_unchanged() {
+        // alpha 0 → src·0 + dst·1 = dst: the covered pixel keeps the background,
+        // even though the fragment passes the depth test.
+        let pts = [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
+        let ghost = tri(pts, 0.5, [1.0, 0.0, 0.0, 0.0], 1);
+        let c = ctx(10, 10);
+        let mut fb = SoftwareFramebuffer::new(10, 10);
+        let mut depth = DepthBuffer::new(10, 10);
+        fb.clear([0.0, 0.0, 1.0, 1.0]);
+        depth.clear_far();
+        let mut s = PixelStats::default();
+        {
+            let (rgba, dep) = (fb.rgba_mut(), depth.slice_mut());
+            rasterize_triangle(rgba, dep, &c, &ghost, &mut s);
+        }
+        // The pixel kept the blue clear colour; the depth test still ran/wrote.
+        assert_eq!(px(&fb.into_rgba_bytes(), 10, 1, 1), [0, 0, 255, 255]);
+        assert!(s.depth_written_pixels > 0);
     }
 
     #[test]

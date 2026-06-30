@@ -44,6 +44,11 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 # Math layer: the 2D parity proof authors a `Draw2dList` whose commands carry
 # math's Mat3 / Vec2 (baked transforms + rect corners).
 axiom-math = { path = "../../crates/axiom-math" }
+# The render command/packet builder: the SPEC-11 §7 translucency proof authors a
+# translucent `RenderMaterial` + scene directly at the render-API level (the
+# umbrella `Material`→asset boundary drops `opacity`), building the sorted,
+# opacity-folded `FramePacket` both backends consume.
+axiom-render = { path = "../../modules/axiom-render" }
 # Renderable apps the tool can screenshot (rlib). Apps are leaves; depending on
 # them here is fine because this tool is outside the engine workspace/graph.
 axiom-doom-browser = { path = "../../apps/axiom-doom-browser" }
