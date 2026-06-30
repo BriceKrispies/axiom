@@ -1,9 +1,7 @@
 # SPEC-05 — Input (keyboard, bindings, pointer, timing)
 
-> Status: Partial — native module landed and the wasm boundary carries input, but
-> the **live browser path is still dead at the platform edge**. See README
-> footnote ⁸ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
-> Landed (2026-06-28, native): `axiom-input::InputState` (`bind_action`/`sample`/`is_down`/`pressed`/`released`/`axis`/`pointer`/`pointer_pressed`/`swipe`/`pressed_at_tick`) replaced the `TouchControls` facade; `@axiom/game` `Sim.input` (`SnapshotInput`) + `bindAction` project it, and the boundary carries input — the `NativeBridge` exposes per-tick input reads and `WasmGame` exposes `inputKey`/`bindAction`/the snapshot-read methods. **Gap (two distinct platform-edge causes):** the live browser path does not yet function because (a) the host `bindAction` is a **deferred no-op** in `wasm-host.ts` (`deferredBridge`), so author bindings never reach the native `InputState`; and (b) there are **no DOM event listeners** feeding neutral device events (`KeyboardEvent`/`PointerEvent` → `DeviceFrame`) into `sample`, so no device input enters the per-tick snapshot. Both are app/platform-edge wiring, not native gaps.
+> Status: Landed (2026-06-30). See the README ledger and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed: `axiom-input::InputState` (`bind_action`/`sample`/`is_down`/`pressed`/`released`/`axis`/`pointer`/`pointer_pressed`/`swipe`/`pressed_at_tick`); the `@axiom/game` `Sim.input` (`SnapshotInput`) + `bindAction` projection; the wasm boundary carries input end-to-end (`WasmGame` `inputKey`/`inputPointerEvent`/`inputSetSurface` injection + the per-tick snapshot reads; the host `bindAction` is wired in `wasm-host.ts`, no longer a deferred no-op), and the `dom-input.ts` platform edge feeds neutral `KeyboardEvent`/`PointerEvent`s into `sample`. The §7 proofs are landed: the per-tick snapshots are invariant to advance chunking, and the intent-snapshot stream alone reproduces the per-tick reads. Live browser input is browser-proven.
 > Contract: §8   Vocabulary: Keyboard, Pointer/click, Touch/swipe/gesture, Key→action bindings, Charge/hold-release, Buffered direction, Timing-window hit   Determinism: sim
 
 ## 1. Summary

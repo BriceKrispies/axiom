@@ -1,8 +1,7 @@
 # SPEC-09 — UI/HUD overlay & tween/easing
 
-> Status: Partial — native `UiSurface` + `axiom-tween` landed; TS UI surface absent.
-> See README footnote ⁹ and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
-> Landed (2026-06-28, native): `axiom-interface` gained the immediate-mode `UiSurface`; new module `axiom-tween` (`TweenApi` + `ease`); `@axiom/game` `Sim.tweens` (`makeTweens`/`EASES`) sampled by the `TickPump`. **Gaps:** there is **no TS `Ui` overlay surface** (rect/text/sprite/button/viewport) in `@axiom/game`, and `solveLayout`/`LayoutNode` — claimed to project `axiom-layout::solve` — exist in **no source file** (Rust or TS); they are referenced only by this spec and the contract.
+> Status: Landed (2026-06-30). See the README ledger and [`../reports/SPEC_VS_IMPL_GAP_AUDIT.md`](../reports/SPEC_VS_IMPL_GAP_AUDIT.md).
+> Landed: `axiom-interface`'s immediate-mode `UiSurface`; the `axiom-tween` module (`TweenApi` + `ease`); the `@axiom/game` `Sim.tweens` (`makeTweens`/`EASES`) sampled by the `TickPump`; the TS `Ui` overlay surface (`ui.ts`/`ui-binding.ts`: rect/text/sprite/button/viewport/drawList) and `solveLayout`/`LayoutNode` (`ui-layout.ts`, projecting `axiom-layout::solve`). The §7 proofs are landed: the TS button activation truth-table (mirroring the native `ui_surface` table) and a presentation-leak proof (no tween/`Ui` state is reachable from a `sim` accessor).
 > Contract: §14, §12   Vocabulary: Overlay screens/modals, Responsive layout solver, Canvas-drawn HUD, Stat/leaderboard panels, Floating popups/toasts, Immediate-mode button, Tween/easing, Flip-book   Determinism: presentation
 
 ## 1. Summary
