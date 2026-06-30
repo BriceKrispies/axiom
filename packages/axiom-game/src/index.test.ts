@@ -69,6 +69,8 @@ const FUNCTION_EXPORTS = [
   "setMasterVolume",
   "setMuted",
   "stopVoice",
+  // 2d flip-book sampler (SPEC-04 §10.2)
+  "sampleAnimation",
   // control flow vocabulary + sample
   "orElse",
   "whenPresent",

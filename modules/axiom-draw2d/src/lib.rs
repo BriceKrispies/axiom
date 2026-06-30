@@ -45,11 +45,17 @@
 //!   [`Draw2dApi::begin_target`] / [`Draw2dApi::end_target`] /
 //!   [`Draw2dApi::target_texture`] route draws into a named nested
 //!   `axiom_host::Draw2dList`; the backend owns the off-screen surface.
+//! - **Flip-book sampler** — [`Draw2dApi::sample_animation`] (§10.2) is a **pure
+//!   function** of `(SpriteAnimation, elapsed, looping)`: the atlas sub-rect to
+//!   show at a presentation time. It holds no state, so the same inputs always
+//!   yield the same `Rect` — deterministic as a function even though `elapsed` is
+//!   presentation time (SPEC-04 §6).
 //!
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** behavioral facade — [`Draw2dApi`] — alongside
 //! its identity vocabulary (Module Law #8): the [`EmitterId`] handle and
-//! [`EmitterConfig`] recipe the particle methods traffic in (`pub use ids::{…}`).
+//! [`EmitterConfig`] recipe the particle methods traffic in, and the
+//! [`SpriteAnimation`] recipe the flip-book sampler reads (`pub use ids::{…}`).
 //! The neutral draw-contract value types still live in the host layer; callers
 //! reach them via `use axiom_host::{Draw2dList, Common2d, Fill2d, Rect, Rgba, …}`.
 
@@ -58,4 +64,4 @@ mod ids;
 mod particles;
 
 pub use draw2d_api::Draw2dApi;
-pub use ids::{EmitterConfig, EmitterId};
+pub use ids::{EmitterConfig, EmitterId, SpriteAnimation};

@@ -22,12 +22,15 @@
 //! read, now followed by the `len` per-shape geometry columns a 2D presenter
 //! rasterizes (see that method for the per-kind payload layout).
 
-use axiom_draw2d::{EmitterConfig, EmitterId};
-use axiom_host::{Common2d, Draw2dCommand, Fill2d, Rect, RenderTargetId, Rgba, Stroke2d};
+use axiom_draw2d::{Draw2dApi, EmitterConfig, EmitterId, SpriteAnimation};
+use axiom_host::{
+    Common2d, Draw2dCommand, Fill2d, Rect, RenderTargetId, Rgba, SpriteDraw2d, Stroke2d, TextAlign,
+    TextDraw2d, TextureId,
+};
 use axiom_kernel::{Meters, Radians, Ratio, Seconds};
-use axiom_math::Vec2;
+use axiom_math::{Mat3, Vec2};
 
-use crate::GameBridge;
+use crate::{font, GameBridge};
 
 /// The `i`-th element of a boundary slice as a scalar (missing ⇒ `0`).
 fn at(s: &[f64], i: usize) -> f64 {
@@ -71,6 +74,31 @@ fn rgba(packed: u32) -> Rgba {
 /// The per-draw [`Common2d`] (z-layer + alpha) from boundary scalars.
 fn common(layer: i32, alpha: f64) -> Common2d {
     Common2d::new(layer, Ratio::finite_or_zero(alpha as f32))
+}
+
+/// A [`TextAlign`] from its boundary discriminant (`0`/`1`/`2`); any other value
+/// resolves to left, the contract default.
+fn text_align(raw: u8) -> TextAlign {
+    [TextAlign::LEFT, TextAlign::CENTER, TextAlign::RIGHT]
+        .get(usize::from(raw))
+        .copied()
+        .unwrap_or(TextAlign::LEFT)
+}
+
+/// The six affine columns `[a, b, c, d, tx, ty]` of a baked 2D transform, as the
+/// `f64`s the boundary carries — the placement a sprite/text presenter applies
+/// (Canvas2D `setTransform(a, b, c, d, tx, ty)`). A 2D affine `Mat3` keeps its
+/// linear part in columns 0–1 and its translation in column 2.
+fn affine_columns(m: Mat3) -> [f64; 6] {
+    let t = m.as_cols_array();
+    [
+        f64::from(t[0]),
+        f64::from(t[1]),
+        f64::from(t[3]),
+        f64::from(t[4]),
+        f64::from(t[6]),
+        f64::from(t[7]),
+    ]
 }
 
 /// Pack a resolved [`Rgba`] (channels in `0..1`) back to a `0xRRGGBBAA` u32, as
@@ -195,6 +223,86 @@ impl GameBridge {
             .line(vec2(a), vec2(b), rgba(color), meters(width), common(layer, alpha));
     }
 
+    /// Sample a flip-book animation (`draw2dSampleAnimation`, §10.2). `frames`
+    /// arrives flattened as `[x, y, w, h, …]` (one `Rect` per 4 scalars), `fps` is
+    /// the integer frame rate, `elapsed` the presentation seconds, and `looping`
+    /// whether the index wraps (else clamps to the last frame). Returns the sampled
+    /// sub-rect as `[x, y, w, h]`. Pure: the native [`Draw2dApi::sample_animation`]
+    /// owns the index math, so the boundary never recomputes it (one source of
+    /// truth); a trailing partial chunk (length not a multiple of 4) is dropped.
+    pub fn draw2d_sample_animation(&self, frames: &[f64], fps: f64, elapsed: f64, looping: bool) -> Vec<f64> {
+        let rects: Vec<Rect> = frames
+            .chunks_exact(4)
+            .map(|f| Rect::new(Vec2::new(f[0] as f32, f[1] as f32), Vec2::new(f[2] as f32, f[3] as f32)))
+            .collect();
+        let anim = SpriteAnimation { frames: rects, fps: fps as u32 };
+        let sampled = Draw2dApi::sample_animation(&anim, seconds(elapsed), looping);
+        vec![
+            f64::from(sampled.min.x),
+            f64::from(sampled.min.y),
+            f64::from(sampled.size.x),
+            f64::from(sampled.size.y),
+        ]
+    }
+
+    /// Draw a textured sprite (`draw2dSprite`); `texture` is a `loadTexture` handle
+    /// and `opts` is the flat slice `[posX, posY, rotation, scaleX, scaleY, anchorX,
+    /// anchorY, srcX, srcY, srcW, srcH, tintRGBA, flipX, flipY, layer, alpha]`. A
+    /// zero `srcW`/`srcH` means "the whole texture" — the source size is only known
+    /// once the app-side decode resolves the pixels, so the presenter substitutes
+    /// the bitmap dimensions. Placement (pos · rotation · scale) is baked onto the
+    /// command's transform; the per-sprite `source`/`anchor`/`tint`/`flips` ride on
+    /// the style.
+    pub fn draw2d_sprite(&mut self, texture: u64, opts: &[f64]) {
+        let pos = Vec2::new(at(opts, 0) as f32, at(opts, 1) as f32);
+        let scale = Vec2::new(at(opts, 3) as f32, at(opts, 4) as f32);
+        let anchor = Vec2::new(at(opts, 5) as f32, at(opts, 6) as f32);
+        let source = Rect::new(
+            Vec2::new(at(opts, 7) as f32, at(opts, 8) as f32),
+            Vec2::new(at(opts, 9) as f32, at(opts, 10) as f32),
+        );
+        let style = SpriteDraw2d::new(
+            source,
+            anchor,
+            rgba(at(opts, 11) as u32),
+            at(opts, 12) != 0.0,
+            at(opts, 13) != 0.0,
+        );
+        let placement = Mat3::translation(pos)
+            .multiply(Mat3::rotation(radians(at(opts, 2))))
+            .multiply(Mat3::scale(scale));
+        let depth = self.draw2d.push_transform(placement);
+        self.draw2d
+            .sprite(TextureId::from_raw(texture), style, common(at(opts, 14) as i32, at(opts, 15)));
+        self.draw2d.pop_transform(depth);
+    }
+
+    /// Draw a line of text (`draw2dText`) in the built-in monospace font; `opts` is
+    /// `[posX, posY, fontSize, colorRGBA, align, layer, alpha]`. The string is
+    /// resolved to a glyph run against the baked atlas ([`crate::font`]); placement
+    /// is baked onto the command's transform.
+    pub fn draw2d_text(&mut self, value: &str, opts: &[f64]) {
+        let run = font::glyph_run(value, at(opts, 2) as f32);
+        let style = TextDraw2d::new(
+            font::BUILTIN_FONT,
+            rgba(at(opts, 3) as u32),
+            text_align(at(opts, 4) as u8),
+        );
+        let placement = Mat3::translation(Vec2::new(at(opts, 0) as f32, at(opts, 1) as f32));
+        let depth = self.draw2d.push_transform(placement);
+        self.draw2d
+            .text(run, style, common(at(opts, 5) as i32, at(opts, 6)));
+        self.draw2d.pop_transform(depth);
+    }
+
+    /// Measure `value` at `font_size` in the built-in font (`draw2dMeasureText`),
+    /// returning `[width, height]` in surface units. Pure monospace arithmetic — no
+    /// atlas, so it is platform-reproducible (SPEC-04 §9).
+    pub fn draw2d_measure_text(&self, value: &str, font_size: f64) -> Vec<f64> {
+        let (width, height) = font::measure(value, font_size as f32);
+        vec![f64::from(width), f64::from(height)]
+    }
+
     /// Finish the frame and return the layer-sorted main command list as a flat,
     /// self-describing stream a 2D presenter can rasterize (`draw2dFinish`). Each
     /// command is `[kind, layer, submission, len, …geometry]`: the `len` payload
@@ -207,8 +315,16 @@ impl GameBridge {
     /// - `ELLIPSE`  (3): `[centerX, centerY, rx, ry, rotation, fillRGBA, strokeRGBA, strokeWidth, alpha]`
     /// - `LINE`     (4): `[aX, aY, bX, bY, colorRGBA, width, alpha]`
     /// - `PARTICLE` (8): `[centerX, centerY, size, colorRGBA, alpha]`
-    /// - other kinds (path / sprite / text): `len = 0` — their ordering is kept,
-    ///   their geometry is not yet flattened across the boundary.
+    /// - `SPRITE`   (6): `[texId, a, b, c, d, tx, ty, srcX, srcY, srcW, srcH,
+    ///   anchorX, anchorY, tintRGBA, flipX, flipY, alpha]` — `(a..ty)` is the baked
+    ///   2D affine (Canvas2D `setTransform`); `srcW`/`srcH` of `0` mean "the whole
+    ///   texture"; `flipX`/`flipY` are `0`/`1`.
+    /// - `TEXT_GLYPHS` (7): `[atlasTexId, a, b, c, d, tx, ty, colorRGBA, align,
+    ///   lineHeight, alpha, glyphCount, (srcX, srcY, srcW, srcH, advance) ×
+    ///   glyphCount]` — the glyphs lay out left-to-right from the baked transform's
+    ///   origin, each sampling its atlas sub-rect; `atlasTexId` is the reserved
+    ///   font-atlas handle the harness bakes.
+    /// - other kinds (path): `len = 0` — ordering kept, geometry not yet flattened.
     ///
     /// Resets the per-frame surface for the next frame (particles persist). The
     /// `(kind, layer, submission)` prefix preserves the deterministic ordering the
@@ -280,6 +396,47 @@ impl GameBridge {
                         pack_rgba(color),
                         alpha,
                     ]
+                }
+                Draw2dCommand::KIND_SPRITE => {
+                    let (texture, opts) = cmd.as_sprite().expect("a SPRITE command carries sprite geometry");
+                    let [a, b, c, d, tx, ty] = affine_columns(cmd.transform());
+                    vec![
+                        texture.raw() as f64,
+                        a, b, c, d, tx, ty,
+                        f64::from(opts.source.min.x),
+                        f64::from(opts.source.min.y),
+                        f64::from(opts.source.size.x),
+                        f64::from(opts.source.size.y),
+                        f64::from(opts.anchor.x),
+                        f64::from(opts.anchor.y),
+                        pack_rgba(opts.tint),
+                        f64::from(u8::from(opts.flip_x)),
+                        f64::from(u8::from(opts.flip_y)),
+                        alpha,
+                    ]
+                }
+                Draw2dCommand::KIND_TEXT_GLYPHS => {
+                    let (run, opts) = cmd.as_text().expect("a TEXT_GLYPHS command carries a glyph run");
+                    let [a, b, c, d, tx, ty] = affine_columns(cmd.transform());
+                    let mut payload = vec![
+                        font::FONT_ATLAS_TEXTURE.raw() as f64,
+                        a, b, c, d, tx, ty,
+                        pack_rgba(opts.color),
+                        f64::from(opts.align.raw()),
+                        f64::from(run.line_height.get()),
+                        alpha,
+                        run.glyphs.len() as f64,
+                    ];
+                    run.glyphs.iter().for_each(|g| {
+                        payload.extend_from_slice(&[
+                            f64::from(g.source.min.x),
+                            f64::from(g.source.min.y),
+                            f64::from(g.source.size.x),
+                            f64::from(g.source.size.y),
+                            f64::from(g.advance.get()),
+                        ]);
+                    });
+                    payload
                 }
                 _ => Vec::new(),
             };
@@ -380,6 +537,30 @@ mod wasm_exports {
         #[wasm_bindgen(js_name = draw2dLine)]
         pub fn draw2d_line(&mut self, a: &[f64], b: &[f64], color: u32, width: f64, layer: i32, alpha: f64) {
             self.bridge.draw2d_line(a, b, color, width, layer, alpha);
+        }
+
+        /// Sample a flip-book animation (`draw2dSampleAnimation`, §10.2).
+        #[wasm_bindgen(js_name = draw2dSampleAnimation)]
+        pub fn draw2d_sample_animation(&self, frames: &[f64], fps: f64, elapsed: f64, looping: bool) -> Vec<f64> {
+            self.bridge.draw2d_sample_animation(frames, fps, elapsed, looping)
+        }
+
+        /// Draw a textured sprite (`draw2dSprite`).
+        #[wasm_bindgen(js_name = draw2dSprite)]
+        pub fn draw2d_sprite(&mut self, texture: f64, opts: &[f64]) {
+            self.bridge.draw2d_sprite(texture as u64, opts);
+        }
+
+        /// Draw a line of monospace text (`draw2dText`).
+        #[wasm_bindgen(js_name = draw2dText)]
+        pub fn draw2d_text(&mut self, value: String, opts: &[f64]) {
+            self.bridge.draw2d_text(&value, opts);
+        }
+
+        /// Measure `value` at `font_size`, returning `[width, height]` (`draw2dMeasureText`).
+        #[wasm_bindgen(js_name = draw2dMeasureText)]
+        pub fn draw2d_measure_text(&self, value: String, font_size: f64) -> Vec<f64> {
+            self.bridge.draw2d_measure_text(&value, font_size)
         }
 
         /// Finish the frame, returning the flat command list (`draw2dFinish`).
@@ -507,5 +688,23 @@ mod tests {
         assert_ne!(a, c);
         // The target's surface texture is stable for a given target.
         assert_eq!(b.draw2d_target_texture(a), b.draw2d_target_texture(a));
+    }
+
+    #[test]
+    fn sample_animation_marshals_frames_and_selects_by_loop() {
+        let b = bridge();
+        // Three distinct sub-rects, flattened [x, y, w, h, …], at 2 fps.
+        let frames = [
+            0.0, 0.0, 1.0, 1.0, //
+            10.0, 0.0, 1.0, 1.0, //
+            20.0, 0.0, 1.0, 1.0,
+        ];
+        // elapsed 1.0s ⇒ index floor(2.0) = 2 ⇒ the third frame.
+        assert_eq!(b.draw2d_sample_animation(&frames, 2.0, 1.0, true), vec![20.0, 0.0, 1.0, 1.0]);
+        // elapsed 2.0s ⇒ index 4: non-looping clamps to the last, looping wraps to 1.
+        assert_eq!(b.draw2d_sample_animation(&frames, 2.0, 2.0, false), vec![20.0, 0.0, 1.0, 1.0]);
+        assert_eq!(b.draw2d_sample_animation(&frames, 2.0, 2.0, true), vec![10.0, 0.0, 1.0, 1.0]);
+        // An empty book marshals to the inert zero-rect.
+        assert_eq!(b.draw2d_sample_animation(&[], 2.0, 1.0, true), vec![0.0, 0.0, 0.0, 0.0]);
     }
 }

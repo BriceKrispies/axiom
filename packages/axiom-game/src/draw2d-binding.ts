@@ -12,7 +12,7 @@
  * (`sim.ts`), only from `onRender`; the surface never feeds sim (SPEC-04 §17.5).
  */
 
-import type { Handle, Rect, Rgba, Vec2 } from "./vocabulary.ts";
+import type { Handle, Rect, Rgba, Seconds, Vec2 } from "./vocabulary.ts";
 
 /*
  * The per-shape 2D fill + stroke + layer/alpha a Wave-2.5 draw carries (SPEC-04
@@ -94,7 +94,20 @@ export interface EmitterConfig {
   readonly layer?: number;
 }
 
-/** The 2D drawing channel (SPEC-04 §10): shapes, particles, and render targets. */
+/*
+ * A flip-book sprite animation (SPEC-04 §10.2): an ordered list of atlas sub-rect
+ * `frames` played at `fps` frames per second. A pure value recipe the
+ * `sampleAnimation` sampler reads; the frame-index math runs NATIVE-side (one
+ * deterministic source of truth), never recomputed in TS.
+ */
+export interface SpriteAnimation {
+  /** The ordered atlas sub-rects, one per animation frame. */
+  readonly frames: readonly Rect[];
+  /** The playback rate, in frames per second. */
+  readonly fps: number;
+}
+
+/** The 2D drawing channel (SPEC-04 §10): shapes, particles, render targets, and the flip-book sampler. */
 export interface Draw2dBridge {
   /** Set the 2D camera — world `center` + `zoom` (`draw2dCamera2d`). */
   readonly draw2dCamera2d: (center: Vec2, zoom: number) => void;
@@ -122,10 +135,15 @@ export interface Draw2dBridge {
   readonly draw2dTargetTexture: (target: Handle) => Handle;
   /** Finish the frame: the layer-sorted neutral command list `[kind, layer, submission, …]` (`draw2dFinish`). */
   readonly draw2dFinish: () => readonly number[];
+  /** Sample a flip-book's sub-rect at presentation time `elapsedSeconds`, wrapping when `looping` else clamping to the last frame (`draw2dSampleAnimation`, §10.2). */
+  readonly draw2dSampleAnimation: (anim: SpriteAnimation, elapsedSeconds: Seconds, looping: boolean) => Rect;
 }
 
 /** The handle returned by the inert handle-minting 2D reads before a host binds (a null handle). */
 const UNBOUND_HANDLE = 0;
+
+/** The inert sub-rect the unbound flip-book sampler returns (nothing to draw). */
+const INERT_RECT: Rect = { height: 0, width: 0, x: 0, y: 0 };
 
 /*
  * The inert 2D surface used before `bindNative`: every draw is a no-op and every
@@ -163,5 +181,6 @@ export const UNBOUND_DRAW2D: Draw2dBridge = {
   draw2dRect: (): void => {
     // No-op until a host is bound
   },
+  draw2dSampleAnimation: (): Rect => INERT_RECT,
   draw2dTargetTexture: (): Handle => UNBOUND_HANDLE,
 };

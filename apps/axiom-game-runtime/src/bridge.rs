@@ -72,6 +72,7 @@ use axiom::prelude::{Entity, HostApi, HostOutcome, RunningApp, Score, StepBudget
 use axiom_draw2d::Draw2dApi;
 use axiom_grid::GridApi;
 
+use crate::assets::AssetRegistry;
 use crate::audio::AudioState;
 use crate::embed::OutcomeLatch;
 use crate::input::InputBridge;
@@ -107,6 +108,9 @@ pub struct GameBridge {
     /// The 2D draw builder (SPEC-10: particles / render targets / shapes), driven
     /// by the `draw2d_*` methods in [`crate::draw2d`].
     pub(crate) draw2d: Draw2dApi,
+    /// The presentation texture/font handle registry (SPEC-04 §10), driven by the
+    /// `load_texture` / `texture_url` / `load_font` methods in [`crate::assets`].
+    pub(crate) assets: AssetRegistry,
 }
 
 impl GameBridge {
@@ -127,6 +131,7 @@ impl GameBridge {
             audio: AudioState::new(),
             ui: UiState::new(),
             draw2d: Draw2dApi::new(),
+            assets: AssetRegistry::new(),
         }
     }
 

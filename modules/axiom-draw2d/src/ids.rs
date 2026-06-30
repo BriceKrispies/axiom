@@ -5,7 +5,7 @@
 //! and is never exposed (particles are presentation-only and feed no sim-readable
 //! getter).
 
-use axiom_host::Rgba;
+use axiom_host::{Rect, Rgba};
 use axiom_kernel::{Meters, Ratio, Seconds};
 use axiom_math::Vec2;
 
@@ -57,6 +57,22 @@ pub struct EmitterConfig {
     pub layer: i32,
 }
 
+/// A flip-book sprite animation (§10.2): an ordered list of atlas sub-rect
+/// `frames` played back at `fps` whole frames per second. A pure value recipe the
+/// [`crate::Draw2dApi::sample_animation`] sampler reads — it carries no behaviour
+/// itself (the sampling lives on the facade, like every other draw verb). `fps` is
+/// an integer frame rate (the universal sprite-sheet convention): a flip-book
+/// advances exactly one frame per `1/fps` seconds, so the rate is a frame *count*
+/// per second, not a fractional scalar — which is why it is a `u32`, not a
+/// dimensionless [`Ratio`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpriteAnimation {
+    /// The ordered atlas sub-rects, one per animation frame.
+    pub frames: Vec<Rect>,
+    /// The playback rate, in whole frames per second.
+    pub fps: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,5 +115,22 @@ mod tests {
         assert_eq!(config.color_start, rgba(1.0));
         assert_eq!(config.color_end, rgba(0.0));
         assert_eq!(config.layer, 3);
+    }
+
+    #[test]
+    fn sprite_animation_preserves_its_parts() {
+        // Mirrors `emitter_config_preserves_its_parts`: read the fields back
+        // (comparing the `frames` Vec, not the whole struct) so the derived
+        // SpriteAnimation eq/clone stay uninstantiated, exactly as EmitterConfig's.
+        let frames = vec![
+            Rect::new(Vec2::ZERO, Vec2::ONE),
+            Rect::new(Vec2::new(1.0, 0.0), Vec2::ONE),
+        ];
+        let anim = SpriteAnimation {
+            frames: frames.clone(),
+            fps: 12,
+        };
+        assert_eq!(anim.frames, frames);
+        assert_eq!(anim.fps, 12);
     }
 }

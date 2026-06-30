@@ -104,6 +104,17 @@ mod ui;
 /// `wasm32` boundary marshals to it.
 mod draw2d;
 
+/// The presentation asset seam (SPEC-04 §10): deterministic `loadTexture` /
+/// `loadFont` handle minting composed into [`GameBridge`]. Pixels are fetched and
+/// decoded in the browser arm; this core only mints stable handles and remembers
+/// the url→handle map. Native-tested; the `wasm32` boundary marshals to it.
+mod assets;
+
+/// The built-in monospace bitmap font (SPEC-04 §9 baked-atlas strategy): the fixed
+/// ASCII grid the [`draw2d`] text resolver and the harness atlas-baker share.
+/// Pure layout math, native-tested.
+mod font;
+
 /// The embed seam (SPEC-12): decode the inbound session config, latch the single
 /// outbound outcome. Pure, native-testable core; the browser channel that carries
 /// it lives in [`wasm`]. Reached at runtime only from the `wasm32` boundary, so on

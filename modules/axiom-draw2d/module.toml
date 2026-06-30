@@ -30,4 +30,5 @@ introduced_capabilities = [
   "2d-layer-sort",
   "2d-particles",
   "2d-render-targets",
+  "2d-flip-book-sampler",
 ]
