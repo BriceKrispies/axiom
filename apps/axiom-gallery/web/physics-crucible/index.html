@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Physics Crucible</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: #15171c;
+        color: #d7dbe2;
+      }
+      h1 { font-size: 16px; font-weight: 600; margin: 0; }
+      /* The canvas id MUST match the app's Window surface id
+         (physics_crucible_app::CANVAS_ID). */
+      #axiom-physics-crucible-canvas {
+        width: min(100%, 1280px);
+        aspect-ratio: 16 / 9;
+        border: 1px solid #2a2e36;
+        border-radius: 6px;
+        background: #000;
+      }
+      #status { font-family: ui-monospace, monospace; white-space: pre; }
+      .ok { color: #7fd17f; }
+      .err { color: #e07a7a; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — physics crucible (six-station proving room)</h1>
+    <canvas id="axiom-physics-crucible-canvas" width="1280" height="720"></canvas>
+    <div id="status">booting…</div>
+
+    <script type="module">
+      // Cache-bust both the JS glue and the wasm binary on every load (the dev
+      // server sends no cache headers; without this a stale bundle could be
+      // served from disk cache across refreshes).
+      const v = Date.now();
+      const { default: init, physics_start } =
+        await import(`../axiom-loader.js?v=${v}`);
+      const wasmUrl = new URL(
+        `./pkg/axiom_physics_crucible_bg.wasm?v=${v}`, import.meta.url);
+      const initOptions = { module_or_path: wasmUrl };
+
+      const status = document.getElementById("status");
+      const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
+
+      // WebGPU preferred; the engine falls back to WebGL2 when it is absent
+      // (see docs/render-fallback.md). Only bail when neither is available.
+      const hasRenderBackend = ("gpu" in navigator) || (() => {
+        try { return !!document.createElement("canvas").getContext("webgl2"); }
+        catch { return false; }
+      })();
+
+      async function main() {
+        if (!hasRenderBackend) {
+          set(
+            "Neither WebGPU nor WebGL2 is available in this browser.\n" +
+            "Use a recent Chrome/Edge, Firefox, or Safari over http://localhost.",
+            "err"
+          );
+          return;
+        }
+        try {
+          await init(initOptions); // load + instantiate the wasm module
+          // The wasm `physics_start` export authors the pre-simulated crucible room and
+          // drives the engine's requestAnimationFrame loop via axiom-windowing.
+          physics_start();
+          set(
+            "Engine started — the physics is running live. Six stations in a grid:\n" +
+            "Body / Contact / Material bays (front), Query / Stress / Replay bays\n" +
+            "(back); the camera orbits while bodies fall, bounce, and pile. Colour\n" +
+            "encodes each body's role; markers show contacts. Controls: ▲ / Space / K\n" +
+            "kick every dynamic body upward; ▼ / R reset and re-drop. The room loops.",
+            "ok"
+          );
+        } catch (e) {
+          set("Startup failed: " + e, "err");
+          throw e;
+        }
+      }
+      main();
+    </script>
+  </body>
+</html>

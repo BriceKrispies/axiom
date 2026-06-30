@@ -4,7 +4,7 @@ An example of "embedding Axiom multiplayer into a real server" using **.NET 10 /
 ASP.NET Core**, where the server runs the **actual Axiom engine** as the
 authority. One process does three things:
 
-1. **Serves the client** — the built `apps/axiom-netplay-browser/web/` directory
+1. **Serves the client** — the built the packaged `dist/` directory
    (the wasm renderer + the vendored `@axiom/client` SDK + `index.html`).
 2. **Runs the engine** — it embeds the real Axiom engine in-process via FFI (a
    native `cdylib`, `apps/axiom-netplay-ffi`), building the netplay scene,

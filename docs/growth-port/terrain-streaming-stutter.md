@@ -12,7 +12,7 @@ Two independent measurements:
 
 | Measurement | Result |
 |---|---|
-| Native bench (`examples/bench_stream.rs`, release) — field eval only | **271 ms** for the 321×321 window (2,632 ns/sample) ≈ **16 dropped frames @60fps** |
+| Native bench (`apps/axiom-gallery/examples/growth_bench_stream.rs`, release) — field eval only | **271 ms** for the 321×321 window (2,632 ns/sample) ≈ **16 dropped frames @60fps** |
 | Same, the newly-exposed leading strip only (1 chunk slide) | 14 ms (≈0.9 frames) |
 | Same, a single 16 m chunk | 0.73 ms |
 | In-browser frame probe (JS RAF dt) while walking across an edge | a single **300 ms** frame; all other frames <40 ms |
@@ -29,7 +29,7 @@ The viewer also **bypasses the simulator's own `ChunkStore`** (which already imp
 ## Options (with honest trade-offs)
 
 ### 1. Raymarching / mesh-free implicit terrain (the user's idea)
-Don't build a mesh. Terrain *is* `height(x,z)`; render by casting a ray per pixel and marching to the surface (like `examples/render_maps.rs`, or shadertoy planets), in a full-screen **fragment shader**.
+Don't build a mesh. Terrain *is* `height(x,z)`; render by casting a ray per pixel and marching to the surface (like `apps/axiom-gallery/examples/growth_render_maps.rs`, or shadertoy planets), in a full-screen **fragment shader**.
 - **Pros:** the zone/edge/regen concept disappears entirely — *the whole stutter category is gone*; walk forever; bounded memory; automatic distance LOD.
 - **Cons / why it fights this project:**
   - The height function must run **per pixel × per march step in WGSL**. The noise layers port; the **macro atlas IDW** (region graph + per-region elevation) must be baked into a texture/buffer for the shader — the hard part.
@@ -61,5 +61,5 @@ Primary: **(3) chunked incremental meshing, aligned with the simulator's `ChunkS
 Independently of which is chosen, two field-level wins help every option: (a) **stop the 19× redundancy** (only generate what's newly exposed), and (b) **make `sample_height_m` cheaper** — cache the macro/atlas term per region instead of per vertex, drop octaves with distance, and use analytic derivatives for normals instead of extra height samples.
 
 ## Repro
-- `cargo run -p axiom-growth --example bench_stream --release` — prints the regen cost table above.
+- `cargo run -p axiom-gallery --example growth_bench_stream --release` — prints the regen cost table above.
 - In-browser: inject a RAF dt probe, walk across an edge, read the max frame ms (a single ~300 ms spike).

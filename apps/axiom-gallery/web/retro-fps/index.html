@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — retro FPS (first-person, on just the engine)</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 12px;
+        /* Each edge clears the device safe area (a notch / home indicator) via
+           env() insets, so the board and HUD are never under system UI on a
+           phone (paired with viewport-fit=cover above). */
+        padding:
+          max(24px, env(safe-area-inset-top))
+          max(24px, env(safe-area-inset-right))
+          max(24px, env(safe-area-inset-bottom))
+          max(24px, env(safe-area-inset-left));
+        font: 14px/1.5 system-ui, sans-serif; background: #0c0d10; color: #d7dbe2;
+      }
+      h1 { font-size: 16px; font-weight: 600; margin: 0; }
+      /* The canvas id MUST match CANVAS_ID in src/lib.rs. */
+      #axiom-retro-fps-canvas {
+        width: 960px; height: 600px; max-width: 100%;
+        border: 1px solid #2a2e36; border-radius: 6px; background: #000;
+        touch-action: none;
+      }
+      #status { font-family: ui-monospace, monospace; white-space: pre; text-align: center; }
+      .ok { color: #7fd17f; } .err { color: #e07a7a; }
+      kbd { background: #20242c; border: 1px solid #333; border-radius: 4px; padding: 1px 5px; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — retro FPS (first-person), built on just the engine</h1>
+    <canvas id="axiom-retro-fps-canvas" width="960" height="600"></canvas>
+    <div id="status">booting…</div>
+
+    <script type="module">
+      // Cache-bust the JS glue + wasm on every load (the dev server sends no
+      // cache headers).
+      const v = Date.now();
+      const { default: init, retro_fps_start } =
+        await import(`../axiom-loader.js?v=${v}`);
+      const wasmUrl = new URL(`./pkg/axiom_retro_fps_browser_bg.wasm?v=${v}`, import.meta.url);
+
+      const status = document.getElementById("status");
+      const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
+
+      // WebGPU preferred; the engine falls back to WebGL2 when it is absent
+      // (see docs/render-fallback.md). Only bail when neither is available.
+      const hasRenderBackend = ("gpu" in navigator) || (() => {
+        try { return !!document.createElement("canvas").getContext("webgl2"); }
+        catch { return false; }
+      })();
+
+      async function main() {
+        if (!hasRenderBackend) {
+          set("Neither WebGPU nor WebGL2 is available. Use a recent Chrome/Edge, Firefox, or Safari.", "err");
+          return;
+        }
+        try {
+          await init({ module_or_path: wasmUrl });
+          retro_fps_start();
+          set("Tank controls: ↑/W forward · ↓/S back · ←/→ turn · A/D strafe · Space fire.", "ok");
+        } catch (e) {
+          set("Startup failed: " + e, "err");
+          throw e;
+        }
+      }
+      main();
+    </script>
+  </body>
+</html>

@@ -220,7 +220,11 @@ static string ResolveWebRoot(string contentRoot)
 {
     string? env = Environment.GetEnvironmentVariable("AXIOM_WEB_ROOT");
     if (!string.IsNullOrEmpty(env)) return Path.GetFullPath(env);
-    string rel = Path.Combine("apps", "axiom-netplay-browser", "web");
+    // Every browser demo is merged into the gallery and packaged into dist/ (one
+    // shared wasm bundle + every demo's page). `make netplay-build` builds that
+    // dist/, so the netplay client lives at dist/netplay/ — serve dist/ and open
+    // /netplay/. (Override with AXIOM_WEB_ROOT for a custom layout.)
+    string rel = "dist";
     foreach (string start in new[] { contentRoot, AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
         for (DirectoryInfo? dir = new(start); dir is not null; dir = dir.Parent)
         {

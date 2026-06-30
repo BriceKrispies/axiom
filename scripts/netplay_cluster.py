@@ -22,7 +22,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVER_DIR = REPO_ROOT / "examples" / "axiom-netplay-dotnet"
-WEB_ROOT = REPO_ROOT / "apps" / "axiom-netplay-browser" / "web"
+WEB_ROOT = REPO_ROOT / "dist"
 DIRECTOR_PORT = 8100
 NODE_PORTS = (8101, 8102)
 

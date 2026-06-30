@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Rotating Cube (visible slice)</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: #15171c;
+        color: #d7dbe2;
+      }
+      h1 { font-size: 16px; font-weight: 600; margin: 0; }
+      /* The canvas id MUST match browser_bootstrap::CANVAS_ELEMENT_ID. */
+      #axiom-cube-canvas {
+        width: 800px;
+        height: 600px;
+        border: 1px solid #2a2e36;
+        border-radius: 6px;
+        background: #000;
+      }
+      #status { font-family: ui-monospace, monospace; white-space: pre; }
+      .ok { color: #7fd17f; }
+      .err { color: #e07a7a; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — browser-visible rotating-cube slice</h1>
+    <canvas id="axiom-cube-canvas" width="800" height="600"></canvas>
+    <div id="status">booting…</div>
+
+    <script type="module">
+      // Cache-bust both the JS glue and the wasm binary on every load. The dev
+      // server (`make demo` → python http.server) sends no cache headers, so a
+      // browser that loaded an OLD bundle once would keep serving the stale
+      // .js/.wasm from disk cache forever — even across a normal refresh —
+      // looking like a frozen window running last build's code. The
+      // `?v=<timestamp>` query forces a fresh fetch of both files.
+      const v = Date.now();
+      const { default: init, rotating_cube_start } =
+        await import(`../axiom-loader.js?v=${v}`);
+      const wasmUrl = new URL(
+        `./pkg/axiom_demo_rotating_cube_browser_bg.wasm?v=${v}`, import.meta.url);
+      // wasm-bindgen's init takes a single options object ({ module_or_path }).
+      const initOptions = { module_or_path: wasmUrl };
+
+      const status = document.getElementById("status");
+      const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
+
+      // WebGPU preferred; the engine falls back to WebGL2 when it is absent
+      // (see docs/render-fallback.md). Only bail when neither is available.
+      const hasRenderBackend = ("gpu" in navigator) || (() => {
+        try { return !!document.createElement("canvas").getContext("webgl2"); }
+        catch { return false; }
+      })();
+
+      async function main() {
+        if (!hasRenderBackend) {
+          set(
+            "Neither WebGPU nor WebGL2 is available in this browser.\n" +
+            "Use a recent Chrome/Edge, Firefox, or Safari over http://localhost.",
+            "err"
+          );
+          return;
+        }
+        try {
+          await init(initOptions); // load + instantiate the wasm module
+          // `App::run()` (via the wasm `rotating_cube_start` export): authors the scene,
+          // configures the surface from Window, and drives the engine's
+          // requestAnimationFrame loop through axiom-windowing.
+          rotating_cube_start();
+          set(
+            "Engine started. You should see three shaded cubes on a dark\n" +
+            "background: red spinning on the vertical (Y) axis, green on the\n" +
+            "horizontal (X) axis, and blue on a diagonal (X+Y) axis.\n" +
+            "The whole app is pure scene description on App::new()...run().",
+            "ok"
+          );
+        } catch (e) {
+          set("Startup failed: " + e, "err");
+          throw e;
+        }
+      }
+      main();
+    </script>
+  </body>
+</html>

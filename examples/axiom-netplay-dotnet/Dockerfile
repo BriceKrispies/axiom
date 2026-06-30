@@ -32,7 +32,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=dotnet /app ./
 COPY --from=rust /src/target/release/libaxiom_netplay_ffi.so /app/lib/
-COPY apps/axiom-netplay-browser/web /app/web
+COPY dist /app/web
 
 ENV AXIOM_FFI_LIB=/app/lib/libaxiom_netplay_ffi.so
 ENV AXIOM_WEB_ROOT=/app/web
