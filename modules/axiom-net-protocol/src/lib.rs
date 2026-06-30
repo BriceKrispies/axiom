@@ -39,6 +39,7 @@
 //! `Vec<u8>`) — which is also exactly a wire shape, so an app or the TypeScript
 //! package can own the socket without naming a protocol type.
 
+mod acks;
 mod client_id;
 mod client_intent;
 mod client_intent_for;
@@ -53,6 +54,8 @@ mod room_id;
 mod server_event;
 mod server_snapshot;
 mod server_snapshot_for;
+mod server_snapshot_for_delta;
+mod snapshot_delta;
 mod welcome;
 
 pub use net_protocol_api::NetProtocolApi;

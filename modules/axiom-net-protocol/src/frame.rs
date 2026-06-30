@@ -35,9 +35,13 @@ pub(crate) const KIND_REJECTED_INTENT: u8 = 6;
 pub(crate) const KIND_CLIENT_INTENT_FOR: u8 = 7;
 /// Per-player-addressed `ServerSnapshot` (carries per-player acknowledgements).
 pub(crate) const KIND_SERVER_SNAPSHOT_FOR: u8 = 8;
+/// Per-player-addressed **delta** snapshot: a diff against the client's last-acked
+/// snapshot (the `base_tick`) instead of a full payload. Full snapshots stay the
+/// fallback and the keyframe; this shrinks steady-state replication.
+pub(crate) const KIND_SERVER_SNAPSHOT_FOR_DELTA: u8 = 9;
 
 /// The largest valid kind byte — the upper bound of the contiguous range.
-pub(crate) const KIND_MAX: u8 = KIND_SERVER_SNAPSHOT_FOR;
+pub(crate) const KIND_MAX: u8 = KIND_SERVER_SNAPSHOT_FOR_DELTA;
 
 /// Write the frame header (`WIRE_VERSION` then `kind`) to `writer`. Each message
 /// encoder calls this before writing its body.
@@ -200,6 +204,7 @@ mod tests {
             KIND_REJECTED_INTENT,
             KIND_CLIENT_INTENT_FOR,
             KIND_SERVER_SNAPSHOT_FOR,
+            KIND_SERVER_SNAPSHOT_FOR_DELTA,
         ];
         kinds.iter().for_each(|&kind| {
             let mut w = BinaryWriter::new();

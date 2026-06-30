@@ -9,18 +9,15 @@
 //! ([`frame::KIND_SERVER_SNAPSHOT_FOR`]); the anonymous `ServerSnapshot` bytes are
 //! untouched.
 
-use axiom_kernel::{
-    BinaryReader, BinaryWriter, KernelError, KernelErrorCode, KernelErrorScope, KernelResult,
-};
+use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult};
 
+use crate::acks::{read_acks, validate_ack_len, write_acks};
 use crate::frame;
 use crate::opaque_payload::OpaquePayload;
 
-/// The maximum number of per-player acknowledgements a single snapshot may carry.
-/// A snapshot acks at most one sequence per seated player, so this bounds the ack
-/// list the way [`crate::opaque_payload::MAX_PAYLOAD_LEN`] bounds the body — a
-/// frame can never declare an unbounded list. Enforced at construction and decode.
-pub(crate) const MAX_ACKS: usize = 4096;
+/// The maximum number of per-player acknowledgements a single snapshot may carry —
+/// re-exported from the shared [`crate::acks`] framing both per-player snapshots use.
+pub(crate) use crate::acks::MAX_ACKS;
 
 /// The server's authoritative state for a tick, acknowledged per player.
 ///
@@ -73,11 +70,7 @@ impl ServerSnapshotFor {
         let mut w = BinaryWriter::new();
         frame::write_header(&mut w, frame::KIND_SERVER_SNAPSHOT_FOR);
         w.write_u64(self.server_tick);
-        w.write_u32(self.acks.len() as u32);
-        self.acks.iter().for_each(|&(player, sequence)| {
-            w.write_u64(player);
-            w.write_u64(sequence);
-        });
+        write_acks(&mut w, &self.acks);
         self.payload.write_to(&mut w);
         w.into_bytes()
     }
@@ -99,39 +92,10 @@ impl ServerSnapshotFor {
     }
 }
 
-/// Reject an ack list longer than [`MAX_ACKS`], branchlessly.
-fn validate_ack_len(len: usize) -> KernelResult<()> {
-    (len <= MAX_ACKS).then_some(()).ok_or_else(too_many_acks_error)
-}
-
-/// Read the length-prefixed ack list, re-validating the [`MAX_ACKS`] bound and
-/// folding the declared count of `(player, sequence)` pairs without a loop.
-fn read_acks(r: &mut BinaryReader<'_>) -> KernelResult<Vec<(u64, u64)>> {
-    r.read_u32().and_then(|count| {
-        validate_ack_len(count as usize).and_then(|()| {
-            (0..count).try_fold(Vec::with_capacity(count as usize), |mut acc, _| {
-                r.read_u64().and_then(|player| {
-                    r.read_u64().map(|sequence| {
-                        acc.push((player, sequence));
-                        acc
-                    })
-                })
-            })
-        })
-    })
-}
-
-fn too_many_acks_error() -> KernelError {
-    KernelError::new(
-        KernelErrorScope::Message,
-        KernelErrorCode::OutOfBounds,
-        "server snapshot ack list exceeds the maximum count",
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_kernel::{KernelErrorCode, KernelErrorScope};
 
     fn sample() -> ServerSnapshotFor {
         ServerSnapshotFor::new(42, &[(7, 5), (9, 3)], b"state-bytes").unwrap()

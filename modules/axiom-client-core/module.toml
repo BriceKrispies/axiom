@@ -33,4 +33,5 @@ introduced_capabilities = [
     "authoritative-server-tick-tracking",
     "unacked-intent-resimulation-cursor",
     "interpolation-delay-cursor",
+    "opt-in-local-player-prediction",
 ]

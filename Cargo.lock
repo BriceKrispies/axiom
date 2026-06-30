@@ -164,6 +164,9 @@ name = "axiom-client-core"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
+ "axiom-math",
+ "axiom-physics",
+ "axiom-runtime",
 ]
 
 [[package]]
@@ -172,6 +175,8 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "ed25519-dalek",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -304,6 +309,7 @@ dependencies = [
  "axiom-space",
  "axiom-tick",
  "axiom-tween",
+ "axiom-windowing",
  "console_error_panic_hook",
  "wasm-bindgen",
  "web-sys",
@@ -506,6 +512,7 @@ name = "axiom-netplay-server"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-crypto",
  "axiom-kernel",
  "axiom-net-protocol",
  "futures-util",

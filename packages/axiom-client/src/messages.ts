@@ -22,6 +22,8 @@ export const KIND_REJECTED_INTENT = 6;
 export const KIND_CLIENT_INTENT_FOR = 7;
 /** Per-player-addressed server snapshot (carries per-player acknowledgements). */
 export const KIND_SERVER_SNAPSHOT_FOR = 8;
+/** Per-player-addressed delta snapshot (a diff against the client's last-acked snapshot). */
+export const KIND_SERVER_SNAPSHOT_FOR_DELTA = 9;
 
 /** Documented size bounds (must match the Rust module). */
 export const MAX_ROOM_ID_LEN = 64;
@@ -45,7 +47,8 @@ export type DecodedKind =
   | typeof KIND_SERVER_EVENT
   | typeof KIND_REJECTED_INTENT
   | typeof KIND_CLIENT_INTENT_FOR
-  | typeof KIND_SERVER_SNAPSHOT_FOR;
+  | typeof KIND_SERVER_SNAPSHOT_FOR
+  | typeof KIND_SERVER_SNAPSHOT_FOR_DELTA;
 
 export interface JoinRoomMessage {
   readonly kind: typeof KIND_JOIN_ROOM;
@@ -106,6 +109,13 @@ export interface ServerSnapshotForMessage {
   readonly acks: readonly PlayerAck[];
   readonly payload: Uint8Array;
 }
+export interface ServerSnapshotForDeltaMessage {
+  readonly kind: typeof KIND_SERVER_SNAPSHOT_FOR_DELTA;
+  readonly serverTick: number;
+  readonly baseTick: number;
+  readonly acks: readonly PlayerAck[];
+  readonly delta: Uint8Array;
+}
 
 export type DecodedMessage =
   | JoinRoomMessage
@@ -116,4 +126,5 @@ export type DecodedMessage =
   | ServerEventMessage
   | RejectedIntentMessage
   | ClientIntentForMessage
-  | ServerSnapshotForMessage;
+  | ServerSnapshotForMessage
+  | ServerSnapshotForDeltaMessage;

@@ -25,6 +25,16 @@ axiom-kernel = { path = "../axiom-kernel" }
 # seed), so no RNG / getrandom dependency leaks into the engine spine.
 ed25519-dalek = "2"
 
+# The vetted SHA-2 implementation (already in the tree via ed25519-dalek). HMAC-SHA256
+# and the HS256 JWT verifier are built ON it rather than hand-rolling a hash — the same
+# no-shortcuts rule as ed25519. Pure, deterministic, wasm-clean; no RNG / platform API.
+sha2 = "0.10"
+
+# A vetted JSON parser (already in the tree), used only to read a verified token's
+# claims (`exp` / `sub`). Hand-rolling a JSON scanner would be the kind of shortcut
+# Axiom forbids; serde_json is pure and deterministic with no platform surface.
+serde_json = "1"
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
