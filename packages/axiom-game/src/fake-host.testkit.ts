@@ -88,7 +88,6 @@ export class FakeHost implements HostBridge {
   public uiTexts: { value: string; opts: UiTextOpts }[] = [];
   public uiSprites: { texture: Handle; bounds: Rect }[] = [];
   public uiButtons: { bounds: Rect; label: string; style: UiStyle }[] = [];
-  public uiButtonReturn = false;
   public uiViewportReturn: UiViewport = { height: 0, width: 0 };
   public uiDrawListReturn: Uint8Array = new Uint8Array();
   public uiSolveLayoutReturn: readonly number[] = [];
@@ -493,9 +492,18 @@ export class FakeHost implements HostBridge {
     this.uiSprites.push({ bounds, texture });
   }
 
+  // Faithfully model the native `UiSurface::button` truth table: a button is
+  // activated this frame iff the latest `beginFrame` pointer was inside `bounds`
+  // on its press edge (`bounds.contains(pointer) & pressed_edge`). Before any
+  // begin-frame the pointer is the inert origin with no press edge.
   public uiButton(bounds: Rect, label: string, style: UiStyle): boolean {
     this.uiButtons.push({ bounds, label, style });
-    return this.uiButtonReturn;
+    const frames = this.uiBeginFrames;
+    if (frames.length === 0) {
+      return false;
+    }
+    const frame = frames[frames.length - 1]!;
+    return this.pointInRect(frame.pointer, bounds) && frame.pressed;
   }
 
   public uiViewport(): UiViewport {

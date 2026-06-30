@@ -1,7 +1,13 @@
-# Headless integration proof — SDK FPS primitives
+# Headless integration proofs — SDK primitives over the real wasm
 
-An **out-of-gate** integration test that drives the real `axiom-game-runtime`
-wasm in Node (no browser) to prove the SDK's first-person primitives end to end:
+**Out-of-gate** integration tests that drive the real `axiom-game-runtime` wasm in
+Node (no browser) to prove SDK primitives end to end across the live boundary.
+They are NOT part of the @axiom/game coverage gate (the node:test unit suite never
+loads wasm); they need the wasm-bindgen `pkg/` bindings built (see below).
+
+## `headless-fps.test.mjs` — FPS primitives
+
+Proves the SDK's first-person primitives end to end:
 
 - **Look-at camera** — `setCamera3D(position, target, …)` aims the camera; the
   `target` now crosses the wasm boundary (previously dropped).
@@ -14,7 +20,7 @@ This is the headless counterpart of the browser `web/` harness that exercises
 live wasm), so they are proven here / via Playwright rather than in the node:test
 coverage unit suite — which never loads wasm.
 
-## What `headless-fps.test.mjs` asserts
+### What `headless-fps.test.mjs` asserts
 
 1. Programmatic input injection reaches the native input system and surfaces to
    the author (`sim.input.axis` tracks the injected `ArrowRight` hold/release).
@@ -25,6 +31,22 @@ coverage unit suite — which never loads wasm.
    `apps/axiom-game-runtime/src/scene3d.rs`.)
 4. Two identical runs are byte-for-byte deterministic (author-visible axis
    sequence + the native sim snapshot).
+
+## `draw2d-marshalling.test.mjs` — SPEC-04 Frame 2D primitives
+
+Proves SPEC-04 §7's headless obligation: the SDK's `Frame` 2D methods marshal to
+the native `Draw2dList`. It binds the real wasm host, drives a few `Frame` draws
+(`rect`/`circle`/`line` with fill/stroke/layer/alpha) submitted out of layer
+order, calls `frame.finish()`, and asserts the returned flat, self-describing
+`[kind, layer, submission, len, …geometry]` stream (see
+`apps/axiom-game-runtime/src/draw2d.rs` `draw2d_finish`):
+
+1. **Layer-sort golden** — commands come back stably sorted by `(layer,
+   submission)`, including a within-layer tie that keeps its submission order.
+2. **Geometry + colour marshalling** — each primitive's payload matches the
+   native per-kind layout, with the SDK's `[r, g, b, a]` colours round-tripping
+   through the boundary's packed `0xRRGGBBAA`.
+3. **Determinism** — the same draws yield a byte-identical command stream.
 
 ## Build the bindings and run
 
@@ -40,8 +62,8 @@ wasm-bindgen --target nodejs \
   --out-dir apps/axiom-game-runtime/integration/pkg \
   target/wasm32-unknown-unknown/debug/axiom_game_runtime.wasm
 
-# 3. run the proof (Node 24+ runs the TypeScript SDK sources directly)
-node --test apps/axiom-game-runtime/integration/headless-fps.test.mjs
+# 3. run the proofs (Node 24+ runs the TypeScript SDK sources directly)
+node --test "apps/axiom-game-runtime/integration/*.test.mjs"
 ```
 
 ## Note: the Node audio stub

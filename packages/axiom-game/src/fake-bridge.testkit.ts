@@ -27,6 +27,47 @@ const IDENTITY_TRANSFORM: Transform = {
   scale: { x: 1, y: 1, z: 1 },
 };
 
+// A `Transform`-bearing component (the built-in `Transform` the World tests `set`
+// onto a node). The fake reads these fields back when composing a node's world
+// transform, so `worldTransform` is a genuine function of the parent chain — not a
+// scripted constant. Test-only, so a structural type guard is fine.
+interface TransformComponent extends Component {
+  readonly position: Vec3;
+  readonly rotation: Transform["rotation"];
+  readonly scale: Vec3;
+}
+
+const isTransformComponent = (component: Component): component is TransformComponent =>
+  "position" in component && "rotation" in component && "scale" in component;
+
+// Hamilton product of two quaternions `[x, y, z, w]` — the rotation half of a TRS
+// compose. With identity rotations it is identity, so a translate/scale-only test
+// reads cleanly while a rotated hierarchy still composes faithfully.
+const quatMul = (a: Transform["rotation"], b: Transform["rotation"]): Transform["rotation"] => [
+  a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+  a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+  a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+  a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+];
+
+// Compose a child's LOCAL transform under its PARENT's resolved world transform:
+// translation accumulates with the parent's scale applied to the child offset,
+// scale multiplies componentwise, and rotation is the quaternion product — the
+// same TRS hierarchy the native scene resolves.
+const composeTransform = (parent: Transform, child: Transform): Transform => ({
+  position: {
+    x: parent.position.x + parent.scale.x * child.position.x,
+    y: parent.position.y + parent.scale.y * child.position.y,
+    z: parent.position.z + parent.scale.z * child.position.z,
+  },
+  rotation: quatMul(parent.rotation, child.rotation),
+  scale: {
+    x: parent.scale.x * child.scale.x,
+    y: parent.scale.y * child.scale.y,
+    z: parent.scale.z * child.scale.z,
+  },
+});
+
 const FIRST_ENTITY = 1;
 
 // A scripted in-memory timer schedule: one-shot fires on its due tick, repeating
@@ -259,7 +300,35 @@ export class FakeBridge implements NativeBridge {
     if (!this.alive.has(entity)) {
       return undefined;
     }
-    return this.transforms.get(entity) ?? IDENTITY_TRANSFORM;
+    return this.resolveWorld(entity);
+  }
+
+  // A node's LOCAL transform: a scripted override wins (the existing transform
+  // test), else its `Transform` component if one was `set`, else identity.
+  private localTransform(entity: Entity): Transform {
+    const scripted = this.transforms.get(entity);
+    if (scripted !== undefined) {
+      return scripted;
+    }
+    const column = this.columns.get(entity);
+    if (column !== undefined) {
+      const component = column.get("transform");
+      if (component !== undefined && isTransformComponent(component)) {
+        return { position: component.position, rotation: component.rotation, scale: component.scale };
+      }
+    }
+    return IDENTITY_TRANSFORM;
+  }
+
+  // Resolve a node's WORLD transform by composing its local transform under its
+  // (live) parent chain — so a child reads its parent's pose, the composed value.
+  private resolveWorld(entity: Entity): Transform {
+    const local = this.localTransform(entity);
+    const parent = this.parents.get(entity);
+    if (parent === undefined || !this.alive.has(parent)) {
+      return local;
+    }
+    return composeTransform(this.resolveWorld(parent), local);
   }
 
   // Test helper: wire `child` under `parent` (the projected surface omits

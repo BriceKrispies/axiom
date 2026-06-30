@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { makeWorld } from "./world.ts";
-import type { Component } from "./vocabulary.ts";
+import type { Component, Quat, Vec3 } from "./vocabulary.ts";
 import { FakeBridge } from "./fake-bridge.testkit.ts";
 
 interface Health extends Component {
@@ -11,6 +11,22 @@ interface Health extends Component {
 }
 
 const health = (hp: number): Health => ({ hp, kind: "health" });
+
+interface TransformComp extends Component {
+  readonly kind: "transform";
+  readonly position: Vec3;
+  readonly rotation: Quat;
+  readonly scale: Vec3;
+}
+
+const NO_ROTATION: Quat = [0, 0, 0, 1];
+
+const transform = (position: Vec3, scale: Vec3): TransformComp => ({
+  kind: "transform",
+  position,
+  rotation: NO_ROTATION,
+  scale,
+});
 
 test("spawn returns a fresh handle and forwards the components", () => {
   const fake = new FakeBridge();
@@ -126,4 +142,41 @@ test("worldTransform reads the resolved transform for a live node, empty for a s
   assert.deepEqual(world.worldTransform(entity), composed);
   // A stale handle is the empty value, never a throw.
   assert.equal(world.worldTransform(9999), undefined);
+});
+
+// SPEC-02 §7: the one combined-lifecycle proof the spec names — spawn a parent
+// and child, parent them, give the parent a Transform, read the child's COMPOSED
+// world transform, confirm the hierarchy reads, then despawn the subtree and
+// confirm the child is gone. Exercises setParent → worldTransform → despawnSubtree
+// end to end against the fake's in-memory ECS + TRS composition.
+test("the parent/child lifecycle: setParent, composed worldTransform, then despawnSubtree removes the child", () => {
+  const world = makeWorld(new FakeBridge());
+  const parent = world.spawn({ kind: "node" });
+  const child = world.spawn({ kind: "node" });
+
+  world.setParent(child, parent);
+  // The hierarchy reads back both ways.
+  assert.equal(world.parentOf(child), parent);
+  assert.deepEqual(world.childrenOf(parent), [child]);
+
+  // The parent gets a world pose (translate +(10,20,30), scale ×2); the child a
+  // local offset of (1,2,3) under it.
+  world.set(parent, transform({ x: 10, y: 20, z: 30 }, { x: 2, y: 2, z: 2 }));
+  world.set(child, transform({ x: 1, y: 2, z: 3 }, { x: 1, y: 1, z: 1 }));
+
+  // The child's world transform is the COMPOSED pose: parent.position +
+  // parent.scale ⊙ child.position = (10+2·1, 20+2·2, 30+2·3) = (12, 24, 36), with
+  // the scale multiplied (2·1) and the identity rotation carried through.
+  assert.deepEqual(world.worldTransform(child), {
+    position: { x: 12, y: 24, z: 36 },
+    rotation: NO_ROTATION,
+    scale: { x: 2, y: 2, z: 2 },
+  });
+
+  // Despawning the parent's subtree removes the parent AND the child.
+  world.despawnSubtree(parent);
+  assert.equal(world.alive(parent), false);
+  assert.equal(world.alive(child), false);
+  // A read on the now-gone child is the clean empty value.
+  assert.equal(world.worldTransform(child), undefined);
 });
