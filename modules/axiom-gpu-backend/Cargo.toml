@@ -17,6 +17,14 @@ crate-type = ["rlib"]
 # boundary (HostPresentationRequest), reading the physical surface size from it.
 axiom-host = { path = "../../crates/axiom-host" }
 
+# The neutral 2D draw contract (host::Draw2dList) carries math's Mat3 / Vec2 (each
+# command's baked transform and rect corners); the GPU 2D geometry core
+# (`draw2d_geometry`) names and uses them directly to transform quad corners.
+# `math` is a layer below `host`, so depending on it is legal under the Module Law
+# and is declared in allowed_layers — the same dependency the Canvas 2D backend
+# declares, for the same reason.
+axiom-math = { path = "../../crates/axiom-math" }
+
 # wgpu + bytemuck are optional here so that on NATIVE they are pulled in only by
 # the `offscreen` feature (the screenshot path); on wasm32 they are required
 # unconditionally via the target table below. pollster drives the native

@@ -112,6 +112,7 @@ name = "axiom-gpu-backend"
 version = "0.1.0"
 dependencies = [
  "axiom-host",
+ "axiom-math",
  "bytemuck",
  "pollster",
  "wasm-bindgen",
@@ -240,6 +241,7 @@ dependencies = [
  "axiom-gpu-backend",
  "axiom-host",
  "axiom-kernel",
+ "axiom-math",
  "axiom-physics-crucible",
  "png",
 ]

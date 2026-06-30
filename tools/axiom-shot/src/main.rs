@@ -194,6 +194,64 @@ fn showcase_app() -> App {
         })
 }
 
+/// The SPEC-11 §7 "nova-roll" render-one-frame slice: a cube + an (emissive)
+/// cylinder, a perspective camera, and one directional light — the smallest scene
+/// that exercises `Mesh::cylinder` + an emissive material on both backends. The
+/// matching `tests/render_parity.rs` authors the same shape and asserts GPU↔canvas2d
+/// agreement; this `--app nova-roll` entry renders it live through either backend.
+fn nova_roll_app() -> App {
+    App::new()
+        .window(
+            Window::new(WIDTH, HEIGHT).with_clear_color(Color::linear_rgb(
+                ch(0.02),
+                ch(0.02),
+                ch(0.05),
+            )),
+        )
+        .add_plugins(DefaultPlugins)
+        .setup(|world, meshes, materials| {
+            let cube = meshes.add(Mesh::cube());
+            let cylinder = meshes.add(Mesh::cylinder());
+            let cube_mat =
+                materials.add(Material::lit(Color::linear_rgb(ch(0.85), ch(0.30), ch(0.25))));
+            // The cylinder carries an emissive colour (carried-but-not-shaded).
+            let cyl_mat = materials.add(
+                Material::lit(Color::linear_rgb(ch(0.25), ch(0.55), ch(0.90)))
+                    .with_emissive(Color::linear_rgb(ch(0.6), ch(0.5), ch(0.1))),
+            );
+            world.spawn((
+                Transform::from_translation(Vec3::new(-1.6, 0.0, 0.0)),
+                Renderable {
+                    mesh: cube,
+                    material: cube_mat,
+                },
+            ));
+            world.spawn((
+                Transform::from_translation(Vec3::new(1.6, 0.0, 0.0)),
+                Renderable {
+                    mesh: cylinder,
+                    material: cyl_mat,
+                },
+            ));
+            world.spawn((
+                Transform::from_translation(Vec3::new(0.0, 0.0, 6.0)),
+                Camera::perspective(PerspectiveProjection {
+                    fov_y: Angle::degrees(55.0),
+                    near: Meters::new(0.1).expect("near plane is finite"),
+                    far: Meters::new(100.0).expect("far plane is finite"),
+                }),
+            ));
+            world.spawn((
+                Transform::IDENTITY,
+                DirectionalLight {
+                    direction: Vec3::new(0.3, -1.0, 0.4),
+                    color: Color::WHITE,
+                    intensity: ch(1.0),
+                },
+            ));
+        })
+}
+
 /// Build the selected app's `RunningApp`. Apps are named on the command line; new
 /// renderable apps are added here (and as a Cargo dependency). `level` (when set)
 /// is a path to a `level.axiom` document for the DOOM app (else its built-in
@@ -202,6 +260,7 @@ fn build_app(name: &str, level: Option<&str>) -> RunningApp {
     match name {
         "doom" => axiom_doom_browser::build_doom_app(&doom_doc(level)).0,
         "showcase" => showcase_app().build(),
+        "nova-roll" => nova_roll_app().build(),
         "physics-crucible" => axiom_physics_crucible::build_physics_crucible(),
         other => {
             eprintln!("axiom-shot: unknown --app '{other}', falling back to 'showcase'");

@@ -23,6 +23,11 @@ kind = "engine-module"
 
 allowed_layers = [
     "host",
+    # The neutral 2D draw contract (host::Draw2dList) is expressed in math's
+    # Mat3 / Vec2 (each command's baked transform and rect corners), so the GPU
+    # 2D geometry core (`draw2d_geometry`) genuinely names and uses the math layer
+    # — the same dependency the Canvas 2D backend declares.
+    "math",
 ]
 
 allowed_modules = []

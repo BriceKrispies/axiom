@@ -29,6 +29,12 @@ pub struct GpuBackendApi {
     // here so the tier decision is observable — and native-testable — even
     // though the renderer that consumes it only exists on wasm32.
     shadow_size: u32,
+    // The CPU sprite/atlas textures the 2D Draw2dList sprite path samples, as
+    // `(texture_id, width, height, RGBA8)` — the same upload shape as the 3D
+    // material set, resolved in the app (fetch/decode). On native they supply the
+    // covered core's sprite UV-normalisation sizes; the live wgpu 2D raster (the
+    // off-screen / browser arm) uploads them as GPU textures.
+    draw2d_textures: Vec<(u64, u32, u32, Vec<u8>)>,
     // The real GPU binding, present only once initialised on wasm32. Its absence
     // is what "not ready" means; native never has one.
     #[cfg(target_arch = "wasm32")]
@@ -50,9 +56,19 @@ impl GpuBackendApi {
             render_width,
             render_height,
             shadow_size: request.device().profile().shadow_map_size(),
+            draw2d_textures: Vec::new(),
             #[cfg(target_arch = "wasm32")]
             live: None,
         }
+    }
+
+    /// Upload the CPU sprite/atlas textures the 2D [`Draw2dList`] sprite path
+    /// samples, as `(texture_id, width, height, RGBA8 pixels)` — the same upload
+    /// shape as the 3D material set and the Canvas 2D backend's `load_textures`.
+    /// On native these supply the covered core's sprite UV sizes; the live arm
+    /// uploads them as GPU textures.
+    pub fn load_draw2d_textures(&mut self, textures: &[(u64, u32, u32, Vec<u8>)]) {
+        self.draw2d_textures = textures.to_vec();
     }
 
     /// The physical surface width the backend will bind.
@@ -172,14 +188,49 @@ impl GpuBackendApi {
     }
 
     /// Present a host-neutral [`Draw2dList`] through the GPU backend — the 2D
-    /// peer of [`Self::present_packet`]. The live wgpu 2D raster is the
-    /// browser/`offscreen` platform arm (alpha-blended, outside the coverage
-    /// gate); the native facade is a no-op returning `false` (no GPU), naming the
-    /// neutral list the live arm consumes. Today the software Canvas 2D backend
-    /// owns the covered 2D raster; this is the wgpu entry point alongside it.
+    /// peer of [`Self::present_packet`]. It walks the layer-sorted list into
+    /// backend-neutral quad geometry via the **covered core**
+    /// ([`crate::draw2d_geometry`]) — the same geometry the live wgpu 2D raster
+    /// uploads and draws (alpha-blended, honouring layer order). On the no-GPU
+    /// path the geometry is built and discarded and present draws nothing
+    /// (returns `false`), exactly like [`Self::present_packet`] no-ops after
+    /// building its batches; the live alpha-blended raster is the off-screen /
+    /// browser platform arm (see [`Self::render_draw2d_offscreen_rgba`]).
     pub fn present_draw2d(&self, list: &Draw2dList) -> bool {
-        let _ = list;
+        let sizes = crate::draw2d_geometry::Draw2dTextureSizes::from_textures(&self.draw2d_textures);
+        let geometry =
+            crate::draw2d_geometry::build_geometry(list, self.width, self.height, &sizes);
+        // The no-GPU path consumes the built geometry (the quad stream + per-quad
+        // sources the live arm would upload) and draws nothing — exactly as
+        // `present_frame`'s native arm consumes its batches and returns `false`.
+        let _ = (
+            geometry.quad_count(),
+            geometry.vertices().len(),
+            geometry.sources().len(),
+        );
         false
+    }
+
+    /// Rasterize a host-neutral [`Draw2dList`] **off-screen** to `width * height *
+    /// 4` linear RGBA8 bytes (row-major, top-left origin), headless on native —
+    /// the 2D peer of [`Self::render_offscreen_rgba`] and the screenshot path for
+    /// 2D surfaces. It builds the geometry through the covered core
+    /// ([`crate::draw2d_geometry`]) and draws it alpha-blended through the shared
+    /// [`crate::draw2d_renderer`] into a **linear** (non-sRGB) target, so the
+    /// pixels match the software Canvas 2D backend byte-for-byte (within ±1
+    /// rounding). `textures` are the sprite atlases sampled by sprite commands.
+    /// `None` if no native GPU adapter is available. Compiled only behind the
+    /// `offscreen` feature, so it never enters the default build or gates.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
+    pub fn render_draw2d_offscreen_rgba(
+        width: u32,
+        height: u32,
+        list: &Draw2dList,
+        textures: &[(u64, u32, u32, Vec<u8>)],
+    ) -> Option<Vec<u8>> {
+        let sizes = crate::draw2d_geometry::Draw2dTextureSizes::from_textures(textures);
+        let geometry = crate::draw2d_geometry::build_geometry(list, width, height, &sizes);
+        crate::draw2d_offscreen::render_draw2d_to_rgba(width, height, &geometry, textures)
     }
 
     /// Render one frame **off-screen** to `width * height * 4` RGBA8 bytes,
@@ -404,12 +455,41 @@ mod tests {
     }
 
     #[test]
-    fn present_draw2d_consumes_a_list_and_no_ops_on_native() {
-        // The 2D entry point names the neutral Draw2dList; on native (no GPU) it
-        // is a no-op, exactly like present_packet. The live alpha-blended wgpu 2D
-        // raster is the exempt browser/offscreen arm.
-        let backend = GpuBackendApi::new(&request(640, 480));
-        let list = Draw2dList::default();
+    fn present_draw2d_builds_geometry_and_no_ops_on_native() {
+        use axiom_host::{Common2d, Draw2dCommand, Fill2d, Rect, Rgba, SpriteDraw2d, TextureId};
+        use axiom_math::{Mat3, Vec2};
+
+        // The 2D entry point walks the neutral Draw2dList through the covered
+        // geometry core; on native (no GPU) it builds the geometry and draws
+        // nothing (returns false), exactly like present_packet. The live
+        // alpha-blended wgpu 2D raster is the exempt off-screen/browser arm.
+        let mut backend = GpuBackendApi::new(&request(640, 480));
+        // An empty list still no-ops cleanly.
+        assert!(!backend.present_draw2d(&Draw2dList::default()));
+
+        // Load a sprite atlas (covers load_draw2d_textures + the sprite UV-size
+        // path the geometry core reads), then present a rect + a sprite.
+        backend.load_draw2d_textures(&[(7, 2, 2, vec![255; 16])]);
+        let one = Ratio::new(1.0).expect("finite");
+        let header = |layer: i32| (0_u32, Mat3::IDENTITY, Common2d::new(layer, one));
+        let mut list = Draw2dList::default();
+        list.push_command(Draw2dCommand::rect(
+            header(0),
+            Rect::new(Vec2::ZERO, Vec2::new(4.0, 4.0)),
+            Fill2d::color(Rgba::new(one, Ratio::new(0.0).unwrap(), Ratio::new(0.0).unwrap(), one)),
+        ));
+        list.push_command(Draw2dCommand::sprite(
+            header(1),
+            TextureId::from_raw(7),
+            SpriteDraw2d::new(
+                Rect::new(Vec2::ZERO, Vec2::new(2.0, 2.0)),
+                Vec2::ZERO,
+                Rgba::new(one, one, one, one),
+                false,
+                false,
+            ),
+        ));
+        list.sort_commands();
         assert!(!backend.present_draw2d(&list));
     }
 }
