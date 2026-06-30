@@ -36,6 +36,7 @@ import {
   KIND_SERVER_EVENT,
   KIND_SERVER_SNAPSHOT,
   KIND_SERVER_SNAPSHOT_FOR,
+  KIND_SERVER_SNAPSHOT_FOR_DELTA,
   KIND_WELCOME,
   type ServerSnapshotMessage,
   type WelcomeMessage,
@@ -226,10 +227,8 @@ export class AxiomClient {
   private handleInbound(bytes: Uint8Array): void {
     const message = decodeFrame(bytes);
     /*
-     * Per-player frames are not consumed by this single-seat client: the
-     * addressed intent is client->server (never received here, like
-     * KIND_CLIENT_INTENT), and per-seat snapshot acks are not wired into this
-     * client's single-sequence model. Both map to NOOP.
+     * Per-player frames (addressed intent client->server, per-seat snapshots and
+     * deltas) are not consumed by this single-seat client, so they map to NOOP.
      */
     const handlers: Readonly<Record<DecodedKind, (decoded: DecodedMessage) => void>> = {
       [KIND_JOIN_ROOM]: NOOP,
@@ -237,6 +236,7 @@ export class AxiomClient {
       [KIND_CLIENT_INTENT]: NOOP,
       [KIND_CLIENT_INTENT_FOR]: NOOP,
       [KIND_SERVER_SNAPSHOT_FOR]: NOOP,
+      [KIND_SERVER_SNAPSHOT_FOR_DELTA]: NOOP,
       [KIND_WELCOME]: (decoded): void => { this.onWelcome(decoded); },
       [KIND_SERVER_SNAPSHOT]: (decoded): void => { this.onSnapshotMessage(decoded); },
       [KIND_SERVER_EVENT]: (decoded): void => { this.onEventMessage(decoded); },

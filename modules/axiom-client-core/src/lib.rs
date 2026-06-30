@@ -24,11 +24,17 @@
 //! - the **interpolation cursor** (`interpolation_tick`) — the latest
 //!   authoritative tick set back by a presentation delay, saturating at 0.
 //!
-//! The simulation itself still runs elsewhere: this module performs **no
-//! prediction step and no rollback**. It only holds the reconciliation
-//! bookkeeping — which intents to replay, and which past tick to interpolate
-//! toward — so a predicted client built on top of it has the exact cursor it
-//! needs without this module ever touching game state.
+//! The simulation itself still runs elsewhere: this module holds the
+//! reconciliation bookkeeping — which intents to replay, and which past tick to
+//! interpolate toward — and a generic **resimulation driver** that folds those
+//! unacked intents over a caller-supplied deterministic step, **never** touching
+//! game state itself. Prediction is **opt-in and default-off**
+//! (`set_predict_local_player`): with it off, `resimulate` is the identity (the
+//! authoritative snapshot is the truth); with it on, the unacked intents are
+//! replayed so a drift-free deterministic step reaches exactly the authority's
+//! state. The opt-in is deliberate: cross-target f32 bit-determinism (SPEC-10
+//! §17.6) is still unresolved, so prediction defaults off; the
+//! `tests/physics_prediction.rs` proof is same-binary byte-identity.
 //!
 //! ## Why the boundary is plain primitives
 //! An engine module may never depend on another module, so this module does not

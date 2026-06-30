@@ -19,6 +19,20 @@ crate-type = ["rlib"]
 # and orders snapshots (an out-of-order snapshot is rejected by Tick ordering).
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
+[dev-dependencies]
+# Test-only: the physics net-prediction proof (`tests/physics_prediction.rs`)
+# replays unacked intents through a real deterministic physics step to show the
+# resimulation cursor reconciles to byte-identical state with the authority.
+# These are NOT runtime dependencies — they live behind `tests/` and are ignored
+# by the architecture checker's dependency-class scan (dev-deps don't load-bear;
+# see crates/xtask/src/cargo_metadata.rs), so the module's runtime surface stays
+# kernel-only and `allowed_modules = []` is unaffected. (The proof is same-binary
+# determinism — cross-target f32 bit-identity is a separate, still-open SPEC-10
+# obligation, which is exactly why prediction ships default-OFF.)
+axiom-physics = { path = "../axiom-physics" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"

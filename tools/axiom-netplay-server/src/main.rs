@@ -27,11 +27,13 @@
 //! too): every dispatch decision is a data transform over `Option`/stream
 //! combinators, not `if`/`match`/`for`/`while`.
 
+mod admission;
 mod authority;
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use admission::JwtPolicy;
 use authority::{Authority, FIXED_STEP_NS, MAX_PLAYERS, PROTOCOL_VERSION};
 use axiom_net_protocol::NetProtocolApi;
 use futures_util::future::OptionFuture;
@@ -77,7 +79,7 @@ async fn run_server(listener: TcpListener) {
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<Command>();
     let (snap_tx, _snap_rx) = broadcast::channel::<Arc<Vec<u8>>>(1024);
     tokio::join!(
-        authority_loop(Authority::new(), cmd_rx, snap_tx.clone()),
+        authority_loop(Authority::new(), JwtPolicy::from_env(), cmd_rx, snap_tx.clone()),
         accept_loop(listener, cmd_tx, snap_tx),
     );
 }
@@ -90,6 +92,7 @@ async fn run_server(listener: TcpListener) {
 /// *what* it computes.
 async fn authority_loop(
     authority: Authority,
+    policy: JwtPolicy,
     cmd_rx: mpsc::UnboundedReceiver<Command>,
     snap_tx: SnapTx,
 ) {
@@ -97,14 +100,19 @@ async fn authority_loop(
         .map(|_instant| AuthEvent::tick());
     let commands = UnboundedReceiverStream::new(cmd_rx).map(AuthEvent::command);
     tokio_stream::StreamExt::merge(ticks, commands)
-        .fold(authority, |authority, event| fold_event(authority, event, &snap_tx))
+        .fold(authority, |authority, event| fold_event(authority, event, &policy, &snap_tx))
         .await;
 }
 
 /// Apply one merged event to the authority and (on a tick) step + broadcast.
 /// Threaded by value through the fold so the world has a single owner.
-async fn fold_event(mut authority: Authority, event: AuthEvent, snap_tx: &SnapTx) -> Authority {
-    apply_command(&mut authority, event.command);
+async fn fold_event(
+    mut authority: Authority,
+    event: AuthEvent,
+    policy: &JwtPolicy,
+    snap_tx: &SnapTx,
+) -> Authority {
+    apply_command(&mut authority, policy, event.command);
     event.step.then(|| {
         let frame = authority.step();
         let _ = snap_tx.send(Arc::new(frame));
@@ -114,12 +122,17 @@ async fn fold_event(mut authority: Authority, event: AuthEvent, snap_tx: &SnapTx
 
 /// Apply one optional peer command to the authority. A `Command` carries exactly
 /// one of join/intent/leave; applying all three `Option`s is branchless and the
-/// absent ones are no-ops.
-fn apply_command(authority: &mut Authority, command: Option<Command>) {
+/// absent ones are no-ops. A join is gated by the [`JwtPolicy`]: a token the policy
+/// rejects claims no seat, so the reply is `None` and the peer is never welcomed.
+fn apply_command(authority: &mut Authority, policy: &JwtPolicy, command: Option<Command>) {
     command
         .map(|cmd| {
-            cmd.join.map(|reply| {
-                let seated = authority.claim().map(|seat| (seat, authority.tick()));
+            cmd.join.map(|(token, reply)| {
+                let seated = policy
+                    .admits(&token)
+                    .then(|| authority.claim())
+                    .flatten()
+                    .map(|seat| (seat, authority.tick()));
                 let _ = reply.send(seated);
             });
             cmd.intent
@@ -187,8 +200,9 @@ async fn serve_ws(ws: WebSocketStream<TcpStream>, cmd_tx: CmdTx, snap_tx: SnapTx
 /// A command from a peer task to the single authority task. Modelled as a struct of
 /// optional fields (no enum `match`): exactly one is `Some` per command.
 struct Command {
-    /// Claim a seat; the reply carries `Some((seat, current_tick))` or `None` (full).
-    join: Option<oneshot::Sender<Option<(u64, u64)>>>,
+    /// Claim a seat: the join `token` (opaque JWT bytes, verified by the policy) and
+    /// the reply, which carries `Some((seat, current_tick))` or `None` (rejected/full).
+    join: Option<(Vec<u8>, oneshot::Sender<Option<(u64, u64)>>)>,
     /// Fold a player's intent into the authority: `(player, sequence, payload)`.
     intent: Option<(u64, u64, Vec<u8>)>,
     /// Release a seat (the peer disconnected).
@@ -196,10 +210,10 @@ struct Command {
 }
 
 impl Command {
-    /// A seat-claim request carrying the reply channel.
-    fn join(reply: oneshot::Sender<Option<(u64, u64)>>) -> Self {
+    /// A seat-claim request carrying the join token and the reply channel.
+    fn join(token: Vec<u8>, reply: oneshot::Sender<Option<(u64, u64)>>) -> Self {
         Command {
-            join: Some(reply),
+            join: Some((token, reply)),
             intent: None,
             leave: None,
         }
@@ -254,8 +268,9 @@ impl AuthEvent {
 /// bus item. A struct of optional fields (no enum `match`): the empty action is a
 /// no-op, and a stop ends the bridge.
 struct Action {
-    /// A compatible `JoinRoom` arrived: claim a seat and reply `Welcome`.
-    join: bool,
+    /// A compatible `JoinRoom` arrived, carrying its opaque join token: claim a seat
+    /// (subject to the admission policy) and reply `Welcome`. `None` = not a join.
+    join: Option<Vec<u8>>,
     /// Raw `ClientIntentFor` bytes to fold into the authority (this peer's seat).
     intent: Option<Vec<u8>>,
     /// A broadcast `ServerSnapshotFor` to forward to this peer's socket.
@@ -268,7 +283,7 @@ impl Action {
     /// A do-nothing action (an ignored frame, or a lagged bus tick).
     fn noop() -> Self {
         Action {
-            join: false,
+            join: None,
             intent: None,
             snapshot: None,
             stop: false,
@@ -312,7 +327,7 @@ fn classify_bytes(bytes: Vec<u8>) -> Action {
     NetProtocolApi::message_kind(&bytes)
         .ok()
         .map(|kind| Action {
-            join: is_compatible_join(kind, &bytes),
+            join: compatible_join_token(kind, &bytes),
             intent: (kind == NetProtocolApi::KIND_CLIENT_INTENT_FOR).then(|| bytes.clone()),
             snapshot: None,
             stop: kind == NetProtocolApi::KIND_LEAVE_ROOM,
@@ -320,14 +335,15 @@ fn classify_bytes(bytes: Vec<u8>) -> Action {
         .unwrap_or_else(Action::noop)
 }
 
-/// Whether `bytes` is a `JoinRoom` on a compatible protocol version. `&` (not `&&`)
-/// keeps it branchless — the RHS is a pure decode that is always safe to run.
-fn is_compatible_join(kind: u8, bytes: &[u8]) -> bool {
+/// The opaque join token of a compatible `JoinRoom`, or `None` if `bytes` is not a
+/// `JoinRoom` on a compatible protocol version. The token is verified later by the
+/// admission policy (the authority, not the socket, decides membership).
+fn compatible_join_token(kind: u8, bytes: &[u8]) -> Option<Vec<u8>> {
     (kind == NetProtocolApi::KIND_JOIN_ROOM)
-        & NetProtocolApi::decode_join_room(bytes)
-            .ok()
-            .map(|(version, _room, _token)| version == PROTOCOL_VERSION)
-            .unwrap_or(false)
+        .then(|| NetProtocolApi::decode_join_room(bytes).ok())
+        .flatten()
+        .filter(|(version, _room, _token)| *version == PROTOCOL_VERSION)
+        .map(|(_version, _room, token)| token)
 }
 
 /// Map one bus item to an [`Action`]: a published snapshot to forward, or a no-op
@@ -369,10 +385,13 @@ impl Peer {
     /// `Err(self)` to stop. Each effect is gated by `Option`/boolean combinators —
     /// no `if`/`match` — and `self` is moved exactly once into the chosen arm.
     async fn apply(mut self, action: Action, cmd_tx: &CmdTx) -> Result<Self, Self> {
-        // JOIN: claim a seat + reply Welcome, iff a compatible join arrived and the
-        // peer is not already seated.
+        // JOIN: claim a seat + reply Welcome, iff a compatible join arrived (carrying
+        // its token) and the peer is not already seated.
         let joined = OptionFuture::from(
-            (action.join & self.seat.is_none()).then(|| claim_and_welcome(cmd_tx, &mut self.sink)),
+            action
+                .join
+                .filter(|_| self.seat.is_none())
+                .map(|token| claim_and_welcome(cmd_tx, &mut self.sink, token)),
         )
         .await;
         self.seat = self.seat.or(joined.and_then(|j| j.seat));
@@ -405,9 +424,9 @@ impl Peer {
 /// welcome that cannot be delivered, the freshly-claimed seat is released so it does
 /// not leak. Returns the seat genuinely occupied plus whether to keep going (a full
 /// room is *not* a stop — the peer stays connected, just unseated).
-async fn claim_and_welcome(cmd_tx: &CmdTx, sink: &mut Sink) -> JoinResult {
+async fn claim_and_welcome(cmd_tx: &CmdTx, sink: &mut Sink, token: Vec<u8>) -> JoinResult {
     let (reply_tx, reply_rx) = oneshot::channel();
-    let _ = cmd_tx.send(Command::join(reply_tx));
+    let _ = cmd_tx.send(Command::join(token, reply_tx));
     let claimed = reply_rx.await.ok().flatten();
     let send_ok = OptionFuture::from(claimed.map(|(id, tick)| send_welcome(sink, id, tick)))
         .await
@@ -571,9 +590,9 @@ mod tests {
 
     #[test]
     fn inbound_classifies_join_intent_leave_and_junk() {
-        // A JoinRoom frame → a join action.
-        let join = NetProtocolApi::encode_join_room(PROTOCOL_VERSION, b"r", b"").unwrap();
-        assert!(inbound_action(Ok(Message::binary(join))).join);
+        // A JoinRoom frame → a join action carrying the (here empty) token.
+        let join = NetProtocolApi::encode_join_room(PROTOCOL_VERSION, b"r", b"tok").unwrap();
+        assert_eq!(inbound_action(Ok(Message::binary(join))).join, Some(b"tok".to_vec()));
 
         // A ClientIntentFor frame → an intent action carrying the bytes.
         let intent = NetProtocolApi::encode_client_intent_for(1, 1, 0, 0, b"x").unwrap();
@@ -586,15 +605,15 @@ mod tests {
         // A close frame → a stop; a text frame → a no-op; garbage → a no-op.
         assert!(inbound_action(Ok(Message::Close(None))).stop);
         let text = inbound_action(Ok(Message::text("hi")));
-        assert!(!text.join && text.intent.is_none() && !text.stop);
+        assert!(text.join.is_none() && text.intent.is_none() && !text.stop);
         let junk = inbound_action(Ok(Message::binary(vec![0xFF, 0xFF])));
-        assert!(!junk.join && junk.intent.is_none() && !junk.stop);
+        assert!(junk.join.is_none() && junk.intent.is_none() && !junk.stop);
     }
 
     #[test]
     fn an_incompatible_join_version_is_not_admitted() {
         let join = NetProtocolApi::encode_join_room(PROTOCOL_VERSION + 1, b"r", b"").unwrap();
-        assert!(!inbound_action(Ok(Message::binary(join))).join);
+        assert!(inbound_action(Ok(Message::binary(join))).join.is_none());
     }
 
     #[test]

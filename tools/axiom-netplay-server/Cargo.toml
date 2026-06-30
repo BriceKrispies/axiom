@@ -23,6 +23,12 @@ axiom-net-protocol = { path = "../../modules/axiom-net-protocol" }
 # authority composes this umbrella directly (SPEC-13 §3.5).
 axiom = { path = "../../modules/axiom" }
 
+# The crypto layer's HS256 JWT verifier: the authority verifies a join token's
+# signature + expiry against a configured secret before admitting a player
+# (SPEC-13 §16.4). The verify itself is pure spine (covered there); this tool owns
+# the policy — the secret and the admit/reject decision. A tool may depend on a layer.
+axiom-crypto = { path = "../../crates/axiom-crypto" }
+
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 # Stream wrappers used to drive the accept loop, the fixed-step tick, and the
 # per-peer bridge as branchless data transforms (the Branchless Law's gate fires

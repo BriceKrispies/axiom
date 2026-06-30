@@ -12,6 +12,8 @@ export type { ClientStatus, ConnectConfig } from "./client-config.ts";
 
 export { WebSocketTransport } from "./transport.ts";
 export type { SocketLike, Transport, TransportHandlers, TransportKind } from "./transport.ts";
+export { DatagramTransport } from "./datagram-transport.ts";
+export type { DatagramLink, DatagramLinkFactory } from "./datagram-transport.ts";
 export { WebTransportTransport } from "./webtransport.ts";
 export { WebRtcTransport } from "./webrtc.ts";
 
@@ -46,6 +48,14 @@ export {
 export type { ClientIntentForFields } from "./per-player-codec.ts";
 
 export {
+  applySnapshot,
+  decodeServerSnapshotForDelta,
+  diffSnapshot,
+  encodeServerSnapshotForDelta,
+} from "./snapshot-delta.ts";
+export type { ServerSnapshotForDeltaFields } from "./snapshot-delta.ts";
+
+export {
   KIND_CLIENT_INTENT,
   KIND_CLIENT_INTENT_FOR,
   KIND_JOIN_ROOM,
@@ -54,6 +64,7 @@ export {
   KIND_SERVER_EVENT,
   KIND_SERVER_SNAPSHOT,
   KIND_SERVER_SNAPSHOT_FOR,
+  KIND_SERVER_SNAPSHOT_FOR_DELTA,
   KIND_WELCOME,
   MAX_ACKS,
   MAX_PAYLOAD_LEN,
@@ -75,6 +86,7 @@ export type {
   PlayerAck,
   RejectedIntentMessage,
   ServerEventMessage,
+  ServerSnapshotForDeltaMessage,
   ServerSnapshotForMessage,
   ServerSnapshotMessage,
   WelcomeMessage,

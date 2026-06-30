@@ -15,6 +15,8 @@ use crate::room_id::MAX_ROOM_ID_LEN;
 use crate::server_event::ServerEvent;
 use crate::server_snapshot::ServerSnapshot;
 use crate::server_snapshot_for::{ServerSnapshotFor, MAX_ACKS};
+use crate::server_snapshot_for_delta::ServerSnapshotForDelta;
+use crate::snapshot_delta;
 use crate::welcome::Welcome;
 
 /// The decoded fields of a per-player `ServerSnapshotFor`: the authoritative
@@ -22,6 +24,12 @@ use crate::welcome::Welcome;
 /// snapshot `payload`. A transparent alias so the facade still returns plain
 /// primitives while keeping the nested-tuple signature readable.
 type DecodedServerSnapshotFor = (u64, Vec<(u64, u64)>, Vec<u8>);
+
+/// The decoded fields of a per-player `ServerSnapshotForDelta`: the authoritative
+/// `server_tick`, the `base_tick` the diff is against, the `(player, sequence)`
+/// acknowledgements, and the opaque `delta` blob (reconstruct with
+/// [`NetProtocolApi::reconstruct_snapshot`]).
+type DecodedServerSnapshotForDelta = (u64, u64, Vec<(u64, u64)>, Vec<u8>);
 
 /// The multiplayer wire contract — the only public export of `axiom-net-protocol`.
 ///
@@ -60,6 +68,8 @@ impl NetProtocolApi {
     pub const KIND_CLIENT_INTENT_FOR: u8 = frame::KIND_CLIENT_INTENT_FOR;
     /// Stable message-kind discriminant of a per-player `ServerSnapshotFor` frame.
     pub const KIND_SERVER_SNAPSHOT_FOR: u8 = frame::KIND_SERVER_SNAPSHOT_FOR;
+    /// Stable message-kind discriminant of a per-player delta `ServerSnapshotForDelta` frame.
+    pub const KIND_SERVER_SNAPSHOT_FOR_DELTA: u8 = frame::KIND_SERVER_SNAPSHOT_FOR_DELTA;
 
     /// The maximum room-id length, in bytes.
     pub const MAX_ROOM_ID_LEN: usize = MAX_ROOM_ID_LEN;
@@ -264,6 +274,48 @@ impl NetProtocolApi {
         ServerSnapshotFor::decode(bytes)
             .map(|m| (m.server_tick(), m.acks().to_vec(), m.payload().to_vec()))
     }
+
+    /// Encode a per-player **delta** `ServerSnapshotForDelta` (server → client): the
+    /// per-player acks plus a [`crate::snapshot_delta`] diff of `base_payload` →
+    /// `new_payload`, tagged with the `base_tick` the diff is against. Fails on an
+    /// over-size ack list **or** if the diff blob would exceed the payload bound —
+    /// the latter is the signal to fall back to a full `encode_server_snapshot_for`
+    /// (full snapshots stay the keyframe and the fallback).
+    pub fn encode_server_snapshot_for_delta(
+        server_tick: u64,
+        acks: &[(u64, u64)],
+        base_tick: u64,
+        base_payload: &[u8],
+        new_payload: &[u8],
+    ) -> KernelResult<Vec<u8>> {
+        ServerSnapshotForDelta::from_payloads(server_tick, acks, base_tick, base_payload, new_payload)
+            .map(|m| m.encode())
+    }
+
+    /// Decode a `ServerSnapshotForDelta`, returning `(server_tick, base_tick, acks,
+    /// delta)`. The `delta` blob is reconstructed into the full new payload by
+    /// [`Self::reconstruct_snapshot`] against the client's `base_tick` snapshot.
+    pub fn decode_server_snapshot_for_delta(
+        bytes: &[u8],
+    ) -> KernelResult<DecodedServerSnapshotForDelta> {
+        ServerSnapshotForDelta::decode(bytes).map(|m| {
+            (
+                m.server_tick(),
+                m.base_tick(),
+                m.acks().to_vec(),
+                m.delta().to_vec(),
+            )
+        })
+    }
+
+    /// Reconstruct the full new snapshot payload from the client's `base_payload`
+    /// (its last-acked snapshot body) and a `delta` blob decoded from a
+    /// `ServerSnapshotForDelta`. Byte-exact: `reconstruct(base, diff(base, new)) ==
+    /// new`. A delta inconsistent with `base` (wrong length, out-of-range edit,
+    /// truncated) fails with a precise error rather than corrupting state.
+    pub fn reconstruct_snapshot(base_payload: &[u8], delta: &[u8]) -> KernelResult<Vec<u8>> {
+        snapshot_delta::apply(base_payload, delta)
+    }
 }
 
 #[cfg(test)]
@@ -387,6 +439,53 @@ mod tests {
             NetProtocolApi::decode_server_snapshot_for(&bytes).unwrap(),
             (42, vec![(7, 5), (9, 3)], b"st".to_vec())
         );
+    }
+
+    #[test]
+    fn server_snapshot_for_delta_round_trips_and_reconstructs_through_the_facade() {
+        let base = b"authoritative state at tick 42";
+        let new = b"authoritative STATE at tick 43!";
+        let bytes =
+            NetProtocolApi::encode_server_snapshot_for_delta(43, &[(1, 9)], 42, base, new).unwrap();
+        assert_eq!(
+            NetProtocolApi::message_kind(&bytes).unwrap(),
+            NetProtocolApi::KIND_SERVER_SNAPSHOT_FOR_DELTA
+        );
+        let (server_tick, base_tick, acks, delta) =
+            NetProtocolApi::decode_server_snapshot_for_delta(&bytes).unwrap();
+        assert_eq!(server_tick, 43);
+        assert_eq!(base_tick, 42);
+        assert_eq!(acks, vec![(1, 9)]);
+        // The delta reconstructs the new payload exactly from the base.
+        assert_eq!(
+            NetProtocolApi::reconstruct_snapshot(base, &delta).unwrap(),
+            new
+        );
+    }
+
+    #[test]
+    fn delta_encode_falls_back_signal_on_over_size_diff() {
+        // A fully-novel large payload (empty base) makes the diff exceed the bound,
+        // surfacing the error the caller turns into a full-snapshot fallback.
+        let big = vec![1u8; NetProtocolApi::MAX_PAYLOAD_LEN];
+        assert_eq!(
+            NetProtocolApi::encode_server_snapshot_for_delta(0, &[], 0, b"", &big)
+                .unwrap_err()
+                .code(),
+            KernelErrorCode::OutOfBounds
+        );
+    }
+
+    #[test]
+    fn reconstruct_rejects_a_delta_inconsistent_with_the_base() {
+        let base = b"some base payload";
+        let new = b"some NEW payload";
+        let (.., delta) = NetProtocolApi::decode_server_snapshot_for_delta(
+            &NetProtocolApi::encode_server_snapshot_for_delta(1, &[], 0, base, new).unwrap(),
+        )
+        .unwrap();
+        // Applying the delta to a different-shaped base is rejected, not silently wrong.
+        assert!(NetProtocolApi::reconstruct_snapshot(b"x", &delta).is_err());
     }
 
     #[test]

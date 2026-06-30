@@ -17,6 +17,10 @@ introduced_capabilities = [
     "SigningKey",
     "VerifyingKey",
     "Signature",
+    "hmac_sha256",
+    "verify_jwt_hs256",
+    "JwtClaims",
+    "JwtError",
 ]
 
 consumed_capabilities = [

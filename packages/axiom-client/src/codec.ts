@@ -20,6 +20,7 @@ import {
   KIND_SERVER_EVENT,
   KIND_SERVER_SNAPSHOT,
   KIND_SERVER_SNAPSHOT_FOR,
+  KIND_SERVER_SNAPSHOT_FOR_DELTA,
   KIND_WELCOME,
   type LeaveRoomMessage,
   type RejectedIntentMessage,
@@ -41,6 +42,7 @@ import { decodeClientIntentFor, decodeServerSnapshotFor } from "./per-player-cod
 import { assert } from "./protocol-error.ts";
 import { byteReader } from "./byte-reader.ts";
 import { byteWriter } from "./byte-writer.ts";
+import { decodeServerSnapshotForDelta } from "./snapshot-delta.ts";
 
 // --- field bundles for encoders that carry more than three values ---
 
@@ -226,6 +228,7 @@ const KIND_SET: ReadonlySet<number> = new Set<number>([
   KIND_REJECTED_INTENT,
   KIND_CLIENT_INTENT_FOR,
   KIND_SERVER_SNAPSHOT_FOR,
+  KIND_SERVER_SNAPSHOT_FOR_DELTA,
 ]);
 
 // Narrow a raw byte to a DecodedKind, throwing when it is not a known kind.
@@ -252,6 +255,7 @@ const DECODERS: Readonly<Record<DecodedKind, (bytes: Uint8Array) => DecodedMessa
   [KIND_REJECTED_INTENT]: decodeRejectedIntent,
   [KIND_CLIENT_INTENT_FOR]: decodeClientIntentFor,
   [KIND_SERVER_SNAPSHOT_FOR]: decodeServerSnapshotFor,
+  [KIND_SERVER_SNAPSHOT_FOR_DELTA]: decodeServerSnapshotForDelta,
 };
 
 /** Decode any frame, dispatching on its validated kind. */

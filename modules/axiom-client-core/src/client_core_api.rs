@@ -32,6 +32,7 @@ pub struct ClientCoreApi {
     latest_server_tick: Tick,
     last_acked_client_sequence: u64,
     pending: Vec<(u64, Vec<u8>)>,
+    predict_local_player: bool,
 }
 
 impl ClientCoreApi {
@@ -54,6 +55,7 @@ impl ClientCoreApi {
             latest_server_tick: Tick::ZERO,
             last_acked_client_sequence: 0,
             pending: Vec::new(),
+            predict_local_player: false,
         }
     }
 
@@ -193,6 +195,56 @@ impl ClientCoreApi {
     /// the value is presentation-only and never re-enters a fixed update.
     pub fn interpolation_tick(&self, delay_ticks: u64) -> u64 {
         self.latest_server_tick.raw().saturating_sub(delay_ticks)
+    }
+
+    /// Opt **in** (or out) of local-player physics/state prediction. **Default
+    /// off**, which preserves the authoritative-only behaviour: a fresh client
+    /// applies snapshots verbatim and [`Self::resimulate`] is the identity.
+    ///
+    /// Turning it on enables the resimulation path: after the client snaps to an
+    /// authoritative snapshot it re-runs its still-unacked local intents on top of
+    /// that snapshot ([`Self::resimulate`]) so the local player sees its own
+    /// actions without waiting a round-trip. This is sound **only** when the
+    /// caller's fixed step is bit-identical between the authority and this client;
+    /// within one build that holds (proven by this module's resimulation tests),
+    /// so prediction is exposed as an explicit opt-in rather than a default. The
+    /// flag carries no game state — it only selects whether `resimulate` replays.
+    pub fn set_predict_local_player(&mut self, enabled: bool) {
+        self.predict_local_player = enabled;
+    }
+
+    /// Whether local-player prediction is enabled (see
+    /// [`Self::set_predict_local_player`]). `false` for a fresh client.
+    pub fn predicts_local_player(&self) -> bool {
+        self.predict_local_player
+    }
+
+    /// Reconcile by **resimulation**: fold `step` over the still-unacked local
+    /// intents, in send order, starting from `baseline` (the just-snapped
+    /// authoritative state), returning the predicted state.
+    ///
+    /// `step(state, intent_payload) -> state` is the caller's deterministic fixed
+    /// update for one intent (e.g. apply the intent then advance the physics
+    /// step). The caller owns the game state `S`; this module owns only *which*
+    /// intents to replay and *whether* to replay them:
+    ///
+    /// - prediction **off** (the default) ⇒ no intents are replayed and `baseline`
+    ///   is returned unchanged — the authoritative snapshot is the truth;
+    /// - prediction **on** ⇒ every intent in [`Self::unacked_intents`] is folded
+    ///   through `step` in order, so a correct (drift-free) replay reaches exactly
+    ///   the state the authority will reach once it has applied those same intents.
+    ///
+    /// Because a deterministic `step` over the same ordered intents yields the same
+    /// state, an authority and a predicting client built on one binary reconcile to
+    /// byte-identical state with zero fuzzy correction. The replay count is the
+    /// flag (`0`/`1`) times the pending length, so the selection is branchless and
+    /// the disabled path provably touches no intent.
+    pub fn resimulate<S, F: FnMut(S, &[u8]) -> S>(&self, baseline: S, mut step: F) -> S {
+        let count = usize::from(self.predict_local_player) * self.pending.len();
+        self.pending
+            .iter()
+            .take(count)
+            .fold(baseline, |state, (_sequence, payload)| step(state, payload))
     }
 }
 
@@ -428,6 +480,69 @@ mod tests {
         assert_eq!(c.interpolation_tick(10), 0);
         // Beyond the tick: saturates at 0 rather than underflowing.
         assert_eq!(c.interpolation_tick(25), 0);
+    }
+
+    #[test]
+    fn prediction_defaults_off_and_toggles() {
+        let mut c = ClientCoreApi::new();
+        assert!(!c.predicts_local_player(), "default is authoritative-only");
+        c.set_predict_local_player(true);
+        assert!(c.predicts_local_player());
+        c.set_predict_local_player(false);
+        assert!(!c.predicts_local_player());
+    }
+
+    /// A deterministic step that folds each intent's first payload byte into the
+    /// running state, so a result encodes both the replayed values and their order.
+    /// Shared by the resimulation tests; when prediction is off (or nothing is
+    /// pending) it is simply never invoked and the baseline survives unchanged.
+    fn fold_step(state: u64, payload: &[u8]) -> u64 {
+        state * 10 + u64::from(payload[0])
+    }
+
+    #[test]
+    fn resimulate_is_the_identity_while_prediction_is_off() {
+        let mut c = connected();
+        c.next_intent(0, 0, &[3]); // seq 1
+        c.next_intent(0, 0, &[4]); // seq 2
+                                   // Off (the default): no intent is replayed, so the baseline is returned
+                                   // verbatim (had `fold_step` run, the result would not equal 100).
+        let predicted = c.resimulate(100u64, fold_step);
+        assert_eq!(predicted, 100);
+    }
+
+    #[test]
+    fn resimulate_replays_every_unacked_intent_in_order_when_on() {
+        let mut c = connected();
+        c.set_predict_local_player(true);
+        c.next_intent(0, 0, &[1]); // seq 1
+        c.next_intent(0, 0, &[2]); // seq 2
+        c.next_intent(0, 0, &[3]); // seq 3
+                                   // Folding the first payload byte encodes both the values and their order.
+        let predicted = c.resimulate(0u64, fold_step);
+        assert_eq!(predicted, 123);
+    }
+
+    #[test]
+    fn resimulate_on_replays_only_the_intents_after_the_acked_sequence() {
+        let mut c = connected();
+        c.set_predict_local_player(true);
+        c.next_intent(0, 0, &[1]); // seq 1
+        c.next_intent(0, 0, &[2]); // seq 2
+        c.next_intent(0, 0, &[3]); // seq 3
+                                   // Acking up to 2 leaves only intent 3 to replay.
+        assert!(c.accept_snapshot(5, 2));
+        let predicted = c.resimulate(0u64, fold_step);
+        assert_eq!(predicted, 3);
+    }
+
+    #[test]
+    fn resimulate_on_with_no_pending_returns_the_baseline() {
+        let mut c = connected();
+        c.set_predict_local_player(true);
+        // Nothing pending: the fold has no elements, so the baseline is returned.
+        let predicted = c.resimulate(7u64, fold_step);
+        assert_eq!(predicted, 7);
     }
 
     #[test]
