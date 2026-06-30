@@ -131,8 +131,10 @@ native facade with no TS projection is half-built*. Status notes:
   draw methods exist. The software backend rasterizes **rect + sprite (src-over
   alpha)**; circle/line/path/gradient/stroke/text are skipped, and the **GPU
   backend `present_draw2d` is a no-op**. The §10.2 flip-book sampler
-  (`sampleAnimation`) is unbuilt; **particles (§10.1) and render-targets (§10.3)**
-  are deferred pending a kernel `Seconds` scalar.
+  (`sampleAnimation`) is **landed** end-to-end — the pure native
+  `Draw2dApi::sample_animation`, the `draw2dSampleAnimation` wasm bridge, and the
+  `@axiom/game` `sampleAnimation` projection — on the now-present kernel `Seconds`
+  scalar (the same scalar that unblocked §10.1 particles and §10.3 render targets).
 - ² **SPEC-08** (Landed) — neutral core + Web Audio arm landed; in the wasm arm
   only `PlayTone` produces sound — `Load`/`PlaySample`/`PlayMusic`/`Stop` are
   currently no-ops. Live playback and the optional §13.1 analyser are

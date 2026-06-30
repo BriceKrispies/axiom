@@ -71,7 +71,7 @@ import {
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
 import type { Cell, Circle, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
-import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle } from "./draw2d-binding.ts";
+import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation } from "./draw2d-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -180,6 +180,7 @@ export interface WasmHostExport {
   readonly draw2dEndTarget: () => void;
   readonly draw2dTargetTexture: (target: number) => number;
   readonly draw2dFinish: () => Float64Array;
+  readonly draw2dSampleAnimation: (frames: Float64Array, fps: number, elapsed: number, looping: boolean) => Float64Array;
   /*
    * 3D scene authoring (SPEC-11 §4.2): a mesh kind crosses as its `string` name, a
    * colour/position/direction as a `Float64Array` slice; each call returns the
@@ -291,6 +292,16 @@ const unpackVec2 = (raw: Float64Array): Vec2 => {
 
 /** A `Rect` as the boundary `[x, y, w, h]` bounds slice. */
 const packRect = (rect: Rect): Float64Array => Float64Array.from([rect.x, rect.y, rect.width, rect.height]);
+
+/** Flatten a `Rect[]` to the boundary `[x, y, w, h, …]` slice (the flip-book frames). */
+const flattenRects = (rects: readonly Rect[]): Float64Array =>
+  Float64Array.from(rects.flatMap((rect): readonly number[] => [rect.x, rect.y, rect.width, rect.height]));
+
+/** Unpack a boundary `[x, y, w, h]` slice into a `Rect` (the sampled flip-book frame). */
+const unpackRect = (raw: Float64Array): Rect => {
+  const values = [...raw];
+  return { height: pick(values, W_INDEX), width: pick(values, Z_INDEX), x: pick(values, 0), y: pick(values, 1) };
+};
 
 /** A `Circle` as the boundary `[centerX, centerY, radius]` slice. */
 const packCircle = (circle: Circle): Float64Array =>
@@ -547,6 +558,7 @@ const draw2dSystemBridge = (game: WasmHostExport): Pick<
   HostBridge,
   | "draw2dCreateEmitter" | "draw2dEmit" | "draw2dAdvanceParticles"
   | "draw2dCreateRenderTarget" | "draw2dBeginTarget" | "draw2dEndTarget" | "draw2dTargetTexture" | "draw2dFinish"
+  | "draw2dSampleAnimation"
 > => ({
   draw2dAdvanceParticles: (dtSeconds: number): void => {
     game.draw2dAdvanceParticles(dtSeconds);
@@ -563,6 +575,8 @@ const draw2dSystemBridge = (game: WasmHostExport): Pick<
     game.draw2dEndTarget();
   },
   draw2dFinish: (): readonly number[] => [...game.draw2dFinish()],
+  draw2dSampleAnimation: (anim: SpriteAnimation, elapsedSeconds: number, looping: boolean): Rect =>
+    unpackRect(game.draw2dSampleAnimation(flattenRects(anim.frames), anim.fps, elapsedSeconds, looping)),
   draw2dTargetTexture: (target: Handle): Handle => game.draw2dTargetTexture(target),
 });
 
@@ -572,6 +586,7 @@ const draw2dBridge = (game: WasmHostExport): Pick<
   | "draw2dCamera2d" | "draw2dRect" | "draw2dCircle" | "draw2dEllipse" | "draw2dLine"
   | "draw2dCreateEmitter" | "draw2dEmit" | "draw2dAdvanceParticles"
   | "draw2dCreateRenderTarget" | "draw2dBeginTarget" | "draw2dEndTarget" | "draw2dTargetTexture" | "draw2dFinish"
+  | "draw2dSampleAnimation"
 > => Object.assign(draw2dShapeBridge(game), draw2dSystemBridge(game));
 
 /** The 3D scene-authoring `HostBridge` ops (SPEC-11), forwarding to the native runtime scene authoring on `RunningApp` (`add_mesh` / `add_material` / `set_camera` / `add_light`). */

@@ -135,7 +135,8 @@ fn lib_rs_exports_exactly_one_facade_plus_its_id_vocabulary() {
     // `use axiom_host::{…}`. The one module-owned vocabulary is the particle
     // surface's nouns (EmitterId handle + EmitterConfig recipe), which the facade
     // returns/accepts and a caller must be able to name — exactly the sanctioned
-    // `ids` exemption.
+    // `ids` exemption — the SpriteAnimation flip-book recipe (§10.2) joins it for
+    // the same reason (the sampler accepts it, so a caller must be able to name it).
     let lib = read(&src_dir().join("lib.rs"));
     let pub_items: Vec<&str> = lib
         .lines()
@@ -146,7 +147,7 @@ fn lib_rs_exports_exactly_one_facade_plus_its_id_vocabulary() {
         pub_items,
         vec![
             "pub use draw2d_api::Draw2dApi;",
-            "pub use ids::{EmitterConfig, EmitterId};",
+            "pub use ids::{EmitterConfig, EmitterId, SpriteAnimation};",
         ],
         "axiom-draw2d's lib.rs must expose the Draw2dApi facade plus only its `ids` vocabulary"
     );

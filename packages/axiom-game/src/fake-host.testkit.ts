@@ -2,7 +2,7 @@
 // the math / host-bridge / bindAction free-function tests. Kept in its own file
 // so each fake is one class (max-classes-per-file).
 
-import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle } from "./draw2d-binding.ts";
+import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation } from "./draw2d-binding.ts";
 import type { UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
 import type {
   HostBridge,
@@ -80,6 +80,7 @@ export class FakeHost implements HostBridge {
   public draw2dBegins: Handle[] = [];
   public draw2dEnds = 0;
   public draw2dFinishReturn: readonly number[] = [];
+  public draw2dSamples: { anim: SpriteAnimation; elapsedSeconds: number; looping: boolean }[] = [];
 
   // --- UI surface (SPEC-09): records the marshalled calls; scriptable button/viewport/draw-list/layout returns ---
   public uiBeginFrames: { viewport: UiViewport; pointer: Vec2; pressed: boolean }[] = [];
@@ -459,6 +460,20 @@ export class FakeHost implements HostBridge {
 
   public draw2dFinish(): readonly number[] {
     return this.draw2dFinishReturn;
+  }
+
+  // The reference flip-book sampler the native Draw2dApi::sample_animation owns:
+  // index = floor(elapsed * fps), wrapped (rem_euclid) when looping else clamped
+  // to the last frame; an empty book samples the inert zero-rect. Records the call
+  // so a test can assert the facade forwarded the RESOLVED loop flag.
+  public draw2dSampleAnimation(anim: SpriteAnimation, elapsedSeconds: number, looping: boolean): Rect {
+    this.draw2dSamples.push({ anim, elapsedSeconds, looping });
+    const count = Math.max(anim.frames.length, 1);
+    const index = Math.floor(elapsedSeconds * anim.fps);
+    const wrapped = ((index % count) + count) % count;
+    const clamped = Math.min(Math.max(index, 0), count - 1);
+    const chosen = [clamped, wrapped][Number(looping)] ?? 0;
+    return anim.frames[chosen] ?? { height: 0, width: 0, x: 0, y: 0 };
   }
 
   // --- UI surface (records the marshalled call; returns the scripted value for the read-back verbs) ---

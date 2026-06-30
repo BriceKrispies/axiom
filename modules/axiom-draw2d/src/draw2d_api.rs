@@ -8,8 +8,12 @@ use axiom_host::{
 use axiom_kernel::{Meters, Radians, Ratio, Seconds};
 use axiom_math::{Mat3, Vec2};
 
-use crate::ids::{EmitterConfig, EmitterId};
+use crate::ids::{EmitterConfig, EmitterId, SpriteAnimation};
 use crate::particles::{ParticleField, ParticleQuad};
+
+/// The inert sub-rect a flip-book sample yields when the animation has no frames
+/// to show — a zero-origin, zero-size `Rect` (nothing to draw).
+const INERT_FRAME: Rect = Rect::new(Vec2::ZERO, Vec2::ZERO);
 
 /// The only public export of `axiom-draw2d`.
 ///
@@ -233,6 +237,32 @@ impl Draw2dApi {
     /// draw binds to sample the rendered target.
     pub fn target_texture(&self, target: RenderTargetId) -> TextureId {
         self.list.target_texture(target)
+    }
+
+    // --- Flip-book animation (§10.2, pure sampler) ---
+
+    /// Sample a flip-book animation (§10.2): the atlas sub-rect to show at
+    /// presentation time `elapsed`. A **pure** function of `(anim, elapsed,
+    /// looping)` — it holds no state, takes no `&self`, and reads no clock, so the
+    /// same inputs always yield the same [`Rect`] (SPEC-04 §6: deterministic *as a
+    /// function* even though `elapsed` is presentation time). The frame index is
+    /// `floor(elapsed * fps)`; when `looping` it wraps modulo the frame count,
+    /// otherwise it clamps to the last frame. An empty `anim` has no frame to show,
+    /// so it returns the inert zero-[`Rect`].
+    ///
+    /// Branchless: the wrap-vs-clamp choice is a table index
+    /// (`[clamped, wrapped][usize::from(looping)]`) and the empty case is the
+    /// combinator `frames.get(..)`, never an `if`/`match`. `rem_euclid` keeps a
+    /// negative index (a negative `elapsed`) wrapping to a non-negative frame, and
+    /// `count = len.max(1)` keeps the clamp bound valid (and the lookup `None`) for
+    /// an empty animation.
+    pub fn sample_animation(anim: &SpriteAnimation, elapsed: Seconds, looping: bool) -> Rect {
+        let count = anim.frames.len().max(1) as i64;
+        let index = (elapsed.get() * anim.fps as f32).floor() as i64;
+        let clamped = index.clamp(0, count - 1);
+        let wrapped = index.rem_euclid(count);
+        let chosen = [clamped, wrapped][usize::from(looping)];
+        anim.frames.get(chosen as usize).copied().unwrap_or(INERT_FRAME)
     }
 
     // --- Finalize ---
@@ -548,6 +578,79 @@ mod tests {
         let routed = list.target_commands(target).unwrap();
         assert_eq!(routed.len(), 1);
         assert_eq!(routed[0].kind_code(), Draw2dCommand::KIND_RECT);
+    }
+
+    /// A 3-frame flip-book at 2 fps, each frame a distinct sub-rect so a test can
+    /// read back which frame the sampler chose.
+    fn flipbook() -> SpriteAnimation {
+        SpriteAnimation {
+            frames: vec![
+                Rect::new(Vec2::new(0.0, 0.0), Vec2::ONE),
+                Rect::new(Vec2::new(1.0, 0.0), Vec2::ONE),
+                Rect::new(Vec2::new(2.0, 0.0), Vec2::ONE),
+            ],
+            fps: 2,
+        }
+    }
+
+    fn frame_at(x: f32) -> Rect {
+        Rect::new(Vec2::new(x, 0.0), Vec2::ONE)
+    }
+
+    #[test]
+    fn sample_animation_indexes_endpoints_and_mid_frame() {
+        let anim = flipbook();
+        // index = floor(elapsed * fps): 0, then the mid-frame 0.25s still in frame 0
+        // (floor(0.5) = 0), then the frame boundaries at 0.5s and 1.0s.
+        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(0.0), true), frame_at(0.0));
+        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(0.25), true), frame_at(0.0));
+        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(0.5), true), frame_at(1.0));
+        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(1.0), true), frame_at(2.0));
+    }
+
+    #[test]
+    fn sample_animation_loops_by_wrapping_else_clamps_to_last() {
+        let anim = flipbook();
+        // elapsed 2.0s ⇒ index floor(4.0) = 4, past the 3 frames.
+        // looping wraps (4 mod 3 = 1 ⇒ frame 1); non-looping clamps to the last.
+        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(2.0), true), frame_at(1.0));
+        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(2.0), false), frame_at(2.0));
+    }
+
+    #[test]
+    fn sample_animation_handles_negative_elapsed_robustly() {
+        let anim = flipbook();
+        // index floor(-0.5 * 2) = -1. Non-looping clamps the negative up to frame 0;
+        // looping wraps it with rem_euclid (-1 mod 3 = 2 ⇒ the last frame).
+        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(-0.5), false), frame_at(0.0));
+        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(-0.5), true), frame_at(2.0));
+    }
+
+    #[test]
+    fn sample_animation_of_an_empty_book_is_the_inert_rect() {
+        let empty = SpriteAnimation { frames: vec![], fps: 24 };
+        // No frame to show: the inert zero-Rect on both the wrap and the clamp arm.
+        assert_eq!(Draw2dApi::sample_animation(&empty, seconds(1.0), true), Rect::new(Vec2::ZERO, Vec2::ZERO));
+        assert_eq!(Draw2dApi::sample_animation(&empty, seconds(1.0), false), Rect::new(Vec2::ZERO, Vec2::ZERO));
+    }
+
+    #[test]
+    fn sample_animation_is_chunk_stable_as_a_pure_function() {
+        let anim = flipbook();
+        // §7: the sampled Rect at a given total elapsed is identical however that
+        // elapsed was reached — the sampler is a pure function of total elapsed, so
+        // the [0, 0.5, 1.0] sequence sampled directly equals re-sampling each point.
+        let elapsed = [0.0_f32, 0.5, 1.0];
+        let direct: Vec<Rect> = elapsed
+            .iter()
+            .map(|&t| Draw2dApi::sample_animation(&anim, seconds(t), true))
+            .collect();
+        let again: Vec<Rect> = elapsed
+            .iter()
+            .map(|&t| Draw2dApi::sample_animation(&anim, seconds(t), true))
+            .collect();
+        assert_eq!(direct, again);
+        assert_eq!(direct, vec![frame_at(0.0), frame_at(1.0), frame_at(2.0)]);
     }
 
     #[test]

@@ -38,3 +38,12 @@ test("the inert UNBOUND_DRAW2D id-returning verbs mint the null handle / empty l
   assert.equal(UNBOUND_DRAW2D.draw2dTargetTexture(5), 0);
   assert.deepEqual(UNBOUND_DRAW2D.draw2dFinish(), []);
 });
+
+test("the inert UNBOUND_DRAW2D flip-book sampler returns the inert zero-rect", () => {
+  const frame = UNBOUND_DRAW2D.draw2dSampleAnimation(
+    { fps: 12, frames: [{ height: 1, width: 1, x: 0, y: 0 }] },
+    1,
+    true,
+  );
+  assert.deepEqual(frame, { height: 0, width: 0, x: 0, y: 0 });
+});

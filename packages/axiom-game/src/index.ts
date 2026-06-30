@@ -108,7 +108,10 @@ export type {
 } from "./host-binding.ts";
 
 // The 2D drawing seam (SPEC-04 §10), behind `Frame` — `HostBridge` extends it.
-export type { Draw2dBridge, EllipseRadii, EmitterConfig, LineStyle, ShapeStyle } from "./draw2d-binding.ts";
+export type { Draw2dBridge, EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation } from "./draw2d-binding.ts";
+
+// The pure flip-book sampler (SPEC-04 §10.2) — the one draw2d free function.
+export { sampleAnimation } from "./draw2d.ts";
 
 // Wave 4 TAIL — the pump-driven and retained-object surfaces.
 
