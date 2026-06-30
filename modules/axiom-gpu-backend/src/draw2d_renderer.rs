@@ -77,26 +77,45 @@ fn vs(
     return out;
 }
 
-// Analytic per-pixel coverage for the round shapes, fed by the covered core's
+// Analytic per-pixel coverage for every shape, fed by the covered core's
 // per-vertex `field`/`kind` (see `draw2d_geometry`). The field is interpolated
 // affinely (clip.w == 1), so each fragment sees the exact value at its pixel
-// centre — reproducing the software rasterizer's per-pixel test byte-for-byte:
-//   * conic (circle/ellipse, kind > 0.5): inside when `s² + t² ≤ 1`, with
-//     `(s, t) = field.xy`.
-//   * capsule (line, and the always-inside plain rect/sprite/particle, kind ≤ 0.5):
-//     inside when `(along − clamp(along,0,len))² + perp² ≤ half_width²`, with
-//     `field = (along, perp, len, half_width)`. A plain quad carries the
-//     always-inside `(0,0,0,HUGE)`, so nothing is discarded.
+// centre — reproducing the software rasterizer's per-pixel test byte-for-byte.
+// The `kind` selects the test:
+//   * capsule (kind 0): line distance, and the always-inside plain
+//     rect/sprite/particle/glyph — inside when
+//     `(along − clamp(along,0,len))² + perp² ≤ half_width²`, with
+//     `field = (along, perp, len, half_width)`; a plain quad's `(0,0,0,HUGE)`
+//     keeps everything.
+//   * conic (kind 1): circle/ellipse fill — inside when `s² + t² ≤ 1`, `field.xy = (s,t)`.
+//   * tri (kind 2): a path fan triangle — inside when `min(b₀,b₁,b₂) ≥ 0`,
+//     `field.xyz` = barycentric coordinates.
+//   * rect stroke (kind 3): a rect's inset border — inside when
+//     `min(field.xyzw) < 1`, the four edge distances over the stroke width.
+//   * conic stroke (kind 4): a circle/ellipse annulus — inside when
+//     `field.z ≤ s²+t² ≤ 1` (`field.z` = inner² = the stroke's inner radius²).
 // Outside coverage `discard`s the fragment, leaving the destination untouched —
-// exactly the software path's "do not composite this pixel".
+// exactly the software path's "do not composite this pixel". The colour is the
+// sampled texel (white for a solid fill/stroke, the atlas for a sprite/glyph, the
+// baked ramp for a gradient) modulated by the per-vertex colour.
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let clamped = clamp(in.field.x, 0.0, in.field.z);
     let dax = in.field.x - clamped;
     let cap_d2 = dax * dax + in.field.y * in.field.y;
     let inside_capsule = cap_d2 <= in.field.w * in.field.w;
-    let inside_conic = dot(in.field.xy, in.field.xy) <= 1.0;
-    let keep = select(inside_capsule, inside_conic, in.kind > 0.5);
+    let s2 = dot(in.field.xy, in.field.xy);
+    let inside_conic = s2 <= 1.0;
+    let inside_tri = min(min(in.field.x, in.field.y), in.field.z) >= 0.0;
+    let inside_rect_stroke = min(min(in.field.x, in.field.y), min(in.field.z, in.field.w)) < 1.0;
+    let inside_conic_stroke = (s2 <= 1.0) && (s2 >= in.field.z);
+    let keep = select(
+        select(
+            select(
+                select(inside_capsule, inside_conic, in.kind > 0.5),
+                inside_tri, in.kind > 1.5),
+            inside_rect_stroke, in.kind > 2.5),
+        inside_conic_stroke, in.kind > 3.5);
     if (!keep) { discard; }
     return textureSample(tex, samp, in.uv) * in.color;
 }

@@ -74,6 +74,87 @@ impl Paint2d {
     pub(crate) fn stops(&self) -> &[GradientStop] {
         &self.stops
     }
+
+    /// Sample the gradient's colour at parameter `u` (clamped to `[0, 1]`).
+    ///
+    /// This is the paint's **canonical colour ramp** — the contract's own
+    /// definition of what a linear/radial gradient looks like, independent of any
+    /// framebuffer. It lives here, in the neutral layer, so both render backends
+    /// (Canvas 2D, GPU) sample the *identical* gradient rather than each
+    /// re-deriving it (the "shared primitive belongs in a lower layer" rule).
+    ///
+    /// Evaluated branchlessly as a telescoping sum over the stop list, sorted by
+    /// offset: starting from the first stop's colour, each adjacent pair adds
+    /// `(next − prev) · clamp((u − prev.offset)/(next.offset − prev.offset), 0, 1)`.
+    /// Before the first stop every term is `0` (the first colour); past the last,
+    /// every term saturates to `1` and the sum telescopes to the last colour; in
+    /// between it is the piecewise-linear interpolation. An empty stop list is
+    /// fully transparent; a single stop is that solid colour. A zero-width segment
+    /// (duplicate offsets) is floored by [`RAMP_EPS`] so the divide stays finite.
+    pub(crate) fn sample(&self, u: f32) -> [f32; 4] {
+        let u = u.clamp(0.0, 1.0);
+        let base = self
+            .stops
+            .first()
+            .map(|s| s.color.channels())
+            .unwrap_or([0.0; 4]);
+        self.stops.windows(2).fold(base, |acc, pair| {
+            let a = pair[0];
+            let b = pair[1];
+            let denom = (b.offset.get() - a.offset.get()).max(RAMP_EPS);
+            let t = ((u - a.offset.get()) / denom).clamp(0.0, 1.0);
+            let ca = a.color.channels();
+            let cb = b.color.channels();
+            [
+                acc[0] + (cb[0] - ca[0]) * t,
+                acc[1] + (cb[1] - ca[1]) * t,
+                acc[2] + (cb[2] - ca[2]) * t,
+                acc[3] + (cb[3] - ca[3]) * t,
+            ]
+        })
+    }
+
+    /// Bake this paint into its canonical sampling **texture** as
+    /// `(width, height, RGBA8 bytes)`: a linear gradient bakes an `n×1` colour
+    /// ramp (sampled along the projection parameter), a radial gradient bakes an
+    /// `n×n` disc whose texel `(i, j)` is the gradient at the radius of that
+    /// texel's centre mapped into `[-1, 1]²` (so a backend samples it with the
+    /// affine UV `((p − center)/radius)·0.5 + 0.5`). Both backends upload/sample
+    /// the *same* bytes with nearest filtering, so the gradient is byte-identical
+    /// across backends. Branchless: the radial-vs-linear height and per-texel
+    /// parameter are table/`select` choices, never an `if`.
+    pub(crate) fn bake_texture(&self, n: u32) -> (u32, u32, Vec<u8>) {
+        let n = n.max(1);
+        let is_radial = usize::from(self.radial.is_some());
+        let height = [1, n][is_radial];
+        let nf = n as f32;
+        let bytes: Vec<u8> = (0..(n * height))
+            .flat_map(|idx| {
+                let i = (idx % n) as f32;
+                let j = (idx / n) as f32;
+                let linear_u = (i + 0.5) / nf;
+                let rx = (i + 0.5) / nf * 2.0 - 1.0;
+                let ry = (j + 0.5) / nf * 2.0 - 1.0;
+                let radial_u = (rx * rx + ry * ry).sqrt();
+                let u = [linear_u, radial_u][is_radial];
+                let c = self.sample(u);
+                [to_byte(c[0]), to_byte(c[1]), to_byte(c[2]), to_byte(c[3])]
+            })
+            .collect();
+        (n, height, bytes)
+    }
+}
+
+/// Smallest gradient-segment width used to floor the interpolation divide so a
+/// duplicate-offset stop pair never divides by zero (yielding a non-finite that
+/// would poison the telescoping sum).
+const RAMP_EPS: f32 = 1.0e-6;
+
+/// Linear `0.0..=1.0` channel → clamped, rounded RGBA8 byte — the same rounding
+/// the software framebuffer and the GPU's `Rgba8Unorm` quantization apply, so a
+/// baked texel matches a directly-composited colour within ±1.
+fn to_byte(c: f32) -> u8 {
+    (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
 }
 
 /// The per-frame collection of registered paints, keyed by a zero-based
@@ -161,5 +242,93 @@ mod tests {
     fn get_unknown_id_is_none() {
         let table = PaintTable::default();
         assert_eq!(table.get(PaintId::from_raw(5)), None);
+    }
+
+    fn rgba(r: f32, g: f32, b: f32, a: f32) -> Rgba {
+        Rgba::new(ratio(r), ratio(g), ratio(b), ratio(a))
+    }
+
+    fn black_white() -> Paint2d {
+        Paint2d::linear(
+            Vec2::ZERO,
+            Vec2::new(1.0, 0.0),
+            vec![
+                GradientStop::new(ratio(0.0), rgba(0.0, 0.0, 0.0, 1.0)),
+                GradientStop::new(ratio(1.0), rgba(1.0, 1.0, 1.0, 1.0)),
+            ],
+        )
+    }
+
+    #[test]
+    fn sample_interpolates_endpoints_and_midpoint_and_clamps() {
+        let p = black_white();
+        assert_eq!(p.sample(0.0), [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(p.sample(1.0), [1.0, 1.0, 1.0, 1.0]);
+        // Midpoint is the halfway grey.
+        assert_eq!(p.sample(0.5), [0.5, 0.5, 0.5, 1.0]);
+        // Out-of-range u clamps to the endpoints (before-first / past-last arms).
+        assert_eq!(p.sample(-2.0), [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(p.sample(3.0), [1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn sample_of_empty_stops_is_transparent_and_single_stop_is_solid() {
+        let empty = Paint2d::linear(Vec2::ZERO, Vec2::ONE, vec![]);
+        assert_eq!(empty.sample(0.5), [0.0, 0.0, 0.0, 0.0]);
+        let one = Paint2d::radial(
+            Vec2::ZERO,
+            meters(1.0),
+            vec![GradientStop::new(ratio(0.25), rgba(0.2, 0.4, 0.6, 1.0))],
+        );
+        assert_eq!(one.sample(0.0), [0.2, 0.4, 0.6, 1.0]);
+        assert_eq!(one.sample(1.0), [0.2, 0.4, 0.6, 1.0]);
+    }
+
+    #[test]
+    fn sample_duplicate_offsets_stay_finite() {
+        // Two stops at the same offset: the EPS-floored divide must not yield NaN.
+        let p = Paint2d::linear(
+            Vec2::ZERO,
+            Vec2::ONE,
+            vec![
+                GradientStop::new(ratio(0.5), rgba(1.0, 0.0, 0.0, 1.0)),
+                GradientStop::new(ratio(0.5), rgba(0.0, 1.0, 0.0, 1.0)),
+            ],
+        );
+        assert!(p.sample(0.5).iter().all(|c| c.is_finite()));
+    }
+
+    #[test]
+    fn bake_texture_linear_is_a_ramp_row_and_radial_is_a_disc() {
+        // Linear → n×1 ramp; first texel is near-black, last near-white.
+        let (lw, lh, lbytes) = black_white().bake_texture(8);
+        assert_eq!((lw, lh), (8, 1));
+        assert_eq!(lbytes.len(), 8 * 1 * 4);
+        assert!(lbytes[0] < lbytes[(7 * 4)], "ramp brightens left→right");
+        // Radial → n×n disc.
+        let radial = Paint2d::radial(
+            Vec2::ZERO,
+            meters(1.0),
+            vec![
+                GradientStop::new(ratio(0.0), rgba(1.0, 1.0, 1.0, 1.0)),
+                GradientStop::new(ratio(1.0), rgba(0.0, 0.0, 0.0, 1.0)),
+            ],
+        );
+        let (rw, rh, rbytes) = radial.bake_texture(4);
+        assert_eq!((rw, rh), (4, 4));
+        assert_eq!(rbytes.len(), 4 * 4 * 4);
+    }
+
+    #[test]
+    fn bake_texture_clamps_n_to_at_least_one_and_clamps_hdr_channels() {
+        // n = 0 floors to 1; an HDR (>1) channel clamps to 255 in to_byte.
+        let p = Paint2d::linear(
+            Vec2::ZERO,
+            Vec2::ONE,
+            vec![GradientStop::new(ratio(0.0), rgba(2.5, 0.0, 0.0, 1.0))],
+        );
+        let (w, h, bytes) = p.bake_texture(0);
+        assert_eq!((w, h), (1, 1));
+        assert_eq!(bytes, vec![255, 0, 0, 255]);
     }
 }

@@ -1,9 +1,14 @@
 //! **SPEC-04 §7 — "Backend alpha-blend proof" (both backends).**
 //!
-//! Rasterizes the SAME layer-sorted [`Draw2dList`] — a scene of overlapping
-//! semi-transparent rects plus a semi-transparent sprite — through BOTH the
-//! software Canvas 2D backend and the GPU off-screen backend, and asserts the
-//! resulting pixels match within a tight tolerance.
+//! Rasterizes the SAME layer-sorted [`Draw2dList`] through BOTH the software
+//! Canvas 2D backend and the GPU off-screen backend, and asserts the resulting
+//! pixels match within a tight tolerance. The scene exercises the **full SPEC-04
+//! 2D command set**: overlapping semi-transparent rects + a semi-transparent
+//! sprite (the alpha-blend core), the round/oriented kinds (circle, rotated
+//! ellipse, thick line, particle), a **filled + stroked polygon path** (software
+//! even-odd fill vs GPU barycentric-fan), **linear and radial gradient fills**
+//! (both sampling the contract's identical baked gradient texture), and a **text
+//! glyph run** (each glyph blitted through the sprite path against the font atlas).
 //!
 //! ## Why they can match byte-for-byte
 //! * The GPU off-screen 2D arm renders into a **linear** (`Rgba8Unorm`, non-sRGB)
@@ -28,13 +33,24 @@
 //! real difference. (Choosing only non-`.5` colours would shrink the mean toward
 //! 0, but representative colours + an honest tolerance is the better proof.)
 //!
+//! The path/gradient/text additions hold the **same** ±2 budget, not a loosened
+//! one: the path is integer-aligned so software even-odd and GPU barycentric agree
+//! at pixel centres (and the stroke's outer band is scanned on both); the gradient
+//! fills sample the *same* host-baked ramp/disc with the same nearest rule, fine
+//! enough (a 512-texel ramp) that a sub-texel rounding disagreement stays inside
+//! ±2; the text run is rendered 1:1 with the integer-aligned atlas cells, so each
+//! glyph pixel samples exactly one atlas texel on both backends.
+//!
 //! Requires the native GPU adapter the sandbox provides (the off-screen arm).
 
 mod common;
 
 use axiom_canvas2d_backend::Canvas2dBackendApi;
 use axiom_gpu_backend::GpuBackendApi;
-use axiom_host::{Common2d, Draw2dCommand, Draw2dList, Fill2d, Rect, Rgba, SpriteDraw2d, TextureId};
+use axiom_host::{
+    Common2d, Draw2dCommand, Draw2dList, Fill2d, FontHandle, Glyph2d, GlyphRun, GradientStop, Rect,
+    Rgba, SpriteDraw2d, Stroke2d, TextAlign, TextDraw2d, TextureId,
+};
 use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::{Mat3, Vec2};
 
@@ -60,6 +76,30 @@ fn atlas() -> Vec<(u64, u32, u32, Vec<u8>)> {
         })
     });
     vec![(7, 4, 4, rgba)]
+}
+
+/// A deterministic native font atlas under the reserved `FONT_ATLAS_TEXTURE` id:
+/// a `16×16` grid of two `8×16` glyph cells (the layout the runtime's `font.rs`
+/// resolver + the browser harness bake), each cell a recognizable per-texel
+/// pattern so a glyph is distinguishable and a covered pixel is opaque. The live
+/// path bakes glyph bitmaps browser-side; this is the equivalent deterministic
+/// atlas so the headless proof can render text — both backends sample these exact
+/// bytes, so text is byte-identical across backends.
+fn font_atlas() -> Vec<(u64, u32, u32, Vec<u8>)> {
+    let id = FontHandle::from_raw(1).atlas_texture().raw();
+    let (w, h) = (16u32, 16u32);
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    (0..h).for_each(|y| {
+        (0..w).for_each(|x| {
+            // Cell 0 = x∈[0,8), cell 1 = x∈[8,16); a per-cell diagonal pattern,
+            // fully opaque so a glyph pixel reads its tint.
+            let cell = x / 8;
+            let lx = x % 8;
+            let v = (((lx + y + cell * 3) * 24) % 256) as u8;
+            rgba.extend_from_slice(&[v, 255 - v, 128, 255]);
+        })
+    });
+    vec![(id, w, h, rgba)]
 }
 
 /// The shared parity scene: an opaque background, an opaque rect, a
@@ -138,6 +178,76 @@ fn scene() -> Draw2dList {
         Meters::new(4.0).expect("finite"),
         rgba(0.9, 0.5, 0.1, 1.0),
     ));
+
+    // --- SPEC-04 §7 full-command-set additions: path, gradients, text. Each is
+    // OPAQUE on a top layer (an exact overwrite where it lands), so only the
+    // shared coverage / sampling is under test. Integer-pixel-aligned so the
+    // software even-odd / GPU barycentric polygon coverage agree at pixel centres,
+    // and the gradient/glyph nearest sampling picks the same texel on both.
+
+    // Layer 8: a filled + stroked convex polygon (a diamond). Software fills it by
+    // even-odd scanline, the GPU by a barycentric fan; both stroke the edges.
+    list.push_command(Draw2dCommand::path(
+        header(8, 8, 1.0),
+        vec![
+            Vec2::new(14.0, 38.0),
+            Vec2::new(22.0, 46.0),
+            Vec2::new(14.0, 54.0),
+            Vec2::new(6.0, 46.0),
+        ],
+        Fill2d::color(rgba(0.9, 0.2, 0.8, 1.0))
+            .with_stroke(Stroke2d::new(rgba(1.0, 1.0, 1.0, 1.0), Meters::new(2.0).expect("finite"))),
+        true,
+    ));
+
+    // Layer 9: a linear-gradient-filled rect (black → white left→right). Both
+    // backends sample the same baked ramp at the same affine projection parameter.
+    let linear = list.register_linear(
+        Vec2::new(34.0, 2.0),
+        Vec2::new(58.0, 2.0),
+        vec![
+            GradientStop::new(ratio(0.0), rgba(0.0, 0.0, 0.0, 1.0)),
+            GradientStop::new(ratio(1.0), rgba(1.0, 1.0, 1.0, 1.0)),
+        ],
+    );
+    list.push_command(Draw2dCommand::rect(
+        header(9, 9, 1.0),
+        Rect::new(Vec2::new(34.0, 2.0), Vec2::new(24.0, 8.0)),
+        Fill2d::paint(linear),
+    ));
+
+    // Layer 10: a radial-gradient-filled rect (white centre → black edge). Both
+    // backends sample the same baked radial disc at the same affine UV.
+    let radial = list.register_radial(
+        Vec2::new(10.0, 8.0),
+        Meters::new(7.0).expect("finite"),
+        vec![
+            GradientStop::new(ratio(0.0), rgba(1.0, 1.0, 1.0, 1.0)),
+            GradientStop::new(ratio(1.0), rgba(0.1, 0.1, 0.1, 1.0)),
+        ],
+    );
+    list.push_command(Draw2dCommand::rect(
+        header(10, 10, 1.0),
+        Rect::new(Vec2::new(2.0, 0.0), Vec2::new(16.0, 16.0)),
+        Fill2d::paint(radial),
+    ));
+
+    // Layer 11: a 2-glyph text run against the font atlas, rendered 1:1 with the
+    // 8×16 cells and integer-aligned, so each dest pixel samples exactly one atlas
+    // texel on both backends. Tinted red; placed at (46, 30) — clear of the other
+    // top-layer shapes' sample points.
+    list.push_command(Draw2dCommand::text(
+        (11, Mat3::translation(Vec2::new(46.0, 30.0)), Common2d::new(11, ratio(1.0))),
+        GlyphRun::new(
+            vec![
+                Glyph2d::new(Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)), Meters::new(8.0).expect("finite")),
+                Glyph2d::new(Rect::new(Vec2::new(8.0, 0.0), Vec2::new(8.0, 16.0)), Meters::new(8.0).expect("finite")),
+            ],
+            Meters::new(16.0).expect("finite"),
+        ),
+        TextDraw2d::new(FontHandle::from_raw(1), rgba(1.0, 0.2, 0.2, 1.0), TextAlign::LEFT),
+    ));
+
     list.sort_commands();
     list
 }
@@ -151,7 +261,8 @@ fn px(b: &[u8], x: u32, y: u32) -> [u8; 4] {
 #[test]
 fn gpu_and_software_2d_alpha_blend_match() {
     let list = scene();
-    let textures = atlas();
+    // Sprite atlas (id 7) + the native font atlas (reserved id) the text run samples.
+    let textures: Vec<(u64, u32, u32, Vec<u8>)> = atlas().into_iter().chain(font_atlas()).collect();
 
     // Software backend at the canvas display size.
     let mut sw = Canvas2dBackendApi::new(&common::present_request(W, H));
@@ -191,6 +302,35 @@ fn gpu_and_software_2d_alpha_blend_match() {
     let line_gpu = px(&gpu_px, 18, 57);
     assert!(line_sw[0] > 200 && line_sw[1] > 200 && line_sw[2] > 200, "software line: {line_sw:?}");
     assert!(line_gpu[0] > 200 && line_gpu[1] > 200 && line_gpu[2] > 200, "gpu line: {line_gpu:?}");
+
+    // Path fill: the diamond's centre (14,46) is interior → its magenta fill on
+    // BOTH backends (proving the even-odd fill and the barycentric fan agree).
+    let path_sw = px(&sw_px, 14, 46);
+    let path_gpu = px(&gpu_px, 14, 46);
+    assert!(path_sw[0] > 200 && path_sw[2] > 180 && path_sw[1] < 80, "software path fill: {path_sw:?}");
+    assert!(path_gpu[0] > 200 && path_gpu[2] > 180 && path_gpu[1] < 80, "gpu path fill: {path_gpu:?}");
+
+    // Linear gradient: dark on the left edge of the rect, bright on the right.
+    let grad_l_sw = px(&sw_px, 35, 5);
+    let grad_r_sw = px(&sw_px, 56, 5);
+    assert!(grad_l_sw[0] < 70, "software linear-gradient left is dark: {grad_l_sw:?}");
+    assert!(grad_r_sw[0] > 190, "software linear-gradient right is bright: {grad_r_sw:?}");
+    assert!(px(&gpu_px, 35, 5)[0] < 70, "gpu linear-gradient left is dark");
+    assert!(px(&gpu_px, 56, 5)[0] > 190, "gpu linear-gradient right is bright");
+
+    // Radial gradient: bright near the centre (10,8), darker toward the edge.
+    let rad_c_sw = px(&sw_px, 10, 8);
+    let rad_e_sw = px(&sw_px, 2, 1);
+    assert!(rad_c_sw[0] > 190, "software radial centre is bright: {rad_c_sw:?}");
+    assert!(rad_e_sw[0] < 130, "software radial edge is darker: {rad_e_sw:?}");
+    assert!(px(&gpu_px, 10, 8)[0] > 190, "gpu radial centre is bright");
+
+    // Text: a glyph pixel inside the first cell (≈(48,38)) reads the red tint on
+    // BOTH backends (proving the glyph-run sampled the atlas and placed the glyph).
+    let text_sw = px(&sw_px, 48, 38);
+    let text_gpu = px(&gpu_px, 48, 38);
+    assert!(text_sw[0] > 60 && text_sw[3] == 255, "software text glyph is drawn: {text_sw:?}");
+    assert!(text_gpu[3] == 255, "gpu text glyph is drawn: {text_gpu:?}");
 
     // Tight pixel parity across the whole frame.
     let maxd = common::max_channel_diff(&gpu_px, &sw_px);
