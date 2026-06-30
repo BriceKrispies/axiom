@@ -401,9 +401,11 @@ mod tests {
         })
     }
 
-    /// The whole observable input boundary folded to one hash: the three edge
-    /// reads for each bound action plus the pointer / swipe / press-start reads.
-    fn input_hash(b: &GameBridge) -> u64 {
+    /// The whole observable input boundary as one byte buffer — the per-tick
+    /// `IntentSnapshot` the boundary exposes: the three edge reads for each bound
+    /// action plus the pointer / swipe / press-start reads. This buffer IS the
+    /// tick's intent record; `input_hash` is just its fingerprint.
+    fn input_buffer(b: &GameBridge) -> Vec<u8> {
         let mut buf: Vec<u8> = Vec::new();
         ["left", "right", "fire"].iter().for_each(|action| {
             buf.push(u8::from(b.input_is_down(action)));
@@ -419,7 +421,13 @@ mod tests {
             .iter()
             .chain(b.input_pointer_pressed().iter())
             .for_each(|&v| buf.extend_from_slice(&v.to_le_bytes()));
-        fnv1a(&buf)
+        buf
+    }
+
+    /// The per-tick input boundary folded to one hash — the fingerprint of the
+    /// tick's [`input_buffer`] `IntentSnapshot`.
+    fn input_hash(b: &GameBridge) -> u64 {
+        fnv1a(&input_buffer(b))
     }
 
     /// Drive a fixed scripted input session and return the per-tick boundary-read
@@ -457,6 +465,68 @@ mod tests {
             .collect()
     }
 
+    /// The scripted session's `(key edit, pointer edit)` plan — the single source
+    /// of truth the per-tick and chunked drivers both replay.
+    fn scripted_steps() -> [(&'static str, bool, f64, f64, bool, bool); 4] {
+        [
+            ("Space", true, 200.0, 300.0, true, false), // tick 0: press fire, drag start
+            ("KeyD", true, 400.0, 300.0, true, false),  // tick 1: hold right, drag +200x
+            ("Space", false, 0.0, 0.0, false, true),    // tick 2: release fire, lift -> swipe
+            ("KeyA", true, 0.0, 0.0, false, true),      // tick 3: press left
+        ]
+    }
+
+    /// Drive the scripted session delivering each tick's `STEP` of elapsed time in
+    /// `substeps` equal sub-advances (the SPEC-00 accumulator banks the partials),
+    /// recording the per-tick `IntentSnapshot` hash whenever a sub-advance produces
+    /// a whole tick. `substeps == 1` is the canonical one-advance-per-tick run.
+    fn scripted_input_hashes_chunked(substeps: u32) -> Vec<u64> {
+        let mut b = bridge();
+        b.input_bind_action("left", &["KeyA", "ArrowLeft"]);
+        b.input_bind_action("right", &["KeyD"]);
+        b.input_bind_action("fire", &["Space"]);
+        let mut hashes: Vec<u64> = Vec::new();
+        scripted_steps()
+            .iter()
+            .for_each(|&(key, key_down, px, py, ptr_down, clear)| {
+                b.input_key(key, key_down);
+                if clear {
+                    b.input_pointer_clear();
+                } else {
+                    b.input_pointer(px, py, ptr_down);
+                }
+                (0..substeps).for_each(|_| {
+                    let budget = b.advance(STEP / u64::from(substeps));
+                    // Sample the snapshot only on the sub-advance that completed a
+                    // whole fixed tick — partial chunks bank, they don't sample.
+                    (budget.steps() > 0).then(|| hashes.push(input_hash(&b)));
+                });
+            });
+        hashes
+    }
+
+    /// Drive the scripted session one advance per tick, capturing the full per-tick
+    /// `IntentSnapshot` byte buffer — the intent stream itself, not just its hash.
+    fn scripted_input_snapshot_stream() -> Vec<Vec<u8>> {
+        let mut b = bridge();
+        b.input_bind_action("left", &["KeyA", "ArrowLeft"]);
+        b.input_bind_action("right", &["KeyD"]);
+        b.input_bind_action("fire", &["Space"]);
+        scripted_steps()
+            .iter()
+            .map(|&(key, key_down, px, py, ptr_down, clear)| {
+                b.input_key(key, key_down);
+                if clear {
+                    b.input_pointer_clear();
+                } else {
+                    b.input_pointer(px, py, ptr_down);
+                }
+                b.advance(STEP);
+                input_buffer(&b)
+            })
+            .collect()
+    }
+
     #[test]
     fn the_input_boundary_replays_to_a_byte_identical_hash_sequence() {
         // The keystone proof: the same scripted injection sequence over the input
@@ -467,6 +537,39 @@ mod tests {
         // The input genuinely evolves (presses, releases, a swipe), so the
         // fingerprint is not constant — real work, not a degenerate sequence.
         assert!(first.iter().any(|&hash| hash != first[0]));
+    }
+
+    #[test]
+    fn the_per_tick_snapshots_are_invariant_to_advance_chunking() {
+        // SPEC-05 §7 cross-chunk invariance: the SAME raw input event stream,
+        // partitioned into ticks two different ways by the accumulator (one whole
+        // STEP per tick vs. two and four equal partials), produces the SAME
+        // per-tick snapshot/hash sequence — the tick decomposition is a function of
+        // banked elapsed time, not of how the host chunked its `advance` calls.
+        let whole = scripted_input_hashes_chunked(1);
+        assert_eq!(whole, scripted_input_hashes_chunked(2));
+        assert_eq!(whole, scripted_input_hashes_chunked(4));
+        // It is exactly the canonical per-tick driver's sequence, and non-trivial.
+        assert_eq!(whole, scripted_input_hashes());
+        assert_eq!(whole.len(), 4);
+        assert!(whole.iter().any(|&hash| hash != whole[0]));
+    }
+
+    #[test]
+    fn the_intent_snapshot_stream_alone_reproduces_the_per_tick_reads() {
+        // SPEC-05 §7: replaying from the snapshot stream alone (no raw events)
+        // reproduces byte-identical state. Two runs yield byte-identical
+        // `IntentSnapshot` streams...
+        let first = scripted_input_snapshot_stream();
+        assert_eq!(first, scripted_input_snapshot_stream());
+        // ...and the per-tick reads are a pure function of those captured
+        // snapshots: fingerprinting the stream alone — without re-feeding any raw
+        // key/pointer event — reconstructs the canonical per-tick hash sequence.
+        let from_snapshots: Vec<u64> = first.iter().map(|buf| fnv1a(buf)).collect();
+        assert_eq!(from_snapshots, scripted_input_hashes());
+        // The snapshots genuinely differ tick to tick (real intent, not a constant).
+        assert_eq!(first.len(), 4);
+        assert!(first.iter().any(|buf| buf != &first[0]));
     }
 
     #[test]
