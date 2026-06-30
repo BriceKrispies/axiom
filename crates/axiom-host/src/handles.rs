@@ -39,6 +39,18 @@ impl FontHandle {
     pub const fn raw(self) -> u64 {
         self.0
     }
+
+    /// The [`TextureId`] naming this font's baked glyph atlas — the texture a
+    /// backend samples to turn a `KIND_TEXT_GLYPHS` run's glyph sub-rects into
+    /// pixels (the same way a sprite samples its atlas). The built-in Tier-0 font
+    /// (handle `1`) maps to the reserved id `0x00F0_0000`, held high to avoid
+    /// colliding with render-target texture ids (which count up from `0`); a
+    /// further font shifts one slot up. This is the contract both render backends
+    /// and the atlas baker agree on, so the id lives here, in the neutral layer,
+    /// rather than being duplicated in each backend.
+    pub const fn atlas_texture(self) -> TextureId {
+        TextureId::from_raw(0x00F0_0000 + self.0.saturating_sub(1))
+    }
 }
 
 /// A marker into the transform stack returned when the `axiom-draw2d` builder
@@ -113,6 +125,15 @@ mod tests {
     fn font_handle_round_trips() {
         assert_eq!(FontHandle::from_raw(4).raw(), 4);
         assert_ne!(FontHandle::from_raw(4), FontHandle::from_raw(5));
+    }
+
+    #[test]
+    fn font_atlas_texture_reserves_a_high_per_font_slot() {
+        // The built-in font (handle 1) is the reserved base; handle 0 (none) and
+        // 1 both map to the base (saturating), and a further font shifts up one.
+        assert_eq!(FontHandle::from_raw(1).atlas_texture(), TextureId::from_raw(0x00F0_0000));
+        assert_eq!(FontHandle::from_raw(0).atlas_texture(), TextureId::from_raw(0x00F0_0000));
+        assert_eq!(FontHandle::from_raw(2).atlas_texture(), TextureId::from_raw(0x00F0_0001));
     }
 
     #[test]

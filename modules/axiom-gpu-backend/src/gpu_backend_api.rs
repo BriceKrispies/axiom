@@ -230,7 +230,15 @@ impl GpuBackendApi {
     ) -> Option<Vec<u8>> {
         let sizes = crate::draw2d_geometry::Draw2dTextureSizes::from_textures(textures);
         let geometry = crate::draw2d_geometry::build_geometry(list, width, height, &sizes);
-        crate::draw2d_offscreen::render_draw2d_to_rgba(width, height, &geometry, textures)
+        // Upload the app's sprite atlases plus the baked gradient ramp textures the
+        // gradient-filled quads bind (the covered core registers them on the
+        // geometry; the platform arm uploads them like any other texture).
+        let all_textures: Vec<(u64, u32, u32, Vec<u8>)> = textures
+            .iter()
+            .cloned()
+            .chain(geometry.gradient_textures())
+            .collect();
+        crate::draw2d_offscreen::render_draw2d_to_rgba(width, height, &geometry, &all_textures)
     }
 
     /// Render one frame **off-screen** to `width * height * 4` RGBA8 bytes,

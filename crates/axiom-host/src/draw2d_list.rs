@@ -181,6 +181,17 @@ impl Draw2dList {
     pub fn paint_stops(&self, paint: PaintId) -> Option<Vec<GradientStop>> {
         self.paints.get(paint).map(|p| p.stops().to_vec())
     }
+
+    /// Bake `paint` into its canonical sampling texture `(width, height, RGBA8)`
+    /// at resolution `n` — an `n×1` colour ramp for a linear gradient, an `n×n`
+    /// disc for a radial one (see [`crate::paint::Paint2d::bake_texture`]). `None`
+    /// if the id is unknown. Both render backends upload/sample this *same* texture
+    /// with nearest filtering, so a gradient fill is byte-identical across
+    /// backends; the contract owns its own gradient image, the backends only
+    /// place it.
+    pub fn paint_texture(&self, paint: PaintId, n: u32) -> Option<(u32, u32, Vec<u8>)> {
+        self.paints.get(paint).map(|p| p.bake_texture(n))
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +266,22 @@ mod tests {
         assert_eq!(list.paint_linear(lin), Some((Vec2::ZERO, Vec2::new(1.0, 0.0))));
         assert_eq!(list.paint_radial(rad), Some((Vec2::ONE, meters(4.0))));
         assert_eq!(list.paint_stops(lin).map(|s| s.len()), Some(2));
+    }
+
+    #[test]
+    fn paint_texture_bakes_known_paints_and_misses_unknown() {
+        let mut list = Draw2dList::default();
+        let stops = vec![
+            GradientStop::new(ratio(0.0), red()),
+            GradientStop::new(ratio(1.0), red()),
+        ];
+        let lin = list.register_linear(Vec2::ZERO, Vec2::new(1.0, 0.0), stops.clone());
+        let rad = list.register_radial(Vec2::ONE, meters(4.0), stops);
+        // Linear bakes an n×1 ramp; radial an n×n disc.
+        assert_eq!(list.paint_texture(lin, 8).map(|(w, h, _)| (w, h)), Some((8, 1)));
+        assert_eq!(list.paint_texture(rad, 8).map(|(w, h, _)| (w, h)), Some((8, 8)));
+        // An unknown id bakes nothing.
+        assert_eq!(list.paint_texture(PaintId::from_raw(9), 8), None);
     }
 
     #[test]
