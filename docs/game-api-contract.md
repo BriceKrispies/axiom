@@ -29,22 +29,28 @@ and its factories ride on; both ship together as `@axiom/game`. The
 deterministic native core (the `axiom-frame` accumulator + `apps/axiom-game-runtime`'s
 `WasmGame`) runs underneath.
 
-Documented deferrals (the contract is honest about what is *not* yet pixels):
+Status of the once-deferred surfaces (a 2026-06-30 pass closed them):
 
-- **§10 2D surface.** The neutral, ordered draw-list (`axiom-draw2d` →
-  host-owned `Draw2dList`) is complete for every shape, sprite, text, and
-  gradient. The **software backend rasterizes rect + sprite with src-over alpha
-  compositing**; circle/line/path/gradient/stroke/text glyph-runs are
-  recognised but skipped (deferred). **§10.1 particles and §10.3 render-targets**
-  are deferred pending a kernel `Seconds` scalar.
+- **§10 2D surface.** The neutral ordered draw-list (`axiom-draw2d` →
+  host-owned `Draw2dList`) and **both** backends are complete: software and GPU
+  (the GPU raster in its wgpu offscreen/`wasm32` arm) rasterize rect / circle /
+  ellipse / line / particle / sprite / **path** / **linear+radial gradient** /
+  **text glyph-runs** with per-shape **fill + stroke** and src-over alpha, at
+  proven GPU↔software parity. §10.1 particles (incl. `[min,max]` ranged emitter
+  fields), §10.2 `sampleAnimation`, and §10.3 render-targets are landed.
 - **§11 3D.** `cylinder`, `emissive`/`roughness`/`opacity`, and a hemisphere
   ambient term landed; `v3`/`mat4`/`quat` route to the native `MathApi` (no TS
-  twin). `opacity` is carried but **3D translucency does not blend yet** (needs
-  back-to-front ordering). `MeshData` deferred.
-- **§16 multiplayer.** `NetSim`/`joinRoom`/`configureNet` landed; **physics
-  net-prediction is OFF by decision** (authority/non-physics state only),
-  because cross-instance deterministic physics (§17.6 / SPEC-10) is unresolved.
-  Delta encoding and JWT verification are follow-ups.
+  twin). **3D translucency now blends** (`opacity` folds into the per-draw alpha
+  on both backends; translucent draws sort back-to-front), authored
+  `createMaterial` opacity/emissive/roughness reach the renderer, and
+  author-supplied **`MeshData`** (`createMeshData`) rides the catalog
+  resolved-geometry pipeline.
+- **§16 multiplayer.** `NetSim`/`joinRoom`/`configureNet` plus the follow-ups —
+  delta snapshot encoding, HS256 JWT admission, an unreliable datagram transport,
+  and client-side prediction (`configureNet({ predictLocalPlayer })`) — all
+  landed. **Physics net-prediction stays OFF by decision** (prediction is proven
+  same-binary only; cross-instance deterministic physics, §17.6 / SPEC-10, is
+  unresolved) — the opt-in flips with no API change once it is proven.
 - The wasm runtime bridge and live browser presentation/audio are
   **browser-proven** — the native sandbox cannot run browser WebGPU / Web Audio.
 
