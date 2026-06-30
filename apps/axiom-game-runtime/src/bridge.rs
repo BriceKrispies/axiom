@@ -328,12 +328,17 @@ impl GameBridge {
     }
 
     /// Re-parent `child` under `parent` (`worldSetParent`); self-parenting, a
-    /// cycle, or a stale handle is a clean `false`. World transforms refresh so a
-    /// later `world_world_transform` read reflects the new chain.
-    pub fn world_set_parent(&mut self, child: u64, parent: u64) -> bool {
-        self.runtime
-            .app_mut()
-            .set_parent(Entity::from_raw(child), Entity::from_raw(parent))
+    /// cycle, or a stale handle is a clean `false`. A `None` parent detaches
+    /// `child` to the hierarchy root (SPEC-02 §4.2: "null detaches to the root").
+    /// World transforms refresh so a later `world_world_transform` read reflects
+    /// the new chain.
+    pub fn world_set_parent(&mut self, child: u64, parent: Option<u64>) -> bool {
+        let app = self.runtime.app_mut();
+        let child = Entity::from_raw(child);
+        match parent {
+            Some(parent) => app.set_parent(child, Entity::from_raw(parent)),
+            None => app.clear_parent(child),
+        }
     }
 
     /// `entity`'s parent as `[]` (root / absent) or `[parent]` (`worldParentOf`).
@@ -600,10 +605,13 @@ mod tests {
         assert!(!b.world_remove(child, "ghost")); // unknown kind ⇒ false
         // Parent linking: none initially, then `child` under `parent`.
         assert!(b.world_parent_of(child).is_empty());
-        assert!(b.world_set_parent(child, parent));
+        assert!(b.world_set_parent(child, Some(parent)));
         assert_eq!(b.world_parent_of(child), vec![parent as f64]);
         // Self-parenting is rejected as a clean false.
-        assert!(!b.world_set_parent(parent, parent));
+        assert!(!b.world_set_parent(parent, Some(parent)));
+        // A `None` parent detaches the child back to the root (SPEC-02 §4.2).
+        assert!(b.world_set_parent(child, None));
+        assert!(b.world_parent_of(child).is_empty());
         // World transform is the flat 10-tuple for a live node, empty for a stale one.
         assert_eq!(b.world_world_transform(parent).len(), 10);
         assert!(b.world_world_transform(9999).is_empty());

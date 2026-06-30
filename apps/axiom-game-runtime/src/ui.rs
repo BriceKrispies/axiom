@@ -21,10 +21,14 @@
 //! argument-count budget. A colour crosses as its packed `0xRRGGBBAA` `u32`, a
 //! texture as its raw [`HandleId`](axiom_kernel::HandleId). Each draw-log item is
 //! a `u8` tag, then a fixed block of little-endian `f64`s, then — for text/button
-//! — a `u32`-LE length-prefixed UTF-8 label:
+//! — a `u32`-LE length-prefixed UTF-8 label. `text`/`sprite` carry the SPEC-04
+//! `TextOpts`/`SpriteOpts` styling in full (SPEC-09 §4.2: the screen-space verbs
+//! reuse the 2D surface's records), in the same flat-column order `draw2dText`/
+//! `draw2dSprite` use, so a UI presenter decodes them identically:
 //! - `1` rect:   `[x, y, w, h, fill, stroke, strokeWidth]`
-//! - `2` text:   `[x, y, color, size]` + label
-//! - `3` sprite: `[texture, x, y, w, h]`
+//! - `2` text:   `[x, y, fontSize, color, align, layer, alpha]` + label
+//! - `3` sprite: `[texture, x, y, rotation, scaleX, scaleY, anchorX, anchorY,
+//!   srcX, srcY, srcW, srcH, tint, flipX, flipY, layer, alpha]`
 //! - `4` button: `[x, y, w, h, fill, stroke, strokeWidth, activated]` + label
 //!
 //! `uiSolveLayout` takes the viewport plus a flat fixed-width node table and
@@ -169,34 +173,55 @@ impl UiState {
         );
     }
 
-    /// Draw a run of text.
-    fn text(&mut self, value: &str, pos: &[f64], color: u32, size: f64) {
+    /// Draw a run of text in the SPEC-04 `TextOpts` style. `opts` is the flat
+    /// slice `[posX, posY, fontSize, colorRGBA, align, layer, alpha]` (the same
+    /// encoding `draw2dText` carries). The engine [`UiTextOpts`] surface records
+    /// position + colour + size for hit-test/bookkeeping; the full
+    /// `align`/`layer`/`alpha` styling rides on the bridge's own draw log so a UI
+    /// presenter can paint it (SPEC-09 §4.2 — the screen-space text verb reuses
+    /// the 2D `TextOpts` record unchanged).
+    fn text(&mut self, value: &str, opts: &[f64]) {
         self.surface.text(
             value,
             UiTextOpts {
-                x: unit(at(pos, 0)),
-                y: unit(at(pos, 1)),
-                color: UiColor::new(color),
-                size: unit(size),
+                x: unit(at(opts, 0)),
+                y: unit(at(opts, 1)),
+                color: UiColor::new(at(opts, 3) as u32),
+                size: unit(at(opts, 2)),
             },
         );
         self.log.push(TAG_TEXT);
         push_f64s(
             &mut self.log,
-            &[at(pos, 0), at(pos, 1), f64::from(color), size],
+            &[
+                at(opts, 0),
+                at(opts, 1),
+                at(opts, 2),
+                at(opts, 3),
+                at(opts, 4),
+                at(opts, 5),
+                at(opts, 6),
+            ],
         );
         push_label(&mut self.log, value);
     }
 
-    /// Draw a textured sprite.
-    fn sprite(&mut self, texture: u64, bounds: &[f64]) {
+    /// Draw a textured sprite in the SPEC-04 `SpriteOpts` style. `opts` is the
+    /// flat slice `[posX, posY, rotation, scaleX, scaleY, anchorX, anchorY, srcX,
+    /// srcY, srcW, srcH, tintRGBA, flipX, flipY, layer, alpha]` (the same encoding
+    /// `draw2dSprite` carries). The engine [`UiSpriteOpts`] surface records the
+    /// placed position + the scaled source footprint (`srcW·scaleX` × `srcH·scaleY`)
+    /// for bookkeeping; the full rotation/anchor/tint/flip/source/layer/alpha
+    /// styling rides on the bridge's own draw log (SPEC-09 §4.2 — the screen-space
+    /// sprite verb reuses the 2D `SpriteOpts` record unchanged).
+    fn sprite(&mut self, texture: u64, opts: &[f64]) {
         self.surface.sprite(
             HandleId::from_raw(texture),
             UiSpriteOpts {
-                x: unit(at(bounds, 0)),
-                y: unit(at(bounds, 1)),
-                w: unit(at(bounds, 2)),
-                h: unit(at(bounds, 3)),
+                x: unit(at(opts, 0)),
+                y: unit(at(opts, 1)),
+                w: unit(at(opts, 9) * at(opts, 3)),
+                h: unit(at(opts, 10) * at(opts, 4)),
             },
         );
         self.log.push(TAG_SPRITE);
@@ -204,10 +229,22 @@ impl UiState {
             &mut self.log,
             &[
                 texture as f64,
-                at(bounds, 0),
-                at(bounds, 1),
-                at(bounds, 2),
-                at(bounds, 3),
+                at(opts, 0),
+                at(opts, 1),
+                at(opts, 2),
+                at(opts, 3),
+                at(opts, 4),
+                at(opts, 5),
+                at(opts, 6),
+                at(opts, 7),
+                at(opts, 8),
+                at(opts, 9),
+                at(opts, 10),
+                at(opts, 11),
+                at(opts, 12),
+                at(opts, 13),
+                at(opts, 14),
+                at(opts, 15),
             ],
         );
     }
@@ -258,14 +295,17 @@ impl GameBridge {
         self.ui.rect(bounds, fill, stroke, stroke_w);
     }
 
-    /// Draw a run of text (`uiText`); `pos = [x, y]`.
-    pub fn ui_text(&mut self, value: &str, pos: &[f64], color: u32, size: f64) {
-        self.ui.text(value, pos, color, size);
+    /// Draw a run of text (`uiText`) in the SPEC-04 `TextOpts` style; `opts =
+    /// [posX, posY, fontSize, colorRGBA, align, layer, alpha]`.
+    pub fn ui_text(&mut self, value: &str, opts: &[f64]) {
+        self.ui.text(value, opts);
     }
 
-    /// Draw a textured sprite (`uiSprite`); `bounds = [x, y, w, h]`.
-    pub fn ui_sprite(&mut self, texture: u64, bounds: &[f64]) {
-        self.ui.sprite(texture, bounds);
+    /// Draw a textured sprite (`uiSprite`) in the SPEC-04 `SpriteOpts` style;
+    /// `opts = [posX, posY, rotation, scaleX, scaleY, anchorX, anchorY, srcX, srcY,
+    /// srcW, srcH, tintRGBA, flipX, flipY, layer, alpha]`.
+    pub fn ui_sprite(&mut self, texture: u64, opts: &[f64]) {
+        self.ui.sprite(texture, opts);
     }
 
     /// Draw an immediate-mode button (`uiButton`); returns activation this frame.
@@ -350,16 +390,16 @@ mod wasm_exports {
             self.bridge.ui_rect(bounds, fill, stroke, stroke_w);
         }
 
-        /// Draw a run of text (`uiText`).
+        /// Draw a run of text (`uiText`) in the SPEC-04 `TextOpts` style.
         #[wasm_bindgen(js_name = uiText)]
-        pub fn ui_text(&mut self, value: String, pos: &[f64], color: u32, size: f64) {
-            self.bridge.ui_text(&value, pos, color, size);
+        pub fn ui_text(&mut self, value: String, opts: &[f64]) {
+            self.bridge.ui_text(&value, opts);
         }
 
-        /// Draw a textured sprite (`uiSprite`).
+        /// Draw a textured sprite (`uiSprite`) in the SPEC-04 `SpriteOpts` style.
         #[wasm_bindgen(js_name = uiSprite)]
-        pub fn ui_sprite(&mut self, texture: f64, bounds: &[f64]) {
-            self.bridge.ui_sprite(texture as u64, bounds);
+        pub fn ui_sprite(&mut self, texture: f64, opts: &[f64]) {
+            self.bridge.ui_sprite(texture as u64, opts);
         }
 
         /// Draw an immediate-mode button (`uiButton`); returns activation.
@@ -411,8 +451,14 @@ mod tests {
         let mut b = bridge();
         b.ui_begin_frame(&[320.0, 240.0], &[110.0, 60.0], pointer_pressed);
         b.ui_rect(&[0.0, 0.0, 320.0, 240.0], 0x1020_30ff, 0x0000_00ff, 1.0);
-        b.ui_text("hp", &[8.0, 8.0], 0xffff_ffff, 12.0);
-        b.ui_sprite(7, &[10.0, 10.0, 16.0, 16.0]);
+        // SPEC-04 `TextOpts`: pos (8,8), size 12, white, left-aligned, layer 0, opaque.
+        b.ui_text("hp", &[8.0, 8.0, 12.0, f64::from(0xffff_ffffu32), 0.0, 0.0, 1.0]);
+        // SPEC-04 `SpriteOpts`: pos (10,10), no rotation, unit scale, top-left anchor,
+        // 16×16 source, white tint, no flips, layer 0, opaque.
+        b.ui_sprite(
+            7,
+            &[10.0, 10.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 16.0, 16.0, f64::from(u32::MAX), 0.0, 0.0, 0.0, 1.0],
+        );
         // The button sits under the pointer (110,60), so it activates on a press edge.
         let activated = b.ui_button(&[100.0, 50.0, 40.0, 20.0], "ok", 0x00ff_00ff, 0x0, 2.0);
         (b.ui_draw_list(), activated)
@@ -436,6 +482,47 @@ mod tests {
         b.ui_begin_frame(&[320.0, 240.0], &[0.0, 0.0], false);
         assert_eq!(b.ui_viewport(), vec![320.0, 240.0]);
         assert!(b.ui_draw_list().is_empty());
+    }
+
+    #[test]
+    fn text_and_sprite_carry_the_full_spec04_styling_in_the_log() {
+        // SPEC-09 §4.2 / gap audit SPEC-09 finding #2: the text/sprite path must
+        // carry the full SPEC-04 styling, not a minimal opts that drops it. We
+        // prove each new styling field reaches the draw log by varying ONLY that
+        // field and observing the log bytes change (the old minimal opts dropped
+        // align/layer/alpha for text and rotation/anchor/tint/flip/source for
+        // sprite, so they could not have moved the bytes).
+        let text_log = |align: f64, layer: f64, alpha: f64| {
+            let mut b = bridge();
+            b.ui_begin_frame(&[320.0, 240.0], &[0.0, 0.0], false);
+            b.ui_text("hp", &[8.0, 8.0, 12.0, f64::from(0xffff_ffffu32), align, layer, alpha]);
+            b.ui_draw_list()
+        };
+        let text_baseline = text_log(0.0, 0.0, 1.0);
+        assert_ne!(text_log(2.0, 0.0, 1.0), text_baseline, "align carried");
+        assert_ne!(text_log(0.0, 3.0, 1.0), text_baseline, "layer carried");
+        assert_ne!(text_log(0.0, 0.0, 0.5), text_baseline, "alpha carried");
+
+        let sprite_log = |opts: &[f64]| {
+            let mut b = bridge();
+            b.ui_begin_frame(&[320.0, 240.0], &[0.0, 0.0], false);
+            b.ui_sprite(7, opts);
+            b.ui_draw_list()
+        };
+        // [posX, posY, rotation, scaleX, scaleY, anchorX, anchorY, srcX, srcY, srcW, srcH, tint, flipX, flipY, layer, alpha]
+        let base = [10.0, 10.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 16.0, 16.0, f64::from(u32::MAX), 0.0, 0.0, 0.0, 1.0];
+        let sprite_baseline = sprite_log(&base);
+        let varied = |idx: usize, value: f64| {
+            let mut o = base;
+            o[idx] = value;
+            sprite_log(&o)
+        };
+        assert_ne!(varied(2, 1.5), sprite_baseline, "rotation carried");
+        assert_ne!(varied(5, 0.5), sprite_baseline, "anchorX carried");
+        assert_ne!(varied(7, 4.0), sprite_baseline, "source carried");
+        assert_ne!(varied(11, f64::from(0x00ff_00ffu32)), sprite_baseline, "tint carried");
+        assert_ne!(varied(12, 1.0), sprite_baseline, "flipX carried");
+        assert_ne!(varied(14, 2.0), sprite_baseline, "layer carried");
     }
 
     #[test]

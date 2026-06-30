@@ -138,10 +138,12 @@ interface TileSpace {
 function tileSpace(origin: Vec2, cellSize: number): TileSpace;
 
 type Cell = { x: number; y: number };
-function gridPath(grid: Grid, start: Cell, goal: Cell, passable: (v: number) => boolean): Cell[] | null;
-function gridReachable(grid: Grid, start: Cell, goal: Cell, passable: (v: number) => boolean): boolean;
+// start/goal bundled into one `CellPair` so the queries stay within the SDK's 3-param lint cap.
+type CellPair = { start: Cell; goal: Cell };
+function gridPath(grid: Grid, ends: CellPair, passable: (v: number) => boolean): Cell[] | null;
+function gridReachable(grid: Grid, ends: CellPair, passable: (v: number) => boolean): boolean;
 function gridDistanceField(grid: Grid, start: Cell, passable: (v: number) => boolean): Grid<number>;
-function stepToward(grid: Grid, from: Cell, target: Cell, passable: (v: number) => boolean): Cell;
+function stepToward(grid: Grid, ends: CellPair, passable: (v: number) => boolean): Cell;
 ```
 
 `gridPath` returns `null` (not throw) when unreachable; the distance field reads

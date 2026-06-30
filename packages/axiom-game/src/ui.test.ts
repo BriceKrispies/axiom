@@ -21,8 +21,8 @@ test("makeUi forwards every verb to the bound host", () => {
 
   ui.beginFrame({ height: 240, width: 320 }, { x: 5, y: 6 }, true);
   ui.rect({ height: 4, width: 3, x: 1, y: 2 }, { fill: WHITE, stroke: BLACK, strokeWidth: 2 });
-  ui.text("score", { color: WHITE, size: 12, x: 8, y: 8 });
-  ui.sprite(7, { height: 16, width: 16, x: 10, y: 10 });
+  ui.text("score", { color: WHITE, font: { family: "monospace", size: 12 }, pos: { x: 8, y: 8 } });
+  ui.sprite(7, { pos: { x: 10, y: 10 } });
   // The pointer (5, 6) installed by beginFrame lies inside this button on its
   // press edge, so the fake's faithful hit-test reports it activated.
   const activated = ui.button({ height: 20, width: 40, x: 0, y: 0 }, "ok", { fill: WHITE });
@@ -33,14 +33,58 @@ test("makeUi forwards every verb to the bound host", () => {
   assert.deepEqual(host.uiRects, [
     { bounds: { height: 4, width: 3, x: 1, y: 2 }, style: { fill: WHITE, stroke: BLACK, strokeWidth: 2 } },
   ]);
-  assert.deepEqual(host.uiTexts, [{ opts: { color: WHITE, size: 12, x: 8, y: 8 }, value: "score" }]);
-  assert.deepEqual(host.uiSprites, [{ bounds: { height: 16, width: 16, x: 10, y: 10 }, texture: 7 }]);
+  // text/sprite carry the SPEC-04 `TextOpts`/`SpriteOpts` records, forwarded unchanged.
+  assert.deepEqual(host.uiTexts, [
+    { opts: { color: WHITE, font: { family: "monospace", size: 12 }, pos: { x: 8, y: 8 } }, value: "score" },
+  ]);
+  assert.deepEqual(host.uiSprites, [{ opts: { pos: { x: 10, y: 10 } }, texture: 7 }]);
   assert.deepEqual(host.uiButtons, [
     { bounds: { height: 20, width: 40, x: 0, y: 0 }, label: "ok", style: { fill: WHITE } },
   ]);
   assert.equal(activated, true);
-  assert.deepEqual(ui.viewport(), { height: 240, width: 320 });
+  // `viewport` is a readonly property (not a method): reading it returns this
+  // frame's installed viewport snapshot.
+  assert.deepEqual(ui.viewport, { height: 240, width: 320 });
   assert.deepEqual([...ui.drawList()], [1, 2, 3]);
+});
+
+// SPEC-09 §4.2 (~line 152): `Ui.text`/`Ui.sprite` reuse the full SPEC-04
+// `TextOpts`/`SpriteOpts` style records UNCHANGED — every styling field
+// (`font`/`align`/`layer`/`alpha` for text; `rotation`/`scale`/`anchor`/`tint`/
+// `flip`/`source`/`layer`/`alpha` for a sprite) reaches the bound host with no
+// field dropped, the contract author surface the gap audit (SPEC-09 finding #1/#2)
+// requires.
+test("text/sprite carry every SPEC-04 styling field through to the host, none dropped", () => {
+  const host = new FakeHost();
+  bindNative(host);
+  const ui = makeUi();
+
+  const textOpts = {
+    align: "center" as const,
+    alpha: 0.75,
+    color: WHITE,
+    font: { family: "serif", size: 18, weight: 700 },
+    layer: 3,
+    pos: { x: 4, y: 5 },
+  };
+  const spriteOpts = {
+    alpha: 0.5,
+    anchor: { x: 0.5, y: 0.5 },
+    flipX: true,
+    flipY: false,
+    layer: 2,
+    pos: { x: 10, y: 20 },
+    rotation: 1.5,
+    scale: { x: 2, y: 3 },
+    source: { height: 16, width: 8, x: 1, y: 2 },
+    tint: BLACK,
+  };
+  ui.text("hp", textOpts);
+  ui.sprite(9, spriteOpts);
+
+  // The full records arrive at the host verbatim — the path is lossless.
+  assert.deepEqual(host.uiTexts, [{ opts: textOpts, value: "hp" }]);
+  assert.deepEqual(host.uiSprites, [{ opts: spriteOpts, texture: 9 }]);
 });
 
 test("button with no style supplies the default transparent-fill style (the orElse default)", () => {

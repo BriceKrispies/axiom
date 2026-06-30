@@ -34,8 +34,10 @@ All 11 games need a loop and an outcome seam. None of them should write it.
   + `fixed_step_nanos`). Per the §4.1 refinement it is **integer-pure** — it does
   not carry `alpha: Ratio`; the presentation boundary computes the `0..1`
   fraction from `remainder_nanos / fixed_step_nanos` itself.
-- **One genuine gap remains:** the `Rect` core value-type (§5) is still absent
-  from the shipped value vocabulary — every other §0–§2 piece is now in place.
+- **The full §0–§2 value vocabulary is shipped**, including the `Rect` core
+  value-type (`packages/axiom-game/src/vocabulary.ts`, exported from `index.ts`).
+  Its fields are `width`/`height` (the contract §0.2 spelling, reconciled
+  2026-06-30 from the earlier `w`/`h` to match the shipped, tested code).
 
 ## 3. Architectural placement
 

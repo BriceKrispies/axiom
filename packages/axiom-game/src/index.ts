@@ -73,7 +73,7 @@ export type { Cameras, SceneFactories, Sound } from "./scene.ts";
 // SPEC-09 — the screen-space UI / HUD authoring surface + the flex layout solver.
 export { makeUi } from "./ui.ts";
 export type { Ui } from "./ui.ts";
-export type { UiBridge, UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
+export type { UiBridge, UiStyle, UiViewport } from "./ui-binding.ts";
 export { solveLayout } from "./ui-layout.ts";
 export type { LayoutNode } from "./ui-layout.ts";
 
@@ -112,7 +112,10 @@ export type {
   Draw2dBridge,
   EllipseRadii,
   EmitterConfig,
+  GradientStop,
   LineStyle,
+  Paint,
+  PathStyle,
   ShapeStyle,
   SpriteAnimation,
   SpriteOpts,

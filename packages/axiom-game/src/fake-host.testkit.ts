@@ -2,8 +2,8 @@
 // the math / host-bridge / bindAction free-function tests. Kept in its own file
 // so each fake is one class (max-classes-per-file).
 
-import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation, SpriteOpts, TextMetrics, TextOpts } from "./draw2d-binding.ts";
-import type { UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
+import type { EllipseRadii, EmitterConfig, GradientStop, LineStyle, Paint, PathStyle, ShapeStyle, SpriteAnimation, SpriteOpts, TextMetrics, TextOpts } from "./draw2d-binding.ts";
+import type { UiStyle, UiViewport } from "./ui-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -83,6 +83,9 @@ export class FakeHost implements HostBridge {
   public draw2dCircles: { center: Vec2; radius: number; style: ShapeStyle }[] = [];
   public draw2dEllipses: { center: Vec2; radii: EllipseRadii; style: ShapeStyle }[] = [];
   public draw2dLines: { from: Vec2; to: Vec2; style: LineStyle }[] = [];
+  public draw2dPaths: { points: readonly Vec2[]; style: PathStyle }[] = [];
+  public draw2dLinearGradients: { from: Vec2; to: Vec2; stops: readonly GradientStop[] }[] = [];
+  public draw2dRadialGradients: { center: Vec2; radius: number; stops: readonly GradientStop[] }[] = [];
   public draw2dEmitters: EmitterConfig[] = [];
   public draw2dEmits: { id: Handle; at: Vec2; direction: Vec2 }[] = [];
   public draw2dAdvances: number[] = [];
@@ -104,8 +107,8 @@ export class FakeHost implements HostBridge {
   // --- UI surface (SPEC-09): records the marshalled calls; scriptable button/viewport/draw-list/layout returns ---
   public uiBeginFrames: { viewport: UiViewport; pointer: Vec2; pressed: boolean }[] = [];
   public uiRects: { bounds: Rect; style: UiStyle }[] = [];
-  public uiTexts: { value: string; opts: UiTextOpts }[] = [];
-  public uiSprites: { texture: Handle; bounds: Rect }[] = [];
+  public uiTexts: { value: string; opts: TextOpts }[] = [];
+  public uiSprites: { texture: Handle; opts: SpriteOpts }[] = [];
   public uiButtons: { bounds: Rect; label: string; style: UiStyle }[] = [];
   public uiViewportReturn: UiViewport = { height: 0, width: 0 };
   public uiDrawListReturn: Uint8Array = new Uint8Array();
@@ -477,6 +480,20 @@ export class FakeHost implements HostBridge {
     this.draw2dLines.push({ from, style, to });
   }
 
+  public draw2dPath(points: readonly Vec2[], style: PathStyle): void {
+    this.draw2dPaths.push({ points, style });
+  }
+
+  public draw2dLinearGradient(from: Vec2, to: Vec2, stops: readonly GradientStop[]): Paint {
+    this.draw2dLinearGradients.push({ from, stops, to });
+    return this.mint();
+  }
+
+  public draw2dRadialGradient(center: Vec2, radius: number, stops: readonly GradientStop[]): Paint {
+    this.draw2dRadialGradients.push({ center, radius, stops });
+    return this.mint();
+  }
+
   public draw2dCreateEmitter(config: EmitterConfig): Handle {
     this.draw2dEmitters.push(config);
     return this.mint();
@@ -557,12 +574,12 @@ export class FakeHost implements HostBridge {
     this.uiRects.push({ bounds, style });
   }
 
-  public uiText(value: string, opts: UiTextOpts): void {
+  public uiText(value: string, opts: TextOpts): void {
     this.uiTexts.push({ opts, value });
   }
 
-  public uiSprite(texture: Handle, bounds: Rect): void {
-    this.uiSprites.push({ bounds, texture });
+  public uiSprite(texture: Handle, opts: SpriteOpts): void {
+    this.uiSprites.push({ opts, texture });
   }
 
   // Faithfully model the native `UiSurface::button` truth table: a button is

@@ -82,7 +82,7 @@ type Handle   = number;          // opaque resource handle (texture, sound, mesh
 
 interface Vec2 { x: number; y: number }
 interface Vec3 { x: number; y: number; z: number }
-interface Rect { x: number; y: number; w: number; h: number }
+interface Rect { x: number; y: number; width: number; height: number }
 interface Rgba { r: number; g: number; b: number; a: number }   // each 0..1
 
 type Result<T> = T | null;       // null is a normal "absent/failed" outcome, never an exception
@@ -146,6 +146,7 @@ interface Sim {
   readonly rng: Rng;        // §3
   readonly input: Input;    // §8 (already sampled into per-tick intents)
   readonly world: World;    // §4
+  readonly time: Time;      // §9 timers + tick-driven state machines
 }
 ```
 
@@ -214,7 +215,7 @@ its parent's. Moving a parent moves its children rigidly — groups, attached pa
 ```ts
 interface World {
   // …§4 above…
-  setParent(child: Entity, parent: Entity | null): void;   // null detaches to the root
+  setParent(child: Entity, parent?: Entity): void;         // omitted parent detaches to the root (the SDK's no-null lint law)
   parentOf(e: Entity): Result<Entity>;
   childrenOf(e: Entity): Entity[];
   worldTransform(e: Entity): Transform;     // resolved (composed) transform for this tick
@@ -298,21 +299,24 @@ Operates over a `Grid`; `passable(value)` decides traversability.
 
 ```ts
 type Cell = { x: number; y: number };
+// Path endpoints bundled into one record: the SDK's lint law caps a function at
+// 3 params, so the start/goal pair travels as a single `CellPair` argument.
+type CellPair = { start: Cell; goal: Cell };
 
 // Shortest path start→goal over 4-connectivity, or null if unreachable.
-function gridPath(grid: Grid, start: Cell, goal: Cell,
+function gridPath(grid: Grid, ends: CellPair,
                   passable: (v: number) => boolean): Result<Cell[]>;
 
 // Whether any path exists.
-function gridReachable(grid: Grid, start: Cell, goal: Cell,
+function gridReachable(grid: Grid, ends: CellPair,
                        passable: (v: number) => boolean): boolean;
 
 // BFS distance from `start` to every cell (Infinity where unreachable).
 function gridDistanceField(grid: Grid, start: Cell,
                            passable: (v: number) => boolean): Grid<number>;
 
-// One greedy step from `from` toward `target` minimizing a cost (Euclidean by default).
-function stepToward(grid: Grid, from: Cell, target: Cell,
+// One greedy step from the pair's `start` toward its `goal`, minimizing a cost (Euclidean by default).
+function stepToward(grid: Grid, ends: CellPair,
                     passable: (v: number) => boolean): Cell;
 ```
 
@@ -357,10 +361,13 @@ All tick-based, deterministic. **No wall-clock timers in the simulation.**
 ```ts
 type TimerId = Handle;
 
-interface Timers {
+// The timer + state-machine factory, reached at `Sim.time`.
+interface Time {
   after(ticks: Ticks, cb: () => void): TimerId;     // one-shot
   every(ticks: Ticks, cb: () => void): TimerId;     // repeating
   cancel(id: TimerId): void;
+  // Mint a tick-driven state machine from an ORDERED list of states + the initial.
+  createMachine<S extends string>(states: readonly StateNode<S>[], initial: S): StateMachine<S>;
 }
 
 // Finite state machine for per-entity or per-game state (poses, AI modes, round phases).
@@ -369,13 +376,16 @@ interface StateMachine<S extends string> {
   readonly ticksInState: Ticks;
   transition(to: S): void;
 }
-interface StateDef<S extends string> {
+// One declared state: its `name` plus optional lifecycle closures. States are an
+// ORDERED `StateNode[]` (not `Record<S, StateDef>`) so the name list is genuinely
+// typed `S[]` (`states.map(n => n.name)`) — avoiding the `Object.keys(...) as S[]`
+// downcast the SDK's lint law forbids; declaration order is the dense index order.
+interface StateNode<S extends string> {
+  name: S;
   onEnter?: (sm: StateMachine<S>) => void;
   onUpdate?: (sm: StateMachine<S>) => void;          // called each tick while active
   onExit?: (sm: StateMachine<S>) => void;
 }
-function createStateMachine<S extends string>(
-  states: Record<S, StateDef<S>>, initial: S): StateMachine<S>;
 ```
 
 Entity lifecycle is `world.spawn`/`world.despawn` (§4). The engine is responsible for pooling;

@@ -10,8 +10,8 @@ test("the inert UNBOUND_UI surface makes every draw a safe no-op", () => {
   assert.doesNotThrow(() => {
     UNBOUND_UI.uiBeginFrame({ height: 1, width: 1 }, { x: 0, y: 0 }, false);
     UNBOUND_UI.uiRect({ height: 1, width: 1, x: 0, y: 0 }, { fill: WHITE });
-    UNBOUND_UI.uiText("hp", { color: WHITE, size: 1, x: 0, y: 0 });
-    UNBOUND_UI.uiSprite(0, { height: 1, width: 1, x: 0, y: 0 });
+    UNBOUND_UI.uiText("hp", { color: WHITE, font: { family: "monospace", size: 1 }, pos: { x: 0, y: 0 } });
+    UNBOUND_UI.uiSprite(0, { pos: { x: 0, y: 0 } });
   });
 });
 

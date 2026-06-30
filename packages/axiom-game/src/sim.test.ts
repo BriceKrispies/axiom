@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { type SimContext, makeFrame, makeSim } from "./sim.ts";
-import type { EmitterConfig, LineStyle, ShapeStyle, SpriteOpts, TextOpts } from "./draw2d-binding.ts";
+import type { EmitterConfig, GradientStop, LineStyle, PathStyle, ShapeStyle, SpriteOpts, TextOpts } from "./draw2d-binding.ts";
 import { FakeBridge } from "./fake-bridge.testkit.ts";
 import { FakeHost } from "./fake-host.testkit.ts";
 import { ROOT_STREAM } from "./rng.ts";
@@ -139,6 +139,29 @@ test("makeFrame presents the latest tick and forwards every draw verb to the bou
   assert.deepEqual(host.draw2dEmitters, [emitterConfig]);
   assert.deepEqual(host.draw2dEmits, [{ at: { x: 1, y: 1 }, direction: { x: 0, y: 1 }, id: emitter }]);
   assert.deepEqual(host.draw2dAdvances, [0.016]);
+});
+
+test("makeFrame forwards path + gradient verbs to the bound host", () => {
+  const host = new FakeHost();
+  bindNative(host);
+  const frame = makeFrame(9);
+
+  const pathStyle: PathStyle = { closed: true, fill: [0, 0, 1, 1] };
+  const stops: readonly GradientStop[] = [
+    { color: [0, 0, 0, 1], offset: 0 },
+    { color: [1, 1, 1, 1], offset: 1 },
+  ];
+  const points = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }];
+
+  frame.path(points, pathStyle);
+  const lin = frame.linearGradient({ x: 0, y: 0 }, { x: 4, y: 0 }, stops);
+  const rad = frame.radialGradient({ x: 2, y: 2 }, 3, stops);
+
+  assert.deepEqual(host.draw2dPaths, [{ points, style: pathStyle }]);
+  assert.deepEqual(host.draw2dLinearGradients, [{ from: { x: 0, y: 0 }, stops, to: { x: 4, y: 0 } }]);
+  assert.deepEqual(host.draw2dRadialGradients, [{ center: { x: 2, y: 2 }, radius: 3, stops }]);
+  // Each registered paint returns a distinct, non-zero handle from the bound host.
+  assert.notEqual(lin, rad);
 });
 
 test("makeFrame forwards sprite / text / measureText to the bound host", () => {

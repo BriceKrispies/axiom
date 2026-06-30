@@ -136,10 +136,12 @@ invocations TS-side. No closure is stored in `sim` state.
 ```ts
 type TimerId = Handle;
 
-interface Timers {
+// The timer + state-machine factory, reached at `Sim.time` (`makeTime`).
+interface Time {
   after(ticks: Ticks, cb: () => void): TimerId;     // one-shot
   every(ticks: Ticks, cb: () => void): TimerId;     // repeating
   cancel(id: TimerId): void;
+  createMachine<S extends string>(states: readonly StateNode<S>[], initial: S): StateMachine<S>;
 }
 
 interface StateMachine<S extends string> {
@@ -147,17 +149,20 @@ interface StateMachine<S extends string> {
   readonly ticksInState: Ticks;
   transition(to: S): void;
 }
-interface StateDef<S extends string> {
+// States are an ORDERED `StateNode[]` (carrying `name`) rather than the original
+// `Record<S, StateDef>`, so the name list is genuinely typed `S[]` with no
+// `Object.keys(...) as S[]` downcast — the unsafe assertion the SDK's lint law
+// forbids. Declaration order is the dense index order the native core uses.
+interface StateNode<S extends string> {
+  name: S;
   onEnter?: (sm: StateMachine<S>) => void;
   onUpdate?: (sm: StateMachine<S>) => void;          // each tick while active
   onExit?: (sm: StateMachine<S>) => void;
 }
-function createStateMachine<S extends string>(
-  states: Record<S, StateDef<S>>, initial: S): StateMachine<S>;
 ```
 
-`createStateMachine` maps the author's string states to dense indices by
-declaration order (deterministic); `Sim.timers`/the machine handle are minted by
+`Sim.time.createMachine` maps the author's string states to dense indices by
+declaration order (deterministic); `Sim.time`/the machine handle are minted by
 the runtime app and reach back into the native `TickApi`. The closures stay in
 the TS layer and are re-bound on replay (like handles, SPEC-00 §9).
 

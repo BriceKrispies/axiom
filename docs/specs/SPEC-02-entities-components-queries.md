@@ -147,7 +147,7 @@ interface World {
   query(...kinds: ComponentKind[]): Entity[];                // entities having all kinds, stable order
 
   // §4.1 hierarchy
-  setParent(child: Entity, parent: Entity | null): void;     // null detaches to the root
+  setParent(child: Entity, parent?: Entity): void;           // omitted parent detaches to the root (the SDK's no-null lint law)
   parentOf(e: Entity): Result<Entity>;
   childrenOf(e: Entity): Entity[];
   worldTransform(e: Entity): Transform;                      // resolved (composed) for this tick

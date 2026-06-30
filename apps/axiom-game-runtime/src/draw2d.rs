@@ -26,8 +26,8 @@
 
 use axiom_draw2d::{Draw2dApi, EmitterConfig, EmitterId, Range, SpriteAnimation};
 use axiom_host::{
-    Common2d, Draw2dCommand, Fill2d, Rect, RenderTargetId, Rgba, SpriteDraw2d, Stroke2d, TextAlign,
-    TextDraw2d, TextureId,
+    Common2d, Draw2dCommand, Fill2d, GradientStop, Rect, RenderTargetId, Rgba, SpriteDraw2d,
+    Stroke2d, TextAlign, TextDraw2d, TextureId,
 };
 use axiom_kernel::{Meters, Radians, Ratio, Seconds};
 use axiom_math::{Mat3, Vec2};
@@ -65,6 +65,27 @@ fn styled_fill(fill: u32, stroke: u32, stroke_width: f64) -> Fill2d {
 /// A `Vec2` from a 2-element boundary slice (missing entries read `0`).
 fn vec2(s: &[f64]) -> Vec2 {
     Vec2::new(at(s, 0) as f32, at(s, 1) as f32)
+}
+
+/// The flat vertex slice `[x0, y0, x1, y1, …]` of a path as a `Vec<Vec2>`; a
+/// trailing partial pair (odd length) is dropped, the same `chunks_exact`
+/// convention the flip-book frame slice uses.
+fn path_points(points: &[f64]) -> Vec<Vec2> {
+    points
+        .chunks_exact(2)
+        .map(|p| Vec2::new(p[0] as f32, p[1] as f32))
+        .collect()
+}
+
+/// The flat gradient-stop slice `[offset0, colorRGBA0, offset1, colorRGBA1, …]`
+/// (two scalars per stop — an `offset` in `[0, 1]` and a packed `0xRRGGBBAA`
+/// colour) as the host [`GradientStop`] list a paint registers. A trailing
+/// partial pair (odd length) is dropped.
+fn gradient_stops(stops: &[f64]) -> Vec<GradientStop> {
+    stops
+        .chunks_exact(2)
+        .map(|s| GradientStop::new(Ratio::finite_or_zero(s[0] as f32), rgba(s[1] as u32)))
+        .collect()
 }
 
 /// An [`Rgba`] from a packed `0xRRGGBBAA` value (each channel `0..1`).
@@ -229,6 +250,41 @@ impl GameBridge {
             .line(vec2(a), vec2(b), rgba(color), meters(width), common(layer, alpha));
     }
 
+    /// Draw a filled / stroked polyline / polygon (`draw2dPath`); `points` is the
+    /// flat `[x0, y0, x1, y1, …]` vertex slice and `closed` joins the last vertex
+    /// back to the first (a polygon). The fill / stroke / layer / alpha columns
+    /// mirror [`Self::draw2d_rect`] exactly.
+    pub fn draw2d_path(&mut self, points: &[f64], fill: u32, stroke: u32, stroke_width: f64, closed: bool, layer: i32, alpha: f64) {
+        self.draw2d.path(
+            &path_points(points),
+            styled_fill(fill, stroke, stroke_width),
+            common(layer, alpha),
+            closed,
+        );
+    }
+
+    /// Register a linear gradient paint (`draw2dLinearGradient`), returning its raw
+    /// `PaintId`; `from = [x, y]` and `to = [x, y]` are the gradient axis endpoints
+    /// and `stops` the flat [`gradient_stops`] slice. A shape fills with the
+    /// returned id (a paint is referenced by id, never inlined).
+    pub fn draw2d_linear_gradient(&mut self, from: &[f64], to: &[f64], stops: &[f64]) -> u64 {
+        u64::from(
+            self.draw2d
+                .linear_gradient(vec2(from), vec2(to), &gradient_stops(stops))
+                .raw(),
+        )
+    }
+
+    /// Register a radial gradient paint (`draw2dRadialGradient`), returning its raw
+    /// `PaintId`; `center = [x, y]` and `radius` is a surface-unit scalar.
+    pub fn draw2d_radial_gradient(&mut self, center: &[f64], radius: f64, stops: &[f64]) -> u64 {
+        u64::from(
+            self.draw2d
+                .radial_gradient(vec2(center), meters(radius), &gradient_stops(stops))
+                .raw(),
+        )
+    }
+
     /// Sample a flip-book animation (`draw2dSampleAnimation`, §10.2). `frames`
     /// arrives flattened as `[x, y, w, h, …]` (one `Rect` per 4 scalars), `fps` is
     /// the integer frame rate, `elapsed` the presentation seconds, and `looping`
@@ -342,7 +398,9 @@ impl GameBridge {
     ///   glyphCount]` — the glyphs lay out left-to-right from the baked transform's
     ///   origin, each sampling its atlas sub-rect; `atlasTexId` is the reserved
     ///   font-atlas handle the harness bakes.
-    /// - other kinds (path): `len = 0` — ordering kept, geometry not yet flattened.
+    /// - `PATH`     (5): `[fillRGBA, strokeRGBA, strokeWidth, alpha, closed,
+    ///   pointCount, (x, y) × pointCount]` — `closed` is `0`/`1` (a closed path is
+    ///   a polygon); the vertices are in the surface's own units.
     ///
     /// Resets the per-frame surface for the next frame (particles persist). The
     /// `(kind, layer, submission)` prefix preserves the deterministic ordering the
@@ -456,6 +514,21 @@ impl GameBridge {
                     });
                     payload
                 }
+                Draw2dCommand::KIND_PATH => {
+                    let (points, closed) = cmd.as_path().expect("a PATH command carries path geometry");
+                    let mut payload = vec![
+                        style[0],
+                        style[1],
+                        style[2],
+                        alpha,
+                        f64::from(u8::from(closed)),
+                        points.len() as f64,
+                    ];
+                    points.iter().for_each(|p| {
+                        payload.extend_from_slice(&[f64::from(p.x), f64::from(p.y)]);
+                    });
+                    payload
+                }
                 _ => Vec::new(),
             };
             out.push(f64::from(cmd.kind_code()));
@@ -555,6 +628,24 @@ mod wasm_exports {
         #[wasm_bindgen(js_name = draw2dLine)]
         pub fn draw2d_line(&mut self, a: &[f64], b: &[f64], color: u32, width: f64, layer: i32, alpha: f64) {
             self.bridge.draw2d_line(a, b, color, width, layer, alpha);
+        }
+
+        /// Draw a filled / stroked polyline / polygon (`draw2dPath`).
+        #[wasm_bindgen(js_name = draw2dPath)]
+        pub fn draw2d_path(&mut self, points: &[f64], fill: u32, stroke: u32, stroke_width: f64, closed: bool, layer: i32, alpha: f64) {
+            self.bridge.draw2d_path(points, fill, stroke, stroke_width, closed, layer, alpha);
+        }
+
+        /// Register a linear gradient paint (`draw2dLinearGradient`).
+        #[wasm_bindgen(js_name = draw2dLinearGradient)]
+        pub fn draw2d_linear_gradient(&mut self, from: &[f64], to: &[f64], stops: &[f64]) -> f64 {
+            self.bridge.draw2d_linear_gradient(from, to, stops) as f64
+        }
+
+        /// Register a radial gradient paint (`draw2dRadialGradient`).
+        #[wasm_bindgen(js_name = draw2dRadialGradient)]
+        pub fn draw2d_radial_gradient(&mut self, center: &[f64], radius: f64, stops: &[f64]) -> f64 {
+            self.bridge.draw2d_radial_gradient(center, radius, stops) as f64
         }
 
         /// Sample a flip-book animation (`draw2dSampleAnimation`, §10.2).
@@ -785,6 +876,44 @@ mod tests {
         // 'H' (code 72) is atlas cell 40 → column 8, row 2 → source (64, 32, 8, 16),
         // advance 8 (= size · 0.5).
         assert_eq!(&p[12..17], &[64.0, 32.0, 8.0, 16.0, 8.0]);
+    }
+
+    #[test]
+    fn path_records_its_geometry_and_gradients_mint_distinct_paint_ids() {
+        let mut b = bridge();
+        // Two gradients register into the per-frame paint table, minting distinct,
+        // zero-based paint ids (the handle a shape fills with).
+        let lin = b.draw2d_linear_gradient(&[0.0, 0.0], &[10.0, 0.0], &[0.0, f64::from(u32::MAX), 1.0, 0.0]);
+        let rad = b.draw2d_radial_gradient(&[5.0, 5.0], 4.0, &[0.0, f64::from(u32::MAX)]);
+        assert_eq!(lin, 0);
+        assert_eq!(rad, 1);
+        // A closed, red-filled, blue-stroked triangle path on layer 2.
+        b.draw2d_path(&[0.0, 0.0, 4.0, 0.0, 2.0, 3.0], 0xff00_00ff, 0x0000_ffff, 1.5, true, 2, 1.0);
+        let recs = records(&b.draw2d_finish());
+        // A gradient is not a draw command (it only registers a paint), so the main
+        // list holds exactly the one path command.
+        assert_eq!(recs.len(), 1);
+        let (kind, layer, p) = &recs[0];
+        assert_eq!(*kind, Draw2dCommand::KIND_PATH);
+        assert_eq!(*layer, 2);
+        // PATH: [fillRGBA, strokeRGBA, strokeWidth, alpha, closed, pointCount, (x, y)…].
+        assert_eq!(
+            *p,
+            vec![
+                f64::from(0xff00_00ffu32),
+                f64::from(0x0000_ffffu32),
+                1.5,
+                1.0,
+                1.0,
+                3.0,
+                0.0,
+                0.0,
+                4.0,
+                0.0,
+                2.0,
+                3.0,
+            ]
+        );
     }
 
     #[test]

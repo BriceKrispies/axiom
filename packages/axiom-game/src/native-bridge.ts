@@ -88,8 +88,8 @@ export interface NativeBridge {
   readonly worldHas: (entity: Entity, kind: ComponentKind) => boolean;
   /** Remove `entity`'s component of `kind` (a stale handle / absent component is a clean no-op). */
   readonly worldRemove: (entity: Entity, kind: ComponentKind) => void;
-  /** Re-parent `child` under `parent` (a self-parent / cycle / stale handle is a clean no-op). */
-  readonly worldSetParent: (child: Entity, parent: Entity) => void;
+  /** Re-parent `child` under `parent`, or detach it to the root when `parent` is omitted (a self-parent / cycle / stale handle is a clean no-op). */
+  readonly worldSetParent: (child: Entity, parent?: Entity) => void;
   /** `entity`'s parent, or the empty value at a root / on a stale handle. */
   readonly worldParentOf: (entity: Entity) => Result<Entity>;
   /** `entity`'s resolved (composed) world transform for this tick, or the empty value on a stale handle. */

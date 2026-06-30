@@ -78,6 +78,43 @@ mod tests {
     }
 
     #[test]
+    fn golden_unit_first_value_is_stable() {
+        // Pinned first `unit()` draw from the same (seed, address, version) tuple as
+        // `golden_first_value_is_stable`: any change to the unit-narrowing of a draw
+        // (the `>> 40` over `2^24`) is caught here.
+        assert_eq!(
+            EntropyApi::stream(7, &addr(&[1, 2]), 3).unit().get(),
+            0.071_215_75
+        );
+    }
+
+    #[test]
+    fn golden_int_first_value_is_stable() {
+        // Pinned first `int(1000)` draw from the same tuple: any change to the bounded
+        // reduction is caught here.
+        assert_eq!(EntropyApi::stream(7, &addr(&[1, 2]), 3).int(1000), 71);
+    }
+
+    #[test]
+    fn golden_weighted_index_first_value_is_stable() {
+        // Pinned first `weighted_index([1, 2, 3, 4])` draw from the same tuple: any
+        // change to the cumulative-weight selection is caught here.
+        assert_eq!(
+            EntropyApi::stream(7, &addr(&[1, 2]), 3).weighted_index(&[1, 2, 3, 4]),
+            0
+        );
+    }
+
+    #[test]
+    fn golden_shuffle_ordering_is_stable() {
+        // Pinned shuffled ordering of `0..8` from the same tuple: any change to the
+        // Fisher-Yates draw sequence is caught here.
+        let mut items: Vec<u32> = (0..8).collect();
+        EntropyApi::stream(7, &addr(&[1, 2]), 3).shuffle(&mut items);
+        assert_eq!(items, vec![4, 7, 3, 1, 6, 2, 5, 0]);
+    }
+
+    #[test]
     fn keying_is_collision_free_over_a_swept_domain() {
         // 125 distinct (seed, address, version) tuples -> 125 distinct stream keys.
         let mut keys = HashSet::new();

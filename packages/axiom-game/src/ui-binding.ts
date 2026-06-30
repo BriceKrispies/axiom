@@ -20,10 +20,18 @@
  * `layer`/`alpha` model SPEC-09's `Common`, but the Wave-2 `uiRect`/`uiButton` exports
  * carry only `fill`/`stroke`/`strokeWidth`, so `layer`/`alpha` are dropped at the edge
  * (a documented partial of the kind `wasm-host.ts` records for each host group).
+ *
+ * `uiText`/`uiSprite` carry the SPEC-04 `TextOpts`/`SpriteOpts` style records
+ * (`draw2d-binding.ts`) **unchanged** (SPEC-09 §4.2: the screen-space verbs are the
+ * 2D surface's variants, so they reuse its full styling — `font`/`align` for text;
+ * `rotation`/`scale`/`anchor`/`tint`/`flip`/`source` for a sprite). The app
+ * (`apps/axiom-game-runtime/src/ui.rs`) translates them onto the native
+ * `UiFill`/`UiTextOpts`, exactly as SPEC-04's `draw2dText`/`draw2dSprite` do — one
+ * deterministic boundary encoding, never a parallel minimal UI-local opts type.
  */
 
-import type { Handle, Rect, Rgba, Vec2 } from "./vocabulary.ts";
-import type { ShapeStyle } from "./draw2d-binding.ts";
+import type { Rect, Rgba, TextureId, Vec2 } from "./vocabulary.ts";
+import type { ShapeStyle, SpriteOpts, TextOpts } from "./draw2d-binding.ts";
 
 /** The logical screen-space viewport (SPEC-09 §5 `UiViewport`), fed per frame. */
 export interface UiViewport {
@@ -47,28 +55,16 @@ export interface UiStyle extends ShapeStyle {
   readonly strokeWidth?: number;
 }
 
-/** Text-run options (SPEC-09 §4.2 `TextOpts`): screen position, fill colour, and pixel size. */
-export interface UiTextOpts {
-  /** The text origin x (screen space, top-left origin, +y down). */
-  readonly x: number;
-  /** The text origin y. */
-  readonly y: number;
-  /** The fill colour. */
-  readonly color: Rgba;
-  /** The text size in logical pixels. */
-  readonly size: number;
-}
-
 /** The screen-space UI channel (SPEC-09 §4.2): immediate-mode draws + the flex solver. */
 export interface UiBridge {
   /** Install this frame's `viewport` + `pointer` snapshot and clear the draw log (`uiBeginFrame`). */
   readonly uiBeginFrame: (viewport: UiViewport, pointer: Vec2, pressed: boolean) => void;
   /** Draw a filled/stroked rectangle (`uiRect`). */
   readonly uiRect: (bounds: Rect, style: UiStyle) => void;
-  /** Draw a run of text (`uiText`). */
-  readonly uiText: (value: string, opts: UiTextOpts) => void;
-  /** Draw a textured sprite over `bounds` (`uiSprite`). */
-  readonly uiSprite: (texture: Handle, bounds: Rect) => void;
+  /** Draw a run of text in the SPEC-04 `TextOpts` style (`uiText`). */
+  readonly uiText: (value: string, opts: TextOpts) => void;
+  /** Draw a textured sprite in the SPEC-04 `SpriteOpts` style (`uiSprite`). */
+  readonly uiSprite: (texture: TextureId, opts: SpriteOpts) => void;
   /** Draw an immediate-mode button; return whether it activated this frame (`uiButton`). */
   readonly uiButton: (bounds: Rect, label: string, style: UiStyle) => boolean;
   /** This frame's installed viewport (`uiViewport`). */

@@ -71,7 +71,7 @@ import {
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
 import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, TextureId, Transform, Vec2, Vec3 } from "./vocabulary.ts";
-import { type EllipseRadii, type EmitterConfig, type LineStyle, type ShapeStyle, type SpriteAnimation, type SpriteOpts, type TextMetrics, type TextOpts, rangeOf } from "./draw2d-binding.ts";
+import { type EllipseRadii, type EmitterConfig, type GradientStop, type LineStyle, type Paint, type PathStyle, type ShapeStyle, type SpriteAnimation, type SpriteOpts, type TextMetrics, type TextOpts, rangeOf } from "./draw2d-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -81,7 +81,7 @@ import type {
   SoundOptions,
   ToneSpec,
 } from "./host-binding.ts";
-import type { UiBridge, UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
+import type { UiBridge, UiStyle, UiViewport } from "./ui-binding.ts";
 import { orElse, pick } from "./control-flow.ts";
 import { seedFromHalves } from "./seed-codec.ts";
 
@@ -173,6 +173,9 @@ export interface WasmHostExport {
   readonly draw2dCircle: (center: Float64Array, radius: number, fill: number, stroke: number, strokeWidth: number, layer: number, alpha: number) => void;
   readonly draw2dEllipse: (geom: Float64Array, fill: number, stroke: number, strokeWidth: number, layer: number, alpha: number) => void;
   readonly draw2dLine: (from: Float64Array, to: Float64Array, color: number, width: number, layer: number, alpha: number) => void;
+  readonly draw2dPath: (points: Float64Array, fill: number, stroke: number, strokeWidth: number, closed: boolean, layer: number, alpha: number) => void;
+  readonly draw2dLinearGradient: (from: Float64Array, to: Float64Array, stops: Float64Array) => number;
+  readonly draw2dRadialGradient: (center: Float64Array, radius: number, stops: Float64Array) => number;
   readonly draw2dCreateEmitter: (config: Float64Array) => number;
   readonly draw2dEmit: (id: number, at: Float64Array, direction: Float64Array) => void;
   readonly draw2dAdvanceParticles: (dt: number) => void;
@@ -268,8 +271,8 @@ export interface WasmHostExport {
    */
   readonly uiBeginFrame: (viewport: Float64Array, pointer: Float64Array, pressed: boolean) => void;
   readonly uiRect: (bounds: Float64Array, fill: number, stroke: number, strokeWidth: number) => void;
-  readonly uiText: (value: string, pos: Float64Array, color: number, size: number) => void;
-  readonly uiSprite: (texture: number, bounds: Float64Array) => void;
+  readonly uiText: (value: string, opts: Float64Array) => void;
+  readonly uiSprite: (texture: number, opts: Float64Array) => void;
   readonly uiButton: (bounds: Float64Array, label: string, fill: number, stroke: number, sw: number) => boolean;
   readonly uiViewport: () => Float64Array;
   readonly uiDrawList: () => Uint8Array;
@@ -557,6 +560,10 @@ const byteOf = (channel: number): number => Math.round(channel * CHANNEL_MAX);
 const packRgba = (color: Rgba): number =>
   [...color].reduce((packed, channel, index): number => packed + byteOf(channel) * pick(RGBA_SCALES, index), 0);
 
+/** Flatten a gradient's stops to the boundary `[offset0, colorRGBA0, offset1, colorRGBA1, …]` slice — two scalars per stop (an `offset` plus the packed `0xRRGGBBAA` colour). */
+const packStops = (stops: readonly GradientStop[]): Float64Array =>
+  Float64Array.from(stops.flatMap((stop): readonly number[] => [stop.offset, packRgba(stop.color)]));
+
 /*
  * Flatten an `EmitterConfig` to the boundary `[count, lifetimeMin, lifetimeMax,
  * speedMin, speedMax, spread, gravityX, gravityY, sizeMin, sizeMax, colorStart,
@@ -622,10 +629,10 @@ const packTextOpts = (opts: TextOpts): Float64Array =>
 /** The default radians an ellipse's omitted `rotation` resolves to (axis-aligned). */
 const NO_ROTATION = 0;
 
-/** The 2D shape `HostBridge` ops (SPEC-04 §10): camera + the filled/stroked shapes + the self-coloured line, every one packing its colours to `0xRRGGBBAA` and defaulting `stroke`/`strokeWidth`/`layer`/`alpha` host-side. */
-const draw2dShapeBridge = (game: WasmHostExport): Pick<
+/** The closed-shape 2D `HostBridge` ops (SPEC-04 §10): the camera plus the filled/stroked rect/circle/ellipse, every one packing its colours to `0xRRGGBBAA` and defaulting `stroke`/`strokeWidth`/`layer`/`alpha` host-side. Split from `draw2dShapeBridge` to keep each forwarder group within the per-function line budget. */
+const draw2dFilledShapeBridge = (game: WasmHostExport): Pick<
   HostBridge,
-  "draw2dCamera2d" | "draw2dRect" | "draw2dCircle" | "draw2dEllipse" | "draw2dLine"
+  "draw2dCamera2d" | "draw2dRect" | "draw2dCircle" | "draw2dEllipse"
 > => ({
   draw2dCamera2d: (center: Vec2, zoom: number): void => {
     game.draw2dCamera2d(packVec2(center), zoom);
@@ -651,16 +658,6 @@ const draw2dShapeBridge = (game: WasmHostExport): Pick<
       orElse(style.alpha, FULL_ALPHA),
     );
   },
-  draw2dLine: (from: Vec2, to: Vec2, style: LineStyle): void => {
-    game.draw2dLine(
-      packVec2(from),
-      packVec2(to),
-      packRgba(style.color),
-      style.width,
-      orElse(style.layer, DEFAULT_LAYER),
-      orElse(style.alpha, FULL_ALPHA),
-    );
-  },
   draw2dRect: (bounds: Rect, style: ShapeStyle): void => {
     game.draw2dRect(
       packRect(bounds),
@@ -672,6 +669,45 @@ const draw2dShapeBridge = (game: WasmHostExport): Pick<
     );
   },
 });
+
+/** The line/path/gradient 2D `HostBridge` ops (SPEC-04 §10): the self-coloured line, the filled/stroked `path`, and the linear/radial gradient paints, every one packing its colours to `0xRRGGBBAA` and defaulting `strokeWidth`/`closed`/`layer`/`alpha` host-side. Split from `draw2dShapeBridge` to keep each forwarder group within the per-function line budget. */
+const draw2dPathBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  "draw2dLine" | "draw2dPath" | "draw2dLinearGradient" | "draw2dRadialGradient"
+> => ({
+  draw2dLine: (from: Vec2, to: Vec2, style: LineStyle): void => {
+    game.draw2dLine(
+      packVec2(from),
+      packVec2(to),
+      packRgba(style.color),
+      style.width,
+      orElse(style.layer, DEFAULT_LAYER),
+      orElse(style.alpha, FULL_ALPHA),
+    );
+  },
+  draw2dLinearGradient: (from: Vec2, to: Vec2, stops: readonly GradientStop[]): Paint =>
+    game.draw2dLinearGradient(packVec2(from), packVec2(to), packStops(stops)),
+  draw2dPath: (points: readonly Vec2[], style: PathStyle): void => {
+    game.draw2dPath(
+      flattenVec2(points),
+      packRgba(style.fill),
+      packRgba(orElse(style.stroke, TRANSPARENT)),
+      orElse(style.strokeWidth, NO_STROKE_WIDTH),
+      orElse(style.closed, false),
+      orElse(style.layer, DEFAULT_LAYER),
+      orElse(style.alpha, FULL_ALPHA),
+    );
+  },
+  draw2dRadialGradient: (center: Vec2, radius: number, stops: readonly GradientStop[]): Paint =>
+    game.draw2dRadialGradient(packVec2(center), radius, packStops(stops)),
+});
+
+/** The 2D shape `HostBridge` ops (SPEC-04 §10): camera + the filled/stroked shapes (incl. `path`) + the self-coloured line + the gradient paints, composed from the closed-shape and line/path/gradient forwarder groups. */
+const draw2dShapeBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  | "draw2dCamera2d" | "draw2dRect" | "draw2dCircle" | "draw2dEllipse" | "draw2dLine"
+  | "draw2dPath" | "draw2dLinearGradient" | "draw2dRadialGradient"
+> => Object.assign(draw2dFilledShapeBridge(game), draw2dPathBridge(game));
 
 /** The 2D sprite + text `HostBridge` ops (SPEC-04 §4.2): the textured sprite, the monospace text run, and the deterministic `measureText`, each marshalling its opts record to the boundary slice. */
 const draw2dTextBridge = (game: WasmHostExport): Pick<
@@ -721,6 +757,7 @@ const draw2dSystemBridge = (game: WasmHostExport): Pick<
 const draw2dBridge = (game: WasmHostExport): Pick<
   HostBridge,
   | "draw2dCamera2d" | "draw2dRect" | "draw2dCircle" | "draw2dEllipse" | "draw2dLine"
+  | "draw2dPath" | "draw2dLinearGradient" | "draw2dRadialGradient"
   | "draw2dSprite" | "draw2dText" | "draw2dMeasureText"
   | "draw2dCreateEmitter" | "draw2dEmit" | "draw2dAdvanceParticles"
   | "draw2dCreateRenderTarget" | "draw2dBeginTarget" | "draw2dEndTarget" | "draw2dTargetTexture" | "draw2dFinish"
@@ -852,7 +889,7 @@ const channelBridge = (game: WasmHostExport): Pick<
   },
 });
 
-/** The screen-space UI `HostBridge` ops (SPEC-09), forwarding to the native `axiom-interface` `UiSurface` + `axiom-layout::solve` via the Wave-2 `ui*` exports. Colours pack to `0xRRGGBBAA`; `stroke`/`strokeWidth` default host-side; `uiViewport` unpacks `[width, height]`. */
+/** The screen-space UI `HostBridge` ops (SPEC-09), forwarding to the native `axiom-interface` `UiSurface` + `axiom-layout::solve` via the Wave-2 `ui*` exports. Colours pack to `0xRRGGBBAA`; `stroke`/`strokeWidth` default host-side; `uiViewport` unpacks `[width, height]`. `uiText`/`uiSprite` reuse SPEC-04's `packTextOpts`/`packSpriteOpts` (the same flat boundary slice `draw2dText`/`draw2dSprite` carry), so the full `TextOpts`/`SpriteOpts` styling crosses unchanged (SPEC-09 §4.2). */
 const uiBridge = (game: WasmHostExport): UiBridge => ({
   uiBeginFrame: (viewport: UiViewport, pointer: Vec2, pressed: boolean): void => {
     game.uiBeginFrame(Float64Array.from([viewport.width, viewport.height]), packVec2(pointer), pressed);
@@ -877,11 +914,11 @@ const uiBridge = (game: WasmHostExport): UiBridge => ({
   uiSolveLayout: (viewport: UiViewport, nodes: readonly number[]): readonly number[] => [
     ...game.uiSolveLayout(viewport.width, viewport.height, Float64Array.from(nodes)),
   ],
-  uiSprite: (texture: Handle, bounds: Rect): void => {
-    game.uiSprite(texture, packRect(bounds));
+  uiSprite: (texture: TextureId, opts: SpriteOpts): void => {
+    game.uiSprite(texture, packSpriteOpts(opts));
   },
-  uiText: (value: string, opts: UiTextOpts): void => {
-    game.uiText(value, Float64Array.from([opts.x, opts.y]), packRgba(opts.color), opts.size);
+  uiText: (value: string, opts: TextOpts): void => {
+    game.uiText(value, packTextOpts(opts));
   },
   uiViewport: (): UiViewport => {
     const size = [...game.uiViewport()];
