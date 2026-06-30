@@ -72,3 +72,9 @@ test("the barrel re-exports the wire-format version", () => {
   assert.equal(api.WIRE_MAJOR, 1);
   assert.equal(api.WIRE_MINOR, 0);
 });
+
+test("the barrel exports the prediction resimulation primitive", () => {
+  assert.equal(typeof api.resimulate, "function");
+  // Sanity: the exported primitive is the pure fold (identity over no intents).
+  assert.equal(api.resimulate(5, [], (state: number): number => state + 1), 5);
+});

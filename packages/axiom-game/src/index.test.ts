@@ -103,6 +103,8 @@ const FUNCTION_EXPORTS = [
   "hostRoom",
   "matchmake",
   "makeNetParticipants",
+  "makeSnapshotIntake",
+  "reconstructSnapshot",
   "axiomNetFactory",
   "decodeIntent",
   "encodeIntent",

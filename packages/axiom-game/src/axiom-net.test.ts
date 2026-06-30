@@ -8,7 +8,7 @@ import {
   encodeIntent,
   netTransportFromClient,
 } from "./axiom-net.ts";
-import type { ConnStatus, Intent, JoinConfig } from "./net.ts";
+import { type ConnStatus, type Intent, type JoinConfig, type NetCarrier, configureNet } from "./net.ts";
 import type { PlayerId } from "./vocabulary.ts";
 
 const noSeats: PlayerId[] = [];
@@ -23,6 +23,7 @@ class FakeClient implements AxiomClientLike {
   public clientId = 0;
   public readonly sent: Uint8Array[] = [];
   public disconnects = 0;
+  public predictEnabled: boolean | undefined;
   public statusObserver: (status: ConnStatus) => void = (): void => {
     // replaced by onStatus
   };
@@ -45,6 +46,13 @@ class FakeClient implements AxiomClientLike {
   }
   public onRejected(handler: (reasonCode: number) => void): void {
     this.rejectedObserver = handler;
+  }
+  public predicting(): { setEnabled: (enabled: boolean) => void } {
+    return {
+      setEnabled: (enabled: boolean): void => {
+        this.predictEnabled = enabled;
+      },
+    };
   }
   public disconnect(): void {
     this.disconnects += 1;
@@ -127,4 +135,35 @@ test("axiomNetFactory opens a client per config and wraps it as a transport", ()
   const transport = factory(config);
   assert.deepEqual(seenConfig, config);
   assert.equal(transport.localPlayer(), 7);
+});
+
+test("the default carrier is reliable and prediction is off when the net config selects neither", () => {
+  // An explicit default config (no transport, predict off) — the §16.4/§16.5 floor.
+  configureNet({ interpolateRemote: false, predictLocalPlayer: false });
+  const fake = new FakeClient();
+  let seenCarrier: NetCarrier | undefined;
+  const factory = axiomNetFactory((_config, carrier): AxiomClientLike => {
+    seenCarrier = carrier;
+    return fake;
+  });
+  factory({ roomId: "r", url: "wss://a" });
+  assert.equal(seenCarrier, "reliable");
+  assert.equal(fake.predictEnabled, false);
+});
+
+test("configureNet selects the datagram carrier and toggles local-player prediction on", () => {
+  // configureNet({ transport, predictLocalPlayer }) flows to the binding: the carrier
+  // reaches the app's `open`, and prediction reaches `client.predicting().setEnabled`.
+  configureNet({ interpolateRemote: false, predictLocalPlayer: true, transport: "datagram" });
+  const fake = new FakeClient();
+  let seenCarrier: NetCarrier | undefined;
+  const factory = axiomNetFactory((_config, carrier): AxiomClientLike => {
+    seenCarrier = carrier;
+    return fake;
+  });
+  factory({ roomId: "r", url: "datagram://a" });
+  assert.equal(seenCarrier, "datagram");
+  assert.equal(fake.predictEnabled, true);
+  // Restore the default config so later tests/files are not influenced by global state.
+  configureNet({ interpolateRemote: false, predictLocalPlayer: false });
 });

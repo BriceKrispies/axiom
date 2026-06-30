@@ -1,17 +1,12 @@
 /*
- * AxiomClient — the browser authoring SDK.
- *
- * Browser glue and author ergonomics, NOT engine truth: the server stays
- * authoritative; this client sends *intents* and applies *snapshots*. It mirrors
- * the portable `axiom-client-core` Rust module (connection state, a monotonic
- * client sequence, a pending-intent queue, the latest server tick).
- *
- * The state machine is branchless: status guards and the inbound dispatch select
- * actions through table lookup (`pick`) and a per-kind handler record, and absent
- * collaborators use null-objects/defaults instead of presence checks. Browser
- * transport wiring lives at the platform edge (build-transport.ts).
- *
- * Deliberately absent: prediction, rollback, reconnect, compression.
+ * AxiomClient — the server-authoritative browser SDK: sends *intents*, applies
+ * *snapshots* newest-wins, mirroring the Rust `axiom-client-core` (connection
+ * state, a monotonic client sequence, the latest server tick). The unacked-intent
+ * queue and the opt-in local-player resimulation live in `LocalPrediction`
+ * (prediction.ts), reached through `predicting()`. The state machine is branchless
+ * (table-lookup dispatch via `pick`, null-object/default collaborators); browser
+ * transport wiring is the platform edge (build-transport.ts). Rollback, reconnect,
+ * and compression stay absent.
  */
 
 import {
@@ -41,6 +36,7 @@ import {
   type ServerSnapshotMessage,
   type WelcomeMessage,
 } from "./messages.ts";
+import { LocalPrediction, type Prediction } from "./prediction.ts";
 import { NULL_TRANSPORT, type Transport } from "./transport.ts";
 import { decodeFrame, encodeClientIntent, encodeJoinRoom, encodeLeaveRoom } from "./codec.ts";
 import { each, pick } from "./control-flow.ts";
@@ -74,7 +70,7 @@ export class AxiomClient {
   private latestServerTick = ZERO;
   private lastAckedClientSequence = ZERO;
   private clientId = ZERO;
-  private pending: number[] = [];
+  private readonly prediction = new LocalPrediction();
   private joinFrame: Uint8Array = new Uint8Array();
   private readonly joinTimers: ReturnType<typeof setInterval>[] = [];
   private readonly snapshotHandlers: SnapshotHandler[] = [];
@@ -84,10 +80,7 @@ export class AxiomClient {
 
   /** Open a connection and join the room once the transport opens. */
   public connect(config: ConnectConfig): void {
-    /*
-     * Destructuring defaults supply the optional fields branchlessly (they apply
-     * exactly when the field is `undefined`) — no `??`/`?:` under the Branchless Law.
-     */
+    // Destructuring defaults supply the optional fields branchlessly (no `??`/`?:`).
     const { protocolVersion = DEFAULT_PROTOCOL_VERSION, token = new Uint8Array() } = config;
     this.protocolVersion = protocolVersion;
     this.roomId = toBytes(config.roomId);
@@ -130,7 +123,7 @@ export class AxiomClient {
     const sequence = this.nextClientSequence;
     const commit = (): number => {
       this.nextClientSequence += SEQUENCE_STEP;
-      this.pending.push(sequence);
+      this.prediction.record(sequence, payload);
       this.transport.send(
         encodeClientIntent({
           clientSequence: sequence,
@@ -187,7 +180,12 @@ export class AxiomClient {
 
   /** How many sent intents are still unacknowledged. */
   public getPendingIntentCount(): number {
-    return this.pending.length;
+    return this.prediction.count();
+  }
+
+  /** The local-player prediction facade: opt-in resimulation over the unacked intents. */
+  public predicting(): Prediction {
+    return this.prediction;
   }
 
   private handleOpen(transport: Transport): void {
@@ -277,7 +275,7 @@ export class AxiomClient {
   private acceptSnapshot(snapshot: ServerSnapshotMessage): void {
     this.latestServerTick = snapshot.serverTick;
     this.lastAckedClientSequence = snapshot.lastAcceptedClientSequence;
-    this.pending = this.pending.filter((seq): boolean => seq > snapshot.lastAcceptedClientSequence);
+    this.prediction.ackThrough(snapshot.lastAcceptedClientSequence);
     each(this.snapshotHandlers, (handler): void => { handler(snapshot); });
   }
 
@@ -288,7 +286,7 @@ export class AxiomClient {
 
   private onRejection(message: DecodedMessage): void {
     assert(message.kind === KIND_REJECTED_INTENT, "dispatch guarantees a rejection");
-    this.pending = this.pending.filter((seq): boolean => seq !== message.clientSequence);
+    this.prediction.drop(message.clientSequence);
     each(this.rejectionHandlers, (handler): void => { handler(message.reasonCode); });
   }
 

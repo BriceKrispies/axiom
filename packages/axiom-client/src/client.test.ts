@@ -20,6 +20,9 @@ import { FakeSocket } from "./fake-socket.testkit.ts";
 const u8 = (...bytes: number[]): Uint8Array => Uint8Array.from(bytes);
 const welcome = (clientId: number, serverTick: number): Uint8Array =>
   encodeWelcome({ clientId, fixedStepNs: 16_666_667, protocolVersion: 1, serverTick });
+// Folds each replayed intent's first payload byte into a base-10 accumulator, so
+// the resimulation result encodes both the intent values and their replay order.
+const fold = (state: number, payload: Uint8Array): number => state * 10 + payload[0]!;
 
 function connect(overrides: Partial<ConnectConfig> = {}): { client: AxiomClient; socket: FakeSocket } {
   let socket!: FakeSocket;
@@ -166,6 +169,41 @@ test("per-player frames are ignored by this single-seat client, not fatal", () =
   assert.deepEqual(snapshots, []);
   assert.equal(client.getServerTick(), 0);
   assert.equal(client.getStatus(), "connected");
+});
+
+test("prediction defaults off, toggles, and gates resimulation", () => {
+  const { client } = connected();
+  // Default off: a fresh client is authoritative-only.
+  assert.equal(client.predicting().enabled(), false);
+  // Three unacked intents are pending; their first payload bytes encode order.
+  client.sendIntent(u8(1));
+  client.sendIntent(u8(2));
+  client.sendIntent(u8(3));
+
+  // OFF: resimulate is the identity — no intent is replayed.
+  assert.equal(client.predicting().resimulate(7, fold), 7);
+
+  // ON: every still-unacked intent replays in send order onto the baseline.
+  client.predicting().setEnabled(true);
+  assert.equal(client.predicting().enabled(), true);
+  assert.equal(client.predicting().resimulate(0, fold), 123);
+
+  // Back OFF flips to the identity again, touching no intent.
+  client.predicting().setEnabled(false);
+  assert.equal(client.predicting().resimulate(9, fold), 9);
+});
+
+test("resimulation replays only the intents still unacked after a snapshot ack", () => {
+  const { client, socket } = connected();
+  client.predicting().setEnabled(true);
+  client.sendIntent(u8(1)); // seq 1
+  client.sendIntent(u8(2)); // seq 2
+  client.sendIntent(u8(3)); // seq 3
+  // The authority acks up to sequence 2, dropping intents 1 and 2 from pending.
+  socket.receive(encodeServerSnapshot(5, 2, u8(0xaa)));
+  assert.equal(client.getPendingIntentCount(), 1);
+  // Only intent 3 remains to replay: 0 -> 3.
+  assert.equal(client.predicting().resimulate(0, fold), 3);
 });
 
 test("disconnect when connected sends LeaveRoom then closes", () => {
