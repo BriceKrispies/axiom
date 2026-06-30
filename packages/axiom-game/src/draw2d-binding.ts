@@ -59,6 +59,37 @@ export interface ShapeStyle {
 }
 
 /*
+ * The per-path style a `draw2dPath` carries (SPEC-04 §10): the same fill / stroke
+ * / layer / alpha a filled shape uses (a {@link ShapeStyle}), plus whether the
+ * polyline is `closed` into a polygon. `closed` defaults host-side to `false` (an
+ * open polyline), matching the contract's `{ closed?: boolean }`.
+ */
+export interface PathStyle extends ShapeStyle {
+  /** Join the last vertex back to the first, filling the enclosed polygon (default: false). */
+  readonly closed?: boolean;
+}
+
+/*
+ * One stop in a gradient (SPEC-04 §10): a `color` at an `offset` along the
+ * gradient axis (`0` at the start point, `1` at the end). The contract's
+ * `GradientStop`, reused unchanged by `linearGradient` / `radialGradient`.
+ */
+export interface GradientStop {
+  /** The position along the gradient axis, in `[0, 1]`. */
+  readonly offset: number;
+  /** The colour at this stop. */
+  readonly color: Rgba;
+}
+
+/*
+ * A registered paint (SPEC-04 §10) — what `linearGradient` / `radialGradient`
+ * return. The contract's `type Paint = Handle`: an opaque handle into the frame's
+ * paint table a shape fills with by reference (a paint is never inlined). Valid
+ * only within the frame that minted it.
+ */
+export type Paint = Handle;
+
+/*
  * An ellipse's radii + rotation (SPEC-04 §10), bundled into one record so the
  * `ellipse` verb stays within the SDK's ≤3-parameter budget (the contract's flat
  * `rx, ry, rotation` arguments collapse into this geometry record). `rotation`
@@ -199,6 +230,12 @@ export interface Draw2dBridge {
   readonly draw2dEllipse: (center: Vec2, radii: EllipseRadii, style: ShapeStyle) => void;
   /** Draw a straight line segment of its own colour + width (`draw2dLine`). */
   readonly draw2dLine: (from: Vec2, to: Vec2, style: LineStyle) => void;
+  /** Draw a filled / stroked polyline / polygon through `points` (`draw2dPath`). */
+  readonly draw2dPath: (points: readonly Vec2[], style: PathStyle) => void;
+  /** Register a linear gradient paint, returning its handle (`draw2dLinearGradient`). */
+  readonly draw2dLinearGradient: (from: Vec2, to: Vec2, stops: readonly GradientStop[]) => Paint;
+  /** Register a radial gradient paint, returning its handle (`draw2dRadialGradient`). */
+  readonly draw2dRadialGradient: (center: Vec2, radius: number, stops: readonly GradientStop[]) => Paint;
   /** Draw a textured sprite (`draw2dSprite`). */
   readonly draw2dSprite: (texture: TextureId, opts: SpriteOpts) => void;
   /** Draw a line of text in `opts.font` (`draw2dText`). */
@@ -225,58 +262,9 @@ export interface Draw2dBridge {
   readonly draw2dSampleAnimation: (anim: SpriteAnimation, elapsedSeconds: Seconds, looping: boolean) => Rect;
 }
 
-/** The handle returned by the inert handle-minting 2D reads before a host binds (a null handle). */
-const UNBOUND_HANDLE = 0;
-
-/** The inert sub-rect the unbound flip-book sampler returns (nothing to draw). */
-const INERT_RECT: Rect = { height: 0, width: 0, x: 0, y: 0 };
-
-/** The inert extent the unbound `measureText` returns before a host binds. */
-const INERT_METRICS: TextMetrics = { height: 0, width: 0 };
-
 /*
- * The inert 2D surface used before `bindNative`: every draw is a no-op and every
- * id-returning verb mints the null handle / empty list. Composed into `UNBOUND_HOST`
- * so the free surface stays total (no `null` channel to branch on).
+ * The inert 2D surface used before `bindNative` lives in its own module
+ * (`draw2d-unbound.ts`, the same partition reason `unbound-host.ts` was split from
+ * `host-binding.ts`) and is re-exported here so its import path stays stable.
  */
-export const UNBOUND_DRAW2D: Draw2dBridge = {
-  draw2dAdvanceParticles: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dBeginTarget: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dCamera2d: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dCircle: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dCreateEmitter: (): Handle => UNBOUND_HANDLE,
-  draw2dCreateRenderTarget: (): Handle => UNBOUND_HANDLE,
-  draw2dEllipse: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dEmit: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dEndTarget: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dFinish: (): readonly number[] => [],
-  draw2dLine: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dMeasureText: (): TextMetrics => INERT_METRICS,
-  draw2dRect: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dSampleAnimation: (): Rect => INERT_RECT,
-  draw2dSprite: (): void => {
-    // No-op until a host is bound
-  },
-  draw2dTargetTexture: (): Handle => UNBOUND_HANDLE,
-  draw2dText: (): void => {
-    // No-op until a host is bound
-  },
-};
+export { UNBOUND_DRAW2D } from "./draw2d-unbound.ts";

@@ -512,10 +512,12 @@ impl WasmGame {
     }
 
     /// Re-parent `child` under `parent` (`worldSetParent`); a rejected link is a
-    /// clean no-op.
+    /// clean no-op. A `null`/`undefined` parent (`None`) detaches `child` to the
+    /// hierarchy root (SPEC-02 §4.2: "null detaches to the root").
     #[wasm_bindgen(js_name = worldSetParent)]
-    pub fn world_set_parent(&mut self, child: f64, parent: f64) {
-        self.bridge.world_set_parent(child as u64, parent as u64);
+    pub fn world_set_parent(&mut self, child: f64, parent: Option<f64>) {
+        self.bridge
+            .world_set_parent(child as u64, parent.map(|parent| parent as u64));
     }
 
     /// `entity`'s parent as `[]` / `[parent]` (`worldParentOf`).

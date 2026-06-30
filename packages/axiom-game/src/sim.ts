@@ -19,7 +19,7 @@
  */
 
 import { type Add, makeAdd } from "./game-object.ts";
-import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteOpts, TextMetrics, TextOpts } from "./draw2d-binding.ts";
+import type { EllipseRadii, EmitterConfig, GradientStop, LineStyle, Paint, PathStyle, ShapeStyle, SpriteOpts, TextMetrics, TextOpts } from "./draw2d-binding.ts";
 import type { FontSpec, Handle, Rect, TextureId, Vec2 } from "./vocabulary.ts";
 import { type Input, makeInput } from "./input.ts";
 import { type Physics, makePhysics } from "./physics.ts";
@@ -61,11 +61,12 @@ export interface Sim {
  * rasterized in TS. The surface is only legal from `onRender`; it never feeds sim.
  *
  * Today's verbs are those the Wave-2.5 `draw2d*` exports back: the 2D `camera2D`;
- * filled / stroked `rect`, `circle`, and `ellipse`; the self-coloured `line`; the
- * particle system (`createEmitter`/`emit`/`advanceParticles`); and render targets
- * (`createRenderTarget`/`drawTo`/`targetTexture`), plus `finish` to drain the
- * layer-sorted command list. `sprite`/`text`/`measureText`, `path`, and
- * gradient/shadow fills (SPEC-04 §4.2) await their draw2d exports.
+ * filled / stroked `rect`, `circle`, `ellipse`, and `path`; the self-coloured
+ * `line`; `sprite`/`text`/`measureText`; the `linearGradient`/`radialGradient`
+ * paints; the particle system (`createEmitter`/`emit`/`advanceParticles`); and
+ * render targets (`createRenderTarget`/`drawTo`/`targetTexture`), plus `finish` to
+ * drain the layer-sorted command list. Only the `shadow` fill (SPEC-04 §4.2) still
+ * awaits its draw2d export.
  */
 export interface Frame {
   /** The latest completed fixed tick this frame presents. */
@@ -80,12 +81,18 @@ export interface Frame {
   readonly ellipse: (center: Vec2, radii: EllipseRadii, style: ShapeStyle) => void;
   /** Draw a straight line segment of its own colour + width (SPEC-04 §10). */
   readonly line: (from: Vec2, to: Vec2, style: LineStyle) => void;
+  /** Draw a filled / stroked polyline / polygon through `points` (SPEC-04 §10). */
+  readonly path: (points: readonly Vec2[], style: PathStyle) => void;
   /** Draw a textured sprite (SPEC-04 §4.2). */
   readonly sprite: (texture: TextureId, opts: SpriteOpts) => void;
   /** Draw a line of text in `opts.font` (SPEC-04 §4.2). */
   readonly text: (value: string, opts: TextOpts) => void;
   /** Measure `value` in `font` (SPEC-04 §4.2). */
   readonly measureText: (value: string, font: FontSpec) => TextMetrics;
+  /** Register a linear gradient paint between `from` and `to`, returning its handle (SPEC-04 §10). */
+  readonly linearGradient: (from: Vec2, to: Vec2, stops: readonly GradientStop[]) => Paint;
+  /** Register a radial gradient paint around `center` of `radius`, returning its handle (SPEC-04 §10). */
+  readonly radialGradient: (center: Vec2, radius: number, stops: readonly GradientStop[]) => Paint;
   /** Register a particle emitter, returning its handle (SPEC-04 §10.1). */
   readonly createEmitter: (config: EmitterConfig) => Handle;
   /** Spawn a particle burst from `id` at `at` flying along `direction` (SPEC-04 §10.1). */
@@ -162,7 +169,14 @@ export const makeFrame = (tick: number): Frame => ({
   line: (from: Vec2, to: Vec2, style: LineStyle): void => {
     boundHost().draw2dLine(from, to, style);
   },
+  linearGradient: (from: Vec2, to: Vec2, stops: readonly GradientStop[]): Paint =>
+    boundHost().draw2dLinearGradient(from, to, stops),
   measureText: (value: string, font: FontSpec): TextMetrics => boundHost().draw2dMeasureText(value, font),
+  path: (points: readonly Vec2[], style: PathStyle): void => {
+    boundHost().draw2dPath(points, style);
+  },
+  radialGradient: (center: Vec2, radius: number, stops: readonly GradientStop[]): Paint =>
+    boundHost().draw2dRadialGradient(center, radius, stops),
   rect: (bounds: Rect, style: ShapeStyle): void => {
     boundHost().draw2dRect(bounds, style);
   },

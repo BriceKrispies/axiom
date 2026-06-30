@@ -136,6 +136,17 @@ impl RunningApp {
         linked
     }
 
+    /// Detach `child` from its parent, returning it to the hierarchy root, and
+    /// report whether the node existed (a missing id is a clean `false`). The
+    /// null arm of the authoring `setParent` (SPEC-02 §4.2: "null detaches to the
+    /// root"). World transforms refresh so a subsequent [`Self::world_transform`]
+    /// read reflects the now-root chain immediately, mirroring [`Self::set_parent`].
+    pub fn clear_parent(&mut self, child: Entity) -> bool {
+        let cleared = self.scene.clear_parent(child).is_ok();
+        self.scene.update_world_transforms();
+        cleared
+    }
+
     /// The authoritative world-space [`Transform`] of `entity` (the most recent
     /// propagated value), or `None` for an absent node — how a holder reads where
     /// a node ended up after parenting and per-tick simulation.
@@ -455,5 +466,23 @@ mod tests {
         assert_eq!(app.parent_of(child), Some(parent));
         // Self-parenting is rejected as a clean false.
         assert!(!app.set_parent(parent, parent));
+    }
+
+    #[test]
+    fn clear_parent_detaches_a_child_to_the_root() {
+        let mut app = App::new()
+            .window(Window::new(64, 64))
+            .add_plugins(DefaultPlugins)
+            .build();
+        let parent = app.spawn_empty();
+        let child = app.spawn_empty();
+        assert!(app.set_parent(child, parent));
+        assert_eq!(app.parent_of(child), Some(parent));
+        // Detaching returns the child to the root: it existed, so `true`, and the
+        // read side now reports no parent.
+        assert!(app.clear_parent(child));
+        assert_eq!(app.parent_of(child), None);
+        // Clearing a missing node is a clean `false`.
+        assert!(!app.clear_parent(Entity::from_raw(9999)));
     }
 }

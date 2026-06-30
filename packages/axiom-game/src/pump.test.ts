@@ -114,6 +114,57 @@ test("cancelTween drops the held sinks so it stops sampling", () => {
   assert.deepEqual(values, []);
 });
 
+// Run the SPEC-07 §7 reentrancy scenario once and return the firing event log.
+// The pump reads the due id set ONCE per tick (`each(timersDue(tick), …)` snapshots
+// the array), so a timer scheduled from inside a dispatched callback cannot fire
+// within the same pass — even when its delay would put it due THIS tick.
+const runReentrancyScenario = (): readonly string[] => {
+  const pump = new TickPump(new FakeBridge(), 60);
+  const events: string[] = [];
+  let now = -1;
+  let reenteredSamePass = false;
+
+  // The outer one-shot is due at tick 2. When the pump dispatches it, it schedules
+  // two inner one-shots: one with delay 0 (its `due === now`, the soonest a live
+  // re-read could fire same-pass) and one with delay 1 (the canonical now+1).
+  // Neither may run before the outer callback returns.
+  pump.scheduleAfter(0, 2, (): void => {
+    events.push(`outer@${now}`);
+    const innerStart = now;
+    pump.scheduleAfter(innerStart, 0, (): void => {
+      events.push(`inner0@${now}`);
+    });
+    pump.scheduleAfter(innerStart, 1, (): void => {
+      events.push(`inner1@${now}`);
+    });
+    // Inside this dispatch nothing inner has run: scheduling does not dispatch.
+    reenteredSamePass = events.some((event) => event.startsWith("inner"));
+  });
+
+  const afterOuterTick: string[] = [];
+  for (let tick = 0; tick <= 6; tick += 1) {
+    now = tick;
+    pump.pump(tick);
+    // Snapshot events right after the outer's own due tick to prove the same-pass
+    // guarantee survives the rest of pump(2), not just the callback.
+    afterOuterTick.push(...[`tick2=${events.join(",")}`].filter(() => tick === 2));
+  }
+  assert.equal(reenteredSamePass, false);
+  // After the whole of pump(2) only the outer has run — no inner re-entry.
+  assert.deepEqual(afterOuterTick, ["tick2=outer@2"]);
+  return events;
+};
+
+test("a timer scheduling another during its dispatch never re-enters the same due pass; the new timer comes due no earlier than now+1 (deterministic on replay)", () => {
+  const first = runReentrancyScenario();
+  const second = runReentrancyScenario();
+  // inner1 (delay 1) lands at exactly now+1 (tick 3); inner0 (delay 0 -> due===now)
+  // is skipped by the snapshot and never observed — the earliest a reentrant timer
+  // can run is now+1. The sequence is byte-identical on replay.
+  assert.deepEqual(first, ["outer@2", "inner1@3"]);
+  assert.deepEqual(second, first);
+});
+
 test("createMachine fires the initial onEnter and advances onUpdate each pumped tick", () => {
   const pump = new TickPump(new FakeBridge(), 60);
   const events: string[] = [];

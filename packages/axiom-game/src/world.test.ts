@@ -122,6 +122,28 @@ test("setParent links a child and parentOf reads it back (root is the empty valu
   assert.deepEqual(world.childrenOf(parent), [child]);
 });
 
+test("setParent(child, undefined) detaches the child back to the root (SPEC-02 §4.2)", () => {
+  const world = makeWorld(new FakeBridge());
+  const firstParent = world.spawn({ kind: "node" });
+  const secondParent = world.spawn({ kind: "node" });
+  const child = world.spawn({ kind: "node" });
+
+  // Parenting under one node, then re-parenting under another, both read back.
+  world.setParent(child, firstParent);
+  assert.equal(world.parentOf(child), firstParent);
+  assert.deepEqual(world.childrenOf(firstParent), [child]);
+  world.setParent(child, secondParent);
+  assert.equal(world.parentOf(child), secondParent);
+  assert.deepEqual(world.childrenOf(firstParent), []);
+  assert.deepEqual(world.childrenOf(secondParent), [child]);
+
+  // Omitting the parent detaches the child to the root: no parent, and gone from
+  // the old parent's children.
+  world.setParent(child, undefined);
+  assert.equal(world.parentOf(child), undefined);
+  assert.deepEqual(world.childrenOf(secondParent), []);
+});
+
 test("worldTransform reads the resolved transform for a live node, empty for a stale one", () => {
   const fake = new FakeBridge();
   const world = makeWorld(fake);

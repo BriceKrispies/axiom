@@ -38,8 +38,8 @@ export interface World {
   readonly has: (entity: Entity, kind: ComponentKind) => boolean;
   /** Remove a component from `entity` (a stale handle / absent component is a clean no-op). */
   readonly remove: (entity: Entity, kind: ComponentKind) => void;
-  /** Re-parent `child` under `parent` (a self-parent / cycle / stale handle is a clean no-op). */
-  readonly setParent: (child: Entity, parent: Entity) => void;
+  /** Re-parent `child` under `parent`, or detach it to the root when `parent` is omitted (a self-parent / cycle / stale handle is a clean no-op). */
+  readonly setParent: (child: Entity, parent?: Entity) => void;
   /** `entity`'s parent, or the empty value at a root / on a stale handle. */
   readonly parentOf: (entity: Entity) => Result<Entity>;
   /** `entity`'s resolved (composed) world transform this tick, or the empty value on a stale handle. */
@@ -94,7 +94,7 @@ export class BridgeWorld implements World {
     this.#bridge.worldRemove(entity, kind);
   }
 
-  public setParent(child: Entity, parent: Entity): void {
+  public setParent(child: Entity, parent?: Entity): void {
     this.#bridge.worldSetParent(child, parent);
   }
 

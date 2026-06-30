@@ -15,8 +15,9 @@
  * is re-exported here so the whole SPEC-09 surface lands behind one import.
  */
 
-import type { Handle, Rect, Rgba, Vec2 } from "./vocabulary.ts";
-import type { UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
+import type { Rect, Rgba, TextureId, Vec2 } from "./vocabulary.ts";
+import type { SpriteOpts, TextOpts } from "./draw2d-binding.ts";
+import type { UiStyle, UiViewport } from "./ui-binding.ts";
 import { boundHost } from "./host-binding.ts";
 import { orElse } from "./control-flow.ts";
 
@@ -26,14 +27,14 @@ export interface Ui {
   readonly beginFrame: (viewport: UiViewport, pointer: Vec2, pressed: boolean) => void;
   /** Draw a filled/stroked rectangle (SPEC-09 §4.2). */
   readonly rect: (bounds: Rect, style: UiStyle) => void;
-  /** Draw a run of text (SPEC-09 §4.2). */
-  readonly text: (value: string, opts: UiTextOpts) => void;
-  /** Draw a textured sprite over `bounds` (SPEC-09 §4.2). */
-  readonly sprite: (texture: Handle, bounds: Rect) => void;
+  /** Draw a run of text in the SPEC-04 `TextOpts` style — screen-space (SPEC-09 §4.2). */
+  readonly text: (value: string, opts: TextOpts) => void;
+  /** Draw a textured sprite in the SPEC-04 `SpriteOpts` style — screen-space (SPEC-09 §4.2). */
+  readonly sprite: (texture: TextureId, opts: SpriteOpts) => void;
   /** Draw an immediate-mode button; return whether it was activated this frame (SPEC-09 §4.2). */
   readonly button: (bounds: Rect, label: string, style?: UiStyle) => boolean;
-  /** This frame's installed viewport (SPEC-09 §4.2). */
-  readonly viewport: () => UiViewport;
+  /** This frame's installed viewport (SPEC-09 §4.2) — a per-frame snapshot read property. */
+  readonly viewport: UiViewport;
   /** This frame's accumulated screen-space draw bytes — the loop reads these back to paint. */
   readonly drawList: () => Uint8Array;
 }
@@ -59,11 +60,14 @@ export const makeUi = (): Ui => ({
   rect: (bounds: Rect, style: UiStyle): void => {
     boundHost().uiRect(bounds, style);
   },
-  sprite: (texture: Handle, bounds: Rect): void => {
-    boundHost().uiSprite(texture, bounds);
+  sprite: (texture: TextureId, opts: SpriteOpts): void => {
+    boundHost().uiSprite(texture, opts);
   },
-  text: (value: string, opts: UiTextOpts): void => {
+  text: (value: string, opts: TextOpts): void => {
     boundHost().uiText(value, opts);
   },
-  viewport: (): UiViewport => boundHost().uiViewport(),
+  // A readonly property (SPEC-09 §4.2 / contract §14): each read returns this frame's installed viewport — the native `uiViewport` snapshot `beginFrame` set.
+  get viewport(): UiViewport {
+    return boundHost().uiViewport();
+  },
 });

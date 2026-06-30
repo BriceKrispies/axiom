@@ -286,9 +286,12 @@ export class FakeBridge implements NativeBridge {
     }
   }
 
-  public worldSetParent(child: Entity, parent: Entity): void {
-    // Self-parenting is rejected (mirrors the native scene), like `link` otherwise.
-    if (child !== parent) {
+  public worldSetParent(child: Entity, parent?: Entity): void {
+    // An omitted parent detaches `child` to the root (SPEC-02 §4.2). Otherwise
+    // self-parenting is rejected (mirrors the native scene), like `link`.
+    if (parent === undefined) {
+      this.parents.delete(child);
+    } else if (child !== parent) {
       this.parents.set(child, parent);
     }
   }
