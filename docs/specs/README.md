@@ -127,20 +127,20 @@ SPEC-03 (`v2` namespace + pure predicates + `lerp` routed to native f32),
 SPEC-05 (input carried across the wasm boundary + replay proofs), SPEC-09
 (`Ui` overlay + `solveLayout` + button truth-table/presentation-leak proofs),
 and SPEC-13 (the whole multiplayer TS authoring surface + cross-instance
-determinism golden + authored netplay-server) are now **Landed**. SPEC-04 and
-SPEC-11 are Landed with the residual deferrals noted below. Status notes:
+determinism golden + authored netplay-server) are now **Landed**. A 2026-06-30
+follow-up pass then closed the residual SPEC-04 / SPEC-11 / SPEC-13 deferrals too
+(below). Status notes:
 
-- ¹ **SPEC-04** (Landed) — the neutral `Draw2dList` core, the full `@axiom/game`
-  `Frame` 2D projection (shapes, sprite, particles, render targets, camera/
-  transform, layer sort), and the §10.2 `sampleAnimation` flip-book sampler are
-  all landed, plus the `measureText`/`loadFont`/`loadTexture` handle seams. The
-  **software** backend rasterizes rect / circle / ellipse / line / particle /
-  sprite (per-shape fill + stroke, src-over alpha); the **GPU** backend now
-  rasterizes **rect + sprite (alpha, layer sort)** in its wgpu offscreen/`wasm32`
-  platform arm, proven at parity with software on that subset (the §7
-  both-backends alpha proof passes). Still deferred: GPU raster of
-  circle/ellipse/line/particle (the software backend has them), and on **both**
-  backends path / gradient / text glyph-run raster (recognised, not drawn).
+- ¹ **SPEC-04** (Landed, fully) — the neutral `Draw2dList` core, the full
+  `@axiom/game` `Frame` 2D projection (shapes, sprite, particles, render targets,
+  camera/transform, layer sort), the §10.2 `sampleAnimation` sampler, the
+  `measureText`/`loadFont`/`loadTexture` seams, and the §10.1 **ranged emitter
+  fields** (`[min,max]` lifetime/speed/size, deterministic in-range pick) are all
+  landed. **Both** backends now rasterize the full set — rect / circle / ellipse /
+  line / particle / sprite / **path** / **linear+radial gradient** / **text
+  glyph-runs**, with per-shape **fill + stroke** and src-over alpha — at proven
+  GPU↔software parity (§7); the GPU raster lives in the wgpu offscreen/`wasm32`
+  platform arm.
 - ² **SPEC-08** (Landed) — neutral core + Web Audio arm landed; in the wasm arm
   only `PlayTone` produces sound — `Load`/`PlaySample`/`PlayMusic`/`Stop` are
   currently no-ops. Live playback and the optional §13.1 analyser are
@@ -150,19 +150,26 @@ SPEC-11 are Landed with the residual deferrals noted below. Status notes:
   must not predict physics. The TS `Sim.physics` adds bodies but **does not yet
   project colliders/materials/friction** (§4.2's "already projected on collider
   attach").
-- ⁴ **SPEC-11** (Landed) — cylinder + emissive/roughness/opacity + hemisphere
-  ambient landed; the §7 render-one-frame slice ("nova-roll") and the
-  GPU↔canvas2d backend-parity proof (cylinder+emissive) are landed (driven via
-  `axiom-shot`). Still deferred: **3D translucency blending** (`opacity` is
-  carried but not yet blended — needs back-to-front ordering) and author-supplied
-  `MeshData`.
+- ⁴ **SPEC-11** (Landed, fully) — cylinder + emissive/roughness/opacity +
+  hemisphere ambient landed; the §7 render-one-frame slice ("nova-roll") and the
+  GPU↔canvas2d backend-parity proof (cylinder+emissive) are landed (via
+  `axiom-shot`). **3D translucency now blends** end-to-end — `opacity` folds into
+  the per-draw alpha on both backends and translucent draws sort back-to-front
+  (canvas2d src-over composites), and authored `createMaterial` opacity/emissive/
+  roughness reach `RenderMaterial`. Author-supplied **`MeshData`** (custom
+  positions/normals/uvs/indices via `createMeshData`) is landed, riding the
+  catalog meshes' resolved-geometry pipeline.
 - ⁵ **SPEC-13** (Landed) — the per-player Rust spine, the full TS authoring
   surface (`onSnapshot`/`onRestore`, the `Intent`-derived wire codec, the
   per-player `ClientIntentFor`/`ServerSnapshotFor` twin, `hostRoom`, `matchmake`),
   the cross-instance determinism golden, and the authored-callback netplay-server
-  are all landed. Deferred by decision: **physics net-prediction is OFF**
-  (authority/non-physics state only), and delta encoding, JWT verification, and
-  unreliable transports are follow-ups.
+  are all landed — plus the follow-ups: **delta snapshot encoding**, **HS256 JWT
+  admission**, an **unreliable datagram transport**, and **client-side prediction**
+  (`configureNet({ predictLocalPlayer })` + a `resimulate` core in Rust
+  `axiom-client-core` and TS `@axiom/client`). Prediction defaults **OFF** and is
+  proven **same-binary** only — physics net-prediction stays off by decision until
+  cross-target f32 determinism (§17.6 / SPEC-10) is proven; the opt-in flips with
+  no API change once it is.
 
 ## Cross-cutting law: determinism & replay (contract §17)
 

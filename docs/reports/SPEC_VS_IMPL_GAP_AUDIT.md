@@ -39,9 +39,17 @@ the genuine remainder was then implemented:
   **closed**. Deferrals by decision: physics net-prediction OFF, delta/JWT/
   unreliable transport.
 
-The medium/low proof-rigor items and the documented deferrals (§"Real but
-already-disclosed") that were not in scope remain as noted. The original audit
-findings below are preserved as the historical record.
+A second 2026-06-30 pass then closed the **documented deferrals** themselves
+(§"Real but already-disclosed"): SPEC-04 — full 2D raster on both backends (GPU
+shape parity + path + linear/radial gradient + text glyph-runs + GPU strokes) and
+§10.1 ranged emitter fields; SPEC-11 — 3D translucency blending + back-to-front
+ordering + the `createMaterial` material-field boundary + author-supplied
+`MeshData`; SPEC-13 — delta snapshot encoding, HS256 JWT admission, an unreliable
+datagram transport, and client-side prediction (opt-in, same-binary; physics
+net-prediction stays off pending cross-target f32 determinism). The remaining
+medium/low proof-rigor items and the SPEC-08/10/12 browser-only / TS-physics
+deferrals are unchanged. The original audit findings below are preserved as the
+historical record.
 
 ## Headline
 
