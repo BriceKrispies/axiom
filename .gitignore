@@ -18,7 +18,9 @@
 /dist-app/
 
 # Vendored, built TypeScript SDK copied into a demo's web/ by `make netplay-build`
+# (the netplay demo now lives under the merged gallery's web/netplay/).
 **/web/vendor/
+**/web/**/vendor/
 
 # .NET build output (scoped to examples/ so it never matches Rust `src/bin/`)
 examples/**/bin/

@@ -258,10 +258,10 @@ fn nova_roll_app() -> App {
 /// default level is used).
 fn build_app(name: &str, level: Option<&str>) -> RunningApp {
     match name {
-        "doom" => axiom_doom_browser::build_doom_app(&doom_doc(level)).0,
+        "doom" => axiom_gallery::doom::build_doom_app(&doom_doc(level)).0,
         "showcase" => showcase_app().build(),
         "nova-roll" => nova_roll_app().build(),
-        "physics-crucible" => axiom_physics_crucible::build_physics_crucible(),
+        "physics-crucible" => axiom_gallery::physics_crucible::build_physics_crucible(),
         other => {
             eprintln!("axiom-shot: unknown --app '{other}', falling back to 'showcase'");
             showcase_app().build()
@@ -271,12 +271,12 @@ fn build_app(name: &str, level: Option<&str>) -> RunningApp {
 
 /// The DOOM level document for `--level PATH` (else the built-in default). Shared
 /// by `build_app` and the `--pose` teleport path so both read the same level.
-fn doom_doc(level: Option<&str>) -> axiom_doom_browser::level::LevelDoc {
+fn doom_doc(level: Option<&str>) -> axiom_gallery::doom::level::LevelDoc {
     match level {
-        Some(path) => axiom_doom_browser::level::LevelDoc::parse(
+        Some(path) => axiom_gallery::doom::level::LevelDoc::parse(
             &std::fs::read_to_string(path).expect("read --level file"),
         ),
-        None => axiom_doom_browser::level::LevelDoc::default(),
+        None => axiom_gallery::doom::level::LevelDoc::default(),
     }
 }
 
@@ -357,7 +357,7 @@ fn main() {
     let teleport = match (app.as_str(), flag(&args, "--pose").as_deref().and_then(parse_pose)) {
         ("doom", Some((x, z, yaw, pitch))) => {
             let mut game =
-                axiom_doom_browser::DoomGame::from_level(&doom_doc(flag(&args, "--level").as_deref()));
+                axiom_gallery::doom::DoomGame::from_level(&doom_doc(flag(&args, "--level").as_deref()));
             Some(game.teleport(x, z, yaw, pitch))
         }
         _ => None,

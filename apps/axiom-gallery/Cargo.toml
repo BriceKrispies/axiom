@@ -1,0 +1,167 @@
+[package]
+name = "axiom-gallery"
+description = "Axiom demo gallery: every browser/WASM demo (rotating-cube, netplay, doom, stress-cubes, growth, roomed-puzzle, quintet, physics-crucible, debug-overlay harness) merged into ONE composition-leaf app crate. Each demo is a module under `src/<demo>/`; the wasm bundle exports one `<demo>_start` entry per demo and the gallery shell boots whichever the user picked. Native agent drivers (doom, growth) and the physics report runner survive as explicit, feature-gated binaries."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+# The gallery declares every binary explicitly (the two native agent drivers and
+# the physics report runner now live in per-demo subdirs, not at the crate root),
+# so cargo must not auto-discover anything — especially doom's `render.rs` agent
+# submodule, which the wasm build must never try to compile as its own bin.
+autobins = false
+
+# `cdylib` for the single wasm bundle every demo boots from (each demo's
+# `#[wasm_bindgen] <demo>_start`); `rlib` so the native test suites and the
+# library APIs the agent bins + axiom-shot compose still build and link.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# --- Native agent drivers + the physics report runner (explicit, feature-gated) ---
+
+# DOOM's native agent-bridge server: drives the real DOOM game headlessly and
+# answers JSON over HTTP. Native-only deps, behind `doom-agent` so the default
+# gates and the wasm build never compile it. (Was `axiom-doom-browser`'s `agent`
+# bin / `agent` feature.)
+[[bin]]
+name = "doom-agent"
+path = "src/doom/bin/agent.rs"
+required-features = ["doom-agent"]
+
+# Growth's native agent driver: walks the headless GroundSim through the reusable
+# agent harness to the summit. Native-only deps, behind `growth-agent`. (Was
+# `axiom-growth`'s `agent` bin / `agent` feature.)
+[[bin]]
+name = "growth-agent"
+path = "src/growth/bin/agent.rs"
+required-features = ["growth-agent"]
+
+# The physics crucible's headless report runner (was `axiom-physics-crucible`'s
+# implicit `src/main.rs`). Native, no extra features.
+[[bin]]
+name = "physics-crucible-report"
+path = "src/physics_crucible/main.rs"
+
+[features]
+# DOOM headless agent server. Native-only optional deps. The kernel/runtime
+# layers and serde are now always-on normal deps (other demos need them), so they
+# are not listed here as `dep:` — only the genuinely optional, native-only crates.
+doom-agent = [
+    "dep:tiny_http",
+    "dep:serde_json",
+    "dep:tungstenite",
+    "dep:axiom-agent",
+    "dep:axiom-perception",
+]
+# Adds the native offscreen wgpu renderer so the DOOM agent can read back images.
+doom-agent-render = ["doom-agent", "dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:png"]
+
+# Growth headless agent driver. Native-only optional deps. toml/serde/host are now
+# always-on normal deps, so they are not listed as `dep:` here.
+growth-agent = [
+    "dep:axiom-agent-harness",
+    "dep:axiom-perception",
+    "dep:axiom-introspect",
+    "dep:tiny_http",
+    "dep:serde_json",
+    "dep:tungstenite",
+    "dep:axiom-gpu-backend",
+    "dep:png",
+    "dep:axiom-canvas2d-backend",
+]
+
+# Native + wasm dependencies, shared across demos. Everything here builds on
+# native (so `cargo test --workspace` exercises every demo's pure game core) and
+# on wasm (the live browser arms). All paths are `../../{modules,crates}` because
+# the gallery sits at the same `apps/<name>` depth the old per-demo crates did.
+[dependencies]
+# The engine umbrella (module `engine`): App/scene/camera/render authoring + the
+# live wgpu backend (wasm32). Used by rotating-cube, netplay, doom, stress-cubes,
+# growth, physics-crucible.
+axiom = { path = "../../modules/axiom" }
+# Layers used by the pure game cores (deterministic primitives, geometry, layout,
+# the proc/space content substrate, the fixed-step runtime, the introspection
+# surface). Promoted to always-on because at least one demo needs each on native.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-interface = { path = "../../crates/axiom-interface" }
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-layout = { path = "../../crates/axiom-layout" }
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-proc = { path = "../../crates/axiom-proc" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+# The physics module under test (physics-crucible), composed only through PhysicsApi.
+axiom-physics = { path = "../../modules/axiom-physics" }
+# The engine input module (roomed-puzzle touch swipes).
+axiom-input = { path = "../../modules/axiom-input" }
+# Hand-editable level/data format used by several demos' codecs (roomed-puzzle,
+# rotating-cube's data-package test) and the growth agent's tag/directive TOML.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Native-only optional deps for the agent drivers. Confined to non-wasm so the
+# browser bundle never sees them; pulled in only by the agent features above.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# DOOM agent substrate + the game-agnostic perception model (shared with growth).
+axiom-agent = { path = "../../modules/axiom-agent", optional = true }
+axiom-perception = { path = "../../modules/axiom-perception", optional = true }
+# Growth agent: the reusable harness (composes axiom-agent), the introspection
+# surface holding world tags, and the two native screenshot backends.
+axiom-agent-harness = { path = "../../modules/axiom-agent-harness", optional = true }
+axiom-introspect = { path = "../../crates/axiom-introspect", optional = true }
+axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["offscreen"], optional = true }
+axiom-canvas2d-backend = { path = "../../modules/axiom-canvas2d-backend", optional = true }
+# Shared native server/codec deps for both agent drivers.
+tiny_http = { version = "0.12", optional = true }
+serde_json = { version = "1", optional = true }
+tungstenite = { version = "0.24", optional = true }
+# DOOM agent-render only: offscreen wgpu + PNG.
+wgpu = { version = "25", optional = true }
+bytemuck = { version = "1", optional = true }
+pollster = { version = "0.4", optional = true }
+png = { version = "0.17", optional = true }
+
+# Browser/live arm only: the wasm-bindgen glue, panic hook, the live windowing
+# presentation loop, the debug overlay, and the union of every demo's web-sys
+# surface. Confined to wasm32, so native `cargo test --workspace` compiles none of
+# it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Navigator",
+    "Document",
+    "Location",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "CssStyleDeclaration",
+    "DomRect",
+    "ImageData",
+    "Performance",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "MouseEvent",
+    "PointerEvent",
+    "WebSocket",
+    "EventSource",
+    "MessageEvent",
+    "BinaryType",
+    "console",
+] }
+
+# Native integration-test only: the deterministic frame recorder (DOOM's
+# replay-determinism proof). Never enters the wasm bundle.
+[dev-dependencies]
+axiom-recording = { path = "../../modules/axiom-recording" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

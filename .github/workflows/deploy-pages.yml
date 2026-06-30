@@ -79,7 +79,7 @@ jobs:
           npm --prefix scripts/packaging install --no-audit --no-fund
           npm --prefix packages/axiom-client install --no-audit --no-fund
           npm --prefix packages/axiom-client run build
-          python3 -c "import shutil, pathlib; d=pathlib.Path('apps/axiom-netplay-browser/web/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
+          python3 -c "import shutil, pathlib; d=pathlib.Path('apps/axiom-gallery/web/netplay/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
           python3 scripts/package_gallery.py --fast
 
       - name: Upload Pages artifact

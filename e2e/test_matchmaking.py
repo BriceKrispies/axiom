@@ -29,7 +29,7 @@ from playwright.sync_api import Page
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVER_DIR = REPO_ROOT / "examples" / "axiom-netplay-dotnet"
-WEB_ROOT = REPO_ROOT / "apps" / "axiom-netplay-browser" / "web"
+WEB_ROOT = REPO_ROOT / "dist"
 PORT = int(os.environ.get("AXIOM_MATCHMAKING_E2E_PORT", "8092"))
 BASE_URL = f"http://localhost:{PORT}"
 
@@ -69,7 +69,7 @@ def matchmaking_base_url():
         return
     if shutil.which("dotnet") is None:
         pytest.skip("the .NET 10 SDK (`dotnet`) is required for the matchmaking e2e test")
-    if not (WEB_ROOT / "pkg" / "axiom_netplay_browser_bg.wasm").exists():
+    if not (WEB_ROOT / "axiom_gallery_bg.wasm").exists():
         pytest.skip("prebuilt wasm bundle missing — run `make netplay-build` first")
 
     subprocess.run(["cargo", "build", "-p", "axiom-netplay-ffi", "--release"], cwd=REPO_ROOT, check=True)
@@ -107,7 +107,7 @@ def test_browser_joins_a_matchmade_room_and_plays(matchmaking_base_url: str, pag
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
 
-    page.goto(f"{matchmaking_base_url}/", wait_until="load")
+    page.goto(f"{matchmaking_base_url}/netplay/", wait_until="load")
     page.wait_for_function(
         "() => window.__net && window.__net.status === 'connected' && window.__net.myPlayer >= 0",
         timeout=CONNECT_TIMEOUT_MS,

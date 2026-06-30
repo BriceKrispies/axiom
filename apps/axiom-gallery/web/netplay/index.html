@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — Server-Authoritative Multiplayer</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 24px;
+        font: 14px/1.5 system-ui, sans-serif;
+        background: #15171c;
+        color: #d7dbe2;
+      }
+      h1 { font-size: 16px; font-weight: 600; margin: 0; }
+      /* The canvas id MUST match CANVAS_ID in src/lib.rs. */
+      #axiom-netplay-canvas {
+        width: 800px;
+        height: 600px;
+        border: 1px solid #2a2e36;
+        border-radius: 6px;
+        background: #000;
+      }
+      #status { font-family: ui-monospace, monospace; white-space: pre; text-align: center; }
+      .ok { color: #7fd17f; }
+      .err { color: #e07a7a; }
+    </style>
+  </head>
+  <body>
+    <h1>Axiom — live server-authoritative multiplayer</h1>
+    <canvas id="axiom-netplay-canvas" width="800" height="600"></canvas>
+    <div id="status">booting…</div>
+
+    <script type="module">
+      // The browser networking is done entirely by the @axiom/client SDK (built
+      // from packages/axiom-client into ./vendor/axiom-client by `make
+      // netplay-build`). The Rust/wasm module is only the renderer: we hand it
+      // the authoritative positions the SERVER sends, and it draws them.
+      //
+      // Cache-bust everything on each load (the dev http.server sends no cache
+      // headers), so a refresh never serves a stale bundle.
+      const v = Date.now();
+      const { default: initWasm, netplay_start, set_positions } =
+        await import(`../axiom-loader.js?v=${v}`);
+      const wasmUrl = new URL(
+        `./pkg/axiom_netplay_browser_bg.wasm?v=${v}`, import.meta.url);
+      const { startNetplay } = await import(`./netplay-client.js?v=${v}`);
+
+      const status = document.getElementById("status");
+      const set = (msg, cls) => { status.textContent = msg; status.className = cls ?? ""; };
+
+      // The authoritative server. By default we connect SAME-ORIGIN to /ws, so a
+      // single server that serves this page AND the game socket (e.g. the .NET
+      // example in examples/axiom-netplay-dotnet) just works. Override with
+      // ?server=<url> for a separate server (e.g. ?server=ws://127.0.0.1:9002).
+      function serverUrl() {
+        const q = new URLSearchParams(location.search).get("server");
+        if (q && q.length > 0) return q;
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        return `${proto}//${location.host}/ws`;
+      }
+
+      const params = new URLSearchParams(location.search);
+      // ?naive disables client-side prediction + interpolation (render the raw
+      // latest snapshot) so you can feel the difference vs the default.
+      const naive = params.has("naive");
+
+      // Which room to join. An explicit ?room=<id> wins; otherwise ask the
+      // matchmaker (POST /matchmake) for a room with a free slot. A director
+      // (scaled-out) answer also carries the owning node's URL to connect to.
+      async function resolveRoom() {
+        const explicit = params.get("room");
+        if (explicit) return { roomId: explicit };
+        try {
+          const r = await fetch("/matchmake", { method: "POST" });
+          if (r.ok) return await r.json();   // { roomId, nodeUrl? }
+        } catch (_) { /* fall through to the default room */ }
+        return { roomId: "lobby" };
+      }
+      // ?transport= selects the transport: websocket (default), webtransport
+      // (HTTP/3), or webrtc (unreliable UDP DataChannel).
+      const transportParam = params.get("transport");
+      const useWebTransport = transportParam === "webtransport";
+      const useWebRtc = transportParam === "webrtc";
+
+      async function resolveTransport() {
+        if (useWebRtc) {
+          // WebRTC: signal the SDP offer/answer over same-origin HTTP; the data
+          // channel is a direct (loopback) UDP flow — no cert, no HTTP/3.
+          return { transport: "webrtc", signalingUrl: `${location.origin}/rtc/offer` };
+        }
+        if (useWebTransport) {
+          // WebTransport: connect to the HTTP/3 endpoint (:8091), trusting the
+          // server's self-signed dev cert via the hash it publishes at /cert-hash.
+          const b64 = await (await fetch("/cert-hash")).text();
+          const hash = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
+          return { url: `https://${location.hostname}:8091/wt`, transport: "webtransport", serverCertificateHash: hash };
+        }
+        return { url: serverUrl(), transport: undefined };
+      }
+
+      // WebGPU preferred; the engine falls back to WebGL2 when it is absent
+      // (see docs/render-fallback.md). Only bail when neither is available.
+      const hasRenderBackend = ("gpu" in navigator) || (() => {
+        try { return !!document.createElement("canvas").getContext("webgl2"); }
+        catch { return false; }
+      })();
+
+      async function main() {
+        if (!hasRenderBackend) {
+          set(
+            "Neither WebGPU nor WebGL2 is available in this browser.\n" +
+            "Use a recent Chrome/Edge, Firefox, or Safari over http://localhost.",
+            "err"
+          );
+          return;
+        }
+        await initWasm({ module_or_path: wasmUrl });
+        netplay_start();   // begin the wasm render loop (draws whatever positions we set)
+
+        // Ask the matchmaker which room to join (and, when scaled out, which node
+        // hosts it). The netcode brain then does prediction + interpolation.
+        const match = await resolveRoom();           // { roomId, nodeUrl? }
+        const t = await resolveTransport();
+        const client = startNetplay({
+          setPositions: set_positions, naive,
+          serverUrl: match.nodeUrl || t.url, transport: t.transport,
+          serverCertificateHash: t.serverCertificateHash, signalingUrl: t.signalingUrl,
+          roomId: match.roomId,
+        });
+
+        const transportLabel = useWebRtc ? "WebRTC (unreliable UDP)"
+          : useWebTransport ? "WebTransport (HTTP/3)" : "WebSocket (TCP)";
+        const mode = (naive
+          ? "NAIVE mode (no prediction/interpolation) — expect stutter + input lag."
+          : "Prediction + interpolation ON — your cube responds instantly, the other moves smoothly.")
+          + "  Transport: " + transportLabel + ".";
+        client.onStatus((s) => {
+          if (s === "connected") {
+            set(
+              "Connected. Open this page in a SECOND browser window to control the\n" +
+              "other cube. Arrow keys (← → ↑ ↓) move YOUR cube. Red = player 1,\n" +
+              "blue = player 2. The server is laggy on purpose.\n" + mode,
+              "ok"
+            );
+          } else if (s === "connecting") {
+            set("Connecting to the server…");
+          } else {
+            set("Disconnected. Is the server running? `make netplay-dotnet`", "err");
+          }
+        });
+      }
+      main().catch((e) => set("Startup failed: " + e, "err"));
+    </script>
+  </body>
+</html>

@@ -30,7 +30,7 @@ from playwright.sync_api import Page
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVER_DIR = REPO_ROOT / "examples" / "axiom-netplay-dotnet"
-WEB_ROOT = REPO_ROOT / "apps" / "axiom-netplay-browser" / "web"
+WEB_ROOT = REPO_ROOT / "dist"
 DIRECTOR_PORT = int(os.environ.get("AXIOM_DIRECTOR_PORT", "8100"))
 NODE_A_PORT = int(os.environ.get("AXIOM_NODE_A_PORT", "8101"))
 NODE_B_PORT = int(os.environ.get("AXIOM_NODE_B_PORT", "8102"))
@@ -132,7 +132,7 @@ def test_browser_is_redirected_to_a_node_and_plays(scaleout_director_url: str, p
     page.on("pageerror", lambda e: errors.append(str(e)))
 
     # The page loads from the DIRECTOR, matchmakes, and connects to a NODE.
-    page.goto(f"{scaleout_director_url}/", wait_until="load")
+    page.goto(f"{scaleout_director_url}/netplay/", wait_until="load")
     page.wait_for_function(
         "() => window.__net && window.__net.status === 'connected' && window.__net.myPlayer >= 0",
         timeout=CONNECT_TIMEOUT_MS,

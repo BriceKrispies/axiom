@@ -138,17 +138,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-browser-dev-harness"
-version = "0.1.0"
-dependencies = [
- "axiom-debug-overlay",
- "console_error_panic_hook",
- "js-sys",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "axiom-canvas2d-backend"
 version = "0.1.0"
 dependencies = [
@@ -207,48 +196,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-demo-rotating-cube-browser"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "console_error_panic_hook",
- "serde",
- "toml",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "axiom-dev-reload"
 version = "0.1.0"
 dependencies = [
  "tiny_http",
-]
-
-[[package]]
-name = "axiom-doom-browser"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-agent",
- "axiom-debug-overlay",
- "axiom-interface",
- "axiom-kernel",
- "axiom-perception",
- "axiom-recording",
- "axiom-runtime",
- "axiom-windowing",
- "bytemuck",
- "console_error_panic_hook",
- "js-sys",
- "png",
- "pollster",
- "serde",
- "serde_json",
- "tiny_http",
- "tungstenite",
- "wasm-bindgen",
- "web-sys",
- "wgpu",
 ]
 
 [[package]]
@@ -287,6 +238,45 @@ dependencies = [
  "axiom-kernel",
  "axiom-runtime",
  "axiom-zones",
+]
+
+[[package]]
+name = "axiom-gallery"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-agent",
+ "axiom-agent-harness",
+ "axiom-canvas2d-backend",
+ "axiom-debug-overlay",
+ "axiom-gpu-backend",
+ "axiom-host",
+ "axiom-input",
+ "axiom-interface",
+ "axiom-introspect",
+ "axiom-kernel",
+ "axiom-layout",
+ "axiom-math",
+ "axiom-perception",
+ "axiom-physics",
+ "axiom-proc",
+ "axiom-recording",
+ "axiom-runtime",
+ "axiom-space",
+ "axiom-windowing",
+ "bytemuck",
+ "console_error_panic_hook",
+ "js-sys",
+ "png",
+ "pollster",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "toml",
+ "tungstenite",
+ "wasm-bindgen",
+ "web-sys",
+ "wgpu",
 ]
 
 [[package]]
@@ -335,33 +325,6 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-math",
-]
-
-[[package]]
-name = "axiom-growth"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-agent-harness",
- "axiom-canvas2d-backend",
- "axiom-gpu-backend",
- "axiom-host",
- "axiom-interface",
- "axiom-introspect",
- "axiom-kernel",
- "axiom-math",
- "axiom-perception",
- "axiom-windowing",
- "console_error_panic_hook",
- "js-sys",
- "png",
- "serde",
- "serde_json",
- "tiny_http",
- "toml",
- "tungstenite",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -477,16 +440,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-netplay-browser"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-windowing",
- "console_error_panic_hook",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "axiom-netplay-ffi"
 version = "0.1.0"
 dependencies = [
@@ -536,20 +489,6 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
-]
-
-[[package]]
-name = "axiom-physics-crucible"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-kernel",
- "axiom-physics",
- "axiom-runtime",
- "axiom-windowing",
- "console_error_panic_hook",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -622,20 +561,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-quintet"
-version = "0.1.0"
-dependencies = [
- "axiom-host",
- "axiom-kernel",
- "axiom-layout",
- "axiom-proc",
- "axiom-space",
- "console_error_panic_hook",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "axiom-recording"
 version = "0.1.0"
 dependencies = [
@@ -673,23 +598,6 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
-]
-
-[[package]]
-name = "axiom-roomed-puzzle"
-version = "0.1.0"
-dependencies = [
- "axiom-host",
- "axiom-input",
- "axiom-interface",
- "axiom-kernel",
- "axiom-layout",
- "axiom-math",
- "console_error_panic_hook",
- "serde",
- "toml",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -734,15 +642,6 @@ name = "axiom-space"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
-]
-
-[[package]]
-name = "axiom-stress-cubes-browser"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "console_error_panic_hook",
- "wasm-bindgen",
 ]
 
 [[package]]

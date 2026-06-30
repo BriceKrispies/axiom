@@ -29,8 +29,8 @@
 //!
 //! All three positional args are optional and default to:
 //! - `port`       = `8080`
-//! - `static_dir` = `apps/axiom-doom-browser/web`
-//! - `level_file` = `apps/axiom-doom-browser/level.axiom`
+//! - `static_dir` = `dist` (the packaged gallery; DOOM is at `dist/doom/`)
+//! - `level_file` = `apps/axiom-gallery/src/doom/level.axiom`
 //!
 //! The level file may not exist yet — that is fine. A missing file is treated
 //! as empty contents, and the watcher keeps polling so a later-created file is
@@ -99,8 +99,8 @@ use tiny_http::{Header, Response, Server};
 
 /// Default values for the optional positional CLI args.
 const DEFAULT_PORT: u16 = 8080;
-const DEFAULT_STATIC_DIR: &str = "apps/axiom-doom-browser/web";
-const DEFAULT_LEVEL_FILE: &str = "apps/axiom-doom-browser/level.axiom";
+const DEFAULT_STATIC_DIR: &str = "dist";
+const DEFAULT_LEVEL_FILE: &str = "apps/axiom-gallery/src/doom/level.axiom";
 
 /// How often the watcher thread polls the level file's modification time.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);

@@ -49,11 +49,10 @@ axiom-math = { path = "../../crates/axiom-math" }
 # umbrella `Material`→asset boundary drops `opacity`), building the sorted,
 # opacity-folded `FramePacket` both backends consume.
 axiom-render = { path = "../../modules/axiom-render" }
-# Renderable apps the tool can screenshot (rlib). Apps are leaves; depending on
-# them here is fine because this tool is outside the engine workspace/graph.
-axiom-doom-browser = { path = "../../apps/axiom-doom-browser" }
-# The physics crucible proof app: a deterministic physics proving room rendered as
-# debug geometry (`--app physics-crucible`).
-axiom-physics-crucible = { path = "../../apps/axiom-physics-crucible" }
+# The merged demo gallery (rlib): every browser demo now lives here as a module
+# (`axiom_gallery::doom`, `axiom_gallery::physics_crucible`, …). The tool screenshots
+# them through that one crate. Apps are leaves; depending on the gallery here is fine
+# because this tool is outside the engine workspace/graph.
+axiom-gallery = { path = "../../apps/axiom-gallery" }
 # PNG encode of the read-back / rasterized pixels.
 png = "0.17"

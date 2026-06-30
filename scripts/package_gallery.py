@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""Assemble the demo gallery into ``dist/`` with every app PACKAGED.
+"""Assemble the SINGLE-bundle demo gallery into ``dist/``.
 
 Repo tooling (alongside ``package_app.py`` and the Makefile), NOT part of the engine
-dependency graph. This replaces the old ``--target web`` + copy assembler: instead of
-copying each app's ``wasm-bindgen --target web`` ``pkg/`` output, it runs the full
-packaging pipeline (``package_app.package``) for every demo, so each ``dist/<id>/``
-carries the capability ladder — a size-optimized wasm fast-path AND a Binaryen
-wasm2js fallback for browsers with no WebAssembly, behind the shared loader. The
-gallery shell (``gallery.js``) boots every demo through that loader.
+dependency graph. Every browser demo is now merged into ONE crate
+(``apps/axiom-gallery``), so the gallery is ONE wasm bundle, not nine: this lays the
+static site (the shell + every demo's page) over a single capability-detecting loader.
 
-All apps share ONE persistent MVP cargo target dir (``target/package-mvp``), so std
-and the dependency graph compile once and are reused across the eight apps. The first
-run is still slow (it builds std MVP and every app); re-runs are incremental.
+It does two things:
 
-Build the netplay SDK first if you want netplay's networking (the Makefile's
-``gallery-build`` vendors it into the app's ``web/`` before calling this, and the
-packager then copies that ``web/vendor/`` into ``dist/netplay/``).
+1. **Copy the static site** ``apps/axiom-gallery/web/`` → ``dist/`` verbatim — the
+   shell (``index.html`` landing grid, ``gallery.js``, ``demo.html``, ``keypad.js``,
+   ``styles.css``), every demo's page under ``dist/<demo>/``, and the netplay client
+   + vendored ``@axiom/client`` SDK. (The Makefile's ``gallery-build`` vendors that SDK
+   into ``web/netplay/vendor/`` first, so it rides along in the copy.)
+
+2. **Build the ONE shared bundle** at the ``dist/`` root via ``package_app.build_bundle``:
+   a size-optimized wasm fast-path AND (unless ``--fast``) a Binaryen wasm2js fallback
+   for browsers with no WebAssembly, behind ``dist/axiom-loader.js``. Every page —
+   shell and self-hosted — imports that one loader and calls its demo's ``<demo>_start``.
+
+The full build rebuilds std MVP (so the wasm2js fallback is possible — see
+``package_app.py``), so the first ``make gallery`` is slow; re-runs are incremental.
+``--fast`` skips the fallback for tight iteration.
 """
 
 from __future__ import annotations
@@ -29,24 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import package_app  # noqa: E402  (local repo tooling, not an installed package)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-
-# The static gallery shell copied verbatim to the dist root (the shared per-demo
-# shell + landing grid). gallery.js boots each shared-shell demo via its loader.
-GALLERY_FILES = ["index.html", "demo.html", "gallery.js", "keypad.js", "styles.css"]
-
-# gallery demo id (== dist subdir, must match gallery.js DEMOS[].id/dir/page) ->
-# the app crate directory packaged into it.
-GALLERY_APPS = {
-    "rotating-cube": "apps/axiom-demo-rotating-cube-browser",
-    "netplay": "apps/axiom-netplay-browser",
-    "doom": "apps/axiom-doom-browser",
-    "stress-cubes": "apps/axiom-stress-cubes-browser",
-    "growth": "apps/axiom-growth",
-    "roomed-puzzle": "apps/axiom-roomed-puzzle",
-    "quintet": "apps/axiom-quintet",
-    "physics-crucible": "apps/axiom-physics-crucible",
-    "harness": "apps/axiom-browser-dev-harness",
-}
+GALLERY_DIR = REPO_ROOT / "apps" / "axiom-gallery"
+WEB_DIR = GALLERY_DIR / "web"
 
 
 def _dir_size_mb(path: Path) -> float:
@@ -54,40 +44,42 @@ def _dir_size_mb(path: Path) -> float:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Package every gallery demo into dist/.")
+    parser = argparse.ArgumentParser(description="Package the single-bundle demo gallery into dist/.")
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="quick wasm-only demos (normal incremental build, no wasm2js fallback) for iteration",
+        help="quick wasm-only bundle (normal incremental build, no wasm2js fallback) for iteration",
     )
     args = parser.parse_args()
+
+    if not (GALLERY_DIR / "Cargo.toml").is_file():
+        sys.exit(f"error: {GALLERY_DIR} not found — the gallery crate is missing.")
 
     dist = REPO_ROOT / "dist"
     if dist.exists():
         shutil.rmtree(dist)
     dist.mkdir(parents=True)
 
-    gallery = REPO_ROOT / "gallery"
-    for name in GALLERY_FILES:
-        shutil.copy2(gallery / name, dist / name)
+    # 1. Lay the whole static site over dist/. Skip any stray local build output
+    #    (a `pkg/` left by a standalone wasm-bindgen run) — the bundle is built fresh
+    #    below, straight into the dist root.
+    for item in WEB_DIR.iterdir():
+        if item.name == "pkg":
+            continue
+        dest = dist / item.name
+        if item.is_dir():
+            shutil.copytree(item, dest)
+        else:
+            shutil.copy2(item, dest)
 
-    # fast shares the main target dir (incremental); full uses the MVP build dir.
+    # 2. Build the ONE shared bundle (axiom-loader.js + <snake>_bg.*) at the dist root.
+    #    fast shares the main target dir (incremental); full uses the MVP build dir so
+    #    std compiles once.
     target_dir = (REPO_ROOT / "target") if args.fast else (REPO_ROOT / "target" / "package-mvp")
-    print(f"Packaging {len(GALLERY_APPS)} demos into {dist}{' (fast)' if args.fast else ''}\n")
-    for demo_id, app_rel in GALLERY_APPS.items():
-        app_dir = REPO_ROOT / app_rel
-        if not (app_dir / "Cargo.toml").is_file():
-            sys.exit(f"error: {app_rel} not found — gallery app missing.")
-        package_app.package(app_dir, out=dist / demo_id, fast=args.fast, target_dir=target_dir)
+    print(f"Building the gallery bundle into {dist}{' (fast: wasm-only)' if args.fast else ''}\n")
+    package_app.build_bundle(GALLERY_DIR, dist, fast=args.fast, target_dir=target_dir)
 
-    print(f"\nassembled packaged gallery into {dist}  ({_dir_size_mb(dist):.0f} MB total)")
-    sizes = sorted(
-        ((demo_id, _dir_size_mb(dist / demo_id)) for demo_id in GALLERY_APPS),
-        key=lambda kv: kv[1],
-        reverse=True,
-    )
-    for demo_id, mb in sizes:
-        print(f"  {demo_id:<16} {mb:6.1f} MB")
+    print(f"\nassembled the single-bundle gallery into {dist}  ({_dir_size_mb(dist):.0f} MB total)")
     return 0
 
 

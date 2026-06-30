@@ -44,7 +44,7 @@ Two app shapes package through the same pipeline:
 Usage:
     uv run --no-project python scripts/package_app.py <app> [--out DIR] [--inline]
 
-``<app>`` is an app crate dir (``apps/axiom-quintet``) or a short name (``quintet``).
+``<app>`` is an app crate dir (``apps/axiom-gallery``) or a short name (``gallery``).
 """
 
 from __future__ import annotations
@@ -368,6 +368,108 @@ def emit_inline_html(
     (out / "index.html").write_text(html, encoding="utf-8")
 
 
+def _compile_wasm_bundle(
+    app_dir: Path,
+    tmp: Path,
+    *,
+    fast: bool,
+    has_fallback: bool,
+    target_dir: Path | None,
+) -> tuple[str, str, Path, Path | None]:
+    """Build the crate's wasm and produce the bundle artifacts in ``tmp``.
+
+    Steps 1-4 of the pipeline, shared by ``package`` (single app) and
+    ``build_bundle`` (the multi-page gallery): cargo build (fast incremental or MVP
+    ``-Z build-std``), wasm-bindgen *bundler* glue, ``wasm-opt -Oz`` fast wasm, and
+    the optional wasm2js fallback. Returns ``(snake, glue_js, fast_wasm_path,
+    wasm2js_path_or_None)``."""
+    name = crate_name(app_dir)
+    snake = name.replace("-", "_")
+    # 1. Build the wasm. fast = normal incremental release build (shares the main
+    # target dir). Otherwise an MVP build with std rebuilt and reference-types off
+    # (what wasm2js requires), paths anonymized, into the shared package-mvp dir.
+    env = os.environ.copy()
+    if fast:
+        target_dir = target_dir or (REPO_ROOT / "target")
+        env["CARGO_TARGET_DIR"] = str(target_dir)
+        run(["cargo", "build", "-p", name, "--target", WASM_TARGET, "--release"], env=env)
+    else:
+        target_dir = target_dir or (REPO_ROOT / "target" / "package-mvp")
+        env["CARGO_TARGET_DIR"] = str(target_dir)
+        home = str(Path.home())
+        env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join([MVP_TARGET_FEATURES, f"--remap-path-prefix={home}=~"])
+        run(
+            ["cargo", "+nightly", "build", "-p", name, "--target", WASM_TARGET, "--release",
+             "-Z", "build-std=std,panic_abort"],
+            env=env,
+        )
+    built = target_dir / WASM_TARGET / "release" / f"{snake}.wasm"
+    if not built.is_file():
+        sys.exit(f"error: expected wasm not produced at {built}")
+
+    # 2. wasm-bindgen bundler glue (the shared __wbg_set_wasm seam).
+    pkg = tmp / "pkg"
+    run(["wasm-bindgen", "--target", "bundler", "--out-dir", str(pkg), str(built)])
+    bg_wasm = pkg / f"{snake}_bg.wasm"
+
+    # 3. Fast-path wasm: size-optimized.
+    fast_wasm = tmp / f"{snake}_bg.opt.wasm"
+    run(binaryen("wasm-opt", "-Oz", str(bg_wasm), "-o", str(fast_wasm)))
+
+    # 4. wasm2js fallback: lower remaining post-MVP ops, then compile to JS, then
+    # inline the bare-`env` i64 scratch so the module resolves in a static bundle.
+    wasm2js_path: Path | None = tmp / f"{snake}_bg.wasm2js.js"
+    if has_fallback:
+        lowered = tmp / "mvp_lowered.wasm"
+        run(binaryen("wasm-opt", str(bg_wasm), *WASM2JS_LOWERING, "-o", str(lowered)))
+        run(binaryen("wasm2js", str(lowered), "-o", str(wasm2js_path)))
+        text = wasm2js_path.read_text(encoding="utf-8")
+        wasm2js_path.write_text(text.replace(WASM2JS_ENV_IMPORT, WASM2JS_ENV_SHIM, 1), encoding="utf-8")
+    else:
+        wasm2js_path = None
+
+    glue_js = (pkg / f"{snake}_bg.js").read_text(encoding="utf-8")
+    return snake, glue_js, fast_wasm, wasm2js_path
+
+
+def build_bundle(
+    app_dir: Path,
+    out: Path,
+    *,
+    fast: bool = False,
+    has_fallback: bool = True,
+    target_dir: Path | None = None,
+    keep_temp: bool = False,
+) -> str:
+    """Build ONE crate's wasm bundle and drop the loader + companions into ``out/``
+    (native root layout: ``axiom-loader.js`` + ``<snake>_bg.{wasm,js[,wasm2js.js]}``).
+
+    Unlike ``package``, this writes NO index.html and copies NO web assets — the
+    caller assembles the static site itself. This is the seam the multi-page demo
+    gallery (``package_gallery.py``) builds on: one shared bundle, many pages that
+    each ``import "./axiom-loader.js"`` and call their own demo's export. ``out`` is
+    created if absent and NOT wiped (the caller may have staged the site there
+    first). Returns the snake-cased crate name."""
+    has_fallback = has_fallback and not fast
+    out.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=f"axiom-bundle-{crate_name(app_dir).removeprefix('axiom-')}-"))
+    try:
+        snake, glue_js, fast_wasm, wasm2js_path = _compile_wasm_bundle(
+            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir
+        )
+        shutil.copy2(fast_wasm, out / f"{snake}_bg.wasm")
+        if wasm2js_path is not None:
+            shutil.copy2(wasm2js_path, out / f"{snake}_bg.wasm2js.js")
+        (out / f"{snake}_bg.js").write_text(glue_js, encoding="utf-8")
+        (out / "axiom-loader.js").write_text(loader_source(snake, has_fallback=has_fallback), encoding="utf-8")
+        return snake
+    finally:
+        if keep_temp:
+            print(f"  (kept temp build dir: {tmp})")
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 def package(
     app_dir: Path,
     *,
@@ -409,54 +511,18 @@ def package(
         # vendored SDK are compiled/built here so the baked bundle matches the dev loop.
         if sdk_hosted:
             prepare_sdk_hosted(app_dir)
-        # 1. Build the wasm. fast = normal incremental release build (shares the main
-        # target dir). Otherwise an MVP build with std rebuilt and reference-types off
-        # (what wasm2js requires), paths anonymized, into the shared package-mvp dir.
-        env = os.environ.copy()
-        if fast:
-            target_dir = target_dir or (REPO_ROOT / "target")
-            env["CARGO_TARGET_DIR"] = str(target_dir)
-            run(["cargo", "build", "-p", name, "--target", WASM_TARGET, "--release"], env=env)
-        else:
-            target_dir = target_dir or (REPO_ROOT / "target" / "package-mvp")
-            env["CARGO_TARGET_DIR"] = str(target_dir)
-            home = str(Path.home())
-            env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join([MVP_TARGET_FEATURES, f"--remap-path-prefix={home}=~"])
-            run(
-                ["cargo", "+nightly", "build", "-p", name, "--target", WASM_TARGET, "--release",
-                 "-Z", "build-std=std,panic_abort"],
-                env=env,
-            )
-        built = target_dir / WASM_TARGET / "release" / f"{snake}.wasm"
-        if not built.is_file():
-            sys.exit(f"error: expected wasm not produced at {built}")
-
-        # 2. wasm-bindgen bundler glue (the shared __wbg_set_wasm seam).
-        pkg = tmp / "pkg"
-        run(["wasm-bindgen", "--target", "bundler", "--out-dir", str(pkg), str(built)])
-        bg_wasm = pkg / f"{snake}_bg.wasm"
-
-        # 3. Fast-path wasm: size-optimized.
-        fast_wasm = tmp / f"{snake}_bg.opt.wasm"
-        run(binaryen("wasm-opt", "-Oz", str(bg_wasm), "-o", str(fast_wasm)))
-
-        # 4. wasm2js fallback: lower remaining post-MVP ops, then compile to JS, then
-        # inline the bare-`env` i64 scratch so the module resolves in a static bundle.
-        wasm2js_path = tmp / f"{snake}_bg.wasm2js.js"
-        if has_fallback:
-            lowered = tmp / "mvp_lowered.wasm"
-            run(binaryen("wasm-opt", str(bg_wasm), *WASM2JS_LOWERING, "-o", str(lowered)))
-            run(binaryen("wasm2js", str(lowered), "-o", str(wasm2js_path)))
-            text = wasm2js_path.read_text(encoding="utf-8")
-            wasm2js_path.write_text(text.replace(WASM2JS_ENV_IMPORT, WASM2JS_ENV_SHIM, 1), encoding="utf-8")
+        # 1-4. Build the wasm + bundle artifacts (shared with the gallery's
+        # build_bundle): cargo build, wasm-bindgen bundler glue, wasm-opt -Oz, and the
+        # optional wasm2js fallback.
+        snake, glue_js, fast_wasm, wasm2js_path = _compile_wasm_bundle(
+            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir
+        )
+        wasm2js_js = wasm2js_path.read_text(encoding="utf-8") if wasm2js_path is not None else None
 
         # Fresh output dir.
         if out.exists():
             shutil.rmtree(out)
         out.mkdir(parents=True)
-
-        glue_js = (pkg / f"{snake}_bg.js").read_text(encoding="utf-8")
-        wasm2js_js = wasm2js_path.read_text(encoding="utf-8") if has_fallback else None
 
         # 5. Emit the bundle in the chosen shape.
         if inline:
@@ -486,7 +552,7 @@ def package(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Package one Axiom browser app into a self-contained bundle.")
-    parser.add_argument("app", help="app crate dir (apps/axiom-quintet) or short name (quintet)")
+    parser.add_argument("app", help="app crate dir (apps/axiom-gallery) or short name (gallery)")
     parser.add_argument("--out", help="output dir (default: dist-app/<name>)")
     parser.add_argument("--inline", action="store_true", help="emit a single self-contained index.html")
     parser.add_argument("--no-fallback", action="store_true", help="skip the wasm2js fallback (wasm-only bundle)")

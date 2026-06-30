@@ -42,7 +42,7 @@ from playwright.sync_api import Page
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVER_DIR = REPO_ROOT / "examples" / "axiom-netplay-dotnet"
-WEB_ROOT = REPO_ROOT / "apps" / "axiom-netplay-browser" / "web"
+WEB_ROOT = REPO_ROOT / "dist"
 PORT = int(os.environ.get("AXIOM_NETPLAY_E2E_PORT", "8090"))
 BASE_URL = f"http://localhost:{PORT}"
 
@@ -85,7 +85,7 @@ def netplay_base_url():
 
     if shutil.which("dotnet") is None:
         pytest.skip("the .NET 10 SDK (`dotnet`) is required for the netplay e2e test")
-    if not (WEB_ROOT / "pkg" / "axiom_netplay_browser_bg.wasm").exists():
+    if not (WEB_ROOT / "axiom_gallery_bg.wasm").exists():
         pytest.skip("prebuilt wasm bundle missing — run `make netplay-build` first")
 
     # The native cdylib the server P/Invokes. Build it fresh so the test exercises
@@ -128,7 +128,7 @@ def test_server_authoritative_movement_clamps_and_reconciles(netplay_base_url: s
     page.on("console", lambda m: messages.append(m.text))
     page.on("pageerror", lambda e: errors.append(str(e)))
 
-    page.goto(f"{netplay_base_url}/", wait_until="load")
+    page.goto(f"{netplay_base_url}/netplay/", wait_until="load")
 
     # 1. The browser connects to the authoritative server.
     page.wait_for_function(
