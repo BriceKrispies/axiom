@@ -10,15 +10,31 @@
 //! a later quad composites over an earlier one on the GPU exactly as the software
 //! `composite_pixel` paints later commands over earlier ones.
 //!
-//! ## Scope — parity with the software subset
-//! The GPU 2D arm is scoped to the software rasterizer's **alpha-composited
-//! subset that has no per-pixel sampling ambiguity**: filled **rect** (its
-//! transformed axis-aligned bounding box, matching the software fill) and
-//! **sprite** (an atlas source-rect blit with tint, per-axis flip, and alpha).
-//! The deferred kinds — circle, ellipse, line, particle-quad, path, text, and
-//! gradient/paint fills — are **not** emitted here (their `as_*` accessor is never
-//! queried), exactly as the software backend defers path/text/paint. A command of
-//! a non-emitted kind contributes zero quads, branchlessly.
+//! ## Scope — shape parity with the software subset
+//! The GPU 2D arm is at **shape parity** with the software rasterizer's filled,
+//! alpha-composited subset: **rect** (its transformed axis-aligned bounding box),
+//! **sprite** (an atlas source-rect blit with tint, per-axis flip, and alpha),
+//! **circle** and **ellipse** (rotation-exact via conjugate semi-diameters),
+//! **line** (a rounded capsule with stroke width), and **particle-quad** (a
+//! centred square — the same `fill_rect` the software path emits). The deferred
+//! kinds — **path**, **text**, gradient/**paint** fills, and per-shape **strokes**
+//! (the software backend draws strokes; the GPU subset, like its rect path, fills
+//! only for now) — are **not** emitted here (their `as_*` accessor is never
+//! queried). A command of a non-emitted kind contributes zero quads, branchlessly.
+//!
+//! ## How the round shapes stay byte-exact (analytic coverage, not tessellation)
+//! A circle/ellipse/line cannot be a hard-edged polygon fan and still match the
+//! software backend's **exact per-pixel** coverage (`s²+t²≤1` for a conic, capsule
+//! distance for a line) within the ±2 quantization budget — a polygon edge
+//! disagrees with the true curve at boundary pixels by the shape's full colour. So
+//! each round shape emits **one quad over its bounding region** carrying, per
+//! vertex, an *analytic coverage field*: the conic basis coordinate `(s, t)` for a
+//! circle/ellipse, or the line-local `(along, perp, length, half_width)` for a
+//! line. The platform (wgpu) arm's fragment shader interpolates that field (affine,
+//! so exact at every pixel centre) and `discard`s the fragment when the *same* test
+//! the software path runs fails. The covered core therefore owns all the coverage
+//! math — the shader only evaluates it — keeping this file the single parity source
+//! of truth, branchless, and fully covered on native.
 //!
 //! ## Coordinate model
 //! Quad positions are **framebuffer pixels** (top-left origin), the same space the
@@ -39,6 +55,25 @@ use axiom_math::{Mat3, Vec2};
 /// emitting a quad with alpha 0 composites nothing, so a "no fill" command draws
 /// nothing without a branch — the same no-op-composite the software path relies on.
 const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+
+/// Smallest line length (screen px) treated as non-degenerate; a shorter segment
+/// has no direction, so its capsule collapses to a round dot of `half_width`
+/// radius — matching the software `raster_line`'s `EPS`-floored `len²`.
+const EPS: f32 = 1e-6;
+
+/// The coverage `field` for a shape that is always fully inside its quad (rect,
+/// sprite, particle): the platform shader's capsule test reads
+/// `(along, perp, length, half_width)` = `(0, 0, 0, HUGE)`, so the distance `0`
+/// is always `≤ HUGE²` and nothing is discarded. `HUGE` is finite (its square does
+/// not overflow `f32`) so the comparison is a plain number, never a `NaN`.
+const PLAIN_FIELD: [f32; 4] = [0.0, 0.0, 0.0, 1.0e18];
+
+/// Coverage `kind` selecting the platform shader's **capsule** distance test —
+/// used by the always-inside plain quads and by the line (a real rounded capsule).
+const KIND_CAPSULE: f32 = 0.0;
+/// Coverage `kind` selecting the platform shader's **conic** test (`s²+t²≤1`) —
+/// used by circle and ellipse.
+const KIND_CONIC: f32 = 1.0;
 
 /// Sprite/atlas texture **dimensions** keyed by the contract's
 /// [`TextureId`] raw value — the GPU peer of the canvas backend's
@@ -80,13 +115,16 @@ pub(crate) enum QuadSource {
     Sprite(u64),
 }
 
-/// Floats per emitted vertex: position `x,y` (pixels) + UV `u,v` + colour `r,g,b,a`.
-/// A layout constant the platform-arm renderer (vertex stride) and the tests
-/// (vertex indexing) read; it has no consumer in the default no-GPU build, so it
-/// is compiled only where one exists — the same `any(test, …)` gating
-/// `surface_recovery` uses.
+/// Floats per emitted vertex: position `x,y` (pixels) + UV `u,v` + colour
+/// `r,g,b,a` + analytic coverage `field` (`vec4`) + coverage `kind` (`f32`). The
+/// `field`/`kind` feed the platform shader's per-pixel discard test (conic or
+/// capsule); a plain rect/sprite/particle carries the always-inside [`PLAIN_FIELD`]
+/// with [`KIND_CAPSULE`]. A layout constant the platform-arm renderer (vertex
+/// stride) and the tests (vertex indexing) read; it has no consumer in the default
+/// no-GPU build, so it is compiled only where one exists — the same `any(test, …)`
+/// gating `surface_recovery` uses.
 #[cfg(any(test, all(not(target_arch = "wasm32"), feature = "offscreen")))]
-pub(crate) const VERTEX_FLOATS: usize = 8;
+pub(crate) const VERTEX_FLOATS: usize = 13;
 /// Vertices per quad (two triangles share the four corners via the index buffer).
 pub(crate) const VERTS_PER_QUAD: usize = 4;
 
@@ -119,12 +157,16 @@ impl Draw2dGeometry {
     }
 
     /// Append one quad: its four screen-pixel `corners` (TL, TR, BR, BL — the
-    /// `0,1,2,0,2,3` index order), their `uvs`, a flat straight-linear `color`,
-    /// and the `source` the platform arm binds.
+    /// `0,1,2,0,2,3` index order), their `uvs`, per-corner analytic coverage
+    /// `fields` (interpolated by the platform shader for its discard test), the
+    /// coverage `kind` (capsule or conic — flat across the quad), a flat
+    /// straight-linear `color`, and the `source` the platform arm binds.
     fn push_quad(
         &mut self,
         corners: [[f32; 2]; 4],
         uvs: [[f32; 2]; 4],
+        fields: [[f32; 4]; 4],
+        kind: f32,
         color: [f32; 4],
         source: QuadSource,
     ) {
@@ -138,6 +180,11 @@ impl Draw2dGeometry {
                 color[1],
                 color[2],
                 color[3],
+                fields[i][0],
+                fields[i][1],
+                fields[i][2],
+                fields[i][3],
+                kind,
             ]);
         });
         self.sources.push(source);
@@ -196,6 +243,27 @@ fn append_command(
     cmd.as_rect()
         .into_iter()
         .for_each(|r| append_rect(geo, &m, r, fill, alpha));
+    cmd.as_circle().into_iter().for_each(|(center, radius)| {
+        let ax = m.transform_vector(Vec2::new(radius.get(), 0.0));
+        let ay = m.transform_vector(Vec2::new(0.0, radius.get()));
+        append_conic(geo, m.transform_point(center), ax, ay, fill, alpha);
+    });
+    cmd.as_ellipse()
+        .into_iter()
+        .for_each(|(center, rx, ry, rotation)| {
+            let local = Mat3::rotation(rotation);
+            let ax = m.transform_vector(local.transform_vector(Vec2::new(rx.get(), 0.0)));
+            let ay = m.transform_vector(local.transform_vector(Vec2::new(0.0, ry.get())));
+            append_conic(geo, m.transform_point(center), ax, ay, fill, alpha);
+        });
+    cmd.as_line().into_iter().for_each(|(a, b, color, width)| {
+        append_line(geo, &m, a, b, color.channels(), width.get(), alpha);
+    });
+    cmd.as_particle().into_iter().for_each(|(center, size, color)| {
+        let h = size.get();
+        let quad = Rect::new(center.subtract(Vec2::new(h, h)), Vec2::new(2.0 * h, 2.0 * h));
+        append_rect(geo, &m, quad, color.channels(), alpha);
+    });
     cmd.as_sprite()
         .into_iter()
         .for_each(|(texture, opts)| append_sprite(geo, &m, texture, opts, alpha, sizes));
@@ -219,7 +287,91 @@ fn append_rect(geo: &mut Draw2dGeometry, m: &Mat3, r: Rect, fill: [f32; 4], alph
     let (minx, miny, maxx, maxy) = transformed_bbox(m, r);
     let corners = [[minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy]];
     let color = [fill[0], fill[1], fill[2], fill[3] * alpha];
-    geo.push_quad(corners, [[0.0, 0.0]; 4], color, QuadSource::Solid);
+    geo.push_quad(
+        corners,
+        [[0.0, 0.0]; 4],
+        [PLAIN_FIELD; 4],
+        KIND_CAPSULE,
+        color,
+        QuadSource::Solid,
+    );
+}
+
+/// Emit a filled circle/ellipse as the quad covering its conic **bounding box**,
+/// carrying per-corner conic-basis coordinates `(s, t)` so the platform shader can
+/// run the software backend's exact `s²+t²≤1` test per pixel and discard the
+/// outside. `center`, `ax`, `ay` are the screen-space centre and the two conjugate
+/// semi-diameter vectors — identical to the software `fill_conic` inputs, so the
+/// two emit the same disc. A degenerate (zero-area) basis makes `det` zero, so
+/// every corner `(s, t)` is non-finite and the shader's `s²+t²` test is `false`
+/// everywhere — nothing draws, matching the software path, with no branch here.
+fn append_conic(geo: &mut Draw2dGeometry, center: Vec2, ax: Vec2, ay: Vec2, fill: [f32; 4], alpha: f32) {
+    let hx = (ax.x * ax.x + ay.x * ay.x).sqrt();
+    let hy = (ax.y * ax.y + ay.y * ay.y).sqrt();
+    let corners = [
+        [center.x - hx, center.y - hy],
+        [center.x + hx, center.y - hy],
+        [center.x + hx, center.y + hy],
+        [center.x - hx, center.y + hy],
+    ];
+    let det = ax.x * ay.y - ay.x * ax.y;
+    let fields = corners.map(|c| {
+        let dx = c[0] - center.x;
+        let dy = c[1] - center.y;
+        [
+            (ay.y * dx - ay.x * dy) / det,
+            (ax.x * dy - ax.y * dx) / det,
+            0.0,
+            0.0,
+        ]
+    });
+    let color = [fill[0], fill[1], fill[2], fill[3] * alpha];
+    geo.push_quad(corners, [[0.0, 0.0]; 4], fields, KIND_CONIC, color, QuadSource::Solid);
+}
+
+/// Emit a stroked line `a`–`b` (both through `m`) as **one** quad covering its
+/// rounded-capsule bounding rectangle (the oriented segment extended by the
+/// screen-space half-width `0.5·|m·(width,0)|` on every side). Each corner carries
+/// the line-local coverage field `(along, perp, length, half_width)` so the
+/// platform shader reproduces the software `raster_line` capsule distance
+/// (`perp² + (along−clamp(along,0,length))² ≤ half_width²`) per pixel — including
+/// the round caps — and discards the rectangle's four outside corners. A
+/// zero-length segment has no direction, so the basis falls back to the axis-aligned
+/// unit frame (branchless via `usize::from`) and the capsule collapses to a round
+/// dot of `half_width` radius — the same shape the software `EPS`-floored `len²`
+/// yields.
+fn append_line(geo: &mut Draw2dGeometry, m: &Mat3, a: Vec2, b: Vec2, color: [f32; 4], width: f32, alpha: f32) {
+    let pa = m.transform_point(a);
+    let pb = m.transform_point(b);
+    let half_w = 0.5 * m.transform_vector(Vec2::new(width, 0.0)).length();
+    let ab = pb.subtract(pa);
+    let len = ab.length();
+    let inv = 1.0 / len.max(EPS);
+    // When `len < EPS` the direction is undefined; add the unit-x basis so the
+    // frame falls back to axis-aligned (`u = (1,0)`, `n = (0,1)`) without a branch.
+    let degenerate = usize::from(len < EPS) as f32;
+    let u = Vec2::new(ab.x * inv + degenerate, ab.y * inv);
+    let n = Vec2::new(-u.y, u.x);
+    let ext_a = pa.subtract(u.mul_scalar(half_w));
+    let ext_b = pb.add(u.mul_scalar(half_w));
+    let off = n.mul_scalar(half_w);
+    let corners = [
+        point(ext_a.subtract(off)),
+        point(ext_b.subtract(off)),
+        point(ext_b.add(off)),
+        point(ext_a.add(off)),
+    ];
+    let fields = corners.map(|c| {
+        let d = Vec2::new(c[0] - pa.x, c[1] - pa.y);
+        [d.dot(u), d.dot(n), len, half_w]
+    });
+    let col = [color[0], color[1], color[2], color[3] * alpha];
+    geo.push_quad(corners, [[0.0, 0.0]; 4], fields, KIND_CAPSULE, col, QuadSource::Solid);
+}
+
+/// A [`Vec2`] as a two-element corner array.
+fn point(v: Vec2) -> [f32; 2] {
+    [v.x, v.y]
 }
 
 /// Emit a sprite as the quad covering its transformed dest AABB, with UVs that map
@@ -251,7 +403,14 @@ fn append_sprite(
         let uvs = [[ua, va], [ub, va], [ub, vb], [ua, vb]];
         let tint = opts.tint.channels();
         let color = [tint[0], tint[1], tint[2], tint[3] * alpha];
-        geo.push_quad(corners, uvs, color, QuadSource::Sprite(texture.raw()));
+        geo.push_quad(
+            corners,
+            uvs,
+            [PLAIN_FIELD; 4],
+            KIND_CAPSULE,
+            color,
+            QuadSource::Sprite(texture.raw()),
+        );
     });
 }
 
@@ -279,7 +438,7 @@ fn transformed_bbox(m: &Mat3, r: Rect) -> (f32, f32, f32, f32) {
 mod tests {
     use super::*;
     use axiom_host::{Common2d, Fill2d, PaintId};
-    use axiom_kernel::{Meters, Ratio};
+    use axiom_kernel::{Meters, Radians, Ratio};
 
     fn ratio(v: f32) -> Ratio {
         Ratio::new(v).unwrap()
@@ -293,8 +452,10 @@ mod tests {
         (submission, Mat3::IDENTITY, Common2d::new(layer, ratio(alpha)))
     }
 
-    /// The 8 floats of vertex `v` (0..4) of quad `q` from a geometry's stream.
-    fn vert(geo: &Draw2dGeometry, q: usize, v: usize) -> [f32; 8] {
+    /// The `VERTEX_FLOATS` floats of vertex `v` (0..4) of quad `q`: position `x,y`
+    /// (0,1), UV `u,v` (2,3), colour `r,g,b,a` (4..8), coverage field (8..12),
+    /// coverage kind (12).
+    fn vert(geo: &Draw2dGeometry, q: usize, v: usize) -> [f32; VERTEX_FLOATS] {
         let base = (q * VERTS_PER_QUAD + v) * VERTEX_FLOATS;
         geo.vertices()[base..base + VERTEX_FLOATS].try_into().unwrap()
     }
@@ -337,32 +498,150 @@ mod tests {
     }
 
     #[test]
-    fn deferred_kinds_emit_no_quads() {
-        // Circle / line / particle are not in the GPU subset → zero quads.
+    fn path_kind_is_deferred_and_emits_no_quads() {
+        // Path / text / paint fills are still deferred → zero quads (their `as_*`
+        // accessor is never queried).
         let mut list = Draw2dList::default();
-        list.push_command(Draw2dCommand::circle(
+        list.push_command(Draw2dCommand::path(
             header(0, 0, 1.0),
-            Vec2::new(4.0, 4.0),
-            Meters::new(2.0).unwrap(),
+            vec![Vec2::ZERO, Vec2::new(4.0, 0.0), Vec2::new(4.0, 4.0)],
             Fill2d::color(rgba(1.0, 1.0, 1.0, 1.0)),
-        ));
-        list.push_command(Draw2dCommand::line(
-            header(1, 0, 1.0),
-            Vec2::ZERO,
-            Vec2::new(4.0, 0.0),
-            rgba(1.0, 1.0, 1.0, 1.0),
-            Meters::new(1.0).unwrap(),
-        ));
-        list.push_command(Draw2dCommand::particle_quad(
-            header(2, 0, 1.0),
-            Vec2::new(4.0, 4.0),
-            Meters::new(1.0).unwrap(),
-            rgba(1.0, 1.0, 1.0, 1.0),
+            true,
         ));
         list.sort_commands();
         let geo = build_geometry(&list, 8, 8, &Draw2dTextureSizes::default());
         assert_eq!(geo.quad_count(), 0);
         assert!(geo.vertices().is_empty());
+    }
+
+    #[test]
+    fn circle_emits_one_conic_quad_with_basis_coords() {
+        // A radius-2 circle at (4,4), identity transform: ax=(2,0), ay=(0,2),
+        // det=4. The bounding quad is (2,2)..(6,6); each corner's (s,t) is the
+        // unit-square corner the shader tests against `s²+t²≤1`.
+        let mut list = Draw2dList::default();
+        list.push_command(Draw2dCommand::circle(
+            header(0, 0, 0.5),
+            Vec2::new(4.0, 4.0),
+            Meters::new(2.0).unwrap(),
+            Fill2d::color(rgba(1.0, 0.0, 0.0, 1.0)),
+        ));
+        list.sort_commands();
+        let geo = build_geometry(&list, 8, 8, &Draw2dTextureSizes::default());
+        assert_eq!(geo.quad_count(), 1);
+        assert_eq!(geo.sources(), &[QuadSource::Solid]);
+        let tl = vert(&geo, 0, 0);
+        let br = vert(&geo, 0, 2);
+        // Bounding-box corners.
+        assert_eq!([tl[0], tl[1]], [2.0, 4.0 - 2.0]);
+        assert_eq!([br[0], br[1]], [6.0, 6.0]);
+        // Colour: straight red, alpha 1·0.5 folded.
+        assert_eq!([tl[4], tl[5], tl[6], tl[7]], [1.0, 0.0, 0.0, 0.5]);
+        // Conic basis at the corners is the unit square; kind selects the conic test.
+        assert_eq!([tl[8], tl[9]], [-1.0, -1.0]);
+        assert_eq!([br[8], br[9]], [1.0, 1.0]);
+        assert_eq!(tl[12], KIND_CONIC);
+    }
+
+    #[test]
+    fn ellipse_rotation_orients_the_bounding_box() {
+        // rx=4, ry=2 rotated 90°: the rotated long axis is vertical, so the
+        // bounding box is 2 wide and 4 tall (half_x=2, half_y=4) around (8,8).
+        let mut list = Draw2dList::default();
+        list.push_command(Draw2dCommand::ellipse(
+            header(0, 0, 1.0),
+            Vec2::new(8.0, 8.0),
+            Meters::new(4.0).unwrap(),
+            Meters::new(2.0).unwrap(),
+            Radians::new(std::f32::consts::FRAC_PI_2).unwrap(),
+            Fill2d::color(rgba(0.0, 0.0, 1.0, 1.0)),
+        ));
+        list.sort_commands();
+        let geo = build_geometry(&list, 16, 16, &Draw2dTextureSizes::default());
+        assert_eq!(geo.quad_count(), 1);
+        let tl = vert(&geo, 0, 0);
+        let br = vert(&geo, 0, 2);
+        // half_x≈2, half_y≈4 → corners (6,4)..(10,12).
+        assert!((tl[0] - 6.0).abs() < 1e-4);
+        assert!((tl[1] - 4.0).abs() < 1e-4);
+        assert!((br[0] - 10.0).abs() < 1e-4);
+        assert!((br[1] - 12.0).abs() < 1e-4);
+        assert_eq!(tl[12], KIND_CONIC);
+    }
+
+    #[test]
+    fn line_emits_one_capsule_quad_with_local_coords() {
+        // A width-2 horizontal line (1,8)->(14,8), identity: half_w=1, len=13,
+        // u=(1,0), n=(0,1). The bounding rect extends ±1 each way: (0,7)..(15,9).
+        let mut list = Draw2dList::default();
+        list.push_command(Draw2dCommand::line(
+            header(0, 0, 1.0),
+            Vec2::new(1.0, 8.0),
+            Vec2::new(14.0, 8.0),
+            rgba(1.0, 1.0, 0.0, 1.0),
+            Meters::new(2.0).unwrap(),
+        ));
+        list.sort_commands();
+        let geo = build_geometry(&list, 16, 16, &Draw2dTextureSizes::default());
+        assert_eq!(geo.quad_count(), 1);
+        assert_eq!(geo.sources(), &[QuadSource::Solid]);
+        let tl = vert(&geo, 0, 0);
+        let br = vert(&geo, 0, 2);
+        assert_eq!([tl[0], tl[1]], [0.0, 7.0]);
+        assert_eq!([br[0], br[1]], [15.0, 9.0]);
+        // Field at the back-left corner: along=-1 (a half-width behind pa),
+        // perp=-1, length=13, half_width=1; kind is the capsule test.
+        assert_eq!([tl[8], tl[9], tl[10], tl[11]], [-1.0, -1.0, 13.0, 1.0]);
+        assert_eq!(tl[12], KIND_CAPSULE);
+        // Colour folded with alpha 1.
+        assert_eq!([tl[4], tl[5], tl[6], tl[7]], [1.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn zero_length_line_falls_back_to_an_axis_aligned_dot() {
+        // a==b under a zero-scale transform: len<EPS triggers the axis-aligned
+        // fallback; half_w=0 collapses the quad to the origin and the capsule to a
+        // zero dot — a finite, no-op quad (the degenerate-length branch).
+        let mut list = Draw2dList::default();
+        list.push_command(Draw2dCommand::line(
+            (0, Mat3::scale(Vec2::ZERO), Common2d::new(0, ratio(1.0))),
+            Vec2::new(4.0, 4.0),
+            Vec2::new(4.0, 4.0),
+            rgba(1.0, 1.0, 1.0, 1.0),
+            Meters::new(1.0).unwrap(),
+        ));
+        list.sort_commands();
+        let geo = build_geometry(&list, 8, 8, &Draw2dTextureSizes::default());
+        assert_eq!(geo.quad_count(), 1);
+        let tl = vert(&geo, 0, 0);
+        // Every corner collapsed to the origin; length 0, half_width 0.
+        assert_eq!([tl[0], tl[1]], [0.0, 0.0]);
+        assert_eq!([tl[10], tl[11]], [0.0, 0.0]);
+        assert_eq!(tl[12], KIND_CAPSULE);
+    }
+
+    #[test]
+    fn particle_emits_a_centred_plain_quad() {
+        // A particle of half-extent 2 at (8,8) is the (6,6)..(10,10) square — the
+        // same `fill_rect` the software path emits, so it is a plain capsule quad.
+        let mut list = Draw2dList::default();
+        list.push_command(Draw2dCommand::particle_quad(
+            header(0, 0, 1.0),
+            Vec2::new(8.0, 8.0),
+            Meters::new(2.0).unwrap(),
+            rgba(0.0, 1.0, 1.0, 1.0),
+        ));
+        list.sort_commands();
+        let geo = build_geometry(&list, 16, 16, &Draw2dTextureSizes::default());
+        assert_eq!(geo.quad_count(), 1);
+        let tl = vert(&geo, 0, 0);
+        let br = vert(&geo, 0, 2);
+        assert_eq!([tl[0], tl[1]], [6.0, 6.0]);
+        assert_eq!([br[0], br[1]], [10.0, 10.0]);
+        // Plain coverage: kind capsule, field is the always-inside PLAIN_FIELD.
+        assert_eq!(tl[12], KIND_CAPSULE);
+        assert_eq!([tl[8], tl[9], tl[10], tl[11]], PLAIN_FIELD);
+        assert_eq!([tl[4], tl[5], tl[6], tl[7]], [0.0, 1.0, 1.0, 1.0]);
     }
 
     #[test]
