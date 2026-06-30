@@ -79,10 +79,19 @@ impl GameBridge {
         self.runtime.app_mut().add_mesh(mesh).id()
     }
 
-    /// Register a lit material of linear colour `[r, g, b]` and return its handle
-    /// id (`createMaterial`).
-    pub fn create_material(&mut self, rgb: &[f64]) -> u64 {
-        self.runtime.app_mut().add_material(Material::lit(color(rgb))).id()
+    /// Register a fully-specified lit material and return its handle id
+    /// (`createMaterial`): linear base colour `[r, g, b]`, linear `emissive`
+    /// `[r, g, b]` self-illumination, `roughness` (`0` smooth … `1` matte), and
+    /// `opacity` (`1` opaque; a translucent material folds into the per-draw
+    /// alpha). The slice/scalar boundary mirrors `set_camera_3d`: one slice per
+    /// colour vector, the catalog ratios as trailing scalars. Each scalar is
+    /// sanitized to a finite [`Ratio`] (non-finite ⇒ zero) without a branch.
+    pub fn create_material(&mut self, rgb: &[f64], emissive: &[f64], roughness: f64, opacity: f64) -> u64 {
+        let material = Material::lit(color(rgb))
+            .with_emissive(color(emissive))
+            .with_roughness(channel(roughness))
+            .with_opacity(channel(opacity));
+        self.runtime.app_mut().add_material(material).id()
     }
 
     /// Set (replacing any existing) the active perspective camera at `position`
@@ -217,10 +226,12 @@ mod wasm_exports {
             self.bridge.create_mesh(&kind) as f64
         }
 
-        /// Register a lit material of linear colour `[r, g, b]` (`createMaterial`).
+        /// Register a fully-specified lit material (`createMaterial`): linear base
+        /// colour `[r, g, b]`, linear `emissive` `[r, g, b]`, `roughness`, and
+        /// `opacity` (`1` opaque).
         #[wasm_bindgen(js_name = createMaterial)]
-        pub fn create_material(&mut self, rgb: &[f64]) -> f64 {
-            self.bridge.create_material(rgb) as f64
+        pub fn create_material(&mut self, rgb: &[f64], emissive: &[f64], roughness: f64, opacity: f64) -> f64 {
+            self.bridge.create_material(rgb, emissive, roughness, opacity) as f64
         }
 
         /// Set the active perspective camera, aimed from `position` at `target`
@@ -318,8 +329,8 @@ mod tests {
         let cube = b.create_mesh("cube");
         let sphere = b.create_mesh("sphere");
         let ghost = b.create_mesh("ghost"); // unknown ⇒ cube fallback, fresh handle
-        let red = b.create_material(&[0.9, 0.1, 0.1]);
-        let blue = b.create_material(&[0.1, 0.1, 0.9]);
+        let red = b.create_material(&[0.9, 0.1, 0.1], &[0.0, 0.0, 0.0], 1.0, 1.0);
+        let blue = b.create_material(&[0.1, 0.1, 0.9], &[0.0, 0.0, 0.0], 1.0, 1.0);
         b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
         let light = b.add_light(&[0.3, -1.0, 0.4], &[1.0, 1.0, 1.0], 1.0);
         vec![cube, sphere, ghost, red, blue, light]
@@ -389,7 +400,7 @@ mod tests {
         let mut b = bridge();
         b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
         let cube = b.create_mesh("cube");
-        let red = b.create_material(&[0.9, 0.1, 0.1]);
+        let red = b.create_material(&[0.9, 0.1, 0.1], &[0.0, 0.0, 0.0], 1.0, 1.0);
         // Spawning a renderable from the (mesh, material) handles makes the scene
         // draw exactly one object.
         let node = b.spawn_renderable(cube, red, &pose(0.0, 0.0, 0.0, 1.0));
@@ -417,6 +428,39 @@ mod tests {
         b.control_first_person(0, &[0.0, 0.0, -1.0], 0.0, 0.0);
         let world = b.world_world_transform(cam);
         assert_eq!((world[0], world[1], world[2]), (0.0, 1.0, 4.0));
+    }
+
+    #[test]
+    fn a_create_material_authored_translucent_material_renders_translucent() {
+        // SPEC-11 §3.4 end-to-end: a material authored through the bridge's
+        // `create_material` (the exact path the wasm `createMaterial` export
+        // drives) with `opacity = 0.5` must reach the rendered draw with its
+        // alpha folded — proving emissive / roughness / opacity are no longer
+        // dropped at the authoring edge. Base colour `(0.1, 0.2, 0.9)`, opaque
+        // base alpha `1.0` × opacity `0.5` ⇒ a draw alpha of `0.5`; the RGB rides
+        // through unchanged (emissive / roughness ride on the same RenderMaterial).
+        let mut b = bridge();
+        b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
+        let cube = b.create_mesh("cube");
+        let glass = b.create_material(&[0.1, 0.2, 0.9], &[0.4, 0.0, 0.0], 0.3, 0.5);
+        b.spawn_renderable(cube, glass, &pose(0.0, 0.0, 0.0, 1.0));
+        let translucent = b.runtime.app_mut().tick(0).draws()[0].color();
+        assert_eq!(
+            translucent,
+            [0.1, 0.2, 0.9, 0.5],
+            "opacity 0.5 folds into the draw alpha; base RGB is preserved"
+        );
+
+        // Control: the same base colour authored fully opaque renders with alpha
+        // 1.0 — so the translucency above is the authored opacity, not a constant.
+        let mut o = bridge();
+        o.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
+        let mesh = o.create_mesh("cube");
+        let solid = o.create_material(&[0.1, 0.2, 0.9], &[0.0, 0.0, 0.0], 1.0, 1.0);
+        o.spawn_renderable(mesh, solid, &pose(0.0, 0.0, 0.0, 1.0));
+        let opaque = o.runtime.app_mut().tick(0).draws()[0].color();
+        assert_eq!(opaque, [0.1, 0.2, 0.9, 1.0], "an opaque material keeps full alpha");
+        assert_ne!(translucent[3], opaque[3], "the authored opacity changed the rendered alpha");
     }
 
     #[test]

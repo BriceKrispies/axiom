@@ -123,12 +123,24 @@ impl RunningApp {
                     geometry.indices.clone(),
                 )
             });
-            self.materials.iter().for_each(|(id, color, texture)| {
+            self.materials.iter().for_each(|(id, material)| {
                 // The pipeline records the material→texture binding (for
                 // receipt fidelity); the live albedo pixels are uploaded
-                // separately via `material_textures`. `0` = untextured.
-                let texture_id = texture.map(Texture::id).unwrap_or(0);
-                pipeline.frame_add_textured_material(&mut frame, *id, *color, texture_id)
+                // separately via `material_textures`. `0` = untextured. The full
+                // catalog surface — base colour, emissive, roughness, and opacity
+                // (folded into the per-draw alpha so a translucent material blends)
+                // — is threaded through, no longer dropped at this boundary.
+                let texture_id = material.texture().map(Texture::id).unwrap_or(0);
+                let emissive = material.emissive().to_array();
+                pipeline.frame_add_lit_material(
+                    &mut frame,
+                    *id,
+                    material.base_color().to_array(),
+                    [emissive[0], emissive[1], emissive[2]],
+                    material.roughness(),
+                    material.opacity(),
+                    texture_id,
+                )
             });
             let report = pipeline.submit(&frame, &self.scene, &self.webgpu);
 

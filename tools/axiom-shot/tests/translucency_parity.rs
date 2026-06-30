@@ -9,13 +9,14 @@
 //! It builds a tiny scene **directly through `axiom_render::RenderApi`** — an
 //! OPAQUE red quad behind a TRANSLUCENT blue quad (opacity `0.5`), a perspective
 //! camera, no lights — and compiles the deterministic, opacity-folded,
-//! back-to-front-sorted `FramePacket` both backends consume. It does NOT go
-//! through the umbrella `App`/`Material` path on purpose: the umbrella
-//! `Material → asset` boundary (and the render-pipeline's `MaterialAsset`) carries
-//! no `opacity` field yet, so a translucent material authored there would arrive
-//! opaque. The render layer is where `opacity` lives next to `base_color`, so the
-//! fold (`alpha = base_color.a × opacity`) and the translucent depth sort live
-//! there; this proof exercises that real render path end-to-end into pixels.
+//! back-to-front-sorted `FramePacket` both backends consume. It authors at the
+//! render-API level (not the umbrella `App`/`Material` path) to exercise the fold
+//! and the translucent depth sort **directly in pixels** with the least scaffolding
+//! — the render layer is where `opacity` lives next to `base_color`. The umbrella
+//! `Material → asset` boundary (and the render-pipeline's `MaterialAsset`) now
+//! threads `opacity` too — a `createMaterial`-authored translucent material reaching
+//! the renderer is proven in `apps/axiom-game-runtime`'s `scene3d` bridge tests; this
+//! proof complements it by validating the actual backend compositing.
 //! (The projection is pre-multiplied by the same GL→wgpu depth remap the
 //! render-pipeline bakes, so the GPU off-screen depth test behaves as in-app.)
 //!

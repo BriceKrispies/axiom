@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use axiom_host::SdfScene;
+use axiom_kernel::Ratio;
 use axiom_math::{Mat4, MathApi, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 use axiom_scene::SceneApi;
@@ -71,13 +72,20 @@ struct MeshAsset {
     indices: Vec<u32>,
 }
 
-/// One material asset supplied to a frame: a linear-RGBA base colour and an
-/// opaque albedo texture id (`0` = untextured), keyed by the id the scene's
-/// renderables reference.
+/// One material asset supplied to a frame: a linear-RGBA base colour, its
+/// catalog surface — `emissive` self-illumination (linear RGB), `roughness`
+/// (`0` mirror-smooth … `1` matte), `opacity` (`1` opaque; folded into the
+/// per-draw alpha so a translucent material blends) — and an albedo texture id
+/// (`0` = untextured), keyed by the id the scene's renderables reference. The
+/// scalar catalog fields stay primitive `f32` at this boundary (matching the
+/// `[f32; 4]` colour); `submit` sanitizes them into the render layer's `Ratio`.
 #[derive(Debug)]
 struct MaterialAsset {
     id: u64,
     color: [f32; 4],
+    emissive: [f32; 3],
+    roughness: f32,
+    opacity: f32,
     texture_id: u64,
 }
 
@@ -181,13 +189,15 @@ impl RenderPipelineApi {
         });
     }
 
-    /// Register a material asset (base colour) for this frame. Untextured.
+    /// Register a material asset (base colour) for this frame. Untextured, no
+    /// emissive, fully matte, fully opaque.
     pub fn frame_add_material(&self, frame: &mut RenderFrame, id: u64, color: [f32; 4]) {
         self.frame_add_textured_material(frame, id, color, 0);
     }
 
     /// Register a material asset with a base colour and an albedo texture id
-    /// (`0` = untextured) for this frame.
+    /// (`0` = untextured) for this frame, with default catalog fields (no
+    /// emissive, fully matte, fully opaque).
     pub fn frame_add_textured_material(
         &self,
         frame: &mut RenderFrame,
@@ -195,9 +205,33 @@ impl RenderPipelineApi {
         color: [f32; 4],
         texture_id: u64,
     ) {
+        let one = Ratio::finite_or_zero(1.0);
+        self.frame_add_lit_material(frame, id, color, [0.0; 3], one, one, texture_id);
+    }
+
+    /// Register a fully-specified lit material asset for this frame: `color`
+    /// base, `emissive` self-illumination (linear RGB), `roughness`, `opacity`
+    /// (`1` opaque — folded into the per-draw alpha so a translucent material
+    /// blends), and an albedo `texture_id` (`0` = untextured). This is the
+    /// boundary that threads the umbrella `Material`'s full catalog surface to
+    /// the renderer, no longer dropping emissive / roughness / opacity.
+    #[allow(clippy::too_many_arguments)]
+    pub fn frame_add_lit_material(
+        &self,
+        frame: &mut RenderFrame,
+        id: u64,
+        color: [f32; 4],
+        emissive: [f32; 3],
+        roughness: Ratio,
+        opacity: Ratio,
+        texture_id: u64,
+    ) {
         frame.materials.push(MaterialAsset {
             id,
             color,
+            emissive,
+            roughness: roughness.get(),
+            opacity: opacity.get(),
             texture_id,
         });
     }
@@ -287,13 +321,21 @@ impl RenderPipelineApi {
             .iter()
             .map(|material| {
                 let c = material.color;
-                let idx = render.add_input_textured_material(
+                let e = material.emissive;
+                let idx = render.add_input_lit_material(
                     &mut input,
                     material.id,
                     Vec4::new(c[0], c[1], c[2], c[3]),
+                    Vec3::new(e[0], e[1], e[2]),
+                    Ratio::finite_or_zero(material.roughness),
+                    Ratio::finite_or_zero(material.opacity),
                     material.texture_id,
                 );
-                material_color.insert(material.id, c);
+                // Fold opacity into the per-draw alpha (`alpha = base.a × opacity`),
+                // exactly as the render layer's neutral packet does, so the report's
+                // per-draw colour — and the live/canvas instance colour built from it
+                // — carries the translucency a `createMaterial`-authored material set.
+                material_color.insert(material.id, [c[0], c[1], c[2], c[3] * material.opacity]);
                 (material.id, idx)
             })
             .collect();
@@ -816,6 +858,39 @@ mod tests {
         assert_eq!(vec, [2.0, 3.0, -4.0]);
         assert_eq!(color, [1.0, 0.0, 0.0]);
         assert_eq!(intensity, 2.5);
+    }
+
+    #[test]
+    fn frame_add_lit_material_threads_opacity_into_the_report_draw_alpha() {
+        // SPEC-11 §3.4: a fully-specified lit material (emissive + roughness +
+        // opacity) authored through `frame_add_lit_material` reaches the report's
+        // per-draw colour with its opacity folded into the alpha — the boundary the
+        // umbrella `Material → asset` path now threads instead of dropping.
+        let api = RenderPipelineApi::new();
+        let scene = cube_scene();
+        let webgpu = WebGpuApi::new_recording();
+        let mut frame = api.new_frame(800, 600, [0.0, 0.0, 0.0, 1.0], Vec3::new(0.3, -1.0, 0.4));
+        api.frame_add_mesh(
+            &mut frame,
+            1,
+            vec![Vec3::new(0.5, 0.5, 0.5); 24],
+            vec![Vec3::new(0.0, 1.0, 0.0); 24],
+            vec![Vec2::new(0.0, 0.0); 24],
+            (0..36).collect(),
+        );
+        // The scene's material id 2, authored translucent (opacity 0.5) + emissive
+        // + rough. Base alpha 1.0 × opacity 0.5 ⇒ a report draw alpha of 0.5.
+        api.frame_add_lit_material(
+            &mut frame,
+            2,
+            [0.2, 0.4, 0.8, 1.0],
+            [0.5, 0.0, 0.0],
+            Ratio::finite_or_zero(0.25),
+            Ratio::finite_or_zero(0.5),
+            0,
+        );
+        let report = api.submit(&frame, &scene, &webgpu);
+        assert_eq!(api.report_draw_color(&report, 0), Some([0.2, 0.4, 0.8, 0.5]));
     }
 
     #[test]

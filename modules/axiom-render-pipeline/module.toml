@@ -14,6 +14,7 @@ crate_name = "axiom-render-pipeline"
 kind = "feature-module"
 
 allowed_layers = [
+    "kernel",
     "math",
     "host",
 ]
