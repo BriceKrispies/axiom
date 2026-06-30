@@ -47,3 +47,17 @@ test("the inert UNBOUND_DRAW2D flip-book sampler returns the inert zero-rect", (
   );
   assert.deepEqual(frame, { height: 0, width: 0, x: 0, y: 0 });
 });
+
+test("the inert UNBOUND_DRAW2D sprite + text verbs are safe no-ops", () => {
+  assert.doesNotThrow(() => {
+    UNBOUND_DRAW2D.draw2dSprite(1, { pos: { x: 0, y: 0 } });
+    UNBOUND_DRAW2D.draw2dText("hi", { color: RED, font: { family: "monospace", size: 16 }, pos: { x: 0, y: 0 } });
+  });
+});
+
+test("the inert UNBOUND_DRAW2D measureText returns the inert zero extent", () => {
+  assert.deepEqual(
+    UNBOUND_DRAW2D.draw2dMeasureText("hi", { family: "monospace", size: 16 }),
+    { height: 0, width: 0 },
+  );
+});

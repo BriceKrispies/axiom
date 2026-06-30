@@ -44,6 +44,16 @@ impl SceneApi {
         self.scene.add_controller(node, index)
     }
 
+    /// Apply one first-person input to controller `index` **immediately** — yaw by
+    /// `yaw` and pitch by `pitch` (clamped), then move by `move_local` in the
+    /// node's yaw-only frame — and recompute world transforms now. The zero-lag
+    /// counterpart to staging a [`Self::controller_command`] for [`Self::advance`]:
+    /// a host that owns its own loop drives the camera with this between ticks. An
+    /// unknown index is a no-op.
+    pub fn control_now(&mut self, index: u32, move_local: Vec3, yaw: Radians, pitch: Radians) {
+        self.scene.control_now(index, move_local, yaw.get(), pitch.get());
+    }
+
     /// Encode a per-tick first-person input for controller `index`: a `yaw`/`pitch`
     /// look delta (yaw about +Y, pitch about local +X, clamped by the scene) plus
     /// a `move_local` translation in the node's own frame (local -Z is forward,

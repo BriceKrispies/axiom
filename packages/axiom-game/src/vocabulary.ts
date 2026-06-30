@@ -28,6 +28,25 @@ export type Seconds = number;
 /** An opaque resource/timer/tween handle (SPEC-00 §0.2). */
 export type Handle = number;
 
+/*
+ * An opaque texture handle (SPEC-04 §10): what `loadTexture` returns and a
+ * `Frame.sprite` draws. Stable for the session; the app resolves its pixels
+ * (fetch/decode) and the engine only ever names the handle, never loads bytes.
+ */
+export type TextureId = Handle;
+
+/*
+ * A font selection (SPEC-04 §4.2): the `family` name, the `size` in surface
+ * units, and an optional `weight`. What `loadFont` returns and a `Frame.text`
+ * draws with. Tier-0 ships one built-in monospace family; `size` drives the
+ * glyph size and the deterministic `measureText`.
+ */
+export interface FontSpec {
+  readonly family: string;
+  readonly size: number;
+  readonly weight?: number;
+}
+
 /** An opaque per-room player identity (SPEC-12 §16.6). */
 export type PlayerId = number;
 

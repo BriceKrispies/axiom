@@ -42,11 +42,13 @@ mod draw2d_geometry;
 
 // The coverage-EXEMPT platform arm of the GPU 2D raster: the real wgpu pipeline
 // that draws the covered core's geometry, alpha-blended, to a wgpu colour target.
-// The 2D peer of `scene_renderer`; compiled only behind the native `offscreen`
-// feature (the screenshot tool + parity proofs). When the live browser run loop
-// routes GPU 2D it reuses this same renderer (add `target_arch = "wasm32"` here),
-// exactly as the live 3D binding and the off-screen path share `scene_renderer`.
-#[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
+// The 2D peer of `scene_renderer`: compiled wherever a real GPU is in play — the
+// live browser arm (`wasm32`, driven by `live_gpu_binding::render_draw2d`) or the
+// native `offscreen` feature (the screenshot tool + parity proofs) — so the
+// default native build, the coverage gate, and the branchless lint never see this
+// wgpu code, exactly as the live 3D binding and the off-screen path share
+// `scene_renderer`.
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod draw2d_renderer;
 
 // The native off-screen 2D capture entry — `offscreen` feature, non-wasm. Renders

@@ -88,7 +88,7 @@ GALLERY_DIR      := gallery
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 
-.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay retro_fps retro_fps-build retro-fps-hot stress stress-build growth growth-build harness harness-build asset-stream asset-stream-build asset-stream-pack agent agent-render agent-bridge gallery gallery-build gallery-serve gallery-fast gallery-fast-build package e2e e2e-netplay e2e-matchmaking e2e-scaleout netplay-cluster netplay-load ts-gate help
+.PHONY: demo demo-build netplay netplay-build netplay-server netplay-dotnet relay retro_fps retro_fps-build retro-fps-hot stress stress-build growth growth-build harness harness-build asset-stream asset-stream-build asset-stream-pack agent agent-render agent-bridge gallery gallery-build gallery-serve gallery-fast gallery-fast-build package loader-test e2e e2e-netplay e2e-matchmaking e2e-scaleout netplay-cluster netplay-load ts-gate help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -145,6 +145,7 @@ help:
 	@echo "  make package APP=quintet           Build dist-app/quintet/ (loader picks wasm or wasm2js)"
 	@echo "  make package APP=quintet INLINE=1  Single self-contained index.html"
 	@echo "  (needs a nightly toolchain with rust-src; first build rebuilds std and is slow.)"
+	@echo "  make loader-test   Prove the loader's wasm→wasm2js fallback (Node-only, seconds)"
 	@echo ""
 	@echo "  Browser end-to-end smoke tests (pytest-playwright):"
 	@echo "  make e2e           Build+serve the gallery and drive every non-multiplayer demo in a real browser"
@@ -381,12 +382,27 @@ gallery-fast: gallery-fast-build
 # needs a nightly toolchain with rust-src (-Z build-std); this target installs the
 # pinned Binaryen toolchain on first run. The first build is slow (it rebuilds std).
 #
+# SDK-hosted TypeScript apps (game-runtime, authored over @axiom/game) package too:
+# the packager builds the @axiom/game SDK, compiles their web/src with tsgo, bakes the
+# vendored SDK + author module into the bundle, and drops the loader in at the glue
+# path the harness imports. Such a bundle uses absolute (/pkg, /vendor, /dist) paths,
+# so serve it from a domain root. INLINE=1 is not supported for these (multi-module).
+#
 #   make package APP=quintet
 #   make package APP=quintet INLINE=1
+#   make package APP=game-runtime
 APP ?= quintet
 package:
 	npm --prefix scripts/packaging install --no-audit --no-fund
 	uv run --no-project python scripts/package_app.py $(APP) $(if $(INLINE),--inline,)
+
+# Prove the packaged loader's wasm→wasm2js fallback decision (scripts/package_app.py
+# loader templates): instantiates the generated loader JS in Node with WebAssembly
+# forced absent / rejecting / working, and asserts the fallback fires on EITHER an
+# absent API OR an instantiation failure. Node-only, no browser, no nightly build —
+# seconds. Also runs as part of `make e2e`.
+loader-test:
+	uv run --no-project --with pytest pytest e2e/test_loader_fallback.py -q
 
 # --- Browser end-to-end smoke tests (pytest-playwright) ---
 

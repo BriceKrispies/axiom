@@ -12,7 +12,7 @@
  * (`sim.ts`), only from `onRender`; the surface never feeds sim (SPEC-04 §17.5).
  */
 
-import type { Handle, Rect, Rgba, Seconds, Vec2 } from "./vocabulary.ts";
+import type { FontSpec, Handle, Rect, Rgba, Seconds, TextureId, Vec2 } from "./vocabulary.ts";
 
 /*
  * The per-shape 2D fill + stroke + layer/alpha a Wave-2.5 draw carries (SPEC-04
@@ -107,7 +107,64 @@ export interface SpriteAnimation {
   readonly fps: number;
 }
 
-/** The 2D drawing channel (SPEC-04 §10): shapes, particles, render targets, and the flip-book sampler. */
+/*
+ * The per-sprite draw options (SPEC-04 §4.2). Placement is `pos` plus an optional
+ * `rotation` (radians) and `scale`; the sprite-local `anchor` (`0..1` pivot),
+ * `tint`, per-axis `flipX`/`flipY`, and atlas `source` sub-rect ride on the draw.
+ * An omitted `source` means the whole texture. All optionals default host-side
+ * (the adapter): unit scale, zero rotation, top-left anchor, white tint, no flip,
+ * layer 0, opaque.
+ */
+export interface SpriteOpts {
+  /** The world position the sprite is placed at. */
+  readonly pos: Vec2;
+  /** The clockwise rotation in radians (default: 0). */
+  readonly rotation?: number;
+  /** The per-axis scale (default: `{ x: 1, y: 1 }`). */
+  readonly scale?: Vec2;
+  /** The sprite-local pivot in `0..1` (default: `{ x: 0, y: 0 }`). */
+  readonly anchor?: Vec2;
+  /** A multiplicative colour tint (default: white). */
+  readonly tint?: Rgba;
+  /** Mirror horizontally (default: false). */
+  readonly flipX?: boolean;
+  /** Mirror vertically (default: false). */
+  readonly flipY?: boolean;
+  /** The atlas / flip-book sub-rect to sample (default: the whole texture). */
+  readonly source?: Rect;
+  /** The explicit z-order (default: 0). */
+  readonly layer?: number;
+  /** The draw opacity in `[0, 1]` (default: 1). */
+  readonly alpha?: number;
+}
+
+/*
+ * The per-text draw options (SPEC-04 §4.2): the world `pos`, the `font`, the glyph
+ * `color`, and an optional `align`/`layer`/`alpha`. The `font.size` drives the
+ * glyph size; alignment defaults to left.
+ */
+export interface TextOpts {
+  /** The world position of the text origin (the left edge of the baseline row). */
+  readonly pos: Vec2;
+  /** The font to render with (its `size` drives the glyph size). */
+  readonly font: FontSpec;
+  /** The glyph colour. */
+  readonly color: Rgba;
+  /** The horizontal alignment (default: "left"). */
+  readonly align?: "left" | "center" | "right";
+  /** The explicit z-order (default: 0). */
+  readonly layer?: number;
+  /** The draw opacity in `[0, 1]` (default: 1). */
+  readonly alpha?: number;
+}
+
+/** The measured extent of a text string (SPEC-04 §4.2). */
+export interface TextMetrics {
+  readonly width: number;
+  readonly height: number;
+}
+
+/** The 2D drawing channel (SPEC-04 §10): shapes, sprites, text, particles, render targets, and the flip-book sampler. */
 export interface Draw2dBridge {
   /** Set the 2D camera — world `center` + `zoom` (`draw2dCamera2d`). */
   readonly draw2dCamera2d: (center: Vec2, zoom: number) => void;
@@ -119,6 +176,12 @@ export interface Draw2dBridge {
   readonly draw2dEllipse: (center: Vec2, radii: EllipseRadii, style: ShapeStyle) => void;
   /** Draw a straight line segment of its own colour + width (`draw2dLine`). */
   readonly draw2dLine: (from: Vec2, to: Vec2, style: LineStyle) => void;
+  /** Draw a textured sprite (`draw2dSprite`). */
+  readonly draw2dSprite: (texture: TextureId, opts: SpriteOpts) => void;
+  /** Draw a line of text in `opts.font` (`draw2dText`). */
+  readonly draw2dText: (value: string, opts: TextOpts) => void;
+  /** Measure `value` in `font`, returning its extent (`draw2dMeasureText`). */
+  readonly draw2dMeasureText: (value: string, font: FontSpec) => TextMetrics;
   /** Register a particle emitter, returning its handle (`draw2dCreateEmitter`, §10.1). */
   readonly draw2dCreateEmitter: (config: EmitterConfig) => Handle;
   /** Spawn a burst from emitter `id` at `at` flying along `direction` (`draw2dEmit`, §10.1). */
@@ -144,6 +207,9 @@ const UNBOUND_HANDLE = 0;
 
 /** The inert sub-rect the unbound flip-book sampler returns (nothing to draw). */
 const INERT_RECT: Rect = { height: 0, width: 0, x: 0, y: 0 };
+
+/** The inert extent the unbound `measureText` returns before a host binds. */
+const INERT_METRICS: TextMetrics = { height: 0, width: 0 };
 
 /*
  * The inert 2D surface used before `bindNative`: every draw is a no-op and every
@@ -178,9 +244,16 @@ export const UNBOUND_DRAW2D: Draw2dBridge = {
   draw2dLine: (): void => {
     // No-op until a host is bound
   },
+  draw2dMeasureText: (): TextMetrics => INERT_METRICS,
   draw2dRect: (): void => {
     // No-op until a host is bound
   },
   draw2dSampleAnimation: (): Rect => INERT_RECT,
+  draw2dSprite: (): void => {
+    // No-op until a host is bound
+  },
   draw2dTargetTexture: (): Handle => UNBOUND_HANDLE,
+  draw2dText: (): void => {
+    // No-op until a host is bound
+  },
 };

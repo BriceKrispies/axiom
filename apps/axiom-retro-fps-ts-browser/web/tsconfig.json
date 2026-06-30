@@ -1,0 +1,23 @@
+{
+  "// note": "Compiles the harness + retro FPS game (web/src/*.ts) to web/dist/*.js. The dev server runs `tsgo -p` on this. `@axiom/game` resolves to the package's built declarations for typecheck; the emitted JS keeps the bare specifier, resolved in the browser by the import map in index.html. The shared axiom-game-runtime wasm + the SDK boot edge resolve by absolute path, served by the dev server.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": true,
+    "strict": true,
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@axiom/game": ["../../../packages/axiom-game/dist/index.d.ts"],
+      "/vendor/axiom-game/boot.js": ["../../../packages/axiom-game/dist/boot.d.ts"],
+      "/pkg/axiom_game_runtime.js": ["../../axiom-game-runtime/web/pkg/axiom_game_runtime.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

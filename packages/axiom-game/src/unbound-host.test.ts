@@ -77,11 +77,18 @@ test("the handle-minting authoring reads return a null handle", () => {
   assert.equal(UNBOUND_HOST_BASE.createMesh(), 0);
   assert.equal(UNBOUND_HOST_BASE.createMaterial(), 0);
   assert.equal(UNBOUND_HOST_BASE.addLight(), 0);
+  assert.equal(UNBOUND_HOST_BASE.spawnRenderable(), 0);
+  assert.equal(UNBOUND_HOST_BASE.createController(), 0);
   assert.equal(UNBOUND_HOST_BASE.loadSound(), 0);
+  assert.equal(UNBOUND_HOST_BASE.loadTexture(), 0);
   assert.equal(UNBOUND_HOST_BASE.playSound(), 0);
   assert.equal(UNBOUND_HOST_BASE.playMusic(), 0);
   assert.equal(UNBOUND_HOST_BASE.playTone(), 0);
   assert.equal(UNBOUND_HOST_BASE.scheduleSound(), 0);
+});
+
+test("loadFont returns the built-in monospace font until a host is bound", () => {
+  assert.deepEqual(UNBOUND_HOST_BASE.loadFont(), { family: "monospace", size: 16 });
 });
 
 test("getSessionConfig returns the neutral seed-zero config", () => {
@@ -95,6 +102,10 @@ test("every signal is a silent no-op until a host is bound", () => {
     UNBOUND_HOST_BASE.reportOutcome();
     UNBOUND_HOST_BASE.reportOutcomes();
     UNBOUND_HOST_BASE.setCamera3D();
+    UNBOUND_HOST_BASE.setNodeTransform();
+    UNBOUND_HOST_BASE.setNodeBounds();
+    UNBOUND_HOST_BASE.clearScene();
+    UNBOUND_HOST_BASE.controlFirstPerson();
     UNBOUND_HOST_BASE.stopVoice();
     UNBOUND_HOST_BASE.setMasterVolume();
     UNBOUND_HOST_BASE.setMuted();

@@ -46,6 +46,30 @@ export interface CameraDescriptor {
   readonly far: number;
 }
 
+/** A first-person controller-camera placement (SPEC-11) — like a camera but with no look-at target; its orientation is driven by per-frame controller input. */
+export interface ControllerSpec {
+  /** The eye position. */
+  readonly position: Vec3;
+  /** The vertical field of view (radians). */
+  readonly fovY: number;
+  /** The near clip distance. */
+  readonly near: number;
+  /** The far clip distance. */
+  readonly far: number;
+}
+
+/** One frame's resolved first-person controller input (SPEC-11): a local-frame move plus yaw/pitch deltas, addressed to a controller index. */
+export interface ControllerInput {
+  /** The controller index this input drives. */
+  readonly index: number;
+  /** Translation in the camera's own frame: `-Z` forward, `+X` right. */
+  readonly moveLocal: Vec3;
+  /** Yaw delta about world `+Y` (radians). */
+  readonly yawDelta: number;
+  /** Pitch delta about local `+X` (radians; the engine clamps it). */
+  readonly pitchDelta: number;
+}
+
 /** A scene light (SPEC-11): dense kind index plus its direction/position vector and colour. */
 export interface LightDescriptor {
   /** The dense light-kind index (0=directional, 1=point). */

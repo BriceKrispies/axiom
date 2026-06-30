@@ -45,9 +45,21 @@ impl RunningApp {
         inputs: &[PlayerInput],
         controls: &[FirstPersonInput],
     ) -> FrameOutcome {
-        let width = self.viewport.physical_width();
-        let height = self.viewport.physical_height();
+        self.step(tick, inputs, controls);
+        // A frame is `step` (the simulation above) then `render` (below). Driving a
+        // whole frame here is unchanged: step, then render the state it produced.
+        self.render(tick)
+    }
 
+    /// Advance the simulation one deterministic tick **without rendering** — the
+    /// step half of a frame. [`Self::tick_with_controls`] calls this then
+    /// [`Self::render`]; a host that owns its own fixed-step loop (the `@axiom/game`
+    /// TS SDK) calls this once per fixed tick during its `advance` and renders only
+    /// once per presented frame, after its per-frame scene mutations. Stepping is
+    /// where all simulation state changes; rendering it is a separate, side-effect-
+    /// free read (see [`Self::render`]). Splitting them keeps an N-tick catch-up
+    /// frame from doing N wasted renders — it does N steps and one render.
+    pub fn step(&mut self, tick: u64, inputs: &[PlayerInput], controls: &[FirstPersonInput]) {
         let host_input = HostFrameInput::new(tick + 1, self.step_nanos, self.viewport);
         let host_report = self
             .driver
@@ -76,6 +88,21 @@ impl RunningApp {
             .expect("host report sequence is monotone");
         let frame_ctx = self.frame_api.frame_context(&engine_frame);
         self.scene.advance(tick, &frame_ctx);
+    }
+
+    /// Render the current scene state at `tick` **without stepping the
+    /// simulation** — the present half of a frame. [`Self::tick_with_controls`]
+    /// calls this right after it steps; a host that drives the simulation itself
+    /// (banking real elapsed time into fixed ticks) instead calls this once per
+    /// presented frame, after writing that frame's camera and node transforms, so
+    /// the pixels reflect the very latest authored state rather than the state as
+    /// of the last fixed tick. Re-rendering the same scene at the same `tick`
+    /// twice is a pure function of that state — it submits draws and summarises
+    /// them, mutating no simulation state — so it is safe to call standalone and
+    /// replayable. When rendering is disabled the outcome is simulation-only.
+    pub fn render(&mut self, tick: u64) -> FrameOutcome {
+        let width = self.viewport.physical_width();
+        let height = self.viewport.physical_height();
 
         // `then` keeps the render path lazy: it runs (with all its side effects)
         // only when rendering is enabled; otherwise the simulation-only outcome is
@@ -158,5 +185,68 @@ impl RunningApp {
             )
         });
         rendered.unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::angle::Angle;
+    use crate::app::App;
+    use crate::camera::{Camera, PerspectiveProjection};
+    use crate::default_plugins::DefaultPlugins;
+    use crate::window::Window;
+    use axiom_kernel::Meters;
+    use axiom_math::{Transform, Vec3};
+
+    /// A perspective camera looking down -Z.
+    fn camera() -> Camera {
+        Camera::perspective(PerspectiveProjection {
+            fov_y: Angle::degrees(60.0),
+            near: Meters::new(0.1).expect("near plane is finite"),
+            far: Meters::new(100.0).expect("far plane is finite"),
+        })
+    }
+
+    /// A bare rendering app — empty scene, render enabled.
+    fn render_app() -> crate::app::RunningApp {
+        App::new()
+            .window(Window::new(64, 64))
+            .add_plugins(DefaultPlugins)
+            .build()
+    }
+
+    #[test]
+    fn render_reflects_a_scene_mutation_made_after_the_last_step() {
+        // The split's whole reason: a host that steps during its own `advance` and
+        // then writes the camera before presenting must see the *new* camera in the
+        // rendered frame — not the camera as of the last fixed tick.
+        let mut app = render_app();
+        app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)));
+        // Step+render frame 0 (the fused path) captures the near camera.
+        let near = app.tick(0).camera_view_proj();
+        // Now move the camera *without* stepping, and render-only the next frame.
+        app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 40.0)));
+        let far = app.render(1).camera_view_proj();
+        assert_ne!(
+            near, far,
+            "render() reflects the post-step camera write, not the stale tick state"
+        );
+    }
+
+    #[test]
+    fn render_only_does_not_advance_the_simulation_and_is_idempotent() {
+        // Rendering the same scene at the same tick twice yields equal outcomes and
+        // does not perturb simulation state — it is the pure present half.
+        let mut app = render_app();
+        app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)));
+        let before = app.snapshot_sim();
+        let first = app.render(7);
+        let second = app.render(7);
+        assert_eq!(first, second, "render is a pure function of the scene at a tick");
+        assert_eq!(
+            before,
+            app.snapshot_sim(),
+            "render must not mutate simulation state"
+        );
     }
 }

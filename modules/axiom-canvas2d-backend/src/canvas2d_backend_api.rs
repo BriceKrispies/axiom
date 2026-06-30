@@ -76,6 +76,21 @@ impl Canvas2dBackendApi {
         crate::draw2d_raster::render(list, self.width, self.height, &self.textures)
     }
 
+    /// Present one host-neutral [`Draw2dList`] live to the bound canvas (wasm32):
+    /// rasterize it at the canvas display size ([`Self::render_draw2d_rgba`], which
+    /// composites the layer-sorted commands over a transparent framebuffer), flatten
+    /// that over the opaque `clear` background, and blit. Compositing the
+    /// transparent result over `clear` is — by src-over associativity — identical to
+    /// drawing the commands directly over `clear`, which is exactly what the GPU 2D
+    /// arm does (clear, then alpha-blend), so the two backends present the same 2D
+    /// frame. A no-op until [`Self::attach_canvas`] has bound a context.
+    #[cfg(target_arch = "wasm32")]
+    pub fn present_draw2d(&self, list: &Draw2dList, clear: [f32; 4]) {
+        let (rgba, width, height) = self.render_draw2d_rgba(list);
+        let opaque = flatten_over_clear(rgba, clear);
+        self.blit(&opaque, width, height);
+    }
+
     /// Upload the mesh set the rasterizer will project, in the GPU backend's
     /// `(mesh_id, 12-float interleaved vertices, indices)` form — so windowing
     /// hands both backends the identical geometry.
@@ -264,6 +279,26 @@ impl Canvas2dBackendApi {
     pub fn height(&self) -> u32 {
         self.height
     }
+}
+
+/// Flatten a straight-alpha RGBA8 image (the 2D rasterizer's transparent-background
+/// output) onto an opaque `clear` background, returning opaque RGBA8 bytes — one
+/// final src-over per pixel (`out = src·a + clear·(1−a)`, `out_a = 255`). By
+/// src-over associativity this equals drawing the commands directly over `clear`,
+/// the GPU 2D arm's clear-then-blend, so the two backends present the same frame.
+/// wasm32 only (the live present path); branchless for consistency with the module.
+#[cfg(target_arch = "wasm32")]
+fn flatten_over_clear(mut rgba: Vec<u8>, clear: [f32; 4]) -> Vec<u8> {
+    let to_byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+    rgba.chunks_exact_mut(4).for_each(|px| {
+        let a = f32::from(px[3]) / 255.0;
+        let inv = 1.0 - a;
+        px[0] = to_byte(f32::from(px[0]) / 255.0 * a + clear[0] * inv);
+        px[1] = to_byte(f32::from(px[1]) / 255.0 * a + clear[1] * inv);
+        px[2] = to_byte(f32::from(px[2]) / 255.0 * a + clear[2] * inv);
+        px[3] = 255;
+    });
+    rgba
 }
 
 /// A monotonic millisecond clock for timing. wasm reads `performance.now()`;

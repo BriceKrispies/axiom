@@ -63,6 +63,16 @@ impl GameBridge {
             .unwrap_or_default()
     }
 
+    /// Every `loadTexture` handle minted so far, in mint order (`textureIds`). The
+    /// browser arm polls this to discover which textures to fetch/decode/upload to
+    /// the engine's 2D presenter — it pairs each id with [`Self::texture_url`]. The
+    /// reserved font-atlas id is not included (the harness bakes that one itself).
+    pub fn texture_ids(&self) -> Vec<u64> {
+        (0..self.assets.texture_urls.len())
+            .map(|i| i as u64 + TEXTURE_ID_BASE)
+            .collect()
+    }
+
     /// The built-in monospace font handle (`loadFont`). Tier-0 ships exactly one
     /// font, so the `url` is ignored and the built-in handle is returned; the
     /// harness bakes the matching atlas under [`crate::font::FONT_ATLAS_TEXTURE`].
@@ -89,6 +99,18 @@ mod wasm_exports {
         #[wasm_bindgen(js_name = textureUrl)]
         pub fn texture_url(&self, id: f64) -> String {
             self.bridge.texture_url(id as u64)
+        }
+
+        /// Every `loadTexture` handle minted so far (`textureIds`), so the browser
+        /// arm can fetch/decode/upload each one's pixels to the engine's 2D
+        /// presenter (pairing it with [`Self::texture_url`]).
+        #[wasm_bindgen(js_name = textureIds)]
+        pub fn texture_ids(&self) -> Vec<f64> {
+            self.bridge
+                .texture_ids()
+                .into_iter()
+                .map(|id| id as f64)
+                .collect()
         }
 
         /// The built-in monospace font handle (`loadFont`).

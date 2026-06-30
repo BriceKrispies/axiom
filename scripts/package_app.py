@@ -27,6 +27,20 @@ with them on — so the app must be rebuilt as MVP *including* ``std`` via night
 it: the artifact is genuinely MVP, not a reference-types build with the symptom
 papered over.
 
+Two app shapes package through the same pipeline:
+
+  * **Native apps** wire the wasm glue directly in ``web/index.html`` (importing
+    ``pkg/<snake>.js``). The packager rewrites that to the bundle-root loader.
+  * **SDK-hosted TypeScript apps** (``axiom-game-runtime``, authored over the
+    ``@axiom/game`` SDK) load the glue from a compiled harness (``web/dist/harness.js``)
+    at the conventional ``/pkg/<snake>.js`` path, the SDK from a ``/vendor/<name>/`` URL
+    in the page's import map, and the author module from ``/dist/game.js``. For these
+    the packager builds the SDK, compiles ``web/src`` with tsgo, materializes the vendor
+    dir, and drops the loader in AT ``pkg/<snake>.js`` (no page rewrite needed, since the
+    loader is a drop-in for the ``--target web`` glue). Such bundles use absolute
+    (/pkg, /vendor, /dist) URLs — serve them from a domain root; ``--inline`` is not
+    supported for them.
+
 Usage:
     uv run --no-project python scripts/package_app.py <app> [--out DIR] [--inline]
 
@@ -50,6 +64,19 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BINARYEN_BIN = REPO_ROOT / "scripts" / "packaging" / "node_modules" / "binaryen" / "bin"
 WASM_TARGET = "wasm32-unknown-unknown"
 
+# An "SDK-hosted" browser app (axiom-game-runtime, axiom-retro-fps-ts-browser) is authored
+# in TypeScript over the `@axiom/game` SDK. Its index.html does NOT wire the wasm glue
+# itself: a compiled harness (web/dist/harness.js) imports the glue from the
+# conventional `/pkg/<snake>.js` path, the SDK from a `/vendor/<name>/` URL declared in
+# the page's import map, and the author module from `/dist/game.js`. The dev server
+# synthesizes /vendor and /dist live (see scripts/axiom_dev_server.mjs); packaging
+# bakes them in — it compiles web/src -> web/dist with the same tsgo, materializes the
+# vendor dir from the SDK's built dist/, and drops the capability-detecting loader in
+# AT `pkg/<snake>.js` (the exact path the harness imports), since the loader is a
+# drop-in for the `--target web` glue. No harness edit, no compiled-JS rewriting.
+AXIOM_GAME_SDK = REPO_ROOT / "packages" / "axiom-game"
+VENDORED_SDKS = {"/vendor/axiom-game/": AXIOM_GAME_SDK / "dist"}
+
 # Disable the post-MVP wasm features that make wasm-bindgen emit externref glue and
 # that wasm2js cannot consume. Rebuilt into std too (-Z build-std), so the whole
 # module is consistently MVP. Encoded with \x1f separators (CARGO_ENCODED_RUSTFLAGS)
@@ -64,6 +91,21 @@ WASM2JS_LOWERING = [
     "--llvm-memory-copy-fill-lowering",
     "-O2",
 ]
+
+# When the module exposes i64 across the JS boundary, Binaryen legalizes it and emits
+# an `import * as env from 'env'` for the i64 high-word scratch (set/getTempRet0). A
+# bare specifier has no resolver in a static bundle, so we replace that import with the
+# standard inline scratch — making the wasm2js fallback self-contained for ANY app, not
+# just i64-free ones. (Single quotes: exactly what Binaryen emits.)
+WASM2JS_ENV_IMPORT = "import * as env from 'env';"
+WASM2JS_ENV_SHIM = (
+    "// scripts/package_app.py: Binaryen's wasm2js imports its i64 high-word scratch "
+    "from a bare\n// `env` module the embedder must supply; a static bundle has no "
+    "bare-specifier resolver,\n// so the standard tempRet0 scratch is inlined here to "
+    "keep the fallback self-contained.\n"
+    "const env = (() => { let tempRet0 = 0; "
+    "return { setTempRet0(x) { tempRet0 = x | 0; }, getTempRet0() { return tempRet0; } }; })();"
+)
 
 
 def run(cmd: list[str], *, env: dict[str, str] | None = None, cwd: Path | None = None) -> None:
@@ -96,45 +138,148 @@ def resolve_app(arg: str) -> Path:
     sys.exit(f"error: could not find an app crate for '{arg}'. Looked at:\n       {searched}")
 
 
+def run_shell(cmd: str, *, cwd: Path | None = None, check: bool = True) -> int:
+    """Run a shell command string (for the npm/tsgo wrappers, which are .cmd on
+    Windows and need a shell). Aborts on failure unless ``check=False``."""
+    print(f"  $ {cmd}", flush=True)
+    result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, shell=True)
+    if check and result.returncode != 0:
+        sys.exit(f"error: command failed ({result.returncode}): {cmd}")
+    return result.returncode
+
+
 def crate_name(app_dir: Path) -> str:
     with (app_dir / "Cargo.toml").open("rb") as f:
         return tomllib.load(f)["package"]["name"]
 
 
-def loader_source(snake: str, *, has_fallback: bool) -> str:
-    """The capability-detecting loader: a drop-in for the old `--target web` glue."""
-    fallback = (
-        f"""    console.warn("Axiom: WebAssembly unavailable — running JS fallback.");
-    const wasm2js = await import("./{snake}_bg.wasm2js.js");
-    bg.__wbg_set_wasm(wasm2js);"""
-        if has_fallback
-        else """    throw new Error("Axiom: WebAssembly unavailable and this bundle ships no JS fallback.");"""
-    )
-    return f"""// Generated by scripts/package_app.py — do not edit.
-// Capability-detecting loader: real wasm where supported, wasm2js fallback otherwise.
-// API-compatible with the old wasm-bindgen `--target web` glue: `await init()` then
-// call the app's exports (re-exported below). Pass nothing — any argument is ignored.
-import * as bg from "./{snake}_bg.js";
-export * from "./{snake}_bg.js";
+def is_sdk_hosted(app_dir: Path, snake: str) -> bool:
+    """True for a TypeScript SDK-hosted app: a compiled harness imports the wasm glue
+    from `/pkg/<snake>.js`, so index.html itself never references `pkg/<snake>.js`
+    (a native app wires that glue path directly in its page). This is the exact
+    condition under which the native index.html glue-rewrite would be a no-op."""
+    html = (app_dir / "web" / "index.html").read_text(encoding="utf-8")
+    return f"pkg/{snake}.js" not in html
+
+
+def prepare_sdk_hosted(app_dir: Path) -> None:
+    """Build the @axiom/game SDK and compile the app's `web/src` to `web/dist`, the
+    same toolchain the dev server runs — so the baked-in bundle matches the live loop.
+
+    The SDK build is required (it produces the vendored dist/ and the tsgo binary);
+    the app compile uses tsgo with the app's own tsconfig (`noEmitOnError: false`, so
+    it emits JS even past type errors — hence ``check=False`` plus an output check)."""
+    if not AXIOM_GAME_SDK.is_dir():
+        sys.exit(f"error: {AXIOM_GAME_SDK} not found — cannot package an SDK-hosted TS app.")
+    print("  (SDK-hosted TS app: building @axiom/game SDK + compiling web/src with tsgo)")
+    run_shell(f'npm --prefix "{AXIOM_GAME_SDK}" install --no-audit --no-fund')
+    run_shell(f'npm --prefix "{AXIOM_GAME_SDK}" run build')
+    tsgo = AXIOM_GAME_SDK / "node_modules" / ".bin" / ("tsgo.cmd" if os.name == "nt" else "tsgo")
+    run_shell(f'"{tsgo}" -p "{app_dir / "web" / "tsconfig.json"}"', cwd=app_dir / "web", check=False)
+    missing = [n for n in ("harness.js", "game.js") if not (app_dir / "web" / "dist" / n).is_file()]
+    if missing:
+        sys.exit(f"error: tsgo did not emit web/dist/{', '.join(missing)} — cannot package.")
+
+
+def vendor_sdks(app_dir: Path, out: Path) -> None:
+    """Materialize every `/vendor/<name>/` URL the app's page declares (in its import
+    map) from the corresponding SDK's built dist/, the way the dev server serves them
+    live. Skipped for any vendor dir the app already ships under its own web/."""
+    html = (app_dir / "web" / "index.html").read_text(encoding="utf-8")
+    for url_prefix, src in VENDORED_SDKS.items():
+        rel = url_prefix.strip("/")
+        if (url_prefix in html) and not (app_dir / "web" / rel).exists():
+            if not src.is_dir():
+                sys.exit(f"error: vendored SDK build missing at {src} — run its `npm run build` first.")
+            shutil.copytree(src, out / rel, dirs_exist_ok=True)
+
+
+def _loader_body(
+    *,
+    glue_specifier: str,
+    glue_import_key: str,
+    acquire_bytes: str,
+    wasm2js_specifier: str,
+    has_fallback: bool,
+) -> str:
+    """The shared init() body for both loader flavours.
+
+    Detection is capability-AND-instantiation aware. A browser can expose the
+    WebAssembly API yet still *reject this specific (MVP) module* — a real failure
+    mode, not just total API absence — so when a JS fallback is shipped we attempt
+    real instantiation and treat EITHER the API being absent OR the instantiate call
+    throwing/rejecting as "wasm unavailable", taking the wasm2js arm and emitting the
+    single console.warn on whichever path leads there.
+
+    When no fallback is shipped (`--fast`/`--no-fallback`) the original contract is
+    preserved: an absent API throws the documented "no JS fallback" error, and an
+    instantiation failure propagates its own (more informative) error naturally —
+    there is no second arm to fall through to.
+
+    `acquire_bytes` is the flavour-specific snippet that leaves a `bytes` ArrayBuffer
+    in scope (a fetched sibling `.wasm` file vs. an embedded `data:` URL)."""
+    instantiate = f"""    {acquire_bytes}
+    const {{ instance }} = await WebAssembly.instantiate(bytes, {{ "{glue_import_key}": bg }});
+    bg.__wbg_set_wasm(instance.exports);"""
+    head = f"""import * as bg from "{glue_specifier}";
+export * from "{glue_specifier}";
 
 let booted = false;
+"""
+    if has_fallback:
+        return f"""{head}
+async function instantiateWasm() {{
+{instantiate}
+}}
 
 export default async function init() {{
   if (booted) return bg;
   const hasWasm =
     typeof WebAssembly === "object" && typeof WebAssembly.instantiate === "function";
-  if (hasWasm) {{
-    const url = new URL("./{snake}_bg.wasm", import.meta.url);
-    const bytes = await (await fetch(url)).arrayBuffer();
-    const {{ instance }} = await WebAssembly.instantiate(bytes, {{ "./{snake}_bg.js": bg }});
-    bg.__wbg_set_wasm(instance.exports);
-  }} else {{
-{fallback}
+  // Try real wasm first; fall back on EITHER the API being absent OR this MVP module
+  // failing to compile/instantiate in this engine (instantiateWasm() rejecting).
+  const ranWasm = hasWasm && (await instantiateWasm().then(() => true, () => false));
+  if (!ranWasm) {{
+    console.warn("Axiom: WebAssembly unavailable — running JS fallback.");
+    const wasm2js = await import("{wasm2js_specifier}");
+    bg.__wbg_set_wasm(wasm2js);
   }}
   booted = true;
   return bg;
 }}
 """
+    return f"""{head}
+export default async function init() {{
+  if (booted) return bg;
+  const hasWasm =
+    typeof WebAssembly === "object" && typeof WebAssembly.instantiate === "function";
+  if (!hasWasm) {{
+    throw new Error("Axiom: WebAssembly unavailable and this bundle ships no JS fallback.");
+  }}
+{instantiate}
+  booted = true;
+  return bg;
+}}
+"""
+
+
+def loader_source(snake: str, *, has_fallback: bool) -> str:
+    """The capability-detecting loader: a drop-in for the old `--target web` glue."""
+    header = """// Generated by scripts/package_app.py — do not edit.
+// Capability-detecting loader: real wasm where supported, wasm2js fallback otherwise.
+// API-compatible with the old wasm-bindgen `--target web` glue: `await init()` then
+// call the app's exports (re-exported below). Pass nothing — any argument is ignored.
+"""
+    return header + _loader_body(
+        glue_specifier=f"./{snake}_bg.js",
+        glue_import_key=f"./{snake}_bg.js",
+        acquire_bytes=(
+            f'const url = new URL("./{snake}_bg.wasm", import.meta.url);\n'
+            "    const bytes = await (await fetch(url)).arrayBuffer();"
+        ),
+        wasm2js_specifier=f"./{snake}_bg.wasm2js.js",
+        has_fallback=has_fallback,
+    )
 
 
 def loader_source_inline(snake: str, wasm_b64: str, *, has_fallback: bool) -> str:
@@ -142,34 +287,13 @@ def loader_source_inline(snake: str, wasm_b64: str, *, has_fallback: bool) -> st
     names the inline import map (data: URLs) resolves. Bare specifiers always consult
     the realm's import map regardless of the importing module's base URL — which is
     why this works from inside a data: URL module."""
-    fallback = (
-        """    console.warn("Axiom: WebAssembly unavailable — running JS fallback.");
-    const wasm2js = await import("axiom-wasm2js");
-    bg.__wbg_set_wasm(wasm2js);"""
-        if has_fallback
-        else """    throw new Error("Axiom: WebAssembly unavailable and this bundle ships no JS fallback.");"""
+    return "// Generated by scripts/package_app.py --inline — do not edit.\n" + _loader_body(
+        glue_specifier="axiom-glue",
+        glue_import_key=f"./{snake}_bg.js",
+        acquire_bytes=f'const bytes = await (await fetch("data:application/wasm;base64,{wasm_b64}")).arrayBuffer();',
+        wasm2js_specifier="axiom-wasm2js",
+        has_fallback=has_fallback,
     )
-    return f"""// Generated by scripts/package_app.py --inline — do not edit.
-import * as bg from "axiom-glue";
-export * from "axiom-glue";
-
-let booted = false;
-
-export default async function init() {{
-  if (booted) return bg;
-  const hasWasm =
-    typeof WebAssembly === "object" && typeof WebAssembly.instantiate === "function";
-  if (hasWasm) {{
-    const bytes = await (await fetch("data:application/wasm;base64,{wasm_b64}")).arrayBuffer();
-    const {{ instance }} = await WebAssembly.instantiate(bytes, {{ "./{snake}_bg.js": bg }});
-    bg.__wbg_set_wasm(instance.exports);
-  }} else {{
-{fallback}
-  }}
-  booted = true;
-  return bg;
-}}
-"""
 
 
 def _copy_extra_web_assets(app_dir: Path, out: Path) -> None:
@@ -184,14 +308,23 @@ def _copy_extra_web_assets(app_dir: Path, out: Path) -> None:
             shutil.copy2(item, dest)
 
 
-def emit_index_html(app_dir: Path, out: Path, snake: str) -> None:
-    """Copy the app's web/ shell (minus pkg/) and rewire index.html to the loader."""
+def emit_index_html(app_dir: Path, out: Path, snake: str, *, sdk_hosted: bool) -> None:
+    """Copy the app's web/ shell (minus pkg/), vendor any declared SDKs, and — for a
+    native app — rewire its index.html glue import to the bundle-root loader.
+
+    An SDK-hosted app needs NO page rewrite: its harness imports the glue from
+    `/pkg/<snake>.js`, and the packager drops the loader in at exactly that path (see
+    ``package``), so the page is served verbatim."""
     _copy_extra_web_assets(app_dir, out)
+    vendor_sdks(app_dir, out)
     html = (app_dir / "web" / "index.html").read_text(encoding="utf-8")
-    # The only change an app's page needs: import the loader instead of the web-target
-    # glue, and point the (now loader-ignored) wasm URL at the bundle root.
-    html = html.replace(f"pkg/{snake}.js", "axiom-loader.js")
-    html = html.replace(f"pkg/{snake}_bg.wasm", f"{snake}_bg.wasm")
+    # A native app's page needs the loader swapped in for the web-target glue, with the
+    # (now loader-ignored) wasm URL pointed at the bundle root. An SDK-hosted app's page
+    # references neither (the harness owns the glue path) — these replaces are no-ops
+    # there, but we skip them to keep the contract explicit.
+    if not sdk_hosted:
+        html = html.replace(f"pkg/{snake}.js", "axiom-loader.js")
+        html = html.replace(f"pkg/{snake}_bg.wasm", f"{snake}_bg.wasm")
     (out / "index.html").write_text(html, encoding="utf-8")
 
 
@@ -261,10 +394,21 @@ def package(
     if not (app_dir / "web" / "index.html").is_file():
         sys.exit(f"error: {app_dir}/web/index.html not found — not a browser app.")
     has_fallback = has_fallback and not fast
+    sdk_hosted = is_sdk_hosted(app_dir, snake)
+    if inline and sdk_hosted:
+        sys.exit(
+            "error: --inline is not supported for SDK-hosted TS apps (their multi-module "
+            "harness + vendored SDK + dynamic author import are not foldable into one file). "
+            "Use the default directory bundle."
+        )
     tmp = Path(tempfile.mkdtemp(prefix=f"axiom-pkg-{name.removeprefix('axiom-')}-"))
 
     print(f"Packaging {name} -> {out}{'  (fast: wasm-only)' if fast else ''}")
     try:
+        # 0. An SDK-hosted app's TypeScript host edge (harness + author module) and its
+        # vendored SDK are compiled/built here so the baked bundle matches the dev loop.
+        if sdk_hosted:
+            prepare_sdk_hosted(app_dir)
         # 1. Build the wasm. fast = normal incremental release build (shares the main
         # target dir). Otherwise an MVP build with std rebuilt and reference-types off
         # (what wasm2js requires), paths anonymized, into the shared package-mvp dir.
@@ -296,12 +440,15 @@ def package(
         fast_wasm = tmp / f"{snake}_bg.opt.wasm"
         run(binaryen("wasm-opt", "-Oz", str(bg_wasm), "-o", str(fast_wasm)))
 
-        # 4. wasm2js fallback: lower remaining post-MVP ops, then compile to JS.
+        # 4. wasm2js fallback: lower remaining post-MVP ops, then compile to JS, then
+        # inline the bare-`env` i64 scratch so the module resolves in a static bundle.
         wasm2js_path = tmp / f"{snake}_bg.wasm2js.js"
         if has_fallback:
             lowered = tmp / "mvp_lowered.wasm"
             run(binaryen("wasm-opt", str(bg_wasm), *WASM2JS_LOWERING, "-o", str(lowered)))
             run(binaryen("wasm2js", str(lowered), "-o", str(wasm2js_path)))
+            text = wasm2js_path.read_text(encoding="utf-8")
+            wasm2js_path.write_text(text.replace(WASM2JS_ENV_IMPORT, WASM2JS_ENV_SHIM, 1), encoding="utf-8")
 
         # Fresh output dir.
         if out.exists():
@@ -316,12 +463,19 @@ def package(
             wasm_b64 = base64.b64encode(fast_wasm.read_bytes()).decode("ascii")
             emit_inline_html(app_dir, out, snake, glue_js, wasm2js_js, wasm_b64)
         else:
-            shutil.copy2(fast_wasm, out / f"{snake}_bg.wasm")
+            # The loader is a drop-in for the wasm-bindgen `--target web` glue. A native
+            # app's page is rewritten to import it as the bundle-root `axiom-loader.js`;
+            # an SDK-hosted app's compiled harness imports `/pkg/<snake>.js`, so the
+            # loader is dropped in at exactly that path (its `_bg.*` companions beside
+            # it). Either way the loader + companions live together in one dir.
+            loader_dir, loader_name = ((out / "pkg"), f"{snake}.js") if sdk_hosted else (out, "axiom-loader.js")
+            loader_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(fast_wasm, loader_dir / f"{snake}_bg.wasm")
             if has_fallback:
-                shutil.copy2(wasm2js_path, out / f"{snake}_bg.wasm2js.js")
-            (out / f"{snake}_bg.js").write_text(glue_js, encoding="utf-8")
-            (out / "axiom-loader.js").write_text(loader_source(snake, has_fallback=has_fallback), encoding="utf-8")
-            emit_index_html(app_dir, out, snake)
+                shutil.copy2(wasm2js_path, loader_dir / f"{snake}_bg.wasm2js.js")
+            (loader_dir / f"{snake}_bg.js").write_text(glue_js, encoding="utf-8")
+            (loader_dir / loader_name).write_text(loader_source(snake, has_fallback=has_fallback), encoding="utf-8")
+            emit_index_html(app_dir, out, snake, sdk_hosted=sdk_hosted)
         return out
     finally:
         if keep_temp:
@@ -365,6 +519,8 @@ def main() -> int:
 
     snake = crate_name(app_dir).replace("-", "_")
     has_fallback = not args.no_fallback and not args.fast
+    # SDK-hosted apps keep the loader + wasm in pkg/ (the harness's glue path).
+    loc = (out / "pkg") if is_sdk_hosted(app_dir, snake) else out
 
     def kb(p: Path) -> str:
         return f"{p.stat().st_size / 1024:.0f} KB" if p.is_file() else "—"
@@ -374,9 +530,9 @@ def main() -> int:
         print(f"  index.html  {kb(out / 'index.html')}  (single self-contained file)")
     else:
         print(f"  index.html            {kb(out / 'index.html')}")
-        print(f"  {snake}_bg.wasm       {kb(out / f'{snake}_bg.wasm')}  (fast path)")
+        print(f"  {snake}_bg.wasm       {kb(loc / f'{snake}_bg.wasm')}  (fast path)")
         if has_fallback:
-            print(f"  {snake}_bg.wasm2js.js {kb(out / f'{snake}_bg.wasm2js.js')}  (fallback)")
+            print(f"  {snake}_bg.wasm2js.js {kb(loc / f'{snake}_bg.wasm2js.js')}  (fallback)")
     print(f"\n  serve with:  uv run --no-project python -m http.server 8000 --directory {out}")
     return 0
 

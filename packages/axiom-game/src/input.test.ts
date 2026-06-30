@@ -53,6 +53,14 @@ test("pointer / pointerPressed / swipe forward the snapshot or its empty value",
   assert.equal(empty.swipe(), undefined);
 });
 
+test("look forwards this tick's relative look delta, or (0, 0) when none", () => {
+  const fake = new FakeBridge();
+  fake.looks.set(TICK, { x: 7, y: -2 });
+  assert.deepEqual(makeInput(fake, TICK).look(), { x: 7, y: -2 });
+  // No look this tick reads the neutral zero delta, never an empty value.
+  assert.deepEqual(makeInput(new FakeBridge(), TICK).look(), { x: 0, y: 0 });
+});
+
 test("pressedAtTick reports the recorded tick, or the empty value if never", () => {
   const fake = new FakeBridge();
   fake.pressedAt.set(`${TICK}|fire`, 2);

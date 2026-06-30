@@ -102,6 +102,8 @@ export interface NativeBridge {
   readonly inputPressed: (tick: Ticks, action: string) => boolean;
   /** Whether `action` went up on `tick` (edge). */
   readonly inputReleased: (tick: Ticks, action: string) => boolean;
+  /** This tick's relative look (mouse / pointer-lock) as a raw-pixel `(dx, dy)` delta — `(0, 0)` when none. */
+  readonly inputLookDelta: (tick: Ticks) => Vec2;
   /** The pointer sample at `tick`, or `null` when there is no pointer. */
   readonly inputPointer: (tick: Ticks) => Result<PointerSample>;
   /** The position a pointer-press began at on `tick`, or `null`. */

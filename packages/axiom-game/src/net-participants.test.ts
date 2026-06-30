@@ -88,6 +88,8 @@ test("makeNetParticipants decodes the authoritative participant block", () => {
   const seatOne = participants.inputOf(1, 0);
   assert.equal(seatOne.isDown("fire"), true);
   assert.equal(seatOne.isDown("jump"), false);
+  // A flat networked intent carries no analog look — the surface reads the neutral delta.
+  assert.deepEqual(seatOne.look(), { x: 0, y: 0 });
 });
 
 test("inputOf projects axis from the held intent fields across all three steps", () => {

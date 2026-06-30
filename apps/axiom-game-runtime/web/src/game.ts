@@ -12,8 +12,16 @@
  * `[r, g, b, a]` with each channel in 0..1.
  */
 
-import { type Frame, type Sim, onFixedUpdate, onRender } from "@axiom/game";
+import { type Frame, type Sim, loadTexture, onFixedUpdate, onRender } from "@axiom/game";
 import type { Rgba } from "@axiom/game";
+
+// A tiny 32×32 four-quadrant texture, embedded as a data URL so the harness can
+// `fetch`+decode it with no static asset — the Tier-0 sprite-texture proof.
+const BADGE =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAASklEQVR42mP4P8CAYdA44LWDCVnYZEUwWXjUAaMOGHXAqANGHTDqgMHnAKfWL2Th33tYycKjDhh1wKgDRh0w6oBRBww+B4zY3jEA0bZlqrmptnsAAAAASUVORK5CYII=";
+
+// The texture handle, resolved lazily on the first render (after the host binds).
+let badge = 0;
 
 // ───────────────────────── tweak these and save ─────────────────────────
 const ORB_COUNT = 7; // how many orbs ride the ring
@@ -33,8 +41,10 @@ const TAU = Math.PI * 2;
 // Deterministic sim state, advanced each fixed tick from the live engine.
 let phase = 0;
 let shimmer = 0;
+let tick = 0;
 
 onFixedUpdate((sim: Sim): void => {
+  tick = sim.tick;
   phase = sim.tick * SPIN_PER_TICK;
   shimmer = sim.rng.next(); // a real deterministic draw, proving the engine seam is live
 });
@@ -69,4 +79,20 @@ onRender((frame: Frame): void => {
   }
   // a calm pulsing core
   frame.circle({ x: CENTER_X, y: CENTER_Y }, 12 + Math.sin(phase * 2) * 4, { fill: [1, 1, 1, 1] });
+
+  // Tier-0 sprite: the badge texture, spun and pulsed at the centre. `loadTexture`
+  // must run after the host binds, so resolve it lazily on the first frame.
+  if (badge === 0) {
+    badge = loadTexture(BADGE);
+  }
+  frame.sprite(badge, {
+    anchor: { x: 0.5, y: 0.5 },
+    pos: { x: CENTER_X, y: CENTER_Y },
+    rotation: -phase,
+    scale: { x: 2.5 + shimmer, y: 2.5 + shimmer },
+  });
+
+  // Tier-0 text HUD: a title and a live tick read-out, top-left.
+  frame.text("AXIOM ENGINE", { color: [1, 1, 1, 1], font: { family: "monospace", size: 28 }, pos: { x: 24, y: 22 } });
+  frame.text(`tick ${tick}`, { color: [0.6, 0.9, 1, 1], font: { family: "monospace", size: 20 }, pos: { x: 24, y: 60 } });
 });

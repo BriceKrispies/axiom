@@ -142,6 +142,18 @@ impl RunningApp {
     pub fn world_transform(&self, entity: Entity) -> Option<Transform> {
         self.scene.world_transform(entity).ok()
     }
+
+    /// Recompute every node's world transform from its local transform — the
+    /// explicit commit a runtime author calls after writing local transforms with
+    /// [`Self::set`], so a following spatial query ([`Self::overlap_box`] / raycast)
+    /// or [`Self::render`] observes the new pose *this* frame instead of on the
+    /// next tick. [`Self::spawn`] and [`Self::set_parent`] already refresh; this is
+    /// the refresh for a bare `set::<Transform>`, which (by its `Component`
+    /// contract) defers propagation. Per-tick simulation refreshes on its own, so a
+    /// game that only moves nodes inside its own fixed step never needs this.
+    pub fn update_world_transforms(&mut self) {
+        self.scene.update_world_transforms();
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +174,39 @@ mod tests {
     use axiom_math::Transform;
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    #[test]
+    fn update_world_transforms_commits_a_set_for_an_immediate_raycast() {
+        // A runtime author moves a bounded node with `set::<Transform>` (which
+        // defers world-transform propagation) and then commits it explicitly, so a
+        // raycast in the SAME frame sees the node at its new place — the contract
+        // the wasm authoring bridge relies on to move enemies and have hitscan hit
+        // them without waiting a tick.
+        let mut app = App::new()
+            .window(Window::new(64, 64))
+            .add_plugins(DefaultPlugins)
+            .setup(|world, meshes, materials| {
+                let cube = meshes.add(Mesh::cube());
+                let material = materials.add(Material::lit(Color::WHITE));
+                world.spawn((
+                    Transform::from_translation(Vec3::new(0.0, 0.0, -3.0)),
+                    Renderable { mesh: cube, material },
+                    Bounds::new(Vec3::new(0.5, 0.5, 0.5)),
+                ));
+            })
+            .build();
+        let reach = Meters::new(100.0).unwrap();
+        let node = app.query::<Bounds>()[0].0;
+        // A ray to the east misses the node at its spawn (it is due north).
+        assert_eq!(app.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach), None);
+        // Move it east with a bare set, then commit: the same ray now hits it.
+        assert!(app.set::<Transform>(node, Transform::from_translation(Vec3::new(3.0, 0.0, 0.0))));
+        app.update_world_transforms();
+        assert_eq!(
+            app.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach),
+            Some(node)
+        );
+    }
 
     #[test]
     fn raycast_and_overlap_return_entities_the_caller_classifies() {

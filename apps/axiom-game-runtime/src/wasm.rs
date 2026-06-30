@@ -18,6 +18,7 @@
 use wasm_bindgen::prelude::*;
 
 use axiom::prelude::HostOutcome;
+use axiom_windowing::WindowingApi;
 
 use crate::embed::{decode_session_config, session_params_json};
 use crate::{demo_app, GameBridge};
@@ -71,15 +72,19 @@ impl StepReport {
     }
 
     /// Sub-step time left banked after this frame, in `[0, fixed_step_nanos)`.
+    /// Crosses as an f64 `number` (never a BigInt i64) so the Binaryen `wasm2js`
+    /// fallback — which legalizes i64 into i32 pairs and has no BigInt ABI — can
+    /// run; a nanosecond budget fits in 2^53 losslessly.
     #[wasm_bindgen(getter)]
-    pub fn remainder_nanos(&self) -> u64 {
-        self.remainder_nanos
+    pub fn remainder_nanos(&self) -> f64 {
+        self.remainder_nanos as f64
     }
 
     /// The fixed step size, so the SDK can compute `remainder_nanos / fixed_step_nanos`.
+    /// An f64 `number` for the same `wasm2js`-fallback reason as `remainder_nanos`.
     #[wasm_bindgen(getter)]
-    pub fn fixed_step_nanos(&self) -> u64 {
-        self.fixed_step_nanos
+    pub fn fixed_step_nanos(&self) -> f64 {
+        self.fixed_step_nanos as f64
     }
 }
 
@@ -97,6 +102,38 @@ pub struct WasmGame {
     /// The raw inbound host query string, kept so [`Self::session_params`] can
     /// re-project the opaque params map the game interprets.
     query: String,
+    /// The live presenter (SPEC-11 3D / SPEC-04 2D). Idle until [`Self::bind_surface`]
+    /// (3D) or [`Self::bind_2d_surface`] (2D) binds it to a canvas; the matching
+    /// `render_scene` / `present_2d` then presents each frame through the engine's
+    /// WebGPU → WebGL2 → Canvas 2D cascade. A game that binds neither pays nothing.
+    windowing: WindowingApi,
+    /// The CPU sprite/atlas textures a 2D game's `onRender` references, accumulated
+    /// from [`Self::upload_2d_texture`] as the harness resolves them (fetch/decode in
+    /// the app — the SPEC-04 "fetch in the app" rule). Handed to the windowing
+    /// presenter each [`Self::present_2d`]; the engine, not the app, rasterizes them.
+    textures_2d: Vec<(u64, u32, u32, Vec<u8>)>,
+    /// The version of `textures_2d`, bumped on every upload so the presenter
+    /// re-uploads the set to the live backend only when it changed (never per frame).
+    textures_2d_generation: u32,
+}
+
+/// The opaque background a 2D frame clears to before its draws — the dark slate the
+/// dev harness used (`#07090e`), now owned by the engine present path so both
+/// backends of the cascade clear identically. Linear `0..1` per channel; both arms
+/// write it as raw bytes (no gamma re-encode), so the on-screen colour is exactly
+/// `(7, 9, 14)`.
+const CLEAR_2D: [f32; 4] = [7.0 / 255.0, 9.0 / 255.0, 14.0 / 255.0, 1.0];
+
+/// The canvas's intrinsic pixel dimensions (its `width`/`height` attributes), or
+/// `None` if no element of that id is a canvas. The surface is sized to these so
+/// the rendered aspect matches the on-screen canvas.
+fn canvas_dimensions(canvas_id: &str) -> Option<(u32, u32)> {
+    let canvas = web_sys::window()?
+        .document()?
+        .get_element_by_id(canvas_id)?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .ok()?;
+    Some((canvas.width(), canvas.height()))
 }
 
 #[wasm_bindgen]
@@ -105,8 +142,13 @@ impl WasmGame {
     /// the panic hook so a Rust panic surfaces as a readable JS error, and decodes
     /// the inbound session config (seed + params) before tick 0 — the seed keys
     /// the bridge's RNG hub for the whole session.
+    ///
+    /// `fixed_step_nanos` crosses as an f64 `number` (not a BigInt i64) so the
+    /// Binaryen `wasm2js` fallback — which legalizes i64 into i32 pairs and has no
+    /// BigInt ABI — can run; a 60 Hz step (~16.6M ns) is far inside 2^53. It is
+    /// converted back to the internal `u64` here.
     #[wasm_bindgen(constructor)]
-    pub fn new(fixed_step_nanos: u64, max_steps: u32) -> WasmGame {
+    pub fn new(fixed_step_nanos: f64, max_steps: u32) -> WasmGame {
         console_error_panic_hook::set_once();
         let query = host_query();
         let config = decode_session_config(&query);
@@ -114,18 +156,32 @@ impl WasmGame {
             bridge: GameBridge::new(
                 demo_app().build(),
                 config.seed(),
-                fixed_step_nanos,
+                fixed_step_nanos as u64,
                 max_steps,
             ),
             query,
+            windowing: WindowingApi::new(),
+            textures_2d: Vec::new(),
+            textures_2d_generation: 0,
         }
     }
 
-    /// The host-supplied session seed, fixed before tick 0 (the determinism input
-    /// the bridge's `Rng` is seeded from). Constant for the whole session.
+    /// The low 32 bits of the host-supplied session seed (the determinism input
+    /// the bridge's `Rng` is seeded from), fixed before tick 0 and constant for the
+    /// whole session. The 64-bit seed crosses as two u32 `number` halves
+    /// (`seed_lo` + `seed_hi`) — never a single BigInt i64 — so the Binaryen
+    /// `wasm2js` fallback (which legalizes i64 into i32 pairs and has no BigInt ABI)
+    /// can run; the TS edge recombines them, preserving the full 2^64 seed space so
+    /// determinism stays byte-identical.
     #[wasm_bindgen(getter)]
-    pub fn seed(&self) -> u64 {
-        self.bridge.seed()
+    pub fn seed_lo(&self) -> u32 {
+        self.bridge.seed() as u32
+    }
+
+    /// The high 32 bits of the session seed — the companion of [`Self::seed_lo`].
+    #[wasm_bindgen(getter)]
+    pub fn seed_hi(&self) -> u32 {
+        (self.bridge.seed() >> 32) as u32
     }
 
     /// The decoded opaque session params as a JSON object string `{"k":"v",…}`
@@ -174,8 +230,13 @@ impl WasmGame {
 
     /// Bank `elapsed_nanos` of real host time, run the resulting whole fixed
     /// ticks, and report the integer budget for the SDK to interpolate with.
-    pub fn advance(&mut self, elapsed_nanos: u64) -> StepReport {
-        let budget = self.bridge.advance(elapsed_nanos);
+    ///
+    /// `elapsed_nanos` crosses as an f64 `number` (not a BigInt i64) for the same
+    /// `wasm2js`-fallback reason as the constructor's `fixed_step_nanos`; a
+    /// per-frame delta is tiny, far inside 2^53. It is converted to the internal
+    /// `u64` here.
+    pub fn advance(&mut self, elapsed_nanos: f64) -> StepReport {
+        let budget = self.bridge.advance(elapsed_nanos as u64);
         StepReport {
             steps: budget.steps(),
             remainder_nanos: budget.remainder_nanos(),
@@ -183,16 +244,137 @@ impl WasmGame {
         }
     }
 
-    /// The monotonic count of fixed ticks driven so far.
+    /// The monotonic count of fixed ticks driven so far. Crosses as an f64
+    /// `number` (not a BigInt i64) so the Binaryen `wasm2js` fallback — which
+    /// legalizes i64 into i32 pairs and has no BigInt ABI — can run; a tick count
+    /// is far inside 2^53.
     #[wasm_bindgen(getter)]
-    pub fn current_tick(&self) -> u64 {
-        self.bridge.tick()
+    pub fn current_tick(&self) -> f64 {
+        self.bridge.tick() as f64
     }
 
     /// The durable simulation state as opaque bytes — the host stores or compares
     /// these to checkpoint or verify determinism.
     pub fn snapshot(&self) -> Vec<u8> {
         self.bridge.snapshot_sim()
+    }
+
+    // --- Live 3D presentation (SPEC-11) ---
+    //
+    // The seam a 3D game's boot path drives: bind a canvas once the scene is
+    // authored, then present the authored scene each host frame. A 2D game (which
+    // draws through the `draw2d` command stream the harness rasterizes) never calls
+    // these.
+
+    /// Bind the live 3D presenter to the `<canvas id=canvas_id>`: size the surface
+    /// to the canvas's pixel dimensions, upload the authored scene's meshes and
+    /// materials, and select the live backend (WebGPU → WebGL2 → Canvas 2D).
+    /// `max_instances` caps the per-frame instance buffer. Call once **after** the
+    /// author has built the 3D scene (so its meshes / materials exist). The backend
+    /// init is asynchronous, so [`Self::render_scene`] is a no-op until it resolves
+    /// (the first frames simply do not paint).
+    #[wasm_bindgen(js_name = bindSurface)]
+    pub fn bind_surface(&mut self, canvas_id: String, max_instances: u32) {
+        let (width, height) = canvas_dimensions(&canvas_id).unwrap_or((960, 600));
+        let _ = self.windowing.configure_surface(width, height);
+        let meshes = self.bridge.mesh_set();
+        let materials = self.bridge.material_set();
+        self.windowing
+            .bind_present_surface(&canvas_id, meshes, materials, max_instances);
+    }
+
+    /// Render the current 3D scene and present it to the bound surface
+    /// (`renderScene`), reflecting every scene mutation the author made this frame.
+    /// A no-op until [`Self::bind_surface`]'s backend init has resolved.
+    #[wasm_bindgen(js_name = renderScene)]
+    pub fn render_scene(&mut self) {
+        let outcome = self.bridge.render_frame();
+        let lights: Vec<(u32, [f32; 3], [f32; 3], f32)> = outcome
+            .lights()
+            .iter()
+            .map(|light| (light.kind(), light.vec(), light.color(), light.intensity()))
+            .collect();
+        let batches = outcome.mesh_batches();
+        let casters = outcome.mesh_batch_casters();
+        self.windowing.present_frame(
+            outcome.tick(),
+            outcome.clear_color(),
+            &lights,
+            outcome.light_view_proj(),
+            &batches,
+            outcome.camera_view_proj(),
+            &casters,
+            outcome.sdf_scene().cloned(),
+        );
+    }
+
+    // --- Live 2D presentation (SPEC-04) ---
+    //
+    // The seam a 2D game's boot path drives: bind a canvas, upload the sprite/atlas
+    // textures the app fetched, then present the authored `draw2d` command list each
+    // frame. The engine rasterizes through the SAME WebGPU → WebGL2 → Canvas 2D
+    // cascade as 3D — no TypeScript Canvas2D interpreter. A 3D game never calls these.
+
+    /// Bind the live presenter to the `<canvas id=canvas_id>` for **2D** presentation:
+    /// size the surface to the canvas's pixel dimensions and select the live backend
+    /// (WebGPU → WebGL2 → Canvas 2D). 2D needs no uploaded mesh/material set, so they
+    /// bind empty (a `1`-instance buffer the 2D path never fills). Call once at boot;
+    /// the backend init is asynchronous, so [`Self::present_2d`] is a no-op until it
+    /// resolves (the first frames simply do not paint).
+    #[wasm_bindgen(js_name = bind2dSurface)]
+    pub fn bind_2d_surface(&mut self, canvas_id: String) {
+        let (width, height) = canvas_dimensions(&canvas_id).unwrap_or((960, 540));
+        let _ = self.windowing.configure_surface(width, height);
+        self.windowing
+            .bind_present_surface(&canvas_id, Vec::new(), Vec::new(), 1);
+    }
+
+    /// Upload one sprite/atlas texture the 2D draw stream references
+    /// (`upload2dTexture`): `(id, width, height, RGBA8 pixels)`, resolved app-side
+    /// (the harness fetch/decodes textures and bakes the font atlas). Replaces any
+    /// texture already under `id` and bumps the set's version so the next
+    /// [`Self::present_2d`] re-uploads it to the live backend exactly once.
+    #[wasm_bindgen(js_name = upload2dTexture)]
+    pub fn upload_2d_texture(&mut self, id: f64, width: u32, height: u32, pixels: Vec<u8>) {
+        let id = id as u64;
+        let entry = (id, width, height, pixels);
+        match self.textures_2d.iter_mut().find(|(tid, ..)| *tid == id) {
+            Some(slot) => *slot = entry,
+            None => self.textures_2d.push(entry),
+        }
+        self.textures_2d_generation = self.textures_2d_generation.wrapping_add(1);
+    }
+
+    /// Present the authored 2D frame (`present2d`): drain the `draw2d` builder into
+    /// its layer-sorted [`Draw2dList`](axiom_host::Draw2dList) and hand it — with the
+    /// uploaded textures — to the windowing presenter, which rasterizes it through the
+    /// live backend. Call once per host frame, **after** the author's `onRender`
+    /// draws. A no-op until [`Self::bind_2d_surface`]'s backend init has resolved.
+    #[wasm_bindgen(js_name = present2d)]
+    pub fn present_2d(&mut self) {
+        let list = self.bridge.draw2d_finish_list();
+        // The frame identity the dev scrubber records under — the monotonic fixed
+        // tick, the 2D peer of `render_scene`'s `outcome.tick()`. Read here (not
+        // threaded through JS) so the harness `game.present2d()` call is unchanged.
+        let tick = self.bridge.tick();
+        self.windowing.present_2d(
+            tick,
+            &list,
+            &self.textures_2d,
+            self.textures_2d_generation,
+            CLEAR_2D,
+        );
+    }
+
+    /// Whether the loop should step the simulation this frame (`isInteractive`):
+    /// `true` when live and focused, `false` while the frame-scrubber overlay is
+    /// scrubbing or after focus loss (Escape / blur / tab hidden). The SDK loop
+    /// gates its `advance` on this so the sim freezes exactly when the overlay says;
+    /// [`Self::render_scene`] / [`Self::present_2d`] keep presenting (the frozen or
+    /// scrubbed frame).
+    #[wasm_bindgen(js_name = isInteractive)]
+    pub fn is_interactive(&self) -> bool {
+        self.windowing.is_interactive()
     }
 
     // --- Deterministic RNG seam (SPEC-01) ---

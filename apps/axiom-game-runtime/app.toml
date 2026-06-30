@@ -59,4 +59,8 @@ allowed_modules = [
     # 2D drawing (SPEC-10): the `axiom-draw2d` builder (particles / render targets /
     # shapes) the `draw2d*` verbs forward to.
     "draw2d",
+    # 3D presentation (SPEC-11): the `axiom-windowing` live backend the wasm
+    # `bindSurface` / `renderScene` boundary binds to the canvas to present the
+    # authored 3D scene. wasm32-only arm; the deterministic core is native-tested.
+    "windowing",
 ]

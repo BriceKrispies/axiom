@@ -108,10 +108,23 @@ export type {
 } from "./host-binding.ts";
 
 // The 2D drawing seam (SPEC-04 §10), behind `Frame` — `HostBridge` extends it.
-export type { Draw2dBridge, EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation } from "./draw2d-binding.ts";
+export type {
+  Draw2dBridge,
+  EllipseRadii,
+  EmitterConfig,
+  LineStyle,
+  ShapeStyle,
+  SpriteAnimation,
+  SpriteOpts,
+  TextMetrics,
+  TextOpts,
+} from "./draw2d-binding.ts";
 
 // The pure flip-book sampler (SPEC-04 §10.2) — the one draw2d free function.
 export { sampleAnimation } from "./draw2d.ts";
+
+// Presentation asset loaders (SPEC-04 §10): fetch in the app, stable handles.
+export { loadFont, loadTexture } from "./loader.ts";
 
 // Wave 4 TAIL — the pump-driven and retained-object surfaces.
 
@@ -171,8 +184,20 @@ export type {
 
 export { mat4, quat, v3 } from "./math3d.ts";
 
-export { addLight, createMaterial, createMesh, setCamera3D } from "./scene3d.ts";
-export type { Camera3D, Light, MaterialSpec, MeshKind } from "./scene3d.ts";
+export {
+  addLight,
+  clearScene,
+  controlFirstPerson,
+  createController,
+  createMaterial,
+  createMesh,
+  setCamera3D,
+  setNodeBounds,
+  setNodeTransform,
+  spawnRenderable,
+} from "./scene3d.ts";
+export type { Camera3D, FirstPersonControl, Light, MaterialSpec, MeshKind } from "./scene3d.ts";
+export type { ControllerSpec } from "./host-descriptors.ts";
 
 export {
   bindNetTransport,
@@ -220,6 +245,7 @@ export type {
   Component,
   ComponentKind,
   Entity,
+  FontSpec,
   Handle,
   Mat4,
   PlayerId,
@@ -229,6 +255,7 @@ export type {
   Result,
   Rgba,
   Seconds,
+  TextureId,
   Ticks,
   Transform,
   Vec2,

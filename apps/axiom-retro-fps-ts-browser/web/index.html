@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — retro FPS (first-person), authored purely in TypeScript on @axiom/game</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 12px;
+        padding:
+          max(16px, env(safe-area-inset-top))
+          max(16px, env(safe-area-inset-right))
+          max(16px, env(safe-area-inset-bottom))
+          max(16px, env(safe-area-inset-left));
+        font: 14px/1.5 system-ui, sans-serif; background: #0c0d10; color: #d7dbe2;
+      }
+      h1 { font-size: 15px; font-weight: 600; margin: 0; }
+      /* The canvas id MUST match the id the harness passes to boot()/bindSurface. */
+      #axiom-canvas {
+        width: 960px; height: 600px; max-width: 100%;
+        border: 1px solid #2a2e36; border-radius: 6px; background: #000;
+        touch-action: none; cursor: crosshair;
+      }
+      /* The stage wraps the canvas so the aiming reticle can sit at its centre. */
+      #stage { position: relative; line-height: 0; max-width: 100%; }
+      /* A fixed centre crosshair (the original retro FPS's `+`), drawn over the canvas
+         and unaffected by pointer lock hiding the OS cursor. */
+      #crosshair {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        color: #e7ecf3; font: 22px/1 ui-monospace, monospace; opacity: 0.85;
+        pointer-events: none; text-shadow: 0 0 2px #000; user-select: none;
+      }
+      #hud {
+        display: flex; gap: 22px; width: 960px; max-width: 100%;
+        font-family: ui-monospace, monospace; justify-content: center;
+      }
+      #hud b { color: #d8e6ff; font-weight: 600; }
+      #status { font-family: ui-monospace, monospace; transition: color .2s; }
+      .ok { color: #7fd17f; } .err { color: #e07a7a; } .flash { color: #7CFFB2 !important; }
+    </style>
+
+    <!--
+      No bundler: the @axiom/game SDK loads as native ES modules from its dist/
+      build (import map below). The retro FPS game + harness are authored in TypeScript
+      and emitted to /dist by the dev server's tsgo compile; the shared
+      axiom-game-runtime wasm is served at /pkg. There is NO Rust in this app — the
+      whole game is the TypeScript in src/game.ts, driving the engine through the SDK.
+    -->
+    <script type="importmap">
+      { "imports": { "@axiom/game": "/vendor/axiom-game/index.js" } }
+    </script>
+  </head>
+  <body>
+    <h1>Axiom — retro FPS (first-person), authored purely in TypeScript on @axiom/game</h1>
+    <div id="stage">
+      <canvas id="axiom-canvas" width="960" height="600"></canvas>
+      <div id="crosshair">+</div>
+    </div>
+    <div id="hud">
+      <span>HP <b id="hp">100</b></span>
+      <span>SCORE <b id="score">0</b></span>
+      <span>AMMO <b id="ammo">50</b></span>
+      <span>ENEMIES <b id="enemies">4</b></span>
+    </div>
+    <div id="status">booting…</div>
+    <p style="font-family: ui-monospace, monospace; color: #6b7686; margin: 0;">
+      W/↑ forward · S/↓ back · A/D strafe · ←/→ turn · Space fire — edit
+      <b>apps/axiom-retro-fps-ts-browser/web/src/game.ts</b> and save to re-run live
+    </p>
+
+    <script type="module" src="/dist/harness.js"></script>
+  </body>
+</html>

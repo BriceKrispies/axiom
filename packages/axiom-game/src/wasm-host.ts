@@ -64,14 +64,16 @@
 
 import {
   type CameraDescriptor,
+  type ControllerInput,
+  type ControllerSpec,
   type GridField,
   IDENTITY_MAT4,
   type LightDescriptor,
   type MaterialDescriptor,
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Circle, Entity, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, Vec2, Vec3 } from "./vocabulary.ts";
-import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation } from "./draw2d-binding.ts";
+import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, TextureId, Transform, Vec2, Vec3 } from "./vocabulary.ts";
+import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation, SpriteOpts, TextMetrics, TextOpts } from "./draw2d-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -83,6 +85,7 @@ import type {
 } from "./host-binding.ts";
 import type { UiBridge, UiStyle, UiTextOpts, UiViewport } from "./ui-binding.ts";
 import { orElse, pick } from "./control-flow.ts";
+import { seedFromHalves } from "./seed-codec.ts";
 
 /*
  * The raw host-facing `WasmGame` exports this adapter reads. Vectors/matrices/
@@ -181,6 +184,11 @@ export interface WasmHostExport {
   readonly draw2dTargetTexture: (target: number) => number;
   readonly draw2dFinish: () => Float64Array;
   readonly draw2dSampleAnimation: (frames: Float64Array, fps: number, elapsed: number, looping: boolean) => Float64Array;
+  readonly draw2dSprite: (texture: number, opts: Float64Array) => void;
+  readonly draw2dText: (value: string, opts: Float64Array) => void;
+  readonly draw2dMeasureText: (value: string, fontSize: number) => Float64Array;
+  // Presentation assets (SPEC-04 §10): a texture handle minted for a url; the app fetches/decodes the pixels.
+  readonly loadTexture: (url: string) => number;
   /*
    * 3D scene authoring (SPEC-11 §4.2): a mesh kind crosses as its `string` name, a
    * colour/position/direction as a `Float64Array` slice; each call returns the
@@ -197,6 +205,24 @@ export interface WasmHostExport {
   ) => void;
   readonly addLight: (direction: Float64Array, rgb: Float64Array, intensity: number) => number;
   /*
+   * 3D scene node authoring (SPEC-11 §4.2): spawn a renderable from a `(mesh,
+   * material)` handle pair at a flat 10-tuple transform `[tx,ty,tz, qx,qy,qz,qw,
+   * sx,sy,sz]`; move/rescale a node or set its collision box by id; clear the
+   * whole scene. Handles / ids cross as numbers, a transform / half-extents as a
+   * `Float64Array`.
+   */
+  readonly spawnRenderable: (meshId: number, materialId: number, transform: Float64Array) => number;
+  readonly setNodeTransform: (entity: number, transform: Float64Array) => void;
+  readonly setNodeBounds: (entity: number, halfExtents: Float64Array) => void;
+  readonly clearScene: () => void;
+  /*
+   * First-person controller (SPEC-11): spawn the active camera as controller
+   * `index` at a `[x,y,z]` position with `fovDeg`/near/far; drive it each frame
+   * with a `[x,y,z]` local move plus yaw/pitch radian deltas (applied immediately).
+   */
+  readonly spawnController: (position: Float64Array, fovDeg: number, near: number, far: number, index: number) => number;
+  readonly controlFirstPerson: (index: number, moveLocal: Float64Array, yaw: number, pitch: number) => void;
+  /*
    * Spatial queries (SPEC-03 §4.2): a point/direction crosses as a 3-element
    * `Float64Array`; overlaps return the matching entity ids as a flat
    * `Float64Array`; `raycast` returns `[]` or `[entity, hitX, hitY, hitZ]`.
@@ -207,10 +233,14 @@ export interface WasmHostExport {
   // Input bind (SPEC-05 §4.2): the action name + the physical key tokens.
   readonly bindAction: (action: string, keys: readonly string[]) => void;
   /*
-   * Embed host channel (SPEC-12 §4.2): the inbound seed (a `bigint` getter) +
-   * opaque params JSON, the readiness signal, and the single-outcome reporters.
+   * Embed host channel (SPEC-12 §4.2): the inbound seed + opaque params JSON, the
+   * readiness signal, and the single-outcome reporters. The 64-bit seed crosses as
+   * two u32 `number` halves (`seed_lo` + `seed_hi`), never a BigInt i64, so the
+   * Binaryen `wasm2js` fallback can run; `seedFromHalves` recombines them into the
+   * author-facing `bigint`, preserving the full 2^64 seed space (determinism).
    */
-  readonly seed: bigint;
+  readonly seed_lo: number;
+  readonly seed_hi: number;
   readonly sessionParams: () => string;
   readonly notifyReady: () => void;
   readonly report_outcome: (won: boolean, score: number) => boolean;
@@ -274,12 +304,35 @@ const NO_GRAVITY: Vec2 = { x: 0, y: 0 };
 const TRANSPARENT: Rgba = [0, 0, 0, 0];
 /** The stroke width a UI style's omitted `strokeWidth` defaults to. */
 const NO_STROKE_WIDTH = 0;
+/** The sprite-draw defaults applied host-side for omitted `SpriteOpts` fields (SPEC-04 §4.2). */
+const NO_ROTATION_SPRITE = 0;
+const UNIT_SCALE: Vec2 = { x: 1, y: 1 };
+const TOP_LEFT_ANCHOR: Vec2 = { x: 0, y: 0 };
+const WHITE_TINT: Rgba = [1, 1, 1, 1];
+/** The "whole texture" source — a zero-size sub-rect the presenter reads as the full bitmap. */
+const WHOLE_TEXTURE: Rect = { height: 0, width: 0, x: 0, y: 0 };
+/** The text alignments in their dense native index order (SPEC-04 §4.2: 0=left, 1=center, 2=right). */
+const ALIGN_NAMES: readonly TextOpts["align"][] = ["left", "center", "right"];
+/** The built-in monospace font a `loadFont` returns (Tier-0 ships one family; `size` is the default). */
+const DEFAULT_FONT: FontSpec = { family: "monospace", size: 16 };
 
 /** The absent `Result` value, materialized without the lint-banned `undefined` literal. */
 const absent = <Value>(slot?: Value): Value | undefined => slot;
 
 /** Pack a `Vec3` into the boundary `[x, y, z]` slice. */
 const packVec3 = (vector: Vec3): Float64Array => Float64Array.from([vector.x, vector.y, vector.z]);
+
+/** Pack a [`Transform`] into the native flat 10-tuple `[tx,ty,tz, qx,qy,qz,qw, sx,sy,sz]` slice the scene-node authoring boundary takes. */
+const packTransform = (transform: Transform): Float64Array =>
+  Float64Array.from([
+    transform.position.x,
+    transform.position.y,
+    transform.position.z,
+    ...transform.rotation,
+    transform.scale.x,
+    transform.scale.y,
+    transform.scale.z,
+  ]);
 
 /** A `Vec2` as the boundary `[x, y]` slice. */
 const packVec2 = (vector: Vec2): Float64Array => Float64Array.from([vector.x, vector.y]);
@@ -498,6 +551,43 @@ const packEmitter = (config: EmitterConfig): Float64Array => {
   ]);
 };
 
+/** Flatten a `SpriteOpts` to the boundary `[posX, posY, rotation, scaleX, scaleY, anchorX, anchorY, srcX, srcY, srcW, srcH, tintRGBA, flipX, flipY, layer, alpha]` slice, defaulting every optional host-side. */
+const packSpriteOpts = (opts: SpriteOpts): Float64Array => {
+  const scale = orElse(opts.scale, UNIT_SCALE);
+  const anchor = orElse(opts.anchor, TOP_LEFT_ANCHOR);
+  const source = orElse(opts.source, WHOLE_TEXTURE);
+  return Float64Array.from([
+    opts.pos.x,
+    opts.pos.y,
+    orElse(opts.rotation, NO_ROTATION_SPRITE),
+    scale.x,
+    scale.y,
+    anchor.x,
+    anchor.y,
+    source.x,
+    source.y,
+    source.width,
+    source.height,
+    packRgba(orElse(opts.tint, WHITE_TINT)),
+    Number(orElse(opts.flipX, false)),
+    Number(orElse(opts.flipY, false)),
+    orElse(opts.layer, DEFAULT_LAYER),
+    orElse(opts.alpha, FULL_ALPHA),
+  ]);
+};
+
+/** Flatten a `TextOpts` to the boundary `[posX, posY, fontSize, colorRGBA, align, layer, alpha]` slice; `align` resolves to its dense index by table position. */
+const packTextOpts = (opts: TextOpts): Float64Array =>
+  Float64Array.from([
+    opts.pos.x,
+    opts.pos.y,
+    opts.font.size,
+    packRgba(opts.color),
+    ALIGN_NAMES.indexOf(orElse(opts.align, "left")),
+    orElse(opts.layer, DEFAULT_LAYER),
+    orElse(opts.alpha, FULL_ALPHA),
+  ]);
+
 /** The 2D drawing `HostBridge` ops (SPEC-04 §10), every one forwarding to the native `axiom-draw2d` builder via the Wave-2 `draw2d*` exports. */
 /** The default radians an ellipse's omitted `rotation` resolves to (axis-aligned). */
 const NO_ROTATION = 0;
@@ -553,6 +643,23 @@ const draw2dShapeBridge = (game: WasmHostExport): Pick<
   },
 });
 
+/** The 2D sprite + text `HostBridge` ops (SPEC-04 §4.2): the textured sprite, the monospace text run, and the deterministic `measureText`, each marshalling its opts record to the boundary slice. */
+const draw2dTextBridge = (game: WasmHostExport): Pick<
+  HostBridge,
+  "draw2dSprite" | "draw2dText" | "draw2dMeasureText"
+> => ({
+  draw2dMeasureText: (value: string, font: FontSpec): TextMetrics => {
+    const extent = [...game.draw2dMeasureText(value, font.size)];
+    return { height: pick(extent, 1), width: pick(extent, 0) };
+  },
+  draw2dSprite: (texture: TextureId, opts: SpriteOpts): void => {
+    game.draw2dSprite(texture, packSpriteOpts(opts));
+  },
+  draw2dText: (value: string, opts: TextOpts): void => {
+    game.draw2dText(value, packTextOpts(opts));
+  },
+});
+
 /** The 2D particle + render-target + finalize `HostBridge` ops (SPEC-04 §10.1 / §10.3), forwarding to the native `axiom-draw2d` builder. */
 const draw2dSystemBridge = (game: WasmHostExport): Pick<
   HostBridge,
@@ -584,19 +691,43 @@ const draw2dSystemBridge = (game: WasmHostExport): Pick<
 const draw2dBridge = (game: WasmHostExport): Pick<
   HostBridge,
   | "draw2dCamera2d" | "draw2dRect" | "draw2dCircle" | "draw2dEllipse" | "draw2dLine"
+  | "draw2dSprite" | "draw2dText" | "draw2dMeasureText"
   | "draw2dCreateEmitter" | "draw2dEmit" | "draw2dAdvanceParticles"
   | "draw2dCreateRenderTarget" | "draw2dBeginTarget" | "draw2dEndTarget" | "draw2dTargetTexture" | "draw2dFinish"
   | "draw2dSampleAnimation"
-> => Object.assign(draw2dShapeBridge(game), draw2dSystemBridge(game));
+> => Object.assign(draw2dShapeBridge(game), draw2dTextBridge(game), draw2dSystemBridge(game));
 
-/** The 3D scene-authoring `HostBridge` ops (SPEC-11), forwarding to the native runtime scene authoring on `RunningApp` (`add_mesh` / `add_material` / `set_camera` / `add_light`). */
+/** The presentation-asset `HostBridge` ops (SPEC-04 §10): `loadTexture` mints a stable handle over the native registry (the app resolves the pixels); `loadFont` returns the built-in monospace `FontSpec` (Tier-0 ships one family). */
+const assetBridge = (game: WasmHostExport): Pick<HostBridge, "loadTexture" | "loadFont"> => ({
+  loadFont: (): FontSpec => DEFAULT_FONT,
+  loadTexture: (url: string): TextureId => game.loadTexture(url),
+});
+
+/** The 3D scene-authoring `HostBridge` ops (SPEC-11), forwarding to the native runtime scene authoring on `RunningApp` (`add_mesh` / `add_material` / `set_camera` / `add_light` / `spawn` / `set::<Transform>` / `set::<Bounds>` / `reauthor`). */
 const scene3dBridge = (game: WasmHostExport): Pick<
   HostBridge,
-  "createMesh" | "createMaterial" | "setCamera3D" | "addLight"
+  | "createMesh"
+  | "createMaterial"
+  | "setCamera3D"
+  | "addLight"
+  | "spawnRenderable"
+  | "setNodeTransform"
+  | "setNodeBounds"
+  | "clearScene"
+  | "createController"
+  | "controlFirstPerson"
 > => ({
   // Directional arm only: the native `add_light` mints a `DirectionalLight` (the `kind` discriminant is dropped — see header).
   addLight: (light: LightDescriptor): Entity =>
     game.addLight(packVec3(light.vector), packRgb(light.color), light.intensity),
+  clearScene: (): void => {
+    game.clearScene();
+  },
+  controlFirstPerson: (input: ControllerInput): void => {
+    game.controlFirstPerson(input.index, packVec3(input.moveLocal), input.yawDelta, input.pitchDelta);
+  },
+  createController: (spec: ControllerSpec, index: number): Entity =>
+    game.spawnController(packVec3(spec.position), spec.fovY * RAD_TO_DEG, spec.near, spec.far, index),
   // Base colour only: emissive / roughness / opacity are dropped (native lit-colour authoring — see header).
   createMaterial: (material: MaterialDescriptor): Handle => game.createMaterial(packRgb(material.baseColor)),
   createMesh: (meshKind: number): Handle => game.createMesh(pick(MESH_NAMES, meshKind)),
@@ -610,6 +741,14 @@ const scene3dBridge = (game: WasmHostExport): Pick<
       camera.far,
     );
   },
+  setNodeBounds: (entity: Entity, halfExtents: Vec3): void => {
+    game.setNodeBounds(entity, packVec3(halfExtents));
+  },
+  setNodeTransform: (entity: Entity, transform: Transform): void => {
+    game.setNodeTransform(entity, packTransform(transform));
+  },
+  spawnRenderable: (mesh: Handle, material: Handle, transform: Transform): Entity =>
+    game.spawnRenderable(mesh, material, packTransform(transform)),
 });
 
 /** The spatial-query `HostBridge` ops (SPEC-03), forwarding to the native `axiom-scene` Entity-addressed query surface (`overlap_circle` / `overlap_box` / `raycast_hit`). */
@@ -653,7 +792,10 @@ const channelBridge = (game: WasmHostExport): Pick<
   bindAction: (action: string, keys: readonly string[]): void => {
     game.bindAction(action, keys);
   },
-  getSessionConfig: (): SessionConfig => ({ params: parseParams(game.sessionParams()), seed: game.seed }),
+  getSessionConfig: (): SessionConfig => ({
+    params: parseParams(game.sessionParams()),
+    seed: seedFromHalves(game.seed_lo, game.seed_hi),
+  }),
   notifyReady: (): void => {
     game.notifyReady();
   },
@@ -723,6 +865,6 @@ export const hostFromWasm = (game: WasmHostExport): HostBridge =>
       audioBridge(game),
       scene3dBridge(game),
       queryBridge(game),
-      Object.assign(channelBridge(game), uiBridge(game)),
+      Object.assign(channelBridge(game), uiBridge(game), assetBridge(game)),
     ),
   );
