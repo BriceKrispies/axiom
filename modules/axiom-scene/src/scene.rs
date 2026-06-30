@@ -103,6 +103,10 @@ impl Scene {
         self.world.storage().renderables.len()
     }
 
+    pub fn sdf_shape_count(&self) -> usize {
+        self.world.storage().sdf_shapes.len()
+    }
+
     /// Whether `id` names a live node (an entity with a local transform).
     pub(crate) fn is_node(&self, id: SceneNodeId) -> bool {
         self.world.storage().locals.contains(Self::entity(id))

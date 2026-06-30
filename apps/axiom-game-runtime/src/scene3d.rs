@@ -71,17 +71,23 @@ impl GameBridge {
     }
 
     /// Set (replacing any existing) the active perspective camera at `position`
-    /// (`setCamera3D`): vertical FOV in degrees, near/far clip in metres.
-    pub fn set_camera_3d(&mut self, position: &[f64], fov_deg: f64, near: f64, far: f64) {
+    /// aimed at `target` (`setCamera3D`): vertical FOV in degrees, near/far clip
+    /// in metres. The camera looks from `position` toward `target` with world
+    /// up = +Y; a degenerate aim (eye coincident with `target`, or the look
+    /// direction parallel to up) falls back to translation-only — never panics.
+    pub fn set_camera_3d(&mut self, position: &[f64], target: &[f64], fov_deg: f64, near: f64, far: f64) {
         let projection = PerspectiveProjection {
             fov_y: Angle::degrees(fov_deg as f32),
             near: meters(near),
             far: meters(far),
         };
-        self.runtime.app_mut().set_camera(
-            Camera::perspective(projection),
-            Transform::from_translation(v3(position)),
-        );
+        let eye = v3(position);
+        let transform = Transform::from_translation(eye)
+            .looking_at(v3(target), Vec3::new(0.0, 1.0, 0.0))
+            .unwrap_or_else(|_| Transform::from_translation(eye));
+        self.runtime
+            .app_mut()
+            .set_camera(Camera::perspective(projection), transform);
     }
 
     /// Spawn a directional light (`addLight`): world-space `direction`, linear
@@ -119,10 +125,18 @@ mod wasm_exports {
             self.bridge.create_material(rgb) as f64
         }
 
-        /// Set the active perspective camera (`setCamera3D`).
+        /// Set the active perspective camera, aimed from `position` at `target`
+        /// (`setCamera3D`).
         #[wasm_bindgen(js_name = setCamera3D)]
-        pub fn set_camera_3d(&mut self, position: &[f64], fov_deg: f64, near: f64, far: f64) {
-            self.bridge.set_camera_3d(position, fov_deg, near, far);
+        pub fn set_camera_3d(
+            &mut self,
+            position: &[f64],
+            target: &[f64],
+            fov_deg: f64,
+            near: f64,
+            far: f64,
+        ) {
+            self.bridge.set_camera_3d(position, target, fov_deg, near, far);
         }
 
         /// Spawn a directional light, returning its node id (`addLight`).
@@ -158,7 +172,7 @@ mod tests {
         let ghost = b.create_mesh("ghost"); // unknown ⇒ cube fallback, fresh handle
         let red = b.create_material(&[0.9, 0.1, 0.1]);
         let blue = b.create_material(&[0.1, 0.1, 0.9]);
-        b.set_camera_3d(&[0.0, 0.0, 8.0], 60.0, 0.1, 100.0);
+        b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
         let light = b.add_light(&[0.3, -1.0, 0.4], &[1.0, 1.0, 1.0], 1.0);
         vec![cube, sphere, ghost, red, blue, light]
     }
@@ -178,6 +192,34 @@ mod tests {
         // byte-identically on a second bridge.
         assert_ne!(ids[5], 0);
         assert_eq!(ids, authoring_ids());
+    }
+
+    #[test]
+    fn set_camera_3d_aims_at_the_target_not_just_the_position() {
+        // From a single fixed eye, two distinct look targets must yield two
+        // distinct camera view-projections — proving the aim (`looking_at`)
+        // actually flows through, not merely the translation.
+        let mut b = bridge();
+        b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
+        let toward_origin = b.runtime.app_mut().tick(0).camera_view_proj();
+        b.set_camera_3d(&[0.0, 0.0, 8.0], &[5.0, 0.0, 0.0], 60.0, 0.1, 100.0);
+        let toward_side = b.runtime.app_mut().tick(1).camera_view_proj();
+        assert_ne!(
+            toward_origin, toward_side,
+            "the camera orientation tracks the look target"
+        );
+    }
+
+    #[test]
+    fn set_camera_3d_with_a_degenerate_aim_falls_back_without_panicking() {
+        // Eye coincident with the target makes `looking_at` fail; the bridge
+        // must fall back to a translation-only placement rather than panic.
+        let mut b = bridge();
+        b.set_camera_3d(&[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], 60.0, 0.1, 100.0);
+        // A camera was still installed (view-projection is non-identity).
+        let view = b.runtime.app_mut().tick(0).camera_view_proj();
+        let no_camera = bridge().runtime.app_mut().tick(0).camera_view_proj();
+        assert_ne!(view, no_camera, "a camera is installed despite the degenerate aim");
     }
 
     #[test]

@@ -69,6 +69,17 @@ impl ActionQueue {
     pub fn intents(&self) -> &[ActionIntent] {
         &self.intents
     }
+
+    /// The bitwise-OR of every queued intent's control code — the tick's combined
+    /// held controls. This folds a whole multi-intent decision into one bitmask,
+    /// so a brain that emits several `press_control` intents in one tick holds
+    /// them all (e.g. forward + turn), not just the first. An empty queue yields
+    /// `0` (no controls held).
+    pub fn combined_control_code(&self) -> u32 {
+        self.intents
+            .iter()
+            .fold(0, |acc, intent| acc | intent.control_code())
+    }
 }
 
 #[cfg(test)]
@@ -121,5 +132,24 @@ mod tests {
         let c = q.clone();
         assert_eq!(c.capacity(), 1);
         assert!(format!("{q:?}").contains("ActionQueue"));
+    }
+
+    #[test]
+    fn combined_control_code_ors_every_queued_intent() {
+        // Empty queue → no controls held.
+        assert_eq!(ActionQueue::empty_with_capacity(2).combined_control_code(), 0);
+        // One intent → exactly its control code.
+        assert_eq!(
+            ActionQueue::from_intents(vec![ActionIntent::press_control(0b0100)]).combined_control_code(),
+            0b0100,
+        );
+        // Distinct bits OR together (forward + turn held in one tick); a repeated
+        // bit is idempotent, so the fold both ORs new bits and re-ORs a present one.
+        let q = ActionQueue::from_intents(vec![
+            ActionIntent::press_control(0b0001),
+            ActionIntent::press_control(0b0100),
+            ActionIntent::press_control(0b0001),
+        ]);
+        assert_eq!(q.combined_control_code(), 0b0101);
     }
 }

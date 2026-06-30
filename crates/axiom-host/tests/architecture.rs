@@ -356,6 +356,9 @@ fn lib_exports_are_curated_set() {
         "pub use frame_submission_report::BackendKind;",
         "pub use frame_submission_report::FrameFeature;",
         "pub use frame_submission_report::FrameSubmissionReport;",
+        // Backend-neutral SDF raymarch contract (the FramePacket raymarch arm).
+        "pub use sdf_scene::SdfPrimitive;",
+        "pub use sdf_scene::SdfScene;",
         // Backend-neutral 2D draw contract (SPEC-04), relocated from axiom-draw2d.
         "pub use camera2d::Camera2d;",
         "pub use common2d::Common2d;",

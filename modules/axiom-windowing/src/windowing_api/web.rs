@@ -97,6 +97,10 @@ impl WindowingApi {
                 // (batch-expansion order) for the Canvas planar-shadow pass.
                 [f32; 16],
                 Vec<bool>,
+                // The frame's optional SDF raymarch scene (composited over the
+                // meshes by both live arms). This is the one public live entry that
+                // exposes the SDF arm; `None` on frames with no SDF shapes.
+                Option<axiom_host::SdfScene>,
             ) + 'static,
     {
         // Scrub-only (no fork hooks). The forkable variant lives in `run_web_forkable`.
@@ -149,6 +153,9 @@ impl WindowingApi {
                 // pass needs; the GPU arm ignores both.
                 [f32; 16],
                 Vec<bool>,
+                // The frame's optional SDF raymarch scene (composited over the
+                // meshes by both live arms). `None` on frames with no SDF shapes.
+                Option<axiom_host::SdfScene>,
             ) + 'static,
     {
         use std::cell::RefCell;
@@ -239,6 +246,9 @@ impl WindowingApi {
                                 batches,
                                 IDENTITY_VP,
                                 Vec::<bool>::new(),
+                                // Recorded scrub frames carry no SDF (a dev-only
+                                // path), so the re-presented frame has no marcher.
+                                None,
                             )
                         })
                         .unwrap_or_else(|| {
@@ -249,6 +259,7 @@ impl WindowingApi {
                                 Vec::new(),
                                 IDENTITY_VP,
                                 Vec::new(),
+                                None,
                             )
                         })
                 } else {
@@ -256,14 +267,14 @@ impl WindowingApi {
                     // engine's cadence read-out, then hand the app its frame
                     // identity (`tick`) and the smoothed `(fps_milli, frame_micros)`.
                     let (fps_milli, frame_micros) = frame_clock.record(perf_now_micros());
-                    let (clear, lights, light_vp, batches, camera_vp, casters) =
+                    let (clear, lights, light_vp, batches, camera_vp, casters, sdf) =
                         (ff.borrow_mut())(tick, fps_milli, frame_micros);
                     if let Some(s) = scrubber.as_ref() {
                         s.record(tick, clear, &lights, light_vp, &batches);
                     }
-                    (clear, lights, light_vp, batches, camera_vp, casters)
+                    (clear, lights, light_vp, batches, camera_vp, casters, sdf)
                 };
-                let (clear, lights, light_vp, batches, camera_vp, casters) = present;
+                let (clear, lights, light_vp, batches, camera_vp, casters, sdf) = present;
                 // Present; an unrecoverable GPU-surface loss (a backgrounded mobile
                 // tab whose context was destroyed) rebuilds the backend off-loop —
                 // re-probing WebGPU → WebGL2 → Canvas2D — and swaps it in, so play
@@ -272,7 +283,7 @@ impl WindowingApi {
                     .borrow()
                     .present(
                         tick, width, height, clear, &lights, light_vp, &batches, camera_vp,
-                        &casters,
+                        &casters, sdf,
                     )
                     .is_err();
                 if lost && !reinitializing.get() {
@@ -353,6 +364,8 @@ impl WindowingApi {
                 // is unused (identity) and the caster list is empty.
                 NO_SHADOW,
                 Vec::new(),
+                // The single-mesh entry authors no SDF shapes.
+                None,
             )
         })
     }
@@ -403,6 +416,8 @@ impl WindowingApi {
                     vec![(SINGLE_MESH_ID, DEFAULT_MATERIAL_ID, instances, count)],
                     camera_vp,
                     casters,
+                    // The forkable single-mesh entry authors no SDF shapes.
+                    None,
                 )
             },
             Some(snapshot),
@@ -542,6 +557,8 @@ impl WindowingApi {
                     &batches,
                     NO_CAMERA,
                     &[],
+                    // Streaming terrain authors no SDF shapes.
+                    None,
                 );
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
@@ -587,10 +604,11 @@ impl LiveBackend {
         batches: &[(u64, u64, Vec<f32>, u32)],
         camera_view_proj: [f32; 16],
         casters: &[bool],
+        sdf: Option<axiom_host::SdfScene>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         match self {
             LiveBackend::Gpu(backend) => {
-                backend.present_frame_result(clear, lights, light_vp, batches)
+                backend.present_frame_result(clear, lights, light_vp, batches, sdf.as_ref())
             }
             LiveBackend::Canvas(backend) => {
                 let packet = frame_packet_from_batches(
@@ -603,6 +621,7 @@ impl LiveBackend {
                     batches,
                     camera_view_proj,
                     casters,
+                    sdf,
                 );
                 let _ = backend.present_packet(&packet);
                 Ok(())
@@ -659,6 +678,7 @@ fn frame_packet_from_batches(
     batches: &[(u64, u64, Vec<f32>, u32)],
     camera_view_proj: [f32; 16],
     casters: &[bool],
+    sdf: Option<axiom_host::SdfScene>,
 ) -> axiom_host::FramePacket {
     use axiom_host::{
         FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
@@ -702,7 +722,7 @@ fn frame_packet_from_batches(
         1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0_f32,
     ];
     let camera = Some(FrameCamera::new(identity, identity, camera_view_proj));
-    FramePacket::new(
+    let packet = FramePacket::new(
         tick,
         tick,
         FrameViewport::new(width, height),
@@ -712,7 +732,10 @@ fn frame_packet_from_batches(
         frame_lights,
         light_vp,
         features,
-    )
+    );
+    // Attach the frame's SDF scene (zero-or-one, via the Option iterator — no
+    // `if`), so the Canvas software marcher composites it over the meshes.
+    sdf.into_iter().fold(packet, |p, scene| p.with_sdf(scene))
 }
 
 /// Select the live backend without poisoning the canvas: a forced Canvas 2D run

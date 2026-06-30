@@ -177,6 +177,10 @@ impl App {
                     // backend's planar contact shadows.
                     outcome.camera_view_proj(),
                     outcome.mesh_batch_casters(),
+                    // The frame's SDF raymarch scene, composited over the meshes by
+                    // the live backend. Forwarded for every `App::run` app, so an
+                    // authored `SdfShape` renders live with no per-app wiring.
+                    outcome.sdf_scene().cloned(),
                 )
             });
     }

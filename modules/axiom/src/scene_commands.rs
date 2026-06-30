@@ -5,7 +5,7 @@
 //! whole replay happens in that single function, so the scene's un-nameable node
 //! ids only ever live as locals (`nodes: Vec<_>`).
 
-use axiom_kernel::{Radians, Ratio};
+use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::{MathApi, Vec3};
 use axiom_scene::SceneApi;
 
@@ -178,6 +178,33 @@ impl SceneCommands {
                             .add_bounds(node, b.half_extents)
                             .expect("bounds attaches to a just-created node");
                     });
+                (component.kind() == NodeComponent::KIND_SDF)
+                    .then(|| component.as_sdf())
+                    .flatten()
+                    .inspect(|s| {
+                        let c = s.color();
+                        let color = Vec3::new(c.r.get(), c.g.get(), c.b.get());
+                        // Dispatch by the shape's kind to the matching scene
+                        // constructor; the three guards are mutually exclusive, so
+                        // exactly one fires (no branch — guarded `.then` effects).
+                        (s.kind() == 0).then(|| {
+                            let radius = Meters::new(s.dims().x)
+                                .expect("authored sdf sphere radius is finite");
+                            scene
+                                .add_sdf_sphere(math, node, radius, color)
+                                .expect("authored sdf sphere is valid");
+                        });
+                        (s.kind() == 1).then(|| {
+                            scene
+                                .add_sdf_box(math, node, s.dims(), color)
+                                .expect("authored sdf box is valid");
+                        });
+                        (s.kind() == 2).then(|| {
+                            scene
+                                .add_sdf_plane(math, node, color)
+                                .expect("authored sdf plane is valid");
+                        });
+                    });
             });
             // A `ContactShadowCaster` marker (in any tuple position) flags the
             // node's renderable as a shadow caster. Done after the component loop
@@ -279,6 +306,34 @@ mod tests {
         // The child is parented (carries a parent id).
         assert!(snap.nodes().iter().any(|n| n.parent().is_some()));
         assert_eq!(light_dir, Some(Vec3::new(0.3, -1.0, 0.4)));
+    }
+
+    #[test]
+    fn realizes_each_sdf_shape_kind_into_the_scene() {
+        use crate::sdf_shape::SdfShape;
+        let mut cmds = SceneCommands::new(4.0 / 3.0);
+        // One of each kind, in order, exercising all three realize dispatch arms.
+        cmds.spawn((
+            Transform::from_translation(Vec3::new(-2.0, 0.0, 0.0)),
+            SdfShape::sphere(Meters::new(0.5).unwrap(), Color::WHITE),
+        ));
+        cmds.spawn((
+            Transform::IDENTITY,
+            SdfShape::cuboid(Vec3::new(0.5, 0.6, 0.7), Color::WHITE),
+        ));
+        cmds.spawn((
+            Transform::from_translation(Vec3::new(0.0, -1.0, 0.0)),
+            SdfShape::plane(Color::WHITE),
+        ));
+
+        let mut scene = SceneApi::new();
+        cmds.realize_into(&mut scene, &math());
+        let snap = scene.snapshot();
+        // Sphere (0), box (1), plane (2) all reached the scene, in spawn order.
+        let kinds: Vec<u32> = snap.sdf_shapes().iter().map(|s| s.kind()).collect();
+        assert_eq!(kinds, vec![0, 1, 2]);
+        // The box kept its authored half-extents through the whole chain.
+        assert_eq!(snap.sdf_shapes()[1].dims(), Vec3::new(0.5, 0.6, 0.7));
     }
 
     #[test]

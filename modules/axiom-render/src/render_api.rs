@@ -2,6 +2,7 @@
 
 use axiom_host::{
     FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
+    SdfPrimitive, SdfScene,
 };
 use axiom_kernel::{FrameIndex, Ratio, Tick};
 use axiom_math::{Mat4, Vec2, Vec3, Vec4};
@@ -16,6 +17,7 @@ use crate::render_mesh::RenderMesh;
 use crate::render_object::RenderObject;
 use crate::render_pipeline_kind::RenderPipelineKind;
 use crate::render_receipt::RenderReceipt;
+use crate::render_sdf::RenderSdf;
 
 /// The only public export of `axiom-render`.
 ///
@@ -148,6 +150,21 @@ impl RenderApi {
             material_idx,
             visible,
         ));
+    }
+
+    /// Add a raymarched SDF shape to `input`: a `kind` discriminant (sphere `0` /
+    /// box `1` / plane `2`, matching the backend SDF primitive kinds), the full
+    /// `world` transform that places it, its **local** `dims` (sphere radius in
+    /// `x`; box half-extents; plane unused), and its linear-RGBA `color`.
+    pub fn add_input_sdf(
+        &self,
+        input: &mut RenderInput,
+        kind: u32,
+        world: Mat4,
+        dims: Vec3,
+        color: Vec4,
+    ) {
+        input.add_sdf_shape(RenderSdf::new(kind, world, dims, color));
     }
 
     // --- Compilation ---
@@ -379,7 +396,7 @@ impl RenderApi {
             point_lights,
         );
 
-        FramePacket::new(
+        let packet = FramePacket::new(
             frame_index,
             tick,
             FrameViewport::new(input.viewport_width(), input.viewport_height()),
@@ -389,7 +406,66 @@ impl RenderApi {
             lights,
             light_view_proj,
             features,
-        )
+        );
+        // Attach the frame's SDF scene, if any (0-or-1 fold over the Option — no
+        // branch, no clone; an SDF-less frame returns the packet unchanged). The
+        // camera's neutral `projection * view` and world position drive the rays.
+        let sdf = input.camera().and_then(|c| {
+            let view_proj = c.projection().multiply(c.view());
+            let eye = c.view().inverse().unwrap_or(Mat4::IDENTITY).as_cols_array();
+            let camera_world_pos = Vec3::new(eye[12], eye[13], eye[14]);
+            let shapes: Vec<(u32, Mat4, Vec3, Vec4)> = input
+                .sdf_shapes()
+                .iter()
+                .map(|s| (s.kind(), s.world(), s.dims(), s.color()))
+                .collect();
+            self.build_sdf_scene(view_proj, camera_world_pos, &shapes)
+        });
+        sdf.into_iter().fold(packet, |p, scene| p.with_sdf(scene))
+    }
+
+    /// Build the backend-neutral [`SdfScene`] for a frame from its camera and SDF
+    /// shapes — the single source of truth for SDF-scene assembly, shared by
+    /// [`Self::build_frame_packet`] and any composition tier (the render pipeline,
+    /// an app) that drives a backend from neutral data.
+    ///
+    /// `view_proj` is the **same** column-major view-projection used to build the
+    /// frame's draw MVPs (so SDF depth composites with the meshes); `view_proj` is
+    /// inverted to unproject each pixel into a world ray. `camera_world_pos` is the
+    /// ray origin. Each shape is `(kind, world, dims, color)`: `world` is inverted
+    /// into the backend's world→local matrix and its uniform scale (the length of
+    /// the transform's first basis column) is carried in `params[3]` so the backend
+    /// rescales the local distance to world units. `None` when `shapes` is empty.
+    pub fn build_sdf_scene(
+        &self,
+        view_proj: Mat4,
+        camera_world_pos: Vec3,
+        shapes: &[(u32, Mat4, Vec3, Vec4)],
+    ) -> Option<SdfScene> {
+        (!shapes.is_empty()).then(|| {
+            let inv_view_proj = view_proj.inverse().unwrap_or(Mat4::IDENTITY).as_cols_array();
+            let primitives = shapes
+                .iter()
+                .map(|(kind, world, dims, color)| {
+                    let cols = world.as_cols_array();
+                    let scale = Vec3::new(cols[0], cols[1], cols[2]).length();
+                    let inv_transform = world.inverse().unwrap_or(Mat4::IDENTITY).as_cols_array();
+                    SdfPrimitive::new(
+                        *kind,
+                        inv_transform,
+                        [dims.x, dims.y, dims.z, scale],
+                        [color.x, color.y, color.z, color.w],
+                    )
+                })
+                .collect();
+            SdfScene::new(
+                primitives,
+                view_proj.as_cols_array(),
+                inv_view_proj,
+                [camera_world_pos.x, camera_world_pos.y, camera_world_pos.z],
+                [SDF_MAX_DISTANCE, SDF_HIT_EPSILON, 0.0, 0.0],
+            )
+        })
     }
 
     // --- Frame capture (engine-owned artifact; NOT pixel capture) ---
@@ -435,6 +511,11 @@ fn material_base_color(input: &RenderInput, material_id: u64) -> [f32; 4] {
         })
         .unwrap_or([1.0; 4])
 }
+
+/// The maximum world-space distance the SDF marcher walks before giving up.
+const SDF_MAX_DISTANCE: f32 = 100.0;
+/// The surface-hit threshold for the SDF marcher, in world units.
+const SDF_HIT_EPSILON: f32 = 0.001;
 
 #[cfg(test)]
 mod tests {
@@ -714,6 +795,9 @@ mod frame_packet_cov {
         assert!(f.uses_shadows());
         assert_eq!(f.directional_lights(), 1);
         assert_eq!(f.point_lights(), 0);
+        // No SDF shapes were added, so the packet carries no SDF scene (the
+        // camera-present-but-no-shapes arm of `build_sdf_scene`).
+        assert!(packet.sdf().is_none());
     }
 
     #[test]
@@ -775,6 +859,67 @@ mod frame_packet_cov {
         assert_eq!(f.directional_lights(), 0);
         assert_eq!(f.point_lights(), 0);
         assert_eq!(packet.viewport(), FrameViewport::new(320, 240));
+        // No camera (and no shapes) → no SDF scene.
+        assert!(packet.sdf().is_none());
+    }
+
+    #[test]
+    fn packet_carries_an_sdf_scene_when_shapes_and_camera_present() {
+        let mut input = api().new_input(64, 64);
+        api().set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
+        api().add_input_sdf(
+            &mut input,
+            1,
+            Mat4::IDENTITY,
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec4::new(0.2, 0.4, 0.6, 1.0),
+        );
+        let packet = api().build_frame_packet(&input, 0, 0, [0.0; 16]);
+        let scene = packet.sdf().expect("sdf scene present");
+        assert_eq!(scene.primitives().len(), 1);
+        let p = scene.primitives()[0];
+        assert_eq!(p.kind(), 1);
+        // dims ride into params[0..3]; an identity world has uniform scale 1.
+        assert_eq!(p.params(), [1.0, 2.0, 3.0, 1.0]);
+        assert_eq!(p.color(), [0.2, 0.4, 0.6, 1.0]);
+        // Identity world → identity world→local matrix.
+        assert_eq!(p.inv_transform(), Mat4::IDENTITY.as_cols_array());
+        // Identity view → camera at the origin, identity inverse view-projection.
+        assert_eq!(scene.camera_world_pos(), [0.0, 0.0, 0.0]);
+        assert_eq!(scene.inv_view_proj(), Mat4::IDENTITY.as_cols_array());
+        assert_eq!(scene.march(), [100.0, 0.001, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn sdf_shapes_without_a_camera_produce_no_scene() {
+        let mut input = api().new_input(64, 64);
+        api().add_input_sdf(&mut input, 0, Mat4::IDENTITY, Vec3::ONE, Vec4::ONE);
+        let packet = api().build_frame_packet(&input, 0, 0, [0.0; 16]);
+        assert!(packet.sdf().is_none());
+    }
+
+    #[test]
+    fn build_sdf_scene_is_none_for_no_shapes_and_a_scene_for_some() {
+        let r = api();
+        // No shapes → no scene (the empty arm of the shared builder).
+        assert!(r.build_sdf_scene(Mat4::IDENTITY, Vec3::ZERO, &[]).is_none());
+        // Two shapes → a scene carrying both, with dims+scale in params and the
+        // supplied camera world position and inverse view-projection.
+        let shapes = [
+            (0u32, Mat4::IDENTITY, Vec3::new(2.0, 0.0, 0.0), Vec4::new(1.0, 0.0, 0.0, 1.0)),
+            (1u32, Mat4::IDENTITY, Vec3::new(1.0, 2.0, 3.0), Vec4::ONE),
+        ];
+        let scene = r
+            .build_sdf_scene(Mat4::IDENTITY, Vec3::new(0.0, 0.0, 5.0), &shapes)
+            .expect("two shapes yield a scene");
+        assert_eq!(scene.primitives().len(), 2);
+        assert_eq!(scene.primitives()[0].kind(), 0);
+        // Identity world → uniform scale 1, dims carried into params[0..3].
+        assert_eq!(scene.primitives()[1].params(), [1.0, 2.0, 3.0, 1.0]);
+        assert_eq!(scene.camera_world_pos(), [0.0, 0.0, 5.0]);
+        assert_eq!(scene.view_proj(), Mat4::IDENTITY.as_cols_array());
+        assert_eq!(scene.inv_view_proj(), Mat4::IDENTITY.as_cols_array());
+        assert_eq!(scene.march(), [100.0, 0.001, 0.0, 0.0]);
     }
 
     #[test]

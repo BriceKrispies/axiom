@@ -23,6 +23,7 @@ use crate::camera::Camera;
 use crate::light::Light;
 use crate::procanim::ProcAnim;
 use crate::renderable::Renderable;
+use crate::sdf_shape::SdfShape;
 use crate::spin::Spin;
 use crate::tag::Tag;
 
@@ -40,6 +41,9 @@ pub struct SceneStorage {
     pub cameras: ComponentColumn<Camera>,
     pub lights: ComponentColumn<Light>,
     pub renderables: ComponentColumn<Renderable>,
+    /// Raymarched SDF shapes, keyed by node entity — the node renders as a
+    /// signed-distance primitive (sphere / box / plane) the backends march.
+    pub sdf_shapes: ComponentColumn<SdfShape>,
     pub spins: ComponentColumn<Spin>,
     pub procanims: ComponentColumn<ProcAnim>,
     /// Axis-aligned bounding volumes, keyed by node entity. The queryable
@@ -126,6 +130,7 @@ impl ColumnSet for SceneStorage {
             ("cameras", &self.cameras),
             ("lights", &self.lights),
             ("renderables", &self.renderables),
+            ("sdf_shapes", &self.sdf_shapes),
             ("spins", &self.spins),
             ("procanims", &self.procanims),
             ("bounds", &self.bounds),
@@ -141,6 +146,7 @@ impl ColumnSet for SceneStorage {
             ("cameras", &mut self.cameras),
             ("lights", &mut self.lights),
             ("renderables", &mut self.renderables),
+            ("sdf_shapes", &mut self.sdf_shapes),
             ("spins", &mut self.spins),
             ("procanims", &mut self.procanims),
             ("bounds", &mut self.bounds),
@@ -370,6 +376,7 @@ mod tests {
         assert!(s.cameras.is_empty());
         assert!(s.lights.is_empty());
         assert!(s.renderables.is_empty());
+        assert!(s.sdf_shapes.is_empty());
         assert!(s.spins.is_empty());
         assert!(s.procanims.is_empty());
         assert!(s.bounds.is_empty());

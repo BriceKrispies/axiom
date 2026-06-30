@@ -44,9 +44,9 @@
  *   - **`createMaterial`** consumes only the base-colour `[r,g,b]`; emissive /
  *     roughness / opacity are dropped (the native `add_material` takes a lit
  *     colour only).
- *   - **`setCamera3D`** sends the eye position + vertical FOV (converted radians →
- *     degrees) + near/far; the look-at `target` is dropped (the native
- *     `set_camera` places from translation only).
+ *   - **`setCamera3D`** sends the eye position + look-at `target` + vertical FOV
+ *     (converted radians → degrees) + near/far; the native `set_camera` aims the
+ *     camera from the position toward the target (world up = +Y).
  *   - **`addLight`** binds the directional arm only (direction + colour +
  *     intensity); the `kind` discriminant is dropped (the native `add_light`
  *     mints a `DirectionalLight`).
@@ -169,7 +169,13 @@ export interface WasmHostExport {
    */
   readonly createMesh: (kind: string) => number;
   readonly createMaterial: (rgb: Float64Array) => number;
-  readonly setCamera3D: (position: Float64Array, fovDeg: number, near: number, far: number) => void;
+  readonly setCamera3D: (
+    position: Float64Array,
+    target: Float64Array,
+    fovDeg: number,
+    near: number,
+    far: number,
+  ) => void;
   readonly addLight: (direction: Float64Array, rgb: Float64Array, intensity: number) => number;
   /*
    * Spatial queries (SPEC-03 §4.2): a point/direction crosses as a 3-element
@@ -518,9 +524,15 @@ const scene3dBridge = (game: WasmHostExport): Pick<
   // Base colour only: emissive / roughness / opacity are dropped (native lit-colour authoring — see header).
   createMaterial: (material: MaterialDescriptor): Handle => game.createMaterial(packRgb(material.baseColor)),
   createMesh: (meshKind: number): Handle => game.createMesh(pick(MESH_NAMES, meshKind)),
-  // Position + degree FOV + near/far: the look-at `target` is dropped (native `set_camera` places from translation — see header).
+  // Eye position + look-at target + degree FOV + near/far: the native `set_camera` aims from position toward target (world up = +Y — see header).
   setCamera3D: (camera: CameraDescriptor): void => {
-    game.setCamera3D(packVec3(camera.position), camera.fovY * RAD_TO_DEG, camera.near, camera.far);
+    game.setCamera3D(
+      packVec3(camera.position),
+      packVec3(camera.target),
+      camera.fovY * RAD_TO_DEG,
+      camera.near,
+      camera.far,
+    );
   },
 });
 

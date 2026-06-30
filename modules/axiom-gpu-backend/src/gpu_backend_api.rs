@@ -1,6 +1,6 @@
 //! The single GPU-backend facade: own the real wgpu binding and present frames.
 
-use axiom_host::{Draw2dList, FramePacket, HostPresentationRequest};
+use axiom_host::{Draw2dList, FramePacket, HostPresentationRequest, SdfScene};
 
 /// The real GPU presentation backend for one surface.
 ///
@@ -111,6 +111,7 @@ impl GpuBackendApi {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        sdf: Option<&SdfScene>,
     ) -> bool {
         #[cfg(target_arch = "wasm32")]
         {
@@ -118,14 +119,14 @@ impl GpuBackendApi {
                 .live
                 .as_ref()
                 .map(|live| {
-                    live.render_frame(lights, light_view_proj, batches, clear_color)
+                    live.render_frame(lights, light_view_proj, batches, clear_color, sdf)
                         .is_ok()
                 })
                 .unwrap_or(false);
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let _ = (clear_color, lights, light_view_proj, batches);
+            let _ = (clear_color, lights, light_view_proj, batches, sdf);
             false
         }
     }
@@ -144,10 +145,11 @@ impl GpuBackendApi {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        sdf: Option<&SdfScene>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         self.live
             .as_ref()
-            .map(|live| live.render_frame(lights, light_view_proj, batches, clear_color))
+            .map(|live| live.render_frame(lights, light_view_proj, batches, clear_color, sdf))
             .unwrap_or(Ok(()))
     }
 
@@ -165,6 +167,7 @@ impl GpuBackendApi {
             &lights,
             packet.light_view_proj(),
             &batches,
+            packet.sdf(),
         )
     }
 
@@ -198,6 +201,7 @@ impl GpuBackendApi {
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
         clear: [f32; 4],
+        sdf: Option<&SdfScene>,
     ) -> Option<Vec<u8>> {
         crate::offscreen::render_to_rgba(
             width,
@@ -208,6 +212,7 @@ impl GpuBackendApi {
             light_view_proj,
             batches,
             clear,
+            sdf,
         )
     }
 
@@ -358,12 +363,15 @@ mod tests {
         let batches = vec![(7_u64, 5_u64, vec![0.0_f32; 36], 1_u32)];
         let lights = vec![(0_u32, [0.0, 1.0, 0.0], [1.0, 1.0, 1.0], 1.0_f32)];
         let light_vp = [0.0_f32; 16];
-        assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &lights, light_vp, &batches));
+        assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &lights, light_vp, &batches, None));
     }
 
     #[test]
     fn present_packet_consumes_a_frame_packet_and_no_ops_on_native() {
-        use axiom_host::{FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport};
+        use axiom_host::{
+            FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport, SdfPrimitive,
+            SdfScene,
+        };
         // A packet with one draw + one light flows through the packet→batches
         // adapter and the same present path; on native it draws nothing.
         let backend = GpuBackendApi::new(&request(640, 480));
@@ -386,7 +394,13 @@ mod tests {
             [0.0; 16],
             FrameFeatureSet::new(false, false, 1, 0),
         );
+        // No SDF attached → present_packet forwards `None`; native no-op.
         assert!(!backend.present_packet(&packet));
+        // An SDF scene attached → present_packet extracts `Some(scene)` and
+        // forwards it through the same path; still a native no-op (no GPU).
+        let prim = SdfPrimitive::new(SdfPrimitive::SPHERE, [0.0; 16], [1.0, 0.0, 0.0, 1.0], [1.0; 4]);
+        let scene = SdfScene::new(vec![prim], [0.0; 16], [0.0; 16], [0.0, 0.0, 5.0], [100.0, 0.001, 0.0, 0.0]);
+        assert!(!backend.present_packet(&packet.with_sdf(scene)));
     }
 
     #[test]

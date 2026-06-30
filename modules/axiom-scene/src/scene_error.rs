@@ -77,6 +77,14 @@ impl SceneError {
         SceneError::new(SceneErrorCode::InvalidRenderableReference, message)
     }
 
+    pub const fn missing_sdf_shape(message: &'static str) -> Self {
+        SceneError::new(SceneErrorCode::MissingSdfShape, message)
+    }
+
+    pub const fn invalid_sdf_shape_parameters(message: &'static str) -> Self {
+        SceneError::new(SceneErrorCode::InvalidSdfShapeParameters, message)
+    }
+
     pub const fn code(&self) -> SceneErrorCode {
         self.code
     }
@@ -161,6 +169,14 @@ mod tests {
         assert_eq!(
             SceneError::invalid_renderable_reference("").code(),
             SceneErrorCode::InvalidRenderableReference
+        );
+        assert_eq!(
+            SceneError::missing_sdf_shape("").code(),
+            SceneErrorCode::MissingSdfShape
+        );
+        assert_eq!(
+            SceneError::invalid_sdf_shape_parameters("").code(),
+            SceneErrorCode::InvalidSdfShapeParameters
         );
     }
 

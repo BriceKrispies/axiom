@@ -13,6 +13,8 @@
 //! remap baked in — applying that (e.g. the wgpu z∈[0,1] fix) is a backend
 //! concern handled where the packet is consumed.
 
+use crate::sdf_scene::SdfScene;
+
 /// The pixel dimensions of the frame's render target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameViewport {
@@ -262,6 +264,7 @@ pub struct FramePacket {
     lights: Vec<FrameLight>,
     light_view_proj: [f32; 16],
     features: FrameFeatureSet,
+    sdf: Option<SdfScene>,
 }
 
 impl FramePacket {
@@ -290,7 +293,24 @@ impl FramePacket {
             lights,
             light_view_proj,
             features,
+            sdf: None,
         }
+    }
+
+    /// Attach an SDF raymarch scene to this packet. The raymarch pass is the
+    /// peer of the triangle `draws`: a backend that renders both composites the
+    /// marched SDF against the rasterized meshes through the shared depth
+    /// buffer. A packet without an SDF scene (the default) renders meshes only.
+    #[must_use]
+    pub fn with_sdf(mut self, sdf: SdfScene) -> Self {
+        self.sdf = Some(sdf);
+        self
+    }
+
+    /// The frame's SDF raymarch scene, or `None` when the frame has no SDF
+    /// content (meshes only).
+    pub const fn sdf(&self) -> Option<&SdfScene> {
+        self.sdf.as_ref()
     }
 
     /// The frame index this packet presents.
@@ -343,6 +363,7 @@ impl FramePacket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sdf_scene::{SdfPrimitive, SdfScene};
 
     fn mat(seed: f32) -> [f32; 16] {
         [seed; 16]
@@ -462,7 +483,32 @@ mod tests {
         assert_eq!(p.lights()[0].kind(), 0);
         assert_eq!(p.light_view_proj(), mat(7.0));
         assert_eq!(p.features(), FrameFeatureSet::new(false, true, 1, 0));
+        // A packet defaults to no SDF scene (meshes only).
+        assert!(p.sdf().is_none());
         assert!(format!("{p:?}").contains("FramePacket"));
+    }
+
+    #[test]
+    fn with_sdf_attaches_a_scene_and_breaks_equality() {
+        let scene = SdfScene::new(
+            vec![SdfPrimitive::new(
+                SdfPrimitive::SPHERE,
+                mat(1.0),
+                [0.5, 0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0, 1.0],
+            )],
+            mat(2.0),
+            mat(3.0),
+            [0.0, 0.0, 5.0],
+            [100.0, 0.001, 0.0, 0.0],
+        );
+        let base = sample_packet();
+        let with = base.clone().with_sdf(scene.clone());
+        // The accessor returns the attached scene; the default packet has none.
+        assert_eq!(with.sdf(), Some(&scene));
+        assert!(base.sdf().is_none());
+        // The SDF arm participates in equality.
+        assert_ne!(with, base);
     }
 
     #[test]

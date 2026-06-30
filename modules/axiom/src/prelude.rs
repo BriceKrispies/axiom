@@ -60,6 +60,7 @@ pub use crate::point_light::PointLight;
 pub use crate::procanim::ProcAnim;
 pub use crate::renderable::Renderable;
 pub use crate::scene_commands::SceneCommands;
+pub use crate::sdf_shape::SdfShape;
 pub use crate::spawn::Spawn;
 pub use crate::spin::Spin;
 pub use crate::texture::Texture;

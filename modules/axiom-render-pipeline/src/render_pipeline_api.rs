@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use axiom_host::SdfScene;
 use axiom_math::{Mat4, MathApi, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 use axiom_scene::SceneApi;
@@ -118,6 +119,11 @@ pub struct RenderReport {
     /// re-projects fragments into it for the PCF lookup. Identity when there is
     /// no directional light (shadows then have no effect).
     light_view_proj: Mat4,
+    /// The frame's backend-neutral SDF scene, if it carries any SDF shapes and a
+    /// camera. Assembled by `axiom-render` from the snapshot's SDF shapes and the
+    /// same wgpu-ready view-projection the meshes use, so a backend that marches
+    /// it composites the result against the rasterized meshes. `None` otherwise.
+    sdf: Option<SdfScene>,
     presented: bool,
     recorded: bool,
 }
@@ -220,7 +226,7 @@ impl RenderPipelineApi {
         // collapses the present/absent arms into a single expression: absent
         // yields identity, present sets the camera command and returns the
         // depth-corrected view-projection.
-        let view_projection = snapshot.cameras().first().map_or(Mat4::IDENTITY, |cam| {
+        let camera = snapshot.cameras().first().map(|cam| {
             let cam_world = snapshot
                 .node(cam.node())
                 .expect("camera node is present in the snapshot")
@@ -237,10 +243,16 @@ impl RenderPipelineApi {
                     cam.far().get(),
                 )
                 .expect("camera intrinsics were validated at scene insertion");
-            render.set_input_camera(&mut input, view, projection);
             let depth_fix = Mat4::from_cols_array(GL_TO_WGPU_DEPTH);
-            depth_fix.multiply(projection).multiply(view)
+            let view_projection = depth_fix.multiply(projection).multiply(view);
+            (view, projection, view_projection, cam_world.translation)
         });
+        // Set the input camera and read the wgpu-ready view-projection (0-or-1
+        // over the Option — no branch; absent yields identity, no camera command).
+        camera
+            .iter()
+            .for_each(|&(view, projection, _, _)| render.set_input_camera(&mut input, view, projection));
+        let view_projection = camera.map_or(Mat4::IDENTITY, |(_, _, vp, _)| vp);
 
         // Lights are resolved into the report below (a frame-uniform set), not
         // collapsed into one global direction: each scene light keeps its own kind
@@ -418,6 +430,28 @@ impl RenderPipelineApi {
         let light_view_proj =
             shadow_light_view_proj(frame.light_direction).unwrap_or(Mat4::IDENTITY);
 
+        // SDF shapes: translate each into the backend-neutral scene the live /
+        // canvas path marches, reusing render's shared SDF-scene assembly. Built
+        // only with a camera (the marcher needs the inverse view-projection), and
+        // from the *same* wgpu-ready view-projection the meshes use, so the
+        // marched SDF depth composites correctly against the rasterized meshes.
+        let sdf = camera.and_then(|(_, _, view_proj, camera_world_pos)| {
+            let shapes: Vec<(u32, Mat4, Vec3, Vec4)> = snapshot
+                .sdf_shapes()
+                .iter()
+                .map(|shape| {
+                    let world = snapshot
+                        .node(shape.node())
+                        .expect("sdf shape node is present in the snapshot")
+                        .world()
+                        .to_matrix();
+                    let c = shape.color();
+                    (shape.kind(), world, shape.dims(), Vec4::new(c.x, c.y, c.z, 1.0))
+                })
+                .collect();
+            render.build_sdf_scene(view_proj, camera_world_pos, &shapes)
+        });
+
         let gpu_report = webgpu.submit(submission);
         RenderReport {
             command_count: gpu_report.submitted_command_count(),
@@ -426,6 +460,7 @@ impl RenderPipelineApi {
             draws,
             lights,
             light_view_proj,
+            sdf,
             presented: gpu_report.presented(),
             recorded: gpu_report.is_recorded(),
         }
@@ -506,6 +541,14 @@ impl RenderPipelineApi {
         report.lights.get(i).copied()
     }
 
+    /// The frame's backend-neutral SDF scene, if it carries SDF shapes and a
+    /// camera. A live/canvas backend attaches this to its `FramePacket`
+    /// (`FramePacket::with_sdf`) to march and composite the shapes against the
+    /// meshes; `None` means the frame has no SDF content to march.
+    pub fn report_sdf_scene<'a>(&self, report: &'a RenderReport) -> Option<&'a SdfScene> {
+        report.sdf.as_ref()
+    }
+
     pub fn report_presented(&self, report: &RenderReport) -> bool {
         report.presented
     }
@@ -583,6 +626,55 @@ mod tests {
         let rn = n.submit(&frame_with_assets(&n), &scene, &webgpu);
         let rd = d.submit(&frame_with_assets(&d), &scene, &webgpu);
         assert_eq!(n.report_command_count(&rn), d.report_command_count(&rd));
+        // This scene carries no SDF shapes, so the report has no SDF scene.
+        assert!(n.report_sdf_scene(&rn).is_none());
+    }
+
+    #[test]
+    fn report_carries_an_sdf_scene_for_a_scene_with_an_sdf_shape() {
+        use axiom_math::Transform;
+        let api = RenderPipelineApi::new();
+        let mut scene = SceneApi::new();
+        // An SDF sphere placed by a translation-only world transform (scale 1),
+        // plus a camera (required for the SDF scene's rays). No renderables, so
+        // the frame needs no mesh/material assets.
+        let shape_node = scene
+            .create_node_with_transform(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
+        scene
+            .add_sdf_sphere(
+                &math(),
+                shape_node,
+                Meters::new(0.5).unwrap(),
+                Vec3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap();
+        let camera = scene
+            .create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
+        scene
+            .add_perspective_camera(
+                &math(),
+                camera,
+                Radians::new(std::f32::consts::FRAC_PI_3).unwrap(),
+                Ratio::new(4.0 / 3.0).unwrap(),
+                Meters::new(0.1).unwrap(),
+                Meters::new(100.0).unwrap(),
+            )
+            .unwrap();
+        scene.update_world_transforms();
+
+        let webgpu = WebGpuApi::new_recording();
+        let frame = api.new_frame(800, 600, [0.0, 0.0, 0.0, 1.0], Vec3::new(0.0, -1.0, 0.0));
+        let report = api.submit(&frame, &scene, &webgpu);
+        let sdf = api
+            .report_sdf_scene(&report)
+            .expect("the scene's SDF shape yields a scene");
+        assert_eq!(sdf.primitives().len(), 1);
+        let p = sdf.primitives()[0];
+        assert_eq!(p.kind(), 0); // sphere
+        // dims (0.5, 0.5, 0.5) carried; translation-only world → uniform scale 1.
+        assert_eq!(p.params(), [0.5, 0.5, 0.5, 1.0]);
+        // The scene's RGB rides through with an opaque alpha synthesized.
+        assert_eq!(p.color(), [1.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]

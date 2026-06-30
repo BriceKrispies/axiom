@@ -69,7 +69,7 @@
       // (no-magic-numbers), conventional short names (id-length), fixture array
       // access (no-non-null-assertion), etc. This matches the Rust reality, where
       // clippy lints tests but does not enforce naming/magic-number style on them.
-      "files": ["test/**/*.ts"],
+      "files": ["**/*.test.ts", "**/*.testkit.ts"],
       "rules": {
         "eslint-js/no-restricted-syntax": "off",
         "eslint/capitalized-comments": "off",

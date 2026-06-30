@@ -33,6 +33,7 @@ mod point_light;
 mod procanim;
 mod renderable;
 mod scene_commands;
+mod sdf_shape;
 mod spawn;
 mod spin;
 mod texture;

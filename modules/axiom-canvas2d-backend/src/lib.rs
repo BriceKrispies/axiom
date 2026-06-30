@@ -56,6 +56,7 @@ mod planar_shadow;
 mod projection;
 mod raster_triangle;
 mod raster_vertex;
+mod sdf_raymarch;
 mod software_framebuffer;
 mod software_rasterizer;
 

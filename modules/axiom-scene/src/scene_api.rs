@@ -18,6 +18,7 @@ use crate::scene_error::SceneError;
 use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::scene_snapshot::SceneSnapshot;
+use crate::sdf_shape::SdfShape;
 use crate::spin::Spin;
 use crate::tag::Tag;
 
@@ -31,6 +32,11 @@ mod players;
 /// by `Reflect` schema name. A child module so neither this file nor the main
 /// `impl SceneApi` block exceeds the engine's size budgets.
 mod dynamic;
+
+/// The signed-distance-field authoring arm of the facade (`add_sdf_sphere`/
+/// `add_sdf_box`/`add_sdf_plane`/`remove_sdf_shape`). A child module so neither
+/// this file nor the main `impl SceneApi` block exceeds the engine's size budgets.
+mod sdf;
 
 /// The only public export of `axiom-scene`: a **stateful scene handle**.
 ///
@@ -260,6 +266,7 @@ impl SceneApi {
             Camera::SCHEMA,
             Light::SCHEMA,
             Renderable::SCHEMA,
+            SdfShape::SCHEMA,
             Spin::SCHEMA,
             ProcAnim::SCHEMA,
             Bounds::SCHEMA,
@@ -836,15 +843,16 @@ mod tests {
     #[test]
     fn component_schemas_describe_the_standard_components() {
         let schemas = api().component_schemas();
-        assert_eq!(schemas.len(), 8);
+        assert_eq!(schemas.len(), 9);
         assert_eq!(schemas[0].name(), "Transform");
         assert_eq!(schemas[1].name(), "Camera");
         assert_eq!(schemas[2].name(), "Light");
         assert_eq!(schemas[3].name(), "Renderable");
-        assert_eq!(schemas[4].name(), "Spin");
-        assert_eq!(schemas[5].name(), "ProcAnim");
-        assert_eq!(schemas[6].name(), "Bounds");
-        assert_eq!(schemas[7].name(), "Tag");
+        assert_eq!(schemas[4].name(), "SdfShape");
+        assert_eq!(schemas[5].name(), "Spin");
+        assert_eq!(schemas[6].name(), "ProcAnim");
+        assert_eq!(schemas[7].name(), "Bounds");
+        assert_eq!(schemas[8].name(), "Tag");
     }
 
     #[test]

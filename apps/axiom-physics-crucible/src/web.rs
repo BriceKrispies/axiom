@@ -148,6 +148,10 @@ pub fn start() {
             outcome.mesh_batches(),
             outcome.camera_view_proj(),
             outcome.mesh_batch_casters(),
+            // The frame's SDF raymarch scene (the floating sphere), composited over
+            // the meshes by the live backend — GPU in the browser, Canvas2D in the
+            // software fallback (and where browser WebGPU is unavailable).
+            outcome.sdf_scene().cloned(),
         )
     };
 

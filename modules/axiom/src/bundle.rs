@@ -18,6 +18,7 @@ use crate::player::Player;
 use crate::point_light::PointLight;
 use crate::procanim::ProcAnim;
 use crate::renderable::Renderable;
+use crate::sdf_shape::SdfShape;
 use crate::spin::Spin;
 
 /// One component attached to a spawned node, recorded for deferred realization.
@@ -39,6 +40,7 @@ pub struct NodeComponent {
     player: Option<Player>,
     controller: Option<Controller>,
     bounds: Option<Bounds>,
+    sdf: Option<SdfShape>,
 }
 
 impl NodeComponent {
@@ -54,6 +56,7 @@ impl NodeComponent {
     pub(crate) const KIND_CONTACT_SHADOW_CASTER: u8 = 7;
     pub(crate) const KIND_PROCANIM: u8 = 8;
     pub(crate) const KIND_BOUNDS: u8 = 9;
+    pub(crate) const KIND_SDF: u8 = 10;
 
     /// The all-`None` base used by every constructor; each then fills in its one
     /// payload field and sets its `kind`.
@@ -68,6 +71,7 @@ impl NodeComponent {
         player: None,
         controller: None,
         bounds: None,
+        sdf: None,
     };
 
     /// Which kind of component this is (see the `KIND_*` tags).
@@ -164,6 +168,15 @@ impl NodeComponent {
             ..Self::EMPTY
         }
     }
+
+    /// A raymarched SDF-shape component.
+    pub(crate) fn sdf(sdf: SdfShape) -> Self {
+        NodeComponent {
+            kind: Self::KIND_SDF,
+            sdf: Some(sdf),
+            ..Self::EMPTY
+        }
+    }
 }
 
 /// Typed payload accessors — one per kind. Split into a second `impl` block so
@@ -212,6 +225,11 @@ impl NodeComponent {
     /// The bounds payload, present iff `kind == KIND_BOUNDS`.
     pub(crate) fn as_bounds(&self) -> Option<&Bounds> {
         self.bounds.as_ref()
+    }
+
+    /// The SDF-shape payload, present iff `kind == KIND_SDF`.
+    pub(crate) fn as_sdf(&self) -> Option<&SdfShape> {
+        self.sdf.as_ref()
     }
 }
 
@@ -308,6 +326,12 @@ impl Bundle for ContactShadowCaster {
 impl Bundle for Bounds {
     fn apply(self, command: &mut SpawnCommand) {
         command.components.push(NodeComponent::bounds(self));
+    }
+}
+
+impl Bundle for SdfShape {
+    fn apply(self, command: &mut SpawnCommand) {
+        command.components.push(NodeComponent::sdf(self));
     }
 }
 

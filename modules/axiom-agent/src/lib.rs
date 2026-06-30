@@ -46,6 +46,7 @@ mod agent_memory;
 mod agent_profile;
 mod agent_runtime;
 mod decision_report;
+mod hold_set_brain;
 mod observation;
 mod observation_builder;
 mod observation_channel;

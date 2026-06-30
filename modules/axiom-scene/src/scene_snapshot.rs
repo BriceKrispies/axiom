@@ -6,6 +6,7 @@ use crate::node_snapshot::NodeSnapshot;
 use crate::renderable_snapshot::RenderableSnapshot;
 use crate::scene::Scene;
 use crate::scene_node_id::SceneNodeId;
+use crate::sdf_shape_snapshot::SdfShapeSnapshot;
 
 /// A deterministic, value-typed snapshot of a [`Scene`].
 ///
@@ -22,6 +23,7 @@ pub struct SceneSnapshot {
     cameras: Vec<CameraSnapshot>,
     lights: Vec<LightSnapshot>,
     renderables: Vec<RenderableSnapshot>,
+    sdf_shapes: Vec<SdfShapeSnapshot>,
 }
 
 impl SceneSnapshot {
@@ -34,6 +36,7 @@ impl SceneSnapshot {
         let mut cameras = Vec::new();
         let mut lights = Vec::new();
         let mut renderables = Vec::new();
+        let mut sdf_shapes = Vec::new();
 
         storage.locals.iter().for_each(|(id, &local)| {
             let node = SceneNodeId::from_raw(id.raw());
@@ -65,6 +68,14 @@ impl SceneSnapshot {
                     r.casts_contact_shadow(),
                 ));
             });
+            storage.sdf_shapes.get(id).into_iter().for_each(|shape| {
+                sdf_shapes.push(SdfShapeSnapshot::new(
+                    node,
+                    shape.kind(),
+                    shape.dims(),
+                    shape.color(),
+                ));
+            });
         });
 
         SceneSnapshot {
@@ -72,6 +83,7 @@ impl SceneSnapshot {
             cameras,
             lights,
             renderables,
+            sdf_shapes,
         }
     }
 
@@ -106,11 +118,19 @@ impl SceneSnapshot {
         &self.renderables
     }
 
+    /// The raymarched SDF shapes, ordered by ascending node id. A consumer pairs
+    /// each entry with its node's world transform (via [`Self::node`]) to build
+    /// the backend-neutral SDF primitive the render backends march.
+    pub fn sdf_shapes(&self) -> &[SdfShapeSnapshot] {
+        &self.sdf_shapes
+    }
+
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
             & self.cameras.is_empty()
             & self.lights.is_empty()
             & self.renderables.is_empty()
+            & self.sdf_shapes.is_empty()
     }
 }
 
@@ -122,6 +142,7 @@ mod tests {
     use crate::material_ref::MaterialRef;
     use crate::mesh_ref::MeshRef;
     use crate::renderable::Renderable;
+    use crate::sdf_shape::SdfShape;
     use axiom_kernel::{Meters, Radians, Ratio};
     use axiom_math::{MathApi, Transform, Vec3};
 
@@ -156,6 +177,11 @@ mod tests {
             Renderable::new(MeshRef::from_raw(7), MaterialRef::from_raw(8)).unwrap(),
         )
         .unwrap();
+        s.add_sdf_shape(
+            b,
+            SdfShape::sphere(&math(), Meters::new(0.5).unwrap(), Vec3::ONE).unwrap(),
+        )
+        .unwrap();
         s.update_world_transforms();
         s
     }
@@ -168,6 +194,7 @@ mod tests {
         assert!(s.cameras().is_empty());
         assert!(s.lights().is_empty());
         assert!(s.renderables().is_empty());
+        assert!(s.sdf_shapes().is_empty());
     }
 
     #[test]
@@ -180,11 +207,17 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_contains_camera_light_renderable() {
+    fn snapshot_contains_camera_light_renderable_and_sdf_shape() {
         let s = SceneSnapshot::from_scene(&populated_scene());
         assert_eq!(s.cameras().len(), 1);
         assert_eq!(s.lights().len(), 1);
         assert_eq!(s.renderables().len(), 1);
+        assert_eq!(s.sdf_shapes().len(), 1);
+        // The shape is keyed by its node and carries the authored sphere kind.
+        let shape = &s.sdf_shapes()[0];
+        assert_eq!(shape.kind(), SdfShape::SPHERE);
+        assert_eq!(shape.dims(), Vec3::new(0.5, 0.5, 0.5));
+        assert!(s.node(shape.node()).is_some());
     }
 
     #[test]
@@ -277,9 +310,12 @@ mod cov {
             false,
         )
     }
+    fn sdf_shape_only() -> SdfShapeSnapshot {
+        SdfShapeSnapshot::new(SceneNodeId::from_raw(1), 0, Vec3::ONE, Vec3::ONE)
+    }
 
-    // Each leaves exactly one collection non-empty so `is_empty`'s `&&` chain
-    // short-circuits at a different conjunct.
+    // Each leaves exactly one collection non-empty so `is_empty`'s `&` chain
+    // fails at a different conjunct.
 
     #[test]
     fn not_empty_when_only_nodes_present() {
@@ -288,6 +324,7 @@ mod cov {
             cameras: vec![],
             lights: vec![],
             renderables: vec![],
+            sdf_shapes: vec![],
         };
         assert!(!s.is_empty());
     }
@@ -299,6 +336,7 @@ mod cov {
             cameras: vec![camera_only()],
             lights: vec![],
             renderables: vec![],
+            sdf_shapes: vec![],
         };
         assert!(!s.is_empty());
     }
@@ -310,6 +348,7 @@ mod cov {
             cameras: vec![],
             lights: vec![light_only()],
             renderables: vec![],
+            sdf_shapes: vec![],
         };
         assert!(!s.is_empty());
     }
@@ -321,6 +360,19 @@ mod cov {
             cameras: vec![],
             lights: vec![],
             renderables: vec![renderable_only()],
+            sdf_shapes: vec![],
+        };
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn not_empty_when_only_sdf_shapes_present() {
+        let s = SceneSnapshot {
+            nodes: vec![],
+            cameras: vec![],
+            lights: vec![],
+            renderables: vec![],
+            sdf_shapes: vec![sdf_shape_only()],
         };
         assert!(!s.is_empty());
     }

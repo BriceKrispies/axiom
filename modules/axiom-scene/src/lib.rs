@@ -55,6 +55,8 @@ mod scene_node_id;
 mod scene_result;
 mod scene_snapshot;
 mod scene_storage;
+mod sdf_shape;
+mod sdf_shape_snapshot;
 mod spin;
 mod tag;
 
