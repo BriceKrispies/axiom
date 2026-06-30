@@ -44,6 +44,17 @@ impl Seconds {
         ][value.is_finite() as usize]
     }
 
+    /// Construct a duration from a *computed* scalar, mapping any non-finite
+    /// result (NaN / ±infinity) to `0.0` so the constructor is **total** — it
+    /// never fails. This is the sanctioned path for values produced by arithmetic
+    /// (interpolation between two endpoints, a deterministic in-range pick, a
+    /// fade) where a fallible [`Seconds::new`] would leave an unreachable error
+    /// arm: the inputs are already finite, so the sanitizing branch exists only as
+    /// a defined fallback. Mirrors [`crate::Ratio::finite_or_zero`].
+    pub const fn finite_or_zero(value: f32) -> Self {
+        Seconds([0.0, value][value.is_finite() as usize])
+    }
+
     /// The underlying scalar value, in seconds.
     pub const fn get(self) -> f32 {
         self.0
@@ -86,6 +97,18 @@ mod tests {
             Seconds::new(f32::INFINITY).unwrap_err().code(),
             KernelErrorCode::NonFiniteScalar
         );
+    }
+
+    #[test]
+    fn finite_or_zero_passes_finite_and_sanitizes_nonfinite() {
+        // Finite values pass through unchanged (including negatives and zero).
+        assert_eq!(Seconds::finite_or_zero(0.016).get(), 0.016);
+        assert_eq!(Seconds::finite_or_zero(-1.5).get(), -1.5);
+        assert_eq!(Seconds::finite_or_zero(0.0).get(), 0.0);
+        // The non-finite fallback maps to a finite zero.
+        assert_eq!(Seconds::finite_or_zero(f32::NAN).get(), 0.0);
+        assert_eq!(Seconds::finite_or_zero(f32::INFINITY).get(), 0.0);
+        assert_eq!(Seconds::finite_or_zero(f32::NEG_INFINITY).get(), 0.0);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { type EmitterConfig, UNBOUND_DRAW2D } from "./draw2d-binding.ts";
+import { type EmitterConfig, rangeOf, UNBOUND_DRAW2D } from "./draw2d-binding.ts";
 import type { Rgba } from "./vocabulary.ts";
 
 const RED: Rgba = [1, 0, 0, 1];
@@ -53,6 +53,19 @@ test("the inert UNBOUND_DRAW2D sprite + text verbs are safe no-ops", () => {
     UNBOUND_DRAW2D.draw2dSprite(1, { pos: { x: 0, y: 0 } });
     UNBOUND_DRAW2D.draw2dText("hi", { color: RED, font: { family: "monospace", size: 16 }, pos: { x: 0, y: 0 } });
   });
+});
+
+test("rangeOf resolves a scalar to the degenerate [v, v] and a tuple to [min, max]", () => {
+  // SPEC-04 §10.1: a scalar emitter field is the backward-compatible degenerate
+  // range; a [min, max] tuple passes both endpoints through unchanged.
+  assert.deepEqual(rangeOf(5), [5, 5]);
+  assert.deepEqual(rangeOf(0), [0, 0]);
+  assert.deepEqual(rangeOf([0.2, 0.8]), [0.2, 0.8]);
+  // A ranged emitter config type-checks and resolves each field to a pair.
+  const ranged: EmitterConfig = { ...emitterConfig, lifetimeSeconds: [1, 3], size: [0.2, 0.8], speed: [5, 15] };
+  assert.deepEqual(rangeOf(ranged.lifetimeSeconds), [1, 3]);
+  assert.deepEqual(rangeOf(ranged.speed), [5, 15]);
+  assert.deepEqual(rangeOf(ranged.size), [0.2, 0.8]);
 });
 
 test("the inert UNBOUND_DRAW2D measureText returns the inert zero extent", () => {

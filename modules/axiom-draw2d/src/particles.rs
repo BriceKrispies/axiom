@@ -15,7 +15,7 @@ use axiom_host::Rgba;
 use axiom_kernel::{DeterministicRng, Meters, Ratio, Seconds};
 use axiom_math::Vec2;
 
-use crate::ids::{EmitterConfig, EmitterId};
+use crate::ids::{EmitterConfig, EmitterId, Range};
 
 /// A floor on a particle's lifetime so the `age / lifetime` fade is always a
 /// finite division (a zero-lifetime config can never divide by zero).
@@ -26,9 +26,62 @@ const MIN_LIFETIME: f32 = 1.0e-6;
 const JITTER_SPAN: u64 = 2001;
 const JITTER_MID: f32 = 1000.0;
 
+/// The resolution of an in-range pick: a uniform integer draw in `0..PICK_SPAN`
+/// normalized to a `t ∈ [0, 1)` fraction. Large enough that distinct draws map to
+/// distinct fractions; the open upper end keeps the lerp inside `[min, max)` for a
+/// non-degenerate range (and exactly `min` for a degenerate `[v, v]`).
+const PICK_SPAN: u64 = 1 << 24;
+
 /// Mixes the emitter id into the per-emit seed so two emitters firing on the same
 /// call index still diverge.
 const EMIT_SEED_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
+
+/// A kernel quantity (a finite-scalar newtype) a [`Range`] can be picked across:
+/// it exposes its raw scalar and a **total** reconstruction from a computed one.
+/// Private to the module — the lint's no-naked-`f32` rule is a *public*-API rule,
+/// and this is the internal seam the deterministic pick lerps through, in one
+/// place, for every ranged emitter field.
+trait RangeQuantity: Copy {
+    /// The underlying finite scalar.
+    fn scalar(self) -> f32;
+    /// Reconstruct from a computed scalar, total (non-finite ⇒ zero).
+    fn from_scalar(value: f32) -> Self;
+}
+
+impl RangeQuantity for Seconds {
+    fn scalar(self) -> f32 {
+        self.get()
+    }
+    fn from_scalar(value: f32) -> Self {
+        Seconds::finite_or_zero(value)
+    }
+}
+
+impl RangeQuantity for Meters {
+    fn scalar(self) -> f32 {
+        self.get()
+    }
+    fn from_scalar(value: f32) -> Self {
+        Meters::finite_or_zero(value)
+    }
+}
+
+/// A fresh `t ∈ [0, 1)` fraction drawn from the deterministic generator — the
+/// per-particle pick parameter. Pure arithmetic over one integer draw.
+fn pick01(rng: &mut DeterministicRng) -> f32 {
+    rng.next_bounded(PICK_SPAN) as f32 / PICK_SPAN as f32
+}
+
+/// The value `range.min + t * (range.max - range.min)` — a branchless arithmetic
+/// lerp picked at fraction `t`. A degenerate `[v, v]` yields exactly `v` for any
+/// `t` (the span is zero); a `[min, max]` with `t ∈ [0, 1)` stays inside
+/// `[min, max)`. The single source of the deterministic in-range pick, shared by
+/// every ranged emitter field.
+fn pick<T: RangeQuantity>(range: Range<T>, t: f32) -> T {
+    let lo = range.min().scalar();
+    let hi = range.max().scalar();
+    T::from_scalar(lo + (hi - lo) * t)
+}
 
 /// One live particle. Carries everything its integration and fade need, so a step
 /// is a pure function of the particle and `dt`. Private: never crosses the facade.
@@ -102,10 +155,17 @@ fn lerp_ratio(a: Ratio, b: Ratio, t: f32) -> Ratio {
     Ratio::finite_or_zero(a.get() + (b.get() - a.get()) * t)
 }
 
-/// Spawn one particle from `config` at `at`, flying along `direction` at the
-/// config speed with a deterministic perpendicular jitter drawn from `rng`.
+/// Spawn one particle from `config` at `at`, flying along `direction`. Each of
+/// the particle's `speed`, `lifetime`, and `size` is **picked deterministically**
+/// in its `[min, max]` [`Range`] from `rng` (the seed is a pure function of the
+/// emit call index + emitter id), then the perpendicular jitter is drawn — so a
+/// burst's particles vary within their ranges yet a replay of the same emit
+/// reproduces them byte-for-byte. The draw order (speed, lifetime, size, jitter)
+/// is fixed, which is what makes the sequence reproducible.
 fn spawn(config: &EmitterConfig, at: Vec2, direction: Vec2, rng: &mut DeterministicRng) -> Particle {
-    let speed = config.speed.get();
+    let speed = pick(config.speed, pick01(rng)).get();
+    let lifetime = pick(config.lifetime, pick01(rng)).get();
+    let size = pick(config.size, pick01(rng));
     let along = direction.mul_scalar(speed);
     let perpendicular = Vec2::new(-direction.y, direction.x);
     let signed = (rng.next_bounded(JITTER_SPAN) as f32 - JITTER_MID) / JITTER_MID;
@@ -115,8 +175,8 @@ fn spawn(config: &EmitterConfig, at: Vec2, direction: Vec2, rng: &mut Determinis
         velocity: along.add(perpendicular.mul_scalar(jitter)),
         gravity: config.gravity,
         age: 0.0,
-        lifetime: config.lifetime.get().max(MIN_LIFETIME),
-        size: config.size,
+        lifetime: lifetime.max(MIN_LIFETIME),
+        size,
         color_start: config.color_start,
         color_end: config.color_end,
         layer: config.layer,
@@ -196,14 +256,23 @@ mod tests {
     fn config(count: u32, spread: f32) -> EmitterConfig {
         EmitterConfig {
             count,
-            lifetime: seconds(2.0),
-            speed: meters(10.0),
+            lifetime: Range::exact(seconds(2.0)),
+            speed: Range::exact(meters(10.0)),
             spread: ratio(spread),
             gravity: Vec2::new(0.0, -4.0),
-            size: meters(0.5),
+            size: Range::exact(meters(0.5)),
             color_start: rgba(1.0, 1.0),
             color_end: rgba(0.0, 0.0),
             layer: 1,
+        }
+    }
+
+    /// A config whose `size` spans a real `[min, max]` range, so a burst's
+    /// particles pick distinct, in-range quad sizes.
+    fn sized_config(count: u32, size_min: f32, size_max: f32) -> EmitterConfig {
+        EmitterConfig {
+            size: Range::new(meters(size_min), meters(size_max)),
+            ..config(count, 0.0)
         }
     }
 
@@ -276,6 +345,66 @@ mod tests {
         clean_field.advance(seconds(1.0));
         let clean_quads = clean_field.quads();
         assert_eq!(clean_quads[0].center, clean_quads[1].center);
+    }
+
+    #[test]
+    fn ranged_size_picks_distinct_in_range_values() {
+        // §10.1 ranged field: a burst from a `[0.5, 1.5]` size range gives each
+        // particle a deterministic in-range size — varied, never out of bounds.
+        let mut field = ParticleField::default();
+        let id = field.create_emitter(sized_config(8, 0.5, 1.5));
+        field.emit(id, Vec2::ZERO, Vec2::new(1.0, 0.0));
+        let sizes: Vec<f32> = field.quads().iter().map(|q| q.size.get()).collect();
+        // Every pick lands inside `[min, max)`.
+        assert!(
+            sizes.iter().all(|&s| (0.5..1.5).contains(&s)),
+            "every picked size is in range: {sizes:?}"
+        );
+        // The picks actually vary (not all the same value) — the range is used.
+        let first = sizes[0];
+        assert!(sizes.iter().any(|&s| s != first), "sizes vary across the burst: {sizes:?}");
+    }
+
+    #[test]
+    fn degenerate_range_picks_exactly_the_fixed_value() {
+        // A `[v, v]` range yields exactly `v` for every particle, whatever the rng
+        // draws — the backward-compatible scalar form (`Range::exact`).
+        let mut field = ParticleField::default();
+        let id = field.create_emitter(sized_config(5, 0.75, 0.75));
+        field.emit(id, Vec2::ZERO, Vec2::new(1.0, 0.0));
+        assert!(field.quads().iter().all(|q| q.size == meters(0.75)));
+    }
+
+    #[test]
+    fn ranged_picks_replay_byte_identically() {
+        // §6 determinism-as-function: the same emit reproduces the identical set
+        // of in-range picks (sizes here) on a second run.
+        let run = || {
+            let mut field = ParticleField::default();
+            let id = field.create_emitter(sized_config(8, 0.5, 1.5));
+            field.emit(id, Vec2::new(1.0, 2.0), Vec2::new(0.0, 1.0));
+            field.quads().iter().map(|q| q.size.get()).collect::<Vec<f32>>()
+        };
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn ranged_speed_and_lifetime_vary_motion_and_fade() {
+        // A `[5, 15]` speed range and `[1, 3]` lifetime range give two particles
+        // distinct integrated positions (speed) and distinct fades (lifetime).
+        let mut field = ParticleField::default();
+        let recipe = EmitterConfig {
+            speed: Range::new(meters(5.0), meters(15.0)),
+            lifetime: Range::new(seconds(1.0), seconds(3.0)),
+            ..config(2, 0.0)
+        };
+        let id = field.create_emitter(recipe);
+        field.emit(id, Vec2::ZERO, Vec2::new(1.0, 0.0));
+        field.advance(seconds(0.5));
+        let quads = field.quads();
+        // Distinct speeds ⇒ distinct +x travel; distinct lifetimes ⇒ distinct fade.
+        assert_ne!(quads[0].center.x, quads[1].center.x);
+        assert_ne!(quads[0].color, quads[1].color);
     }
 
     #[test]

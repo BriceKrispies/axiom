@@ -9,6 +9,46 @@ use axiom_host::{Rect, Rgba};
 use axiom_kernel::{Meters, Ratio, Seconds};
 use axiom_math::Vec2;
 
+/// An inclusive `[min, max]` range of a dimensioned quantity `T` (a kernel
+/// quantity newtype such as [`Seconds`] or [`Meters`]) — the value-typed form of
+/// the contract's `[min, max]` emitter fields (SPEC-04 §10.1). A burst draws each
+/// particle's lifetime / speed / size **deterministically** within its range; a
+/// single scalar `v` is the degenerate range [`Range::exact`] (`[v, v]`), so a
+/// fixed-value field needs no separate shape. Carries no behaviour — the
+/// in-range pick lives behind the [`crate::Draw2dApi`] particle system, the one
+/// place the deterministic source (the per-emit seed) is in hand.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Range<T> {
+    min: T,
+    max: T,
+}
+
+impl<T: Copy> Range<T> {
+    /// A range spanning `min`..=`max`.
+    pub const fn new(min: T, max: T) -> Self {
+        Range { min, max }
+    }
+
+    /// The degenerate range `[value, value]` — a fixed value carried as a range,
+    /// the backward-compatible form of a single scalar field.
+    pub const fn exact(value: T) -> Self {
+        Range {
+            min: value,
+            max: value,
+        }
+    }
+
+    /// The lower endpoint.
+    pub const fn min(self) -> T {
+        self.min
+    }
+
+    /// The upper endpoint.
+    pub const fn max(self) -> T {
+        self.max
+    }
+}
+
 /// A particle emitter registered with [`crate::Draw2dApi::create_emitter`]. A
 /// zero-based index into the builder's emitter table; only valid for the builder
 /// that minted it. Carries no behaviour — it is the noun [`crate::Draw2dApi::emit`]
@@ -31,24 +71,27 @@ impl EmitterId {
 /// A particle-emitter description (§10.1): the resolved, value-typed recipe a
 /// burst is spawned from. Every scalar is a kernel quantity newtype, never a
 /// naked float. A burst of `count` particles is spawned at the emit point, each
-/// flying along the emit direction at `speed`, perturbed perpendicular to it by
-/// up to `spread` of that speed (a deterministic per-particle jitter), pulled by
-/// `gravity`, drawn as a `size`-wide quad whose colour lerps `color_start` →
-/// `color_end` across its `lifetime`, on z-order `layer`.
+/// flying along the emit direction at a `speed` **picked deterministically in its
+/// range**, perturbed perpendicular to it by up to `spread` of that speed (a
+/// deterministic per-particle jitter), pulled by `gravity`, drawn as a `size`-wide
+/// quad (also a per-particle in-range pick) whose colour lerps `color_start` →
+/// `color_end` across its `lifetime` (likewise picked in range), on z-order
+/// `layer`. `lifetime` / `speed` / `size` are `[min, max]` [`Range`]s; a fixed
+/// value is the degenerate [`Range::exact`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EmitterConfig {
     /// How many particles a single [`crate::Draw2dApi::emit`] spawns.
     pub count: u32,
-    /// How long each particle lives (presentation seconds).
-    pub lifetime: Seconds,
-    /// Initial speed along the emit direction.
-    pub speed: Meters,
-    /// Perpendicular jitter as a fraction of `speed` (`0` = a clean jet).
+    /// Each particle's lifetime range (presentation seconds); picked per particle.
+    pub lifetime: Range<Seconds>,
+    /// The initial-speed range along the emit direction; picked per particle.
+    pub speed: Range<Meters>,
+    /// Perpendicular jitter as a fraction of the picked speed (`0` = a clean jet).
     pub spread: Ratio,
     /// Constant acceleration applied each step (e.g. downward gravity).
     pub gravity: Vec2,
-    /// The drawn quad's half-extent.
-    pub size: Meters,
+    /// The drawn quad's half-extent range; picked per particle.
+    pub size: Range<Meters>,
     /// Colour at birth (`age = 0`).
     pub color_start: Rgba,
     /// Colour at death (`age = lifetime`).
@@ -94,24 +137,38 @@ mod tests {
     }
 
     #[test]
+    fn range_new_exact_and_endpoints() {
+        // A two-endpoint range carries both bounds; `exact` is the degenerate
+        // [v, v] a scalar field collapses to.
+        let span = Range::new(Seconds::new(1.0).unwrap(), Seconds::new(3.0).unwrap());
+        assert_eq!(span.min(), Seconds::new(1.0).unwrap());
+        assert_eq!(span.max(), Seconds::new(3.0).unwrap());
+        let fixed = Range::exact(Meters::new(0.5).unwrap());
+        assert_eq!(fixed.min(), Meters::new(0.5).unwrap());
+        assert_eq!(fixed.max(), Meters::new(0.5).unwrap());
+        assert_eq!(fixed, Range::new(Meters::new(0.5).unwrap(), Meters::new(0.5).unwrap()));
+    }
+
+    #[test]
     fn emitter_config_preserves_its_parts() {
         let config = EmitterConfig {
             count: 8,
-            lifetime: Seconds::new(2.0).unwrap(),
-            speed: Meters::new(5.0).unwrap(),
+            lifetime: Range::new(Seconds::new(1.0).unwrap(), Seconds::new(2.0).unwrap()),
+            speed: Range::exact(Meters::new(5.0).unwrap()),
             spread: ratio(0.25),
             gravity: Vec2::new(0.0, -9.8),
-            size: Meters::new(0.5).unwrap(),
+            size: Range::new(Meters::new(0.5).unwrap(), Meters::new(1.5).unwrap()),
             color_start: rgba(1.0),
             color_end: rgba(0.0),
             layer: 3,
         };
         assert_eq!(config.count, 8);
-        assert_eq!(config.lifetime, Seconds::new(2.0).unwrap());
-        assert_eq!(config.speed, Meters::new(5.0).unwrap());
+        assert_eq!(config.lifetime.min(), Seconds::new(1.0).unwrap());
+        assert_eq!(config.lifetime.max(), Seconds::new(2.0).unwrap());
+        assert_eq!(config.speed, Range::exact(Meters::new(5.0).unwrap()));
         assert_eq!(config.spread, ratio(0.25));
         assert_eq!(config.gravity, Vec2::new(0.0, -9.8));
-        assert_eq!(config.size, Meters::new(0.5).unwrap());
+        assert_eq!(config.size.max(), Meters::new(1.5).unwrap());
         assert_eq!(config.color_start, rgba(1.0));
         assert_eq!(config.color_end, rgba(0.0));
         assert_eq!(config.layer, 3);

@@ -70,7 +70,7 @@ import {
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
 import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, TextureId, Transform, Vec2, Vec3 } from "./vocabulary.ts";
-import type { EllipseRadii, EmitterConfig, LineStyle, ShapeStyle, SpriteAnimation, SpriteOpts, TextMetrics, TextOpts } from "./draw2d-binding.ts";
+import { type EllipseRadii, type EmitterConfig, type LineStyle, type ShapeStyle, type SpriteAnimation, type SpriteOpts, type TextMetrics, type TextOpts, rangeOf } from "./draw2d-binding.ts";
 import type {
   HostBridge,
   MusicOptions,
@@ -536,17 +536,24 @@ const byteOf = (channel: number): number => Math.round(channel * CHANNEL_MAX);
 const packRgba = (color: Rgba): number =>
   [...color].reduce((packed, channel, index): number => packed + byteOf(channel) * pick(RGBA_SCALES, index), 0);
 
-/** Flatten an `EmitterConfig` to the boundary `[count, lifetime, speed, spread, gravityX, gravityY, size, colorStart, colorEnd, layer]` slice. */
+/*
+ * Flatten an `EmitterConfig` to the boundary `[count, lifetimeMin, lifetimeMax,
+ * speedMin, speedMax, spread, gravityX, gravityY, sizeMin, sizeMax, colorStart,
+ * colorEnd, layer]` slice. The ranged `lifetime` / `speed` / `size` fields (SPEC-04
+ * §10.1) each resolve through `rangeOf` to a `[min, max]` pair — a scalar `v`
+ * becomes the degenerate `[v, v]` — so the native builder does the deterministic
+ * in-range pick over both endpoints.
+ */
 const packEmitter = (config: EmitterConfig): Float64Array => {
   const gravity = orElse(config.gravity, NO_GRAVITY);
   return Float64Array.from([
     config.count,
-    config.lifetimeSeconds,
-    config.speed,
+    ...rangeOf(config.lifetimeSeconds),
+    ...rangeOf(config.speed),
     config.spread,
     gravity.x,
     gravity.y,
-    config.size,
+    ...rangeOf(config.size),
     packRgba(config.colorStart),
     packRgba(config.colorEnd),
     orElse(config.layer, DEFAULT_LAYER),
