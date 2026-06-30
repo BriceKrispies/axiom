@@ -75,6 +75,7 @@ test("the scene-query reads return empty collections / the origin cell / a null 
 
 test("the handle-minting authoring reads return a null handle", () => {
   assert.equal(UNBOUND_HOST_BASE.createMesh(), 0);
+  assert.equal(UNBOUND_HOST_BASE.createMeshData(), 0);
   assert.equal(UNBOUND_HOST_BASE.createMaterial(), 0);
   assert.equal(UNBOUND_HOST_BASE.addLight(), 0);
   assert.equal(UNBOUND_HOST_BASE.spawnRenderable(), 0);

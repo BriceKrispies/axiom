@@ -87,6 +87,7 @@ const FUNCTION_EXPORTS = [
   "addLight",
   "createMaterial",
   "createMesh",
+  "createMeshData",
   "setCamera3D",
   // netcode
   "bindNetTransport",

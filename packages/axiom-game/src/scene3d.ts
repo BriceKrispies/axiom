@@ -15,8 +15,8 @@
  * an unsafe cast) and `orElse`-defaulting to whichever channel is present.
  */
 
-import type { CameraDescriptor, ControllerSpec, LightDescriptor, MaterialDescriptor } from "./host-descriptors.ts";
-import type { Entity, Handle, Rgba, Transform, Vec3 } from "./vocabulary.ts";
+import type { CameraDescriptor, ControllerSpec, LightDescriptor, MaterialDescriptor, MeshDataDescriptor } from "./host-descriptors.ts";
+import type { Entity, Handle, Rgba, Transform, Vec2, Vec3 } from "./vocabulary.ts";
 import { boundHost } from "./host-binding.ts";
 import { orElse } from "./control-flow.ts";
 
@@ -28,6 +28,45 @@ const MESH_KINDS: readonly MeshKind[] = ["box", "sphere", "cylinder"];
 
 /** Create a primitive mesh, returning its opaque handle (SPEC-11 §4.2). */
 export const createMesh = (kind: MeshKind): Handle => boundHost().createMesh(MESH_KINDS.indexOf(kind));
+
+/**
+ * Author-supplied mesh geometry (SPEC-11 §4.2 / §11) — the non-catalog
+ * counterpart to a primitive [`MeshKind`]: one `positions` and one `normals`
+ * vector per vertex, an optional `uvs` (omit to default each vertex to the
+ * origin), and a triangle-list `indices` into the vertices.
+ */
+export interface MeshData {
+  /** The per-vertex positions. */
+  readonly positions: readonly Vec3[];
+  /** The per-vertex normals (one per position). */
+  readonly normals: readonly Vec3[];
+  /** The optional per-vertex UVs (omitted ⇒ origin per vertex). */
+  readonly uvs?: readonly Vec2[];
+  /** The triangle-list indices into the vertices. */
+  readonly indices: readonly number[];
+}
+
+/** The default UVs when an author omits them — the engine fills the origin per vertex. */
+const NO_UVS: readonly Vec2[] = [];
+
+/**
+ * Create a mesh from author-supplied vertex data, returning its opaque handle
+ * (SPEC-11 §11) — the same handle a primitive [`createMesh`] returns, so it
+ * spawns identically. A distinct function rather than a `createMesh` overload:
+ * discriminating a kind string from a data record at runtime would need a
+ * `typeof` branch, which the Branchless Law forbids; two named entry points keep
+ * each path branchless and fully typed. Malformed geometry resolves to the null
+ * handle engine-side.
+ */
+export const createMeshData = (data: MeshData): Handle => {
+  const descriptor: MeshDataDescriptor = {
+    indices: data.indices,
+    normals: data.normals,
+    positions: data.positions,
+    uvs: orElse(data.uvs, NO_UVS),
+  };
+  return boundHost().createMeshData(descriptor);
+};
 
 /** A lit-material description (SPEC-11 §4.2); emissive/roughness/opacity default engine-side. */
 export interface MaterialSpec {

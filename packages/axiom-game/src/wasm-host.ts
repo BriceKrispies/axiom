@@ -67,6 +67,7 @@ import {
   IDENTITY_MAT4,
   type LightDescriptor,
   type MaterialDescriptor,
+  type MeshDataDescriptor,
   type PerspectiveSpec,
 } from "./host-descriptors.ts";
 import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, TextureId, Transform, Vec2, Vec3 } from "./vocabulary.ts";
@@ -192,6 +193,18 @@ export interface WasmHostExport {
    * engine handle / light-node id it minted as a number.
    */
   readonly createMesh: (kind: string) => number;
+  /*
+   * Author-supplied mesh geometry (SPEC-11 §11): `positions` / `normals` cross as
+   * flat `[x,y,z,…]` `Float64Array` triples, `uvs` as flat `[u,v,…]` pairs (empty
+   * ⇒ origin per vertex), and `indices` as a `Uint32Array` triangle list. Returns
+   * the minted mesh handle (`0` when the geometry is malformed).
+   */
+  readonly createMeshData: (
+    positions: Float64Array,
+    normals: Float64Array,
+    uvs: Float64Array,
+    indices: Uint32Array,
+  ) => number;
   readonly createMaterial: (
     rgb: Float64Array,
     emissive: Float64Array,
@@ -323,6 +336,14 @@ const absent = <Value>(slot?: Value): Value | undefined => slot;
 
 /** Pack a `Vec3` into the boundary `[x, y, z]` slice. */
 const packVec3 = (vector: Vec3): Float64Array => Float64Array.from([vector.x, vector.y, vector.z]);
+
+/** Flatten a `Vec3[]` into the boundary `[x, y, z, …]` slice (author mesh positions / normals). */
+const flattenVec3 = (vectors: readonly Vec3[]): Float64Array =>
+  Float64Array.from(vectors.flatMap((vector): readonly number[] => [vector.x, vector.y, vector.z]));
+
+/** Flatten a `Vec2[]` into the boundary `[u, v, …]` slice (author mesh UVs). */
+const flattenVec2 = (vectors: readonly Vec2[]): Float64Array =>
+  Float64Array.from(vectors.flatMap((vector): readonly number[] => [vector.x, vector.y]));
 
 /** Pack a [`Transform`] into the native flat 10-tuple `[tx,ty,tz, qx,qy,qz,qw, sx,sy,sz]` slice the scene-node authoring boundary takes. */
 const packTransform = (transform: Transform): Float64Array =>
@@ -712,10 +733,23 @@ const assetBridge = (game: WasmHostExport): Pick<HostBridge, "loadTexture" | "lo
   loadTexture: (url: string): TextureId => game.loadTexture(url),
 });
 
-/** The 3D scene-authoring `HostBridge` ops (SPEC-11), forwarding to the native runtime scene authoring on `RunningApp` (`add_mesh` / `add_material` / `set_camera` / `add_light` / `spawn` / `set::<Transform>` / `set::<Bounds>` / `reauthor`). */
+/** The author-facing mesh-registration `HostBridge` ops (SPEC-11 §4.2/§11): a primitive by dense kind index, or author vertex data flattened to the boundary slices (positions/normals → `Float64Array` triples, uvs → pairs, indices → `Uint32Array`). Split from `scene3dBridge` to keep each forwarder group within the per-function line budget. */
+const meshAuthoringBridge = (game: WasmHostExport): Pick<HostBridge, "createMesh" | "createMeshData"> => ({
+  createMesh: (meshKind: number): Handle => game.createMesh(pick(MESH_NAMES, meshKind)),
+  createMeshData: (data: MeshDataDescriptor): Handle =>
+    game.createMeshData(
+      flattenVec3(data.positions),
+      flattenVec3(data.normals),
+      flattenVec2(data.uvs),
+      Uint32Array.from(data.indices),
+    ),
+});
+
+/** The 3D scene-authoring `HostBridge` ops (SPEC-11), forwarding to the native runtime scene authoring on `RunningApp` (`add_mesh` / `add_mesh_data` / `add_material` / `set_camera` / `add_light` / `spawn` / `set::<Transform>` / `set::<Bounds>` / `reauthor`). The mesh-registration ops are composed in from `meshAuthoringBridge`. */
 const scene3dBridge = (game: WasmHostExport): Pick<
   HostBridge,
   | "createMesh"
+  | "createMeshData"
   | "createMaterial"
   | "setCamera3D"
   | "addLight"
@@ -725,7 +759,7 @@ const scene3dBridge = (game: WasmHostExport): Pick<
   | "clearScene"
   | "createController"
   | "controlFirstPerson"
-> => ({
+> => Object.assign(meshAuthoringBridge(game), {
   // Directional arm only: the native `add_light` mints a `DirectionalLight` (the `kind` discriminant is dropped — see header).
   addLight: (light: LightDescriptor): Entity =>
     game.addLight(packVec3(light.vector), packRgb(light.color), light.intensity),
@@ -740,7 +774,6 @@ const scene3dBridge = (game: WasmHostExport): Pick<
   // Full catalog surface: base colour + emissive (linear `[r,g,b]`) + roughness + opacity, all threaded to the native lit material (see header).
   createMaterial: (material: MaterialDescriptor): Handle =>
     game.createMaterial(packRgb(material.baseColor), packRgb(material.emissive), material.roughness, material.opacity),
-  createMesh: (meshKind: number): Handle => game.createMesh(pick(MESH_NAMES, meshKind)),
   // Eye position + look-at target + degree FOV + near/far: the native `set_camera` aims from position toward target (world up = +Y — see header).
   setCamera3D: (camera: CameraDescriptor): void => {
     game.setCamera3D(

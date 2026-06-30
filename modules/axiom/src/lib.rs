@@ -27,6 +27,7 @@ mod frame_outcome;
 mod handle;
 mod material;
 mod mesh;
+mod mesh_data;
 mod mesh_geometry;
 mod player;
 mod point_light;

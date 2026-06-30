@@ -34,7 +34,8 @@ use crate::directional_light::DirectionalLight;
 use crate::handle::Handle;
 use crate::material::Material;
 use crate::mesh::Mesh;
-use crate::mesh_geometry::mesh_geometry;
+use crate::mesh_data::{MeshData, MeshDataError};
+use crate::mesh_geometry::{mesh_data_geometry, mesh_geometry};
 
 impl RunningApp {
     /// Register `mesh` into the running app's resolved-geometry store and return a
@@ -46,6 +47,26 @@ impl RunningApp {
         let id = self.meshes.len() as u64 + 1;
         self.meshes.push((id, mesh_geometry(&mesh)));
         Handle::new(id)
+    }
+
+    /// Register author-supplied [`MeshData`] (explicit positions / normals /
+    /// optional UVs / triangle indices) into the running app's resolved-geometry
+    /// store and return a stable [`Handle<Mesh>`] addressing it — the non-catalog
+    /// counterpart to [`Self::add_mesh`]. The geometry is validated (finite
+    /// coordinates, one normal per vertex, optional UVs matching the vertex count,
+    /// a non-empty in-range triangle-list) and threaded through the SAME
+    /// `axiom-resources` resolution the built-in primitives use, so the returned
+    /// handle is interchangeable with a primitive's in a [`crate::prelude::Spawn`].
+    /// Malformed geometry returns the offending [`MeshDataError`] and registers
+    /// nothing (the store is left untouched).
+    pub fn add_mesh_data(&mut self, data: MeshData) -> Result<Handle<Mesh>, MeshDataError> {
+        // Register only on a clean resolve; `Result::map` keeps the registration
+        // off the error arm without an `if`/`match` (branchless).
+        mesh_data_geometry(&data).map(|geometry| {
+            let id = self.meshes.len() as u64 + 1;
+            self.meshes.push((id, geometry));
+            Handle::new(id)
+        })
     }
 
     /// Register `material` into the running app's material store and return a
@@ -149,6 +170,7 @@ impl RunningApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_math::Vec2;
     use crate::angle::Angle;
     use crate::app::App;
     use crate::camera::PerspectiveProjection;
@@ -216,6 +238,79 @@ mod tests {
         let mesh_set = app.mesh_set();
         assert_eq!(mesh_set.len(), 2);
         assert_ne!(mesh_set[0].0, mesh_set[1].0);
+    }
+
+    /// A unit quad authored from explicit vertex data (4 verts, 2 triangles).
+    fn quad_mesh_data() -> MeshData {
+        MeshData::new(
+            vec![
+                Vec3::new(-0.5, -0.5, 0.0),
+                Vec3::new(0.5, -0.5, 0.0),
+                Vec3::new(0.5, 0.5, 0.0),
+                Vec3::new(-0.5, 0.5, 0.0),
+            ],
+            vec![Vec3::new(0.0, 0.0, 1.0); 4],
+            vec![
+                Vec2::new(0.0, 0.0),
+                Vec2::new(1.0, 0.0),
+                Vec2::new(1.0, 1.0),
+                Vec2::new(0.0, 1.0),
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        )
+    }
+
+    #[test]
+    fn add_mesh_data_registers_author_geometry_that_spawns_and_renders() {
+        // SPEC-11 §9 end-to-end: a mesh authored from explicit vertices reaches
+        // the resolved store and renders as just-another-triangle-set, on the same
+        // rails as a catalog primitive.
+        let mut app = empty_render_app();
+        let quad = app
+            .add_mesh_data(quad_mesh_data())
+            .expect("the authored quad is valid geometry");
+        let white = app.add_material(Material::lit(Color::linear_rgb(ch(1.0), ch(1.0), ch(1.0))));
+
+        app.spawn(Spawn::new(Transform::IDENTITY, quad, white));
+        // The authored node draws exactly like a primitive node.
+        assert_eq!(app.tick(0).draws().len(), 1, "the authored mesh renders");
+
+        // The author's own geometry reached the resolved upload set: 4 vertices
+        // (×12 interleaved floats) and 6 indices — NOT a catalog primitive's
+        // counts, proving the author data was not dropped/ignored.
+        let mesh_set = app.mesh_set();
+        assert_eq!(mesh_set.len(), 1);
+        assert_eq!(mesh_set[0].1.len(), 4 * 12, "4 authored vertices uploaded");
+        assert_eq!(mesh_set[0].2, vec![0, 1, 2, 0, 2, 3], "authored indices intact");
+    }
+
+    #[test]
+    fn add_mesh_data_handle_interleaves_with_primitive_handles() {
+        // An author mesh and a catalog primitive share one 1-based handle space,
+        // so they are interchangeable in a spawn.
+        let mut app = empty_render_app();
+        let cube = app.add_mesh(Mesh::cube());
+        let quad = app
+            .add_mesh_data(quad_mesh_data())
+            .expect("the authored quad is valid geometry");
+        assert_eq!(cube.id(), 1);
+        assert_eq!(quad.id(), 2);
+        assert_eq!(app.mesh_set().len(), 2);
+    }
+
+    #[test]
+    fn add_mesh_data_rejects_malformed_geometry_and_registers_nothing() {
+        // A malformed author mesh (an out-of-range index) is rejected with the
+        // precise error and leaves the store untouched — no half-registered mesh.
+        let mut app = empty_render_app();
+        let bad = MeshData::new(
+            vec![Vec3::ZERO, Vec3::UNIT_X, Vec3::UNIT_Y],
+            vec![Vec3::UNIT_Z, Vec3::UNIT_Z, Vec3::UNIT_Z],
+            vec![],
+            vec![0, 1, 7],
+        );
+        assert_eq!(app.add_mesh_data(bad), Err(MeshDataError::IndexOutOfRange));
+        assert!(app.mesh_set().is_empty(), "a rejected mesh registers nothing");
     }
 
     #[test]

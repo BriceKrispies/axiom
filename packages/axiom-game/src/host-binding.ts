@@ -24,6 +24,7 @@ import type {
   GridField,
   LightDescriptor,
   MaterialDescriptor,
+  MeshDataDescriptor,
   PerspectiveSpec,
 } from "./host-descriptors.ts";
 import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, PlayerId, Quat, RayHit, Rect, Result, TextureId, Transform, Vec2, Vec3 } from "./vocabulary.ts";
@@ -174,6 +175,8 @@ export interface HostBridge extends Draw2dBridge, UiBridge {
   // 3D scene authoring (SPEC-11): mesh/material/camera/light marshal to the existing scene/render facades; handles are opaque, kinds are dense table indices the projection resolves from the contract's string discriminant.
   /** Create a primitive mesh by its dense kind index (0=box, 1=sphere, 2=cylinder); return its handle. */
   readonly createMesh: (meshKind: number) => Handle;
+  /** Create a mesh from author-supplied vertex data (positions/normals/uvs/indices); return its handle. */
+  readonly createMeshData: (data: MeshDataDescriptor) => Handle;
   /** Create a lit material from its resolved descriptor; return its handle. */
   readonly createMaterial: (material: MaterialDescriptor) => Handle;
   /** Build the perspective camera node (look-at + intrinsics) from its descriptor. */

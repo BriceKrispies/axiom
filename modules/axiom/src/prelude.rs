@@ -55,6 +55,7 @@ pub use crate::frame_outcome::{DrawData, FrameOutcome};
 pub use crate::handle::Handle;
 pub use crate::material::Material;
 pub use crate::mesh::Mesh;
+pub use crate::mesh_data::{MeshData, MeshDataError};
 pub use crate::player::{Player, PlayerInput};
 pub use crate::point_light::PointLight;
 pub use crate::procanim::ProcAnim;
