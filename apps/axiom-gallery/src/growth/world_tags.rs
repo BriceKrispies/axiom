@@ -12,7 +12,9 @@
 //!
 //! Native + `agent` feature only (it imports the `agent`-gated deps).
 
+use axiom_agent_harness::AgentHarnessApi;
 use axiom_introspect::WorldTag;
+use axiom_kernel::Meters;
 use serde::Deserialize;
 
 use crate::growth::ground::GroundSim;
@@ -26,10 +28,11 @@ pub const KIND_SPAWN: u16 = 3;
 /// An unclassified point of interest.
 pub const KIND_OTHER: u16 = 0;
 
-/// A world-unit `f32` as fixed-point micro-units (the engine's tag/observation
-/// coordinate convention — millionths of a world unit).
+/// A world-unit `f32` as fixed-point micro-units, through the harness's own codec
+/// ([`AgentHarnessApi::micro`]) — the single source of the tag/observation
+/// coordinate convention (millionths of a world unit).
 fn micro(value: f32) -> i64 {
-    (f64::from(value) * 1_000_000.0) as i64
+    AgentHarnessApi::micro(Meters::finite_or_zero(value))
 }
 
 /// Map an authored kind name to its coarse code (the app owns the vocabulary).

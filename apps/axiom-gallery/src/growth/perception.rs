@@ -42,11 +42,6 @@ const MARCH_STEP_M: f32 = 10.0;
 /// builds it.
 type Fact = (u16, u32, i64, i64, i64, i64);
 
-/// One micro-unit per millionth of a metre — the fixed-point fact convention.
-fn metres(micro: i64) -> f32 {
-    micro as f32 / 1_000_000.0
-}
-
 /// A ray probe struck rising ground: which probe, how far ahead (metres), and the
 /// absolute terrain height there (metres).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -147,64 +142,29 @@ fn march(sim: &GroundSim, eye: Vec3, dir: Vec3) -> Option<(f32, Vec3)> {
     })
 }
 
-/// Sense the heightfield through `axiom-perception`: cast the ray-fan (by marching
-/// the terrain), cull the landmarks to the view cone, and produce the neutral
-/// facts. Returns the facts (for any agent observation) — the [`Sight`] is decoded
-/// from them by [`decode`].
-fn sense(sim: &GroundSim, eye: Vec3, forward: Vec3) -> Vec<Fact> {
-    let fov = Radians::new(FOV_RADIANS).expect("authored fov is finite");
-    let reach = Meters::new(SIGHT_RANGE_M).expect("authored sight range is finite");
-    let mut facts: Vec<Fact> = Vec::new();
-
-    // Ray-fan probes: march the terrain along each direction; rising ground is a
-    // geometric obstacle fact (probe + hit point + distance).
-    for (probe, dir) in PerceptionApi::ray_fan(forward, fov, RAY_COUNT)
-        .into_iter()
-        .enumerate()
-    {
-        if let Some((distance, point)) = march(sim, eye, dir) {
-            let metres = Meters::new(distance).expect("a finite march distance");
-            facts.push(PerceptionApi::obstacle_fact(probe as u32, point, metres));
-        }
-    }
-
-    // Visible landmarks: cull on the *horizontal* bearing (ground-project each to
-    // the eye height, so a towering nearby summit is not pushed out of the cone by
-    // its altitude), then emit a visible fact carrying its true position and kind.
-    let marks = landmarks(sim);
-    let projected: Vec<(u32, Vec3)> = marks
-        .iter()
-        .map(|m| (m.id, Vec3::new(m.pos.x, eye.y, m.pos.z)))
-        .collect();
-    for (id, _) in PerceptionApi::in_view(eye, forward, fov, reach, &projected) {
-        if let Some(mark) = marks.iter().find(|m| m.id == id) {
-            facts.push(PerceptionApi::visible_fact(id, mark.pos, mark.kind));
-        }
-    }
-    facts
-}
-
 /// Decode the neutral facts back into a readable [`Sight`] — the consumer side of
-/// the contract (what a brain reads off the observation).
+/// the contract (what a brain reads off the observation). The tuple layout is
+/// owned by `axiom-perception`; this only maps its decoded fields into the growth
+/// app's own `Obstacle` / `Visible` vocabulary (and interprets the raw kind).
 fn decode(facts: &[Fact]) -> Sight {
     let obstacles: Vec<Obstacle> = facts
         .iter()
-        .filter(|f| f.0 == PerceptionApi::FACT_OBSTACLE)
-        .map(|f| Obstacle {
-            probe: f.1,
-            distance_m: metres(f.5),
-            height_m: metres(f.3),
+        .filter_map(|&f| PerceptionApi::decode_obstacle(f))
+        .map(|(probe, hit, distance)| Obstacle {
+            probe,
+            distance_m: distance.get(),
+            height_m: hit.y,
         })
         .collect();
     let ahead = obstacles.iter().copied().find(|o| o.probe == RAY_COUNT / 2);
     let visible: Vec<Visible> = facts
         .iter()
-        .filter(|f| f.0 == PerceptionApi::FACT_VISIBLE)
-        .map(|f| Visible {
-            subject: f.1,
-            x: metres(f.2),
-            z: metres(f.4),
-            kind: f.5 as u32,
+        .filter_map(|&f| PerceptionApi::decode_visible(f))
+        .map(|(subject, pos, kind)| Visible {
+            subject,
+            x: pos.x,
+            z: pos.z,
+            kind,
         })
         .collect();
     Sight {
@@ -216,13 +176,33 @@ fn decode(facts: &[Fact]) -> Sight {
 
 /// Perceive a ground sim's world this tick: cast the ray-fan against the
 /// heightfield and cull its landmarks, returning the decoded [`Sight`]. The whole
-/// of the sensor model is `axiom-perception`; this only supplies the heightfield
-/// probe.
+/// of the sensor orchestration — ray-fan, view-cone cull, fact assembly — is
+/// `axiom-perception`'s [`PerceptionApi::sense_with_probe`]; growth supplies only
+/// the heightfield **probe** ([`march`]) and its **landmarks**.
 pub fn sense_sim(sim: &GroundSim) -> Sight {
     let (x, z, _yaw, _pitch) = sim.pose();
     let eye = Vec3::new(x, sim.eye_height_m(), z);
     let (fx, fz) = sim.forward_xz();
-    decode(&sense(sim, eye, Vec3::new(fx, 0.0, fz)))
+    let forward = Vec3::new(fx, 0.0, fz);
+    let fov = Radians::new(FOV_RADIANS).expect("authored fov is finite");
+    let reach = Meters::new(SIGHT_RANGE_M).expect("authored sight range is finite");
+    let marks: Vec<(u32, Vec3, u32)> = landmarks(sim)
+        .iter()
+        .map(|m| (m.id, m.pos, m.kind))
+        .collect();
+    let facts = PerceptionApi::sense_with_probe(
+        eye,
+        forward,
+        fov,
+        reach,
+        RAY_COUNT,
+        |dir| {
+            march(sim, eye, dir)
+                .map(|(distance, point)| (Meters::new(distance).expect("a finite march distance"), point))
+        },
+        &marks,
+    );
+    decode(&facts)
 }
 
 #[cfg(test)]
