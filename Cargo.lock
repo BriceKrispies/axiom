@@ -267,6 +267,7 @@ dependencies = [
  "axiom-recording",
  "axiom-runtime",
  "axiom-space",
+ "axiom-streaming",
  "axiom-windowing",
  "bytemuck",
  "console_error_panic_hook",
@@ -670,6 +671,10 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
 ]
+
+[[package]]
+name = "axiom-streaming"
+version = "0.1.0"
 
 [[package]]
 name = "axiom-terrain"

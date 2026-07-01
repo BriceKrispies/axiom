@@ -1,0 +1,23 @@
+[package]
+name = "axiom-streaming"
+description = "Axiom engine module: a payload-agnostic chunk-residency ring over an integer 2-D lattice. Owns Residency (which coordinates are resident) and the deterministic load/unload delta it computes as a focus point moves — the reusable substrate behind every streamed, focus-radius world. Pure integer coordinates in, deterministically-ordered ResidencyDelta out; the module never sees the payload a coordinate carries."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No layer, no browser API, no engine state: the ring is a pure
+# function of (resident set, center, radius, margin, is_dirty), so it runs and is
+# tested on native exactly as it drives the web.
+crate-type = ["rlib"]
+
+# An *isolated engine module* (kind = "engine-module", allowed_modules = []): it
+# composes NO other module. It is a pure integer-lattice capability — the resident
+# coordinate set is a BTreeSet and the coordinate is a plain `i32` newtype — so it
+# genuinely builds on NO layer (allowed_layers = []) and declares no engine deps.
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

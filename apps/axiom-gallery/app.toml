@@ -35,6 +35,7 @@ allowed_modules = [
     "agent",
     "agent-harness",
     "perception",
+    "streaming",
     "gpu-backend",
     "canvas2d-backend",
 ]

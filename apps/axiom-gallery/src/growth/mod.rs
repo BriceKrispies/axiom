@@ -83,7 +83,7 @@ pub mod inventory;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
-use crate::growth::chunkstore::{ChunkStore, STREAM_RADIUS_CHUNKS};
+use crate::growth::chunkstore::{ChunkStore, STREAM_RADIUS_CHUNKS, STREAM_UNLOAD_MARGIN};
 use crate::growth::genome::PlanetGenome;
 use crate::growth::ids::ChunkCoord;
 use crate::growth::inventory::Inventory;
@@ -179,9 +179,10 @@ impl Growth {
         let localmap = GameWorldLocalMap::anchored(&self.atlas);
         let mut diffs = Vec::new();
         let center = ChunkCoord::default();
-        self.store.request(
+        self.store.stream(
             center,
             STREAM_RADIUS_CHUNKS,
+            STREAM_UNLOAD_MARGIN,
             &self.atlas,
             &localmap,
             self.seed.value,
@@ -201,16 +202,15 @@ impl Growth {
             return diffs;
         }
         if let Some(localmap) = &self.localmap {
-            self.store.request(
+            self.store.stream(
                 center,
                 STREAM_RADIUS_CHUNKS,
+                STREAM_UNLOAD_MARGIN,
                 &self.atlas,
                 localmap,
                 self.seed.value,
                 &mut diffs,
             );
-            self.store
-                .unload_far(center, STREAM_RADIUS_CHUNKS, 1, &mut diffs);
             self.last_center = center;
         }
         diffs

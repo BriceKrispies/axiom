@@ -1,22 +1,38 @@
-//! Authoritative streamed-chunk store with focus-radius load/unload and edit
-//! preservation. Audit: GW vision, GW-E3 (persist edits), GW-E9 (sim unload).
+//! Authoritative streamed-chunk store: pairs the reusable residency ring
+//! (`axiom_streaming::Residency`) with the app-owned chunk payloads.
+//!
+//! The ring owns *which* coordinates are resident and the deterministic
+//! load/unload delta as the focus moves; this store owns *what* each resident
+//! coordinate holds (its generated [`Chunk`] heights + edit state) and turns the
+//! ring's delta into the app's presentation [`Diff`]s. Audit: GW vision, GW-E3
+//! (persist edits), GW-E9 (sim unload).
 use std::collections::HashMap;
 
-use crate::growth::ids::ChunkCoord;
+use axiom_streaming::{ChunkCoord, Residency};
+
 use crate::growth::model_planet::PlanetSurfaceAtlas;
 use crate::growth::model_world::{Chunk, Diff, GameWorldLocalMap};
 
 /// Stream radius in chunks. Audit: GW (k_stream_radius_chunks).
 pub const STREAM_RADIUS_CHUNKS: i32 = 2;
 
+/// Eviction hysteresis: a chunk is only unloaded once it is beyond
+/// `STREAM_RADIUS_CHUNKS + STREAM_UNLOAD_MARGIN`, so a player pacing across a
+/// chunk boundary does not thrash-reload. Audit: GW-E9.
+pub const STREAM_UNLOAD_MARGIN: i32 = 1;
+
 #[derive(Debug, Default)]
 pub struct ChunkStore {
+    /// Which coordinates are resident + the load/unload delta authority.
+    residency: Residency,
+    /// The payload for each resident coordinate (heights + edit state).
     loaded: HashMap<ChunkCoord, Chunk>,
 }
 
 impl ChunkStore {
     pub fn new() -> Self {
         Self {
+            residency: Residency::new(),
             loaded: HashMap::new(),
         }
     }
@@ -33,52 +49,37 @@ impl ChunkStore {
         self.loaded.get_mut(&coord)
     }
 
-    /// Ensure chunks within `radius` of `center` are loaded; emit ChunkLoaded
-    /// diffs for newly generated ones. Preserves edited chunks. Audit: GW-E3.
-    pub fn request(
+    /// Stream chunks for a new focus `center`: load the coordinates the residency
+    /// ring newly admits (generating each [`Chunk`] payload and emitting a
+    /// `ChunkLoaded`), and unload the coordinates it evicts beyond
+    /// `radius + margin` (dropping the payload and emitting a `ChunkUnloaded`).
+    /// Edited chunks are marked dirty to the ring, so they are never evicted.
+    /// Audit: GW-E3 (persist edits), GW-E9 (sim unload).
+    pub fn stream(
         &mut self,
         center: ChunkCoord,
         radius: i32,
+        margin: i32,
         atlas: &PlanetSurfaceAtlas,
         localmap: &GameWorldLocalMap,
         seed: u64,
         out: &mut Vec<Diff>,
     ) {
-        for dz in -radius..=radius {
-            for dx in -radius..=radius {
-                let c = ChunkCoord::new(center.x + dx, center.z + dz);
-                if self.loaded.contains_key(&c) {
-                    continue;
-                }
-                let chunk = crate::growth::gameworld::generate_chunk(c, atlas, localmap, seed);
-                out.push(Diff::ChunkLoaded {
-                    coord: c,
-                    heights: chunk.height_samples.clone(),
-                });
-                self.loaded.insert(c, chunk);
-            }
+        let loaded = &self.loaded;
+        let delta = self.residency.apply(center, radius, margin, |c| {
+            loaded.get(&c).map(|ch| ch.edited).unwrap_or(false)
+        });
+        for coord in delta.load {
+            let chunk = crate::growth::gameworld::generate_chunk(coord, atlas, localmap, seed);
+            out.push(Diff::ChunkLoaded {
+                coord,
+                heights: chunk.height_samples.clone(),
+            });
+            self.loaded.insert(coord, chunk);
         }
-    }
-
-    /// Unload chunks outside `radius + margin`; preserve edited ones. Audit: GW-E9.
-    pub fn unload_far(
-        &mut self,
-        center: ChunkCoord,
-        radius: i32,
-        margin: i32,
-        out: &mut Vec<Diff>,
-    ) {
-        let keep = radius + margin;
-        let mut remove = Vec::new();
-        for (&c, chunk) in &self.loaded {
-            let outside = (c.x - center.x).abs() > keep || (c.z - center.z).abs() > keep;
-            if outside && !chunk.edited {
-                remove.push(c);
-            }
-        }
-        for c in remove {
-            self.loaded.remove(&c);
-            out.push(Diff::ChunkUnloaded { coord: c });
+        for coord in delta.unload {
+            self.loaded.remove(&coord);
+            out.push(Diff::ChunkUnloaded { coord });
         }
     }
 }

@@ -1,0 +1,35 @@
+# Axiom module manifest — axiom-streaming (an ENGINE module).
+#
+# The residency ring: a payload-agnostic resident-coordinate set over an integer
+# 2-D lattice, and the deterministic load/unload delta it computes as a focus
+# point (a player, a camera, a stream anchor) moves. This is the reusable
+# substrate every streamed, focus-radius world stands on — the ring the growth
+# game's chunk streamer graduated out of.
+#
+# It is an ISOLATED engine module: it composes no other module
+# (`allowed_modules = []`) and never touches a browser API (Module Law #9). Its
+# whole behavioral surface is one facade, `Residency`; `ChunkCoord` and
+# `ResidencyDelta` are the pure value-type vocabulary it hands back and takes in
+# (the `pub use ids::{…}` carve-out), carrying data, not engine state.
+#
+# Why a module, not a layer or kernel addition: a residency ring is a runtime
+# capability apps compose, not an always-true engine primitive (it is domain-
+# shaped, so it fails the kernel bar), and no lower layer genuinely *uses* it, so
+# wedging it into the spine would manufacture a ceremonial edge. It is exactly an
+# isolated capability with one facade. It builds on NO layer — the ring is pure
+# integer-lattice logic (a `BTreeSet` of `i32` coordinates) — so `allowed_layers`
+# is empty rather than carrying a ceremonial dependency.
+
+[module]
+name = "streaming"
+crate_name = "axiom-streaming"
+kind = "engine-module"
+
+allowed_layers = []
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "residency-ring",
+    "chunk-streaming-delta",
+]
