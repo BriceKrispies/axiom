@@ -318,10 +318,26 @@ export async function bootDemo() {
   titleEl.textContent = demo.title;
   document.title = "Axiom — " + demo.title;
 
+  // Embed mode: this page is one pane of the backend-comparison triptych
+  // (loaded in an iframe as `demo.html?...&embed=1&backend=<b>`). The parent
+  // triptych owns the chrome — the title bar, the on-screen keypad, the control
+  // bars, and the single input authority that mirrors keystrokes/pointer to all
+  // three panes — so an embedded pane renders ONLY the canvas and suppresses all
+  // of that. It also skips the debug overlay (three stacked overlays would be
+  // noise). The `backend` param is read by the engine itself (axiom-windowing),
+  // so each pane binds its pinned backend with no extra wiring here.
+  const embed = params.get("embed") === "1";
+  if (embed) {
+    document.body.classList.add("embed");
+  }
+
   // Mount the developer debug overlay over this shared-shell demo (press ` to
   // open it). Fire-and-forget so it never blocks or breaks the demo — it even
-  // mounts when the demo itself can't start (e.g. no WebGPU available).
-  mountDebugOverlay();
+  // mounts when the demo itself can't start (e.g. no WebGPU available). Skipped
+  // for an embedded pane (the parent triptych owns one shared surface).
+  if (!embed) {
+    mountDebugOverlay();
+  }
 
   // The canvas the engine binds its surface to; id must match the Rust app.
   const canvas = document.createElement("canvas");
@@ -330,17 +346,18 @@ export async function bootDemo() {
   canvas.height = 600;
   stage.appendChild(canvas);
 
-  if (demo.buttons.length > 0) {
+  // The keypad and control bars belong to the parent triptych in embed mode.
+  if (!embed && demo.buttons.length > 0) {
     renderKeypad(keypad, demo.buttons);
   }
 
   const relay = params.get("relay");
-  if (demo.needsRelay) {
+  if (!embed && demo.needsRelay) {
     mountRelayBar(document.getElementById("controls"), demo, relay);
   }
 
   const cubeCount = demo.cubeStress ? readCubeCount(params) : null;
-  if (demo.cubeStress) {
+  if (!embed && demo.cubeStress) {
     mountCubeBar(document.getElementById("controls"), demo, cubeCount);
   }
 

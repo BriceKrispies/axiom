@@ -10,6 +10,7 @@
     <header class="site">
       <h1>Axiom Demos</h1>
       <p>WebAssembly demos of the Axiom engine. Prefers WebGPU (recent Chrome/Edge, Android Chrome, or iOS Safari 18.2+) and falls back to WebGL2 elsewhere.</p>
+      <p>Shared-shell demos open as a three-backend comparison — the same scene rendered through WebGPU, WebGL2, and Canvas2D at once, with your input mirrored across all three.</p>
     </header>
 
     <main class="grid" id="grid"></main>
@@ -21,11 +22,13 @@
       for (const demo of DEMOS) {
         const card = document.createElement("a");
         card.className = "card";
-        // Self-hosted demos (demo.page) link to their own page; the rest open in
-        // the shared per-demo shell.
+        // Self-hosted demos (demo.page) link to their own bespoke page; the rest
+        // open in the backend-comparison triptych (three panes, one per backend,
+        // input mirrored). A single-backend view is still reachable directly via
+        // demo.html?id=<demo>.
         card.href = demo.page
           ? `./${demo.page}`
-          : `./demo.html?id=${encodeURIComponent(demo.id)}`;
+          : `./triptych.html?id=${encodeURIComponent(demo.id)}`;
 
         const h2 = document.createElement("h2");
         h2.textContent = demo.title;
@@ -35,7 +38,7 @@
 
         const open = document.createElement("span");
         open.className = "open";
-        open.textContent = "Open demo →";
+        open.textContent = demo.page ? "Open demo →" : "Compare backends →";
 
         card.append(h2, p, open);
         grid.appendChild(card);

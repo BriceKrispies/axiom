@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Backend Comparison</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="triptych">
+    <div class="demo-top">
+      <a class="back" href="./index.html" aria-label="Back to gallery">←</a>
+      <h1 id="demo-title">Backend Comparison</h1>
+    </div>
+
+    <main class="demo">
+      <div class="panes" id="panes"></div>
+      <div id="controls"></div>
+      <div id="keypad"></div>
+      <div id="status" class="status">booting three backends…</div>
+    </main>
+
+    <script type="module">
+      import { bootTriptych } from "./triptych.js";
+      bootTriptych();
+    </script>
+  </body>
+</html>

@@ -77,11 +77,24 @@ impl LiveGpuBinding {
     /// `JsValue`.
     /// Backend selection (see docs/render-fallback.md): a browser canvas can host
     /// exactly one context type, so the backend must be chosen *before* the
-    /// surface is created. We first probe a WebGPU adapter via `navigator.gpu`
-    /// (no canvas context needed); if one exists we present through WebGPU, and if
-    /// it does not we fall back to wgpu's WebGL2 backend. The same shared
-    /// [`SceneRenderer`], shaders, and instancing run unchanged on either, since
-    /// the renderer is already held to `downlevel_webgl2_defaults` limits.
+    /// surface is created. `preference` decides which graphics API is bound:
+    ///
+    /// * `None` — **auto**: probe a WebGPU adapter+device via `navigator.gpu` (no
+    ///   canvas context needed); if one is live we present through WebGPU, else we
+    ///   fall back to wgpu's WebGL2 backend. This is the default the run loop uses.
+    /// * `Some(BackendKind::GpuPrimary)` — **WebGPU only**: bind WebGPU, and if no
+    ///   WebGPU device is available return `Err` rather than falling back — so a
+    ///   caller comparing backends sees an honest failure instead of a silent
+    ///   downgrade.
+    /// * `Some(BackendKind::GpuFallback)` — **WebGL2 only**: skip WebGPU entirely
+    ///   and bind wgpu's GL backend.
+    /// * `Some(BackendKind::Canvas2d)` — never reaches here (the software arm is
+    ///   selected in `axiom-windowing` before a GPU backend is built); treated as
+    ///   auto for totality.
+    ///
+    /// The same shared [`SceneRenderer`], shaders, and instancing run unchanged on
+    /// either GPU arm, since the renderer is held to `downlevel_webgl2_defaults`
+    /// limits.
     #[allow(clippy::too_many_arguments)]
     pub async fn initialize(
         canvas: HtmlCanvasElement,
@@ -93,7 +106,12 @@ impl LiveGpuBinding {
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
+        preference: Option<axiom_host::BackendKind>,
     ) -> Result<LiveGpuBinding, JsValue> {
+        use axiom_host::BackendKind;
+        // WebGL2-only skips the WebGPU probe; WebGPU-only forbids the GL fallback.
+        let webgl2_only = matches!(preference, Some(BackendKind::GpuFallback));
+        let webgpu_only = matches!(preference, Some(BackendKind::GpuPrimary));
         let width = width.max(1);
         let height = height.max(1);
         // The scene renders at the device tier's resolution (`render_size`),
@@ -114,30 +132,41 @@ impl LiveGpuBinding {
             backends: wgpu::Backends::BROWSER_WEBGPU,
             ..Default::default()
         });
-        let webgpu_ready = match webgpu
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: None,
-            })
-            .await
-        {
-            Ok(adapter) => request_render_device(&adapter)
+        // Skip the WebGPU probe entirely when WebGL2 was explicitly requested.
+        let webgpu_ready = match webgl2_only {
+            true => None,
+            false => match webgpu
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    force_fallback_adapter: false,
+                    compatible_surface: None,
+                })
                 .await
-                .ok()
-                .map(|(device, queue)| (adapter, device, queue)),
-            Err(_) => None,
+            {
+                Ok(adapter) => request_render_device(&adapter)
+                    .await
+                    .ok()
+                    .map(|(device, queue)| (adapter, device, queue)),
+                Err(_) => None,
+            },
         };
 
-        // WebGPU if its device is live, else WebGL2. Each arm creates the surface
-        // on the instance whose backend it committed to (the canvas context is
-        // acquired there), so the two never contend for the one context slot.
+        // WebGPU if its device is live, else WebGL2 — unless WebGPU was demanded,
+        // in which case a missing device is a hard error (no silent downgrade).
+        // Each arm creates the surface on the instance whose backend it committed
+        // to (the canvas context is acquired there), so the two never contend for
+        // the one context slot.
         let (surface, adapter, device, queue) = match webgpu_ready {
             Some((adapter, device, queue)) => {
                 let surface = webgpu
                     .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
                     .map_err(|e| JsValue::from_str(&format!("create_surface failed: {e}")))?;
                 (surface, adapter, device, queue)
+            }
+            None if webgpu_only => {
+                return Err(JsValue::from_str(
+                    "WebGPU backend requested but no WebGPU device is available",
+                ));
             }
             None => {
                 let gl = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -184,7 +213,22 @@ impl LiveGpuBinding {
         // forbids any view whose format differs from the texture's). When the
         // surface format is already non-sRGB the view format equals it and the
         // extra entry is harmless.
-        let draw2d_format = format.remove_srgb_suffix();
+        //
+        // A distinct swapchain view format requires the `SURFACE_VIEW_FORMATS`
+        // downlevel capability, which some WebGL2 devices lack (notably headless
+        // swiftshader). Configuring a distinct view there is a hard error, so when
+        // the device can't do it we drop back to the surface's own format for the
+        // 2D view: the 2D pass then writes through the sRGB view (a minor colour
+        // difference on that path only, on downlevel devices only) instead of
+        // aborting the whole backend. This is exactly what lets the WebGL2
+        // comparison pane bind on more devices rather than crash.
+        let supports_view_formats = adapter
+            .get_downlevel_capabilities()
+            .flags
+            .contains(wgpu::DownlevelFlags::SURFACE_VIEW_FORMATS);
+        let draw2d_format = supports_view_formats
+            .then(|| format.remove_srgb_suffix())
+            .unwrap_or(format);
         let view_formats = (draw2d_format != format)
             .then(|| vec![draw2d_format])
             .unwrap_or_default();
