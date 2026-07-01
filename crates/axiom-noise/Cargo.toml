@@ -1,0 +1,15 @@
+[package]
+name = "axiom-noise"
+description = "Axiom layer: deterministic coherent (Perlin-style gradient) noise + fractal Brownian motion (FBM) with domain warp, for procedural worldgen. The integer lattice is keyed by the kernel's StableHash (no bespoke RNG/mixer) and positions/gradients are axiom-math Vec3, so the same seed + point always yields the same value on every run and platform. depends_on = kernel + math."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-math = { path = "../axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

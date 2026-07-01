@@ -1,0 +1,56 @@
+# Axiom layer manifest — axiom-noise.
+#
+# The coherent-noise layer: deterministic 3D gradient (Perlin-style) noise, its
+# multi-octave fractal Brownian motion (FBM), and domain warp — the procedural
+# field primitive worldgen samples for elevation/moisture/detail. This is where
+# the noise that lived ad hoc in an app graduates into a reusable, spine-tested
+# engine home. Because engine modules may depend only on LAYERS (never on another
+# module), the shared noise primitive is a layer, not a module — a terrain/biome
+# module can build on it.
+#
+# depends_on = kernel + math, and both are genuinely adapted:
+#   * kernel — StableHash keys the integer lattice cells (seed + (xi,yi,zi) folded
+#     into one FNV-1a digest, replacing any bespoke splitmix mixer), and the typed
+#     scalar Ratio types the FBM gain in [0,1]. No new RNG, no ambient entropy, no
+#     wall clock: the determinism is the kernel's, keyed here.
+#   * math — Vec3 is the sample position AND the per-cell gradient vector; the dot
+#     product of gradient with corner offset is the noise value.
+
+[layer]
+name = "noise"
+crate_name = "axiom-noise"
+depends_on = ["kernel", "math"]
+
+meaningful_dependency = """
+Noise adapts the kernel's StableHash (canonical-bytes FNV-1a digest) and math's
+Vec3 into a deterministic coherent-noise field: value_noise hashes
+(seed, xi, yi, zi) lattice coordinates through StableHash to pick a per-cell Vec3
+gradient, dots it against the fractional Vec3 offset, and quintic-interpolates the
+eight cell corners; Fbm sums octaves of that field, scaling frequency by a
+Lacunarity and amplitude by a kernel Ratio (gain) each octave, then normalizes to
+a NoiseValue in [-1,1]. It introduces no new randomness and no platform state; it
+keys the kernel's existing digest by a math position, so the same seed + point is
+identical on every run and platform.
+"""
+
+introduced_capabilities = [
+    "value_noise",
+    "Fbm",
+    "FbmConfig",
+    "NoiseValue",
+    "Frequency",
+    "Lacunarity",
+    "WarpStrength",
+]
+consumed_capabilities = ["StableHash", "Ratio", "Vec3"]
+
+# Proof the dependencies are genuine. value_noise's body dots a per-cell Vec3
+# gradient against a Vec3 offset (proves math); Fbm keys its lattice + per-octave
+# seeds through StableHash (proves kernel).
+[[proof_exports]]
+export = "value_noise"
+must_reference = ["Vec3"]
+
+[[proof_exports]]
+export = "Fbm"
+must_reference = ["StableHash"]

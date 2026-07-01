@@ -9,8 +9,8 @@
 
 use crate::growth::ids::RegionId;
 use crate::growth::model_planet::PlanetGlobe;
-use crate::growth::noise::Fbm;
 use crate::growth::pipeline::{GenContext, Stage};
+use axiom_noise::{Fbm, FbmConfig, Frequency};
 
 /// Height added at a plate boundary (mountain ridge / island arc).
 const BOUNDARY_UPLIFT: f32 = 0.55;
@@ -33,7 +33,13 @@ impl Stage for ElevationStage {
             globe.region_elevation.resize(region_count, 0.0);
         }
 
-        let fbm = Fbm::new(ctx.seed ^ 0x_E1E7_A710, DETAIL_OCTAVES, DETAIL_FREQUENCY);
+        let fbm = Fbm::new(
+            ctx.seed ^ 0x_E1E7_A710,
+            FbmConfig::new(
+                DETAIL_OCTAVES,
+                Frequency::new(DETAIL_FREQUENCY).expect("DETAIL_FREQUENCY is finite"),
+            ),
+        );
 
         // Boundary uplift falls off with how many neighbours share the plate:
         // an isolated seam region is a peak; an interior region is unchanged.
@@ -58,7 +64,7 @@ impl Stage for ElevationStage {
 
         for (r, &up) in uplift.iter().enumerate() {
             let site = globe.topology.sites[r];
-            let detail = fbm.sample(site) * DETAIL_AMPLITUDE;
+            let detail = fbm.sample(site).get() * DETAIL_AMPLITUDE;
             globe.region_elevation[r] += up + detail;
         }
 
