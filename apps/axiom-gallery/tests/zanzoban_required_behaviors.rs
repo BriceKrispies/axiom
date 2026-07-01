@@ -4,17 +4,17 @@
 
 use std::collections::BTreeSet;
 
-use axiom_gallery::roomed_puzzle::actor_state::ActorKind;
-use axiom_gallery::roomed_puzzle::coord::GridCoord;
-use axiom_gallery::roomed_puzzle::direction::Direction;
-use axiom_gallery::roomed_puzzle::game_command::PuzzleCommand;
-use axiom_gallery::roomed_puzzle::game_state::{PuzzleGameState, TICKS_PER_SECOND};
-use axiom_gallery::roomed_puzzle::game_step::{run, step};
-use axiom_gallery::roomed_puzzle::ghost_replay::GHOST_STEP_TICKS;
-use axiom_gallery::roomed_puzzle::group_id::GroupId;
-use axiom_gallery::roomed_puzzle::level_definition::{Button, Door, LevelDefinition};
-use axiom_gallery::roomed_puzzle::level_validation::validate_level;
-use axiom_gallery::roomed_puzzle::{level_codec, LEVEL_001_TOML};
+use axiom_gallery::zanzoban::actor_state::ActorKind;
+use axiom_gallery::zanzoban::coord::GridCoord;
+use axiom_gallery::zanzoban::direction::Direction;
+use axiom_gallery::zanzoban::game_command::PuzzleCommand;
+use axiom_gallery::zanzoban::game_state::{PuzzleGameState, TICKS_PER_SECOND};
+use axiom_gallery::zanzoban::game_step::{run, step};
+use axiom_gallery::zanzoban::ghost_replay::GHOST_STEP_TICKS;
+use axiom_gallery::zanzoban::group_id::GroupId;
+use axiom_gallery::zanzoban::level_definition::{Button, Door, LevelDefinition};
+use axiom_gallery::zanzoban::level_validation::validate_level;
+use axiom_gallery::zanzoban::{level_codec, LEVEL_001_TOML};
 
 /// entrance(0) · button(1) · floor(2) · door(3) · exit(4) — width 5, height 1.
 /// The button and door are not adjacent, so the door cannot be solo-crossed.

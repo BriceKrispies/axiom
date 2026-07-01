@@ -30,9 +30,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::roomed_puzzle::coord::GridCoord;
-use crate::roomed_puzzle::group_id::GroupId;
-use crate::roomed_puzzle::level_definition::{Button, Door, LevelDefinition};
+use crate::zanzoban::coord::GridCoord;
+use crate::zanzoban::group_id::GroupId;
+use crate::zanzoban::level_definition::{Button, Door, LevelDefinition};
 
 /// A failure encoding or decoding a level.
 #[derive(Debug, Clone, PartialEq, Eq)]

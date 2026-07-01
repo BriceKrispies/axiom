@@ -9,7 +9,7 @@
 //! ## Time
 //!
 //! The app runs a 60-tick/second fixed step ([`TICKS_PER_SECOND`]). A ghost
-//! takes one recorded move every [`crate::roomed_puzzle::ghost_replay::GHOST_STEP_TICKS`] ticks
+//! takes one recorded move every [`crate::zanzoban::ghost_replay::GHOST_STEP_TICKS`] ticks
 //! (== 0.5 s). The clock is the kernel's, so the tick the simulation runs on is
 //! the kernel's `Tick`, not an ad-hoc counter.
 //!
@@ -33,13 +33,13 @@ use std::collections::BTreeSet;
 
 use axiom_kernel::{FixedStep, ReplayTimeline, SimulationClock};
 
-use crate::roomed_puzzle::actor_state::{ActorId, ActorState};
-use crate::roomed_puzzle::coord::GridCoord;
-use crate::roomed_puzzle::direction::Direction;
-use crate::roomed_puzzle::game_command::{PuzzleStepResult, StepKind};
-use crate::roomed_puzzle::ghost_replay::GhostReplay;
-use crate::roomed_puzzle::group_id::GroupId;
-use crate::roomed_puzzle::level_definition::LevelDefinition;
+use crate::zanzoban::actor_state::{ActorId, ActorState};
+use crate::zanzoban::coord::GridCoord;
+use crate::zanzoban::direction::Direction;
+use crate::zanzoban::game_command::{PuzzleStepResult, StepKind};
+use crate::zanzoban::ghost_replay::GhostReplay;
+use crate::zanzoban::group_id::GroupId;
+use crate::zanzoban::level_definition::LevelDefinition;
 
 /// The app's fixed simulation rate: 60 ticks per second.
 pub const TICKS_PER_SECOND: u32 = 60;
@@ -343,8 +343,8 @@ fn build_cells(level: &LevelDefinition) -> Vec<Cell> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomed_puzzle::ghost_replay::GHOST_STEP_TICKS;
-    use crate::roomed_puzzle::level_definition::{Button, Door};
+    use crate::zanzoban::ghost_replay::GHOST_STEP_TICKS;
+    use crate::zanzoban::level_definition::{Button, Door};
 
     /// A tiny 5×1 corridor: entrance(0) · button(1) · floor(2) · door(3) · exit(4).
     /// (Height 1 keeps the geometry trivial for unit tests.)

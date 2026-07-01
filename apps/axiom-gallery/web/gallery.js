@@ -105,8 +105,8 @@ export const DEMOS = [
     page: "growth/index.html",
   },
   {
-    id: "roomed-puzzle",
-    title: "Roomed Puzzle",
+    id: "zanzoban",
+    title: "Zanzoban",
     blurb: "Leave ghosts of your past runs on the buttons, then walk the live block through the doors they open.",
     desc:
       "A deterministic top-down grid puzzle on the engine. Walk a block one cell " +
@@ -116,8 +116,8 @@ export const DEMOS = [
       "is to leave a ghost on the button and walk the live block through. " +
       "Includes an in-browser level editor + playtest with TOML import/export.",
     // Self-hosted: the editor/playtest flow (canvas + TOML textarea + validation
-    // panel) owns its own page, copied into dist/roomed-puzzle/ by the assembler.
-    page: "roomed-puzzle/index.html",
+    // panel) owns its own page, copied into dist/zanzoban/ by the assembler.
+    page: "zanzoban/index.html",
   },
   {
     id: "quintet",

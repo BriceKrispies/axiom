@@ -1,13 +1,13 @@
 //! The commands that drive the deterministic game core, and the result of one.
 //!
-//! Every change to a [`crate::roomed_puzzle::game_state::PuzzleGameState`] goes through exactly
+//! Every change to a [`crate::zanzoban::game_state::PuzzleGameState`] goes through exactly
 //! one [`PuzzleCommand`]. The four commands are the whole interface: three are
 //! player intents (`Move`, `q`, `r`) and one is the fixed-step clock tick that
 //! advances ghost replay. Applying a command returns a [`PuzzleStepResult`]
 //! describing what happened — enough for the presentation layer to react without
 //! re-deriving state.
 
-use crate::roomed_puzzle::direction::Direction;
+use crate::zanzoban::direction::Direction;
 
 /// A single command applied to the game state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

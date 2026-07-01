@@ -1,8 +1,8 @@
 //! The in-browser (WASM) editor + playtest surface — **`wasm32` only**.
 //!
 //! A thin 2D-`<canvas>` adapter over the pure, deterministic core
-//! ([`crate::roomed_puzzle::app::RoomedPuzzleApp`]). It renders the neutral
-//! [`crate::roomed_puzzle::render_model::RenderModel`] with top-down depth cues, routes DOM
+//! ([`crate::zanzoban::app::ZanzobanApp`]). It renders the neutral
+//! [`crate::zanzoban::render_model::RenderModel`] with top-down depth cues, routes DOM
 //! input into core commands, and runs the fixed-step tick loop — and that is
 //! *all* it does. Every gameplay rule, every validation, and the level format
 //! live in the browser-free core; this file makes no decisions of its own. It is
@@ -43,14 +43,14 @@ use web_sys::{
     PointerEvent,
 };
 
-use crate::roomed_puzzle::actor_state::ActorKind;
-use crate::roomed_puzzle::app::{Mode, RoomedPuzzleApp};
-use crate::roomed_puzzle::game_command::PuzzleCommand;
-use crate::roomed_puzzle::game_state::TICKS_PER_SECOND;
-use crate::roomed_puzzle::group_id::GroupId;
-use crate::roomed_puzzle::input_mapping::command_for_swipe;
-use crate::roomed_puzzle::render_model::{Elevation, RenderActor, RenderTile};
-use crate::roomed_puzzle::tile_kind::TileKind;
+use crate::zanzoban::actor_state::ActorKind;
+use crate::zanzoban::app::{Mode, ZanzobanApp};
+use crate::zanzoban::game_command::PuzzleCommand;
+use crate::zanzoban::game_state::TICKS_PER_SECOND;
+use crate::zanzoban::group_id::GroupId;
+use crate::zanzoban::input_mapping::command_for_swipe;
+use crate::zanzoban::render_model::{Elevation, RenderActor, RenderTile};
+use crate::zanzoban::tile_kind::TileKind;
 
 /// The board canvas element id (must match `web/index.html`).
 const CANVAS_ID: &str = "axiom-puzzle-canvas";
@@ -69,7 +69,7 @@ const MAX_TICKS_PER_FRAME: u32 = 8;
 thread_local! {
     /// The single app instance, shared across the DOM callbacks (single-threaded
     /// wasm, so a plain `RefCell` is enough).
-    static APP: RefCell<RoomedPuzzleApp> = RefCell::new(RoomedPuzzleApp::new());
+    static APP: RefCell<ZanzobanApp> = RefCell::new(ZanzobanApp::new());
 
     /// The engine input state (swipe scheme), shared across the pointer
     /// callbacks. Holds the in-progress gesture's state between events.
@@ -94,7 +94,7 @@ const NODE_PANEL: u32 = 2;
 
 /// Log a line to the browser console, prefixed so it is easy to spot.
 fn log(msg: &str) {
-    web_sys::console::log_1(&JsValue::from_str(&format!("[roomed-puzzle] {msg}")));
+    web_sys::console::log_1(&JsValue::from_str(&format!("[zanzoban] {msg}")));
 }
 
 fn window() -> web_sys::Window {
@@ -116,7 +116,7 @@ fn canvas_context() -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
 /// handler, and the fixed-step run loop, then draw the first frame. Called from
 /// the page once the wasm module is ready.
 #[wasm_bindgen]
-pub fn roomed_start() {
+pub fn zanzoban_start() {
     console_error_panic_hook::set_once();
     install_canvas_click();
     install_keyboard();
@@ -567,7 +567,7 @@ fn read_safe_area_insets() -> HostSafeAreaInsets {
 }
 
 /// Draw the current frame (edit grid or live game) onto the board canvas.
-fn draw(app: &RoomedPuzzleApp) {
+fn draw(app: &ZanzobanApp) {
     let Some((canvas, ctx)) = canvas_context() else {
         return;
     };
@@ -674,7 +674,7 @@ fn draw_actor(ctx: &CanvasRenderingContext2d, actor: &RenderActor) {
 }
 
 /// The validation summary text for the current editor state.
-fn validation_summary(app: &RoomedPuzzleApp) -> String {
+fn validation_summary(app: &ZanzobanApp) -> String {
     let report = app.editor().validate();
     if report.is_valid() {
         "Level is valid — you can playtest.".to_string()

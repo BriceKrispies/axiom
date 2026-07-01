@@ -20,11 +20,11 @@
 
 use axiom_kernel::{ReplayTimeline, TickDivider};
 
-use crate::roomed_puzzle::direction::Direction;
+use crate::zanzoban::direction::Direction;
 
 /// Ticks between a ghost's recorded moves: one move per 0.5 s at the app's
 /// 60-tick/second fixed step (`60 / 2 == 30`). The relationship to the fixed
-/// step is asserted in `crate::roomed_puzzle::game_state`'s tests, which own the tick rate.
+/// step is asserted in `crate::zanzoban::game_state`'s tests, which own the tick rate.
 pub const GHOST_STEP_TICKS: u32 = 30;
 
 /// An immutable recorded path plus a fixed-step replay cursor, built from the

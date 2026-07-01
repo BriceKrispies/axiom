@@ -1,4 +1,4 @@
-# Roomed Puzzle — Level 001: "Button Door"
+# Zanzoban — Level 001: "Button Door"
 #
 # A 10x10 room. A wall partition at column x=7 seals off the exit corridor
 # (column x=8); the door at (7,5) is the ONLY gap in that partition, so the exit

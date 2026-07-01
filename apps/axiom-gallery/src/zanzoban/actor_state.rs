@@ -6,7 +6,7 @@
 //! (the player from input, a ghost from a recorded path) and how they are drawn
 //! (ghosts are translucent). [`ActorState`] is the shared positional state.
 
-use crate::roomed_puzzle::coord::GridCoord;
+use crate::zanzoban::coord::GridCoord;
 
 /// What kind of solid actor this is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

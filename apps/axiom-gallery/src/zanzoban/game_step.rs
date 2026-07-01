@@ -6,8 +6,8 @@
 //! "apply a command here" door for the playtest session, the browser shell, and
 //! the tests to share.
 
-use crate::roomed_puzzle::game_command::{PuzzleCommand, PuzzleStepResult};
-use crate::roomed_puzzle::game_state::PuzzleGameState;
+use crate::zanzoban::game_command::{PuzzleCommand, PuzzleStepResult};
+use crate::zanzoban::game_state::PuzzleGameState;
 
 /// Apply one command to the state and return what happened. Deterministic: the
 /// result and the new state are a pure function of the prior state and the
@@ -30,10 +30,10 @@ pub fn run(state: &mut PuzzleGameState, commands: &[PuzzleCommand]) -> Vec<Puzzl
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomed_puzzle::coord::GridCoord;
-    use crate::roomed_puzzle::direction::Direction;
-    use crate::roomed_puzzle::group_id::GroupId;
-    use crate::roomed_puzzle::level_definition::{Button, Door, LevelDefinition};
+    use crate::zanzoban::coord::GridCoord;
+    use crate::zanzoban::direction::Direction;
+    use crate::zanzoban::group_id::GroupId;
+    use crate::zanzoban::level_definition::{Button, Door, LevelDefinition};
 
     fn corridor() -> LevelDefinition {
         LevelDefinition {
@@ -62,19 +62,19 @@ mod tests {
         let reset = step(&mut s, PuzzleCommand::ResetLifeFromRecording);
         assert!(matches!(
             reset.kind,
-            crate::roomed_puzzle::game_command::StepKind::LifeReset
+            crate::zanzoban::game_command::StepKind::LifeReset
         ));
         assert_eq!(s.ghost_count(), 1);
         let restart = step(&mut s, PuzzleCommand::RestartLevelFresh);
         assert!(matches!(
             restart.kind,
-            crate::roomed_puzzle::game_command::StepKind::LevelRestarted
+            crate::zanzoban::game_command::StepKind::LevelRestarted
         ));
         assert_eq!(s.ghost_count(), 0);
         let ticked = step(&mut s, PuzzleCommand::Tick);
         assert!(matches!(
             ticked.kind,
-            crate::roomed_puzzle::game_command::StepKind::Ticked { .. }
+            crate::zanzoban::game_command::StepKind::Ticked { .. }
         ));
     }
 

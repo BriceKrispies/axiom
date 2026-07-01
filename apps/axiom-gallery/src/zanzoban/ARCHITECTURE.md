@@ -1,11 +1,11 @@
-# axiom-roomed-puzzle — Architecture
+# axiom-zanzoban — Architecture
 
 A deterministic top-down 2D grid puzzle with ghost replay, built as an Axiom
 **app**.
 
 ## Architectural placement
 
-This is an **app** (`apps/axiom-roomed-puzzle/`, classified by `app.toml`) — a
+This is an **app** (`apps/axiom-zanzoban/`, classified by `app.toml`) — a
 composition leaf. It is **not** a kernel change, **not** a new engine layer, and
 **not** a reusable engine module. Per the Axiom Module Law, apps are the only
 leaf composition roots; nothing depends on them, and they are exempt from the
@@ -14,7 +14,7 @@ rules, level format, editor, ghost replay, orchestration — lives here and is n
 pushed down into a layer or module.
 
 ```
-apps/axiom-roomed-puzzle/
+apps/axiom-zanzoban/
 ├── app.toml                 # classifies this crate as an app
 ├── Cargo.toml               # deps: axiom-kernel + toml/serde (+ wasm-only browser crates)
 ├── levels/001-button-door.toml
@@ -37,7 +37,7 @@ apps/axiom-roomed-puzzle/
 │   ├── input_mapping.rs     # key string → PuzzleCommand
 │   ├── editor_model.rs      # edit-mode model (paint, validate, TOML I/O)
 │   ├── playtest_model.rs    # playtest-mode model
-│   ├── app.rs               # RoomedPuzzleApp — edit ⟷ playtest mode machine
+│   ├── app.rs               # ZanzobanApp — edit ⟷ playtest mode machine
 │   └── web.rs               # wasm32-only 2D-canvas + DOM shell
 └── web/index.html           # the page chrome that drives the wasm
 ```

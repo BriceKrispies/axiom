@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Axiom — Roomed Puzzle</title>
+    <title>Axiom — Zanzoban</title>
     <style>
       :root { color-scheme: dark; }
       html, body {
@@ -135,7 +135,7 @@
     <script type="module">
       const v = Date.now();
       const wasm = await import(`../axiom-loader.js?v=${v}`);
-      const wasmUrl = new URL(`./pkg/axiom_roomed_puzzle_bg.wasm?v=${v}`, import.meta.url);
+      const wasmUrl = new URL(`./pkg/axiom_zanzoban_bg.wasm?v=${v}`, import.meta.url);
       const boot = document.getElementById("boot");
       try {
         await wasm.default({ module_or_path: wasmUrl });
@@ -144,7 +144,7 @@
         boot.style.color = "#e07a7a";
         throw e;
       }
-      wasm.roomed_start();
+      wasm.zanzoban_start();
       boot.style.display = "none";
 
       // --- Palette selection ---

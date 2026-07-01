@@ -1,4 +1,4 @@
-# Roomed Puzzle — Level Format
+# Zanzoban — Level Format
 
 Levels are plain, hand-editable **TOML** (no bespoke format). The schema is small
 and is round-tripped by `src/level_codec.rs` (`to_toml` / `from_toml`). The

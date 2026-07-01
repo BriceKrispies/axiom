@@ -1,4 +1,4 @@
-//! Phase 1 — stored golden capture for the deterministic Roomed-Puzzle game.
+//! Phase 1 — stored golden capture for the deterministic Zanzoban game.
 //!
 //! The puzzle core is pure and deterministic: time is the kernel's
 //! `SimulationClock` and ghost replay is driven by a recorded path, so a fixed
@@ -15,14 +15,14 @@
 
 use std::path::PathBuf;
 
-use axiom_gallery::roomed_puzzle::actor_state::ActorState;
-use axiom_gallery::roomed_puzzle::game_command::PuzzleCommand;
-use axiom_gallery::roomed_puzzle::{level_codec, Direction, PuzzleGameState, LEVEL_001_TOML};
+use axiom_gallery::zanzoban::actor_state::ActorState;
+use axiom_gallery::zanzoban::game_command::PuzzleCommand;
+use axiom_gallery::zanzoban::{level_codec, Direction, PuzzleGameState, LEVEL_001_TOML};
 
 fn golden_path(name: &str) -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     p.push("tests");
-    p.push("roomed_puzzle/golden");
+    p.push("zanzoban/golden");
     p.push(format!("{name}.bin"));
     p
 }
@@ -34,7 +34,7 @@ fn assert_golden(name: &str, actual: &[u8]) {
         Some(expected) if !force => assert_eq!(
             actual,
             expected.as_slice(),
-            "golden mismatch for `{name}` ({} vs {} bytes): Roomed-Puzzle output \
+            "golden mismatch for `{name}` ({} vs {} bytes): Zanzoban output \
              drifted. If intended, re-capture (delete the golden or set \
              AXIOM_REGOLD=1).",
             actual.len(),
@@ -74,8 +74,8 @@ fn encode_actor(out: &mut Vec<u8>, a: &ActorState) {
     out.extend_from_slice(&a.id.raw().to_le_bytes());
     // kind: 0 = player, 1 = ghost.
     out.push(match a.kind {
-        axiom_gallery::roomed_puzzle::actor_state::ActorKind::Player => 0,
-        axiom_gallery::roomed_puzzle::actor_state::ActorKind::Ghost => 1,
+        axiom_gallery::zanzoban::actor_state::ActorKind::Player => 0,
+        axiom_gallery::zanzoban::actor_state::ActorKind::Ghost => 1,
     });
     out.extend_from_slice(&a.position.x.to_le_bytes());
     out.extend_from_slice(&a.position.y.to_le_bytes());
@@ -118,8 +118,8 @@ fn run_script() -> Vec<u8> {
 }
 
 #[test]
-fn golden_roomed_puzzle_trajectory() {
-    assert_golden("roomed_puzzle_trajectory", &run_script());
+fn golden_zanzoban_trajectory() {
+    assert_golden("zanzoban_trajectory", &run_script());
 }
 
 #[test]

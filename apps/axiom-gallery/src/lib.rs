@@ -21,7 +21,7 @@ pub mod netplay;
 pub mod retro_fps;
 pub mod stress_cubes;
 pub mod growth;
-pub mod roomed_puzzle;
+pub mod zanzoban;
 pub mod quintet;
 pub mod physics_crucible;
 pub mod harness;
