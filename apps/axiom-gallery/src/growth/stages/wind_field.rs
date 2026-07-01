@@ -10,7 +10,8 @@
 //!
 //! Writes unit `region_wind` (the tangent direction the wind blows toward).
 
-use crate::growth::geo::{latitude, tangent_basis};
+use axiom_math::{latitude, tangent_basis};
+
 use crate::growth::model_planet::PlanetGlobe;
 use crate::growth::pipeline::{GenContext, Stage};
 
@@ -35,7 +36,7 @@ impl Stage for WindFieldStage {
 
         for r in 0..region_count {
             let site = globe.topology.sites[r];
-            let lat = latitude(site);
+            let lat = latitude(site).get();
             let abs_lat = lat.abs();
             let (east, north) = tangent_basis(site);
 

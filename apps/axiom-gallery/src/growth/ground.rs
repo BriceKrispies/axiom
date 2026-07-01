@@ -15,10 +15,10 @@
 //! movement axes and reads back the pose and **height**.
 
 use axiom::prelude::*;
+use axiom_kernel::Radians;
 use axiom_math::Quat;
 
 use crate::growth::gameworld::sample_height_m_lod_vista;
-use crate::growth::geo;
 use crate::growth::model_planet::PlanetSurfaceAtlas;
 use crate::growth::model_world::GameWorldLocalMap;
 use crate::growth::presets::PlanetPreset;
@@ -43,7 +43,10 @@ pub fn ch(value: f32) -> Ratio {
 pub fn map_pick_to_dir(u: f32, v: f32) -> Vec3 {
     let lat = std::f32::consts::FRAC_PI_2 - v.clamp(0.0, 1.0) * std::f32::consts::PI;
     let lon = -std::f32::consts::PI + u.clamp(0.0, 1.0) * std::f32::consts::TAU;
-    geo::unit_dir_from_lat_lon(lat, lon)
+    axiom_math::unit_dir_from_lat_lon(
+        Radians::new(lat).expect("map-pick latitude is finite"),
+        Radians::new(lon).expect("map-pick longitude is finite"),
+    )
 }
 
 /// The walking player's authoritative state (owned by the app, not the engine's

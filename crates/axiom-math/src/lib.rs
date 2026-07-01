@@ -5,10 +5,17 @@
 //! planes, and frusta that every later engine layer will build on.
 //!
 //! ## Public surface
-//! `lib.rs` exposes exactly one public item: [`MathApi`]. Every internal
-//! module file owns exactly one primary public type and lives behind a
-//! private `mod`. Callers reach every math capability through the [`MathApi`]
-//! facade.
+//! The behavioral facade is [`MathApi`], and alongside it `lib.rs` re-exports
+//! the workhorse value types (`Vec3`, `Quat`, `Mat4`, geometry primitives, …)
+//! future layers must be able to *name*. The one exception to "one primary
+//! public type per module" is [`mod@geo`], a small set of spherical / geodesic
+//! *free functions* over unit directions ([`latitude`], [`longitude`],
+//! [`great_circle_distance`], [`tangent_basis`], [`unit_dir_from_lat_lon`],
+//! [`slerp`]): they are pure transforms of `Vec3` directions and kernel
+//! angle/ratio quantities, with no type of their own to hang them on, so callers
+//! name them directly (`axiom_math::latitude(dir)`). Every internal module lives
+//! behind a private `mod`; the curated public set is pinned by
+//! `tests/architecture.rs`.
 //!
 //! ## What this layer is not allowed to know
 //! Rendering, WebGPU/WebGL, DOM, browser APIs, assets, physics, animation,
@@ -40,6 +47,8 @@ mod plane;
 mod plane_side;
 mod ray;
 mod sphere;
+
+mod geo;
 
 mod math_api;
 
@@ -81,3 +90,16 @@ pub use plane::Plane;
 pub use plane_side::PlaneSide;
 pub use ray::Ray;
 pub use sphere::Sphere;
+
+// Spherical / geodesic operations over unit directions — latitude/longitude,
+// great-circle distance, tangent frames, and spherical interpolation. Unlike the
+// items above these are free functions, not a value type: they transform `Vec3`
+// directions plus kernel angle/ratio quantities, so callers name them directly
+// (`axiom_math::latitude(dir)`) the way they name `Vec3::new`. Angles are
+// `Radians` and blends are `Ratio`, so no unit is left to guess.
+pub use geo::great_circle_distance;
+pub use geo::latitude;
+pub use geo::longitude;
+pub use geo::slerp;
+pub use geo::tangent_basis;
+pub use geo::unit_dir_from_lat_lon;

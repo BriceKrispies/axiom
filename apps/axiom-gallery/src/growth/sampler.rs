@@ -3,7 +3,6 @@
 use axiom_math::Vec3;
 
 use crate::growth::atlas::{lat_band, lon_band};
-use crate::growth::geo;
 use crate::growth::ids::{BiomeId, PlateId, RegionId};
 use crate::growth::model_planet::{PlanetSurfaceAtlas, SurfaceSample};
 
@@ -128,7 +127,7 @@ pub fn sample_surface(atlas: &PlanetSurfaceAtlas, dir: Vec3) -> SurfaceSample {
     // Temperature is latitude-dependent, so it is derived from the query
     // direction rather than the region centre. Audit: Climate (query-time temp).
     if sample.region == region {
-        sample.temperature = derive_temperature(geo::latitude(dir), sample.elevation);
+        sample.temperature = derive_temperature(axiom_math::latitude(dir).get(), sample.elevation);
         sample.biome = derive_biome(sample.temperature, sample.moisture, sample.elevation);
     }
     sample
@@ -144,7 +143,7 @@ pub fn sample_region(atlas: &PlanetSurfaceAtlas, region: RegionId) -> SurfaceSam
     }
     let elevation = atlas.region_elevation.get(i).copied().unwrap_or(0.0);
     let moisture = atlas.region_moisture.get(i).copied().unwrap_or(0.0);
-    let latitude = atlas.sites.get(i).map(|&s| geo::latitude(s)).unwrap_or(0.0);
+    let latitude = atlas.sites.get(i).map(|&s| axiom_math::latitude(s).get()).unwrap_or(0.0);
     let temperature = derive_temperature(latitude, elevation);
     SurfaceSample {
         region,
