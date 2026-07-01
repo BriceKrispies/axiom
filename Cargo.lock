@@ -247,6 +247,7 @@ dependencies = [
  "axiom",
  "axiom-agent",
  "axiom-agent-harness",
+ "axiom-biome",
  "axiom-canvas2d-backend",
  "axiom-debug-overlay",
  "axiom-entropy",

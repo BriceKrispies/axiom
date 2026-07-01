@@ -1,5 +1,7 @@
 //! Overworld surface queries. Audit: OW-E3 locate_region/sample_surface,
 //! "Query/API requirements" (spatial index), Climate (derived temperature/biome).
+use axiom_biome::BiomeApi;
+use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_math::Vec3;
 
 use crate::growth::atlas::{lat_band, lon_band};
@@ -79,45 +81,45 @@ fn locate_region_linear(atlas: &PlanetSurfaceAtlas, dir: Vec3) -> RegionId {
     RegionId(best as u32)
 }
 
-/// Derive temperature from latitude + elevation. Audit: Climate requirements
-/// (latitude cosine minus elevation lapse). Warmest at the equator (lat 0),
-/// coldest at the poles; higher elevation is colder (lapse rate).
+/// Derive temperature from latitude + elevation via the biome module's climate
+/// primitive [`BiomeApi::temperature`]. Warmest at the equator (lat 0), coldest
+/// at the poles; higher elevation is colder (lapse rate). Audit: Climate
+/// requirements. The app adapts its raw `f32` fields to the module's kernel
+/// quantity types and reads the dimensionless result back out — the classification
+/// math itself now lives in `axiom-biome`, not here.
 pub fn derive_temperature(latitude_rad: f32, elevation: f32) -> f32 {
-    let latitudinal = latitude_rad.cos();
-    let lapse = elevation.max(0.0) * 0.6;
-    latitudinal - lapse
+    BiomeApi::temperature(
+        Radians::finite_or_zero(latitude_rad),
+        Meters::finite_or_zero(elevation),
+    )
+    .get()
 }
 
-/// Threshold above which a region counts as "hot" for biome lookup.
-const BIOME_HOT_THRESHOLD: f32 = 0.5;
-/// Threshold above which a region counts as "wet" for biome lookup.
-const BIOME_WET_THRESHOLD: f32 = 0.5;
-
-/// Biome ids produced by [`derive_biome`]. Audit: OW-E3 derived biome, the
-/// hot/cold x wet/dry lookup table (ocean when below sea level 0).
+/// Biome ids produced by [`derive_biome`], mirroring the biome module's
+/// climate `CLIMATE_*` vocabulary as the `u32` codes the app's atlas/rendering
+/// key their colours on. Audit: OW-E3 derived biome, the hot/cold x wet/dry
+/// lookup table (ocean when below sea level 0).
 pub mod biome {
-    pub const OCEAN: u32 = 0;
-    pub const DESERT: u32 = 1; // hot + dry
-    pub const RAINFOREST: u32 = 2; // hot + wet
-    pub const TUNDRA: u32 = 3; // cold + dry
-    pub const TAIGA: u32 = 4; // cold + wet
+    use axiom_biome::BiomeApi;
+    pub const OCEAN: u32 = BiomeApi::CLIMATE_OCEAN as u32;
+    pub const DESERT: u32 = BiomeApi::CLIMATE_DESERT as u32; // hot + dry
+    pub const RAINFOREST: u32 = BiomeApi::CLIMATE_RAINFOREST as u32; // hot + wet
+    pub const TUNDRA: u32 = BiomeApi::CLIMATE_TUNDRA as u32; // cold + dry
+    pub const TAIGA: u32 = BiomeApi::CLIMATE_TAIGA as u32; // cold + wet
 }
 
-/// Map climate scalars to a biome id. Audit: Climate requirements biome lookup.
-/// Ocean below sea level 0; otherwise a hot/cold x wet/dry table.
+/// Map climate scalars to a biome id via [`BiomeApi::classify_climate`]. Audit:
+/// Climate requirements biome lookup. Ocean below sea level 0; otherwise a
+/// hot/cold x wet/dry table. The returned climate code is wrapped in the app's
+/// [`BiomeId`].
 pub fn derive_biome(temperature: f32, moisture: f32, elevation: f32) -> BiomeId {
-    if elevation < 0.0 {
-        return BiomeId(biome::OCEAN);
-    }
-    let hot = temperature >= BIOME_HOT_THRESHOLD;
-    let wet = moisture >= BIOME_WET_THRESHOLD;
-    let id = match (hot, wet) {
-        (true, false) => biome::DESERT,
-        (true, true) => biome::RAINFOREST,
-        (false, false) => biome::TUNDRA,
-        (false, true) => biome::TAIGA,
-    };
-    BiomeId(id)
+    BiomeId(
+        BiomeApi::classify_climate(
+            Ratio::finite_or_zero(temperature),
+            Ratio::finite_or_zero(moisture),
+            elevation < 0.0,
+        ) as u32,
+    )
 }
 
 /// Sample overworld fields at a unit direction. Audit: OW-E3/E4.

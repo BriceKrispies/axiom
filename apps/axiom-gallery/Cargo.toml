@@ -96,6 +96,10 @@ axiom-noise = { path = "../../crates/axiom-noise" }
 # Spherical topology (geodesic icosphere + dual region-adjacency graph + ring
 # validation) for growth's planet worldgen.
 axiom-geosphere = { path = "../../crates/axiom-geosphere" }
+# Deterministic biome classification (growth's climate lens): BiomeApi::temperature
+# + classify_climate own the latitude/elevation temperature and temperature x
+# moisture biome lookup the growth sampler used to inline.
+axiom-biome = { path = "../../modules/axiom-biome" }
 # Graph-hydrology field solvers (pit-fill, receivers, flow accumulation, erosion,
 # ocean distance) over the geosphere region graph; the worldgen hydrology stages
 # are thin wrappers over this layer.
