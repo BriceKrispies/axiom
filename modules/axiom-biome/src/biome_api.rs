@@ -6,8 +6,15 @@
 //! address. The **domain rules** — the thresholds that decide ocean vs forest vs
 //! peak — live here, never in the generic `proc-validate` layer. Integer-only and
 //! branchless; biome codes are small `u8`s with named constants.
+//!
+//! Alongside the elevation×moisture band lens, `temperature` +
+//! `classify_climate` add a complementary **climate lens**: a latitude/elevation
+//! temperature (a dimensionless [`Ratio`]) feeding a temperature×moisture lookup
+//! (ocean below sea level) over its own `CLIMATE_*` code vocabulary, so the two
+//! classifications never collide.
 
 use axiom_entropy::EntropyApi;
+use axiom_kernel::{Meters, Radians, Ratio};
 use axiom_space::Address;
 
 use crate::biome_map::BiomeMap;
@@ -23,6 +30,14 @@ const MOIST_WET: u32 = 500;
 /// The biome version. Bump to deliberately re-key generation (+ regolden).
 const BIOME_VERSION: u32 = 1;
 
+/// Climate lapse rate: fraction of temperature shed per metre of elevation above
+/// sea level (used by [`BiomeApi::temperature`]).
+const LAPSE_RATE: f32 = 0.6;
+/// Temperature at or above which a climate cell counts as "hot".
+const CLIMATE_HOT_THRESHOLD: f32 = 0.5;
+/// Moisture at or above which a climate cell counts as "wet".
+const CLIMATE_WET_THRESHOLD: f32 = 0.5;
+
 /// The deterministic biome facade.
 #[derive(Debug)]
 pub struct BiomeApi;
@@ -35,6 +50,17 @@ impl BiomeApi {
     pub const FOREST: u8 = 3;
     pub const MOUNTAIN: u8 = 4;
     pub const PEAK: u8 = 5;
+
+    /// Climate biome codes — a SECOND, climate-driven vocabulary (temperature ×
+    /// moisture, with ocean below sea level), produced by
+    /// [`BiomeApi::classify_climate`]. Kept as their own named constants so this
+    /// climate universe never collides with the elevation-driven codes above:
+    /// the two lenses answer different questions and are never mixed in one map.
+    pub const CLIMATE_OCEAN: u8 = 0;
+    pub const CLIMATE_DESERT: u8 = 1;
+    pub const CLIMATE_RAINFOREST: u8 = 2;
+    pub const CLIMATE_TUNDRA: u8 = 3;
+    pub const CLIMATE_TAIGA: u8 = 4;
 
     /// Classify one `(elevation, moisture)` pair (each in `[0, 1000)`) into a
     /// biome code. Branchless: elevation and moisture are bucketed into bands
@@ -67,6 +93,42 @@ impl BiomeApi {
             })
             .collect();
         BiomeMap::new(codes)
+    }
+
+    /// Derive a climate **temperature** from latitude and elevation: warmest at
+    /// the equator (latitude 0, `cos 0 = 1`), coldest at the poles, and colder
+    /// with elevation via a lapse rate (only elevation *above* sea level cools,
+    /// `max(0.0)`). The result is a dimensionless normalized scalar — hence
+    /// [`Ratio`], the kernel's finite-dimensionless quantity — consumed by
+    /// [`BiomeApi::classify_climate`] against a hot/cold threshold. This is the
+    /// climate lens; it is independent of the `(elevation, moisture)` band
+    /// [`BiomeApi::classify`] uses. Branchless: `cos` of the already-finite angle
+    /// minus the clamped-positive lapse, sanitized through the total
+    /// [`Ratio::finite_or_zero`].
+    pub fn temperature(latitude: Radians, elevation: Meters) -> Ratio {
+        let latitudinal = latitude.get().cos();
+        let lapse = elevation.get().max(0.0) * LAPSE_RATE;
+        Ratio::finite_or_zero(latitudinal - lapse)
+    }
+
+    /// Classify a climate cell from `(temperature, moisture)` plus whether it
+    /// sits below sea level, into a `CLIMATE_*` code. Ocean dominates below sea
+    /// level; otherwise a hot/cold × wet/dry lookup selects desert / rainforest
+    /// / tundra / taiga. Branchless in exactly the same shape as
+    /// [`BiomeApi::classify`]: the hot and wet booleans index a table, and the
+    /// below-sea-level flag selects ocean vs land through `usize::from(bool)`.
+    pub fn classify_climate(temperature: Ratio, moisture: Ratio, below_sea_level: bool) -> u8 {
+        // `(hot, wet)` -> climate, indexed by `hot * 2 + wet`.
+        const CLIMATE_TABLE: [u8; 4] = [
+            BiomeApi::CLIMATE_TUNDRA,     // cold, dry
+            BiomeApi::CLIMATE_TAIGA,      // cold, wet
+            BiomeApi::CLIMATE_DESERT,     // hot,  dry
+            BiomeApi::CLIMATE_RAINFOREST, // hot,  wet
+        ];
+        let hot = usize::from(temperature.get() >= CLIMATE_HOT_THRESHOLD);
+        let wet = usize::from(moisture.get() >= CLIMATE_WET_THRESHOLD);
+        let land = CLIMATE_TABLE[hot * 2 + wet];
+        [land, BiomeApi::CLIMATE_OCEAN][usize::from(below_sea_level)]
     }
 }
 
@@ -138,6 +200,66 @@ mod tests {
     fn golden_biome_map_digest_is_stable() {
         let m = BiomeApi::map(7, &site(&[2, 5]), 64);
         assert_eq!(m.digest().raw(), 9_396_021_443_120_572_672);
+    }
+
+    #[test]
+    fn temperature_is_warmest_at_equator_sea_level_and_cools_with_latitude_and_elevation() {
+        let equator = BiomeApi::temperature(Radians::new(0.0).unwrap(), Meters::new(0.0).unwrap());
+        let pole = BiomeApi::temperature(
+            Radians::new(core::f32::consts::FRAC_PI_2).unwrap(),
+            Meters::new(0.0).unwrap(),
+        );
+        // Equator at sea level is the warmest: cos 0 = 1, no lapse.
+        assert_eq!(equator.get(), 1.0);
+        // The pole is colder than the equator (cos pi/2 ~ 0).
+        assert!(pole.get() < equator.get());
+        // Elevation above sea level cools via the lapse: 1.0 - 0.5 * 0.6 = 0.7.
+        let highland = BiomeApi::temperature(Radians::new(0.0).unwrap(), Meters::new(0.5).unwrap());
+        assert_eq!(highland.get(), 1.0 - 0.5 * LAPSE_RATE);
+        // Below sea level (negative elevation) sheds no temperature: max(0.0).
+        let below = BiomeApi::temperature(Radians::new(0.0).unwrap(), Meters::new(-3.0).unwrap());
+        assert_eq!(below.get(), 1.0);
+    }
+
+    #[test]
+    fn classify_climate_covers_ocean_and_every_land_quadrant() {
+        let hot = Ratio::new(0.9).unwrap();
+        let cold = Ratio::new(0.1).unwrap();
+        let wet = Ratio::new(0.9).unwrap();
+        let dry = Ratio::new(0.1).unwrap();
+        // Ocean dominates below sea level regardless of temperature/moisture.
+        assert_eq!(
+            BiomeApi::classify_climate(hot, wet, true),
+            BiomeApi::CLIMATE_OCEAN
+        );
+        // hot/cold x wet/dry on land, exercising all four table entries.
+        assert_eq!(
+            BiomeApi::classify_climate(hot, dry, false),
+            BiomeApi::CLIMATE_DESERT
+        );
+        assert_eq!(
+            BiomeApi::classify_climate(hot, wet, false),
+            BiomeApi::CLIMATE_RAINFOREST
+        );
+        assert_eq!(
+            BiomeApi::classify_climate(cold, dry, false),
+            BiomeApi::CLIMATE_TUNDRA
+        );
+        assert_eq!(
+            BiomeApi::classify_climate(cold, wet, false),
+            BiomeApi::CLIMATE_TAIGA
+        );
+    }
+
+    #[test]
+    fn climate_and_elevation_code_universes_are_distinct_vocabularies() {
+        // The two lenses are separate constant sets; asserting the climate codes
+        // pins the app-facing colour numbering the gallery keys on.
+        assert_eq!(BiomeApi::CLIMATE_OCEAN, 0);
+        assert_eq!(BiomeApi::CLIMATE_DESERT, 1);
+        assert_eq!(BiomeApi::CLIMATE_RAINFOREST, 2);
+        assert_eq!(BiomeApi::CLIMATE_TUNDRA, 3);
+        assert_eq!(BiomeApi::CLIMATE_TAIGA, 4);
     }
 
     #[test]

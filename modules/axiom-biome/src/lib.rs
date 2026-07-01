@@ -22,6 +22,12 @@
 //!   single (Module Law #8) without a separate category type. No browser/platform
 //!   APIs.
 //!
+//! ## Two classification lenses
+//! [`BiomeApi::classify`] is the **elevation×moisture** lens. Additively,
+//! [`BiomeApi::temperature`] + [`BiomeApi::classify_climate`] add a
+//! **climate** lens (latitude/elevation temperature × moisture, ocean below sea
+//! level) over a distinct `CLIMATE_*` code vocabulary — the two never collide.
+//!
 //! ## Public surface
 //! One facade: [`BiomeApi`] (with its biome-code constants). The `BiomeMap` it
 //! returns is read through its own methods.
