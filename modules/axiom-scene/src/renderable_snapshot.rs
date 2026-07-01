@@ -110,7 +110,6 @@ mod tests {
             false,
             false,
         );
-        // The caster flag also participates in equality.
         let d = RenderableSnapshot::new(
             SceneNodeId::from_raw(1),
             MeshRef::from_raw(1),

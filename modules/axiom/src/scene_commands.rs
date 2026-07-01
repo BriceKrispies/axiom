@@ -73,12 +73,8 @@ impl SceneCommands {
                     .expect("a parent command is recorded before its child")
             });
             command.components.iter().for_each(|component| {
-                // Each component has exactly one kind; exactly one gated arm
-                // below fires, reading the payload its kind names. Same dispatch
-                // and ordering as the old per-variant match, driven by `kind()`.
-                // The kind gate and the payload `Option` agree by construction,
-                // so `(kind == K).then(payload).flatten()` is `Some` for exactly
-                // the matching kind — no unreachable arm, no panicking unwrap.
+                // Exactly one guarded arm fires per component: `kind()`
+                // uniquely determines which `as_*` payload is `Some`.
                 (component.kind() == NodeComponent::KIND_RENDERABLE)
                     .then(|| component.as_renderable())
                     .flatten()
@@ -184,9 +180,6 @@ impl SceneCommands {
                     .inspect(|s| {
                         let c = s.color();
                         let color = Vec3::new(c.r.get(), c.g.get(), c.b.get());
-                        // Dispatch by the shape's kind to the matching scene
-                        // constructor; the three guards are mutually exclusive, so
-                        // exactly one fires (no branch — guarded `.then` effects).
                         (s.kind() == 0).then(|| {
                             let radius = Meters::new(s.dims().x)
                                 .expect("authored sdf sphere radius is finite");
@@ -206,10 +199,9 @@ impl SceneCommands {
                         });
                     });
             });
-            // A `ContactShadowCaster` marker (in any tuple position) flags the
-            // node's renderable as a shadow caster. Done after the component loop
-            // so the renderable exists regardless of marker order; a marker on a
-            // node with no renderable is a harmless no-op.
+            // Applied after the component loop so the renderable already
+            // exists regardless of marker order; a marker with no renderable
+            // is a no-op.
             command
                 .components
                 .iter()
@@ -261,7 +253,6 @@ mod tests {
     fn realizes_a_parent_child_camera_and_light_scene() {
         let mut cmds = SceneCommands::new(4.0 / 3.0);
 
-        // A translation parent with a spinning, renderable child.
         let mesh: Handle<Mesh> = {
             let mut a = crate::assets::Assets::new();
             a.add(Mesh::cube())
@@ -276,7 +267,6 @@ mod tests {
                 Spin::around(Vec3::UNIT_Y).period(360),
             ));
 
-        // A camera and a directional light, each a 2-tuple bundle.
         cmds.spawn((
             Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
             Camera::perspective(PerspectiveProjection {
@@ -298,12 +288,10 @@ mod tests {
         let light_dir = cmds.realize_into(&mut scene, &math());
 
         let snap = scene.snapshot();
-        // parent + child + camera node + light node = 4 nodes.
         assert_eq!(snap.nodes().len(), 4);
         assert_eq!(snap.renderables().len(), 1);
         assert_eq!(snap.cameras().len(), 1);
         assert_eq!(snap.lights().len(), 1);
-        // The child is parented (carries a parent id).
         assert!(snap.nodes().iter().any(|n| n.parent().is_some()));
         assert_eq!(light_dir, Some(Vec3::new(0.3, -1.0, 0.4)));
     }
@@ -312,7 +300,6 @@ mod tests {
     fn realizes_each_sdf_shape_kind_into_the_scene() {
         use crate::sdf_shape::SdfShape;
         let mut cmds = SceneCommands::new(4.0 / 3.0);
-        // One of each kind, in order, exercising all three realize dispatch arms.
         cmds.spawn((
             Transform::from_translation(Vec3::new(-2.0, 0.0, 0.0)),
             SdfShape::sphere(Meters::new(0.5).unwrap(), Color::WHITE),
@@ -329,10 +316,9 @@ mod tests {
         let mut scene = SceneApi::new();
         cmds.realize_into(&mut scene, &math());
         let snap = scene.snapshot();
-        // Sphere (0), box (1), plane (2) all reached the scene, in spawn order.
+        // kind 0 = sphere, 1 = box, 2 = plane.
         let kinds: Vec<u32> = snap.sdf_shapes().iter().map(|s| s.kind()).collect();
         assert_eq!(kinds, vec![0, 1, 2]);
-        // The box kept its authored half-extents through the whole chain.
         assert_eq!(snap.sdf_shapes()[1].dims(), Vec3::new(0.5, 0.6, 0.7));
     }
 
@@ -350,7 +336,6 @@ mod tests {
             Controller::new(0),
         ));
         let mut scene = SceneApi::new();
-        // The Controller arm of realize_into runs add_controller without error.
         assert_eq!(cmds.realize_into(&mut scene, &math()), None);
         assert_eq!(scene.snapshot().nodes().len(), 1);
         assert_eq!(scene.snapshot().cameras().len(), 1);
@@ -368,22 +353,19 @@ mod tests {
             let mut a = crate::assets::Assets::new();
             a.add(Material::lit(Color::WHITE))
         };
-        // One renderable marked as a caster, spawned as a 4-component bundle
-        // (exercises `Bundle for (A, B, C, D)`)...
+        // Exercises `Bundle for (A, B, C, D)`.
         cmds.spawn((
             Transform::IDENTITY,
             Renderable { mesh, material },
             crate::spin::Spin::around(Vec3::UNIT_Y).period(60),
             ContactShadowCaster,
         ));
-        // ...and one plain renderable (the marker-absent / casts=false path).
         cmds.spawn(Renderable { mesh, material });
 
         let mut scene = SceneApi::new();
         cmds.realize_into(&mut scene, &math());
         let snap = scene.snapshot();
         assert_eq!(snap.renderables().len(), 2);
-        // Exactly the marked renderable is a contact-shadow caster.
         assert_eq!(
             snap.renderables()
                 .iter()
@@ -405,7 +387,7 @@ mod tests {
             },
         ));
         let mut scene = SceneApi::new();
-        // A point light contributes a scene light but no frame sun direction.
+        // A point light contributes no frame sun direction (unlike a directional light).
         let dir = cmds.realize_into(&mut scene, &math());
         assert_eq!(dir, None);
         assert_eq!(scene.snapshot().lights().len(), 1);
@@ -424,8 +406,7 @@ mod tests {
     fn realizes_a_procanim_node_around_its_spawn_transform() {
         use crate::procanim::ProcAnim;
         let mut cmds = SceneCommands::new(4.0 / 3.0);
-        // A positioned node carrying a bob+spin procedural animation; the spawn
-        // transform is the resting pose the animation composes around.
+        // The spawn transform is the resting pose the animation composes around.
         cmds.spawn((
             Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)),
             ProcAnim::bob(Meters::new(0.5).unwrap(), 120)
@@ -433,7 +414,6 @@ mod tests {
                 .phase(7),
         ));
         let mut scene = SceneApi::new();
-        // The ProcAnim arm of realize_into runs add_procanim without error.
         assert_eq!(cmds.realize_into(&mut scene, &math()), None);
         assert_eq!(scene.snapshot().nodes().len(), 1);
     }

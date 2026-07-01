@@ -104,9 +104,7 @@ impl ProcessSubscription {
 /// The set of all process→dependency subscriptions, indexed both ways.
 #[derive(Debug, Clone, Default)]
 pub struct DependencySet {
-    // process -> its dependencies (deduplicated).
     by_process: BTreeMap<ProcessId, BTreeSet<(u8, u64)>>,
-    // (kind code, key) -> subscribed processes.
     by_dependency: BTreeMap<(u8, u64), BTreeSet<ProcessId>>,
 }
 
@@ -199,7 +197,6 @@ mod tests {
         assert_eq!(set.len(), 0);
         let fact_dep = ProcessDependency::new(DependencyKind::FactKindChanged, 7);
         assert!(set.subscribe(p(1), fact_dep));
-        // Duplicate subscription is rejected (dedup).
         assert!(!set.subscribe(p(1), fact_dep));
         assert!(set.subscribe(p(2), fact_dep));
         assert!(set.subscribe(
@@ -207,14 +204,12 @@ mod tests {
             ProcessDependency::new(DependencyKind::SubjectChanged, 3)
         ));
         assert_eq!(set.len(), 3);
-        // by dependency.
         assert_eq!(set.subscribers_of(fact_dep), vec![p(1), p(2)]);
         assert_eq!(
             set.subscribers_of(ProcessDependency::new(DependencyKind::WoundChanged, 0))
                 .len(),
             0
         );
-        // by process, ascending by (kind, key): FactKindChanged(0) before SubjectChanged(2).
         let deps = set.dependencies_of(p(1));
         assert_eq!(deps.len(), 2);
         assert_eq!(deps[0].kind(), DependencyKind::FactKindChanged);

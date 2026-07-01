@@ -1,6 +1,5 @@
 //! The backend-neutral SDF (signed-distance-field) scene contract for a
 //! raymarch presentation pass.
-//!
 //! `SdfScene` is the raymarch peer of [`crate::FramePacket`]'s triangle draws:
 //! it carries everything a backend needs to *march* a frame's SDF shapes, and
 //! only primitives — no GPU, browser, DOM, render-module, or scene types — so
@@ -9,7 +8,6 @@
 //! nothing. A backend evaluates the same primitives two ways (a WGSL shader on
 //! the GPU, a branchless CPU fold in the software backend), but the data they
 //! read is identical, so the two backends stay in parity.
-//!
 //! Each primitive is evaluated in its own local frame: a sample point is
 //! transformed by `inv_transform` (column-major world→local) into local space,
 //! the canonical local SDF is evaluated there, and the distance is rescaled by
@@ -18,13 +16,11 @@
 //! (it makes the field non-metric).
 
 /// One SDF primitive, evaluated in its own local frame.
-///
 /// `kind` selects the canonical local distance function ([`Self::SPHERE`],
 /// [`Self::BOX`], [`Self::PLANE`]); `inv_transform` is the column-major
 /// world→local matrix; `params` carries the primitive's local dimensions plus
 /// the transform's uniform scale (so the backend can rescale the local distance
 /// back to world units); `color` is the linear RGBA surface colour.
-///
 /// Parameter layout by kind:
 /// - sphere: `[radius, _, _, uniform_scale]`
 /// - box:    `[half_x, half_y, half_z, uniform_scale]`
@@ -80,14 +76,12 @@ impl SdfPrimitive {
 
 /// The frame's SDF scene: the primitives to march, the camera's forward and
 /// inverse view-projection, the camera world position, and the march tunables.
-///
 /// The scene is **self-contained**: it carries everything a backend needs to
 /// march *and* depth-composite a frame's SDF shapes against the meshes, without
 /// reaching for a [`crate::FrameCamera`]. That is required, not merely tidy — a
 /// backend may evaluate an `SdfScene` with no `FramePacket` in hand (the GPU
 /// backend's live/offscreen path takes raw instance batches, never a camera), so
 /// the contract itself must hold the camera math both backends consume.
-///
 /// `view_proj` (world→clip) projects each world hit to the **same** NDC z the
 /// triangle pass writes, so SDF depth composites with the meshes; `inv_view_proj`
 /// (clip→world) *un*projects each pixel into a world ray; `camera_world_pos` is

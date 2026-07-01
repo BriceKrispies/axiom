@@ -316,7 +316,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(registry.len(), 1);
-        // A duplicate durable name is rejected cleanly.
         assert!(registry
             .register(
                 DefinitionKind::Substance,

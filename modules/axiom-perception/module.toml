@@ -1,10 +1,5 @@
-# Axiom module manifest — axiom-perception.
-#
-# Perception is an *isolated* engine module: it owns the game-agnostic sensor
-# model (ray-fan geometry, view-cone culling, subject tracking) and the neutral
-# fact vocabulary an agent observes. It does not depend on any other module — an
-# app casts the rays against its own world and feeds the facts to `axiom-agent`,
-# keeping perception decoupled from both the scene and the agent.
+# An app casts the rays against its own world and feeds the facts to
+# `axiom-agent`, keeping perception decoupled from both scene and agent.
 
 [module]
 name = "perception"
@@ -16,8 +11,8 @@ allowed_layers = [
     "math",
 ]
 
-# Modules may not depend on other modules. Perception speaks the agent's fact
-# shape as plain tuples, so it needs no dependency on `axiom-agent`.
+# Perception speaks the agent fact shape as plain tuples, so it needs no
+# dependency on `axiom-agent`.
 allowed_modules = []
 
 introduced_capabilities = [

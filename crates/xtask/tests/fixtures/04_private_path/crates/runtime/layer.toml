@@ -1,5 +1,3 @@
-# Layer 1 that reaches into a private module path of the kernel
-# (`kernel::clock::KernelClock`) instead of its public root export.
 [layer]
 name = "runtime"
 crate_name = "runtime"

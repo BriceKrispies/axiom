@@ -30,9 +30,8 @@ impl HostBoundaryConfig {
         fixed_step_nanos: u64,
         max_steps_per_frame: u32,
     ) -> HostResult<HostBoundaryConfig> {
-        // Branchless selection: index `[Err, Ok]` by whether the count is
-        // non-zero. Both arms are `Copy`, so the array is const-constructible
-        // and indexing is legal in a `const fn` (no `if`, no `?`, no closure).
+        // Index `[Err, Ok]` by whether the count is non-zero; both arms are
+        // `Copy`, so this is const-constructible.
         [
             Err(HostError::invalid_boundary_config(
                 "host boundary max_steps_per_frame must be non-zero",

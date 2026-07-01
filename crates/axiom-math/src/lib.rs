@@ -52,28 +52,16 @@ mod geo;
 
 mod math_api;
 
-// --- Public surface (curated; see `tests/architecture.rs`) ---
-
-// Primary entry point.
 pub use math_api::MathApi;
 
-// Scalar policy primitives — higher layers/modules need to name these to
-// validate inputs and compare values without taking on a parallel finite
-// scalar discipline.
 pub use approx_eq::ApproxEq;
 pub use epsilon::Epsilon;
 pub use scalar::Scalar;
 
-// Error / result primitives — higher layers return `MathResult` and match
-// on `(code, optional kernel cause)` identity.
 pub use math_error::MathError;
 pub use math_error_code::MathErrorCode;
 pub use math_result::MathResult;
 
-// Workhorse value types — higher layers/modules need to *name* these to
-// store transforms, build cameras, declare bounds, and so on. None of
-// them carry hidden state; they are plain data with deterministic
-// methods.
 pub use mat3::Mat3;
 pub use mat4::Mat4;
 pub use quat::Quat;
@@ -82,8 +70,6 @@ pub use vec2::Vec2;
 pub use vec3::Vec3;
 pub use vec4::Vec4;
 
-// Geometry primitives — used by frame snapshots, scene bounding volumes,
-// and future culling/picking modules.
 pub use aabb::Aabb;
 pub use frustum::Frustum;
 pub use plane::Plane;
@@ -91,12 +77,6 @@ pub use plane_side::PlaneSide;
 pub use ray::Ray;
 pub use sphere::Sphere;
 
-// Spherical / geodesic operations over unit directions — latitude/longitude,
-// great-circle distance, tangent frames, and spherical interpolation. Unlike the
-// items above these are free functions, not a value type: they transform `Vec3`
-// directions plus kernel angle/ratio quantities, so callers name them directly
-// (`axiom_math::latitude(dir)`) the way they name `Vec3::new`. Angles are
-// `Radians` and blends are `Ratio`, so no unit is left to guess.
 pub use geo::great_circle_distance;
 pub use geo::latitude;
 pub use geo::longitude;

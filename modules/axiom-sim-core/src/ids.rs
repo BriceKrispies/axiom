@@ -125,19 +125,15 @@ mod tests {
             #[test]
             fn $test() {
                 use std::collections::HashSet;
-                // raw round-trip
                 assert_eq!($name::from_raw(7).raw(), 7);
-                // ordering + equality
                 assert!($name::from_raw(1) < $name::from_raw(2));
                 assert_eq!($name::from_raw(5), $name::from_raw(5));
                 assert_ne!($name::from_raw(5), $name::from_raw(6));
-                // hashing
                 let mut set = HashSet::new();
                 set.insert($name::from_raw(3));
                 set.insert($name::from_raw(3));
                 set.insert($name::from_raw(4));
                 assert_eq!(set.len(), 2);
-                // binary round-trip
                 let id = $name::from_raw(0x0102_0304_0506_0708);
                 let mut writer = BinaryWriter::new();
                 id.reflect_write(&mut writer);
@@ -147,7 +143,6 @@ mod tests {
                     id
                 );
                 assert_eq!($name::SCHEMA.name(), stringify!($name));
-                // truncation fails cleanly at every prefix
                 for len in 0..bytes.len() {
                     assert!($name::reflect_read(&mut BinaryReader::new(&bytes[..len])).is_err());
                 }

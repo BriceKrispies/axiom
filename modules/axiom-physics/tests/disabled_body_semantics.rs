@@ -1,5 +1,4 @@
 //! Proofs for the semantics of a disabled body across the public facade.
-//!
 //! A disabled body deterministically rejects force/impulse operations (rather than
 //! silently dropping them), does not integrate, and is skipped by the broad phase;
 //! re-enabling it restores all of that. A disable/enable becomes effective only
@@ -113,15 +112,12 @@ fn disabled_body_is_skipped_by_broad_phase() {
 #[test]
 fn reenabled_body_accepts_force_again() {
     let (mut api, body) = disabled_world();
-    // While disabled, a force is rejected.
     assert!(api.apply_force(body, Vec3::new(1.0, 0.0, 0.0)).is_err());
 
-    // Re-enable and commit the enable.
     api.enable_body(body).unwrap();
     api.step(tenth_second()).unwrap();
     assert!(enabled(&api, body), "the enable must have committed");
 
-    // Now the force is accepted and actually moves the body.
     api.apply_force(body, Vec3::new(5.0, 0.0, 0.0)).unwrap();
     api.step(tenth_second()).unwrap();
     assert!(pos(&api, body).x > 0.0, "a re-enabled body responds to force again");

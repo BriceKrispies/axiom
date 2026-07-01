@@ -7,12 +7,10 @@
 //! coordinate (`-1`, or `BOARD_SIZE`) that placement can reject instead of
 //! underflowing.
 
-/// The board is square: `BOARD_SIZE` cells on a side.
 pub const BOARD_SIZE: usize = 10;
 
 const CELL_COUNT: usize = BOARD_SIZE * BOARD_SIZE;
 
-/// The 10×10 grid of filled / empty cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Board {
     /// Row-major occupancy; index = `y * BOARD_SIZE + x`.
@@ -26,19 +24,16 @@ impl Default for Board {
 }
 
 impl Board {
-    /// A fresh, fully empty board.
     pub fn empty() -> Self {
         Board {
             filled: [false; CELL_COUNT],
         }
     }
 
-    /// Is `(x, y)` a real cell on the board?
     pub const fn in_bounds(x: i32, y: i32) -> bool {
         x >= 0 && y >= 0 && (x as i64) < BOARD_SIZE as i64 && (y as i64) < BOARD_SIZE as i64
     }
 
-    /// The flat index of an in-bounds cell.
     fn index(x: i32, y: i32) -> usize {
         y as usize * BOARD_SIZE + x as usize
     }
@@ -68,22 +63,19 @@ impl Board {
         }
     }
 
-    /// Is the whole board empty?
     pub fn is_clear(&self) -> bool {
         self.filled.iter().all(|&f| !f)
     }
 
-    /// Is every cell in row `y` filled?
     pub fn row_full(&self, y: i32) -> bool {
         (0..BOARD_SIZE as i32).all(|x| self.is_filled(x, y))
     }
 
-    /// Is every cell in column `x` filled?
     pub fn col_full(&self, x: i32) -> bool {
         (0..BOARD_SIZE as i32).all(|y| self.is_filled(x, y))
     }
 
-    /// The number of filled cells (used to seed deterministic generation).
+    /// Used to seed deterministic generation.
     pub fn filled_count(&self) -> usize {
         self.filled.iter().filter(|&&f| f).count()
     }
@@ -122,7 +114,6 @@ mod tests {
         assert!(!Board::in_bounds(0, -1));
         assert!(!Board::in_bounds(BOARD_SIZE as i32, 0));
         assert!(!Board::in_bounds(0, BOARD_SIZE as i32));
-        // Out of bounds: not filled, and not a placeable empty cell.
         assert!(!b.is_filled(-1, 0));
         assert!(!b.is_empty_cell(-1, 0));
         assert!(!b.is_empty_cell(BOARD_SIZE as i32, 0));

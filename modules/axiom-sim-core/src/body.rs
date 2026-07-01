@@ -168,7 +168,6 @@ impl BodyStore {
     ) -> BodyId {
         let body = BodyId::from_raw(self.next_body);
         self.next_body += 1;
-        // Mint a part id for every plan part, preserving order.
         let part_ids: Vec<BodyPartId> = plan
             .parts()
             .iter()
@@ -178,7 +177,6 @@ impl BodyStore {
                 id
             })
             .collect();
-        // Build each part with its minted surfaces.
         let parts: Vec<BodyPart> = plan
             .parts()
             .iter()
@@ -209,7 +207,6 @@ impl BodyStore {
                 }
             })
             .collect();
-        // Map plan connections (by index) to instantiated part ids.
         let connections: Vec<BodyConnection> = plan
             .connections()
             .iter()
@@ -435,25 +432,19 @@ mod tests {
 
         let parts = store.parts_of(body);
         assert_eq!(parts.len(), 2);
-        // The body records its own parts in the same instantiation order.
         assert_eq!(store.get(body).unwrap().parts(), parts.as_slice());
-        // Parts query by kind.
         let cores = store.parts_by_kind(body, BodyPlanPartKind::Core);
         assert_eq!(cores.len(), 1);
         let extremities = store.parts_by_kind(body, BodyPlanPartKind::Extremity);
         assert_eq!(extremities.len(), 1);
         assert_eq!(store.parts_by_kind(body, BodyPlanPartKind::Eye).len(), 0);
-        // Connections (undirected): core connects to extremity and vice versa.
         assert_eq!(store.connected_parts(body, parts[0]), vec![parts[1]]);
         assert_eq!(store.connected_parts(body, parts[1]), vec![parts[0]]);
-        // Part fields.
         let core = store.part(cores[0]).unwrap();
         assert_eq!(core.body(), body);
-        // The core is the first plan part, so it carries plan index 0.
         assert_eq!(core.plan_index(), 0);
         assert_eq!(core.tissue_layers().len(), 1);
         assert_eq!(core.surfaces().len(), 1);
-        // Surfaces.
         let surfaces = store.surfaces_of(body);
         assert_eq!(surfaces.len(), 2);
         assert_eq!(store.surfaces_of_part(cores[0]).len(), 1);

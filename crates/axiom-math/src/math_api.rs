@@ -2,9 +2,6 @@
 
 use axiom_kernel::{KernelApi, Radians, Tick};
 use axiom_runtime::RuntimeContext;
-// `TelemetryMetric` is the kernel primitive Math hands to the runtime sink;
-// importing it here is what makes Math a real semantic adapter over the
-// runtime's telemetry surface (not just over the kernel facade).
 use axiom_kernel::TelemetryMetric;
 
 use crate::aabb::Aabb;
@@ -27,12 +24,10 @@ use crate::vec3::Vec3;
 use crate::vec4::Vec4;
 
 /// The single public entry point to the Axiom math layer.
-///
 /// `MathApi` is the *only* item `lib.rs` exports. Every math capability —
 /// scalar/epsilon policy, vector, quaternion, matrix, transform, geometry —
 /// is reached through one of its constructors. The facade is a zero-sized
 /// value; it holds no state and reads nothing ambient.
-///
 /// `MathApi` is also the layer's adapter over the runtime: methods that take
 /// a `&mut RuntimeContext` route deterministic telemetry through the kernel
 /// sinks the runtime owns ([`Self::record_validation_failure`],
@@ -60,7 +55,6 @@ impl MathApi {
         kernel.serializes_little_endian()
     }
 
-    // --- Scalar / epsilon policy ---
 
     /// Return `v` if finite, otherwise produce a math error.
     pub fn validate_finite(&self, v: f32) -> MathResult<f32> {
@@ -87,7 +81,6 @@ impl MathApi {
         a.approx_eq(b, epsilon)
     }
 
-    // --- Vectors ---
 
     pub fn vec2(&self, x: f32, y: f32) -> Vec2 {
         Vec2::new(x, y)
@@ -122,7 +115,6 @@ impl MathApi {
         Vec4::new(x, y, z, w)
     }
 
-    // --- Quaternions ---
 
     pub fn quat_identity(&self) -> Quat {
         Quat::IDENTITY
@@ -132,7 +124,6 @@ impl MathApi {
         Quat::from_axis_angle(axis, angle_radians)
     }
 
-    // --- Matrices ---
 
     pub fn mat4_identity(&self) -> Mat4 {
         Mat4::IDENTITY
@@ -182,7 +173,6 @@ impl MathApi {
         m.inverse()
     }
 
-    // --- Transforms ---
 
     pub fn transform_identity(&self) -> Transform {
         Transform::IDENTITY
@@ -208,7 +198,6 @@ impl MathApi {
         Transform::combine(parent, child)
     }
 
-    // --- Geometry primitives ---
 
     pub fn aabb(&self, min: Vec3, max: Vec3) -> MathResult<Aabb> {
         Aabb::new(min, max)
@@ -243,7 +232,6 @@ impl MathApi {
         plane.classify_point(point, epsilon)
     }
 
-    // --- Math telemetry through the runtime ---
 
     /// Emit a `math.validation_failure` counter into the runtime's sink.
     /// Used by higher layers to track how often math validation rejects
@@ -315,11 +303,11 @@ mod tests {
     #[test]
     fn clamp_holds_interior_and_pins_both_bounds() {
         let m = api();
-        assert_eq!(m.clamp(5.0, 0.0, 10.0).unwrap(), 5.0); // interior
-        assert_eq!(m.clamp(-3.0, 0.0, 10.0).unwrap(), 0.0); // below -> lo
-        assert_eq!(m.clamp(42.0, 0.0, 10.0).unwrap(), 10.0); // above -> hi
-        assert_eq!(m.clamp(0.0, 0.0, 10.0).unwrap(), 0.0); // at lo
-        assert_eq!(m.clamp(10.0, 0.0, 10.0).unwrap(), 10.0); // at hi
+        assert_eq!(m.clamp(5.0, 0.0, 10.0).unwrap(), 5.0);
+        assert_eq!(m.clamp(-3.0, 0.0, 10.0).unwrap(), 0.0);
+        assert_eq!(m.clamp(42.0, 0.0, 10.0).unwrap(), 10.0);
+        assert_eq!(m.clamp(0.0, 0.0, 10.0).unwrap(), 0.0);
+        assert_eq!(m.clamp(10.0, 0.0, 10.0).unwrap(), 10.0);
     }
 
     #[test]
@@ -341,7 +329,7 @@ mod tests {
         assert_eq!(m.lerp(2.0, 6.0, 0.0).unwrap(), 2.0);
         assert_eq!(m.lerp(2.0, 6.0, 1.0).unwrap(), 6.0);
         assert_eq!(m.lerp(2.0, 6.0, 0.5).unwrap(), 4.0);
-        assert_eq!(m.lerp(0.0, 10.0, 2.0).unwrap(), 20.0); // extrapolation
+        assert_eq!(m.lerp(0.0, 10.0, 2.0).unwrap(), 20.0);
     }
 
     #[test]
@@ -351,7 +339,6 @@ mod tests {
             m.lerp(f32::INFINITY, 0.0, 0.5).unwrap_err().code(),
             MathErrorCode::NonFiniteScalar
         );
-        // Finite inputs whose interpolation overflows to ±Inf are rejected.
         assert_eq!(
             m.lerp(f32::MAX, f32::MIN, f32::MAX).unwrap_err().code(),
             MathErrorCode::NonFiniteScalar
@@ -367,13 +354,11 @@ mod tests {
         let approx = |a: f32, b: f32| (a - b).abs() < 1.0e-4;
 
         assert!(approx(wrap(0.0), 0.0));
-        assert!(approx(wrap(pi), pi)); // +π stays (closed end)
-        assert!(approx(wrap(-pi), pi)); // -π maps to +π (open end)
+        assert!(approx(wrap(pi), pi));
+        assert!(approx(wrap(-pi), pi));
         assert!(approx(wrap(3.0 * pi / 2.0), -pi / 2.0));
         assert!(approx(wrap(tau), 0.0));
-        // Idempotence: re-wrapping a wrapped angle is a no-op.
         assert!(approx(wrap(wrap(5.0)), wrap(5.0)));
-        // Every wrapped value lies in (-π, π].
         (-20..=20).for_each(|k| {
             let w = wrap(k as f32);
             assert!(w > -pi - 1.0e-4);
@@ -421,8 +406,6 @@ mod tests {
         assert!(api().approx_eq(&a, &b, api().default_epsilon()));
     }
 
-    // Kills `replace MathApi::approx_eq -> bool with true` at math_api.rs:85.
-    // Two clearly distinct vectors must compare NOT approx-equal.
     #[test]
     fn approx_eq_returns_false_for_distinct_values() {
         let a = api().vec3(1.0, 2.0, 3.0);
@@ -496,11 +479,9 @@ mod tests {
     fn mat4_invert_round_trips_invertible_and_rejects_singular() {
         let m = api();
         let eps = m.epsilon(1.0e-5).unwrap();
-        // Invertible: inverting a translation then composing yields identity.
         let t = m.mat4_translation(m.vec3(3.0, -4.0, 5.0));
         let inv = m.mat4_invert(t).unwrap();
         assert!(t.multiply(inv).approx_eq(&Mat4::IDENTITY, eps));
-        // Singular: the zero matrix has no inverse.
         assert!(m.mat4_invert(Mat4::ZERO).is_none());
     }
 

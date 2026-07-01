@@ -1,16 +1,5 @@
-# Axiom module manifest — axiom-biome (an ENGINE module).
-#
-# A DOMAIN generator on the procedural-generation substrate (roadmap Phase 9):
-# biome classification. The DOMAIN rules - the elevation/moisture thresholds that
-# decide ocean vs forest vs peak - live HERE, never in the generic proc-validate
-# layer (which only knows neutral words). It is an *isolated engine module*
-# (allowed_modules = []) and never imports another module: it does not depend on
-# terrain (a caller composes a heightfield with a biome map); it classifies the
-# (elevation, moisture) values it is given or generates from entropy.
-#
-# It consumes space (the Address a biome map is keyed at) and entropy (the keyed
-# stream per-cell elevation/moisture is drawn from), plus the kernel for canonical
-# bytes + digest. Integer-only, branchless, 100%-covered.
+# Domain rules (elevation/moisture thresholds) live here, not in the generic
+# proc-validate layer, which only knows neutral words.
 
 [module]
 name = "biome"

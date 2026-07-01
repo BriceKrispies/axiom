@@ -1,8 +1,5 @@
-//! The `wasm32` live arm: drive the windowing render loop, stepping the physics
-//! world and re-authoring the scene every frame so the crucible's bodies fall,
-//! bounce, and pile **live** on the gallery canvas. Never compiled on native — the
-//! deterministic physics + scene authoring live in the other modules; this is the
-//! thin browser edge (the windowing loop + keyboard/keypad input).
+//! The `wasm32` live arm: drives the windowing render loop, stepping the
+//! physics world and re-authoring the scene every frame.
 //!
 //! Controls (real keyboard or the gallery's on-screen keypad, which dispatches
 //! synthetic key events): **▲ / Space / K** kick every dynamic body upward so the
@@ -58,7 +55,6 @@ impl LiveCrucible {
         }
     }
 
-    /// Tear the room down and re-drop it from the start.
     fn reset(&mut self) {
         self.world = CrucibleWorld::new();
         for station in &self.stations {
@@ -67,8 +63,7 @@ impl LiveCrucible {
         self.step = 0;
     }
 
-    /// Kick every dynamic body upward (with a little per-body lateral spread, keyed
-    /// off the deterministic handle) so the pile scatters and re-settles.
+    /// Per-body lateral spread is keyed off the deterministic handle.
     fn kick(&mut self) {
         let handles: Vec<_> = self
             .world
@@ -85,7 +80,6 @@ impl LiveCrucible {
         }
     }
 
-    /// Advance one step, applying any pending input first, and loop at the end.
     fn advance(&mut self, input: &mut Input) {
         if std::mem::take(&mut input.reset) || self.step >= LIVE_LOOP_STEPS {
             self.reset();
@@ -102,9 +96,6 @@ impl LiveCrucible {
     }
 }
 
-/// Browser entry: build the live room, capture keyboard/keypad input, and drive
-/// the windowing render loop — stepping physics and re-authoring the scene each
-/// frame so the simulation plays out on screen.
 #[wasm_bindgen]
 pub fn physics_start() {
     console_error_panic_hook::set_once();
@@ -148,9 +139,6 @@ pub fn physics_start() {
             outcome.mesh_batches(),
             outcome.camera_view_proj(),
             outcome.mesh_batch_casters(),
-            // The frame's SDF raymarch scene (the floating sphere), composited over
-            // the meshes by the live backend — GPU in the browser, Canvas2D in the
-            // software fallback (and where browser WebGPU is unavailable).
             outcome.sdf_scene().cloned(),
         )
     };
@@ -158,9 +146,8 @@ pub fn physics_start() {
     let _ = windowing.run_web_multi(CANVAS_ID, meshes, materials, LIVE_CAPACITY, frame);
 }
 
-/// Install a `keydown` listener that maps the demo's keys/keypad into one-shot
-/// input flags. Matches on the logical `key()` so the gallery's synthetic-keyboard
-/// on-screen pad drives it too.
+/// Matches on the logical `key()` so the gallery's synthetic-keyboard on-screen
+/// pad drives it too.
 fn install_key_listener(input: &Rc<RefCell<Input>>) {
     let input = input.clone();
     let callback = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {

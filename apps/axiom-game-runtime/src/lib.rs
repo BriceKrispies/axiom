@@ -1,17 +1,14 @@
 //! # Axiom — Game Runtime (wasm-bindgen boundary)
-//!
 //! The native boundary the TypeScript authoring SDK (`@axiom/game`) projects
 //! through. It owns [`GameRuntime`] — the deterministic driver that banks a real,
 //! variable-rate host elapsed interval into whole fixed simulation steps and runs
 //! exactly that many deterministic ticks on a [`RunningApp`](axiom::prelude::RunningApp).
-//!
 //! The split is the determinism boundary made physical:
 //! - the **accumulator** (in the `frame` layer, re-exported through `axiom`)
 //!   decides *how many* fixed steps a frame runs — pure integer arithmetic;
 //! - this **runtime** drives exactly that many `tick`s — deterministic;
 //! - the **TS SDK** owns the clock and the render and computes the `0..1`
 //!   interpolation fraction from the returned [`StepBudget`](axiom::prelude::StepBudget).
-//!
 //! The deterministic core ([`runtime`]) is the rlib part, proven by the native
 //! slice tests below and in `runtime.rs`; the `#[wasm_bindgen]` `start`/`WasmGame`
 //! entry (in [`wasm`], compiled only for `wasm32`) is the thin JS-facing boundary

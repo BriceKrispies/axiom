@@ -275,8 +275,6 @@ mod tests {
 
     #[test]
     fn join_room_id_decodes_through_the_c_abi() {
-        // A real JoinRoom carrying room id "room-7" → the host reads those bytes
-        // to route the connection.
         let frame = NetProtocolApi::encode_join_room(1, b"room-7", b"").unwrap();
         let mut out = [0u8; 64];
         let n = unsafe {
@@ -285,7 +283,6 @@ mod tests {
         assert_eq!(n, 6);
         assert_eq!(&out[..n as usize], b"room-7");
 
-        // A non-JoinRoom frame (a Welcome) yields -1, not a room id.
         let welcome = NetProtocolApi::encode_welcome(1, 1, 0, 1).unwrap();
         assert_eq!(
             unsafe {
@@ -298,7 +295,6 @@ mod tests {
             },
             -1
         );
-        // A too-small output buffer is reported as -1, never a partial write.
         let mut tiny = [0u8; 3];
         assert_eq!(
             unsafe {
@@ -324,8 +320,6 @@ mod tests {
 
     #[test]
     fn client_intent_round_trips_through_the_c_abi() {
-        // Build a real ClientIntent (payload = a (0.25, -0.5) delta) with the
-        // canonical encoder, then decode it through the C ABI.
         let mut payload = Vec::new();
         payload.extend_from_slice(&0.25f32.to_le_bytes());
         payload.extend_from_slice(&(-0.5f32).to_le_bytes());
@@ -371,7 +365,6 @@ mod tests {
         assert_eq!(unsafe { axiom_msg_kind(std::ptr::null(), 0) }, -1);
         assert_eq!(unsafe { axiom_msg_kind([0xFFu8, 0xFF].as_ptr(), 2) }, -1);
         assert_eq!(unsafe { axiom_decode_join_version([0u8].as_ptr(), 1) }, 0);
-        // Too-small output buffer is reported as -1.
         let mut tiny = [0u8; 2];
         assert_eq!(
             unsafe { axiom_encode_welcome(1, 1, 0, 1, tiny.as_mut_ptr(), tiny.len()) },

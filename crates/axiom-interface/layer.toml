@@ -1,11 +1,3 @@
-# Axiom layer manifest — axiom-interface.
-#
-# A root-adjacent layer: Axiom layers are a DAG (no index, no "previous layer"),
-# so this declares only the lower layer it genuinely adapts — the kernel. It is
-# NOT appended above introspect; it sits beside crypto/runtime as a kernel
-# adapter. The browser/native rendering of its neutral draw descriptions lives in
-# a platform-facing module that consumes this layer, never here.
-
 [layer]
 name = "interface"
 crate_name = "axiom-interface"
@@ -43,8 +35,6 @@ introduced_capabilities = [
 
 consumed_capabilities = ["HandleId"]
 
-# Proof that the kernel dependency is genuine: InterfaceApi mints panel identity
-# from HandleId, and PanelId is a HandleId newtype.
 [[proof_exports]]
 export = "InterfaceApi"
 must_reference = ["HandleId"]

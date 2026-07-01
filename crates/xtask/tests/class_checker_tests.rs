@@ -14,8 +14,6 @@ use std::path::{Path, PathBuf};
 use xtask::check::check_architecture;
 use xtask::violation::ViolationKind;
 
-// ---------- temp-dir fixture builder ----------
-
 /// A small helper that paves a synthetic workspace into a unique
 /// temp directory. Each test gets a fresh root so tests can run in
 /// parallel without sharing state.
@@ -259,8 +257,6 @@ fn facade_plus_id_vocabulary() -> &'static str {
     "pub use self::inner::Facade;\npub use self::ids::Id;\nmod inner { pub struct Facade; }\nmod ids { pub struct Id; }\n"
 }
 
-// A lib.rs that imports the kernel layer's prefix (satisfies
-// MissingPreviousImport for a non-kernel layer).
 fn lib_using_axiomkernel() -> &'static str {
     "pub use self::inner::Facade;\nmod inner { use axiomkernel::*; pub struct Facade; }\n"
 }
@@ -268,8 +264,6 @@ fn lib_using_axiomkernel() -> &'static str {
 fn lib_using_real_kernel() -> &'static str {
     "pub use self::inner::Facade;\nmod inner { use kernelfx::*; pub struct Facade; }\n"
 }
-
-// ---------- tests ----------
 
 #[test]
 fn case_a_valid_layer_chain_passes() {

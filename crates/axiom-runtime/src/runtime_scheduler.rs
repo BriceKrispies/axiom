@@ -99,8 +99,6 @@ impl RuntimeScheduler {
                     order,
                     system,
                 });
-                // Keep `entries` sorted by order so execution order is
-                // determined by configuration only, not by insertion order.
                 self.entries.sort_by_key(|e| e.order);
                 Ok(())
             },
@@ -138,10 +136,6 @@ impl RuntimeScheduler {
         stop_on_error: bool,
     ) -> Vec<SystemOutcome> {
         let mut outcomes = Vec::with_capacity(self.entries.len());
-        // `try_fold` walks entries in order; once a failing system runs under
-        // `stop_on_error`, it yields `ControlFlow::Break` and the remaining
-        // systems are never touched — the branchless equivalent of the old
-        // `if failed && stop_on_error { break }`.
         let _walk: std::ops::ControlFlow<()> = self.entries.iter_mut().try_fold((), |(), entry| {
             let result = entry.system.run(ctx);
             let failed = result.is_err();
@@ -183,7 +177,6 @@ mod tests {
         }
     }
 
-    /// A system that returns a typed error.
     struct FailSystem;
     impl RuntimeSystem for FailSystem {
         fn run(&mut self, _ctx: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
@@ -413,8 +406,7 @@ mod cov {
         rt.scheduler_mut()
             .register(HandleId::from_raw(1), "noop", 1, Box::new(Noop))
             .unwrap();
-        rt.step().unwrap(); // executes Noop::run
-                            // The registered system survived the step through the runtime.
+        rt.step().unwrap();
         assert_eq!(rt.scheduler().len(), 1);
     }
 
@@ -426,10 +418,10 @@ mod cov {
             .unwrap();
         assert!(s
             .register(HandleId::from_raw(1), "b", 2, Box::new(Noop))
-            .is_err()); // duplicate id
+            .is_err());
         assert!(s
             .register(HandleId::from_raw(2), "c", 1, Box::new(Noop))
-            .is_err()); // duplicate order
+            .is_err());
         s.register(HandleId::from_raw(2), "c", 2, Box::new(Noop))
             .unwrap();
         assert_eq!(s.len(), 2);

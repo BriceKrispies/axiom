@@ -1,5 +1,4 @@
 //! Equivalence test: the declarative data package mirrors the runtime scene.
-//!
 //! This is the first concrete step of the app-datafication migration (see
 //! docs/app-datafication/FIRST_DATA_ONLY_APP_MIGRATION.md). The app still authors
 //! its scene imperatively in `src/lib.rs`; this test parses the parallel data
@@ -8,7 +7,6 @@
 //! *checked* mirror of the runtime — drift in either direction fails here — and
 //! the contract the future `axiom-appc` compiler + `axiom-runner` will satisfy
 //! when they replace the Rust scene with a data load.
-//!
 //! `toml`/`serde` are dev-dependencies only (the repo's sanctioned app-tier
 //! authoring stack), so nothing here touches the wasm bundle or the engine spine.
 
@@ -17,7 +15,6 @@ use std::path::Path;
 use axiom_gallery::rotating_cube as app;
 use serde::Deserialize;
 
-// ----- Package manifest (axiom.app.toml) -----
 
 #[derive(Debug, Deserialize)]
 struct PackageManifest {
@@ -40,7 +37,6 @@ struct PackageSurface {
     surface_id: String,
 }
 
-// ----- Scene data (package/scenes/main.toml) -----
 
 #[derive(Debug, Deserialize)]
 struct Scene {

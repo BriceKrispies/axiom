@@ -61,10 +61,7 @@ impl SoftwareFramebuffer {
 
     /// **src-over composite** a straight-alpha linear RGBA `src` onto `(x, y)`.
     /// Out-of-bounds coordinates are ignored. Branchless: per channel
-    /// `out = src·a + dst·(1-a)`, with `out_a = a + dst_a·(1-a)`. This is the 2D
-    /// surface's alpha-blend path — the verified-missing "no alpha blending" fix
-    /// on the software backend — so a translucent draw composites over what is
-    /// already in the buffer instead of overwriting it.
+    /// `out = src·a + dst·(1-a)`, with `out_a = a + dst_a·(1-a)`.
     pub(crate) fn composite_pixel(&mut self, x: u32, y: u32, src: [f32; 4]) {
         let inside = (x < self.width) & (y < self.height);
         let idx = (y as usize * self.width as usize + x as usize) * 4;
@@ -90,8 +87,7 @@ impl SoftwareFramebuffer {
 
 /// src-over composite a straight-alpha linear RGBA `src` onto a 4-byte RGBA8
 /// destination `slot`. Branchless: `out = src·a + dst·(1-a)` per colour channel,
-/// `out_a = a + dst_a·(1-a)`. Exact for the common opaque-destination case
-/// (over a cleared background or an already-composited opaque layer); a
+/// `out_a = a + dst_a·(1-a)`. Exact for an opaque destination; a
 /// partially-transparent destination uses the premultiplied-over form (no divide).
 fn over(slot: &mut [u8], src: [f32; 4]) {
     let a = src[3].clamp(0.0, 1.0);
@@ -132,7 +128,6 @@ mod tests {
         assert_eq!(fb.height(), 2);
         fb.clear([1.0, 0.0, 0.5, 1.0]);
         let bytes = fb.into_rgba_bytes();
-        // 0.5 * 255 + 0.5 = 128 (rounded). Every pixel is the clear colour.
         assert_eq!(bytes.len(), 2 * 2 * 4);
         (0..2)
             .for_each(|x| (0..2).for_each(|y| assert_eq!(px(&bytes, 2, x, y), [255, 0, 128, 255])));
@@ -145,7 +140,6 @@ mod tests {
         fb.set_pixel(1, 2, [1.0, 1.0, 1.0, 1.0]);
         let bytes = fb.into_rgba_bytes();
         assert_eq!(px(&bytes, 3, 1, 2), [255, 255, 255, 255]);
-        // Every other pixel is still the cleared black; the target is white.
         (0..3).for_each(|x| {
             (0..3).for_each(|y| {
                 let is_target = (x == 1) && (y == 2);
@@ -159,7 +153,6 @@ mod tests {
     fn out_of_bounds_write_is_ignored() {
         let mut fb = SoftwareFramebuffer::new(2, 2);
         fb.clear([0.0, 0.0, 0.0, 1.0]);
-        // Past either edge: no panic, no change to any in-bounds pixel.
         fb.set_pixel(2, 0, [1.0, 1.0, 1.0, 1.0]);
         fb.set_pixel(0, 2, [1.0, 1.0, 1.0, 1.0]);
         let bytes = fb.into_rgba_bytes();
@@ -175,7 +168,6 @@ mod tests {
 
     #[test]
     fn composite_over_opaque_blends_half_alpha_exactly() {
-        // Opaque red destination; composite half-alpha blue over it.
         let mut fb = SoftwareFramebuffer::new(1, 1);
         fb.clear([1.0, 0.0, 0.0, 1.0]);
         fb.composite_pixel(0, 0, [0.0, 0.0, 1.0, 0.5]);
@@ -185,8 +177,6 @@ mod tests {
 
     #[test]
     fn composite_over_transparent_becomes_the_source() {
-        // A fresh (transparent-black) buffer; an opaque draw replaces the pixel
-        // and turns it opaque (out_a = 1 + 0 = 1).
         let mut fb = SoftwareFramebuffer::new(1, 1);
         fb.composite_pixel(0, 0, [0.2, 0.4, 0.6, 1.0]);
         assert_eq!(fb.into_rgba_bytes(), vec![51, 102, 153, 255]);

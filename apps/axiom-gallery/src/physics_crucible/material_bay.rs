@@ -1,5 +1,4 @@
 //! Station 3 — Material Bay.
-//!
 //! Material response: a restitution ladder (three spheres dropped from the same
 //! height with restitution `0.0`, `0.5`, `0.9`) proving the solver's combined
 //! restitution makes a bouncy body rebound, and a mass test proving an

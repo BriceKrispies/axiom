@@ -106,12 +106,9 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUnitlessFloatPublicApi {
         if !is_engine_file(cx, item.span) {
             return;
         }
-        // The scalar-floor crates (kernel, math) are where raw f32 is correct.
         if is_in_crate_dir(cx, item.span, SCALAR_FLOOR) {
             return;
         }
-        // Only the public surface is the concern. A private fn / struct can use
-        // bare floats freely.
         let def_id = item.owner_id.def_id;
         if !cx.tcx.visibility(def_id.to_def_id()).is_public() {
             return;
@@ -123,7 +120,6 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUnitlessFloatPublicApi {
             // ItemKind::Struct(_ident, _generics, variant_data) — data is third.
             ItemKind::Struct(_, _, data) => {
                 for field in data.fields() {
-                    // A private field of a public struct is out of scope.
                     if cx.tcx.visibility(field.def_id.to_def_id()).is_public()
                         && is_bare_float(field.ty)
                     {
@@ -136,7 +132,6 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUnitlessFloatPublicApi {
     }
 
     fn check_impl_item(&mut self, cx: &LateContext<'tcx>, impl_item: &'tcx ImplItem<'tcx>) {
-        // Only methods/associated functions carry a signature to inspect.
         let ImplItemKind::Fn(sig, _) = impl_item.kind else {
             return;
         };
@@ -149,31 +144,22 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUnitlessFloatPublicApi {
         if !is_engine_file(cx, impl_item.span) {
             return;
         }
-        // The scalar-floor crates (kernel, math) are where raw f32 is correct.
         if is_in_crate_dir(cx, impl_item.span, SCALAR_FLOOR) {
             return;
         }
         let def_id = impl_item.owner_id.def_id;
-        // Only the public surface is the concern.
         if !cx.tcx.visibility(def_id.to_def_id()).is_public() {
             return;
         }
-        // The parent of an impl item is its `impl` block.
         let parent = cx.tcx.local_parent(def_id);
         if let Node::Item(parent_item) = cx.tcx.hir_node_by_def_id(parent) {
             if let ItemKind::Impl(imp) = parent_item.kind {
-                // Skip trait-impl methods: the signature is the trait's contract,
-                // not a free choice of this crate. (`impl Trait for T` sets
-                // `of_trait`; an inherent `impl T` leaves it `None`.)
+                // Trait-impl methods are skipped: `impl Trait for T` sets
+                // `of_trait`, and the signature there is the trait's contract,
+                // not this crate's free choice.
                 if imp.of_trait.is_some() {
                     return;
                 }
-                // Skip the inherent methods of a *quantity newtype* — a struct
-                // that is itself a single `f32`/`f64` field (e.g. `Pixels(f32)`,
-                // `Angle { radians: f32 }`). Such a type IS a float quantity, so
-                // its own constructor (`new(f32)`) and accessor (`get() -> f32`)
-                // are the boundary where a raw scalar enters/leaves the type, not
-                // a unitless leak — exactly like the kernel's `Ratio::new`/`get`.
                 if impl_self_is_float_newtype(cx, &imp) {
                     return;
                 }

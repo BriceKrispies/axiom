@@ -1,8 +1,7 @@
-//! Player intents routed to sim mutations. Audit: GW-E10 IntentRouter,
-//! "Ecology/gameplay" intents. Scaffold: dig is the first verb (M1).
+//! Player intents routed to sim mutations. Dig is the first verb.
 use crate::growth::ids::ChunkCoord;
 
-/// A player intent. Audit: interactions.xml / apply_intent.
+/// A player intent.
 #[derive(Debug, Clone)]
 pub enum Intent {
     Dig {
@@ -21,7 +20,7 @@ pub enum Intent {
     },
 }
 
-/// Routes an intent to its handler. Audit: GW-E10/E11. Scaffold.
+/// Routes an intent to its handler.
 #[derive(Debug, Default)]
 pub struct IntentRouter;
 

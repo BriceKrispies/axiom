@@ -7,13 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free; a live windowing backend is composed in later.
 crate-type = ["rlib"]
 
 [dependencies]
-# A *feature module* (kind = "feature-module"). It depends on the layer spine it
-# needs and, as features land, on the engine modules listed in `module.toml`'s
-# `allowed_modules`. The skeleton starts with just the layers it re-exports.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-ecs = { path = "../../crates/axiom-ecs" }
@@ -25,9 +21,8 @@ axiom-resources = { path = "../axiom-resources" }
 axiom-render-pipeline = { path = "../axiom-render-pipeline" }
 axiom-webgpu = { path = "../axiom-webgpu" }
 
-# Windowing is the platform presentation backend, used only by the wasm32 `run`
-# terminal entry (native builds drive headlessly via build + tick). Pulled in
-# only for wasm32 so the native umbrella never links it.
+# wasm32-only: platform presentation backend for the `run` entry point; native
+# builds drive headlessly via build + tick.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axiom-windowing = { path = "../axiom-windowing" }
 

@@ -1,15 +1,12 @@
 //! The retro FPS agent — driving the real game through the reusable `axiom-agent`
 //! module. Native-only and gated behind the `agent` feature, so the wasm build
 //! and the default workspace gates never compile it.
-//!
 //! There is **no hand-rolled decision logic** here. Every tick the app:
-//!
 //! 1. **observes** the live retro FPS state into `axiom-agent`'s neutral observation,
 //! 2. lets the agent substrate **decide** and emit player-equivalent intents
 //!    (`AgentApi::step`, producing a real `DecisionReport`), and
 //! 3. **lowers** the emitted neutral intent back into the retro FPS [`Intent`] the
 //!    engine consumes.
-//!
 //! Per the Module Law the module never learns a game noun: the app owns both ends
 //! of the translation, here. The agent expresses play as *discrete
 //! player-equivalent controls* (forward / back / turn / strafe / fire), packed
@@ -188,7 +185,6 @@ fn micro(value: f32) -> i64 {
 
 /// Run one `observe → decide → emit` cycle through `axiom-agent` and return the
 /// lowered retro FPS [`Intent`] to apply this tick.
-///
 /// All of `axiom-agent`'s neutral contracts (id, profile, observation, brain,
 /// memory, queue, intent) are created and consumed here, held only by type
 /// inference — the app never names a sealed `axiom-agent` type. The brain is a

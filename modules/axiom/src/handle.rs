@@ -87,10 +87,8 @@ mod tests {
         assert_eq!(h, Handle::new(9));
     }
 
-    // The explicit `.clone()` is the point: it exercises `Handle`'s hand-written
-    // `Clone` impl (the `*self` body the coverage gate requires a test to reach),
-    // alongside the `Copy` move above. `clone_on_copy` would have us drop it and
-    // lose that coverage, so it is allowed here deliberately.
+    // Explicit `.clone()` exercises the hand-written `Clone` impl for coverage;
+    // `clone_on_copy` is allowed deliberately so it isn't lint-stripped.
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn copy_and_clone_preserve_identity() {

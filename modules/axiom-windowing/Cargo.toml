@@ -7,39 +7,25 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. The deterministic core is browser-free and wasm-clean; the
-# real wgpu/web-sys presentation arm (a future, compiled-out platform arm) never
-# enters this rlib's native build.
 crate-type = ["rlib"]
 
 [dependencies]
-# An *engine module* (kind = "engine-module"): it composes NO other module
-# (allowed_modules = []). It builds on the kernel and the host layer's
-# deterministic presentation boundary (HostPresentationRequest and friends).
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-host = { path = "../../crates/axiom-host" }
 
-# The live presentation arm, pulled in ONLY for wasm32, so native `cargo
-# test`/coverage never compiles it and the deterministic core stays browser-free.
-# Windowing is a feature module that composes the gpu-backend module: it drives
-# the run loop (canvas lookup + requestAnimationFrame + monotonic tick) and
-# delegates each frame's real GPU draw to axiom-gpu-backend. This is a sanctioned
-# platform-facing module (Module Law #9 / PLATFORM_FACING_MODULES).
+# wasm32-only: keeps native `cargo test`/coverage from compiling the GPU
+# backend, so the deterministic core stays browser-free. The run loop delegates
+# each frame's real GPU draw to axiom-gpu-backend.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axiom-gpu-backend = { path = "../axiom-gpu-backend" }
-# The software last-resort backend windowing selects when there is no GPU (or
-# when `?backend=canvas2d` forces it). Composed only in the wasm32 run loop.
+# Software fallback backend selected when there is no GPU, or when
+# `?backend=canvas2d` forces it.
 axiom-canvas2d-backend = { path = "../axiom-canvas2d-backend" }
-# The deterministic frame recorder, composed ONLY in the wasm32 run loop to drive
-# the dev frame-scrubber overlay every browser game shares (it records each
-# presented frame and re-presents it while scrubbing). Pure + native-clean, but
-# pulled in only for wasm32 so the native core stays free of it (and the
-# genuine-dependency lint, which runs on native, never sees an unused edge).
+# Drives the dev frame-scrubber overlay (records/re-presents frames);
+# wasm32-only so the native genuine-dependency lint never sees an unused edge.
 axiom-recording = { path = "../axiom-recording" }
-# The neutral interface layer (panels / draw list / drag / buttons) the dev
-# frame-scrubber overlay is built on. wasm32-only for the same reason as the
-# others: the native core stays free of it and the genuine-dependency lint never
-# sees an unused edge.
+# Interface layer (panels/draw list/drag/buttons) the frame-scrubber overlay is
+# built on; same wasm32-only reasoning.
 axiom-interface = { path = "../../crates/axiom-interface" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

@@ -27,12 +27,10 @@ impl ServerEvent {
         })
     }
 
-    /// The authoritative tick the event belongs to.
     pub(crate) fn server_tick(&self) -> u64 {
         self.server_tick
     }
 
-    /// The opaque event payload.
     pub(crate) fn payload(&self) -> &[u8] {
         self.payload.as_bytes()
     }

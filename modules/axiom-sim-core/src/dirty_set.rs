@@ -265,7 +265,6 @@ mod tests {
             Some(CauseRef::Command),
         );
         set.mark_fact(FactId::from_raw(1), 7, DirtyKind::Added, None);
-        // Last write per fact wins.
         set.mark_fact(FactId::from_raw(1), 7, DirtyKind::Removed, None);
         let facts: Vec<(u64, u32, DirtyKind)> = set
             .dirty_facts()

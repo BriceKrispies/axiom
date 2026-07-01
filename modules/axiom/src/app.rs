@@ -19,8 +19,6 @@ use axiom_render_pipeline::RenderPipelineApi;
 use axiom_runtime::{Runtime, RuntimeConfig};
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
-// Windowing is the platform presentation backend, used only by the wasm `run`
-// terminal entry; native builds drive headlessly via `build` + `tick`.
 #[cfg(target_arch = "wasm32")]
 use axiom_windowing::WindowingApi;
 
@@ -32,39 +30,31 @@ const DEFAULT_SURFACE_ID: &str = "axiom-surface";
 use crate::assets::Assets;
 use crate::default_plugins::DefaultPlugins;
 use crate::material::Material;
-// NOTE: `Texture` is no longer named here — the material store holds the full
-// `Material` value (it carries its own optional texture plus the catalog fields).
 use crate::mesh::Mesh;
 use crate::mesh_geometry::{mesh_geometry, MeshGeometry};
 use crate::scene_commands::SceneCommands;
 use crate::window::Window;
 
-/// The engine's spatial-reasoning queries on [`RunningApp`] (raycast / overlap),
-/// in a child module so this file stays within the per-file size budget.
+/// The engine's spatial-reasoning queries on [`RunningApp`] (raycast / overlap).
 mod queries;
 
-/// Typed component access by `Entity` (`get`/`set`/`query`) lives in a sibling
-/// child module, keeping this file within the per-file size budget.
+/// Typed component access by `Entity` (`get`/`set`/`query`).
 mod components;
 
 /// The dynamic, kind-keyed retained-world surface (`spawn_empty`/`set_dynamic`/
 /// `query_dynamic`/`despawn_subtree`/`children_of`) — the app-blind component arm
-/// a wasm-boundary game world is built on — lives in a sibling child module,
-/// keeping this file within the per-file size budget.
+/// a wasm-boundary game world is built on.
 mod dynamic_world;
 
 /// Incremental runtime scene authoring (`add_mesh`/`add_material`/`add_light`/
 /// `set_camera`) — growing the live world a piece at a time after the app is
-/// running — lives in a sibling child module, keeping this file within the
-/// per-file size budget.
+/// running.
 mod authoring;
 
-/// The per-frame `tick` family lives in a sibling child module, keeping this
-/// file within the per-file size budget.
+/// The per-frame `tick` family.
 mod frame;
 
-/// The live-backend resource exports (mesh streams, material albedos) live in a
-/// sibling child module, keeping this file within the per-file size budget.
+/// The live-backend resource exports (mesh streams, material albedos).
 mod resources;
 
 /// The default fixed simulation step: 1 ms, matching the engine's slices.
@@ -145,8 +135,6 @@ impl App {
     /// plain draw data, never a platform type.
     #[cfg(target_arch = "wasm32")]
     pub fn run(self) {
-        // Read the surface config through a non-`window`-named binding so this
-        // platform-free module never spells the literal platform needles.
         let cfg = &self.window;
         let surface_id = cfg.surface_id().unwrap_or(DEFAULT_SURFACE_ID).to_string();
         let (width, height) = (cfg.width(), cfg.height());
@@ -173,14 +161,12 @@ impl App {
                     lights,
                     outcome.light_view_proj(),
                     outcome.mesh_batches(),
-                    // The camera and the per-instance caster flags (in the same
-                    // order `mesh_batches` lays its instances out) drive the Canvas
-                    // backend's planar contact shadows.
+                    // Per-instance caster flags (matching `mesh_batches`' order)
+                    // drive the Canvas backend's planar contact shadows.
                     outcome.camera_view_proj(),
                     outcome.mesh_batch_casters(),
-                    // The frame's SDF raymarch scene, composited over the meshes by
-                    // the live backend. Forwarded for every `App::run` app, so an
-                    // authored `SdfShape` renders live with no per-app wiring.
+                    // The frame's SDF raymarch scene, composited over the meshes
+                    // by the live backend.
                     outcome.sdf_scene().cloned(),
                 )
             });
@@ -220,14 +206,11 @@ pub struct RunningApp {
     render: bool,
     clear_color: [f32; 4],
     light_direction: Vec3,
-    // Each registered mesh's own resolved geometry (keyed by handle id) and each
-    // registered `Material` (keyed by handle id), held in full so its base colour,
-    // optional albedo texture, AND its catalog surface (emissive / roughness /
-    // opacity) all reach the render path. The scene's renderables reference these ids.
+    // Held in full (not just an id) so base colour, albedo texture, and catalog
+    // surface (emissive/roughness/opacity) all reach the render path.
     meshes: Vec<(u64, MeshGeometry)>,
     materials: Vec<(u64, Material)>,
-    // How many renderables the scene draws each frame (the live backend's
-    // per-instance buffer capacity).
+    // The live backend's per-instance buffer capacity.
     renderables: usize,
 }
 
@@ -261,8 +244,6 @@ impl RunningApp {
             .expect("surface dimensions are valid");
         let aspect = surface.width() as f32 / surface.height() as f32;
 
-        // Run user setup and realize the scene + resources (shared with the live
-        // `reauthor` path).
         let authored = Self::author(app.setup, aspect);
 
         RunningApp {
@@ -303,14 +284,10 @@ impl RunningApp {
         let light_direction = commands
             .realize_into(&mut scene, &math)
             .unwrap_or(Vec3::ZERO);
-        // Propagate world transforms once at author time so the spatial queries
-        // ([`RunningApp::raycast`] / `overlap_box`) answer correctly from the
-        // very first frame, before any `tick` has advanced the scene.
+        // Propagate world transforms once at author time so spatial queries
+        // answer correctly from the very first frame, before any `tick`.
         scene.update_world_transforms();
 
-        // Each material asset -> (handle id, the full `Material`); each mesh
-        // asset -> its own resolved geometry keyed by handle id. The engine
-        // resolves a mesh by its kind, so distinct meshes get distinct geometry.
         let materials: Vec<(u64, Material)> = materials
             .iter()
             .enumerate()
@@ -585,8 +562,6 @@ mod tests {
 
     #[test]
     fn tick_with_controls_moves_the_camera() {
-        // Moving the controller camera forward changes the cube's on-screen draw;
-        // an input-free tick does not.
         let moved = controller_app().build().tick_with_controls(
             0,
             &[],
@@ -607,9 +582,6 @@ mod tests {
 
     #[test]
     fn snapshot_sim_round_trips_through_restore_into_a_fresh_app() {
-        // Drive the camera a few frames so the controller accumulates real state,
-        // snapshot the sim, then restore those bytes into a FRESH app and confirm
-        // it re-serializes byte-identically — the fork reproduces the exact world.
         let mut app = controller_app().build();
         (0..3).for_each(|i| {
             app.tick_with_controls(
@@ -628,16 +600,11 @@ mod tests {
         let mut forked = controller_app().build();
         forked.restore_sim(&bytes).unwrap();
         assert_eq!(forked.snapshot_sim(), bytes);
-
-        // A truncated buffer is a deterministic error, not a panic.
         assert!(forked.restore_sim(&[7, 7, 7]).is_err());
     }
 
     #[test]
     fn snapshot_session_round_trips_the_sim_and_continues_the_rng() {
-        // Drive the sim, advance the host RNG, then bundle both into one session
-        // blob. Restoring into a fresh app forks the world AND hands back the
-        // generator, so the restored session continues the identical sequence.
         let mut app = controller_app().build();
         (0..3).for_each(|i| {
             app.tick_with_controls(
@@ -659,9 +626,7 @@ mod tests {
 
         let mut forked = controller_app().build();
         let mut restored_rng = forked.restore_session(&blob).unwrap();
-        // The sim forked exactly: re-snapshotting the session is byte-identical.
         assert_eq!(forked.snapshot_session(&restored_rng), blob);
-        // The generator resumes the identical continuation of the original.
         let original: Vec<u64> = (0..8).map(|_| rng.next_u64()).collect();
         let replayed: Vec<u64> = (0..8).map(|_| restored_rng.next_u64()).collect();
         assert_eq!(original, replayed);
@@ -669,7 +634,6 @@ mod tests {
 
     #[test]
     fn restore_session_rejects_an_incompatible_schema() {
-        // A buffer whose major version is one ahead is rejected deterministically.
         let mut writer = BinaryWriter::new();
         SchemaVersion::new(SESSION_SCHEMA.major() + 1, 0).write_to(&mut writer);
         let mut app = controller_app().build();
@@ -681,8 +645,6 @@ mod tests {
 
     #[test]
     fn restore_session_rejects_truncation_at_every_prefix() {
-        // Drive the source app so its sim state differs from a fresh target — a
-        // partial restore would therefore be *visible* as a changed target sim.
         let mut app = controller_app().build();
         (0..3).for_each(|i| {
             app.tick_with_controls(
@@ -700,9 +662,8 @@ mod tests {
 
         let mut forked = controller_app().build();
         let baseline = forked.snapshot_sim();
-        // Every strictly-truncated prefix is a deterministic error, never a panic,
-        // and — because the only mutation is the final `restore_sim` — leaves the
-        // target's sim byte-for-byte untouched (no half-applied restore).
+        // The only mutation is the final `restore_sim`, so a failed (truncated)
+        // restore must leave the target's sim byte-for-byte untouched.
         (0..blob.len()).for_each(|len| {
             assert!(forked.restore_session(&blob[..len]).is_err());
             assert_eq!(
@@ -735,8 +696,6 @@ mod tests {
             }
             last
         };
-        // Same controls ⇒ byte-identical frames; turning changes the view from a
-        // bare tick.
         assert_eq!(drive(), drive());
         assert_ne!(drive().draws(), controller_app().build().tick(0).draws());
     }
@@ -747,7 +706,6 @@ mod tests {
             .build()
             .tick_with(0, &[PlayerInput::new(0, Vec3::new(1.0, 0.0, 0.0))]);
         let still = player_app().build().tick_with(0, &[]);
-        // Moving player 0 changes its on-screen draw; an input-free tick does not.
         assert_ne!(
             moved.draws(),
             still.draws(),
@@ -757,7 +715,6 @@ mod tests {
 
     #[test]
     fn tick_with_is_deterministic_and_accumulates() {
-        // Same inputs ⇒ byte-identical frames; the move accumulates across ticks.
         let drive = |deltas: &[f32]| {
             let mut app = player_app().build();
             let mut last = app.tick_with(0, &[]);
@@ -770,7 +727,6 @@ mod tests {
             last
         };
         assert_eq!(drive(&[0.5, 0.5]), drive(&[0.5, 0.5]));
-        // Two +0.5 steps land somewhere a single +0.5 step does not.
         assert_ne!(drive(&[0.5, 0.5]).draws(), drive(&[0.5]).draws());
     }
 
@@ -782,7 +738,6 @@ mod tests {
 
     #[test]
     fn an_app_with_no_setup_runs_an_empty_simulation() {
-        // Exercises the no-setup path (the `None` arm of the setup callback).
         let mut app = App::new().build();
         let outcome = app.tick(0);
         assert_eq!(outcome.command_count(), 0);
@@ -795,7 +750,7 @@ mod tests {
         assert!(format!("{app:?}").starts_with("RunningApp"));
         let outcome = app.tick(0);
         // Clear + SetCamera + SetPipeline + 3 x (SetMesh + SetMaterial +
-        // DrawIndexed) + Present = 13.
+        // DrawIndexed) + Present.
         assert_eq!(outcome.command_count(), 13);
         assert_eq!(outcome.draws().len(), 3);
         assert_eq!(outcome.clear_color(), [0.05, 0.06, 0.08, 1.0]);
@@ -816,7 +771,6 @@ mod tests {
 
     #[test]
     fn a_held_world_evolves_and_replays_deterministically() {
-        // Tick 0 differs from a later tick (the cubes spun)...
         let mut a = three_cube_app().build();
         let early = a.tick(0);
         let mut later_outcome = early.clone();
@@ -826,7 +780,6 @@ mod tests {
         assert_eq!(later_outcome.tick(), 60);
         assert_ne!(early.draws()[0].mvp(), later_outcome.draws()[0].mvp());
 
-        // ...and a fresh app replays tick 0 byte-equal.
         let mut b = three_cube_app().build();
         assert_eq!(b.tick(0), early);
     }
@@ -847,7 +800,6 @@ mod tests {
 
     #[test]
     fn a_render_app_with_no_meshes_still_clears_and_presents() {
-        // Exercises the empty-geometry branch: render enabled, no renderables.
         let mut app = App::new()
             .window(Window::new(64, 64))
             .add_plugins(DefaultPlugins)
@@ -863,7 +815,6 @@ mod tests {
             })
             .build();
         let outcome = app.tick(0);
-        // Clear + Present, no draws.
         assert_eq!(outcome.draws().len(), 0);
         assert!(outcome.recorded());
     }
@@ -876,22 +827,17 @@ mod tests {
         assert!(!vertices.is_empty());
         // position(3)+normal(3)+uv(2)+colour(4) per vertex.
         assert_eq!(vertices.len() % 12, 0);
-        // Per-vertex colour defaults to opaque white so the per-instance colour
-        // stays authoritative (white * instance == instance); it sits after the
-        // 2-float uv, at floats [8..12].
+        // Per-vertex colour defaults to opaque white (so the per-instance colour
+        // stays authoritative: white * instance == instance); floats [8..12].
         assert_eq!(&vertices[8..12], &[1.0, 1.0, 1.0, 1.0]);
         assert!(!indices.is_empty());
 
-        // The multi-mesh upload set: three cubes share one mesh, so one entry,
-        // matching the single mesh_vertex_stream geometry.
         let set = app.mesh_set();
         assert_eq!(set.len(), 1);
         assert_eq!(set[0].1.len() % 12, 0);
         assert_eq!(set[0].1, vertices);
         assert_eq!(set[0].2, indices);
 
-        // Each authored material resolves to a backend albedo (untextured here →
-        // 1x1 white), one entry per material.
         let mats = app.material_textures();
         assert_eq!(mats.len(), 3);
         assert_eq!((mats[0].1, mats[0].2), (1, 1));
@@ -900,14 +846,10 @@ mod tests {
 
     #[test]
     fn reauthor_replaces_the_scene_and_renderable_count_in_place() {
-        // Build a one-cube app, then re-author into the three-cube scene while
-        // keeping the running app: the renderable count and the rendered frame
-        // both change, and the engine keeps ticking monotonically.
         let mut app = player_app().build();
         assert_eq!(app.renderable_count(), 1);
         let before = app.tick(0);
 
-        // Re-author with the three-cube authoring closure.
         app.reauthor(|world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
             for offset_x in [-2.6_f32, 0.0, 2.6] {
@@ -949,7 +891,6 @@ mod tests {
 
     #[test]
     fn an_app_with_no_mesh_has_empty_geometry() {
-        // Exercises the no-mesh arm of mesh_vertex_stream + a zero count.
         let app = App::new().build();
         assert_eq!(app.renderable_count(), 0);
         let (vertices, indices) = app.mesh_vertex_stream();

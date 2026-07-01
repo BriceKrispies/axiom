@@ -14,10 +14,6 @@
 //!
 //! Each scenario prints a stats report and a PASS/FAIL verdict; the process exit
 //! code is `0` on PASS, `1` on FAIL, `2` on a usage error — so it can gate CI.
-//!
-//! Repo tooling: a Tool by its `tools/` location, outside the engine dependency
-//! graph and the coverage gate. It uses ordinary control flow and sockets the
-//! engine spine may not.
 
 mod args;
 mod http;

@@ -237,7 +237,6 @@ mod tests {
         let by_parent: Vec<CausalEventId> =
             journal.by_parent(parent).map(CausalEvent::id).collect();
         assert_eq!(by_parent, vec![e1, e3]);
-        // An unrelated cause matches nothing.
         assert_eq!(journal.by_parent(CauseRef::Command).count(), 0);
         let all: Vec<u64> = journal.iter().map(|e| e.id().raw()).collect();
         assert_eq!(all, vec![1, 2, 3]);
@@ -246,7 +245,6 @@ mod tests {
     #[test]
     fn parent_child_chain_links_events() {
         let mut journal = CausalJournal::new();
-        // A root event, then a child whose parent is the root event.
         let root = journal.append(CausalEventKind::new(1), 0, (None, None), None, 1, None);
         let child = journal.append(
             CausalEventKind::new(2),

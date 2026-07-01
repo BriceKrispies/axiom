@@ -96,26 +96,21 @@ impl<'tcx> LateLintPass<'tcx> for TestWithoutAssertion {
         if matches!(kind, FnKind::Closure) {
             return;
         }
-        // Detect `#[test]` functions. Under `--test` the `#[test]` attribute
-        // macro is *consumed* (replaced by a generated `#[rustc_test_marker]`
-        // const), so we can't match the raw attribute; `is_in_test_function`
-        // matches against the marker-name set instead. We pass a node *inside*
-        // the body so the function itself is on the ancestor chain.
+        // Under `--test` the `#[test]` attribute macro is *consumed* (replaced by
+        // a generated `#[rustc_test_marker]` const), so we can't match the raw
+        // attribute; `is_in_test_function` matches the marker-name set instead.
         if !is_in_test_function(cx.tcx, body.value.hir_id) {
             return;
         }
-        // ...but lint the test function ITSELF, never a helper nested inside it.
-        // A test that declares `struct S; impl Trait for S { fn run() {..} }` in
-        // its body would otherwise have that inner `run` flagged: it's inside a
-        // test, but it isn't the test. If this fn's *parent* is already inside a
-        // test fn, this is such a nested helper — skip it.
+        // Lint the test function itself, never a helper nested inside it (e.g. an
+        // inline `impl Trait for S { fn run() {..} }`): if this fn's parent is
+        // already inside a test fn, it's such a nested helper — skip it.
         let hir_id = cx.tcx.local_def_id_to_hir_id(def_id);
         if is_in_test_function(cx.tcx, cx.tcx.parent_hir_id(hir_id)) {
             return;
         }
-        // `#[should_panic]`: the expected panic IS the assertion. Under the new
-        // attribute-parsing it's lowered to `AttributeKind::ShouldPanic` (no
-        // longer a raw `should_panic` path), so match the parsed kind.
+        // `#[should_panic]` is lowered to `AttributeKind::ShouldPanic` (no longer
+        // a raw `should_panic` path), so match the parsed kind, not the attribute.
         if is_should_panic(cx.tcx, hir_id) {
             return;
         }
@@ -189,7 +184,6 @@ impl<'a, 'tcx> AssertionFinder<'a, 'tcx> {
                 return true;
             }
         }
-        // A call to a helper that asserts (by name, or by its resolved body).
         if let ExprKind::Call(callee, _) = expr.kind {
             return self.call_is_assertion(callee);
         }

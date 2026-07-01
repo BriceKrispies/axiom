@@ -75,12 +75,6 @@ impl SystemReport {
     /// decoded lossily, so any byte sequence yields a valid `String` (system
     /// names are ASCII in practice, so round trips are exact).
     pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        // Branchless sequential decode: each field threads through `and_then`,
-        // so the first failure short-circuits and the reader advances exactly
-        // as `write_to` laid the fields down. The optional error code is the
-        // presence-tag pattern — `then(...)` runs the `u16` read only when the
-        // tag is set, then `transpose` lifts the inner result, folded into the
-        // chain by `and_then` to leave no residual `?`.
         reader.read_u64().and_then(|system_id| {
             reader.read_byte_slice().and_then(|name_bytes| {
                 let name = String::from_utf8_lossy(name_bytes).into_owned();
@@ -139,9 +133,6 @@ mod tests {
 
     #[test]
     fn succeeded_system_round_trips_without_error_code() {
-        // A hand-built success report exercises the `None` arm of both
-        // write_to and read_from (frame fixtures register only failing
-        // systems).
         let report = SystemReport {
             system_id: 9,
             name: "physics".to_string(),

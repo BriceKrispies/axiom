@@ -1,5 +1,4 @@
 //! App-space debug geometry: the neutral renderable vocabulary the crucible draws.
-//!
 //! The renderer has three primitive meshes (cube, sphere, plane) and no line or
 //! text primitive (see `README.md`), so every debug overlay here is expressed as
 //! those primitives: a line/ray/normal/velocity is a row of small marker cubes
@@ -223,7 +222,6 @@ mod tests {
             length: 5.0,
             hit: Some(Vec3::new(3.0, 0.0, 0.0)),
         });
-        // SAMPLES line markers + 1 hit marker.
         assert_eq!(shapes.len() as u32, SAMPLES + 1);
         // The last instance is the hit marker.
         assert_eq!(shapes[shapes.len() - 1].color, palette::RAY_HIT);

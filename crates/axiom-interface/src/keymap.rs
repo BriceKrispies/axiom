@@ -132,17 +132,12 @@ mod tests {
     fn modifier_insensitive_key_matches_any_modifiers_and_wrong_key_misses() {
         let map = Keymap::new(&[KeyBinding::key("w", 7)]);
         assert_eq!(map.resolve("w", ev(false, false, false)), Some(7));
-        // The same key resolves regardless of held modifiers (the key-up-safe form).
         assert_eq!(map.resolve("w", ev(true, true, true)), Some(7));
-        // A different key misses.
         assert_eq!(map.resolve("a", ev(false, false, false)), None);
     }
 
     #[test]
     fn exact_chord_matches_only_its_modifier_state() {
-        // plain / Shift / Ctrl / Alt on the same key -> distinct actions. Resolving
-        // each in turn exercises the non-matching modifier arms of the earlier
-        // bindings before the matching one is found.
         let map = Keymap::new(&[
             KeyBinding::chord("Backquote", false, false, false, 0),
             KeyBinding::chord("Backquote", true, false, false, 1),
@@ -153,7 +148,6 @@ mod tests {
         assert_eq!(map.resolve("Backquote", ev(true, false, false)), Some(1));
         assert_eq!(map.resolve("Backquote", ev(false, true, false)), Some(2));
         assert_eq!(map.resolve("Backquote", ev(false, false, true)), Some(3));
-        // A multi-modifier combo matches no exact chord.
         assert_eq!(map.resolve("Backquote", ev(true, true, false)), None);
     }
 

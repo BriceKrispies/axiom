@@ -86,12 +86,8 @@ mod sdf_scene;
 mod sprite_draw2d;
 mod text2d;
 
-// --- Curated public surface ---
-
-// Primary facade.
 pub use host_api::HostApi;
 
-// Host boundary data types future adapters must be able to name.
 pub use host_boundary_config::HostBoundaryConfig;
 pub use host_error::HostError;
 pub use host_error_code::HostErrorCode;
@@ -108,11 +104,9 @@ pub use host_step_plan::HostStepPlan;
 pub use host_viewport::HostViewport;
 pub use pixels::Pixels;
 
-// Embed-seam boundary data types (SPEC-12): the inbound session identity and
-// the outbound terminal outcome the platform arm decodes/forwards. Primitive-
-// only, browser-free — the same discipline as every other host boundary type.
-// `Score` is the single sanctioned f64 boundary (a quantity newtype, like
-// `Pixels`); no naked float appears elsewhere on this surface.
+// Embed-seam boundary data types (SPEC-12). `Score` is the single sanctioned
+// f64 boundary (a quantity newtype, like `Pixels`); no naked float appears
+// elsewhere on this surface.
 pub use host_metrics::HostMetrics;
 pub use host_outcome::HostOutcome;
 pub use host_outcome_set::HostOutcomeSet;
@@ -122,10 +116,6 @@ pub use host_session_params::HostSessionParams;
 pub use player_id::PlayerId;
 pub use score::Score;
 
-// Presentation-boundary data types future browser/WASM adapters and a future
-// axiom-webgpu live mode must be able to name. None of these contain
-// browser/DOM/WebGPU objects — they are stable kernel identities and
-// validated host-owned data.
 pub use host_adapter_request::HostAdapterRequest;
 pub use host_alpha_mode::HostAlphaMode;
 pub use host_color_format::HostColorFormat;
@@ -140,10 +130,8 @@ pub use host_presentation_target::HostPresentationTarget;
 pub use host_surface_descriptor::HostSurfaceDescriptor;
 pub use host_surface_handle::HostSurfaceHandle;
 
-// Backend-neutral frame presentation packet + uniform submission report. The
-// single artifact every render backend (GPU now, Canvas 2D later) consumes /
-// returns. Primitive-only, browser/GPU-free — derived from a render command
-// list by axiom-render. See frame_packet.rs / frame_submission_report.rs.
+// The single frame-presentation artifact every render backend consumes;
+// derived from a render command list by axiom-render.
 pub use frame_packet::FrameCamera;
 pub use frame_packet::FrameDrawItem;
 pub use frame_packet::FrameFeatureSet;
@@ -156,18 +144,11 @@ pub use frame_submission_report::BackendKind;
 pub use frame_submission_report::FrameFeature;
 pub use frame_submission_report::FrameSubmissionReport;
 
-// Backend-neutral SDF raymarch contract: the raymarch peer of FramePacket's
-// triangle draws, carried as an optional FramePacket arm. Both render backends
-// (GPU now, Canvas 2D) march the same primitive-only data. See sdf_scene.rs.
+// The raymarch peer of FramePacket's triangle draws, carried as an optional
+// FramePacket arm.
 pub use sdf_scene::SdfPrimitive;
 pub use sdf_scene::SdfScene;
 
-// Backend-neutral 2D draw contract (SPEC-04), relocated here from the
-// axiom-draw2d module so both render backends (Canvas 2D, GPU) — which already
-// depend on host — can name and rasterize it, exactly as they name FramePacket.
-// axiom-draw2d keeps only the Draw2dApi *builder*, which assembles these
-// host-owned types through their producer constructors. Primitive-only — no
-// GPU/DOM/font/scene types.
 pub use camera2d::Camera2d;
 pub use common2d::Common2d;
 pub use common2d::Shadow2d;

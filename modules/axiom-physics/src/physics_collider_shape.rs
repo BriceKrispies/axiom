@@ -1,19 +1,16 @@
 //! The deterministic collider shapes, as a flat *tagged value*.
-//!
 //! A `PhysicsColliderShape` is **not** a payload-carrying enum. It is a tag
 //! ([`PhysicsShapeKind`]) plus a uniform set of geometry fields, so the broad
 //! phase, narrow phase, and queries read its parameters with plain field access
 //! and dispatch on `kind().index()` — never a `match` on variant payloads, which
 //! the Branchless Law forbids. The four constructors validate their inputs and
 //! pack them into the flat representation:
-//!
 //! | kind    | `half_extents`        | `radius` | `normal` | `offset`   |
 //! |---------|-----------------------|----------|----------|------------|
 //! | Sphere  | `(r, r, r)`           | `r`      | `ZERO`   | `0`        |
 //! | Box     | the box half-extents  | `0`      | `ZERO`   | `0`        |
 //! | Capsule | `(r, hh + r, r)`      | `r`      | `ZERO`   | `0`        |
 //! | Plane   | `ZERO`                | `0`      | unit `n` | distance   |
-//!
 //! `half_extents` is the shape's **local axis-aligned half-size** for the finite
 //! kinds (the value the broad phase turns into a world AABB). Planes are infinite
 //! and carry no finite extent; their `normal`/`offset` define the half-space.
@@ -30,7 +27,6 @@ use crate::physics_result::PhysicsResult;
 use crate::physics_shape_kind::PhysicsShapeKind;
 
 /// The geometric shape of a collider — a flat, branchless tagged value.
-///
 /// The four classical primitives are supported. They are validated at
 /// construction and surfaced in snapshots. The broad phase and queries handle all
 /// four; the narrow-phase contact generator handles the sphere/sphere,
@@ -154,14 +150,6 @@ impl PhysicsColliderShape {
         self.offset
     }
 
-    // --- Public, neutral geometry accessors (integration surface) ---------------
-    //
-    // An app reading a `ColliderSnapshot` needs to know what shape it is and its
-    // dimensions to render or debug-draw it, without naming the internal
-    // `PhysicsShapeKind` tag. These predicates + dimension accessors expose the
-    // geometry as kernel/math value types (`Meters`, `Vec3`) — never a naked
-    // float — and return `None` when asked for a dimension the shape does not
-    // carry.
 
     /// `true` iff this collider is a sphere.
     pub fn is_sphere(&self) -> bool {
@@ -269,7 +257,6 @@ mod tests {
 
     #[test]
     fn plane_stores_a_unit_normal_and_offset() {
-        // A non-unit normal is normalized on construction.
         let p = PhysicsColliderShape::plane(Vec3::new(0.0, 2.0, 0.0), m(5.0)).unwrap();
         assert_eq!(p.kind(), PhysicsShapeKind::Plane);
         assert_eq!(p.normal(), Vec3::new(0.0, 1.0, 0.0));
@@ -297,28 +284,22 @@ mod tests {
         let capsule = PhysicsColliderShape::capsule(m(1.0), m(2.0)).unwrap();
         let plane = PhysicsColliderShape::plane(Vec3::UNIT_Y, m(5.0)).unwrap();
 
-        // Predicates: each shape answers `true` to its own kind and `false` to
-        // the others (covers both arms of every predicate).
         assert!(sphere.is_sphere() && !sphere.is_box() && !sphere.is_capsule() && !sphere.is_plane());
         assert!(boxes.is_box() && !boxes.is_sphere());
         assert!(capsule.is_capsule() && !capsule.is_plane());
         assert!(plane.is_plane() && !plane.is_capsule());
 
-        // Sphere radius.
         assert_eq!(sphere.sphere_radius().unwrap().get(), 2.0);
         assert!(boxes.sphere_radius().is_none());
 
-        // Box half-extents.
         assert_eq!(boxes.box_half_extents().unwrap(), Vec3::new(1.0, 2.0, 3.0));
         assert!(sphere.box_half_extents().is_none());
 
-        // Capsule radius + half-height (half_height = packed extent.y - radius).
         assert_eq!(capsule.capsule_radius().unwrap().get(), 1.0);
         assert_eq!(capsule.capsule_half_height().unwrap().get(), 2.0);
         assert!(sphere.capsule_radius().is_none());
         assert!(sphere.capsule_half_height().is_none());
 
-        // Plane normal + distance.
         assert_eq!(plane.plane_normal().unwrap(), Vec3::UNIT_Y);
         assert_eq!(plane.plane_distance().unwrap().get(), 5.0);
         assert!(sphere.plane_normal().is_none());

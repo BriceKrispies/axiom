@@ -87,8 +87,6 @@ impl Session {
 
     /// Whether `tick` is inside the input admission window.
     fn in_input_window(&self, tick: u64) -> bool {
-        // `&` not `&&`: both operands are pure, always-safe `u64` comparisons,
-        // so eager evaluation is behavior-identical and branchless.
         (tick >= self.confirmed) & (tick < self.confirmed.saturating_add(HORIZON))
     }
 
@@ -97,7 +95,6 @@ impl Session {
     /// well as forward — old enough beacons are rejected so the table stays
     /// bounded.
     fn in_beacon_window(&self, tick: u64) -> bool {
-        // `&` not `&&`: both operands are pure, always-safe `u64` comparisons.
         (tick >= self.confirmed.saturating_sub(HORIZON))
             & (tick < self.confirmed.saturating_add(HORIZON))
     }
@@ -122,39 +119,26 @@ impl Session {
     /// out-of-window tick) is silently dropped: adversarial traffic is expected,
     /// not an error that should halt an honest peer.
     pub(crate) fn accept(&mut self, message: NetMessage) {
-        // Authenticate first, branchlessly. `roster.get(...).copied()` ends the
-        // borrow of `self.roster` so the admission step can mutate `self`.
-        // `map_or_else` is the `let-else` replacement: None -> count unknown
-        // peer; Some(key) -> verify-then-admit. The verify result then selects
-        // between counting a bad signature and admitting the frame, again with
-        // `then/unwrap_or_else` rather than an `if`.
+        // `roster.get(...).copied()` ends the borrow of `self.roster` before
+        // the admission step below needs to mutate `self`.
         let key = self.roster.get(&message.peer()).copied();
         let present = key.is_some();
-        // `verified` is true iff the peer is in the roster AND its signature
-        // matches; absent key folds to `false` via `unwrap_or`.
         let verified = key
             .map(|verifying_key| verifying_key.verify(&message.signed_bytes(), message.signature()))
             .unwrap_or(false);
-        // The three outcomes are mutually exclusive by construction, applied as
-        // separate guarded statements (no `if`): unknown peer, bad signature, or
-        // admit. Exactly one guard is true for any frame.
+        // present/verified partition every frame into exactly one outcome:
+        // unknown peer, bad signature, or admit.
         (!present).then(|| self.rejections.unknown_peer += 1);
         (present & !verified).then(|| self.rejections.bad_signature += 1);
         verified.then(|| self.admit(message));
     }
 
     /// Fold an already-authenticated frame into local state, counting it as
-    /// out-of-window if its tick is outside the admission window. The frame is a
-    /// tagged struct, so the dispatch is a kind-gated guard (no `match`): the
-    /// `kind` selects the input timeline or the hash table via two mutually
-    /// exclusive `then` guards — exactly one runs for any frame, mirroring the
-    /// branchless guards in [`Self::accept`]. Each kind's in-window guard is
-    /// branchless, and an out-of-window frame of either kind is counted once.
+    /// out-of-window if its tick is outside the admission window.
     fn admit(&mut self, message: NetMessage) {
         let (peer, tick, kind) = (message.peer(), message.tick(), message.kind());
-        // Input: take the command (present iff this is an input frame) and admit
-        // it to the timeline iff in the input window. The `.expect` cannot fire:
-        // the guard is true exactly when `command()` is `Some`.
+        // `.expect` cannot fail: this guard runs only when `kind == KIND_INPUT`,
+        // where `command()` is always `Some`.
         (kind == KIND_INPUT).then(|| {
             let command = message
                 .command()
@@ -165,8 +149,6 @@ impl Session {
                 .then(|| self.timeline.insert(tick, peer, command));
             admitted.unwrap_or_else(|| self.rejections.out_of_window += 1)
         });
-        // HashBeacon: take the hash (present iff this is a beacon frame) and
-        // admit it to the table iff in the beacon window.
         (kind == KIND_HASH_BEACON).then(|| {
             let hash = *message
                 .hash()
@@ -192,9 +174,6 @@ impl Session {
     /// tick's inputs are pruned afterwards (confirmed history is immutable), so
     /// the timeline never accumulates past ticks.
     pub(crate) fn confirm(&mut self, tick: u64) -> Vec<(PeerId, NetCommand)> {
-        // `&` not `&&`: `has_all` is a pure read, always safe to evaluate. The
-        // `then(..).unwrap_or_default()` runs the mutating body only when the
-        // tick is exactly next and complete — identical to the original guard.
         let confirmed =
             ((tick == self.confirmed) & self.timeline.has_all(tick, &self.peers)).then(|| {
                 let ordered = self.timeline.ordered_at(tick);
@@ -224,12 +203,8 @@ impl Session {
 
     /// Compare every peer's reported hash for `tick`.
     pub(crate) fn reconcile(&self, tick: u64) -> SyncStatus {
-        // Branchless fold over the peers, threading the first-seen agreed hash.
-        // `try_fold` short-circuits to a verdict (`Err`) exactly where the
-        // original loop did an early `return`: a missing hash -> Pending, a
-        // mismatch -> Desync. The accumulator is `Ok(Option<hash>)`; an `Ok` at
-        // the end (no early exit) means every peer reported and all agreed ->
-        // InSync. `map_or`/`map_or_else` replace the inner `match`/`if`.
+        // A missing hash -> Pending; a mismatch -> Desync; if every peer
+        // reported and agreed -> InSync.
         self.peers
             .iter()
             .try_fold(None::<[u8; 32]>, |agreed, peer| {
@@ -272,8 +247,6 @@ mod tests {
 
     #[test]
     fn new_includes_local_dedups_and_sorts_via_confirm_order() {
-        // Peer 2 among a roster {3, 1, 3}: the peer set becomes {1, 2, 3} (local
-        // included, the duplicate 3 collapsed). Confirm order is the sorted set.
         let k2 = key(2);
         let roster = [
             (3u64, key(3).verifying_key()),
@@ -281,7 +254,7 @@ mod tests {
             (3u64, key(3).verifying_key()),
         ];
         let mut s = Session::new(2, k2.clone(), &roster);
-        s.schedule_local(20, vec![0]); // local (peer 2) input for tick 0
+        s.schedule_local(20, vec![0]);
         s.accept(signed_input(&key(1), 1, 0, 10));
         s.accept(signed_input(&key(3), 3, 0, 30));
         let ordered: Vec<u64> = s.confirm(0).iter().map(|(p, _)| p.raw()).collect();
@@ -293,14 +266,10 @@ mod tests {
     fn schedule_local_signs_and_increments_tick() {
         let (mut s, _) = duo();
         let m0 = s.schedule_local(7, vec![1]);
-        // The returned frame is genuinely signed by the local key.
         assert!(key(1)
             .verifying_key()
             .verify(&m0.signed_bytes(), m0.signature()));
         assert_eq!(m0.peer(), PeerId::from_raw(1));
-        // The second local input lands on tick 1 (the cursor advanced) and is a
-        // fully-formed, correctly-signed frame. Compared by value, so there is no
-        // catch-all match arm left unexercised.
         let m1 = s.schedule_local(8, vec![2]);
         let command = NetCommand::new(8, vec![2]);
         let signature = key(1).sign(&NetMessage::input_signing_payload(
@@ -342,7 +311,6 @@ mod tests {
     #[test]
     fn an_unknown_peer_is_dropped() {
         let (mut s, _) = duo();
-        // Peer 99 is not in the roster, even with a valid self-signature.
         s.accept(signed_input(&key(99), 99, 0, 5));
         assert_eq!(s.buffered_inputs(), 0);
         assert_eq!(s.rejections().unknown_peer, 1);
@@ -352,7 +320,6 @@ mod tests {
     #[test]
     fn a_forged_signature_is_dropped() {
         let (mut s, _) = duo();
-        // Claims peer 2 but is signed by the wrong key (an impersonation attempt).
         s.accept(signed_input(&key(7), 2, 0, 5));
         s.schedule_local(1, vec![]);
         assert_eq!(
@@ -367,18 +334,14 @@ mod tests {
     #[test]
     fn out_of_window_inputs_are_dropped() {
         let (mut s, k2) = duo();
-        // A tick far in the future (beyond HORIZON) is rejected.
         s.accept(signed_input(&k2, 2, HORIZON, 5));
         assert_eq!(s.buffered_inputs(), 0, "future-flood input dropped");
-        // Advance confirmed to 1, then a past tick (0 < confirmed) is rejected.
         s.schedule_local(1, vec![]);
         s.accept(signed_input(&k2, 2, 0, 5));
         s.confirm(0);
         assert_eq!(s.confirmed_tick(), 1);
-        s.accept(signed_input(&k2, 2, 0, 9)); // tick 0 < confirmed 1
-                                              // Only peer 1's tick-1 local will exist; peer 2's stale tick 0 ignored.
+        s.accept(signed_input(&k2, 2, 0, 9));
         assert!(s.ready_tick().is_none());
-        // Both the future and the past input were counted as out-of-window.
         assert_eq!(s.rejections().out_of_window, 2);
     }
 
@@ -387,13 +350,11 @@ mod tests {
         let (mut s, k2) = duo();
         s.schedule_local(1, vec![]);
         s.accept(signed_input(&k2, 2, 0, 2));
-        // A valid-signed flood of distinct future ticks from peer 2.
         for t in 1..50 {
             s.accept(signed_input(&k2, 2, t, 2));
         }
         let before = s.buffered_inputs();
         s.confirm(0);
-        // Tick 0's two inputs are pruned; the in-window flood remains bounded.
         assert!(s.buffered_inputs() < before);
         assert!(s.buffered_inputs() as u64 <= 2 * HORIZON);
     }
@@ -404,7 +365,6 @@ mod tests {
         assert_eq!(s.reconcile(0), SyncStatus::Pending, "nobody reported");
         s.record_local_hash(0, [1u8; 32]);
         assert_eq!(s.reconcile(0), SyncStatus::Pending, "peer 2 still missing");
-        // Peer 2 agrees -> InSync (a genuinely signed beacon).
         let beacon = {
             let hash = [1u8; 32];
             let sig = k2.sign(&NetMessage::beacon_signing_payload(
@@ -416,7 +376,6 @@ mod tests {
         };
         s.accept(beacon);
         assert_eq!(s.reconcile(0), SyncStatus::InSync);
-        // A divergent hash at tick 1 -> Desync.
         s.record_local_hash(1, [1u8; 32]);
         let bad = {
             let hash = [2u8; 32];
@@ -435,8 +394,6 @@ mod tests {
     fn a_forged_beacon_is_dropped() {
         let (mut s, _) = duo();
         s.record_local_hash(0, [1u8; 32]);
-        // A beacon claiming peer 2 but signed by the wrong key is ignored, so
-        // reconcile still waits on peer 2.
         let forged = {
             let hash = [1u8; 32];
             let sig = key(8).sign(&NetMessage::beacon_signing_payload(
@@ -453,7 +410,6 @@ mod tests {
 
     #[test]
     fn beacons_outside_the_window_are_dropped_and_old_ones_pruned() {
-        // Drive confirmed past HORIZON so the backward window edge is non-zero.
         let (mut s, k2) = duo();
         for t in 0..=HORIZON + 1 {
             s.schedule_local(0, vec![]);
@@ -462,7 +418,6 @@ mod tests {
         }
         let confirmed = s.confirmed_tick();
         assert_eq!(confirmed, HORIZON + 2);
-        // A beacon too far in the future is dropped.
         let future = confirmed + HORIZON;
         let mk = |tick: u64| {
             let hash = [9u8; 32];
@@ -479,7 +434,6 @@ mod tests {
             SyncStatus::Pending,
             "future beacon dropped"
         );
-        // A beacon older than the backward edge (confirmed - HORIZON) is dropped.
         let stale = confirmed - HORIZON - 1;
         s.accept(mk(stale));
         assert_eq!(
@@ -487,21 +441,14 @@ mod tests {
             SyncStatus::Pending,
             "stale beacon dropped"
         );
-        // Both out-of-window beacons were counted.
         assert_eq!(s.rejections().out_of_window, 2);
     }
 
     #[test]
     fn an_attacker_without_a_roster_key_cannot_change_the_confirmed_stream() {
-        // The honest confirmed stream, computed twice: once clean, once with a
-        // storm of attacker traffic interleaved. The attacker (a compromised
-        // relay or third party) holds NO roster private key, so it can only
-        // forge, replay, or flood — never author a roster peer's input. The two
-        // streams must be byte-identical, and the polluted buffer stays bounded.
-        //
-        // (A *roster* peer can of course choose its own input — including a bad
-        // one — but that only desyncs itself, which `reconcile` catches; that is
-        // a different property from forgery resistance.)
+        // Runs the same input stream twice — once clean, once with forged and
+        // flooded attacker traffic interleaved — and asserts the confirmed
+        // output is byte-identical while the buffer stays bounded.
         fn run(with_attacker: bool) -> (Vec<Vec<(u64, u32)>>, usize) {
             let (mut s, k2) = duo();
             let mut stream = Vec::new();
@@ -511,14 +458,10 @@ mod tests {
                 let genuine = signed_input(&k2, 2, tick, 100 + tick as u32);
                 s.accept(genuine.clone());
                 if with_attacker {
-                    // Forgeries: claim a roster peer but sign with a non-roster
-                    // key (7), so verification fails. None can author peer 1 or 2.
-                    s.accept(signed_input(&key(7), 2, tick, 9)); // forged peer 2
-                    s.accept(signed_input(&key(7), 1, tick, 9)); // forged peer 1
-                    s.accept(signed_input(&key(99), 99, tick, 9)); // unknown peer
-                                                                   // Replay of a genuine frame: idempotent, no effect.
+                    s.accept(signed_input(&key(7), 2, tick, 9));
+                    s.accept(signed_input(&key(7), 1, tick, 9));
+                    s.accept(signed_input(&key(99), 99, tick, 9));
                     s.accept(genuine.clone());
-                    // Forged future flood + forged replayed-past: all dropped.
                     for f in 0..40 {
                         s.accept(signed_input(&key(7), 2, tick + 1 + f, 9));
                     }

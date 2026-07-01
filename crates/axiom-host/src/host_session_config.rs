@@ -4,7 +4,6 @@ use crate::host_session_params::HostSessionParams;
 
 /// The inbound half of the embed seam (SPEC-12 §5): a deterministic `seed` plus
 /// opaque session [`HostSessionParams`].
-///
 /// The platform arm decodes a URL query / parent `postMessage` payload / JWT
 /// claim into this shape; the host boundary only validates and carries it — it
 /// never parses a query string or reads a clock. The `seed` is the determinism

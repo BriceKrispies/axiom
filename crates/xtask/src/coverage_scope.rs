@@ -1,24 +1,7 @@
-//! Guards the scope boundary of the Axiom Coverage Law.
-//!
-//! The 100% coverage gate (`scripts/coverage.sh` / `scripts/coverage.ps1`)
-//! excludes apps and repo tooling from the count via llvm-cov's
-//! `--ignore-filename-regex`. That ignore list is the one place the gate can be
-//! quietly widened: a future agent could append a layer or module path and
-//! "earn" 100% by hiding code instead of testing it.
-//!
-//! This module makes that impossible to do silently. xtask OWNS the sanctioned
-//! ignore pattern and asserts two things mechanically:
-//!
-//!   1. The sanctioned pattern excludes NO layer or module source path — only
-//!      apps and tooling. If the constant is ever edited to swallow engine
-//!      code, this fires.
-//!   2. Every gate script applies exactly that sanctioned pattern, exactly
-//!      once. If a script is edited to use a wider pattern, or to add a second
-//!      ignore flag, this fires.
-//!
-//! To change what the gate excludes you must edit [`SANCTIONED_IGNORE_REGEX`]
-//! here AND both scripts, and the new pattern must still exclude no engine
-//! path. There is no quiet path through.
+//! Guards the scope boundary of the Axiom Coverage Law: asserts that
+//! [`SANCTIONED_IGNORE_REGEX`] excludes no layer/module source path, and that
+//! every gate script applies exactly that pattern exactly once (so the
+//! coverage ignore list can't be quietly widened to hide engine code).
 //!
 //! The pattern is evaluated with the `regex` crate — the same engine llvm-cov
 //! uses — so the check reflects what the tool actually does, not an
@@ -64,15 +47,11 @@ pub fn check(
         .filter(|p| p.is_file())
         .collect();
 
-    // Nothing to govern when no gate script is present (synthetic fixtures /
-    // alternate roots); the whole body is gated on that.
     (!present.is_empty()).then(|| {
-        // The sanctioned pattern is a constant, so a compile failure is an xtask
-        // programming error. Surface it as a violation rather than panicking so
-        // the checker stays infallible.
+        // A compile failure here is an xtask programming error; surface it as
+        // a violation rather than panicking so the checker stays infallible.
         let re = Regex::new(SANCTIONED_IGNORE_REGEX);
 
-        // Compile failure: emit one drift violation and run no further steps.
         re.as_ref().err().into_iter().for_each(|err| {
             report.push(Violation::new(
                 ViolationKind::CoverageIgnoreScriptDrift,
@@ -164,7 +143,6 @@ mod tests {
     use super::*;
     use std::fs;
 
-    /// `(name, src_dir)` pairs for a set of engine crates.
     type EngineDirs = Vec<(String, PathBuf)>;
 
     /// Build a temp root with a `scripts/coverage.sh` whose ignore line is
@@ -229,7 +207,6 @@ mod tests {
 
     #[test]
     fn script_missing_sanctioned_pattern_is_drift() {
-        // A script that ignores something else entirely (no sanctioned pattern).
         let root = setup(
             "drift_missing",
             "exclude=(--ignore-filename-regex '[/\\\\]modules[/\\\\]')",
@@ -242,8 +219,6 @@ mod tests {
 
     #[test]
     fn script_with_second_ignore_flag_is_drift() {
-        // The sanctioned pattern is present, but a smuggled second ignore would
-        // let engine code be hidden. Two flag uses must fail.
         let root = setup(
             "drift_extra",
             "exclude=(--ignore-filename-regex '[/\\\\](xtask|apps|axiom-zones|tools)[/\\\\]' \
@@ -257,7 +232,6 @@ mod tests {
 
     #[test]
     fn flag_mentioned_only_in_comment_does_not_satisfy_the_gate() {
-        // A comment mentioning the flag is not a real usage: flag_uses == 0.
         let root = setup("comment", "# uses --ignore-filename-regex somewhere");
         let (layers, modules) = dirs(&root);
         let mut report = CheckReport::default();
@@ -267,9 +241,6 @@ mod tests {
 
     #[test]
     fn module_placed_under_an_excluded_dir_is_flagged() {
-        // Contrived: a module whose source sits under `apps/` would be silently
-        // excluded by the sanctioned pattern. The engine-exclusion guard catches
-        // it regardless of how the misplacement happened.
         let root = setup(
             "engine_excluded",
             "exclude=(--ignore-filename-regex '[/\\\\](xtask|apps|axiom-zones|tools)[/\\\\]')",

@@ -61,7 +61,6 @@ impl<'tcx> LateLintPass<'tcx> for UnwrapInEngine {
         if expr.span.from_expansion() {
             return;
         }
-        // Tests (and `#[cfg(test)]` helpers) may unwrap freely.
         if is_in_test(cx.tcx, expr.hir_id) {
             return;
         }

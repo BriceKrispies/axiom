@@ -7,14 +7,11 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free, wasm-clean, platform-agnostic.
 crate-type = ["rlib"]
 
 [dependencies]
-# An *isolated* engine module (allowed_modules = []): it composes NO other
-# module. It builds only on the kernel layer — deterministic FrameIndex/Tick
-# identity and KernelError/KernelResult. It never reads a clock, never knows
-# what an artifact's bytes mean. `cargo xtask check-architecture` enforces this.
+# kernel: deterministic FrameIndex/Tick identity and KernelError/KernelResult.
+# Never reads a clock; never interprets what an artifact's bytes mean.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
 [lints.rust]

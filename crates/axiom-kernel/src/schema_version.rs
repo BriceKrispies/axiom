@@ -111,7 +111,6 @@ mod cov2 {
 
     #[test]
     fn read_from_fails_when_minor_is_truncated() {
-        // major reads ok (2 bytes); minor needs 2 but only 1 remains.
         let mut r = BinaryReader::new(&[1u8, 0u8, 9u8]);
         assert!(SchemaVersion::read_from(&mut r).is_err());
     }

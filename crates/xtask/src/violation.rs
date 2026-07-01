@@ -32,7 +32,6 @@ pub enum ViolationKind {
     /// required depended-layer `must_reference` symbols.
     ProofReferenceMissing,
 
-    // --- Module / app / tool classification and dependency rules ---
     /// A workspace package could not be classified as a layer, module, app,
     /// or tool. Every workspace package must fit exactly one class.
     UnknownPackageClass,
@@ -93,7 +92,6 @@ pub enum ViolationKind {
     /// actual cargo package name.
     ManifestCrateNameMismatch,
 
-    // --- Source hygiene (centralized in xtask) ---
     /// A layer or module source file uses a forbidden macro (`println!`,
     /// `eprintln!`, `dbg!`, `todo!`, `unimplemented!`).
     SourceHygieneForbiddenMacro,
@@ -109,7 +107,6 @@ pub enum ViolationKind {
     /// coverage is earned by reachable tests, not by silencing the tool.
     SourceHygieneCoverageOff,
 
-    // --- Coverage gate scope (the Axiom Coverage Law) ---
     /// The coverage gate's sanctioned `--ignore-filename-regex` matches a layer
     /// or module source path. The 100% gate may exclude only apps and tooling;
     /// excluding engine code is forbidden.
@@ -243,7 +240,7 @@ impl fmt::Display for Violation {
 /// The full outcome of a check, with violations pre-sorted for determinism.
 #[derive(Debug, Clone, Default)]
 pub struct CheckReport {
-    /// Logical names of the layers that were discovered and checked, sorted by index.
+    /// Logical names of the layers that were discovered and checked, sorted by name.
     pub layers_checked: Vec<String>,
     violations: Vec<Violation>,
 }

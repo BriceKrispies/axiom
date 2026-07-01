@@ -25,9 +25,7 @@ const DEFAULT_ADDR: &str = "127.0.0.1:9001";
 /// The number of player slots (this demo is two-player).
 const MAX_PEERS: usize = 2;
 
-/// What travels on the broadcast bus. Modelled as a struct (not an enum) so its
-/// shape is destructurable purely with `Option`/boolean combinators — no `match`
-/// or `if let` — to satisfy the engine's no-branching analyzer:
+/// What travels on the broadcast bus:
 ///
 /// * `from == 0` with `payload == None` is the relay's own **"go" start signal**.
 /// * `from == <peer id>` with `payload == Some(bytes)` is one peer's **input
@@ -56,10 +54,8 @@ impl Bus {
     }
 }
 
-/// One thing the per-peer bridge does in response to a stream item. Modelled so
-/// it dispatches with `Option`/boolean combinators rather than a `match`: every
-/// variant carries the data its action needs, and the empty actions
-/// (`relay_to`/`broadcast`/`go_signal` all absent) is a no-op.
+/// One thing the per-peer bridge does in response to a stream item. Every
+/// field carries the data its action needs; all fields absent is a no-op.
 struct Action {
     /// `Some((from, bytes))` to forward another peer's frame (originating id
     /// `from`) to *this* peer's socket.
@@ -69,7 +65,7 @@ struct Action {
     /// `true` to send the textual "go" start signal to this peer's socket.
     go_signal: bool,
     /// `true` once a source stream has ended (socket closed/errored, or bus
-    /// closed): applying this stops the bridge — the stream-end `break` of old.
+    /// closed): applying this stops the bridge.
     stop: bool,
 }
 
@@ -138,12 +134,9 @@ async fn main() {
 
 /// Accept connections forever, serving each on the shared relay state.
 ///
-/// The accept-forever loop is the `TcpListenerStream` of inbound connections
-/// driven by `for_each_concurrent`: one spawned `serve_peer` task per accepted
-/// socket, all in flight at once (`None` = unbounded concurrency). A failed
-/// `accept()` surfaces as an `Err` item, which `conn.ok()` drops and the stream
-/// keeps going — exactly the old "ignore the error and accept the next" behavior,
-/// with no `loop` keyword.
+/// One spawned `serve_peer` task per accepted socket, all in flight at once
+/// (`None` = unbounded concurrency). A failed `accept()` surfaces as an `Err`
+/// item, which `conn.ok()` drops so the stream keeps going.
 async fn run_relay(listener: TcpListener) {
     let (tx, _rx) = broadcast::channel::<Bus>(1024);
     let relay = Arc::new(Relay {
@@ -204,10 +197,9 @@ async fn serve_peer(stream: TcpStream, relay: Arc<Relay>, rx: broadcast::Receive
 
     // The peer id arrives as a text frame; all netcode payloads are binary.
     let sent_ok = sink.send(Message::text(id.to_string())).await.is_ok();
-    // Release the slot iff the send failed — the old `if … is_err()` arm.
+    // Release the slot if the send failed.
     futures_util::future::OptionFuture::from((!sent_ok).then(|| free_slot(&relay, id))).await;
-    // Serve the peer iff the send succeeded — the old fall-through continuation,
-    // lifted whole into a gated async block so the `if` keyword disappears.
+    // Serve the peer only if the send succeeded.
     futures_util::future::OptionFuture::from(sent_ok.then_some(async move {
         println!("relay: peer {id} connected");
         // Completing the pair starts both clients together (no early-input loss).
@@ -224,23 +216,18 @@ async fn serve_peer(stream: TcpStream, relay: Arc<Relay>, rx: broadcast::Receive
 
 /// Bridge one paired peer's socket to the bus until either side ends.
 ///
-/// The old `loop { tokio::select! { ... } }` is replaced by two streams merged
-/// into one and consumed by `try_fold`:
+/// Two streams are merged into one and consumed by `try_fold`:
 ///
 /// * the **inbound** socket (`source`) mapped to `Action`s (broadcast a binary
 ///   frame, ignore text/ping/pong, or stop), and
 /// * the **bus** receiver (`BroadcastStream`) mapped to `Action`s (send "go",
 ///   relay another peer's frame, or skip our own echo / a lagged tick).
 ///
-/// Each stream is `.chain`ed with a single terminal `Action::stop()` so that when
-/// *either* stream ends (socket closed/errored, or bus closed) a stop flows
-/// through — reproducing the old `break`-on-any-end. `try_fold` threads the
-/// `Bridge` (sink + counters) through each action and short-circuits on the first
-/// `Err(Bridge)` — a stop action or a send failure — reproducing the old
-/// `break`-on-send-error while carrying the final counters out for the disconnect
-/// log. No `loop`, `match`, or `if let` is written; the only branching is inside
-/// the `select!` the `merge` combinator uses internally (a macro, exempt from the
-/// analyzer).
+/// Each stream is `.chain`ed with a terminal `Action::stop()` so that when
+/// either stream ends (socket closed/errored, or bus closed), bridging stops.
+/// `try_fold` threads the `Bridge` (sink + counters) through each action and
+/// short-circuits on the first `Err(Bridge)` (a stop action or a send
+/// failure), carrying the final counters out for the disconnect log.
 async fn bridge_peer(
     sink: PeerSink,
     source: PeerSource,
@@ -248,9 +235,6 @@ async fn bridge_peer(
     rx: broadcast::Receiver<Bus>,
     id: u64,
 ) {
-    // Each stream is mapped to `Action`s and `.chain`ed with one terminal
-    // `Action::stop()` so that when *either* stream ends (socket closed/errored,
-    // or bus closed) a stop action flows through — the old `break`-on-any-end.
     let inbound = source
         .map(inbound_action)
         .chain(futures_util::stream::once(async { Action::stop() }));
@@ -258,11 +242,8 @@ async fn bridge_peer(
         .map(move |relayed| bus_action(relayed, id))
         .chain(futures_util::stream::once(async { Action::stop() }));
 
-    // `try_fold` threads the per-peer state (sink + counters) by value through
-    // each action and short-circuits on the first `Err(Bridge)` — a stop action
-    // or a send failure. The merged stream is infallible (`Action` items), so the
-    // fold-future's error and the recovered accumulator are both `Bridge`: the
-    // final counters survive whichever way the bridge ends.
+    // The merged stream is infallible, so both the fold's `Err` and its
+    // recovered accumulator are `Bridge` — the final counters survive either way.
     let folded = tokio_stream::StreamExt::merge(inbound, outbound)
         .map(Ok::<Action, Bridge>)
         .try_fold(Bridge::new(sink), |bridge, action| {
@@ -317,9 +298,7 @@ impl Bridge {
         )
         .await
         .is_ok();
-        // Route the (single) `self` into `Ok` to keep bridging or `Err` to stop,
-        // selecting the variant by index rather than a branch keyword: both are
-        // `fn(Self) -> Result<Self, Self>`, and `self` is moved exactly once.
+        // Selects Ok (keep bridging) or Err (stop) by index; `self` is moved exactly once.
         const ARMS: [fn(Bridge) -> Result<Bridge, Bridge>; 2] = [Err, Ok];
         ARMS[keep_going as usize](self)
     }
@@ -333,8 +312,7 @@ type PeerSink =
 type PeerSource = futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>;
 
 /// Map one inbound socket item to an `Action`: broadcast a binary frame, ignore a
-/// text/ping/pong, or stop the bridge (the socket closed or errored). Built from
-/// `Option`/boolean combinators: no `match` / `if`.
+/// text/ping/pong, or stop the bridge (the socket closed or errored).
 fn inbound_action(incoming: Result<Message, tokio_tungstenite::tungstenite::Error>) -> Action {
     incoming
         .ok()
@@ -379,8 +357,7 @@ fn bus_action(
 }
 
 /// Carry out one `Action` against this peer's socket, returning `Err(())` if the
-/// action is a stop or a socket write fails (which stops the bridge). Dispatch is
-/// by `Option`/boolean combinators on the action's fields — no `match` / `if`.
+/// action is a stop or a socket write fails (which stops the bridge).
 async fn perform_action(
     action: Action,
     sink: &mut PeerSink,
@@ -509,7 +486,6 @@ mod tests {
         let _ = next_text(&mut a).await;
         let (mut b, _) = connect_async(&url).await.unwrap();
         let _ = next_text(&mut b).await;
-        // The third peer is told the game is full.
         let (mut c, _) = connect_async(&url).await.unwrap();
         assert_eq!(next_text(&mut c).await, "full");
     }

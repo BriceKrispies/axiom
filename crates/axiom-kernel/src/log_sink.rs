@@ -18,8 +18,6 @@ mod tests {
     use super::*;
     use crate::log_level::LogLevel;
 
-    /// A minimal sink proving the trait contract: a record handed in is the
-    /// record observed, deterministically.
     #[derive(Default)]
     struct CountingSink {
         count: usize,

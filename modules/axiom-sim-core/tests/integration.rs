@@ -4,7 +4,6 @@
 use axiom_ecs::EntityRegistry;
 use axiom_sim_core::{InteractionId, SimCoreApi};
 
-// Domain-agnostic codes used only by these tests.
 const FACT_KIND: u32 = 1;
 const PROC_KIND: u32 = 1;
 const EVENT_KIND: u32 = 1;
@@ -19,21 +18,16 @@ fn run_chain() -> (Vec<u64>, Vec<u64>, u64) {
     let a = reg.spawn_handle();
     let mut api = SimCoreApi::new();
 
-    // entity A has fact X = 0
     let x = api
         .add_fact(&reg, FACT_KIND, a, api.value_unsigned(0), None, 0)
         .unwrap();
-    // schedule process P to wake at tick 1
     let p = api
         .schedule_process(&reg, PROC_KIND, a, 0, 1, None)
         .unwrap();
 
-    // P is not due at tick 0; it is due at tick 1.
     assert!(api.wake_due(0).is_empty());
     assert_eq!(api.wake_due(1), vec![p], "process P wakes at tick 1");
 
-    // P emits effects at an explicit boundary: update fact X, and record that P
-    // caused the change as a causal event whose parent is P.
     let mut batch = api.new_effect_batch();
     batch.update_fact(x, api.value_unsigned(1), 1);
     batch.emit_causal_event(
@@ -47,9 +41,7 @@ fn run_chain() -> (Vec<u64>, Vec<u64>, u64) {
     let report = api.apply_effects(batch, &reg);
     assert_eq!(report.len(), 2, "both effects were applied at the boundary");
 
-    // Effect Y updated fact X.
     assert_eq!(api.fact(x).unwrap().value(), api.value_unsigned(1));
-    // The causal event records P as the cause.
     let caused = api.events_by_parent(api.cause_process(p));
     assert_eq!(caused.len(), 1, "exactly one event was caused by P");
     assert_eq!(api.causal_event(caused[0]).unwrap().subject(), Some(a));
@@ -91,10 +83,8 @@ fn effects_apply_only_at_the_boundary() {
         .unwrap();
     let mut batch = api.new_effect_batch();
     batch.update_fact(x, api.value_unsigned(7), 1);
-    // Staging does not mutate the world.
     assert_eq!(api.fact(x).unwrap().value(), api.value_unsigned(0));
     api.apply_effects(batch, &reg);
-    // The boundary did.
     assert_eq!(api.fact(x).unwrap().value(), api.value_unsigned(7));
 }
 
@@ -116,8 +106,6 @@ fn stale_entity_references_are_rejected_through_the_facade() {
     assert!(api.is_empty(), "no stale-referencing state was created");
 }
 
-// ----- Phase 3: generic material interaction chain -----
-
 const SUBSTANCE_KIND: u32 = 1;
 const FACT_X_KIND: u32 = 100;
 const TRANSFER_EVENT_KIND: u32 = 200;
@@ -131,7 +119,6 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
     let actor_a = reg.spawn_handle();
     let mut api = SimCoreApi::new();
 
-    // 1. Register a transferable substance.
     let substance_x = api
         .register_substance(
             "substance-x",
@@ -140,18 +127,15 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
             &[],
         )
         .unwrap();
-    // fact-x starts at 0 on actor-a.
     let fact_x = api
         .add_fact(&reg, FACT_X_KIND, actor_a, api.value_unsigned(0), None, 0)
         .unwrap();
 
-    // 2. Create a source residue-x of quantity 10 on surface-a.
     let surface_a = api.residue_location_symbol(1);
     let target_location = api.residue_location_symbol(2);
     let ten = api.quantity(SimCoreApi::UNIT_VOLUME, 10).unwrap();
     let residue_x = api.create_residue(substance_x, ten, surface_a, 0, None, 0);
 
-    // 3. Record a touch interaction referencing the source residue + substance.
     let interaction = api
         .record_interaction(
             1,
@@ -167,7 +151,6 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
         )
         .unwrap();
 
-    // 4. Apply a transfer rule (fixed 4) consuming the interaction.
     let rule = api.register_transfer_fixed(4, ROUTE_TOUCH, false).unwrap();
     let transfer = api
         .apply_transfer(
@@ -180,7 +163,6 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
         )
         .unwrap();
 
-    // 5 & 6. Source decreased to 6; target created with 4 (quantity conserved).
     assert_eq!(
         transfer.moved(),
         Some(api.quantity(SimCoreApi::UNIT_VOLUME, 4).unwrap())
@@ -197,11 +179,8 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
         .sum();
     assert_eq!(deposited, 4);
 
-    // 7. A causal event recorded the transfer.
     let transfer_event = api.all_causal_event_ids()[0];
 
-    // 8. Material effect rules observe the contact-transferable tag on this route:
-    //    one updates fact-x, one emits a causal event chained to the transfer.
     api.register_material_effect_rule(
         (
             Some(SimCoreApi::TAG_CONTACT_TRANSFERABLE),
@@ -223,8 +202,6 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
     )
     .unwrap();
 
-    // 8b. Preview the effects first: producing builds the batch for the same
-    //     interaction without mutating state, and an unknown interaction is None.
     let preview = api
         .produce_material_effects(
             interaction,
@@ -242,7 +219,6 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
         .produce_material_effects(InteractionId::from_raw(9999), None, None)
         .is_none());
 
-    // 9. Apply the material effects at the boundary, chaining to the transfer event.
     let cause = api.cause_event(transfer_event);
     let outcome = api
         .apply_material_effects(interaction, Some(fact_x), Some(cause), &reg)
@@ -250,10 +226,8 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
     assert_eq!(outcome.matched(), 2, "both rules matched the tag + route");
     assert_eq!(outcome.applied(), 2);
 
-    // The effect updated fact-x.
     assert_eq!(api.fact_value(fact_x), Some(api.value_unsigned(1)));
 
-    // 10. The causal journal traces the effect event back to the transfer.
     let effect_children = api.events_by_parent(cause);
     assert_eq!(
         effect_children.len(),
@@ -261,7 +235,6 @@ fn run_material_chain() -> (Vec<u64>, Vec<i64>, Vec<u64>, u64) {
         "the emitted effect event is a child of the transfer event"
     );
 
-    // Comparable snapshot for determinism.
     let fact_ids: Vec<u64> = api.all_fact_ids().into_iter().map(|f| f.raw()).collect();
     let residue_amounts: Vec<i64> = api
         .all_residue_ids()
@@ -302,8 +275,6 @@ fn material_chain_is_deterministic() {
 
 #[test]
 fn ecs_entity_references_are_deterministic_across_runs() {
-    // Two independent runs spawn identical handles (Phase-1 ECS is deterministic),
-    // so a fact whose value references the entity compares equal across runs.
     let build = || {
         let mut reg = EntityRegistry::new();
         let a = reg.spawn_handle();
@@ -317,8 +288,6 @@ fn ecs_entity_references_are_deterministic_across_runs() {
     assert!(build());
 }
 
-// ----- Body/anatomy integration chain (neutral names only) -----
-
 const SURFACE_A_LOCATION: u64 = 9000;
 
 /// Run the abstract body-interaction chain and return a comparable snapshot:
@@ -328,7 +297,6 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
     let actor_a = ereg.spawn_handle();
     let mut api = SimCoreApi::new();
 
-    // 1. transferable substance, 2. residue-holding tissue.
     let substance_x = api
         .register_substance(
             "substance-x",
@@ -346,7 +314,6 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
         )
         .unwrap();
 
-    // 3. body plan: core + extremity (outer surface) + mouth (mouth surface).
     let draft = api.begin_body_plan();
     api.add_body_plan_part(
         draft,
@@ -378,19 +345,16 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
     api.connect_body_plan_parts(draft, 0, 1);
     let plan = api.finish_body_plan(draft, "test-body").unwrap();
 
-    // 4. instantiate the body for actor-a.
     let body = api
         .instantiate_body(plan, Some(actor_a), &ereg, Some(api.cause_command()), 0)
         .unwrap();
     let extremity = api.body_parts_by_kind(body, SimCoreApi::PART_EXTREMITY)[0];
     let surface = api.part_surfaces(extremity)[0];
 
-    // 5. source residue (10) at a generic non-body location.
     let source_location = api.residue_location_symbol(SURFACE_A_LOCATION);
     let ten = api.quantity(SimCoreApi::UNIT_VOLUME, 10).unwrap();
     let source = api.create_residue(substance_x, ten, source_location, 0, None, 0);
 
-    // 6. record a touch interaction targeting the extremity surface (refs source).
     let interaction = api
         .record_surface_interaction(
             (1, ROUTE_TOUCH),
@@ -400,7 +364,6 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
         )
         .unwrap();
 
-    // 7. apply a transfer rule (fixed 4) depositing onto the body surface.
     let target = api.residue_location_for_surface(surface);
     let rule = api.register_transfer_fixed(4, ROUTE_TOUCH, false).unwrap();
     let result = api
@@ -411,7 +374,6 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
         Some(api.quantity(SimCoreApi::UNIT_VOLUME, 4).unwrap())
     );
 
-    // 8 & 9. residue now on the body surface; source decreased (quantity conserved).
     let on_surface = api.residues_on_surface(surface);
     assert_eq!(
         on_surface.len(),
@@ -424,15 +386,12 @@ fn run_body_chain() -> (i64, i64, usize, usize) {
     let source_remaining = api.residue(source).unwrap().quantity().amount();
     assert_eq!((source_remaining, surface_deposited), (6, 4));
 
-    // 10. the causal journal records both the interaction and the transfer, chained
-    // to the shared command cause.
     let chained = api.events_by_parent(api.cause_command());
     assert!(
         chained.len() >= 2,
         "interaction + transfer events recorded under the cause"
     );
 
-    // 11 & 12. wound on the extremity, queryable every way.
     let wound = api
         .create_wound(
             (body, extremity, Some(covering)),
@@ -473,8 +432,6 @@ fn body_chain_is_deterministic() {
     );
 }
 
-// ----- Phase 5: deterministic scheduler chain (neutral names only) -----
-
 const FX_KIND: u32 = 50;
 const FY_KIND: u32 = 51;
 const SCHED_PROC_KIND: u32 = 60;
@@ -486,7 +443,6 @@ fn run_scheduler_chain() -> (Option<u64>, Option<u64>, Option<u8>, usize, usize)
     let subject_a = reg.spawn_handle();
     let mut api = SimCoreApi::new();
 
-    // 2. fact-x for subject-a (= 0); a second fact-y the process will update.
     let fact_x = api
         .add_fact(&reg, FX_KIND, subject_a, api.value_unsigned(0), None, 0)
         .unwrap();
@@ -494,8 +450,6 @@ fn run_scheduler_chain() -> (Option<u64>, Option<u64>, Option<u8>, usize, usize)
         .add_fact(&reg, FY_KIND, subject_a, api.value_unsigned(0), None, 0)
         .unwrap();
 
-    // 3 & 4. Register process-p (updates fact-y when it runs) and subscribe it to
-    // changes of fact-x's kind.
     let process_p = api.register_process_updating_fact(
         SCHED_PROC_KIND,
         subject_a,
@@ -506,27 +460,20 @@ fn run_scheduler_chain() -> (Option<u64>, Option<u64>, Option<u8>, usize, usize)
     );
     api.subscribe_process(process_p, SimCoreApi::DEP_FACT_KIND, u64::from(FX_KIND));
 
-    // 5 & 6. Update fact-x through an effect batch -> marks fact-x dirty.
     let mut batch = api.new_effect_batch();
     batch.update_fact(fact_x, api.value_unsigned(7), 1);
     api.apply_effects(batch, &reg);
     assert_eq!(api.dirty_fact_ids(), vec![fact_x]);
 
-    // 7. Dirty invalidation wakes process-p.
     let woken = api.apply_dirty_invalidations(1, Some(api.cause_command()));
     assert_eq!(woken, 1);
 
-    // 8 & 9. Step at the wake tick: process-p runs through its handler.
     assert_eq!(api.step_scheduler(1), vec![process_p]);
-    // 11. Effects only apply at the boundary: fact-y still 0 here.
     assert_eq!(api.fact_value(fact_y), Some(api.value_unsigned(0)));
 
-    // 10 & 11. Boundary applies the handler's effect, updating fact-y.
     api.apply_scheduler_boundary(1, &reg);
     assert_eq!(api.fact_value(fact_y), Some(api.value_unsigned(1)));
 
-    // 12. The causal journal recorded the process lifecycle (woke/started/produced/
-    // applied/completed) under process-p.
     let process_events = api.scheduler_events_for_process(process_p);
     assert!(process_events.len() >= 5);
 

@@ -47,7 +47,6 @@ fn run_check(rest: &[String]) -> ExitCode {
             println!("Axiom architecture check — root: {}", root.display());
             let report = check_architecture(&root);
 
-            // Summarize what (if anything) was checked.
             let summary = report.layers_checked.is_empty().then(|| {
                 "No layer manifests (crates/*/layer.toml) found. Nothing to check.".to_string()
             });

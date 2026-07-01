@@ -7,15 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free, GPU-free, wasm-clean, deterministic.
 crate-type = ["rlib"]
 
 [dependencies]
-# An isolated engine module that builds only on completed layers:
-# the kernel (ids, dimensioned scalars Ratio/Radians/Meters), math (Vec2 / Mat3
-# for the 2D transform stack), and host (the relocated neutral 2D draw contract
-# the Draw2dApi builder assembles and returns — Draw2dList and its value
-# vocabulary). No other module, app, or tool.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-host = { path = "../../crates/axiom-host" }

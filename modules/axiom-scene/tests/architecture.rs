@@ -135,8 +135,6 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest presence ----------
-
 #[test]
 fn module_toml_exists() {
     let manifest = scene_root().join("module.toml");
@@ -150,7 +148,6 @@ fn module_toml_exists() {
 fn module_toml_has_empty_allowed_modules() {
     let manifest = scene_root().join("module.toml");
     let text = fs::read_to_string(&manifest).unwrap();
-    // Look for the literal empty-list form, comment-stripped.
     let stripped = strip_comments_and_strings(&text);
     assert!(
         stripped.contains("allowed_modules = []"),
@@ -160,17 +157,12 @@ fn module_toml_has_empty_allowed_modules() {
 
 #[test]
 fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
-    // Module Law #8: exactly one behavioral facade (SceneApi), plus the optional
-    // identity vocabulary (the `SceneNodeId` handle the facade hands back). All
-    // other public exports are forbidden.
     let lib = read(&scene_src_dir().join("lib.rs"));
     let pub_uses: Vec<&str> = lib
         .lines()
         .map(str::trim)
         .filter(|line| line.starts_with("pub use"))
         .collect();
-    // The only behavioral facade is SceneApi: every other public export must be
-    // part of the SceneNodeId identity vocabulary.
     let facades: Vec<&str> = pub_uses
         .iter()
         .copied()
@@ -189,8 +181,6 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
     );
 }
 
-// ---------- legal layer imports only ----------
-
 #[test]
 fn scene_imports_only_legal_layers() {
     let mut illegal = Vec::new();
@@ -207,14 +197,9 @@ fn scene_imports_only_legal_layers() {
                     && chunk != "axiom_runtime"
                     && chunk != "axiom_math"
                     && chunk != "axiom_frame"
-                    // The scene is an ECS world (the ecs layer): nodes are entities,
-                    // node facts are component columns.
                     && chunk != "axiom_ecs"
-                    // axiom_host appears only in #[cfg(test)] blocks because it
-                    // is a dev-dependency; allow it here too.
                     && chunk != "axiom_host"
                     && chunk != "axiom_scene"
-                    // axiom-zones is the build-time zone-marker Support crate.
                     && chunk != "axiom_zones"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
@@ -232,9 +217,6 @@ fn scene_imports_only_legal_layers() {
 
 #[test]
 fn scene_imports_no_other_modules() {
-    // Modules live under modules/; reject any reference to another
-    // module's crate name. Today there are no other modules to refer to,
-    // so this scan is a tripwire for when one is added.
     let modules_dir = repo_root().join("modules");
     if !modules_dir.is_dir() {
         return;
@@ -251,11 +233,8 @@ fn scene_imports_no_other_modules() {
     let mut violations = Vec::new();
     for path in scene_source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
-        // Match whole import-prefix identifiers, not raw substrings: a module's
-        // crate prefix (`axiom_render`, or the umbrella's bare `axiom`) is a
-        // distinct token. A substring check would flag legal layer imports like
-        // `axiom_math` as references to the `axiom` umbrella — the same
-        // identifier-token split the legal-layers test above relies on.
+        // Token split (not substring match) so `axiom_math` doesn't false-positive
+        // as a reference to the bare `axiom` umbrella.
         let tokens: std::collections::HashSet<&str> = stripped
             .split(|c: char| !c.is_alphanumeric() && c != '_')
             .collect();
@@ -275,8 +254,6 @@ fn scene_imports_no_other_modules() {
         violations.join("\n")
     );
 }
-
-// ---------- lower layers must not import scene ----------
 
 #[test]
 fn no_layer_imports_axiom_scene() {
@@ -299,10 +276,6 @@ fn no_layer_imports_axiom_scene() {
 
 #[test]
 fn no_app_imports_axiom_scene_unless_app_manifest_allows_it() {
-    // For every app under `apps/`, its `app.toml` MUST list `"scene"` in
-    // `allowed_modules` if its source imports `axiom_scene`. The xtask
-    // checker enforces this with `AppDependsOnModuleNotAllowed`; this is
-    // a fast in-crate sanity check.
     let apps_dir = repo_root().join("apps");
     if !apps_dir.is_dir() {
         return;
@@ -331,8 +304,8 @@ fn no_app_imports_axiom_scene_unless_app_manifest_allows_it() {
         }
         let app_manifest = path.join("app.toml");
         let manifest_text = fs::read_to_string(&app_manifest).unwrap_or_default();
-        // Do not strip strings here — the manifest's `allowed_modules`
-        // list IS strings. Just drop `#` line comments.
+        // Don't strip strings here: `allowed_modules` values ARE strings. Only
+        // drop `#` line comments.
         let no_comments: String = manifest_text
             .lines()
             .map(|l| match l.find('#') {
@@ -349,8 +322,6 @@ fn no_app_imports_axiom_scene_unless_app_manifest_allows_it() {
         );
     }
 }
-
-// ---------- source hygiene ----------
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {

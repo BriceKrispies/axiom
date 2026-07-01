@@ -9,10 +9,6 @@
 //! [`crate::live_gpu_binding`]) or an off-screen texture read back to a PNG (the
 //! native [`crate::offscreen`]). Both arms run byte-identical rendering; there is
 //! no second hand-synced copy of the pipeline to drift.
-//!
-//! Compiled only where a real GPU is in play — `wasm32` (the live browser arm) or
-//! the native `offscreen` feature (the screenshot tool) — so the default native
-//! build, the coverage gate, and the branchless lint never see this wgpu code.
 
 use std::collections::HashMap;
 
@@ -710,7 +706,7 @@ impl SceneRenderer {
             label: Some("axiom-frame-encoder"),
         });
 
-        // --- Shadow depth pre-pass: scene depth from the light's POV. ---
+        // Shadow depth pre-pass: scene depth from the light's POV.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("axiom-shadow-pass"),
@@ -738,7 +734,7 @@ impl SceneRenderer {
             }
         }
 
-        // --- Main pass: lit + textured + shadowed. ---
+        // Main pass: lit + textured + shadowed.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("axiom-frame-pass"),
@@ -782,11 +778,11 @@ impl SceneRenderer {
             }
         }
 
-        // --- SDF raymarch pass: composite the frame's SDF shapes over the meshes.
+        // SDF raymarch pass: composite the frame's SDF shapes over the meshes.
         // Loads (does not clear) the same colour + depth attachments, so the
         // fullscreen marcher depth-tests against the mesh depth and writes its own
         // `frag_depth` — SDF and meshes occlude correctly. Runs zero-or-one times
-        // (the Option iterator), only on frames carrying an SdfScene. ---
+        // (the Option iterator), only on frames carrying an SdfScene.
         sdf.into_iter().for_each(|_scene| {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("axiom-sdf-pass"),

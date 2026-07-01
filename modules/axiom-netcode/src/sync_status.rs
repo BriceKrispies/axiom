@@ -20,14 +20,12 @@ pub(crate) enum SyncStatus {
 }
 
 impl SyncStatus {
-    /// Whether this is [`SyncStatus::Pending`] (no verdict yet). A branchless
-    /// equality check against the field-less `Pending` variant.
+    /// Whether this is [`SyncStatus::Pending`] (no verdict yet).
     pub(crate) fn is_pending(self) -> bool {
         self == SyncStatus::Pending
     }
 
-    /// Whether this is [`SyncStatus::InSync`] (all hashes agreed). A branchless
-    /// equality check against the field-less `InSync` variant.
+    /// Whether this is [`SyncStatus::InSync`] (all hashes agreed).
     pub(crate) fn is_in_sync(self) -> bool {
         self == SyncStatus::InSync
     }

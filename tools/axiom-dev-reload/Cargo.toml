@@ -11,8 +11,8 @@ name = "axiom-dev-reload"
 path = "src/main.rs"
 
 [dependencies]
-# The only dependency: a tiny blocking HTTP server (no async runtime). Everything
-# else — file watching, SSE encoding, threading — is std.
+# A tiny blocking HTTP server (no async runtime); everything else — file
+# watching, SSE encoding, threading — is std.
 tiny_http = "0.12"
 
 [lints.rust]

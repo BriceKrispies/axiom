@@ -137,13 +137,12 @@ mod tests {
 
     #[test]
     fn decode_rejects_a_zero_fixed_step() {
-        // A frame whose fixed-step field is zero must fail to decode.
         let mut w = BinaryWriter::new();
         frame::write_header(&mut w, frame::KIND_WELCOME);
         ProtocolVersion::new(1).unwrap().write_to(&mut w);
         ClientId::new(1).unwrap().write_to(&mut w);
-        w.write_u64(0); // server_tick
-        w.write_u64(0); // fixed_step_ns = 0 → invalid
+        w.write_u64(0);
+        w.write_u64(0);
         assert_eq!(
             Welcome::decode(w.as_bytes()).unwrap_err().code(),
             KernelErrorCode::InvalidFixedStep

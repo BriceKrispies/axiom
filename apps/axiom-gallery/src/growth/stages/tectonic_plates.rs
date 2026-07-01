@@ -1,5 +1,4 @@
 //! `tectonic_plates` stage: spherical-Voronoi partition of regions into plates.
-//! Audit: worldgen `tectonic_plates`; OW deterministic overworld.
 //!
 //! Picks `ctx.plate_count` plate seed directions (deterministic uniform unit
 //! vectors via `axiom_math::unit_vec3`) and assigns every region to the nearest
@@ -23,7 +22,6 @@ impl Stage for TectonicPlatesStage {
         let plate_count = ctx.plate_count.max(1) as usize;
         let mut rng = worldgen_stream(ctx.seed).fork(0x_71A7_E5ED);
 
-        // Deterministic plate seed directions on the sphere.
         let mut seeds: Vec<Vec3> = Vec::with_capacity(plate_count);
         for _ in 0..plate_count {
             seeds.push(distributions::unit_vec3(&mut rng));
@@ -34,7 +32,6 @@ impl Stage for TectonicPlatesStage {
             globe.region_plate.resize(region_count, 0);
         }
 
-        // Nearest-seed assignment: spherical Voronoi by max dot.
         for r in 0..region_count {
             let site = globe.topology.sites[r];
             let mut best = 0usize;

@@ -1,10 +1,7 @@
 //! # axiom-dev-reload — retro FPS browser hot-reload dev server
 //!
-//! This is **repo tooling**, not engine code. It lives under `tools/`, has no
-//! `layer.toml` / `module.toml` / `app.toml`, and depends on nothing in the
-//! engine graph — only the `tiny_http` crate and the Rust standard library.
-//! Because it is a tool, it is outside the coverage gate and the Branchless
-//! Law; it is allowed to use ordinary control flow.
+//! Depends on nothing beyond the `tiny_http` crate and the Rust standard
+//! library.
 //!
 //! ## What it does
 //!
@@ -137,8 +134,6 @@ fn main() {
 
     let clients: Clients = Arc::new(Mutex::new(Vec::new()));
 
-    // Background watcher: poll the level file's mtime and broadcast contents on
-    // first read and on every change.
     {
         let clients = Arc::clone(&clients);
         let level_file = level_file.clone();
@@ -153,8 +148,6 @@ fn main() {
         }
     };
 
-    // Serve forever. Hand each request to its own thread so a blocked, long-
-    // lived SSE reader never starves static-file requests.
     for request in server.incoming_requests() {
         let clients = Arc::clone(&clients);
         let static_dir = static_dir.clone();
@@ -339,7 +332,6 @@ fn encode_sse_event(payload: &str) -> Vec<u8> {
             out.push('\n');
         }
     }
-    // Blank line dispatches the event.
     out.push('\n');
     out.into_bytes()
 }
@@ -404,9 +396,7 @@ mod tests {
 
         broadcast(&clients, "AB\nCD");
 
-        // The live client received the payload...
         assert_eq!(live_rx.recv().unwrap(), "AB\nCD");
-        // ...and the dead client's sender was pruned.
         assert_eq!(clients.lock().unwrap().len(), 1);
     }
 }

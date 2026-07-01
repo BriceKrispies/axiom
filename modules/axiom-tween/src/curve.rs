@@ -20,8 +20,6 @@ fn quad_out(t: f32) -> f32 {
 }
 
 fn quad_in_out(t: f32) -> f32 {
-    // Accelerate over the first half, decelerate over the second — selected by a
-    // branchless table index, not an `if`.
     let first = 2.0 * t * t;
     let second = 1.0 - 2.0 * (1.0 - t) * (1.0 - t);
     [first, second][(t >= 0.5) as usize]
@@ -34,7 +32,7 @@ fn cubic_out(t: f32) -> f32 {
 
 fn expo_out(t: f32) -> f32 {
     // Normalized exponential: divide by the value at `t = 1` so the endpoints are
-    // exactly 0 and 1 without an `if t == 1` special case.
+    // exactly 0 and 1.
     let denom = 1.0 - 2f32.powf(-10.0);
     (1.0 - 2f32.powf(-10.0 * t)) / denom
 }

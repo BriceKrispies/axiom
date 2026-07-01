@@ -1,6 +1,5 @@
 //! The deterministic rigid-body integrator, split into a velocity pass and a
 //! position pass so the contact solver can run **between** them.
-//!
 //! Semi-implicit (symplectic) Euler over an explicit fixed step:
 //! 1. [`integrate_velocities`] applies gravity, accumulated force, and impulse to
 //!    each enabled dynamic body's linear velocity, applies accumulated torque to
@@ -9,13 +8,11 @@
 //! 2. the contact solver adjusts velocities to resolve contacts;
 //! 3. [`integrate_positions`] advances each enabled dynamic body's translation by
 //!    its (now solved) linear velocity and its orientation by its angular velocity.
-//!
 //! Static, kinematic, and disabled bodies have `active == 0`, so both passes
 //! collapse to "no change" for them with **no branches** — gating is arithmetic
 //! and table-index selection, not control flow. The integrator reads no clock and
 //! no randomness; `dt` and the damping fractions are derived solely from the
 //! explicit step and the validated world config.
-//!
 //! ## Orientation integration (deterministic, NaN-safe)
 //! Orientation advances by `q' = normalize(q + 0.5·dt·(ω_quat ⊗ q))` using
 //! [`axiom_math::Quat::multiply`] in a fixed factor order, where `ω_quat` is the
@@ -101,7 +98,6 @@ pub(crate) fn integrate_positions(bodies: &mut [PhysicsBody], dt: f32) {
     bodies.iter_mut().for_each(|body| integrate_position(body, dt));
 }
 
-/// Integrate one body's position and orientation.
 fn integrate_position(body: &mut PhysicsBody, dt: f32) {
     let active = active_index(body);
     let factor = active as f32;

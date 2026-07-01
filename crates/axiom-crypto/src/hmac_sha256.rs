@@ -1,5 +1,4 @@
 //! HMAC-SHA256 (RFC 2104) — the keyed MAC behind HS256 JSON Web Tokens.
-//!
 //! Built on the vetted `sha2` implementation already in the tree (the same crate
 //! `ed25519-dalek` pulls in), not a hand-rolled hash: only the small, standard HMAC
 //! construction `H((K ⊕ opad) ‖ H((K ⊕ ipad) ‖ message))` is assembled here, which
@@ -12,7 +11,6 @@ use sha2::{Digest, Sha256};
 /// SHA-256 block size, in bytes (the HMAC key-padding width).
 const BLOCK_LEN: usize = 64;
 
-/// The HMAC-SHA256 output length, in bytes.
 pub const HMAC_SHA256_LEN: usize = 32;
 
 const IPAD: u8 = 0x36;
@@ -59,7 +57,6 @@ mod tests {
 
     #[test]
     fn a_short_and_an_exactly_block_length_key_use_the_raw_key() {
-        // Two distinct messages under the same short key differ; same input matches.
         let a = hmac_sha256(b"key", b"message one");
         let b = hmac_sha256(b"key", b"message two");
         assert_ne!(a, b);

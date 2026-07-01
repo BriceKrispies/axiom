@@ -1,6 +1,6 @@
 //! Data-driven worldgen pipeline: ordered stages resolved from a list of stage
-//! ids against a registry. Audit: "Pipeline/modding requirements" — stage order
-//! is data, stages keyed by stable id, unknown stage fails loudly (OW-E5).
+//! ids against a registry. Stage order is data, stages are keyed by stable id,
+//! and an unknown stage id fails loudly.
 //!
 //! The pipeline runner and the `Stage` contract live here; concrete stage
 //! implementations live in `stages/` and register themselves into a
@@ -37,20 +37,19 @@ pub fn worldgen_stream(seed: u64) -> EntropyStream {
 /// Per-generation context handed to every stage. Plain config + a deterministic
 /// seed so stages can mint the worldgen entropy stream ([`worldgen_stream`]) and
 /// `fork` their own sub-streams.
-/// Audit: "Determinism requirements".
 #[derive(Debug, Clone)]
 pub struct GenContext {
     pub seed: u64,
-    /// Target land fraction in `[0,1]`. Audit: OW-E21 `fit_land_coverage`.
+    /// Target land fraction in `[0,1]`.
     pub land_target: f32,
     pub planet_radius_m: f32,
     /// Requested region count target (quantised to a subdivision level).
     pub site_target: u32,
-    /// Number of tectonic plate seeds. Audit: `num_plate_regions`.
+    /// Number of tectonic plate seeds.
     pub plate_count: u32,
-    /// Erosion iterations (lower in a performance profile). Audit: OW-E16.
+    /// Erosion iterations (lower in a performance profile).
     pub erosion_iterations: u32,
-    /// Stage log lines, appended as the pipeline runs. Audit: OW-4.3.
+    /// Stage log lines, appended as the pipeline runs.
     pub log: Vec<String>,
 }
 
@@ -68,7 +67,7 @@ impl GenContext {
     }
 }
 
-/// A single worldgen stage. Audit: worldgen pipeline stage list.
+/// A single worldgen stage.
 pub trait Stage {
     /// Stable id matching the data-driven stage order (e.g. `"elevation"`).
     fn id(&self) -> &'static str;
@@ -83,7 +82,6 @@ impl std::fmt::Debug for dyn Stage {
 }
 
 /// Error when a requested stage id has no registered implementation.
-/// Audit: OW-E5 "unknown stage fails loudly in dev".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissingStage(pub String);
 
@@ -122,7 +120,7 @@ impl StageRegistry {
     }
 
     /// Build a pipeline from an ordered list of stage ids. Fails loudly if any
-    /// id is unknown. Audit: OW-E5.
+    /// id is unknown.
     pub fn build(&self, ordered_ids: &[&str]) -> Result<Pipeline, MissingStage> {
         let mut stages = Vec::with_capacity(ordered_ids.len());
         for id in ordered_ids {
@@ -142,7 +140,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// Run every stage in order, mutating the globe. Audit: PlanetGlobePipeline.
+    /// Run every stage in order, mutating the globe.
     pub fn run(&self, globe: &mut PlanetGlobe, ctx: &mut GenContext) {
         for stage in &self.stages {
             ctx.log.push(format!("stage:{}", stage.id()));
@@ -155,9 +153,8 @@ impl Pipeline {
     }
 }
 
-/// The canonical overworld stage order. Audit: `world_gen_pipelines.xml`
-/// `default_globe`. Implemented stages are filled by `stages/`; absent ones are
-/// registered as no-ops until implemented (tracked in the requirement registry).
+/// The canonical overworld stage order. Implemented stages are filled by
+/// `stages/`; absent ones are registered as no-ops until implemented.
 pub const DEFAULT_GLOBE: &[&str] = &[
     "topology",
     "half_edge_mesh",
@@ -168,8 +165,7 @@ pub const DEFAULT_GLOBE: &[&str] = &[
     "erosion",
     "fit_land_coverage",
     "moisture",
-    // Climate runs after elevation/moisture and BEFORE triangle_values, per the
-    // audit (OW-E8: "runs after elevation and before triangle_values").
+    // Climate must run after elevation/moisture and before triangle_values.
     "wind_field",
     "moisture_advection",
     "rain_shadow",

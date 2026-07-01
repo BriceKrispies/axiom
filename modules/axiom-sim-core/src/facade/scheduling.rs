@@ -1,5 +1,4 @@
 //! The process-scheduler facade surface of `SimCoreApi`.
-//!
 //! A child module of `facade`, so it may use the private `world` field. Ticks,
 //! kinds, statuses, and reasons cross the facade as plain integer codes; the
 //! internal `SimTick`/`HandlerSpec`/enum types are never named by consumers.
@@ -21,7 +20,6 @@ use crate::sim_world;
 use super::SimCoreApi;
 
 impl SimCoreApi {
-    // --- dependency-kind codes ---
     /// Dependency code: a fact of a kind changed (key = fact kind).
     pub const DEP_FACT_KIND: u8 = 0;
     /// Dependency code: a relation of a kind changed (key = relation kind).
@@ -41,7 +39,6 @@ impl SimCoreApi {
     /// Dependency code: a generic dependency.
     pub const DEP_GENERIC: u8 = 8;
 
-    // --- dirty-kind codes ---
     /// Dirty code: added.
     pub const DIRTY_ADDED: u8 = 0;
     /// Dirty code: updated.
@@ -53,7 +50,6 @@ impl SimCoreApi {
     /// Dirty code: dependency-invalidated.
     pub const DIRTY_DEPENDENCY_INVALIDATED: u8 = 4;
 
-    // --- process status codes ---
     /// Status code: scheduled.
     pub const STATUS_SCHEDULED: u8 = 0;
     /// Status code: sleeping.
@@ -71,7 +67,6 @@ impl SimCoreApi {
 }
 
 impl SimCoreApi {
-    // --- scheduler causal-event codes (for filtering causal records) ---
     /// Causal code: a process was scheduled (registered).
     pub const SCHED_EVENT_SCHEDULED: u32 = sim_world::SCHED_PROCESS_SCHEDULED;
     /// Causal code: a process woke.

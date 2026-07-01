@@ -114,8 +114,8 @@ fn basis_plus_grow_is_the_roomed_puzzle_shape_landscape() {
     root_style.direction = Direction::Adaptive;
     let mut b = LayoutTreeBuilder::new();
     let root = b.root(id(0), root_style);
-    b.child(root, id(1), item(0.0, 1.0)); // board
-    b.child(root, id(2), item(332.0, 0.0)); // panel
+    b.child(root, id(1), item(0.0, 1.0));
+    b.child(root, id(2), item(332.0, 0.0));
     let result = solve(&vp(1000, 600), &b.build());
     assert_rect(result.rect(id(1)).unwrap(), 0.0, 0.0, 668.0, 600.0);
     assert_rect(result.rect(id(2)).unwrap(), 668.0, 0.0, 332.0, 600.0);
@@ -128,8 +128,8 @@ fn adaptive_stacks_the_panel_below_the_board_in_portrait() {
     root_style.direction = Direction::Adaptive;
     let mut b = LayoutTreeBuilder::new();
     let root = b.root(id(0), root_style);
-    b.child(root, id(1), item(0.0, 1.0)); // board
-    b.child(root, id(2), item(332.0, 0.0)); // panel
+    b.child(root, id(1), item(0.0, 1.0));
+    b.child(root, id(2), item(332.0, 0.0));
     let result = solve(&vp(600, 1000), &b.build());
     assert_rect(result.rect(id(1)).unwrap(), 0.0, 0.0, 600.0, 668.0);
     assert_rect(result.rect(id(2)).unwrap(), 0.0, 668.0, 600.0, 332.0);
@@ -235,7 +235,6 @@ fn gap_and_padding_are_applied() {
 
 #[test]
 fn min_and_max_clamp_the_main_size() {
-    // A grow child capped by max; another floored by min.
     let mut capped = item(0.0, 1.0);
     capped.max_main = Some(px(200.0));
     let mut floored = item(0.0, 1.0);
@@ -253,7 +252,7 @@ fn min_and_max_clamp_the_main_size() {
 #[test]
 fn aspect_letterboxes_a_square_into_a_wide_cell() {
     let mut board = item(0.0, 1.0);
-    board.aspect = Some(ratio(1.0)); // square
+    board.aspect = Some(ratio(1.0));
     let mut b = LayoutTreeBuilder::new();
     let root = b.root(id(0), LayoutStyle::new());
     b.child(root, id(1), board);
@@ -265,7 +264,7 @@ fn aspect_letterboxes_a_square_into_a_wide_cell() {
 #[test]
 fn non_positive_aspect_is_ignored() {
     let mut board = item(0.0, 1.0);
-    board.aspect = Some(ratio(0.0)); // ignored
+    board.aspect = Some(ratio(0.0));
     let mut b = LayoutTreeBuilder::new();
     let root = b.root(id(0), LayoutStyle::new());
     b.child(root, id(1), board);

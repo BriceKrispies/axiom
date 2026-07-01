@@ -196,9 +196,6 @@ fn no_global_mutable_state() {
 
 #[test]
 fn no_engine_layer_concepts_higher_than_math() {
-    // Any of these would mean math has started absorbing concepts that belong
-    // to higher layers. Use word-boundary-ish patterns to avoid false hits
-    // (e.g. don't flag plain "Plane" because of "plane.rs").
     let forbidden = &[
         "::World",
         "::Scene",
@@ -257,11 +254,6 @@ fn lib_exports_exactly_math_api() {
         .collect();
     actual.sort();
 
-    // `MathApi` is the primary facade; the rest are the workhorse value
-    // types future layers and modules must be able to *name* (store,
-    // construct, match on). Any change to this set requires explicit
-    // justification in ARCHITECTURE.md — mismatches fail the build so
-    // accidental surface widening is caught.
     let mut expected: Vec<&str> = vec![
         "pub use math_api::MathApi;",
         "pub use approx_eq::ApproxEq;",
@@ -322,14 +314,9 @@ fn axiom_runtime_does_not_import_axiom_math() {
 
 #[test]
 fn math_only_imports_declared_dependencies() {
-    // axiom-math may only import axiom-kernel and axiom-runtime.
     let mut illegal = Vec::new();
     for path in math_source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
-        // Any `axiom_` crate prefix that isn't kernel/runtime is illegal.
-        // (axiom_math itself is the layer's own prefix; it's allowed
-        // internally — but a self-import like `use axiom_math::...` would
-        // already be flagged by the architecture checker as a self-reference.)
         for line in stripped.lines() {
             let trimmed = line.trim();
             if !trimmed.contains("axiom_") {
@@ -340,7 +327,6 @@ fn math_only_imports_declared_dependencies() {
                     && chunk != "axiom_kernel"
                     && chunk != "axiom_runtime"
                     && chunk != "axiom_math"
-                    // axiom-zones is the build-time zone-marker Support crate.
                     && chunk != "axiom_zones"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));

@@ -91,7 +91,6 @@ mod tests {
     fn populated_sink_is_not_empty() {
         let mut sink = InMemoryLogSink::new();
         sink.record(rec(1));
-        // Distinguishes `is_empty -> true`: a sink with a record is NOT empty.
         assert!(!sink.is_empty());
         assert_eq!(sink.len(), 1);
     }

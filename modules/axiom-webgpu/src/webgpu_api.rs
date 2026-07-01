@@ -71,8 +71,7 @@ impl WebGpuApi {
     pub fn new_live(request: &HostPresentationRequest) -> KernelResult<Self> {
         // The request's surface handle is already guaranteed valid by
         // `HostApi`, which mints only valid handles; the only setup that can
-        // actually fail is a request whose adapter cannot present. Branchless:
-        // map the presentability flag to the corresponding result.
+        // actually fail is a request whose adapter cannot present.
         request
             .adapter()
             .require_presentation_surface()
@@ -95,8 +94,6 @@ impl WebGpuApi {
 
     /// Whether this is the deterministic recording backend.
     pub const fn is_recording(&self) -> bool {
-        // Fieldless-enum predicate: compare the coarse `BackendKind`'s integer
-        // discriminants directly rather than branching on a `matches!` arm.
         (self.state.kind() as u8) == (BackendKind::Recording as u8)
     }
 
@@ -119,8 +116,6 @@ impl WebGpuApi {
     pub const KIND_SET_MATERIAL: u32 = GpuCommand::KIND_SET_MATERIAL;
     pub const KIND_DRAW_INDEXED: u32 = GpuCommand::KIND_DRAW_INDEXED;
     pub const KIND_PRESENT: u32 = GpuCommand::KIND_PRESENT;
-
-    // --- Submission construction ---
 
     pub fn new_submission(&self, target_width: u32, target_height: u32) -> GpuSubmission {
         GpuSubmission::new(target_width, target_height)
@@ -159,8 +154,6 @@ impl WebGpuApi {
         sub.push(GpuCommand::present());
     }
 
-    // --- Submission ---
-
     /// Submit a [`GpuSubmission`] to the backend.
     ///
     /// Both backends accept the same submission shape and build a
@@ -175,8 +168,6 @@ impl WebGpuApi {
         let commands = sub.commands().to_vec();
         GpuSubmissionReport::new(commands, width, height, self.state.submission_status())
     }
-
-    // --- Report inspection ---
 
     pub fn report_command_count(&self, report: &GpuSubmissionReport) -> usize {
         report.submitted_command_count()
@@ -226,7 +217,6 @@ mod tests {
 
     #[test]
     fn new_and_default_facades_are_equivalent() {
-        // Both construction paths start in the same recording backend.
         assert_eq!(
             WebGpuApi::new().backend_kind(),
             WebGpuApi::default().backend_kind(),
@@ -258,9 +248,7 @@ mod tests {
         assert_eq!(api().report_present_count(&report), 1);
         assert_eq!(report.target_width(), 800);
         assert_eq!(report.target_height(), 600);
-        // The SetMaterial command (index 4) records its albedo texture binding.
         assert_eq!(api().report_material_texture_at(&report, 4), Some(4));
-        // Non-SetMaterial / out-of-range indices report no texture binding.
         assert_eq!(api().report_material_texture_at(&report, 0), None);
         assert_eq!(api().report_material_texture_at(&report, 99), None);
     }
@@ -279,9 +267,6 @@ mod tests {
 
     #[test]
     fn report_count_passthroughs_match_underlying_with_values_distinct_from_one() {
-        // Two of every counted kind so each passthrough returns 2 — distinct
-        // from the mutant constants 0 and 1, and asserted to equal the
-        // underlying report's own counts.
         let mut sub = api().new_submission(1, 1);
         api().submission_clear_frame(&mut sub, [0.0, 0.0, 0.0, 1.0]);
         api().submission_clear_frame(&mut sub, [1.0, 1.0, 1.0, 1.0]);
@@ -314,8 +299,6 @@ mod tests {
         );
         assert_eq!(api().report_kind_at(&report, 2), None);
     }
-
-    // --- Backend modes ---
 
     use crate::gpu_submission_status::GpuSubmissionStatus;
     use axiom_host::{
@@ -365,7 +348,6 @@ mod tests {
         assert_eq!(report.status(), GpuSubmissionStatus::Recorded);
         assert!(report.is_recorded());
         assert!(!report.presented());
-        // Recording shape is unchanged.
         assert_eq!(report.clear_count(), 1);
         assert_eq!(report.draw_count(), 1);
         assert_eq!(report.present_count(), 1);
@@ -392,11 +374,9 @@ mod tests {
     fn live_backend_accepts_same_submission_shape_but_does_not_present() {
         let api = WebGpuApi::new_live(&host_request(true)).unwrap();
         let report = api.submit(demo_submission(&api));
-        // Same submission shape is accepted and recorded.
         assert_eq!(report.clear_count(), 1);
         assert_eq!(report.draw_count(), 1);
         assert_eq!(report.present_count(), 1);
-        // ...but nothing was presented and the status says so.
         assert_eq!(report.status(), GpuSubmissionStatus::LiveNotInitialized);
         assert!(report.is_live_not_initialized());
         assert!(!report.presented());
@@ -431,7 +411,6 @@ mod tests {
 
     #[test]
     fn is_recording_is_false_for_live_backends() {
-        // Exercises the non-matching arm of `is_recording`'s `matches!`.
         let unbound = WebGpuApi::new_live_unbound();
         assert!(!unbound.is_recording());
         let live = WebGpuApi::new_live(&host_request(true)).unwrap();

@@ -19,12 +19,9 @@ pub struct RuntimeDiagnostics {
     events_pushed: u32,
     commands_drained: u32,
     events_drained: u32,
-    /// Telemetry metrics emitted by the step's systems, in emission order.
     /// Excludes the runtime's own internal step-summary counter.
     metrics: Vec<TelemetryMetric>,
-    /// The kernel never reads wall-clock time, so step duration is `None`
-    /// until a future layer supplies a deterministic time source. The field
-    /// exists so the diagnostics schema is stable.
+    /// The kernel never reads wall-clock time, so this is always `None`.
     step_duration_nanos: Option<u64>,
 }
 
@@ -83,8 +80,6 @@ impl RuntimeDiagnostics {
             .filter_map(|o| o.result().as_ref().err())
             .collect()
     }
-
-    // --- crate-private setters used by Runtime::step ---
 
     pub(crate) fn record_outcomes(&mut self, outcomes: Vec<SystemOutcome>) {
         self.system_outcomes = outcomes;
@@ -145,8 +140,6 @@ mod tests {
         let errs = d.errors();
         assert_eq!(errs.len(), 1);
         assert_eq!(errs[0].code(), RuntimeErrorCode::SystemFailed);
-        // The raw outcomes slice must reflect all three recorded outcomes, not
-        // an empty leaked slice.
         assert_eq!(d.system_outcomes().len(), 3);
         assert_eq!(d.system_outcomes()[1].name(), "boom");
     }
@@ -154,8 +147,6 @@ mod tests {
     #[test]
     fn queue_counts_are_recorded() {
         let mut d = RuntimeDiagnostics::new(step());
-        // Use distinct counts, all different from the mutation constants 0/1,
-        // so each accessor is independently pinned.
         d.record_queue_counts(2, 5, 3, 4);
         assert_eq!(d.commands_pushed(), 2);
         assert_eq!(d.events_pushed(), 5);

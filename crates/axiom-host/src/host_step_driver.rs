@@ -79,11 +79,6 @@ impl HostStepDriver {
         runtime: &mut Runtime,
         input: HostFrameInput,
     ) -> HostResult<HostFrameReport> {
-        // Out-of-order rejection, branchless: `is_some_and` folds the original
-        // nested `if let Some(last) { if seq <= last }` into one predicate that
-        // is false whenever no frame has been accepted yet, and the
-        // `then_some(()).ok_or_else(..)` turns that predicate into the same
-        // early `Err` the guard produced.
         let out_of_order = self
             .last_sequence
             .is_some_and(|last| input.sequence() <= last);
@@ -100,10 +95,6 @@ impl HostStepDriver {
                     self.accumulator_nanos,
                 );
 
-                // `collect` into `Result<Vec<_>, _>` reproduces the `for … ?`
-                // loop exactly: it drives `Runtime::step` in order and stops at
-                // the first `Err`, so the same calls happen and the same first
-                // failure propagates — no `for`, no `?`.
                 (0..plan.steps())
                     .map(|_| {
                         runtime.step().map_err(|e| {
@@ -112,9 +103,7 @@ impl HostStepDriver {
                     })
                     .collect::<HostResult<Vec<_>>>()
                     .map(|step_records| {
-                        // Commit accumulator only after a successful drive. For
-                        // a lifecycle skip the plan's `retained_nanos` already
-                        // reflects policy.
+                        // Commit the accumulator only after a successful drive.
                         self.accumulator_nanos = plan.retained_nanos();
                         self.last_sequence = Some(input.sequence());
 
@@ -212,13 +201,11 @@ mod tests {
     #[test]
     fn driver_preserves_accumulator_between_frames() {
         let (mut driver, mut runtime) = started_driver_and_runtime();
-        // Frame 1: half a step elapsed → 0 runtime steps, half a step retained.
         let r1 = driver
             .drive(&mut runtime, HostFrameInput::new(1, STEP_NANOS / 2, vp()))
             .unwrap();
         assert_eq!(r1.steps_executed(), 0);
         assert_eq!(driver.accumulator_nanos(), STEP_NANOS / 2);
-        // Frame 2: another half-step elapsed → accumulator now 1 step → 1 runtime step.
         let r2 = driver
             .drive(&mut runtime, HostFrameInput::new(2, STEP_NANOS / 2, vp()))
             .unwrap();
@@ -263,8 +250,7 @@ mod tests {
     #[test]
     fn driver_does_not_step_while_hidden_when_policy_forbids() {
         let mut driver = HostStepDriver::new(cfg());
-        // Lifecycle: started then hidden → !visible, default policy
-        // (step_while_hidden=false) blocks stepping.
+        // Default policy (step_while_hidden=false) blocks stepping while hidden.
         driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
         driver.apply_lifecycle_signal(HostLifecycleSignal::Hidden);
         let mut runtime = Runtime::new(RuntimeConfig::new(STEP_NANOS)).unwrap();
@@ -299,7 +285,6 @@ mod tests {
         let mut driver = HostStepDriver::new(cfg());
         driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
         let mut runtime = Runtime::new(RuntimeConfig::new(STEP_NANOS)).unwrap();
-        // Deliberately NOT calling initialize/start.
         let err = driver
             .drive(&mut runtime, HostFrameInput::new(1, STEP_NANOS, vp()))
             .unwrap_err();

@@ -7,9 +7,7 @@
 //! a piece at a time without rebuilding it: register one more mesh/material into
 //! the same stores the initial build filled, spawn a light node, or set/replace
 //! the active camera. They reuse the existing resolved-geometry / material stores
-//! and the scene's node lifecycle — there is no parallel store. A child module of
-//! `app` so it reaches [`RunningApp`]'s private scene + resource tables while
-//! keeping `app.rs` within the per-file size budget.
+//! and the scene's node lifecycle — there is no parallel store.
 //!
 //! A renderable node is *spawned* from a `(Handle<Mesh>, Handle<Material>)` pair
 //! through the existing [`RunningApp::spawn`] (a [`crate::prelude::Spawn`]
@@ -60,8 +58,6 @@ impl RunningApp {
     /// Malformed geometry returns the offending [`MeshDataError`] and registers
     /// nothing (the store is left untouched).
     pub fn add_mesh_data(&mut self, data: MeshData) -> Result<Handle<Mesh>, MeshDataError> {
-        // Register only on a clean resolve; `Result::map` keeps the registration
-        // off the error arm without an `if`/`match` (branchless).
         mesh_data_geometry(&data).map(|geometry| {
             let id = self.meshes.len() as u64 + 1;
             self.meshes.push((id, geometry));
@@ -206,10 +202,8 @@ mod tests {
     #[test]
     fn add_mesh_and_add_material_yield_distinct_usable_handles() {
         let mut app = empty_render_app();
-        // A bare app draws nothing.
         assert!(app.tick(0).draws().is_empty());
 
-        // Runtime-register two meshes and two materials; the handles are distinct.
         let cube = app.add_mesh(Mesh::cube());
         let sphere = app.add_mesh(Mesh::sphere());
         assert_ne!(cube, sphere);
@@ -217,8 +211,6 @@ mod tests {
         let blue = app.add_material(Material::lit(Color::linear_rgb(ch(0.1), ch(0.1), ch(0.9))));
         assert_ne!(red, blue);
 
-        // Spawn renderables from the runtime handles (reusing RunningApp::spawn):
-        // each handle resolves, so both objects draw with their distinct colours.
         app.spawn(Spawn::new(
             Transform::from_translation(Vec3::new(-1.0, 0.0, 0.0)),
             cube,
@@ -234,7 +226,6 @@ mod tests {
         assert_eq!(outcome.draws().len(), 2, "both runtime nodes render");
         let colors: Vec<[f32; 4]> = outcome.draws().iter().map(|d| d.color()).collect();
         assert_ne!(colors[0], colors[1], "the two materials are distinct");
-        // The two distinct meshes resolve to distinct geometry ids in the upload set.
         let mesh_set = app.mesh_set();
         assert_eq!(mesh_set.len(), 2);
         assert_ne!(mesh_set[0].0, mesh_set[1].0);
@@ -262,9 +253,6 @@ mod tests {
 
     #[test]
     fn add_mesh_data_registers_author_geometry_that_spawns_and_renders() {
-        // SPEC-11 §9 end-to-end: a mesh authored from explicit vertices reaches
-        // the resolved store and renders as just-another-triangle-set, on the same
-        // rails as a catalog primitive.
         let mut app = empty_render_app();
         let quad = app
             .add_mesh_data(quad_mesh_data())
@@ -272,12 +260,8 @@ mod tests {
         let white = app.add_material(Material::lit(Color::linear_rgb(ch(1.0), ch(1.0), ch(1.0))));
 
         app.spawn(Spawn::new(Transform::IDENTITY, quad, white));
-        // The authored node draws exactly like a primitive node.
         assert_eq!(app.tick(0).draws().len(), 1, "the authored mesh renders");
 
-        // The author's own geometry reached the resolved upload set: 4 vertices
-        // (×12 interleaved floats) and 6 indices — NOT a catalog primitive's
-        // counts, proving the author data was not dropped/ignored.
         let mesh_set = app.mesh_set();
         assert_eq!(mesh_set.len(), 1);
         assert_eq!(mesh_set[0].1.len(), 4 * 12, "4 authored vertices uploaded");
@@ -286,8 +270,6 @@ mod tests {
 
     #[test]
     fn add_mesh_data_handle_interleaves_with_primitive_handles() {
-        // An author mesh and a catalog primitive share one 1-based handle space,
-        // so they are interchangeable in a spawn.
         let mut app = empty_render_app();
         let cube = app.add_mesh(Mesh::cube());
         let quad = app
@@ -300,8 +282,6 @@ mod tests {
 
     #[test]
     fn add_mesh_data_rejects_malformed_geometry_and_registers_nothing() {
-        // A malformed author mesh (an out-of-range index) is rejected with the
-        // precise error and leaves the store untouched — no half-registered mesh.
         let mut app = empty_render_app();
         let bad = MeshData::new(
             vec![Vec3::ZERO, Vec3::UNIT_X, Vec3::UNIT_Y],
@@ -316,7 +296,6 @@ mod tests {
     #[test]
     fn add_light_adds_a_light_visible_to_the_renderer() {
         let mut app = empty_render_app();
-        // No light yet: the renderer resolves zero lights.
         assert!(app.tick(0).lights().is_empty());
 
         let entity = app.add_light(
@@ -328,9 +307,7 @@ mod tests {
             Transform::from_translation(Vec3::new(0.0, 5.0, 0.0)),
         );
 
-        // The renderer now resolves exactly one light.
         assert_eq!(app.tick(1).lights().len(), 1);
-        // The returned entity is a live, addressable node carrying the transform.
         assert_eq!(
             app.get::<Transform>(entity).map(|t| t.translation),
             Some(Vec3::new(0.0, 5.0, 0.0))
@@ -340,23 +317,20 @@ mod tests {
     #[test]
     fn set_camera_sets_and_then_replaces_the_active_camera() {
         let mut app = empty_render_app();
-        // With no camera the view-projection is identity.
         let identity = app.tick(0).camera_view_proj();
 
-        // Setting a camera makes the view-projection non-identity.
         app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)));
         let near = app.tick(1).camera_view_proj();
         assert_ne!(near, identity, "a camera replaces the identity view");
 
-        // Replacing the camera (a different position) changes the view again —
-        // proving the old camera was dropped, not merely shadowed by a second one.
+        // A second `set_camera` must drop the old one, not merely shadow it with
+        // a second camera in the scene.
         app.set_camera(
             camera(),
             Transform::from_translation(Vec3::new(0.0, 0.0, 20.0)),
         );
         let far = app.tick(2).camera_view_proj();
         assert_ne!(far, near, "set_camera replaces the active camera");
-        // Exactly one camera remains in the scene after the replacement.
         assert_eq!(app.tick(3).camera_view_proj(), far);
     }
 
@@ -364,11 +338,10 @@ mod tests {
     fn spawn_controller_drives_the_camera_immediately_via_first_person_input() {
         let mut app = empty_render_app();
         let cam = app.spawn_controller(camera(), Transform::from_translation(Vec3::new(0.0, 1.0, 5.0)), 0);
-        // The controller node IS the active camera (its view-projection is non-identity).
         assert_ne!(app.tick(0).camera_view_proj(), [0.0; 16]);
 
-        // Move forward one unit (local -Z) with no turn: the camera node slides to
-        // z = 4 IMMEDIATELY — no tick, no re-authoring the camera transform.
+        // `control` applies immediately — no tick, no re-authoring the camera
+        // transform.
         app.control(FirstPersonInput::new(
             0,
             Vec3::new(0.0, 0.0, -1.0),
@@ -381,9 +354,8 @@ mod tests {
             "forward at yaw 0 moves the camera node along -Z, applied now"
         );
 
-        // Yaw 90° then move forward again: the move frame rotates with the yaw, so
-        // this step lands off the z axis (x changes) — proving the engine, not the
-        // game, rotates the movement.
+        // Yaw 90° then move forward again: the move frame rotates with the yaw,
+        // so the engine (not the game) rotates the movement.
         app.control(FirstPersonInput::new(
             0,
             Vec3::new(0.0, 0.0, -1.0),
@@ -393,8 +365,6 @@ mod tests {
         let turned = app.world_transform(cam).expect("controller node is live").translation;
         assert!(turned.x.abs() > 0.5, "yaw rotated the move frame off the z axis");
 
-        // An input for an unknown controller index is a clean no-op (the camera
-        // node does not move).
         let before = app.world_transform(cam).map(|t| t.translation);
         app.control(FirstPersonInput::new(
             9,

@@ -52,8 +52,6 @@ mod tests {
 
     #[test]
     fn empty_input_has_a_stable_digest() {
-        // The absorb loop runs zero times; the mixing pass still produces a
-        // fixed, repeatable fingerprint.
         assert_eq!(digest(&[]), digest(&[]));
         assert_ne!(digest(&[]), digest(&[0]));
     }
@@ -65,7 +63,6 @@ mod tests {
 
     #[test]
     fn single_byte_change_avalanches() {
-        // A one-bit change should flip many output bytes (not just one lane).
         let a = digest(&[0u8; 64]);
         let mut input = [0u8; 64];
         input[40] = 1;

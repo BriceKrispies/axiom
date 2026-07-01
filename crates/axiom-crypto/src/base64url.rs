@@ -1,6 +1,5 @@
 //! Unpadded base64url decoding (RFC 4648 §5) — the encoding compact JWS uses for
 //! its `header.payload.signature` segments.
-//!
 //! This is *encoding*, not cryptography: it turns the ASCII base64url segments of a
 //! JWT into their raw bytes so [`crate::jwt`] can HMAC-verify the signing input and
 //! read the claims. It is deterministic and branchless: each input byte is mapped
@@ -99,7 +98,6 @@ mod tests {
 
     #[test]
     fn decodes_each_alphabet_class() {
-        // Upper, lower, digit, dash, underscore all decode to known 6-bit values.
         assert_eq!(decode_byte(b'A'), 0);
         assert_eq!(decode_byte(b'Z'), 25);
         assert_eq!(decode_byte(b'a'), 26);
@@ -108,14 +106,13 @@ mod tests {
         assert_eq!(decode_byte(b'9'), 61);
         assert_eq!(decode_byte(b'-'), 62);
         assert_eq!(decode_byte(b'_'), 63);
-        assert_eq!(decode_byte(b'+'), 0xFF); // not base64url
+        assert_eq!(decode_byte(b'+'), 0xFF);
         assert_eq!(decode_byte(b'/'), 0xFF);
         assert_eq!(decode_byte(b'='), 0xFF); // padding is rejected (unpadded)
     }
 
     #[test]
     fn rejects_a_non_alphabet_byte() {
-        // "AAAA" is valid; corrupting one byte to '+' fails.
         assert!(decode(b"AAAA").is_some());
         assert!(decode(b"AA+A").is_none());
     }
@@ -125,7 +122,6 @@ mod tests {
         // len % 4 == 1 is not a producible base64 length.
         assert!(decode(b"A").is_none());
         assert!(decode(b"AAAAA").is_none());
-        // The producible remainders (0, 2, 3) are fine.
         assert!(decode(b"").is_some());
         assert!(decode(b"AA").is_some());
         assert!(decode(b"AAA").is_some());

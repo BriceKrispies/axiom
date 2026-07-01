@@ -28,9 +28,6 @@ impl HostSafeAreaInsets {
     /// [`HostError::invalid_safe_area_insets`]. Finiteness is already
     /// guaranteed by [`Pixels`]; this constructor adds the non-negativity
     /// invariant (an inset *into* the surface cannot be negative).
-    ///
-    /// The four comparisons are combined with `&` (eager, no short-circuit) so
-    /// the validation is a single branchless predicate.
     pub fn new(top: Pixels, right: Pixels, bottom: Pixels, left: Pixels) -> HostResult<Self> {
         ((top.get() >= 0.0) & (right.get() >= 0.0) & (bottom.get() >= 0.0) & (left.get() >= 0.0))
             .then_some(HostSafeAreaInsets {

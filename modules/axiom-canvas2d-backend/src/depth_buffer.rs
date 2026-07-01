@@ -62,7 +62,6 @@ mod tests {
     #[test]
     fn clear_far_initializes_every_pixel_to_far() {
         let mut b = DepthBuffer::new(3, 2);
-        // Scribble through the slice, then clear back to far.
         b.slice_mut()
             .iter_mut()
             .enumerate()
@@ -74,7 +73,6 @@ mod tests {
     #[test]
     fn slice_mut_writes_are_visible_through_depth_at() {
         let mut b = DepthBuffer::new(2, 2);
-        // Row-major: (x=1,y=1) is index 3.
         b.slice_mut()[3] = 0.25;
         assert_eq!(b.depth_at(1, 1), 0.25);
         assert_eq!(b.depth_at(0, 0), f32::INFINITY);

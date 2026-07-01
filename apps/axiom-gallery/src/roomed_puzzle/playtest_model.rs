@@ -120,11 +120,9 @@ mod tests {
         let mut p = PlaytestSession::new(corridor());
         assert!(p.apply_key("ArrowRight").unwrap().player_moved());
         assert_eq!(p.state().player().position, GridCoord::new(1, 0));
-        // q leaves a ghost and resets.
         p.apply_key("q");
         assert_eq!(p.ghost_count(), 1);
         assert_eq!(p.state().player().position, GridCoord::new(0, 0));
-        // An ignored key returns None.
         assert!(p.apply_key("Tab").is_none());
     }
 

@@ -209,11 +209,9 @@ mod tests {
             SubstanceKind::new(20),
             &[(SubstanceProperty::new(2), 9)]
         ));
-        // Re-registering a cataloged definition is rejected.
         assert!(!catalog.register_material(d(1), MaterialKind::new(99), &[]));
         assert_eq!(catalog.len(), 2);
 
-        // Material lookups succeed only for the material; substance lookups only for it.
         assert_eq!(catalog.material_kind(d(1)), Some(MaterialKind::new(10)));
         assert_eq!(
             catalog.material_kind(d(2)),

@@ -46,11 +46,20 @@ impl Canvas2dBackendApi {
     /// (larger) canvas display size.
     pub fn new(request: &HostPresentationRequest) -> Self {
         let viewport = request.descriptor().viewport();
+        let width = viewport.physical_width();
+        let height = viewport.physical_height();
         Canvas2dBackendApi {
-            width: viewport.physical_width(),
-            height: viewport.physical_height(),
+            width,
+            height,
             profile: CanvasVisualProfile::LowPolyFramebuffer,
-            options: LowPolyRasterOptions::default(),
+            // The internal framebuffer preserves the SURFACE aspect (not a fixed
+            // 16:9), so the software image is the same shape the GPU renders and
+            // upscales without vertical distortion.
+            options: LowPolyRasterOptions::from_preset_for_surface(
+                CanvasQualityPreset::Low,
+                width,
+                height,
+            ),
             meshes: MeshCache::default(),
             textures: Draw2dTextures::default(),
             #[cfg(target_arch = "wasm32")]
@@ -113,7 +122,6 @@ impl Canvas2dBackendApi {
             self.options.framebuffer_width(),
             self.options.framebuffer_height(),
             self.width,
-            self.height,
         )?);
         Ok(())
     }
@@ -127,12 +135,14 @@ impl Canvas2dBackendApi {
 
     /// Select the internal-resolution quality tier (`0` = UltraLow … `3` = High,
     /// clamped). The forced-fallback default is Low; the platform arm resolves a
-    /// level from a `?quality=` query, and this is the seam a future
-    /// dynamic-resolution policy would drive from measured frame time. Resizing
-    /// the framebuffer mid-run is supported because the binding tracks the
-    /// framebuffer size on each blit.
+    /// level from a `?quality=` query. Resizing the framebuffer mid-run is
+    /// supported because the binding tracks the framebuffer size on each blit.
     pub fn set_quality_level(&mut self, level: u8) {
-        self.options = LowPolyRasterOptions::from_preset(CanvasQualityPreset::from_level(level));
+        self.options = LowPolyRasterOptions::from_preset_for_surface(
+            CanvasQualityPreset::from_level(level),
+            self.width,
+            self.height,
+        );
     }
 
     /// Rasterize one [`FramePacket`] in the low-poly framebuffer profile and
@@ -174,8 +184,7 @@ impl Canvas2dBackendApi {
     /// with the packet clear colour each frame, leaving every other knob as
     /// configured) and run the pure software z-buffer rasterizer.
     fn rasterize(&self, packet: &FramePacket) -> SoftwareRasterResult {
-        // v1 ships a single visual profile; this field is the seam where a
-        // future profile would select a different rasterization strategy.
+        // Only one visual profile exists; this avoids an unused-field warning.
         let _ = self.profile;
         let mut cues = self.options.depth_cues();
         cues.fog.color = packet.clear_color();
@@ -460,10 +469,11 @@ mod tests {
         assert_eq!(report.submitted_draws(), 1);
         assert_eq!(report.skipped_draws(), 0);
         assert_eq!(report.critical_coverage_skipped(), 0);
-        // The framebuffer is the low internal resolution (Low tier 240×135), not
-        // the 800x600 canvas.
+        // The framebuffer is the low internal resolution, aspect-matched to the
+        // 800×600 (4:3) surface — Low tier's 240 long-edge budget → 240×180, not a
+        // distorting fixed 16:9, and not the full 800×600 canvas.
         assert_eq!(report.raster().framebuffer_width, 240);
-        assert_eq!(report.raster().framebuffer_height, 135);
+        assert_eq!(report.raster().framebuffer_height, 180);
         assert_eq!(report.raster().rasterized_triangles, 2);
         assert!(report.raster().depth_written_pixels > 0);
         assert_eq!(report.raster().terrain_draws_preserved, 1);
@@ -476,7 +486,8 @@ mod tests {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(800, 600));
         backend.load_meshes(&[ground(7)]);
-        // Low tier → a 240×135 internal framebuffer (the forced-fallback default).
+        // Low tier at the 800×600 (4:3) surface → a 240×180 internal framebuffer
+        // (aspect-matched to the surface, the forced-fallback default tier).
         backend.set_quality_level(1);
         let draws = vec![FrameDrawItem::new(
             1,
@@ -492,7 +503,7 @@ mod tests {
         let (rgba, w, h) = backend.render_offscreen_rgba(&p);
         // The dimensions are the internal raster resolution, and the buffer is a
         // tight RGBA8 image of exactly that size.
-        assert_eq!((w, h), (240, 135));
+        assert_eq!((w, h), (240, 180));
         assert_eq!(rgba.len() as u32, w * h * 4);
         // It is the same framebuffer `present_packet` would blit: same size, and
         // every pixel opaque.
@@ -513,19 +524,19 @@ mod tests {
         let draws = vec![FrameDrawItem::new(
             1, 7, 9, IDENTITY, IDENTITY, [1.0; 4], false,
         )];
-        // Level 0 → UltraLow 160×90.
+        // Level 0 → UltraLow, 160×120 at the 800×600 (4:3) surface.
         backend.set_quality_level(0);
         let r0 = backend.present_packet(&packet(
             draws.clone(),
             FrameFeatureSet::new(false, false, 0, 0),
         ));
         assert_eq!(r0.raster().framebuffer_width, 160);
-        assert_eq!(r0.raster().framebuffer_height, 90);
-        // Level 2 → Medium 320×180 (more candidate pixels than UltraLow).
+        assert_eq!(r0.raster().framebuffer_height, 120);
+        // Level 2 → Medium, 320×240 (more candidate pixels than UltraLow).
         backend.set_quality_level(2);
         let r2 = backend.present_packet(&packet(draws, FrameFeatureSet::new(false, false, 0, 0)));
         assert_eq!(r2.raster().framebuffer_width, 320);
-        assert_eq!(r2.raster().framebuffer_height, 180);
+        assert_eq!(r2.raster().framebuffer_height, 240);
         assert!(r2.raster().candidate_pixels > r0.raster().candidate_pixels);
     }
 

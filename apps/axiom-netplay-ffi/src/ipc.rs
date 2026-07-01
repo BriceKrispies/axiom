@@ -471,7 +471,6 @@ mod tests {
         let response = Response::decode(&handle(&mut s, &frame)).unwrap();
         assert!(matches!(response, Response::StateHash(_)));
 
-        // A garbage frame yields a Malformed response, never a panic.
         assert_eq!(
             Response::decode(&handle(&mut s, &[0x99, 0x99])),
             Some(Response::Malformed)

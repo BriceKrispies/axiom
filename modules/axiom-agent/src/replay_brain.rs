@@ -41,9 +41,8 @@ impl AgentBrain for ReplayBrain {
         let recorded_is_empty = self.recorded.is_empty();
         self.cursor = self.cursor.saturating_add(1);
         let has = next.is_some();
-        // Reason: an emitted intent (3) wins; otherwise the exhaustion is empty
-        // (4) when the recording was empty, or complete (5) past the end of a
-        // non-empty recording. Nested table index of Copy values — branchless.
+        // Reason precedence: an emitted intent wins; otherwise exhaustion is
+        // "empty" for a never-populated recording or "complete" past its end.
         let reason = [
             [
                 DecisionReport::REASON_REPLAY_COMPLETE,
@@ -77,7 +76,6 @@ mod tests {
         assert_eq!(d.intents().len(), 1);
         assert_eq!(d.intents()[0].kind_code(), ActionIntent::KIND_NOOP);
         assert_eq!(d.reason_code(), DecisionReport::REASON_REPLAY_EMPTY);
-        // An empty recording stays "empty" on every step, never "complete".
         let again = decide(&mut brain);
         assert_eq!(again.reason_code(), DecisionReport::REASON_REPLAY_EMPTY);
     }
@@ -98,8 +96,6 @@ mod tests {
 
     #[test]
     fn emits_noop_with_replay_complete_reason_after_completion() {
-        // A non-empty recording stepped past its end reports "complete" (5),
-        // distinct from the "empty" (4) of a never-populated recording.
         let mut brain = ReplayBrain::new(vec![ActionIntent::press_control(1)]);
         let _consumed = decide(&mut brain);
         let after = decide(&mut brain);

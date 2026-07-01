@@ -11,14 +11,12 @@ use crate::observation::Observation;
 /// A brain that emits **one `press_control` intent per held control, every
 /// tick** — so a single decision carries several simultaneous controls (e.g.
 /// forward + turn).
-///
 /// This is the substrate's producer of genuine *multi-intent* decisions. The
 /// replay brain emits one recorded intent per step and the scripted brain emits
 /// the first matching rule's intent; neither lets one tick express more than one
 /// action. The hold-set brain does: the runtime queues every emitted intent, and
 /// a consumer folds them back together with
 /// [`crate::action_queue::ActionQueue::combined_control_code`].
-///
 /// Emissions are clamped to the profile's `max_actions_per_tick` exactly like the
 /// scripted brain — a zero budget emits nothing, reported as
 /// [`DecisionReport::REASON_ACTION_BUDGET_ZERO`].
@@ -46,16 +44,12 @@ impl AgentBrain for HoldSetBrain {
     ) -> BrainDecision {
         let max = profile.max_actions_per_tick() as usize;
         let budget_zero = max == 0;
-        // One press-control intent per held control, clamped to the budget. A zero
-        // budget emits nothing (take(0)). One iterator chain, no branches.
         let emission: Vec<ActionIntent> = self
             .controls
             .iter()
             .map(|code| ActionIntent::press_control(*code))
             .take(max)
             .collect();
-        // Table-indexed reason: a zero budget reports budget-zero, otherwise the
-        // hold-set emission reason (even for an empty set — an idle held tick).
         let reason = [
             DecisionReport::REASON_HOLD_SET_EMITTED,
             DecisionReport::REASON_ACTION_BUDGET_ZERO,
@@ -80,8 +74,6 @@ mod tests {
 
     #[test]
     fn emits_one_press_control_intent_per_held_control() {
-        // Two controls held → two distinct press-control intents in ONE decision
-        // (the multi-intent capability), reported as hold-set emitted.
         let mut brain = HoldSetBrain::new(vec![0b0001, 0b0100]);
         let d = decide(&mut brain, AgentProfile::debug_perfect());
         assert_eq!(d.intents().len(), 2);
@@ -93,7 +85,6 @@ mod tests {
 
     #[test]
     fn the_action_budget_clamps_the_emission_count() {
-        // Three controls but a budget of two → only two are emitted (take(max)).
         let mut brain = HoldSetBrain::new(vec![1, 2, 4]);
         let d = decide(&mut brain, AgentProfile::debug_perfect().with_action_budget(2));
         assert_eq!(d.intents().len(), 2);
@@ -103,8 +94,6 @@ mod tests {
 
     #[test]
     fn an_empty_held_set_emits_nothing_with_the_hold_set_reason() {
-        // No controls held (an idle tick) → no intents, but a non-zero budget, so
-        // the reason is hold-set-emitted, not budget-zero.
         let mut brain = HoldSetBrain::new(Vec::new());
         let d = decide(&mut brain, AgentProfile::debug_perfect());
         assert_eq!(d.intents().len(), 0);
@@ -113,8 +102,6 @@ mod tests {
 
     #[test]
     fn a_zero_budget_emits_nothing_with_budget_zero_reason() {
-        // A zero budget suppresses every control and reports budget-zero — the
-        // other arm of the reason table.
         let mut brain = HoldSetBrain::new(vec![1, 2]);
         let d = decide(&mut brain, AgentProfile::debug_perfect().with_action_budget(0));
         assert_eq!(d.intents().len(), 0);

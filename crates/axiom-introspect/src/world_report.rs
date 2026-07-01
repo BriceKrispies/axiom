@@ -56,8 +56,6 @@ impl WorldReport {
     /// incompatible major version, or a binary error for truncated/invalid data.
     pub fn from_bytes(bytes: &[u8]) -> KernelResult<Self> {
         let mut reader = BinaryReader::new(bytes);
-        // Branchless sequential decode: schema guard threaded into the same
-        // `and_then` chain as the two count reads, first error short-circuits.
         SchemaVersion::read_from(&mut reader)
             .and_then(|version| {
                 SCHEMA
@@ -104,8 +102,6 @@ mod tests {
         world.spawn();
         world.spawn();
 
-        // Advance once over an active frame so the registered system actually
-        // runs, then observe.
         let frame = &crate::fixtures::active_engine_frames(1)[0];
         world.advance(0, &FrameContext::new(frame));
 

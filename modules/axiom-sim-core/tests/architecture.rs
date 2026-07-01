@@ -112,8 +112,6 @@ fn assert_absent(forbidden: &[&str], why: &str) {
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest + facade ----------
-
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
@@ -128,10 +126,8 @@ fn module_toml_exists_and_is_isolated() {
     );
 }
 
-// A `pub` line re-exports the identity vocabulary when its `pub use` path has an
-// `ids` segment — these value-type id newtypes are the nouns the facade returns,
-// allowed alongside the single behavioral facade (matched on a whole segment, so
-// paths like `fluids::` are not misclassified). Mirrors the `xtask` gate.
+// Matches a whole `ids` path segment (not a substring like `fluids::`), mirroring
+// the `xtask` gate's identity-vocabulary exemption.
 fn is_id_vocabulary_export(line: &str) -> bool {
     line.starts_with("pub use ")
         && line["pub use ".len()..]
@@ -167,8 +163,6 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
         "axiom-sim-core re-exports its identity vocabulary via exactly one `pub use ids::{{…}}` line"
     );
 }
-
-// ---------- legal dependencies only ----------
 
 #[test]
 fn imports_only_legal_layers() {
@@ -266,8 +260,6 @@ fn imports_no_apps_or_tools() {
         violations.join("\n")
     );
 }
-
-// ---------- source hygiene ----------
 
 #[test]
 fn no_browser_gpu_or_dom() {
@@ -377,13 +369,8 @@ fn no_utils_or_helpers_modules() {
 
 #[test]
 fn no_phase_milestone_naming_in_structure() {
-    // A phase is a planning milestone, not an engine concept. No source FILE may
-    // be named after a phase, and no phase-numbered IDENTIFIER (e.g. `phase4`,
-    // `phase_4`) may appear in code. Comments and string literals are stripped
-    // first, so prose references to prior milestones in doc comments are
-    // unaffected — only structural names are policed. Modules are named for what
-    // they contain (`body_plan`, `tissue`, `wound`, the `anatomy` facade group),
-    // never for the milestone that introduced them.
+    // No source file or identifier may be named after a planning phase (e.g.
+    // `phase4`); comments/strings are stripped first, so doc prose is unaffected.
     let mut violations = Vec::new();
     for path in source_files() {
         let stem = path

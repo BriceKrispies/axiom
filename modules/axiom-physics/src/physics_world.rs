@@ -1,19 +1,16 @@
 //! The deterministic physics world: owns all rigid-body and collider state.
-//!
 //! `PhysicsWorld` is the heart of the module. It owns ordered (`Vec`-backed)
 //! body and collider storage, the FIFO command queue, the event log, the step
 //! counter, monotonic id allocators, the latest step record, and the most recent
 //! step's contact manifolds. It mutates only its own state from explicit inputs —
 //! it never reads a clock or randomness, and knows nothing of scenes, renderers,
 //! assets, input, or gameplay.
-//!
 //! ## Stepping (substepped, atomic)
 //! A single fixed step is split into `max_substeps` deterministic substeps so a
 //! fast body cannot tunnel through thin geometry in one large jump. Queued
 //! commands are applied **once**, before substepping; each substep then runs the
 //! full broad → narrow → integrate → solve → correct pipeline over a fraction of
 //! the step. A `StepCompleted` event is emitted **once** per outer step.
-//!
 //! ## Atomic finiteness (no poisoned state)
 //! Validation screens input *finiteness*, but a finite-but-extreme force,
 //! impulse, or gravity can still drive computed velocity/translation to

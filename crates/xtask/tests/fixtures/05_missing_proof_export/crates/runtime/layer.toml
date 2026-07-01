@@ -1,6 +1,3 @@
-# The proof export `Runtime` is named here but is NOT public in source. The
-# introduced capability `RuntimeApi` IS exported, so the only violation is the
-# missing public proof export.
 [layer]
 name = "runtime"
 crate_name = "runtime"

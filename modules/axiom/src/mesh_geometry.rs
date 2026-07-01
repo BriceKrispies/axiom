@@ -24,11 +24,8 @@ pub(crate) struct MeshGeometry {
 
 /// Resolve a mesh description into renderable geometry by its kind.
 pub(crate) fn mesh_geometry(mesh: &Mesh) -> MeshGeometry {
-    // `Mesh` is a fieldless enum, so `*mesh as usize` is its discriminant: index
-    // a generator table instead of `match`ing (branchless). The table order must
-    // match the variant order (Cube=0, Plane=1, Sphere=2, Cylinder=3); adding a
-    // `Mesh` variant requires adding its generator at the same index, or this
-    // panics.
+    // Table order must match the `Mesh` variant order (Cube=0, Plane=1, Sphere=2,
+    // Cylinder=3); adding a variant requires adding its generator at the same index.
     let generators: [fn() -> MeshGeometry; 4] =
         [cube_geometry, plane_geometry, sphere_geometry, cylinder_geometry];
     generators[*mesh as usize]()
@@ -196,14 +193,11 @@ fn cylinder_geometry() -> MeshGeometry {
 /// `axiom-resources` exactly like a primitive (see [`resolve_author_geometry`]),
 /// so an author mesh rides the identical pipeline — no special render path.
 pub(crate) fn mesh_data_geometry(data: &MeshData) -> Result<MeshGeometry, MeshDataError> {
-    // `validate` yields the first failing check (or `None`); selecting Ok/Err off
-    // that `Option` is `map_or_else`, not an `if`/`match` (branchless).
     validate(data).map_or_else(|| Ok(resolve_author_geometry(data)), Err)
 }
 
 /// The first failing validation check, in [`MeshDataError`] declaration priority,
-/// or `None` when the author geometry is well-formed. Branchless: each check is an
-/// `Option<MeshDataError>` and `Option::or` keeps the first `Some`.
+/// or `None` when the author geometry is well-formed.
 fn validate(data: &MeshData) -> Option<MeshDataError> {
     let positions = data.positions();
     let normals = data.normals();
@@ -304,7 +298,6 @@ mod tests {
 
     #[test]
     fn mesh_geometry_resolves_every_primitive() {
-        // Covers the generator table + each primitive resolver.
         let cube = mesh_geometry(&Mesh::Cube);
         let plane = mesh_geometry(&Mesh::Plane);
         let sphere = mesh_geometry(&Mesh::Sphere);
@@ -337,9 +330,6 @@ mod tests {
 
     #[test]
     fn author_geometry_resolves_explicit_vertices_and_uvs() {
-        // The author's own positions/normals/uvs/indices thread through the
-        // resources resolution unchanged — proving the data reaches the resolved
-        // store, not a primitive fallback.
         let geom = mesh_data_geometry(&triangle_with_uvs()).expect("valid author mesh");
         assert_eq!(geom.positions.len(), 3);
         assert_eq!(geom.normals.len(), 3);
@@ -352,8 +342,6 @@ mod tests {
 
     #[test]
     fn author_geometry_defaults_omitted_uvs_to_the_origin() {
-        // Empty author UVs: the resolved mesh still carries one UV per vertex,
-        // defaulted to the origin (so the downstream zip never truncates).
         let data = MeshData::new(
             vec![Vec3::ZERO, Vec3::UNIT_X, Vec3::UNIT_Y],
             vec![Vec3::UNIT_Z, Vec3::UNIT_Z, Vec3::UNIT_Z],
@@ -373,8 +361,8 @@ mod tests {
 
     #[test]
     fn non_finite_coordinates_are_rejected() {
-        // A NaN position fails the finite check (and a separate ∞ UV proves the
-        // UV arm of `all_finite` runs).
+        // A NaN position and a separate ∞ UV each exercise a different arm of
+        // `all_finite`.
         let nan_pos = MeshData::new(
             vec![Vec3::new(f32::NAN, 0.0, 0.0), Vec3::UNIT_X, Vec3::UNIT_Y],
             vec![Vec3::UNIT_Z, Vec3::UNIT_Z, Vec3::UNIT_Z],

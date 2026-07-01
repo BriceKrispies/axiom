@@ -1,13 +1,11 @@
 //! Signed-distance-field shape component: a node renders as a raymarched
 //! primitive (sphere / box / plane) instead of (or alongside) a triangle mesh.
-//!
 //! This is the scene-authoring peer of [`crate::renderable::Renderable`]: a node
 //! declares an `SdfShape` and the engine carries it — node world transform, kind,
 //! dimensions, colour — into a deterministic [`crate::scene_snapshot::SceneSnapshot`].
 //! An app or render module translates that snapshot into the backend-neutral SDF
 //! contract the render backends march; the scene module itself marches nothing
 //! and depends on no render code.
-//!
 //! The component is pure data: a `kind` discriminant, the local `dims` it carries
 //! (a sphere's radius, a box's half-extents, or nothing for a plane), and a linear
 //! RGB surface colour. The shape's world placement is the node's transform, exactly
@@ -21,7 +19,6 @@ use crate::scene_error::SceneError;
 use crate::scene_result::SceneResult;
 
 /// An SDF shape component, stored on the node entity it belongs to.
-///
 /// `kind` selects the canonical local distance function ([`Self::SPHERE`],
 /// [`Self::BOX`], [`Self::PLANE`]); `dims` carries the local dimensions the kind
 /// needs (sphere: `(radius, radius, radius)`; box: the half-extents; plane: unused

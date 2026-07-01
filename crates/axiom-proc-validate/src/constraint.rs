@@ -62,8 +62,6 @@ impl Constraint {
     }
 }
 
-// --- evaluation -------------------------------------------------------------
-
 /// Evaluate one constraint against `words`, returning `(satisfied, score)`. The
 /// score is the count of satisfying words (or the word count, for `MinCount`) — a
 /// stable, ordered measure. Branchless table dispatch.
@@ -108,8 +106,6 @@ pub(crate) fn evaluate(words: &[u64], constraints: &[Constraint]) -> ValidationR
     ValidationReport::new(verdicts, all_satisfied, total_score)
 }
 
-// --- repair -----------------------------------------------------------------
-
 /// Apply one constraint's bounded word-level repair. Branchless table dispatch.
 fn repair_one(constraint: &Constraint, words: Vec<u64>) -> Vec<u64> {
     const REPAIRS: [ConstraintRepair; 3] = [repair_min_count, repair_max_value, repair_non_zero];
@@ -120,8 +116,6 @@ fn repair_one(constraint: &Constraint, words: Vec<u64>) -> Vec<u64> {
 type ConstraintRepair = fn(&Constraint, Vec<u64>) -> Vec<u64>;
 
 fn repair_min_count(_constraint: &Constraint, words: Vec<u64>) -> Vec<u64> {
-    // Structural: repair never invents words, so a too-short artifact is left as
-    // is (and stays failing) — a deliberate, documented limit.
     words
 }
 

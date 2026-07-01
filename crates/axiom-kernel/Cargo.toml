@@ -7,16 +7,11 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. No cdylib / wasm-bindgen yet: the kernel is a computational
-# substrate and carries no browser bindings. It is `wasm32-unknown-unknown`
-# friendly because it touches no platform APIs, no wall clock, and no randomness.
 crate-type = ["rlib"]
 
-# Dependency policy: the kernel has ZERO external dependencies by design.
-# See ARCHITECTURE.md. Adding one requires written justification there.
+# Kernel deps must stay zero-dependency; see ARCHITECTURE.md before adding one.
 [dependencies]
 
 [lints.rust]
-# The kernel must stay self-contained and explicit.
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"

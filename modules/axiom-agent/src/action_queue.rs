@@ -5,7 +5,6 @@ use axiom_kernel::{KernelError, KernelErrorCode, KernelErrorScope, KernelResult}
 use crate::action_intent::ActionIntent;
 
 /// A fixed-capacity, insertion-ordered queue of action intents.
-///
 /// It is a plain `Vec` with an explicit `capacity`. `push` appends to the back
 /// and fails deterministically (a kernel [`KernelErrorCode::OutOfBounds`]) when
 /// full; `pop` removes from the front, so intents leave in exactly the order
@@ -136,9 +135,7 @@ mod tests {
 
     #[test]
     fn combined_control_code_ors_every_queued_intent() {
-        // Empty queue → no controls held.
         assert_eq!(ActionQueue::empty_with_capacity(2).combined_control_code(), 0);
-        // One intent → exactly its control code.
         assert_eq!(
             ActionQueue::from_intents(vec![ActionIntent::press_control(0b0100)]).combined_control_code(),
             0b0100,

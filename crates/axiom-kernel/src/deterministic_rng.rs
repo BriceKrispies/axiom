@@ -7,14 +7,12 @@ use crate::result::KernelResult;
 use crate::type_schema::{FieldSchema, TypeSchema};
 
 /// A deterministic pseudo-random number generator.
-///
 /// This is a *seeded* generator: its entire output is a pure function of the
 /// seed it was constructed with, so the same seed always yields the same
 /// sequence on every platform. It reads no entropy, no clock and no global
 /// state — it is the kernel's sanctioned deterministic "random source", suitable
 /// for replayable simulation, fuzzing and adversarial-network models where the
 /// sequence must be reproducible.
-///
 /// The core step is `splitmix64`: cheap, branchless, and well-distributed.
 #[derive(Debug, Clone)]
 pub struct DeterministicRng {
@@ -145,7 +143,6 @@ mod tests {
         (0..5).for_each(|_| {
             rng.next_u64();
         });
-        // from_state(state()) reproduces the generator exactly.
         let mut resumed = DeterministicRng::from_state(rng.state());
         assert_eq!(resumed.state(), rng.state());
         assert_eq!(resumed.next_u64(), {
@@ -169,8 +166,6 @@ mod tests {
 
     #[test]
     fn a_restored_generator_continues_the_identical_sequence() {
-        // Draw a prefix, snapshot mid-stream, then assert the restored generator's
-        // next draws are byte-identical to the original's continuation.
         let mut original = DeterministicRng::seeded(0xABCD_EF01);
         (0..8).for_each(|_| {
             original.next_u64();
@@ -200,7 +195,6 @@ mod tests {
 
     #[test]
     fn next_bool_in_thousand_can_be_both() {
-        // A 500 per-mille coin yields both faces across many flips.
         let mut rng = DeterministicRng::seeded(123);
         let mut saw_true = false;
         let mut saw_false = false;

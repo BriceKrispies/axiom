@@ -1,6 +1,5 @@
-//! `wind_field` stage (OW-E7): prevailing wind direction per region from
-//! latitude banding (trade winds / westerlies / polar easterlies).
-//! Audit: OW-E7 prevailing-wind field, deterministic.
+//! `wind_field` stage: prevailing wind direction per region from latitude
+//! banding (trade winds / westerlies / polar easterlies).
 //!
 //! Each region's wind is a unit tangent vector built from the east/north basis
 //! at its site direction. Idealised Earth bands set the zonal/meridional mix:
@@ -40,8 +39,7 @@ impl Stage for WindFieldStage {
             let abs_lat = lat.abs();
             let (east, north) = tangent_basis(site);
 
-            // Zonal component: +east = blowing toward the east.
-            // Trade winds & polar easterlies blow westward (-east); westerlies east.
+            // +east = blowing east; trade winds & polar easterlies blow west.
             let zonal = if abs_lat < 30.0 * DEG {
                 -0.9 // trade winds (easterlies)
             } else if abs_lat < 60.0 * DEG {
@@ -105,7 +103,6 @@ mod tests {
         WindFieldStage.run(&mut g, &mut ctx);
         for (r, w) in g.region_wind.iter().enumerate() {
             assert!((w.length() - 1.0).abs() < 1.0e-3, "wind not unit at {}", r);
-            // Tangent: roughly perpendicular to the site direction.
             assert!(w.dot(normed[r]).abs() < 1.0e-2, "wind not tangent at {}", r);
         }
     }

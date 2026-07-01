@@ -1,5 +1,3 @@
-# Layer 2 — valid on its own (adapts its previous layer, `mid`). Present so that
-# `mid`'s import of it is a genuine forward (future) import.
 [layer]
 name = "top"
 crate_name = "top"

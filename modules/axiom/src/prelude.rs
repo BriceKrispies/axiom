@@ -6,38 +6,27 @@
 //! component bundles) and `App`/`DefaultPlugins` are added as features land.
 
 pub use axiom_ecs::SchedulePhase;
-// The first-class entity handle an app holds: spawn returns one, and despawn /
-// component access / spatial queries take one. Re-exported from the scene's
-// identity vocabulary under the engine-standard name `Entity` (Bevy-shaped). The
-// app-facing world API on `RunningApp` is built on this handle.
+// Re-exported from the scene's identity vocabulary under the engine-standard
+// name `Entity` (Bevy-shaped); the app-facing world API on `RunningApp` is
+// built on this handle.
 pub use axiom_scene::SceneNodeId as Entity;
-// Kernel quantity types in the authoring vocabulary: `Ratio` for colour
-// channels/intensities, `Meters` for camera clip planes. Re-exported so an app
-// depends only on `axiom`.
 pub use axiom_kernel::{Meters, Ratio};
-// The deterministic fixed-step accumulator and its integer step budget, from the
-// `frame` layer the umbrella already composes. An app driving its own variable-dt
-// run loop (a wasm `requestAnimationFrame` host) banks real elapsed time into
-// whole fixed steps through these, so they belong in the one authoring barrel an
-// app imports — re-exported, not re-derived (the loop arithmetic lives in `frame`).
+// An app driving its own variable-dt run loop (a wasm `requestAnimationFrame`
+// host) banks real elapsed time into whole fixed steps through these.
 pub use axiom_frame::{FrameAccumulator, StepBudget};
-// The embed seam (SPEC-12), from the `host` layer the umbrella already composes:
-// the inbound session identity (`HostSessionConfig` = seed + opaque params) an app
-// decodes before tick 0, and the outbound terminal outcome (`HostOutcome`) it
-// reports once. `Score` is the single sanctioned f64 boundary. These are the
-// author-facing `getSessionConfig`/`reportOutcome` vocabulary, so they belong in
-// the one barrel an app imports. The browser channel that carries them
-// (`postMessage`, `window.location.search`) is the app's platform edge, never here.
+// The embed seam (SPEC-12): `HostSessionConfig` (seed + opaque params) an app
+// decodes before tick 0, and the outbound `HostOutcome` it reports once.
+// `Score` is the single sanctioned f64 boundary. The browser channel that
+// carries them (`postMessage`, `window.location.search`) is the app's platform
+// edge, never here.
 pub use axiom_host::{
     HostApi, HostMetrics, HostOutcome, HostOutcomeSet, HostParamValue, HostSessionConfig,
     HostSessionParams, PlayerId, Score,
 };
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
-// The reflection machinery an app needs to declare its **own** dynamic component
-// vocabulary — the `Reflect` game structs a retained world stores by schema name
-// (the dynamic peer of the typed `Component` surface). Re-exported so an app
-// depends only on `axiom`: `Reflect` is the trait, and the rest are the
-// (de)serialization primitives its hand-written impls call.
+// `Reflect` is the trait an app implements to declare its own dynamic
+// component vocabulary; the rest are the (de)serialization primitives its
+// hand-written impls call.
 pub use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 
 pub use crate::angle::Angle;

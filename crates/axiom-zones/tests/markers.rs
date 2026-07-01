@@ -6,7 +6,6 @@ use axiom_zones::{escape_hatch, hot_path, sim, strict, supervisor};
 
 #[sim]
 fn sim_fn() {
-    // `#[sim]` injected `const __engine_zone_sim: () = ();` here.
     __engine_zone_sim
 }
 
@@ -27,7 +26,6 @@ fn supervisor_fn() {
 
 #[escape_hatch(reason = "documented and deliberate")]
 fn escape_hatch_fn() -> &'static str {
-    // `#[escape_hatch]` injected the reason as a `&str` const.
     __engine_escape_hatch_reason
 }
 

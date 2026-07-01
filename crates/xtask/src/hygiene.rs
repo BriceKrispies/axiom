@@ -32,9 +32,7 @@ const FORBIDDEN_MACROS: &[&str] = &[
 /// these names.
 const JUNK_DRAWER_NAMES: &[&str] = &["utils", "helpers", "common", "misc"];
 
-/// Coverage-suppression tokens. Banned everywhere in layers and modules:
-/// coverage must be earned by reachable tests, never silenced. Genuinely
-/// unreachable defensive code must be refactored away instead.
+/// Coverage-suppression tokens, banned everywhere in layers and modules.
 const COVERAGE_OFF_NEEDLES: &[&str] = &["coverage(off)", "coverage(on)", "coverage_attribute"];
 
 /// Browser / platform API substrings. The scanner uses substring matches
@@ -83,8 +81,6 @@ pub fn check(
         scan_one(name, dir, "layer", is_platform_facing, report);
     });
     module_dirs.iter().for_each(|(name, dir)| {
-        // Only the sanctioned platform-facing module (windowing) may reference
-        // browser APIs; every other module rejects them.
         let is_platform_facing = PLATFORM_FACING_MODULES.contains(&name.as_str());
         scan_one(name, dir, "module", is_platform_facing, report);
     });
@@ -171,7 +167,6 @@ fn scan_one(
                             report.push(v);
                         });
 
-                    // Browser APIs are rejected only for non-platform-facing crates.
                     BROWSER_API_NEEDLES
                         .iter()
                         .filter(|_| !is_platform_facing)

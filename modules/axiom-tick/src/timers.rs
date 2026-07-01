@@ -1,5 +1,4 @@
 //! Tick-scheduled timers projected over the kernel's [`TickSchedule`].
-//!
 //! `Timers` is a thin projection of the generic kernel schedule: each timer is an
 //! ascending [`TimerId`] armed to fire at a future tick, carrying a
 //! `(interval, repeating)` payload. One-shot timers (`after`) fire once;
@@ -11,7 +10,6 @@ use axiom_kernel::{Tick, TickDelta, TickSchedule};
 use crate::ids::TimerId;
 
 /// A deterministic set of tick-scheduled timers.
-///
 /// The payload is `(interval, repeating)`: `interval` is the original delay (and,
 /// for a repeating timer, its cadence), `repeating` selects one-shot vs.
 /// self-rescheduling. Ids are minted ascending so two timers due on the same tick
@@ -94,9 +92,7 @@ mod tests {
         let mut timers = Timers::new();
         let id = timers.after(at(10), delta(3));
         assert_eq!(id, TimerId::from_raw(1));
-        // Not due before the deadline.
         assert_eq!(timers.due(at(12)), vec![]);
-        // Fires exactly at now + 3, then never again.
         assert_eq!(timers.due(at(13)), vec![id]);
         assert_eq!(timers.due(at(13)), vec![]);
         assert_eq!(timers.due(at(100)), vec![]);
@@ -113,9 +109,7 @@ mod tests {
     fn every_reschedules_no_earlier_than_next_tick() {
         let mut timers = Timers::new();
         let id = timers.every(at(0), delta(2));
-        // First fire at 0 + 2.
         assert_eq!(timers.due(at(2)), vec![id]);
-        // Re-armed at 2 + 2 = 4; not due again until then.
         assert_eq!(timers.due(at(3)), vec![]);
         assert_eq!(timers.due(at(4)), vec![id]);
     }
@@ -124,7 +118,6 @@ mod tests {
     fn every_clamps_zero_cadence_to_one() {
         let mut timers = Timers::new();
         let id = timers.every(at(0), delta(0));
-        // Clamped to interval 1: first fire at tick 1, not a busy-fire at tick 0.
         assert_eq!(timers.due(at(0)), vec![]);
         assert_eq!(timers.due(at(1)), vec![id]);
         assert_eq!(timers.due(at(2)), vec![id]);

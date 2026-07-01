@@ -27,45 +27,34 @@
 //!   uses. It is the only place DOM/canvas APIs appear, and it is never compiled
 //!   on native, so the core and `cargo test` stay browser-free.
 
-// --- Deterministic primitives ---
 pub mod coord;
 pub mod direction;
 pub mod group_id;
 pub mod tile_kind;
 
-// --- Level model, validation, and TOML codec ---
 pub mod level_codec;
 pub mod level_definition;
 pub mod level_validation;
 
-// --- Actors, recording, and ghost replay ---
-// The recording + replay cadence now live in the kernel (ReplayTimeline /
-// TickDivider); `ghost_replay` composes them into the gameplay ghost.
 pub mod actor_state;
 pub mod ghost_replay;
 
-// --- The deterministic game core ---
 pub mod game_command;
 pub mod game_state;
 pub mod game_step;
 
-// --- Authoring, playtest, rendering, and input ---
 pub mod app;
 pub mod editor_model;
 pub mod input_mapping;
 pub mod playtest_model;
 pub mod render_model;
 
-// --- In-browser editor/playtest surface (wasm32 only) ---
-// The 2D-canvas presentation arm. Never compiled on native, so the deterministic
-// core and `cargo test` are untouched.
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 /// The built-in first level, embedded so the app (and tests) need no filesystem.
 pub const LEVEL_001_TOML: &str = include_str!("levels/001-button-door.toml");
 
-// Headline re-exports for ergonomic `use axiom_roomed_puzzle::...`.
 pub use app::{Mode, RoomedPuzzleApp};
 pub use direction::Direction;
 pub use game_command::{PuzzleCommand, PuzzleStepResult, StepKind};

@@ -2,15 +2,12 @@
 //! reusable [`axiom_agent_harness::AgentHarnessApi`]. Native-only and gated behind
 //! the `agent` feature, so the wasm build and the default workspace gates never
 //! compile it.
-//!
 //! There is no hand-rolled decision logic here. Every tick the driver:
-//!
 //! 1. **observes** the live ground state (the player's pose **and height**, and the
 //!    summit as the goal) into the harness as fixed-point micro-units,
 //! 2. lets the harness **decide** through `axiom-agent` (hold the requested
 //!    controls, or seek the summit) and hand back a held-control bitmask, and
 //! 3. **lowers** that bitmask into ground-sim movement axes and steps the sim.
-//!
 //! The same reusable harness drives any first-person Axiom game; this module is
 //! the growth-specific ends of the translation (game state → neutral numbers, and
 //! neutral controls → ground-sim axes), which is exactly where the Module Law
@@ -269,14 +266,12 @@ impl AgentSession {
         self.sim.reached_summit()
     }
 
-    // --- the data-driven directive runner ---------------------------------
 
     /// Run a parsed directive **script** — the data form of a command like "walk
     /// to the mountaintop, look at the ground, take a screenshot". Each directive
     /// is resolved against the world's tags (the nouns) through introspect and
     /// executed via the reusable agent verbs; the only growth-specific ends are
     /// stepping the sim and producing the capture pixels.
-    ///
     /// Returns one [`CaptureRequest`] per `capture` directive — the label to save
     /// under plus the neutral render inputs the bin renders (rendering is a GPU
     /// concern kept out of the lib, exactly like the other capture paths).

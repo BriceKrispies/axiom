@@ -42,8 +42,6 @@ impl InterfaceApi {
         id
     }
 
-    // --- visibility ---------------------------------------------------------
-
     pub fn is_visible(&self, panel: PanelId) -> bool {
         self.state
             .panel(panel)
@@ -72,8 +70,6 @@ impl InterfaceApi {
             .for_each(Panel::toggle);
     }
 
-    // --- pin ----------------------------------------------------------------
-
     pub fn is_pinned(&self, panel: PanelId) -> bool {
         self.state
             .panel(panel)
@@ -99,8 +95,6 @@ impl InterfaceApi {
             .for_each(Panel::toggle_pin);
     }
 
-    // --- focus --------------------------------------------------------------
-
     /// Show the panel and give its console focus (transferring focus to it).
     pub fn focus_console(&mut self, panel: PanelId) {
         self.state
@@ -117,8 +111,6 @@ impl InterfaceApi {
     pub fn is_console_focused(&self, panel: PanelId) -> bool {
         self.state.focus().is_focused(panel)
     }
-
-    // --- layout / drag ------------------------------------------------------
 
     pub fn panel_position(&self, panel: PanelId) -> (i32, i32) {
         self.state
@@ -181,8 +173,6 @@ impl InterfaceApi {
 }
 
 impl InterfaceApi {
-    // --- console model ------------------------------------------------------
-
     pub fn console_record(&mut self, panel: PanelId, command: &str) {
         self.state
             .panel_mut(panel)
@@ -265,8 +255,6 @@ impl InterfaceApi {
             .unwrap_or_default()
     }
 
-    // --- content ------------------------------------------------------------
-
     pub fn set_panel_header(&mut self, panel: PanelId, primary: &str, secondary: &str) {
         self.state
             .panel_mut(panel)
@@ -298,13 +286,9 @@ impl InterfaceApi {
             .for_each(|p| p.set_actions(actions));
     }
 
-    // --- draw ---------------------------------------------------------------
-
     pub fn draw_list(&self, panel: PanelId) -> InterfaceDrawList {
         self.state.draw_list(panel)
     }
-
-    // --- clipboard ----------------------------------------------------------
 
     /// Queue `text` to be copied to the platform clipboard. Like the draw list,
     /// this is a renderer-/platform-neutral *output channel*: the layer only
@@ -321,8 +305,6 @@ impl InterfaceApi {
     pub fn take_clipboard_requests(&mut self) -> Vec<String> {
         self.state.take_clipboard_requests()
     }
-
-    // --- console-key dispatch (branchless table over the discriminant) ------
 
     fn apply_console_key(&mut self, panel: PanelId, key: ConsoleKey) -> Option<String> {
         const OPS: [fn(&mut InterfaceApi, PanelId) -> Option<String>; 4] = [
@@ -445,16 +427,13 @@ mod tests {
     #[test]
     fn clipboard_requests_queue_in_order_and_drain_once() {
         let mut api = InterfaceApi::new();
-        // Nothing queued yet.
         assert!(api.take_clipboard_requests().is_empty());
         api.request_clipboard("alpha".to_string());
         api.request_clipboard("beta".to_string());
-        // Drained in request order...
         assert_eq!(
             api.take_clipboard_requests(),
             vec!["alpha".to_string(), "beta".to_string()]
         );
-        // ...and draining clears the queue.
         assert!(api.take_clipboard_requests().is_empty());
     }
 
@@ -470,7 +449,6 @@ mod tests {
             Some("alpha".to_string())
         );
         assert_eq!(api.console_navigate(p, "ArrowDown"), Some(String::new()));
-        // Ordinary typing is not a console key.
         assert_eq!(api.console_navigate(p, "x"), None);
         // Escape dismisses (blurs) and returns None.
         api.focus_console(p);
@@ -577,7 +555,6 @@ mod tests {
     fn mutating_an_unknown_panel_is_a_safe_noop() {
         let mut api = InterfaceApi::new();
         let ghost = missing();
-        // None of these find a panel; all must be no-ops, not panics.
         api.show(ghost);
         api.hide(ghost);
         api.toggle(ghost);

@@ -1,6 +1,5 @@
 //! `plate_properties` stage: classify plates oceanic/continental and seed a base
 //! elevation per region from its plate type.
-//! Audit: worldgen `plate_properties`; OW elevation baseline.
 //!
 //! ~40% of plates are marked oceanic deterministically (a hashed-per-plate
 //! threshold from the seed). Continental regions get a positive base elevation,
@@ -10,7 +9,7 @@
 use crate::growth::model_planet::PlanetGlobe;
 use crate::growth::pipeline::{worldgen_stream, GenContext, Stage};
 
-/// Fraction of plates that are oceanic. Audit: ~40% oceanic plates.
+/// Fraction of plates that are oceanic.
 const OCEANIC_FRACTION: f32 = 0.40;
 /// Base elevation handed to continental regions (above sea level 0).
 const CONTINENTAL_BASE: f32 = 0.30;
@@ -115,7 +114,6 @@ mod tests {
         let mut ctx = GenContext::new(2024);
         PlatePropertiesStage.run(&mut g, &mut ctx);
         let oceanic = g.plate_oceanic.iter().filter(|&&o| o).count();
-        // 100 plates, target 40% — allow a generous band for the hash draw.
         assert!(
             (25..=55).contains(&oceanic),
             "oceanic count {} not near 40%",

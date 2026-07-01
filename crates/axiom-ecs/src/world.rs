@@ -562,13 +562,10 @@ mod tests {
         assert_eq!(world.system_count(), 2);
         let e = world.spawn();
         let frame = fixtures::active_engine_frame();
-        // Advance 1: startup(1) then update(2) -> 12.
         world.advance(0, &FrameContext::new(&frame));
         assert_eq!(world.storage().doubled.get(e), Some(&12));
-        // Advance 2: update only -> 12*10 + 2 = 122.
         world.advance(1, &FrameContext::new(&frame));
         assert_eq!(world.storage().doubled.get(e), Some(&122));
-        // Advance 3: update only -> 1222. Startup never runs again.
         world.advance(2, &FrameContext::new(&frame));
         assert_eq!(world.storage().doubled.get(e), Some(&1222));
     }
@@ -578,10 +575,8 @@ mod tests {
         let mut world: World<Storage> = World::new();
         world.register_system_in(SchedulePhase::Startup, Box::new(Mark(1)));
         let e = world.spawn();
-        // A skipped frame runs nothing and leaves startup pending.
         world.advance(0, &FrameContext::new(&fixtures::skipped_engine_frame()));
         assert!(world.storage().doubled.get(e).is_none());
-        // The first *active* advance is where startup finally fires.
         world.advance(1, &FrameContext::new(&fixtures::active_engine_frame()));
         assert_eq!(world.storage().doubled.get(e), Some(&1));
     }
@@ -607,7 +602,6 @@ mod tests {
             world.storage().doubled.get(e).is_none(),
             "doubled row cleaned"
         );
-        // Despawning an absent entity is a clean no-op (no cleanup performed).
         assert!(!world.despawn(e));
     }
 
@@ -623,7 +617,6 @@ mod tests {
             world.storage().value.get(handle.id()).is_none(),
             "components cleaned"
         );
-        // The stale handle cannot despawn again.
         assert!(!world.despawn_handle(handle));
     }
 
@@ -632,9 +625,8 @@ mod tests {
         let mut world: World<Storage> = World::new();
         let first = world.spawn_handle();
         assert!(world.despawn_handle(first));
-        let second = world.spawn_handle(); // reuses the slot at a bumped generation
+        let second = world.spawn_handle();
         world.storage_mut().value.insert(second.id(), 99);
-        // The old handle is stale and must not affect the new occupant.
         assert!(!world.despawn_handle(first));
         assert!(world.entities().is_current(second));
         assert_eq!(world.storage().value.get(second.id()), Some(&99));
@@ -648,7 +640,7 @@ mod tests {
         world.spawn();
         world.storage_mut().value.insert(a, 10);
         world.storage_mut().value.insert(b, 20);
-        world.despawn(b); // frees slot b, cleans its component
+        world.despawn(b);
 
         let mut writer = BinaryWriter::new();
         world.write_snapshot(&mut writer);
@@ -691,14 +683,11 @@ mod tests {
 
     #[test]
     fn restore_of_a_post_startup_snapshot_re_runs_update_but_not_startup() {
-        // `Mark(n)` does `doubled = doubled*10 + n` for every entity when it runs.
-        // Startup `Mark(7)` runs once; Update `Mark(3)` runs every active advance.
         let mut world: World<Storage> = World::new();
         world.register_system_in(SchedulePhase::Startup, Box::new(Mark(7)));
         world.register_system_in(SchedulePhase::Update, Box::new(Mark(3)));
         let e = world.spawn();
         let frame = fixtures::active_engine_frame();
-        // First active advance: startup (0 -> 7) then update (7 -> 73).
         world.advance(0, &FrameContext::new(&frame));
         assert_eq!(world.storage().doubled.get(e), Some(&73));
 
@@ -706,7 +695,6 @@ mod tests {
         world.write_snapshot(&mut writer);
         let bytes = writer.into_bytes();
 
-        // Restore into a FRESH world carrying the same two systems.
         let mut restored: World<Storage> = World::new();
         restored.register_system_in(SchedulePhase::Startup, Box::new(Mark(7)));
         restored.register_system_in(SchedulePhase::Update, Box::new(Mark(3)));
@@ -715,9 +703,8 @@ mod tests {
             .unwrap();
         assert_eq!(restored.storage().doubled.get(e), Some(&73), "restored state");
 
-        // The snapshot was taken mid-session, so the restored world is past
-        // startup: advancing runs ONLY update (73 -> 733). A re-run of startup
-        // would instead give 73*10 + 7 = 737 (then update -> 7373).
+        // Post-startup restore runs update only (73 -> 733); a re-run of startup
+        // would instead give 73*10 + 7 = 737.
         restored.advance(1, &FrameContext::new(&frame));
         assert_eq!(
             restored.storage().doubled.get(e),
@@ -728,16 +715,14 @@ mod tests {
 
     #[test]
     fn restore_of_a_pre_startup_snapshot_still_runs_startup() {
-        // A snapshot taken BEFORE the first advance carries `startup_done == false`.
-        // Restoring it must reproduce that — a fresh-baseline restore still runs its
-        // authoring startup on the next advance. (The old unconditional
-        // `startup_done = true` on restore wrongly suppressed it.)
+        // Regression guard: restore once wrongly forced `startup_done = true`
+        // unconditionally, suppressing a fresh-baseline restore's startup run.
         let mut world: World<Storage> = World::new();
         world.register_system_in(SchedulePhase::Startup, Box::new(Mark(7)));
         let e = world.spawn();
 
         let mut writer = BinaryWriter::new();
-        world.write_snapshot(&mut writer); // never advanced: startup not yet done
+        world.write_snapshot(&mut writer);
         let bytes = writer.into_bytes();
 
         let mut restored: World<Storage> = World::new();
@@ -745,7 +730,6 @@ mod tests {
         restored
             .read_snapshot(&mut BinaryReader::new(&bytes))
             .unwrap();
-        // Startup has NOT run yet in the restored world.
         assert_eq!(restored.storage().doubled.get(e), None, "pre-startup state");
 
         let frame = fixtures::active_engine_frame();

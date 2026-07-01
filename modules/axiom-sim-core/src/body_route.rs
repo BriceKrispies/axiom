@@ -180,7 +180,6 @@ mod tests {
         assert!(wound.can_target(BodySurfaceKind::Wound));
         assert!(!wound.can_target(BodySurfaceKind::Outer));
 
-        // Generic route may target anything; generic surface accepts anything.
         let generic = BodyRoute::new(BodyRouteKind::Generic);
         assert!(generic.can_target(BodySurfaceKind::Inner));
         assert!(surface.can_target(BodySurfaceKind::Generic));

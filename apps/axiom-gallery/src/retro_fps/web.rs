@@ -613,6 +613,27 @@ fn pointer_is_locked() -> bool {
         .is_some()
 }
 
+/// Is this retro FPS running as one pane of the gallery's backend-comparison triptych
+/// (`?embed=1`)? When embedded, the demo does NOT own the pointer lock — the
+/// parent triptych holds a single lock over all three panes and fans synthetic
+/// mouse-move deltas (and mouse-button presses) into each iframe. So mouse-look
+/// and mouse-fire must honor those forwarded events without requiring THIS pane
+/// to hold the lock itself; the parent already gates them on its own lock, so
+/// stray movement can't spin the camera when you're not playing.
+fn is_embedded() -> bool {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .map(|s| s.contains("embed=1"))
+        .unwrap_or(false)
+}
+
+/// True when the mouse should drive look/fire this frame: either this pane holds
+/// the pointer lock (standalone play) or it is an embedded triptych pane driven
+/// by the parent's forwarded, already-gated events.
+fn mouse_input_active() -> bool {
+    pointer_is_locked() || is_embedded()
+}
+
 /// Capture the pointer when the canvas is clicked (classic FPS mouse-look).
 fn install_pointer_lock() {
     let canvas = retro_fps_canvas();
@@ -631,7 +652,7 @@ fn install_pointer_lock() {
 fn install_mouse_look(look: &Rc<RefCell<Look>>) {
     let look = look.clone();
     let cb = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
-        if !pointer_is_locked() {
+        if !mouse_input_active() {
             return;
         }
         let mut l = look.borrow_mut();
@@ -652,7 +673,7 @@ fn install_mouse_fire(keys: &Rc<RefCell<Keys>>) {
     let window = web_sys::window().expect("a browser window");
     let down_keys = keys.clone();
     let down = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
-        if e.button() == 0 && pointer_is_locked() {
+        if e.button() == 0 && mouse_input_active() {
             down_keys.borrow_mut().fire = true;
         }
     });

@@ -1,20 +1,3 @@
-# Axiom audio engine module manifest.
-#
-# axiom-audio is an *isolated* engine module: it builds on the kernel alone to
-# own audio as DATA — synthesis specs, sample/music playback, audio-clock
-# scheduling, and master volume/mute — behind one `AudioApi` facade. It never
-# depends on another module, an app, or a tool, and never touches a scene,
-# renderer, physics, asset, input, animation, or editor system.
-#
-# It is split into two arms, the same shape as `axiom-windowing`:
-#   * a neutral deterministic core (the spine): branchless, 100% covered, owns no
-#     Web API — it allocates handles, validates a ToneSpec, folds volume/mute into
-#     mix state, and accumulates a ScheduledBatch the platform arm drains;
-#   * a `#[cfg(target_arch = "wasm32")]` Web Audio playback arm (compiled out on
-#     native) that realizes the batch into real `AudioContext` nodes.
-#
-# Owning the real Web Audio arm requires `"audio"` in PLATFORM_FACING_MODULES
-# (Module Law #9), exactly the sanctioned escape windowing/gpu-backend use.
 [module]
 name = "audio"
 crate_name = "axiom-audio"

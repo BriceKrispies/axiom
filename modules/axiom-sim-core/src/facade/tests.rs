@@ -33,7 +33,6 @@ fn reference_getters_and_iteration_are_reachable() {
             3,
         )
         .unwrap();
-    // Rich fields are readable through the returned reference.
     let fact = api.fact(f).unwrap();
     assert_eq!(fact.kind().code(), 7);
     assert_eq!(fact.subject(), a);
@@ -86,7 +85,6 @@ fn reference_getters_and_iteration_are_reachable() {
     assert_eq!(api.definition_by_name("muscle").unwrap().id(), d);
     assert!(api.definition_by_name("absent").is_none());
 
-    // Deterministic iteration through the facade.
     assert_eq!(api.all_fact_ids(), vec![f]);
     assert_eq!(api.all_relation_ids(), vec![r]);
     assert_eq!(api.all_process_ids(), vec![p]);
@@ -146,8 +144,6 @@ fn definitions_through_the_facade() {
         Some(FactValue::Unsigned(5))
     );
     assert_eq!(api.definition_property(id, "missing"), None);
-    // Query by named property value: the matching value finds it; a different
-    // value or an unknown name finds nothing.
     assert_eq!(
         api.definitions_by_property("hardness", api.value_unsigned(5)),
         vec![id]
@@ -158,12 +154,10 @@ fn definitions_through_the_facade() {
     assert!(api
         .definitions_by_property("missing", api.value_unsigned(5))
         .is_empty());
-    // Duplicate name rejected; out-of-range kind code rejected.
     assert!(api
         .register_definition(SimCoreApi::KIND_SUBSTANCE, "iron", &[], &[])
         .is_none());
     assert!(api.register_definition(250, "tungsten", &[], &[]).is_none());
-    // Generic kind round-trips its code.
     let g = api
         .register_definition(SimCoreApi::KIND_GENERIC, "thing", &[], &[])
         .unwrap();
@@ -224,7 +218,6 @@ fn processes_through_the_facade() {
     assert!(api.wake_due(1).is_empty());
     assert!(api.reschedule_process(p, 1));
     assert_eq!(api.wake_due(1), vec![p]);
-    // Re-arm and cancel.
     api.reschedule_process(p, 9);
     assert!(api.cancel_process(p));
     assert_eq!(api.process_count(), 0);
@@ -245,8 +238,6 @@ fn causal_events_through_the_facade() {
     assert_eq!(api.event_parent(root), None);
 }
 
-// ---- Phase 3 ----
-
 #[test]
 fn quantity_construction_through_the_facade() {
     let api = SimCoreApi::new();
@@ -262,7 +253,6 @@ fn quantity_construction_through_the_facade() {
         api.quantity(250, 5).is_none(),
         "out-of-range unit code rejected"
     );
-    // Incompatible units cannot be combined.
     let mass = api.quantity(SimCoreApi::UNIT_MASS, 1).unwrap();
     assert!(a.add(mass).is_none());
 }
@@ -286,7 +276,6 @@ fn materials_and_substances_through_the_facade() {
             &[(2, 0)],
         )
         .unwrap();
-    // Duplicate names rejected.
     assert!(api.register_material("iron", 9, &[], &[]).is_none());
     assert_eq!(api.material_kind_code(iron), Some(1));
     assert_eq!(
@@ -301,11 +290,9 @@ fn materials_and_substances_through_the_facade() {
     assert!(api.is_cataloged(iron) && api.is_cataloged(water));
     assert_eq!(api.cataloged_count(), 2);
     assert_eq!(api.all_cataloged_definition_ids().len(), 2);
-    // Tag queries (generic registry).
     let solids = api.definitions_by_tag(SimCoreApi::TAG_SOLID);
     assert_eq!(solids, vec![iron]);
     assert_eq!(api.definitions_by_tag(SimCoreApi::TAG_GAS).len(), 0);
-    // The Phase-2 generic definition surface still works for materials.
     assert!(api.definition_has_tag(iron, SimCoreApi::TAG_SOLID));
     assert_eq!(
         api.definition_kind_code(iron),
@@ -340,7 +327,7 @@ fn interactions_through_the_facade_validate_routes() {
     let a = reg.spawn_handle();
     let b = reg.spawn_handle();
     let mut api = SimCoreApi::new();
-    let touch = 0u8; // InteractionRoute::Touch
+    let touch = 0u8;
     let i = api
         .record_interaction(
             1,
@@ -355,7 +342,6 @@ fn interactions_through_the_facade_validate_routes() {
     assert_eq!(api.interactions_by_route(touch), vec![i]);
     assert_eq!(api.interaction_count(), 1);
     assert_eq!(api.all_interaction_ids(), vec![i]);
-    // An out-of-range route code fails cleanly.
     assert!(api
         .record_interaction(1, 250, (a, None), (None, None, None, None), (0, None))
         .is_none());
@@ -372,7 +358,6 @@ fn transfer_rules_through_the_facade() {
         .unwrap();
     let _all = api.register_transfer_all_up_to(9, touch, true).unwrap();
     let _none = api.register_transfer_none(touch, false).unwrap();
-    // Invalid percentage / invalid route fail cleanly.
     assert!(api
         .register_transfer_percentage(20_000, touch, false)
         .is_none());
@@ -406,7 +391,6 @@ fn material_effect_rules_through_the_facade() {
     assert_eq!(api.material_effect_rule_count(), 1);
     assert!(api.material_effect_rule(rule).is_some());
     assert_eq!(api.all_material_effect_rule_ids(), vec![rule]);
-    // Invalid route / effect-kind code fail cleanly.
     assert!(api
         .register_material_effect_rule(
             (None, 250, SimCoreApi::EFFECT_ADD_FACT),

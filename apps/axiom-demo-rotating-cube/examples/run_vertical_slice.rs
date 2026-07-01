@@ -15,8 +15,6 @@ fn main() {
     println!("Axiom — headless deterministic rotating-cube vertical slice");
     println!("(no window; axiom-webgpu records a submission report, no pixels)\n");
 
-    // Drive a fresh app across a sequence so engine/host counters advance
-    // monotonically, and capture tick 0 and tick 60.
     let mut demo = DemoRotatingCubeApi::new();
     let mut tick_0 = None;
     let mut tick_60 = None;
@@ -34,7 +32,6 @@ fn main() {
     print_summary(&tick_0);
     print_summary(&tick_60);
 
-    // Proof 1/3: replaying tick 0 from a fresh app is byte-equal.
     let replay_0 = DemoRotatingCubeApi::new().run_tick(0);
     let fresh_0 = DemoRotatingCubeApi::new().run_tick(0);
     println!("== determinism ==");
@@ -43,7 +40,6 @@ fn main() {
         replay_0 == fresh_0
     );
 
-    // Proof 2: tick 60 cube world transform differs from tick 0.
     println!(
         "  tick 60 cube world transform differs from tick 0: {}",
         tick_0.cube_transform.world != tick_60.cube_transform.world
@@ -121,8 +117,6 @@ fn print_summary(a: &VerticalSliceArtifact) {
 }
 
 fn command_name(c: &RenderCommandArtifact) -> &'static str {
-    // Branchless kind lookup: one (kind, name) pair per command kind, in
-    // declaration order; the matching pair wins. No `match`.
     [
         (RenderCommandArtifact::KIND_CLEAR_FRAME, "ClearFrame"),
         (RenderCommandArtifact::KIND_SET_CAMERA, "SetCamera"),

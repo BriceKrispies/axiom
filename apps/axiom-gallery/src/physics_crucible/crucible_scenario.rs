@@ -1,5 +1,4 @@
 //! The scripted-scenario vocabulary every station authors with.
-//!
 //! These are *app-owned* description types — the nouns a station uses to ask the
 //! harness to create bodies and colliders. They are deliberately phrased in plain
 //! `f32`/`Vec3` because the app is a composition leaf; the harness
@@ -210,7 +209,6 @@ impl BodySpec {
 
 /// A proving station: it populates the world, optionally scripts per-step
 /// commands, and emits debug shapes describing the physics it is exercising.
-///
 /// A station never owns physics state; it asks the harness ([`CrucibleWorld`]) to
 /// create and command bodies, and reads back snapshots/queries to describe what to
 /// draw. The same station drives both the visible and the hidden replay world.

@@ -35,19 +35,14 @@
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** facade: [`DebugOverlayApi`].
 
-// The debug-specific overlay state machine, composed on `axiom-interface`.
-// Internal modules (`pub(crate)`), each fully unit-tested on native; only the
-// facade is public.
 mod backquote;
 mod diagnostics;
 mod overlay_commands;
 mod overlay_density;
 mod overlay_state;
 
-// The one public facade.
 mod overlay_api;
 
-// The real DOM presentation arm — compiled only for wasm32, behind the facade.
 #[cfg(target_arch = "wasm32")]
 mod dom_binding;
 

@@ -1,11 +1,3 @@
-# Axiom app manifest — axiom-gallery.
-#
-# The single composition-leaf app that merges every browser/WASM demo. Each demo
-# is a module under `src/<demo>/`; the gallery is a leaf in the dependency graph
-# (nothing depends on it). `allowed_layers` / `allowed_modules` are the UNION of
-# what the nine merged demos depend on — the app may compose layers and modules,
-# never another app or tool.
-
 [app]
 name = "gallery"
 crate_name = "axiom-gallery"

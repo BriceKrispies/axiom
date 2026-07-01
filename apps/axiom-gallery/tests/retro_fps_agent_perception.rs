@@ -1,10 +1,8 @@
 //! Behavioural proof that the retro FPS agent genuinely **perceives** its world,
 //! driven only through the public `perception::RetroFpsPerceiver` surface.
-//!
 //! It locks the three capabilities the live perception build exists to prove —
 //! all game-agnostic (the sensor model is `axiom-perception`; this app only casts
 //! its rays against the retro FPS engine world):
-//!
 //! 1. **Facing a wall, with a real distance.** From the start pose (yaw 0) the
 //!    centre probe finds the north wall ~7.5 m ahead, classified geometry (no
 //!    enemy `Tag`).
@@ -12,7 +10,6 @@
 //!    reported visible and classified `ENEMY` off its engine-native `Tag`.
 //! 3. **Tracking a moving object.** A subject seen on consecutive ticks reports a
 //!    non-zero per-tick velocity.
-//!
 //! Plus determinism: the same run perceives the same thing every time.
 #![cfg(feature = "retro-fps-agent")]
 
@@ -39,7 +36,6 @@ fn the_agent_sees_classifies_and_tracks_a_moving_enemy() {
     let mut tracked_moving = false;
     for _ in 0..150 {
         let sight = perceiver.advance();
-        // Every visible candidate is a tagged enemy; a wall is never mislabelled.
         assert!(sight.visible.iter().all(|v| v.kind == KIND_ENEMY));
         saw_enemy |= !sight.visible.is_empty();
         tracked_moving |= sight

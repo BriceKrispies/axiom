@@ -1,9 +1,7 @@
 //! `axiom-growth` agent driver — the reusable `axiom-agent` harness walking the
 //! game's player up the Everest-scale mountain. Native + `agent` feature only
 //! (`required-features`), so it never enters the wasm build or the default gates.
-//!
 //! Three modes:
-//!
 //! * **climb** (default) — headless: hold "forward" until the player reaches the
 //!   summit, printing the player's **height** as it rises. The literal
 //!   "hold forward until it reaches the top of the mountain, reporting height".

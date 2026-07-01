@@ -109,7 +109,7 @@ mod tests {
         let mut runtime = Runtime::new(RuntimeConfig::new(STEP_NANOS)).unwrap();
         runtime.initialize().unwrap();
         runtime.start().unwrap();
-        let _ = HostLifecycleState::initial(); // touch import for clarity
+        let _ = HostLifecycleState::initial();
         (driver, runtime)
     }
 
@@ -122,8 +122,6 @@ mod tests {
         let summaries = FrameStepSummary::list_from_records(report.step_records());
         let ticks: Vec<u64> = summaries.iter().map(|s| s.runtime_tick()).collect();
         assert_eq!(ticks, vec![1, 2, 3]);
-        // Pin frame index and sequence to the third step's value (3), which is
-        // distinct from the mutation constant 1.
         let frames: Vec<u64> = summaries.iter().map(|s| s.runtime_frame_index()).collect();
         assert_eq!(frames, vec![1, 2, 3]);
         let seqs: Vec<u64> = summaries.iter().map(|s| s.runtime_sequence()).collect();
@@ -177,10 +175,8 @@ mod tests {
             }
         }
 
-        // The runtime is configured to *not* halt on system failure so the
-        // host driver gets a `RuntimeStepRecord` back rather than a
-        // failure. The record's `succeeded()` is `false`, which is what we
-        // want to assert flows through to the summary.
+        // fail_on_system_error is disabled so the driver returns a
+        // RuntimeStepRecord with succeeded() == false instead of an Err.
         let mut driver = HostStepDriver::new(HostBoundaryConfig::new(STEP_NANOS, 5).unwrap());
         driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
         let mut runtime =
@@ -201,8 +197,6 @@ mod tests {
             "summary must mirror record.succeeded()"
         );
 
-        // The per-system detail must survive into the frame summary: one
-        // system ran, named "fail", at order 1, with the SystemFailed code.
         assert_eq!(summary.systems().len(), 1);
         let system = &summary.systems()[0];
         assert_eq!(system.name(), "fail");

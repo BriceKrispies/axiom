@@ -273,7 +273,6 @@ mod tests {
 
     #[test]
     fn step_payload_bounces_direction() {
-        // First FLIP_EVERY intents go positive, the next block negative.
         let first = step_payload(0);
         let later = step_payload(FLIP_EVERY);
         let fx = f32::from_le_bytes([first[0], first[1], first[2], first[3]]);
@@ -305,7 +304,6 @@ mod tests {
         assert_eq!(l.samples.len(), 1);
         assert!(l.samples[0] >= 20.0);
         assert_eq!(l.sent_at.len(), 1);
-        // Ack up to 3: one more sample.
         l.on_ack(3, t0 + Duration::from_millis(40));
         assert_eq!(l.samples.len(), 2);
         assert!(l.sent_at.is_empty());
@@ -315,7 +313,7 @@ mod tests {
     fn latency_ignores_a_stale_ack_with_no_pending() {
         let mut l = Latency::new();
         let t0 = Instant::now();
-        l.on_ack(5, t0); // nothing sent — no sample
+        l.on_ack(5, t0);
         assert!(l.samples.is_empty());
     }
 
@@ -405,8 +403,6 @@ mod tests {
         );
         assert_eq!(report.rejects, 1);
     }
-
-    // --- End-to-end integration over a real socket against a mock server ---
 
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;

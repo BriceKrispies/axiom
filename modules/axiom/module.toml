@@ -1,15 +1,8 @@
-# Axiom module manifest — `axiom` (the engine umbrella, a FEATURE module).
+# Axiom module manifest — `axiom` (the engine umbrella).
 #
-# This is the one crate an app imports (`use axiom::prelude::*;`). It is a
-# feature module: it composes the isolated engine modules into the high-level
-# App/DefaultPlugins/Assets/SceneCommands surface so apps stop hand-wiring
-# boundaries. Its single public facade is `pub mod prelude;` — exactly one
-# top-level `pub` item, satisfying Module Law #8; the curated barrel lives
-# inside `prelude`, the idiomatic single entry point.
-#
-# `allowed_modules` forward-declares the engine modules the umbrella will
-# compose as features land (scene, resources, render-pipeline, webgpu, and
-# later windowing). The skeleton Cargo-depends only on the layers it re-exports.
+# The one crate an app imports (`use axiom::prelude::*;`); composes the engine
+# modules into the App/DefaultPlugins/Assets/SceneCommands surface so apps stop
+# hand-wiring boundaries. Its single public facade is `pub mod prelude;`.
 
 [module]
 name = "engine"

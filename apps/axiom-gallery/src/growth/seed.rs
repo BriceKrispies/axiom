@@ -1,5 +1,4 @@
-//! World seed: the deterministic root for all proc-gen. Audit: worldgen.md §2.
-/// Audit: form keys seed/height_scale/octaves/frequency.
+//! World seed: the deterministic root for all proc-gen.
 #[derive(Debug, Clone)]
 pub struct WorldSeed {
     pub value: u64,
@@ -25,10 +24,9 @@ impl WorldSeed {
 
     /// Build a seed from the full world-gen form: the seed string is hashed
     /// (FNV-1a) into the root value, and the noise knobs are carried through.
-    /// Audit: form keys seed/height_scale/octaves/frequency.
     ///
-    /// NOTE: an empty `seed_str` hashes to the FNV offset basis; callers that
-    /// want a fresh random world per run should detect the empty string and
+    /// An empty `seed_str` hashes to the FNV offset basis; callers that want a
+    /// fresh random world per run should detect the empty string and
     /// substitute a randomised seed before calling generation.
     pub fn from_form(seed_str: &str, height_scale: f32, octaves: u32, frequency: f32) -> Self {
         Self {
@@ -71,9 +69,6 @@ mod tests {
 
     #[test]
     fn empty_seed_hashes_to_the_fnv_offset_basis() {
-        // The documented empty-seed rule: "" hashes to the FNV-1a offset basis
-        // (an empty byte fold), which callers detect to substitute a random world.
-        // Swapping in the kernel `StableHash` must preserve this exact value.
         assert_eq!(WorldSeed::from_str_seed("").value, 0xcbf2_9ce4_8422_2325);
     }
 
@@ -88,7 +83,6 @@ mod tests {
 
     #[test]
     fn from_form_matches_str_seed_value() {
-        // The root value path is shared, so form and str-seed agree on `value`.
         for s in ["", "a", "longer seed phrase", "12345"] {
             assert_eq!(
                 WorldSeed::from_form(s, 1.0, 5, 1.5).value,

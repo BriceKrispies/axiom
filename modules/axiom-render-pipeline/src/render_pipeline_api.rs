@@ -14,10 +14,10 @@ use axiom_webgpu::WebGpuApi;
 /// `view_projection` is pre-multiplied by this, so a caller's
 /// `view_projection * world` is a wgpu-ready model-view-projection.
 const GL_TO_WGPU_DEPTH: [f32; 16] = [
-    1.0, 0.0, 0.0, 0.0, //
-    0.0, 1.0, 0.0, 0.0, //
-    0.0, 0.0, 0.5, 0.0, //
-    0.0, 0.0, 0.5, 1.0, //
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
 ];
 
 /// Build the directional shadow caster's light view-projection from the sun's
@@ -250,7 +250,6 @@ impl RenderPipelineApi {
         let render = RenderApi::new();
         let snapshot = scene.snapshot();
 
-        // ---- Build the neutral render input from the scene + assets. ----
         let mut input = render.new_input(frame.width, frame.height);
         render.set_input_clear_color(&mut input, frame.clear_color);
 
@@ -367,7 +366,6 @@ impl RenderPipelineApi {
             );
         });
 
-        // ---- Compile and translate to a GPU submission. ----
         let commands = render.build_command_list(&input);
         let count = render.command_count(&commands);
         let mut submission = webgpu.new_submission(frame.width, frame.height);
@@ -508,7 +506,6 @@ impl RenderPipelineApi {
         }
     }
 
-    // --- Report accessors (the report contract is read only through these) ---
 
     pub fn report_command_count(&self, report: &RenderReport) -> usize {
         report.command_count
@@ -660,7 +657,6 @@ mod tests {
 
     #[test]
     fn new_and_default_are_equivalent() {
-        // Both construction paths submit the same scene to the same command count.
         let scene = cube_scene();
         let webgpu = WebGpuApi::new_recording();
         let n = RenderPipelineApi::new();
@@ -668,7 +664,6 @@ mod tests {
         let rn = n.submit(&frame_with_assets(&n), &scene, &webgpu);
         let rd = d.submit(&frame_with_assets(&d), &scene, &webgpu);
         assert_eq!(n.report_command_count(&rn), d.report_command_count(&rd));
-        // This scene carries no SDF shapes, so the report has no SDF scene.
         assert!(n.report_sdf_scene(&rn).is_none());
     }
 
@@ -726,7 +721,6 @@ mod tests {
         let mut scene = SceneApi::new();
         let mesh = scene.mesh_ref(1);
         let material = scene.material_ref(2);
-        // A visible renderable marked as a contact-shadow caster.
         let caster =
             scene.create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)));
         scene.add_renderable(caster, mesh, material).unwrap();
@@ -758,7 +752,6 @@ mod tests {
             &scene,
             &WebGpuApi::new_recording(),
         );
-        // Only the visible renderable is drawn, and it is reported as a caster.
         assert_eq!(api.report_draw_count(&report), 1);
         assert_eq!(api.report_draw_casts_shadow(&report, 0), Some(true));
     }
@@ -784,13 +777,10 @@ mod tests {
         assert!(api.report_draw_world(&report, 0).is_some());
         assert!(api.report_draw_world(&report, 9).is_none());
         assert!(api.report_draw_color(&report, 9).is_none());
-        // The draw carries its mesh id (mesh 1 in the scene), for batching.
         assert_eq!(api.report_draw_mesh_id(&report, 0), Some(1));
         assert!(api.report_draw_mesh_id(&report, 9).is_none());
-        // ...and its material id (material 2 in the scene), for texture binding.
         assert_eq!(api.report_draw_material_id(&report, 0), Some(2));
         assert!(api.report_draw_material_id(&report, 9).is_none());
-        // A plain renderable is not a contact-shadow caster.
         assert_eq!(api.report_draw_casts_shadow(&report, 0), Some(false));
         assert!(api.report_draw_casts_shadow(&report, 9).is_none());
         // The frame resolves its one directional light: kind 0, to-light dir is
@@ -800,9 +790,7 @@ mod tests {
         assert_eq!(kind, 0);
         assert_eq!(vec, [-0.3, 1.0, -0.4]);
         assert!(api.report_light_at(&report, 9).is_none());
-        // A real camera makes the view-projection non-identity.
         assert_ne!(api.report_view_projection(&report), Mat4::IDENTITY);
-        // The directional light yields a non-identity shadow light view-projection.
         assert_ne!(
             api.report_light_view_proj(&report),
             Mat4::IDENTITY.as_cols_array()
@@ -813,7 +801,6 @@ mod tests {
 
     #[test]
     fn shadow_light_view_proj_covers_tilted_vertical_and_degenerate_suns() {
-        // A tilted sun builds a finite, non-identity light view-projection.
         let tilted = shadow_light_view_proj(Vec3::new(0.3, -1.0, 0.4)).unwrap();
         assert_ne!(tilted, Mat4::IDENTITY);
         // A near-vertical sun (|n.y| > 0.99) takes the sideways-up table arm and

@@ -1,15 +1,6 @@
-# Axiom module manifest — axiom-recording (an ENGINE module).
-#
-# A deterministic, memory-bounded frame *recorder* and *scrubber* for proving
-# replay determinism and inspecting prior engine-produced frames. It is an
-# *isolated engine module* (allowed_modules = []): it composes no other module.
-#
-# It records per-frame artifacts as OPAQUE canonical bytes indexed by kernel
-# FrameIndex/Tick. It treats every higher-level artifact (input, runtime step,
-# state snapshot, render commands) as an undifferentiated `Vec<u8>` — it does
-# not know what a scene, renderer, GPU backend, ECS world, or editor panel is.
-# It builds only on the kernel layer (FrameIndex/Tick/KernelError). The scrubber
-# *UI* belongs in apps/devtools, never here.
+# Records per-frame artifacts as opaque canonical bytes; treats every
+# higher-level artifact as an undifferentiated Vec<u8>. The scrubber UI
+# belongs in apps/devtools, never here.
 
 [module]
 name = "recording"

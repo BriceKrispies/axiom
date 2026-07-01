@@ -48,8 +48,6 @@ impl Panel {
         self.id
     }
 
-    // --- visibility / pin ---------------------------------------------------
-
     pub(crate) fn is_visible(&self) -> bool {
         self.visible
     }
@@ -86,8 +84,6 @@ impl Panel {
         self.visible |= !was_pinned;
         self.pinned = !was_pinned;
     }
-
-    // --- layout / drag ------------------------------------------------------
 
     pub(crate) fn position(&self) -> (i32, i32) {
         self.rect.position()
@@ -127,8 +123,6 @@ impl Panel {
     pub(crate) fn drag_end(&mut self) {
         self.drag_grab = None;
     }
-
-    // --- content ------------------------------------------------------------
 
     pub(crate) fn set_header(&mut self, primary: &str, secondary: &str) {
         self.header_primary = primary.to_string();
@@ -199,14 +193,14 @@ mod tests {
         p.toggle();
         assert!(p.is_visible());
         p.pin();
-        p.toggle(); // pinned: stays
+        p.toggle();
         assert!(p.is_visible() && p.is_pinned());
         p.unpin();
         p.hide();
         assert!(!p.is_visible());
-        p.toggle_pin(); // unpinned + hidden -> pins and shows
+        p.toggle_pin();
         assert!(p.is_pinned() && p.is_visible());
-        p.toggle_pin(); // pinned -> unpins, keeps visibility
+        p.toggle_pin();
         assert!(!p.is_pinned() && p.is_visible());
     }
 
@@ -214,7 +208,7 @@ mod tests {
     fn drag_moves_and_clamps() {
         let mut p = panel();
         assert!(!p.is_dragging());
-        p.drag_begin(20, 18); // grab offset (12, 10)
+        p.drag_begin(20, 18);
         assert!(p.is_dragging());
         p.drag_update(120, 118, 1000, 800);
         assert_eq!(p.position(), (108, 108));
@@ -222,7 +216,7 @@ mod tests {
         assert_eq!(p.position(), (0, 0));
         p.drag_end();
         assert!(!p.is_dragging());
-        p.drag_update(300, 300, 1000, 800); // no-op without a grab
+        p.drag_update(300, 300, 1000, 800);
         assert_eq!(p.position(), (0, 0));
     }
 

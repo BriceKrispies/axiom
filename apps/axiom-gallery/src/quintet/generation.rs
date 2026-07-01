@@ -154,8 +154,6 @@ mod tests {
 
     #[test]
     fn recipe_driven_generation_reproduces_across_a_state_sweep() {
-        // Phase 8: every (board, score, moves) state reproduces its piece exactly
-        // when re-evaluated — the substrate keying is fully deterministic.
         let board = Board::empty();
         for state in 0..64u64 {
             let (score, moves) = (state, state * 3 + 1);
@@ -168,8 +166,8 @@ mod tests {
 
     #[test]
     fn perturbing_then_restoring_the_state_restores_the_piece() {
-        // Phase 8 metamorphic: a changed state can change the piece, and restoring
-        // the exact state restores the exact piece (the address keys it).
+        // A changed state can change the piece, and restoring the exact state
+        // restores the exact piece (the address keys it).
         let board = Board::empty();
         let base = generate(&board, 4, 9);
         assert!((0..32).any(|m| generate(&board, 4, m) != base));

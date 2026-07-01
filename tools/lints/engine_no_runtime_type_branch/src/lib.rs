@@ -96,11 +96,9 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoRuntimeTypeBranch {
         if !hit {
             return;
         }
-        // Don't blame the call site for a downcast a macro expanded into it.
         if expr.span.from_expansion() {
             return;
         }
-        // Tests (and `#[cfg(test)]` helpers) may use type reflection freely.
         if is_in_test(cx.tcx, expr.hir_id) {
             return;
         }

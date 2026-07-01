@@ -8,7 +8,6 @@ use crate::state_event::StateEvent;
 use crate::timers::Timers;
 
 /// The game-API timers and state-machine facade.
-///
 /// `TickApi` is the deterministic, wall-clock-free half of "time & state": tick
 /// scheduled `after` / `every` / `cancel` timers and author-defined state
 /// machines, both projected over the kernel's `TickSchedule` / `Tick` / `TickDelta`.
@@ -100,13 +99,11 @@ mod tests {
         TickDelta::new(raw)
     }
 
-    /// Drive timers across N ticks, collecting the per-tick fired-id sequence.
     fn run_timers() -> Vec<(u64, Vec<TimerId>)> {
         let mut api = TickApi::new();
         let one_shot = api.after(at(0), delta(3));
         let repeating = api.every(at(0), delta(5));
         let canceled = api.after(at(0), delta(4));
-        // Cancel the third timer mid-flight before it fires.
         assert!(api.cancel(canceled));
         (0..12)
             .map(|t| (t, api.due(at(t))))
@@ -114,7 +111,6 @@ mod tests {
             .collect::<Vec<_>>()
             .into_iter()
             .map(|(t, fired)| {
-                // Sanity: the canceled timer (id 3) never appears.
                 assert!(!fired.contains(&canceled));
                 let _ = (one_shot, repeating);
                 (t, fired)
@@ -127,7 +123,6 @@ mod tests {
         let first = run_timers();
         let second = run_timers();
         assert_eq!(first, second, "timer fire sequence must replay byte-identically");
-        // after(3) fires at 3; every(5) fires at 5 and 10; canceled never.
         assert_eq!(
             first,
             vec![
@@ -138,13 +133,11 @@ mod tests {
         );
     }
 
-    /// Drive one machine across N ticks, collecting the per-tick event kinds.
     fn run_machine() -> Vec<(u64, Vec<(u32, StateEventKind)>)> {
         let mut api = TickApi::new();
         let m = api.create_machine(3, 0, at(0));
         (0..6)
             .map(|t| {
-                // Transition at tick 3 from state 0 to state 2.
                 (t == 3).then(|| api.transition(m, 2, at(t)));
                 let events: Vec<(u32, StateEventKind)> = api
                     .drain_events(at(t))

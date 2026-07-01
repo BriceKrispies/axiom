@@ -23,8 +23,6 @@ pub async fn run(cfg: &Config) -> bool {
     }
 }
 
-// --- Scenario: single-node capacity ---------------------------------------
-
 async fn soak(cfg: &Config) -> bool {
     println!(
         "== soak: {} players across {} room(s) on {} ==",
@@ -38,8 +36,6 @@ async fn soak(cfg: &Config) -> bool {
     let reports = drive_players(assignments, cfg).await;
     report_and_verdict("soak", &stats::aggregate(&reports), cfg, Vec::new())
 }
-
-// --- Scenario: matchmaker throughput --------------------------------------
 
 async fn matchmake(cfg: &Config) -> bool {
     println!(
@@ -79,8 +75,6 @@ async fn matchmake(cfg: &Config) -> bool {
     ok
 }
 
-// --- Scenario: scaleout distribution --------------------------------------
-
 async fn scaleout(cfg: &Config) -> bool {
     println!(
         "== scaleout: {} players via director {} ==",
@@ -106,7 +100,6 @@ async fn scaleout(cfg: &Config) -> bool {
     println!("matched:      {}/{}", assignments.len(), cfg.players);
     print_node_distribution(&dist);
 
-    // Connect each matched player directly to its assigned node + room.
     let players: Vec<(String, String)> = assignments
         .iter()
         .filter_map(|(room, node)| node.clone().map(|n| (n, room.clone())))
@@ -125,8 +118,6 @@ async fn scaleout(cfg: &Config) -> bool {
     report_and_verdict("scaleout", &agg, cfg, extra)
 }
 
-// --- Scenario: crash-recovery under load ----------------------------------
-
 async fn resilience(cfg: &Config) -> bool {
     println!(
         "== resilience: {} players on {}, killing '{}' every {:.1}s ==",
@@ -141,7 +132,6 @@ async fn resilience(cfg: &Config) -> bool {
         .collect();
     let dur = Duration::from_secs_f64(cfg.duration_secs);
 
-    // Drive the load and the chaos concurrently for the same duration.
     let (reports, kills) = tokio::join!(
         drive_players(assignments, cfg),
         chaos_loop(cfg.worker_image.clone(), cfg.kill_every_secs, dur),
@@ -181,8 +171,6 @@ fn resilience_extra_fails(kills: u64, agg: &Aggregate, duration_secs: f64) -> Ve
     });
     fails
 }
-
-// --- Shared driving + reporting -------------------------------------------
 
 /// Spawn one task per player (with a ramp delay) and collect every report.
 async fn drive_players(assignments: Vec<(String, String)>, cfg: &Config) -> Vec<PlayerReport> {
@@ -290,8 +278,6 @@ fn print_node_distribution(dist: &Distribution) {
     }
 }
 
-// --- Matchmaking helpers (pure where possible, for tests) -----------------
-
 /// Fire `n` `POST /matchmake` calls, bounded to `concurrency` in flight.
 async fn fire_matchmake(
     target: &str,
@@ -360,8 +346,6 @@ fn distribution(assignments: &[(String, Option<String>)]) -> Distribution {
     }
     Distribution { per_node, per_room }
 }
-
-// --- Chaos (resilience) ---------------------------------------------------
 
 /// Kill the worker process(es) every `every_secs` until `total` elapses; returns
 /// how many kills landed. Killing by image name fells every live worker, so each

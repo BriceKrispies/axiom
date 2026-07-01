@@ -1,11 +1,9 @@
-# Axiom module manifest — axiom-sim-core (Phase 2 simulation substrate).
+# Axiom module manifest — axiom-sim-core.
 #
-# sim-core is an *isolated* engine module. It adapts the kernel (identity,
-# deterministic binary IO) and the ECS layer (generational entity handles +
-# liveness) into a generic simulation language: facts, relations, definitions,
-# processes, effects, and a causal journal. It is NOT a layer, owns no domain
-# meaning (no materials/bodies/fluids/jobs/rendering/scene/physics/gameplay),
-# and must not depend on any other module.
+# Adapts kernel identity/binary-IO and ECS generational entity handles into a
+# generic simulation language: facts, relations, definitions, processes,
+# effects, and a causal journal. Owns no domain meaning (no materials/bodies/
+# fluids/jobs/rendering/scene/physics/gameplay).
 
 [module]
 name = "sim-core"
@@ -17,7 +15,6 @@ allowed_layers = [
     "ecs",
 ]
 
-# Modules may not depend on other modules. sim-core is fully isolated.
 allowed_modules = []
 
 introduced_capabilities = [

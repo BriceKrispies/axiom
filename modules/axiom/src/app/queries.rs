@@ -2,8 +2,6 @@
 //! queries (Category 2) and runtime lifecycle (Category 3) of the game
 //! vocabulary (`docs/game-vocabulary.md`). The engine answers "what is where" and
 //! owns object lifetime, returning first-class [`Entity`] handles an app holds.
-//! A child module of `app` so it reaches `RunningApp`'s private scene while
-//! keeping `app.rs` within the per-file size budget.
 
 use axiom_kernel::Meters;
 use axiom_math::{Transform, Vec3};
@@ -188,11 +186,6 @@ mod tests {
 
     #[test]
     fn update_world_transforms_commits_a_set_for_an_immediate_raycast() {
-        // A runtime author moves a bounded node with `set::<Transform>` (which
-        // defers world-transform propagation) and then commits it explicitly, so a
-        // raycast in the SAME frame sees the node at its new place — the contract
-        // the wasm authoring bridge relies on to move enemies and have hitscan hit
-        // them without waiting a tick.
         let mut app = App::new()
             .window(Window::new(64, 64))
             .add_plugins(DefaultPlugins)
@@ -208,9 +201,7 @@ mod tests {
             .build();
         let reach = Meters::new(100.0).unwrap();
         let node = app.query::<Bounds>()[0].0;
-        // A ray to the east misses the node at its spawn (it is due north).
         assert_eq!(app.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach), None);
-        // Move it east with a bare set, then commit: the same ray now hits it.
         assert!(app.set::<Transform>(node, Transform::from_translation(Vec3::new(3.0, 0.0, 0.0))));
         app.update_world_transforms();
         assert_eq!(
@@ -251,7 +242,6 @@ mod tests {
             .build();
         let reach = Meters::new(100.0).unwrap();
         let enemy = app.player_entity(0).expect("enemy is marked player 0");
-        // North hits the enemy entity; up hits nothing.
         assert_eq!(
             app.raycast(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), reach),
             Some(enemy)
@@ -260,11 +250,9 @@ mod tests {
             app.raycast(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), reach),
             None
         );
-        // East hits the wall — some entity, but not the enemy (the caller's check).
         let wall = app.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach);
         assert!(wall.is_some());
         assert_ne!(wall, Some(enemy));
-        // Overlap returns the same entities; the origin overlaps neither.
         assert_eq!(
             app.overlap_box(Vec3::new(0.0, 0.0, -3.0), Vec3::new(0.2, 0.2, 0.2)),
             vec![enemy]
@@ -300,11 +288,9 @@ mod tests {
             .build();
         let reach = Meters::new(100.0).unwrap();
         let enemy = app.player_entity(0).expect("enemy is player 0");
-        // Tag the enemy (entity-native classification); the wall stays untagged.
-        assert!(app.tag(enemy, 2)); // 2 = "enemy" in this game's vocabulary
-        assert!(!app.tag(Entity::from_raw(9999), 2)); // missing node -> false
+        assert!(app.tag(enemy, 2));
+        assert!(!app.tag(Entity::from_raw(9999), 2));
 
-        // North hits the enemy: the agent reads the exact point and its kind.
         let (north_node, north_point) = app
             .raycast_hit(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), reach)
             .expect("ray hits the enemy");
@@ -312,14 +298,12 @@ mod tests {
         assert!((north_point.z + 2.5).abs() < 1.0e-5, "entry on the near face");
         assert_eq!(app.tag_of(north_node), Some(2));
 
-        // East hits the wall: a real hit, but untagged -> plain geometry.
         let (east_node, _point) = app
             .raycast_hit(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach)
             .expect("ray hits the wall");
         assert_ne!(east_node, enemy);
         assert_eq!(app.tag_of(east_node), None);
 
-        // Up hits nothing.
         assert!(app
             .raycast_hit(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), reach)
             .is_none());
@@ -349,13 +333,11 @@ mod tests {
     #[test]
     fn spawn_returns_an_entity_queryable_addressable_and_removable() {
         let (mut app, cube, material) = app_with_handles();
-        // A plain renderable spawn — no player, no bounds, no caster.
         let plain = app.spawn(Spawn::new(
             Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)),
             cube,
             material,
         ));
-        // A player-marked, bounded, shadow-casting spawn — fully queryable.
         let enemy = app.spawn(
             Spawn::new(
                 Transform::from_translation(Vec3::new(0.0, 0.0, -3.0)),
@@ -366,7 +348,6 @@ mod tests {
             .with_bounds(Vec3::new(0.5, 0.5, 0.5))
             .casts_contact_shadow(),
         );
-        // The spawn return is the same handle queries hand back.
         assert_eq!(app.player_entity(0), Some(enemy));
         assert_ne!(plain, enemy);
         let reach = Meters::new(100.0).unwrap();
@@ -375,12 +356,11 @@ mod tests {
             Some(enemy)
         );
         assert_eq!(app.player_translation(0), Some(Vec3::new(0.0, 0.0, -3.0)));
-        // The plain spawn has no bounds, so it is not a query hit.
+        // `plain` has no bounds, so it is not a query hit.
         assert_eq!(
             app.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach),
             None
         );
-        // And the enemy can be despawned by its handle.
         assert!(app.despawn(enemy));
         assert_eq!(
             app.raycast(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), reach),
@@ -408,10 +388,8 @@ mod tests {
             })
             .build();
         let mut app = app;
-        // The player spawns at the origin; no node is marked player 1.
         assert_eq!(app.player_translation(0), Some(Vec3::new(0.0, 0.0, 0.0)));
         assert_eq!(app.player_translation(1), None);
-        // A move advances the authoritative translation read back from the engine.
         app.tick_with(0, &[PlayerInput::new(0, Vec3::new(1.5, 0.0, 0.0))]);
         assert_eq!(app.player_translation(0), Some(Vec3::new(1.5, 0.0, 0.0)));
     }
@@ -419,7 +397,6 @@ mod tests {
     #[test]
     fn overlap_circle_liveness_and_world_transform_round_trip() {
         let (mut app, cube, material) = app_with_handles();
-        // A bounded node three units down -Z.
         let target = app.spawn(
             Spawn::new(
                 Transform::from_translation(Vec3::new(0.0, 0.0, -3.0)),
@@ -428,8 +405,6 @@ mod tests {
             )
             .with_bounds(Vec3::new(0.5, 0.5, 0.5)),
         );
-        // overlap_circle finds the bounded node near its centre and nothing at the
-        // origin (the box↔sphere test the engine owns).
         assert_eq!(
             app.overlap_circle(Vec3::new(0.0, 0.0, -3.0), Meters::new(1.0).unwrap()),
             vec![target]
@@ -437,16 +412,13 @@ mod tests {
         assert!(app
             .overlap_circle(Vec3::ZERO, Meters::new(0.5).unwrap())
             .is_empty());
-        // Liveness: a live node is true, a stale handle false.
         assert!(app.is_alive(target));
         assert!(!app.is_alive(Entity::from_raw(9999)));
-        // World transform reflects the authored position; an absent node is None.
         assert_eq!(
             app.world_transform(target).map(|t| t.translation),
             Some(Vec3::new(0.0, 0.0, -3.0))
         );
         assert_eq!(app.world_transform(Entity::from_raw(9999)), None);
-        // Despawn flips liveness.
         assert!(app.despawn(target));
         assert!(!app.is_alive(target));
     }
@@ -459,12 +431,9 @@ mod tests {
             .build();
         let parent = app.spawn_empty();
         let child = app.spawn_empty();
-        // A fresh node has no parent.
         assert_eq!(app.parent_of(child), None);
-        // Linking succeeds and the read side reflects it.
         assert!(app.set_parent(child, parent));
         assert_eq!(app.parent_of(child), Some(parent));
-        // Self-parenting is rejected as a clean false.
         assert!(!app.set_parent(parent, parent));
     }
 
@@ -478,11 +447,8 @@ mod tests {
         let child = app.spawn_empty();
         assert!(app.set_parent(child, parent));
         assert_eq!(app.parent_of(child), Some(parent));
-        // Detaching returns the child to the root: it existed, so `true`, and the
-        // read side now reports no parent.
         assert!(app.clear_parent(child));
         assert_eq!(app.parent_of(child), None);
-        // Clearing a missing node is a clean `false`.
         assert!(!app.clear_parent(Entity::from_raw(9999)));
     }
 }

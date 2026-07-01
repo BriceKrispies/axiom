@@ -94,8 +94,6 @@ mod tests {
     #[test]
     fn fires_once_every_period_ticks_and_rearms() {
         let mut d = TickDivider::new(3).unwrap();
-        // Two non-firing ticks then a fire — run two full periods to prove the
-        // divider re-arms after firing.
         assert_eq!(
             [
                 d.advance(),

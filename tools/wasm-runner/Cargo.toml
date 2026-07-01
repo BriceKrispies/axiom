@@ -1,9 +1,6 @@
-# Repo TOOLING — a deliberately SEPARATE, single-crate workspace (like
-# `tools/lints`), so it is absent from the root `cargo metadata` and never
-# touches the engine dependency graph, the Module Law's "every package must
-# classify" checker, or the coverage gate. It exists only to PROVE that a Rust
-# test can be executed on `wasm32` (not just compiled), so a future workstream
-# can run a physics-determinism golden on wasm and diff it against native.
+# Separate single-crate workspace (like tools/lints); proves a Rust test can
+# actually execute on wasm32 (not just compile), for a future physics-determinism
+# golden comparing wasm against native.
 [package]
 name = "axiom-wasm-runner-proof"
 version = "0.1.0"
@@ -13,22 +10,12 @@ publish = false
 [workspace]
 
 [dependencies]
-# Cross-workspace PATH deps into the engine spine (a path dep across workspaces is
-# legal in cargo, and this crate is repo tooling — it is NOT in the root
-# `cargo metadata`, so it never widens the engine dependency graph, the Module
-# Law's classifier, or the coverage gate). These are the exact layers the physics
-# step path is built on: the deterministic rigid-body world (`axiom-physics`), its
-# kernel identity/scalar/`StableHash`/canonical-byte primitives, the runtime fixed
-# step, and `math`'s `Vec3`/`Transform`. The cross-target f32 golden replays a
-# fixed physics scenario over them and hashes the per-tick state.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-physics = { path = "../../modules/axiom-physics" }
 
 [dev-dependencies]
-# Pinned so the `wasm-bindgen` it pulls (0.2.122) matches the installed
-# `wasm-bindgen-test-runner` / `wasm-bindgen` CLI (0.2.122) — the build and the
-# runner must agree on the wasm-bindgen schema version. The test crate is
-# versioned in the 0.3 series (0.3.72 -> wasm-bindgen 0.2.122).
+# Pinned: wasm-bindgen-test 0.3.72 pulls wasm-bindgen 0.2.122, which must match
+# the installed wasm-bindgen-test-runner/CLI version.
 wasm-bindgen-test = "=0.3.72"

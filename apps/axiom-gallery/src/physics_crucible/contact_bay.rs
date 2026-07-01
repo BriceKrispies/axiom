@@ -1,5 +1,4 @@
 //! Station 2 — Contact Bay.
-//!
 //! The narrow-phase catalogue: the four contact pair types the physics module
 //! actually generates — sphere/plane, sphere/sphere, sphere/box, and box/plane —
 //! each as an isolated dropped body settling onto a target. It proves contacts are

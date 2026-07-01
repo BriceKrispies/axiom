@@ -5,7 +5,6 @@ use axiom_math::MathError;
 use crate::physics_error_code::PhysicsErrorCode;
 
 /// A deterministic physics-module error.
-///
 /// Identity is `(code, math-cause-identity)`. Two errors with the same
 /// [`PhysicsErrorCode`] and the same optionally-wrapped [`MathError`] compare
 /// equal regardless of the static human message, so error assertions stay
@@ -154,9 +153,6 @@ const fn matches_code(code: PhysicsErrorCode, expected: PhysicsErrorCode) -> boo
 /// Equality on machine identity only (code + math cause), never the message.
 impl PartialEq for PhysicsError {
     fn eq(&self, other: &Self) -> bool {
-        // Both operands are pure equality comparisons, so the short-circuiting
-        // `&&` would be behaviour-identical to this bitwise `&` (and `&` keeps
-        // the spine branchless).
         (self.code == other.code) & (self.math == other.math)
     }
 }
@@ -291,7 +287,6 @@ mod tests {
         assert!(PhysicsError::operation_on_disabled_body("").is_operation_on_disabled_body());
         assert!(PhysicsError::non_finite_step_result("").is_non_finite_step_result());
 
-        // A predicate is false for an unrelated code (covers the false arm).
         let step = PhysicsError::invalid_step("");
         assert!(!step.is_invalid_mass());
         assert!(!step.is_force_on_non_dynamic_body());

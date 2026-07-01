@@ -134,8 +134,6 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest presence ----------
-
 #[test]
 fn module_toml_exists() {
     assert!(
@@ -169,13 +167,8 @@ fn lib_rs_exports_only_netcode_api() {
     );
 }
 
-// ---------- legal layer imports only ----------
-
 #[test]
 fn netcode_imports_only_its_allowed_layers() {
-    // Netcode builds on two layers only: the kernel (time/id/codec/result
-    // primitives) and crypto (input/beacon signing + verification). Nothing
-    // higher, and no other module.
     let mut illegal = Vec::new();
     for path in netcode_source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -237,8 +230,6 @@ fn netcode_imports_no_other_modules() {
     );
 }
 
-// ---------- lower layers must not import netcode ----------
-
 #[test]
 fn no_layer_imports_axiom_netcode() {
     for layer in [
@@ -298,8 +289,6 @@ fn no_app_imports_axiom_netcode_unless_app_manifest_allows_it() {
     }
 }
 
-// ---------- source hygiene ----------
-
 #[test]
 fn no_browser_or_js_bindgen_apis() {
     assert_absent(
@@ -333,8 +322,6 @@ fn no_webgpu_or_webgl_apis() {
 
 #[test]
 fn no_sockets_or_network_io() {
-    // The deterministic core speaks plain bytes; the app owns the socket. No
-    // real transport may leak into this module.
     assert_absent(
         &[
             "std::net",

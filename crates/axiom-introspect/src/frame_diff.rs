@@ -30,9 +30,8 @@ pub struct FrameDiff {
 impl FrameDiff {
     /// Compute the delta `from` → `to`.
     pub fn between(from: &FrameReport, to: &FrameReport) -> Self {
-        // Newly failed = failed in `to`, and not already failing in `from`
-        // (absent, or present-and-succeeded). Expressed branchlessly: keep a
-        // failed-in-`to` system unless `from` held the same id *failing*.
+        // Newly failed = failed in `to` and not already failing in `from`
+        // (absent, or present-and-succeeded).
         let newly_failed_systems = to
             .systems()
             .iter()
@@ -173,9 +172,6 @@ mod tests {
 
     #[test]
     fn a_system_that_recovers_is_not_newly_failed() {
-        // from failed, to (active) has no failing systems ⇒ nothing *newly*
-        // failed (exercises the success-filter rejecting `to`'s clean systems
-        // and the absence of a newly-failed entry).
         let from = FrameReport::from_frame(&fixtures::failing_engine_frame());
         let to = FrameReport::from_frame(&fixtures::active_engine_frames(1)[0]);
         let diff = FrameDiff::between(&from, &to);
@@ -184,9 +180,6 @@ mod tests {
 
     #[test]
     fn a_system_already_failing_in_both_is_not_newly_failed() {
-        // Same failing frame on both sides: the system fails in `to` but also
-        // failed in `from`, so it is not *newly* failed (the join's
-        // already-failed arm).
         let report = FrameReport::from_frame(&fixtures::failing_engine_frame());
         let diff = FrameDiff::between(&report, &report);
         assert!(diff.newly_failed_systems().is_empty());
@@ -196,23 +189,18 @@ mod tests {
     #[test]
     fn scalar_field_changes_are_detected() {
         let base = FrameReport::from_frame(&fixtures::active_engine_frames(1)[0]);
-        // Lifecycle byte @25: Active(0) -> Hidden(1).
         let life = FrameDiff::between(&base, &patched(&base, 25, 1));
         assert!(life.lifecycle_changed());
-        // Skip byte @24: false(0) -> true(1).
         let skip = FrameDiff::between(&base, &patched(&base, 24, 1));
         assert!(skip.skipped_changed());
-        // Viewport width LSB @26.
         let view = FrameDiff::between(&base, &patched(&base, 26, 1));
         assert!(view.viewport_changed());
-        // host_elapsed_nanos LSB @34.
         let time = FrameDiff::between(&base, &patched(&base, 34, 1));
         assert!(time.timing_changed());
     }
 
     #[test]
     fn step_count_delta_is_signed() {
-        // Patch the step-count u32 LSB @20 to differ, both directions.
         let base = FrameReport::from_frame(&fixtures::active_engine_frames(1)[0]);
         let more = patched(&base, 20, base.runtime_step_count() as u8 + 5);
         assert!(FrameDiff::between(&base, &more).step_count_delta() > 0);

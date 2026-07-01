@@ -1,6 +1,5 @@
-//! `moisture_advection` stage (OW-E8): advect moisture downwind along the region
+//! `moisture_advection` stage: advect moisture downwind along the region
 //! graph; ocean stays a moisture source; values stay in `[0,1]`.
-//! Audit: OW-E8 wind-advected moisture, deterministic, runs after elevation.
 //!
 //! For a fixed number of passes, each land region pulls moisture from its most
 //! *upwind* neighbour — the neighbour whose offset direction best opposes the
@@ -124,9 +123,7 @@ mod tests {
         };
         g.resize_fields();
         g.region_elevation = (0..n).map(|i| if i == 0 { -1.0 } else { 0.5 }).collect();
-        // Wind blows toward +x for all regions.
         g.region_wind = vec![Vec3::new(1.0, 0.0, 0.0); n];
-        // Dry land, wet ocean to start.
         g.region_moisture = (0..n).map(|i| if i == 0 { 1.0 } else { 0.0 }).collect();
         g
     }
@@ -139,9 +136,7 @@ mod tests {
         for &m in &g.region_moisture {
             assert!((0.0..=1.0).contains(&m), "moisture {} out of range", m);
         }
-        // Region 1 (next to ocean, downwind) should have gained moisture.
         assert!(g.region_moisture[1] > 0.0);
-        // Closer to source should be at least as wet as further inland.
         assert!(g.region_moisture[1] >= g.region_moisture[4]);
     }
 

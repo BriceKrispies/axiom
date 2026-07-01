@@ -12,9 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 # The canonical multiplayer wire contract: the load client encodes/decodes the
-# exact same frames the browser SDK and the .NET host do, so a load run can never
-# drift from the real protocol. A tool may depend on a module (tools are outside
-# the engine dependency graph).
+# exact same frames the browser SDK and the .NET host do, so a load run can
+# never drift from the real protocol.
 axiom-net-protocol = { path = "../../modules/axiom-net-protocol" }
 # The portable client-side state machine (connection state, sequence/pending
 # bookkeeping) the browser logic mirrors — driving it here means each virtual

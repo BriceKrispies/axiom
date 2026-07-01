@@ -1,5 +1,4 @@
 //! VistaDirector — deterministic "Everest-scale mountain vista" scenic generation.
-//!
 //! When the player picks a spot on the overworld map and descends into the
 //! first-person world, the raw noise field puts them on arbitrary ground facing
 //! an arbitrary direction. The [`VistaDirector`] turns that descent into a
@@ -7,9 +6,7 @@
 //! flat, safe landing shelf, an enormous far-off mountain framed on the horizon,
 //! a readable winding route up the mountain's side, and the atmospheric band
 //! altitudes (cloud band, snow/rock/vegetation lines) that sell the scale.
-//!
 //! ## Where it sits in the pipeline
-//!
 //! The whole ground world flows from one pure height function in
 //! [`crate::growth::gameworld`]. The plan is *composited into that function* via
 //! [`vista_height_m`], so the mountain and the flat shelf become genuinely part
@@ -17,18 +14,14 @@
 //! collision sampler — with no special-casing in the streaming machinery. The
 //! director itself only *reads* the base terrain (the un-composited height) to
 //! score where the composition reads best; it never mutates engine state.
-//!
 //! ## Determinism
-//!
 //! Everything is a pure function of the world `seed` plus the picked direction
 //! (already baked into the anchored [`GameWorldLocalMap`]). The only randomness
 //! is an explicit `axiom_entropy::EntropyStream` fork of the worldgen root
 //! (`worldgen_stream(seed).fork(VISTA_SALT)`); there is no wall-clock, no global
 //! state, no unseeded sampling. The same input always yields the same plan
 //! (proved by [`tests::plan_is_deterministic`]).
-//!
 //! ## Authoring convention (why the mountain sits on local −Z)
-//!
 //! The engine's first-person controller always *rebuilds* the camera rotation
 //! from an accumulated yaw that starts at `0` (local forward is −Z). Setting an
 //! initial transform rotation would be overwritten on tick 0. Rather than fight
@@ -52,9 +45,6 @@ const VISTA_SALT: u64 = 0x5713_A115_7A00_0000;
 /// the viewer's `EYE_HEIGHT_M` so the scoring sightlines agree with what renders.
 const EYE_HEIGHT_M: f32 = 1.7;
 
-// ===========================================================================
-// Configuration
-// ===========================================================================
 
 /// Tunable thresholds and band altitudes that shape the vista. All distances are
 /// in metres in the local world-metre frame; slopes are dimensionless rise/run.
@@ -140,9 +130,6 @@ impl Default for VistaConfig {
     }
 }
 
-// ===========================================================================
-// Plan contract
-// ===========================================================================
 
 /// A reference to the target mountain landform the vista is composed around.
 /// The massif is generated (not found in noise), so the id distinguishes the
@@ -334,9 +321,6 @@ pub struct MountainVistaPlan {
     pub debug: VistaScore,
 }
 
-// ===========================================================================
-// Composited terrain height
-// ===========================================================================
 
 /// Composite the vista into a base terrain height at `(x, z)`: flatten the spawn
 /// shelf, raise the analytic massif, then carve the route ledge. `base_h` is the
@@ -373,9 +357,6 @@ fn shelf_blend(plan: &MountainVistaPlan, base_h: f32, x: f32, z: f32) -> f32 {
     }
 }
 
-// ===========================================================================
-// VistaDirector
-// ===========================================================================
 
 /// The deterministic scenic generator. Stateless; [`Self::plan`] is the entry.
 #[derive(Debug)]
@@ -596,9 +577,6 @@ impl VistaConfig {
     }
 }
 
-// ===========================================================================
-// Spawn selection
-// ===========================================================================
 
 /// Deterministically pick the flattest spot within `spawn_search_radius_m` of
 /// the local origin (the map pick), so the shelf blends gently and the player
@@ -646,9 +624,6 @@ fn flatness_at(
     1.0 / (1.0 + slope * 4.0)
 }
 
-// ===========================================================================
-// Visibility scoring
-// ===========================================================================
 
 /// Whether a reference point ~15% up the relief (representing the visible lower
 /// mountain) clears intervening base terrain on the sightline from the eye.
@@ -692,9 +667,6 @@ fn lower_flank_visible(
     visible
 }
 
-// ===========================================================================
-// Route construction
-// ===========================================================================
 
 /// Build the carved route as `(x, z, target_absolute_height)` waypoints: a flat
 /// leg from the spawn to the near rim, then a switchback spiral up the flank to
@@ -736,7 +708,7 @@ fn build_route(
     // Assign target altitudes: flat (shelf) until we reach the rim, then climb at
     // `path_grade` along cumulative horizontal length, capped at the high
     // endpoint.
-    let rim_index = approach_steps; // index of the base rim in `pts`
+    let rim_index = approach_steps;
     let cap = shelf_height + cfg.peak_relief_m * cfg.high_endpoint_fraction;
     let mut out: Vec<(f32, f32, f32)> = Vec::with_capacity(pts.len());
     let mut climb = 0.0_f32;
@@ -768,9 +740,6 @@ fn route_within_slope(route: &[(f32, f32, f32)], max_slope: f32) -> bool {
     })
 }
 
-// ===========================================================================
-// Atmosphere / band colour (pure, baked into the scenic mesh by the viewer)
-// ===========================================================================
 
 /// The base material colour (linear RGB) for terrain at `altitude_m` above the
 /// spawn ground: green vegetation low, grey-brown rock mid, white snow high.
@@ -841,9 +810,6 @@ pub fn trail_tint(base: [f32; 4], weight: f32) -> [f32; 4] {
     ]
 }
 
-// ===========================================================================
-// Small math helpers
-// ===========================================================================
 
 /// Smooth radial massif profile: 1 at the centre (`u = 0`), 0 at the rim
 /// (`u = 1`), with a broad base and a sharpened, dominant summit. Smooth (no
@@ -917,9 +883,6 @@ fn build_ridges(seed: u64) -> Vec<Ridge> {
         .collect()
 }
 
-// ===========================================================================
-// Tests
-// ===========================================================================
 
 #[cfg(test)]
 mod tests {
@@ -984,7 +947,6 @@ mod tests {
     fn spawn_slope_within_threshold() {
         let p = plan();
         let (sx, sz) = p.spawn_xz;
-        // Sample composited height across the flat disk and check adjacent slope.
         let base = |x: f32, z: f32| {
             // base terrain irrelevant inside the flat disk, but supply a real one.
             let (atlas, localmap, seed) = fixture();

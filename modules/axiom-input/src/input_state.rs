@@ -226,7 +226,6 @@ mod tests {
         KeyToken::new(name)
     }
 
-    /// A keyboard-only frame: the named tokens down, no pointer.
     fn keys(down: &[&str]) -> DeviceFrame {
         let tokens: Vec<KeyToken> = down.iter().map(|name| key(name)).collect();
         DeviceFrame::new(Vec2::new(1000.0, 600.0), &tokens, &[])
@@ -260,7 +259,6 @@ mod tests {
     #[test]
     fn any_bound_token_holds_the_action() {
         let mut input = bound_state();
-        // The alternate token for MOVE_LEFT also holds it.
         input.sample(Tick::new(1), &keys(&["ArrowLeft"]));
         assert!(input.is_down(MOVE_LEFT));
         assert!(!input.is_down(MOVE_RIGHT));
@@ -269,17 +267,14 @@ mod tests {
     #[test]
     fn a_held_key_presses_once_then_only_holds() {
         let mut input = bound_state();
-        // Tick 1: down-edge — pressed and held, stamped at tick 1.
         input.sample(Tick::new(1), &keys(&["Space"]));
         assert!(input.pressed(JUMP));
         assert!(input.is_down(JUMP));
         assert!(!input.released(JUMP));
         assert_eq!(input.pressed_at_tick(JUMP), Some(Tick::new(1)));
-        // Tick 2: still held — held, but NOT pressed again (auto-repeat suppressed).
         input.sample(Tick::new(2), &keys(&["Space"]));
         assert!(!input.pressed(JUMP));
         assert!(input.is_down(JUMP));
-        // Stamp stays at the original down-edge tick.
         assert_eq!(input.pressed_at_tick(JUMP), Some(Tick::new(1)));
     }
 
@@ -287,11 +282,9 @@ mod tests {
     fn release_is_a_single_up_edge() {
         let mut input = bound_state();
         input.sample(Tick::new(1), &keys(&["Space"]));
-        // Tick 2: lifted — released exactly once, no longer down.
         input.sample(Tick::new(2), &keys(&[]));
         assert!(input.released(JUMP));
         assert!(!input.is_down(JUMP));
-        // Tick 3: still up — no release edge.
         input.sample(Tick::new(3), &keys(&[]));
         assert!(!input.released(JUMP));
     }
@@ -301,10 +294,9 @@ mod tests {
         let mut input = bound_state();
         input.sample(Tick::new(5), &keys(&["Space"]));
         assert_eq!(input.pressed_at_tick(JUMP), Some(Tick::new(5)));
-        input.sample(Tick::new(6), &keys(&[])); // release
-        // Stamp persists through the up window.
+        input.sample(Tick::new(6), &keys(&[]));
         assert_eq!(input.pressed_at_tick(JUMP), Some(Tick::new(5)));
-        input.sample(Tick::new(9), &keys(&["Space"])); // press again
+        input.sample(Tick::new(9), &keys(&["Space"]));
         assert_eq!(input.pressed_at_tick(JUMP), Some(Tick::new(9)));
     }
 
@@ -312,35 +304,32 @@ mod tests {
     fn axis_returns_all_four_held_combinations() {
         let mut input = bound_state();
         input.sample(Tick::new(1), &keys(&[]));
-        assert_eq!(input.axis(MOVE_LEFT, MOVE_RIGHT), 0); // neither
+        assert_eq!(input.axis(MOVE_LEFT, MOVE_RIGHT), 0);
         input.sample(Tick::new(2), &keys(&["KeyD"]));
-        assert_eq!(input.axis(MOVE_LEFT, MOVE_RIGHT), 1); // only pos
+        assert_eq!(input.axis(MOVE_LEFT, MOVE_RIGHT), 1);
         input.sample(Tick::new(3), &keys(&["KeyA"]));
-        assert_eq!(input.axis(MOVE_LEFT, MOVE_RIGHT), -1); // only neg
+        assert_eq!(input.axis(MOVE_LEFT, MOVE_RIGHT), -1);
         input.sample(Tick::new(4), &keys(&["KeyA", "KeyD"]));
-        assert_eq!(input.axis(MOVE_LEFT, MOVE_RIGHT), 0); // both
+        assert_eq!(input.axis(MOVE_LEFT, MOVE_RIGHT), 0);
     }
 
     #[test]
     fn rebinding_replaces_the_keys_for_an_action() {
         let mut input = bound_state();
-        // Remap JUMP from Space to KeyJ.
         input.bind_action(JUMP, &[key("KeyJ")]);
         input.sample(Tick::new(1), &keys(&["Space"]));
-        assert!(!input.is_down(JUMP)); // old key no longer fires it
+        assert!(!input.is_down(JUMP));
         input.sample(Tick::new(2), &keys(&["KeyJ"]));
-        assert!(input.is_down(JUMP)); // new key does
+        assert!(input.is_down(JUMP));
     }
 
     #[test]
     fn pointer_and_pointer_pressed_track_the_primary_contact() {
         let mut input = InputState::new();
         let surface = Vec2::new(1000.0, 600.0);
-        // No samples: no pointer, no press.
         input.sample(Tick::new(1), &DeviceFrame::new(surface, &[], &[]));
         assert_eq!(input.pointer(), None);
         assert_eq!(input.pointer_pressed(), None);
-        // Down-edge: pointer reported and press position is this tick's.
         let frame = DeviceFrame::new(surface, &[], &[(Vec2::new(120.0, 80.0), true)]);
         input.sample(Tick::new(2), &frame);
         assert_eq!(
@@ -351,7 +340,6 @@ mod tests {
             })
         );
         assert_eq!(input.pointer_pressed(), Some(Vec2::new(120.0, 80.0)));
-        // Still down next tick: a hold is not a fresh press.
         let held = DeviceFrame::new(surface, &[], &[(Vec2::new(130.0, 90.0), true)]);
         input.sample(Tick::new(3), &held);
         assert_eq!(input.pointer_pressed(), None);
@@ -381,12 +369,12 @@ mod tests {
             Tick::new(1),
             &DeviceFrame::new(surface, &[], &[(Vec2::new(200.0, 300.0), true)]),
         );
-        assert_eq!(input.swipe(), None); // mid-gesture
+        assert_eq!(input.swipe(), None);
         input.sample(
             Tick::new(2),
             &DeviceFrame::new(surface, &[], &[(Vec2::new(400.0, 300.0), true)]),
         );
-        input.sample(Tick::new(3), &DeviceFrame::new(surface, &[], &[])); // lift
+        input.sample(Tick::new(3), &DeviceFrame::new(surface, &[], &[]));
         assert_eq!(input.swipe(), Some(SwipeDir::Right));
     }
 
@@ -406,7 +394,6 @@ mod tests {
                 .for_each(|(i, frame)| input.sample(Tick::new(i as u64 + 1), frame));
             input
         };
-        // Two independent runs of the same stream are equal in their entirety.
         assert_eq!(drive(), drive());
     }
 

@@ -68,12 +68,12 @@ mod tests {
     /// before the window (tick 2). Last-write-wins gives each entity one record.
     fn column() -> TrackedColumn<i32> {
         let mut col = TrackedColumn::new();
-        col.insert(e(1), 10, 5); // Added @5
+        col.insert(e(1), 10, 5);
         col.insert(e(2), 20, 1);
-        col.insert(e(2), 21, 5); // Changed @5 (value 21)
+        col.insert(e(2), 21, 5);
         col.insert(e(3), 30, 1);
-        col.remove(e(3), 5); // Removed @5 (value gone)
-        col.insert(e(4), 40, 2); // Added @2 (before the window)
+        col.remove(e(3), 5);
+        col.insert(e(4), 40, 2);
         col
     }
 
@@ -83,7 +83,6 @@ mod tests {
         let got: Vec<(u64, i32)> = Query::changed_since(&col, 5)
             .map(|(id, v)| (id.raw(), *v))
             .collect();
-        // e1 Added + e2 Changed kept; e3 Removed dropped at value lookup; e4 too old.
         assert_eq!(got, vec![(1, 10), (2, 21)]);
     }
 
@@ -93,7 +92,6 @@ mod tests {
         let got: Vec<(u64, i32)> = Query::added_since(&col, 5)
             .map(|(id, v)| (id.raw(), *v))
             .collect();
-        // e1 Added@5 kept; e2 Changed and e3 Removed rejected by kind; e4 too old.
         assert_eq!(got, vec![(1, 10)]);
     }
 
@@ -101,9 +99,8 @@ mod tests {
     fn removed_since_yields_only_removals_in_the_window() {
         let mut col = column();
         col.insert(e(5), 50, 1);
-        col.remove(e(5), 2); // Removed @2 — right kind, before the window
+        col.remove(e(5), 2);
         let got: Vec<u64> = Query::removed_since(&col, 5).map(|id| id.raw()).collect();
-        // e3 Removed@5 kept; e5 Removed@2 rejected by tick; others rejected by kind.
         assert_eq!(got, vec![3]);
     }
 }

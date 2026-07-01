@@ -270,8 +270,6 @@ pub(crate) fn convert(
     let cap = options.max_triangles_per_terrain_draw();
     let budget = options.pixel_budget();
     let cues = options.depth_cues();
-    // Resolve the real scene directional light once per frame (its direction,
-    // colour, and intensity drive the per-triangle shading below).
     let light = scene_light(packet, &cues);
 
     let (mut frame, _spent) = packet.draws().iter().fold(
@@ -379,7 +377,6 @@ fn convert_draw(
         },
     );
 
-    // Classify by total on-screen coverage.
     let coverage: f32 = acc.candidates.iter().map(|c| c.area).sum();
     let importance = classify(coverage, screen_px2);
     let is_critical = importance == CanvasFallbackImportance::CriticalCoverage;
@@ -480,8 +477,8 @@ fn project_triangle_cued(
     // Flat per-triangle cue inputs (shared by every clipped piece).
     let normal = face_normal_world(&model, world);
     let brightness = lighting_brightness(normal, light.dir, light.intensity, cues);
-    // Hemisphere ambient (sky/ground by the face normal) — replaces the old flat
-    // ambient grey, shared by every clipped piece of this triangle.
+    // Hemisphere ambient (sky/ground by the face normal), shared by every
+    // clipped piece of this triangle.
     let ambient = hemisphere_ambient(normal, cues);
     let mean_model = [
         (model[0][0] + model[1][0] + model[2][0]) / 3.0,

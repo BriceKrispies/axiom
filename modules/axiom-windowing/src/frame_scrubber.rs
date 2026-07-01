@@ -226,7 +226,7 @@ impl FrameScrubber {
         batches: &[Batch],
     ) {
         // Skip recording while paused (game unfocused): the frame still presents
-        // live, but the timeline does not grow. `then` keeps this branchless.
+        // live, but the timeline does not grow.
         self.shared.active.get().then(|| {
             let render_bytes = encode(clear, lights, light_vp, batches);
             // Capture the app's sim state for this frame (empty when not forkable);
@@ -330,8 +330,6 @@ fn selected_present(s: &Shared) -> Option<PresentArgs> {
     let capture = recorder.frame(selected).ok()?;
     decode(capture.render_bytes())
 }
-
-// ----- the interface-driven panel: content + DOM paint -----
 
 /// Push this tick's recorder stats into the interface panel (header / rows /
 /// actions), then paint the panel's neutral draw list into the DOM.
@@ -535,8 +533,6 @@ fn inject_style(document: &web_sys::Document, body: &Element) {
     });
 }
 
-// ----- interaction: button clicks + drag + focus gating -----
-
 /// Install one delegated click listener on the actions container: it reads the
 /// clicked button's `data-action` id and dispatches it to the recorder. Fork uses
 /// the app's `restore` hook (held in the closure).
@@ -732,8 +728,6 @@ fn add_toggle<T: AsRef<EventTarget>>(target: &T, event: &str, s: &Shared, value:
     cb.forget();
 }
 
-// ----- present-args (de)serialization: opaque to the recorder, symmetric here -----
-
 /// Encode the present arguments into the recorder's opaque render bytes.
 fn encode(clear: [f32; 4], lights: &[Light], light_vp: [f32; 16], batches: &[Batch]) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -809,8 +803,6 @@ fn put_u8(bytes: &mut Vec<u8>, value: u8) {
     bytes.push(value);
 }
 
-// ----- 2D present (clear + Draw2dList) → opaque recorder bytes -----
-//
 // This is a *one-way* read of the host's 2D draw contract into deterministic
 // bytes: it drives the recorder's memory/hash/eviction bookkeeping only — the
 // frame replayed while scrubbing comes from the clone store, not from decoding

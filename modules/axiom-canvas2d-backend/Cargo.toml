@@ -7,31 +7,15 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. The rasterizer core is browser-free and wasm-clean; the real
-# web-sys arm never enters this rlib's native build.
 crate-type = ["rlib"]
 
 [dependencies]
-# An *engine module* (kind = "engine-module", allowed_modules = []): it composes
-# NO other module. It builds on the host layer's deterministic presentation
-# boundary (HostPresentationRequest) and consumes the backend-neutral
-# host::FramePacket, returning a host::FrameSubmissionReport.
 axiom-host = { path = "../../crates/axiom-host" }
-
-# The neutral 2D draw contract (host::Draw2dList) carries math's Mat3 / Vec2 (the
-# per-command baked transform and rect corners); the software Draw2dList consumer
-# names and uses them directly. `math` is a layer below `host`, so depending on
-# it is legal under the Module Law and is declared in allowed_layers.
 axiom-math = { path = "../../crates/axiom-math" }
 
 [dev-dependencies]
-# Tests construct a HostPresentationRequest via the host API, which takes a
-# kernel handle source. Test-only, so it never counts as a non-test dependency.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
-# The live presentation arm: real web-sys, pulled in ONLY for wasm32, so native
-# `cargo test`/coverage never compiles it and the facade stays browser-free.
-# Sanctioned platform-facing module (Module Law #9 / PLATFORM_FACING_MODULES).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [

@@ -14,9 +14,6 @@
 //! two independent [`Authority`] instances fed the identical ordered intent stream
 //! produce byte-identical `ServerSnapshotFor` sequences (proven in `tests`).
 //!
-//! Branchless (app/tool tier still holds the Branchless Law's gate), so every step
-//! is a data transform over combinators — no `if`/`match`/`for`/`while`.
-//!
 //! ## Why the umbrella, not `axiom-game-runtime::GameRuntime`
 //! The proven headless driver `GameRuntime`/`GameBridge` lives in an **app**
 //! (`apps/axiom-game-runtime`), and the Module Law forbids a tool depending on an
@@ -269,7 +266,7 @@ fn initial_x(seat: u64) -> f32 {
 }
 
 /// Decode a `[dx, dy]` move from an intent payload of two little-endian `f32`s; a
-/// short or absent payload is no movement. Branchless via slice `get` + `try_into`.
+/// short or absent payload is no movement.
 fn unpack_delta(payload: &[u8]) -> [f32; 2] {
     [read_f32(payload, 0), read_f32(payload, 4)]
 }

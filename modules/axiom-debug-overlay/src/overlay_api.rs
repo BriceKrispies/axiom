@@ -43,8 +43,6 @@ impl DebugOverlayApi {
         }
     }
 
-    // --- queries ------------------------------------------------------------
-
     pub fn is_visible(&self) -> bool {
         self.state.borrow().is_visible()
     }
@@ -78,8 +76,6 @@ impl DebugOverlayApi {
     pub fn recent_results(&self) -> Vec<(bool, String, String)> {
         self.state.borrow().recent_results()
     }
-
-    // --- direct ops ---------------------------------------------------------
 
     pub fn toggle(&self) {
         self.state.borrow_mut().toggle();
@@ -138,8 +134,6 @@ impl DebugOverlayApi {
         self.repaint();
     }
 
-    // --- keyboard -----------------------------------------------------------
-
     /// Classify and apply a physical-Backquote chord; returns whether it was
     /// handled (so the caller `preventDefault`s only handled chords). The generic
     /// "does this chord route as a global hotkey" lives in [`InterfaceInputEvent`];
@@ -165,8 +159,6 @@ impl DebugOverlayApi {
         self.repaint();
         action.is_some()
     }
-
-    // --- console keys -------------------------------------------------------
 
     /// Submit a raw console line through the overlay's command table (parse →
     /// dispatch → record → echo).
@@ -200,8 +192,6 @@ impl DebugOverlayApi {
 // block exceeds the engine's per-impl item budget (a structural split, not a
 // behavioural one — the surface is unchanged).
 impl DebugOverlayApi {
-    // --- diagnostics in (primitives only) -----------------------------------
-
     /// Live per-frame counters. Timing is integer-encoded: `fps_milli` is
     /// fps × 1000, `frame_time_micros` is the frame time in microseconds.
     pub fn set_frame(
@@ -281,8 +271,6 @@ impl DebugOverlayApi {
         self.repaint();
     }
 
-    // --- DOM (wasm32 only) --------------------------------------------------
-
     /// Mount the overlay into `parent` and install the keyboard listeners.
     /// Idempotent — a second call while mounted does nothing.
     #[cfg(target_arch = "wasm32")]
@@ -310,8 +298,6 @@ impl DebugOverlayApi {
             .into_iter()
             .for_each(crate::dom_binding::Binding::unmount);
     }
-
-    // --- repaint (cfg-split: native no-op, wasm DOM sync) -------------------
 
     #[cfg(target_arch = "wasm32")]
     fn repaint(&self) {

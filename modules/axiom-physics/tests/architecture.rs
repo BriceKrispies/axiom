@@ -1,5 +1,4 @@
 //! Architecture-boundary tests for the `axiom-physics` engine module.
-//!
 //! The workspace `xtask` checker enforces the global Module Law (allowed
 //! layers, no module-to-module deps, single facade). These per-module tests are
 //! the second line of defence: they scan this crate's `src/` tree for forbidden
@@ -9,10 +8,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-// Facade-only imports for the determinism/ordering checks below. Like
-// `tests/integration.rs`, these tests drive the module solely through its public
-// facade plus the regular kernel/math/runtime value types that cross it; the
-// rich return types (snapshot, material) stay sealed and are never named.
 use axiom_kernel::{FrameIndex, Meters, Ratio, Tick};
 use axiom_math::{Transform, Vec3};
 use axiom_physics::PhysicsApi;
@@ -144,7 +139,6 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest + facade ----------
 
 #[test]
 fn module_toml_exists_and_is_isolated() {
@@ -162,8 +156,6 @@ fn module_toml_exists_and_is_isolated() {
 
 #[test]
 fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
-    // Module Law #8: exactly one behavioral facade (PhysicsApi), plus the
-    // identity vocabulary (the handle types). All other public exports forbidden.
     let lib = read(&src_dir().join("lib.rs"));
     let pub_uses: Vec<&str> = lib
         .lines()
@@ -190,7 +182,6 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
     );
 }
 
-// ---------- legal layer imports only ----------
 
 #[test]
 fn physics_imports_only_legal_layers() {
@@ -274,7 +265,6 @@ fn no_layer_imports_axiom_physics() {
     }
 }
 
-// ---------- source hygiene: platform / determinism / foreign concepts ----------
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -446,7 +436,6 @@ fn every_source_module_is_declared_in_lib_rs() {
     );
 }
 
-// ---------- facade-level determinism / ordering proofs ----------
 
 fn ratio(v: f32) -> Ratio {
     Ratio::new(v).unwrap()

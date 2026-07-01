@@ -1,14 +1,14 @@
-//! Sim-owned session inventory. Audit: GW-E14/E15, SV-0.4. Scaffold (M1).
+//! Sim-owned session inventory.
 use std::collections::HashMap;
 
-/// A stack of one item type. Audit: item_id + count.
+/// A stack of one item type.
 #[derive(Debug, Clone, Copy)]
 pub struct ItemStack {
     pub item: u32,
     pub count: u32,
 }
 
-/// Sim-authoritative inventory exposed to presentation. Audit: GW-E14.
+/// Sim-authoritative inventory exposed to presentation.
 #[derive(Debug, Default)]
 pub struct Inventory {
     stacks: HashMap<u32, u32>,
