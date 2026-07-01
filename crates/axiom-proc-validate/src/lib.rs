@@ -22,13 +22,17 @@
 //! canonical bytes + digest).
 //!
 //! ## Public surface
-//! [`ProcValidateApi`] (facade), [`Constraint`] (the declarative checks), and
-//! [`ValidationReport`] (the deterministic verdict).
+//! [`ProcValidateApi`] (facade), [`Constraint`] (the declarative checks),
+//! [`ValidationReport`] (the deterministic verdict), and [`sample_until_valid`]
+//! (the generative counterpart: bounded, branchless rejection sampling — draw
+//! candidates until one validates, else keep the last).
 
 mod constraint;
 mod report;
+mod sampling;
 mod validate_api;
 
 pub use constraint::Constraint;
 pub use report::ValidationReport;
+pub use sampling::sample_until_valid;
 pub use validate_api::ProcValidateApi;

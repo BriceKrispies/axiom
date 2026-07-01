@@ -22,7 +22,7 @@ word-level fixes, returning a new Artifact (built via Artifact::from_words). It
 owns no domain rules and never loops to a fixpoint.
 """
 
-introduced_capabilities = ["ProcValidateApi", "ValidationReport", "Constraint"]
+introduced_capabilities = ["ProcValidateApi", "ValidationReport", "Constraint", "sample_until_valid"]
 consumed_capabilities = ["Artifact", "StableHash", "BinaryWriter"]
 
 # Proof the dependencies are genuine: ProcValidateApi validates and rebuilds a
