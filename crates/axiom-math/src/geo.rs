@@ -1,13 +1,15 @@
 //! Spherical / geodesic math over unit directions.
 //!
 //! Latitude/longitude, great-circle (angular) distance, an east/north tangent
-//! frame, and spherical linear interpolation — the substrate a planetary /
-//! spherical-world generator builds on. Every direction is a [`crate::Vec3`]
-//! with `y` as the pole axis. Angles are dimensioned as [`Radians`] and the
-//! interpolation parameter as a [`Ratio`], so a caller cannot silently hand a
-//! length where an angle belongs, nor a raw magnitude where a `[0, 1]` blend
-//! belongs. Pure and branchless; the pole and near-parallel degeneracies are
-//! resolved by table selection, not control flow.
+//! frame, spherical linear interpolation, and an area-preserving uniform
+//! sphere-point sampler — the substrate a planetary / spherical-world generator
+//! builds on. Every direction is a [`crate::Vec3`]; the lat/lon frame uses `y`
+//! as the pole axis, while [`unit_vec3`] samples about `z` (the axis is free for
+//! a uniform direction). Angles are dimensioned as [`Radians`] and the
+//! interpolation / sampling parameters as [`Ratio`], so a caller cannot silently
+//! hand a length where an angle belongs, nor a raw magnitude where a `[0, 1]`
+//! blend or draw belongs. Pure and branchless; the pole and near-parallel
+//! degeneracies are resolved by table selection, not control flow.
 
 use axiom_kernel::{Radians, Ratio};
 
@@ -94,6 +96,21 @@ pub fn slerp(a: Vec3, b: Vec3, t: Ratio) -> Vec3 {
 
     let parallel = sin_theta.abs() < 1.0e-5;
     [arced, blended][usize::from(parallel)]
+}
+
+/// A uniformly-distributed point on the unit sphere from two uniform draws.
+///
+/// `u` selects the height `z = 2·u − 1` (uniform in `[-1, 1]`) and `v` selects the
+/// azimuth `θ = 2π·v` about `z`; the ring radius is `r = √(max(0, 1 − z²))`. Because
+/// `z` is uniform in height (Archimedes' hat-box theorem), the returned direction is
+/// *area-preserving* — uniform over the sphere's surface — with no rejection loop. The
+/// `max(0, …)` only absorbs a sub-ULP negative at the poles (`z = ±1`), where the ring
+/// collapses to the axis point `(0, 0, ±1)`. Pure and branchless.
+pub fn unit_vec3(u: Ratio, v: Ratio) -> Vec3 {
+    let z = 2.0 * u.get() - 1.0;
+    let theta = core::f32::consts::TAU * v.get();
+    let r = (1.0 - z * z).max(0.0).sqrt();
+    Vec3::new(r * theta.cos(), r * theta.sin(), z)
 }
 
 #[cfg(test)]
@@ -234,5 +251,40 @@ mod tests {
         let a = Vec3::new(0.2, 0.9, -0.1);
         let b = Vec3::new(-0.5, 0.3, 0.8);
         assert_eq!(slerp(a, b, ratio(0.37)), slerp(a, b, ratio(0.37)));
+    }
+
+    #[test]
+    fn unit_vec3_is_unit_length_across_the_square() {
+        // Sweep the (u, v) unit square, including the poles u -> 0 and u -> 1 and
+        // the azimuth wrap v -> 0 / v -> 1. Every draw must land on the unit sphere.
+        let samples = [0.0f32, 0.001, 0.25, 0.5, 0.75, 0.999, 1.0];
+        for &uu in &samples {
+            for &vv in &samples {
+                let p = unit_vec3(ratio(uu), ratio(vv));
+                assert!(approx(p.length(), 1.0, 1.0e-4), "must be unit length on the sphere");
+            }
+        }
+    }
+
+    #[test]
+    fn unit_vec3_poles_are_the_axis() {
+        // u = 1 -> z = +1, ring radius 0 -> the +Z pole regardless of azimuth;
+        // u = 0 -> z = -1 -> the -Z pole. This exercises the `max(0, 1 - z^2)`
+        // collapse at both extremes.
+        assert!(vec_approx(unit_vec3(ratio(1.0), ratio(0.3)), Vec3::new(0.0, 0.0, 1.0), 1.0e-5));
+        assert!(vec_approx(unit_vec3(ratio(0.0), ratio(0.7)), Vec3::new(0.0, 0.0, -1.0), 1.0e-5));
+    }
+
+    #[test]
+    fn unit_vec3_maps_draws_to_height_and_azimuth() {
+        // The equator (u = 0.5 -> z = 0) at azimuth 0 (v = 0) is +X; a quarter turn
+        // (v = 0.25 -> θ = π/2) is +Y. Ties the two uniforms to z and θ concretely.
+        assert!(vec_approx(unit_vec3(ratio(0.5), ratio(0.0)), Vec3::new(1.0, 0.0, 0.0), 1.0e-5));
+        assert!(vec_approx(unit_vec3(ratio(0.5), ratio(0.25)), Vec3::new(0.0, 1.0, 0.0), 1.0e-5));
+    }
+
+    #[test]
+    fn unit_vec3_is_deterministic() {
+        assert_eq!(unit_vec3(ratio(0.31), ratio(0.62)), unit_vec3(ratio(0.31), ratio(0.62)));
     }
 }

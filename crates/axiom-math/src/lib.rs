@@ -11,7 +11,7 @@
 //! public type per module" is [`mod@geo`], a small set of spherical / geodesic
 //! *free functions* over unit directions ([`latitude`], [`longitude`],
 //! [`great_circle_distance`], [`tangent_basis`], [`unit_dir_from_lat_lon`],
-//! [`slerp`]): they are pure transforms of `Vec3` directions and kernel
+//! [`slerp`], [`unit_vec3`]): they are pure transforms of `Vec3` directions and kernel
 //! angle/ratio quantities, with no type of their own to hang them on, so callers
 //! name them directly (`axiom_math::latitude(dir)`). Every internal module lives
 //! behind a private `mod`; the curated public set is pinned by
@@ -103,3 +103,4 @@ pub use geo::longitude;
 pub use geo::slerp;
 pub use geo::tangent_basis;
 pub use geo::unit_dir_from_lat_lon;
+pub use geo::unit_vec3;

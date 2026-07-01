@@ -17,6 +17,7 @@ allowed_layers = [
     "host",
     "layout",
     "space",
+    "entropy",
     "proc",
     "runtime",
     "introspect",

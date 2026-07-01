@@ -79,8 +79,9 @@ impl Stage for FitLandCoverageStage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::growth::distributions;
     use crate::growth::model_planet::{Icosphere, RegionGraph};
-    use crate::growth::rng::Rng;
+    use crate::growth::pipeline::worldgen_stream;
     use axiom_math::Vec3;
 
     fn globe_with_elev(elev: Vec<f32>) -> PlanetGlobe {
@@ -110,8 +111,10 @@ mod tests {
     #[test]
     fn hits_targets_within_five_percent() {
         // 1000 random elevations.
-        let mut rng = Rng::seeded(42);
-        let elev: Vec<f32> = (0..1000).map(|_| rng.next_range(-2.0, 2.0)).collect();
+        let mut rng = worldgen_stream(42);
+        let elev: Vec<f32> = (0..1000)
+            .map(|_| distributions::range(&mut rng, -2.0, 2.0))
+            .collect();
         for &target in &[0.1f32, 0.3, 0.5, 0.7, 0.9] {
             let result = run_target(elev.clone(), target);
             assert!(

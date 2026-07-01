@@ -180,7 +180,7 @@ pub const REQUIREMENTS: &[Requirement] = &[
         "PRIM-rng",
         "determinism",
         Implemented,
-        "rng::Rng float sampling",
+        "axiom_entropy::EntropyStream + distributions float sampling",
     ),
     r("PRIM-noise", "procgen", Implemented, "noise::Fbm"),
     r("PRIM-geo", "procgen", Implemented, "axiom_math:: spherical math"),

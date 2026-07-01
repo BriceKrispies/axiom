@@ -13,12 +13,12 @@
 use axiom_math::Vec3;
 
 // --- foundation (shared types + determinism) ---
+pub mod distributions;
 pub mod ids;
 pub mod model_planet;
 pub mod model_world;
 pub mod pipeline;
 pub mod requirements;
-pub mod rng;
 
 // --- generation primitives ---
 pub mod noise;
@@ -89,7 +89,6 @@ use crate::growth::model_planet::{PlanetGlobe, PlanetSurfaceAtlas, SurfaceSample
 use crate::growth::model_world::{Diff, GameWorldLocalMap};
 use crate::growth::pipeline::{GenContext, StageRegistry, DEFAULT_GLOBE};
 use crate::growth::presets::PlanetPreset;
-use crate::growth::rng::Rng;
 use crate::growth::seed::WorldSeed;
 
 /// A Growth session: owns the seed, genome, overworld atlas, and (after entering
@@ -115,8 +114,8 @@ impl Growth {
     /// Audit: OW vision, OW-4.4 (store seed+genome), OW-E1 (build atlas).
     pub fn generate(seed_str: &str, preset: PlanetPreset, site_target: u32) -> Self {
         let seed = WorldSeed::from_str_seed(seed_str);
-        let mut rng = Rng::seeded(seed.value);
-        let genome = presets::sample_genome(preset, &mut rng);
+        let mut stream = pipeline::worldgen_stream(seed.value);
+        let genome = presets::sample_genome(preset, &mut stream);
 
         let mut ctx = GenContext::new(seed.value);
         ctx.planet_radius_m = genome.radius_m;

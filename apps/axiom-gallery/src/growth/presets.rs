@@ -5,10 +5,12 @@
 //! `sample_genome` draws every knob from the preset's distribution, derives the
 //! on-demand values (gravity, insolation, surface temp), and validates them
 //! against the constraint band — resampling up to `MAX_ATTEMPTS` times. All
-//! draws come from `crate::growth::rng::Rng`, so the same seed reproduces the same
-//! genome bit-for-bit every run.
+//! draws come from an `axiom_entropy::EntropyStream` (via `crate::growth::distributions`),
+//! so the same seed reproduces the same genome bit-for-bit every run.
+use axiom_entropy::EntropyStream;
+
+use crate::growth::distributions;
 use crate::growth::genome::{MaterialWeights, PlanetGenome};
-use crate::growth::rng::Rng;
 
 /// Audit: planet_presets.xml earthlike `max_attempts="32"`.
 const MAX_ATTEMPTS: u32 = 32;
@@ -97,15 +99,15 @@ fn surface_temp_k(g: &PlanetGenome) -> f32 {
     g.equilibrium_temperature_k() + SURFACE_TEMP_OFFSET_K
 }
 
-/// Sample a uniform value in `[a, b]` (inclusive-ish; `next_range` is `[a,b)`).
-fn uniform(rng: &mut Rng, a: f32, b: f32) -> f32 {
-    rng.next_range(a, b)
+/// Sample a uniform value in `[a, b)`.
+fn uniform(stream: &mut EntropyStream, a: f32, b: f32) -> f32 {
+    distributions::range(stream, a, b)
 }
 
 /// Sample a normal value `N(mean, std)` clamped to `[lo, hi]`. Audit: XML Normal
 /// dists carry clamp bounds in `c`/`d` (S_eff_target, obliquity).
-fn normal_clamped(rng: &mut Rng, mean: f32, std: f32, lo: f32, hi: f32) -> f32 {
-    (mean + std * rng.next_normal()).clamp(lo, hi)
+fn normal_clamped(stream: &mut EntropyStream, mean: f32, std: f32, lo: f32, hi: f32) -> f32 {
+    (mean + std * distributions::normal(stream)).clamp(lo, hi)
 }
 
 /// Derive the semi-major axis (m) that yields a given insolation `S_eff` for a
@@ -156,7 +158,7 @@ fn constraints(preset: PlanetPreset) -> Constraints {
 /// Draw one candidate genome from the preset's distributions (no validation).
 /// ocean_world and dry override only the knobs they declare in XML; the rest
 /// fall back to the earthlike-shaped baseline so the genome is always complete.
-fn sample_once(preset: PlanetPreset, rng: &mut Rng) -> PlanetGenome {
+fn sample_once(preset: PlanetPreset, rng: &mut EntropyStream) -> PlanetGenome {
     // Shared earthlike-shaped baseline knobs (all presets inherit these unless
     // they override below). material_weights is rng-free; l_star is the first
     // rng draw, so listing it first in the literal preserves the draw order.
@@ -207,7 +209,7 @@ fn sample_once(preset: PlanetPreset, rng: &mut Rng) -> PlanetGenome {
 /// Sample a genome from a preset, validating against the preset's constraints and
 /// resampling up to `MAX_ATTEMPTS` times. Returns the last attempt if none pass.
 /// Audit: GEN-preset, planet_presets.xml constraints + max_attempts=32.
-pub fn sample_genome(preset: PlanetPreset, rng: &mut Rng) -> PlanetGenome {
+pub fn sample_genome(preset: PlanetPreset, rng: &mut EntropyStream) -> PlanetGenome {
     let cons = constraints(preset);
     let mut last = sample_once(preset, rng);
     if cons.passes(&last) {
@@ -228,7 +230,8 @@ mod tests {
     use crate::growth::seed::WorldSeed;
 
     fn genome_for(preset: PlanetPreset, seed: &str) -> PlanetGenome {
-        let mut rng = Rng::seeded(WorldSeed::from_str_seed(seed).value);
+        let mut rng =
+            crate::growth::pipeline::worldgen_stream(WorldSeed::from_str_seed(seed).value);
         sample_genome(preset, &mut rng)
     }
 

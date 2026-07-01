@@ -1,13 +1,14 @@
 //! `tectonic_plates` stage: spherical-Voronoi partition of regions into plates.
 //! Audit: worldgen `tectonic_plates`; OW deterministic overworld.
 //!
-//! Picks `ctx.plate_count` plate seed directions (deterministic unit vectors via
-//! [`Rng`]) and assigns every region to the nearest seed by maximum dot product
-//! against the region site direction. Fills `region_plate`.
+//! Picks `ctx.plate_count` plate seed directions (deterministic uniform unit
+//! vectors via `axiom_math::unit_vec3`) and assigns every region to the nearest
+//! seed by maximum dot product against the region site direction. Fills
+//! `region_plate`.
 
+use crate::growth::distributions;
 use crate::growth::model_planet::PlanetGlobe;
-use crate::growth::pipeline::{GenContext, Stage};
-use crate::growth::rng::Rng;
+use crate::growth::pipeline::{worldgen_stream, GenContext, Stage};
 
 use axiom_math::Vec3;
 
@@ -20,12 +21,12 @@ impl Stage for TectonicPlatesStage {
 
     fn run(&self, globe: &mut PlanetGlobe, ctx: &mut GenContext) {
         let plate_count = ctx.plate_count.max(1) as usize;
-        let mut rng = Rng::seeded(ctx.seed).fork(0x_71A7_E5ED);
+        let mut rng = worldgen_stream(ctx.seed).fork(0x_71A7_E5ED);
 
         // Deterministic plate seed directions on the sphere.
         let mut seeds: Vec<Vec3> = Vec::with_capacity(plate_count);
         for _ in 0..plate_count {
-            seeds.push(rng.next_unit_vec3());
+            seeds.push(distributions::unit_vec3(&mut rng));
         }
 
         let region_count = globe.region_count();

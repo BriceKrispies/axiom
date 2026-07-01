@@ -289,6 +289,7 @@ fn lib_exports_exactly_math_api() {
         "pub use geo::slerp;",
         "pub use geo::tangent_basis;",
         "pub use geo::unit_dir_from_lat_lon;",
+        "pub use geo::unit_vec3;",
     ];
     expected.sort();
 

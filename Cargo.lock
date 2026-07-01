@@ -249,6 +249,7 @@ dependencies = [
  "axiom-agent-harness",
  "axiom-canvas2d-backend",
  "axiom-debug-overlay",
+ "axiom-entropy",
  "axiom-gpu-backend",
  "axiom-host",
  "axiom-input",
