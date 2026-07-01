@@ -25,31 +25,41 @@ pub(crate) struct LiveCanvasBinding {
 
 impl LiveCanvasBinding {
     /// Acquire the canvas's 2D context, switch its backing store to the internal
-    /// `fb_width`×`fb_height` resolution, and CSS-scale it to the
-    /// `display_width`×`display_height` box with pixelated upscaling. Errors (no
-    /// context, wrong type) surface as `JsValue` so the caller can fall through
-    /// to "unsupported".
+    /// `fb_width`×`fb_height` resolution, and CSS-scale it to `display_width` with
+    /// pixelated upscaling and a **proportional** height. Errors (no context, wrong
+    /// type) surface as `JsValue` so the caller can fall through to "unsupported".
+    ///
+    /// The display height is `auto`, NOT a fixed pixel value: the canvas is a
+    /// replaced element, so `height: auto` derives the display height from the
+    /// backing store's aspect ratio. Because the backing store now preserves the
+    /// surface aspect (see [`CanvasQualityPreset::framebuffer_dims`]), the on-screen
+    /// box tracks the surface aspect exactly — matching the GPU canvas, which is
+    /// styled the same responsive way. Pinning a fixed `height` px here was the bug
+    /// that let a width-constrained canvas (e.g. `width:960px` clamped to the
+    /// column by `max-width:100%`) keep its full height and so distort the image.
+    ///
+    /// [`CanvasQualityPreset::framebuffer_dims`]: crate::canvas_policy::CanvasQualityPreset::framebuffer_dims
     pub(crate) fn attach(
         canvas: &HtmlCanvasElement,
         fb_width: u32,
         fb_height: u32,
         display_width: u32,
-        display_height: u32,
     ) -> Result<Self, JsValue> {
         let ctx = canvas
             .get_context("2d")?
             .ok_or_else(|| JsValue::from_str("no 2d context"))?
             .dyn_into::<CanvasRenderingContext2d>()?;
 
-        // Backing store = low internal resolution; CSS box = display size, scaled
-        // with nearest-neighbour ("pixelated") for a crisp low-poly look.
+        // Backing store = low internal resolution; CSS box = display width with a
+        // proportional (aspect-preserving) height, scaled nearest-neighbour
+        // ("pixelated") for a crisp low-poly look.
         canvas.set_width(fb_width);
         canvas.set_height(fb_height);
         // `style()` lives on HtmlElement; a canvas *is* one.
         let style = canvas.unchecked_ref::<HtmlElement>().style();
         let _ = style.set_property("image-rendering", "pixelated");
         let _ = style.set_property("width", &format!("{display_width}px"));
-        let _ = style.set_property("height", &format!("{display_height}px"));
+        let _ = style.set_property("height", "auto");
         // putImageData ignores smoothing, but keep any future drawImage crisp too.
         ctx.set_image_smoothing_enabled(false);
 
