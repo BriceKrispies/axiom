@@ -285,6 +285,12 @@ impl GpuBackendApi {
     /// (texture + sampler) is built per material. wasm32 only; on success later
     /// [`Self::present_frame`] calls draw real pixels. On failure the binding
     /// stays absent (not ready).
+    ///
+    /// `preference` forces which graphics API is bound (see
+    /// [`crate::live_gpu_binding::LiveGpuBinding::initialize`]): `None` auto-probes
+    /// WebGPU→WebGL2; `Some(BackendKind::GpuPrimary)` binds WebGPU only (erroring if
+    /// absent); `Some(BackendKind::GpuFallback)` binds WebGL2 only. This is what
+    /// lets a caller render the same scene through each backend side by side.
     #[cfg(target_arch = "wasm32")]
     pub async fn initialize(
         &mut self,
@@ -292,6 +298,7 @@ impl GpuBackendApi {
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
+        preference: Option<axiom_host::BackendKind>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let binding = crate::live_gpu_binding::LiveGpuBinding::initialize(
             canvas,
@@ -303,6 +310,7 @@ impl GpuBackendApi {
             materials,
             max_instances,
             self.shadow_size,
+            preference,
         )
         .await?;
         self.live = Some(binding);
