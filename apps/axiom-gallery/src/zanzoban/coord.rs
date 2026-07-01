@@ -7,7 +7,7 @@
 //! edge produces a representable out-of-bounds coordinate (`-1`, or `width`)
 //! that movement and validation can reject, instead of underflowing.
 
-use crate::roomed_puzzle::direction::Direction;
+use crate::zanzoban::direction::Direction;
 
 /// The standard room size every authored level uses today (Level 001 is 10×10).
 /// The engine supports any size up to [`MAX_DIMENSION`]; these are the canonical

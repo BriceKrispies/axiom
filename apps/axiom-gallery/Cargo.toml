@@ -1,6 +1,6 @@
 [package]
 name = "axiom-gallery"
-description = "Axiom demo gallery: every browser/WASM demo (rotating-cube, netplay, doom, stress-cubes, growth, roomed-puzzle, quintet, physics-crucible, debug-overlay harness) merged into ONE composition-leaf app crate. Each demo is a module under `src/<demo>/`; the wasm bundle exports one `<demo>_start` entry per demo and the gallery shell boots whichever the user picked. Native agent drivers (doom, growth) and the physics report runner survive as explicit, feature-gated binaries."
+description = "Axiom demo gallery: every browser/WASM demo (rotating-cube, netplay, doom, stress-cubes, growth, zanzoban, quintet, physics-crucible, debug-overlay harness) merged into ONE composition-leaf app crate. Each demo is a module under `src/<demo>/`; the wasm bundle exports one `<demo>_start` entry per demo and the gallery shell boots whichever the user picked. Native agent drivers (doom, growth) and the physics report runner survive as explicit, feature-gated binaries."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -117,7 +117,7 @@ axiom-proc-validate = { path = "../../crates/axiom-proc-validate" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 # The physics module under test (physics-crucible), composed only through PhysicsApi.
 axiom-physics = { path = "../../modules/axiom-physics" }
-# The engine input module (roomed-puzzle touch swipes).
+# The engine input module (zanzoban touch swipes).
 axiom-input = { path = "../../modules/axiom-input" }
 # The residency-ring module (growth's chunk streamer): owns which chunk coords
 # are resident + the deterministic load/unload delta as the player moves. The
@@ -127,7 +127,7 @@ axiom-streaming = { path = "../../modules/axiom-streaming" }
 # grid config + a height callback in, positions/normals/indices out. The app
 # decorates the neutral mesh with its colour/vista/biome content.
 axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
-# Hand-editable level/data format used by several demos' codecs (roomed-puzzle,
+# Hand-editable level/data format used by several demos' codecs (zanzoban,
 # rotating-cube's data-package test) and the growth agent's tag/directive TOML.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

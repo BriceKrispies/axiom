@@ -1,4 +1,4 @@
-# Roomed Puzzle
+# Zanzoban
 
 A deterministic, top-down **2D grid puzzle** built as an Axiom app. A solid
 player block walks a room one cell at a time. Press **q** to freeze the current
@@ -65,7 +65,7 @@ The whole game core, validation, codec, editor, and the 17 required behaviours
 run on native:
 
 ```sh
-cargo test -p axiom-roomed-puzzle
+cargo test -p axiom-zanzoban
 ```
 
 ### In the browser (the editor + playtest surface)
@@ -76,10 +76,10 @@ the `web/` directory and open it:
 
 ```sh
 # from the repo root
-wasm-pack build apps/axiom-roomed-puzzle --target web --out-dir web/pkg
+wasm-pack build apps/axiom-zanzoban --target web --out-dir web/pkg
 
 # serve the app directory over http://localhost (any static server works)
-python -m http.server 8080 --directory apps/axiom-roomed-puzzle/web
+python -m http.server 8080 --directory apps/axiom-zanzoban/web
 # open http://localhost:8080/
 ```
 

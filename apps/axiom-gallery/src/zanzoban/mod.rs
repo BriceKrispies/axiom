@@ -1,4 +1,4 @@
-//! # Roomed Puzzle — a deterministic top-down 2D grid puzzle (Axiom app)
+//! # Zanzoban — a deterministic top-down 2D grid puzzle (Axiom app)
 //!
 //! A solid player block walks a small room one cell at a time. Pressing **q**
 //! freezes the current life into a **ghost** that replays the recorded path on a
@@ -55,7 +55,7 @@ mod web;
 /// The built-in first level, embedded so the app (and tests) need no filesystem.
 pub const LEVEL_001_TOML: &str = include_str!("levels/001-button-door.toml");
 
-pub use app::{Mode, RoomedPuzzleApp};
+pub use app::{Mode, ZanzobanApp};
 pub use direction::Direction;
 pub use game_command::{PuzzleCommand, PuzzleStepResult, StepKind};
 pub use game_state::PuzzleGameState;

@@ -3,8 +3,8 @@
 //! [`TileKind`] is the *editor palette* vocabulary: the six kinds a cell can be
 //! painted as. It is deliberately group-free — the button/door wiring group is a
 //! separate field the editor tracks alongside the painted kind (see
-//! [`crate::roomed_puzzle::group_id`]). The runtime grid uses a richer cell type that carries
-//! the group ([`crate::roomed_puzzle::game_state::Cell`]); `TileKind` is the flat,
+//! [`crate::zanzoban::group_id`]). The runtime grid uses a richer cell type that carries
+//! the group ([`crate::zanzoban::game_state::Cell`]); `TileKind` is the flat,
 //! human-facing menu.
 
 /// A static tile/object kind that can occupy a cell.
@@ -12,7 +12,7 @@
 /// Exactly one kind occupies a cell. `Floor` is the empty default; `Wall`,
 /// `Entrance`, `Exit`, `Button` and `Door` are the placeable objects. Two
 /// placeable objects in one cell is a level error (see
-/// [`crate::roomed_puzzle::level_validation`]).
+/// [`crate::zanzoban::level_validation`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TileKind {
     /// Empty, walkable ground.

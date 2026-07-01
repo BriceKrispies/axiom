@@ -1,16 +1,16 @@
 //! The top-level app: an edit ⟷ playtest mode machine.
 //!
-//! [`RoomedPuzzleApp`] owns the [`EditorModel`] and, while playtesting, a
+//! [`ZanzobanApp`] owns the [`EditorModel`] and, while playtesting, a
 //! [`PlaytestSession`]. It is the orchestration the browser shell drives: paint
 //! and validate in edit mode, switch to playtest **only when the level
 //! validates**, play, and return to edit mode without losing the edited level.
 //! It is pure and browser-free; the wasm `web` arm is a thin adapter over it.
 
-use crate::roomed_puzzle::editor_model::EditorModel;
-use crate::roomed_puzzle::level_codec;
-use crate::roomed_puzzle::level_definition::LevelDefinition;
-use crate::roomed_puzzle::playtest_model::PlaytestSession;
-use crate::roomed_puzzle::render_model::RenderModel;
+use crate::zanzoban::editor_model::EditorModel;
+use crate::zanzoban::level_codec;
+use crate::zanzoban::level_definition::LevelDefinition;
+use crate::zanzoban::playtest_model::PlaytestSession;
+use crate::zanzoban::render_model::RenderModel;
 
 /// Which surface is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,27 +23,27 @@ pub enum Mode {
 
 /// The whole app: the editor, the optional live playtest, and the active mode.
 #[derive(Debug)]
-pub struct RoomedPuzzleApp {
+pub struct ZanzobanApp {
     editor: EditorModel,
     playtest: Option<PlaytestSession>,
     mode: Mode,
 }
 
-impl Default for RoomedPuzzleApp {
+impl Default for ZanzobanApp {
     fn default() -> Self {
-        RoomedPuzzleApp::new()
+        ZanzobanApp::new()
     }
 }
 
-impl RoomedPuzzleApp {
+impl ZanzobanApp {
     /// A fresh app in edit mode, pre-loaded with the built-in Level 001. If the
     /// embedded level somehow fails to parse, it falls back to a blank editor so
     /// construction is always total.
     pub fn new() -> Self {
-        let editor = level_codec::from_toml(crate::roomed_puzzle::LEVEL_001_TOML)
+        let editor = level_codec::from_toml(crate::zanzoban::LEVEL_001_TOML)
             .map(|level| EditorModel::from_level(&level))
             .unwrap_or_default();
-        RoomedPuzzleApp {
+        ZanzobanApp {
             editor,
             playtest: None,
             mode: Mode::Edit,
@@ -52,7 +52,7 @@ impl RoomedPuzzleApp {
 
     /// A fresh app in edit mode, pre-loaded with `level`.
     pub fn with_level(level: &LevelDefinition) -> Self {
-        RoomedPuzzleApp {
+        ZanzobanApp {
             editor: EditorModel::from_level(level),
             playtest: None,
             mode: Mode::Edit,
@@ -115,11 +115,11 @@ impl RoomedPuzzleApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomed_puzzle::tile_kind::TileKind;
+    use crate::zanzoban::tile_kind::TileKind;
 
     #[test]
     fn opens_in_edit_mode_with_level_001_loaded() {
-        let app = RoomedPuzzleApp::new();
+        let app = ZanzobanApp::new();
         assert_eq!(app.mode(), Mode::Edit);
         // Level 001's entrance is at (1,5).
         assert_eq!(app.editor().tile_at(1, 5), TileKind::Entrance);
@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn enter_playtest_requires_a_valid_level() {
-        let mut app = RoomedPuzzleApp::new();
+        let mut app = ZanzobanApp::new();
         app.editor_mut().select(TileKind::Floor);
         app.editor_mut().paint(1, 5);
         assert!(!app.enter_playtest());
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn returning_to_edit_keeps_the_edited_level() {
-        let mut app = RoomedPuzzleApp::new();
+        let mut app = ZanzobanApp::new();
         app.editor_mut().set_title("My Level");
         assert!(app.enter_playtest());
         app.enter_edit();

@@ -8,9 +8,9 @@
 //! depth decisions of its own. Keeping the mapping here makes the visual rules
 //! testable on native, away from the DOM.
 
-use crate::roomed_puzzle::actor_state::ActorKind;
-use crate::roomed_puzzle::coord::GridCoord;
-use crate::roomed_puzzle::game_state::{Cell, PuzzleGameState};
+use crate::zanzoban::actor_state::ActorKind;
+use crate::zanzoban::coord::GridCoord;
+use crate::zanzoban::game_state::{Cell, PuzzleGameState};
 
 /// The live player is fully opaque.
 pub const PLAYER_ALPHA: f32 = 1.0;
@@ -169,10 +169,10 @@ impl RenderModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomed_puzzle::coord::GridCoord;
-    use crate::roomed_puzzle::direction::Direction;
-    use crate::roomed_puzzle::group_id::GroupId;
-    use crate::roomed_puzzle::level_definition::{Button, Door, LevelDefinition};
+    use crate::zanzoban::coord::GridCoord;
+    use crate::zanzoban::direction::Direction;
+    use crate::zanzoban::group_id::GroupId;
+    use crate::zanzoban::level_definition::{Button, Door, LevelDefinition};
 
     fn corridor() -> LevelDefinition {
         LevelDefinition {

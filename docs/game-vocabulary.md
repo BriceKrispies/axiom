@@ -180,7 +180,7 @@ exactly the "clever abstraction" the engine distrusts (and a branch-and-unsafe
 hazard). The trait dispatch is static, branchless, and fully covered; the scene
 grew only value getters/enumerations (`node_transforms`, `bounds_half_extents`,
 `bounded_nodes`). The surface is additive — no determinism impact — and is the
-foundation the transform-mutation stage and the roomed-puzzle port build on.
+foundation the transform-mutation stage and the zanzoban port build on.
 (`get`/`set` of `Transform` are *local*-transform semantics, mirroring Bevy's
 `Transform`; world transforms refresh on the next tick.)
 
@@ -212,9 +212,9 @@ byte-identical.
 `Input` mapped-bindings and `Variation` RNG are intentionally **not** built yet:
 the Law discovers them from a second game's wall, not a category checklist.
 
-## Second game: the roomed-puzzle reduction
+## Second game: the zanzoban reduction
 
-`apps/axiom-roomed-puzzle` is the second, deliberately different genre — a
+`apps/axiom-zanzoban` is the second, deliberately different genre — a
 deterministic top-down **grid puzzle** (a block walks a room cell-by-cell; `q`
 freezes a *ghost* that replays its recorded path; `r` restarts; ghosts are solid
 and stand on buttons that open doors). Reducing it against the vocabulary:
@@ -252,9 +252,9 @@ enemy set — `StepCommands.spawns` carries the revived enemies and the app call
 
 ### Next
 
-- **Input action-bindings** — the other primitive the roomed-puzzle reduction
+- **Input action-bindings** — the other primitive the zanzoban reduction
   surfaced (discrete `key → action` mapping owned by the engine).
-- Port roomed-puzzle to render through the engine scene as the end-to-end
+- Port zanzoban to render through the engine scene as the end-to-end
   consumer (today it draws to its own 2D canvas), once spawn + input-bindings are
   both in.
 - The introspectable host surface (the agent-readable spec) and the scripting

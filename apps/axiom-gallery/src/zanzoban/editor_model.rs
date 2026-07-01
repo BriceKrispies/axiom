@@ -7,13 +7,13 @@
 //! several entrances, an empty group being typed) — that is exactly what the
 //! validation report surfaces, and what gates the switch to playtest.
 
-use crate::roomed_puzzle::coord::{GridCoord, GRID_HEIGHT, GRID_WIDTH};
-use crate::roomed_puzzle::group_id::GroupId;
-use crate::roomed_puzzle::level_codec::{self, LevelCodecError};
-use crate::roomed_puzzle::level_definition::{Button, Door, LevelDefinition};
-use crate::roomed_puzzle::level_validation::{validate_census, LevelCensus, LevelValidationReport};
-use crate::roomed_puzzle::render_model::{RenderCell, RenderModel, RenderTile};
-use crate::roomed_puzzle::tile_kind::TileKind;
+use crate::zanzoban::coord::{GridCoord, GRID_HEIGHT, GRID_WIDTH};
+use crate::zanzoban::group_id::GroupId;
+use crate::zanzoban::level_codec::{self, LevelCodecError};
+use crate::zanzoban::level_definition::{Button, Door, LevelDefinition};
+use crate::zanzoban::level_validation::{validate_census, LevelCensus, LevelValidationReport};
+use crate::zanzoban::render_model::{RenderCell, RenderModel, RenderTile};
+use crate::zanzoban::tile_kind::TileKind;
 
 /// A paintable level under construction.
 #[derive(Debug, Clone)]
@@ -289,7 +289,7 @@ impl EditorModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomed_puzzle::level_validation::LevelError;
+    use crate::zanzoban::level_validation::LevelError;
 
     #[test]
     fn painting_places_kinds_and_groups() {

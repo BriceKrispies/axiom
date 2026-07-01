@@ -108,7 +108,7 @@ fn column_grow_splits_the_height() {
 }
 
 #[test]
-fn basis_plus_grow_is_the_roomed_puzzle_shape_landscape() {
+fn basis_plus_grow_is_the_zanzoban_shape_landscape() {
     // Adaptive root in landscape → row: board grows, panel is a fixed 332px column.
     let mut root_style = LayoutStyle::new();
     root_style.direction = Direction::Adaptive;

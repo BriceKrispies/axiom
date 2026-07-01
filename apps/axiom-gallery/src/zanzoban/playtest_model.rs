@@ -1,18 +1,18 @@
 //! The playtest-mode model.
 //!
 //! [`PlaytestSession`] is the playtest-mode counterpart to
-//! [`crate::roomed_puzzle::editor_model::EditorModel`]: it owns the live
+//! [`crate::zanzoban::editor_model::EditorModel`]: it owns the live
 //! [`PuzzleGameState`], applies commands through the one deterministic
 //! [`step`] door, and exposes the render model and a status line the browser
 //! shell draws. It is built from a *validated* level (the app gates the switch on
-//! [`EditorModel::can_playtest`](crate::roomed_puzzle::editor_model::EditorModel::can_playtest)).
+//! [`EditorModel::can_playtest`](crate::zanzoban::editor_model::EditorModel::can_playtest)).
 
-use crate::roomed_puzzle::game_command::{PuzzleCommand, PuzzleStepResult};
-use crate::roomed_puzzle::game_state::PuzzleGameState;
-use crate::roomed_puzzle::game_step::step;
-use crate::roomed_puzzle::input_mapping::command_for_key;
-use crate::roomed_puzzle::level_definition::LevelDefinition;
-use crate::roomed_puzzle::render_model::RenderModel;
+use crate::zanzoban::game_command::{PuzzleCommand, PuzzleStepResult};
+use crate::zanzoban::game_state::PuzzleGameState;
+use crate::zanzoban::game_step::step;
+use crate::zanzoban::input_mapping::command_for_key;
+use crate::zanzoban::level_definition::LevelDefinition;
+use crate::zanzoban::render_model::RenderModel;
 
 /// One-line controls help shown under the playtest board.
 pub const CONTROLS_HELP: &str = "Arrows / WASD: move · q: leave a ghost & reset · r: restart fresh";
@@ -91,10 +91,10 @@ impl PlaytestSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomed_puzzle::coord::GridCoord;
-    use crate::roomed_puzzle::direction::Direction;
-    use crate::roomed_puzzle::group_id::GroupId;
-    use crate::roomed_puzzle::level_definition::{Button, Door};
+    use crate::zanzoban::coord::GridCoord;
+    use crate::zanzoban::direction::Direction;
+    use crate::zanzoban::group_id::GroupId;
+    use crate::zanzoban::level_definition::{Button, Door};
 
     fn corridor() -> LevelDefinition {
         LevelDefinition {

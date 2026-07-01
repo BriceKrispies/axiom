@@ -10,8 +10,8 @@
 use axiom_input::SwipeDir;
 use axiom_interface::{InterfaceInputEvent, KeyBinding, Keymap};
 
-use crate::roomed_puzzle::direction::Direction;
-use crate::roomed_puzzle::game_command::PuzzleCommand;
+use crate::zanzoban::direction::Direction;
+use crate::zanzoban::game_command::PuzzleCommand;
 
 /// Puzzle action ids — the neutral `u32`s [`puzzle_keymap`] resolves keys to, each
 /// turned into a [`PuzzleCommand`] by [`command_for_action`].

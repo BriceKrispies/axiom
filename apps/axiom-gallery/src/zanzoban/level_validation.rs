@@ -16,9 +16,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::roomed_puzzle::coord::{GridCoord, MAX_DIMENSION};
-use crate::roomed_puzzle::group_id::GroupId;
-use crate::roomed_puzzle::level_definition::LevelDefinition;
+use crate::zanzoban::coord::{GridCoord, MAX_DIMENSION};
+use crate::zanzoban::group_id::GroupId;
+use crate::zanzoban::level_definition::LevelDefinition;
 
 /// A multiplicity-capable inventory of a level's placements — the input to
 /// validation. Built either from a [`LevelDefinition`] or from the editor grid.
@@ -274,7 +274,7 @@ pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomed_puzzle::level_definition::{Button, Door};
+    use crate::zanzoban::level_definition::{Button, Door};
 
     /// A minimal valid level: 10×10, one entrance, one exit, a wired button+door.
     fn valid_level() -> LevelDefinition {

@@ -5,9 +5,9 @@
 //! exit, a list of walls, and lists of buttons and doors wired by group. It is
 //! the type that:
 //!
-//! * round-trips through TOML ([`crate::roomed_puzzle::level_codec`]),
-//! * is checked by [`crate::roomed_puzzle::level_validation::validate_level`], and
-//! * is played by [`crate::roomed_puzzle::game_state::PuzzleGameState`].
+//! * round-trips through TOML ([`crate::zanzoban::level_codec`]),
+//! * is checked by [`crate::zanzoban::level_validation::validate_level`], and
+//! * is played by [`crate::zanzoban::game_state::PuzzleGameState`].
 //!
 //! Multiplicity errors ("not exactly one entrance") live one level up, in the
 //! editor and the census, because a `LevelDefinition` structurally has exactly
@@ -15,8 +15,8 @@
 //! (bounds, empty groups, door-without-button, out-of-grid, overlap, blocked
 //! start) are all reachable on a hand-built or hand-edited `LevelDefinition`.
 
-use crate::roomed_puzzle::coord::GridCoord;
-use crate::roomed_puzzle::group_id::GroupId;
+use crate::zanzoban::coord::GridCoord;
+use crate::zanzoban::group_id::GroupId;
 
 /// A pressure button: standing on it presses its wiring [`GroupId`].
 #[derive(Debug, Clone, PartialEq, Eq)]
