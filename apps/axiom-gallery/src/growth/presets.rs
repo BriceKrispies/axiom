@@ -209,19 +209,20 @@ fn sample_once(preset: PlanetPreset, rng: &mut EntropyStream) -> PlanetGenome {
 /// Sample a genome from a preset, validating against the preset's constraints and
 /// resampling up to `MAX_ATTEMPTS` times. Returns the last attempt if none pass.
 /// Audit: GEN-preset, planet_presets.xml constraints + max_attempts=32.
+///
+/// The rejection loop itself is the engine's generic, bounded, branchless
+/// [`axiom_proc_validate::sample_until_valid`] harness; this function supplies only
+/// the app content it drives — the per-preset distributions (`sample_once`) and the
+/// constraint band (`Constraints::passes`). `sample_until_valid` draws in order and
+/// stops the instant a genome passes, so `rng` advances exactly as the old
+/// hand-rolled loop advanced it, and the same seed still reproduces the same genome.
 pub fn sample_genome(preset: PlanetPreset, rng: &mut EntropyStream) -> PlanetGenome {
     let cons = constraints(preset);
-    let mut last = sample_once(preset, rng);
-    if cons.passes(&last) {
-        return last;
-    }
-    for _ in 1..MAX_ATTEMPTS {
-        last = sample_once(preset, rng);
-        if cons.passes(&last) {
-            return last;
-        }
-    }
-    last
+    axiom_proc_validate::sample_until_valid(
+        MAX_ATTEMPTS,
+        || sample_once(preset, rng),
+        |g| cons.passes(g),
+    )
 }
 
 #[cfg(test)]

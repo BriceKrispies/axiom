@@ -264,6 +264,7 @@ dependencies = [
  "axiom-perception",
  "axiom-physics",
  "axiom-proc",
+ "axiom-proc-validate",
  "axiom-recording",
  "axiom-runtime",
  "axiom-space",

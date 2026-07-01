@@ -101,6 +101,9 @@ axiom-geosphere = { path = "../../crates/axiom-geosphere" }
 # are thin wrappers over this layer.
 axiom-hydrology = { path = "../../crates/axiom-hydrology" }
 axiom-proc = { path = "../../crates/axiom-proc" }
+# Generic bounded rejection-sampling harness (sample_until_valid): the growth
+# preset genome sampler draws candidates through it until one satisfies the band.
+axiom-proc-validate = { path = "../../crates/axiom-proc-validate" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 # The physics module under test (physics-crucible), composed only through PhysicsApi.
 axiom-physics = { path = "../../modules/axiom-physics" }
