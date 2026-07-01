@@ -40,14 +40,12 @@ impl WorldSeed {
     }
 }
 
-/// FNV-1a 64-bit hash. Stable across runs/platforms; same string → same value.
+/// FNV-1a 64-bit hash via the kernel's platform-stable [`axiom_kernel::StableHash`]
+/// instead of a hand-rolled copy. Stable across runs/platforms; same string → same
+/// value. An empty string hashes to the FNV offset basis
+/// (`StableHash::of_bytes(&[])`), preserving the documented empty-seed behavior.
 fn fnv1a(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01B3);
-    }
-    h
+    axiom_kernel::StableHash::of_bytes(s.as_bytes()).raw()
 }
 
 #[cfg(test)]
@@ -69,6 +67,14 @@ mod tests {
         assert_ne!(a.value, b.value);
         assert_ne!(a.value, c.value);
         assert_ne!(b.value, c.value);
+    }
+
+    #[test]
+    fn empty_seed_hashes_to_the_fnv_offset_basis() {
+        // The documented empty-seed rule: "" hashes to the FNV-1a offset basis
+        // (an empty byte fold), which callers detect to substitute a random world.
+        // Swapping in the kernel `StableHash` must preserve this exact value.
+        assert_eq!(WorldSeed::from_str_seed("").value, 0xcbf2_9ce4_8422_2325);
     }
 
     #[test]

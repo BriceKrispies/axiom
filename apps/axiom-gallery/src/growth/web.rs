@@ -48,6 +48,7 @@ use std::rc::Rc;
 
 use axiom::prelude::*;
 use axiom_interface::{InterfaceInputEvent, KeyBinding, Keymap};
+use axiom_kernel::Radians;
 use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -57,7 +58,6 @@ use web_sys::{
 };
 
 use crate::growth::gameworld::{sample_height_m, sample_height_m_lod_vista};
-use crate::growth::geo;
 use crate::growth::ground::{self, PlayerState};
 use crate::growth::model_world::{GameWorldLocalMap, CELL_SIZE_M, CHUNK_SIZE_CELLS, CHUNK_VERT_SIDE};
 use crate::growth::presets::PlanetPreset;
@@ -341,7 +341,10 @@ fn render_overworld_map(growth: &Growth) {
             // Longitude from -pi (left) to +pi (right).
             let lon =
                 -std::f32::consts::PI + (px as f32 + 0.5) / MAP_W as f32 * std::f32::consts::TAU;
-            let dir = geo::unit_dir_from_lat_lon(lat, lon);
+            let dir = axiom_math::unit_dir_from_lat_lon(
+                Radians::new(lat).expect("equirectangular latitude is finite"),
+                Radians::new(lon).expect("equirectangular longitude is finite"),
+            );
             let s = sampler::sample_surface(&growth.atlas, dir);
             let [r, g, b] = biome_color(s.biome.0, s.elevation);
             let i = ((py * MAP_W + px) * 4) as usize;

@@ -183,7 +183,7 @@ pub const REQUIREMENTS: &[Requirement] = &[
         "rng::Rng float sampling",
     ),
     r("PRIM-noise", "procgen", Implemented, "noise::Fbm"),
-    r("PRIM-geo", "procgen", Implemented, "geo:: spherical math"),
+    r("PRIM-geo", "procgen", Implemented, "axiom_math:: spherical math"),
     r(
         "PRIM-icosphere",
         "procgen",

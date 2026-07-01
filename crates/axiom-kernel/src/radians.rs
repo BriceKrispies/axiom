@@ -31,6 +31,18 @@ impl Radians {
         ][value.is_finite() as usize]
     }
 
+    /// Construct an angle from a *computed* scalar, mapping any non-finite result
+    /// (NaN / ±infinity) to `0.0` so the constructor is **total** — it never
+    /// fails. This is the sanctioned path for angles produced by trigonometry
+    /// (`asin` / `acos` / `atan2` of already-finite inputs), where a fallible
+    /// [`Radians::new`] would leave an unreachable error arm: the inputs are
+    /// finite, so the sanitizing branch exists only as a defined fallback. Finite
+    /// values pass through unchanged; only the genuinely non-finite collapse to a
+    /// finite zero. The dimensioned twin of [`crate::Ratio::finite_or_zero`].
+    pub const fn finite_or_zero(value: f32) -> Self {
+        Radians([0.0, value][value.is_finite() as usize])
+    }
+
     /// The underlying scalar value, in radians.
     pub const fn get(self) -> f32 {
         self.0
@@ -58,6 +70,17 @@ mod tests {
     #[test]
     fn new_accepts_finite() {
         assert_eq!(Radians::new(1.25).unwrap().get(), 1.25);
+    }
+
+    #[test]
+    fn finite_or_zero_passes_finite_and_sanitizes_nonfinite() {
+        // Finite values (including negatives, past ±π) pass through unchanged.
+        assert_eq!(Radians::finite_or_zero(0.5).get(), 0.5);
+        assert_eq!(Radians::finite_or_zero(-2.25).get(), -2.25);
+        // Non-finite scalars collapse to a finite zero (NaN and both infinities).
+        assert_eq!(Radians::finite_or_zero(f32::NAN).get(), 0.0);
+        assert_eq!(Radians::finite_or_zero(f32::INFINITY).get(), 0.0);
+        assert_eq!(Radians::finite_or_zero(f32::NEG_INFINITY).get(), 0.0);
     }
 
     #[test]

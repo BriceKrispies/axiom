@@ -1,5 +1,4 @@
 //! Game-world local tangent frame anchored on the planet. Audit: GW-E1.
-use crate::growth::geo;
 use crate::growth::ids::ChunkCoord;
 use crate::growth::model_planet::PlanetSurfaceAtlas;
 use crate::growth::model_world::{GameWorldLocalMap, CELL_SIZE_M, CHUNK_SIZE_CELLS};
@@ -21,7 +20,7 @@ impl GameWorldLocalMap {
             if !is_land {
                 continue;
             }
-            let lat = geo::latitude(*site);
+            let lat = axiom_math::latitude(*site).get();
             // Distance from the target band (either hemisphere) plus a small
             // penalty for being very near the poles.
             let band = (lat.abs() - TARGET_LAT_RAD).abs();
@@ -57,7 +56,7 @@ impl GameWorldLocalMap {
     /// tangent basis is always well-formed. Audit: GW-E1 anchor (caller-chosen).
     pub fn anchored_at(atlas: &PlanetSurfaceAtlas, unit_dir: Vec3) -> Self {
         let dir = unit_dir.normalize().unwrap_or(Vec3::new(0.0, 1.0, 0.0));
-        let (east, north) = geo::tangent_basis(dir);
+        let (east, north) = axiom_math::tangent_basis(dir);
         Self {
             anchor_dir: [dir.x, dir.y, dir.z],
             tangent_east: [east.x, east.y, east.z],

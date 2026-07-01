@@ -283,6 +283,12 @@ fn lib_exports_exactly_math_api() {
         "pub use plane_side::PlaneSide;",
         "pub use ray::Ray;",
         "pub use sphere::Sphere;",
+        "pub use geo::great_circle_distance;",
+        "pub use geo::latitude;",
+        "pub use geo::longitude;",
+        "pub use geo::slerp;",
+        "pub use geo::tangent_basis;",
+        "pub use geo::unit_dir_from_lat_lon;",
     ];
     expected.sort();
 

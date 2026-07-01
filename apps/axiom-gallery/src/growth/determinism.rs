@@ -1,21 +1,20 @@
 //! Determinism / QA hashing. Audit: SC-E3 (determinism hash of elevation +
 //! moisture), "Correctness/QA requirements".
 use crate::growth::model_planet::PlanetGlobe;
+use axiom_kernel::StableHash;
 
-/// FNV-1a hash over the canonical scalar fields. Same inputs to the same hash.
+/// Stable digest over the canonical scalar fields, using the kernel's
+/// platform-stable FNV-1a [`StableHash`] instead of a hand-rolled copy. Each
+/// field's `f32` bits are appended in little-endian order and the whole buffer is
+/// folded — byte-for-byte the FNV-1a this used to compute inline, so the digest
+/// value is unchanged. A diagnostic QA index, never the proof: byte equality
+/// remains the source of truth for determinism.
 pub fn world_hash(globe: &PlanetGlobe) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    fn mix(bits: u32, h: &mut u64) {
-        for b in bits.to_le_bytes() {
-            *h ^= b as u64;
-            *h = h.wrapping_mul(0x0000_0100_0000_01B3);
-        }
-    }
-    for &e in &globe.region_elevation {
-        mix(e.to_bits(), &mut h);
-    }
-    for &m in &globe.region_moisture {
-        mix(m.to_bits(), &mut h);
-    }
-    h
+    let bytes: Vec<u8> = globe
+        .region_elevation
+        .iter()
+        .chain(globe.region_moisture.iter())
+        .flat_map(|f| f.to_bits().to_le_bytes())
+        .collect();
+    StableHash::of_bytes(&bytes).raw()
 }

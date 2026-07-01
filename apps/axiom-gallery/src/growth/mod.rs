@@ -21,7 +21,6 @@ pub mod requirements;
 pub mod rng;
 
 // --- generation primitives ---
-pub mod geo;
 pub mod noise;
 pub mod topology;
 
