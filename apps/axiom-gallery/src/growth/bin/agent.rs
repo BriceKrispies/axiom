@@ -29,7 +29,7 @@ use axiom_host::{
     HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostPowerPreference,
     HostPresentMode, HostPresentationRequest,
 };
-use axiom_kernel::{KernelApi, Ratio};
+use axiom_kernel::{KernelApi, Meters, Ratio};
 use tiny_http::{Header, Method, Response, Server};
 use tungstenite::Message;
 
@@ -492,9 +492,11 @@ struct BridgeObs {
     reached_summit: bool,
 }
 
-/// A world-unit `f32` as fixed-point micro-units (the harness convention).
+/// A world-unit `f32` as fixed-point micro-units, through the harness's own codec
+/// ([`AgentHarnessApi::micro`]) — the single source of the observation-coordinate
+/// convention.
 fn micro(value: f32) -> i64 {
-    (f64::from(value) * 1_000_000.0) as i64
+    AgentHarnessApi::micro(Meters::finite_or_zero(value))
 }
 
 /// Bridge mode: a WebSocket server the live browser viewer connects to. Each frame

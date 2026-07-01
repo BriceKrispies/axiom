@@ -46,8 +46,14 @@ fn ray_fan_is_symmetric_and_spans_the_fov() {
     // An even count straddles forward: the two halves mirror across -Z (x flips).
     let fan = PerceptionApi::ray_fan(FORWARD, rad(std::f32::consts::FRAC_PI_2), 2);
     assert_eq!(fan.len(), 2);
-    assert!(fan[0].x * fan[1].x < 0.0, "the two rays deflect opposite ways");
-    assert!((fan[0].x + fan[1].x).abs() < 1.0e-6, "symmetric about forward");
+    assert!(
+        fan[0].x * fan[1].x < 0.0,
+        "the two rays deflect opposite ways"
+    );
+    assert!(
+        (fan[0].x + fan[1].x).abs() < 1.0e-6,
+        "symmetric about forward"
+    );
     assert!(fan[0].x.abs() > 1.0e-3, "the fan actually spreads");
     // Zero rays requested -> empty fan.
     assert!(PerceptionApi::ray_fan(FORWARD, rad(1.0), 0).is_empty());
@@ -100,6 +106,79 @@ fn visible_fact_encodes_id_position_and_kind() {
     assert_eq!(fact.1, 42, "subject is the entity id");
     assert_eq!((fact.2, fact.3, fact.4), (micro(1.0), 0, micro(-3.0)));
     assert_eq!(fact.5, 7, "value is the coarse kind code");
+}
+
+#[test]
+fn decode_obstacle_inverts_the_obstacle_fact() {
+    let fact = PerceptionApi::obstacle_fact(3, Vec3::new(0.0, 1.0, -2.0), m(2.5));
+    let (probe, hit, distance) = PerceptionApi::decode_obstacle(fact).expect("an obstacle decodes");
+    assert_eq!(probe, 3, "subject is the probe index");
+    assert!(hit.x.abs() < 1.0e-6 && (hit.y - 1.0).abs() < 1.0e-6 && (hit.z + 2.0).abs() < 1.0e-6);
+    assert!(
+        (distance.get() - 2.5).abs() < 1.0e-6,
+        "value decodes to the distance"
+    );
+    // A fact of another kind is not an obstacle.
+    let visible = PerceptionApi::visible_fact(1, Vec3::ZERO, 0);
+    assert!(PerceptionApi::decode_obstacle(visible).is_none());
+}
+
+#[test]
+fn decode_visible_inverts_the_visible_fact_and_returns_the_raw_kind() {
+    let fact = PerceptionApi::visible_fact(42, Vec3::new(1.0, 0.0, -3.0), 7);
+    let (subject, pos, value) =
+        PerceptionApi::decode_visible(fact).expect("a visible fact decodes");
+    assert_eq!(subject, 42, "subject is the entity id");
+    assert!((pos.x - 1.0).abs() < 1.0e-6 && (pos.z + 3.0).abs() < 1.0e-6);
+    assert_eq!(value, 7, "the coarse kind is returned uninterpreted");
+    // An obstacle fact is not a visible fact.
+    let obstacle = PerceptionApi::obstacle_fact(0, Vec3::ZERO, m(1.0));
+    assert!(PerceptionApi::decode_visible(obstacle).is_none());
+}
+
+#[test]
+fn sense_with_probe_fans_the_rays_culls_the_landmarks_and_assembles_facts() {
+    let eye = Vec3::ZERO;
+    let fov = rad(std::f32::consts::FRAC_PI_2); // 90° total
+    let range = m(1000.0);
+    // A test probe that only strikes on the near-straight-ahead ray (a small |x|
+    // deflection) — so the two outer rays of a 3-ray fan miss (the discard path).
+    let probe = |dir: Vec3| {
+        (dir.x.abs() < 0.1).then(|| (m(12.0), Vec3::new(dir.x * 12.0, 0.0, dir.z * 12.0)))
+    };
+    // One landmark straight ahead and very HIGH (proving the altitude flattening
+    // keeps a towering summit in the cone), one directly behind (culled).
+    let landmarks = [
+        (100u32, Vec3::new(0.0, 900.0, -50.0), 5u32),
+        (200u32, Vec3::new(0.0, 0.0, 50.0), 6u32),
+    ];
+    let facts = PerceptionApi::sense_with_probe(eye, FORWARD, fov, range, 3, probe, &landmarks);
+
+    let obstacles: Vec<_> = facts
+        .iter()
+        .filter_map(|&f| PerceptionApi::decode_obstacle(f))
+        .collect();
+    assert_eq!(obstacles.len(), 1, "only the centre ray struck");
+    assert_eq!(
+        obstacles[0].0, 1,
+        "the centre probe of a 3-ray fan is index 1"
+    );
+    assert!(
+        (obstacles[0].2.get() - 12.0).abs() < 1.0e-6,
+        "the probe's distance"
+    );
+
+    let visible: Vec<_> = facts
+        .iter()
+        .filter_map(|&f| PerceptionApi::decode_visible(f))
+        .collect();
+    assert_eq!(visible.len(), 1, "the behind landmark is culled");
+    assert_eq!(visible[0].0, 100, "the ahead summit is seen");
+    assert_eq!(visible[0].2, 5, "its kind passes through untouched");
+    assert!(
+        (visible[0].1.y - 900.0).abs() < 1.0e-3,
+        "emitted with the landmark's TRUE altitude, not the flattened one"
+    );
 }
 
 #[test]

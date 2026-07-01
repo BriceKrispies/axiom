@@ -42,6 +42,12 @@ impl PerceptionApi {
         (f64::from(value) * Self::MICRO) as i64
     }
 
+    /// Fixed-point micro-units back to a world-unit `f32` — the inverse of
+    /// [`Self::micro`], used to reconstruct geometry when decoding a fact.
+    fn from_micro(value: i64) -> f32 {
+        (value as f64 / Self::MICRO) as f32
+    }
+
     /// Generate `count` ray directions fanned **horizontally** (about world +Y)
     /// across the angular span `fov`, centred on `forward`. The app casts each
     /// against its world (scene raycast / heightfield march); the centre ray is
@@ -125,6 +131,88 @@ impl PerceptionApi {
             Self::micro(position.z),
             i64::from(kind_code),
         )
+    }
+
+    /// Decode an **obstacle** fact (the inverse of [`Self::obstacle_fact`]) into
+    /// `(probe_index, hit_point, distance)` — the producer owning its own tuple
+    /// layout so a consumer never re-derives the encoding. `None` for any fact of
+    /// another kind, so a caller can `filter_map` a mixed fact stream.
+    pub fn decode_obstacle(fact: (u16, u32, i64, i64, i64, i64)) -> Option<(u32, Vec3, Meters)> {
+        (fact.0 == Self::FACT_OBSTACLE).then(|| {
+            (
+                fact.1,
+                Vec3::new(
+                    Self::from_micro(fact.2),
+                    Self::from_micro(fact.3),
+                    Self::from_micro(fact.4),
+                ),
+                Meters::finite_or_zero(Self::from_micro(fact.5)),
+            )
+        })
+    }
+
+    /// Decode a **visible** fact (the inverse of [`Self::visible_fact`]) into
+    /// `(subject_id, position, value)`. The raw `value` is returned uninterpreted —
+    /// its coarse-kind meaning is the caller's vocabulary, not the sensor's. `None`
+    /// for any fact of another kind.
+    pub fn decode_visible(fact: (u16, u32, i64, i64, i64, i64)) -> Option<(u32, Vec3, u32)> {
+        (fact.0 == Self::FACT_VISIBLE).then(|| {
+            (
+                fact.1,
+                Vec3::new(
+                    Self::from_micro(fact.2),
+                    Self::from_micro(fact.3),
+                    Self::from_micro(fact.4),
+                ),
+                fact.5 as u32,
+            )
+        })
+    }
+
+    /// The whole sensor cycle behind one call: fan the ray probes, cull the
+    /// landmarks to the view cone, and assemble the neutral facts — the module
+    /// owning the orchestration DOOM and growth used to hand-roll. The game passes
+    /// only a **probe** (`probe(dir) -> Some((distance, hit_point))` when that
+    /// direction strikes its world — a scene raycast or a heightfield march) and
+    /// its **landmarks** (`(subject_id, world position, coarse kind code)`); the
+    /// kind is passed through untouched into each visible fact's `value`.
+    ///
+    /// Landmarks are flattened to the eye height for the cone test, so a towering
+    /// nearby summit is not pushed out of view by its own altitude, yet each
+    /// visible fact still carries the landmark's **true** position.
+    pub fn sense_with_probe(
+        eye: Vec3,
+        forward: Vec3,
+        fov: Radians,
+        range: Meters,
+        count: u32,
+        probe: impl Fn(Vec3) -> Option<(Meters, Vec3)>,
+        landmarks: &[(u32, Vec3, u32)],
+    ) -> Vec<(u16, u32, i64, i64, i64, i64)> {
+        // Ray-fan probes: each direction that strikes the world is an obstacle fact.
+        let obstacles = Self::ray_fan(forward, fov, count)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, dir)| {
+                probe(dir).map(|(distance, hit)| Self::obstacle_fact(index as u32, hit, distance))
+            });
+
+        // Landmarks culled on their horizontal bearing (altitude flattened to the
+        // eye) then emitted with their true position + pass-through kind.
+        let flattened: Vec<(u32, Vec3)> = landmarks
+            .iter()
+            .map(|&(id, pos, _)| (id, Vec3::new(pos.x, eye.y, pos.z)))
+            .collect();
+        let visible = Self::in_view(eye, forward, fov, range, &flattened)
+            .into_iter()
+            .filter_map(|(id, _)| {
+                landmarks
+                    .iter()
+                    .find(|(landmark_id, ..)| *landmark_id == id)
+                    .map(|&(landmark_id, pos, kind)| Self::visible_fact(landmark_id, pos, kind))
+            });
+
+        obstacles.chain(visible).collect()
     }
 
     /// The per-tick velocity of a tracked subject from its previous and current

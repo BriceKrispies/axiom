@@ -18,6 +18,7 @@
 
 use axiom_agent_harness::AgentHarnessApi;
 use axiom_introspect::IntrospectApi;
+use axiom_kernel::Meters;
 use serde::{Deserialize, Serialize};
 
 use crate::growth::ground::{CaptureInputs, GroundSim, MOVE_SPEED};
@@ -27,10 +28,18 @@ use crate::growth::world_tags;
 /// The agent's stable id ("growth" in ASCII) — deterministic, like everything else.
 const AGENT_RAW_ID: u64 = 0x67_72_6f_77_74_68;
 
-/// A world-unit `f32` as fixed-point micro-units — the harness's integer
-/// observation-coordinate convention.
+/// A world-unit `f32` as fixed-point micro-units, through the harness's own codec
+/// ([`AgentHarnessApi::micro`]) — the single source of the observation-coordinate
+/// convention. `finite_or_zero` wraps the app's raw `f32` into the kernel `Meters`
+/// the codec speaks (a computed scalar is already finite).
 fn micro(value: f32) -> i64 {
-    (f64::from(value) * 1_000_000.0) as i64
+    AgentHarnessApi::micro(Meters::finite_or_zero(value))
+}
+
+/// The inverse: fixed-point micro-units back to a world-unit `f32`, through the
+/// same harness codec ([`AgentHarnessApi::metres`]).
+fn metres(value: i64) -> f32 {
+    AgentHarnessApi::metres(value).get()
 }
 
 /// One action the driver applies: which neutral held controls to drive (by name)
@@ -341,8 +350,7 @@ impl AgentSession {
             .introspect
             .tag_by_name(name)
             .unwrap_or_else(|| panic!("look_at: no world tag named {name:?}"));
-        let to_m = |micro: i64| (micro as f64 / 1_000_000.0) as f32;
-        (to_m(tag.x()), to_m(tag.y()), to_m(tag.z()))
+        (metres(tag.x()), metres(tag.y()), metres(tag.z()))
     }
 }
 

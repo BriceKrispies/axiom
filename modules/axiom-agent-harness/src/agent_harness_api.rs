@@ -10,7 +10,7 @@
 //! `if`/`match`/`&&`.
 
 use axiom_agent::AgentApi;
-use axiom_kernel::{FrameIndex, Tick};
+use axiom_kernel::{FrameIndex, Meters, Tick};
 use axiom_runtime::RuntimeStep;
 
 /// The reusable first-person agent-driving facade.
@@ -70,6 +70,23 @@ impl AgentHarnessApi {
     /// for the integer observation coordinates.
     const MICRO: f64 = 1_000_000.0;
 
+    /// Encode a world-space length as fixed-point **micro-units** (millionths of a
+    /// world unit) — the harness's integer observation-coordinate convention. The
+    /// `decide_*` methods speak this encoding in their `(x, y, z, yaw)` tuples, so
+    /// this is the single source of truth for the convention every caller (and the
+    /// inverse [`Self::metres`]) must agree on.
+    pub fn micro(m: Meters) -> i64 {
+        (f64::from(m.get()) * Self::MICRO) as i64
+    }
+
+    /// Decode fixed-point micro-units back to a world-space length — the inverse of
+    /// [`Self::micro`]. Total: dividing a finite integer by the fixed scale is
+    /// always finite, so the length is always valid (any non-finite arithmetic
+    /// result would sanitize to zero via [`Meters::finite_or_zero`]).
+    pub fn metres(u: i64) -> Meters {
+        Meters::finite_or_zero((u as f64 / Self::MICRO) as f32)
+    }
+
     /// Decide a held-control bitmask by **holding `held_control_code`** this tick.
     ///
     /// The harness packs a neutral observation (the agent's pose — including its
@@ -113,9 +130,19 @@ impl AgentHarnessApi {
         goal_point_micro: (i64, i64, i64),
         arrive_radius_micro: i64,
     ) -> (u32, u16, u16, usize) {
-        let (control, _arrived) =
-            Self::seek_control_code(self_pose_micro, self_forward_micro, goal_point_micro, arrive_radius_micro);
-        Self::decide_with_control(agent_raw_id, tick, self_pose_micro, goal_point_micro, control)
+        let (control, _arrived) = Self::seek_control_code(
+            self_pose_micro,
+            self_forward_micro,
+            goal_point_micro,
+            arrive_radius_micro,
+        );
+        Self::decide_with_control(
+            agent_raw_id,
+            tick,
+            self_pose_micro,
+            goal_point_micro,
+            control,
+        )
     }
 
     /// Decide a held-control bitmask by **going to** a target point — the
@@ -134,10 +161,19 @@ impl AgentHarnessApi {
         goal_point_micro: (i64, i64, i64),
         arrive_radius_micro: i64,
     ) -> (u32, u16, u16, usize, u32) {
-        let (control, arrived) =
-            Self::seek_control_code(self_pose_micro, self_forward_micro, goal_point_micro, arrive_radius_micro);
-        let (control, reason, brain, emitted) =
-            Self::decide_with_control(agent_raw_id, tick, self_pose_micro, goal_point_micro, control);
+        let (control, arrived) = Self::seek_control_code(
+            self_pose_micro,
+            self_forward_micro,
+            goal_point_micro,
+            arrive_radius_micro,
+        );
+        let (control, reason, brain, emitted) = Self::decide_with_control(
+            agent_raw_id,
+            tick,
+            self_pose_micro,
+            goal_point_micro,
+            control,
+        );
         (control, reason, brain, emitted, arrived)
     }
 
@@ -179,7 +215,11 @@ impl AgentHarnessApi {
         let pitch = dy.atan2(horizontal);
 
         let aimed = u32::from(yaw_turn.abs() <= Self::AIMED_CONE_RADIANS);
-        ((yaw_turn * Self::MICRO) as i64, (pitch * Self::MICRO) as i64, aimed)
+        (
+            (yaw_turn * Self::MICRO) as i64,
+            (pitch * Self::MICRO) as i64,
+            aimed,
+        )
     }
 
     /// The branchless seek policy: turn-toward + forward as a held-control bitmask.
@@ -205,8 +245,8 @@ impl AgentHarnessApi {
 
         let arrived = u32::from(dist <= arrive);
         let active = 1 - arrived; // 0 once we have arrived (stop)
-        // "Ahead": in front and within the cone. `dot.max(0.0)` keeps the cone
-        // test meaningful only when the goal is actually in front.
+                                  // "Ahead": in front and within the cone. `dot.max(0.0)` keeps the cone
+                                  // test meaningful only when the goal is actually in front.
         let ahead = u32::from((dot > 0.0) & (cross.abs() <= Self::AHEAD_TAN * dot.max(0.0)));
         let turning = (1 - ahead) & active;
         let turn_left = u32::from(cross > 0.0) & turning;
@@ -261,9 +301,20 @@ impl AgentHarnessApi {
 
         // Decide + emit through the substrate (a one-shot replay of the control).
         let mut brain = AgentApi::replay_brain(vec![AgentApi::press_control_intent(control_code)]);
-        let step = RuntimeStep::new(FrameIndex::new(0), Tick::new(tick), Self::FIXED_DELTA_NANOS, 0);
-        let (report, mut queue) =
-            AgentApi::step(agent_id, profile, &mut brain, &observation, &mut memory, step);
+        let step = RuntimeStep::new(
+            FrameIndex::new(0),
+            Tick::new(tick),
+            Self::FIXED_DELTA_NANOS,
+            0,
+        );
+        let (report, mut queue) = AgentApi::step(
+            agent_id,
+            profile,
+            &mut brain,
+            &observation,
+            &mut memory,
+            step,
+        );
 
         // Lower the emitted neutral intents back to a held-control bitmask: the
         // OR of every intent this tick emitted, so a multi-intent decision holds
