@@ -1,0 +1,56 @@
+# Axiom layer manifest — axiom-geosphere.
+#
+# The spherical-topology layer: a geodesic icosphere (icosahedron subdivided on a
+# barycentric lattice, every vertex normalized onto the unit sphere and shared
+# edge/corner vertices deduplicated into stable region indices) and its dual
+# region-adjacency graph in compressed-sparse-row form, plus a ring/manifold
+# validator. This is the topology that lived ad hoc in the growth app graduating
+# into a reusable engine home. Because engine modules may depend only on LAYERS
+# (never on another module), the shared topology primitive is a layer, not a
+# module — a hydrology / planet-generation module (and the future axiom-hydrology
+# layer) can build its graph algorithms on the CSR region graph this layer emits.
+#
+# depends_on = math, and it is genuinely adapted: every region site is an
+# axiom-math Vec3 on the unit sphere, and the subdivision/orientation math
+# (barycentric blend, cross/dot for outward winding, normalize for the unit
+# projection) is all Vec3 arithmetic.
+
+[layer]
+name = "geosphere"
+crate_name = "axiom-geosphere"
+depends_on = ["math"]
+
+meaningful_dependency = """
+Geosphere adapts math's Vec3 into a deterministic spherical topology:
+build_icosphere blends the base icosahedron corners with barycentric weights into
+Vec3 lattice points, normalizes each onto the unit sphere, deduplicates coincident
+Vec3 positions into stable region indices, and orients every emitted triangle
+outward via the Vec3 cross/dot of its edge vectors against the outward radial.
+build_region_graph then folds those triangles into a CSR region-adjacency graph and
+validate_region_rings checks the dual is a closed 2-manifold. It introduces no new
+randomness and no platform state: the same subdivision level yields byte-identical
+sites/triangles/graph on every run and platform, because vertex indices are assigned
+in deterministic lattice order (map iteration order never reaches the output).
+"""
+
+introduced_capabilities = [
+    "Icosphere",
+    "RegionGraph",
+    "RegionId",
+    "RingReport",
+    "subdivisions_for_target",
+    "build_icosphere",
+    "build_region_graph",
+    "validate_region_rings",
+]
+consumed_capabilities = ["Vec3"]
+
+# Proof the math dependency is genuine. build_icosphere's body blends and
+# normalizes Vec3 lattice points; Icosphere stores the Vec3 region sites.
+[[proof_exports]]
+export = "build_icosphere"
+must_reference = ["Vec3"]
+
+[[proof_exports]]
+export = "Icosphere"
+must_reference = ["Vec3"]

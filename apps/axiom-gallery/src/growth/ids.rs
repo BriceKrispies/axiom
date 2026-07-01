@@ -5,9 +5,10 @@
 //! flat per-region arrays of [`crate::growth::model_planet::PlanetGlobe`]; chunk coords
 //! address the streamed game world.
 
-/// A region (icosphere site) index on the overworld. Audit: OW-E1/E3.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct RegionId(pub u32);
+// The region (icosphere site) index is the topology's own vocabulary: it lives in
+// the `axiom-geosphere` layer alongside the icosphere + region graph that hand it
+// out, and every Growth subsystem names that one type.
+pub use axiom_geosphere::RegionId;
 
 /// A tectonic plate index. Audit: worldgen `tectonic_plates`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -32,11 +33,5 @@ pub struct ChunkCoord {
 impl ChunkCoord {
     pub fn new(x: i32, z: i32) -> Self {
         Self { x, z }
-    }
-}
-
-impl RegionId {
-    pub fn index(self) -> usize {
-        self.0 as usize
     }
 }

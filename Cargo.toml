@@ -20,6 +20,7 @@ members = [
     "crates/axiom-interface",
     "crates/axiom-layout",
     "crates/axiom-noise",
+    "crates/axiom-geosphere",
     "crates/axiom-space",
     "crates/axiom-entropy",
     "crates/axiom-proc",

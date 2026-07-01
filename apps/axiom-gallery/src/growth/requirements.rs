@@ -145,7 +145,7 @@ pub const REQUIREMENTS: &[Requirement] = &[
         "OW-E18",
         "qa",
         Implemented,
-        "topology::validate_region_rings",
+        "axiom_geosphere::validate_region_rings",
     ),
     r("OW-E19", "perf", Deferred, "marshal caps (presentation)"),
     r(
@@ -193,7 +193,7 @@ pub const REQUIREMENTS: &[Requirement] = &[
         "PRIM-icosphere",
         "procgen",
         Implemented,
-        "topology::build_icosphere",
+        "axiom_geosphere::build_icosphere",
     ),
     // --- Pipeline stages (concrete) ---
     r(
@@ -307,7 +307,7 @@ pub const REQUIREMENTS: &[Requirement] = &[
         "SC-E1",
         "qa",
         Implemented,
-        "topology::validate_region_rings (wired in generate)",
+        "axiom_geosphere::validate_region_rings (wired in generate)",
     ),
     r(
         "SC-E2",
