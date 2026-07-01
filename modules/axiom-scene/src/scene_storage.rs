@@ -59,8 +59,7 @@ pub struct SceneStorage {
     /// where the schema is a closed game vocabulary the engine need not name. The
     /// engine's typed columns above stay the zero-cost borrowed path; this serves
     /// the app-blind path. Cleared per-entity on despawn (see
-    /// `Scene::despawn_entity`). Not yet folded into `write_state` — bridge-authored
-    /// dynamic components do not survive snapshot/restore yet (tracked follow-up).
+    /// `Scene::despawn_entity`).
     pub dynamic: DynamicComponents,
     /// Controllable nodes, keyed entity → player index. Authored once; the
     /// bridge that lets a per-tick move command address a node by player index.
@@ -236,8 +235,6 @@ impl WorldSystem<SceneStorage> for PlayerMoveSystem {
     fn run(&self, _step: &WorldStep, _entities: &EntityRegistry, storage: &mut SceneStorage) {
         let moves = std::mem::take(&mut storage.pending_moves);
         moves.into_iter().for_each(|(player, delta)| {
-            // Resolve the player index to its node (deterministic: BTreeMap iter).
-            // An input for an unknown index resolves to `None` and is ignored.
             storage
                 .players
                 .iter()
@@ -312,8 +309,7 @@ pub(crate) fn apply_controller(
                 .expect("entity was just resolved from this map");
             state.yaw += yaw_delta;
             state.pitch = (state.pitch + pitch_delta).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-            // Unit quaternions built directly (`(axis·sin(θ/2), cos(θ/2))`) —
-            // infallible, so there is no unreachable error arm.
+            // Unit quaternions built directly via `(axis*sin(theta/2), cos(theta/2))`.
             let (yh, ph) = (state.yaw * 0.5, state.pitch * 0.5);
             let yaw = Quat::new(0.0, yh.sin(), 0.0, yh.cos());
             let pitch = Quat::new(ph.sin(), 0.0, 0.0, ph.cos());
@@ -323,9 +319,7 @@ pub(crate) fn apply_controller(
                 .get(entity)
                 .copied()
                 .unwrap_or(Transform::IDENTITY);
-            // View orientation: yaw then pitch.
             local.rotation = yaw.multiply(pitch);
-            // Movement uses the yaw-only frame, so it stays horizontal.
             let step = yaw.rotate(move_local);
             local.translation = Vec3::new(
                 local.translation.x + step.x,
@@ -373,7 +367,6 @@ mod tests {
         EntityId::from_raw(raw)
     }
 
-    /// Build a registry holding entities `1..=n`.
     fn registry(n: u64) -> EntityRegistry {
         let mut reg = EntityRegistry::new();
         for _ in 0..n {
@@ -402,7 +395,6 @@ mod tests {
         assert!(s.pending_controls.is_empty());
     }
 
-    /// A fresh controller state for index `i` (yaw/pitch zero).
     fn ctrl(i: u32) -> ControllerState {
         ControllerState {
             index: i,
@@ -415,11 +407,8 @@ mod tests {
     fn controller_system_yaws_then_moves_relative_to_facing_and_drains() {
         let reg = registry(1);
         let mut storage = SceneStorage::default();
-        // e1 is controller 0 at the origin, facing -Z (identity rotation).
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.controllers.insert(e(1), ctrl(0));
-        // A quarter turn left (+90° about +Y) then move forward by 1: after the
-        // yaw, local -Z points to -X, so the node should translate toward -X.
         let quarter = std::f32::consts::FRAC_PI_2;
         storage
             .pending_controls
@@ -435,7 +424,6 @@ mod tests {
         );
         assert!(local.translation.z.abs() < 1.0e-5);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().yaw, quarter);
-        // The queue drained.
         assert!(storage.pending_controls.is_empty());
     }
 
@@ -445,7 +433,6 @@ mod tests {
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.controllers.insert(e(1), ctrl(0));
-        // No turn; strafe +1 (local +X) with identity facing moves along +X.
         storage
             .pending_controls
             .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0, 0.0));
@@ -461,7 +448,6 @@ mod tests {
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.controllers.insert(e(1), ctrl(0));
-        // Forward (-Z) by 0.5 three times, no turning -> z = -1.5.
         for _ in 0..3 {
             storage
                 .pending_controls
@@ -477,8 +463,6 @@ mod tests {
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.controllers.insert(e(1), ctrl(0));
-        // A huge upward pitch clamps to +PITCH_LIMIT and tilts the rotation (the
-        // X component of a pitch-about-X quaternion becomes non-zero).
         storage.pending_controls.push((0, Vec3::ZERO, 0.0, 10.0));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, PITCH_LIMIT);
@@ -486,7 +470,6 @@ mod tests {
             storage.locals.get(e(1)).unwrap().rotation.x.abs() > 0.1,
             "pitched"
         );
-        // A huge downward pitch clamps to -PITCH_LIMIT (the other clamp arm).
         storage.pending_controls.push((0, Vec3::ZERO, 0.0, -20.0));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, -PITCH_LIMIT);
@@ -494,8 +477,6 @@ mod tests {
 
     #[test]
     fn controller_movement_stays_horizontal_under_pitch() {
-        // Looking up must not lift the node off the floor: forward movement is in
-        // the yaw-only frame, so y stays put even with a large pitch.
         let reg = registry(1);
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
@@ -521,7 +502,6 @@ mod tests {
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.controllers.insert(e(1), ctrl(0));
-        // No controller 7 exists — the find_map None arm; nothing moves.
         storage
             .pending_controls
             .push((7, Vec3::new(9.0, 0.0, 9.0), 9.0, 9.0));
@@ -531,8 +511,6 @@ mod tests {
 
     #[test]
     fn controller_uses_identity_when_node_has_no_local() {
-        // Exercises the `unwrap_or(Transform::IDENTITY)` arm: a controller marked
-        // on an entity with no local transform yet still applies its input.
         let reg = registry(1);
         let mut storage = SceneStorage::default();
         storage.controllers.insert(e(1), ctrl(0));
@@ -552,21 +530,18 @@ mod tests {
     fn player_move_system_translates_the_addressed_player_and_drains() {
         let reg = registry(2);
         let mut storage = SceneStorage::default();
-        // e1 is player 0 at the origin; e2 is player 1 offset on x.
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.players.insert(e(1), 0);
         storage
             .locals
             .insert(e(2), Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)));
         storage.players.insert(e(2), 1);
-        // Move player 0 by (+1, +2); player 1 gets no input this tick.
         storage.pending_moves.push((0, Vec3::new(1.0, 2.0, 0.0)));
 
         PlayerMoveSystem.run(&WorldStep::new(0), &reg, &mut storage);
 
         assert_eq!(storage.locals.get(e(1)).unwrap().translation.x, 1.0);
         assert_eq!(storage.locals.get(e(1)).unwrap().translation.y, 2.0);
-        // Player 1 is untouched, and the queue is drained.
         assert_eq!(storage.locals.get(e(2)).unwrap().translation.x, 5.0);
         assert!(storage.pending_moves.is_empty());
     }
@@ -590,7 +565,6 @@ mod tests {
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.players.insert(e(1), 0);
-        // No player 7 exists — the find_map None arm; nothing moves.
         storage.pending_moves.push((7, Vec3::new(9.0, 9.0, 9.0)));
         PlayerMoveSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.locals.get(e(1)).unwrap().translation.x, 0.0);
@@ -605,11 +579,8 @@ mod tests {
     fn spin_system_rotates_spun_nodes_and_skips_invalid_axes() {
         let reg = registry(2);
         let mut storage = SceneStorage::default();
-        // e1: a valid spin; its local starts at identity.
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.spins.insert(e(1), Spin::new(Vec3::UNIT_Y, 360));
-        // e2: a degenerate (zero-axis) spin — the filter_map None arm; its local
-        // must be left untouched.
         storage
             .locals
             .insert(e(2), Transform::from_translation(Vec3::new(9.0, 0.0, 0.0)));
@@ -619,9 +590,7 @@ mod tests {
 
         SpinSystem.run(&WorldStep::new(90), &reg, &mut storage);
 
-        // e1 became a non-identity rotation about Y (a quarter turn).
         assert!((storage.locals.get(e(1)).unwrap().rotation.w - 1.0).abs() > 1.0e-6);
-        // e2 is unchanged (invalid axis -> skipped).
         assert_eq!(storage.locals.get(e(2)).unwrap().translation.x, 9.0);
     }
 
@@ -634,15 +603,12 @@ mod tests {
     fn procanim_system_animates_a_positioned_node_around_its_resting_pose() {
         let reg = registry(1);
         let mut storage = SceneStorage::default();
-        // e1 rests at (1, 2, 3); a bob of 0.5 along +Y with a 4-tick period.
         let base = Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
         storage.locals.insert(e(1), base);
         storage
             .procanims
             .insert(e(1), ProcAnim::new(base, 0.5, 4, Vec3::UNIT_Y, 8, 0));
 
-        // Tick 1 of a 4-tick bob → sin(π/2) = 1 → full +0.5 on Y; X and Z keep the
-        // resting place (a positioned node is animated, never relocated).
         ProcAnimSystem.run(&WorldStep::new(1), &reg, &mut storage);
 
         let local = storage.locals.get(e(1)).unwrap();
@@ -658,10 +624,6 @@ mod tests {
 
     #[test]
     fn propagation_covers_root_child_and_localless_and_uncomputed_parent() {
-        // e1: root with a local       -> parent-link None arm.
-        // e2: child of e1 with a local-> parent world present, Some arm.
-        // e3: NO local                -> the `if let Some(local)` false arm.
-        // e4: child of e3 with a local-> parent has no world, and_then None arm.
         let reg = registry(4);
         let mut storage = SceneStorage::default();
         storage
@@ -671,7 +633,6 @@ mod tests {
             .locals
             .insert(e(2), Transform::from_translation(Vec3::new(0.0, 2.0, 0.0)));
         storage.parents.insert(e(2), e(1));
-        // e3 deliberately has no local.
         storage
             .locals
             .insert(e(4), Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)));
@@ -679,15 +640,11 @@ mod tests {
 
         TransformPropagation.run(&WorldStep::new(0), &reg, &mut storage);
 
-        // Root world == its local.
         assert_eq!(storage.worlds.get(e(1)).unwrap().translation.x, 1.0);
-        // Child accumulates parent + child translation.
         let w2 = storage.worlds.get(e(2)).unwrap();
         assert_eq!(w2.translation.x, 1.0);
         assert_eq!(w2.translation.y, 2.0);
-        // No-local entity produced no world.
         assert!(storage.worlds.get(e(3)).is_none());
-        // Child of a world-less parent falls back to its own local.
         assert_eq!(storage.worlds.get(e(4)).unwrap().translation.x, 5.0);
     }
 
@@ -739,7 +696,6 @@ mod tests {
             Bounds::new(Vec3::new(0.5, 0.5, 0.5)),
             |s: &mut SceneStorage| &mut s.bounds,
         );
-        // Deferred: nothing is applied until the barrier.
         assert!(world.storage().locals.get(entity).is_none());
 
         let report = buffer.apply(&mut world);
@@ -748,7 +704,6 @@ mod tests {
         assert!(world.storage().locals.get(entity).is_some());
         assert!(world.storage().bounds.get(entity).is_some());
 
-        // Remove the bounds through the seam.
         let mut remover = ComponentCommandBuffer::new();
         let removed = remover.remove_component(entity, |s: &mut SceneStorage| &mut s.bounds);
         let report = remover.apply(&mut world);

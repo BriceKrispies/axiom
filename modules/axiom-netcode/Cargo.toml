@@ -7,21 +7,15 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. No sockets, no platform APIs: the deterministic session core
-# speaks plain bytes; the app owns the socket loop (the nondeterministic edge),
-# exactly as the windowing module isolates the live presentation arm.
 crate-type = ["rlib"]
 
 [dependencies]
-# An *engine module* (kind = "engine-module"): it composes NO other module
-# (allowed_modules = []). It builds only on the kernel's deterministic
-# primitives — Tick/ids, the binary writer/reader + schema version for the wire
-# codec, the result/error model, and the seeded DeterministicRng (used by the
-# convergence proof to model an adversarial network).
+# kernel: Tick/ids, wire codec, result/error model, and the seeded
+# DeterministicRng (used by the convergence proof to model an adversarial network).
 axiom-kernel = { path = "../../crates/axiom-kernel" }
-# The crypto layer: each input/beacon is signed by its author, so a compromised
-# peer (or relay) cannot forge another peer's inputs. Verified on ingest against
-# a roster of verifying keys.
+# crypto: each input/beacon is signed by its author so a compromised peer or
+# relay cannot forge another peer's inputs; verified on ingest against a
+# roster of verifying keys.
 axiom-crypto = { path = "../../crates/axiom-crypto" }
 
 [lints.rust]

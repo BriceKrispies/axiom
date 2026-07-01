@@ -102,7 +102,6 @@ mod tests {
 
     #[test]
     fn cube_uvs_and_color_are_per_face_neutral() {
-        // The 4 corners of every face carry the same UV set and white colour.
         let (v, _) = build_cube_mesh();
         assert_eq!(v[0].2, [0.0, 0.0]);
         assert_eq!(v[1].2, [1.0, 0.0]);

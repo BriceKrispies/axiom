@@ -129,8 +129,6 @@ mod tests {
 
     #[test]
     fn total_ticks_are_independent_of_frame_chunking() {
-        // The replay invariant: the same total elapsed time, drained to empty,
-        // drives the same total tick count no matter how it was split into frames.
         let total = 10 * STEP + STEP / 4;
         let drive = |chunks: &[u64]| -> u64 {
             let mut rt = runtime(u32::MAX);
@@ -161,15 +159,12 @@ mod tests {
     #[test]
     fn the_per_frame_step_count_is_clamped() {
         let mut rt = runtime(3);
-        // 100 steps' worth of time arrives at once; only `max_steps` run.
         assert_eq!(rt.advance(100 * STEP).steps(), 3);
         assert_eq!(rt.tick(), 3);
     }
 
     #[test]
     fn identical_elapsed_sequences_produce_identical_snapshots() {
-        // Two independent runtimes, fed the same elapsed sequence, end byte-equal:
-        // same total tick count AND byte-identical simulation snapshots.
         let sequence = [STEP, 3 * STEP, STEP / 2, 2 * STEP + 10, 5 * STEP];
         let run = || -> (u64, Vec<u8>) {
             let mut rt = runtime(u32::MAX);
@@ -186,9 +181,8 @@ mod tests {
 
     #[test]
     fn per_tick_state_hash_sequence_reproduces_and_evolves() {
-        // With max_steps = 1 each `advance(STEP)` runs exactly one tick, so the
-        // snapshot after each advance is that tick's state. The whole hash
-        // sequence reproduces on a second run (determinism)...
+        // max_steps = 1 so each advance(STEP) runs exactly one tick, and the
+        // snapshot after each advance is that tick's state.
         let hashes = || -> Vec<u64> {
             let mut rt = runtime(1);
             (0..30u32)
@@ -200,8 +194,8 @@ mod tests {
         };
         let first = hashes();
         assert_eq!(first, hashes());
-        // ...and the state genuinely evolves (the demo cube spins), so the
-        // fingerprint is not constant — proving the ticks did real work.
+        // The state genuinely evolves (the demo cube spins), so the fingerprint
+        // is not constant.
         assert!(first.iter().any(|&hash| hash != first[0]));
     }
 }

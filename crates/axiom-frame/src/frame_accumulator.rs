@@ -137,7 +137,6 @@ mod tests {
         // 95 whole steps' worth of time stays banked, not dropped.
         assert_eq!(a.banked_nanos(), 95 * STEP);
         assert_eq!(b.remainder_nanos(), 0);
-        // A following frame with no new time drains five more.
         assert_eq!(a.advance(0, 5).steps(), 5);
         assert_eq!(a.banked_nanos(), 90 * STEP);
     }

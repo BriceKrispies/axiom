@@ -1,14 +1,12 @@
 //! A deterministic profile of an agent's human-like control limits.
 
 /// The fixed control-limit parameters of one agent.
-///
 /// Every field is a plain integer or fixed-point quantity — there is no
 /// randomness here and no noisy behavior is implemented yet. The profile is a
 /// pure *parameter block*: a future decision stage may read these limits to
 /// shape its output, but in this scaffold only [`Self::max_actions_per_tick`] is
 /// consumed (to clamp how many actions a brain may emit in one step). The rest
 /// are carried as the documented, stable contract a later stage will honor.
-///
 /// Fixed-point units keep the contract deterministic and float-free: angles in
 /// milli-degrees (`1000` = one degree) and positions in micro-units (`1_000_000`
 /// = one world unit).
@@ -139,7 +137,6 @@ mod tests {
         let base = AgentProfile::debug_perfect();
         let frozen = base.with_action_budget(0);
         assert_eq!(frozen.max_actions_per_tick(), 0);
-        // Every other field is preserved.
         assert_eq!(frozen.reaction_delay_ticks(), base.reaction_delay_ticks());
         assert_eq!(frozen.attention_slots(), base.attention_slots());
         assert_eq!(frozen.memory_ticks(), base.memory_ticks());
@@ -149,7 +146,6 @@ mod tests {
         );
         assert_eq!(frozen.aim_error_milli_degrees(), base.aim_error_milli_degrees());
         assert_eq!(frozen.movement_error_microunits(), base.movement_error_microunits());
-        // A non-zero override works too.
         assert_eq!(base.with_action_budget(2).max_actions_per_tick(), 2);
     }
 

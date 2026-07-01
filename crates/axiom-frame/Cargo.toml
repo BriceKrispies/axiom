@@ -7,16 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free and wasm-clean.
 crate-type = ["rlib"]
 
 [dependencies]
-# Layer 04 may import only layers 00, 01, and 03. The Axiom Layer Law
-# and `cargo xtask check-architecture` enforce that nothing else slips in.
 axiom-kernel = { path = "../axiom-kernel" }
 axiom-runtime = { path = "../axiom-runtime" }
 axiom-host = { path = "../axiom-host" }
-# Build-time Support crate (zone marker attributes); allowed for all engine code.
 axiom-zones = { path = "../axiom-zones" }
 
 [lints.rust]

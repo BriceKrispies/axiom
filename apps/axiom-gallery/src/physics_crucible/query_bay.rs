@@ -1,10 +1,6 @@
-//! Station 4 — Query Bay.
-//!
-//! Spatial queries: an exact raycast that hits a solid target, a raycast that
-//! misses into empty space, a raycast that passes *through* a trigger to the solid
-//! body behind it (triggers are excluded from raycasts), and an overlap-sphere
-//! probe whose membership the report tallies each frame. All exact, all through
-//! `PhysicsApi`.
+//! Station 4 — Query Bay: raycast hit, raycast miss, a raycast that passes
+//! *through* a trigger to the solid body behind it (triggers are excluded from
+//! raycasts), and an overlap-sphere probe tallied each frame.
 
 use axiom::prelude::Vec3;
 
@@ -15,14 +11,13 @@ use crate::physics_crucible::physics_crucible_app::CrucibleWorld;
 
 /// The standing overlap probe, in the bay's local frame.
 pub const PROBE_LOCAL: Vec3 = Vec3::new(4.0, 1.0, 3.0);
-/// The standing overlap probe radius. Kept just under the probe's 1.0 height above
-/// the floor so it cleanly catches the two parked spheres and *not* the infinite
-/// ground planes (an infinite plane overlaps any query sphere whose centre is
-/// within `radius` of it — correct, but it would inflate the tally).
+/// Kept just under the probe's 1.0 height above the floor so it cleanly catches
+/// the two parked spheres and *not* the infinite ground planes (an infinite
+/// plane overlaps any query sphere whose centre is within `radius` of it —
+/// correct, but it would inflate the tally).
 pub const PROBE_RADIUS: f32 = 0.9;
 
-/// The standing overlap probe in world space (centre, radius). The report calls
-/// this so its `query_hit_count` is a real, deterministic `PhysicsApi` query.
+/// The standing overlap probe in world space (centre, radius).
 pub fn probe_world() -> (Vec3, f32) {
     (CrucibleStation::QueryBay.origin().add(PROBE_LOCAL), PROBE_RADIUS)
 }

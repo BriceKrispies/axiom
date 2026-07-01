@@ -39,12 +39,10 @@ const ABSENT_HASH: [u8; 32] = [0u8; 32];
 /// hash for a confirmed tick. Every frame carries an ed25519 [`Signature`] over
 /// its canonical body, so the author cannot be forged.
 ///
-/// This is a **tagged struct**, not an enum: `kind` selects which logical frame
-/// this is ([`KIND_INPUT`] or [`KIND_HASH_BEACON`]), `peer` and `signature` are
-/// common to both kinds (read with no branch), and the remaining fields are the
-/// payload of one kind or the other. A field that does not belong to the active
-/// kind holds a deterministic placeholder and is never read for that kind, so
-/// payload extraction is a kind-gated field read rather than a `match`.
+/// This is a tagged struct, not an enum: `kind` selects which logical frame
+/// this is ([`KIND_INPUT`] or [`KIND_HASH_BEACON`]); a field that does not
+/// belong to the active kind holds a deterministic placeholder and is never
+/// read for that kind.
 ///
 /// Every frame is prefixed with [`WIRE_VERSION`] and a one-byte discriminant,
 /// then decoded with bounds checks — a truncated or version-mismatched or
@@ -109,8 +107,6 @@ impl NetMessage {
     }
 
     /// This frame's kind discriminant ([`KIND_INPUT`] or [`KIND_HASH_BEACON`]).
-    /// Common to both kinds — a plain field read, the basis for kind-gated
-    /// payload extraction.
     pub(crate) fn kind(&self) -> u8 {
         self.kind
     }
@@ -158,21 +154,18 @@ impl NetMessage {
     }
 
     /// The peer this frame claims as its author (to be verified against a
-    /// roster). Common to both kinds — a plain field read, no branch.
+    /// roster).
     pub(crate) fn peer(&self) -> PeerId {
         self.peer
     }
 
-    /// This frame's signature. Common to both kinds — a plain field read.
+    /// This frame's signature.
     pub(crate) fn signature(&self) -> &Signature {
         &self.signature
     }
 
-    /// The canonical bytes this frame's signature must cover. The signing
-    /// payload is per-kind, so the kind selects which payload to build: an
-    /// `Input` frame signs over its command, a `HashBeacon` over its hash. The
-    /// `then(..).unwrap_or_else(..)` builds exactly one payload — the EXACT bytes
-    /// that kind has always produced — with no `match`.
+    /// The canonical bytes this frame's signature must cover: an `Input` frame
+    /// signs over its command, a `HashBeacon` over its hash.
     pub(crate) fn signed_bytes(&self) -> Vec<u8> {
         let input_payload = (self.kind == KIND_INPUT)
             .then(|| Self::input_signing_payload(self.peer, self.tick, &self.command));
@@ -200,9 +193,6 @@ impl NetMessage {
         let mut r = BinaryReader::new(bytes);
         SchemaVersion::read_from(&mut r)
             .and_then(|version| {
-                // `then_some`/`ok_or_else` is the branchless form of the
-                // incompatible-major guard: compatible -> Ok(()), else the
-                // SchemaVersionMismatch error.
                 version
                     .is_compatible_with(WIRE_VERSION)
                     .then_some(())
@@ -219,10 +209,7 @@ impl NetMessage {
     }
 
     /// Decode the frame body for a known `tag`, or fail with
-    /// `InvalidDiscriminant`. The tag dispatch is a value comparison (not an
-    /// enum match): `then`/`or_else` selects exactly one decode path so the
-    /// reader is consumed by only the matching arm, and an unknown tag falls
-    /// through to the discriminant error.
+    /// `InvalidDiscriminant`.
     fn decode_body(r: &mut BinaryReader<'_>, tag: u8) -> KernelResult<Self> {
         (tag == TAG_INPUT)
             .then(|| Self::decode_input(r))
@@ -236,8 +223,7 @@ impl NetMessage {
             })
     }
 
-    /// Decode an `Input` body (the fields after the tag), as a `?`-free chain of
-    /// fallible field reads.
+    /// Decode an `Input` body (the fields after the tag).
     fn decode_input(r: &mut BinaryReader<'_>) -> KernelResult<Self> {
         PeerId::read_from(r).and_then(|peer| {
             r.read_u64().and_then(|tick| {
@@ -249,8 +235,7 @@ impl NetMessage {
         })
     }
 
-    /// Decode a `HashBeacon` body (the fields after the tag), as a `?`-free chain
-    /// of fallible field reads.
+    /// Decode a `HashBeacon` body (the fields after the tag).
     fn decode_beacon(r: &mut BinaryReader<'_>) -> KernelResult<Self> {
         PeerId::read_from(r).and_then(|peer| {
             r.read_u64().and_then(|tick| {
@@ -262,10 +247,7 @@ impl NetMessage {
         })
     }
 
-    /// Read the 32 hash bytes in order, failing on the first short read. The
-    /// `try_fold` writes each byte into its slot and threads the reader's
-    /// `OutOfBounds`/`TruncatedData` error out of the fold — the branchless form
-    /// of the per-byte `?` loop.
+    /// Read the 32 hash bytes in order, failing on the first short read.
     fn read_hash(r: &mut BinaryReader<'_>) -> KernelResult<[u8; 32]> {
         (0..32usize).try_fold([0u8; 32], |mut hash, i| {
             r.read_u8().map(|byte| {
@@ -313,8 +295,6 @@ mod tests {
 
     #[test]
     fn the_signature_covers_the_genuine_body() {
-        // The decoded signature verifies against the frame's signed bytes under
-        // the author's key — and fails under a different key.
         for msg in [input(), beacon()] {
             assert!(key()
                 .verifying_key()
@@ -326,13 +306,11 @@ mod tests {
 
     #[test]
     fn kind_gated_accessors_select_the_active_payload() {
-        // An input frame: kind is INPUT, `command()` is Some, `hash()` is None.
         let i = input();
         assert_eq!(i.kind(), KIND_INPUT);
         assert_eq!(i.tick(), 7);
         assert_eq!(i.command(), Some(&NetCommand::new(2, vec![9, 9, 9])));
         assert_eq!(i.hash(), None, "an input carries no hash");
-        // A beacon frame: kind is HASH_BEACON, `hash()` is Some, `command()` None.
         let b = beacon();
         assert_eq!(b.kind(), KIND_HASH_BEACON);
         assert_eq!(b.tick(), 12);
@@ -344,7 +322,6 @@ mod tests {
     fn peer_and_signature_accessors_match_each_variant() {
         assert_eq!(input().peer(), PeerId::from_raw(3));
         assert_eq!(beacon().peer(), PeerId::from_raw(4));
-        // Accessor returns the same signature the frame was built with.
         assert!(key()
             .verifying_key()
             .verify(&input().signed_bytes(), input().signature()));
@@ -354,7 +331,7 @@ mod tests {
     fn unknown_tag_is_invalid_discriminant() {
         let mut w = BinaryWriter::new();
         WIRE_VERSION.write_to(&mut w);
-        w.write_u8(99); // not a known tag
+        w.write_u8(99);
         let err = NetMessage::decode(&w.into_bytes()).unwrap_err();
         assert_eq!(err.scope(), KernelErrorScope::Binary);
         assert_eq!(err.code(), KernelErrorCode::InvalidDiscriminant);
@@ -371,8 +348,6 @@ mod tests {
 
     #[test]
     fn every_truncated_prefix_of_a_frame_is_rejected() {
-        // Walks the `?` error arm of every field read in both variants (version,
-        // tag, peer, tick, command/hash, signature) — including the empty buffer.
         for msg in [input(), beacon()] {
             let bytes = msg.encode();
             for k in 0..bytes.len() {

@@ -266,9 +266,7 @@ impl Mat4 {
     pub fn multiply(self, other: Mat4) -> Mat4 {
         let a = &self.data;
         let b = &other.data;
-        // Explicit unroll of the column-major 4x4 product. Each element keeps
-        // the exact accumulation order of the original `acc += a[k*4+row] *
-        // b[col*4+k]` loop over k = 0,1,2,3: `(((0 + t0) + t1) + t2) + t3`.
+        // Keeps the exact accumulation order `(((0 + t0) + t1) + t2) + t3` for determinism.
         let elem = |col: usize, row: usize| -> f32 {
             0.0f32
                 + a[row] * b[col * 4]
@@ -405,9 +403,7 @@ impl Mat4 {
     pub fn transform_point(&self, p: Vec3) -> Vec3 {
         let v = self.transform_vec4(Vec4::new(p.x, p.y, p.z, 1.0));
         let needs_divide = (v.w != 0.0) & (v.w != 1.0);
-        // Select the divisor branchlessly: 1.0 leaves the components unchanged
-        // (the affine branch), v.w performs the perspective divide. Dividing by
-        // 1.0 is always finite, so this is safe for the non-divide case.
+        // Branchless divisor select: 1.0 (affine, always finite) or v.w (perspective).
         let divisor = [1.0, v.w][usize::from(needs_divide)];
         Vec3::new(v.x / divisor, v.y / divisor, v.z / divisor)
     }
@@ -533,12 +529,10 @@ mod tests {
     fn multiply_order_is_deterministic_and_translation_then_scale_is_not_scale_then_translation() {
         let t = Mat4::translation(Vec3::new(1.0, 0.0, 0.0));
         let s = Mat4::scale(Vec3::new(2.0, 2.0, 2.0));
-        // Apply scale first, then translation: point at origin should land at (1,0,0).
         let ts = t.multiply(s);
         assert!(ts
             .transform_point(Vec3::ZERO)
             .approx_eq(&Vec3::new(1.0, 0.0, 0.0), eps()));
-        // Apply translation first, then scale: (0,0,0) -> (1,0,0) -> (2,0,0).
         let st = s.multiply(t);
         assert!(st
             .transform_point(Vec3::ZERO)
@@ -555,7 +549,6 @@ mod tests {
     #[test]
     fn perspective_has_stable_expected_values() {
         let m = Mat4::perspective(std::f32::consts::FRAC_PI_2, 2.0, 1.0, 100.0).unwrap();
-        // f = 1/tan(45deg) = 1.0; f/aspect = 0.5
         let cols = m.as_cols_array();
         assert!(cols[0].approx_eq(&0.5, eps()));
         assert!(cols[5].approx_eq(&1.0, eps()));
@@ -588,10 +581,8 @@ mod tests {
     #[test]
     fn orthographic_has_stable_expected_values() {
         let m = Mat4::orthographic(-1.0, 1.0, -1.0, 1.0, 0.0, 1.0).unwrap();
-        // Should map (0,0,0) -> (0,0,-1) in NDC.
         let p = m.transform_point(Vec3::new(0.0, 0.0, 0.0));
         assert!(p.approx_eq(&Vec3::new(0.0, 0.0, -1.0), eps()));
-        // And (1,1,0) -> (1, 1, -1).
         let p2 = m.transform_point(Vec3::new(1.0, 1.0, 0.0));
         assert!(p2.approx_eq(&Vec3::new(1.0, 1.0, -1.0), eps()));
     }
@@ -620,33 +611,26 @@ mod tests {
 
     #[test]
     fn look_at_produces_stable_basis() {
-        // Camera at (0,0,5), looking at origin, up = +Y. Forward axis in view
-        // space is +Z (because RH look_at negates the world forward).
         let m = Mat4::look_at(
             Vec3::new(0.0, 0.0, 5.0),
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(0.0, 1.0, 0.0),
         )
         .unwrap();
-        // The world origin sits 5 units in front of the camera; transformed to
-        // view space it lands at (0, 0, -5).
         let view_origin = m.transform_point(Vec3::ZERO);
         assert!(view_origin.approx_eq(&Vec3::new(0.0, 0.0, -5.0), eps()));
-        // Right axis (world +X) stays +X in view space.
         let view_right = m.transform_vector(Vec3::UNIT_X);
         assert!(view_right.approx_eq(&Vec3::UNIT_X, eps()));
     }
 
     #[test]
     fn look_at_rejects_degenerate_inputs() {
-        // eye == target.
         assert_eq!(
             Mat4::look_at(Vec3::ZERO, Vec3::ZERO, Vec3::UNIT_Y)
                 .unwrap_err()
                 .code(),
             MathErrorCode::InvalidMatrixOperation
         );
-        // forward parallel to up.
         assert_eq!(
             Mat4::look_at(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), Vec3::UNIT_Y)
                 .unwrap_err()
@@ -690,7 +674,6 @@ mod tests {
         let m = Mat4::translation(Vec3::new(1.0, 2.0, 3.0));
         let v = m.transform_vec4(Vec4::new(0.0, 0.0, 0.0, 1.0));
         assert!(v.approx_eq(&Vec4::new(1.0, 2.0, 3.0, 1.0), eps()));
-        // w=0 — translation has no effect.
         let d = m.transform_vec4(Vec4::new(1.0, 0.0, 0.0, 0.0));
         assert!(d.approx_eq(&Vec4::new(1.0, 0.0, 0.0, 0.0), eps()));
     }
@@ -739,17 +722,14 @@ mod cov {
 
     #[test]
     fn transform_point_perspective_divide_and_affine() {
-        // Perspective matrix yields w' != 0 and != 1 -> divide branch.
         let p = Mat4::perspective(1.0, 1.0, 0.1, 100.0).unwrap();
         let _ = p.transform_point(Vec3::new(1.0, 1.0, -5.0));
-        // Identity yields w' == 1 -> affine branch.
         let i = Mat4::IDENTITY.transform_point(Vec3::new(2.0, 3.0, 4.0));
         assert!(i.approx_eq(&Vec3::new(2.0, 3.0, 4.0), Epsilon::DEFAULT));
     }
 
     #[test]
     fn transform_point_zero_w_takes_affine_branch() {
-        // Fourth row all zeros -> w' == 0, so the perspective divide is skipped.
         let m = Mat4::from_cols_array([
             1.0, 0.0, 0.0, 0.0, //
             0.0, 1.0, 0.0, 0.0, //
@@ -780,68 +760,41 @@ mod cov {
         Epsilon::new(1.0e-5).unwrap()
     }
 
-    // Kills from_quaternion mutants at 71 (`x*x`), 88 (`yz + wx`), 92
-    // (`yz - wx`). Uses q = (0.5,0.5,0.5,0.5) (a genuine unit quaternion) where
-    // each squared/cross term is a distinct 0.25, so the mutated forms produce
-    // different, checkable matrix elements.
     #[test]
     fn from_quaternion_matrix_elements_are_exact() {
         let q = Quat::new(0.5, 0.5, 0.5, 0.5);
         let m = Mat4::from_quaternion(q).as_cols_array();
-        // index5 = 1 - 2*(xx + zz); with xx=x*x=0.25 this is 0.0.
-        // Mutant `x + x = 1.0` makes it 1 - 2*1.25 = -1.5.
         assert!(m[5].approx_eq(&0.0, eps5()));
-        // index6 = 2*(yz + wx) = 2*(0.25+0.25) = 1.0.
         assert!(m[6].approx_eq(&1.0, eps5()));
-        // index9 = 2*(yz - wx) = 0.0; mutant `+` gives 1.0.
         assert!(m[9].approx_eq(&0.0, eps5()));
-        // index10 = 1 - 2*(xx + yy) = 0.0 (also pins the `x*x` term).
         assert!(m[10].approx_eq(&0.0, eps5()));
     }
 
-    // Kills perspective mutants at 133 (`1.0 / tan`) and 153 (`2.0 * far`).
-    // FRAC_PI_2 makes tan == 1 which hides the 133 divide, so use FRAC_PI_3.
     #[test]
     fn perspective_focal_and_depth_terms_are_exact() {
-        let fovy = std::f32::consts::FRAC_PI_3; // 60 deg; tan(30 deg) = 1/sqrt(3)
-                                                // near = 2 (NOT 1) so that `far * near` differs from `far / near`,
-                                                // killing the 153:23 (`*` -> `/`) mutant; and `far - near` differs from
-                                                // `far + near` for the depth terms.
+        let fovy = std::f32::consts::FRAC_PI_3;
         let near = 2.0f32;
         let far = 100.0f32;
         let m = Mat4::perspective(fovy, 1.0, near, far).unwrap();
         let cols = m.as_cols_array();
-        // f = 1/tan(30deg) = sqrt(3) ~= 1.7320508; f/aspect with aspect 1.
-        // Mutant 133 (`/` -> `*`) gives f = tan(30deg) ~= 0.57735.
         assert!(cols[0].approx_eq(&3.0f32.sqrt(), eps5()));
-        let nf = 1.0f32 / (near - far); // = -1/98
-                                        // col[10] = (far+near)*nf = 102 * nf.
+        let nf = 1.0f32 / (near - far);
         assert!(cols[10].approx_eq(&((far + near) * nf), eps5()));
-        // col[14] = 2*far*near*nf. With near=2: 2*100*2*nf = 400*nf.
-        // Mutant 153 (`far / near`) gives 2*(100/2)*nf = 100*nf, distinct.
         assert!(cols[14].approx_eq(&(2.0 * far * near * nf), eps5()));
     }
 
-    // Kills every orthographic mutant: 183 (`far - near`), 197 (`-2.0/fn_`
-    // delete `-`, `/`->`%`/`*`), 200/201 (translation column delete `-`,
-    // `/`->`%`/`*`), 202 (`far + near` -> `-`, `/`->`*`). Asymmetric bounds make
-    // each element distinct from the mutated alternatives.
     #[test]
     fn orthographic_matrix_elements_are_exact() {
         let m = Mat4::orthographic(2.0, 6.0, 1.0, 5.0, 3.0, 9.0).unwrap();
         let c = m.as_cols_array();
-        // rl=4, tb=4, fn_=6.
-        assert!(c[0].approx_eq(&0.5, eps5())); // 2/rl
-        assert!(c[5].approx_eq(&0.5, eps5())); // 2/tb
-        assert!(c[10].approx_eq(&(-2.0 / 6.0), eps5())); // -2/fn_
-        assert!(c[12].approx_eq(&-2.0, eps5())); // -(right+left)/rl = -8/4
-        assert!(c[13].approx_eq(&-1.5, eps5())); // -(top+bottom)/tb = -6/4
-        assert!(c[14].approx_eq(&-2.0, eps5())); // -(far+near)/fn_ = -12/6
+        assert!(c[0].approx_eq(&0.5, eps5()));
+        assert!(c[5].approx_eq(&0.5, eps5()));
+        assert!(c[10].approx_eq(&(-2.0 / 6.0), eps5()));
+        assert!(c[12].approx_eq(&-2.0, eps5()));
+        assert!(c[13].approx_eq(&-1.5, eps5()));
+        assert!(c[14].approx_eq(&-2.0, eps5()));
     }
 
-    // Kills the look_at `delete -` mutants at 220..=224. f, s, u and the eye
-    // dots are recomputed independently and the matrix's third row / fourth
-    // column are pinned to the negated values production must store.
     #[test]
     fn look_at_negation_terms_are_exact() {
         let eye = Vec3::new(3.0, 4.0, 5.0);
@@ -853,30 +806,24 @@ mod cov {
         let s = f.cross(up).normalize().unwrap();
         let u = s.cross(f);
 
-        // Third row holds -f (indices 2, 6, 10).
         assert!(m[2].approx_eq(&(-f.x), eps5()));
         assert!(m[6].approx_eq(&(-f.y), eps5()));
         assert!(m[10].approx_eq(&(-f.z), eps5()));
-        // Fourth column holds -s.dot(eye), -u.dot(eye), f.dot(eye).
         assert!(m[12].approx_eq(&(-s.dot(eye)), eps5()));
         assert!(m[13].approx_eq(&(-u.dot(eye)), eps5()));
         assert!(m[14].approx_eq(&(f.dot(eye)), eps5()));
-        // Guard the values are actually non-trivial (so deletes change them).
         assert!(f.z.abs() > 1.0e-3);
         assert!(s.dot(eye).abs() > 1.0e-3);
         assert!(u.dot(eye).abs() > 1.0e-3);
     }
 
-    // Kills transform_point mutants at 261 (`v.w != 1.0` -> `==`) and 262
-    // (the three perspective divides `/` -> `%` / `*`). A matrix that forces
-    // w' == 2 (not 0, not 1) must take the divide branch and divide by 2.
     #[test]
     fn transform_point_perspective_divide_by_two() {
         let m = Mat4::from_cols_array([
             1.0, 0.0, 0.0, 0.0, //
             0.0, 1.0, 0.0, 0.0, //
             0.0, 0.0, 1.0, 0.0, //
-            0.0, 0.0, 0.0, 2.0, // w' = 2 for any input point
+            0.0, 0.0, 0.0, 2.0, //
         ]);
         let r = m.transform_point(Vec3::new(3.0, 7.0, 9.0));
         assert!(r.approx_eq(&Vec3::new(1.5, 3.5, 4.5), eps5()));
@@ -893,35 +840,28 @@ mod cov {
         let t = Vec3::new(10.0, -20.0, 30.0);
         let m = Mat4::translation(t);
         let inv = m.inverse().unwrap();
-        // The inverse of a pure translation is the translation by -t.
         assert!(inv.approx_eq(&Mat4::translation(t.mul_scalar(-1.0)), eps5()));
-        // And it round-trips a point back to itself.
         let p = Vec3::new(1.0, 2.0, 3.0);
         assert!(inv.transform_point(m.transform_point(p)).approx_eq(&p, eps5()));
     }
 
     #[test]
     fn inverse_of_general_matrix_times_self_is_identity() {
-        // A general invertible affine matrix: scale, then rotate, then
-        // translate (det = 2*3*4 = 24, comfortably non-singular).
         let q = Quat::from_axis_angle(Vec3::new(1.0, 2.0, 3.0), 0.9).unwrap();
         let m = Mat4::translation(Vec3::new(5.0, -3.0, 2.0))
             .multiply(Mat4::from_quaternion(q))
             .multiply(Mat4::scale(Vec3::new(2.0, 3.0, 4.0)));
         let inv = m.inverse().unwrap();
-        // M * M⁻¹ ≈ I and M⁻¹ * M ≈ I.
         assert!(m.multiply(inv).approx_eq(&Mat4::IDENTITY, eps5()));
         assert!(inv.multiply(m).approx_eq(&Mat4::IDENTITY, eps5()));
     }
 
     #[test]
     fn inverse_of_singular_matrix_is_none() {
-        // Zero matrix: det = 0.
         assert!(Mat4::ZERO.inverse().is_none());
-        // Rank-deficient: two identical columns force det = 0.
         let rank_deficient = Mat4::from_cols_array([
             1.0, 2.0, 3.0, 4.0, //
-            1.0, 2.0, 3.0, 4.0, // duplicate of column 0
+            1.0, 2.0, 3.0, 4.0, //
             9.0, 8.0, 7.0, 6.0, //
             0.0, 1.0, 0.0, 1.0, //
         ]);
@@ -930,8 +870,6 @@ mod cov {
 
     #[test]
     fn inverse_of_non_finite_matrix_is_none() {
-        // A NaN entry propagates into det, which is then non-finite; the
-        // finiteness guard (and the `> ε` test) rejects it.
         let m = Mat4::from_cols_array([
             f32::NAN, 0.0, 0.0, 0.0, //
             0.0, 1.0, 0.0, 0.0, //

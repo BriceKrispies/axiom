@@ -1,12 +1,3 @@
-# Axiom layer manifest — axiom-entropy.
-#
-# The deterministic entropy layer: it keys the kernel's DeterministicRng by a
-# (seed, Address, version) tuple so every generated site draws from an
-# independent, reproducible stream. depends_on = kernel (the RNG + the digest used
-# for keying) and space (the Address that names the site). It does NOT invent a
-# new RNG or any noise function — those stay where they belong (the kernel's RNG;
-# noise graduates into a Phase 9 domain module).
-
 [layer]
 name = "entropy"
 crate_name = "axiom-entropy"
@@ -27,8 +18,6 @@ Address.
 introduced_capabilities = ["EntropyApi", "EntropyStream"]
 consumed_capabilities = ["DeterministicRng", "StableHash", "SpaceApi", "Address"]
 
-# Proof the dependencies are genuine: EntropyApi::stream digests a space Address
-# (via SpaceApi) and keys a kernel StableHash to seed the stream.
 [[proof_exports]]
 export = "EntropyApi"
 must_reference = ["StableHash", "Address"]

@@ -204,11 +204,8 @@ mod tests {
 
     #[test]
     fn projection_matrix_failure_is_wrapped() {
-        // A Camera holding intrinsics the math layer rejects exercises the
-        // `map_err` arm of `projection_matrix`. Construction normally validates,
-        // so the struct is built directly to reach this path. The quantity types
-        // accept these finite values; it is the perspective *relationship*
-        // (zero fovy/aspect/extent) the math layer rejects.
+        // Built directly (bypassing validation) to reach `map_err`: the
+        // quantities are finite, but the perspective relationship is invalid.
         let bad = Camera {
             fovy_radians: rad(0.0),
             aspect: rat(0.0),

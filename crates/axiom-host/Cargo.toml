@@ -7,15 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free and wasm-clean.
 crate-type = ["rlib"]
 
 [dependencies]
-# Layer 03 may import only lower layers. The Axiom Layer Law and
-# `cargo xtask check-architecture` enforce that nothing else slips in. Host
-# consumes runtime (stepping) and kernel (identities, telemetry, the `Ratio`
-# quantity type that validates viewport scale factors at the boundary), and math
-# (`Vec2`/`Mat3`) for the backend-neutral 2D draw contract (`Draw2dList`).
 axiom-kernel = { path = "../axiom-kernel" }
 axiom-runtime = { path = "../axiom-runtime" }
 axiom-math = { path = "../axiom-math" }

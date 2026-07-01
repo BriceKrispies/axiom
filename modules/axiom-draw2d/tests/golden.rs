@@ -1,6 +1,5 @@
 //! Golden / determinism proofs for `axiom-draw2d`, driven solely through the
 //! public [`Draw2dApi`] facade and the value vocabulary that crosses it.
-//!
 //! Three SPEC-04 §7 proofs:
 //!  1. **Layer-sort** — draws submitted out of layer order (with ties) come out
 //!     of `finish()` stably sorted by `(layer, submit-order)`.
@@ -42,7 +41,6 @@ fn at(min: f32) -> Rect {
     Rect::new(Vec2::new(min, 0.0), Vec2::ONE)
 }
 
-// ---------- 1. layer-sort golden ----------
 
 #[test]
 fn finish_stably_sorts_by_layer_then_submit_order() {
@@ -85,7 +83,6 @@ fn finish_stably_sorts_by_layer_then_submit_order() {
         .all(|w| w[0].0 != w[1].0 || w[0].1 < w[1].1));
 }
 
-// ---------- 2. determinism-as-function ----------
 
 /// A rich, deterministic frame exercising every landed surface: camera, the
 /// transform stack (push/pop), every shape kind, sprite, text, and both

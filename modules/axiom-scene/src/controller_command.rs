@@ -96,7 +96,6 @@ mod tests {
             let cmd = FrameCommand::new(0, CONTROLLER_KIND, bytes[..k].to_vec());
             assert_eq!(decode_controller(&cmd), None, "prefix len {k} must fail");
         }
-        // The full payload decodes.
         assert!(decode_controller(&full).is_some());
     }
 }

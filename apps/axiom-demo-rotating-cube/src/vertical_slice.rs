@@ -120,8 +120,7 @@ pub(crate) fn run_vertical_slice(
     api: &mut DemoRotatingCubeApi,
     tick: u64,
 ) -> VerticalSliceArtifact {
-    // ---- 1. Drive one host frame through the runtime (this runs the
-    //         cube-spin system) and build the engine frame contract. ----
+    // Drives one host frame through the runtime, which runs the cube-spin system.
     let host_input = HostFrameInput::new(tick + 1, FIXED_STEP_NANOS, api.viewport);
     let host_report = api
         .driver
@@ -132,15 +131,12 @@ pub(crate) fn run_vertical_slice(
         .build(&host_report, Vec::new())
         .expect("host report sequence is monotone");
 
-    // Record the frame into the introspection surface — every tick's frame
-    // becomes a queryable, serializable report.
     api.introspect.observe(&engine_frame);
     let frame_ctx = api.frame_api.frame_context(&engine_frame);
 
-    // ---- 2. The cube's rotation IS the engine's own telemetry: the cube-spin
-    //         system computed `cube.angle_rad` this step and it flows through
-    //         the frame. The value the cube is built from is the value
-    //         introspection reports — a single source of truth. ----
+    // The cube's rotation IS the engine's own telemetry: the cube-spin system
+    // computed `cube.angle_rad` this step, so the value the cube is built from
+    // is the same value introspection reports — a single source of truth.
     let angle_rad = engine_frame
         .runtime_step_summaries()
         .iter()
@@ -149,7 +145,6 @@ pub(crate) fn run_vertical_slice(
         .and_then(|m| m.value().as_float())
         .expect("the cube-spin system emits cube.angle_rad each step");
 
-    // ---- 3. Build a fresh resource table: built-in cube mesh + basic-lit material. ----
     let mut resources = api.resources_api.empty_table();
     let mesh_id = api.resources_api.register_cube_mesh(&mut resources);
     let base_color = Vec4::new(
@@ -162,12 +157,8 @@ pub(crate) fn run_vertical_slice(
         .resources_api
         .register_basic_lit_material(&mut resources, base_color);
 
-    // ---- 4. Build the scene through the shared `axiom-scene` facade — the one
-    //         scene model both demo apps now compose. The rotating parent's
-    //         rotation is set from the telemetry angle, so the cube's rotation
-    //         IS the engine's own `cube.angle_rad` — one source of truth. (The
-    //         browser app instead declares an engine `Spin`; here the headless
-    //         app drives rotation from telemetry for the introspection story.) ----
+    // The browser app instead declares an engine `Spin`; here the headless app
+    // drives the rotating parent's rotation from the telemetry angle above.
     let aspect = VIEWPORT_WIDTH as f32 / VIEWPORT_HEIGHT as f32;
     let mut scene = SceneApi::new();
     let rotation =
@@ -206,14 +197,12 @@ pub(crate) fn run_vertical_slice(
         )
         .expect("light parameters are valid");
 
-    // ---- 5. Advance the scene (frame-gated): runs transform propagation. ----
     let snapshot = scene.advance(tick, &frame_ctx);
 
-    // ---- 6. Resolve resources (un-nameable value). ----
+    // `resolved` is an un-nameable `axiom-resources` value; read into a plain
+    // artifact below via the facade's indexed accessors.
     let resolved = api.resources_api.resolve(&resources);
 
-    // ---- 7. Read the scene snapshot into the plain-data artifact the render
-    //         pipeline consumes — nothing downstream changes. ----
     let scene_snapshot_artifact = SceneSnapshotArtifact {
         nodes: snapshot
             .nodes()
@@ -258,7 +247,6 @@ pub(crate) fn run_vertical_slice(
             .collect(),
     };
 
-    // ---- 9. Read the resolved resources into a plain-data artifact. ----
     let meshes = (0..api.resources_api.resolved_mesh_count(&resolved))
         .map(|i| {
             let id = api
@@ -322,14 +310,12 @@ pub(crate) fn run_vertical_slice(
         .collect();
     let resolved_resources_artifact = ResolvedResourcesArtifact { meshes, materials };
 
-    // ---- 10. GLUE: scene snapshot + resolved resources -> render input plan. ----
     let render_input_artifact = scene_to_render_input(
         &api.math,
         &scene_snapshot_artifact,
         &resolved_resources_artifact,
     );
 
-    // ---- 11. Replay the render input plan into the real RenderApi builder. ----
     let mut render_input = api.render_api.new_input(
         render_input_artifact.viewport_width,
         render_input_artifact.viewport_height,
@@ -393,10 +379,8 @@ pub(crate) fn run_vertical_slice(
             );
         });
 
-    // ---- 12. Compile the render command list (un-nameable value). ----
     let render_commands = api.render_api.build_command_list(&render_input);
 
-    // ---- 13. Read the render command list into a plain-data artifact. ----
     let command_count = api.render_api.command_count(&render_commands);
     let render_command_list_artifact = RenderCommandListArtifact {
         commands: (0..command_count)
@@ -456,21 +440,16 @@ pub(crate) fn run_vertical_slice(
             .collect(),
     };
 
-    // ---- 14. GLUE: render command list -> GPU submission plan. ----
     let gpu_submission_artifact = render_command_list_to_gpu_submission(
         &render_command_list_artifact,
         render_input_artifact.viewport_width,
         render_input_artifact.viewport_height,
     );
 
-    // ---- 15. Replay the submission plan into the real WebGpuApi and submit. ----
     let mut submission = api.webgpu_api.new_submission(
         gpu_submission_artifact.target_width,
         gpu_submission_artifact.target_height,
     );
-    // Replay each command into the submission through the branchless `as_*`
-    // accessors: every command matches exactly one arm, and `Present` is the
-    // gated fallthrough. No `match` over the command shape.
     gpu_submission_artifact.commands.iter().for_each(|command| {
         command
             .as_clear_frame()
@@ -517,7 +496,6 @@ pub(crate) fn run_vertical_slice(
     });
     let gpu_report = api.webgpu_api.submit(submission);
 
-    // ---- 16. Read the GPU submission report into a plain-data artifact. ----
     let report_command_count = api.webgpu_api.report_command_count(&gpu_report);
     let gpu_submission_report_artifact = GpuSubmissionReportArtifact {
         target_width: gpu_submission_artifact.target_width,
@@ -531,7 +509,6 @@ pub(crate) fn run_vertical_slice(
         present_count: api.webgpu_api.report_present_count(&gpu_report),
     };
 
-    // ---- 17. Cube identity + transform from the snapshot artifact. ----
     let cube_node = scene_snapshot_artifact
         .nodes
         .iter()

@@ -1,4 +1,4 @@
-//! Game-world local tangent frame anchored on the planet. Audit: GW-E1.
+//! Game-world local tangent frame anchored on the planet.
 use crate::growth::ids::ChunkCoord;
 use crate::growth::model_planet::PlanetSurfaceAtlas;
 use crate::growth::model_world::{GameWorldLocalMap, CELL_SIZE_M, CHUNK_SIZE_CELLS};
@@ -8,7 +8,6 @@ impl GameWorldLocalMap {
     /// Anchor at a hospitable play start: a land region (elevation >= 0) as close
     /// as possible to mid-latitude (|lat| ~ 30 deg), avoiding the poles where the
     /// tangent basis degenerates. Falls back to any land region, then region 0.
-    /// Audit: GW-E1 anchor.
     pub fn anchored(atlas: &PlanetSurfaceAtlas) -> Self {
         // Prefer land near mid-latitude. We score every region and keep the best;
         // this is deterministic and independent of region ordering.
@@ -53,7 +52,7 @@ impl GameWorldLocalMap {
     /// the player clicks a spot, that pixel maps to a lat/long → unit direction,
     /// and the descended first-person world is anchored exactly there. The input
     /// is normalised (falling back to the north pole if it is degenerate) so the
-    /// tangent basis is always well-formed. Audit: GW-E1 anchor (caller-chosen).
+    /// tangent basis is always well-formed.
     pub fn anchored_at(atlas: &PlanetSurfaceAtlas, unit_dir: Vec3) -> Self {
         let dir = unit_dir.normalize().unwrap_or(Vec3::new(0.0, 1.0, 0.0));
         let (east, north) = axiom_math::tangent_basis(dir);
@@ -72,7 +71,7 @@ impl GameWorldLocalMap {
     /// `dist_m / radius`. This is the same continuous, well-defined function for
     /// every chunk, so two world positions that coincide (e.g. a shared chunk
     /// edge) always map to the *same* unit direction — which is what lets
-    /// neighbouring chunks share macro context exactly. Audit: GW-E1/E19.
+    /// neighbouring chunks share macro context exactly.
     pub fn world_metres_to_unit_dir(&self, x_m: f32, z_m: f32) -> [f32; 3] {
         let dir = Vec3::new(self.anchor_dir[0], self.anchor_dir[1], self.anchor_dir[2]);
         let east = Vec3::new(

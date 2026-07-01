@@ -134,7 +134,6 @@ mod tests {
         m.remember(entry(2, 11, 101));
         m.remember(entry(3, 12, 102));
         assert_eq!(m.len(), 2);
-        // The oldest (key 10) was dropped; the newest two remain, in order.
         let keys: Vec<u32> = m.entries().iter().map(|e| e.key_code()).collect();
         assert_eq!(keys, vec![11, 12]);
         assert_eq!(m.entries()[0].tick(), Tick::new(2));

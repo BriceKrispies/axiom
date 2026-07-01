@@ -41,14 +41,10 @@ fn run_scenario(initial_state: u64) -> RecordingApi {
         let frame = i as u64;
         let tick = i as u64;
         state = step_state(state, input);
-        // Canonical little-endian serialization of the deterministic state.
         let state_bytes = state.to_le_bytes().to_vec();
-        // Runtime artifact: the canonical (frame, tick) advance record.
         let mut runtime_bytes = Vec::new();
         runtime_bytes.extend_from_slice(&frame.to_le_bytes());
         runtime_bytes.extend_from_slice(&tick.to_le_bytes());
-        // Render artifact: a deterministic function of the state (what a real
-        // render boundary would derive); still just opaque bytes to the recorder.
         let render_bytes = state.rotate_left(7).to_le_bytes().to_vec();
         recorder
             .record_frame(
@@ -76,9 +72,6 @@ fn identical_runs_produce_byte_identical_recordings() {
         .compare_with(&replay)
         .expect("identical scenarios have matching timeline shapes");
 
-    // The deterministic pipeline must be byte-identical. If it ever is not, the
-    // report localizes the first divergence (frame / artifact / byte index)
-    // instead of an opaque failure — no ad-hoc debug printing required.
     assert!(
         report.matched(),
         "replay diverged at frame {:?}, artifact {:?}, byte {:?} (hashes {:#x} vs {:#x})",
@@ -95,15 +88,12 @@ fn identical_runs_produce_byte_identical_recordings() {
 #[test]
 fn a_perturbed_replay_is_caught_and_localized() {
     let original = run_scenario(1);
-    // A replay from a *different* initial state diverges immediately and
-    // deterministically; the report must localize it rather than panic.
     let perturbed = run_scenario(2);
 
     let report = original
         .compare_with(&perturbed)
         .expect("same scenario length and frame indices");
     assert!(!report.matched());
-    // The very first frame's state already differs, so frame 0 is reported.
     assert_eq!(report.first_mismatching_frame(), Some(FrameIndex::new(0)));
     assert!(report.first_mismatching_byte_index().is_some());
     assert_ne!(report.original_hash(), report.replay_hash());

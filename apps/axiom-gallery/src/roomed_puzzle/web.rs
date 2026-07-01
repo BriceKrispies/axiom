@@ -112,10 +112,6 @@ fn canvas_context() -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
     Some((canvas, ctx))
 }
 
-// ===========================================================================
-// Browser entry point.
-// ===========================================================================
-
 /// Boot the editor/playtest surface: install the canvas painter, the keyboard
 /// handler, and the fixed-step run loop, then draw the first frame. Called from
 /// the page once the wasm module is ready.
@@ -151,10 +147,6 @@ pub fn playtest_restart() {
         }
     });
 }
-
-// ===========================================================================
-// Editor-facing API (called from the page chrome).
-// ===========================================================================
 
 /// Select a palette kind: `"floor"`, `"wall"`, `"entrance"`, `"exit"`,
 /// `"button"`, or `"door"`. Unknown values are ignored.
@@ -252,10 +244,6 @@ pub fn status_line() -> String {
             .unwrap_or_default()
     })
 }
-
-// ===========================================================================
-// Input plumbing.
-// ===========================================================================
 
 /// Map a palette string to a [`TileKind`].
 fn tile_from_str(kind: &str) -> Option<TileKind> {
@@ -412,10 +400,6 @@ fn pointer_position(canvas: &HtmlCanvasElement, e: &PointerEvent) -> (f32, f32) 
     (x as f32, y as f32)
 }
 
-// ===========================================================================
-// The fixed-step run loop.
-// ===========================================================================
-
 /// Start the `requestAnimationFrame` loop: advance ghost replay at the fixed
 /// step (playtest only) and draw every frame.
 fn start_run_loop() {
@@ -457,10 +441,6 @@ fn request_frame(cb: Option<&Closure<dyn FnMut(f64)>>) {
         let _ = window().request_animation_frame(cb.as_ref().unchecked_ref());
     }
 }
-
-// ===========================================================================
-// Engine-driven responsive layout (mobile-first).
-// ===========================================================================
 
 /// The side-panel element id (must match `web/index.html`).
 const SIDE_ID: &str = "side";
@@ -586,10 +566,6 @@ fn read_safe_area_insets() -> HostSafeAreaInsets {
     .unwrap_or_else(|_| HostSafeAreaInsets::none())
 }
 
-// ===========================================================================
-// Rendering — top-down depth cues on a 2D canvas.
-// ===========================================================================
-
 /// Draw the current frame (edit grid or live game) onto the board canvas.
 fn draw(app: &RoomedPuzzleApp) {
     let Some((canvas, ctx)) = canvas_context() else {
@@ -608,7 +584,6 @@ fn draw(app: &RoomedPuzzleApp) {
         canvas.set_height(want_h);
     }
 
-    // Background.
     ctx.set_global_alpha(1.0);
     ctx.set_fill_style_str("#15171c");
     ctx.fill_rect(0.0, 0.0, want_w as f64, want_h as f64);
@@ -665,11 +640,9 @@ fn draw_tile(ctx: &CanvasRenderingContext2d, x: f64, y: f64, tile: RenderTile) {
     );
     let (top_left, bottom_right) = if raised { (light, dark) } else { (dark, light) };
 
-    // Top + left edges.
     ctx.set_fill_style_str(top_left);
     ctx.fill_rect(px, py, s, bevel);
     ctx.fill_rect(px, py, bevel, s);
-    // Bottom + right edges.
     ctx.set_fill_style_str(bottom_right);
     ctx.fill_rect(px, py + s - bevel, s, bevel);
     ctx.fill_rect(px + s - bevel, py, bevel, s);
@@ -699,10 +672,6 @@ fn draw_actor(ctx: &CanvasRenderingContext2d, actor: &RenderActor) {
     ctx.stroke_rect(x, y, s, s);
     ctx.set_global_alpha(1.0);
 }
-
-// ===========================================================================
-// Editor UI sync.
-// ===========================================================================
 
 /// The validation summary text for the current editor state.
 fn validation_summary(app: &RoomedPuzzleApp) -> String {

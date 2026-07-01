@@ -34,7 +34,6 @@ impl OpaquePayload {
             })
     }
 
-    /// The payload bytes.
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -110,8 +109,8 @@ mod tests {
     #[test]
     fn decode_rejects_truncation() {
         let mut w = BinaryWriter::new();
-        w.write_u32(8); // declares 8 body bytes
-        w.write_u8(1); // but only one present
+        w.write_u32(8);
+        w.write_u8(1);
         let mut r = BinaryReader::new(w.as_bytes());
         assert!(OpaquePayload::read_from(&mut r).is_err());
     }

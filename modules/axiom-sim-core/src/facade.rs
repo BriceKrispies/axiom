@@ -50,8 +50,6 @@ impl SimCoreApi {
         }
     }
 
-    // --- value constructors (opaque FactValue) ---
-
     /// A signed-integer fact value.
     pub fn value_signed(&self, value: i64) -> FactValue {
         FactValue::Signed(value)
@@ -73,8 +71,6 @@ impl SimCoreApi {
         FactValue::Entity(entity)
     }
 
-    // --- cause constructors (opaque CauseRef) ---
-
     /// A cause referencing a prior causal event.
     pub fn cause_event(&self, event: CausalEventId) -> CauseRef {
         CauseRef::Event(event)
@@ -91,8 +87,6 @@ impl SimCoreApi {
     pub fn cause_command(&self) -> CauseRef {
         CauseRef::Command
     }
-
-    // --- relation endpoint constructors (opaque RelationEndpoint) ---
 
     /// A relation endpoint referencing an ECS entity.
     pub fn endpoint_entity(&self, entity: EntityHandle) -> RelationEndpoint {

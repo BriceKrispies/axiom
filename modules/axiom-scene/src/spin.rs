@@ -65,7 +65,6 @@ mod tests {
     fn rotation_at_zero_tick_is_identity_rotation() {
         let s = Spin::new(Vec3::UNIT_Y, 360);
         let q = s.rotation_at(0).unwrap();
-        // Angle 0 -> identity quaternion (w = 1).
         assert!((q.w - 1.0).abs() < 1.0e-6);
     }
 
@@ -80,7 +79,6 @@ mod tests {
     #[test]
     fn zero_period_is_treated_as_one_and_does_not_divide_by_zero() {
         let s = Spin::new(Vec3::UNIT_Y, 0);
-        // period.max(1) == 1, so tick % 1 == 0 -> fraction 0 -> identity, no panic.
         let q = s.rotation_at(5).unwrap();
         assert!((q.w - 1.0).abs() < 1.0e-6);
     }

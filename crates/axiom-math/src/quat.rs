@@ -341,14 +341,9 @@ mod tests {
         assert_eq!(err.code(), MathErrorCode::NonFiniteScalar);
     }
 
-    // look_rotation: a node carrying it maps its local axes (+X, +Y, -Z) onto
-    // the world basis (right, up, forward). Each case is chosen to land in a
-    // distinct Shepperd branch (positive trace, then each dominant diagonal).
     fn assert_look_maps_axes(forward: Vec3, up: Vec3, right: Vec3, real_up: Vec3) {
         let q = Quat::look_rotation(forward, up).unwrap();
-        // Unit rotation.
         assert!((q.length() - 1.0).abs() <= eps().value());
-        // Local -Z faces `forward`; +X -> right; +Y -> the orthonormalised up.
         assert!(q
             .rotate(Vec3::new(0.0, 0.0, -1.0))
             .approx_eq(&forward, eps()));
@@ -358,7 +353,6 @@ mod tests {
 
     #[test]
     fn look_rotation_forward_is_identity_when_facing_negative_z() {
-        // trace > 0 branch: basis already aligned, rotation is identity.
         let q = Quat::look_rotation(Vec3::new(0.0, 0.0, -1.0), Vec3::UNIT_Y).unwrap();
         assert!(q.approx_eq(&Quat::IDENTITY, eps()));
         assert_look_maps_axes(
@@ -371,7 +365,6 @@ mod tests {
 
     #[test]
     fn look_rotation_covers_x_dominant_branch() {
-        // forward +Z, up -Y -> R = diag(1,-1,-1), m00 dominant.
         assert_look_maps_axes(
             Vec3::new(0.0, 0.0, 1.0),
             Vec3::new(0.0, -1.0, 0.0),
@@ -382,7 +375,6 @@ mod tests {
 
     #[test]
     fn look_rotation_covers_y_dominant_branch() {
-        // forward +Z, up +Y -> R = diag(-1,1,-1), m11 dominant.
         assert_look_maps_axes(
             Vec3::new(0.0, 0.0, 1.0),
             Vec3::UNIT_Y,
@@ -393,7 +385,6 @@ mod tests {
 
     #[test]
     fn look_rotation_covers_z_dominant_branch() {
-        // forward -Z, up -Y -> R = diag(-1,-1,1), m22 dominant.
         assert_look_maps_axes(
             Vec3::new(0.0, 0.0, -1.0),
             Vec3::new(0.0, -1.0, 0.0),
@@ -404,14 +395,12 @@ mod tests {
 
     #[test]
     fn look_rotation_rejects_degenerate_inputs() {
-        // Zero-length forward.
         assert_eq!(
             Quat::look_rotation(Vec3::ZERO, Vec3::UNIT_Y)
                 .unwrap_err()
                 .code(),
             MathErrorCode::InvalidMatrixOperation
         );
-        // Forward parallel to up.
         assert_eq!(
             Quat::look_rotation(Vec3::UNIT_Y, Vec3::UNIT_Y)
                 .unwrap_err()
@@ -422,15 +411,13 @@ mod tests {
 
     #[test]
     fn multiplication_order_is_deterministic() {
-        // Rotate +X by (rot_z then rot_y): rot_z sends X to Y, rot_y sends Y to Y.
         let rot_z = Quat::from_axis_angle(Vec3::UNIT_Z, std::f32::consts::FRAC_PI_2).unwrap();
         let rot_y = Quat::from_axis_angle(Vec3::UNIT_Y, std::f32::consts::FRAC_PI_2).unwrap();
-        let composed = rot_y.multiply(rot_z); // apply rot_z first, then rot_y
+        let composed = rot_y.multiply(rot_z);
         let direct = rot_y.rotate(rot_z.rotate(Vec3::UNIT_X));
         let through_q = composed.rotate(Vec3::UNIT_X);
         assert!(through_q.approx_eq(&direct, eps()));
 
-        // And the reverse composition is genuinely different.
         let reverse = rot_z.multiply(rot_y);
         assert!(!reverse.rotate(Vec3::UNIT_X).approx_eq(&through_q, eps()));
     }
@@ -525,9 +512,6 @@ mod cov {
         assert!(base.approx_eq(&base, eps));
     }
 
-    // Kills normalize divide mutants at 78/79/80 (`/ len` -> `% len` / `* len`).
-    // q = (2,2,2,2) has length 4, so each component normalizes to exactly 0.5.
-    // The mutated forms give 2*4=8 (mul) or 2%4=2 (rem), both checkable.
     #[test]
     fn normalize_divides_each_component_by_length() {
         let n = Quat::new(2.0, 2.0, 2.0, 2.0).normalize().unwrap();
@@ -537,9 +521,6 @@ mod cov {
         assert_eq!(n.w, 0.5);
     }
 
-    // Kills inverse divide mutants at 101 (`/ ls` -> `% ls` / `* ls`) for all
-    // four components. q = (1,2,3,4) has length_squared 30; inverse is
-    // conjugate/30 = (-1/30, -2/30, -3/30, 4/30).
     #[test]
     fn inverse_divides_conjugate_by_length_squared() {
         let inv = Quat::new(1.0, 2.0, 3.0, 4.0).inverse().unwrap();
@@ -550,21 +531,14 @@ mod cov {
         assert!((inv.w - (4.0 / ls)).abs() < 1.0e-7);
     }
 
-    // Kills every Hamilton-product mutant at 110..=113. Operands have distinct
-    // nonzero integer components so each term is value-significant; the exact
-    // product is asserted component-wise.
     #[test]
     fn multiply_hamilton_product_is_exact() {
         let a = Quat::new(1.0, 2.0, 3.0, 4.0);
         let b = Quat::new(5.0, 6.0, 7.0, 8.0);
         let r = a.multiply(b);
-        // x = aw*bx + ax*bw + ay*bz - az*by = 20 + 8 + 14 - 18 = 24
         assert_eq!(r.x, 24.0);
-        // y = aw*by - ax*bz + ay*bw + az*bx = 24 - 7 + 16 + 15 = 48
         assert_eq!(r.y, 48.0);
-        // z = aw*bz + ax*by - ay*bx + az*bw = 28 + 6 - 10 + 24 = 48
         assert_eq!(r.z, 48.0);
-        // w = aw*bw - ax*bx - ay*by - az*bz = 32 - 5 - 12 - 21 = -6
         assert_eq!(r.w, -6.0);
     }
 }

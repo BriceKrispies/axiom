@@ -1,5 +1,4 @@
 //! Deterministic broad-phase candidate pairing.
-//!
 //! The broad phase turns the collider set into the unordered collider pairs whose
 //! shapes *could* be in contact, so the (more expensive) narrow phase only tests
 //! those. The broad phase uses a simple, fully deterministic `O(n²)` scan — no
@@ -9,7 +8,6 @@
 //! and their world AABBs overlap, or exactly one is an (infinite) plane — a plane
 //! cannot be culled by bounds, so every finite collider is always a candidate
 //! against every plane. Two planes never pair (no finite shape to contact).
-//!
 //! Output pairs are sorted by `(a, b)` collider handle, so the candidate list is
 //! a deterministic function of world state, independent of scan order.
 

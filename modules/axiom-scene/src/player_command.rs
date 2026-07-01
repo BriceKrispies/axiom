@@ -69,7 +69,6 @@ mod tests {
             let cmd = FrameCommand::new(0, MOVE_KIND, bytes[..k].to_vec());
             assert_eq!(decode_move(&cmd), None, "prefix len {k} must fail");
         }
-        // The full payload decodes.
         assert!(decode_move(&full).is_some());
     }
 }

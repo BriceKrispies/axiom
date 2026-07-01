@@ -1,5 +1,3 @@
-# Axiom module manifest — axiom-resources.
-
 [module]
 name = "resources"
 crate_name = "axiom-resources"

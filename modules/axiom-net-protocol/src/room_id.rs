@@ -32,7 +32,6 @@ impl RoomId {
         })
     }
 
-    /// The room id bytes.
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.0
     }

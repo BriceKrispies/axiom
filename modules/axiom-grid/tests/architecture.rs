@@ -1,5 +1,4 @@
 //! Architecture-boundary tests for the `axiom-grid` engine module.
-//!
 //! The workspace `xtask` checker enforces the global Module Law (allowed layers,
 //! no module-to-module deps, single facade). These per-module tests are the
 //! second line of defence: they scan this crate's `src/` tree for forbidden
@@ -9,8 +8,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-// Facade-only imports for the determinism check below: the module is driven
-// solely through `GridApi` plus the value-type vocabulary it traffics in.
 use axiom_grid::{Cell, GridApi};
 
 fn src_dir() -> PathBuf {
@@ -139,7 +136,6 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest + facade ----------
 
 #[test]
 fn module_toml_exists_and_is_isolated() {
@@ -154,8 +150,6 @@ fn module_toml_exists_and_is_isolated() {
 
 #[test]
 fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
-    // Module Law #8: exactly one behavioral facade (GridApi), plus the identity
-    // vocabulary (the value types). All other public exports forbidden.
     let lib = read(&src_dir().join("lib.rs"));
     let pub_uses: Vec<&str> = lib
         .lines()
@@ -179,7 +173,6 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
     );
 }
 
-// ---------- legal layer imports only ----------
 
 #[test]
 fn grid_imports_only_legal_layers() {
@@ -255,7 +248,6 @@ fn no_layer_imports_axiom_grid() {
     }
 }
 
-// ---------- source hygiene: platform / determinism / foreign concepts ----------
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -336,9 +328,6 @@ fn no_global_mutable_or_nondeterministic_collections() {
 
 #[test]
 fn no_foreign_engine_subsystem_concepts() {
-    // Grid owns the board/tile/path nouns; it must not absorb the concepts owned
-    // by other subsystems, nor reference foreign engine crates. Notably it must
-    // not become a navmesh/agent: `agent` decides, `grid` computes the route.
     assert_absent(
         &[
             "axiom_scene",
@@ -389,7 +378,6 @@ fn every_source_module_is_declared_in_lib_rs() {
     );
 }
 
-// ---------- facade-level determinism proof ----------
 
 /// Two independently-built identical boards, queried for the same path, must
 /// return byte-identical routes — the replay invariant, through the facade.

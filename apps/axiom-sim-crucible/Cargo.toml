@@ -6,15 +6,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-# A library (the testable crucible: scenario, run loop, report, replay) plus a
-# thin binary that runs it headlessly and prints the structured report.
 [lib]
 crate-type = ["rlib"]
 
 [dependencies]
-# The two substrate crates the app composes: the ECS layer (entity registry +
-# generational handles) and the sim-core module (the SimCoreApi facade). No
-# browser/GPU/scene/physics deps — this is a headless deterministic app.
 axiom-ecs = { path = "../../crates/axiom-ecs" }
 axiom-sim-core = { path = "../../modules/axiom-sim-core" }
 

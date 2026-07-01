@@ -370,8 +370,6 @@ mod wasm_exports {
 
     #[wasm_bindgen]
     impl WasmGame {
-        // --- Timers (SPEC-07) ---
-
         /// Schedule a one-shot timer registered at `tick`, due `delay` ticks later
         /// (`timerAfter`). The id crosses back as a JS number.
         #[wasm_bindgen(js_name = timerAfter)]
@@ -403,8 +401,6 @@ mod wasm_exports {
                 .collect()
         }
 
-        // --- State machines (SPEC-07) ---
-
         /// Create a machine of `state_count` states starting in `initial`, entered
         /// at `tick` (`machineCreate`).
         #[wasm_bindgen(js_name = machineCreate)]
@@ -433,8 +429,6 @@ mod wasm_exports {
         pub fn machine_ticks_in_state(&self, id: f64, tick: f64) -> f64 {
             self.bridge.machine_ticks_in_state(id as u64, tick as u64) as f64
         }
-
-        // --- Tweens (SPEC-09) ---
 
         /// Add a tween from its scalar curve (`tweenAdd`): the TS edge destructures
         /// the `TweenCurve` object into these scalar args (the tween analogue of
@@ -536,18 +530,17 @@ mod tests {
     /// and an eased tween, pumped one tick per advance over a fixed window.
     fn scripted_time_hashes() -> Vec<(u64, u64)> {
         let mut b = bridge();
-        // Schedule at tick 0 (the schedule is populated before its due ticks are
-        // pumped, exactly as the loop schedules during an author update).
-        let _one_shot = b.timer_after(0, 3); // id 1: fires at tick 3
-        let _repeating = b.timer_every(0, 4); // id 2: fires at ticks 4, 8
-        let canceled = b.timer_after(0, 5); // id 3: cancelled before firing
+        // The schedule is populated before its due ticks are pumped, exactly as
+        // the loop schedules during an author update.
+        let _one_shot = b.timer_after(0, 3);
+        let _repeating = b.timer_every(0, 4);
+        let canceled = b.timer_after(0, 5);
         assert!(b.timer_cancel(canceled));
-        // A 5-tick eased tween 0 -> 100 (id 0, ease index 4 = cubicOut).
+        // Ease index 4 = cubicOut.
         let tween = b.tween_add(0.0, 100.0, 5, 4);
         (0..10u64)
             .map(|tick| {
-                b.advance(STEP); // runs exactly tick `tick`
-                // The cancelled timer never appears.
+                b.advance(STEP);
                 assert!(!b.timers_due(tick).contains(&canceled));
                 (tick, time_hash(&b, tick, &[tween]))
             })
@@ -556,12 +549,10 @@ mod tests {
 
     #[test]
     fn the_time_boundary_replays_to_a_byte_identical_hash_sequence() {
-        // The keystone proof: the same scripted timer/tween schedule produces a
-        // byte-identical per-tick read-hash sequence across two independent runs.
         let first = scripted_time_hashes();
         assert_eq!(first, scripted_time_hashes());
-        // The schedule genuinely evolves (timers fire on distinct ticks, the tween
-        // ramps), so the fingerprint is not constant — real work.
+        // The schedule genuinely evolves (timers fire, the tween ramps), so the
+        // fingerprint is not constant.
         let hashes: Vec<u64> = first.iter().map(|&(_, h)| h).collect();
         assert!(hashes.iter().any(|&h| h != hashes[0]));
     }
@@ -569,21 +560,19 @@ mod tests {
     #[test]
     fn a_one_shot_timer_fires_once_at_its_deadline_and_every_re_arms() {
         let mut b = bridge();
-        let one_shot = b.timer_after(0, 3); // fires at tick 3
-        let repeating = b.timer_every(0, 4); // fires at ticks 4, 8
+        let one_shot = b.timer_after(0, 3);
+        let repeating = b.timer_every(0, 4);
         let due: Vec<Vec<u64>> = (0..10u64)
             .map(|tick| {
                 b.advance(STEP);
                 b.timers_due(tick)
             })
             .collect();
-        // The one-shot fires only on tick 3.
         assert_eq!(due[3], vec![one_shot]);
         assert!(due
             .iter()
             .enumerate()
             .all(|(t, ids)| (t == 3) == ids.contains(&one_shot)));
-        // The repeating timer fires on ticks 4 and 8 (cadence 4), nowhere else.
         assert_eq!(due[4], vec![repeating]);
         assert_eq!(due[8], vec![repeating]);
         assert!(due
@@ -595,13 +584,10 @@ mod tests {
     #[test]
     fn a_tween_ramps_to_its_end_value_then_completes_exactly_once() {
         let mut b = bridge();
-        // Run tick 0 with no tween, then add a linear tween 0 -> 10 over 4 ticks
-        // "at tick 0": the next pumped tick (tick 1) is its first sample, exactly
-        // as the loop adds a tween during an author update after that tick pumped.
-        b.advance(STEP); // tick 0
+        // Adding the tween "at tick 0" (after tick 0 pumped) means the next
+        // pumped tick (tick 1) is its first sample.
+        b.advance(STEP);
         let tween = b.tween_add(0.0, 10.0, 4, 0);
-        // The log holds only the most recent frame, so each tick's value/completion
-        // is read in the same iteration as its advance (as the TS pump does).
         let samples: Vec<(u64, f64, bool)> = (1..7u64)
             .map(|tick| {
                 b.advance(STEP);
@@ -610,9 +596,8 @@ mod tests {
                 (tick, value, completed)
             })
             .collect();
-        // First sample (tick 1) is a quarter along the linear ramp -> value 2.5.
+        // Quarter along the linear 0->10 ramp.
         assert!((samples[0].1 - 2.5).abs() < 1e-3);
-        // Completion fires exactly once, on tick 4, carrying the end value 10.0.
         let completed: Vec<&(u64, f64, bool)> = samples.iter().filter(|s| s.2).collect();
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].0, 4);
@@ -623,31 +608,28 @@ mod tests {
     fn a_cancelled_tween_stops_sampling() {
         let mut b = bridge();
         let live = b.tween_add(0.0, 5.0, 10, 0);
-        b.advance(STEP); // tick 0: added before this pump, so sampled here
-        b.advance(STEP); // tick 1: sampled again
+        // Added before the first pump, so it is already sampled on tick 0.
+        b.advance(STEP);
+        b.advance(STEP);
         assert!(b.tween_active(1).contains(&live));
         b.tween_cancel(live);
-        b.advance(STEP); // tick 2: no longer sampled
+        b.advance(STEP);
         assert!(!b.tween_active(2).contains(&live));
-        // Not sampled on tick 2 -> the value read is the neutral 0.0.
         assert!((b.tween_value(live, 2) - 0.0).abs() < 1e-9);
-        // Cancelling an unknown id is a clean no-op.
+        // Cancelling an unknown id must not panic.
         b.tween_cancel(9999);
     }
 
     #[test]
     fn a_state_machine_tracks_its_current_index_and_dwell_time() {
         let mut b = bridge();
-        // A 3-state machine starting in state 0 at tick 0.
         let m = b.machine_create(0, 3, 0);
         assert_eq!(b.machine_current(m), 0);
-        // As of tick 5 it has dwelt 5 ticks in state 0.
         assert_eq!(b.machine_ticks_in_state(m, 5), 5);
-        // Transition to state 2 at tick 5 resets the dwell clock.
+        // Transitioning resets the dwell clock.
         b.machine_transition(m, 5, 2);
         assert_eq!(b.machine_current(m), 2);
         assert_eq!(b.machine_ticks_in_state(m, 8), 3);
-        // An unknown machine reads neutral (index 0, dwell 0).
         assert_eq!(b.machine_current(9999), 0);
         assert_eq!(b.machine_ticks_in_state(9999, 8), 0);
     }
@@ -655,7 +637,6 @@ mod tests {
     #[test]
     fn reads_for_an_unpumped_tick_are_empty() {
         let b = bridge();
-        // Nothing has been pumped, so every per-tick read is empty / neutral.
         assert!(b.timers_due(0).is_empty());
         assert!(b.tween_active(0).is_empty());
         assert!(b.tween_completed(0).is_empty());

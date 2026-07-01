@@ -54,9 +54,9 @@ mod tests {
     #[test]
     fn distinct_address_seed_or_version_are_independent() {
         let base = first_n(7, &addr(&[1, 2]), 3, 8);
-        assert_ne!(base, first_n(7, &addr(&[1, 3]), 3, 8)); // address
-        assert_ne!(base, first_n(8, &addr(&[1, 2]), 3, 8)); // seed
-        assert_ne!(base, first_n(7, &addr(&[1, 2]), 4, 8)); // version
+        assert_ne!(base, first_n(7, &addr(&[1, 3]), 3, 8));
+        assert_ne!(base, first_n(8, &addr(&[1, 2]), 3, 8));
+        assert_ne!(base, first_n(7, &addr(&[1, 2]), 4, 8));
     }
 
     #[test]
@@ -64,7 +64,7 @@ mod tests {
         let a = addr(&[5]);
         let v3 = first_n(1, &a, 3, 8);
         assert_ne!(v3, first_n(1, &a, 4, 8));
-        assert_eq!(v3, first_n(1, &a, 3, 8)); // restoring the version restores the stream
+        assert_eq!(v3, first_n(1, &a, 3, 8));
     }
 
     #[test]
@@ -116,7 +116,6 @@ mod tests {
 
     #[test]
     fn keying_is_collision_free_over_a_swept_domain() {
-        // 125 distinct (seed, address, version) tuples -> 125 distinct stream keys.
         let mut keys = HashSet::new();
         for seed in 0..5u64 {
             for x in 0..5u64 {

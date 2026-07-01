@@ -48,12 +48,8 @@ mod frame_timing;
 mod frame_viewport;
 mod step_budget;
 
-// --- Curated public surface ---
-
-// Primary facade.
 pub use frame_api::FrameApi;
 
-// Frame boundary data types future engine systems must be able to name.
 pub use engine_frame::EngineFrame;
 pub use frame_accumulator::FrameAccumulator;
 pub use frame_builder::FrameBuilder;

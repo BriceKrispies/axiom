@@ -219,7 +219,6 @@ mod tests {
         let mut t = FrameTimeline::new(3, 1 << 20).unwrap();
         (0..5).for_each(|f| t.push_frame(cap(f, 0)).unwrap());
         let order: Vec<u64> = t.captures().iter().map(|c| c.frame_index().raw()).collect();
-        // Only the 3 newest survive, oldest-first.
         assert_eq!(order, vec![2, 3, 4]);
         assert_eq!(t.len(), 3);
     }

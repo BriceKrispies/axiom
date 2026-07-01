@@ -1,5 +1,4 @@
 //! Architecture-boundary tests for the `axiom-tween` engine module.
-//!
 //! The workspace `xtask` checker enforces the global Module Law; these per-module
 //! tests are the second line of defence, scanning this crate's `src/` tree for
 //! forbidden tokens so module-internal regressions fail at `cargo test` time.
@@ -9,8 +8,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-// Facade-only imports for the determinism check: the module is driven solely
-// through `TweenApi` plus the value vocabulary it traffics in.
 use axiom_tween::{Ease, TweenApi, TweenSpec, TweenValue};
 
 fn src_dir() -> PathBuf {
@@ -139,7 +136,6 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest + facade ----------
 
 #[test]
 fn module_toml_exists_and_is_isolated() {
@@ -154,8 +150,6 @@ fn module_toml_exists_and_is_isolated() {
 
 #[test]
 fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
-    // Module Law #8: exactly one behavioral facade (TweenApi), plus the value
-    // vocabulary. All other public exports forbidden.
     let lib = read(&src_dir().join("lib.rs"));
     let pub_uses: Vec<&str> = lib
         .lines()
@@ -179,7 +173,6 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
     );
 }
 
-// ---------- legal layer imports only ----------
 
 #[test]
 fn tween_imports_only_the_kernel() {
@@ -247,7 +240,6 @@ fn no_layer_imports_axiom_tween() {
     }
 }
 
-// ---------- source hygiene: platform / determinism / foreign concepts ----------
 
 #[test]
 fn no_browser_platform_or_renderer_apis() {
@@ -326,8 +318,6 @@ fn no_global_mutable_or_nondeterministic_collections() {
 
 #[test]
 fn no_ui_or_foreign_subsystem_concepts() {
-    // Tween is non-UI value interpolation; it must not absorb UI/render/scene
-    // concepts (that conflation is exactly why it is not housed in interface).
     assert_absent(
         &[
             "axiom_interface",
@@ -377,11 +367,7 @@ fn every_source_module_is_declared_in_lib_rs() {
     );
 }
 
-// ---------- facade-level determinism proof ----------
 
-/// Two independently-built tween tables, fed the identical spec and the identical
-/// elapsed sequence, must produce identical sample series — presentation
-/// determinism through the facade.
 #[test]
 fn identical_tweens_replay_to_identical_samples() {
     let run = || {

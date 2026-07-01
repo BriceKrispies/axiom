@@ -1,20 +1,3 @@
-# Axiom module manifest — axiom-client-core (an ENGINE module).
-#
-# This module owns the *portable* client-side multiplayer state machine. It does
-# not open sockets, does not know the browser, and does not speak the wire
-# format. It consumes the authoritative values a server sends — a welcome, a
-# snapshot acknowledgement, an intent rejection — and produces the outbound
-# intents a client sends, tracking the connection state, the monotonically
-# increasing client sequence, the latest authoritative server tick, and the
-# queue of pending (unacknowledged) intents.
-#
-# It is an *isolated engine module* (allowed_modules = []): it composes no other
-# module — in particular NOT axiom-net-protocol, because an engine module may
-# never depend on another module. The boundary is therefore plain primitives;
-# the app (or the TypeScript package) translates between this state machine and
-# the wire codec. It depends only on the kernel, using the deterministic `Tick`
-# to model and order the authoritative server tick.
-
 [module]
 name = "client-core"
 crate_name = "axiom-client-core"

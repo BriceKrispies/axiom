@@ -61,8 +61,7 @@ dylint_linting::declare_late_lint! {
     "engine function exceeds the line-count budget"
 }
 
-/// Maximum source lines for one engine function body. TUNABLE — keep as a
-/// named const; the orchestrator verifies the real engine stays under it.
+/// Maximum source lines for one engine function body.
 const MAX_LINES: usize = 120;
 
 impl<'tcx> LateLintPass<'tcx> for EngineNoLargeFunctions {
@@ -75,17 +74,12 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoLargeFunctions {
         span: Span,
         def_id: LocalDefId,
     ) {
-        // Only real named functions / methods — skip closures (their size is
-        // accounted for by the enclosing named function).
         if let FnKind::Closure = kind {
             return;
         }
-        // Macro-generated code can be arbitrarily long; blame the macro author,
-        // not the call site.
         if span.from_expansion() {
             return;
         }
-        // Measure the function's span in source lines.
         let sm = cx.tcx.sess.source_map();
         let lo = sm.lookup_char_pos(span.lo()).line;
         let hi = sm.lookup_char_pos(span.hi()).line;
@@ -93,12 +87,9 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoLargeFunctions {
         if lines <= MAX_LINES {
             return;
         }
-        // Only engine spine source — crates/<layer>/src/ and modules/<mod>/src/.
         if !is_engine_file(cx, span) {
             return;
         }
-        // Exempt test functions; long #[test] bodies are normal in this repo
-        // (they set up elaborate state for a single assertion).
         let hir_id = cx.tcx.local_def_id_to_hir_id(def_id);
         if is_in_test(cx.tcx, hir_id) {
             return;

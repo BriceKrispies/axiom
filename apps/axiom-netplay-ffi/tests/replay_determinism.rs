@@ -47,7 +47,6 @@ fn replay_from_zero_reproduces_hashes() {
 
 #[test]
 fn replay_from_zero_reproduces_snapshot_bytes_when_supported() {
-    // Byte-equality of canonical snapshot bytes is the determinism proof.
     let s = driven_session();
     let record = s.replay_record();
 

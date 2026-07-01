@@ -1,12 +1,10 @@
 //! The deterministic narrow phase: candidate pairs → contact manifolds.
-//!
 //! `generate_contacts` takes the broad phase's candidate pairs and produces a
 //! [`ContactManifold`] for each pair that is genuinely overlapping. The narrow
 //! phase implements the four classical pairings — sphere/sphere, sphere/plane,
 //! sphere/box, and box/plane — in both collider orderings; every other pairing
 //! (box/box, any capsule, plane/plane) deterministically produces **no** contact
 //! and is a documented deferral (see `ROADMAP.md`).
-//!
 //! ## Branchless shape dispatch
 //! There is no `match` on shape kinds. Each ordered `(kind_a, kind_b)` pairing
 //! indexes a fixed 16-entry function table (`kind_a.index() * 4 + kind_b.index()`)
@@ -14,7 +12,6 @@
 //! reversed orderings (box/sphere, plane/sphere, plane/box) reuse the canonical
 //! generator with arguments swapped and the resulting normal flipped, so the
 //! geometry is written once.
-//!
 //! ## Conventions (deterministic, documented)
 //! - The contact **normal points from collider A to collider B** (A/B in
 //!   ascending handle order — see [`ContactManifold`]).
@@ -285,7 +282,6 @@ mod tests {
         assert!(d < 1.0e-9, "expected {b:?}, got {a:?}");
     }
 
-    // ---- sphere / sphere ----
 
     #[test]
     fn sphere_sphere_hit_reports_axis_normal_and_depth() {
@@ -305,7 +301,6 @@ mod tests {
         assert!(sphere_sphere(sphere(1.0), Vec3::ZERO, sphere(1.0), Vec3::ZERO).is_none());
     }
 
-    // ---- sphere / plane ----
 
     #[test]
     fn sphere_plane_hit_pushes_along_plane_normal() {
@@ -321,7 +316,6 @@ mod tests {
         assert!(sphere_plane(sphere(1.0), Vec3::new(0.0, 2.0, 0.0), plane(), Vec3::ZERO).is_none());
     }
 
-    // ---- box / plane ----
 
     #[test]
     fn box_plane_hit_uses_projection_radius() {
@@ -336,7 +330,6 @@ mod tests {
         assert!(box_plane(box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 2.0, 0.0), plane(), Vec3::ZERO).is_none());
     }
 
-    // ---- sphere / box ----
 
     #[test]
     fn sphere_box_hit_resolves_against_closest_face() {
@@ -355,7 +348,6 @@ mod tests {
         assert!(sphere_box(sphere(1.0), Vec3::ZERO, box_shape(1.0, 1.0, 1.0), Vec3::ZERO).is_none());
     }
 
-    // ---- swapped orderings reuse the canonical generators ----
 
     #[test]
     fn box_sphere_flips_the_canonical_normal() {
@@ -384,7 +376,6 @@ mod tests {
         assert!(box_sphere(box_shape(1.0, 1.0, 1.0), Vec3::ZERO, sphere(1.0), Vec3::new(0.0, 5.0, 0.0)).is_none());
     }
 
-    // ---- generate_contacts orchestration ----
 
     fn material() -> PhysicsMaterial {
         PhysicsMaterial::new(

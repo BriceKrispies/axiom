@@ -1,8 +1,6 @@
 //! The deterministic sequential-impulse contact solver.
-//!
 //! Given the narrow phase's [`ContactManifold`]s, the solver resolves
 //! interpenetration in two deterministic stages:
-//!
 //! 1. **Velocity solve** ([`solve`]) — a fixed number of sequential-impulse
 //!    iterations (from `PhysicsConfig::solver_iterations`). Each iteration walks
 //!    the manifolds in their stable sorted order and applies a normal impulse that
@@ -14,7 +12,6 @@
 //!    by inverse inertia, so an off-centre hit induces spin while a static or
 //!    kinematic body (zero inverse mass *and* zero inverse inertia) is never moved
 //!    or spun.
-//!
 //! ## Contact-point angular term (deterministic, branchless)
 //! A contact at world point `p` has lever arms `r_a = p - centre_a` and
 //! `r_b = p - centre_b`. The velocity the solver drives to zero is the velocity
@@ -28,7 +25,6 @@
 //! 2. **Position correction** ([`correct_positions`]) — a Baumgarte-style push
 //!    that removes residual penetration beyond a small slop, again split by
 //!    inverse mass, so resting stacks do not sink.
-//!
 //! ## Friction (deterministic, branchless)
 //! The friction impulse needs a tangent direction. It is derived **only from the
 //! contact normal** — never from discovery order or an iterative search that could
@@ -39,7 +35,6 @@
 //! `|j_t| <= μ·j_n` is applied with `clamp` (min/max), never a branch. The
 //! friction pass walks the same stable handle-sorted manifold order as the normal
 //! pass, so the result stays a pure function of world state.
-//!
 //! Every operation is branchless: contact gating is arithmetic
 //! (`approaching.then(..)`, `(depth - slop).max(0.0)`, the Coulomb `clamp`),
 //! never control flow.

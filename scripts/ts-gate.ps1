@@ -1,8 +1,7 @@
 <#
 .SYNOPSIS
-  Axiom TypeScript SDK gate (PowerShell). The TS-native counterpart of
-  scripts/coverage.ps1 — holds packages/axiom-client (the @axiom/client SDK) to
-  TS-native versions of the Static-Analysis, Branchless, and Coverage laws. See
+  Axiom TypeScript SDK gate (PowerShell): holds packages/axiom-client to the
+  TS gate stack (tsgo, Oxlint, node:test coverage). See
   packages/axiom-client/STATIC_ANALYSIS.md and docs/ts-sdk-hardening.md.
 
 .DESCRIPTION
@@ -13,11 +12,6 @@
 
   Requires npm + Node >= 24. Deps live in packages/axiom-client/devDependencies;
   run `npm --prefix packages/axiom-client install` once first.
-
-  The SDK is green (branchless, maximally linted, 100% covered) and this gate is
-  wired into the pre-commit hook and CI as a hard gate. The remediation history is
-  in docs/ts-sdk-hardening.md; the tool<->law mapping and documented exceptions are
-  in packages/axiom-client/STATIC_ANALYSIS.md.
 #>
 $ErrorActionPreference = 'Stop'
 $pkg = 'packages/axiom-client'

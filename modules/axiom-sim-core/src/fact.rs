@@ -215,13 +215,10 @@ mod tests {
         assert_eq!(store.get(id).unwrap().kind(), FactKind::new(1));
         assert_eq!(store.get(id).unwrap().cause(), None);
         assert_eq!(store.get(id).unwrap().tick(), 0);
-        // update
         assert!(store.update(id, FactValue::Unsigned(20), 5));
         assert_eq!(store.get(id).unwrap().value(), FactValue::Unsigned(20));
         assert_eq!(store.get(id).unwrap().tick(), 5);
-        // update missing id is a clean false
         assert!(!store.update(FactId::from_raw(999), FactValue::Bool(true), 9));
-        // remove
         assert_eq!(store.remove(id).unwrap().id(), id);
         assert!(store.get(id).is_none());
         assert!(
@@ -240,7 +237,6 @@ mod tests {
         let fact = store.get(id).unwrap();
         assert_eq!(fact.value(), FactValue::Signed(-4));
         assert_eq!(fact.cause(), cause);
-        // distinct value variants are unequal even with the same payload bits
         assert_ne!(FactValue::Symbol(1), FactValue::Unsigned(1));
         assert_ne!(FactValue::Entity(a), FactValue::Symbol(0));
     }

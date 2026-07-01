@@ -23,7 +23,6 @@ pub struct Renderable {
 }
 
 impl Renderable {
-    /// The reflected shape of a renderable component.
     pub const SCHEMA: TypeSchema = TypeSchema::new(
         "Renderable",
         &[
@@ -127,7 +126,6 @@ mod tests {
         assert_eq!(r.mesh().raw(), 2);
         assert_eq!(r.material().raw(), 3);
         assert!(r.visible());
-        // A fresh renderable is not a contact-shadow caster until opted in.
         assert!(!r.casts_contact_shadow());
     }
 
@@ -192,7 +190,6 @@ mod tests {
         assert_eq!(got, r);
         assert!(!got.visible());
         assert!(got.casts_contact_shadow());
-        // Truncation at every field boundary is rejected (no partial restore).
         assert!(Renderable::reflect_read(&mut BinaryReader::new(&[])).is_err());
     }
 }

@@ -84,7 +84,6 @@ const LINT_HELP: &str =
 
 impl<'tcx> LateLintPass<'tcx> for EngineNoUninitMemory {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
-        // Standard guards shared across all arms.
         if expr.span.from_expansion() {
             return;
         }
@@ -102,8 +101,8 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUninitMemory {
                     return;
                 };
                 let banned = match qpath {
-                    // Resolved path: `std::mem::zeroed()` or fully-qualified forms.
-                    // def_path_str returns e.g. "core::mem::zeroed".
+                    // Resolved path, e.g. `std::mem::zeroed()`; def_path_str
+                    // returns a string like "core::mem::zeroed".
                     QPath::Resolved(..) => {
                         let Some(def_id) = cx.qpath_res(qpath, callee.hir_id).opt_def_id()
                         else {
@@ -112,15 +111,13 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUninitMemory {
                         let path = cx.tcx.def_path_str(def_id);
                         BANNED_PATH.iter().any(|b| path.ends_with(b))
                     }
-                    // Type-relative path: `MaybeUninit::<u32>::uninit()`.
-                    // The callee QPath has shape TypeRelative(ty, seg) where `ty` is the
-                    // HIR Ty for `MaybeUninit<T>` and `seg.ident` is the assoc-fn name.
-                    // We match the assoc-fn name and verify the type is named MaybeUninit.
+                    // Type-relative path, e.g. `MaybeUninit::<u32>::uninit()`:
+                    // TypeRelative(ty, seg) where `ty` is the HIR Ty for
+                    // `MaybeUninit<T>` and `seg.ident` is the assoc-fn name.
                     QPath::TypeRelative(ty, seg) => {
                         if !BANNED_MAYBEUNINIT_FNS.contains(&seg.ident.name.as_str()) {
                             return;
                         }
-                        // Check that the base type is MaybeUninit by inspecting its path.
                         let TyKind::Path(QPath::Resolved(_, path)) = ty.kind else {
                             return;
                         };
@@ -141,7 +138,6 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUninitMemory {
                 );
             }
 
-            // Method-call form: mu.assume_init()
             ExprKind::MethodCall(seg, _recv, _, _) => {
                 if seg.ident.name.as_str() != "assume_init" {
                     return;

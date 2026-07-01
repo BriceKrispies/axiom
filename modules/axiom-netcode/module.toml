@@ -1,20 +1,3 @@
-# Axiom module manifest — axiom-netcode (an ENGINE module).
-#
-# Netcode is the deterministic-lockstep networking core. It is an *isolated
-# engine module* (allowed_modules = []): it composes no other module. Over a
-# deterministic, replayable-by-tick simulation, multiplayer means only INPUTS
-# cross the wire (never state); a tick advances once every peer's input for it
-# is present. This module owns that session: the input timeline keyed by
-# (tick, peer), the readiness gate, the wire codec, and state-hash
-# reconciliation for desync detection.
-#
-# It depends only on the kernel: Tick/ids, the binary writer/reader + schema
-# version for the wire codec, the result/error model, and the seeded
-# DeterministicRng. It holds NO sockets and NO platform APIs — the boundary is
-# plain bytes, and the app owns the socket loop (the nondeterministic edge),
-# the same way the windowing module isolates the live presentation arm. A real
-# wasm transport is a later, separate platform-facing slice.
-
 [module]
 name = "netcode"
 crate_name = "axiom-netcode"

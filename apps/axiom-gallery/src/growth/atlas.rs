@@ -25,9 +25,7 @@ pub fn build_atlas(globe: &PlanetGlobe, genome: &PlanetGenome) -> PlanetSurfaceA
     }
 }
 
-// --- spatial index ------------------------------------------------------------
-//
-// Design (audit: perf P1, "Query/API requirements" spatial index):
+// Spatial index design:
 //
 // A `locate_region(dir)` is "which site direction has max dot with `dir`",
 // i.e. nearest region centre on the sphere. A linear scan is O(R) per query;

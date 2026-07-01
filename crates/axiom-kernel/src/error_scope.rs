@@ -14,9 +14,6 @@ pub enum KernelErrorScope {
     Memory = 3,
     Message = 4,
     Binary = 5,
-    // Scope 6 (`Layer`) was retired with the kernel's index-based
-    // layer-contract model; the layer graph is now a DAG owned by `layer.toml`
-    // + the architecture checker, not a runtime kernel concern.
     Scalar = 7,
 }
 

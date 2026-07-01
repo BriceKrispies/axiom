@@ -81,7 +81,6 @@ fn main() {
         }};
     }
 
-    // --- 1. Round-trip: scalars. ---
     let (u32_ok, _) = round_trip(&0xABCD_1234u32);
     let (u64_ok, _) = round_trip(&0x0102_0304_0506_0708u64);
     let (f32_ok, _) = round_trip(&(-2.5f32));
@@ -93,7 +92,6 @@ fn main() {
         u32_ok && u64_ok && f32_ok && bool_ok && eid_ok
     );
 
-    // --- 1b. Round-trip: math value types (the real component building blocks). ---
     let transform = Transform::from_translation(Vec3::new(1.0, -2.0, 3.5));
     let (v2, _) = round_trip(&Vec2::new(1.0, 2.0));
     let (v3, _) = round_trip(&Vec3::new(1.0, 2.0, 3.0));
@@ -108,7 +106,6 @@ fn main() {
     );
     check!("math value types round-trip", v2 && v3 && v4 && q && m && t);
 
-    // --- 2. Schema names real fields and types. ---
     let schema = <Transform as Reflect>::SCHEMA;
     let fields: Vec<String> = schema
         .fields()
@@ -142,7 +139,6 @@ fn main() {
         DemoRotatingCubeApi::new().component_schemas().len() >= 4
     );
 
-    // --- 3. Determinism: identical value -> identical bytes. ---
     let a = bytes_of(&transform);
     let b = bytes_of(&transform);
     let deterministic = a == b;
@@ -152,7 +148,6 @@ fn main() {
     );
     check!("serialization is deterministic", deterministic);
 
-    // --- 4. Safety: every truncated prefix is rejected. ---
     let transform_safe = every_prefix_rejected::<Transform>(&transform_bytes);
     info!(
         "safety Transform truncations rejected={transform_safe} (over {} prefixes)",
@@ -163,7 +158,6 @@ fn main() {
         transform_safe
     );
 
-    // --- 5. ECS column: the world's per-type storage round-trips. ---
     let mut column: ComponentColumn<Transform> = ComponentColumn::new();
     column.insert(EntityId::from_raw(1), Transform::IDENTITY);
     column.insert(EntityId::from_raw(7), transform);
@@ -190,8 +184,6 @@ fn main() {
     check!("an ECS component column round-trips", col_ok);
     check!("truncated column bytes are rejected", col_safe);
 
-    // --- 6. Whole-world: a World serializes, reloads, and self-describes via
-    //        erased columns (no per-type code at the call site). ---
     #[derive(Default)]
     struct DemoWorld {
         transforms: ComponentColumn<Transform>,
@@ -255,8 +247,6 @@ fn main() {
         world_roundtrips
     );
 
-    // --- 7. App-blind dynamic components: a store that was never told about
-    //        these types holds and returns them by type (safe, owned). ---
     let mut dynamic = DynamicComponents::new();
     let de = EntityId::from_raw(1);
     dynamic.insert(de, Transform::from_translation(Vec3::new(9.0, 0.0, 0.0)));

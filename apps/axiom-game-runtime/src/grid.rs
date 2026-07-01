@@ -5,7 +5,6 @@
 //! passability is the only thing that crosses; the canonical neighbour order and
 //! `(y, x)` tie-break that make a path *byte*-identical run-to-run live in the
 //! `axiom-grid` module, never re-derived here.
-//!
 //! ## Boundary convention (the established `scalar / byte / slice` rule)
 //! A query crosses as the board dimensions (`cols`, `rows`), the **row-major
 //! passability mask** as bytes (`&[u8]`, `0` = blocked, non-zero = passable), and
@@ -19,7 +18,6 @@
 //! - `gridDistanceField` returns the row-major distances as `Vec<f64>`, with
 //!   `f64::INFINITY` at every unreachable cell (the `Dist::UNREACHABLE` sentinel);
 //! - `gridReachable` returns a plain `bool`.
-//!
 //! The board cell type is `u8` (the mask byte itself); the passability predicate
 //! the queries take is simply "the cell is non-zero", so an author's arbitrary
 //! `passable` predicate is evaluated TS-side into the mask and the native core

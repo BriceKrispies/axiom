@@ -195,8 +195,6 @@ mod tests {
 
     #[test]
     fn material_texture_id_is_part_of_the_capture() {
-        // Two SetMaterial commands that differ only in their albedo texture id
-        // must serialize to different bytes — the receipt captures the binding.
         let a = RenderReceipt::capture(
             FrameIndex::new(0),
             Tick::new(0),

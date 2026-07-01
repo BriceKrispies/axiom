@@ -48,8 +48,6 @@ impl DynamicComponents {
         }
     }
 
-    // ---- monomorphic byte core: all the type-agnostic storage branching ----
-
     /// Store `bytes` for `entity` under the column named `name`, creating the
     /// column (recording `schema`) on first use.
     fn put_bytes(
@@ -89,8 +87,6 @@ impl DynamicComponents {
             .get_mut(name)
             .is_some_and(|column| column.entries.remove(&entity).is_some())
     }
-
-    // ---- typed shell: the only generic part is Reflect (de)serialization ----
 
     /// Set `entity`'s component of type `T`, serializing it. The type is keyed
     /// by its `Reflect` schema name; the first insert of a type records its
@@ -286,7 +282,7 @@ mod tests {
         store.insert(e(3), One(30));
         store.insert(e(1), One(10));
         let ids: Vec<EntityId> = store.entities_with("Clash").collect();
-        assert_eq!(ids, vec![e(1), e(3)]); // ascending, insertion-order independent
+        assert_eq!(ids, vec![e(1), e(3)]);
         assert!(store.entities_with("Unknown").next().is_none());
     }
 
@@ -297,14 +293,12 @@ mod tests {
         store.insert(e(2), One(2));
         store.insert(e(2), Other);
         store.insert(e(3), Other);
-        // Only e2 carries both kinds.
         assert_eq!(store.entities_with_all(&["Clash", "Other"]), vec![e(2)]);
         // The intersection entity actually carries an `Other` (round-trips
         // through `Other::reflect_read`); an entity carrying only `Clash` reads
         // back no `Other` (the absent arm of the same read).
         assert!(store.get::<Other>(e(2)).unwrap().is_some());
         assert!(store.get::<Other>(e(1)).unwrap().is_none());
-        // A single kind is just its column, ascending.
         assert_eq!(store.entities_with_all(&["Clash"]), vec![e(1), e(2)]);
         // Empty names -> no rows; an unknown kind -> empty intersection.
         assert!(store.entities_with_all(&[]).is_empty());

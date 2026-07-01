@@ -440,8 +440,7 @@ impl DoomGame {
     /// Advance one deterministic tick under `intent`, asking the engine `space`
     /// for every spatial answer (wall collision, hitscan, contact). When the
     /// player has died, this tick snaps the camera back to the start and respawns
-    /// enemies. The game is the app — the branchless/coverage laws don't apply
-    /// here — so this reads as plain control flow.
+    /// enemies.
     pub fn step(&mut self, intent: Intent, space: &dyn DoomSpace) -> StepCommands {
         if self.health <= 0 {
             self.respawn(space)

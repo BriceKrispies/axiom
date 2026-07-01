@@ -94,7 +94,6 @@ fn two_object_capture(api: &RenderApi, swap: bool) -> Vec<u8> {
     api.receipt_bytes(&receipt).to_vec()
 }
 
-// 1. Replay determinism.
 #[test]
 fn rotating_cube_frame_120_replay_produces_byte_identical_frame_capture() {
     let api = RenderApi::new();
@@ -108,13 +107,11 @@ fn rotating_cube_frame_120_replay_produces_byte_identical_frame_capture() {
     assert_eq!(hash_a, hash_b, "same frame must hash identically");
 }
 
-// 2. Meaningful difference: same frame index + tick, different cube world
-//    transform rotation (a render-visible value).
 #[test]
 fn rotating_cube_frame_120_meaningful_render_change_changes_frame_capture() {
     let api = RenderApi::new();
     let baseline = cube_world(cube_rotation_angle(120));
-    let rotated = cube_world(cube_rotation_angle(121)); // different cube rotation only
+    let rotated = cube_world(cube_rotation_angle(121));
     let (bytes_a, hash_a) = cube_capture(&api, 120, 120, baseline);
     let (bytes_b, hash_b) = cube_capture(&api, 120, 120, rotated);
     assert_ne!(
@@ -127,8 +124,6 @@ fn rotating_cube_frame_120_meaningful_render_change_changes_frame_capture() {
     );
 }
 
-// 3. Command ordering: the same commands in a different order must capture
-//    differently.
 #[test]
 fn render_command_order_changes_frame_capture() {
     let api = RenderApi::new();
@@ -137,8 +132,6 @@ fn render_command_order_changes_frame_capture() {
     assert_ne!(in_order, swapped, "command order must affect the capture");
 }
 
-// 4. Negative proof / guardrail.
-//
 // PROOF-TEST ONLY — keep this `#[ignore]`d. It deliberately asserts equality
 // *after* a meaningful render-visible change (a different cube rotation), so it
 // MUST fail when run explicitly. Its only purpose is to demonstrate that the

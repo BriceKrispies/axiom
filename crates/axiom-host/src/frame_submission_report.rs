@@ -157,7 +157,6 @@ mod tests {
             BackendKind::GpuFallback,
             BackendKind::Canvas2d,
         ];
-        // Each variant is distinct and Debug-formats to its own name.
         assert_ne!(kinds[0], kinds[1]);
         assert_ne!(kinds[1], kinds[2]);
         assert_ne!(kinds[0], kinds[2]);
@@ -177,7 +176,6 @@ mod tests {
             FrameFeature::MultiLight,
             FrameFeature::PostProcessing,
         ];
-        // Every variant is distinct from the next and Debug-formats.
         features.windows(2).for_each(|w| assert_ne!(w[0], w[1]));
         assert_eq!(features[0], FrameFeature::Shadows);
         features
@@ -258,7 +256,6 @@ mod tests {
         );
         assert_eq!(a.clone(), b);
         assert_ne!(a, c);
-        // A clean GPU report reports zero degradation and zero raster stats.
         assert_eq!(a.unsupported_features(), 0);
         assert_eq!(a.critical_coverage_skipped(), 0);
         assert_eq!(a.raster(), &FrameRasterStats::ZERO);

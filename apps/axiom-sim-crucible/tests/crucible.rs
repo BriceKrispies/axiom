@@ -18,7 +18,6 @@ fn row_of_kind(
 fn scenario_initializes_deterministically() {
     let a = Crucible::new();
     let b = Crucible::new();
-    // Nothing has happened yet; both fresh worlds agree.
     for c in [&a, &b] {
         assert_eq!(c.paw_amount(), 0);
         assert_eq!(c.mouth_amount(), 0);
@@ -51,8 +50,6 @@ fn source_residue_exists_at_initial_location() {
 fn scenario_actions_run_at_deterministic_ticks() {
     let crucible = Crucible::new();
     let actions = crucible.actions();
-    // Four actions: schedule the grooming wake (tick 0), contact transfer (tick 2),
-    // grooming transfer (tick 5), and effect application (tick 5).
     let ticks: Vec<u64> = actions.iter().map(|a| a.tick).collect();
     assert_eq!(
         ticks,
@@ -123,13 +120,10 @@ fn grooming_process_wakes_at_the_expected_tick() {
 fn grooming_produces_effects_rather_than_mutating_directly() {
     let mut crucible = Crucible::new();
     crucible.run();
-    // The grooming process added its "groomed" fact through the effect boundary.
     assert!(
         crucible.groomed(),
         "groomed fact added via the effect boundary"
     );
-    // Its run is recorded as produced-effects + effects-applied, proving it went
-    // through the effect boundary (not a direct store mutation).
     let rows = crucible.rows();
     assert!(rows.iter().any(|r| r.label == "process-produced-effects"));
     assert!(rows.iter().any(|r| r.label == "effects-applied"));
@@ -141,7 +135,6 @@ fn residue_transfers_from_extremity_to_mouth() {
     crucible.run();
     assert_eq!(crucible.mouth_amount(), 3, "3 units groomed onto the mouth");
     assert_eq!(crucible.paw_amount(), 1, "paw reduced from 4 to 1");
-    // Conserved: source 6 + paw 1 + mouth 3 = 10.
     assert_eq!(
         crucible.source_amount() + crucible.paw_amount() + crucible.mouth_amount(),
         10
@@ -176,10 +169,8 @@ fn causal_journal_contains_the_full_parent_child_chain() {
     let mut crucible = Crucible::new();
     crucible.run();
     let rows = crucible.rows();
-    // Contact (paw gains residue) is caused by the external command.
     let contact = row_of_kind(&rows, scenario::KIND_CONTACT_TRANSFER).expect("contact transfer");
     assert_eq!(contact.parent, ParentRef::Command);
-    // The grooming transfer, ingestion, and effect are all caused by the process.
     for kind in [
         scenario::KIND_GROOM_TRANSFER,
         scenario::KIND_INGESTION,
@@ -191,7 +182,6 @@ fn causal_journal_contains_the_full_parent_child_chain() {
             "kind {kind} should be process-caused"
         );
     }
-    // Every event is attributed (no Unknown parents).
     assert!(
         rows.iter().all(|r| r.parent != ParentRef::Unknown),
         "all events attributed"

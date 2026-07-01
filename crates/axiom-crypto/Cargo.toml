@@ -7,32 +7,22 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. The signing/verification surface is deterministic and
-# platform-agnostic; OS entropy for key generation is injected at the edge (an
-# app provides a 32-byte seed via `from_seed`), so this layer holds no
-# nondeterminism and no browser/platform APIs.
+# OS entropy for key generation is injected at the edge (an app provides a
+# 32-byte seed via `from_seed`); this layer itself holds no nondeterminism.
 crate-type = ["rlib"]
 
 [dependencies]
-# Layer dependency: the kernel only (binary writer/reader + result/error model
-# for wire serialization). Enforced by the Axiom Layer Law.
 axiom-kernel = { path = "../axiom-kernel" }
 
-# A vetted ed25519 implementation (RFC 8032 — deterministic signing). We wrap it
-# behind a thin facade rather than hand-rolling the cipher: rolling your own
-# crypto is exactly the kind of shortcut Axiom forbids. Default features only;
-# we never call randomized key generation here (the deterministic core takes a
-# seed), so no RNG / getrandom dependency leaks into the engine spine.
+# Vetted ed25519 (RFC 8032, deterministic signing). Default features only; key
+# generation here always takes a seed, so no RNG/getrandom dependency leaks in.
 ed25519-dalek = "2"
 
-# The vetted SHA-2 implementation (already in the tree via ed25519-dalek). HMAC-SHA256
-# and the HS256 JWT verifier are built ON it rather than hand-rolling a hash — the same
-# no-shortcuts rule as ed25519. Pure, deterministic, wasm-clean; no RNG / platform API.
+# Vetted SHA-2 (already in the tree via ed25519-dalek); HMAC-SHA256 and the
+# HS256 JWT verifier are built on it.
 sha2 = "0.10"
 
-# A vetted JSON parser (already in the tree), used only to read a verified token's
-# claims (`exp` / `sub`). Hand-rolling a JSON scanner would be the kind of shortcut
-# Axiom forbids; serde_json is pure and deterministic with no platform surface.
+# Used only to read a verified token's claims (`exp` / `sub`).
 serde_json = "1"
 
 [lints.rust]

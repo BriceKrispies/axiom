@@ -51,9 +51,6 @@ mod tests {
 
     #[test]
     fn ordering_is_preserved_when_queued() {
-        // Layer 03 does not impose semantic ordering on lifecycle signals; it
-        // only requires that an externally-supplied sequence is replayed in
-        // insertion order. A Vec is the queue contract.
         let queue = vec![
             HostLifecycleSignal::Started,
             HostLifecycleSignal::Visible,

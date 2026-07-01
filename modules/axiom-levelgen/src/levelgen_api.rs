@@ -65,7 +65,6 @@ mod tests {
         let w = LevelGenApi::generate(7, &site(&[1, 2]), 16, 16);
         assert_eq!(w.width(), 16);
         assert_eq!(w.height(), 16);
-        // Terrain + biome cover every cell; placement scatters area / 16 objects.
         assert_eq!(w.heights().len(), 256);
         assert_eq!(w.biomes().len(), 256);
         assert_eq!(w.objects().len(), 256 / 16);
@@ -83,8 +82,6 @@ mod tests {
 
     #[test]
     fn the_biome_map_reflects_the_terrain() {
-        // A real composition: terrain drives biomes, so the world has more than
-        // one biome (not a single flat category), and every code is a known biome.
         let w = LevelGenApi::generate(7, &site(&[1, 2]), 32, 32);
         let first = w.biomes()[0];
         assert!(
@@ -97,8 +94,8 @@ mod tests {
     #[test]
     fn distinct_seeds_or_addresses_yield_distinct_worlds() {
         let base = LevelGenApi::generate(7, &site(&[1, 2]), 16, 16);
-        assert_ne!(base, LevelGenApi::generate(8, &site(&[1, 2]), 16, 16)); // seed
-        assert_ne!(base, LevelGenApi::generate(7, &site(&[1, 3]), 16, 16)); // address
+        assert_ne!(base, LevelGenApi::generate(8, &site(&[1, 2]), 16, 16));
+        assert_ne!(base, LevelGenApi::generate(7, &site(&[1, 3]), 16, 16));
     }
 
     #[test]

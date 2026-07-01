@@ -7,13 +7,11 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free, GPU-free, wasm-clean, deterministic.
 crate-type = ["rlib"]
 
 [dependencies]
-# Physics is an isolated engine module that builds only on completed layers:
-# the kernel (identity, dimensioned scalars, deterministic fixed step, errors),
-# the runtime (deterministic stepping vocabulary), and math (Vec3 / Transform).
+# kernel: identity, dimensioned scalars, fixed step, errors. runtime:
+# deterministic stepping vocabulary. math: Vec3/Transform.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-math = { path = "../../crates/axiom-math" }

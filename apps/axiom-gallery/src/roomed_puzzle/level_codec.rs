@@ -55,8 +55,6 @@ impl std::fmt::Display for LevelCodecError {
 
 impl std::error::Error for LevelCodecError {}
 
-// --- On-disk document structs (the wire schema) ---
-
 #[derive(Debug, Serialize, Deserialize)]
 struct LevelDoc {
     title: String,
@@ -228,7 +226,6 @@ mod tests {
 
     #[test]
     fn missing_required_section_is_a_parse_error() {
-        // No [exit] table.
         let text = "title=\"x\"\nwidth=10\nheight=10\n[player]\nstart=[1,5]\n";
         let err = from_toml(text).unwrap_err();
         assert!(matches!(err, LevelCodecError::Parse(_)));
@@ -236,7 +233,6 @@ mod tests {
 
     #[test]
     fn parses_a_level_with_no_walls_or_objects() {
-        // `walls`/`buttons`/`doors` default to empty when absent.
         let text =
             "title=\"bare\"\nwidth=3\nheight=3\n[player]\nstart=[0,0]\n[exit]\nposition=[2,2]\n";
         let level = from_toml(text).expect("parses");

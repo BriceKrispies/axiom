@@ -1,23 +1,12 @@
-//! Live, game-agnostic perception for the growth agent — the **heightfield sense
-//! adapter**. Native + `agent` feature only, like [`crate::growth::agent`].
+//! Live, game-agnostic perception for the growth agent — the heightfield sense
+//! adapter. Native + `agent` feature only, like [`crate::growth::agent`].
 //!
-//! This is the agnosticism proof for `axiom-perception`. Growth's world is a
-//! *procedural heightfield*: there is no scene and there are no entities. Yet the
-//! agent senses it with the **same** module DOOM uses — the same horizontal
-//! ray-fan ([`PerceptionApi::ray_fan`]), the same view-cone cull
-//! ([`PerceptionApi::in_view`]), and the same neutral `(kind, subject, x, y, z,
-//! value)` fact vocabulary. Only the per-game *world probe* differs:
-//!
-//! * **DOOM** casts each ray-fan direction against its engine scene
-//!   (`raycast_hit`) — a wall is a bounded node.
-//! * **Growth** *marches the terrain sampler* ([`GroundSim::ground_abs_at`])
-//!   along each direction until the ground rises above the eye — a "wall" here is
-//!   the mountain slope ahead.
-//!
-//! "Visible" entities are the world's named landmarks (the summit, the spawn) —
-//! culled to the view cone exactly as DOOM's enemies are. The facts are produced
-//! purely with [`PerceptionApi`]; the [`Sight`] the demo prints is decoded back
-//! out of those very facts, so the neutral contract is genuinely on the path.
+//! Growth's world is a procedural heightfield with no scene and no entities, so
+//! it senses via the same [`PerceptionApi`] ray-fan/view-cone/fact vocabulary
+//! DOOM uses, but marches the terrain sampler ([`GroundSim::ground_abs_at`])
+//! along each ray instead of casting against a scene: a "wall" here is the
+//! mountain slope ahead. Visible landmarks (the summit, the spawn) are culled to
+//! the view cone the same way DOOM's enemies are.
 
 use axiom_kernel::{Meters, Radians};
 use axiom_math::Vec3;
@@ -212,10 +201,6 @@ mod tests {
 
     #[test]
     fn climbing_the_agent_faces_the_slope_and_sees_the_mountaintop() {
-        // Earthlike vista; the climb walks toward the summit. Perception must, at
-        // some point, both face rising ground ahead (a slope "wall") and see the
-        // mountaintop landmark classified as such — the same ray-fan + cone the
-        // DOOM agent uses, against a heightfield with no entities.
         let mut session = AgentSession::earthlike();
         let mut faced_slope = false;
         let mut saw_summit = false;
@@ -234,8 +219,6 @@ mod tests {
 
     #[test]
     fn every_obstacle_has_a_real_distance_within_sight() {
-        // Climb a while, then assert every probe hit is a finite distance within
-        // the sight range with a real terrain height — the geometry is sound.
         let mut session = AgentSession::earthlike();
         for _ in 0..40 {
             session.step(&crate::growth::agent::Action::seek());

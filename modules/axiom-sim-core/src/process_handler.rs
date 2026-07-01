@@ -324,7 +324,6 @@ mod tests {
         assert_eq!(c.subject().id().raw(), 1);
     }
 
-    /// A bespoke handler proves the trait seam is genuinely generic.
     struct AlwaysComplete;
     impl ProcessHandler for AlwaysComplete {
         fn run(&self, _ctx: &ProcessContext) -> ProcessOutput {
@@ -336,7 +335,6 @@ mod tests {
     fn custom_handler_implements_the_seam() {
         let out = AlwaysComplete.run(&ctx(0));
         assert_eq!(out.disposition(), ProcessDisposition::complete());
-        // into_effects consumes the output (covers the boundary accessor).
         assert!(out.into_effects().is_empty());
     }
 }

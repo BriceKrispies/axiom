@@ -20,9 +20,7 @@
 //! `{seed, versions, command/delta stream}`, never full state — and because the
 //! whole generation stack is integer-only and deterministic (the
 //! `axiom-proc-fuzz` gate proves it across 2000 seeds), the regenerated world is
-//! byte-identical on every platform, so server and browser agree. (Wiring the
-//! netcode stacks and a native↔wasm parity harness is the documented next step;
-//! the determinism it relies on is already gated.)
+//! byte-identical on every platform, so server and browser agree.
 //!
 //! ## Public surface
 //! One facade: [`WorldSaveApi`]. The `Save` and `SavedWorld` it returns are read

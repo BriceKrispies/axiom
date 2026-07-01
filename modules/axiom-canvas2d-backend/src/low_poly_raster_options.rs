@@ -72,14 +72,33 @@ impl LowPolyRasterOptions {
         }
     }
 
-    /// Resolve options for a quality tier: the tier's framebuffer dimensions plus
-    /// the shipping defaults (no overlay, generous cap + budget, subtle depth
-    /// cues). The deterministic `CanvasQualityPreset → LowPolyRasterOptions` map.
+    /// Resolve options for a quality tier at the tier's canonical **16:9**
+    /// framebuffer dimensions, plus the shipping defaults (no overlay, generous cap
+    /// + budget, subtle depth cues). Used where no surface aspect is in hand (the
+    /// [`Default`] look); the live backend resolves the aspect-correct framebuffer
+    /// via [`Self::from_preset_for_surface`].
     pub(crate) fn from_preset(preset: CanvasQualityPreset) -> Self {
-        let (w, h) = preset.dimensions();
+        Self::from_dims(preset.dimensions())
+    }
+
+    /// Resolve options for a quality tier at a framebuffer that **preserves the
+    /// surface's aspect ratio** (`surface_width × surface_height`), so the software
+    /// framebuffer is the same shape the GPU renders — no aspect distortion on a
+    /// non-16:9 surface. This is what the live backend uses; see
+    /// [`CanvasQualityPreset::framebuffer_dims`].
+    pub(crate) fn from_preset_for_surface(
+        preset: CanvasQualityPreset,
+        surface_width: u32,
+        surface_height: u32,
+    ) -> Self {
+        Self::from_dims(preset.framebuffer_dims(surface_width, surface_height))
+    }
+
+    /// Shared assembly: framebuffer dimensions + the shipping defaults.
+    fn from_dims((framebuffer_width, framebuffer_height): (u32, u32)) -> Self {
         LowPolyRasterOptions::new(
-            w,
-            h,
+            framebuffer_width,
+            framebuffer_height,
             CanvasDebugOverlay::None,
             DEFAULT_MAX_TERRAIN_TRIANGLES,
             DEFAULT_PIXEL_BUDGET,
@@ -155,6 +174,24 @@ mod tests {
         assert_eq!(
             LowPolyRasterOptions::from_preset(CanvasQualityPreset::Medium),
             LowPolyRasterOptions::from_preset(CanvasQualityPreset::Medium)
+        );
+    }
+
+    #[test]
+    fn from_preset_for_surface_resolves_aspect_matched_dimensions() {
+        // The live backend's path: the framebuffer preserves the SURFACE aspect,
+        // so an 8:5 (960×600) surface gets an 8:5 framebuffer (240×150 at Low),
+        // never a distorting 16:9 — while every other option keeps its default.
+        let o = LowPolyRasterOptions::from_preset_for_surface(CanvasQualityPreset::Low, 960, 600);
+        assert_eq!((o.framebuffer_width(), o.framebuffer_height()), (240, 150));
+        assert_eq!(o.debug_overlay(), CanvasDebugOverlay::None);
+        assert_eq!(o.max_triangles_per_terrain_draw(), 200_000);
+        assert_eq!(o.pixel_budget(), 8_000_000);
+        assert!(o.depth_cues().fog.enabled);
+        // A 16:9 surface reproduces the canonical 16:9 pairing (== from_preset).
+        assert_eq!(
+            LowPolyRasterOptions::from_preset_for_surface(CanvasQualityPreset::Low, 1920, 1080),
+            LowPolyRasterOptions::from_preset(CanvasQualityPreset::Low)
         );
     }
 

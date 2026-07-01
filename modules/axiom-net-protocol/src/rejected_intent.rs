@@ -36,12 +36,10 @@ impl RejectedIntent {
         }
     }
 
-    /// The sequence id of the refused intent.
     pub(crate) fn client_sequence(&self) -> u64 {
         self.client_sequence
     }
 
-    /// The machine-readable refusal reason.
     pub(crate) fn reason_code(&self) -> u32 {
         self.reason_code
     }

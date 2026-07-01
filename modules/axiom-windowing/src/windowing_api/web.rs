@@ -542,7 +542,7 @@ impl WindowingApi {
         let canvas = find_canvas(canvas_id)?;
         let frame_fn = Rc::new(RefCell::new(frame_fn));
         let windowing = self;
-        let force_canvas = force_canvas2d();
+        let preference = backend_preference();
 
         wasm_bindgen_futures::spawn_local(async move {
             let request = match windowing.surface.as_ref() {
@@ -555,7 +555,7 @@ impl WindowingApi {
             let (mat_w, mat_h, mat_pixels) = material;
             let materials = vec![(STREAM_MATERIAL_ID, mat_w, mat_h, mat_pixels)];
             let backend = match select_backend_or_report(
-                force_canvas,
+                preference,
                 &request,
                 canvas,
                 &meshes,
@@ -670,7 +670,10 @@ pub(crate) struct LivePresenter {
     max_instances: u32,
     width: u32,
     height: u32,
-    force_canvas: bool,
+    // The forced backend for this presenter (`?backend=webgpu|webgl2|canvas2d`),
+    // or `None` for the auto WebGPU→WebGL2→Canvas2D cascade. Retained so an
+    // off-loop device-loss rebuild re-selects the SAME backend the caller pinned.
+    preference: Option<axiom_host::BackendKind>,
     // Set while a rebuild is in flight, so a surface that keeps failing every frame
     // spawns exactly one rebuild, not a storm.
     reinitializing: std::rc::Rc<std::cell::Cell<bool>>,
@@ -715,13 +718,13 @@ impl LivePresenter {
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
 
-        let force_canvas = force_canvas2d();
+        let preference = backend_preference();
         let width = request.descriptor().viewport().physical_width();
         let height = request.descriptor().viewport().physical_height();
         let meshes = Rc::new(meshes);
         let materials = Rc::new(materials);
         let backend = select_backend_or_report(
-            force_canvas,
+            preference,
             &request,
             canvas.clone(),
             &meshes[..],
@@ -738,7 +741,7 @@ impl LivePresenter {
             max_instances,
             width,
             height,
-            force_canvas,
+            preference,
             reinitializing: Rc::new(Cell::new(false)),
             // Mount the scrub-only dev overlay (no fork hooks) so a caller-owned
             // loop gets the frame slider + Escape/blur freeze the engine's own run
@@ -849,11 +852,11 @@ impl LivePresenter {
             let materials = self.materials.clone();
             let flag = self.reinitializing.clone();
             let request = self.request;
-            let force_canvas = self.force_canvas;
+            let preference = self.preference;
             let max_instances = self.max_instances;
             wasm_bindgen_futures::spawn_local(async move {
                 let rebuilt = select_backend(
-                    force_canvas,
+                    preference,
                     &request,
                     canvas,
                     &meshes[..],
@@ -869,25 +872,19 @@ impl LivePresenter {
         }
     }
 
-    /// Present one resolved frame to the bound surface. The arguments are the same
-    /// per-frame data the run loop produces: the clear colour, the resolved lights
-    /// (`(kind, geometry-vec, colour, intensity)`), the shadow light
-    /// view-projection, the per-`(mesh, material)` instance `batches` (`[mvp(16),
-    /// world(16), colour(4)]` per instance), the camera view-projection and
-    /// per-instance contact-shadow caster flags the Canvas planar-shadow pass
-    /// needs, and the frame's optional SDF scene. An unrecoverable GPU-surface loss
-    /// (a backgrounded mobile tab whose context was destroyed) rebuilds the backend
-    /// off-loop — re-probing WebGPU → WebGL2 → Canvas 2D — and swaps it in, so play
-    /// resumes instead of going black; at most one rebuild is in flight at a time.
-    /// Present one frame to the bound surface, routed through the scrubber overlay
-    /// exactly as the engine's run loops do: while **live**, record this frame and
-    /// present the current scene; while **scrubbing**, ignore the live args and
+    /// Present one resolved frame to the bound surface, routed through the scrubber
+    /// overlay exactly as the engine's run loops do: while **live**, record this
+    /// frame (the clear colour, resolved lights `(kind, geometry-vec, colour,
+    /// intensity)`, shadow light view-projection, per-`(mesh, material)` instance
+    /// `batches` `[mvp(16), world(16), colour(4)]` per instance, camera
+    /// view-projection, per-instance contact-shadow caster flags, and optional SDF
+    /// scene) and present it; while **scrubbing**, ignore the live args and
     /// re-present the selected recorded frame (the sim is frozen by the host, which
-    /// gates its `advance` on [`Self::is_interactive`]). The live args are the same
-    /// per-frame data the run loop produces — the clear colour, the resolved lights,
-    /// the shadow light view-projection, the per-`(mesh, material)` instance
-    /// `batches`, the camera view-projection + per-instance contact-shadow caster
-    /// flags, and the frame's optional SDF scene.
+    /// gates its `advance` on [`Self::is_interactive`]). An unrecoverable
+    /// GPU-surface loss (a backgrounded mobile tab whose context was destroyed)
+    /// rebuilds the backend off-loop — re-probing WebGPU → WebGL2 → Canvas 2D — and
+    /// swaps it in, so play resumes instead of going black; at most one rebuild is
+    /// in flight at a time.
     #[allow(clippy::too_many_arguments)]
     pub fn present(
         &self,
@@ -1038,14 +1035,29 @@ fn perf_now_micros() -> u64 {
         .unwrap_or(0)
 }
 
-/// Whether the page asked to force the Canvas 2D backend (`?backend=canvas2d`),
-/// so it can be exercised even where a GPU is available. wasm32 only.
+/// The backend the page pinned via `?backend=webgpu|webgl2|canvas2d`, or `None`
+/// for the automatic WebGPU→WebGL2→Canvas2D cascade. This is what lets the
+/// gallery's backend-comparison view boot the SAME demo three times, each iframe
+/// pinned to one backend. Maps to the neutral [`axiom_host::BackendKind`]:
+/// `webgpu`→`GpuPrimary`, `webgl2`(or `webgl`)→`GpuFallback`, `canvas2d`→
+/// `Canvas2d`. An unknown/absent value is `None` (auto). wasm32 only — the URL is
+/// the platform edge, so ordinary control flow is fine here.
 #[cfg(target_arch = "wasm32")]
-fn force_canvas2d() -> bool {
-    web_sys::window()
+fn backend_preference() -> Option<axiom_host::BackendKind> {
+    use axiom_host::BackendKind;
+    let search = web_sys::window()
         .and_then(|w| w.location().search().ok())
-        .map(|search| search.contains("backend=canvas2d"))
-        .unwrap_or(false)
+        .unwrap_or_default();
+    let value = search
+        .split("backend=")
+        .nth(1)
+        .map(|rest| rest.split('&').next().unwrap_or(rest));
+    match value {
+        Some("canvas2d") => Some(BackendKind::Canvas2d),
+        Some("webgpu") => Some(BackendKind::GpuPrimary),
+        Some("webgl2") | Some("webgl") => Some(BackendKind::GpuFallback),
+        _ => None,
+    }
 }
 
 /// Reconstruct the backend-neutral frame packet from the per-`(mesh, material)`
@@ -1124,28 +1136,43 @@ fn frame_packet_from_batches(
     sdf.into_iter().fold(packet, |p, scene| p.with_sdf(scene))
 }
 
-/// Select the live backend without poisoning the canvas: a forced Canvas 2D run
-/// never gives the canvas a GPU context; otherwise try the GPU (WebGPU→WebGL2)
-/// and fall back to Canvas 2D only when it has no device. wasm32 only.
+/// Select the live backend without poisoning the canvas. `preference` decides:
+///
+/// * `Some(Canvas2d)` — bind the software rasterizer directly (never give the
+///   canvas a GPU context).
+/// * `Some(GpuPrimary)` / `Some(GpuFallback)` — bind exactly that GPU API
+///   (WebGPU-only / WebGL2-only) and, on failure, return `None` **without**
+///   silently degrading to Canvas 2D — the comparison view wants an honest
+///   per-backend result.
+/// * `None` — the historical cascade: try the GPU (WebGPU→WebGL2) and fall back
+///   to Canvas 2D only when it has no device.
+///
+/// wasm32 only.
 #[cfg(target_arch = "wasm32")]
 async fn select_backend(
-    force_canvas: bool,
+    preference: Option<axiom_host::BackendKind>,
     request: &axiom_host::HostPresentationRequest,
     canvas: web_sys::HtmlCanvasElement,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     max_instances: u32,
 ) -> Option<LiveBackend> {
-    if force_canvas {
+    use axiom_host::BackendKind;
+    if matches!(preference, Some(BackendKind::Canvas2d)) {
         return make_canvas(request, &canvas, meshes).map(LiveBackend::Canvas);
     }
+    // A forced GPU tier binds exactly that API and must not fall back to Canvas2D.
+    let forced_gpu = matches!(
+        preference,
+        Some(BackendKind::GpuPrimary | BackendKind::GpuFallback)
+    );
     let mut gpu = axiom_gpu_backend::GpuBackendApi::new(request);
     // Clone the canvas handle so a GPU failure leaves the element available for
     // the Canvas 2D fallback. Log the GPU error rather than swallowing it, so the
     // (common, expected) GPU→Canvas2D fallback is diagnosable in the console / by
     // the Playwright suite instead of being silent.
     match gpu
-        .initialize(canvas.clone(), meshes, materials, max_instances)
+        .initialize(canvas.clone(), meshes, materials, max_instances, preference)
         .await
     {
         Ok(()) => return Some(LiveBackend::Gpu(gpu)),
@@ -1156,6 +1183,10 @@ async fn select_backend(
             &err,
         ),
     }
+    // A forced GPU tier does not degrade; only the auto cascade reaches Canvas 2D.
+    if forced_gpu {
+        return None;
+    }
     make_canvas(request, &canvas, meshes).map(LiveBackend::Canvas)
 }
 
@@ -1165,7 +1196,7 @@ async fn select_backend(
 /// browser test can catch a demo that never renders. wasm32 only.
 #[cfg(target_arch = "wasm32")]
 async fn select_backend_or_report(
-    force_canvas: bool,
+    preference: Option<axiom_host::BackendKind>,
     request: &axiom_host::HostPresentationRequest,
     canvas: web_sys::HtmlCanvasElement,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
@@ -1173,7 +1204,7 @@ async fn select_backend_or_report(
     max_instances: u32,
 ) -> Option<LiveBackend> {
     let backend = select_backend(
-        force_canvas,
+        preference,
         request,
         canvas,
         meshes,

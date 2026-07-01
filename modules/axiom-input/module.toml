@@ -1,19 +1,7 @@
-# Axiom module manifest — axiom-input (an ENGINE module).
-#
-# Owns the engine's input contract: the per-tick INTENT SNAPSHOT the simulation
-# reads. The platform edge (the windowing module) decodes raw browser
-# Keyboard/Pointer events into a neutral, recordable `DeviceFrame` (the keys down
-# this frame + pointer samples + surface); this module folds each frame, at a
-# tick boundary, into a deterministic snapshot of author-defined ACTIONS —
-# keyboard state + press/release edges, an action-binding table, pointer/click,
-# the directional swipe, and a tick-stamped press for timing windows. Gameplay
-# reads only action names against a fixed `Tick`, never a physical key, so input
-# is replayable and net-serializable.
-#
-# It is an ISOLATED engine module: it composes no other module
-# (`allowed_modules = []`) and never touches a browser API (Module Law #9). Its
-# whole surface is one behavioural facade, `InputState`, plus the pure `ids`
-# value-type vocabulary it traffics in (Module Law #8).
+# The platform edge (windowing module) decodes raw browser Keyboard/Pointer
+# events into a neutral `DeviceFrame`; this module folds each frame, at a tick
+# boundary, into a deterministic snapshot of author-defined actions, so
+# gameplay reads action names against a fixed Tick rather than a physical key.
 
 [module]
 name = "input"

@@ -130,10 +130,8 @@ mod tests {
 
     #[test]
     fn out_of_range_indices_clamp_to_the_last_state() {
-        // initial 5 with only 3 states clamps to 2.
         let mut m = StateMachine::new(3, 5, at(0));
         assert_eq!(m.current(), 2);
-        // transition past the range clamps too.
         m.transition(9, at(1));
         assert_eq!(m.current(), 2);
     }

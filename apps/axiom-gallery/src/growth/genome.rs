@@ -1,12 +1,10 @@
 //! Planet genome: stored physical/orbital knobs; derived values on demand.
-//! Audit: worldgen.md §3 (L_star, a, e, S_eff, M_p, R_p, P_rot, obliquity, p0,
-//! albedo, greenhouse, water_fraction, precipitation, material_tags, schema).
 //!
-//! Per the audit ("derived values on demand"), `g`, `P_orb`, `T_eq`, and `S_eff`
-//! are computed from the stored knobs by accessors rather than stored, so the
-//! genome stays a minimal, replayable description of the planet.
+//! `g`, `P_orb`, `T_eq`, and `S_eff` are computed from the stored knobs by
+//! accessors rather than stored, so the genome stays a minimal, replayable
+//! description of the planet.
 
-/// Newtonian gravitational constant (m^3 kg^-1 s^-2). Audit: GEN-genome derived g.
+/// Newtonian gravitational constant (m^3 kg^-1 s^-2).
 const GRAVITATIONAL_CONSTANT: f64 = 6.674e-11;
 /// Stefan-Boltzmann constant (W m^-2 K^-4), for equilibrium temperature.
 const STEFAN_BOLTZMANN: f64 = 5.670_374e-8;
@@ -20,7 +18,7 @@ const SOLAR_CONSTANT_1AU: f64 = 1361.0;
 const ONE_AU: f64 = 1.496e11;
 
 /// Relative weights of the dominant surface materials for downstream content
-/// (biome palettes, resource yields). Audit: planet_presets.xml `material_weights`.
+/// (biome palettes, resource yields).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MaterialWeights {
     pub high_silicate: f32,
@@ -28,7 +26,7 @@ pub struct MaterialWeights {
 }
 
 impl Default for MaterialWeights {
-    /// Earthlike default (`high_silicate=0.6`, `organic=0.3`). Audit: earthlike preset.
+    /// Earthlike default (`high_silicate=0.6`, `organic=0.3`).
     fn default() -> Self {
         Self {
             high_silicate: 0.6,
@@ -52,7 +50,7 @@ pub struct PlanetGenome {
     pub greenhouse: f32,
     pub water_fraction: f32,
     pub precipitation: f32,
-    /// Relative surface material weights. Audit: planet_presets.xml material_weights.
+    /// Relative surface material weights.
     pub material_weights: MaterialWeights,
     pub schema_version: u32,
 }
@@ -80,13 +78,12 @@ impl Default for PlanetGenome {
 }
 
 impl PlanetGenome {
-    /// Land fraction target implied by water_fraction. Audit: land-slider default.
+    /// Land fraction target implied by water_fraction.
     pub fn implied_land_fraction(&self) -> f32 {
         (1.0 - self.water_fraction).clamp(0.0, 1.0)
     }
 
     /// Surface gravity (m/s^2) from mass + radius: `g = G M / R^2`.
-    /// Audit: GEN-genome "derived values on demand", G = 6.674e-11.
     pub fn gravity_m_s2(&self) -> f32 {
         let m = self.mass_kg as f64;
         let r = self.radius_m as f64;
@@ -97,7 +94,7 @@ impl PlanetGenome {
     }
 
     /// Orbital period (s) via Kepler's third law about a Sun-mass star:
-    /// `P = 2π sqrt(a^3 / (G M_star))`. Audit: GEN-genome derived P_orb.
+    /// `P = 2π sqrt(a^3 / (G M_star))`.
     pub fn orbital_period_s(&self) -> f32 {
         let a = self.semi_major_axis as f64;
         if a <= 0.0 {
@@ -110,7 +107,6 @@ impl PlanetGenome {
     /// Stellar insolation relative to Earth (`S_eff`): the incident flux at the
     /// orbit, scaled by luminosity and inverse-square distance, normalised so an
     /// Earthlike planet at 1 AU around a Sun-luminosity star reads ~1.0.
-    /// Audit: GEN-genome derived S_eff / insolation.
     pub fn insolation(&self) -> f32 {
         let l = self.l_star as f64;
         let a = self.semi_major_axis as f64;
@@ -125,7 +121,7 @@ impl PlanetGenome {
 
     /// Equilibrium (radiative) surface temperature (K), greenhouse-adjusted.
     /// Bare-rock `T_eq = ( (1-A) F / (4 σ) )^(1/4)` from the orbital flux, then
-    /// multiplied by the greenhouse factor. Audit: GEN-genome derived T_eq.
+    /// multiplied by the greenhouse factor.
     pub fn equilibrium_temperature_k(&self) -> f32 {
         let l = self.l_star as f64;
         let a = self.semi_major_axis as f64;

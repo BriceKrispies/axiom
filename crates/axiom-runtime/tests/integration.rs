@@ -88,12 +88,10 @@ fn full_lifecycle_and_deterministic_replay() {
     let last_a = last_a.unwrap();
     let last_b = last_b.unwrap();
 
-    // Step identity matches byte-for-byte.
     assert_eq!(last_a.step(), last_b.step());
     assert_eq!(last_a.step().tick(), Tick::new(8));
     assert_eq!(last_a.step().sequence(), 8);
 
-    // The two trace logs are identical and follow scheduled order, repeated.
     let trace_a = trace_a.lock().unwrap().clone();
     let trace_b = trace_b.lock().unwrap().clone();
     assert_eq!(trace_a, trace_b);
@@ -101,7 +99,6 @@ fn full_lifecycle_and_deterministic_replay() {
     assert_eq!(trace_a[1], (1, "b"));
     assert_eq!(trace_a[14], (8, "a"));
 
-    // Pause -> Stop is a legal terminal transition.
     a.pause().unwrap();
     assert_eq!(a.state(), RuntimeState::Paused);
     a.stop().unwrap();
@@ -154,7 +151,6 @@ fn queue_ordering_is_fifo_across_systems() {
     assert_eq!(record.diagnostics().commands_pushed(), 3);
     assert_eq!(record.diagnostics().commands_drained(), 3);
     assert_eq!(record.diagnostics().events_drained(), 3);
-    // After drain, queues are empty.
     assert!(rt.commands().is_empty());
     assert!(rt.events().is_empty());
 }
@@ -176,7 +172,6 @@ fn system_failure_propagates_into_step_record_and_state() {
     assert!(!record.succeeded());
     assert_eq!(record.state_after(), RuntimeState::Failed);
     assert_eq!(record.diagnostics().errors().len(), 1);
-    // Subsequent step calls are rejected because we are no longer Running.
     assert_eq!(
         rt.step().unwrap_err().code(),
         RuntimeErrorCode::StepWhileNotRunning

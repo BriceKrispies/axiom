@@ -23,9 +23,6 @@ pub enum KernelErrorCode {
     TruncatedData = 6,
     /// A schema version was incompatible with the reader.
     SchemaVersionMismatch = 7,
-    // Codes 8–12 were retired with the kernel's index-based layer-contract
-    // model; the layer graph is now a DAG owned by `layer.toml` + the
-    // architecture checker (repo tooling), not a runtime kernel concern.
     /// A dimensioned scalar quantity was built from a non-finite value (NaN or
     /// infinity).
     NonFiniteScalar = 13,

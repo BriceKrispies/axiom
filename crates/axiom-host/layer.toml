@@ -1,40 +1,9 @@
-# Axiom layer manifest — axiom-host.
-#
-# Host is the deterministic platform boundary. It accepts externally supplied
-# host facts as explicit data, validates them, and adapts them into runtime
-# stepping plans and reports. It knows that a host exists but it does NOT call
-# any browser/DOM/WebGPU/WebGL/JS/wall-clock/OS API itself — those belong to
-# future browser/native adapter layers built on this boundary.
-#
-# Host logical capabilities (documentation only — Rust public surface is
-# the curated re-export list in `lib.rs`, enforced by the layer's own
-# `tests/architecture.rs::lib_exports_are_curated_set`):
-#   - host-boundary-contracts
-#   - viewport-validation
-#   - display-orientation
-#   - safe-area-insets
-#   - explicit-host-frame-input
-#   - lifecycle-signals
-#   - deterministic-host-step-planning
-#   - runtime-host-step-driver
-#   - host-frame-reporting
-#   - host-error-propagation
-#   - presentation-target-boundary
-#   - surface-handle-boundary
-#   - surface-descriptor-validation
-#   - adapter-request-boundary
-#   - device-request-boundary
-#   - presentation-request-validation
-
 [layer]
 name = "host"
 crate_name = "axiom-host"
 depends_on = ["kernel", "runtime", "math"]
 meaningful_dependency = "Host consumes runtime (`Runtime`, `RuntimeStepRecord`, `RuntimeConfig`) for deterministic stepping, and kernel (`KernelApi`, `HandleId`, `Tick`, `TelemetryMetric`) for telemetry routing and for minting the stable opaque identities behind `HostPresentationTarget` / `HostSurfaceHandle` — and validates host-supplied viewport scale factors through the kernel `Ratio` quantity type at its boundary. It also consumes math (`Vec2`, `Mat3`) for the backend-neutral 2D draw contract (`Draw2dList` and the value vocabulary it carries: baked transforms, geometry, gradient axes), relocated here so the render backends that depend on host can name and rasterize it. It exposes the deterministic host boundary (stepping, presentation, plus the neutral 2D draw contract) every future browser/native adapter and render backend will sit on top of."
 
-# Public Rust surface is the curated list in `lib.rs`; the architecture
-# checker only needs the facade plus the driver to prove the layer's
-# adapter role.
 introduced_capabilities = [
     "HostApi",
     "HostStepDriver",
@@ -74,11 +43,6 @@ consumed_capabilities = [
     "Mat3",
 ]
 
-# Each proof export is a real public export whose source must
-# reference at least one depended-layer (kernel/runtime/math) symbol. The driver
-# names `Runtime` (it steps it); the facade names `KernelApi` (it routes
-# identity/boundary-config validation through the kernel facade); `Draw2dList`
-# names math `Vec2` (its paint/geometry accessors return math vectors).
 [[proof_exports]]
 export = "HostApi"
 must_reference = ["KernelApi"]

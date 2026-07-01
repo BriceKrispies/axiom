@@ -84,8 +84,6 @@ impl Scene {
         &self.world
     }
 
-    // --- Counts (read-only) ---
-
     /// The number of nodes (entities carrying a local transform).
     pub fn node_count(&self) -> usize {
         self.world.storage().locals.len()
@@ -111,8 +109,6 @@ impl Scene {
     pub(crate) fn is_node(&self, id: SceneNodeId) -> bool {
         self.world.storage().locals.contains(Self::entity(id))
     }
-
-    // --- Node lifecycle / transforms (crate-private; reached through SceneApi) ---
 
     pub(crate) fn create_node(&mut self, local: Transform) -> SceneNodeId {
         let entity = self.world.spawn();
@@ -200,8 +196,6 @@ impl Scene {
             .map(|p| SceneNodeId::from_raw(p.raw()))
     }
 
-    // --- Players / controllers (per-tick command-driven node marks) ---
-
     /// Mark `node` as the controllable node for `player` index, so per-tick move
     /// commands addressed to that index translate it (via [`PlayerMoveSystem`]).
     pub(crate) fn add_player(&mut self, node: SceneNodeId, player: u32) -> SceneResult<()> {
@@ -247,20 +241,17 @@ impl Scene {
         self.update_world_transforms();
     }
 
-    // --- Transform propagation ---
-
     /// Recompute every node's world transform now, regardless of frame state.
     pub(crate) fn update_world_transforms(&mut self) {
         let ids: Vec<EntityId> = self.world.entities().iter().collect();
         propagate(ids.into_iter(), self.world.storage_mut());
     }
 
-    /// Advance the scene for one engine frame: recompute world transforms iff
-    /// the frame is active (not skipped, ran at least one runtime step), then
+    /// Advance the scene for one engine frame: run the registered systems
+    /// (spin, player-move, controller, then transform propagation) iff the
+    /// frame is active (not skipped, ran at least one runtime step), then
     /// return the deterministic snapshot taken after whatever update happened.
     pub(crate) fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
-        // Stage this frame's player-move and controller commands for the move and
-        // controller systems to apply.
         let moves: Vec<(u32, Vec3)> = frame.commands().iter().filter_map(decode_move).collect();
         let controls: Vec<(u32, Vec3, f32, f32)> = frame
             .commands()
@@ -269,9 +260,6 @@ impl Scene {
             .collect();
         self.world.storage_mut().pending_moves = moves;
         self.world.storage_mut().pending_controls = controls;
-        // The ECS scheduler runs the registered systems (spin, player-move,
-        // controller, then transform propagation) at logical time `tick`, gated on
-        // the frame (skipped / zero-step frames run nothing).
         self.world.advance(tick, frame);
         self.snapshot()
     }
@@ -447,7 +435,6 @@ mod tests {
         let n = s.create_node(Transform::from_translation(Vec3::new(4.0, 0.0, 0.0)));
         // No propagation yet: world falls back to local.
         assert_eq!(s.world_transform(n).unwrap().translation.x, 4.0);
-        // Missing node.
         assert_eq!(
             s.world_transform(SceneNodeId::from_raw(99))
                 .unwrap_err()
@@ -574,7 +561,6 @@ mod frame_tests {
             vec![encode_move(0, 0, Vec3::new(1.0, 2.0, 0.0))],
         );
         let snap = s.advance(0, &FrameContext::new(&frame));
-        // The player node's local — and its propagated world — moved by the delta.
         assert_eq!(s.local(node).unwrap().translation.x, 1.0);
         assert_eq!(s.local(node).unwrap().translation.y, 2.0);
         let moved = snap.nodes().iter().find(|n| n.world().translation.x == 1.0);
@@ -692,21 +678,18 @@ mod frame_tests {
         let frame = engine_frame_with(1_000, true, vec![look, mv]);
         s.advance(7, &FrameContext::new(&frame));
 
-        // Serialize, then restore into a fresh scene with the same systems.
         let mut writer = BinaryWriter::new();
         s.write_state(&mut writer);
         let bytes = writer.into_bytes();
         let mut restored = Scene::new();
         restored.read_state(&mut BinaryReader::new(&bytes)).unwrap();
 
-        // Identity, columns, and both maps survive the round-trip.
         assert_eq!(restored.node_count(), s.node_count());
         assert_eq!(
             restored.world.storage().controllers,
             s.world.storage().controllers
         );
         assert_eq!(restored.world.storage().players, s.world.storage().players);
-        // The accumulated controller orientation (yaw/pitch) was preserved.
         let ctrl = restored
             .world
             .storage()

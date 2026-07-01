@@ -41,9 +41,8 @@ use crate::planar_shadow::apply_planar_shadows;
 use crate::raster_triangle::RasterTriangle;
 use crate::sdf_raymarch::apply_sdf_raymarch;
 use crate::software_framebuffer::SoftwareFramebuffer;
-// The finished-frame result type lives in its own file (file-size budget) but is
-// re-exported here so its long-standing `software_rasterizer::SoftwareRasterResult`
-// path — used by the backend facade and a draw2d doc link — stays valid.
+// Re-exported here (defined in its own file) so the long-standing
+// `software_rasterizer::SoftwareRasterResult` path stays valid for callers.
 pub(crate) use crate::software_raster_result::SoftwareRasterResult;
 
 /// Barycentric distance to an edge below which a pixel is "on the edge" (the
@@ -127,10 +126,9 @@ impl SoftwareRasterizer {
         // shadow post-passes below still occlude against SDF surfaces.
         sdf_pass(&mut self.framebuffer, &mut self.depth, packet);
 
-        // --- Depth-cue post-passes (the per-pixel + per-object cues; the
-        // per-triangle cues — lighting, height tint, falloff — are already baked
-        // into each triangle's flat colour during conversion). Documented order:
-        // fog (6) → vertical grade (7) → contact shadows + outlines (8). ---
+        // Depth-cue post-passes run in a fixed order: fog (6) → vertical grade
+        // (7) → contact shadows + outlines (8). Per-triangle cues (lighting,
+        // height tint, falloff) are already baked into each flat triangle colour.
         let cues = self.options.depth_cues();
 
         // 6. depth fog: mix each pixel toward the fog colour by its final depth.
@@ -168,15 +166,12 @@ impl SoftwareRasterizer {
             .then(|| apply_outlines(&mut self.framebuffer, &converted.overlays, &cues));
         let (outlined, outline_px) = outlined_opt.unwrap_or((0, 0));
 
-        // The far-horizon silhouette is a documented seam, disabled by default:
-        // deriving a clean far-terrain band needs neutral far-band data the
-        // FramePacket does not carry (see ARCHITECTURE.md). Its knobs are read so
-        // they stay live, but it draws nothing yet.
+        // The far-horizon silhouette needs neutral far-band data the FramePacket
+        // does not carry (see ARCHITECTURE.md); its knobs are read but unused.
         let _ = cues.horizon_alpha;
         let _ = cues.enable_horizon_silhouette;
         let horizon: u32 = 0;
 
-        // Debug overlays applied as post-passes over the finished framebuffer.
         (overlay == CanvasDebugOverlay::DepthBuffer)
             .then(|| apply_depth_visualization(&mut self.framebuffer, &self.depth));
         (overlay == CanvasDebugOverlay::Bounds)
@@ -231,14 +226,9 @@ fn rasterize_triangle(
     let c = tri.color();
     // Flat colour → bytes ONCE per triangle.
     let base = [to_byte(c[0]), to_byte(c[1]), to_byte(c[2]), to_byte(c[3])];
-    // Straight (non-premultiplied) src-over alpha, the SPEC-11 §3.4 translucency
-    // fold on the software path: a covered fragment composites the draw colour
-    // OVER the existing pixel by the colour's alpha (`out = src·a + dst·(1−a)`),
-    // instead of overwriting it. The per-triangle src contribution (`base·a`) and
-    // `1−a` are precomputed here; only the `dst·(1−a)` term is per-pixel. The
-    // alpha channel composites against full opacity (`255·a`), so a translucent
-    // draw over the opaque background stays opaque. An opaque draw (`a == 1`)
-    // reduces to the previous straight overwrite exactly, byte-for-byte.
+    // Straight (non-premultiplied) src-over alpha per SPEC-11 §3.4: a covered
+    // fragment composites `out = src·a + dst·(1-a)`. `base·a` and `1-a` are
+    // precomputed per triangle; only `dst·(1-a)` is per-pixel.
     let a = c[3].clamp(0.0, 1.0);
     let inv = 1.0 - a;
     let src = [
@@ -273,8 +263,7 @@ fn rasterize_triangle(
     let mut r2 = edge(x0, y0, x1, y1, minxf, fy0) * inv_area;
 
     (miny..maxy + 1).for_each(|py| {
-        // The x-span this row actually covers (the scanline win: iterate the
-        // span, not the whole bounding box — thin slivers stop being waste).
+        // The x-span this row actually covers, not the whole bounding box.
         let (sx, ex) = row_span((r0, r1, r2), (a0, a1, a2), minx, maxx);
 
         let row = py as usize * w;
@@ -491,7 +480,6 @@ mod tests {
         // (0,0): bary inside → green. (3,3): outside → black.
         assert_eq!(px(&bytes, 4, 0, 0), [0, 255, 0, 255]);
         assert_eq!(px(&bytes, 4, 3, 3), [0, 0, 0, 255]);
-        // Deterministic.
         let (again, _) = rasterize_one(&t, &ctx(4, 4));
         assert_eq!(bytes, again);
     }
@@ -581,7 +569,6 @@ mod tests {
             let (rgba, dep) = (fb.rgba_mut(), depth.slice_mut());
             rasterize_triangle(rgba, dep, &c, &ghost, &mut s);
         }
-        // The pixel kept the blue clear colour; the depth test still ran/wrote.
         assert_eq!(px(&fb.into_rgba_bytes(), 10, 1, 1), [0, 0, 255, 255]);
         assert!(s.depth_written_pixels > 0);
     }
@@ -626,8 +613,6 @@ mod tests {
         assert!(p[2] < 160, "blue raised by fog");
         assert!(result.depth_fog_applied_pixels() > 0);
     }
-
-    // ---- rasterize_packet (end-to-end) ----
 
     fn vertex(pos: [f32; 3], color: [f32; 4]) -> [f32; 12] {
         [
@@ -843,8 +828,6 @@ mod tests {
         let b = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache);
         assert_eq!(a, b);
     }
-
-    // ---- depth-cue post-passes ----
 
     #[test]
     fn vertical_grade_darkens_lower_screen_more_than_top() {

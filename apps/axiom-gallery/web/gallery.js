@@ -277,17 +277,39 @@ function mountCubeBar(host, demo, current) {
   requestAnimationFrame(loop);
 }
 
-// Load the standalone debug-overlay harness wasm as a second module and mount
-// its backquote-toggled overlay on top of the current demo. Fire-and-forget:
-// failures here (e.g. a gallery built without the harness bundle) only warn —
-// they never block or break the demo. The overlay shows its own stub
-// diagnostics; it does not read the demo's engine state.
+// The gallery is ONE wasm bundle, so every consumer on a page — the demo AND the
+// debug overlay that rides on top of it — MUST share ONE wasm instance. The
+// wasm-bindgen glue (`axiom_gallery_bg.js`) holds a single module-level `wasm`
+// binding; importing the loader twice (e.g. with distinct `?v=` cache-busts loads
+// two loader modules over the one shared glue) inits two wasm instances whose
+// second `__wbg_set_wasm(...)` OVERWRITES that shared binding — hijacking the
+// already-running demo onto the wrong instance, so its live loop reads a foreign
+// linear memory and crashes ("TextDecoder: encoded data not valid", "memory access
+// out of bounds", "table index out of bounds"). We therefore import + init the
+// loader exactly ONCE per page and hand the same module to every caller.
+let enginePromise = null;
+function loadEngine() {
+  if (enginePromise === null) {
+    // Cache-bust ONCE per page load (the dev/static server may send no cache
+    // headers) and share that URL, so every caller resolves the SAME module.
+    const v = Date.now();
+    enginePromise = import(`./axiom-loader.js?v=${v}`).then(async (mod) => {
+      await mod.default();
+      return mod;
+    });
+  }
+  return enginePromise;
+}
+
+// Mount the backquote-toggled debug overlay on top of the current demo, on the
+// SAME shared wasm instance the demo runs on (see `loadEngine`). Fire-and-forget:
+// failures here (e.g. a gallery built without the harness entry) only warn — they
+// never block or break the demo. The overlay shows its own stub diagnostics; it
+// does not read the demo's engine state.
 async function mountDebugOverlay() {
   try {
-    const v = Date.now();
-    const overlay = await import(`./axiom-loader.js?v=${v}`);
-    await overlay.default();
-    overlay.harness_start();
+    const mod = await loadEngine();
+    mod.harness_start();
   } catch (e) {
     console.warn("[gallery] debug overlay unavailable:", e);
   }
@@ -318,10 +340,26 @@ export async function bootDemo() {
   titleEl.textContent = demo.title;
   document.title = "Axiom — " + demo.title;
 
+  // Embed mode: this page is one pane of the backend-comparison triptych
+  // (loaded in an iframe as `demo.html?...&embed=1&backend=<b>`). The parent
+  // triptych owns the chrome — the title bar, the on-screen keypad, the control
+  // bars, and the single input authority that mirrors keystrokes/pointer to all
+  // three panes — so an embedded pane renders ONLY the canvas and suppresses all
+  // of that. It also skips the debug overlay (three stacked overlays would be
+  // noise). The `backend` param is read by the engine itself (axiom-windowing),
+  // so each pane binds its pinned backend with no extra wiring here.
+  const embed = params.get("embed") === "1";
+  if (embed) {
+    document.body.classList.add("embed");
+  }
+
   // Mount the developer debug overlay over this shared-shell demo (press ` to
   // open it). Fire-and-forget so it never blocks or breaks the demo — it even
-  // mounts when the demo itself can't start (e.g. no WebGPU available).
-  mountDebugOverlay();
+  // mounts when the demo itself can't start (e.g. no WebGPU available). Skipped
+  // for an embedded pane (the parent triptych owns one shared surface).
+  if (!embed) {
+    mountDebugOverlay();
+  }
 
   // The canvas the engine binds its surface to; id must match the Rust app.
   const canvas = document.createElement("canvas");
@@ -330,17 +368,18 @@ export async function bootDemo() {
   canvas.height = 600;
   stage.appendChild(canvas);
 
-  if (demo.buttons.length > 0) {
+  // The keypad and control bars belong to the parent triptych in embed mode.
+  if (!embed && demo.buttons.length > 0) {
     renderKeypad(keypad, demo.buttons);
   }
 
   const relay = params.get("relay");
-  if (demo.needsRelay) {
+  if (!embed && demo.needsRelay) {
     mountRelayBar(document.getElementById("controls"), demo, relay);
   }
 
   const cubeCount = demo.cubeStress ? readCubeCount(params) : null;
-  if (demo.cubeStress) {
+  if (!embed && demo.cubeStress) {
     mountCubeBar(document.getElementById("controls"), demo, cubeCount);
   }
 
@@ -364,15 +403,11 @@ export async function bootDemo() {
   }
 
   try {
-    // Boot through the ONE packaged capability-detecting loader: it picks the
-    // wasm fast-path or the wasm2js fallback itself. Every demo is merged into a
-    // single bundle, so the gallery loads `./axiom-loader.js` once and calls the
-    // demo's namespaced entry (`<demo>_start`) — `init()` is idempotent, so a
-    // demo and the debug overlay share the one wasm instance. Cache-bust on every
-    // load (the dev/static server may send no cache headers).
-    const v = Date.now();
-    const mod = await import(`./axiom-loader.js?v=${v}`);
-    await mod.default();
+    // Boot through the ONE packaged capability-detecting loader (it picks the wasm
+    // fast-path or the wasm2js fallback itself) via the shared `loadEngine`, so the
+    // demo and the debug overlay run on the SAME single wasm instance, then call the
+    // demo's namespaced entry (`<demo>_start`).
+    const mod = await loadEngine();
     if (cubeCount != null) {
       mod[demo.startFn](cubeCount);
     } else {

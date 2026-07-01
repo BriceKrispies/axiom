@@ -67,8 +67,6 @@ pub fn check_architecture(root: &Path) -> CheckReport {
 
     let manifest_index = ManifestIndex::new(&manifests, &module_manifests, &app_manifests);
 
-    // Pure filesystem scans below run for every discovered layer and module
-    // regardless of whether `cargo metadata` is available.
     let layer_dirs: Vec<(String, PathBuf)> = manifests
         .iter()
         .map(|m| (m.layer.name.clone(), m.src_dir()))
@@ -78,23 +76,19 @@ pub fn check_architecture(root: &Path) -> CheckReport {
         .map(|m| (m.module.name.clone(), m.src_dir()))
         .collect();
 
-    // Centralized source hygiene scan.
     check_hygiene(&layer_dirs, &module_dirs, &mut report);
 
-    // The coverage gate's ignore list may exclude only apps and tooling; prove
-    // it never excludes a layer or module (the Axiom Coverage Law's scope).
     check_coverage_scope(root, &layer_dirs, &module_dirs, &mut report);
 
-    // Cargo metadata is required for cross-class dependency-graph checks.
-    // If it is unavailable (e.g. on a synthetic fixture that has no
-    // `Cargo.toml`), we still emit every check above and finish.
+    // If `cargo metadata` is unavailable (e.g. a synthetic fixture with no
+    // `Cargo.toml`), cross-class checks are skipped and every other check
+    // still runs to completion.
     load_cargo_metadata(root).into_iter().for_each(|graph| {
         check_classes(root, &graph, &manifest_index, &mut report);
     });
 
-    // The set of declared layer names, and the prefix table for resolving
-    // cross-layer references found in source. With no manifests these are empty
-    // and every step below is a no-op, so no early return is needed.
+    // With no manifests, `known_names`/`prefix_table` are empty and every step
+    // below becomes a no-op, so no early return is needed.
     let known_names: BTreeSet<String> = manifests.iter().map(|m| m.layer.name.clone()).collect();
     let prefix_table: Vec<PrefixEntry> = manifests
         .iter()
@@ -104,11 +98,9 @@ pub fn check_architecture(root: &Path) -> CheckReport {
         })
         .collect();
 
-    // Layers form a directed acyclic graph: every `depends_on` edge must name a
-    // real layer, and the graph must contain no cycle.
     check_dependency_graph(&manifests, &known_names, &mut report);
 
-    // Layers in name order for a deterministic report.
+    // Sorted by name for a deterministic report.
     let mut ordered: Vec<&LayerManifest> = manifests.iter().collect();
     ordered.sort_by(|a, b| a.layer.name.cmp(&b.layer.name));
     report.layers_checked = ordered.iter().map(|m| m.layer.name.clone()).collect();
@@ -170,8 +162,8 @@ fn check_dependency_graph(
     let mut color: BTreeMap<&str, u8> = adj.keys().map(|k| (*k, 0u8)).collect();
     let mut names: Vec<&str> = adj.keys().copied().collect();
     names.sort_unstable();
-    // The first cycle found (in sorted start order) is enough to fail the build;
-    // `find_map` stops at it, threading `color` across starts statefully.
+    // `find_map` stops at the first cycle found and threads `color` across
+    // starts statefully.
     let cycle = names.into_iter().find_map(|start| {
         (color[start] == 0).then_some(()).and_then(|()| {
             let mut stack: Vec<&str> = Vec::new();
@@ -201,15 +193,13 @@ fn dfs_cycle<'a>(
 ) -> Option<Vec<String>> {
     color.insert(node, 1);
     stack.push(node);
-    // Visit neighbours in order; the first that yields a cycle wins. A
-    // `1`-coloured (on-stack) neighbour is a back-edge; a `0`-coloured one is
-    // recursed into; `2` (done) contributes nothing.
+    // A `1`-coloured (on-stack) neighbour is a back-edge; `0` is recursed
+    // into; `2` (done) contributes nothing.
     let neighbours: Vec<&str> = adj[node].clone();
     let found = neighbours.into_iter().find_map(|next| {
         let col = color.get(next).copied().unwrap_or(2);
         (col == 1)
             .then(|| {
-                // Back-edge: build the cycle from where `next` sits on the stack.
                 let start = stack.iter().position(|n| *n == next).unwrap_or(0);
                 let mut cycle: Vec<String> = stack[start..].iter().map(|s| s.to_string()).collect();
                 cycle.push(next.to_string());
@@ -222,8 +212,8 @@ fn dfs_cycle<'a>(
             })
     });
     stack.pop();
-    // Only mark this node done when no cycle was found through it (matching the
-    // original, which returns before the `color.insert(node, 2)` on a hit).
+    // Only mark this node done when no cycle was found through it, or a
+    // real back-edge could be missed on a later, differently-ordered visit.
     found.is_none().then(|| color.insert(node, 2));
     found
 }
@@ -236,11 +226,9 @@ fn check_layer(
 ) {
     let name = &m.layer.name;
 
-    // --- Read this layer's source once (comments stripped so a stray mention
-    // in a comment cannot mask or invent a violation) ---
-    // Read each file with `//` comments stripped (so a mention can't mask or
-    // invent a violation). This is BEFORE test-code stripping, so the
-    // `#[cfg(test)] mod NAME;` declarations are still visible.
+    // Comments stripped first (so a stray mention can't mask/invent a
+    // violation), before test-code stripping, so `#[cfg(test)] mod NAME;`
+    // declarations are still visible below.
     let commented: Vec<(PathBuf, String)> = collect_rs_files(&m.src_dir())
         .into_iter()
         .filter_map(|p| {
@@ -251,10 +239,9 @@ fn check_layer(
         .collect();
 
     // Files reachable only through a `#[cfg(test)] mod NAME;` declaration are
-    // test-only; the gate lives in the declaring file, not in them. Collect
-    // those names first, then drop the corresponding files and strip remaining
-    // in-file test code — so the scan sees only non-test architecture,
-    // consistent with the `engine_genuine_dependency` dylint.
+    // test-only, so drop them and strip remaining in-file test code — the
+    // scan then sees only non-test architecture, consistent with the
+    // `engine_genuine_dependency` dylint.
     let test_module_names: BTreeSet<String> = commented
         .iter()
         .flat_map(|(_, text)| find_cfg_test_modules(text))
@@ -265,7 +252,7 @@ fn check_layer(
         .map(|(path, text)| (path, strip_test_code(&text)))
         .collect();
 
-    // Prefixes of OTHER layers (a layer referencing itself is intra-layer).
+    // A layer referencing itself is intra-layer, not a cross-layer import.
     let own_prefix = m.import_prefix();
     let other_prefixes: Vec<String> = prefix_table
         .iter()
@@ -281,19 +268,16 @@ fn check_layer(
         let rel = relativize(root, path);
         find_cross_refs(text, &other_prefixes)
             .into_iter()
-            // An unknown prefix has no target layer; ignore it.
             .filter_map(|cross| {
                 prefix_lookup
                     .get(cross.prefix.as_str())
                     .map(|target| (cross, *target))
             })
             .for_each(|(cross, target)| {
-                // DAG rule: a layer may import only the layers in its
-                // `depends_on`. "Genuinely uses each declared dependency" is
-                // enforced separately by the `engine_genuine_dependency` dylint
-                // (which has real type info); here we enforce the converse — no
-                // import of an undeclared layer. An undeclared import is flagged
-                // and the private-path check is skipped for it.
+                // This enforces only the "no undeclared import" direction;
+                // "genuinely uses each declared dependency" is checked
+                // separately by the `engine_genuine_dependency` dylint, which
+                // has real type info.
                 let declared = m.layer.depends_on.contains(&target.name);
                 (!declared).then(|| {
                     report.push(
@@ -309,7 +293,6 @@ fn check_layer(
                         .at(rel.clone(), cross.line),
                     );
                 });
-                // Reach only public exports, never private module paths.
                 (declared & cross.private).then(|| {
                     report.push(
                         Violation::new(
@@ -327,7 +310,6 @@ fn check_layer(
             });
     });
 
-    // --- Introduced capabilities must be publicly exported ---
     m.layer
         .introduced_capabilities
         .iter()
@@ -343,7 +325,6 @@ fn check_layer(
             ));
         });
 
-    // --- Proof exports ---
     check_proof_exports(root, m, &files, report);
 }
 
@@ -355,11 +336,9 @@ fn check_proof_exports(
 ) {
     let name = &m.layer.name;
 
-    // A root layer (empty `depends_on`, e.g. the kernel) adapts nothing, so it
-    // proves nothing. Every non-root layer must expose at least one public
-    // capability whose implementation uses a layer it depends on. When this
-    // fires, `proof_exports` is empty, so the per-export loop below is a no-op —
-    // no early return is needed.
+    // A root layer (empty `depends_on`) proves nothing by definition; when
+    // this fires, `proof_exports` is empty, so the per-export loop below is
+    // a no-op without an early return.
     let missing_all = !m.layer.depends_on.is_empty() & m.proof_exports.is_empty();
     missing_all.then(|| {
         report.push(Violation::new(
@@ -373,9 +352,8 @@ fn check_proof_exports(
     });
 
     m.proof_exports.iter().for_each(|pe| {
-        // A missing public export is itself a violation; otherwise prove the
-        // located export against its required symbols. Build at most one
-        // `Violation` here, then push it once (so `report` is borrowed once).
+        // Build at most one `Violation` here, then push it once (so `report`
+        // is borrowed only once).
         let violation = locate_public_export(files, &pe.export).map_or_else(
             || {
                 Some(Violation::new(
@@ -423,8 +401,6 @@ fn check_proof_exports(
         violation.into_iter().for_each(|v| report.push(v));
     });
 }
-
-// --- helpers ---
 
 fn locate_public_export(files: &[(PathBuf, String)], name: &str) -> Option<(PathBuf, usize)> {
     files
@@ -486,7 +462,6 @@ mod tests {
 
     #[test]
     fn empty_root_is_ok() {
-        // A directory with no `crates/` produces an empty, passing report.
         let tmp = std::env::temp_dir().join("axiom_xtask_empty_check");
         let _ = std::fs::create_dir_all(&tmp);
         let report = check_architecture(&tmp);

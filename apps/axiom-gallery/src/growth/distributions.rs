@@ -1,17 +1,10 @@
 //! Float / distribution draws over a deterministic [`EntropyStream`].
 //!
-//! The engine's `axiom-entropy` layer produces integers plus a single
-//! unit-interval draw ([`EntropyStream::unit`], a kernel `Ratio` in `[0, 1)`).
-//! Worldgen additionally needs uniform ranges, a Gaussian, and uniform points on
-//! the sphere. These are app-side conveniences — the growth app is a composition
-//! leaf, exempt from the naked-`f32` and branchless spine laws — each composed
-//! purely over `unit()`, so the same seed still reproduces the same world.
-//!
-//! The one genuinely reusable, *unitful* primitive — the area-preserving uniform
-//! sphere point — lives in the engine as [`axiom_math::unit_vec3`]; this module
-//! only adapts the two unit draws it consumes. The uniform-range and Box–Muller
-//! conveniences stay app-side deliberately: they traffic in naked `f32`, so they
-//! do not belong in a layer.
+//! Worldgen needs uniform ranges, a Gaussian, and uniform points on the sphere,
+//! each composed purely over [`EntropyStream::unit`] so the same seed still
+//! reproduces the same world. The area-preserving uniform sphere point is a
+//! reusable primitive and lives in [`axiom_math::unit_vec3`]; this module only
+//! adapts the two unit draws it consumes.
 
 use axiom_entropy::EntropyStream;
 use axiom_math::Vec3;

@@ -79,8 +79,7 @@ impl Mat3 {
     pub fn multiply(self, other: Mat3) -> Mat3 {
         let a = &self.data;
         let b = &other.data;
-        // Explicit unroll of the column-major 3×3 product, keeping the exact
-        // accumulation order `((0 + t0) + t1) + t2` over k = 0,1,2.
+        // Keeps the exact accumulation order `((0 + t0) + t1) + t2` for determinism.
         let elem = |col: usize, row: usize| -> f32 {
             0.0f32 + a[row] * b[col * 3] + a[3 + row] * b[col * 3 + 1] + a[6 + row] * b[col * 3 + 2]
         };
@@ -149,7 +148,6 @@ mod tests {
         assert!(m
             .transform_point(Vec2::new(1.0, 2.0))
             .approx_eq(&Vec2::new(11.0, 22.0), eps()));
-        // A direction (w = 0) ignores translation.
         assert!(m
             .transform_vector(Vec2::new(1.0, 2.0))
             .approx_eq(&Vec2::new(1.0, 2.0), eps()));
@@ -169,11 +167,9 @@ mod tests {
     #[test]
     fn rotation_quarter_turn_maps_x_to_y() {
         let m = Mat3::rotation(Radians::new(std::f32::consts::FRAC_PI_2).unwrap());
-        // CCW 90°: (1,0) -> (0,1).
         assert!(m
             .transform_vector(Vec2::new(1.0, 0.0))
             .approx_eq(&Vec2::new(0.0, 1.0), eps()));
-        // (0,1) -> (-1,0).
         assert!(m
             .transform_vector(Vec2::new(0.0, 1.0))
             .approx_eq(&Vec2::new(-1.0, 0.0), eps()));
@@ -183,12 +179,10 @@ mod tests {
     fn multiply_applies_right_factor_first() {
         let t = Mat3::translation(Vec2::new(1.0, 0.0));
         let s = Mat3::scale(Vec2::new(2.0, 2.0));
-        // Scale first, then translate: origin -> (1, 0).
         let ts = t.multiply(s);
         assert!(ts
             .transform_point(Vec2::ZERO)
             .approx_eq(&Vec2::new(1.0, 0.0), eps()));
-        // Translate first, then scale: origin -> (1,0) -> (2,0).
         let st = s.multiply(t);
         assert!(st
             .transform_point(Vec2::ZERO)
@@ -221,28 +215,18 @@ mod tests {
         assert!(Mat3::IDENTITY.approx_eq(&Mat3::IDENTITY, eps()));
     }
 
-    // Pins every element of the column-major product so a `+`/`*` index mutant
-    // in `multiply` is caught: distinct, asymmetric matrices whose product is
-    // hand-computed.
     #[test]
     fn multiply_elements_are_exact() {
         let a = Mat3::from_cols_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
         let b = Mat3::from_cols_array([9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0]);
         let p = a.multiply(b).as_cols_array();
-        // elem(col,row) = sum_k a[k*3+row]*b[col*3+k].
-        // col0: b col = [9,8,7]; row0 = 1*9+4*8+7*7 = 90; row1 = 2*9+5*8+8*7 =
-        // 114; row2 = 3*9+6*8+9*7 = 138.
         assert!(p[0].approx_eq(&90.0, eps()));
         assert!(p[1].approx_eq(&114.0, eps()));
         assert!(p[2].approx_eq(&138.0, eps()));
-        // col1: b col = [6,5,4]; row0 = 1*6+4*5+7*4 = 54.
         assert!(p[3].approx_eq(&54.0, eps()));
-        // col2: b col = [3,2,1]; row0 = 1*3+4*2+7*1 = 18.
         assert!(p[6].approx_eq(&18.0, eps()));
     }
 
-    // Pins the translation column read in `transform_point` (data[6], data[7])
-    // and the linear coefficients, killing index/op mutants distinctly.
     #[test]
     fn transform_point_uses_distinct_coefficients() {
         let m = Mat3::from_cols_array([
@@ -250,10 +234,8 @@ mod tests {
             4.0, 5.0, 0.0, //
             6.0, 7.0, 1.0, //
         ]);
-        // x' = 2*10 + 4*100 + 6 = 426; y' = 3*10 + 5*100 + 7 = 537.
         let r = m.transform_point(Vec2::new(10.0, 100.0));
         assert!(r.approx_eq(&Vec2::new(426.0, 537.0), eps()));
-        // Vector form drops the translation column.
         let v = m.transform_vector(Vec2::new(10.0, 100.0));
         assert!(v.approx_eq(&Vec2::new(420.0, 530.0), eps()));
     }

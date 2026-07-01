@@ -1,6 +1,5 @@
 //! `ServerSnapshotFor` — a per-player-acknowledged authoritative snapshot
 //! (server → client).
-//!
 //! This is the per-player twin of [`crate::server_snapshot::ServerSnapshot`]: the
 //! same opaque snapshot body, carrying a **bounded list of per-player
 //! acknowledgements** `(player, sequence)` instead of a single anonymous acked
@@ -20,7 +19,6 @@ use crate::opaque_payload::OpaquePayload;
 pub(crate) use crate::acks::MAX_ACKS;
 
 /// The server's authoritative state for a tick, acknowledged per player.
-///
 /// - `server_tick` — the authoritative tick this snapshot describes.
 /// - `acks` — the bounded `(player, last_accepted_client_sequence)` pairs, so each
 ///   client can drop its own acknowledged pending intents (owned by
@@ -50,17 +48,14 @@ impl ServerSnapshotFor {
             })
     }
 
-    /// The authoritative tick this snapshot describes.
     pub(crate) fn server_tick(&self) -> u64 {
         self.server_tick
     }
 
-    /// The per-player acknowledgements `(player, sequence)`.
     pub(crate) fn acks(&self) -> &[(u64, u64)] {
         &self.acks
     }
 
-    /// The opaque snapshot payload.
     pub(crate) fn payload(&self) -> &[u8] {
         self.payload.as_bytes()
     }

@@ -18,7 +18,6 @@ fn built() -> (SimCoreApi, EntityRegistry, crate::ids::BodyId, EntityHandle) {
         )
         .unwrap();
     let draft = api.begin_body_plan();
-    // core: one outer surface, one covering layer.
     api.add_body_plan_part(
         draft,
         "test-core",
@@ -28,17 +27,15 @@ fn built() -> (SimCoreApi, EntityRegistry, crate::ids::BodyId, EntityHandle) {
         &[(SimCoreApi::SURFACE_OUTER, true)],
     )
     .unwrap();
-    // extremity: bilateral, grouped, a capability + a covering layer, outer surface.
     api.add_body_plan_part(
         draft,
         "test-extremity",
-        (SimCoreApi::PART_EXTREMITY, 1, 1), // bilateral, group
+        (SimCoreApi::PART_EXTREMITY, 1, 1),
         &[10],
         &[(covering, 0)],
         &[(SimCoreApi::SURFACE_OUTER, true)],
     )
     .unwrap();
-    // mouth: one mouth surface.
     api.add_body_plan_part(
         draft,
         "test-mouth",
@@ -77,7 +74,6 @@ fn tissues_through_the_facade() {
             &[(1, 7), (2, 3)],
         )
         .unwrap();
-    // Duplicate name and out-of-range kind code rejected.
     assert!(api
         .register_tissue(SimCoreApi::TISSUE_BONE, "test-muscle", &[], &[])
         .is_none());
@@ -119,7 +115,6 @@ fn body_plan_building_and_queries() {
         .add_body_plan_part(draft, "l", (SimCoreApi::PART_LIMB, 1, 2), &[5, 6], &[], &[])
         .unwrap();
     assert_eq!((core, limb), (0, 1));
-    // Invalid arms: duplicate name, bad kind code, bad symmetry code, bad surface code, unknown draft.
     assert!(api
         .add_body_plan_part(draft, "c", (SimCoreApi::PART_HEAD, 0, 0), &[], &[], &[])
         .is_none());
@@ -145,7 +140,6 @@ fn body_plan_building_and_queries() {
     assert!(api.connect_body_plan_parts(draft, core, limb));
     assert!(!api.connect_body_plan_parts(draft, core, 99));
     let plan = api.finish_body_plan(draft, "p").unwrap();
-    // finish of a consumed/unknown draft fails.
     assert!(api.finish_body_plan(draft, "p2").is_none());
     assert_eq!(api.body_plan_id("p"), Some(plan));
     assert_eq!(api.body_plan_part_count(plan), Some(2));
@@ -159,7 +153,6 @@ fn body_plan_building_and_queries() {
     assert_eq!(api.body_plan_count(), 1);
     assert_eq!(api.all_body_plan_ids(), vec![plan]);
     assert_eq!(api.body_plan(plan).unwrap().parts().len(), 2);
-    // unknown plan queries are empty/None.
     let absent = crate::ids::BodyPlanId::from_raw(0);
     assert!(api.body_plan_part_count(absent).is_none());
     assert!(api
@@ -187,16 +180,13 @@ fn body_instantiation_and_part_queries() {
         api.body_part_kind_code(cores[0]),
         Some(SimCoreApi::PART_CORE)
     );
-    // core connects to extremity and mouth.
     assert_eq!(api.connected_parts(body, cores[0]).len(), 2);
     assert!(api.body_part(cores[0]).is_some());
-    // part state get/set.
     assert_eq!(api.body_part_state(cores[0]), Some(0));
     assert!(api.set_body_part_state(cores[0], 4));
     assert_eq!(api.body_part_state(cores[0]), Some(4));
     assert!(!api.set_body_part_state(crate::ids::BodyPartId::from_raw(9999), 1));
 
-    // Stale owner is rejected at instantiation.
     let mut e2 = EntityRegistry::new();
     let dead = e2.spawn_handle();
     e2.despawn_handle(dead);
@@ -204,7 +194,6 @@ fn body_instantiation_and_part_queries() {
     assert!(api
         .instantiate_body(plan, Some(dead), &e2, None, 0)
         .is_none());
-    // Unknown plan rejected.
     assert!(api
         .instantiate_body(crate::ids::BodyPlanId::from_raw(0), None, &ereg, None, 0)
         .is_none());
@@ -218,7 +207,7 @@ fn surfaces_and_residues_on_them() {
         .unwrap();
 
     let surfaces = api.body_surfaces(body);
-    assert_eq!(surfaces.len(), 3); // core + extremity + mouth each have one
+    assert_eq!(surfaces.len(), 3);
     let outer = api.body_surfaces_by_kind(body, SimCoreApi::SURFACE_OUTER);
     assert_eq!(outer.len(), 2);
     assert_eq!(
@@ -235,13 +224,11 @@ fn surfaces_and_residues_on_them() {
     let part = api.surface_part(surface).unwrap();
     assert_eq!(api.part_surfaces(part), vec![surface]);
     assert!(api.body_surface(surface).is_some());
-    // surface state get/set.
     assert_eq!(api.surface_state(surface), Some(0));
     assert!(api.set_surface_state(surface, 2));
     assert_eq!(api.surface_state(surface), Some(2));
     assert!(!api.set_surface_state(crate::ids::BodySurfaceId::from_raw(9999), 1));
 
-    // Residue on a surface, queryable by surface/part/body.
     let q = api.quantity(SimCoreApi::UNIT_VOLUME, 5).unwrap();
     let residue = api
         .create_residue_on_surface(substance, q, surface, 0, None, 0)
@@ -249,10 +236,8 @@ fn surfaces_and_residues_on_them() {
     assert_eq!(api.residues_on_surface(surface), vec![residue]);
     assert_eq!(api.residues_on_part(part), vec![residue]);
     assert!(api.residues_on_body(body).contains(&residue));
-    // residue location bridge round-trips.
     let loc = api.residue_location_for_surface(surface);
     assert_eq!(loc.as_symbol(), Some(surface.raw()));
-    // creating on an unknown surface fails cleanly.
     assert!(api
         .create_residue_on_surface(
             substance,
@@ -272,7 +257,6 @@ fn body_routes_validate_and_record() {
     let outer = api.body_surfaces_by_kind(body, SimCoreApi::SURFACE_OUTER)[0];
     let mouth = api.body_surfaces_by_kind(body, SimCoreApi::SURFACE_MOUTH)[0];
 
-    // Route mapping + targeting rules.
     assert_eq!(
         api.body_route_from_interaction(0),
         Some(SimCoreApi::BODY_ROUTE_SURFACE_CONTACT)
@@ -297,7 +281,6 @@ fn body_routes_validate_and_record() {
         None
     );
 
-    // Touch (route 0 -> surface-contact) can target an outer surface.
     let before = api.causal_event_count();
     let interaction = api
         .record_surface_interaction(
@@ -313,15 +296,12 @@ fn body_routes_validate_and_record() {
         before + 1,
         "routed interaction emits a causal event"
     );
-    // Touch cannot target the mouth surface (surface-contact !-> mouth).
     assert!(api
         .record_surface_interaction((1, 0), (actor, mouth), (None, None, None), (1, 0, 3, None))
         .is_none());
-    // Ingestion (route 1 -> ingestion-entry) can target the mouth surface.
     assert!(api
         .record_surface_interaction((1, 1), (actor, mouth), (None, None, None), (1, 0, 3, None))
         .is_some());
-    // Invalid interaction-route code fails cleanly.
     assert!(api
         .record_surface_interaction(
             (1, 250),
@@ -330,7 +310,6 @@ fn body_routes_validate_and_record() {
             (1, 0, 3, None)
         )
         .is_none());
-    // Unknown surface fails cleanly.
     assert!(api
         .record_surface_interaction(
             (1, 0),
@@ -374,7 +353,6 @@ fn wounds_through_the_facade() {
     assert!(api.set_wound_state(wound, 1));
     assert!(!api.set_wound_state(crate::ids::WoundId::from_raw(9999), 1));
 
-    // Invalid references fail cleanly.
     assert!(api
         .create_wound(
             (crate::ids::BodyId::from_raw(0), part, None),
@@ -419,9 +397,7 @@ fn connection_relations_are_recorded_and_queryable() {
     let recorded = api.record_body_connections_as_relations(body, 1);
     assert_eq!(recorded, 2, "core->extremity and core->mouth");
     let core = api.body_parts_by_kind(body, SimCoreApi::PART_CORE)[0];
-    // The core part appears as an endpoint in both connection relations.
     assert_eq!(api.connection_relations_for_part(core).len(), 2);
-    // An unknown body records nothing.
     assert_eq!(
         api.record_body_connections_as_relations(crate::ids::BodyId::from_raw(0), 1),
         0

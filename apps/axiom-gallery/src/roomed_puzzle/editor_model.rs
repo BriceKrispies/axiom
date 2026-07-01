@@ -60,8 +60,6 @@ impl EditorModel {
         editor
     }
 
-    // --- Palette / metadata ---
-
     /// Grid width.
     pub fn width(&self) -> u32 {
         self.width
@@ -102,8 +100,6 @@ impl EditorModel {
         self.paint_group = group;
     }
 
-    // --- Painting / inspection ---
-
     /// Row-major index of `(x, y)`, if in range.
     fn index(&self, x: u32, y: u32) -> Option<usize> {
         (x < self.width && y < self.height).then(|| (y * self.width + x) as usize)
@@ -133,8 +129,6 @@ impl EditorModel {
             .map(|i| self.groups[i].clone())
             .unwrap_or_else(GroupId::default_group)
     }
-
-    // --- Validation / census ---
 
     /// A census of everything currently painted (multiplicity-capable).
     pub fn census(&self) -> LevelCensus {
@@ -174,8 +168,6 @@ impl EditorModel {
     pub fn can_playtest(&self) -> bool {
         self.validate().is_valid()
     }
-
-    // --- Conversion / TOML ---
 
     /// Best-effort conversion to a canonical [`LevelDefinition`]: the first
     /// entrance/exit in row-major order (or `(0, 0)` if none) plus every wall,
@@ -267,8 +259,6 @@ impl EditorModel {
         }
     }
 
-    // --- Rendering ---
-
     /// A render model of the painted grid (doors drawn closed, buttons released,
     /// no actors), so edit mode and playtest share the same depth-cue drawing.
     pub fn render_model(&self) -> RenderModel {
@@ -309,7 +299,6 @@ mod tests {
         e.paint(4, 5);
         assert_eq!(e.tile_at(4, 5), TileKind::Button);
         assert_eq!(e.group_at(4, 5), GroupId::new("alt"));
-        // Out-of-range paint is ignored.
         e.paint(99, 99);
         assert_eq!(e.tile_at(0, 0), TileKind::Floor);
     }
@@ -317,13 +306,11 @@ mod tests {
     #[test]
     fn zero_and_many_entrances_are_invalid() {
         let mut e = EditorModel::new(6, 1);
-        // No entrance/exit yet.
         let r = e.validate();
         assert!(r.contains(&LevelError::NoEntrance));
         assert!(r.contains(&LevelError::NoExit));
         assert!(!e.can_playtest());
 
-        // Two entrances.
         e.select(TileKind::Entrance);
         e.paint(0, 0);
         e.paint(1, 0);

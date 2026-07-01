@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn overflow_is_reported_not_wrapped() {
         let mut c = clock(u64::MAX);
-        c.advance().unwrap(); // elapsed == u64::MAX
+        c.advance().unwrap();
         let err = c.advance().unwrap_err();
         assert_eq!(err.scope(), KernelErrorScope::Time);
         assert_eq!(err.code(), KernelErrorCode::RangeOverflow);
@@ -167,8 +167,8 @@ mod cov2 {
     #[test]
     fn advance_reports_overflow() {
         let mut c = SimulationClock::new(FixedStep::new(u64::MAX).unwrap());
-        assert!(c.advance().is_ok()); // 0 + MAX
-        assert!(c.advance().is_err()); // MAX + MAX overflows
+        assert!(c.advance().is_ok());
+        assert!(c.advance().is_err());
     }
 
     #[test]

@@ -213,7 +213,6 @@ mod tests {
         assert_eq!(s.lights().len(), 1);
         assert_eq!(s.renderables().len(), 1);
         assert_eq!(s.sdf_shapes().len(), 1);
-        // The shape is keyed by its node and carries the authored sphere kind.
         let shape = &s.sdf_shapes()[0];
         assert_eq!(shape.kind(), SdfShape::SPHERE);
         assert_eq!(shape.dims(), Vec3::new(0.5, 0.5, 0.5));
@@ -234,27 +233,22 @@ mod tests {
 
     #[test]
     fn snapshot_world_falls_back_to_local_before_propagation() {
-        // Build a parented scene but DO NOT propagate: world == local (the
-        // `unwrap_or(local)` fallback arm).
         let mut s = Scene::new();
         let a = s.create_node(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
         let b = s.create_node(Transform::from_translation(Vec3::new(0.0, 5.0, 0.0)));
         s.set_parent(b, a).unwrap();
         let snap = SceneSnapshot::from_scene(&s);
         let child = snap.nodes().iter().find(|n| n.parent().is_some()).unwrap();
-        assert_eq!(child.world().translation.x, 0.0); // not propagated
+        assert_eq!(child.world().translation.x, 0.0);
         assert_eq!(child.world().translation.y, 5.0);
     }
 
     #[test]
     fn node_lookup_resolves_present_ids_and_rejects_absent_ones() {
         let s = SceneSnapshot::from_scene(&populated_scene());
-        // Every listed node is found by its own id, and the lookup returns that
-        // same node (the `Ok` -> `map` arm of the binary search).
         for n in s.nodes() {
             assert_eq!(s.node(n.id()), Some(n));
         }
-        // An id no node carries returns `None` (the `Err` -> `None` arm).
         assert!(s.node(SceneNodeId::from_raw(9_999)).is_none());
     }
 
@@ -313,9 +307,6 @@ mod cov {
     fn sdf_shape_only() -> SdfShapeSnapshot {
         SdfShapeSnapshot::new(SceneNodeId::from_raw(1), 0, Vec3::ONE, Vec3::ONE)
     }
-
-    // Each leaves exactly one collection non-empty so `is_empty`'s `&` chain
-    // fails at a different conjunct.
 
     #[test]
     fn not_empty_when_only_nodes_present() {

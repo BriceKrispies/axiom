@@ -85,7 +85,6 @@ pub fn classify(
                 .then_some(PackageClass::App)
         })
         .or_else(|| (pkg.name == "xtask").then_some(PackageClass::Tool))
-        // The zone-marker proc-macro crate is build-time engine support.
         .or_else(|| (pkg.name == "axiom-zones").then_some(PackageClass::Support))
         .or_else(|| {
             pkg.dir

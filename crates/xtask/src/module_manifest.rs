@@ -51,8 +51,8 @@ pub struct ModuleSection {
     /// name must resolve to an existing layer.
     #[serde(default)]
     pub allowed_layers: Vec<String>,
-    /// Required, **must be empty** today. Reserved for a future, explicit
-    /// exception system; until then modules never depend on other modules.
+    /// Modules this module composes. Engine modules must leave this empty;
+    /// only feature modules may list other modules here.
     #[serde(default)]
     pub allowed_modules: Vec<String>,
     /// Logical capability names this module publishes. Duplicates are

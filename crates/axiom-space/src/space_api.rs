@@ -97,18 +97,15 @@ mod tests {
         let address = SpaceApi::child(&SpaceApi::child(&SpaceApi::root(), 1), 2);
         let bytes = SpaceApi::to_bytes(&address);
         assert_eq!(SpaceApi::from_bytes(&bytes), Ok(address));
-        // The root round-trips too.
         let root = SpaceApi::root();
         assert_eq!(SpaceApi::from_bytes(&SpaceApi::to_bytes(&root)), Ok(root));
     }
 
     #[test]
     fn from_bytes_rejects_a_truncated_buffer() {
-        // A buffer that claims a segment but is chopped mid-segment.
         let mut bytes = SpaceApi::to_bytes(&SpaceApi::child(&SpaceApi::root(), 7));
         bytes.truncate(bytes.len() - 1);
         assert!(SpaceApi::from_bytes(&bytes).is_err());
-        // An empty buffer cannot even read the length word.
         assert!(SpaceApi::from_bytes(&[]).is_err());
     }
 
@@ -120,15 +117,13 @@ mod tests {
             SpaceApi::digest(&a),
             SpaceApi::digest(&SpaceApi::child(&SpaceApi::root(), 6))
         );
-        // The length prefix keeps a prefix-address distinct from a deeper one.
+        // Length prefix keeps a prefix-address distinct from a deeper one.
         let deeper = SpaceApi::child(&a, 0);
         assert_ne!(SpaceApi::digest(&a), SpaceApi::digest(&deeper));
     }
 
     #[test]
     fn digests_are_collision_free_over_a_swept_domain() {
-        // Every address of depth 0..=2 with segments in 0..6 (tests are exempt
-        // from the branchless law, so a plain sweep is fine here).
         let mut addresses = vec![SpaceApi::root()];
         for x in 0..6u64 {
             let depth1 = SpaceApi::child(&SpaceApi::root(), x);

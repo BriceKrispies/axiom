@@ -21,12 +21,10 @@ struct RenderTarget {
 
 /// A frame's 2D draw commands after the `(layer, submission)` sort, plus the
 /// per-frame paint table and the resolved camera.
-///
 /// Primitives only — no GPU/DOM/font/scene types — so it is hashable and
 /// byte-comparable for golden tests. Inspected by the app/runtime through
 /// indexed accessors, the `KIND_*` codes on each [`Draw2dCommand`], and the
 /// paint/camera accessors here.
-///
 /// A `Default` list is empty (no commands, no paints, no camera). The
 /// `axiom-draw2d` builder accumulates a frame onto one of these through the
 /// producer methods below (`set_camera`, `register_linear`/`register_radial`,
@@ -277,10 +275,8 @@ mod tests {
         ];
         let lin = list.register_linear(Vec2::ZERO, Vec2::new(1.0, 0.0), stops.clone());
         let rad = list.register_radial(Vec2::ONE, meters(4.0), stops);
-        // Linear bakes an n×1 ramp; radial an n×n disc.
         assert_eq!(list.paint_texture(lin, 8).map(|(w, h, _)| (w, h)), Some((8, 1)));
         assert_eq!(list.paint_texture(rad, 8).map(|(w, h, _)| (w, h)), Some((8, 8)));
-        // An unknown id bakes nothing.
         assert_eq!(list.paint_texture(PaintId::from_raw(9), 8), None);
     }
 
@@ -294,11 +290,8 @@ mod tests {
         assert_eq!(b, RenderTargetId::from_raw(1));
         assert_eq!(list.render_target_count(), 2);
 
-        // A routed draw lands in the target's nested list, not the main list.
         list.push_command_routed(Some(a), rect_cmd(0, 0));
-        // A None route lands in the main list.
         list.push_command_routed(None, rect_cmd(1, 0));
-        // An unknown target id falls back to the main list (no panic, no branch).
         list.push_command_routed(Some(RenderTargetId::from_raw(99)), rect_cmd(2, 0));
 
         assert_eq!(list.len(), 2);
@@ -310,9 +303,7 @@ mod tests {
     fn render_target_lookups_are_total_and_honest() {
         let mut list = Draw2dList::default();
         let id = list.create_render_target(40, 20);
-        // target_texture is a total function of the id (slot 0 -> texture 0).
         assert_eq!(list.target_texture(id), TextureId::from_raw(0));
-        // Known id resolves dimensions / commands; an unknown one yields None.
         assert_eq!(list.target_dimensions(id), Some((40, 20)));
         assert_eq!(list.target_commands(id), Some(&[][..]));
         let unknown = RenderTargetId::from_raw(7);
@@ -324,7 +315,6 @@ mod tests {
     fn sort_commands_also_sorts_each_nested_target_list() {
         let mut list = Draw2dList::default();
         let t = list.create_render_target(16, 16);
-        // Route draws into the target out of layer order, with a tie on layer 0.
         list.push_command_routed(Some(t), rect_cmd(0, 2));
         list.push_command_routed(Some(t), rect_cmd(1, 0));
         list.push_command_routed(Some(t), rect_cmd(2, 0));
@@ -341,7 +331,6 @@ mod tests {
     #[test]
     fn push_then_sort_orders_by_layer_then_submission() {
         let mut list = Draw2dList::default();
-        // Submit out of layer order, with a tie on layer 0.
         list.push_command(rect_cmd(0, 2));
         list.push_command(rect_cmd(1, 0));
         list.push_command(rect_cmd(2, 0));

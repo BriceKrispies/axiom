@@ -15,10 +15,6 @@ fn run_fresh(tick: u64) -> axiom_demo_rotating_cube::VerticalSliceArtifact {
     DemoRotatingCubeApi::new().run_tick(tick)
 }
 
-// ---------------------------------------------------------------------------
-// Manifest / isolation proofs.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn app_manifest_classifies_as_an_app_with_declared_layers_and_modules() {
     let app_toml = include_str!("../app.toml");
@@ -38,8 +34,6 @@ fn app_manifest_classifies_as_an_app_with_declared_layers_and_modules() {
             "app.toml must allow layer `{layer}`"
         );
     }
-    // The scene module (ECS-native) is the shared world model; the app also
-    // composes resources/render/webgpu.
     for module in ["scene", "resources", "render", "webgpu"] {
         assert!(
             app_toml.contains(&format!("\"{module}\"")),
@@ -50,8 +44,6 @@ fn app_manifest_classifies_as_an_app_with_declared_layers_and_modules() {
 
 #[test]
 fn modules_declare_no_dependency_on_other_modules() {
-    // The app composes these modules; each must remain isolated
-    // (`allowed_modules = []`).
     for manifest in [
         include_str!("../../../modules/axiom-scene/module.toml"),
         include_str!("../../../modules/axiom-resources/module.toml"),
@@ -64,10 +56,6 @@ fn modules_declare_no_dependency_on_other_modules() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Determinism proofs.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn tick_zero_replay_is_byte_for_byte_equal() {
@@ -102,10 +90,6 @@ fn driven_sequence_replays_identically() {
     assert_eq!(drive(), drive());
 }
 
-// ---------------------------------------------------------------------------
-// Cube transform proof.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn cube_world_transform_changes_as_the_simulation_advances() {
     // The cube spin is driven by the simulation clock (the cube-spin system),
@@ -121,7 +105,6 @@ fn cube_world_transform_changes_as_the_simulation_advances() {
         first.cube_transform.world, later.cube_transform.world,
         "the rotating cube must have a different world transform 60 ticks later"
     );
-    // The drawn object's world matrix must differ too.
     assert_ne!(draw_world(&first), draw_world(&later));
 }
 
@@ -134,10 +117,6 @@ fn draw_world(artifact: &axiom_demo_rotating_cube::VerticalSliceArtifact) -> axi
         .find_map(|c| c.as_draw_indexed().map(|(_, world)| world))
         .expect("the cube draw command is present")
 }
-
-// ---------------------------------------------------------------------------
-// Boundary-completeness proofs.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn every_boundary_artifact_is_present_and_well_formed() {
@@ -226,10 +205,6 @@ fn every_boundary_artifact_is_present_and_well_formed() {
     assert_eq!(f.gpu_submission_report.target_height, 600);
 }
 
-// ---------------------------------------------------------------------------
-// Introspection proofs — the demo drives the Layer-05 IntrospectApi.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn introspection_records_each_tick_and_is_queryable() {
     use axiom_introspect::FrameReport;
@@ -290,7 +265,6 @@ fn introspection_records_each_tick_and_is_queryable() {
     let decoded = FrameReport::from_bytes(&bytes).unwrap();
     assert_eq!(decoded.engine_frame_index(), *indices.last().unwrap());
 
-    // An index that was never observed misses.
     assert!(demo.describe_frame(9_999).is_none());
 }
 

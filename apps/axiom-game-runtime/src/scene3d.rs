@@ -393,25 +393,19 @@ mod tests {
     #[test]
     fn authoring_mints_stable_distinct_handles_and_replays() {
         let ids = authoring_ids();
-        // Mesh handles are 1-based and distinct; the unknown kind still mints a
-        // fresh (third) handle rather than colliding.
         assert_eq!(ids[0], 1);
         assert_eq!(ids[1], 2);
         assert_eq!(ids[2], 3);
-        // Materials are their own 1-based store.
         assert_eq!(ids[3], 1);
         assert_eq!(ids[4], 2);
-        // The light node is a real, non-zero entity, and the whole script replays
-        // byte-identically on a second bridge.
         assert_ne!(ids[5], 0);
         assert_eq!(ids, authoring_ids());
     }
 
     #[test]
     fn create_mesh_data_authors_a_renderable_custom_mesh() {
-        // SPEC-11 §9 over the bridge: a mesh authored from explicit flat vertex
-        // arrays (a single triangle) mints a handle and spawns + draws exactly
-        // like a catalog primitive — proving author geometry rides the same rails.
+        // SPEC-11 §9: author geometry must ride the same spawn/draw rails as a
+        // catalog primitive.
         let mut b = bridge();
         b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
         let positions = [-0.5, -0.5, 0.0, 0.5, -0.5, 0.0, 0.0, 0.5, 0.0];
@@ -427,7 +421,6 @@ mod tests {
 
     #[test]
     fn create_mesh_data_with_empty_uvs_is_accepted() {
-        // Omitted UVs (an empty slice) default origin per vertex — still valid.
         let mut b = bridge();
         let positions = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
         let normals = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
@@ -437,8 +430,6 @@ mod tests {
 
     #[test]
     fn create_mesh_data_rejects_malformed_geometry_with_the_null_handle() {
-        // An out-of-range index is rejected at the engine boundary; the bridge
-        // returns 0 (the null handle) rather than panicking across wasm.
         let mut b = bridge();
         let positions = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
         let normals = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
@@ -449,8 +440,8 @@ mod tests {
     #[test]
     fn set_camera_3d_aims_at_the_target_not_just_the_position() {
         // From a single fixed eye, two distinct look targets must yield two
-        // distinct camera view-projections — proving the aim (`looking_at`)
-        // actually flows through, not merely the translation.
+        // distinct view-projections, proving the aim flows through and not
+        // merely the translation.
         let mut b = bridge();
         b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
         let toward_origin = b.runtime.app_mut().tick(0).camera_view_proj();
@@ -464,11 +455,8 @@ mod tests {
 
     #[test]
     fn set_camera_3d_with_a_degenerate_aim_falls_back_without_panicking() {
-        // Eye coincident with the target makes `looking_at` fail; the bridge
-        // must fall back to a translation-only placement rather than panic.
         let mut b = bridge();
         b.set_camera_3d(&[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], 60.0, 0.1, 100.0);
-        // A camera was still installed (view-projection is non-identity).
         let view = b.runtime.app_mut().tick(0).camera_view_proj();
         let no_camera = bridge().runtime.app_mut().tick(0).camera_view_proj();
         assert_ne!(view, no_camera, "a camera is installed despite the degenerate aim");
@@ -478,7 +466,6 @@ mod tests {
     fn an_added_light_is_a_live_addressable_node() {
         let mut b = bridge();
         let light = b.add_light(&[0.0, -1.0, 0.0], &[1.0, 1.0, 1.0], 1.0);
-        // The returned id names a live scene node (the bridge's world-liveness read).
         assert!(b.world_alive(light));
     }
 
@@ -494,18 +481,13 @@ mod tests {
         b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
         let cube = b.create_mesh("cube");
         let red = b.create_material(&[0.9, 0.1, 0.1], &[0.0, 0.0, 0.0], 1.0, 1.0);
-        // Spawning a renderable from the (mesh, material) handles makes the scene
-        // draw exactly one object.
         let node = b.spawn_renderable(cube, red, &pose(0.0, 0.0, 0.0, 1.0));
         assert!(b.world_alive(node));
         assert_eq!(b.runtime.app_mut().tick(0).draws().len(), 1);
-        // It is bounded and movable: setting a transform relocates the node, which
-        // a world-transform read reflects.
         assert!(b.set_node_bounds(node, &[0.5, 0.5, 0.5]));
         assert!(b.set_node_transform(node, &pose(3.0, 0.0, -2.0, 1.0)));
         let world = b.world_world_transform(node);
         assert_eq!((world[0], world[1], world[2]), (3.0, 0.0, -2.0));
-        // Clearing the scene drops the node and everything else.
         b.clear_scene();
         assert!(!b.world_alive(node));
         assert!(b.runtime.app_mut().tick(1).draws().is_empty());
@@ -516,8 +498,8 @@ mod tests {
         let mut b = bridge();
         let cam = b.spawn_controller(&[0.0, 1.0, 5.0], 70.0, 0.1, 100.0, 0);
         assert!(b.world_alive(cam));
-        // Forward (local -Z) at yaw 0 moves the camera node to z = 4 immediately —
-        // no tick, the engine controller applies it now.
+        // Forward (local -Z) at yaw 0 moves the camera from z=5 to z=4 immediately,
+        // with no tick.
         b.control_first_person(0, &[0.0, 0.0, -1.0], 0.0, 0.0);
         let world = b.world_world_transform(cam);
         assert_eq!((world[0], world[1], world[2]), (0.0, 1.0, 4.0));
@@ -525,13 +507,8 @@ mod tests {
 
     #[test]
     fn a_create_material_authored_translucent_material_renders_translucent() {
-        // SPEC-11 §3.4 end-to-end: a material authored through the bridge's
-        // `create_material` (the exact path the wasm `createMaterial` export
-        // drives) with `opacity = 0.5` must reach the rendered draw with its
-        // alpha folded — proving emissive / roughness / opacity are no longer
-        // dropped at the authoring edge. Base colour `(0.1, 0.2, 0.9)`, opaque
-        // base alpha `1.0` × opacity `0.5` ⇒ a draw alpha of `0.5`; the RGB rides
-        // through unchanged (emissive / roughness ride on the same RenderMaterial).
+        // SPEC-11 §3.4: opacity authored through create_material must reach the
+        // rendered draw alpha (base alpha 1.0 x opacity 0.5 = 0.5), RGB unchanged.
         let mut b = bridge();
         b.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
         let cube = b.create_mesh("cube");
@@ -544,8 +521,8 @@ mod tests {
             "opacity 0.5 folds into the draw alpha; base RGB is preserved"
         );
 
-        // Control: the same base colour authored fully opaque renders with alpha
-        // 1.0 — so the translucency above is the authored opacity, not a constant.
+        // Control: the same base colour authored fully opaque must render alpha
+        // 1.0, so the translucency above is the authored opacity, not a constant.
         let mut o = bridge();
         o.set_camera_3d(&[0.0, 0.0, 8.0], &[0.0, 0.0, 0.0], 60.0, 0.1, 100.0);
         let mesh = o.create_mesh("cube");
@@ -559,7 +536,6 @@ mod tests {
     #[test]
     fn set_node_transform_and_bounds_on_a_stale_handle_are_clean_no_ops() {
         let mut b = bridge();
-        // No node `999` exists, so both writes report a clean miss.
         assert!(!b.set_node_transform(999, &pose(1.0, 1.0, 1.0, 1.0)));
         assert!(!b.set_node_bounds(999, &[1.0, 1.0, 1.0]));
     }

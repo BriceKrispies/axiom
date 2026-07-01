@@ -1,6 +1,5 @@
-//! `fit_land_coverage` stage (OW-E21): shift all elevations by a constant so the
-//! land fraction matches `ctx.land_target`, with sea level fixed at 0.
-//! Audit: OW-E21 "Land (target) matches Land (result) at sea level 0".
+//! `fit_land_coverage` stage: shift all elevations by a constant so the land
+//! fraction matches `ctx.land_target`, with sea level fixed at 0.
 //!
 //! Land is `elevation >= 0`. Adding a constant offset to every region monotonically
 //! changes the land fraction, so we binary-search the additive offset that makes
@@ -110,7 +109,6 @@ mod tests {
 
     #[test]
     fn hits_targets_within_five_percent() {
-        // 1000 random elevations.
         let mut rng = worldgen_stream(42);
         let elev: Vec<f32> = (0..1000)
             .map(|_| distributions::range(&mut rng, -2.0, 2.0))

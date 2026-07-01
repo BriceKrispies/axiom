@@ -10,9 +10,6 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-# A root-adjacent layer: it adapts the kernel's HandleId into stable panel/node
-# identity and uses KernelResult/KernelError for fallible operations. It depends
-# on NOTHING else — no runtime/math/host/frame/ecs/introspect, no module, no app.
 axiom-kernel = { path = "../axiom-kernel" }
 
 [lints.rust]

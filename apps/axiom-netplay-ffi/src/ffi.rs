@@ -95,8 +95,6 @@ unsafe fn copy_out(bytes: &[u8], out_ptr: *mut u8, capacity: usize, out_written:
     Ok(())
 }
 
-// --- version handshake ---
-
 /// Worker semantic version, major.
 #[no_mangle]
 pub extern "C" fn axiom_worker_version_major() -> u32 {
@@ -120,8 +118,6 @@ pub extern "C" fn axiom_worker_version_patch() -> u32 {
 pub extern "C" fn axiom_worker_protocol_version() -> u32 {
     catch_unwind(|| WORKER_PROTOCOL_VERSION).unwrap_or(0)
 }
-
-// --- lifecycle ---
 
 /// Create a sim instance. Returns an opaque handle, or null on invalid arguments
 /// (`max_players` zero or above the cap, `fixed_step_ns` zero) or a caught panic.
@@ -152,8 +148,6 @@ pub unsafe extern "C" fn axiom_sim_destroy(sim: *mut Session) {
         let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(sim))));
     });
 }
-
-// --- state ---
 
 /// Restore authoritative state from snapshot bytes (the .NET "load room state").
 ///
@@ -215,7 +209,7 @@ pub unsafe extern "C" fn axiom_sim_advance_tick(
     out_state_hash: *mut u64,
 ) -> i32 {
     run(sim, || {
-        let _ = target_tick; // reserved; v1 advances exactly one step per call.
+        let _ = target_tick;
         let s = sess(sim)?;
         let tick_out = out_tick.as_mut().ok_or(STATUS_ERR_INVALID_ARG)?;
         let hash_out = out_state_hash.as_mut().ok_or(STATUS_ERR_INVALID_ARG)?;
@@ -264,12 +258,9 @@ pub unsafe extern "C" fn axiom_sim_snapshot_write(
     })
 }
 
-// --- full session snapshot (sim + rng): the persistence / recovery aggregate ---
-//
-// Distinct from the scene-only `axiom_sim_snapshot_*` pair above (which the
-// per-tick replay/hash machinery uses): this carries the durable sim state AND
-// the host RNG in one opaque, versioned blob the embedding host stores verbatim
-// and hands back on restore — so a recovered worker continues the identical
+// The full session snapshot (sim + rng) is distinct from the scene-only
+// `axiom_sim_snapshot_*` pair above: it carries the host RNG too, in one
+// opaque versioned blob, so a recovered worker continues the identical
 // random sequence rather than diverging.
 
 /// Write the full session-snapshot length (in bytes) to `out_len`.
@@ -376,8 +367,6 @@ pub unsafe extern "C" fn axiom_sim_render_view_write(
     })
 }
 
-// --- replay ---
-
 /// Write the exported replay-record length (in bytes) to `out_len`.
 ///
 /// # Safety
@@ -445,8 +434,6 @@ pub unsafe extern "C" fn axiom_sim_verify_replay(
         Ok(())
     })
 }
-
-// --- last error ---
 
 /// The last error code recorded on the handle (`0` if none or null).
 ///
@@ -539,7 +526,6 @@ mod tests {
                 STATUS_ERR_NULL_HANDLE
             );
             assert_eq!(axiom_sim_last_error_code(std::ptr::null_mut()), 0);
-            // Destroying null is a no-op.
             axiom_sim_destroy(std::ptr::null_mut());
         }
     }
@@ -550,12 +536,10 @@ mod tests {
         let mut reason: u32 = 0;
         let garbage = [0xFFu8; 3];
         unsafe {
-            // Malformed payload → rejected (not a panic, not OK).
             let status =
                 axiom_sim_submit_intent(sim, 0, 1, 0, garbage.as_ptr(), garbage.len(), &mut reason);
             assert_eq!(status, STATUS_REJECTED);
             assert_eq!(reason, REASON_MALFORMED);
-            // Garbage replay bytes → deserialize error, not a panic.
             let mut matched: u32 = 9;
             let mut first: u64 = 0;
             let mut final_hash: u64 = 0;
@@ -581,7 +565,6 @@ mod tests {
             assert_eq!(axiom_sim_snapshot_len(sim, &mut len), STATUS_OK);
             assert!(len > 0);
 
-            // Too-small buffer is rejected, not a panic.
             let mut tiny = vec![0u8; len - 1];
             let (mut written, mut hash) = (0usize, 0u64);
             assert_eq!(
@@ -595,7 +578,6 @@ mod tests {
                 STATUS_ERR_BUFFER_TOO_SMALL
             );
 
-            // Exact buffer writes the snapshot and its hash.
             let mut buf = vec![0u8; len];
             assert_eq!(
                 axiom_sim_snapshot_write(sim, buf.as_mut_ptr(), buf.len(), &mut written, &mut hash),
@@ -613,14 +595,12 @@ mod tests {
     fn session_snapshot_round_trips_through_the_c_abi() {
         let sim = axiom_sim_create(1, 2, 16_666_667);
         unsafe {
-            // Drive a tick so the sim carries real state.
             let p = payload(0.4, 0.0);
             let mut reason: u32 = 0;
             let (mut tick, mut hash) = (0u64, 0u64);
             axiom_sim_submit_intent(sim, 0, 1, 0, p.as_ptr(), p.len(), &mut reason);
             axiom_sim_advance_tick(sim, 1, &mut tick, &mut hash);
 
-            // Size-probe, reject a short buffer, then fill a host-owned buffer.
             let mut len: usize = 0;
             assert_eq!(axiom_session_snapshot_len(sim, &mut len), STATUS_OK);
             assert!(len > 0);
@@ -637,8 +617,6 @@ mod tests {
             );
             assert_eq!(written, len);
 
-            // Restore into a fresh sim (different seed) and re-snapshot: the blob
-            // carries the full session, so the re-snapshot is byte-identical.
             let fresh = axiom_sim_create(9, 2, 16_666_667);
             assert_eq!(
                 axiom_session_restore(fresh, buf.as_ptr(), buf.len()),
@@ -654,7 +632,6 @@ mod tests {
             );
             assert_eq!(buf2, buf, "restored session re-snapshots byte-identically");
 
-            // Garbage is a clean deserialize error, never a panic.
             let garbage = [1u8, 2, 3, 4, 5];
             assert_eq!(
                 axiom_session_restore(fresh, garbage.as_ptr(), garbage.len()),
@@ -690,7 +667,6 @@ mod tests {
     fn render_view_reports_authoritative_positions_and_rejects_small_buffers() {
         let sim = axiom_sim_create(1, 2, 16_666_667);
         unsafe {
-            // Too-small buffer is rejected, not a panic.
             let mut tiny = [0.0f32; 2];
             let mut count: usize = 0;
             assert_eq!(
@@ -706,7 +682,6 @@ mod tests {
             assert_eq!(count, 4);
             assert_eq!(buf, [-1.5, 0.0, 1.5, 0.0]);
 
-            // A move updates the authoritative view.
             let p = payload(0.5, 0.0);
             let mut reason = 0u32;
             axiom_sim_submit_intent(sim, 0, 1, 0, p.as_ptr(), p.len(), &mut reason);

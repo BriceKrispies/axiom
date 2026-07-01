@@ -21,7 +21,6 @@ impl LeaveRoom {
         RoomId::new(room_id).map(|room_id| LeaveRoom { room_id })
     }
 
-    /// The room being left.
     pub(crate) fn room_id(&self) -> &[u8] {
         self.room_id.as_bytes()
     }

@@ -122,18 +122,15 @@ mod tests {
     fn byte_slice_is_length_prefixed() {
         let mut w = BinaryWriter::new();
         w.write_byte_slice(&[0xAA, 0xBB, 0xCC]);
-        // 3 as u32 little-endian, then the three bytes.
         assert_eq!(w.into_bytes(), vec![3, 0, 0, 0, 0xAA, 0xBB, 0xCC]);
     }
 
     #[test]
     fn populated_writer_reports_real_len_and_is_not_empty() {
         let mut w = BinaryWriter::new();
-        w.write_u16(0x0201); // two bytes
-        w.write_u8(0xFF); // one more byte → 3 total
-                          // Distinguishes `len -> 0`: a real length distinct from 0 and 1.
+        w.write_u16(0x0201);
+        w.write_u8(0xFF);
         assert_eq!(w.len(), 3);
-        // Distinguishes `is_empty -> true`: a written buffer is NOT empty.
         assert!(!w.is_empty());
     }
 

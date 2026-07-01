@@ -26,16 +26,13 @@ fn main() {
 
     let mut session = Session::new(seed, max_players, fixed_step);
 
-    // Bind an ephemeral loopback port and tell the host which one (the handshake).
     let listener = TcpListener::bind("127.0.0.1:0").expect("worker: bind loopback");
     let port = listener.local_addr().expect("worker: local_addr").port();
     println!("{port}");
     std::io::stdout().flush().ok();
 
-    // Serve exactly one host connection for this worker's lifetime.
     let (mut stream, _peer) = listener.accept().expect("worker: accept host");
     stream.set_nodelay(true).ok();
-    // Serve frames until the host closes the connection (`read_frame` -> None).
     while let Some(frame) = read_frame(&mut stream) {
         let response = ipc::handle(&mut session, &frame);
         if write_frame(&mut stream, &response).is_err() {

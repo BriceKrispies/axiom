@@ -4,39 +4,27 @@ use axiom_host::{Draw2dList, FramePacket, HostPresentationRequest, SdfScene};
 
 /// The real GPU presentation backend for one surface.
 ///
-/// It is constructed from a validated [`HostPresentationRequest`] (a `host`-layer
-/// value — nameable across the engine graph, unlike a module contract type), from
-/// which it reads the physical surface size. On `wasm32` it then binds a real
-/// `wgpu` surface/device and presents instanced draws; on native there is no GPU,
-/// so it holds only the size and every present is a no-op. This keeps the
-/// deterministic, native-testable surface (size + readiness + a no-op present)
-/// here, with the real, browser-only `wgpu` work behind the `wasm32` arm.
+/// Constructed from a validated [`HostPresentationRequest`], from which it reads
+/// the physical surface size. On `wasm32` it binds a real `wgpu` surface/device
+/// and presents instanced draws; on native there is no GPU, so it holds only the
+/// size and every present is a no-op.
 #[derive(Debug)]
 pub struct GpuBackendApi {
     width: u32,
     height: u32,
-    // The render-target size the device tier renders the 3D scene at before
-    // upscaling to the (`width`×`height`) swapchain on present
-    // (`HostDeviceProfile::render_size`). Equal to the surface size on an
-    // in-budget surface; smaller on a high-DPR phone the tier caps. Stored from
-    // the request at construction so the tier decision is observable and
-    // native-testable, even though the intermediate target only exists on wasm32.
+    // Render-target size the device tier renders at before upscaling to the
+    // surface on present (`HostDeviceProfile::render_size`); smaller than the
+    // surface on a high-DPR phone the tier caps.
     render_width: u32,
     render_height: u32,
-    // The shadow-atlas edge length this backend's device tier asked for
-    // (`HostDeviceProfile::shadow_map_size`), read from the presentation
-    // request at construction and handed to the renderer on initialise. Stored
-    // here so the tier decision is observable — and native-testable — even
-    // though the renderer that consumes it only exists on wasm32.
+    // Shadow-atlas edge length from the device tier
+    // (`HostDeviceProfile::shadow_map_size`), handed to the renderer on initialise.
     shadow_size: u32,
-    // The CPU sprite/atlas textures the 2D Draw2dList sprite path samples, as
-    // `(texture_id, width, height, RGBA8)` — the same upload shape as the 3D
-    // material set, resolved in the app (fetch/decode). On native they supply the
-    // covered core's sprite UV-normalisation sizes; the live wgpu 2D raster (the
-    // off-screen / browser arm) uploads them as GPU textures.
+    // CPU sprite/atlas textures the 2D Draw2dList sprite path samples, as
+    // `(texture_id, width, height, RGBA8)` — same upload shape as the 3D
+    // material set.
     draw2d_textures: Vec<(u64, u32, u32, Vec<u8>)>,
-    // The real GPU binding, present only once initialised on wasm32. Its absence
-    // is what "not ready" means; native never has one.
+    // Present only once initialised on wasm32; its absence means "not ready".
     #[cfg(target_arch = "wasm32")]
     live: Option<crate::live_gpu_binding::LiveGpuBinding>,
 }
@@ -69,8 +57,6 @@ impl GpuBackendApi {
     /// uploads them as GPU textures.
     pub fn load_draw2d_textures(&mut self, textures: &[(u64, u32, u32, Vec<u8>)]) {
         self.draw2d_textures = textures.to_vec();
-        // On wasm32, push the new set to the live binding's 2D renderer (a GPU
-        // upload, kept off the per-frame present path). A no-op when not yet bound.
         #[cfg(target_arch = "wasm32")]
         self.live
             .iter_mut()
@@ -219,8 +205,6 @@ impl GpuBackendApi {
                 crate::draw2d_geometry::Draw2dTextureSizes::from_textures(&self.draw2d_textures);
             let geometry =
                 crate::draw2d_geometry::build_geometry(list, self.width, self.height, &sizes);
-            // The no-GPU path consumes the built geometry (the quad stream +
-            // per-quad sources the live arm would upload) and draws nothing.
             let _ = (
                 geometry.quad_count(),
                 geometry.vertices().len(),
@@ -301,6 +285,12 @@ impl GpuBackendApi {
     /// (texture + sampler) is built per material. wasm32 only; on success later
     /// [`Self::present_frame`] calls draw real pixels. On failure the binding
     /// stays absent (not ready).
+    ///
+    /// `preference` forces which graphics API is bound (see
+    /// [`crate::live_gpu_binding::LiveGpuBinding::initialize`]): `None` auto-probes
+    /// WebGPU→WebGL2; `Some(BackendKind::GpuPrimary)` binds WebGPU only (erroring if
+    /// absent); `Some(BackendKind::GpuFallback)` binds WebGL2 only. This is what
+    /// lets a caller render the same scene through each backend side by side.
     #[cfg(target_arch = "wasm32")]
     pub async fn initialize(
         &mut self,
@@ -308,6 +298,7 @@ impl GpuBackendApi {
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
+        preference: Option<axiom_host::BackendKind>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let binding = crate::live_gpu_binding::LiveGpuBinding::initialize(
             canvas,
@@ -319,6 +310,7 @@ impl GpuBackendApi {
             materials,
             max_instances,
             self.shadow_size,
+            preference,
         )
         .await?;
         self.live = Some(binding);
@@ -383,10 +375,7 @@ mod tests {
 
     #[test]
     fn new_carries_the_device_tier_shadow_size() {
-        // The mobile-first Baseline tier asks the renderer for the 1024² shadow
-        // atlas; ExtendedLimits opts up to 2048². The backend reads this from the
-        // presentation request's device profile at construction and will hand it
-        // to the renderer on initialise.
+        // Baseline asks for a 1024² shadow atlas; ExtendedLimits opts up to 2048².
         let baseline =
             GpuBackendApi::new(&request_with_profile(800, 600, HostDeviceProfile::Baseline));
         assert_eq!(baseline.shadow_size(), 1024);
@@ -434,7 +423,6 @@ mod tests {
 
     #[test]
     fn native_is_never_ready_and_present_is_a_no_op() {
-        // On native there is no GPU binding: not ready, and present draws nothing.
         let backend = GpuBackendApi::new(&request(640, 480));
         assert!(!backend.binding_is_ready());
         // One batch of one instance: mesh 7, material 5, mvp(16)+world(16)+colour(4).
@@ -450,8 +438,6 @@ mod tests {
             FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport, SdfPrimitive,
             SdfScene,
         };
-        // A packet with one draw + one light flows through the packet→batches
-        // adapter and the same present path; on native it draws nothing.
         let backend = GpuBackendApi::new(&request(640, 480));
         let packet = FramePacket::new(
             1,
@@ -472,10 +458,7 @@ mod tests {
             [0.0; 16],
             FrameFeatureSet::new(false, false, 1, 0),
         );
-        // No SDF attached → present_packet forwards `None`; native no-op.
         assert!(!backend.present_packet(&packet));
-        // An SDF scene attached → present_packet extracts `Some(scene)` and
-        // forwards it through the same path; still a native no-op (no GPU).
         let prim = SdfPrimitive::new(SdfPrimitive::SPHERE, [0.0; 16], [1.0, 0.0, 0.0, 1.0], [1.0; 4]);
         let scene = SdfScene::new(vec![prim], [0.0; 16], [0.0; 16], [0.0, 0.0, 5.0], [100.0, 0.001, 0.0, 0.0]);
         assert!(!backend.present_packet(&packet.with_sdf(scene)));
@@ -486,16 +469,9 @@ mod tests {
         use axiom_host::{Common2d, Draw2dCommand, Fill2d, Rect, Rgba, SpriteDraw2d, TextureId};
         use axiom_math::{Mat3, Vec2};
 
-        // The 2D entry point walks the neutral Draw2dList through the covered
-        // geometry core; on native (no GPU) it builds the geometry and draws
-        // nothing (returns false), exactly like present_packet. The live
-        // alpha-blended wgpu 2D raster is the exempt off-screen/browser arm.
         let mut backend = GpuBackendApi::new(&request(640, 480));
-        // An empty list still no-ops cleanly.
         assert!(!backend.present_draw2d(&Draw2dList::default(), [0.0; 4]));
 
-        // Load a sprite atlas (covers load_draw2d_textures + the sprite UV-size
-        // path the geometry core reads), then present a rect + a sprite.
         backend.load_draw2d_textures(&[(7, 2, 2, vec![255; 16])]);
         let one = Ratio::new(1.0).expect("finite");
         let header = |layer: i32| (0_u32, Mat3::IDENTITY, Common2d::new(layer, one));

@@ -53,9 +53,7 @@ impl CanvasDebugOverlay {
 /// A discrete internal-resolution quality tier for the software framebuffer.
 /// Lower tiers rasterize far fewer pixels (cost scales with width×height), so
 /// the forced-Canvas2D fallback defaults to a low tier; the platform arm may
-/// resolve a tier from a query parameter (and a future dynamic-resolution policy
-/// could step tiers by measured frame time — the documented seam in
-/// `low_poly_raster_options.rs`).
+/// resolve a tier from a query parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CanvasQualityPreset {
     /// 160×90 — cheapest.
@@ -83,9 +81,36 @@ impl CanvasQualityPreset {
         Self::ORDER.iter().position(|p| *p == self).unwrap_or(0)
     }
 
-    /// The internal framebuffer dimensions `(width, height)` for this tier.
+    /// The tier's canonical 16:9 framebuffer dimensions `(width, height)` — the
+    /// resolution a 16:9 surface resolves to, and the fixed default used when no
+    /// surface aspect is in hand (see [`LowPolyRasterOptions::default`]). The width
+    /// is the tier's **resolution budget** (its longest edge); the live backend
+    /// scales that budget onto the real surface's aspect via
+    /// [`Self::framebuffer_dims`].
     pub(crate) fn dimensions(self) -> (u32, u32) {
         [(160, 90), (240, 135), (320, 180), (426, 240)][self.index()]
+    }
+
+    /// The internal framebuffer dimensions `(width, height)` for this tier at a
+    /// surface of `surface_width × surface_height`, **preserving the surface's
+    /// aspect ratio**.
+    ///
+    /// This is the software peer of the GPU path's
+    /// [`axiom_host::HostDeviceProfile::render_size`]: scale the surface down so
+    /// its longest edge meets the tier's resolution budget ([`Self::dimensions`]'s
+    /// width), keeping the aspect, floor each axis at 1, never upscale. Deriving
+    /// from the surface (not a fixed 16:9 table) is what keeps the software
+    /// framebuffer the SAME shape the GPU renders — so a 960×600 (8:5) surface
+    /// rasterizes into 240×150, not a distorting 240×135 (16:9). A 16:9 surface
+    /// resolves to the canonical pairing. Branchless: the same closure-driven scale
+    /// `render_size` uses.
+    pub(crate) fn framebuffer_dims(self, surface_width: u32, surface_height: u32) -> (u32, u32) {
+        let cap = self.dimensions().0;
+        let longest = surface_width.max(surface_height).max(1);
+        let capped = longest.min(cap);
+        let scale =
+            |axis: u32| (((axis as u64) * (capped as u64)) / (longest as u64)).max(1) as u32;
+        (scale(surface_width), scale(surface_height))
     }
 
     /// Resolve a tier from a numeric level (`0` = UltraLow … `3` = High),
@@ -242,5 +267,27 @@ mod tests {
             CanvasQualityPreset::from_level(1),
             CanvasQualityPreset::from_level(1)
         );
+    }
+
+    #[test]
+    fn framebuffer_dims_preserve_the_surface_aspect_at_the_tier_budget() {
+        use CanvasQualityPreset::{High, Low, UltraLow};
+        // A 16:9 surface resolves to the tier's canonical pairing (back-compat).
+        assert_eq!(Low.framebuffer_dims(1920, 1080), (240, 135));
+        assert_eq!(UltraLow.framebuffer_dims(1280, 720), (160, 90));
+        // A 8:5 (960×600) surface — the demo canvases — resolves to 8:5, NOT a
+        // distorting 16:9: Low's 240 long edge → 240×150 (960/600 == 240/150).
+        assert_eq!(Low.framebuffer_dims(960, 600), (240, 150));
+        // A 4:3 (800×600) surface → 4:3 at each tier's long-edge budget.
+        assert_eq!(UltraLow.framebuffer_dims(800, 600), (160, 120));
+        assert_eq!(Low.framebuffer_dims(800, 600), (240, 180));
+        // A portrait surface caps its (longer) HEIGHT to the budget, aspect kept.
+        assert_eq!(Low.framebuffer_dims(600, 960), (150, 240));
+        // A surface already at/under the budget is never upscaled.
+        assert_eq!(Low.framebuffer_dims(120, 90), (120, 90));
+        // High's 426 long edge on 8:5: 426×266 (426/1.6, floored) — still ~8:5.
+        assert_eq!(High.framebuffer_dims(960, 600), (426, 266));
+        // A degenerate zero surface floors each axis to a usable 1×1, no divide-by-zero.
+        assert_eq!(Low.framebuffer_dims(0, 0), (1, 1));
     }
 }

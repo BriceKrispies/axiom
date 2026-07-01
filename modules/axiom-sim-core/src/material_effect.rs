@@ -330,7 +330,6 @@ mod tests {
             cause: None,
         };
         let matching = interactions.create(p);
-        // Same material, wrong route.
         p.route = InteractionRoute::Adjacent;
         let wrong_route = interactions.create(p);
 
@@ -399,12 +398,9 @@ mod tests {
             cause: None,
         };
         let with_secondary = interactions.create(p);
-        // Same interaction but with no secondary entity.
         p.secondary = None;
         let without_secondary = interactions.create(p);
 
-        // With a secondary entity, the relation's second endpoint is that entity;
-        // both the relation and the scheduled process are produced, in id order.
         let mut batch = EffectBatch::new();
         let matched = store.produce_into(
             &mut batch,
@@ -418,8 +414,6 @@ mod tests {
         assert_eq!(batch.kind_at(0), Some(EffectKind::AddRelation));
         assert_eq!(batch.kind_at(1), Some(EffectKind::ScheduleProcess));
 
-        // With no secondary entity, the relation falls back to its symbol
-        // endpoint and still produces both effects.
         let mut batch2 = EffectBatch::new();
         let matched2 = store.produce_into(
             &mut batch2,
@@ -470,7 +464,6 @@ mod tests {
         };
         let id = interactions.create(p);
 
-        // Given a context fact, the rule produces a remove-fact effect for it.
         let mut batch = EffectBatch::new();
         let matched = store.produce_into(
             &mut batch,

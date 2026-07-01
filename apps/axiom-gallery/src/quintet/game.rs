@@ -40,7 +40,6 @@ impl Default for QuintetGame {
 }
 
 impl QuintetGame {
-    /// A new game: an empty board, zero score, and the first placeable quintet.
     pub fn new() -> Self {
         let board = Board::empty();
         let current = generate(&board, 0, 0);
@@ -57,7 +56,6 @@ impl QuintetGame {
         &self.board
     }
 
-    /// The running score.
     pub fn score(&self) -> u64 {
         self.score
     }
@@ -114,8 +112,6 @@ impl QuintetGame {
         PlaceResult::Placed(outcome)
     }
 
-    /// Reset to a fresh game: clear the board, zero the score, drop the stuck
-    /// state, and generate a new quintet for the empty board.
     pub fn reset(&mut self) {
         self.board = Board::empty();
         self.score = 0;
@@ -159,7 +155,6 @@ mod tests {
         let before = game.board().filled_count();
         let result = game.try_place(ax, ay);
         assert!(matches!(result, PlaceResult::Placed(_)));
-        // Five new cells (the empty board can't have cleared a line with one piece).
         assert_eq!(game.board().filled_count(), before + 5);
         assert_eq!(game.moves(), 1);
         assert!(!game.is_stuck());
@@ -168,7 +163,6 @@ mod tests {
     #[test]
     fn rejected_placement_changes_nothing() {
         let mut game = QuintetGame::new();
-        // An anchor far off the board is always invalid.
         let snapshot = game.board().clone();
         let result = game.try_place(100, 100);
         assert_eq!(result, PlaceResult::Rejected);
@@ -180,7 +174,6 @@ mod tests {
     #[test]
     fn reset_clears_board_score_and_stuck() {
         let mut game = QuintetGame::new();
-        // Make some moves so state is non-trivial.
         for _ in 0..3 {
             let (ax, ay) = any_valid_anchor(&game);
             game.try_place(ax, ay);
@@ -197,13 +190,11 @@ mod tests {
     #[test]
     fn snap_anchor_finds_a_nearby_fit_and_is_none_when_stuck() {
         let game = QuintetGame::new();
-        // On a fresh empty board there is always a fit near the centre.
         let snapped = game
             .snap_anchor((4, 4), 2)
             .expect("a fit exists near (4,4)");
         assert!(game.can_place_current(snapped.0, snapped.1));
 
-        // A stuck game snaps to nothing.
         let mut stuck = QuintetGame::new();
         for y in 0..BOARD_SIZE as i32 {
             for x in 0..BOARD_SIZE as i32 {
@@ -228,10 +219,8 @@ mod tests {
         game.current = generate(&game.board, game.score, game.moves);
         assert!(game.is_stuck(), "a full board has no placeable quintet");
         assert!(game.current().is_none());
-        // Any placement attempt while stuck reports Stuck and changes nothing.
         assert_eq!(game.try_place(0, 0), PlaceResult::Stuck);
         assert!(!game.can_place_current(0, 0));
-        // Reset rescues a stuck game.
         game.reset();
         assert!(!game.is_stuck());
         assert!(game.board().is_clear());

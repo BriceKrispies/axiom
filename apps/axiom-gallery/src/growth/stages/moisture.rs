@@ -1,5 +1,4 @@
 //! `moisture` stage: ocean-distance BFS baseline moisture.
-//! Audit: Wind/moisture reqs "Current moisture is ocean-distance BFS only".
 //!
 //! Thin app-side [`Stage`] wrapper over the `axiom-hydrology` layer: the
 //! multi-source ocean-distance solver ([`axiom_hydrology::ocean_distance`]) does
@@ -104,7 +103,6 @@ mod tests {
         for &m in &g.region_moisture {
             assert!((0.0..=1.0).contains(&m), "moisture {} out of range", m);
         }
-        // Coast wetter than interior.
         assert!(g.region_moisture[0] >= g.region_moisture[4]);
         assert!(g.region_moisture[1] > g.region_moisture[3]);
     }

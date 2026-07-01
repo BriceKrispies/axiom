@@ -7,12 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free, GPU-free, wasm-clean, deterministic.
 crate-type = ["rlib"]
 
 [dependencies]
-# An isolated engine module that builds only on the kernel: deterministic
-# Tick / TickDelta time and the generic TickSchedule scheduling primitive.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
 [lints.rust]

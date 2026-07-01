@@ -81,8 +81,7 @@ impl PointerCapture {
 
     /// A snapshot of the currently-down pointers as `(x, y, down)` in physical
     /// surface pixels. Every returned pointer is down (`true`); the flag is part
-    /// of the neutral shape `axiom_input::TouchControls::update` consumes, so a
-    /// future hover source could report `false` through the same path.
+    /// of the neutral shape `axiom_input::TouchControls::update` consumes.
     pub fn samples(&self) -> Vec<(f32, f32, bool)> {
         self.pointers
             .borrow()

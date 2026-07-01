@@ -1,17 +1,6 @@
-# Axiom module manifest — axiom-net-protocol (an ENGINE module).
-#
-# This module owns the stable multiplayer **wire/message contract**: the set of
-# messages clients and servers exchange, encoded as deterministic little-endian
-# binary frames. It is *protocol data only* — constructors, validators, and
-# encode/decode helpers. It holds no session state, opens no socket, and knows
-# nothing about the browser. The portable client state machine lives in the
-# separate `axiom-client-core` module; the transport lives at the app/package
-# edge (the native app or the TypeScript `axiom-client` package).
-#
-# It is an *isolated engine module* (allowed_modules = []): it composes no other
-# module. It depends only on the kernel — the binary writer/reader + schema
-# version for the codec, the result/error model for validation failures, and
-# HandleId / FixedStep for the two validated numeric fields.
+# The portable client state machine lives in the separate `axiom-client-core`
+# module; the transport lives at the app/package edge (native app or the
+# TypeScript `axiom-client` package).
 
 [module]
 name = "net-protocol"

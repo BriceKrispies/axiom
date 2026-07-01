@@ -74,7 +74,6 @@ mod tests {
         let a = RenderObject::new(1, Mat4::IDENTITY, 0, 0, true);
         let b = RenderObject::new(1, Mat4::IDENTITY, 0, 0, true);
         let c = RenderObject::new(1, Mat4::IDENTITY, 0, 0, false);
-        // A differing id alone breaks equality.
         let d = RenderObject::new(2, Mat4::IDENTITY, 0, 0, true);
         assert_eq!(a, b);
         assert_ne!(a, c);

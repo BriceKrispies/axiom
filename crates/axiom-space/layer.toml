@@ -1,11 +1,3 @@
-# Axiom layer manifest — axiom-space.
-#
-# A root-adjacent layer: Axiom layers are a DAG (no index, no "previous layer"),
-# so this declares only the lower layer it genuinely adapts — the kernel. It sits
-# beside crypto/runtime as a kernel adapter, NOT stacked above introspect. It is
-# the deterministic content-addressing primitive every future procedural-
-# generation layer (entropy, proc) and domain generator keys by.
-
 [layer]
 name = "space"
 crate_name = "axiom-space"
@@ -25,9 +17,6 @@ is math) and no domain meaning: an address names a site, it does not generate on
 introduced_capabilities = ["SpaceApi", "Address"]
 consumed_capabilities = ["StableHash", "BinaryWriter", "BinaryReader", "KernelResult"]
 
-# Proof that the kernel dependency is genuine: SpaceApi::digest returns a kernel
-# StableHash computed over an address's canonical bytes, and its serialization
-# round-trips through BinaryWriter/BinaryReader.
 [[proof_exports]]
 export = "SpaceApi"
 must_reference = ["StableHash"]

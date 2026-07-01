@@ -20,12 +20,8 @@ use crate::ids::{
     PlayOpts, SoundId, ToneSpec, VoiceId,
 };
 
-// The `wasm32`-only live Web Audio arm: it realizes a `ScheduledBatch` into real
-// `AudioContext` oscillator/gain/buffer nodes and (§13.1) opens a capture stream
-// + `AnalyserNode`. Gated on wasm32 so none of it compiles (or is coverage-gated)
-// on native; the deterministic, fully-covered core below stays browser-free. It
-// adds no public surface — only further `impl AudioApi` blocks driven from the
-// core's data.
+// Realizes a `ScheduledBatch` into real `AudioContext` nodes; adds no public
+// surface beyond further `impl AudioApi` blocks.
 #[cfg(target_arch = "wasm32")]
 mod web;
 

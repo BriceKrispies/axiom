@@ -8,7 +8,6 @@ use crate::physics_error::PhysicsError;
 use crate::physics_result::PhysicsResult;
 
 /// The mass properties of a rigid body.
-///
 /// `inverse_mass` is the value the linear integrator uses: a static or kinematic
 /// body has **zero** inverse mass (it never accelerates from a force), and a
 /// dynamic body has `1 / mass`. `local_inverse_inertia` is the per-axis inverse
@@ -186,7 +185,6 @@ mod tests {
     fn dynamic_has_reciprocal_inverse_mass_and_starts_inertia_free() {
         let mp = MassProperties::dynamic(Ratio::new(4.0).unwrap()).unwrap();
         assert_eq!(mp.inverse_mass().get(), 0.25);
-        // No collider yet -> no rotational extent.
         assert_eq!(mp.inverse_inertia(), Vec3::ZERO);
     }
 
@@ -242,7 +240,6 @@ mod tests {
 
     #[test]
     fn immovable_body_with_a_shape_still_has_zero_inverse_inertia() {
-        // Mass 0 -> zero moment -> zero inverse inertia, even for a finite shape.
         let mp = MassProperties::static_props().with_inertia_for(sphere(2.0));
         assert_eq!(mp.inverse_inertia(), Vec3::ZERO);
     }

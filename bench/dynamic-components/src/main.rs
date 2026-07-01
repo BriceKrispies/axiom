@@ -1,6 +1,5 @@
 //! Realistic micro-benchmark: typed access to *app-blind* (type-erased)
 //! dynamic components, three ways.
-//!
 //!   1. `downcast`  — safe `std::any::Any::downcast_ref` -> `&T`. Fast, but its
 //!                    unreachable `None` arm fails the engine's 100% gate.
 //!   2. `unsafe`    — a `TypeId`-checked `unsafe` pointer cast -> `&T`. Same
@@ -8,7 +7,6 @@
 //!                    `unsafe`, which the engine forbids).
 //!   3. `bytes`     — safe + coverable: components stored as `Reflect`-serialized
 //!                    bytes; each read deserializes to an owned `T`.
-//!
 //! Workloads: a hot "read a field of every component and sum it" loop (the
 //! dominant ECS access pattern), and the one-time build/insert cost. The point
 //! is the ratio, run in `--release`.
@@ -54,7 +52,6 @@ fn min_time(mut f: impl FnMut() -> f32) -> Duration {
     best
 }
 
-// --- 1. downcast store: safe `&T` recovery via std `Any`. ---
 struct DowncastStore {
     columns: HashMap<TypeId, Box<dyn Any>>,
 }
@@ -71,7 +68,6 @@ impl DowncastStore {
     }
 }
 
-// --- 2. unsafe store: TypeId-checked pointer cast, no checked arm. ---
 struct UnsafeStore {
     columns: HashMap<TypeId, Box<dyn Any>>,
 }
@@ -90,7 +86,6 @@ impl UnsafeStore {
     }
 }
 
-// --- 3. bytes store: Reflect-serialized; reads deserialize to owned T. ---
 struct BytesStore {
     columns: HashMap<TypeId, BTreeMap<EntityId, Vec<u8>>>,
 }
@@ -114,14 +109,12 @@ impl BytesStore {
 fn main() {
     let transforms = make_transforms();
 
-    // Build the three stores.
     let mut downcast = DowncastStore { columns: HashMap::new() };
     downcast.insert_column(transforms.clone());
     let mut unsafe_store = UnsafeStore { columns: HashMap::new() };
     unsafe_store.insert_column(transforms.clone());
     let mut bytes = BytesStore { columns: HashMap::new() };
 
-    // --- build/insert cost (one-time) ---
     let t_build_typed = {
         let start = Instant::now();
         let mut s = DowncastStore { columns: HashMap::new() };
@@ -137,7 +130,6 @@ fn main() {
 
     let bytes_per_component = bytes.column_bytes::<Transform>().values().next().unwrap().len();
 
-    // --- read-sum hot loop: sum translation.x of every component, FRAMES times ---
     let downcast_read = min_time(|| {
         let mut acc = 0.0f32;
         for _ in 0..FRAMES {

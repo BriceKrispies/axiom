@@ -1,10 +1,8 @@
 //! Axiom demo gallery — every browser/WASM demo merged into ONE composition-leaf
 //! app crate.
-//!
 //! Each demo keeps its own source tree under `src/<demo>/`, exposed here as a
 //! public module. The merge rules that make nine independent crates coexist in
 //! one crate:
-//!
 //! * **Entry points are namespaced.** Every demo's wasm entry was `start`; in one
 //!   crate the wasm-bindgen exports must be globally unique, so each is renamed
 //!   `<demo>_start` (e.g. [`doom::doom_start`]). The gallery shell boots whichever
@@ -14,7 +12,6 @@
 //!   module, its internal `crate::…` paths become `crate::<demo>::…`.
 //! * **Native agent drivers survive as feature-gated bins** (`doom-agent`,
 //!   `growth-agent`) and the physics report runner as `physics-crucible-report`.
-//!
 //! Apps are composition leaves, exempt from the branchless and 100%-coverage
 //! spine gates — which is what lets nine games with hand-written control flow live
 //! here unchanged.

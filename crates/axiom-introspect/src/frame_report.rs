@@ -179,11 +179,7 @@ impl FrameReport {
     }
 
     pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        // A fully branchless sequential decode: each field's read is chained
-        // through `and_then`, so the first error short-circuits the rest and
-        // the reader advances field-by-field exactly as `write_to` laid them
-        // down. The schema guard becomes a `then_some(...).ok_or_else(...)`
-        // expression threaded into the same chain.
+        // Decode order must match `write_to`'s field order exactly.
         SchemaVersion::read_from(reader)
             .and_then(|version| {
                 SCHEMA
@@ -321,9 +317,6 @@ mod tests {
 
     #[test]
     fn from_frame_captures_the_deterministic_timing() {
-        // The single fixed-step active frame: one step consumed the fixed step
-        // duration, nothing retained. The timing is host-injected data, so it is
-        // exact and replay-stable — never a wall-clock read.
         let frame = &fixtures::active_engine_frames(1)[0];
         let report = FrameReport::from_frame(frame);
         let timing = frame.timing();
@@ -331,17 +324,11 @@ mod tests {
         assert_eq!(report.consumed_nanos(), timing.consumed_nanos());
         assert_eq!(report.retained_nanos(), timing.retained_nanos());
         assert_eq!(report.fixed_step_nanos(), timing.fixed_step_nanos());
-        // The fixed step is genuinely non-zero, so the accessor proves a value,
-        // not a default.
         assert!(report.fixed_step_nanos() > 0);
     }
 
     #[test]
     fn equal_float_metric_frames_serialize_byte_identically() {
-        // The failing fixture carries a float metric (`cube.angle_deg`). Two
-        // reports built from independent-but-equal frames must serialize to the
-        // exact same bytes — the float rides through its fixed bit pattern, so
-        // the agent byte channel is replay-diffable even with floats present.
         let a = FrameReport::from_frame(&fixtures::failing_engine_frame());
         let b = FrameReport::from_frame(&fixtures::failing_engine_frame());
         assert_eq!(a, b);
@@ -357,7 +344,6 @@ mod tests {
         assert_eq!(report.systems()[0].name(), "fail");
         assert!(!report.systems()[0].succeeded());
         assert!(report.systems()[0].error_code().is_some());
-        // The same step emitted a metric, which must ride along.
         assert_eq!(report.metrics().len(), 1);
         assert_eq!(report.metrics()[0].name(), "cube.angle_deg");
     }
@@ -419,10 +405,6 @@ mod tests {
 
     #[test]
     fn invalid_lifecycle_code_in_buffer_is_rejected() {
-        // A structurally valid buffer whose lifecycle byte is an unknown code
-        // must fail decode (the read_u8 succeeds, so this exercises the `?`
-        // propagation of lifecycle_from_u8's error at the call site, not just
-        // the helper itself).
         let mut bytes = report_with(FrameLifecycleState::Active, false).to_bytes();
         // Layout: schema(4) + u64 + u64 + u32 + bool(1) => lifecycle byte at 25.
         let lifecycle_offset = 4 + 8 + 8 + 4 + 1;

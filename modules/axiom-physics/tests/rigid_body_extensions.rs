@@ -1,6 +1,5 @@
 //! Golden proofs for the SPEC-10 rigid-body completions — damping, friction, and
 //! angular dynamics — driven only through the public [`PhysicsApi`] facade.
-//!
 //! Each proof asserts on whole observable values (snapshot velocities, transforms,
 //! step-record counts), never on internal state, and every world is fed an
 //! explicit, deterministic `RuntimeStep` exactly as a production caller would.
@@ -42,9 +41,6 @@ fn angular_velocity(api: &PhysicsApi, body: PhysicsBodyHandle) -> Vec3 {
         .angular_velocity()
 }
 
-// ---------------------------------------------------------------------------
-// Damping — coast-to-rest, and damping == 0 reproduces today exactly
-// ---------------------------------------------------------------------------
 
 #[test]
 fn linear_damping_decays_a_coasting_body_monotonically_to_rest() {
@@ -102,9 +98,6 @@ fn zero_damping_reproduces_prior_behaviour_exactly() {
     assert_eq!(rec_zero, rec_default);
 }
 
-// ---------------------------------------------------------------------------
-// Angular — spin-up under torque, orientation advances, damped decay
-// ---------------------------------------------------------------------------
 
 /// A lone dynamic sphere (which gives the body a finite moment of inertia) in a
 /// gravity-free world with the given angular damping.
@@ -162,9 +155,6 @@ fn angular_damping_decays_a_spin_monotonically_toward_rest() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Friction — grip vs slide, and the honest frictioned-contact count
-// ---------------------------------------------------------------------------
 
 /// A box sliding sideways across a flat floor under gravity, with the given
 /// surface friction on both bodies. Returns the world, the box handle, and runs
@@ -251,9 +241,6 @@ fn step_record_reports_an_honest_frictioned_contact_count() {
     assert_eq!(frictionless.latest_step_record().frictioned_contact_count(), 0);
 }
 
-// ---------------------------------------------------------------------------
-// Same-binary replay determinism for the new paths
-// ---------------------------------------------------------------------------
 
 #[test]
 fn torque_and_friction_replay_byte_equal_within_one_binary() {

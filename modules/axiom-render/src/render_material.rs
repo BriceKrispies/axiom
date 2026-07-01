@@ -111,7 +111,6 @@ mod tests {
         let m = RenderMaterial::new(3, Vec4::new(0.5, 0.5, 0.5, 1.0));
         assert_eq!(m.id(), 3);
         assert_eq!(m.base_color(), Vec4::new(0.5, 0.5, 0.5, 1.0));
-        // The plain constructor is untextured.
         assert_eq!(m.texture_id(), 0);
     }
 
@@ -126,7 +125,6 @@ mod tests {
         let a = RenderMaterial::new(1, Vec4::ONE);
         let b = RenderMaterial::new(1, Vec4::ONE);
         let c = RenderMaterial::new(1, Vec4::ZERO);
-        // A differing texture id alone breaks equality.
         let d = RenderMaterial::new_textured(1, Vec4::ONE, 7);
         assert_eq!(a, b);
         assert_ne!(a, c);
@@ -135,20 +133,17 @@ mod tests {
 
     #[test]
     fn default_catalog_fields_and_lit_round_trip() {
-        // The plain constructors default the catalog fields.
         let basic = RenderMaterial::new(1, Vec4::ONE);
         assert_eq!(basic.emissive(), Vec3::ZERO);
         assert_eq!(basic.roughness().get(), 1.0);
         assert_eq!(basic.opacity().get(), 1.0);
 
-        // new_lit carries every field, read back distinct from the defaults.
         let half = Ratio::new(0.5).expect("finite");
         let lit = RenderMaterial::new_lit(2, Vec4::ONE, Vec3::new(0.0, 1.0, 0.0), half, half, 9);
         assert_eq!(lit.emissive(), Vec3::new(0.0, 1.0, 0.0));
         assert_eq!(lit.roughness().get(), 0.5);
         assert_eq!(lit.opacity().get(), 0.5);
         assert_eq!(lit.texture_id(), 9);
-        // Equality requires every new field: a differing emissive breaks it.
         let other = RenderMaterial::new_lit(2, Vec4::ONE, Vec3::ZERO, half, half, 9);
         assert_ne!(lit, other);
     }

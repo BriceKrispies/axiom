@@ -11,7 +11,6 @@ use crate::ray::Ray;
 use crate::vec3::Vec3;
 
 /// A sphere with a finite, non-negative radius and a finite center.
-///
 /// Constructed via [`Sphere::new`], which validates both. Containment is
 /// inclusive of the surface; overlap is inclusive of touching spheres.
 #[derive(Debug, Clone, Copy)]
@@ -219,7 +218,6 @@ mod cov {
 
     #[test]
     fn read_from_radius_truncated() {
-        // 12 bytes feed the center; radius read then fails.
         assert!(Sphere::read_from(&mut BinaryReader::new(&[0u8; 12])).is_err());
     }
 
@@ -238,21 +236,13 @@ mod cov {
         assert!(!a.approx_eq(&b, Epsilon::DEFAULT));
     }
 
-    // Kills contains_point 58:27 (`radius * radius` -> `radius + radius` /
-    // `radius / radius`). r = 3 so r*r = 9, r+r = 6, r/r = 1. A point at squared
-    // distance 8 is contained only under the correct `r*r`.
     #[test]
     fn contains_point_radius_squared_term() {
         let s = Sphere::new(Vec3::ZERO, 3.0).unwrap();
-        // (2,2,0) -> d2 = 8, within 9 but outside 6 and 1.
         assert!(s.contains_point(Vec3::new(2.0, 2.0, 0.0)));
-        // Clearly outside (d2 = 25).
         assert!(!s.contains_point(Vec3::new(5.0, 0.0, 0.0)));
     }
 
-    // Kills overlaps 65:19 (`radius + radius` -> `radius * radius`). radii 1 and
-    // 3: sum = 4 (sum^2 = 16) vs product = 3 (product^2 = 9). Centers at squared
-    // distance 12 overlap under the correct sum but not under the product.
     #[test]
     fn overlaps_sum_of_radii_term() {
         let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
@@ -262,19 +252,14 @@ mod cov {
 
     #[test]
     fn intersects_aabb_covers_inside_near_and_far() {
-        // Unit box centered at the origin (corners ±1).
         let box_ = Aabb::from_center_extents(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
-        // Center inside the box -> closest point is the center itself.
         assert!(Sphere::new(Vec3::ZERO, 0.1).unwrap().intersects_aabb(&box_));
-        // Center outside but within radius of the +x face (face at x=1).
         assert!(Sphere::new(Vec3::new(1.4, 0.0, 0.0), 0.5)
             .unwrap()
             .intersects_aabb(&box_));
-        // Just touching the face (distance 0.5 == radius 0.5).
         assert!(Sphere::new(Vec3::new(1.5, 0.0, 0.0), 0.5)
             .unwrap()
             .intersects_aabb(&box_));
-        // Outside, beyond the radius.
         assert!(!Sphere::new(Vec3::new(3.0, 0.0, 0.0), 0.5)
             .unwrap()
             .intersects_aabb(&box_));

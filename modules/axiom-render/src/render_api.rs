@@ -20,7 +20,6 @@ use crate::render_receipt::RenderReceipt;
 use crate::render_sdf::RenderSdf;
 
 /// The only public export of `axiom-render`.
-///
 /// Owns:
 ///  - the builder for [`RenderInput`] (camera, lights, meshes,
 ///    materials, objects),
@@ -28,7 +27,6 @@ use crate::render_sdf::RenderSdf;
 ///  - the indexed inspection of a `RenderCommandList` so the app can
 ///    translate commands into the WebGPU backend's input without
 ///    naming any render-internal enum.
-///
 /// `RenderApi` never imports scene or resources; the app pre-translates.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RenderApi {
@@ -53,7 +51,6 @@ impl RenderApi {
     pub const KIND_SET_MATERIAL: u32 = RenderCommand::KIND_SET_MATERIAL;
     pub const KIND_DRAW_INDEXED: u32 = RenderCommand::KIND_DRAW_INDEXED;
 
-    // --- Input construction ---
 
     pub fn new_input(&self, viewport_width: u32, viewport_height: u32) -> RenderInput {
         RenderInput::new(viewport_width, viewport_height)
@@ -190,7 +187,6 @@ impl RenderApi {
         input.add_sdf_shape(RenderSdf::new(kind, world, dims, color));
     }
 
-    // --- Compilation ---
 
     /// Build a deterministic [`RenderCommandList`] from a [`RenderInput`]:
     /// `ClearFrame`, then `SetCamera` (if present), `SetPipeline { BASIC_LIT }`,
@@ -208,8 +204,6 @@ impl RenderApi {
             ));
         });
         list.push(RenderCommand::set_pipeline(RenderPipelineKind::BASIC_LIT));
-        // The drawable objects, resolved + alpha-ordered by `draw_order` (opaque
-        // first in submission order, then translucent back-to-front).
         crate::draw_order::ordered_draws(input)
             .iter()
             .for_each(|d| {
@@ -220,7 +214,6 @@ impl RenderApi {
         list
     }
 
-    // --- Command list inspection (boundary primitives only) ---
 
     pub fn command_count(&self, list: &RenderCommandList) -> usize {
         list.len()
@@ -281,12 +274,10 @@ impl RenderApi {
         list.at(idx).and_then(RenderCommand::as_draw_object_id)
     }
 
-    // --- Backend-neutral frame packet (derived from the command list) ---
 
     /// Compile a [`RenderInput`] to a deterministic
     /// [`axiom_host::FramePacket`] — the single backend-neutral artifact the GPU
     /// backend consumes today and the Canvas 2D backend will consume later.
-    ///
     /// The packet is **derived by walking the [`RenderCommandList`]**, not by
     /// reaching around it into scene/resource state: `ClearFrame` supplies the
     /// clear colour, `SetCamera` the camera (its `view_proj = projection *
@@ -295,7 +286,6 @@ impl RenderApi {
     /// threaded mesh/material, its world matrix, `mvp = view_proj * world`, and
     /// the material's resolved base colour. Draw order is exactly the command
     /// list's order.
-    ///
     /// Matrices are backend-neutral (`projection * view * world`, no clip-space
     /// depth remap); applying a backend's depth convention is the consumer's job.
     /// `frame_index`, `tick`, and the directional shadow caster's
@@ -422,7 +412,6 @@ impl RenderApi {
     /// shapes — the single source of truth for SDF-scene assembly, shared by
     /// [`Self::build_frame_packet`] and any composition tier (the render pipeline,
     /// an app) that drives a backend from neutral data.
-    ///
     /// `view_proj` is the **same** column-major view-projection used to build the
     /// frame's draw MVPs (so SDF depth composites with the meshes); `view_proj` is
     /// inverted to unproject each pixel into a world ray. `camera_world_pos` is the
@@ -462,7 +451,6 @@ impl RenderApi {
         })
     }
 
-    // --- Frame capture (engine-owned artifact; NOT pixel capture) ---
 
     /// Capture a deterministic [`RenderReceipt`] for one frame: the frame
     /// identity ([`FrameIndex`] + [`Tick`]) plus the ordered command list,
@@ -546,7 +534,6 @@ mod tests {
 
     #[test]
     fn new_and_default_facades_are_equivalent() {
-        // Both construction paths build the same command list from equal input.
         let n = RenderApi::new();
         let d = RenderApi::default();
         assert_eq!(
@@ -717,7 +704,6 @@ mod cov {
         let api = api();
         let mut input = api.new_input(100, 100);
         let mesh_idx = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
-        // texture id 77 is carried on the material and surfaced on its command.
         let mat_idx = api.add_input_textured_material(&mut input, 5, Vec4::ONE, 77);
         api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh_idx, mat_idx, true);
         let list = api.build_command_list(&input);
@@ -758,7 +744,6 @@ mod frame_packet_cov {
         let input = one_object_input();
         let packet = api().build_frame_packet(&input, 4, 240, [9.0; 16]);
 
-        // Identity carried through: one draw, object id 7, mesh 42, material 99.
         assert_eq!(packet.draws().len(), 1);
         let draw = packet.draws()[0];
         assert_eq!(draw.object_id(), 7);
@@ -769,7 +754,6 @@ mod frame_packet_cov {
         assert_eq!(draw.mvp(), Mat4::IDENTITY.as_cols_array());
         assert_eq!(draw.color(), [0.5, 0.5, 0.5, 1.0]);
 
-        // Frame identity + viewport + clear + shadow VP carried verbatim.
         assert_eq!(packet.frame_index(), 4);
         assert_eq!(packet.tick(), 240);
         assert_eq!(packet.viewport(), FrameViewport::new(800, 600));
@@ -809,7 +793,6 @@ mod frame_packet_cov {
 
     #[test]
     fn packet_object_ids_and_order_match_the_command_list() {
-        // Three objects with distinct ids → three draws in input order.
         let mut input = api().new_input(100, 100);
         let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
         let mat = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
@@ -818,7 +801,6 @@ mod frame_packet_cov {
         api().add_input_object(&mut input, 300, Mat4::IDENTITY, mesh, mat, true);
 
         let list = api().build_command_list(&input);
-        // Object ids straight off the DrawIndexed commands, in list order.
         let cmd_ids: Vec<u64> = (0..list.len())
             .filter_map(|i| api().command_draw_object_id_at(&list, i))
             .collect();
@@ -854,7 +836,6 @@ mod frame_packet_cov {
         assert_eq!(f.directional_lights(), 0);
         assert_eq!(f.point_lights(), 0);
         assert_eq!(packet.viewport(), FrameViewport::new(320, 240));
-        // No camera (and no shapes) → no SDF scene.
         assert!(packet.sdf().is_none());
     }
 
@@ -949,9 +930,7 @@ mod frame_packet_cov {
     fn material_base_color_resolves_by_id_with_white_fallback() {
         let mut input = api().new_input(10, 10);
         api().add_input_basic_lit_material(&mut input, 9, Vec4::new(0.2, 0.4, 0.6, 1.0));
-        // A present material id resolves to its base colour…
         assert_eq!(material_base_color(&input, 9), [0.2, 0.4, 0.6, 1.0]);
-        // …and an absent id falls back to opaque white.
         assert_eq!(material_base_color(&input, 404), [1.0, 1.0, 1.0, 1.0]);
     }
 }
@@ -991,9 +970,7 @@ mod translucency_cov {
             0,
         );
         api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh, mat, true);
-        // The free resolver folds opacity into the alpha…
         assert_eq!(material_base_color(&input, 7), [0.2, 0.4, 0.6, 0.5]);
-        // …and the neutral packet draw carries that folded alpha.
         let packet = api.build_frame_packet(&input, 0, 0, [0.0; 16]);
         assert_eq!(packet.draws()[0].color(), [0.2, 0.4, 0.6, 0.5]);
     }

@@ -90,22 +90,17 @@ mod tests {
         let mut s = Scene::new();
         let node = s.create_node(Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)));
         s.add_player(node, 0).unwrap();
-        // The marked node exists and is reachable by its player index.
         assert_eq!(s.player_translation(0), Some(Vec3::new(2.0, 0.0, 0.0)));
         assert_eq!(s.node_count(), 1);
 
-        // Despawning it removes the node and clears its player mark.
         assert!(s.despawn_player(0));
         assert_eq!(s.node_count(), 0);
         assert_eq!(s.player_translation(0), None);
-        // The node id no longer resolves as a live node.
         assert!(s
             .world_transform(SceneNodeId::from_raw(node.raw()))
             .is_err());
 
-        // Despawning again (now absent) is a clean `false`.
         assert!(!s.despawn_player(0));
-        // An unknown index is also a clean `false`.
         assert!(!s.despawn_player(99));
     }
 
@@ -114,10 +109,8 @@ mod tests {
         let mut s = Scene::new();
         let node = s.create_node(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
         assert_eq!(s.node_count(), 1);
-        // Despawning by handle removes the node.
         assert!(s.despawn_node(node));
         assert_eq!(s.node_count(), 0);
-        // A repeat despawn — and any non-node handle — is a clean `false`.
         assert!(!s.despawn_node(node));
         assert!(!s.despawn_node(SceneNodeId::from_raw(404)));
     }
@@ -146,7 +139,6 @@ mod tests {
         s.set_parent(grandchild, child).unwrap();
         assert_eq!(s.node_count(), 4);
 
-        // Despawning the root cascades to child and grandchild; bystander remains.
         assert!(s.despawn_subtree(root));
         assert_eq!(s.node_count(), 1);
         assert!(s
@@ -157,7 +149,6 @@ mod tests {
             .is_err());
         assert!(s.world_transform(bystander).is_ok());
 
-        // An absent node is a clean false; a leaf despawns like despawn_node.
         assert!(!s.despawn_subtree(SceneNodeId::from_raw(999)));
         assert!(s.despawn_subtree(bystander));
         assert_eq!(s.node_count(), 0);

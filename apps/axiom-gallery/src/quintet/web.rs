@@ -46,7 +46,6 @@ const NODE_ROOT: u32 = 0;
 const NODE_BOARD: u32 = 1;
 const NODE_TRAY: u32 = 2;
 
-// --- Palette --------------------------------------------------------------
 const BG: &str = "#15171c";
 const GRID_LINE: &str = "#2a2e36";
 const EMPTY_FILL: &str = "#1d212a";
@@ -138,12 +137,6 @@ fn canvas_context() -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
     Some((canvas, ctx))
 }
 
-// ===========================================================================
-// Browser entry point.
-// ===========================================================================
-
-/// Boot the play surface: install pointer handlers, start the draw loop (which
-/// drives the responsive layout), and refresh the status line.
 #[wasm_bindgen]
 pub fn quintet_start() {
     console_error_panic_hook::set_once();
@@ -168,14 +161,10 @@ fn log(msg: &str) {
     web_sys::console::log_1(&JsValue::from_str(&format!("[quintet] {msg}")));
 }
 
-// ===========================================================================
-// Engine-driven responsive layout (mobile-first).
-// ===========================================================================
-
-/// Recompute the layout from the live viewport and resize the canvas — but only
-/// when the window size changed. The engine's `axiom-layout` solver decides where
-/// the board and tray go (row in landscape, column — tray below the board — in
-/// portrait); we project the solved rects into canvas backing-store pixels.
+/// Recomputed only when the window size changed. The engine's `axiom-layout`
+/// solver decides where the board and tray go (row in landscape, column — tray
+/// below the board — in portrait); we project the solved rects into canvas
+/// backing-store pixels.
 fn sync_layout() {
     let Some((canvas, _)) = canvas_context() else {
         return;
@@ -325,10 +314,6 @@ fn read_safe_area_insets() -> HostSafeAreaInsets {
     .unwrap_or_else(|_| HostSafeAreaInsets::none())
 }
 
-// ===========================================================================
-// Pointer drag-and-drop (mouse + touch + pen via PointerEvent).
-// ===========================================================================
-
 /// Convert a pointer event's client coordinates into canvas backing-store
 /// coordinates, accounting for any CSS scaling of the canvas element.
 fn to_canvas_coords(canvas: &HtmlCanvasElement, e: &PointerEvent) -> (f64, f64) {
@@ -444,10 +429,6 @@ fn install_pointer() {
     cancel.forget();
 }
 
-// ===========================================================================
-// The draw loop.
-// ===========================================================================
-
 fn start_run_loop() {
     let frame = Rc::new(RefCell::new(None::<Closure<dyn FnMut()>>));
     let frame_outer = frame.clone();
@@ -465,10 +446,6 @@ fn request_frame(cb: Option<&Closure<dyn FnMut()>>) {
         let _ = window().request_animation_frame(cb.as_ref().unchecked_ref());
     }
 }
-
-// ===========================================================================
-// Rendering.
-// ===========================================================================
 
 fn draw(ui: &Ui, layout: &Layout) {
     let Some((_, ctx)) = canvas_context() else {
@@ -656,10 +633,6 @@ fn draw_score(ctx: &CanvasRenderingContext2d, ui: &Ui, layout: &Layout) {
     ));
     let _ = ctx.fill_text(&ui.game.score().to_string(), layout.tray_x, y + mini * 1.3);
 }
-
-// ===========================================================================
-// Status line sync (the page's stuck / playing message).
-// ===========================================================================
 
 fn refresh_status() {
     let stuck = UI.with(|ui| ui.borrow().game.is_stuck());

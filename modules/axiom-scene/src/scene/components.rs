@@ -271,7 +271,6 @@ mod tests {
         .unwrap();
         s.add_camera(n, cam).unwrap();
         assert_eq!(s.camera_count(), 1);
-        // Missing node.
         assert_eq!(
             s.add_camera(SceneNodeId::from_raw(99), cam)
                 .unwrap_err()
@@ -280,7 +279,6 @@ mod tests {
         );
         s.remove_camera(n).unwrap();
         assert_eq!(s.camera_count(), 0);
-        // Removing absent camera fails.
         assert_eq!(
             s.remove_camera(n).unwrap_err().code(),
             SceneErrorCode::MissingCamera
@@ -320,9 +318,8 @@ mod tests {
                 .code(),
             SceneErrorCode::MissingNode
         );
-        // Toggle visibility + contact-shadow casting, present + missing. (The
-        // caster value flowing through to a snapshot is asserted in the
-        // render-pipeline tests.)
+        // The caster value flowing through to a snapshot is asserted in the
+        // render-pipeline tests.
         s.set_renderable_visible(n, false).unwrap();
         s.set_renderable_casts_contact_shadow(n, true).unwrap();
         assert_eq!(
@@ -351,7 +348,6 @@ mod tests {
         let shape = SdfShape::sphere(&math(), Meters::new(1.0).unwrap(), Vec3::ONE).unwrap();
         s.add_sdf_shape(n, shape).unwrap();
         assert_eq!(s.sdf_shape_count(), 1);
-        // Missing node is rejected.
         assert_eq!(
             s.add_sdf_shape(SceneNodeId::from_raw(99), shape)
                 .unwrap_err()
@@ -360,7 +356,6 @@ mod tests {
         );
         s.remove_sdf_shape(n).unwrap();
         assert_eq!(s.sdf_shape_count(), 0);
-        // Removing an absent shape fails.
         assert_eq!(
             s.remove_sdf_shape(n).unwrap_err().code(),
             SceneErrorCode::MissingSdfShape
@@ -377,22 +372,18 @@ mod tests {
         s.add_tag(enemy_a, 2).unwrap();
         s.add_tag(enemy_b, 2).unwrap();
 
-        // Read back a single node's kind (present + untagged node).
         assert_eq!(s.tag_of(wall), Some(1));
         assert_eq!(s.tag_of(enemy_a), Some(2));
         let untagged = node(&mut s);
         assert_eq!(s.tag_of(untagged), None);
 
-        // Enumerate by kind (deterministic ascending id order).
         assert_eq!(s.tagged_nodes(2), vec![enemy_a, enemy_b]);
         assert_eq!(s.tagged_nodes(1), vec![wall]);
         assert!(s.tagged_nodes(99).is_empty());
 
-        // Re-tagging replaces the kind.
         s.add_tag(enemy_a, 1).unwrap();
         assert_eq!(s.tag_of(enemy_a), Some(1));
 
-        // Tagging a missing node is a clean error.
         assert_eq!(
             s.add_tag(SceneNodeId::from_raw(9999), 5).unwrap_err().code(),
             SceneErrorCode::MissingNode

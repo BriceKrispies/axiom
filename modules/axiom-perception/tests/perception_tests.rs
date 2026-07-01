@@ -36,7 +36,6 @@ fn fact_kind_codes_are_distinct() {
 fn ray_fan_of_one_points_dead_ahead() {
     let fan = PerceptionApi::ray_fan(FORWARD, rad(1.0), 1);
     assert_eq!(fan.len(), 1);
-    // The single ray is the forward direction (within float tolerance).
     assert!((fan[0].x).abs() < 1.0e-6, "no horizontal deflection");
     assert!((fan[0].z + 1.0).abs() < 1.0e-6, "still facing -Z");
 }

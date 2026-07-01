@@ -123,7 +123,6 @@ mod tests {
         fill_col(&mut board, 5);
         let out = resolve_clears(&mut board);
         assert_eq!((out.rows_cleared, out.cols_cleared), (1, 1));
-        // 10 + 10 - 1 shared cell = 19 unique blocks.
         assert_eq!(out.cleared_blocks, 19);
         assert_eq!(out.lines_cleared(), 2);
         assert_eq!(out.score_delta, 38);

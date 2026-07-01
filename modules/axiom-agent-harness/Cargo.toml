@@ -7,14 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib, browser-free and wasm-clean. It composes the axiom-agent engine
-# module plus the kernel/runtime layers; apps depend on it, never the reverse.
 crate-type = ["rlib"]
 
 [dependencies]
-# A feature module (kind = "feature-module"): it composes the `agent` engine
-# module (listed in module.toml's allowed_modules) plus the kernel + runtime
-# layers it needs to mint the Tick / RuntimeStep that drive one agent decision.
 axiom-agent = { path = "../axiom-agent" }
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }

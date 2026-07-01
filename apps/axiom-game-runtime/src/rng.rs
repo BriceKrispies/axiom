@@ -120,9 +120,7 @@ mod tests {
             (0..16).map(|_| hub.unit(0)).collect()
         };
         assert_eq!(draw(7), draw(7));
-        // The seed genuinely keys the stream: a different seed diverges.
         assert_ne!(draw(7), draw(8));
-        // The root draws lie in the unit interval.
         assert!(draw(7).iter().all(|&v| (0.0..1.0).contains(&v)));
     }
 
@@ -140,16 +138,11 @@ mod tests {
     #[test]
     fn named_stream_is_resolved_idempotently_and_advances_once() {
         let mut hub = RngHub::new(11);
-        // Resolving the same (parent, name) twice returns the SAME id...
         let loot = hub.stream(0, "loot");
         assert_eq!(hub.stream(0, "loot"), loot);
-        // ...and that id is not the root, and a distinct name is a distinct id.
         assert_ne!(loot, 0);
         assert_ne!(hub.stream(0, "spawn"), loot);
 
-        // Because the id is stable, draws advance ONE logical stream: the loot
-        // stream's draws match a fresh hub's loot stream drawn the same number of
-        // times (no accidental double-forking on re-resolution).
         let mixed: Vec<u64> = (0..8).map(|_| hub.below(loot, 1_000_000)).collect();
         let mut fresh = RngHub::new(11);
         let fresh_loot = fresh.stream(0, "loot");
@@ -171,7 +164,6 @@ mod tests {
             hub.permutation(0, 32)
         };
         let a = perm(23);
-        // Same seed ⇒ identical permutation; it is a true permutation of [0, 32).
         assert_eq!(a, perm(23));
         let mut sorted = a.clone();
         sorted.sort_unstable();

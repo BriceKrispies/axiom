@@ -150,10 +150,8 @@ mod tests {
         let mut column = TrackedColumn::new();
         column.insert(e(1), 1, 0);
         column.clear_changes();
-        // Absent entity: no change recorded, None returned.
         assert!(column.get_mut(e(2), 9).is_none());
         assert!(recorded(&column).is_empty());
-        // Present entity: marked Changed.
         *column.get_mut(e(1), 7).unwrap() = 42;
         assert_eq!(recorded(&column), vec![(1, ChangeKind::Changed, 7)]);
         assert_eq!(column.get(e(1)), Some(&42));
@@ -164,10 +162,8 @@ mod tests {
         let mut column = TrackedColumn::new();
         column.insert(e(1), 1, 0);
         column.clear_changes();
-        // Absent: no record, None.
         assert_eq!(column.remove(e(2), 3), None);
         assert!(recorded(&column).is_empty());
-        // Present: Removed recorded.
         assert_eq!(column.remove(e(1), 4), Some(1));
         assert_eq!(recorded(&column), vec![(1, ChangeKind::Removed, 4)]);
         assert!(!column.contains(e(1)));

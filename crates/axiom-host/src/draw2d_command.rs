@@ -69,7 +69,6 @@ struct ParticleQuad2d {
 }
 
 /// One backend-neutral 2D draw command.
-///
 /// A **tagged struct**, not a data-carrying enum: `kind` selects which payload
 /// `Option` is `Some`, and the branchless `as_*` accessors gate on it — so there
 /// is no `match` over the command shape anywhere. Every command carries its
@@ -376,7 +375,6 @@ mod tests {
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_PARTICLE_QUAD);
         assert_eq!(c.submission_index(), 8);
         assert_eq!(c.as_particle(), Some((Vec2::new(7.0, 8.0), meters(0.5), color())));
-        // A particle carries no Fill2d and is none of the other kinds.
         assert_eq!(c.fill(), None);
         assert_eq!(c.as_rect(), None);
         assert_eq!(c.as_text(), None);
@@ -423,7 +421,6 @@ mod tests {
             c.as_line(),
             Some((Vec2::ZERO, Vec2::new(10.0, 0.0), color(), meters(2.0)))
         );
-        // A line carries no Fill2d.
         assert_eq!(c.fill(), None);
         assert_eq!(c.as_rect(), None);
     }
@@ -444,7 +441,6 @@ mod tests {
         let c = Draw2dCommand::sprite(header(5), TextureId::from_raw(9), opts);
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_SPRITE);
         assert_eq!(c.as_sprite(), Some((TextureId::from_raw(9), opts)));
-        // A sprite carries no Fill2d (it tints via its own opts).
         assert_eq!(c.fill(), None);
         assert_eq!(c.as_text(), None);
     }
