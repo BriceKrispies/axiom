@@ -182,7 +182,12 @@ pub const REQUIREMENTS: &[Requirement] = &[
         Implemented,
         "axiom_entropy::EntropyStream + distributions float sampling",
     ),
-    r("PRIM-noise", "procgen", Implemented, "noise::Fbm"),
+    r(
+        "PRIM-noise",
+        "procgen",
+        Engine,
+        "axiom-noise layer (value_noise/Fbm)",
+    ),
     r("PRIM-geo", "procgen", Implemented, "axiom_math:: spherical math"),
     r(
         "PRIM-icosphere",

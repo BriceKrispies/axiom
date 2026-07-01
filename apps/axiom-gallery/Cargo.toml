@@ -91,6 +91,8 @@ axiom-space = { path = "../../crates/axiom-space" }
 # Deterministic, address-keyed entropy streams — the growth worldgen RNG (replaces
 # the app-local splitmix64 duplicate; the sphere-point sampler graduated to axiom-math).
 axiom-entropy = { path = "../../crates/axiom-entropy" }
+# Coherent noise (gradient/Perlin + FBM + domain warp) for growth's worldgen.
+axiom-noise = { path = "../../crates/axiom-noise" }
 axiom-proc = { path = "../../crates/axiom-proc" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 # The physics module under test (physics-crucible), composed only through PhysicsApi.

@@ -18,6 +18,7 @@ allowed_layers = [
     "layout",
     "space",
     "entropy",
+    "noise",
     "proc",
     "runtime",
     "introspect",

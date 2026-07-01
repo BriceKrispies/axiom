@@ -27,8 +27,22 @@
 use crate::growth::ids::ChunkCoord;
 use crate::growth::model_planet::PlanetSurfaceAtlas;
 use crate::growth::model_world::{Chunk, GameWorldLocalMap, CELL_SIZE_M, CHUNK_VERT_SIDE};
-use crate::growth::noise::Fbm;
 use axiom_math::Vec3;
+use axiom_noise::{Fbm, FbmConfig, Frequency, WarpStrength};
+
+/// Build an FBM field for the detail layers from a raw seed/octave/frequency
+/// triple. The frequencies here are compile-time-fixed positive constants, so the
+/// typed [`Frequency`] constructor never fails. (App edge: the naked `f32` and
+/// `.expect` are fine here — the engine `axiom-noise` layer keeps the typed API.)
+fn build_fbm(seed: u64, octaves: u32, frequency: f32) -> Fbm {
+    Fbm::new(
+        seed,
+        FbmConfig::new(
+            octaves,
+            Frequency::new(frequency).expect("detail frequency is finite"),
+        ),
+    )
+}
 
 /// Metres of terrain height per unit of macro (overworld) elevation. The
 /// overworld stores elevation as a small signed scalar (sea level 0); this maps
@@ -190,10 +204,10 @@ fn lod_octaves(base_freq: f32, base_octaves: u32, min_feature_m: f32) -> u32 {
 /// structure of far terrain.
 fn mountainousness(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
     let octaves = lod_octaves(MASK_FREQ_PER_M, MASK_OCTAVES, min_feature_m).max(1);
-    let fbm = Fbm::new(seed ^ SEED_MASK, octaves, MASK_FREQ_PER_M);
+    let fbm = build_fbm(seed ^ SEED_MASK, octaves, MASK_FREQ_PER_M);
     // Remap [-1,1] -> [0,1]. Square it to bias toward plains (most of the world
     // gentle) with occasional pronounced ranges -> stronger contrast/variety.
-    let raw = (fbm.sample(world_pos) + 1.0) * 0.5;
+    let raw = (fbm.sample(world_pos).get() + 1.0) * 0.5;
     let shaped = raw * raw;
     MASK_FLOOR + (1.0 - MASK_FLOOR) * shaped
 }
@@ -204,8 +218,9 @@ fn mountainousness(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
 /// finest octave used (0 = full detail).
 fn ridged_mountain(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
     let octaves = lod_octaves(MOUNTAIN_FREQ_PER_M, MOUNTAIN_OCTAVES, min_feature_m).max(1);
-    let fbm = Fbm::new(seed ^ SEED_MOUNTAIN, octaves, MOUNTAIN_FREQ_PER_M);
-    let n = fbm.sample_warped(world_pos, MOUNTAIN_WARP);
+    let fbm = build_fbm(seed ^ SEED_MOUNTAIN, octaves, MOUNTAIN_FREQ_PER_M);
+    let warp = WarpStrength::new(MOUNTAIN_WARP).expect("MOUNTAIN_WARP is finite");
+    let n = fbm.sample_warped(world_pos, warp).get();
     let ridged = 1.0 - n.abs();
     // Square to sharpen crests (billow). Result stays in [0,1].
     ridged * ridged
@@ -234,7 +249,9 @@ fn detail_height_m(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
     let hill = if hill_octaves == 0 {
         0.0
     } else {
-        Fbm::new(seed ^ SEED_HILL, hill_octaves, HILL_FREQ_PER_M).sample(world_pos)
+        build_fbm(seed ^ SEED_HILL, hill_octaves, HILL_FREQ_PER_M)
+            .sample(world_pos)
+            .get()
             * HILL_AMPLITUDE_M
     };
 
@@ -244,7 +261,9 @@ fn detail_height_m(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
     let fine = if fine_octaves == 0 {
         0.0
     } else {
-        Fbm::new(seed ^ SEED_FINE, fine_octaves, FINE_FREQ_PER_M).sample(world_pos)
+        build_fbm(seed ^ SEED_FINE, fine_octaves, FINE_FREQ_PER_M)
+            .sample(world_pos)
+            .get()
             * FINE_AMPLITUDE_M
     };
 

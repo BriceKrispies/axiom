@@ -21,7 +21,8 @@ pub mod pipeline;
 pub mod requirements;
 
 // --- generation primitives ---
-pub mod noise;
+// Coherent noise (gradient/Perlin + FBM + domain warp) graduated into the
+// `axiom-noise` engine layer; the growth stages consume it directly.
 pub mod topology;
 
 // --- planet genome / presets / seed ---

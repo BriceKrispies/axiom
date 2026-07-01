@@ -19,6 +19,7 @@ members = [
     "crates/axiom-introspect",
     "crates/axiom-interface",
     "crates/axiom-layout",
+    "crates/axiom-noise",
     "crates/axiom-space",
     "crates/axiom-entropy",
     "crates/axiom-proc",
