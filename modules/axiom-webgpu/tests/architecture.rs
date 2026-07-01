@@ -111,8 +111,7 @@ fn lib_rs_exports_only_webgpu_api() {
 
 #[test]
 fn no_scene_resources_or_render_imports() {
-    // axiom-webgpu is intentionally allowed to depend on axiom-host
-    // (for future surface integration), but never on other modules.
+    // axiom-webgpu may depend on axiom-host, but never on other modules.
     assert_absent(
         &[
             "axiom_scene",
@@ -128,9 +127,8 @@ fn no_scene_resources_or_render_imports() {
 
 #[test]
 fn no_real_gpu_backend_today() {
-    // The vertical slice does NOT compile real wgpu / web-sys / wasm-bindgen
-    // bindings; the backend is the deterministic recorder. When that
-    // changes, this test should be updated explicitly.
+    // The vertical slice does not compile real wgpu / web-sys / wasm-bindgen
+    // bindings; the backend is the deterministic recorder.
     assert_absent(
         &["wgpu::", "web_sys::", "js_sys::", "wasm_bindgen::"],
         "axiom-webgpu must not import a real GPU/JS binding today (see ARCHITECTURE.md)",

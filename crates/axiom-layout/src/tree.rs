@@ -120,7 +120,6 @@ mod tests {
 
         assert_eq!(tree.len(), 4);
         assert!(!tree.is_empty());
-        // Root is index 0 with no parent; every child's parent index precedes it.
         assert_eq!(tree.nodes()[0].id(), id(0));
         assert!(tree.nodes()[0].parent().is_none());
         tree.nodes()

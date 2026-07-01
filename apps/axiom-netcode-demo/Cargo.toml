@@ -10,14 +10,8 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-# An app composes modules. This one wires two: the `axiom` umbrella (the real
-# engine `App`) and `axiom-netcode` (the lockstep session). Translating between
-# them — a frame outcome into the bytes netcode hashes — is the app's job, the
-# only tier allowed to name both modules' types.
 axiom = { path = "../../modules/axiom" }
 axiom-netcode = { path = "../../modules/axiom-netcode" }
-# The crypto layer: each peer's signing key + the shared roster of verifying
-# keys that `NetcodeApi::new` authenticates ingested frames against.
 axiom-crypto = { path = "../../crates/axiom-crypto" }
 
 [lints.rust]

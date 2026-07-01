@@ -1,18 +1,6 @@
-# Axiom module manifest — axiom-canvas2d-backend (an ENGINE module).
-#
-# The software, last-resort browser presentation backend. It is an *isolated
-# engine module* (allowed_modules = []): it composes no other module. Like
-# axiom-gpu-backend it builds only on the host layer's deterministic
-# presentation boundary, and consumes the SAME backend-neutral
-# `axiom_host::FramePacket` the GPU backend consumes — so a game authored/tested
-# against the normal render path stays recognizable when the backend is Canvas
-# 2D.
-#
-# The entire rasterizer (projection, triangle assembly, depth sort, colour
-# resolution, op emission) is a PURE, native-testable core; only the thin
-# `live_canvas_binding` arm (wasm32) touches `CanvasRenderingContext2d`. This is
-# the third sanctioned platform-facing module (Module Law #9): its real
-# `web-sys` arm is compiled only for `wasm32`, behind the native-clean facade.
+# Consumes the same backend-neutral axiom_host::FramePacket as the GPU backend,
+# so a game authored/tested against the normal render path stays recognizable
+# when the backend is Canvas 2D.
 
 [module]
 name = "canvas2d-backend"
@@ -21,9 +9,6 @@ kind = "engine-module"
 
 allowed_layers = [
     "host",
-    # The neutral 2D draw contract (host::Draw2dList) is expressed in math's
-    # Mat3 / Vec2 (each command's baked transform and rect corners), so the
-    # software Draw2dList consumer genuinely names and uses the math layer.
     "math",
 ]
 

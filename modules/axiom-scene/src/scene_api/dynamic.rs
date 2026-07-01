@@ -93,14 +93,12 @@ mod tests {
         assert!(api.set_dynamic(b, Velocity2D { x: 3.0, y: 4.0 }));
         assert!(api.set_dynamic(a, Marked));
         assert!(!api.set_dynamic(SceneNodeId::from_raw(9999), Marked));
-        // Read owned values back; presence checks; absent reads are None/false.
         assert_eq!(
             api.get_dynamic::<Velocity2D>(a),
             Some(Velocity2D { x: 1.0, y: 2.0 })
         );
         assert!(api.has_dynamic::<Marked>(a));
         assert!(!api.has_dynamic::<Marked>(b));
-        // The marker round-trips back through its `reflect_read` while present.
         assert!(api.get_dynamic::<Marked>(a).is_some());
         assert!(api
             .get_dynamic::<Velocity2D>(SceneNodeId::from_raw(9999))
@@ -109,7 +107,6 @@ mod tests {
         // node carrying every named kind.
         assert_eq!(api.query_dynamic(&["Velocity2D"]), vec![a, b]);
         assert_eq!(api.query_dynamic(&["Velocity2D", "Marked"]), vec![a]);
-        // Remove drops just that kind; removing again is a clean false.
         assert!(api.remove_dynamic::<Marked>(a));
         assert!(!api.remove_dynamic::<Marked>(a));
         assert!(api.has_dynamic::<Velocity2D>(a));

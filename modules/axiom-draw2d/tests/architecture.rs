@@ -1,5 +1,4 @@
 //! Architecture-boundary tests for the `axiom-draw2d` engine module.
-//!
 //! The workspace `xtask` checker enforces the global Module Law (allowed
 //! layers, no module-to-module deps, single facade). These per-module tests are
 //! the second line of defence: they scan this crate's `src/` tree for forbidden
@@ -113,7 +112,6 @@ fn assert_absent(forbidden: &[&str], why: &str) {
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest + facade ----------
 
 #[test]
 fn module_toml_exists_and_is_isolated() {
@@ -155,7 +153,6 @@ fn lib_rs_exports_exactly_one_facade_plus_its_id_vocabulary() {
     );
 }
 
-// ---------- legal layer imports only ----------
 
 #[test]
 fn draw2d_imports_only_legal_layers() {
@@ -215,7 +212,6 @@ fn draw2d_imports_no_other_modules() {
     );
 }
 
-// ---------- source hygiene ----------
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -323,7 +319,6 @@ fn every_source_module_is_declared_in_lib_rs() {
     );
 }
 
-// ---------- presentation exclusion (structural) ----------
 
 /// The whole surface is presentation class (SPEC-04 §6/§17.5): nothing it
 /// produces may be read back into a sim-class API. Structurally, the facade's

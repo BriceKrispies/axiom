@@ -48,9 +48,6 @@ impl HostViewport {
     /// constructed — so this constructor only enforces positivity and the
     /// dimension invariants.
     pub fn new(logical_width: u32, logical_height: u32, scale_factor: Ratio) -> HostResult<Self> {
-        // `&`/`|` over the pure comparisons reproduces the original `||`/`&&`
-        // truth tables without short-circuit control flow; every operand is a
-        // total comparison with no side effect, so eager evaluation is exact.
         ((logical_width != 0) & (logical_height != 0))
             .then_some(())
             .ok_or_else(|| {
@@ -103,8 +100,6 @@ impl HostViewport {
         physical_height: u32,
         scale_factor: Ratio,
     ) -> HostResult<Self> {
-        // Same branchless shape as `new`: `&`/`|` over total comparisons
-        // reproduces the original `||` guards without short-circuit flow.
         ((physical_width != 0) & (physical_height != 0))
             .then_some(())
             .ok_or_else(|| {
@@ -275,7 +270,6 @@ mod tests {
             v.logical_to_physical(Pixels::new(50.0).unwrap()),
             Pixels::new(100.0).unwrap()
         );
-        // Identical inputs across two calls must match byte-for-byte.
         assert_eq!(
             v.logical_to_physical(Pixels::new(50.0).unwrap()),
             v.logical_to_physical(Pixels::new(50.0).unwrap())
@@ -328,7 +322,6 @@ mod tests {
             .unwrap()
             .with_safe_area_insets(insets);
         assert_eq!(v.safe_area_insets(), insets);
-        // The other viewport facts survive the builder untouched.
         assert_eq!(v.logical_width(), 390);
         assert_eq!(v.logical_height(), 844);
     }
@@ -428,12 +421,9 @@ mod cov {
 
     #[test]
     fn from_physical_zero_width_reports_the_physical_zero_error_not_the_derived_one() {
-        // Distinguishes `||` -> `&&` in the physical-zero guard. With `||`,
-        // `physical_width == 0` short-circuits to the *physical* dimension
-        // error message. With `&&`, the guard never fires for a single zero
-        // and the code falls through to the *derived logical* error message.
-        // Both share the `InvalidViewportDimensions` code, so the message is
-        // the only thing that distinguishes the two operators.
+        // A single zero must trip the physical-dimension guard, not fall
+        // through to the derived-logical-dimension error (same error code,
+        // distinct message).
         let err = HostViewport::from_physical(0, 100, ratio(1.0)).unwrap_err();
         assert_eq!(err.code(), HostErrorCode::InvalidViewportDimensions);
         assert_eq!(

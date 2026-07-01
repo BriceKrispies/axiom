@@ -5,24 +5,23 @@
 //! flat per-region arrays of [`crate::growth::model_planet::PlanetGlobe`]; chunk coords
 //! address the streamed game world.
 
-/// A region (icosphere site) index on the overworld. Audit: OW-E1/E3.
+/// A region (icosphere site) index on the overworld.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct RegionId(pub u32);
 
-/// A tectonic plate index. Audit: worldgen `tectonic_plates`.
+/// A tectonic plate index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct PlateId(pub u32);
 
-/// A triangle (dual-mesh face) index. Audit: `triangle_values`, rivers.
+/// A triangle (dual-mesh face) index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TriangleId(pub u32);
 
-/// A derived biome id. Audit: OW-E3 derived biome, `biomes.xml`.
+/// A derived biome id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct BiomeId(pub u32);
 
 /// Integer chunk coordinate in the streamed game world (16 m chunks).
-/// Audit: GW coordinate notes (`CHUNK_SIZE` = 16 cells, 1 m cells).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ChunkCoord {
     pub x: i32,

@@ -86,8 +86,6 @@ mod tests {
         let vk = key.verifying_key();
         let sig = key.sign(b"hello");
         assert!(vk.verify(b"hello", &sig));
-        // Wrong message under the right key, and the right message under a
-        // different key, both fail.
         assert!(!vk.verify(b"hella", &sig));
         let other = SigningKey::from_seed([4u8; 32]).verifying_key();
         assert!(!other.verify(b"hello", &sig));
@@ -123,7 +121,6 @@ mod tests {
         let bytes = vk.to_bytes();
         assert_eq!(bytes.len(), VerifyingKey::LEN);
         assert_eq!(VerifyingKey::try_from_bytes(&bytes), Some(vk));
-        // Non-point bytes yield None.
         assert_eq!(
             VerifyingKey::try_from_bytes(&[2u8; VerifyingKey::LEN]),
             None

@@ -208,7 +208,7 @@ mod tests {
         // intent path, not pass on it.
         let cfg = Config::parse(&["soak".to_string()]).unwrap();
         let mut r = report(true, 600, 0, 0, 600);
-        r.latencies_ms.clear(); // no acks ever recorded
+        r.latencies_ms.clear();
         let agg = aggregate(&[r]);
         assert_eq!(agg.latency.count, 0);
         let (ok, fails) = verdict(&agg, &cfg);

@@ -1,13 +1,12 @@
 //! Game-world chunk generation: a data-driven per-chunk pipeline seeded from the
-//! overworld atlas. Audit: GW-E2/E12/E16/E17/E18/E19.
+//! overworld atlas.
 //!
-//! Design (SC-E8 correctness): every height vertex is a *pure function of its
-//! world position*. We never draw from per-chunk RNG state. The pipeline for a
-//! vertex is:
+//! Every height vertex is a *pure function of its world position*; we never
+//! draw from per-chunk RNG state. The pipeline for a vertex is:
 //!   world_metre pos -> unit dir (localmap)         (continuous on the sphere)
-//!     -> macro elevation via IDW over region + graph neighbours  (GW-E18)
+//!     -> macro elevation via IDW over region + graph neighbours
 //!     -> metres (macro scale)
-//!     -> + a MULTI-SCALE detail field sampled from the *world position* (GW-E19)
+//!     -> + a MULTI-SCALE detail field sampled from the *world position*
 //! Because two adjacent chunks compute the very same world position for a shared
 //! edge vertex, and every step is deterministic in that position, the shared
 //! edge heights are bit-identical (seam delta 0).
@@ -21,7 +20,7 @@
 //!   * a medium hill layer,
 //!   * a fine roughness layer.
 //!     Per-layer per-metre slope is kept bounded (amplitude * 2*pi*frequency * a
-//!     small gradient constant) so the SUM of all layers stays under the SC-E8 6 m
+//!     small gradient constant) so the SUM of all layers stays under the 6 m
 //!     adjacent-vertex budget. All layers derive sub-seeds from the world seed only
 //!     (never the chunk coord), preserving the bit-identical seam property.
 use crate::growth::ids::ChunkCoord;
@@ -37,18 +36,12 @@ const MACRO_HEIGHT_SCALE_M: f32 = 600.0;
 /// IDW falloff exponent. Higher => sharper weighting toward the nearest site.
 const IDW_POWER: f32 = 2.0;
 
-// ---------------------------------------------------------------------------
-// Multi-scale detail field parameters.
-//
-// SC-E8 budget reasoning. For a layer of amplitude `A` (m) and spatial
-// frequency `f` (cycles/m) the worst-case slope of a single FBM octave is about
-// `A * 2*pi*f * k`, where `k` (~1.4) bounds the gradient-noise slope. Over a 1 m
-// step the height change is at most that slope. We choose amplitudes and
-// frequencies so the SUM of every layer's worst-case 1 m step is comfortably
-// below 6 m. In practice FBM rarely hits its theoretical worst case
-// simultaneously across layers, so the realized max delta is far lower (the
-// `adjacent_vertex_delta_within_budget` test guards the real value).
-// ---------------------------------------------------------------------------
+// Multi-scale detail field parameters. For a layer of amplitude `A` (m) and
+// spatial frequency `f` (cycles/m) the worst-case slope of a single FBM octave
+// is about `A * 2*pi*f * k`, where `k` (~1.4) bounds the gradient-noise slope.
+// Amplitudes/frequencies are chosen so the SUM of every layer's worst-case 1 m
+// step stays comfortably below 6 m (the realized max is far lower in practice;
+// `adjacent_vertex_delta_within_budget` guards the real value).
 
 /// Seed offsets so each layer draws a decorrelated FBM from the same world seed.
 const SEED_MASK: u64 = 0x00A1_0000;
@@ -87,7 +80,7 @@ const FINE_AMPLITUDE_M: f32 = 7.0;
 
 /// Continuous macro elevation at a unit direction. Inverse-distance-weighted
 /// blend over the nearest region AND its graph neighbours, so macro elevation is
-/// smooth across region boundaries (no Voronoi stairsteps). Audit: GW-E12/E18.
+/// smooth across region boundaries (no Voronoi stairsteps).
 pub fn sample_macro_continuous(atlas: &PlanetSurfaceAtlas, dir: [f32; 3]) -> f32 {
     let v = Vec3::new(dir[0], dir[1], dir[2]);
     if atlas.sites.is_empty() {
@@ -213,8 +206,8 @@ fn ridged_mountain(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
 
 /// Coherent multi-scale detail height (metres) sampled purely from a world-space
 /// position, so the field is identical wherever two chunks evaluate the same
-/// position. Audit: GW-E19. Mountains (mask-gated, ridged) + hills + fine
-/// roughness, all derived from the world seed only.
+/// position. Mountains (mask-gated, ridged) + hills + fine roughness, all
+/// derived from the world seed only.
 ///
 /// `min_feature_m` is the level-of-detail cap: octaves (and whole layers) whose
 /// wavelength is finer than it are skipped (see [`lod_octaves`]). Pass `0.0` for
@@ -253,7 +246,8 @@ fn detail_height_m(seed: u64, world_pos: Vec3, min_feature_m: f32) -> f32 {
 
 /// Continuous terrain height (metres) at a single world-metre position: macro
 /// regional base + the multi-scale detail field. This is the pure per-point
-/// query a renderer / raymarcher uses, and the heart of the SC-E8 guarantee.
+/// query a renderer / raymarcher uses, and the heart of the seam-consistency
+/// guarantee.
 ///
 /// **Full detail, always.** This is the authoritative height used for
 /// ground-follow / collision and for the near (LOD 0) render ring, so the player
@@ -329,7 +323,7 @@ pub fn sample_height_m_lod_vista(
     }
 }
 
-/// Generate one chunk's height grid from the atlas. Audit: GW-E2 pipeline
+/// Generate one chunk's height grid from the atlas
 /// (sample_macro -> base_height -> detail_noise -> build_height_grid).
 pub fn generate_chunk(
     coord: ChunkCoord,
@@ -423,8 +417,8 @@ mod tests {
         max_d
     }
 
-    /// CRITICAL SC-E8 seam test: two horizontally-adjacent chunks must produce
-    /// identical heights along their shared edge.
+    /// Two horizontally-adjacent chunks must produce identical heights along
+    /// their shared edge.
     #[test]
     fn shared_edge_seam_is_zero() {
         let atlas = synthetic_atlas();
@@ -466,7 +460,7 @@ mod tests {
         }
     }
 
-    /// Adjacent in-chunk vertices must differ by <= ~6 m (SC-E8 budget).
+    /// Adjacent in-chunk vertices must differ by <= ~6 m (the height budget).
     #[test]
     fn adjacent_vertex_delta_within_budget() {
         let atlas = synthetic_atlas();

@@ -1,7 +1,6 @@
 //! Machine-readable physics-error code.
 
 /// The reason a physics operation failed.
-///
 /// Codes are physics-module identities: two errors with the same code compare
 /// equal regardless of the human-readable message, so error checks stay
 /// machine-stable across builds and deterministic replays.

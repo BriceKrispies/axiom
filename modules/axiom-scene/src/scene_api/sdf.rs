@@ -72,7 +72,6 @@ mod tests {
         let n = api.create_node_with_transform(Transform::IDENTITY);
         api.add_sdf_sphere(&math(), n, Meters::new(1.0).unwrap(), Vec3::ONE)
             .unwrap();
-        // The shape reaches the snapshot as a sphere keyed by its node.
         assert_eq!(api.snapshot().sdf_shapes().len(), 1);
         assert_eq!(api.snapshot().sdf_shapes()[0].kind(), SdfShape::SPHERE);
         // Re-authoring the same node replaces the shape (the column overwrites).

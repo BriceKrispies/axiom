@@ -7,9 +7,6 @@
 //! agent (or a human) can read off exactly how a piece of content was made and
 //! reproduce it from `(seed, address)`.
 //!
-//! This is **repo tooling**, outside the engine dependency graph — exempt from the
-//! coverage and branchless gates — so it uses ordinary control flow and `println!`.
-//!
 //! ```text
 //! cargo run -p axiom-proc-inspect -- [seed] [addr-seg ...]
 //! cargo run -p axiom-proc-inspect -- 2026 7 42

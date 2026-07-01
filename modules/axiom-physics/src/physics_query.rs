@@ -367,8 +367,6 @@ mod tests {
             .unwrap();
     }
 
-    // ---- raycast ----
-
     #[test]
     fn raycast_hits_a_sphere_and_misses_empty_space() {
         let mut w = world();
@@ -505,7 +503,6 @@ mod tests {
 
     #[test]
     fn trigger_policy_is_explicitly_tested() {
-        // A ray excludes triggers (solid geometry only); overlap includes them.
         let mut w = world();
         let b = spawn(&mut w, Vec3::ZERO);
         attach(&mut w, b, sphere(1.0), true); // trigger
@@ -520,7 +517,6 @@ mod tests {
 
     #[test]
     fn disabled_bodies_and_colliders_are_skipped_by_queries() {
-        // A disabled body's collider is invisible to both queries.
         let mut w = world();
         let b = spawn_dynamic(&mut w, Vec3::ZERO);
         attach(&mut w, b, sphere(1.0), false);
@@ -543,8 +539,6 @@ mod tests {
         assert!(PhysicsQuery::new(&w).raycast(o, Vec3::ZERO, far()).is_none());
     }
 
-    // ---- overlap_sphere ----
-
     #[test]
     fn non_finite_query_inputs_are_a_deterministic_miss_and_empty() {
         let mut w = world();
@@ -552,7 +546,6 @@ mod tests {
         attach(&mut w, b, sphere(1.0), false);
         let q = PhysicsQuery::new(&w);
         let nan = Vec3::new(f32::NAN, 0.0, 0.0);
-        // A non-finite origin / centre never panics and never hits.
         assert!(q.raycast(nan, Vec3::UNIT_X, far()).is_none());
         assert!(q.overlap_sphere(nan, far()).is_empty());
     }
@@ -647,8 +640,7 @@ mod tests {
 
     #[test]
     fn overlap_sphere_results_are_sorted() {
-        // Spawn three overlapping bodies out of handle order's "natural" position
-        // and confirm the result is ascending by handle.
+        // Spawned out of handle order to confirm the result is ascending by handle.
         let mut w = world();
         let a = spawn(&mut w, Vec3::new(0.3, 0.0, 0.0));
         attach(&mut w, a, sphere(1.0), false);
@@ -658,7 +650,6 @@ mod tests {
         attach(&mut w, c, sphere(1.0), false);
         let hits = PhysicsQuery::new(&w).overlap_sphere(Vec3::ZERO, Meters::new(0.5).unwrap());
         assert_eq!(hits, vec![a, b, c]);
-        // Strictly ascending (the deterministic ordering guarantee).
         assert!(a < b && b < c);
     }
 

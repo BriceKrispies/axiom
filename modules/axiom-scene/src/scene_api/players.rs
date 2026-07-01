@@ -12,8 +12,6 @@ use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 
 impl SceneApi {
-    // --- Players (controllable nodes moved by per-tick commands) ---
-
     /// Mark `node` as the controllable node for `player` index. Per-tick move
     /// commands addressed to that index translate it during [`Self::advance`].
     pub fn add_player(&mut self, node: SceneNodeId, player: u32) -> SceneResult<()> {
@@ -34,8 +32,6 @@ impl SceneApi {
     pub fn move_command(&self, sequence: u64, player: u32, delta: Vec3) -> FrameCommand {
         crate::player_command::encode_move(sequence, player, delta)
     }
-
-    // --- Controllers (first-person nodes yawed + moved by per-tick commands) ---
 
     /// Mark `node` as the first-person controller for `index`. Per-tick
     /// controller commands addressed to that index yaw it about +Y and move it

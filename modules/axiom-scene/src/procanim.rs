@@ -188,7 +188,7 @@ mod tests {
         );
         let t = a.local_at(20);
         assert!((t.rotation.w - 1.0).abs() < 1.0e-6);
-        assert_ne!(t.translation.y, 1.0); // bob applied
+        assert_ne!(t.translation.y, 1.0);
     }
 
     #[test]

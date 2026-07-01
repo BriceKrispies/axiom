@@ -1,16 +1,8 @@
-//! Station 6 — Replay Bay.
-//!
-//! Determinism made visible. The bay scripts a sphere shoved sideways onto a
-//! frictional floor (so the solver's tangential friction pass bleeds off the
-//! slide) **and** a second sphere driven by a torque (so the angular integrator
-//! advances its orientation). Its real job is to run inside the [`Crucible`]'s
-//! two-world harness: the visible world and the hidden replay world receive
-//! byte-identical inputs and therefore stay in perfect sync — including their
-//! rotation and angular-velocity state, which the projected `BodyState` now
-//! carries — and a deliberate perturbation in the replay world is *detected* (the
-//! projected states stop matching). This is the proof that "deterministic" means
-//! same-binary replay, the property the physics module guarantees, now extended
-//! to the friction and angular paths.
+//! Station 6 — Replay Bay: a sphere shoved sideways onto a frictional floor and
+//! a second sphere driven by a torque, run inside the [`Crucible`]'s two-world
+//! harness. The visible and hidden replay worlds receive byte-identical inputs
+//! and must stay in perfect sync (translation, rotation, angular velocity); a
+//! deliberate perturbation in the replay world must be detected.
 
 use axiom::prelude::Vec3;
 
@@ -114,8 +106,6 @@ mod tests {
             .into_iter()
             .find(|b| b.handle == spinner)
             .unwrap();
-        // The torque about +Y produced angular velocity and rotated the body away
-        // from the identity orientation [0, 0, 0, 1].
         assert!(state.angular.y > 0.0, "torque produced +Y spin: {:?}", state.angular);
         assert!(state.rotation[1].abs() > 0.0, "orientation advanced: {:?}", state.rotation);
         assert_ne!(state.rotation, [0.0, 0.0, 0.0, 1.0]);

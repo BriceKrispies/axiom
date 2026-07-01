@@ -34,17 +34,14 @@ impl JoinRoom {
         })
     }
 
-    /// The announced application protocol version.
     pub(crate) fn protocol_version(&self) -> u32 {
         self.protocol_version.raw()
     }
 
-    /// The room being joined.
     pub(crate) fn room_id(&self) -> &[u8] {
         self.room_id.as_bytes()
     }
 
-    /// The opaque join token (empty when absent).
     pub(crate) fn token(&self) -> &[u8] {
         self.token.as_bytes()
     }
@@ -118,7 +115,6 @@ mod tests {
 
     #[test]
     fn decode_rejects_a_wrong_kind() {
-        // A frame for a different message must not decode as JoinRoom.
         let other = crate::leave_room::LeaveRoom::new(b"r").unwrap().encode();
         assert_eq!(
             JoinRoom::decode(&other).unwrap_err().code(),

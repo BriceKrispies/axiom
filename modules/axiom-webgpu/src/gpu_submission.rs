@@ -61,7 +61,6 @@ mod tests {
     fn populated_submission_is_not_empty() {
         let mut s = GpuSubmission::new(1, 1);
         s.push(GpuCommand::present());
-        // Distinguishes `is_empty -> true`: a submission with a command is NOT empty.
         assert!(!s.is_empty());
         assert_eq!(s.len(), 1);
     }

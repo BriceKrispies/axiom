@@ -41,22 +41,18 @@ impl ClientIntent {
         })
     }
 
-    /// The per-client monotonically increasing sequence id.
     pub(crate) fn client_sequence(&self) -> u64 {
         self.client_sequence
     }
 
-    /// The client-predicted tick at which the intent was produced.
     pub(crate) fn predicted_client_tick(&self) -> u64 {
         self.predicted_client_tick
     }
 
-    /// The newest authoritative server tick the client had applied.
     pub(crate) fn last_seen_server_tick(&self) -> u64 {
         self.last_seen_server_tick
     }
 
-    /// The opaque intent payload.
     pub(crate) fn payload(&self) -> &[u8] {
         self.payload.as_bytes()
     }

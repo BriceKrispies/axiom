@@ -191,13 +191,11 @@ pub fn validate_level(level: &LevelDefinition) -> LevelValidationReport {
 pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
     let mut errors = Vec::new();
 
-    // --- Dimensions ---
     (census.width == 0).then(|| errors.push(LevelError::ZeroWidth));
     (census.height == 0).then(|| errors.push(LevelError::ZeroHeight));
     (census.width > MAX_DIMENSION).then(|| errors.push(LevelError::WidthTooLarge(census.width)));
     (census.height > MAX_DIMENSION).then(|| errors.push(LevelError::HeightTooLarge(census.height)));
 
-    // --- Exactly one entrance / one exit ---
     match census.entrances.len() {
         1 => {}
         0 => errors.push(LevelError::NoEntrance),
@@ -209,7 +207,6 @@ pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
         n => errors.push(LevelError::MultipleExits(n)),
     }
 
-    // --- Empty wiring groups ---
     census
         .buttons
         .iter()
@@ -221,7 +218,6 @@ pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
         .filter(|(_, g)| g.is_empty())
         .for_each(|(c, _)| errors.push(LevelError::EmptyDoorGroup(*c)));
 
-    // --- Every door group has a matching (non-empty) button group ---
     let button_groups: BTreeSet<&str> = census
         .buttons
         .iter()
@@ -241,7 +237,6 @@ pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
         .into_iter()
         .for_each(|g| errors.push(LevelError::DoorWithoutButton(g.to_string())));
 
-    // --- Out-of-grid placements (only meaningful on a non-degenerate grid) ---
     if census.width > 0 && census.height > 0 {
         // Stable, de-duplicated order so the report doesn't repeat a coord.
         let mut outside: BTreeSet<GridCoord> = BTreeSet::new();
@@ -257,7 +252,6 @@ pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
             .for_each(|c| errors.push(LevelError::OutsideGrid(c)));
     }
 
-    // --- Two exclusive static objects in one cell ---
     let mut counts: BTreeMap<GridCoord, usize> = BTreeMap::new();
     census.placements().into_iter().for_each(|c| {
         *counts.entry(c).or_insert(0) += 1;
@@ -267,7 +261,6 @@ pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
         .filter(|(_, n)| **n > 1)
         .for_each(|(c, _)| errors.push(LevelError::OverlappingObjects(*c)));
 
-    // --- Player start blocked by a wall ---
     let walls: BTreeSet<GridCoord> = census.walls.iter().copied().collect();
     census
         .entrances

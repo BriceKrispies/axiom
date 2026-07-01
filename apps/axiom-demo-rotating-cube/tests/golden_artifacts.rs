@@ -53,13 +53,9 @@ use axiom_demo_rotating_cube::{
 use axiom_kernel::BinaryWriter;
 use axiom_math::{Mat4, Transform, Vec3};
 
-// ---------------------------------------------------------------------------
-// Canonical encoders: artifact -> deterministic little-endian bytes.
-//
 // Each `enc_*` appends a fixed sequence of primitives, so the same artifact
 // always yields the same bytes. Collections are length-prefixed (a u32 count)
 // so a structural change (e.g. an extra node) shifts the bytes detectably.
-// ---------------------------------------------------------------------------
 
 fn enc_vec3(w: &mut BinaryWriter, v: Vec3) {
     v.write_to(w);
@@ -267,10 +263,6 @@ fn enc_full_artifact(a: &VerticalSliceArtifact) -> Vec<u8> {
     w.into_bytes()
 }
 
-// ---------------------------------------------------------------------------
-// Golden storage + the capture/compare harness.
-// ---------------------------------------------------------------------------
-
 fn golden_path(name: &str) -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     p.push("tests");
@@ -307,10 +299,6 @@ fn assert_golden(name: &str, actual: &[u8]) {
 fn run(tick: u64) -> VerticalSliceArtifact {
     DemoRotatingCubeApi::new().run_tick(tick)
 }
-
-// ---------------------------------------------------------------------------
-// Per-boundary golden tests (tick 0) — boundaries compared independently.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn golden_scene_snapshot_tick0() {
@@ -360,11 +348,6 @@ fn golden_gpu_submission_report_tick0() {
     assert_golden("gpu_submission_report_tick0", w.as_bytes());
 }
 
-// ---------------------------------------------------------------------------
-// Whole-artifact goldens at two ticks (the outer tripwire + the
-// tick-N-vs-tick-N+60 difference, both pinned).
-// ---------------------------------------------------------------------------
-
 #[test]
 fn golden_full_artifact_tick0() {
     assert_golden("full_artifact_tick0", &enc_full_artifact(&run(0)));
@@ -372,8 +355,6 @@ fn golden_full_artifact_tick0() {
 
 #[test]
 fn golden_full_artifact_tick60() {
-    // Driven across 60 ticks so the cube has rotated — captures a distinct
-    // world transform from tick 0.
     let mut demo = DemoRotatingCubeApi::new();
     let mut a = demo.run_tick(0);
     for tick in 1..=60 {
@@ -382,15 +363,11 @@ fn golden_full_artifact_tick60() {
     assert_golden("full_artifact_tick60", &enc_full_artifact(&a));
 }
 
-// ---------------------------------------------------------------------------
-// Sanity guards on the golden machinery itself (so the harness can't silently
-// pass on absent/degenerate data).
-// ---------------------------------------------------------------------------
+// Sanity guards on the golden machinery itself, so the harness can't silently
+// pass on absent/degenerate data.
 
 #[test]
 fn the_two_tick_goldens_differ() {
-    // tick 0 vs a 60-tick-driven artifact must encode to different bytes —
-    // otherwise the "rotation advances" property is not actually captured.
     let tick0 = enc_full_artifact(&run(0));
     let mut demo = DemoRotatingCubeApi::new();
     let mut later = demo.run_tick(0);
@@ -402,7 +379,6 @@ fn the_two_tick_goldens_differ() {
 
 #[test]
 fn encoding_is_stable_within_a_run() {
-    // The encoder is a pure function of the artifact: same artifact, same bytes.
     let a = run(0);
     assert_eq!(enc_full_artifact(&a), enc_full_artifact(&a));
 }

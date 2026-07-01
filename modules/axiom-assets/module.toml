@@ -1,5 +1,3 @@
-# Axiom module manifest — axiom-assets.
-
 [module]
 name = "assets"
 crate_name = "axiom-assets"

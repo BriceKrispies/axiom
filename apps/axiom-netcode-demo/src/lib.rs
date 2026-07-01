@@ -111,7 +111,6 @@ fn confirm_and_step(
     let tick = net
         .ready_tick()
         .expect("both peers submitted this tick, so it is ready");
-    // Inputs are carried through the session but do not yet drive the sim.
     let _inputs = net.confirm_tick(tick);
     let outcome = app.tick(tick);
     let bytes = frame_state_bytes(&outcome);
@@ -159,9 +158,8 @@ pub fn run_two_peer_lockstep(ticks: u64, peer_b_cubes: usize) -> LockstepReport 
         net_b.ingest(&beacon_a).expect("well-formed beacon");
         net_a.ingest(&beacon_b).expect("well-formed beacon");
 
-        // 4. Reconcile peer A's view of this tick; record the first desync.
-        // `Option::or` keeps the first recorded desync tick and ignores later
-        // ones, exactly as the original first-desync-wins check did.
+        // 4. Reconcile peer A's view of this tick, keeping only the first desync
+        // (`Option::or` ignores any later one).
         report.desync_tick = report
             .desync_tick
             .or((net_a.reconcile(tick) == Some(false)).then_some(tick));

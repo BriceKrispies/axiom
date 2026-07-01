@@ -44,14 +44,10 @@ mod tests {
 
     #[test]
     fn order_is_lexicographic_on_y_then_x() {
-        // Lower row sorts first regardless of column.
         assert!(Cell::new(9, 0) < Cell::new(0, 1));
-        // Within a row, lower column sorts first.
         assert!(Cell::new(0, 2) < Cell::new(1, 2));
-        // Equality.
         assert_eq!(Cell::new(3, 4).cmp(&Cell::new(3, 4)), Ordering::Equal);
         assert_eq!(Cell::new(3, 4), Cell::new(3, 4));
-        // partial_cmp agrees with cmp.
         assert_eq!(
             Cell::new(1, 2).partial_cmp(&Cell::new(2, 2)),
             Some(Ordering::Less)

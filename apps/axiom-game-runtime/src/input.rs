@@ -3,7 +3,6 @@
 //! browser feeds raw key/pointer events into, the per-fixed-tick sample driven
 //! inside the loop, and the `#[wasm_bindgen]` boundary the TS `NativeBridge`
 //! input methods bind.
-//!
 //! ## What lives here
 //! - [`InputBridge`]: the engine [`InputState`] facade, the action-name → id
 //!   table the boundary's string actions resolve through, and the *live* device
@@ -17,7 +16,6 @@
 //!   `input_swipe`) the `NativeBridge` projects.
 //! - A `#[wasm_bindgen] impl WasmGame` block (wasm32 only): the camelCase exports
 //!   the TS edge forwards verbatim.
-//!
 //! ## Boundary convention (the established scalar/byte/string rule)
 //! Every input value crosses the wasm boundary as a boundary primitive, never a
 //! structured object — exactly as entities cross as raw ids, components as
@@ -29,7 +27,6 @@
 //!   that is **empty** when absent and `[…]` when present (the TS edge maps `[]`
 //!   to the empty `Result`, exactly as `world_get`'s empty buffer does);
 //! - a swipe is the direction `string` (`""` when absent).
-//!
 //! ## Per-tick sample
 //! [`GameBridge::advance`] runs the fixed-step loop, then [`InputBridge::sample`]
 //! folds the current live [`DeviceFrame`] into the snapshot once per fixed tick

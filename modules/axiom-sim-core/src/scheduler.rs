@@ -157,10 +157,8 @@ fn is_terminal(status: ProcessStatus) -> bool {
 #[derive(Debug, Clone, Default)]
 pub struct ProcessScheduler {
     processes: BTreeMap<ProcessId, SchedProcess>,
-    // The kernel's deterministic `(tick, id)`-ordered schedule, keyed on
-    // `ProcessId` and carrying a `WakeReason` payload. sim-core no longer owns a
-    // bespoke wake queue: the ordering/bookkeeping live in the kernel primitive,
-    // converting `SimTick` <-> kernel `Tick` (both `u64` newtypes) at this seam.
+    // Ordering/bookkeeping delegate to the kernel's `TickSchedule` primitive;
+    // `SimTick` <-> kernel `Tick` (both `u64` newtypes) convert at this seam.
     wake_queue: TickSchedule<ProcessId, WakeReason>,
     dependencies: DependencySet,
     pending: Vec<(ProcessId, ProcessOutput)>,
@@ -402,9 +400,7 @@ mod tests {
         assert!(sched.schedule_wake(p, SimTick::new(5), WakeReason::Scheduled));
         assert_eq!(sched.status(p), Some(ProcessStatus::Sleeping));
         assert_eq!(sched.pending_wake(p), Some(SimTick::new(5)));
-        // Not due before tick 5.
         assert!(sched.take_due(SimTick::new(4)).is_empty());
-        // Peek before consuming.
         assert_eq!(sched.due_processes(SimTick::new(5)), vec![p]);
         let due = sched.take_due(SimTick::new(5));
         assert_eq!(due.len(), 1);
@@ -423,8 +419,7 @@ mod tests {
         let mut sched = ProcessScheduler::new();
         let p = sched.register(ProcessKind::new(1), handle(1), HandlerSpec::complete());
         sched.schedule_wake(p, SimTick::new(0), WakeReason::Scheduled);
-        sched.take_due(SimTick::new(0)); // -> Running
-                                         // Reschedule: Running -> Sleeping + re-armed wake.
+        sched.take_due(SimTick::new(0));
         let transition = sched
             .finalize(
                 p,
@@ -437,13 +432,12 @@ mod tests {
         assert_eq!(transition.from(), ProcessStatus::Running);
         assert_eq!(sched.status(p), Some(ProcessStatus::Sleeping));
         assert_eq!(sched.pending_wake(p), Some(SimTick::new(9)));
-        // Record an execution and read it back.
         sched.record_execution(crate::process_lifecycle::ProcessExecutionRecord::new(
             p, 0, transition,
         ));
         assert_eq!(sched.execution_records().len(), 1);
         assert_eq!(sched.execution_records()[0].process(), p);
-        sched.take_due(SimTick::new(9)); // -> Running again
+        sched.take_due(SimTick::new(9));
         let done = sched
             .finalize(p, ProcessStatus::Completed, None, SimTick::new(9))
             .unwrap();
@@ -457,9 +451,7 @@ mod tests {
         sched.schedule_wake(p, SimTick::new(5), WakeReason::Scheduled);
         assert!(sched.cancel(p, SimTick::new(1)));
         assert_eq!(sched.status(p), Some(ProcessStatus::Canceled));
-        // Canceling again is a clean false (terminal).
         assert!(!sched.cancel(p, SimTick::new(2)));
-        // The wake was removed, so nothing is due.
         assert!(sched.take_due(SimTick::new(5)).is_empty());
     }
 

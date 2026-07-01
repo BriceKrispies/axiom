@@ -1,6 +1,5 @@
 //! Live, game-agnostic perception for the retro FPS agent — the app-side **sense
 //! adapter**. Native + `agent` feature only, like [`crate::retro_fps::agent`].
-//!
 //! The reusable sensor model and the neutral fact vocabulary live in the
 //! `axiom-perception` module (game-agnostic: it owns only the ray-fan geometry,
 //! the view-cone cull, the subject-tracking math, and the
@@ -12,7 +11,6 @@
 //! `axiom-agent` `observe → decide → emit` loop the rest of the agent uses — so
 //! the agent genuinely *sees* (a wall at a real distance) and *tracks* (a moving
 //! enemy's per-tick velocity) with zero game-specific perception logic.
-//!
 //! Classification is **entity-native**: each enemy carries a `Tag(KIND_ENEMY)`
 //! on its engine node, so a raycast hit classifies itself (an untagged hit is
 //! plain level geometry — a wall). This is the "move to the ECS thing": meaning

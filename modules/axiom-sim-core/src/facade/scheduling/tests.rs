@@ -51,11 +51,9 @@ fn register_schedule_step_boundary_updates_a_fact() {
     );
     assert_eq!(api.process_pending_wake(p), Some(1));
     assert_eq!(api.pending_wake_count(), 1);
-    // Inspect due (non-consuming): not due at 0, due at 1.
     assert!(api.due_process_ids(0).is_empty());
     assert_eq!(api.due_process_ids(1), vec![p]);
 
-    // Step: handler runs, but effects are NOT applied yet.
     assert_eq!(api.step_scheduler(1), vec![p]);
     assert_eq!(api.process_status_code(p), Some(SimCoreApi::STATUS_RUNNING));
     assert_eq!(
@@ -64,7 +62,6 @@ fn register_schedule_step_boundary_updates_a_fact() {
         "effects deferred to the boundary"
     );
 
-    // Boundary: effects apply, fact updates, process completes.
     let (batches, effects, failed) = api.apply_scheduler_boundary(1, &reg);
     assert_eq!((batches, effects, failed), (1, 1, 0));
     assert_eq!(api.fact_value(f), Some(api.value_unsigned(5)));
@@ -73,7 +70,6 @@ fn register_schedule_step_boundary_updates_a_fact() {
         Some(SimCoreApi::STATUS_COMPLETED)
     );
 
-    // Execution record + causal events.
     let records = api.execution_records();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].0, p);
@@ -94,7 +90,6 @@ fn dirty_dependency_wakes_a_subscribed_process() {
         .add_fact(&reg, 8, subject, api.value_unsigned(0), None, 0)
         .unwrap();
     let p = api.register_process_updating_fact(1, subject, g, api.value_unsigned(9), 2, 0);
-    // Subscribe p to changes of fact-kind FACT_KIND (the kind of f).
     assert!(api.subscribe_process(p, SimCoreApi::DEP_FACT_KIND, u64::from(FACT_KIND)));
     assert_eq!(
         api.process_dependencies(p),
@@ -103,7 +98,6 @@ fn dirty_dependency_wakes_a_subscribed_process() {
     assert_eq!(api.process_subscriptions(p).len(), 1);
     assert_eq!(api.subscription_count(), 1);
 
-    // Update f through an effect batch -> marks f dirty.
     let mut batch = api.new_effect_batch();
     batch.update_fact(f, api.value_unsigned(1), 2);
     api.apply_effects(batch, &reg);
@@ -112,7 +106,6 @@ fn dirty_dependency_wakes_a_subscribed_process() {
     let details = api.dirty_fact_details();
     assert_eq!(details, vec![(f, FACT_KIND, SimCoreApi::DIRTY_UPDATED)]);
 
-    // Dirty invalidation wakes p (a subscriber), and clears the dirty set.
     let woken = api.apply_dirty_invalidations(2, Some(api.cause_command()));
     assert_eq!(woken, 1);
     assert!(!api.is_dirty(), "invalidation clears the dirty set");
@@ -121,7 +114,6 @@ fn dirty_dependency_wakes_a_subscribed_process() {
         Some(SimCoreApi::STATUS_SLEEPING)
     );
 
-    // Step + boundary at tick 2 -> g updated.
     assert_eq!(api.step_scheduler(2), vec![p]);
     api.apply_scheduler_boundary(2, &reg);
     assert_eq!(api.fact_value(g), Some(api.value_unsigned(9)));
@@ -137,7 +129,6 @@ fn manual_dirty_marking_and_inspection() {
     assert!(api.mark_dirty_fact(f, FACT_KIND, SimCoreApi::DIRTY_UPDATED));
     assert!(api.mark_dirty_relation(r, 3, SimCoreApi::DIRTY_ADDED));
     assert!(api.mark_dirty_subject(other, SimCoreApi::DIRTY_TOUCHED));
-    // Invalid dirty code rejected.
     assert!(!api.mark_dirty_fact(f, FACT_KIND, 250));
     assert_eq!(api.dirty_fact_ids(), vec![f]);
     assert_eq!(api.dirty_relation_ids(), vec![r]);
@@ -156,7 +147,6 @@ fn manual_dirty_marking_and_inspection() {
 #[test]
 fn failing_and_canceling_processes() {
     let (mut api, reg, subject, _f) = built();
-    // Failing handler -> status Failed at boundary.
     let fail = api.register_failing_process(1, subject, 0);
     api.schedule_process_wake(fail, 0);
     api.step_scheduler(0);
@@ -166,7 +156,6 @@ fn failing_and_canceling_processes() {
         Some(SimCoreApi::STATUS_FAILED)
     );
 
-    // Cancel a scheduled process.
     let cancelable = api.register_process(1, subject, 0);
     api.schedule_process_wake(cancelable, 5);
     assert!(api.cancel_scheduler_process(cancelable, 1));
@@ -178,10 +167,8 @@ fn failing_and_canceling_processes() {
         !api.cancel_scheduler_process(cancelable, 2),
         "already terminal"
     );
-    // Canceled process is not due.
     assert!(api.due_process_ids(5).is_empty());
 
-    // A process whose own handler cancels it -> Canceled at its boundary.
     let self_cancel = api.register_canceling_process(1, subject, 7);
     api.schedule_process_wake(self_cancel, 7);
     api.step_scheduler(7);
@@ -199,11 +186,8 @@ fn dirty_relation_invalidation_wakes_a_subscribed_process() {
         .add_relation(&reg, 3, vec![api.endpoint_entity(subject)], None, None)
         .unwrap();
     let p = api.register_process(1, subject, 0);
-    // Subscribe p to changes of relation-kind 3 (the kind of r).
     assert!(api.subscribe_process(p, SimCoreApi::DEP_RELATION_KIND, 3));
 
-    // Mark the relation dirty, then invalidate: p (a subscriber) wakes and the
-    // dirty set clears.
     assert!(api.mark_dirty_relation(r, 3, SimCoreApi::DIRTY_ADDED));
     assert_eq!(api.dirty_relation_ids(), vec![r]);
     let woken = api.apply_dirty_invalidations(2, Some(api.cause_command()));
@@ -222,13 +206,11 @@ fn rescheduling_handler_sleeps_and_re_arms() {
     api.schedule_process_wake(p, 0);
     api.step_scheduler(0);
     api.apply_scheduler_boundary(0, &reg);
-    // Reschedule disposition -> Sleeping, re-armed 3 ticks later.
     assert_eq!(
         api.process_status_code(p),
         Some(SimCoreApi::STATUS_SLEEPING)
     );
     assert_eq!(api.process_pending_wake(p), Some(3));
-    // Reschedule manually too.
     assert!(api.reschedule_process_wake(p, 9));
     assert_eq!(api.process_pending_wake(p), Some(9));
 }
@@ -237,12 +219,10 @@ fn rescheduling_handler_sleeps_and_re_arms() {
 fn add_fact_handler_and_with_reason_wake() {
     let (mut api, reg, subject, _f) = built();
     let p = api.register_process_adding_fact(1, subject, 99, api.value_unsigned(1), 4, 0);
-    // Schedule with an explicit reason code; invalid reason rejected.
     assert!(api.schedule_process_wake_with_reason(p, 4, SimCoreApi::WAKE_SCHEDULED));
     assert!(!api.schedule_process_wake_with_reason(p, 4, 250));
     api.step_scheduler(4);
     api.apply_scheduler_boundary(4, &reg);
-    // The handler added a fact of kind 99 on the subject.
     assert_eq!(api.facts_by_kind(99).len(), 1);
 }
 
@@ -264,7 +244,6 @@ fn invalid_subscription_codes_and_unknown_process() {
         ),
         "unknown process"
     );
-    // Unknown process status / kind are None.
     assert!(api
         .process_status_code(crate::ids::ProcessId::from_raw(9999))
         .is_none());

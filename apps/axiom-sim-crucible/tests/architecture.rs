@@ -106,8 +106,6 @@ fn assert_absent_in_app(forbidden: &[&str], why: &str) {
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- app manifest ----------
-
 #[test]
 fn app_toml_exists_and_lists_only_consumed_layers_and_modules() {
     let manifest = app_root().join("app.toml");
@@ -125,8 +123,6 @@ fn app_toml_exists_and_lists_only_consumed_layers_and_modules() {
         );
     }
 }
-
-// ---------- app hygiene ----------
 
 #[test]
 fn no_browser_gpu_or_dom() {
@@ -248,8 +244,6 @@ fn no_phase_milestone_naming_in_structure() {
     );
 }
 
-// ---------- the tick loop is data-driven ----------
-
 #[test]
 fn tick_loop_has_no_hardcoded_consequence_branches() {
     // The driver's `tick` function must be boring: step the scheduler, run the
@@ -285,8 +279,6 @@ fn tick_loop_has_no_hardcoded_consequence_branches() {
         "the tick loop must run the due actions from the schedule"
     );
 }
-
-// ---------- scenario names stay in the app ----------
 
 fn scan_raw(dir: PathBuf, needles: &[&str]) -> Vec<String> {
     let mut files = Vec::new();

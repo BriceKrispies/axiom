@@ -77,12 +77,9 @@ mod tests {
 
     #[test]
     fn finite_or_zero_passes_finite_and_sanitizes_nonfinite() {
-        // Finite values (including HDR > 1.0 and negatives) pass through.
         assert_eq!(Ratio::finite_or_zero(0.5).get(), 0.5);
         assert_eq!(Ratio::finite_or_zero(2.5).get(), 2.5);
         assert_eq!(Ratio::finite_or_zero(-0.25).get(), -0.25);
-        // Non-finite scalars collapse to a finite zero (both the NaN and the
-        // infinity arms select the fallback).
         assert_eq!(Ratio::finite_or_zero(f32::NAN).get(), 0.0);
         assert_eq!(Ratio::finite_or_zero(f32::INFINITY).get(), 0.0);
         assert_eq!(Ratio::finite_or_zero(f32::NEG_INFINITY).get(), 0.0);
@@ -113,9 +110,7 @@ mod tests {
             Ratio::reflect_read(&mut BinaryReader::new(&bytes)).unwrap(),
             r
         );
-        // A truncated stream errs rather than panicking.
         assert!(Ratio::reflect_read(&mut BinaryReader::new(&[])).is_err());
-        // A non-finite scalar in the stream is rejected on read.
         let mut bad = BinaryWriter::new();
         bad.write_f32(f32::INFINITY);
         assert!(Ratio::reflect_read(&mut BinaryReader::new(&bad.into_bytes())).is_err());

@@ -35,17 +35,14 @@ impl ServerSnapshot {
         })
     }
 
-    /// The authoritative tick this snapshot describes.
     pub(crate) fn server_tick(&self) -> u64 {
         self.server_tick
     }
 
-    /// The newest client intent the server has accepted.
     pub(crate) fn last_accepted_client_sequence(&self) -> u64 {
         self.last_accepted_client_sequence
     }
 
-    /// The opaque snapshot payload.
     pub(crate) fn payload(&self) -> &[u8] {
         self.payload.as_bytes()
     }

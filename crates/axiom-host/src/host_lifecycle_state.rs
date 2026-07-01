@@ -37,11 +37,9 @@ impl HostLifecycleState {
     /// deterministic and prevents a stuck-shutdown bug from being masked by
     /// an out-of-order `Started`.
     pub const fn apply(self, signal: HostLifecycleSignal) -> Self {
-        // Each signal sets exactly one boolean field; the projection is a pure
-        // table lookup. `(clear_mask, set_mask)` over the packed field bits
-        // (visible=1, focused=2, suspended=4, shutdown=8) replaces the per-signal
-        // `match`: new_bits = (self_bits & !clear) | set, indexed by the fieldless
-        // signal's discriminant. Behaviourally identical, branchless in source.
+        // `(clear_mask, set_mask)` table over packed bits (visible=1, focused=2,
+        // suspended=4, shutdown=8): new_bits = (self_bits & !clear) | set,
+        // indexed by the signal's discriminant.
         const VISIBLE: u8 = 1;
         const FOCUSED: u8 = 2;
         const SUSPENDED: u8 = 4;

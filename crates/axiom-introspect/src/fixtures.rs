@@ -49,8 +49,6 @@ struct AlwaysFail;
 
 impl RuntimeSystem for AlwaysFail {
     fn run(&mut self, ctx: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
-        // Emit a metric before failing, so the produced frame carries both a
-        // failed system report and a telemetry metric.
         let tick = ctx.step().tick();
         ctx.metric(TelemetryMetric::gauge(
             "cube.angle_deg",

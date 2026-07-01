@@ -1,5 +1,4 @@
 //! Architecture-boundary tests for the `axiom-agent` engine module.
-//!
 //! The workspace `xtask` checker enforces the global Module Law (allowed layers,
 //! no module-to-module deps, single facade). These per-module tests are the
 //! second line of defence: they scan this crate's `src/` tree for forbidden
@@ -138,7 +137,6 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest + facade ----------
 
 #[test]
 fn module_toml_exists_and_is_isolated() {
@@ -150,8 +148,6 @@ fn module_toml_exists_and_is_isolated() {
         stripped.contains("allowed_modules = []"),
         "axiom-agent must declare `allowed_modules = []`"
     );
-    // Quoted values are checked against the raw text — `strip_comments_and_strings`
-    // empties string literals, which is exactly what we are matching on here.
     assert!(
         raw.contains("name = \"agent\""),
         "axiom-agent module must declare name = \"agent\""
@@ -164,8 +160,6 @@ fn module_toml_exists_and_is_isolated() {
 
 #[test]
 fn lib_rs_exports_exactly_one_facade() {
-    // The prompt is stricter than Module Law #8 here: lib.rs exposes exactly one
-    // public thing — AgentApi — and no identity-vocabulary re-export line.
     let lib = read(&src_dir().join("lib.rs"));
     let pub_uses: Vec<&str> = lib
         .lines()
@@ -183,7 +177,6 @@ fn lib_rs_exports_exactly_one_facade() {
     );
 }
 
-// ---------- legal layer imports only ----------
 
 #[test]
 fn agent_imports_only_legal_layers() {
@@ -255,7 +248,6 @@ fn no_layer_imports_axiom_agent() {
     }
 }
 
-// ---------- source hygiene: platform / determinism / foreign concepts ----------
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -339,8 +331,6 @@ fn no_unordered_or_linked_collections() {
 
 #[test]
 fn no_foreign_engine_subsystem_concepts() {
-    // The agent owns neutral contracts only; it must not absorb the concepts of
-    // other subsystems or reference foreign engine crates.
     assert_absent(
         &[
             "axiom_scene",
@@ -367,8 +357,6 @@ fn no_foreign_engine_subsystem_concepts() {
 
 #[test]
 fn no_prohibited_ai_concepts() {
-    // This module is explicitly NOT an AI framework. Encode the prompt's hard
-    // prohibitions as a gate so a future agent cannot quietly grow one here.
     assert_absent(
         &[
             "navmesh",

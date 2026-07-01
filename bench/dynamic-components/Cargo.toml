@@ -1,6 +1,5 @@
-# Standalone benchmark harness (NOT a workspace member): it needs `unsafe`,
-# which the engine crates forbid. Its own `[workspace]` keeps it out of the
-# main workspace's coverage gate and architecture checker. Run with:
+# Standalone (own `[workspace]`, excluded from the main workspace's gates because
+# it needs `unsafe`, which engine crates forbid). Run with:
 #   cargo run --release --manifest-path bench/dynamic-components/Cargo.toml
 [package]
 name = "dynamic-component-bench"
@@ -11,8 +10,6 @@ publish = false
 [workspace]
 
 [dependencies]
-# Real engine reflection/serialization, so the "safe" path is measured against
-# what the engine actually does, not a hand-rolled stand-in.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
 

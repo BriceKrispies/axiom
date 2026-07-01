@@ -121,7 +121,6 @@ mod tests {
     fn report_preserves_record_order_via_slice_accessor() {
         let plan = HostStepPlan::build(&HostFrameInput::new(1, 0, vp()), &cfg(), &visible(), 0);
         let report = HostFrameReport::new(1, plan, 0, Vec::new(), vp(), visible());
-        // The slice length matches the constructor's vec length.
         assert_eq!(report.step_records().len(), 0);
     }
 

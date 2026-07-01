@@ -1,7 +1,6 @@
 //! The board: a row-major integer container with an out-of-bounds-safe read.
 
 /// A row-major 2D grid of `T`, the board every tile/level query reads.
-///
 /// The out-of-bounds `get` returning the grid's **default cell** (the `fill` the
 /// grid was created with) is a contract guarantee, not an error path: it keeps
 /// neighbor reads branchless (no bounds `if` at every wavefront step). `set` on
@@ -115,10 +114,8 @@ mod tests {
     fn get_is_out_of_bounds_safe_returning_the_default() {
         let mut g = Grid::new(2, 2, 7u32);
         g.set(1, 0, 42);
-        // In bounds: the written value, then the untouched default.
         assert_eq!(g.get(1, 0), 42);
         assert_eq!(g.get(0, 0), 7);
-        // Out of bounds (every direction): the grid's default cell.
         assert_eq!(g.get(-1, 0), 7);
         assert_eq!(g.get(2, 0), 7);
         assert_eq!(g.get(0, -1), 7);
@@ -128,7 +125,7 @@ mod tests {
     #[test]
     fn set_out_of_bounds_is_a_silent_no_op() {
         let mut g = Grid::new(2, 2, 0u32);
-        g.set(5, 5, 99); // ignored, no panic
+        g.set(5, 5, 99);
         let mut total = 0u32;
         g.for_each(|v, _, _| total += v);
         assert_eq!(total, 0);

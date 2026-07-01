@@ -110,8 +110,7 @@ const CHUNK_VERTS: usize = CHUNK_VERT_SIDE * CHUNK_VERT_SIDE;
 /// near one (same 289 vertices), so one cap fits all LODs.
 const MAX_GEN_PER_FRAME: usize = 6;
 
-// ===========================================================================
-// Level-of-detail (LOD) terrain — concentric clipmap-style rings.
+// Level-of-detail (LOD) terrain: concentric clipmap-style rings.
 //
 // Every chunk still emits `CHUNK_VERT_SIDE`²(=289) vertices. A chunk at **LOD L**
 // has world size `CHUNK_M * 2^L` m and vertex spacing `STEP_M * 2^L` m, so a far
@@ -125,7 +124,6 @@ const MAX_GEN_PER_FRAME: usize = 6;
 // `sample_height_m` (LOD 0 quality), so render-LOD never moves where the player
 // walks. Cracks where a coarse chunk meets a fine neighbour are hidden by
 // per-chunk vertical SKIRTS (the border ring of verts dropped straight down).
-// ===========================================================================
 
 /// World size (metres) of a chunk at LOD `lod`: the base `CHUNK_M` doubled per
 /// level. LOD 0 = 16 m (1 m spacing); LOD 3 = 128 m (8 m spacing); etc.
@@ -260,10 +258,8 @@ fn log(msg: &str) {
     web_sys::console::log_1(&JsValue::from_str(&format!("[growth] {msg}")));
 }
 
-// ===========================================================================
 // Cross-call state (single-threaded wasm): the generated planet lives here
 // between the JS-driven flow steps (generate → render map → pick → descend).
-// ===========================================================================
 
 thread_local! {
     /// The currently generated planet, set by [`generate`] and read by the
@@ -279,10 +275,6 @@ fn parse_preset(name: &str) -> PlanetPreset {
         _ => PlanetPreset::Earthlike,
     }
 }
-
-// ===========================================================================
-// (A) CONFIG → Generate, and (B) the overworld equirectangular map.
-// ===========================================================================
 
 /// Generate a planet from the config form and render the overworld map.
 ///
@@ -391,10 +383,6 @@ fn biome_color(biome_id: u32, elevation: f32) -> [u8; 3] {
     ]
 }
 
-// ===========================================================================
-// (C) SELECT — map a clicked pixel to a unit direction and test for land.
-// ===========================================================================
-
 /// Convert a normalised map click `(u, v)` in `[0,1]` (u = left→right, v =
 /// top→bottom) to a unit direction on the planet. The inverse of the
 /// equirectangular projection used by [`render_overworld_map`].
@@ -413,10 +401,6 @@ pub fn is_land(u: f32, v: f32) -> bool {
         })
     })
 }
-
-// ===========================================================================
-// Terrain mesh build (shared by the descend step).
-// ===========================================================================
 
 /// A per-vertex biome+elevation colour for the walkable terrain, in **linear**
 /// RGB `[0,1]` (the live shader works in linear space, and the terrain material
@@ -599,12 +583,12 @@ fn gen_chunk(
     let side = CHUNK_VERT_SIDE;
     let mut vertices: Vec<f32> = Vec::with_capacity(VERTS_PER_CHUNK * VERT_FLOATS);
 
-    // --- Surface verts: the 17×17 grid (indices 0..CHUNK_VERTS), row-major. ---
+    // Surface verts: the 17×17 grid (indices 0..CHUNK_VERTS), row-major.
     (0..side).for_each(|sz| (0..side).for_each(|sx| emit(&mut vertices, sx, sz, 0.0)));
 
-    // --- Skirt verts: one dropped twin per border surface vert, appended in a
+    // Skirt verts: one dropped twin per border surface vert, appended in a
     // fixed perimeter order (top row, bottom row, left col, right col interiors)
-    // so `skirt_index` below addresses them deterministically. ---
+    // so `skirt_index` below addresses them deterministically.
     let skirt_drop = SKIRT_DEPTH_SPACINGS * spacing;
     let last = side - 1;
     // Top (sz=0) and bottom (sz=last) full rows.
@@ -862,10 +846,6 @@ fn build_viewer_app(spawn_x: f32, spawn_z: f32, eye_y: f32) -> RunningApp {
     ground::build_first_person_app(CANVAS_ID, SURFACE_W, SURFACE_H, spawn_x, spawn_z, eye_y)
 }
 
-// ===========================================================================
-// (D) DESCEND — build the local world at the picked spot and walk it.
-// ===========================================================================
-
 // The walking player's authoritative state is `ground::PlayerState` (shared with
 // the headless `GroundSim`), so the wasm viewer and the agent driver integrate
 // movement + ground-follow through one function and walk identically.
@@ -1011,7 +991,6 @@ pub fn descend(u: f32, v: f32) {
         engine_y: eye_y,
     }));
 
-    // Input capture.
     let keys = Rc::new(RefCell::new(Keys::default()));
     install_key_listener(&keys, "keydown", true);
     install_key_listener(&keys, "keyup", false);
@@ -1052,10 +1031,10 @@ pub fn descend(u: f32, v: f32) {
                 v
             };
 
-            // --- 1-4. Look + move + ground-follow, through the one shared native
+            // Look + move + ground-follow, through the one shared native
             // integration (`ground::step_first_person`), so the live viewer walks
             // exactly as the headless `GroundSim` the agent drives. Keys → axes:
-            // forward/back, strafe right/left, and key-turn folded into the look. ---
+            // forward/back, strafe right/left, and key-turn folded into the look.
             let key_yaw = (k.turn_left as i32 - k.turn_right as i32) as f32 * ground::TURN_SPEED;
             let yaw_delta = key_yaw + look_yaw;
             let forward_axis = (k.forward as i32 - k.backward as i32) as f32;
@@ -1103,7 +1082,7 @@ pub fn descend(u: f32, v: f32) {
                 let _ = bridge.socket.send_with_str(&obs);
             }
 
-            // --- 5. Stream the terrain incrementally as LOD ring chunks. The
+            // Stream the terrain incrementally as LOD ring chunks. The
             // player lives in continuous world space; each frame we recompute the
             // desired concentric LOD set around them, generate only the chunks
             // that newly enter it (bounded to MAX_GEN_PER_FRAME, nearest first, so
@@ -1113,7 +1092,7 @@ pub fn descend(u: f32, v: f32) {
             // colours are pure functions of world position recentred by the SAME
             // fixed anchor, so chunks of one LOD are seamless with each other and
             // stable across frames; LOD boundaries are bridged by skirts. We only
-            // reassemble + re-upload on frames where the loaded set changed. ---
+            // reassemble + re-upload on frames where the loaded set changed.
             let desired: Vec<ChunkKey> = lod_chunk_set(player_x, player_z, &cfg);
             let desired_set: std::collections::HashSet<ChunkKey> =
                 desired.iter().copied().collect();
@@ -1210,10 +1189,6 @@ pub fn descend(u: f32, v: f32) {
     );
 }
 
-// ===========================================================================
-// Input plumbing (shared with the first-person view).
-// ===========================================================================
-
 /// The presentation canvas element (the first-person WebGPU canvas).
 fn canvas() -> web_sys::Element {
     web_sys::window()
@@ -1304,8 +1279,7 @@ fn install_key_listener(keys: &Rc<RefCell<Keys>>, event: &str, pressed: bool) {
     callback.forget();
 }
 
-// ===========================================================================
-// Live agent bridge — drive the in-browser viewer from an external agent.
+// Live agent bridge: drive the in-browser viewer from an external agent.
 //
 // When the page is opened with `?agent=ws://host:port`, the viewer connects a
 // WebSocket to an `axiom-agent` driver (the `agent` bin's `--bridge` mode). The
@@ -1313,7 +1287,6 @@ fn install_key_listener(keys: &Rc<RefCell<Keys>>, event: &str, pressed: bool) {
 // keyboard each frame, and the viewer streams an observation (pose + HEIGHT +
 // summit goal) back every frame. This is the live counterpart of the headless
 // `GroundSim` climb — the same neutral control vocabulary, over a socket.
-// ===========================================================================
 
 /// The live agent bridge: the held controls the driver pushes (merged into the
 /// keyboard each frame) and the socket the viewer reports observations on.

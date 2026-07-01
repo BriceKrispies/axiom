@@ -16,20 +16,17 @@ use crate::particles::{ParticleField, ParticleQuad};
 const INERT_FRAME: Rect = Rect::new(Vec2::ZERO, Vec2::ZERO);
 
 /// The only public export of `axiom-draw2d`.
-///
 /// Accumulates a frame's 2D draws onto a host-owned [`Draw2dList`] in progress,
 /// then yields the neutral, layer-sorted contract. Shape mirrors `RenderApi`:
 /// typed builders in, opaque `KIND_*`-tagged [`Draw2dCommand`]s out, branchless
 /// `as_*` accessors for the consumer. It **rasterizes nothing** — turning the
 /// list into pixels (and the alpha-blend fix) is the backends' job.
-///
 /// This module owns only the *builder*; the neutral contract types
 /// ([`Draw2dList`], [`Draw2dCommand`], and the value vocabulary) live in the
 /// host layer (`axiom_host`), so the render backends that depend on host can
 /// name and rasterize them. The builder adds the authoring ergonomics the
 /// contract deliberately does not carry: the transform stack and the submit
 /// counter. Callers `use axiom_host::{…}` for the value vocabulary they pass in.
-///
 /// Presentation-class: the only caller is `onRender`. Nothing it produces is
 /// authoritative, and there is **no getter that returns draw state into a
 /// sim-readable form** — the facade hands out a `Draw2dList` and never reads it
@@ -79,7 +76,6 @@ impl Draw2dApi {
         self.list.push_command_routed(self.active_target, cmd);
     }
 
-    // --- Camera + transform stack ---
 
     /// Set the 2D camera for this frame (centre + zoom).
     pub fn set_camera2d(&mut self, center: Vec2, zoom: Ratio) {
@@ -101,7 +97,6 @@ impl Draw2dApi {
         self.transform_stack.truncate(depth.raw());
     }
 
-    // --- Shapes ---
 
     /// Draw a filled/stroked rectangle.
     pub fn rect(&mut self, r: Rect, style: Fill2d, common: Common2d) {
@@ -141,7 +136,6 @@ impl Draw2dApi {
         self.route(cmd);
     }
 
-    // --- Sprites + text ---
 
     /// Draw a textured sprite (source sub-rect / anchor / tint / flips ride on
     /// `opts`; placement on the current transform).
@@ -163,7 +157,6 @@ impl Draw2dApi {
         run.measure(font)
     }
 
-    // --- Paints ---
 
     /// Register a linear gradient, returning its [`PaintId`]. A command's
     /// [`Fill2d`] references the paint by id; it never inlines stops.
@@ -181,7 +174,6 @@ impl Draw2dApi {
         self.list.register_radial(center, radius, stops.to_vec())
     }
 
-    // --- Particles (§10.1, presentation-only) ---
 
     /// Register a particle emitter, returning its [`EmitterId`]. The emitter is a
     /// recipe; nothing is spawned until [`Self::emit`].
@@ -214,7 +206,6 @@ impl Draw2dApi {
         });
     }
 
-    // --- Render targets (§10.3) ---
 
     /// Create an off-screen render target of `width`×`height` pixels, returning
     /// its [`RenderTargetId`]. A render target is a named nested list; the backend
@@ -239,7 +230,6 @@ impl Draw2dApi {
         self.list.target_texture(target)
     }
 
-    // --- Flip-book animation (§10.2, pure sampler) ---
 
     /// Sample a flip-book animation (§10.2): the atlas sub-rect to show at
     /// presentation time `elapsed`. A **pure** function of `(anim, elapsed,
@@ -249,7 +239,6 @@ impl Draw2dApi {
     /// `floor(elapsed * fps)`; when `looping` it wraps modulo the frame count,
     /// otherwise it clamps to the last frame. An empty `anim` has no frame to show,
     /// so it returns the inert zero-[`Rect`].
-    ///
     /// Branchless: the wrap-vs-clamp choice is a table index
     /// (`[clamped, wrapped][usize::from(looping)]`) and the empty case is the
     /// combinator `frames.get(..)`, never an `if`/`match`. `rem_euclid` keeps a
@@ -265,7 +254,6 @@ impl Draw2dApi {
         anim.frames.get(chosen as usize).copied().unwrap_or(INERT_FRAME)
     }
 
-    // --- Finalize ---
 
     /// Finish the frame: take the accumulated list, **stable-sort it by
     /// `(layer, submission)`** so equal layers keep call order, and yield the

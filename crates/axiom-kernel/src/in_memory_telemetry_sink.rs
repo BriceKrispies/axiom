@@ -110,7 +110,6 @@ mod tests {
     fn populated_sink_is_not_empty() {
         let mut sink = InMemoryTelemetrySink::new();
         sink.record(TelemetryMetric::counter("c", 1, None));
-        // Distinguishes `is_empty -> true`: a sink with a sample is NOT empty.
         assert!(!sink.is_empty());
         assert_eq!(sink.len(), 1);
     }

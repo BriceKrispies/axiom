@@ -1,5 +1,4 @@
 //! Architecture-boundary tests for the `axiom-tick` engine module.
-//!
 //! The workspace `xtask` checker enforces the global Module Law (allowed layers,
 //! no module-to-module deps, single facade). These per-module tests are the
 //! second line of defence: they scan this crate's `src/` tree for forbidden
@@ -9,8 +8,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-// Facade-only smoke check: drive the module solely through its public facade plus
-// the kernel value types that cross it.
 use axiom_kernel::{Tick, TickDelta};
 use axiom_tick::TickApi;
 
@@ -140,7 +137,6 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest + facade ----------
 
 #[test]
 fn module_toml_exists_and_is_isolated() {
@@ -155,8 +151,6 @@ fn module_toml_exists_and_is_isolated() {
 
 #[test]
 fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
-    // Module Law #8: exactly one behavioral facade (TickApi), plus the identity
-    // vocabulary (the handle types). All other public exports forbidden.
     let lib = read(&src_dir().join("lib.rs"));
     let pub_uses: Vec<&str> = lib
         .lines()
@@ -180,7 +174,6 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
     );
 }
 
-// ---------- legal layer imports only ----------
 
 #[test]
 fn tick_imports_only_legal_layers() {
@@ -262,7 +255,6 @@ fn no_layer_imports_axiom_tick() {
     }
 }
 
-// ---------- source hygiene: platform / determinism / foreign concepts ----------
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -313,8 +305,6 @@ fn no_randomness() {
 
 #[test]
 fn no_floating_point_time() {
-    // Time in axiom-tick is integer Tick / TickDelta only — never a float
-    // duration. Guard against an `f32`/`f64` leaking into the schedule.
     assert_absent(
         &["f32", "f64"],
         "axiom-tick must keep time integer (Tick/TickDelta), never a float duration",
@@ -379,8 +369,6 @@ fn no_junk_drawer_modules() {
     }
 }
 
-/// Guard against an orphan source module: every top-level `src/*.rs` file (other
-/// than `lib.rs`) must have a matching `mod <stem>;` in `lib.rs`.
 #[test]
 fn every_source_module_is_declared_in_lib_rs() {
     let lib = strip_comments_and_strings(&read(&src_dir().join("lib.rs")));
@@ -406,12 +394,7 @@ fn every_source_module_is_declared_in_lib_rs() {
     );
 }
 
-// ---------- facade-level determinism proof ----------
 
-/// Two independently-built facades, fed the identical timer + machine program and
-/// the identical sequence of ticks, must produce equal per-tick outputs — the
-/// core replay invariant, asserted through the public facade with the kernel
-/// value types a production caller would use.
 #[test]
 fn identical_programs_replay_to_identical_outputs() {
     let run = || {

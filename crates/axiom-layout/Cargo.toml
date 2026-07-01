@@ -7,16 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free and wasm-clean: it consumes already-measured host
-# viewport facts and emits rectangles, so it runs and is tested on native exactly
-# as it drives the web.
 crate-type = ["rlib"]
 
 [dependencies]
-# Layer dependencies (Layer Law: only lower layers). `host` supplies the viewport
-# facts the solver consumes (HostViewport / Orientation / HostSafeAreaInsets) and
-# the `Pixels` quantity it emits; `kernel` supplies `Ratio` (aspect ratios + flex
-# weights) and the result types. Both are genuinely used.
 axiom-kernel = { path = "../axiom-kernel" }
 axiom-host = { path = "../axiom-host" }
 

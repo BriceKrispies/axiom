@@ -81,8 +81,7 @@ impl WindowingApi {
         // rejects a zero/oversized viewport. The remaining steps use fixed,
         // valid constants and so cannot fail (documented at each site). The
         // success arm builds and stores the request; on the viewport error we
-        // return it and leave the surface unconfigured — expressed branchlessly
-        // through `map`, so this carries no `?`.
+        // return it and leave the surface unconfigured.
         host.viewport(
             width,
             height,
@@ -219,9 +218,9 @@ impl FrameClock {
     ///
     /// The read-out is recomputed only when the window fills, so the first
     /// `FRAME_CLOCK_WINDOW_MICROS` of play reports zeros (an honest "not measured
-    /// yet"), then a smoothed mean thereafter. Branchless: the window-full
-    /// predicate selects, per field, between the freshly-computed value and the
-    /// retained one (and resets the accumulators) via `then_some`/`unwrap_or`.
+    /// yet"), then a smoothed mean thereafter. The window-full predicate selects,
+    /// per field, between the freshly-computed value and the retained one (and
+    /// resets the accumulators) via `then_some`/`unwrap_or`.
     pub(crate) fn record(&mut self, now_micros: u64) -> (u32, u32) {
         // We measure *intervals*, not frames: N timestamps bound N-1 deltas. The
         // first observation only seeds the clock — it has no predecessor, so it
@@ -262,8 +261,6 @@ mod tests {
         assert!(w.presentation_request().is_none());
         assert_eq!(w.next_tick(), 0);
         assert_eq!(w.frames_driven(), 0);
-        // Default matches new (compared through observable state), and the
-        // driver is Debug-printable.
         let d = WindowingApi::default();
         assert_eq!(d.is_surface_configured(), w.is_surface_configured());
         assert_eq!(d.next_tick(), w.next_tick());
@@ -277,7 +274,6 @@ mod tests {
         assert!(w.is_surface_configured());
         assert_eq!(w.surface_width(), Some(800));
         assert_eq!(w.surface_height(), Some(600));
-        // The assembled request is exposed for a live backend to consume.
         let request = w.presentation_request().expect("configured");
         assert_eq!(request.descriptor().viewport().physical_width(), 800);
         assert!(request.surface().is_valid());
@@ -285,7 +281,6 @@ mod tests {
 
     #[test]
     fn configure_surface_is_deterministic() {
-        // Same inputs reach the same observable state.
         let mut a = WindowingApi::new();
         let mut b = WindowingApi::new();
         a.configure_surface(1280, 720).unwrap();

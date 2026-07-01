@@ -14,9 +14,7 @@
 //! Bare-entity lifecycle (`spawn_empty`/`despawn_subtree`/`children_of`) reuses
 //! the scene's landed node lifecycle; despawn clears an entity's dynamic
 //! components (see `axiom_scene` `Scene::despawn_entity`), so a recycled id never
-//! inherits stale components. A child module of `app` so it reaches
-//! [`RunningApp`]'s private scene while keeping `app.rs` within the per-file size
-//! budget.
+//! inherits stale components.
 
 use axiom_kernel::Reflect;
 use axiom_scene::SceneNodeId as Entity;
@@ -88,8 +86,6 @@ mod tests {
     use crate::window::Window;
     use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, TypeSchema};
 
-    // A closed-vocabulary game component, declared exactly as a bridge app would:
-    // a `Reflect` struct whose schema name is the kind key.
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct Velocity2D {
         x: f32,
@@ -108,7 +104,6 @@ mod tests {
             f32::reflect_read(r).and_then(|x| f32::reflect_read(r).map(|y| Velocity2D { x, y }))
         }
     }
-    // A zero-field marker kind, so the intersection query spans two kinds.
     #[derive(Debug)]
     struct Marked;
     impl Reflect for Marked {
@@ -131,34 +126,26 @@ mod tests {
         let mut app = app();
         let a = app.spawn_empty();
         let b = app.spawn_empty();
-        // Distinct entities; set on live nodes is true, a stale handle a clean false.
         assert_ne!(a, b);
         assert!(app.set_dynamic(a, Velocity2D { x: 1.0, y: 2.0 }));
         assert!(app.set_dynamic(b, Velocity2D { x: 3.0, y: 4.0 }));
         assert!(app.set_dynamic(a, Marked));
         assert!(!app.set_dynamic(Entity::from_raw(9999), Marked));
-        // Read owned values back; presence checks; absent reads are None/false.
         assert_eq!(
             app.get_dynamic::<Velocity2D>(a),
             Some(Velocity2D { x: 1.0, y: 2.0 })
         );
         assert!(app.has_dynamic::<Marked>(a));
         assert!(!app.has_dynamic::<Marked>(b));
-        // The marker round-trips back through its `reflect_read` while present.
         assert!(app.get_dynamic::<Marked>(a).is_some());
         assert!(app.get_dynamic::<Velocity2D>(Entity::from_raw(9999)).is_none());
-        // Query: a single kind enumerates ascending; the intersection is only the
-        // entity carrying every named kind.
         assert_eq!(app.query_dynamic(&["Velocity2D"]), vec![a, b]);
         assert_eq!(app.query_dynamic(&["Velocity2D", "Marked"]), vec![a]);
-        // Remove drops just that kind; a leaf has no children; subtree despawn of a
-        // childless node removes it and clears its dynamic components.
         assert!(app.remove_dynamic::<Marked>(a));
         assert!(!app.remove_dynamic::<Marked>(a));
         assert!(app.children_of(a).is_empty());
         assert!(app.despawn_subtree(a));
         assert!(app.get_dynamic::<Velocity2D>(a).is_none());
-        // b is untouched by a's removal.
         assert_eq!(
             app.get_dynamic::<Velocity2D>(b),
             Some(Velocity2D { x: 3.0, y: 4.0 })

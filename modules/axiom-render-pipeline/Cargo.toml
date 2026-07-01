@@ -7,19 +7,13 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free and wasm-clean (the recording backend is used in
-# tests; a live backend is supplied by the app).
 crate-type = ["rlib"]
 
 [dependencies]
-# A *feature module* (kind = "feature-module"): it composes the engine modules
-# listed in `module.toml`'s `allowed_modules`, plus the math and host layers.
-# The host layer supplies `SdfScene` — the backend-neutral SDF contract this
-# pipeline assembles (via `axiom-render`) and reports for the live/canvas path.
-# The kernel root supplies `Ratio` — the sanitized catalog scalar
-# (`roughness` / `opacity`) the material asset boundary threads into the render
-# layer's fully-specified lit material. The lib now names it, so it is a runtime
-# dependency (and `kernel` is listed in `module.toml`'s `allowed_layers`).
+# host supplies SdfScene, the backend-neutral SDF contract this pipeline
+# assembles (via axiom-render) for the live/canvas path. kernel supplies
+# Ratio, the sanitized catalog scalar (roughness/opacity) the material asset
+# boundary threads into the render layer's fully-specified lit material.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-host = { path = "../../crates/axiom-host" }

@@ -1,22 +1,10 @@
 #![feature(rustc_private)]
 #![warn(unused_extern_crates)]
 
-//! Shared building blocks for Axiom's dylint rulebook.
-//!
-//! Every engine lint needs the same two primitives:
-//!
-//! 1. **Scope** — does this span live in the reusable engine spine (a layer
-//!    `crates/<x>/src/...` or a `modules/<x>/src/...`), as opposed to an app,
-//!    an integration test, or repo tooling? That decision is [`is_engine_file`].
-//! 2. **Zone** — is this code inside an `axiom_zones` zone (`#[sim]`,
-//!    `#[hot_path]`, `#[strict]`, ...)? Those attributes inject a greppable
-//!    zero-sized marker `const` that survives into HIR; [`in_zone`] /
-//!    [`item_has_marker`] / [`def_named`] find it, and [`markers`] names the
-//!    constants so a lint never hard-codes the string.
-//!
-//! Keeping these here means a new lint is "match the banned thing, then call one
-//! of these to decide if it counts" — and a fix to the scoping/zone heuristic
-//! lands once for the whole rulebook.
+//! Shared building blocks for Axiom's dylint rulebook: [`is_engine_file`] decides
+//! whether a span is in the reusable engine spine, and [`in_zone`] /
+//! [`item_has_marker`] / [`def_named`] detect an `axiom_zones` marker `const`
+//! (named via [`markers`]) so no lint hard-codes the marker strings.
 
 // A list of available compiler crates can be found here:
 // https://doc.rust-lang.org/nightly/nightly-rustc/
@@ -50,13 +38,8 @@ pub mod markers {
 
 /// True if `span` is in engine *source*: under `crates/<layer>/src/...` or
 /// `modules/<module>/src/...`, excluding the `xtask` tool and the `axiom-zones`
-/// support crate.
-///
-/// The `src` requirement is what makes integration tests
-/// (`crates/<x>/tests/...`), benches, and examples exempt — they are
-/// test/tooling code, not the engine spine. Apps are exempt because their path
-/// has no `crates`/`modules` component. `xtask` and `axiom-zones` sit under
-/// `crates/` with a `src/` but are tooling / build-time support, not the spine.
+/// support crate. The `src` requirement is what exempts integration tests,
+/// benches, and examples.
 pub fn is_engine_file(cx: &LateContext<'_>, span: Span) -> bool {
     let FileName::Real(name) = cx.tcx.sess.source_map().span_to_filename(span) else {
         return false;
@@ -80,13 +63,8 @@ pub fn is_engine_file(cx: &LateContext<'_>, span: Span) -> bool {
 }
 
 /// True if `span`'s source path has a directory component exactly equal to one
-/// of `dirs`.
-///
-/// This is generic path scoping (the *mechanism*); the caller supplies the
-/// *policy* — e.g. a lint naming the crate dirs that form its "floor" where a
-/// pattern it normally bans is actually correct. Matching is on whole path
-/// components, so `"axiom-math"` does not match a hypothetical
-/// `axiom-math-extra`.
+/// of `dirs`. Matches whole path components, so `"axiom-math"` does not match a
+/// hypothetical `axiom-math-extra`.
 pub fn is_in_crate_dir(cx: &LateContext<'_>, span: Span, dirs: &[&str]) -> bool {
     let FileName::Real(name) = cx.tcx.sess.source_map().span_to_filename(span) else {
         return false;
@@ -129,13 +107,8 @@ pub fn item_has_marker(cx: &LateContext<'_>, item: &Item<'_>, marker: &str) -> b
     }
 }
 
-/// Is the item at `def_id` named exactly `name`?
-///
-/// Uses `opt_item_name` rather than `item_name`: a module's `item_ids` include
-/// nameless defs such as `use` re-exports, and `item_name` *panics* (ICEs) on a
-/// def with no name. `opt_item_name` yields `None` for those, so a nameless
-/// sibling of a marker const can never crash a zone walk — it simply isn't the
-/// marker.
+/// Is the item at `def_id` named exactly `name`? Uses `opt_item_name` rather
+/// than `item_name`, which panics on a nameless def (e.g. a `use` re-export).
 pub fn def_named(cx: &LateContext<'_>, def_id: DefId, name: &str) -> bool {
     cx.tcx
         .opt_item_name(def_id)

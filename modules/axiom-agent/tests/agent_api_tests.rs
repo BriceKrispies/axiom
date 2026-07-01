@@ -14,8 +14,6 @@ fn step_at(tick: u64) -> RuntimeStep {
     RuntimeStep::new(FrameIndex::new(0), Tick::new(tick), 16_666_667, 0)
 }
 
-// ---------- identity & profiles ----------
-
 #[test]
 fn agent_id_construction_is_deterministic() {
     assert_eq!(AgentApi::create_agent_id(7), AgentApi::create_agent_id(7));
@@ -34,14 +32,11 @@ fn default_profiles_have_stable_expected_values() {
     assert_ne!(perfect, human);
 }
 
-// ---------- intents & channels ----------
-
 #[test]
 fn every_intent_factory_sets_its_kind() {
     use axiom_agent::AgentApi as A;
-    // Bind the kind constants off a representative intent's accessor isn't
-    // possible (codes are sealed on ActionIntent), so assert the kinds are all
-    // distinct and that each factory yields a stable, distinct code.
+    // Kind codes are sealed on ActionIntent, so assert distinctness instead of
+    // binding the constants directly.
     let kinds = [
         A::noop_intent().kind_code(),
         A::wait_ticks_intent(1).kind_code(),
@@ -100,8 +95,6 @@ fn every_channel_factory_returns_a_distinct_channel() {
     assert_eq!(codes, [1, 2, 3, 4, 5]);
 }
 
-// ---------- bounded observation ----------
-
 #[test]
 fn observation_builder_preserves_order_and_builds() {
     let id = AgentApi::create_agent_id(1);
@@ -147,8 +140,6 @@ fn empty_observation_has_no_entries() {
     assert_eq!(obs.legal_action_count(), 0);
 }
 
-// ---------- bounded action queue ----------
-
 #[test]
 fn action_queue_is_fifo_and_overflows_deterministically() {
     let mut q = AgentApi::action_queue(2);
@@ -163,20 +154,12 @@ fn action_queue_is_fifo_and_overflows_deterministically() {
     assert!(q.pop().is_none());
 }
 
-// ---------- empty memory ----------
-
 #[test]
 fn empty_memory_starts_empty() {
     let mem = AgentApi::empty_memory(4);
     assert!(mem.is_empty());
     assert_eq!(mem.capacity(), 4);
 }
-
-// ---------- scripted brain through the runtime ----------
-
-// The canonical reason / brain-kind codes are exposed on the facade itself
-// (AgentApi::REASON_* / BRAIN_KIND_*), so these proofs reference them
-// symbolically rather than by magic number.
 
 #[test]
 fn canonical_report_vocabulary_is_exposed_on_the_facade() {
@@ -269,8 +252,6 @@ fn scripted_brain_with_zero_budget_emits_nothing_with_budget_zero_reason() {
     assert_eq!(report.reason_code(), AgentApi::REASON_ACTION_BUDGET_ZERO);
 }
 
-// ---------- replay brain through the runtime ----------
-
 #[test]
 fn replay_brain_emits_recorded_actions_then_noop() {
     let id = AgentApi::create_agent_id(1);
@@ -315,8 +296,6 @@ fn empty_replay_brain_emits_noop_with_reason_four() {
         "replay_empty (distinct from replay_complete)"
     );
 }
-
-// ---------- determinism proofs ----------
 
 #[test]
 fn identical_inputs_replay_to_identical_report_and_actions() {
@@ -364,8 +343,6 @@ fn a_different_matching_rule_yields_a_different_report() {
     let mut mem_b = AgentApi::empty_memory(4);
     let (report_b, _qb) = AgentApi::step(id, profile, &mut brain, &build_obs(200), &mut mem_b, step_at(5));
 
-    // Different rules fire, so the reports' first emitted action kind differs —
-    // and the result is deterministic when each is re-run.
     assert_ne!(report_a, report_b);
     assert_eq!(
         report_a.first_emitted_action_kind_code(),

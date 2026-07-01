@@ -38,7 +38,6 @@ pub fn start() {
         .document()
         .expect("a document");
 
-    // Boot-fast: the page is interactive and says so before any asset finishes.
     if let Some(boot) = document.get_element_by_id("boot") {
         boot.set_text_content(Some("engine ready — streaming assets…"));
     }
@@ -83,19 +82,15 @@ fn drive(api: AssetsApi, document: Document) {
     let scheduler = callback.clone();
 
     let mut api = api;
-    // The order ids became ready — the proof that dependents land after deps.
+    // The order ids became ready — proof that dependents land after their deps.
     let mut ready_order: Vec<u64> = Vec::new();
 
     *callback.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
-        // 1. Drain the fetches that completed since the last frame.
         let ok: Vec<AssetId> = completed_ok.borrow_mut().drain(..).collect();
         let failed: Vec<AssetId> = completed_failed.borrow_mut().drain(..).collect();
 
-        // 2. Record completions; get back the NEW loads to dispatch this frame.
         let requests = api.advance(&ok, &failed);
 
-        // 3. Dispatch each requested load as an independent, parallel fetch; its
-        //    outcome is queued for a future frame to drain.
         for (id, locator) in requests {
             let ok_push = completed_ok.clone();
             let fail_push = completed_failed.clone();
@@ -107,12 +102,10 @@ fn drive(api: AssetsApi, document: Document) {
             });
         }
 
-        // 4. Drain newly-ready ids (here the app would decode + register them).
         for id in api.take_ready() {
             ready_order.push(id.raw());
         }
 
-        // 5. Reflect every row's live state + the headline progress.
         for id in api.asset_ids() {
             update_row(&document, id.raw(), api.state_code(id));
         }
@@ -124,7 +117,6 @@ fn drive(api: AssetsApi, document: Document) {
         update_header(&document, ready, total, failed_count, in_flight, done);
         update_window_state(ready, total, failed_count, in_flight, done, &ready_order);
 
-        // 6. Keep polling until every asset is ready or failed.
         if !done {
             request_animation_frame(scheduler.borrow().as_ref().expect("raf closure set"));
         }

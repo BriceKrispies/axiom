@@ -11,13 +11,10 @@ use rustc_lint::{LateContext, LateLintPass};
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
-    ///
     /// Flags `enum` declarations in **non-test engine code** (layer crates under
     /// `crates/` and module crates under `modules/`) that have more than
     /// `MAX_VARIANTS` (currently 24) variants.
-    ///
     /// ### Why is this bad?
-    ///
     /// An enum with a very large number of variants is usually a sign that the
     /// type is doing too many jobs. Large enums create broad `match` arms that are
     /// hard to extend, make exhaustive coverage expensive, and often signal that a
@@ -25,14 +22,11 @@ dylint_linting::declare_late_lint! {
     /// focused types. In a game engine this also matters for cache: every branch
     /// arm the optimizer must consider is work, and every match the CPU must
     /// speculate through is heat. A focused enum is fast, legible, and testable.
-    ///
     /// The usual fix is to split the discriminant space: introduce sub-enums
     /// grouped by semantic category (`InputEvent::Keyboard(…)` +
     /// `InputEvent::Mouse(…)` instead of 30 flat variants), or replace the enum
     /// with a struct carrying a smaller tag plus a payload.
-    ///
     /// ### Example
-    ///
     /// ```rust
     /// // BAD — 25 variants, all flat, hard to match and extend
     /// enum EngineEvent {
@@ -44,15 +38,12 @@ dylint_linting::declare_late_lint! {
     ///     AudioStart, AudioStop, AudioError,
     /// }
     /// ```
-    ///
     /// Use instead:
-    ///
     /// ```rust
     /// // GOOD — sub-enums keep each arm count small and each type focused
     /// enum InputEvent { KeyPress, KeyRelease, MouseMove, /* … */ }
     /// enum NetworkEvent { Connect, Disconnect, Data, Error }
     /// enum AudioEvent { Start, Stop, Error }
-    ///
     /// enum EngineEvent {
     ///     Input(InputEvent),
     ///     Network(NetworkEvent),
@@ -79,16 +70,12 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoLargeEnums {
         if n <= MAX_VARIANTS {
             return;
         }
-        // Don't blame a span that came from a macro expansion.
         if item.span.from_expansion() {
             return;
         }
-        // Test code (inside #[test] fns or #[cfg(test)] modules) is exempt.
         if is_in_test(cx.tcx, item.hir_id()) {
             return;
         }
-        // Only fire inside the engine spine (crates/ or modules/, but not
-        // xtask/axiom-zones); apps, tooling, and integration tests are silent.
         if !is_engine_file(cx, item.span) {
             return;
         }

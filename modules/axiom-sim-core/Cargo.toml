@@ -7,12 +7,11 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free, GPU-free, wasm-clean.
 crate-type = ["rlib"]
 
 [dependencies]
-# The simulation substrate builds on the kernel (identity, deterministic binary
-# IO, Reflect) and the ECS layer (generational entity handles + liveness checks).
+# kernel: identity, deterministic binary IO, Reflect. ecs: generational
+# entity handles + liveness checks.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-ecs = { path = "../../crates/axiom-ecs" }
 

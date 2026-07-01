@@ -1,12 +1,9 @@
-//! `rain_shadow` stage (OW-E9): orographic lift windward, depletion leeward.
-//! Audit: OW-E9 rain shadows when moisture crosses rising terrain along wind.
+//! `rain_shadow` stage: orographic lift windward, depletion leeward.
 //!
 //! For each land region we look at the *upwind* neighbour (the one the wind
 //! blows from). If this region rises above that neighbour, the air is forced up
-//! and rains out: the windward (upwind-facing, rising) side gains moisture and
-//! this rising cell deposits, while the leeward side (where the region instead
-//! falls away downwind) loses moisture. Net effect is a wet windward slope and a
-//! dry leeward rain shadow. Moisture stays in `[0,1]`.
+//! and rains out: the windward side gains moisture while the leeward side
+//! (falling away downwind) loses it. Moisture stays in `[0,1]`.
 
 use crate::growth::ids::RegionId;
 use crate::growth::model_planet::PlanetGlobe;
@@ -33,7 +30,7 @@ impl Stage for RainShadowStage {
         let mut delta = vec![0.0f32; region_count];
         for r in 0..region_count {
             if globe.region_elevation[r] < 0.0 {
-                continue; // ocean: no orographic effect
+                continue;
             }
             let site = globe.topology.sites[r];
             let wind = globe.region_wind[r];
@@ -42,10 +39,10 @@ impl Stage for RainShadowStage {
                 continue;
             }
 
-            // Find the most-upwind neighbour (wind blows from it toward us).
+            // Most-upwind neighbour: wind blows from it toward us.
             let mut up: Option<usize> = None;
             let mut up_score = 0.0f32;
-            // Find the most-downwind neighbour (wind blows toward it).
+            // Most-downwind neighbour: wind blows toward it.
             let mut down: Option<usize> = None;
             let mut down_score = 0.0f32;
             for &n in neighbours {
@@ -67,14 +64,12 @@ impl Stage for RainShadowStage {
             if let Some(u) = up {
                 let rise = h - globe.region_elevation[u];
                 if rise > 0.0 {
-                    // Windward rising slope: orographic lift → rain out here.
                     delta[r] += WINDWARD_GAIN * rise;
                 }
             }
             if let Some(d) = down {
                 let drop = h - globe.region_elevation[d];
                 if drop > 0.0 {
-                    // We are higher than the downwind cell: it sits in our shadow.
                     delta[d] -= LEEWARD_LOSS * drop;
                 }
             }
@@ -135,9 +130,7 @@ mod tests {
         for &m in &g.region_moisture {
             assert!((0.0..=1.0).contains(&m), "moisture {} out of range", m);
         }
-        // The ridge (region 1) rises above upwind region 0 → gains moisture.
         assert!(g.region_moisture[1] >= before[1]);
-        // Region 2 sits behind the ridge → loses moisture (rain shadow).
         assert!(g.region_moisture[2] < before[2]);
     }
 

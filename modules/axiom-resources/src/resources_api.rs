@@ -34,8 +34,6 @@ impl ResourcesApi {
         ResourcesApi { _sealed: () }
     }
 
-    // --- Table construction ---
-
     pub fn empty_table(&self) -> ResourceTable {
         ResourceTable::new()
     }
@@ -173,8 +171,6 @@ impl ResourcesApi {
         biome_cell_origin(biome)
     }
 
-    // --- Snapshot ---
-
     pub fn resolve(&self, table: &ResourceTable) -> ResolvedResources {
         ResolvedResources::from_table(table)
     }
@@ -184,8 +180,6 @@ impl ResourcesApi {
 /// without naming any resource-internal type. Split into its own `impl` block (one
 /// facade, grouped by responsibility) so neither block grows unwieldy.
 impl ResourcesApi {
-    // --- Inspection methods on ResolvedResources (boundary primitives only) ---
-
     pub fn resolved_mesh_count(&self, resolved: &ResolvedResources) -> usize {
         resolved.mesh_count()
     }
@@ -346,7 +340,6 @@ mod tests {
 
     #[test]
     fn new_and_default_facades_are_equivalent() {
-        // Both construction paths produce an equivalent empty table.
         assert_eq!(
             ResourcesApi::new().empty_table().mesh_count(),
             ResourcesApi::default().empty_table().mesh_count(),
@@ -379,7 +372,6 @@ mod tests {
         assert!(sphere.is_valid());
         assert_eq!(t.mesh_count(), 2);
         let resolved = api.resolve(&t);
-        // The plane is a 4-vertex quad; the sphere has many more vertices.
         assert_eq!(
             api.resolved_mesh_vertex_count(&resolved, plane.raw()),
             Some(4)
@@ -393,8 +385,6 @@ mod tests {
 
     #[test]
     fn arbitrary_mesh_can_be_registered_through_the_general_path() {
-        // A non-cube shape (a single triangle) proves the resource module is
-        // shape-agnostic: any neutral geometry round-trips through the snapshot.
         let mut t = api().empty_table();
         let tri = [
             (
@@ -420,10 +410,8 @@ mod tests {
         assert!(id.is_valid());
 
         let r = api().resolve(&t);
-        // Not the cube's 24/36 — the registered shape's own counts.
         assert_eq!(api().resolved_mesh_vertex_count(&r, id.raw()), Some(3));
         assert_eq!(api().resolved_mesh_index_count(&r, id.raw()), Some(3));
-        // Position, normal, and uv all thread through unchanged.
         assert_eq!(
             api().resolved_mesh_position_at(&r, id.raw(), 1),
             Some([2.0, 0.0, 0.0])
@@ -471,8 +459,6 @@ mod tests {
 
     #[test]
     fn cube_is_the_general_path_with_cube_geometry() {
-        // register_cube_mesh is a thin generator over register_mesh: the cube
-        // produces the same 24/36 it always did, now through the general path.
         let mut t = api().empty_table();
         let id = api().register_cube_mesh(&mut t);
         let r = api().resolve(&t);
@@ -528,7 +514,6 @@ mod tests {
         let r = api().resolve(&t);
         assert_eq!(api().resolved_mesh_vertex_count(&r, mesh.raw()), Some(24));
         assert_eq!(api().resolved_mesh_index_count(&r, mesh.raw()), Some(36));
-        // Position 0 is one of the cube corners.
         let p = api().resolved_mesh_position_at(&r, mesh.raw(), 0).unwrap();
         assert!(p.iter().all(|c| (c.abs() - 0.5).abs() < 1.0e-6));
     }
@@ -586,15 +571,12 @@ mod tests {
         let mut t = api().empty_table();
         let mesh = api().register_cube_mesh(&mut t);
         let r = api().resolve(&t);
-        // Present mesh + present vertex.
         assert!(api().resolved_mesh_normal_at(&r, mesh.raw(), 0).is_some());
         assert!(api().resolved_mesh_uv_at(&r, mesh.raw(), 0).is_some());
-        // Present mesh, out-of-range vertex index.
         assert!(api()
             .resolved_mesh_normal_at(&r, mesh.raw(), 9999)
             .is_none());
         assert!(api().resolved_mesh_uv_at(&r, mesh.raw(), 9999).is_none());
-        // Missing mesh id.
         assert!(api().resolved_mesh_normal_at(&r, 9999, 0).is_none());
         assert!(api().resolved_mesh_uv_at(&r, 9999, 0).is_none());
     }
@@ -634,7 +616,6 @@ mod tests {
             api.resolved_material_texture_id(&r, mat.raw()),
             Some(tex.raw())
         );
-        // An untextured material and a missing material both report no texture.
         assert_eq!(api.resolved_material_texture_id(&r, untextured.raw()), None);
         assert_eq!(api.resolved_material_texture_id(&r, 9999), None);
     }
@@ -660,7 +641,6 @@ mod tests {
         let api = api();
         assert_eq!(api.biome_atlas_cell_origin(0), (0.0, 0.0));
         assert_eq!(api.biome_atlas_cell_origin(3), (0.5, 0.5));
-        // Out-of-range biome ids wrap into the 4-cell grid.
         assert_eq!(
             api.biome_atlas_cell_origin(4),
             api.biome_atlas_cell_origin(0)

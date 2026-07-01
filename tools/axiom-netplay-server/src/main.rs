@@ -1,6 +1,5 @@
 //! `axiom-netplay-server` — the **authored-callback authority** for the live
 //! server-authoritative netplay demo (SPEC-13 §16, §3.5).
-//!
 //! Unlike the dumb lockstep relay (`tools/axiom-netcode-relay`), this server is
 //! the single source of truth. It no longer hard-codes movement: it runs the
 //! **authored game** headlessly through the engine's deterministic fixed-step
@@ -11,7 +10,6 @@
 //! `ServerSnapshotFor` carrying the participant block and the per-player ack
 //! cursors. Clients send *intents*, never state; the authority decides the
 //! outcome; predicted clients reconcile.
-//!
 //! ## Why a single authority task + channels (not a shared `Mutex<Authority>`)
 //! The authored world `RunningApp` is intentionally **not `Send`** (it holds engine
 //! `dyn` system objects that never leave their owning thread). So the authority is
@@ -20,12 +18,6 @@
 //! must be `Send` — reach it only through `Send` channels: an `mpsc` of
 //! [`Command`]s in, and a `broadcast` of snapshot frames out. This is also the
 //! cleaner shape: a single owner of the deterministic world, exactly one writer.
-//!
-//! Repo tooling: a Tool by its `tools/` location — outside the engine dependency
-//! graph and the coverage gate — but, like `axiom-netcode-relay`, written
-//! **branchless** (the Branchless Law's `engine_no_branching` gate fires in tools
-//! too): every dispatch decision is a data transform over `Option`/stream
-//! combinators, not `if`/`match`/`for`/`while`.
 
 mod admission;
 mod authority;
@@ -171,7 +163,6 @@ async fn serve(stream: TcpStream, cmd_tx: CmdTx, snap_tx: SnapTx) {
 }
 
 /// Bridge one peer's socket to the authority until either side ends.
-///
 /// Two streams are merged into one and consumed by `try_fold`, the
 /// `axiom-netcode-relay` shape: the **inbound** socket (mapped to [`Action`]s —
 /// claim a seat, apply an intent, or stop) and the **bus** (mapped to [`Action`]s

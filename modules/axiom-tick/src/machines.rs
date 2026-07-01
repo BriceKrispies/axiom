@@ -85,7 +85,6 @@ mod tests {
         assert_eq!(machines.current(a), Some(0));
         assert_eq!(machines.current(b), Some(1));
         assert_eq!(machines.ticks_in_state(a, at(4)), Some(TickDelta::new(4)));
-        // Unknown ids are clean None.
         let unknown = StateMachineId::from_raw(99);
         assert_eq!(machines.current(unknown), None);
         assert_eq!(machines.ticks_in_state(unknown, at(4)), None);
@@ -106,13 +105,11 @@ mod tests {
         let mut machines = Machines::new();
         let a = machines.create(3, 0, at(0));
         let b = machines.create(3, 1, at(0));
-        // Both just created at tick 0: each emits Enter, ordered a before b.
         let created = machines.drain_events(at(0));
         assert_eq!(
             created,
             vec![StateEvent::enter(a, 0), StateEvent::enter(b, 1)]
         );
-        // A later tick: each emits Update, still id-ordered.
         let updates = machines.drain_events(at(1));
         assert_eq!(
             updates,

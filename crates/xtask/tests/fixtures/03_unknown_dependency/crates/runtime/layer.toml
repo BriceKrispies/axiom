@@ -1,6 +1,3 @@
-# Layer `runtime` lists a `depends_on` entry (`ghost`) for which no layer exists.
-# Everything else is valid, so the ONLY violation is the dangling edge
-# (UnknownDependency).
 [layer]
 name = "runtime"
 crate_name = "runtime"

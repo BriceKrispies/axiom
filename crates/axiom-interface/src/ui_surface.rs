@@ -1,5 +1,4 @@
 //! The per-frame screen-space immediate-mode HUD surface (SPEC-09).
-//!
 //! Sits beside the retained `InterfaceState`: where panels persist and route
 //! clicks by id, the `UiSurface` is rebuilt every frame and its `button` returns
 //! activation *this frame*. The only cross-call state is the per-frame
@@ -166,7 +165,6 @@ mod tests {
         s.rect(UiRect::new(u(0.0), u(0.0), u(10.0), u(10.0)), fill());
         assert_eq!(s.draw_list().items().len(), 1);
         assert_eq!(s.viewport(), viewport());
-        // A new frame resets the surface — last frame's items do not leak.
         s.begin_frame(viewport(), pointer(0.0, 0.0, false));
         assert!(s.draw_list().items().is_empty());
     }
@@ -181,8 +179,6 @@ mod tests {
         s.rect(r_bounds, fill());
         s.text("hp", t_opts);
         s.sprite(HandleId::from_raw(7), sp_opts);
-        // Whole-item equality keeps the assertions branch-free (no `matches!`
-        // guard arm to leave uncovered).
         assert_eq!(
             s.draw_list().items(),
             &[
@@ -197,7 +193,6 @@ mod tests {
     fn button_activation_truth_table_and_draw_item() {
         let bounds = UiRect::new(u(10.0), u(10.0), u(20.0), u(20.0));
         let f = fill();
-        // Pointer inside + press edge => activated, and the draw item records it.
         let mut s = UiSurface::new();
         s.begin_frame(viewport(), pointer(15.0, 15.0, true));
         assert!(s.button(bounds, "ok", f));
@@ -205,13 +200,10 @@ mod tests {
             s.draw_list().items(),
             &[UiDrawItem::Button { bounds, label: "ok".to_string(), style: f, activated: true }]
         );
-        // Inside but no press edge => not activated.
         s.begin_frame(viewport(), pointer(15.0, 15.0, false));
         assert!(!s.button(bounds, "ok", f));
-        // Press edge but pointer outside => not activated.
         s.begin_frame(viewport(), pointer(0.0, 0.0, true));
         assert!(!s.button(bounds, "ok", f));
-        // Outside and no edge => not activated.
         s.begin_frame(viewport(), pointer(0.0, 0.0, false));
         assert!(!s.button(bounds, "ok", f));
     }

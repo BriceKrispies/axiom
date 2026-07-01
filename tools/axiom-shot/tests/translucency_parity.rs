@@ -1,33 +1,17 @@
-//! **SPEC-11 §7 — 3D translucency proof: opacity actually blends, on both backends.**
+//! SPEC-11 §7 proof that `Material.opacity` actually blends a pixel on both
+//! backends (previously it rode on `RenderMaterial` but the per-draw alpha came
+//! only from `base_color`, never `opacity`, and Canvas 2D overwrote instead of
+//! compositing).
 //!
-//! SPEC-11 §3.4 / README footnote ⁴ named the gap: a `Material.opacity` rode on
-//! the `RenderMaterial` receipt but never reached a pixel — the per-draw alpha
-//! came only from `base_color × vertex_color`, never from `opacity`, and the
-//! Canvas 2D 3D path overwrote pixels instead of compositing. This proof closes it.
+//! Builds an opaque red quad behind a translucent blue quad directly through
+//! `axiom_render::RenderApi` (not the umbrella `App`/`Material` path) to exercise
+//! the opacity fold and back-to-front sort straight in pixels. The projection is
+//! pre-multiplied by the same GL->wgpu depth remap the render-pipeline bakes, so
+//! the off-screen depth test behaves as in-app.
 //!
-//! ## What it authors, and why at the render-API level
-//! It builds a tiny scene **directly through `axiom_render::RenderApi`** — an
-//! OPAQUE red quad behind a TRANSLUCENT blue quad (opacity `0.5`), a perspective
-//! camera, no lights — and compiles the deterministic, opacity-folded,
-//! back-to-front-sorted `FramePacket` both backends consume. It authors at the
-//! render-API level (not the umbrella `App`/`Material` path) to exercise the fold
-//! and the translucent depth sort **directly in pixels** with the least scaffolding
-//! — the render layer is where `opacity` lives next to `base_color`. The umbrella
-//! `Material → asset` boundary (and the render-pipeline's `MaterialAsset`) now
-//! threads `opacity` too — a `createMaterial`-authored translucent material reaching
-//! the renderer is proven in `apps/axiom-game-runtime`'s `scene3d` bridge tests; this
-//! proof complements it by validating the actual backend compositing.
-//! (The projection is pre-multiplied by the same GL→wgpu depth remap the
-//! render-pipeline bakes, so the GPU off-screen depth test behaves as in-app.)
-//!
-//! ## What it asserts
-//! * **(a) opacity blends** — on EACH backend, the centre pixel of the
-//!   opacity-`0.5` render DIFFERS from the opacity-`1.0` render. At `1.0` the
-//!   front quad overwrites (centre = front colour); at `0.5` it composites over
-//!   the red behind, so the centre is a mix. A differing centre is blending.
-//! * **(b) GPU↔canvas2d coarse agreement** — the same resolution-independent
-//!   region metric `render_parity.rs` uses (centroid + coverage), since the
-//!   software fallback is low-res flat-shaded by design.
+//! Asserts (a) the opacity-0.5 centre pixel differs from the opacity-1.0 centre
+//! pixel on each backend, and (b) GPU/canvas2d coarse region agreement (the same
+//! metric `render_parity.rs` uses).
 //!
 //! Requires the native GPU adapter the sandbox provides (the off-screen arm).
 
@@ -42,13 +26,11 @@ use axiom_kernel::Ratio;
 use axiom_math::{Mat4, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
 
-/// Authoring / GPU render size (16:9, matching the canvas quality tiers).
 const W: u32 = 480;
 const H: u32 = 270;
 
-/// Column-major GL→wgpu clip-depth remap (`z' = (z + w) / 2`), the same matrix
-/// the render-pipeline pre-multiplies into its view-projection so a neutral
-/// `projection * view * world` MVP is wgpu-ready for the off-screen depth test.
+/// Column-major GL->wgpu clip-depth remap (`z' = (z + w) / 2`), matching the
+/// remap the render-pipeline pre-multiplies into its view-projection.
 const GL_TO_WGPU_DEPTH: [f32; 16] = [
     1.0, 0.0, 0.0, 0.0, //
     0.0, 1.0, 0.0, 0.0, //
@@ -111,9 +93,9 @@ fn translate(x: f32, y: f32, z: f32) -> Mat4 {
     ])
 }
 
-/// Author the scene (opaque red quad BEHIND, blue quad of `front_opacity` IN
-/// FRONT) and compile its `FramePacket` through the real render path. Also returns
-/// the backend mesh geometry and the (untextured → 1×1 white) material textures.
+/// Author the scene (opaque red quad behind, blue quad of `front_opacity` in
+/// front) and compile its `FramePacket`. Also returns the backend mesh geometry
+/// and the (untextured -> 1x1 white) material textures.
 fn scene(
     front_opacity: f32,
 ) -> (
@@ -144,9 +126,7 @@ fn scene(
         quad_uvs(),
         quad_indices(),
     );
-    // Opaque red BACK material…
     let back = api.add_input_basic_lit_material(&mut input, 10, Vec4::new(0.9, 0.1, 0.1, 1.0));
-    // …and a blue FRONT material whose opacity is the variable under test.
     let front = api.add_input_lit_material(
         &mut input,
         20,
@@ -156,9 +136,8 @@ fn scene(
         Ratio::new(front_opacity).expect("finite"),
         0,
     );
-    // BACK farther (world z = -1), FRONT nearer (world z = +1); both centred so
-    // they overlap on screen. The render layer sorts the translucent front AFTER
-    // the opaque back, so straight alpha over-composites correctly.
+    // Back farther (z=-1), front nearer (z=+1); the render layer sorts the
+    // translucent front after the opaque back so alpha over-composites correctly.
     api.add_input_object(&mut input, 100, translate(0.0, 0.0, -1.0), mesh, back, true);
     api.add_input_object(&mut input, 200, translate(0.0, 0.0, 1.0), mesh, front, true);
 
@@ -238,8 +217,6 @@ fn center_px(px: &[u8], w: u32, h: u32) -> [u8; 4] {
 
 #[test]
 fn opacity_blends_on_both_backends() {
-    // GPU: a translucent front composites over the opaque back, so the centre
-    // differs from the fully-opaque (overwrite) render.
     let (p_trans, m_trans, mat_trans) = scene(0.5);
     let (p_opaque, m_opaque, mat_opaque) = scene(1.0);
 
@@ -251,14 +228,11 @@ fn opacity_blends_on_both_backends() {
         gc_t, gc_o,
         "GPU: opacity 0.5 must blend (centre {gc_t:?}) differently from opaque overwrite (centre {gc_o:?})"
     );
-    // The blended centre carries red from the quad behind that the opaque
-    // overwrite hides — the over-composite is real, not just any difference.
     assert!(
         gc_t[0] > gc_o[0],
         "GPU: translucent centre shows red from behind: trans {gc_t:?} vs opaque {gc_o:?}"
     );
 
-    // Canvas 2D: same proof on the software path (its own internal resolution).
     let (cv_trans, cw, chh) = render_canvas2d(&p_trans, &m_trans);
     let (cv_opaque, ow, ohh) = render_canvas2d(&p_opaque, &m_opaque);
     assert_eq!((cw, chh), (ow, ohh));
@@ -276,9 +250,6 @@ fn opacity_blends_on_both_backends() {
 
 #[test]
 fn translucent_scene_agrees_across_backends() {
-    // Coarse, resolution-independent agreement on the translucent scene (the same
-    // metric render_parity.rs uses): both backends place the overlapping quads at
-    // the same screen position with comparable coverage.
     let (packet, meshes, materials) = scene(0.5);
     let gpu = render_gpu(&packet, &meshes, &materials);
     let (sw, sw_w, sw_h) = render_canvas2d(&packet, &meshes);

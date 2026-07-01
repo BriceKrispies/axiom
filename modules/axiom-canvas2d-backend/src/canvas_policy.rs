@@ -53,9 +53,7 @@ impl CanvasDebugOverlay {
 /// A discrete internal-resolution quality tier for the software framebuffer.
 /// Lower tiers rasterize far fewer pixels (cost scales with width×height), so
 /// the forced-Canvas2D fallback defaults to a low tier; the platform arm may
-/// resolve a tier from a query parameter (and a future dynamic-resolution policy
-/// could step tiers by measured frame time — the documented seam in
-/// `low_poly_raster_options.rs`).
+/// resolve a tier from a query parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CanvasQualityPreset {
     /// 160×90 — cheapest.

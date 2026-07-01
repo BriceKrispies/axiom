@@ -8,8 +8,6 @@ use axiom_gallery::quintet::generation::{catalog, generate, placeable_shapes};
 use axiom_gallery::quintet::placement::{can_place, can_place_anywhere, commit};
 use axiom_gallery::quintet::quintet::{QuintetMask, QUINTET_CELLS};
 
-// --- shape helpers --------------------------------------------------------
-
 /// A plus / X-pentomino, used as a known-valid placement shape.
 fn plus() -> QuintetMask {
     QuintetMask::from_rows(&["oxo", "xxx", "oxo"])
@@ -33,8 +31,6 @@ fn fill_all(board: &mut Board) {
     }
 }
 
-// --- 1. A valid orthogonally connected quintet passes validation ----------
-
 #[test]
 fn valid_connected_quintet_passes_validation() {
     // The allowed-style P-shape from the task.
@@ -48,8 +44,6 @@ fn valid_connected_quintet_passes_validation() {
     assert!(t.is_valid());
 }
 
-// --- 2. A diagonal-line shape fails validation ----------------------------
-
 #[test]
 fn diagonal_line_shape_fails_validation() {
     let diag = QuintetMask::from_rows(&["xoooo", "oxooo", "ooxoo", "oooxo", "oooox"]);
@@ -58,8 +52,6 @@ fn diagonal_line_shape_fails_validation() {
     assert!(!diag.is_connected());
     assert!(!diag.is_valid());
 }
-
-// --- 3. A disconnected shape fails validation -----------------------------
 
 #[test]
 fn disconnected_shape_fails_validation() {
@@ -77,21 +69,15 @@ fn disconnected_shape_fails_validation() {
     assert!(!corner.is_valid());
 }
 
-// --- 4. Generated pieces contain exactly 5 occupied cells -----------------
-
 #[test]
 fn generated_pieces_have_exactly_five_cells() {
-    // Every catalog shape...
     for shape in catalog() {
         assert_eq!(shape.count(), QUINTET_CELLS);
     }
-    // ...and a freshly generated one.
     let board = Board::empty();
     let piece = generate(&board, 0, 0).expect("empty board is playable");
     assert_eq!(piece.count(), QUINTET_CELLS);
 }
-
-// --- 5. Generated pieces are always placeable when a placement exists ------
 
 #[test]
 fn generated_pieces_are_always_placeable() {
@@ -114,16 +100,12 @@ fn generated_pieces_are_always_placeable() {
     assert!(can_place_anywhere(&partial, &piece));
 }
 
-// --- 6. Placement fails when overlapping filled cells ---------------------
-
 #[test]
 fn placement_fails_when_overlapping_filled_cells() {
     let mut board = Board::empty();
     board.fill(1, 1); // the plus's centre
     assert!(!can_place(&board, &plus(), 0, 0));
 }
-
-// --- 7. Placement fails outside the board ---------------------------------
 
 #[test]
 fn placement_fails_outside_the_board() {
@@ -133,8 +115,6 @@ fn placement_fails_outside_the_board() {
     assert!(!can_place(&board, &m, 0, -1)); // top arm above the board
     assert!(!can_place(&board, &m, 9, 9)); // off the bottom-right corner
 }
-
-// --- 8. Placement succeeds on empty cells ---------------------------------
 
 #[test]
 fn placement_succeeds_on_empty_cells() {
@@ -148,8 +128,6 @@ fn placement_succeeds_on_empty_cells() {
     }
 }
 
-// --- 9. Single row clear scoring ------------------------------------------
-
 #[test]
 fn single_row_clear_scores_ten() {
     let mut board = Board::empty();
@@ -160,8 +138,6 @@ fn single_row_clear_scores_ten() {
     assert_eq!(out.score_delta, 10);
     assert!(board.is_clear());
 }
-
-// --- 10. Two row clear scoring --------------------------------------------
 
 #[test]
 fn two_row_clear_scores_forty() {
@@ -174,8 +150,6 @@ fn two_row_clear_scores_forty() {
     assert_eq!(out.score_delta, 40);
 }
 
-// --- 11. Row + column clear, intersection counted once --------------------
-
 #[test]
 fn row_plus_column_clear_counts_intersection_once() {
     let mut board = Board::empty();
@@ -187,8 +161,6 @@ fn row_plus_column_clear_counts_intersection_once() {
     assert_eq!(out.score_delta, 38); // 19 * 2
     assert!(board.is_clear());
 }
-
-// --- 12. Stuck state occurs when no valid quintet can fit ------------------
 
 #[test]
 fn stuck_when_no_quintet_fits() {

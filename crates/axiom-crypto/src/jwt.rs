@@ -1,16 +1,13 @@
 //! Compact JWS / JSON Web Token verification, HS256 only (RFC 7519 / 7515).
-//!
 //! A host-admission seam: an authority verifies a join token's **signature** and
 //! **expiry** against a configured shared secret before admitting a player. It is
 //! pure and deterministic — the current time is *injected* (`now_unix_secs`), never
 //! read from a wall clock here — so it stays branchless, fully testable, and free of
 //! the entropy/clock nondeterminism the rest of this layer also keeps at the edge.
-//!
 //! It verifies one thing and trusts nothing in the header: the algorithm is fixed to
 //! HS256 (the token's `alg` field is never consulted), so an `alg: none` /
 //! algorithm-confusion token is simply HMAC-checked and rejected — it cannot bypass
 //! verification. Every failure is a typed [`JwtError`] value, never a panic:
-//!
 //! * [`JwtError::Malformed`] — not three dot-separated segments, a non-base64url
 //!   segment, claims that are not JSON, or claims lacking an integer `exp`;
 //! * [`JwtError::BadSignature`] — the HMAC-SHA256 over `header.payload` does not
@@ -181,7 +178,6 @@ mod tests {
 
     const SECRET: &[u8] = b"a-shared-256-bit-admission-secret";
 
-    // Mint a signed HS256 token from raw header/payload JSON segments.
     fn mint(header: &[u8], payload: &[u8], secret: &[u8]) -> Vec<u8> {
         let mut signing_input = b64(header);
         signing_input.push(b'.');
@@ -241,7 +237,6 @@ mod tests {
 
     #[test]
     fn rejects_a_non_base64url_signature() {
-        // Valid header.payload, but a signature segment with a non-alphabet byte.
         let mut token = b64(HEADER);
         token.push(b'.');
         token.extend_from_slice(&b64(br#"{"exp":2000}"#));
@@ -264,10 +259,8 @@ mod tests {
 
     #[test]
     fn rejects_non_json_and_exp_less_claims() {
-        // Valid base64, valid signature, but claims are not JSON.
         let not_json = mint(HEADER, b"not json at all", SECRET);
         assert_eq!(verify_jwt_hs256(&not_json, SECRET, 0), Err(JwtError::Malformed));
-        // Valid JSON but no `exp`.
         let no_exp = mint(HEADER, br#"{"sub":"x"}"#, SECRET);
         assert_eq!(verify_jwt_hs256(&no_exp, SECRET, 0), Err(JwtError::Malformed));
     }

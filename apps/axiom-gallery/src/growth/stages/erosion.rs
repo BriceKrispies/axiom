@@ -1,5 +1,4 @@
 //! `erosion` stage: iterative stream-power-style erosion on the region graph.
-//! Audit: OW-E16 stream-power erosion (done core).
 //!
 //! For `min(ctx.erosion_iterations, MAX_ITERS)` passes, each region is lowered
 //! toward its lowest downhill neighbour by a fraction proportional to the local
@@ -10,7 +9,7 @@ use crate::growth::ids::RegionId;
 use crate::growth::model_planet::PlanetGlobe;
 use crate::growth::pipeline::{GenContext, Stage};
 
-/// Cap on erosion passes regardless of the requested count. Audit: perf cap.
+/// Cap on erosion passes regardless of the requested count.
 const MAX_ITERS: u32 = 60;
 /// Per-pass erosion strength applied to the slope toward the lowest neighbour.
 const EROSION_K: f32 = 0.10;
@@ -119,7 +118,6 @@ mod tests {
         let mut g = line_globe(vec![0.0, 1.0, 5.0, 1.0, 0.0]);
         let mut ctx = GenContext::new(1);
         ctx.erosion_iterations = 100_000;
-        // Should terminate quickly thanks to MAX_ITERS cap.
         ErosionStage.run(&mut g, &mut ctx);
         assert!(g.region_elevation[2] < 5.0);
     }

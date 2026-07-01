@@ -181,7 +181,6 @@ impl Session {
             self.rejected_since_advance += 1;
             return reason;
         }
-        // Accept: record the per-player cursor and queue the intent for the next tick.
         self.last_accepted_seq[player_id as usize] = Some(client_sequence);
         self.pending.push(AcceptedIntent {
             player_id,
@@ -218,9 +217,7 @@ impl Session {
             .count()
             < MAX_INTENTS_PER_PLAYER_PER_TICK;
 
-        // Resolve in priority order: structural problems first, then sequence,
-        // then ruleset, then rate. A simple precedence chain (an app, so a plain
-        // match is fine here).
+        // Priority order: structural problems, then sequence, then ruleset, then rate.
         match (in_range, size_ok, seq_reason, rule_reason, rate_ok) {
             (false, _, _, _, _) => REASON_INVALID_PLAYER,
             (_, false, _, _, _) => REASON_PAYLOAD_TOO_LARGE,
@@ -238,16 +235,12 @@ impl Session {
         let prev_hash = self.state_hash();
 
         // Deterministic application order: by player id, then client sequence.
-        // Never hash-map order.
         let mut batch = std::mem::take(&mut self.pending);
         batch.sort_by_key(|a| (a.player_id, a.client_sequence));
 
-        // Collapse each player's accepted intents this tick into one net delta
-        // (summed in the deterministic sorted order above), then clamp the
-        // *resulting* position to the authoritative field bound. The bound is a
-        // server-side rule: it is enforced against the engine's current
-        // authoritative position (read back, never mirrored), so a client cannot
-        // cross the wall by holding a key — the worker trims the applied delta.
+        // Sum each player's accepted deltas in the order above, then clamp the
+        // resulting position to the field bound against the engine's current
+        // authoritative position — the worker trims the delta, never the client.
         let mut net: std::collections::BTreeMap<u32, (f32, f32)> =
             std::collections::BTreeMap::new();
         for a in &batch {
@@ -370,16 +363,14 @@ mod tests {
         assert_eq!(s.render_view(), vec![-1.5, 0.0, 1.5, 0.0]);
         s.submit_intent(0, 1, 0, &move_payload(0.5, 0.0));
         s.advance();
-        // The authoritative view tracks the engine's moved player.
         assert_eq!(s.render_view(), vec![-1.0, 0.0, 1.5, 0.0]);
     }
 
     #[test]
     fn authoritative_position_is_clamped_to_the_field_bound() {
         let mut s = session();
-        // Player 0 spawns at x=-1.5; shove right at the max delta far past the
-        // wall over many ticks. The authoritative position must rest *at* the
-        // field bound, never beyond it — the server is the wall.
+        // Push far past the wall over many ticks; the position must rest at the
+        // bound, never beyond it.
         (1..=20u64).for_each(|seq| {
             s.submit_intent(0, seq, 0, &move_payload(1.0, 0.0));
             s.advance();
@@ -390,7 +381,6 @@ mod tests {
             (x - ruleset::FIELD_BOUND).abs() < 1e-3,
             "x={x} should rest against the wall"
         );
-        // Player 1 (untouched) is still at its spawn — the clamp is per-player.
         assert_eq!(s.render_view()[2], 1.5);
     }
 
@@ -417,10 +407,8 @@ mod tests {
     #[test]
     fn advancing_an_empty_tick_preserves_the_hash_deterministically() {
         let mut s = session();
-        // The first advance runs the (empty) startup phase, which flips the
-        // world's `startup_done` bit — genuine state, now carried in the snapshot
-        // and therefore the hash. Measure across a *post-startup* empty tick, where
-        // nothing changes.
+        // The first advance flips the world's `startup_done` bit into the hashed
+        // snapshot; measure across a post-startup empty tick instead.
         s.advance();
         let before = s.state_hash();
         let (_, after) = s.advance();
@@ -446,21 +434,19 @@ mod tests {
         let mut s = session();
         s.submit_intent(1, 1, 0, &move_payload(0.0, 0.5));
         s.advance();
-        // Advance the host RNG, then bundle the full session (sim + rng).
         (0..5).for_each(|_| {
             s.rng.next_u64();
         });
         let blob = s.snapshot_session();
 
-        // Restore into a session built with a DIFFERENT seed: if the blob did not
-        // carry the rng, the continuation would diverge — it does not.
+        // Restore into a session built with a different seed: the rng must
+        // continue from the blob, not the fresh seed.
         let mut fresh = Session::new(0x9999, 2, 16_666_667);
         assert!(fresh.restore_session(&blob));
         let original: Vec<u64> = (0..8).map(|_| s.rng.next_u64()).collect();
         let replayed: Vec<u64> = (0..8).map(|_| fresh.rng.next_u64()).collect();
         assert_eq!(original, replayed, "the session blob carries and resumes the rng");
 
-        // A bad buffer is rejected (recorded), not a panic.
         assert!(!fresh.restore_session(&[1, 2, 3]));
     }
 
@@ -544,7 +530,6 @@ mod tests {
     #[test]
     fn too_many_intents_per_tick_is_rate_limited() {
         let mut s = session();
-        // The first MAX_INTENTS_PER_PLAYER_PER_TICK accept; the next is limited.
         (1..=MAX_INTENTS_PER_PLAYER_PER_TICK as u64).for_each(|seq| {
             assert_eq!(
                 s.submit_intent(0, seq, 0, &move_payload(0.01, 0.0)),
@@ -567,9 +552,8 @@ mod tests {
 
     #[test]
     fn accepted_inputs_apply_in_deterministic_order() {
-        // Submit with players interleaved (each player's sequences stay
-        // monotonic, so none is rejected); the applied result must be independent
-        // of arrival order, matching a session that received them already sorted.
+        // Submitted with players interleaved; the result must match a session
+        // that received the same intents already sorted.
         let mut shuffled = session();
         shuffled.submit_intent(1, 1, 0, &move_payload(0.1, 0.0));
         shuffled.submit_intent(0, 1, 0, &move_payload(0.2, 0.0));

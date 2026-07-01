@@ -80,8 +80,6 @@ mod tests {
 
     #[test]
     fn every_truncated_prefix_is_rejected() {
-        // Decoding any prefix shorter than the full frame must fail — this walks
-        // the `?` error arm of every field read (kind, then payload).
         let mut w = BinaryWriter::new();
         NetCommand::new(9, vec![1, 2, 3]).write_to(&mut w);
         let bytes = w.into_bytes();

@@ -21,8 +21,6 @@ use axiom_sim_core::{
 /// The scenario's display name.
 pub const SCENARIO_NAME: &str = "cat-in-tavern";
 
-// ---- logical ticks (fixed and deterministic; documented in tests) ----
-
 /// Tick at which the creature contacts the source residue.
 pub const TICK_CONTACT: u64 = 2;
 /// Tick at which the grooming process wakes and its consequences resolve.
@@ -30,14 +28,10 @@ pub const TICK_GROOM: u64 = 5;
 /// Final tick; the report is produced after this tick runs.
 pub const TICK_FINAL: u64 = 8;
 
-// ---- sim-core InteractionRoute codes (Touch = 0, Ingestion = 1) ----
-
 /// Interaction route code: touch (surface contact).
 pub const ROUTE_TOUCH: u8 = 0;
 /// Interaction route code: ingestion (mouth entry).
 pub const ROUTE_INGESTION: u8 = 1;
-
-// ---- opaque domain codes (meaningless to the substrate) ----
 
 const SUBSTANCE_KIND: u32 = 1;
 const GROOMING_PROCESS_KIND: u32 = 10;
@@ -48,28 +42,17 @@ pub(crate) const INTOX_FACT_KIND: u32 = 100;
 /// Fact kind: the "groomed" marker the grooming process adds via its effect.
 pub(crate) const GROOMED_FACT_KIND: u32 = 101;
 
-// ---- causal-event kinds the scenario stamps (used by the report) ----
-
-/// Causal kind: the contact interaction record.
 pub const KIND_CONTACT_INTERACTION: u32 = 7000;
-/// Causal kind: the source → extremity-surface transfer.
 pub const KIND_CONTACT_TRANSFER: u32 = 7001;
-/// Causal kind: the extremity-surface → mouth-surface transfer.
 pub const KIND_GROOM_TRANSFER: u32 = 7002;
-/// Causal kind: the ingestion-entry interaction record.
 pub const KIND_INGESTION: u32 = 7003;
-/// Causal kind: the generic material effect updating the creature fact.
 pub const KIND_INTOX_EFFECT: u32 = 7004;
-
-// ---- causal-event symbol codes ----
 
 pub(crate) const CODE_CONTACT_INTERACTION: u64 = 0xC0;
 pub(crate) const CODE_CONTACT_TRANSFER: u64 = 0xC1;
 pub(crate) const CODE_GROOM_TRANSFER: u64 = 0xC2;
 pub(crate) const CODE_INGESTION: u64 = 0xC3;
 pub(crate) const CODE_INTOX_EFFECT: u64 = 0xC4;
-
-// ---- scenario data ----
 
 /// Non-body source location (the tavern cell), as an opaque residue-location code.
 pub(crate) const TAVERN_CELL: u64 = 9001;
@@ -91,9 +74,7 @@ pub(crate) const INTOX_VALUE: u64 = 1;
 /// never re-queries the world for "the paw" or "the grooming process".
 #[derive(Debug, Clone, Copy)]
 pub struct ScenarioRefs {
-    /// The creature entity.
     pub creature: EntityHandle,
-    /// The creature's instantiated body.
     pub body: BodyId,
     /// The extremity (paw) body part.
     pub extremity_part: BodyPartId,

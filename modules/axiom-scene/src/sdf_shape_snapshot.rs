@@ -5,7 +5,6 @@ use axiom_math::Vec3;
 use crate::scene_node_id::SceneNodeId;
 
 /// One raymarched SDF shape in a deterministic scene snapshot, keyed by its node.
-///
 /// Carries the shape's kind, local dimensions, and colour; the shape's world
 /// placement is the node's world transform, looked up by `node` (the same way a
 /// [`crate::renderable_snapshot::RenderableSnapshot`] is placed). A consumer

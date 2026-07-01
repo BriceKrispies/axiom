@@ -1,12 +1,10 @@
-//! `priority_flood` stage (OW-E11): Barnes-style priority-flood pit filling so
-//! land drains monotonically to the ocean.
-//! Audit: OW-E11 priority_flood region drainage, monotonic, saddle spill carved.
+//! `priority_flood` stage: Barnes/Planchon-Darboux priority-flood pit filling
+//! so land drains monotonically to the ocean.
 //!
-//! Classic Barnes/Planchon-Darboux flooding: seed a priority queue with all
-//! ocean (boundary) cells at their own elevation, then repeatedly pop the lowest
-//! spill level and raise each unvisited neighbour to at least that spill level.
-//! Afterward every region has a non-ascending path to the ocean — no interior
-//! pit is lower than its outflow saddle. Deterministic (ties broken by index).
+//! Seeds a priority queue with all ocean (boundary) cells at their own
+//! elevation, then repeatedly pops the lowest spill level and raises each
+//! unvisited neighbour to at least that level, guaranteeing a non-ascending
+//! path to the ocean. Ties break by region index for determinism.
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -17,8 +15,8 @@ use crate::growth::pipeline::{GenContext, Stage};
 
 pub struct PriorityFloodStage;
 
-/// A queue entry ordered so the *lowest* spill level pops first (min-heap via
-/// `Reverse`-style manual ordering). Ties break by region index for determinism.
+/// A queue entry ordered so the *lowest* spill level pops first (min-heap
+/// ordering). Ties break by region index for determinism.
 #[derive(Clone, Copy)]
 struct Cell {
     level: f32,
@@ -65,7 +63,6 @@ impl Stage for PriorityFloodStage {
         let mut visited = vec![false; region_count];
         let mut heap: BinaryHeap<Cell> = BinaryHeap::new();
 
-        // Ocean cells are the outlets; seed them at their own elevation.
         let mut has_ocean = false;
         for (r, slot) in visited.iter_mut().enumerate() {
             if globe.region_elevation[r] < 0.0 {
@@ -78,8 +75,8 @@ impl Stage for PriorityFloodStage {
             }
         }
 
-        // No ocean: seed from the single lowest cell so flooding still has an
-        // outlet (an endorheic basin draining to the global minimum).
+        // No ocean: seed from the single lowest cell (endorheic basin draining
+        // to the global minimum) so flooding still has an outlet.
         if !has_ocean {
             let mut lo = 0usize;
             for r in 1..region_count {
@@ -104,7 +101,6 @@ impl Stage for PriorityFloodStage {
                     continue;
                 }
                 visited[ni] = true;
-                // Raise to at least the spill level → guarantees a downhill path.
                 if globe.region_elevation[ni] < spill {
                     globe.region_elevation[ni] = spill;
                     filled += 1;
@@ -127,8 +123,8 @@ mod tests {
     use crate::growth::model_planet::{Icosphere, RegionGraph};
     use axiom_math::Vec3;
 
-    /// Line 0-1-2-3-4. Region 0 ocean (-1). Region 2 is a pit (0.1) below its
-    /// neighbours (1.0). After flooding it must be raised to the spill level.
+    /// Line 0-1-2-3-4; region 0 is ocean (-1), region 2 is a pit (0.1) below
+    /// its neighbours (1.0).
     fn pit_globe() -> PlanetGlobe {
         let n = 5;
         let mut offsets = vec![0u32];
@@ -165,7 +161,7 @@ mod tests {
         let n = g.region_count();
         for r in 0..n {
             if g.region_elevation[r] < 0.0 {
-                continue; // ocean drains trivially
+                continue;
             }
             let here = g.region_elevation[r];
             let mut ok = false;
@@ -187,7 +183,6 @@ mod tests {
         let mut g = pit_globe();
         let mut ctx = GenContext::new(1);
         PriorityFloodStage.run(&mut g, &mut ctx);
-        // Region 2 was a pit at 0.1 surrounded by 1.0; it must be raised.
         assert!(
             g.region_elevation[2] >= 1.0,
             "pit not filled: {}",

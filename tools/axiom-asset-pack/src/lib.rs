@@ -196,8 +196,8 @@ pub fn pack(input_path: &Path, out_dir_override: Option<&Path>) -> Result<PackSu
         source,
     })?;
 
-    // Copy each blob, record its size/hash/locator. Owned `locator`/`deps`
-    // buffers outlive the borrowing tuples handed to `encode_manifest`.
+    // Owned `locator`/`deps` buffers must outlive the borrowing tuples
+    // handed to `encode_manifest` below.
     let mut packed = Vec::with_capacity(input.assets.len());
     let mut locators = Vec::with_capacity(input.assets.len());
     let mut dep_lists = Vec::with_capacity(input.assets.len());
@@ -220,7 +220,6 @@ pub fn pack(input_path: &Path, out_dir_override: Option<&Path>) -> Result<PackSu
             source,
         })?;
 
-        // Locator is the out_dir-relative URL the browser fetches, forward-slashed.
         let locator = format!("{}/{}", input.blob_dir, blob_name);
 
         total_bytes += size;
@@ -258,8 +257,6 @@ pub fn pack(input_path: &Path, out_dir_override: Option<&Path>) -> Result<PackSu
 
     let manifest_bytes = AssetsApi::encode_manifest(&entries);
 
-    // Reuse the OWNING module's validator: if these bytes don't round-trip, the
-    // manifest is broken (duplicate/null id, dangling dependency) — fail now.
     AssetsApi::from_manifest_bytes(&manifest_bytes, 1)
         .map_err(|e| PackError::InvalidManifest(format!("{e:?}")))?;
 
@@ -332,7 +329,6 @@ mod tests {
 
         let summary = pack(&input, None).expect("pack succeeds");
 
-        // Summary reports the two assets and the total bytes copied.
         assert_eq!(summary.assets.len(), 2);
         assert_eq!(
             summary.total_bytes,
@@ -341,7 +337,6 @@ mod tests {
         assert_eq!(summary.assets[0].locator, "blobs/1.mesh");
         assert_eq!(summary.assets[1].locator, "blobs/2.tex");
 
-        // Blobs were copied byte-for-byte under their id-based names.
         assert_eq!(
             std::fs::read(dir.join("dist/blobs/1.mesh")).unwrap(),
             b"mesh-bytes"
@@ -351,7 +346,6 @@ mod tests {
             b"texture-bytes-longer"
         );
 
-        // The manifest round-trips through the OWNING module's reader.
         let bytes = std::fs::read(&summary.manifest_path).expect("read manifest");
         let api = AssetsApi::from_manifest_bytes(&bytes, 4).expect("manifest is valid");
         assert_eq!(api.total_count(), 2);
@@ -369,7 +363,6 @@ mod tests {
             api.locator(AssetId::from_raw(2)),
             Some("blobs/2.tex".to_string())
         );
-        // The authored dependency edge survived the manifest.
         assert_eq!(
             api.dependencies_of(AssetId::from_raw(2)),
             vec![AssetId::from_raw(1)]
@@ -415,7 +408,6 @@ mod tests {
         write(&input, toml.as_bytes());
 
         let summary = pack(&input, None).expect("pack succeeds");
-        // No extension -> bare id; default blob dir -> "blobs/".
         assert_eq!(summary.assets[0].locator, "blobs/3");
         assert!(dir.join("out/blobs/3").exists());
     }
@@ -503,7 +495,6 @@ mod tests {
     fn out_dir_override_redirects_output_and_toml_out_dir_is_optional() {
         let dir = scratch("override");
         write(&dir.join("a.bin"), b"payload");
-        // No `out_dir` key in the TOML: it must default, then be overridden.
         let toml = r#"
             [[asset]]
             id = 1
@@ -517,11 +508,9 @@ mod tests {
 
         let summary = pack(&input, Some(&target)).expect("pack succeeds");
 
-        // Output landed under the override, not the default "dist".
         assert_eq!(summary.manifest_path, target.join("manifest.bin"));
         assert!(target.join("blobs/1.bin").exists());
         assert!(!dir.join("dist").exists());
-        // Source still resolved relative to the input file, and the manifest is valid.
         let bytes = std::fs::read(&summary.manifest_path).expect("read manifest");
         let api = AssetsApi::from_manifest_bytes(&bytes, 1).expect("valid manifest");
         assert_eq!(

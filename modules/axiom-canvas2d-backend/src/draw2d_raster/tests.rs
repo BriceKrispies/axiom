@@ -40,7 +40,6 @@ fn rect_fills_its_pixels_over_transparent() {
     list.sort_commands();
     let (bytes, w, h) = render(&list, 8, 8, &Draw2dTextures::default());
     assert_eq!((w, h), (8, 8));
-    // Inside the rect (cols/rows 2..6) is opaque red; outside is transparent.
     assert_eq!(px(&bytes, 8, 3, 3), [255, 0, 0, 255]);
     assert_eq!(px(&bytes, 8, 5, 5), [255, 0, 0, 255]);
     assert_eq!(px(&bytes, 8, 6, 6), [0, 0, 0, 0]);
@@ -49,12 +48,10 @@ fn rect_fills_its_pixels_over_transparent() {
 
 #[test]
 fn layer2_half_alpha_draw_composites_over_layer1_fill() {
-    // THE core proof: a layer-2 draw with alpha < 1 over a layer-1 fill
-    // COMPOSITES (not overwrites). Submit out of order to also prove the
-    // host-sorted list is painted by (layer, submission).
+    // Submitted out of order (translucent blue/layer 2 first, opaque red/layer 1
+    // second) to prove the host-sorted list is painted by (layer, submission).
     let mut list = Draw2dList::default();
     let full = rect(Vec2::ZERO, Vec2::new(8.0, 8.0));
-    // Submit the translucent blue (layer 2) FIRST, opaque red (layer 1) second.
     list.push_command(Draw2dCommand::rect(
         header(0, 2, 0.5),
         full,
@@ -90,7 +87,6 @@ fn camera_zoom_and_center_place_the_rect() {
 
 #[test]
 fn unknown_paint_fill_composites_nothing() {
-    // A paint id naming no registered paint resolves to a transparent fill.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::rect(
         header(0, 0, 1.0),
@@ -104,8 +100,6 @@ fn unknown_paint_fill_composites_nothing() {
 
 #[test]
 fn linear_gradient_fill_shades_across_the_axis() {
-    // A black→white horizontal linear gradient over an 8×8 rect: the left edge
-    // is near-black, the right near-white, proving per-pixel gradient eval.
     let mut list = Draw2dList::default();
     let lin = list.register_linear(
         Vec2::new(0.0, 0.0),
@@ -131,8 +125,6 @@ fn linear_gradient_fill_shades_across_the_axis() {
 
 #[test]
 fn radial_gradient_fill_brightens_toward_the_centre() {
-    // A white→black radial gradient on a rect centred at (4,4): the centre is
-    // near-white, a corner near-black.
     let mut list = Draw2dList::default();
     let rad = list.register_radial(
         Vec2::new(4.0, 4.0),
@@ -157,8 +149,6 @@ fn radial_gradient_fill_brightens_toward_the_centre() {
 
 #[test]
 fn path_fills_a_polygon_and_strokes_its_edges() {
-    // A closed convex quad (a diamond) filled blue with a white stroke: a point
-    // inside fills blue; a point outside the polygon is clear.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::path(
         header(0, 0, 1.0),
@@ -174,16 +164,12 @@ fn path_fills_a_polygon_and_strokes_its_edges() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());
-    // Dead centre is inside the diamond → blue fill.
     assert_eq!(px(&bytes, 16, 8, 8), [0, 0, 255, 255]);
-    // A far corner is outside the diamond → clear.
     assert_eq!(px(&bytes, 16, 0, 0), [0, 0, 0, 0]);
 }
 
 #[test]
 fn open_path_strokes_without_filling() {
-    // An open L-polyline: no fill (closed=false) anywhere, but the stroke marks
-    // the segments. A point "inside" the implied closure stays clear.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::path(
         header(0, 0, 1.0),
@@ -194,9 +180,7 @@ fn open_path_strokes_without_filling() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());
-    // On the vertical segment near (2,7): green stroke.
     assert_eq!(px(&bytes, 16, 2, 7), [0, 255, 0, 255]);
-    // Interior of the implied triangle (not on a segment): no fill, clear.
     assert_eq!(px(&bytes, 16, 8, 6), [0, 0, 0, 0]);
 }
 
@@ -216,12 +200,9 @@ fn empty_path_draws_nothing() {
 
 #[test]
 fn text_blits_glyph_cells_from_the_atlas() {
-    // A 2-glyph run sampling a 2-cell white atlas (the font atlas), tinted red.
-    // Each glyph cell is 8×16; the run lays them out at x=0 and x=8, drawn at
-    // font_size 16 (so a cell renders 8×16 px). A pixel inside glyph 0 reads
-    // the red tint; an untouched pixel beyond the run is clear.
+    // 2-cell 16x16 atlas (each cell 8x16), glyph run laid out at x=0 and x=8,
+    // drawn at font_size 16 so each cell renders at its native 8x16 px.
     let atlas = FontHandle::from_raw(1).atlas_texture();
-    // A 16×16 atlas: two 8×16 cells, all opaque white.
     let pixels = vec![255u8; 16 * 16 * 4];
     let textures = Draw2dTextures::load(&[(atlas.raw(), 16, 16, pixels)]);
     let mut list = Draw2dList::default();
@@ -238,11 +219,8 @@ fn text_blits_glyph_cells_from_the_atlas() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 32, 16, &textures);
-    // Inside glyph 0 (x≈2, y≈8): white atlas texel × red tint = red.
     assert_eq!(px(&bytes, 32, 2, 8), [255, 0, 0, 255]);
-    // Inside glyph 1 (x≈10): also red.
     assert_eq!(px(&bytes, 32, 10, 8), [255, 0, 0, 255]);
-    // Beyond the run (x=20): clear.
     assert_eq!(px(&bytes, 32, 20, 8), [0, 0, 0, 0]);
 }
 
@@ -279,8 +257,6 @@ fn empty_text_run_draws_nothing() {
 
 #[test]
 fn circle_fills_a_round_disc() {
-    // A radius-3 red circle centred at (4,4) on an 8×8 buffer: the centre is
-    // filled; a far corner pixel (distance > 3) is outside the disc.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::circle(
         header(0, 0, 1.0),
@@ -290,16 +266,13 @@ fn circle_fills_a_round_disc() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 8, 8, &Draw2dTextures::default());
-    // Centre is inside the disc.
     assert_eq!(px(&bytes, 8, 4, 4), [255, 0, 0, 255]);
-    // The (0,0) corner is ~5.6 px from the centre — outside radius 3.
+    // (0,0) is ~5.6 px from the centre — outside radius 3.
     assert_eq!(px(&bytes, 8, 0, 0), [0, 0, 0, 0]);
 }
 
 #[test]
 fn circle_stroke_draws_an_annulus_over_the_fill() {
-    // A green circle with a 2-px red stroke: the centre keeps the green fill,
-    // a near-edge pixel inside the stroke band reads red.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::circle(
         header(0, 0, 1.0),
@@ -310,16 +283,15 @@ fn circle_stroke_draws_an_annulus_over_the_fill() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());
-    // Dead centre: pure green fill (well inside the stroke's inner radius).
     assert_eq!(px(&bytes, 16, 8, 8), [0, 255, 0, 255]);
-    // Near the right edge (x≈13, ~5 px out of radius 6): inside the 2-px stroke.
+    // x≈13 is ~5 px out of radius 6 — inside the 2-px stroke.
     assert_eq!(px(&bytes, 16, 13, 8), [255, 0, 0, 255]);
 }
 
 #[test]
 fn ellipse_honours_radii_and_rotation() {
-    // An axis-aligned ellipse rx=6, ry=2 at (8,8): a point 5 px along x is in,
-    // the same distance along y is out (the short axis).
+    // rx=6, ry=2 at (8,8): a point 5 px along x is in, the same distance along
+    // y is out (the short axis).
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::ellipse(
         header(0, 0, 1.0),
@@ -331,16 +303,13 @@ fn ellipse_honours_radii_and_rotation() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());
-    // Along the long (x) axis at 5 px: inside.
     assert_eq!(px(&bytes, 16, 13, 8), [0, 0, 255, 255]);
-    // Along the short (y) axis at 5 px: outside (ry is only 2).
     assert_eq!(px(&bytes, 16, 8, 13), [0, 0, 0, 0]);
 }
 
 #[test]
 fn ellipse_rotation_swaps_the_long_axis() {
-    // The same rx=6, ry=2 ellipse rotated 90°: now the long axis is vertical,
-    // so the point 5 px along y is inside and 5 px along x is outside.
+    // Same rx=6, ry=2 ellipse rotated 90°: the long axis is now vertical.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::ellipse(
         header(0, 0, 1.0),
@@ -358,8 +327,6 @@ fn ellipse_rotation_swaps_the_long_axis() {
 
 #[test]
 fn line_strokes_a_thick_segment() {
-    // A 2-px-wide horizontal line from (1,8) to (14,8): a pixel on the line is
-    // coloured; one several rows away is not.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::line(
         header(0, 0, 1.0),
@@ -370,16 +337,12 @@ fn line_strokes_a_thick_segment() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());
-    // On the segment.
     assert_eq!(px(&bytes, 16, 7, 8), [255, 255, 0, 255]);
-    // Far from the segment (row 0).
     assert_eq!(px(&bytes, 16, 7, 0), [0, 0, 0, 0]);
 }
 
 #[test]
 fn particle_quad_fills_a_centred_square() {
-    // A KIND_PARTICLE_QUAD of half-extent 2 at (8,8): the centre fills; a
-    // corner well outside the 4×4 quad is clear.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::particle_quad(
         header(0, 0, 1.0),
@@ -395,8 +358,6 @@ fn particle_quad_fills_a_centred_square() {
 
 #[test]
 fn rect_stroke_borders_the_fill() {
-    // A blue rect (2,2)..(14,14) with a 2-px red border: an edge pixel reads
-    // the red stroke, a centre pixel keeps the blue fill.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::rect(
         header(0, 0, 1.0),
@@ -406,16 +367,14 @@ fn rect_stroke_borders_the_fill() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());
-    // Top-left inside the border band: red stroke over the blue fill.
     assert_eq!(px(&bytes, 16, 2, 2), [255, 0, 0, 255]);
-    // Dead centre: blue fill, untouched by the border.
     assert_eq!(px(&bytes, 16, 8, 8), [0, 0, 255, 255]);
 }
 
 #[test]
 fn zero_length_line_with_degenerate_transform_draws_nothing() {
-    // A degenerate segment (a==b) under a zero-scale transform exercises the
-    // EPS-floored length²: the projection stays finite and nothing is drawn.
+    // Degenerate segment (a==b) under a zero-scale transform exercises the
+    // EPS-floored length² so the projection stays finite.
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::line(
         (0, Mat3::scale(Vec2::ZERO), Common2d::new(0, ratio(1.0))),
@@ -461,10 +420,10 @@ fn sprite_blits_atlas_pixels() {
     list.sort_commands();
     // Dest is the 2×2 source at the origin → pixels (0,0)..(2,2).
     let (bytes, _, _) = render(&list, 2, 2, &atlas());
-    assert_eq!(px(&bytes, 2, 0, 0), [255, 0, 0, 255]); // TL red
-    assert_eq!(px(&bytes, 2, 1, 0), [0, 255, 0, 255]); // TR green
-    assert_eq!(px(&bytes, 2, 0, 1), [0, 0, 255, 255]); // BL blue
-    assert_eq!(px(&bytes, 2, 1, 1), [255, 255, 255, 255]); // BR white
+    assert_eq!(px(&bytes, 2, 0, 0), [255, 0, 0, 255]);
+    assert_eq!(px(&bytes, 2, 1, 0), [0, 255, 0, 255]);
+    assert_eq!(px(&bytes, 2, 0, 1), [0, 0, 255, 255]);
+    assert_eq!(px(&bytes, 2, 1, 1), [255, 255, 255, 255]);
 }
 
 #[test]
@@ -477,22 +436,20 @@ fn sprite_flip_x_and_y_mirror_the_sample() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 2, 2, &atlas());
-    // Both axes mirrored: TL now samples the atlas BR (white), TR samples BL.
-    assert_eq!(px(&bytes, 2, 0, 0), [255, 255, 255, 255]); // was BR white
-    assert_eq!(px(&bytes, 2, 1, 1), [255, 0, 0, 255]); // was TL red
+    // Both axes mirrored: TL now samples the atlas BR, TR samples BL.
+    assert_eq!(px(&bytes, 2, 0, 0), [255, 255, 255, 255]);
+    assert_eq!(px(&bytes, 2, 1, 1), [255, 0, 0, 255]);
 }
 
 #[test]
 fn sprite_tint_and_alpha_modulate_the_blit() {
     let mut list = Draw2dList::default();
-    // Half-alpha command, green tint → white texel becomes half-alpha green.
     list.push_command(Draw2dCommand::sprite(
         header(0, 0, 0.5),
         TextureId::from_raw(9),
         sprite_opts(false, false, rgba(0.0, 1.0, 0.0, 1.0)),
     ));
     list.sort_commands();
-    // A 1×1 white opaque texture id 9.
     let tex = Draw2dTextures::load(&[(9, 1, 1, vec![255, 255, 255, 255])]);
     let (bytes, _, _) = render(&list, 2, 2, &tex);
     // src = white·green-tint·0.5 alpha = (0,1,0,0.5) over transparent →

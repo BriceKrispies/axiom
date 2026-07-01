@@ -57,12 +57,6 @@ fn check_module_facades_export_one(index: &ManifestIndex, report: &mut CheckRepo
                     .map(str::trim)
                     .filter(|line| line.starts_with("pub ") & !line.starts_with("pub(crate)"))
                     .collect();
-                // A module exposes exactly one behavioral facade, plus (optionally) a
-                // re-export of its identity vocabulary — the pure value-type id
-                // newtypes the facade traffics in (`pub use ids::{…}`). Those ids
-                // carry no behavior, and a handle-based facade is unusable if callers
-                // cannot name the handles it returns. Every other public item counts
-                // toward the single-facade limit.
                 let facade_exports: Vec<&str> = public_exports
                     .iter()
                     .copied()
@@ -87,12 +81,10 @@ fn check_module_facades_export_one(index: &ManifestIndex, report: &mut CheckRepo
     });
 }
 
-/// Whether a top-level `pub` line re-exports a module's identity vocabulary — a
-/// `pub use` path containing an `ids` segment (e.g. `pub use ids::{FactId, …};`
-/// or `pub use crate::ids::*;`). These value-type id newtypes are the nouns a
-/// facade returns; a module may publish them alongside its one behavioral facade
-/// without counting as a second facade. Matching is on a whole path segment, so
-/// unrelated paths like `fluids::` are not misclassified.
+/// Whether a top-level `pub` line re-exports a module's identity vocabulary
+/// (a `pub use` path containing a whole `ids` segment, e.g. `pub use
+/// ids::{FactId, …};`). Matching on a whole segment avoids misclassifying
+/// unrelated paths like `fluids::`.
 fn is_identity_vocabulary_export(line: &str) -> bool {
     line.trim()
         .strip_prefix("pub use ")
@@ -180,9 +172,8 @@ fn check_duplicate_module_capabilities(index: &ManifestIndex, report: &mut Check
 
 fn check_module_manifest_local_rules(index: &ManifestIndex, report: &mut CheckReport) {
     index.module_by_dir.values().for_each(|m| {
-        // Only *engine* modules are barred from composing other modules.
-        // Feature modules (`kind = "feature-module"`) may list modules they
-        // compose; those references are validated separately.
+        // Feature modules may list modules they compose (validated
+        // separately); only engine modules are barred from composing.
         (!m.module.is_feature_module() & !m.module.allowed_modules.is_empty()).then(|| {
             report.push(Violation::new(
                 ViolationKind::ModuleHasNonEmptyAllowedModules,
@@ -233,9 +224,8 @@ fn check_layer_manifest_crate_name_matches(
     class_by_name: &BTreeMap<&str, PackageClass>,
     report: &mut CheckReport,
 ) {
-    // Layer manifests may default the crate name. We only flag a mismatch
-    // when the cargo package at the same dir has a different name from the
-    // explicit `crate_name` field.
+    // Layer manifests may default the crate name; only flag a mismatch when
+    // an explicit `crate_name` names no known package.
     index
         .layer_by_dir
         .values()
@@ -254,11 +244,8 @@ fn check_layer_manifest_crate_name_matches(
 }
 
 fn check_module_manifest_crate_name_matches(index: &ManifestIndex, report: &mut CheckReport) {
-    // The package at each dir must have the declared crate_name.
-    // We don't have the package here; the check is enforced indirectly:
-    // if `crate_name` doesn't match any classified package, the dir
-    // classification will catch it via `UnknownPackageClass`. For
-    // explicit ergonomics we also validate the name shape here.
+    // A non-matching `crate_name` is caught indirectly via
+    // `UnknownPackageClass`; this only validates the name isn't empty.
     index
         .module_by_dir
         .values()
@@ -367,7 +354,6 @@ fn check_forward_dependencies(
     index: &ManifestIndex,
     report: &mut CheckReport,
 ) {
-    // Lookups by cargo package name → module/app manifest (for allowlists).
     let module_by_crate: BTreeMap<&str, &crate::module_manifest::ModuleManifest> = index
         .module_by_dir
         .values()
@@ -399,16 +385,11 @@ fn check_forward_dependencies(
                 .copied()
                 .into_iter()
                 .for_each(|dep_class| {
-            // `PackageClass` is fieldless, so the legal/illegal dispatch is a
-            // pure lookup over the `(source, dep)` pair — no control flow, just
-            // data. Each illegal pair is one arm of a flat combinator chain
-            // keyed on `pair == (Src, Dep)`; "allowed" pairs (layer→layer,
-            // anything→support, tool→*, support→*) are simply absent, so they
-            // fall through to the terminating `None`. Arms that need a lookup
-            // (module/app allowlists) run their multi-step work inside the
-            // `then(|| { … })` closure. The whole chain is evaluated for its
-            // side effects (pushing violations); its `Option<()>` value is
-            // discarded.
+            // Each illegal `(source, dep)` pair is one arm of a flat
+            // `.then().or_else()` chain keyed on `pair == (Src, Dep)`;
+            // allowed pairs are simply absent and fall through to `None`.
+            // The chain runs for its violation-pushing side effects; the
+            // resulting `Option<()>` is discarded.
             let pair = (c.class, dep_class);
             use PackageClass::{App, Layer, Module, Tool};
 
@@ -452,9 +433,6 @@ fn check_forward_dependencies(
                 })
                 .or_else(|| {
                     (pair == (Module, Module)).then(|| {
-                        // Engine modules may never depend on a module. A feature
-                        // module may depend on the modules it lists in
-                        // `allowed_modules`; anything else is a violation.
                         let feature_src = module_by_crate
                             .get(c.package.name.as_str())
                             .filter(|s| s.module.is_feature_module());
@@ -633,9 +611,6 @@ fn check_forward_dependencies(
                             });
                     })
                 });
-            // Pairs not listed above are allowed: layer→layer (the layer DAG,
-            // validated by depends_on), {layer,module,app}→support, tool→* (tools depend on
-            // anything), and support→* (support depends only on externals).
                 });
         });
     });
@@ -658,8 +633,7 @@ fn check_apps_are_leaves(
             .workspace_deps
             .iter()
             // The dep-class branches above already flag layer/module/tool ->
-            // app individually. This loop catches any other importer shape
-            // (today only `Tool`, but stays robust if classes grow).
+            // app individually; this catches any other importer shape.
             .filter(|dep_name| {
                 app_names.contains(dep_name.as_str())
                     & (class_by_name.get(c.package.name.as_str()) != Some(&PackageClass::App))
@@ -699,10 +673,8 @@ fn check_tools_not_used_by_engine(
                 .workspace_deps
                 .iter()
                 .filter(|dep_name| tool_names.contains(dep_name.as_str()))
-                // Layer/module/app -> tool is already flagged by the per-class
-                // dispatch above; do not emit `ToolImportedByEngine` for those
-                // (avoids double-counting). This is a defensive duplicate-safe
-                // check for any future class.
+                // Layer/module/app -> tool is already flagged above; avoid
+                // double-counting those here.
                 .filter(|_| {
                     let importer = class_by_name.get(c.package.name.as_str()).copied();
                     ![

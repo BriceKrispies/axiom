@@ -1,9 +1,7 @@
 //! Typed component access on [`RunningApp`] by `Entity` — `get` / `set` / `query`
 //! over the engine's component vocabulary ([`Component`]). The Bevy/Godot-shaped
 //! read/write surface: address any node by its first-class handle and access its
-//! components by type, never by an engine-internal column or player index. A child
-//! module of `app` so it reaches `RunningApp`'s private scene while keeping
-//! `app.rs` within the per-file size budget.
+//! components by type, never by an engine-internal column or player index.
 
 use axiom_scene::SceneNodeId as Entity;
 
@@ -72,17 +70,14 @@ mod tests {
     fn get_reads_transform_and_bounds_by_entity() {
         let mut app = app_with_enemy();
         let enemy = app.player_entity(0).expect("enemy is player 0");
-        // Transform reads back the authored local transform.
         assert_eq!(
             app.get::<Transform>(enemy).map(|t| t.translation),
             Some(Vec3::new(0.0, 0.0, -3.0))
         );
-        // Bounds reads back on the bounded node.
         assert_eq!(
             app.get::<Bounds>(enemy),
             Some(Bounds::new(Vec3::new(0.5, 0.5, 0.5)))
         );
-        // A despawned (absent) handle yields None for both component kinds.
         assert!(app.despawn(enemy));
         assert_eq!(app.get::<Transform>(enemy), None);
         assert_eq!(app.get::<Bounds>(enemy), None);
@@ -92,20 +87,17 @@ mod tests {
     fn set_writes_transform_and_bounds_and_reports_liveness() {
         let mut app = app_with_enemy();
         let enemy = app.player_entity(0).expect("enemy is player 0");
-        // Set moves the node; get reads the new value back.
         let moved = Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
         assert!(app.set::<Transform>(enemy, moved));
         assert_eq!(
             app.get::<Transform>(enemy).map(|t| t.translation),
             Some(Vec3::new(1.0, 2.0, 3.0))
         );
-        // Setting Bounds overwrites the node's bounding volume.
         assert!(app.set::<Bounds>(enemy, Bounds::new(Vec3::new(2.0, 2.0, 2.0))));
         assert_eq!(
             app.get::<Bounds>(enemy),
             Some(Bounds::new(Vec3::new(2.0, 2.0, 2.0)))
         );
-        // A stale/absent handle reports false for both component kinds.
         assert!(app.despawn(enemy));
         assert!(!app.set::<Transform>(enemy, moved));
         assert!(!app.set::<Bounds>(enemy, Bounds::new(Vec3::ONE)));
@@ -115,13 +107,12 @@ mod tests {
     fn query_enumerates_each_component() {
         let app = app_with_enemy();
         let enemy = app.player_entity(0).expect("enemy is player 0");
-        // The enemy's transform is among those `query::<Transform>()` enumerates
-        // (DefaultPlugins may add a camera/light node, so assert membership).
+        // DefaultPlugins may add a camera/light node, so assert membership rather
+        // than an exact set.
         let transforms = app.query::<Transform>();
         assert!(transforms
             .iter()
             .any(|&(e, t)| e == enemy && t.translation == Vec3::new(0.0, 0.0, -3.0)));
-        // Only the enemy carries Bounds, so the bounded enumeration is exactly it.
         let bounded = app.query::<Bounds>();
         assert_eq!(
             bounded,

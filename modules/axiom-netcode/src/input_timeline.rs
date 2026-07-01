@@ -80,14 +80,12 @@ mod tests {
         assert!(!t.has_all(0, &peers), "missing peer 2");
         t.insert(0, peers[1], cmd(2));
         assert!(t.has_all(0, &peers));
-        // A different tick is still incomplete.
         assert!(!t.has_all(1, &peers));
     }
 
     #[test]
     fn ordered_at_is_sorted_by_peer_and_scoped_to_the_tick() {
         let mut t = InputTimeline::new();
-        // Insert out of peer order, across two ticks.
         t.insert(0, PeerId::from_raw(2), cmd(20));
         t.insert(0, PeerId::from_raw(1), cmd(10));
         t.insert(1, PeerId::from_raw(1), cmd(11));
@@ -95,7 +93,6 @@ mod tests {
         assert_eq!(at0.len(), 2);
         assert_eq!(at0[0].0, PeerId::from_raw(1));
         assert_eq!(at0[1].0, PeerId::from_raw(2));
-        // Tick 1 holds only its own input.
         assert_eq!(t.ordered_at(1), vec![(PeerId::from_raw(1), cmd(11))]);
     }
 
@@ -104,7 +101,6 @@ mod tests {
         let mut t = InputTimeline::new();
         let p = PeerId::from_raw(1);
         t.insert(0, p, cmd(10));
-        // A resent (duplicate) input must not overwrite the first.
         t.insert(0, p, cmd(99));
         assert_eq!(t.ordered_at(0), vec![(p, cmd(10))]);
     }

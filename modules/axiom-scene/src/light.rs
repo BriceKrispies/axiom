@@ -171,7 +171,6 @@ mod tests {
     fn zero_intensity_and_zero_channels_are_allowed() {
         let l = Light::directional(&math(), Vec3::ONE, rat(0.0)).unwrap();
         assert_eq!(l.intensity().get(), 0.0);
-        // Each channel exactly 0.0 is non-negative and accepted.
         assert_eq!(
             Light::directional(&math(), Vec3::new(0.0, 1.0, 1.0), rat(1.0))
                 .unwrap()

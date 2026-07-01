@@ -122,7 +122,6 @@ mod tests {
     #[test]
     fn out_of_range_index_degrades_to_origin_and_white() {
         let m = tri_mesh();
-        // No panic; out-of-range positions/colours fall back to defaults.
         assert_eq!(m.position(99), [0.0, 0.0, 0.0]);
         assert_eq!(m.color(99), [1.0, 1.0, 1.0, 1.0]);
     }
@@ -155,7 +154,6 @@ mod tests {
     #[test]
     fn replace_swaps_one_mesh_geometry() {
         let mut cache = MeshCache::load(&[(7, quad_verts(), vec![0, 1, 2])]);
-        // Replace mesh 7 with a single-vertex, single... index geometry.
         let mut new_verts = Vec::new();
         new_verts.extend_from_slice(&vertex([5.0, 5.0, 5.0], [0.0, 0.0, 0.0, 1.0]));
         cache.replace(7, &new_verts, &[0]);

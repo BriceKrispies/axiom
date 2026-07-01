@@ -1,8 +1,7 @@
 //! Shared overworld data model: the structures every worldgen stage, the atlas
 //! builder, and the surface sampler operate on.
 //!
-//! Design (audit: "Data/model requirements", "Terrain/hydrology requirements"):
-//! topology (sites + triangles) is **fixed for one generation**; all geology,
+//! Topology (sites + triangles) is **fixed for one generation**; all geology,
 //! climate, erosion and hydrology mutate the flat per-region scalar fields on
 //! [`PlanetGlobe`]. The durable, queryable output is [`PlanetSurfaceAtlas`].
 //!
@@ -15,14 +14,13 @@ use axiom_math::Vec3;
 use crate::growth::ids::{BiomeId, PlateId, RegionId};
 
 /// A fixed icosphere: unit-sphere sites (region centres) and triangle faces.
-/// Audit: worldgen `topology` stage, OW-E12 primal-quad export.
 #[derive(Debug, Clone, Default)]
 pub struct Icosphere {
     /// Unit-length region centre directions, indexed by region id.
     pub sites: Vec<Vec3>,
     /// Triangle faces, each three region indices (CCW outward).
     pub triangles: Vec<[u32; 3]>,
-    /// Subdivision level used (quantises region count). Audit: perf cap subdiv 9.
+    /// Subdivision level used (quantises region count).
     pub subdivisions: u32,
 }
 
@@ -32,7 +30,7 @@ impl Icosphere {
     }
 }
 
-/// Region adjacency in compressed-sparse-row form. Audit: OW-E1 "neighbours CSR".
+/// Region adjacency in compressed-sparse-row form.
 #[derive(Debug, Clone, Default)]
 pub struct RegionGraph {
     /// `offsets[r]..offsets[r+1]` slices into `neighbours` for region `r`.
@@ -55,32 +53,31 @@ impl RegionGraph {
 }
 
 /// Mutable generation state. Worldgen stages read/write these flat fields in
-/// place; sea level is fixed at 0 (audit: OW-E21 `fit_land_coverage`).
+/// place; sea level is fixed at 0.
 #[derive(Debug, Clone, Default)]
 pub struct PlanetGlobe {
     pub topology: Icosphere,
     pub graph: RegionGraph,
 
-    // --- geology ---
-    /// Plate id per region. Audit: `tectonic_plates`.
+    // Geology.
     pub region_plate: Vec<u32>,
-    /// Whether each plate is oceanic. Audit: `plate_properties`.
+    /// Whether each plate is oceanic.
     pub plate_oceanic: Vec<bool>,
 
-    // --- scalar fields (per region) ---
-    /// Elevation; `>= 0` is land after `fit_land_coverage`. Audit: OW-E21.
+    // Scalar fields (per region).
+    /// Elevation; `>= 0` is land after `fit_land_coverage`.
     pub region_elevation: Vec<f32>,
-    /// Moisture in `[0,1]`. Audit: moisture / advection / rain shadow.
+    /// Moisture in `[0,1]`.
     pub region_moisture: Vec<f32>,
-    /// Prevailing-wind tangent direction per region (unit). Audit: OW-E7.
+    /// Prevailing-wind tangent direction per region (unit).
     pub region_wind: Vec<Vec3>,
-    /// Drainage / flow accumulation per region. Audit: priority_flood, rivers.
+    /// Drainage / flow accumulation per region.
     pub region_flow: Vec<f32>,
 
-    // --- triangle scalars ---
-    /// Triangle elevations averaged from regions. Audit: `triangle_values`.
+    // Triangle scalars.
+    /// Triangle elevations averaged from regions.
     pub triangle_elevation: Vec<f32>,
-    /// Per-triangle river flow. Audit: `river_flow`.
+    /// Per-triangle river flow.
     pub triangle_flow: Vec<f32>,
 }
 
@@ -102,7 +99,7 @@ impl PlanetGlobe {
         self.triangle_flow.resize(t, 0.0);
     }
 
-    /// Fraction of regions with elevation `>= 0` (land). Audit: OW-E21 gate.
+    /// Fraction of regions with elevation `>= 0` (land).
     pub fn land_fraction(&self) -> f32 {
         if self.region_elevation.is_empty() {
             return 0.0;
@@ -112,32 +109,30 @@ impl PlanetGlobe {
     }
 }
 
-/// A single overworld surface query result. Audit: OW-E3 `sample_surface`.
+/// A single overworld surface query result.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SurfaceSample {
     pub region: RegionId,
     pub plate: PlateId,
     pub elevation: f32,
     pub moisture: f32,
-    /// Derived at query time, not stored. Audit: Climate requirements.
+    /// Derived at query time, not stored.
     pub temperature: f32,
     pub biome: BiomeId,
 }
 
 /// The durable, queryable overworld output owned for the session.
-/// Audit: OW-E1/E2 `PlanetSurfaceAtlas`, OW-E3 query API, surface-atlas reqs.
 #[derive(Debug, Clone, Default)]
 pub struct PlanetSurfaceAtlas {
-    /// Fixed region centre directions (unit). Audit: surface atlas reqs.
     pub sites: Vec<Vec3>,
     pub graph: RegionGraph,
     pub region_plate: Vec<u32>,
     pub plate_oceanic: Vec<bool>,
     pub region_elevation: Vec<f32>,
     pub region_moisture: Vec<f32>,
-    /// Planet radius in metres (from genome). Audit: localmap, GW-E1.
+    /// Planet radius in metres (from genome).
     pub planet_radius_m: f32,
-    /// Optional coarse spatial index for fast `locate_region`. Audit: perf P1.
+    /// Optional coarse spatial index for fast `locate_region`.
     pub locator: RegionLocator,
 }
 
@@ -148,8 +143,8 @@ impl PlanetSurfaceAtlas {
 }
 
 /// Coarse spatial acceleration for `locate_region(unit_dir)` so it is not an
-/// O(R) scan. Audit: "Query/API requirements" spatial index, perf P1.
-/// Filled by the atlas builder; an empty locator falls back to linear scan.
+/// O(R) scan. Filled by the atlas builder; an empty locator falls back to
+/// linear scan.
 #[derive(Debug, Clone, Default)]
 pub struct RegionLocator {
     /// Coarse-cell → candidate region indices (implementation-defined binning).

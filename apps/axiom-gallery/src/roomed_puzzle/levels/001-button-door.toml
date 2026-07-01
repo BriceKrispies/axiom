@@ -35,7 +35,6 @@ start = [1, 5]
 [exit]
 position = [8, 5]
 
-# --- Boundary: top wall (y = 0) ---
 [[walls]]
 position = [0, 0]
 [[walls]]
@@ -57,7 +56,6 @@ position = [8, 0]
 [[walls]]
 position = [9, 0]
 
-# --- Boundary: bottom wall (y = 9) ---
 [[walls]]
 position = [0, 9]
 [[walls]]
@@ -79,7 +77,6 @@ position = [8, 9]
 [[walls]]
 position = [9, 9]
 
-# --- Boundary: left wall (x = 0, interior rows) ---
 [[walls]]
 position = [0, 1]
 [[walls]]
@@ -97,7 +94,6 @@ position = [0, 7]
 [[walls]]
 position = [0, 8]
 
-# --- Boundary: right wall (x = 9, interior rows) ---
 [[walls]]
 position = [9, 1]
 [[walls]]
@@ -115,7 +111,6 @@ position = [9, 7]
 [[walls]]
 position = [9, 8]
 
-# --- Interior partition (x = 7), with the door at (7,5) as its only gap ---
 [[walls]]
 position = [7, 1]
 [[walls]]
@@ -131,7 +126,6 @@ position = [7, 7]
 [[walls]]
 position = [7, 8]
 
-# --- The pressure button and the door it controls (shared group "main") ---
 [[buttons]]
 position = [4, 5]
 group = "main"

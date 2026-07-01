@@ -14,13 +14,11 @@ use crate::scenario;
 /// table is plain data; the facade's `CauseRef` itself stays behind the facade).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParentRef {
-    /// A direct external command.
     Command,
-    /// A scheduler process (raw process id).
+    /// Raw process id.
     Process(u64),
-    /// A prior causal event (raw event id).
+    /// Raw event id.
     Event(u64),
-    /// Parent not captured.
     Unknown,
 }
 
@@ -38,27 +36,16 @@ impl ParentRef {
 /// One row of the causal-chain report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CausalRow {
-    /// The logical tick the event occurred on.
     pub tick: u64,
-    /// The causal event id.
     pub event_id: u64,
-    /// The causal event kind code.
     pub kind: u32,
-    /// The primary subject entity slot, if any.
     pub subject: Option<u64>,
-    /// The secondary subject entity slot, if any.
     pub secondary: Option<u64>,
-    /// The interaction route, if this step has one.
     pub route: Option<u8>,
-    /// The substance involved, if this step has one.
     pub substance: Option<&'static str>,
-    /// The parent cause.
     pub parent: ParentRef,
-    /// The deterministic symbol/code.
     pub code: u64,
-    /// Whether the event carried a payload.
     pub payload_present: bool,
-    /// A short human label for the kind.
     pub label: &'static str,
 }
 

@@ -1,11 +1,9 @@
 //! # Axiom Physics Crucible — proof app
-//!
 //! A rendered, deterministic *physics proving room*. It is a composition leaf that
 //! drives the `axiom-physics` engine module through its public `PhysicsApi` facade
 //! across six scripted stations, translates every physics snapshot into renderable
 //! debug geometry, and runs a hidden replay world in lock-step to make determinism
 //! visible.
-//!
 //! ## The six stations
 //! 1. **Body Bay** — static / dynamic / kinematic / disabled body kinds.
 //! 2. **Contact Bay** — sphere/plane, sphere/sphere, sphere/box, box/plane contacts.
@@ -13,7 +11,6 @@
 //! 4. **Query Bay** — exact raycast (hit / miss / through-trigger) + overlap sphere.
 //! 5. **Stress Bay** — a deterministic pile exercising the broad phase + solver.
 //! 6. **Replay Bay** — the two-world determinism proof (and divergence detection).
-//!
 //! ## Architecture (the laws this app respects)
 //! Physics and the renderer are isolated modules; **this app owns every boundary**
 //! between them ([`physics_to_render`], [`debug_geometry`], [`debug_overlay`]).
@@ -24,7 +21,6 @@
 //! types in [`crucible_report`]. As a composition leaf, the app is exempt from the
 //! branchless and 100%-coverage spine gates, but it ships with the tests its
 //! behaviour warrants (every station is covered).
-//!
 //! ## Rendering note
 //! The Axiom umbrella `App` exposes no per-frame external hook, and `PhysicsApi`
 //! exposes no teleport, so the crucible pre-simulates deterministically to a hero

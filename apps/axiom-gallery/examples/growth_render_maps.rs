@@ -30,10 +30,8 @@ fn main() {
     render_firstperson(&g, "apps/axiom-gallery/examples/growth_local.png");
 }
 
-// ---------------------------------------------------------------------------
 // Overworld: a 3D sphere (orthographic projection of the planet), centered on
 // the play anchor and diffuse-shaded for roundness — like Growth's debug globe.
-// ---------------------------------------------------------------------------
 fn render_globe(g: &Growth, size: usize, path: &str) {
     // Camera basis: look straight at the play anchor so the globe is centered on
     // where the local terrain lives. forward = anchor; right/up complete a frame.
@@ -63,7 +61,7 @@ fn render_globe(g: &Growth, size: usize, path: &str) {
                 continue; // outside the sphere
             }
             let sz = (1.0 - r2).sqrt(); // front hemisphere
-                                        // World direction of this surface point (rotate view → world).
+                                        // World direction of this surface point (rotate view -> world).
             let dir = Vec3::new(
                 right[0] * sx + up[0] * sy + forward[0] * sz,
                 right[1] * sx + up[1] * sy + forward[1] * sz,
@@ -157,12 +155,10 @@ fn normalize3(v: [f32; 3]) -> [f32; 3] {
     [v[0] / l, v[1] / l, v[2] / l]
 }
 
-// ---------------------------------------------------------------------------
 // First-person: "descend" onto the spot and look around, human-sized.
 // A heightfield raymarcher (Voxel-Space style) over the SAME chunk worldgen:
 // for each screen column it marches a ray out to the horizon, tracking the
 // occluding skyline, and paints terrain under a shaded sky. No GPU/browser.
-// ---------------------------------------------------------------------------
 struct Terrain<'a> {
     atlas: &'a axiom_gallery::growth::model_planet::PlanetSurfaceAtlas,
     localmap: &'a GameWorldLocalMap,
@@ -249,7 +245,6 @@ fn render_firstperson(g: &Growth, path: &str) {
     let sky_top = [70u8, 120, 200];
     let sky_horizon = [185u8, 208, 232];
 
-    // sky gradient
     let mut rgb = vec![0u8; w * h_img * 3];
     for py in 0..h_img {
         let t = (py as f32 / horizon).clamp(0.0, 1.0);
@@ -315,9 +310,7 @@ fn lerpf(a: f32, b: f32, f: f32) -> f32 {
     a + (b - a) * f
 }
 
-// ---------------------------------------------------------------------------
 // Minimal PNG encoder (RGB8, zlib "stored" blocks). No external crates.
-// ---------------------------------------------------------------------------
 fn write_png(path: &str, w: usize, h: usize, rgb: &[u8]) {
     let mut raw = Vec::with_capacity(h * (1 + w * 3));
     for y in 0..h {

@@ -7,13 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free, GPU-free, wasm-clean, deterministic, headless.
 crate-type = ["rlib"]
 
-# An isolated engine module (kind = "engine-module", allowed_modules = []) that
-# composes only completed layers: the kernel (the `Radians`/`Meters` dimensioned
-# quantities its public API speaks in) and math (the `Vec3`/`Quat` geometry of
-# ray fans and view cones). It depends on no other module, no app, no tool.
+# kernel: Radians/Meters dimensioned quantities its public API speaks in.
+# math: Vec3/Quat geometry of ray fans and view cones.
 [dependencies]
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }

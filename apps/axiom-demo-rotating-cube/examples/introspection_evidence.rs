@@ -59,7 +59,6 @@ fn main() {
         }};
     }
 
-    // --- 1. Live capture over a deterministic run. ---
     let mut demo = DemoRotatingCubeApi::new();
     let mut indices = Vec::new();
     for tick in 0..=TICKS {
@@ -109,7 +108,6 @@ fn main() {
             .all(|r| r.metrics().iter().any(|m| m.name() == "cube.angle_rad"))
     );
 
-    // --- 2. Query by index. ---
     let probe = indices[60];
     let described_ok = demo
         .describe_frame(probe)
@@ -120,7 +118,6 @@ fn main() {
     check!("describe_frame returns the matching report", described_ok);
     check!("describe_frame misses an unobserved index", missing_ok);
 
-    // --- 3. Serialized snapshot channel round-trips. ---
     let snapshot = demo.introspection_snapshot().expect("a tick has run");
     let decoded = FrameReport::from_bytes(&snapshot).expect("snapshot decodes");
     let round_trips = Some(&decoded) == demo.recent_frames(1).first();
@@ -131,7 +128,6 @@ fn main() {
     );
     check!("snapshot decodes back to an equal report", round_trips);
 
-    // --- 4. Deterministic replay. ---
     let run = |ticks: u64| {
         let mut d = DemoRotatingCubeApi::new();
         for t in 0..=ticks {
@@ -148,7 +144,6 @@ fn main() {
         identical
     );
 
-    // --- 5. Per-system introspection via a failing system. ---
     let frame = failing_system_frame();
     let mut api = IntrospectApi::new(4);
     api.observe(&frame);
@@ -174,8 +169,6 @@ fn main() {
         sys_decoded.systems().len() == 1 && &sys_decoded == report
     );
 
-    // --- 6. Reflection: the world describes its components, and a component
-    //        column round-trips as bytes (the world is now data). ---
     for schema in demo.component_schemas() {
         let fields: Vec<String> = schema
             .fields()
@@ -291,7 +284,6 @@ fn metric_f32(report: &FrameReport, name: &str) -> f32 {
         .unwrap_or(0.0)
 }
 
-/// Lowercase hex of a byte slice.
 fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {

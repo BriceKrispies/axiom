@@ -202,7 +202,6 @@ fn critical_terrain_over_cap_is_decimated_but_preserved() {
 
 #[test]
 fn decimation_keep_is_all_unless_preserved_and_over_cap() {
-    // `is_preserved` = critical coverage OR a rescued visible draw.
     assert_eq!(decimation_keep(false, 10_000, 50), 10_000);
     assert_eq!(decimation_keep(true, 30, 50), 30);
     assert_eq!(decimation_keep(true, 200, 50), 50);
@@ -211,8 +210,8 @@ fn decimation_keep_is_all_unless_preserved_and_over_cap() {
 
 #[test]
 fn decorative_draw_skipped_once_budget_exhausted_critical_kept() {
-    // Tiny budget: the first (critical) ground spends past it, so a later
-    // decorative object is skipped — but terrain is never skipped.
+    // Tiny budget: the first (critical) draw spends past it, so the later
+    // decorative draw is skipped; terrain is never skipped.
     let cache = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0]), small_decorative(8)]);
     let o =
         LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 200_000, 10, cues_off());
@@ -221,7 +220,6 @@ fn decorative_draw_skipped_once_budget_exhausted_critical_kept() {
     assert_eq!(out.stats.skipped_decorative_draws, 1);
     assert_eq!(out.stats.terrain_draws_preserved, 1);
     assert_eq!(out.stats.critical_coverage_skipped, 0);
-    // Terrain still produced triangles; the decorative object did not.
     assert!(!out.triangles.is_empty());
     assert!(out.triangles.iter().all(|t| t.object_id() == 1));
 }
@@ -384,7 +382,6 @@ fn lighting_changes_the_triangle_colour_versus_base() {
     lit.enable_distance_detail_falloff = false;
     let on = convert(&packet(vec![draw(1, 7)]), &cache, &opts_cued(lit));
     let off = convert(&packet(vec![draw(1, 7)]), &cache, &opts());
-    // Lighting scales the flat colour, so the shaded triangle differs.
     assert_ne!(on.triangles[0].color(), off.triangles[0].color());
     assert_eq!(off.triangles[0].color(), [0.6, 0.6, 0.6, 1.0]);
 }
@@ -412,10 +409,9 @@ fn convert_shades_from_the_scene_directional_light() {
         FrameFeatureSet::new(false, false, 1, 0),
     );
     let out = convert(&p, &cache, &opts_cued(cues));
-    // The red light tints only the DIFFUSE term; the hemisphere ambient (sky/
-    // ground, untinted by the scene light) still reaches green/blue. So red is the
-    // brightest channel and green/blue retain just the (smaller) ambient floor —
-    // the corrected lighting model (ambient is its own sky/ground colour now).
+    // The red light tints only the diffuse term; the hemisphere ambient (sky/
+    // ground, untinted by the scene light) still reaches green/blue, so red is
+    // the brightest channel and green/blue retain just the ambient floor.
     let c = out.triangles[0].color();
     assert!(c[0] > c[1], "red lit brightest by the red light");
     assert!(c[0] > c[2], "red lit brighter than blue");
@@ -434,7 +430,6 @@ fn gameplay_object_emits_one_overlay_terrain_does_not() {
         "gameplay object emits an overlay anchor"
     );
     assert_eq!(out.overlays[0].object_id, 42);
-    // Critical terrain emits no contact-shadow/outline anchor.
     let terrain = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0])]);
     let t = convert(&packet(vec![draw(1, 7)]), &terrain, &opts_cued(p));
     assert!(t.overlays.is_empty());
@@ -486,10 +481,9 @@ fn clip_near_keeps_all_drops_all_and_splits_a_straddle() {
 #[test]
 fn straddling_triangle_is_clipped_not_exploded() {
     // Two vertices well in front of the near plane, one just inside it (cw = z
-    // via CW_IS_Z). Before this fix the near-zero-cw vertex divided to a huge
-    // off-screen coordinate (the phantom-wall smear); the near-plane clip splits
-    // the triangle at the plane into a bounded front piece (a quad → 2 triangles)
-    // instead of culling it whole.
+    // via CW_IS_Z). The near-plane clip splits the triangle at the plane into a
+    // bounded front piece (a quad → 2 triangles) instead of culling it whole or
+    // dividing the near-zero-cw vertex into a huge off-screen coordinate.
     let c = [1.0, 1.0, 1.0, 1.0];
     let mut verts = Vec::new();
     verts.extend_from_slice(&vertex([-0.5, -0.5, 1.0], c));
@@ -498,13 +492,12 @@ fn straddling_triangle_is_clipped_not_exploded() {
     let cache = MeshCache::load(&[(7, verts, vec![0, 1, 2])]);
     let d = FrameDrawItem::new(1, 7, 9, IDENTITY, CW_IS_Z, c, false);
     let out = convert(&packet(vec![d]), &cache, &opts());
-    // Clipped (a quad → 2 triangles), not culled as invalid the way the whole
-    // straddling triangle used to be.
+    // Clipped (a quad → 2 triangles), not culled as invalid.
     assert_eq!(out.stats.skipped_invalid_projection_triangles, 0);
     assert_eq!(out.stats.projected_triangles, 2);
     assert!(!out.triangles.is_empty());
-    // Every surviving coordinate is finite and bounded — the divide no longer
-    // explodes (the clipped vertices sit at cw >= W_NEAR, not cw ≈ 0).
+    // Every surviving coordinate is finite and bounded (the clipped vertices sit
+    // at cw >= W_NEAR, not cw ≈ 0).
     let mut coords = out
         .triangles
         .iter()

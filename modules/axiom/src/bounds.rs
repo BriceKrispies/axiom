@@ -30,7 +30,7 @@ mod tests {
     #[test]
     fn new_stores_half_extents_and_is_copy_debug() {
         let b = Bounds::new(Vec3::new(0.5, 1.0, 2.0));
-        let c = b; // Copy
+        let c = b;
         assert_eq!(b, c);
         assert_eq!(c.half_extents, Vec3::new(0.5, 1.0, 2.0));
         assert!(format!("{b:?}").contains("Bounds"));

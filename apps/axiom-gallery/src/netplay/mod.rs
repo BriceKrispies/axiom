@@ -124,9 +124,8 @@ mod tests {
     #[test]
     fn inputs_to_targets_are_the_per_player_deltas() {
         let inputs = inputs_to_targets(INITIAL_POSITIONS, [-1.0, 0.5, 2.0, -0.5]);
-        assert_eq!(inputs[0].delta, Vec3::new(0.5, 0.5, 0.0)); // -1.0 - (-1.5)
-        assert_eq!(inputs[1].delta, Vec3::new(0.5, -0.5, 0.0)); // 2.0 - 1.5
-                                                                // No change → zero deltas (cubes hold still).
+        assert_eq!(inputs[0].delta, Vec3::new(0.5, 0.5, 0.0));
+        assert_eq!(inputs[1].delta, Vec3::new(0.5, -0.5, 0.0));
         let still = inputs_to_targets(INITIAL_POSITIONS, INITIAL_POSITIONS);
         assert_eq!(still[0].delta, Vec3::ZERO);
         assert_eq!(still[1].delta, Vec3::ZERO);

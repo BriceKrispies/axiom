@@ -219,19 +219,16 @@ mod cov {
     // need cases where each operand is the first non-empty collection.
     #[test]
     fn is_empty_short_circuits_on_each_operand() {
-        // meshes-only: first operand false -> short-circuits.
         let mut tm = ResourceTable::new();
         let id = tm.next_id();
         tm.insert_mesh(test_mesh(id));
         assert!(!ResolvedResources::from_table(&tm).is_empty());
 
-        // materials-only: meshes empty (true), materials non-empty (false).
         let mut tmat = ResourceTable::new();
         let id = tmat.next_id();
         tmat.insert_material(build_basic_lit_material(id, Vec4::ONE));
         assert!(!ResolvedResources::from_table(&tmat).is_empty());
 
-        // textures-only: meshes+materials empty (true), textures non-empty.
         let mut ttex = ResourceTable::new();
         let id = ttex.next_id();
         ttex.insert_texture(build_solid_color_texture(id, "x", [0, 0, 0, 0]));

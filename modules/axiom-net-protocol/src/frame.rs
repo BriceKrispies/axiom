@@ -154,7 +154,7 @@ mod tests {
     fn read_expected_kind_rejects_an_unknown_kind_too() {
         let mut w = BinaryWriter::new();
         WIRE_VERSION.write_to(&mut w);
-        w.write_u8(200); // far outside the known range
+        w.write_u8(200);
         let mut r = BinaryReader::new(w.as_bytes());
         assert_eq!(
             read_expected_kind(&mut r, KIND_JOIN_ROOM)
@@ -193,7 +193,6 @@ mod tests {
 
     #[test]
     fn the_full_kind_range_peeks_back() {
-        // Every known discriminant round-trips through the header + peek.
         let kinds = [
             KIND_JOIN_ROOM,
             KIND_LEAVE_ROOM,

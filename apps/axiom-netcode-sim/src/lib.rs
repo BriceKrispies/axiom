@@ -441,7 +441,6 @@ mod tests {
 
     #[test]
     fn the_real_engine_backend_also_converges() {
-        // A handful of real engine Apps stay byte-identical under lockstep.
         let report = run_simulation(&clean(3, 16, Backend::Engine));
         assert!(report.all_agree);
         assert!(report.min_confirmed >= 12);
@@ -460,7 +459,6 @@ mod tests {
             "retransmission carries a lossy link to agreement"
         );
         assert!(report.min_confirmed > 0);
-        // Latency under loss is at least one tick somewhere.
         let max_lat = report
             .peers
             .iter()
@@ -515,12 +513,10 @@ mod tests {
             clean(3, 24, Backend::Mock),
             CheatKind::CorruptSim,
         ));
-        // The honest peers still agree with each other...
         assert!(
             report.all_agree,
             "honest peers converge despite the cheater"
         );
-        // ...and at least one of them flagged the cheater's divergence.
         let caught = report.peers.iter().any(|p| !p.desync_ticks.is_empty());
         assert!(caught, "reconcile must catch the corrupt peer");
     }
@@ -541,7 +537,6 @@ mod tests {
         c.per_peer[0].tick_rate = 3; // a slow tab submits a third as often
         let report = run_simulation(&c);
         assert!(report.all_agree);
-        // The slow peer bounds how far the group confirms.
         let slow_confirmed = report.peers[0].final_confirmed;
         assert!(slow_confirmed > 0 && slow_confirmed < report.max_confirmed.max(1) + 1);
     }
@@ -555,7 +550,6 @@ mod tests {
             to_tick: 25,
         }];
         let report = run_simulation(&c);
-        // After the link returns, retransmission lets the group converge again.
         assert!(report.all_agree);
         assert!(
             report.min_confirmed > 25,

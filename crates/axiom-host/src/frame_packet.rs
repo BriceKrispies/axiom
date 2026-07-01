@@ -374,7 +374,6 @@ mod tests {
         let v = FrameViewport::new(800, 600);
         assert_eq!(v.width(), 800);
         assert_eq!(v.height(), 600);
-        // Debug + Clone + Eq are derived and must be exercised.
         assert_eq!(v, v);
         assert_eq!(v, FrameViewport::new(800, 600));
         assert_ne!(v, FrameViewport::new(640, 480));
@@ -397,7 +396,6 @@ mod tests {
         let l = FrameLight::new(1, [2.0, 3.0, -4.0], [1.0, 0.0, 0.0, 2.5]);
         assert_eq!(l.kind(), 1);
         assert_eq!(l.vec(), [2.0, 3.0, -4.0]);
-        // Colour in [0..3], intensity in [3].
         assert_eq!(l.color_intensity(), [1.0, 0.0, 0.0, 2.5]);
         assert_ne!(
             l,
@@ -420,7 +418,6 @@ mod tests {
             d,
             FrameDrawItem::new(8, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], true)
         );
-        // The caster flag participates in equality.
         assert_ne!(
             d,
             FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], false)
@@ -483,7 +480,6 @@ mod tests {
         assert_eq!(p.lights()[0].kind(), 0);
         assert_eq!(p.light_view_proj(), mat(7.0));
         assert_eq!(p.features(), FrameFeatureSet::new(false, true, 1, 0));
-        // A packet defaults to no SDF scene (meshes only).
         assert!(p.sdf().is_none());
         assert!(format!("{p:?}").contains("FramePacket"));
     }
@@ -504,10 +500,8 @@ mod tests {
         );
         let base = sample_packet();
         let with = base.clone().with_sdf(scene.clone());
-        // The accessor returns the attached scene; the default packet has none.
         assert_eq!(with.sdf(), Some(&scene));
         assert!(base.sdf().is_none());
-        // The SDF arm participates in equality.
         assert_ne!(with, base);
     }
 

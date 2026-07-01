@@ -1,11 +1,9 @@
 //! Requirement traceability registry.
-//!
 //! Every requirement from `docs/growth-port/worldgen_simulator_requirements_audit.md`
 //! is listed here with a category and an implementation status, so "everything
 //! in the audit is accounted for" is a checkable fact, not a claim. The
 //! adversarial review agents (see `docs/growth-port/adversarial-review-plan.md`)
 //! cross-check this registry against both the audit and the real code.
-//!
 //! Status is updated as subsystems land. `Implemented` requires real code +
 //! tests; `Scaffolded` is a typed stub + wiring; `Deferred` is represented but
 //! intentionally later-phase; `Engine` is owned by an Axiom layer/module.
@@ -408,7 +406,6 @@ mod tests {
 
     #[test]
     fn report_status_breakdown() {
-        // Not an assertion gate; prints the breakdown adversarial review reads.
         let total = REQUIREMENTS.len();
         let impl_n = count(Status::Implemented);
         let scaf = count(Status::Scaffolded);

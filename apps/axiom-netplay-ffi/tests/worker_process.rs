@@ -24,11 +24,9 @@ fn spawn_worker(seed: u64, max_players: u32, fixed_step: u64) -> (Child, TcpStre
             "--fixed-step",
             &fixed_step.to_string(),
         ])
-        // The test `kill()`s this child, which under `cargo llvm-cov` would leave a
-        // half-written, corrupt `.profraw` in the shared profile pool and break the
-        // workspace-wide `llvm-profdata merge`. The worker is an app binary (outside
-        // the coverage scope), so its profile is not wanted: clear the instrumented
-        // output path for the child so it emits none. A no-op when not under coverage.
+        // Killing this child under `cargo llvm-cov` would leave a half-written
+        // `.profraw` that breaks the workspace-wide profile merge; clear the
+        // instrumented output path so it emits none (no-op outside coverage).
         .env_remove("LLVM_PROFILE_FILE")
         .stdout(Stdio::piped())
         .spawn()
@@ -67,8 +65,6 @@ fn out_of_process_worker_matches_in_process_determinism() {
     let (mut child, mut stream) = spawn_worker(7, 2, 16_666_667);
     let mut local = Session::new(7, 2, 16_666_667);
 
-    // Drive 40 ticks; player 0 nudges right every third tick. Both the worker and
-    // the in-process session must agree on tick count and state hash every step.
     for tick in 0..40u64 {
         if tick % 3 == 0 {
             let payload = ruleset::encode_move(0.1, 0.0);
@@ -91,7 +87,6 @@ fn out_of_process_worker_matches_in_process_determinism() {
         assert_eq!(advanced, Response::Tick { tick: lt, hash: lh });
     }
 
-    // Full snapshot parity — byte-equality is the determinism proof.
     match call(&mut stream, &Request::Snapshot) {
         Response::Snapshot { hash, bytes } => {
             assert_eq!(hash, local.state_hash());
@@ -107,8 +102,6 @@ fn out_of_process_worker_matches_in_process_determinism() {
 
 #[test]
 fn a_restored_worker_resumes_identical_state() {
-    // Run a worker, snapshot it mid-game, then prove a FRESH worker restored from
-    // those bytes is byte-identical — the basis of the host's crash-recovery.
     let (mut a, mut sa) = spawn_worker(3, 2, 16_666_667);
     for tick in 0..10u64 {
         call(

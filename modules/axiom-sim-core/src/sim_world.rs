@@ -35,7 +35,6 @@ use crate::sim_tick::SimTick;
 
 /// The owned simulation state: a [`FactStore`], [`RelationStore`],
 /// [`DefinitionRegistry`], [`ProcessQueue`], and [`CausalJournal`].
-///
 /// `SimWorld` references ECS entity handles inside its facts/relations/processes,
 /// but it does **not** own the ECS — liveness is checked against an
 /// [`EntityRegistry`] passed in at the mutation boundary. All mutation that comes
@@ -367,7 +366,6 @@ impl SimWorld {
         MaterialEffectResult::new(matched, report.len())
     }
 
-    // ---- Phase 5: scheduler / dirty coordination ----
 
     pub(crate) fn dirty(&self) -> &DirtySet {
         &self.dirty

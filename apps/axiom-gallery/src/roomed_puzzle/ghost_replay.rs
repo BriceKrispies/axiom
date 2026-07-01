@@ -98,15 +98,12 @@ mod tests {
     #[test]
     fn consumes_one_move_every_step_window() {
         let mut r = GhostReplay::new(vec![Direction::Right, Direction::Up]);
-        // The first GHOST_STEP_TICKS-1 ticks do nothing.
         for _ in 0..(GHOST_STEP_TICKS - 1) {
             assert_eq!(r.advance_tick(), None);
         }
-        // The GHOST_STEP_TICKS-th tick consumes the first move.
         assert_eq!(r.advance_tick(), Some(Direction::Right));
         assert_eq!(r.applied(), 1);
         assert_eq!(r.remaining(), 1);
-        // Another full window consumes the second move.
         for _ in 0..(GHOST_STEP_TICKS - 1) {
             assert_eq!(r.advance_tick(), None);
         }
@@ -121,7 +118,6 @@ mod tests {
             r.advance_tick();
         }
         assert!(r.is_finished());
-        // Many more ticks: still no moves.
         for _ in 0..1000 {
             assert_eq!(r.advance_tick(), None);
         }

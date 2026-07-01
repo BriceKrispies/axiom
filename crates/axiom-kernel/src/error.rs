@@ -130,8 +130,8 @@ mod cov {
         let diff_scope =
             KernelError::new(KernelErrorScope::Time, KernelErrorCode::RangeOverflow, "z");
         let diff_code = KernelError::new(KernelErrorScope::Memory, KernelErrorCode::InvalidId, "w");
-        assert!(base == same); // scope eq true, code eq true
-        assert!(base != diff_scope); // scope eq false (short-circuits)
-        assert!(base != diff_code); // scope eq true, code eq false
+        assert!(base == same);
+        assert!(base != diff_scope);
+        assert!(base != diff_code);
     }
 }

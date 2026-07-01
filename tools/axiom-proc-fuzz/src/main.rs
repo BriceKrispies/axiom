@@ -8,11 +8,6 @@
 //! regenerate → byte-equal). The property tests run under `cargo test --workspace`
 //! — the CI gate that fails on any determinism drift.
 //!
-//! Repo **tooling**, outside the engine dependency graph (exempt from the coverage
-//! and branchless gates). The non-test sweep is still written branchlessly, so it
-//! adds nothing to the engine branch count; the inherently branchy recipe fuzz
-//! lives in the (exempt) test module.
-//!
 //! ```text
 //! cargo run -p axiom-proc-fuzz            # sweep 2000 seeds, exit non-zero on drift
 //! ```

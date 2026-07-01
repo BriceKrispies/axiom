@@ -122,7 +122,6 @@ mod tests {
 
     #[test]
     fn replay_applies_despawn_commands() {
-        // Spawn two live, then build a log that despawns the first.
         let mut world: World<Storage> = World::new();
         let first = world.spawn_handle();
         world.spawn_handle();
@@ -135,7 +134,6 @@ mod tests {
 
     #[test]
     fn reordering_independent_spawns_is_not_semantically_meaningful() {
-        // Two spawns produce slots 1 and 2 regardless of order, so the worlds match.
         let mut a_log = ReplayLog::new();
         a_log.record_spawn();
         a_log.record_spawn();

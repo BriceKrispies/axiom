@@ -1,5 +1,4 @@
 //! Behavioral tests for `SimWorld` effect application and material transfer.
-//!
 //! A child module of `sim_world`, kept in its own file for the file-size budget.
 
 use super::*;
@@ -41,10 +40,10 @@ fn update_and_remove_fact_fail_cleanly_for_invalid_ids() {
         .insert(FactKind::new(1), a, FactValue::Unsigned(1), None, 0);
 
     let mut b = batch();
-    b.update_fact(id, FactValue::Unsigned(2), 1); // valid -> Applied
-    b.update_fact(FactId::from_raw(999), FactValue::Unsigned(3), 1); // invalid -> Failed
-    b.remove_fact(id); // valid -> Applied
-    b.remove_fact(FactId::from_raw(999)); // invalid -> Failed
+    b.update_fact(id, FactValue::Unsigned(2), 1);
+    b.update_fact(FactId::from_raw(999), FactValue::Unsigned(3), 1);
+    b.remove_fact(id);
+    b.remove_fact(FactId::from_raw(999));
     let report = world.apply_effects(b, &reg);
     assert_eq!(report.result(0), Some(EffectResult::Applied));
     assert_eq!(report.result(1), Some(EffectResult::Failed));
@@ -67,8 +66,8 @@ fn relation_effects_apply_skip_and_fail() {
         vec![RelationEndpoint::entity(a), RelationEndpoint::symbol(9)],
         None,
         None,
-    ); // Applied
-    b.add_relation(1, vec![RelationEndpoint::entity(dead)], None, None); // Skipped
+    );
+    b.add_relation(1, vec![RelationEndpoint::entity(dead)], None, None);
     let report = world.apply_effects(b, &reg);
     assert_eq!(report.result(0), Some(EffectResult::Applied));
     assert_eq!(report.result(1), Some(EffectResult::Skipped));
@@ -76,8 +75,8 @@ fn relation_effects_apply_skip_and_fail() {
 
     let live_id = world.relations().iter().next().unwrap().id();
     let mut b2 = batch();
-    b2.remove_relation(live_id); // Applied
-    b2.remove_relation(RelationId::from_raw(999)); // Failed
+    b2.remove_relation(live_id);
+    b2.remove_relation(RelationId::from_raw(999));
     let report2 = world.apply_effects(b2, &reg);
     assert_eq!(report2.result(0), Some(EffectResult::Applied));
     assert_eq!(report2.result(1), Some(EffectResult::Failed));
@@ -92,8 +91,8 @@ fn process_effects_apply_skip_and_fail() {
     let mut world = SimWorld::new();
 
     let mut b = batch();
-    b.schedule_process(1, a, 0, 5, None); // Applied
-    b.schedule_process(1, dead, 0, 5, None); // Skipped
+    b.schedule_process(1, a, 0, 5, None);
+    b.schedule_process(1, dead, 0, 5, None);
     let report = world.apply_effects(b, &reg);
     assert_eq!(report.result(0), Some(EffectResult::Applied));
     assert_eq!(report.result(1), Some(EffectResult::Skipped));
@@ -101,8 +100,8 @@ fn process_effects_apply_skip_and_fail() {
 
     let pid = world.processes().iter().next().unwrap().id();
     let mut b2 = batch();
-    b2.cancel_process(pid); // Applied
-    b2.cancel_process(ProcessId::from_raw(999)); // Failed
+    b2.cancel_process(pid);
+    b2.cancel_process(ProcessId::from_raw(999));
     let report2 = world.apply_effects(b2, &reg);
     assert_eq!(report2.result(0), Some(EffectResult::Applied));
     assert_eq!(report2.result(1), Some(EffectResult::Failed));
@@ -127,7 +126,6 @@ fn empty_batch_applies_nothing() {
     assert!(report.is_empty());
 }
 
-// ---- Phase 3: transfers ----
 
 use crate::definition::{DefinitionKind, PropertySet, TagSet};
 use crate::interaction::{InteractionKind, InteractionParams, InteractionRoute};
@@ -196,7 +194,6 @@ fn transfer_applies_and_conserves_quantity() {
     let result = world.apply_transfer(r, &interaction, dst, 1, 0xABC, 5);
     assert_eq!(result.outcome(), TransferOutcome::Applied);
     assert_eq!(result.moved(), Some(vol(4)));
-    // Source reduced, target created — total conserved at 10.
     assert_eq!(world.residues().get(source).unwrap().quantity().amount(), 6);
     let deposited: i64 = world
         .residues()
@@ -288,7 +285,6 @@ fn transfer_insufficient_quantity_fails_cleanly() {
 #[test]
 fn transfer_invalid_source_fails_cleanly() {
     let (mut world, mut interaction, _source, dst) = transfer_setup();
-    // Point the interaction at a non-existent residue.
     let bad = world.interactions_mut().create(InteractionParams {
         kind: interaction.kind(),
         route: InteractionRoute::Touch,
@@ -319,7 +315,6 @@ fn transfer_invalid_source_fails_cleanly() {
 #[test]
 fn transfer_incompatible_units_fails_cleanly() {
     let (mut world, interaction, _source, dst) = transfer_setup();
-    // Pre-place a same-substance residue at dst, but in Mass (incompatible).
     let sub = world.residues().get(_source).unwrap().definition();
     world.residues_mut().create(
         sub,

@@ -1,14 +1,10 @@
 //! The real wgpu **swap-chain** presentation binding — wasm32 only.
-//!
 //! This is the surface arm: it acquires a `wgpu` surface from the browser canvas,
 //! configures it, and presents one frame per call. All the actual *rendering* —
 //! pipeline, mesh/material caches, lighting uniform, instance packing, draw loop —
 //! lives in the shared [`crate::scene_renderer::SceneRenderer`], which the native
 //! off-screen arm ([`crate::offscreen`]) uses too, so there is a single
 //! definition of how a frame is drawn (no second copy to drift from).
-//!
-//! None of this compiles on native, so the deterministic engine, `cargo test`,
-//! and the coverage gate never pull in wgpu/web-sys.
 
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
@@ -24,7 +20,6 @@ use crate::upscale::UpscaleBlit;
 /// colour target** sized to the device tier's render resolution (with a matching
 /// depth view), then the [`UpscaleBlit`] samples that target across the acquired
 /// swap-chain texture, upscaling it on present.
-///
 /// The surface `config` is retained so the binding can **reconfigure and
 /// re-acquire** the drawing context after a backgrounded mobile browser drops it
 /// (the surface then reports `Lost`/`Outdated`) — see [`Self::render_frame`].
@@ -80,7 +75,6 @@ impl LiveGpuBinding {
     /// → depth buffer. `meshes` is `(mesh_id, 12-float vertices, indices)` and
     /// `materials` is `(material_id, width, height, RGBA8)`. Errors surface as
     /// `JsValue`.
-    ///
     /// Backend selection (see docs/render-fallback.md): a browser canvas can host
     /// exactly one context type, so the backend must be chosen *before* the
     /// surface is created. We first probe a WebGPU adapter via `navigator.gpu`
@@ -345,7 +339,6 @@ impl LiveGpuBinding {
     /// swap-chain texture and present. `clear` is the background colour. Recovers a
     /// dropped context exactly as [`Self::render_frame`] does. Real pixels; a frame
     /// skipped for surface recovery presents nothing and returns `Ok`.
-    ///
     /// Gradient fills are the one degraded case here: their baked ramp textures
     /// (emitted by the covered core into `geometry.gradient_textures()`) are not
     /// uploaded per frame, so a gradient-filled quad samples the white fallback.

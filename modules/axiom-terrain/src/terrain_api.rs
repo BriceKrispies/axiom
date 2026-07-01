@@ -95,8 +95,8 @@ mod tests {
         // Lattice values are keyed by WORLD coords, so a tile at origin 0 and a
         // tile at origin 15 agree on the shared world column 15 (seam == 0).
         let seed = 99;
-        let a = TerrainApi::heightfield(seed, 0, 0, 16, 6); // world x 0..15
-        let b = TerrainApi::heightfield(seed, 15, 0, 16, 6); // world x 15..30
+        let a = TerrainApi::heightfield(seed, 0, 0, 16, 6);
+        let b = TerrainApi::heightfield(seed, 15, 0, 16, 6);
         for cy in 0..6 {
             assert_eq!(
                 a.at(15, cy),
@@ -112,7 +112,6 @@ mod tests {
         let heights = f.heights();
         let min = *heights.iter().min().unwrap();
         let max = *heights.iter().max().unwrap();
-        // Not constant — the noise actually produces relief.
         assert!(max > min);
         // Coherent — a horizontal step never jumps more than twice the lattice
         // gradient (value noise is interpolated, not white noise).
@@ -125,8 +124,8 @@ mod tests {
     #[test]
     fn distinct_seeds_or_origins_differ() {
         let base = TerrainApi::heightfield(7, 0, 0, 16, 8);
-        assert_ne!(base, TerrainApi::heightfield(8, 0, 0, 16, 8)); // seed
-        assert_ne!(base, TerrainApi::heightfield(7, 64, 0, 16, 8)); // far origin
+        assert_ne!(base, TerrainApi::heightfield(8, 0, 0, 16, 8));
+        assert_ne!(base, TerrainApi::heightfield(7, 64, 0, 16, 8));
     }
 
     #[test]
@@ -134,9 +133,8 @@ mod tests {
         let f = TerrainApi::heightfield(7, 0, 0, 4, 3);
         assert_eq!(f.at(0, 0), f.heights()[0]);
         assert_eq!(f.at(3, 2), f.heights()[2 * 4 + 3]);
-        // Out of range -> 0, never a panic or a wrap into the next row.
-        assert_eq!(f.at(4, 0), 0); // cx == width
-        assert_eq!(f.at(0, 3), 0); // cy == height
+        assert_eq!(f.at(4, 0), 0);
+        assert_eq!(f.at(0, 3), 0);
     }
 
     #[test]

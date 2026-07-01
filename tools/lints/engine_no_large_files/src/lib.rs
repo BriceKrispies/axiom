@@ -46,34 +46,26 @@ dylint_linting::declare_late_lint! {
     "engine source file exceeds the line-count budget"
 }
 
-/// Maximum physical lines per engine source file. Tunable — adjust here and
-/// the test fixture in `ui/modules/m/src/big.rs` must track it. The current
-/// real-engine maximum is well under this value; this const prevents new code
-/// from quietly blowing past it.
+/// Maximum physical lines per engine source file. Tunable — the test fixture
+/// in `ui/modules/m/src/big.rs` must track this value.
 const MAX_LINES: usize = 1000;
 
 impl<'tcx> LateLintPass<'tcx> for EngineNoLargeFiles {
     fn check_crate(&mut self, cx: &LateContext<'tcx>) {
         let sm = cx.tcx.sess.source_map();
         for sf in sm.files().iter() {
-            // Only care about real on-disk files, not virtual/macro expansions.
             if !matches!(sf.name, FileName::Real(_)) {
                 continue;
             }
 
-            // count_lines() returns the number of line-ending characters seen so
-            // far; for a fully-loaded source file this equals the physical line
-            // count.
             let lines = sf.count_lines();
             if lines <= MAX_LINES {
                 continue;
             }
 
-            // Build a zero-width span at the very start of the file.  We need a
-            // Span so we can feed it to `is_engine_file` (which resolves the
-            // file path via the SourceMap) and so the diagnostic points at the
-            // file.  The fourth argument to `Span::new` is the parent span
-            // (None = no parent).
+            // A zero-width span at the file start: feeds `is_engine_file`
+            // (which resolves the path via the SourceMap) and anchors the
+            // diagnostic. `Span::new`'s fourth argument is the parent span.
             let span = Span::new(sf.start_pos, sf.start_pos, SyntaxContext::root(), None);
 
             if !is_engine_file(cx, span) {

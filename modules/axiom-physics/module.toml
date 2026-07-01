@@ -1,11 +1,5 @@
-# Axiom physics engine module manifest.
-#
-# axiom-physics is an *isolated* engine module: it composes completed layers
-# (kernel, runtime, math) into a deterministic rigid-body physics world. It
-# never depends on another module, an app, or a tool, and never touches a
-# scene, renderer, asset, input, animation, audio, ECS, plugin, or editor
-# system. Composition (translating a PhysicsSnapshot into scene/render state)
-# is the job of an app or a future feature module, never of physics itself.
+# Composition (translating a PhysicsSnapshot into scene/render state) is the
+# job of an app or a future feature module, never of physics itself.
 [module]
 name = "physics"
 crate_name = "axiom-physics"

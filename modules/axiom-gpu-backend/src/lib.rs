@@ -19,73 +19,50 @@
 //! materials by name. It takes plain engine data (vertex/instance float streams +
 //! a clear colour) and a host presentation request, and issues GPU calls.
 //!
-//! This is the second sanctioned platform-facing module (Module Law #9): its real
-//! `wgpu`/`web-sys` arm is compiled only for `wasm32`, behind the native-clean
-//! facade, and never enters the native build or the coverage gate.
-//!
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** facade: [`GpuBackendApi`].
 
 mod gpu_backend_api;
 
-// Pure, native-testable adapter from the backend-neutral host::FramePacket to
-// the live path's instance-batch + light shape. No GPU/browser code, so it
-// builds and is covered on native exactly as on wasm.
+// Pure, native-testable adapter from host::FramePacket to the live path's
+// instance-batch + light shape.
 mod frame_packet_adapter;
 
-// The COVERED CORE of the GPU 2D raster arm: walk a layer-sorted host::Draw2dList
-// into backend-neutral quad geometry (positions, UVs, alpha-folded colours, and a
-// per-quad texture). Pure, branchless, fully covered on native — the 2D peer of
-// `frame_packet_adapter`. Referenced by `GpuBackendApi::present_draw2d` (default
-// build) and the off-screen 2D entry, so it is never dead code.
+// Walks a layer-sorted host::Draw2dList into backend-neutral quad geometry
+// (positions, UVs, alpha-folded colours, per-quad texture). Pure and
+// branchless — the 2D peer of `frame_packet_adapter`.
 mod draw2d_geometry;
 
-// The coverage-EXEMPT platform arm of the GPU 2D raster: the real wgpu pipeline
-// that draws the covered core's geometry, alpha-blended, to a wgpu colour target.
-// The 2D peer of `scene_renderer`: compiled wherever a real GPU is in play — the
-// live browser arm (`wasm32`, driven by `live_gpu_binding::render_draw2d`) or the
-// native `offscreen` feature (the screenshot tool + parity proofs) — so the
-// default native build, the coverage gate, and the branchless lint never see this
-// wgpu code, exactly as the live 3D binding and the off-screen path share
-// `scene_renderer`.
+// The real wgpu pipeline that draws `draw2d_geometry`'s output, alpha-blended,
+// to a wgpu colour target — the 2D peer of `scene_renderer`.
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod draw2d_renderer;
 
-// The native off-screen 2D capture entry — `offscreen` feature, non-wasm. Renders
-// a Draw2dList's geometry into a linear RGBA8 texture and reads it back; drives
-// `axiom-shot` and the SPEC-04 alpha-blend parity proof.
+// Native off-screen 2D capture entry: renders a Draw2dList's geometry into a
+// linear RGBA8 texture and reads it back; drives `axiom-shot` and the SPEC-04
+// alpha-blend parity proof.
 #[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
 mod draw2d_offscreen;
 
 // The deterministic surface-recovery decision (what to do when the GPU surface
-// is lost/outdated — as a backgrounded mobile browser does). Pure data → action,
-// but its only non-test consumer is the wasm-only live binding, so it is compiled
-// for `wasm32` (where the binding uses it) and for native `test` (where its own
-// unit tests exercise it) — and is absent from the default/offscreen builds,
-// where it would be dead.
+// is lost/outdated, as a backgrounded mobile browser does).
 #[cfg(any(target_arch = "wasm32", test))]
 mod surface_recovery;
 
-// The shared, target-agnostic renderer (pipeline + caches + draw). Compiled only
-// where a real GPU is in play — wasm32 (the live arm) or the native `offscreen`
-// feature (the screenshot tool) — so the default native build, coverage gate, and
-// branchless lint never see this wgpu code.
+// The shared, target-agnostic renderer (pipeline + caches + draw).
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod scene_renderer;
 
-// The upscale-blit pipeline that presents a reduced-resolution render target to
-// the swapchain (the mobile-first render-scale path). Its only consumer is the
-// live binding (wasm32); the off-screen screenshot path renders at a fixed size
-// and never upscales, so this is wasm32-only.
+// Upscale-blit pipeline presenting a reduced-resolution render target to the
+// swapchain (the mobile-first render-scale path). Only the live binding uses it.
 #[cfg(target_arch = "wasm32")]
 mod upscale;
 
-// The real wgpu swap-chain binding — compiled only for wasm32, behind the facade.
+// The real wgpu swap-chain binding.
 #[cfg(target_arch = "wasm32")]
 mod live_gpu_binding;
 
-// The native off-screen renderer — compiled only behind the `offscreen` feature
-// (non-wasm). Drives the same `scene_renderer` as the live arm.
+// The native off-screen renderer. Drives the same `scene_renderer` as the live arm.
 #[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
 mod offscreen;
 

@@ -291,12 +291,10 @@ fn sync_nodes(nodes: &Nodes, state: &OverlayState) {
         "axiom-dbg-overlay axiom-dbg--{}",
         state.density_label()
     ));
-    // Collect the row cells and console result lines as specs, then RECONCILE the
-    // DOM in place (reuse existing nodes, only update changed text/attrs) instead
-    // of clear-and-rebuild. The overlay repaints every frame; rebuilding would
-    // destroy the very nodes a user is clicking (a mousedown then mouseup on a
-    // replaced node fires no `click`), making click-to-copy unreliable — and it
-    // churns the DOM 60×/sec for nothing.
+    // Collect specs, then RECONCILE the DOM in place (reuse existing nodes)
+    // instead of clear-and-rebuild: rebuilding would break click-to-copy (a
+    // mousedown/mouseup on a replaced node fires no `click`) and churn the DOM
+    // 60×/sec for nothing.
     let mut row_cells: Vec<ChildSpec> = Vec::new();
     let mut result_lines: Vec<ChildSpec> = Vec::new();
     for item in state.draw_list().items() {
@@ -383,11 +381,8 @@ fn reconcile_children(document: &Document, container: &Element, specs: &[ChildSp
 
 fn build_dom(document: &Document, parent: &Element) -> Nodes {
     // Idempotent at the DOM level: drop any pre-existing overlay root before
-    // building a fresh one, so the page never stacks two overlays painting their
-    // values on top of each other. This mirrors the dedup `inject_style` already
-    // does for the stylesheet, and guards the case where the app's loader runs
-    // `start()` more than once (e.g. a wasm → wasm2js fallback that re-inits, or
-    // an HMR reload) and so mounts a second `DebugOverlayApi` over the first.
+    // building a fresh one (mirrors `inject_style`'s dedup), so a repeated
+    // `start()` (wasm2js fallback re-init, HMR reload) never stacks two overlays.
     remove_existing(document, OVERLAY_ID);
     let root = document.create_element("div").expect("create overlay root");
     root.set_id(OVERLAY_ID);
@@ -580,10 +575,9 @@ fn apply_position(root: &Element, state: &OverlayState) {
 }
 
 /// One delegated `click` listener on the overlay root: a click on any element
-/// carrying a `data-copy` payload (the diagnostics rows and console result lines,
-/// tagged by [`set_copy`]) queues that text and flushes it to the clipboard.
-/// Click is a user gesture, so `navigator.clipboard` is permitted here. Other
-/// clicks (header, console input, empty area) carry no `data-copy` and are no-ops.
+/// carrying a `data-copy` payload (tagged by [`set_copy`]) queues that text and
+/// flushes it to the clipboard. Click is a user gesture, so
+/// `navigator.clipboard` is permitted here; other clicks are no-ops.
 fn install_copy_click(
     state: &Rc<RefCell<OverlayState>>,
     nodes: &Nodes,
@@ -607,10 +601,9 @@ fn install_copy_click(
 }
 
 /// Drain the overlay's pending clipboard requests and write each to the system
-/// clipboard via `navigator.clipboard.writeText`. Must be called from inside a
-/// user gesture (the console keydown, or a row/result click). The returned
-/// Promise is intentionally dropped — the copy proceeds, and a failure (e.g. an
-/// insecure context) is silently ignored so it never disrupts the console.
+/// clipboard. Must be called from inside a user gesture. The returned Promise
+/// is intentionally dropped — a failure (e.g. an insecure context) is silently
+/// ignored so it never disrupts the console.
 fn flush_clipboard(state: &Rc<RefCell<OverlayState>>) {
     let requests = state.borrow_mut().take_clipboard_requests();
     let clipboard = window().navigator().clipboard();

@@ -217,7 +217,6 @@ mod tests {
         let mut buffer = CommandBuffer::new();
         buffer.spawn();
         buffer.spawn();
-        // Nothing happens to the world until apply.
         assert_eq!(world.entity_count(), 0);
         assert_eq!(buffer.len(), 2);
         let report = buffer.apply(&mut world);
@@ -248,13 +247,11 @@ mod tests {
         world.storage_mut().value.insert(handle.id(), 7);
         let mut buffer = CommandBuffer::new();
         let ticket = buffer.despawn(handle);
-        // Still live until the barrier.
         assert_eq!(world.entity_count(), 1);
         let report = buffer.apply(&mut world);
         assert_eq!(report.outcome(ticket).unwrap().despawned(), Some(true));
         assert_eq!(world.entity_count(), 0);
         assert!(world.storage().value.get(handle.id()).is_none());
-        // The immutable column view exposes the same single named column.
         let columns = world.storage().columns();
         assert_eq!(columns.len(), 1);
         assert_eq!(columns[0].0, "value");
@@ -264,7 +261,7 @@ mod tests {
     fn despawn_of_stale_handle_fails_cleanly() {
         let mut world: World<Storage> = World::new();
         let handle = world.spawn_handle();
-        world.despawn_handle(handle); // already gone
+        world.despawn_handle(handle);
         let mut buffer = CommandBuffer::new();
         let ticket = buffer.despawn(handle);
         let report = buffer.apply(&mut world);
@@ -276,7 +273,6 @@ mod tests {
         let mut world: World<Storage> = World::new();
         let mut buffer = CommandBuffer::new();
         let spawn_ticket = buffer.spawn();
-        // Apply the spawn first to get a handle, then despawn it in a second batch.
         let report = buffer.apply(&mut world);
         let handle = report.outcome(spawn_ticket).unwrap().spawned().unwrap();
         let despawn_ticket = buffer.despawn(handle);
@@ -286,7 +282,6 @@ mod tests {
             Some(true)
         );
         assert_eq!(world.entity_count(), 0);
-        // A spawn outcome has no despawn record and vice versa.
         assert_eq!(report.outcome(spawn_ticket).unwrap().despawned(), None);
         assert!(report2.outcome(despawn_ticket).unwrap().spawned().is_none());
         assert!(report.outcome(99).is_none());

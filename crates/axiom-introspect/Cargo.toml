@@ -7,21 +7,15 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free and wasm-clean.
 crate-type = ["rlib"]
 
 [dependencies]
-# Layer 05 imports only the kernel and the frame layer it adapts. The Axiom
-# Layer Law and `cargo xtask check-architecture` enforce that nothing else
-# slips in.
 axiom-kernel = { path = "../axiom-kernel" }
 axiom-frame = { path = "../axiom-frame" }
 axiom-ecs = { path = "../axiom-ecs" }
 
 [dev-dependencies]
-# Test-only: lower layers used to synthesize real `EngineFrame` fixtures the
-# introspection adapters run against (the same path the frame layer's own
-# tests use). Never imported by the layer's runtime code.
+# Test-only fixtures for real EngineFrames; never imported by runtime code.
 axiom-host = { path = "../axiom-host" }
 axiom-runtime = { path = "../axiom-runtime" }
 axiom-math = { path = "../axiom-math" }

@@ -13,13 +13,10 @@ use rustc_lint::{LateContext, LateLintPass};
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
-    ///
     /// Flags `impl` blocks in **engine code** (layers under `crates/` and modules
     /// under `modules/`) that have more than [`MAX_ITEMS`] associated items
     /// (methods, associated constants, and associated types combined).
-    ///
     /// ### Why is this bad?
-    ///
     /// An `impl` block with dozens of methods is a god-object smell. It means one
     /// type is carrying too many responsibilities, making the code hard to reason
     /// about, hard to test in isolation, and hard for future agents to navigate.
@@ -27,9 +24,7 @@ dylint_linting::declare_late_lint! {
     /// well-bounded capability. When an impl block exceeds the limit, split the
     /// behavior into focused traits or break the type into smaller, more
     /// purposeful types.
-    ///
     /// ### Example
-    ///
     /// ```rust
     /// // BAD — one impl block with 32 methods signals a god object
     /// struct Engine;
@@ -40,9 +35,7 @@ dylint_linting::declare_late_lint! {
     ///     // ... 29 more methods ...
     /// }
     /// ```
-    ///
     /// Use instead:
-    ///
     /// ```rust
     /// // GOOD — split into focused traits
     /// trait Lifecycle { fn init(&self); fn update(&self); }
@@ -57,14 +50,10 @@ dylint_linting::declare_late_lint! {
 }
 
 /// Maximum associated items allowed in one engine `impl` block.
-/// This is intentionally tunable — the engine has API-facade impls with many
-/// methods, so headroom is left. Prefer splitting into focused traits first.
 const MAX_ITEMS: usize = 30;
 
 impl<'tcx> LateLintPass<'tcx> for EngineNoLargeImplBlocks {
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
-        // `ItemKind::Impl` wraps a `Box<rustc_hir::Impl<'hir>>` whose `items`
-        // field is a `&[ImplItemRef]` — one entry per associated item.
         let ItemKind::Impl(imp) = item.kind else {
             return;
         };
@@ -72,15 +61,12 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoLargeImplBlocks {
         if n <= MAX_ITEMS {
             return;
         }
-        // Don't blame macro-generated impl blocks.
         if item.span.from_expansion() {
             return;
         }
-        // Test helpers may have large impl blocks freely.
         if is_in_test(cx.tcx, item.hir_id()) {
             return;
         }
-        // Only engine source (layers / modules) is in scope.
         if !is_engine_file(cx, item.span) {
             return;
         }

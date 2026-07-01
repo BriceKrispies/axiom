@@ -1,5 +1,4 @@
 //! [`AgentApi`] — the module's single public facade.
-//!
 //! Every neutral agent contract is constructed and stepped through this one
 //! type. The contract types it returns and accepts (ids, profiles, memory,
 //! observations, intents, queues, brains, reports) are sealed in private
@@ -24,7 +23,6 @@ use crate::replay_brain::ReplayBrain;
 use axiom_kernel::Tick;
 
 /// The deterministic embodied-agent facade — the only public type in the module.
-///
 /// It is a stateless constructor and orchestrator: it builds the neutral
 /// contracts and steps a brain once. It holds no world, no clock, and no global
 /// state.
@@ -64,7 +62,6 @@ impl AgentApi {
 }
 
 impl AgentApi {
-    // --- identity & profiles ---
 
     /// Create an agent id from a raw value.
     pub fn create_agent_id(raw: u64) -> AgentId {
@@ -88,14 +85,12 @@ impl AgentApi {
         profile.with_action_budget(max_actions_per_tick)
     }
 
-    // --- memory ---
 
     /// An empty memory bounded to `capacity` entries.
     pub fn empty_memory(capacity: usize) -> AgentMemory {
         AgentMemory::empty_with_capacity(capacity)
     }
 
-    // --- observation ---
 
     /// An empty observation for `agent_id` at `tick`.
     pub fn empty_observation(agent_id: AgentId, tick: Tick) -> Observation {
@@ -198,7 +193,6 @@ impl AgentApi {
         ActionIntent::pointer_up(control_code)
     }
 
-    // --- action intents (high-level, data only) ---
 
     /// Orient toward subject `subject_code`.
     pub fn look_at_subject_intent(subject_code: u32) -> ActionIntent {
@@ -243,7 +237,6 @@ impl AgentApi {
         ActionQueue::empty_with_capacity(capacity)
     }
 
-    // --- brains ---
 
     /// A scripted-brain rule: match facts of `fact_kind_code`, emit `intent`,
     /// and report `reason_code` when the rule fires.
@@ -269,7 +262,6 @@ impl AgentApi {
         HoldSetBrain::new(controls)
     }
 
-    // --- stepping ---
 
     /// Step `brain` once: observe, decide, emit player-equivalent intents, and
     /// produce a deterministic decision report. The step's tick stamps the
@@ -298,9 +290,6 @@ mod tests {
 
     #[test]
     fn hold_set_brain_facade_steps_a_multi_intent_decision() {
-        // The facade path for the multi-intent capability: a hold-set brain over
-        // two controls, stepped through `AgentApi::step`, reports two emitted
-        // actions in one tick and the queue folds them into one combined bitmask.
         let agent_id = AgentApi::create_agent_id(1);
         let profile = AgentApi::debug_perfect_profile();
         let mut brain = AgentApi::hold_set_brain(vec![0b001, 0b010]);

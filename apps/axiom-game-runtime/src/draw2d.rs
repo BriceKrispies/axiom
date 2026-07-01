@@ -4,12 +4,10 @@
 //! transform stack, the layer sort, and the particle field; this module only
 //! marshals scalars in and the neutral, layer-sorted command list out — nothing
 //! is rasterized or re-implemented here.
-//!
 //! ## Presentation-only (§17.5)
 //! Everything here is display data: the particle field feeds no sim-readable
 //! getter, and `advance_particles` steps on the **presentation** delta the host
 //! measured, never a fixed sim tick — so a 2D draw can never perturb determinism.
-//!
 //! ## Boundary convention (the established slice / scalar / handle rule)
 //! A point / bounds crosses as a `&[f64]` slice (`bounds = [x, y, w, h]`); a
 //! colour as its packed `0xRRGGBBAA` `u32`; an emitter recipe as one flat
@@ -383,7 +381,6 @@ impl GameBridge {
     /// columns that follow depend on `kind`, so a consumer can advance by
     /// `4 + len` past a kind it does not handle. Geometry is in the surface's own
     /// units; colours are packed `0xRRGGBBAA`; `alpha` is the resolved `0..1`:
-    ///
     /// - `RECT`     (1): `[minX, minY, sizeW, sizeH, fillRGBA, strokeRGBA, strokeWidth, alpha]`
     /// - `CIRCLE`   (2): `[centerX, centerY, radius, fillRGBA, strokeRGBA, strokeWidth, alpha]`
     /// - `ELLIPSE`  (3): `[centerX, centerY, rx, ry, rotation, fillRGBA, strokeRGBA, strokeWidth, alpha]`
@@ -401,7 +398,6 @@ impl GameBridge {
     /// - `PATH`     (5): `[fillRGBA, strokeRGBA, strokeWidth, alpha, closed,
     ///   pointCount, (x, y) × pointCount]` — `closed` is `0`/`1` (a closed path is
     ///   a polygon); the vertices are in the surface's own units.
-    ///
     /// Resets the per-frame surface for the next frame (particles persist). The
     /// `(kind, layer, submission)` prefix preserves the deterministic ordering the
     /// list always carried; the geometry is purely additive.
@@ -953,8 +949,8 @@ mod tests {
         let b = bridge();
         // Three distinct sub-rects, flattened [x, y, w, h, …], at 2 fps.
         let frames = [
-            0.0, 0.0, 1.0, 1.0, //
-            10.0, 0.0, 1.0, 1.0, //
+            0.0, 0.0, 1.0, 1.0,
+            10.0, 0.0, 1.0, 1.0,
             20.0, 0.0, 1.0, 1.0,
         ];
         // elapsed 1.0s ⇒ index floor(2.0) = 2 ⇒ the third frame.

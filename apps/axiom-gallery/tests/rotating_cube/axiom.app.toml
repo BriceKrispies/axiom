@@ -1,25 +1,12 @@
-# Axiom APP PACKAGE manifest — axiom-demo-rotating-cube-browser.
-#
-# This is the declarative entry point of the app's data package (Phase 4 of the
-# app-datafication design, docs/app-datafication/). It is distinct from
-# `app.toml`, which is the ARCHITECTURAL manifest the layer/module checker reads.
-# This file is data: it is parsed by the future `tools/axiom-appc` compiler and
-# by the migration validation test, never by the engine spine.
-#
-# Today the app still authors its scene in Rust (src/lib.rs). This package
-# describes the SAME scene as data; a native test
-# (tests/scene_manifest_matches_runtime.rs) asserts the two agree, so the data
-# file is a checked mirror of the runtime. The full migration (when `axiom-appc`
-# + `axiom-runner` exist) will delete the Rust scene and load this package.
+# This package describes, as data, the same scene authored in Rust in
+# src/lib.rs; tests/scene_manifest_matches_runtime.rs asserts the two agree, so
+# this file is a checked mirror of the runtime, not (yet) consumed by the engine.
 
 [package]
 name = "rotating-cube-browser-demo"
 schema_version = 1
 entry_scene = "package/scenes/main.toml"
 
-# Deterministic load order for the (single-scene) package. Only the kinds this
-# app populates are listed; the canonical full order lives in
-# docs/app-datafication/DATA_ONLY_APP_MODEL.md.
 load_order = [
     "meshes",
     "materials",
@@ -27,8 +14,6 @@ load_order = [
 ]
 
 [surface]
-# How this package presents. The runner binds the real wgpu surface on wasm32;
-# native tests use the headless build path.
 kind = "scene-3d"
 width = 800
 height = 600

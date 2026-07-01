@@ -1,5 +1,5 @@
-//! Overworld surface queries. Audit: OW-E3 locate_region/sample_surface,
-//! "Query/API requirements" (spatial index), Climate (derived temperature/biome).
+//! Overworld surface queries: region lookup by direction, plus derived
+//! temperature/biome sampling.
 use axiom_math::Vec3;
 
 use crate::growth::atlas::{lat_band, lon_band};
@@ -9,11 +9,11 @@ use crate::growth::model_planet::{PlanetSurfaceAtlas, SurfaceSample};
 /// Find the region whose site direction is closest to `dir` (max dot product).
 ///
 /// Fast-path: when the atlas `RegionLocator` is populated, only the query's
-/// lat/long cell plus its eight neighbours are checked (audit: perf P1). The
-/// single neighbour ring guarantees the true nearest centre is considered even
-/// when it sits just across a cell boundary, so the result is identical to the
+/// lat/long cell plus its eight neighbours are checked. The single neighbour
+/// ring guarantees the true nearest centre is considered even when it sits
+/// just across a cell boundary, so the result is identical to the
 /// brute-force scan. An empty locator (index not yet built) falls back to the
-/// linear scan, so the query always works. Audit: OW-E3.
+/// linear scan, so the query always works.
 pub fn locate_region(atlas: &PlanetSurfaceAtlas, dir: Vec3) -> RegionId {
     let bands = atlas.locator.bands;
     if bands == 0 || atlas.locator.cell_regions.is_empty() {
@@ -79,9 +79,9 @@ fn locate_region_linear(atlas: &PlanetSurfaceAtlas, dir: Vec3) -> RegionId {
     RegionId(best as u32)
 }
 
-/// Derive temperature from latitude + elevation. Audit: Climate requirements
-/// (latitude cosine minus elevation lapse). Warmest at the equator (lat 0),
-/// coldest at the poles; higher elevation is colder (lapse rate).
+/// Derive temperature from latitude + elevation (latitude cosine minus
+/// elevation lapse). Warmest at the equator (lat 0), coldest at the poles;
+/// higher elevation is colder (lapse rate).
 pub fn derive_temperature(latitude_rad: f32, elevation: f32) -> f32 {
     let latitudinal = latitude_rad.cos();
     let lapse = elevation.max(0.0) * 0.6;
@@ -93,8 +93,8 @@ const BIOME_HOT_THRESHOLD: f32 = 0.5;
 /// Threshold above which a region counts as "wet" for biome lookup.
 const BIOME_WET_THRESHOLD: f32 = 0.5;
 
-/// Biome ids produced by [`derive_biome`]. Audit: OW-E3 derived biome, the
-/// hot/cold x wet/dry lookup table (ocean when below sea level 0).
+/// Biome ids produced by [`derive_biome`]: ocean when below sea level 0,
+/// otherwise a hot/cold x wet/dry lookup table.
 pub mod biome {
     pub const OCEAN: u32 = 0;
     pub const DESERT: u32 = 1; // hot + dry
@@ -103,8 +103,8 @@ pub mod biome {
     pub const TAIGA: u32 = 4; // cold + wet
 }
 
-/// Map climate scalars to a biome id. Audit: Climate requirements biome lookup.
-/// Ocean below sea level 0; otherwise a hot/cold x wet/dry table.
+/// Map climate scalars to a biome id: ocean below sea level 0, otherwise a
+/// hot/cold x wet/dry table.
 pub fn derive_biome(temperature: f32, moisture: f32, elevation: f32) -> BiomeId {
     if elevation < 0.0 {
         return BiomeId(biome::OCEAN);
@@ -120,12 +120,12 @@ pub fn derive_biome(temperature: f32, moisture: f32, elevation: f32) -> BiomeId 
     BiomeId(id)
 }
 
-/// Sample overworld fields at a unit direction. Audit: OW-E3/E4.
+/// Sample overworld fields at a unit direction.
 pub fn sample_surface(atlas: &PlanetSurfaceAtlas, dir: Vec3) -> SurfaceSample {
     let region = locate_region(atlas, dir);
     let mut sample = sample_region(atlas, region);
     // Temperature is latitude-dependent, so it is derived from the query
-    // direction rather than the region centre. Audit: Climate (query-time temp).
+    // direction rather than the region centre.
     if sample.region == region {
         sample.temperature = derive_temperature(axiom_math::latitude(dir).get(), sample.elevation);
         sample.biome = derive_biome(sample.temperature, sample.moisture, sample.elevation);
@@ -134,8 +134,8 @@ pub fn sample_surface(atlas: &PlanetSurfaceAtlas, dir: Vec3) -> SurfaceSample {
 }
 
 /// Sample overworld fields directly by region id (used by the game world, which
-/// already knows the region from `locate_region`/`GameWorldLocalMap`). Audit:
-/// OW-E3, GW-E2. Temperature uses the region centre's latitude.
+/// already knows the region from `locate_region`/`GameWorldLocalMap`).
+/// Temperature uses the region centre's latitude.
 pub fn sample_region(atlas: &PlanetSurfaceAtlas, region: RegionId) -> SurfaceSample {
     let i = region.index();
     if i >= atlas.region_count() {
@@ -196,7 +196,6 @@ mod tests {
 
     #[test]
     fn locator_matches_brute_force_for_many_queries() {
-        // The key correctness property of the spatial index.
         let atlas = synthetic_atlas(137);
         assert!(atlas.locator.bands > 0, "locator must be populated");
         let mut checked = 0;
@@ -216,7 +215,7 @@ mod tests {
     #[test]
     fn empty_locator_falls_back_to_linear() {
         let mut atlas = synthetic_atlas(40);
-        atlas.locator = Default::default(); // simulate "index not built yet"
+        atlas.locator = Default::default();
         for q in 0..200u32 {
             let dir = pseudo_dir(q + 100);
             let got = locate_region(&atlas, dir);
@@ -236,7 +235,6 @@ mod tests {
         assert_eq!(s.elevation, atlas.region_elevation[i]);
         assert_eq!(s.moisture, atlas.region_moisture[i]);
         assert_eq!(s.plate, PlateId(atlas.region_plate[i]));
-        // Biome derived from temperature/moisture/elevation, consistent.
         let expect_biome = derive_biome(s.temperature, s.moisture, s.elevation);
         assert_eq!(s.biome, expect_biome);
     }
@@ -248,17 +246,14 @@ mod tests {
         assert_eq!(s.region, RegionId(5));
         assert_eq!(s.elevation, atlas.region_elevation[5]);
         assert_eq!(s.moisture, atlas.region_moisture[5]);
-        // Out-of-range id returns default.
         let oob = sample_region(&atlas, RegionId(9999));
         assert_eq!(oob.region, RegionId::default());
     }
 
     #[test]
     fn derive_biome_matches_table() {
-        // Ocean dominates whenever below sea level.
         assert_eq!(derive_biome(1.0, 1.0, -0.1), BiomeId(biome::OCEAN));
         assert_eq!(derive_biome(0.0, 0.0, -5.0), BiomeId(biome::OCEAN));
-        // hot/cold x wet/dry on land.
         assert_eq!(derive_biome(0.9, 0.1, 1.0), BiomeId(biome::DESERT));
         assert_eq!(derive_biome(0.9, 0.9, 1.0), BiomeId(biome::RAINFOREST));
         assert_eq!(derive_biome(0.1, 0.1, 1.0), BiomeId(biome::TUNDRA));

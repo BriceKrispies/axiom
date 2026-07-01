@@ -76,8 +76,8 @@ mod tests {
     #[test]
     fn get_with_a_foreign_or_zero_handle_is_none() {
         let assets: Assets<Mesh> = Assets::default();
-        assert_eq!(assets.get(Handle::new(0)), None); // zero handle
-        assert_eq!(assets.get(Handle::new(99)), None); // out of range
+        assert_eq!(assets.get(Handle::new(0)), None);
+        assert_eq!(assets.get(Handle::new(99)), None);
     }
 
     #[test]

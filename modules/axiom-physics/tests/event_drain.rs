@@ -1,5 +1,4 @@
 //! Proofs for the deterministic event log: ordering, draining, and bounded growth.
-//!
 //! `events()` is a read-only view of pending events in emission order;
 //! `drain_events()` returns them in that order and clears the queue so the log —
 //! which gains a `StepCompleted` every step — cannot grow without bound. Driven
@@ -71,11 +70,10 @@ fn events_view_matches_pending_events_before_drain() {
 fn step_completed_does_not_grow_without_bound_when_drained_each_step() {
     let mut api = PhysicsApi::new();
     api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
-    api.drain_events(); // clear the initial BodyCreated event
+    api.drain_events();
 
     for _ in 0..1000 {
         api.step(tenth_second()).unwrap();
-        // Each step adds exactly one StepCompleted; draining keeps the log at zero.
         assert_eq!(api.events().len(), 1, "only this step's event is pending");
         let drained = api.drain_events();
         assert_eq!(drained.len(), 1);
@@ -98,7 +96,6 @@ fn events_after_drain_only_include_new_events() {
     let _old = api.drain_events();
     assert!(api.events().is_empty());
 
-    // A fresh operation produces only its own event, not the drained history.
     api.create_static_body(Transform::IDENTITY).unwrap();
     let now: Vec<String> = api.events().iter().map(|e| format!("{e:?}")).collect();
     assert_eq!(now.len(), 1, "only the new BodyCreated is pending");

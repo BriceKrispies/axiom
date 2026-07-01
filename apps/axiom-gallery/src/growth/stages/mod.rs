@@ -1,5 +1,4 @@
 //! Worldgen stage implementations, registered into a [`StageRegistry`] by id.
-//! Audit: world_gen_pipelines.xml `default_globe`; OW-E5 (id-keyed stages).
 //!
 //! Each id in [`DEFAULT_GLOBE`] resolves to a real [`Stage`] implementation in
 //! its own submodule. The three pre-pipeline ids — `topology`, `half_edge_mesh`,
@@ -37,7 +36,7 @@ use triangle_values::TriangleValuesStage;
 use wind_field::WindFieldStage;
 
 /// A no-op stage for ids whose data is produced before the pipeline runs
-/// (`topology`, `half_edge_mesh`, `region_neighbours`). Audit: OW pre-pipeline.
+/// (`topology`, `half_edge_mesh`, `region_neighbours`).
 struct NoopStage(&'static str);
 impl Stage for NoopStage {
     fn id(&self) -> &'static str {
@@ -67,7 +66,6 @@ pub fn register_default_stages(reg: &mut StageRegistry) {
     reg.register("moisture_advection", || Box::new(MoistureAdvectionStage));
     reg.register("rain_shadow", || Box::new(RainShadowStage));
 
-    // Pre-pipeline / topology-produced ids remain no-ops.
     for id in DEFAULT_GLOBE {
         if !reg.contains(id) {
             let sid: &'static str = id;
@@ -88,7 +86,6 @@ mod tests {
         for id in DEFAULT_GLOBE {
             assert!(reg.contains(id), "stage {} not registered", id);
         }
-        // The full pipeline must build without a MissingStage error.
         assert!(reg.build(DEFAULT_GLOBE).is_ok());
     }
 }

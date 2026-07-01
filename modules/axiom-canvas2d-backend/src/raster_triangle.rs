@@ -66,9 +66,7 @@ mod tests {
         let v1 = RasterVertex::new(3.0, 0.0, 0.0, [0.6, 0.0, 0.0, 1.0], 5);
         let v2 = RasterVertex::new(0.0, 3.0, 0.0, [0.0, 0.6, 0.3, 1.0], 5);
         let verts = [v0, v1, v2];
-        // Mean of the three colours.
         assert_eq!(RasterTriangle::base_color(&verts), [0.2, 0.2, 0.1, 1.0]);
-        // `shaded` carries an explicit (already cue-shaded) colour + the object id.
         let t = RasterTriangle::shaded(verts, [0.5, 0.4, 0.3, 1.0]);
         assert_eq!(t.color(), [0.5, 0.4, 0.3, 1.0]);
         assert_eq!(t.object_id(), 5);

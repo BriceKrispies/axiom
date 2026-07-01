@@ -5,47 +5,28 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-# The gallery declares every binary explicitly (the two native agent drivers and
-# the physics report runner now live in per-demo subdirs, not at the crate root),
-# so cargo must not auto-discover anything — especially retro_fps's `render.rs` agent
-# submodule, which the wasm build must never try to compile as its own bin.
+# Every binary is declared explicitly so cargo does not auto-discover retro_fps's
+# `render.rs` agent submodule as its own bin (the wasm build must not compile it).
 autobins = false
 
-# `cdylib` for the single wasm bundle every demo boots from (each demo's
-# `#[wasm_bindgen] <demo>_start`); `rlib` so the native test suites and the
-# library APIs the agent bins + axiom-shot compose still build and link.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# --- Native agent drivers + the physics report runner (explicit, feature-gated) ---
-
-# retro FPS's native agent-bridge server: drives the real retro FPS game headlessly and
-# answers JSON over HTTP. Native-only deps, behind `retro-fps-agent` so the default
-# gates and the wasm build never compile it. (Was `axiom-retro-fps-browser`'s `agent`
-# bin / `agent` feature.)
 [[bin]]
 name = "retro-fps-agent"
 path = "src/retro_fps/bin/agent.rs"
 required-features = ["retro-fps-agent"]
 
-# Growth's native agent driver: walks the headless GroundSim through the reusable
-# agent harness to the summit. Native-only deps, behind `growth-agent`. (Was
-# `axiom-growth`'s `agent` bin / `agent` feature.)
 [[bin]]
 name = "growth-agent"
 path = "src/growth/bin/agent.rs"
 required-features = ["growth-agent"]
 
-# The physics crucible's headless report runner (was `axiom-physics-crucible`'s
-# implicit `src/main.rs`). Native, no extra features.
 [[bin]]
 name = "physics-crucible-report"
 path = "src/physics_crucible/main.rs"
 
 [features]
-# retro FPS headless agent server. Native-only optional deps. The kernel/runtime
-# layers and serde are now always-on normal deps (other demos need them), so they
-# are not listed here as `dep:` — only the genuinely optional, native-only crates.
 retro-fps-agent = [
     "dep:tiny_http",
     "dep:serde_json",
@@ -53,11 +34,8 @@ retro-fps-agent = [
     "dep:axiom-agent",
     "dep:axiom-perception",
 ]
-# Adds the native offscreen wgpu renderer so the retro FPS agent can read back images.
 retro-fps-agent-render = ["retro-fps-agent", "dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:png"]
 
-# Growth headless agent driver. Native-only optional deps. toml/serde/host are now
-# always-on normal deps, so they are not listed as `dep:` here.
 growth-agent = [
     "dep:axiom-agent-harness",
     "dep:axiom-perception",
@@ -70,64 +48,37 @@ growth-agent = [
     "dep:axiom-canvas2d-backend",
 ]
 
-# Native + wasm dependencies, shared across demos. Everything here builds on
-# native (so `cargo test --workspace` exercises every demo's pure game core) and
-# on wasm (the live browser arms). All paths are `../../{modules,crates}` because
-# the gallery sits at the same `apps/<name>` depth the old per-demo crates did.
 [dependencies]
-# The engine umbrella (module `engine`): App/scene/camera/render authoring + the
-# live wgpu backend (wasm32). Used by rotating-cube, netplay, retro_fps, stress-cubes,
-# growth, physics-crucible.
 axiom = { path = "../../modules/axiom" }
-# Layers used by the pure game cores (deterministic primitives, geometry, layout,
-# the proc/space content substrate, the fixed-step runtime, the introspection
-# surface). Promoted to always-on because at least one demo needs each on native.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-interface = { path = "../../crates/axiom-interface" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-layout = { path = "../../crates/axiom-layout" }
 axiom-space = { path = "../../crates/axiom-space" }
-# Deterministic, address-keyed entropy streams — the growth worldgen RNG (replaces
-# the app-local splitmix64 duplicate; the sphere-point sampler graduated to axiom-math).
 axiom-entropy = { path = "../../crates/axiom-entropy" }
 axiom-proc = { path = "../../crates/axiom-proc" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
-# The physics module under test (physics-crucible), composed only through PhysicsApi.
 axiom-physics = { path = "../../modules/axiom-physics" }
-# The engine input module (roomed-puzzle touch swipes).
 axiom-input = { path = "../../modules/axiom-input" }
-# Hand-editable level/data format used by several demos' codecs (roomed-puzzle,
-# rotating-cube's data-package test) and the growth agent's tag/directive TOML.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 
-# Native-only optional deps for the agent drivers. Confined to non-wasm so the
-# browser bundle never sees them; pulled in only by the agent features above.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# retro FPS agent substrate + the game-agnostic perception model (shared with growth).
 axiom-agent = { path = "../../modules/axiom-agent", optional = true }
 axiom-perception = { path = "../../modules/axiom-perception", optional = true }
-# Growth agent: the reusable harness (composes axiom-agent), the introspection
-# surface holding world tags, and the two native screenshot backends.
 axiom-agent-harness = { path = "../../modules/axiom-agent-harness", optional = true }
 axiom-introspect = { path = "../../crates/axiom-introspect", optional = true }
 axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["offscreen"], optional = true }
 axiom-canvas2d-backend = { path = "../../modules/axiom-canvas2d-backend", optional = true }
-# Shared native server/codec deps for both agent drivers.
 tiny_http = { version = "0.12", optional = true }
 serde_json = { version = "1", optional = true }
 tungstenite = { version = "0.24", optional = true }
-# retro FPS agent-render only: offscreen wgpu + PNG.
 wgpu = { version = "25", optional = true }
 bytemuck = { version = "1", optional = true }
 pollster = { version = "0.4", optional = true }
 png = { version = "0.17", optional = true }
 
-# Browser/live arm only: the wasm-bindgen glue, panic hook, the live windowing
-# presentation loop, the debug overlay, and the union of every demo's web-sys
-# surface. Confined to wasm32, so native `cargo test --workspace` compiles none of
-# it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axiom-windowing = { path = "../../modules/axiom-windowing" }
 axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
@@ -160,8 +111,6 @@ web-sys = { version = "0.3", features = [
     "console",
 ] }
 
-# Native integration-test only: the deterministic frame recorder (retro FPS's
-# replay-determinism proof). Never enters the wasm bundle.
 [dev-dependencies]
 axiom-recording = { path = "../../modules/axiom-recording" }
 

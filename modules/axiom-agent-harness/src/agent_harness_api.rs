@@ -1,10 +1,8 @@
 //! [`AgentHarnessApi`] — the module's single public facade.
-//!
 //! It composes [`axiom_agent::AgentApi`] into the reusable first-person
 //! observe → decide → lower pipeline. Everything crosses the boundary as
 //! primitives and tuples (Module Law: one facade, no foreign types in the public
 //! surface), so an app drives an agent without naming an `axiom-agent` type.
-//!
 //! The code is branchless (the engine spine invariant): conditional control is
 //! expressed as bitmask arithmetic and iterator/`Option` combinators, never
 //! `if`/`match`/`&&`.
@@ -14,14 +12,12 @@ use axiom_kernel::{FrameIndex, Tick};
 use axiom_runtime::RuntimeStep;
 
 /// The reusable first-person agent-driving facade.
-///
 /// Stateless: every method runs one self-contained `observe → decide → lower`
 /// cycle through [`axiom_agent`] and returns the result as plain numbers.
 #[derive(Debug)]
 pub struct AgentHarnessApi;
 
 impl AgentHarnessApi {
-    // --- first-person held-control vocabulary (the neutral `control_code` bits) ---
 
     /// Hold "move forward".
     pub const FORWARD: u32 = 1 << 0;
@@ -40,7 +36,6 @@ impl AgentHarnessApi {
     /// Hold the secondary action button.
     pub const ACTION_SECONDARY: u32 = 1 << 7;
 
-    // --- observation fact-kind vocabulary (so a future scripted brain can read them) ---
 
     /// The agent's own pose fact: `x`/`y`/`z` carry world position **with the
     /// player's height in `y`**, and `value` carries the yaw.
@@ -71,12 +66,10 @@ impl AgentHarnessApi {
     const MICRO: f64 = 1_000_000.0;
 
     /// Decide a held-control bitmask by **holding `held_control_code`** this tick.
-    ///
     /// The harness packs a neutral observation (the agent's pose — including its
     /// height in `y` — and the goal point), runs a one-shot replay of
     /// `held_control_code` through [`axiom_agent`] so the decision produces a real
     /// report, and lowers the emitted intent back to a held-control bitmask.
-    ///
     /// Returns `(control_code, reason_code, brain_kind_code, emitted_action_count)`.
     /// A literal "hold forward" is `decide_hold(.., Self::FORWARD)`.
     pub fn decide_hold(
@@ -97,13 +90,11 @@ impl AgentHarnessApi {
 
     /// Decide a held-control bitmask by **seeking the goal point**: turn toward it
     /// and walk, stopping within `arrive_radius_micro`.
-    ///
     /// The policy is deterministic and game-agnostic — the game passes its own
     /// current forward direction `self_forward_micro` (the world-space `(x, z)` it
     /// considers "forward"), so no yaw convention is baked in. The harness routes
     /// the computed control through [`axiom_agent`] for the canonical report, the
     /// same path as [`Self::decide_hold`].
-    ///
     /// Returns `(control_code, reason_code, brain_kind_code, emitted_action_count)`.
     pub fn decide_seek(
         agent_raw_id: u64,
@@ -123,7 +114,6 @@ impl AgentHarnessApi {
     /// motion to [`Self::decide_seek`] (turn-toward + forward), but it also
     /// returns an `arrived` flag so a directive runner knows when this verb is
     /// complete without re-deriving the arrival test in the app.
-    ///
     /// Returns `(control_code, reason_code, brain_kind_code, emitted_action_count,
     /// arrived)` where `arrived` is `1` once within `arrive_radius_micro`.
     pub fn decide_goto(
@@ -145,7 +135,6 @@ impl AgentHarnessApi {
     /// command toward `target_point_micro`, given the agent's current `(x, z)`
     /// forward direction `self_forward_micro` (no yaw convention is baked in, the
     /// same contract as [`Self::decide_seek`]).
-    ///
     /// Returns `(yaw_turn_micro, pitch_target_micro, aimed)`:
     /// - `yaw_turn_micro` — signed micro-radians to rotate the current forward
     ///   toward the target horizontally; **positive turns left** (toward the side
@@ -154,7 +143,6 @@ impl AgentHarnessApi {
     ///   up**, negative looks down (so a target below the eye, "look at the
     ///   ground", yields a negative pitch).
     /// - `aimed` — `1` once `yaw_turn_micro` is within the alignment cone.
-    ///
     /// A live game feeds the yaw turn as look input and sets the pitch; a capture
     /// path can build a view straight from the target point instead.
     pub fn decide_look_at(
@@ -183,7 +171,6 @@ impl AgentHarnessApi {
     }
 
     /// The branchless seek policy: turn-toward + forward as a held-control bitmask.
-    ///
     /// Uses the 2-D cross/dot of `forward` against `goal - self` (no trig, no yaw
     /// convention): `cross` sign picks the turn direction, `dot > 0` with a small
     /// `cross` is the "ahead" cone, and within `arrive_radius` it stops.

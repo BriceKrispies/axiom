@@ -32,14 +32,12 @@ type DecodedServerSnapshotFor = (u64, Vec<(u64, u64)>, Vec<u8>);
 type DecodedServerSnapshotForDelta = (u64, u64, Vec<(u64, u64)>, Vec<u8>);
 
 /// The multiplayer wire contract — the only public export of `axiom-net-protocol`.
-///
 /// This is a stateless codec namespace: every method is an associated function
 /// that validates and encodes, or decodes and validates, one protocol message.
 /// Because a module exposes a single nameable type, messages cross this boundary
 /// as plain primitives (`u32` / `u64` / `&[u8]` / `Vec<u8>`) — the same shape a
 /// socket sees — so an app or the TypeScript package can own the transport
 /// without naming a protocol type.
-///
 /// Encoders return `KernelResult<Vec<u8>>` and fail on invalid input (a zero
 /// protocol version, an empty/over-long room id, an over-size payload, a zero
 /// fixed step). `RejectedIntent` has nothing to validate, so its encoder is
@@ -456,7 +454,6 @@ mod tests {
         assert_eq!(server_tick, 43);
         assert_eq!(base_tick, 42);
         assert_eq!(acks, vec![(1, 9)]);
-        // The delta reconstructs the new payload exactly from the base.
         assert_eq!(
             NetProtocolApi::reconstruct_snapshot(base, &delta).unwrap(),
             new

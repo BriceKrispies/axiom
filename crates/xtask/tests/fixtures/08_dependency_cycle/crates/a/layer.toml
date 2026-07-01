@@ -1,5 +1,3 @@
-# Layer `a` depends on `b`, and `b` depends on `a` — a cycle. Layers must form a
-# directed ACYCLIC graph; this fixture exercises DependencyCycle.
 [layer]
 name = "a"
 crate_name = "a"

@@ -10,10 +10,8 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-# An *engine module* (kind = "engine-module", allowed_modules = []): it composes
-# NO other module. It builds only on the kernel — `HandleId` backs the opaque
-# `TweenId` the table is keyed by. Time is integer nanoseconds and values are a
-# float-newtype, so it needs nothing from math.
+# `TweenId` is backed by kernel `HandleId`; time is integer nanoseconds and
+# values are a float-newtype, so nothing from math is needed.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
 [lints.rust]

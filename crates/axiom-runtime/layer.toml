@@ -1,12 +1,3 @@
-# Axiom layer manifest — the runtime.
-#
-# The runtime is the deterministic engine execution substrate. It adapts the
-# kernel's deterministic primitives (clock/ticks, structured results,
-# logging/telemetry, stable IDs) into lifecycle management, fixed-timestep
-# stepping, ordered scheduling, command/event queues, and replay-ready step
-# records. It introduces no rendering / ECS / asset / physics / input / browser
-# concepts — those belong to higher layers.
-
 [layer]
 name = "runtime"
 crate_name = "axiom-runtime"
@@ -51,11 +42,6 @@ consumed_capabilities = [
     "InMemoryTelemetrySink",
     "TelemetrySink",
 ]
-
-# Each block names a public runtime export and the kernel symbols its
-# implementation must reference. The architecture checker follows the
-# `pub use module::Type;` re-export in lib.rs to the module file and asserts
-# the named kernel symbol appears there.
 
 [[proof_exports]]
 export = "Runtime"

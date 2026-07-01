@@ -57,9 +57,6 @@ mod tests {
 
     #[test]
     fn one_pixel_wider_flips_to_landscape() {
-        // Boundary: a single pixel of difference is enough. A `>=` mutant of
-        // the inner comparison would misclassify the equal case, which the
-        // `equal_extents_are_square` test already pins.
         assert_eq!(Orientation::from_extents(801, 800), Orientation::Landscape);
         assert_eq!(Orientation::from_extents(800, 801), Orientation::Portrait);
     }

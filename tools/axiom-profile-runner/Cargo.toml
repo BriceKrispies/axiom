@@ -11,9 +11,6 @@ name = "axiom-profile-runner"
 path = "src/main.rs"
 
 [dependencies]
-# Public engine facades the stress scenario composes. A tool may depend on any
-# layer or module (tools sit outside the engine graph); it composes them the
-# way an app would, but its purpose — wall-clock measurement — makes it tooling.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-math = { path = "../../crates/axiom-math" }

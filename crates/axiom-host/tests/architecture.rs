@@ -321,7 +321,6 @@ fn lib_exports_are_curated_set() {
         "pub use host_step_driver::HostStepDriver;",
         "pub use host_step_plan::HostStepPlan;",
         "pub use host_viewport::HostViewport;",
-        // Embed-seam boundary (SPEC-12).
         "pub use host_metrics::HostMetrics;",
         "pub use host_outcome::HostOutcome;",
         "pub use host_outcome_set::HostOutcomeSet;",
@@ -330,7 +329,6 @@ fn lib_exports_are_curated_set() {
         "pub use host_session_params::HostSessionParams;",
         "pub use player_id::PlayerId;",
         "pub use score::Score;",
-        // Presentation boundary.
         "pub use host_adapter_request::HostAdapterRequest;",
         "pub use host_alpha_mode::HostAlphaMode;",
         "pub use host_color_format::HostColorFormat;",
@@ -344,7 +342,6 @@ fn lib_exports_are_curated_set() {
         "pub use host_power_preference::HostPowerPreference;",
         "pub use host_surface_descriptor::HostSurfaceDescriptor;",
         "pub use host_surface_handle::HostSurfaceHandle;",
-        // Backend-neutral frame presentation packet + uniform submission report.
         "pub use frame_packet::FrameCamera;",
         "pub use frame_packet::FrameDrawItem;",
         "pub use frame_packet::FrameFeatureSet;",
@@ -356,7 +353,6 @@ fn lib_exports_are_curated_set() {
         "pub use frame_submission_report::BackendKind;",
         "pub use frame_submission_report::FrameFeature;",
         "pub use frame_submission_report::FrameSubmissionReport;",
-        // Backend-neutral SDF raymarch contract (the FramePacket raymarch arm).
         "pub use sdf_scene::SdfPrimitive;",
         "pub use sdf_scene::SdfScene;",
         // Backend-neutral 2D draw contract (SPEC-04), relocated from axiom-draw2d.

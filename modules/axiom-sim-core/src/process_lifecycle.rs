@@ -208,7 +208,6 @@ mod tests {
     #[test]
     fn illegal_transitions_are_rejected_cleanly() {
         let mut life = ProcessLifecycle::new();
-        // Scheduled cannot jump straight to Running.
         assert!(!life.can_transition(ProcessStatus::Running));
         assert!(life
             .transition(ProcessStatus::Running, None, SimTick::new(0))
@@ -218,7 +217,6 @@ mod tests {
             ProcessStatus::Scheduled,
             "status unchanged after a rejected transition"
         );
-        // Terminal states are dead ends.
         life.transition(ProcessStatus::Canceled, None, SimTick::new(0));
         assert_eq!(life.status(), ProcessStatus::Canceled);
         assert!(life

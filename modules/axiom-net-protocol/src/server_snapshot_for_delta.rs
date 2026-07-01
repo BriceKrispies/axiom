@@ -124,7 +124,6 @@ mod tests {
         assert_eq!(m.server_tick(), 43);
         assert_eq!(m.base_tick(), 42);
         assert_eq!(m.acks(), &[(7, 5), (9, 3)]);
-        // The delta reconstructs the new payload from the base.
         assert_eq!(snapshot_delta::apply(BASE, m.delta()).unwrap(), NEW);
     }
 
@@ -157,8 +156,6 @@ mod tests {
 
     #[test]
     fn construction_rejects_an_over_size_diff_blob() {
-        // A fully-novel large payload diffed against an empty base yields a blob
-        // larger than the payload bound → the caller must fall back to a full snapshot.
         let big = vec![0u8; MAX_PAYLOAD_LEN];
         assert_eq!(
             ServerSnapshotForDelta::from_payloads(0, &[], 0, b"", &big)
@@ -193,9 +190,8 @@ mod tests {
 
     #[test]
     fn cross_language_byte_parity_fixture() {
-        // The exact bytes the `@axiom/client` TS twin must reproduce for the same
-        // input (`snapshot-delta.test.ts` asserts the identical literal). A single
-        // shared fixture pins the two codecs byte-for-byte across languages.
+        // The exact bytes the `@axiom/client` TS twin must reproduce
+        // (`snapshot-delta.test.ts` asserts the identical literal).
         let bytes =
             ServerSnapshotForDelta::from_payloads(43, &[(1, 9)], 42, b"abc", b"abd")
                 .unwrap()

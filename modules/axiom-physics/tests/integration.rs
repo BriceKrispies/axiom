@@ -1,14 +1,12 @@
 //! End-to-end integration tests driving `axiom-physics` only through its single
 //! public facade, [`PhysicsApi`], plus its identity vocabulary
 //! ([`PhysicsBodyHandle`], [`PhysicsColliderHandle`]).
-//!
 //! These are the module's behavioral proofs (spec §21): determinism, stable
 //! handle ordering, gravity behavior per body kind, FIFO command application,
 //! deterministic records/snapshots, typed validation failures, capacity limits,
 //! the "no collision events in Phase 1" invariant, and the empty/no-hit query
 //! scaffolds. They also fully exercise `physics_world.rs`, the one source file
 //! with no inline unit tests — every world path is reached from here.
-//!
 //! Tests are exempt from the Branchless Law, so this file uses ordinary control
 //! flow. Scalars cross the facade as kernel/math value types (`Ratio`, `Meters`,
 //! `Vec3`, `Transform`) — never naked floats — exactly as production callers
@@ -40,9 +38,6 @@ fn meters(v: f32) -> Meters {
     Meters::new(v).unwrap()
 }
 
-// ----------------------------------------------------------------------------
-// determinism + stable handle ordering
-// ----------------------------------------------------------------------------
 
 #[test]
 fn identical_inputs_produce_byte_identical_snapshots_and_records() {
@@ -109,9 +104,6 @@ fn collider_handles_are_allocated_in_stable_increasing_order() {
     assert_ne!(first, PhysicsColliderHandle::NULL);
 }
 
-// ----------------------------------------------------------------------------
-// gravity behavior per body kind (linear integrator)
-// ----------------------------------------------------------------------------
 
 #[test]
 fn dynamic_body_falls_under_gravity() {
@@ -158,9 +150,6 @@ fn kinematic_body_does_not_move_under_gravity() {
     assert_eq!(body.linear_velocity(), Vec3::ZERO);
 }
 
-// ----------------------------------------------------------------------------
-// forces, impulses, and FIFO command application
-// ----------------------------------------------------------------------------
 
 #[test]
 fn applying_force_changes_dynamic_velocity_deterministically() {
@@ -249,9 +238,6 @@ fn disabled_dynamic_body_does_not_integrate() {
     assert_eq!(api.latest_step_record().integration_count(), 0);
 }
 
-// ----------------------------------------------------------------------------
-// deterministic step records + snapshots
-// ----------------------------------------------------------------------------
 
 #[test]
 fn step_record_reports_real_counts_for_a_single_body() {
@@ -319,9 +305,6 @@ fn snapshot_lists_bodies_and_colliders_in_insertion_order() {
     assert!(collider.enabled());
 }
 
-// ----------------------------------------------------------------------------
-// typed validation failures (no panics for invalid input)
-// ----------------------------------------------------------------------------
 
 #[test]
 fn non_finite_body_transform_is_rejected() {
@@ -426,9 +409,6 @@ fn zero_length_step_is_rejected() {
     assert_eq!(api.latest_step_record().step_index(), 0);
 }
 
-// ----------------------------------------------------------------------------
-// capacity limits fail deterministically
-// ----------------------------------------------------------------------------
 
 #[test]
 fn body_capacity_is_enforced() {
@@ -474,9 +454,6 @@ fn attaching_to_a_missing_body_is_rejected() {
         .is_err());
 }
 
-// ----------------------------------------------------------------------------
-// Phase-1 invariants: lifecycle-only events, empty queries
-// ----------------------------------------------------------------------------
 
 #[test]
 fn no_collision_or_trigger_events_are_emitted_yet() {
@@ -561,9 +538,6 @@ fn default_world_is_empty_and_unstepped() {
     assert_eq!(api.latest_step_record().step_index(), 0);
 }
 
-// ----------------------------------------------------------------------------
-// contact response: broad phase -> narrow phase -> solver -> correction
-// ----------------------------------------------------------------------------
 
 /// A small `1/120 s` step — fine enough for stable resting contact.
 fn small_step() -> RuntimeStep {
@@ -654,7 +628,6 @@ fn step_record_reports_real_broad_and_contact_counts_while_resting() {
     assert_eq!(record.broad_phase_pair_count(), 1);
     // While resting, that pair is genuinely in contact.
     assert_eq!(record.contact_pair_count(), 1);
-    // The solver runs the configured iteration count.
     assert_eq!(record.solver_iteration_count(), 8);
 }
 

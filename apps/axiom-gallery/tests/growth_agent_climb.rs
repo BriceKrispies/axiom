@@ -46,7 +46,6 @@ fn hold_forward_reaches_the_summit_and_reports_height() {
         end.reached_summit,
         "holding forward must reach the summit; ended at {end:?}",
     );
-    // It climbed essentially the whole prominence — real, emotional height.
     assert!(
         end.height_above_spawn_m >= end.prominence_m * 0.9,
         "should climb most of the {:.0} m prominence, got {:.0} m above spawn",
@@ -58,7 +57,6 @@ fn hold_forward_reaches_the_summit_and_reports_height() {
         "the summit is thousands of metres above spawn, got {:.0} m",
         end.height_above_spawn_m,
     );
-    // Eye height tracks the climbed terrain.
     assert!(
         (end.eye_height_m - (end.ground_height_m + 1.7)).abs() < 0.01,
         "eye sits ~1.7 m above the climbed ground",

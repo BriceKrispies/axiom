@@ -19,7 +19,6 @@ impl Endian {
 
     /// Whether this is little-endian order.
     pub const fn is_little(self) -> bool {
-        // Fieldless-enum predicate: compare discriminants, no `match`.
         (self as u8) == (Endian::Little as u8)
     }
 }

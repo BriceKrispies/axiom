@@ -39,7 +39,6 @@ mod dynamic;
 mod sdf;
 
 /// The only public export of `axiom-scene`: a **stateful scene handle**.
-///
 /// `SceneApi` *owns* the scene — an ECS world (the ecs layer) where nodes are
 /// entities and every node fact is a component column. A consumer builds it
 /// **once** and holds it across frames, mutating it incrementally and calling
@@ -47,7 +46,6 @@ mod sdf;
 /// rebuilt per frame. (It owns the world rather than handing back a `Scene`
 /// value precisely so apps can keep it in a field — the internal types are
 /// never re-exported, so they can't be named as field types.)
-///
 /// The facade is also where Layer 02 ([`MathApi`]) and Layer 04
 /// ([`FrameContext`]) integration lives — see [`Self::advance`] and the
 /// camera/light validators.
@@ -64,7 +62,6 @@ impl SceneApi {
         }
     }
 
-    // --- Nodes ---
 
     /// Create a node with the identity local transform.
     pub fn create_node(&mut self) -> SceneNodeId {
@@ -115,7 +112,6 @@ impl SceneApi {
         self.scene.is_node(id)
     }
 
-    // --- Hierarchy ---
 
     /// Make `child` a child of `parent`. Rejects self-parenting, cycles, and
     /// missing ids.
@@ -128,7 +124,6 @@ impl SceneApi {
         self.scene.clear_parent(child)
     }
 
-    // --- Cameras ---
 
     /// Add a perspective camera to `node`. Intrinsic validation is delegated to
     /// [`MathApi::mat4_perspective`].
@@ -158,7 +153,6 @@ impl SceneApi {
         )
     }
 
-    // --- Lights ---
 
     /// Add a directional light to `node`.
     pub fn add_directional_light(
@@ -188,7 +182,6 @@ impl SceneApi {
         self.scene.remove_light(node)
     }
 
-    // --- Renderables ---
 
     /// Construct an opaque [`MeshRef`].
     pub const fn mesh_ref(&self, raw: u64) -> MeshRef {
@@ -235,7 +228,6 @@ impl SceneApi {
         self.scene.set_renderable_casts_contact_shadow(node, casts)
     }
 
-    // --- Propagation / frame integration ---
 
     /// Recompute every node's world transform now.
     pub fn update_world_transforms(&mut self) {
@@ -256,7 +248,6 @@ impl SceneApi {
         self.scene.snapshot()
     }
 
-    // --- Self-description ---
 
     /// The reflected schemas of the standard component types a scene is built
     /// from — the scene describing its own shape as data an agent can read.
@@ -501,7 +492,6 @@ mod tests {
 
     #[test]
     fn new_and_default_facades_are_equivalent() {
-        // Both construction paths produce the same (empty) scene snapshot.
         assert_eq!(SceneApi::new().snapshot(), SceneApi::default().snapshot());
     }
 
@@ -519,7 +509,6 @@ mod tests {
         let node = s.create_node();
         s.add_player(node, 0).unwrap();
         assert_eq!(s.snapshot().nodes().len(), 1);
-        // Despawning the marked node removes it; a second despawn is a clean false.
         assert!(s.despawn_player(0));
         assert_eq!(s.snapshot().nodes().len(), 0);
         assert!(!s.despawn_player(0));
@@ -530,10 +519,8 @@ mod tests {
         let mut s = api();
         let node = s.create_node();
         s.add_player(node, 2).unwrap();
-        // The handle authored by player index is recoverable; an unknown index is None.
         assert_eq!(s.player_entity(2), Some(node));
         assert_eq!(s.player_entity(9), None);
-        // Despawning by that handle removes the node; a repeat is a clean false.
         assert!(s.despawn_node(node));
         assert_eq!(s.snapshot().nodes().len(), 0);
         assert!(!s.despawn_node(node));
@@ -551,7 +538,6 @@ mod tests {
 
     #[test]
     fn move_command_encodes_a_decodable_move() {
-        // The facade-built command round-trips through the scene's decoder.
         let s = api();
         let cmd = s.move_command(0, 3, Vec3::new(0.25, -0.75, 0.0));
         assert_eq!(
@@ -570,7 +556,6 @@ mod tests {
 
     #[test]
     fn controller_command_encodes_a_decodable_input() {
-        // The facade-built command round-trips through the scene's decoder.
         let s = api();
         let cmd = s.controller_command(0, 1, Vec3::new(0.5, 0.0, -0.25), rad(0.1), rad(-0.2));
         assert_eq!(
@@ -598,12 +583,9 @@ mod tests {
     #[test]
     fn is_alive_tracks_spawn_and_despawn_and_is_false_for_absent() {
         let mut a = api();
-        // An never-created handle is not alive.
         assert!(!a.is_alive(SceneNodeId::from_raw(404)));
-        // A created node is alive...
         let n = a.create_node();
         assert!(a.is_alive(n));
-        // ...and stops being alive once despawned.
         assert!(a.despawn_node(n));
         assert!(!a.is_alive(n));
     }
@@ -621,12 +603,10 @@ mod tests {
             m(100.0),
         )
         .unwrap();
-        // Invalid intrinsics propagate the `?` error arm.
         let err = a
             .add_perspective_camera(&math(), n, rad(0.0), rat(1.0), m(0.1), m(100.0))
             .unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidCameraParameters);
-        // Projection matrix: present + missing.
         let m = a.camera_projection_matrix(&math(), n).unwrap();
         assert_eq!(m.as_cols_array(), m.as_cols_array());
         let n2 = a.create_node();
@@ -676,8 +656,6 @@ mod tests {
         a.set_renderable_visibility(n, false).unwrap();
         a.set_renderable_casts_contact_shadow(n, true).unwrap();
         a.remove_renderable(n).unwrap();
-        // Marking a caster on a node with no renderable is a missing-renderable
-        // error (the delegated scene path's failure arm).
         assert_eq!(
             a.set_renderable_casts_contact_shadow(n, true)
                 .unwrap_err()
@@ -734,14 +712,10 @@ mod tests {
             a.overlap_box(Vec3::new(3.0, 0.0, 0.0), Vec3::new(0.1, 0.1, 0.1)),
             vec![n]
         );
-        // A bare node is classified as geometry (no player index); marking it a
-        // player makes `player_index` report it — the hit classifier.
         assert_eq!(a.player_index(n), None);
         a.add_player(n, 5).unwrap();
         assert_eq!(a.player_index(n), Some(5));
-        // A zero direction passes the `None` straight through the facade.
         assert_eq!(a.raycast(Vec3::ZERO, Vec3::ZERO, m(100.0)), None);
-        // Remove, then a second remove and a missing-node add both error.
         a.remove_bounds(n).unwrap();
         assert_eq!(
             a.remove_bounds(n).unwrap_err().code(),
@@ -766,8 +740,6 @@ mod tests {
         assert_eq!(a.overlap_circle(Vec3::ZERO, m(3.0)), vec![n]);
         assert!(a.overlap_circle(Vec3::ZERO, m(1.0)).is_empty());
 
-        // A parent with two children: children_of lists them ascending; a leaf
-        // and a missing node report none.
         let parent = a.create_node();
         let first = a.create_node();
         let second = a.create_node();
@@ -776,8 +748,6 @@ mod tests {
         assert_eq!(a.children_of(parent), vec![first, second]);
         assert!(a.children_of(first).is_empty());
 
-        // Despawning the parent cascades to both children; a repeat is a clean
-        // false.
         assert!(a.despawn_subtree(parent));
         assert!(a.children_of(parent).is_empty());
         assert!(!a.despawn_subtree(parent));
@@ -800,17 +770,14 @@ mod tests {
         assert!((point.x - 2.5).abs() < 1.0e-5);
         assert_eq!(a.tag_of(node), Some(1));
 
-        // tagged_nodes enumerates by kind; an untagged node reads None.
         let untagged = a.create_node();
         assert_eq!(a.tag_of(untagged), None);
         assert_eq!(a.tagged_nodes(1), vec![wall]);
         assert!(a.tagged_nodes(2).is_empty());
-        // Tagging a missing node errors.
         assert_eq!(
             a.add_tag(SceneNodeId::from_raw(404), 9).unwrap_err().code(),
             SceneErrorCode::MissingNode
         );
-        // A miss passes None straight through.
         assert!(a
             .raycast_hit(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), m(100.0))
             .is_none());
@@ -825,18 +792,15 @@ mod tests {
             a.create_node_with_transform(Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)));
         a.add_bounds(n1, Vec3::new(0.5, 0.5, 0.5)).unwrap();
 
-        // node_transforms lists every node's local transform, ascending id.
         let transforms = a.node_transforms();
         assert_eq!(transforms.len(), 2);
         assert_eq!(transforms[0].0, n0);
         assert_eq!(transforms[0].1.translation, Vec3::new(1.0, 0.0, 0.0));
         assert_eq!(transforms[1].0, n1);
 
-        // bounds_half_extents reads one node's bounds; the unbounded node is None.
         assert_eq!(a.bounds_half_extents(n1), Some(Vec3::new(0.5, 0.5, 0.5)));
         assert_eq!(a.bounds_half_extents(n0), None);
 
-        // bounded_nodes lists only the bounded node.
         assert_eq!(a.bounded_nodes(), vec![(n1, Vec3::new(0.5, 0.5, 0.5))]);
     }
 

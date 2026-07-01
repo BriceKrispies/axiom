@@ -81,12 +81,9 @@ def log(line: str) -> None:
         fh.write(f"{_now()} {line}\n")
 
 
-# --------------------------------------------------------------------------- #
 # Daemon: owns the Playwright browser and answers commands over local HTTP.
 # Single-threaded on purpose — Playwright's sync API must be used from the one
 # thread that created it, and serializing commands matches one browser/one page.
-# --------------------------------------------------------------------------- #
-
 class Daemon:
     def __init__(self) -> None:
         self._pw = None
@@ -145,8 +142,6 @@ class Daemon:
             lambda e: self.console.append({"type": "pageerror", "text": str(e)}),
         )
 
-    # -- command handlers --------------------------------------------------- #
-
     def handle(self, action: str, args: list[str]) -> dict:
         if action == "stop":
             self.should_stop = True
@@ -201,8 +196,6 @@ class Daemon:
 
         return {"ok": False, "error": f"unknown action: {action}"}
 
-    # -- serving ------------------------------------------------------------ #
-
     def serve(self) -> None:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         daemon = self
@@ -244,10 +237,7 @@ class Daemon:
         server.server_close()
 
 
-# --------------------------------------------------------------------------- #
-# Client: ensure the daemon is up (start it if not), then send one command.
-# --------------------------------------------------------------------------- #
-
+# Client: ensures the daemon is up (starting it if not), then sends one command.
 def _post(action: str, args: list[str], timeout: float = 60.0) -> dict | None:
     req = urllib.request.Request(
         f"http://{HOST}:{PORT}/",

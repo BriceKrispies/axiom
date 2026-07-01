@@ -35,10 +35,6 @@ pub(crate) const DEMO_LIGHT_INTENSITY: f32 = 1.0;
 /// Render-side light kind code: a directional light.
 pub(crate) const LIGHT_KIND_DIRECTIONAL: u32 = 0;
 
-// ----------------------------------------------------------------------
-// Source artifact: a plain-data mirror of `axiom_scene::SceneSnapshot`.
-// ----------------------------------------------------------------------
-
 /// One node entry mirrored from a scene snapshot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneNodeArtifact {
@@ -96,10 +92,6 @@ impl SceneSnapshotArtifact {
     }
 }
 
-// ----------------------------------------------------------------------
-// Source artifact: a plain-data mirror of `axiom_resources::ResolvedResources`.
-// ----------------------------------------------------------------------
-
 /// One resolved mesh, with full CPU-side vertex data so the artifact is
 /// fully inspectable and deterministic.
 #[derive(Debug, Clone, PartialEq)]
@@ -124,10 +116,6 @@ pub struct ResolvedResourcesArtifact {
     pub meshes: Vec<ResolvedMeshArtifact>,
     pub materials: Vec<ResolvedMaterialArtifact>,
 }
-
-// ----------------------------------------------------------------------
-// Target artifact: a plain-data plan for `axiom_render::RenderInput`.
-// ----------------------------------------------------------------------
 
 /// The camera the render input should use.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -210,7 +198,6 @@ pub(crate) fn scene_to_render_input(
     scene: &SceneSnapshotArtifact,
     resources: &ResolvedResourcesArtifact,
 ) -> RenderInputArtifact {
-    // Camera: first camera in the snapshot, if any.
     let camera = scene.cameras.first().map(|cam| {
         let world = scene
             .world_of(cam.node)

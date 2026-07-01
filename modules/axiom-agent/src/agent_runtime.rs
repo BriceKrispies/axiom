@@ -12,7 +12,6 @@ use crate::decision_report::DecisionReport;
 use crate::observation::Observation;
 
 /// Steps a single agent through one `observe -> decide -> emit -> report` cycle.
-///
 /// It is a stateless orchestrator (no game loop, no system registration): given
 /// the agent's identity, profile, a brain, the current observation, mutable
 /// memory, and the deterministic [`RuntimeStep`] driving the tick, it runs the
@@ -110,7 +109,6 @@ mod tests {
         assert_eq!(report.reason_code(), DecisionReport::REASON_MATCHED_RULE);
         assert_eq!(queue.len(), 1);
         assert_eq!(queue.intents()[0].control_code(), 7);
-        // One decision entry was recorded at the step's tick, carrying the reason.
         assert_eq!(memory.len(), 1);
         assert_eq!(memory.entries()[0].tick(), Tick::new(5));
         assert_eq!(memory.entries()[0].key_code(), AgentRuntime::MEMORY_KEY_DECISION);
@@ -160,7 +158,6 @@ mod tests {
         assert_eq!(report.first_emitted_action_kind_code(), ActionIntent::KIND_NOOP);
         assert_eq!(report.reason_code(), DecisionReport::REASON_ACTION_BUDGET_ZERO);
         assert!(queue.is_empty());
-        // The recorded memory entry stamps the budget-zero reason verbatim.
         assert_eq!(
             memory.entries()[0].value_code(),
             DecisionReport::REASON_ACTION_BUDGET_ZERO as i64
@@ -186,10 +183,6 @@ mod tests {
 
     #[test]
     fn hold_set_brain_step_emits_multiple_intents_in_one_tick() {
-        // The multi-intent capability end-to-end: a hold-set brain holding two
-        // controls produces a decision with TWO emitted intents in a single step,
-        // reported as such, and the queue folds them into one combined bitmask —
-        // the agent doing more than one thing at the same time, deterministically.
         use crate::hold_set_brain::HoldSetBrain;
         let mut brain = HoldSetBrain::new(vec![0b0001, 0b0100]);
         let mut memory = AgentMemory::empty_with_capacity(2);

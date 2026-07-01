@@ -54,11 +54,8 @@ mod tests {
     #[test]
     fn origin_cell_is_color_a_and_neighbor_cell_is_color_b() {
         let t = build_checker_texture(ResourceId::from_raw(1), "checker", A, B);
-        // (0,0) is in the origin cell -> colour a.
         assert_eq!(pixel(&t, 0, 0), A);
-        // One cell to the right alternates to colour b.
         assert_eq!(pixel(&t, CELL, 0), B);
-        // Diagonally one cell over returns to colour a.
         assert_eq!(pixel(&t, CELL, CELL), A);
     }
 

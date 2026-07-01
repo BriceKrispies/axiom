@@ -5,7 +5,6 @@
 //! presentation-only (SPEC-08 §6): data flows sim/app → core → arm and is never
 //! read back, so these all return opaque handles (or nothing) and no audio value
 //! ever re-enters a deterministic read.
-//!
 //! ## Two arms, the same shape as `axiom-audio` / `axiom-windowing`
 //! - The **neutral core** ([`AudioApi`]) is native-testable bookkeeping: it
 //!   allocates monotonic handles, validates a [`ToneSpec`], folds master
@@ -15,7 +14,6 @@
 //!   [`AudioState::realize`] lazily opens a real `AudioContext` and drains the
 //!   accumulated batch into it (`AudioApi::realize_into`). Every browser symbol
 //!   stays inside that arm; the deterministic core never names one.
-//!
 //! ## Boundary convention (the established `scalar / string` rule)
 //! Handles cross as their raw `u64` id (`f64` at the JS edge); a `Vec3`-free
 //! audio call carries only scalars and strings — a sound url as a `String`, a
@@ -24,7 +22,6 @@
 //! / `ScheduleOptions` destructure into, and a tone as its
 //! `(waveIndex, freq, duration, volume)` quadruple. The TS host edge
 //! (`wasm-host.ts`) destructures the option records into these scalar args.
-//!
 //! ## Known facade scope (documented, not a shortcut)
 //! `ToneSpec`'s optional `envelope` / `lfo` are **deferred** at this boundary: the
 //! bridge always passes `None`, so a synthesized tone uses the core's default

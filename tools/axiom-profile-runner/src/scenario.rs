@@ -46,14 +46,12 @@ const CUBE_MATERIAL_ID: u64 = 1;
 const MESH_IDX: u32 = 0;
 const MATERIAL_IDX: u32 = 0;
 
-// transform_update subphase names.
 const TF_PREPARE: &str = "transform_prepare_inputs";
 const TF_PARENT: &str = "transform_parent_lookup";
 const TF_COMBINE: &str = "transform_combine_or_matrix_math";
 const TF_WRITE: &str = "transform_write_world_state";
 const TF_SNAPSHOT: &str = "transform_snapshot_or_output_collection";
 
-// render_command_build subphase names.
 const RC_CREATE: &str = "render_input_create_or_reset";
 const RC_CLONE: &str = "render_mesh_data_clone_or_reference";
 const RC_PUSH: &str = "render_object_push";

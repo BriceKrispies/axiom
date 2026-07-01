@@ -99,9 +99,6 @@ impl NetcodeApi {
     /// desync at `tick` — the app should halt/resync).
     pub fn reconcile(&self, tick: u64) -> Option<bool> {
         let status = self.session.reconcile(tick);
-        // Pending -> None; InSync -> Some(true); any Desync -> Some(false).
-        // `is_pending`/`is_in_sync` are exact equality checks against the two
-        // field-less variants, so the remaining case is exactly Desync.
         (!status.is_pending()).then(|| status.is_in_sync())
     }
 
@@ -130,8 +127,7 @@ impl NetcodeApi {
 mod tests {
     use super::*;
 
-    /// A matched pair of peers (1 and 2), each with its own key and the shared
-    /// two-key roster — the facade-level equivalent of two browsers.
+    /// A matched pair of peers (1 and 2) sharing a two-key roster.
     fn pair() -> (NetcodeApi, NetcodeApi) {
         let k1 = SigningKey::from_seed([1u8; 32]);
         let k2 = SigningKey::from_seed([2u8; 32]);
@@ -157,8 +153,6 @@ mod tests {
 
     #[test]
     fn submit_then_ingest_round_trips_an_input() {
-        // Peer 1 submits locally; peer 2 ingests peer 1's signed bytes and, once
-        // it adds its own input, confirms tick 0 with both inputs in peer order.
         let (mut p1, mut p2) = pair();
         let bytes = p1.submit_local(7, &[1, 2, 3]);
         p2.ingest(&bytes).unwrap();
@@ -175,20 +169,15 @@ mod tests {
 
     #[test]
     fn an_impersonated_input_is_ignored_through_the_facade() {
-        // Peer 1 signs an input but tags it as peer 2 — a different peer's bytes,
-        // verified against peer 1's roster key, fail and are dropped. (Peer 1
-        // cannot mint peer-2 bytes: its signature is over `peer = 2` but made
-        // with key 1, so peer 2's roster entry rejects it.)
+        // A frame claims peer 2 but is signed with peer 1's key; verification
+        // checks the signature against the claimed peer's roster key, so it fails.
         let mut p2 = pair().1;
-        // A rogue holding peer 1's key submits *as peer 2*: a frame claiming
-        // peer 2 but signed by key 1.
         let forged = {
-            let k = SigningKey::from_seed([1u8; 32]); // peer 1's key
+            let k = SigningKey::from_seed([1u8; 32]);
             let roster = [(2u64, k.verifying_key())];
             let mut liar = NetcodeApi::new(2, k, &roster);
             liar.submit_local(5, &[1])
         };
-        // p2's roster has the REAL peer-2 key, so the forged frame fails to verify.
         p2.ingest(&forged).unwrap();
         p2.submit_local(0, &[]);
         assert_eq!(p2.ready_tick(), None, "no genuine peer-1 input arrived");
@@ -204,14 +193,11 @@ mod tests {
     #[test]
     fn reconcile_maps_all_three_states() {
         let (mut p1, mut p2) = pair();
-        // Pending: no hashes yet.
         assert_eq!(p1.reconcile(0), None);
-        // In sync: both peers report the same hash for the same state.
         p1.record_local_hash(0, b"state-0");
         let p2_beacon = p2.record_local_hash(0, b"state-0");
         p1.ingest(&p2_beacon).unwrap();
         assert_eq!(p1.reconcile(0), Some(true));
-        // Desync: peer 2 reports a different hash at tick 1.
         p1.record_local_hash(1, b"state-1");
         let p2_bad = p2.record_local_hash(1, b"DIFFERENT");
         p1.ingest(&p2_bad).unwrap();
@@ -228,8 +214,6 @@ mod tests {
     #[test]
     fn telemetry_reports_buffer_occupancy_and_rejections() {
         let (mut p1, mut p2) = pair();
-        // A genuine peer-2 input buffers; an unknown-peer forgery is dropped and
-        // counted. Both are observable through the facade.
         let real = p2.submit_local(3, &[7]);
         p1.ingest(&real).unwrap();
         assert_eq!(p1.buffered_inputs(), 1);

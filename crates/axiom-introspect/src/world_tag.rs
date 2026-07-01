@@ -10,14 +10,12 @@ use axiom_kernel::{
 const TAGS_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 
 /// A stable, named point of interest in the world.
-///
 /// A `WorldTag` is the engine's semantic **noun**: a name (`"mountaintop"`), a
 /// coarse `kind_code` so an agent can ask for "every summit", and a world
 /// position in micro-units (the same fixed-point convention the agent and the
 /// agent harness use for coordinates — millionths of a world unit). It carries
 /// no behaviour; it is the inert thing an agent resolves a high-level command
 /// against ("walk to the mountaintop").
-///
 /// Like [`crate::WorldReport`] it is serializable through the kernel binary
 /// primitives, so an external agent can read the world's nouns over the same
 /// byte channel as the frame and world snapshots — the [`crate::IntrospectApi`]
@@ -92,9 +90,6 @@ impl WorldTag {
     /// The name is decoded lossily (tag names are ASCII in practice, so round
     /// trips are exact).
     pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        // Branchless sequential decode: every field threads through `and_then`,
-        // so the first failure short-circuits and the reader advances exactly as
-        // `write_to` laid the fields down.
         reader.read_u32().and_then(|tag_id| {
             reader.read_byte_slice().and_then(|name_bytes| {
                 let name = String::from_utf8_lossy(name_bytes).into_owned();
@@ -132,8 +127,6 @@ impl WorldTag {
     /// version, or a binary error for truncated/invalid data.
     pub fn decode_set(bytes: &[u8]) -> KernelResult<Vec<WorldTag>> {
         let mut reader = BinaryReader::new(bytes);
-        // Branchless sequential decode: schema guard then count then each tag,
-        // all threaded through `and_then` so the first error short-circuits.
         SchemaVersion::read_from(&mut reader)
             .and_then(|version| {
                 TAGS_SCHEMA

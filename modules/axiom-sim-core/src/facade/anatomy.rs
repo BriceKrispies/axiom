@@ -489,9 +489,6 @@ impl SimCoreApi {
         let route = InteractionRoute::from_code(route_code);
         let surface_kind = self.world.bodies().surface(surface).map(BodySurface::kind);
         route.zip(surface_kind).and_then(|(route, kind)| {
-            // The (body-route, surface) pair this interaction targets. Validating
-            // and locating both flow through the target so the route refinement is
-            // explicit, not implied.
             let target = BodyRouteTarget::new(BodyRoute::from_interaction(route).kind(), surface);
             BodyRoute::new(target.route()).can_target(kind).then(|| {
                 let location = self.residue_location_for_surface(target.surface());

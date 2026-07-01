@@ -58,7 +58,6 @@ fn rotating_cubes_app() -> App {
                 ),
             ];
             cubes.into_iter().for_each(|(offset_x, axis, color)| {
-                // Each cube wears a checkerboard albedo, tinted by its base colour.
                 let material = materials.add(Material::lit(color).with_texture(Texture::Checker));
                 world
                     .spawn(Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)))
@@ -70,9 +69,8 @@ fn rotating_cubes_app() -> App {
                         Spin::around(axis).period(360),
                     ));
             });
-            // A ground plane beneath the cubes (a distinct mesh: a scaled quad).
+            // A distinct mesh (scaled quad) so it batches separately from the cubes.
             let plane = meshes.add(Mesh::plane());
-            // The ground shows a UV grid so the texture mapping is legible.
             let ground = materials.add(
                 Material::lit(Color::linear_rgb(ch(0.18), ch(0.20), ch(0.24)))
                     .with_texture(Texture::UvGrid),
@@ -87,7 +85,7 @@ fn rotating_cubes_app() -> App {
                     material: ground,
                 },
             ));
-            // A sphere above the cubes (a third distinct mesh).
+            // A third distinct mesh, so it also batches separately.
             let sphere = meshes.add(Mesh::sphere());
             let sphere_material = materials.add(
                 Material::lit(Color::linear_rgb(ch(0.90), ch(0.78), ch(0.30)))
@@ -119,9 +117,7 @@ fn rotating_cubes_app() -> App {
                     intensity: ch(1.0),
                 },
             ));
-            // Three orbiting coloured point lights: each is a point light offset
-            // on a spinning parent, so it circles the cubes. Their moving coloured
-            // highlights are the visible Stage-3 result over the old fixed light.
+            // Each point light orbits by riding a spinning parent transform.
             let orbit_lights = [
                 (
                     Vec3::UNIT_Y,

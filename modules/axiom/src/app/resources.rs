@@ -1,8 +1,6 @@
 //! The live-backend resource exports on [`RunningApp`] — the registered meshes as
 //! interleaved vertex streams and the materials as RGBA8 albedo sets the windowing
-//! backend uploads. A child module of `app` so it reaches `RunningApp`'s private
-//! resolved geometry/material tables while keeping `app.rs` within the per-file
-//! size budget.
+//! backend uploads.
 
 use super::RunningApp;
 use crate::mesh_geometry::MeshGeometry;

@@ -1,6 +1,5 @@
 use kernel::KernelClock;
 
-// The publicly exported capability.
 pub struct RuntimeApi {
     clock: KernelClock,
 }

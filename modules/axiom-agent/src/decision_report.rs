@@ -149,8 +149,7 @@ mod tests {
 
     #[test]
     fn brain_kind_and_reason_codes_have_exact_stable_values() {
-        // The canonical code tables — pinned to their exact numbers so a
-        // renumbering cannot pass silently.
+        // Pinned to exact numbers so a renumbering cannot pass silently.
         assert_eq!(DecisionReport::BRAIN_KIND_NONE, 0);
         assert_eq!(DecisionReport::BRAIN_KIND_SCRIPTED, 1);
         assert_eq!(DecisionReport::BRAIN_KIND_REPLAY, 2);

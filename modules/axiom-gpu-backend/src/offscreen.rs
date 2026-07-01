@@ -6,10 +6,6 @@
 //! browser arm does, so a native screenshot exercises byte-identical rendering to
 //! what the browser presents — the screenshot tool (`axiom-shot`) is no longer a
 //! separate copy that can drift.
-//!
-//! Compiled only behind the `offscreen` feature (off by default), so the engine's
-//! default native build, coverage gate, and branchless lint never see this wgpu
-//! code — the same exemption the wasm arm has.
 
 use crate::scene_renderer::{create_depth_view, SceneRenderer};
 

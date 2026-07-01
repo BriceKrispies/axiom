@@ -1,12 +1,7 @@
 //! Coherent noise (value/Perlin/simplex + FBM, domain warp) for worldgen.
-//! Audit: "Procedural-generation math" gap — needed for elevation detail,
-//! moisture, chunk detail_noise. Deterministic from a seed.
-//!
-//! INTERFACE CONTRACT (preserve signatures): agents implement the bodies.
-//!
-//! Implementation: 3D gradient (Perlin-style) noise hashed deterministically
-//! from a 64-bit seed using a splitmix64-derived integer mixer. No std rand,
-//! no wall clock — same seed + same point always yields the same value.
+//! 3D gradient (Perlin-style) noise hashed deterministically from a 64-bit
+//! seed via a splitmix64-derived mixer: same seed + same point always yields
+//! the same value.
 use axiom_math::Vec3;
 
 /// Splitmix64-style avalanche mixer. Deterministic, no external state.
@@ -21,9 +16,6 @@ fn mix64(mut x: u64) -> u64 {
 /// Hash an integer lattice cell + seed into a 64-bit value.
 #[inline]
 fn hash_cell(seed: u64, xi: i32, yi: i32, zi: i32) -> u64 {
-    // Fold the (possibly negative) lattice coordinates into the 64-bit space
-    // and run them through the avalanche mixer one component at a time so that
-    // adjacent cells decorrelate fully.
     let mut h = seed ^ 0xA076_1D64_78BD_642F_u64;
     h = mix64(h ^ (xi as i64 as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93));
     h = mix64(h ^ (yi as i64 as u64).wrapping_mul(0xCA01_F4D2_2A3B_C9D1));
@@ -36,7 +28,6 @@ fn hash_cell(seed: u64, xi: i32, yi: i32, zi: i32) -> u64 {
 /// non-normalized but unit-ish gradient; the dot product is scaled to [-1,1].
 #[inline]
 fn cell_gradient(h: u64) -> Vec3 {
-    // 12 gradient directions toward the edges of a cube.
     const GRADS: [(f32, f32, f32); 12] = [
         (1.0, 1.0, 0.0),
         (-1.0, 1.0, 0.0),
@@ -80,7 +71,6 @@ fn gradient_noise(seed: u64, p: Vec3) -> f32 {
     let y1 = y0.wrapping_add(1);
     let z1 = z0.wrapping_add(1);
 
-    // Fractional position within the cell.
     let fx = p.x - xf;
     let fy = p.y - yf;
     let fz = p.z - zf;
@@ -89,7 +79,6 @@ fn gradient_noise(seed: u64, p: Vec3) -> f32 {
     let v = fade(fy);
     let w = fade(fz);
 
-    // Dot of each corner's gradient with the offset from that corner.
     #[inline]
     fn corner(seed: u64, ci: i32, cj: i32, ck: i32, dx: f32, dy: f32, dz: f32) -> f32 {
         let g = cell_gradient(hash_cell(seed, ci, cj, ck));
@@ -115,9 +104,7 @@ fn gradient_noise(seed: u64, p: Vec3) -> f32 {
 
     let n = lerp(nxy0, nxy1, w);
 
-    // The raw gradient-noise range for these gradients is about
-    // [-1/sqrt(2)*sqrt(2), ...]; empirically within ~[-1,1] after scaling.
-    // A scale of ~1.0 keeps values comfortably inside [-1, 1].
+    // Empirically within ~[-1,1] for these gradients; clamp to guarantee it.
     (n * 1.0).clamp(-1.0, 1.0)
 }
 
@@ -158,7 +145,6 @@ impl Fbm {
         let mut total_amp = 0.0_f32;
 
         for o in 0..octaves {
-            // Decorrelate octaves by deriving a per-octave seed.
             let oseed = mix64(self.seed ^ (o as u64).wrapping_mul(0x68E3_1DA4));
             let sp = p.mul_scalar(freq);
             sum += gradient_noise(oseed, sp) * amp;
@@ -174,14 +160,13 @@ impl Fbm {
         }
     }
 
-    /// Domain-warped sample. Audit: OW-E17 terrain_warp. Offsets the input
-    /// point by a vector-valued noise field (three decorrelated FBM channels)
-    /// scaled by `warp`, then samples the base field at the warped location.
+    /// Domain-warped sample: offsets the input point by a vector-valued noise
+    /// field (three decorrelated FBM channels) scaled by `warp`, then samples
+    /// the base field at the warped location.
     pub fn sample_warped(&self, p: Vec3, warp: f32) -> f32 {
         if warp == 0.0 {
             return self.sample(p);
         }
-        // Three decorrelated offset fields built from distinct seeds.
         let qx = Fbm {
             seed: mix64(self.seed ^ 0x1111_1111),
             ..self.clone()
@@ -270,8 +255,6 @@ mod tests {
 
     #[test]
     fn fbm_respects_octave_count() {
-        // More octaves should generally produce a different (more detailed)
-        // value at the same point.
         let p = Vec3::new(3.3, -2.2, 1.1);
         let one = Fbm::new(77, 1, 1.5).sample(p);
         let many = Fbm::new(77, 6, 1.5).sample(p);

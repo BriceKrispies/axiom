@@ -172,10 +172,7 @@ impl CrucibleReport {
                 None => "query_hit_count:        unavailable (no probe this frame)".to_string(),
             },
             format!("replay_match:           {}", self.replay_match),
-            // Angular dynamics and friction now resolve live (SPEC-10); angular
-            // state rides each body's projected rotation/angular fields and
-            // friction work is the `frictioned_contacts` count above.
-            // Honest remaining gap: physics does not surface these yet.
+            // Remaining gap: physics does not surface lifecycle events yet.
             "collision_events:       unavailable (lifecycle events deferred)".to_string(),
         ]
     }

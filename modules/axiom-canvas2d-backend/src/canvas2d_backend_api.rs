@@ -127,10 +127,8 @@ impl Canvas2dBackendApi {
 
     /// Select the internal-resolution quality tier (`0` = UltraLow … `3` = High,
     /// clamped). The forced-fallback default is Low; the platform arm resolves a
-    /// level from a `?quality=` query, and this is the seam a future
-    /// dynamic-resolution policy would drive from measured frame time. Resizing
-    /// the framebuffer mid-run is supported because the binding tracks the
-    /// framebuffer size on each blit.
+    /// level from a `?quality=` query. Resizing the framebuffer mid-run is
+    /// supported because the binding tracks the framebuffer size on each blit.
     pub fn set_quality_level(&mut self, level: u8) {
         self.options = LowPolyRasterOptions::from_preset(CanvasQualityPreset::from_level(level));
     }
@@ -174,8 +172,7 @@ impl Canvas2dBackendApi {
     /// with the packet clear colour each frame, leaving every other knob as
     /// configured) and run the pure software z-buffer rasterizer.
     fn rasterize(&self, packet: &FramePacket) -> SoftwareRasterResult {
-        // v1 ships a single visual profile; this field is the seam where a
-        // future profile would select a different rasterization strategy.
+        // Only one visual profile exists; this avoids an unused-field warning.
         let _ = self.profile;
         let mut cues = self.options.depth_cues();
         cues.fog.color = packet.clear_color();

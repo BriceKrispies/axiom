@@ -1,28 +1,11 @@
-# axiom-shot — native, headless screenshot tool for any Axiom app + backend.
-#
-# Ticks a chosen app's scene, pulls `RunningApp`'s neutral live-render data (the
-# same mesh/material/instance-batch/light data that drives the browser), and
-# renders it through a selected backend:
-#
-#   * `gpu`      — `axiom-gpu-backend`'s native off-screen arm (the SAME
-#                  `scene_renderer` the browser's WebGPU/WebGL2 path runs).
-#   * `canvas2d` — `axiom-canvas2d-backend`'s software z-buffer rasterizer (the
-#                  SAME renderer the browser's `?backend=canvas2d` path runs),
-#                  fed the SAME backend-neutral `FramePacket` windowing builds.
-#
-# Either way the screenshot is byte-faithful to what the browser presents on
-# that backend — so this reproduces backend-specific rendering artifacts (e.g.
-# the Canvas 2D contact-shadow blobs) headlessly, with no browser.
-#
-# It can also drive the first-person camera itself (a scripted sequence of held
-# `FirstPersonInput` controls on controller 0), so an app like the retro FPS demo can
-# be walked to an arbitrary vantage point and shot.
+# Native headless screenshot tool: ticks an app's scene and renders it through
+# a selected backend (`gpu` or `canvas2d`), byte-faithful to what the browser
+# presents on that backend.
 #
 # NOT a workspace member (see the root Cargo.toml `exclude`): enabling the GPU
 # `offscreen` feature here must not unify into the module during the workspace
 # coverage/dylint gates, and depending on app crates must not enter the engine
-# dependency graph the architecture checker validates. It is its own standalone
-# workspace.
+# dependency graph the architecture checker validates.
 [package]
 name = "axiom-shot"
 version = "0.1.0"
@@ -31,28 +14,17 @@ edition = "2021"
 [workspace]
 
 [dependencies]
-# The engine umbrella: author a scene, drive the camera, pull neutral render data.
 axiom = { path = "../../modules/axiom" }
-# The real GPU backend, with its native off-screen render path enabled.
 axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["offscreen"] }
-# The real software Canvas 2D backend, rendered via its headless offscreen capture.
 axiom-canvas2d-backend = { path = "../../modules/axiom-canvas2d-backend" }
-# The host-layer presentation boundary: the `FramePacket` the Canvas 2D backend
-# consumes and the validated presentation request it is sized from.
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-kernel = { path = "../../crates/axiom-kernel" }
-# Math layer: the 2D parity proof authors a `Draw2dList` whose commands carry
-# math's Mat3 / Vec2 (baked transforms + rect corners).
 axiom-math = { path = "../../crates/axiom-math" }
-# The render command/packet builder: the SPEC-11 §7 translucency proof authors a
-# translucent `RenderMaterial` + scene directly at the render-API level (the
-# umbrella `Material`→asset boundary drops `opacity`), building the sorted,
-# opacity-folded `FramePacket` both backends consume.
+# The SPEC-11 §7 translucency proof authors a translucent `RenderMaterial`
+# directly at the render-API level (the umbrella `Material`→asset boundary
+# drops `opacity`).
 axiom-render = { path = "../../modules/axiom-render" }
-# The merged demo gallery (rlib): every browser demo now lives here as a module
-# (`axiom_gallery::retro_fps`, `axiom_gallery::physics_crucible`, …). The tool screenshots
-# them through that one crate. Apps are leaves; depending on the gallery here is fine
-# because this tool is outside the engine workspace/graph.
+# Every browser demo lives here as a module (`axiom_gallery::retro_fps`, …); the
+# tool screenshots them through this one crate.
 axiom-gallery = { path = "../../apps/axiom-gallery" }
-# PNG encode of the read-back / rasterized pixels.
 png = "0.17"

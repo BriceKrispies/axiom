@@ -1,12 +1,3 @@
-# Axiom layer manifest — axiom-proc-validate.
-#
-# Makes generated artifacts trustworthy: declarative constraints, scoring,
-# validation verdicts, and a single bounded repair pass over proc artifacts.
-# depends_on = kernel (digest + serialization for the report) and proc (the
-# Artifact it validates and the repaired artifact it builds). It owns NO domain
-# rules ("rivers reach the sea" is a terrain module's job) and never generates new
-# content beyond bounded word-level repair.
-
 [layer]
 name = "proc-validate"
 crate_name = "axiom-proc-validate"
@@ -25,8 +16,6 @@ owns no domain rules and never loops to a fixpoint.
 introduced_capabilities = ["ProcValidateApi", "ValidationReport", "Constraint"]
 consumed_capabilities = ["Artifact", "StableHash", "BinaryWriter"]
 
-# Proof the dependencies are genuine: ProcValidateApi validates and rebuilds a
-# proc Artifact; ValidationReport digests its canonical bytes with kernel StableHash.
 [[proof_exports]]
 export = "ProcValidateApi"
 must_reference = ["Artifact"]

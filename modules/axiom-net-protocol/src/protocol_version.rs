@@ -29,7 +29,6 @@ impl ProtocolVersion {
             })
     }
 
-    /// The raw version number.
     pub(crate) fn raw(self) -> u32 {
         self.0
     }

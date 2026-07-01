@@ -16,14 +16,6 @@ use axiom::prelude::{
     HostApi, HostOutcome, HostParamValue, HostSessionConfig, HostSessionParams, Score,
 };
 
-/// Decode a URL query string (`seed=123&mode=ranked&threshold=9.5`) into a
-/// validated [`HostSessionConfig`].
-///
-/// The `seed` key is the determinism input (SPEC-12 §6), parsed as a `u64`
-/// (absent or unparsable ⇒ `0`). Every other key becomes an opaque param: a
-/// value that parses as an `f64` is a [`HostParamValue::Number`], otherwise
-/// [`HostParamValue::Text`]. Parameter order follows the query string, which the
-/// stable-ordered [`HostSessionParams`] preserves.
 /// Split a URL query string into its non-empty `(key, value)` pairs, in query
 /// order — the one parse both [`decode_session_config`] and [`session_params_json`]
 /// share, so the two views of the query can never drift.
@@ -61,16 +53,20 @@ pub(crate) fn session_params_json(raw_query: &str) -> String {
     format!("{{{body}}}")
 }
 
+/// Decode a URL query string (`seed=123&mode=ranked&threshold=9.5`) into a
+/// validated [`HostSessionConfig`]. The `seed` key is the determinism input
+/// (SPEC-12 §6), parsed as a `u64` (absent or unparsable ⇒ `0`). Every other key
+/// becomes an opaque param: a value that parses as an `f64` is a
+/// [`HostParamValue::Number`], otherwise [`HostParamValue::Text`]. Parameter
+/// order follows the query string, which [`HostSessionParams`] preserves.
 pub(crate) fn decode_session_config(raw_query: &str) -> HostSessionConfig {
     let pairs = query_pairs(raw_query);
-    // `seed` is the last `seed=` value parsed as u64 (absent/unparsable ⇒ 0).
     let seed = pairs
         .iter()
         .filter(|(key, _)| *key == "seed")
         .map(|(_, value)| value.parse::<u64>().unwrap_or(0))
         .last()
         .unwrap_or(0);
-    // Every other non-empty key becomes a typed opaque param, order preserved.
     let params = pairs
         .iter()
         .filter(|(key, _)| (*key != "seed") & !key.is_empty())

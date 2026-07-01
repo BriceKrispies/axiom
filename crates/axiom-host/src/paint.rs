@@ -76,13 +76,11 @@ impl Paint2d {
     }
 
     /// Sample the gradient's colour at parameter `u` (clamped to `[0, 1]`).
-    ///
     /// This is the paint's **canonical colour ramp** — the contract's own
     /// definition of what a linear/radial gradient looks like, independent of any
     /// framebuffer. It lives here, in the neutral layer, so both render backends
     /// (Canvas 2D, GPU) sample the *identical* gradient rather than each
     /// re-deriving it (the "shared primitive belongs in a lower layer" rule).
-    ///
     /// Evaluated branchlessly as a telescoping sum over the stop list, sorted by
     /// offset: starting from the first stop's colour, each adjacent pair adds
     /// `(next − prev) · clamp((u − prev.offset)/(next.offset − prev.offset), 0, 1)`.
@@ -264,9 +262,7 @@ mod tests {
         let p = black_white();
         assert_eq!(p.sample(0.0), [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(p.sample(1.0), [1.0, 1.0, 1.0, 1.0]);
-        // Midpoint is the halfway grey.
         assert_eq!(p.sample(0.5), [0.5, 0.5, 0.5, 1.0]);
-        // Out-of-range u clamps to the endpoints (before-first / past-last arms).
         assert_eq!(p.sample(-2.0), [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(p.sample(3.0), [1.0, 1.0, 1.0, 1.0]);
     }
@@ -286,7 +282,6 @@ mod tests {
 
     #[test]
     fn sample_duplicate_offsets_stay_finite() {
-        // Two stops at the same offset: the EPS-floored divide must not yield NaN.
         let p = Paint2d::linear(
             Vec2::ZERO,
             Vec2::ONE,
@@ -300,12 +295,10 @@ mod tests {
 
     #[test]
     fn bake_texture_linear_is_a_ramp_row_and_radial_is_a_disc() {
-        // Linear → n×1 ramp; first texel is near-black, last near-white.
         let (lw, lh, lbytes) = black_white().bake_texture(8);
         assert_eq!((lw, lh), (8, 1));
         assert_eq!(lbytes.len(), 8 * 1 * 4);
         assert!(lbytes[0] < lbytes[(7 * 4)], "ramp brightens left→right");
-        // Radial → n×n disc.
         let radial = Paint2d::radial(
             Vec2::ZERO,
             meters(1.0),
@@ -321,7 +314,6 @@ mod tests {
 
     #[test]
     fn bake_texture_clamps_n_to_at_least_one_and_clamps_hdr_channels() {
-        // n = 0 floors to 1; an HDR (>1) channel clamps to 255 in to_byte.
         let p = Paint2d::linear(
             Vec2::ZERO,
             Vec2::ONE,

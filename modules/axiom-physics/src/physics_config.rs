@@ -7,11 +7,9 @@ use crate::physics_error::PhysicsError;
 use crate::physics_result::PhysicsResult;
 
 /// The fixed, deterministic configuration of a [`crate::PhysicsApi`] world.
-///
 /// Every value is explicit and bounded — there is no hidden global state and no
 /// wall-clock or random input. The defaults ([`PhysicsConfig::default_config`])
 /// are deterministic constants; [`PhysicsConfig::new`] rejects any invalid value.
-///
 /// `linear_damping` / `angular_damping` are per-step velocity-decay fractions in
 /// `[0, 1]`: each step a body's linear (resp. angular) velocity is scaled by
 /// `1 - damping`, so `0` is no decay (a free body coasts forever, today's
@@ -175,7 +173,6 @@ mod tests {
 
     #[test]
     fn damping_outside_unit_range_is_rejected() {
-        // Below zero and above one, on each of the two damping channels.
         assert!(PhysicsConfig::new(Vec3::ZERO, 1, 1, 1, 1, true, r(-0.1), r(0.0)).is_err());
         assert!(PhysicsConfig::new(Vec3::ZERO, 1, 1, 1, 1, true, r(1.1), r(0.0)).is_err());
         assert!(PhysicsConfig::new(Vec3::ZERO, 1, 1, 1, 1, true, r(0.0), r(-0.1)).is_err());

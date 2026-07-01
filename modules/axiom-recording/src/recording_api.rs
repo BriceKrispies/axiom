@@ -290,7 +290,6 @@ mod tests {
         assert_eq!(c.tick(), Tick::new(30));
         assert_eq!(c.input_bytes(), &[3_u8]);
         assert_ne!(c.final_hash(), 0);
-        // A missing frame is a deterministic error.
         assert!(r.frame(FrameIndex::new(99)).is_err());
     }
 
@@ -329,12 +328,11 @@ mod tests {
     #[test]
     fn step_back_from_live_walks_back_from_the_latest_frame() {
         let mut r = rec();
-        (0..3).for_each(|f| push(&mut r, f)); // 0,1,2
+        (0..3).for_each(|f| push(&mut r, f));
         r.step_back().unwrap();
         assert_eq!(r.selected_frame(), Some(FrameIndex::new(1)));
         r.step_back().unwrap();
         assert_eq!(r.selected_frame(), Some(FrameIndex::new(0)));
-        // At the oldest edge stepping back fails.
         assert!(r.step_back().is_err());
         assert_eq!(r.selected_frame(), Some(FrameIndex::new(0)));
     }

@@ -103,7 +103,6 @@ mod tests {
         assert_eq!(biome_cell_origin(1), (0.5, 0.0));
         assert_eq!(biome_cell_origin(2), (0.0, 0.5));
         assert_eq!(biome_cell_origin(3), (0.5, 0.5));
-        // Out-of-range biome ids wrap into the 4-cell grid.
         assert_eq!(biome_cell_origin(4), biome_cell_origin(0));
     }
 

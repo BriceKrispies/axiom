@@ -56,22 +56,19 @@ impl QuintetMask {
         QuintetMask::from_coords(&coords)
     }
 
-    /// The occupied cells, normalized and sorted.
     pub fn cells(&self) -> &[(i32, i32)] {
         &self.cells
     }
 
-    /// How many cells the shape occupies.
     pub fn count(&self) -> usize {
         self.cells.len()
     }
 
-    /// Does the shape occupy `(x, y)` (in normalized mask space)?
+    /// `(x, y)` is in normalized mask space.
     pub fn contains(&self, x: i32, y: i32) -> bool {
         self.cells.binary_search(&(x, y)).is_ok()
     }
 
-    /// Width of the shape's bounding box, in cells.
     pub fn width(&self) -> i32 {
         self.cells
             .iter()
@@ -80,7 +77,6 @@ impl QuintetMask {
             .map_or(0, |m| m + 1)
     }
 
-    /// Height of the shape's bounding box, in cells.
     pub fn height(&self) -> i32 {
         self.cells
             .iter()
@@ -164,7 +160,6 @@ mod tests {
 
     #[test]
     fn valid_connected_quintet_passes() {
-        // An L/P-style 5-cell shape, orthogonally connected.
         let m = QuintetMask::from_rows(&["xxooo", "xoooo", "xoooo", "xoooo"]);
         assert!(m.is_connected());
         assert!(!m.is_diagonal_line());

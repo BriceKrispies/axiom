@@ -1,5 +1,4 @@
 //! `elevation` stage: tectonic-boundary uplift + FBM detail on the plate base.
-//! Audit: worldgen `elevation`; OW-E16 uplift from plate seams.
 //!
 //! Starting from the plate base elevation (`plate_properties`), regions on a
 //! plate boundary (a neighbour belongs to a different plate) get a ridge bump —
@@ -110,8 +109,6 @@ mod tests {
         let mut g = ring_globe();
         let mut ctx = GenContext::new(5);
         ElevationStage.run(&mut g, &mut ctx);
-        // Every region in this ring touches the other plate, so all get uplift.
-        // With Fbm a stub (0), elevation equals uplift only; assert positive.
         for r in 0..g.region_count() {
             assert!(
                 g.region_elevation[r] > 0.0,

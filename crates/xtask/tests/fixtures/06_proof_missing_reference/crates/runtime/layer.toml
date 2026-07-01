@@ -1,6 +1,3 @@
-# `Runtime` is exported and the kernel IS used (via KernelClock), but the proof
-# claims `Runtime` must reference `KernelResult`, which its implementation never
-# does. Only ProofReferenceMissing should fire.
 [layer]
 name = "runtime"
 crate_name = "runtime"

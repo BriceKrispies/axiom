@@ -47,12 +47,7 @@ impl HostStepPlan {
         let sequence = input.sequence();
         let elapsed = input.elapsed_nanos();
 
-        // The lifecycle guards are an ordered priority: shutdown wins over
-        // suspended, which wins over hidden. `Option::or_else` reproduces that
-        // exact precedence branchlessly — the first `Some` short-circuits the
-        // rest the same way the original `if … return` ladder did, and the
-        // final stepping plan is the `unwrap_or_else` fall-through that the
-        // original code reached only when every guard was false.
+        // Priority order: shutdown wins over suspended, which wins over hidden.
         lifecycle
             .shutdown_requested()
             .then_some(HostStepPlan {
@@ -193,14 +188,11 @@ mod tests {
         );
         assert_eq!(plan.steps(), 5, "clamped to max_steps_per_frame=5");
         assert_eq!(plan.consumed_nanos(), 5 * STEP_NANOS);
-        // 100 * STEP - 5 * STEP = 95 * STEP retained.
         assert_eq!(plan.retained_nanos(), 95 * STEP_NANOS);
     }
 
     #[test]
     fn retain_accumulator_carries_unspent_time() {
-        // Half a step elapsed, plus a 1.5-step accumulator → 2 steps total
-        // (≈ 2.0 steps), retain the rest.
         let plan = HostStepPlan::build(
             &HostFrameInput::new(1, STEP_NANOS / 2, vp()),
             &cfg(),
@@ -210,7 +202,6 @@ mod tests {
         assert_eq!(plan.steps(), 2);
         assert_eq!(plan.retained_nanos(), 0);
 
-        // Now under-budget: accumulator+elapsed < fixed_step.
         let plan2 = HostStepPlan::build(
             &HostFrameInput::new(2, STEP_NANOS / 4, vp()),
             &cfg(),
@@ -339,8 +330,7 @@ mod cov {
 
     #[test]
     fn zero_fixed_step_produces_zero_steps() {
-        // `fixed_step_nanos == 0` is allowed by `new`; planning must take the
-        // `fixed == 0` branch and schedule zero steps rather than divide.
+        // `fixed_step_nanos == 0` must schedule zero steps, not divide by zero.
         let cfg = HostBoundaryConfig::new(0, 5).unwrap();
         let plan = HostStepPlan::build(
             &HostFrameInput::new(1, 1_000_000, vp()),

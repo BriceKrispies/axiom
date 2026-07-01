@@ -182,9 +182,7 @@ mod tests {
         s.set_parent(c, p).unwrap();
         s.clear_parent(c).unwrap();
         assert_eq!(s.parent_of(c), None);
-        // Clearing a root (no parent) still succeeds.
         s.clear_parent(p).unwrap();
-        // Missing node fails.
         assert_eq!(
             s.clear_parent(SceneNodeId::from_raw(99))
                 .unwrap_err()
@@ -202,9 +200,7 @@ mod tests {
         let leaf = node(&mut s);
         s.set_parent(first, parent).unwrap();
         s.set_parent(second, parent).unwrap();
-        // Direct children in ascending id order.
         assert_eq!(s.children_of(parent), vec![first, second]);
-        // A leaf and a missing node both have no children.
         assert!(s.children_of(leaf).is_empty());
         assert!(s.children_of(SceneNodeId::from_raw(999)).is_empty());
     }

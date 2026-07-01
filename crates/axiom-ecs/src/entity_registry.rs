@@ -243,7 +243,6 @@ mod tests {
         assert!(reg.despawn_handle(handle));
         assert!(reg.is_stale(handle), "the handle is stale after despawn");
         assert!(!reg.is_current(handle));
-        // Repeated despawn of a now-stale handle is a clean no-op.
         assert!(!reg.despawn_handle(handle));
         assert_eq!(reg.generation(handle.id()), None);
     }
@@ -253,13 +252,11 @@ mod tests {
         let mut reg = EntityRegistry::new();
         let first = reg.spawn_handle();
         assert!(reg.despawn(first.id()));
-        // The next spawn reuses slot 1 at generation 1.
         let second = reg.spawn_handle();
         assert_eq!(second.id(), first.id(), "slot is reused");
         assert_eq!(second.generation(), 1, "generation is bumped");
         assert!(reg.is_current(second));
         assert!(reg.is_stale(first), "the pre-reuse handle is stale");
-        // The stale handle cannot despawn the new occupant.
         assert!(!reg.despawn_handle(first));
         assert!(
             reg.is_current(second),
@@ -283,10 +280,10 @@ mod tests {
     #[test]
     fn iter_handles_is_ascending_with_generations() {
         let mut reg = EntityRegistry::new();
-        reg.spawn_handle(); // slot 1
-        let two = reg.spawn_handle(); // slot 2
+        reg.spawn_handle();
+        let two = reg.spawn_handle();
         reg.despawn(two.id());
-        let reused = reg.spawn_handle(); // slot 2 again, gen 1
+        let reused = reg.spawn_handle();
         let handles: Vec<(u64, u32)> = reg
             .iter_handles()
             .map(|h| (h.id().raw(), h.generation()))
@@ -301,7 +298,7 @@ mod tests {
         reg.spawn_handle();
         let two = reg.spawn_handle();
         reg.spawn_handle();
-        reg.despawn(two.id()); // slot 2 -> free list at gen 1
+        reg.despawn(two.id());
         let mut writer = BinaryWriter::new();
         reg.serialize(&mut writer);
         let bytes = writer.into_bytes();
@@ -331,7 +328,6 @@ mod tests {
         let bytes = writer.into_bytes();
         let mut restored = EntityRegistry::deserialize(&mut BinaryReader::new(&bytes)).unwrap();
 
-        // Both the original and the restored registry must mint the same next handle.
         let from_original = original.spawn_handle();
         let from_restored = restored.spawn_handle();
         assert_eq!(from_original.id(), from_restored.id());

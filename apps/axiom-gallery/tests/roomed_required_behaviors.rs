@@ -16,8 +16,6 @@ use axiom_gallery::roomed_puzzle::level_definition::{Button, Door, LevelDefiniti
 use axiom_gallery::roomed_puzzle::level_validation::validate_level;
 use axiom_gallery::roomed_puzzle::{level_codec, LEVEL_001_TOML};
 
-// --- Test fixtures --------------------------------------------------------
-
 /// entrance(0) · button(1) · floor(2) · door(3) · exit(4) — width 5, height 1.
 /// The button and door are not adjacent, so the door cannot be solo-crossed.
 fn corridor() -> LevelDefinition {
@@ -67,8 +65,6 @@ fn ticks(n: usize) -> Vec<PuzzleCommand> {
     vec![PuzzleCommand::Tick; n]
 }
 
-// --- 1. Player can move one square into floor ----------------------------
-
 #[test]
 fn req01_player_moves_one_square_into_floor() {
     let mut s = PuzzleGameState::new(corridor());
@@ -78,8 +74,6 @@ fn req01_player_moves_one_square_into_floor() {
     assert_eq!(s.player().position, GridCoord::new(2, 0));
 }
 
-// --- 2. Player cannot move outside the grid ------------------------------
-
 #[test]
 fn req02_player_cannot_move_outside_the_grid() {
     let mut s = PuzzleGameState::new(corridor());
@@ -88,8 +82,6 @@ fn req02_player_cannot_move_outside_the_grid() {
     assert_eq!(s.player().position, GridCoord::new(0, 0));
 }
 
-// --- 3. Player cannot move into a wall -----------------------------------
-
 #[test]
 fn req03_player_cannot_move_into_a_wall() {
     let mut s = PuzzleGameState::new(walled());
@@ -97,8 +89,6 @@ fn req03_player_cannot_move_into_a_wall() {
     assert!(into_wall.player_move_rejected());
     assert_eq!(s.player().position, GridCoord::new(0, 0));
 }
-
-// --- 4. Player cannot move into a closed door ----------------------------
 
 #[test]
 fn req04_player_cannot_move_into_a_closed_door() {
@@ -109,8 +99,6 @@ fn req04_player_cannot_move_into_a_closed_door() {
     assert_eq!(s.player().position, GridCoord::new(2, 0));
 }
 
-// --- 5. Standing on a button opens the matching door ---------------------
-
 #[test]
 fn req05_standing_on_button_opens_the_matching_door() {
     let mut s = PuzzleGameState::new(corridor());
@@ -118,8 +106,6 @@ fn req05_standing_on_button_opens_the_matching_door() {
     step(&mut s, R); // onto the button
     assert!(s.is_group_open(&main_group()));
 }
-
-// --- 6. Moving off a button closes the matching door ---------------------
 
 #[test]
 fn req06_moving_off_button_closes_the_matching_door() {
@@ -129,8 +115,6 @@ fn req06_moving_off_button_closes_the_matching_door() {
     step(&mut s, R); // off button (onto floor) -> closed
     assert!(!s.is_group_open(&main_group()));
 }
-
-// --- 7. A ghost standing on a button opens the matching door -------------
 
 #[test]
 fn req07_ghost_on_button_opens_the_matching_door() {
@@ -148,8 +132,6 @@ fn req07_ghost_on_button_opens_the_matching_door() {
     assert!(s.is_group_open(&main_group()));
 }
 
-// --- 8. A ghost finishing its replay remains in its final cell -----------
-
 #[test]
 fn req08_finished_ghost_stays_in_its_final_cell() {
     let mut s = PuzzleGameState::new(corridor());
@@ -163,8 +145,6 @@ fn req08_finished_ghost_stays_in_its_final_cell() {
     assert_eq!(s.ghost_states()[0].position, GridCoord::new(2, 0));
 }
 
-// --- 9. q creates a ghost and resets the live player to the entrance ------
-
 #[test]
 fn req09_q_creates_ghost_and_resets_player() {
     let mut s = PuzzleGameState::new(corridor());
@@ -175,8 +155,6 @@ fn req09_q_creates_ghost_and_resets_player() {
     assert_eq!(s.player().position, s.entrance());
     assert_eq!(s.ghost_states()[0].position, s.entrance());
 }
-
-// --- 10. q clears the current-life recording after creating the ghost -----
 
 #[test]
 fn req10_q_clears_the_recording() {
@@ -191,13 +169,11 @@ fn req10_q_clears_the_recording() {
     assert_eq!(s.ghost_states()[0].position, GridCoord::new(2, 0));
 }
 
-// --- 11. r clears all ghosts and resets the level fresh -------------------
-
 #[test]
 fn req11_r_restarts_fresh() {
     let mut s = PuzzleGameState::new(corridor());
     run(&mut s, &[R, PuzzleCommand::ResetLifeFromRecording, R]); // a ghost + a move
-    run(&mut s, &ticks(45)); // advance the clock
+    run(&mut s, &ticks(45));
     assert_eq!(s.ghost_count(), 1);
     assert!(s.current_tick() > 0);
 
@@ -207,8 +183,6 @@ fn req11_r_restarts_fresh() {
     assert_eq!(s.recording_len(), 0);
     assert_eq!(s.current_tick(), 0, "the clock resets on a fresh restart");
 }
-
-// --- 12. Failed moves are not recorded -----------------------------------
 
 #[test]
 fn req12_failed_moves_are_not_recorded() {
@@ -225,8 +199,6 @@ fn req12_failed_moves_are_not_recorded() {
     );
 }
 
-// --- 13. Ghosts replay one move per 0.5 s worth of fixed ticks ------------
-
 #[test]
 fn req13_ghost_moves_once_per_half_second_window() {
     // 0.5 s at the 60-tick/s fixed step is exactly the step window.
@@ -242,8 +214,6 @@ fn req13_ghost_moves_once_per_half_second_window() {
     step(&mut s, PuzzleCommand::Tick);
     assert_eq!(s.ghost_states()[0].position, GridCoord::new(1, 0));
 }
-
-// --- 14. Two identical command streams produce identical state traces -----
 
 #[test]
 fn req14_identical_streams_produce_identical_traces() {
@@ -265,8 +235,6 @@ fn req14_identical_streams_produce_identical_traces() {
     assert_eq!(trace_a, trace_b, "per-step result traces must match");
     assert_eq!(a, b, "final states must be byte-identical");
 }
-
-// --- 15. Level 001 validates (and matches its intended geometry) ----------
 
 #[test]
 fn req15_level_001_validates() {
@@ -308,8 +276,6 @@ fn req15_level_001_validates() {
         "level 001 walls match the partitioned room"
     );
 }
-
-// --- 16. Level 001 is solvable via the ghost-on-button sequence -----------
 
 #[test]
 fn req16_level_001_is_solvable_with_a_ghost() {
@@ -359,8 +325,6 @@ fn level_001_door_genuinely_blocks_a_lone_player() {
     assert_eq!(s.player().position, GridCoord::new(6, 5));
     assert!(!s.is_solved());
 }
-
-// --- 17. TOML export/import round-trips for level definitions -------------
 
 #[test]
 fn req17_toml_export_import_round_trips() {

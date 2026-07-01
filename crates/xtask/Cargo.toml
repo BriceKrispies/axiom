@@ -10,15 +10,10 @@ publish = false
 name = "xtask"
 path = "src/main.rs"
 
-# These dependencies live ONLY in this tooling crate. The kernel (and every
-# future layer) stays free to remain zero-dependency and wasm-clean. `serde` +
-# `toml` give us a readable, derive-based manifest schema that future agents can
-# extend without hand-writing a TOML parser.
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
-# Used only to faithfully evaluate the coverage gate's `--ignore-filename-regex`
-# pattern (the same regex engine llvm-cov uses) when proving it excludes no
-# engine code. See `coverage_scope.rs`.
+# Faithfully evaluates the coverage gate's --ignore-filename-regex pattern
+# (same regex engine as llvm-cov); see coverage_scope.rs.
 regex = "1"

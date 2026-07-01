@@ -1,10 +1,7 @@
-//! Station 5 — Stress Bay.
-//!
-//! A deterministic pile: a 4×4 grid of dynamic spheres dropped onto a floor so
-//! they collide, stack, and settle. It exercises the `O(n²)` broad phase (many
-//! candidate pairs), the contact solver (many simultaneous contacts), the
-//! substepping, and — most importantly — determinism: the same drop run twice
-//! produces byte-identical state. No body may tunnel through the floor.
+//! Station 5 — Stress Bay: a 4×4 grid of dynamic spheres dropped onto a floor
+//! so they collide, stack, and settle, exercising the broad phase, contact
+//! solver, and substepping. The same drop run twice must be byte-identical,
+//! and no body may tunnel through the floor.
 
 use axiom::prelude::Vec3;
 
@@ -49,7 +46,6 @@ impl Station for StressBay {
     }
 
     fn debug_shapes(&self, world: &CrucibleWorld) -> Vec<DebugShape> {
-        // Mark every resolved contact in the pile.
         world
             .contacts()
             .into_iter()
@@ -92,9 +88,6 @@ mod tests {
 
     #[test]
     fn the_solver_resolves_contacts_in_the_pile() {
-        // `solved_contact_count` is per-step; once the staggered pile has settled,
-        // gravity re-introduces approaching velocity every step, so resting
-        // contacts are solved on each subsequent step.
         let world = run(200);
         assert!(world.step_counts().solved_contact_count > 0);
     }
@@ -104,7 +97,6 @@ mod tests {
         let world = run(150);
         for s in world.body_states() {
             assert!(s.translation.x.is_finite() && s.translation.y.is_finite());
-            // Floor at y=0; nothing should sink meaningfully below its radius.
             assert!(
                 s.translation.y > -0.2,
                 "a body tunnelled the floor: y={}",
