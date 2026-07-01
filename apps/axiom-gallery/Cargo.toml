@@ -96,6 +96,10 @@ axiom-noise = { path = "../../crates/axiom-noise" }
 # Spherical topology (geodesic icosphere + dual region-adjacency graph + ring
 # validation) for growth's planet worldgen.
 axiom-geosphere = { path = "../../crates/axiom-geosphere" }
+# Graph-hydrology field solvers (pit-fill, receivers, flow accumulation, erosion,
+# ocean distance) over the geosphere region graph; the worldgen hydrology stages
+# are thin wrappers over this layer.
+axiom-hydrology = { path = "../../crates/axiom-hydrology" }
 axiom-proc = { path = "../../crates/axiom-proc" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 # The physics module under test (physics-crucible), composed only through PhysicsApi.

@@ -1,0 +1,76 @@
+# Axiom layer manifest — axiom-hydrology.
+#
+# The graph-hydrology layer: the pure field solvers that turn the geosphere
+# region-adjacency graph plus a per-region elevation field into a drainage
+# surface, receivers, flow accumulation, eroded relief and an ocean-distance
+# field. These algorithms lived ad hoc in the growth app's worldgen stages
+# (priority_flood, rivers, erosion, moisture); they graduate here into a reusable
+# engine home so a future planet-generation feature-module and the app's stages
+# both build on one deterministic implementation. Because engine modules may
+# depend only on LAYERS (never on another module), the shared hydrology primitive
+# is a layer, not a module.
+#
+# depends_on = geosphere, kernel — and both are genuinely adapted:
+#   * geosphere: every solver traverses a `RegionGraph` via `neighbours_of`,
+#     keyed by the `RegionId` region-index vocabulary geosphere hands out;
+#     `compute_receivers` returns `Vec<RegionId>`.
+#   * kernel: the elevation field is `Meters`, flow accumulation is `Ratio`, so
+#     no naked scalar reaches the public API — the typed boundary is the kernel's
+#     quantity primitives.
+#
+# NOTE ON depends_on (deliberate, gate-driven): the algorithms are pure
+# graph-plus-scalar transforms — no Vec3/Mat/Quat — so they do NOT genuinely use
+# `math`. Declaring `math` would be a ceremonial dependency the Layer Law forbids
+# and the `engine_genuine_dependency` dylint rejects. `Meters`/`Ratio` are kernel
+# primitives, so `kernel` (not `math`) is the honest typed-field dependency.
+
+[layer]
+name = "hydrology"
+crate_name = "axiom-hydrology"
+depends_on = ["geosphere", "kernel"]
+
+meaningful_dependency = """
+Hydrology adapts geosphere's RegionGraph and kernel's quantity primitives into
+deterministic drainage fields. Every solver walks the CSR adjacency via
+RegionGraph::neighbours_of keyed by RegionId: pit_fill runs a monotone max-min
+wavefront relaxation (max of own elevation and the least-filled neighbour) that
+converges to the priority-flood drainage surface with no heap; compute_receivers
+folds each region's neighbourhood to the (elevation, index)-least receiver as a
+Vec<RegionId>; flow_accumulation scatters unit rainfall down those receivers in a
+sorted, deterministic order; stream_power_erosion incises each region toward its
+lowest neighbour; ocean_distance runs a bounded multi-source BFS as N relaxation
+passes over the graph. The elevation field is kernel Meters and flow is kernel
+Ratio, so the public surface carries no naked scalar. All outputs are
+byte-identical run-to-run: ordered folds, saturating hop arithmetic, and a fixed
+number of relaxation passes bounded by the region count — no map iteration, no
+wall clock, no ambient randomness reaches the result.
+"""
+
+introduced_capabilities = [
+    "pit_fill",
+    "compute_receivers",
+    "flow_accumulation",
+    "stream_power_erosion",
+    "ocean_distance",
+    "HopDistance",
+]
+consumed_capabilities = ["RegionGraph", "RegionId", "Meters", "Ratio"]
+
+# Proof the geosphere + kernel dependencies are genuine. pit_fill's body walks a
+# RegionGraph and rewrites a &mut [Meters] elevation field; compute_receivers
+# folds a RegionGraph into a Vec<RegionId>.
+[[proof_exports]]
+export = "pit_fill"
+must_reference = ["RegionGraph", "Meters"]
+
+[[proof_exports]]
+export = "compute_receivers"
+must_reference = ["RegionGraph", "RegionId"]
+
+[[proof_exports]]
+export = "flow_accumulation"
+must_reference = ["RegionGraph", "Ratio"]
+
+[[proof_exports]]
+export = "ocean_distance"
+must_reference = ["RegionGraph"]

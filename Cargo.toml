@@ -21,6 +21,7 @@ members = [
     "crates/axiom-layout",
     "crates/axiom-noise",
     "crates/axiom-geosphere",
+    "crates/axiom-hydrology",
     "crates/axiom-space",
     "crates/axiom-entropy",
     "crates/axiom-proc",

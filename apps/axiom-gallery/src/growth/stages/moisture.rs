@@ -1,14 +1,15 @@
 //! `moisture` stage: ocean-distance BFS baseline moisture.
 //! Audit: Wind/moisture reqs "Current moisture is ocean-distance BFS only".
 //!
-//! A multi-source BFS over the region graph seeded from every ocean region
-//! (`elevation < 0`) computes graph distance to the nearest ocean. Moisture is
-//! `1` at the coast and decays linearly with distance, normalised to `[0,1]`.
-//! Regions on an all-land world with no ocean get a flat baseline.
+//! Thin app-side [`Stage`] wrapper over the `axiom-hydrology` layer: the
+//! multi-source ocean-distance solver ([`axiom_hydrology::ocean_distance`]) does
+//! the graph traversal; this stage marks ocean regions (`elevation < 0`), calls
+//! the layer, and folds the returned hop distances into a `[0,1]` moisture field
+//! (`1` at the coast, decaying linearly with distance). An all-land world with no
+//! ocean gets a flat dry baseline.
 
-use std::collections::VecDeque;
+use axiom_hydrology::ocean_distance;
 
-use crate::growth::ids::RegionId;
 use crate::growth::model_planet::PlanetGlobe;
 use crate::growth::pipeline::{GenContext, Stage};
 
@@ -28,33 +29,12 @@ impl Stage for MoistureStage {
             return;
         }
 
-        let unreached = u32::MAX;
-        let mut dist = vec![unreached; region_count];
-        let mut queue: VecDeque<usize> = VecDeque::new();
+        // Ocean regions (below sea level) are the BFS sources.
+        let is_ocean: Vec<bool> = globe.region_elevation.iter().map(|&e| e < 0.0).collect();
+        let no_ocean = !is_ocean.iter().any(|&o| o);
 
-        for (r, slot) in dist.iter_mut().enumerate() {
-            if globe.region_elevation[r] < 0.0 {
-                *slot = 0;
-                queue.push_back(r);
-            }
-        }
-
-        let no_ocean = queue.is_empty();
-
-        let mut max_dist = 0u32;
-        while let Some(r) = queue.pop_front() {
-            let d = dist[r];
-            for &n in globe.graph.neighbours_of(RegionId(r as u32)) {
-                let ni = n as usize;
-                if dist[ni] == unreached {
-                    dist[ni] = d + 1;
-                    if d + 1 > max_dist {
-                        max_dist = d + 1;
-                    }
-                    queue.push_back(ni);
-                }
-            }
-        }
+        let dist = ocean_distance(&globe.graph, &is_ocean);
+        let max_dist = dist.iter().filter_map(|d| d.steps()).max().unwrap_or(0);
 
         if no_ocean {
             // No ocean anywhere: uniform dry baseline.
@@ -63,8 +43,9 @@ impl Stage for MoistureStage {
             }
         } else {
             let denom = if max_dist == 0 { 1.0 } else { max_dist as f32 };
-            for (r, &dr) in dist.iter().enumerate() {
-                let d = if dr == unreached { max_dist } else { dr };
+            for (r, hop) in dist.iter().enumerate() {
+                // Unreached interior sits at the far end of the gradient.
+                let d = hop.steps().unwrap_or(max_dist);
                 // Nearer ocean = wetter; clamp to [0,1].
                 let m = 1.0 - (d as f32 / denom);
                 globe.region_moisture[r] = m.clamp(0.0, 1.0);
@@ -136,6 +117,14 @@ mod tests {
         for &m in &g.region_moisture {
             assert!((0.0..=1.0).contains(&m));
         }
+    }
+
+    #[test]
+    fn empty_globe_is_a_noop() {
+        let mut g = line_globe(vec![]);
+        let mut ctx = GenContext::new(1);
+        MoistureStage.run(&mut g, &mut ctx);
+        assert!(g.region_moisture.is_empty());
     }
 
     #[test]
