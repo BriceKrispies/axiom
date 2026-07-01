@@ -1,0 +1,14 @@
+[package]
+name = "axiom-geosphere"
+description = "Axiom layer: deterministic geodesic-icosphere topology + its dual region-adjacency graph. Subdivides the icosahedron on a barycentric lattice, normalizes every vertex onto the unit sphere (positions are axiom-math Vec3), deduplicates shared edge/corner vertices into stable region indices, emits outward-CCW triangles, and derives a compressed-sparse-row (CSR) region-neighbour graph plus a ring-manifold validator. The same subdivision level always yields byte-identical topology on every run and platform. depends_on = math."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-math = { path = "../axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

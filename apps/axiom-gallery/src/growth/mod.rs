@@ -22,8 +22,9 @@ pub mod requirements;
 
 // --- generation primitives ---
 // Coherent noise (gradient/Perlin + FBM + domain warp) graduated into the
-// `axiom-noise` engine layer; the growth stages consume it directly.
-pub mod topology;
+// `axiom-noise` engine layer; the spherical topology (icosphere + region graph +
+// ring validation) graduated into the `axiom-geosphere` engine layer. The growth
+// pipeline consumes both directly.
 
 // --- planet genome / presets / seed ---
 pub mod genome;
@@ -124,18 +125,19 @@ impl Growth {
         ctx.site_target = site_target;
 
         // Topology (fixed for the generation), then run the data-driven pipeline.
-        let subdiv = topology::subdivisions_for_target(site_target);
+        let subdiv = axiom_geosphere::subdivisions_for_target(site_target);
         let mut globe = PlanetGlobe {
-            topology: topology::build_icosphere(subdiv),
+            topology: axiom_geosphere::build_icosphere(subdiv),
             ..PlanetGlobe::default()
         };
-        globe.graph = topology::build_region_graph(&globe.topology);
+        globe.graph = axiom_geosphere::build_region_graph(&globe.topology);
         globe.resize_fields();
 
         // OW-E18 / SC-E1: validate dual region rings before hydrology. Logged
         // (not aborted) so generation is observable; the QA gate test asserts
-        // validity on reference configs.
-        let rings = topology::validate_region_rings(&globe);
+        // validity on reference configs. The layer validator takes neutral
+        // topology (icosphere + region graph), not the app's planet.
+        let rings = axiom_geosphere::validate_region_rings(&globe.topology, &globe.graph);
         ctx.log.push(format!(
             "validate_topology: bad_adjacency={} tris_not_in_3_rings={}",
             rings.bad_adjacency, rings.tris_not_in_3_rings

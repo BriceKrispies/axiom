@@ -93,6 +93,9 @@ axiom-space = { path = "../../crates/axiom-space" }
 axiom-entropy = { path = "../../crates/axiom-entropy" }
 # Coherent noise (gradient/Perlin + FBM + domain warp) for growth's worldgen.
 axiom-noise = { path = "../../crates/axiom-noise" }
+# Spherical topology (geodesic icosphere + dual region-adjacency graph + ring
+# validation) for growth's planet worldgen.
+axiom-geosphere = { path = "../../crates/axiom-geosphere" }
 axiom-proc = { path = "../../crates/axiom-proc" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 # The physics module under test (physics-crucible), composed only through PhysicsApi.

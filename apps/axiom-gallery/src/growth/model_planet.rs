@@ -14,45 +14,12 @@ use axiom_math::Vec3;
 
 use crate::growth::ids::{BiomeId, PlateId, RegionId};
 
-/// A fixed icosphere: unit-sphere sites (region centres) and triangle faces.
-/// Audit: worldgen `topology` stage, OW-E12 primal-quad export.
-#[derive(Debug, Clone, Default)]
-pub struct Icosphere {
-    /// Unit-length region centre directions, indexed by region id.
-    pub sites: Vec<Vec3>,
-    /// Triangle faces, each three region indices (CCW outward).
-    pub triangles: Vec<[u32; 3]>,
-    /// Subdivision level used (quantises region count). Audit: perf cap subdiv 9.
-    pub subdivisions: u32,
-}
-
-impl Icosphere {
-    pub fn region_count(&self) -> usize {
-        self.sites.len()
-    }
-}
-
-/// Region adjacency in compressed-sparse-row form. Audit: OW-E1 "neighbours CSR".
-#[derive(Debug, Clone, Default)]
-pub struct RegionGraph {
-    /// `offsets[r]..offsets[r+1]` slices into `neighbours` for region `r`.
-    pub offsets: Vec<u32>,
-    /// Flattened neighbour region indices.
-    pub neighbours: Vec<u32>,
-}
-
-impl RegionGraph {
-    /// Neighbour region indices of `region`.
-    pub fn neighbours_of(&self, region: RegionId) -> &[u32] {
-        let i = region.index();
-        if i + 1 >= self.offsets.len() {
-            return &[];
-        }
-        let start = self.offsets[i] as usize;
-        let end = self.offsets[i + 1] as usize;
-        &self.neighbours[start..end]
-    }
-}
+// The fixed spherical topology — the unit-sphere region sites, the outward-CCW
+// triangle faces, and the dual region-adjacency graph (CSR) — graduated into the
+// `axiom-geosphere` engine layer. `PlanetGlobe` composes that neutral topology and
+// hangs its planet scalar fields (elevation, moisture, plates, flow) off the same
+// region indices. Audit: worldgen `topology` stage, OW-E1 "neighbours CSR".
+pub use axiom_geosphere::{Icosphere, RegionGraph};
 
 /// Mutable generation state. Worldgen stages read/write these flat fields in
 /// place; sea level is fixed at 0 (audit: OW-E21 `fit_land_coverage`).

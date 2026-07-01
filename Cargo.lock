@@ -250,6 +250,7 @@ dependencies = [
  "axiom-canvas2d-backend",
  "axiom-debug-overlay",
  "axiom-entropy",
+ "axiom-geosphere",
  "axiom-gpu-backend",
  "axiom-host",
  "axiom-input",
@@ -305,6 +306,13 @@ dependencies = [
  "console_error_panic_hook",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "axiom-geosphere"
+version = "0.1.0"
+dependencies = [
+ "axiom-math",
 ]
 
 [[package]]
