@@ -4,7 +4,7 @@
 //! exceeds the engine's impl-block size budget.
 
 use axiom_frame::FrameCommand;
-use axiom_kernel::Radians;
+use axiom_kernel::{Meters, Radians};
 use axiom_math::Vec3;
 
 use super::SceneApi;
@@ -45,17 +45,28 @@ impl SceneApi {
     /// node's yaw-only frame — and recompute world transforms now. The zero-lag
     /// counterpart to staging a [`Self::controller_command`] for [`Self::advance`]:
     /// a host that owns its own loop drives the camera with this between ticks. An
-    /// unknown index is a no-op.
-    pub fn control_now(&mut self, index: u32, move_local: Vec3, yaw: Radians, pitch: Radians) {
-        self.scene.control_now(index, move_local, yaw.get(), pitch.get());
+    /// unknown index is a no-op. When `seat_y` is present the eye is seated at that
+    /// absolute height instead of taking `move_local`'s vertical component.
+    pub fn control_now(
+        &mut self,
+        index: u32,
+        move_local: Vec3,
+        yaw: Radians,
+        pitch: Radians,
+        seat_y: Option<Meters>,
+    ) {
+        self.scene
+            .control_now(index, move_local, yaw.get(), pitch.get(), seat_y);
     }
 
     /// Encode a per-tick first-person input for controller `index`: a `yaw`/`pitch`
     /// look delta (yaw about +Y, pitch about local +X, clamped by the scene) plus
     /// a `move_local` translation in the node's own frame (local -Z is forward,
-    /// local +X is right), as a [`FrameCommand`] to hand to the frame builder.
-    /// The scene decodes these in [`Self::advance`] and applies them to the
-    /// addressed controller's node — moving in the yaw-only horizontal frame.
+    /// local +X is right) and an optional absolute vertical `seat_y` (metres), as a
+    /// [`FrameCommand`] to hand to the frame builder. The scene decodes these in
+    /// [`Self::advance`] and applies them to the addressed controller's node —
+    /// moving in the yaw-only horizontal frame, seating the eye when `seat_y` is
+    /// present.
     pub fn controller_command(
         &self,
         sequence: u64,
@@ -63,6 +74,7 @@ impl SceneApi {
         move_local: Vec3,
         yaw: Radians,
         pitch: Radians,
+        seat_y: Option<Meters>,
     ) -> FrameCommand {
         crate::controller_command::encode_controller(
             sequence,
@@ -70,6 +82,7 @@ impl SceneApi {
             move_local,
             yaw.get(),
             pitch.get(),
+            seat_y,
         )
     }
 }

@@ -159,7 +159,7 @@ impl RunningApp {
         let yaw = Radians::new(input.yaw.as_radians()).expect("authored yaw is finite");
         let pitch = Radians::new(input.pitch.as_radians()).expect("authored pitch is finite");
         self.scene
-            .control_now(input.index, input.move_local, yaw, pitch);
+            .control_now(input.index, input.move_local, yaw, pitch, input.seat_y);
     }
 }
 

@@ -10,7 +10,7 @@
 //! encode/decode pair lives here so the format has a single source of truth.
 
 use axiom_frame::FrameCommand;
-use axiom_kernel::{BinaryReader, BinaryWriter};
+use axiom_kernel::{BinaryReader, BinaryWriter, Meters};
 use axiom_math::Vec3;
 
 /// The `FrameCommand::kind` tag identifying a first-person controller command.
@@ -21,14 +21,17 @@ pub(crate) const CONTROLLER_KIND: u32 = 2;
 /// Encode a first-person input for controller `index`: a `yaw`/`pitch` look
 /// delta (radians; yaw about +Y, pitch about local +X) plus a `move_local`
 /// translation in the node's own frame (local -Z is forward, local +X is right),
-/// as a frame command. `sequence` is frame bookkeeping and is not interpreted by
-/// the scene.
+/// and an optional absolute vertical `seat_y` (metres), as a frame command.
+/// `sequence` is frame bookkeeping and is not interpreted by the scene. The seat
+/// is carried as a presence flag plus a scalar so the format stays fixed-width
+/// and the decode is a plain sequential read.
 pub(crate) fn encode_controller(
     sequence: u64,
     index: u32,
     move_local: Vec3,
     yaw: f32,
     pitch: f32,
+    seat_y: Option<Meters>,
 ) -> FrameCommand {
     let mut w = BinaryWriter::new();
     w.write_u32(index);
@@ -37,13 +40,19 @@ pub(crate) fn encode_controller(
     w.write_f32(move_local.z);
     w.write_f32(yaw);
     w.write_f32(pitch);
+    w.write_bool(seat_y.is_some());
+    w.write_f32(seat_y.map_or(0.0, Meters::get));
     FrameCommand::new(sequence, CONTROLLER_KIND, w.into_bytes())
 }
 
-/// Decode a controller command into `(index, move_local, yaw, pitch)`, or `None`
-/// if it is not a well-formed controller input (wrong kind, or a truncated
-/// payload).
-pub(crate) fn decode_controller(command: &FrameCommand) -> Option<(u32, Vec3, f32, f32)> {
+/// Decode a controller command into `(index, move_local, yaw, pitch, seat_y)`,
+/// or `None` if it is not a well-formed controller input (wrong kind, or a
+/// truncated payload). The trailing presence flag reconstructs the optional
+/// absolute vertical seat: a set flag yields `Some(Meters)`, a clear flag
+/// `None` (the scalar is still present but ignored).
+pub(crate) fn decode_controller(
+    command: &FrameCommand,
+) -> Option<(u32, Vec3, f32, f32, Option<Meters>)> {
     // Reads are sequential on a stateful reader, so each field read nests inside
     // the previous one's success arm (`and_then`); a wrong kind or any truncated
     // field collapses the whole chain to `None`.
@@ -55,9 +64,15 @@ pub(crate) fn decode_controller(command: &FrameCommand) -> Option<(u32, Vec3, f3
                     r.read_f32().ok().and_then(|y| {
                         r.read_f32().ok().and_then(|z| {
                             r.read_f32().ok().and_then(|yaw| {
-                                r.read_f32()
-                                    .ok()
-                                    .map(|pitch| (index, Vec3::new(x, y, z), yaw, pitch))
+                                r.read_f32().ok().and_then(|pitch| {
+                                    r.read_bool().ok().and_then(|has_seat| {
+                                        r.read_f32().ok().map(|seat| {
+                                            let seat_y =
+                                                has_seat.then(|| Meters::finite_or_zero(seat));
+                                            (index, Vec3::new(x, y, z), yaw, pitch, seat_y)
+                                        })
+                                    })
+                                })
                             })
                         })
                     })
@@ -71,26 +86,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn controller_round_trips() {
-        let cmd = encode_controller(0, 2, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2);
+    fn controller_round_trips_without_a_seat() {
+        let cmd = encode_controller(0, 2, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2, None);
         assert_eq!(cmd.kind(), CONTROLLER_KIND);
         assert_eq!(
             decode_controller(&cmd),
-            Some((2, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2))
+            Some((2, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2, None))
+        );
+    }
+
+    #[test]
+    fn controller_round_trips_with_an_absolute_seat() {
+        let seat = Meters::new(3.5).expect("seat is finite");
+        let cmd = encode_controller(0, 2, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2, Some(seat));
+        assert_eq!(
+            decode_controller(&cmd),
+            Some((2, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2, Some(seat)))
         );
     }
 
     #[test]
     fn non_controller_kind_decodes_to_none() {
-        let other = FrameCommand::new(0, CONTROLLER_KIND + 1, vec![0; 16]);
+        let other = FrameCommand::new(0, CONTROLLER_KIND + 1, vec![0; 24]);
         assert_eq!(decode_controller(&other), None);
     }
 
     #[test]
     fn every_truncated_prefix_decodes_to_none() {
         // Walks the `ok()?` error arm of each field read (index, forward, strafe,
-        // turn).
-        let full = encode_controller(0, 1, Vec3::new(0.5, 0.0, 0.25), -0.5, 0.3);
+        // turn, yaw, pitch, seat flag, seat scalar).
+        let full = encode_controller(
+            0,
+            1,
+            Vec3::new(0.5, 0.0, 0.25),
+            -0.5,
+            0.3,
+            Some(Meters::new(2.0).expect("finite")),
+        );
         let bytes = full.payload().to_vec();
         for k in 0..bytes.len() {
             let cmd = FrameCommand::new(0, CONTROLLER_KIND, bytes[..k].to_vec());

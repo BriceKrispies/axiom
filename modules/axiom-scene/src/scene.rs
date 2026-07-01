@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 
 use axiom_frame::FrameContext;
-use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, KernelResult, Reflect};
+use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, KernelResult, Meters, Reflect};
 use axiom_math::{Transform, Vec3};
 
 use crate::controller_command::decode_controller;
@@ -236,8 +236,22 @@ impl Scene {
     /// between ticks (the SDK's `RunningApp::control`); it reuses the exact logic
     /// the per-tick [`ControllerSystem`] runs, so the two never diverge. An unknown
     /// index is a no-op.
-    pub(crate) fn control_now(&mut self, index: u32, move_local: Vec3, yaw_delta: f32, pitch_delta: f32) {
-        apply_controller(self.world.storage_mut(), index, move_local, yaw_delta, pitch_delta);
+    pub(crate) fn control_now(
+        &mut self,
+        index: u32,
+        move_local: Vec3,
+        yaw_delta: f32,
+        pitch_delta: f32,
+        seat_y: Option<Meters>,
+    ) {
+        apply_controller(
+            self.world.storage_mut(),
+            index,
+            move_local,
+            yaw_delta,
+            pitch_delta,
+            seat_y,
+        );
         self.update_world_transforms();
     }
 
@@ -253,7 +267,7 @@ impl Scene {
     /// return the deterministic snapshot taken after whatever update happened.
     pub(crate) fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
         let moves: Vec<(u32, Vec3)> = frame.commands().iter().filter_map(decode_move).collect();
-        let controls: Vec<(u32, Vec3, f32, f32)> = frame
+        let controls: Vec<(u32, Vec3, f32, f32, Option<Meters>)> = frame
             .commands()
             .iter()
             .filter_map(decode_controller)
@@ -590,7 +604,7 @@ mod frame_tests {
         let node = s.create_node(Transform::IDENTITY);
         s.add_controller(node, 0).unwrap();
         // A frame carrying a forward move (local -Z by 1) for controller 0, no look.
-        let frame = encode_controller(0, 0, Vec3::new(0.0, 0.0, -1.0), 0.0, 0.0);
+        let frame = encode_controller(0, 0, Vec3::new(0.0, 0.0, -1.0), 0.0, 0.0, None);
         let engine_frame = engine_frame_with(1_000, true, vec![frame]);
         s.advance(0, &FrameContext::new(&engine_frame));
         // Forward with identity facing translates along -Z.
@@ -673,7 +687,7 @@ mod frame_tests {
 
         // Drive a controller look + a player move so the controller accumulates
         // yaw/pitch and the player translates — genuine per-frame state.
-        let look = encode_controller(0, 0, Vec3::new(0.0, 0.0, -1.0), 0.5, 0.3);
+        let look = encode_controller(0, 0, Vec3::new(0.0, 0.0, -1.0), 0.5, 0.3, None);
         let mv = encode_move(1, 1, Vec3::new(2.0, 0.0, 0.0));
         let frame = engine_frame_with(1_000, true, vec![look, mv]);
         s.advance(7, &FrameContext::new(&frame));
