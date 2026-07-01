@@ -557,10 +557,21 @@ mod tests {
     #[test]
     fn controller_command_encodes_a_decodable_input() {
         let s = api();
-        let cmd = s.controller_command(0, 1, Vec3::new(0.5, 0.0, -0.25), rad(0.1), rad(-0.2));
+        let cmd = s.controller_command(0, 1, Vec3::new(0.5, 0.0, -0.25), rad(0.1), rad(-0.2), None);
         assert_eq!(
             crate::controller_command::decode_controller(&cmd),
-            Some((1, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2))
+            Some((1, Vec3::new(0.5, 0.0, -0.25), 0.1, -0.2, None))
+        );
+    }
+
+    #[test]
+    fn controller_command_carries_an_absolute_vertical_seat() {
+        let s = api();
+        let seat = m(4.25);
+        let cmd = s.controller_command(0, 1, Vec3::ZERO, rad(0.0), rad(0.0), Some(seat));
+        assert_eq!(
+            crate::controller_command::decode_controller(&cmd),
+            Some((1, Vec3::ZERO, 0.0, 0.0, Some(seat)))
         );
     }
 

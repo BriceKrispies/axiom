@@ -48,22 +48,24 @@ pub fn map_pick_to_dir(u: f32, v: f32) -> Vec3 {
 }
 
 /// The walking player's authoritative state (owned by the app, not the engine's
-/// free-fly controller): world position `(x, z)`, look `yaw`/`pitch`, and the
-/// camera's mirrored engine-space `engine_y`.
+/// free-fly controller): world position `(x, z)` and look `yaw`/`pitch`. The
+/// vertical seat is no longer mirrored here — the engine seats the eye absolutely
+/// from the [`FirstPersonInput::with_seat_y`] the step emits, so there is no
+/// shadow-Y to keep in lock-step.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlayerState {
     pub x: f32,
     pub z: f32,
     pub yaw: f32,
     pub pitch: f32,
-    pub engine_y: f32,
 }
 
 /// One integrated tick: the engine input to apply, plus the surface height read.
 #[derive(Clone, Copy, Debug)]
 pub struct StepOutput {
-    /// The first-person input to feed the engine (horizontal step + vertical
-    /// ground-follow correction in `move_local.y`, plus look deltas).
+    /// The first-person input to feed the engine: the horizontal step (look
+    /// deltas) plus an absolute vertical seat (`with_seat_y`) that rides the
+    /// terrain surface.
     pub control: FirstPersonInput,
     /// Absolute terrain height (metres) under the new position.
     pub ground_height_m: f32,
@@ -108,16 +110,16 @@ pub fn step_first_person(
     let sampled = sample_height_m_lod_vista(atlas, localmap, seed, state.x, state.z, 0.0, Some(plan));
     let desired_y = sampled - anchor_h + EYE_HEIGHT_M;
 
-    // 4. Build the engine input: horizontal step + vertical correction in Y (a +Y
-    // yaw rotation preserves Y, so the camera lands exactly on the surface).
-    let dy = desired_y - state.engine_y;
-    state.engine_y = desired_y;
+    // 4. Build the engine input: the horizontal step (move_local carries no
+    // vertical component) plus an explicit absolute vertical seat, so the engine
+    // seats the eye exactly on the surface this tick — no shadow-Y delta needed.
     let control = FirstPersonInput::new(
         0,
-        Vec3::new(strafe, dy, -forward),
+        move_local,
         Angle::radians(yaw_delta),
         Angle::radians(pitch_delta),
-    );
+    )
+    .with_seat_y(Meters::finite_or_zero(desired_y));
     StepOutput {
         control,
         ground_height_m: sampled,
@@ -218,7 +220,6 @@ impl GroundSim {
                 z: spawn_z,
                 yaw: view_yaw,
                 pitch: 0.0,
-                engine_y: eye_y,
             },
             app,
             tick: 0,

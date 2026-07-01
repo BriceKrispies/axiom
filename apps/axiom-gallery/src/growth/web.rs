@@ -988,7 +988,6 @@ pub fn descend(u: f32, v: f32) {
         z: spawn_z,
         yaw: plan.view_yaw,
         pitch: 0.0,
-        engine_y: eye_y,
     }));
 
     let keys = Rc::new(RefCell::new(Keys::default()));

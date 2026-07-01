@@ -76,6 +76,7 @@ impl RunningApp {
                 control.move_local,
                 yaw,
                 pitch,
+                control.seat_y,
             )
         }));
         let engine_frame = self

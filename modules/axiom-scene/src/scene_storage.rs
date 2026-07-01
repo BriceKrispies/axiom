@@ -14,7 +14,7 @@ use axiom_ecs::{
     WorldSystem,
 };
 use axiom_kernel::{
-    BinaryReader, BinaryWriter, EntityId, FieldSchema, KernelResult, Reflect, TypeSchema,
+    BinaryReader, BinaryWriter, EntityId, FieldSchema, KernelResult, Meters, Reflect, TypeSchema,
 };
 use axiom_math::{Quat, Transform, Vec3};
 
@@ -73,10 +73,12 @@ pub struct SceneStorage {
     /// node by index, and the home of that controller's accumulated yaw/pitch.
     pub controllers: BTreeMap<EntityId, ControllerState>,
     /// The per-tick controller inputs to apply this frame, `(index, move_local,
-    /// yaw_delta, pitch_delta)`. Staged from frame commands by
+    /// yaw_delta, pitch_delta, seat_y)`. `seat_y` is the optional absolute
+    /// vertical seat (metres) that, when present, overrides `move_local`'s
+    /// vertical delta. Staged from frame commands by
     /// [`crate::scene::Scene::advance`] and drained by [`ControllerSystem`];
     /// transient, never serialized.
-    pub pending_controls: Vec<(u32, Vec3, f32, f32)>,
+    pub pending_controls: Vec<(u32, Vec3, f32, f32, Option<Meters>)>,
 }
 
 /// A first-person controller node's persistent orientation: the index it answers
@@ -275,8 +277,8 @@ impl WorldSystem<SceneStorage> for ControllerSystem {
         let controls = std::mem::take(&mut storage.pending_controls);
         controls
             .into_iter()
-            .for_each(|(index, move_local, yaw_delta, pitch_delta)| {
-                apply_controller(storage, index, move_local, yaw_delta, pitch_delta);
+            .for_each(|(index, move_local, yaw_delta, pitch_delta, seat_y)| {
+                apply_controller(storage, index, move_local, yaw_delta, pitch_delta, seat_y);
             });
     }
 }
@@ -285,17 +287,21 @@ impl WorldSystem<SceneStorage> for ControllerSystem {
 /// (about world +Y) and `pitch` (about local +X, clamped to [`PITCH_LIMIT`]) into
 /// its [`ControllerState`], rebuild the node rotation as `yaw·pitch`, and move it
 /// by `move_local` rotated by the **yaw only** (so looking up/down never tilts
-/// movement). Resolving the index is deterministic (BTreeMap iter); an input for
-/// an unknown index resolves to `None` and is ignored. Shared by
-/// [`ControllerSystem`] (the per-tick drain) and the on-demand
-/// [`crate::scene::Scene::control_now`] (the immediate, zero-lag path) so the two
-/// never diverge.
+/// movement). The vertical result is selected by `seat_y`: `None` applies the
+/// rotated step's vertical delta (a free-fly controller); `Some(m)` seats the
+/// local eye at exactly `m` metres (the deterministic ground-follow path). The
+/// horizontal (x, z) step is applied identically either way. Resolving the index
+/// is deterministic (BTreeMap iter); an input for an unknown index resolves to
+/// `None` and is ignored. Shared by [`ControllerSystem`] (the per-tick drain) and
+/// the on-demand [`crate::scene::Scene::control_now`] (the immediate, zero-lag
+/// path) so the two never diverge.
 pub(crate) fn apply_controller(
     storage: &mut SceneStorage,
     index: u32,
     move_local: Vec3,
     yaw_delta: f32,
     pitch_delta: f32,
+    seat_y: Option<Meters>,
 ) {
     storage
         .controllers
@@ -321,9 +327,13 @@ pub(crate) fn apply_controller(
                 .unwrap_or(Transform::IDENTITY);
             local.rotation = yaw.multiply(pitch);
             let step = yaw.rotate(move_local);
+            // Vertical select (branchless): `None` keeps the delta path
+            // (`current + step.y`); `Some(m)` seats the eye at exactly `m`.
+            let delta_y = local.translation.y + step.y;
+            let seated_y = seat_y.map_or(delta_y, Meters::get);
             local.translation = Vec3::new(
                 local.translation.x + step.x,
-                local.translation.y + step.y,
+                seated_y,
                 local.translation.z + step.z,
             );
             storage.locals.insert(entity, local);
@@ -412,7 +422,7 @@ mod tests {
         let quarter = std::f32::consts::FRAC_PI_2;
         storage
             .pending_controls
-            .push((0, Vec3::new(0.0, 0.0, -1.0), quarter, 0.0));
+            .push((0, Vec3::new(0.0, 0.0, -1.0), quarter, 0.0, None));
 
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
 
@@ -435,7 +445,7 @@ mod tests {
         storage.controllers.insert(e(1), ctrl(0));
         storage
             .pending_controls
-            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0, 0.0));
+            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0, 0.0, None));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         let local = storage.locals.get(e(1)).unwrap();
         assert!((local.translation.x - 1.0).abs() < 1.0e-5);
@@ -451,7 +461,7 @@ mod tests {
         for _ in 0..3 {
             storage
                 .pending_controls
-                .push((0, Vec3::new(0.0, 0.0, -0.5), 0.0, 0.0));
+                .push((0, Vec3::new(0.0, 0.0, -0.5), 0.0, 0.0, None));
             ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         }
         assert!((storage.locals.get(e(1)).unwrap().translation.z + 1.5).abs() < 1.0e-5);
@@ -463,14 +473,14 @@ mod tests {
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.controllers.insert(e(1), ctrl(0));
-        storage.pending_controls.push((0, Vec3::ZERO, 0.0, 10.0));
+        storage.pending_controls.push((0, Vec3::ZERO, 0.0, 10.0, None));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, PITCH_LIMIT);
         assert!(
             storage.locals.get(e(1)).unwrap().rotation.x.abs() > 0.1,
             "pitched"
         );
-        storage.pending_controls.push((0, Vec3::ZERO, 0.0, -20.0));
+        storage.pending_controls.push((0, Vec3::ZERO, 0.0, -20.0, None));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, -PITCH_LIMIT);
     }
@@ -483,7 +493,7 @@ mod tests {
         storage.controllers.insert(e(1), ctrl(0));
         storage
             .pending_controls
-            .push((0, Vec3::new(0.0, 0.0, -1.0), 0.0, 1.2));
+            .push((0, Vec3::new(0.0, 0.0, -1.0), 0.0, 1.2, None));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         let local = storage.locals.get(e(1)).unwrap();
         assert!(
@@ -497,6 +507,63 @@ mod tests {
     }
 
     #[test]
+    fn controller_without_a_seat_applies_move_local_vertical_as_a_delta() {
+        // `seat_y = None`: the vertical component of `move_local` accumulates as a
+        // free-fly delta (DOOM's jump path) — the `map_or` None arm.
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage.locals.insert(e(1), Transform::IDENTITY);
+        storage.controllers.insert(e(1), ctrl(0));
+        storage
+            .pending_controls
+            .push((0, Vec3::new(0.0, 2.0, 0.0), 0.0, 0.0, None));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        assert!(
+            (storage.locals.get(e(1)).unwrap().translation.y - 2.0).abs() < 1.0e-6,
+            "vertical move_local accumulated as a delta"
+        );
+        // A second identical delta keeps accumulating (proving it is not seated).
+        storage
+            .pending_controls
+            .push((0, Vec3::new(0.0, 2.0, 0.0), 0.0, 0.0, None));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        assert!((storage.locals.get(e(1)).unwrap().translation.y - 4.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn controller_with_a_seat_places_the_eye_at_the_absolute_height() {
+        // `seat_y = Some(m)`: the local eye is seated at exactly `m`, ignoring the
+        // vertical component of `move_local` — the `map_or` Some arm. The
+        // horizontal step is still applied.
+        let reg = registry(1);
+        let mut storage = SceneStorage::default();
+        storage
+            .locals
+            .insert(e(1), Transform::from_translation(Vec3::new(0.0, 99.0, 0.0)));
+        storage.controllers.insert(e(1), ctrl(0));
+        let seat = Meters::new(5.0).expect("seat is finite");
+        storage
+            .pending_controls
+            .push((0, Vec3::new(1.0, 42.0, 0.0), 0.0, 0.0, Some(seat)));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        let local = storage.locals.get(e(1)).unwrap();
+        assert!(
+            (local.translation.y - 5.0).abs() < 1.0e-6,
+            "eye seated at the absolute height, ignoring the prior y and move_local.y"
+        );
+        assert!(
+            (local.translation.x - 1.0).abs() < 1.0e-5,
+            "horizontal step still applied under a seat"
+        );
+        // Re-seating at the same height is idempotent (absolute, not a delta).
+        storage
+            .pending_controls
+            .push((0, Vec3::ZERO, 0.0, 0.0, Some(seat)));
+        ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
+        assert!((storage.locals.get(e(1)).unwrap().translation.y - 5.0).abs() < 1.0e-6);
+    }
+
+    #[test]
     fn controller_input_for_unknown_index_is_ignored() {
         let reg = registry(1);
         let mut storage = SceneStorage::default();
@@ -504,7 +571,7 @@ mod tests {
         storage.controllers.insert(e(1), ctrl(0));
         storage
             .pending_controls
-            .push((7, Vec3::new(9.0, 0.0, 9.0), 9.0, 9.0));
+            .push((7, Vec3::new(9.0, 0.0, 9.0), 9.0, 9.0, None));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.locals.get(e(1)).unwrap().translation.z, 0.0);
     }
@@ -516,7 +583,7 @@ mod tests {
         storage.controllers.insert(e(1), ctrl(0));
         storage
             .pending_controls
-            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0, 0.0));
+            .push((0, Vec3::new(1.0, 0.0, 0.0), 0.0, 0.0, None));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert!((storage.locals.get(e(1)).unwrap().translation.x - 1.0).abs() < 1.0e-5);
     }
