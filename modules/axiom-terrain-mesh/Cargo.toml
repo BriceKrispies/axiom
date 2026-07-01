@@ -1,0 +1,25 @@
+[package]
+name = "axiom-terrain-mesh"
+description = "Axiom engine module: domain-neutral heightfield-grid meshing. Given a grid config (center, radius, spacing) and a height callback, builds a square grid mesh — positions, central-difference normals, and triangle indices — as neutral Vec3/index data a caller turns into a renderable. No colour, no UVs, no world semantics: those decorate the returned mesh in the app. The reusable geometry core the growth game's terrain mesher graduated out of."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No browser APIs, no engine state: the mesh is a pure function of
+# (center, radius, spacing, height), so it runs and is tested on native exactly as
+# it drives the web.
+crate-type = ["rlib"]
+
+[dependencies]
+# An *engine module* (kind = "engine-module", allowed_modules = []): it composes
+# NO other module. It builds on the kernel (`Meters` — the dimensioned coords and
+# heights that keep naked floats off the public boundary) and the math layer
+# (`Vec3` — the positions and normals it emits).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

@@ -268,6 +268,7 @@ dependencies = [
  "axiom-runtime",
  "axiom-space",
  "axiom-streaming",
+ "axiom-terrain-mesh",
  "axiom-windowing",
  "bytemuck",
  "console_error_panic_hook",
@@ -683,6 +684,14 @@ dependencies = [
  "axiom-entropy",
  "axiom-kernel",
  "axiom-space",
+]
+
+[[package]]
+name = "axiom-terrain-mesh"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
 ]
 
 [[package]]

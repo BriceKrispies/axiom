@@ -45,6 +45,7 @@ members = [
     "modules/axiom-input",
     "modules/axiom-placement",
     "modules/axiom-terrain",
+    "modules/axiom-terrain-mesh",
     "modules/axiom-biome",
     "modules/axiom-levelgen",
     "modules/axiom-worldsave",

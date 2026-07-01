@@ -1,0 +1,41 @@
+# Axiom module manifest — axiom-terrain-mesh (an ENGINE module).
+#
+# Domain-neutral heightfield-grid meshing: given a grid config (center, radius,
+# spacing) and a height callback, build a square grid mesh — positions, central-
+# difference normals, and grid triangle indices. This is the reusable geometry
+# core the growth game's far/snapshot terrain mesher (`apps/axiom-gallery`'s
+# `growth/terrain_mesh.rs`) graduated out of: the hand-rolled double grid loop and
+# the central-difference normal, lifted so any app that meshes a heightfield
+# composes the same geometry instead of re-deriving it.
+#
+# It is an ISOLATED engine module: it composes no other module
+# (`allowed_modules = []`) and never touches a browser API (Module Law #9). Its
+# whole behavioral surface is one facade, `TerrainMeshApi`; `GridMesh` is the pure
+# value-type vocabulary it hands back (the `pub use ids::{…}` carve-out), carrying
+# geometry data, not engine state.
+#
+# What it is NOT: the colour bands, atmospheric perspective, trail tint, biome
+# UVs, and any vista/gameworld/sampler coupling are app *content* and stay in the
+# app, which decorates the returned neutral mesh. The module never sees a colour,
+# a UV, or a world semantic.
+#
+# Why a module, not a layer or kernel addition: heightfield meshing is a runtime
+# capability apps compose, not an always-true engine primitive (it is domain-
+# shaped geometry, so it fails the kernel bar), and no lower layer genuinely *uses*
+# it, so wedging it into the spine would manufacture a ceremonial edge. It is
+# exactly an isolated capability with one facade. It builds on the kernel
+# (`Meters`, keeping naked floats off the boundary) and the math layer (`Vec3`,
+# the positions and normals it emits).
+
+[module]
+name = "terrain-mesh"
+crate_name = "axiom-terrain-mesh"
+kind = "engine-module"
+
+allowed_layers = ["kernel", "math"]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "heightfield-grid-mesh",
+]
