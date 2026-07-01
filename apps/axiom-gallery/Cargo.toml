@@ -106,6 +106,10 @@ axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-physics = { path = "../../modules/axiom-physics" }
 # The engine input module (roomed-puzzle touch swipes).
 axiom-input = { path = "../../modules/axiom-input" }
+# The residency-ring module (growth's chunk streamer): owns which chunk coords
+# are resident + the deterministic load/unload delta as the player moves. The
+# app pairs it with its own Chunk payloads.
+axiom-streaming = { path = "../../modules/axiom-streaming" }
 # Hand-editable level/data format used by several demos' codecs (roomed-puzzle,
 # rotating-cube's data-package test) and the growth agent's tag/directive TOML.
 serde = { version = "1", features = ["derive"] }

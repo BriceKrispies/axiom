@@ -255,7 +255,12 @@ pub const REQUIREMENTS: &[Requirement] = &[
         "chunkstore preserves edited",
     ),
     r("GW-E4", "gameplay", Scaffolded, "dig::apply_dig"),
-    r("GW-E9", "streaming", Implemented, "chunkstore::unload_far"),
+    r(
+        "GW-E9",
+        "streaming",
+        Implemented,
+        "chunkstore::stream (axiom_streaming::Residency)",
+    ),
     r("GW-E10", "gameplay", Scaffolded, "intent::IntentRouter"),
     r("GW-E11", "gameplay", Scaffolded, "dig handler"),
     r(
