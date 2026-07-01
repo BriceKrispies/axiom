@@ -60,7 +60,7 @@ impl GameWorldLocalMap {
             anchor_dir: [dir.x, dir.y, dir.z],
             tangent_east: [east.x, east.y, east.z],
             tangent_north: [north.x, north.y, north.z],
-            planet_radius_m: atlas.planet_radius_m,
+            planet_radius_m: atlas.planet_radius_m.get(),
         }
     }
 
@@ -116,7 +116,7 @@ mod tests {
 
     fn atlas() -> PlanetSurfaceAtlas {
         PlanetSurfaceAtlas {
-            planet_radius_m: 6_000_000.0,
+            planet_radius_m: axiom_kernel::Meters::finite_or_zero(6_000_000.0),
             ..PlanetSurfaceAtlas::default()
         }
     }
@@ -129,7 +129,7 @@ mod tests {
         let lm = GameWorldLocalMap::anchored_at(&a, Vec3::new(0.0, 0.0, 2.0));
         assert!((lm.anchor_dir[2] - 1.0).abs() < 1.0e-5, "anchor points +Z");
         assert!(lm.anchor_dir[0].abs() < 1.0e-5 && lm.anchor_dir[1].abs() < 1.0e-5);
-        assert_eq!(lm.planet_radius_m, a.planet_radius_m);
+        assert_eq!(lm.planet_radius_m, a.planet_radius_m.get());
         // The origin maps to the anchor direction exactly.
         let at_origin = lm.world_metres_to_unit_dir(0.0, 0.0);
         assert_eq!(at_origin, lm.anchor_dir);

@@ -264,6 +264,7 @@ dependencies = [
  "axiom-noise",
  "axiom-perception",
  "axiom-physics",
+ "axiom-planetgen",
  "axiom-proc",
  "axiom-proc-validate",
  "axiom-recording",
@@ -528,6 +529,20 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-proc",
+ "axiom-space",
+]
+
+[[package]]
+name = "axiom-planetgen"
+version = "0.1.0"
+dependencies = [
+ "axiom-biome",
+ "axiom-entropy",
+ "axiom-geosphere",
+ "axiom-hydrology",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-noise",
  "axiom-space",
 ]
 

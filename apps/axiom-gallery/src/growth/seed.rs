@@ -1,4 +1,25 @@
 //! World seed: the deterministic root for all proc-gen.
+use axiom_entropy::{EntropyApi, EntropyStream};
+use axiom_space::{Address, SpaceApi};
+
+/// Opaque, fixed address segment naming the growth worldgen root site — a depth-1
+/// child of the space root, so the entropy key derived from `(seed, address,
+/// version)` is reproducible across runs and platforms. Kept byte-identical to
+/// `axiom_planetgen`'s own root segment so the app's genome / vista streams and
+/// the graduated pipeline's stage streams share one keying convention.
+const WORLDGEN_ROOT_SEGMENT: u64 = 0x_67_72_6F_77_74_68_00_01; // "growth\0\x01"
+/// Generator version for the worldgen entropy key.
+const WORLDGEN_VERSION: u32 = 1;
+
+/// The deterministic worldgen root [`EntropyStream`] for a `u64` seed. The genome
+/// sampler (`presets`) draws sequentially off it and the scenic composers
+/// (`vista`) fork isolated sub-streams — independent of the planet-generation
+/// stages, which mint their own equivalent stream inside `axiom_planetgen`.
+pub fn worldgen_stream(seed: u64) -> EntropyStream {
+    let address: Address = SpaceApi::child(&SpaceApi::root(), WORLDGEN_ROOT_SEGMENT);
+    EntropyApi::stream(seed, &address, WORLDGEN_VERSION)
+}
+
 #[derive(Debug, Clone)]
 pub struct WorldSeed {
     pub value: u64,

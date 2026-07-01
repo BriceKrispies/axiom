@@ -1,0 +1,21 @@
+[package]
+name = "axiom-planetgen"
+description = "Axiom FEATURE module: the deterministic planet-generation pipeline, graduated out of the growth app. PlanetGenApi::generate composes the geosphere topology + a fixed, straight-line sequence of thirteen branchless worldgen stages (tectonics, elevation with FBM detail, sea-level fitting, hydrology erosion/pit-fill/rivers over the hydrology layer, latitude winds, moisture advection, rain shadow) into a durable PlanetSurfaceAtlas, and answers deterministic surface queries (sample/locate) that classify climate through the biome module. This is the sanctioned multi-module composition tier (kind = feature-module): the only crate allowed to depend on biome together with the noise + geosphere + hydrology layers, the way the levelgen feature module composes terrain + biome + placement."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-space = { path = "../../crates/axiom-space" }
+axiom-entropy = { path = "../../crates/axiom-entropy" }
+axiom-noise = { path = "../../crates/axiom-noise" }
+axiom-geosphere = { path = "../../crates/axiom-geosphere" }
+axiom-hydrology = { path = "../../crates/axiom-hydrology" }
+axiom-biome = { path = "../axiom-biome" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

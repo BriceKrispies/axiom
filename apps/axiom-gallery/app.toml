@@ -22,6 +22,7 @@ allowed_layers = [
 allowed_modules = [
     "engine",
     "biome",
+    "planetgen",
     "windowing",
     "debug-overlay",
     "input",

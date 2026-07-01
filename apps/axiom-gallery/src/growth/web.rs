@@ -338,7 +338,7 @@ fn render_overworld_map(growth: &Growth) {
                 Radians::new(lon).expect("equirectangular longitude is finite"),
             );
             let s = sampler::sample_surface(&growth.atlas, dir);
-            let [r, g, b] = biome_color(s.biome.0, s.elevation);
+            let [r, g, b] = biome_color(s.biome.0, s.elevation.get());
             let i = ((py * MAP_W + px) * 4) as usize;
             rgba[i] = r;
             rgba[i + 1] = g;
@@ -397,7 +397,7 @@ pub fn is_land(u: f32, v: f32) -> bool {
     WORLD.with(|w| {
         w.borrow().as_ref().is_some_and(|g| {
             let dir = click_to_dir(u, v);
-            sampler::sample_surface(&g.atlas, dir).elevation >= 0.0
+            sampler::sample_surface(&g.atlas, dir).elevation.get() >= 0.0
         })
     })
 }
@@ -553,7 +553,7 @@ fn gen_chunk(
         let dir = localmap.world_metres_to_unit_dir(x_m, z_m);
         let s = sampler::sample_surface(atlas, Vec3::new(dir[0], dir[1], dir[2]));
         let t = (0.5 + y_m / RELIEF_SPAN_M).clamp(0.0, 1.0);
-        let [cr, cg, cb, ca] = biome_terrain_color(s.biome.0, s.elevation, s.moisture, t);
+        let [cr, cg, cb, ca] = biome_terrain_color(s.biome.0, s.elevation.get(), s.moisture.get(), t);
 
         // Albedo UV into the biome atlas: pick the vertex's biome cell, then tile
         // a fractional position within that 0.5×0.5 cell by world metres so the
