@@ -519,7 +519,6 @@ def package(
         )
         wasm2js_js = wasm2js_path.read_text(encoding="utf-8") if wasm2js_path is not None else None
 
-        # Fresh output dir.
         if out.exists():
             shutil.rmtree(out)
         out.mkdir(parents=True)

@@ -1,5 +1,4 @@
 //! Pure, deterministic Canvas depth-cue math.
-//!
 //! Every function here is a small arithmetic transform of colour/depth/geometry
 //! — no allocation, no browser types, no scene/game knowledge. The conversion
 //! stage (`frame_packet_raster`) calls the **per-triangle** cues (fake lighting,
@@ -7,7 +6,6 @@
 //! rasterizer post-passes call the **per-pixel** helpers (fog, vertical grade).
 //! Splitting the cues this way keeps the hot pixel loop to cheap arithmetic and
 //! does all geometry-derived work once per triangle.
-//!
 //! ## Fake lighting normal
 //! A screen-space normal degenerates to "facing the viewer" because screen x/y
 //! are in pixels (~hundreds) while NDC depth is ~`[-1,1]`, so the cross product

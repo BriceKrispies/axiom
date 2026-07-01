@@ -35,11 +35,9 @@ fn introspect_source_files() -> Vec<PathBuf> {
 }
 
 /// Files reached only through a `#[cfg(test)] mod NAME;` declaration in
-/// `lib.rs`. They are test-only, and test code is exempt from the
-/// `depends_on` import rule, so the import-legality scan — which governs the
-/// non-test engine spine — skips them. (`fixtures.rs` legitimately uses
-/// `axiom-host`/`axiom-runtime` to build real `EngineFrame`s for the layer's
-/// own tests.)
+/// `lib.rs` are test-only, so the import-legality scan skips them
+/// (`fixtures.rs` legitimately uses `axiom-host`/`axiom-runtime` to build
+/// real `EngineFrame`s for the layer's own tests).
 fn test_only_module_files() -> Vec<PathBuf> {
     let lib = read(&introspect_src_dir().join("lib.rs"));
     let mut prev_is_cfg_test = false;

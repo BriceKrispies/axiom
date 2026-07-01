@@ -1,5 +1,4 @@
 //! Screen-space value types for the immediate-mode UI surface (SPEC-09).
-//!
 //! Distinct from the retained [`Rect`](crate::layout_rect) used by panels: this
 //! family is **float**, top-left origin, `+y` down — the screen-space HUD drawn
 //! *after* the world. Colors are packed integers (the layer owns no float color;
@@ -142,14 +141,10 @@ mod tests {
     #[test]
     fn contains_is_half_open_on_both_axes() {
         let r = UiRect::new(UiUnit::new(10.0), UiUnit::new(20.0), UiUnit::new(30.0), UiUnit::new(40.0));
-        // Inside.
         assert!(r.contains(UiUnit::new(15.0), UiUnit::new(25.0)));
-        // Left/top edges are inclusive.
         assert!(r.contains(UiUnit::new(10.0), UiUnit::new(20.0)));
-        // Right/bottom edges are exclusive.
         assert!(!r.contains(UiUnit::new(40.0), UiUnit::new(25.0)));
         assert!(!r.contains(UiUnit::new(15.0), UiUnit::new(60.0)));
-        // Outside on the low side of each axis.
         assert!(!r.contains(UiUnit::new(5.0), UiUnit::new(25.0)));
         assert!(!r.contains(UiUnit::new(15.0), UiUnit::new(5.0)));
     }

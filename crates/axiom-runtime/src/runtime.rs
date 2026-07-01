@@ -142,9 +142,6 @@ impl Runtime {
     ///   the step into the runtime's in-memory log sink.
     #[axiom_zones::sim]
     pub fn step(&mut self) -> RuntimeResult<RuntimeStepRecord> {
-        // The running-state guard becomes the first link of the chain: only a
-        // `Running` runtime yields `Ok(())` to advance through; any other state
-        // short-circuits to `StepWhileNotRunning` without touching the body.
         (self.state == RuntimeState::Running)
             .then_some(())
             .ok_or_else(|| {
@@ -157,8 +154,7 @@ impl Runtime {
     }
 
     /// The body of one `Running` step: advance the timeline, run the scheduler,
-    /// drain the queues, and record the result. Split out of [`Self::step`] so
-    /// the running-state guard composes as a plain `and_then` chain.
+    /// drain the queues, and record the result.
     fn run_one_step(&mut self) -> RuntimeResult<RuntimeStepRecord> {
         let commands_before = self.commands.len();
         let events_before = self.events.len();
@@ -167,8 +163,6 @@ impl Runtime {
         self.timeline.advance().map(|step| {
             let mut diagnostics = RuntimeDiagnostics::new(step);
 
-            // Run the scheduler with a context borrowing the runtime's queues
-            // and sinks. The kernel is borrowed shared (the facade is stateless).
             let outcomes = {
                 let mut ctx = RuntimeContext::new(
                     step,
@@ -185,9 +179,6 @@ impl Runtime {
             let any_error = outcomes.iter().any(|o| !o.succeeded());
             diagnostics.record_outcomes(outcomes);
 
-            // Capture the metrics the step's systems emitted (everything
-            // appended to the sink during the scheduler run), before the
-            // runtime's own diagnostics counter is recorded below.
             diagnostics.record_metrics(self.telemetry_sink.metrics()[metrics_before..].to_vec());
 
             let commands_after = self.commands.len();
@@ -199,7 +190,6 @@ impl Runtime {
                 .saturating_sub(events_before)
                 .min(u32::MAX as usize) as u32;
 
-            // Drain at the step boundary.
             let commands_drained = commands_after.min(u32::MAX as usize) as u32;
             let events_drained = events_after.min(u32::MAX as usize) as u32;
             self.commands.clear();
@@ -252,8 +242,6 @@ impl Runtime {
             TelemetryMetric::counter("runtime.steps", 1, Some(diagnostics.step().tick())),
         );
     }
-
-    // --- accessors ---
 
     pub fn state(&self) -> RuntimeState {
         self.state
@@ -319,8 +307,6 @@ mod tests {
         rt
     }
 
-    // --- Lifecycle transition tests ---
-
     #[test]
     fn fresh_runtime_starts_in_created() {
         let rt = Runtime::new(cfg()).unwrap();
@@ -369,7 +355,6 @@ mod tests {
         let mut rt = Runtime::new(cfg()).unwrap();
         rt.initialize().unwrap();
         rt.start().unwrap();
-        // Force-fail via a failing system.
         struct F;
         impl RuntimeSystem for F {
             fn run(&mut self, _: &mut RuntimeContext<'_>) -> RuntimeResult<()> {
@@ -386,8 +371,6 @@ mod tests {
             RuntimeErrorCode::InvalidLifecycleTransition
         );
     }
-
-    // --- Stepping determinism ---
 
     #[test]
     fn step_requires_running_state() {
@@ -419,8 +402,6 @@ mod tests {
         }
         assert_eq!(last_a, last_b);
     }
-
-    // --- System ordering through Runtime::step ---
 
     #[test]
     fn systems_run_in_scheduled_order_each_step() {
@@ -465,8 +446,6 @@ mod tests {
         assert_eq!(*trace.lock().unwrap(), vec!["a", "b", "a", "b"]);
     }
 
-    // --- Queue draining at boundary ---
-
     #[test]
     fn commands_and_events_are_drained_at_step_boundary() {
         struct Producer;
@@ -488,7 +467,6 @@ mod tests {
             .unwrap();
         let record = rt.step().unwrap();
 
-        // The systems pushed 2 commands and 1 event, all of which got drained.
         assert_eq!(record.diagnostics().commands_pushed(), 2);
         assert_eq!(record.diagnostics().events_pushed(), 1);
         assert_eq!(record.diagnostics().commands_drained(), 2);
@@ -496,8 +474,6 @@ mod tests {
         assert!(rt.commands().is_empty());
         assert!(rt.events().is_empty());
     }
-
-    // --- Failure handling ---
 
     #[test]
     fn system_failure_transitions_runtime_to_failed_by_default() {
@@ -538,8 +514,6 @@ mod tests {
         assert_eq!(rt.state(), RuntimeState::Running);
     }
 
-    // --- Diagnostics emission ---
-
     #[test]
     fn diagnostics_enabled_emits_a_log_and_a_metric_per_step() {
         let mut rt = started();
@@ -566,9 +540,8 @@ mod tests {
                 Ok(())
             }
         }
-        // Default config has diagnostics enabled, so the runtime also emits its
-        // own `runtime.steps` counter — which must NOT appear in the step's
-        // captured metrics.
+        // Diagnostics are enabled by default, so the runtime also emits its own
+        // `runtime.steps` counter, which must not appear in captured metrics.
         let mut rt = started();
         rt.scheduler_mut()
             .register(HandleId::from_raw(1), "emit", 1, Box::new(Emit))
@@ -583,7 +556,6 @@ mod tests {
         assert_eq!(metrics[0].name(), "cube.angle_deg");
         assert_eq!(metrics[0].value(), MetricValue::float(7.0));
 
-        // A runtime with no emitting system captures no metrics.
         let mut bare = started();
         assert!(bare.step().unwrap().diagnostics().metrics().is_empty());
     }
@@ -648,14 +620,11 @@ mod cov {
             .register(HandleId::from_raw(1), "acc", 1, Box::new(AccessorSystem))
             .unwrap();
         rt.step().unwrap();
-        // The diagnostics-enabled step completes without tripping the runtime.
         assert_eq!(rt.state(), RuntimeState::Running);
     }
 
     #[test]
     fn scheduler_accessor_reflects_registered_systems() {
-        // A registered system makes the live scheduler non-empty; a leaked
-        // `Default` scheduler would report len 0.
         let mut rt = started(RuntimeConfig::new(1_000));
         rt.scheduler_mut()
             .register(HandleId::from_raw(1), "acc", 1, Box::new(AccessorSystem))
@@ -667,13 +636,11 @@ mod cov {
     #[test]
     fn accessors_reflect_a_freshly_started_runtime() {
         let mut rt = started(RuntimeConfig::new(1_000));
-        // A freshly started runtime is Running with nothing registered or queued.
         assert_eq!(rt.state(), RuntimeState::Running);
         assert!(rt.scheduler().is_empty());
         assert!(rt.scheduler_mut().is_empty());
         assert_eq!(rt.commands().len(), 0);
         assert_eq!(rt.events().len(), 0);
-        // The remaining accessors are reachable on the started runtime.
         let _ = rt.config();
         let tl = rt.timeline();
         let _ = (tl.frame(), tl.tick(), tl.sequence(), tl.elapsed_nanos());

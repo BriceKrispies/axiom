@@ -146,7 +146,6 @@ mod tests {
         [Texture::Checker, Texture::UvGrid, Texture::BiomeAtlas]
             .into_iter()
             .for_each(|t| {
-                // Both the internal resolver and the public `rgba` agree.
                 let (w, h, pixels) = texture_rgba(t);
                 assert!((w > 0) & (h > 0));
                 assert_eq!(pixels.len(), (w * h * 4) as usize);
@@ -166,7 +165,6 @@ mod tests {
     fn biome_cell_origins_cover_the_atlas_grid() {
         assert_eq!(Texture::biome_cell_origin(0), (0.0, 0.0));
         assert_eq!(Texture::biome_cell_origin(3), (0.5, 0.5));
-        // Out-of-range biome ids wrap into the 4-cell grid.
         assert_eq!(Texture::biome_cell_origin(4), Texture::biome_cell_origin(0));
     }
 }

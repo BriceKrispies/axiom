@@ -29,7 +29,6 @@ fn transform_is_finite(t: Transform) -> bool {
 }
 
 /// The validated inputs for creating a rigid body.
-///
 /// Built by the explicit constructors below — never by an app directly (the
 /// facade owns construction). A description is well-formed by construction: its
 /// transform is finite and, for a dynamic body, its mass is finite and positive.

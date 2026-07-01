@@ -53,11 +53,9 @@ fn lib_rs_exports_only_the_facade() {
 
 #[test]
 fn pure_rasterizer_core_has_no_browser_apis() {
-    // The whole rasterizer (projection, triangle assembly, depth sort, colour,
-    // op emission) is a pure native core with zero browser coupling. Only the
-    // platform edge — the wasm-gated `live_canvas_binding.rs` and the facade's
-    // `#[cfg(wasm32)]` `attach_canvas` arm in `canvas2d_backend_api.rs` — may
-    // name web-sys/canvas APIs. Every other file must be clean.
+    // Only the platform edge — `live_canvas_binding.rs` and the facade's
+    // wasm32 `attach_canvas` arm in `canvas2d_backend_api.rs` — may name
+    // web-sys/canvas APIs; every other file must be clean.
     let edge = ["live_canvas_binding.rs", "canvas2d_backend_api.rs"];
     let needles = [
         "web_sys",

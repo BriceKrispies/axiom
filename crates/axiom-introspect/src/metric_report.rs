@@ -58,10 +58,7 @@ impl MetricReport {
     pub(crate) fn write_to(&self, writer: &mut BinaryWriter) {
         writer.write_byte_slice(self.name.as_bytes());
         writer.write_bool(self.is_counter);
-        // Branchless value encode: the value is exactly one kind, so exactly
-        // one accessor yields `Some` and runs its writes; the other is `None`.
-        // Order and bytes match the former `match`: integer => tag `0` + the
-        // `i64`'s `u64` bit pattern; float => tag `1` + the `f32`.
+        // Wire tag: integer => `0` + the `i64`'s `u64` bit pattern; float => `1` + the `f32`.
         self.value
             .as_integer()
             .map(|i| {
@@ -82,17 +79,10 @@ impl MetricReport {
     /// Read a report previously written with [`Self::write_to`]. Rejects an
     /// unknown value tag.
     pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Self> {
-        // Branchless sequential decode: each field threads through `and_then`,
-        // so the first failure short-circuits and the reader advances exactly
-        // as `write_to` laid the fields down.
+        // Decode order must match `write_to`'s field order exactly.
         reader.read_byte_slice().and_then(|name_bytes| {
             let name = String::from_utf8_lossy(name_bytes).into_owned();
             reader.read_bool().and_then(|is_counter| {
-                // Value-tag dispatch on a `u8` (not an enum discriminant):
-                // `.then` runs only the selected read, so the reader advances
-                // by exactly the bytes the chosen branch consumes. An
-                // unrecognized tag falls through both guards to the invalid-tag
-                // error.
                 reader
                     .read_u8()
                     .and_then(|tag| {
@@ -110,8 +100,6 @@ impl MetricReport {
                             })
                     })
                     .and_then(|value| {
-                        // Optional tick: the presence-tag pattern, with
-                        // `transpose` folded into the chain to leave no `?`.
                         reader.read_bool().and_then(|has_tick| {
                             has_tick.then(|| reader.read_u64()).transpose().map(|tick| {
                                 MetricReport {
@@ -193,7 +181,6 @@ mod tests {
 
     #[test]
     fn unknown_value_tag_is_rejected() {
-        // name "" (len 0) + is_counter(1 byte) + tag 9.
         let mut w = BinaryWriter::new();
         w.write_byte_slice(b"");
         w.write_bool(true);

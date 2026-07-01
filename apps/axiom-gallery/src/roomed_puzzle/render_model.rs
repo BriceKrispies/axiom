@@ -134,7 +134,6 @@ impl RenderModel {
             })
             .collect();
 
-        // Ghosts first (drawn under), then the player (drawn on top).
         let mut actors: Vec<RenderActor> = state
             .ghost_states()
             .into_iter()
@@ -230,13 +229,11 @@ mod tests {
     #[test]
     fn live_state_folds_in_open_door_and_pressed_button() {
         let mut s = PuzzleGameState::new(corridor());
-        // Off the button: door closed (raised), button released (slightly raised).
         let m0 = RenderModel::from_state(&s);
         assert_eq!(
             m0.cell_at(GridCoord::new(3, 0)).unwrap().tile,
             RenderTile::Door { open: false }
         );
-        // Step onto the button: door opens, button depresses.
         s.apply_player_move(Direction::Right);
         let m1 = RenderModel::from_state(&s);
         assert_eq!(
@@ -247,7 +244,6 @@ mod tests {
             m1.cell_at(GridCoord::new(1, 0)).unwrap().tile,
             RenderTile::Button { pressed: true }
         );
-        // The player is the last actor (drawn on top).
         assert_eq!(m1.actors.last().unwrap().kind, ActorKind::Player);
         assert_eq!(m1.actors.last().unwrap().alpha, PLAYER_ALPHA);
     }

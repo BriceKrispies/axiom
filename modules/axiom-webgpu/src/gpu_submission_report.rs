@@ -33,10 +33,6 @@ impl GpuSubmissionReport {
         target_height: u32,
         status: GpuSubmissionStatus,
     ) -> Self {
-        // Branchless tally: map each command to its kind code, then count the
-        // occurrences of each counted kind. Equality on the stable kind codes
-        // replaces the per-variant `match` arms, and `filter().count()` walks
-        // the sequence without an explicit `for`/`if`.
         let kinds = || submitted_commands.iter().map(GpuCommand::kind_code);
         let clear_count = kinds()
             .filter(|code| *code == GpuCommand::KIND_CLEAR_FRAME)
@@ -101,8 +97,6 @@ impl GpuSubmissionReport {
 
     /// Whether this report came from the deterministic recording backend.
     pub const fn is_recorded(&self) -> bool {
-        // Fieldless-enum predicate over the carried status: compare integer
-        // discriminants directly rather than branching on a `matches!` arm.
         (self.status as u8) == (GpuSubmissionStatus::Recorded as u8)
     }
 
@@ -144,9 +138,7 @@ mod tests {
 
     #[test]
     fn report_counts_distinguish_from_zero_and_one() {
-        // Two of every counted kind so each count is 2 — distinct from the
-        // mutant constants 0 and 1 for clear_count / present_count (and
-        // draw_count for good measure).
+        // Two of every counted kind: distinguishes each count from 0 and 1.
         let r = GpuSubmissionReport::new(
             vec![
                 GpuCommand::clear_frame([0.0, 0.0, 0.0, 1.0]),
@@ -215,14 +207,10 @@ mod cov {
 
     #[test]
     fn status_predicates_return_false_on_mismatch() {
-        // A `LiveNotBound` report is none of the other classifications, so
-        // each `matches!` predicate exercises its non-matching arm.
         let r = GpuSubmissionReport::new(vec![], 1, 1, GpuSubmissionStatus::LiveNotBound);
         assert!(!r.is_recorded());
         assert!(!r.is_live_not_initialized());
 
-        // A `Recorded` report exercises the non-matching arm of the live
-        // predicates.
         let rec = GpuSubmissionReport::new(vec![], 1, 1, GpuSubmissionStatus::Recorded);
         assert!(!rec.is_live_not_bound());
         assert!(!rec.is_live_not_initialized());

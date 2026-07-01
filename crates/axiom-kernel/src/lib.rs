@@ -24,13 +24,11 @@
 //! surface still fails the build. Every other type remains private to the
 //! crate.
 
-// --- Result / error model ---
 mod error;
 mod error_code;
 mod error_scope;
 mod result;
 
-// --- Deterministic time model ---
 mod fixed_step;
 mod frame_index;
 mod replay_timeline;
@@ -40,16 +38,13 @@ mod tick_delta;
 mod tick_divider;
 mod tick_schedule;
 
-// --- Deterministic random source ---
 mod deterministic_rng;
 
-// --- Dimensioned scalar quantity model ---
 mod meters;
 mod radians;
 mod ratio;
 mod seconds;
 
-// --- Stable ID model ---
 mod asset_id;
 mod entity_id;
 mod handle_id;
@@ -57,18 +52,15 @@ mod id_macro;
 mod message_id;
 mod resource_id;
 
-// --- Memory / address model ---
 mod alignment;
 mod byte_length;
 mod byte_offset;
 mod memory_range;
 
-// --- Message / event model ---
 mod message_envelope;
 mod message_kind;
 mod message_queue;
 
-// --- Binary serialization primitives ---
 mod binary_reader;
 mod binary_writer;
 mod endian;
@@ -76,116 +68,74 @@ mod reflect;
 mod schema_version;
 mod type_schema;
 
-// --- Stable hashing ---
 mod stable_hash;
 
-// --- Structured logging model ---
 mod in_memory_log_sink;
 mod log_field;
 mod log_level;
 mod log_record;
 mod log_sink;
 
-// --- Telemetry model ---
 mod in_memory_telemetry_sink;
 mod metric_kind;
 mod metric_value;
 mod telemetry_metric;
 mod telemetry_sink;
 
-// --- The single public facade ---
 mod facade;
 
-// --- Public surface (curated; see `tests/architecture.rs`) ---
-
-// Primary entry point.
 pub use facade::KernelApi;
 
-// Error and result primitives — layers return KernelResult and match on
-// (scope, code) identity.
 pub use error::KernelError;
 pub use error_code::KernelErrorCode;
 pub use error_scope::KernelErrorScope;
 pub use result::KernelResult;
 
-// Deterministic time primitives — layers stamp steps with Tick/FrameIndex and
-// own a SimulationClock advanced by a FixedStep.
 pub use fixed_step::FixedStep;
 pub use frame_index::FrameIndex;
 pub use simulation_clock::SimulationClock;
 pub use tick::Tick;
-// Deterministic replay primitives — the data companions to the clock: an ordered
-// recording replayed by a saturating cursor, and a fixed-step sub-rate divider
-// (fire every N ticks). `ReplayTimeline<T>` is the kernel's first type-generic
-// primitive (the replayed item is the caller's; see ARCHITECTURE.md).
+// `ReplayTimeline<T>` is the kernel's first type-generic primitive; the
+// replayed item type belongs to the caller (see ARCHITECTURE.md).
 pub use replay_timeline::ReplayTimeline;
 pub use tick_divider::TickDivider;
-// Deterministic tick-scheduling primitives — the `(tick, id)`-ordered wake
-// schedule and its companion tick offset. A `TickSchedule<Id, P>` arms ids to
-// wake at future ticks and pops them due in a stable `(tick, id)` order; a
-// `TickDelta` is the typed offset applied to a `Tick`. Two engine consumers name
-// them: sim-core's process wake queue and the `axiom-tick` timers facade (see
-// ARCHITECTURE.md). `TickSchedule` is type-generic for the same reason
-// `ReplayTimeline` is — the id and payload belong to the caller.
+// `TickSchedule<Id, P>` is type-generic for the same reason `ReplayTimeline`
+// is; named by sim-core's wake queue and the `axiom-tick` timers facade.
 pub use tick_delta::TickDelta;
 pub use tick_schedule::TickSchedule;
 
-// Deterministic random source — a seeded generator higher layers and modules
-// use for replayable simulation, fuzzing, and adversarial-network models.
 pub use deterministic_rng::DeterministicRng;
 
-// Dimensioned scalar quantities — the typed boundary where a raw f32 becomes a
-// length/angle/ratio, so layers above the kernel and math stop exposing naked
-// floats whose unit a caller must guess. Higher layers name and construct these
-// directly (e.g. a camera's `fovy: Radians`, a viewport's `aspect: Ratio`).
 pub use meters::Meters;
 pub use radians::Radians;
 pub use ratio::Ratio;
-// `Seconds` is the presentation frame-delta duration — the wall-clock `dt` an
-// `onRender` pass feeds a visual-only system (particles, easing). It is
-// deliberately distinct from the deterministic sim `Tick`/`TickDelta` and from
-// an audio-clock second; see seconds.rs.
+// `Seconds` is the presentation frame-delta (wall-clock `dt` for visual-only
+// systems), deliberately distinct from the deterministic `Tick`/`TickDelta`.
 pub use seconds::Seconds;
 
-// Identity primitives used by higher layers.
 pub use asset_id::AssetId;
 pub use entity_id::EntityId;
 pub use handle_id::HandleId;
 pub use message_id::MessageId;
 
-// Binary serialization primitives — layers store typed `BinaryWriter` /
-// `BinaryReader` values (e.g. math's `Vec3::write_to`) and feed bytes through
-// them. The kernel facade still constructs them.
 pub use binary_reader::BinaryReader;
 pub use binary_writer::BinaryWriter;
-// SchemaVersion lets higher layers stamp a `major.minor` header on their own
-// wire formats and reject incompatible data — e.g. axiom-introspect's
-// serialized FrameReport snapshot.
 pub use schema_version::SchemaVersion;
-// Reflection: a type describes its shape (TypeSchema) and round-trips its
-// values. The composable formalization of the write_to/read_from idiom that
-// makes engine data (e.g. ECS components) serializable and describable. The
-// branchless tagged-union (enum) read-dispatch helper lives on `BinaryReader`
-// as `read_tagged`, alongside its sibling primitive reads.
+// The branchless tagged-union read-dispatch helper lives on
+// `BinaryReader::read_tagged`, alongside its sibling primitive reads.
 pub use reflect::Reflect;
 pub use type_schema::{FieldSchema, TypeSchema};
 
-// Stable hashing — a deterministic FNV-1a digest over canonical bytes. The
-// shared primitive the recording module's determinism reports and the
-// procedural-generation provenance both index artifacts with, so a digest
-// computed in one place matches another. A diagnostic index, never the
-// determinism proof (byte equality proves; a hash only labels/locates).
+// A diagnostic index, never a determinism proof: byte equality proves replay
+// determinism, a hash only labels/locates artifacts (recording, procgen).
 pub use stable_hash::StableHash;
 
-// Structured logging — layers construct records and hand them to sinks via the
-// facade; the kernel never prints.
 pub use in_memory_log_sink::InMemoryLogSink;
 pub use log_field::LogField;
 pub use log_level::LogLevel;
 pub use log_record::LogRecord;
 pub use log_sink::LogSink;
 
-// Structured telemetry.
 pub use in_memory_telemetry_sink::InMemoryTelemetrySink;
 pub use metric_kind::MetricKind;
 pub use metric_value::MetricValue;

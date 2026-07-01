@@ -80,7 +80,6 @@ mod tests {
     fn palette_is_complete_and_labelled() {
         assert_eq!(TileKind::PALETTE.len(), 6);
         assert_eq!(TileKind::Door.label(), "Door");
-        // Every palette entry has a non-empty label.
         assert!(TileKind::PALETTE.iter().all(|k| !k.label().is_empty()));
     }
 }

@@ -142,18 +142,14 @@ mod tests {
         assert!(!s.is_empty());
         assert_eq!(s.pending(1), Some(at(5)));
         assert_eq!(s.pending(2), Some(at(10)));
-        // Peek does not consume; ordered (tick, id); the future entry excluded.
         assert_eq!(s.peek_due(at(5)), vec![(1, 100), (3, 300)]);
         assert_eq!(s.len(), 3);
-        // Pop the two due-at-5 entries, ascending id; the tick-10 entry stays.
         let due = s.pop_due(at(5));
         assert_eq!(due, vec![(1, 100), (3, 300)]);
         assert_eq!(s.len(), 1);
         assert_eq!(s.pending(1), None);
         assert_eq!(s.pending(3), None);
-        // Already-popped entries do not re-fire.
         assert_eq!(s.pop_due(at(5)), vec![]);
-        // The future entry fires at its tick.
         assert_eq!(s.pop_due(at(10)), vec![(2, 200)]);
         assert!(s.is_empty());
     }
@@ -165,9 +161,7 @@ mod tests {
         s.schedule(1, at(8), 20);
         assert_eq!(s.len(), 1);
         assert_eq!(s.pending(1), Some(at(8)));
-        // Not due at the old tick anymore.
         assert_eq!(s.pop_due(at(3)), vec![]);
-        // Move earlier with a fresh payload.
         s.schedule(1, at(2), 30);
         assert_eq!(s.pending(1), Some(at(2)));
         assert_eq!(s.pop_due(at(2)), vec![(1, 30)]);
@@ -180,7 +174,6 @@ mod tests {
         assert!(s.cancel(1));
         assert_eq!(s.pending(1), None);
         assert!(s.is_empty());
-        // Canceling an unknown / already-fired id is a clean false.
         assert!(!s.cancel(1));
         assert!(!s.cancel(99));
     }
@@ -190,7 +183,6 @@ mod tests {
         let mut s: TickSchedule<u64, u32> = TickSchedule::new();
         assert_eq!(s.pop_due(at(100)), vec![]);
         s.schedule(1, at(50), 1);
-        // Everything is in the future: nothing due, the entry stays pending.
         assert_eq!(s.pop_due(at(10)), vec![]);
         assert_eq!(s.peek_due(at(10)), vec![]);
         assert_eq!(s.len(), 1);

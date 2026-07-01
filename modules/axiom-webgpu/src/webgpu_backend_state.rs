@@ -30,8 +30,7 @@ impl WebGpuBackendState {
     const KIND_LIVE_UNBOUND: u8 = 1;
     const KIND_LIVE_PRESENTATION_REQUESTED: u8 = 2;
 
-    /// `BackendKind` for each `kind`, indexed by `self.kind`. Replaces the
-    /// per-state `match` with a single table read.
+    /// `BackendKind` for each `kind`, indexed by `self.kind`.
     const BACKEND_KINDS: [BackendKind; 3] = [
         BackendKind::Recording, // KIND_RECORDING
         BackendKind::Live,      // KIND_LIVE_UNBOUND

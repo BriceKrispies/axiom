@@ -1,30 +1,9 @@
-# Axiom layer manifest — axiom-math.
-#
-# Math is the deterministic numeric / geometric substrate every later engine
-# layer (rendering, scene, physics, animation, culling, picking, tooling)
-# depends on. It knows nothing about rendering, WebGPU, DOM, ECS, scenes,
-# assets, physics, animation, audio, input, plugins, editor, or game framework
-# concepts.
-#
-# Math logical capabilities (documentation only — Rust public surface is
-# the single `MathApi` facade, enforced by the architecture checker):
-#   - deterministic-scalar-policy
-#   - vector-math
-#   - quaternion-math
-#   - matrix-math
-#   - transform-composition
-#   - geometry-primitives
-#   - math-serialization
-#   - checked-math-errors
-
 [layer]
 name = "math"
 crate_name = "axiom-math"
 depends_on = ["kernel", "runtime"]
 meaningful_dependency = "Math consumes kernel primitives (`KernelApi` for binary serialization, `KernelResult`/`KernelError` for wrapped deserialization failures) and runtime substrate (`RuntimeContext`, `TelemetryMetric`) to provide deterministic-scalar, vector, quaternion, 4x4-matrix, transform, and geometry primitives — with checked failures, approximate-equality, and binary round-trip — that every later rendering / scene / physics / animation / culling layer will build on."
 
-# Public Rust surface is intentionally the single `MathApi` facade; logical
-# capabilities are documented in the comment above.
 introduced_capabilities = ["MathApi"]
 
 consumed_capabilities = [
@@ -36,8 +15,6 @@ consumed_capabilities = [
     "Tick",
 ]
 
-# Each proof export is a real public export whose source must
-# reference at least one depended-layer (kernel or runtime) symbol.
 [[proof_exports]]
 export = "MathApi"
 must_reference = ["KernelApi", "RuntimeContext", "TelemetryMetric"]

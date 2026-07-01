@@ -6,8 +6,8 @@ use axiom_kernel::Tick;
 /// boundary.
 ///
 /// Structurally identical to [`crate::runtime_command::RuntimeCommand`] but
-/// kept as a distinct type so producers and consumers in future layers do not
-/// confuse the two semantic streams. Future layers assign meaning to `kind`.
+/// kept as a distinct type so producers and consumers do not confuse the two
+/// semantic streams.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeEvent {
     kind: u32,
@@ -55,8 +55,6 @@ mod tests {
 
     #[test]
     fn payload_returns_the_constructed_bytes() {
-        // A non-empty payload distinguishes the real accessor from an empty
-        // leaked slice.
         let e = RuntimeEvent::new(2, Tick::new(5), vec![9, 8, 7]);
         assert_eq!(e.payload(), &[9, 8, 7]);
     }

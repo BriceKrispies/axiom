@@ -58,7 +58,6 @@ impl OverlayState {
         state
     }
 
-    // --- visibility (delegated to the panel) --------------------------------
 
     pub(crate) fn is_visible(&self) -> bool {
         self.interface.is_visible(self.panel)
@@ -90,7 +89,6 @@ impl OverlayState {
         SYNC[usize::from(self.is_visible())](self);
     }
 
-    // --- pin (delegated) ----------------------------------------------------
 
     pub(crate) fn is_pinned(&self) -> bool {
         self.interface.is_pinned(self.panel)
@@ -111,7 +109,6 @@ impl OverlayState {
         self.refresh_panel();
     }
 
-    // --- density (debug-specific) -------------------------------------------
 
     pub(crate) fn density_label(&self) -> &'static str {
         self.density.label()
@@ -165,7 +162,6 @@ impl OverlayState {
 }
 
 impl OverlayState {
-    // --- console (delegated to the panel) -----------------------------------
 
     pub(crate) fn focus_console(&mut self) {
         self.interface.focus_console(self.panel);
@@ -228,7 +224,6 @@ impl OverlayState {
         self.refresh_panel();
     }
 
-    // --- diagnostics in (primitives only) -----------------------------------
 
     pub(crate) fn diagnostics(&self) -> &Diagnostics {
         &self.diagnostics

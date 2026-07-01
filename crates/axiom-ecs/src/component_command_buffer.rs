@@ -158,7 +158,6 @@ mod tests {
         let mut buffer = ComponentCommandBuffer::new();
         let t0 = buffer.insert_component(entity, 10u32, select_a);
         let t1 = buffer.insert_component(entity, 5u64, select_b);
-        // Nothing applied until the barrier.
         assert!(world.storage().a.get(entity).is_none());
         assert_eq!(buffer.len(), 2);
 
@@ -167,7 +166,6 @@ mod tests {
         assert_eq!(world.storage().b.get(entity), Some(&5));
         assert!(buffer.is_empty(), "the queue drains on apply");
         assert_eq!(report.len(), 2);
-        // First inserts report no replacement.
         assert_eq!(report.outcome(t0).unwrap().inserted(), Some(false));
         assert_eq!(report.outcome(t1).unwrap().inserted(), Some(false));
     }
@@ -179,9 +177,9 @@ mod tests {
         world.storage_mut().a.insert(entity, 1);
 
         let mut buffer = ComponentCommandBuffer::new();
-        let overwrite = buffer.insert_component(entity, 2u32, select_a); // replaces -> true
-        let remove_present = buffer.remove_component(entity, select_a); // present -> true
-        let remove_absent = buffer.remove_component(entity, select_b); // absent -> false
+        let overwrite = buffer.insert_component(entity, 2u32, select_a);
+        let remove_present = buffer.remove_component(entity, select_a);
+        let remove_absent = buffer.remove_component(entity, select_b);
         let report = buffer.apply(&mut world);
 
         assert_eq!(report.outcome(overwrite).unwrap().inserted(), Some(true));
@@ -193,7 +191,6 @@ mod tests {
             report.outcome(remove_absent).unwrap().removed(),
             Some(false)
         );
-        // The component was removed by the barrier.
         assert!(world.storage().a.get(entity).is_none());
     }
 
@@ -226,13 +223,11 @@ mod tests {
         buffer.insert_component(entity, 2u64, select_b);
         buffer.apply(&mut world);
 
-        // The storage exposes its two named, type-erased columns.
         let columns = world.storage().columns();
         assert_eq!(columns.len(), 2);
         assert_eq!(columns[0].0, "a");
         assert_eq!(columns[1].0, "b");
 
-        // Despawning walks `columns_mut` to drop every component the seam inserted.
         assert!(world.despawn_handle(handle));
         assert!(world.storage().a.get(entity).is_none());
         assert!(world.storage().b.get(entity).is_none());

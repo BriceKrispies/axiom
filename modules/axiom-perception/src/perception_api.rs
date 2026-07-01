@@ -21,8 +21,6 @@ use axiom_math::{Quat, Vec3};
 pub struct PerceptionApi;
 
 impl PerceptionApi {
-    // --- the neutral fact-kind vocabulary (the agent's `kind_code`) ---
-
     /// A ray probe struck something solid: `subject` = probe index, `x/y/z` = the
     /// world-space hit point (micro-units), `value` = the distance (micro-units).
     pub const FACT_OBSTACLE: u16 = 200;

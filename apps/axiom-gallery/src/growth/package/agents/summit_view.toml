@@ -1,8 +1,5 @@
-# A data-driven agent directive script: "walk to the mountaintop, look at the
-# ground, take a screenshot." This *is* the command — the runner resolves each
-# `target` against the world's tags (the nouns) and executes the closed verb
-# vocabulary (goto / look_at / capture / wait). Nothing here is growth-specific
-# but the tag names; the same runner drives any script over any tagged world.
+# The runner resolves each `target` against the world's tags and executes the
+# closed verb vocabulary (goto / look_at / capture / wait).
 
 [[directive]]
 verb = "goto"

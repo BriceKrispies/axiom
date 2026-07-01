@@ -1,5 +1,4 @@
 //! `GameBridge`: the deterministic native core the `wasm32` boundary marshals to.
-//!
 //! This is the rlib heart of the bridge — everything the TS `NativeBridge` /
 //! `HostBridge` seams drive, expressed in plain Rust over the real engine facades
 //! so it is fully native-testable. The `wasm32` [`crate::wasm`] layer is a thin
@@ -7,7 +6,6 @@
 //! calls and the results back, and owns only the browser channel (the inbound
 //! query string, the outbound `postMessage`). Nothing here touches a browser
 //! symbol or a wall clock.
-//!
 //! It composes the deterministic pieces, each over a real facade:
 //! - the fixed-step [`GameRuntime`] (the `frame` accumulator → tick loop), which
 //!   banks real elapsed nanoseconds into whole deterministic ticks **and** owns
@@ -15,7 +13,6 @@
 //! - the [`RngHub`] (SPEC-01), the session-seeded entropy streams the `Rng`
 //!   projection draws from, over `axiom-entropy`;
 //! - the [`OutcomeLatch`] (SPEC-12), the emit-exactly-once terminal outcome.
-//!
 //! ## Retained world (SPEC-02)
 //! The `world*` methods host the TS `NativeBridge` retained world over the app's
 //! dynamic, schema-name-keyed component store (`RunningApp::set_dynamic` /
@@ -28,7 +25,6 @@
 //! as their raw `u64` id (the `wasm32` shell narrows them to JS numbers).
 //! `worldSpawn` is composed at the TS edge from `world_spawn` + per-component
 //! `world_set`, so this core exposes only scalar / byte / string methods.
-//!
 //! ## Input (SPEC-05)
 //! The `input_*` methods host the TS `NativeBridge` input surface over the
 //! engine's `axiom-input` intent-snapshot facade ([`crate::input`]): the browser
@@ -37,7 +33,6 @@
 //! resolved intent. Action names cross as strings; edges/holds as booleans;
 //! optional reads (pointer / press-start / pressed-at-tick) as a `Vec<f64>` that
 //! is empty when absent; a swipe as its direction string.
-//!
 //! ## Time, state machines, and tweens (SPEC-07 / SPEC-09)
 //! The `timer_*` / `machine_*` / `tween_*` methods host the TS `NativeBridge`
 //! timer, state-machine, and tween surface over the deterministic `axiom-tick`
@@ -46,7 +41,6 @@
 //! pumps them once per fixed tick and records what fired; the read methods report
 //! that recorded frame. Ids and ticks cross as numbers, a fired-id / active-id /
 //! completed-id list as a `Vec<u64>`, a tween value as `f64`.
-//!
 //! ## Grid, math, and audio (SPEC-06 / SPEC-03 / SPEC-11 / SPEC-08)
 //! The `grid` / `mathbridge` / `audio` modules host the TS `HostBridge` query and
 //! presentation surface: deterministic `axiom-grid` pathfinding ([`crate::grid`]),
@@ -56,7 +50,6 @@
 //! `setCamera3D`/`addLight`) and `mat4Invert` stay deferred behind documented engine
 //! gaps (no runtime scene authoring on `RunningApp`; no `Mat4::inverse` in the math
 //! layer) — a follow-up engine phase adds those primitives, not this app.
-//!
 //! ## Net (SPEC-13)
 //! Net is **not** bridged through this wasm core. The browser already has a
 //! complete, independent client — `@axiom/client` (`AxiomClient` + its own wire
@@ -65,7 +58,6 @@
 //! `axiom-net-protocol`/`axiom-client-core` crates stay the server/native substrate.
 //! Re-implementing a net codec + socket here would duplicate that single source of
 //! truth, so this core deliberately owns no net state.
-//!
 //! [`advance`]: GameBridge::advance
 
 use axiom::prelude::{Entity, FrameOutcome, HostApi, HostOutcome, RunningApp, Score, StepBudget};
@@ -238,10 +230,6 @@ impl GameBridge {
         self.outcome.reported()
     }
 
-    // --- Retained world (SPEC-02) ---
-    //
-    // The TS `NativeBridge` world surface over the app's dynamic component store.
-    // Entity handles cross as their raw `u64` id; components as `(kind, bytes)`.
 
     /// Spawn a bare entity carrying no components, returning its raw id
     /// (`worldSpawn`'s root, which the TS edge then dresses with `world_set`s).
@@ -303,12 +291,6 @@ impl GameBridge {
             .collect()
     }
 
-    // --- Hierarchy + liveness reads (SPEC-02) ---
-    //
-    // The remaining `NativeBridge` world surface over the engine's Entity-addressed
-    // scene seam: liveness, kind-keyed presence/removal, parent linking, and the
-    // authoritative world transform. Entity handles cross as raw ids; an optional
-    // read is the empty-is-absent `Vec<f64>` the rest of the boundary uses.
 
     /// Whether `entity` names a live node (`worldAlive`); a stale handle is `false`.
     pub fn world_alive(&self, entity: u64) -> bool {

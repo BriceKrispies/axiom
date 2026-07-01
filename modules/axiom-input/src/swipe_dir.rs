@@ -47,11 +47,8 @@ mod tests {
 
     #[test]
     fn dominant_axis_decides_a_diagonal() {
-        // |x| > |y| -> horizontal wins.
         assert_eq!(SwipeDir::from_unit(Vec2::new(-0.8, 0.6)), SwipeDir::Left);
-        // |y| > |x| -> vertical wins.
         assert_eq!(SwipeDir::from_unit(Vec2::new(0.6, -0.8)), SwipeDir::Up);
-        // Exact tie resolves horizontal.
         assert_eq!(SwipeDir::from_unit(Vec2::new(0.5, 0.5)), SwipeDir::Right);
     }
 }

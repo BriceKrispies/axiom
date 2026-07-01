@@ -67,15 +67,6 @@ pub fn escape_hatch(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Parse `reason = "…"` from the attribute tokens, defaulting to `""` (which the
 /// reason lint then rejects) when absent or malformed.
 fn parse_escape_hatch_reason(attr: TokenStream) -> LitStr {
-    // Expect `reason = "<text>"`. An empty/malformed attr fails to parse (or
-    // fails a filter) and falls through to the `""` default, which the reason
-    // lint then rejects — behavior-identical to the prior explicit branches.
-    // Extract the `LitStr` without destructuring the `syn::Expr`/`Lit` enums:
-    // re-parse `nv.value`'s tokens directly as a `LitStr`. A non-string-literal
-    // value (e.g. `reason = 1` or `reason = foo`) yields tokens that fail to
-    // parse as `LitStr`, so it falls through to the `""` default — exactly as the
-    // old `Expr::Lit(.. Lit::Str ..) => Some / _ => None` branches did. `Result`/
-    // `Option` combinators only, no enum `match`.
     syn::parse::<syn::MetaNameValue>(attr)
         .ok()
         .filter(|nv| nv.path.is_ident("reason"))
@@ -97,11 +88,9 @@ fn inject_zone(item: TokenStream, zone: &str) -> TokenStream {
 /// items, re-emitting the item. Any other item kind is a compile error: zones
 /// live on functions, methods, and inline modules.
 fn inject(item: TokenStream, injected: proc_macro2::TokenStream) -> TokenStream {
-    // Try each concrete item kind directly, chained with `Result` combinators —
-    // no `Item` enum and no variant `match`. A free-standing `fn`, then an inline
-    // `mod`, then an associated function (a method in an `impl` block, which
-    // parses as `ImplItemFn`, not `Item` — so zones can mark the engine's
-    // `step`/`advance` etc.). The final fallback emits the unsupported-item error.
+    // Tries each concrete item kind in turn: a free-standing `fn`, then an
+    // inline `mod`, then an associated function (`ImplItemFn`, not `Item` —
+    // so zones can mark the engine's `step`/`advance` methods).
     let injected_for_mod = injected.clone();
     let injected_for_method = injected.clone();
     syn::parse::<syn::ItemFn>(item.clone())
@@ -113,7 +102,7 @@ fn inject(item: TokenStream, injected: proc_macro2::TokenStream) -> TokenStream 
             syn::parse::<syn::ItemMod>(item.clone()).map(|mut m| {
                 // `m.content` is `Option<(Brace, Vec<Item>)>`: an inline body
                 // injects the marker; a bodyless `mod name;` produces the
-                // module-needs-a-body error. `Option` combinators, no `match`.
+                // module-needs-a-body error.
                 let with_body = m.content.as_mut().map(|(_brace, items)| {
                     items.insert(0, syn::parse_quote! { #injected_for_mod });
                 });
@@ -135,13 +124,9 @@ fn inject(item: TokenStream, injected: proc_macro2::TokenStream) -> TokenStream 
                 quote! { #method }
             })
         })
-        // Every concrete kind failed. Reproduce the original two-tier error
-        // without matching the `Item` enum: if the tokens *do* parse as some
-        // `Item` (necessarily neither `fn` nor `mod`, since those were tried
-        // above), emit the "apply only to" error spanned on that item — exactly
-        // the old `Ok(other) =>` arm. Otherwise the tokens aren't a valid item
-        // at all, so surface that parse error verbatim — the old `ImplItemFn`
-        // `Err(err)` arm. `Result::or_else`/`map_err`, no `match`.
+        // Every concrete kind failed. If the tokens parse as some other `Item`,
+        // emit the "apply only to" error spanned on it; otherwise the tokens
+        // aren't a valid item at all, so surface that parse error verbatim.
         .unwrap_or_else(|impl_err| {
             syn::parse::<Item>(item)
                 .map(|other| {

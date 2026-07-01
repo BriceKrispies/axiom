@@ -1,15 +1,4 @@
-# `axiom-zones` — engine-support proc-macro crate (NOT a layer).
-#
-# It provides the zone marker attributes (`#[sim]`, `#[hot_path]`, `#[strict]`,
-# `#[supervisor]`, `#[escape_hatch]`) that label engine code so the dylint
-# rulebook can enforce zone-specific bans (no time/random/alloc in `#[sim]`,
-# etc.). Each attribute is a near-no-op: it re-emits the item with a greppable
-# zero-sized marker const (`const __engine_zone_<name>: () = ();`) that the lints
-# detect — the raw attribute is consumed at expansion, the marker survives.
-#
-# Classified as `PackageClass::Support` by the architecture checker: it has no
-# `layer.toml`, every engine layer/module/app may depend on it, and it is
-# excluded from the coverage gate (a build-time proc-macro, not runtime spine).
+# axiom-zones: proc-macro zone-marker attributes (Support crate, not a layer).
 [package]
 name = "axiom-zones"
 version = "0.1.0"

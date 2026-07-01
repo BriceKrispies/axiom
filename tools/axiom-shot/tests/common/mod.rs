@@ -4,8 +4,7 @@
 //! These mirror the render glue in `src/main.rs` (the per-frame
 //! batches→FramePacket reconstruction `axiom-windowing` does) so a test can feed
 //! the SAME neutral frame data to both backends and compare pixels — without
-//! exporting the binary's internals. Tool/test tier: outside the engine graph and
-//! the coverage gate, so the duplication is acceptable.
+//! exporting the binary's internals.
 
 #![allow(dead_code)]
 

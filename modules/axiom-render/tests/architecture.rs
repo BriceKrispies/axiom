@@ -147,15 +147,8 @@ fn no_scene_or_resources_or_webgpu_or_other_module_imports() {
 
 #[test]
 fn host_dependency_is_limited_to_the_neutral_frame_packet() {
-    // axiom-render compiles a RenderCommandList into the backend-neutral
-    // `axiom_host::FramePacket` (RenderApi::build_frame_packet) — the single
-    // artifact every render backend consumes. That is the ONLY sanctioned reason
-    // render names the host layer: it produces host's neutral, primitive-only
-    // frame-packet value types. render must still NOT become a host/presentation
-    // CONSUMER — it may not touch host's facade, stepping, or surface/
-    // presentation-request APIs. This narrows (does not remove) the original
-    // "render imports no host APIs" boundary to exactly the neutral packet
-    // vocabulary the slice contract requires.
+    // render may name host's neutral FramePacket types but must not become a
+    // host/presentation consumer (facade, stepping, surface APIs).
     assert_absent(
         &[
             "HostApi",
@@ -213,11 +206,6 @@ fn no_higher_engine_concepts() {
 
 #[test]
 fn capture_boundary_has_no_pixels_clock_randomness_or_global_state() {
-    // The RenderReceipt capture boundary is an engine-owned artifact, not a
-    // pixel capture: no screenshots, no GPU readback, no offscreen targets,
-    // no wall-clock time, no randomness, no global mutable state. (Comments
-    // and string literals are stripped before scanning, so the doc prose in
-    // render_receipt.rs that *describes* these exclusions does not trip it.)
     assert_absent(
         &[
             "screenshot",

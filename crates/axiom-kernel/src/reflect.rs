@@ -111,8 +111,6 @@ mod tests {
         assert_eq!(<EntityId as Reflect>::SCHEMA.name(), "EntityId");
     }
 
-    // A representative tagged union exercising the `read_tagged` dispatch helper:
-    // a unit variant (tag 0) and a payload variant (tag 1, carrying an i64).
     #[derive(Debug, PartialEq)]
     enum Sample {
         Nothing,
@@ -121,10 +119,8 @@ mod tests {
 
     impl Sample {
         fn write(&self, w: &mut BinaryWriter) {
-            // tag byte, then the variant body (branchless: table-index the tag).
             let tag = [0u8, 1][usize::from(matches!(self, Sample::Number(_)))];
             w.write_u8(tag);
-            // Unit variant writes no body; the payload variant writes its i64.
             if let Sample::Number(n) = self {
                 n.reflect_write(w);
             }
@@ -150,7 +146,6 @@ mod tests {
 
     #[test]
     fn read_tagged_rejects_an_out_of_range_tag() {
-        // Tag 2 is past the 2-entry reader table.
         let mut w = BinaryWriter::new();
         w.write_u8(2);
         let err = Sample::read(&mut BinaryReader::new(&w.into_bytes())).unwrap_err();
@@ -160,7 +155,6 @@ mod tests {
 
     #[test]
     fn read_tagged_propagates_truncation() {
-        // No tag byte at all, and a tag with a truncated body.
         assert!(Sample::read(&mut BinaryReader::new(&[])).is_err());
         assert!(Sample::read(&mut BinaryReader::new(&[1])).is_err());
     }

@@ -137,7 +137,6 @@ mod tests {
         assert_eq!(api.kind(C), Some(11));
         assert_eq!(api.locator(D), Some("d.bin".to_string()));
         assert_eq!(api.dependencies_of(D), vec![B, C]);
-        // Unknown id queries are empty/None, never a panic.
         let unknown = AssetId::from_raw(999);
         assert_eq!(api.kind(unknown), None);
         assert_eq!(api.locator(unknown), None);
@@ -148,8 +147,6 @@ mod tests {
     #[test]
     fn scheduler_dispatches_roots_by_priority_within_budget() {
         let mut api = diamond(2);
-        // Only roots (A, B) are eligible; C and D are dependency-gated. Budget 2,
-        // so both roots dispatch, highest priority first: B(20) then A(10).
         let requests = api.advance(&[], &[]);
         assert_eq!(
             requests,
@@ -158,39 +155,34 @@ mod tests {
         assert_eq!(api.in_flight_count(), 2);
         assert_eq!(api.state_code(A), 1);
         assert_eq!(api.state_code(B), 1);
-        // Budget is full → no new dispatches even though C/D exist.
         assert!(api.advance(&[], &[]).is_empty());
     }
 
     #[test]
     fn dependencies_gate_then_release_in_order() {
         let mut api = diamond(2);
-        api.advance(&[], &[]); // dispatch A, B
-                               // A completes: C becomes eligible (its only dep is ready); one slot frees.
+        api.advance(&[], &[]);
         let after_a = api.advance(&[A], &[]);
         assert_eq!(after_a, vec![(C, "c.bin".to_string())]);
         assert_eq!(api.take_ready(), vec![A]);
         assert!(api.is_ready(A));
-        // B and C complete: D's deps are all ready → D dispatches.
         let after_bc = api.advance(&[B, C], &[]);
         assert_eq!(after_bc, vec![(D, "d.bin".to_string())]);
         assert_eq!(api.take_ready(), vec![B, C]);
-        // D completes: everything ready, nothing left to dispatch.
         assert!(api.advance(&[D], &[]).is_empty());
         assert_eq!(api.take_ready(), vec![D]);
         assert_eq!(api.ready_count(), 4);
-        assert!(api.is_usable(D)); // D ready and its deps (B, C) ready
+        assert!(api.is_usable(D));
     }
 
     #[test]
     fn a_failed_dependency_blocks_its_dependents_forever() {
         let mut api = diamond(4);
-        api.advance(&[], &[]); // dispatch A and B (budget 4)
-                               // A fails → C (which needs A ready) can never become eligible.
+        api.advance(&[], &[]);
         let next = api.advance(&[], &[A]);
         assert_eq!(api.failed_count(), 1);
         assert_eq!(api.state_code(A), 3);
-        assert!(next.is_empty()); // C still gated; D still gated
+        assert!(next.is_empty());
         assert!(!api.is_ready(C));
         assert!(!api.is_usable(C));
     }
@@ -198,15 +190,13 @@ mod tests {
     #[test]
     fn stray_and_duplicate_completions_are_no_ops() {
         let mut api = diamond(2);
-        api.advance(&[], &[]); // A, B in flight
-        api.advance(&[A], &[]); // A ready (C dispatched)
+        api.advance(&[], &[]);
+        api.advance(&[A], &[]);
         let ready_first = api.take_ready();
         assert_eq!(ready_first, vec![A]);
-        // A completing again must not re-emit A as newly ready, nor change state.
         api.advance(&[A], &[]);
         assert!(api.take_ready().is_empty());
         assert!(api.is_ready(A));
-        // A completion for an unknown id changes nothing.
         let unknown = AssetId::from_raw(777);
         api.advance(&[unknown], &[]);
         assert_eq!(api.state_code(unknown), 0);
@@ -223,12 +213,10 @@ mod tests {
     #[test]
     fn is_usable_is_false_until_dependencies_are_ready() {
         let mut api = diamond(4);
-        api.advance(&[], &[]); // dispatch roots
-        api.advance(&[A], &[]); // A ready, C dispatched
-        api.advance(&[C], &[]); // C's bytes ready, but its dep A is ready too
-                                // C is usable (C ready, dep A ready)...
+        api.advance(&[], &[]);
+        api.advance(&[A], &[]);
+        api.advance(&[C], &[]);
         assert!(api.is_usable(C));
-        // ...but D is not: D isn't even ready yet.
         assert!(!api.is_usable(D));
     }
 

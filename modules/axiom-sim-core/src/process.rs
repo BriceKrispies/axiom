@@ -270,7 +270,6 @@ mod tests {
         let mut reg = EntityRegistry::new();
         let a = subject(&mut reg);
         let mut queue = ProcessQueue::new();
-        // Schedule out of order; the wake index must order by (tick, id).
         let p_late = queue.schedule(
             ProcessKind::new(1),
             a,
@@ -292,7 +291,6 @@ mod tests {
             WakeTick::new(5),
             None,
         );
-        // Two processes due at the same tick must wake in id order.
         let p_tie = queue.schedule(
             ProcessKind::new(1),
             a,
@@ -308,9 +306,7 @@ mod tests {
             "ordered by (tick, id); future excluded"
         );
         assert!(!due.contains(&p_late), "a future process is not woken");
-        // Woken processes left the wake index; only the future one remains scheduled.
         assert_eq!(queue.scheduled(), 1);
-        // Waking again at the same tick yields nothing (they already woke).
         assert!(queue.wake_due(5).is_empty());
     }
 
@@ -326,13 +322,10 @@ mod tests {
             WakeTick::new(3),
             None,
         );
-        // Not due at tick 1.
         assert!(queue.wake_due(1).is_empty());
-        // Reschedule earlier; now due at tick 1.
         assert!(queue.reschedule(id, WakeTick::new(1)));
         assert_eq!(queue.get(id).unwrap().wake(), WakeTick::new(1));
         assert_eq!(queue.wake_due(1), vec![id]);
-        // Rescheduling a missing process is a clean false.
         assert!(!queue.reschedule(ProcessId::from_raw(999), WakeTick::new(0)));
     }
 

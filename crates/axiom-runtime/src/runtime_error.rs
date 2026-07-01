@@ -87,7 +87,6 @@ mod tests {
 
     #[test]
     fn wraps_a_kernel_error_and_preserves_its_identity() {
-        // Produce a real kernel error by asking the kernel to validate zero ns.
         let api = KernelApi::new();
         let kernel_err = api.fixed_step(0).unwrap_err();
         assert_eq!(kernel_err.code(), KernelErrorCode::InvalidFixedStep);
@@ -124,11 +123,8 @@ mod cov {
         let k = KernelError::new(KernelErrorScope::Time, KernelErrorCode::RangeOverflow, "o");
         let wrapped = RuntimeError::with_kernel(RuntimeErrorCode::KernelFailure, "x", k);
         assert_eq!(wrapped.kernel(), Some(k));
-        // code eq true + kernel eq true
         assert!(bare == RuntimeError::new(RuntimeErrorCode::SystemFailed, "y"));
-        // code eq false (short-circuits)
         assert!(bare != RuntimeError::new(RuntimeErrorCode::InvalidConfig, "y"));
-        // code eq true, kernel eq false
         assert!(RuntimeError::new(RuntimeErrorCode::KernelFailure, "z") != wrapped);
     }
 }

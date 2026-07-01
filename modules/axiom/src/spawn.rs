@@ -73,7 +73,6 @@ mod tests {
 
     #[test]
     fn builder_sets_each_field() {
-        // Handles come from `Assets::add` (the only minting path).
         let mut meshes: Assets<Mesh> = Assets::new();
         let mut materials: Assets<Material> = Assets::new();
         let mesh = meshes.add(Mesh::cube());

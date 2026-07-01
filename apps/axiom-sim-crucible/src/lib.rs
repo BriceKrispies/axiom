@@ -204,8 +204,6 @@ impl Crucible {
         }
     }
 
-    // ---- inspection (returns Copy primitives; uses the captured refs) ----
-
     /// Total beer residue remaining at the source (tavern-cell) residue.
     pub fn source_amount(&self) -> i64 {
         self.api

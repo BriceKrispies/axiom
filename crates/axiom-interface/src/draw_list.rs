@@ -131,7 +131,6 @@ mod tests {
             assert_eq!(item.clone(), *item);
             assert!(!format!("{item:?}").is_empty());
         });
-        // A cross-variant comparison exercises the discriminant-mismatch path.
         assert_ne!(items[0], items[1]);
         let list = InterfaceDrawList::new(items);
         assert_eq!(list.clone(), list);

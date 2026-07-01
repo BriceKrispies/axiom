@@ -5,7 +5,6 @@
 //! either calls a `MathApi` / value-type primitive directly or composes a few of
 //! them (`v3_lerp` folds the facade's scalar `lerp`; `quat_from_euler` composes
 //! `Quat::from_axis_angle` + `Quat::multiply`).
-//!
 //! ## Boundary convention (the established `slice / scalar` rule)
 //! A vector / matrix / quaternion crosses the wasm boundary as a `&[f64]` slice
 //! and returns as a `Vec<f64>` (JS `Float64Array`): a `Vec3` is a 3-element slice
@@ -18,7 +17,6 @@
 //! narrowed to the engine's `f32` here, the one place the precision step happens.
 //! (Carrying each vector as one slice — rather than flat scalar components — also
 //! keeps every method within the engine's argument-count budget.)
-//!
 //! ## `mat4Invert` (closed gap)
 //! `mat4Invert` now forwards to the math layer's general 4×4 inverse
 //! (`MathApi::mat4_invert` / `Mat4::inverse`), landed as a Wave-1 primitive — so
@@ -91,7 +89,6 @@ fn quat_out(q: Quat) -> Vec<f64> {
 }
 
 impl GameBridge {
-    // --- v2 (2D vector) ops (SPEC-03 §4.2) ---
 
     /// `lhs + rhs` (`v2Add`).
     pub fn v2_add(&self, lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
@@ -140,7 +137,6 @@ impl GameBridge {
         vec![blend(a.x, b.x), blend(a.y, b.y)]
     }
 
-    // --- v3 (vector) ops (SPEC-11 §4.2) ---
 
     /// `lhs + rhs` (`v3Add`).
     pub fn v3_add(&self, lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
@@ -194,7 +190,6 @@ impl GameBridge {
         vec![blend(a.x, b.x), blend(a.y, b.y), blend(a.z, b.z)]
     }
 
-    // --- mat4 (matrix) ops (SPEC-11 §4.2) ---
 
     /// The 4×4 identity (`mat4Identity`).
     pub fn mat4_identity(&self) -> Vec<f64> {
@@ -239,7 +234,6 @@ impl GameBridge {
         mat_out(MathApi::new().mat4_invert(mat_in(m)).unwrap_or(Mat4::IDENTITY))
     }
 
-    // --- quat (quaternion) ops (SPEC-11 §4.2) ---
 
     /// The identity quaternion (`quatIdentity`).
     pub fn quat_identity(&self) -> Vec<f64> {
@@ -275,7 +269,6 @@ impl GameBridge {
         mat_out(MathApi::new().mat4_from_quaternion(quat_in(q)))
     }
 
-    // --- scalar ops (SPEC-03 §4.2) ---
 
     /// Constrain `v` to `[lo, hi]` (`clamp`); an inverted/non-finite range (which
     /// the facade rejects) returns `v` unchanged (the inert identity behaviour).
@@ -296,7 +289,6 @@ impl GameBridge {
         f64::from(MathApi::new().lerp(a as f32, b as f32, t as f32).unwrap_or(a as f32))
     }
 
-    // --- pure predicates (SPEC-03 §4.2) ---
 
     /// Whether rects `a` and `b` (each `[x, y, w, h]`) share any point
     /// (`aabbOverlap`), via the math layer's z=0 [`Aabb::overlaps`]; an invalid

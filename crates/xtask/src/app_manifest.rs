@@ -79,8 +79,8 @@ pub fn load_app_manifests(root: &Path) -> (Vec<AppManifest>, Vec<AppManifestErro
         .collect();
     crate_dirs.sort();
 
-    // Each crate dir with an `app.toml` yields one parse result; split the
-    // Ok/Err results into the two output vecs without branching.
+    // Each crate dir with an `app.toml` yields one parse result, split into
+    // the two output vecs below.
     crate_dirs
         .into_iter()
         .map(|crate_dir| crate_dir.join("app.toml"))

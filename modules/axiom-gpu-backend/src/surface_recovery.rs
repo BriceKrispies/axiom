@@ -68,9 +68,6 @@ mod tests {
 
     #[test]
     fn outdated_and_lost_and_other_reconfigure() {
-        // The backgrounded-mobile case (`Lost`) and the post-resize case
-        // (`Outdated`) both re-acquire the context by reconfiguring; an unknown
-        // failure takes the same safe default.
         assert_eq!(
             SurfaceStatus::Outdated.recovery_action(),
             RecoveryAction::Reconfigure
@@ -97,7 +94,6 @@ mod tests {
     fn statuses_and_actions_are_distinct_value_types() {
         assert_ne!(SurfaceStatus::Timeout, SurfaceStatus::Lost);
         assert_ne!(RecoveryAction::SkipFrame, RecoveryAction::Reconfigure);
-        // Copy + Eq round-trip.
         let s = SurfaceStatus::Outdated;
         assert_eq!(s, s);
         let a = RecoveryAction::SkipFrame;

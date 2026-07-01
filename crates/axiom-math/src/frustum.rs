@@ -56,8 +56,7 @@ impl Frustum {
         let (nn, nd) = plane_from(row2, 1.0, row3);
         let (fn_, fd) = plane_from(row2, -1.0, row3);
 
-        // Build the six planes left-to-right, short-circuiting on the first
-        // zero-length normal exactly as the original `?` chain did.
+        // Each stage short-circuits on the first zero-length normal.
         Plane::new(ln, ld).and_then(|left| {
             Plane::new(rn, rd).and_then(|right| {
                 Plane::new(bn, bd).and_then(|bottom| {
@@ -92,8 +91,8 @@ impl Frustum {
         self.planes.iter().all(|plane| {
             let n = plane.normal();
             // p-vertex: corner that maximizes signed distance. Each axis picks
-            // `max` when the normal component is >= 0, else `min` — the same
-            // selection the `if` did, expressed branchlessly as a table index.
+            // `max` when the normal component is >= 0, else `min`, via a
+            // branchless table index.
             let p_vertex = Vec3::new(
                 [aabb.min().x, aabb.max().x][usize::from(n.x >= 0.0)],
                 [aabb.min().y, aabb.max().y][usize::from(n.y >= 0.0)],

@@ -1,12 +1,3 @@
-# Axiom layer manifest — axiom-crypto (authenticated identity).
-#
-# A root-adjacent layer that depends only on the kernel. It provides a single
-# new capability: cryptographic proof of authorship (ed25519 sign/verify) plus
-# wire-serializable keys and signatures. It genuinely consumes the kernel's
-# binary writer/reader and result/error model to serialize keys/signatures and
-# to report a malformed key encoding. No higher layer's concepts leak in; OS
-# entropy is injected at the edge (apps), so the layer stays deterministic.
-
 [layer]
 name = "crypto"
 crate_name = "axiom-crypto"
@@ -32,7 +23,7 @@ consumed_capabilities = [
     "KernelErrorScope",
 ]
 
-# VerifyingKey and Signature both serialize through the kernel's binary
+# VerifyingKey and Signature both serialize through the kernel binary
 # primitives; VerifyingKey additionally reports a KernelError for non-point bytes.
 [[proof_exports]]
 export = "VerifyingKey"

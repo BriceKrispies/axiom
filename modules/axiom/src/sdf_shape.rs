@@ -107,7 +107,6 @@ mod tests {
         assert_eq!(s.kind(), SdfShape::PLANE);
         assert_eq!(s.dims(), Vec3::ZERO);
         assert_eq!(s.color(), col());
-        // Copy + Debug.
         let c = s;
         assert_eq!(s, c);
         assert!(format!("{s:?}").contains("SdfShape"));

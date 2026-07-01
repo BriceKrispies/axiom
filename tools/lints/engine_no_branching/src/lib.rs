@@ -79,9 +79,8 @@ fn branch_message(kind: &ExprKind<'_>) -> Option<&'static str> {
 }
 
 /// True if `span`'s source file lives under a `tests/`, `examples/`, or
-/// `benches/` directory — integration tests, example binaries, and benchmarks.
-/// Their non-`#[test]` helper code is still test/support code, so it is exempt
-/// just like inline `#[cfg(test)]` code.
+/// `benches/` directory. Their non-`#[test]` helper code is still test/support
+/// code, exempt just like inline `#[cfg(test)]` code.
 fn in_test_or_example_file(cx: &LateContext<'_>, span: Span) -> bool {
     let FileName::Real(name) = cx.tcx.sess.source_map().span_to_filename(span) else {
         return false;
@@ -99,42 +98,30 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoBranching {
         let Some(message) = branch_message(&expr.kind) else {
             return;
         };
-        // `async`/`.await` desugar to a generator state machine — a `loop {
-        // match poll { Ready => break, Pending => yield } }`. That loop/match is
-        // compiler machinery, not branching the programmer wrote (they wrote
-        // `.await`), exactly like a `for` loop's internal `next()` match. The ban
-        // targets source-level branching keywords, so skip async/await
-        // desugaring. (A real `if`/`match`/`loop` written *inside* an async fn
-        // keeps its own span and is still flagged.)
+        // `.await` desugars to a generator-state-machine loop/match that is
+        // compiler machinery, not branching the programmer wrote; skip it (a
+        // real if/match/loop inside an async fn keeps its own span and is still
+        // flagged).
         if matches!(
             expr.span.desugaring_kind(),
             Some(DesugaringKind::Async | DesugaringKind::Await)
         ) {
             return;
         }
-        // Skip branching that originated inside a macro expansion (library/user
-        // macro internals such as `assert!` / `matches!`), keeping diagnostics on
-        // control flow the programmer actually wrote. Compiler desugarings of
-        // surface constructs (`for` / `while` / `?` / `if let`) carry a
-        // desugaring kind and map back to real source, so they are still caught.
+        // Skip macro-internal expansions (e.g. `assert!`), but not compiler
+        // desugarings of surface constructs (`for`/`while`/`?`/`if let`), which
+        // carry a desugaring kind and map back to real source.
         if expr.span.from_expansion() && expr.span.desugaring_kind().is_none() {
             return;
         }
-        // A `while` / `while let` lowers to `Loop(While)` wrapping a synthetic
-        // `If` (the condition test), which is itself a desugaring. Skip a
-        // desugared `If` so the enclosing `while` is the single finding — a
-        // genuine `if` / `if let` is never a desugaring, so this only drops the
-        // artifact, never real source.
+        // `while`/`while let` lowers to `Loop(While)` wrapping a synthetic `If`;
+        // skip that desugared `If` so the enclosing `while` is the sole finding.
         if matches!(expr.kind, ExprKind::If(..)) && expr.span.desugaring_kind().is_some() {
             return;
         }
-        // Test code may branch freely: the ban targets the engine the build
-        // ships, not the suites that verify it. Two forms of test code are
-        // exempt — inline `#[test]` fns / `#[cfg(test)]` modules (via
-        // `is_in_test`), and whole `tests/` / `examples/` / `benches/` files,
-        // whose non-`#[test]` helpers `is_in_test` would otherwise miss. (Scope
-        // is otherwise everything — no engine-file filter — so apps and tools
-        // are still covered.)
+        // Test code branches freely: inline #[test]/#[cfg(test)] (is_in_test),
+        // plus whole tests/examples/benches files whose non-#[test] helpers
+        // is_in_test would otherwise miss.
         if is_in_test(cx.tcx, expr.hir_id) || in_test_or_example_file(cx, expr.span) {
             return;
         }

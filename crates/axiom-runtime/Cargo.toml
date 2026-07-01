@@ -7,16 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib, like the kernel. No browser / wasm-bindgen surface — Layer 01
-# is platform-agnostic deterministic execution; host integration lives in
-# higher layers.
 crate-type = ["rlib"]
 
 [dependencies]
-# Layer 01 is allowed to import from layer 00 (kernel) only. The Axiom Layer
-# Law and `cargo xtask check-architecture` enforce that no other layer is used.
 axiom-kernel = { path = "../axiom-kernel" }
-# Build-time Support crate (zone marker attributes); allowed for all engine code.
 axiom-zones = { path = "../axiom-zones" }
 
 [lints.rust]

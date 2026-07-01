@@ -79,7 +79,7 @@ fn validate_len(new_len: usize) -> KernelResult<()> {
 }
 
 /// Read the change list, rejecting a count beyond the shared prefix and any offset
-/// outside `[0, common)` — folded without a loop.
+/// outside `[0, common)`.
 fn read_changes(r: &mut BinaryReader<'_>, common: usize) -> KernelResult<Vec<(usize, u8)>> {
     r.read_u32().and_then(|count| {
         (count as usize <= common)
@@ -130,7 +130,6 @@ fn delta_error(message: &'static str) -> KernelError {
 mod tests {
     use super::*;
 
-    /// The defining property: reconstructing the diff yields the new payload exactly.
     fn round_trip(base: &[u8], new: &[u8]) {
         let blob = diff(base, new);
         assert_eq!(apply(base, &blob).unwrap(), new, "base={base:?} new={new:?}");
@@ -138,18 +137,17 @@ mod tests {
 
     #[test]
     fn round_trips_for_equal_changed_grown_shrunk_and_empty() {
-        round_trip(b"hello world", b"hello world"); // identical → empty change set
-        round_trip(b"hello world", b"hELLo world"); // in-place edits
-        round_trip(b"hello", b"hello, longer tail"); // grow (tail carries the new bytes)
-        round_trip(b"hello, longer tail", b"hi"); // shrink (drop base's excess)
-        round_trip(b"", b"from empty"); // empty base → all tail
-        round_trip(b"to empty", b""); // empty new → drop everything
-        round_trip(b"", b""); // both empty
+        round_trip(b"hello world", b"hello world");
+        round_trip(b"hello world", b"hELLo world");
+        round_trip(b"hello", b"hello, longer tail");
+        round_trip(b"hello, longer tail", b"hi");
+        round_trip(b"", b"from empty");
+        round_trip(b"to empty", b"");
+        round_trip(b"", b"");
     }
 
     #[test]
     fn an_unchanged_payload_diffs_to_a_tiny_blob() {
-        // The whole point: a no-change delta is a constant few bytes, not the payload.
         let payload = vec![7u8; 4096];
         let blob = diff(&payload, &payload);
         assert!(blob.len() < payload.len(), "delta must beat the full payload");
@@ -168,7 +166,7 @@ mod tests {
     #[test]
     fn apply_rejects_an_over_max_declared_length() {
         let mut w = BinaryWriter::new();
-        w.write_u32(MAX_PAYLOAD_LEN as u32 + 1); // new_len over the bound
+        w.write_u32(MAX_PAYLOAD_LEN as u32 + 1);
         let blob = w.into_bytes();
         assert_eq!(
             apply(b"", &blob).unwrap_err().code(),
@@ -179,8 +177,8 @@ mod tests {
     #[test]
     fn apply_rejects_a_change_count_beyond_the_prefix() {
         let mut w = BinaryWriter::new();
-        w.write_u32(2); // new_len = 2
-        w.write_u32(3); // but 3 changes claimed (> common of 2)
+        w.write_u32(2);
+        w.write_u32(3);
         let blob = w.into_bytes();
         assert!(apply(b"xy", &blob).is_err());
     }
@@ -188,11 +186,11 @@ mod tests {
     #[test]
     fn apply_rejects_an_out_of_range_offset() {
         let mut w = BinaryWriter::new();
-        w.write_u32(2); // new_len = 2, base len 2 → common 2
-        w.write_u32(1); // one change
-        w.write_u32(5); // offset 5 is outside [0,2)
+        w.write_u32(2);
+        w.write_u32(1);
+        w.write_u32(5);
         w.write_u8(b'Z');
-        w.write_byte_slice(b""); // empty tail
+        w.write_byte_slice(b"");
         let blob = w.into_bytes();
         assert_eq!(
             apply(b"xy", &blob).unwrap_err().code(),
@@ -203,9 +201,9 @@ mod tests {
     #[test]
     fn apply_rejects_an_inconsistent_tail_length() {
         let mut w = BinaryWriter::new();
-        w.write_u32(2); // new_len = 2, common with a 2-byte base = 2
-        w.write_u32(0); // no changes
-        w.write_byte_slice(b"extra"); // tail of 5 ≠ new_len - common (0)
+        w.write_u32(2);
+        w.write_u32(0);
+        w.write_byte_slice(b"extra");
         let blob = w.into_bytes();
         assert!(apply(b"xy", &blob).is_err());
     }

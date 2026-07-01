@@ -58,8 +58,6 @@ mod tests {
     fn scrubbing_mode_is_not_live_and_carries_its_selection() {
         let m = TimelineMode::scrubbing(FrameIndex::new(12));
         assert!(!m.is_live());
-        // The selection is carried in the constructed variant; comparing against
-        // the expected variant verifies it without an (uncoverable) panic arm.
         assert_eq!(
             m,
             TimelineMode::Scrubbing {

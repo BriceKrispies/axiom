@@ -1,5 +1,4 @@
 //! Spherical / geodesic math over unit directions.
-//!
 //! Latitude/longitude, great-circle (angular) distance, an east/north tangent
 //! frame, spherical linear interpolation, and an area-preserving uniform
 //! sphere-point sampler — the substrate a planetary / spherical-world generator
@@ -99,7 +98,6 @@ pub fn slerp(a: Vec3, b: Vec3, t: Ratio) -> Vec3 {
 }
 
 /// A uniformly-distributed point on the unit sphere from two uniform draws.
-///
 /// `u` selects the height `z = 2·u − 1` (uniform in `[-1, 1]`) and `v` selects the
 /// azimuth `θ = 2π·v` about `z`; the ring radius is `r = √(max(0, 1 − z²))`. Because
 /// `z` is uniform in height (Archimedes' hat-box theorem), the returned direction is

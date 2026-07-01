@@ -91,11 +91,9 @@ mod tests {
 
     #[test]
     fn finite_or_zero_passes_finite_and_sanitizes_nonfinite() {
-        // Finite values pass through unchanged (including negatives and zero).
         assert_eq!(Meters::finite_or_zero(2.5).get(), 2.5);
         assert_eq!(Meters::finite_or_zero(-0.25).get(), -0.25);
         assert_eq!(Meters::finite_or_zero(0.0).get(), 0.0);
-        // The non-finite fallback maps to a finite zero.
         assert_eq!(Meters::finite_or_zero(f32::NAN).get(), 0.0);
         assert_eq!(Meters::finite_or_zero(f32::INFINITY).get(), 0.0);
         assert_eq!(Meters::finite_or_zero(f32::NEG_INFINITY).get(), 0.0);

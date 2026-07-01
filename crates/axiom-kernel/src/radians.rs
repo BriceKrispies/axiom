@@ -74,10 +74,8 @@ mod tests {
 
     #[test]
     fn finite_or_zero_passes_finite_and_sanitizes_nonfinite() {
-        // Finite values (including negatives, past ±π) pass through unchanged.
         assert_eq!(Radians::finite_or_zero(0.5).get(), 0.5);
         assert_eq!(Radians::finite_or_zero(-2.25).get(), -2.25);
-        // Non-finite scalars collapse to a finite zero (NaN and both infinities).
         assert_eq!(Radians::finite_or_zero(f32::NAN).get(), 0.0);
         assert_eq!(Radians::finite_or_zero(f32::INFINITY).get(), 0.0);
         assert_eq!(Radians::finite_or_zero(f32::NEG_INFINITY).get(), 0.0);

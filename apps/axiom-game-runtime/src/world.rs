@@ -1,6 +1,5 @@
 //! The retained-world component vocabulary + the branchless kind→codec dispatch
 //! (SPEC-02) the bridge routes `worldSet`/`worldGet` through.
-//!
 //! ## The marshalling convention (load-bearing — every later subsystem reuses it)
 //! A component crosses the wasm boundary as a `(kind: string, fields: bytes)`
 //! pair, never as a structured JS object:
@@ -16,7 +15,6 @@
 //!   both ends of the boundary share the *one* engine codec rather than an
 //!   app-invented framing. The TS platform edge (`raf-loop.ts`) holds the matching
 //!   per-kind field (en/de)coder; this module holds the Rust half.
-//!
 //! Dispatch is a slice of `(kind, set-fn, get-fn)` rows scanned with
 //! `iter().find(...)` — no `match`/`if` — so an unknown kind is a clean no-op
 //! (`set` → `false`) / empty read (`get` → `&[]`), exactly as a stale entity is.
@@ -385,7 +383,6 @@ mod tests {
         let mut app = app();
         let e = app.spawn_empty();
 
-        // Each component kind: set from encoded bytes, read back, decode, compare.
         let transform = Transform2D {
             x: 1.0,
             y: 2.0,
@@ -451,7 +448,6 @@ mod tests {
     fn unknown_kind_is_a_clean_no_op() {
         let mut app = app();
         let e = app.spawn_empty();
-        // An unknown kind never sets and always reads empty.
         assert!(!world_set(&mut app, e, "Nope", &[1, 2, 3, 4]));
         assert!(world_get(&app, e, "Nope").is_empty());
         assert_eq!(static_kind("Nope"), None);
@@ -465,7 +461,6 @@ mod tests {
         // Too few bytes for a Transform's five f32s ⇒ a graceful false, no insert.
         assert!(!world_set(&mut app, e, "Transform", &[0, 1, 2]));
         assert!(world_get(&app, e, "Transform").is_empty());
-        // A stale entity handle is also a clean false / empty read.
         assert!(!world_set(
             &mut app,
             Entity::from_raw(9999),
@@ -487,14 +482,11 @@ mod tests {
             static_kinds(&["Transform", "Velocity"]),
             Some(vec!["Transform", "Velocity"])
         );
-        // One unknown kind collapses the whole list to None (empty query).
         assert_eq!(static_kinds(&["Transform", "ghost"]), None);
     }
 
     #[test]
     fn corrupt_utf8_decodes_deterministically_without_panic() {
-        // A length-prefixed body with invalid UTF-8 decodes to a deterministic
-        // replacement-char string rather than panicking.
         let mut w = BinaryWriter::new();
         w.write_byte_slice(&[0xFF, 0xFE]);
         let bytes = w.into_bytes();

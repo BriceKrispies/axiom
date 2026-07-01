@@ -31,10 +31,7 @@ mod render_to_gpu_submission;
 mod scene_to_render_input;
 mod vertical_slice;
 
-// The single behavioral facade of the app.
 pub use demo_api::DemoRotatingCubeApi;
-
-// --- Inspectable artifact tree returned by `DemoRotatingCubeApi::run_tick`. ---
 
 pub use vertical_slice::{
     CubeIdentityArtifact, CubeTransformArtifact, GpuSubmissionReportArtifact, VerticalSliceArtifact,

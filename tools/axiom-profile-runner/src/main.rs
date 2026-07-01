@@ -6,9 +6,8 @@
 //! plus a terminal summary showing where CPU time went across named phases and
 //! subphases. See `README.md` for what this does and does not measure.
 //!
-//! This is repo **tooling**: it lives under `tools/`, sits outside the engine
-//! dependency graph and the coverage gate, and is the only place — together
-//! with `scenario.rs` — allowed to read the wall clock.
+//! This is repo **tooling**, and is the only place — together with
+//! `scenario.rs` — allowed to read the wall clock.
 
 mod report;
 mod scenario;

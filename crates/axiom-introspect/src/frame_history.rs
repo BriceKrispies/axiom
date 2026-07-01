@@ -91,8 +91,7 @@ impl FrameHistory {
     /// version, or a binary error for truncated/invalid data.
     pub fn from_bytes(bytes: &[u8]) -> KernelResult<Self> {
         let mut reader = BinaryReader::new(bytes);
-        // Branchless sequential decode: schema guard, capacity, count, then each
-        // report, all threaded through `and_then` so the first error short-circuits.
+        // Decode order must match `to_bytes`: schema, capacity, count, then each report.
         SchemaVersion::read_from(&mut reader)
             .and_then(|version| {
                 HISTORY_SCHEMA
@@ -191,15 +190,13 @@ mod tests {
 
     #[test]
     fn describe_resolves_a_duplicate_index_to_the_most_recent() {
-        // Record the same engine frame index twice; the newest-first scan must
-        // return the instance recorded last (proven by pointer identity with the
-        // newest retained report).
         let mut history = FrameHistory::new(8);
         let report = reports(1).pop().unwrap();
         let idx = report.engine_frame_index();
         history.record(report.clone());
         history.record(report);
         let found = history.describe(idx).unwrap();
+        // ptr::eq confirms it's the instance recorded last, not just an equal value.
         assert!(std::ptr::eq(found, history.recent(1).last().unwrap()));
     }
 

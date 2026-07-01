@@ -6,8 +6,6 @@
 //! signals failure by panicking — a panic that escapes the implementation is
 //! caught at the ABI boundary and surfaces as [`STATUS_ERR_PANIC`].
 
-// --- call status codes ---
-
 /// The operation succeeded.
 pub const STATUS_OK: i32 = 0;
 /// The sim handle pointer was null.
@@ -29,12 +27,9 @@ pub const STATUS_ERR_ENGINE: i32 = 6;
 /// is intact; the call had no effect beyond recording the panic in last-error.
 pub const STATUS_ERR_PANIC: i32 = 7;
 
-// --- intent rejection reason codes ---
-//
-// 0..=3 deliberately mirror `axiom-net-protocol`'s reason codes so the .NET host
-// can forward a worker rejection as a Tier-A `RejectedIntent` without a lookup
-// table. 4.. are worker-specific and the host maps them to the closest wire
-// reason when echoing to the browser.
+// 0..=3 mirror `axiom-net-protocol`'s reason codes so the .NET host can forward
+// a worker rejection as a Tier-A `RejectedIntent` without a lookup table; 4..
+// are worker-specific.
 
 /// Not a rejection — the intent was accepted.
 pub const REASON_NONE: u32 = 0;
@@ -55,8 +50,6 @@ pub const REASON_INVALID_PLAYER: u32 = 6;
 pub const REASON_RATE_LIMITED: u32 = 7;
 /// The move the intent implies is illegal for the ruleset (e.g. a teleport).
 pub const REASON_IMPOSSIBLE_MOVEMENT: u32 = 8;
-
-// --- version handshake ---
 
 /// Worker semantic version (major). Bumped on an incompatible ABI/behaviour change.
 pub const WORKER_VERSION_MAJOR: u32 = 0;

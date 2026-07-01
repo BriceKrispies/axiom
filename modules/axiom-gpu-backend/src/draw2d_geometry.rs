@@ -1,7 +1,6 @@
 //! The **covered core** of the GPU 2D raster arm: walk a layer-sorted
 //! [`axiom_host::Draw2dList`] into backend-neutral quad geometry the platform
 //! (wgpu) arm uploads and draws.
-//!
 //! This is the GPU peer of the canvas backend's `draw2d_raster` *list walk*: it
 //! resolves each command's baked [`Mat3`] transform (composed with the frame's
 //! optional [`axiom_host::Camera2d`]), folds the command `alpha` into the source
@@ -9,7 +8,6 @@
 //! order**, which is already the host's `(layer, submission)` painter's order, so
 //! a later quad composites over an earlier one on the GPU exactly as the software
 //! `composite_pixel` paints later commands over earlier ones.
-//!
 //! ## Scope — full SPEC-04 2D parity with the software rasterizer
 //! Every [`axiom_host::Draw2dCommand`] kind the software backend rasterizes is
 //! emitted here, at byte-parity (within the established ±2 tolerance):
@@ -21,7 +19,6 @@
 //! GPU peer of the software stroke arm), and **gradient/paint fills** (linear and
 //! radial: the contract's canonical gradient texture, sampled with a per-vertex
 //! affine UV — see "How gradients stay parity-exact" below).
-//!
 //! ## How the round shapes / strokes / polygons stay byte-exact (analytic coverage)
 //! A circle/ellipse/line/polygon cannot be a hard-edged polygon fan and still
 //! match the software backend's **exact per-pixel** coverage within the ±2
@@ -39,7 +36,6 @@
 //! The covered core owns all the coverage math — the shader only evaluates it —
 //! keeping this file the single parity source of truth, branchless, and fully
 //! covered on native.
-//!
 //! ## How gradients stay parity-exact (canonical texture + affine UV)
 //! A gradient fill resolves to the contract's **canonical gradient texture**
 //! ([`axiom_host::Draw2dList::paint_texture`]) — an `n×1` colour ramp for a linear
@@ -50,14 +46,12 @@
 //! samples the *same* host-baked texture with the *same* nearest rule, so a
 //! gradient fill is byte-identical across backends. The shape's own coverage
 //! (`CONIC`/`TRI`/plain) is untouched — gradient is purely the colour source.
-//!
 //! ## Coordinate model
 //! Quad positions are **framebuffer pixels** (top-left origin), the same space the
 //! software rasterizer reasons in; the platform arm's vertex shader converts them
 //! to NDC. Colours are straight linear RGBA with the command alpha folded into the
 //! alpha channel, so the GPU's `ALPHA_BLENDING` reproduces the software `over()`
 //! blend.
-//!
 //! Pure Rust — no wgpu, no browser types — so it builds, is branchless, and is
 //! fully covered on native exactly as on wasm.
 

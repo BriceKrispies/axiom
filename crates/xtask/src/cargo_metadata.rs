@@ -54,7 +54,6 @@ impl std::fmt::Display for MetadataError {
 /// [`load_via_toml`] so synthetic fixtures and CI environments without a
 /// working cargo install still validate.
 pub fn load(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
-    // Cargo is authoritative; fall back to a pure-TOML parse on any failure.
     load_via_cargo(root).or_else(|_| load_via_toml(root))
 }
 
@@ -90,10 +89,7 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
     // (`dep = "1.0"`) or an inline table (`dep = { package = "…", … }`). The
     // only thing the architecture checker reads from it is the table's optional
     // `package` rename; the version string was never load-bearing. Capturing
-    // the value as a generic `toml::Value` collapses both shapes into one
-    // struct field — the detailed table when present, `None` otherwise — and
-    // lets the `package` override be reached by a branchless accessor chain
-    // (`as_table().and_then(get).and_then(as_str)`) with no data-carrying enum.
+    // the value as a generic `toml::Value` collapses both shapes into one field.
     #[derive(Deserialize)]
     #[serde(transparent)]
     struct DepValue {
@@ -113,8 +109,6 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
     }
 
     let root_cargo_path = root.join("Cargo.toml");
-    // Read + parse the workspace manifest, then read + parse each member; both
-    // are fallible, so the whole pipeline is an error-propagating chain.
     let root_text = std::fs::read_to_string(&root_cargo_path).map_err(|e| MetadataError {
         message: format!(
             "could not read workspace Cargo.toml at {}: {e}",
@@ -185,8 +179,6 @@ pub fn load_via_toml(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
                     .dependencies
                     .iter()
                     .filter_map(|(dep_key, value)| {
-                        // A renamed dep (`package = "…"`) resolves to that name;
-                        // otherwise the key is the crate name.
                         let resolved = value.package_override().unwrap_or_else(|| dep_key.clone());
                         dir_by_name.contains_key(&resolved).then_some(resolved)
                     })
@@ -213,8 +205,6 @@ fn load_via_cargo(root: &Path) -> Result<WorkspaceGraph, MetadataError> {
     let manifest = root.join("Cargo.toml");
     let cargo_bin = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
 
-    // Require the manifest, run `cargo metadata`, require success, then parse —
-    // each step error-propagates into the next.
     manifest
         .is_file()
         .then_some(())
@@ -302,7 +292,6 @@ fn parse_metadata(bytes: &[u8]) -> Result<WorkspaceGraph, MetadataError> {
             .map(|p| p.name.as_str())
             .collect();
 
-        // Keep only workspace members; each resolves its parent dir (fallible).
         raw.packages
             .iter()
             .filter(|raw_pkg| workspace_ids.contains(raw_pkg.id.as_str()))
@@ -319,8 +308,7 @@ fn parse_metadata(bytes: &[u8]) -> Result<WorkspaceGraph, MetadataError> {
                         ),
                     })
                     .map(|dir| {
-                        // Normal deps only (no dev/build, source = null), and
-                        // cross-checked against the workspace name set.
+                        // Normal deps only (no dev/build, source = null).
                         let workspace_deps: Vec<String> = raw_pkg
                             .dependencies
                             .iter()

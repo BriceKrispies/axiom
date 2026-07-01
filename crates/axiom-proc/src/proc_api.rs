@@ -74,7 +74,6 @@ mod tests {
         let r = sample();
         let (a1, t1) = ProcApi::evaluate(&r, 7, &addr(&[1, 2])).unwrap();
         let (a2, t2) = ProcApi::evaluate(&r, 7, &addr(&[1, 2])).unwrap();
-        // Byte equality is the proof of determinism (the hash only indexes).
         assert_eq!(a1.to_bytes(), a2.to_bytes());
         assert_eq!(t1.to_bytes(), t2.to_bytes());
         assert_eq!(a1, a2);
@@ -83,15 +82,13 @@ mod tests {
 
     #[test]
     fn invalid_recipe_is_rejected_as_data() {
-        // node 0 is an Add referencing non-existent nodes 5, 6.
         let mut bad = Recipe::new(1);
         bad.add(5, 6);
         assert!(ProcApi::begin(&bad, 0, &addr(&[0])).is_none());
         assert!(ProcApi::evaluate(&bad, 0, &addr(&[0])).is_none());
-        // A self/back reference is also rejected: node 1 references node 1.
         let mut selfref = Recipe::new(1);
-        selfref.draw(); // node 0
-        selfref.add(1, 0); // node 1 references itself (1) -> invalid
+        selfref.draw();
+        selfref.add(1, 0);
         assert!(ProcApi::begin(&selfref, 0, &addr(&[0])).is_none());
     }
 
@@ -102,23 +99,21 @@ mod tests {
         let mut eval = ProcApi::begin(&r, 7, &addr(&[1, 2])).unwrap();
         assert!(!eval.is_done());
         while !eval.is_done() {
-            eval.step(1); // one node at a time
+            eval.step(1);
         }
         assert_eq!(whole, eval.into_output());
     }
 
     #[test]
     fn over_budget_step_and_empty_recipe_finish_cleanly() {
-        // Over-budget: stepping further than there are nodes simply finishes.
         let mut eval = ProcApi::begin(&sample(), 7, &addr(&[1, 2])).unwrap();
         eval.step(100);
         assert!(eval.is_done());
-        // An empty recipe is done immediately; its artifact + trace are empty.
         let empty = Recipe::new(1);
         assert!(empty.is_empty());
         let mut e = ProcApi::begin(&empty, 0, &addr(&[0])).unwrap();
         assert!(e.is_done());
-        e.step(3); // no-op past the (empty) end
+        e.step(3);
         let (artifact, trace) = e.into_output();
         assert!(artifact.words().is_empty());
         assert!(trace.is_empty());
@@ -133,9 +128,8 @@ mod tests {
         v4.draw();
         let art_v3 = ProcApi::evaluate(&v3, 7, &a).unwrap().0;
         let art_v4 = ProcApi::evaluate(&v4, 7, &a).unwrap().0;
-        assert_ne!(art_v3, art_v4); // a version bump re-keys the stream
+        assert_ne!(art_v3, art_v4);
         assert_eq!(art_v3.generator_version(), 3);
-        // Restoring the version restores the artifact.
         let mut v3b = Recipe::new(3);
         v3b.draw();
         assert_eq!(art_v3, ProcApi::evaluate(&v3b, 7, &a).unwrap().0);
@@ -156,7 +150,6 @@ mod tests {
 
     #[test]
     fn golden_artifact_and_trace_digests_are_stable() {
-        // Pinned indices: a change to evaluation or the byte format is caught here.
         let (artifact, trace) = ProcApi::evaluate(&sample(), 7, &addr(&[1, 2])).unwrap();
         assert_eq!(artifact.digest().raw(), 4_507_544_175_111_723_444);
         assert_eq!(trace.digest().raw(), 11_030_477_466_451_214_382);
@@ -167,7 +160,7 @@ mod tests {
         let r = sample();
         let eval = ProcApi::begin(&r, 7, &addr(&[1, 2])).unwrap();
         let (artifact, trace) = ProcApi::evaluate(&r, 7, &addr(&[1, 2])).unwrap();
-        assert!(!format!("{r:?}").is_empty()); // Recipe -> RecipeNode -> NodeOp
+        assert!(!format!("{r:?}").is_empty());
         assert!(!format!("{eval:?}").is_empty());
         assert!(!format!("{artifact:?}").is_empty());
         assert!(!format!("{trace:?}").is_empty());

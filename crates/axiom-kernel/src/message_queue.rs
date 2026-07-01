@@ -114,7 +114,6 @@ mod tests {
         let mut q = MessageQueue::new();
         q.push(envelope(1));
         q.push(envelope(2));
-        // Distinguishes `is_empty -> true`: a populated queue is NOT empty.
         assert!(!q.is_empty());
         assert_eq!(q.len(), 2);
     }

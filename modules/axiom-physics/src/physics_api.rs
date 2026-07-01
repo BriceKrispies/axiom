@@ -277,7 +277,6 @@ mod tests {
             PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, zero(), zero())
                 .is_ok()
         );
-        // Damping outside [0, 1] is rejected at construction.
         let bad = Ratio::new(2.0).unwrap();
         assert!(PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, bad, zero()).is_err());
     }
@@ -291,7 +290,6 @@ mod tests {
         assert!(api.apply_torque(dynamic, Vec3::new(0.0, 1.0, 0.0)).is_ok());
         let ground = api.create_static_body(Transform::IDENTITY).unwrap();
         assert!(api.apply_torque(ground, Vec3::new(0.0, 1.0, 0.0)).is_err());
-        // The queued torque is drained and applied on the next step.
         api.step(step()).unwrap();
         assert_eq!(api.latest_step_record().command_count(), 1);
     }

@@ -1,8 +1,6 @@
 //! The per-frame engine drive on [`RunningApp`] — the `tick` family that advances
 //! exactly one deterministic frame (step the runtime, advance the scene, and, when
-//! rendering is enabled, submit and summarise the draws). A child module of `app`
-//! so it reaches `RunningApp`'s private per-frame machinery while keeping `app.rs`
-//! within the per-file size budget.
+//! rendering is enabled, submit and summarise the draws).
 
 use axiom_host::HostFrameInput;
 use axiom_kernel::Radians;
@@ -46,8 +44,6 @@ impl RunningApp {
         controls: &[FirstPersonInput],
     ) -> FrameOutcome {
         self.step(tick, inputs, controls);
-        // A frame is `step` (the simulation above) then `render` (below). Driving a
-        // whole frame here is unchanged: step, then render the state it produced.
         self.render(tick)
     }
 
@@ -104,10 +100,6 @@ impl RunningApp {
         let width = self.viewport.physical_width();
         let height = self.viewport.physical_height();
 
-        // `then` keeps the render path lazy: it runs (with all its side effects)
-        // only when rendering is enabled; otherwise the simulation-only outcome is
-        // produced. Behaviourally identical to the former `if !self.render` early
-        // return, without the branch in source.
         let rendered = self.render.then(|| {
             let mut frame =
                 self.pipeline
@@ -124,12 +116,9 @@ impl RunningApp {
                 )
             });
             self.materials.iter().for_each(|(id, material)| {
-                // The pipeline records the material→texture binding (for
-                // receipt fidelity); the live albedo pixels are uploaded
-                // separately via `material_textures`. `0` = untextured. The full
-                // catalog surface — base colour, emissive, roughness, and opacity
-                // (folded into the per-draw alpha so a translucent material blends)
-                // — is threaded through, no longer dropped at this boundary.
+                // `0` = untextured; live albedo pixels are uploaded separately via
+                // `material_textures`. Opacity is folded into the per-draw alpha so
+                // a translucent material blends.
                 let texture_id = material.texture().map(Texture::id).unwrap_or(0);
                 let emissive = material.emissive().to_array();
                 pipeline.frame_add_lit_material(
@@ -229,14 +218,12 @@ mod tests {
 
     #[test]
     fn render_reflects_a_scene_mutation_made_after_the_last_step() {
-        // The split's whole reason: a host that steps during its own `advance` and
-        // then writes the camera before presenting must see the *new* camera in the
-        // rendered frame — not the camera as of the last fixed tick.
+        // A host that steps during its own `advance` and then writes the camera
+        // before presenting must see the *new* camera in the rendered frame — not
+        // the camera as of the last fixed tick.
         let mut app = render_app();
         app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)));
-        // Step+render frame 0 (the fused path) captures the near camera.
         let near = app.tick(0).camera_view_proj();
-        // Now move the camera *without* stepping, and render-only the next frame.
         app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 40.0)));
         let far = app.render(1).camera_view_proj();
         assert_ne!(
@@ -247,8 +234,6 @@ mod tests {
 
     #[test]
     fn render_only_does_not_advance_the_simulation_and_is_idempotent() {
-        // Rendering the same scene at the same tick twice yields equal outcomes and
-        // does not perturb simulation state — it is the pure present half.
         let mut app = render_app();
         app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)));
         let before = app.snapshot_sim();

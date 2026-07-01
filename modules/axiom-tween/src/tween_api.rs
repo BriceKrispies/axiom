@@ -46,7 +46,6 @@ impl ActiveTween {
 
 /// The tween module's single facade: a table of live tweens advanced on the
 /// presentation clock.
-///
 /// Every output is display-only (§17.5) — a sampled value must never be read back
 /// into a `sim` API.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -157,13 +156,11 @@ mod tests {
         assert!(approx(mid(Ease::QuadInOut), 0.5)); // t >= 0.5 takes the second arm
         assert!(approx(mid(Ease::CubicOut), 0.875));
         assert!(approx(mid(Ease::ExpoOut), 0.969_70));
-        // BackOut overshoots above 1 near the end.
         assert!(TweenApi::ease(Ease::BackOut, val(0.9)).get() > 1.0);
     }
 
     #[test]
     fn quad_in_out_takes_the_accelerating_arm_below_the_midpoint() {
-        // t < 0.5 selects 2t² (the first table arm).
         assert!(approx(TweenApi::ease(Ease::QuadInOut, val(0.25)).get(), 0.125));
     }
 
@@ -171,20 +168,16 @@ mod tests {
     fn advance_samples_then_completes_once_and_value_tracks_then_clears() {
         let mut api = TweenApi::new();
         let id = api.start(spec(0.0, 10.0, 100, Ease::Linear));
-        // Halfway: a non-complete sample at the linear midpoint, and `value`
-        // reports the same.
         let half = api.advance(50);
         assert_eq!(half.len(), 1);
         assert!(approx(half[0].value.get(), 5.0));
         assert!(!half[0].completed);
         assert!(approx(api.value(id).expect("still live").get(), 5.0));
-        // Past the duration: the final value with `completed`, then it is gone.
         let done = api.advance(60);
         assert_eq!(done.len(), 1);
         assert!(approx(done[0].value.get(), 10.0));
         assert!(done[0].completed);
         assert_eq!(api.value(id), None);
-        // A further advance sees no tweens.
         assert!(api.advance(10).is_empty());
     }
 
@@ -199,7 +192,6 @@ mod tests {
                 .last()
                 .unwrap_or(f32::NAN)
         };
-        // One 600ns step and six 100ns steps reach the same value at total 600ns.
         assert!(approx(run(&[600]), run(&[100, 100, 100, 100, 100, 100])));
     }
 
@@ -209,7 +201,7 @@ mod tests {
         api.start(spec(2.0, 8.0, 0, Ease::Linear));
         let samples = api.advance(1);
         assert_eq!(samples.len(), 1);
-        assert!(approx(samples[0].value.get(), 8.0)); // phase pinned to 1
+        assert!(approx(samples[0].value.get(), 8.0));
         assert!(samples[0].completed);
     }
 
@@ -221,10 +213,8 @@ mod tests {
         api.cancel(a);
         assert_eq!(api.value(a), None);
         assert!(api.value(b).is_some());
-        // Cancelling an already-removed id changes nothing.
         api.cancel(a);
         assert!(api.value(b).is_some());
-        // Only b is sampled now.
         assert_eq!(api.advance(10).len(), 1);
     }
 

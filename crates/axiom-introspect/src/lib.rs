@@ -42,12 +42,8 @@ mod world_tag;
 #[cfg(test)]
 mod fixtures;
 
-// --- Curated public surface ---
-
-// Primary facade.
 pub use introspect_api::IntrospectApi;
 
-// Inert, inspectable, serializable report types reachable through the facade.
 pub use frame_diff::FrameDiff;
 pub use frame_history::FrameHistory;
 pub use frame_report::FrameReport;

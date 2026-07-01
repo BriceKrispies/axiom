@@ -1,5 +1,4 @@
 //! `moisture` stage: ocean-distance BFS baseline moisture.
-//! Audit: Wind/moisture reqs "Current moisture is ocean-distance BFS only".
 //!
 //! A multi-source BFS over the region graph seeded from every ocean region
 //! (`elevation < 0`) computes graph distance to the nearest ocean. Moisture is
@@ -123,7 +122,6 @@ mod tests {
         for &m in &g.region_moisture {
             assert!((0.0..=1.0).contains(&m), "moisture {} out of range", m);
         }
-        // Coast wetter than interior.
         assert!(g.region_moisture[0] >= g.region_moisture[4]);
         assert!(g.region_moisture[1] > g.region_moisture[3]);
     }

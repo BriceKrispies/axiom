@@ -869,25 +869,19 @@ impl LivePresenter {
         }
     }
 
-    /// Present one resolved frame to the bound surface. The arguments are the same
-    /// per-frame data the run loop produces: the clear colour, the resolved lights
-    /// (`(kind, geometry-vec, colour, intensity)`), the shadow light
-    /// view-projection, the per-`(mesh, material)` instance `batches` (`[mvp(16),
-    /// world(16), colour(4)]` per instance), the camera view-projection and
-    /// per-instance contact-shadow caster flags the Canvas planar-shadow pass
-    /// needs, and the frame's optional SDF scene. An unrecoverable GPU-surface loss
-    /// (a backgrounded mobile tab whose context was destroyed) rebuilds the backend
-    /// off-loop — re-probing WebGPU → WebGL2 → Canvas 2D — and swaps it in, so play
-    /// resumes instead of going black; at most one rebuild is in flight at a time.
-    /// Present one frame to the bound surface, routed through the scrubber overlay
-    /// exactly as the engine's run loops do: while **live**, record this frame and
-    /// present the current scene; while **scrubbing**, ignore the live args and
+    /// Present one resolved frame to the bound surface, routed through the scrubber
+    /// overlay exactly as the engine's run loops do: while **live**, record this
+    /// frame (the clear colour, resolved lights `(kind, geometry-vec, colour,
+    /// intensity)`, shadow light view-projection, per-`(mesh, material)` instance
+    /// `batches` `[mvp(16), world(16), colour(4)]` per instance, camera
+    /// view-projection, per-instance contact-shadow caster flags, and optional SDF
+    /// scene) and present it; while **scrubbing**, ignore the live args and
     /// re-present the selected recorded frame (the sim is frozen by the host, which
-    /// gates its `advance` on [`Self::is_interactive`]). The live args are the same
-    /// per-frame data the run loop produces — the clear colour, the resolved lights,
-    /// the shadow light view-projection, the per-`(mesh, material)` instance
-    /// `batches`, the camera view-projection + per-instance contact-shadow caster
-    /// flags, and the frame's optional SDF scene.
+    /// gates its `advance` on [`Self::is_interactive`]). An unrecoverable
+    /// GPU-surface loss (a backgrounded mobile tab whose context was destroyed)
+    /// rebuilds the backend off-loop — re-probing WebGPU → WebGL2 → Canvas 2D — and
+    /// swaps it in, so play resumes instead of going black; at most one rebuild is
+    /// in flight at a time.
     #[allow(clippy::too_many_arguments)]
     pub fn present(
         &self,

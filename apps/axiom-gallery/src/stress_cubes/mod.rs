@@ -88,9 +88,7 @@ fn stress_cubes_app(cubes: u32) -> App {
                 let row = i / cols;
                 let x = x0 + col as f32 * SPACING;
                 let y = y0 + row as f32 * SPACING;
-                // Branch-free three-way axis select: `i % 3` is always 0, 1, or
-                // 2, so this index is always in bounds — behaviour-identical to
-                // the original `match`.
+                // `i % 3` is always 0, 1, or 2, so this index is always in bounds.
                 let axis = [Vec3::UNIT_Y, Vec3::UNIT_X, Vec3::new(1.0, 1.0, 0.0)][(i % 3) as usize];
                 let period = 120 + (i % 240);
                 let material = materials.add(Material::lit(cube_color(i, cubes)));
@@ -141,7 +139,6 @@ mod tests {
     fn authors_the_requested_number_of_cubes() {
         let mut app = stress_cubes_app(16).build();
         assert_eq!(app.renderable_count(), 16);
-        // The scene ticks and produces one draw per cube.
         let outcome = app.tick(0);
         assert_eq!(outcome.draws().len(), 16);
     }
@@ -154,9 +151,7 @@ mod tests {
         for t in 1..=60 {
             later = a.tick(t);
         }
-        // Spinning cubes change their transforms over time...
         assert_ne!(early.draws()[0].mvp(), later.draws()[0].mvp());
-        // ...and a fresh build replays tick 0 byte-for-byte.
         let mut b = stress_cubes_app(9).build();
         assert_eq!(b.tick(0), early);
     }

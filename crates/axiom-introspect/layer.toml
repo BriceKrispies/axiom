@@ -1,33 +1,9 @@
-# Axiom layer manifest — axiom-introspect.
-#
-# Introspect is the engine's agent-facing observability boundary. It adapts the
-# frame contract into a retained, byte-serializable model of what the engine
-# just did, and now also observes the ECS world (ecs) it sits directly on
-# top of — the right direction: observability depends on the world, never the
-# reverse. It records; it never reaches around its inputs at runtime, never
-# reads a wall clock, and never touches a browser/GPU API.
-#
-# Introspect logical capabilities (documentation only — Rust public surface is
-# the curated re-export list in `lib.rs`, enforced by the layer's own
-# `tests/architecture.rs::lib_exports_are_curated_set`):
-#   - per-frame-report
-#   - per-system-report
-#   - retained-frame-history
-#   - frame-report-serialization
-#   - history-window-serialization
-#   - frame-diff + failure-queries
-#   - deterministic-frame-timing
-#   - engine-introspection-facade
-#   - world-observation + world-serialization
-
 [layer]
 name = "introspect"
 crate_name = "axiom-introspect"
 depends_on = ["kernel", "frame", "ecs"]
 meaningful_dependency = "Introspect consumes the frame contract (`EngineFrame` and the per-system detail on its `FrameStepSummary`/`FrameSystemReport`, plus `FrameLifecycleState`/`FrameViewport`) and kernel serialization (`BinaryWriter`/`BinaryReader`/`SchemaVersion`, `KernelResult`) to produce a retained, byte-serializable per-frame `FrameReport`, a bounded `FrameHistory`, and the `IntrospectApi` query facade an agent uses to ask a running engine what it is and what it just did."
 
-# Public Rust surface is the curated list in `lib.rs`; the checker needs the
-# facade plus the report type to prove the layer's adapter role over frame.
 introduced_capabilities = ["IntrospectApi", "FrameReport", "SystemReport", "MetricReport", "FrameHistory", "WorldReport", "WorldTag", "FrameDiff"]
 
 consumed_capabilities = [
@@ -45,9 +21,6 @@ consumed_capabilities = [
     "World",
 ]
 
-# `WorldReport` is the adapter over a depended layer (ecs): it observes a
-# `World`. The frame-derived reports still reference frame symbols (a legal
-# depended layer), but the *depended-layer* proof is `WorldReport` -> `World`.
 [[proof_exports]]
 export = "WorldReport"
 must_reference = ["World"]
@@ -56,8 +29,6 @@ must_reference = ["World"]
 export = "FrameReport"
 must_reference = ["EngineFrame"]
 
-# `WorldTag` is an inert semantic noun serialized through the kernel binary
-# primitives (a depended root layer), the same adapter shape as the reports.
 [[proof_exports]]
 export = "WorldTag"
 must_reference = ["BinaryWriter"]

@@ -50,23 +50,20 @@ dylint_linting::declare_late_lint! {
 
 impl<'tcx> LateLintPass<'tcx> for EngineGenuineDependency {
     fn check_crate(&mut self, cx: &LateContext<'tcx>) {
-        // Only layer crates have a `layer.toml`; everything else is out of scope.
         let Some(info) = read_layer_info() else {
             return;
         };
         if info.depends_on.is_empty() {
-            return; // A root layer (e.g. the kernel) declares nothing.
+            return;
         }
         // `--all-targets` compiles a layer's integration tests / examples as
-        // their own crates, sharing the layer's `CARGO_MANIFEST_DIR`. Only the
-        // layer's own *library* crate is the adapter under test, so skip any
-        // target whose crate name is not the layer's.
+        // their own crates, sharing the layer's `CARGO_MANIFEST_DIR`; skip any
+        // target whose crate name isn't the layer's own library crate.
         if cx.tcx.crate_name(LOCAL_CRATE).as_str() != info.self_prefix {
             return;
         }
         let declared = info.depends_on;
 
-        // Collect the names of every extern crate referenced in non-test code.
         let mut used: BTreeSet<String> = BTreeSet::new();
         let mut visitor = UsedCrates { cx, used: &mut used };
         cx.tcx.hir_walk_toplevel_module(&mut visitor);

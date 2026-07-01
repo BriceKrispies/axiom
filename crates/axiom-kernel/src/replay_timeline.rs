@@ -112,7 +112,6 @@ mod tests {
         assert!(t.is_finished());
         assert_eq!(t.remaining(), 0);
         assert_eq!(t.advance(), None);
-        // Default matches `new`.
         assert_eq!(ReplayTimeline::<u8>::default(), t);
     }
 
@@ -134,7 +133,6 @@ mod tests {
         assert_eq!(t.position(), 2);
         assert!(t.is_finished());
         assert_eq!(t.remaining(), 0);
-        // Past the end: saturates, no panic.
         assert_eq!(t.advance(), None);
         assert_eq!(t.position(), 2);
     }

@@ -1,14 +1,7 @@
-# Authored world tags for the growth app — the static-world source of the
-# agent's semantic "nouns", merged on top of the runtime tags the generated
-# vista yields. Each tag names a point an agent can resolve a command against.
-#
 # A tag resolves its position from a symbolic `at` ("spawn" | "summit") or an
 # explicit `x`/`z`; its height `y` (metres) is sampled off the terrain when
-# omitted. This is the hand-authored path; it graduates to the full `.axpkg`
-# pipeline (package/world) later.
+# omitted.
 
-# An explicit alias for the spawn shelf the climb sets out from — proves the
-# authored path resolves alongside the runtime `mountaintop` / `ground` tags.
 [[tag]]
 name = "basecamp"
 kind = "spawn"

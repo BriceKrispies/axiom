@@ -4,12 +4,10 @@ use crate::host_param_value::HostParamValue;
 
 /// An opaque key→value map of session parameters with a **stable iteration
 /// order** (SPEC-12 §6).
-///
 /// Order is a determinism requirement: the projected JS record and any logged
 /// form must be reproducible, so the entries are held in an order-preserving
 /// vector (insertion order), never a hash map with random iteration. The host
 /// boundary only carries these values — the game interprets them.
-///
 /// Keys are not de-duplicated; [`Self::with`] appends in order and
 /// [`Self::get`] returns the first match, keeping construction branchless.
 #[derive(Debug, Clone, Default, PartialEq)]

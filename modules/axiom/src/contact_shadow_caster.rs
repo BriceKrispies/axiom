@@ -19,7 +19,6 @@ mod tests {
 
     #[test]
     fn marker_is_a_zero_data_value() {
-        // It is a pure marker: all instances are equal and it is `Default`.
         assert_eq!(
             ContactShadowCaster,
             <ContactShadowCaster as Default>::default()

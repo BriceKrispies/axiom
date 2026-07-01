@@ -27,14 +27,11 @@ impl GpuSubmissionStatus {
     /// Whether real, visible presentation occurred. Always `false` in this
     /// pass — neither backend touches a GPU.
     pub const fn presented(self) -> bool {
-        // No variant represents real presentation yet.
         false
     }
 
     /// Whether this status came from the deterministic recording backend.
     pub const fn is_recorded(self) -> bool {
-        // Fieldless-enum predicate: compare integer discriminants directly
-        // instead of a `matches!` arm (which compiles to a two-arm branch).
         (self as u8) == (GpuSubmissionStatus::Recorded as u8)
     }
 }

@@ -1,12 +1,10 @@
 //! Software-raster consumer of the host-neutral [`axiom_host::Draw2dList`].
-//!
 //! Composites a frame's ordered 2D draw commands onto an RGBA framebuffer with
 //! **src-over alpha blending** (via [`SoftwareFramebuffer::composite_pixel`]) —
 //! the verified-missing "no alpha blending" fix on the software backend. The
 //! list arrives already `(layer, submission)`-sorted by the host, so iterating
 //! `Draw2dList::commands` in order is correct painter's order; each command's
 //! resolved `alpha`, baked `Mat3` transform, and `layer` are honoured.
-//!
 //! ## Coverage of the SPEC-04 2D command set
 //! This backend rasterizes every [`axiom_host::Draw2dCommand`] kind: **rect**,
 //! **circle**, **ellipse** (rotation-exact via conjugate semi-diameters), **line**,
@@ -19,7 +17,6 @@
 //! contract's canonical gradient texture, sampled per pixel along the projection
 //! parameter / radius). Everything is alpha-composited and honours the command's
 //! resolved `alpha`.
-//!
 //! ## Coordinate model
 //! Draw coordinates are framebuffer pixels. Each command's baked `Mat3` (composed
 //! with the list's optional `Camera2d`) places the shape. **Rect**, **line**, and
@@ -27,7 +24,6 @@
 //! additionally honour rotation/shear **exactly** (their per-pixel test inverts
 //! the transformed conjugate semi-diameters), while a rect still fills the
 //! transformed axis-aligned bounding box (its rotated form is an approximation).
-//!
 //! Pure Rust — no browser types — so it builds and is fully covered on native.
 
 use std::collections::HashMap;

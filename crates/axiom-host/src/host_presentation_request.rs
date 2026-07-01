@@ -44,11 +44,8 @@ impl HostPresentationRequest {
         adapter: HostAdapterRequest,
         device: HostDeviceRequest,
     ) -> HostResult<Self> {
-        // `target` and `surface` are already guaranteed valid by their own
-        // constructors (`HostPresentationTarget::new` / `HostSurfaceHandle::new`
-        // reject null ids and the fields are private), so the only binding
-        // failure that can actually occur is an inconsistent adapter/device
-        // pairing.
+        // target/surface are already validated by their own constructors, so the
+        // only possible binding failure is an inconsistent adapter/device pairing.
         let inconsistent = device.require_presentation() & !adapter.require_presentation_surface();
         (!inconsistent)
             .then_some(HostPresentationRequest {

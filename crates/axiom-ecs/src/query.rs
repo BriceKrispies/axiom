@@ -118,8 +118,8 @@ mod tests {
     #[test]
     fn one_yields_live_entities_in_order() {
         let mut registry = EntityRegistry::new();
-        let a = registry.spawn(); // 1
-        let b = registry.spawn(); // 2
+        let a = registry.spawn();
+        let b = registry.spawn();
         let mut values: ComponentColumn<i32> = ComponentColumn::new();
         values.insert(b, 20);
         values.insert(a, 10);
@@ -137,7 +137,6 @@ mod tests {
         let mut values: ComponentColumn<i32> = ComponentColumn::new();
         values.insert(a, 10);
         values.insert(b, 20);
-        // Despawn b in the registry only (simulate a stale column row).
         registry.despawn(b);
         let got: Vec<u64> = Query::one(&registry, &values)
             .map(|(id, _)| id.raw())
@@ -148,9 +147,9 @@ mod tests {
     #[test]
     fn two_yields_intersection_in_order() {
         let mut registry = EntityRegistry::new();
-        let a = registry.spawn(); // 1
-        let b = registry.spawn(); // 2
-        let c = registry.spawn(); // 3
+        let a = registry.spawn();
+        let b = registry.spawn();
+        let c = registry.spawn();
         let mut names: ComponentColumn<&'static str> = ComponentColumn::new();
         names.insert(a, "a");
         names.insert(b, "b");
@@ -158,7 +157,6 @@ mod tests {
         let mut scores: ComponentColumn<i32> = ComponentColumn::new();
         scores.insert(c, 30);
         scores.insert(a, 10);
-        // b has a name but no score -> excluded from the intersection.
         let got: Vec<(u64, &str, i32)> = Query::two(&registry, &names, &scores)
             .map(|(id, n, s)| (id.raw(), *n, *s))
             .collect();

@@ -125,8 +125,7 @@ fn drive_pool(api: AssetsApi, document: Document) {
         worker_job: vec![None; count],
     }));
 
-    // Spawn the workers. Each worker's onmessage records its job's outcome and
-    // returns the worker to the idle set; the frame loop picks both up next frame.
+    // Each worker's onmessage records its job's outcome and returns it to the idle set.
     let workers: Vec<Worker> = (0..count)
         .map(|i| {
             let worker = Worker::new(WORKER_URL).expect("spawn worker.js");
@@ -158,17 +157,14 @@ fn drive_pool(api: AssetsApi, document: Document) {
     *callback.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
         let mut s = state.borrow_mut();
 
-        // 1. Apply the completions workers reported since the last frame.
         let ok: Vec<AssetId> = s.completed_ok.drain(..).collect();
         let failed: Vec<AssetId> = s.completed_failed.drain(..).collect();
 
-        // 2. Advance the scheduler; queue the loads it releases.
         let requests = s.api.advance(&ok, &failed);
         for (id, locator) in requests {
             s.pending.push_back((id.raw(), locator));
         }
 
-        // 3. Hand queued jobs to idle workers — true CPU parallelism across the pool.
         while !s.idle.is_empty() && !s.pending.is_empty() {
             let wi = s.idle.pop().expect("idle worker");
             let (id, locator) = s.pending.pop_front().expect("pending job");
@@ -178,12 +174,10 @@ fn drive_pool(api: AssetsApi, document: Document) {
             s.worker_job[wi] = Some(id);
         }
 
-        // 4. Drain newly-ready ids (here the app would register the decoded asset).
         for id in s.api.take_ready() {
             s.ready_order.push(id.raw());
         }
 
-        // 5. Reflect scheduler + pool state into the DOM and `window.__assetDemo`.
         for id in s.api.asset_ids() {
             update_row(&document, id.raw(), s.api.state_code(id));
         }

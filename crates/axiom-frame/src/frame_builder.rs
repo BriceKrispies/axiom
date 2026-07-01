@@ -72,17 +72,6 @@ impl FrameBuilder {
         report: &HostFrameReport,
         commands: Vec<FrameCommand>,
     ) -> FrameResult<EngineFrame> {
-        // Branchless rewrite of the original guard + `?` flow.
-        //
-        // 1. Sequence guard: the original `if let Some(last) { if seq <= last
-        //    { return Err } }` rejects only when a previous sequence exists
-        //    AND the new one does not strictly increase. `map_or(false, ..)`
-        //    turns the `Option` into that exact predicate (absent => allowed),
-        //    and `.then_some(()).map_or_else(Ok, Err)` selects the outcome.
-        // 2. Timing: `FrameTiming::from_host_report` is fallible; chaining it
-        //    with `.and_then` replaces the `?`, propagating its error.
-        // 3. On the success arm we perform the same state mutation and build
-        //    the same `EngineFrame` the original did.
         let sequence_rejected = self
             .last_host_sequence
             .is_some_and(|last| report.sequence() <= last);
@@ -293,8 +282,6 @@ mod tests {
         let mut b = FrameBuilder::new(STEP_NANOS);
         b.build(&report(7, STEP_NANOS, visible()), vec![]).unwrap();
         b.build(&report(8, STEP_NANOS, visible()), vec![]).unwrap();
-        // After two builds the next index is 2 (distinct from 0 and 1) and the
-        // last accepted host sequence is the most recent one (Some, not None).
         assert_eq!(b.next_engine_frame_index(), 2);
         assert_eq!(b.last_host_sequence(), Some(8));
     }

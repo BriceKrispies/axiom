@@ -4,7 +4,7 @@
 //! regenerates the levelgen world from the seed and replays the deltas on top, so a
 //! world reproduces from a tiny save byte-for-byte. The same `{seed, deltas}` shape
 //! underlies lockstep multiplayer (a peer ships a seed + a command/delta stream,
-//! never full state). Branchless.
+//! never full state).
 
 use axiom_levelgen::LevelGenApi;
 use axiom_space::Address;
@@ -101,8 +101,8 @@ mod tests {
         let edited =
             WorldSaveApi::restore(&WorldSaveApi::save(7, &address, 16, 16, &[(5, FOREST)]));
         assert_eq!(edited.biomes()[5], FOREST);
-        assert_eq!(base.heights(), edited.heights()); // terrain unchanged
-        assert_eq!(base.objects(), edited.objects()); // objects unchanged
+        assert_eq!(base.heights(), edited.heights());
+        assert_eq!(base.objects(), edited.objects());
         for i in 0..256 {
             if i != 5 {
                 assert_eq!(base.biomes()[i], edited.biomes()[i]);

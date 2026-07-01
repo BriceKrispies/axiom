@@ -1,11 +1,6 @@
-//! App-owned translation: physics body state → renderable instances.
-//!
-//! This is the composition glue the Module Law keeps in the app. It reads the
-//! crucible's projected [`BodyState`]s and the app-side [`CrucibleBody`] registry
-//! and produces neutral [`RenderInstance`]s. It never imports a renderer type into
-//! physics or a physics type into the renderer — it maps one app value type to
-//! another. Colour encodes the body's *role* (static / dynamic / kinematic /
-//! disabled / trigger); mesh + scale encode its collider shape.
+//! Translation: physics body state → renderable instances. Colour encodes the
+//! body's *role* (static / dynamic / kinematic / disabled / trigger); mesh +
+//! scale encode its collider shape.
 
 use axiom::prelude::{Transform, Vec3};
 
@@ -14,13 +9,11 @@ use crate::physics_crucible::crucible_scenario::{CrucibleShape, KindTag};
 use crate::physics_crucible::debug_geometry::{palette, CrucibleMesh, RenderInstance};
 use crate::physics_crucible::physics_crucible_app::CrucibleBody;
 
-/// How far (in world units) a rendered plane extends each way from its origin.
 /// Kept under the inter-cell spacing so the UV-grid floor shows between station
 /// pads and each cell reads as its own square.
 const PLANE_HALF_SPAN: f32 = 6.0;
 
-/// Translate the visible world's body states into render instances. A state with
-/// no matching registry entry is skipped (it was not created by the crucible).
+/// A state with no matching registry entry is skipped (not created by the crucible).
 pub fn render_instances(states: &[BodyState], registry: &[CrucibleBody]) -> Vec<RenderInstance> {
     states
         .iter()
@@ -33,8 +26,7 @@ pub fn render_instances(states: &[BodyState], registry: &[CrucibleBody]) -> Vec<
         .collect()
 }
 
-/// The render instance for one body: colour by role, mesh + scale by shape. A
-/// ground plane is a station *pad*, so it reads in the neutral divider colour
+/// A ground plane is a station *pad*, so it reads in the neutral divider colour
 /// rather than the bright static-body colour, keeping the bodies on it legible.
 fn instance_for(state: &BodyState, body: &CrucibleBody) -> RenderInstance {
     let color = match body.shape {
@@ -46,8 +38,8 @@ fn instance_for(state: &BodyState, body: &CrucibleBody) -> RenderInstance {
     RenderInstance::new(transform, mesh, color)
 }
 
-/// Pick a body's colour by its visible role. A disabled body reads as inert
-/// regardless of kind; a trigger reads as a sensor; otherwise the kind decides.
+/// A disabled body reads as inert regardless of kind; a trigger reads as a
+/// sensor; otherwise the kind decides.
 fn body_color(enabled: bool, is_trigger: bool, kind: KindTag) -> [f32; 3] {
     if !enabled {
         palette::DISABLED
@@ -62,9 +54,9 @@ fn body_color(enabled: bool, is_trigger: bool, kind: KindTag) -> [f32; 3] {
     }
 }
 
-/// Map a collider shape to a primitive mesh and a world scale. A capsule has no
-/// primitive mesh, so it renders as a vertically-stretched cube — an honest
-/// approximation, and the crucible never relies on capsule resting contact.
+/// A capsule has no primitive mesh, so it renders as a vertically-stretched
+/// cube — an honest approximation, and the crucible never relies on capsule
+/// resting contact.
 fn mesh_and_scale(shape: CrucibleShape) -> (CrucibleMesh, Vec3) {
     match shape {
         CrucibleShape::Sphere { radius } => (

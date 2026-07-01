@@ -52,14 +52,11 @@ mod tests {
     fn plus_one_steps_and_saturates_at_unreachable() {
         assert_eq!(Dist::ZERO.plus_one(), Dist(1));
         assert_eq!(Dist(7).plus_one(), Dist(8));
-        // The sentinel never relaxes to a finite distance.
         assert_eq!(Dist::UNREACHABLE.plus_one(), Dist::UNREACHABLE);
     }
 
     #[test]
     fn unreachable_is_the_order_maximum() {
-        // Every finite distance is strictly less than the sentinel, so `min`
-        // prefers a reachable cell.
         assert!(Dist(u32::MAX - 1) < Dist::UNREACHABLE);
         assert_eq!(Dist::ZERO.min(Dist::UNREACHABLE), Dist::ZERO);
     }

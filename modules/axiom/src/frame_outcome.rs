@@ -334,18 +334,17 @@ mod tests {
             false,
             true,
         );
-        // The camera view-projection and per-draw caster flags round-trip.
         assert_eq!(outcome.camera_view_proj(), [4.0; 16]);
         assert!(!outcome.draws()[0].casts_contact_shadow());
         assert!(outcome.draws()[1].casts_contact_shadow());
         let floats = outcome.instance_floats();
         assert_eq!(floats.len(), 72); // 2 draws x (16 mvp + 16 world + 4 colour)
-        assert_eq!(&floats[0..16], &[1.0; 16]); // mvp 0
-        assert_eq!(&floats[16..32], &[9.0; 16]); // world 0
-        assert_eq!(&floats[32..36], &[0.1, 0.2, 0.3, 1.0]); // colour 0
-        assert_eq!(&floats[36..52], &[2.0; 16]); // mvp 1
-        assert_eq!(&floats[52..68], &[8.0; 16]); // world 1
-        assert_eq!(&floats[68..72], &[0.4, 0.5, 0.6, 1.0]); // colour 1
+        assert_eq!(&floats[0..16], &[1.0; 16]);
+        assert_eq!(&floats[16..32], &[9.0; 16]);
+        assert_eq!(&floats[32..36], &[0.1, 0.2, 0.3, 1.0]);
+        assert_eq!(&floats[36..52], &[2.0; 16]);
+        assert_eq!(&floats[52..68], &[8.0; 16]);
+        assert_eq!(&floats[68..72], &[0.4, 0.5, 0.6, 1.0]);
     }
 
     #[test]
@@ -364,7 +363,6 @@ mod tests {
             false,
         );
         assert_eq!(with.sdf_scene(), Some(&scene));
-        // A simulation-only frame carries no SDF scene.
         assert!(FrameOutcome::simulation_only(0, [0.0; 4])
             .sdf_scene()
             .is_none());
@@ -385,9 +383,8 @@ mod tests {
 
     #[test]
     fn mesh_batches_group_draws_by_mesh_and_material_in_first_appearance_order() {
-        // Same mesh 7, two materials: material 5 (draws 0,2) then material 6
-        // (draw 1) — so the (mesh, material) pair, not the mesh alone, keys a
-        // batch. A textured and an untextured material on one mesh must not merge.
+        // Same mesh (7), two materials (5, 6): a batch keys on the (mesh,
+        // material) pair, not the mesh alone.
         let outcome = FrameOutcome::new(
             0,
             0,
@@ -404,7 +401,6 @@ mod tests {
             true,
             false,
         );
-        // The per-draw accessors expose mvp/world/colour/mesh id/material id.
         assert_eq!(outcome.draws()[0].mesh_id(), 7);
         assert_eq!(outcome.draws()[0].material_id(), 5);
         assert_eq!(outcome.draws()[1].material_id(), 6);
@@ -418,14 +414,13 @@ mod tests {
         assert_eq!((batches[0].0, batches[0].1), (7, 5));
         assert_eq!(batches[0].3, 2);
         assert_eq!(batches[0].2.len(), 72); // 2 instances x 36 floats
-        assert_eq!(&batches[0].2[0..16], &[1.0; 16]); // draw 0 mvp
-        assert_eq!(&batches[0].2[36..52], &[3.0; 16]); // draw 2 mvp
+        assert_eq!(&batches[0].2[0..16], &[1.0; 16]);
+        assert_eq!(&batches[0].2[36..52], &[3.0; 16]);
         assert_eq!((batches[1].0, batches[1].1), (7, 6));
         assert_eq!(batches[1].3, 1);
         assert_eq!(&batches[1].2[0..16], &[2.0; 16]);
 
-        // The caster flags follow the same expansion order: batch (7,5) holds
-        // draws 0 and 2 (both casters), then batch (7,6) holds draw 1 (not).
+        // The caster flags follow the same expansion order as the batches above.
         assert_eq!(outcome.mesh_batch_casters(), vec![true, true, false]);
     }
 

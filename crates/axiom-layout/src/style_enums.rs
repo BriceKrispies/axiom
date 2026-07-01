@@ -130,7 +130,6 @@ mod tests {
         assert!(Direction::Row.main_is_horizontal(true));
         assert!(Direction::Row.main_is_horizontal(false));
         assert!(!Direction::Column.main_is_horizontal(true));
-        // Adaptive follows the landscape flag: horizontal in landscape, vertical not.
         assert!(Direction::Adaptive.main_is_horizontal(true));
         assert!(!Direction::Adaptive.main_is_horizontal(false));
     }

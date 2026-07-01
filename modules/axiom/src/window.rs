@@ -14,11 +14,7 @@ pub struct Window {
     width: u32,
     height: u32,
     clear_color: Color,
-    // The presentation-target element id the live backend binds to (a web
-    // drawing element, on the web). A plain string — the only "where the surface
-    // lives" hint, handed to the windowing backend, never a platform type.
-    // `None` means use the engine default. Named platform-neutrally: this module
-    // is platform-free and must not name web concepts.
+    // `None` means use the engine default.
     surface_id: Option<String>,
 }
 

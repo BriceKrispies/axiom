@@ -135,8 +135,6 @@ impl PuzzleGameState {
         }
     }
 
-    // --- Read accessors (for rendering and tests) ---
-
     /// The level being played.
     pub fn level(&self) -> &LevelDefinition {
         &self.level
@@ -214,8 +212,6 @@ impl PuzzleGameState {
         self.pressed_groups().contains(group)
     }
 
-    // --- Transitions ---
-
     /// Apply a live-player move. On success the player moves and the move is
     /// recorded; on failure nothing changes and nothing is recorded.
     pub fn apply_player_move(&mut self, direction: Direction) -> PuzzleStepResult {
@@ -283,8 +279,6 @@ impl PuzzleGameState {
         PuzzleStepResult::new(StepKind::Ticked { ghosts_stepped }, self.is_solved())
     }
 
-    // --- Internal helpers ---
-
     /// All solid actors (player + ghosts), in stable order (ghosts, then player).
     fn actors(&self) -> impl Iterator<Item = ActorState> + '_ {
         self.ghosts
@@ -309,10 +303,10 @@ impl PuzzleGameState {
     /// wall, into a closed door, or onto a cell another actor occupies.
     fn can_enter(&self, coord: GridCoord, mover: ActorId) -> bool {
         let passable_terrain = match self.cell_at(coord) {
-            None => false,                                        // out of grid
-            Some(Cell::Wall) => false,                            // solid wall
-            Some(Cell::Door(group)) => self.is_group_open(group), // door iff open
-            Some(_) => true, // floor / entrance / exit / button
+            None => false,
+            Some(Cell::Wall) => false,
+            Some(Cell::Door(group)) => self.is_group_open(group),
+            Some(_) => true,
         };
         passable_terrain && !self.is_occupied(coord, mover)
     }
@@ -390,9 +384,7 @@ mod tests {
     #[test]
     fn standing_on_button_opens_the_matching_door() {
         let mut s = PuzzleGameState::new(corridor());
-        // Off the button: door closed.
         assert!(!s.is_group_open(&GroupId::new("main")));
-        // Move onto the button (cell 1): door opens.
         s.apply_player_move(Direction::Right);
         assert!(s.is_group_open(&GroupId::new("main")));
     }
@@ -402,9 +394,9 @@ mod tests {
         let mut s = PuzzleGameState::new(corridor());
         // Walk to cell 2 (floor just before the door). The player steps on the
         // button at cell 1 en route, but leaves it, so at cell 2 the door is shut.
-        s.apply_player_move(Direction::Right); // ->1 (button)
-        s.apply_player_move(Direction::Right); // ->2 (floor); door now closed
-        let blocked = s.apply_player_move(Direction::Right); // ->3 door, closed
+        s.apply_player_move(Direction::Right);
+        s.apply_player_move(Direction::Right);
+        let blocked = s.apply_player_move(Direction::Right);
         assert!(blocked.player_move_rejected());
         assert_eq!(s.player().position, GridCoord::new(2, 0));
     }

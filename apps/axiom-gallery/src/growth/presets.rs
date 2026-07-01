@@ -1,5 +1,4 @@
 //! Planet presets as distributions sampled into a genome under constraints.
-//! Audit: planet_presets.xml (earthlike/ocean_world/dry), "Planet genome reqs".
 //!
 //! Each preset is a set of per-knob distributions plus validation constraints.
 //! `sample_genome` draws every knob from the preset's distribution, derives the
@@ -12,7 +11,6 @@ use axiom_entropy::EntropyStream;
 use crate::growth::distributions;
 use crate::growth::genome::{MaterialWeights, PlanetGenome};
 
-/// Audit: planet_presets.xml earthlike `max_attempts="32"`.
 const MAX_ATTEMPTS: u32 = 32;
 
 /// Reference solar luminosity (W) used to back out semi-major axis from an
@@ -38,9 +36,9 @@ impl PlanetPreset {
     }
 }
 
-/// The validation band a sampled genome must satisfy. Audit: planet_presets.xml
-/// `<constraints>`. Bounds default to "always pass" so presets that omit a field
-/// (ocean_world/dry only set a few) impose no extra constraint.
+/// The validation band a sampled genome must satisfy. Bounds default to
+/// "always pass" so presets that omit a field (ocean_world/dry only set a
+/// few) impose no extra constraint.
 #[derive(Debug, Clone, Copy)]
 struct Constraints {
     insolation_min: f32,
@@ -92,7 +90,7 @@ impl Constraints {
 
 /// Approximate habitable surface temperature: the radiative equilibrium temp
 /// warmed by a fixed habitable offset. Earth's equilibrium temp (~255 K) maps to
-/// ~288 K, matching the 273-310 K constraint band. Audit: surface_temp_* bounds.
+/// ~288 K, matching the 273-310 K constraint band.
 const SURFACE_TEMP_OFFSET_K: f32 = 33.0;
 
 fn surface_temp_k(g: &PlanetGenome) -> f32 {
@@ -104,8 +102,7 @@ fn uniform(stream: &mut EntropyStream, a: f32, b: f32) -> f32 {
     distributions::range(stream, a, b)
 }
 
-/// Sample a normal value `N(mean, std)` clamped to `[lo, hi]`. Audit: XML Normal
-/// dists carry clamp bounds in `c`/`d` (S_eff_target, obliquity).
+/// Sample a normal value `N(mean, std)` clamped to `[lo, hi]`.
 fn normal_clamped(stream: &mut EntropyStream, mean: f32, std: f32, lo: f32, hi: f32) -> f32 {
     (mean + std * distributions::normal(stream)).clamp(lo, hi)
 }
@@ -120,8 +117,8 @@ fn semi_major_axis_for_seff(l_star: f32, s_eff: f32) -> f32 {
     (ONE_AU * (l_ratio / s).sqrt()) as f32
 }
 
-/// Material weights for a preset. Audit: planet_presets.xml material_weights
-/// (all three presets currently declare high_silicate=0.6, organic=0.3).
+/// Material weights for a preset (all three presets currently declare
+/// high_silicate=0.6, organic=0.3).
 fn material_weights(preset: PlanetPreset) -> MaterialWeights {
     match preset {
         PlanetPreset::Earthlike | PlanetPreset::OceanWorld | PlanetPreset::Dry => MaterialWeights {
@@ -131,7 +128,7 @@ fn material_weights(preset: PlanetPreset) -> MaterialWeights {
     }
 }
 
-/// Validation constraints for a preset. Audit: planet_presets.xml `<constraints>`.
+/// Validation constraints for a preset.
 fn constraints(preset: PlanetPreset) -> Constraints {
     match preset {
         PlanetPreset::Earthlike => Constraints {
@@ -145,12 +142,10 @@ fn constraints(preset: PlanetPreset) -> Constraints {
             pressure_max: 140_000.0,
             eccentricity_max: 0.2,
         },
-        // ocean_world declares only surface_temp_max="320".
         PlanetPreset::OceanWorld => Constraints {
             surface_temp_max: 320.0,
             ..Constraints::ANY
         },
-        // dry declares no constraints.
         PlanetPreset::Dry => Constraints::ANY,
     }
 }
@@ -178,7 +173,6 @@ fn sample_once(preset: PlanetPreset, rng: &mut EntropyStream) -> PlanetGenome {
     g.water_fraction = uniform(rng, 0.65, 0.75);
     g.precipitation = uniform(rng, 0.4, 0.7);
 
-    // Per-preset overrides (planet_presets.xml).
     let p0 = match preset {
         PlanetPreset::Earthlike => uniform(rng, 90_000.0, 111_000.0),
         PlanetPreset::OceanWorld => uniform(rng, 100_000.0, 150_000.0),
@@ -200,7 +194,7 @@ fn sample_once(preset: PlanetPreset, rng: &mut EntropyStream) -> PlanetGenome {
     }
 
     // Tie orbit to the sampled S_eff target so insolation is the target, then
-    // store the realised insolation as s_eff. Audit: S_eff_target distribution.
+    // store the realised insolation as s_eff.
     g.semi_major_axis = semi_major_axis_for_seff(g.l_star, s_eff_target);
     g.s_eff = g.insolation();
     g
@@ -208,7 +202,6 @@ fn sample_once(preset: PlanetPreset, rng: &mut EntropyStream) -> PlanetGenome {
 
 /// Sample a genome from a preset, validating against the preset's constraints and
 /// resampling up to `MAX_ATTEMPTS` times. Returns the last attempt if none pass.
-/// Audit: GEN-preset, planet_presets.xml constraints + max_attempts=32.
 pub fn sample_genome(preset: PlanetPreset, rng: &mut EntropyStream) -> PlanetGenome {
     let cons = constraints(preset);
     let mut last = sample_once(preset, rng);
@@ -269,20 +262,16 @@ mod tests {
     #[test]
     fn earthlike_satisfies_constraints() {
         let cons = constraints(PlanetPreset::Earthlike);
-        // Try several seeds: every earthlike genome should pass the band.
         for s in ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"] {
             let g = genome_for(PlanetPreset::Earthlike, s);
             assert!(cons.passes(&g), "earthlike seed {s} failed constraints");
-            // Gravity in band.
             let grav = g.gravity_m_s2();
             assert!((8.5..=11.5).contains(&grav), "gravity {grav} seed {s}");
-            // Water fraction in the earthlike band.
             assert!(
                 (0.65..=0.75).contains(&g.water_fraction),
                 "water {} seed {s}",
                 g.water_fraction
             );
-            // Insolation in band.
             assert!(
                 (0.85..=1.15).contains(&g.insolation()),
                 "insolation seed {s}"

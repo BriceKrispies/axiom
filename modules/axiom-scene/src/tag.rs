@@ -4,7 +4,6 @@ use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflec
 
 /// A coarse semantic kind attached to a node — what the thing *is* (a wall, an
 /// enemy, a door, an item), as a numeric code whose vocabulary the app owns.
-///
 /// This is the engine-native answer to "what did I just see": a perceiving agent
 /// resolves a raycast / overlap hit to a node, reads its `Tag`, and knows the
 /// kind without the app maintaining a side table of entity classifications. The

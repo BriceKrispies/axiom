@@ -5,8 +5,7 @@ use axiom_math::Mat4;
 /// One backend-level submission command.
 ///
 /// Hidden behind [`crate::WebGpuApi`]. Translation from the
-/// render layer's `RenderCommand` to this struct lives in the **app**
-/// because modules may not import other modules.
+/// render layer's `RenderCommand` to this struct lives in the **app**.
 ///
 /// This is a **tagged struct**, not a data-carrying enum: a `kind` code
 /// selects which payload fields are meaningful, and every payload field is

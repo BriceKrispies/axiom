@@ -199,9 +199,9 @@ mod tests {
 
     #[test]
     fn out_of_bounds_read_fails_and_does_not_advance() {
-        let bytes = [1u8, 2, 3]; // only 3 bytes
+        let bytes = [1u8, 2, 3];
         let mut r = BinaryReader::new(&bytes);
-        let err = r.read_u32().unwrap_err(); // needs 4
+        let err = r.read_u32().unwrap_err();
         assert_eq!(err.scope(), KernelErrorScope::Binary);
         assert_eq!(err.code(), KernelErrorCode::OutOfBounds);
         assert_eq!(r.position(), 0, "failed read must not advance the cursor");
@@ -209,7 +209,6 @@ mod tests {
 
     #[test]
     fn truncated_length_prefixed_slice_fails() {
-        // Declares length 10 but provides only 2 body bytes.
         let mut w = BinaryWriter::new();
         w.write_u32(10);
         w.write_u8(1);
@@ -270,7 +269,7 @@ mod cov {
     #[test]
     fn truncated_byte_slice_is_err() {
         let mut w = BinaryWriter::new();
-        w.write_u32(100); // declared length far beyond the buffer
+        w.write_u32(100);
         let bytes = w.into_bytes();
         let mut r = BinaryReader::new(&bytes);
         assert!(r.read_byte_slice().is_err());
@@ -306,7 +305,7 @@ mod cov2 {
 
     #[test]
     fn read_bytes_too_short_is_out_of_bounds_and_does_not_advance() {
-        let bytes = [1u8, 2]; // only 2 bytes available
+        let bytes = [1u8, 2];
         let mut r = BinaryReader::new(&bytes);
         let err = r.read_bytes::<4>().unwrap_err();
         assert_eq!(err.scope(), KernelErrorScope::Binary);

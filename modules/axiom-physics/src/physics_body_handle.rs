@@ -1,13 +1,11 @@
 //! Stable identity for a physics rigid body.
 
 /// A stable, opaque handle for a rigid body in a [`crate::PhysicsApi`] world.
-///
 /// Handles are deterministic `u64` ids assigned monotonically at body-creation
 /// time and **never** reused. They do not depend on pointer addresses and carry
 /// no randomness, so the same sequence of `create_*_body` calls always produces
 /// the same handles in the same order — safe to store in snapshots, replay
 /// logs, and external caches.
-///
 /// Handle `0` is the **invalid sentinel** ([`PhysicsBodyHandle::NULL`]); the
 /// world's allocator starts at `1`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

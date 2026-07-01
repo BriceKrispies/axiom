@@ -1,5 +1,4 @@
 //! Proofs for deterministic substepping of a single fixed step.
-//!
 //! A step is split into `max_substeps` deterministic substeps so a fast body
 //! cannot tunnel through thin geometry in one large jump. Queued commands are
 //! applied **once** before substepping; each substep runs the full collision
@@ -120,7 +119,7 @@ fn commands_apply_once_across_substeps() {
 fn step_completed_event_emits_once_for_outer_step() {
     let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 3, true, ratio(0.0), ratio(0.0)).unwrap();
     api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
-    api.drain_events(); // clear the BodyCreated event
+    api.drain_events();
     api.step(tenth_second()).unwrap();
     let completed = api
         .drain_events()

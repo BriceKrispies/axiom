@@ -10,10 +10,6 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-# An app composes modules + layers. This harness names the `axiom` umbrella (the
-# real engine App, for the full-fidelity backend), `axiom-netcode` (the signed
-# lockstep session + its telemetry), `axiom-crypto` (per-peer keypairs), and the
-# kernel's deterministic RNG (the seeded, replayable network model).
 axiom = { path = "../../modules/axiom" }
 axiom-netcode = { path = "../../modules/axiom-netcode" }
 axiom-crypto = { path = "../../crates/axiom-crypto" }

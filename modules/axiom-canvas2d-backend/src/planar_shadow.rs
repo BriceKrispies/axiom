@@ -277,7 +277,7 @@ mod tests {
     fn marked_caster_casts_a_depth_tested_ground_shadow() {
         let cache = MeshCache::load(&[caster_mesh(7)]);
         let mut fb = white_fb();
-        let depth = DepthBuffer::new(16, 16); // all far
+        let depth = DepthBuffer::new(16, 16);
         let p = packet(vec![caster_draw(7, true)], topdown_cam(), down_light());
         let (count, pixels) = apply_planar_shadows(&mut fb, &depth, &p, &cache, 0.5, 0.002);
         assert_eq!(count, 1);
@@ -394,16 +394,13 @@ mod tests {
 
     #[test]
     fn helpers_are_exact() {
-        // `world_point` applies translation + the linear part.
         let mut world = ID16;
-        world[12] = 1.0; // +x translation
-        world[13] = 2.0; // +y translation
+        world[12] = 1.0;
+        world[13] = 2.0;
         assert_eq!(world_point(&world, [0.0, 0.0, 0.0]), [1.0, 2.0, 0.0]);
-        // `project_to_ground` lands a point on the plane along the travel dir.
         let on = project_to_ground([0.0, 1.0, 0.0], [0.0, -1.0, 0.0], 0.25);
         assert_eq!(on, [0.0, 0.25, 0.0]);
-        // `blend_toward_black`: out-of-range offset is a no-op; full blend blackens
-        // RGB and preserves alpha.
+        // Out-of-range offset is a no-op; full blend blackens RGB, keeps alpha.
         let mut buf = vec![255_u8; 8];
         blend_toward_black(&mut buf, 100, 0.5);
         assert!(buf.iter().all(|&b| b == 255));

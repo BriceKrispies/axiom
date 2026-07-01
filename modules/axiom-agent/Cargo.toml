@@ -7,13 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. Browser-free, GPU-free, wasm-clean, deterministic, headless.
 crate-type = ["rlib"]
 
-# An isolated engine module (kind = "engine-module", allowed_modules = []) that
-# composes only completed layers: the kernel (Tick identity + result/error model)
-# and the runtime (the deterministic RuntimeStep that drives one agent decision).
-# It depends on no other module, no app, no tool, and no external crate.
 [dependencies]
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }

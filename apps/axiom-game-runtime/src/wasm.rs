@@ -259,8 +259,6 @@ impl WasmGame {
         self.bridge.snapshot_sim()
     }
 
-    // --- Live 3D presentation (SPEC-11) ---
-    //
     // The seam a 3D game's boot path drives: bind a canvas once the scene is
     // authored, then present the authored scene each host frame. A 2D game (which
     // draws through the `draw2d` command stream the harness rasterizes) never calls
@@ -308,8 +306,6 @@ impl WasmGame {
         );
     }
 
-    // --- Live 2D presentation (SPEC-04) ---
-    //
     // The seam a 2D game's boot path drives: bind a canvas, upload the sprite/atlas
     // textures the app fetched, then present the authored `draw2d` command list each
     // frame. The engine rasterizes through the SAME WebGPU → WebGL2 → Canvas 2D
@@ -377,8 +373,6 @@ impl WasmGame {
         self.windowing.is_interactive()
     }
 
-    // --- Deterministic RNG seam (SPEC-01) ---
-    //
     // The `NativeBridge` rng methods, marshalled to the bridge's seeded
     // [`crate::RngHub`]. The `js_name` is the camelCase identifier the TS
     // `bridgeFromWasm` adapter forwards verbatim (`game.rngUnit`, ...). Stream
@@ -427,8 +421,6 @@ impl WasmGame {
         self.bridge.rng_stream(parent, &name)
     }
 
-    // --- Retained ECS world seam (SPEC-02) ---
-    //
     // The `NativeBridge` world methods, marshalled to the bridge's retained world
     // over the app's dynamic component store. Entity handles cross as JS `number`s
     // (f64) so they match the contract's `Entity = number`; a component crosses as

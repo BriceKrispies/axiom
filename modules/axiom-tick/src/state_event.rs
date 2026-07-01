@@ -86,7 +86,6 @@ mod tests {
         assert_eq!(update.kind(), StateEventKind::Update);
         assert_eq!(exit.kind(), StateEventKind::Exit);
         assert_eq!(exit.state(), 0);
-        // Whole-value equality + clone + debug.
         assert_eq!(enter, enter.clone());
         assert_ne!(enter, update);
         assert!(format!("{exit:?}").contains("Exit"));

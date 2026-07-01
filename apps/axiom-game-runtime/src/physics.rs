@@ -2,7 +2,6 @@
 //! over [`axiom_physics::PhysicsApi`], a body table keyed by retained-world
 //! entity, the per-tick step driven inside the fixed-step loop, and the
 //! `#[wasm_bindgen]` boundary the TS `NativeBridge` physics methods bind.
-//!
 //! ## What lives here
 //! - [`PhysicsState`]: the `PhysicsApi` world plus the `entity -> body handle`
 //!   table the bridge keeps. It is a private field of [`GameBridge`] (initialized
@@ -12,14 +11,12 @@
 //!   `physics_apply_*`, `physics_set_*velocity`).
 //! - A `#[wasm_bindgen] impl WasmGame` block (wasm32 only): the camelCase exports
 //!   the TS edge forwards verbatim.
-//!
 //! ## Boundary convention (the established `(scalar/byte/string)` rule)
 //! A physics vector crosses the wasm boundary as scalar `(x, y, z)` `f64` args,
 //! never a structured object — exactly as entities cross as raw ids and
 //! components as `(kind, bytes)`. The TS platform edge (`raf-loop.ts`)
 //! destructures the `Vec3`/`Handle` of the `NativeBridge` shape into these scalar
 //! calls, the physics analogue of its component codec.
-//!
 //! ## Per-tick step + write-back
 //! [`GameBridge::advance`] runs the fixed-step loop, then steps physics once per
 //! fixed tick that ran and writes each bodied entity's resulting world transform
@@ -27,7 +24,6 @@
 //! `Transform` through the world surface sees the simulated pose each tick. Both
 //! the step loop and the write-back are branchless data transforms (iterator
 //! folds / `find` / `map`), matching the engine's Branchless Law for app code.
-//!
 //! ## Known facade gaps (root-cause fix belongs in `axiom-physics`, not here)
 //! `PhysicsApi` exposes `apply_force`/`apply_impulse`/`apply_torque` but **no**
 //! direct velocity setters and **no angular impulse**. So:

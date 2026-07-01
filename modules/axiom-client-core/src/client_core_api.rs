@@ -6,17 +6,14 @@ use crate::connection_state::ConnectionState;
 
 /// The portable client-side multiplayer state machine — the only public export
 /// of `axiom-client-core`.
-///
 /// One `ClientCoreApi` is one client's session bookkeeping. It holds no socket
 /// and no wire codec: the app feeds it the authoritative values a server sent
 /// (decoded elsewhere via `axiom-net-protocol`) and reads back the outbound
 /// intent fields to encode and send. Every method is deterministic; given the
 /// same calls it produces the same state.
-///
 /// State-machine rejections are **normal outcomes**, not errors: an operation
 /// that does not apply in the current state returns `false` (transitions) or
 /// `None` (intent creation), never a panic and never a kernel error.
-///
 /// ```text
 /// let mut client = ClientCoreApi::new();          // Disconnected
 /// client.connect();                               // → Connecting
@@ -179,7 +176,6 @@ impl ClientCoreApi {
     }
 
     /// The ordered, still-unacknowledged intents — the **resimulation cursor**.
-    ///
     /// After the client snaps to an authoritative snapshot, these are exactly the
     /// `(client_sequence, payload)` pairs, in send order, that must be replayed on
     /// top of that snapshot to reconcile. A snapshot acking sequence `k` has
@@ -200,7 +196,6 @@ impl ClientCoreApi {
     /// Opt **in** (or out) of local-player physics/state prediction. **Default
     /// off**, which preserves the authoritative-only behaviour: a fresh client
     /// applies snapshots verbatim and [`Self::resimulate`] is the identity.
-    ///
     /// Turning it on enables the resimulation path: after the client snaps to an
     /// authoritative snapshot it re-runs its still-unacked local intents on top of
     /// that snapshot ([`Self::resimulate`]) so the local player sees its own
@@ -222,18 +217,15 @@ impl ClientCoreApi {
     /// Reconcile by **resimulation**: fold `step` over the still-unacked local
     /// intents, in send order, starting from `baseline` (the just-snapped
     /// authoritative state), returning the predicted state.
-    ///
     /// `step(state, intent_payload) -> state` is the caller's deterministic fixed
     /// update for one intent (e.g. apply the intent then advance the physics
     /// step). The caller owns the game state `S`; this module owns only *which*
     /// intents to replay and *whether* to replay them:
-    ///
     /// - prediction **off** (the default) ⇒ no intents are replayed and `baseline`
     ///   is returned unchanged — the authoritative snapshot is the truth;
     /// - prediction **on** ⇒ every intent in [`Self::unacked_intents`] is folded
     ///   through `step` in order, so a correct (drift-free) replay reaches exactly
     ///   the state the authority will reach once it has applied those same intents.
-    ///
     /// Because a deterministic `step` over the same ordered intents yields the same
     /// state, an authority and a predicting client built on one binary reconcile to
     /// byte-identical state with zero fuzzy correction. The replay count is the
@@ -291,7 +283,6 @@ mod tests {
         assert!(c.connect());
         assert!(c.is_connecting());
         assert_eq!(c.status_code(), ClientCoreApi::STATUS_CONNECTING);
-        // A second connect from Connecting is rejected.
         assert!(!c.connect());
     }
 
@@ -356,7 +347,7 @@ mod tests {
         (0..5).for_each(|_| {
             c.next_intent(0, 0, b"").unwrap();
         });
-        assert_eq!(c.pending_intent_count(), 5); // sequences 1..=5
+        assert_eq!(c.pending_intent_count(), 5);
         assert!(c.accept_snapshot(10, 3));
         // Sequences 1,2,3 acknowledged; 4 and 5 remain.
         assert_eq!(c.pending_intent_count(), 2);
@@ -385,10 +376,9 @@ mod tests {
         let mut c = connected();
         (0..3).for_each(|_| {
             c.next_intent(0, 0, b"").unwrap();
-        }); // 1,2,3
+        });
         assert!(c.accept_rejected_intent(2));
-        assert_eq!(c.pending_intent_count(), 2); // 1 and 3 remain
-                                                 // Rejecting an absent sequence is a harmless no-op (still Connected).
+        assert_eq!(c.pending_intent_count(), 2);
         assert!(c.accept_rejected_intent(99));
         assert_eq!(c.pending_intent_count(), 2);
     }

@@ -309,14 +309,11 @@ mod tests {
         depth.clear_far();
 
         let written = apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights);
-        // Some pixels were written (the sphere covers the centre).
         assert!(written > 0);
-        // The centre pixel is on the (lit, red) sphere; its red channel is high
-        // and it is opaque.
         let c = pixel(&fb, 16, 8, 8);
         assert!(c[0] > 60, "centre is lit red, got {c:?}");
         assert_eq!(c[3], 255);
-        // A corner ray misses the unit sphere — still the cleared black.
+        // A corner ray misses the unit sphere, leaving it the cleared black.
         assert_eq!(pixel(&fb, 16, 0, 0), [0, 0, 0, 255]);
     }
 
@@ -328,7 +325,6 @@ mod tests {
         let mut depth = DepthBuffer::new(8, 8);
         depth.clear_far();
         apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights);
-        // The centre hit wrote a finite (nearer-than-far) depth; the corner did not.
         assert!(depth.depth_at(4, 4).is_finite());
         assert_eq!(depth.depth_at(0, 0), f32::INFINITY);
     }
@@ -340,8 +336,8 @@ mod tests {
         fb.clear([0.0, 0.0, 0.0, 1.0]);
         let mut depth = DepthBuffer::new(8, 8);
         depth.clear_far();
-        // Pin every pixel's depth nearer than anything (−inf): the SDF must lose
-        // the depth test everywhere and write nothing.
+        // Every pixel's depth is nearer than anything: the SDF must lose the
+        // depth test everywhere and write nothing.
         depth.slice_mut().iter_mut().for_each(|d| *d = f32::NEG_INFINITY);
         let written = apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights);
         assert_eq!(written, 0);
@@ -350,7 +346,6 @@ mod tests {
 
     #[test]
     fn point_light_kind_is_shaded() {
-        // Exercises the point-light arm (kind 1) of light_diffuse.
         let (scene, lights) = unit_sphere_scene([0.0, 0.0, 1.0, 1.0], 1);
         let mut fb = SoftwareFramebuffer::new(8, 8);
         fb.clear([0.0, 0.0, 0.0, 1.0]);
@@ -358,14 +353,11 @@ mod tests {
         depth.clear_far();
         let written = apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights);
         assert!(written > 0);
-        // The centre is at least ambient-lit blue.
         assert!(pixel(&fb, 8, 4, 4)[2] > 20);
     }
 
     #[test]
     fn box_and_plane_kinds_evaluate() {
-        // A box filling the view and a ground plane both produce hits, covering
-        // the box and plane arms of local_distance.
         let (vp, inv, cam) = camera();
         let cuboid = SdfPrimitive::new(SdfPrimitive::BOX, IDENTITY, [1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 0.0, 1.0]);
         let scene = SdfScene::new(vec![cuboid], vp, inv, cam, [100.0, 0.001, 0.0, 0.0]);
@@ -376,23 +368,22 @@ mod tests {
         depth.clear_far();
         assert!(apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights) > 0);
 
-        // The plane kind: a local y=0 plane evaluates (distance is the local y).
+        // The plane kind's local-space distance is just the local y.
         let plane = SdfPrimitive::new(SdfPrimitive::PLANE, IDENTITY, [0.0, 0.0, 0.0, 1.0], [0.5, 0.5, 0.5, 1.0]);
         assert_eq!(local_distance(SdfPrimitive::PLANE, Vec3::new(0.0, 2.0, 0.0), plane.params()), 2.0);
     }
 
     #[test]
     fn box_distance_is_signed_inside_and_outside() {
-        // Outside on +x by 1 unit from a unit box → distance 1.
+        // (2,0,0) is outside a unit box by 1 unit on +x.
         assert!((box_distance(Vec3::new(2.0, 0.0, 0.0), [1.0, 1.0, 1.0, 1.0]) - 1.0).abs() < 1e-5);
-        // Centre of a unit box → −1 (the inside arm: max(q)<0).
+        // The box centre is inside, taking the `max(q) < 0` arm.
         assert!((box_distance(Vec3::ZERO, [1.0, 1.0, 1.0, 1.0]) + 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn out_of_range_kind_clamps_to_plane() {
-        // A kind past the table clamps to the last entry (plane) rather than
-        // panicking — the `.min(2)` guard.
+        // A kind past the table clamps to the last entry (plane), via `.min(2)`.
         assert_eq!(local_distance(99, Vec3::new(0.0, 3.0, 0.0), [0.0; 4]), 3.0);
     }
 
@@ -404,8 +395,8 @@ mod tests {
         fb.clear([0.0, 0.0, 0.0, 1.0]);
         let mut depth = DepthBuffer::new(4, 4);
         depth.clear_far();
-        // No primitives → the ray never gets within eps → no writes, and the
-        // far scene distance keeps the marcher from ever hitting.
+        // No primitives means an infinite scene distance, so the ray never
+        // gets within `eps` of a hit.
         assert_eq!(apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights_none()), 0);
     }
 
@@ -425,7 +416,6 @@ mod tests {
         fb.clear([0.0, 0.0, 0.0, 1.0]);
         let mut depth = DepthBuffer::new(4, 4);
         depth.clear_far();
-        // Just assert it runs to completion deterministically.
         let a = apply_sdf_raymarch(&mut fb.clone(), &mut depth.clone(), &scene, &lights_none());
         let b = apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights_none());
         assert_eq!(a, b);
@@ -456,14 +446,11 @@ mod tests {
         fb.clear([0.0, 0.0, 0.0, 1.0]);
         let mut depth = DepthBuffer::new(16, 16);
         depth.clear_far();
-        // The `Some` arm: the camera + scene drive the marcher, compositing the
-        // lit sphere at the centre.
         let written = crate::software_rasterizer::sdf_pass(&mut fb, &mut depth, &with);
         assert!(written > 0);
         assert!(pixel(&fb, 16, 8, 8)[0] > 60);
 
-        // The `None` arm: a camera-only packet carries no SDF scene, so the pass
-        // is a no-op and writes nothing.
+        // A camera-only packet carries no SDF scene, so the pass is a no-op.
         let without = FramePacket::new(
             2,
             120,

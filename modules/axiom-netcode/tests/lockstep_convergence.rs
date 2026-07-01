@@ -1,18 +1,9 @@
-//! The proof that the deterministic-lockstep session actually keeps peers in
-//! sync — entirely in-process, with **no sockets**.
-//!
-//! Multiplayer correctness reduces to one pure property:
-//!
-//! > Given the same ordered input timeline, every peer's state hash is identical
-//! > at every confirmed tick.
-//!
-//! Here N peers (each a real `NetcodeApi`) are connected by a **deterministic
-//! adversarial transport** that reorders, delays, and drops messages, driven by
-//! the kernel's seeded `DeterministicRng` (so the whole run is replayable). Each
-//! peer runs a tiny deterministic mock sim standing in for a real `App`. The
-//! tests assert: every peer is byte-identical at every confirmed tick; a replay
-//! with the same seed is byte-equal; and an injected divergence is caught by
-//! `reconcile`.
+//! Proves the deterministic-lockstep session keeps peers in sync, in-process
+//! with no sockets: N peers (each a real `NetcodeApi`) are connected by a
+//! deterministic adversarial transport that reorders, delays, and drops
+//! messages (driven by the kernel's seeded `DeterministicRng`, so the whole run
+//! is replayable), each running a tiny deterministic mock sim standing in for a
+//! real `App`.
 
 use std::collections::BTreeMap;
 
@@ -27,9 +18,8 @@ fn key_for(id: u64) -> SigningKey {
     SigningKey::from_seed(seed)
 }
 
-/// A deterministic fold standing in for a real per-tick simulation: a pure
-/// function of the inputs applied, in order, so two peers that apply the same
-/// confirmed inputs reach the same state.
+/// A pure fold standing in for a per-tick simulation, so two peers that apply
+/// the same confirmed inputs reach the same state.
 fn mix(state: u64, tick: u64, peer: u64, kind: u32, payload: &[u8]) -> u64 {
     let mut s = state ^ tick.wrapping_mul(0x9E37_79B9_7F4A_7C15);
     s = s.rotate_left(7) ^ peer.wrapping_mul(0xD1B5_4A32_D192_ED03);
@@ -40,7 +30,6 @@ fn mix(state: u64, tick: u64, peer: u64, kind: u32, payload: &[u8]) -> u64 {
     s
 }
 
-/// A modelled lockstep network of N peers.
 struct Harness {
     peers: Vec<NetcodeApi>,
     sims: Vec<u64>,
@@ -89,8 +78,6 @@ impl Harness {
         self.peers.len()
     }
 
-    /// Broadcast `bytes` from peer `from` to every other peer, each with a
-    /// deterministic delay and possible drop.
     fn enqueue(&mut self, from: usize, bytes: Vec<u8>) {
         for to in 0..self.peers.len() {
             if to == from {
@@ -111,7 +98,6 @@ impl Harness {
     fn advance(&mut self, submit: bool) {
         let n = self.peers.len();
 
-        // 1. Each peer submits its input for this frame's tick.
         if submit {
             for i in 0..n {
                 let bytes = self.peers[i].submit_local(i as u32 + 1, &[self.frame as u8]);
@@ -120,14 +106,12 @@ impl Harness {
             }
         }
 
-        // 2. Resend every message produced so far (a dropped packet is retried).
         for i in 0..n {
             for msg in self.outboxes[i].clone() {
                 self.enqueue(i, msg);
             }
         }
 
-        // 3. Deliver everything due this frame; keep the rest in flight.
         let mut still = Vec::new();
         for (at, to, bytes) in std::mem::take(&mut self.inflight) {
             if at <= self.frame {
@@ -140,14 +124,12 @@ impl Harness {
         }
         self.inflight = still;
 
-        // 4. Confirm every ready tick; advance each peer's mock sim and hash.
         for i in 0..n {
             while let Some(tick) = self.peers[i].ready_tick() {
                 for (peer, kind, payload) in self.peers[i].confirm_tick(tick) {
                     self.sims[i] = mix(self.sims[i], tick, peer, kind, &payload);
                 }
                 if self.corrupt == Some(i) {
-                    // A persistent divergence in this peer's simulation state.
                     self.sims[i] = self.sims[i].wrapping_add(0x00BA_D000);
                 }
                 let state = self.sims[i].to_le_bytes();
@@ -167,16 +149,12 @@ impl Harness {
         }
     }
 
-    /// Quiescently drain in-flight traffic (no new inputs) so trailing beacons
-    /// for already-confirmed ticks arrive at every peer.
     fn settle(&mut self, rounds: u64) {
         for _ in 0..rounds {
             self.advance(false);
         }
     }
 
-    /// The lowest confirmed-tick cursor across all peers (ticks below it are
-    /// confirmed everywhere).
     fn min_confirmed(&self) -> u64 {
         self.peers
             .iter()

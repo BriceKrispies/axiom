@@ -13,17 +13,13 @@ use rustc_lint::{LateContext, LateLintPass};
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
-    ///
     /// Flags direct OS thread spawning (`std::thread::spawn` and
     /// `std::thread::Builder::spawn`) in **non-test engine code** — the layer
     /// crates under `crates/` (except `xtask` and `axiom-zones`) and the modules
     /// under `modules/`. Apps, tooling, and all test code are exempt.
-    ///
     /// ### Why is this bad?
-    ///
     /// Axiom is a **WASM-first, deterministic** engine. Raw OS threads break both
     /// properties at once:
-    ///
     /// - **WASM**: `std::thread::spawn` does not exist in the standard WASM target
     ///   (`wasm32-unknown-unknown`). Calling it from engine code makes the crate
     ///   non-portable and will fail to compile for the primary target.
@@ -31,22 +27,16 @@ dylint_linting::declare_late_lint! {
     ///   that touches threads cannot be replayed, fuzz-tested, or simulated
     ///   repeatably. Concurrency must flow through the engine's runtime/scheduler,
     ///   which controls ordering and is testable.
-    ///
     /// If work parallelism is genuinely needed, it must go through the engine's
     /// sanctioned scheduler API, not the raw OS thread primitive.
-    ///
     /// ### Example
-    ///
     /// ```rust
     /// // FLAGGED — raw thread spawn in engine code
     /// let _ = std::thread::spawn(|| do_work());
-    ///
     /// // FLAGGED — Builder variant
     /// let _ = std::thread::Builder::new().spawn(|| do_work());
     /// ```
-    ///
     /// Use instead:
-    ///
     /// ```rust
     /// // Submit work through the engine's runtime/scheduler (when it exists).
     /// runtime.schedule(|| do_work());
@@ -75,19 +65,15 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoThreadSpawn {
         };
         let Some(def_id) = def_id else { return };
         let path = cx.tcx.def_path_str(def_id);
-        // Catch `std::thread::spawn` (free fn) and `std::thread::Builder::spawn` (method).
         if !(path.ends_with("thread::spawn") || path.ends_with("Builder::spawn")) {
             return;
         }
-        // Don't blame a call site that a macro expanded into.
         if expr.span.from_expansion() {
             return;
         }
-        // Test code may spawn threads freely.
         if is_in_test(cx.tcx, expr.hir_id) {
             return;
         }
-        // Only fire inside the engine spine (crates/ or modules/, excluding xtask/axiom-zones).
         if !is_engine_file(cx, expr.span) {
             return;
         }

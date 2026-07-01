@@ -30,7 +30,6 @@ impl Bounds {
         Bounds { half_extents }
     }
 
-    /// The bounding box's local half-extents.
     pub const fn half_extents(&self) -> Vec3 {
         self.half_extents
     }
@@ -68,7 +67,6 @@ mod tests {
         assert_eq!(Bounds::SCHEMA.name(), "Bounds");
         assert_eq!(Bounds::SCHEMA.fields().len(), 1);
         assert_eq!(Bounds::SCHEMA.fields()[0].name(), "half_extents");
-        // The Reflect schema is the same constant.
         assert_eq!(<Bounds as Reflect>::SCHEMA.name(), "Bounds");
     }
 
@@ -79,7 +77,6 @@ mod tests {
         b.reflect_write(&mut w);
         let got = Bounds::reflect_read(&mut BinaryReader::new(&w.into_bytes())).unwrap();
         assert_eq!(got, b);
-        // A truncated buffer is a clean error, not a panic.
         assert!(Bounds::reflect_read(&mut BinaryReader::new(&[])).is_err());
     }
 }

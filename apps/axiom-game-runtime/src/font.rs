@@ -1,6 +1,5 @@
 //! The built-in monospace bitmap font (SPEC-04 §9 option 1, the baked-atlas
 //! strategy) used by the Tier-0 text path.
-//!
 //! `axiom-draw2d` is glyph-index-only: a [`crate::draw2d`] text draw resolves a
 //! string into a [`GlyphRun`] of atlas sub-rects + advances against a [`FontHandle`],
 //! and the backend turns those sub-rects into pixels by sampling a baked atlas
@@ -9,7 +8,6 @@
 //! browser harness (`web/src/harness.ts`) bakes a white atlas on the same grid,
 //! and the flattened text command names it by the reserved [`FONT_ATLAS_TEXTURE`]
 //! id.
-//!
 //! Determinism: the glyph **layout** (which cell, which advance) is pure integer
 //! arithmetic here — so `measure_text` is reproducible across platforms (the
 //! spec's measure-reproducibility requirement, SPEC-04 §9). Only the atlas

@@ -122,8 +122,7 @@ impl RenderCommandArtifact {
         self.kind
     }
 
-    /// Extract this command's `ClearFrame` `color`, or `None` for any other
-    /// kind. Branchless: the `kind` tag gates the field with no `match`.
+    /// Extract this command's `ClearFrame` `color`, or `None` for any other kind.
     pub fn as_clear_frame(&self) -> Option<[f32; 4]> {
         (self.kind == Self::KIND_CLEAR_FRAME).then_some(self.color)
     }
@@ -266,8 +265,7 @@ impl GpuCommandArtifact {
         self.kind
     }
 
-    /// Extract this command's `ClearFrame` `color`, or `None` for any other
-    /// kind. Branchless: the `kind` tag gates the field with no `match`.
+    /// Extract this command's `ClearFrame` `color`, or `None` for any other kind.
     pub fn as_clear_frame(&self) -> Option<[f32; 4]> {
         (self.kind == Self::KIND_CLEAR_FRAME).then_some(self.color)
     }
@@ -297,7 +295,7 @@ impl GpuCommandArtifact {
         (self.kind == Self::KIND_DRAW_INDEXED).then_some((self.index_count, self.world))
     }
 
-    /// `true` when this command is `Present`. Branchless kind read.
+    /// `true` when this command is `Present`.
     pub fn is_present(&self) -> bool {
         self.kind == Self::KIND_PRESENT
     }
@@ -403,8 +401,6 @@ mod tests {
 
     #[test]
     fn each_render_command_maps_to_its_gpu_counterpart() {
-        // The mapping carries every payload through to the matching GPU kind,
-        // in order — the branchless accessor chain preserves both kind and data.
         let sub = render_command_list_to_gpu_submission(&cube_command_list(), 800, 600);
         assert_eq!(sub.commands[0].as_clear_frame(), Some([0.0, 0.0, 0.0, 1.0]));
         assert_eq!(

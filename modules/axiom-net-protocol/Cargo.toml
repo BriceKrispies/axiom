@@ -7,19 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-# Pure Rust rlib. This module is *protocol data only*: it encodes/decodes the
-# stable wire contract and validates its fields. It opens no socket and touches
-# no platform API — the app (native) and the TypeScript package (browser) own
-# the transport.
 crate-type = ["rlib"]
 
 [dependencies]
-# An *engine module* (kind = "engine-module"): it composes NO other module
-# (allowed_modules = []). It builds only on the kernel's deterministic
-# primitives — the binary writer/reader + schema version for the wire codec,
-# the result/error model for validation failures, and HandleId / FixedStep for
-# the two validated numeric fields (client id must be nonzero; fixed step must
-# be nonzero).
+# kernel supplies the binary writer/reader + schema version for the wire codec,
+# the result/error model, and HandleId/FixedStep for the two validated fields
+# (client id and fixed step must both be nonzero).
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
 [lints.rust]

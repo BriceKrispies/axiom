@@ -128,8 +128,6 @@ impl AssetCatalog {
         self.count(AssetState::Requested)
     }
 
-    // --- internals ----------------------------------------------------------
-
     /// The `(priority, id, locator)` of every asset that may be dispatched now:
     /// still unrequested and with every dependency already ready.
     fn eligible(&self) -> Vec<(u32, AssetId, String)> {

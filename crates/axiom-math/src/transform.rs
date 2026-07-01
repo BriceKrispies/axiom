@@ -279,7 +279,6 @@ mod tests {
         let t = Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
         let p = t.transform_point(Vec3::ZERO);
         assert!(p.approx_eq(&Vec3::new(1.0, 2.0, 3.0), eps()));
-        // Vectors are unaffected by translation.
         let d = t.transform_vector(Vec3::UNIT_X);
         assert!(d.approx_eq(&Vec3::UNIT_X, eps()));
     }
@@ -314,7 +313,6 @@ mod tests {
             Quat::from_axis_angle(Vec3::UNIT_Z, std::f32::consts::FRAC_PI_2).unwrap(),
             Vec3::new(2.0, 2.0, 2.0),
         );
-        // Apply: scale x=1 -> 2, rotate (2,0,0) -> (0,2,0), translate -> (10,2,0).
         assert!(t
             .transform_point(Vec3::UNIT_X)
             .approx_eq(&Vec3::new(10.0, 2.0, 0.0), eps()));
@@ -322,10 +320,7 @@ mod tests {
 
     #[test]
     fn looking_at_world_inverse_equals_look_at_view() {
-        // A camera node's transform, inverted, must reproduce the engine's view
-        // matrix exactly — this is the contract the render pipeline relies on
-        // (view = inverse(camera world)). Off-axis target so the rotation is
-        // non-trivial.
+        // The render pipeline relies on view = inverse(camera world); this must hold exactly.
         let eye = Vec3::new(0.0, 0.0, 8.0);
         let target = Vec3::new(1.0, 0.5, 0.0);
         let up = Vec3::UNIT_Y;
@@ -358,14 +353,12 @@ mod tests {
 
     #[test]
     fn looking_at_rejects_coincident_target_and_parallel_up() {
-        // Target coincides with the eye -> zero-length forward.
         let at_self = Transform::from_translation(Vec3::new(4.0, 0.0, 0.0))
             .looking_at(Vec3::new(4.0, 0.0, 0.0), Vec3::UNIT_Y);
         assert_eq!(
             at_self.unwrap_err().code(),
             MathErrorCode::InvalidMatrixOperation
         );
-        // Look direction parallel to up.
         let parallel = Transform::IDENTITY.looking_at(Vec3::UNIT_Y, Vec3::UNIT_Y);
         assert_eq!(
             parallel.unwrap_err().code(),
@@ -467,8 +460,6 @@ mod cov {
 
     #[test]
     fn inverse_zero_rotation_fails_after_scale_checks() {
-        // Uniform, finite, non-zero scale passes all scale checks; the zero
-        // quaternion then fails to invert.
         let t = Transform::new(Vec3::ZERO, Quat::new(0.0, 0.0, 0.0, 0.0), Vec3::ONE);
         assert!(t.inverse().is_err());
     }
@@ -493,7 +484,6 @@ mod cov {
 
     #[test]
     fn read_from_truncated_each_field() {
-        // translation fails (0 bytes), rotation fails (12 bytes), scale fails (28 bytes).
         assert!(Transform::read_from(&mut BinaryReader::new(&[])).is_err());
         assert!(Transform::read_from(&mut BinaryReader::new(&[0u8; 12])).is_err());
         assert!(Transform::read_from(&mut BinaryReader::new(&[0u8; 28])).is_err());
@@ -517,10 +507,6 @@ mod cov {
         assert!(!base.approx_eq(&moved, Epsilon::DEFAULT));
     }
 
-    // Kills combine 94:28 (`parent.scale.x * child.translation.x` -> `/`).
-    // Identity parent rotation and zero parent translation leave the combined
-    // translation equal to the (scaled) child translation, so the X term is
-    // observable: 3 * 2 = 6 (correct) vs 3 / 2 = 1.5 (mutant).
     #[test]
     fn combine_scales_child_translation_x_by_multiplication() {
         let parent = Transform::new(Vec3::ZERO, Quat::IDENTITY, Vec3::new(3.0, 3.0, 3.0));

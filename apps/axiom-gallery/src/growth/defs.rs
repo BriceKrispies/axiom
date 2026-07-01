@@ -1,6 +1,4 @@
 //! Moddable data-driven config: pipeline stage order, presets, biomes as data.
-//! Audit: "Pipeline/modding requirements", moddability. Scaffold — today these
-//! are Rust constants; a later loader can read them from data packs.
 //!
 //! The key invariant preserved from Growth: **stage order is data**, resolved
 //! against the registry (pipeline.rs), not hardcoded in the generator.

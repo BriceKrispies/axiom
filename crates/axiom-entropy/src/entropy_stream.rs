@@ -147,8 +147,8 @@ mod tests {
         let parent = EntropyStream::from_key(7);
         let mut from_fresh = parent.fork(3);
 
-        // A parent advanced by some draws still forks to the same sub-stream:
-        // fork keys off the stable key, not the draw position.
+        // fork keys off the stable key, not the draw position, so a parent
+        // advanced by some draws still forks to the same sub-stream.
         let mut moved = EntropyStream::from_key(7);
         (0..5).for_each(|_| {
             moved.next_u64();
@@ -160,7 +160,6 @@ mod tests {
             assert_eq!(from_fresh.next_u64(), from_moved.next_u64());
         }
 
-        // A different salt is an independent sub-stream.
         let mut other = parent.fork(4);
         assert!((0..16).any(|_| parent.fork(3).next_u64() != other.next_u64()));
     }
@@ -195,10 +194,8 @@ mod tests {
     #[test]
     fn ratio_bool_honours_certain_and_impossible() {
         let mut s = EntropyStream::from_key(11);
-        // p = 1 is always true, p = 0 is never true — both edges exercised.
         assert!((0..64).all(|_| s.ratio_bool(ratio(1.0))));
         assert!((0..64).all(|_| !s.ratio_bool(ratio(0.0))));
-        // p = 0.5 produces a mix (both arms of the comparison occur).
         let trues = (0..256).filter(|_| s.ratio_bool(ratio(0.5))).count();
         assert!(trues > 0);
         assert!(trues < 256);
@@ -214,21 +211,19 @@ mod tests {
     #[test]
     fn weighted_index_favours_weight_and_never_picks_zero() {
         let mut s = EntropyStream::from_key(17);
-        // Index 1 has all the weight; index 0 and 2 (weight 0) never chosen.
         let weights = [0, 5, 0];
         assert!((0..256).all(|_| s.weighted_index(&weights) == 1));
-        // A spread of weights lands on every positive bucket over many draws.
         let mut counts = [0u32; 3];
         (0..3_000).for_each(|_| counts[s.weighted_index(&[1, 2, 3])] += 1);
         assert!(counts.iter().all(|&c| c > 0));
-        assert!(counts[2] > counts[0]); // heavier bucket wins more often
+        assert!(counts[2] > counts[0]);
     }
 
     #[test]
     fn weighted_index_degenerate_inputs_yield_zero() {
         let mut s = EntropyStream::from_key(19);
-        assert_eq!(s.weighted_index(&[]), 0); // empty
-        assert_eq!(s.weighted_index(&[0, 0, 0]), 0); // all-zero
+        assert_eq!(s.weighted_index(&[]), 0);
+        assert_eq!(s.weighted_index(&[0, 0, 0]), 0);
     }
 
     #[test]
@@ -238,9 +233,7 @@ mod tests {
         let mut b: Vec<u32> = golden.clone();
         EntropyStream::from_key(23).shuffle(&mut a);
         EntropyStream::from_key(23).shuffle(&mut b);
-        // Same key ⇒ identical ordering (deterministic).
         assert_eq!(a, b);
-        // It actually reordered, and preserved the multiset.
         assert_ne!(a, golden);
         let mut sorted = a.clone();
         sorted.sort_unstable();
@@ -259,16 +252,14 @@ mod tests {
     #[test]
     fn named_streams_are_distinct_and_reproducible() {
         let root = EntropyStream::from_key(101);
-        // Distinct names ⇒ divergent streams.
         assert!((0..16).any(|_| root.named("loot").next_u64() != root.named("spawn").next_u64()));
-        // Same name ⇒ identical stream, regardless of how far the parent drew.
+        // Same name yields the same stream regardless of how far the parent drew.
         let from_fresh_key = root.named("loot").key();
         let mut moved = EntropyStream::from_key(101);
         (0..9).for_each(|_| {
             moved.next_u64();
         });
         assert_eq!(moved.named("loot").key(), from_fresh_key);
-        // named(name) equals fork(hash(name)).
         assert_eq!(
             root.named("loot").key(),
             root.fork(StableHash::of_bytes(b"loot").raw()).key()

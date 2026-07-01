@@ -113,8 +113,6 @@ fn assert_absent(forbidden: &[&str], why: &str) {
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-// ---------- manifest + facade ----------
-
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
@@ -128,7 +126,6 @@ fn module_toml_exists_and_is_isolated() {
         stripped.contains("allowed_modules = []"),
         "axiom-recording must declare `allowed_modules = []`"
     );
-    // The `kind` value is a string literal, so check the raw manifest text.
     assert!(
         raw.contains("kind = \"engine-module\""),
         "axiom-recording must be an isolated engine module"
@@ -153,8 +150,6 @@ fn lib_rs_exports_exactly_one_facade_and_no_extra_surface() {
 
 #[test]
 fn lib_rs_declares_no_public_modules() {
-    // Modules are private; only the single `pub use` facade leaks out. A `pub mod`
-    // would widen the surface past the one-facade rule.
     let lib = strip_comments_and_strings(&read(&src_dir().join("lib.rs")));
     assert!(
         !lib.contains("pub mod "),
@@ -162,12 +157,8 @@ fn lib_rs_declares_no_public_modules() {
     );
 }
 
-// ---------- legal dependencies only ----------
-
 #[test]
 fn imports_only_the_kernel_layer() {
-    // The recorder builds ONLY on the kernel (FrameIndex/Tick/KernelError). It is
-    // allowed to name itself and the repo-wide `axiom_zones` support crate.
     let mut illegal = Vec::new();
     for path in source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -262,8 +253,6 @@ fn imports_no_apps_or_tools() {
     );
 }
 
-// ---------- source hygiene ----------
-
 #[test]
 fn no_browser_gpu_or_dom() {
     assert_absent(
@@ -342,9 +331,6 @@ fn no_global_mutable_state_or_file_io() {
 
 #[test]
 fn no_render_scene_input_or_pixel_concepts() {
-    // The recorder treats every artifact as opaque bytes. It must own NO concept
-    // of scenes, renderers, GPU, input, pixels, screenshots, or compression — the
-    // explicitly out-of-scope features.
     assert_absent(
         &[
             "winit",

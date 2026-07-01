@@ -112,10 +112,9 @@ fn measure(n: usize) -> (Duration, Duration) {
     let webgpu = WebGpuApi::new_recording();
 
     // Per-frame render assets: one unit cube + one material, shared by every
-    // renderable. Constant across the sweep, so they don't contaminate the
-    // scaling signal. The frame value's type is the module's un-nameable
-    // contract, so it lives here as an inferred local (can't be returned or
-    // stored as a field) — see the single-facade Module Law.
+    // renderable, constant across the sweep so it doesn't contaminate the
+    // scaling signal. The frame value's type is un-nameable outside this
+    // module, so it lives only as this inferred local.
     let mut render_frame =
         pipeline.new_frame(1920, 1080, [0.05, 0.06, 0.08, 1.0], Vec3::new(0.3, -1.0, 0.4));
     pipeline.frame_add_mesh(

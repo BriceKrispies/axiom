@@ -101,8 +101,6 @@ mod tests {
 
     #[test]
     fn helper_reflect_impls_write_nothing_and_read_back() {
-        // The id is derived purely from the schema name, so these helper
-        // components carry empty bodies; assert that documented contract.
         let mut writer = BinaryWriter::new();
         Position.reflect_write(&mut writer);
         Velocity.reflect_write(&mut writer);

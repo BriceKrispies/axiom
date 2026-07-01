@@ -19,7 +19,6 @@ macro_rules! ratio_lit {
 }
 
 /// A material an app registers with the engine.
-///
 /// The engine provides the built-in basic-lit material: a base [`Color`], an
 /// optional albedo [`Texture`], and the catalog scalar fields the contract names
 /// — `emissive` (self-illumination), `roughness` (`0` mirror-smooth … `1` matte),
@@ -124,14 +123,12 @@ mod tests {
     fn with_texture_attaches_an_albedo() {
         let m = Material::lit(Color::WHITE).with_texture(Texture::Checker);
         assert_eq!(m.texture(), Some(Texture::Checker));
-        // The base colour is preserved.
         assert_eq!(m.base_color(), Color::WHITE);
     }
 
     #[test]
     fn lit_defaults_the_catalog_fields() {
         let m = Material::lit(Color::WHITE);
-        // No self-illumination, fully matte, fully opaque.
         assert_eq!(m.emissive(), Color::BLACK);
         assert_eq!(m.roughness().get(), 1.0);
         assert_eq!(m.opacity().get(), 1.0);
@@ -144,7 +141,6 @@ mod tests {
             .with_emissive(Color::WHITE)
             .with_roughness(half())
             .with_opacity(half());
-        // Each field reads back its set value — distinct from the lit() default.
         assert_eq!(m.emissive(), Color::WHITE);
         assert_eq!(m.roughness().get(), 0.5);
         assert_eq!(m.opacity().get(), 0.5);

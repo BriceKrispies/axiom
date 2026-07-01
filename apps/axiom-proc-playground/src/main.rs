@@ -92,8 +92,7 @@ mod tests {
 
     #[test]
     fn golden_provenance_digests_are_stable() {
-        // Pinned provenance: any change to the recipe, the stack, or a byte format
-        // is caught here. Regolden deliberately (and bump the recipe version).
+        // Regolden deliberately (and bump the recipe version) if this changes.
         let (artifact, trace, report) = run(2026, &site(&[7, 42]));
         assert_eq!(artifact.digest().raw(), 0xa9ed_8e1e_48df_3777);
         assert_eq!(trace.digest().raw(), 0x6a97_e4bb_1cb2_25ae);

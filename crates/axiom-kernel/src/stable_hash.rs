@@ -16,9 +16,7 @@
 //! `fold`); no ambient state, no platform dependence (FNV-1a over the same
 //! little-endian canonical encodings everywhere).
 
-/// FNV-1a 64-bit offset basis.
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-/// FNV-1a 64-bit prime.
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 /// A stable 64-bit digest of canonical bytes. Deterministic across runs,
@@ -107,7 +105,6 @@ mod tests {
     #[test]
     fn from_raw_and_raw_round_trip() {
         assert_eq!(StableHash::from_raw(0xDEAD_BEEF).raw(), 0xDEAD_BEEF);
-        // A digest equals its own raw value re-wrapped.
         let digest = StableHash::of_bytes(b"axiom");
         assert_eq!(StableHash::from_raw(digest.raw()), digest);
     }

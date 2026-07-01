@@ -93,8 +93,8 @@ mod tests {
     #[test]
     fn with_keeps_only_entities_that_have_the_column() {
         let mut registry = EntityRegistry::new();
-        let a = registry.spawn(); // 1: has tag
-        let b = registry.spawn(); // 2: no tag
+        let a = registry.spawn();
+        let b = registry.spawn();
         let mut base: ComponentColumn<i32> = ComponentColumn::new();
         base.insert(a, 10);
         base.insert(b, 20);
@@ -119,10 +119,10 @@ mod tests {
     #[test]
     fn with_either_covers_all_presence_combinations() {
         let mut registry = EntityRegistry::new();
-        let a = registry.spawn(); // 1: in c only
-        let b = registry.spawn(); // 2: in d only
-        let c_e = registry.spawn(); // 3: in both
-        let d_e = registry.spawn(); // 4: in neither
+        let a = registry.spawn();
+        let b = registry.spawn();
+        let c_e = registry.spawn();
+        let d_e = registry.spawn();
         let mut base: ComponentColumn<i32> = ComponentColumn::new();
         [a, b, c_e, d_e].iter().for_each(|&e| {
             base.insert(e, 0);
@@ -133,7 +133,6 @@ mod tests {
         d.insert(b, ());
         c.insert(c_e, ());
         d.insert(c_e, ());
-        // Kept: a (c only), b (d only), c_e (both); dropped: d_e (neither).
         assert_eq!(
             ids(Query::one(&registry, &base).with_either(&c, &d)),
             vec![1, 2, 3]
@@ -143,8 +142,8 @@ mod tests {
     #[test]
     fn filters_chain_and_apply_to_every_query_arity() {
         let mut registry = EntityRegistry::new();
-        let a = registry.spawn(); // 1
-        let b = registry.spawn(); // 2
+        let a = registry.spawn();
+        let b = registry.spawn();
         let mut x: ComponentColumn<i32> = ComponentColumn::new();
         let mut y: ComponentColumn<i32> = ComponentColumn::new();
         let mut z: ComponentColumn<i32> = ComponentColumn::new();
@@ -161,12 +160,10 @@ mod tests {
         keep.insert(b, ());
         drop.insert(b, ());
 
-        // arity 2 item (EntityId, &x): chained with + without.
         assert_eq!(
             ids(Query::one(&registry, &x).with(&keep).without(&drop)),
             vec![1]
         );
-        // arity 3 item (from `two`).
         assert_eq!(
             Query::two(&registry, &x, &y)
                 .with(&keep)
@@ -175,7 +172,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1]
         );
-        // arity 4 item (from `three`).
         assert_eq!(
             Query::three(&registry, &x, &y, &z)
                 .without(&drop)
@@ -183,7 +179,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1]
         );
-        // arity 5 item (from `four`).
         assert_eq!(
             Query::four(&registry, &x, &y, &z, &w)
                 .with(&keep)

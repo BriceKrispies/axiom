@@ -5,7 +5,6 @@
 //! / `overlap_box` / `raycast_hit`). The scene owns the bounds tests and the
 //! nearest-hit tie-break; this module only marshals scalars in and the entity-id
 //! / hit-record arrays out — no query math is re-implemented here.
-//!
 //! ## Boundary convention (the established slice / scalar rule)
 //! A point or direction crosses as a 3-element `&[f64]` slice (exactly as a math
 //! vector does — one slice per vector keeps every method within the engine's
@@ -136,25 +135,20 @@ mod tests {
     #[test]
     fn overlap_and_raycast_find_the_bounded_node_and_replay() {
         let b = bridge();
-        // The box query at the node's centre returns exactly one entity; the same
-        // entity the circle query and the ray (down -Z) report.
         let hits = b.overlap_box(&[0.0, 0.0, -3.0], &[0.2, 0.2, 0.2]);
         assert_eq!(hits.len(), 1);
         assert_eq!(b.overlap_circle(&[0.0, 0.0, -3.0], 1.0), hits);
-        // The ray hits the same entity and carries a 4-tuple [entity, x, y, z].
         let ray = b.raycast(&[0.0, 0.0, 0.0], &[0.0, 0.0, -1.0], 100.0);
         assert_eq!(ray.len(), 4);
         assert_eq!(ray[0], hits[0]);
         // The entry point sits on the node's near (-Z) face, ~2.5 out.
         assert!((ray[3] + 2.5).abs() < 1.0e-4);
-        // Pure functions of the scene: a second independent bridge agrees byte-wise.
         assert_eq!(hits, bridge().overlap_box(&[0.0, 0.0, -3.0], &[0.2, 0.2, 0.2]));
     }
 
     #[test]
     fn a_miss_is_the_empty_array() {
         let b = bridge();
-        // Nothing at the origin; a ray straight up hits nothing.
         assert!(b.overlap_box(&[0.0, 0.0, 0.0], &[0.2, 0.2, 0.2]).is_empty());
         assert!(b.overlap_circle(&[0.0, 0.0, 0.0], 0.5).is_empty());
         assert!(b.raycast(&[0.0, 0.0, 0.0], &[0.0, 1.0, 0.0], 100.0).is_empty());

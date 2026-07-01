@@ -57,11 +57,9 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoWildcardImports {
         if item.span.from_expansion() {
             return;
         }
-        // Test code (inside `#[test]` fns or `#[cfg(test)]` modules) may use globs.
         if is_in_test(cx.tcx, item.hir_id()) {
             return;
         }
-        // Only fire for engine-spine source files.
         if !is_engine_file(cx, item.span) {
             return;
         }

@@ -419,10 +419,6 @@ impl Crucible {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Rendered entry point
-// ---------------------------------------------------------------------------
-
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 720;
 
@@ -554,10 +550,6 @@ fn build_render_app(instances: Vec<RenderInstance>) -> App {
         })
 }
 
-// ---------------------------------------------------------------------------
-// Live (browser) authoring
-// ---------------------------------------------------------------------------
-
 /// The live demo's surface size.
 pub fn live_surface_size() -> (u32, u32) {
     (WIDTH, HEIGHT)
@@ -635,10 +627,8 @@ pub fn author_live(
             intensity: ch(40.0),
         },
     ));
-    // A raymarched SDF sphere floating over the crucible — the live proof that the
-    // SDF pass composites with the physics meshes through the real browser run
-    // loop (GPU arm, and the Canvas2D software fallback). Its node transform
-    // places it; the engine marches and depth-composites it against the meshes.
+    // Proves the SDF raymarch pass depth-composites live against physics meshes
+    // (GPU arm and Canvas2D fallback), driven through the real browser run loop.
     world.spawn((
         Transform::from_translation(Vec3::new(0.0, 9.0, 0.0)),
         SdfShape::sphere(

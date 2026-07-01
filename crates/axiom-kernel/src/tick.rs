@@ -89,7 +89,6 @@ mod tests {
     fn delta_since_measures_and_saturates() {
         assert_eq!(Tick::new(12).delta_since(Tick::new(5)), TickDelta::new(7));
         assert_eq!(Tick::new(5).delta_since(Tick::new(5)), TickDelta::new(0));
-        // An earlier "now" yields a zero delta, never a wrap.
         assert_eq!(Tick::new(3).delta_since(Tick::new(9)), TickDelta::new(0));
     }
 }

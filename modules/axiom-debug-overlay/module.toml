@@ -1,20 +1,3 @@
-# Axiom module manifest — axiom-debug-overlay (an ENGINE module).
-#
-# A developer debug overlay + command console for the browser engine surface. It
-# is an *isolated engine module* (allowed_modules = []) that COMPOSES the generic
-# interface layer `axiom-interface` (allowed_layers = ["interface"]): the layer
-# owns the reusable windowing (panels, visibility/pin/focus, drag/layout, the
-# console model, the command-dispatch shape, the neutral draw list) and the
-# overlay adds only the debug-specific density, diagnostics read-out, command set,
-# and Backquote binding. Diagnostics still cross the *facade* as primitives — the
-# overlay names no other module's type.
-#
-# The whole overlay state machine is a PURE, native-testable, BRANCHLESS core;
-# only the thin `dom_binding` arm (wasm32) touches `web_sys`. This is a sanctioned
-# platform-facing module (Module Law #9): its real web-sys arm is compiled only
-# for wasm32, behind the native-clean facade, and never enters the native build
-# or the coverage gate.
-
 [module]
 name = "debug-overlay"
 crate_name = "axiom-debug-overlay"

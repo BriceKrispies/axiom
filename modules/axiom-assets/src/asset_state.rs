@@ -47,7 +47,6 @@ mod tests {
 
     #[test]
     fn only_requested_advances_on_completion() {
-        // Requested resolves to Ready / Failed by outcome.
         assert_eq!(
             AssetState::Requested.on_completion(CompletionOutcome::Success),
             AssetState::Ready
@@ -60,7 +59,6 @@ mod tests {
 
     #[test]
     fn non_requested_states_ignore_completions() {
-        // Stray/duplicate completions for any other current state are no-ops.
         let untouched = [
             AssetState::Unrequested,
             AssetState::Ready,

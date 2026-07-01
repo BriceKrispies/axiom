@@ -64,11 +64,9 @@ dylint_linting::declare_late_lint! {
     "direct recursive call in non-test engine (layer/module) code"
 }
 
-/// Walks one function body looking for the first call that resolves to `me`
-/// (the function's own `DefId`). It deliberately does **not** descend into
-/// nested bodies (closures, nested `fn`s) — those are separate items checked by
-/// their own `check_fn` invocation — so only `visit_expr` is implemented and the
-/// default (no nested-body) walk is used.
+/// Walks one function body for the first call resolving to `me` (the
+/// function's own `DefId`). Deliberately does not descend into nested bodies
+/// (closures, nested `fn`s) — those get their own `check_fn` invocation.
 struct SelfCallFinder<'a, 'tcx> {
     cx: &'a LateContext<'tcx>,
     me: DefId,
@@ -89,7 +87,6 @@ impl<'a, 'tcx> Visitor<'tcx> for SelfCallFinder<'a, 'tcx> {
             ExprKind::MethodCall(..) => self.typeck.type_dependent_def_id(ex.hir_id),
             _ => None,
         };
-        // Don't blame the function for a self-call a macro expanded into it.
         if callee == Some(self.me) && !ex.span.from_expansion() {
             self.hit = Some(ex.span);
             return;
@@ -114,7 +111,6 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoRecursion {
         if !is_engine_file(cx, span) {
             return;
         }
-        // Tests (and `#[cfg(test)]` helpers) may recurse freely.
         let hir_id = cx.tcx.local_def_id_to_hir_id(def_id);
         if is_in_test(cx.tcx, hir_id) {
             return;

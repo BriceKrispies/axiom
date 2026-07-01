@@ -179,7 +179,7 @@ pub fn references_symbol(text: &str, symbol: &str) -> bool {
     let sym = symbol.as_bytes();
     // Every byte offset where `symbol` could begin (overlapping matches kept, so
     // the boundary test is identical to a 1-byte-advancing manual scan). An
-    // empty `symbol` yields an empty start set => `false`, as before.
+    // empty `symbol` yields an empty start set => `false`.
     bytes
         .len()
         .checked_sub(sym.len())

@@ -1,9 +1,3 @@
-# Axiom app manifest — axiom-demo-rotating-cube.
-#
-# Apps are the only composition roots in the workspace. This app builds its
-# world on the ECS layer and composes the resources/render/webgpu modules,
-# providing the cross-boundary translation glue.
-
 [app]
 name = "rotating-cube-demo"
 crate_name = "axiom-demo-rotating-cube"

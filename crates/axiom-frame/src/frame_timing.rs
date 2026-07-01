@@ -37,25 +37,9 @@ impl FrameTiming {
         let runtime_steps_executed = report.steps_executed();
         let skipped = plan.is_skipped();
 
-        // Consistency check: the consumed nanoseconds must equal
-        // `steps_executed * fixed_step_nanos` (when fixed_step_nanos is
-        // non-zero). A mismatch means the host driver and the plan
-        // disagree on how much time a step takes — that is a host-driver
-        // bug, not a host-input bug.
-        //
-        // Branchless form: gate a mismatch flag on `fixed_step_nanos != 0`
-        // (the original outer `if`) AND the value disagreement (the inner
-        // `if`), then select the `Ok`/`Err` outcome with `.then_some` /
-        // `.map_or` instead of an early `return`. The success arm builds
-        // the same `FrameTiming` the original constructed at the end.
-        //
-        // The host elapsed time we can recover is total = consumed + retained
-        // (minus any pre-existing accumulator the report does not carry).
-        // Frame timing reports the *frame's contribution* — consumed plus
-        // retained — which equals the host's elapsed when the prior
-        // accumulator was zero. For non-zero accumulators the value is
-        // still deterministic and meaningful as "this frame's planning
-        // budget".
+        // host_elapsed_nanos = consumed + retained; this equals the host's
+        // actual elapsed time only when the prior accumulator was zero, but
+        // remains a deterministic "frame planning budget" otherwise.
         let host_elapsed_nanos = consumed_nanos.saturating_add(retained_nanos);
         let expected = (runtime_steps_executed as u64).saturating_mul(fixed_step_nanos);
         let timing_is_invalid = (fixed_step_nanos != 0) & (expected != consumed_nanos);
@@ -167,8 +151,6 @@ mod tests {
 
     #[test]
     fn max_step_clamped_timing_preserves_retained_nanos() {
-        // 100 host steps elapsed but max_steps_per_frame = 5 → 5 executed,
-        // 95 * STEP_NANOS retained.
         let r = report_for(100 * STEP_NANOS, 0, visible());
         let t = FrameTiming::from_host_report(&r, STEP_NANOS).unwrap();
         assert_eq!(t.runtime_steps_executed(), 5);
@@ -178,7 +160,6 @@ mod tests {
 
     #[test]
     fn retain_accumulator_timing_reports_carryover() {
-        // Half a step elapsed → 0 runtime steps → half a step retained.
         let r = report_for(STEP_NANOS / 2, 0, visible());
         let t = FrameTiming::from_host_report(&r, STEP_NANOS).unwrap();
         assert_eq!(t.runtime_steps_executed(), 0);
@@ -188,7 +169,6 @@ mod tests {
 
     #[test]
     fn skipped_frame_timing_marks_skipped() {
-        // Hidden host with default policy → skip.
         let r = report_for(STEP_NANOS, 0, HostLifecycleState::initial());
         let t = FrameTiming::from_host_report(&r, STEP_NANOS).unwrap();
         assert!(t.skipped());
@@ -209,14 +189,12 @@ mod tests {
 
     #[test]
     fn mismatched_steps_executed_is_rejected_as_invalid_timing() {
-        // Synthesize a report whose plan asks for 1 step but whose
-        // `steps_executed` is 0 — a host driver bug.
         let input = HostFrameInput::new(1, STEP_NANOS, vp());
         let plan = HostStepPlan::build(&input, &cfg(), &visible(), 0);
         let mismatched = HostFrameReport::new(
             input.sequence(),
             plan,
-            0, // wrong: should be plan.steps() == 1
+            0,
             Vec::new(),
             vp(),
             visible(),
@@ -253,8 +231,6 @@ mod cov {
 
     #[test]
     fn mismatched_fixed_step_is_rejected() {
-        // consumed = 1 step * 1000ns; supplying a different fixed step makes
-        // expected != consumed, exercising the consistency-check failure.
         let err = FrameTiming::from_host_report(&report(), 1_001).unwrap_err();
         assert_eq!(
             err.code(),

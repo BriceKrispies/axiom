@@ -1,9 +1,8 @@
 //! `triangle_values` stage: average per-region scalars onto triangle faces.
-//! Audit: worldgen `triangle_values`; feeds terrain-mesh / river export.
 //!
 //! Each triangle is the dual of three regions; its elevation is the mean of its
-//! three corner regions' elevations. (River flow is filled later by the river
-//! stages.)
+//! three corner regions' elevations. River flow is filled later by the river
+//! stages.
 
 use crate::growth::model_planet::PlanetGlobe;
 use crate::growth::pipeline::{GenContext, Stage};

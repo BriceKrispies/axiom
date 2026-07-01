@@ -17,11 +17,9 @@ use rustc_span::Span;
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
-    ///
     /// Inside the engine's **deterministic step path** — the `axiom-physics`
     /// module and any `#[sim]` zone — flags float operations that are *not*
     /// bit-reproducible across targets:
-    ///
     /// - **Fused multiply-add**: `f32::mul_add` / `f64::mul_add` and the
     ///   `core::intrinsics` FMA intrinsics (`fmaf32`, `fmuladdf64`, ...).
     /// - **Fast-math / algebraic intrinsics**: `fadd_fast`, `fmul_fast`,
@@ -30,13 +28,10 @@ dylint_linting::declare_late_lint! {
     ///   `atan2`, `sin_cos`, the hyperbolics, `exp`, `exp2`, `exp_m1`, `ln`,
     ///   `ln_1p`, `log`, `log2`, `log10`, `cbrt`, `hypot`, `powf`, `powi` — and
     ///   their `core::intrinsics` equivalents.
-    ///
     /// `sqrt` is **allowed**: IEEE-754 mandates a correctly-rounded result, so
     /// `sqrtf` is bit-identical on wasm32, SSE2, and NEON. The arithmetic the
     /// step path is restricted to is `{+, -, *, /, sqrt, min, max}`.
-    ///
     /// ### Why is this bad?
-    ///
     /// SPEC-10 §17.6 requires Axiom's simulation to produce **byte-identical**
     /// results on every target so a recorded tick replays the same on a server,
     /// a desktop, and a browser. The `{+,-,*,/,sqrt,min,max}` subset is the
@@ -47,25 +42,20 @@ dylint_linting::declare_late_lint! {
     /// some targets and a software polyfill on others; the transcendentals are
     /// served by each platform's own `libm`, which is not bit-identical. Any of
     /// them in the step path is a latent cross-target desync.
-    ///
     /// This is the float-determinism analogue of `engine_no_time_in_sim`: the
     /// same `#[sim]` zone that may not read the wall clock may not perform an
     /// unportable float op. Authoring-time trig (e.g. `Quat::from_axis_angle`'s
     /// `sin`/`cos` in `axiom-math`, mesh generation in `axiom-resources`, easing
     /// curves in `axiom-tween`) is **out of scope** — it runs once at setup, not
     /// per step, and is not on the replayed path.
-    ///
     /// ### Example
-    ///
     /// ```rust
     /// #[axiom_zones::sim]
     /// fn integrate(p: f32, v: f32, a: f32, dt: f32) -> f32 {
     ///     v.mul_add(dt, p) // fused — not bit-identical across targets
     /// }
     /// ```
-    ///
     /// Use instead:
-    ///
     /// ```rust
     /// #[axiom_zones::sim]
     /// fn integrate(p: f32, v: f32, a: f32, dt: f32) -> f32 {
@@ -191,8 +181,6 @@ impl<'tcx> LateLintPass<'tcx> for EngineNoUnportableFloat {
         if !is_engine_file(cx, expr.span) {
             return;
         }
-        // Scope: the deterministic step path only — the `axiom-physics` module,
-        // or any `#[sim]` zone. Authoring-time float math elsewhere is fine.
         let in_step_path = is_in_crate_dir(cx, expr.span, STEP_PATH_CRATES)
             | in_zone(cx, expr.hir_id, markers::SIM);
         if !in_step_path {

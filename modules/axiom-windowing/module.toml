@@ -1,18 +1,11 @@
 # Axiom module manifest — axiom-windowing (a FEATURE module).
 #
-# Windowing is the deterministic presentation driver. It builds on the kernel and
-# the host layer's deterministic presentation boundary (HostPresentationRequest /
-# HostSurfaceHandle / surface descriptor + adapter / device requests), turning
-# plain viewport dimensions into a validated presentation request and driving the
-# fixed per-frame tick loop (canvas lookup + requestAnimationFrame + monotonic
-# tick).
-#
-# It is a *feature module* because it composes one module: axiom-gpu-backend. The
-# run loop delegates each frame's real GPU draw to the backend's facade
-# (GpuBackendApi — a nameable facade, not a deeper contract type), constructing it
-# from the host-layer presentation request. The deterministic *what/when* stays
-# here; the impure wgpu *how* lives in the backend. Both are wasm32-gated platform
-# arms behind native-clean cores (PLATFORM_FACING_MODULES).
+# The deterministic presentation driver: turns plain viewport dimensions into a
+# validated HostPresentationRequest and drives the fixed per-frame tick loop
+# (canvas lookup + requestAnimationFrame + monotonic tick). The run loop
+# delegates each frame's real GPU draw to axiom-gpu-backend's facade
+# (GpuBackendApi); the deterministic *what/when* stays here, the impure wgpu
+# *how* lives in the backend.
 
 [module]
 name = "windowing"

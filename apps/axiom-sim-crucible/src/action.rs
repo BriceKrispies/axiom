@@ -15,9 +15,7 @@ use crate::scenario::{self, ScenarioRefs};
 /// Which cause stamps the causal events an action produces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CauseSpec {
-    /// A direct external command.
     Command,
-    /// A scheduler process.
     Process(ProcessId),
 }
 
@@ -37,36 +35,25 @@ pub enum ResidueSource {
 /// (source → paw) and the grooming consequence (paw → mouth).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SurfaceTransferAction {
-    /// The transfer rule to apply.
     pub rule: TransferRuleId,
-    /// The interaction route code.
     pub route: u8,
     /// Where the moved residue comes from.
     pub source: ResidueSource,
-    /// The surface the residue moves onto.
     pub target_surface: BodySurfaceId,
     /// The primary entity of the interaction (the creature).
     pub primary: EntityHandle,
-    /// The substance definition.
     pub material: DefinitionId,
-    /// The cause stamped on the produced causal events.
     pub cause: CauseSpec,
-    /// Causal kind for the interaction record.
     pub interaction_event_kind: u32,
-    /// Causal code for the interaction record.
     pub interaction_event_code: u64,
-    /// Causal kind for the transfer.
     pub transfer_event_kind: u32,
-    /// Causal code for the transfer.
     pub transfer_event_code: u64,
 }
 
 /// Schedule a registered process to wake at a future tick (data-driven scheduling).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessAction {
-    /// The process to schedule.
     pub process: ProcessId,
-    /// The tick it should wake on.
     pub wake_tick: u64,
 }
 
@@ -74,29 +61,22 @@ pub struct ProcessAction {
 /// preceding surface transfer recorded), against a context fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EffectApplicationAction {
-    /// The fact the matched effect rules update.
     pub context_fact: FactId,
-    /// The cause stamped on the produced causal events.
     pub cause: CauseSpec,
 }
 
 /// One scenario action, tagged by what it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScenarioActionKind {
-    /// Move residue along a route onto a surface.
     SurfaceTransfer(SurfaceTransferAction),
-    /// Schedule a process wake.
     Process(ProcessAction),
-    /// Apply material effects to the pending interaction.
     EffectApplication(EffectApplicationAction),
 }
 
 /// A scenario action scheduled at a deterministic tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScenarioAction {
-    /// The logical tick this action runs on.
     pub tick: u64,
-    /// What the action does.
     pub kind: ScenarioActionKind,
 }
 
@@ -109,7 +89,6 @@ pub struct ScenarioAction {
 /// never inlined into the driver.
 pub fn schedule(refs: &ScenarioRefs) -> Vec<ScenarioAction> {
     vec![
-        // Setup tick: schedule the grooming process to wake at TICK_GROOM.
         ScenarioAction {
             tick: 0,
             kind: ScenarioActionKind::Process(ProcessAction {
@@ -117,8 +96,6 @@ pub fn schedule(refs: &ScenarioRefs) -> Vec<ScenarioAction> {
                 wake_tick: scenario::TICK_GROOM,
             }),
         },
-        // Contact: beer moves from the tavern-cell source onto the paw surface, on
-        // the touch route, caused by the external command.
         ScenarioAction {
             tick: scenario::TICK_CONTACT,
             kind: ScenarioActionKind::SurfaceTransfer(SurfaceTransferAction {
@@ -135,8 +112,6 @@ pub fn schedule(refs: &ScenarioRefs) -> Vec<ScenarioAction> {
                 transfer_event_code: scenario::CODE_CONTACT_TRANSFER,
             }),
         },
-        // Grooming consequence: beer moves from the paw surface to the mouth surface
-        // via an ingestion-entry interaction, caused by the grooming process.
         ScenarioAction {
             tick: scenario::TICK_GROOM,
             kind: ScenarioActionKind::SurfaceTransfer(SurfaceTransferAction {
@@ -153,7 +128,6 @@ pub fn schedule(refs: &ScenarioRefs) -> Vec<ScenarioAction> {
                 transfer_event_code: scenario::CODE_GROOM_TRANSFER,
             }),
         },
-        // Generic effect: any intoxicant that entered via ingestion updates the fact.
         ScenarioAction {
             tick: scenario::TICK_GROOM,
             kind: ScenarioActionKind::EffectApplication(EffectApplicationAction {

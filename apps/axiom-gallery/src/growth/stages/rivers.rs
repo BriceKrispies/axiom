@@ -1,5 +1,4 @@
 //! River hydrology stages: `river_downflow`, `river_flow`, `river_carve`.
-//! Audit: worldgen river_downflow/river_flow/river_carve; OW-E14 (carve default).
 //!
 //! - `river_downflow`: each region drains to its lowest neighbour (its receiver);
 //!   regions with no lower neighbour are local sinks/ocean. Initialises
@@ -39,8 +38,6 @@ fn compute_receivers(globe: &PlanetGlobe) -> Vec<u32> {
     recv
 }
 
-// --- river_downflow ---------------------------------------------------------
-
 pub struct RiverDownflowStage;
 
 impl Stage for RiverDownflowStage {
@@ -53,18 +50,14 @@ impl Stage for RiverDownflowStage {
         if globe.region_flow.len() != n {
             globe.region_flow.resize(n, 0.0);
         }
-        // Each region starts with one unit of rainfall.
         for f in globe.region_flow.iter_mut() {
             *f = 1.0;
         }
-        // Computing receivers here validates that the drainage graph exists.
         let recv = compute_receivers(globe);
         let sinks = (0..n).filter(|&r| recv[r] as usize == r).count();
         ctx.log.push(format!("river_downflow: {} sinks", sinks));
     }
 }
-
-// --- river_flow -------------------------------------------------------------
 
 pub struct RiverFlowStage;
 
@@ -83,9 +76,8 @@ impl Stage for RiverFlowStage {
         }
         let recv = compute_receivers(globe);
 
-        // Process regions from highest to lowest elevation so a region's full
-        // accumulation is known before it drains into its receiver. Stable order
-        // (by index) on ties keeps this deterministic.
+        // Process highest to lowest elevation so a region's full accumulation
+        // is known before it drains into its receiver.
         let mut order: Vec<usize> = (0..n).collect();
         order.sort_by(|&a, &b| {
             globe.region_elevation[b]
@@ -105,8 +97,6 @@ impl Stage for RiverFlowStage {
     }
 }
 
-// --- river_carve ------------------------------------------------------------
-
 pub struct RiverCarveStage;
 
 /// Elevation lowered per unit of log-flow at a region.
@@ -123,8 +113,7 @@ impl Stage for RiverCarveStage {
             return;
         }
 
-        // Carve land regions proportional to log(flow): big rivers cut deeper.
-        // Never carve below sea level (keep coastlines stable).
+        // Carve proportional to log(flow); never carve below sea level.
         for r in 0..n {
             if globe.region_elevation[r] < 0.0 {
                 continue;
@@ -135,7 +124,6 @@ impl Stage for RiverCarveStage {
             globe.region_elevation[r] = new_e.max(0.0);
         }
 
-        // Triangle flow = mean of corner-region flow.
         let tri_count = globe.topology.triangles.len();
         if globe.triangle_flow.len() != tri_count {
             globe.triangle_flow.resize(tri_count, 0.0);
@@ -190,7 +178,6 @@ mod tests {
             ..PlanetGlobe::default()
         };
         g.resize_fields();
-        // Descending: region 0 lowest (ocean), 4 highest.
         g.region_elevation = vec![-1.0, 1.0, 2.0, 3.0, 4.0];
         g
     }
@@ -207,9 +194,7 @@ mod tests {
         let mut ctx = GenContext::new(1);
         RiverDownflowStage.run(&mut g, &mut ctx);
         RiverFlowStage.run(&mut g, &mut ctx);
-        // Bottom of the slope collects flow from everything above it.
         assert!(g.region_flow[0] > g.region_flow[4]);
-        // Total flow is conserved (sum of rainfall == 5 units somewhere down).
         assert!(g.region_flow[0] >= 4.0);
     }
 
@@ -219,7 +204,6 @@ mod tests {
         let mut ctx = GenContext::new(1);
         let before = g.region_elevation[1];
         run_all(&mut g, &mut ctx);
-        // Region 1 (land, high flow) is incised but stays >= 0.
         assert!(g.region_elevation[1] <= before);
         assert!(g.region_elevation[1] >= 0.0);
         assert!(g.triangle_flow[0] > 0.0);

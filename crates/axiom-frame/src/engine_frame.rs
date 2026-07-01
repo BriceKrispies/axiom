@@ -40,12 +40,8 @@ impl EngineFrame {
     /// pins the layer-03 adapter relationship in the proof export's
     /// "must_reference" list — the public API of [`HostFrameReport`] is
     /// what every input passed in here was derived from.
-    //
-    // This is a plain-data constructor that mirrors the immutable struct's
-    // fields one-to-one (plus the `_host_report` proof anchor). Folding the
-    // arguments into a separate params struct would be pure ceremony — a second
-    // type carrying the identical shape — so the argument-count lint is allowed
-    // here deliberately.
+    // A params struct here would just duplicate this struct's own field list,
+    // so the argument-count lint is allowed rather than adding that ceremony.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         engine_frame_index: u64,
@@ -188,8 +184,6 @@ mod tests {
         );
         assert_eq!(frame.engine_frame_index(), 0);
         assert_eq!(frame.host_frame_sequence(), report.sequence());
-        // A visible (non-skipped) frame must report `false`; the skipped test
-        // below pins the `true` outcome.
         assert!(!frame.is_skipped());
     }
 
@@ -281,8 +275,6 @@ mod tests {
         let f = EngineFrame::new(0, 1, vec![], v, l, t, d, cmds.clone(), &report);
         assert_eq!(f.commands(), cmds.as_slice());
     }
-
-    // --- helpers ---
 
     fn dummy_record(tick_value: u64) -> axiom_runtime::RuntimeStepRecord {
         use axiom_kernel::{FrameIndex, Tick};

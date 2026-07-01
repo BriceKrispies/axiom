@@ -210,7 +210,6 @@ mod tests {
             }
         );
         assert_ne!(a, FrameRasterStats::ZERO);
-        // Cue stats participate in equality.
         assert_ne!(
             FrameRasterStats {
                 depth_cues: FrameDepthCueStats {

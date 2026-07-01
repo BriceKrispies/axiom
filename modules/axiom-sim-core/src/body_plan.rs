@@ -444,11 +444,9 @@ mod tests {
             .add_part(draft, spec("test-limb", BodyPlanPartKind::Limb))
             .unwrap();
         assert_eq!((core, limb), (0, 1));
-        // Duplicate part name is rejected.
         assert!(registry
             .add_part(draft, spec("test-core", BodyPlanPartKind::Generic))
             .is_none());
-        // Connection validity.
         assert!(registry.connect(draft, core, limb));
         assert!(
             !registry.connect(draft, core, 99),
@@ -458,7 +456,6 @@ mod tests {
             !registry.connect(draft, core, core),
             "self-connection rejected"
         );
-        // Unknown draft handle is rejected.
         assert!(registry
             .add_part(999, spec("x", BodyPlanPartKind::Generic))
             .is_none());
@@ -487,9 +484,7 @@ mod tests {
         let a = registry.begin();
         registry.add_part(a, spec("p", BodyPlanPartKind::Core));
         assert!(registry.finish(a, "plan").is_some());
-        // Finishing the same draft again fails (it was consumed).
         assert!(registry.finish(a, "plan2").is_none());
-        // A new draft with a duplicate plan name fails.
         let b = registry.begin();
         registry.add_part(b, spec("p", BodyPlanPartKind::Core));
         assert!(registry.finish(b, "plan").is_none());

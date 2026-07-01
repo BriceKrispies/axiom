@@ -467,17 +467,14 @@ mod tests {
     #[test]
     fn a_ui_frame_builds_a_deterministic_draw_log_and_button_activates() {
         let (bytes, activated) = ui_frame_bytes(true);
-        // The pointer is inside the button on a press edge ⇒ activated.
         assert!(activated);
-        // Four items were drawn, so the log is non-empty and replays byte-identically.
         assert!(!bytes.is_empty());
         assert_eq!(ui_frame_bytes(true).0, bytes);
-        // No press edge ⇒ the same geometry but the button does not activate, and
-        // the activated flag flips the log bytes.
+        // No press edge: same geometry, but the button does not activate, which
+        // also flips the log bytes (the activated flag rides in the log).
         let (bytes_idle, idle) = ui_frame_bytes(false);
         assert!(!idle);
         assert_ne!(bytes_idle, bytes);
-        // begin_frame clears the log: the viewport reads back what was installed.
         let mut b = bridge();
         b.ui_begin_frame(&[320.0, 240.0], &[0.0, 0.0], false);
         assert_eq!(b.ui_viewport(), vec![320.0, 240.0]);
@@ -486,12 +483,8 @@ mod tests {
 
     #[test]
     fn text_and_sprite_carry_the_full_spec04_styling_in_the_log() {
-        // SPEC-09 §4.2 / gap audit SPEC-09 finding #2: the text/sprite path must
-        // carry the full SPEC-04 styling, not a minimal opts that drops it. We
-        // prove each new styling field reaches the draw log by varying ONLY that
-        // field and observing the log bytes change (the old minimal opts dropped
-        // align/layer/alpha for text and rotation/anchor/tint/flip/source for
-        // sprite, so they could not have moved the bytes).
+        // SPEC-09 §4.2: prove each styling field reaches the draw log by varying
+        // ONLY that field and observing the log bytes change.
         let text_log = |align: f64, layer: f64, alpha: f64| {
             let mut b = bridge();
             b.ui_begin_frame(&[320.0, 240.0], &[0.0, 0.0], false);
@@ -536,15 +529,12 @@ mod tests {
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, // 2: child grow 1
         ];
         let rects = b.ui_solve_layout(200.0, 100.0, &nodes);
-        // Three nodes × 4 components each.
+        // Three nodes x 4 components each.
         assert_eq!(rects.len(), 12);
-        // The root spans the whole viewport.
         assert_eq!(&rects[0..4], &[0.0, 0.0, 200.0, 100.0]);
-        // The two children each take half the width and tile left-to-right.
         assert_eq!(rects[6], 100.0, "child 0 width");
         assert_eq!(rects[10], 100.0, "child 1 width");
         assert_eq!(rects[8], 100.0, "child 1 starts at x=100");
-        // Pure: the same tree solves byte-identically.
         assert_eq!(b.ui_solve_layout(200.0, 100.0, &nodes), rects);
     }
 }

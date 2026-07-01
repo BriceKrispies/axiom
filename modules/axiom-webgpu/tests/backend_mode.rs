@@ -81,11 +81,9 @@ fn live_backend_constructed_from_host_request_reports_live() {
 fn live_backend_accepts_same_submission_shape_without_presenting() {
     let live = WebGpuApi::new_live(&host_request(true)).unwrap();
     let report = live.submit(cube_submission!(live));
-    // The same submission contract is accepted and recorded ...
     assert_eq!(report.clear_count(), 1);
     assert_eq!(report.draw_count(), 1);
     assert_eq!(report.present_count(), 1);
-    // ... but the live backend presents nothing this pass.
     assert!(!report.presented());
     assert!(report.is_live_not_initialized());
 }

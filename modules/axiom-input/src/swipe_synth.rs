@@ -42,14 +42,11 @@ impl SwipeSynth {
     /// mid-gesture, for a too-short flick, or with no gesture in progress.
     pub fn fold(&mut self, surface: Vec2, pointers: &[(Vec2, bool)]) -> Option<Vec2> {
         let down = pointers.iter().filter(|p| p.1).map(|p| p.0).next();
-        // While a pointer is down, latch the start (first sample) and track the
-        // latest position; an empty option iterates zero times (no `if`).
         down.iter().for_each(|pos| {
             self.start = self.start.or(Some(*pos));
             self.last = Some(*pos);
         });
 
-        // The gesture completes on the frame the pointer lifts (none down).
         let lifted = down.is_none();
         let threshold = (surface.x.min(surface.y) * SWIPE_MIN_FRACTION).max(TINY);
         let result = lifted
@@ -59,8 +56,6 @@ impl SwipeSynth {
             .filter(|d| d.length() >= threshold)
             .and_then(|d| d.normalize().ok());
 
-        // Reset the gesture state on lift (branchless): clear when lifted, keep
-        // the just-latched start/last while the gesture is still in progress.
         self.start = [self.start, None][usize::from(lifted)];
         self.last = [self.last, None][usize::from(lifted)];
         result
@@ -95,9 +90,9 @@ mod tests {
     #[test]
     fn horizontal_drag_returns_a_unit_right_direction() {
         let mut synth = SwipeSynth::new();
-        synth.fold(surface(), &[(Vec2::new(700.0, 300.0), true)]); // start
-        synth.fold(surface(), &[(Vec2::new(800.0, 300.0), true)]); // drag +100 x
-        let dir = synth.fold(surface(), &[]).expect("a completed swipe"); // lift
+        synth.fold(surface(), &[(Vec2::new(700.0, 300.0), true)]);
+        synth.fold(surface(), &[(Vec2::new(800.0, 300.0), true)]);
+        let dir = synth.fold(surface(), &[]).expect("a completed swipe");
         assert!(approx(dir.x, 1.0));
         assert!(approx(dir.y, 0.0));
     }
@@ -106,7 +101,7 @@ mod tests {
     fn a_too_short_flick_is_not_a_swipe() {
         let mut synth = SwipeSynth::new();
         synth.fold(surface(), &[(Vec2::new(300.0, 300.0), true)]);
-        synth.fold(surface(), &[(Vec2::new(320.0, 300.0), true)]); // 20 px < 60 px
+        synth.fold(surface(), &[(Vec2::new(320.0, 300.0), true)]);
         assert_eq!(synth.fold(surface(), &[]), None);
     }
 
@@ -117,7 +112,6 @@ mod tests {
         synth.fold(surface(), &[(Vec2::new(320.0, 300.0), true)]);
         let first = synth.fold(surface(), &[]).expect("first swipe");
         assert!(approx(first.x, 1.0));
-        // Second swipe down: must not be biased by the first gesture's start.
         synth.fold(surface(), &[(Vec2::new(500.0, 100.0), true)]);
         synth.fold(surface(), &[(Vec2::new(500.0, 250.0), true)]);
         let second = synth.fold(surface(), &[]).expect("second swipe");

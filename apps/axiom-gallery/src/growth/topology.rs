@@ -1,5 +1,4 @@
 //! Icosphere construction, subdivision, region-neighbour graph, ring validation.
-//! Audit: worldgen `topology`/`region_neighbours`, OW-E18/SC-E1 ring validity.
 use std::collections::HashMap;
 
 use axiom_math::Vec3;
@@ -7,8 +6,8 @@ use axiom_math::Vec3;
 use crate::growth::ids::RegionId;
 use crate::growth::model_planet::{Icosphere, PlanetGlobe, RegionGraph};
 
-/// Choose an icosphere subdivision level for a region-count target.
-/// Audit: perf cap at subdivision 9 (~2.6M sites).
+/// Choose an icosphere subdivision level for a region-count target (capped at
+/// subdivision 9, ~2.6M sites).
 pub fn subdivisions_for_target(target: u32) -> u32 {
     // 10*4^n+2 regions; pick smallest n meeting target, capped at 9.
     let mut n = 0u32;
@@ -81,7 +80,6 @@ fn base_icosahedron() -> (Vec<Vec3>, Vec<[usize; 3]>) {
         Vec3::new(-t, 0.0, -1.0),
         Vec3::new(-t, 0.0, 1.0),
     ];
-    // Standard outward-facing CCW winding for the icosahedron.
     let faces = vec![
         [0, 11, 5],
         [0, 5, 1],
@@ -215,7 +213,7 @@ pub fn build_region_graph(ico: &Icosphere) -> RegionGraph {
     }
 }
 
-/// Region-ring validation report. Audit: SC-E1 (bad_adjacency, tris_not_in_3_rings).
+/// Region-ring validation report.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RingReport {
     pub bad_adjacency: u32,
@@ -228,7 +226,7 @@ impl RingReport {
     }
 }
 
-/// Validate dual region rings before hydrology. Audit: OW-E18, SC-E1.
+/// Validate dual region rings before hydrology.
 ///
 /// For each triangle the three regions must be mutually adjacent in the region
 /// graph (`bad_adjacency`), and every triangle edge must be shared by exactly

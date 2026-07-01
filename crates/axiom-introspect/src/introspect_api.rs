@@ -11,7 +11,6 @@ use crate::world_report::WorldReport;
 use crate::world_tag::WorldTag;
 
 /// The query surface an agent uses to interrogate a running engine.
-///
 /// An owner feeds each completed [`EngineFrame`] to [`Self::observe`] (and,
 /// optionally, the ECS [`World`] to [`Self::observe_world`]); the facade
 /// projects frames into [`FrameReport`]s retained in a bounded [`FrameHistory`]
@@ -189,7 +188,6 @@ mod tests {
         }
         assert_eq!(api.frame_count(), 3);
 
-        // Indices are monotonic across the observed frames.
         let indices: Vec<u64> = api
             .recent(3)
             .iter()
@@ -197,7 +195,6 @@ mod tests {
             .collect();
         assert!(indices.windows(2).all(|w| w[0] < w[1]));
 
-        // describe_frame round-trips a known index; an absent one misses.
         let known = frames[1].engine_frame_index();
         assert_eq!(
             api.describe_frame(known).unwrap().engine_frame_index(),
@@ -205,7 +202,6 @@ mod tests {
         );
         assert!(api.describe_frame(1_000_000).is_none());
 
-        // latest is the last observed frame.
         let last = frames[2].engine_frame_index();
         assert_eq!(api.latest().unwrap().engine_frame_index(), last);
     }
@@ -256,8 +252,6 @@ mod tests {
         world.register_system(Box::new(Noop));
         world.spawn();
         world.spawn();
-        // Advance once over an active frame so the registered system actually
-        // runs before we observe the world's shape.
         let frame = &fixtures::active_engine_frames(1)[0];
         world.advance(0, &axiom_frame::FrameContext::new(frame));
         api.observe_world(&world);
@@ -273,7 +267,6 @@ mod tests {
     #[test]
     fn tags_flow_through_the_facade_and_answer_queries() {
         let mut api = IntrospectApi::new(4);
-        // A fresh facade has no tags.
         assert!(api.tags().is_empty());
         assert!(api.tag_by_name("mountaintop").is_none());
         assert!(api.nearest_tag(0, 0, 0).is_none());
@@ -285,20 +278,15 @@ mod tests {
         api.observe_tags(&[summit.clone(), ground.clone(), camp.clone()]);
 
         assert_eq!(api.tags().len(), 3);
-        // Resolve a noun by name (hit + miss).
         assert_eq!(api.tag_by_name("ground"), Some(&ground));
         assert!(api.tag_by_name("nope").is_none());
-        // Filter by coarse kind.
         let summits = api.tags_of_kind(7);
         assert_eq!(summits, vec![&summit, &camp]);
-        // Nearest to a point near the ground.
         assert_eq!(api.nearest_tag(11, 1, 11), Some(&ground));
 
-        // The snapshot round-trips the whole set.
         let decoded = WorldTag::decode_set(&api.tags_snapshot_bytes()).unwrap();
         assert_eq!(decoded, vec![summit, ground, camp]);
 
-        // Re-observing replaces the set.
         api.observe_tags(&[]);
         assert!(api.tags().is_empty());
     }
@@ -314,7 +302,6 @@ mod tests {
         let diff = api.diff(a, b).expect("both frames retained");
         assert_eq!(diff.from_index(), a);
         assert_eq!(diff.to_index(), b);
-        // An absent index yields no diff.
         assert!(api.diff(a, 9_999).is_none());
         assert!(api.diff(9_999, b).is_none());
     }
@@ -322,12 +309,11 @@ mod tests {
     #[test]
     fn failures_lists_failed_systems_across_the_window() {
         let mut api = IntrospectApi::new(8);
-        api.observe(&fixtures::active_engine_frames(1)[0]); // no failures
-        api.observe(&fixtures::failing_engine_frame()); // one failure
+        api.observe(&fixtures::active_engine_frames(1)[0]);
+        api.observe(&fixtures::failing_engine_frame());
         let failures = api.failures(8);
         assert_eq!(failures.len(), 1);
         assert_eq!(failures[0].1.name(), "fail");
-        // An empty window reports nothing.
         assert!(api.failures(0).is_empty());
     }
 

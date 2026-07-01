@@ -129,13 +129,11 @@ mod tests {
     #[test]
     fn enter_playtest_requires_a_valid_level() {
         let mut app = RoomedPuzzleApp::new();
-        // Break the level: erase the entrance.
         app.editor_mut().select(TileKind::Floor);
         app.editor_mut().paint(1, 5);
         assert!(!app.enter_playtest());
         assert_eq!(app.mode(), Mode::Edit);
 
-        // Repaint it: now playtest is allowed.
         app.editor_mut().select(TileKind::Entrance);
         app.editor_mut().paint(1, 5);
         assert!(app.enter_playtest());

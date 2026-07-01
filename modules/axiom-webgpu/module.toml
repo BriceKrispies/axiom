@@ -1,19 +1,17 @@
 # Axiom module manifest — axiom-webgpu.
 #
-# Owns the backend boundary for WebGPU/WASM. Routes the one GpuSubmission
-# input contract through a Recording backend (deterministic record, no GPU)
-# or a Live backend (structurally built from the `axiom-host` presentation
-# boundary, but performing no real GPU work yet). Binding a real surface to a
-# HostSurfaceHandle and driving real GPU calls belongs to a future
-# browser/native adapter app, not this module (see ARCHITECTURE.md).
+# Backend boundary for WebGPU/WASM: routes one GpuSubmission contract through
+# a Recording backend (deterministic record, no GPU) or a Live backend (built
+# on the axiom-host presentation boundary, no real GPU work yet — see
+# ARCHITECTURE.md).
 
 [module]
 name = "webgpu"
 crate_name = "axiom-webgpu"
 kind = "engine-module"
 
-# axiom-webgpu is the only module today that may depend on `host`
-# because the WebGPU surface ultimately lives behind a host adapter.
+# The only module that depends on `host`: the WebGPU surface ultimately lives
+# behind a host adapter.
 allowed_layers = [
     "kernel",
     "runtime",

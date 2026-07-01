@@ -43,10 +43,10 @@
 //!
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** behavioral facade — [`PhysicsApi`] — plus its
-//! **identity vocabulary**: the [`PhysicsBodyHandle`] and [`PhysicsColliderHandle`]
-//! handles the facade returns and accepts (Module Law #8). Every other type
-//! (configs, bodies, colliders, shapes, materials, snapshots, records, events)
-//! stays reachable only through the facade.
+//! identity vocabulary: the [`PhysicsBodyHandle`] and [`PhysicsColliderHandle`]
+//! handles the facade returns and accepts. Every other type (configs, bodies,
+//! colliders, shapes, materials, snapshots, records, events) stays reachable
+//! only through the facade.
 
 mod broad_phase_pair;
 mod collider_bounds;

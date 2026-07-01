@@ -1,5 +1,4 @@
 //! Station 1 — Body Bay.
-//!
 //! The body-kind catalogue: a static floor, a dynamic sphere that falls and
 //! settles, an immovable static box, a kinematic box that ignores gravity, and a
 //! dynamic body that is *disabled* on the first step and then holds its position

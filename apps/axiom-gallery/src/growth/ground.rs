@@ -1,14 +1,12 @@
 //! Native first-person ground-walk simulation — the player's walk lifted out of
 //! the wasm-only viewer so it can run **headlessly** (tests, the agent driver) and
 //! be the single source of truth the browser viewer also uses.
-//!
 //! The browser `web` module's per-frame closure and this module share one movement
 //! + height integration ([`step_first_person`]): horizontal motion is the engine's
 //! yaw-rotated step, and the eye rides the vista-composited terrain
 //! ([`crate::growth::gameworld::sample_height_m_lod_vista`] at full detail). Keeping that in
 //! one native function means the headless walk is byte-for-byte the walk the player
 //! sees in the browser, and the agent that drives it climbs the very same mountain.
-//!
 //! [`GroundSim`] wraps that step with the real engine [`RunningApp`] (camera +
 //! `Controller`, driven by `tick_with_controls` — the same authority path the
 //! browser player uses) and the generated planet + vista, so a caller just feeds
@@ -75,7 +73,6 @@ pub struct StepOutput {
 
 /// Integrate one tick of first-person movement against the vista-composited
 /// terrain, updating `state` and returning the engine input + the height read.
-///
 /// `forward_axis`/`strafe_axis` are in `[-1, 1]` (scaled by [`MOVE_SPEED`]);
 /// `yaw_delta`/`pitch_delta` are radians. This is the exact integration the
 /// browser viewer's per-frame closure performs — the single source of truth so the
@@ -376,7 +373,6 @@ impl GroundSim {
     /// `(dir_x, dir_z)` (a unit vector), aim it at the peak, and gather the render
     /// inputs. This frames the whole Everest-scale spire rising against the sky —
     /// the natural "shoot the mountain's side" shot for each cardinal direction.
-    ///
     /// The camera *position* is set at app build (only an initial *rotation* fails
     /// to stick — the engine's controller zeroes camera yaw each tick — so look is
     /// driven by the first-person yaw/pitch input, exactly as the live viewer aims).

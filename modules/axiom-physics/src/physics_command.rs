@@ -1,5 +1,4 @@
 //! Deterministic per-step command input.
-//!
 //! A command is a flattened, tag-dispatched record rather than a data-carrying
 //! enum: the engine's Branchless Law forbids `match`-ing a payload enum, so —
 //! exactly like the kernel's `RuntimeCommand` and sim-core's `Effect` — the

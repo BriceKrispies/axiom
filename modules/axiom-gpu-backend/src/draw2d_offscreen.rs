@@ -1,11 +1,9 @@
 //! Native **off-screen** 2D raster — `offscreen` feature, non-wasm only.
-//!
 //! The 2D peer of [`crate::offscreen`]: it builds a throwaway wgpu device, renders
 //! a [`Draw2dGeometry`] through the shared [`crate::draw2d_renderer::Draw2dRenderer`]
 //! into an off-screen colour texture, and reads the pixels back to RGBA8. It is
 //! the headless capture path the screenshot tool (`axiom-shot`) and the SPEC-04
 //! alpha-blend parity proof drive.
-//!
 //! ## Why a **linear** (non-sRGB) target
 //! The software Canvas 2D backend writes linear `0.0..=1.0` colours straight to
 //! bytes (`linear → round → u8`) with **no gamma encoding**, and composites in
@@ -15,7 +13,6 @@
 //! blends in the same space, so the only residual difference is ±1 rounding. (The
 //! 3D path wants sRGB output for display; the 2D parity proof wants byte parity
 //! with the software rasterizer, so the two deliberately differ here.)
-//!
 //! Compiled only behind the `offscreen` feature, so the engine's default native
 //! build, coverage gate, and branchless lint never see this wgpu code.
 

@@ -67,9 +67,9 @@ mod tests {
         let report = ProcValidateApi::validate(&artifact(&[0, 99]), &full());
         assert!(!report.all_satisfied());
         let verdicts = report.verdicts();
-        assert!(verdicts[0].1); // min_count(2) satisfied (2 words)
-        assert!(!verdicts[1].1); // max_value(10) violated
-        assert!(!verdicts[2].1); // non_zero violated
+        assert!(verdicts[0].1);
+        assert!(!verdicts[1].1);
+        assert!(!verdicts[2].1);
     }
 
     #[test]
@@ -88,7 +88,6 @@ mod tests {
         let a = artifact(&[0, 99, 4]);
         assert!(!ProcValidateApi::validate(&a, &c).all_satisfied());
         let repaired = ProcValidateApi::repair(&a, &c);
-        // Clamped to <=10 then lifted off zero, in order.
         assert_eq!(repaired.words(), &[1, 10, 4]);
         assert!(ProcValidateApi::validate(&repaired, &c).all_satisfied());
         assert_eq!(repaired.generator_version(), 1);
@@ -96,10 +95,9 @@ mod tests {
 
     #[test]
     fn repair_cannot_satisfy_a_structural_min_count() {
-        // Repair never invents words, so a too-short artifact stays failing.
         let c = [Constraint::min_count(3), Constraint::non_zero()];
         let repaired = ProcValidateApi::repair(&artifact(&[5]), &c);
-        assert_eq!(repaired.words(), &[5]); // min_count repair is a no-op; non_zero leaves 5
+        assert_eq!(repaired.words(), &[5]);
         assert!(!ProcValidateApi::validate(&repaired, &c).all_satisfied());
     }
 
@@ -107,7 +105,6 @@ mod tests {
     fn metamorphic_known_good_passes_perturbed_fails() {
         let c = [Constraint::max_value(10)];
         assert!(ProcValidateApi::validate(&artifact(&[1, 2, 3]), &c).all_satisfied());
-        // Perturb one word past the bound -> fails at the max_value constraint.
         let report = ProcValidateApi::validate(&artifact(&[1, 2, 11]), &c);
         assert!(!report.all_satisfied());
         assert!(!report.verdicts()[0].1);
@@ -131,7 +128,7 @@ mod tests {
     #[test]
     fn types_are_debug() {
         let report = ProcValidateApi::validate(&artifact(&[1]), &[Constraint::min_count(1)]);
-        assert!(!format!("{:?}", Constraint::non_zero()).is_empty()); // Constraint -> ConstraintKind
+        assert!(!format!("{:?}", Constraint::non_zero()).is_empty());
         assert!(!format!("{report:?}").is_empty());
         assert!(!format!("{:?}", ProcValidateApi).is_empty());
     }

@@ -1,32 +1,9 @@
-# Axiom layer manifest — axiom-frame.
-#
-# Frame is the canonical engine frame boundary. It adapts host frame reports
-# (host), runtime step records (runtime), and viewport facts (host)
-# into a stable per-frame contract — the `EngineFrame` and `FrameContext`
-# future engine systems consume.
-#
-# Frame logical capabilities (documentation only — Rust public surface is
-# the curated re-export list in `lib.rs`, enforced by the layer's own
-# `tests/architecture.rs::lib_exports_are_curated_set`):
-#   - canonical-engine-frame
-#   - frame-context
-#   - frame-step-summary
-#   - frame-timing-summary
-#   - frame-viewport-snapshot
-#   - frame-lifecycle-state
-#   - deterministic-frame-command-queue
-#   - frame-diagnostics
-#   - host-frame-adaptation
-
 [layer]
 name = "frame"
 crate_name = "axiom-frame"
 depends_on = ["kernel", "runtime", "host"]
 meaningful_dependency = "Frame consumes host (`HostFrameReport`, `HostViewport`, `HostLifecycleState`, `HostSkipReason` for host adaptation, including the viewport's kernel `Ratio` scale factor and aspect ratio), runtime (`RuntimeStepRecord` for ordered step summaries), and kernel (`Tick`, `FrameIndex`, `TelemetryMetric`) — and exposes the deterministic engine frame contract every future engine system will read from. Finiteness of viewport-derived scalars is guaranteed by the kernel `Ratio` type the viewport carries, so no math layer is needed."
 
-# Public Rust surface is the curated list in `lib.rs`; the architecture
-# checker needs the facade and the constructor types to prove the layer's
-# adapter role.
 introduced_capabilities = ["FrameApi", "EngineFrame", "FrameBuilder"]
 
 consumed_capabilities = [
@@ -40,10 +17,6 @@ consumed_capabilities = [
     "TelemetryMetric",
 ]
 
-# Each proof export is a real public export whose source file must
-# reference at least one depended-layer (host) symbol. Listing only host
-# symbols here proves all three files use axiom-host directly through its
-# public API, as required.
 [[proof_exports]]
 export = "FrameApi"
 must_reference = ["HostFrameReport", "HostViewport"]

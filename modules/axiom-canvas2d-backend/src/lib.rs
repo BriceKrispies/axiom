@@ -26,10 +26,6 @@
 //! loop, not a GPU backend. It takes uploaded mesh geometry plus a frame packet
 //! and produces pixels.
 //!
-//! This is the third sanctioned platform-facing module (Module Law #9): its real
-//! `web-sys` arm is compiled only for `wasm32`, behind the native-clean facade,
-//! and never enters the native build or the coverage gate.
-//!
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** facade: [`Canvas2dBackendApi`].
 
@@ -42,9 +38,7 @@ mod canvas_policy;
 // The pure, native-testable software rasterizer pipeline:
 //   FramePacket --frame_packet_raster--> RasterTriangle[] (projected, LOD'd)
 //             --software_rasterizer--> SoftwareFramebuffer (RGBA) + DepthBuffer
-// plus the CPU mesh cache it reads geometry from and the projection math. No
-// browser/GPU code, so it builds and is fully covered on native exactly as on
-// wasm.
+// plus the CPU mesh cache it reads geometry from and the projection math.
 mod canvas_depth_cue;
 mod canvas_depth_cue_profile;
 mod canvas_post_pass;
@@ -61,9 +55,9 @@ mod software_framebuffer;
 mod software_raster_result;
 mod software_rasterizer;
 
-// The host-neutral 2D draw-list (`host::Draw2dList`) software consumer: composites
-// the layer-sorted 2D commands onto a framebuffer with src-over alpha blending.
-// Pure, native-testable, fully covered — the 2D peer of the FramePacket raster.
+// The host-neutral 2D draw-list (`host::Draw2dList`) software consumer:
+// composites the layer-sorted 2D commands onto a framebuffer with src-over
+// alpha blending — the 2D peer of the FramePacket raster.
 mod draw2d_raster;
 
 // The real Canvas 2D presentation arm — compiled only for wasm32, behind the

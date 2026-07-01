@@ -1,16 +1,3 @@
-# Axiom layer manifest — axiom-layout.
-#
-# The deterministic, mobile-first responsive layout solver. It consumes the host
-# boundary's viewport facts — size, orientation, and safe-area insets — and a flat
-# flex/constraint node tree, and produces a placed rectangle per node. It is the
-# engine's single home for "how on-screen regions are ordered and placed", so apps
-# (and a future interface adoption) stop hand-rolling responsive CSS: the engine
-# decides placement, mobile-first by default (safe-area inset, orientation-driven
-# stacking, free-space distribution), from the viewport facts at runtime.
-#
-# It owns NO browser, NO renderer, NO app/gameplay concepts — pure data in
-# (HostViewport + a node tree), placed rects out.
-
 [layer]
 name = "layout"
 crate_name = "axiom-layout"
@@ -46,8 +33,6 @@ introduced_capabilities = [
 
 consumed_capabilities = ["HostViewport", "Orientation", "HostSafeAreaInsets", "Pixels"]
 
-# Each proof export is a real public export whose source references a depended-layer
-# symbol. `solve` names HostViewport (its input); LayoutRect names Pixels (its edges).
 [[proof_exports]]
 export = "solve"
 must_reference = ["HostViewport"]

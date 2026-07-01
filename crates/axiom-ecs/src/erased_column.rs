@@ -102,7 +102,6 @@ mod tests {
         {
             let erased: &mut dyn ErasedColumn = &mut col;
             erased.remove_entity(e(1));
-            // Removing an absent entity is a clean no-op.
             erased.remove_entity(e(9));
         }
         assert_eq!(col.entry_count(), 1);

@@ -81,16 +81,12 @@ impl AgentBrain for ScriptedBrain {
         let has_match = matched.is_some();
         let max = profile.max_actions_per_tick() as usize;
         let budget_zero = max == 0;
-        // Reason precedence: a zero budget overrides everything (6); otherwise the
-        // matched rule's own reason, which already defaults to "no matching rule"
-        // (1) when nothing matched. Pure table index of Copy values.
+        // Reason precedence: a zero budget overrides everything; otherwise the
+        // matched rule's own reason (already defaulting to "no matching rule").
         let rule_reason = matched
             .map(|rule| rule.reason_code())
             .unwrap_or(DecisionReport::REASON_NO_MATCHING_RULE);
         let reason = [rule_reason, DecisionReport::REASON_ACTION_BUDGET_ZERO][budget_zero as usize];
-        // Emission: the matched intent clamped to the budget (so a zero budget
-        // emits nothing); when no rule matched and the budget is non-zero, a
-        // single explicit Noop is chained in. One iterator chain, branchless.
         let fallback = ((!has_match) & (!budget_zero)).then(ActionIntent::noop);
         let emission: Vec<ActionIntent> = matched
             .map(|rule| rule.intent())
@@ -148,8 +144,6 @@ mod tests {
 
     #[test]
     fn a_rules_custom_reason_code_propagates_to_the_decision() {
-        // A rule may carry any reason code; the firing rule's code is reported,
-        // not a hardcoded constant.
         let mut brain = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(7), 42)]);
         let d = decide(&mut brain, &observation_with_fact(100), AgentProfile::debug_perfect());
         assert_eq!(d.reason_code(), 42);
@@ -175,9 +169,6 @@ mod tests {
 
     #[test]
     fn emitted_count_never_exceeds_the_action_budget() {
-        // "First matching rule wins" means at most one real action is emitted,
-        // and the `take(max)` clamp guarantees the count never exceeds the
-        // profile's budget. Assert that invariant under both stock profiles.
         let mut brain = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(1), MATCHED)]);
         for profile in [AgentProfile::debug_perfect(), AgentProfile::human_like_default()] {
             let d = decide(&mut brain, &observation_with_fact(100), profile);
@@ -191,14 +182,11 @@ mod tests {
 
     #[test]
     fn zero_action_budget_emits_nothing_with_budget_zero_reason() {
-        // A zero budget suppresses even a matched rule's intent, and the reason
-        // is the dedicated action_budget_zero code regardless of the match.
         let frozen = AgentProfile::debug_perfect().with_action_budget(0);
         let mut matching = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(1), MATCHED)]);
         let d = decide(&mut matching, &observation_with_fact(100), frozen);
         assert_eq!(d.intents().len(), 0, "a zero budget emits no action");
         assert_eq!(d.reason_code(), DecisionReport::REASON_ACTION_BUDGET_ZERO);
-        // Even with no matching rule, a zero budget reports budget-zero (6 > 1).
         let mut nonmatching = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(1), MATCHED)]);
         let d2 = decide(&mut nonmatching, &observation_with_fact(200), frozen);
         assert_eq!(d2.intents().len(), 0);

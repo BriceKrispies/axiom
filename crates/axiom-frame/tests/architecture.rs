@@ -350,7 +350,6 @@ fn frame_only_imports_declared_dependencies() {
                     && chunk != "axiom_runtime"
                     && chunk != "axiom_host"
                     && chunk != "axiom_frame"
-                    // axiom-zones is the build-time zone-marker Support crate.
                     && chunk != "axiom_zones"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));

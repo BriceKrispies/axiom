@@ -1,5 +1,3 @@
-# Fully valid layer 1 with two proof exports, each genuinely referencing the
-# previous layer's public symbols.
 [layer]
 name = "runtime"
 crate_name = "runtime"

@@ -1,5 +1,4 @@
 //! The crucible's headless-friendly status overlay.
-//!
 //! The engine debug-overlay module is browser/DOM-only, so a headless screenshot
 //! cannot show text. This overlay therefore renders a report's key facts as
 //! *geometry*: a replay-match beacon (green = match, red = diverged) and a row of
@@ -96,7 +95,7 @@ mod tests {
     fn tally_has_one_marker_per_live_contact_plus_the_beacon() {
         let report = CrucibleReport::build(1, &[state()], &counts(), &[contact(), contact()], 0, true);
         let markers = status_markers(&report, Vec3::ZERO);
-        assert_eq!(markers.len(), 3); // beacon + 2 contacts
+        assert_eq!(markers.len(), 3);
     }
 
     #[test]

@@ -213,7 +213,6 @@ mod tests {
         let n = at(&mut s, 0.0, 0.0, 0.0);
         s.add_bounds(n, unit()).unwrap();
         s.remove_bounds(n).unwrap();
-        // Removing again is a missing-bounds error.
         assert_eq!(
             s.remove_bounds(n).unwrap_err().code(),
             SceneErrorCode::MissingBounds
@@ -279,11 +278,9 @@ mod tests {
         let n = at(&mut s, 3.0, 0.0, 0.0);
         s.add_bounds(n, unit()).unwrap();
         s.update_world_transforms();
-        // Zero direction -> no ray.
         assert_eq!(s.raycast(Vec3::ZERO, Vec3::ZERO, 100.0), None);
         // Box enters at t=2.5 but max_distance 1.0 filters it out.
         assert_eq!(s.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 1.0), None);
-        // Aimed away from the box.
         assert_eq!(s.raycast(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), 100.0), None);
     }
 
@@ -309,12 +306,10 @@ mod tests {
         s.add_bounds(near, unit()).unwrap();
         s.add_bounds(far, unit()).unwrap();
         s.update_world_transforms();
-        // A query box around the origin overlaps `near` only.
         assert_eq!(
             s.overlap_box(Vec3::ZERO, Vec3::new(0.6, 0.6, 0.6)),
             vec![near]
         );
-        // A degenerate query box (negative half-extent) yields nothing.
         assert!(s
             .overlap_box(Vec3::ZERO, Vec3::new(-1.0, 0.0, 0.0))
             .is_empty());
@@ -332,7 +327,6 @@ mod tests {
         assert_eq!(s.overlap_circle(Vec3::ZERO, 1.0), vec![near]);
         // A wide sphere reaches both (far box near-face at x=9.5, within 9.5).
         assert_eq!(s.overlap_circle(Vec3::ZERO, 9.5), vec![near, far]);
-        // A degenerate (negative) radius yields nothing.
         assert!(s.overlap_circle(Vec3::ZERO, -1.0).is_empty());
     }
 
@@ -348,7 +342,6 @@ mod tests {
         let mut restored = Scene::new();
         restored.read_state(&mut BinaryReader::new(&bytes)).unwrap();
         restored.update_world_transforms();
-        // The restored bounds answer the same overlap query.
         assert_eq!(
             restored.overlap_box(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.1, 0.1, 0.1)),
             vec![n]

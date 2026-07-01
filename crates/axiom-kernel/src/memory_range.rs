@@ -83,13 +83,10 @@ impl MemoryRange {
     pub const fn checked_shift(self, delta: u64) -> KernelResult<MemoryRange> {
         let base = self.offset.raw();
         let shifted = base.wrapping_add(delta);
-        // For unsigned addition, the sum wraps below `base` exactly when the
-        // true result exceeded u64::MAX — a branchless overflow test.
+        // Unsigned addition wraps below `base` exactly when it overflowed.
         let overflowed = shifted < base;
         [
-            // No shift overflow: delegate to `new`, which checks offset+length.
             MemoryRange::new(ByteOffset::new(shifted), self.length),
-            // Shift overflow: the offset itself overran u64.
             Err(KernelError::new(
                 KernelErrorScope::Memory,
                 KernelErrorCode::RangeOverflow,
@@ -127,7 +124,7 @@ mod tests {
 
     #[test]
     fn contains_offset_is_half_open() {
-        let r = range(10, 5); // [10, 15)
+        let r = range(10, 5);
         assert!(!r.contains_offset(9));
         assert!(r.contains_offset(10));
         assert!(r.contains_offset(14));
@@ -139,15 +136,15 @@ mod tests {
         let outer = range(0, 100);
         assert!(outer.contains_range(range(10, 20)));
         assert!(outer.contains_range(range(0, 100)));
-        assert!(!outer.contains_range(range(90, 20))); // ends at 110 > 100
-        assert!(!outer.contains_range(range(50, 0))); // zero length contained by nothing
+        assert!(!outer.contains_range(range(90, 20)));
+        assert!(!outer.contains_range(range(50, 0)));
     }
 
     #[test]
     fn overlap_detection() {
         assert!(range(0, 10).overlaps(range(5, 10)));
         assert!(range(5, 10).overlaps(range(0, 10)));
-        assert!(!range(0, 10).overlaps(range(10, 10))); // touching, not overlapping
+        assert!(!range(0, 10).overlaps(range(10, 10)));
         assert!(!range(0, 10).overlaps(range(100, 10)));
     }
 
@@ -176,7 +173,7 @@ mod cov {
     #[test]
     fn covers_overflow_and_predicate_branches() {
         assert!(MemoryRange::new(ByteOffset::new(u64::MAX), ByteLength::new(1)).is_err());
-        let r = MemoryRange::new(ByteOffset::new(10), ByteLength::new(10)).unwrap(); // [10, 20)
+        let r = MemoryRange::new(ByteOffset::new(10), ByteLength::new(10)).unwrap();
         assert!(!r.contains_offset(5));
         assert!(r.contains_offset(10));
         assert!(!r.contains_offset(20));
@@ -208,17 +205,14 @@ mod cov2 {
     fn overlaps_is_false_when_other_is_entirely_before_self() {
         let r = MemoryRange::new(ByteOffset::new(10), ByteLength::new(10)).unwrap();
         let before = MemoryRange::new(ByteOffset::new(0), ByteLength::new(5)).unwrap();
-        assert!(!r.overlaps(before)); // self.offset(10) < other.end(5) is false
+        assert!(!r.overlaps(before));
     }
 
     #[test]
     fn overlaps_is_false_when_self_start_touches_other_end() {
-        // Boundary case for the first comparison `self.offset < other.end`:
-        // self.offset (10) exactly equals other.end (10). Half-open intervals
-        // mean touching does NOT overlap, so the correct result is `false`.
-        // The `<= ` mutant would treat the touch as an overlap (`true`).
-        let r = MemoryRange::new(ByteOffset::new(10), ByteLength::new(10)).unwrap(); // [10, 20)
-        let touching = MemoryRange::new(ByteOffset::new(5), ByteLength::new(5)).unwrap(); // [5, 10)
+        // self.offset (10) == other.end (10): touching, not overlapping (half-open).
+        let r = MemoryRange::new(ByteOffset::new(10), ByteLength::new(10)).unwrap();
+        let touching = MemoryRange::new(ByteOffset::new(5), ByteLength::new(5)).unwrap();
         assert_eq!(touching.end(), 10);
         assert!(!r.overlaps(touching));
     }

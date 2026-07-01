@@ -10,85 +10,45 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# The one engine crate an app imports. The fixed-step accumulator (FrameAccumulator,
-# StepBudget) and the App/RunningApp surface all arrive through `axiom::prelude`.
 axiom = { path = "../../modules/axiom" }
 
-# The deterministic RNG seam (SPEC-01) the bridge marshals: the real entropy
-# facade (`axiom-entropy`) keyed at the root address (`axiom-space`). These are
-# layers the umbrella does not compose, so the app — a leaf composition root —
-# depends on them directly (the legal app-composes-layers path). Native, so the
-# slice determinism test drives the exact draw path the browser binds.
+# SPEC-01 RNG seam: entropy facade keyed at the root address (axiom-space).
 axiom-entropy = { path = "../../crates/axiom-entropy" }
 axiom-space = { path = "../../crates/axiom-space" }
 
-# Physics (SPEC-10): the deterministic rigid-body world the bridge composes into
-# the fixed-step loop. `RuntimeStep` (the explicit step identity `PhysicsApi::step`
-# takes) comes from the `runtime` layer, and its `FrameIndex`/`Tick` identities
-# from the `kernel` layer — both layers the umbrella does not re-export, so this
-# leaf app depends on them directly (the legal app-composes-layers path).
+# SPEC-10 physics: rigid-body world stepped via `runtime`'s `RuntimeStep`.
 axiom-physics = { path = "../../modules/axiom-physics" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
-# Input (SPEC-05): the engine's per-tick intent-snapshot facade (`InputState`)
-# the bridge samples each fixed tick. An isolated engine module the umbrella does
-# not re-export, so this leaf app composes it directly (the legal
-# app-composes-modules path). `Tick`/`Vec2` arrive through `axiom-kernel` /
-# `axiom::prelude` already on the deps above.
+# SPEC-05 input: per-tick intent-snapshot facade.
 axiom-input = { path = "../../modules/axiom-input" }
 
-# Timers + state machines (SPEC-07) and tweens (SPEC-09): the deterministic,
-# wall-clock-free `axiom-tick` timer wheel + state machines and the `axiom-tween`
-# eased-curve table the bridge pumps once per fixed tick. Both are isolated engine
-# modules the umbrella does not re-export, so this leaf app composes them directly
-# (the legal app-composes-modules path). `Tick`/`TickDelta` arrive through
-# `axiom-kernel` already on the deps above.
+# SPEC-07 timers/state machines, SPEC-09 tweens.
 axiom-tick = { path = "../../modules/axiom-tick" }
 axiom-tween = { path = "../../modules/axiom-tween" }
 
-# Grid / pathfinding (SPEC-06) and audio (SPEC-08): the deterministic
-# `axiom-grid` BFS/wavefront core and the neutral `axiom-audio` mixer core the
-# bridge composes for the `gridPath`/… and `playSound`/… host surfaces. Both are
-# isolated engine modules the umbrella does not re-export, so this leaf app
-# composes them directly (the legal app-composes-modules path).
+# SPEC-06 grid/pathfinding, SPEC-08 audio.
 axiom-grid = { path = "../../modules/axiom-grid" }
 axiom-audio = { path = "../../modules/axiom-audio" }
 
-# Math (SPEC-03 / SPEC-11): the single deterministic math source of truth. The
-# prelude re-exports the value types (`Vec3`/`Mat4`/`Transform`) but NOT the
-# `MathApi` facade or `Quat`, which the `v3`/`mat4`/`quat` host ops forward to, so
-# this leaf app names the `math` layer directly (the legal app-composes-layers path).
+# SPEC-03/SPEC-11 math: the `v3`/`mat4`/`quat` ops forward to `MathApi`/`Quat`,
+# which the prelude does not re-export.
 axiom-math = { path = "../../crates/axiom-math" }
 
-# UI (SPEC-09): the immediate-mode `axiom-interface` HUD surface (the `ui*` verbs
-# bind over) and the responsive `axiom-layout` flex solver (`uiSolveLayout`). Both
-# are layers the umbrella does not re-export, so this leaf app names them directly.
+# SPEC-09 UI: immediate-mode HUD surface + the responsive layout solver.
 axiom-interface = { path = "../../crates/axiom-interface" }
 axiom-layout = { path = "../../crates/axiom-layout" }
 
-# Host (the platform/value-type layer): the `axiom-draw2d` value vocabulary
-# (`Rect`/`Fill2d`/`Common2d`/`Rgba`/`RenderTargetId`) the 2D draw verbs marshal,
-# and the `Pixels`/`HostViewport` the layout solver takes. A layer the umbrella
-# does not re-export, so this leaf app names it directly.
 axiom-host = { path = "../../crates/axiom-host" }
 
-# 2D drawing (SPEC-10): the `axiom-draw2d` builder (particles / render targets /
-# shapes) the `draw2d*` verbs forward to. An isolated engine module the umbrella
-# does not re-export, so this leaf app composes it directly.
+# SPEC-10 2D drawing.
 axiom-draw2d = { path = "../../modules/axiom-draw2d" }
 
-# Browser entry only: the wasm-bindgen export macro + a panic hook, plus the
-# bits of web-sys the embed-seam host channel (inbound query string, outbound
-# outcome) and the live audio arm (`AudioContext` the SPEC-08 batch realizes into)
-# need. Confined to wasm32, so native `cargo test --workspace` never compiles them.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
-# The live presentation arm (SPEC-11 3D): the windowing module binds a real
-# wgpu/WebGL2/Canvas2D surface to the canvas and presents the authored 3D scene
-# each frame. wasm32-only (its live arm is gated on wasm32); the deterministic
-# scene authoring + render summary it presents lives in `axiom` on every target.
+# SPEC-11 3D: live wgpu/WebGL2/Canvas2D presentation, wasm32-only.
 axiom-windowing = { path = "../../modules/axiom-windowing" }
 web-sys = { version = "0.3", features = [
     "Window",

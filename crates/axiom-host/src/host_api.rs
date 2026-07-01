@@ -55,8 +55,6 @@ impl HostApi {
         HostApi { _sealed: () }
     }
 
-    // --- Viewport ---
-
     /// Construct a validated viewport from a logical size and a scale
     /// factor. The scale factor is a finite kernel [`Ratio`].
     pub fn viewport(
@@ -79,8 +77,6 @@ impl HostApi {
         HostViewport::from_physical(physical_width, physical_height, scale_factor)
     }
 
-    // --- Frame input ---
-
     /// Construct a host frame input from explicit integer timing values.
     /// The host supplies every timestamp; nothing is read from a clock.
     pub fn frame_input(
@@ -91,8 +87,6 @@ impl HostApi {
     ) -> HostFrameInput {
         HostFrameInput::new(sequence, elapsed_nanos, viewport)
     }
-
-    // --- Lifecycle ---
 
     /// The initial host lifecycle state (nothing observed yet).
     pub const fn lifecycle_initial(&self) -> HostLifecycleState {
@@ -107,8 +101,6 @@ impl HostApi {
     ) -> HostLifecycleState {
         state.apply(signal)
     }
-
-    // --- Boundary config ---
 
     /// Construct a host boundary config. Rejects zero `max_steps_per_frame`.
     pub const fn boundary_config(
@@ -129,14 +121,10 @@ impl HostApi {
         config.validate(kernel)
     }
 
-    // --- Step driver ---
-
     /// Construct a step driver around a validated boundary config.
     pub fn step_driver(&self, config: HostBoundaryConfig) -> HostStepDriver {
         HostStepDriver::new(config)
     }
-
-    // --- Planning helpers ---
 
     /// Compute a step plan for the given inputs, without touching a
     /// runtime. Pure and deterministic.
@@ -169,13 +157,9 @@ impl HostApi {
         )
     }
 
-    // --- Presentation boundary ---
-    //
-    // The deterministic, browser-free surface/adapter/device/presentation
-    // boundary a future browser/WASM adapter and a future axiom-webgpu live
-    // mode will consume. Nothing here touches a real GPU, window, or DOM
-    // object — handles are stable kernel identities and everything else is
-    // validated host-owned data.
+    // Deterministic surface/adapter/device/presentation boundary: handles are
+    // stable kernel identities, and nothing here touches a real GPU, window, or
+    // DOM object.
 
     /// Mint a validated [`HostPresentationTarget`]. The handle id is built
     /// through the kernel facade; a null id or empty label is rejected.
@@ -249,12 +233,8 @@ impl HostApi {
         HostPresentationReport::from_request(request)
     }
 
-    // --- Embed seam (SPEC-12) ---
-    //
-    // The inbound session identity the platform arm decoded, and the outbound
-    // terminal outcome the engine mints once. The facade only carries already-
-    // decoded data: it never reads a URL, a clock, or `localStorage` — those are
-    // the runtime app's job.
+    // The facade only carries already-decoded data (SPEC-12): it never reads a
+    // URL, a clock, or `localStorage` itself.
 
     /// Carry a session config from a `seed` and already-decoded opaque `params`.
     /// The `seed` is the determinism input fixed before tick 0 (SPEC-12 §6).
@@ -303,8 +283,6 @@ mod tests {
 
     #[test]
     fn new_and_default_are_equivalent() {
-        // The facade is a zero-sized marker: both paths validate viewports
-        // identically.
         assert_eq!(
             HostApi::new()
                 .viewport(800, 600, ratio(2.0))
@@ -415,8 +393,6 @@ mod tests {
         assert_eq!(report.steps_executed(), 0);
         assert_eq!(report.sequence(), 7);
     }
-
-    // --- Presentation boundary (facade level) ---
 
     use crate::host_alpha_mode::HostAlphaMode;
     use crate::host_color_format::HostColorFormat;
@@ -539,8 +515,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code(), HostErrorCode::InvalidPresentationRequest);
     }
-
-    // --- Embed seam (facade level) ---
 
     use crate::host_param_value::HostParamValue;
 
