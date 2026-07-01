@@ -88,6 +88,9 @@ axiom-interface = { path = "../../crates/axiom-interface" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-layout = { path = "../../crates/axiom-layout" }
 axiom-space = { path = "../../crates/axiom-space" }
+# Deterministic, address-keyed entropy streams — the growth worldgen RNG (replaces
+# the app-local splitmix64 duplicate; the sphere-point sampler graduated to axiom-math).
+axiom-entropy = { path = "../../crates/axiom-entropy" }
 axiom-proc = { path = "../../crates/axiom-proc" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 # The physics module under test (physics-crucible), composed only through PhysicsApi.

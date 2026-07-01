@@ -8,10 +8,35 @@
 
 use std::collections::HashMap;
 
+use axiom_entropy::{EntropyApi, EntropyStream};
+use axiom_space::{Address, SpaceApi};
+
 use crate::growth::model_planet::PlanetGlobe;
 
+/// Opaque, fixed address segment naming the growth worldgen root site. The value
+/// is arbitrary but *stable* — a depth-1 child of the space root — so the entropy
+/// key derived from `(seed, address, version)` is reproducible across runs and
+/// platforms. Do not change it without accepting a full re-baseline of every
+/// generated world.
+const WORLDGEN_ROOT_SEGMENT: u64 = 0x_67_72_6F_77_74_68_00_01; // "growth\0\x01"
+/// Generator version for the worldgen entropy key. Bumping it re-keys every
+/// stream (a deliberate, versioned worldgen behavior change).
+const WORLDGEN_VERSION: u32 = 1;
+
+/// The deterministic worldgen root [`EntropyStream`] for a `u64` seed. Every
+/// generation subsystem mints this once and [`EntropyStream::fork`]s an isolated
+/// sub-stream (by a per-purpose salt) off it, so subsystems never share a
+/// sequence yet the whole world stays reproducible from the seed. Replaces the
+/// deleted app-local `rng::Rng::seeded(seed)` with the engine's `axiom-entropy`
+/// keying.
+pub fn worldgen_stream(seed: u64) -> EntropyStream {
+    let address: Address = SpaceApi::child(&SpaceApi::root(), WORLDGEN_ROOT_SEGMENT);
+    EntropyApi::stream(seed, &address, WORLDGEN_VERSION)
+}
+
 /// Per-generation context handed to every stage. Plain config + a deterministic
-/// seed so stages can `Rng::seeded`/`fork` their own sub-streams.
+/// seed so stages can mint the worldgen entropy stream ([`worldgen_stream`]) and
+/// `fork` their own sub-streams.
 /// Audit: "Determinism requirements".
 #[derive(Debug, Clone)]
 pub struct GenContext {

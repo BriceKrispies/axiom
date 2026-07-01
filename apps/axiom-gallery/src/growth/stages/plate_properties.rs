@@ -8,8 +8,7 @@
 //! the `elevation` stage adds boundary uplift + noise detail.
 
 use crate::growth::model_planet::PlanetGlobe;
-use crate::growth::pipeline::{GenContext, Stage};
-use crate::growth::rng::Rng;
+use crate::growth::pipeline::{worldgen_stream, GenContext, Stage};
 
 /// Fraction of plates that are oceanic. Audit: ~40% oceanic plates.
 const OCEANIC_FRACTION: f32 = 0.40;
@@ -37,13 +36,13 @@ impl Stage for PlatePropertiesStage {
 
         // Deterministic per-plate oceanic flag: hash the plate index off the seed
         // and threshold so ~OCEANIC_FRACTION of plates are oceanic.
-        let base = Rng::seeded(ctx.seed).fork(0x_0CEA_0CEA);
+        let base = worldgen_stream(ctx.seed).fork(0x_0CEA_0CEA);
         globe.plate_oceanic.clear();
         globe.plate_oceanic.resize(plate_count, false);
         let mut oceanic_count = 0usize;
         for p in 0..plate_count {
             let mut prng = base.fork(p as u64);
-            let oceanic = prng.next_f32() < OCEANIC_FRACTION;
+            let oceanic = prng.unit().get() < OCEANIC_FRACTION;
             globe.plate_oceanic[p] = oceanic;
             if oceanic {
                 oceanic_count += 1;

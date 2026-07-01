@@ -22,9 +22,10 @@
 //!
 //! Everything is a pure function of the world `seed` plus the picked direction
 //! (already baked into the anchored [`GameWorldLocalMap`]). The only randomness
-//! is an explicitly seeded [`Rng`] sub-stream (`seed ^ VISTA_SALT`); there is no
-//! wall-clock, no global state, no unseeded sampling. The same input always
-//! yields the same plan (proved by [`tests::plan_is_deterministic`]).
+//! is an explicit `axiom_entropy::EntropyStream` fork of the worldgen root
+//! (`worldgen_stream(seed).fork(VISTA_SALT)`); there is no wall-clock, no global
+//! state, no unseeded sampling. The same input always yields the same plan
+//! (proved by [`tests::plan_is_deterministic`]).
 //!
 //! ## Authoring convention (why the mountain sits on local −Z)
 //!
@@ -37,12 +38,13 @@
 //! anyway — the map pick fixes *where on the planet* the anchor is (and thus the
 //! surrounding terrain), not which tangent heading the player looks down.
 
+use crate::growth::distributions;
 use crate::growth::gameworld::sample_height_m;
 use crate::growth::model_planet::PlanetSurfaceAtlas;
 use crate::growth::model_world::GameWorldLocalMap;
-use crate::growth::rng::Rng;
+use crate::growth::pipeline::worldgen_stream;
 
-/// Salt mixed into the world seed for the vista's deterministic sub-stream, so
+/// Salt forked off the worldgen root for the vista's deterministic sub-stream, so
 /// vista selection never shares a sequence with worldgen or chunk detail.
 const VISTA_SALT: u64 = 0x5713_A115_7A00_0000;
 
@@ -391,7 +393,7 @@ impl VistaDirector {
         seed: u64,
         cfg: VistaConfig,
     ) -> MountainVistaPlan {
-        let mut rng = Rng::seeded(seed ^ VISTA_SALT);
+        let mut rng = worldgen_stream(seed).fork(VISTA_SALT);
 
         // 1. Choose the flattest nearby spawn (the "nudge"), so the shelf blend is
         //    gentle and we never seat the player on rough ground.
@@ -402,7 +404,8 @@ impl VistaDirector {
         //    sits on local −Z from the spawn (see module docs).
         let mut best: Option<(f32, f32)> = None; // (score, distance)
         for _ in 0..cfg.candidate_count.max(1) {
-            let dist = rng.next_range(cfg.distance_range_m.0, cfg.distance_range_m.1);
+            let dist =
+                distributions::range(&mut rng, cfg.distance_range_m.0, cfg.distance_range_m.1);
             let eval = evaluate(atlas, localmap, seed, spawn, shelf_height, dist, cfg);
             if eval.accept {
                 let s = composite_score(&eval, dist, cfg);
@@ -898,18 +901,18 @@ fn fingerprint(plan: &MountainVistaPlan) -> u64 {
 
 /// A deterministic mountain id from the seed and chosen distance.
 fn mountain_id(seed: u64, distance: f32) -> u32 {
-    let mut r = Rng::seeded(seed ^ (distance.to_bits() as u64).wrapping_shl(8));
-    r.next_u32()
+    let mut r = worldgen_stream(seed).fork((distance.to_bits() as u64).wrapping_shl(8));
+    (r.next_u64() >> 32) as u32
 }
 
 /// Three secondary ridges at deterministic azimuths from the seed.
 fn build_ridges(seed: u64) -> Vec<Ridge> {
-    let mut r = Rng::seeded(seed ^ 0x21D6_E5A7);
+    let mut r = worldgen_stream(seed).fork(0x21D6_E5A7);
     (0..3)
         .map(|_| Ridge {
-            angle: r.next_range(0.0, core::f32::consts::TAU),
-            amplitude_m: r.next_range(500.0, 1100.0),
-            width: r.next_range(0.25, 0.5),
+            angle: distributions::range(&mut r, 0.0, core::f32::consts::TAU),
+            amplitude_m: distributions::range(&mut r, 500.0, 1100.0),
+            width: distributions::range(&mut r, 0.25, 0.5),
         })
         .collect()
 }
