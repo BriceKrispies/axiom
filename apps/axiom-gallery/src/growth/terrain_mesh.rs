@@ -12,6 +12,8 @@
 //! `GpuBackendApi::render_offscreen_rgba` consume.
 
 use axiom::prelude::*;
+use axiom_kernel::Meters;
+use axiom_terrain_mesh::TerrainMeshApi;
 
 use crate::growth::gameworld::sample_height_m_lod_vista;
 use crate::growth::model_world::GameWorldLocalMap;
@@ -67,30 +69,33 @@ fn build_field(
     spacing: f32,
     drop: f32,
 ) -> (Vec<f32>, Vec<u32>) {
-    let side: usize = (2.0 * radius / spacing).ceil() as usize + 1;
-
     // Absolute composited height at a point (detail cap = spacing).
     let h_abs = |x: f32, z: f32| {
         sample_height_m_lod_vista(&growth.atlas, localmap, seed, x, z, spacing, Some(plan))
     };
 
-    let mut vertices: Vec<f32> = Vec::with_capacity(side * side * VERT_FLOATS);
-    (0..side).for_each(|jz| {
-        let z = cz - radius + jz as f32 * spacing;
-        (0..side).for_each(|ix| {
-            let x = cx - radius + ix as f32 * spacing;
-            let abs = h_abs(x, z);
-            let y = abs - anchor_h - drop;
+    // The reusable geometry — the square grid of positions, central-difference
+    // normals, and grid triangle indices — comes from the engine module. It is
+    // domain-neutral: it samples the absolute height and hands back neutral Vec3
+    // geometry. Everything below (drop/anchor placement, colour bands, atmospheric
+    // perspective, trail tint, biome UVs) is app content decorating that mesh.
+    let mesh = TerrainMeshApi::heightfield_grid_mesh(
+        (Meters::finite_or_zero(cx), Meters::finite_or_zero(cz)),
+        Meters::finite_or_zero(radius),
+        Meters::finite_or_zero(spacing),
+        |mx, mz| Meters::finite_or_zero(h_abs(mx.get(), mz.get())),
+    );
 
-            // Central-difference normal from the field.
-            let hx0 = h_abs(x - spacing, z);
-            let hx1 = h_abs(x + spacing, z);
-            let hz0 = h_abs(x, z - spacing);
-            let hz1 = h_abs(x, z + spacing);
-            let nx = -(hx1 - hx0);
-            let nz = -(hz1 - hz0);
-            let ny = 2.0 * spacing;
-            let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1.0e-6);
+    let mut vertices: Vec<f32> = Vec::with_capacity(mesh.positions().len() * VERT_FLOATS);
+    mesh.positions()
+        .iter()
+        .zip(mesh.normals())
+        .for_each(|(pos, normal)| {
+            // The module places `y = abs`; the app recenters by the anchor and the
+            // depth drop. (A constant y offset leaves the central-difference normal
+            // unchanged, so the module's normal is used verbatim.)
+            let (x, abs, z) = (pos.x, pos.y, pos.z);
+            let y = abs - anchor_h - drop;
 
             // Per-vertex colour: altitude bands × atmospheric perspective (faded by
             // distance from the field centre, i.e. the viewer) × cloud-band fade,
@@ -108,35 +113,11 @@ fn build_field(
             let v = cell_v + (z / BIOME_TILE_M).rem_euclid(1.0) * 0.5;
 
             vertices.extend_from_slice(&[
-                x,
-                y,
-                z,
-                nx / len,
-                ny / len,
-                nz / len,
-                u,
-                v,
-                col[0],
-                col[1],
-                col[2],
-                col[3],
+                x, y, z, normal.x, normal.y, normal.z, u, v, col[0], col[1], col[2], col[3],
             ]);
         });
-    });
 
-    let mut indices: Vec<u32> = Vec::with_capacity((side - 1) * (side - 1) * 6);
-    (0..side - 1).for_each(|jz| {
-        (0..side - 1).for_each(|ix| {
-            let i0 = (jz * side + ix) as u32;
-            let i1 = i0 + 1;
-            let i2 = i0 + side as u32;
-            let i3 = i2 + 1;
-            // Same winding as the streamed surface quads.
-            indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
-        });
-    });
-
-    (vertices, indices)
+    (vertices, mesh.indices().to_vec())
 }
 
 /// The browser's far scenic mesh: a coarse grid centred on the spawn covering the
