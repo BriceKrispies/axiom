@@ -17,7 +17,6 @@ pub mod distributions;
 pub mod ids;
 pub mod model_planet;
 pub mod model_world;
-pub mod pipeline;
 pub mod requirements;
 
 // --- generation primitives ---
@@ -31,10 +30,8 @@ pub mod genome;
 pub mod presets;
 pub mod seed;
 
-// --- worldgen stages + atlas + sampling ---
-pub mod atlas;
+// --- worldgen composition (via the axiom-planetgen feature module) + sampling ---
 pub mod sampler;
-pub mod stages;
 
 // --- game-world streaming ---
 pub mod chunkstore;
@@ -83,15 +80,22 @@ pub mod inventory;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+use axiom_kernel::{Meters, Ratio};
+use axiom_planetgen::{PlanetGenApi, PlanetGenParams};
+
 use crate::growth::chunkstore::{ChunkStore, STREAM_RADIUS_CHUNKS, STREAM_UNLOAD_MARGIN};
 use crate::growth::genome::PlanetGenome;
 use crate::growth::ids::ChunkCoord;
 use crate::growth::inventory::Inventory;
-use crate::growth::model_planet::{PlanetGlobe, PlanetSurfaceAtlas, SurfaceSample};
+use crate::growth::model_planet::{PlanetSurfaceAtlas, SurfaceSample};
 use crate::growth::model_world::{Diff, GameWorldLocalMap};
-use crate::growth::pipeline::{GenContext, StageRegistry, DEFAULT_GLOBE};
 use crate::growth::presets::PlanetPreset;
-use crate::growth::seed::WorldSeed;
+use crate::growth::seed::{worldgen_stream, WorldSeed};
+
+/// Tectonic plate seeds for a generated planet (was `GenContext::plate_count`).
+const DEFAULT_PLATE_COUNT: u32 = 24;
+/// Stream-power erosion iterations (was `GenContext::erosion_iterations`).
+const DEFAULT_EROSION_ITERS: u32 = 120;
 
 /// A Growth session: owns the seed, genome, overworld atlas, and (after entering
 /// play) the streamed game world. Audit: SA-E1 session, OW-E2 atlas ownership.
@@ -107,8 +111,6 @@ pub struct Growth {
     last_center: ChunkCoord,
     /// Determinism hash of the generated globe. Audit: SC-E3.
     pub world_hash: u64,
-    /// Stage log from generation. Audit: OW-4.3.
-    pub gen_log: Vec<String>,
 }
 
 impl Growth {
@@ -116,43 +118,24 @@ impl Growth {
     /// Audit: OW vision, OW-4.4 (store seed+genome), OW-E1 (build atlas).
     pub fn generate(seed_str: &str, preset: PlanetPreset, site_target: u32) -> Self {
         let seed = WorldSeed::from_str_seed(seed_str);
-        let mut stream = pipeline::worldgen_stream(seed.value);
+        let mut stream = worldgen_stream(seed.value);
         let genome = presets::sample_genome(preset, &mut stream);
 
-        let mut ctx = GenContext::new(seed.value);
-        ctx.planet_radius_m = genome.radius_m;
-        ctx.land_target = genome.implied_land_fraction();
-        ctx.site_target = site_target;
-
-        // Topology (fixed for the generation), then run the data-driven pipeline.
-        let subdiv = axiom_geosphere::subdivisions_for_target(site_target);
-        let mut globe = PlanetGlobe {
-            topology: axiom_geosphere::build_icosphere(subdiv),
-            ..PlanetGlobe::default()
+        // The whole overworld pipeline (topology + the thirteen worldgen stages +
+        // atlas build) is now the `axiom-planetgen` feature module. The app only
+        // translates the astrophysical genome into neutral generation params and
+        // reads the durable atlas back. Audit: OW-E1 (build atlas), OW-E20 (the
+        // transient globe lives and dies inside `PlanetGenApi::generate`).
+        let params = PlanetGenParams {
+            seed: seed.value,
+            radius_m: Meters::finite_or_zero(genome.radius_m),
+            land_target: Ratio::finite_or_zero(genome.implied_land_fraction()),
+            site_target,
+            plate_count: DEFAULT_PLATE_COUNT,
+            erosion_iters: DEFAULT_EROSION_ITERS,
         };
-        globe.graph = axiom_geosphere::build_region_graph(&globe.topology);
-        globe.resize_fields();
-
-        // OW-E18 / SC-E1: validate dual region rings before hydrology. Logged
-        // (not aborted) so generation is observable; the QA gate test asserts
-        // validity on reference configs. The layer validator takes neutral
-        // topology (icosphere + region graph), not the app's planet.
-        let rings = axiom_geosphere::validate_region_rings(&globe.topology, &globe.graph);
-        ctx.log.push(format!(
-            "validate_topology: bad_adjacency={} tris_not_in_3_rings={}",
-            rings.bad_adjacency, rings.tris_not_in_3_rings
-        ));
-
-        let mut registry = StageRegistry::new();
-        stages::register_default_stages(&mut registry);
-        match registry.build(DEFAULT_GLOBE) {
-            Ok(pipe) => pipe.run(&mut globe, &mut ctx),
-            Err(missing) => ctx.log.push(format!("MISSING STAGE: {}", missing.0)),
-        }
-
-        let world_hash = determinism::world_hash(&globe);
-        let atlas = atlas::build_atlas(&globe, &genome);
-        // OW-E20: transient globe is dropped here; only the atlas is retained.
+        let atlas = PlanetGenApi::generate(params);
+        let world_hash = determinism::world_hash(&atlas);
 
         Self {
             seed,
@@ -164,7 +147,6 @@ impl Growth {
             committed: false,
             last_center: ChunkCoord::default(),
             world_hash,
-            gen_log: ctx.log,
         }
     }
 
@@ -256,15 +238,27 @@ mod integration {
     }
 
     #[test]
-    fn pipeline_runs_all_default_stages() {
-        let g = Growth::generate("x", PlanetPreset::Dry, 1024);
-        for id in DEFAULT_GLOBE {
-            assert!(
-                g.gen_log.iter().any(|l| l == &format!("stage:{}", id)),
-                "stage {} did not run",
-                id
-            );
-        }
+    fn pipeline_produces_a_fully_shaped_atlas() {
+        // The graduated pipeline no longer emits a stage log; instead assert the
+        // observable result of every stage having run in order on a real planet:
+        // a fully-populated atlas whose fields carry the geology + hydrology the
+        // stages produce, and which is reproducible from the same seed.
+        let a = Growth::generate("x", PlanetPreset::Dry, 1024);
+        let b = Growth::generate("x", PlanetPreset::Dry, 1024);
+        let n = a.atlas.region_count();
+        assert!(n >= 1024, "topology stage produced {n} regions");
+        assert_eq!(a.atlas.region_elevation.len(), n);
+        assert_eq!(a.atlas.region_moisture.len(), n);
+        // tectonic + plate stages assigned every region to a plate.
+        assert_eq!(a.atlas.region_plate.len(), n);
+        assert!(!a.atlas.plate_oceanic.is_empty());
+        // fit_land_coverage produced both land and ocean; moisture stayed in range.
+        assert!(a.atlas.region_elevation.iter().any(|&e| e >= 0.0));
+        assert!(a.atlas.region_elevation.iter().any(|&e| e < 0.0));
+        assert!(a.atlas.region_moisture.iter().all(|&m| (0.0..=1.0).contains(&m)));
+        // Determinism: the same seed reproduces the same planet.
+        assert_eq!(a.world_hash, b.world_hash);
+        assert_eq!(a.atlas.region_elevation, b.atlas.region_elevation);
     }
 
     #[test]

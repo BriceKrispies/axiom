@@ -415,7 +415,7 @@ mod tests {
             plate_oceanic: vec![false; 5],
             region_elevation,
             region_moisture: vec![0.5; 5],
-            planet_radius_m: 6_000_000.0,
+            planet_radius_m: axiom_kernel::Meters::finite_or_zero(6_000_000.0),
             locator: Default::default(),
         }
     }

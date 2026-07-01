@@ -35,7 +35,7 @@ use crate::growth::distributions;
 use crate::growth::gameworld::sample_height_m;
 use crate::growth::model_planet::PlanetSurfaceAtlas;
 use crate::growth::model_world::GameWorldLocalMap;
-use crate::growth::pipeline::worldgen_stream;
+use crate::growth::seed::worldgen_stream;
 
 /// Salt forked off the worldgen root for the vista's deterministic sub-stream, so
 /// vista selection never shares a sequence with worldgen or chunk detail.
@@ -912,7 +912,7 @@ mod tests {
             plate_oceanic: vec![false; 5],
             region_elevation,
             region_moisture: vec![0.5; 5],
-            planet_radius_m: 6_000_000.0,
+            planet_radius_m: axiom_kernel::Meters::finite_or_zero(6_000_000.0),
             locator: Default::default(),
         }
     }

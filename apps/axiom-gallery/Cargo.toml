@@ -100,6 +100,12 @@ axiom-geosphere = { path = "../../crates/axiom-geosphere" }
 # + classify_climate own the latitude/elevation temperature and temperature x
 # moisture biome lookup the growth sampler used to inline.
 axiom-biome = { path = "../../modules/axiom-biome" }
+# The graduated planet-generation pipeline (feature module): PlanetGenApi::generate
+# composes the geosphere topology + thirteen branchless worldgen stages into a
+# durable PlanetSurfaceAtlas, and answers deterministic sample/locate queries. The
+# growth app builds its PlanetGenParams from the genome and re-exports the atlas
+# value types the rest of the app names.
+axiom-planetgen = { path = "../../modules/axiom-planetgen" }
 # Graph-hydrology field solvers (pit-fill, receivers, flow accumulation, erosion,
 # ocean distance) over the geosphere region graph; the worldgen hydrology stages
 # are thin wrappers over this layer.

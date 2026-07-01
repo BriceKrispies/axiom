@@ -68,7 +68,7 @@ fn render_globe(g: &Growth, size: usize, path: &str) {
                 right[2] * sx + up[2] * sy + forward[2] * sz,
             );
             let s = sampler::sample_surface(&g.atlas, dir);
-            let (cr, cg, cb) = color_for(s.biome.0, s.elevation, s.moisture);
+            let (cr, cg, cb) = color_for(s.biome.0, s.elevation.get(), s.moisture.get());
             // View-space normal is (sx, sy, sz): diffuse + ambient + limb darkening.
             let ndotl = (sx * light[0] + sy * light[1] + sz * light[2]).max(0.0);
             let shade = (0.30 + 0.85 * ndotl).min(1.15);

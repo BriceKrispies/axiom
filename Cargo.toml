@@ -48,6 +48,7 @@ members = [
     "modules/axiom-terrain-mesh",
     "modules/axiom-biome",
     "modules/axiom-levelgen",
+    "modules/axiom-planetgen",
     "modules/axiom-worldsave",
     "modules/axiom-physics",
     "modules/axiom-audio",

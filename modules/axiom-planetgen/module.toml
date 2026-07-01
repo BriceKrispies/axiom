@@ -1,0 +1,21 @@
+[module]
+name = "planetgen"
+crate_name = "axiom-planetgen"
+kind = "feature-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+    "space",
+    "entropy",
+    "noise",
+    "geosphere",
+    "hydrology",
+]
+
+allowed_modules = ["biome"]
+
+introduced_capabilities = [
+    "planet-generation",
+    "planet-surface-atlas",
+]
