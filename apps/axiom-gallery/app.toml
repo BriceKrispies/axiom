@@ -20,6 +20,7 @@ allowed_layers = [
     "entropy",
     "noise",
     "geosphere",
+    "hydrology",
     "proc",
     "runtime",
     "introspect",

@@ -1,17 +1,18 @@
 //! `erosion` stage: iterative stream-power-style erosion on the region graph.
 //! Audit: OW-E16 stream-power erosion (done core).
 //!
-//! For `min(ctx.erosion_iterations, MAX_ITERS)` passes, each region is lowered
-//! toward its lowest downhill neighbour by a fraction proportional to the local
-//! slope — a cheap, deterministic stand-in for stream-power incision that
-//! smooths peaks and deepens valleys without depending on flow accumulation yet.
+//! Thin app-side [`Stage`] wrapper over the `axiom-hydrology` layer: the
+//! slope-proportional incision ([`axiom_hydrology::stream_power_erosion`]) lives
+//! in the layer (which owns the per-pass cap and the branchless relaxation); this
+//! stage lifts the region elevation into `Meters`, runs the requested number of
+//! passes at the erosion strength, and writes the eroded field back.
 
-use crate::growth::ids::RegionId;
+use axiom_hydrology::stream_power_erosion;
+use axiom_kernel::{Meters, Ratio};
+
 use crate::growth::model_planet::PlanetGlobe;
 use crate::growth::pipeline::{GenContext, Stage};
 
-/// Cap on erosion passes regardless of the requested count. Audit: perf cap.
-const MAX_ITERS: u32 = 60;
 /// Per-pass erosion strength applied to the slope toward the lowest neighbour.
 const EROSION_K: f32 = 0.10;
 
@@ -27,38 +28,21 @@ impl Stage for ErosionStage {
         if region_count == 0 {
             return;
         }
-        let iters = ctx.erosion_iterations.min(MAX_ITERS);
 
-        let mut next = globe.region_elevation.clone();
-        for _ in 0..iters {
-            for (r, slot) in next.iter_mut().enumerate() {
-                let h = globe.region_elevation[r];
-                let neighbours = globe.graph.neighbours_of(RegionId(r as u32));
-                if neighbours.is_empty() {
-                    *slot = h;
-                    continue;
-                }
-                // Lowest downhill neighbour.
-                let mut min_h = h;
-                for &n in neighbours {
-                    let nh = globe.region_elevation[n as usize];
-                    if nh < min_h {
-                        min_h = nh;
-                    }
-                }
-                let slope = h - min_h;
-                // Incise proportional to slope; only erodes where there is a drop.
-                *slot = if slope > 0.0 {
-                    h - EROSION_K * slope
-                } else {
-                    h
-                };
-            }
-            globe.region_elevation.copy_from_slice(&next);
-        }
+        let elevation: Vec<Meters> = globe
+            .region_elevation
+            .iter()
+            .map(|&e| Meters::finite_or_zero(e))
+            .collect();
+        let strength = Ratio::finite_or_zero(EROSION_K);
+        let eroded =
+            stream_power_erosion(&globe.graph, &elevation, strength, ctx.erosion_iterations);
+        globe.region_elevation = eroded.into_iter().map(|m| m.get()).collect();
 
-        ctx.log
-            .push(format!("erosion: {} passes (cap {})", iters, MAX_ITERS));
+        ctx.log.push(format!(
+            "erosion: {} passes requested",
+            ctx.erosion_iterations
+        ));
     }
 }
 
@@ -115,11 +99,19 @@ mod tests {
     }
 
     #[test]
+    fn empty_globe_is_a_noop() {
+        let mut g = line_globe(vec![]);
+        let mut ctx = GenContext::new(1);
+        ErosionStage.run(&mut g, &mut ctx);
+        assert!(g.region_elevation.is_empty());
+    }
+
+    #[test]
     fn iteration_cap_is_respected() {
         let mut g = line_globe(vec![0.0, 1.0, 5.0, 1.0, 0.0]);
         let mut ctx = GenContext::new(1);
         ctx.erosion_iterations = 100_000;
-        // Should terminate quickly thanks to MAX_ITERS cap.
+        // Should terminate quickly thanks to the layer's per-pass cap.
         ErosionStage.run(&mut g, &mut ctx);
         assert!(g.region_elevation[2] < 5.0);
     }

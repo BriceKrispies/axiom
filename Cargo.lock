@@ -253,6 +253,7 @@ dependencies = [
  "axiom-geosphere",
  "axiom-gpu-backend",
  "axiom-host",
+ "axiom-hydrology",
  "axiom-input",
  "axiom-interface",
  "axiom-introspect",
@@ -344,6 +345,14 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-hydrology"
+version = "0.1.0"
+dependencies = [
+ "axiom-geosphere",
+ "axiom-kernel",
 ]
 
 [[package]]

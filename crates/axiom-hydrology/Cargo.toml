@@ -1,0 +1,15 @@
+[package]
+name = "axiom-hydrology"
+description = "Axiom layer: deterministic graph-hydrology field solvers over the geosphere region-adjacency graph. Pit-fills an elevation field to a monotone drainage surface, computes per-region steepest-descent receivers and flow accumulation, applies stream-power erosion, and measures multi-source ocean-distance — all as pure, branchless, byte-deterministic transforms of (RegionGraph + per-region scalar fields) in, fields out. The heaps/queues of a classic priority-flood / BFS are replaced by bounded wavefront relaxation passes. depends_on = geosphere, kernel."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-kernel = { path = "../axiom-kernel" }
+axiom-geosphere = { path = "../axiom-geosphere" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

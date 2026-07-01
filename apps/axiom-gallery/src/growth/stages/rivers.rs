@@ -1,42 +1,32 @@
 //! River hydrology stages: `river_downflow`, `river_flow`, `river_carve`.
 //! Audit: worldgen river_downflow/river_flow/river_carve; OW-E14 (carve default).
 //!
-//! - `river_downflow`: each region drains to its lowest neighbour (its receiver);
-//!   regions with no lower neighbour are local sinks/ocean. Initialises
-//!   `region_flow` to the per-region rainfall (1 unit each).
-//! - `river_flow`: accumulate flow downstream — every region pushes its
-//!   accumulated flow to its receiver in order of descending elevation, so each
-//!   region ends holding the total upstream contributing area.
-//! - `river_carve`: lower high-flow regions slightly (valley incision) and fill
-//!   `triangle_flow` by averaging the region flow of each triangle's corners.
+//! Thin app-side [`Stage`] wrappers over the `axiom-hydrology` layer:
+//! - `river_downflow`: seeds `region_flow` to the per-region rainfall (1 unit)
+//!   and logs the sink count from the layer's receivers
+//!   ([`axiom_hydrology::compute_receivers`]).
+//! - `river_flow`: replaces `region_flow` with the layer's downstream flow
+//!   accumulation ([`axiom_hydrology::flow_accumulation`]) — each region ends
+//!   holding its total upstream contributing area.
+//! - `river_carve`: lowers high-flow land regions (valley incision) and fills
+//!   `triangle_flow` by averaging corner-region flow. This carve is app-specific
+//!   worldgen shaping, not a generic graph algorithm, so it stays here.
 //!
-//! All three recompute receivers from the current elevation, so they are
-//! independent and deterministic and need no extra shared fields.
+//! The receiver / accumulation math is deterministic and lives once in the layer.
 
-use crate::growth::ids::RegionId;
+use axiom_hydrology::{compute_receivers, flow_accumulation};
+use axiom_kernel::Meters;
+
 use crate::growth::model_planet::PlanetGlobe;
 use crate::growth::pipeline::{GenContext, Stage};
 
-/// Compute each region's receiver: index of its lowest neighbour strictly below
-/// it, or itself if it is a local minimum (a sink). Deterministic: lowest
-/// elevation wins, ties broken by smallest index.
-fn compute_receivers(globe: &PlanetGlobe) -> Vec<u32> {
-    let n = globe.region_count();
-    let mut recv = vec![0u32; n];
-    for (r, slot) in recv.iter_mut().enumerate() {
-        let h = globe.region_elevation[r];
-        let mut best = r as u32;
-        let mut best_h = h;
-        for &nb in globe.graph.neighbours_of(RegionId(r as u32)) {
-            let nh = globe.region_elevation[nb as usize];
-            if nh < best_h || (nh == best_h && nb < best) {
-                best_h = nh;
-                best = nb;
-            }
-        }
-        *slot = best;
-    }
-    recv
+/// Lift the globe's `f32` elevation field into the layer's typed `Meters`.
+fn elevation_meters(globe: &PlanetGlobe) -> Vec<Meters> {
+    globe
+        .region_elevation
+        .iter()
+        .map(|&e| Meters::finite_or_zero(e))
+        .collect()
 }
 
 // --- river_downflow ---------------------------------------------------------
@@ -58,8 +48,8 @@ impl Stage for RiverDownflowStage {
             *f = 1.0;
         }
         // Computing receivers here validates that the drainage graph exists.
-        let recv = compute_receivers(globe);
-        let sinks = (0..n).filter(|&r| recv[r] as usize == r).count();
+        let recv = compute_receivers(&globe.graph, &elevation_meters(globe));
+        let sinks = (0..n).filter(|&r| recv[r].index() == r).count();
         ctx.log.push(format!("river_downflow: {} sinks", sinks));
     }
 }
@@ -78,29 +68,8 @@ impl Stage for RiverFlowStage {
         if n == 0 {
             return;
         }
-        if globe.region_flow.len() != n {
-            globe.region_flow.resize(n, 1.0);
-        }
-        let recv = compute_receivers(globe);
-
-        // Process regions from highest to lowest elevation so a region's full
-        // accumulation is known before it drains into its receiver. Stable order
-        // (by index) on ties keeps this deterministic.
-        let mut order: Vec<usize> = (0..n).collect();
-        order.sort_by(|&a, &b| {
-            globe.region_elevation[b]
-                .partial_cmp(&globe.region_elevation[a])
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then(a.cmp(&b))
-        });
-
-        for &r in &order {
-            let target = recv[r] as usize;
-            if target != r {
-                globe.region_flow[target] += globe.region_flow[r];
-            }
-        }
-
+        let flow = flow_accumulation(&globe.graph, &elevation_meters(globe));
+        globe.region_flow = flow.into_iter().map(|r| r.get()).collect();
         ctx.log.push("river_flow: accumulated drainage".to_string());
     }
 }
@@ -214,6 +183,24 @@ mod tests {
     }
 
     #[test]
+    fn downflow_reports_the_single_sink() {
+        let mut g = slope_globe();
+        let mut ctx = GenContext::new(1);
+        RiverDownflowStage.run(&mut g, &mut ctx);
+        // Region 0 is the only local minimum ⇒ exactly one sink.
+        assert!(ctx.log.iter().any(|l| l == "river_downflow: 1 sinks"));
+    }
+
+    #[test]
+    fn river_flow_empty_globe_is_a_noop() {
+        let mut g = PlanetGlobe::default();
+        let mut ctx = GenContext::new(1);
+        RiverFlowStage.run(&mut g, &mut ctx);
+        RiverCarveStage.run(&mut g, &mut ctx);
+        assert!(g.region_flow.is_empty());
+    }
+
+    #[test]
     fn carve_lowers_high_flow_and_sets_triangle_flow() {
         let mut g = slope_globe();
         let mut ctx = GenContext::new(1);
@@ -223,6 +210,17 @@ mod tests {
         assert!(g.region_elevation[1] <= before);
         assert!(g.region_elevation[1] >= 0.0);
         assert!(g.triangle_flow[0] > 0.0);
+    }
+
+    #[test]
+    fn carve_zeroes_triangle_with_out_of_range_corner() {
+        let mut g = slope_globe();
+        // A degenerate triangle referencing a corner past the region count.
+        g.topology.triangles = vec![[0, 1, 99]];
+        g.triangle_flow.resize(1, 0.0);
+        let mut ctx = GenContext::new(1);
+        run_all(&mut g, &mut ctx);
+        assert_eq!(g.triangle_flow[0], 0.0);
     }
 
     #[test]
