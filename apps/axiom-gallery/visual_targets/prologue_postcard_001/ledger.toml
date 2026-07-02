@@ -1466,3 +1466,44 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 5
+
+[[iteration]]
+iteration = 36
+attacked_axis = "color_palette"
+changed_files = [
+    "manifest.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "PARITY REFINEMENT: broaden the foliage palette to the full autumn range; color_palette 4->5"
+abstraction_introduced = false
+human_note = "Broaden the foliage palette from warm-orange-leaning to the reference's full autumn RANGE (yellow-gold, gold, orange, russet, deep red, brown), so individual leaves show authentic autumn colour variety across the canopy."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 5
+vegetation_clumping = 5
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 5
+vegetation_clumping = 5
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 5
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5
