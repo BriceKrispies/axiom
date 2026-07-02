@@ -609,34 +609,54 @@ fn litter_unit_mesh() -> (Vec<f32>, Vec<u32>) {
     (v, idx)
 }
 
-/// The unit foliage leaf clump: two crossed **irregular** polygons (a jittered rim
-/// fan, radius ~0.5), not paper squares, so the card reads as a ragged leaf mass.
-/// Double-sided, up-facing normals so the mass catches the warm sun. Per-vertex
-/// white; the instance tint carries the autumn leaf colour.
+/// The unit foliage leaf clump: a **cluster of small separate leaf quads** at varied
+/// offsets + tilts, with real GAPS between them — so the card reads as a mass of
+/// individual leaves with light through the gaps, rather than one solid sheet. The
+/// gaps are actual geometry (nothing there), so every backend (textured GPU + flat
+/// software raster) renders them identically and depth stays correct — no alpha
+/// texture or shader cutout needed. Double-sided, up-facing normals for the warm sun;
+/// per-vertex white, the instance tint carries the autumn leaf colour.
 fn foliage_card_unit_mesh() -> (Vec<f32>, Vec<u32>) {
-    // Irregular rim radii (a leaf clump silhouette, not a circle or square).
-    const RIM: [f32; 9] = [0.50, 0.34, 0.47, 0.28, 0.50, 0.36, 0.44, 0.30, 0.48];
+    const LEAF: usize = 9;
+    // Per-leaf centre offset within the unit clump (spread through its volume).
+    const OFF: [[f32; 3]; LEAF] = [
+        [0.00, 0.10, 0.00],
+        [0.34, -0.06, 0.20],
+        [-0.30, 0.04, -0.24],
+        [0.16, 0.30, -0.30],
+        [-0.36, -0.18, 0.12],
+        [0.24, -0.30, -0.14],
+        [-0.12, 0.34, 0.28],
+        [0.06, -0.10, 0.36],
+        [-0.22, 0.16, 0.30],
+    ];
+    // Per-leaf half-size (varied so the clump is ragged).
+    const SIZE: [f32; LEAF] = [0.30, 0.24, 0.27, 0.22, 0.28, 0.21, 0.25, 0.23, 0.26];
     let up = [0.0f32, 1.0, 0.0];
     let w = [1.0f32, 1.0, 1.0, 1.0];
-    let n = RIM.len();
     let mut v = Vec::new();
     let mut idx = Vec::new();
-    // Two crossed planes: one facing ±Z (x,y), one facing ±X (z,y).
-    (0..2).for_each(|plane| {
+    for k in 0..LEAF {
         let base = (v.len() / VERT_FLOATS) as u32;
-        push_vertex(&mut v, [0.0, 0.06, 0.0], up, [0.5, 0.5], w); // centre, slightly high
-        (0..n).for_each(|k| {
-            let a = k as f32 / n as f32 * std::f32::consts::TAU;
-            let r = RIM[k];
-            let (hx, hz) = (plane == 0).then_some((a.cos() * r, 0.0)).unwrap_or((0.0, a.cos() * r));
-            push_vertex(&mut v, [hx, a.sin() * r, hz], up, [0.5, 0.5], w);
-        });
-        (0..n).for_each(|k| {
-            let (c, r0, r1) = (base, base + 1 + k as u32, base + 1 + ((k + 1) % n) as u32);
-            // Fan triangle, both windings → visible from either side.
-            idx.extend_from_slice(&[c, r0, r1, c, r1, r0]);
-        });
-    });
+        let (o, s) = (OFF[k], SIZE[k]);
+        let a = k as f32 * 0.8;
+        let (ca, sa) = (a.cos(), a.sin());
+        // Two in-plane axes for a small tilted leaf diamond at offset `o`.
+        let ax = [ca * s, s * 0.15, sa * s];
+        let ay = [-sa * s * 0.7, s * 0.8, ca * s * 0.7];
+        let corner = |sx: f32, sy: f32| {
+            [o[0] + ax[0] * sx + ay[0] * sy, o[1] + ax[1] * sx + ay[1] * sy, o[2] + ax[2] * sx + ay[2] * sy]
+        };
+        push_vertex(&mut v, corner(-1.0, 0.0), up, [0.5, 0.5], w);
+        push_vertex(&mut v, corner(0.0, -1.0), up, [0.5, 0.5], w);
+        push_vertex(&mut v, corner(1.0, 0.0), up, [0.5, 0.5], w);
+        push_vertex(&mut v, corner(0.0, 1.0), up, [0.5, 0.5], w);
+        // Two triangles (a diamond), both windings → visible from either side.
+        idx.extend_from_slice(&[
+            base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base,
+            base + 3, base + 2,
+        ]);
+    }
     (v, idx)
 }
 

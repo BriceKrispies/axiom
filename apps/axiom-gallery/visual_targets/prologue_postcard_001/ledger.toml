@@ -1343,3 +1343,44 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 4
+
+[[iteration]]
+iteration = 33
+attacked_axis = "vegetation_clumping"
+changed_files = [
+    "build.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "PARITY REFINEMENT: geometric leaf clusters (individual leaves + gaps) push vegetation_clumping 4->5"
+abstraction_introduced = false
+human_note = "CAPABILITY: the foliage card mesh is now a CLUSTER of 9 small separate leaf quads at varied offsets/tilts with real GAPS between them (was two solid crossed polygons), so the canopy reads as masses of individual leaves with light through the gaps. Chosen over an alpha-cutout texture because the canvas2d software rasterizer is flat-shaded (no per-fragment texture sampling) -- geometric gaps render identically on EVERY backend (depth-correct, no shader/texture change), upholding the both-backends principle. Verified GPU + canvas2d."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 4
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 4
+vegetation_clumping = 5
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 4
