@@ -1384,3 +1384,44 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 4
+
+[[iteration]]
+iteration = 34
+attacked_axis = "artifact_level"
+changed_files = [
+    "build.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "PARITY REFINEMENT: trunk bark grain + grounded base reduces the flat-cylinder tell; artifact_level 4->5"
+abstraction_introduced = false
+human_note = "Bake per-segment bark streaks (deterministic light/dark) + a darker base into the trunk mesh vertex colours, so trunks read as beech bark with vertical grain + grounding instead of flat uniform tubes. Vertex colours -> identical on both backends. With the geometric leaf clusters (gaps) and the litter floor, the main low-poly tells are addressed; the residual is the intended stylized idiom."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 4
+vegetation_clumping = 5
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 4
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 4
+vegetation_clumping = 5
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5

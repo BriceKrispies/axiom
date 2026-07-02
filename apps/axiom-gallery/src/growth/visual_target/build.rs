@@ -515,8 +515,13 @@ fn trunk_unit_mesh() -> (Vec<f32>, Vec<u32>) {
     for s in 0..=seg {
         let a = (s as f32 / seg as f32) * std::f32::consts::TAU;
         let (nx, nz) = (a.cos(), a.sin());
+        // Per-segment bark streak (deterministic light/dark) → vertical bark variation
+        // so the trunk reads as bark, not a flat tube.
+        let streak = 0.84 + ((s.wrapping_mul(2_654_435_761) >> 24) & 0xFF) as f32 / 255.0 * 0.28;
         for y in [0.0f32, 1.0f32] {
-            push_vertex(&mut v, [nx, y, nz], [nx, 0.0, nz], [0.5, 0.5], [1.0, 1.0, 1.0, 1.0]);
+            // Darker toward the base (roots / ambient occlusion), lighter up.
+            let c = (streak * (0.60 + y * 0.40)).min(1.12);
+            push_vertex(&mut v, [nx, y, nz], [nx, 0.0, nz], [0.5, 0.5], [c, c, c, 1.0]);
         }
     }
     for s in 0..seg {
