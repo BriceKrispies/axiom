@@ -46,13 +46,13 @@ impl FrameVolumetrics {
         FrameVolumetrics { samples, density, decay, weight, exposure, threshold, color }
     }
 
-    /// The public constructor: a warm, subtle low-poly god-ray preset. Presets keep
-    /// the raw tuning scalars off the public surface.
+    /// The public constructor: a warm low-poly god-ray preset. Presets keep the raw
+    /// tuning scalars off the public surface.
     pub const fn low_poly() -> Self {
-        // Softer shafts: only the brightest pixels leak (higher threshold) at a lower
-        // exposure/weight, so light shafts read as gentle mist instead of blowing the
-        // open-sky gaps to white.
-        FrameVolumetrics::new(48, 0.9, 0.94, 0.042, 0.5, 0.72, [1.0, 0.9, 0.68])
+        // Visible warm sunbeams: a lower threshold lets more of the bright backlit sky
+        // leak, at a higher weight/exposure, so shafts stream through the trunks the way
+        // the reference's misty backlight does — without fully blowing the sky gaps.
+        FrameVolumetrics::new(48, 0.9, 0.94, 0.09, 0.8, 0.62, [1.0, 0.9, 0.68])
     }
 }
 
