@@ -1659,3 +1659,46 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 4
 artifact_level = 2
+
+[[iteration]]
+iteration = 41
+attacked_axis = "lighting_directionality"
+changed_files = [
+    "manifest.candidate.toml",
+    "verdict.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "attacked axis lighting_directionality 2->3 (+1); no non-attacked axis dropped; promoted"
+next_attacked_axis = "artifact_level"
+abstraction_introduced = false
+human_note = "One nudge: [sun] intensity 1.25->1.6. Directly-lit surfaces (floor pools, lit trunk edges) brighten while shadowed areas stay at the unchanged ambient, so the sunlit/shadow contrast widens and the long cast trunk shadows read. Config-only (existing directional sun). lighting_directionality 2->3 (directionally stronger; still short of the reference crisp-shadow drama). More contrast, not more washed; nothing worse."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 2
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 2

@@ -27,7 +27,7 @@ height_px = 800
 # in view) so the new volumetric god-ray post-pass streams shafts toward the camera.
 direction = [0.14, -0.40, 0.90]
 color = [1.0, 0.86, 0.62]
-intensity = 1.25
+intensity = 1.6
 
 [fog]
 # ITER 21 (attack: fog_and_haze) — a warm, luminous depth haze (matching the backlit

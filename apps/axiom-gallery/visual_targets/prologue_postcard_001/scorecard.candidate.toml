@@ -1,12 +1,13 @@
-# Cool-neutral haze nudge: the distance recedes as cool mist (warm fg / cool bg),
-# restoring depth. fog_and_haze 3->4 (attacked) + depth_separation 3->4; nothing dropped.
+# Sun intensity 1.25 -> 1.6: brighter sunlit floor + more visible cast trunk shadows
+# (directional drama stronger, more contrast). Still not the reference's crisp shadow
+# drama, so 2->3 not higher. Nothing dropped (more contrasty, not more washed).
 terrain_silhouette = 4
 foreground_material_detail = 3
 vegetation_density = 4
 vegetation_clumping = 3
 depth_separation = 4
 fog_and_haze = 4
-lighting_directionality = 2
+lighting_directionality = 3
 color_palette = 3
 contrast_and_exposure = 3
 object_scale = 4
