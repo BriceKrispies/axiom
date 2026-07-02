@@ -99,15 +99,17 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     let dim = vec2<f32>(textureDimensions(shadow_map));
     let texel = 1.0 / dim;
     let bias = 0.0015;
+    // 5x5 PCF with a slight kernel spread for a softer penumbra than a 3x3 tap.
+    let spread = 1.25;
     var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy = dy + 1) {
-        for (var dx = -1; dx <= 1; dx = dx + 1) {
-            let off = vec2<f32>(f32(dx), f32(dy)) * texel;
+    for (var dy = -2; dy <= 2; dy = dy + 1) {
+        for (var dx = -2; dx <= 2; dx = dx + 1) {
+            let off = vec2<f32>(f32(dx), f32(dy)) * texel * spread;
             sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, ndc.z - bias);
         }
     }
     let outside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0;
-    return select(sum / 9.0, 1.0, outside);
+    return select(sum / 25.0, 1.0, outside);
 }
 
 @fragment
