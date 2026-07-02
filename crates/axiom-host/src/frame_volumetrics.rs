@@ -49,7 +49,10 @@ impl FrameVolumetrics {
     /// The public constructor: a warm, subtle low-poly god-ray preset. Presets keep
     /// the raw tuning scalars off the public surface.
     pub const fn low_poly() -> Self {
-        FrameVolumetrics::new(48, 0.9, 0.94, 0.055, 0.75, 0.62, [1.0, 0.9, 0.68])
+        // Softer shafts: only the brightest pixels leak (higher threshold) at a lower
+        // exposure/weight, so light shafts read as gentle mist instead of blowing the
+        // open-sky gaps to white.
+        FrameVolumetrics::new(48, 0.9, 0.94, 0.042, 0.5, 0.72, [1.0, 0.9, 0.68])
     }
 }
 

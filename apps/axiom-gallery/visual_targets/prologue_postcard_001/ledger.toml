@@ -1548,3 +1548,44 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 5
+
+[[iteration]]
+iteration = 38
+attacked_axis = "contrast_and_exposure"
+changed_files = [
+    "frame_volumetrics.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "PARITY REFINEMENT: softer god-ray preset stops the open-sky gaps blowing to white; contrast_and_exposure 4->5"
+abstraction_introduced = false
+human_note = "Soften the host low_poly volumetric preset (higher threshold 0.62->0.72, lower exposure 0.75->0.5, lower weight) so only the brightest pixels leak -- light shafts read as gentle mist instead of blowing the open-sky gaps to harsh white. Balanced tonal range. Spine constant change (no API/test impact); benefits every backend + the forest_walk demo."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 5
+vegetation_clumping = 5
+depth_separation = 5
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 5
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 5
+vegetation_clumping = 5
+depth_separation = 5
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 5
+contrast_and_exposure = 5
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5
