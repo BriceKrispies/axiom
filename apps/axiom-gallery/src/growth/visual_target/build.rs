@@ -14,7 +14,9 @@
 //! uv(2) · colour(4). Instance layout is the engine's 36 floats: view_proj(16) ·
 //! world(16) · tint(4).
 
-use axiom_host::{BackendCapabilityProfile, FrameAmbient, FrameVolumetrics, RenderCapability};
+use axiom_host::{
+    BackendCapabilityProfile, FrameAmbient, FramePostProcess, FrameVolumetrics, RenderCapability,
+};
 use axiom_kernel::Meters;
 use axiom_math::{Mat4, Quat, Transform, Vec3};
 use axiom_terrain_mesh::TerrainMeshApi;
@@ -69,6 +71,9 @@ pub struct RenderData {
     /// Optional volumetric light (god-rays) — neutral frame data every backend
     /// realizes through `host::apply_frame_volumetrics`.
     pub volumetrics: Option<FrameVolumetrics>,
+    /// Optional filmic tonemap post-process (ACES + exposure) — neutral frame data
+    /// the GPU always applies and Canvas 2D applies unless its profile drops it.
+    pub postprocess: Option<FramePostProcess>,
     /// Hemisphere ambient — neutral frame data lighting the faces no directional
     /// light reaches (lifts the backlit trunk faces + softens shadow contrast).
     pub ambient: FrameAmbient,
@@ -77,13 +82,16 @@ pub struct RenderData {
     pub canvas2d_profile: BackendCapabilityProfile,
 }
 
-/// Resolve the Canvas 2D capability profile from the manifest: `all()` unless the
-/// `[canvas2d]` config disables a capability (only `volumetrics` today).
+/// Resolve the Canvas 2D capability profile from the manifest's `[canvas2d]` config:
+/// `all()` minus any capability the config disables.
 fn canvas2d_profile(manifest: &Manifest) -> BackendCapabilityProfile {
     let all = BackendCapabilityProfile::all();
     match &manifest.canvas2d {
-        Some(c) if !c.volumetrics => all.without(RenderCapability::Volumetrics),
-        _ => all,
+        Some(c) => {
+            let p = [all, all.without(RenderCapability::Volumetrics)][usize::from(!c.volumetrics)];
+            [p, p.without(RenderCapability::PostProcess)][usize::from(!c.postprocess)]
+        }
+        None => all,
     }
 }
 
@@ -188,6 +196,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
         materials: vec![white_material()],
         batches,
         volumetrics: manifest.volumetrics.then(FrameVolumetrics::low_poly),
+        postprocess: manifest.postprocess.then(FramePostProcess::cinematic),
         ambient: manifest
             .ambient
             .map(|a| FrameAmbient::new(a.sky, a.ground))

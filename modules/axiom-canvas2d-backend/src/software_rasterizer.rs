@@ -176,6 +176,15 @@ impl SoftwareRasterizer {
             .contains(axiom_host::RenderCapability::Volumetrics)
             .then(|| axiom_host::apply_frame_volumetrics(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
 
+        // 10. filmic tonemap (ACES + exposure): the backend-neutral grade `host` applies
+        // to the finished RGBA. Gated on the capability profile too, so the [canvas2d]
+        // config can skip it; runs last so it grades the fully composited frame. A no-op
+        // when the frame carries no post-process.
+        self.options
+            .capability_profile()
+            .contains(axiom_host::RenderCapability::PostProcess)
+            .then(|| axiom_host::apply_frame_postprocess(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
+
         // The far-horizon silhouette needs neutral far-band data the FramePacket
         // does not carry (see ARCHITECTURE.md); its knobs are read but unused.
         let _ = cues.horizon_alpha;

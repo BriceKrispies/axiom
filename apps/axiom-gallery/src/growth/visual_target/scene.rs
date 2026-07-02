@@ -54,6 +54,12 @@ pub struct Manifest {
     /// Canvas 2D, WebGPU, and WebGL.
     #[serde(default)]
     pub volumetrics: bool,
+    /// Whether the scene applies the filmic tonemap post-process (ACES + exposure) —
+    /// **neutral frame data**. When `true`, the GPU always applies `host::
+    /// apply_frame_postprocess`; Canvas 2D applies it too unless its `[canvas2d]`
+    /// config disables the `PostProcess` capability.
+    #[serde(default)]
+    pub postprocess: bool,
     /// Optional stylized foliage: each tree's canopy is a loose cluster of crossed
     /// leaf **cards** in a warm autumn palette instead of one sphere blob. When
     /// absent, trees fall back to the sphere canopy.
@@ -87,6 +93,9 @@ pub struct Canvas2dConfig {
     /// Whether Canvas 2D runs the god-ray volumetric post-pass (default `true`).
     #[serde(default = "default_true")]
     pub volumetrics: bool,
+    /// Whether Canvas 2D runs the filmic tonemap post-process (default `true`).
+    #[serde(default = "default_true")]
+    pub postprocess: bool,
 }
 
 fn default_true() -> bool {

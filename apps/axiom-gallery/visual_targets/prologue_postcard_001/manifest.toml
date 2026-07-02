@@ -9,6 +9,8 @@ version = 1
 name = "prologue-postcard-001-candidate-iter6"
 # Volumetric god-rays (neutral frame data — realized by every backend).
 volumetrics = true
+# ITER 44: filmic ACES tonemap + exposure (host post-process, applied by both backends).
+postprocess = true
 
 # Low, forward-looking interior view: standing among the trunks, looking slightly up
 # and into the depth of the forest.

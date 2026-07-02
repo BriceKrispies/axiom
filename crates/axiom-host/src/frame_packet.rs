@@ -267,6 +267,7 @@ pub struct FramePacket {
     sdf: Option<SdfScene>,
     volumetrics: Option<crate::frame_volumetrics::FrameVolumetrics>,
     ambient: Option<crate::frame_ambient::FrameAmbient>,
+    postprocess: Option<crate::frame_postprocess::FramePostProcess>,
 }
 
 impl FramePacket {
@@ -298,6 +299,7 @@ impl FramePacket {
             sdf: None,
             volumetrics: None,
             ambient: None,
+            postprocess: None,
         }
     }
 
@@ -346,6 +348,22 @@ impl FramePacket {
     /// backend then falls back to [`crate::FrameAmbient::default_hemisphere`]).
     pub const fn ambient(&self) -> Option<&crate::frame_ambient::FrameAmbient> {
         self.ambient.as_ref()
+    }
+
+    /// Attach a tonemap post-process to this frame. It is neutral frame data: every
+    /// backend applies [`crate::apply_frame_postprocess`] to its output, so the filmic
+    /// look reads identically regardless of renderer. A packet without one (the
+    /// default) is presented untonemapped.
+    #[must_use]
+    pub fn with_postprocess(mut self, postprocess: crate::frame_postprocess::FramePostProcess) -> Self {
+        self.postprocess = Some(postprocess);
+        self
+    }
+
+    /// The frame's tonemap post-process parameters, or `None` when the frame carries
+    /// none.
+    pub const fn postprocess(&self) -> Option<&crate::frame_postprocess::FramePostProcess> {
+        self.postprocess.as_ref()
     }
 
     /// The frame index this packet presents.
@@ -547,6 +565,16 @@ mod tests {
         let amb = crate::frame_ambient::FrameAmbient::new([0.6, 0.7, 0.8], [0.2, 0.15, 0.1]);
         let with = base.clone().with_ambient(amb);
         assert_eq!(with.ambient(), Some(&amb));
+        assert_ne!(with, base);
+    }
+
+    #[test]
+    fn with_postprocess_attaches_and_breaks_equality() {
+        let base = sample_packet();
+        assert!(base.postprocess().is_none());
+        let pp = crate::frame_postprocess::FramePostProcess::cinematic();
+        let with = base.clone().with_postprocess(pp);
+        assert_eq!(with.postprocess(), Some(&pp));
         assert_ne!(with, base);
     }
 
