@@ -67,6 +67,15 @@ impl Canvas2dBackendApi {
         }
     }
 
+    /// Restrict which optional render capabilities this backend attempts (the default
+    /// is [`axiom_host::BackendCapabilityProfile::all`] — attempt everything, like the
+    /// GPU backends). The config lever for keeping Canvas 2D legible and fast:
+    /// e.g. `all().without(RenderCapability::Volumetrics)` makes it skip the god-ray
+    /// pass while the WebGPU / WebGL2 backends keep it.
+    pub fn set_capability_profile(&mut self, profile: axiom_host::BackendCapabilityProfile) {
+        self.options = self.options.with_capability_profile(profile);
+    }
+
     /// Upload the CPU sprite/atlas textures the 2D [`Draw2dList`] sprite path
     /// samples, as `(texture_id, width, height, RGBA8 pixels)` — the same upload
     /// shape as the 3D material set. Resolved in the app (fetch/decode); the
@@ -138,11 +147,15 @@ impl Canvas2dBackendApi {
     /// level from a `?quality=` query. Resizing the framebuffer mid-run is
     /// supported because the binding tracks the framebuffer size on each blit.
     pub fn set_quality_level(&mut self, level: u8) {
+        // Preserve the capability profile across a quality change (it is independent of
+        // the resolution tier, so a `set_quality_level` must not wipe a configured one).
+        let capability = self.options.capability_profile();
         self.options = LowPolyRasterOptions::from_preset_for_surface(
             CanvasQualityPreset::from_level(level),
             self.width,
             self.height,
-        );
+        )
+        .with_capability_profile(capability);
     }
 
 

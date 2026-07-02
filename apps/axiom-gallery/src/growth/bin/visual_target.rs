@@ -314,6 +314,10 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
 fn render_canvas2d(rd: &RenderData) -> (Vec<u8>, u32, u32) {
     let request = present_request(rd.width, rd.height);
     let mut backend = Canvas2dBackendApi::new(&request);
+    // Per-backend capability config: Canvas 2D uses the profile resolved from the
+    // manifest's [canvas2d] section (e.g. skip the god-ray volumetric pass); the GPU
+    // path always attempts everything.
+    backend.set_capability_profile(rd.canvas2d_profile);
     backend.load_meshes(&rd.meshes);
     backend.set_quality_level(3);
 

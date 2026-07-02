@@ -167,9 +167,14 @@ impl SoftwareRasterizer {
         let (outlined, outline_px) = outlined_opt.unwrap_or((0, 0));
 
         // 9. volumetric light scatter (god-rays): the backend-neutral frame effect —
-        // `host` applies the frame's `FrameVolumetrics` to the finished RGBA the same
-        // way for every renderer. A no-op when the frame carries none.
-        axiom_host::apply_frame_volumetrics(self.framebuffer.rgba_mut(), fb_w, fb_h, packet);
+        // `host` applies the frame's `FrameVolumetrics` to the finished RGBA. Gated on
+        // the backend's capability profile: skipped when this backend is configured to
+        // not attempt `Volumetrics` (the Canvas 2D fps lever), so the god-ray pass runs
+        // only when the profile allows it. A no-op anyway when the frame carries none.
+        self.options
+            .capability_profile()
+            .contains(axiom_host::RenderCapability::Volumetrics)
+            .then(|| axiom_host::apply_frame_volumetrics(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
 
         // The far-horizon silhouette needs neutral far-band data the FramePacket
         // does not carry (see ARCHITECTURE.md); its knobs are read but unused.
@@ -926,6 +931,33 @@ mod tests {
         let off = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&base, &cache);
         let on = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache);
         assert_ne!(off.rgba_bytes(), on.rgba_bytes(), "frame volumetrics reach the canvas output");
+    }
+
+    #[test]
+    fn capability_profile_gates_the_volumetric_pass() {
+        use axiom_host::{BackendCapabilityProfile, FrameLight, FrameVolumetrics, RenderCapability};
+        let cache = MeshCache::load(&[gameplay_object(42, [1.0, 1.0, 1.0, 1.0])]);
+        let cam = Some(FrameCamera::new(IDENTITY, IDENTITY, FRONT_VP));
+        let lit = FramePacket::new(
+            2,
+            120,
+            FrameViewport::new(48, 48),
+            [0.01, 0.01, 0.03, 1.0],
+            cam,
+            vec![draw(42, 42, [1.0; 4])],
+            vec![FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])],
+            IDENTITY,
+            FrameFeatureSet::new(false, true, 1, 0),
+        )
+        .with_volumetrics(FrameVolumetrics::low_poly());
+        // Default profile (all) applies the god-ray pass...
+        let with = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache);
+        // ...but a profile WITHOUT Volumetrics skips it (the Canvas 2D fps lever) — even
+        // though the frame carries volumetrics, the gated backend never runs the pass.
+        let restricted = opts_cued(48, 48, cues_off())
+            .with_capability_profile(BackendCapabilityProfile::all().without(RenderCapability::Volumetrics));
+        let without = SoftwareRasterizer::new(restricted).rasterize_packet(&lit, &cache);
+        assert_ne!(with.rgba_bytes(), without.rgba_bytes(), "capability gate skips the volumetric pass");
     }
 
     #[test]

@@ -14,7 +14,7 @@
 //! uv(2) · colour(4). Instance layout is the engine's 36 floats: view_proj(16) ·
 //! world(16) · tint(4).
 
-use axiom_host::{FrameAmbient, FrameVolumetrics};
+use axiom_host::{BackendCapabilityProfile, FrameAmbient, FrameVolumetrics, RenderCapability};
 use axiom_kernel::Meters;
 use axiom_math::{Mat4, Quat, Transform, Vec3};
 use axiom_terrain_mesh::TerrainMeshApi;
@@ -72,6 +72,19 @@ pub struct RenderData {
     /// Hemisphere ambient — neutral frame data lighting the faces no directional
     /// light reaches (lifts the backlit trunk faces + softens shadow contrast).
     pub ambient: FrameAmbient,
+    /// The capability profile the **Canvas 2D** backend should use (resolved from the
+    /// manifest's `[canvas2d]` config). The GPU path always attempts everything.
+    pub canvas2d_profile: BackendCapabilityProfile,
+}
+
+/// Resolve the Canvas 2D capability profile from the manifest: `all()` unless the
+/// `[canvas2d]` config disables a capability (only `volumetrics` today).
+fn canvas2d_profile(manifest: &Manifest) -> BackendCapabilityProfile {
+    let all = BackendCapabilityProfile::all();
+    match &manifest.canvas2d {
+        Some(c) if !c.volumetrics => all.without(RenderCapability::Volumetrics),
+        _ => all,
+    }
 }
 
 /// The full instance list: the explicitly authored trees plus, if present, the
@@ -179,6 +192,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
             .ambient
             .map(|a| FrameAmbient::new(a.sky, a.ground))
             .unwrap_or_else(FrameAmbient::default_hemisphere),
+        canvas2d_profile: canvas2d_profile(manifest),
     }
 }
 

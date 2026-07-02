@@ -70,6 +70,27 @@ pub struct Manifest {
     /// softens shadow contrast toward the reference's soft global illumination.
     #[serde(default)]
     pub ambient: Option<Ambient>,
+    /// Per-backend capability config for the **Canvas 2D** renderer only (the GPU
+    /// backends always attempt everything). The lever for keeping the software raster
+    /// legible + fast by having it skip effects it shouldn't attempt. Absent = attempt
+    /// everything (same as the GPU).
+    #[serde(default)]
+    pub canvas2d: Option<Canvas2dConfig>,
+}
+
+/// Which optional capabilities the Canvas 2D backend should attempt. Each flag defaults
+/// to `true` (attempt it); set one `false` to skip that effect on Canvas 2D — the
+/// WebGPU / WebGL2 backends keep it either way.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Canvas2dConfig {
+    /// Whether Canvas 2D runs the god-ray volumetric post-pass (default `true`).
+    #[serde(default = "default_true")]
+    pub volumetrics: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Hemisphere ambient tint: the linear-RGB sky (overhead) and ground (below) an unlit
