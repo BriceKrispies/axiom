@@ -4,10 +4,12 @@
 //! loop, steps the session from keyboard/pad input, and re-authors the scene
 //! every frame — exactly the `physics_crucible` live pattern.
 //!
-//! The render plan's flat, pre-shaded colours (Pass 3) are carried as
-//! **emissive** on a black-base material, so the engine renders them unlit —
-//! byte-faithful to the diorama's own shading without needing the engine light
-//! model. Boxes/quads/lines become the unit cube (extent 1 → scale = size), the
+//! The render plan's flat, pre-shaded colours (Pass 3) are carried as the
+//! material **base colour** — the one channel the live render path feeds every
+//! backend's per-instance colour (emissive is dropped from the live batches), so
+//! WebGPU / WebGL2 / Canvas2D all shade the same colour identically (hemisphere
+//! ambient + one directional light). Boxes/quads/lines become the unit cube
+//! (extent 1 → scale = size), the
 //! ball becomes the unit sphere (radius 0.5 → scale = size·2), and every draw is
 //! nudged a hair toward the camera in the plan's back-to-front order so the many
 //! near-coplanar ground/net quads win the depth test cleanly.
@@ -77,13 +79,18 @@ pub fn author_soccer(
             let to_eye = cam.eye.subtract(position);
             let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
             let biased = position.add(dir.mul_scalar(index as f32 * 0.0015));
-            let material = materials.add(
-                Material::lit(Color::BLACK).with_emissive(Color::linear_rgb(
-                    ch(shaded_color.r),
-                    ch(shaded_color.g),
-                    ch(shaded_color.b),
-                )),
-            );
+            // The colour MUST live in the material base colour: the live render
+            // path (all three backends — WebGPU / WebGL2 / Canvas2D) builds each
+            // instance's colour from `base_color`, and drops `emissive` (emissive
+            // only reaches the offscreen GPU material input). The scene's flat
+            // retro 32-bit shading is already baked into `shaded_color`; the engine's
+            // hemisphere ambient + the one directional light below then light it
+            // identically across all three backends.
+            let material = materials.add(Material::lit(Color::linear_rgb(
+                ch(shaded_color.r),
+                ch(shaded_color.g),
+                ch(shaded_color.b),
+            )));
             world.spawn((
                 Transform::combine(Transform::from_translation(biased), Transform::from_scale(scale)),
                 Renderable { mesh, material },
