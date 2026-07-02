@@ -35,6 +35,9 @@ const GROUNDCOVER_MESH: u64 = 4;
 const FOLIAGE_MESH: u64 = 5;
 const LITTER_MESH: u64 = 6;
 const WHITE_MAT: u64 = 1;
+/// A radial soft-alpha leaf texture — GPU renders the foliage cards as feathered leaf
+/// blobs (alpha cutout + blend); Canvas 2D ignores it and keeps the solid-card proxy.
+const LEAF_ALPHA_MAT: u64 = 2;
 
 /// Radial segments in the unit trunk cylinder.
 const TRUNK_SEGMENTS: u32 = 8;
@@ -143,15 +146,21 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let trees = all_trees(manifest);
     let trunk_inst = trunk_instances(manifest, &trees, lean_deg, &view_proj, eye);
     // Canopy: stylized foliage-card clusters when configured, else sphere blobs.
-    let (canopy_mesh_id, canopy_inst, canopy_count) = match &manifest.foliage {
+    // Foliage cards get the leaf-alpha material (GPU feathers them via alpha cutout);
+    // the sphere-blob fallback stays a solid white material.
+    let (canopy_mesh_id, canopy_inst, canopy_count, canopy_mat) = match &manifest.foliage {
         Some(f) => (
             FOLIAGE_MESH,
             foliage_instances(manifest, &trees, f, lean_deg, &view_proj, eye),
             trees.len() as u32 * (f.cards_per_tree + f.understory_cards),
+            LEAF_ALPHA_MAT,
         ),
-        None => {
-            (CANOPY_MESH, canopy_instances(manifest, &trees, lean_deg, &view_proj, eye), trees.len() as u32)
-        }
+        None => (
+            CANOPY_MESH,
+            canopy_instances(manifest, &trees, lean_deg, &view_proj, eye),
+            trees.len() as u32,
+            WHITE_MAT,
+        ),
     };
 
     let tufts = all_groundcover(manifest);
@@ -169,7 +178,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let tree_count = trees.len() as u32;
     (tree_count > 0).then(|| {
         batches.push((TRUNK_MESH, WHITE_MAT, trunk_inst, tree_count));
-        batches.push((canopy_mesh_id, WHITE_MAT, canopy_inst, canopy_count));
+        batches.push((canopy_mesh_id, canopy_mat, canopy_inst, canopy_count));
     });
     // Ground cover: one instanced batch when the abstraction placed any tufts.
     let tuft_count = tufts.len() as u32;
@@ -193,7 +202,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
             (GROUNDCOVER_MESH, tuft_v, tuft_i),
             (LITTER_MESH, litter_v, litter_i),
         ],
-        materials: vec![white_material()],
+        materials: vec![white_material(), leaf_alpha_material()],
         batches,
         volumetrics: manifest.volumetrics.then(FrameVolumetrics::low_poly),
         postprocess: manifest.postprocess.then(FramePostProcess::cinematic),
@@ -687,10 +696,12 @@ fn foliage_card_unit_mesh() -> (Vec<f32>, Vec<u32>) {
         let corner = |sx: f32, sy: f32| {
             [o[0] + ax[0] * sx + ay[0] * sy, o[1] + ax[1] * sx + ay[1] * sy, o[2] + ax[2] * sx + ay[2] * sy]
         };
-        push_vertex(&mut v, corner(-1.0, 0.0), up, [0.5, 0.5], w);
-        push_vertex(&mut v, corner(0.0, -1.0), up, [0.5, 0.5], w);
-        push_vertex(&mut v, corner(1.0, 0.0), up, [0.5, 0.5], w);
-        push_vertex(&mut v, corner(0.0, 1.0), up, [0.5, 0.5], w);
+        // Map the diamond's 4 corners across the leaf-alpha texture (corner → texture
+        // corner), so the radial soft-alpha reads as a feathered leaf blob on the GPU.
+        push_vertex(&mut v, corner(-1.0, 0.0), up, [0.0, 0.0], w);
+        push_vertex(&mut v, corner(0.0, -1.0), up, [1.0, 0.0], w);
+        push_vertex(&mut v, corner(1.0, 0.0), up, [1.0, 1.0], w);
+        push_vertex(&mut v, corner(0.0, 1.0), up, [0.0, 1.0], w);
         // Two triangles (a diamond), both windings → visible from either side.
         idx.extend_from_slice(&[
             base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base,
@@ -704,6 +715,29 @@ fn foliage_card_unit_mesh() -> (Vec<f32>, Vec<u32>) {
 /// reduces to the per-vertex / per-instance colours the meshes carry.
 fn white_material() -> (u64, u32, u32, Vec<u8>) {
     (WHITE_MAT, 2, 2, vec![255u8; 2 * 2 * 4])
+}
+
+/// A radial soft-alpha leaf texture: white RGB with an alpha that is opaque at the centre
+/// and feathers to 0 toward the edge (a soft disc). On the GPU the mesh shader alpha-cuts
+/// + blends it, so each foliage card diamond reads as a feathered leaf blob instead of a
+/// hard quad; Canvas 2D never samples it (flat-shaded), keeping its solid-card proxy.
+fn leaf_alpha_material() -> (u64, u32, u32, Vec<u8>) {
+    const N: u32 = 64;
+    let mut rgba = vec![255u8; (N * N * 4) as usize];
+    (0..N).for_each(|y| {
+        (0..N).for_each(|x| {
+            // Distance from the texture centre, normalized so the edge midpoint is ~1.
+            let nx = (x as f32 + 0.5) / N as f32 * 2.0 - 1.0;
+            let ny = (y as f32 + 0.5) / N as f32 * 2.0 - 1.0;
+            let r = (nx * nx + ny * ny).sqrt();
+            // Opaque for r < 0.55, feathering to 0 by r = 0.95 (smoothstep).
+            let t = ((0.95 - r) / (0.95 - 0.55)).clamp(0.0, 1.0);
+            let a = t * t * (3.0 - 2.0 * t);
+            let idx = ((y * N + x) * 4 + 3) as usize;
+            rgba[idx] = (a * 255.0 + 0.5) as u8;
+        })
+    });
+    (LEAF_ALPHA_MAT, N, N, rgba)
 }
 
 fn push_vertex(out: &mut Vec<f32>, pos: [f32; 3], normal: [f32; 3], uv: [f32; 2], color: [f32; 4]) {

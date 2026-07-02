@@ -115,6 +115,9 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let albedo = textureSample(albedo_tex, albedo_sampler, in.uv);
+    // Alpha cutout: drop fully-transparent texels (foliage leaf-alpha cards) so they
+    // neither shade nor write depth; the soft 0.5..1 rim still alpha-blends.
+    if (albedo.a < 0.5) { discard; }
     let base = albedo * in.color;
     let N = normalize(in.normal);
     let shade = shadow_factor(in.world_pos);
@@ -1179,8 +1182,10 @@ fn upload_material(
         address_mode_u: wgpu::AddressMode::Repeat,
         address_mode_v: wgpu::AddressMode::Repeat,
         address_mode_w: wgpu::AddressMode::Repeat,
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
+        // Linear filtering so the leaf-alpha material's soft edge reads smooth, not
+        // blocky. The solid-colour materials (2x2 white) are unaffected by the filter.
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
         mipmap_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });
