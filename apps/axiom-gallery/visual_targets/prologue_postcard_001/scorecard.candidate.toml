@@ -1,0 +1,17 @@
+# Candidate scorecard, iteration 2 (attacked: lighting_directionality).
+# The low raking sun gives the canopies visible directional volume (lit tops, darker
+# undersides) and a touch of warmth: lighting_directionality 1 -> 2. It is only a
+# modest gain — the muted canopy palette still reads gray, so the win is real but
+# small. Nothing dropped; color_palette is still 1 and becomes the next flaw.
+terrain_silhouette = 3
+foreground_material_detail = 2
+vegetation_density = 4
+vegetation_clumping = 2
+depth_separation = 2
+fog_and_haze = 2
+lighting_directionality = 2
+color_palette = 1
+contrast_and_exposure = 2
+object_scale = 3
+horizon_composition = 3
+artifact_level = 2
