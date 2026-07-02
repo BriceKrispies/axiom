@@ -45,6 +45,14 @@ pub mod vista;
 // viewer and the headless screenshot capture ---
 pub mod terrain_mesh;
 
+// --- Axiom Visual Target 001: a deterministic static forest diorama renderer,
+// built on top of growth's headless render-to-PNG machinery (NOT its worldgen). A
+// self-contained, versioned scene-manifest + one-frame screenshot + reference
+// compare, plus the visual-convergence comparator (axis scorecards, weighted
+// decision, iteration ledger). Native-only headless tooling, never in the wasm bundle.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod visual_target;
+
 // --- native first-person ground-walk sim (shared by the wasm viewer + the
 // headless agent driver) ---
 pub mod ground;

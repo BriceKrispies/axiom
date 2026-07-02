@@ -1,0 +1,95 @@
+# prologue_postcard_001 — the REFERENCE (the goal image).
+#
+# The look we are converging toward: a warm, deep autumn forest slope seen from an
+# elevated corner, raked by a low afternoon sun with long shadows, dense believable
+# vegetation, a rich autumn palette, and a subtle depth haze that separates the near
+# trees from the far ridge. This manifest exists only for provenance — it is
+# rendered once to `reference.png`, which is the fixed target the champion chases.
+
+version = 1
+name = "prologue-postcard-001-reference"
+
+[camera]
+eye = [-26.0, 16.0, 40.0]
+target = [4.0, 3.0, -4.0]
+fov_deg = 50.0
+near_m = 0.1
+far_m = 400.0
+width_px = 1280
+height_px = 800
+
+# Low, warm, strong afternoon sun — clear directionality and long shadows.
+[sun]
+direction = [0.55, -0.42, -0.72]
+color = [1.0, 0.9, 0.72]
+intensity = 1.35
+
+# A gentle depth haze: it starts far and never fully swallows the ridge, so near/mid/
+# far read as distinct planes.
+[fog]
+color = [0.78, 0.82, 0.86]
+start_m = 45.0
+end_m = 230.0
+
+[terrain]
+size_m = 64.0
+spacing_m = 0.5
+base_height_m = 0.0
+slope = [0.06, 0.10]
+detail = [
+  { amplitude_m = 1.5, wavelength_m = 22.0, seed = 11 },
+  { amplitude_m = 0.5, wavelength_m = 6.0, seed = 12 },
+  { amplitude_m = 0.18, wavelength_m = 2.2, seed = 13 },
+]
+rock_albedo = [0.40, 0.38, 0.35]
+rock_slope_start = 0.55
+rock_slope_full = 1.10
+
+[[terrain.ground_band]]
+max_height_m = -4.0
+albedo = [0.28, 0.22, 0.12]
+[[terrain.ground_band]]
+max_height_m = 0.0
+albedo = [0.44, 0.33, 0.16]
+[[terrain.ground_band]]
+max_height_m = 4.0
+albedo = [0.56, 0.45, 0.22]
+[[terrain.ground_band]]
+max_height_m = 9.0
+albedo = [0.62, 0.54, 0.34]
+
+[[tree]]
+x = 3.0
+z = 2.0
+yaw_deg = 20.0
+trunk_height_m = 8.5
+trunk_radius_m = 0.42
+canopy_radius_m = 4.8
+canopy_color = [0.90, 0.46, 0.12]
+
+[[tree]]
+x = -6.0
+z = -2.0
+yaw_deg = 200.0
+trunk_height_m = 7.0
+trunk_radius_m = 0.36
+canopy_radius_m = 4.2
+canopy_color = [0.92, 0.68, 0.20]
+
+# A dense, believable forest: many trees, tight spacing, a rich autumn palette.
+[scatter]
+seed = 7
+count = 220
+min_spacing_m = 1.6
+slope_limit = 0.80
+trunk_height_m = [4.0, 9.5]
+trunk_radius_m = [0.16, 0.42]
+canopy_radius_m = [2.2, 4.4]
+canopy_palette = [
+  [0.90, 0.44, 0.12],
+  [0.92, 0.66, 0.18],
+  [0.74, 0.28, 0.12],
+  [0.66, 0.56, 0.22],
+  [0.84, 0.36, 0.15],
+  [0.95, 0.74, 0.28],
+]

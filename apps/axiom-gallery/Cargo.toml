@@ -42,6 +42,13 @@ required-features = ["growth-agent"]
 name = "physics-crucible-report"
 path = "src/physics_crucible/main.rs"
 
+# The Visual Target 001 runner + convergence comparator. Native-only (offscreen
+# render backends + png), so it never enters the wasm bundle or the default gates.
+[[bin]]
+name = "visual-target"
+path = "src/growth/bin/visual_target.rs"
+required-features = ["visual-target"]
+
 [features]
 # retro FPS headless agent server. Native-only optional deps. The kernel/runtime
 # layers and serde are now always-on normal deps (other demos need them), so they
@@ -55,6 +62,15 @@ retro-fps-agent = [
 ]
 # Adds the native offscreen wgpu renderer so the retro FPS agent can read back images.
 retro-fps-agent-render = ["retro-fps-agent", "dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:png"]
+
+# The Visual Target 001 diorama runner + convergence comparator. Reuses the growth
+# capture backends (offscreen GPU + software Canvas 2D) and the png codec; all
+# native-only optional deps, so the browser bundle never sees them.
+visual-target = [
+    "dep:axiom-gpu-backend",
+    "dep:axiom-canvas2d-backend",
+    "dep:png",
+]
 
 # Growth headless agent driver. Native-only optional deps. toml/serde/host are now
 # always-on normal deps, so they are not listed as `dep:` here.
