@@ -56,6 +56,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-biome"
+version = "0.1.0"
+dependencies = [
+ "axiom-entropy",
+ "axiom-kernel",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-canvas2d-backend"
 version = "0.1.0"
 dependencies = [
@@ -106,17 +115,26 @@ name = "axiom-gallery"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-biome",
  "axiom-debug-overlay",
+ "axiom-entropy",
+ "axiom-geosphere",
  "axiom-host",
+ "axiom-hydrology",
  "axiom-input",
  "axiom-interface",
  "axiom-kernel",
  "axiom-layout",
  "axiom-math",
+ "axiom-noise",
  "axiom-physics",
+ "axiom-planetgen",
  "axiom-proc",
+ "axiom-proc-validate",
  "axiom-runtime",
  "axiom-space",
+ "axiom-streaming",
+ "axiom-terrain-mesh",
  "axiom-windowing",
  "console_error_panic_hook",
  "js-sys",
@@ -124,6 +142,13 @@ dependencies = [
  "toml",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "axiom-geosphere"
+version = "0.1.0"
+dependencies = [
+ "axiom-math",
 ]
 
 [[package]]
@@ -146,6 +171,14 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-hydrology"
+version = "0.1.0"
+dependencies = [
+ "axiom-geosphere",
+ "axiom-kernel",
 ]
 
 [[package]]
@@ -185,6 +218,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-noise"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
 name = "axiom-physics"
 version = "0.1.0"
 dependencies = [
@@ -194,12 +235,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-planetgen"
+version = "0.1.0"
+dependencies = [
+ "axiom-biome",
+ "axiom-entropy",
+ "axiom-geosphere",
+ "axiom-hydrology",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-noise",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-proc"
 version = "0.1.0"
 dependencies = [
  "axiom-entropy",
  "axiom-kernel",
  "axiom-space",
+]
+
+[[package]]
+name = "axiom-proc-validate"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-proc",
 ]
 
 [[package]]
@@ -225,6 +288,7 @@ name = "axiom-render-pipeline"
 version = "0.1.0"
 dependencies = [
  "axiom-host",
+ "axiom-kernel",
  "axiom-math",
  "axiom-render",
  "axiom-scene",
@@ -281,6 +345,18 @@ name = "axiom-space"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
+]
+
+[[package]]
+name = "axiom-streaming"
+version = "0.1.0"
+
+[[package]]
+name = "axiom-terrain-mesh"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
 ]
 
 [[package]]
