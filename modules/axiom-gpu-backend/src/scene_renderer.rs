@@ -35,6 +35,9 @@ struct Lights {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
+    // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
+    sky: vec4<f32>,
+    ground: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
@@ -113,13 +116,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let base = albedo * in.color;
     let N = normalize(in.normal);
     let shade = shadow_factor(in.world_pos);
-    // Hemisphere ambient: a cool sky overhead, a warm-dark ground below, blended
-    // by the surface normal's up-component (N.y) — replaces the old flat 0.12
-    // ambient so unlit faces pick up sky vs ground colour. Defaulted to match the
-    // canvas software path's `hemisphere_ambient` (sky/ground colours x 0.6).
-    let sky = vec3<f32>(0.55, 0.65, 0.85);
-    let ground = vec3<f32>(0.30, 0.26, 0.22);
-    let hemi = mix(ground, sky, clamp(N.y * 0.5 + 0.5, 0.0, 1.0)) * 0.6;
+    // Hemisphere ambient from the frame's ambient uniform (sky overhead, warm-dark
+    // ground below, blended by the normal's up-component). Strength is folded into the
+    // colours, so this is a plain mix — no extra scale. An absent frame ambient is
+    // filled with the engine default upstream, so this stays identical by default.
+    let hemi = mix(lights.ground.rgb, lights.sky.rgb, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
     var lit = base.rgb * hemi;
     for (var i: u32 = 0u; i < lights.count; i = i + 1u) {
         let lt = lights.items[i];
@@ -184,6 +185,9 @@ struct Lights {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
+    // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
+    sky: vec4<f32>,
+    ground: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
@@ -360,9 +364,10 @@ fn fs(in: VsOut) -> FsOut {
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Maximum lights uploaded per frame (must match the WGSL `array<Light, 16>`).
 const MAX_LIGHTS: usize = 16;
-/// Lighting uniform size in bytes: a 16-byte header (count + padding) plus
-/// `MAX_LIGHTS` × two `vec4`s (32 bytes each) — std140-compatible.
-const LIGHTS_UBO_BYTES: u64 = 16 + (MAX_LIGHTS as u64) * 32;
+/// Lighting uniform size in bytes: a 48-byte header (count + padding, then the
+/// hemisphere-ambient `sky` + `ground` `vec4`s) plus `MAX_LIGHTS` × two `vec4`s
+/// (32 bytes each) — std140-compatible.
+const LIGHTS_UBO_BYTES: u64 = 48 + (MAX_LIGHTS as u64) * 32;
 /// Maximum SDF primitives uploaded per frame (must match the WGSL
 /// `array<SdfPrim, 16>`). Primitives beyond this are dropped, the same honesty
 /// the lights path uses — see [`pack_sdf`].
@@ -422,6 +427,8 @@ pub(crate) struct SceneRenderer {
     sdf_uniform_buffer: wgpu::Buffer,
     /// Group 0 of the SDF pass: the SDF uniform.
     sdf_bind_group: wgpu::BindGroup,
+    /// The frame's hemisphere ambient, packed into the lights uniform each draw.
+    ambient: axiom_host::FrameAmbient,
 }
 
 impl SceneRenderer {
@@ -437,6 +444,7 @@ impl SceneRenderer {
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
+        ambient: axiom_host::FrameAmbient,
     ) -> SceneRenderer {
         let max_instances = max_instances.max(1);
         // The shadow-atlas edge length is the device tier's choice
@@ -651,6 +659,7 @@ impl SceneRenderer {
             sdf_pipeline,
             sdf_uniform_buffer,
             sdf_bind_group,
+            ambient,
         }
     }
 
@@ -675,7 +684,7 @@ impl SceneRenderer {
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
     ) {
-        queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights));
+        queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights, self.ambient));
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
@@ -1190,14 +1199,19 @@ fn upload_material(
 }
 
 /// Pack the frame's lights into the std140 lighting-uniform byte layout: a
-/// 16-byte header (light count `u32` + 12 bytes padding) then `MAX_LIGHTS`
-/// entries of two `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb,
-/// intensity)`. Entries past the count stay zero. Capped at `MAX_LIGHTS`.
-fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)]) -> Vec<u8> {
+/// 48-byte header — light count `u32` + 12 bytes padding, then the hemisphere-ambient
+/// `sky` + `ground` `vec4`s (rgb, w unused) — then `MAX_LIGHTS` entries of two
+/// `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb, intensity)`. Entries past
+/// the count stay zero. Capped at `MAX_LIGHTS`.
+fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)], ambient: axiom_host::FrameAmbient) -> Vec<u8> {
     let count = lights.len().min(MAX_LIGHTS);
     let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
     bytes.extend_from_slice(&(count as u32).to_le_bytes());
     bytes.extend_from_slice(&[0u8; 12]);
+    let (sky, ground) = (ambient.sky(), ambient.ground());
+    [sky[0], sky[1], sky[2], 0.0, ground[0], ground[1], ground[2], 0.0]
+        .iter()
+        .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));
     (0..MAX_LIGHTS).for_each(|i| {
         let (kind, vec, color, intensity) =
             lights

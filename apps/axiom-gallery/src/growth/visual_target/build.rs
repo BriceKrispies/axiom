@@ -14,7 +14,7 @@
 //! uv(2) · colour(4). Instance layout is the engine's 36 floats: view_proj(16) ·
 //! world(16) · tint(4).
 
-use axiom_host::FrameVolumetrics;
+use axiom_host::{FrameAmbient, FrameVolumetrics};
 use axiom_kernel::Meters;
 use axiom_math::{Mat4, Quat, Transform, Vec3};
 use axiom_terrain_mesh::TerrainMeshApi;
@@ -68,6 +68,9 @@ pub struct RenderData {
     /// Optional volumetric light (god-rays) — neutral frame data every backend
     /// realizes through `host::apply_frame_volumetrics`.
     pub volumetrics: Option<FrameVolumetrics>,
+    /// Hemisphere ambient — neutral frame data lighting the faces no directional
+    /// light reaches (lifts the backlit trunk faces + softens shadow contrast).
+    pub ambient: FrameAmbient,
 }
 
 /// The full instance list: the explicitly authored trees plus, if present, the
@@ -154,6 +157,10 @@ pub fn build(manifest: &Manifest) -> RenderData {
         materials: vec![white_material()],
         batches,
         volumetrics: manifest.volumetrics.then(FrameVolumetrics::low_poly),
+        ambient: manifest
+            .ambient
+            .map(|a| FrameAmbient::new(a.sky, a.ground))
+            .unwrap_or_else(FrameAmbient::default_hemisphere),
     }
 }
 

@@ -264,6 +264,7 @@ impl GpuBackendApi {
         batches: &[(u64, u64, Vec<f32>, u32)],
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
+        ambient: axiom_host::FrameAmbient,
     ) -> Option<Vec<u8>> {
         crate::offscreen::render_to_rgba(
             width,
@@ -275,6 +276,7 @@ impl GpuBackendApi {
             batches,
             clear,
             sdf,
+            ambient,
         )
     }
 

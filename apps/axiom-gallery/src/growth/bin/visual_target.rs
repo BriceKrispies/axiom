@@ -276,6 +276,7 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
         &rd.batches,
         rd.clear,
         None,
+        rd.ambient,
     )
     .expect("a native GPU adapter renders the visual-target frame");
     // The off-screen GPU path takes raw args (no FramePacket), so the composition
@@ -365,6 +366,9 @@ fn render_canvas2d(rd: &RenderData) -> (Vec<u8>, u32, u32) {
         Some(v) => packet.with_volumetrics(v),
         None => packet,
     };
+    // Hemisphere ambient rides on the packet too; the Canvas 2D backend lights unlit
+    // faces with it, matching the GPU path's ambient uniform.
+    let packet = packet.with_ambient(rd.ambient);
     backend.render_offscreen_rgba(&packet)
 }
 

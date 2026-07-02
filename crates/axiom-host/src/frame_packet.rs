@@ -266,6 +266,7 @@ pub struct FramePacket {
     features: FrameFeatureSet,
     sdf: Option<SdfScene>,
     volumetrics: Option<crate::frame_volumetrics::FrameVolumetrics>,
+    ambient: Option<crate::frame_ambient::FrameAmbient>,
 }
 
 impl FramePacket {
@@ -296,6 +297,7 @@ impl FramePacket {
             features,
             sdf: None,
             volumetrics: None,
+            ambient: None,
         }
     }
 
@@ -328,6 +330,22 @@ impl FramePacket {
     /// The frame's volumetric-light parameters, or `None` when the frame has none.
     pub const fn volumetrics(&self) -> Option<&crate::frame_volumetrics::FrameVolumetrics> {
         self.volumetrics.as_ref()
+    }
+
+    /// Attach a hemisphere ambient to this frame. It is neutral frame data: every
+    /// backend lights unlit faces with it, so ambient reads identically regardless of
+    /// renderer. A packet without one (the default) uses
+    /// [`crate::FrameAmbient::default_hemisphere`].
+    #[must_use]
+    pub fn with_ambient(mut self, ambient: crate::frame_ambient::FrameAmbient) -> Self {
+        self.ambient = Some(ambient);
+        self
+    }
+
+    /// The frame's hemisphere ambient, or `None` when the frame carries none (the
+    /// backend then falls back to [`crate::FrameAmbient::default_hemisphere`]).
+    pub const fn ambient(&self) -> Option<&crate::frame_ambient::FrameAmbient> {
+        self.ambient.as_ref()
     }
 
     /// The frame index this packet presents.
@@ -519,6 +537,16 @@ mod tests {
         let with = base.clone().with_sdf(scene.clone());
         assert_eq!(with.sdf(), Some(&scene));
         assert!(base.sdf().is_none());
+        assert_ne!(with, base);
+    }
+
+    #[test]
+    fn with_ambient_attaches_and_breaks_equality() {
+        let base = sample_packet();
+        assert!(base.ambient().is_none());
+        let amb = crate::frame_ambient::FrameAmbient::new([0.6, 0.7, 0.8], [0.2, 0.15, 0.1]);
+        let with = base.clone().with_ambient(amb);
+        assert_eq!(with.ambient(), Some(&amb));
         assert_ne!(with, base);
     }
 

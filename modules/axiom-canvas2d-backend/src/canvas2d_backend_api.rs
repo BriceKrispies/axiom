@@ -189,6 +189,13 @@ impl Canvas2dBackendApi {
         let _ = self.profile;
         let mut cues = self.options.depth_cues();
         cues.fog.color = packet.clear_color();
+        // The frame's hemisphere ambient drives the software lighting too, matching the
+        // GPU path's ambient uniform. Colours are strength-folded, so the ambient scale
+        // is 1.0; an absent frame ambient falls back to the engine default hemisphere.
+        let amb = packet.ambient().copied().unwrap_or_else(axiom_host::FrameAmbient::default_hemisphere);
+        cues.lighting.sky_color = amb.sky();
+        cues.lighting.ground_color = amb.ground();
+        cues.lighting.ambient = 1.0;
         let options = self.options.with_depth_cues(cues);
         SoftwareRasterizer::new(options).rasterize_packet(packet, &self.meshes)
     }
@@ -515,6 +522,23 @@ mod tests {
         // Pure function of the packet: identical bytes every call.
         let (again, _, _) = backend.render_offscreen_rgba(&p);
         assert_eq!(rgba, again);
+    }
+
+    #[test]
+    fn frame_ambient_lifts_the_lit_result() {
+        use axiom_host::{FrameAmbient, FrameDrawItem, FrameFeatureSet};
+        let mut backend = Canvas2dBackendApi::new(&request(800, 600));
+        backend.load_meshes(&[ground(7)]);
+        backend.set_quality_level(1);
+        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 1.0, 1.0, 1.0], false)];
+        // No directional light → the ground is lit by the hemisphere ambient alone.
+        let base = packet(draws.clone(), FrameFeatureSet::new(false, false, 0, 0));
+        let (dim, _, _) = backend.render_offscreen_rgba(&base);
+        // A bright frame ambient (the `Some` path) lifts the ground above the default.
+        let bright = base.clone().with_ambient(FrameAmbient::new([0.95, 0.95, 0.95], [0.95, 0.95, 0.95]));
+        let (lit, _, _) = backend.render_offscreen_rgba(&bright);
+        assert_ne!(dim, lit);
+        assert!(dim.iter().zip(&lit).any(|(d, l)| l > d));
     }
 
     #[test]

@@ -252,6 +252,9 @@ impl LiveGpuBinding {
             materials,
             max_instances,
             shadow_size,
+            // The live arm keeps the engine default hemisphere ambient (a per-scene
+            // ambient can be threaded through the present path as a follow-up).
+            axiom_host::FrameAmbient::default_hemisphere(),
         );
 
         // The intermediate colour target the scene renders into (then upscaled to

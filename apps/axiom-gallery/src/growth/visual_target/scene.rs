@@ -57,6 +57,23 @@ pub struct Manifest {
     /// never wash out the frame. Absent = neutral (exposure 1, no change).
     #[serde(default)]
     pub style: Option<Style>,
+    /// Hemisphere ambient light (sky overhead, warm-dark ground below) — the neutral
+    /// frame-data ambient the render backends light unlit faces with. Absent = the
+    /// engine default hemisphere. Brightening it lifts the backlit trunk faces and
+    /// softens shadow contrast toward the reference's soft global illumination.
+    #[serde(default)]
+    pub ambient: Option<Ambient>,
+}
+
+/// Hemisphere ambient tint: the linear-RGB sky (overhead) and ground (below) an unlit
+/// face receives. Strength is folded into the colours (a plain hemisphere blend).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ambient {
+    /// Overhead sky tint.
+    pub sky: [f32; 3],
+    /// Below / ground tint.
+    pub ground: [f32; 3],
 }
 
 /// Global tone/brightness controls for the target, applied to every emitted albedo.
