@@ -555,6 +555,42 @@ mod tests {
     }
 
     #[test]
+    fn set_capability_profile_gates_the_volumetric_pass() {
+        use axiom_host::{
+            BackendCapabilityProfile, FrameCamera, FrameFeatureSet, FrameLight, FrameViewport,
+            FrameVolumetrics, RenderCapability,
+        };
+        // A view_proj with m[11] = 1 puts a +z to-light on-screen, and a bright uniform
+        // frame (no draws → just the bright clear) exceeds the god-ray leak threshold, so
+        // the pass produces a real difference only when a backend runs it.
+        let front_vp = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        let vol = FramePacket::new(
+            0,
+            0,
+            FrameViewport::new(800, 600),
+            [0.9, 0.9, 0.9, 1.0],
+            Some(FrameCamera::new(IDENTITY, IDENTITY, front_vp)),
+            Vec::new(),
+            vec![FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])],
+            IDENTITY,
+            FrameFeatureSet::new(false, true, 1, 0),
+        )
+        .with_volumetrics(FrameVolumetrics::low_poly());
+        // Default profile (all): the god-ray pass runs.
+        let mut full = Canvas2dBackendApi::new(&request(800, 600));
+        let (a, _, _) = full.render_offscreen_rgba(&vol);
+        // set_capability_profile restricting Volumetrics: the pass is skipped.
+        let mut restricted = Canvas2dBackendApi::new(&request(800, 600));
+        restricted.set_capability_profile(
+            BackendCapabilityProfile::all().without(RenderCapability::Volumetrics),
+        );
+        let (b, _, _) = restricted.render_offscreen_rgba(&vol);
+        assert_ne!(a, b, "set_capability_profile gates the god-ray pass on Canvas 2D");
+    }
+
+    #[test]
     fn set_quality_level_changes_the_internal_resolution() {
         use axiom_host::{FrameDrawItem, FrameFeatureSet};
         let mut backend = Canvas2dBackendApi::new(&request(800, 600));
