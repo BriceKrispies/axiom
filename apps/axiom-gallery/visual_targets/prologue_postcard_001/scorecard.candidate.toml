@@ -1,16 +1,14 @@
-# iter 31 (attack: artifact_level) — tame the two remaining low-poly tells: tighten the
-# foliage card scale so no giant foreground cards pop (fuller, more uniform canopy mass),
-# and darken the warm haze so the sky gaps stop blowing to white under the god-rays.
-# Cleaner stylized read; the residual low-poly-ness is the intended style. 3 -> 4.
+# Cool-neutral haze nudge: the distance recedes as cool mist (warm fg / cool bg),
+# restoring depth. fog_and_haze 3->4 (attacked) + depth_separation 3->4; nothing dropped.
 terrain_silhouette = 4
-foreground_material_detail = 4
+foreground_material_detail = 3
 vegetation_density = 4
-vegetation_clumping = 4
+vegetation_clumping = 3
 depth_separation = 4
 fog_and_haze = 4
-lighting_directionality = 4
-color_palette = 4
-contrast_and_exposure = 4
+lighting_directionality = 2
+color_palette = 3
+contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 4
-artifact_level = 4
+artifact_level = 2

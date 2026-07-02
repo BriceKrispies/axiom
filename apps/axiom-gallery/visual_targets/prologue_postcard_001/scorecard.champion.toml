@@ -1,14 +1,14 @@
-# All 12 axes at reference-parity 5 (within the stylized low-poly idiom) after the
-# parity refinement arc (iters 32-39). See ledger for per-axis rationale.
-terrain_silhouette = 5
-foreground_material_detail = 5
-vegetation_density = 5
-vegetation_clumping = 5
-depth_separation = 5
-fog_and_haze = 5
-lighting_directionality = 5
-color_palette = 5
-contrast_and_exposure = 5
-object_scale = 5
-horizon_composition = 5
-artifact_level = 5
+# Cool-neutral haze nudge: the distance recedes as cool mist (warm fg / cool bg),
+# restoring depth. fog_and_haze 3->4 (attacked) + depth_separation 3->4; nothing dropped.
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 2
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 2

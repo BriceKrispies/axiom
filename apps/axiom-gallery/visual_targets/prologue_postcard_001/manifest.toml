@@ -39,7 +39,7 @@ intensity = 1.25
 # fades to cool haze and foreground stays dark for contrast.
 # ITER 25 (attack: fog_and_haze) — warm golden sunlit haze matching the reference's
 # misty backlit light; distance fades into warm amber mist, not a cool blue wash.
-color = [0.70, 0.61, 0.47]
+color = [0.60, 0.63, 0.67]
 start_m = 5.0
 end_m = 74.0
 

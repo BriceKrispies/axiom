@@ -1347,9 +1347,7 @@ artifact_level = 4
 [[iteration]]
 iteration = 33
 attacked_axis = "vegetation_clumping"
-changed_files = [
-    "build.rs",
-]
+changed_files = ["build.rs"]
 champion_screenshot = "champion.png"
 candidate_screenshot = "candidate.png"
 decision = "keep_candidate"
@@ -1388,9 +1386,7 @@ artifact_level = 4
 [[iteration]]
 iteration = 34
 attacked_axis = "artifact_level"
-changed_files = [
-    "build.rs",
-]
+changed_files = ["build.rs"]
 champion_screenshot = "champion.png"
 candidate_screenshot = "candidate.png"
 decision = "keep_candidate"
@@ -1429,9 +1425,7 @@ artifact_level = 5
 [[iteration]]
 iteration = 35
 attacked_axis = "vegetation_density"
-changed_files = [
-    "manifest.toml",
-]
+changed_files = ["manifest.toml"]
 champion_screenshot = "champion.png"
 candidate_screenshot = "candidate.png"
 decision = "keep_candidate"
@@ -1470,9 +1464,7 @@ artifact_level = 5
 [[iteration]]
 iteration = 36
 attacked_axis = "color_palette"
-changed_files = [
-    "manifest.toml",
-]
+changed_files = ["manifest.toml"]
 champion_screenshot = "champion.png"
 candidate_screenshot = "candidate.png"
 decision = "keep_candidate"
@@ -1511,9 +1503,7 @@ artifact_level = 5
 [[iteration]]
 iteration = 37
 attacked_axis = "depth_separation"
-changed_files = [
-    "manifest.toml",
-]
+changed_files = ["manifest.toml"]
 champion_screenshot = "champion.png"
 candidate_screenshot = "candidate.png"
 decision = "keep_candidate"
@@ -1552,9 +1542,7 @@ artifact_level = 5
 [[iteration]]
 iteration = 38
 attacked_axis = "contrast_and_exposure"
-changed_files = [
-    "frame_volumetrics.rs",
-]
+changed_files = ["frame_volumetrics.rs"]
 champion_screenshot = "champion.png"
 candidate_screenshot = "candidate.png"
 decision = "keep_candidate"
@@ -1628,3 +1616,46 @@ contrast_and_exposure = 5
 object_scale = 5
 horizon_composition = 5
 artifact_level = 5
+
+[[iteration]]
+iteration = 40
+attacked_axis = "fog_and_haze"
+changed_files = [
+    "manifest.candidate.toml",
+    "verdict.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "attacked axis fog_and_haze 3->4 (+1); no non-attacked axis dropped; promoted"
+next_attacked_axis = "lighting_directionality"
+abstraction_introduced = false
+human_note = "HONEST RE-SCORE (the prior all-5s was an over-claim; not at reference parity). One nudge: de-warm the [fog] colour to a cool-neutral blue-gray [0.60,0.63,0.67] so the misty distance recedes as cool mist while the near foliage stays warm, restoring the reference warm-fg/cool-bg tonal range. Keeps the fog primitive; no new mesh/material/pass. fog_and_haze 3->4, depth_separation 3->4, dark trunks read better against the light mist; nothing worse, not noisier, less washed."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 2
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 2
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 2
