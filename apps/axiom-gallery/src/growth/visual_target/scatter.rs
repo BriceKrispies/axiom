@@ -94,14 +94,17 @@ pub fn expand_groundcover(gc: &Groundcover, terrain: &Terrain) -> Vec<Tuft> {
 
     let half = terrain.half_m();
     let min_sq = gc.min_spacing_m * gc.min_spacing_m;
+    // Clump centres (empty → uniform), so ground clutter gathers into patches.
+    let centers: Vec<(f32, f32)> = (0..gc.clusters)
+        .map(|_| (lerp(-half, half, unit(&mut stream)), lerp(-half, half, unit(&mut stream))))
+        .collect();
     let mut placed: Vec<Tuft> = Vec::with_capacity(gc.count as usize);
     let attempt_cap = gc.count.saturating_mul(MAX_ATTEMPTS_PER_TREE);
     let mut attempts = 0u32;
 
     while (placed.len() as u32) < gc.count && attempts < attempt_cap {
         attempts += 1;
-        let x = lerp(-half, half, unit(&mut stream));
-        let z = lerp(-half, half, unit(&mut stream));
+        let (x, z) = site(&mut stream, &centers, half, gc.cluster_radius_m);
 
         if terrain.slope_at(x, z) > gc.slope_limit {
             continue;
@@ -177,6 +180,7 @@ mod tests {
             keep_clear_m: 0.0,
             clusters: 0,
             cluster_radius_m: 0.0,
+            lean_deg: 0.0,
             trunk_height_m: [4.0, 8.0],
             trunk_radius_m: [0.2, 0.4],
             canopy_radius_m: [2.0, 4.0],
@@ -221,6 +225,8 @@ mod tests {
             height_m: [0.2, 0.6],
             radius_m: [0.1, 0.4],
             palette: vec![[0.6, 0.5, 0.2], [0.7, 0.4, 0.2]],
+            clusters: 0,
+            cluster_radius_m: 0.0,
         }
     }
 

@@ -867,3 +867,136 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 4
+
+[[iteration]]
+iteration = 22
+attacked_axis = "vegetation_clumping"
+changed_files = [
+    "build.rs",
+    "scene.rs",
+    "manifest.candidate.toml",
+    "verdict.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "reject_candidate"
+reason = "attacked axis vegetation_clumping 3->4 (+1) but worst non-attacked change artifact_level -2 (significant, >= 2); champion kept"
+next_attacked_axis = "vegetation_clumping"
+abstraction_introduced = false
+human_note = "capability iteration: foliage cards target tree representation / vegetation layering. The loose autumn card masses ARE a better canopy form than perfect balls, but the oversized opaque blocky cards + floating foreground boxes + upper-canopy washout REDUCE readability (a significant artifact regression). Per the promote rule (improve without reducing readability), reject and keep the champion; the capability stays for a tuned retry (smaller/more/alpha-cut cards)."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 1
+
+[[iteration]]
+iteration = 23
+attacked_axis = "vegetation_clumping"
+changed_files = [
+    "build.rs",
+    "scene.rs",
+    "scatter.rs",
+    "manifest.candidate.toml",
+    "verdict.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "attacked axis vegetation_clumping 3->4 (+1); no non-attacked axis dropped; promoted"
+abstraction_introduced = false
+human_note = "rejected previous candidate (noisy, overexposed, big opaque rectangular cards); corrective pass attempted. Preserved renderer capabilities (instanced foliage cards, deterministic tree variation, clustered placement, floor clutter); moved unsafe constants into a [style] config (exposure/ambient/foliage_saturation/distance_desaturation), shrank + irregularized the leaf cards, darkened the autumn palette, lowered the sun, blue-gray distance haze, fewer trunks with big dark foreground framing, sparser clustered darker ground clutter. Result: dark trunks, warm-but-not-blown foliage, clustered floor, clear fg/mg/bg depth — closer to the reference."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 4
+
+[[iteration]]
+iteration = 24
+attacked_axis = "foreground_material_detail"
+changed_files = [
+    "build.rs",
+    "manifest.candidate.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "attacked axis foreground_material_detail 2->3 (+1); no non-attacked axis dropped; promoted"
+next_attacked_axis = "foreground_material_detail"
+abstraction_introduced = false
+human_note = ""
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 2
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3
