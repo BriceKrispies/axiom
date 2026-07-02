@@ -906,7 +906,8 @@ canopy_color = [0.80, 0.42, 0.12]
         // terrain + trunk + canopy.
         assert_eq!(rd.batches.len(), 3);
         assert_eq!(rd.batches[0].0, TERRAIN_MESH);
-        assert_eq!(rd.batches[1], (TRUNK_MESH, WHITE_MAT, rd.batches[1].2.clone(), 1));
+        assert_eq!(rd.batches[0].1, GROUND_MAT);
+        assert_eq!(rd.batches[1], (TRUNK_MESH, BARK_MAT, rd.batches[1].2.clone(), 1));
         assert_eq!(rd.batches[2].3, 1);
         // 36 floats per instance.
         assert_eq!(rd.batches[1].2.len(), 36);
