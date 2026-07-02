@@ -1,0 +1,18 @@
+[package]
+name = "axiom-workspace"
+description = "The Axiom Workspace: a developer-facing composition-leaf app that opens a game project, reads a workspace manifest, builds a canonical launch specification, starts a play-session abstraction, records input/snapshot artifacts, and constructs replay requests over prior sessions. It is NOT the runtime and implements no game behavior — it launches, observes, records, and replays real runtime sessions. The concrete runtime integration is deferred behind explicit scaffold contracts until the public engine APIs it needs exist (see ARCHITECTURE.md). Apps are composition leaves, exempt from the branchless and 100%-coverage spine gates."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

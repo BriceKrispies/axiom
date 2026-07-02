@@ -27,7 +27,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use axiom_host::{HostSafeAreaInsets, HostViewport, Pixels};
 use axiom_input::{DeviceFrame, InputState, Tick};
@@ -35,22 +34,25 @@ use axiom_kernel::Ratio;
 use axiom_layout::{
     solve, Direction, LayoutRect, LayoutStyle, LayoutTree, LayoutTreeBuilder, NodeId,
 };
-use axiom_math::Vec2;
+use axiom_math::{Mat4, Vec2};
+use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{
-    CanvasRenderingContext2d, HtmlCanvasElement, HtmlElement, KeyboardEvent, MouseEvent,
-    PointerEvent,
-};
+use web_sys::{HtmlCanvasElement, HtmlElement, KeyboardEvent, MouseEvent, PointerEvent};
 
-use crate::zanzoban::actor_state::ActorKind;
 use crate::zanzoban::app::{Mode, ZanzobanApp};
 use crate::zanzoban::game_command::PuzzleCommand;
-use crate::zanzoban::game_state::TICKS_PER_SECOND;
 use crate::zanzoban::group_id::GroupId;
 use crate::zanzoban::input_mapping::command_for_swipe;
-use crate::zanzoban::render_model::{Elevation, RenderActor, RenderTile};
+use crate::zanzoban::scene3d;
 use crate::zanzoban::tile_kind::TileKind;
+
+/// The engine render surface size (backing resolution); the backend upscales it
+/// to the canvas's CSS box. WebGPU / WebGL2 / Canvas2D all render at this size.
+const SURFACE_W: u32 = 960;
+const SURFACE_H: u32 = 720;
+/// Instance-buffer cap for the renderer — generous enough for any real board.
+const MAX_INSTANCES: u32 = 4608;
 
 /// The board canvas element id (must match `web/index.html`).
 const CANVAS_ID: &str = "axiom-puzzle-canvas";
@@ -58,13 +60,6 @@ const CANVAS_ID: &str = "axiom-puzzle-canvas";
 const VALIDATION_ID: &str = "validation";
 /// The "Playtest" button element id (enabled only when the level validates).
 const PLAYTEST_BTN_ID: &str = "btn-playtest";
-
-/// Pixels per grid cell on the canvas backing store.
-const CELL_PX: f64 = 48.0;
-/// Real milliseconds per fixed tick (60 Hz).
-const STEP_MS: f64 = 1000.0 / TICKS_PER_SECOND as f64;
-/// Most ticks dispatched in one frame, so a long pause can't spiral.
-const MAX_TICKS_PER_FRAME: u32 = 8;
 
 thread_local! {
     /// The single app instance, shared across the DOM callbacks (single-threaded
@@ -82,7 +77,18 @@ thread_local! {
     /// The last `(css_w, css_h, cols, rows)` the layout was solved for, so the
     /// engine layout is recomputed + reapplied only when the window or grid changes.
     static LAST_LAYOUT: RefCell<Option<(u32, u32, u32, u32)>> = RefCell::new(None);
+
+    /// Whether the editor is in eraser mode (canvas clicks erase instead of paint).
+    static ERASING: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Cached camera view-projection keyed on `(grid_w, grid_h, perspective)`; the
+    /// engine `App` that produces it is rebuilt only when the board size or the
+    /// camera mode (edit ↔ playtest) changes, not every frame.
+    static VIEW_PROJ: RefCell<Option<(u32, u32, bool, Mat4)>> = const { RefCell::new(None) };
 }
+
+/// The browser localStorage key prefix for save slots.
+const SLOT_PREFIX: &str = "zanzoban.slot.";
 
 /// The fixed panel width (landscape) / height (portrait) the layout reserves for
 /// the editor/playtest side panel, in logical pixels.
@@ -105,11 +111,10 @@ fn document() -> web_sys::Document {
     window().document().expect("a document")
 }
 
-/// The board canvas and its 2D context.
-fn canvas_context() -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
-    let canvas: HtmlCanvasElement = document().get_element_by_id(CANVAS_ID)?.dyn_into().ok()?;
-    let ctx: CanvasRenderingContext2d = canvas.get_context("2d").ok()??.dyn_into().ok()?;
-    Some((canvas, ctx))
+/// The board canvas element (the engine binds it as the render surface; we only
+/// need the element for pointer geometry, not a 2D context).
+fn canvas_element() -> Option<HtmlCanvasElement> {
+    document().get_element_by_id(CANVAS_ID)?.dyn_into().ok()
 }
 
 /// Boot the editor/playtest surface: install the canvas painter, the keyboard
@@ -121,9 +126,155 @@ pub fn zanzoban_start() {
     install_canvas_click();
     install_keyboard();
     install_swipe();
-    start_run_loop();
     refresh_editor_ui();
+    // Render the board through the Axiom engine's instanced-cube renderer. The
+    // windowing loop owns backend selection (?backend=webgpu|webgl2|canvas2d,
+    // auto-cascading otherwise), the canvas binding, and the rAF loop; we supply
+    // the cube mesh once and one frame of instances (built from the render model)
+    // per animation frame.
+    let (vertices, indices) = cube_geometry();
+    let mut windowing = WindowingApi::new();
+    windowing
+        .configure_surface(SURFACE_W, SURFACE_H)
+        .expect("a positive surface is valid");
     log("ready");
+    // Single cube mesh (id 0) with one 1×1 opaque-white material (id 0), so the
+    // sampled albedo is (1,1,1,1) and each draw's colour reduces to its per-
+    // instance colour. The lit-mesh batch format wants 36 floats/instance.
+    let meshes = vec![(0_u64, vertices, indices)];
+    let materials = vec![(0_u64, 1_u32, 1_u32, vec![255_u8, 255, 255, 255])];
+    let _ = windowing.run_web_multi(CANVAS_ID, meshes, materials, MAX_INSTANCES, frame);
+}
+
+/// Source the engine's canonical cube geometry (position/normal/uv interleaved in
+/// the backend's vertex format) by building a one-cube `App` and reading its mesh
+/// vertex stream — the same stream retro FPS feeds the web loop.
+fn cube_geometry() -> (Vec<f32>, Vec<u32>) {
+    use axiom::prelude as ax;
+    let unit = ax::Ratio::new(1.0).expect("unit channel is finite");
+    let app = ax::App::new()
+        .window(ax::Window::new(SURFACE_W, SURFACE_H))
+        .add_plugins(ax::DefaultPlugins)
+        .setup(move |world, meshes, materials| {
+            let cube = meshes.add(ax::Mesh::cube());
+            let material =
+                materials.add(ax::Material::lit(ax::Color::linear_rgb(unit, unit, unit)));
+            world.spawn((
+                ax::Transform::IDENTITY,
+                ax::Renderable {
+                    mesh: cube,
+                    material,
+                },
+            ));
+        })
+        .build();
+    app.mesh_vertex_stream()
+}
+
+/// The lit directional light (fixed look), one per frame.
+type Light = (u32, [f32; 3], [f32; 3], f32);
+/// A per-`(mesh, material)` instance batch: `(mesh_id, material_id, floats, count)`.
+type Batch = (u64, u64, Vec<f32>, u32);
+/// The full frame tuple `run_web_multi` consumes.
+type FrameOut = (
+    [f32; 4],
+    Vec<Light>,
+    [f32; 16],
+    Vec<Batch>,
+    [f32; 16],
+    Vec<bool>,
+    Option<axiom_host::SdfScene>,
+);
+
+/// An identity 4×4 (column-major): an unused shadow / camera matrix.
+const IDENTITY_4X4: [f32; 16] = [
+    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+];
+
+/// One animation frame: advance the playtest sim (if playing), then build the
+/// instance batch from the current render model. Playtest uses an angled
+/// perspective diorama; edit uses a steep near-top-down view.
+fn frame(_tick: u64) -> FrameOut {
+    APP.with(|app| {
+        let mut app = app.borrow_mut();
+        let perspective = app.mode() == Mode::Playtest;
+        if perspective {
+            if let Some(session) = app.playtest_mut() {
+                session.tick();
+            }
+        }
+        let model = app.render_model();
+        sync_layout(model.width, model.height);
+        let vp = cached_view_proj(model.width, model.height, perspective);
+        let (clear, instances, count) = scene3d::build_instances(&model, vp);
+        let lights = vec![(0_u32, [0.4_f32, 0.7, 0.6], [1.0_f32, 1.0, 1.0], 1.0_f32)];
+        (
+            clear,
+            lights,
+            IDENTITY_4X4,
+            vec![(0_u64, 0_u64, instances, count)],
+            vp.as_cols_array(),
+            Vec::new(),
+            None,
+        )
+    })
+}
+
+/// The camera view-projection for the board, cached per `(grid_w, grid_h, mode)`.
+fn cached_view_proj(w: u32, h: u32, perspective: bool) -> Mat4 {
+    VIEW_PROJ.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let hit = cache
+            .as_ref()
+            .and_then(|(cw, ch, cp, vp)| (*cw == w && *ch == h && *cp == perspective).then_some(*vp));
+        hit.unwrap_or_else(|| {
+            let vp = engine_view_proj(w, h, perspective);
+            *cache = Some((w, h, perspective, vp));
+            vp
+        })
+    })
+}
+
+/// Build a single-camera engine `App` framing the board and read its
+/// `camera_view_proj` — the canonical clip-space matrix all three backends
+/// expect (the same one retro FPS composes its per-draw MVPs from). Edit uses a steep
+/// near-top-down camera; playtest an angled diorama.
+fn engine_view_proj(grid_w: u32, grid_h: u32, perspective: bool) -> Mat4 {
+    use axiom::prelude as ax;
+    let w = grid_w.max(1) as f32;
+    let h = grid_h.max(1) as f32;
+    let span = w.max(h);
+    let center = ax::Vec3::new(w * 0.5, 0.0, h * 0.5);
+    let (eye, fov_deg, far) = match perspective {
+        true => (
+            ax::Vec3::new(w * 0.5, span * 0.95, h * 0.5 + span * 0.85),
+            52.0,
+            span * 8.0 + 100.0,
+        ),
+        false => (
+            ax::Vec3::new(w * 0.5, span * 1.7, h * 0.5 + span * 0.45),
+            40.0,
+            span * 12.0 + 100.0,
+        ),
+    };
+    let mut app = ax::App::new()
+        .window(ax::Window::new(SURFACE_W, SURFACE_H))
+        .add_plugins(ax::DefaultPlugins)
+        .setup(move |world, _meshes, _materials| {
+            let camera = ax::Transform::from_translation(eye)
+                .looking_at(center, ax::Vec3::UNIT_Y)
+                .expect("camera look direction is well-defined");
+            world.spawn((
+                camera,
+                ax::Camera::perspective(ax::PerspectiveProjection {
+                    fov_y: ax::Angle::degrees(fov_deg),
+                    near: ax::Meters::new(0.1).expect("near plane is finite"),
+                    far: ax::Meters::new(far).expect("far plane is finite"),
+                }),
+            ));
+        })
+        .build();
+    Mat4::from_cols_array(app.tick(0).camera_view_proj())
 }
 
 /// Leave a ghost and reset the current life (the `q` action), wired to the
@@ -172,6 +323,12 @@ pub fn set_group(group: &str) {
 #[wasm_bindgen]
 pub fn set_title(title: &str) {
     APP.with(|app| app.borrow_mut().editor_mut().set_title(title));
+}
+
+/// The current level title (for hydrating the title field after import/load).
+#[wasm_bindgen]
+pub fn level_title() -> String {
+    APP.with(|app| app.borrow().editor().title().to_string())
 }
 
 /// The current level as hand-editable TOML (for the export textarea).
@@ -245,22 +402,257 @@ pub fn status_line() -> String {
     })
 }
 
-/// Map a palette string to a [`TileKind`].
-fn tile_from_str(kind: &str) -> Option<TileKind> {
-    match kind {
-        "floor" => Some(TileKind::Floor),
-        "wall" => Some(TileKind::Wall),
-        "entrance" => Some(TileKind::Entrance),
-        "exit" => Some(TileKind::Exit),
-        "button" => Some(TileKind::Button),
-        "door" => Some(TileKind::Door),
-        _ => None,
+// ---- Mechanics config (add-ons) -------------------------------------------------
+
+/// Enable/disable afterimage decay (`lifetime` used only when `enabled`).
+#[wasm_bindgen]
+pub fn set_decay(enabled: bool, lifetime: u32) {
+    APP.with(|app| {
+        app.borrow_mut()
+            .editor_mut()
+            .set_decay(enabled.then_some(lifetime.max(1)))
+    });
+    refresh_editor_ui();
+}
+
+/// Enable/disable the ghost budget (`par < 0` means no par).
+#[wasm_bindgen]
+pub fn set_budget(enabled: bool, max_ghosts: u32, par: i32) {
+    let budget = enabled.then(|| (max_ghosts.max(1), (par >= 0).then_some(par as u32)));
+    APP.with(|app| app.borrow_mut().editor_mut().set_budget(budget));
+    refresh_editor_ui();
+}
+
+/// Enable/disable latching switches.
+#[wasm_bindgen]
+pub fn set_switches(on: bool) {
+    APP.with(|app| app.borrow_mut().editor_mut().set_switches(on));
+    refresh_editor_ui();
+}
+
+/// Enable/disable pushable crates.
+#[wasm_bindgen]
+pub fn set_crates(on: bool) {
+    APP.with(|app| app.borrow_mut().editor_mut().set_crates(on));
+    refresh_editor_ui();
+}
+
+/// Enable/disable lethal hazards.
+#[wasm_bindgen]
+pub fn set_hazards(on: bool) {
+    APP.with(|app| app.borrow_mut().editor_mut().set_hazards(on));
+    refresh_editor_ui();
+}
+
+/// Whether decay is enabled (for hydrating the panel after import/load).
+#[wasm_bindgen]
+pub fn decay_enabled() -> bool {
+    APP.with(|app| app.borrow().editor().rules().decay.is_some())
+}
+/// The current decay lifetime (a sensible default when decay is off).
+#[wasm_bindgen]
+pub fn decay_lifetime() -> u32 {
+    APP.with(|app| {
+        app.borrow()
+            .editor()
+            .rules()
+            .decay
+            .map(|d| d.lifetime_steps)
+            .unwrap_or(8)
+    })
+}
+/// Whether the budget is enabled.
+#[wasm_bindgen]
+pub fn budget_enabled() -> bool {
+    APP.with(|app| app.borrow().editor().rules().budget.is_some())
+}
+/// The current budget cap (default when off).
+#[wasm_bindgen]
+pub fn budget_max() -> u32 {
+    APP.with(|app| {
+        app.borrow()
+            .editor()
+            .rules()
+            .budget
+            .map(|b| b.max_ghosts)
+            .unwrap_or(3)
+    })
+}
+/// The current par (`-1` when unset).
+#[wasm_bindgen]
+pub fn budget_par() -> i32 {
+    APP.with(|app| {
+        app.borrow()
+            .editor()
+            .rules()
+            .budget
+            .and_then(|b| b.par)
+            .map(|p| p as i32)
+            .unwrap_or(-1)
+    })
+}
+/// Whether switches are enabled.
+#[wasm_bindgen]
+pub fn switches_on() -> bool {
+    APP.with(|app| app.borrow().editor().rules().switches)
+}
+/// Whether crates are enabled.
+#[wasm_bindgen]
+pub fn crates_on() -> bool {
+    APP.with(|app| app.borrow().editor().rules().crates)
+}
+/// Whether hazards are enabled.
+#[wasm_bindgen]
+pub fn hazards_on() -> bool {
+    APP.with(|app| app.borrow().editor().rules().hazards)
+}
+
+/// The palette kinds available right now, as comma-joined slugs — the page shows
+/// only these buttons (add-on tiles appear when their add-on is enabled).
+#[wasm_bindgen]
+pub fn available_tiles() -> String {
+    APP.with(|app| {
+        app.borrow()
+            .editor()
+            .available_kinds()
+            .iter()
+            .map(|k| k.slug())
+            .collect::<Vec<_>>()
+            .join(",")
+    })
+}
+
+// ---- Eraser, undo/redo, resize --------------------------------------------------
+
+/// Toggle the eraser tool (canvas clicks erase instead of paint).
+#[wasm_bindgen]
+pub fn set_erasing(on: bool) {
+    ERASING.with(|e| *e.borrow_mut() = on);
+}
+
+/// Undo the last edit.
+#[wasm_bindgen]
+pub fn undo() {
+    APP.with(|app| {
+        app.borrow_mut().editor_mut().undo();
+    });
+    refresh_editor_ui();
+}
+/// Redo the last undone edit.
+#[wasm_bindgen]
+pub fn redo() {
+    APP.with(|app| {
+        app.borrow_mut().editor_mut().redo();
+    });
+    refresh_editor_ui();
+}
+/// Is there anything to undo?
+#[wasm_bindgen]
+pub fn can_undo() -> bool {
+    APP.with(|app| app.borrow().editor().can_undo())
+}
+/// Is there anything to redo?
+#[wasm_bindgen]
+pub fn can_redo() -> bool {
+    APP.with(|app| app.borrow().editor().can_redo())
+}
+
+/// Resize the grid, preserving the overlapping region.
+#[wasm_bindgen]
+pub fn resize_grid(w: u32, h: u32) {
+    APP.with(|app| app.borrow_mut().editor_mut().resize_preserving(w, h));
+    refresh_editor_ui();
+}
+/// Current grid width (for hydrating the resize inputs).
+#[wasm_bindgen]
+pub fn grid_width() -> u32 {
+    APP.with(|app| app.borrow().editor().width())
+}
+/// Current grid height.
+#[wasm_bindgen]
+pub fn grid_height() -> u32 {
+    APP.with(|app| app.borrow().editor().height())
+}
+
+// ---- Library: templates + localStorage slots ------------------------------------
+
+/// The built-in template names, one per line.
+#[wasm_bindgen]
+pub fn list_templates() -> String {
+    crate::zanzoban::templates::TEMPLATES
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Load a built-in template into the editor. Returns `""` on success.
+#[wasm_bindgen]
+pub fn load_template(name: &str) -> String {
+    match crate::zanzoban::templates::template(name) {
+        Some(toml) => import_toml(toml),
+        None => format!("no template named {name}"),
     }
+}
+
+/// The browser localStorage handle, if available.
+fn storage() -> Option<web_sys::Storage> {
+    window().local_storage().ok().flatten()
+}
+
+/// Save the current level into a named browser slot. Returns `""` on success.
+#[wasm_bindgen]
+pub fn save_slot(name: &str) -> String {
+    let toml = APP.with(|app| app.borrow().editor().to_toml());
+    match (toml, storage()) {
+        (Ok(text), Some(store)) => {
+            let _ = store.set_item(&format!("{SLOT_PREFIX}{name}"), &text);
+            String::new()
+        }
+        (Err(e), _) => e.to_string(),
+        (_, None) => "browser storage unavailable".to_string(),
+    }
+}
+
+/// Load a named browser slot into the editor. Returns `""` on success.
+#[wasm_bindgen]
+pub fn load_slot(name: &str) -> String {
+    match storage().and_then(|s| s.get_item(&format!("{SLOT_PREFIX}{name}")).ok().flatten()) {
+        Some(toml) => import_toml(&toml),
+        None => format!("no saved slot named {name}"),
+    }
+}
+
+/// Every saved slot name, one per line.
+#[wasm_bindgen]
+pub fn list_slots() -> String {
+    let Some(store) = storage() else {
+        return String::new();
+    };
+    let n = store.length().unwrap_or(0);
+    (0..n)
+        .filter_map(|i| store.key(i).ok().flatten())
+        .filter_map(|k| k.strip_prefix(SLOT_PREFIX).map(str::to_string))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Delete a named saved slot.
+#[wasm_bindgen]
+pub fn delete_slot(name: &str) {
+    if let Some(store) = storage() {
+        let _ = store.remove_item(&format!("{SLOT_PREFIX}{name}"));
+    }
+}
+
+/// Map a palette slug to a [`TileKind`] (single source: [`TileKind::from_slug`]).
+fn tile_from_str(kind: &str) -> Option<TileKind> {
+    TileKind::from_slug(kind)
 }
 
 /// Install the canvas click handler: in edit mode it paints the clicked cell.
 fn install_canvas_click() {
-    let Some((canvas, _)) = canvas_context() else {
+    let Some(canvas) = canvas_element() else {
         return;
     };
     let target = canvas.clone();
@@ -280,7 +672,16 @@ fn install_canvas_click() {
         let gx = (u * w as f64).floor();
         let gy = (v * h as f64).floor();
         if (0.0..w as f64).contains(&gx) && (0.0..h as f64).contains(&gy) {
-            APP.with(|app| app.borrow_mut().editor_mut().paint(gx as u32, gy as u32));
+            let erasing = ERASING.with(|e| *e.borrow());
+            APP.with(|app| {
+                let mut app = app.borrow_mut();
+                let editor = app.editor_mut();
+                if erasing {
+                    editor.erase(gx as u32, gy as u32);
+                } else {
+                    editor.paint(gx as u32, gy as u32);
+                }
+            });
             refresh_editor_ui();
         }
     });
@@ -319,7 +720,7 @@ fn install_keyboard() {
 /// that reports touch, mouse, and pen as one shape — the same neutral
 /// `(position, is_down)` samples the engine's `axiom-input` module consumes.
 fn install_swipe() {
-    let Some((canvas, _)) = canvas_context() else {
+    let Some(canvas) = canvas_element() else {
         return;
     };
     // down / move: record this pointer's physical position, then evaluate.
@@ -398,48 +799,6 @@ fn pointer_position(canvas: &HtmlCanvasElement, e: &PointerEvent) -> (f32, f32) 
     let x = (e.client_x() as f64 - rect.left()) * sx;
     let y = (e.client_y() as f64 - rect.top()) * sy;
     (x as f32, y as f32)
-}
-
-/// Start the `requestAnimationFrame` loop: advance ghost replay at the fixed
-/// step (playtest only) and draw every frame.
-fn start_run_loop() {
-    let frame = Rc::new(RefCell::new(None::<Closure<dyn FnMut(f64)>>));
-    let frame_outer = frame.clone();
-    let mut last_ts = 0.0_f64;
-    let mut accumulator = 0.0_f64;
-
-    *frame_outer.borrow_mut() = Some(Closure::<dyn FnMut(f64)>::new(move |ts: f64| {
-        let dt = if last_ts == 0.0 { 0.0 } else { ts - last_ts };
-        last_ts = ts;
-
-        APP.with(|app| {
-            let mut app = app.borrow_mut();
-            if app.mode() == Mode::Playtest {
-                accumulator += dt;
-                let mut dispatched = 0;
-                while accumulator >= STEP_MS && dispatched < MAX_TICKS_PER_FRAME {
-                    if let Some(session) = app.playtest_mut() {
-                        session.tick();
-                    }
-                    accumulator -= STEP_MS;
-                    dispatched += 1;
-                }
-            } else {
-                accumulator = 0.0;
-            }
-            draw(&app);
-        });
-
-        request_frame(frame.borrow().as_ref());
-    }));
-    request_frame(frame_outer.borrow().as_ref());
-}
-
-/// Schedule the next animation frame.
-fn request_frame(cb: Option<&Closure<dyn FnMut(f64)>>) {
-    if let Some(cb) = cb {
-        let _ = window().request_animation_frame(cb.as_ref().unchecked_ref());
-    }
 }
 
 /// The side-panel element id (must match `web/index.html`).
@@ -566,113 +925,6 @@ fn read_safe_area_insets() -> HostSafeAreaInsets {
     .unwrap_or_else(|_| HostSafeAreaInsets::none())
 }
 
-/// Draw the current frame (edit grid or live game) onto the board canvas.
-fn draw(app: &ZanzobanApp) {
-    let Some((canvas, ctx)) = canvas_context() else {
-        return;
-    };
-    let model = app.render_model();
-    // Let the engine place the board + side panel for the current viewport (the
-    // canvas keeps its fixed grid resolution; the engine sizes its CSS box).
-    sync_layout(model.width as u32, model.height as u32);
-    let want_w = (model.width as f64 * CELL_PX) as u32;
-    let want_h = (model.height as f64 * CELL_PX) as u32;
-    if canvas.width() != want_w {
-        canvas.set_width(want_w);
-    }
-    if canvas.height() != want_h {
-        canvas.set_height(want_h);
-    }
-
-    ctx.set_global_alpha(1.0);
-    ctx.set_fill_style_str("#15171c");
-    ctx.fill_rect(0.0, 0.0, want_w as f64, want_h as f64);
-
-    model.cells.iter().for_each(|cell| {
-        let x = cell.coord.x as f64 * CELL_PX;
-        let y = cell.coord.y as f64 * CELL_PX;
-        draw_tile(&ctx, x, y, cell.tile);
-    });
-    model
-        .actors
-        .iter()
-        .for_each(|actor| draw_actor(&ctx, actor));
-}
-
-/// Colour palette for a tile: `(fill, light_edge, dark_edge)`.
-fn tile_colors(tile: RenderTile) -> (&'static str, &'static str, &'static str) {
-    match tile {
-        RenderTile::Floor => ("#262b36", "#2f3542", "#1c2029"),
-        RenderTile::Wall => ("#5b6373", "#737d8f", "#363c47"),
-        RenderTile::Entrance => ("#2e6b3f", "#3f8a54", "#1f4a2c"),
-        RenderTile::Exit => ("#b8902f", "#e0b552", "#7c5f1d"),
-        RenderTile::Button { .. } => ("#a23b3b", "#c45656", "#6e2727"),
-        RenderTile::Door { open: false } => ("#7a5a36", "#9a7548", "#503a22"),
-        RenderTile::Door { open: true } => ("#191d25", "#232935", "#0f1217"),
-    }
-}
-
-/// Draw one cell with its depth cue: flat fill for floor, beveled raised for
-/// walls/closed doors/released buttons, beveled recessed for open doors/pressed
-/// buttons. A 1px inset keeps adjacent blocks visually separated.
-fn draw_tile(ctx: &CanvasRenderingContext2d, x: f64, y: f64, tile: RenderTile) {
-    let (fill, light, dark) = tile_colors(tile);
-    let inset = 1.0;
-    let px = x + inset;
-    let py = y + inset;
-    let s = CELL_PX - inset * 2.0;
-
-    ctx.set_global_alpha(1.0);
-    ctx.set_fill_style_str(fill);
-    ctx.fill_rect(px, py, s, s);
-
-    let bevel = match tile.elevation() {
-        Elevation::Flat => 0.0,
-        Elevation::Raised | Elevation::Recessed => s * 0.18,
-        Elevation::SlightlyRaised | Elevation::SlightlyRecessed => s * 0.10,
-    };
-    if bevel <= 0.0 {
-        return;
-    }
-    let raised = matches!(
-        tile.elevation(),
-        Elevation::Raised | Elevation::SlightlyRaised
-    );
-    let (top_left, bottom_right) = if raised { (light, dark) } else { (dark, light) };
-
-    ctx.set_fill_style_str(top_left);
-    ctx.fill_rect(px, py, s, bevel);
-    ctx.fill_rect(px, py, bevel, s);
-    ctx.set_fill_style_str(bottom_right);
-    ctx.fill_rect(px, py + s - bevel, s, bevel);
-    ctx.fill_rect(px + s - bevel, py, bevel, s);
-}
-
-/// Draw one actor as a solid (player) or translucent, outlined (ghost) block.
-fn draw_actor(ctx: &CanvasRenderingContext2d, actor: &RenderActor) {
-    let margin = CELL_PX * 0.16;
-    let x = actor.coord.x as f64 * CELL_PX + margin;
-    let y = actor.coord.y as f64 * CELL_PX + margin;
-    let s = CELL_PX - margin * 2.0;
-
-    let (fill, outline) = match actor.kind {
-        ActorKind::Player => ("#3f7fe0", "#bcd4ff"),
-        ActorKind::Ghost => ("#54c6d6", "#eafcff"),
-    };
-
-    // Translucent fill (opaque for the player), then a near-opaque outline so a
-    // ghost still reads as a distinct solid block, not an invisible outline.
-    ctx.set_global_alpha(actor.alpha as f64);
-    ctx.set_fill_style_str(fill);
-    ctx.fill_rect(x, y, s, s);
-
-    ctx.set_global_alpha((actor.alpha as f64 * 1.6).min(1.0));
-    ctx.set_stroke_style_str(outline);
-    ctx.set_line_width(2.0);
-    ctx.stroke_rect(x, y, s, s);
-    ctx.set_global_alpha(1.0);
-}
-
 /// The validation summary text for the current editor state.
 fn validation_summary(app: &ZanzobanApp) -> String {
     let report = app.editor().validate();
@@ -685,19 +937,31 @@ fn validation_summary(app: &ZanzobanApp) -> String {
 
 /// Refresh the page's validation panel and the "Playtest" button after an edit.
 fn refresh_editor_ui() {
-    let (summary, playable) = APP.with(|app| {
+    let (summary, playable, can_undo, can_redo) = APP.with(|app| {
         let app = app.borrow();
-        (validation_summary(&app), app.editor().can_playtest())
+        (
+            validation_summary(&app),
+            app.editor().can_playtest(),
+            app.editor().can_undo(),
+            app.editor().can_redo(),
+        )
     });
     let doc = document();
     if let Some(panel) = doc.get_element_by_id(VALIDATION_ID) {
         panel.set_text_content(Some(&summary));
     }
-    if let Some(button) = doc.get_element_by_id(PLAYTEST_BTN_ID) {
-        if playable {
-            let _ = button.remove_attribute("disabled");
+    set_disabled(&doc, PLAYTEST_BTN_ID, !playable);
+    set_disabled(&doc, "btn-undo", !can_undo);
+    set_disabled(&doc, "btn-redo", !can_redo);
+}
+
+/// Set or clear the `disabled` attribute on an element by id.
+fn set_disabled(doc: &web_sys::Document, id: &str, disabled: bool) {
+    if let Some(el) = doc.get_element_by_id(id) {
+        if disabled {
+            let _ = el.set_attribute("disabled", "");
         } else {
-            let _ = button.set_attribute("disabled", "");
+            let _ = el.remove_attribute("disabled");
         }
     }
 }

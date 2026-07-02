@@ -73,6 +73,9 @@ members = [
     "apps/axiom-proc-playground",
     "apps/axiom-asset-stream-demo",
     "apps/axiom-game-runtime",
+    # The developer-facing workspace app: opens a project, builds a canonical
+    # launch spec, and records/replays real runtime sessions (composition leaf).
+    "apps/axiom-workspace",
     "crates/xtask",
     "tools/axiom-asset-pack",
     "tools/axiom-netcode-relay",

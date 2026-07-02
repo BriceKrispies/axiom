@@ -38,6 +38,14 @@ pub struct LevelCensus {
     pub buttons: Vec<(GridCoord, GroupId)>,
     /// Door cells with their wiring group.
     pub doors: Vec<(GridCoord, GroupId)>,
+    /// Resonance-well cells (decay add-on).
+    pub wells: Vec<GridCoord>,
+    /// Switch cells with their wiring group (switches add-on).
+    pub switches: Vec<(GridCoord, GroupId)>,
+    /// Pushable-crate cells (crates add-on).
+    pub crates: Vec<GridCoord>,
+    /// Hazard cells (hazards add-on).
+    pub hazards: Vec<GridCoord>,
 }
 
 impl LevelCensus {
@@ -59,10 +67,18 @@ impl LevelCensus {
                 .iter()
                 .map(|d| (d.position, d.group.clone()))
                 .collect(),
+            wells: level.wells.clone(),
+            switches: level
+                .switches
+                .iter()
+                .map(|s| (s.position, s.group.clone()))
+                .collect(),
+            crates: level.crates.clone(),
+            hazards: level.hazards.clone(),
         }
     }
 
-    /// Every `(coord, what)` placement, for the overlap and out-of-grid scans.
+    /// Every placed cell, for the overlap and out-of-grid scans.
     fn placements(&self) -> Vec<GridCoord> {
         self.entrances
             .iter()
@@ -70,8 +86,48 @@ impl LevelCensus {
             .chain(self.walls.iter())
             .chain(self.buttons.iter().map(|(c, _)| c))
             .chain(self.doors.iter().map(|(c, _)| c))
+            .chain(self.wells.iter())
+            .chain(self.switches.iter().map(|(c, _)| c))
+            .chain(self.crates.iter())
+            .chain(self.hazards.iter())
             .copied()
             .collect()
+    }
+}
+
+/// A configurable mechanic ("add-on"), used to report a placement whose add-on is
+/// not enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mechanic {
+    /// Afterimage decay (resonance wells).
+    Decay,
+    /// Latching switches.
+    Switch,
+    /// Pushable echo-crates.
+    Crate,
+    /// Lethal hazards.
+    Hazard,
+}
+
+impl Mechanic {
+    /// A short label for messages.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Mechanic::Decay => "resonance well",
+            Mechanic::Switch => "switch",
+            Mechanic::Crate => "crate",
+            Mechanic::Hazard => "hazard",
+        }
+    }
+
+    /// The add-on that must be enabled for this placement to be legal.
+    pub const fn addon(self) -> &'static str {
+        match self {
+            Mechanic::Decay => "decay",
+            Mechanic::Switch => "switches",
+            Mechanic::Crate => "crates",
+            Mechanic::Hazard => "hazards",
+        }
     }
 }
 
@@ -98,8 +154,17 @@ pub enum LevelError {
     EmptyButtonGroup(GridCoord),
     /// A door names an empty wiring group.
     EmptyDoorGroup(GridCoord),
-    /// A door's group has no button to open it.
+    /// A switch names an empty wiring group.
+    EmptySwitchGroup(GridCoord),
+    /// A door's group has no button or switch to open it.
     DoorWithoutButton(String),
+    /// A placement (well/switch/crate/hazard) exists but its add-on is disabled.
+    PlacementWithoutRule {
+        /// Where the offending object sits.
+        coord: GridCoord,
+        /// Which mechanic's add-on it needs.
+        mechanic: Mechanic,
+    },
     /// A placement sits outside the grid.
     OutsideGrid(GridCoord),
     /// Two exclusive static objects occupy the same cell.
@@ -133,9 +198,20 @@ impl fmt::Display for LevelError {
             LevelError::EmptyDoorGroup(c) => {
                 write!(f, "the door at ({}, {}) has an empty group", c.x, c.y)
             }
-            LevelError::DoorWithoutButton(g) => {
-                write!(f, "door group \"{g}\" has no matching button")
+            LevelError::EmptySwitchGroup(c) => {
+                write!(f, "the switch at ({}, {}) has an empty group", c.x, c.y)
             }
+            LevelError::DoorWithoutButton(g) => {
+                write!(f, "door group \"{g}\" has no matching button or switch")
+            }
+            LevelError::PlacementWithoutRule { coord, mechanic } => write!(
+                f,
+                "a {} at ({}, {}) needs the \"{}\" add-on enabled",
+                mechanic.label(),
+                coord.x,
+                coord.y,
+                mechanic.addon()
+            ),
             LevelError::OutsideGrid(c) => {
                 write!(f, "an object at ({}, {}) is outside the grid", c.x, c.y)
             }
@@ -181,9 +257,55 @@ impl LevelValidationReport {
     }
 }
 
-/// Validate a canonical [`LevelDefinition`].
+/// Validate a canonical [`LevelDefinition`]: the structural census rules plus the
+/// rule-consistency rules (a placement whose add-on is disabled).
 pub fn validate_level(level: &LevelDefinition) -> LevelValidationReport {
-    validate_census(&LevelCensus::of_level(level))
+    let mut report = validate_census(&LevelCensus::of_level(level));
+    report.errors.extend(rule_errors(level));
+    report
+}
+
+/// Add-on-consistency errors: a well/switch/crate/hazard placed while its rule is
+/// off. Needs `level.rules`, which the census does not carry, so it lives here.
+fn rule_errors(level: &LevelDefinition) -> Vec<LevelError> {
+    let mut errors = Vec::new();
+    level
+        .rules
+        .decay
+        .is_none()
+        .then(|| {
+            level.wells.iter().for_each(|&coord| {
+                errors.push(LevelError::PlacementWithoutRule {
+                    coord,
+                    mechanic: Mechanic::Decay,
+                })
+            })
+        });
+    (!level.rules.switches).then(|| {
+        level.switches.iter().for_each(|s| {
+            errors.push(LevelError::PlacementWithoutRule {
+                coord: s.position,
+                mechanic: Mechanic::Switch,
+            })
+        })
+    });
+    (!level.rules.crates).then(|| {
+        level.crates.iter().for_each(|&coord| {
+            errors.push(LevelError::PlacementWithoutRule {
+                coord,
+                mechanic: Mechanic::Crate,
+            })
+        })
+    });
+    (!level.rules.hazards).then(|| {
+        level.hazards.iter().for_each(|&coord| {
+            errors.push(LevelError::PlacementWithoutRule {
+                coord,
+                mechanic: Mechanic::Hazard,
+            })
+        })
+    });
+    errors
 }
 
 /// Validate any [`LevelCensus`] (the shared core). Errors are emitted in a fixed
@@ -217,10 +339,17 @@ pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
         .iter()
         .filter(|(_, g)| g.is_empty())
         .for_each(|(c, _)| errors.push(LevelError::EmptyDoorGroup(*c)));
+    census
+        .switches
+        .iter()
+        .filter(|(_, g)| g.is_empty())
+        .for_each(|(c, _)| errors.push(LevelError::EmptySwitchGroup(*c)));
 
-    let button_groups: BTreeSet<&str> = census
+    // A door opens from a button OR a switch of the same group.
+    let opener_groups: BTreeSet<&str> = census
         .buttons
         .iter()
+        .chain(census.switches.iter())
         .map(|(_, g)| g.as_str())
         .filter(|g| !g.is_empty())
         .collect();
@@ -229,7 +358,7 @@ pub fn validate_census(census: &LevelCensus) -> LevelValidationReport {
         .doors
         .iter()
         .map(|(_, g)| g.as_str())
-        .filter(|g| !g.is_empty() && !button_groups.contains(g))
+        .filter(|g| !g.is_empty() && !opener_groups.contains(g))
         .for_each(|g| {
             unmatched.insert(g);
         });
@@ -293,6 +422,11 @@ mod tests {
                 position: GridCoord::new(7, 5),
                 group: GroupId::new("main"),
             }],
+            wells: Vec::new(),
+            switches: Vec::new(),
+            crates: Vec::new(),
+            hazards: Vec::new(),
+            rules: Default::default(),
         }
     }
 

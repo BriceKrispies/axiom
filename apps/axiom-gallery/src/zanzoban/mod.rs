@@ -21,11 +21,14 @@
 //!   that deterministic time.
 //! * The **edit / playtest surfaces** ([`editor_model`], [`playtest_model`],
 //!   [`app`]) are also pure; the [`render_model`] turns state into a neutral,
-//!   depth-cued draw description.
-//! * The **browser shell** (`web`, wasm32-only) is a thin 2D-`<canvas>` adapter
-//!   over the pure core — the same app-local presentation pattern `axiom-growth`
-//!   uses. It is the only place DOM/canvas APIs appear, and it is never compiled
-//!   on native, so the core and `cargo test` stay browser-free.
+//!   depth-cued draw description, and [`scene3d`] turns *that* into engine cube
+//!   instances (an MVP + colour per cell/actor/crate).
+//! * The **browser shell** (`web`, wasm32-only) renders the board in 3D through
+//!   the Axiom engine — one cube mesh drawn as N instances via
+//!   `axiom-windowing`'s `run_web_multi`, so WebGPU / WebGL2 / Canvas2D all paint
+//!   it (the same instanced-cube path retro FPS uses). It is the only place DOM APIs
+//!   appear, and is never compiled on native, so the core and `cargo test` stay
+//!   browser-free.
 
 pub mod coord;
 pub mod direction;
@@ -48,9 +51,14 @@ pub mod editor_model;
 pub mod input_mapping;
 pub mod playtest_model;
 pub mod render_model;
+pub mod scene3d;
+pub mod templates;
 
 #[cfg(target_arch = "wasm32")]
 mod web;
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "zanzoban-agent"))]
+pub mod agent;
 
 /// The built-in first level, embedded so the app (and tests) need no filesystem.
 pub const LEVEL_001_TOML: &str = include_str!("levels/001-button-door.toml");

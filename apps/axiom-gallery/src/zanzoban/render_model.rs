@@ -17,6 +17,9 @@ pub const PLAYER_ALPHA: f32 = 1.0;
 /// Ghosts are translucent — clearly solid blocks, just see-through enough to
 /// read as past selves (not wireframes, not outlines).
 pub const GHOST_ALPHA: f32 = 0.45;
+/// The dimmest a fading afterimage draws before it is reaped — it is always still
+/// faintly visible right up to the tick it vanishes (decay add-on).
+pub const GHOST_FADE_FLOOR: f32 = 0.12;
 
 /// How far a cell reads above or below the floor plane — the depth cue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,11 +52,20 @@ pub enum RenderTile {
         /// Whether an actor currently holds this button down.
         pressed: bool,
     },
-    /// A door; `open` while its wiring group is pressed.
+    /// A door; `open` while its wiring group is pressed or latched.
     Door {
         /// Whether the door is currently open (passable, recessed).
         open: bool,
     },
+    /// A resonance well that refreshes ghost life (decay add-on).
+    Well,
+    /// A latching switch; `latched` while its group is currently held by a latch.
+    Switch {
+        /// Whether this switch's group is currently latched open.
+        latched: bool,
+    },
+    /// A lethal hazard tile (hazards add-on).
+    Hazard,
 }
 
 impl RenderTile {
@@ -66,6 +78,10 @@ impl RenderTile {
             RenderTile::Door { open: false } => Elevation::Raised,
             RenderTile::Button { pressed: true } => Elevation::SlightlyRecessed,
             RenderTile::Button { pressed: false } => Elevation::SlightlyRaised,
+            RenderTile::Well => Elevation::Recessed,
+            RenderTile::Switch { latched: true } => Elevation::SlightlyRecessed,
+            RenderTile::Switch { latched: false } => Elevation::SlightlyRaised,
+            RenderTile::Hazard => Elevation::Flat,
         }
     }
 
@@ -108,6 +124,8 @@ pub struct RenderModel {
     pub cells: Vec<RenderCell>,
     /// Actors in draw order (ghosts, then the player).
     pub actors: Vec<RenderActor>,
+    /// Pushable-crate positions to draw over the cells (crates add-on).
+    pub crates: Vec<GridCoord>,
 }
 
 impl RenderModel {
@@ -126,21 +144,29 @@ impl RenderModel {
                         pressed: pressed.contains(g),
                     },
                     Some(Cell::Door(g)) => RenderTile::Door {
-                        open: pressed.contains(g),
+                        open: state.is_group_open(g),
                     },
+                    Some(Cell::Well) => RenderTile::Well,
+                    Some(Cell::Switch(g)) => RenderTile::Switch {
+                        latched: state.is_latched(g),
+                    },
+                    Some(Cell::Hazard) => RenderTile::Hazard,
                     _ => RenderTile::Floor,
                 };
                 RenderCell { coord, tile }
             })
             .collect();
 
+        // Ghosts fade with remaining life when decay is on (alpha proportional to
+        // life/lifetime, floored so a ghost is faintly visible until it is reaped).
+        let lifetime = state.level().rules.decay.map(|d| d.lifetime_steps);
         let mut actors: Vec<RenderActor> = state
-            .ghost_states()
+            .ghost_lives()
             .into_iter()
-            .map(|g| RenderActor {
+            .map(|(g, life)| RenderActor {
                 kind: g.kind,
                 coord: g.position,
-                alpha: GHOST_ALPHA,
+                alpha: ghost_alpha(life, lifetime),
             })
             .collect();
         let player = state.player();
@@ -155,6 +181,7 @@ impl RenderModel {
             height: state.height(),
             cells,
             actors,
+            crates: state.crates().to_vec(),
         }
     }
 
@@ -163,6 +190,17 @@ impl RenderModel {
         coord
             .in_bounds(self.width, self.height)
             .then(|| &self.cells[coord.y as usize * self.width as usize + coord.x as usize])
+    }
+}
+
+/// A ghost's opacity: full `GHOST_ALPHA` when decay is off (immortal), otherwise
+/// proportional to remaining life, floored at [`GHOST_FADE_FLOOR`].
+fn ghost_alpha(life: Option<u32>, lifetime: Option<u32>) -> f32 {
+    match (life, lifetime) {
+        (Some(n), Some(l)) if l > 0 => {
+            (GHOST_ALPHA * (n as f32 / l as f32)).max(GHOST_FADE_FLOOR)
+        }
+        _ => GHOST_ALPHA,
     }
 }
 
@@ -190,6 +228,11 @@ mod tests {
                 position: GridCoord::new(3, 0),
                 group: GroupId::new("main"),
             }],
+            wells: Vec::new(),
+            switches: Vec::new(),
+            crates: Vec::new(),
+            hazards: Vec::new(),
+            rules: Default::default(),
         }
     }
 

@@ -86,6 +86,9 @@ growth-agent = [
     "dep:axiom-canvas2d-backend",
 ]
 
+# Zanzoban agent driver: play the grid puzzle through axiom-agent (native-only).
+zanzoban-agent = ["dep:axiom-agent"]
+
 # Native + wasm dependencies, shared across demos. Everything here builds on
 # native (so `cargo test --workspace` exercises every demo's pure game core) and
 # on wasm (the live browser arms). All paths are `../../{modules,crates}` because
@@ -203,6 +206,7 @@ web-sys = { version = "0.3", features = [
     "EventSource",
     "MessageEvent",
     "BinaryType",
+    "Storage",
     "console",
 ] }
 

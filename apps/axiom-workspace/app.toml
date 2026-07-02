@@ -1,0 +1,11 @@
+[app]
+name = "axiom-workspace"
+crate_name = "axiom-workspace"
+
+# The workspace is a developer-facing composition leaf. It legally consumes the
+# kernel (identity/tick/hash primitives its contracts are built from) and the
+# runtime layer (the deterministic fixed-step default a LaunchSpec carries). It
+# depends on no engine module yet: real runtime integration is deliberately
+# deferred until the public engine contracts it needs exist (see ARCHITECTURE.md).
+allowed_layers = ["kernel", "runtime"]
+allowed_modules = []

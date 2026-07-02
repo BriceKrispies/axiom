@@ -32,7 +32,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::zanzoban::coord::GridCoord;
 use crate::zanzoban::group_id::GroupId;
-use crate::zanzoban::level_definition::{Button, Door, LevelDefinition};
+use crate::zanzoban::level_definition::{
+    BudgetRule, Button, DecayRule, Door, LevelDefinition, RuleSet, Switch,
+};
 
 /// A failure encoding or decoding a level.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +70,53 @@ struct LevelDoc {
     buttons: Vec<WiredDoc>,
     #[serde(default)]
     doors: Vec<WiredDoc>,
+    // Add-on placements + config. All default to empty/absent and are skipped on
+    // serialize, so a level with no add-ons round-trips byte-identically to the
+    // pre-add-on schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rules: Option<RulesDoc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    wells: Vec<WallDoc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    switches: Vec<WiredDoc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    crates: Vec<WallDoc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hazards: Vec<WallDoc>,
+}
+
+/// The `[rules]` table: which add-ons are enabled and their params.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct RulesDoc {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    decay: Option<DecayDoc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    budget: Option<BudgetDoc>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    switches: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    crates: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    hazards: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DecayDoc {
+    lifetime_steps: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BudgetDoc {
+    max_ghosts: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    par: Option<u32>,
+}
+
+/// `skip_serializing_if` predicate for a `false` flag (keeps default rules out of
+/// the emitted TOML).
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -132,8 +181,66 @@ impl From<&LevelDefinition> for LevelDoc {
                     group: d.group.as_str().to_string(),
                 })
                 .collect(),
+            rules: rules_doc(&level.rules),
+            wells: level
+                .wells
+                .iter()
+                .map(|&c| WallDoc { position: arr(c) })
+                .collect(),
+            switches: level
+                .switches
+                .iter()
+                .map(|s| WiredDoc {
+                    position: arr(s.position),
+                    group: s.group.as_str().to_string(),
+                })
+                .collect(),
+            crates: level
+                .crates
+                .iter()
+                .map(|&c| WallDoc { position: arr(c) })
+                .collect(),
+            hazards: level
+                .hazards
+                .iter()
+                .map(|&c| WallDoc { position: arr(c) })
+                .collect(),
         }
     }
+}
+
+/// `RuleSet` → `[rules]` doc, `None` when the rules are all-default (so a plain
+/// level emits no `[rules]` table).
+fn rules_doc(rules: &RuleSet) -> Option<RulesDoc> {
+    (*rules != RuleSet::default()).then(|| RulesDoc {
+        decay: rules.decay.map(|d| DecayDoc {
+            lifetime_steps: d.lifetime_steps,
+        }),
+        budget: rules.budget.map(|b| BudgetDoc {
+            max_ghosts: b.max_ghosts,
+            par: b.par,
+        }),
+        switches: rules.switches,
+        crates: rules.crates,
+        hazards: rules.hazards,
+    })
+}
+
+/// `[rules]` doc → `RuleSet` (all-default when the table is absent).
+fn rule_set(doc: Option<RulesDoc>) -> RuleSet {
+    doc.map(|d| RuleSet {
+        decay: d.decay.map(|x| DecayRule {
+            lifetime_steps: x.lifetime_steps,
+        }),
+        budget: d.budget.map(|x| BudgetRule {
+            max_ghosts: x.max_ghosts,
+            par: x.par,
+        }),
+        switches: d.switches,
+        crates: d.crates,
+        hazards: d.hazards,
+    })
+    .unwrap_or_default()
 }
 
 impl From<LevelDoc> for LevelDefinition {
@@ -161,6 +268,18 @@ impl From<LevelDoc> for LevelDefinition {
                     group: GroupId::new(d.group),
                 })
                 .collect(),
+            wells: doc.wells.into_iter().map(|w| coord(w.position)).collect(),
+            switches: doc
+                .switches
+                .into_iter()
+                .map(|s| Switch {
+                    position: coord(s.position),
+                    group: GroupId::new(s.group),
+                })
+                .collect(),
+            crates: doc.crates.into_iter().map(|c| coord(c.position)).collect(),
+            hazards: doc.hazards.into_iter().map(|h| coord(h.position)).collect(),
+            rules: rule_set(doc.rules),
         }
     }
 }
@@ -200,6 +319,11 @@ mod tests {
                 position: GridCoord::new(7, 5),
                 group: GroupId::new("main"),
             }],
+            wells: Vec::new(),
+            switches: Vec::new(),
+            crates: Vec::new(),
+            hazards: Vec::new(),
+            rules: Default::default(),
         }
     }
 

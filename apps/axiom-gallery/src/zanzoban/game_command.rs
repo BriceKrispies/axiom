@@ -41,14 +41,22 @@ pub enum StepKind {
     PlayerMoved(Direction),
     /// The live player's move was blocked (and was **not** recorded).
     PlayerMoveRejected(Direction),
+    /// The live player stepped onto a hazard and died: reset to the entrance with
+    /// the recording cleared and **no** ghost created (hazards add-on).
+    PlayerDied,
     /// A life ended and a ghost was created (`q`).
     LifeReset,
+    /// `q` was refused because the ghost budget is full; no ghost was created and
+    /// nothing changed (budget add-on).
+    LifeRejectedBudgetFull,
     /// The level was restarted (`r`).
     LevelRestarted,
-    /// A fixed-step tick advanced; `ghosts_stepped` ghosts physically moved.
+    /// A fixed-step tick advanced.
     Ticked {
         /// How many ghosts changed cell on this tick.
         ghosts_stepped: u32,
+        /// How many ghosts faded to nothing this tick (decay add-on).
+        ghosts_faded: u32,
     },
 }
 
@@ -67,6 +75,16 @@ impl PuzzleStepResult {
     pub const fn player_move_rejected(&self) -> bool {
         matches!(self.kind, StepKind::PlayerMoveRejected(_))
     }
+
+    /// Did the live player step onto a hazard and die (hazards add-on)?
+    pub const fn player_died(&self) -> bool {
+        matches!(self.kind, StepKind::PlayerDied)
+    }
+
+    /// Was a `q` refused because the ghost budget is full (budget add-on)?
+    pub const fn life_rejected(&self) -> bool {
+        matches!(self.kind, StepKind::LifeRejectedBudgetFull)
+    }
 }
 
 #[cfg(test)]
@@ -83,7 +101,13 @@ mod tests {
         assert!(blocked.player_move_rejected());
         assert!(!blocked.player_moved());
 
-        let ticked = PuzzleStepResult::new(StepKind::Ticked { ghosts_stepped: 2 }, false);
+        let ticked = PuzzleStepResult::new(
+            StepKind::Ticked {
+                ghosts_stepped: 2,
+                ghosts_faded: 0,
+            },
+            false,
+        );
         assert!(!ticked.player_moved());
     }
 }

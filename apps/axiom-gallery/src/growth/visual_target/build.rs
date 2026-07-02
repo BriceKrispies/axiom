@@ -20,7 +20,7 @@ use axiom_math::{Mat4, Quat, Transform, Vec3};
 use axiom_terrain_mesh::TerrainMeshApi;
 
 use super::scatter;
-use super::scene::{Manifest, Terrain, Tree, Tuft};
+use super::scene::{value_noise, Foliage, Manifest, Style, Terrain, Tree, Tuft};
 
 /// Floats per mesh vertex: position(3) + normal(3) + uv(2) + colour(4).
 const VERT_FLOATS: usize = 12;
@@ -30,6 +30,7 @@ const TERRAIN_MESH: u64 = 1;
 const TRUNK_MESH: u64 = 2;
 const CANOPY_MESH: u64 = 3;
 const GROUNDCOVER_MESH: u64 = 4;
+const FOLIAGE_MESH: u64 = 5;
 const WHITE_MAT: u64 = 1;
 
 /// Radial segments in the unit trunk cylinder.
@@ -96,14 +97,26 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let view_proj = camera_view_proj(manifest);
     let (lights, light_view_proj) = sun(manifest);
 
-    let (terrain_v, terrain_i) = terrain_mesh(&manifest.terrain, &manifest.fog, eye);
+    let (terrain_v, terrain_i) = terrain_mesh(&manifest.terrain, &manifest.fog, eye, &style_of(manifest));
     let (trunk_v, trunk_i) = trunk_unit_mesh();
     let (canopy_v, canopy_i) = canopy_unit_mesh();
-
+    let (foliage_v, foliage_i) = foliage_card_unit_mesh();
     let (tuft_v, tuft_i) = tuft_unit_mesh();
 
+    let lean_deg = manifest.scatter.as_ref().map(|s| s.lean_deg).unwrap_or(0.0);
     let trees = all_trees(manifest);
-    let (trunk_inst, canopy_inst) = tree_instances(manifest, &trees, &view_proj, eye);
+    let trunk_inst = trunk_instances(manifest, &trees, lean_deg, &view_proj, eye);
+    // Canopy: stylized foliage-card clusters when configured, else sphere blobs.
+    let (canopy_mesh_id, canopy_inst, canopy_count) = match &manifest.foliage {
+        Some(f) => (
+            FOLIAGE_MESH,
+            foliage_instances(manifest, &trees, f, lean_deg, &view_proj, eye),
+            trees.len() as u32 * (f.cards_per_tree + f.understory_cards),
+        ),
+        None => {
+            (CANOPY_MESH, canopy_instances(manifest, &trees, lean_deg, &view_proj, eye), trees.len() as u32)
+        }
+    };
 
     let tufts = all_groundcover(manifest);
     let tuft_inst = tuft_instances(manifest, &tufts, &view_proj, eye);
@@ -118,7 +131,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let tree_count = trees.len() as u32;
     (tree_count > 0).then(|| {
         batches.push((TRUNK_MESH, WHITE_MAT, trunk_inst, tree_count));
-        batches.push((CANOPY_MESH, WHITE_MAT, canopy_inst, tree_count));
+        batches.push((canopy_mesh_id, WHITE_MAT, canopy_inst, canopy_count));
     });
     // Ground cover: one instanced batch when the abstraction placed any tufts.
     let tuft_count = tufts.len() as u32;
@@ -135,6 +148,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
             (TERRAIN_MESH, terrain_v, terrain_i),
             (TRUNK_MESH, trunk_v, trunk_i),
             (CANOPY_MESH, canopy_v, canopy_i),
+            (FOLIAGE_MESH, foliage_v, foliage_i),
             (GROUNDCOVER_MESH, tuft_v, tuft_i),
         ],
         materials: vec![white_material()],
@@ -186,7 +200,7 @@ fn pick_up(dir: Vec3) -> Vec3 {
 
 /// The 64×64 terrain patch: the neutral grid from `axiom-terrain-mesh`, decorated
 /// with ground-band albedo, a slope→rock tint, and baked linear distance fog.
-fn terrain_mesh(terrain: &Terrain, fog: &super::scene::Fog, eye: Vec3) -> (Vec<f32>, Vec<u32>) {
+fn terrain_mesh(terrain: &Terrain, fog: &super::scene::Fog, eye: Vec3, style: &Style) -> (Vec<f32>, Vec<u32>) {
     let mesh = TerrainMeshApi::heightfield_grid_mesh(
         (Meters::finite_or_zero(0.0), Meters::finite_or_zero(0.0)),
         Meters::finite_or_zero(terrain.half_m()),
@@ -202,66 +216,148 @@ fn terrain_mesh(terrain: &Terrain, fog: &super::scene::Fog, eye: Vec3) -> (Vec<f
             let base = ground_albedo(terrain, pos.y);
             let slope = terrain.slope_at(pos.x, pos.z);
             let rock_t = smoothstep(terrain.rock_slope_start, terrain.rock_slope_full, slope);
-            let surface = lerp3(base, terrain.rock_albedo, rock_t);
+            let rocked = lerp3(base, terrain.rock_albedo, rock_t);
+            // Leaf-litter carpet: mottle the floor between two warm fallen-leaf tones
+            // (orange-brown ↔ dry tan) so it reads as a bed of autumn leaves, not flat
+            // dirt, then drop in sparse muted-green grass/moss patches — a forest
+            // floor. Smooth, clustered value noise keeps it readable, not speckly.
+            let litter_n = value_noise(4242, pos.x * 0.34, pos.z * 0.34) * 0.5 + 0.5;
+            let fine_n = value_noise(7777, pos.x * 1.1, pos.z * 1.1) * 0.5 + 0.5;
+            // The floor is fallen-leaf litter: warm russet ↔ ochre, only lightly tinted
+            // by the underlying ground so it reads as a leaf bed, not tan dirt.
+            let litter = lerp3([0.44, 0.24, 0.11], [0.58, 0.38, 0.18], fine_n);
+            let leafy = lerp3(rocked, litter, 0.80 + 0.15 * litter_n);
+            // Sparse muted-green grass/moss patches breaking up the litter.
+            let moss_n = smoothstep(0.64, 0.88, value_noise(1313, pos.x * 0.52, pos.z * 0.52) * 0.5 + 0.5);
+            let surface = lerp3(leafy, [0.31, 0.36, 0.18], moss_n * 0.5);
 
             let dist = eye.subtract(Vec3::new(pos.x, pos.y, pos.z)).length();
-            let f = fog_factor(dist, fog.start_m, fog.end_m);
-            let col = lerp3(surface, fog.color, f);
+            let col = fogged(surface, fog, dist, style, 1.0);
 
             push_vertex(
                 &mut vertices,
                 [pos.x, pos.y, pos.z],
                 [normal.x, normal.y, normal.z],
                 [0.5, 0.5],
-                [col[0], col[1], col[2], 1.0],
+                col,
             );
         });
     (vertices, mesh.indices().to_vec())
 }
 
-/// Build the per-tree instance data for the trunk and canopy batches (parallel
-/// order: instance `i` of each batch is tree `i`).
-fn tree_instances(
-    manifest: &Manifest,
-    trees: &[Tree],
-    view_proj: &[f32; 16],
-    eye: Vec3,
-) -> (Vec<f32>, Vec<f32>) {
+/// A deterministic `[0, 1)` hash from a world `(x, z)` plus a `salt` — the per-tree /
+/// per-card randomness source (pure integer bit math, identical on every platform).
+fn hash01(x: f32, z: f32, salt: u32) -> f32 {
+    let mut h = x.to_bits().wrapping_mul(0x9E37_79B1)
+        ^ z.to_bits().wrapping_mul(0x85EB_CA77)
+        ^ salt.wrapping_mul(0xC2B2_AE3D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x27D4_EB2F);
+    h ^= h >> 13;
+    (h & 0x00FF_FFFF) as f32 / 0x0100_0000 as f32
+}
+
+/// A tree's deterministic lean: `(theta, dir)` — tilt magnitude (radians, up to
+/// `lean_deg_max`) and the horizontal direction it leans toward.
+fn tree_lean(t: &Tree, lean_deg_max: f32) -> (f32, f32) {
+    let theta = (hash01(t.x, t.z, 71) * lean_deg_max).to_radians();
+    (theta, hash01(t.x, t.z, 131) * std::f32::consts::TAU)
+}
+
+/// The leaned trunk-top anchor the canopy/foliage sits on (the top shifts sideways as
+/// the trunk leans).
+fn canopy_anchor(t: &Tree, ground: f32, lean_deg_max: f32) -> Vec3 {
+    let (theta, dir) = tree_lean(t, lean_deg_max);
+    let h = t.trunk_height_m;
+    Vec3::new(t.x + h * theta.sin() * dir.cos(), ground + h * theta.cos(), t.z + h * theta.sin() * dir.sin())
+}
+
+/// Per-tree trunk instances, each leaned a deterministic amount; near trunks read
+/// dark, distance fog hazes far ones.
+fn trunk_instances(manifest: &Manifest, trees: &[Tree], lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
-    let mut trunk = Vec::with_capacity(trees.len() * 36);
-    let mut canopy = Vec::with_capacity(trees.len() * 36);
-
+    let mut out = Vec::with_capacity(trees.len() * 36);
     for t in trees {
         let ground = manifest.terrain.height_at(t.x, t.z);
-        let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, t.yaw_deg.to_radians())
-            .unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0));
-
-        // Trunk: unit cylinder (y in [0,1]) scaled to (radius, height, radius).
-        let trunk_world = Transform::new(
+        let (theta, dir) = tree_lean(t, lean_deg);
+        let axis = Vec3::new(dir.sin(), 0.0, -dir.cos());
+        let lean = Quat::from_axis_angle(axis, theta).unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0));
+        let world = Transform::new(
             Vec3::new(t.x, ground, t.z),
-            yaw,
+            lean,
             Vec3::new(t.trunk_radius_m, t.trunk_height_m, t.trunk_radius_m),
         )
         .to_matrix();
-        let trunk_dist = eye.subtract(Vec3::new(t.x, ground + t.trunk_height_m * 0.5, t.z)).length();
-        let trunk_tint = fogged(BARK, fog, trunk_dist);
-        trunk.extend_from_slice(&instance(&vp, trunk_world, trunk_tint));
-
-        // Canopy: unit blob scaled uniformly, centred on the trunk top so its lower
-        // hemisphere wraps the trunk (no floating gap between crown and stem).
-        let canopy_y = ground + t.trunk_height_m;
-        let canopy_world = Transform::new(
-            Vec3::new(t.x, canopy_y, t.z),
-            yaw,
-            Vec3::new(t.canopy_radius_m, t.canopy_radius_m, t.canopy_radius_m),
-        )
-        .to_matrix();
-        let canopy_dist = eye.subtract(Vec3::new(t.x, canopy_y, t.z)).length();
-        let canopy_tint = fogged(t.canopy_color, fog, canopy_dist);
-        canopy.extend_from_slice(&instance(&vp, canopy_world, canopy_tint));
+        let d = eye.subtract(Vec3::new(t.x, ground + t.trunk_height_m * 0.5, t.z)).length();
+        out.extend_from_slice(&instance(&vp, world, fogged(BARK, fog, d, &style_of(manifest), 1.0)));
     }
-    (trunk, canopy)
+    out
+}
+
+/// The sphere-blob canopy (the fallback when no `[foliage]` is configured).
+fn canopy_instances(manifest: &Manifest, trees: &[Tree], lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+    let fog = &manifest.fog;
+    let vp = Mat4::from_cols_array(*view_proj);
+    let mut out = Vec::with_capacity(trees.len() * 36);
+    for t in trees {
+        let ground = manifest.terrain.height_at(t.x, t.z);
+        let c = canopy_anchor(t, ground, lean_deg);
+        let world = Transform::new(c, Quat::new(0.0, 0.0, 0.0, 1.0), Vec3::new(t.canopy_radius_m, t.canopy_radius_m, t.canopy_radius_m)).to_matrix();
+        out.extend_from_slice(&instance(&vp, world, fogged(t.canopy_color, fog, eye.subtract(c).length(), &style_of(manifest), fol_sat(manifest))));
+    }
+    out
+}
+
+/// Stylized foliage: each tree's canopy is a loose cluster of crossed leaf cards in a
+/// warm autumn palette (upper/mid canopy) plus a few smaller understory cards near the
+/// ground — the "autumn forest" look that replaces the sphere blobs.
+fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+    let fog = &manifest.fog;
+    let vp = Mat4::from_cols_array(*view_proj);
+    let pal = f.palette.as_slice();
+    let mut out = Vec::with_capacity(trees.len() * (f.cards_per_tree + f.understory_cards) as usize * 36);
+    for t in trees {
+        let ground = manifest.terrain.height_at(t.x, t.z);
+        let anchor = canopy_anchor(t, ground, lean_deg);
+        let r = t.canopy_radius_m;
+        // Upper/mid canopy: cards gathered in an oblate mass around the anchor.
+        for j in 0..f.cards_per_tree {
+            let a = hash01(t.x, t.z, 200 + j) * std::f32::consts::TAU;
+            let rad = hash01(t.x, t.z, 300 + j).sqrt() * r;
+            let hy = (hash01(t.x, t.z, 400 + j) - 0.30) * r * 1.1;
+            let pos = Vec3::new(anchor.x + rad * a.cos(), anchor.y + hy, anchor.z + rad * a.sin());
+            let sc = r * f.card_scale * (0.7 + hash01(t.x, t.z, 500 + j) * 0.6);
+            let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, 700 + j), 1.0);
+            out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, 600 + j), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));
+        }
+        // Understory: smaller, muted cards near the trunk base.
+        for j in 0..f.understory_cards {
+            let a = hash01(t.x, t.z, 800 + j) * std::f32::consts::TAU;
+            let rad = t.trunk_radius_m + hash01(t.x, t.z, 900 + j) * r * 0.6;
+            let pos = Vec3::new(t.x + rad * a.cos(), ground + 0.2 + hash01(t.x, t.z, 1000 + j) * r * 0.4, t.z + rad * a.sin());
+            let sc = r * f.card_scale * (0.4 + hash01(t.x, t.z, 1100 + j) * 0.3);
+            let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, 1200 + j), 0.7);
+            out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, 1300 + j), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));
+        }
+    }
+    out
+}
+
+/// Pick a palette colour by `pick` in `[0,1)` (fallback to `fallback` on an empty
+/// palette), scaled by `mul` (understory cards are darker).
+fn pick_color(pal: &[[f32; 3]], fallback: [f32; 3], pick: f32, mul: f32) -> [f32; 3] {
+    let c = pal.get((pick * pal.len() as f32) as usize).copied().unwrap_or(fallback);
+    [c[0] * mul, c[1] * mul, c[2] * mul]
+}
+
+/// One foliage-card instance: the unit crossed card at `pos`, yawed + uniformly
+/// scaled, tinted.
+fn card_instance(vp: &Mat4, pos: Vec3, yaw01: f32, scale: f32, tint: [f32; 4]) -> Vec<f32> {
+    let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, yaw01 * std::f32::consts::TAU)
+        .unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0));
+    let world = Transform::new(pos, yaw, Vec3::new(scale, scale, scale)).to_matrix();
+    instance(vp, world, tint)
 }
 
 /// Build the per-tuft instance data for the ground-cover batch: each tuft is the
@@ -282,7 +378,7 @@ fn tuft_instances(manifest: &Manifest, tufts: &[Tuft], view_proj: &[f32; 16], ey
         )
         .to_matrix();
         let dist = eye.subtract(Vec3::new(t.x, ground + t.height_m * 0.5, t.z)).length();
-        let tint = fogged(t.color, fog, dist);
+        let tint = fogged(t.color, fog, dist, &style_of(manifest), 1.0);
         out.extend_from_slice(&instance(&vp, world, tint));
     }
     out
@@ -302,9 +398,40 @@ fn instance(vp: &Mat4, world: Mat4, tint: [f32; 4]) -> Vec<f32> {
     v
 }
 
-/// A colour pulled toward the fog colour by distance, returned as an RGBA tint.
-fn fogged(color: [f32; 3], fog: &super::scene::Fog, dist: f32) -> [f32; 4] {
-    let c = lerp3(color, fog.color, fog_factor(dist, fog.start_m, fog.end_m));
+/// The manifest's style (neutral when omitted).
+fn style_of(manifest: &Manifest) -> Style {
+    manifest.style.unwrap_or_else(Style::neutral)
+}
+
+/// The manifest's foliage saturation (`1.0` when no style).
+fn fol_sat(manifest: &Manifest) -> f32 {
+    manifest.style.map(|s| s.foliage_saturation).unwrap_or(1.0)
+}
+
+/// Desaturate a colour toward its luminance by `1 - sat` (`sat = 1` keeps it).
+fn mute(c: [f32; 3], sat: f32) -> [f32; 3] {
+    let g = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    [lerp(g, c[0], sat), lerp(g, c[1], sat), lerp(g, c[2], sat)]
+}
+
+/// Apply exposure (global multiply) + an ambient shadow-lift, clamped so nothing
+/// blows past white — the tone control that stops foliage washing out the frame.
+fn expose(c: [f32; 3], s: &Style) -> [f32; 3] {
+    let f = |x: f32| {
+        let e = x * s.exposure;
+        (e + s.ambient * (1.0 - e)).clamp(0.0, 1.0)
+    };
+    [f(c[0]), f(c[1]), f(c[2])]
+}
+
+/// The full styled tint for an instance: mute foliage saturation, desaturate with
+/// distance, blend toward the (blue-gray) fog, then expose + tone-clamp. `sat` is the
+/// foliage saturation (`1.0` for non-foliage surfaces).
+fn fogged(color: [f32; 3], fog: &super::scene::Fog, dist: f32, style: &Style, sat: f32) -> [f32; 4] {
+    let f = fog_factor(dist, fog.start_m, fog.end_m);
+    let muted = mute(color, sat);
+    let far = mute(muted, 1.0 - style.distance_desaturation * f);
+    let c = expose(lerp3(far, fog.color, f), style);
     [c[0], c[1], c[2], 1.0]
 }
 
@@ -402,6 +529,37 @@ fn tuft_unit_mesh() -> (Vec<f32>, Vec<u32>) {
     (v, idx)
 }
 
+/// The unit foliage leaf clump: two crossed **irregular** polygons (a jittered rim
+/// fan, radius ~0.5), not paper squares, so the card reads as a ragged leaf mass.
+/// Double-sided, up-facing normals so the mass catches the warm sun. Per-vertex
+/// white; the instance tint carries the autumn leaf colour.
+fn foliage_card_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    // Irregular rim radii (a leaf clump silhouette, not a circle or square).
+    const RIM: [f32; 9] = [0.50, 0.34, 0.47, 0.28, 0.50, 0.36, 0.44, 0.30, 0.48];
+    let up = [0.0f32, 1.0, 0.0];
+    let w = [1.0f32, 1.0, 1.0, 1.0];
+    let n = RIM.len();
+    let mut v = Vec::new();
+    let mut idx = Vec::new();
+    // Two crossed planes: one facing ±Z (x,y), one facing ±X (z,y).
+    (0..2).for_each(|plane| {
+        let base = (v.len() / VERT_FLOATS) as u32;
+        push_vertex(&mut v, [0.0, 0.06, 0.0], up, [0.5, 0.5], w); // centre, slightly high
+        (0..n).for_each(|k| {
+            let a = k as f32 / n as f32 * std::f32::consts::TAU;
+            let r = RIM[k];
+            let (hx, hz) = (plane == 0).then_some((a.cos() * r, 0.0)).unwrap_or((0.0, a.cos() * r));
+            push_vertex(&mut v, [hx, a.sin() * r, hz], up, [0.5, 0.5], w);
+        });
+        (0..n).for_each(|k| {
+            let (c, r0, r1) = (base, base + 1 + k as u32, base + 1 + ((k + 1) % n) as u32);
+            // Fan triangle, both windings → visible from either side.
+            idx.extend_from_slice(&[c, r0, r1, c, r1, r0]);
+        });
+    });
+    (v, idx)
+}
+
 /// A 2×2 fully-white albedo texture, so `albedo · vertex_colour · instance_colour`
 /// reduces to the per-vertex / per-instance colours the meshes carry.
 fn white_material() -> (u64, u32, u32, Vec<u8>) {
@@ -422,6 +580,10 @@ fn fog_factor(dist: f32, start: f32, end: f32) -> f32 {
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0).max(1.0e-3)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {

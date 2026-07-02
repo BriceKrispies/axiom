@@ -65,6 +65,13 @@ pub enum Cell {
     Button(GroupId),
     /// A door of the given wiring group (walkable only while the group is open).
     Door(GroupId),
+    /// A resonance well: walkable; refreshes a ghost's life to full (decay add-on).
+    Well,
+    /// A latching switch of the given wiring group: walkable; an actor entering it
+    /// toggles the group's latch (switches add-on).
+    Switch(GroupId),
+    /// A lethal hazard: walkable, but the live player entering it dies (hazards add-on).
+    Hazard,
 }
 
 impl Cell {
@@ -77,11 +84,16 @@ impl Cell {
     }
 }
 
-/// A ghost: its positional state plus its replay cursor.
+/// A ghost: its positional state, its replay cursor, and its remaining life.
+///
+/// `life` is `None` when the decay add-on is off (the ghost is immortal, exactly
+/// as before decay existed); `Some(n)` means `n` more of its own steps before it
+/// fades. Landing on a [`Cell::Well`] refreshes it to the rule's `lifetime_steps`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GhostActor {
     actor: ActorState,
     replay: GhostReplay,
+    life: Option<u32>,
 }
 
 /// The full deterministic puzzle state.
@@ -105,6 +117,12 @@ pub struct PuzzleGameState {
     clock: SimulationClock,
     /// Total ghosts created since the last fresh restart (assigns ghost ids).
     ghosts_created: u32,
+    /// Wiring groups currently held open by a switch latch (switches add-on).
+    /// Persists across `q`; cleared only by `r`.
+    latched: BTreeSet<GroupId>,
+    /// Live pushable-crate positions (crates add-on). Persists across `q`;
+    /// re-cloned from the level on `r`.
+    crates: Vec<GridCoord>,
 }
 
 impl PuzzleGameState {
@@ -117,6 +135,7 @@ impl PuzzleGameState {
         let entrance = level.entrance;
         let exit = level.exit;
         let cells = build_cells(&level);
+        let crates = level.crates.clone();
         let clock = SimulationClock::new(
             FixedStep::new(FIXED_STEP_NANOS).expect("fixed step nanos is non-zero"),
         );
@@ -132,6 +151,8 @@ impl PuzzleGameState {
             recording: ReplayTimeline::new(),
             clock,
             ghosts_created: 0,
+            latched: BTreeSet::new(),
+            crates,
         }
     }
 
@@ -168,6 +189,12 @@ impl PuzzleGameState {
     /// Every ghost's positional state, in creation order.
     pub fn ghost_states(&self) -> Vec<ActorState> {
         self.ghosts.iter().map(|g| g.actor).collect()
+    }
+
+    /// Every ghost's positional state paired with its remaining life (`None` when
+    /// decay is off), in creation order — the input to the ghost-fade render cue.
+    pub fn ghost_lives(&self) -> Vec<(ActorState, Option<u32>)> {
+        self.ghosts.iter().map(|g| (g.actor, g.life)).collect()
     }
 
     /// How many ghosts currently exist.
@@ -207,32 +234,62 @@ impl PuzzleGameState {
             .collect()
     }
 
-    /// Is the door of `group` currently open?
+    /// Is the door of `group` currently open? A group opens while any actor holds
+    /// one of its buttons **or** the group is held by a switch latch.
     pub fn is_group_open(&self, group: &GroupId) -> bool {
-        self.pressed_groups().contains(group)
+        self.pressed_groups().contains(group) || self.latched.contains(group)
     }
 
-    /// Apply a live-player move. On success the player moves and the move is
-    /// recorded; on failure nothing changes and nothing is recorded.
+    /// Is `group` currently held open by a switch latch (switches add-on)?
+    pub fn is_latched(&self, group: &GroupId) -> bool {
+        self.latched.contains(group)
+    }
+
+    /// The live pushable-crate positions (crates add-on).
+    pub fn crates(&self) -> &[GridCoord] {
+        &self.crates
+    }
+
+    /// Apply a live-player move. On success the player moves (pushing a crate if
+    /// one is in the way and the cell beyond is free) and the move is recorded; on
+    /// failure nothing changes and nothing is recorded. Stepping onto a hazard is a
+    /// successful move that then kills the life; stepping onto a switch toggles it.
     pub fn apply_player_move(&mut self, direction: Direction) -> PuzzleStepResult {
         let target = self.player.position.stepped(direction);
-        if self.can_enter(target, ActorId::PLAYER) {
-            self.player.position = target;
-            self.recording.record(direction);
-            PuzzleStepResult::new(StepKind::PlayerMoved(direction), self.is_solved())
-        } else {
-            PuzzleStepResult::new(StepKind::PlayerMoveRejected(direction), self.is_solved())
+        if !self.resolve_move(ActorId::PLAYER, target, direction) {
+            return PuzzleStepResult::new(StepKind::PlayerMoveRejected(direction), self.is_solved());
         }
+        self.player.position = target;
+        self.recording.record(direction);
+        // Hazard death: a hazard cell is never also a switch (cells are exclusive),
+        // so short-circuit here — reset the life with no ghost.
+        if self.level.rules.hazards && matches!(self.cell_at(target), Some(Cell::Hazard)) {
+            self.player.position = self.entrance;
+            self.recording.clear();
+            return PuzzleStepResult::new(StepKind::PlayerDied, self.is_solved());
+        }
+        self.enter_cell_effects(target);
+        PuzzleStepResult::new(StepKind::PlayerMoved(direction), self.is_solved())
     }
 
     /// End the current life (`q`): create a ghost from the recording, reset the
-    /// player to the entrance, clear the recording. Existing ghosts and the clock
-    /// are untouched.
+    /// player to the entrance, clear the recording. Existing ghosts, latches,
+    /// crates, and the clock are untouched. Refused with no effect when the ghost
+    /// budget is full (budget add-on).
     pub fn reset_life_from_recording(&mut self) -> PuzzleStepResult {
+        if let Some(budget) = self.level.rules.budget {
+            if self.ghosts.len() as u32 >= budget.max_ghosts {
+                return PuzzleStepResult::new(
+                    StepKind::LifeRejectedBudgetFull,
+                    self.is_solved(),
+                );
+            }
+        }
         let replay = GhostReplay::new(self.recording.recorded().to_vec());
         let ghost = GhostActor {
             actor: ActorState::ghost(self.ghosts_created, self.entrance),
             replay,
+            life: self.level.rules.decay.map(|d| d.lifetime_steps),
         };
         self.ghosts.push(ghost);
         self.ghosts_created += 1;
@@ -242,24 +299,30 @@ impl PuzzleGameState {
     }
 
     /// Restart fresh (`r`): reset the player, clear all ghosts, clear the
-    /// recording, and reset the clock to zero.
+    /// recording, drop every switch latch, restore crates to their authored
+    /// positions, and reset the clock to zero.
     pub fn restart_fresh(&mut self) -> PuzzleStepResult {
         self.player = ActorState::player(self.entrance);
         self.ghosts.clear();
         self.recording.clear();
         self.ghosts_created = 0;
+        self.latched.clear();
+        self.crates = self.level.crates.clone();
         self.clock = SimulationClock::new(
             FixedStep::new(FIXED_STEP_NANOS).expect("fixed step nanos is non-zero"),
         );
         PuzzleStepResult::new(StepKind::LevelRestarted, self.is_solved())
     }
 
-    /// Advance one fixed tick: step the clock, then advance each ghost's replay
-    /// in creation order, moving the ones whose move is due and unobstructed.
+    /// Advance one fixed tick: step the clock, then advance each ghost's replay in
+    /// creation order, moving the ones whose move is due and unobstructed (pushing
+    /// crates and toggling switches on the way), ageing them under the decay rule,
+    /// and reaping any that have fully faded.
     pub fn tick(&mut self) -> PuzzleStepResult {
         // The clock cannot overflow in any realistic session (u64 nanoseconds is
         // ~580 years at 60 Hz); advancing is total either way.
         let _ = self.clock.advance();
+        let decay = self.level.rules.decay;
 
         let mut ghosts_stepped = 0u32;
         for i in 0..self.ghosts.len() {
@@ -268,15 +331,43 @@ impl PuzzleGameState {
             if let Some(direction) = due {
                 let id = self.ghosts[i].actor.id;
                 let target = self.ghosts[i].actor.position.stepped(direction);
-                // `can_enter` reads current occupancy (incl. earlier ghosts that
-                // already moved this tick); the mutation is a separate statement.
-                if self.can_enter(target, id) {
+                // `resolve_move` reads current occupancy (incl. earlier ghosts that
+                // already moved this tick) and may push a crate; the position write
+                // and switch toggle are separate statements.
+                let moved = self.resolve_move(id, target, direction);
+                if moved {
                     self.ghosts[i].actor.position = target;
                     ghosts_stepped += 1;
+                    self.enter_cell_effects(target);
+                }
+                // A due (consumed) step ages the afterimage; landing on a well
+                // refreshes it (decrement first, then refresh, so a ghost at life 1
+                // that reaches a well survives).
+                if let Some(rule) = decay {
+                    // Resolve the well check before taking the mutable ghost borrow.
+                    let on_well = moved && matches!(self.cell_at(target), Some(Cell::Well));
+                    if let Some(life) = self.ghosts[i].life.as_mut() {
+                        *life = life.saturating_sub(1);
+                        on_well.then(|| *life = rule.lifetime_steps);
+                    }
                 }
             }
         }
-        PuzzleStepResult::new(StepKind::Ticked { ghosts_stepped }, self.is_solved())
+
+        // Reap faded ghosts AFTER the loop (removing mid-loop would invalidate
+        // indices). A removed ghost releases anything it held, because door-open is
+        // derived from live actor occupancy.
+        let before = self.ghosts.len();
+        (decay.is_some()).then(|| self.ghosts.retain(|g| g.life != Some(0)));
+        let ghosts_faded = (before - self.ghosts.len()) as u32;
+
+        PuzzleStepResult::new(
+            StepKind::Ticked {
+                ghosts_stepped,
+                ghosts_faded,
+            },
+            self.is_solved(),
+        )
     }
 
     /// All solid actors (player + ghosts), in stable order (ghosts, then player).
@@ -299,16 +390,51 @@ impl PuzzleGameState {
         self.actors().any(|a| a.id != mover && a.position == coord)
     }
 
-    /// Can the actor `mover` move into `coord`? False if out of grid, into a
-    /// wall, into a closed door, or onto a cell another actor occupies.
-    fn can_enter(&self, coord: GridCoord, mover: ActorId) -> bool {
-        let passable_terrain = match self.cell_at(coord) {
-            None => false,
-            Some(Cell::Wall) => false,
+    /// Is `coord` passable terrain (ignoring actors and crates)? False out of grid,
+    /// into a wall, or into a closed door; wells/switches/hazards are all walkable.
+    fn is_passable_terrain(&self, coord: GridCoord) -> bool {
+        match self.cell_at(coord) {
+            None | Some(Cell::Wall) => false,
             Some(Cell::Door(group)) => self.is_group_open(group),
             Some(_) => true,
-        };
-        passable_terrain && !self.is_occupied(coord, mover)
+        }
+    }
+
+    /// The index of a crate at `coord`, if any (crates add-on).
+    fn crate_index_at(&self, coord: GridCoord) -> Option<usize> {
+        self.crates.iter().position(|&c| c == coord)
+    }
+
+    /// Try to move `mover` into `target` coming from `dir`. Pushes a crate one cell
+    /// if one is in the way and the cell beyond is passable and free. Returns
+    /// whether the actor may occupy `target`. With no crates present this reduces
+    /// exactly to the old occupancy+terrain test (the base game is unchanged).
+    fn resolve_move(&mut self, mover: ActorId, target: GridCoord, dir: Direction) -> bool {
+        if !self.is_passable_terrain(target) || self.is_occupied(target, mover) {
+            return false;
+        }
+        if let Some(ci) = self.crate_index_at(target) {
+            let beyond = target.stepped(dir);
+            let pushable = self.is_passable_terrain(beyond)
+                && !self.is_occupied(beyond, mover)
+                && self.crate_index_at(beyond).is_none();
+            if !pushable {
+                return false;
+            }
+            self.crates[ci] = beyond;
+        }
+        true
+    }
+
+    /// Edge-triggered effects of an actor entering `coord`: toggle a switch's group
+    /// latch (switches add-on). Called only after a successful entry.
+    fn enter_cell_effects(&mut self, coord: GridCoord) {
+        if self.level.rules.switches {
+            if let Some(Cell::Switch(group)) = self.cell_at(coord) {
+                let group = group.clone();
+                (!self.latched.remove(&group)).then(|| self.latched.insert(group));
+            }
+        }
     }
 }
 
@@ -335,6 +461,12 @@ fn build_cells(level: &LevelDefinition) -> Vec<Cell> {
         .doors
         .iter()
         .for_each(|d| stamp(d.position, Cell::Door(d.group.clone())));
+    level.wells.iter().for_each(|&c| stamp(c, Cell::Well));
+    level
+        .switches
+        .iter()
+        .for_each(|s| stamp(s.position, Cell::Switch(s.group.clone())));
+    level.hazards.iter().for_each(|&c| stamp(c, Cell::Hazard));
     stamp(level.entrance, Cell::Entrance);
     stamp(level.exit, Cell::Exit);
     cells
@@ -364,6 +496,11 @@ mod tests {
                 position: GridCoord::new(3, 0),
                 group: GroupId::new("main"),
             }],
+            wells: Vec::new(),
+            switches: Vec::new(),
+            crates: Vec::new(),
+            hazards: Vec::new(),
+            rules: Default::default(),
         }
     }
 

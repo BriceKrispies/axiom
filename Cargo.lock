@@ -752,6 +752,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-workspace"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-runtime",
+]
+
+[[package]]
 name = "axiom-worldsave"
 version = "0.1.0"
 dependencies = [

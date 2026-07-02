@@ -112,6 +112,11 @@ mod tests {
                 position: GridCoord::new(3, 0),
                 group: GroupId::new("main"),
             }],
+            wells: Vec::new(),
+            switches: Vec::new(),
+            crates: Vec::new(),
+            hazards: Vec::new(),
+            rules: Default::default(),
         }
     }
 
@@ -146,6 +151,11 @@ mod tests {
                 position: GridCoord::new(2, 0),
                 group: GroupId::new("main"),
             }],
+            wells: Vec::new(),
+            switches: Vec::new(),
+            crates: Vec::new(),
+            hazards: Vec::new(),
+            rules: Default::default(),
         };
         let mut p = PlaytestSession::new(adjacent);
         assert!(p.status_line().contains("Ghosts: 0"));

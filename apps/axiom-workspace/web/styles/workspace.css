@@ -1,0 +1,481 @@
+/* Workspace shell styling.
+ *
+ * Light, dense, square, boring — a developer instrument, not a marketing page.
+ * No rounded corners beyond a 2px hairline, no pills, no shadows-as-decoration,
+ * no external fonts, no animations. Every panel is a bordered box with a dark
+ * title bar so the shell reads as visibly modular. Layout: a header, then a main
+ * area with a left column, a large center viewport, and a right column, then a
+ * full-width bottom bar of observe/control panels.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Consolas", "SFMono-Regular", "Menlo", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #1a1a1a;
+  background: #f2f2f0;
+}
+
+.ws-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #e2e2de;
+  border-bottom: 2px solid #1a1a1a;
+}
+
+.ws-title {
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.ws-subtitle {
+  color: #555;
+}
+
+.ws-root {
+  padding: 8px;
+}
+
+.ws-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Three columns: left | center (grows) | right. */
+.ws-columns {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 300px;
+  gap: 8px;
+  align-items: start;
+}
+
+.ws-region {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ws-region-heading {
+  padding: 2px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #444;
+  border-bottom: 1px solid #bbb;
+}
+
+/* The bottom bar lays its panels out in a dense responsive row. */
+.ws-bottom {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  align-items: start;
+  border-top: 2px solid #1a1a1a;
+  padding-top: 8px;
+}
+
+.ws-bottom .ws-region-heading {
+  grid-column: 1 / -1;
+  border-bottom: none;
+}
+
+/* ---- Panel shell ---- */
+
+.ws-panel {
+  border: 1px solid #1a1a1a;
+  background: #ffffff;
+  border-radius: 2px;
+}
+
+.ws-panel-title {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #1a1a1a;
+  color: #f2f2f0;
+}
+
+.ws-panel-note {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #666;
+  border-bottom: 1px solid #ddd;
+}
+
+/* ---- Runtime viewport (center) ---- */
+
+.ws-viewport-panel {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-viewport-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: #e8e8e4;
+  border: 1px dashed #999;
+  margin: 8px;
+}
+
+.ws-viewport-label {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #444;
+}
+
+.ws-viewport-mode {
+  font-size: 12px;
+  color: #777;
+}
+
+/* ---- Runtime viewport tabs + backend-triptych placeholder ---- */
+
+.ws-viewport-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 0;
+}
+
+.ws-viewport-tab {
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #1a1a1a;
+  background: #e8e8e4;
+  border: 1px solid #1a1a1a;
+  border-bottom: none;
+  border-radius: 2px 2px 0 0;
+  cursor: pointer;
+}
+
+.ws-viewport-tab:hover {
+  background: #dcdcd6;
+}
+
+.ws-viewport-tab[data-active="true"] {
+  background: #1a1a1a;
+  color: #f2f2f0;
+}
+
+.ws-triptych-stage {
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.ws-triptych-heading {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #444;
+}
+
+.ws-triptych-panes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.ws-triptych-pane {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #1a1a1a;
+  background: #ffffff;
+  border-radius: 2px;
+}
+
+.ws-triptych-pane-label {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 6px;
+  background: #333;
+  color: #f2f2f0;
+}
+
+.ws-triptych-pane-name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ws-triptych-pane-note {
+  font-size: 10px;
+  color: #bdbdbd;
+}
+
+.ws-triptych-pane-body {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  font-size: 11px;
+  color: #777;
+  background: #eceae4;
+  border: 1px dashed #aaa;
+  margin: 6px;
+}
+
+.ws-triptych-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #666;
+}
+
+/* ---- Row lists (project / level) ---- */
+
+.ws-row-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ws-row-button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #1a1a1a;
+  background: #f7f7f5;
+  border: 1px solid #bbb;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.ws-row-button:hover {
+  background: #ecece8;
+}
+
+.ws-row-button[data-selected="true"] {
+  background: #1a1a1a;
+  color: #f2f2f0;
+  border-color: #1a1a1a;
+}
+
+.ws-row-id {
+  font-size: 11px;
+  color: #888;
+}
+
+.ws-row-button[data-selected="true"] .ws-row-id {
+  color: #cfcfcf;
+}
+
+.ws-row-name {
+  font-weight: 700;
+}
+
+/* ---- Field lists (manifest / inspector / package) ---- */
+
+.ws-field-list {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr;
+  gap: 1px;
+  margin: 0;
+  padding: 4px;
+  background: #ddd;
+  border-top: 1px solid #ddd;
+}
+
+.ws-field-label {
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #555;
+  background: #f2f2f0;
+}
+
+.ws-field-value {
+  margin: 0;
+  padding: 3px 6px;
+  color: #222;
+  background: #ffffff;
+  word-break: break-word;
+}
+
+/* ---- Asset table ---- */
+
+.ws-asset-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+}
+
+.ws-asset-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  grid-template-areas: "kind name" "id id";
+  gap: 2px 6px;
+  text-align: left;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #1a1a1a;
+  background: #f7f7f5;
+  border: 1px solid #bbb;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.ws-asset-row:hover {
+  background: #ecece8;
+}
+
+.ws-asset-row[data-selected="true"] {
+  background: #1a1a1a;
+  color: #f2f2f0;
+  border-color: #1a1a1a;
+}
+
+.ws-asset-kind {
+  grid-area: kind;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #888;
+}
+
+.ws-asset-name {
+  grid-area: name;
+  font-weight: 700;
+}
+
+.ws-asset-id {
+  grid-area: id;
+  font-size: 11px;
+  color: #999;
+}
+
+/* ---- Log / sample / input / timeline lists ---- */
+
+.ws-log-list,
+.ws-sample-list,
+.ws-input-list,
+.ws-timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ws-log-row,
+.ws-sample-row,
+.ws-input-row,
+.ws-timeline-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.ws-log-level {
+  min-width: 42px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #555;
+}
+
+.ws-log-level[data-level="warn"] {
+  color: #8a5a00;
+}
+
+.ws-log-level[data-level="error"] {
+  color: #a11;
+}
+
+.ws-log-tick,
+.ws-sample-tick,
+.ws-input-tick,
+.ws-timeline-tick {
+  min-width: 42px;
+  color: #999;
+}
+
+.ws-sample-label,
+.ws-input-label {
+  flex: 1;
+}
+
+.ws-sample-micros,
+.ws-input-code {
+  color: #555;
+}
+
+.ws-timeline-snapshot {
+  color: #444;
+  word-break: break-all;
+}
+
+/* ---- Buttons ---- */
+
+.ws-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.ws-inline-button,
+.ws-mode-button {
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #1a1a1a;
+  background: #f7f7f5;
+  border: 1px solid #1a1a1a;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.ws-inline-button {
+  margin: 6px 8px;
+}
+
+.ws-inline-button:hover,
+.ws-mode-button:hover {
+  background: #1a1a1a;
+  color: #f2f2f0;
+}
+
+.ws-mode-button[data-active="true"] {
+  background: #1a1a1a;
+  color: #f2f2f0;
+  font-weight: 700;
+}

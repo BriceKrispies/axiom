@@ -50,7 +50,14 @@
       .palette button { background: #2a2e36; }
       .palette button.sel { background: #2f6df0; outline: 2px solid #9fd1ff; }
       label { display: block; color: #aab2c0; margin: 10px 0 4px; }
-      input[type="text"] {
+      input[type="text"], input[type="number"] {
+        width: 100%; box-sizing: border-box; background: #0f1116; color: #e6e9ef;
+        border: 1px solid #353a45; border-radius: 6px; padding: 7px 9px; font: inherit;
+      }
+      .mech { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+      .mech input[type="number"] { width: 70px; }
+      .mech label { display: inline; margin: 0; color: #d7dbe2; }
+      select {
         width: 100%; box-sizing: border-box; background: #0f1116; color: #e6e9ef;
         border: 1px solid #353a45; border-radius: 6px; padding: 7px 9px; font: inherit;
       }
@@ -77,17 +84,33 @@
         <strong>Edit mode</strong>
         <div class="hint">Click a cell to paint the selected tile.</div>
         <div class="palette" id="palette">
-          <button data-kind="floor">Floor (erase)</button>
+          <button data-kind="floor">Floor</button>
           <button data-kind="wall">Wall</button>
           <button data-kind="entrance">Entrance</button>
           <button data-kind="exit">Exit</button>
           <button data-kind="button">Button</button>
           <button data-kind="door">Door</button>
+          <button data-kind="well">Well</button>
+          <button data-kind="switch">Switch</button>
+          <button data-kind="crate">Crate</button>
+          <button data-kind="hazard">Hazard</button>
         </div>
-        <label for="group">Button/Door group</label>
+        <div class="row">
+          <button class="ghost" id="btn-eraser">🩹 Eraser: off</button>
+          <button class="ghost" id="btn-undo" disabled>↶ Undo</button>
+          <button class="ghost" id="btn-redo" disabled>↷ Redo</button>
+        </div>
+        <label for="group">Button / Door / Switch group</label>
         <input type="text" id="group" value="main" />
         <label for="title">Title</label>
         <input type="text" id="title" value="Button Door" />
+        <div class="row">
+          <span class="hint" style="align-self:center">Size</span>
+          <input type="number" id="grid-w" min="1" max="64" value="10" style="width:64px" />
+          <span class="hint" style="align-self:center">×</span>
+          <input type="number" id="grid-h" min="1" max="64" value="10" style="width:64px" />
+          <button class="ghost" id="btn-resize">Resize</button>
+        </div>
 
         <label>Validation</label>
         <div id="validation">…</div>
@@ -102,6 +125,57 @@
           <button class="ghost" id="btn-import">Import ⤒</button>
         </div>
         <div id="io-msg" class="hint"></div>
+      </section>
+
+      <!-- MECHANICS panel (add-ons) -->
+      <section id="panel-mechanics" class="panel">
+        <strong>Mechanics (add-ons)</strong>
+        <div class="hint">Enable an add-on to reveal its tiles in the palette.</div>
+        <div class="mech">
+          <input type="checkbox" id="chk-decay" />
+          <label for="chk-decay">Afterimage decay — lifetime</label>
+          <input type="number" id="num-decay" min="1" max="999" value="8" />
+        </div>
+        <div class="mech">
+          <input type="checkbox" id="chk-budget" />
+          <label for="chk-budget">Ghost budget — max</label>
+          <input type="number" id="num-budget-max" min="1" max="99" value="3" />
+          <label for="num-budget-par">par</label>
+          <input type="number" id="num-budget-par" min="0" max="99" value="2" />
+        </div>
+        <div class="mech">
+          <input type="checkbox" id="chk-switches" />
+          <label for="chk-switches">Latching switches</label>
+        </div>
+        <div class="mech">
+          <input type="checkbox" id="chk-crates" />
+          <label for="chk-crates">Pushable crates</label>
+        </div>
+        <div class="mech">
+          <input type="checkbox" id="chk-hazards" />
+          <label for="chk-hazards">Lethal hazards</label>
+        </div>
+      </section>
+
+      <!-- LIBRARY panel -->
+      <section id="panel-library" class="panel">
+        <strong>Library</strong>
+        <label for="template-list">Templates</label>
+        <select id="template-list"></select>
+        <div class="row">
+          <button class="ghost" id="btn-load-template">Load template</button>
+        </div>
+        <label for="slot-name">Save slot</label>
+        <input type="text" id="slot-name" placeholder="my level" />
+        <div class="row">
+          <button class="ghost" id="btn-save-slot">Save</button>
+        </div>
+        <label for="slot-list">Saved levels</label>
+        <select id="slot-list"></select>
+        <div class="row">
+          <button class="ghost" id="btn-load-slot">Load</button>
+          <button class="ghost" id="btn-delete-slot">Delete</button>
+        </div>
       </section>
 
       <!-- PLAYTEST panel -->
@@ -123,6 +197,10 @@
           <span class="sw" style="background:#a23b3b"></span><span>Button</span>
           <span class="sw" style="background:#7a5a36"></span><span>Door (raised = closed)</span>
           <span class="sw" style="background:#b8902f"></span><span>Exit</span>
+          <span class="sw" style="background:#1f4f57"></span><span>Well (refreshes ghosts)</span>
+          <span class="sw" style="background:#7a57c0"></span><span>Switch (latch)</span>
+          <span class="sw" style="background:#8a6a3f"></span><span>Crate (pushable)</span>
+          <span class="sw" style="background:#8a2f2f"></span><span>Hazard (lethal)</span>
         </div>
         <div class="row">
           <button class="ghost" id="btn-edit">◀ Back to edit</button>
@@ -172,12 +250,115 @@
         const err = wasm.import_toml(toml.value);
         ioMsg.textContent = err ? "Import error: " + err : "Imported level.";
         ioMsg.style.color = err ? "#e07a7a" : "#7fd17f";
-        document.getElementById("title").value = ""; // refreshed below from the level
+        if (!err) afterLevelChange();
       });
 
       // --- Validation panel colour follows validity ---
       const validation = document.getElementById("validation");
       const syncValidationColour = () => validation.classList.toggle("valid", wasm.can_playtest());
+
+      // --- Palette gating: only show tiles whose add-on is enabled ---
+      function syncPalette() {
+        const avail = new Set(wasm.available_tiles().split(",").filter(Boolean));
+        buttons.forEach((b) => { b.hidden = !avail.has(b.dataset.kind); });
+      }
+
+      // --- Mechanics (add-on) panel ---
+      const chkDecay = document.getElementById("chk-decay");
+      const numDecay = document.getElementById("num-decay");
+      const chkBudget = document.getElementById("chk-budget");
+      const numBudgetMax = document.getElementById("num-budget-max");
+      const numBudgetPar = document.getElementById("num-budget-par");
+      const chkSwitches = document.getElementById("chk-switches");
+      const chkCrates = document.getElementById("chk-crates");
+      const chkHazards = document.getElementById("chk-hazards");
+      const pushDecay = () => { wasm.set_decay(chkDecay.checked, parseInt(numDecay.value) || 8); syncPalette(); syncValidationColour(); };
+      const pushBudget = () => {
+        const par = numBudgetPar.value === "" ? -1 : (parseInt(numBudgetPar.value));
+        wasm.set_budget(chkBudget.checked, parseInt(numBudgetMax.value) || 3, par);
+        syncValidationColour();
+      };
+      [chkDecay, numDecay].forEach((el) => el.addEventListener("input", pushDecay));
+      [chkBudget, numBudgetMax, numBudgetPar].forEach((el) => el.addEventListener("input", pushBudget));
+      chkSwitches.addEventListener("input", () => { wasm.set_switches(chkSwitches.checked); syncPalette(); syncValidationColour(); });
+      chkCrates.addEventListener("input", () => { wasm.set_crates(chkCrates.checked); syncPalette(); syncValidationColour(); });
+      chkHazards.addEventListener("input", () => { wasm.set_hazards(chkHazards.checked); syncPalette(); syncValidationColour(); });
+      function hydrateMechanics() {
+        chkDecay.checked = wasm.decay_enabled(); numDecay.value = wasm.decay_lifetime();
+        chkBudget.checked = wasm.budget_enabled(); numBudgetMax.value = wasm.budget_max();
+        const par = wasm.budget_par(); numBudgetPar.value = par >= 0 ? par : "";
+        chkSwitches.checked = wasm.switches_on();
+        chkCrates.checked = wasm.crates_on();
+        chkHazards.checked = wasm.hazards_on();
+      }
+
+      // --- Eraser tool ---
+      let erasing = false;
+      const btnEraser = document.getElementById("btn-eraser");
+      btnEraser.addEventListener("click", () => {
+        erasing = !erasing;
+        wasm.set_erasing(erasing);
+        btnEraser.textContent = `🩹 Eraser: ${erasing ? "on" : "off"}`;
+        btnEraser.classList.toggle("sel", erasing);
+      });
+
+      // --- Undo / redo ---
+      document.getElementById("btn-undo").addEventListener("click", () => { wasm.undo(); afterLevelChange(); });
+      document.getElementById("btn-redo").addEventListener("click", () => { wasm.redo(); afterLevelChange(); });
+
+      // --- Resize ---
+      const gridW = document.getElementById("grid-w"), gridH = document.getElementById("grid-h");
+      document.getElementById("btn-resize").addEventListener("click", () => {
+        wasm.resize_grid(parseInt(gridW.value) || 10, parseInt(gridH.value) || 10);
+        afterLevelChange();
+      });
+      function hydrateSize() { gridW.value = wasm.grid_width(); gridH.value = wasm.grid_height(); }
+
+      // --- Library: templates + localStorage save slots ---
+      const templateList = document.getElementById("template-list");
+      const slotList = document.getElementById("slot-list");
+      const slotName = document.getElementById("slot-name");
+      const fillSelect = (sel, names) => {
+        const cur = sel.value;
+        sel.innerHTML = "";
+        names.filter(Boolean).forEach((n) => {
+          const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o);
+        });
+        sel.value = cur;
+      };
+      const refreshSlots = () => fillSelect(slotList, wasm.list_slots().split("\n"));
+      fillSelect(templateList, wasm.list_templates().split("\n"));
+      document.getElementById("btn-load-template").addEventListener("click", () => {
+        const err = wasm.load_template(templateList.value);
+        ioMsg.textContent = err ? "Error: " + err : `Loaded "${templateList.value}".`;
+        if (!err) { toml.value = wasm.export_toml(); afterLevelChange(); }
+      });
+      document.getElementById("btn-save-slot").addEventListener("click", () => {
+        const name = slotName.value.trim();
+        if (!name) { ioMsg.textContent = "Name the slot first."; return; }
+        const err = wasm.save_slot(name);
+        ioMsg.textContent = err ? "Error: " + err : `Saved "${name}".`;
+        refreshSlots(); slotList.value = name;
+      });
+      document.getElementById("btn-load-slot").addEventListener("click", () => {
+        if (!slotList.value) return;
+        const err = wasm.load_slot(slotList.value);
+        ioMsg.textContent = err ? "Error: " + err : `Loaded "${slotList.value}".`;
+        if (!err) { toml.value = wasm.export_toml(); afterLevelChange(); }
+      });
+      document.getElementById("btn-delete-slot").addEventListener("click", () => {
+        if (!slotList.value) return;
+        wasm.delete_slot(slotList.value); refreshSlots();
+      });
+
+      // --- Re-sync every panel after a whole-level change (import/load/undo/resize) ---
+      function afterLevelChange() {
+        document.getElementById("title").value = wasm.level_title();
+        hydrateMechanics();
+        hydrateSize();
+        syncPalette();
+        syncValidationColour();
+      }
 
       // --- Mode switching ---
       const panelEdit = document.getElementById("panel-edit");
@@ -204,7 +385,9 @@
         if (wasm.current_mode() === "playtest") status.textContent = wasm.status_line();
         else syncValidationColour();
       }, 120);
-      syncValidationColour();
+      // Hydrate every panel from the initial level, gate the palette, list slots.
+      afterLevelChange();
+      refreshSlots();
     </script>
   </body>
 </html>

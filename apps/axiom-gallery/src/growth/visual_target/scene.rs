@@ -47,6 +47,51 @@ pub struct Manifest {
     /// Canvas 2D, WebGPU, and WebGL.
     #[serde(default)]
     pub volumetrics: bool,
+    /// Optional stylized foliage: each tree's canopy is a loose cluster of crossed
+    /// leaf **cards** in a warm autumn palette instead of one sphere blob. When
+    /// absent, trees fall back to the sphere canopy.
+    #[serde(default)]
+    pub foliage: Option<Foliage>,
+    /// Global visual-style controls (exposure, ambient, saturation, distance
+    /// desaturation) — the safe home for the tone/brightness constants so foliage can
+    /// never wash out the frame. Absent = neutral (exposure 1, no change).
+    #[serde(default)]
+    pub style: Option<Style>,
+}
+
+/// Global tone/brightness controls for the target, applied to every emitted albedo.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Style {
+    /// Global albedo multiply (< 1 darkens the whole frame).
+    pub exposure: f32,
+    /// A small brightness floor lifting the deepest shadows (`0` = none).
+    pub ambient: f32,
+    /// Foliage/canopy saturation (`1` = full, `< 1` mutes the pale-yellow blowout).
+    pub foliage_saturation: f32,
+    /// How much distant surfaces desaturate toward grey before fog (`0` = none).
+    pub distance_desaturation: f32,
+}
+
+impl Style {
+    /// The neutral style (no change) used when the manifest omits `[style]`.
+    pub fn neutral() -> Style {
+        Style { exposure: 1.0, ambient: 0.0, foliage_saturation: 1.0, distance_desaturation: 0.0 }
+    }
+}
+
+/// Stylized foliage-card configuration for the trees (the "autumn forest" look).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Foliage {
+    /// Crossed leaf cards forming the upper/mid canopy mass per tree.
+    pub cards_per_tree: u32,
+    /// Smaller understory leaf cards near the ground per tree.
+    pub understory_cards: u32,
+    /// Card size as a multiple of the tree's `canopy_radius_m`.
+    pub card_scale: f32,
+    /// Warm autumn palette (yellow/orange/tan/brown) a card colour is drawn from.
+    pub palette: Vec<[f32; 3]>,
 }
 
 /// The single camera the frame is rendered from.
@@ -170,6 +215,10 @@ pub struct Scatter {
     /// Spread radius (m) of each clump around its centre (used when `clusters > 0`).
     #[serde(default)]
     pub cluster_radius_m: f32,
+    /// Max trunk lean (degrees). Each tree leans a deterministic amount up to this in
+    /// a hashed direction, so trunks are not perfectly vertical. `0` = upright.
+    #[serde(default)]
+    pub lean_deg: f32,
     /// Trunk height range `[min, max]` (m).
     pub trunk_height_m: [f32; 2],
     /// Trunk radius range `[min, max]` (m).
@@ -212,6 +261,13 @@ pub struct Groundcover {
     pub radius_m: [f32; 2],
     /// Palette a tuft colour is picked from per instance.
     pub palette: Vec<[f32; 3]>,
+    /// Number of clump centres (`0` = uniform). `> 0` gathers clutter into clusters
+    /// so the floor keeps readable open patches instead of a uniform blanket.
+    #[serde(default)]
+    pub clusters: u32,
+    /// Spread radius (m) of each ground-clutter clump (used when `clusters > 0`).
+    #[serde(default)]
+    pub cluster_radius_m: f32,
 }
 
 fn default_rock_albedo() -> [f32; 3] {
@@ -329,7 +385,9 @@ fn hash2(seed: u32, ix: i32, iz: i32) -> f32 {
 }
 
 /// Signed value noise in `[-1, 1]` with smoothstep-interpolated lattice corners.
-fn value_noise(seed: u32, x: f32, z: f32) -> f32 {
+/// `pub(super)` so the render builder can reuse it for smooth, clustered leaf-litter
+/// colour breakup on the forest floor.
+pub(super) fn value_noise(seed: u32, x: f32, z: f32) -> f32 {
     let x0 = x.floor();
     let z0 = z.floor();
     let ix = x0 as i32;
