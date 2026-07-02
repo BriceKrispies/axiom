@@ -1425,3 +1425,44 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 5
+
+[[iteration]]
+iteration = 35
+attacked_axis = "vegetation_density"
+changed_files = [
+    "manifest.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "PARITY REFINEMENT: denser leaf clusters + more trees fill the canopy into a full rich mass; vegetation_density 4->5"
+abstraction_introduced = false
+human_note = "More leaf clusters per tree (32) + more trees fill the gaps the geometric leaves opened, so the canopy reads as a full rich autumn mass while keeping the individual-leaf light-through look."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 4
+vegetation_clumping = 5
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 5
+vegetation_clumping = 5
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5

@@ -4,7 +4,7 @@
 # Cleaner stylized read; the residual low-poly-ness is the intended style. 3 -> 4.
 terrain_silhouette = 4
 foreground_material_detail = 5
-vegetation_density = 4
+vegetation_density = 5
 vegetation_clumping = 5
 depth_separation = 4
 fog_and_haze = 4

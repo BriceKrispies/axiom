@@ -116,8 +116,8 @@ seed = 7
 # ITER 19 (attack: vegetation_density) — dense small patch made composable by the
 # keep-clear abstraction: no trunk spawns within 16 m of the camera along the view.
 # ITER 23 (corrective): fewer trunks for readable corridors, wider radius variation.
-count = 380
-min_spacing_m = 1.6
+count = 440
+min_spacing_m = 1.45
 slope_limit = 0.85
 keep_clear_m = 16.0
 # ITER 22 (capability): deterministic trunk lean so trunks are not perfect poles.
@@ -173,8 +173,8 @@ palette = [
 [foliage]
 # ITER 23 (corrective): small irregular leaf clumps (not big paper squares), fewer +
 # layered, in a darker warm autumn palette (orange/brown, muted-yellow highlight).
-cards_per_tree = 23
-understory_cards = 4
+cards_per_tree = 32
+understory_cards = 5
 card_scale = 0.56
 palette = [
   [0.82, 0.32, 0.08],
