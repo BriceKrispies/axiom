@@ -24,11 +24,13 @@ pub(crate) fn render_to_rgba(
     height: u32,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
+    normals: &[(u64, u32, u32, Vec<u8>)],
     lights: &[(u32, [f32; 3], [f32; 3], f32)],
     light_view_proj: [f32; 16],
     batches: &[(u64, u64, Vec<f32>, u32)],
     clear: [f32; 4],
     sdf: Option<&axiom_host::SdfScene>,
+    ambient: axiom_host::FrameAmbient,
 ) -> Option<Vec<u8>> {
     let width = width.max(1);
     let height = height.max(1);
@@ -77,8 +79,10 @@ pub(crate) fn render_to_rgba(
         COLOR_FORMAT,
         meshes,
         materials,
+        normals,
         max_instances,
         shadow_size,
+        ambient,
     );
     renderer.record(
         &device,

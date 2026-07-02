@@ -23,6 +23,8 @@ use wgpu::util::DeviceExt;
 const SCENE_WGSL: &str = r#"
 @group(0) @binding(0) var albedo_tex: texture_2d<f32>;
 @group(0) @binding(1) var albedo_sampler: sampler;
+@group(0) @binding(2) var normal_tex: texture_2d<f32>;
+@group(0) @binding(3) var normal_sampler: sampler;
 
 struct Light {
     // xyz = to-light direction (directional) or world position (point); w = kind (0 dir, 1 point).
@@ -35,6 +37,9 @@ struct Lights {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
+    // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
+    sky: vec4<f32>,
+    ground: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
@@ -96,30 +101,48 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     let dim = vec2<f32>(textureDimensions(shadow_map));
     let texel = 1.0 / dim;
     let bias = 0.0015;
+    // 5x5 PCF with a slight kernel spread for a softer penumbra than a 3x3 tap.
+    let spread = 1.25;
     var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy = dy + 1) {
-        for (var dx = -1; dx <= 1; dx = dx + 1) {
-            let off = vec2<f32>(f32(dx), f32(dy)) * texel;
+    for (var dy = -2; dy <= 2; dy = dy + 1) {
+        for (var dx = -2; dx <= 2; dx = dx + 1) {
+            let off = vec2<f32>(f32(dx), f32(dy)) * texel * spread;
             sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, ndc.z - bias);
         }
     }
     let outside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0;
-    return select(sum / 9.0, 1.0, outside);
+    return select(sum / 25.0, 1.0, outside);
 }
 
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let albedo = textureSample(albedo_tex, albedo_sampler, in.uv);
+    // Alpha cutout: drop fully-transparent texels (foliage leaf-alpha cards) so they
+    // neither shade nor write depth; the soft 0.5..1 rim still alpha-blends.
+    if (albedo.a < 0.5) { discard; }
     let base = albedo * in.color;
-    let N = normalize(in.normal);
+    // Perturb the geometric normal by the material's tangent-space normal map. There is
+    // no per-vertex tangent, so build the cotangent frame from screen-space derivatives
+    // of world position + uv (Mikkelsen). A flat (0,0,1) normal map leaves N unchanged.
+    let geo_n = normalize(in.normal);
+    let nmap = textureSample(normal_tex, normal_sampler, in.uv).xyz * 2.0 - 1.0;
+    let dp1 = dpdx(in.world_pos);
+    let dp2 = dpdy(in.world_pos);
+    let duv1 = dpdx(in.uv);
+    let duv2 = dpdy(in.uv);
+    let r1 = cross(dp2, geo_n);
+    let r2 = cross(geo_n, dp1);
+    let inv_det = 1.0 / max(dot(dp1, r1), 0.0001);
+    let tangent = (r1 * duv1.x + r2 * duv2.x) * inv_det;
+    let bitangent = (r1 * duv1.y + r2 * duv2.y) * inv_det;
+    let inv_max = inverseSqrt(max(dot(tangent, tangent), dot(bitangent, bitangent)));
+    let N = normalize(tangent * (nmap.x * inv_max) + bitangent * (nmap.y * inv_max) + geo_n * nmap.z);
     let shade = shadow_factor(in.world_pos);
-    // Hemisphere ambient: a cool sky overhead, a warm-dark ground below, blended
-    // by the surface normal's up-component (N.y) — replaces the old flat 0.12
-    // ambient so unlit faces pick up sky vs ground colour. Defaulted to match the
-    // canvas software path's `hemisphere_ambient` (sky/ground colours x 0.6).
-    let sky = vec3<f32>(0.55, 0.65, 0.85);
-    let ground = vec3<f32>(0.30, 0.26, 0.22);
-    let hemi = mix(ground, sky, clamp(N.y * 0.5 + 0.5, 0.0, 1.0)) * 0.6;
+    // Hemisphere ambient from the frame's ambient uniform (sky overhead, warm-dark
+    // ground below, blended by the normal's up-component). Strength is folded into the
+    // colours, so this is a plain mix — no extra scale. An absent frame ambient is
+    // filled with the engine default upstream, so this stays identical by default.
+    let hemi = mix(lights.ground.rgb, lights.sky.rgb, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
     var lit = base.rgb * hemi;
     for (var i: u32 = 0u; i < lights.count; i = i + 1u) {
         let lt = lights.items[i];
@@ -184,6 +207,9 @@ struct Lights {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
+    // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
+    sky: vec4<f32>,
+    ground: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
@@ -360,9 +386,10 @@ fn fs(in: VsOut) -> FsOut {
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Maximum lights uploaded per frame (must match the WGSL `array<Light, 16>`).
 const MAX_LIGHTS: usize = 16;
-/// Lighting uniform size in bytes: a 16-byte header (count + padding) plus
-/// `MAX_LIGHTS` × two `vec4`s (32 bytes each) — std140-compatible.
-const LIGHTS_UBO_BYTES: u64 = 16 + (MAX_LIGHTS as u64) * 32;
+/// Lighting uniform size in bytes: a 48-byte header (count + padding, then the
+/// hemisphere-ambient `sky` + `ground` `vec4`s) plus `MAX_LIGHTS` × two `vec4`s
+/// (32 bytes each) — std140-compatible.
+const LIGHTS_UBO_BYTES: u64 = 48 + (MAX_LIGHTS as u64) * 32;
 /// Maximum SDF primitives uploaded per frame (must match the WGSL
 /// `array<SdfPrim, 16>`). Primitives beyond this are dropped, the same honesty
 /// the lights path uses — see [`pack_sdf`].
@@ -422,21 +449,27 @@ pub(crate) struct SceneRenderer {
     sdf_uniform_buffer: wgpu::Buffer,
     /// Group 0 of the SDF pass: the SDF uniform.
     sdf_bind_group: wgpu::BindGroup,
+    /// The frame's hemisphere ambient, packed into the lights uniform each draw.
+    ambient: axiom_host::FrameAmbient,
 }
 
 impl SceneRenderer {
     /// Build both pipelines (for the given colour target `format`), the shadow
     /// map, upload every distinct mesh and material, and allocate the per-frame
     /// lighting + light-VP + instance buffers. `meshes` is `(mesh_id, 12-float
-    /// vertices, indices)`; `materials` is `(material_id, width, height, RGBA8)`.
+    /// vertices, indices)`; `materials` is `(material_id, width, height, RGBA8)`;
+    /// `normals` is the optional per-material `(material_id, width, height, RGBA8)`
+    /// tangent-space normal maps (materials absent from it get a flat normal).
     pub(crate) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
+        normals: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
+        ambient: axiom_host::FrameAmbient,
     ) -> SceneRenderer {
         let max_instances = max_instances.max(1);
         // The shadow-atlas edge length is the device tier's choice
@@ -448,7 +481,9 @@ impl SceneRenderer {
             .map(|(id, vertices, indices)| (*id, upload_mesh(device, vertices, indices)))
             .collect();
 
-        // Material albedo bind group layout (group 0): texture + sampler.
+        // Material bind group layout (group 0): albedo texture + sampler (0,1) and a
+        // normal-map texture + sampler (2,3). Materials with no normal map get a 1x1
+        // flat normal, so they light exactly as before.
         let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("axiom-material-layout"),
             entries: &[
@@ -468,14 +503,38 @@ impl SceneRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
+        // The default flat normal (1x1, RGB encodes the +Z tangent-space normal) used for
+        // any material without an authored normal map.
+        let flat_normal: (u32, u32, Vec<u8>) = (1, 1, vec![128, 128, 255, 255]);
         let materials: HashMap<u64, wgpu::BindGroup> = materials
             .iter()
             .map(|(id, w, h, rgba8)| {
+                let (nw, nh, nrgba) = normals
+                    .iter()
+                    .find(|(nid, ..)| nid == id)
+                    .map(|(_, nw, nh, nrgba)| (*nw, *nh, nrgba.as_slice()))
+                    .unwrap_or((flat_normal.0, flat_normal.1, flat_normal.2.as_slice()));
                 (
                     *id,
-                    upload_material(device, queue, &material_layout, *w, *h, rgba8),
+                    upload_material(device, queue, &material_layout, (*w, *h, rgba8), (nw, nh, nrgba)),
                 )
             })
             .collect();
@@ -651,6 +710,7 @@ impl SceneRenderer {
             sdf_pipeline,
             sdf_uniform_buffer,
             sdf_bind_group,
+            ambient,
         }
     }
 
@@ -675,7 +735,7 @@ impl SceneRenderer {
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
     ) {
-        queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights));
+        queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights, self.ambient));
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
@@ -1126,10 +1186,65 @@ fn upload_material(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
+    albedo: (u32, u32, &[u8]),
+    normal: (u32, u32, &[u8]),
+) -> wgpu::BindGroup {
+    // Albedo is sRGB-encoded colour; the normal map is linear data (RGB = the
+    // tangent-space normal), so it uses the non-sRGB format.
+    let albedo = upload_texture(device, queue, albedo.0, albedo.1, albedo.2, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let normal = upload_texture(
+        device,
+        queue,
+        normal.0,
+        normal.1,
+        normal.2,
+        wgpu::TextureFormat::Rgba8Unorm,
+    );
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("axiom-material-sampler"),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        // Linear filtering so the leaf-alpha material's soft edge reads smooth, not
+        // blocky. The solid-colour materials (2x2 white) are unaffected by the filter.
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("axiom-material-bind-group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&albedo),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&normal),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    })
+}
+
+/// Upload one RGBA8 texture of the given format and return its default view.
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
     width: u32,
     height: u32,
     rgba8: &[u8],
-) -> wgpu::BindGroup {
+    format: wgpu::TextureFormat,
+) -> wgpu::TextureView {
     let width = width.max(1);
     let height = height.max(1);
     let size = wgpu::Extent3d {
@@ -1138,12 +1253,12 @@ fn upload_material(
         depth_or_array_layers: 1,
     };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("axiom-material-albedo"),
+        label: Some("axiom-material-texture"),
         size,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -1162,42 +1277,23 @@ fn upload_material(
         },
         size,
     );
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("axiom-material-sampler"),
-        address_mode_u: wgpu::AddressMode::Repeat,
-        address_mode_v: wgpu::AddressMode::Repeat,
-        address_mode_w: wgpu::AddressMode::Repeat,
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
-        mipmap_filter: wgpu::FilterMode::Nearest,
-        ..Default::default()
-    });
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("axiom-material-bind-group"),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&sampler),
-            },
-        ],
-    })
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 /// Pack the frame's lights into the std140 lighting-uniform byte layout: a
-/// 16-byte header (light count `u32` + 12 bytes padding) then `MAX_LIGHTS`
-/// entries of two `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb,
-/// intensity)`. Entries past the count stay zero. Capped at `MAX_LIGHTS`.
-fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)]) -> Vec<u8> {
+/// 48-byte header — light count `u32` + 12 bytes padding, then the hemisphere-ambient
+/// `sky` + `ground` `vec4`s (rgb, w unused) — then `MAX_LIGHTS` entries of two
+/// `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb, intensity)`. Entries past
+/// the count stay zero. Capped at `MAX_LIGHTS`.
+fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)], ambient: axiom_host::FrameAmbient) -> Vec<u8> {
     let count = lights.len().min(MAX_LIGHTS);
     let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
     bytes.extend_from_slice(&(count as u32).to_le_bytes());
     bytes.extend_from_slice(&[0u8; 12]);
+    let (sky, ground) = (ambient.sky(), ambient.ground());
+    [sky[0], sky[1], sky[2], 0.0, ground[0], ground[1], ground[2], 0.0]
+        .iter()
+        .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));
     (0..MAX_LIGHTS).for_each(|i| {
         let (kind, vec, color, intensity) =
             lights

@@ -271,40 +271,49 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
         rd.height,
         &rd.meshes,
         &rd.materials,
+        &rd.normals,
         &rd.lights,
         rd.light_view_proj,
         &rd.batches,
         rd.clear,
         None,
+        rd.ambient,
     )
     .expect("a native GPU adapter renders the visual-target frame");
     // The off-screen GPU path takes raw args (no FramePacket), so the composition
-    // applies the SAME backend-neutral volumetric pass (host::apply_frame_volumetrics)
-    // to its RGBA output that the packet-consuming backends realize internally — the
-    // god-rays are neutral frame data, identical across every renderer.
+    // applies the SAME backend-neutral whole-frame passes (god-rays, then the filmic
+    // tonemap) to its RGBA output that the packet-consuming backends realize internally
+    // — these are neutral frame data, identical across every renderer. The GPU always
+    // attempts everything (its profile is `all()`), so both passes run when present.
+    let lights: Vec<FrameLight> = rd
+        .lights
+        .iter()
+        .map(|(kind, vec, color, intensity)| {
+            FrameLight::new(*kind, *vec, [color[0], color[1], color[2], *intensity])
+        })
+        .collect();
+    let camera = Some(FrameCamera::new(IDENTITY_4X4, IDENTITY_4X4, rd.view_proj));
+    let mut packet = FramePacket::new(
+        0,
+        0,
+        FrameViewport::new(rd.width, rd.height),
+        rd.clear,
+        camera,
+        Vec::new(),
+        lights,
+        rd.light_view_proj,
+        FrameFeatureSet::new(false, true, 1, 0),
+    );
     if let Some(v) = rd.volumetrics {
-        let lights: Vec<FrameLight> = rd
-            .lights
-            .iter()
-            .map(|(kind, vec, color, intensity)| {
-                FrameLight::new(*kind, *vec, [color[0], color[1], color[2], *intensity])
-            })
-            .collect();
-        let camera = Some(FrameCamera::new(IDENTITY_4X4, IDENTITY_4X4, rd.view_proj));
-        let packet = FramePacket::new(
-            0,
-            0,
-            FrameViewport::new(rd.width, rd.height),
-            rd.clear,
-            camera,
-            Vec::new(),
-            lights,
-            rd.light_view_proj,
-            FrameFeatureSet::new(false, true, 1, 0),
-        )
-        .with_volumetrics(v);
-        axiom_host::apply_frame_volumetrics(&mut rgba, rd.width, rd.height, &packet);
+        packet = packet.with_volumetrics(v);
     }
+    if let Some(pp) = rd.postprocess {
+        packet = packet.with_postprocess(pp);
+    }
+    // Both apply passes no-op when the packet carries no such effect; order matters
+    // (tonemap grades the composited result, so it runs last).
+    axiom_host::apply_frame_volumetrics(&mut rgba, rd.width, rd.height, &packet);
+    axiom_host::apply_frame_postprocess(&mut rgba, rd.width, rd.height, &packet);
     rgba
 }
 
@@ -313,6 +322,10 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
 fn render_canvas2d(rd: &RenderData) -> (Vec<u8>, u32, u32) {
     let request = present_request(rd.width, rd.height);
     let mut backend = Canvas2dBackendApi::new(&request);
+    // Per-backend capability config: Canvas 2D uses the profile resolved from the
+    // manifest's [canvas2d] section (e.g. skip the god-ray volumetric pass); the GPU
+    // path always attempts everything.
+    backend.set_capability_profile(rd.canvas2d_profile);
     backend.load_meshes(&rd.meshes);
     backend.set_quality_level(3);
 
@@ -363,6 +376,15 @@ fn render_canvas2d(rd: &RenderData) -> (Vec<u8>, u32, u32) {
     // it (via host::apply_frame_volumetrics) exactly as any other backend would.
     let packet = match rd.volumetrics {
         Some(v) => packet.with_volumetrics(v),
+        None => packet,
+    };
+    // Hemisphere ambient rides on the packet too; the Canvas 2D backend lights unlit
+    // faces with it, matching the GPU path's ambient uniform.
+    let packet = packet.with_ambient(rd.ambient);
+    // The filmic tonemap rides on the packet as well; the Canvas 2D backend applies it
+    // gated by its capability profile (so the [canvas2d] config can skip it).
+    let packet = match rd.postprocess {
+        Some(pp) => packet.with_postprocess(pp),
         None => packet,
     };
     backend.render_offscreen_rgba(&packet)

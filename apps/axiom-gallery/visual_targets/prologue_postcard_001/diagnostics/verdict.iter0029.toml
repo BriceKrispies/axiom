@@ -1,0 +1,2 @@
+attacked_axis = "lighting_directionality"
+note = "STRUCTURAL: made the hemisphere ambient configurable neutral frame data (host FrameAmbient on FramePacket + GPU Lights uniform + canvas software lighting), replacing the hardcoded per-backend constant. A brighter warm ambient lifts the near-black backlit trunks to beech gray-brown and softens the hard geometric shadows into soft dappled shade, matching the reference GI. Realized identically on GPU + canvas2d. 3->4."

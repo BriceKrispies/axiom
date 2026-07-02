@@ -62,11 +62,13 @@ pub fn render_gpu(
         h,
         meshes,
         materials,
+        &[],
         &lights,
         outcome.light_view_proj(),
         &batches,
         outcome.clear_color(),
         outcome.sdf_scene(),
+        axiom_host::FrameAmbient::default_hemisphere(),
     )
     .expect("a native GPU adapter is required to render a GPU screenshot");
     (pixels, w, h)

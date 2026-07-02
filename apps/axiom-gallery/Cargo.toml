@@ -49,6 +49,14 @@ name = "visual-target"
 path = "src/growth/bin/visual_target.rs"
 required-features = ["visual-target"]
 
+# Soccer-penalty's native agent driver: plays a full deterministic 5-round
+# session through axiom-agent and prints a per-round report. Native-only,
+# behind `soccer-penalty-agent`.
+[[bin]]
+name = "soccer-penalty-agent"
+path = "src/soccer_penalty/bin/agent.rs"
+required-features = ["soccer-penalty-agent"]
+
 [features]
 # retro FPS headless agent server. Native-only optional deps. The kernel/runtime
 # layers and serde are now always-on normal deps (other demos need them), so they
@@ -88,6 +96,9 @@ growth-agent = [
 
 # Zanzoban agent driver: play the grid puzzle through axiom-agent (native-only).
 zanzoban-agent = ["dep:axiom-agent"]
+# Soccer-penalty's headless agent driver. `axiom-agent` is the only optional dep
+# (kernel/runtime are always-on); native-only, never in the wasm bundle.
+soccer-penalty-agent = ["dep:axiom-agent"]
 
 # Native + wasm dependencies, shared across demos. Everything here builds on
 # native (so `cargo test --workspace` exercises every demo's pure game core) and

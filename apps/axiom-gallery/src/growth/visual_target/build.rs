@@ -14,7 +14,9 @@
 //! uv(2) · colour(4). Instance layout is the engine's 36 floats: view_proj(16) ·
 //! world(16) · tint(4).
 
-use axiom_host::FrameVolumetrics;
+use axiom_host::{
+    BackendCapabilityProfile, FrameAmbient, FramePostProcess, FrameVolumetrics, RenderCapability,
+};
 use axiom_kernel::Meters;
 use axiom_math::{Mat4, Quat, Transform, Vec3};
 use axiom_terrain_mesh::TerrainMeshApi;
@@ -31,7 +33,17 @@ const TRUNK_MESH: u64 = 2;
 const CANOPY_MESH: u64 = 3;
 const GROUNDCOVER_MESH: u64 = 4;
 const FOLIAGE_MESH: u64 = 5;
+const LITTER_MESH: u64 = 6;
 const WHITE_MAT: u64 = 1;
+/// A radial soft-alpha leaf texture — GPU renders the foliage cards as feathered leaf
+/// blobs (alpha cutout + blend); Canvas 2D ignores it and keeps the solid-card proxy.
+const LEAF_ALPHA_MAT: u64 = 2;
+/// Procedural beech-bark detail texture (a near-white value multiplier the trunk tint
+/// modulates) — GPU-only surface grain; Canvas 2D keeps the flat trunk tint.
+const BARK_MAT: u64 = 3;
+/// Procedural forest-floor detail texture (color mottle multiplier) — GPU-only ground
+/// grain; Canvas 2D keeps the flat per-vertex ground colour.
+const GROUND_MAT: u64 = 4;
 
 /// Radial segments in the unit trunk cylinder.
 const TRUNK_SEGMENTS: u32 = 8;
@@ -41,10 +53,12 @@ const TRUNK_SEGMENTS: u32 = 8;
 const CANOPY_RINGS: u32 = 8;
 const CANOPY_SECTORS: u32 = 14;
 /// Blades in the unit ground-cover tuft (a small crossed-blade cluster).
-const TUFT_BLADES: u32 = 3;
+const TUFT_BLADES: u32 = 6;
 
-/// Bark tint the trunk instances carry (fog is folded in per instance).
-const BARK: [f32; 3] = [0.30, 0.21, 0.13];
+/// Bark tint the trunk instances carry (fog is folded in per instance). Light
+/// silver-grey beech — the reference's trunks are pale, not near-black; the bark detail
+/// texture (GPU) modulates this, Canvas 2D shows it flat.
+const BARK: [f32; 3] = [0.56, 0.50, 0.43];
 
 /// Neutral, backend-agnostic render data for exactly one frame.
 #[derive(Debug, Clone)]
@@ -63,11 +77,36 @@ pub struct RenderData {
     pub meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
     /// `(material_id, width, height, RGBA8 albedo)`.
     pub materials: Vec<(u64, u32, u32, Vec<u8>)>,
+    /// Per-material tangent-space normal maps `(material_id, w, h, RGBA8)` — GPU-only
+    /// surface relief; materials absent here get a flat normal (Canvas 2D ignores all).
+    pub normals: Vec<(u64, u32, u32, Vec<u8>)>,
     /// `(mesh_id, material_id, interleaved 36-float instances, instance count)`.
     pub batches: Vec<(u64, u64, Vec<f32>, u32)>,
     /// Optional volumetric light (god-rays) — neutral frame data every backend
     /// realizes through `host::apply_frame_volumetrics`.
     pub volumetrics: Option<FrameVolumetrics>,
+    /// Optional filmic tonemap post-process (ACES + exposure) — neutral frame data
+    /// the GPU always applies and Canvas 2D applies unless its profile drops it.
+    pub postprocess: Option<FramePostProcess>,
+    /// Hemisphere ambient — neutral frame data lighting the faces no directional
+    /// light reaches (lifts the backlit trunk faces + softens shadow contrast).
+    pub ambient: FrameAmbient,
+    /// The capability profile the **Canvas 2D** backend should use (resolved from the
+    /// manifest's `[canvas2d]` config). The GPU path always attempts everything.
+    pub canvas2d_profile: BackendCapabilityProfile,
+}
+
+/// Resolve the Canvas 2D capability profile from the manifest's `[canvas2d]` config:
+/// `all()` minus any capability the config disables.
+fn canvas2d_profile(manifest: &Manifest) -> BackendCapabilityProfile {
+    let all = BackendCapabilityProfile::all();
+    match &manifest.canvas2d {
+        Some(c) => {
+            let p = [all, all.without(RenderCapability::Volumetrics)][usize::from(!c.volumetrics)];
+            [p, p.without(RenderCapability::PostProcess)][usize::from(!c.postprocess)]
+        }
+        None => all,
+    }
 }
 
 /// The full instance list: the explicitly authored trees plus, if present, the
@@ -90,6 +129,16 @@ pub fn all_groundcover(manifest: &Manifest) -> Vec<Tuft> {
         .unwrap_or_default()
 }
 
+/// The fallen-leaf litter scatter (flat leaves on the ground), from the `[litter]`
+/// config; empty when absent. Reuses the ground-cover scatter.
+pub fn all_litter(manifest: &Manifest) -> Vec<Tuft> {
+    manifest
+        .litter
+        .as_ref()
+        .map(|g| scatter::expand_groundcover(g, &manifest.terrain))
+        .unwrap_or_default()
+}
+
 /// Build every neutral artifact the backends consume from `manifest`.
 pub fn build(manifest: &Manifest) -> RenderData {
     let cam = &manifest.camera;
@@ -102,40 +151,52 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let (canopy_v, canopy_i) = canopy_unit_mesh();
     let (foliage_v, foliage_i) = foliage_card_unit_mesh();
     let (tuft_v, tuft_i) = tuft_unit_mesh();
+    let (litter_v, litter_i) = litter_unit_mesh();
 
     let lean_deg = manifest.scatter.as_ref().map(|s| s.lean_deg).unwrap_or(0.0);
     let trees = all_trees(manifest);
     let trunk_inst = trunk_instances(manifest, &trees, lean_deg, &view_proj, eye);
     // Canopy: stylized foliage-card clusters when configured, else sphere blobs.
-    let (canopy_mesh_id, canopy_inst, canopy_count) = match &manifest.foliage {
+    // Foliage cards get the leaf-alpha material (GPU feathers them via alpha cutout);
+    // the sphere-blob fallback stays a solid white material.
+    let (canopy_mesh_id, canopy_inst, canopy_count, canopy_mat) = match &manifest.foliage {
         Some(f) => (
             FOLIAGE_MESH,
             foliage_instances(manifest, &trees, f, lean_deg, &view_proj, eye),
             trees.len() as u32 * (f.cards_per_tree + f.understory_cards),
+            LEAF_ALPHA_MAT,
         ),
-        None => {
-            (CANOPY_MESH, canopy_instances(manifest, &trees, lean_deg, &view_proj, eye), trees.len() as u32)
-        }
+        None => (
+            CANOPY_MESH,
+            canopy_instances(manifest, &trees, lean_deg, &view_proj, eye),
+            trees.len() as u32,
+            WHITE_MAT,
+        ),
     };
 
     let tufts = all_groundcover(manifest);
     let tuft_inst = tuft_instances(manifest, &tufts, &view_proj, eye);
+    let litter = all_litter(manifest);
+    let litter_inst = litter_instances(manifest, &litter, &view_proj, eye);
 
     // Terrain: one identity-world instance whose MVP is the camera view-projection.
     let terrain_batch_inst =
         instance(&Mat4::from_cols_array(view_proj), Mat4::IDENTITY, [1.0, 1.0, 1.0, 1.0]);
 
     let mut batches: Vec<(u64, u64, Vec<f32>, u32)> =
-        vec![(TERRAIN_MESH, WHITE_MAT, terrain_batch_inst, 1)];
+        vec![(TERRAIN_MESH, GROUND_MAT, terrain_batch_inst, 1)];
     // Only emit vegetation batches when there is at least one tree.
     let tree_count = trees.len() as u32;
     (tree_count > 0).then(|| {
-        batches.push((TRUNK_MESH, WHITE_MAT, trunk_inst, tree_count));
-        batches.push((canopy_mesh_id, WHITE_MAT, canopy_inst, canopy_count));
+        batches.push((TRUNK_MESH, BARK_MAT, trunk_inst, tree_count));
+        batches.push((canopy_mesh_id, canopy_mat, canopy_inst, canopy_count));
     });
     // Ground cover: one instanced batch when the abstraction placed any tufts.
     let tuft_count = tufts.len() as u32;
     (tuft_count > 0).then(|| batches.push((GROUNDCOVER_MESH, WHITE_MAT, tuft_inst, tuft_count)));
+    // Fallen-leaf litter: a dense flat-leaf carpet on the ground.
+    let litter_count = litter.len() as u32;
+    (litter_count > 0).then(|| batches.push((LITTER_MESH, WHITE_MAT, litter_inst, litter_count)));
 
     RenderData {
         width: cam.width_px,
@@ -150,10 +211,23 @@ pub fn build(manifest: &Manifest) -> RenderData {
             (CANOPY_MESH, canopy_v, canopy_i),
             (FOLIAGE_MESH, foliage_v, foliage_i),
             (GROUNDCOVER_MESH, tuft_v, tuft_i),
+            (LITTER_MESH, litter_v, litter_i),
         ],
-        materials: vec![white_material()],
+        materials: vec![
+            white_material(),
+            leaf_alpha_material(),
+            bark_material(),
+            ground_material(),
+        ],
+        normals: vec![bark_normal_material(), ground_normal_material()],
         batches,
         volumetrics: manifest.volumetrics.then(FrameVolumetrics::low_poly),
+        postprocess: manifest.postprocess.then(FramePostProcess::cinematic),
+        ambient: manifest
+            .ambient
+            .map(|a| FrameAmbient::new(a.sky, a.ground))
+            .unwrap_or_else(FrameAmbient::default_hemisphere),
+        canvas2d_profile: canvas2d_profile(manifest),
     }
 }
 
@@ -234,11 +308,13 @@ fn terrain_mesh(terrain: &Terrain, fog: &super::scene::Fog, eye: Vec3, style: &S
             let dist = eye.subtract(Vec3::new(pos.x, pos.y, pos.z)).length();
             let col = fogged(surface, fog, dist, style, 1.0);
 
+            // Planar UVs tiled every ~2.5 m (Repeat sampler) so the ground detail texture
+            // adds sub-grid mottle without stretching across the whole terrain.
             push_vertex(
                 &mut vertices,
                 [pos.x, pos.y, pos.z],
                 [normal.x, normal.y, normal.z],
-                [0.5, 0.5],
+                [pos.x / 2.5, pos.z / 2.5],
                 col,
             );
         });
@@ -321,13 +397,25 @@ fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg:
         let ground = manifest.terrain.height_at(t.x, t.z);
         let anchor = canopy_anchor(t, ground, lean_deg);
         let r = t.canopy_radius_m;
-        // Upper/mid canopy: cards gathered in an oblate mass around the anchor.
+        // Upper/mid canopy: cards clumped into a few tight sub-masses (with dark gaps
+        // between them) instead of a uniform oblate speckle. Each card belongs to one
+        // sub-mass whose centre is offset from the anchor by `cluster_spread`; the card
+        // then sits within `cluster_tightness` of that centre. clusters=1, spread=0,
+        // tightness=1 reproduces the old uniform fill exactly.
+        let clusters = f.clusters.max(1);
         for j in 0..f.cards_per_tree {
+            let m = j % clusters;
+            // Sub-mass centre: a point spread out from the anchor within the canopy.
+            let ma = hash01(t.x, t.z, 2000 + m) * std::f32::consts::TAU;
+            let mrad = hash01(t.x, t.z, 2100 + m).sqrt() * r * f.cluster_spread;
+            let mhy = (hash01(t.x, t.z, 2200 + m) - 0.30) * r * f.cluster_spread * 1.1;
+            let mc = Vec3::new(anchor.x + mrad * ma.cos(), anchor.y + mhy, anchor.z + mrad * ma.sin());
+            // Card placement, tight around its sub-mass centre.
             let a = hash01(t.x, t.z, 200 + j) * std::f32::consts::TAU;
-            let rad = hash01(t.x, t.z, 300 + j).sqrt() * r;
-            let hy = (hash01(t.x, t.z, 400 + j) - 0.30) * r * 1.1;
-            let pos = Vec3::new(anchor.x + rad * a.cos(), anchor.y + hy, anchor.z + rad * a.sin());
-            let sc = r * f.card_scale * (0.7 + hash01(t.x, t.z, 500 + j) * 0.6);
+            let rad = hash01(t.x, t.z, 300 + j).sqrt() * r * f.cluster_tightness;
+            let hy = (hash01(t.x, t.z, 400 + j) - 0.30) * r * f.cluster_tightness * 1.1;
+            let pos = Vec3::new(mc.x + rad * a.cos(), mc.y + hy, mc.z + rad * a.sin());
+            let sc = r * f.card_scale * (0.55 + hash01(t.x, t.z, 500 + j) * 0.4);
             let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, 700 + j), 1.0);
             out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, 600 + j), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));
         }
@@ -378,6 +466,30 @@ fn tuft_instances(manifest: &Manifest, tufts: &[Tuft], view_proj: &[f32; 16], ey
         )
         .to_matrix();
         let dist = eye.subtract(Vec3::new(t.x, ground + t.height_m * 0.5, t.z)).length();
+        let tint = fogged(t.color, fog, dist, &style_of(manifest), 1.0);
+        out.extend_from_slice(&instance(&vp, world, tint));
+    }
+    out
+}
+
+/// Fallen-leaf litter instances: flat leaf cards lying just above the ground, scaled by
+/// `radius_m` and yawed, in warm litter tints — a dense fallen-leaf carpet on the floor.
+fn litter_instances(manifest: &Manifest, litter: &[Tuft], view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+    let fog = &manifest.fog;
+    let vp = Mat4::from_cols_array(*view_proj);
+    let mut out = Vec::with_capacity(litter.len() * 36);
+    for t in litter {
+        let ground = manifest.terrain.height_at(t.x, t.z);
+        let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, t.yaw_deg.to_radians())
+            .unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0));
+        // Flat leaf: lie a hair above the ground; radius_m is the leaf size (uniform).
+        let world = Transform::new(
+            Vec3::new(t.x, ground + 0.02, t.z),
+            yaw,
+            Vec3::new(t.radius_m, t.radius_m, t.radius_m),
+        )
+        .to_matrix();
+        let dist = eye.subtract(Vec3::new(t.x, ground, t.z)).length();
         let tint = fogged(t.color, fog, dist, &style_of(manifest), 1.0);
         out.extend_from_slice(&instance(&vp, world, tint));
     }
@@ -466,8 +578,16 @@ fn trunk_unit_mesh() -> (Vec<f32>, Vec<u32>) {
     for s in 0..=seg {
         let a = (s as f32 / seg as f32) * std::f32::consts::TAU;
         let (nx, nz) = (a.cos(), a.sin());
+        // Per-segment bark streak (deterministic light/dark) → vertical bark variation
+        // so the trunk reads as bark, not a flat tube.
+        let streak = 0.84 + ((s.wrapping_mul(2_654_435_761) >> 24) & 0xFF) as f32 / 255.0 * 0.28;
+        // Cylindrical UVs: u wraps once around, v tiles up the trunk (Repeat sampler) so
+        // the bark detail texture reads at a sensible scale on a tall trunk.
+        let u = s as f32 / seg as f32;
         for y in [0.0f32, 1.0f32] {
-            push_vertex(&mut v, [nx, y, nz], [nx, 0.0, nz], [0.5, 0.5], [1.0, 1.0, 1.0, 1.0]);
+            // Darker toward the base (roots / ambient occlusion), lighter up.
+            let c = (streak * (0.60 + y * 0.40)).min(1.12);
+            push_vertex(&mut v, [nx, y, nz], [nx, 0.0, nz], [u, y * 4.0], [c, c, c, 1.0]);
         }
     }
     for s in 0..seg {
@@ -512,16 +632,24 @@ fn canopy_unit_mesh() -> (Vec<f32>, Vec<u32>) {
 /// so it reads from any angle; normals point up so the tuft catches sky/sun light.
 /// Per-vertex colour is white; the instance tint carries the grass/litter colour.
 fn tuft_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    // Varied per-blade tip heights so the clump is ragged, not a uniform star.
+    const TIP_H: [f32; 6] = [1.0, 0.66, 0.9, 0.58, 0.82, 0.72];
     let mut v = Vec::new();
     let mut idx = Vec::new();
     let up = [0.0f32, 1.0, 0.0];
+    let w = [1.0f32, 1.0, 1.0, 1.0];
     let mut base = 0u32;
     for k in 0..TUFT_BLADES {
-        let a = (k as f32 / TUFT_BLADES as f32) * std::f32::consts::PI;
-        let (dx, dz) = (a.cos() * 0.5, a.sin() * 0.5);
-        push_vertex(&mut v, [-dx, 0.0, -dz], up, [0.0, 0.0], [1.0, 1.0, 1.0, 1.0]);
-        push_vertex(&mut v, [dx, 0.0, dz], up, [1.0, 0.0], [1.0, 1.0, 1.0, 1.0]);
-        push_vertex(&mut v, [0.0, 1.0, 0.0], up, [0.5, 1.0], [1.0, 1.0, 1.0, 1.0]);
+        let a = (k as f32 / TUFT_BLADES as f32) * std::f32::consts::TAU;
+        let (ca, sa) = (a.cos(), a.sin());
+        // Base edge perpendicular to the splay direction; the apex leans OUTWARD (to
+        // radius 0.7) and up — a low grass/leaf clump that hugs the ground, not an
+        // upright spike, so the ground reads as soft clutter instead of confetti.
+        let (px, pz) = (-sa * 0.16, ca * 0.16);
+        let tip = TIP_H[(k % TIP_H.len() as u32) as usize];
+        push_vertex(&mut v, [px, 0.0, pz], up, [0.0, 0.0], w);
+        push_vertex(&mut v, [-px, 0.0, -pz], up, [1.0, 0.0], w);
+        push_vertex(&mut v, [ca * 0.7, tip, sa * 0.7], up, [0.5, 1.0], w);
         // Both windings → the blade is visible from either side.
         idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 1]);
         base += 3;
@@ -529,34 +657,79 @@ fn tuft_unit_mesh() -> (Vec<f32>, Vec<u32>) {
     (v, idx)
 }
 
-/// The unit foliage leaf clump: two crossed **irregular** polygons (a jittered rim
-/// fan, radius ~0.5), not paper squares, so the card reads as a ragged leaf mass.
-/// Double-sided, up-facing normals so the mass catches the warm sun. Per-vertex
-/// white; the instance tint carries the autumn leaf colour.
-fn foliage_card_unit_mesh() -> (Vec<f32>, Vec<u32>) {
-    // Irregular rim radii (a leaf clump silhouette, not a circle or square).
-    const RIM: [f32; 9] = [0.50, 0.34, 0.47, 0.28, 0.50, 0.36, 0.44, 0.30, 0.48];
+/// The unit fallen leaf: a single flat irregular polygon lying in the XZ plane (a leaf
+/// on the ground), normal up, double-sided. Per-vertex white; the instance tint carries
+/// the warm litter colour.
+fn litter_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    const RIM: [f32; 7] = [0.50, 0.36, 0.48, 0.30, 0.50, 0.34, 0.44];
     let up = [0.0f32, 1.0, 0.0];
     let w = [1.0f32, 1.0, 1.0, 1.0];
     let n = RIM.len();
     let mut v = Vec::new();
     let mut idx = Vec::new();
-    // Two crossed planes: one facing ±Z (x,y), one facing ±X (z,y).
-    (0..2).for_each(|plane| {
+    push_vertex(&mut v, [0.0, 0.0, 0.0], up, [0.5, 0.5], w);
+    for k in 0..n {
+        let a = k as f32 / n as f32 * std::f32::consts::TAU;
+        let r = RIM[k];
+        push_vertex(&mut v, [a.cos() * r, 0.0, a.sin() * r], up, [0.5, 0.5], w);
+    }
+    for k in 0..n {
+        let (c, r0, r1) = (0u32, 1 + k as u32, 1 + ((k + 1) % n) as u32);
+        idx.extend_from_slice(&[c, r0, r1, c, r1, r0]);
+    }
+    (v, idx)
+}
+
+/// The unit foliage leaf clump: a **cluster of small separate leaf quads** at varied
+/// offsets + tilts, with real GAPS between them — so the card reads as a mass of
+/// individual leaves with light through the gaps, rather than one solid sheet. The
+/// gaps are actual geometry (nothing there), so every backend (textured GPU + flat
+/// software raster) renders them identically and depth stays correct — no alpha
+/// texture or shader cutout needed. Double-sided, up-facing normals for the warm sun;
+/// per-vertex white, the instance tint carries the autumn leaf colour.
+fn foliage_card_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    const LEAF: usize = 9;
+    // Per-leaf centre offset within the unit clump (spread through its volume).
+    const OFF: [[f32; 3]; LEAF] = [
+        [0.00, 0.10, 0.00],
+        [0.34, -0.06, 0.20],
+        [-0.30, 0.04, -0.24],
+        [0.16, 0.30, -0.30],
+        [-0.36, -0.18, 0.12],
+        [0.24, -0.30, -0.14],
+        [-0.12, 0.34, 0.28],
+        [0.06, -0.10, 0.36],
+        [-0.22, 0.16, 0.30],
+    ];
+    // Per-leaf half-size (varied so the clump is ragged).
+    const SIZE: [f32; LEAF] = [0.30, 0.24, 0.27, 0.22, 0.28, 0.21, 0.25, 0.23, 0.26];
+    let up = [0.0f32, 1.0, 0.0];
+    let w = [1.0f32, 1.0, 1.0, 1.0];
+    let mut v = Vec::new();
+    let mut idx = Vec::new();
+    for k in 0..LEAF {
         let base = (v.len() / VERT_FLOATS) as u32;
-        push_vertex(&mut v, [0.0, 0.06, 0.0], up, [0.5, 0.5], w); // centre, slightly high
-        (0..n).for_each(|k| {
-            let a = k as f32 / n as f32 * std::f32::consts::TAU;
-            let r = RIM[k];
-            let (hx, hz) = (plane == 0).then_some((a.cos() * r, 0.0)).unwrap_or((0.0, a.cos() * r));
-            push_vertex(&mut v, [hx, a.sin() * r, hz], up, [0.5, 0.5], w);
-        });
-        (0..n).for_each(|k| {
-            let (c, r0, r1) = (base, base + 1 + k as u32, base + 1 + ((k + 1) % n) as u32);
-            // Fan triangle, both windings → visible from either side.
-            idx.extend_from_slice(&[c, r0, r1, c, r1, r0]);
-        });
-    });
+        let (o, s) = (OFF[k], SIZE[k]);
+        let a = k as f32 * 0.8;
+        let (ca, sa) = (a.cos(), a.sin());
+        // Two in-plane axes for a small tilted leaf diamond at offset `o`.
+        let ax = [ca * s, s * 0.15, sa * s];
+        let ay = [-sa * s * 0.7, s * 0.8, ca * s * 0.7];
+        let corner = |sx: f32, sy: f32| {
+            [o[0] + ax[0] * sx + ay[0] * sy, o[1] + ax[1] * sx + ay[1] * sy, o[2] + ax[2] * sx + ay[2] * sy]
+        };
+        // Map the diamond's 4 corners across the leaf-alpha texture (corner → texture
+        // corner), so the radial soft-alpha reads as a feathered leaf blob on the GPU.
+        push_vertex(&mut v, corner(-1.0, 0.0), up, [0.0, 0.0], w);
+        push_vertex(&mut v, corner(0.0, -1.0), up, [1.0, 0.0], w);
+        push_vertex(&mut v, corner(1.0, 0.0), up, [1.0, 1.0], w);
+        push_vertex(&mut v, corner(0.0, 1.0), up, [0.0, 1.0], w);
+        // Two triangles (a diamond), both windings → visible from either side.
+        idx.extend_from_slice(&[
+            base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base,
+            base + 3, base + 2,
+        ]);
+    }
     (v, idx)
 }
 
@@ -564,6 +737,127 @@ fn foliage_card_unit_mesh() -> (Vec<f32>, Vec<u32>) {
 /// reduces to the per-vertex / per-instance colours the meshes carry.
 fn white_material() -> (u64, u32, u32, Vec<u8>) {
     (WHITE_MAT, 2, 2, vec![255u8; 2 * 2 * 4])
+}
+
+/// A leaf-shaped soft-alpha texture: white RGB with an alpha shaped like an ovate,
+/// pointed leaf (zero-width at the stem and tip, widest near the base — a beech-ish
+/// silhouette), feathered at the edge. On the GPU the mesh shader alpha-cuts + blends it,
+/// so each foliage card reads as an actual leaf rather than a soft disc; Canvas 2D never
+/// samples it (flat-shaded), keeping its solid-card proxy.
+fn leaf_alpha_material() -> (u64, u32, u32, Vec<u8>) {
+    const N: u32 = 64;
+    let mut rgba = vec![255u8; (N * N * 4) as usize];
+    (0..N).for_each(|y| {
+        (0..N).for_each(|x| {
+            let nx = (x as f32 + 0.5) / N as f32 * 2.0 - 1.0;
+            let ny = (y as f32 + 0.5) / N as f32 * 2.0 - 1.0;
+            // Leaf-local height: 0 at the stem (bottom), 1 at the tip (top).
+            let ly = ((ny + 1.0) * 0.5).clamp(0.0, 1.0);
+            // Ovate half-width profile: 0 at stem & tip, peaks ~0.45 near ly=0.4, so the
+            // outline is a rounded leaf tapering to a point.
+            let hw = 1.05 * ly.powf(0.45) * (1.0 - ly).powf(0.9);
+            // Feather across the horizontal outline (and the tip, where hw -> 0).
+            let a = smoothstep(-0.05, 0.03, hw - nx.abs());
+            let idx = ((y * N + x) * 4 + 3) as usize;
+            rgba[idx] = (a * 255.0 + 0.5) as u8;
+        })
+    });
+    (LEAF_ALPHA_MAT, N, N, rgba)
+}
+
+/// Beech-bark surface value at a texel — a near-white multiplier that doubles as a
+/// height field (darker banding / lenticel dashes = lower). Shared by the bark albedo and
+/// its normal map so relief and shading agree. Beech is smooth silver-grey, so it is
+/// subtle: gentle vertical banding (up the trunk), faint grain, sparse lenticel dashes.
+fn bark_height(px: f32, py: f32) -> f32 {
+    let band = value_noise(11, px * 0.09, py * 0.015) * 0.5 + 0.5;
+    let grain = value_noise(23, px * 0.35, py * 0.5) * 0.5 + 0.5;
+    let lent = smoothstep(0.80, 0.9, value_noise(37, px * 0.6, py * 0.14) * 0.5 + 0.5);
+    ((0.86 + 0.14 * band) * (0.94 + 0.06 * grain) - 0.28 * lent).clamp(0.5, 1.05)
+}
+
+/// The beech-bark albedo detail (RGB grey value multiplier, opaque), from [`bark_height`].
+fn bark_material() -> (u64, u32, u32, Vec<u8>) {
+    const N: u32 = 128;
+    let mut rgba = vec![255u8; (N * N * 4) as usize];
+    (0..N).for_each(|y| {
+        (0..N).for_each(|x| {
+            let b = (bark_height(x as f32, y as f32) * 255.0).clamp(0.0, 255.0) as u8;
+            let idx = ((y * N + x) * 4) as usize;
+            rgba[idx] = b;
+            rgba[idx + 1] = b;
+            rgba[idx + 2] = b;
+        })
+    });
+    (BARK_MAT, N, N, rgba)
+}
+
+/// Forest-floor surface value (a mottle multiplier that doubles as a height field).
+/// Shared by the ground albedo and its normal map.
+fn ground_height(px: f32, py: f32) -> f32 {
+    let coarse = value_noise(51, px * 0.06, py * 0.06) * 0.5 + 0.5;
+    let fine = value_noise(63, px * 0.28, py * 0.28) * 0.5 + 0.5;
+    (0.78 + 0.28 * coarse) * (0.9 + 0.16 * fine)
+}
+
+/// Procedural forest-floor detail: a color-mottle multiplier (around 1.0) that the
+/// terrain's per-vertex ground colour modulates — cooler earth vs warmer leaf-litter at a
+/// finer scale than the terrain grid. Tiles.
+fn ground_material() -> (u64, u32, u32, Vec<u8>) {
+    const N: u32 = 128;
+    let mut rgba = vec![255u8; (N * N * 4) as usize];
+    (0..N).for_each(|y| {
+        (0..N).for_each(|x| {
+            let px = x as f32;
+            let py = y as f32;
+            let v = ground_height(px, py);
+            // Tint the mottle: darker patches lean cool-earth, lighter lean warm-litter.
+            let warm = smoothstep(0.5, 1.0, value_noise(51, px * 0.06, py * 0.06) * 0.5 + 0.5);
+            let tint = lerp3([0.92, 0.90, 0.86], [1.06, 0.98, 0.86], warm);
+            let idx = ((y * N + x) * 4) as usize;
+            rgba[idx] = (v * tint[0] * 255.0).clamp(0.0, 255.0) as u8;
+            rgba[idx + 1] = (v * tint[1] * 255.0).clamp(0.0, 255.0) as u8;
+            rgba[idx + 2] = (v * tint[2] * 255.0).clamp(0.0, 255.0) as u8;
+        })
+    });
+    (GROUND_MAT, N, N, rgba)
+}
+
+/// Build a tangent-space normal map (RGBA8, id-tagged) by central-differencing a height
+/// field `h` over N×N at `strength` bump scale — RGB encodes the perturbed normal
+/// `(-dh/dx, -dh/dy, 1)` normalized into `[0,1]`. Used to give the bark + ground GPU
+/// surface relief under the directional light (Canvas 2D ignores it).
+fn normal_map_from_height(
+    id: u64,
+    n: u32,
+    strength: f32,
+    h: impl Fn(f32, f32) -> f32,
+) -> (u64, u32, u32, Vec<u8>) {
+    let mut rgba = vec![255u8; (n * n * 4) as usize];
+    (0..n).for_each(|y| {
+        (0..n).for_each(|x| {
+            let (px, py) = (x as f32, y as f32);
+            let nx = -(h(px + 1.0, py) - h(px - 1.0, py)) * strength;
+            let ny = -(h(px, py + 1.0) - h(px, py - 1.0)) * strength;
+            let inv = 1.0 / (nx * nx + ny * ny + 1.0).sqrt();
+            let enc = |v: f32| ((v * inv * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
+            let idx = ((y * n + x) * 4) as usize;
+            rgba[idx] = enc(nx);
+            rgba[idx + 1] = enc(ny);
+            rgba[idx + 2] = enc(1.0);
+        })
+    });
+    (id, n, n, rgba)
+}
+
+/// The bark tangent-space normal map (relief from [`bark_height`]).
+fn bark_normal_material() -> (u64, u32, u32, Vec<u8>) {
+    normal_map_from_height(BARK_MAT, 128, 3.2, bark_height)
+}
+
+/// The ground tangent-space normal map (relief from [`ground_height`]).
+fn ground_normal_material() -> (u64, u32, u32, Vec<u8>) {
+    normal_map_from_height(GROUND_MAT, 128, 2.2, ground_height)
 }
 
 fn push_vertex(out: &mut Vec<f32>, pos: [f32; 3], normal: [f32; 3], uv: [f32; 2], color: [f32; 4]) {
@@ -653,7 +947,8 @@ canopy_color = [0.80, 0.42, 0.12]
         // terrain + trunk + canopy.
         assert_eq!(rd.batches.len(), 3);
         assert_eq!(rd.batches[0].0, TERRAIN_MESH);
-        assert_eq!(rd.batches[1], (TRUNK_MESH, WHITE_MAT, rd.batches[1].2.clone(), 1));
+        assert_eq!(rd.batches[0].1, GROUND_MAT);
+        assert_eq!(rd.batches[1], (TRUNK_MESH, BARK_MAT, rd.batches[1].2.clone(), 1));
         assert_eq!(rd.batches[2].3, 1);
         // 36 floats per instance.
         assert_eq!(rd.batches[1].2.len(), 36);

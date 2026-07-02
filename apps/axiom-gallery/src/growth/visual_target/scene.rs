@@ -41,12 +41,25 @@ pub struct Manifest {
     /// express small ground-level detail; this is the smallest primitive that does.
     #[serde(default)]
     pub groundcover: Option<Groundcover>,
+    /// Optional deterministic fallen-leaf **litter**: flat leaf cards lying on the
+    /// ground, scattered densely, in warm brown/orange/russet tones. Reuses the
+    /// [`Groundcover`] scatter shape (`radius_m` is the leaf size; `height_m` is
+    /// unused — the leaves are flat). The reference's floor is a dense leaf carpet;
+    /// this is what pushes the forest floor toward photoreal parity.
+    #[serde(default)]
+    pub litter: Option<Groundcover>,
     /// Whether the scene has volumetric light (god-rays) — **neutral frame data**.
     /// When `true`, every backend applies the same `host::apply_frame_volumetrics`
     /// pass (the `FrameVolumetrics::low_poly` preset), so shafts render identically on
     /// Canvas 2D, WebGPU, and WebGL.
     #[serde(default)]
     pub volumetrics: bool,
+    /// Whether the scene applies the filmic tonemap post-process (ACES + exposure) —
+    /// **neutral frame data**. When `true`, the GPU always applies `host::
+    /// apply_frame_postprocess`; Canvas 2D applies it too unless its `[canvas2d]`
+    /// config disables the `PostProcess` capability.
+    #[serde(default)]
+    pub postprocess: bool,
     /// Optional stylized foliage: each tree's canopy is a loose cluster of crossed
     /// leaf **cards** in a warm autumn palette instead of one sphere blob. When
     /// absent, trees fall back to the sphere canopy.
@@ -57,6 +70,47 @@ pub struct Manifest {
     /// never wash out the frame. Absent = neutral (exposure 1, no change).
     #[serde(default)]
     pub style: Option<Style>,
+    /// Hemisphere ambient light (sky overhead, warm-dark ground below) — the neutral
+    /// frame-data ambient the render backends light unlit faces with. Absent = the
+    /// engine default hemisphere. Brightening it lifts the backlit trunk faces and
+    /// softens shadow contrast toward the reference's soft global illumination.
+    #[serde(default)]
+    pub ambient: Option<Ambient>,
+    /// Per-backend capability config for the **Canvas 2D** renderer only (the GPU
+    /// backends always attempt everything). The lever for keeping the software raster
+    /// legible + fast by having it skip effects it shouldn't attempt. Absent = attempt
+    /// everything (same as the GPU).
+    #[serde(default)]
+    pub canvas2d: Option<Canvas2dConfig>,
+}
+
+/// Which optional capabilities the Canvas 2D backend should attempt. Each flag defaults
+/// to `true` (attempt it); set one `false` to skip that effect on Canvas 2D — the
+/// WebGPU / WebGL2 backends keep it either way.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Canvas2dConfig {
+    /// Whether Canvas 2D runs the god-ray volumetric post-pass (default `true`).
+    #[serde(default = "default_true")]
+    pub volumetrics: bool,
+    /// Whether Canvas 2D runs the filmic tonemap post-process (default `true`).
+    #[serde(default = "default_true")]
+    pub postprocess: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Hemisphere ambient tint: the linear-RGB sky (overhead) and ground (below) an unlit
+/// face receives. Strength is folded into the colours (a plain hemisphere blend).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ambient {
+    /// Overhead sky tint.
+    pub sky: [f32; 3],
+    /// Below / ground tint.
+    pub ground: [f32; 3],
 }
 
 /// Global tone/brightness controls for the target, applied to every emitted albedo.
@@ -92,6 +146,29 @@ pub struct Foliage {
     pub card_scale: f32,
     /// Warm autumn palette (yellow/orange/tan/brown) a card colour is drawn from.
     pub palette: Vec<[f32; 3]>,
+    /// How many tight sub-masses the canopy cards clump into (default 1 = the old
+    /// uniform oblate fill). Higher reads as distinct leaf clumps with dark gaps
+    /// between them — closer to a real branch-hung canopy than a uniform speckle.
+    #[serde(default = "one_u32")]
+    pub clusters: u32,
+    /// How far the sub-mass centres spread from the canopy anchor, as a fraction of
+    /// the canopy radius (default 0 = all masses at the anchor).
+    #[serde(default)]
+    pub cluster_spread: f32,
+    /// Each card's local radius around its sub-mass centre, as a fraction of the
+    /// canopy radius (default 1 = fill the whole canopy, i.e. no clumping).
+    #[serde(default = "one_f32")]
+    pub cluster_tightness: f32,
+}
+
+/// serde default: one sub-mass (reproduces the pre-clustering uniform fill).
+fn one_u32() -> u32 {
+    1
+}
+
+/// serde default: full-radius local spread (reproduces the pre-clustering fill).
+fn one_f32() -> f32 {
+    1.0
 }
 
 /// The single camera the frame is rendered from.

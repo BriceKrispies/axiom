@@ -26,8 +26,8 @@ height_px = 800
 # ITER 11 (attack: lighting_directionality) — backlight the scene (sun ahead + up,
 # in view) so the new volumetric god-ray post-pass streams shafts toward the camera.
 direction = [0.14, -0.40, 0.90]
-color = [1.0, 0.83, 0.60]
-intensity = 1.15
+color = [1.0, 0.86, 0.62]
+intensity = 1.6
 
 [fog]
 # ITER 21 (attack: fog_and_haze) — a warm, luminous depth haze (matching the backlit
@@ -37,9 +37,11 @@ intensity = 1.15
 # foreground trunks stay dark for contrast; the warm backlit sun keeps foreground warm.
 # ITER 23 (corrective): darker BLUE-GRAY distance haze, stronger, so background
 # fades to cool haze and foreground stays dark for contrast.
-color = [0.54, 0.60, 0.69]
-start_m = 8.0
-end_m = 105.0
+# ITER 25 (attack: fog_and_haze) — warm golden sunlit haze matching the reference's
+# misty backlit light; distance fades into warm amber mist, not a cool blue wash.
+color = [0.60, 0.63, 0.67]
+start_m = 5.0
+end_m = 74.0
 
 # A deeper patch so the trunks recede into the distance; gentler relief so the floor
 # reads as walkable ground rather than lumpy hills at eye level.
@@ -114,8 +116,8 @@ seed = 7
 # ITER 19 (attack: vegetation_density) — dense small patch made composable by the
 # keep-clear abstraction: no trunk spawns within 16 m of the camera along the view.
 # ITER 23 (corrective): fewer trunks for readable corridors, wider radius variation.
-count = 380
-min_spacing_m = 1.6
+count = 440
+min_spacing_m = 1.45
 slope_limit = 0.85
 keep_clear_m = 16.0
 # ITER 22 (capability): deterministic trunk lean so trunks are not perfect poles.
@@ -150,13 +152,13 @@ seed = 21
 # ITER 24 (attack: foreground_material_detail) — a richer forest floor: denser,
 # lower clumps in a leaf-litter + grass-green palette so the ground reads as fallen
 # leaves and grass tufts (like the reference), not sparse brown pyramids.
-count = 9000
-min_spacing_m = 0.24
+count = 12000
+min_spacing_m = 0.20
 slope_limit = 1.2
 clusters = 60
 cluster_radius_m = 5.5
-height_m = [0.05, 0.22]
-radius_m = [0.05, 0.14]
+height_m = [0.04, 0.14]
+radius_m = [0.09, 0.22]
 palette = [
   [0.52, 0.30, 0.13],
   [0.60, 0.40, 0.16],
@@ -171,20 +173,49 @@ palette = [
 [foliage]
 # ITER 23 (corrective): small irregular leaf clumps (not big paper squares), fewer +
 # layered, in a darker warm autumn palette (orange/brown, muted-yellow highlight).
-cards_per_tree = 12
-understory_cards = 3
-card_scale = 0.52
+cards_per_tree = 32
+understory_cards = 5
+card_scale = 0.56
 palette = [
-  [0.74, 0.34, 0.10],
-  [0.84, 0.46, 0.12],
-  [0.68, 0.40, 0.15],
-  [0.56, 0.32, 0.13],
-  [0.88, 0.62, 0.20],
+  [0.90, 0.74, 0.26],
+  [0.86, 0.58, 0.16],
+  [0.88, 0.42, 0.10],
+  [0.72, 0.30, 0.10],
+  [0.80, 0.40, 0.14],
+  [0.68, 0.38, 0.16],
 ]
 
 # ITER 23 (corrective): global tone controls so foliage can never wash out the frame.
 [style]
-exposure = 0.74
+exposure = 0.70
 ambient = 0.07
-foliage_saturation = 0.96
-distance_desaturation = 0.42
+foliage_saturation = 1.0
+distance_desaturation = 0.26
+
+# ITER 29 (attack: lighting_directionality) — the hemisphere ambient is now neutral
+# frame data (host FrameAmbient -> GPU Lights uniform + canvas software lighting). A
+# brighter, warmer ambient lifts the backlit trunk faces off near-black toward beech
+# gray-brown and softens the hard shadow contrast, matching the reference's soft GI.
+[ambient]
+sky = [0.52, 0.55, 0.62]
+ground = [0.46, 0.40, 0.32]
+
+# PARITY PUSH: a dense fallen-leaf carpet on the forest floor (flat leaf cards lying on
+# the ground, warm brown/orange/russet) -- the reference floor's defining feature, which
+# grass clumps + colour mottle alone can't express. Reuses the ground-cover scatter.
+[litter]
+seed = 77
+count = 48000
+min_spacing_m = 0.05
+slope_limit = 1.2
+clusters = 55
+cluster_radius_m = 14.0
+height_m = [0.0, 0.0]
+radius_m = [0.11, 0.30]
+palette = [
+  [0.58, 0.28, 0.10],
+  [0.70, 0.40, 0.13],
+  [0.52, 0.20, 0.10],
+  [0.46, 0.32, 0.15],
+  [0.38, 0.24, 0.13],
+]

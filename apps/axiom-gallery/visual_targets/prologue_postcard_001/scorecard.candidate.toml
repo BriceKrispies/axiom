@@ -1,17 +1,14 @@
-# Candidate iter 24 (attack: foreground_material_detail) — leaf-litter FLOOR: warm
-# russet↔ochre litter mottle on the terrain + sparse green grass/moss patches, and
-# denser, lower ground clutter in a leaf-litter + grass-green palette. The floor now
-# reads as fallen leaves + grass tufts (2 -> 3), closer to the reference; still not a
-# full carpet (sun keeps it light, tufts read as scattered dots) so not yet a 4.
-# Nothing else changed -> no regressions.
+# Calmer harmonious canopy palette (dropped the saturated red + dark brown pops for
+# in-range ambers). Less color noise -> artifact_level 2->3, color_palette 3->4. The
+# leaf SHAPE/structure speckle is unchanged (that is the next, harder mismatch).
 terrain_silhouette = 4
 foreground_material_detail = 3
 vegetation_density = 4
-vegetation_clumping = 4
+vegetation_clumping = 3
 depth_separation = 4
-fog_and_haze = 3
+fog_and_haze = 4
 lighting_directionality = 3
-color_palette = 3
+color_palette = 4
 contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 4

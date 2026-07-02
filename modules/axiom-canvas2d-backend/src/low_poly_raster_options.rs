@@ -41,6 +41,9 @@ pub(crate) struct LowPolyRasterOptions {
     max_triangles_per_terrain_draw: u32,
     pixel_budget: u64,
     depth_cues: CanvasDepthCueProfile,
+    /// Which optional render capabilities this backend will attempt. Defaults to
+    /// `all()`; the facade restricts it to skip capabilities Canvas 2D shouldn't do.
+    capability: axiom_host::BackendCapabilityProfile,
 }
 
 impl Default for LowPolyRasterOptions {
@@ -69,6 +72,8 @@ impl LowPolyRasterOptions {
             max_triangles_per_terrain_draw,
             pixel_budget,
             depth_cues,
+            // Default: attempt everything. The facade restricts Canvas 2D per config.
+            capability: axiom_host::BackendCapabilityProfile::all(),
         }
     }
 
@@ -141,6 +146,17 @@ impl LowPolyRasterOptions {
     /// overrides the fog colour to the frame clear colour each frame).
     pub(crate) fn with_depth_cues(self, depth_cues: CanvasDepthCueProfile) -> Self {
         LowPolyRasterOptions { depth_cues, ..self }
+    }
+
+    /// The optional capabilities this backend will attempt (default `all()`).
+    pub(crate) fn capability_profile(&self) -> axiom_host::BackendCapabilityProfile {
+        self.capability
+    }
+
+    /// A copy of these options with the capability profile replaced — the facade's
+    /// config lever for restricting what Canvas 2D attempts.
+    pub(crate) fn with_capability_profile(self, capability: axiom_host::BackendCapabilityProfile) -> Self {
+        LowPolyRasterOptions { capability, ..self }
     }
 }
 

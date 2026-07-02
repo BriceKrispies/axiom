@@ -38,7 +38,10 @@ mod common2d;
 mod draw2d_command;
 mod draw2d_list;
 mod fill2d;
+mod frame_ambient;
+mod frame_capability;
 mod frame_packet;
+mod frame_postprocess;
 mod frame_raster_stats;
 mod frame_submission_report;
 mod frame_volumetrics;
@@ -133,12 +136,17 @@ pub use host_surface_handle::HostSurfaceHandle;
 
 // The single frame-presentation artifact every render backend consumes;
 // derived from a render command list by axiom-render.
+pub use frame_ambient::FrameAmbient;
+pub use frame_capability::BackendCapabilityProfile;
+pub use frame_capability::RenderCapability;
 pub use frame_packet::FrameCamera;
 pub use frame_packet::FrameDrawItem;
 pub use frame_packet::FrameFeatureSet;
 pub use frame_packet::FrameLight;
 pub use frame_packet::FramePacket;
 pub use frame_packet::FrameViewport;
+pub use frame_postprocess::apply_frame_postprocess;
+pub use frame_postprocess::FramePostProcess;
 pub use frame_volumetrics::apply_frame_volumetrics;
 pub use frame_volumetrics::FrameVolumetrics;
 pub use frame_raster_stats::FrameDepthCueStats;

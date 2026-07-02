@@ -67,6 +67,15 @@ impl Canvas2dBackendApi {
         }
     }
 
+    /// Restrict which optional render capabilities this backend attempts (the default
+    /// is [`axiom_host::BackendCapabilityProfile::all`] — attempt everything, like the
+    /// GPU backends). The config lever for keeping Canvas 2D legible and fast:
+    /// e.g. `all().without(RenderCapability::Volumetrics)` makes it skip the god-ray
+    /// pass while the WebGPU / WebGL2 backends keep it.
+    pub fn set_capability_profile(&mut self, profile: axiom_host::BackendCapabilityProfile) {
+        self.options = self.options.with_capability_profile(profile);
+    }
+
     /// Upload the CPU sprite/atlas textures the 2D [`Draw2dList`] sprite path
     /// samples, as `(texture_id, width, height, RGBA8 pixels)` — the same upload
     /// shape as the 3D material set. Resolved in the app (fetch/decode); the
@@ -138,11 +147,15 @@ impl Canvas2dBackendApi {
     /// level from a `?quality=` query. Resizing the framebuffer mid-run is
     /// supported because the binding tracks the framebuffer size on each blit.
     pub fn set_quality_level(&mut self, level: u8) {
+        // Preserve the capability profile across a quality change (it is independent of
+        // the resolution tier, so a `set_quality_level` must not wipe a configured one).
+        let capability = self.options.capability_profile();
         self.options = LowPolyRasterOptions::from_preset_for_surface(
             CanvasQualityPreset::from_level(level),
             self.width,
             self.height,
-        );
+        )
+        .with_capability_profile(capability);
     }
 
 
@@ -189,6 +202,13 @@ impl Canvas2dBackendApi {
         let _ = self.profile;
         let mut cues = self.options.depth_cues();
         cues.fog.color = packet.clear_color();
+        // The frame's hemisphere ambient drives the software lighting too, matching the
+        // GPU path's ambient uniform. Colours are strength-folded, so the ambient scale
+        // is 1.0; an absent frame ambient falls back to the engine default hemisphere.
+        let amb = packet.ambient().copied().unwrap_or_else(axiom_host::FrameAmbient::default_hemisphere);
+        cues.lighting.sky_color = amb.sky();
+        cues.lighting.ground_color = amb.ground();
+        cues.lighting.ambient = 1.0;
         let options = self.options.with_depth_cues(cues);
         SoftwareRasterizer::new(options).rasterize_packet(packet, &self.meshes)
     }
@@ -515,6 +535,59 @@ mod tests {
         // Pure function of the packet: identical bytes every call.
         let (again, _, _) = backend.render_offscreen_rgba(&p);
         assert_eq!(rgba, again);
+    }
+
+    #[test]
+    fn frame_ambient_lifts_the_lit_result() {
+        use axiom_host::{FrameAmbient, FrameDrawItem, FrameFeatureSet};
+        let mut backend = Canvas2dBackendApi::new(&request(800, 600));
+        backend.load_meshes(&[ground(7)]);
+        backend.set_quality_level(1);
+        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 1.0, 1.0, 1.0], false)];
+        // No directional light → the ground is lit by the hemisphere ambient alone.
+        let base = packet(draws.clone(), FrameFeatureSet::new(false, false, 0, 0));
+        let (dim, _, _) = backend.render_offscreen_rgba(&base);
+        // A bright frame ambient (the `Some` path) lifts the ground above the default.
+        let bright = base.clone().with_ambient(FrameAmbient::new([0.95, 0.95, 0.95], [0.95, 0.95, 0.95]));
+        let (lit, _, _) = backend.render_offscreen_rgba(&bright);
+        assert_ne!(dim, lit);
+        assert!(dim.iter().zip(&lit).any(|(d, l)| l > d));
+    }
+
+    #[test]
+    fn set_capability_profile_gates_the_volumetric_pass() {
+        use axiom_host::{
+            BackendCapabilityProfile, FrameCamera, FrameFeatureSet, FrameLight, FrameViewport,
+            FrameVolumetrics, RenderCapability,
+        };
+        // A view_proj with m[11] = 1 puts a +z to-light on-screen, and a bright uniform
+        // frame (no draws → just the bright clear) exceeds the god-ray leak threshold, so
+        // the pass produces a real difference only when a backend runs it.
+        let front_vp = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        let vol = FramePacket::new(
+            0,
+            0,
+            FrameViewport::new(800, 600),
+            [0.9, 0.9, 0.9, 1.0],
+            Some(FrameCamera::new(IDENTITY, IDENTITY, front_vp)),
+            Vec::new(),
+            vec![FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])],
+            IDENTITY,
+            FrameFeatureSet::new(false, true, 1, 0),
+        )
+        .with_volumetrics(FrameVolumetrics::low_poly());
+        // Default profile (all): the god-ray pass runs.
+        let full = Canvas2dBackendApi::new(&request(800, 600));
+        let (a, _, _) = full.render_offscreen_rgba(&vol);
+        // set_capability_profile restricting Volumetrics: the pass is skipped.
+        let mut restricted = Canvas2dBackendApi::new(&request(800, 600));
+        restricted.set_capability_profile(
+            BackendCapabilityProfile::all().without(RenderCapability::Volumetrics),
+        );
+        let (b, _, _) = restricted.render_offscreen_rgba(&vol);
+        assert_ne!(a, b, "set_capability_profile gates the god-ray pass on Canvas 2D");
     }
 
     #[test]
