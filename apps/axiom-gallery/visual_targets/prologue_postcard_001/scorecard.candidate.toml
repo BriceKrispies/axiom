@@ -1,18 +1,17 @@
-# Candidate iter 24 (attack: foreground_material_detail) — leaf-litter FLOOR: warm
-# russet↔ochre litter mottle on the terrain + sparse green grass/moss patches, and
-# denser, lower ground clutter in a leaf-litter + grass-green palette. The floor now
-# reads as fallen leaves + grass tufts (2 -> 3), closer to the reference; still not a
-# full carpet (sun keeps it light, tufts read as scattered dots) so not yet a 4.
-# Nothing else changed -> no regressions.
+# iter 28 (attack: contrast_and_exposure) — fill the canopy with more small (not
+# bigger) leaf clumps so the dense mass reads richly instead of bright haze washing
+# through; exposure trimmed 0.74->0.70. The upper frame gains tonal depth (dark trunks
+# / rich canopy / warm gaps) instead of a uniform bright wash. 3 -> 4. No regressions
+# (still readable, no blocky cards).
 terrain_silhouette = 4
 foreground_material_detail = 3
 vegetation_density = 4
 vegetation_clumping = 4
 depth_separation = 4
-fog_and_haze = 3
+fog_and_haze = 4
 lighting_directionality = 3
-color_palette = 3
-contrast_and_exposure = 3
+color_palette = 4
+contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 3
