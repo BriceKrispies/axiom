@@ -176,6 +176,11 @@ palette = [
 cards_per_tree = 32
 understory_cards = 5
 card_scale = 0.56
+# ITER 43: clump the canopy cards into a few tight sub-masses with dark gaps between
+# them (branch-hung look) instead of a uniform speckle.
+clusters = 3
+cluster_spread = 0.7
+cluster_tightness = 0.42
 palette = [
   [0.90, 0.74, 0.26],
   [0.86, 0.58, 0.16],

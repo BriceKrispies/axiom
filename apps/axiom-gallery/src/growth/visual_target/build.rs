@@ -360,12 +360,24 @@ fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg:
         let ground = manifest.terrain.height_at(t.x, t.z);
         let anchor = canopy_anchor(t, ground, lean_deg);
         let r = t.canopy_radius_m;
-        // Upper/mid canopy: cards gathered in an oblate mass around the anchor.
+        // Upper/mid canopy: cards clumped into a few tight sub-masses (with dark gaps
+        // between them) instead of a uniform oblate speckle. Each card belongs to one
+        // sub-mass whose centre is offset from the anchor by `cluster_spread`; the card
+        // then sits within `cluster_tightness` of that centre. clusters=1, spread=0,
+        // tightness=1 reproduces the old uniform fill exactly.
+        let clusters = f.clusters.max(1);
         for j in 0..f.cards_per_tree {
+            let m = j % clusters;
+            // Sub-mass centre: a point spread out from the anchor within the canopy.
+            let ma = hash01(t.x, t.z, 2000 + m) * std::f32::consts::TAU;
+            let mrad = hash01(t.x, t.z, 2100 + m).sqrt() * r * f.cluster_spread;
+            let mhy = (hash01(t.x, t.z, 2200 + m) - 0.30) * r * f.cluster_spread * 1.1;
+            let mc = Vec3::new(anchor.x + mrad * ma.cos(), anchor.y + mhy, anchor.z + mrad * ma.sin());
+            // Card placement, tight around its sub-mass centre.
             let a = hash01(t.x, t.z, 200 + j) * std::f32::consts::TAU;
-            let rad = hash01(t.x, t.z, 300 + j).sqrt() * r;
-            let hy = (hash01(t.x, t.z, 400 + j) - 0.30) * r * 1.1;
-            let pos = Vec3::new(anchor.x + rad * a.cos(), anchor.y + hy, anchor.z + rad * a.sin());
+            let rad = hash01(t.x, t.z, 300 + j).sqrt() * r * f.cluster_tightness;
+            let hy = (hash01(t.x, t.z, 400 + j) - 0.30) * r * f.cluster_tightness * 1.1;
+            let pos = Vec3::new(mc.x + rad * a.cos(), mc.y + hy, mc.z + rad * a.sin());
             let sc = r * f.card_scale * (0.55 + hash01(t.x, t.z, 500 + j) * 0.4);
             let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, 700 + j), 1.0);
             out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, 600 + j), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));

@@ -137,6 +137,29 @@ pub struct Foliage {
     pub card_scale: f32,
     /// Warm autumn palette (yellow/orange/tan/brown) a card colour is drawn from.
     pub palette: Vec<[f32; 3]>,
+    /// How many tight sub-masses the canopy cards clump into (default 1 = the old
+    /// uniform oblate fill). Higher reads as distinct leaf clumps with dark gaps
+    /// between them — closer to a real branch-hung canopy than a uniform speckle.
+    #[serde(default = "one_u32")]
+    pub clusters: u32,
+    /// How far the sub-mass centres spread from the canopy anchor, as a fraction of
+    /// the canopy radius (default 0 = all masses at the anchor).
+    #[serde(default)]
+    pub cluster_spread: f32,
+    /// Each card's local radius around its sub-mass centre, as a fraction of the
+    /// canopy radius (default 1 = fill the whole canopy, i.e. no clumping).
+    #[serde(default = "one_f32")]
+    pub cluster_tightness: f32,
+}
+
+/// serde default: one sub-mass (reproduces the pre-clustering uniform fill).
+fn one_u32() -> u32 {
+    1
+}
+
+/// serde default: full-radius local spread (reproduces the pre-clustering fill).
+fn one_f32() -> f32 {
+    1.0
 }
 
 /// The single camera the frame is rendered from.
