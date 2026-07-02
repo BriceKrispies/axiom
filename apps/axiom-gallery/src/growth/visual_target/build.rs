@@ -41,7 +41,7 @@ const TRUNK_SEGMENTS: u32 = 8;
 const CANOPY_RINGS: u32 = 8;
 const CANOPY_SECTORS: u32 = 14;
 /// Blades in the unit ground-cover tuft (a small crossed-blade cluster).
-const TUFT_BLADES: u32 = 3;
+const TUFT_BLADES: u32 = 6;
 
 /// Bark tint the trunk instances carry (fog is folded in per instance).
 const BARK: [f32; 3] = [0.30, 0.21, 0.13];
@@ -334,7 +334,7 @@ fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg:
             let rad = hash01(t.x, t.z, 300 + j).sqrt() * r;
             let hy = (hash01(t.x, t.z, 400 + j) - 0.30) * r * 1.1;
             let pos = Vec3::new(anchor.x + rad * a.cos(), anchor.y + hy, anchor.z + rad * a.sin());
-            let sc = r * f.card_scale * (0.7 + hash01(t.x, t.z, 500 + j) * 0.6);
+            let sc = r * f.card_scale * (0.55 + hash01(t.x, t.z, 500 + j) * 0.4);
             let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, 700 + j), 1.0);
             out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, 600 + j), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));
         }
@@ -519,16 +519,24 @@ fn canopy_unit_mesh() -> (Vec<f32>, Vec<u32>) {
 /// so it reads from any angle; normals point up so the tuft catches sky/sun light.
 /// Per-vertex colour is white; the instance tint carries the grass/litter colour.
 fn tuft_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    // Varied per-blade tip heights so the clump is ragged, not a uniform star.
+    const TIP_H: [f32; 6] = [1.0, 0.66, 0.9, 0.58, 0.82, 0.72];
     let mut v = Vec::new();
     let mut idx = Vec::new();
     let up = [0.0f32, 1.0, 0.0];
+    let w = [1.0f32, 1.0, 1.0, 1.0];
     let mut base = 0u32;
     for k in 0..TUFT_BLADES {
-        let a = (k as f32 / TUFT_BLADES as f32) * std::f32::consts::PI;
-        let (dx, dz) = (a.cos() * 0.5, a.sin() * 0.5);
-        push_vertex(&mut v, [-dx, 0.0, -dz], up, [0.0, 0.0], [1.0, 1.0, 1.0, 1.0]);
-        push_vertex(&mut v, [dx, 0.0, dz], up, [1.0, 0.0], [1.0, 1.0, 1.0, 1.0]);
-        push_vertex(&mut v, [0.0, 1.0, 0.0], up, [0.5, 1.0], [1.0, 1.0, 1.0, 1.0]);
+        let a = (k as f32 / TUFT_BLADES as f32) * std::f32::consts::TAU;
+        let (ca, sa) = (a.cos(), a.sin());
+        // Base edge perpendicular to the splay direction; the apex leans OUTWARD (to
+        // radius 0.7) and up — a low grass/leaf clump that hugs the ground, not an
+        // upright spike, so the ground reads as soft clutter instead of confetti.
+        let (px, pz) = (-sa * 0.16, ca * 0.16);
+        let tip = TIP_H[(k % TIP_H.len() as u32) as usize];
+        push_vertex(&mut v, [px, 0.0, pz], up, [0.0, 0.0], w);
+        push_vertex(&mut v, [-px, 0.0, -pz], up, [1.0, 0.0], w);
+        push_vertex(&mut v, [ca * 0.7, tip, sa * 0.7], up, [0.5, 1.0], w);
         // Both windings → the blade is visible from either side.
         idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 1]);
         base += 3;

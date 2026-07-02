@@ -1,10 +1,9 @@
-# iter 29 (attack: lighting_directionality) — the hemisphere ambient is now neutral
-# frame data (host FrameAmbient -> GPU Lights uniform + canvas software lighting),
-# verified identical on BOTH backends. A brighter warm ambient lifts the backlit trunk
-# faces off near-black to beech gray-brown and softens the hard shadow bands into soft
-# dappled shade -- the reference's soft global illumination. 3 -> 4. No regressions.
+# iter 31 (attack: artifact_level) — tame the two remaining low-poly tells: tighten the
+# foliage card scale so no giant foreground cards pop (fuller, more uniform canopy mass),
+# and darken the warm haze so the sky gaps stop blowing to white under the god-rays.
+# Cleaner stylized read; the residual low-poly-ness is the intended style. 3 -> 4.
 terrain_silhouette = 4
-foreground_material_detail = 3
+foreground_material_detail = 4
 vegetation_density = 4
 vegetation_clumping = 4
 depth_separation = 4
@@ -14,4 +13,4 @@ color_palette = 4
 contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
-artifact_level = 3
+artifact_level = 4

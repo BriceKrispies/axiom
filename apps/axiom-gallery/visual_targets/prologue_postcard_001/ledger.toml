@@ -1213,3 +1213,90 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 3
+
+[[iteration]]
+iteration = 30
+attacked_axis = "foreground_material_detail"
+changed_files = [
+    "build.rs",
+    "manifest.candidate.toml",
+    "verdict.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "attacked axis foreground_material_detail 3->4 (+1); no non-attacked axis dropped; promoted"
+next_attacked_axis = "artifact_level"
+abstraction_introduced = false
+human_note = "Redesign ground clutter: low splayed grass/leaf clumps hugging the ground (was upright confetti spikes), denser. Reads as a soft forest floor. 3->4."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3
+
+[[iteration]]
+iteration = 31
+attacked_axis = "artifact_level"
+changed_files = [
+    "build.rs",
+    "manifest.candidate.toml",
+    "verdict.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "attacked axis artifact_level 3->4 (+1); no non-attacked axis dropped; promoted"
+abstraction_introduced = false
+human_note = "Tighten foliage card scale (no giant cards; fuller uniform canopy) + darken haze so sky gaps stop blowing white under the god-rays. Cleaner stylized read. 3->4."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 4

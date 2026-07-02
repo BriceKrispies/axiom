@@ -39,7 +39,7 @@ intensity = 1.25
 # fades to cool haze and foreground stays dark for contrast.
 # ITER 25 (attack: fog_and_haze) — warm golden sunlit haze matching the reference's
 # misty backlit light; distance fades into warm amber mist, not a cool blue wash.
-color = [0.78, 0.68, 0.52]
+color = [0.70, 0.61, 0.47]
 start_m = 7.0
 end_m = 98.0
 
@@ -152,13 +152,13 @@ seed = 21
 # ITER 24 (attack: foreground_material_detail) — a richer forest floor: denser,
 # lower clumps in a leaf-litter + grass-green palette so the ground reads as fallen
 # leaves and grass tufts (like the reference), not sparse brown pyramids.
-count = 9000
-min_spacing_m = 0.24
+count = 12000
+min_spacing_m = 0.20
 slope_limit = 1.2
 clusters = 60
 cluster_radius_m = 5.5
-height_m = [0.05, 0.22]
-radius_m = [0.05, 0.14]
+height_m = [0.04, 0.14]
+radius_m = [0.09, 0.22]
 palette = [
   [0.52, 0.30, 0.13],
   [0.60, 0.40, 0.16],
@@ -173,7 +173,7 @@ palette = [
 [foliage]
 # ITER 23 (corrective): small irregular leaf clumps (not big paper squares), fewer +
 # layered, in a darker warm autumn palette (orange/brown, muted-yellow highlight).
-cards_per_tree = 20
+cards_per_tree = 23
 understory_cards = 4
 card_scale = 0.56
 palette = [
