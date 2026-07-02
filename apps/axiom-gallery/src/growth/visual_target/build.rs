@@ -38,6 +38,12 @@ const WHITE_MAT: u64 = 1;
 /// A radial soft-alpha leaf texture — GPU renders the foliage cards as feathered leaf
 /// blobs (alpha cutout + blend); Canvas 2D ignores it and keeps the solid-card proxy.
 const LEAF_ALPHA_MAT: u64 = 2;
+/// Procedural beech-bark detail texture (a near-white value multiplier the trunk tint
+/// modulates) — GPU-only surface grain; Canvas 2D keeps the flat trunk tint.
+const BARK_MAT: u64 = 3;
+/// Procedural forest-floor detail texture (color mottle multiplier) — GPU-only ground
+/// grain; Canvas 2D keeps the flat per-vertex ground colour.
+const GROUND_MAT: u64 = 4;
 
 /// Radial segments in the unit trunk cylinder.
 const TRUNK_SEGMENTS: u32 = 8;
@@ -49,8 +55,10 @@ const CANOPY_SECTORS: u32 = 14;
 /// Blades in the unit ground-cover tuft (a small crossed-blade cluster).
 const TUFT_BLADES: u32 = 6;
 
-/// Bark tint the trunk instances carry (fog is folded in per instance).
-const BARK: [f32; 3] = [0.30, 0.21, 0.13];
+/// Bark tint the trunk instances carry (fog is folded in per instance). Light
+/// silver-grey beech — the reference's trunks are pale, not near-black; the bark detail
+/// texture (GPU) modulates this, Canvas 2D shows it flat.
+const BARK: [f32; 3] = [0.56, 0.50, 0.43];
 
 /// Neutral, backend-agnostic render data for exactly one frame.
 #[derive(Debug, Clone)]
@@ -173,11 +181,11 @@ pub fn build(manifest: &Manifest) -> RenderData {
         instance(&Mat4::from_cols_array(view_proj), Mat4::IDENTITY, [1.0, 1.0, 1.0, 1.0]);
 
     let mut batches: Vec<(u64, u64, Vec<f32>, u32)> =
-        vec![(TERRAIN_MESH, WHITE_MAT, terrain_batch_inst, 1)];
+        vec![(TERRAIN_MESH, GROUND_MAT, terrain_batch_inst, 1)];
     // Only emit vegetation batches when there is at least one tree.
     let tree_count = trees.len() as u32;
     (tree_count > 0).then(|| {
-        batches.push((TRUNK_MESH, WHITE_MAT, trunk_inst, tree_count));
+        batches.push((TRUNK_MESH, BARK_MAT, trunk_inst, tree_count));
         batches.push((canopy_mesh_id, canopy_mat, canopy_inst, canopy_count));
     });
     // Ground cover: one instanced batch when the abstraction placed any tufts.
@@ -202,7 +210,12 @@ pub fn build(manifest: &Manifest) -> RenderData {
             (GROUNDCOVER_MESH, tuft_v, tuft_i),
             (LITTER_MESH, litter_v, litter_i),
         ],
-        materials: vec![white_material(), leaf_alpha_material()],
+        materials: vec![
+            white_material(),
+            leaf_alpha_material(),
+            bark_material(),
+            ground_material(),
+        ],
         batches,
         volumetrics: manifest.volumetrics.then(FrameVolumetrics::low_poly),
         postprocess: manifest.postprocess.then(FramePostProcess::cinematic),
@@ -291,11 +304,13 @@ fn terrain_mesh(terrain: &Terrain, fog: &super::scene::Fog, eye: Vec3, style: &S
             let dist = eye.subtract(Vec3::new(pos.x, pos.y, pos.z)).length();
             let col = fogged(surface, fog, dist, style, 1.0);
 
+            // Planar UVs tiled every ~2.5 m (Repeat sampler) so the ground detail texture
+            // adds sub-grid mottle without stretching across the whole terrain.
             push_vertex(
                 &mut vertices,
                 [pos.x, pos.y, pos.z],
                 [normal.x, normal.y, normal.z],
-                [0.5, 0.5],
+                [pos.x / 2.5, pos.z / 2.5],
                 col,
             );
         });
@@ -562,10 +577,13 @@ fn trunk_unit_mesh() -> (Vec<f32>, Vec<u32>) {
         // Per-segment bark streak (deterministic light/dark) → vertical bark variation
         // so the trunk reads as bark, not a flat tube.
         let streak = 0.84 + ((s.wrapping_mul(2_654_435_761) >> 24) & 0xFF) as f32 / 255.0 * 0.28;
+        // Cylindrical UVs: u wraps once around, v tiles up the trunk (Repeat sampler) so
+        // the bark detail texture reads at a sensible scale on a tall trunk.
+        let u = s as f32 / seg as f32;
         for y in [0.0f32, 1.0f32] {
             // Darker toward the base (roots / ambient occlusion), lighter up.
             let c = (streak * (0.60 + y * 0.40)).min(1.12);
-            push_vertex(&mut v, [nx, y, nz], [nx, 0.0, nz], [0.5, 0.5], [c, c, c, 1.0]);
+            push_vertex(&mut v, [nx, y, nz], [nx, 0.0, nz], [u, y * 4.0], [c, c, c, 1.0]);
         }
     }
     for s in 0..seg {
@@ -738,6 +756,64 @@ fn leaf_alpha_material() -> (u64, u32, u32, Vec<u8>) {
         })
     });
     (LEAF_ALPHA_MAT, N, N, rgba)
+}
+
+/// Procedural beech-bark detail: a near-white value multiplier (RGB grey, opaque) that
+/// the beech trunk tint modulates. Beech bark is smooth silver-grey, so the texture is
+/// subtle — gentle vertical tonal banding (runs up the trunk), faint fine grain, and
+/// sparse darker horizontal lenticel dashes. Tiles vertically (Repeat sampler).
+fn bark_material() -> (u64, u32, u32, Vec<u8>) {
+    const N: u32 = 128;
+    let mut rgba = vec![255u8; (N * N * 4) as usize];
+    (0..N).for_each(|y| {
+        (0..N).for_each(|x| {
+            let px = x as f32;
+            let py = y as f32;
+            // Vertical tonal banding: varies mostly around the trunk (u/x), smooth in v.
+            let band = value_noise(11, px * 0.09, py * 0.015) * 0.5 + 0.5;
+            // Faint fine grain (beech is smooth — keep low amplitude).
+            let grain = value_noise(23, px * 0.35, py * 0.5) * 0.5 + 0.5;
+            // Sparse darker horizontal lenticel dashes (a beech hallmark).
+            let lent = smoothstep(0.80, 0.9, value_noise(37, px * 0.6, py * 0.14) * 0.5 + 0.5);
+            let m = ((0.86 + 0.14 * band) * (0.94 + 0.06 * grain) - 0.28 * lent).clamp(0.5, 1.05);
+            let b = (m * 255.0).clamp(0.0, 255.0) as u8;
+            let idx = ((y * N + x) * 4) as usize;
+            rgba[idx] = b;
+            rgba[idx + 1] = b;
+            rgba[idx + 2] = b;
+        })
+    });
+    (BARK_MAT, N, N, rgba)
+}
+
+/// Procedural forest-floor detail: a color-mottle multiplier (around 1.0) that the
+/// terrain's per-vertex ground colour modulates — patches of cooler earth, warmer
+/// leaf-litter, and muted-green moss at a finer scale than the terrain grid. Tiles.
+fn ground_material() -> (u64, u32, u32, Vec<u8>) {
+    const N: u32 = 128;
+    let mut rgba = vec![255u8; (N * N * 4) as usize];
+    (0..N).for_each(|y| {
+        (0..N).for_each(|x| {
+            let px = x as f32;
+            let py = y as f32;
+            let coarse = value_noise(51, px * 0.06, py * 0.06) * 0.5 + 0.5;
+            let fine = value_noise(63, px * 0.28, py * 0.28) * 0.5 + 0.5;
+            let v = (0.78 + 0.28 * coarse) * (0.9 + 0.16 * fine);
+            // Tint the mottle: darker patches lean cool-earth, lighter lean warm-litter.
+            let warm = smoothstep(0.5, 1.0, coarse);
+            let tint = lerp3([0.92, 0.90, 0.86], [1.06, 0.98, 0.86], warm);
+            let px_rgb = [
+                (v * tint[0] * 255.0).clamp(0.0, 255.0) as u8,
+                (v * tint[1] * 255.0).clamp(0.0, 255.0) as u8,
+                (v * tint[2] * 255.0).clamp(0.0, 255.0) as u8,
+            ];
+            let idx = ((y * N + x) * 4) as usize;
+            rgba[idx] = px_rgb[0];
+            rgba[idx + 1] = px_rgb[1];
+            rgba[idx + 2] = px_rgb[2];
+        })
+    });
+    (GROUND_MAT, N, N, rgba)
 }
 
 fn push_vertex(out: &mut Vec<f32>, pos: [f32; 3], normal: [f32; 3], uv: [f32; 2], color: [f32; 4]) {
