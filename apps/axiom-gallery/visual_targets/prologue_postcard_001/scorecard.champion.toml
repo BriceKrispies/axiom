@@ -3,7 +3,7 @@
 # and darken the warm haze so the sky gaps stop blowing to white under the god-rays.
 # Cleaner stylized read; the residual low-poly-ness is the intended style. 3 -> 4.
 terrain_silhouette = 4
-foreground_material_detail = 4
+foreground_material_detail = 5
 vegetation_density = 4
 vegetation_clumping = 4
 depth_separation = 4

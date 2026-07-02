@@ -41,6 +41,13 @@ pub struct Manifest {
     /// express small ground-level detail; this is the smallest primitive that does.
     #[serde(default)]
     pub groundcover: Option<Groundcover>,
+    /// Optional deterministic fallen-leaf **litter**: flat leaf cards lying on the
+    /// ground, scattered densely, in warm brown/orange/russet tones. Reuses the
+    /// [`Groundcover`] scatter shape (`radius_m` is the leaf size; `height_m` is
+    /// unused — the leaves are flat). The reference's floor is a dense leaf carpet;
+    /// this is what pushes the forest floor toward photoreal parity.
+    #[serde(default)]
+    pub litter: Option<Groundcover>,
     /// Whether the scene has volumetric light (god-rays) — **neutral frame data**.
     /// When `true`, every backend applies the same `host::apply_frame_volumetrics`
     /// pass (the `FrameVolumetrics::low_poly` preset), so shafts render identically on

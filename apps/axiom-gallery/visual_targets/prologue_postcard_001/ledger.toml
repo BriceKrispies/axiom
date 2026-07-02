@@ -1300,3 +1300,46 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 4
+
+[[iteration]]
+iteration = 32
+attacked_axis = "foreground_material_detail"
+changed_files = [
+    "build.rs",
+    "scene.rs",
+    "manifest.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "PARITY REFINEMENT (beyond the >=4 completion bar): fallen-leaf litter carpet pushes foreground_material_detail 4->5"
+abstraction_introduced = false
+human_note = "New capability: a dense fallen-leaf LITTER layer (flat leaf cards lying on the ground, warm brown/orange/russet, reusing the ground-cover scatter) added the reference floor's defining feature that grass clumps + colour mottle could not express. The floor now reads as a rich forest floor of fallen leaves + grass. Manual promotion because the target was already complete (all axes >=4); this pushes toward photoreal parity (5)."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 4
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 4
+vegetation_clumping = 4
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 4

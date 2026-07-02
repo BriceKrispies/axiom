@@ -31,6 +31,7 @@ const TRUNK_MESH: u64 = 2;
 const CANOPY_MESH: u64 = 3;
 const GROUNDCOVER_MESH: u64 = 4;
 const FOLIAGE_MESH: u64 = 5;
+const LITTER_MESH: u64 = 6;
 const WHITE_MAT: u64 = 1;
 
 /// Radial segments in the unit trunk cylinder.
@@ -93,6 +94,16 @@ pub fn all_groundcover(manifest: &Manifest) -> Vec<Tuft> {
         .unwrap_or_default()
 }
 
+/// The fallen-leaf litter scatter (flat leaves on the ground), from the `[litter]`
+/// config; empty when absent. Reuses the ground-cover scatter.
+pub fn all_litter(manifest: &Manifest) -> Vec<Tuft> {
+    manifest
+        .litter
+        .as_ref()
+        .map(|g| scatter::expand_groundcover(g, &manifest.terrain))
+        .unwrap_or_default()
+}
+
 /// Build every neutral artifact the backends consume from `manifest`.
 pub fn build(manifest: &Manifest) -> RenderData {
     let cam = &manifest.camera;
@@ -105,6 +116,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let (canopy_v, canopy_i) = canopy_unit_mesh();
     let (foliage_v, foliage_i) = foliage_card_unit_mesh();
     let (tuft_v, tuft_i) = tuft_unit_mesh();
+    let (litter_v, litter_i) = litter_unit_mesh();
 
     let lean_deg = manifest.scatter.as_ref().map(|s| s.lean_deg).unwrap_or(0.0);
     let trees = all_trees(manifest);
@@ -123,6 +135,8 @@ pub fn build(manifest: &Manifest) -> RenderData {
 
     let tufts = all_groundcover(manifest);
     let tuft_inst = tuft_instances(manifest, &tufts, &view_proj, eye);
+    let litter = all_litter(manifest);
+    let litter_inst = litter_instances(manifest, &litter, &view_proj, eye);
 
     // Terrain: one identity-world instance whose MVP is the camera view-projection.
     let terrain_batch_inst =
@@ -139,6 +153,9 @@ pub fn build(manifest: &Manifest) -> RenderData {
     // Ground cover: one instanced batch when the abstraction placed any tufts.
     let tuft_count = tufts.len() as u32;
     (tuft_count > 0).then(|| batches.push((GROUNDCOVER_MESH, WHITE_MAT, tuft_inst, tuft_count)));
+    // Fallen-leaf litter: a dense flat-leaf carpet on the ground.
+    let litter_count = litter.len() as u32;
+    (litter_count > 0).then(|| batches.push((LITTER_MESH, WHITE_MAT, litter_inst, litter_count)));
 
     RenderData {
         width: cam.width_px,
@@ -153,6 +170,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
             (CANOPY_MESH, canopy_v, canopy_i),
             (FOLIAGE_MESH, foliage_v, foliage_i),
             (GROUNDCOVER_MESH, tuft_v, tuft_i),
+            (LITTER_MESH, litter_v, litter_i),
         ],
         materials: vec![white_material()],
         batches,
@@ -391,6 +409,30 @@ fn tuft_instances(manifest: &Manifest, tufts: &[Tuft], view_proj: &[f32; 16], ey
     out
 }
 
+/// Fallen-leaf litter instances: flat leaf cards lying just above the ground, scaled by
+/// `radius_m` and yawed, in warm litter tints — a dense fallen-leaf carpet on the floor.
+fn litter_instances(manifest: &Manifest, litter: &[Tuft], view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+    let fog = &manifest.fog;
+    let vp = Mat4::from_cols_array(*view_proj);
+    let mut out = Vec::with_capacity(litter.len() * 36);
+    for t in litter {
+        let ground = manifest.terrain.height_at(t.x, t.z);
+        let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, t.yaw_deg.to_radians())
+            .unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0));
+        // Flat leaf: lie a hair above the ground; radius_m is the leaf size (uniform).
+        let world = Transform::new(
+            Vec3::new(t.x, ground + 0.02, t.z),
+            yaw,
+            Vec3::new(t.radius_m, t.radius_m, t.radius_m),
+        )
+        .to_matrix();
+        let dist = eye.subtract(Vec3::new(t.x, ground, t.z)).length();
+        let tint = fogged(t.color, fog, dist, &style_of(manifest), 1.0);
+        out.extend_from_slice(&instance(&vp, world, tint));
+    }
+    out
+}
+
 /// One 36-float instance: `mvp(16) · world(16) · tint(4)`, where `mvp = view_proj ·
 /// world`. The GPU shader clips with the first matrix directly (`clip = mvp *
 /// position`) and lights with the second (`world`), and the Canvas 2D backend reads
@@ -540,6 +582,29 @@ fn tuft_unit_mesh() -> (Vec<f32>, Vec<u32>) {
         // Both windings → the blade is visible from either side.
         idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 1]);
         base += 3;
+    }
+    (v, idx)
+}
+
+/// The unit fallen leaf: a single flat irregular polygon lying in the XZ plane (a leaf
+/// on the ground), normal up, double-sided. Per-vertex white; the instance tint carries
+/// the warm litter colour.
+fn litter_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    const RIM: [f32; 7] = [0.50, 0.36, 0.48, 0.30, 0.50, 0.34, 0.44];
+    let up = [0.0f32, 1.0, 0.0];
+    let w = [1.0f32, 1.0, 1.0, 1.0];
+    let n = RIM.len();
+    let mut v = Vec::new();
+    let mut idx = Vec::new();
+    push_vertex(&mut v, [0.0, 0.0, 0.0], up, [0.5, 0.5], w);
+    for k in 0..n {
+        let a = k as f32 / n as f32 * std::f32::consts::TAU;
+        let r = RIM[k];
+        push_vertex(&mut v, [a.cos() * r, 0.0, a.sin() * r], up, [0.5, 0.5], w);
+    }
+    for k in 0..n {
+        let (c, r0, r1) = (0u32, 1 + k as u32, 1 + ((k + 1) % n) as u32);
+        idx.extend_from_slice(&[c, r0, r1, c, r1, r0]);
     }
     (v, idx)
 }
