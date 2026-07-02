@@ -579,7 +579,7 @@ mod tests {
         )
         .with_volumetrics(FrameVolumetrics::low_poly());
         // Default profile (all): the god-ray pass runs.
-        let mut full = Canvas2dBackendApi::new(&request(800, 600));
+        let full = Canvas2dBackendApi::new(&request(800, 600));
         let (a, _, _) = full.render_offscreen_rgba(&vol);
         // set_capability_profile restricting Volumetrics: the pass is skipped.
         let mut restricted = Canvas2dBackendApi::new(&request(800, 600));
