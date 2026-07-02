@@ -1,15 +1,15 @@
-# iter 28 (attack: contrast_and_exposure) — fill the canopy with more small (not
-# bigger) leaf clumps so the dense mass reads richly instead of bright haze washing
-# through; exposure trimmed 0.74->0.70. The upper frame gains tonal depth (dark trunks
-# / rich canopy / warm gaps) instead of a uniform bright wash. 3 -> 4. No regressions
-# (still readable, no blocky cards).
+# iter 29 (attack: lighting_directionality) — the hemisphere ambient is now neutral
+# frame data (host FrameAmbient -> GPU Lights uniform + canvas software lighting),
+# verified identical on BOTH backends. A brighter warm ambient lifts the backlit trunk
+# faces off near-black to beech gray-brown and softens the hard shadow bands into soft
+# dappled shade -- the reference's soft global illumination. 3 -> 4. No regressions.
 terrain_silhouette = 4
 foreground_material_detail = 3
 vegetation_density = 4
 vegetation_clumping = 4
 depth_separation = 4
 fog_and_haze = 4
-lighting_directionality = 3
+lighting_directionality = 4
 color_palette = 4
 contrast_and_exposure = 4
 object_scale = 4

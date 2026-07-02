@@ -190,3 +190,11 @@ exposure = 0.70
 ambient = 0.07
 foliage_saturation = 1.0
 distance_desaturation = 0.26
+
+# ITER 29 (attack: lighting_directionality) — the hemisphere ambient is now neutral
+# frame data (host FrameAmbient -> GPU Lights uniform + canvas software lighting). A
+# brighter, warmer ambient lifts the backlit trunk faces off near-black toward beech
+# gray-brown and softens the hard shadow contrast, matching the reference's soft GI.
+[ambient]
+sky = [0.52, 0.55, 0.62]
+ground = [0.46, 0.40, 0.32]
