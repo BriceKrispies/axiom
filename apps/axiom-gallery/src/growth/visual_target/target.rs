@@ -232,8 +232,10 @@ impl Target {
         Ok(written)
     }
 
-    /// Write one diff heatmap, or `None` if either input is missing or the two
-    /// differ in size (both are non-fatal for a diagnostic).
+    /// Write one diff heatmap, or `None` if it cannot: either input missing, either
+    /// not a decodable RGBA8 PNG (e.g. an external RGB reference screenshot), or the
+    /// two differ in size. A diagnostic must never fail a review, so only a genuine
+    /// write error propagates — every "can't compare these" case is a graceful skip.
     fn try_diff(
         &self,
         a: &Path,
@@ -242,21 +244,15 @@ impl Target {
         label: &str,
     ) -> Result<Option<String>, String> {
         (a.exists() & b.exists())
-            .then(|| {
-                let (ap, aw, ah) = decode(a)?;
-                let (bp, bw, bh) = decode(b)?;
-                (aw == bw && ah == bh)
-                    .then(|| {
-                        let heat = compare::diff_heatmap(&ap, &bp);
-                        let out = self
-                            .diagnostics_dir()
-                            .join(format!("iter{iteration:04}_{label}.png"));
-                        write_png(&out, &heat, aw, ah).map(|()| file_name(&out))
-                    })
-                    .transpose()
+            .then(|| (decode(a).ok(), decode(b).ok()))
+            .and_then(|(a, b)| a.zip(b))
+            .filter(|((_, aw, ah), (_, bw, bh))| aw == bw && ah == bh)
+            .map(|((ap, aw, ah), (bp, _, _))| {
+                let heat = compare::diff_heatmap(&ap, &bp);
+                let out = self.diagnostics_dir().join(format!("iter{iteration:04}_{label}.png"));
+                write_png(&out, &heat, aw, ah).map(|()| file_name(&out))
             })
             .transpose()
-            .map(Option::flatten)
     }
 }
 
@@ -302,6 +298,18 @@ mod tests {
     fn write_solid(path: &Path, rgba: [u8; 4]) {
         let pixels: Vec<u8> = rgba.iter().copied().cycle().take(2 * 2 * 4).collect();
         write_png(path, &pixels, 2, 2).unwrap();
+    }
+
+    /// A 2×2 solid-colour **RGB** (not RGBA) PNG — models an external reference
+    /// screenshot the RGBA8 diff decoder cannot read.
+    fn write_solid_rgb(path: &Path, rgb: [u8; 3]) {
+        let pixels: Vec<u8> = rgb.iter().copied().cycle().take(2 * 2 * 3).collect();
+        let file = std::fs::File::create(path).unwrap();
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), 2, 2);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&pixels).unwrap();
     }
 
     /// A target dir seeded with champion + candidate scorecards and screenshots.
@@ -396,5 +404,22 @@ mod tests {
         let champ = Scorecard::uniform(5);
         let t = seed("complete", champ, champ);
         assert!(t.review(vec![], false).unwrap_err().contains("complete"));
+    }
+
+    #[test]
+    fn undecodable_reference_is_skipped_not_fatal() {
+        // An external RGB reference the RGBA8 diff decoder can't read must not fail
+        // the review — the candidate-vs-champion diagnostic still renders, the
+        // candidate-vs-reference one is silently skipped.
+        let mut champ = Scorecard::uniform(3);
+        champ.set(Axis::FogAndHaze, 1);
+        let mut cand = champ;
+        cand.set(Axis::FogAndHaze, 3);
+        let t = seed("rgb_ref", champ, cand);
+        write_solid_rgb(&t.reference_png(), [30, 30, 30]); // overwrite RGBA ref with RGB
+        let out = t.review(vec![], false).unwrap();
+        assert!(out.promoted);
+        assert!(out.diagnostics.iter().any(|d| d.contains("candidate_vs_champion")));
+        assert!(!out.diagnostics.iter().any(|d| d.contains("candidate_vs_reference")));
     }
 }

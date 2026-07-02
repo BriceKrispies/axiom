@@ -200,19 +200,44 @@ candidate-vs-champion and candidate-vs-reference diff heatmaps into `diagnostics
 
 ## 4. `prologue_postcard_001` — the worked target
 
-The seeded target is an autumn-forest prologue postcard. Its `reference.png` is a
-dense, warm, raked-light slope; its iteration-0 champion is deliberately rough — a
-sparse, gray, flatly-lit slope (`final_score 1.275`). The live ledger records the
-convergence:
+### Campaign 1 (retired) — vs a canvas2d "gold" render
 
-- **iter 1** — attacked `vegetation_density` (1→4) by raising the scatter from 30 to
-  150 trees. Clean win, `keep_candidate`. Side benefit: `terrain_silhouette` 2→3.
-- **iter 2** — attacked `lighting_directionality` (1→2) by swapping the dim overhead
-  sun for a low raking warm sun. Modest win, `keep_candidate`. `final_score` → 1.400.
+The first campaign chased a canvas2d-rendered gold reference from a rough, sparse,
+gray iteration-0 champion (`final_score 1.275`): iter 1 attacked `vegetation_density`
+(1→4, dense scatter) and iter 2 `lighting_directionality` (1→2, raking sun), both
+`keep_candidate`, reaching `final_score 1.400`. That ledger is archived in
+`ledger.legacy-oldref.toml`; its retired reference manifest is preserved in git
+history.
 
-The next flaw is `color_palette` (still 1 — the canopy tints are muted gray). The
-champion is mid-convergence and honestly **not** complete; the loop continues until
-every axis clears 4 or a human accepts it.
+### Campaign 2 (current) — vs an external photoreal reference
+
+`reference.png` was then replaced with a **photorealistic first-person forest
+screenshot** (tall trunks, volumetric god-rays, detailed leaf-litter/grass ground) —
+a far higher, external bar with no manifest provenance. The champion (our low-poly
+diorama) was re-baselined honestly against it (`final_score 1.275`), and a fresh
+`ledger.toml` records the new campaign:
+
+- **iter 1** — attacked `foreground_material_detail`. Enriched the ground bands +
+  micro-relief, but the change is **invisible** (the elevated dense-canopy view
+  occludes the ground) → `start_new_candidate_branch`.
+- **iter 2** — a human verdict redirected the attack to `horizon_composition`; the
+  bounded change dropped the camera to eye level. It **broke** the composition (short
+  blob trees + a 64 m patch render as dark smears under empty sky), `2→1` →
+  `start_new_candidate_branch`. The verdict is archived under `diagnostics/`.
+- **iter 3** — back on `foreground_material_detail`. Two failed attempts plus a
+  genuine inexpressibility (the manifest had **no** ground-detail primitive at all)
+  justified the loop's first **abstraction**: a `[groundcover]` instance layer (a new
+  `Tuft` value, a deterministic `expand_groundcover`, and a tuft mesh/batch — app-
+  local, no backend change). A dense carpet of small warm tufts gives the visible
+  foreground real material detail: `foreground_material_detail 1→2`, `keep_candidate`,
+  `abstraction_introduced = true`. The justification is recorded in
+  `abstractions/0001.toml` (axis unlocked, smallest API, and a byte-identical
+  double-render proof that the deterministic screenshot still works).
+
+The next flaw is `color_palette` (still 1). The champion is mid-convergence and
+honestly **not** complete — closing the rest of the gap to a photoreal target needs
+further capability (tall receding trunks, an interior camera that works, volumetric
+god-rays), each of which the loop will gate as its own justified abstraction.
 
 The comparator's decision/regression/abstraction logic is proven exhaustively by the
 unit tests in `axes.rs`, `review.rs`, `ledger.rs`, `abstraction.rs`, and `target.rs`

@@ -73,3 +73,22 @@ canopy_palette = [
   [0.52, 0.44, 0.30],
   [0.48, 0.42, 0.28],
 ]
+
+# ITER 3 (attack: foreground_material_detail) — the ABSTRACTION: a ground-cover
+# instance layer (new [groundcover] primitive). The base diorama had no way to
+# express ground-level detail; this scatters a dense carpet of small warm grass/
+# litter tufts across the patch, giving the visible foreground real material detail.
+[groundcover]
+seed = 21
+count = 4000
+min_spacing_m = 0.35
+slope_limit = 1.2
+height_m = [0.2, 0.6]
+radius_m = [0.15, 0.45]
+palette = [
+  [0.62, 0.50, 0.22],
+  [0.70, 0.42, 0.16],
+  [0.55, 0.48, 0.24],
+  [0.48, 0.36, 0.18],
+  [0.75, 0.60, 0.28],
+]

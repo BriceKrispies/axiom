@@ -36,6 +36,11 @@ pub struct Manifest {
     /// Optional deterministic expansion appended to `trees` at load time.
     #[serde(default)]
     pub scatter: Option<Scatter>,
+    /// Optional deterministic ground-cover (grass/litter tufts) — the abstraction
+    /// added to unlock `foreground_material_detail`. The base diorama has no way to
+    /// express small ground-level detail; this is the smallest primitive that does.
+    #[serde(default)]
+    pub groundcover: Option<Groundcover>,
 }
 
 /// The single camera the frame is rendered from.
@@ -155,6 +160,40 @@ pub struct Scatter {
     pub canopy_palette: Vec<[f32; 3]>,
 }
 
+/// One ground-cover tuft: a small instanced cluster seated on the terrain. This is
+/// the value type the [`Groundcover`] abstraction produces — the ground-level
+/// analogue of a [`Tree`], carrying no trunk.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tuft {
+    pub x: f32,
+    pub z: f32,
+    #[serde(default)]
+    pub yaw_deg: f32,
+    pub height_m: f32,
+    pub radius_m: f32,
+    /// Linear RGB tint (dry grass / leaf-litter).
+    pub color: [f32; 3],
+}
+
+/// A deterministic ground-cover layer expanded into [`Tuft`] instances — the
+/// smallest primitive that lets a manifest express foreground ground detail.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Groundcover {
+    pub seed: u64,
+    pub count: u32,
+    pub min_spacing_m: f32,
+    /// Skip candidate sites steeper than this (rise/run).
+    pub slope_limit: f32,
+    /// Tuft height range `[min, max]` (m).
+    pub height_m: [f32; 2],
+    /// Tuft radius range `[min, max]` (m).
+    pub radius_m: [f32; 2],
+    /// Palette a tuft colour is picked from per instance.
+    pub palette: Vec<[f32; 3]>,
+}
+
 fn default_rock_albedo() -> [f32; 3] {
     [0.42, 0.40, 0.38]
 }
@@ -213,6 +252,14 @@ impl Manifest {
             (s.min_spacing_m > 0.0)
                 .then_some(())
                 .ok_or("scatter.min_spacing_m must be > 0")?;
+        }
+        if let Some(g) = &self.groundcover {
+            (!g.palette.is_empty())
+                .then_some(())
+                .ok_or("groundcover.palette must have at least one colour")?;
+            (g.min_spacing_m > 0.0)
+                .then_some(())
+                .ok_or("groundcover.min_spacing_m must be > 0")?;
         }
         Ok(())
     }
@@ -356,6 +403,17 @@ canopy_color = [0.8, 0.4, 0.1]
         // The linear slope dominates: height rises moving +x and +z.
         assert!(m.terrain.height_at(10.0, 0.0) > m.terrain.height_at(-10.0, 0.0));
         assert!(m.terrain.slope_at(0.0, 0.0) > 0.0);
+    }
+
+    #[test]
+    fn parses_groundcover_and_rejects_empty_palette() {
+        let gc = "\n[groundcover]\nseed = 1\ncount = 100\nmin_spacing_m = 0.3\n\
+                  slope_limit = 1.0\nheight_m = [0.2, 0.5]\nradius_m = [0.1, 0.3]\n\
+                  palette = [ [0.6, 0.5, 0.2] ]\n";
+        let m = Manifest::parse(&format!("{SAMPLE}{gc}")).unwrap();
+        assert!(m.groundcover.is_some());
+        let bad = format!("{SAMPLE}{}", gc.replace("[ [0.6, 0.5, 0.2] ]", "[]"));
+        assert!(Manifest::parse(&bad).is_err());
     }
 
     #[test]

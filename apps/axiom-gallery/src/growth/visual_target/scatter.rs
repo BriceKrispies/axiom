@@ -12,12 +12,15 @@
 use axiom_entropy::{EntropyApi, EntropyStream};
 use axiom_space::{Address, SpaceApi};
 
-use super::scene::{Scatter, Terrain, Tree};
+use super::scene::{Groundcover, Scatter, Terrain, Tree, Tuft};
 
 /// Fixed address segment keying the scatter entropy stream ("vtscat\0\x01"), so the
 /// stream derived from `(scatter.seed, address, version)` is reproducible.
 const SCATTER_SEGMENT: u64 = 0x_76_74_73_63_61_74_00_01;
 const SCATTER_VERSION: u32 = 1;
+/// Fixed address segment keying the ground-cover entropy stream ("vtgcvr\0\x01"),
+/// distinct from the tree scatter so the two streams never correlate.
+const GROUNDCOVER_SEGMENT: u64 = 0x_76_74_67_63_76_72_00_01;
 /// How many rejected candidates to tolerate before giving up on reaching `count`
 /// (keeps a dense/steep scene from looping forever). A generous multiple of `count`.
 const MAX_ATTEMPTS_PER_TREE: u32 = 32;
@@ -70,6 +73,42 @@ pub fn expand(scatter: &Scatter, terrain: &Terrain) -> Vec<Tree> {
     placed
 }
 
+/// Expand `groundcover` over `terrain` into concrete [`Tuft`] instances — the
+/// ground-level analogue of [`expand`], on its own entropy stream.
+pub fn expand_groundcover(gc: &Groundcover, terrain: &Terrain) -> Vec<Tuft> {
+    let address: Address = SpaceApi::child(&SpaceApi::root(), GROUNDCOVER_SEGMENT);
+    let mut stream = EntropyApi::stream(gc.seed, &address, SCATTER_VERSION);
+
+    let half = terrain.half_m();
+    let min_sq = gc.min_spacing_m * gc.min_spacing_m;
+    let mut placed: Vec<Tuft> = Vec::with_capacity(gc.count as usize);
+    let attempt_cap = gc.count.saturating_mul(MAX_ATTEMPTS_PER_TREE);
+    let mut attempts = 0u32;
+
+    while (placed.len() as u32) < gc.count && attempts < attempt_cap {
+        attempts += 1;
+        let x = lerp(-half, half, unit(&mut stream));
+        let z = lerp(-half, half, unit(&mut stream));
+
+        if terrain.slope_at(x, z) > gc.slope_limit {
+            continue;
+        }
+        let crowded = placed
+            .iter()
+            .any(|t| (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z) < min_sq);
+        if crowded {
+            continue;
+        }
+
+        let height_m = range(&mut stream, gc.height_m);
+        let radius_m = range(&mut stream, gc.radius_m);
+        let yaw_deg = range(&mut stream, [0.0, 360.0]);
+        let color = gc.palette[stream.pick_index(gc.palette.len())];
+        placed.push(Tuft { x, z, yaw_deg, height_m, radius_m, color });
+    }
+    placed
+}
+
 /// A uniform `[0, 1)` sample as `f32`, off the deterministic stream.
 fn unit(stream: &mut EntropyStream) -> f32 {
     stream.unit().get()
@@ -87,7 +126,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::growth::visual_target::scene::Octave;
+    use crate::growth::visual_target::scene::{Groundcover, Octave};
 
     fn terrain(slope: [f32; 2]) -> Terrain {
         Terrain {
@@ -140,6 +179,40 @@ mod tests {
             for b in &trees[i + 1..] {
                 let d = (a.x - b.x).powi(2) + (a.z - b.z).powi(2);
                 assert!(d >= min_sq, "two trees closer than min spacing");
+            }
+        }
+    }
+
+    fn groundcover(count: u32) -> Groundcover {
+        Groundcover {
+            seed: 5,
+            count,
+            min_spacing_m: 0.5,
+            slope_limit: 1.0,
+            height_m: [0.2, 0.6],
+            radius_m: [0.1, 0.4],
+            palette: vec![[0.6, 0.5, 0.2], [0.7, 0.4, 0.2]],
+        }
+    }
+
+    #[test]
+    fn groundcover_is_deterministic_and_respects_spacing() {
+        let t = terrain([0.02, 0.02]);
+        let gc = groundcover(200);
+        let a = expand_groundcover(&gc, &t);
+        let b = expand_groundcover(&gc, &t);
+        assert_eq!(a.len(), b.len());
+        assert!(!a.is_empty());
+        for (p, q) in a.iter().zip(&b) {
+            assert_eq!(p.x, q.x);
+            assert_eq!(p.z, q.z);
+            assert_eq!(p.color, q.color);
+            assert_eq!(p.height_m, q.height_m);
+        }
+        let min_sq = gc.min_spacing_m * gc.min_spacing_m;
+        for (i, p) in a.iter().enumerate() {
+            for q in &a[i + 1..] {
+                assert!((p.x - q.x).powi(2) + (p.z - q.z).powi(2) >= min_sq);
             }
         }
     }

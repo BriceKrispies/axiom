@@ -301,8 +301,9 @@ fn render_canvas2d(rd: &RenderData) -> (Vec<u8>, u32, u32) {
                 instances[base + 34],
                 instances[base + 35],
             ];
-            // Trees are discrete objects (contact-shadow casters); the terrain is not.
-            let casts = *mesh_id != 1;
+            // Only the trees (trunk mesh 2, canopy mesh 3) cast contact shadows;
+            // the terrain (1) and the ground-cover tufts (4) do not.
+            let casts = *mesh_id == 2 || *mesh_id == 3;
             draws.push(FrameDrawItem::new(object_id, *mesh_id, *material_id, world, mvp, tint, casts));
             object_id += 1;
         }
