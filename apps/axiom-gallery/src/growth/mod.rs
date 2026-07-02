@@ -49,8 +49,9 @@ pub mod terrain_mesh;
 // built on top of growth's headless render-to-PNG machinery (NOT its worldgen). A
 // self-contained, versioned scene-manifest + one-frame screenshot + reference
 // compare, plus the visual-convergence comparator (axis scorecards, weighted
-// decision, iteration ledger). Native-only headless tooling, never in the wasm bundle.
-#[cfg(not(target_arch = "wasm32"))]
+// decision, iteration ledger). The pure geometry (scene/scatter/build) compiles on
+// wasm too so the `forest_walk` browser demo can render the same forest; only the
+// headless `compare`/`target` tooling is native + feature-gated.
 pub mod visual_target;
 
 // --- native first-person ground-walk sim (shared by the wasm viewer + the
