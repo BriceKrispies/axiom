@@ -1507,3 +1507,44 @@ contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
 artifact_level = 5
+
+[[iteration]]
+iteration = 37
+attacked_axis = "depth_separation"
+changed_files = [
+    "manifest.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "PARITY REFINEMENT: stronger distance haze fades the mid/far forest into mist; depth_separation 4->5"
+abstraction_introduced = false
+human_note = "Pull the warm haze in (end 98->74m) so the mid/far forest fades into mist, strengthening the dark-foreground -> misty-background gradient of the reference. Foreground trunks stay crisp/dark; the depth reads strongly."
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 5
+vegetation_clumping = 5
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 5
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 5
+vegetation_density = 5
+vegetation_clumping = 5
+depth_separation = 5
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 5
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 4
+artifact_level = 5

@@ -40,8 +40,8 @@ intensity = 1.25
 # ITER 25 (attack: fog_and_haze) — warm golden sunlit haze matching the reference's
 # misty backlit light; distance fades into warm amber mist, not a cool blue wash.
 color = [0.70, 0.61, 0.47]
-start_m = 7.0
-end_m = 98.0
+start_m = 5.0
+end_m = 74.0
 
 # A deeper patch so the trunks recede into the distance; gentler relief so the floor
 # reads as walkable ground rather than lumpy hills at eye level.
