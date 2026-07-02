@@ -190,6 +190,7 @@ fn render_gpu(
         meshes,
         materials,
         &[],
+        &[],
         packet.light_view_proj(),
         &batches,
         packet.clear_color(),

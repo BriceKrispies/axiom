@@ -62,6 +62,7 @@ pub fn render_gpu(
         h,
         meshes,
         materials,
+        &[],
         &lights,
         outcome.light_view_proj(),
         &batches,

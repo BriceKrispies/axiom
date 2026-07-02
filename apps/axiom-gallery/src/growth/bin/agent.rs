@@ -272,6 +272,7 @@ fn render_capture(inputs: &CaptureInputs) -> Vec<u8> {
         inputs.height,
         &meshes,
         &materials,
+        &[],
         &inputs.lights,
         inputs.light_view_proj,
         &batches,

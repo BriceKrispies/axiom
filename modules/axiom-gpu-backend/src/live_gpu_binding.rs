@@ -250,6 +250,8 @@ impl LiveGpuBinding {
             format,
             meshes,
             materials,
+            // The live arm has no authored normal maps yet; materials get a flat normal.
+            &[],
             max_instances,
             shadow_size,
             // The live arm keeps the engine default hemisphere ambient (a per-scene

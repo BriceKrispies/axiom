@@ -271,6 +271,7 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
         rd.height,
         &rd.meshes,
         &rd.materials,
+        &rd.normals,
         &rd.lights,
         rd.light_view_proj,
         &rd.batches,

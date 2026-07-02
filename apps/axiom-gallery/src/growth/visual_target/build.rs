@@ -77,6 +77,9 @@ pub struct RenderData {
     pub meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
     /// `(material_id, width, height, RGBA8 albedo)`.
     pub materials: Vec<(u64, u32, u32, Vec<u8>)>,
+    /// Per-material tangent-space normal maps `(material_id, w, h, RGBA8)` — GPU-only
+    /// surface relief; materials absent here get a flat normal (Canvas 2D ignores all).
+    pub normals: Vec<(u64, u32, u32, Vec<u8>)>,
     /// `(mesh_id, material_id, interleaved 36-float instances, instance count)`.
     pub batches: Vec<(u64, u64, Vec<f32>, u32)>,
     /// Optional volumetric light (god-rays) — neutral frame data every backend
@@ -216,6 +219,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
             bark_material(),
             ground_material(),
         ],
+        normals: vec![bark_normal_material(), ground_normal_material()],
         batches,
         volumetrics: manifest.volumetrics.then(FrameVolumetrics::low_poly),
         postprocess: manifest.postprocess.then(FramePostProcess::cinematic),
@@ -761,25 +765,24 @@ fn leaf_alpha_material() -> (u64, u32, u32, Vec<u8>) {
     (LEAF_ALPHA_MAT, N, N, rgba)
 }
 
-/// Procedural beech-bark detail: a near-white value multiplier (RGB grey, opaque) that
-/// the beech trunk tint modulates. Beech bark is smooth silver-grey, so the texture is
-/// subtle — gentle vertical tonal banding (runs up the trunk), faint fine grain, and
-/// sparse darker horizontal lenticel dashes. Tiles vertically (Repeat sampler).
+/// Beech-bark surface value at a texel — a near-white multiplier that doubles as a
+/// height field (darker banding / lenticel dashes = lower). Shared by the bark albedo and
+/// its normal map so relief and shading agree. Beech is smooth silver-grey, so it is
+/// subtle: gentle vertical banding (up the trunk), faint grain, sparse lenticel dashes.
+fn bark_height(px: f32, py: f32) -> f32 {
+    let band = value_noise(11, px * 0.09, py * 0.015) * 0.5 + 0.5;
+    let grain = value_noise(23, px * 0.35, py * 0.5) * 0.5 + 0.5;
+    let lent = smoothstep(0.80, 0.9, value_noise(37, px * 0.6, py * 0.14) * 0.5 + 0.5);
+    ((0.86 + 0.14 * band) * (0.94 + 0.06 * grain) - 0.28 * lent).clamp(0.5, 1.05)
+}
+
+/// The beech-bark albedo detail (RGB grey value multiplier, opaque), from [`bark_height`].
 fn bark_material() -> (u64, u32, u32, Vec<u8>) {
     const N: u32 = 128;
     let mut rgba = vec![255u8; (N * N * 4) as usize];
     (0..N).for_each(|y| {
         (0..N).for_each(|x| {
-            let px = x as f32;
-            let py = y as f32;
-            // Vertical tonal banding: varies mostly around the trunk (u/x), smooth in v.
-            let band = value_noise(11, px * 0.09, py * 0.015) * 0.5 + 0.5;
-            // Faint fine grain (beech is smooth — keep low amplitude).
-            let grain = value_noise(23, px * 0.35, py * 0.5) * 0.5 + 0.5;
-            // Sparse darker horizontal lenticel dashes (a beech hallmark).
-            let lent = smoothstep(0.80, 0.9, value_noise(37, px * 0.6, py * 0.14) * 0.5 + 0.5);
-            let m = ((0.86 + 0.14 * band) * (0.94 + 0.06 * grain) - 0.28 * lent).clamp(0.5, 1.05);
-            let b = (m * 255.0).clamp(0.0, 255.0) as u8;
+            let b = (bark_height(x as f32, y as f32) * 255.0).clamp(0.0, 255.0) as u8;
             let idx = ((y * N + x) * 4) as usize;
             rgba[idx] = b;
             rgba[idx + 1] = b;
@@ -789,9 +792,17 @@ fn bark_material() -> (u64, u32, u32, Vec<u8>) {
     (BARK_MAT, N, N, rgba)
 }
 
+/// Forest-floor surface value (a mottle multiplier that doubles as a height field).
+/// Shared by the ground albedo and its normal map.
+fn ground_height(px: f32, py: f32) -> f32 {
+    let coarse = value_noise(51, px * 0.06, py * 0.06) * 0.5 + 0.5;
+    let fine = value_noise(63, px * 0.28, py * 0.28) * 0.5 + 0.5;
+    (0.78 + 0.28 * coarse) * (0.9 + 0.16 * fine)
+}
+
 /// Procedural forest-floor detail: a color-mottle multiplier (around 1.0) that the
-/// terrain's per-vertex ground colour modulates — patches of cooler earth, warmer
-/// leaf-litter, and muted-green moss at a finer scale than the terrain grid. Tiles.
+/// terrain's per-vertex ground colour modulates — cooler earth vs warmer leaf-litter at a
+/// finer scale than the terrain grid. Tiles.
 fn ground_material() -> (u64, u32, u32, Vec<u8>) {
     const N: u32 = 128;
     let mut rgba = vec![255u8; (N * N * 4) as usize];
@@ -799,24 +810,54 @@ fn ground_material() -> (u64, u32, u32, Vec<u8>) {
         (0..N).for_each(|x| {
             let px = x as f32;
             let py = y as f32;
-            let coarse = value_noise(51, px * 0.06, py * 0.06) * 0.5 + 0.5;
-            let fine = value_noise(63, px * 0.28, py * 0.28) * 0.5 + 0.5;
-            let v = (0.78 + 0.28 * coarse) * (0.9 + 0.16 * fine);
+            let v = ground_height(px, py);
             // Tint the mottle: darker patches lean cool-earth, lighter lean warm-litter.
-            let warm = smoothstep(0.5, 1.0, coarse);
+            let warm = smoothstep(0.5, 1.0, value_noise(51, px * 0.06, py * 0.06) * 0.5 + 0.5);
             let tint = lerp3([0.92, 0.90, 0.86], [1.06, 0.98, 0.86], warm);
-            let px_rgb = [
-                (v * tint[0] * 255.0).clamp(0.0, 255.0) as u8,
-                (v * tint[1] * 255.0).clamp(0.0, 255.0) as u8,
-                (v * tint[2] * 255.0).clamp(0.0, 255.0) as u8,
-            ];
             let idx = ((y * N + x) * 4) as usize;
-            rgba[idx] = px_rgb[0];
-            rgba[idx + 1] = px_rgb[1];
-            rgba[idx + 2] = px_rgb[2];
+            rgba[idx] = (v * tint[0] * 255.0).clamp(0.0, 255.0) as u8;
+            rgba[idx + 1] = (v * tint[1] * 255.0).clamp(0.0, 255.0) as u8;
+            rgba[idx + 2] = (v * tint[2] * 255.0).clamp(0.0, 255.0) as u8;
         })
     });
     (GROUND_MAT, N, N, rgba)
+}
+
+/// Build a tangent-space normal map (RGBA8, id-tagged) by central-differencing a height
+/// field `h` over N×N at `strength` bump scale — RGB encodes the perturbed normal
+/// `(-dh/dx, -dh/dy, 1)` normalized into `[0,1]`. Used to give the bark + ground GPU
+/// surface relief under the directional light (Canvas 2D ignores it).
+fn normal_map_from_height(
+    id: u64,
+    n: u32,
+    strength: f32,
+    h: impl Fn(f32, f32) -> f32,
+) -> (u64, u32, u32, Vec<u8>) {
+    let mut rgba = vec![255u8; (n * n * 4) as usize];
+    (0..n).for_each(|y| {
+        (0..n).for_each(|x| {
+            let (px, py) = (x as f32, y as f32);
+            let nx = -(h(px + 1.0, py) - h(px - 1.0, py)) * strength;
+            let ny = -(h(px, py + 1.0) - h(px, py - 1.0)) * strength;
+            let inv = 1.0 / (nx * nx + ny * ny + 1.0).sqrt();
+            let enc = |v: f32| ((v * inv * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
+            let idx = ((y * n + x) * 4) as usize;
+            rgba[idx] = enc(nx);
+            rgba[idx + 1] = enc(ny);
+            rgba[idx + 2] = enc(1.0);
+        })
+    });
+    (id, n, n, rgba)
+}
+
+/// The bark tangent-space normal map (relief from [`bark_height`]).
+fn bark_normal_material() -> (u64, u32, u32, Vec<u8>) {
+    normal_map_from_height(BARK_MAT, 128, 3.2, bark_height)
+}
+
+/// The ground tangent-space normal map (relief from [`ground_height`]).
+fn ground_normal_material() -> (u64, u32, u32, Vec<u8>) {
+    normal_map_from_height(GROUND_MAT, 128, 2.2, ground_height)
 }
 
 fn push_vertex(out: &mut Vec<f32>, pos: [f32; 3], normal: [f32; 3], uv: [f32; 2], color: [f32; 4]) {

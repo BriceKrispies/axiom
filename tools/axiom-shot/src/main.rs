@@ -411,6 +411,7 @@ fn render_gpu(
         HEIGHT,
         meshes,
         materials,
+        &[],
         &lights,
         outcome.light_view_proj(),
         &batches,

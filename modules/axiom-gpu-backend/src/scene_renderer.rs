@@ -23,6 +23,8 @@ use wgpu::util::DeviceExt;
 const SCENE_WGSL: &str = r#"
 @group(0) @binding(0) var albedo_tex: texture_2d<f32>;
 @group(0) @binding(1) var albedo_sampler: sampler;
+@group(0) @binding(2) var normal_tex: texture_2d<f32>;
+@group(0) @binding(3) var normal_sampler: sampler;
 
 struct Light {
     // xyz = to-light direction (directional) or world position (point); w = kind (0 dir, 1 point).
@@ -119,7 +121,22 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // neither shade nor write depth; the soft 0.5..1 rim still alpha-blends.
     if (albedo.a < 0.5) { discard; }
     let base = albedo * in.color;
-    let N = normalize(in.normal);
+    // Perturb the geometric normal by the material's tangent-space normal map. There is
+    // no per-vertex tangent, so build the cotangent frame from screen-space derivatives
+    // of world position + uv (Mikkelsen). A flat (0,0,1) normal map leaves N unchanged.
+    let geo_n = normalize(in.normal);
+    let nmap = textureSample(normal_tex, normal_sampler, in.uv).xyz * 2.0 - 1.0;
+    let dp1 = dpdx(in.world_pos);
+    let dp2 = dpdy(in.world_pos);
+    let duv1 = dpdx(in.uv);
+    let duv2 = dpdy(in.uv);
+    let r1 = cross(dp2, geo_n);
+    let r2 = cross(geo_n, dp1);
+    let inv_det = 1.0 / max(dot(dp1, r1), 0.0001);
+    let tangent = (r1 * duv1.x + r2 * duv2.x) * inv_det;
+    let bitangent = (r1 * duv1.y + r2 * duv2.y) * inv_det;
+    let inv_max = inverseSqrt(max(dot(tangent, tangent), dot(bitangent, bitangent)));
+    let N = normalize(tangent * (nmap.x * inv_max) + bitangent * (nmap.y * inv_max) + geo_n * nmap.z);
     let shade = shadow_factor(in.world_pos);
     // Hemisphere ambient from the frame's ambient uniform (sky overhead, warm-dark
     // ground below, blended by the normal's up-component). Strength is folded into the
@@ -440,13 +457,16 @@ impl SceneRenderer {
     /// Build both pipelines (for the given colour target `format`), the shadow
     /// map, upload every distinct mesh and material, and allocate the per-frame
     /// lighting + light-VP + instance buffers. `meshes` is `(mesh_id, 12-float
-    /// vertices, indices)`; `materials` is `(material_id, width, height, RGBA8)`.
+    /// vertices, indices)`; `materials` is `(material_id, width, height, RGBA8)`;
+    /// `normals` is the optional per-material `(material_id, width, height, RGBA8)`
+    /// tangent-space normal maps (materials absent from it get a flat normal).
     pub(crate) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
+        normals: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
         ambient: axiom_host::FrameAmbient,
@@ -461,7 +481,9 @@ impl SceneRenderer {
             .map(|(id, vertices, indices)| (*id, upload_mesh(device, vertices, indices)))
             .collect();
 
-        // Material albedo bind group layout (group 0): texture + sampler.
+        // Material bind group layout (group 0): albedo texture + sampler (0,1) and a
+        // normal-map texture + sampler (2,3). Materials with no normal map get a 1x1
+        // flat normal, so they light exactly as before.
         let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("axiom-material-layout"),
             entries: &[
@@ -481,14 +503,38 @@ impl SceneRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
+        // The default flat normal (1x1, RGB encodes the +Z tangent-space normal) used for
+        // any material without an authored normal map.
+        let flat_normal: (u32, u32, Vec<u8>) = (1, 1, vec![128, 128, 255, 255]);
         let materials: HashMap<u64, wgpu::BindGroup> = materials
             .iter()
             .map(|(id, w, h, rgba8)| {
+                let (nw, nh, nrgba) = normals
+                    .iter()
+                    .find(|(nid, ..)| nid == id)
+                    .map(|(_, nw, nh, nrgba)| (*nw, *nh, nrgba.as_slice()))
+                    .unwrap_or((flat_normal.0, flat_normal.1, flat_normal.2.as_slice()));
                 (
                     *id,
-                    upload_material(device, queue, &material_layout, *w, *h, rgba8),
+                    upload_material(device, queue, &material_layout, (*w, *h, rgba8), (nw, nh, nrgba)),
                 )
             })
             .collect();
@@ -1140,43 +1186,20 @@ fn upload_material(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-    width: u32,
-    height: u32,
-    rgba8: &[u8],
+    albedo: (u32, u32, &[u8]),
+    normal: (u32, u32, &[u8]),
 ) -> wgpu::BindGroup {
-    let width = width.max(1);
-    let height = height.max(1);
-    let size = wgpu::Extent3d {
-        width,
-        height,
-        depth_or_array_layers: 1,
-    };
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("axiom-material-albedo"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        rgba8,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(4 * width),
-            rows_per_image: Some(height),
-        },
-        size,
+    // Albedo is sRGB-encoded colour; the normal map is linear data (RGB = the
+    // tangent-space normal), so it uses the non-sRGB format.
+    let albedo = upload_texture(device, queue, albedo.0, albedo.1, albedo.2, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let normal = upload_texture(
+        device,
+        queue,
+        normal.0,
+        normal.1,
+        normal.2,
+        wgpu::TextureFormat::Rgba8Unorm,
     );
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("axiom-material-sampler"),
         address_mode_u: wgpu::AddressMode::Repeat,
@@ -1195,14 +1218,66 @@ fn upload_material(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
+                resource: wgpu::BindingResource::TextureView(&albedo),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::Sampler(&sampler),
             },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&normal),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
         ],
     })
+}
+
+/// Upload one RGBA8 texture of the given format and return its default view.
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    rgba8: &[u8],
+    format: wgpu::TextureFormat,
+) -> wgpu::TextureView {
+    let width = width.max(1);
+    let height = height.max(1);
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("axiom-material-texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba8,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * width),
+            rows_per_image: Some(height),
+        },
+        size,
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 /// Pack the frame's lights into the std140 lighting-uniform byte layout: a
