@@ -158,9 +158,13 @@ impl Target {
 
         let promoted = resolved.effective.replaces_champion();
         // The champion that the *next* attacked axis is computed from is the
-        // candidate iff we promoted, else the unchanged champion.
+        // candidate iff we promoted, else the unchanged champion. The verdict's
+        // `attacked_axis` override is one-shot (it steered THIS iteration and is
+        // archived below), so the *next* flaw is the new champion's natural lowest —
+        // only completion (all-pass or human accept) can override it to "none".
         let next_champion = promoted.then_some(candidate).unwrap_or(champion);
-        let next_axis = review::next_attacked_axis(&next_champion, verdict.as_ref());
+        let next_axis = (!review::is_complete(&next_champion, verdict.as_ref()))
+            .then(|| next_champion.lowest_axis());
 
         let iteration = ledger.next_iteration();
         let diagnostics = self.write_diagnostics(iteration)?;
@@ -397,6 +401,23 @@ mod tests {
         // verdict.toml consumed → archived under diagnostics, gone from root.
         assert!(!t.verdict_path().exists());
         assert!(t.diagnostics_dir().join("verdict.iter0001.toml").exists());
+    }
+
+    #[test]
+    fn one_shot_axis_override_does_not_leak_into_next_flaw() {
+        // Champion's natural lowest is fog_and_haze; a verdict redirects THIS
+        // iteration to color_palette. After promoting, the NEXT flaw must be the new
+        // champion's natural lowest (fog_and_haze), not the consumed override.
+        let mut champ = Scorecard::uniform(3);
+        champ.set(Axis::FogAndHaze, 1);
+        let mut cand = champ;
+        cand.set(Axis::ColorPalette, 4); // improves the overridden axis
+        let t = seed("override_no_leak", champ, cand);
+        std::fs::write(t.verdict_path(), "attacked_axis = \"color_palette\"\n").unwrap();
+        let out = t.review(vec![], false).unwrap();
+        assert_eq!(out.attacked_axis, Axis::ColorPalette); // this iteration
+        assert!(out.promoted);
+        assert_eq!(out.entry.next_attacked_axis, Some(Axis::FogAndHaze)); // not color_palette
     }
 
     #[test]

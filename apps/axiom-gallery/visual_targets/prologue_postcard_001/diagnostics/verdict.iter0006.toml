@@ -1,0 +1,2 @@
+attacked_axis = "horizon_composition"
+note = "iter2 eye-level failed only because the trees were short blobs on a tiny patch; retry the interior composition properly with tall thin trunks + a deeper patch (all expressible). If this still fails, composition is genuinely inexpressible and an abstraction is justified."
