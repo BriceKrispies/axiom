@@ -735,22 +735,25 @@ fn white_material() -> (u64, u32, u32, Vec<u8>) {
     (WHITE_MAT, 2, 2, vec![255u8; 2 * 2 * 4])
 }
 
-/// A radial soft-alpha leaf texture: white RGB with an alpha that is opaque at the centre
-/// and feathers to 0 toward the edge (a soft disc). On the GPU the mesh shader alpha-cuts
-/// + blends it, so each foliage card diamond reads as a feathered leaf blob instead of a
-/// hard quad; Canvas 2D never samples it (flat-shaded), keeping its solid-card proxy.
+/// A leaf-shaped soft-alpha texture: white RGB with an alpha shaped like an ovate,
+/// pointed leaf (zero-width at the stem and tip, widest near the base — a beech-ish
+/// silhouette), feathered at the edge. On the GPU the mesh shader alpha-cuts + blends it,
+/// so each foliage card reads as an actual leaf rather than a soft disc; Canvas 2D never
+/// samples it (flat-shaded), keeping its solid-card proxy.
 fn leaf_alpha_material() -> (u64, u32, u32, Vec<u8>) {
     const N: u32 = 64;
     let mut rgba = vec![255u8; (N * N * 4) as usize];
     (0..N).for_each(|y| {
         (0..N).for_each(|x| {
-            // Distance from the texture centre, normalized so the edge midpoint is ~1.
             let nx = (x as f32 + 0.5) / N as f32 * 2.0 - 1.0;
             let ny = (y as f32 + 0.5) / N as f32 * 2.0 - 1.0;
-            let r = (nx * nx + ny * ny).sqrt();
-            // Opaque for r < 0.55, feathering to 0 by r = 0.95 (smoothstep).
-            let t = ((0.95 - r) / (0.95 - 0.55)).clamp(0.0, 1.0);
-            let a = t * t * (3.0 - 2.0 * t);
+            // Leaf-local height: 0 at the stem (bottom), 1 at the tip (top).
+            let ly = ((ny + 1.0) * 0.5).clamp(0.0, 1.0);
+            // Ovate half-width profile: 0 at stem & tip, peaks ~0.45 near ly=0.4, so the
+            // outline is a rounded leaf tapering to a point.
+            let hw = 1.05 * ly.powf(0.45) * (1.0 - ly).powf(0.9);
+            // Feather across the horizontal outline (and the tip, where hw -> 0).
+            let a = smoothstep(-0.05, 0.03, hw - nx.abs());
             let idx = ((y * N + x) * 4 + 3) as usize;
             rgba[idx] = (a * 255.0 + 0.5) as u8;
         })
