@@ -265,6 +265,7 @@ pub struct FramePacket {
     light_view_proj: [f32; 16],
     features: FrameFeatureSet,
     sdf: Option<SdfScene>,
+    volumetrics: Option<crate::frame_volumetrics::FrameVolumetrics>,
 }
 
 impl FramePacket {
@@ -294,6 +295,7 @@ impl FramePacket {
             light_view_proj,
             features,
             sdf: None,
+            volumetrics: None,
         }
     }
 
@@ -311,6 +313,21 @@ impl FramePacket {
     /// content (meshes only).
     pub const fn sdf(&self) -> Option<&SdfScene> {
         self.sdf.as_ref()
+    }
+
+    /// Attach volumetric light (god-rays) to this frame. It is neutral frame data:
+    /// every backend applies [`crate::apply_frame_volumetrics`] to its output, so the
+    /// shafts render identically regardless of renderer. A packet without it (the
+    /// default) has no shafts.
+    #[must_use]
+    pub fn with_volumetrics(mut self, volumetrics: crate::frame_volumetrics::FrameVolumetrics) -> Self {
+        self.volumetrics = Some(volumetrics);
+        self
+    }
+
+    /// The frame's volumetric-light parameters, or `None` when the frame has none.
+    pub const fn volumetrics(&self) -> Option<&crate::frame_volumetrics::FrameVolumetrics> {
+        self.volumetrics.as_ref()
     }
 
     /// The frame index this packet presents.

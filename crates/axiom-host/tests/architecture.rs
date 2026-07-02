@@ -348,6 +348,8 @@ fn lib_exports_are_curated_set() {
         "pub use frame_packet::FrameLight;",
         "pub use frame_packet::FramePacket;",
         "pub use frame_packet::FrameViewport;",
+        "pub use frame_volumetrics::apply_frame_volumetrics;",
+        "pub use frame_volumetrics::FrameVolumetrics;",
         "pub use frame_raster_stats::FrameDepthCueStats;",
         "pub use frame_raster_stats::FrameRasterStats;",
         "pub use frame_submission_report::BackendKind;",

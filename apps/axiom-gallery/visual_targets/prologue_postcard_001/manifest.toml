@@ -7,6 +7,8 @@
 
 version = 1
 name = "prologue-postcard-001-candidate-iter6"
+# Volumetric god-rays (neutral frame data — realized by every backend).
+volumetrics = true
 
 # Low, forward-looking interior view: standing among the trunks, looking slightly up
 # and into the depth of the forest.
@@ -20,19 +22,27 @@ width_px = 1280
 height_px = 800
 
 [sun]
-direction = [0.55, -0.42, -0.72]
-color = [1.0, 0.9, 0.72]
-intensity = 1.3
+# ITER 10 (attack: contrast_and_exposure) — brighter, warmer, lower sun for tonal range.
+# ITER 11 (attack: lighting_directionality) — backlight the scene (sun ahead + up,
+# in view) so the new volumetric god-ray post-pass streams shafts toward the camera.
+direction = [0.14, -0.40, 0.90]
+color = [1.0, 0.86, 0.58]
+intensity = 2.0
 
 [fog]
-color = [0.80, 0.82, 0.85]
-start_m = 18.0
-end_m = 160.0
+# ITER 21 (attack: fog_and_haze) — a warm, luminous depth haze (matching the backlit
+# sun) with a graduated falloff, so distance glows atmospherically instead of a flat
+# cool wash — reads together with the god-ray shafts.
+color = [0.90, 0.83, 0.71]
+start_m = 16.0
+end_m = 155.0
 
 # A deeper patch so the trunks recede into the distance; gentler relief so the floor
 # reads as walkable ground rather than lumpy hills at eye level.
 [terrain]
-size_m = 120.0
+# ITER 19 (attack: vegetation_density) — dense small patch, made composable by the
+# keep-clear abstraction: no trunk spawns within 12 m of the camera.
+size_m = 85.0
 spacing_m = 0.6
 base_height_m = 0.0
 slope = [0.04, 0.06]
@@ -40,37 +50,61 @@ detail = [
   { amplitude_m = 1.4, wavelength_m = 34.0, seed = 11 },
   { amplitude_m = 0.5, wavelength_m = 9.0, seed = 12 },
   { amplitude_m = 0.18, wavelength_m = 2.4, seed = 13 },
+  { amplitude_m = 0.07, wavelength_m = 0.9, seed = 14 },
 ]
 rock_albedo = [0.40, 0.38, 0.35]
 rock_slope_start = 0.55
 rock_slope_full = 1.10
 
+# ITER 15 (attack: foreground_material_detail) — the interior camera now shows the
+# ground, so enrich it: warm autumn-litter albedo bands + a fine micro-relief octave
+# give the visible foreground real material variation (the change iter1 could not show).
 [[terrain.ground_band]]
-max_height_m = 0.0
-albedo = [0.34, 0.31, 0.26]
+max_height_m = -2.0
+albedo = [0.26, 0.19, 0.11]
+[[terrain.ground_band]]
+max_height_m = 0.5
+albedo = [0.46, 0.33, 0.17]
+[[terrain.ground_band]]
+max_height_m = 4.0
+albedo = [0.60, 0.44, 0.22]
 [[terrain.ground_band]]
 max_height_m = 9.0
-albedo = [0.40, 0.38, 0.32]
+albedo = [0.68, 0.57, 0.34]
 
 # Hero tree: tall and thin, set off to the side so it frames rather than blocks.
 [[tree]]
-x = 6.0
-z = -6.0
+x = -28.0
+z = -34.0
 yaw_deg = 20.0
-trunk_height_m = 17.0
-trunk_radius_m = 0.32
-canopy_radius_m = 4.2
+trunk_height_m = 26.0
+trunk_radius_m = 0.4
+canopy_radius_m = 5.0
 canopy_color = [0.90, 0.55, 0.15]
 
 # Tall, thin trunks over the deeper patch — the beech-forest profile the reference has.
 [scatter]
 seed = 7
-count = 320
-min_spacing_m = 2.2
+# ITER 8 (attack: vegetation_clumping) — relax the enforced even spacing so the
+# random placement bunches into clumps and leaves clearings, instead of a uniform sprinkle.
+# ITER 19 (attack: vegetation_density) — dense small patch made composable by the
+# keep-clear abstraction: no trunk spawns within 16 m of the camera along the view.
+count = 520
+min_spacing_m = 1.3
 slope_limit = 0.85
-trunk_height_m = [11.0, 20.0]
-trunk_radius_m = [0.12, 0.32]
-canopy_radius_m = [2.6, 4.6]
+keep_clear_m = 16.0
+# ITER 20 (attack: vegetation_clumping) — clustered placement: gather the trees into
+# 14 clumps (radius 9 m) so believable groves and clearings replace the even sprinkle.
+clusters = 14
+cluster_radius_m = 9.0
+# ITER 7 (attack: terrain_silhouette) — widen the height range so some emergent
+# trees tower above the rest, breaking the flat canopy ceiling into a layered,
+# varied skyline against the bright sky (the reference's broken-canopy read).
+# ITER 13 (attack: terrain_silhouette) — taller emergents for a more dramatic,
+# deeply layered canopy skyline against the sky.
+trunk_height_m = [11.0, 42.0]
+trunk_radius_m = [0.12, 0.40]
+canopy_radius_m = [2.4, 5.4]
 canopy_palette = [
   [0.92, 0.62, 0.16],
   [0.85, 0.42, 0.12],
@@ -82,11 +116,13 @@ canopy_palette = [
 # Ground cover, expanded to carpet the larger patch densely.
 [groundcover]
 seed = 21
-count = 9000
-min_spacing_m = 0.35
+# ITER 12 (attack: artifact_level) — shrink the ground tufts into a finer, denser
+# carpet so they read as ground texture instead of blocky little pyramids.
+count = 16000
+min_spacing_m = 0.22
 slope_limit = 1.2
-height_m = [0.2, 0.6]
-radius_m = [0.15, 0.45]
+height_m = [0.12, 0.34]
+radius_m = [0.07, 0.20]
 palette = [
   [0.62, 0.50, 0.22],
   [0.70, 0.42, 0.16],

@@ -1,0 +1,10 @@
+axis = "vegetation_density"
+failed_attempts = [
+    16,
+    17,
+    18,
+]
+inexpressible = false
+smallest_api = "scene.rs Scatter.keep_clear_m + scatter::expand(scatter, terrain, clear_center): reject candidate trunks within keep_clear_m of the camera ground position; build.rs passes the camera eye xz. Lets a dense small patch read full without a trunk blocking the frame."
+screenshot_command = "cargo run --features visual-target --bin visual-target -- render manifest.candidate.toml --backend canvas2d --out candidate.png"
+screenshot_proof = "rendered twice byte-identical: kc_a.png == kc_b.png == md5 6261cd41eace2324f75cc073b21685e9"

@@ -166,6 +166,11 @@ impl SoftwareRasterizer {
             .then(|| apply_outlines(&mut self.framebuffer, &converted.overlays, &cues));
         let (outlined, outline_px) = outlined_opt.unwrap_or((0, 0));
 
+        // 9. volumetric light scatter (god-rays): the backend-neutral frame effect —
+        // `host` applies the frame's `FrameVolumetrics` to the finished RGBA the same
+        // way for every renderer. A no-op when the frame carries none.
+        axiom_host::apply_frame_volumetrics(self.framebuffer.rgba_mut(), fb_w, fb_h, packet);
+
         // The far-horizon silhouette needs neutral far-band data the FramePacket
         // does not carry (see ARCHITECTURE.md); its knobs are read but unused.
         let _ = cues.horizon_alpha;
@@ -209,6 +214,7 @@ pub(crate) fn sdf_pass(framebuffer: &mut SoftwareFramebuffer, depth: &mut DepthB
         .map(|scene| apply_sdf_raymarch(framebuffer, depth, scene, packet.lights()))
         .unwrap_or(0)
 }
+
 
 /// Rasterize one **non-degenerate** triangle into the colour + depth slices,
 /// updating `stats`. Pure, branchless, NaN-safe (callers guarantee area ≠ 0).
@@ -890,6 +896,36 @@ mod tests {
             SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(false), &cache);
         assert_eq!(r0.contact_shadows_drawn(), 0);
         assert_eq!(r0.contact_shadow_pixels(), 0);
+    }
+
+    /// A column-major toy view_proj with `m[11] = 1`, so a `+z` to-light projects in
+    /// front of the camera (clip w > 0) — an on-screen sun for the volumetrics pass.
+    const FRONT_VP: [f32; 16] =
+        [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+
+    #[test]
+    fn frame_volumetrics_reach_the_canvas_output() {
+        use axiom_host::{FrameLight, FrameVolumetrics};
+        // The backend applies the frame's neutral volumetrics to its RGBA: with a
+        // directional sun in front, a frame carrying FrameVolumetrics renders
+        // differently than the same frame without (god-rays brighten toward the sun).
+        let cache = MeshCache::load(&[gameplay_object(42, [1.0, 1.0, 1.0, 1.0])]);
+        let cam = Some(FrameCamera::new(IDENTITY, IDENTITY, FRONT_VP));
+        let base = FramePacket::new(
+            2,
+            120,
+            FrameViewport::new(48, 48),
+            [0.01, 0.01, 0.03, 1.0],
+            cam,
+            vec![draw(42, 42, [1.0; 4])],
+            vec![FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])],
+            IDENTITY,
+            FrameFeatureSet::new(false, true, 1, 0),
+        );
+        let lit = base.clone().with_volumetrics(FrameVolumetrics::low_poly());
+        let off = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&base, &cache);
+        let on = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache);
+        assert_ne!(off.rgba_bytes(), on.rgba_bytes(), "frame volumetrics reach the canvas output");
     }
 
     #[test]

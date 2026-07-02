@@ -1,19 +1,17 @@
-# Candidate scorecard, campaign-2 iteration 6 (attacked: horizon_composition, human-redirected).
-# The expressible interior reshape (tall thin trunks + deeper patch + low forward
-# camera) transforms the diorama into an immersive forest interior like the reference.
-# horizon_composition 2 -> 4; object_scale, depth_separation, vegetation_density also
-# jump, foreground_material_detail and fog_and_haze rise (ground + haze now visible).
-# One honest cost: the elevated hillside ridge is gone, so terrain_silhouette slips
-# 3 -> 2 (a MINOR, non-significant regression) — promote but flag it.
-terrain_silhouette = 2
-foreground_material_detail = 3
+# Candidate scorecard, campaign-2 iteration 21 (attacked: fog_and_haze).
+# A warm, luminous depth haze (matched to the backlit sun) with a graduated falloff
+# gives real atmospheric perspective that reads with the god-ray shafts:
+# fog_and_haze 3 -> 4. Nothing dropped — this lifts the LAST floor axis, so every
+# axis now clears the bar.
+terrain_silhouette = 4
+foreground_material_detail = 4
 vegetation_density = 4
-vegetation_clumping = 2
+vegetation_clumping = 4
 depth_separation = 4
-fog_and_haze = 3
-lighting_directionality = 2
-color_palette = 3
-contrast_and_exposure = 2
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 4
-artifact_level = 2
+artifact_level = 4
