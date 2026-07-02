@@ -25,3 +25,4 @@ pub mod zanzoban;
 pub mod quintet;
 pub mod physics_crucible;
 pub mod harness;
+pub mod soccer_penalty;

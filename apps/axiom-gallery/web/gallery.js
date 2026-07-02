@@ -31,6 +31,30 @@ export const DEMOS = [
     buttons: [],
   },
   {
+    id: "soccer-penalty",
+    title: "Soccer Penalty (retro 32-bit)",
+    blurb: "Aim, charge, and shoot penalties past a diving keeper — a deterministic retro 32-bit-style kick game.",
+    desc:
+      "A fixed-camera, retro 32-bit-style penalty-kick game rendered on the engine: the " +
+      "whole diorama (field, goal + net, an articulated diving keeper, the ball) " +
+      "is authored as cube/sphere renderables and the flat retro 32-bit shading is carried " +
+      "as emissive colour. Aim with the arrows (◀ ▶ ▲ ▼), hold SHOOT to charge " +
+      "the power meter and release to strike; between rounds SHOOT advances to the " +
+      "next kick (keyboard: arrows aim, hold/release Space to shoot, Enter to " +
+      "continue, R to reset). Five rounds, deterministic keeper.",
+    dir: "soccer-penalty",
+    jsModule: "axiom_soccer_penalty_browser",
+    startFn: "soccer_penalty_start",
+    canvasId: "axiom-soccer-penalty-canvas",
+    buttons: [
+      { key: "ArrowUp", label: "▲", pos: "up" },
+      { key: "ArrowLeft", label: "◀", pos: "left" },
+      { key: "ArrowRight", label: "▶", pos: "right" },
+      { key: "ArrowDown", label: "▼", pos: "down" },
+      { key: " ", label: "SHOOT", pos: "fire" },
+    ],
+  },
+  {
     id: "netplay",
     title: "Lockstep Multiplayer",
     blurb: "Move your cube with the D-pad; only signed inputs cross the wire.",
