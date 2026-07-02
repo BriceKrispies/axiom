@@ -166,24 +166,10 @@ impl SoftwareRasterizer {
             .then(|| apply_outlines(&mut self.framebuffer, &converted.overlays, &cues));
         let (outlined, outline_px) = outlined_opt.unwrap_or((0, 0));
 
-        // 9. volumetric light scatter (god-rays): the backend-neutral frame effect —
-        // `host` applies the frame's `FrameVolumetrics` to the finished RGBA. Gated on
-        // the backend's capability profile: skipped when this backend is configured to
-        // not attempt `Volumetrics` (the Canvas 2D fps lever), so the god-ray pass runs
-        // only when the profile allows it. A no-op anyway when the frame carries none.
-        self.options
-            .capability_profile()
-            .contains(axiom_host::RenderCapability::Volumetrics)
-            .then(|| axiom_host::apply_frame_volumetrics(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
-
-        // 10. filmic tonemap (ACES + exposure): the backend-neutral grade `host` applies
-        // to the finished RGBA. Gated on the capability profile too, so the [canvas2d]
-        // config can skip it; runs last so it grades the fully composited frame. A no-op
-        // when the frame carries no post-process.
-        self.options
-            .capability_profile()
-            .contains(axiom_host::RenderCapability::PostProcess)
-            .then(|| axiom_host::apply_frame_postprocess(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
+        // 9+10. capability-gated backend-neutral whole-frame effects (god-rays, then the
+        // filmic grade) applied to the finished RGBA — each skipped when this backend's
+        // profile drops it (the Canvas 2D fps/legibility levers).
+        self.apply_gated_frame_effects(packet, fb_w, fb_h);
 
         // The far-horizon silhouette needs neutral far-band data the FramePacket
         // does not carry (see ARCHITECTURE.md); its knobs are read but unused.
@@ -213,6 +199,19 @@ impl SoftwareRasterizer {
             outline_pixels: outline_px,
             horizon_silhouette_drawn: horizon,
         }
+    }
+
+    /// Apply the capability-gated backend-neutral whole-frame effects to the finished
+    /// framebuffer, in order: god-rays, then the filmic grade. Each is skipped when this
+    /// backend's capability profile drops it (and is a no-op when the frame carries none).
+    fn apply_gated_frame_effects(&mut self, packet: &FramePacket, fb_w: u32, fb_h: u32) {
+        let profile = self.options.capability_profile();
+        profile
+            .contains(axiom_host::RenderCapability::Volumetrics)
+            .then(|| axiom_host::apply_frame_volumetrics(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
+        profile
+            .contains(axiom_host::RenderCapability::PostProcess)
+            .then(|| axiom_host::apply_frame_postprocess(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
     }
 }
 
