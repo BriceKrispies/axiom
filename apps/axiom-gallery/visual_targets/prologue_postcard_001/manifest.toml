@@ -175,14 +175,16 @@ palette = [
 [foliage]
 # ITER 23 (corrective): small irregular leaf clumps (not big paper squares), fewer +
 # layered, in a darker warm autumn palette (orange/brown, muted-yellow highlight).
-cards_per_tree = 32
+cards_per_tree = 46
 understory_cards = 5
-card_scale = 0.56
+card_scale = 0.60
 # ITER 43: clump the canopy cards into a few tight sub-masses with dark gaps between
 # them (branch-hung look) instead of a uniform speckle.
+# ITER 47: more cards + slightly larger to fill the canopy now that alpha-cut leaves are
+# softer/smaller than the old solid quads.
 clusters = 3
-cluster_spread = 0.7
-cluster_tightness = 0.42
+cluster_spread = 0.66
+cluster_tightness = 0.44
 palette = [
   [0.90, 0.74, 0.26],
   [0.86, 0.58, 0.16],
