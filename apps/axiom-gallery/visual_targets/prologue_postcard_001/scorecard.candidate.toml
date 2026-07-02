@@ -1,17 +1,18 @@
-# Candidate scorecard, iteration 2 (attacked: lighting_directionality).
-# The low raking sun gives the canopies visible directional volume (lit tops, darker
-# undersides) and a touch of warmth: lighting_directionality 1 -> 2. It is only a
-# modest gain — the muted canopy palette still reads gray, so the win is real but
-# small. Nothing dropped; color_palette is still 1 and becomes the next flaw.
-terrain_silhouette = 3
+# Candidate scorecard, campaign-2 iteration 3 (attacked: foreground_material_detail).
+# The ground-cover abstraction places a dense carpet of small warm tufts; where the
+# ground is visible (foreground + canopy gaps) it now reads as textured litter/grass
+# instead of flat gray: foreground_material_detail 1 -> 2. The gain is bounded — the
+# elevated view still occludes most ground — and nothing dropped. color_palette
+# stays 1 and becomes the next flaw.
+terrain_silhouette = 2
 foreground_material_detail = 2
-vegetation_density = 4
+vegetation_density = 3
 vegetation_clumping = 2
 depth_separation = 2
 fog_and_haze = 2
 lighting_directionality = 2
 color_palette = 1
 contrast_and_exposure = 2
-object_scale = 3
-horizon_composition = 3
+object_scale = 2
+horizon_composition = 2
 artifact_level = 2

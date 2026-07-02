@@ -19,7 +19,7 @@ use axiom_math::{Mat4, Quat, Transform, Vec3};
 use axiom_terrain_mesh::TerrainMeshApi;
 
 use super::scatter;
-use super::scene::{Manifest, Terrain, Tree};
+use super::scene::{Manifest, Terrain, Tree, Tuft};
 
 /// Floats per mesh vertex: position(3) + normal(3) + uv(2) + colour(4).
 const VERT_FLOATS: usize = 12;
@@ -28,6 +28,7 @@ const VERT_FLOATS: usize = 12;
 const TERRAIN_MESH: u64 = 1;
 const TRUNK_MESH: u64 = 2;
 const CANOPY_MESH: u64 = 3;
+const GROUNDCOVER_MESH: u64 = 4;
 const WHITE_MAT: u64 = 1;
 
 /// Radial segments in the unit trunk cylinder.
@@ -35,6 +36,8 @@ const TRUNK_SEGMENTS: u32 = 8;
 /// Rings / sectors in the unit canopy blob (low-poly on purpose).
 const CANOPY_RINGS: u32 = 4;
 const CANOPY_SECTORS: u32 = 8;
+/// Blades in the unit ground-cover tuft (a small crossed-blade cluster).
+const TUFT_BLADES: u32 = 3;
 
 /// Bark tint the trunk instances carry (fog is folded in per instance).
 const BARK: [f32; 3] = [0.30, 0.21, 0.13];
@@ -70,6 +73,15 @@ pub fn all_trees(manifest: &Manifest) -> Vec<Tree> {
     trees
 }
 
+/// The ground-cover tufts, if the manifest carries a `[groundcover]` block.
+pub fn all_groundcover(manifest: &Manifest) -> Vec<Tuft> {
+    manifest
+        .groundcover
+        .as_ref()
+        .map(|g| scatter::expand_groundcover(g, &manifest.terrain))
+        .unwrap_or_default()
+}
+
 /// Build every neutral artifact the backends consume from `manifest`.
 pub fn build(manifest: &Manifest) -> RenderData {
     let cam = &manifest.camera;
@@ -81,8 +93,13 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let (trunk_v, trunk_i) = trunk_unit_mesh();
     let (canopy_v, canopy_i) = canopy_unit_mesh();
 
+    let (tuft_v, tuft_i) = tuft_unit_mesh();
+
     let trees = all_trees(manifest);
     let (trunk_inst, canopy_inst) = tree_instances(manifest, &trees, &view_proj, eye);
+
+    let tufts = all_groundcover(manifest);
+    let tuft_inst = tuft_instances(manifest, &tufts, &view_proj, eye);
 
     // Terrain: one identity-world instance whose MVP is the camera view-projection.
     let terrain_batch_inst =
@@ -96,6 +113,9 @@ pub fn build(manifest: &Manifest) -> RenderData {
         batches.push((TRUNK_MESH, WHITE_MAT, trunk_inst, tree_count));
         batches.push((CANOPY_MESH, WHITE_MAT, canopy_inst, tree_count));
     });
+    // Ground cover: one instanced batch when the abstraction placed any tufts.
+    let tuft_count = tufts.len() as u32;
+    (tuft_count > 0).then(|| batches.push((GROUNDCOVER_MESH, WHITE_MAT, tuft_inst, tuft_count)));
 
     RenderData {
         width: cam.width_px,
@@ -108,6 +128,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
             (TERRAIN_MESH, terrain_v, terrain_i),
             (TRUNK_MESH, trunk_v, trunk_i),
             (CANOPY_MESH, canopy_v, canopy_i),
+            (GROUNDCOVER_MESH, tuft_v, tuft_i),
         ],
         materials: vec![white_material()],
         batches,
@@ -234,6 +255,30 @@ fn tree_instances(
     (trunk, canopy)
 }
 
+/// Build the per-tuft instance data for the ground-cover batch: each tuft is the
+/// unit tuft mesh (y in [0,1]) seated on the terrain surface, scaled to
+/// (radius, height, radius) and yawed, tinted with its colour + fog.
+fn tuft_instances(manifest: &Manifest, tufts: &[Tuft], view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+    let fog = &manifest.fog;
+    let vp = Mat4::from_cols_array(*view_proj);
+    let mut out = Vec::with_capacity(tufts.len() * 36);
+    for t in tufts {
+        let ground = manifest.terrain.height_at(t.x, t.z);
+        let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, t.yaw_deg.to_radians())
+            .unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0));
+        let world = Transform::new(
+            Vec3::new(t.x, ground, t.z),
+            yaw,
+            Vec3::new(t.radius_m, t.height_m, t.radius_m),
+        )
+        .to_matrix();
+        let dist = eye.subtract(Vec3::new(t.x, ground + t.height_m * 0.5, t.z)).length();
+        let tint = fogged(t.color, fog, dist);
+        out.extend_from_slice(&instance(&vp, world, tint));
+    }
+    out
+}
+
 /// One 36-float instance: `mvp(16) · world(16) · tint(4)`, where `mvp = view_proj ·
 /// world`. The GPU shader clips with the first matrix directly (`clip = mvp *
 /// position`) and lights with the second (`world`), and the Canvas 2D backend reads
@@ -322,6 +367,28 @@ fn canopy_unit_mesh() -> (Vec<f32>, Vec<u32>) {
             let b = a + stride;
             idx.extend_from_slice(&[a, b, a + 1, a + 1, b, b + 1]);
         }
+    }
+    (v, idx)
+}
+
+/// The unit ground-cover tuft: `TUFT_BLADES` tapered blades crossing at a common
+/// apex (radius 1, y in [0,1]). Each blade is a double-sided triangle (both windings)
+/// so it reads from any angle; normals point up so the tuft catches sky/sun light.
+/// Per-vertex colour is white; the instance tint carries the grass/litter colour.
+fn tuft_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    let mut v = Vec::new();
+    let mut idx = Vec::new();
+    let up = [0.0f32, 1.0, 0.0];
+    let mut base = 0u32;
+    for k in 0..TUFT_BLADES {
+        let a = (k as f32 / TUFT_BLADES as f32) * std::f32::consts::PI;
+        let (dx, dz) = (a.cos() * 0.5, a.sin() * 0.5);
+        push_vertex(&mut v, [-dx, 0.0, -dz], up, [0.0, 0.0], [1.0, 1.0, 1.0, 1.0]);
+        push_vertex(&mut v, [dx, 0.0, dz], up, [1.0, 0.0], [1.0, 1.0, 1.0, 1.0]);
+        push_vertex(&mut v, [0.0, 1.0, 0.0], up, [0.5, 1.0], [1.0, 1.0, 1.0, 1.0]);
+        // Both windings → the blade is visible from either side.
+        idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 1]);
+        base += 3;
     }
     (v, idx)
 }
@@ -447,6 +514,31 @@ canopy_color = [0.80, 0.42, 0.12]
         assert!(trees.len() > 1);
         let rd = build(&m);
         assert_eq!(rd.batches[1].3 as usize, trees.len());
+    }
+
+    #[test]
+    fn groundcover_yields_its_own_batch_and_mesh() {
+        let with_gc = format!(
+            "{SCENE}\n[groundcover]\nseed = 2\ncount = 60\nmin_spacing_m = 0.5\n\
+             slope_limit = 1.0\nheight_m = [0.2, 0.5]\nradius_m = [0.1, 0.3]\n\
+             palette = [ [0.6, 0.5, 0.2] ]\n"
+        );
+        let m = Manifest::parse(&with_gc).unwrap();
+        let tufts = all_groundcover(&m);
+        assert!(!tufts.is_empty());
+        let rd = build(&m);
+        let batch = rd.batches.iter().find(|(mesh, ..)| *mesh == GROUNDCOVER_MESH).unwrap();
+        assert_eq!(batch.3 as usize, tufts.len());
+        assert_eq!(batch.2.len(), tufts.len() * 36); // 36 floats per instance
+        assert!(rd.meshes.iter().any(|(id, ..)| *id == GROUNDCOVER_MESH));
+    }
+
+    #[test]
+    fn no_groundcover_block_yields_no_groundcover_batch() {
+        let m = Manifest::parse(SCENE).unwrap();
+        assert!(all_groundcover(&m).is_empty());
+        let rd = build(&m);
+        assert!(!rd.batches.iter().any(|(mesh, ..)| *mesh == GROUNDCOVER_MESH));
     }
 
     #[test]
