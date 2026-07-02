@@ -266,7 +266,7 @@ fn render(rd: &RenderData, backend: Backend) -> (Vec<u8>, u32, u32) {
 /// Render through the engine's native off-screen GPU backend (the shadowed, lit,
 /// instanced path the browser's WebGPU/WebGL2 arm runs).
 fn render_gpu(rd: &RenderData) -> Vec<u8> {
-    GpuBackendApi::render_offscreen_rgba(
+    let mut rgba = GpuBackendApi::render_offscreen_rgba(
         rd.width,
         rd.height,
         &rd.meshes,
@@ -277,7 +277,35 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
         rd.clear,
         None,
     )
-    .expect("a native GPU adapter renders the visual-target frame")
+    .expect("a native GPU adapter renders the visual-target frame");
+    // The off-screen GPU path takes raw args (no FramePacket), so the composition
+    // applies the SAME backend-neutral volumetric pass (host::apply_frame_volumetrics)
+    // to its RGBA output that the packet-consuming backends realize internally — the
+    // god-rays are neutral frame data, identical across every renderer.
+    if let Some(v) = rd.volumetrics {
+        let lights: Vec<FrameLight> = rd
+            .lights
+            .iter()
+            .map(|(kind, vec, color, intensity)| {
+                FrameLight::new(*kind, *vec, [color[0], color[1], color[2], *intensity])
+            })
+            .collect();
+        let camera = Some(FrameCamera::new(IDENTITY_4X4, IDENTITY_4X4, rd.view_proj));
+        let packet = FramePacket::new(
+            0,
+            0,
+            FrameViewport::new(rd.width, rd.height),
+            rd.clear,
+            camera,
+            Vec::new(),
+            lights,
+            rd.light_view_proj,
+            FrameFeatureSet::new(false, true, 1, 0),
+        )
+        .with_volumetrics(v);
+        axiom_host::apply_frame_volumetrics(&mut rgba, rd.width, rd.height, &packet);
+    }
+    rgba
 }
 
 /// Render through the software Canvas 2D backend, expanding each instanced batch
@@ -331,6 +359,12 @@ fn render_canvas2d(rd: &RenderData) -> (Vec<u8>, u32, u32) {
         rd.light_view_proj,
         features,
     );
+    // Neutral volumetric light rides on the packet; the Canvas 2D backend realizes
+    // it (via host::apply_frame_volumetrics) exactly as any other backend would.
+    let packet = match rd.volumetrics {
+        Some(v) => packet.with_volumetrics(v),
+        None => packet,
+    };
     backend.render_offscreen_rgba(&packet)
 }
 

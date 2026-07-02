@@ -145,6 +145,7 @@ impl Canvas2dBackendApi {
         );
     }
 
+
     /// Rasterize one [`FramePacket`] in the low-poly framebuffer profile and
     /// return the uniform [`FrameSubmissionReport`] (carrying the neutral
     /// [`FrameRasterStats`]). The rasterizer and report run identically on every
@@ -539,6 +540,7 @@ mod tests {
         assert_eq!(r2.raster().framebuffer_height, 240);
         assert!(r2.raster().candidate_pixels > r0.raster().candidate_pixels);
     }
+
 
     #[test]
     fn unknown_mesh_is_skipped_without_critical_violation() {

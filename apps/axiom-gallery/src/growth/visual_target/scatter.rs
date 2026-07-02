@@ -25,22 +25,35 @@ const GROUNDCOVER_SEGMENT: u64 = 0x_76_74_67_63_76_72_00_01;
 /// (keeps a dense/steep scene from looping forever). A generous multiple of `count`.
 const MAX_ATTEMPTS_PER_TREE: u32 = 32;
 
-/// Expand `scatter` over `terrain` into concrete [`Tree`] instances.
-pub fn expand(scatter: &Scatter, terrain: &Terrain) -> Vec<Tree> {
+/// Expand `scatter` over `terrain` into concrete [`Tree`] instances, keeping a
+/// `clear_center` (the camera's ground `[x, z]`) free of trunks within
+/// `scatter.keep_clear_m` so a dense forest never blocks the frame from the camera.
+pub fn expand(scatter: &Scatter, terrain: &Terrain, clear_center: [f32; 2]) -> Vec<Tree> {
     let address: Address = SpaceApi::child(&SpaceApi::root(), SCATTER_SEGMENT);
     let mut stream = EntropyApi::stream(scatter.seed, &address, SCATTER_VERSION);
 
     let half = terrain.half_m();
     let min_sq = scatter.min_spacing_m * scatter.min_spacing_m;
+    let clear_sq = scatter.keep_clear_m * scatter.keep_clear_m;
+    // Clump centres, drawn up front so placement can gather around them (clearings
+    // fall between). Empty when `clusters == 0` → uniform placement.
+    let centers: Vec<(f32, f32)> = (0..scatter.clusters)
+        .map(|_| (lerp(-half, half, unit(&mut stream)), lerp(-half, half, unit(&mut stream))))
+        .collect();
     let mut placed: Vec<Tree> = Vec::with_capacity(scatter.count as usize);
     let attempt_cap = scatter.count.saturating_mul(MAX_ATTEMPTS_PER_TREE);
     let mut attempts = 0u32;
 
     while (placed.len() as u32) < scatter.count && attempts < attempt_cap {
         attempts += 1;
-        let x = lerp(-half, half, unit(&mut stream));
-        let z = lerp(-half, half, unit(&mut stream));
+        let (x, z) = site(&mut stream, &centers, half, scatter.cluster_radius_m);
 
+        // Reject sites inside the camera's keep-clear radius (no face-blocking trunk).
+        let cdx = x - clear_center[0];
+        let cdz = z - clear_center[1];
+        if cdx * cdx + cdz * cdz < clear_sq {
+            continue;
+        }
         // Reject steep ground.
         if terrain.slope_at(x, z) > scatter.slope_limit {
             continue;
@@ -109,6 +122,19 @@ pub fn expand_groundcover(gc: &Groundcover, terrain: &Terrain) -> Vec<Tuft> {
     placed
 }
 
+/// A candidate placement site. With no clump centres it is uniform over the patch
+/// (unchanged sequence); with centres it gathers around a randomly-chosen centre
+/// (`sqrt` radius → uniform disc density), so trees clump and clearings open between.
+fn site(stream: &mut EntropyStream, centers: &[(f32, f32)], half: f32, cluster_radius_m: f32) -> (f32, f32) {
+    if centers.is_empty() {
+        return (lerp(-half, half, unit(stream)), lerp(-half, half, unit(stream)));
+    }
+    let (cx, cz) = centers[stream.pick_index(centers.len())];
+    let ang = unit(stream) * std::f32::consts::TAU;
+    let r = unit(stream).sqrt() * cluster_radius_m;
+    (cx + r * ang.cos(), cz + r * ang.sin())
+}
+
 /// A uniform `[0, 1)` sample as `f32`, off the deterministic stream.
 fn unit(stream: &mut EntropyStream) -> f32 {
     stream.unit().get()
@@ -148,6 +174,9 @@ mod tests {
             count,
             min_spacing_m: 1.5,
             slope_limit,
+            keep_clear_m: 0.0,
+            clusters: 0,
+            cluster_radius_m: 0.0,
             trunk_height_m: [4.0, 8.0],
             trunk_radius_m: [0.2, 0.4],
             canopy_radius_m: [2.0, 4.0],
@@ -158,8 +187,8 @@ mod tests {
     #[test]
     fn same_seed_reproduces_the_forest() {
         let t = terrain([0.02, 0.02]);
-        let a = expand(&scatter(60, 1.0), &t);
-        let b = expand(&scatter(60, 1.0), &t);
+        let a = expand(&scatter(60, 1.0), &t, [0.0, 0.0]);
+        let b = expand(&scatter(60, 1.0), &t, [0.0, 0.0]);
         assert_eq!(a.len(), b.len());
         for (ta, tb) in a.iter().zip(&b) {
             assert_eq!(ta.x, tb.x);
@@ -173,7 +202,7 @@ mod tests {
     fn respects_minimum_spacing() {
         let t = terrain([0.0, 0.0]);
         let s = scatter(80, 1.0);
-        let trees = expand(&s, &t);
+        let trees = expand(&s, &t, [0.0, 0.0]);
         let min_sq = s.min_spacing_m * s.min_spacing_m;
         for (i, a) in trees.iter().enumerate() {
             for b in &trees[i + 1..] {
@@ -221,8 +250,68 @@ mod tests {
     fn steep_slope_limit_places_fewer_trees() {
         // A steep linear ramp with a strict slope limit rejects most sites.
         let steep = terrain([0.9, 0.9]);
-        let strict = expand(&scatter(80, 0.2), &steep);
-        let permissive = expand(&scatter(80, 5.0), &steep);
+        let strict = expand(&scatter(80, 0.2), &steep, [0.0, 0.0]);
+        let permissive = expand(&scatter(80, 5.0), &steep, [0.0, 0.0]);
         assert!(strict.len() < permissive.len());
+    }
+
+    #[test]
+    fn clustering_gathers_trees_into_clumps() {
+        // With clump centres, placed trees sit near a centre; the mean nearest-centre
+        // distance is far smaller than for uniform placement over the same patch.
+        let t = terrain([0.0, 0.0]);
+        let mut s = scatter(120, 1.0);
+        s.min_spacing_m = 0.3;
+        let uniform = expand(&s, &t, [0.0, 0.0]);
+        s.clusters = 5;
+        s.cluster_radius_m = 4.0;
+        let clumped = expand(&s, &t, [0.0, 0.0]);
+        let half = t.half_m();
+        // Re-derive the same centres the clustered run used (same seed/stream order).
+        let mut stream = EntropyApi::stream(
+            s.seed,
+            &SpaceApi::child(&SpaceApi::root(), SCATTER_SEGMENT),
+            SCATTER_VERSION,
+        );
+        let centers: Vec<(f32, f32)> = (0..s.clusters)
+            .map(|_| (lerp(-half, half, unit(&mut stream)), lerp(-half, half, unit(&mut stream))))
+            .collect();
+        let mean_to_centre = |trees: &[Tree]| -> f32 {
+            let sum: f32 = trees
+                .iter()
+                .map(|tr| {
+                    centers
+                        .iter()
+                        .map(|&(cx, cz)| (tr.x - cx).powi(2) + (tr.z - cz).powi(2))
+                        .fold(f32::MAX, f32::min)
+                        .sqrt()
+                })
+                .sum();
+            sum / trees.len() as f32
+        };
+        assert!(!clumped.is_empty() && !uniform.is_empty());
+        assert!(mean_to_centre(&clumped) < mean_to_centre(&uniform), "clustered trees hug centres");
+    }
+
+    #[test]
+    fn keep_clear_radius_excludes_trunks_near_the_camera() {
+        // With a keep-clear radius around the camera's ground position, no placed
+        // tree falls inside that radius — the near-camera area stays open.
+        let t = terrain([0.0, 0.0]);
+        let mut s = scatter(120, 1.0);
+        s.keep_clear_m = 8.0;
+        let center = [5.0, -4.0];
+        let trees = expand(&s, &t, center);
+        assert!(!trees.is_empty());
+        let clear_sq = s.keep_clear_m * s.keep_clear_m;
+        for tree in &trees {
+            let d = (tree.x - center[0]).powi(2) + (tree.z - center[1]).powi(2);
+            assert!(d >= clear_sq, "a trunk landed inside the keep-clear radius");
+        }
+        // With no keep-clear (default 0), trees are free to land near the centre.
+        let open = expand(&scatter(120, 1.0), &t, center);
+        assert!(open.iter().any(|tree| {
+            (tree.x - center[0]).powi(2) + (tree.z - center[1]).powi(2) < clear_sq
+        }));
     }
 }

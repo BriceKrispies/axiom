@@ -41,6 +41,12 @@ pub struct Manifest {
     /// express small ground-level detail; this is the smallest primitive that does.
     #[serde(default)]
     pub groundcover: Option<Groundcover>,
+    /// Whether the scene has volumetric light (god-rays) — **neutral frame data**.
+    /// When `true`, every backend applies the same `host::apply_frame_volumetrics`
+    /// pass (the `FrameVolumetrics::low_poly` preset), so shafts render identically on
+    /// Canvas 2D, WebGPU, and WebGL.
+    #[serde(default)]
+    pub volumetrics: bool,
 }
 
 /// The single camera the frame is rendered from.
@@ -150,6 +156,20 @@ pub struct Scatter {
     pub min_spacing_m: f32,
     /// Skip candidate sites whose terrain slope (rise/run) exceeds this.
     pub slope_limit: f32,
+    /// Keep-clear radius (m) around the camera: reject any candidate within this of
+    /// the camera's ground position, so a dense forest never spawns a trunk right in
+    /// the camera's face (the abstraction that unblocked vegetation_density). `0` =
+    /// no exclusion.
+    #[serde(default)]
+    pub keep_clear_m: f32,
+    /// Number of clump centres. `0` = uniform placement; `> 0` scatters trees around
+    /// this many seeded centres (the abstraction that unblocked vegetation_clumping),
+    /// producing believable clumps and clearings instead of an even sprinkle.
+    #[serde(default)]
+    pub clusters: u32,
+    /// Spread radius (m) of each clump around its centre (used when `clusters > 0`).
+    #[serde(default)]
+    pub cluster_radius_m: f32,
     /// Trunk height range `[min, max]` (m).
     pub trunk_height_m: [f32; 2],
     /// Trunk radius range `[min, max]` (m).

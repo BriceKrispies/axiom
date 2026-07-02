@@ -14,6 +14,7 @@
 //! uv(2) · colour(4). Instance layout is the engine's 36 floats: view_proj(16) ·
 //! world(16) · tint(4).
 
+use axiom_host::FrameVolumetrics;
 use axiom_kernel::Meters;
 use axiom_math::{Mat4, Quat, Transform, Vec3};
 use axiom_terrain_mesh::TerrainMeshApi;
@@ -33,9 +34,11 @@ const WHITE_MAT: u64 = 1;
 
 /// Radial segments in the unit trunk cylinder.
 const TRUNK_SEGMENTS: u32 = 8;
-/// Rings / sectors in the unit canopy blob (low-poly on purpose).
-const CANOPY_RINGS: u32 = 4;
-const CANOPY_SECTORS: u32 = 8;
+/// Rings / sectors in the unit canopy blob. ITER 14 (attack: artifact_level) — the
+/// canopy-geometry abstraction: raise the mesh resolution so canopies read as
+/// rounded crowns instead of faceted blobs (the dominant remaining artifact).
+const CANOPY_RINGS: u32 = 8;
+const CANOPY_SECTORS: u32 = 14;
 /// Blades in the unit ground-cover tuft (a small crossed-blade cluster).
 const TUFT_BLADES: u32 = 3;
 
@@ -61,6 +64,9 @@ pub struct RenderData {
     pub materials: Vec<(u64, u32, u32, Vec<u8>)>,
     /// `(mesh_id, material_id, interleaved 36-float instances, instance count)`.
     pub batches: Vec<(u64, u64, Vec<f32>, u32)>,
+    /// Optional volumetric light (god-rays) — neutral frame data every backend
+    /// realizes through `host::apply_frame_volumetrics`.
+    pub volumetrics: Option<FrameVolumetrics>,
 }
 
 /// The full instance list: the explicitly authored trees plus, if present, the
@@ -68,7 +74,8 @@ pub struct RenderData {
 pub fn all_trees(manifest: &Manifest) -> Vec<Tree> {
     let mut trees = manifest.trees.clone();
     if let Some(s) = &manifest.scatter {
-        trees.extend(scatter::expand(s, &manifest.terrain));
+        let cam_xz = [manifest.camera.eye[0], manifest.camera.eye[2]];
+        trees.extend(scatter::expand(s, &manifest.terrain, cam_xz));
     }
     trees
 }
@@ -132,6 +139,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
         ],
         materials: vec![white_material()],
         batches,
+        volumetrics: manifest.volumetrics.then(FrameVolumetrics::low_poly),
     }
 }
 
@@ -240,8 +248,9 @@ fn tree_instances(
         let trunk_tint = fogged(BARK, fog, trunk_dist);
         trunk.extend_from_slice(&instance(&vp, trunk_world, trunk_tint));
 
-        // Canopy: unit blob scaled uniformly, seated atop the trunk.
-        let canopy_y = ground + t.trunk_height_m + t.canopy_radius_m * 0.3;
+        // Canopy: unit blob scaled uniformly, centred on the trunk top so its lower
+        // hemisphere wraps the trunk (no floating gap between crown and stem).
+        let canopy_y = ground + t.trunk_height_m;
         let canopy_world = Transform::new(
             Vec3::new(t.x, canopy_y, t.z),
             yaw,
