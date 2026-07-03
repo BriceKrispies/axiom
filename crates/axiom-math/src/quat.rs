@@ -57,6 +57,24 @@ impl Quat {
             })
     }
 
+    /// Build a unit rotation from intrinsic Euler angles (radians), applied in
+    /// **X-then-Y-then-Z** order (`Rz · Ry · Rx`). Infallible by construction:
+    /// the three rotations are built directly from half-angle sines/cosines
+    /// about the canonical unit axes, so — unlike [`Quat::from_axis_angle`] —
+    /// there is no axis-normalization step that can fail. Non-finite inputs
+    /// propagate to a non-finite quaternion, exactly as [`Quat::new`] would.
+    ///
+    /// This is the primitive a skeletal-animation layer builds joint rotations
+    /// on: authored per-joint Euler angles (clampable against anatomical limits)
+    /// convert here to the composable rotation FK needs.
+    pub fn from_euler_xyz(x: f32, y: f32, z: f32) -> Quat {
+        let (hx, hy, hz) = (x * 0.5, y * 0.5, z * 0.5);
+        let qx = Quat::new(hx.sin(), 0.0, 0.0, hx.cos());
+        let qy = Quat::new(0.0, hy.sin(), 0.0, hy.cos());
+        let qz = Quat::new(0.0, 0.0, hz.sin(), hz.cos());
+        qz.multiply(qy).multiply(qx)
+    }
+
     /// Build a unit rotation that orients local **-Z** along `forward` with
     /// local **+Y** toward `up`, using the same right-handed basis
     /// [`crate::Mat4::look_at`] uses for its view. This is the *camera-to-world*
@@ -540,5 +558,39 @@ mod cov {
         assert_eq!(r.y, 48.0);
         assert_eq!(r.z, 48.0);
         assert_eq!(r.w, -6.0);
+    }
+
+    fn cov_eps() -> Epsilon {
+        Epsilon::new(1.0e-5).unwrap()
+    }
+
+    #[test]
+    fn from_euler_zero_is_identity() {
+        assert!(Quat::from_euler_xyz(0.0, 0.0, 0.0).approx_eq(&Quat::IDENTITY, cov_eps()));
+    }
+
+    #[test]
+    fn from_euler_single_axis_matches_axis_angle() {
+        let angle = 0.7f32;
+        assert!(Quat::from_euler_xyz(angle, 0.0, 0.0)
+            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_X, angle).unwrap(), cov_eps()));
+        assert!(Quat::from_euler_xyz(0.0, angle, 0.0)
+            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_Y, angle).unwrap(), cov_eps()));
+        assert!(Quat::from_euler_xyz(0.0, 0.0, angle)
+            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_Z, angle).unwrap(), cov_eps()));
+    }
+
+    #[test]
+    fn from_euler_composes_x_then_y_then_z() {
+        // Applying X first then Y then Z equals Rz * Ry * Rx as a rotation.
+        let (x, y, z) = (0.3f32, -0.5f32, 0.4f32);
+        let composed = Quat::from_axis_angle(Vec3::UNIT_Z, z)
+            .unwrap()
+            .multiply(Quat::from_axis_angle(Vec3::UNIT_Y, y).unwrap())
+            .multiply(Quat::from_axis_angle(Vec3::UNIT_X, x).unwrap());
+        let v = Vec3::new(0.2, 0.9, -0.4);
+        assert!(Quat::from_euler_xyz(x, y, z)
+            .rotate(v)
+            .approx_eq(&composed.rotate(v), cov_eps()));
     }
 }

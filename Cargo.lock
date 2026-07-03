@@ -88,6 +88,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-animation"
+version = "0.1.0"
+dependencies = [
+ "axiom-math",
+]
+
+[[package]]
+name = "axiom-animation-lab"
+version = "0.1.0"
+dependencies = [
+ "axiom-animation",
+ "axiom-math",
+]
+
+[[package]]
 name = "axiom-asset-pack"
 version = "0.1.0"
 dependencies = [

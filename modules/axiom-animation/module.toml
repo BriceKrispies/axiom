@@ -1,0 +1,31 @@
+# Axiom module manifest — axiom-animation.
+#
+# A deterministic, data-first skeletal-animation core. It is an *isolated*
+# engine module: it composes no other module (`allowed_modules = []`) and knows
+# nothing of scene, render, resources, webgpu, input, physics, editor, or any
+# app. It builds purely on the math layer's dimensionless linear algebra
+# (`Vec3`/`Quat`/`Transform`), and every output is neutral pose data an app or a
+# higher composition tier can translate into a renderable rig.
+#
+# The behavioral facade is `AnimationApi`; alongside it `lib.rs` re-exports the
+# pure value vocabulary the facade traffics in (skeletons, poses, clips, limits,
+# the humanoid prefab) via a single `pub use ids::{…}`, per Module Law #8.
+
+[module]
+name = "animation"
+crate_name = "axiom-animation"
+kind = "engine-module"
+
+allowed_layers = [
+    "math",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "skeletal-rig-definition",
+    "joint-euler-pose",
+    "animation-clip-sampling",
+    "anatomical-joint-limits",
+    "humanoid-kick-prefab",
+]

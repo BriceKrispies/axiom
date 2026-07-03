@@ -1,0 +1,20 @@
+[package]
+name = "axiom-animation"
+description = "Axiom engine module: a deterministic, data-first skeletal-animation core. It owns the runtime animation data model — skeletons and bind poses, per-joint Euler poses, authored clips with phases and events, anatomical joint limits, a branchless clip sampler, and a joint-limit pose solver — plus an editable low-poly humanoid prefab carrying an authored right-foot soccer kick. No scene, render, physics, input, or platform concerns: it consumes only the math layer's vector/quaternion/transform primitives and hands back neutral pose data. Branchless and 100% covered like the rest of the spine."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# The whole animation model is expressed in the math layer's dimensionless
+# linear-algebra primitives: bone offsets and Euler poses are `Vec3`, joint
+# rotations compose through `Quat`, and forward kinematics runs on `Transform`.
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
