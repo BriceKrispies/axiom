@@ -81,6 +81,7 @@ members = [
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",
+    "games/retro-fps",
     "crates/xtask",
     "tools/axiom-asset-pack",
     "tools/axiom-netcode-relay",

@@ -18,7 +18,13 @@
 
 pub mod rotating_cube;
 pub mod netplay;
-pub mod retro_fps;
+// retro FPS is now the `games/retro-fps` cartridge (`axiom-game-retro-fps`), not an in-crate
+// module — the gallery is one of its HOSTS. Re-export its `#[wasm_bindgen]`
+// `retro_fps_start` so the shared bundle still exports the `retro_fps_start` entry
+// gallery.js boots (the re-export links the cartridge's wasm entry into the
+// gallery cdylib). wasm-only, mirroring how the demo runs.
+#[cfg(target_arch = "wasm32")]
+pub use axiom_game_retro_fps::retro_fps_start;
 pub mod stress_cubes;
 pub mod growth;
 pub mod zanzoban;

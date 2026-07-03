@@ -8,8 +8,8 @@
 //!   curl -s -XPOST localhost:7878/reset
 //!   curl -s localhost:7878/state
 
-use axiom_gallery::retro_fps::agent::{Action, AgentSession, Observation};
-use axiom_gallery::retro_fps::perception::RetroFpsPerceiver;
+use axiom_game_retro_fps::agent::{Action, AgentSession, Observation};
+use axiom_game_retro_fps::perception::RetroFpsPerceiver;
 use tiny_http::{Header, Method, Response, Server};
 
 // The offscreen renderer lives in the bin (not the lib) so wgpu's symbols never

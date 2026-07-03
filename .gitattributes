@@ -6,5 +6,8 @@
 # no longer match the bytes a generator produces.
 *.bin binary
 
-# Golden corpus directories (any extension) are stored verbatim.
+# Golden corpus directories (any extension) are stored verbatim. A golden dir may
+# sit directly under `tests/` (`tests/golden/`) or be namespaced under a subdir
+# (e.g. a game's `tests/retro_fps/golden/`), so match a `golden/` dir at any depth.
 **/tests/golden/** binary
+**/tests/**/golden/** binary
