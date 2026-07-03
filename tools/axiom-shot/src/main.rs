@@ -258,7 +258,7 @@ fn nova_roll_app() -> App {
 /// default level is used).
 fn build_app(name: &str, level: Option<&str>, shot_tick: Option<u32>) -> RunningApp {
     match name {
-        "retro_fps" => axiom_gallery::retro_fps::build_retro_fps_app(&retro_fps_doc(level)).0,
+        "retro_fps" => axiom_game_retro_fps::build_retro_fps_app(&retro_fps_doc(level)).0,
         "showcase" => showcase_app().build(),
         "nova-roll" => nova_roll_app().build(),
         "physics-crucible" => axiom_gallery::physics_crucible::build_physics_crucible(),
@@ -297,12 +297,12 @@ fn soccer_shot_state(shot_tick: u32) -> axiom_gallery::soccer_penalty::PenaltyIn
 
 /// The retro FPS level document for `--level PATH` (else the built-in default). Shared
 /// by `build_app` and the `--pose` teleport path so both read the same level.
-fn retro_fps_doc(level: Option<&str>) -> axiom_gallery::retro_fps::level::LevelDoc {
+fn retro_fps_doc(level: Option<&str>) -> axiom_game_retro_fps::level::LevelDoc {
     match level {
-        Some(path) => axiom_gallery::retro_fps::level::LevelDoc::parse(
+        Some(path) => axiom_game_retro_fps::level::LevelDoc::parse(
             &std::fs::read_to_string(path).expect("read --level file"),
         ),
-        None => axiom_gallery::retro_fps::level::LevelDoc::default(),
+        None => axiom_game_retro_fps::level::LevelDoc::default(),
     }
 }
 
@@ -383,7 +383,7 @@ fn main() {
     let teleport = match (app.as_str(), flag(&args, "--pose").as_deref().and_then(parse_pose)) {
         ("retro_fps", Some((x, z, yaw, pitch))) => {
             let mut game =
-                axiom_gallery::retro_fps::RetroFpsGame::from_level(&retro_fps_doc(flag(&args, "--level").as_deref()));
+                axiom_game_retro_fps::RetroFpsGame::from_level(&retro_fps_doc(flag(&args, "--level").as_deref()));
             Some(game.teleport(x, z, yaw, pitch))
         }
         _ => None,

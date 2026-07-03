@@ -27,4 +27,5 @@ axiom-render = { path = "../../modules/axiom-render" }
 # Every browser demo lives here as a module (`axiom_gallery::retro_fps`, …); the
 # tool screenshots them through this one crate.
 axiom-gallery = { path = "../../apps/axiom-gallery" }
+axiom-game-retro-fps = { path = "../../games/retro-fps" }
 png = "0.17"
