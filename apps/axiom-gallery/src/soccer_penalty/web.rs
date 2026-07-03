@@ -1,20 +1,14 @@
-//! The soccer-penalty gallery arm: the native **engine-scene bridge** that
-//! renders the game's render plan through the real engine backend, plus the
-//! `wasm32` browser entry (`soccer_penalty_start`) that drives the windowing run
-//! loop, steps the session from keyboard/pad input, and re-authors the scene
-//! every frame — exactly the `physics_crucible` live pattern.
+//! The soccer-penalty gallery arm: the `wasm32` browser entry
+//! (`soccer_penalty_start`) that drives the windowing run loop, steps the session
+//! from keyboard/pad input, and re-authors the scene every frame.
 //!
-//! The render plan's flat, pre-shaded colours (Pass 3) are carried as the
-//! material **base colour** — the one channel the live render path feeds every
-//! backend's per-instance colour (emissive is dropped from the live batches), so
-//! WebGPU / WebGL2 / Canvas2D all shade the same colour identically (hemisphere
-//! ambient + one directional light). Boxes/quads/lines become the unit cube
-//! (extent 1 → scale = size), the
-//! ball becomes the unit sphere (radius 0.5 → scale = size·2), and every draw is
-//! nudged a hair toward the camera in the plan's back-to-front order so the many
-//! near-coplanar ground/net quads win the depth test cleanly.
-
-use axiom::prelude::*;
+//! Rendering goes through [`crate::soccer_penalty::penalty_render_meshed`] — the
+//! **same shared meshed scene the headless convergence champion uses** — so the
+//! gallery and the champion can never diverge. The scene registers its low-poly
+//! mesh library once, then updates each frame with runtime `spawn`/`despawn`; the
+//! render plan's flat, pre-shaded colours (Pass 3) ride as each material's base
+//! colour, which every backend (WebGPU / WebGL2 / Canvas2D) feeds into its
+//! per-instance colour.
 
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
@@ -29,111 +23,26 @@ use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 use web_sys::KeyboardEvent;
 
-use crate::soccer_penalty::low_poly_assets::PrimitiveShape;
+// The live gallery renders through the SAME shared meshed scene the headless
+// convergence champion uses, so the two can never diverge.
+#[cfg(target_arch = "wasm32")]
+use crate::soccer_penalty::penalty_render_meshed::{soccer_meshed_shell, PenaltyMeshedScene};
+// The world-item count check in tests reads the render plan's content tag.
+#[cfg(test)]
 use crate::soccer_penalty::penalty_render_plan::PenaltyRenderContent;
-use crate::soccer_penalty::soccer_penalty_app::Stage1Diorama;
-// Only the wasm entry + native tests build a session; the scene author takes a frame.
+// Only the wasm entry + native tests build a session.
 #[cfg(any(test, target_arch = "wasm32"))]
 use crate::soccer_penalty::SoccerPenaltyApp;
 
+#[cfg(target_arch = "wasm32")]
 const CANVAS_ID: &str = "axiom-soccer-penalty-canvas";
+#[cfg(target_arch = "wasm32")]
 const WIDTH: u32 = 960;
+#[cfg(target_arch = "wasm32")]
 const HEIGHT: u32 = 600;
-/// The live instance cap: the diorama draws ~100 objects, well under this.
+/// The live instance cap: the diorama draws ~180 objects, well under this.
 #[cfg(target_arch = "wasm32")]
 const CAPACITY: u32 = 1024;
-
-/// A finite `Ratio` from a colour channel (clamped, so always valid).
-fn ch(value: f32) -> Ratio {
-    Ratio::new(value.clamp(0.0, 1.0)).expect("clamped colour channel is finite")
-}
-
-/// Keep flat quads genuinely thin so a ground layer's slab does not overlap the
-/// layer a few millimetres above it (the unit cube has extent 1, so scale=size).
-fn nonzero(s: Vec3) -> Vec3 {
-    let c = |v: f32| if v.abs() < 1.0e-3 { 0.01 } else { v };
-    Vec3::new(c(s.x), c(s.y), c(s.z))
-}
-
-/// Author the current diorama frame into the engine scene: one cube/sphere
-/// `Renderable` per world render item (emissive flat colour), a fixed camera,
-/// and a token light.
-pub fn author_soccer(
-    world: &mut SceneCommands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<Material>,
-    frame: &Stage1Diorama,
-) {
-    let cam = frame.render_plan.camera;
-    let cube = meshes.add(Mesh::cube());
-    let sphere = meshes.add(Mesh::sphere());
-
-    let mut index = 0u64;
-    frame.render_plan.items.iter().for_each(|item| {
-        if let PenaltyRenderContent::World { shape, position, size, shaded_color, .. } = item.content {
-            let (mesh, scale) = match shape {
-                PrimitiveShape::FacetedBall => (sphere, size.mul_scalar(2.0)),
-                _ => (cube, nonzero(size)),
-            };
-            // Painter's-order depth bias toward the camera (see module docs).
-            let to_eye = cam.eye.subtract(position);
-            let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
-            let biased = position.add(dir.mul_scalar(index as f32 * 0.0015));
-            // The colour MUST live in the material base colour: the live render
-            // path (all three backends — WebGPU / WebGL2 / Canvas2D) builds each
-            // instance's colour from `base_color`, and drops `emissive` (emissive
-            // only reaches the offscreen GPU material input). The scene's flat
-            // retro 32-bit shading is already baked into `shaded_color`; the engine's
-            // hemisphere ambient + the one directional light below then light it
-            // identically across all three backends.
-            let material = materials.add(Material::lit(Color::linear_rgb(
-                ch(shaded_color.r),
-                ch(shaded_color.g),
-                ch(shaded_color.b),
-            )));
-            world.spawn((
-                Transform::combine(Transform::from_translation(biased), Transform::from_scale(scale)),
-                Renderable { mesh, material },
-            ));
-            index += 1;
-        }
-    });
-
-    world.spawn((
-        Transform::from_translation(cam.eye)
-            .looking_at(cam.target, cam.up)
-            .unwrap_or_else(|_| Transform::from_translation(cam.eye)),
-        Camera::perspective(PerspectiveProjection {
-            fov_y: Angle::degrees(cam.fov_y_degrees),
-            near: Meters::new(cam.near).expect("camera near plane is finite"),
-            far: Meters::new(cam.far).expect("camera far plane is finite"),
-        }),
-    ));
-    // Emissive is self-lit, but keep one directional light so any lit fallback
-    // still resolves a frame.
-    world.spawn((
-        Transform::IDENTITY,
-        DirectionalLight {
-            direction: Vec3::new(0.3, -1.0, 0.4),
-            color: Color::WHITE,
-            intensity: ch(1.0),
-        },
-    ));
-}
-
-/// Build the initial live [`RunningApp`] for the given frame — the browser loop
-/// drives and re-authors it each tick.
-pub fn soccer_live_app(frame: Stage1Diorama) -> RunningApp {
-    App::new()
-        .window(
-            Window::new(WIDTH, HEIGHT)
-                .with_surface_id(CANVAS_ID)
-                .with_clear_color(Color::linear_rgb(ch(0.07), ch(0.10), ch(0.18))),
-        )
-        .add_plugins(DefaultPlugins)
-        .setup(move |world, meshes, materials| author_soccer(world, meshes, materials, &frame))
-        .build()
-}
 
 // --- wasm32 browser arm -----------------------------------------------------
 
@@ -185,16 +94,24 @@ pub fn soccer_penalty_start() {
         .configure_surface(WIDTH, HEIGHT)
         .expect("surface dimensions are valid");
 
+    // Build the shared meshed scene once (registering the mesh library + a stable
+    // material palette before the live backend snapshots them), author the start
+    // frame, then re-author it each frame with runtime spawn/despawn — the exact
+    // scene the convergence champion renders.
     let session = SoccerPenaltyApp::new_session();
-    let running = soccer_live_app(SoccerPenaltyApp::build_session_frame(&session));
+    let initial = SoccerPenaltyApp::build_session_frame(&session);
+    let mut running = soccer_meshed_shell();
+    let mut scene = PenaltyMeshedScene::install(&mut running);
+    scene.set_view(&mut running, initial.render_plan.camera);
+    scene.author(&mut running, &initial);
     let meshes = running.mesh_set();
     let materials = running.material_textures();
 
-    let state = Rc::new(RefCell::new((session, running)));
+    let state = Rc::new(RefCell::new((session, running, scene)));
     let frame_input = input.clone();
     let frame = move |tick: u64| {
         let mut guard = state.borrow_mut();
-        let (session, running) = &mut *guard;
+        let (session, running, scene) = &mut *guard;
         let raw = frame_input.borrow_mut().drain();
         // Between rounds the SHOOT/Space press doubles as "continue", so the
         // 5-button on-screen pad (4 arrows + SHOOT) can play the whole loop.
@@ -211,9 +128,7 @@ pub fn soccer_penalty_start() {
         };
         *session = session.clone().advance(intent);
         let diorama = SoccerPenaltyApp::build_session_frame(session);
-        running.reauthor(move |world, meshes, materials| {
-            author_soccer(world, meshes, materials, &diorama)
-        });
+        scene.author(running, &diorama);
         let outcome = running.tick(tick);
         let lights = outcome
             .lights()
@@ -298,6 +213,7 @@ mod tests {
 
     #[test]
     fn authors_the_diorama_into_the_engine_scene() {
+        use crate::soccer_penalty::penalty_render_meshed::soccer_meshed_app;
         let frame = SoccerPenaltyApp::build_stage1();
         let world_items = frame
             .render_plan
@@ -305,10 +221,10 @@ mod tests {
             .iter()
             .filter(|it| matches!(it.content, PenaltyRenderContent::World { .. }))
             .count();
-        let mut app = soccer_live_app(frame);
-        // Every world render item becomes one renderable; the camera + light are
-        // not renderables.
-        assert_eq!(app.renderable_count(), world_items);
+        // The shared meshed scene (the one the gallery AND the convergence
+        // champion render) draws exactly one real-mesh renderable per world item;
+        // the camera + light are not draws.
+        let mut app = soccer_meshed_app(frame);
         let outcome = app.tick(0);
         assert_eq!(outcome.draws().len(), world_items);
     }

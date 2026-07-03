@@ -186,6 +186,12 @@ card_scale = 0.60
 clusters = 3
 cluster_spread = 0.66
 cluster_tightness = 0.44
+# ITER 44 (structural): branch scaffold + dense leaves ALONG branches — the canopy reads
+# as attached, layered foliage instead of a floating card cloud. branches x
+# leaves_per_branch = 6 x 24 = 144 leaves/tree (was ~46). Supersedes the sub-mass fill.
+branches = 6
+leaves_per_branch = 24
+branch_thickness = 0.5
 palette = [
   [0.90, 0.74, 0.26],
   [0.86, 0.58, 0.16],

@@ -159,6 +159,22 @@ pub struct Foliage {
     /// canopy radius (default 1 = fill the whole canopy, i.e. no clumping).
     #[serde(default = "one_f32")]
     pub cluster_tightness: f32,
+    /// Branches radiating from the crown that leaves cluster ALONG (0 = the old
+    /// floating sub-mass sphere fill). The structural canopy: leaves attach to branch
+    /// lines instead of floating, and density scales with `branches * leaves_per_branch`.
+    #[serde(default)]
+    pub branches: u32,
+    /// Leaf cards placed densely along EACH branch (the dense attached canopy).
+    #[serde(default)]
+    pub leaves_per_branch: u32,
+    /// Branch thickness as a fraction of the tree's trunk radius (default 0.5).
+    #[serde(default = "half_f32")]
+    pub branch_thickness: f32,
+}
+
+/// serde default: branch thickness (fraction of trunk radius).
+fn half_f32() -> f32 {
+    0.5
 }
 
 /// serde default: one sub-mass (reproduces the pre-clustering uniform fill).

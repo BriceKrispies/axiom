@@ -34,6 +34,8 @@ const CANOPY_MESH: u64 = 3;
 const GROUNDCOVER_MESH: u64 = 4;
 const FOLIAGE_MESH: u64 = 5;
 const LITTER_MESH: u64 = 6;
+/// Thin branch strokes radiating from each crown; leaves cluster along them.
+const BRANCH_MESH: u64 = 7;
 const WHITE_MAT: u64 = 1;
 /// A radial soft-alpha leaf texture — GPU renders the foliage cards as feathered leaf
 /// blobs (alpha cutout + blend); Canvas 2D ignores it and keeps the solid-card proxy.
@@ -150,6 +152,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let (trunk_v, trunk_i) = trunk_unit_mesh();
     let (canopy_v, canopy_i) = canopy_unit_mesh();
     let (foliage_v, foliage_i) = foliage_card_unit_mesh();
+    let (branch_v, branch_i) = branch_unit_mesh();
     let (tuft_v, tuft_i) = tuft_unit_mesh();
     let (litter_v, litter_i) = litter_unit_mesh();
 
@@ -160,12 +163,11 @@ pub fn build(manifest: &Manifest) -> RenderData {
     // Foliage cards get the leaf-alpha material (GPU feathers them via alpha cutout);
     // the sphere-blob fallback stays a solid white material.
     let (canopy_mesh_id, canopy_inst, canopy_count, canopy_mat) = match &manifest.foliage {
-        Some(f) => (
-            FOLIAGE_MESH,
-            foliage_instances(manifest, &trees, f, lean_deg, &view_proj, eye),
-            trees.len() as u32 * (f.cards_per_tree + f.understory_cards),
-            LEAF_ALPHA_MAT,
-        ),
+        Some(f) => {
+            let inst = foliage_instances(manifest, &trees, f, lean_deg, &view_proj, eye);
+            let count = (inst.len() / 36) as u32;
+            (FOLIAGE_MESH, inst, count, LEAF_ALPHA_MAT)
+        }
         None => (
             CANOPY_MESH,
             canopy_instances(manifest, &trees, lean_deg, &view_proj, eye),
@@ -173,6 +175,14 @@ pub fn build(manifest: &Manifest) -> RenderData {
             WHITE_MAT,
         ),
     };
+    // Branch scaffold (only when [foliage] branches > 0): dark strokes the leaves hang on.
+    let branch_inst = manifest
+        .foliage
+        .as_ref()
+        .filter(|f| f.branches > 0)
+        .map(|f| branch_instances(manifest, &trees, f, lean_deg, &view_proj, eye))
+        .unwrap_or_default();
+    let branch_count = (branch_inst.len() / 36) as u32;
 
     let tufts = all_groundcover(manifest);
     let tuft_inst = tuft_instances(manifest, &tufts, &view_proj, eye);
@@ -191,6 +201,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
         batches.push((TRUNK_MESH, BARK_MAT, trunk_inst, tree_count));
         batches.push((canopy_mesh_id, canopy_mat, canopy_inst, canopy_count));
     });
+    (branch_count > 0).then(|| batches.push((BRANCH_MESH, WHITE_MAT, branch_inst, branch_count)));
     // Ground cover: one instanced batch when the abstraction placed any tufts.
     let tuft_count = tufts.len() as u32;
     (tuft_count > 0).then(|| batches.push((GROUNDCOVER_MESH, WHITE_MAT, tuft_inst, tuft_count)));
@@ -210,6 +221,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
             (TRUNK_MESH, trunk_v, trunk_i),
             (CANOPY_MESH, canopy_v, canopy_i),
             (FOLIAGE_MESH, foliage_v, foliage_i),
+            (BRANCH_MESH, branch_v, branch_i),
             (GROUNDCOVER_MESH, tuft_v, tuft_i),
             (LITTER_MESH, litter_v, litter_i),
         ],
@@ -385,39 +397,85 @@ fn canopy_instances(manifest: &Manifest, trees: &[Tree], lean_deg: f32, view_pro
     out
 }
 
-/// Stylized foliage: each tree's canopy is a loose cluster of crossed leaf cards in a
-/// warm autumn palette (upper/mid canopy) plus a few smaller understory cards near the
-/// ground — the "autumn forest" look that replaces the sphere blobs.
+/// Deterministic branch lines radiating from a tree's crown: `(base, direction, length)`.
+/// Leaves cluster along these and a thin branch stroke is drawn on each, so the canopy
+/// reads as attached foliage instead of a floating card cloud.
+fn tree_branches(t: &Tree, anchor: Vec3, f: &Foliage) -> Vec<(Vec3, Vec3, f32)> {
+    let r = t.canopy_radius_m;
+    (0..f.branches)
+        .map(|k| {
+            let az = hash01(t.x, t.z, 3000 + k) * std::f32::consts::TAU;
+            // Tilt up from horizontal so branches sweep outward + upward.
+            let tilt = 0.30 + hash01(t.x, t.z, 3100 + k) * 0.55;
+            let (ct, st) = (tilt.cos(), tilt.sin());
+            let dir = Vec3::new(az.cos() * ct, st, az.sin() * ct);
+            // Base spread a little down the upper trunk so branches don't share one point.
+            let base = Vec3::new(anchor.x, anchor.y - hash01(t.x, t.z, 3200 + k) * r * 0.35, anchor.z);
+            let length = r * (0.75 + hash01(t.x, t.z, 3300 + k) * 0.5);
+            (base, dir, length)
+        })
+        .collect()
+}
+
+/// A quaternion rotating +Y onto `dir` (orients the +Y branch stroke along a branch).
+fn orient_y_to(dir: Vec3) -> Quat {
+    let d = dir.normalize().unwrap_or(Vec3::UNIT_Y);
+    let dot = Vec3::UNIT_Y.dot(d).clamp(-1.0, 1.0);
+    Vec3::UNIT_Y
+        .cross(d)
+        .normalize()
+        .and_then(|axis| Quat::from_axis_angle(axis, dot.acos()))
+        .unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0))
+}
+
+/// Stylized foliage. With `[foliage] branches > 0` the canopy is DENSE leaf cards clustered
+/// ALONG branch lines radiating from the crown (attached, layered foliage); otherwise the
+/// older floating sub-mass sphere fill. Plus a few muted understory cards near the base.
 fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
     let pal = f.palette.as_slice();
-    let mut out = Vec::with_capacity(trees.len() * (f.cards_per_tree + f.understory_cards) as usize * 36);
+    let mut out = Vec::new();
     for t in trees {
         let ground = manifest.terrain.height_at(t.x, t.z);
         let anchor = canopy_anchor(t, ground, lean_deg);
         let r = t.canopy_radius_m;
-        // Upper/mid canopy: cards clumped into a few tight sub-masses (with dark gaps
-        // between them) instead of a uniform oblate speckle. Each card belongs to one
-        // sub-mass whose centre is offset from the anchor by `cluster_spread`; the card
-        // then sits within `cluster_tightness` of that centre. clusters=1, spread=0,
-        // tightness=1 reproduces the old uniform fill exactly.
-        let clusters = f.clusters.max(1);
-        for j in 0..f.cards_per_tree {
-            let m = j % clusters;
-            // Sub-mass centre: a point spread out from the anchor within the canopy.
-            let ma = hash01(t.x, t.z, 2000 + m) * std::f32::consts::TAU;
-            let mrad = hash01(t.x, t.z, 2100 + m).sqrt() * r * f.cluster_spread;
-            let mhy = (hash01(t.x, t.z, 2200 + m) - 0.30) * r * f.cluster_spread * 1.1;
-            let mc = Vec3::new(anchor.x + mrad * ma.cos(), anchor.y + mhy, anchor.z + mrad * ma.sin());
-            // Card placement, tight around its sub-mass centre.
-            let a = hash01(t.x, t.z, 200 + j) * std::f32::consts::TAU;
-            let rad = hash01(t.x, t.z, 300 + j).sqrt() * r * f.cluster_tightness;
-            let hy = (hash01(t.x, t.z, 400 + j) - 0.30) * r * f.cluster_tightness * 1.1;
-            let pos = Vec3::new(mc.x + rad * a.cos(), mc.y + hy, mc.z + rad * a.sin());
-            let sc = r * f.card_scale * (0.55 + hash01(t.x, t.z, 500 + j) * 0.4);
-            let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, 700 + j), 1.0);
-            out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, 600 + j), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));
+        if f.branches > 0 {
+            // Dense leaves clustered along each branch line — attached, layered canopy.
+            for (bi, (base, dir, length)) in tree_branches(t, anchor, f).iter().enumerate() {
+                let perp1 = dir.cross(Vec3::UNIT_Y).normalize().unwrap_or(Vec3::UNIT_X);
+                let perp2 = dir.cross(perp1).normalize().unwrap_or(Vec3::UNIT_Z);
+                let jr = r * f.card_scale * 0.9;
+                for j in 0..f.leaves_per_branch {
+                    let s = 4000 + bi as u32 * 131 + j;
+                    // Along the branch, biased to the outer/tip half where leaves gather.
+                    let frac = (0.35 + hash01(t.x, t.z, s) * 0.7).min(1.05);
+                    let along = base.add(dir.mul_scalar(length * frac));
+                    let jx = (hash01(t.x, t.z, s + 11) - 0.5) * jr;
+                    let jz = (hash01(t.x, t.z, s + 23) - 0.5) * jr;
+                    let jd = (hash01(t.x, t.z, s + 31) - 0.5) * jr * 0.6;
+                    let pos = along.add(perp1.mul_scalar(jx)).add(perp2.mul_scalar(jz)).add(dir.mul_scalar(jd));
+                    let sc = r * f.card_scale * (0.5 + hash01(t.x, t.z, s + 41) * 0.4);
+                    let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, s + 53), 1.0);
+                    out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, s + 61), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));
+                }
+            }
+        } else {
+            let clusters = f.clusters.max(1);
+            for j in 0..f.cards_per_tree {
+                let m = j % clusters;
+                let ma = hash01(t.x, t.z, 2000 + m) * std::f32::consts::TAU;
+                let mrad = hash01(t.x, t.z, 2100 + m).sqrt() * r * f.cluster_spread;
+                let mhy = (hash01(t.x, t.z, 2200 + m) - 0.30) * r * f.cluster_spread * 1.1;
+                let mc = Vec3::new(anchor.x + mrad * ma.cos(), anchor.y + mhy, anchor.z + mrad * ma.sin());
+                let a = hash01(t.x, t.z, 200 + j) * std::f32::consts::TAU;
+                let rad = hash01(t.x, t.z, 300 + j).sqrt() * r * f.cluster_tightness;
+                let hy = (hash01(t.x, t.z, 400 + j) - 0.30) * r * f.cluster_tightness * 1.1;
+                let pos = Vec3::new(mc.x + rad * a.cos(), mc.y + hy, mc.z + rad * a.sin());
+                let sc = r * f.card_scale * (0.55 + hash01(t.x, t.z, 500 + j) * 0.4);
+                let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, 700 + j), 1.0);
+                out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, 600 + j), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));
+            }
         }
         // Understory: smaller, muted cards near the trunk base.
         for j in 0..f.understory_cards {
@@ -427,6 +485,26 @@ fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg:
             let sc = r * f.card_scale * (0.4 + hash01(t.x, t.z, 1100 + j) * 0.3);
             let col = pick_color(pal, t.canopy_color, hash01(t.x, t.z, 1200 + j), 0.7);
             out.extend_from_slice(&card_instance(&vp, pos, hash01(t.x, t.z, 1300 + j), sc, fogged(col, fog, eye.subtract(pos).length(), &style_of(manifest), fol_sat(manifest))));
+        }
+    }
+    out
+}
+
+/// Thin dark branch strokes (one per `tree_branches` line), oriented along the branch and
+/// scaled to its length — the visible scaffold the dense leaves hang on.
+fn branch_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+    let fog = &manifest.fog;
+    let vp = Mat4::from_cols_array(*view_proj);
+    let dark = [BARK[0] * 0.6, BARK[1] * 0.6, BARK[2] * 0.6];
+    let mut out = Vec::new();
+    for t in trees {
+        let ground = manifest.terrain.height_at(t.x, t.z);
+        let anchor = canopy_anchor(t, ground, lean_deg);
+        let thick = t.trunk_radius_m * f.branch_thickness;
+        for (base, dir, length) in tree_branches(t, anchor, f) {
+            let world = Transform::new(base, orient_y_to(dir), Vec3::new(thick, length, thick)).to_matrix();
+            let mid = base.add(dir.mul_scalar(length * 0.5));
+            out.extend_from_slice(&instance(&vp, world, fogged(dark, fog, eye.subtract(mid).length(), &style_of(manifest), 1.0)));
         }
     }
     out
@@ -687,6 +765,25 @@ fn litter_unit_mesh() -> (Vec<f32>, Vec<u32>) {
 /// software raster) renders them identically and depth stays correct — no alpha
 /// texture or shader cutout needed. Double-sided, up-facing normals for the warm sun;
 /// per-vertex white, the instance tint carries the autumn leaf colour.
+/// Unit branch stroke: two perpendicular quads spanning y in [0,1], tapering base->tip, so
+/// it reads as a thin branch from any angle. White vertex colour (the instance tint = bark).
+fn branch_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    let mut v = Vec::new();
+    let mut idx = Vec::new();
+    let (bw, tw) = (1.0f32, 0.3f32); // base / tip half-width (the instance scales it thin)
+    let up = [0.0f32, 1.0, 0.0];
+    let w = [1.0f32, 1.0, 1.0, 1.0];
+    for (ax, az) in [(1.0f32, 0.0f32), (0.0f32, 1.0f32)] {
+        let base = (v.len() / VERT_FLOATS) as u32;
+        push_vertex(&mut v, [-bw * ax, 0.0, -bw * az], up, [0.0, 0.0], w);
+        push_vertex(&mut v, [bw * ax, 0.0, bw * az], up, [1.0, 0.0], w);
+        push_vertex(&mut v, [tw * ax, 1.0, tw * az], up, [1.0, 1.0], w);
+        push_vertex(&mut v, [-tw * ax, 1.0, -tw * az], up, [0.0, 1.0], w);
+        idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
+    (v, idx)
+}
+
 fn foliage_card_unit_mesh() -> (Vec<f32>, Vec<u32>) {
     const LEAF: usize = 9;
     // Per-leaf centre offset within the unit clump (spread through its volume).

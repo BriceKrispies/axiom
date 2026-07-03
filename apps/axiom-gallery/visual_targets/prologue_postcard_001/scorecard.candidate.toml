@@ -1,15 +1,15 @@
-# iter43: strengthened directional shadow contrast — shadowed ground receives less sky
-# ambient (via the existing shadow factor), so cast tree shadows read as deep dappled
-# bands instead of a washed gradient. lighting_directionality 3->4; no non-attacked drop.
-terrain_silhouette = 4
+# iter44 structural: branch scaffold + dense leaves along branches. Canopy denser +
+# attached (not a floating card cloud). vegetation_density 2->3. artifact_level stays 2
+# (the near/foreground leaf-card sprays remain — the next attack).
+terrain_silhouette = 3
 foreground_material_detail = 3
-vegetation_density = 4
+vegetation_density = 3
 vegetation_clumping = 3
-depth_separation = 4
-fog_and_haze = 4
-lighting_directionality = 4
-color_palette = 4
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
 contrast_and_exposure = 3
 object_scale = 4
-horizon_composition = 4
-artifact_level = 3
+horizon_composition = 3
+artifact_level = 2

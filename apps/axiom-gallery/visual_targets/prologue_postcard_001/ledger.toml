@@ -1784,3 +1784,42 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 4
 artifact_level = 3
+
+[[iteration]]
+iteration = 44
+attacked_axis = "vegetation_density"
+changed_files = ["apps/axiom-gallery/src/growth/visual_target/build.rs", "apps/axiom-gallery/src/growth/visual_target/scene.rs", "manifest.toml", "abstractions/0007.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "Structural foliage overhaul (the audit's recommended next pass): a branch primitive + dense leaves clustered ALONG branch lines radiating from each crown (6 branches x 24 leaves = 144/tree, was ~46 floating sub-mass cards). Canopy reads denser + attached/layered instead of a floating card cloud. vegetation_density 2->3. artifact_level unchanged at 2 (near/foreground leaf-card sprays remain). No non-attacked axis dropped >=2. GPU render deterministic (mean=0, max=0). Promoted. App-tier (build.rs/scene.rs/manifest); no spine gate; dylint ratchet <= baseline (no_branching 12<=15). Abstraction 0007 (branch primitive; config could not express attached dense foliage)."
+next_attacked_axis = "artifact_level"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 3
+vegetation_density = 2
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 3
+foreground_material_detail = 3
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2

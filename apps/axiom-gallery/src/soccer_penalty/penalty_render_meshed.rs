@@ -1,29 +1,38 @@
-//! The **fidelity** render bridge: author the diorama into the engine scene with
-//! real low-poly [`crate::soccer_penalty::penalty_meshes`] geometry instead of
-//! catalog cubes, so the actors read as rounded figures rather than a stack of
-//! boxes.
+//! The **single, shared** meshed render bridge: author the diorama into the
+//! engine scene with real low-poly [`crate::soccer_penalty::penalty_meshes`]
+//! geometry instead of catalog cubes, so the actors read as rounded figures.
 //!
-//! Why this is separate from [`crate::soccer_penalty::web`]. The live/browser arm
-//! authors through the `setup`/`reauthor` closure, whose `Assets<Mesh>` can only
-//! name the catalog cube/sphere/plane — it cannot register custom geometry. Real
-//! geometry is only reachable through `RunningApp`'s *runtime* authoring
-//! (`add_mesh_data` / `add_material` / `spawn` / `set_camera` / `add_light`), so
-//! this path builds an empty app and authors the whole diorama post-build. The
-//! deterministic headless `tick` (used by the `axiom-shot` screenshot tool and
-//! the visual-convergence loop) re-reads the stores each frame and renders it.
+//! This is the *one* path both consumers use, so the convergence champion and the
+//! live gallery can never diverge:
 //!
-//! This is the first phase of the fidelity work: real meshes on the headless
-//! path. Unifying the live/browser path (letting the authoring closure accept
-//! `MeshData`) is a later, engine-level step; until then the browser still uses
-//! [`crate::soccer_penalty::web::author_soccer`]'s box path.
+//! * the **headless champion** ([`soccer_meshed_app`]) — `axiom-shot` / the
+//!   visual-convergence loop — builds it once and ticks it, and
+//! * the **live browser gallery** ([`crate::soccer_penalty::web::soccer_penalty_start`])
+//!   re-authors it every frame.
+//!
+//! Both go through [`PenaltyMeshedScene`]: the same mesh library, the same
+//! shape→mesh mapping, the same per-object spawn.
+//!
+//! Why not the `setup`/`reauthor` closure. The live/browser path historically
+//! authored through that closure, whose `Assets<Mesh>` can only name the catalog
+//! cube/sphere/plane — the `Mesh` enum is deliberately fieldless so the engine
+//! resolves it branchlessly by table index, so it *cannot* carry custom geometry.
+//! Real geometry has its own sanctioned channel: `RunningApp::add_mesh_data`
+//! (which stores resolved geometry directly). So this scene registers the mesh
+//! library once via that channel and drives per-frame updates with runtime
+//! `spawn`/`despawn` — never `reauthor`, which would rebuild the mesh store from
+//! the catalog-only closure and wipe the custom meshes.
+
+use std::collections::HashMap;
 
 use axiom::prelude::*;
 
-use crate::soccer_penalty::low_poly_assets::PrimitiveShape;
+use crate::soccer_penalty::low_poly_assets::{PrimitiveShape, Rgba};
 use crate::soccer_penalty::penalty_meshes::{unit_capsule, unit_cube, unit_sphere};
 use crate::soccer_penalty::penalty_render_plan::PenaltyRenderContent;
 use crate::soccer_penalty::penalty_scene::DioramaRole;
 use crate::soccer_penalty::soccer_penalty_app::Stage1Diorama;
+use crate::soccer_penalty::static_diorama::CameraConfig;
 
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 600;
@@ -33,17 +42,16 @@ fn ch(value: f32) -> Ratio {
     Ratio::new(value.clamp(0.0, 1.0)).expect("clamped colour channel is finite")
 }
 
-/// Keep flat quad/line slabs genuinely thin without collapsing to a zero extent
-/// (the unit cube has extent 1, so scale = size).
+/// Keep flat quad/line slabs thin without collapsing to a zero extent.
 fn nonzero(s: Vec3) -> Vec3 {
     let c = |v: f32| if v.abs() < 1.0e-3 { 0.01 } else { v };
     Vec3::new(c(s.x), c(s.y), c(s.z))
 }
 
-/// Which library mesh renders one diorama object, and the scale to apply. Actor
-/// (kicker/goalie) body parts become rounded meshes — spheres for heads/hands,
-/// capsules for limbs and torso — while structure (posts, wall, crowd, ad boards,
-/// ground quads, net lines) stays boxy, as in the reference.
+/// The library mesh + scale for one diorama object. Actor (kicker/goalie) body
+/// parts become rounded meshes — spheres for heads/hands, capsules for limbs and
+/// torso — while structure (posts, wall, crowd, ad boards, ground quads, net
+/// lines) stays boxy, as in the reference.
 fn select_mesh(
     role: DioramaRole,
     label: &str,
@@ -55,57 +63,114 @@ fn select_mesh(
 ) -> (Handle<Mesh>, Vec3) {
     let is_actor = matches!(role, DioramaRole::Kicker | DioramaRole::Goalie);
     let is_round_end = label.ends_with(".head") || label.contains("hand");
-    let is_limb = label.contains("arm")
-        || label.contains("leg")
-        || label.contains("thigh")
-        || label.contains("shin")
-        || label.contains("foot");
-    match (shape, is_actor, is_round_end, is_limb) {
-        // The ball: a real sphere (its size.x is a radius, so diameter = size*2).
-        (PrimitiveShape::FacetedBall, _, _, _) => (sphere, size.mul_scalar(2.0)),
-        // Actor heads and hands → spheres; limbs and the rest of the body → capsules.
-        (PrimitiveShape::Box, true, true, _) => (sphere, nonzero(size)),
-        (PrimitiveShape::Box, true, false, _) => (capsule, nonzero(size)),
-        // Everything structural (and flat quads / thin net lines) → boxes.
+    match (shape, is_actor, is_round_end) {
+        (PrimitiveShape::FacetedBall, _, _) => (sphere, size.mul_scalar(2.0)),
+        (PrimitiveShape::Box, true, true) => (sphere, nonzero(size)),
+        (PrimitiveShape::Box, true, false) => (capsule, nonzero(size)),
         _ => (cube, nonzero(size)),
     }
 }
 
-/// Build the meshed headless [`RunningApp`] for a frame: register the mesh
-/// library once, spawn one real-mesh renderable per world object (with the
-/// plan's painter's-order depth bias toward the camera), then set the camera and
-/// key light.
-pub fn soccer_meshed_app(frame: Stage1Diorama) -> RunningApp {
-    let mut app = App::new()
-        .window(
-            Window::new(WIDTH, HEIGHT)
-                .with_clear_color(Color::linear_rgb(ch(0.07), ch(0.10), ch(0.18))),
-        )
-        .add_plugins(DefaultPlugins)
-        .build();
+/// The registered low-poly mesh library (one handle per shape family).
+#[derive(Clone, Copy, Debug)]
+struct MeshLib {
+    cube: Handle<Mesh>,
+    sphere: Handle<Mesh>,
+    capsule: Handle<Mesh>,
+}
 
-    let cube = app.add_mesh_data(unit_cube()).expect("unit cube geometry is valid");
-    let sphere = app.add_mesh_data(unit_sphere()).expect("unit sphere geometry is valid");
-    let capsule = app.add_mesh_data(unit_capsule()).expect("unit capsule geometry is valid");
+/// The shared meshed scene: the mesh library, a colour→material cache (so a stable
+/// palette of materials is registered before the live backend snapshots them, and
+/// no material leaks per frame), and the entities spawned last frame (despawned
+/// before the next author pass).
+#[derive(Debug)]
+pub struct PenaltyMeshedScene {
+    lib: MeshLib,
+    palette: HashMap<[u8; 3], Handle<Material>>,
+    spawned: Vec<Entity>,
+}
 
-    let cam = frame.render_plan.camera;
-    let mut index = 0u64;
-    frame.render_plan.items.iter().for_each(|item| {
-        if let PenaltyRenderContent::World { role, shape, position, size, shaded_color, .. } =
-            item.content
-        {
-            let (mesh, scale) = select_mesh(role, item.label, shape, size, cube, sphere, capsule);
-            // Painter's-order depth bias a hair toward the camera, so the many
-            // near-coplanar ground/net quads win the depth test in plan order.
+impl PenaltyMeshedScene {
+    /// Register the mesh library into `app` and prime an empty authoring scene.
+    pub fn install(app: &mut RunningApp) -> Self {
+        let lib = MeshLib {
+            cube: app.add_mesh_data(unit_cube()).expect("unit cube geometry is valid"),
+            sphere: app.add_mesh_data(unit_sphere()).expect("unit sphere geometry is valid"),
+            capsule: app.add_mesh_data(unit_capsule()).expect("unit capsule geometry is valid"),
+        };
+        Self { lib, palette: HashMap::new(), spawned: Vec::new() }
+    }
+
+    /// Set the fixed camera and key light once (call after [`Self::install`]).
+    pub fn set_view(&self, app: &mut RunningApp, cam: CameraConfig) {
+        app.set_camera(
+            Camera::perspective(PerspectiveProjection {
+                fov_y: Angle::degrees(cam.fov_y_degrees),
+                near: Meters::new(cam.near).expect("camera near plane is finite"),
+                far: Meters::new(cam.far).expect("camera far plane is finite"),
+            }),
+            Transform::from_translation(cam.eye)
+                .looking_at(cam.target, cam.up)
+                .unwrap_or_else(|_| Transform::from_translation(cam.eye)),
+        );
+        app.add_light(
+            DirectionalLight {
+                direction: Vec3::new(0.3, -1.0, 0.4),
+                color: Color::WHITE,
+                intensity: ch(1.0),
+            },
+            Transform::IDENTITY,
+        );
+    }
+
+    /// A cached lit material for `color` (registered once, reused thereafter), so
+    /// the material set the live backend snapshots at startup stays stable.
+    fn material_for(&mut self, app: &mut RunningApp, color: Rgba) -> Handle<Material> {
+        let key = [
+            (color.r.clamp(0.0, 1.0) * 255.0) as u8,
+            (color.g.clamp(0.0, 1.0) * 255.0) as u8,
+            (color.b.clamp(0.0, 1.0) * 255.0) as u8,
+        ];
+        *self.palette.entry(key).or_insert_with(|| {
+            app.add_material(Material::lit(Color::linear_rgb(
+                ch(color.r),
+                ch(color.g),
+                ch(color.b),
+            )))
+        })
+    }
+
+    /// Re-author the diorama: despawn the previous frame's renderables, then spawn
+    /// this frame's world objects with real meshes (in the plan's back-to-front
+    /// order, each nudged a hair toward the camera so near-coplanar ground/net
+    /// quads win the depth test). Camera + light are untouched (set once).
+    pub fn author(&mut self, app: &mut RunningApp, frame: &Stage1Diorama) {
+        self.spawned.drain(..).for_each(|e| {
+            app.despawn(e);
+        });
+        let cam = frame.render_plan.camera;
+        let mut index = 0u64;
+        // Collect first so the immutable borrow of `frame` doesn't overlap the
+        // mutable `self`/`app` borrows in the spawn loop.
+        let objects: Vec<_> = frame
+            .render_plan
+            .items
+            .iter()
+            .filter_map(|item| match item.content {
+                PenaltyRenderContent::World { role, shape, position, size, shaded_color, .. } => {
+                    Some((role, item.label, shape, position, size, shaded_color))
+                }
+                _ => None,
+            })
+            .collect();
+        objects.into_iter().for_each(|(role, label, shape, position, size, color)| {
+            let (mesh, scale) =
+                select_mesh(role, label, shape, size, self.lib.cube, self.lib.sphere, self.lib.capsule);
             let to_eye = cam.eye.subtract(position);
             let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
             let biased = position.add(dir.mul_scalar(index as f32 * 0.0015));
-            let material = app.add_material(Material::lit(Color::linear_rgb(
-                ch(shaded_color.r),
-                ch(shaded_color.g),
-                ch(shaded_color.b),
-            )));
-            app.spawn(Spawn::new(
+            let material = self.material_for(app, color);
+            let entity = app.spawn(Spawn::new(
                 Transform::combine(
                     Transform::from_translation(biased),
                     Transform::from_scale(scale),
@@ -113,27 +178,29 @@ pub fn soccer_meshed_app(frame: Stage1Diorama) -> RunningApp {
                 mesh,
                 material,
             ));
+            self.spawned.push(entity);
             index += 1;
-        }
-    });
+        });
+    }
+}
 
-    app.set_camera(
-        Camera::perspective(PerspectiveProjection {
-            fov_y: Angle::degrees(cam.fov_y_degrees),
-            near: Meters::new(cam.near).expect("camera near plane is finite"),
-            far: Meters::new(cam.far).expect("camera far plane is finite"),
-        }),
-        Transform::from_translation(cam.eye)
-            .looking_at(cam.target, cam.up)
-            .unwrap_or_else(|_| Transform::from_translation(cam.eye)),
-    );
-    app.add_light(
-        DirectionalLight {
-            direction: Vec3::new(0.3, -1.0, 0.4),
-            color: Color::WHITE,
-            intensity: ch(1.0),
-        },
-        Transform::IDENTITY,
-    );
+/// Build the empty meshed app shell (window + clear colour + default plugins).
+pub fn soccer_meshed_shell() -> RunningApp {
+    App::new()
+        .window(
+            Window::new(WIDTH, HEIGHT)
+                .with_clear_color(Color::linear_rgb(ch(0.07), ch(0.10), ch(0.18))),
+        )
+        .add_plugins(DefaultPlugins)
+        .build()
+}
+
+/// Build the headless meshed [`RunningApp`] for one static frame — the
+/// convergence champion (`axiom-shot`). Identical authoring to the live gallery.
+pub fn soccer_meshed_app(frame: Stage1Diorama) -> RunningApp {
+    let mut app = soccer_meshed_shell();
+    let mut scene = PenaltyMeshedScene::install(&mut app);
+    scene.set_view(&mut app, frame.render_plan.camera);
+    scene.author(&mut app, &frame);
     app
 }

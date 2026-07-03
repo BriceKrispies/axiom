@@ -296,3 +296,44 @@ ball_fidelity           = 2
 depth_and_separation    = 3
 scale_and_proportion    = 2
 artifact_level          = 4
+
+[[iteration]]
+iteration = 8
+attacked_axis = "none"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/penalty_render_meshed.rs",
+  "apps/axiom-gallery/src/soccer_penalty/web.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "unify_render_paths"
+reason = "No intended visual change (champion visually identical; md5 differs only from material-dedup batch regrouping, which the per-instance geometric depth bias still resolves). UNIFIED the champion and the live gallery onto ONE shared PenaltyMeshedScene: the headless champion (axiom-shot -> soccer_meshed_app) and the browser gallery (soccer_penalty_start) now register the SAME mesh library and author via the SAME select_mesh mapping + runtime spawn/despawn. Deleted the old box authoring (author_soccer/soccer_live_app); the gallery no longer uses reauthor (which rebuilds the mesh store from the catalog-only closure and would wipe custom meshes). Native tests + wasm build both green. So what a user sees in the gallery is what the convergence loop scores."
+next_attacked_axis = "scale_and_proportion"
+
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity        = 3
+silhouette_readability  = 3
+pitch_detail            = 2
+stadium_and_crowd       = 2
+color_palette           = 3
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 2
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 3
+silhouette_readability  = 3
+pitch_detail            = 2
+stadium_and_crowd       = 2
+color_palette           = 3
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 2
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
