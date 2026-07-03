@@ -61,6 +61,7 @@ members = [
     "modules/axiom-visibility",
     "modules/axiom-scatter",
     "modules/axiom-world",
+    "modules/axiom-forest",
     "modules/axiom-tween",
     "modules/axiom-tick",
     "modules/axiom",
@@ -75,6 +76,7 @@ members = [
     "apps/axiom-sim-crucible",
     "apps/axiom-proc-playground",
     "apps/axiom-asset-stream-demo",
+    "apps/axiom-worldgen-demo",
     "apps/axiom-game-runtime",
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).

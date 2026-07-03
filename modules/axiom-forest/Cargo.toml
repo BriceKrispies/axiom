@@ -1,0 +1,25 @@
+[package]
+name = "axiom-forest"
+description = "Axiom feature module: a chunk's worth of trees. Composes axiom-scatter (where the trees stand) into seated, deterministically-varied tree transforms for one world cell, and offers a simple unit tree mesh to instance them with. The reusable vegetation layer a streamed world grows on each loaded chunk; the caller supplies the ground-height function and renders the instances."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No browser API, no engine state: a chunk's trees are a pure
+# function of (seed, cell, config, ground fn), so it runs and is fully tested on
+# native and tiles identically everywhere.
+crate-type = ["rlib"]
+
+# A *feature module* (kind = "feature-module"): it COMPOSES the scatter engine
+# module into vegetation, and builds on the kernel (Meters/StableHash) and math
+# (Transform/Vec3/Quat the trees are expressed in).
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-scatter = { path = "../axiom-scatter" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
