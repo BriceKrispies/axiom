@@ -38,6 +38,11 @@ pub struct AppSection {
     /// Module names this app may depend on.
     #[serde(default)]
     pub allowed_modules: Vec<String>,
+    /// Game names this app (a host) may load — the cartridges it hosts. Empty
+    /// for a non-host app. An app may Cargo-depend on a game only if that game's
+    /// logical name is listed here.
+    #[serde(default)]
+    pub allowed_games: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,12 +126,14 @@ mod tests {
             crate_name = "axiom-demo-rotating-cube"
             allowed_layers = ["kernel", "runtime", "math", "host", "frame"]
             allowed_modules = ["scene", "render"]
+            allowed_games = ["retro_fps"]
         "#;
         let a = parse_app_manifest(Path::new("apps/rotating-cube"), text).unwrap();
         assert_eq!(a.app.name, "rotating-cube-demo");
         assert_eq!(a.app.crate_name, "axiom-demo-rotating-cube");
         assert_eq!(a.app.allowed_layers.len(), 5);
         assert_eq!(a.app.allowed_modules, vec!["scene", "render"]);
+        assert_eq!(a.app.allowed_games, vec!["retro_fps"]);
         assert_eq!(a.import_prefix(), "axiom_demo_rotating_cube");
     }
 

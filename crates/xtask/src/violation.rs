@@ -115,13 +115,41 @@ pub enum ViolationKind {
     /// ignore pattern once (it is missing, altered, or a second ignore was
     /// added) — a path to silently widen what the gate hides.
     CoverageIgnoreScriptDrift,
+
+    // --- Game (cartridge tier) rules ---
+    /// A `game.toml` could not be parsed or was structurally invalid.
+    GameManifestInvalid,
+    /// A layer, module, or tool depends on a game crate. Games are content
+    /// (the cartridge tier), not the reusable spine — only **host apps** (which
+    /// list the game in `allowed_games`) may depend on a game.
+    NonHostDependsOnGame,
+    /// An app's Cargo deps include a game crate that is not in its
+    /// `allowed_games`.
+    AppDependsOnGameNotAllowed,
+    /// An `app.toml` names a game in `allowed_games` that does not exist.
+    AppAllowedGameUnknown,
+    /// A game's Cargo deps include an app crate.
+    GameDependsOnApp,
+    /// A game's Cargo deps include a tool crate.
+    GameDependsOnTool,
+    /// A game's Cargo deps include another game crate (games are independent
+    /// cartridges; they do not compose one another).
+    GameDependsOnGame,
+    /// A game's Cargo deps include a layer that is not in its `allowed_layers`.
+    GameDependsOnLayerNotAllowed,
+    /// A game's Cargo deps include a module that is not in its `allowed_modules`.
+    GameDependsOnModuleNotAllowed,
+    /// A `game.toml` names a layer in `allowed_layers` that does not exist.
+    GameAllowedLayerUnknown,
+    /// A `game.toml` names a module in `allowed_modules` that does not exist.
+    GameAllowedModuleUnknown,
 }
 
 impl ViolationKind {
     /// The stable, greppable tokens, one per variant, in declaration order.
     /// `ViolationKind` is fieldless, so `self as usize` is its discriminant and
     /// indexes straight into this table — no per-variant match arm to maintain.
-    const TOKENS: [&'static str; 40] = [
+    const TOKENS: [&'static str; 51] = [
         "ManifestInvalid",
         "UnknownDependency",
         "DependencyCycle",
@@ -162,6 +190,17 @@ impl ViolationKind {
         "SourceHygieneCoverageOff",
         "CoverageIgnoreExcludesEngine",
         "CoverageIgnoreScriptDrift",
+        "GameManifestInvalid",
+        "NonHostDependsOnGame",
+        "AppDependsOnGameNotAllowed",
+        "AppAllowedGameUnknown",
+        "GameDependsOnApp",
+        "GameDependsOnTool",
+        "GameDependsOnGame",
+        "GameDependsOnLayerNotAllowed",
+        "GameDependsOnModuleNotAllowed",
+        "GameAllowedLayerUnknown",
+        "GameAllowedModuleUnknown",
     ];
 }
 
