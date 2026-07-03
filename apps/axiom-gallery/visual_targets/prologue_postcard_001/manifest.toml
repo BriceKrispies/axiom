@@ -39,10 +39,12 @@ intensity = 1.6
 # foreground trunks stay dark for contrast; the warm backlit sun keeps foreground warm.
 # ITER 23 (corrective): darker BLUE-GRAY distance haze, stronger, so background
 # fades to cool haze and foreground stays dark for contrast.
-# ITER 48 (structural atmosphere): warm, luminous haze — distance + the background glow
-# fade to a bright warm-grey/gold mist (the reference's misty backlit light), not a cool
-# blue wash. This colour is both the aerial-perspective target and the clear/background.
-color = [0.80, 0.76, 0.67]
+# ITER 49 (attack: fog_and_haze) — fix the BLOWOUT: the background/mist was clipping to
+# near-white (mean ~[196,181,153], 3.5% fully clipped), ~2x the reference's controlled
+# warm-grey mist (mean ~[95,79,64], 0% clipped). This colour is both the aerial-perspective
+# target and the sky/clear background, so lowering it brings the whole distance down to a
+# controlled warm mist instead of a blown white sheet.
+color = [0.44, 0.40, 0.33]
 start_m = 5.0
 end_m = 74.0
 
@@ -68,18 +70,21 @@ rock_slope_full = 1.10
 # ITER 15 (attack: foreground_material_detail) — the interior camera now shows the
 # ground, so enrich it: warm autumn-litter albedo bands + a fine micro-relief octave
 # give the visible foreground real material variation (the change iter1 could not show).
+# ITER 46 (ground base): dark soil/mulch bands — the reference's exposed earth shows
+# between the leaves; the fallen leaves are the litter INSTANCES on top, not a baked
+# orange carpet. A bright baked base was what made the floor read as one glowing sheet.
 [[terrain.ground_band]]
 max_height_m = -2.0
-albedo = [0.26, 0.19, 0.11]
+albedo = [0.16, 0.12, 0.08]
 [[terrain.ground_band]]
 max_height_m = 0.5
-albedo = [0.46, 0.33, 0.17]
+albedo = [0.20, 0.15, 0.10]
 [[terrain.ground_band]]
 max_height_m = 4.0
-albedo = [0.60, 0.44, 0.22]
+albedo = [0.26, 0.20, 0.13]
 [[terrain.ground_band]]
 max_height_m = 9.0
-albedo = [0.68, 0.57, 0.34]
+albedo = [0.32, 0.25, 0.16]
 
 # Hero tree: tall and thin, set off to the side so it frames rather than blocks.
 [[tree]]
@@ -119,24 +124,28 @@ seed = 7
 # ITER 19 (attack: vegetation_density) — dense small patch made composable by the
 # keep-clear abstraction: no trunk spawns within 16 m of the camera along the view.
 # ITER 23 (corrective): fewer trunks for readable corridors, wider radius variation.
-count = 440
-min_spacing_m = 1.45
+# ITER 48 (attack: terrain_silhouette) — the reference is FEW, well-spaced, moderately
+# thick beech trunks with air + mist between them (you see THROUGH the forest into depth),
+# not a dense picket wall of thin poles. Cut the trunk count ~2.75x, widen the spacing,
+# and thicken the trunks so each reads as a mature tree with clear air around it.
+count = 160
+min_spacing_m = 3.2
 slope_limit = 0.85
 keep_clear_m = 16.0
 # ITER 22 (capability): deterministic trunk lean so trunks are not perfect poles.
 lean_deg = 7.0
 # ITER 20 (attack: vegetation_clumping) — clustered placement: gather the trees into
 # 14 clumps (radius 9 m) so believable groves and clearings replace the even sprinkle.
-clusters = 14
-cluster_radius_m = 9.0
+clusters = 12
+cluster_radius_m = 11.0
 # ITER 7 (attack: terrain_silhouette) — widen the height range so some emergent
 # trees tower above the rest, breaking the flat canopy ceiling into a layered,
 # varied skyline against the bright sky (the reference's broken-canopy read).
 # ITER 13 (attack: terrain_silhouette) — taller emergents for a more dramatic,
 # deeply layered canopy skyline against the sky.
 trunk_height_m = [11.0, 42.0]
-trunk_radius_m = [0.12, 0.40]
-canopy_radius_m = [2.4, 5.4]
+trunk_radius_m = [0.20, 0.60]
+canopy_radius_m = [2.8, 6.0]
 canopy_palette = [
   [0.92, 0.62, 0.16],
   [0.85, 0.42, 0.12],
@@ -155,7 +164,8 @@ seed = 21
 # ITER 24 (attack: foreground_material_detail) — a richer forest floor: denser,
 # lower clumps in a leaf-litter + grass-green palette so the ground reads as fallen
 # leaves and grass tufts (like the reference), not sparse brown pyramids.
-count = 12000
+# ITER 45 (ground detail): denser mixed ground plants (grass clumps + taller sedge fronds).
+count = 18000
 min_spacing_m = 0.20
 slope_limit = 1.2
 clusters = 60
@@ -177,8 +187,11 @@ palette = [
 # ITER 23 (corrective): small irregular leaf clumps (not big paper squares), fewer +
 # layered, in a darker warm autumn palette (orange/brown, muted-yellow highlight).
 cards_per_tree = 46
-understory_cards = 5
-card_scale = 0.60
+# ITER 47 (attack: artifact_level) — fewer eye-level understory cards (they sprayed as
+# large floating leaves near the close framing trees' bases); smaller + denser canopy
+# leaves so foliage reads as a mass, not separated confetti cards.
+understory_cards = 2
+card_scale = 0.45
 # ITER 43: clump the canopy cards into a few tight sub-masses with dark gaps between
 # them (branch-hung look) instead of a uniform speckle.
 # ITER 47: more cards + slightly larger to fill the canopy now that alpha-cut leaves are
@@ -189,8 +202,11 @@ cluster_tightness = 0.44
 # ITER 44 (structural): branch scaffold + dense leaves ALONG branches — the canopy reads
 # as attached, layered foliage instead of a floating card cloud. branches x
 # leaves_per_branch = 6 x 24 = 144 leaves/tree (was ~46). Supersedes the sub-mass fill.
-branches = 6
-leaves_per_branch = 24
+# ITER 48: fuller crowns to compensate for the sparser (spaced) forest — each of the
+# fewer, bigger trees carries more branches + leaves, so its crown reads full like the
+# reference's, without bringing back the floating-card spray (jitter stays tight).
+branches = 8
+leaves_per_branch = 42
 branch_thickness = 0.5
 palette = [
   [0.90, 0.74, 0.26],
@@ -228,10 +244,16 @@ clusters = 55
 cluster_radius_m = 14.0
 height_m = [0.0, 0.0]
 radius_m = [0.11, 0.30]
+# ITER 45 (ground detail): wider leaf-litter palette — russet/ochre/tan/khaki/dark-red
+# so tilted overlapping leaves read as a varied bed, not a uniform brown wash.
 palette = [
   [0.58, 0.28, 0.10],
   [0.70, 0.40, 0.13],
   [0.52, 0.20, 0.10],
   [0.46, 0.32, 0.15],
   [0.38, 0.24, 0.13],
+  [0.80, 0.58, 0.22],
+  [0.66, 0.30, 0.12],
+  [0.50, 0.42, 0.22],
+  [0.60, 0.22, 0.14],
 ]

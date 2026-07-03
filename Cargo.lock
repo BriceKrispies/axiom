@@ -231,6 +231,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-forest"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-scatter",
+]
+
+[[package]]
 name = "axiom-frame"
 version = "0.1.0"
 dependencies = [
@@ -251,6 +260,7 @@ dependencies = [
  "axiom-canvas2d-backend",
  "axiom-debug-overlay",
  "axiom-entropy",
+ "axiom-game-retro-fps",
  "axiom-geosphere",
  "axiom-gpu-backend",
  "axiom-host",
@@ -272,6 +282,31 @@ dependencies = [
  "axiom-space",
  "axiom-streaming",
  "axiom-terrain-mesh",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "js-sys",
+ "png",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "toml",
+ "tungstenite",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "axiom-game-retro-fps"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-agent",
+ "axiom-debug-overlay",
+ "axiom-interface",
+ "axiom-kernel",
+ "axiom-perception",
+ "axiom-recording",
+ "axiom-runtime",
  "axiom-windowing",
  "bytemuck",
  "console_error_panic_hook",
@@ -655,6 +690,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-scatter"
+version = "0.1.0"
+dependencies = [
+ "axiom-entropy",
+ "axiom-kernel",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-scene"
 version = "0.1.0"
 dependencies = [
@@ -726,6 +770,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-visibility"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
 name = "axiom-webgpu"
 version = "0.1.0"
 dependencies = [
@@ -757,6 +809,28 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-world"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-streaming",
+ "axiom-visibility",
+]
+
+[[package]]
+name = "axiom-worldgen-demo"
+version = "0.1.0"
+dependencies = [
+ "axiom-forest",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-scatter",
+ "axiom-streaming",
+ "axiom-world",
 ]
 
 [[package]]

@@ -1,0 +1,5 @@
+[app]
+name = "worldgen-demo"
+crate_name = "axiom-worldgen-demo"
+allowed_layers = ["kernel", "math"]
+allowed_modules = ["streaming", "scatter", "forest", "world"]

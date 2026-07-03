@@ -1,0 +1,101 @@
+[package]
+name = "axiom-game-retro-fps"
+description = "retro FPS — a first-person-shooter cartridge built on the Axiom engine: a cube-walled level, the engine's first-person controller, chasing cube enemies. A `games/` cartridge (not an app leaf): it exposes `retro_fps_start` (the wasm browser entry) and `build_retro_fps_app` (a headless `RunningApp`), so any host — the gallery showcase, the workspace dev console — can load it. Native agent drivers survive as feature-gated bins."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+# The agent driver bin is declared explicitly; cargo must not auto-discover the
+# `render.rs` / `bridge.rs` submodules of that bin as bins of their own.
+autobins = false
+
+# `cdylib` for the wasm bundle a browser host boots (`retro_fps_start`); `rlib` so a
+# host (gallery/workspace) and the native agent bin + tests can compose the crate.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# retro FPS's native agent-bridge server: drives the real game headlessly and answers
+# JSON over HTTP. Native-only deps, behind `retro-fps-agent` so the default gates and
+# the wasm build never compile it.
+[[bin]]
+name = "retro-fps-agent"
+path = "src/bin/agent.rs"
+required-features = ["retro-fps-agent"]
+
+[features]
+# retro FPS headless agent server. Native-only optional deps.
+retro-fps-agent = [
+    "dep:tiny_http",
+    "dep:serde_json",
+    "dep:tungstenite",
+    "dep:axiom-agent",
+    "dep:axiom-perception",
+]
+# Adds the native offscreen wgpu renderer so the agent can read back images.
+retro-fps-agent-render = ["retro-fps-agent", "dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:png"]
+
+# Native + wasm dependencies (the game core builds on both: native for the pure
+# game tests, wasm for the live browser arm).
+[dependencies]
+# The engine umbrella (App/scene/camera/render authoring + the live wgpu backend).
+axiom = { path = "../../modules/axiom" }
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-interface = { path = "../../crates/axiom-interface" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Native-only optional deps for the agent driver.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+axiom-agent = { path = "../../modules/axiom-agent", optional = true }
+axiom-perception = { path = "../../modules/axiom-perception", optional = true }
+tiny_http = { version = "0.12", optional = true }
+serde_json = { version = "1", optional = true }
+tungstenite = { version = "0.24", optional = true }
+wgpu = { version = "25", optional = true }
+bytemuck = { version = "1", optional = true }
+pollster = { version = "0.4", optional = true }
+png = { version = "0.17", optional = true }
+
+# Browser/live arm only: the wasm-bindgen glue, panic hook, live windowing loop,
+# the debug overlay, and retro_fps's web-sys surface.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Navigator",
+    "Document",
+    "Location",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "CssStyleDeclaration",
+    "DomRect",
+    "ImageData",
+    "Performance",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "MouseEvent",
+    "PointerEvent",
+    "WebSocket",
+    "EventSource",
+    "MessageEvent",
+    "BinaryType",
+    "console",
+] }
+
+# Native integration-test only: the deterministic frame recorder (the
+# replay-determinism proof). Never enters the wasm bundle.
+[dev-dependencies]
+axiom-recording = { path = "../../modules/axiom-recording" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

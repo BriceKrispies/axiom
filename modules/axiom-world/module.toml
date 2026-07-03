@@ -1,0 +1,38 @@
+# Axiom module manifest — axiom-world (a FEATURE module).
+#
+# The per-frame streaming-world plan. Given the camera and a config, it decides —
+# in one call — which chunks to LOAD and UNLOAD (the residency ring around the
+# camera's focus chunk) and which of the loaded chunks are VISIBLE this frame and
+# at what level of detail (frustum culling + distance-banded LOD). That is the
+# reusable policy every streamed, culled, LOD'd world runs each frame, so an app
+# composes one `WorldApi::frame_plan` instead of re-deriving residency + culling +
+# LOD and wiring them together by hand.
+#
+# It is a FEATURE module (kind = "feature-module"): it COMPOSES two engine
+# modules — `streaming` (the residency ring) and `visibility` (frustum cull +
+# LOD) — which is exactly what an isolated engine module may not do. It holds no
+# payload: the caller owns the chunk geometry and performs the load/draw the plan
+# directs (the app supplies each chunk's world AABB via a closure, so this module
+# never needs to know terrain). Its whole behavioral surface is one facade,
+# `WorldApi`; `WorldConfig`, `WorldFramePlan`, and `VisibleChunk` are the pure
+# value-type vocabulary it takes in and hands back.
+
+[module]
+name = "world"
+crate_name = "axiom-world"
+kind = "feature-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = [
+    "streaming",
+    "visibility",
+]
+
+introduced_capabilities = [
+    "streaming-world-frame-plan",
+    "chunk-residency-visibility-lod",
+]

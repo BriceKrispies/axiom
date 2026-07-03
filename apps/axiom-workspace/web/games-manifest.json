@@ -1,0 +1,9 @@
+[
+  {
+    "id": "retro_fps",
+    "title": "retro FPS (first-person)",
+    "bundle": "./games/retro-fps/axiom_game_retro_fps.js",
+    "entry": "retro_fps_start",
+    "canvas": "axiom-retro-fps-canvas"
+  }
+]

@@ -1,0 +1,22 @@
+[package]
+name = "axiom-worldgen-demo"
+description = "Axiom app: a headless proof that the chunked-worldgen substrate streams, culls, and scales. Walks a camera across an endless procedural forest, composing axiom-world (residency + frustum cull + LOD) with axiom-forest (per-chunk trees over axiom-scatter), and reports the resident / visible / drawn-tree counts each step — plus a byte-identical replay, proving determinism."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-worldgen-demo"
+path = "src/main.rs"
+
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-streaming = { path = "../../modules/axiom-streaming" }
+axiom-scatter = { path = "../../modules/axiom-scatter" }
+axiom-forest = { path = "../../modules/axiom-forest" }
+axiom-world = { path = "../../modules/axiom-world" }
+
+[lints.rust]
+unsafe_code = "forbid"

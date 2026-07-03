@@ -479,3 +479,68 @@ body {
   color: #f2f2f0;
   font-weight: 700;
 }
+
+/* ---- Runtime console (cartridge loader) --------------------------------- */
+/* The workspace as a dev console: a game-selector that loads a games/ cartridge
+   live into the viewport. Sits above the panel grid, persistent across the
+   reducer's re-renders. */
+.ws-cartridge-host {
+  margin: 8px;
+  border: 1px solid #b7bcc4;
+  background: #fff;
+}
+
+.ws-cartridge-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: #eef0f3;
+  border-bottom: 1px solid #b7bcc4;
+  font: 12px/1.2 ui-monospace, monospace;
+}
+
+.ws-cartridge-heading {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #2b2f36;
+}
+
+.ws-cartridge-label {
+  color: #55606c;
+}
+
+.ws-cartridge-select {
+  font: 12px ui-monospace, monospace;
+  padding: 3px 6px;
+  border: 1px solid #9aa1ab;
+  background: #fff;
+}
+
+.ws-cartridge-status {
+  margin-left: auto;
+  color: #3a7a3a;
+  font-weight: 600;
+}
+
+.ws-cartridge-stage {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 320px;
+  padding: 10px;
+  background: #0b0d10;
+}
+
+.ws-cartridge-idle {
+  color: #8b93a1;
+  font: 13px ui-monospace, monospace;
+}
+
+.ws-cartridge-canvas {
+  width: 100%;
+  max-width: 800px;
+  height: auto;
+  image-rendering: auto;
+  background: #000;
+}

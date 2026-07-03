@@ -9,8 +9,12 @@
   <body>
     <header class="ws-header">
       <span class="ws-title">Axiom Workspace</span>
-      <span class="ws-subtitle">placeholder developer shell — no runtime attached</span>
+      <span class="ws-subtitle">dev console — load a games/ cartridge into the runtime viewport</span>
     </header>
+
+    <!-- The runtime console: loads a games/ cartridge live. Persistent (mounted
+         outside #workspace-root, which the reducer clears on every dispatch). -->
+    <div id="cartridge-host" class="ws-cartridge-host"></div>
 
     <div id="workspace-root" class="ws-root"></div>
 

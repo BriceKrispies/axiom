@@ -44,6 +44,14 @@ impl Residency {
         self.resident.contains(&coord)
     }
 
+    /// Every currently-resident coordinate, in the set's deterministic sorted
+    /// order. This is the snapshot a renderer iterates each frame to decide which
+    /// *loaded* chunks to cull and draw (the load/unload delta reports only what
+    /// *changed*; visibility needs the whole resident set).
+    pub fn resident_coords(&self) -> Vec<ChunkCoord> {
+        self.resident.iter().copied().collect()
+    }
+
     /// Advance the ring to a new focus and return the delta.
     ///
     /// **Loads** every coordinate in the `[-radius, radius]²` square around
@@ -245,5 +253,20 @@ mod tests {
     fn residency_is_debuggable() {
         let text = format!("{:?}", Residency::new());
         assert!(text.contains("Residency"));
+    }
+
+    #[test]
+    fn resident_coords_snapshots_the_loaded_set_in_sorted_order() {
+        let mut r = Residency::new();
+        assert!(r.resident_coords().is_empty());
+        r.apply(ORIGIN, 1, 0, clean); // 9 chunks resident
+        let coords = r.resident_coords();
+        assert_eq!(coords.len(), 9);
+        // BTreeSet order: the min corner sorts first, the max corner last.
+        assert_eq!(coords[0], ChunkCoord::new(-1, -1));
+        assert_eq!(coords[8], ChunkCoord::new(1, 1));
+        let mut sorted = coords.clone();
+        sorted.sort();
+        assert_eq!(coords, sorted);
     }
 }

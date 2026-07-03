@@ -214,6 +214,80 @@ impl Fixture {
         self
     }
 
+    /// A host app that declares the games it may load in `allowed_games`.
+    #[allow(clippy::too_many_arguments)]
+    fn host_app_crate(
+        &self,
+        dir_rel: &str,
+        crate_name: &str,
+        app_name: &str,
+        allowed_layers: &[&str],
+        allowed_modules: &[&str],
+        allowed_games: &[&str],
+        deps: &[(&str, &str)],
+        lib_rs: &str,
+    ) -> &Self {
+        let dir = self.root.join(dir_rel);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        self.write_cargo_toml(&dir, crate_name, deps);
+        let join = |xs: &[&str]| {
+            xs.iter()
+                .map(|s| format!("\"{s}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let app_toml = format!(
+            "[app]\n\
+             name = \"{app_name}\"\n\
+             crate_name = \"{crate_name}\"\n\
+             allowed_layers = [{}]\n\
+             allowed_modules = [{}]\n\
+             allowed_games = [{}]\n",
+            join(allowed_layers),
+            join(allowed_modules),
+            join(allowed_games)
+        );
+        std::fs::write(dir.join("app.toml"), app_toml).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), lib_rs).unwrap();
+        self
+    }
+
+    /// A game (cartridge tier) at `games/<name>/` with a `game.toml`.
+    #[allow(clippy::too_many_arguments)]
+    fn game_crate(
+        &self,
+        dir_rel: &str,
+        crate_name: &str,
+        game_name: &str,
+        allowed_layers: &[&str],
+        allowed_modules: &[&str],
+        deps: &[(&str, &str)],
+        lib_rs: &str,
+    ) -> &Self {
+        let dir = self.root.join(dir_rel);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        self.write_cargo_toml(&dir, crate_name, deps);
+        let join = |xs: &[&str]| {
+            xs.iter()
+                .map(|s| format!("\"{s}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let game_toml = format!(
+            "[game]\n\
+             name = \"{game_name}\"\n\
+             crate_name = \"{crate_name}\"\n\
+             kind = \"rust\"\n\
+             allowed_layers = [{}]\n\
+             allowed_modules = [{}]\n",
+            join(allowed_layers),
+            join(allowed_modules)
+        );
+        std::fs::write(dir.join("game.toml"), game_toml).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), lib_rs).unwrap();
+        self
+    }
+
     /// A workspace member with a Cargo.toml but no manifest of any kind.
     /// Used to test `UnknownPackageClass`.
     fn unclassified_crate(&self, dir_rel: &str, crate_name: &str, deps: &[(&str, &str)]) -> &Self {
@@ -1042,4 +1116,121 @@ fn real_repo_class_aware_check_passes() {
 fn _unused() {
     let _ = lib_using_axiomkernel();
     let _ = lib_using_real_kernel();
+}
+
+// --- Game (cartridge tier) rules ---
+
+#[test]
+fn case_game_valid_cartridge_hosted_by_app_passes() {
+    // A game composes a layer (allowed) and is loaded by a host app that lists
+    // it in `allowed_games`. No violation: this is the sanctioned shape.
+    let f = Fixture::new("game_valid_hosted");
+    f.workspace(&["crates/kernel", "games/retro-fps", "apps/gallery"])
+        .layer_crate("crates/kernel", "gv-kernel", "kernel", &[], &[], "pub struct K;\n")
+        .game_crate(
+            "games/retro-fps",
+            "gv-retro_fps",
+            "retro_fps",
+            &["kernel"],
+            &[],
+            &[("gv-kernel", "../../crates/kernel")],
+            "pub fn app() {}\n",
+        )
+        .host_app_crate(
+            "apps/gallery",
+            "gv-gallery",
+            "gallery",
+            &["kernel"],
+            &[],
+            &["retro_fps"],
+            &[
+                ("gv-kernel", "../../crates/kernel"),
+                ("gv-retro_fps", "../../games/retro-fps"),
+            ],
+            "pub fn main() {}\n",
+        );
+    let report = check_architecture(&f.root);
+    assert!(
+        report.is_ok(),
+        "expected a valid game+host to pass; violations: {:?}",
+        report.violations()
+    );
+}
+
+#[test]
+fn case_game_imported_by_a_layer_fails() {
+    // A layer depending on a game is `NonHostDependsOnGame`: games are content,
+    // not the reusable spine.
+    let f = Fixture::new("game_imported_by_layer");
+    f.workspace(&["crates/kernel", "games/retro-fps"])
+        .game_crate(
+            "games/retro-fps",
+            "gil-retro_fps",
+            "retro_fps",
+            &[],
+            &[],
+            &[],
+            "pub fn app() {}\n",
+        )
+        .layer_crate(
+            "crates/kernel",
+            "gil-kernel",
+            "kernel",
+            &[],
+            &[("gil-retro_fps", "../../games/retro-fps")],
+            "pub struct K;\n",
+        );
+    let report = check_architecture(&f.root);
+    assert!(
+        report.has_kind(ViolationKind::NonHostDependsOnGame),
+        "violations: {:?}",
+        report.violations()
+    );
+}
+
+#[test]
+fn case_app_hosting_unlisted_game_fails() {
+    // An app depending on a game it does NOT list in `allowed_games` is
+    // `AppDependsOnGameNotAllowed`.
+    let f = Fixture::new("game_unlisted_host");
+    f.workspace(&["games/retro-fps", "apps/gallery"])
+        .game_crate("games/retro-fps", "gu-retro_fps", "retro_fps", &[], &[], &[], "pub fn app() {}\n")
+        .app_crate(
+            "apps/gallery",
+            "gu-gallery",
+            "gallery",
+            &[],
+            &[],
+            &[("gu-retro_fps", "../../games/retro-fps")],
+            "pub fn main() {}\n",
+        );
+    let report = check_architecture(&f.root);
+    assert!(
+        report.has_kind(ViolationKind::AppDependsOnGameNotAllowed),
+        "violations: {:?}",
+        report.violations()
+    );
+}
+
+#[test]
+fn case_game_depending_on_an_app_fails() {
+    // A game may not depend on an app: `GameDependsOnApp`.
+    let f = Fixture::new("game_dep_on_app");
+    f.workspace(&["apps/host", "games/retro-fps"])
+        .app_crate("apps/host", "gda-host", "host", &[], &[], &[], "pub fn main() {}\n")
+        .game_crate(
+            "games/retro-fps",
+            "gda-retro_fps",
+            "retro_fps",
+            &[],
+            &[],
+            &[("gda-host", "../../apps/host")],
+            "pub fn app() {}\n",
+        );
+    let report = check_architecture(&f.root);
+    assert!(
+        report.has_kind(ViolationKind::GameDependsOnApp),
+        "violations: {:?}",
+        report.violations()
+    );
 }

@@ -19,14 +19,10 @@ crate-type = ["cdylib", "rlib"]
 
 # --- Native agent drivers + the physics report runner (explicit, feature-gated) ---
 
-# retro FPS's native agent-bridge server: drives the real retro FPS game headlessly and
-# answers JSON over HTTP. Native-only deps, behind `retro-fps-agent` so the default
-# gates and the wasm build never compile it. (Was `axiom-retro-fps-browser`'s `agent`
-# bin / `agent` feature.)
-[[bin]]
-name = "retro-fps-agent"
-path = "src/retro_fps/bin/agent.rs"
-required-features = ["retro-fps-agent"]
+# retro FPS is now a `games/retro-fps` cartridge (the gallery composes it — see the
+# `axiom-game-retro-fps` wasm dep + `allowed_games` in app.toml). Its native agent
+# driver lives with the cartridge: `cargo build -p axiom-game-retro-fps --features
+# retro-fps-agent`.
 
 # Growth's native agent driver: walks the headless GroundSim through the reusable
 # agent harness to the summit. Native-only deps, behind `growth-agent`. (Was
@@ -58,19 +54,6 @@ path = "src/soccer_penalty/bin/agent.rs"
 required-features = ["soccer-penalty-agent"]
 
 [features]
-# retro FPS headless agent server. Native-only optional deps. The kernel/runtime
-# layers and serde are now always-on normal deps (other demos need them), so they
-# are not listed here as `dep:` — only the genuinely optional, native-only crates.
-retro-fps-agent = [
-    "dep:tiny_http",
-    "dep:serde_json",
-    "dep:tungstenite",
-    "dep:axiom-agent",
-    "dep:axiom-perception",
-]
-# Adds the native offscreen wgpu renderer so the retro FPS agent can read back images.
-retro-fps-agent-render = ["retro-fps-agent", "dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:png"]
-
 # The Visual Target 001 diorama runner + convergence comparator. Reuses the growth
 # capture backends (offscreen GPU + software Canvas 2D) and the png codec; all
 # native-only optional deps, so the browser bundle never sees them.
@@ -178,10 +161,7 @@ axiom-canvas2d-backend = { path = "../../modules/axiom-canvas2d-backend", option
 tiny_http = { version = "0.12", optional = true }
 serde_json = { version = "1", optional = true }
 tungstenite = { version = "0.24", optional = true }
-# retro FPS agent-render only: offscreen wgpu + PNG.
-wgpu = { version = "25", optional = true }
-bytemuck = { version = "1", optional = true }
-pollster = { version = "0.4", optional = true }
+# Offscreen PNG capture for growth's visual-target runner.
 png = { version = "0.17", optional = true }
 
 # Browser/live arm only: the wasm-bindgen glue, panic hook, the live windowing
@@ -189,6 +169,10 @@ png = { version = "0.17", optional = true }
 # surface. Confined to wasm32, so native `cargo test --workspace` compiles none of
 # it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# The retro FPS cartridge (games/retro-fps): the gallery is a HOST that composes it and
+# re-exports its `retro_fps_start` wasm entry into the bundle. Listed in app.toml's
+# `allowed_games`. wasm-only — the gallery boots retro_fps in the browser.
+axiom-game-retro-fps = { path = "../../games/retro-fps" }
 axiom-windowing = { path = "../../modules/axiom-windowing" }
 axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
 wasm-bindgen = "0.2"

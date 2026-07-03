@@ -1,15 +1,17 @@
-# iter44 structural: branch scaffold + dense leaves along branches. Canopy denser +
-# attached (not a floating card cloud). vegetation_density 2->3. artifact_level stays 2
-# (the near/foreground leaf-card sprays remain — the next attack).
-terrain_silhouette = 3
-foreground_material_detail = 3
+# iter49 fog_and_haze: fixed the BLOWOUT — fog/clear colour 0.80->0.44 brought the
+# background from a clipping near-white (mean [196,181,153], 3.5% clipped to 255) to a
+# controlled warm-grey mist (mean [140,123,97], 0% clipped), close to the reference
+# ([95,79,64]). fog_and_haze 3->4 (controlled mist); contrast_and_exposure 3->4 (blown
+# highlights gone). No non-attacked axis dropped.
+terrain_silhouette = 4
+foreground_material_detail = 4
 vegetation_density = 3
 vegetation_clumping = 3
-depth_separation = 3
-fog_and_haze = 3
+depth_separation = 4
+fog_and_haze = 4
 lighting_directionality = 3
 color_palette = 3
-contrast_and_exposure = 3
+contrast_and_exposure = 4
 object_scale = 4
 horizon_composition = 3
-artifact_level = 2
+artifact_level = 3

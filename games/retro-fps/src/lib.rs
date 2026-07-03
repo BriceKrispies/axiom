@@ -927,6 +927,13 @@ fn block(x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32) -> Transform {
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+// The cartridge's browser entry, re-exported at the crate root so a HOST (the
+// gallery, the workspace) can `pub use axiom_game_retro_fps::retro_fps_start;` — which both
+// names the entry and links its `#[wasm_bindgen]` registration into the host's
+// wasm bundle. wasm-only.
+#[cfg(target_arch = "wasm32")]
+pub use web::retro_fps_start;
+
 // The retro FPS agent: drives the real game through the reusable `axiom-agent` module
 // (observe → decide → emit player-equivalent intents) and owns the app-side
 // translation between the module's neutral contracts and the retro FPS `Intent`. The

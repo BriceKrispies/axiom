@@ -35,3 +35,9 @@ allowed_modules = [
     "gpu-backend",
     "canvas2d-backend",
 ]
+
+# The cartridges (games/) this host loads. retro FPS was extracted out of this crate
+# into `games/retro-fps`; the gallery composes it as a host.
+allowed_games = [
+    "retro_fps",
+]

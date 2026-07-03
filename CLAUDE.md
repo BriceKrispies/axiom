@@ -277,7 +277,8 @@ package as exactly one of them and fails the build if classification or
 the per-category rules below are violated.
 
 > **Layers are the engine's layer DAG. Modules are isolated capabilities.
-> Apps compose modules. Tools are repo tooling.**
+> Games are the cartridges (titles built on the engine). Apps compose modules
+> and host games. Tools are repo tooling.**
 >
 > - **Layers** (`crates/<name>/` + `layer.toml`) form a directed acyclic
 >   graph keyed on each layer's `depends_on` (the kernel is a root; e.g.
@@ -296,13 +297,25 @@ the per-category rules below are violated.
 >     render pipeline composing scene + resources + render + webgpu). It
 >     still may never depend on an app or a tool, and may only be depended
 >     on by apps (or another feature module that lists it).
+> - **Games** (`games/<name>/` + `game.toml`) are the **cartridge tier**: a
+>   *title* built on the engine (it composes layers and modules like an app,
+>   declaring them in `allowed_layers`/`allowed_modules`), but — unlike an app
+>   — it is **not a leaf**. A game exposes one uniform, host-loadable entry (a
+>   Rust `fn app() -> App`, or a `@axiom/game` bundle) and *host apps may depend
+>   on it and load it*. A game is content, not a reusable engine capability, so
+>   it is neither a module (a capability) nor an app (a leaf); it never depends
+>   on an app, a tool, or another game, and — like an app — it is exempt from
+>   the branchless and 100%-coverage spine laws. The console/cartridge metaphor:
+>   hosts (the gallery showcase, the workspace dev console, the game-runtime) are
+>   consoles; games are the cartridges they all load.
 > - **Apps** (`apps/<name>/` + `app.toml`) are the only *leaf* composition
->   roots. An app may depend on layers and modules (engine or feature).
+>   roots. An app may depend on layers, modules (engine or feature), and the
+>   **games it lists in `allowed_games`** (a host app loading its cartridges).
 >   Nothing else may depend on an app — apps are leaves in the dependency
 >   graph.
 > - **Tools** (`tools/<name>/`, plus the existing `xtask` crate) are
 >   repo tooling. Tools must not be part of the runtime engine
->   dependency graph; layers, modules, and apps must not depend on
+>   dependency graph; layers, modules, apps, and games must not depend on
 >   tools.
 
 Hard rules (mechanically enforced):
@@ -362,8 +375,8 @@ Hard rules (mechanically enforced):
     `utils`, `helpers`, `common`, or `misc` are rejected in any layer or
     module.
 12. **Every workspace package must classify.** A package that is not under
-    `crates/`, `modules/`, `apps/`, or `tools/` (and is not the existing
-    `xtask` crate, nor the `axiom-zones` support crate) fails as
+    `crates/`, `modules/`, `apps/`, `games/`, or `tools/` (and is not the
+    existing `xtask` crate, nor the `axiom-zones` support crate) fails as
     `UnknownPackageClass`.
 13. **Support crates are build-time engine support, not the spine.** The
     `axiom-zones` crate (the zone-marker proc-macros — see "Zone markers"
@@ -373,6 +386,20 @@ Hard rules (mechanically enforced):
     coverage gate. It is the one sanctioned escape from "layers depend only
     on lower layers"; adding another support crate is a deliberate amendment
     here, not a default.
+14. **Games are content, loaded only by hosts.** A game (`games/<name>/` +
+    `game.toml`) composes layers and modules like an app, but is the *cartridge
+    tier*: a layer, module, or tool that depends on a game is
+    `NonHostDependsOnGame` (games are content, not the reusable spine); only a
+    **host app** that lists the game in `allowed_games` may depend on it (an
+    unlisted game is `AppDependsOnGameNotAllowed`, an `allowed_games` name that
+    matches no game is `AppAllowedGameUnknown`). A game must not depend on an app
+    (`GameDependsOnApp`), a tool (`GameDependsOnTool`), or another game
+    (`GameDependsOnGame`), and may depend only on the layers/modules in its own
+    `game.toml` (`GameDependsOnLayerNotAllowed` / `GameDependsOnModuleNotAllowed`;
+    an unknown allowlisted name is `GameAllowedLayerUnknown` /
+    `GameAllowedModuleUnknown`). Like an app, a game is exempt from the
+    branchless and 100%-coverage spine laws (`games/` is in the sanctioned
+    coverage-ignore scope).
 
 Architecture violations fail `cargo xtask check-architecture` and the
 workspace test `real_repo_class_aware_check_passes`. The checker reads
@@ -415,15 +442,34 @@ name = "rotating-cube-demo"
 crate_name = "axiom-demo-rotating-cube"
 allowed_layers = ["kernel", "runtime", "math", "host", "frame"]
 allowed_modules = ["scene", "render"]
+allowed_games = []                   # the games (cartridges) this host loads
 ```
+
+### Writing a `game.toml` manifest
+
+One manifest lives in each game crate at `games/<name>/game.toml`:
+
+```toml
+[game]
+name = "retro_fps"                        # short logical game name (unique)
+crate_name = "axiom-game-retro-fps"       # must match the cargo package name
+kind = "rust"                        # "rust" (a crate exposing `fn app() -> App`)
+                                     # or "bundle" (a @axiom/game TS bundle)
+allowed_layers = ["kernel", "runtime", "math", "host", "frame"]
+allowed_modules = ["engine", "windowing"]
+```
+
+A game composes the engine the same way an app does, but a **host app** loads it
+by listing its `name` in the app's `allowed_games`.
 
 ### Repo structure summary
 
 ```text
 crates/    # layers (the layer DAG) + the axiom-zones support crate
-modules/   # isolated capabilities (future)
-apps/      # composition roots (future)
-tools/     # repo tooling (future) — incl. tools/lints (dylint rulebook)
+modules/   # isolated capabilities
+games/     # cartridges — titles built on the engine, loaded by host apps
+apps/      # composition roots (hosts + demos)
+tools/     # repo tooling — incl. tools/lints (dylint rulebook)
 ```
 
 The `xtask` crate is a tool; it has no `layer.toml`, no `module.toml`,

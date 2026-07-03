@@ -1823,3 +1823,198 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 3
 artifact_level = 2
+
+[[iteration]]
+iteration = 45
+attacked_axis = "foreground_material_detail"
+changed_files = ["apps/axiom-gallery/src/growth/visual_target/build.rs", "manifest.toml", "abstractions/0008.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "Ground-detail overhaul (what the reference's authored floor implies): a SECOND ground-plant species (fern_unit_mesh upright sedge frond) split from the scatter by per-instance hash into two batches, and per-leaf 3D tilt (hashed horizontal axis) + brightness jitter + wider palette on the litter, plus denser ground plants (12k->18k). Floor now reads as mixed, varied, tilted plants + a colour-varied leaf bed instead of one plant type on flat sprites. foreground_material_detail 2->3 (recalibrated down from the audit's generous 3, then improved). artifact_level unchanged at 2 (canopy leaf-card sprays remain). No non-attacked axis dropped >=2. GPU render deterministic (mean=0). Promoted. App-tier; dylint ratchet <= baseline. Abstraction 0008."
+next_attacked_axis = "artifact_level"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 2
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 3
+foreground_material_detail = 3
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[[iteration]]
+iteration = 46
+attacked_axis = "foreground_material_detail"
+changed_files = ["apps/axiom-gallery/src/growth/visual_target/build.rs", "manifest.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "Rechecked the reference: its floor BASE is dark brown soil with the leaves scattered on TOP (dark earth shows between them), not a bright carpet. Ours baked an 80-95% orange leaf-litter into the terrain base (`leafy`), making the floor read as one flat glowing sheet. Fix: terrain base is now dark soil/mulch varied by coarse+fine noise (dark mulch <-> lighter dirt) + sparse moss, with only a 12% ground-band tint; the fallen leaves are the litter INSTANCES on top. Manifest ground_bands darkened to soil tones to match. Floor now reads dark-earth-with-leaves like the reference. foreground_material_detail 3->4 (last structural floor-wrong fixed; residual olive tint + sprite plants = the 4->5 gap). depth_separation/color_palette slightly helped (darker foreground, less orange uniformity) but held at 3 to avoid inflation; no non-attacked axis dropped. GPU render deterministic (mean=0). Promoted. App-tier config/data (no new primitive)."
+next_attacked_axis = "artifact_level"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 3
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 3
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[[iteration]]
+iteration = 47
+attacked_axis = "artifact_level"
+changed_files = ["apps/axiom-gallery/src/growth/visual_target/build.rs", "manifest.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "The frame-edge foliage read as large, well-separated leaf cards floating with big gaps (confetti) + eye-level clumps near the close framing trees' bases — the dominant artifact. The reference foliage is a dense soft mass, never separated floating cards. Root cause: cards too large + spraying too far off the branch lines. Fix (app-tier): tighten the per-leaf perpendicular jitter to the branch (0.9->0.55 in build.rs), smaller + denser canopy cards (card_scale 0.60->0.45, leaves_per_branch 24->34 to hold coverage), and fewer eye-level understory cards (5->2). Edge card-sprays largely eliminated; foliage reads as a mass. artifact_level 2->3 (residual: a few small floating leaves + the blown-bright background). vegetation_density held at 3 (denser leaves compensate); no non-attacked axis dropped. GPU render deterministic (mean=0). Promoted. Config/data (no new primitive)."
+next_attacked_axis = "terrain_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 3
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3
+
+[[iteration]]
+iteration = 48
+attacked_axis = "terrain_silhouette"
+changed_files = ["manifest.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "Rechecked the reference: it is FEW, well-spaced, moderately thick beech trunks with air + mist between them (you see THROUGH the forest into atmospheric depth), not our dense picket wall of 440 thin poles. Fix (manifest [scatter]): count 440->160, min_spacing 1.45->3.2, trunk_radius [0.12,0.40]->[0.20,0.60], canopy_radius [2.4,5.4]->[2.8,6.0], clusters 14/9m->12/11m. Fewer trees thinned the canopy, so (coherent same change) fuller crowns: [foliage] branches 6->8, leaves_per_branch 34->42, so each of the fewer/bigger trees reads full without reintroducing the tightened-away spray. Result: spaced mature trees with clear depth, like the reference. terrain_silhouette 3->4; depth_separation 3->4 (real see-through misty depth); vegetation_density held at 3 (fuller crowns compensate for fewer trees); no non-attacked axis dropped. GPU render deterministic (mean=0). Promoted. Config-only (no new primitive)."
+next_attacked_axis = "vegetation_density"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3
+
+[[iteration]]
+iteration = 49
+attacked_axis = "fog_and_haze"
+changed_files = ["manifest.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "User-directed: fix the background BLOWOUT. Measured: the champion background clipped to near-white (upper-third mean [196,181,153], 3.5% of pixels fully clipped to 255), ~2x the reference's controlled warm-grey mist (mean [95,79,64], 0% clipped). Cause: the fog colour [0.80,0.76,0.67] is both the aerial-perspective target AND the sky/clear background, and post-process contrast pushed it to clip. Fix (manifest [fog]): colour [0.80,0.76,0.67]->[0.44,0.40,0.33]. Candidate background is now [140,123,97] with 0% clipped — a controlled warm mist the distant trunks read against, close to the reference. fog_and_haze 3->4 (controlled mist, no clip); contrast_and_exposure 3->4 (the blown-highlights flaw the audit flagged is gone); depth_separation held at 4 (trunks still separate against the mist); no non-attacked axis dropped. GPU render deterministic (mean=0). Promoted. Config-only."
+next_attacked_axis = "vegetation_density"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3

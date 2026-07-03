@@ -1,0 +1,40 @@
+# Axiom module manifest — axiom-forest (a FEATURE module).
+#
+# A chunk's worth of trees. Given a world seed, a cell, and a forest config, it
+# composes the scatter field (axiom-scatter) into seated, deterministically-varied
+# tree transforms for that cell — each tree placed at a scattered site, seated on
+# the ground (via a caller-supplied height function), and given a stable per-tree
+# yaw and size. It also offers a simple unit tree mesh to instance them with. This
+# is the reusable vegetation a streamed world grows on each loaded chunk, so an
+# app composes `ForestApi` instead of re-deriving "scatter → seated tree
+# instances" by hand.
+#
+# It is a FEATURE module (kind = "feature-module"): it COMPOSES the `scatter`
+# engine module (which an isolated engine module may not do). It holds no engine
+# state and no browser API; the caller owns terrain (supplies the ground height)
+# and rendering (instances the tree mesh). Its whole behavioral surface is one
+# facade, `ForestApi`; `ForestConfig` is the pure value-type vocabulary it takes
+# in.
+#
+# This is the deliberately-thin first cut of the vegetation module: simple trees
+# proving the streamed-world loop. The diorama's full foliage/branch/leaf art
+# graduates into it incrementally.
+
+[module]
+name = "forest"
+crate_name = "axiom-forest"
+kind = "feature-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = [
+    "scatter",
+]
+
+introduced_capabilities = [
+    "chunk-tree-placement",
+    "unit-tree-mesh",
+]

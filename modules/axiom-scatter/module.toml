@@ -1,0 +1,40 @@
+# Axiom module manifest — axiom-scatter (an ENGINE module).
+#
+# Chunked deterministic point scatter: given a world seed, an integer cell
+# coordinate, a cell size, and a jittered-sub-grid rule, it emits the ground
+# positions (plus a stable per-site seed) of that cell's scattered sites. Each
+# cell's placement is a pure function of (seed, cell) via a per-cell entropy
+# address, so cells tile into a SEAMLESS infinite field: a site's position
+# depends only on its own cell, and the sub-grid gives implicit min-spacing that
+# holds across cell boundaries with no cross-cell bookkeeping.
+#
+# It is an ISOLATED engine module: it composes no other module
+# (`allowed_modules = []`) and never touches a browser API (Module Law #9). Its
+# whole behavioral surface is one facade, `ScatterApi`; `CellCoord`,
+# `ScatterRule`, and `ScatterSite` are the pure value-type vocabulary it takes in
+# and hands back (the `pub use ids::{…}` carve-out), carrying data, not state.
+#
+# Why a module, not a layer: chunked scatter is a runtime worldgen capability
+# apps and higher composers use, not an always-true engine primitive, and no
+# lower layer genuinely *uses* it. It genuinely builds on `kernel` (the
+# `Meters`/`Ratio` quantities it traffics in) and the `entropy` + `space` layers
+# (the per-cell deterministic stream keyed by a spatial address), so those are
+# its `allowed_layers`.
+
+[module]
+name = "scatter"
+crate_name = "axiom-scatter"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "entropy",
+    "space",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "chunked-deterministic-scatter",
+    "jittered-subgrid-placement",
+]
