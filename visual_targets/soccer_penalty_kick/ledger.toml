@@ -88,3 +88,167 @@ ball_fidelity           = 1
 depth_and_separation    = 4
 scale_and_proportion    = 4
 artifact_level          = 4
+
+[[iteration]]
+iteration = 3
+attacked_axis = "none"
+changed_files = ["visual_targets/soccer_penalty_kick/scorecard.champion.toml"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = "No render change. Recalibrated the whole champion scorecard from a loose 'reads-as-the-same-thing' bar to the strict PARITY bar (identical-to-reference), per user direction. Iters 1-2 scores were inflated: e.g. composition 4->3, subject 3->1, silhouette 4->2, stadium 4->2, depth 4->3, scale 4->2, color/contrast/lighting 3->2, pitch 2->1. Skill updated to score harshly and attack structurally."
+next_attacked_axis = "subject_fidelity"   # lowest (1) by axis order among {subject, pitch, ball}
+
+[iteration.scorecard_before]
+composition_and_framing = 4
+subject_fidelity        = 3
+silhouette_readability  = 4
+pitch_detail            = 2
+stadium_and_crowd       = 4
+color_palette           = 3
+contrast_and_exposure   = 3
+lighting_and_shadow     = 3
+ball_fidelity           = 1
+depth_and_separation    = 4
+scale_and_proportion    = 4
+artifact_level          = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 1
+silhouette_readability  = 2
+pitch_detail            = 1
+stadium_and_crowd       = 2
+color_palette           = 2
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[[iteration]]
+iteration = 4
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_stage1_diorama.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_pass2_depth_ordering.rs",
+  "visual_targets/soccer_penalty_kick/abstractions/0001.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "STRUCTURAL attack (abstraction 0001, inexpressible at config): reshaped the kicker from a static 9-box T-pose into an 11-part mid-stride figure -- staggered planted/trailing legs, forward lean, counter-swinging arms, plus a neck, a smaller head, and a dark hair block (reusing GoalieHair). subject_fidelity 1->2 (reads as a leaning player from behind, not a cube stack). No non-attacked axis moved; render clean. Object/render counts updated (167->169, 173->175). Promoted."
+next_attacked_axis = "pitch_detail"   # lowest (1) by axis order among {pitch, ball}; ball also queued
+
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity        = 1
+silhouette_readability  = 2
+pitch_detail            = 1
+stadium_and_crowd       = 2
+color_palette           = 2
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 2
+pitch_detail            = 1
+stadium_and_crowd       = 2
+color_palette           = 2
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[[iteration]]
+iteration = 5
+attacked_axis = "pitch_detail"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/low_poly_assets.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "pitch_detail 1->2. Checked structural elements first: the penalty arc + box-front line sit at/behind the camera (eye z~17.8, box front z=16.5), so adding that geometry would render nothing (coverage theater). The VISIBLE pitch gap is faint mow stripes + hairline lines, which config closes: boosted GRASS_LIGHT/DARK contrast + warmth (bands now read as pronounced mown stripes) and thickened LINE_THICKNESS 0.12->0.17. Coupled: color_palette 2->3 (grass less minty). No non-attacked axis dropped. Promoted."
+next_attacked_axis = "ball_fidelity"
+
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 2
+pitch_detail            = 1
+stadium_and_crowd       = 2
+color_palette           = 2
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 2
+pitch_detail            = 2
+stadium_and_crowd       = 2
+color_palette           = 3
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[[iteration]]
+iteration = 6
+attacked_axis = "ball_fidelity"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_stage1_diorama.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_pass2_depth_ordering.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "STRUCTURAL: found the root cause of the blank-white ball -- the 2 existing dark panel quads sat at panel_z (11.22) INSIDE the sphere surface (11.32), so they were occluded and never rendered. Replaced them with 6 dark panels placed PROUD of the camera-facing upper-front hemisphere (center + unit_dir * radius*1.03), so the ball now reads as a black/white soccer ball. ball_fidelity 1->2. Object/render counts 169->173, 175->179. No non-attacked axis dropped. Promoted."
+next_attacked_axis = "subject_fidelity"   # goalie still boxy; many axes now tied at 2
+
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 2
+pitch_detail            = 2
+stadium_and_crowd       = 2
+color_palette           = 3
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 2
+pitch_detail            = 2
+stadium_and_crowd       = 2
+color_palette           = 3
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 2
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4

@@ -100,7 +100,9 @@ pub const PENALTY_BOX_FRONT_Z: f32 = 16.5;
 pub const PENALTY_BOX_HALF_WIDTH: f32 = 20.15;
 pub const GOAL_AREA_FRONT_Z: f32 = 5.5;
 pub const GOAL_AREA_HALF_WIDTH: f32 = 9.16;
-pub const LINE_THICKNESS: f32 = 0.12;
+// Thicker so the visible goal-area / goal-line markings read crisply from the
+// elevated camera (they were hairline-thin).
+pub const LINE_THICKNESS: f32 = 0.17;
 
 // Actors. The kicker is nearest the camera, the ball sits between kicker and
 // goal (on the spot), the goalie stands just in front of the goal line.
@@ -308,39 +310,52 @@ struct PuppetMaterials {
     skin: PenaltyMaterialId,
     legs: PenaltyMaterialId,
     hands: PenaltyMaterialId,
+    hair: PenaltyMaterialId,
 }
 
-/// The nine per-part labels of a puppet, in emission order:
-/// leg.left, leg.right, shorts, torso, head, arm.left, arm.right, hand.left,
-/// hand.right. Passing them in keeps each puppet's parts uniquely greppable
-/// (e.g. `kicker.torso` vs `goalie.torso`).
-type PuppetLabels = [&'static str; 9];
+/// The eleven per-part labels of a puppet, in emission order:
+/// leg.left, leg.right, shorts, torso, neck, head, hair, arm.left, arm.right,
+/// hand.left, hand.right. Passing them in keeps each puppet's parts uniquely
+/// greppable (e.g. `kicker.torso`).
+type PuppetLabels = [&'static str; 11];
 
-/// Emit one low-poly humanoid puppet from primitive boxes at a ground base.
-/// `arm_spread` pushes the arms out; `crouch` lowers the upper body (bent knees).
+/// Emit one low-poly humanoid puppet from primitive boxes at a ground base, in a
+/// dynamic mid-stride run-up pose seen from behind (the reference framing): the
+/// figure leans forward toward the ball (local `-Z`), one leg planted forward and
+/// the trailing leg lifted back, and the arms swing counter to the legs for
+/// balance. Boxes can't rotate, so the lean/stride is faked with `Z`/`Y` offsets.
+/// `stride` sets the leg/arm fore-aft swing; `lean` shifts the upper body forward.
+/// A neck, a smaller head, and a hair block replace the old floating-cube head to
+/// break the boxy silhouette.
 fn puppet(
     b: &mut SceneBuilder,
     role: DioramaRole,
     base: (f32, f32),
     materials: PuppetMaterials,
-    arm_spread: f32,
-    crouch: f32,
+    stride: f32,
+    lean: f32,
     labels: PuppetLabels,
 ) {
     let (base_x, base_z) = base;
     let mut part = |x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32, m: PenaltyMaterialId, label: &'static str| {
         b.emit(role, PrimitiveShape::Box, Vec3::new(x, y, z), Vec3::new(sx, sy, sz), m, label);
     };
-    let y = |h: f32| h - crouch;
-    part(base_x - 0.16, 0.42, base_z, 0.2, 0.86, 0.22, materials.legs, labels[0]);
-    part(base_x + 0.16, 0.42, base_z, 0.2, 0.86, 0.22, materials.legs, labels[1]);
-    part(base_x, y(0.98), base_z, 0.5, 0.3, 0.26, materials.shorts, labels[2]);
-    part(base_x, y(1.4), base_z, 0.56, 0.62, 0.3, materials.jersey, labels[3]);
-    part(base_x, y(1.9), base_z, 0.26, 0.28, 0.26, materials.skin, labels[4]);
-    part(base_x - 0.34 - arm_spread, y(1.36), base_z, 0.16, 0.54, 0.16, materials.jersey, labels[5]);
-    part(base_x + 0.34 + arm_spread, y(1.36), base_z, 0.16, 0.54, 0.16, materials.jersey, labels[6]);
-    part(base_x - 0.4 - arm_spread, y(1.06), base_z, 0.17, 0.17, 0.17, materials.hands, labels[7]);
-    part(base_x + 0.4 + arm_spread, y(1.06), base_z, 0.17, 0.17, 0.17, materials.hands, labels[8]);
+    // Planted (left) leg forward and full-length; trailing (right) leg swung back
+    // and lifted (shorter box, higher centre = a bent, rising knee).
+    part(base_x - 0.15, 0.42, base_z - stride * 0.5, 0.2, 0.86, 0.22, materials.legs, labels[0]);
+    part(base_x + 0.17, 0.56, base_z + stride * 0.9, 0.2, 0.66, 0.22, materials.legs, labels[1]);
+    // Upper body leans forward over the planted foot (shifted -Z by `lean`).
+    part(base_x, 0.98, base_z - lean * 0.4, 0.5, 0.3, 0.26, materials.shorts, labels[2]);
+    part(base_x, 1.42, base_z - lean, 0.58, 0.6, 0.3, materials.jersey, labels[3]);
+    part(base_x, 1.75, base_z - lean * 1.15, 0.13, 0.13, 0.16, materials.skin, labels[4]);
+    part(base_x, 1.92, base_z - lean * 1.2, 0.24, 0.26, 0.25, materials.skin, labels[5]);
+    // Hair sits on top and a hair-breadth back, capping the head.
+    part(base_x, 2.03, base_z - lean * 1.2 + 0.02, 0.26, 0.13, 0.27, materials.hair, labels[6]);
+    // Arms swing counter to the legs: left arm forward, right arm back.
+    part(base_x - 0.37, 1.4, base_z - stride * 0.7 - lean, 0.15, 0.5, 0.15, materials.jersey, labels[7]);
+    part(base_x + 0.37, 1.36, base_z + stride * 0.6, 0.15, 0.5, 0.15, materials.jersey, labels[8]);
+    part(base_x - 0.41, 1.12, base_z - stride * 0.95 - lean, 0.16, 0.16, 0.16, materials.hands, labels[9]);
+    part(base_x + 0.41, 1.08, base_z + stride * 0.85, 0.16, 0.16, 0.16, materials.hands, labels[10]);
 }
 
 const KICKER_LABELS: PuppetLabels = [
@@ -348,7 +363,9 @@ const KICKER_LABELS: PuppetLabels = [
     "kicker.leg.right",
     "kicker.shorts",
     "kicker.torso",
+    "kicker.neck",
     "kicker.head",
+    "kicker.hair",
     "kicker.arm.left",
     "kicker.arm.right",
     "kicker.hand.left",
@@ -366,9 +383,11 @@ fn kicker(b: &mut SceneBuilder) {
             skin: PenaltyMaterialId::KickerSkin,
             legs: PenaltyMaterialId::KickerSocksDark,
             hands: PenaltyMaterialId::KickerSkin,
+            // Reuse the dark hair material the goalie already defines.
+            hair: PenaltyMaterialId::GoalieHair,
         },
-        0.0,
-        0.0,
+        0.42,
+        0.14,
         KICKER_LABELS,
     );
 }
@@ -391,23 +410,38 @@ fn goalie(b: &mut SceneBuilder) {
 }
 
 fn ball(b: &mut SceneBuilder) {
+    let center = Vec3::new(0.0, BALL_RADIUS, PENALTY_SPOT_Z);
     b.emit(
         DioramaRole::Ball,
         PrimitiveShape::FacetedBall,
-        Vec3::new(0.0, BALL_RADIUS, PENALTY_SPOT_Z),
+        center,
         Vec3::new(BALL_RADIUS, BALL_RADIUS, BALL_RADIUS),
         PenaltyMaterialId::BallWhite,
         "ball",
     );
-    // Two small dark panels on the camera-facing side of the ball (retro 32-bit-style
-    // faceting cue). They share the Ball layer and sort just after the ball.
-    let panel_z = PENALTY_SPOT_Z + BALL_RADIUS * 0.7; // toward the camera
-    [(-0.12_f32, "ball.panel.left"), (0.12, "ball.panel.right")].iter().for_each(|&(dx, label)| {
+    // The classic black pentagon panels, faked with small dark quads placed just
+    // PROUD of the sphere on its camera-/light-facing upper-front hemisphere (the
+    // old panels sat *inside* the sphere at panel_z < surface_z, so they never
+    // rendered and the ball read as a blank white sphere). Each direction is a
+    // unit-ish vector on that hemisphere; the panel sits a hair outside the
+    // radius so it always wins the depth test against the white surface.
+    const PANEL_DIRS: [(f32, f32, f32, &str); 6] = [
+        (0.00, 0.62, 0.78, "ball.panel.top"),
+        (0.00, 0.20, 0.98, "ball.panel.front"),
+        (-0.60, 0.44, 0.67, "ball.panel.upleft"),
+        (0.60, 0.44, 0.67, "ball.panel.upright"),
+        (-0.42, 0.10, 0.90, "ball.panel.loleft"),
+        (0.42, 0.10, 0.90, "ball.panel.loright"),
+    ];
+    PANEL_DIRS.iter().for_each(|&(dx, dy, dz, label)| {
+        let dir = Vec3::new(dx, dy, dz);
+        let unit = dir.mul_scalar(1.0 / dir.length().max(1.0e-6));
+        let pos = center.add(unit.mul_scalar(BALL_RADIUS * 1.03));
         b.emit(
             DioramaRole::Ball,
             PrimitiveShape::Quad,
-            Vec3::new(dx, BALL_RADIUS + 0.04, panel_z),
-            Vec3::new(0.16, 0.16, 0.0),
+            pos,
+            Vec3::new(0.15, 0.15, 0.0),
             PenaltyMaterialId::BallDarkPanels,
             label,
         );

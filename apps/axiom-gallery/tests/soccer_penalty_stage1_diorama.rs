@@ -14,8 +14,10 @@ use axiom_gallery::soccer_penalty::SoccerPenaltyApp;
 /// The exact number of primitives the diorama emits. Pinned so an accidental
 /// change to the composition is caught. (Pass 7: the goalie is now a 16-part
 /// articulated rig instead of the earlier 10-object puppet. Visual-convergence
-/// pass: the crowd is now 3 stacked rows of 26 cards (78) rather than 9.)
-const EXPECTED_OBJECT_COUNT: usize = 167;
+/// pass: the crowd is now 3 stacked rows of 26 cards (78) rather than 9, the
+/// kicker is an 11-part posed figure — neck + hair added — rather than 9 boxes,
+/// and the ball carries 6 dark panel spots rather than 2.)
+const EXPECTED_OBJECT_COUNT: usize = 173;
 
 #[test]
 fn build_is_fully_deterministic() {

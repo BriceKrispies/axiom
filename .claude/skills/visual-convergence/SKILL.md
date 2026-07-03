@@ -9,6 +9,15 @@ Drive an Axiom app/game's **real rendered output** toward a **reference image**,
 disciplined, scored change at a time. This is not "make it look better" — it is an
 axis-by-axis, keep-if-better, fully-audited convergence loop with an abstraction gate.
 
+**The target is parity: a render *identical* to the reference.** Not "close," not "reads
+as the same thing," not "a nice stylized take." That goal governs two things this skill is
+strict about — **score harshly** against identity (§Step 4.1), and **attack structurally**
+(§Step 4.2). Convergence toward parity is won with structural changes — new geometry, a
+real mesh, a material/shader feature, a re-cut data contract — far more often than with
+cosmetic config tweaks. A config nudge that cannot in principle reach the reference (a boxy
+proxy will never become a modeled subject by moving a number) is a shortcut; take the
+structural fix at the lowest correct layer instead.
+
 The novel part is the **harness**: you must run the *actual* app (not a mock) and capture a
 deterministic screenshot of it, then compare that real render against the reference. Most of
 the work is figuring out how to put the target app into a harness.
@@ -127,21 +136,48 @@ list + order for the whole campaign (order is the tie-break for "lowest axis").
 
 Repeat until every axis ≥ 4, or the user accepts the champion:
 
-1. **Score** the champion against the reference, `0..5` per axis, by eye.
-   - **5 = indistinguishable from the reference to a human reviewer.** A stylized/low-poly
-     render is *not* a 5. Do **not** claim parity until the user explicitly accepts. Be honest
-     — an inflated scorecard corrupts the whole loop.
+1. **Score** the champion against the reference, `0..5` per axis, by eye. **Calibrate to
+   identity and score harshly.** The bar is "indistinguishable from the reference," so a
+   render that merely *reads as the same subject* is low, not middling. Explicit anchors:
+   - **0** — absent or wrong (the axis's subject isn't there, or is plainly incorrect).
+   - **1** — present but crude/proxy: you can tell *what it is meant to be*, but nobody would
+     mistake it for the reference (a boxy cube-puppet standing in for a modeled player; a
+     flat colour band standing in for a photographic crowd; a plain sphere for a panelled
+     ball). **Most axes start here against a polished reference — that is correct, not
+     pessimistic.**
+   - **2** — the right structure is emerging but is obviously stylized/simplified next to the
+     reference.
+   - **3** — clearly on-model; a viewer sees the same intent, but side-by-side the gap is
+     still obvious.
+   - **4** — near-parity; you have to look closely to tell them apart.
+   - **5** — indistinguishable from the reference to a human reviewer. A stylized/low-poly
+     render is **not** a 5. Never claim parity until the user explicitly accepts it.
+   - An inflated scorecard corrupts the whole loop: it hides the real flaw, picks the wrong
+     axis to attack, and fakes progress. When unsure between two scores, take the **lower**.
+     If you catch your scores drifting up without the render approaching *identity*,
+     recalibrate down and record it as a scoring-recalibration iteration in the ledger.
    - `final_score = lowest_axis * 0.7 + average_axis * 0.3`. The **lowest axis is the next flaw
      to attack** (ties broken by fixed axis order).
 
-2. **Attack the lowest axis with ONE bounded nudge**, smallest-first up this ladder:
-   `config/manifest → generation/data → backend/shader → new code/primitive`. Before editing,
-   write the rationale:
-   - *Attacked mismatch* — what about this axis differs from the reference.
+2. **Attack the lowest axis with ONE bounded change — the smallest change that actually
+   closes the gap to the reference.** "Smallest" is measured toward *parity*, not toward
+   *least code*. There is a ladder — `config/manifest → generation/data → backend/shader →
+   new geometry/primitive` — and you still start as low as a change that can *reach the
+   reference* allows. But **do not spend the iteration on a cosmetic tweak you already know
+   cannot close the gap.** Against a polished reference the honest smallest-correct change is
+   usually **structural**: real geometry where there were proxy boxes, a panelled mesh where
+   there was a bare sphere, mow-stripe/field-marking geometry, a material/shader feature, a
+   re-shaped data contract. Reach for the structural fix directly when config demonstrably
+   can't express parity (see the abstraction gate's "cannot express" branch — for a parity
+   target it is the common case, not the exception). Keep it **one axis, one coherent change,
+   fully scored** — structural does not mean unbounded or multi-axis. Before editing, write
+   the rationale:
+   - *Attacked mismatch* — what about this axis differs from the reference, concretely.
    - *Why it's the most important flaw* — it's the lowest / dominates final_score.
-   - *The smallest nudge* — the one change you'll make.
-   - *Why it's smaller than a new primitive* — you're staying low on the ladder.
-   - *What would justify a primitive later* — the abstraction-gate trigger.
+   - *The change* — the one structural (or config) change you'll make, and the layer it lives at.
+   - *Why this is the smallest change that can reach parity on this axis* — and, if you're
+     staying at config/data, why that genuinely *can* close the gap rather than just nudge it.
+   - *What deeper structural move is queued next* if this one only gets partway.
 
 3. **Re-render the candidate** through the *same harness* (Step 1) and **re-score it against
    the reference** (candidate vs reference, not vs champion).
@@ -188,6 +224,15 @@ A **new primitive / structural change** (a new manifest field, a new engine capa
 shader/material feature) is allowed **only** after either:
 - the same axis has failed **≥ 3** bounded (config/data) attempts, recorded in the ledger, or
 - the current implementation genuinely **cannot express** the needed change.
+
+For a **parity target** the second branch is the *norm*, not a rare escape: when the axis
+gap is structural (proxy geometry vs a modeled subject, a bare sphere vs a panelled ball,
+no field markings vs painted lines), the config layer *cannot express* the reference, so
+you go structural on the first attempt — do **not** burn three ceremonial config nudges you
+already know will fail just to "unlock" the gate. Still record the `abstractions/NNNN.toml`
+justification with `inexpressible = true` and `failed_attempts = []`. The gate exists to
+stop *gratuitous* new surface, not to force cosmetic theater before an obviously-needed
+structural fix. Keep the new surface minimal and at the lowest correct layer.
 
 Justify it in `abstractions/NNNN.toml`:
 ```toml
