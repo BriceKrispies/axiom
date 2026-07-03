@@ -58,6 +58,7 @@ members = [
     "modules/axiom-perception",
     "modules/axiom-grid",
     "modules/axiom-streaming",
+    "modules/axiom-visibility",
     "modules/axiom-tween",
     "modules/axiom-tick",
     "modules/axiom",

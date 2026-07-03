@@ -1,0 +1,24 @@
+[package]
+name = "axiom-visibility"
+description = "Axiom engine module: per-frame view-visibility. Owns VisibilityApi — frustum culling of world-space bounding boxes against a camera's clip-from-world matrix, and distance-banded level-of-detail selection. Pure geometry in (Mat4, Aabb, Vec3, Meters), plain visibility flags and LOD levels out; holds no engine state, so it runs and is tested on native exactly as it drives a live frame."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No browser API, no engine state: visibility is a pure function
+# of (camera matrix / position, bounding boxes, LOD bands), so it runs and is
+# fully tested on native.
+crate-type = ["rlib"]
+
+# An *isolated engine module* (kind = "engine-module", allowed_modules = []): it
+# composes NO other module. It builds on the math layer (Frustum/Aabb/Mat4/Vec3)
+# and the kernel (Meters), both genuinely used.
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
