@@ -1940,3 +1940,42 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 3
 artifact_level = 3
+
+[[iteration]]
+iteration = 48
+attacked_axis = "terrain_silhouette"
+changed_files = ["manifest.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "Rechecked the reference: it is FEW, well-spaced, moderately thick beech trunks with air + mist between them (you see THROUGH the forest into atmospheric depth), not our dense picket wall of 440 thin poles. Fix (manifest [scatter]): count 440->160, min_spacing 1.45->3.2, trunk_radius [0.12,0.40]->[0.20,0.60], canopy_radius [2.4,5.4]->[2.8,6.0], clusters 14/9m->12/11m. Fewer trees thinned the canopy, so (coherent same change) fuller crowns: [foliage] branches 6->8, leaves_per_branch 34->42, so each of the fewer/bigger trees reads full without reintroducing the tightened-away spray. Result: spaced mature trees with clear depth, like the reference. terrain_silhouette 3->4; depth_separation 3->4 (real see-through misty depth); vegetation_density held at 3 (fuller crowns compensate for fewer trees); no non-attacked axis dropped. GPU render deterministic (mean=0). Promoted. Config-only (no new primitive)."
+next_attacked_axis = "vegetation_density"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3

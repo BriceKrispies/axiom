@@ -1,14 +1,13 @@
-# iter47 artifact_level: tightened foliage — leaves hug the branch lines (perp jitter
-# 0.9->0.55), smaller+denser cards (card_scale 0.60->0.45, leaves_per_branch 24->34),
-# fewer eye-level understory cards (5->2). The frame-edge floating card-spray "confetti"
-# is largely gone; foliage reads as a mass. artifact_level 2->3 (residual: a few small
-# floating leaves + the blown-bright background). vegetation_density held at 3 (denser
-# leaves compensate for smaller cards).
-terrain_silhouette = 3
+# iter48 terrain_silhouette: FEWER (440->160), THICKER, WELL-SPACED trunks (min_spacing
+# 1.45->3.2, radius up) with air + mist between them — the reference's spaced beech forest
+# with real depth, not a dense picket wall. Fuller crowns (branches 6->8, leaves 34->42) so
+# the fewer trees keep canopy density. terrain_silhouette 3->4, depth_separation 3->4 (real
+# see-through depth); vegetation_density held at 3 (crowns compensate). No drops.
+terrain_silhouette = 4
 foreground_material_detail = 4
 vegetation_density = 3
 vegetation_clumping = 3
-depth_separation = 3
+depth_separation = 4
 fog_and_haze = 3
 lighting_directionality = 3
 color_palette = 3
