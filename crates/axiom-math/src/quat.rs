@@ -208,6 +208,70 @@ impl Quat {
         )
     }
 
+    /// Normalized linear interpolation from `self` to `other` at parameter `t`.
+    ///
+    /// Both inputs are assumed unit quaternions. The shortest arc is chosen
+    /// branchlessly: when the two rotations point into opposite hemispheres
+    /// (`dot < 0`), `other` is negated first (a quaternion and its negation are
+    /// the same rotation), so `nlerp` never takes the long way around. The four
+    /// components are then linearly interpolated and the result renormalized.
+    ///
+    /// `nlerp` is exact at the endpoints (`t = 0` returns `self`, `t = 1`
+    /// returns the hemisphere-aligned `other`) and deterministic for any finite
+    /// `t`. It fails with
+    /// [`crate::math_error_code::MathErrorCode::NormalizeZeroLength`] only when
+    /// the interpolated quaternion is zero-length or non-finite — which for unit
+    /// inputs cannot happen from the hemisphere alignment alone, but does occur
+    /// for degenerate (zero) inputs or a non-finite `t`, so the failure stays a
+    /// deterministic `Result` rather than a panic.
+    pub fn nlerp(self, other: Quat, t: f32) -> MathResult<Quat> {
+        let dot = self.x * other.x + self.y * other.y + self.z * other.z + self.w * other.w;
+        // sign = +1 when the inputs share a hemisphere (`dot >= 0`), else -1.
+        // Table index keeps the choice branchless.
+        let sign = [1.0_f32, -1.0][usize::from(dot < 0.0)];
+        let bx = other.x * sign;
+        let by = other.y * sign;
+        let bz = other.z * sign;
+        let bw = other.w * sign;
+        Quat::new(
+            self.x + (bx - self.x) * t,
+            self.y + (by - self.y) * t,
+            self.z + (bz - self.z) * t,
+            self.w + (bw - self.w) * t,
+        )
+        .normalize()
+    }
+
+    /// Build a rotation from intrinsic Euler angles applied **X, then Y, then
+    /// Z** (all in radians) — i.e. `R = Rz · Ry · Rx`. This is the composition a
+    /// per-joint Euler DOF uses: an authored `(x, y, z)` joint angle becomes a
+    /// composable quaternion. Round-trips with [`Quat::to_euler_xyz`] for pitch
+    /// (`y`) away from the ±90° gimbal poles.
+    pub fn from_euler_xyz(x: f32, y: f32, z: f32) -> Quat {
+        let (hx, hy, hz) = (x * 0.5, y * 0.5, z * 0.5);
+        let qx = Quat::new(hx.sin(), 0.0, 0.0, hx.cos());
+        let qy = Quat::new(0.0, hy.sin(), 0.0, hy.cos());
+        let qz = Quat::new(0.0, 0.0, hz.sin(), hz.cos());
+        qz.multiply(qy).multiply(qx)
+    }
+
+    /// Decompose this (assumed unit) quaternion into intrinsic Euler angles in
+    /// the same **X, then Y, then Z** convention as [`Quat::from_euler_xyz`],
+    /// returned as a `Vec3` of radians `(x, y, z)`. Uses `asin`/`atan2` so it is
+    /// total and branch-free; the pitch is clamped into `asin`'s domain. At the
+    /// ±90° pitch gimbal poles the `x`/`z` split is not unique (the standard
+    /// limitation of Euler extraction), but the result is always a valid
+    /// decomposition — which is all a joint-limit clamp needs.
+    pub fn to_euler_xyz(self) -> Vec3 {
+        let (x, y, z, w) = (self.x, self.y, self.z, self.w);
+        // Rotation-matrix terms for R = Rz·Ry·Rx: R20 = -sin(y); the x/z angles
+        // come from the neighbouring off-diagonals via atan2.
+        let ey = (2.0 * (w * y - x * z)).clamp(-1.0, 1.0).asin();
+        let ex = (2.0 * (y * z + w * x)).atan2(1.0 - 2.0 * (x * x + y * y));
+        let ez = (2.0 * (x * y + w * z)).atan2(1.0 - 2.0 * (y * y + z * z));
+        Vec3::new(ex, ey, ez)
+    }
+
     /// Rotate a vector by this (assumed unit) quaternion.
     pub fn rotate(self, v: Vec3) -> Vec3 {
         // v + 2 * q.xyz × (q.xyz × v + q.w * v) — the standard 18-multiply
@@ -407,6 +471,102 @@ mod tests {
                 .code(),
             MathErrorCode::InvalidMatrixOperation
         );
+    }
+
+    #[test]
+    fn nlerp_endpoints_return_inputs() {
+        let a = Quat::from_axis_angle(Vec3::UNIT_Z, 0.0).unwrap();
+        let b = Quat::from_axis_angle(Vec3::UNIT_Z, std::f32::consts::FRAC_PI_2).unwrap();
+        assert!(a.nlerp(b, 0.0).unwrap().approx_eq(&a, eps()));
+        assert!(a.nlerp(b, 1.0).unwrap().approx_eq(&b, eps()));
+    }
+
+    #[test]
+    fn nlerp_midpoint_is_the_half_rotation() {
+        // Halfway between identity and a 90° turn about Z is a 45° turn about Z.
+        let a = Quat::IDENTITY;
+        let b = Quat::from_axis_angle(Vec3::UNIT_Z, std::f32::consts::FRAC_PI_2).unwrap();
+        let mid = a.nlerp(b, 0.5).unwrap();
+        let expect = Quat::from_axis_angle(Vec3::UNIT_Z, std::f32::consts::FRAC_PI_4).unwrap();
+        assert!(mid
+            .rotate(Vec3::UNIT_X)
+            .approx_eq(&expect.rotate(Vec3::UNIT_X), eps()));
+    }
+
+    #[test]
+    fn nlerp_takes_the_shortest_arc_across_hemispheres() {
+        // `flipped` is the same 45° rotation as `short`, but negated so it lies
+        // in the opposite hemisphere from identity (dot < 0). The hemisphere
+        // flip must make nlerp reach the SHORT 45° arc, not the long way.
+        let short = Quat::from_axis_angle(Vec3::UNIT_Z, std::f32::consts::FRAC_PI_4).unwrap();
+        let flipped = Quat::new(-short.x, -short.y, -short.z, -short.w);
+        let mid = Quat::IDENTITY.nlerp(flipped, 0.5).unwrap();
+        // Midpoint of the short arc is ~22.5° about Z; sanity-check via a vector.
+        let expect = Quat::from_axis_angle(Vec3::UNIT_Z, std::f32::consts::FRAC_PI_8).unwrap();
+        assert!(mid
+            .rotate(Vec3::UNIT_X)
+            .approx_eq(&expect.rotate(Vec3::UNIT_X), eps()));
+    }
+
+    #[test]
+    fn nlerp_of_degenerate_inputs_fails() {
+        let zero = Quat::new(0.0, 0.0, 0.0, 0.0);
+        assert_eq!(
+            zero.nlerp(zero, 0.5).unwrap_err().code(),
+            MathErrorCode::NormalizeZeroLength
+        );
+    }
+
+    #[test]
+    fn from_euler_zero_is_identity_and_single_axes_match_axis_angle() {
+        assert!(Quat::from_euler_xyz(0.0, 0.0, 0.0).approx_eq(&Quat::IDENTITY, eps()));
+        let a = 0.6_f32;
+        assert!(Quat::from_euler_xyz(a, 0.0, 0.0)
+            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_X, a).unwrap(), eps()));
+        assert!(Quat::from_euler_xyz(0.0, a, 0.0)
+            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_Y, a).unwrap(), eps()));
+        assert!(Quat::from_euler_xyz(0.0, 0.0, a)
+            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_Z, a).unwrap(), eps()));
+    }
+
+    #[test]
+    fn from_euler_composes_x_then_y_then_z() {
+        let (x, y, z) = (0.3_f32, -0.5, 0.7);
+        let composed = Quat::from_axis_angle(Vec3::UNIT_Z, z)
+            .unwrap()
+            .multiply(Quat::from_axis_angle(Vec3::UNIT_Y, y).unwrap())
+            .multiply(Quat::from_axis_angle(Vec3::UNIT_X, x).unwrap());
+        let v = Vec3::new(0.2, 0.9, -0.4);
+        assert!(Quat::from_euler_xyz(x, y, z)
+            .rotate(v)
+            .approx_eq(&composed.rotate(v), eps()));
+    }
+
+    #[test]
+    fn euler_round_trips_away_from_gimbal() {
+        // For pitch away from ±90°, from_euler(to_euler(q)) recovers the same
+        // rotation, and to_euler(from_euler(e)) recovers the same angles.
+        let (x, y, z) = (0.4_f32, -0.3, 1.1);
+        let q = Quat::from_euler_xyz(x, y, z);
+        let e = q.to_euler_xyz();
+        assert!((e.x - x).abs() <= 1.0e-4);
+        assert!((e.y - y).abs() <= 1.0e-4);
+        assert!((e.z - z).abs() <= 1.0e-4);
+        let v = Vec3::new(-0.7, 0.25, 0.6);
+        assert!(Quat::from_euler_xyz(e.x, e.y, e.z)
+            .rotate(v)
+            .approx_eq(&q.rotate(v), eps()));
+    }
+
+    #[test]
+    fn to_euler_clamps_pitch_at_the_gimbal_pole() {
+        // A pure +90° pitch (about Y) sits exactly at the asin domain edge; the
+        // clamp keeps it finite and returns y = +FRAC_PI_2.
+        let q = Quat::from_axis_angle(Vec3::UNIT_Y, std::f32::consts::FRAC_PI_2).unwrap();
+        let e = q.to_euler_xyz();
+        // asin is extremely sensitive near ±1, so the recovered pitch is only
+        // coarsely accurate at the pole — it must still land close to +90°.
+        assert!((e.y - std::f32::consts::FRAC_PI_2).abs() <= 1.0e-2);
     }
 
     #[test]

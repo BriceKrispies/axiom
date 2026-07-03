@@ -1,0 +1,12 @@
+[app]
+name = "animation-lab"
+crate_name = "axiom-animation-lab"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = [
+    "animation",
+]

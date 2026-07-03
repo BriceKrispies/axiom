@@ -1,0 +1,36 @@
+# Axiom module manifest — axiom-animation (an isolated ENGINE module).
+#
+# Reusable skeletal-animation *mechanics*: a skeleton is a parented set of
+# bones, a pose is one local transform per bone, a clip is per-bone keyframe
+# tracks sampled at a deterministic `Tick`, and two poses blend by a `Ratio`.
+# The engine owns the mechanism; a game owns the meaning (which clip a "kicker"
+# plays, when a "goalie" dives). None of that gameplay vocabulary lives here.
+#
+# It is an isolated engine module: it composes only the `kernel` and `math`
+# layers and NEVER another module (`allowed_modules = []`). It holds no browser
+# API, no wall-clock time, no randomness. Everything is reached through the one
+# facade, `AnimationApi`, plus the id vocabulary (`SkeletonId`/`BoneId`/`ClipId`)
+# the facade hands back and accepts.
+#
+# Deliberately deferred (NOT implemented here, see ARCHITECTURE.md): a stateful
+# `Animator` that advances play-time, and an `AnimationGraph` state machine.
+# This module is the deterministic contract those higher constructs build on.
+
+[module]
+name = "animation"
+crate_name = "axiom-animation"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "skeleton-hierarchy",
+    "bone-pose-model",
+    "animation-clip-sampling",
+    "pose-blending",
+]
