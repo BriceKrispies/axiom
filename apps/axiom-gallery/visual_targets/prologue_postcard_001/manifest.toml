@@ -181,8 +181,11 @@ palette = [
 # ITER 23 (corrective): small irregular leaf clumps (not big paper squares), fewer +
 # layered, in a darker warm autumn palette (orange/brown, muted-yellow highlight).
 cards_per_tree = 46
-understory_cards = 5
-card_scale = 0.60
+# ITER 47 (attack: artifact_level) — fewer eye-level understory cards (they sprayed as
+# large floating leaves near the close framing trees' bases); smaller + denser canopy
+# leaves so foliage reads as a mass, not separated confetti cards.
+understory_cards = 2
+card_scale = 0.45
 # ITER 43: clump the canopy cards into a few tight sub-masses with dark gaps between
 # them (branch-hung look) instead of a uniform speckle.
 # ITER 47: more cards + slightly larger to fill the canopy now that alpha-cut leaves are
@@ -194,7 +197,7 @@ cluster_tightness = 0.44
 # as attached, layered foliage instead of a floating card cloud. branches x
 # leaves_per_branch = 6 x 24 = 144 leaves/tree (was ~46). Supersedes the sub-mass fill.
 branches = 6
-leaves_per_branch = 24
+leaves_per_branch = 34
 branch_thickness = 0.5
 palette = [
   [0.90, 0.74, 0.26],

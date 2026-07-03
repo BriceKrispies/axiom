@@ -1,8 +1,9 @@
-# iter46 ground base: dark soil/mulch terrain base (was a baked bright-orange leaf carpet)
-# — the reference's exposed earth shows BETWEEN the litter instances + plants, instead of
-# a flat glowing sheet. foreground_material_detail 3->4 (last structural floor-wrong fixed;
-# residual = a slight olive/green tint + sprite-plant detail = the 4->5 gap). artifact_level
-# stays 2 (canopy leaf-card sprays remain).
+# iter47 artifact_level: tightened foliage — leaves hug the branch lines (perp jitter
+# 0.9->0.55), smaller+denser cards (card_scale 0.60->0.45, leaves_per_branch 24->34),
+# fewer eye-level understory cards (5->2). The frame-edge floating card-spray "confetti"
+# is largely gone; foliage reads as a mass. artifact_level 2->3 (residual: a few small
+# floating leaves + the blown-bright background). vegetation_density held at 3 (denser
+# leaves compensate for smaller cards).
 terrain_silhouette = 3
 foreground_material_detail = 4
 vegetation_density = 3
@@ -14,4 +15,4 @@ color_palette = 3
 contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 3
-artifact_level = 2
+artifact_level = 3

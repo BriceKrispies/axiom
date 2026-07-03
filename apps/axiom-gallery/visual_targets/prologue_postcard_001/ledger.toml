@@ -1901,3 +1901,42 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 3
 artifact_level = 2
+
+[[iteration]]
+iteration = 47
+attacked_axis = "artifact_level"
+changed_files = ["apps/axiom-gallery/src/growth/visual_target/build.rs", "manifest.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "The frame-edge foliage read as large, well-separated leaf cards floating with big gaps (confetti) + eye-level clumps near the close framing trees' bases — the dominant artifact. The reference foliage is a dense soft mass, never separated floating cards. Root cause: cards too large + spraying too far off the branch lines. Fix (app-tier): tighten the per-leaf perpendicular jitter to the branch (0.9->0.55 in build.rs), smaller + denser canopy cards (card_scale 0.60->0.45, leaves_per_branch 24->34 to hold coverage), and fewer eye-level understory cards (5->2). Edge card-sprays largely eliminated; foliage reads as a mass. artifact_level 2->3 (residual: a few small floating leaves + the blown-bright background). vegetation_density held at 3 (denser leaves compensate); no non-attacked axis dropped. GPU render deterministic (mean=0). Promoted. Config/data (no new primitive)."
+next_attacked_axis = "terrain_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 3
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3

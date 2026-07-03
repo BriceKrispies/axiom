@@ -457,7 +457,10 @@ fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg:
             for (bi, (base, dir, length)) in tree_branches(t, anchor, f).iter().enumerate() {
                 let perp1 = dir.cross(Vec3::UNIT_Y).normalize().unwrap_or(Vec3::UNIT_X);
                 let perp2 = dir.cross(perp1).normalize().unwrap_or(Vec3::UNIT_Z);
-                let jr = r * f.card_scale * 0.9;
+                // Tight to the branch line: leaves hug the branch (small perpendicular
+                // spread) so the canopy reads as a dense mass, not separated floating cards
+                // spraying into empty gaps (the frame-edge "confetti" artifact).
+                let jr = r * f.card_scale * 0.55;
                 for j in 0..f.leaves_per_branch {
                     let s = 4000 + bi as u32 * 131 + j;
                     // Along the branch, biased to the outer/tip half where leaves gather.
