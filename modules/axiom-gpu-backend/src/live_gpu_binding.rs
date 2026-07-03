@@ -278,7 +278,7 @@ impl LiveGpuBinding {
         });
         let intermediate_view = intermediate.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_view = create_depth_view(&device, render_width, render_height);
-        let upscale = UpscaleBlit::new(&device, format, &intermediate_view);
+        let upscale = UpscaleBlit::new(&device, format, &intermediate_view, wgpu::FilterMode::Nearest);
 
         // The 2D quad renderer, built for the non-sRGB swapchain view and the full
         // canvas size. Its sprite/atlas textures are uploaded later, once the app
