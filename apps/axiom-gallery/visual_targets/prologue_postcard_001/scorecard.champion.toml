@@ -1,13 +1,13 @@
-# Calmer harmonious canopy palette (dropped the saturated red + dark brown pops for
-# in-range ambers). Less color noise -> artifact_level 2->3, color_palette 3->4. The
-# leaf SHAPE/structure speckle is unchanged (that is the next, harder mismatch).
+# iter43: strengthened directional shadow contrast — shadowed ground receives less sky
+# ambient (via the existing shadow factor), so cast tree shadows read as deep dappled
+# bands instead of a washed gradient. lighting_directionality 3->4; no non-attacked drop.
 terrain_silhouette = 4
 foreground_material_detail = 3
 vegetation_density = 4
 vegetation_clumping = 3
 depth_separation = 4
 fog_and_haze = 4
-lighting_directionality = 3
+lighting_directionality = 4
 color_palette = 4
 contrast_and_exposure = 3
 object_scale = 4

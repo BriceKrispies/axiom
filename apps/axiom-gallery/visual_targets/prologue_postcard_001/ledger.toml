@@ -1745,3 +1745,42 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 4
 artifact_level = 3
+
+[[iteration]]
+iteration = 43
+attacked_axis = "lighting_directionality"
+changed_files = ["modules/axiom-gpu-backend/src/scene_renderer.rs", "abstractions/0006.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "lighting_directionality 3->4: modulated hemisphere ambient by the EXISTING shadow factor (SHADOW_AMBIENT=0.5) so shadowed ground reads with directional contrast (deep dappled cast shadows) instead of washed full-ambient. Reuses the existing shadow map — bounded shader tuning, not a new abstraction. No non-attacked axis dropped >=2. GPU render deterministic (md5 1c868b82.. twice). Promoted. Resumes the ledger on the post-Tier converged champion (Tiers 1-3 landed as direct commits, not ledger iterations)."
+next_attacked_axis = "foreground_material_detail"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 3
+color_palette = 4
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 3
+vegetation_density = 4
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 4
+color_palette = 4
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 4
+artifact_level = 3

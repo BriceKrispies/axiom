@@ -114,6 +114,12 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     return select(sum / 25.0, 1.0, outside);
 }
 
+// Fraction of hemisphere ambient a fully-shadowed fragment keeps. 1.0 = the shadow removes
+// only the sun's diffuse (shadows wash out under full sky fill); <1.0 also dims the sky
+// ambient in shadow, so the sun's cast shadows read with directional contrast. An explicit,
+// minimal directional-shadow contrast control (kept lifted, never crushed to black).
+const SHADOW_AMBIENT: f32 = 0.5;
+
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let albedo = textureSample(albedo_tex, albedo_sampler, in.uv);
@@ -143,7 +149,10 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // colours, so this is a plain mix — no extra scale. An absent frame ambient is
     // filled with the engine default upstream, so this stays identical by default.
     let hemi = mix(lights.ground.rgb, lights.sky.rgb, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
-    var lit = base.rgb * hemi;
+    // Shadowed ground receives less SKY ambient too, not just less sun, so the sun's cast
+    // shadows read with real contrast instead of being washed flat by full ambient.
+    let ambient_shade = mix(SHADOW_AMBIENT, 1.0, shade);
+    var lit = base.rgb * hemi * ambient_shade;
     for (var i: u32 = 0u; i < lights.count; i = i + 1u) {
         let lt = lights.items[i];
         var L = normalize(lt.v.xyz);
