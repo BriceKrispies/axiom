@@ -1,6 +1,7 @@
-# iter44 structural: branch scaffold + dense leaves along branches. Canopy denser +
-# attached (not a floating card cloud). vegetation_density 2->3. artifact_level stays 2
-# (the near/foreground leaf-card sprays remain — the next attack).
+# iter45 ground detail: two ground-plant species (low grass + taller sedge fronds) + 3D-
+# tilted, colour-varied leaf litter. foreground_material_detail 2->3 (recalibrated: the
+# prior single-species/flat-sprite ground was a generous 3, really a 2). artifact_level
+# stays 2 (the canopy leaf-card sprays remain the dominant artifact — next attack).
 terrain_silhouette = 3
 foreground_material_detail = 3
 vegetation_density = 3

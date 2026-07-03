@@ -1823,3 +1823,42 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 3
 artifact_level = 2
+
+[[iteration]]
+iteration = 45
+attacked_axis = "foreground_material_detail"
+changed_files = ["apps/axiom-gallery/src/growth/visual_target/build.rs", "manifest.toml", "abstractions/0008.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "Ground-detail overhaul (what the reference's authored floor implies): a SECOND ground-plant species (fern_unit_mesh upright sedge frond) split from the scatter by per-instance hash into two batches, and per-leaf 3D tilt (hashed horizontal axis) + brightness jitter + wider palette on the litter, plus denser ground plants (12k->18k). Floor now reads as mixed, varied, tilted plants + a colour-varied leaf bed instead of one plant type on flat sprites. foreground_material_detail 2->3 (recalibrated down from the audit's generous 3, then improved). artifact_level unchanged at 2 (canopy leaf-card sprays remain). No non-attacked axis dropped >=2. GPU render deterministic (mean=0). Promoted. App-tier; dylint ratchet <= baseline. Abstraction 0008."
+next_attacked_axis = "artifact_level"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 2
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 3
+foreground_material_detail = 3
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2

@@ -1,0 +1,6 @@
+axis = "foreground_material_detail"
+failed_attempts = []
+inexpressible = true
+smallest_api = "A second ground-plant species mesh (fern_unit_mesh — an upright sedge/grass frond) + a per-instance-hash species split of the existing groundcover scatter into two batches, generalizing tuft_instances into plant_instances(height_mul); plus per-leaf 3D tilt (about a hashed horizontal axis) + brightness jitter in litter_instances, and a wider litter palette. App-tier (build.rs/manifest); reuses the existing mesh/instance pipeline — no backend/shader change. The single-species uniform tufts + flat leaf sprites could not express a varied, tilted, mixed-plant forest floor through config alone."
+screenshot_command = "cargo run --features visual-target --bin visual-target -- render apps/axiom-gallery/visual_targets/prologue_postcard_001/manifest.toml --backend gpu --out apps/axiom-gallery/visual_targets/prologue_postcard_001/candidate.gpu.png"
+screenshot_proof = "rendered twice byte-identical GPU output (determinism mean=0, max=0; within GPU tolerance)"

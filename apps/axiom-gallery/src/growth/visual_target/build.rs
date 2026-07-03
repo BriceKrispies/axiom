@@ -36,6 +36,8 @@ const FOLIAGE_MESH: u64 = 5;
 const LITTER_MESH: u64 = 6;
 /// Thin branch strokes radiating from each crown; leaves cluster along them.
 const BRANCH_MESH: u64 = 7;
+/// Taller upright sedge/grass-frond clump — the second ground-plant species.
+const FERN_MESH: u64 = 8;
 const WHITE_MAT: u64 = 1;
 /// A radial soft-alpha leaf texture — GPU renders the foliage cards as feathered leaf
 /// blobs (alpha cutout + blend); Canvas 2D ignores it and keeps the solid-card proxy.
@@ -154,6 +156,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let (foliage_v, foliage_i) = foliage_card_unit_mesh();
     let (branch_v, branch_i) = branch_unit_mesh();
     let (tuft_v, tuft_i) = tuft_unit_mesh();
+    let (fern_v, fern_i) = fern_unit_mesh();
     let (litter_v, litter_i) = litter_unit_mesh();
 
     let lean_deg = manifest.scatter.as_ref().map(|s| s.lean_deg).unwrap_or(0.0);
@@ -185,7 +188,12 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let branch_count = (branch_inst.len() / 36) as u32;
 
     let tufts = all_groundcover(manifest);
-    let tuft_inst = tuft_instances(manifest, &tufts, &view_proj, eye);
+    // Two ground-plant species from one scatter: ~55% low splayed grass clumps, ~45%
+    // taller upright sedge fronds — so the floor reads as mixed plants, not one repeat.
+    let grass: Vec<Tuft> = tufts.iter().copied().filter(|t| hash01(t.x, t.z, 5000) < 0.55).collect();
+    let sedge: Vec<Tuft> = tufts.iter().copied().filter(|t| hash01(t.x, t.z, 5000) >= 0.55).collect();
+    let grass_inst = plant_instances(manifest, &grass, 1.0, &view_proj, eye);
+    let sedge_inst = plant_instances(manifest, &sedge, 2.4, &view_proj, eye);
     let litter = all_litter(manifest);
     let litter_inst = litter_instances(manifest, &litter, &view_proj, eye);
 
@@ -202,9 +210,11 @@ pub fn build(manifest: &Manifest) -> RenderData {
         batches.push((canopy_mesh_id, canopy_mat, canopy_inst, canopy_count));
     });
     (branch_count > 0).then(|| batches.push((BRANCH_MESH, WHITE_MAT, branch_inst, branch_count)));
-    // Ground cover: one instanced batch when the abstraction placed any tufts.
-    let tuft_count = tufts.len() as u32;
-    (tuft_count > 0).then(|| batches.push((GROUNDCOVER_MESH, WHITE_MAT, tuft_inst, tuft_count)));
+    // Ground cover: two species batches (low grass clumps + taller sedge fronds).
+    let grass_count = grass.len() as u32;
+    (grass_count > 0).then(|| batches.push((GROUNDCOVER_MESH, WHITE_MAT, grass_inst, grass_count)));
+    let sedge_count = sedge.len() as u32;
+    (sedge_count > 0).then(|| batches.push((FERN_MESH, WHITE_MAT, sedge_inst, sedge_count)));
     // Fallen-leaf litter: a dense flat-leaf carpet on the ground.
     let litter_count = litter.len() as u32;
     (litter_count > 0).then(|| batches.push((LITTER_MESH, WHITE_MAT, litter_inst, litter_count)));
@@ -223,6 +233,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
             (FOLIAGE_MESH, foliage_v, foliage_i),
             (BRANCH_MESH, branch_v, branch_i),
             (GROUNDCOVER_MESH, tuft_v, tuft_i),
+            (FERN_MESH, fern_v, fern_i),
             (LITTER_MESH, litter_v, litter_i),
         ],
         materials: vec![
@@ -529,7 +540,7 @@ fn card_instance(vp: &Mat4, pos: Vec3, yaw01: f32, scale: f32, tint: [f32; 4]) -
 /// Build the per-tuft instance data for the ground-cover batch: each tuft is the
 /// unit tuft mesh (y in [0,1]) seated on the terrain surface, scaled to
 /// (radius, height, radius) and yawed, tinted with its colour + fog.
-fn tuft_instances(manifest: &Manifest, tufts: &[Tuft], view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+fn plant_instances(manifest: &Manifest, tufts: &[Tuft], height_mul: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
     let mut out = Vec::with_capacity(tufts.len() * 36);
@@ -540,7 +551,7 @@ fn tuft_instances(manifest: &Manifest, tufts: &[Tuft], view_proj: &[f32; 16], ey
         let world = Transform::new(
             Vec3::new(t.x, ground, t.z),
             yaw,
-            Vec3::new(t.radius_m, t.height_m, t.radius_m),
+            Vec3::new(t.radius_m, t.height_m * height_mul, t.radius_m),
         )
         .to_matrix();
         let dist = eye.subtract(Vec3::new(t.x, ground + t.height_m * 0.5, t.z)).length();
@@ -558,17 +569,24 @@ fn litter_instances(manifest: &Manifest, litter: &[Tuft], view_proj: &[f32; 16],
     let mut out = Vec::with_capacity(litter.len() * 36);
     for t in litter {
         let ground = manifest.terrain.height_at(t.x, t.z);
-        let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, t.yaw_deg.to_radians())
-            .unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0));
-        // Flat leaf: lie a hair above the ground; radius_m is the leaf size (uniform).
+        // Tilt each fallen leaf about a varied horizontal axis so it lies at a natural
+        // angle (some flat, some curled up on an edge) instead of a flat sprite — the bed
+        // gains relief, overlap, and varied light. Axis azimuth from yaw, tilt from a hash.
+        let phi = t.yaw_deg.to_radians();
+        let axis = Vec3::new(phi.cos(), 0.0, phi.sin());
+        let tilt = (hash01(t.x, t.z, 6100) - 0.5) * 0.95;
+        let rot = Quat::from_axis_angle(axis, tilt).unwrap_or_else(|_| Quat::new(0.0, 0.0, 0.0, 1.0));
         let world = Transform::new(
             Vec3::new(t.x, ground + 0.02, t.z),
-            yaw,
+            rot,
             Vec3::new(t.radius_m, t.radius_m, t.radius_m),
         )
         .to_matrix();
+        // Per-leaf brightness jitter widens the litter variety beyond the palette alone.
+        let cj = 0.82 + hash01(t.x, t.z, 6200) * 0.36;
+        let col = [t.color[0] * cj, t.color[1] * cj, t.color[2] * cj];
         let dist = eye.subtract(Vec3::new(t.x, ground, t.z)).length();
-        let tint = fogged(t.color, fog, dist, &style_of(manifest), 1.0);
+        let tint = fogged(col, fog, dist, &style_of(manifest), 1.0);
         out.extend_from_slice(&instance(&vp, world, tint));
     }
     out
@@ -738,6 +756,32 @@ fn tuft_unit_mesh() -> (Vec<f32>, Vec<u32>) {
 /// The unit fallen leaf: a single flat irregular polygon lying in the XZ plane (a leaf
 /// on the ground), normal up, double-sided. Per-vertex white; the instance tint carries
 /// the warm litter colour.
+/// A taller upright sedge/grass-frond clump: thin near-vertical blades fanning only
+/// slightly, tips up to y=1 — the dried tall grasses standing on the forest floor (the
+/// second ground-plant species, distinct from the low splayed tuft).
+fn fern_unit_mesh() -> (Vec<f32>, Vec<u32>) {
+    const BLADES: u32 = 9;
+    const TIP: [f32; 9] = [1.0, 0.78, 0.92, 0.65, 0.85, 0.72, 0.96, 0.6, 0.82];
+    let mut v = Vec::new();
+    let mut idx = Vec::new();
+    let up = [0.0f32, 1.0, 0.0];
+    let w = [1.0f32, 1.0, 1.0, 1.0];
+    let mut base = 0u32;
+    for k in 0..BLADES {
+        let a = (k as f32 / BLADES as f32) * std::f32::consts::TAU;
+        let (ca, sa) = (a.cos(), a.sin());
+        let (px, pz) = (-sa * 0.06, ca * 0.06); // narrow base
+        let tip = TIP[(k % 9) as usize];
+        // Near-vertical: apex only slightly out (0.22) but tall (up to y=1).
+        push_vertex(&mut v, [px, 0.0, pz], up, [0.0, 0.0], w);
+        push_vertex(&mut v, [-px, 0.0, -pz], up, [1.0, 0.0], w);
+        push_vertex(&mut v, [ca * 0.22, tip, sa * 0.22], up, [0.5, 1.0], w);
+        idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 1]);
+        base += 3;
+    }
+    (v, idx)
+}
+
 fn litter_unit_mesh() -> (Vec<f32>, Vec<u32>) {
     const RIM: [f32; 7] = [0.50, 0.36, 0.48, 0.30, 0.50, 0.34, 0.44];
     let up = [0.0f32, 1.0, 0.0];
@@ -1090,10 +1134,15 @@ canopy_color = [0.80, 0.42, 0.12]
         let tufts = all_groundcover(&m);
         assert!(!tufts.is_empty());
         let rd = build(&m);
-        let batch = rd.batches.iter().find(|(mesh, ..)| *mesh == GROUNDCOVER_MESH).unwrap();
-        assert_eq!(batch.3 as usize, tufts.len());
-        assert_eq!(batch.2.len(), tufts.len() * 36); // 36 floats per instance
+        // The scatter is split into two species batches (grass GROUNDCOVER_MESH + sedge
+        // FERN_MESH); together they account for every scattered tuft.
+        let is_ground = |mesh: u64| mesh == GROUNDCOVER_MESH || mesh == FERN_MESH;
+        let ground_count: u32 = rd.batches.iter().filter(|(mesh, ..)| is_ground(*mesh)).map(|b| b.3).sum();
+        assert_eq!(ground_count as usize, tufts.len());
+        let ground_floats: usize = rd.batches.iter().filter(|(mesh, ..)| is_ground(*mesh)).map(|b| b.2.len()).sum();
+        assert_eq!(ground_floats, tufts.len() * 36); // 36 floats per instance
         assert!(rd.meshes.iter().any(|(id, ..)| *id == GROUNDCOVER_MESH));
+        assert!(rd.meshes.iter().any(|(id, ..)| *id == FERN_MESH));
     }
 
     #[test]

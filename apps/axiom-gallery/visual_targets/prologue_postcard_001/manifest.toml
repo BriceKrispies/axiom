@@ -155,7 +155,8 @@ seed = 21
 # ITER 24 (attack: foreground_material_detail) — a richer forest floor: denser,
 # lower clumps in a leaf-litter + grass-green palette so the ground reads as fallen
 # leaves and grass tufts (like the reference), not sparse brown pyramids.
-count = 12000
+# ITER 45 (ground detail): denser mixed ground plants (grass clumps + taller sedge fronds).
+count = 18000
 min_spacing_m = 0.20
 slope_limit = 1.2
 clusters = 60
@@ -228,10 +229,16 @@ clusters = 55
 cluster_radius_m = 14.0
 height_m = [0.0, 0.0]
 radius_m = [0.11, 0.30]
+# ITER 45 (ground detail): wider leaf-litter palette — russet/ochre/tan/khaki/dark-red
+# so tilted overlapping leaves read as a varied bed, not a uniform brown wash.
 palette = [
   [0.58, 0.28, 0.10],
   [0.70, 0.40, 0.13],
   [0.52, 0.20, 0.10],
   [0.46, 0.32, 0.15],
   [0.38, 0.24, 0.13],
+  [0.80, 0.58, 0.22],
+  [0.66, 0.30, 0.12],
+  [0.50, 0.42, 0.22],
+  [0.60, 0.22, 0.14],
 ]
