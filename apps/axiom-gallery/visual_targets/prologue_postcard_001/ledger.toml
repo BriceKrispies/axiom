@@ -1979,3 +1979,42 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 3
 artifact_level = 3
+
+[[iteration]]
+iteration = 49
+attacked_axis = "fog_and_haze"
+changed_files = ["manifest.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "User-directed: fix the background BLOWOUT. Measured: the champion background clipped to near-white (upper-third mean [196,181,153], 3.5% of pixels fully clipped to 255), ~2x the reference's controlled warm-grey mist (mean [95,79,64], 0% clipped). Cause: the fog colour [0.80,0.76,0.67] is both the aerial-perspective target AND the sky/clear background, and post-process contrast pushed it to clip. Fix (manifest [fog]): colour [0.80,0.76,0.67]->[0.44,0.40,0.33]. Candidate background is now [140,123,97] with 0% clipped — a controlled warm mist the distant trunks read against, close to the reference. fog_and_haze 3->4 (controlled mist, no clip); contrast_and_exposure 3->4 (the blown-highlights flaw the audit flagged is gone); depth_separation held at 4 (trunks still separate against the mist); no non-attacked axis dropped. GPU render deterministic (mean=0). Promoted. Config-only."
+next_attacked_axis = "vegetation_density"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3
+
+[iteration.scorecard_after]
+terrain_silhouette = 4
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 4
+fog_and_haze = 4
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 4
+object_scale = 4
+horizon_composition = 3
+artifact_level = 3

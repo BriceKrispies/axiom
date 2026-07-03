@@ -39,10 +39,12 @@ intensity = 1.6
 # foreground trunks stay dark for contrast; the warm backlit sun keeps foreground warm.
 # ITER 23 (corrective): darker BLUE-GRAY distance haze, stronger, so background
 # fades to cool haze and foreground stays dark for contrast.
-# ITER 48 (structural atmosphere): warm, luminous haze — distance + the background glow
-# fade to a bright warm-grey/gold mist (the reference's misty backlit light), not a cool
-# blue wash. This colour is both the aerial-perspective target and the clear/background.
-color = [0.80, 0.76, 0.67]
+# ITER 49 (attack: fog_and_haze) — fix the BLOWOUT: the background/mist was clipping to
+# near-white (mean ~[196,181,153], 3.5% fully clipped), ~2x the reference's controlled
+# warm-grey mist (mean ~[95,79,64], 0% clipped). This colour is both the aerial-perspective
+# target and the sky/clear background, so lowering it brings the whole distance down to a
+# controlled warm mist instead of a blown white sheet.
+color = [0.44, 0.40, 0.33]
 start_m = 5.0
 end_m = 74.0
 
