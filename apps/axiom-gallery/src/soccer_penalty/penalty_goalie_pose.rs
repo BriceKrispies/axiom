@@ -153,11 +153,11 @@ const PART_MATERIAL: [PenaltyMaterialId; 16] = [
     PenaltyMaterialId::GoalieJerseyYellow, // RightForearm
     PenaltyMaterialId::GoalieGloves,       // RightHand
     PenaltyMaterialId::GoalieShortsBlack,  // LeftThigh
-    PenaltyMaterialId::GoalieShortsBlack,  // LeftShin
-    PenaltyMaterialId::GoalieShortsBlack,  // LeftFoot
+    PenaltyMaterialId::GoalieSocks,        // LeftShin
+    PenaltyMaterialId::GoalieShoes,        // LeftFoot
     PenaltyMaterialId::GoalieShortsBlack,  // RightThigh
-    PenaltyMaterialId::GoalieShortsBlack,  // RightShin
-    PenaltyMaterialId::GoalieShortsBlack,  // RightFoot
+    PenaltyMaterialId::GoalieSocks,        // RightShin
+    PenaltyMaterialId::GoalieShoes,        // RightFoot
 ];
 
 const PART_LABELS: [&str; 16] = [
@@ -199,7 +199,13 @@ pub struct PenaltyGoaliePose {
 }
 
 impl PenaltyGoaliePose {
-    /// The idle / ready rest pose.
+    /// The idle / ready rest pose (translation-only locals). The idle pose is left
+    /// un-rotated on purpose: the Pass-6 save volumes ride these part world
+    /// positions, so re-posing the idle would move the deterministic save geometry
+    /// — a gameplay change out of scope for a visual-silhouette pass. The goalie's
+    /// silhouette still improves via angular box meshes + sock/shoe materials +
+    /// hair, none of which move a joint. A render-only posed overlay (decoupled
+    /// from the collision rig) is the correct future path to an arms-out stance.
     pub fn idle() -> Self {
         let mut local = [Transform::IDENTITY; 16];
         (0..16).for_each(|i| local[i] = Transform::from_translation(IDLE_LOCAL[i]));

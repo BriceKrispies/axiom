@@ -52,9 +52,11 @@ struct ShadowU { light_vp: mat4x4<f32> };
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
-    // Affine (perspective-incorrect) UV — the retro 32-bit texture "swim". `linear` drops
-    // the perspective divide the default interpolation applies.
-    @location(1) @interpolate(linear) uv: vec2<f32>,
+    // Perspective-correct UV. (An affine `@interpolate(linear)` "swim" reads more
+    // retro 32-bit, but compiles to a `noperspective` qualifier the WebGL2 GLSL target
+    // rejects — it panics pipeline creation on the browser's downlevel path — so
+    // the UV stays perspective-correct; nearest filtering carries the retro 32-bit look.)
+    @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
     @location(3) world_pos: vec3<f32>,
 };

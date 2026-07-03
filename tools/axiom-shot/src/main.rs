@@ -256,20 +256,43 @@ fn nova_roll_app() -> App {
 /// renderable apps are added here (and as a Cargo dependency). `level` (when set)
 /// is a path to a `level.axiom` document for the retro FPS app (else its built-in
 /// default level is used).
-fn build_app(name: &str, level: Option<&str>) -> RunningApp {
+fn build_app(name: &str, level: Option<&str>, shot_tick: Option<u32>) -> RunningApp {
     match name {
         "retro_fps" => axiom_gallery::retro_fps::build_retro_fps_app(&retro_fps_doc(level)).0,
         "showcase" => showcase_app().build(),
         "nova-roll" => nova_roll_app().build(),
         "physics-crucible" => axiom_gallery::physics_crucible::build_physics_crucible(),
-        "soccer-penalty" => axiom_gallery::soccer_penalty::penalty_render_meshed::soccer_meshed_app(
-            axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_stage1(),
-        ),
+        "soccer-penalty" => {
+            // `--shot-tick N` renders a scripted power shot N ticks in (so the
+            // kicker's kick animation + ball flight + keeper dive are visible);
+            // without it, the static stage-1 diorama (aiming at rest).
+            let diorama = shot_tick
+                .map(|n| axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_frame(&soccer_shot_state(n)))
+                .unwrap_or_else(axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_stage1);
+            axiom_gallery::soccer_penalty::penalty_render_meshed::soccer_meshed_app(diorama)
+        }
         other => {
             eprintln!("axiom-shot: unknown --app '{other}', falling back to 'showcase'");
             showcase_app().build()
         }
     }
+}
+
+/// The soccer interaction state `shot_tick` ticks into a standard centred power
+/// shot: hold to charge for a few ticks, release, then let the ball fly.
+fn soccer_shot_state(shot_tick: u32) -> axiom_gallery::soccer_penalty::PenaltyInteractionState {
+    use axiom_gallery::soccer_penalty::{PenaltyInputIntent, PenaltyInteractionState};
+    const CHARGE_TICKS: u32 = 8;
+    (0..shot_tick).fold(PenaltyInteractionState::start(), |s, t| {
+        let intent = if t < CHARGE_TICKS {
+            PenaltyInputIntent::charging(0, 0)
+        } else if t == CHARGE_TICKS {
+            PenaltyInputIntent::releasing()
+        } else {
+            PenaltyInputIntent::neutral()
+        };
+        s.advance(intent)
+    })
 }
 
 /// The retro FPS level document for `--level PATH` (else the built-in default). Shared
@@ -368,7 +391,8 @@ fn main() {
 
     // Drive the engine to `render_tick`, applying the scripted control for each
     // tick (controller 0). The meshes are static, so they are pulled once.
-    let mut running = build_app(&app, flag(&args, "--level").as_deref());
+    let shot_tick = flag(&args, "--shot-tick").and_then(|s| s.parse::<u32>().ok());
+    let mut running = build_app(&app, flag(&args, "--level").as_deref(), shot_tick);
     let meshes = running.mesh_set();
     let materials = running.material_textures();
     let mut outcome = None;

@@ -6,7 +6,7 @@
 //! ball + ball-shadow objects and appends any trail samples, derives the HUD
 //! from the interaction state (Pass 4), and produces the ordered render plan.
 
-use axiom_math::Vec3;
+use axiom_math::{Quat, Vec3};
 
 use crate::soccer_penalty::low_poly_assets::PrimitiveShape;
 use crate::soccer_penalty::penalty_ball::PenaltyBallPose;
@@ -15,12 +15,15 @@ use crate::soccer_penalty::penalty_goalie::{
     PenaltyGoalieContactKind, PenaltyGoalieDebugDescriptor, PenaltyGoalieVolume,
     PenaltyGoalieVolumeKind, PenaltyGoalieVolumeSet, PenaltyGoalieVolumeShape,
 };
+use crate::soccer_penalty::penalty_character::{HumanoidPose, KitPart};
 use crate::soccer_penalty::penalty_goalie_pose::{PenaltyGoaliePartKind, PenaltyGoaliePoseDescriptor};
 use crate::soccer_penalty::penalty_hud::PenaltyHudModel;
-use crate::soccer_penalty::penalty_interaction::PenaltyInteractionState;
+use crate::soccer_penalty::penalty_interaction::{PenaltyInteractionState, PenaltyShotFlightState};
 use crate::soccer_penalty::penalty_materials::PenaltyMaterialId;
 use crate::soccer_penalty::penalty_render_plan::PenaltyRenderPlan;
-use crate::soccer_penalty::penalty_scene::{DioramaObject, DioramaRole, ObjectId, BALL_RADIUS};
+use crate::soccer_penalty::penalty_scene::{
+    kicker_character, kicker_label, DioramaObject, DioramaRole, ObjectId, BALL_RADIUS,
+};
 use crate::soccer_penalty::penalty_session::PenaltySessionState;
 use crate::soccer_penalty::static_diorama::{CameraConfig, StaticDiorama};
 
@@ -68,13 +71,20 @@ impl SoccerPenaltyApp {
         let diorama = StaticDiorama::stage1();
         let pose = state.ball_pose();
         let goalie_pose = state.goalie.descriptor();
+        let kicker_parts = kicker_character(&kicker_pose(state));
 
-        // Overlay the live ball pose and the sampled goalie pose onto the static
-        // ball / shadow / goalie objects (identity at rest → default unchanged).
+        // Overlay the live ball pose, the sampled goalie dive, and the kicker's kick
+        // pose onto the static ball / shadow / goalie / kicker objects (identity at
+        // rest → default unchanged).
         let mut objects: Vec<DioramaObject> = diorama
             .objects
             .iter()
-            .map(|o| apply_goalie_pose(apply_ball_pose(*o, &pose), &goalie_pose))
+            .map(|o| {
+                apply_kicker_pose(
+                    apply_goalie_pose(apply_ball_pose(*o, &pose), &goalie_pose),
+                    &kicker_parts,
+                )
+            })
             .collect();
         // Append deterministic trail samples (none at rest / in the default).
         append_trail(&mut objects, &pose);
@@ -99,11 +109,17 @@ impl SoccerPenaltyApp {
         let diorama = StaticDiorama::stage1();
         let pose = session.shot.ball_pose();
         let goalie_pose = session.shot.goalie.descriptor();
+        let kicker_parts = kicker_character(&kicker_pose(&session.shot));
 
         let mut objects: Vec<DioramaObject> = diorama
             .objects
             .iter()
-            .map(|o| apply_goalie_pose(apply_ball_pose(*o, &pose), &goalie_pose))
+            .map(|o| {
+                apply_kicker_pose(
+                    apply_goalie_pose(apply_ball_pose(*o, &pose), &goalie_pose),
+                    &kicker_parts,
+                )
+            })
             .collect();
         append_trail(&mut objects, &pose);
 
@@ -202,6 +218,7 @@ fn append_effect_items(objects: &mut Vec<DioramaObject>, desc: &PenaltyEffectDes
             shape: PrimitiveShape::Quad,
             position: it.position,
             size: Vec3::new(it.size, it.size, 0.0),
+            rotation: Quat::IDENTITY,
             material: PenaltyMaterialId::HudYellowHighlight,
             label: it.label,
         });
@@ -222,6 +239,7 @@ fn append_wobble_nodes(
             shape: PrimitiveShape::Line,
             position: n.displaced_position,
             size: Vec3::new(0.06, 0.06, 0.06),
+            rotation: Quat::IDENTITY,
             material: PenaltyMaterialId::NetOffWhite,
             label,
         });
@@ -254,6 +272,7 @@ fn append_goalie_debug(
             shape: PrimitiveShape::Quad,
             position: v.center,
             size: Vec3::new(hx * 2.0, hy * 2.0, 0.0),
+            rotation: Quat::IDENTITY,
             material: debug_material(v.kind),
             label: "goalie.debug.volume",
         });
@@ -284,7 +303,54 @@ fn apply_goalie_pose(o: DioramaObject, pose: &PenaltyGoaliePoseDescriptor) -> Di
     PenaltyGoaliePartKind::from_label(o.label)
         .map(|kind| {
             let part = pose.part(kind);
-            DioramaObject { position: part.world.translation, size: part.size, ..o }
+            DioramaObject {
+                position: part.world.translation,
+                rotation: part.world.rotation,
+                size: part.size,
+                ..o
+            }
+        })
+        .unwrap_or(o)
+}
+
+/// The kicker's animation pose for the current shot state — a deterministic,
+/// tick-driven kick (no wall-clock): the run-up stride while aiming, a loaded
+/// wind-up while charging / locked, then contact → follow-through over the ticks
+/// after release. Mirrors how the goalie's dive pose is sampled per tick.
+fn kicker_pose(state: &PenaltyInteractionState) -> HumanoidPose {
+    match state.state {
+        PenaltyShotFlightState::Aiming => HumanoidPose::kicker_stride(),
+        PenaltyShotFlightState::Charging | PenaltyShotFlightState::LockedPreview => {
+            HumanoidPose::kicker_windup()
+        }
+        PenaltyShotFlightState::BallInFlight
+        | PenaltyShotFlightState::ContactDetected
+        | PenaltyShotFlightState::ArrivedAtGoalPlane
+        | PenaltyShotFlightState::Resolved => {
+            // Ticks since the shot was released (the ball launches the tick after a
+            // lock): a brief contact, then the follow-through is held.
+            let released = state.preview.map(|p| p.release_tick).unwrap_or(state.tick);
+            let since = state.tick.saturating_sub(released);
+            if since <= 2 {
+                HumanoidPose::kicker_contact()
+            } else {
+                HumanoidPose::kicker_follow_through()
+            }
+        }
+    }
+}
+
+/// Overlay the current kick pose onto a kicker part object (matched by label).
+/// Non-kicker objects pass through unchanged; at the stride pose (aiming/rest) this
+/// reproduces the emitted positions, so the static frame is unchanged.
+fn apply_kicker_pose(o: DioramaObject, parts: &[KitPart]) -> DioramaObject {
+    parts
+        .iter()
+        .find(|p| kicker_label(p.part) == o.label)
+        .map(|p| DioramaObject {
+            position: p.world.translation,
+            rotation: p.world.rotation,
+            ..o
         })
         .unwrap_or(o)
 }
@@ -303,6 +369,7 @@ fn append_trail(objects: &mut Vec<DioramaObject>, pose: &PenaltyBallPose) {
             shape: crate::soccer_penalty::low_poly_assets::PrimitiveShape::Quad,
             position: pose.trail[i],
             size: Vec3::new(s, s, 0.0),
+            rotation: Quat::IDENTITY,
             material: PenaltyMaterialId::BallWhite,
             label: "ball.trail",
         });

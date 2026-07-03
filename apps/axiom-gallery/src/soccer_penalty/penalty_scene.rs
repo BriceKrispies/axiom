@@ -18,10 +18,11 @@
 //! - The goal line sits at `z = 0`; the ball/penalty spot at `z = PENALTY_SPOT_Z`.
 //! - The camera looks down `-Z` toward the goal (see `static_diorama.rs`).
 
-use axiom_math::Vec3;
+use axiom_math::{Quat, Vec3};
 
 use crate::soccer_penalty::low_poly_assets::PrimitiveShape;
 use crate::soccer_penalty::penalty_blob_shadow::BLOB_SHADOWS;
+use crate::soccer_penalty::penalty_character::{build_character, HumanoidPose, KitPart, Outfit, Part};
 use crate::soccer_penalty::penalty_goalie_pose::PenaltyGoaliePose;
 use crate::soccer_penalty::penalty_materials::PenaltyMaterialId;
 
@@ -69,6 +70,11 @@ pub struct DioramaObject {
     pub position: Vec3,
     /// Full extents for a `Box`/`Quad`; `size.x` is the radius for a `FacetedBall`.
     pub size: Vec3,
+    /// Local orientation of the primitive about its center. `Quat::IDENTITY` for
+    /// every axis-aligned object (field/goal/net/ball/backdrop); the humanoid kit
+    /// authors real rotations here so posed angular limbs (a bent knee, an angled
+    /// arm, a leaning torso) render at their pose orientation.
+    pub rotation: Quat,
     /// The named material this object is drawn with (color lives in the palette).
     pub material: PenaltyMaterialId,
     /// A stable, greppable name for this object (e.g. `"kicker.torso"`).
@@ -143,12 +149,29 @@ impl SceneBuilder {
         material: PenaltyMaterialId,
         label: &'static str,
     ) {
+        self.emit_rotated(role, shape, position, Quat::IDENTITY, size, material, label);
+    }
+
+    /// Emit an object with an explicit local rotation (the humanoid kit uses this
+    /// for posed angular limbs). `emit` forwards here with `Quat::IDENTITY`.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_rotated(
+        &mut self,
+        role: DioramaRole,
+        shape: PrimitiveShape,
+        position: Vec3,
+        rotation: Quat,
+        size: Vec3,
+        material: PenaltyMaterialId,
+        label: &'static str,
+    ) {
         self.objects.push(DioramaObject {
             id: ObjectId(self.next_id),
             role,
             shape,
             position,
             size,
+            rotation,
             material,
             label,
         });
@@ -302,94 +325,78 @@ fn net(b: &mut SceneBuilder) {
     panel(GOAL_LINE_Z, DioramaRole::FrontNet, "net.front");
 }
 
-/// The material assignment for one low-poly humanoid puppet.
-#[derive(Clone, Copy)]
-struct PuppetMaterials {
-    jersey: PenaltyMaterialId,
-    shorts: PenaltyMaterialId,
-    skin: PenaltyMaterialId,
-    legs: PenaltyMaterialId,
-    hands: PenaltyMaterialId,
-    hair: PenaltyMaterialId,
+/// The greppable label for one kicker humanoid part. Public so the per-frame
+/// kick-animation overlay (`soccer_penalty_app`) can match the kicker's objects.
+pub fn kicker_label(part: Part) -> &'static str {
+    match part {
+        Part::Pelvis => "kicker.pelvis",
+        Part::Torso => "kicker.torso",
+        Part::Head => "kicker.head",
+        Part::Hair => "kicker.hair",
+        Part::UpperArmL => "kicker.upperarm.left",
+        Part::UpperArmR => "kicker.upperarm.right",
+        Part::ForearmL => "kicker.forearm.left",
+        Part::ForearmR => "kicker.forearm.right",
+        Part::HandL => "kicker.hand.left",
+        Part::HandR => "kicker.hand.right",
+        Part::ThighL => "kicker.thigh.left",
+        Part::ThighR => "kicker.thigh.right",
+        Part::ShinL => "kicker.shin.left",
+        Part::ShinR => "kicker.shin.right",
+        Part::FootL => "kicker.foot.left",
+        Part::FootR => "kicker.foot.right",
+    }
 }
 
-/// The eleven per-part labels of a puppet, in emission order:
-/// leg.left, leg.right, shorts, torso, neck, head, hair, arm.left, arm.right,
-/// hand.left, hand.right. Passing them in keeps each puppet's parts uniquely
-/// greppable (e.g. `kicker.torso`).
-type PuppetLabels = [&'static str; 11];
-
-/// Emit one low-poly humanoid puppet from primitive boxes at a ground base, in a
-/// dynamic mid-stride run-up pose seen from behind (the reference framing): the
-/// figure leans forward toward the ball (local `-Z`), one leg planted forward and
-/// the trailing leg lifted back, and the arms swing counter to the legs for
-/// balance. Boxes can't rotate, so the lean/stride is faked with `Z`/`Y` offsets.
-/// `stride` sets the leg/arm fore-aft swing; `lean` shifts the upper body forward.
-/// A neck, a smaller head, and a hair block replace the old floating-cube head to
-/// break the boxy silhouette.
-fn puppet(
-    b: &mut SceneBuilder,
-    role: DioramaRole,
-    base: (f32, f32),
-    materials: PuppetMaterials,
-    stride: f32,
-    lean: f32,
-    labels: PuppetLabels,
-) {
-    let (base_x, base_z) = base;
-    let mut part = |x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32, m: PenaltyMaterialId, label: &'static str| {
-        b.emit(role, PrimitiveShape::Box, Vec3::new(x, y, z), Vec3::new(sx, sy, sz), m, label);
-    };
-    // Planted (left) leg forward and full-length; trailing (right) leg swung back
-    // and lifted (shorter box, higher centre = a bent, rising knee).
-    part(base_x - 0.15, 0.42, base_z - stride * 0.5, 0.2, 0.86, 0.22, materials.legs, labels[0]);
-    part(base_x + 0.17, 0.56, base_z + stride * 0.9, 0.2, 0.66, 0.22, materials.legs, labels[1]);
-    // Upper body leans forward over the planted foot (shifted -Z by `lean`).
-    part(base_x, 0.98, base_z - lean * 0.4, 0.5, 0.3, 0.26, materials.shorts, labels[2]);
-    part(base_x, 1.42, base_z - lean, 0.58, 0.6, 0.3, materials.jersey, labels[3]);
-    part(base_x, 1.75, base_z - lean * 1.15, 0.13, 0.13, 0.16, materials.skin, labels[4]);
-    part(base_x, 1.92, base_z - lean * 1.2, 0.24, 0.26, 0.25, materials.skin, labels[5]);
-    // Hair sits on top and a hair-breadth back, capping the head.
-    part(base_x, 2.03, base_z - lean * 1.2 + 0.02, 0.26, 0.13, 0.27, materials.hair, labels[6]);
-    // Arms swing counter to the legs: left arm forward, right arm back.
-    part(base_x - 0.37, 1.4, base_z - stride * 0.7 - lean, 0.15, 0.5, 0.15, materials.jersey, labels[7]);
-    part(base_x + 0.37, 1.36, base_z + stride * 0.6, 0.15, 0.5, 0.15, materials.jersey, labels[8]);
-    part(base_x - 0.41, 1.12, base_z - stride * 0.95 - lean, 0.16, 0.16, 0.16, materials.hands, labels[9]);
-    part(base_x + 0.41, 1.08, base_z + stride * 0.85, 0.16, 0.16, 0.16, materials.hands, labels[10]);
+/// The kicker's kit outfit (blue jersey, white shorts, skin, dark socks/shoes).
+pub fn kicker_outfit() -> Outfit {
+    Outfit {
+        skin: PenaltyMaterialId::KickerSkin,
+        // Reuse the dark hair material the goalie already defines.
+        hair: PenaltyMaterialId::GoalieHair,
+        jersey: PenaltyMaterialId::KickerJerseyBlue,
+        shorts: PenaltyMaterialId::KickerShortsWhite,
+        socks: PenaltyMaterialId::KickerSocksDark,
+        shoes: PenaltyMaterialId::KickerShoes,
+        gloves: PenaltyMaterialId::KickerSkin, // kicker has no gloves; bare hands
+    }
 }
 
-const KICKER_LABELS: PuppetLabels = [
-    "kicker.leg.left",
-    "kicker.leg.right",
-    "kicker.shorts",
-    "kicker.torso",
-    "kicker.neck",
-    "kicker.head",
-    "kicker.hair",
-    "kicker.arm.left",
-    "kicker.arm.right",
-    "kicker.hand.left",
-    "kicker.hand.right",
-];
+/// The kicker faces the goal (local `-Z`), a 180° yaw so the camera behind sees
+/// the number on his back.
+pub fn kicker_facing() -> Quat {
+    Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), core::f32::consts::PI)
+        .expect("half-turn is a finite rotation")
+}
 
+/// Resolve the kicker's humanoid parts in `pose` at the fixed left-foreground base
+/// — the single source of truth for both the static scene author (below) and the
+/// per-frame kick-animation overlay (`soccer_penalty_app::apply_kicker_pose`), so
+/// the overlay's transforms line up exactly with the objects it re-poses.
+pub fn kicker_character(pose: &HumanoidPose) -> Vec<KitPart> {
+    build_character(
+        Vec3::new(KICKER_X, GROUND_Y, KICKER_Z),
+        kicker_facing(),
+        pose,
+        &kicker_outfit(),
+    )
+}
+
+/// The kicker: a rigid low-poly humanoid (the character kit) authored once at its
+/// run-up stride. The app re-poses it per frame during a shot (wind-up → contact →
+/// follow-through), so at rest this is the kicker you see.
 fn kicker(b: &mut SceneBuilder) {
-    puppet(
-        b,
-        DioramaRole::Kicker,
-        (KICKER_X, KICKER_Z),
-        PuppetMaterials {
-            jersey: PenaltyMaterialId::KickerJerseyBlue,
-            shorts: PenaltyMaterialId::KickerShortsWhite,
-            skin: PenaltyMaterialId::KickerSkin,
-            legs: PenaltyMaterialId::KickerSocksDark,
-            hands: PenaltyMaterialId::KickerSkin,
-            // Reuse the dark hair material the goalie already defines.
-            hair: PenaltyMaterialId::GoalieHair,
-        },
-        0.42,
-        0.14,
-        KICKER_LABELS,
-    );
+    kicker_character(&HumanoidPose::kicker_stride()).iter().for_each(|p| {
+        b.emit_rotated(
+            DioramaRole::Kicker,
+            PrimitiveShape::Box,
+            p.world.translation,
+            p.world.rotation,
+            p.size,
+            p.material,
+            kicker_label(p.part),
+        );
+    });
 }
 
 fn goalie(b: &mut SceneBuilder) {
@@ -407,6 +414,17 @@ fn goalie(b: &mut SceneBuilder) {
             part.kind.label(),
         );
     });
+    // A hair cap over the head. Emitted as a plain (non-rig) object — the goalie
+    // pose overlay passes labels it doesn't own straight through, so it sits at
+    // this rest position (the head barely moves at the idle stance).
+    b.emit(
+        DioramaRole::Goalie,
+        PrimitiveShape::Box,
+        Vec3::new(GOALIE_X, 1.97, GOALIE_Z),
+        Vec3::new(0.28, 0.14, 0.28),
+        PenaltyMaterialId::GoalieHair,
+        "goalie.hair",
+    );
 }
 
 fn ball(b: &mut SceneBuilder) {

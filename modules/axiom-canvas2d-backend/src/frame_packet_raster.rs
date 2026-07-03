@@ -386,7 +386,19 @@ fn convert_draw(
     let (kept, min_culled, decimated) =
         prune_candidates(core::mem::take(&mut acc.candidates), is_critical, coverage, cap);
     acc.candidates = kept;
-    let est_cost: u64 = acc.candidates.iter().map(|c| c.area as u64).sum();
+    // A draw's budget cost is its on-screen work, capped at one framebuffer's worth
+    // of pixels. Without the cap a large or near-plane quad (the pitch plane / grass
+    // bands) contributes its full *unclamped* projected-triangle area — millions of
+    // px, most of it off-screen — which spuriously exhausts the frame pixel budget
+    // and makes the budget skip legitimate distant Decorative draws (the goal, net,
+    // and keeper). That skip is order-sensitive, so with the live re-authoring path's
+    // churning draw order it manifested as those objects flickering on Canvas 2D.
+    let est_cost: u64 = acc
+        .candidates
+        .iter()
+        .map(|c| c.area as u64)
+        .sum::<u64>()
+        .min(screen_px2 as u64);
 
     // Bake the per-triangle depth cues into each flat colour (lighting → height
     // tint → distance falloff, the documented order).

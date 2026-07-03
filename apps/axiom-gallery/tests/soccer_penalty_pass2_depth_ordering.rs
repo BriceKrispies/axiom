@@ -17,7 +17,7 @@ use axiom_math::Vec3;
 /// with the visual-convergence pass: the crowd is now 3 stacked rows of 26 cards
 /// (78) instead of a single row of 9, the kicker is an 11-part posed figure, and
 /// the ball carries 6 dark panels instead of 2.
-const EXPECTED_RENDER_ITEMS: usize = 179;
+const EXPECTED_RENDER_ITEMS: usize = 185;
 
 fn plan() -> PenaltyRenderPlan {
     SoccerPenaltyApp::build_stage1().render_plan
@@ -139,7 +139,7 @@ fn render_items_are_a_total_sorted_order() {
     // the appended HUD items.
     let world = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::World { .. })).count();
     let hud = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::Hud { .. })).count();
-    assert_eq!(world, 173);
+    assert_eq!(world, 179);
     assert_eq!(hud, 6);
 }
 

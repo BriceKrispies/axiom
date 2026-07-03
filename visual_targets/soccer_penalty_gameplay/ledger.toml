@@ -1,0 +1,118 @@
+# Visual-convergence ledger — soccer penalty gameplay viewport.
+# Target: the cropped main 3D gameplay viewport of reference/soccer-penalty-kick.png
+# (kicker, ball, goal, keeper, reticle, field, stadium) — not the right-side/bottom UI sheet.
+# Harness: tools/axiom-shot --app soccer-penalty --backend gpu (native offscreen, 960x600,
+# byte-deterministic: identical md5 on a double render). Score 0..5, harsh; a proxy = 1.
+# final_score = lowest_axis*0.7 + average_axis*0.3. Attack the lowest axis, one per pass.
+
+[[iteration]]
+iteration = 1
+attacked_axis = "composition_and_framing"
+changed_files = ["apps/axiom-gallery/src/soccer_penalty/static_diorama.rs"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = """
+Reframed the fixed shot camera to the reference composition: FOV 44->32 (the main cause of \
+everything reading small/distant), eye lowered + pulled back to (1.2,3.8,18.8), target aimed low \
+at the goal line (-0.35,-1.3,0.0) so the vertical frame spans the goal (near the horizon) down to \
+the close kicker's feet. Result: kicker large in the left foreground seen from behind (full body), \
+goal centred in the upper-middle at ~half width, ball lower-middle, keeper centred in the goal, a \
+crowd band above the goal, field lines in perspective. composition_and_framing 1->3 and \
+camera_lens_and_scale 1->3; every non-attacked axis held or rose (none dropped), so promote. \
+App-only change (camera constants); no engine/kernel/runtime/math edits, no new primitives, no \
+animation, no crowd-noise/cosmetic edits. Byte-deterministic (md5 a743652a…).
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 1
+camera_lens_and_scale     = 1
+kicker_silhouette         = 1
+goalkeeper_silhouette     = 1
+ball_fidelity             = 2
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 2
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 1
+gameplay_readability      = 1
+artifact_level            = 2
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 3
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 2
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 2
+stadium_and_ad_boards     = 2
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2
+
+[[iteration]]
+iteration = 2
+attacked_axis = "character_silhouette"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/penalty_character.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_render_plan.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_render_meshed.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_goalie_pose.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_materials.rs",
+  "apps/axiom-gallery/src/soccer_penalty/soccer_penalty_app.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_meshes.rs",
+  "apps/axiom-gallery/src/soccer_penalty/mod.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_stage1_diorama.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_pass2_depth_ordering.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = """
+Replaced the oval/blob (capsule/sphere) athletes with a rigid low-poly ANGULAR humanoid kit. \
+New `penalty_character.rs` defines a 16-part parented humanoid (pelvis/torso/head/hair/arms/hands/\
+thighs/shins/feet) with per-joint rotations, angular box meshes, and material slots (skin/hair/\
+jersey/shorts/socks/shoes/gloves); the render path gained a `rotation` field (DioramaObject + \
+PenaltyRenderContent::World + the meshed spawn) so posed limbs orient correctly, and `select_mesh` \
+now routes every actor part to an angular box (ball stays a sphere). The kicker is a kit instance in \
+a back-facing stride; the goalie's existing rig gained angular boxes + sock/shoe materials + a hair \
+cap. kicker_silhouette 2->3, goalkeeper_silhouette 1->2; no non-attacked axis dropped, so promote. \
+The goalie's arms-out/knees-bent stance was reverted: the Pass-6 save volumes ride the goalie joint \
+world positions, so re-posing the idle changes deterministic save outcomes — a gameplay change out of \
+scope for a visual pass (a render-only posed overlay decoupled from the collision rig is the correct \
+future path). The kit uses proper JOINT pivots (each limb rotates about its shoulder/elbow/knee, not \
+its center) so elbows/knees never bend backward, and the cube UVs were flipped to image convention so \
+the jersey number + ad-board text read upright. App-only; no engine/kernel/runtime/math edits. \
+Byte-deterministic (md5 77ba2c26…).
+"""
+next_attacked_axis = "goal_and_net_fidelity"
+abstraction_introduced = true  # penalty_character.rs (the humanoid kit) — a new app-local capability
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 3
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 2
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 2
+stadium_and_ad_boards     = 2
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 3
+kicker_silhouette         = 3
+goalkeeper_silhouette     = 2
+ball_fidelity             = 2
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 2
+stadium_and_ad_boards     = 2
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2

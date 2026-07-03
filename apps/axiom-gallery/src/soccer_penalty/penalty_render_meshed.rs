@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use axiom::prelude::*;
 
 use crate::soccer_penalty::low_poly_assets::{PrimitiveShape, Rgba};
-use crate::soccer_penalty::penalty_meshes::{unit_capsule, unit_cube, unit_sphere};
+use crate::soccer_penalty::penalty_meshes::{unit_cube, unit_sphere};
 use crate::soccer_penalty::penalty_render_plan::PenaltyRenderContent;
 use crate::soccer_penalty::penalty_scene::DioramaRole;
 use crate::soccer_penalty::penalty_textures;
@@ -49,25 +49,21 @@ fn nonzero(s: Vec3) -> Vec3 {
     Vec3::new(c(s.x), c(s.y), c(s.z))
 }
 
-/// The library mesh + scale for one diorama object. Actor (kicker/goalie) body
-/// parts become rounded meshes — spheres for heads/hands, capsules for limbs and
-/// torso — while structure (posts, wall, crowd, ad boards, ground quads, net
-/// lines) stays boxy, as in the reference.
+/// The library mesh + scale for one diorama object. The only round mesh is the
+/// ball (a `FacetedBall`); EVERYTHING else — structure (posts, wall, crowd, ad
+/// boards, ground/net) AND the athletes' body parts — is an **angular box**. The
+/// humanoid kit builds readable low-poly figures from scaled, posed boxes rather
+/// than the smooth spheres/capsules the actors used to round into.
 fn select_mesh(
-    role: DioramaRole,
-    label: &str,
+    _role: DioramaRole,
+    _label: &str,
     shape: PrimitiveShape,
     size: Vec3,
     cube: Handle<Mesh>,
     sphere: Handle<Mesh>,
-    capsule: Handle<Mesh>,
 ) -> (Handle<Mesh>, Vec3) {
-    let is_actor = matches!(role, DioramaRole::Kicker | DioramaRole::Goalie);
-    let is_round_end = label.ends_with(".head") || label.contains("hand");
-    match (shape, is_actor, is_round_end) {
-        (PrimitiveShape::FacetedBall, _, _) => (sphere, size.mul_scalar(2.0)),
-        (PrimitiveShape::Box, true, true) => (sphere, nonzero(size)),
-        (PrimitiveShape::Box, true, false) => (capsule, nonzero(size)),
+    match shape {
+        PrimitiveShape::FacetedBall => (sphere, size.mul_scalar(2.0)),
         _ => (cube, nonzero(size)),
     }
 }
@@ -77,7 +73,6 @@ fn select_mesh(
 struct MeshLib {
     cube: Handle<Mesh>,
     sphere: Handle<Mesh>,
-    capsule: Handle<Mesh>,
 }
 
 /// The registered retro 32-bit pixel-art texture ids (0 = none), by surface kind.
@@ -110,7 +105,6 @@ impl PenaltyMeshedScene {
         let lib = MeshLib {
             cube: app.add_mesh_data(unit_cube()).expect("unit cube geometry is valid"),
             sphere: app.add_mesh_data(unit_sphere()).expect("unit sphere geometry is valid"),
-            capsule: app.add_mesh_data(unit_capsule()).expect("unit capsule geometry is valid"),
         };
         let mut tex = |t: (u32, u32, Vec<u8>)| {
             app.add_texture_data(t.0, t.1, t.2).expect("authored texture is valid").id()
@@ -215,23 +209,25 @@ impl PenaltyMeshedScene {
             .items
             .iter()
             .filter_map(|item| match item.content {
-                PenaltyRenderContent::World { role, shape, position, size, shaded_color, .. } => {
-                    Some((role, item.label, shape, position, size, shaded_color))
+                PenaltyRenderContent::World { role, shape, position, rotation, size, shaded_color, .. } => {
+                    Some((role, item.label, shape, position, rotation, size, shaded_color))
                 }
                 _ => None,
             })
             .collect();
-        objects.into_iter().for_each(|(role, label, shape, position, size, color)| {
+        objects.into_iter().for_each(|(role, label, shape, position, rotation, size, color)| {
             let (mesh, scale) =
-                select_mesh(role, label, shape, size, self.lib.cube, self.lib.sphere, self.lib.capsule);
+                select_mesh(role, label, shape, size, self.lib.cube, self.lib.sphere);
             let to_eye = cam.eye.subtract(position);
             let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
             let biased = position.add(dir.mul_scalar(index as f32 * 0.0015));
             let material = self.material_for(app, color, self.texture_for(role, label));
+            // Compose translate ∘ (rotate ∘ scale): the part is scaled, oriented to
+            // its posed rotation about its own center, then placed in the world.
             let entity = app.spawn(Spawn::new(
                 Transform::combine(
                     Transform::from_translation(biased),
-                    Transform::from_scale(scale),
+                    Transform::combine(Transform::from_rotation(rotation), Transform::from_scale(scale)),
                 ),
                 mesh,
                 material,
