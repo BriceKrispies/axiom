@@ -26,6 +26,9 @@ pub enum RenderCapability {
     DetailInstancing = 1 << 3,
     /// A post-process stack (tone-map / bloom / colour grade).
     PostProcess = 1 << 4,
+    /// The retro 32-bit console render profile (low-res + nearest, vertex snap, flat
+    /// passthrough, distance fog, colour-depth quantize + ordered dither).
+    Retro32Bit = 1 << 5,
 }
 
 /// Every known capability's bit, OR-ed together — the `all()` set.
@@ -33,7 +36,8 @@ const ALL_CAPABILITY_BITS: u32 = RenderCapability::Volumetrics as u32
     | RenderCapability::Sdf as u32
     | RenderCapability::AlphaMask as u32
     | RenderCapability::DetailInstancing as u32
-    | RenderCapability::PostProcess as u32;
+    | RenderCapability::PostProcess as u32
+    | RenderCapability::Retro32Bit as u32;
 
 /// The set of render capabilities a backend will attempt. Default for every backend is
 /// [`Self::all`]; restrict it (via [`Self::without`]) to shut specific capabilities off
@@ -76,12 +80,13 @@ impl BackendCapabilityProfile {
 mod tests {
     use super::*;
 
-    const CAPS: [RenderCapability; 5] = [
+    const CAPS: [RenderCapability; 6] = [
         RenderCapability::Volumetrics,
         RenderCapability::Sdf,
         RenderCapability::AlphaMask,
         RenderCapability::DetailInstancing,
         RenderCapability::PostProcess,
+        RenderCapability::Retro32Bit,
     ];
 
     #[test]

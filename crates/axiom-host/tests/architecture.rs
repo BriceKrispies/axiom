@@ -353,6 +353,8 @@ fn lib_exports_are_curated_set() {
         "pub use frame_packet::FrameViewport;",
         "pub use frame_postprocess::apply_frame_postprocess;",
         "pub use frame_postprocess::FramePostProcess;",
+        "pub use frame_retro_32bit::apply_frame_retro_32bit;",
+        "pub use frame_retro_32bit::FrameRetro32BitProfile;",
         "pub use frame_volumetrics::apply_frame_volumetrics;",
         "pub use frame_volumetrics::FrameVolumetrics;",
         "pub use frame_raster_stats::FrameDepthCueStats;",
