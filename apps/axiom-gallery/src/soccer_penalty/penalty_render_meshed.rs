@@ -31,6 +31,7 @@ use crate::soccer_penalty::low_poly_assets::{PrimitiveShape, Rgba};
 use crate::soccer_penalty::penalty_meshes::{unit_capsule, unit_cube, unit_sphere};
 use crate::soccer_penalty::penalty_render_plan::PenaltyRenderContent;
 use crate::soccer_penalty::penalty_scene::DioramaRole;
+use crate::soccer_penalty::penalty_textures;
 use crate::soccer_penalty::soccer_penalty_app::Stage1Diorama;
 use crate::soccer_penalty::static_diorama::CameraConfig;
 
@@ -79,26 +80,80 @@ struct MeshLib {
     capsule: Handle<Mesh>,
 }
 
-/// The shared meshed scene: the mesh library, a colour→material cache (so a stable
-/// palette of materials is registered before the live backend snapshots them, and
-/// no material leaks per frame), and the entities spawned last frame (despawned
-/// before the next author pass).
+/// The registered retro 32-bit pixel-art texture ids (0 = none), by surface kind.
+#[derive(Clone, Copy, Debug)]
+struct TexLib {
+    crowd: u64,
+    ad_axiom: u64,
+    ad_generic: u64,
+    jersey: u64,
+    keeper: u64,
+    ball: u64,
+    skin: u64,
+}
+
+/// The shared meshed scene: the mesh + texture libraries, a
+/// (colour, texture)→material cache (so a stable palette of materials is
+/// registered before the live backend snapshots them, and no material leaks per
+/// frame), and the entities spawned last frame (despawned before the next pass).
 #[derive(Debug)]
 pub struct PenaltyMeshedScene {
     lib: MeshLib,
-    palette: HashMap<[u8; 3], Handle<Material>>,
+    tex: TexLib,
+    palette: HashMap<([u8; 3], u64), Handle<Material>>,
     spawned: Vec<Entity>,
 }
 
 impl PenaltyMeshedScene {
-    /// Register the mesh library into `app` and prime an empty authoring scene.
+    /// Register the mesh + texture libraries into `app` and prime an empty scene.
     pub fn install(app: &mut RunningApp) -> Self {
         let lib = MeshLib {
             cube: app.add_mesh_data(unit_cube()).expect("unit cube geometry is valid"),
             sphere: app.add_mesh_data(unit_sphere()).expect("unit sphere geometry is valid"),
             capsule: app.add_mesh_data(unit_capsule()).expect("unit capsule geometry is valid"),
         };
-        Self { lib, palette: HashMap::new(), spawned: Vec::new() }
+        let mut tex = |t: (u32, u32, Vec<u8>)| {
+            app.add_texture_data(t.0, t.1, t.2).expect("authored texture is valid").id()
+        };
+        let tex = TexLib {
+            crowd: tex(penalty_textures::crowd()),
+            ad_axiom: tex(penalty_textures::ad_axiom()),
+            ad_generic: tex(penalty_textures::ad_generic()),
+            jersey: tex(penalty_textures::jersey([40, 76, 200], "10", [240, 240, 245])),
+            keeper: tex(penalty_textures::kit([230, 200, 40])),
+            ball: tex(penalty_textures::ball()),
+            skin: tex(penalty_textures::skin([210, 160, 128])),
+        };
+        Self { lib, tex, palette: HashMap::new(), spawned: Vec::new() }
+    }
+
+    /// The retro 32-bit texture id for one object's role/label (0 = flat, no texture).
+    fn texture_for(&self, role: DioramaRole, label: &str) -> u64 {
+        match role {
+            DioramaRole::CrowdCard => self.tex.crowd,
+            DioramaRole::AdBoard => {
+                if label == "ad.board.axiom" {
+                    self.tex.ad_axiom
+                } else {
+                    self.tex.ad_generic
+                }
+            }
+            DioramaRole::Kicker => self.body_texture(label, self.tex.jersey),
+            DioramaRole::Goalie => self.body_texture(label, self.tex.keeper),
+            DioramaRole::Ball => (label == "ball").then_some(self.tex.ball).unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    /// Body-part texture: the kit on the torso, skin on head/hands, flat elsewhere.
+    fn body_texture(&self, label: &str, kit: u64) -> u64 {
+        if label.ends_with(".torso") {
+            kit
+        } else if label.ends_with(".head") || label.contains("hand") {
+            self.tex.skin
+        } else {
+            0
+        }
     }
 
     /// Set the fixed camera and key light once (call after [`Self::install`]).
@@ -125,18 +180,21 @@ impl PenaltyMeshedScene {
 
     /// A cached lit material for `color` (registered once, reused thereafter), so
     /// the material set the live backend snapshots at startup stays stable.
-    fn material_for(&mut self, app: &mut RunningApp, color: Rgba) -> Handle<Material> {
-        let key = [
-            (color.r.clamp(0.0, 1.0) * 255.0) as u8,
-            (color.g.clamp(0.0, 1.0) * 255.0) as u8,
-            (color.b.clamp(0.0, 1.0) * 255.0) as u8,
-        ];
+    fn material_for(&mut self, app: &mut RunningApp, color: Rgba, tex_id: u64) -> Handle<Material> {
+        let key = (
+            [
+                (color.r.clamp(0.0, 1.0) * 255.0) as u8,
+                (color.g.clamp(0.0, 1.0) * 255.0) as u8,
+                (color.b.clamp(0.0, 1.0) * 255.0) as u8,
+            ],
+            tex_id,
+        );
         *self.palette.entry(key).or_insert_with(|| {
-            app.add_material(Material::lit(Color::linear_rgb(
-                ch(color.r),
-                ch(color.g),
-                ch(color.b),
-            )))
+            // The texture (when present) modulates the flat `shaded_color` tint —
+            // albedo × base colour — so the retro 32-bit shading survives under the texture.
+            let base = Material::lit(Color::linear_rgb(ch(color.r), ch(color.g), ch(color.b)));
+            let material = if tex_id != 0 { base.with_custom_texture(tex_id) } else { base };
+            app.add_material(material)
         })
     }
 
@@ -169,7 +227,7 @@ impl PenaltyMeshedScene {
             let to_eye = cam.eye.subtract(position);
             let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
             let biased = position.add(dir.mul_scalar(index as f32 * 0.0015));
-            let material = self.material_for(app, color);
+            let material = self.material_for(app, color, self.texture_for(role, label));
             let entity = app.spawn(Spawn::new(
                 Transform::combine(
                     Transform::from_translation(biased),

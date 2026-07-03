@@ -119,8 +119,12 @@ impl RunningApp {
             self.materials.iter().for_each(|(id, material)| {
                 // `0` = untextured; live albedo pixels are uploaded separately via
                 // `material_textures`. Opacity is folded into the per-draw alpha so
-                // a translucent material blends.
-                let texture_id = material.texture().map(Texture::id).unwrap_or(0);
+                // a translucent material blends. An app-authored raw-pixel texture
+                // (nonzero `custom_texture`) takes precedence over the built-in one.
+                let texture_id = (material.custom_texture() != 0)
+                    .then_some(material.custom_texture())
+                    .or_else(|| material.texture().map(Texture::id))
+                    .unwrap_or(0);
                 let emissive = material.emissive().to_array();
                 pipeline.frame_add_lit_material(
                     &mut frame,

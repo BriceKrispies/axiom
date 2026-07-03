@@ -86,15 +86,16 @@ impl FrameRetro32BitProfile {
     }
 
     /// The full-on retro 32-bit console preset: 384×240 (8:5) internal resolution with a
-    /// nearest upscale, vertex snapping and flat unlit passthrough on, 5-bit
-    /// colour with a 4×4 Bayer dither, and a moderate dark distance fog.
+    /// nearest upscale, vertex snapping and flat unlit passthrough on, aggressive
+    /// ~12-level colour depth with a clearly-visible 4×4 Bayer dither, and a
+    /// moderate dark distance fog.
     pub const fn retro_32bit() -> Self {
         FrameRetro32BitProfile::new(
             Ratio::finite_or_zero(0.85),
             Ratio::finite_or_zero(1.0),
             Ratio::finite_or_zero(0.35),
             [0.05, 0.06, 0.10],
-            [32, 32, 32],
+            [12, 12, 12],
             Ratio::finite_or_zero(1.0),
             1,
             1,
@@ -293,7 +294,7 @@ mod tests {
         assert_eq!(p.fog_far().get(), 1.0);
         assert_eq!(p.fog_strength().get(), 0.35);
         assert_eq!(p.fog_color(), [0.05, 0.06, 0.10]);
-        assert_eq!(p.color_levels(), [32, 32, 32]);
+        assert_eq!(p.color_levels(), [12, 12, 12]);
         assert_eq!(p.dither_strength().get(), 1.0);
         assert_eq!(p.dither_tier(), 1);
         assert_eq!(p.snap(), 1);

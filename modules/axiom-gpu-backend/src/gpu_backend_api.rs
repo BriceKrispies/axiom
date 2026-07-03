@@ -266,7 +266,7 @@ impl GpuBackendApi {
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
         ambient: axiom_host::FrameAmbient,
-        internal: Option<(u32, u32)>,
+        retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
     ) -> Option<Vec<u8>> {
         crate::offscreen::render_to_rgba(
             width,
@@ -280,7 +280,7 @@ impl GpuBackendApi {
             clear,
             sdf,
             ambient,
-            internal,
+            retro_32bit,
         )
     }
 

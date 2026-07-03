@@ -384,15 +384,14 @@ fn main() {
     }
     let outcome = outcome.expect("at least one frame is ticked");
 
-    // The soccer-penalty app carries a retro 32-bit render profile; its internal resolution
-    // drives the low-res + nearest-upscale champion (other apps render native).
+    // The soccer-penalty app carries a retro 32-bit render profile: it drives the low-res +
+    // nearest-upscale champion and the colour-depth quantize + dither. Others native.
     let retro_32bit = (app == "soccer-penalty").then(axiom_host::FrameRetro32BitProfile::retro_32bit);
-    let internal = retro_32bit.map(|p| (p.internal_width(), p.internal_height()));
 
     // Render through the requested backend and read the pixels back.
     let (pixels, w, h) = match backend.as_str() {
         "canvas2d" | "canvas" => render_canvas2d(&meshes, &outcome, quality),
-        _ => render_gpu(&meshes, &materials, &outcome, internal),
+        _ => render_gpu(&meshes, &materials, &outcome, retro_32bit),
     };
 
     write_png(&out, &pixels, w, h);
@@ -407,7 +406,7 @@ fn render_gpu(
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     outcome: &FrameOutcome,
-    internal: Option<(u32, u32)>,
+    retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
 ) -> (Vec<u8>, u32, u32) {
     let batches = outcome.mesh_batches();
     let lights: Vec<(u32, [f32; 3], [f32; 3], f32)> = outcome
@@ -427,7 +426,7 @@ fn render_gpu(
         outcome.clear_color(),
         outcome.sdf_scene(),
         axiom_host::FrameAmbient::default_hemisphere(),
-        internal,
+        retro_32bit,
     )
     .expect("a native GPU adapter is required to render a GPU screenshot");
     (pixels, WIDTH, HEIGHT)

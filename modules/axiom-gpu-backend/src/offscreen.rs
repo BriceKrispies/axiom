@@ -32,10 +32,13 @@ pub(crate) fn render_to_rgba(
     clear: [f32; 4],
     sdf: Option<&axiom_host::SdfScene>,
     ambient: axiom_host::FrameAmbient,
-    internal: Option<(u32, u32)>,
+    retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
 ) -> Option<Vec<u8>> {
     let width = width.max(1);
     let height = height.max(1);
+    // The retro 32-bit profile drives the low-res internal target (its internal resolution)
+    // and the colour-depth quantize + ordered dither applied to the readback.
+    let internal = retro_32bit.map(|p| (p.internal_width(), p.internal_height()));
 
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -171,5 +174,23 @@ pub(crate) fn render_to_rgba(
     });
     drop(mapped);
     readback.unmap();
+    // retro 32-bit colour-depth quantize + ordered dither on the finished RGBA — the shared
+    // host post (canvas2d + the live WGSL mirror the same numbers). Built from a
+    // minimal packet carrying just the profile.
+    retro_32bit.into_iter().for_each(|p| {
+        let packet = axiom_host::FramePacket::new(
+            0,
+            0,
+            axiom_host::FrameViewport::new(width, height),
+            clear,
+            None,
+            Vec::new(),
+            Vec::new(),
+            [0.0; 16],
+            axiom_host::FrameFeatureSet::new(false, false, 0, 0),
+        )
+        .with_retro_32bit_profile(p);
+        axiom_host::apply_frame_retro_32bit(&mut pixels, width, height, &packet);
+    });
     Some(pixels)
 }

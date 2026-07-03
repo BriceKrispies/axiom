@@ -33,6 +33,11 @@ pub struct Material {
     emissive: Color,
     roughness: Ratio,
     opacity: Ratio,
+    /// An app-authored raw-pixel albedo texture id (0 = none). Unlike `texture`
+    /// (the built-in procedural [`Texture`] enum), this references RGBA8 pixels the
+    /// app registered via `RunningApp::add_texture_data`. Kept a scalar so
+    /// `Material` stays `Copy`.
+    custom_texture: u64,
 }
 
 impl Material {
@@ -45,12 +50,21 @@ impl Material {
             emissive: Color::BLACK,
             roughness: ratio_lit!(1.0),
             opacity: ratio_lit!(1.0),
+            custom_texture: 0,
         }
     }
 
     /// This material with an albedo [`Texture`] attached (sampled × base colour).
     pub const fn with_texture(mut self, texture: Texture) -> Self {
         self.texture = Some(texture);
+        self
+    }
+
+    /// This material with an app-authored raw-pixel albedo texture attached, by the
+    /// `id` from `RunningApp::add_texture_data` (sampled × base colour). `0` clears
+    /// it. Takes precedence over the built-in [`Texture`] when both are set.
+    pub const fn with_custom_texture(mut self, id: u64) -> Self {
+        self.custom_texture = id;
         self
     }
 
@@ -82,6 +96,11 @@ impl Material {
     /// The material's albedo texture, if any.
     pub const fn texture(self) -> Option<Texture> {
         self.texture
+    }
+
+    /// The material's app-authored raw-pixel albedo texture id (0 = none).
+    pub const fn custom_texture(self) -> u64 {
+        self.custom_texture
     }
 
     /// The material's emissive (self-illumination) colour.
@@ -124,6 +143,15 @@ mod tests {
         let m = Material::lit(Color::WHITE).with_texture(Texture::Checker);
         assert_eq!(m.texture(), Some(Texture::Checker));
         assert_eq!(m.base_color(), Color::WHITE);
+    }
+
+    #[test]
+    fn with_custom_texture_attaches_a_raw_pixel_id() {
+        let m = Material::lit(Color::WHITE);
+        assert_eq!(m.custom_texture(), 0, "default is no custom texture");
+        let textured = m.with_custom_texture(7);
+        assert_eq!(textured.custom_texture(), 7);
+        assert_ne!(textured, m, "the custom-texture id is part of equality");
     }
 
     #[test]

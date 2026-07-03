@@ -30,7 +30,7 @@ pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
 pub use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
 
 pub use crate::angle::Angle;
-pub use crate::app::{App, RunningApp};
+pub use crate::app::{App, RunningApp, TextureDataError};
 pub use crate::assets::Assets;
 pub use crate::bounds::Bounds;
 pub use crate::camera::{Camera, PerspectiveProjection};
