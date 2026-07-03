@@ -68,18 +68,21 @@ rock_slope_full = 1.10
 # ITER 15 (attack: foreground_material_detail) — the interior camera now shows the
 # ground, so enrich it: warm autumn-litter albedo bands + a fine micro-relief octave
 # give the visible foreground real material variation (the change iter1 could not show).
+# ITER 46 (ground base): dark soil/mulch bands — the reference's exposed earth shows
+# between the leaves; the fallen leaves are the litter INSTANCES on top, not a baked
+# orange carpet. A bright baked base was what made the floor read as one glowing sheet.
 [[terrain.ground_band]]
 max_height_m = -2.0
-albedo = [0.26, 0.19, 0.11]
+albedo = [0.16, 0.12, 0.08]
 [[terrain.ground_band]]
 max_height_m = 0.5
-albedo = [0.46, 0.33, 0.17]
+albedo = [0.20, 0.15, 0.10]
 [[terrain.ground_band]]
 max_height_m = 4.0
-albedo = [0.60, 0.44, 0.22]
+albedo = [0.26, 0.20, 0.13]
 [[terrain.ground_band]]
 max_height_m = 9.0
-albedo = [0.68, 0.57, 0.34]
+albedo = [0.32, 0.25, 0.16]
 
 # Hero tree: tall and thin, set off to the side so it frames rather than blocks.
 [[tree]]

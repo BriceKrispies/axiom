@@ -1862,3 +1862,42 @@ contrast_and_exposure = 3
 object_scale = 4
 horizon_composition = 3
 artifact_level = 2
+
+[[iteration]]
+iteration = 46
+attacked_axis = "foreground_material_detail"
+changed_files = ["apps/axiom-gallery/src/growth/visual_target/build.rs", "manifest.toml"]
+champion_screenshot = "champion.gpu.png"
+candidate_screenshot = "candidate.gpu.png"
+decision = "keep_candidate"
+reason = "Rechecked the reference: its floor BASE is dark brown soil with the leaves scattered on TOP (dark earth shows between them), not a bright carpet. Ours baked an 80-95% orange leaf-litter into the terrain base (`leafy`), making the floor read as one flat glowing sheet. Fix: terrain base is now dark soil/mulch varied by coarse+fine noise (dark mulch <-> lighter dirt) + sparse moss, with only a 12% ground-band tint; the fallen leaves are the litter INSTANCES on top. Manifest ground_bands darkened to soil tones to match. Floor now reads dark-earth-with-leaves like the reference. foreground_material_detail 3->4 (last structural floor-wrong fixed; residual olive tint + sprite plants = the 4->5 gap). depth_separation/color_palette slightly helped (darker foreground, less orange uniformity) but held at 3 to avoid inflation; no non-attacked axis dropped. GPU render deterministic (mean=0). Promoted. App-tier config/data (no new primitive)."
+next_attacked_axis = "artifact_level"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+terrain_silhouette = 3
+foreground_material_detail = 3
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2
+
+[iteration.scorecard_after]
+terrain_silhouette = 3
+foreground_material_detail = 4
+vegetation_density = 3
+vegetation_clumping = 3
+depth_separation = 3
+fog_and_haze = 3
+lighting_directionality = 3
+color_palette = 3
+contrast_and_exposure = 3
+object_scale = 4
+horizon_composition = 3
+artifact_level = 2

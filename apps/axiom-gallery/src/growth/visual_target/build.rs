@@ -314,19 +314,20 @@ fn terrain_mesh(terrain: &Terrain, fog: &super::scene::Fog, eye: Vec3, style: &S
             let slope = terrain.slope_at(pos.x, pos.z);
             let rock_t = smoothstep(terrain.rock_slope_start, terrain.rock_slope_full, slope);
             let rocked = lerp3(base, terrain.rock_albedo, rock_t);
-            // Leaf-litter carpet: mottle the floor between two warm fallen-leaf tones
-            // (orange-brown ↔ dry tan) so it reads as a bed of autumn leaves, not flat
-            // dirt, then drop in sparse muted-green grass/moss patches — a forest
-            // floor. Smooth, clustered value noise keeps it readable, not speckly.
-            let litter_n = value_noise(4242, pos.x * 0.34, pos.z * 0.34) * 0.5 + 0.5;
+            // The forest-floor BASE is dark brown soil / leaf-mulch — the reference's
+            // exposed earth that shows *between* the leaves. The actual fallen leaves are
+            // the litter INSTANCES scattered on top, NOT baked into the ground; baking a
+            // bright orange carpet here is what made the floor read as one flat glowing
+            // sheet. Keep the base dark + varied: mottle the soil between dark mulch and
+            // lighter dirt by coarse + fine noise, with sparse mossy-green patches.
+            let coarse_n = value_noise(4242, pos.x * 0.18, pos.z * 0.18) * 0.5 + 0.5;
             let fine_n = value_noise(7777, pos.x * 1.1, pos.z * 1.1) * 0.5 + 0.5;
-            // The floor is fallen-leaf litter: warm russet ↔ ochre, only lightly tinted
-            // by the underlying ground so it reads as a leaf bed, not tan dirt.
-            let litter = lerp3([0.44, 0.24, 0.11], [0.58, 0.38, 0.18], fine_n);
-            let leafy = lerp3(rocked, litter, 0.80 + 0.15 * litter_n);
-            // Sparse muted-green grass/moss patches breaking up the litter.
-            let moss_n = smoothstep(0.64, 0.88, value_noise(1313, pos.x * 0.52, pos.z * 0.52) * 0.5 + 0.5);
-            let surface = lerp3(leafy, [0.31, 0.36, 0.18], moss_n * 0.5);
+            let soil = lerp3([0.11, 0.08, 0.055], [0.22, 0.16, 0.10], coarse_n * 0.7 + fine_n * 0.3);
+            // The height/ground-band tint whispers through the soil (12%) so relief reads.
+            let earth = lerp3(soil, rocked, 0.12);
+            // Sparse muted-green moss breaking up the bare earth.
+            let moss_n = smoothstep(0.66, 0.90, value_noise(1313, pos.x * 0.52, pos.z * 0.52) * 0.5 + 0.5);
+            let surface = lerp3(earth, [0.17, 0.21, 0.115], moss_n * 0.55);
 
             let dist = eye.subtract(Vec3::new(pos.x, pos.y, pos.z)).length();
             let col = fogged(surface, fog, dist, style, 1.0);

@@ -1,9 +1,10 @@
-# iter45 ground detail: two ground-plant species (low grass + taller sedge fronds) + 3D-
-# tilted, colour-varied leaf litter. foreground_material_detail 2->3 (recalibrated: the
-# prior single-species/flat-sprite ground was a generous 3, really a 2). artifact_level
-# stays 2 (the canopy leaf-card sprays remain the dominant artifact — next attack).
+# iter46 ground base: dark soil/mulch terrain base (was a baked bright-orange leaf carpet)
+# — the reference's exposed earth shows BETWEEN the litter instances + plants, instead of
+# a flat glowing sheet. foreground_material_detail 3->4 (last structural floor-wrong fixed;
+# residual = a slight olive/green tint + sprite-plant detail = the 4->5 gap). artifact_level
+# stays 2 (canopy leaf-card sprays remain).
 terrain_silhouette = 3
-foreground_material_detail = 3
+foreground_material_detail = 4
 vegetation_density = 3
 vegetation_clumping = 3
 depth_separation = 3
