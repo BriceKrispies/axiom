@@ -1,0 +1,26 @@
+[package]
+name = "axiom-scatter"
+description = "Axiom engine module: chunked deterministic point scatter. Owns ScatterApi — given a world seed, an integer cell coordinate, a cell size, and a jittered-sub-grid rule, it emits the ground positions (+ a stable per-site seed) of that cell's scattered sites. Placement is a pure function of (seed, cell) via a per-cell entropy address, so cells tile into a seamless infinite field with implicit min-spacing; the caller seats each site on terrain and expands its seed into per-instance attributes."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Pure Rust rlib. No browser API, no engine state: a cell's sites are a pure
+# function of (seed, cell, size, rule), keyed by a per-cell entropy address, so it
+# runs and is fully tested on native and tiles identically everywhere.
+crate-type = ["rlib"]
+
+# An *isolated engine module* (kind = "engine-module", allowed_modules = []): it
+# composes NO other module. It builds on the kernel (Meters/Ratio quantities), and
+# the entropy + space layers (per-cell deterministic streams keyed by a spatial
+# address), all genuinely used.
+[dependencies]
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-entropy = { path = "../../crates/axiom-entropy" }
+axiom-space = { path = "../../crates/axiom-space" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

@@ -655,6 +655,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-scatter"
+version = "0.1.0"
+dependencies = [
+ "axiom-entropy",
+ "axiom-kernel",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-scene"
 version = "0.1.0"
 dependencies = [
@@ -726,6 +735,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-visibility"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
 name = "axiom-webgpu"
 version = "0.1.0"
 dependencies = [
@@ -757,6 +774,16 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-runtime",
+]
+
+[[package]]
+name = "axiom-world"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-streaming",
+ "axiom-visibility",
 ]
 
 [[package]]
