@@ -262,7 +262,7 @@ fn build_app(name: &str, level: Option<&str>) -> RunningApp {
         "showcase" => showcase_app().build(),
         "nova-roll" => nova_roll_app().build(),
         "physics-crucible" => axiom_gallery::physics_crucible::build_physics_crucible(),
-        "soccer-penalty" => axiom_gallery::soccer_penalty::web::soccer_live_app(
+        "soccer-penalty" => axiom_gallery::soccer_penalty::penalty_render_meshed::soccer_meshed_app(
             axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_stage1(),
         ),
         other => {

@@ -252,3 +252,47 @@ ball_fidelity           = 2
 depth_and_separation    = 3
 scale_and_proportion    = 2
 artifact_level          = 4
+
+[[iteration]]
+iteration = 7
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/penalty_meshes.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_render_meshed.rs",
+  "apps/axiom-gallery/src/soccer_penalty/mod.rs",
+  "tools/axiom-shot/src/main.rs",
+  "visual_targets/soccer_penalty_kick/abstractions/0002.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "STRUCTURAL (Phase 1 fidelity, abstraction 0002): the render was boxes because the engine's setup/reauthor authoring closure can only name the catalog Mesh enum (cube/sphere/plane). Built an app-local low-poly mesh library (unit_cube/unit_sphere/unit_capsule as real MeshData) + a meshed render path authoring the whole diorama post-build via RunningApp runtime authoring (add_mesh_data/add_material/spawn/set_camera/add_light), rendered through the deterministic headless tick the convergence loop uses. Actors are now rounded figures (capsule limbs, sphere heads); structure stays boxy. subject_fidelity 2->3, silhouette 2->3. No non-attacked axis dropped. Live/browser box path (web.rs) untouched; unifying it is queued Phase 0. Promoted."
+next_attacked_axis = "scale_and_proportion"   # capsule torso/shorts still blobby; then lighting + textures
+
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 2
+pitch_detail            = 2
+stadium_and_crowd       = 2
+color_palette           = 3
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 2
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 3
+silhouette_readability  = 3
+pitch_detail            = 2
+stadium_and_crowd       = 2
+color_palette           = 3
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 2
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4

@@ -1,13 +1,13 @@
-# Candidate scorecard — iter 6 (ball black/white panels). Parity bar.
+# Candidate scorecard — iter 7 (real low-poly meshes: capsule limbs, sphere heads). Parity bar.
 composition_and_framing = 3   # unchanged
-subject_fidelity        = 2   # kicker posed (iter4); goalie still boxy
-silhouette_readability  = 2   # unchanged
-pitch_detail            = 2   # pronounced mow stripes + crisp lines (iter5)
-stadium_and_crowd       = 2   # unchanged
-color_palette           = 3   # warmer, less minty grass (iter5)
+subject_fidelity        = 3   # kicker + goalie now rounded figures (capsule limbs, sphere heads), not cube stacks; still blobby proportions, no face/number
+silhouette_readability  = 3   # rounded silhouettes read more human
+pitch_detail            = 2   # unchanged
+stadium_and_crowd       = 2   # unchanged (still flat cards)
+color_palette           = 3   # unchanged
 contrast_and_exposure   = 2   # unchanged
 lighting_and_shadow     = 2   # unchanged
-ball_fidelity           = 2   # 6 dark panels proud of the surface -> reads as a black/white soccer ball, not a blank sphere
+ball_fidelity           = 2   # smooth sphere + panels
 depth_and_separation    = 3   # unchanged
-scale_and_proportion    = 2   # unchanged
+scale_and_proportion    = 2   # rounded but capsule torso/shorts still a bit blobby
 artifact_level          = 4   # clean render
