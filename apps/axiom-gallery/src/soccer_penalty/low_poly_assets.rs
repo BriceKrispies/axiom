@@ -84,7 +84,9 @@ pub mod palette {
     pub const BALL_WHITE: Rgba = Rgba::rgb(0.97, 0.97, 0.98);
 
     // --- backdrop ---
-    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.34, 0.36, 0.42);
+    // The reference has no bright grey wall: the stand behind/above the goal is
+    // a dark near-black mass the packed crowd sits against. Darkened to match.
+    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.13, 0.14, 0.18);
     pub const CROWD_A: Rgba = Rgba::rgb(0.72, 0.28, 0.30);
     pub const CROWD_B: Rgba = Rgba::rgb(0.28, 0.42, 0.70);
     pub const CROWD_C: Rgba = Rgba::rgb(0.86, 0.72, 0.24);

@@ -1,0 +1,13 @@
+# Candidate scorecard — iter 2 (camera pull-back/up + lower wall, crowd fills down).
+composition_and_framing = 4   # full kicker + ball in frame, elevated, goal centred, crowd fills top; kicker a touch central vs ref's hard-left
+subject_fidelity        = 3   # full kicker now recognizable (head/blue jersey/arms); goalie clear
+silhouette_readability  = 4   # kicker, ball, goal, goalie all read
+pitch_detail            = 2   # still faint lines, no penalty arc, weak mow stripes
+stadium_and_crowd       = 4   # packed 3-row terrace over a thin dark stand; close to ref
+color_palette           = 3   # crowd vivid; grass still slightly minty vs ref's warmer green
+contrast_and_exposure   = 3   # good stand/pitch contrast
+lighting_and_shadow     = 3   # goalie/goal shadows read on pitch
+ball_fidelity           = 1   # still a plain white sphere, no soccer pattern
+depth_and_separation    = 4   # crowd -> stand -> goal -> ball -> kicker layers with real depth
+scale_and_proportion    = 4   # kicker/ball/goal proportions read correctly now
+artifact_level          = 4   # clean render

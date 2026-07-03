@@ -13,8 +13,9 @@ use axiom_gallery::soccer_penalty::SoccerPenaltyApp;
 
 /// The exact number of primitives the diorama emits. Pinned so an accidental
 /// change to the composition is caught. (Pass 7: the goalie is now a 16-part
-/// articulated rig instead of the earlier 10-object puppet.)
-const EXPECTED_OBJECT_COUNT: usize = 98;
+/// articulated rig instead of the earlier 10-object puppet. Visual-convergence
+/// pass: the crowd is now 3 stacked rows of 26 cards (78) rather than 9.)
+const EXPECTED_OBJECT_COUNT: usize = 167;
 
 #[test]
 fn build_is_fully_deterministic() {
@@ -54,7 +55,7 @@ fn camera_config_is_deterministic_and_fixed() {
     // Behind the kicker (positive Z), elevated, aimed at the goal (lower Z).
     assert!(cam.eye.z > cam.target.z, "camera must sit behind its target");
     assert!(cam.eye.y > cam.target.y, "camera must be elevated above its target");
-    assert_eq!(cam.fov_y_degrees, 46.0);
+    assert_eq!(cam.fov_y_degrees, 44.0);
     // Forward points toward the goal (-Z).
     assert!(cam.forward().z < 0.0);
 }

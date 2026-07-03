@@ -112,8 +112,11 @@ pub const BALL_RADIUS: f32 = 0.32; // exaggerated for readability (real ~0.11 m)
 
 // Backdrop.
 pub const STADIUM_WALL_Z: f32 = -4.6;
-pub const STADIUM_WALL_HEIGHT: f32 = 6.0;
-pub const CROWD_CARD_COUNT: u32 = 9;
+// A low, dark barrier wall: it occludes the pitch behind the goal and gives the
+// lowest crowd row a base to rise from. Kept short so the crowd fills down close
+// to the goal top (as in the reference) instead of leaving a tall dead band.
+pub const STADIUM_WALL_HEIGHT: f32 = 2.8;
+pub const CROWD_CARD_COUNT: u32 = 26;
 pub const AD_BOARD_COUNT: u32 = 5;
 pub const AD_BOARD_Z: f32 = -2.6;
 pub const AD_BOARD_AXIOM_INDEX: u32 = 2;
@@ -428,19 +431,34 @@ fn backdrop(b: &mut SceneBuilder) {
         PenaltyMaterialId::CrowdMutedColorsAltA,
         PenaltyMaterialId::CrowdMutedColorsAltB,
     ];
-    let span = FIELD_HALF_WIDTH * 1.7;
-    (0..CROWD_CARD_COUNT).for_each(|i| {
-        let t = i as f32 / (CROWD_CARD_COUNT - 1) as f32;
-        let x = -span * 0.5 + span * t;
-        let material = crowd_materials[(i % 3) as usize];
-        b.emit(
-            DioramaRole::CrowdCard,
-            PrimitiveShape::Box,
-            Vec3::new(x, STADIUM_WALL_HEIGHT + 1.1, STADIUM_WALL_Z - 0.3),
-            Vec3::new(span / CROWD_CARD_COUNT as f32 * 0.9, 2.0, 0.2),
-            material,
-            "crowd.card",
-        );
+    // The crowd is a dense, tall, multi-coloured band packed against the dark
+    // stand: two stacked rows of many cards, rising from the top of the wall so
+    // the whole upper backdrop reads as a stadium of people (as in the
+    // reference) rather than a flat grey slab with a few floating cards.
+    let span = FIELD_HALF_WIDTH * 1.9;
+    let card_w = span / CROWD_CARD_COUNT as f32;
+    // Three stacked, interleaved rows filling from just above the low wall up
+    // into the stand, so the whole upper backdrop reads as a packed terrace.
+    let rows = [
+        (2.9_f32, 2.9_f32, 0.0_f32),
+        (5.3, 2.9, 0.5),
+        (7.7, 2.9, 0.0),
+    ];
+    rows.iter().enumerate().for_each(|(row, &(y, height, phase))| {
+        (0..CROWD_CARD_COUNT).for_each(|i| {
+            // Half-card horizontal offset on the upper row so the two rows
+            // interleave like real terrace seating rather than lining up.
+            let x = -span * 0.5 + card_w * (i as f32 + 0.5 + phase);
+            let material = crowd_materials[(i as usize + row * 2) % 3];
+            b.emit(
+                DioramaRole::CrowdCard,
+                PrimitiveShape::Box,
+                Vec3::new(x, y, STADIUM_WALL_Z - 0.3),
+                Vec3::new(card_w * 0.92, height, 0.2),
+                material,
+                "crowd.card",
+            );
+        });
     });
     // Ad boards in front of the wall; one is the bright red "AXIOM" board.
     let ad_span = GOAL_HALF_WIDTH * 2.6;

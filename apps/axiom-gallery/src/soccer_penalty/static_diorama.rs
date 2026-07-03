@@ -27,9 +27,14 @@ pub struct CameraConfig {
 }
 
 // Camera constants (behind the kicker at KICKER_Z, raised, aimed at the goal).
-pub const CAMERA_EYE: Vec3 = Vec3::new(0.0, 3.6, KICKER_Z + 4.2);
-pub const CAMERA_TARGET: Vec3 = Vec3::new(0.0, 1.15, 2.0);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 46.0;
+// The reference frames the kicker in the LEFT third seen over his right
+// shoulder, with the goal enlarged and centred in the upper half and a strong
+// downward (elevated) tilt showing a lot of pitch. So the eye is offset to +X
+// (to the kicker's right, pushing the kicker at x=-0.7 to screen-left), raised
+// for the elevation, and pulled closer; the target stays near the goal centre.
+pub const CAMERA_EYE: Vec3 = Vec3::new(1.4, 4.7, KICKER_Z + 5.2);
+pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.2, 1.05, 3.0);
+pub const CAMERA_FOV_Y_DEGREES: f32 = 44.0;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;

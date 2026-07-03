@@ -12,9 +12,11 @@ use axiom_gallery::soccer_penalty::penalty_render_plan::{
 use axiom_gallery::soccer_penalty::SoccerPenaltyApp;
 use axiom_math::Vec3;
 
-/// The exact number of render items = world objects (98) + HUD items
-/// (score, round, best, power, reticle, instruction = 6).
-const EXPECTED_RENDER_ITEMS: usize = 104;
+/// The exact number of render items = world objects (167) + HUD items
+/// (score, round, best, power, reticle, instruction = 6). The world count grew
+/// with the visual-convergence pass: the crowd is now 3 stacked rows of 26 cards
+/// (78) instead of a single row of 9.
+const EXPECTED_RENDER_ITEMS: usize = 173;
 
 fn plan() -> PenaltyRenderPlan {
     SoccerPenaltyApp::build_stage1().render_plan
@@ -136,7 +138,7 @@ fn render_items_are_a_total_sorted_order() {
     // the appended HUD items.
     let world = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::World { .. })).count();
     let hud = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::Hud { .. })).count();
-    assert_eq!(world, 98);
+    assert_eq!(world, 167);
     assert_eq!(hud, 6);
 }
 

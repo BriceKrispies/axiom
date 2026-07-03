@@ -262,6 +262,9 @@ fn build_app(name: &str, level: Option<&str>) -> RunningApp {
         "showcase" => showcase_app().build(),
         "nova-roll" => nova_roll_app().build(),
         "physics-crucible" => axiom_gallery::physics_crucible::build_physics_crucible(),
+        "soccer-penalty" => axiom_gallery::soccer_penalty::web::soccer_live_app(
+            axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_stage1(),
+        ),
         other => {
             eprintln!("axiom-shot: unknown --app '{other}', falling back to 'showcase'");
             showcase_app().build()

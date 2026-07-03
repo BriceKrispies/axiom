@@ -1,0 +1,90 @@
+# Append-only convergence ledger — soccer penalty kick.
+# Harness: tools/axiom-shot --app soccer-penalty --backend gpu (native offscreen,
+# byte-deterministic; verified identical md5 on a double render).
+
+[[iteration]]
+iteration = 1
+attacked_axis = "composition_and_framing"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/static_diorama.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_materials.rs",
+  "apps/axiom-gallery/src/soccer_penalty/low_poly_assets.rs",
+  "tools/axiom-shot/src/main.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "composition_and_framing 1->3 (kicker screen-left, elevated, goal centred/larger); no non-attacked axis dropped, and stadium_and_crowd 1->3, color_palette/contrast/lighting/scale all 2->3 came along as coupled backdrop/palette wins. Aggressive first-pass bundle per user request. Promoted."
+next_attacked_axis = "composition_and_framing"   # still the dominant flaw: kicker/ball cut off at bottom, dead dark gap above goal
+
+[iteration.scorecard_before]
+composition_and_framing = 1
+subject_fidelity        = 1
+silhouette_readability  = 2
+pitch_detail            = 2
+stadium_and_crowd       = 1
+color_palette           = 2
+contrast_and_exposure   = 2
+lighting_and_shadow     = 2
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 2
+artifact_level          = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 3
+pitch_detail            = 2
+stadium_and_crowd       = 3
+color_palette           = 3
+contrast_and_exposure   = 3
+lighting_and_shadow     = 3
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 3
+artifact_level          = 4
+
+[[iteration]]
+iteration = 2
+attacked_axis = "composition_and_framing"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/static_diorama.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_stage1_diorama.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_pass2_depth_ordering.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "composition_and_framing 3->4: pulled the eye back+up and reduced the wall height so the FULL kicker + ball sit in the lower frame (no longer cut off) and the crowd fills down close to the goal (dead dark band gone). subject_fidelity/silhouette/depth/scale improved with the fuller framing; no non-attacked axis dropped. Integration count/fov tests updated to match the new composition. Promoted."
+next_attacked_axis = "ball_fidelity"   # now the lowest (1): plain white sphere, no soccer pattern
+
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 3
+pitch_detail            = 2
+stadium_and_crowd       = 3
+color_palette           = 3
+contrast_and_exposure   = 3
+lighting_and_shadow     = 3
+ball_fidelity           = 1
+depth_and_separation    = 3
+scale_and_proportion    = 3
+artifact_level          = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 4
+subject_fidelity        = 3
+silhouette_readability  = 4
+pitch_detail            = 2
+stadium_and_crowd       = 4
+color_palette           = 3
+contrast_and_exposure   = 3
+lighting_and_shadow     = 3
+ball_fidelity           = 1
+depth_and_separation    = 4
+scale_and_proportion    = 4
+artifact_level          = 4
