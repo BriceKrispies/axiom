@@ -98,7 +98,9 @@ pub const GOAL_HALF_WIDTH: f32 = 3.66;
 pub const GOAL_HEIGHT: f32 = 2.44;
 pub const POST_THICKNESS: f32 = 0.12;
 pub const GOAL_LINE_Z: f32 = 0.0;
-pub const NET_DEPTH: f32 = 1.9;
+// Shallow net so it reads as a mesh DRAPING just behind the mouth (as in the
+// reference), not a deep free-floating wireframe cage. Pulled in from 1.9.
+pub const NET_DEPTH: f32 = 0.95;
 
 // Penalty markings.
 pub const PENALTY_SPOT_Z: f32 = 11.0;
@@ -301,27 +303,30 @@ fn net(b: &mut SceneBuilder) {
     let h = GOAL_HEIGHT;
     let back_z = GOAL_LINE_Z - NET_DEPTH;
     let mid_z = GOAL_LINE_Z - NET_DEPTH * 0.5;
-    let t = 0.03;
+    // Finer strands (0.02 vs 0.03) so the dense grid reads as a hanging MESH, not
+    // a stack of chunky bars.
+    let t = 0.02;
     let mut bar = |pos: Vec3, size: Vec3, tag: &'static str| {
         b.emit(DioramaRole::RearNet, PrimitiveShape::Line, pos, size, PenaltyMaterialId::NetOffWhite, tag);
     };
-    // Back wall: 14 verticals × 8 horizontals — the main visible net.
-    (0..=13).for_each(|i| {
-        let x = -hw + (hw * 2.0) * (i as f32 / 13.0);
+    // Back wall: 24 verticals × 12 horizontals — a fine, dense mesh (was 14 × 8),
+    // the main visible net face draped just behind the mouth.
+    (0..=23).for_each(|i| {
+        let x = -hw + (hw * 2.0) * (i as f32 / 23.0);
         bar(Vec3::new(x, h * 0.5, back_z), Vec3::new(t, h, t), "net.back.v");
     });
-    (0..=7).for_each(|j| {
-        let y = h * (j as f32 / 7.0);
+    (0..=11).for_each(|j| {
+        let y = h * (j as f32 / 11.0);
         bar(Vec3::new(0.0, y, back_z), Vec3::new(hw * 2.0, t, t), "net.back.h");
     });
     // Top roof: depth strands from the crossbar back to the top of the back wall.
-    (0..=6).for_each(|i| {
-        let x = -hw + (hw * 2.0) * (i as f32 / 6.0);
+    (0..=9).for_each(|i| {
+        let x = -hw + (hw * 2.0) * (i as f32 / 9.0);
         bar(Vec3::new(x, h, mid_z), Vec3::new(t, t, NET_DEPTH), "net.top");
     });
     // Side walls: depth strands down each edge.
-    (0..=3).for_each(|k| {
-        let y = h * (k as f32 / 3.0);
+    (0..=5).for_each(|k| {
+        let y = h * (k as f32 / 5.0);
         bar(Vec3::new(-hw, y, mid_z), Vec3::new(t, t, NET_DEPTH), "net.left");
         bar(Vec3::new(hw, y, mid_z), Vec3::new(t, t, NET_DEPTH), "net.right");
     });

@@ -85,8 +85,12 @@ pub const PENALTY_PALETTE: [PenaltyMaterial; 31] = [
     lit(PenaltyMaterialId::FieldGrass, "field grass", palette::GRASS_LIGHT),
     lit(PenaltyMaterialId::DarkerGrassBand, "darker grass band", palette::GRASS_DARK),
     lit(PenaltyMaterialId::WhiteFieldLines, "white field lines", palette::LINE_WHITE),
-    lit(PenaltyMaterialId::GoalFrameWhite, "goal frame white", palette::POST_WHITE),
-    lit(PenaltyMaterialId::NetOffWhite, "net off-white", Rgba::rgb(0.88, 0.90, 0.93)),
+    // Posts/crossbar: near-pure bright white so the solid frame reads distinctly
+    // in front of the dimmer net (as in the reference).
+    lit(PenaltyMaterialId::GoalFrameWhite, "goal frame white", Rgba::rgb(0.99, 0.99, 1.0)),
+    // Net: dimmer greyed off-white so the fine mesh recedes behind the bright
+    // frame instead of merging with it into one boxy cage.
+    lit(PenaltyMaterialId::NetOffWhite, "net off-white", Rgba::rgb(0.70, 0.72, 0.76)),
     lit(PenaltyMaterialId::GoalieJerseyYellow, "goalie jersey yellow", palette::GOALIE_JERSEY),
     lit(PenaltyMaterialId::GoalieShortsBlack, "goalie shorts black", palette::GOALIE_SHORTS),
     lit(PenaltyMaterialId::GoalieSkin, "goalie skin", palette::GOALIE_SKIN),
