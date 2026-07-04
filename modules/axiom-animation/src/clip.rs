@@ -1,6 +1,6 @@
 //! An animation clip: per-bone keyframe tracks, sampled against a skeleton.
 
-use axiom_kernel::Tick;
+use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult, Tick};
 use axiom_math::Transform;
 
 use crate::animation_error::AnimationError;
@@ -104,6 +104,42 @@ impl AnimationClip {
             })
             .map(Pose::from_locals)
     }
+
+    /// Append the clip's bytes: each of tracks, events, and phases as a `u64`
+    /// count followed by that many encoded items, in that order.
+    pub(crate) fn write_to(&self, writer: &mut BinaryWriter) {
+        writer.write_u64(self.tracks.len() as u64);
+        self.tracks.iter().for_each(|track| track.write_to(writer));
+        writer.write_u64(self.events.len() as u64);
+        self.events.iter().for_each(|event| event.write_to(writer));
+        writer.write_u64(self.phases.len() as u64);
+        self.phases.iter().for_each(|phase| phase.write_to(writer));
+    }
+
+    /// Read a clip written by [`AnimationClip::write_to`].
+    pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<AnimationClip> {
+        read_counted(reader, Track::read_from).and_then(|tracks| {
+            read_counted(reader, ClipEvent::read_from).and_then(|events| {
+                read_counted(reader, ClipPhase::read_from)
+                    .map(|phases| AnimationClip { tracks, events, phases })
+            })
+        })
+    }
+}
+
+/// Read a `u64` length prefix then that many `T`s with `read_one`, into a `Vec`.
+fn read_counted<T>(
+    reader: &mut BinaryReader<'_>,
+    read_one: fn(&mut BinaryReader<'_>) -> KernelResult<T>,
+) -> KernelResult<Vec<T>> {
+    reader.read_u64().and_then(|count| {
+        (0..count).try_fold(Vec::new(), |mut acc, _| {
+            read_one(reader).map(|item| {
+                acc.push(item);
+                acc
+            })
+        })
+    })
 }
 
 #[cfg(test)]
@@ -127,6 +163,31 @@ mod tests {
         let root = skel.push_root(Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)));
         skel.add_child(root, Transform::IDENTITY).unwrap();
         skel
+    }
+
+    #[test]
+    fn clip_round_trips_through_bytes() {
+        let mut clip = AnimationClip::new();
+        clip.add_track(BoneId::from_raw(1), vec![key(0, 0.0), key(10, 10.0)]).unwrap();
+        clip.add_track(BoneId::from_raw(0), vec![key(0, 1.0)]).unwrap();
+        clip.add_event(Tick::new(5), 42);
+        clip.add_phase(Tick::new(0), Tick::new(6), 1);
+        clip.add_phase(Tick::new(6), Tick::new(10), 2);
+        let mut w = BinaryWriter::new();
+        clip.write_to(&mut w);
+        let bytes = w.into_bytes();
+        let back = AnimationClip::read_from(&mut BinaryReader::new(&bytes)).unwrap();
+        assert_eq!(back, clip);
+    }
+
+    #[test]
+    fn empty_clip_round_trips_and_truncation_fails() {
+        let clip = AnimationClip::new();
+        let mut w = BinaryWriter::new();
+        clip.write_to(&mut w);
+        let bytes = w.into_bytes();
+        assert_eq!(AnimationClip::read_from(&mut BinaryReader::new(&bytes)).unwrap(), clip);
+        assert!(AnimationClip::read_from(&mut BinaryReader::new(&bytes[..4])).is_err());
     }
 
     #[test]

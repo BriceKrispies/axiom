@@ -18,6 +18,7 @@ use crate::soccer_penalty::penalty_goalie::{
 use crate::soccer_penalty::penalty_goalie_pose::{PenaltyGoaliePartKind, PenaltyGoaliePoseDescriptor};
 use crate::soccer_penalty::penalty_hud::PenaltyHudModel;
 use crate::soccer_penalty::penalty_interaction::PenaltyInteractionState;
+use crate::soccer_penalty::penalty_kicker;
 use crate::soccer_penalty::penalty_materials::PenaltyMaterialId;
 use crate::soccer_penalty::penalty_render_plan::PenaltyRenderPlan;
 use crate::soccer_penalty::penalty_scene::{DioramaObject, DioramaRole, ObjectId, BALL_RADIUS};
@@ -69,12 +70,20 @@ impl SoccerPenaltyApp {
         let pose = state.ball_pose();
         let goalie_pose = state.goalie.descriptor();
 
-        // Overlay the live ball pose and the sampled goalie pose onto the static
-        // ball / shadow / goalie objects (identity at rest → default unchanged).
+        // Overlay the live ball pose, the sampled goalie pose, and the sampled
+        // kicker pose onto the static objects (identity at rest → default
+        // unchanged). The kicker frame is driven by the shot: strike at contact.
+        let kicker_boxes =
+            penalty_kicker::KickerRig::new().boxes_at(penalty_kicker::kicker_frame(state));
         let mut objects: Vec<DioramaObject> = diorama
             .objects
             .iter()
-            .map(|o| apply_goalie_pose(apply_ball_pose(*o, &pose), &goalie_pose))
+            .map(|o| {
+                apply_kicker_pose(
+                    apply_goalie_pose(apply_ball_pose(*o, &pose), &goalie_pose),
+                    &kicker_boxes,
+                )
+            })
             .collect();
         // Append deterministic trail samples (none at rest / in the default).
         append_trail(&mut objects, &pose);
@@ -100,10 +109,17 @@ impl SoccerPenaltyApp {
         let pose = session.shot.ball_pose();
         let goalie_pose = session.shot.goalie.descriptor();
 
+        let kicker_boxes = penalty_kicker::KickerRig::new()
+            .boxes_at(penalty_kicker::kicker_frame(&session.shot));
         let mut objects: Vec<DioramaObject> = diorama
             .objects
             .iter()
-            .map(|o| apply_goalie_pose(apply_ball_pose(*o, &pose), &goalie_pose))
+            .map(|o| {
+                apply_kicker_pose(
+                    apply_goalie_pose(apply_ball_pose(*o, &pose), &goalie_pose),
+                    &kicker_boxes,
+                )
+            })
             .collect();
         append_trail(&mut objects, &pose);
 
@@ -286,6 +302,16 @@ fn apply_goalie_pose(o: DioramaObject, pose: &PenaltyGoaliePoseDescriptor) -> Di
             let part = pose.part(kind);
             DioramaObject { position: part.world.translation, size: part.size, ..o }
         })
+        .unwrap_or(o)
+}
+
+/// Overlay the sampled kicker pose: reposition each `kicker.*` object to its
+/// posed box center. Non-kicker objects pass through unchanged.
+fn apply_kicker_pose(o: DioramaObject, boxes: &[penalty_kicker::KickerBox]) -> DioramaObject {
+    boxes
+        .iter()
+        .find(|kb| kb.label == o.label)
+        .map(|kb| DioramaObject { position: kb.center, ..o })
         .unwrap_or(o)
 }
 

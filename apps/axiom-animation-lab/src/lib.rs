@@ -1,14 +1,17 @@
 //! # Axiom Animation Lab
 //!
-//! A demo app that proves the animation **mechanism vs. meaning** boundary. The
-//! reusable mechanism — skeletons, poses, clip sampling, joint limits, events,
-//! forward kinematics — lives in the `axiom-animation` engine module. All the
-//! *meaning* lives here: an 18-bone humanoid, an authored right-foot soccer
-//! kick, named kick phases, and a `KickContact` event. The app authors that
-//! content entirely through the module's `AnimationApi` facade, then samples,
-//! joint-limit-clamps, and forward-kinematics-solves the kick per frame and
-//! renders it as SVG stick figures.
+//! A data-driven authoring/inspection tool for the soccer kicker. It proves the
+//! **mechanism vs. meaning** boundary and the **portable-data** boundary: the
+//! reusable mechanism (skeletons, poses, clip sampling) lives in
+//! `axiom-animation`; the reusable articulated box-figure lives in
+//! `axiom-figure`; and all the *meaning* — the refined 13-part kicker rig and
+//! its sagittal right-foot kick — lives here, authored as **bytes** ([`authoring`]).
+//!
+//! Those exact bytes are what the game embeds, so tuning the kick here and
+//! re-emitting the assets keeps the lab and the game 1-1. The lab loads the
+//! bytes back through the generic facades, poses the figure per frame, and
+//! renders a side-view SVG scrubber.
 
-pub mod rig;
+pub mod authoring;
 pub mod scene;
 pub mod svg;

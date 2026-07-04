@@ -1,0 +1,22 @@
+[package]
+name = "axiom-figure"
+description = "Axiom engine module: a generic, data-driven articulated box-figure. A figure is a parented set of parts, each carrying a rest transform, a render box size, and an opaque game-defined tag — the reusable low-poly character representation any game can pose. It owns the portable figure data (serialize/deserialize) and the box-posing step (pairing per-part boxes with app-computed world transforms), and nothing about any particular character: a soccer kicker, a goalie, or any other figure is authored as data, never wired in here. Depends only on kernel + math; the animation clip that drives a figure lives in axiom-animation, and an app composes the two. Branchless and 100% covered."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# A figure is expressed purely in kernel serialization primitives and math
+# transforms/vectors. The animation *clip* that poses it lives in
+# axiom-animation; composing the two is an app's job, so this stays an isolated
+# engine module (`allowed_modules = []`).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

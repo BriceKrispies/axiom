@@ -9,4 +9,5 @@ allowed_layers = [
 
 allowed_modules = [
     "animation",
+    "figure",
 ]

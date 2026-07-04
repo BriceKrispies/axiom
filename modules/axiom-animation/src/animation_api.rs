@@ -1,6 +1,6 @@
 //! The single public facade for the animation module.
 
-use axiom_kernel::{Ratio, Tick};
+use axiom_kernel::{BinaryReader, BinaryWriter, Ratio, Tick};
 use axiom_math::{Transform, Vec3};
 
 use crate::animation_error::AnimationError;
@@ -185,6 +185,54 @@ impl AnimationApi {
             .all(|l| pose.local(l.bone()).map(|t| l.contains(t.rotation)).unwrap_or(true))
     }
 
+    /// Encode `skeleton` to a portable byte buffer that
+    /// [`AnimationApi::deserialize_skeleton`] can reload into any registry.
+    /// Fails with `SkeletonNotFound` for an unknown id.
+    pub fn serialize_skeleton(&self, skeleton: SkeletonId) -> AnimationResult<Vec<u8>> {
+        self.skeleton(skeleton).map(|s| {
+            let mut writer = BinaryWriter::new();
+            s.write_to(&mut writer);
+            writer.into_bytes()
+        })
+    }
+
+    /// Decode a skeleton previously produced by
+    /// [`AnimationApi::serialize_skeleton`], registering it and returning its
+    /// fresh id. Fails with `MalformedData` if the bytes cannot be decoded.
+    pub fn deserialize_skeleton(&mut self, bytes: &[u8]) -> AnimationResult<SkeletonId> {
+        Skeleton::read_from(&mut BinaryReader::new(bytes))
+            .map_err(|_| AnimationError::malformed_data("could not decode skeleton bytes"))
+            .map(|skeleton| {
+                let id = SkeletonId::from_raw(self.skeletons.len() as u64);
+                self.skeletons.push(skeleton);
+                id
+            })
+    }
+
+    /// Encode `clip` to a portable byte buffer that
+    /// [`AnimationApi::deserialize_clip`] can reload. Fails with `ClipNotFound`
+    /// for an unknown id.
+    pub fn serialize_clip(&self, clip: ClipId) -> AnimationResult<Vec<u8>> {
+        self.clip(clip).map(|c| {
+            let mut writer = BinaryWriter::new();
+            c.write_to(&mut writer);
+            writer.into_bytes()
+        })
+    }
+
+    /// Decode a clip previously produced by [`AnimationApi::serialize_clip`],
+    /// registering it and returning its fresh id. Fails with `MalformedData` if
+    /// the bytes cannot be decoded.
+    pub fn deserialize_clip(&mut self, bytes: &[u8]) -> AnimationResult<ClipId> {
+        AnimationClip::read_from(&mut BinaryReader::new(bytes))
+            .map_err(|_| AnimationError::malformed_data("could not decode clip bytes"))
+            .map(|clip| {
+                let id = ClipId::from_raw(self.clips.len() as u64);
+                self.clips.push(clip);
+                id
+            })
+    }
+
     /// Immutable skeleton lookup.
     fn skeleton(&self, id: SkeletonId) -> AnimationResult<&Skeleton> {
         self.skeletons
@@ -261,6 +309,54 @@ mod tests {
     fn bone_count_reports_added_bones() {
         let (api, skel, _) = rig();
         assert_eq!(api.bone_count(skel).unwrap(), 2);
+    }
+
+    #[test]
+    fn skeleton_serialize_deserialize_round_trips_through_the_facade() {
+        let (mut api, skel, _) = rig();
+        let bytes = api.serialize_skeleton(skel).unwrap();
+        let reloaded = api.deserialize_skeleton(&bytes).unwrap();
+        assert_ne!(reloaded, skel);
+        assert_eq!(api.bone_count(reloaded).unwrap(), api.bone_count(skel).unwrap());
+    }
+
+    #[test]
+    fn clip_serialize_deserialize_reproduces_the_same_sample() {
+        let (mut api, skel, clip) = rig();
+        let bytes = api.serialize_clip(clip).unwrap();
+        let reloaded = api.deserialize_clip(&bytes).unwrap();
+        let original = api.resolve_model(skel, &api.sample(skel, clip, Tick::new(7)).unwrap()).unwrap();
+        let copy = api.resolve_model(skel, &api.sample(skel, reloaded, Tick::new(7)).unwrap()).unwrap();
+        assert_eq!(
+            original.position(BoneId::from_raw(1)),
+            copy.position(BoneId::from_raw(1))
+        );
+    }
+
+    #[test]
+    fn serializing_unknown_ids_reports_not_found() {
+        let api = AnimationApi::new();
+        assert_eq!(
+            api.serialize_skeleton(SkeletonId::from_raw(3)).unwrap_err().code(),
+            AnimationErrorCode::SkeletonNotFound
+        );
+        assert_eq!(
+            api.serialize_clip(ClipId::from_raw(3)).unwrap_err().code(),
+            AnimationErrorCode::ClipNotFound
+        );
+    }
+
+    #[test]
+    fn deserializing_garbage_reports_malformed_data() {
+        let mut api = AnimationApi::new();
+        assert_eq!(
+            api.deserialize_skeleton(&[0xFF]).unwrap_err().code(),
+            AnimationErrorCode::MalformedData
+        );
+        assert_eq!(
+            api.deserialize_clip(&[0xFF]).unwrap_err().code(),
+            AnimationErrorCode::MalformedData
+        );
     }
 
     #[test]

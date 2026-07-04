@@ -142,6 +142,8 @@ axiom-world = { path = "../../modules/axiom-world" }
 # grid config + a height callback in, positions/normals/indices out. The app
 # decorates the neutral mesh with its colour/vista/biome content.
 axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
+axiom-animation = { path = "../../modules/axiom-animation" }
+axiom-figure = { path = "../../modules/axiom-figure" }
 # Hand-editable level/data format used by several demos' codecs (zanzoban,
 # rotating-cube's data-package test) and the growth agent's tag/directive TOML.
 serde = { version = "1", features = ["derive"] }

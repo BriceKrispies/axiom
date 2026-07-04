@@ -1,5 +1,6 @@
 //! A skeleton: bones in parent-before-child insertion order.
 
+use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult};
 use axiom_math::Transform;
 
 use crate::animation_error::AnimationError;
@@ -62,6 +63,26 @@ impl Skeleton {
     pub(crate) fn bone(&self, id: BoneId) -> Option<Bone> {
         self.bones.get(id.raw() as usize).copied()
     }
+
+    /// Append the skeleton's bytes: a `u64` bone count then each bone in order.
+    pub(crate) fn write_to(&self, writer: &mut BinaryWriter) {
+        writer.write_u64(self.bones.len() as u64);
+        self.bones.iter().for_each(|bone| bone.write_to(writer));
+    }
+
+    /// Read a skeleton written by [`Skeleton::write_to`].
+    pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Skeleton> {
+        reader.read_u64().and_then(|count| {
+            (0..count)
+                .try_fold(Vec::new(), |mut bones, _| {
+                    Bone::read_from(reader).map(|bone| {
+                        bones.push(bone);
+                        bones
+                    })
+                })
+                .map(|bones| Skeleton { bones })
+        })
+    }
 }
 
 #[cfg(test)]
@@ -97,5 +118,36 @@ mod tests {
     fn bone_lookup_out_of_range_is_none() {
         let skel = Skeleton::new();
         assert_eq!(skel.bone(BoneId::from_raw(0)), None);
+    }
+
+    #[test]
+    fn skeleton_round_trips_through_bytes() {
+        let mut skel = Skeleton::new();
+        let root = skel.push_root(t(0.0));
+        let a = skel.add_child(root, t(1.0)).unwrap();
+        skel.add_child(a, t(2.0)).unwrap();
+        let mut w = BinaryWriter::new();
+        skel.write_to(&mut w);
+        let bytes = w.into_bytes();
+        let back = Skeleton::read_from(&mut BinaryReader::new(&bytes)).unwrap();
+        assert_eq!(back, skel);
+    }
+
+    #[test]
+    fn empty_skeleton_round_trips() {
+        let skel = Skeleton::new();
+        let mut w = BinaryWriter::new();
+        skel.write_to(&mut w);
+        let bytes = w.into_bytes();
+        assert_eq!(Skeleton::read_from(&mut BinaryReader::new(&bytes)).unwrap(), skel);
+    }
+
+    #[test]
+    fn truncated_skeleton_bytes_fail() {
+        assert!(Skeleton::read_from(&mut BinaryReader::new(&[])).is_err());
+        let mut w = BinaryWriter::new();
+        w.write_u64(3); // claims 3 bones, provides none
+        let bytes = w.into_bytes();
+        assert!(Skeleton::read_from(&mut BinaryReader::new(&bytes)).is_err());
     }
 }

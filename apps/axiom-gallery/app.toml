@@ -36,6 +36,8 @@ allowed_modules = [
     "terrain-mesh",
     "gpu-backend",
     "canvas2d-backend",
+    "animation",
+    "figure",
 ]
 
 # The cartridges (games/) this host loads. retro FPS was extracted out of this crate

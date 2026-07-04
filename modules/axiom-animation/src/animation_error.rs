@@ -77,6 +77,11 @@ impl AnimationError {
     }
 
     /// A joint limit had a min bound greater than its max bound on some axis.
+    /// A serialized skeleton or clip could not be decoded.
+    pub const fn malformed_data(message: &'static str) -> Self {
+        Self::new(AnimationErrorCode::MalformedData, message)
+    }
+
     pub const fn invalid_joint_limit(message: &'static str) -> Self {
         AnimationError::new(AnimationErrorCode::InvalidJointLimit, message)
     }

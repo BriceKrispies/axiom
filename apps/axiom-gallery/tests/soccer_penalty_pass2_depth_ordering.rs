@@ -17,7 +17,9 @@ use axiom_math::Vec3;
 /// with the visual-convergence pass: the crowd is now 3 stacked rows of 26 cards
 /// (78) instead of a single row of 9, the kicker is an 11-part posed figure, and
 /// the ball carries 6 dark panels instead of 2.
-const EXPECTED_RENDER_ITEMS: usize = 179;
+// The kicker is now the articulated 13-part figure (was an 11-box puppet), so
+// the diorama carries two more objects.
+const EXPECTED_RENDER_ITEMS: usize = 181;
 
 fn plan() -> PenaltyRenderPlan {
     SoccerPenaltyApp::build_stage1().render_plan
@@ -139,7 +141,7 @@ fn render_items_are_a_total_sorted_order() {
     // the appended HUD items.
     let world = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::World { .. })).count();
     let hud = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::Hud { .. })).count();
-    assert_eq!(world, 173);
+    assert_eq!(world, 175);
     assert_eq!(hud, 6);
 }
 
@@ -231,6 +233,6 @@ fn ball_sorts_between_goalie_and_kicker() {
     let p = plan();
     let goalie = p.items.iter().position(|it| it.label == "goalie.torso").expect("goalie");
     let ball = p.items.iter().position(|it| it.label == "ball").expect("ball");
-    let kicker = p.items.iter().position(|it| it.label == "kicker.torso").expect("kicker");
+    let kicker = p.items.iter().position(|it| it.label == "kicker.chest").expect("kicker");
     assert!(goalie < ball && ball < kicker, "draw order must be goalie → ball → kicker");
 }

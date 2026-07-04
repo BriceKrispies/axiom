@@ -17,6 +17,7 @@ path = "src/main.rs"
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-animation = { path = "../../modules/axiom-animation" }
+axiom-figure = { path = "../../modules/axiom-figure" }
 
 [lints.rust]
 unsafe_code = "forbid"

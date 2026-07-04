@@ -1,6 +1,6 @@
 //! A per-bone keyframe track and its deterministic sampler.
 
-use axiom_kernel::Tick;
+use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult, Tick};
 use axiom_math::Transform;
 
 use crate::animation_error::AnimationError;
@@ -66,6 +66,36 @@ impl Track {
         let factor = (elapsed as f32 / (span as f32).max(1.0)).clamp(0.0, 1.0);
         lerp_transform(lo_key.transform(), hi_key.transform(), factor)
     }
+
+    /// Append the track's bytes: the bone id (`u64`), a `u64` key count, then
+    /// each keyframe in order.
+    pub(crate) fn write_to(&self, writer: &mut BinaryWriter) {
+        writer.write_u64(self.bone.raw());
+        writer.write_u64(self.keys.len() as u64);
+        self.keys.iter().for_each(|key| key.write_to(writer));
+    }
+
+    /// Read a track written by [`Track::write_to`]. Trusts the byte source: the
+    /// keyframe invariants (non-empty, strictly increasing) were enforced when
+    /// the track was first built and are preserved by a round-trip, so no
+    /// re-validation is performed here.
+    pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<Track> {
+        reader.read_u64().and_then(|bone| {
+            reader.read_u64().and_then(|count| {
+                (0..count)
+                    .try_fold(Vec::new(), |mut keys, _| {
+                        Keyframe::read_from(reader).map(|key| {
+                            keys.push(key);
+                            keys
+                        })
+                    })
+                    .map(|keys| Track {
+                        bone: BoneId::from_raw(bone),
+                        keys,
+                    })
+            })
+        })
+    }
 }
 
 #[cfg(test)]
@@ -84,6 +114,17 @@ mod tests {
 
     fn two_key_track() -> Track {
         Track::new(BoneId::from_raw(0), vec![key(0, 0.0), key(10, 10.0)]).unwrap()
+    }
+
+    #[test]
+    fn track_round_trips_through_bytes() {
+        let track = Track::new(BoneId::from_raw(3), vec![key(0, 0.0), key(4, 1.0), key(9, -2.0)]).unwrap();
+        let mut w = BinaryWriter::new();
+        track.write_to(&mut w);
+        let bytes = w.into_bytes();
+        let back = Track::read_from(&mut BinaryReader::new(&bytes)).unwrap();
+        assert_eq!(back, track);
+        assert!(Track::read_from(&mut BinaryReader::new(&bytes[..5])).is_err());
     }
 
     #[test]

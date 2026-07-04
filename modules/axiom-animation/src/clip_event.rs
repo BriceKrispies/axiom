@@ -1,6 +1,6 @@
 //! A timed clip event carrying an opaque, game-defined code.
 
-use axiom_kernel::Tick;
+use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult, Tick};
 
 /// An event fired at an exact [`Tick`] on a clip's timeline. The `code` is an
 /// **opaque** `u32` the *game* assigns and interprets — a footstep, a strike, a
@@ -28,6 +28,22 @@ impl ClipEvent {
     pub(crate) fn code(self) -> u32 {
         self.code
     }
+
+    /// Append the event's bytes: the tick (`u64`) then the code (`u32`).
+    pub(crate) fn write_to(self, writer: &mut BinaryWriter) {
+        writer.write_u64(self.at.raw());
+        writer.write_u32(self.code);
+    }
+
+    /// Read an event written by [`ClipEvent::write_to`].
+    pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<ClipEvent> {
+        reader.read_u64().and_then(|at| {
+            reader.read_u32().map(|code| ClipEvent {
+                at: Tick::new(at),
+                code,
+            })
+        })
+    }
 }
 
 #[cfg(test)]
@@ -39,5 +55,15 @@ mod tests {
         let e = ClipEvent::new(Tick::new(12), 7);
         assert_eq!(e.at(), Tick::new(12));
         assert_eq!(e.code(), 7);
+    }
+
+    #[test]
+    fn event_round_trips_through_bytes() {
+        let e = ClipEvent::new(Tick::new(99), 12345);
+        let mut w = BinaryWriter::new();
+        e.write_to(&mut w);
+        let bytes = w.into_bytes();
+        assert_eq!(ClipEvent::read_from(&mut BinaryReader::new(&bytes)).unwrap(), e);
+        assert!(ClipEvent::read_from(&mut BinaryReader::new(&bytes[..4])).is_err());
     }
 }

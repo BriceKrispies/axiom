@@ -100,6 +100,7 @@ name = "axiom-animation-lab"
 version = "0.1.0"
 dependencies = [
  "axiom-animation",
+ "axiom-figure",
  "axiom-kernel",
  "axiom-math",
 ]
@@ -248,6 +249,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-figure"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
 name = "axiom-forest"
 version = "0.1.0"
 dependencies = [
@@ -273,10 +282,12 @@ dependencies = [
  "axiom",
  "axiom-agent",
  "axiom-agent-harness",
+ "axiom-animation",
  "axiom-biome",
  "axiom-canvas2d-backend",
  "axiom-debug-overlay",
  "axiom-entropy",
+ "axiom-figure",
  "axiom-game-retro-fps",
  "axiom-geosphere",
  "axiom-gpu-backend",

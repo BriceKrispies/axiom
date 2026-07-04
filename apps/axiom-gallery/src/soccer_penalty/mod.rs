@@ -140,6 +140,7 @@ pub mod penalty_goalie_pose;
 pub mod penalty_hud;
 pub mod penalty_input;
 pub mod penalty_interaction;
+pub mod penalty_kicker;
 pub mod penalty_light;
 pub mod penalty_materials;
 pub mod penalty_render_plan;

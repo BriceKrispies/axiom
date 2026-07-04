@@ -1,0 +1,31 @@
+# Axiom module manifest — axiom-figure.
+#
+# A generic, data-driven articulated box-figure: a parented set of parts, each
+# with a rest transform, a render box size, and an opaque game-defined tag. It is
+# an *isolated* engine module — it composes no other module (`allowed_modules =
+# []`) and knows nothing of scene, render, physics, input, or any game. It owns
+# the portable figure data (round-trip) and the box-posing step (pair per-part
+# boxes with app-supplied world transforms). The animation clip that drives a
+# figure lives in axiom-animation; an app composes figure + animation.
+#
+# The behavioral facade is `FigureApi`; alongside it `lib.rs` re-exports the pure
+# value vocabulary (parts, definitions, posed parts, errors) via `pub use
+# ids::{…}`, per Module Law #8.
+
+[module]
+name = "figure"
+crate_name = "axiom-figure"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "articulated-figure-definition",
+    "figure-box-posing",
+    "portable-figure-data",
+]

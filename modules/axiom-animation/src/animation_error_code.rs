@@ -22,6 +22,8 @@ pub enum AnimationErrorCode {
     NonFiniteInterpolation,
     /// A joint limit was given a min bound greater than its max bound.
     InvalidJointLimit,
+    /// A serialized skeleton or clip could not be decoded from its bytes.
+    MalformedData,
 }
 
 impl AnimationErrorCode {
@@ -37,6 +39,7 @@ impl AnimationErrorCode {
             (AnimationErrorCode::PoseLengthMismatch, 6),
             (AnimationErrorCode::NonFiniteInterpolation, 7),
             (AnimationErrorCode::InvalidJointLimit, 8),
+            (AnimationErrorCode::MalformedData, 9),
         ][self as usize]
             .1
     }
@@ -57,9 +60,10 @@ mod tests {
             AnimationErrorCode::PoseLengthMismatch,
             AnimationErrorCode::NonFiniteInterpolation,
             AnimationErrorCode::InvalidJointLimit,
+            AnimationErrorCode::MalformedData,
         ];
-        // Each maps to its documented discriminant, in order 1..=8.
-        assert_eq!(all.map(AnimationErrorCode::raw), [1, 2, 3, 4, 5, 6, 7, 8]);
+        // Each maps to its documented discriminant, in order 1..=9.
+        assert_eq!(all.map(AnimationErrorCode::raw), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
         // Distinct codes and matching equality.
         assert_eq!(AnimationErrorCode::BoneNotFound, AnimationErrorCode::BoneNotFound);
         assert_ne!(AnimationErrorCode::BoneNotFound, AnimationErrorCode::ClipNotFound);
