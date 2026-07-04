@@ -231,6 +231,8 @@ fn install_input_keydown(
                 // A `copy` command queues clipboard text; flush it here, inside
                 // the keydown — the user gesture `navigator.clipboard` requires.
                 flush_clipboard(&state);
+                // A `scrubber` command queues a toggle; dispatch its DOM event here.
+                flush_scrubber_toggle(&state);
                 nodes.input.set_value("");
             }
             "Escape" => {
@@ -610,6 +612,22 @@ fn flush_clipboard(state: &Rc<RefCell<OverlayState>>) {
     for text in &requests {
         let _ = clipboard.write_text(text);
     }
+}
+
+/// Drain a pending `scrubber` command and dispatch the `axiom:scrubber-toggle` DOM
+/// event the windowing frame-scrubber listens for — the cross-module bridge from
+/// the console command to the scrubber (which shares no interface instance with the
+/// overlay). Dispatched on `window` so the scrubber's window-level listener sees it.
+fn flush_scrubber_toggle(state: &Rc<RefCell<OverlayState>>) {
+    let pending = state.borrow_mut().take_scrubber_toggle();
+    pending.then(|| {
+        web_sys::Event::new("axiom:scrubber-toggle")
+            .ok()
+            .into_iter()
+            .for_each(|event| {
+                let _ = window().dispatch_event(&event);
+            });
+    });
 }
 
 fn window() -> Window {

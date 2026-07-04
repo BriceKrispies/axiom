@@ -1,15 +1,16 @@
 // Package / Export panel (id: "package-export", region: right).
 //
-// Shows placeholder build/export status and target, plus a placeholder "request"
-// button that dispatches a typed `package.placeholder.request` event. This only
-// updates shell state; it does not run a real packaging pipeline.
+// A read-only view of the current build/export target and status. No runtime is
+// attached, so nothing is configured and it stays empty until an export is set up.
 
 import type { Dispatch } from "../workspace_events";
 import type { WorkspaceBrowserState } from "../workspace_state";
+import { UNSET } from "../workspace_state";
+import { renderEmpty } from "./empty_state";
 
 export function renderPackageExportPanel(
   state: WorkspaceBrowserState,
-  dispatch: Dispatch,
+  _dispatch: Dispatch,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "ws-panel";
@@ -19,12 +20,18 @@ export function renderPackageExportPanel(
   bar.className = "ws-panel-title";
   bar.textContent = "Package / Export";
 
+  const pkg = state.packageExport;
+  if (pkg.target === UNSET && pkg.status === UNSET) {
+    section.append(bar, renderEmpty("No export configured"));
+    return section;
+  }
+
   const dl = document.createElement("dl");
   dl.className = "ws-field-list";
   const rows: readonly (readonly [string, string])[] = [
-    ["status", state.packageExport.status],
-    ["target", state.packageExport.target],
-    ["requested", String(state.packageExport.requested)],
+    ["status", pkg.status],
+    ["target", pkg.target],
+    ["requested", String(pkg.requested)],
   ];
   rows.forEach(([label, value]) => {
     const dt = document.createElement("dt");
@@ -36,17 +43,6 @@ export function renderPackageExportPanel(
     dl.append(dt, dd);
   });
 
-  const request = document.createElement("button");
-  request.type = "button";
-  request.className = "ws-inline-button";
-  request.textContent = "Request Placeholder Package";
-  request.addEventListener("click", () => {
-    dispatch({
-      type: "package.placeholder.request",
-      target: "browser (placeholder)",
-    });
-  });
-
-  section.append(bar, dl, request);
+  section.append(bar, dl);
   return section;
 }

@@ -1,11 +1,13 @@
 // Game Manifest Editor panel (id: "game-manifest-editor", region: left).
 //
-// Shows the game manifest as TYPED, labeled placeholder fields (title / version
-// / entrypoint / default level) — deliberately NOT a raw textarea blob. Read-only
-// in this shell; editing is a future integration point.
+// A read-only view of the opened game's manifest fields (title / version /
+// entrypoint / default level). No project is open, so every field is unset and it
+// shows an empty state until a real manifest is loaded.
 
 import type { Dispatch } from "../workspace_events";
 import type { WorkspaceBrowserState } from "../workspace_state";
+import { UNSET } from "../workspace_state";
+import { renderEmpty } from "./empty_state";
 
 export function renderGameManifestEditorPanel(
   state: WorkspaceBrowserState,
@@ -19,10 +21,6 @@ export function renderGameManifestEditorPanel(
   bar.className = "ws-panel-title";
   bar.textContent = "Game Manifest Editor";
 
-  const note = document.createElement("p");
-  note.className = "ws-panel-note";
-  note.textContent = "Typed placeholder manifest fields (read-only in this shell).";
-
   const manifest = state.gameManifestEditor;
   const rows: readonly (readonly [string, string])[] = [
     ["title", manifest.title],
@@ -30,6 +28,10 @@ export function renderGameManifestEditorPanel(
     ["entrypoint", manifest.entrypoint],
     ["defaultLevel", manifest.defaultLevel],
   ];
+  if (rows.every(([, value]) => value === UNSET)) {
+    section.append(bar, renderEmpty("No game manifest loaded"));
+    return section;
+  }
 
   const dl = document.createElement("dl");
   dl.className = "ws-field-list";
@@ -43,6 +45,6 @@ export function renderGameManifestEditorPanel(
     dl.append(dt, dd);
   });
 
-  section.append(bar, note, dl);
+  section.append(bar, dl);
   return section;
 }

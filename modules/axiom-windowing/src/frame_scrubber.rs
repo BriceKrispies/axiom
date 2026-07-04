@@ -55,8 +55,23 @@ use std::rc::Rc;
 use axiom_interface::{InterfaceApi, InterfaceDrawItem, PanelId};
 use axiom_recording::RecordingApi;
 use wasm_bindgen::closure::Closure;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, EventTarget, KeyboardEvent, MouseEvent, PointerEvent};
+
+/// The frame scrubber is a **developer-console** overlay, not a public-showcase
+/// one. It mounts only when the host page has opted in by setting the global
+/// `window.__axiom_dev_tools = true` — the workspace dev console does this before
+/// booting a cartridge; the public gallery never does, so its apps get no
+/// scrubber. Read as a truthy JS value (via `Reflect`, since it is an arbitrary
+/// host-set global), defaulting to `false` when absent. wasm32-only platform edge.
+fn dev_tools_enabled() -> bool {
+    web_sys::window()
+        .and_then(|window| {
+            js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("__axiom_dev_tools")).ok()
+        })
+        .map(|value| value.is_truthy())
+        .unwrap_or(false)
+}
 
 /// One directional light as the run loop carries it: `(index, dir, colour, intensity)`.
 type Light = (u32, [f32; 3], [f32; 3], f32);
@@ -93,7 +108,8 @@ margin-bottom:6px;white-space:nowrap;}\
 .axiom-scrub-v{text-align:right;}\
 .axiom-scrub-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}\
 .axiom-scrub-btn{font:600 12px ui-monospace,monospace;color:#e8ecf2;background:#1b1f27;\
-border:1px solid #3a3f49;border-radius:6px;padding:3px 9px;cursor:pointer;}";
+border:1px solid #3a3f49;border-radius:6px;padding:3px 9px;cursor:pointer;}\
+.axiom-scrub--hidden{display:none;}";
 
 /// The fixed DOM skeleton the binding repaints in place: the panel root, its
 /// header (drag handle), and the row/action containers, plus the by-position
@@ -117,6 +133,11 @@ struct Shared {
     recorder: Rc<RefCell<RecordingApi>>,
     reverse: Rc<Cell<bool>>,
     active: Rc<Cell<bool>>,
+    // Whether the overlay is shown. The scrubber always mounts (so it is always
+    // summonable), but starts hidden unless the host opts in via
+    // `window.__axiom_dev_tools`. Toggled by the F2 hotkey and the debug overlay's
+    // `scrubber` command; while hidden the run loop records nothing (zero cost).
+    visible: Rc<Cell<bool>>,
     interface: Rc<RefCell<InterfaceApi>>,
     panel: PanelId,
     has_fork: bool,
@@ -152,9 +173,15 @@ impl FrameScrubber {
         snapshot: Option<SnapshotHook>,
         restore: Option<RestoreHook>,
     ) -> Option<FrameScrubber> {
+        // The overlay always mounts (so the F2 hotkey and the debug `scrubber`
+        // command can always summon it), but starts HIDDEN unless the host opts in
+        // via `window.__axiom_dev_tools` (the workspace dev console does; the public
+        // gallery does not). While hidden the run loop records nothing, so a hidden
+        // scrubber costs nothing per frame.
         let recorder = Rc::new(RefCell::new(RecordingApi::browser_safe().ok()?));
         let reverse = Rc::new(Cell::new(false));
         let active = Rc::new(Cell::new(true));
+        let visible = Rc::new(Cell::new(dev_tools_enabled()));
         let window = web_sys::window()?;
         let document = window.document()?;
         let body = document.body()?;
@@ -183,6 +210,7 @@ impl FrameScrubber {
             recorder,
             reverse,
             active,
+            visible,
             interface: Rc::new(RefCell::new(interface)),
             panel,
             has_fork: restore.is_some(),
@@ -192,6 +220,10 @@ impl FrameScrubber {
         install_click(&shared, restore);
         install_drag(&window, &shared);
         install_focus_listeners(&window, &document, &shared);
+        install_visibility_toggle(&window, &shared);
+        // Reflect the initial hidden/visible state onto the DOM before the first
+        // repaint.
+        apply_visibility(&shared);
 
         let scrubber = FrameScrubber {
             shared,
@@ -225,27 +257,32 @@ impl FrameScrubber {
         light_vp: [f32; 16],
         batches: &[Batch],
     ) {
-        // Skip recording while paused (game unfocused): the frame still presents
-        // live, but the timeline does not grow.
-        self.shared.active.get().then(|| {
-            let render_bytes = encode(clear, lights, light_vp, batches);
-            // Capture the app's sim state for this frame (empty when not forkable);
-            // it rides in the recorder's `state_bytes` slot for a later fork.
-            let state_bytes = self
-                .snapshot
-                .as_ref()
-                .map(|snap| snap())
-                .unwrap_or_default();
-            let _ = self.shared.recorder.borrow_mut().record_frame(
-                frame,
-                frame,
-                Vec::new(),
-                Vec::new(),
-                state_bytes,
-                render_bytes,
-            );
+        // A hidden scrubber records nothing and has no visible panel to repaint —
+        // zero per-frame cost until it is summoned (F2 / the `scrubber` command).
+        self.shared.visible.get().then(|| {
+            // Skip recording while paused (game unfocused): the frame still presents
+            // live, but the timeline does not grow.
+            self.shared.active.get().then(|| {
+                let render_bytes = encode(clear, lights, light_vp, batches);
+                // Capture the app's sim state for this frame (empty when not
+                // forkable); it rides in the recorder's `state_bytes` slot for a
+                // later fork.
+                let state_bytes = self
+                    .snapshot
+                    .as_ref()
+                    .map(|snap| snap())
+                    .unwrap_or_default();
+                let _ = self.shared.recorder.borrow_mut().record_frame(
+                    frame,
+                    frame,
+                    Vec::new(),
+                    Vec::new(),
+                    state_bytes,
+                    render_bytes,
+                );
+            });
+            repaint(&self.shared);
         });
-        repaint(&self.shared);
     }
 
     /// The frame to present this scrub tick: first advance auto-rewind (if
@@ -263,34 +300,38 @@ impl FrameScrubber {
     /// the timeline does not grow. Recording errors (e.g. an over-budget frame) are
     /// non-fatal and leave the clone store untouched (so it stays aligned).
     pub(crate) fn record_2d(&self, frame: u64, clear: [f32; 4], list: &axiom_host::Draw2dList) {
-        self.shared.active.get().then(|| {
-            let render_bytes = encode_2d(clear, list);
-            // Capture the app's sim state for this frame (empty when not forkable);
-            // it rides in the recorder's `state_bytes` slot for a later fork.
-            let state_bytes = self
-                .snapshot
-                .as_ref()
-                .map(|snap| snap())
-                .unwrap_or_default();
-            let recorded = self
-                .shared
-                .recorder
-                .borrow_mut()
-                .record_frame(frame, frame, Vec::new(), Vec::new(), state_bytes, render_bytes)
-                .is_ok();
-            // Mirror the push only when the recorder actually retained the frame,
-            // then trim the store's front to the timeline's retained length so the
-            // two stay position-aligned through the recorder's FIFO eviction.
-            recorded.then(|| {
-                let retained = self.shared.recorder.borrow().frame_count();
-                let mut store = self.frames_2d.borrow_mut();
-                store.push_back((frame, clear, list.clone()));
-                while store.len() > retained {
-                    store.pop_front();
-                }
+        // A hidden scrubber records nothing and has no visible panel to repaint.
+        self.shared.visible.get().then(|| {
+            self.shared.active.get().then(|| {
+                let render_bytes = encode_2d(clear, list);
+                // Capture the app's sim state for this frame (empty when not
+                // forkable); it rides in the recorder's `state_bytes` slot for a
+                // later fork.
+                let state_bytes = self
+                    .snapshot
+                    .as_ref()
+                    .map(|snap| snap())
+                    .unwrap_or_default();
+                let recorded = self
+                    .shared
+                    .recorder
+                    .borrow_mut()
+                    .record_frame(frame, frame, Vec::new(), Vec::new(), state_bytes, render_bytes)
+                    .is_ok();
+                // Mirror the push only when the recorder actually retained the frame,
+                // then trim the store's front to the timeline's retained length so the
+                // two stay position-aligned through the recorder's FIFO eviction.
+                recorded.then(|| {
+                    let retained = self.shared.recorder.borrow().frame_count();
+                    let mut store = self.frames_2d.borrow_mut();
+                    store.push_back((frame, clear, list.clone()));
+                    while store.len() > retained {
+                        store.pop_front();
+                    }
+                });
             });
+            repaint(&self.shared);
         });
-        repaint(&self.shared);
     }
 
     /// The **2D** frame to present this scrub tick — the 2D peer of
@@ -726,6 +767,49 @@ fn add_toggle<T: AsRef<EventTarget>>(target: &T, event: &str, s: &Shared, value:
         .as_ref()
         .add_event_listener_with_callback(event, cb.as_ref().unchecked_ref());
     cb.forget();
+}
+
+/// Reflect the `visible` flag onto the panel's DOM: add the `--hidden` class when
+/// hidden, remove it when shown. `render` only ever writes the `style` attribute
+/// (position/width), never the class, so this class swap survives every repaint.
+fn apply_visibility(s: &Shared) {
+    let class = s
+        .visible
+        .get()
+        .then_some("axiom-scrub")
+        .unwrap_or("axiom-scrub axiom-scrub--hidden");
+    s.nodes.root.set_class_name(class);
+}
+
+/// Flip the overlay's visibility and reflect it onto the DOM. Shared by the F2
+/// hotkey and the `axiom:scrubber-toggle` signal the debug console dispatches.
+fn toggle_visibility(s: &Shared) {
+    s.visible.set(!s.visible.get());
+    apply_visibility(s);
+}
+
+/// Wire the two ways to toggle the overlay: the **F2** hotkey (observed on
+/// `window`, never consumed, so game input is unaffected) and the
+/// `axiom:scrubber-toggle` custom event the debug overlay's `scrubber` command
+/// dispatches to reach the scrubber across the module boundary (they share no
+/// interface instance).
+fn install_visibility_toggle(window: &web_sys::Window, s: &Shared) {
+    let on_key = {
+        let shared = s.clone();
+        Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
+            (e.key() == "F2").then(|| toggle_visibility(&shared));
+        })
+    };
+    let _ = window.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
+    on_key.forget();
+
+    let on_signal = {
+        let shared = s.clone();
+        Closure::<dyn FnMut()>::new(move || toggle_visibility(&shared))
+    };
+    let _ = window
+        .add_event_listener_with_callback("axiom:scrubber-toggle", on_signal.as_ref().unchecked_ref());
+    on_signal.forget();
 }
 
 /// Encode the present arguments into the recorder's opaque render bytes.

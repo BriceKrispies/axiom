@@ -1,9 +1,79 @@
 [
   {
+    "id": "rotating-cube",
+    "title": "Rotating Cube",
+    "kind": "inline",
+    "bundle": "/gallery/axiom-loader.js",
+    "entry": "rotating_cube_start",
+    "canvas": "axiom-cube-canvas",
+    "compare": true
+  },
+  {
+    "id": "stress-cubes",
+    "title": "Stress (N cubes)",
+    "kind": "inline",
+    "bundle": "/gallery/axiom-loader.js",
+    "entry": "stress_start",
+    "canvas": "axiom-stress-canvas",
+    "compare": true
+  },
+  {
+    "id": "soccer-penalty",
+    "title": "Soccer Penalty (retro 32-bit)",
+    "kind": "inline",
+    "bundle": "/gallery/axiom-loader.js",
+    "entry": "soccer_penalty_start",
+    "canvas": "axiom-soccer-penalty-canvas"
+  },
+  {
+    "id": "physics-crucible",
+    "title": "Physics Crucible",
+    "kind": "inline",
+    "bundle": "/gallery/axiom-loader.js",
+    "entry": "physics_start",
+    "canvas": "axiom-physics-crucible-canvas",
+    "compare": true
+  },
+  {
+    "id": "quintet",
+    "title": "Quintet",
+    "kind": "inline",
+    "bundle": "/gallery/axiom-loader.js",
+    "entry": "quintet_start",
+    "canvas": "axiom-quintet-canvas"
+  },
+  {
+    "id": "netplay",
+    "title": "Lockstep Multiplayer",
+    "kind": "inline",
+    "bundle": "/gallery/axiom-loader.js",
+    "entry": "netplay_start",
+    "canvas": "axiom-netplay-canvas"
+  },
+  {
     "id": "retro_fps",
     "title": "retro FPS (first-person)",
-    "bundle": "./games/retro-fps/axiom_game_retro_fps.js",
+    "kind": "inline",
+    "bundle": "/gallery/axiom-loader.js",
     "entry": "retro_fps_start",
     "canvas": "axiom-retro-fps-canvas"
+  },
+  {
+    "id": "growth",
+    "title": "Growth (walkable terrain)",
+    "kind": "page",
+    "page": "/gallery/growth/index.html"
+  },
+  {
+    "id": "zanzoban",
+    "title": "Zanzoban",
+    "kind": "page",
+    "page": "/gallery/zanzoban/index.html"
+  },
+  {
+    "id": "harness",
+    "title": "Debug Overlay",
+    "kind": "page",
+    "page": "/gallery/harness/index.html"
   }
 ]

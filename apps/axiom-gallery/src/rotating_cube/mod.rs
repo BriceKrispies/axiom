@@ -30,7 +30,7 @@ fn ch(value: f32) -> Ratio {
 /// (red on Y, green on X, blue on a diagonal), plus a pulled-back camera and a
 /// single directional light.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-fn rotating_cubes_app() -> App {
+pub(crate) fn rotating_cubes_app() -> App {
     App::new()
         .window(
             Window::new(800, 600)

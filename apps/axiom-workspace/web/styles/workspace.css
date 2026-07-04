@@ -295,6 +295,37 @@ body {
   font-weight: 700;
 }
 
+/* A read-only display row (data-driven list, no interactivity). */
+.ws-row {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: #1a1a1a;
+  background: #f7f7f5;
+  border: 1px solid #bbb;
+  border-radius: 2px;
+}
+
+.ws-row[data-selected="true"] {
+  background: #1a1a1a;
+  color: #f2f2f0;
+  border-color: #1a1a1a;
+}
+
+.ws-row[data-selected="true"] .ws-row-id {
+  color: #cfcfcf;
+}
+
+/* Empty-state message shown when a panel's data slice has no rows. */
+.ws-empty-state {
+  margin: 0;
+  padding: 14px 8px;
+  font-size: 12px;
+  font-style: italic;
+  color: #999;
+}
+
 /* ---- Field lists (manifest / inspector / package) ---- */
 
 .ws-field-list {
@@ -543,4 +574,54 @@ body {
   height: auto;
   image-rendering: auto;
   background: #000;
+}
+
+.ws-cartridge-compare {
+  font: 12px ui-monospace, monospace;
+  padding: 3px 10px;
+  border: 1px solid #9aa1ab;
+  border-radius: 4px;
+  background: #fff;
+  color: #2b2f36;
+  cursor: pointer;
+}
+
+.ws-cartridge-compare:hover {
+  background: #dfe3e8;
+}
+
+/* Backend-comparison view: the three panes side by side (stacked on a narrow
+   viewport). One wasm instance, one sim, three backends — no nested frames. */
+.ws-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+@media (min-width: 900px) {
+  .ws-compare-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.ws-compare-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ws-compare-label {
+  font: 12px/1 ui-monospace, monospace;
+  color: #aab2c0;
+}
+
+.ws-compare-canvas {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid #2a2f36;
+  border-radius: 6px;
+  background: #000;
+  display: block;
 }

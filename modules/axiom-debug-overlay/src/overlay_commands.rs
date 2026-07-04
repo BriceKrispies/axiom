@@ -68,6 +68,11 @@ pub(crate) const OVERLAY_SPECS: &[CommandSpec<OverlayState>] = &[
         handler: cmd_copy,
     },
     CommandSpec {
+        name: "scrubber",
+        summary: "show/hide the frame-scrubber overlay (also the F2 hotkey)",
+        handler: cmd_scrubber,
+    },
+    CommandSpec {
         name: "replay.mark",
         summary: "record a replay marker (stub)",
         handler: cmd_replay_mark,
@@ -141,6 +146,15 @@ fn cmd_copy(state: &mut OverlayState, args: &[String]) -> CommandOutcome {
     let count = text.chars().count();
     state.request_clipboard(text);
     CommandOutcome::ok("copy", format!("copied {count} chars to the clipboard"))
+}
+
+/// `scrubber` toggles the windowing frame-scrubber overlay. The overlay lives in a
+/// different module with no shared interface instance, so the handler only queues a
+/// neutral request; the wasm arm drains it and dispatches the `axiom:scrubber-toggle`
+/// DOM event the scrubber listens for (the F2 hotkey toggles it directly).
+fn cmd_scrubber(state: &mut OverlayState, _args: &[String]) -> CommandOutcome {
+    state.request_scrubber_toggle();
+    CommandOutcome::ok("scrubber", "toggled the frame scrubber (F2)")
 }
 
 fn cmd_replay_mark(_state: &mut OverlayState, _args: &[String]) -> CommandOutcome {

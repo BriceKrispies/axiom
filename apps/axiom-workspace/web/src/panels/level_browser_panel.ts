@@ -1,14 +1,15 @@
 // Level Browser panel (id: "level-browser", region: left).
 //
-// Lists placeholder levels. Selecting a row dispatches a typed
-// `level.placeholder.select` event through the shared reducer.
+// A read-only, data-driven list of the opened project's levels. No runtime is
+// attached, so it stays empty (no placeholder levels) until real levels arrive.
 
 import type { Dispatch } from "../workspace_events";
 import type { WorkspaceBrowserState } from "../workspace_state";
+import { renderEmpty } from "./empty_state";
 
 export function renderLevelBrowserPanel(
   state: WorkspaceBrowserState,
-  dispatch: Dispatch,
+  _dispatch: Dispatch,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "ws-panel";
@@ -18,21 +19,18 @@ export function renderLevelBrowserPanel(
   bar.className = "ws-panel-title";
   bar.textContent = "Level Browser";
 
-  const note = document.createElement("p");
-  note.className = "ws-panel-note";
-  note.textContent = "Placeholder levels — click a row to select (shell state only).";
+  const levels = state.levelBrowser.levels;
+  if (levels.length === 0) {
+    section.append(bar, renderEmpty("No levels"));
+    return section;
+  }
 
   const list = document.createElement("ul");
   list.className = "ws-row-list";
-
-  state.levelBrowser.levels.forEach((level, index) => {
+  levels.forEach((level, index) => {
     const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "ws-row-button";
-    const selected = state.levelBrowser.selectedIndex === index;
-    button.setAttribute("aria-pressed", selected ? "true" : "false");
-    button.dataset.selected = selected ? "true" : "false";
+    item.className = "ws-row";
+    item.dataset.selected = state.levelBrowser.selectedIndex === index ? "true" : "false";
 
     const id = document.createElement("span");
     id.className = "ws-row-id";
@@ -41,14 +39,10 @@ export function renderLevelBrowserPanel(
     name.className = "ws-row-name";
     name.textContent = level.name;
 
-    button.append(id, name);
-    button.addEventListener("click", () => {
-      dispatch({ type: "level.placeholder.select", index });
-    });
-    item.append(button);
+    item.append(id, name);
     list.append(item);
   });
 
-  section.append(bar, note, list);
+  section.append(bar, list);
   return section;
 }

@@ -16,6 +16,7 @@ GALLERY_DIR      := apps/axiom-gallery
 GALLERY_WEB      := $(GALLERY_DIR)/web
 DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
+WORKSPACE_PORT   ?= 8123
 
 # The live 2-browser SERVER-AUTHORITATIVE multiplayer demo lives at dist/netplay/.
 # Its browser networking is the TypeScript @axiom/client SDK (packages/axiom-client),
@@ -33,7 +34,8 @@ ASSETSTREAM_PKG      := $(ASSETSTREAM_WEB)/pkg
 ASSETSTREAM_FIXTURE  := $(ASSETSTREAM_DIR)/fixture/assets.toml
 ASSETSTREAM_PORT     ?= 8000
 
-.PHONY: gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
+.PHONY: workspace workspace-build \
+	gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
 	netplay netplay-build netplay-server netplay-dotnet relay retro-fps-hot \
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
@@ -52,6 +54,11 @@ help:
 	@echo "  (make gallery is slow the first time — it rebuilds std MVP so the wasm2js fallback is possible.)"
 	@echo "  (every browser demo is merged into apps/axiom-gallery: ONE bundle, ONE loader,"
 	@echo "   booted per-demo by <demo>_start. The card grid + shared shell live in web/.)"
+	@echo ""
+	@echo "  ===> DEV CONSOLE — the axiom-workspace (loads every gallery app + games/ cartridges):"
+	@echo "  make workspace      Build the console (shell + gallery bundle) + serve at http://localhost:$(WORKSPACE_PORT)"
+	@echo "  make workspace-build  Build dist-workspace/ only, no serve"
+	@echo "  (hosts every app inline or opens the multi-screen ones; has the frame scrubber + backend-compare dev tools.)"
 	@echo ""
 	@echo "  Live 2-browser SERVER-AUTHORITATIVE multiplayer demo (dist/netplay/):"
 	@echo "  make netplay-build   Build the gallery dist/ + vendor the @axiom/client SDK + the worker cdylib"
@@ -143,6 +150,21 @@ gallery-fast-build:
 gallery-fast: gallery-fast-build
 	@echo Fast gallery (wasm-only) built into $(DIST_DIR)/. Serving at http://localhost:$(GALLERY_PORT) - Ctrl+C to stop.
 	uv run --no-project python -m http.server $(GALLERY_PORT) --directory $(DIST_DIR)
+
+# --- Workspace dev console (loads every gallery app + the games/ cartridges) ---
+
+# Build + serve the axiom-workspace dev console: compiles the vanilla-TS shell with
+# tsgo, lays it into dist-workspace/, and builds the ONE gallery bundle into
+# dist-workspace/gallery/ so the console can load every gallery app (inline single-
+# canvas boot, or open the multi-screen ones) plus the retro_fps cartridge, and run the
+# no-iframe backend-compare tool. Fast wasm-only bundle (seconds after the first
+# cargo build); the shell's own extension-resolving static server serves it.
+workspace:
+	uv run --no-project python scripts/package_workspace.py --serve --port $(WORKSPACE_PORT)
+
+# Build only (no serve): assemble dist-workspace/.
+workspace-build:
+	uv run --no-project python scripts/package_workspace.py
 
 # --- Live 2-browser SERVER-AUTHORITATIVE multiplayer demo ---
 

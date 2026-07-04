@@ -1,10 +1,11 @@
 // Profiler panel (id: "profiler", region: bottom).
 //
-// Shows placeholder frame/system timing samples (label / micros / tick) in
-// insertion order. Read-only view over the profiler slice of shell state.
+// A read-only, data-driven view over the profiler slice (label / micros / tick).
+// No runtime is attached, so it stays empty until real timing samples arrive.
 
 import type { Dispatch } from "../workspace_events";
 import type { WorkspaceBrowserState } from "../workspace_state";
+import { renderEmpty } from "./empty_state";
 
 export function renderProfilerPanel(
   state: WorkspaceBrowserState,
@@ -18,14 +19,15 @@ export function renderProfilerPanel(
   bar.className = "ws-panel-title";
   bar.textContent = "Profiler";
 
-  const note = document.createElement("p");
-  note.className = "ws-panel-note";
-  note.textContent = "Placeholder timing samples (insertion order).";
+  const samples = state.profiler.samples;
+  if (samples.length === 0) {
+    section.append(bar, renderEmpty("No timing samples"));
+    return section;
+  }
 
   const list = document.createElement("ul");
   list.className = "ws-sample-list";
-
-  state.profiler.samples.forEach((sample) => {
+  samples.forEach((sample) => {
     const item = document.createElement("li");
     item.className = "ws-sample-row";
 
@@ -43,6 +45,6 @@ export function renderProfilerPanel(
     list.append(item);
   });
 
-  section.append(bar, note, list);
+  section.append(bar, list);
   return section;
 }

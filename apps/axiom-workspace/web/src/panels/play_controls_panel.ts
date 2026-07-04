@@ -1,30 +1,24 @@
 // Play Controls panel (id: "play-controls", region: bottom).
 //
-// Placeholder workflow-mode buttons (Edit / Play / Drop In / Replay / Package).
-// Each dispatches a typed `workspace.mode.set` event with the matching mode; the
-// Drop In button additionally dispatches `drop_in.placeholder.create`, and Play
-// additionally dispatches `launch.placeholder.create`. These buttons update SHELL
-// state only — they never simulate a runtime. The current mode is shown.
+// The workflow-mode switcher (Edit / Play / Drop In / Replay / Package). Each
+// button dispatches a typed `workspace.mode.set` event with the matching mode —
+// the one genuine control in the shell (it drives which workflow the layout
+// presents). It attaches no runtime and produces no placeholder data.
 
-import type { Dispatch, WorkspaceEvent } from "../workspace_events";
+import type { Dispatch } from "../workspace_events";
 import type { WorkspaceBrowserState, WorkspaceMode } from "../workspace_state";
 
 interface ModeButtonSpec {
   readonly mode: WorkspaceMode;
   readonly label: string;
-  readonly extra: readonly WorkspaceEvent[];
 }
 
 const MODE_BUTTONS: readonly ModeButtonSpec[] = [
-  { mode: "Edit", label: "Edit", extra: [] },
-  { mode: "Play", label: "Play", extra: [{ type: "launch.placeholder.create" }] },
-  {
-    mode: "DropIn",
-    label: "Drop In",
-    extra: [{ type: "drop_in.placeholder.create", levelId: "level.placeholder.01" }],
-  },
-  { mode: "Replay", label: "Replay", extra: [] },
-  { mode: "Package", label: "Package", extra: [] },
+  { mode: "Edit", label: "Edit" },
+  { mode: "Play", label: "Play" },
+  { mode: "DropIn", label: "Drop In" },
+  { mode: "Replay", label: "Replay" },
+  { mode: "Package", label: "Package" },
 ];
 
 export function renderPlayControlsPanel(
@@ -41,7 +35,7 @@ export function renderPlayControlsPanel(
 
   const status = document.createElement("p");
   status.className = "ws-panel-note";
-  status.textContent = `mode: ${state.mode} · launch: ${String(state.playControls.launchCreated)} · dropIn: ${String(state.playControls.dropInCreated)}`;
+  status.textContent = `mode: ${state.mode}`;
 
   const row = document.createElement("div");
   row.className = "ws-button-row";
@@ -56,9 +50,6 @@ export function renderPlayControlsPanel(
     button.setAttribute("aria-pressed", active ? "true" : "false");
     button.addEventListener("click", () => {
       dispatch({ type: "workspace.mode.set", mode: spec.mode });
-      spec.extra.forEach((event) => {
-        dispatch(event);
-      });
     });
     row.append(button);
   });

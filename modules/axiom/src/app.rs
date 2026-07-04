@@ -171,6 +171,53 @@ impl App {
                 )
             });
     }
+
+    /// Run the app as a **backend comparison**: realize the world once and present
+    /// every deterministic frame to three surfaces at once, each pinned to a
+    /// different backend (WebGPU / WebGL2 / Canvas 2D). This is the no-frame
+    /// successor to the old gallery triptych — one instance, one sim, three
+    /// renderers — so the panes are always frame-identical. `surface_ids` are the
+    /// three presentation element ids (in WebGPU / WebGL2 / Canvas2D order). Like
+    /// [`Self::run`] it is wasm32-only (it owns the live present loop) and hands
+    /// windowing only plain per-frame draw data, never a platform type.
+    #[cfg(target_arch = "wasm32")]
+    pub fn run_compare(self, surface_ids: [&str; 3]) {
+        let cfg = &self.window;
+        let (width, height) = (cfg.width(), cfg.height());
+
+        let mut windowing = WindowingApi::new();
+        windowing
+            .configure_surface(width, height)
+            .expect("surface dimensions are valid");
+
+        let mut running = self.build();
+        let meshes = running.mesh_set();
+        let materials = running.material_textures();
+        let max_instances = running.renderable_count() as u32;
+        let _ = windowing.run_web_compare(
+            surface_ids,
+            meshes,
+            materials,
+            max_instances,
+            move |tick| {
+                let outcome = running.tick(tick);
+                let lights = outcome
+                    .lights()
+                    .iter()
+                    .map(|l| (l.kind(), l.vec(), l.color(), l.intensity()))
+                    .collect();
+                (
+                    outcome.clear_color(),
+                    lights,
+                    outcome.light_view_proj(),
+                    outcome.mesh_batches(),
+                    outcome.camera_view_proj(),
+                    outcome.mesh_batch_casters(),
+                    outcome.sdf_scene().cloned(),
+                )
+            },
+        );
+    }
 }
 
 impl Default for App {

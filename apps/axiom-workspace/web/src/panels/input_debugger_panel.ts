@@ -1,15 +1,15 @@
 // Input Debugger panel (id: "input-debugger", region: bottom).
 //
-// Shows placeholder input events (tick / code / label) in insertion order, plus a
-// placeholder "record" button that dispatches a typed `input.placeholder.record`
-// event. The button updates shell state only — it does not read real input.
+// A read-only, data-driven list of captured input events (tick / code / label).
+// No runtime is attached, so it stays empty until real input is captured.
 
 import type { Dispatch } from "../workspace_events";
 import type { WorkspaceBrowserState } from "../workspace_state";
+import { renderEmpty } from "./empty_state";
 
 export function renderInputDebuggerPanel(
   state: WorkspaceBrowserState,
-  dispatch: Dispatch,
+  _dispatch: Dispatch,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "ws-panel";
@@ -19,22 +19,15 @@ export function renderInputDebuggerPanel(
   bar.className = "ws-panel-title";
   bar.textContent = "Input Debugger";
 
-  const record = document.createElement("button");
-  record.type = "button";
-  record.className = "ws-inline-button";
-  record.textContent = "Record Placeholder Input";
-  record.addEventListener("click", () => {
-    dispatch({
-      type: "input.placeholder.record",
-      code: 0x40,
-      label: "placeholder.recorded",
-    });
-  });
+  const inputs = state.inputDebugger.inputs;
+  if (inputs.length === 0) {
+    section.append(bar, renderEmpty("No input captured"));
+    return section;
+  }
 
   const list = document.createElement("ul");
   list.className = "ws-input-list";
-
-  state.inputDebugger.inputs.forEach((input) => {
+  inputs.forEach((input) => {
     const item = document.createElement("li");
     item.className = "ws-input-row";
 
@@ -52,6 +45,6 @@ export function renderInputDebuggerPanel(
     list.append(item);
   });
 
-  section.append(bar, record, list);
+  section.append(bar, list);
   return section;
 }

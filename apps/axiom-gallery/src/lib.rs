@@ -33,3 +33,25 @@ pub mod physics_crucible;
 pub mod harness;
 pub mod forest_walk;
 pub mod soccer_penalty;
+
+/// Backend-comparison entry: render one demo three ways at once — WebGPU, WebGL2,
+/// and Canvas 2D — into three canvases, from ONE wasm instance and ONE
+/// deterministic sim. This is the no-iframe successor to the old gallery
+/// triptych; a host (the workspace dev console) creates three canvases and calls
+/// this. Only the engine-`App` 3D demos are comparable (`quintet` is a bespoke
+/// Canvas 2D game, `retro_fps`/`soccer`/`netplay` build a `RunningApp` with their own
+/// input/relay wiring); an unknown or non-comparable `demo_id` is a no-op.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn compare_start(demo_id: &str, canvas_a: &str, canvas_b: &str, canvas_c: &str) {
+    console_error_panic_hook::set_once();
+    let canvases = [canvas_a, canvas_b, canvas_c];
+    match demo_id {
+        "rotating-cube" => rotating_cube::rotating_cubes_app().run_compare(canvases),
+        "stress-cubes" => stress_cubes::stress_cubes_app(2000).run_compare(canvases),
+        "physics-crucible" => {
+            physics_crucible::physics_crucible_app::crucible_app().run_compare(canvases)
+        }
+        _ => (),
+    }
+}

@@ -1,15 +1,16 @@
-// Typed placeholder state for the workspace browser shell.
+// Typed state for the workspace browser shell.
 //
 // This module owns the ENTIRE browser-side state shape. There is one typed
 // state object per panel plus a root `WorkspaceBrowserState`. Every field is
 // `readonly` and there is no `any` anywhere — the shell is a strictly typed
 // view model.
 //
-// This is a PLACEHOLDER shell: `initialWorkspaceState()` fills each panel with
-// a few clearly-labeled placeholder rows so the panels render visibly populated.
-// The shell never simulates real game behavior; it is a developer surface whose
-// panels reflect typed state, and whose only state transitions go through the
-// single reducer in `workspace_events.ts`.
+// No runtime is attached yet, so `initialWorkspaceState()` starts EMPTY: every
+// list is empty and every field is unset (there is no placeholder data). Panels
+// render empty states until a real runtime, project, or asset source populates
+// them. The shell never simulates real game behavior; its only state transition
+// today is the workflow-mode switcher, through the single reducer in
+// `workspace_events.ts`.
 
 export type WorkspaceMode = "Edit" | "Play" | "DropIn" | "Replay" | "Package";
 
@@ -52,8 +53,8 @@ export interface ComparisonBackend {
 }
 
 export interface RuntimeViewportPanelState {
-  readonly placeholderLabel: "Runtime Viewport Placeholder";
-  readonly attached: false;
+  readonly placeholderLabel: string;
+  readonly attached: boolean;
   readonly view: RuntimeViewportView;
   readonly backends: readonly ComparisonBackend[];
 }
@@ -147,84 +148,54 @@ export interface WorkspaceBrowserState {
   readonly packageExport: PackageExportPanelState;
 }
 
+// Mirrors the Rust `GameManifestEditorState` sentinel: a field with no value.
+export const UNSET = "<unset>";
+
+// The shell attaches no real runtime yet, so it starts with NO data: every list
+// is empty and every field is unset. Panels render empty states until a real
+// runtime, project, or asset source is wired in — there is no placeholder data.
 export function initialWorkspaceState(): WorkspaceBrowserState {
   return {
     mode: "Edit",
     projectBrowser: {
-      projects: [
-        { id: "proj.placeholder.alpha", name: "Placeholder Project Alpha" },
-        { id: "proj.placeholder.beta", name: "Placeholder Project Beta" },
-        { id: "proj.placeholder.gamma", name: "Placeholder Project Gamma" },
-      ],
+      projects: [],
       selectedIndex: null,
     },
     gameManifestEditor: {
-      title: "Placeholder Game Title",
-      version: "0.0.0-placeholder",
-      entrypoint: "placeholder_main",
-      defaultLevel: "level.placeholder.01",
+      title: UNSET,
+      version: UNSET,
+      entrypoint: UNSET,
+      defaultLevel: UNSET,
     },
     levelBrowser: {
-      levels: [
-        { id: "level.placeholder.01", name: "Placeholder Level 01" },
-        { id: "level.placeholder.02", name: "Placeholder Level 02" },
-        { id: "level.placeholder.03", name: "Placeholder Level 03" },
-      ],
+      levels: [],
       selectedIndex: null,
     },
     runtimeViewport: {
-      placeholderLabel: "Runtime Viewport Placeholder",
+      placeholderLabel: "No runtime attached",
       attached: false,
       view: "placeholder",
-      backends: [
-        { id: "webgpu", name: "WebGPU", note: "GPU · primary" },
-        { id: "webgl2", name: "WebGL2", note: "GPU · fallback" },
-        { id: "canvas2d", name: "Canvas2D", note: "software rasterizer" },
-      ],
+      backends: [],
     },
     objectInspector: {
       selectedObjectId: null,
-      fields: [
-        { name: "placeholder.name", value: "placeholder value" },
-        { name: "placeholder.transform", value: "0, 0, 0 (placeholder)" },
-        { name: "placeholder.tag", value: "unset (placeholder)" },
-      ],
+      fields: [],
     },
     assetBrowser: {
-      assets: [
-        { id: "asset.placeholder.mesh.01", kind: "mesh", name: "Placeholder Mesh" },
-        { id: "asset.placeholder.texture.01", kind: "texture", name: "Placeholder Texture" },
-        { id: "asset.placeholder.audio.01", kind: "audio", name: "Placeholder Audio Clip" },
-      ],
+      assets: [],
       selectedIndex: null,
     },
     consoleLogViewer: {
-      records: [
-        { level: "info", message: "workspace shell opened (placeholder)", tick: 0 },
-        { level: "info", message: "no runtime attached (placeholder)", tick: 0 },
-        { level: "warn", message: "all data below is placeholder data", tick: 0 },
-      ],
+      records: [],
     },
     profiler: {
-      samples: [
-        { label: "placeholder.frame", micros: 16_666, tick: 0 },
-        { label: "placeholder.update", micros: 4_200, tick: 0 },
-        { label: "placeholder.render", micros: 8_100, tick: 0 },
-      ],
+      samples: [],
     },
     inputDebugger: {
-      inputs: [
-        { tick: 0, code: 0x01, label: "placeholder.move.forward" },
-        { tick: 0, code: 0x02, label: "placeholder.move.back" },
-        { tick: 0, code: 0x20, label: "placeholder.jump" },
-      ],
+      inputs: [],
     },
     timelineReplay: {
-      ticks: [
-        { tick: 0, snapshot: "placeholder-snapshot-0000" },
-        { tick: 60, snapshot: "placeholder-snapshot-0060" },
-        { tick: 120, snapshot: null },
-      ],
+      ticks: [],
       replayRequested: false,
     },
     playControls: {
@@ -233,8 +204,8 @@ export function initialWorkspaceState(): WorkspaceBrowserState {
       dropInCreated: false,
     },
     packageExport: {
-      status: "idle (placeholder)",
-      target: "browser (placeholder)",
+      status: UNSET,
+      target: UNSET,
       requested: false,
     },
   };

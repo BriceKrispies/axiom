@@ -1,14 +1,15 @@
 // Project Browser panel (id: "project-browser", region: left).
 //
-// Lists placeholder projects. Clicking a row dispatches a typed
-// `project.placeholder.open` event through the shared reducer.
+// A read-only, data-driven list of known/openable game projects. Empty (no
+// placeholder projects) until a real project source is wired in.
 
 import type { Dispatch } from "../workspace_events";
 import type { WorkspaceBrowserState } from "../workspace_state";
+import { renderEmpty } from "./empty_state";
 
 export function renderProjectBrowserPanel(
   state: WorkspaceBrowserState,
-  dispatch: Dispatch,
+  _dispatch: Dispatch,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "ws-panel";
@@ -18,21 +19,18 @@ export function renderProjectBrowserPanel(
   bar.className = "ws-panel-title";
   bar.textContent = "Project Browser";
 
-  const note = document.createElement("p");
-  note.className = "ws-panel-note";
-  note.textContent = "Placeholder projects — click a row to open (shell state only).";
+  const projects = state.projectBrowser.projects;
+  if (projects.length === 0) {
+    section.append(bar, renderEmpty("No projects"));
+    return section;
+  }
 
   const list = document.createElement("ul");
   list.className = "ws-row-list";
-
-  state.projectBrowser.projects.forEach((project, index) => {
+  projects.forEach((project, index) => {
     const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "ws-row-button";
-    const selected = state.projectBrowser.selectedIndex === index;
-    button.setAttribute("aria-pressed", selected ? "true" : "false");
-    button.dataset.selected = selected ? "true" : "false";
+    item.className = "ws-row";
+    item.dataset.selected = state.projectBrowser.selectedIndex === index ? "true" : "false";
 
     const id = document.createElement("span");
     id.className = "ws-row-id";
@@ -41,14 +39,10 @@ export function renderProjectBrowserPanel(
     name.className = "ws-row-name";
     name.textContent = project.name;
 
-    button.append(id, name);
-    button.addEventListener("click", () => {
-      dispatch({ type: "project.placeholder.open", projectId: project.id });
-    });
-    item.append(button);
+    item.append(id, name);
     list.append(item);
   });
 
-  section.append(bar, note, list);
+  section.append(bar, list);
   return section;
 }

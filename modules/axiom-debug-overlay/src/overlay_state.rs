@@ -40,6 +40,11 @@ pub(crate) struct OverlayState {
     /// The `` ` `` hotkey bindings (interface-layer [`Keymap`]); resolved against
     /// each keydown by [`Self::apply_key`].
     keymap: Keymap,
+    /// A neutral one-shot outbox: set by the `scrubber` command, drained by the
+    /// wasm arm (which dispatches the `axiom:scrubber-toggle` DOM event that the
+    /// windowing frame-scrubber listens for). The pure core only records the
+    /// request as a bit — it never touches the DOM or the scrubber directly.
+    scrubber_toggle_pending: bool,
 }
 
 impl OverlayState {
@@ -53,6 +58,7 @@ impl OverlayState {
             diagnostics: Diagnostics::placeholder(),
             app_rows: Vec::new(),
             keymap: backquote_keymap(),
+            scrubber_toggle_pending: false,
         };
         state.refresh_panel();
         state
@@ -430,6 +436,25 @@ impl OverlayState {
     }
 }
 
+/// Frame-scrubber toggle plumbing — a neutral one-shot outbox mirroring the
+/// clipboard one. The `scrubber` command sets the bit; the wasm arm drains it and
+/// dispatches the `axiom:scrubber-toggle` DOM event the windowing scrubber listens
+/// for. Kept native (not `wasm32`-only) so both sides stay covered by tests.
+impl OverlayState {
+    /// Record a pending request to toggle the frame scrubber's visibility.
+    pub(crate) fn request_scrubber_toggle(&mut self) {
+        self.scrubber_toggle_pending = true;
+    }
+
+    /// Drain the pending scrubber-toggle request: returns whether one was pending
+    /// and clears it (so the wasm arm dispatches at most one DOM event per toggle).
+    pub(crate) fn take_scrubber_toggle(&mut self) -> bool {
+        let pending = self.scrubber_toggle_pending;
+        self.scrubber_toggle_pending = false;
+        pending
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,6 +753,20 @@ mod tests {
             .recent_results()
             .iter()
             .any(|(ok, cmd, msg)| *ok && cmd == "copy" && *msg == expected));
+    }
+
+    #[test]
+    fn scrubber_command_queues_a_single_toggle_request() {
+        let mut s = OverlayState::new();
+        assert!(!s.take_scrubber_toggle(), "nothing pending before the command");
+        s.submit_command("scrubber");
+        assert!(s
+            .recent_results()
+            .iter()
+            .any(|(ok, cmd, msg)| *ok && cmd == "scrubber" && msg.contains("scrubber")));
+        // The command queued exactly one toggle: drain returns it once, then clears.
+        assert!(s.take_scrubber_toggle());
+        assert!(!s.take_scrubber_toggle());
     }
 
     #[test]

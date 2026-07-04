@@ -29,6 +29,9 @@ axiom-recording = { path = "../axiom-recording" }
 axiom-interface = { path = "../../crates/axiom-interface" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+# Read the host's `window.__axiom_dev_tools` opt-in (dev-console-only overlays
+# like the frame scrubber) via `Reflect`; wasm32-only, platform-edge.
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Window",
     "Document",

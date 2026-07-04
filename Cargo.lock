@@ -815,6 +815,7 @@ dependencies = [
  "axiom-interface",
  "axiom-kernel",
  "axiom-recording",
+ "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

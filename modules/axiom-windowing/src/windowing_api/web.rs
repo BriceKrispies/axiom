@@ -117,6 +117,124 @@ impl WindowingApi {
         )
     }
 
+    /// Drive a **backend-comparison** loop with no nested browsing contexts: ONE
+    /// shared deterministic sim presented to three canvases, each pinned to a
+    /// different backend (WebGPU / WebGL2 / Canvas 2D), so the same frame is
+    /// rendered three ways side by side. The engine steps the app once per rAF
+    /// tick and presents the identical frame to all three presenters — each bound
+    /// with a forced backend and NO scrubber overlay. This supersedes the old
+    /// iframe triptych: because it is one instance and one step (not three apps
+    /// kept loosely in sync), the three panes can never drift a frame apart. A
+    /// pane whose backend is unavailable in this browser simply stays unbound (its
+    /// canvas holds its clear colour). wasm32 only; consumes the driver.
+    #[cfg(target_arch = "wasm32")]
+    pub fn run_web_compare<F>(
+        self,
+        canvas_ids: [&str; 3],
+        meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        max_instances: u32,
+        frame_fn: F,
+    ) -> Result<(), wasm_bindgen::JsValue>
+    where
+        F: FnMut(
+                u64,
+            ) -> (
+                [f32; 4],
+                Vec<(u32, [f32; 3], [f32; 3], f32)>,
+                [f32; 16],
+                Vec<(u64, u64, Vec<f32>, u32)>,
+                [f32; 16],
+                Vec<bool>,
+                Option<axiom_host::SdfScene>,
+            ) + 'static,
+    {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::closure::Closure;
+
+        let canvases = [
+            find_canvas(canvas_ids[0])?,
+            find_canvas(canvas_ids[1])?,
+            find_canvas(canvas_ids[2])?,
+        ];
+        // The three panes, in the cascade's own preference order.
+        let backends = [
+            axiom_host::BackendKind::GpuPrimary,
+            axiom_host::BackendKind::GpuFallback,
+            axiom_host::BackendKind::Canvas2d,
+        ];
+        let request = match self.surface.as_ref() {
+            Some(request) => *request,
+            None => return Ok(()),
+        };
+        let meshes = Rc::new(meshes);
+        let materials = Rc::new(materials);
+        let slots: [Rc<RefCell<Option<LivePresenter>>>; 3] = [
+            Rc::new(RefCell::new(None)),
+            Rc::new(RefCell::new(None)),
+            Rc::new(RefCell::new(None)),
+        ];
+
+        // Bind each pane's presenter off-loop (each backend init is async); until a
+        // slot resolves, presenting to it is a no-op — the first frames simply
+        // don't paint on that pane.
+        (0..3).for_each(|i| {
+            let slot = slots[i].clone();
+            let canvas = canvases[i].clone();
+            let backend = backends[i];
+            let meshes = meshes.clone();
+            let materials = materials.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                *slot.borrow_mut() = LivePresenter::bind_with(
+                    request,
+                    canvas,
+                    Some(backend),
+                    false,
+                    (*meshes).clone(),
+                    (*materials).clone(),
+                    max_instances,
+                )
+                .await;
+            });
+        });
+
+        let windowing = Rc::new(RefCell::new(self));
+        let frame_fn = Rc::new(RefCell::new(frame_fn));
+        let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
+        let g = f.clone();
+        let win = windowing.clone();
+        let ff = frame_fn.clone();
+        let panes = slots.clone();
+        *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+            let tick = win.borrow_mut().step();
+            let (clear, lights, light_vp, batches, camera_vp, casters, sdf) = (ff.borrow_mut())(tick);
+            panes.iter().for_each(|slot| {
+                slot.borrow().as_ref().into_iter().for_each(|presenter| {
+                    presenter.present(
+                        tick,
+                        clear,
+                        &lights,
+                        light_vp,
+                        &batches,
+                        camera_vp,
+                        &casters,
+                        sdf.clone(),
+                    );
+                });
+            });
+            let next = f.borrow();
+            next.as_ref().into_iter().for_each(|cb| {
+                let _ = request_animation_frame(cb);
+            });
+        }) as Box<dyn FnMut()>));
+        let initial = g.borrow();
+        initial.as_ref().into_iter().for_each(|cb| {
+            let _ = request_animation_frame(cb);
+        });
+        Ok(())
+    }
+
     /// Bind a live presenter to the canvas for a host that owns its **own** frame
     /// loop (e.g. the `@axiom/game` TS SDK, which banks real elapsed time into
     /// fixed ticks itself). It selects the live backend (WebGPU → WebGL2 → Canvas
@@ -705,9 +823,11 @@ impl std::fmt::Debug for LivePresenter {
 
 #[cfg(target_arch = "wasm32")]
 impl LivePresenter {
-    /// Bind a presenter to `canvas`: select the backend (WebGPU → WebGL2 → Canvas
-    /// 2D), upload the mesh set `meshes` and material set `materials` once, and
-    /// capture the rebuild inputs. `None` if no backend could be built.
+    /// Bind a presenter to `canvas`: select the backend from `?backend=` (else the
+    /// WebGPU → WebGL2 → Canvas 2D cascade), upload the mesh set `meshes` and
+    /// material set `materials` once, and mount the scrub-only dev overlay so a
+    /// caller-owned loop gets the frame slider + Escape/blur freeze the engine's
+    /// own run loops have. `None` if no backend could be built.
     async fn bind(
         request: axiom_host::HostPresentationRequest,
         canvas: web_sys::HtmlCanvasElement,
@@ -715,10 +835,37 @@ impl LivePresenter {
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
     ) -> Option<LivePresenter> {
+        Self::bind_with(
+            request,
+            canvas,
+            backend_preference(),
+            true,
+            meshes,
+            materials,
+            max_instances,
+        )
+        .await
+    }
+
+    /// The general binder [`Self::bind`] funnels through. `preference` forces a
+    /// specific backend (`Some`) or takes the cascade (`None`); `with_scrubber`
+    /// controls whether the dev frame-scrubber overlay is mounted for this
+    /// presenter — the backend-comparison loop pins each backend and mounts NO
+    /// scrubber (three stacked overlays over the panes would be noise). Uploads
+    /// the scene once and captures the rebuild inputs. `None` if no backend could
+    /// be built.
+    async fn bind_with(
+        request: axiom_host::HostPresentationRequest,
+        canvas: web_sys::HtmlCanvasElement,
+        preference: Option<axiom_host::BackendKind>,
+        with_scrubber: bool,
+        meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        max_instances: u32,
+    ) -> Option<LivePresenter> {
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
 
-        let preference = backend_preference();
         let width = request.descriptor().viewport().physical_width();
         let height = request.descriptor().viewport().physical_height();
         let meshes = Rc::new(meshes);
@@ -743,10 +890,9 @@ impl LivePresenter {
             height,
             preference,
             reinitializing: Rc::new(Cell::new(false)),
-            // Mount the scrub-only dev overlay (no fork hooks) so a caller-owned
-            // loop gets the frame slider + Escape/blur freeze the engine's own run
-            // loops have.
-            scrubber: crate::frame_scrubber::FrameScrubber::mount(None, None),
+            scrubber: with_scrubber
+                .then(|| crate::frame_scrubber::FrameScrubber::mount(None, None))
+                .flatten(),
             // No 2D textures applied yet; the first `present_2d` uploads the set.
             applied_texture_generation: Cell::new(u32::MAX),
         })

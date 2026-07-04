@@ -1,10 +1,11 @@
 // Console Log Viewer panel (id: "console-log-viewer", region: bottom).
 //
-// Shows structured placeholder log records (level / message / tick) in insertion
-// order. This is a read-only view over the console-log slice of shell state.
+// A read-only, data-driven view over the console-log slice. No runtime is
+// attached, so it stays empty until real log records arrive.
 
 import type { Dispatch } from "../workspace_events";
 import type { WorkspaceBrowserState } from "../workspace_state";
+import { renderEmpty } from "./empty_state";
 
 export function renderConsoleLogViewerPanel(
   state: WorkspaceBrowserState,
@@ -18,14 +19,15 @@ export function renderConsoleLogViewerPanel(
   bar.className = "ws-panel-title";
   bar.textContent = "Console Log Viewer";
 
-  const note = document.createElement("p");
-  note.className = "ws-panel-note";
-  note.textContent = "Placeholder log records (insertion order).";
+  const records = state.consoleLogViewer.records;
+  if (records.length === 0) {
+    section.append(bar, renderEmpty("No log records"));
+    return section;
+  }
 
   const list = document.createElement("ul");
   list.className = "ws-log-list";
-
-  state.consoleLogViewer.records.forEach((record) => {
+  records.forEach((record) => {
     const item = document.createElement("li");
     item.className = "ws-log-row";
 
@@ -44,6 +46,6 @@ export function renderConsoleLogViewerPanel(
     list.append(item);
   });
 
-  section.append(bar, note, list);
+  section.append(bar, list);
   return section;
 }

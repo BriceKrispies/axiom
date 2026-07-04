@@ -55,7 +55,7 @@ fn cube_color(i: u32, total: u32) -> Color {
 /// with a per-cube period, so no two are in lockstep — more varied transforms,
 /// a denser visual, and a heavier-than-trivial per-frame workload.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-fn stress_cubes_app(cubes: u32) -> App {
+pub(crate) fn stress_cubes_app(cubes: u32) -> App {
     let cubes = cubes.clamp(MIN_CUBES, MAX_CUBES);
     let cols = (cubes as f32).sqrt().ceil() as u32;
     let rows = cubes.div_ceil(cols);
@@ -122,13 +122,15 @@ fn stress_cubes_app(cubes: u32) -> App {
 }
 
 /// Browser entry: author an `N`-cube stress scene and drive the terminal web run
-/// loop. The page passes `cubes` (e.g. from a `?cubes=` query parameter) after
-/// confirming WebGPU is available.
+/// loop. The gallery page passes `cubes` (e.g. from a `?cubes=` query parameter)
+/// after confirming WebGPU is available; a bare-canvas host (the workspace
+/// console) boots it argument-free, so `cubes` is optional and defaults to 2000
+/// — the same default the gallery's cube-bar starts on.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn stress_start(cubes: u32) {
+pub fn stress_start(cubes: Option<u32>) {
     console_error_panic_hook::set_once();
-    stress_cubes_app(cubes).run();
+    stress_cubes_app(cubes.unwrap_or(2000)).run();
 }
 
 #[cfg(test)]

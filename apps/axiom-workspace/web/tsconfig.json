@@ -1,0 +1,17 @@
+{
+  "// note": "Compiles the workspace browser shell (web/src/*.ts) to web/dist/*.js. `scripts/package_workspace.py` runs `tsgo -p` on this, then lays the compiled JS + the gallery bundle into the served site. Relative imports are extensionless; the package script's static server resolves `./foo` -> `./foo.js`. No `@axiom/*` here — the shell is dependency-free vanilla web code.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}
