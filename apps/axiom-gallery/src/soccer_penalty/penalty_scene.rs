@@ -291,31 +291,40 @@ fn goal_frame(b: &mut SceneBuilder) {
 }
 
 fn net(b: &mut SceneBuilder) {
-    // A real net pocket behind the goal mouth: four planes (back, top, two sides)
-    // carrying the `net` cutout texture (white strands on transparent ground), so
-    // the GPU's alpha-cutout turns them into a see-through net — replacing the old
-    // wireframe cage of ~32 thin bars. All rear-layer: the keeper stands in front
-    // of the pocket (z = 0.5 > the pocket's z ≤ 0), so the actors read as standing
-    // inside the goal, seen against the net behind them.
+    // A real net pocket behind the goal mouth, built from a FINE grid of thin
+    // white bars (not a textured plane): a back wall, a top roof, and two side
+    // walls sloping back from the goal line to `back_z`. Bar geometry reads as a
+    // net on EVERY backend — WebGPU, WebGL2, and the flat Canvas2D fallback (which
+    // ignores textures) — so the three stay in sync, and the see-through gaps let
+    // the crowd show through. All rear-layer: the keeper (z = 0.5) stands in front.
     let hw = GOAL_HALF_WIDTH;
     let h = GOAL_HEIGHT;
     let back_z = GOAL_LINE_Z - NET_DEPTH;
     let mid_z = GOAL_LINE_Z - NET_DEPTH * 0.5;
-    let t = 0.02;
-    let mut plane = |pos: Vec3, size: Vec3, tag: &'static str| {
-        b.emit(
-            DioramaRole::RearNet,
-            PrimitiveShape::Quad,
-            pos,
-            size,
-            PenaltyMaterialId::NetOffWhite,
-            tag,
-        );
+    let t = 0.03;
+    let mut bar = |pos: Vec3, size: Vec3, tag: &'static str| {
+        b.emit(DioramaRole::RearNet, PrimitiveShape::Line, pos, size, PenaltyMaterialId::NetOffWhite, tag);
     };
-    plane(Vec3::new(0.0, h * 0.5, back_z), Vec3::new(hw * 2.0, h, t), "net.back");
-    plane(Vec3::new(0.0, h, mid_z), Vec3::new(hw * 2.0, t, NET_DEPTH), "net.top");
-    plane(Vec3::new(-hw, h * 0.5, mid_z), Vec3::new(t, h, NET_DEPTH), "net.left");
-    plane(Vec3::new(hw, h * 0.5, mid_z), Vec3::new(t, h, NET_DEPTH), "net.right");
+    // Back wall: 14 verticals × 8 horizontals — the main visible net.
+    (0..=13).for_each(|i| {
+        let x = -hw + (hw * 2.0) * (i as f32 / 13.0);
+        bar(Vec3::new(x, h * 0.5, back_z), Vec3::new(t, h, t), "net.back.v");
+    });
+    (0..=7).for_each(|j| {
+        let y = h * (j as f32 / 7.0);
+        bar(Vec3::new(0.0, y, back_z), Vec3::new(hw * 2.0, t, t), "net.back.h");
+    });
+    // Top roof: depth strands from the crossbar back to the top of the back wall.
+    (0..=6).for_each(|i| {
+        let x = -hw + (hw * 2.0) * (i as f32 / 6.0);
+        bar(Vec3::new(x, h, mid_z), Vec3::new(t, t, NET_DEPTH), "net.top");
+    });
+    // Side walls: depth strands down each edge.
+    (0..=3).for_each(|k| {
+        let y = h * (k as f32 / 3.0);
+        bar(Vec3::new(-hw, y, mid_z), Vec3::new(t, t, NET_DEPTH), "net.left");
+        bar(Vec3::new(hw, y, mid_z), Vec3::new(t, t, NET_DEPTH), "net.right");
+    });
 }
 
 /// The greppable label for one kicker humanoid part. Public so the per-frame

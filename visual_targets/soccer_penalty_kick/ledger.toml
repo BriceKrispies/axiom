@@ -473,3 +473,19 @@ ball_fidelity           = 2
 depth_and_separation    = 3
 scale_and_proportion    = 3
 artifact_level          = 3
+
+[[iteration]]
+iteration = 13
+attacked_axis = "cross-backend net parity (Canvas2D fix)"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_render_meshed.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_textures.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_stage1_diorama.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_pass2_depth_ordering.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "Backend-parity fix (user played the browser build and saw the net as a WHITE SQUARE on the Canvas2D backend). Root cause: pass C's net was an alpha-CUTOUT TEXTURE on planes, but Canvas2D renders 3D triangles flat (no textures) -> the cutout never applies, so the plane is a solid white quad. Replaced the 4 textured planes with a FINE grid of 37 thin white net bars (back wall 14x8, top roof 7, side walls 4+4) -- bar geometry reads as a net on EVERY backend (WebGPU, WebGL2, Canvas2D) and the gaps show the crowd through. Removed the now-unused `net` cutout texture. Object count 181->214; count tests updated. Verified on both GPU and Canvas2D via axiom-shot: both read as a real net, no white square."
+next_attacked_axis = "lighting_and_shadow"

@@ -102,7 +102,6 @@ struct TexLib {
     keeper: u64,
     ball: u64,
     skin: u64,
-    net: u64,
 }
 
 /// The shared meshed scene: the mesh + texture libraries, a
@@ -136,7 +135,6 @@ impl PenaltyMeshedScene {
             keeper: tex(penalty_textures::kit([230, 200, 40])),
             ball: tex(penalty_textures::ball()),
             skin: tex(penalty_textures::skin([210, 160, 128])),
-            net: tex(penalty_textures::net()),
         };
         Self { lib, tex, palette: HashMap::new(), spawned: Vec::new() }
     }
@@ -155,7 +153,6 @@ impl PenaltyMeshedScene {
             DioramaRole::Kicker => self.body_texture(label, self.tex.jersey),
             DioramaRole::Goalie => self.body_texture(label, self.tex.keeper),
             DioramaRole::Ball => (label == "ball").then_some(self.tex.ball).unwrap_or(0),
-            DioramaRole::RearNet | DioramaRole::FrontNet => self.tex.net,
             _ => 0,
         }
     }
