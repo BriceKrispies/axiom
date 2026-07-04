@@ -337,3 +337,41 @@ ball_fidelity           = 2
 depth_and_separation    = 3
 scale_and_proportion    = 2
 artifact_level          = 4
+
+[[iteration]]
+iteration = 9
+attacked_axis = "lighting_and_shadow"
+changed_files = ["apps/axiom-gallery/src/soccer_penalty/penalty_render_meshed.rs"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "Re-baselined first: the committed champion.png was STALE (md5 fbd9bcc) and did not match what the current source renders (md5 d970864 — the retro 32-bit texture pipeline + humanoid #10 kit + textured ball from origin commits 3090681/fbc8ec2). Re-promoted the real render to champion and re-scored to reality (most axes jumped to 3; ball to 4). Then attacked the lone lowest axis, lighting_and_shadow (2): the engine key light was neutral-white and top-down (0.3,-1.0,0.4), inconsistent with the baked flat-shading model's warm upper-front-left direction. Warmed it (golden linear_rgb 1.0/0.95/0.83), re-angled to (-0.39,-0.87,-0.30) to match, and bumped intensity 1.0->1.25 -> the #10 kicker and keeper now read with a golden directional cast and more tonal modelling instead of a flat neutral wash. lighting_and_shadow 2->3; no non-attacked axis dropped; render byte-deterministic (double-render md5 1e3e38b). Promoted."
+next_attacked_axis = "composition_and_framing"
+
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity        = 3
+silhouette_readability  = 3
+pitch_detail            = 3
+stadium_and_crowd       = 3
+color_palette           = 3
+contrast_and_exposure   = 3
+lighting_and_shadow     = 2
+ball_fidelity           = 4
+depth_and_separation    = 3
+scale_and_proportion    = 3
+artifact_level          = 3
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 3
+silhouette_readability  = 3
+pitch_detail            = 3
+stadium_and_crowd       = 3
+color_palette           = 3
+contrast_and_exposure   = 3
+lighting_and_shadow     = 3
+ball_fidelity           = 4
+depth_and_separation    = 3
+scale_and_proportion    = 3
+artifact_level          = 3

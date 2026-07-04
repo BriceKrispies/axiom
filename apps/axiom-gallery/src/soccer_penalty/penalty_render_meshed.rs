@@ -162,11 +162,14 @@ impl PenaltyMeshedScene {
                 .looking_at(cam.target, cam.up)
                 .unwrap_or_else(|_| Transform::from_translation(cam.eye)),
         );
+        // A warm key light from the upper-front-left (matching the baked
+        // flat-shading model's direction) models the figures with a golden
+        // stadium-sun cast instead of a flat neutral top-light.
         app.add_light(
             DirectionalLight {
-                direction: Vec3::new(0.3, -1.0, 0.4),
-                color: Color::WHITE,
-                intensity: ch(1.0),
+                direction: Vec3::new(-0.39, -0.87, -0.30),
+                color: Color::linear_rgb(ch(1.0), ch(0.95), ch(0.83)),
+                intensity: ch(1.25),
             },
             Transform::IDENTITY,
         );
