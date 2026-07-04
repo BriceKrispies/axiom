@@ -126,14 +126,14 @@ mod tests {
             crate_name = "axiom-demo-rotating-cube"
             allowed_layers = ["kernel", "runtime", "math", "host", "frame"]
             allowed_modules = ["scene", "render"]
-            allowed_games = ["retro_fps"]
+            allowed_games = ["retro-fps"]
         "#;
         let a = parse_app_manifest(Path::new("apps/rotating-cube"), text).unwrap();
         assert_eq!(a.app.name, "rotating-cube-demo");
         assert_eq!(a.app.crate_name, "axiom-demo-rotating-cube");
         assert_eq!(a.app.allowed_layers.len(), 5);
         assert_eq!(a.app.allowed_modules, vec!["scene", "render"]);
-        assert_eq!(a.app.allowed_games, vec!["retro_fps"]);
+        assert_eq!(a.app.allowed_games, vec!["retro-fps"]);
         assert_eq!(a.import_prefix(), "axiom_demo_rotating_cube");
     }
 

@@ -1130,7 +1130,7 @@ fn case_game_valid_cartridge_hosted_by_app_passes() {
         .game_crate(
             "games/retro-fps",
             "gv-retro_fps",
-            "retro_fps",
+            "retro-fps",
             &["kernel"],
             &[],
             &[("gv-kernel", "../../crates/kernel")],
@@ -1142,7 +1142,7 @@ fn case_game_valid_cartridge_hosted_by_app_passes() {
             "gallery",
             &["kernel"],
             &[],
-            &["retro_fps"],
+            &["retro-fps"],
             &[
                 ("gv-kernel", "../../crates/kernel"),
                 ("gv-retro_fps", "../../games/retro-fps"),
@@ -1166,7 +1166,7 @@ fn case_game_imported_by_a_layer_fails() {
         .game_crate(
             "games/retro-fps",
             "gil-retro_fps",
-            "retro_fps",
+            "retro-fps",
             &[],
             &[],
             &[],
@@ -1194,7 +1194,7 @@ fn case_app_hosting_unlisted_game_fails() {
     // `AppDependsOnGameNotAllowed`.
     let f = Fixture::new("game_unlisted_host");
     f.workspace(&["games/retro-fps", "apps/gallery"])
-        .game_crate("games/retro-fps", "gu-retro_fps", "retro_fps", &[], &[], &[], "pub fn app() {}\n")
+        .game_crate("games/retro-fps", "gu-retro_fps", "retro-fps", &[], &[], &[], "pub fn app() {}\n")
         .app_crate(
             "apps/gallery",
             "gu-gallery",
@@ -1221,7 +1221,7 @@ fn case_game_depending_on_an_app_fails() {
         .game_crate(
             "games/retro-fps",
             "gda-retro_fps",
-            "retro_fps",
+            "retro-fps",
             &[],
             &[],
             &[("gda-host", "../../apps/host")],

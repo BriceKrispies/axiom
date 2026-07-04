@@ -35,7 +35,7 @@ Mirrors Growth milestone **M0 (overworld half)**.
 Mirrors Growth milestone **M0 (game-world half)**. Depends on Phase 0 spike #1 succeeding.
 
 10. **Game-world module** (`module:game-world` / `feature-module:game-world`): `GameWorldLocalMap`, atlas-seeded per-chunk pipeline (`sample_macro`/IDW → `base_height` → `detail_noise` → `build_height_grid`), chunk store, focus-radius load + unload, seam continuity.
-11. **App composition**: player rig (reuse `scene` FPS controller + RetroFps-style input wiring) standing on streamed chunks; per-frame cull with `math::Frustum`; dynamic chunk meshes via the Phase-0 path.
+11. **App composition**: player rig (reuse `scene` FPS controller + retro FPS-style input wiring) standing on streamed chunks; per-frame cull with `math::Frustum`; dynamic chunk meshes via the Phase-0 path.
 
 **Vertical slice B:** *Start → drop player onto streamed, overworld-shaped terrain you can walk around.* This is exactly the milestone the Growth repo itself has *not yet visually proven* — reaching it on Axiom would already match Growth's current real state, on a stricter foundation.
 

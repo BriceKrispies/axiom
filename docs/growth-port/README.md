@@ -3,7 +3,7 @@
 **Status:** Analysis only (no Axiom code changed). Written 2026-06-19.
 **Author context:** Produced by auditing a separate, fully-specified target product (the *Growth* repo — a Godot/C++ procedural-planet survival game) against the current Axiom engine, to answer one question: **what is missing in Axiom to build that product here instead.**
 
-> Axiom today is a deterministic, WASM-first 3D engine substrate with a strict layered spine, a working render path (rotating-cube / stress-cubes / a playable RetroFps-browser FPS), an ECS, scene graph, and deterministic signed-lockstep netcode. It has **no** world generation, terrain, chunk streaming, gameplay systems, or planetary-scale anything. None of that is a defect — those are app/feature concerns by design. This folder enumerates them so they can be built in the right place, in the right order, without violating Axiom's laws.
+> Axiom today is a deterministic, WASM-first 3D engine substrate with a strict layered spine, a working render path (rotating-cube / stress-cubes / a playable retro FPS-browser FPS), an ECS, scene graph, and deterministic signed-lockstep netcode. It has **no** world generation, terrain, chunk streaming, gameplay systems, or planetary-scale anything. None of that is a defect — those are app/feature concerns by design. This folder enumerates them so they can be built in the right place, in the right order, without violating Axiom's laws.
 
 ## The target in one paragraph
 

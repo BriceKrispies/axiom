@@ -451,7 +451,7 @@ One manifest lives in each game crate at `games/<name>/game.toml`:
 
 ```toml
 [game]
-name = "retro_fps"                        # short logical game name (unique)
+name = "retro-fps"                        # short logical game name (unique)
 crate_name = "axiom-game-retro-fps"       # must match the cargo package name
 kind = "rust"                        # "rust" (a crate exposing `fn app() -> App`)
                                      # or "bundle" (a @axiom/game TS bundle)

@@ -75,7 +75,7 @@ export const DEMOS = [
     needsRelay: true,
   },
   {
-    id: "retro_fps",
+    id: "retro-fps",
     title: "retro FPS (first-person)",
     blurb: "Stalk a cube-walled level and shoot the cubes — built on just the engine.",
     desc:
@@ -83,7 +83,7 @@ export const DEMOS = [
       "is scaled cube instances, the camera is the engine's first-person " +
       "controller, and enemies are chasing cube players. Desktop: click to look " +
       "(mouse), WASD to move, click to fire. Touch: ◀ ▶ turn, ▲ ▼ move, FIRE.",
-    dir: "retro_fps",
+    dir: "retro-fps",
     jsModule: "axiom_retro_fps_browser",
     startFn: "retro_fps_start",
     canvasId: "axiom-retro-fps-canvas",

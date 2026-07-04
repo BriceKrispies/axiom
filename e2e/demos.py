@@ -20,7 +20,7 @@ loaded, its canvas, and whether that canvas paints on entry.
 DEMOS = [
     {"id": "rotating-cube", "kind": "windowing3d", "path": "demo.html?id=rotating-cube", "canvas": "#axiom-cube-canvas"},
     {"id": "netplay", "skip": "multiplayer — needs a relay (needsRelay)"},
-    {"id": "retro_fps", "kind": "windowing3d", "path": "demo.html?id=retro_fps", "canvas": "#axiom-retro-fps-canvas"},
+    {"id": "retro-fps", "kind": "windowing3d", "path": "demo.html?id=retro_fps", "canvas": "#axiom-retro-fps-canvas"},
     {"id": "stress-cubes", "kind": "windowing3d", "path": "demo.html?id=stress-cubes", "canvas": "#axiom-stress-canvas"},
     {"id": "growth", "kind": "growth", "path": "growth/index.html", "check_canvas": False},
     {"id": "zanzoban", "kind": "canvas2d_app", "path": "zanzoban/index.html",

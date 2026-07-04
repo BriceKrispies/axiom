@@ -160,7 +160,7 @@ mod tests {
         let game_manifest = GameManifest {
             dir: pkg.dir.clone(),
             game: crate::game_manifest::GameSection {
-                name: "retro_fps".into(),
+                name: "retro-fps".into(),
                 crate_name: "axiom-game-retro-fps".into(),
                 kind: "rust".into(),
                 allowed_layers: vec!["kernel".into()],

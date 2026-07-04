@@ -65,13 +65,13 @@ Worldgen is a **composition** of topology + noise + graph ops → it is a **feat
 | Player edits (dig) mutate cells + emit diffs; edits persist | ❌ | new; mutation + a diff queue (runtime has FIFO queues to model this) | `module:game-world` + app intent wiring |
 | Chunk-edit save/load | ❌ | `Reflect`/`BinaryWriter` make this tractable | later; `module:game-world` |
 
-Streaming is where Axiom's "bake geometry at startup" assumption (proven only by RetroFps/stress-cubes) meets the target's "constantly upload/free chunk meshes." This is the **#1 engine-capability gap**, not just a gameplay gap.
+Streaming is where Axiom's "bake geometry at startup" assumption (proven only by retro FPS/stress-cubes) meets the target's "constantly upload/free chunk meshes." This is the **#1 engine-capability gap**, not just a gameplay gap.
 
 ## 6. Gameplay layers (all downstream, mostly app-owned)
 
 | Need | Status | Gap | Placement |
 |------|--------|-----|-----------|
-| Player avatar + play camera + first-person input | 🟡 | `scene` has an FPS controller primitive; RetroFps proves the loop; **input capture is app `web.rs`, not engine** | `app` (+ optional `feature-module:input` later) |
+| Player avatar + play camera + first-person input | 🟡 | `scene` has an FPS controller primitive; retro FPS proves the loop; **input capture is app `web.rs`, not engine** | `app` (+ optional `feature-module:input` later) |
 | Interaction ray / picking | 🟡 | `math::Ray` + intersect exist; no picking service against world cells | `app` / `module:game-world` |
 | Dig/terraform intents → cell mutation → diff | ❌ | new; model intents on `RuntimeCommandQueue` | `app` → `module:game-world` |
 | Sim-owned inventory | ❌ | new; ECS component columns fit | `app` ECS storage, later a module |
@@ -116,13 +116,13 @@ Growth's defining trait is **content + assembly as data** (pipeline stage order,
 Growth's `sim_core` is ordinary branchy, multi-threaded C++. Putting the equivalent into Axiom **layers/modules** means it must be **branchless and 100%-covered** — a large, sustained tax on tens of thousands of lines of generation/erosion/streaming logic. **Mitigation (central recommendation):** build the world/gameplay in an **app** first (apps are exempt from both gates), prove it, then **graduate** only the stable, genuinely-reusable primitives (noise, geo, icosphere, atlas query) down into modules/layers — paying the branchless/coverage tax only on code that has earned permanence. This is also how Axiom's own slice grew.
 
 **R2 — Dynamic streamed meshes are unproven in Axiom.**
-The target constantly creates/frees chunk meshes and edits their vertices (digging). Axiom's render path is demonstrated with geometry **baked at startup** (RetroFps/stress-cubes vary transforms/instances, not vertex buffers). A real per-frame **upload/free** path through `resources`→`webgpu`→`windowing` (live wgpu buffers) must be designed and proven early — it is a prerequisite for *any* visible streamed terrain, before gameplay matters. Build a "single dynamic chunk mesh that regenerates each second" spike first.
+The target constantly creates/frees chunk meshes and edits their vertices (digging). Axiom's render path is demonstrated with geometry **baked at startup** (retro FPS/stress-cubes vary transforms/instances, not vertex buffers). A real per-frame **upload/free** path through `resources`→`webgpu`→`windowing` (live wgpu buffers) must be designed and proven early — it is a prerequisite for *any* visible streamed terrain, before gameplay matters. Build a "single dynamic chunk mesh that regenerates each second" spike first.
 
 **R3 — No threads; long worldgen must be cooperative.**
 `thread::spawn` is banned in the spine and Axiom is single-threaded-deterministic. Growth's worldgen runs seconds-to-minutes on a worker thread with progress/cancel. On Axiom, worldgen must be a **tick-amortised job** (process N stages/regions per `step`, surface progress, support cancel) or an **offline tool** that bakes an atlas the app loads. Decide this early; it shapes the whole gen architecture. (The determinism upside: a tick-stepped job is trivially replayable.)
 
 **R4 — WASM-first vs the target's desktop assumptions.**
-Axiom's live presentation is the browser (`wasm32` + wgpu). The target (from Growth) assumes a desktop Godot context with large worlds, big RAM, threads, and `res://` assets. Browser memory/threading/asset-delivery constraints are real for an "earth-scale" sim. Confirm the deployment target: native wgpu host, or browser with bounded world size. The RetroFps app shows the browser path *works*; it does not show it at planetary scale.
+Axiom's live presentation is the browser (`wasm32` + wgpu). The target (from Growth) assumes a desktop Godot context with large worlds, big RAM, threads, and `res://` assets. Browser memory/threading/asset-delivery constraints are real for an "earth-scale" sim. Confirm the deployment target: native wgpu host, or browser with bounded world size. The retro FPS app shows the browser path *works*; it does not show it at planetary scale.
 
 **R5 — No queries / no spatial index in ECS.**
 ECS is ordered `BTreeMap` columns with manual filtering and no spatial structure. Chunk lookup, "entities near player," and region location all need spatial indices the engine doesn't provide. Expect to build spatial indexing inside `module:game-world`/`planet-atlas` rather than getting it from ECS. Whether ordered-`BTreeMap` ECS performs at the entity counts an ecology sim wants is **UNCLEAR** and should be benchmarked before committing gameplay-scale entity counts to it.

@@ -32,7 +32,7 @@ impl GameManifest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GameSection {
-    /// Short logical game name (e.g. `"retro_fps"`).
+    /// Short logical game name (e.g. `"retro-fps"`).
     pub name: String,
     /// The actual cargo package name (e.g. `"axiom-game-retro-fps"`).
     pub crate_name: String,
@@ -130,14 +130,14 @@ mod tests {
     fn parses_a_full_game_manifest() {
         let text = r#"
             [game]
-            name = "retro_fps"
+            name = "retro-fps"
             crate_name = "axiom-game-retro-fps"
             kind = "rust"
             allowed_layers = ["kernel", "runtime", "math", "host", "frame"]
             allowed_modules = ["engine", "windowing"]
         "#;
         let g = parse_game_manifest(Path::new("games/retro-fps"), text).unwrap();
-        assert_eq!(g.game.name, "retro_fps");
+        assert_eq!(g.game.name, "retro-fps");
         assert_eq!(g.game.crate_name, "axiom-game-retro-fps");
         assert_eq!(g.game.kind, "rust");
         assert_eq!(g.game.allowed_layers.len(), 5);
@@ -150,7 +150,7 @@ mod tests {
     fn kind_defaults_to_rust() {
         let text = r#"
             [game]
-            name = "retro_fps"
+            name = "retro-fps"
             crate_name = "axiom-game-retro-fps"
         "#;
         let g = parse_game_manifest(Path::new("games/retro-fps"), text).unwrap();
@@ -163,7 +163,7 @@ mod tests {
     fn unknown_field_is_rejected() {
         let text = r#"
             [game]
-            name = "retro_fps"
+            name = "retro-fps"
             crate_name = "axiom-game-retro-fps"
             mystery = true
         "#;

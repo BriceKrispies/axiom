@@ -51,7 +51,7 @@
     "canvas": "axiom-netplay-canvas"
   },
   {
-    "id": "retro_fps",
+    "id": "retro-fps",
     "title": "retro FPS (first-person)",
     "kind": "inline",
     "bundle": "/gallery/axiom-loader.js",

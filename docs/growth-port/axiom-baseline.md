@@ -53,7 +53,7 @@ Legend: ✅ exists and works · 🟡 partial / demo-only · ❌ absent.
 - File: `modules/axiom-resources/src/lib.rs`.
 
 ### `axiom-render`, `axiom-webgpu`, `axiom-render-pipeline`, `axiom-windowing`
-- ✅ Render path: `RenderInput` (camera/meshes/materials/lights/objects) → branchless `RenderCommandList` (`CLEAR/SET_CAMERA/SET_PIPELINE/SET_MESH/SET_MATERIAL/DRAW_INDEXED`) → `GpuSubmission` → `GpuSubmissionReport`. Deterministic **recording** backend always; **live `wgpu`** arm compiled for `wasm32` in `axiom-windowing` (real browser presentation works — see RetroFps).
+- ✅ Render path: `RenderInput` (camera/meshes/materials/lights/objects) → branchless `RenderCommandList` (`CLEAR/SET_CAMERA/SET_PIPELINE/SET_MESH/SET_MATERIAL/DRAW_INDEXED`) → `GpuSubmission` → `GpuSubmissionReport`. Deterministic **recording** backend always; **live `wgpu`** arm compiled for `wasm32` in `axiom-windowing` (real browser presentation works — see retro FPS).
 - ✅ `axiom-render-pipeline` (feature module) composes scene+resources+render+webgpu into a per-frame `submit(...) → RenderReport` (incl. `GL_TO_WGPU` depth remap).
 - ✅ Lighting: directional + point, **basic-lit diffuse only**. ✅ Instancing **backend** proven at scale (stress-cubes ≈ up to 200k cubes).
 - ❌ No frustum culling in the render module (app must pre-filter), one draw per object in the command model, no terrain/PBR/normal-mapped shaders, no shadows.
