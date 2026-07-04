@@ -140,10 +140,26 @@ pub fn generia_start() {
             return;
         }
     };
+    // Canvas2D projects every leaf card on the CPU (single-threaded) — that projection
+    // is ~96% of its frame cost — so the full canopy density (hundreds of cards/tree)
+    // is unplayable there. On the software backend, drop to a low-detail canopy: far
+    // fewer, larger cards. The GPU keeps the full density.
+    let low_detail = low_detail_backend();
+    let foliage = if low_detail {
+        low_detail_foliage(&foliage)
+    } else {
+        foliage
+    };
     let terrain = manifest.terrain.clone();
     // A coarser terrain clone for the streamed window (fewer verts over a big area).
+    // Coarser still on the software backend: it halves the terrain triangle count the
+    // CPU projects AND shrinks the per-chunk-crossing regen spike (the `worst` frame).
     let mut coarse_terrain = terrain.clone();
-    coarse_terrain.spacing_m = TERRAIN_SPACING_M;
+    coarse_terrain.spacing_m = if low_detail {
+        TERRAIN_SPACING_M * 2.0
+    } else {
+        TERRAIN_SPACING_M
+    };
     let manifest = Rc::new(manifest);
 
     let spawn = Pose { x: 0.0, z: 0.0, yaw: 0.0, pitch: -0.05 };
@@ -161,9 +177,13 @@ pub fn generia_start() {
         return;
     }
 
+    // On the software backend, a shorter residency ring cuts *every* draw (trunks +
+    // branches + terrain window), not just foliage — and the fog hides the nearer
+    // view distance. The GPU keeps the full radius.
+    let load_radius = if low_detail { 2 } else { LOAD_RADIUS };
     let world = Rc::new(RefCell::new(WorldApi::new(WorldConfig {
         chunk_size: Meters::finite_or_zero(CHUNK_M),
-        load_radius: LOAD_RADIUS,
+        load_radius,
         margin: MARGIN,
         lod_bands: vec![Meters::finite_or_zero(80.0), Meters::finite_or_zero(160.0)],
     })));
@@ -224,7 +244,7 @@ pub fn generia_start() {
                     *lf = Some(focus);
                     let cx = (focus.0 as f32 + 0.5) * CHUNK_M;
                     let cz = (focus.1 as f32 + 0.5) * CHUNK_M;
-                    let radius = (LOAD_RADIUS as f32 + 1.0) * CHUNK_M;
+                    let radius = (load_radius as f32 + 1.0) * CHUNK_M;
                     Some(terrain_window_mesh(
                         &coarse_terrain,
                         &manifest.fog,
@@ -393,6 +413,31 @@ fn agent_preference() -> bool {
         .and_then(|w| w.location().search().ok())
         .map(|s| s.contains("agent=1"))
         .unwrap_or(false)
+}
+
+/// Whether the Canvas2D software backend was explicitly selected
+/// (`?backend=canvas2d`) — the low-power path that projects every card on the CPU, so
+/// it gets the thinned canopy. The GPU cascade (no `?backend`, or webgpu/webgl2) keeps
+/// the full-density foliage.
+fn low_detail_backend() -> bool {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .map(|s| s.contains("backend=canvas2d"))
+        .unwrap_or(false)
+}
+
+/// A drastically thinned canopy for the Canvas2D software backend. The leaf-card count
+/// (`branches * leaves_per_branch`, plus the loose `cards_per_tree`/`understory_cards`)
+/// is the projection hog — ~96% of the Canvas2D frame — so cut it hard and enlarge each
+/// remaining card so the canopy still reads as a coloured mass at 240×150.
+fn low_detail_foliage(f: &Foliage) -> Foliage {
+    let mut lo = f.clone();
+    lo.branches = (f.branches / 2).max(2);
+    lo.leaves_per_branch = (f.leaves_per_branch / 8).max(3);
+    lo.cards_per_tree = (f.cards_per_tree / 4).max(2);
+    lo.understory_cards = 0;
+    lo.card_scale = f.card_scale * 1.8;
+    lo
 }
 
 /// The deterministic waypoint ring the agent circles (a big loop through the
