@@ -34,6 +34,16 @@ use crate::material::Material;
 use crate::mesh::Mesh;
 use crate::mesh_data::{MeshData, MeshDataError};
 use crate::mesh_geometry::{mesh_data_geometry, mesh_geometry};
+use crate::texture::Texture;
+
+/// Why app-supplied texture pixels are not valid renderable data. Returned by
+/// [`RunningApp::add_texture_data`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextureDataError {
+    /// Zero width/height, or the pixel buffer length is not exactly
+    /// `width * height * 4` (RGBA8, row-major).
+    Malformed,
+}
 
 impl RunningApp {
     /// Register `mesh` into the running app's resolved-geometry store and return a
@@ -75,6 +85,33 @@ impl RunningApp {
         let id = self.materials.len() as u64 + 1;
         self.materials.push((id, material));
         Handle::new(id)
+    }
+
+    /// Register an app-authored raw-pixel albedo texture — `width * height` RGBA8
+    /// pixels (row-major, 4 bytes/pixel) — into the running app's custom-texture
+    /// store and return a stable [`Handle<Texture>`] whose 1-based id a
+    /// [`Material::with_custom_texture`] references. This is the raw-pixel
+    /// counterpart to [`Self::add_mesh_data`] for geometry: it lets an app supply
+    /// hand-authored textures the built-in [`Texture`] enum cannot express. The
+    /// pixels are resolved by `material_textures` and reach every backend (the same
+    /// upload lane the built-in textures use). Malformed input (zero dimensions or
+    /// a pixel buffer that is not exactly `width * height * 4` bytes) returns
+    /// [`TextureDataError::Malformed`] and registers nothing.
+    pub fn add_texture_data(
+        &mut self,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    ) -> Result<Handle<Texture>, TextureDataError> {
+        let expected = width as usize * height as usize * 4;
+        let ok = (width > 0) & (height > 0) & (pixels.len() == expected);
+        ok.then_some(())
+            .map(|()| {
+                let id = self.custom_textures.len() as u64 + 1;
+                self.custom_textures.push((id, width, height, pixels));
+                Handle::new(id)
+            })
+            .ok_or(TextureDataError::Malformed)
     }
 
     /// Spawn a directional-light node carrying `transform` and return its
@@ -291,6 +328,63 @@ mod tests {
         );
         assert_eq!(app.add_mesh_data(bad), Err(MeshDataError::IndexOutOfRange));
         assert!(app.mesh_set().is_empty(), "a rejected mesh registers nothing");
+    }
+
+    #[test]
+    fn add_texture_data_registers_pixels_surfaced_by_material_textures() {
+        let mut app = empty_render_app();
+        // A 1x2 texture: one red texel, one green texel (8 RGBA8 bytes).
+        let tex = app
+            .add_texture_data(1, 2, vec![255, 0, 0, 255, 0, 255, 0, 255])
+            .expect("well-formed pixels register");
+        let material = app.add_material(
+            Material::lit(Color::linear_rgb(ch(1.0), ch(1.0), ch(1.0))).with_custom_texture(tex.id()),
+        );
+        // Spawn + tick a renderable with the custom-textured material, so the
+        // per-frame material build (which reports the texture id) runs it.
+        let cube = app.add_mesh(Mesh::cube());
+        app.spawn(Spawn::new(Transform::IDENTITY, cube, material));
+        assert_eq!(app.tick(0).draws().len(), 1, "the custom-textured mesh renders");
+        // The material set carries the app's custom pixels for that material id,
+        // not the untextured 1x1 white default.
+        let set = app.material_textures();
+        let entry = set
+            .iter()
+            .find(|(id, _, _, _)| *id == material.id())
+            .expect("the material is in the set");
+        assert_eq!((entry.1, entry.2), (1, 2), "authored dimensions surface");
+        assert_eq!(entry.3, vec![255, 0, 0, 255, 0, 255, 0, 255], "authored pixels surface");
+        // An untextured material still gets the 1x1 white fallback.
+        let plain = app.add_material(Material::lit(Color::linear_rgb(ch(0.5), ch(0.5), ch(0.5))));
+        let plain_entry = app
+            .material_textures()
+            .into_iter()
+            .find(|(id, _, _, _)| *id == plain.id())
+            .expect("plain material present");
+        assert_eq!((plain_entry.1, plain_entry.2, plain_entry.3), (1, 1, vec![255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn add_texture_data_rejects_malformed_and_registers_nothing() {
+        let mut app = empty_render_app();
+        // Zero dimension.
+        assert_eq!(app.add_texture_data(0, 4, vec![]), Err(TextureDataError::Malformed));
+        // Pixel buffer length != width*height*4.
+        assert_eq!(app.add_texture_data(2, 2, vec![0; 8]), Err(TextureDataError::Malformed));
+        // A rejected texture registers nothing: the next valid one still gets id 1,
+        // and a material referencing it resolves the authored pixels.
+        let tex = app
+            .add_texture_data(1, 1, vec![9, 8, 7, 255])
+            .expect("valid pixels register");
+        assert_eq!(tex.id(), 1, "no phantom ids from rejected textures");
+        let material =
+            app.add_material(Material::lit(Color::WHITE).with_custom_texture(tex.id()));
+        let entry = app
+            .material_textures()
+            .into_iter()
+            .find(|(id, _, _, _)| *id == material.id())
+            .expect("material present");
+        assert_eq!(entry.3, vec![9, 8, 7, 255]);
     }
 
     #[test]

@@ -17,8 +17,7 @@ use axiom_gallery::soccer_penalty::SoccerPenaltyApp;
 /// pass: the crowd is now 3 stacked rows of 26 cards (78) rather than 9, the
 /// kicker is an 11-part posed figure — neck + hair added — rather than 9 boxes,
 /// and the ball carries 6 dark panel spots rather than 2.)
-// The kicker is now the articulated 13-part figure (was an 11-box puppet): +2.
-const EXPECTED_OBJECT_COUNT: usize = 175;
+const EXPECTED_OBJECT_COUNT: usize = 211;
 
 #[test]
 fn build_is_fully_deterministic() {
@@ -58,7 +57,7 @@ fn camera_config_is_deterministic_and_fixed() {
     // Behind the kicker (positive Z), elevated, aimed at the goal (lower Z).
     assert!(cam.eye.z > cam.target.z, "camera must sit behind its target");
     assert!(cam.eye.y > cam.target.y, "camera must be elevated above its target");
-    assert_eq!(cam.fov_y_degrees, 44.0);
+    assert_eq!(cam.fov_y_degrees, 29.0);
     // Forward points toward the goal (-Z).
     assert!(cam.forward().z < 0.0);
 }
@@ -102,7 +101,6 @@ fn all_required_scene_elements_are_present() {
         DioramaRole::PenaltySpot,
         DioramaRole::GoalFrame,
         DioramaRole::RearNet,
-        DioramaRole::FrontNet,
         DioramaRole::Kicker,
         DioramaRole::Ball,
         DioramaRole::Goalie,

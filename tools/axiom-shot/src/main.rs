@@ -256,15 +256,21 @@ fn nova_roll_app() -> App {
 /// renderable apps are added here (and as a Cargo dependency). `level` (when set)
 /// is a path to a `level.axiom` document for the retro FPS app (else its built-in
 /// default level is used).
-fn build_app(name: &str, level: Option<&str>) -> RunningApp {
+fn build_app(name: &str, level: Option<&str>, shot_tick: Option<u32>) -> RunningApp {
     match name {
-        "retro_fps" => axiom_gallery::retro_fps::build_retro_fps_app(&retro_fps_doc(level)).0,
+        "retro_fps" => axiom_game_retro_fps::build_retro_fps_app(&retro_fps_doc(level)).0,
         "showcase" => showcase_app().build(),
         "nova-roll" => nova_roll_app().build(),
         "physics-crucible" => axiom_gallery::physics_crucible::build_physics_crucible(),
-        "soccer-penalty" => axiom_gallery::soccer_penalty::penalty_render_meshed::soccer_meshed_app(
-            axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_stage1(),
-        ),
+        "soccer-penalty" => {
+            // `--shot-tick N` renders a scripted power shot N ticks in (so the
+            // kicker's kick animation + ball flight + keeper dive are visible);
+            // without it, the static stage-1 diorama (aiming at rest).
+            let diorama = shot_tick
+                .map(|n| axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_frame(&soccer_shot_state(n)))
+                .unwrap_or_else(axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_stage1);
+            axiom_gallery::soccer_penalty::penalty_render_meshed::soccer_meshed_app(diorama)
+        }
         other => {
             eprintln!("axiom-shot: unknown --app '{other}', falling back to 'showcase'");
             showcase_app().build()
@@ -272,14 +278,31 @@ fn build_app(name: &str, level: Option<&str>) -> RunningApp {
     }
 }
 
+/// The soccer interaction state `shot_tick` ticks into a standard centred power
+/// shot: hold to charge for a few ticks, release, then let the ball fly.
+fn soccer_shot_state(shot_tick: u32) -> axiom_gallery::soccer_penalty::PenaltyInteractionState {
+    use axiom_gallery::soccer_penalty::{PenaltyInputIntent, PenaltyInteractionState};
+    const CHARGE_TICKS: u32 = 8;
+    (0..shot_tick).fold(PenaltyInteractionState::start(), |s, t| {
+        let intent = if t < CHARGE_TICKS {
+            PenaltyInputIntent::charging(0, 0)
+        } else if t == CHARGE_TICKS {
+            PenaltyInputIntent::releasing()
+        } else {
+            PenaltyInputIntent::neutral()
+        };
+        s.advance(intent)
+    })
+}
+
 /// The retro FPS level document for `--level PATH` (else the built-in default). Shared
 /// by `build_app` and the `--pose` teleport path so both read the same level.
-fn retro_fps_doc(level: Option<&str>) -> axiom_gallery::retro_fps::level::LevelDoc {
+fn retro_fps_doc(level: Option<&str>) -> axiom_game_retro_fps::level::LevelDoc {
     match level {
-        Some(path) => axiom_gallery::retro_fps::level::LevelDoc::parse(
+        Some(path) => axiom_game_retro_fps::level::LevelDoc::parse(
             &std::fs::read_to_string(path).expect("read --level file"),
         ),
-        None => axiom_gallery::retro_fps::level::LevelDoc::default(),
+        None => axiom_game_retro_fps::level::LevelDoc::default(),
     }
 }
 
@@ -360,7 +383,7 @@ fn main() {
     let teleport = match (app.as_str(), flag(&args, "--pose").as_deref().and_then(parse_pose)) {
         ("retro_fps", Some((x, z, yaw, pitch))) => {
             let mut game =
-                axiom_gallery::retro_fps::RetroFpsGame::from_level(&retro_fps_doc(flag(&args, "--level").as_deref()));
+                axiom_game_retro_fps::RetroFpsGame::from_level(&retro_fps_doc(flag(&args, "--level").as_deref()));
             Some(game.teleport(x, z, yaw, pitch))
         }
         _ => None,
@@ -368,7 +391,8 @@ fn main() {
 
     // Drive the engine to `render_tick`, applying the scripted control for each
     // tick (controller 0). The meshes are static, so they are pulled once.
-    let mut running = build_app(&app, flag(&args, "--level").as_deref());
+    let shot_tick = flag(&args, "--shot-tick").and_then(|s| s.parse::<u32>().ok());
+    let mut running = build_app(&app, flag(&args, "--level").as_deref(), shot_tick);
     let meshes = running.mesh_set();
     let materials = running.material_textures();
     let mut outcome = None;
@@ -384,10 +408,14 @@ fn main() {
     }
     let outcome = outcome.expect("at least one frame is ticked");
 
+    // The soccer-penalty app carries a retro 32-bit render profile: it drives the low-res +
+    // nearest-upscale champion and the colour-depth quantize + dither. Others native.
+    let retro_32bit = (app == "soccer-penalty").then(axiom_host::FrameRetro32BitProfile::retro_32bit);
+
     // Render through the requested backend and read the pixels back.
     let (pixels, w, h) = match backend.as_str() {
         "canvas2d" | "canvas" => render_canvas2d(&meshes, &outcome, quality),
-        _ => render_gpu(&meshes, &materials, &outcome),
+        _ => render_gpu(&meshes, &materials, &outcome, retro_32bit),
     };
 
     write_png(&out, &pixels, w, h);
@@ -402,6 +430,7 @@ fn render_gpu(
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     outcome: &FrameOutcome,
+    retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
 ) -> (Vec<u8>, u32, u32) {
     let batches = outcome.mesh_batches();
     let lights: Vec<(u32, [f32; 3], [f32; 3], f32)> = outcome
@@ -421,6 +450,7 @@ fn render_gpu(
         outcome.clear_color(),
         outcome.sdf_scene(),
         axiom_host::FrameAmbient::default_hemisphere(),
+        retro_32bit,
     )
     .expect("a native GPU adapter is required to render a GPU screenshot");
     (pixels, WIDTH, HEIGHT)

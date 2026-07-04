@@ -17,9 +17,7 @@ use axiom_math::Vec3;
 /// with the visual-convergence pass: the crowd is now 3 stacked rows of 26 cards
 /// (78) instead of a single row of 9, the kicker is an 11-part posed figure, and
 /// the ball carries 6 dark panels instead of 2.
-// The kicker is now the articulated 13-part figure (was an 11-box puppet), so
-// the diorama carries two more objects.
-const EXPECTED_RENDER_ITEMS: usize = 181;
+const EXPECTED_RENDER_ITEMS: usize = 217;
 
 fn plan() -> PenaltyRenderPlan {
     SoccerPenaltyApp::build_stage1().render_plan
@@ -141,24 +139,19 @@ fn render_items_are_a_total_sorted_order() {
     // the appended HUD items.
     let world = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::World { .. })).count();
     let hud = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::Hud { .. })).count();
-    assert_eq!(world, 175);
+    assert_eq!(world, 211);
     assert_eq!(hud, 6);
 }
 
 #[test]
-fn rear_net_renders_before_actors_and_front_net_after() {
+fn net_pocket_renders_behind_the_actors() {
     let p = plan();
-    let (rear_lo, rear_hi) = index_span(&p, "net.rear").expect("rear net exists");
-    let (front_lo, front_hi) = index_span(&p, "net.front").expect("front net exists");
+    // The net is now a real rear pocket (back/top/side planes, all RearNet); the
+    // keeper stands in front of it, so the whole net renders before every actor.
+    let (net_lo, net_hi) = index_span(&p, "net.").expect("net exists");
     let (actor_lo, actor_hi) = actor_index_range(&p);
-
-    // Rear net entirely before every actor.
-    assert!(rear_hi < actor_lo, "rear net must render before the goalie/ball/kicker");
-    // Front net entirely after every actor.
-    assert!(front_lo > actor_hi, "front net must render after the goalie/ball/kicker");
-    // Sanity: the two net panels don't interleave.
-    assert!(rear_hi < front_lo, "rear net must precede front net");
-    let _ = (rear_lo, front_hi);
+    assert!(net_hi < actor_lo, "the net pocket must render before the goalie/ball/kicker");
+    let _ = (net_lo, actor_hi);
 }
 
 #[test]
@@ -192,8 +185,9 @@ fn hud_renders_after_all_world_items() {
 fn high_level_bucket_order_is_fixed() {
     let p = plan();
     // background/crowd/stadium → field → rear net → goal/shadows/actors/ball/
-    // kicker → front net → HUD. (Background and ForegroundEffects are reserved
-    // and empty in Pass 2, so they don't appear.)
+    // kicker → HUD. The net is now a single rear pocket (no FrontNet items), and
+    // Background/ForegroundEffects are reserved and empty in Pass 2, so none of
+    // those layers appear.
     assert_eq!(
         p.distinct_layers_in_order(),
         vec![
@@ -207,7 +201,6 @@ fn high_level_bucket_order_is_fixed() {
             PenaltyDrawLayer::Goalie,
             PenaltyDrawLayer::Ball,
             PenaltyDrawLayer::Kicker,
-            PenaltyDrawLayer::FrontNet,
             PenaltyDrawLayer::Hud,
         ]
     );

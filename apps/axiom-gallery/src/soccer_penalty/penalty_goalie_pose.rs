@@ -11,7 +11,7 @@
 //! arrays, nearest-frame clip sampling, and no wall-clock time, randomness, or
 //! maps.
 
-use axiom_math::{Transform, Vec3};
+use axiom_math::{Quat, Transform, Vec3};
 
 use crate::soccer_penalty::penalty_goalie::PenaltyGoalieVolumeSet;
 use crate::soccer_penalty::penalty_materials::PenaltyMaterialId;
@@ -153,11 +153,11 @@ const PART_MATERIAL: [PenaltyMaterialId; 16] = [
     PenaltyMaterialId::GoalieJerseyYellow, // RightForearm
     PenaltyMaterialId::GoalieGloves,       // RightHand
     PenaltyMaterialId::GoalieShortsBlack,  // LeftThigh
-    PenaltyMaterialId::GoalieShortsBlack,  // LeftShin
-    PenaltyMaterialId::GoalieShortsBlack,  // LeftFoot
+    PenaltyMaterialId::GoalieSocks,        // LeftShin
+    PenaltyMaterialId::GoalieShoes,        // LeftFoot
     PenaltyMaterialId::GoalieShortsBlack,  // RightThigh
-    PenaltyMaterialId::GoalieShortsBlack,  // RightShin
-    PenaltyMaterialId::GoalieShortsBlack,  // RightFoot
+    PenaltyMaterialId::GoalieSocks,        // RightShin
+    PenaltyMaterialId::GoalieShoes,        // RightFoot
 ];
 
 const PART_LABELS: [&str; 16] = [
@@ -199,10 +199,47 @@ pub struct PenaltyGoaliePose {
 }
 
 impl PenaltyGoaliePose {
-    /// The idle / ready rest pose.
+    /// The idle / ready rest pose (translation-only locals). The idle pose is left
+    /// un-rotated on purpose: the Pass-6 save volumes ride these part world
+    /// positions, so re-posing the idle would move the deterministic save geometry
+    /// — a gameplay change out of scope for a visual-silhouette pass. The goalie's
+    /// silhouette still improves via angular box meshes + sock/shoe materials +
+    /// hair, none of which move a joint. A render-only posed overlay (decoupled
+    /// from the collision rig) is the correct future path to an arms-out stance.
     pub fn idle() -> Self {
         let mut local = [Transform::IDENTITY; 16];
         (0..16).for_each(|i| local[i] = Transform::from_translation(IDLE_LOCAL[i]));
+        Self { local }
+    }
+
+    /// A **render-only** ready stance: the keeper's arms spread out to the sides
+    /// (elbows slightly bent) and knees bent into a crouch, matching the
+    /// reference's set keeper. This is deliberately decoupled from [`Self::idle`]
+    /// — the Pass-6 save volumes keep riding the un-rotated `idle` rig, so this
+    /// pose changes only the visual silhouette, never the deterministic save
+    /// geometry (the dive clips are separate). Used by the static diorama emit.
+    pub fn idle_display() -> Self {
+        let mut local = [Transform::IDENTITY; 16];
+        (0..16).for_each(|i| local[i] = Transform::from_translation(IDLE_LOCAL[i]));
+        // (part-ordinal, euler x, y, z) — arms out + forward, elbows bent, knees crouched.
+        [
+            (4_usize, 0.2_f32, 0.0_f32, -1.15_f32), // left upper arm — out to the side
+            (7, 0.2, 0.0, 1.15),                    // right upper arm — out to the side
+            (5, 0.45, 0.0, -0.15),                  // left forearm — bent up/forward
+            (8, 0.45, 0.0, 0.15),                   // right forearm
+            (10, 0.28, 0.0, -0.12),                 // left thigh — slight splay + forward
+            (13, 0.28, 0.0, 0.12),                  // right thigh
+            (11, -0.5, 0.0, 0.0),                   // left shin — knee bent
+            (14, -0.5, 0.0, 0.0),                   // right shin
+        ]
+        .iter()
+        .for_each(|&(i, x, y, z)| {
+            local[i] = Transform::new(
+                IDLE_LOCAL[i],
+                Quat::from_euler_xyz(x, y, z),
+                Vec3::new(1.0, 1.0, 1.0),
+            );
+        });
         Self { local }
     }
 

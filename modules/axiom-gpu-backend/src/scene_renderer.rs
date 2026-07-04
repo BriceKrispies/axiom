@@ -52,6 +52,10 @@ struct ShadowU { light_vp: mat4x4<f32> };
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
+    // Perspective-correct UV. (An affine `@interpolate(linear)` "swim" reads more
+    // retro 32-bit, but compiles to a `noperspective` qualifier the WebGL2 GLSL target
+    // rejects — it panics pipeline creation on the browser's downlevel path — so
+    // the UV stays perspective-correct; nearest filtering carries the retro 32-bit look.)
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
     @location(3) world_pos: vec3<f32>,
@@ -1214,10 +1218,10 @@ fn upload_material(
         address_mode_u: wgpu::AddressMode::Repeat,
         address_mode_v: wgpu::AddressMode::Repeat,
         address_mode_w: wgpu::AddressMode::Repeat,
-        // Linear filtering so the leaf-alpha material's soft edge reads smooth, not
-        // blocky. The solid-colour materials (2x2 white) are unaffected by the filter.
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
+        // Nearest filtering for crunchy retro 32-bit texels (hard, un-smoothed texture
+        // pixels). Solid-colour materials (1x1 white) are unaffected by the filter.
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
         mipmap_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });

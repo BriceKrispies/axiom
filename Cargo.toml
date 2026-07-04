@@ -66,7 +66,9 @@ members = [
     "modules/axiom-forest",
     "modules/axiom-tween",
     "modules/axiom-tick",
+    "modules/axiom-animation",
     "modules/axiom",
+    "apps/axiom-animation-lab",
     "apps/axiom-demo-rotating-cube",
     # The demo gallery: every browser/WASM demo (rotating-cube, netplay, retro_fps,
     # stress-cubes, growth, zanzoban, quintet, physics-crucible, debug-overlay

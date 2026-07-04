@@ -6,7 +6,7 @@
 //! ball + ball-shadow objects and appends any trail samples, derives the HUD
 //! from the interaction state (Pass 4), and produces the ordered render plan.
 
-use axiom_math::Vec3;
+use axiom_math::{Quat, Vec3};
 
 use crate::soccer_penalty::low_poly_assets::PrimitiveShape;
 use crate::soccer_penalty::penalty_ball::PenaltyBallPose;
@@ -213,6 +213,7 @@ fn append_effect_items(objects: &mut Vec<DioramaObject>, desc: &PenaltyEffectDes
     desc.foreground.iter().for_each(|it| {
         let id = ObjectId(objects.len() as u32);
         objects.push(DioramaObject {
+            rotation: Quat::IDENTITY,
             id,
             role: DioramaRole::ImpactEffect,
             shape: PrimitiveShape::Quad,
@@ -233,6 +234,7 @@ fn append_wobble_nodes(
     nodes.iter().for_each(|n| {
         let id = ObjectId(objects.len() as u32);
         objects.push(DioramaObject {
+            rotation: Quat::IDENTITY,
             id,
             role,
             shape: PrimitiveShape::Line,
@@ -265,6 +267,7 @@ fn append_goalie_debug(
     markers.iter().enumerate().for_each(|(i, v)| {
         let (hx, hy) = debug_extent(v);
         objects.push(DioramaObject {
+            rotation: Quat::IDENTITY,
             id: ObjectId(base + i as u32),
             role: DioramaRole::GoalieDebugVolume,
             shape: PrimitiveShape::Quad,
@@ -324,6 +327,7 @@ fn append_trail(objects: &mut Vec<DioramaObject>, pose: &PenaltyBallPose) {
         let fade = 1.0 - (i as f32 / (pose.trail_len as f32 + 1.0));
         let s = BALL_RADIUS * 0.8 * fade;
         objects.push(DioramaObject {
+            rotation: Quat::IDENTITY,
             id: ObjectId(base + i as u32),
             role: DioramaRole::BallTrail,
             shape: crate::soccer_penalty::low_poly_assets::PrimitiveShape::Quad,

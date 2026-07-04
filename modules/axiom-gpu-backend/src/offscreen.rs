@@ -8,6 +8,7 @@
 //! separate copy that can drift.
 
 use crate::scene_renderer::{create_depth_view, SceneRenderer};
+use crate::upscale::UpscaleBlit;
 
 /// The off-screen colour target format (matches the live arm's sRGB output).
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -31,9 +32,13 @@ pub(crate) fn render_to_rgba(
     clear: [f32; 4],
     sdf: Option<&axiom_host::SdfScene>,
     ambient: axiom_host::FrameAmbient,
+    retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
 ) -> Option<Vec<u8>> {
     let width = width.max(1);
     let height = height.max(1);
+    // The retro 32-bit profile drives the low-res internal target (its internal resolution)
+    // and the colour-depth quantize + ordered dither applied to the readback.
+    let internal = retro_32bit.map(|p| (p.internal_width(), p.internal_height()));
 
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -66,7 +71,6 @@ pub(crate) fn render_to_rgba(
         view_formats: &[],
     });
     let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let depth_view = create_depth_view(&device, width, height);
 
     let max_instances: u32 = batches.iter().map(|(_, _, _, count)| *count).sum();
     // The off-screen screenshot path is a verification tool, not a live mobile
@@ -84,17 +88,43 @@ pub(crate) fn render_to_rgba(
         shadow_size,
         ambient,
     );
-    renderer.record(
-        &device,
-        &queue,
-        &color_view,
-        &depth_view,
-        lights,
-        light_view_proj,
-        batches,
-        clear,
-        sdf,
-    );
+
+    // A retro 32-bit profile renders the scene into a small internal target and then a
+    // nearest blit upscales it to the full readback texture (chunky pixels); with
+    // no internal size the scene renders directly at full resolution (unchanged).
+    match internal.map(|(iw, ih)| (iw.max(1), ih.max(1))) {
+        None => {
+            let depth_view = create_depth_view(&device, width, height);
+            renderer.record(
+                &device, &queue, &color_view, &depth_view, lights, light_view_proj, batches,
+                clear, sdf,
+            );
+        }
+        Some((iw, ih)) => {
+            let scene_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("axiom-offscreen-scene"),
+                size: wgpu::Extent3d { width: iw, height: ih, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: COLOR_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let scene_view = scene_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let depth_view = create_depth_view(&device, iw, ih);
+            renderer.record(
+                &device, &queue, &scene_view, &depth_view, lights, light_view_proj, batches,
+                clear, sdf,
+            );
+            let blit = UpscaleBlit::new(&device, COLOR_FORMAT, &scene_view, wgpu::FilterMode::Nearest);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("axiom-offscreen-upscale"),
+            });
+            blit.record(&mut encoder, &color_view);
+            queue.submit(std::iter::once(encoder.finish()));
+        }
+    }
 
     // Read the colour texture back through a row-aligned staging buffer.
     let unpadded_row = width * 4;
@@ -144,5 +174,23 @@ pub(crate) fn render_to_rgba(
     });
     drop(mapped);
     readback.unmap();
+    // retro 32-bit colour-depth quantize + ordered dither on the finished RGBA — the shared
+    // host post (canvas2d + the live WGSL mirror the same numbers). Built from a
+    // minimal packet carrying just the profile.
+    retro_32bit.into_iter().for_each(|p| {
+        let packet = axiom_host::FramePacket::new(
+            0,
+            0,
+            axiom_host::FrameViewport::new(width, height),
+            clear,
+            None,
+            Vec::new(),
+            Vec::new(),
+            [0.0; 16],
+            axiom_host::FrameFeatureSet::new(false, false, 0, 0),
+        )
+        .with_retro_32bit_profile(p);
+        axiom_host::apply_frame_retro_32bit(&mut pixels, width, height, &packet);
+    });
     Some(pixels)
 }

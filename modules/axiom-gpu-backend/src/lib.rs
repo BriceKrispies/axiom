@@ -53,9 +53,10 @@ mod surface_recovery;
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod scene_renderer;
 
-// Upscale-blit pipeline presenting a reduced-resolution render target to the
-// swapchain (the mobile-first render-scale path). Only the live binding uses it.
-#[cfg(target_arch = "wasm32")]
+// Upscale-blit pipeline presenting a reduced-resolution render target: the live
+// binding's mobile-first render-scale path, and the offscreen retro 32-bit low-res +
+// nearest upscale. Available wherever a real GPU renders (wasm32 / offscreen).
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod upscale;
 
 // The real wgpu swap-chain binding.

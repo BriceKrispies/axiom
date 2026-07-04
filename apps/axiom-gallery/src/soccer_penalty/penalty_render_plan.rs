@@ -35,7 +35,7 @@
 //! Materials and shading never affect the sort key, so ordering stays exactly
 //! as Pass 2 defined it.
 
-use axiom_math::Vec3;
+use axiom_math::{Quat, Vec3};
 
 use crate::soccer_penalty::low_poly_assets::{PrimitiveShape, Rgba, WORLD_UP};
 use crate::soccer_penalty::penalty_hud::PenaltyHudModel;
@@ -179,6 +179,9 @@ pub enum PenaltyRenderContent {
         role: DioramaRole,
         shape: PrimitiveShape,
         position: Vec3,
+        /// Local orientation about the primitive's center (identity for axis-aligned
+        /// objects; posed for humanoid-kit limbs).
+        rotation: Quat,
         size: Vec3,
         /// The named material this primitive uses (base color in the palette).
         material: PenaltyMaterialId,
@@ -287,6 +290,7 @@ impl PenaltyRenderPlan {
                         role: o.role,
                         shape: o.shape,
                         position: o.position,
+                        rotation: o.rotation,
                         size: o.size,
                         material: o.material,
                         shaded_color: style_pass.shade(&mat, WORLD_UP),

@@ -61,8 +61,8 @@ pub mod palette {
     // --- field & markings ---
     // Stronger light/dark contrast so the mown bands read as pronounced stripes
     // (they were near-identical and looked flat/minty), and a warmer light band.
-    pub const GRASS_LIGHT: Rgba = Rgba::rgb(0.27, 0.66, 0.25);
-    pub const GRASS_DARK: Rgba = Rgba::rgb(0.12, 0.45, 0.16);
+    pub const GRASS_LIGHT: Rgba = Rgba::rgb(0.34, 0.55, 0.22);
+    pub const GRASS_DARK: Rgba = Rgba::rgb(0.22, 0.41, 0.15);
     pub const LINE_WHITE: Rgba = Rgba::rgb(0.95, 0.97, 0.95);
 
     // --- goal & net ---

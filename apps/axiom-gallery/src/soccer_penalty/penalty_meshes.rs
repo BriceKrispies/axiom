@@ -40,7 +40,10 @@ pub fn unit_cube() -> MeshData {
         for (k, corner) in corners.iter().enumerate() {
             positions.push(*corner);
             normals.push(normal);
-            uvs.push(Vec2::new((k == 1 || k == 2) as u32 as f32, (k >= 2) as u32 as f32));
+            // V is 0 at the TOP of the face (image convention: texture row 0 is the
+            // top), so text decals (the jersey number, the AXIOM board) read upright
+            // rather than vertically flipped. k=0,1 are the face's bottom edge.
+            uvs.push(Vec2::new((k == 1 || k == 2) as u32 as f32, (k < 2) as u32 as f32));
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }

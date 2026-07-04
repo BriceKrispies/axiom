@@ -56,20 +56,22 @@ pub(crate) struct UpscaleBlit {
 
 impl UpscaleBlit {
     /// Build the blit for a `source_view` (the intermediate colour target) to a
-    /// swapchain of `target_format`. The linear sampler is what upscales.
+    /// swapchain of `target_format`. The `filter` chooses the upscale character:
+    /// `Linear` smooths, `Nearest` gives hard retro 32-bit-style chunky pixels.
     pub(crate) fn new(
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
         source_view: &wgpu::TextureView,
+        filter: wgpu::FilterMode,
     ) -> UpscaleBlit {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("axiom-upscale-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mag_filter: filter,
+            min_filter: filter,
+            mipmap_filter: filter,
             ..Default::default()
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

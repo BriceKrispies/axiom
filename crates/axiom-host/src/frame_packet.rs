@@ -268,6 +268,7 @@ pub struct FramePacket {
     volumetrics: Option<crate::frame_volumetrics::FrameVolumetrics>,
     ambient: Option<crate::frame_ambient::FrameAmbient>,
     postprocess: Option<crate::frame_postprocess::FramePostProcess>,
+    retro_32bit: Option<crate::frame_retro_32bit::FrameRetro32BitProfile>,
 }
 
 impl FramePacket {
@@ -300,6 +301,7 @@ impl FramePacket {
             volumetrics: None,
             ambient: None,
             postprocess: None,
+            retro_32bit: None,
         }
     }
 
@@ -364,6 +366,23 @@ impl FramePacket {
     /// none.
     pub const fn postprocess(&self) -> Option<&crate::frame_postprocess::FramePostProcess> {
         self.postprocess.as_ref()
+    }
+
+    /// Attach a retro 32-bit render profile to this frame. It is neutral frame data: the
+    /// CPU-readback backends apply [`crate::apply_frame_retro_32bit`] (colour quantize +
+    /// dither) to their output, and every backend reads the profile's fog / snap /
+    /// internal-resolution fields for its geometry/target stages, so the
+    /// retro 32-bit console look reads consistently regardless of renderer. A packet
+    /// without one (the default) is presented at full fidelity.
+    #[must_use]
+    pub fn with_retro_32bit_profile(mut self, retro_32bit: crate::frame_retro_32bit::FrameRetro32BitProfile) -> Self {
+        self.retro_32bit = Some(retro_32bit);
+        self
+    }
+
+    /// The frame's retro 32-bit render profile, or `None` when the frame carries none.
+    pub const fn retro_32bit(&self) -> Option<&crate::frame_retro_32bit::FrameRetro32BitProfile> {
+        self.retro_32bit.as_ref()
     }
 
     /// The frame index this packet presents.
@@ -575,6 +594,16 @@ mod tests {
         let pp = crate::frame_postprocess::FramePostProcess::cinematic();
         let with = base.clone().with_postprocess(pp);
         assert_eq!(with.postprocess(), Some(&pp));
+        assert_ne!(with, base);
+    }
+
+    #[test]
+    fn with_retro_32bit_profile_attaches_and_breaks_equality() {
+        let base = sample_packet();
+        assert!(base.retro_32bit().is_none());
+        let retro_32bit = crate::frame_retro_32bit::FrameRetro32BitProfile::retro_32bit();
+        let with = base.clone().with_retro_32bit_profile(retro_32bit);
+        assert_eq!(with.retro_32bit(), Some(&retro_32bit));
         assert_ne!(with, base);
     }
 

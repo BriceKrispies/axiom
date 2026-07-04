@@ -50,6 +50,7 @@ mod dynamic_world;
 /// `set_camera`) — growing the live world a piece at a time after the app is
 /// running.
 mod authoring;
+pub use authoring::TextureDataError;
 
 /// The per-frame `tick` family.
 mod frame;
@@ -257,6 +258,11 @@ pub struct RunningApp {
     // surface (emissive/roughness/opacity) all reach the render path.
     meshes: Vec<(u64, MeshGeometry)>,
     materials: Vec<(u64, Material)>,
+    // App-authored raw-pixel albedo textures `(id, width, height, RGBA8)`,
+    // registered at runtime via `add_texture_data` and resolved by
+    // `material_textures` when a material references one. The setup closure cannot
+    // register these, so this starts empty and grows only at runtime.
+    custom_textures: Vec<(u64, u32, u32, Vec<u8>)>,
     // The live backend's per-instance buffer capacity.
     renderables: usize,
 }
@@ -308,6 +314,7 @@ impl RunningApp {
             light_direction: authored.light_direction,
             meshes: authored.meshes,
             materials: authored.materials,
+            custom_textures: Vec::new(),
             renderables: authored.renderables,
         }
     }

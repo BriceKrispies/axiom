@@ -38,18 +38,23 @@ impl RunningApp {
     }
 
     /// Every registered material as the live backend's material set: `(material_id,
-    /// width, height, RGBA8 albedo pixels)`. A textured material resolves its
-    /// [`crate::texture::Texture`] to pixels; an untextured material gets a 1×1
-    /// opaque-white albedo (so its sampled albedo is `(1,1,1,1)` and the draw
-    /// colour reduces to base × per-vertex colour). The backend builds one albedo
-    /// bind group per material.
+    /// width, height, RGBA8 albedo pixels)`. Resolution order per material: an
+    /// app-authored raw-pixel texture (`with_custom_texture`, looked up in the
+    /// custom-texture store); else the built-in procedural [`crate::texture::Texture`];
+    /// else a 1×1 opaque-white albedo (so its sampled albedo is `(1,1,1,1)` and the
+    /// draw colour reduces to base × per-vertex colour). The backend builds one
+    /// albedo bind group per material.
     pub fn material_textures(&self) -> Vec<(u64, u32, u32, Vec<u8>)> {
         self.materials
             .iter()
             .map(|(id, material)| {
-                let (w, h, pixels) = material
-                    .texture()
-                    .map(texture_rgba)
+                let custom = self
+                    .custom_textures
+                    .iter()
+                    .find(|(tid, _, _, _)| *tid == material.custom_texture())
+                    .map(|(_, w, h, px)| (*w, *h, px.clone()));
+                let (w, h, pixels) = custom
+                    .or_else(|| material.texture().map(texture_rgba))
                     .unwrap_or_else(|| (1, 1, vec![255, 255, 255, 255]));
                 (*id, w, h, pixels)
             })

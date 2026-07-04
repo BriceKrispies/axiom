@@ -131,8 +131,10 @@
 
 pub mod low_poly_assets;
 pub mod penalty_ball;
+pub mod penalty_character;
 pub mod penalty_meshes;
 pub mod penalty_render_meshed;
+pub mod penalty_textures;
 pub mod penalty_blob_shadow;
 pub mod penalty_effects;
 pub mod penalty_goalie;

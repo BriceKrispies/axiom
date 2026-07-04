@@ -54,6 +54,11 @@ pub enum PenaltyMaterialId {
     HudYellowHighlight,
     HudGreenSuccess,
     HudRedWarning,
+    // Athlete footwear / socks (appended for the humanoid character kit; appended
+    // at the end so every existing discriminant/index stays stable).
+    KickerShoes,
+    GoalieShoes,
+    GoalieSocks,
 }
 
 /// One named material: its id, human name, base color, and lit/unlit flag.
@@ -76,7 +81,7 @@ const fn unlit(id: PenaltyMaterialId, name: &'static str, base_color: Rgba) -> P
 
 /// The fixed material palette, ordered to match [`PenaltyMaterialId`]. This is
 /// the whole palette — deterministic and stable.
-pub const PENALTY_PALETTE: [PenaltyMaterial; 28] = [
+pub const PENALTY_PALETTE: [PenaltyMaterial; 31] = [
     lit(PenaltyMaterialId::FieldGrass, "field grass", palette::GRASS_LIGHT),
     lit(PenaltyMaterialId::DarkerGrassBand, "darker grass band", palette::GRASS_DARK),
     lit(PenaltyMaterialId::WhiteFieldLines, "white field lines", palette::LINE_WHITE),
@@ -97,14 +102,17 @@ pub const PENALTY_PALETTE: [PenaltyMaterial; 28] = [
     lit(PenaltyMaterialId::CrowdMutedColorsAltA, "crowd muted colors (alt a)", Rgba::rgb(0.32, 0.44, 0.66)),
     lit(PenaltyMaterialId::CrowdMutedColorsAltB, "crowd muted colors (alt b)", Rgba::rgb(0.74, 0.66, 0.30)),
     lit(PenaltyMaterialId::StadiumWallDarkGray, "stadium wall dark gray", palette::STADIUM_WALL),
-    lit(PenaltyMaterialId::AdBoardRed, "ad board red", Rgba::rgb(0.78, 0.16, 0.20)),
-    lit(PenaltyMaterialId::AdBoardDark, "ad board dark", Rgba::rgb(0.09, 0.10, 0.13)),
+    lit(PenaltyMaterialId::AdBoardRed, "ad board red", Rgba::rgb(0.80, 0.15, 0.19)),
+    lit(PenaltyMaterialId::AdBoardDark, "ad board blue", Rgba::rgb(0.16, 0.28, 0.66)),
     unlit(PenaltyMaterialId::BlobShadow, "blob shadow", palette::BLOB_SHADOW),
     unlit(PenaltyMaterialId::HudDarkPanel, "HUD dark panel", Rgba::new(0.05, 0.06, 0.09, 0.85)),
     unlit(PenaltyMaterialId::HudWhiteText, "HUD white text", Rgba::rgb(0.96, 0.97, 0.98)),
     unlit(PenaltyMaterialId::HudYellowHighlight, "HUD yellow highlight", Rgba::rgb(0.98, 0.83, 0.16)),
     unlit(PenaltyMaterialId::HudGreenSuccess, "HUD green success", Rgba::rgb(0.30, 0.82, 0.38)),
     unlit(PenaltyMaterialId::HudRedWarning, "HUD red warning", Rgba::rgb(0.86, 0.24, 0.24)),
+    lit(PenaltyMaterialId::KickerShoes, "kicker shoes", Rgba::rgb(0.06, 0.06, 0.08)),
+    lit(PenaltyMaterialId::GoalieShoes, "goalie shoes", Rgba::rgb(0.06, 0.06, 0.08)),
+    lit(PenaltyMaterialId::GoalieSocks, "goalie socks", Rgba::rgb(0.10, 0.10, 0.12)),
 ];
 
 /// The material for an id. A direct index — the id's discriminant is its
