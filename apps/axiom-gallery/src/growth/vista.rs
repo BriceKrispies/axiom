@@ -31,6 +31,7 @@
 //! anyway — the map pick fixes *where on the planet* the anchor is (and thus the
 //! surrounding terrain), not which tangent heading the player looks down.
 
+use crate::growth::curves::{lerp3, smoothstep01};
 use crate::growth::distributions;
 use crate::growth::gameworld::sample_height_m;
 use crate::growth::model_planet::PlanetSurfaceAtlas;
@@ -820,26 +821,12 @@ fn radial_core(u: f32) -> f32 {
     raised_cos.powf(1.3)
 }
 
-/// Clamped smoothstep on `[0, 1]`.
-fn smoothstep01(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
 /// Distance fit in `[0, 1]`: 1 at the ideal distance, decaying toward the range
 /// edges.
 fn distance_fit(distance: f32, cfg: VistaConfig) -> f32 {
     let span = (cfg.distance_range_m.1 - cfg.distance_range_m.0).max(1.0);
     let off = (distance - cfg.ideal_distance_m).abs() / span;
     (1.0 - off).clamp(0.0, 1.0)
-}
-
-fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
-    [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-    ]
 }
 
 /// A stable hash of the plan's defining numbers (FNV-1a over their bit patterns)

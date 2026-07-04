@@ -21,6 +21,8 @@ use axiom_kernel::Meters;
 use axiom_math::{Mat4, Quat, Transform, Vec3};
 use axiom_terrain_mesh::TerrainMeshApi;
 
+use crate::growth::curves::{lerp, lerp3, smoothstep};
+
 use super::scatter;
 use super::scene::{value_noise, Foliage, Manifest, Style, Terrain, Tree, Tuft};
 
@@ -1030,19 +1032,6 @@ fn push_vertex(out: &mut Vec<f32>, pos: [f32; 3], normal: [f32; 3], uv: [f32; 2]
 
 fn fog_factor(dist: f32, start: f32, end: f32) -> f32 {
     ((dist - start) / (end - start).max(1.0e-3)).clamp(0.0, 1.0)
-}
-
-fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    let t = ((x - edge0) / (edge1 - edge0).max(1.0e-3)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
-fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
 #[cfg(test)]

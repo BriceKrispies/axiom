@@ -12,6 +12,8 @@
 use axiom_entropy::{EntropyApi, EntropyStream};
 use axiom_space::{Address, SpaceApi};
 
+use crate::growth::curves::lerp;
+
 use super::scene::{Groundcover, Scatter, Terrain, Tree, Tuft};
 
 /// Fixed address segment keying the scatter entropy stream ("vtscat\0\x01"), so the
@@ -146,10 +148,6 @@ fn unit(stream: &mut EntropyStream) -> f32 {
 /// A uniform sample in `[lo, hi]` from a `[min, max]` range.
 fn range(stream: &mut EntropyStream, bounds: [f32; 2]) -> f32 {
     lerp(bounds[0], bounds[1], unit(stream))
-}
-
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
 }
 
 #[cfg(test)]

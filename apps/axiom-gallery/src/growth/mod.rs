@@ -38,6 +38,11 @@ pub mod chunkstore;
 pub mod gameworld;
 pub mod localmap;
 
+// --- shared scalar/array interpolation curves (lerp, lerp3, smoothstep,
+// smoothstep01), the single home for helpers formerly copy-pasted across the
+// growth painters (vista, visual_target, scatter) and the render-maps example ---
+pub mod curves;
+
 // --- scenic composition (Everest-scale mountain vista) ---
 pub mod vista;
 

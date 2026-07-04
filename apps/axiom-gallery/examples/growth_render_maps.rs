@@ -11,6 +11,7 @@
 
 use axiom_gallery::growth::gameworld;
 use axiom_gallery::growth::model_world::{GameWorldLocalMap, CHUNK_SIZE_CELLS, CHUNK_VERT_SIDE};
+use axiom_gallery::growth::curves;
 use axiom_gallery::growth::presets::PlanetPreset;
 use axiom_gallery::growth::sampler::{self, biome};
 use axiom_gallery::growth::Growth;
@@ -147,7 +148,7 @@ fn ramp(t: f32) -> (u8, u8, u8) {
 }
 
 fn lerp(a: u8, b: u8, f: f32) -> u8 {
-    (a as f32 + (b as f32 - a as f32) * f) as u8
+    curves::lerp(a as f32, b as f32, f) as u8
 }
 
 fn normalize3(v: [f32; 3]) -> [f32; 3] {
@@ -282,9 +283,9 @@ fn render_firstperson(g: &Growth, path: &str) {
                 let t = ((hgt - lo) / span).clamp(0.0, 1.0);
                 let (br, bg, bb) = ramp(t);
                 let fog = (d / maxd).powf(0.8).clamp(0.0, 1.0);
-                let cr = lerpf(br as f32 * lambert, sky_horizon[0] as f32, fog);
-                let cg = lerpf(bg as f32 * lambert, sky_horizon[1] as f32, fog);
-                let cb = lerpf(bb as f32 * lambert, sky_horizon[2] as f32, fog);
+                let cr = curves::lerp(br as f32 * lambert, sky_horizon[0] as f32, fog);
+                let cg = curves::lerp(bg as f32 * lambert, sky_horizon[1] as f32, fog);
+                let cb = curves::lerp(bb as f32 * lambert, sky_horizon[2] as f32, fog);
                 let top = sy.max(0);
                 let bottom = (*slot).min(h_img as i32);
                 for py in top..bottom {
@@ -304,10 +305,6 @@ fn render_firstperson(g: &Growth, path: &str) {
         "wrote {} ({}x{} first-person, local relief span {:.1} m)",
         path, w, h_img, span
     );
-}
-
-fn lerpf(a: f32, b: f32, f: f32) -> f32 {
-    a + (b - a) * f
 }
 
 // Minimal PNG encoder (RGB8, zlib "stored" blocks). No external crates.
