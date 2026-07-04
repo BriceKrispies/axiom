@@ -1,0 +1,29 @@
+# BACKFILLED by the convergence critic (2026-07-04).
+# Ledger iteration 2 set `abstraction_introduced = true` for the new app-local
+# humanoid character kit (penalty_character.rs) but shipped NO abstractions/NNNN.toml
+# — the abstraction gate was skipped. This record backfills the required
+# justification after the fact. The introduced surface is app-tier
+# (apps/axiom-gallery/src/soccer_penalty/, outside the engine spine), so it is not
+# gated by coverage/branchless, but the /visual-convergence discipline still
+# requires the structural change to be recorded and justified.
+
+axis = "kicker_silhouette"          # primary attacked axis; the kit also serves goalkeeper_silhouette.
+failed_attempts = []                # none — inexpressible, went structural on the first attempt (see below).
+inexpressible = true                # A rigid, articulated, back-facing humanoid in a run-up stride (jointed
+                                    # upper-arm/forearm/hand, thighs/shins/feet, torso/pelvis/head/hair, per-part
+                                    # material slots and per-joint rotations) CANNOT be expressed by the prior
+                                    # capsule/sphere proxy actors at any config value. No manifest/data tweak turns
+                                    # a capsule into a posed 16-part figure, so the structural change was correct
+                                    # on the first attempt (no ceremonial config nudges owed).
+smallest_api = """
+App-local only (no engine/kernel/runtime/math/module edit):
+  - penalty_character.rs: a 16-part parented humanoid kit (pelvis/torso/head/hair/
+    arms/hands/thighs/shins/feet) with per-joint rotations, angular box meshes, and
+    material slots (skin/hair/jersey/shorts/socks/shoes/gloves), resolved by parenting.
+  - a `rotation` field added to the app's render content (DioramaObject +
+    PenaltyRenderContent::World + the meshed spawn) so posed limbs orient correctly.
+  - select_mesh routes every actor part to an angular box (the ball stays a sphere).
+The minimal surface needed to place posed articulated actors in the fixed shot.
+"""
+screenshot_command = "cargo run -p axiom-shot -- --app soccer-penalty --backend gpu"
+screenshot_proof = "rendered twice byte-identical: md5 77ba2c26… (per ledger iteration 2)"

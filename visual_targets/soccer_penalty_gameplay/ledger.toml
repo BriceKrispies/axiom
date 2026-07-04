@@ -116,3 +116,73 @@ stadium_and_ad_boards     = 2
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 2
+
+# --- Scoring recalibration (not a render change) -----------------------------
+# The convergence critic (proposal board) audited the record. No render was
+# touched; this iteration only corrects the bookkeeping so the loop stays honest.
+[[iteration]]
+iteration = 3
+attacked_axis = "none (scoring recalibration)"
+changed_files = [
+  "visual_targets/soccer_penalty_gameplay/scorecard.champion.toml",
+  "visual_targets/soccer_penalty_gameplay/abstractions/0001.toml",
+  "visual_targets/soccer_penalty_gameplay/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "recalibrate"
+reason = """
+Honesty audit of the champion scorecard against the identity bar ("merely reads \
+as the same subject = 1, not 3; stylized/low-poly is not 4-5; when unsure take the \
+lower"). The champion is a heavily-dithered PS1-look frame vs a clean low-poly \
+mobile reference, so six axes were inflated and are LOWERED: camera_lens_and_scale \
+3->2 (keeper is a thumbnail, goal squashed), kicker_silhouette 3->2 (coarse blocky \
+proxy, faint number), goalkeeper_silhouette 2->1 (barely-humanoid yellow blob), \
+field_markings_and_turf 2->1 (no spot/box/arc/stripes), stadium_and_ad_boards 2->1 \
+(illegible ad blocks + dithered crowd), artifact_level 2->1 (dither banding + \
+wireframe-goal dominate). Recomputed: lowest = 1 (five-way tie), avg = 1.64, \
+final_score = 1.19 (the card had claimed 1.35). \
+RIGHT-AXIS CORRECTION: by fixed axis order the first axis at the lowest value is \
+goalkeeper_silhouette, so the NEXT attack is goalkeeper_silhouette — not \
+goal_and_net_fidelity, which the inflated card had queued. \
+KEEPER-CREDIT CORRECTION: iteration 2's card justified goalkeeper +1 partly on the \
+"arms-out ready stance reverted, out of scope, moves save volumes" narrative, but \
+PenaltyGoaliePose::idle_display() (penalty_goalie_pose.rs:221) is a save-volume- \
+DECOUPLED render-only ready stance and penalty_scene.rs:348 already uses it — the \
+narrative is false and that +1 was inflated; harsh read of the keeper is still a \
+proxy = 1. \
+ABSTRACTION-GATE BACKFILL: iteration 2 set abstraction_introduced = true for the \
+penalty_character.rs humanoid kit but shipped no abstractions/NNNN.toml. Backfilled \
+as abstractions/0001.toml (inexpressible = true, failed_attempts = []): a posed \
+16-part articulated humanoid cannot be expressed by capsule/sphere proxies, so the \
+structural change was correct on the first attempt. \
+No parity is claimed; the render remains far from the reference.
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 3
+kicker_silhouette         = 3
+goalkeeper_silhouette     = 2
+ball_fidelity             = 2
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 2
+stadium_and_ad_boards     = 2
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 2
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 1
