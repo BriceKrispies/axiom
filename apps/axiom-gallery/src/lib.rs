@@ -32,6 +32,7 @@ pub mod quintet;
 pub mod physics_crucible;
 pub mod harness;
 pub mod forest_walk;
+pub mod generia;
 pub mod soccer_penalty;
 
 /// Backend-comparison entry: render one demo three ways at once — WebGPU, WebGL2,

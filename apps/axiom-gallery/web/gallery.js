@@ -129,6 +129,19 @@ export const DEMOS = [
     page: "growth/index.html",
   },
   {
+    id: "generia",
+    title: "Generia (forest)",
+    blurb: "Walk an Axiom-rendered procedural forest in first person — the fall-forest game, ported onto the engine.",
+    desc:
+      "A first-person walk through a procedural forest rendered with the engine's " +
+      "GPU forest pipeline (terrain, trees, foliage, ground clutter, fog). Click the " +
+      "canvas to capture the mouse, WASD/arrows to move, mouse to look, Esc to release. " +
+      "The port foundation for the fall-forest game (streaming, props, discoveries, " +
+      "and world modes land in later phases).",
+    // Self-hosted: its own first-person canvas page (copied into dist/generia/).
+    page: "generia/index.html",
+  },
+  {
     id: "zanzoban",
     title: "Zanzoban",
     blurb: "Leave ghosts of your past runs on the buttons, then walk the live block through the doors they open.",
