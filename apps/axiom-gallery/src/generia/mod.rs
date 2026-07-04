@@ -219,14 +219,19 @@ pub fn generia_start() {
             };
 
             // Gather visible chunks' instances into the three vegetation batches.
+            // Distance LOD (WorldApi hands a level per visible chunk): the leaf-card
+            // foliage is the triangle hog, so only the nearest band (lod 0) draws it;
+            // farther chunks keep just trunks + branches (readable through the fog).
             let c = cache.borrow();
             let (mut trunk, mut foliage_d, mut branch) = (Vec::new(), Vec::new(), Vec::new());
             let (mut tn, mut fn_, mut bn) = (0u32, 0u32, 0u32);
             for vc in &plan.visible {
                 if let Some(veg) = c.get(&(vc.coord.x, vc.coord.z)) {
                     tn += project_into(&mut trunk, &veg.trunk, &vp);
-                    fn_ += project_into(&mut foliage_d, &veg.foliage, &vp);
                     bn += project_into(&mut branch, &veg.branch, &vp);
+                    if vc.lod == 0 {
+                        fn_ += project_into(&mut foliage_d, &veg.foliage, &vp);
+                    }
                 }
             }
 
