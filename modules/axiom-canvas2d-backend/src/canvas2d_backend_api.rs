@@ -217,6 +217,7 @@ impl Canvas2dBackendApi {
         SoftwareRasterizer::new(options)
             .with_clock(now_ms)
             .with_phase_sink(log_phases)
+            .with_deep_sink(deep_log)
             .rasterize_packet(packet, &self.meshes)
     }
 
@@ -368,6 +369,23 @@ fn log_phases(convert_ms: f64, rasterize_ms: f64, post_ms: f64) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn log_phases(_convert_ms: f64, _rasterize_ms: f64, _post_ms: f64) {}
+
+/// The deep sink installed on the rasterizer: log the `convert`-phase project/shade
+/// split as its own `axiom-canvas2d DEEP:` console line. The timing that feeds it is
+/// gated to a **debug wasm** build, so this logger only ever sees a non-zero split
+/// there; native and release-wasm hand it a zero split (or, on native, nothing at
+/// all beyond the deterministic one-shot the discard path exercises). The render
+/// benchmark's `--debug` mode parses this line.
+#[cfg(all(target_arch = "wasm32", debug_assertions))]
+fn deep_log(project_ms: f64, shade_ms: f64, draws: u32, triangles: usize) {
+    let msg = format!(
+        "axiom-canvas2d DEEP: project={project_ms:.1}ms shade={shade_ms:.1}ms draws={draws} tris={triangles}"
+    );
+    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
+}
+
+#[cfg(not(all(target_arch = "wasm32", debug_assertions)))]
+fn deep_log(_project_ms: f64, _shade_ms: f64, _draws: u32, _triangles: usize) {}
 
 /// Log the per-frame raster telemetry + timings (wasm only; native is a no-op so
 /// the deterministic path emits nothing and reads no clock).

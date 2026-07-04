@@ -2,6 +2,17 @@ use super::*;
 use crate::canvas_policy::CanvasDebugOverlay;
 use axiom_host::{FrameCamera, FrameFeatureSet, FramePacket, FrameViewport};
 
+/// Test wrapper for [`super::convert`]: supplies the zero clock + discarding deep
+/// sink (the browser profiler hooks are the backend's job), so every existing
+/// 3-arg call site stays unchanged. Shadows the glob-imported 5-arg `convert`.
+fn convert(
+    packet: &FramePacket,
+    cache: &MeshCache,
+    options: &LowPolyRasterOptions,
+) -> ConvertedFrame {
+    super::convert(packet, cache, options, || 0.0, super::discard_deep)
+}
+
 const IDENTITY: [f32; 16] = [
     1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
 ];

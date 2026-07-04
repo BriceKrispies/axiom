@@ -259,10 +259,78 @@ fn scene_light(packet: &FramePacket, cues: &CanvasDepthCueProfile) -> SceneLight
 
 /// Project + classify + cull every draw in `packet` against `cache`, applying
 /// terrain LOD and the frame pixel budget, into screen-space triangles.
+/// The discarding deep sink: drops the `(project, shade, draws, tris)` split. It is
+/// the rasterizer's default (native/tests keep it); the backend installs a wasm
+/// console logger. So the deterministic path emits no deep telemetry.
+pub(crate) fn discard_deep(_project_ms: f64, _shade_ms: f64, _draws: u32, _triangles: usize) {}
+
+/// Debug-only deep profiler for the `convert` phase. `convert` is the dominant
+/// Canvas2D cost (~84% of a frame), and it has two real per-draw folds: **project**
+/// (transform + near-clip + cull every triangle) and **shade** (bake the depth cues
+/// into each survivor). This splits those two so a benchmark can see *which* half of
+/// `convert` to attack, reporting the per-frame totals to the injected `sink`.
+///
+/// The timing itself is present ONLY in a **debug wasm** build
+/// (`cfg(all(target_arch = "wasm32", debug_assertions))`): absent from the release
+/// bundle (`--release` clears `debug_assertions`) and from native, so it costs
+/// nothing there. Crucially the module stays **`web_sys`-free** — it reads an
+/// injected `clock` fn and reports through an injected `sink` fn (the platform edge
+/// supplies the `performance.now()` clock and the console-logging sink), so the
+/// pure rasterizer core keeps its no-browser-APIs invariant.
+#[cfg(all(target_arch = "wasm32", debug_assertions))]
+mod deep {
+    use std::cell::Cell;
+
+    thread_local! {
+        static MARK: Cell<f64> = const { Cell::new(0.0) };
+        static PROJECT_MS: Cell<f64> = const { Cell::new(0.0) };
+        static SHADE_MS: Cell<f64> = const { Cell::new(0.0) };
+    }
+
+    pub(super) fn enter(clock: fn() -> f64) {
+        MARK.with(|m| m.set(clock()));
+    }
+
+    pub(super) fn exit_project(clock: fn() -> f64) {
+        let dt = clock() - MARK.with(Cell::get);
+        PROJECT_MS.with(|p| p.set(p.get() + dt));
+    }
+
+    pub(super) fn exit_shade(clock: fn() -> f64) {
+        let dt = clock() - MARK.with(Cell::get);
+        SHADE_MS.with(|p| p.set(p.get() + dt));
+    }
+
+    pub(super) fn flush(sink: fn(f64, f64, u32, usize), draws: u32, triangles: usize) {
+        let project = PROJECT_MS.with(Cell::get);
+        let shade = SHADE_MS.with(Cell::get);
+        PROJECT_MS.with(|p| p.set(0.0));
+        SHADE_MS.with(|p| p.set(0.0));
+        sink(project, shade, draws, triangles);
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", debug_assertions)))]
+mod deep {
+    pub(super) fn enter(_clock: fn() -> f64) {}
+    pub(super) fn exit_project(_clock: fn() -> f64) {}
+    pub(super) fn exit_shade(_clock: fn() -> f64) {}
+    // Still hand the sink one (zero) frame so the deterministic path exercises it.
+    pub(super) fn flush(sink: fn(f64, f64, u32, usize), draws: u32, triangles: usize) {
+        sink(0.0, 0.0, draws, triangles);
+    }
+}
+
+/// Project + cull + LOD + shade every draw in `packet` into screen-space triangles.
+/// `clock` + `deep_sink` are the injected browser profiler hooks — a zero clock and
+/// the [`discard_deep`] sink on native/tests, the wasm `performance.now()` clock and
+/// console sink in the browser (see [`deep`]).
 pub(crate) fn convert(
     packet: &FramePacket,
     cache: &MeshCache,
     options: &LowPolyRasterOptions,
+    clock: fn() -> f64,
+    deep_sink: fn(f64, f64, u32, usize),
 ) -> ConvertedFrame {
     let w = options.framebuffer_width();
     let h = options.framebuffer_height();
@@ -284,7 +352,7 @@ pub(crate) fn convert(
         |(mut frame, spent), draw| {
             let drawn = cache
                 .get(draw.mesh_id())
-                .map(|geo| convert_draw(geo, draw, w, h, screen_px2, cap, &cues, &light));
+                .map(|geo| convert_draw(geo, draw, w, h, screen_px2, cap, &cues, &light, clock));
             frame.stats.skipped_draws += u32::from(drawn.is_none());
             let next = drawn.into_iter().fold(spent, |spent, dc| {
                 frame.stats.projected_draws += 1;
@@ -316,6 +384,7 @@ pub(crate) fn convert(
     );
     let distinct: HashSet<u64> = frame.triangles.iter().map(|t| t.object_id()).collect();
     frame.stats.rasterized_objects = distinct.len() as u32;
+    deep::flush(deep_sink, frame.stats.projected_draws, frame.triangles.len());
     frame
 }
 
@@ -332,6 +401,7 @@ fn convert_draw(
     cap: u32,
     cues: &CanvasDepthCueProfile,
     light: &SceneLight,
+    clock: fn() -> f64,
 ) -> DrawConversion {
     let mvp = draw.mvp();
     let world = draw.world();
@@ -342,6 +412,7 @@ fn convert_draw(
     // world-Y, depth), area, and cull (invalid / degenerate / off-screen) into
     // one pre-reserved candidates `Vec`, tracking the draw's world-Y extent.
     let tri_count = geo.indices().len() / 3;
+    deep::enter(clock);
     let mut acc = geo.indices().chunks_exact(3).fold(
         DrawAcc {
             candidates: Vec::with_capacity(tri_count),
@@ -376,6 +447,7 @@ fn convert_draw(
             acc
         },
     );
+    deep::exit_project(clock);
 
     let coverage: f32 = acc.candidates.iter().map(|c| c.area).sum();
     let importance = classify(coverage, screen_px2);
@@ -391,6 +463,7 @@ fn convert_draw(
     // Bake the per-triangle depth cues into each flat colour (lighting → height
     // tint → distance falloff, the documented order).
     let (y_min, y_max) = (acc.y_min, acc.y_max);
+    deep::enter(clock);
     let triangles: Vec<RasterTriangle> = acc
         .candidates
         .iter()
@@ -402,6 +475,7 @@ fn convert_draw(
             RasterTriangle::shaded(c.verts, shaded)
         })
         .collect();
+    deep::exit_shade(clock);
 
     let n = triangles.len() as u32;
     let is_gameplay = importance == CanvasFallbackImportance::GameplayObject;

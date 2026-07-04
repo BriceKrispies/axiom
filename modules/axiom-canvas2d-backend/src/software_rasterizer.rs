@@ -34,7 +34,7 @@ use crate::canvas_depth_cue::to_byte;
 use crate::canvas_policy::CanvasDebugOverlay;
 use crate::canvas_post_pass::{apply_fog, apply_outlines, apply_vertical_grade, clamp_axis};
 use crate::depth_buffer::DepthBuffer;
-use crate::frame_packet_raster::convert;
+use crate::frame_packet_raster::{convert, discard_deep};
 use crate::low_poly_raster_options::LowPolyRasterOptions;
 use crate::mesh_cache::MeshCache;
 use crate::planar_shadow::apply_planar_shadows;
@@ -77,6 +77,7 @@ pub(crate) struct SoftwareRasterizer {
     options: LowPolyRasterOptions,
     clock: fn() -> f64,
     phase_sink: fn(f64, f64, f64),
+    deep_sink: fn(f64, f64, u32, usize),
 }
 
 /// The default phase clock: always `0.0`, so a rasterizer built for a native test
@@ -105,6 +106,7 @@ impl SoftwareRasterizer {
             options,
             clock: zero_clock,
             phase_sink: discard_phases,
+            deep_sink: discard_deep,
         }
     }
 
@@ -120,6 +122,15 @@ impl SoftwareRasterizer {
     /// callers keep the discarding default).
     pub(crate) fn with_phase_sink(mut self, sink: fn(f64, f64, f64)) -> Self {
         self.phase_sink = sink;
+        self
+    }
+
+    /// Install the deep sink that consumes the `convert`-phase `(project, shade,
+    /// draws, tris)` split (the backend passes a debug-wasm console logger; native
+    /// callers keep the discarding default). Only a debug wasm build actually times
+    /// the split — see [`crate::frame_packet_raster`]'s `deep` module.
+    pub(crate) fn with_deep_sink(mut self, sink: fn(f64, f64, u32, usize)) -> Self {
+        self.deep_sink = sink;
         self
     }
 
@@ -139,8 +150,9 @@ impl SoftwareRasterizer {
     ) -> SoftwareRasterResult {
         let clock = self.clock;
         let phase_sink = self.phase_sink;
+        let deep_sink = self.deep_sink;
         let t_convert0 = clock();
-        let converted = convert(packet, cache, &self.options);
+        let converted = convert(packet, cache, &self.options, clock, deep_sink);
         let t_convert1 = clock();
         let clear = packet.clear_color();
         let overlay = self.options.debug_overlay();
