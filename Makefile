@@ -36,6 +36,7 @@ ASSETSTREAM_PORT     ?= 8000
 
 .PHONY: workspace workspace-build \
 	gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
+	gallery-debug-build render-bench \
 	netplay netplay-build netplay-server netplay-dotnet relay retro-fps-hot \
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
@@ -165,6 +166,18 @@ workspace:
 # Build only (no serve): assemble dist-workspace/.
 workspace-build:
 	uv run --no-project python scripts/package_workspace.py
+
+# A debug wasm gallery build: keeps debug_assertions on, so the Canvas2D deep
+# profiler (the convert project/shade split) is present. Used by `make render-bench`.
+gallery-debug-build:
+	npm --prefix scripts/packaging install --no-audit --no-fund
+	uv run --no-project python scripts/package_gallery.py --debug
+
+# RENDER BENCHMARK: build+serve the gallery, auto-walk a demo (default generia) with
+# the agent, and report FPS + phase breakdown from the Canvas2D telemetry. Pass extra
+# flags via ARGS, e.g. `make render-bench ARGS="--backend canvas2d --duration 10 --debug"`.
+render-bench:
+	cargo run -q -p axiom-render-bench -- $(ARGS)
 
 # --- Live 2-browser SERVER-AUTHORITATIVE multiplayer demo ---
 

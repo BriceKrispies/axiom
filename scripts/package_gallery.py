@@ -50,7 +50,15 @@ def main() -> int:
         action="store_true",
         help="quick wasm-only bundle (normal incremental build, no wasm2js fallback) for iteration",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="debug wasm build (keeps debug_assertions on for the Canvas2D deep profiler; "
+        "used by the render benchmark). Implies --fast (no wasm2js fallback).",
+    )
     args = parser.parse_args()
+    if args.debug:
+        args.fast = True
 
     if not (GALLERY_DIR / "Cargo.toml").is_file():
         sys.exit(f"error: {GALLERY_DIR} not found — the gallery crate is missing.")
@@ -77,7 +85,7 @@ def main() -> int:
     #    std compiles once.
     target_dir = (REPO_ROOT / "target") if args.fast else (REPO_ROOT / "target" / "package-mvp")
     print(f"Building the gallery bundle into {dist}{' (fast: wasm-only)' if args.fast else ''}\n")
-    package_app.build_bundle(GALLERY_DIR, dist, fast=args.fast, target_dir=target_dir)
+    package_app.build_bundle(GALLERY_DIR, dist, fast=args.fast, target_dir=target_dir, debug=args.debug)
 
     print(f"\nassembled the single-bundle gallery into {dist}  ({_dir_size_mb(dist):.0f} MB total)")
     return 0

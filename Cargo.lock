@@ -679,6 +679,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-render-bench"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "axiom-render-pipeline"
 version = "0.1.0"
 dependencies = [

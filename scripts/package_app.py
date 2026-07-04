@@ -375,6 +375,7 @@ def _compile_wasm_bundle(
     fast: bool,
     has_fallback: bool,
     target_dir: Path | None,
+    debug: bool = False,
 ) -> tuple[str, str, Path, Path | None]:
     """Build the crate's wasm and produce the bundle artifacts in ``tmp``.
 
@@ -392,7 +393,10 @@ def _compile_wasm_bundle(
     if fast:
         target_dir = target_dir or (REPO_ROOT / "target")
         env["CARGO_TARGET_DIR"] = str(target_dir)
-        run(["cargo", "build", "-p", name, "--target", WASM_TARGET, "--release"], env=env)
+        # A --debug bundle keeps `debug_assertions` on (for the Canvas2D deep
+        # profiler); the render benchmark uses it. Otherwise a normal release build.
+        profile = [] if debug else ["--release"]
+        run(["cargo", "build", "-p", name, "--target", WASM_TARGET, *profile], env=env)
     else:
         target_dir = target_dir or (REPO_ROOT / "target" / "package-mvp")
         env["CARGO_TARGET_DIR"] = str(target_dir)
@@ -403,7 +407,8 @@ def _compile_wasm_bundle(
              "-Z", "build-std=std,panic_abort"],
             env=env,
         )
-    built = target_dir / WASM_TARGET / "release" / f"{snake}.wasm"
+    profile_subdir = "debug" if (fast and debug) else "release"
+    built = target_dir / WASM_TARGET / profile_subdir / f"{snake}.wasm"
     if not built.is_file():
         sys.exit(f"error: expected wasm not produced at {built}")
 
@@ -440,6 +445,7 @@ def build_bundle(
     has_fallback: bool = True,
     target_dir: Path | None = None,
     keep_temp: bool = False,
+    debug: bool = False,
 ) -> str:
     """Build ONE crate's wasm bundle and drop the loader + companions into ``out/``
     (native root layout: ``axiom-loader.js`` + ``<snake>_bg.{wasm,js[,wasm2js.js]}``).
@@ -455,7 +461,7 @@ def build_bundle(
     tmp = Path(tempfile.mkdtemp(prefix=f"axiom-bundle-{crate_name(app_dir).removeprefix('axiom-')}-"))
     try:
         snake, glue_js, fast_wasm, wasm2js_path = _compile_wasm_bundle(
-            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir
+            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir, debug=debug
         )
         shutil.copy2(fast_wasm, out / f"{snake}_bg.wasm")
         if wasm2js_path is not None:

@@ -1,0 +1,19 @@
+[package]
+name = "axiom-render-bench"
+description = "Repo tooling: a render benchmark harness. It builds + serves the gallery, drives a demo (default `generia`) headlessly through the Playwright controller with the autonomous agent walk (`?agent=1`), runs it for a fixed duration, and parses the Canvas2D backend's per-frame console telemetry into an FPS + phase-breakdown report (convert/rasterize/post, and — in a `--debug` wasm build — the deep project/shade split). Outside the engine dependency graph and the coverage gate (a Tool, by its tools/ location)."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-render-bench"
+path = "src/main.rs"
+
+[dependencies]
+# Parse the Playwright controller's JSON responses (its `console` command returns a
+# JSON list of page console messages, which this tool scans for the telemetry lines).
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
