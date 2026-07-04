@@ -123,9 +123,9 @@ pub const STADIUM_WALL_Z: f32 = -4.6;
 // A low, dark barrier wall: it occludes the pitch behind the goal and gives the
 // lowest crowd row a base to rise from. Kept short so the crowd fills down close
 // to the goal top (as in the reference) instead of leaving a tall dead band.
-pub const STADIUM_WALL_HEIGHT: f32 = 2.8;
+pub const STADIUM_WALL_HEIGHT: f32 = 1.2;
 pub const CROWD_CARD_COUNT: u32 = 26;
-pub const AD_BOARD_COUNT: u32 = 5;
+pub const AD_BOARD_COUNT: u32 = 9;
 pub const AD_BOARD_Z: f32 = -2.6;
 pub const AD_BOARD_AXIOM_INDEX: u32 = 2;
 
@@ -291,38 +291,31 @@ fn goal_frame(b: &mut SceneBuilder) {
 }
 
 fn net(b: &mut SceneBuilder) {
-    // Two grids of thin line segments: a rear panel (behind the goalie) and a
-    // front panel (the goal mouth). Distinct roles let the render plan place the
-    // rear panel behind the actors and the front panel in front of them — the
-    // retro 32-bit-style fake-depth net trick.
-    let verticals = 9u32;
-    let horizontals = 5u32;
-    let mut panel = |z: f32, role: DioramaRole, tag: &'static str| {
-        (0..=verticals).for_each(|i| {
-            let x = -GOAL_HALF_WIDTH + (GOAL_HALF_WIDTH * 2.0) * (i as f32 / verticals as f32);
-            b.emit(
-                role,
-                PrimitiveShape::Line,
-                Vec3::new(x, GOAL_HEIGHT * 0.5, z),
-                Vec3::new(LINE_THICKNESS * 0.3, GOAL_HEIGHT, LINE_THICKNESS * 0.3),
-                PenaltyMaterialId::NetOffWhite,
-                tag,
-            );
-        });
-        (0..=horizontals).for_each(|j| {
-            let y = GOAL_HEIGHT * (j as f32 / horizontals as f32);
-            b.emit(
-                role,
-                PrimitiveShape::Line,
-                Vec3::new(0.0, y, z),
-                Vec3::new(GOAL_HALF_WIDTH * 2.0, LINE_THICKNESS * 0.3, LINE_THICKNESS * 0.3),
-                PenaltyMaterialId::NetOffWhite,
-                tag,
-            );
-        });
+    // A real net pocket behind the goal mouth: four planes (back, top, two sides)
+    // carrying the `net` cutout texture (white strands on transparent ground), so
+    // the GPU's alpha-cutout turns them into a see-through net — replacing the old
+    // wireframe cage of ~32 thin bars. All rear-layer: the keeper stands in front
+    // of the pocket (z = 0.5 > the pocket's z ≤ 0), so the actors read as standing
+    // inside the goal, seen against the net behind them.
+    let hw = GOAL_HALF_WIDTH;
+    let h = GOAL_HEIGHT;
+    let back_z = GOAL_LINE_Z - NET_DEPTH;
+    let mid_z = GOAL_LINE_Z - NET_DEPTH * 0.5;
+    let t = 0.02;
+    let mut plane = |pos: Vec3, size: Vec3, tag: &'static str| {
+        b.emit(
+            DioramaRole::RearNet,
+            PrimitiveShape::Quad,
+            pos,
+            size,
+            PenaltyMaterialId::NetOffWhite,
+            tag,
+        );
     };
-    panel(GOAL_LINE_Z - NET_DEPTH, DioramaRole::RearNet, "net.rear");
-    panel(GOAL_LINE_Z, DioramaRole::FrontNet, "net.front");
+    plane(Vec3::new(0.0, h * 0.5, back_z), Vec3::new(hw * 2.0, h, t), "net.back");
+    plane(Vec3::new(0.0, h, mid_z), Vec3::new(hw * 2.0, t, NET_DEPTH), "net.top");
+    plane(Vec3::new(-hw, h * 0.5, mid_z), Vec3::new(t, h, NET_DEPTH), "net.left");
+    plane(Vec3::new(hw, h * 0.5, mid_z), Vec3::new(t, h, NET_DEPTH), "net.right");
 }
 
 /// The greppable label for one kicker humanoid part. Public so the per-frame
@@ -403,7 +396,7 @@ fn goalie(b: &mut SceneBuilder) {
     // Pass 7: the goalie is an articulated 16-part puppet rig, emitted here at
     // its idle rest pose. The app overlays the sampled dive pose per frame (see
     // `soccer_penalty_app`), so at rest this is the goalie you see.
-    let idle = PenaltyGoaliePose::idle().resolve();
+    let idle = PenaltyGoaliePose::idle_display().resolve();
     idle.parts().iter().for_each(|part| {
         b.emit(
             DioramaRole::Goalie,
@@ -491,10 +484,13 @@ fn backdrop(b: &mut SceneBuilder) {
     let card_w = span / CROWD_CARD_COUNT as f32;
     // Three stacked, interleaved rows filling from just above the low wall up
     // into the stand, so the whole upper backdrop reads as a packed terrace.
+    // Four dense rows starting right at the low wall's top so the crowd fills the
+    // whole backdrop down to just above the goal (no tall dead band as before).
     let rows = [
-        (2.9_f32, 2.9_f32, 0.0_f32),
-        (5.3, 2.9, 0.5),
-        (7.7, 2.9, 0.0),
+        (2.0_f32, 2.4_f32, 0.0_f32),
+        (3.7, 2.4, 0.5),
+        (5.4, 2.4, 0.0),
+        (7.1, 2.4, 0.5),
     ];
     rows.iter().enumerate().for_each(|(row, &(y, height, phase))| {
         (0..CROWD_CARD_COUNT).for_each(|i| {
@@ -512,19 +508,21 @@ fn backdrop(b: &mut SceneBuilder) {
             );
         });
     });
-    // Ad boards in front of the wall; one is the bright red "AXIOM" board.
-    let ad_span = GOAL_HALF_WIDTH * 2.6;
+    // Bright ad hoardings ringing the goal, alternating red "AXIOM" and blue
+    // "SPORTS" boards (as in the reference) — taller and wider than before so they
+    // read as a prominent band in front of the crowd.
+    let ad_span = GOAL_HALF_WIDTH * 3.4;
     (0..AD_BOARD_COUNT).for_each(|i| {
         let t = i as f32 / (AD_BOARD_COUNT - 1) as f32;
         let x = -ad_span * 0.5 + ad_span * t;
-        let is_axiom = i == AD_BOARD_AXIOM_INDEX;
+        let is_axiom = i % 2 == 0;
         let material = [PenaltyMaterialId::AdBoardDark, PenaltyMaterialId::AdBoardRed][is_axiom as usize];
         let label = ["ad.board", "ad.board.axiom"][is_axiom as usize];
         b.emit(
             DioramaRole::AdBoard,
             PrimitiveShape::Box,
-            Vec3::new(x, 0.45, AD_BOARD_Z),
-            Vec3::new(ad_span / AD_BOARD_COUNT as f32 * 0.92, 0.9, 0.12),
+            Vec3::new(x, 0.62, AD_BOARD_Z),
+            Vec3::new(ad_span / AD_BOARD_COUNT as f32 * 0.94, 1.25, 0.12),
             material,
             label,
         );

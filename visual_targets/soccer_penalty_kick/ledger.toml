@@ -375,3 +375,59 @@ ball_fidelity           = 4
 depth_and_separation    = 3
 scale_and_proportion    = 3
 artifact_level          = 3
+
+[[iteration]]
+iteration = 10
+attacked_axis = "none"
+changed_files = ["visual_targets/soccer_penalty_kick/scorecard.champion.toml"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = "No render change. Recalibrated the whole champion scorecard to the STRICT PARITY bar (indistinguishable-from-reference) per user direction -- the current diorama is a low-poly retro 32-bit PROXY, so every axis is honestly a 1, not the inflated 3s. Kicks off a structural multi-pass reshape (round the figures, keeper spread stance, real cutout net, brighter ringed boards + denser crowd + kill the dead band, warm textured pitch, cast-shadow lighting, tight over-the-shoulder reframe, ball polish). Scope: 3D diorama only (HUD is not captured by axiom-shot). All passes app-tier."
+next_attacked_axis = "subject_fidelity"
+
+[[iteration]]
+iteration = 11
+attacked_axis = "subject_fidelity + silhouette + stadium + artifact (reshape passes A-D)"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/penalty_render_meshed.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_goalie_pose.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_textures.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_materials.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_stage1_diorama.rs",
+  "apps/axiom-gallery/tests/soccer_penalty_pass2_depth_ordering.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "Structural reshape checkpoint (four kept passes off the all-1s baseline). A: select_mesh now routes actor limbs to the (previously unused) unit_capsule and head/hands to spheres -> figures de-box into rounded low-poly people. B: a render-only PenaltyGoaliePose::idle_display() gives the static keeper a spread-arm crouch (decoupled from the Pass-6 save volumes, which keep riding idle()). C: replaced the ~32-bar wireframe net cage with a real net POCKET -- four planes (back/top/sides) carrying a new alpha-cutout `net` texture (white strands on transparent ground), so the GPU's albedo.a<0.5 discard turns them into a see-through net with the crowd visible through the holes. D: brightened + ringed the ad boards (alternating red AXIOM / blue SPORTS via a recoloured AdBoardDark->blue + a bright ad_generic texture), lowered the stadium wall to 1.2 and pushed the crowd down into four dense rows so it fills the whole backdrop -- the dead dark band above the goal is gone. Object count 179->181; integration count/ordering/element tests updated (net is now all-rear, no FrontNet items). All app-tier; render byte-deterministic."
+next_attacked_axis = "pitch_detail"
+
+[iteration.scorecard_before]
+composition_and_framing = 1
+subject_fidelity        = 1
+silhouette_readability  = 1
+pitch_detail            = 1
+stadium_and_crowd       = 1
+color_palette           = 1
+contrast_and_exposure   = 1
+lighting_and_shadow     = 1
+ball_fidelity           = 1
+depth_and_separation    = 1
+scale_and_proportion    = 1
+artifact_level          = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity        = 2
+silhouette_readability  = 2
+pitch_detail            = 1
+stadium_and_crowd       = 3
+color_palette           = 2
+contrast_and_exposure   = 2
+lighting_and_shadow     = 1
+ball_fidelity           = 2
+depth_and_separation    = 2
+scale_and_proportion    = 2
+artifact_level          = 3

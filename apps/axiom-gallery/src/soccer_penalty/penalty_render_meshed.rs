@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use axiom::prelude::*;
 
 use crate::soccer_penalty::low_poly_assets::{PrimitiveShape, Rgba};
-use crate::soccer_penalty::penalty_meshes::{unit_cube, unit_sphere};
+use crate::soccer_penalty::penalty_meshes::{unit_capsule, unit_cube, unit_sphere};
 use crate::soccer_penalty::penalty_render_plan::PenaltyRenderContent;
 use crate::soccer_penalty::penalty_scene::DioramaRole;
 use crate::soccer_penalty::penalty_textures;
@@ -49,23 +49,39 @@ fn nonzero(s: Vec3) -> Vec3 {
     Vec3::new(c(s.x), c(s.y), c(s.z))
 }
 
-/// The library mesh + scale for one diorama object. The only round mesh is the
-/// ball (a `FacetedBall`); EVERYTHING else — structure (posts, wall, crowd, ad
-/// boards, ground/net) AND the athletes' body parts — is an **angular box**. The
-/// humanoid kit builds readable low-poly figures from scaled, posed boxes rather
-/// than the smooth spheres/capsules the actors used to round into.
+/// The library mesh + scale for one diorama object. The ball is a sphere (radius
+/// convention). The athletes' **limbs round into capsules** and their
+/// **head/hands into spheres** so the figures read as modelled low-poly people,
+/// not box-stacks; the torso stays a box (it carries the jersey-number decal on a
+/// flat face), and boots plus all structure (posts, wall, crowd, ad boards,
+/// ground/net) stay angular boxes.
 fn select_mesh(
     _role: DioramaRole,
-    _label: &str,
+    label: &str,
     shape: PrimitiveShape,
     size: Vec3,
     cube: Handle<Mesh>,
     sphere: Handle<Mesh>,
+    capsule: Handle<Mesh>,
 ) -> (Handle<Mesh>, Vec3) {
-    match shape {
-        PrimitiveShape::FacetedBall => (sphere, size.mul_scalar(2.0)),
-        _ => (cube, nonzero(size)),
+    // The ball keeps its radius→diameter convention.
+    if matches!(shape, PrimitiveShape::FacetedBall) {
+        return (sphere, size.mul_scalar(2.0));
     }
+    let is_limb = label.contains("upperarm")
+        || label.contains("forearm")
+        || label.contains("thigh")
+        || label.contains("shin");
+    let is_joint = label.ends_with(".head") || label.contains(".hand.");
+    if is_limb {
+        // The unit capsule's bbox is (0.8, 1.0, 0.8); scale it to fill the part's
+        // box extents so the rounded tube matches the limb's footprint.
+        return (capsule, Vec3::new(size.x / 0.8, size.y, size.z / 0.8));
+    }
+    if is_joint {
+        return (sphere, nonzero(size));
+    }
+    (cube, nonzero(size))
 }
 
 /// The registered low-poly mesh library (one handle per shape family).
@@ -73,6 +89,7 @@ fn select_mesh(
 struct MeshLib {
     cube: Handle<Mesh>,
     sphere: Handle<Mesh>,
+    capsule: Handle<Mesh>,
 }
 
 /// The registered retro 32-bit pixel-art texture ids (0 = none), by surface kind.
@@ -85,6 +102,7 @@ struct TexLib {
     keeper: u64,
     ball: u64,
     skin: u64,
+    net: u64,
 }
 
 /// The shared meshed scene: the mesh + texture libraries, a
@@ -105,6 +123,7 @@ impl PenaltyMeshedScene {
         let lib = MeshLib {
             cube: app.add_mesh_data(unit_cube()).expect("unit cube geometry is valid"),
             sphere: app.add_mesh_data(unit_sphere()).expect("unit sphere geometry is valid"),
+            capsule: app.add_mesh_data(unit_capsule()).expect("unit capsule geometry is valid"),
         };
         let mut tex = |t: (u32, u32, Vec<u8>)| {
             app.add_texture_data(t.0, t.1, t.2).expect("authored texture is valid").id()
@@ -117,6 +136,7 @@ impl PenaltyMeshedScene {
             keeper: tex(penalty_textures::kit([230, 200, 40])),
             ball: tex(penalty_textures::ball()),
             skin: tex(penalty_textures::skin([210, 160, 128])),
+            net: tex(penalty_textures::net()),
         };
         Self { lib, tex, palette: HashMap::new(), spawned: Vec::new() }
     }
@@ -135,6 +155,7 @@ impl PenaltyMeshedScene {
             DioramaRole::Kicker => self.body_texture(label, self.tex.jersey),
             DioramaRole::Goalie => self.body_texture(label, self.tex.keeper),
             DioramaRole::Ball => (label == "ball").then_some(self.tex.ball).unwrap_or(0),
+            DioramaRole::RearNet | DioramaRole::FrontNet => self.tex.net,
             _ => 0,
         }
     }
@@ -219,8 +240,15 @@ impl PenaltyMeshedScene {
             })
             .collect();
         objects.into_iter().for_each(|(role, label, shape, position, rotation, size, color)| {
-            let (mesh, scale) =
-                select_mesh(role, label, shape, size, self.lib.cube, self.lib.sphere);
+            let (mesh, scale) = select_mesh(
+                role,
+                label,
+                shape,
+                size,
+                self.lib.cube,
+                self.lib.sphere,
+                self.lib.capsule,
+            );
             let to_eye = cam.eye.subtract(position);
             let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
             let biased = position.add(dir.mul_scalar(index as f32 * 0.0015));

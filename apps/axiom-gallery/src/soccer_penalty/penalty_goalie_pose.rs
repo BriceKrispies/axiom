@@ -11,7 +11,7 @@
 //! arrays, nearest-frame clip sampling, and no wall-clock time, randomness, or
 //! maps.
 
-use axiom_math::{Transform, Vec3};
+use axiom_math::{Quat, Transform, Vec3};
 
 use crate::soccer_penalty::penalty_goalie::PenaltyGoalieVolumeSet;
 use crate::soccer_penalty::penalty_materials::PenaltyMaterialId;
@@ -209,6 +209,37 @@ impl PenaltyGoaliePose {
     pub fn idle() -> Self {
         let mut local = [Transform::IDENTITY; 16];
         (0..16).for_each(|i| local[i] = Transform::from_translation(IDLE_LOCAL[i]));
+        Self { local }
+    }
+
+    /// A **render-only** ready stance: the keeper's arms spread out to the sides
+    /// (elbows slightly bent) and knees bent into a crouch, matching the
+    /// reference's set keeper. This is deliberately decoupled from [`Self::idle`]
+    /// — the Pass-6 save volumes keep riding the un-rotated `idle` rig, so this
+    /// pose changes only the visual silhouette, never the deterministic save
+    /// geometry (the dive clips are separate). Used by the static diorama emit.
+    pub fn idle_display() -> Self {
+        let mut local = [Transform::IDENTITY; 16];
+        (0..16).for_each(|i| local[i] = Transform::from_translation(IDLE_LOCAL[i]));
+        // (part-ordinal, euler x, y, z) — arms out + forward, elbows bent, knees crouched.
+        [
+            (4_usize, 0.2_f32, 0.0_f32, -1.15_f32), // left upper arm — out to the side
+            (7, 0.2, 0.0, 1.15),                    // right upper arm — out to the side
+            (5, 0.45, 0.0, -0.15),                  // left forearm — bent up/forward
+            (8, 0.45, 0.0, 0.15),                   // right forearm
+            (10, 0.28, 0.0, -0.12),                 // left thigh — slight splay + forward
+            (13, 0.28, 0.0, 0.12),                  // right thigh
+            (11, -0.5, 0.0, 0.0),                   // left shin — knee bent
+            (14, -0.5, 0.0, 0.0),                   // right shin
+        ]
+        .iter()
+        .for_each(|&(i, x, y, z)| {
+            local[i] = Transform::new(
+                IDLE_LOCAL[i],
+                Quat::from_euler_xyz(x, y, z),
+                Vec3::new(1.0, 1.0, 1.0),
+            );
+        });
         Self { local }
     }
 

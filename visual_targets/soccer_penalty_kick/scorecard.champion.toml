@@ -1,15 +1,15 @@
-# Champion scorecard — the REAL current render (remote main soccer: retro 32-bit texture
-# pipeline + humanoid #10 kit + textured ball), re-baselined from the stale
-# committed champion, then lighting warmed. Parity bar.
-composition_and_framing = 3   # #10 kicker large lower-left, goal centred, crowd top — layout on-model; some empty midfield + mild dead band above goal
-subject_fidelity        = 3   # kicker reads clearly as the #10 player (jersey number, kit, proportions); goal still a wireframe cage
-silhouette_readability  = 3   # kicker / ball / keeper silhouettes read cleanly
-pitch_detail            = 3   # dithered retro 32-bit grass with mow stripes + penalty-spot area; hue brighter than the reference's warm green
-stadium_and_crowd       = 3   # dense dithered crowd fills the stands; ad boards present but dark vs the reference's bright AXIOM hoardings
-color_palette           = 3   # saturated green + colourful crowd; reference is warmer/more muted
-contrast_and_exposure   = 3   # readable range; reference has deeper shadows / brighter highlights
-lighting_and_shadow     = 3   # iter 9: warm front-left key light now models the figures (golden cast); still no strong cast shadows
-ball_fidelity           = 4   # clean black/white panelled soccer ball, near parity
-depth_and_separation    = 3   # kicker/ball foreground, goal mid, crowd back — good separation
-scale_and_proportion    = 3   # kit proportions decent; torso/shorts a touch blocky
-artifact_level          = 3   # heavy retro 32-bit dither (intentional) + the wireframe goal reads slightly artifacty
+# Champion scorecard — after reshape passes A-D. Strict PARITY bar. Big moves off
+# the all-1s baseline on the figures, goal/net, and stadium backdrop; pitch,
+# lighting, composition, and ball still pending (passes E-H).
+composition_and_framing = 2   # dead band above the goal is gone; still zoomed out with empty midfield
+subject_fidelity        = 2   # rounded capsule/sphere figures + #10 kit + a real goal frame; not yet modelled detail
+silhouette_readability  = 2   # rounded limbs + real net pocket read as figures-in-a-goal
+pitch_detail            = 1   # UNCHANGED — flat oversaturated green, no grass texture / spot (pass E)
+stadium_and_crowd       = 3   # dense crowd fills the backdrop; bright red-AXIOM / blue-SPORTS boards ring the goal
+color_palette           = 2   # colourful boards + crowd, but the pitch green is still minty/cool (pass E/F)
+contrast_and_exposure   = 2   # backdrop adds range; overall still a touch flat (pass F)
+lighting_and_shadow     = 1   # UNCHANGED — near-flat shading, faked blob shadows (pass F)
+ball_fidelity           = 2   # textured black/white ball; coarse panels (pass H)
+depth_and_separation    = 2   # real net pocket + crowd depth separate fore/mid/back
+scale_and_proportion    = 2   # rounded figures read more human; keeper still smallish
+artifact_level          = 3   # the wireframe-cage goal + floating net dashes are gone

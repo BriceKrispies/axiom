@@ -17,7 +17,7 @@ use axiom_gallery::soccer_penalty::SoccerPenaltyApp;
 /// pass: the crowd is now 3 stacked rows of 26 cards (78) rather than 9, the
 /// kicker is an 11-part posed figure — neck + hair added — rather than 9 boxes,
 /// and the ball carries 6 dark panel spots rather than 2.)
-const EXPECTED_OBJECT_COUNT: usize = 179;
+const EXPECTED_OBJECT_COUNT: usize = 181;
 
 #[test]
 fn build_is_fully_deterministic() {
@@ -101,7 +101,6 @@ fn all_required_scene_elements_are_present() {
         DioramaRole::PenaltySpot,
         DioramaRole::GoalFrame,
         DioramaRole::RearNet,
-        DioramaRole::FrontNet,
         DioramaRole::Kicker,
         DioramaRole::Ball,
         DioramaRole::Goalie,

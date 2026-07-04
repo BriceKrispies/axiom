@@ -170,8 +170,13 @@ pub fn ad_axiom() -> (u32, u32, Vec<u8>) {
 /// A generic dark ad-board (SPORT), so the non-AXIOM boards read as signage too.
 pub fn ad_generic() -> (u32, u32, Vec<u8>) {
     let (w, h) = (64u32, 20u32);
-    let mut c = Canvas::filled(w, h, [22, 26, 40]);
-    draw_text(&mut c, "SPORT", 6, 6, 1, [150, 170, 210]);
+    let mut c = Canvas::filled(w, h, [46, 78, 190]);
+    // Thin dark top/bottom rails, matching the AXIOM board.
+    for x in 0..w {
+        c.set(x, 0, [14, 22, 60]);
+        c.set(x, h - 1, [14, 22, 60]);
+    }
+    draw_text(&mut c, "SPORTS", 4, 6, 1, [244, 246, 250]);
     c.into_texture()
 }
 
@@ -196,6 +201,32 @@ pub fn ball() -> (u32, u32, Vec<u8>) {
         }
     }
     c.into_texture()
+}
+
+/// A goal-net texture: white strands on a **transparent** ground so the GPU's
+/// alpha-cutout (`albedo.a < 0.5` discards) turns a few flat planes into a real
+/// see-through net. A square mesh — strands every `CELL` pixels — mapped once
+/// across each net plane (~10×8 cells over the goal mouth).
+pub fn net() -> (u32, u32, Vec<u8>) {
+    let (w, h) = (64u32, 48u32);
+    let cell = 6u32;
+    let strand = [226u8, 230, 235];
+    // Start fully transparent (alpha 0 in the holes).
+    let mut px = vec![0u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            // A strand where either axis crosses a grid line (2px thick for read).
+            let on = x % cell < 1 || y % cell < 1;
+            if on {
+                let i = ((y * w + x) * 4) as usize;
+                px[i] = strand[0];
+                px[i + 1] = strand[1];
+                px[i + 2] = strand[2];
+                px[i + 3] = 255;
+            }
+        }
+    }
+    (w, h, px)
 }
 
 /// Skin: a warm base with faint dither so heads/hands aren't perfectly flat.
