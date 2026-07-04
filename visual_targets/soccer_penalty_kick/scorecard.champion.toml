@@ -1,15 +1,16 @@
-# Champion scorecard — after reshape passes A-D. Strict PARITY bar. Big moves off
-# the all-1s baseline on the figures, goal/net, and stadium backdrop; pitch,
-# lighting, composition, and ball still pending (passes E-H).
-composition_and_framing = 2   # dead band above the goal is gone; still zoomed out with empty midfield
-subject_fidelity        = 2   # rounded capsule/sphere figures + #10 kit + a real goal frame; not yet modelled detail
-silhouette_readability  = 2   # rounded limbs + real net pocket read as figures-in-a-goal
-pitch_detail            = 1   # UNCHANGED — flat oversaturated green, no grass texture / spot (pass E)
+# Champion scorecard — after reshape passes A-E, G, H (F reverted). Strict PARITY
+# bar. A materially reshaped diorama; every axis up from the all-1s baseline
+# except lighting (pass F's flat-shade tune was reverted as marginal + test-
+# breaking; the warm key light already present carries it).
+composition_and_framing = 3   # tight over-the-shoulder reframe; subject large, feet in frame, goal fills centre
+subject_fidelity        = 2   # rounded capsule/sphere figures + #10 kit + real goal/net; still low-poly, no modelled detail
+silhouette_readability  = 3   # rounded limbs, a real net pocket, and the tighter frame read clearly
+pitch_detail            = 2   # warmer natural green + mow stripes; still flat/banded, no grass texture, arc behind camera
 stadium_and_crowd       = 3   # dense crowd fills the backdrop; bright red-AXIOM / blue-SPORTS boards ring the goal
-color_palette           = 2   # colourful boards + crowd, but the pitch green is still minty/cool (pass E/F)
-contrast_and_exposure   = 2   # backdrop adds range; overall still a touch flat (pass F)
-lighting_and_shadow     = 1   # UNCHANGED — near-flat shading, faked blob shadows (pass F)
-ball_fidelity           = 2   # textured black/white ball; coarse panels (pass H)
-depth_and_separation    = 2   # real net pocket + crowd depth separate fore/mid/back
-scale_and_proportion    = 2   # rounded figures read more human; keeper still smallish
+color_palette           = 3   # warm grass + colourful boards/crowd; cohesive, no longer minty
+contrast_and_exposure   = 2   # decent range; retro 32-bit flat-shade keeps it a touch flat
+lighting_and_shadow     = 1   # UNCHANGED — flat retro 32-bit shading + faked blob shadows; the deeper-contrast tune was reverted
+ball_fidelity           = 2   # crisper black/white panelled ball
+depth_and_separation    = 3   # net pocket + crowd depth + reframe separate fore/mid/back
+scale_and_proportion    = 3   # rounded figures at a larger, more human scale
 artifact_level          = 3   # the wireframe-cage goal + floating net dashes are gone

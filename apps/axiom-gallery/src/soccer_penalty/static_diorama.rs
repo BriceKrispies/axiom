@@ -32,9 +32,9 @@ pub struct CameraConfig {
 // downward (elevated) tilt showing a lot of pitch. So the eye is offset to +X
 // (to the kicker's right, pushing the kicker at x=-0.7 to screen-left), raised
 // for the elevation, and pulled closer; the target stays near the goal centre.
-pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 3.8, KICKER_Z + 6.2);
-pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.35, -1.3, 0.0);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 32.0;
+pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 3.55, KICKER_Z + 5.5);
+pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.35, -0.9, 0.0);
+pub const CAMERA_FOV_Y_DEGREES: f32 = 29.0;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;

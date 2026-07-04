@@ -183,11 +183,18 @@ pub fn ad_generic() -> (u32, u32, Vec<u8>) {
 /// The soccer ball: white with black pentagon-ish spots on a lat-long wrap.
 pub fn ball() -> (u32, u32, Vec<u8>) {
     let (w, h) = (32u32, 32u32);
-    let mut c = Canvas::filled(w, h, [240, 240, 245]);
-    // A ring of dark spots around the equator + one at each pole band.
-    let spots: [(i32, i32, i32); 7] = [
-        (16, 16, 4), (4, 12, 3), (28, 12, 3), (10, 24, 3),
-        (22, 24, 3), (16, 4, 3), (16, 28, 3),
+    let mut c = Canvas::filled(w, h, [244, 244, 248]);
+    // The classic panelled look: a central hex + a ring of pentagons, crisp black.
+    let spots: [(i32, i32, i32); 9] = [
+        (16, 16, 5),
+        (5, 8, 3),
+        (27, 8, 3),
+        (8, 23, 3),
+        (24, 23, 3),
+        (16, 3, 3),
+        (16, 29, 3),
+        (2, 17, 2),
+        (30, 17, 2),
     ];
     for y in 0..h {
         for x in 0..w {
@@ -195,7 +202,7 @@ pub fn ball() -> (u32, u32, Vec<u8>) {
                 let dx = x as i32 - sx;
                 let dy = y as i32 - sy;
                 if dx * dx + dy * dy <= r * r {
-                    c.set(x, y, [20, 20, 24]);
+                    c.set(x, y, [16, 16, 20]);
                 }
             }
         }

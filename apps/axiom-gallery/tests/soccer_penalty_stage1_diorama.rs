@@ -57,7 +57,7 @@ fn camera_config_is_deterministic_and_fixed() {
     // Behind the kicker (positive Z), elevated, aimed at the goal (lower Z).
     assert!(cam.eye.z > cam.target.z, "camera must sit behind its target");
     assert!(cam.eye.y > cam.target.y, "camera must be elevated above its target");
-    assert_eq!(cam.fov_y_degrees, 32.0);
+    assert_eq!(cam.fov_y_degrees, 29.0);
     // Forward points toward the goal (-Z).
     assert!(cam.forward().z < 0.0);
 }

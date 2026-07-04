@@ -431,3 +431,45 @@ ball_fidelity           = 2
 depth_and_separation    = 2
 scale_and_proportion    = 2
 artifact_level          = 3
+
+[[iteration]]
+iteration = 12
+attacked_axis = "pitch + composition + ball (reshape passes E, G, H; F reverted)"
+changed_files = [
+  "apps/axiom-gallery/src/soccer_penalty/low_poly_assets.rs",
+  "apps/axiom-gallery/src/soccer_penalty/static_diorama.rs",
+  "apps/axiom-gallery/src/soccer_penalty/penalty_textures.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "Second reshape batch. E (pitch): warmed the grass from a vivid mint (GRASS_LIGHT 0.27,0.66,0.25) to a natural green (0.34,0.55,0.22) + darker band, so the pitch reads warm not radioactive -> pitch 1->2, colour 2->3. G (composition): with pass D's dead band gone, tightened the camera (eye closer KICKER_Z+6.2->+5.5, fov 32->29, target raised) so the kicker/ball are larger and the goal fills the centre with feet still in frame -> composition 2->3, scale 2->3, depth 2->3. H (ball): crisper 9-spot black/white panel texture. F (lighting) was ATTEMPTED (deeper flat-shade contrast: ambient 0.35->0.30, directional 0.65->0.74, bands) but REVERTED -- the gain was marginal and it broke the light-model invariants (ambient+directional=1.0, band values); not worth faking. Render byte-deterministic; light-model tests green after revert."
+next_attacked_axis = "lighting_and_shadow"
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity        = 2
+silhouette_readability  = 2
+pitch_detail            = 1
+stadium_and_crowd       = 3
+color_palette           = 2
+contrast_and_exposure   = 2
+lighting_and_shadow     = 1
+ball_fidelity           = 2
+depth_and_separation    = 2
+scale_and_proportion    = 2
+artifact_level          = 3
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity        = 2
+silhouette_readability  = 3
+pitch_detail            = 2
+stadium_and_crowd       = 3
+color_palette           = 3
+contrast_and_exposure   = 2
+lighting_and_shadow     = 1
+ball_fidelity           = 2
+depth_and_separation    = 3
+scale_and_proportion    = 3
+artifact_level          = 3
