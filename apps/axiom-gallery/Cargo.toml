@@ -136,6 +136,8 @@ axiom-input = { path = "../../modules/axiom-input" }
 # are resident + the deterministic load/unload delta as the player moves. The
 # app pairs it with its own Chunk payloads.
 axiom-streaming = { path = "../../modules/axiom-streaming" }
+axiom-scatter = { path = "../../modules/axiom-scatter" }
+axiom-world = { path = "../../modules/axiom-world" }
 # The domain-neutral heightfield mesher (growth's far/snapshot terrain geometry):
 # grid config + a height callback in, positions/normals/indices out. The app
 # decorates the neutral mesh with its colour/vista/biome content.

@@ -31,6 +31,8 @@ allowed_modules = [
     "agent-harness",
     "perception",
     "streaming",
+    "scatter",
+    "world",
     "terrain-mesh",
     "gpu-backend",
     "canvas2d-backend",

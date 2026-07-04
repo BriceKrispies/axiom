@@ -1,61 +1,82 @@
-//! # `generia` — a first-person walk through a procedural Axiom forest.
+//! # `generia` — a first-person walk through an **endless** procedural Axiom forest.
 //!
-//! This is the port target for the old WAT-engine "fall-forest" game: the game's
-//! systems (chunked world-gen, layered terrain, rule-based props, discoveries,
-//! world modes, a horror layer, a narrative console) are being rebuilt on the
-//! Axiom engine, wearing Axiom's GPU forest look instead of a 320×200 software
-//! rasterizer.
+//! The port target for the WAT-engine fall-forest game, on Axiom's GPU forest.
+//! Phase 2: the world **streams**. A [`axiom_world::WorldApi`] residency ring
+//! loads/unloads/culls chunks around the camera; each loaded chunk's trees are
+//! placed by [`axiom_scatter::ScatterApi`] and turned into the same rich
+//! trunk/foliage/branch instances the hero render uses (`build::*_instances`);
+//! the ground is a terrain mesh regenerated around the moving camera and streamed
+//! into the backend via `run_web_multi_streaming`. Walk forever — chunks appear
+//! ahead and unload behind, and only the visible ones are drawn.
 //!
-//! **Phase 1 (this module) is the foundation:** the walkable GPU forest itself.
-//! The same generators the offscreen hero render uses (`build::build` over a
-//! forest manifest) are uploaded once, and each frame a first-person camera —
-//! WASD + mouse-look, seated on the terrain (ground-follow) — re-projects every
-//! instance and presents it live through `axiom-windowing`'s WebGPU → WebGL2 →
-//! Canvas 2D cascade (`run_web_multi`). Subsequent phases replace the fixed
-//! manifest with streamed procedural chunks and layer the game systems on top.
+//! Later phases layer on the fall-forest game systems (layered terrain + rail
+//! path, rule-based props, discoveries, world modes, the horror layer, a console).
 //!
-//! wasm32 only — it is the browser presentation arm; native builds compile it away.
+//! wasm32 only — the browser presentation arm; native builds compile it away.
 #![cfg(target_arch = "wasm32")]
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use axiom_math::{Mat4, Vec3};
+use axiom_kernel::{Meters, Ratio, StableHash};
+use axiom_math::{Aabb, Mat4, Vec3};
+use axiom_scatter::{CellCoord, ScatterApi, ScatterRule, ScatterSite};
+use axiom_streaming::ChunkCoord;
 use axiom_windowing::WindowingApi;
+use axiom_world::{WorldApi, WorldConfig};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::growth::visual_target::build::{self, RenderData};
-use crate::growth::visual_target::scene::Manifest;
+use crate::growth::visual_target::build::{
+    self, branch_instances, foliage_instances, terrain_window_mesh, trunk_instances,
+};
+use crate::growth::visual_target::scene::{Foliage, Manifest, Tree};
 
-/// The presentation canvas element id (must match `web/generia/index.html`).
 const CANVAS_ID: &str = "axiom-generia-canvas";
 const SURFACE_W: u32 = 1280;
 const SURFACE_H: u32 = 800;
 
-/// Eye height above the forest floor, and movement/turn/look rates (per frame / per px).
+/// Mesh + material ids (must match `build.rs`).
+const TERRAIN_MESH: u64 = 1;
+const TRUNK_MESH: u64 = 2;
+const FOLIAGE_MESH: u64 = 5;
+const BRANCH_MESH: u64 = 7;
+const WHITE_MAT: u64 = 1;
+const LEAF_ALPHA_MAT: u64 = 2;
+const BARK_MAT: u64 = 3;
+const GROUND_MAT: u64 = 4;
+
+/// Streaming shape: chunk size, load ring, and the terrain-window spacing.
+const CHUNK_M: f32 = 24.0;
+const LOAD_RADIUS: i32 = 3;
+const MARGIN: i32 = 1;
+const TREE_SEED: u64 = 0x_67_65_6e_65_72_69_61_00; // "generia\0"
+const TERRAIN_SPACING_M: f32 = 1.0; // coarser than the hero patch, for a big window
+/// Upper bound on instances drawn in a frame (backend instance-buffer capacity).
+const MAX_INSTANCES: u32 = 180_000;
+
 const EYE_HEIGHT_M: f32 = 1.7;
 const MOVE_SPEED_M: f32 = 0.22;
 const TURN_SPEED: f32 = 0.028;
 const LOOK_SENS: f32 = 0.0022;
 const PITCH_LIMIT: f32 = 1.45;
 
-/// The forest scene, baked into the wasm bundle. Phase 1 reuses the champion
-/// forest manifest; later phases generate chunks procedurally instead.
-const MANIFEST: &str = include_str!("../../visual_targets/prologue_postcard_001/manifest.toml");
+const IDENTITY16: [f32; 16] =
+    [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
 
 /// One instance's fixed world transform + tint (camera-independent).
+#[derive(Clone, Copy)]
 struct Inst {
     world: Mat4,
     tint: [f32; 4],
 }
 
-/// One `(mesh, material)` batch of instances + their contact-shadow caster flags.
-struct MeshBatch {
-    mesh_id: u64,
-    material_id: u64,
-    insts: Vec<Inst>,
-    casts: bool,
+/// A loaded chunk's cached vegetation, grouped by mesh.
+struct ChunkVeg {
+    trunk: Vec<Inst>,
+    foliage: Vec<Inst>,
+    branch: Vec<Inst>,
 }
 
 /// The player's first-person pose.
@@ -67,7 +88,6 @@ struct Pose {
     pitch: f32,
 }
 
-/// Held movement/turn keys, polled each frame.
 #[derive(Clone, Copy, Default)]
 struct Keys {
     forward: bool,
@@ -78,38 +98,46 @@ struct Keys {
     turn_right: bool,
 }
 
-/// Mouse-look deltas accumulated between frames (radians), drained each tick.
 #[derive(Clone, Copy, Default)]
 struct Look {
     yaw: f32,
     pitch: f32,
 }
 
-/// Boot the first-person generia forest walk on the demo canvas.
+/// Boot the endless streamed generia forest on the demo canvas.
 #[wasm_bindgen]
 pub fn generia_start() {
     console_error_panic_hook::set_once();
-    let manifest = match Manifest::parse(MANIFEST) {
+    let manifest = match Manifest::parse(include_str!(
+        "../../visual_targets/prologue_postcard_001/manifest.toml"
+    )) {
         Ok(m) => m,
         Err(e) => {
             log(&format!("[generia] manifest parse failed: {e}"));
             return;
         }
     };
+    // Build once for the unit meshes + materials; the baked batches are ignored —
+    // generia generates its own per-chunk instances.
     let rd = build::build(&manifest);
-    let batches = split_batches(&rd);
     let (near, far, fov) = (manifest.camera.near_m, manifest.camera.far_m, manifest.camera.fov_deg);
     let clear = rd.clear;
     let lights = rd.lights.clone();
     let light_vp = rd.light_view_proj;
-
-    // Spawn where the hero camera stands, but seated on the ground and free to walk.
-    let spawn = Pose {
-        x: manifest.camera.eye[0],
-        z: manifest.camera.eye[2],
-        yaw: 0.0,
-        pitch: -0.05,
+    let foliage = match manifest.foliage.clone() {
+        Some(f) => f,
+        None => {
+            log("[generia] manifest has no [foliage]");
+            return;
+        }
     };
+    let terrain = manifest.terrain.clone();
+    // A coarser terrain clone for the streamed window (fewer verts over a big area).
+    let mut coarse_terrain = terrain.clone();
+    coarse_terrain.spacing_m = TERRAIN_SPACING_M;
+    let manifest = Rc::new(manifest);
+
+    let spawn = Pose { x: 0.0, z: 0.0, yaw: 0.0, pitch: -0.05 };
     let pose = Rc::new(RefCell::new(spawn));
     let keys = Rc::new(RefCell::new(Keys::default()));
     let look = Rc::new(RefCell::new(Look::default()));
@@ -123,17 +151,22 @@ pub fn generia_start() {
         log("[generia] invalid surface");
         return;
     }
-    let terrain = manifest.terrain.clone();
-    // The live backend packs every batch into ONE instance buffer at cumulative
-    // offsets, so the capacity must be the TOTAL instance count across all batches.
-    let max_instances = batches.iter().map(|b| b.insts.len() as u32).sum::<u32>().max(1);
-    let casters = flat_casters(&batches);
 
-    let _ = windowing.run_web_multi(
+    let world = Rc::new(RefCell::new(WorldApi::new(WorldConfig {
+        chunk_size: Meters::finite_or_zero(CHUNK_M),
+        load_radius: LOAD_RADIUS,
+        margin: MARGIN,
+        lod_bands: vec![Meters::finite_or_zero(80.0), Meters::finite_or_zero(160.0)],
+    })));
+    let cache: Rc<RefCell<BTreeMap<(i32, i32), ChunkVeg>>> = Rc::new(RefCell::new(BTreeMap::new()));
+    let last_focus: Rc<RefCell<Option<(i32, i32)>>> = Rc::new(RefCell::new(None));
+
+    let _ = windowing.run_web_multi_streaming(
         CANVAS_ID,
         rd.meshes.clone(),
         rd.materials.clone(),
-        max_instances,
+        TERRAIN_MESH,
+        MAX_INSTANCES,
         move |_tick| {
             let k = *keys.borrow();
             let l = {
@@ -145,55 +178,163 @@ pub fn generia_start() {
             let mut p = pose.borrow_mut();
             step(&mut p, &k, l);
             let ground = terrain.height_at(p.x, p.z);
+            let eye = Vec3::new(p.x, ground + EYE_HEIGHT_M, p.z);
             let vp = camera_view_proj(&p, ground, fov, near, far);
-            let out = project_batches(&batches, &vp);
-            (clear, lights.clone(), light_vp, out, vp.as_cols_array(), casters.clone(), None)
+
+            // Plan the frame: load / unload / visible chunks.
+            let plan = world.borrow_mut().frame_plan(eye, vp, chunk_aabb);
+            {
+                let mut c = cache.borrow_mut();
+                for coord in &plan.load {
+                    c.insert((coord.x, coord.z), gen_chunk_veg(&manifest, &foliage, *coord, eye));
+                }
+                for coord in &plan.unload {
+                    c.remove(&(coord.x, coord.z));
+                }
+            }
+
+            // Regenerate the terrain window when the camera crosses into a new chunk.
+            let focus = (
+                (p.x / CHUNK_M).floor() as i32,
+                (p.z / CHUNK_M).floor() as i32,
+            );
+            let new_geometry = {
+                let mut lf = last_focus.borrow_mut();
+                if *lf != Some(focus) {
+                    *lf = Some(focus);
+                    let cx = (focus.0 as f32 + 0.5) * CHUNK_M;
+                    let cz = (focus.1 as f32 + 0.5) * CHUNK_M;
+                    let radius = (LOAD_RADIUS as f32 + 1.0) * CHUNK_M;
+                    Some(terrain_window_mesh(
+                        &coarse_terrain,
+                        &manifest.fog,
+                        eye,
+                        &style_of(&manifest),
+                        (cx, cz),
+                        radius,
+                    ))
+                } else {
+                    None
+                }
+            };
+
+            // Gather visible chunks' instances into the three vegetation batches.
+            let c = cache.borrow();
+            let (mut trunk, mut foliage_d, mut branch) = (Vec::new(), Vec::new(), Vec::new());
+            let (mut tn, mut fn_, mut bn) = (0u32, 0u32, 0u32);
+            for vc in &plan.visible {
+                if let Some(veg) = c.get(&(vc.coord.x, vc.coord.z)) {
+                    tn += project_into(&mut trunk, &veg.trunk, &vp);
+                    fn_ += project_into(&mut foliage_d, &veg.foliage, &vp);
+                    bn += project_into(&mut branch, &veg.branch, &vp);
+                }
+            }
+
+            let terrain_inst = terrain_instance(&vp);
+            let batches = vec![
+                (TERRAIN_MESH, GROUND_MAT, terrain_inst, 1),
+                (TRUNK_MESH, BARK_MAT, trunk, tn),
+                (FOLIAGE_MESH, LEAF_ALPHA_MAT, foliage_d, fn_),
+                (BRANCH_MESH, WHITE_MAT, branch, bn),
+            ];
+            (clear, lights.clone(), light_vp, batches, vp.as_cols_array(), Vec::new(), None, new_geometry)
         },
     );
 }
 
-/// Split the render data's `[mvp, world, tint]` batches into camera-independent
-/// world-transform + tint instances, grouped by `(mesh, material)`.
-fn split_batches(rd: &RenderData) -> Vec<MeshBatch> {
-    rd.batches
-        .iter()
-        .map(|(mesh_id, material_id, data, count)| {
-            let insts = (0..*count as usize)
-                .map(|i| {
-                    let base = i * 36;
-                    Inst {
-                        world: Mat4::from_cols_array(slice16(&data[base + 16..base + 32])),
-                        tint: [data[base + 32], data[base + 33], data[base + 34], data[base + 35]],
-                    }
-                })
-                .collect();
-            // Trees (trunk mesh 2, canopy/foliage mesh 3 & 5) cast contact shadows.
-            let casts = *mesh_id == 2 || *mesh_id == 3 || *mesh_id == 5;
-            MeshBatch { mesh_id: *mesh_id, material_id: *material_id, insts, casts }
+/// The manifest's style (or the neutral default).
+fn style_of(m: &Manifest) -> crate::growth::visual_target::scene::Style {
+    m.style.clone().unwrap_or_else(crate::growth::visual_target::scene::Style::neutral)
+}
+
+/// Generate one chunk's cached vegetation: scatter its trees, then run the hero
+/// trunk/foliage/branch generators over that chunk's trees (with an identity
+/// view-projection, so the emitted `mvp` slot equals the world transform we keep).
+fn gen_chunk_veg(manifest: &Manifest, foliage: &Foliage, cell: ChunkCoord, eye: Vec3) -> ChunkVeg {
+    let rule = ScatterRule {
+        sites_per_side: 3,
+        jitter: Ratio::new(0.8).unwrap_or_else(|_| Ratio::new(0.0).unwrap()),
+        fill: Ratio::new(0.7).unwrap_or_else(|_| Ratio::new(0.0).unwrap()),
+    };
+    let sites = ScatterApi::chunk_sites(
+        TREE_SEED,
+        CellCoord::new(cell.x, cell.z),
+        Meters::finite_or_zero(CHUNK_M),
+        &rule,
+    );
+    let trees: Vec<Tree> = sites.iter().map(|s| site_to_tree(manifest, s)).collect();
+    let lean = manifest.scatter.as_ref().map(|s| s.lean_deg).unwrap_or(0.0);
+    ChunkVeg {
+        trunk: extract(&trunk_instances(manifest, &trees, lean, &IDENTITY16, eye)),
+        foliage: extract(&foliage_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
+        branch: extract(&branch_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
+    }
+}
+
+/// A scattered site → a `Tree`, its size/rotation/colour drawn deterministically
+/// from the site's seed across the manifest scatter's ranges.
+fn site_to_tree(manifest: &Manifest, s: &ScatterSite) -> Tree {
+    let (th, tr, cr, pal): ([f32; 2], [f32; 2], [f32; 2], &[[f32; 3]]) = match &manifest.scatter {
+        Some(sc) => (sc.trunk_height_m, sc.trunk_radius_m, sc.canopy_radius_m, sc.canopy_palette.as_slice()),
+        None => ([6.0, 14.0], [0.2, 0.5], [2.0, 4.0], &[[0.8, 0.5, 0.2]]),
+    };
+    let h = StableHash::of_words(&[s.seed]).raw();
+    let u = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
+    let lerp = |r: [f32; 2], t: f32| r[0] + (r[1] - r[0]) * t;
+    let color = pal.get(((h >> 8) as usize) % pal.len().max(1)).copied().unwrap_or([0.8, 0.5, 0.2]);
+    Tree {
+        x: s.x.get(),
+        z: s.z.get(),
+        yaw_deg: u(0) * 360.0,
+        trunk_height_m: lerp(th, u(16)),
+        trunk_radius_m: lerp(tr, u(32)),
+        canopy_radius_m: lerp(cr, u(48)),
+        canopy_color: color,
+    }
+}
+
+/// A chunk's world-space bounding box for frustum culling / LOD.
+fn chunk_aabb(c: ChunkCoord) -> Aabb {
+    let x = c.x as f32 * CHUNK_M;
+    let z = c.z as f32 * CHUNK_M;
+    Aabb::new(Vec3::new(x, -12.0, z), Vec3::new(x + CHUNK_M, 48.0, z + CHUNK_M))
+        .unwrap_or_else(|_| Aabb::from_center_extents(Vec3::ZERO, Vec3::ONE).unwrap())
+}
+
+/// Split a `[mvp, world, tint]` instance stream into camera-independent
+/// `Inst { world, tint }` (the generators are called with an identity vp, so the
+/// `world` slot at floats 16..32 is the true world transform).
+fn extract(data: &[f32]) -> Vec<Inst> {
+    (0..data.len() / 36)
+        .map(|i| {
+            let b = i * 36;
+            Inst {
+                world: Mat4::from_cols_array(slice16(&data[b + 16..b + 32])),
+                tint: [data[b + 32], data[b + 33], data[b + 34], data[b + 35]],
+            }
         })
         .collect()
 }
 
-/// The per-instance caster flags in batch-expansion order (for the planar-shadow pass).
-fn flat_casters(batches: &[MeshBatch]) -> Vec<bool> {
-    batches.iter().flat_map(|b| std::iter::repeat(b.casts).take(b.insts.len())).collect()
+/// Re-project a chunk's cached instances into the live `[mvp, world, tint]` layout,
+/// appending onto `out`; returns how many were appended.
+fn project_into(out: &mut Vec<f32>, insts: &[Inst], vp: &Mat4) -> u32 {
+    for i in insts {
+        out.extend_from_slice(&vp.multiply(i.world).as_cols_array());
+        out.extend_from_slice(&i.world.as_cols_array());
+        out.extend_from_slice(&i.tint);
+    }
+    insts.len() as u32
 }
 
-/// Re-project every instance through the current camera view-projection into the
-/// live backend's per-instance `mvp(16) · world(16) · tint(4)` layout.
-fn project_batches(batches: &[MeshBatch], vp: &Mat4) -> Vec<(u64, u64, Vec<f32>, u32)> {
-    batches
-        .iter()
-        .map(|b| {
-            let mut data = Vec::with_capacity(b.insts.len() * 36);
-            b.insts.iter().for_each(|i| {
-                data.extend_from_slice(&vp.multiply(i.world).as_cols_array());
-                data.extend_from_slice(&i.world.as_cols_array());
-                data.extend_from_slice(&i.tint);
-            });
-            (b.mesh_id, b.material_id, data, b.insts.len() as u32)
-        })
-        .collect()
+/// The single terrain instance: world coords already, so world = identity and
+/// mvp = the camera view-projection.
+fn terrain_instance(vp: &Mat4) -> Vec<f32> {
+    let mut d = Vec::with_capacity(36);
+    d.extend_from_slice(&vp.as_cols_array());
+    d.extend_from_slice(&IDENTITY16);
+    d.extend_from_slice(&[1.0, 1.0, 1.0, 1.0]);
+    d
 }
 
 /// Integrate one frame of first-person movement + look.
@@ -201,14 +342,13 @@ fn step(p: &mut Pose, k: &Keys, l: Look) {
     let key_turn = (k.turn_left as i32 - k.turn_right as i32) as f32 * TURN_SPEED;
     p.yaw += key_turn + l.yaw;
     p.pitch = (p.pitch + l.pitch).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-    let (fx, fz) = (p.yaw.sin(), -p.yaw.cos()); // yaw 0 ⇒ facing −Z
+    let (fx, fz) = (p.yaw.sin(), -p.yaw.cos());
     let fwd = (k.forward as i32 - k.backward as i32) as f32 * MOVE_SPEED_M;
     let strafe = (k.strafe_right as i32 - k.strafe_left as i32) as f32 * MOVE_SPEED_M;
     p.x += fx * fwd + fz * -strafe;
     p.z += fz * fwd - fx * -strafe;
 }
 
-/// The camera view-projection for the current pose, eye seated on the terrain.
 fn camera_view_proj(p: &Pose, ground: f32, fov_deg: f32, near: f32, far: f32) -> Mat4 {
     let eye = Vec3::new(p.x, ground + EYE_HEIGHT_M, p.z);
     let (cp, sp) = (p.pitch.cos(), p.pitch.sin());
@@ -240,7 +380,6 @@ fn pointer_is_locked() -> bool {
     document().pointer_lock_element().is_some()
 }
 
-/// Install a keydown/keyup listener that sets the held-keys state.
 fn install_key_listener(keys: &Rc<RefCell<Keys>>, event: &str, pressed: bool) {
     let keys = keys.clone();
     let cb = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
@@ -259,7 +398,6 @@ fn install_key_listener(keys: &Rc<RefCell<Keys>>, event: &str, pressed: bool) {
     cb.forget();
 }
 
-/// Capture the pointer when the canvas is clicked (classic FPS mouse-look).
 fn install_pointer_lock() {
     if let Some(canvas) = document().get_element_by_id(CANVAS_ID) {
         let target = canvas.clone();
@@ -271,7 +409,6 @@ fn install_pointer_lock() {
     }
 }
 
-/// Accumulate relative mouse movement into yaw/pitch while the pointer is locked.
 fn install_mouse_look(look: &Rc<RefCell<Look>>) {
     let look = look.clone();
     let cb = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |e: web_sys::MouseEvent| {

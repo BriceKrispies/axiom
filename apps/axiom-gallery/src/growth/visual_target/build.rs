@@ -295,12 +295,28 @@ fn pick_up(dir: Vec3) -> Vec3 {
     (dir.y.abs() > 0.99).then_some(Vec3::UNIT_Z).unwrap_or(Vec3::UNIT_Y)
 }
 
-/// The 64×64 terrain patch: the neutral grid from `axiom-terrain-mesh`, decorated
+/// The terrain patch: the neutral grid from `axiom-terrain-mesh`, decorated
 /// with ground-band albedo, a slope→rock tint, and baked linear distance fog.
 fn terrain_mesh(terrain: &Terrain, fog: &super::scene::Fog, eye: Vec3, style: &Style) -> (Vec<f32>, Vec<u32>) {
+    terrain_window_mesh(terrain, fog, eye, style, (0.0, 0.0), terrain.half_m())
+}
+
+/// The same decorated heightfield as [`terrain_mesh`], but over an arbitrary
+/// square window `(center ± radius)` instead of the origin-centred patch — the
+/// streamed-world variant, so a walkable app can regenerate the ground around a
+/// moving camera. `terrain.height_at` is a pure function of world `(x, z)`, so
+/// windows tile seamlessly.
+pub(crate) fn terrain_window_mesh(
+    terrain: &Terrain,
+    fog: &super::scene::Fog,
+    eye: Vec3,
+    style: &Style,
+    center: (f32, f32),
+    radius: f32,
+) -> (Vec<f32>, Vec<u32>) {
     let mesh = TerrainMeshApi::heightfield_grid_mesh(
-        (Meters::finite_or_zero(0.0), Meters::finite_or_zero(0.0)),
-        Meters::finite_or_zero(terrain.half_m()),
+        (Meters::finite_or_zero(center.0), Meters::finite_or_zero(center.1)),
+        Meters::finite_or_zero(radius),
         Meters::finite_or_zero(terrain.spacing_m),
         |mx, mz| Meters::finite_or_zero(terrain.height_at(mx.get(), mz.get())),
     );
@@ -374,7 +390,7 @@ fn canopy_anchor(t: &Tree, ground: f32, lean_deg_max: f32) -> Vec3 {
 
 /// Per-tree trunk instances, each leaned a deterministic amount; near trunks read
 /// dark, distance fog hazes far ones.
-fn trunk_instances(manifest: &Manifest, trees: &[Tree], lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+pub(crate) fn trunk_instances(manifest: &Manifest, trees: &[Tree], lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
     let mut out = Vec::with_capacity(trees.len() * 36);
@@ -443,7 +459,7 @@ fn orient_y_to(dir: Vec3) -> Quat {
 /// Stylized foliage. With `[foliage] branches > 0` the canopy is DENSE leaf cards clustered
 /// ALONG branch lines radiating from the crown (attached, layered foliage); otherwise the
 /// older floating sub-mass sphere fill. Plus a few muted understory cards near the base.
-fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+pub(crate) fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
     let pal = f.palette.as_slice();
@@ -507,7 +523,7 @@ fn foliage_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg:
 
 /// Thin dark branch strokes (one per `tree_branches` line), oriented along the branch and
 /// scaled to its length — the visible scaffold the dense leaves hang on.
-fn branch_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+pub(crate) fn branch_instances(manifest: &Manifest, trees: &[Tree], f: &Foliage, lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
     let dark = [BARK[0] * 0.6, BARK[1] * 0.6, BARK[2] * 0.6];
