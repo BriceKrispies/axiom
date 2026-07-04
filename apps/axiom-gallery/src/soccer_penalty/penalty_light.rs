@@ -17,8 +17,10 @@ use axiom_math::Vec3;
 
 use crate::soccer_penalty::low_poly_assets::Rgba;
 
-/// Fixed ambient strength (flat fill light).
-pub const AMBIENT_STRENGTH: f32 = 0.35;
+/// Fixed ambient strength (flat fill light). Lifted so the pitch reads as open
+/// bright daylight instead of a dim, muddy field — the reference is a sunlit
+/// stadium, not a shaded one.
+pub const AMBIENT_STRENGTH: f32 = 0.55;
 /// Fixed directional strength (the "sun" contribution).
 pub const DIRECTIONAL_STRENGTH: f32 = 0.65;
 
@@ -29,8 +31,11 @@ pub const DIRECTIONAL_STRENGTH: f32 = 0.65;
 pub const LIGHT_DIRECTION: Vec3 = Vec3::new(-0.390932, -0.868799, -0.304059);
 
 /// The fixed brightness bands, ascending. Quantization snaps a computed
-/// brightness down to the largest band it meets or exceeds.
-pub const BRIGHTNESS_BANDS: [f32; 4] = [0.35, 0.50, 0.70, 0.90];
+/// brightness down to the largest band it meets or exceeds. The floor is lifted
+/// and the upper steps tightened (was `[0.35, 0.50, 0.70, 0.90]`, steps of
+/// 0.15/0.20/0.20) so the turf stops splitting into dark/bright slabs and holds
+/// an even, bright daylight tone across the pitch.
+pub const BRIGHTNESS_BANDS: [f32; 4] = [0.55, 0.68, 0.80, 0.92];
 
 /// The deterministic flat-shading light model.
 #[derive(Debug, Clone, Copy, PartialEq)]

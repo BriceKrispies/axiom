@@ -96,7 +96,10 @@ pub mod palette {
     pub const AD_BOARD_AXIOM: Rgba = Rgba::rgb(0.86, 0.20, 0.42);
 
     // --- shadows ---
-    pub const BLOB_SHADOW: Rgba = Rgba::new(0.02, 0.05, 0.03, 0.38);
+    // A soft contact shadow, not a black cut-out: lower opacity (0.38 -> 0.20)
+    // and a slightly grass-tinted, lifted tone so the ellipse reads as a
+    // grounded contact darkening rather than an opaque hole in the pitch.
+    pub const BLOB_SHADOW: Rgba = Rgba::new(0.06, 0.11, 0.07, 0.20);
 }
 
 /// A convenience direction constant: the up axis the whole diorama uses. It is
