@@ -26,15 +26,17 @@ pub struct CameraConfig {
     pub aspect: f32,
 }
 
-// Camera constants (behind the kicker at KICKER_Z, raised, aimed at the goal).
-// The reference frames the kicker in the LEFT third seen over his right
-// shoulder, with the goal enlarged and centred in the upper half and a strong
-// downward (elevated) tilt showing a lot of pitch. So the eye is offset to +X
-// (to the kicker's right, pushing the kicker at x=-0.7 to screen-left), raised
-// for the elevation, and pulled closer; the target stays near the goal centre.
-pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 3.55, KICKER_Z + 5.5);
-pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.35, -0.9, 0.0);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 29.0;
+// Camera constants (behind the kicker at KICKER_Z, at a low broadcast-style
+// height, aimed at the goal). The reference frames the kicker in the LEFT third
+// over his right shoulder with the goal ENLARGED and its crossbar riding into
+// the upper third — a near-level look, not a steep top-down. So the eye is
+// offset to +X (to the kicker's right, pushing the kicker at x=-0.7 to
+// screen-left), sits low (shoulder height, not lifted), and is pushed forward
+// toward the goal; the target lifts to the goal mouth so the ~6deg tilt keeps
+// the crossbar high and the keeper large instead of small-and-far.
+pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 2.35, KICKER_Z + 3.8);
+pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.35, 0.6, 0.0);
+pub const CAMERA_FOV_Y_DEGREES: f32 = 31.0;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;
