@@ -19,6 +19,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use axiom_agent_harness::AgentHarnessApi;
 use axiom_kernel::{Meters, Ratio, StableHash};
 use axiom_math::{Aabb, Mat4, Vec3};
 use axiom_scatter::{CellCoord, ScatterApi, ScatterRule, ScatterSite};
@@ -55,6 +56,14 @@ const TREE_SEED: u64 = 0x_67_65_6e_65_72_69_61_00; // "generia\0"
 const TERRAIN_SPACING_M: f32 = 1.0; // coarser than the hero patch, for a big window
 /// Upper bound on instances drawn in a frame (backend instance-buffer capacity).
 const MAX_INSTANCES: u32 = 180_000;
+
+/// Autonomous benchmark walk (`?agent=1`): the camera is driven by the first-person
+/// agent harness around a deterministic waypoint ring, so a render benchmark gets a
+/// reproducible walk through the streaming world.
+const AGENT_ID: u64 = 0x_67_65_6e_65_72_69_61; // "generia"
+const WALK_RADIUS_M: f32 = 45.0;
+const ARRIVE_RADIUS_M: f32 = 3.0;
+const AGENT_WAYPOINTS: u32 = 8;
 
 const EYE_HEIGHT_M: f32 = 1.7;
 const MOVE_SPEED_M: f32 = 0.22;
@@ -161,14 +170,20 @@ pub fn generia_start() {
     let cache: Rc<RefCell<BTreeMap<(i32, i32), ChunkVeg>>> = Rc::new(RefCell::new(BTreeMap::new()));
     let last_focus: Rc<RefCell<Option<(i32, i32)>>> = Rc::new(RefCell::new(None));
 
+    // Autonomous benchmark walk (`?agent=1`): a deterministic waypoint ring the
+    // agent circles, exercising streaming + varied views for the render benchmark.
+    let agent_mode = agent_preference();
+    let waypoints = agent_waypoints();
+    let wp_idx = Rc::new(RefCell::new(0usize));
+
     let _ = windowing.run_web_multi_streaming(
         CANVAS_ID,
         rd.meshes.clone(),
         rd.materials.clone(),
         TERRAIN_MESH,
         MAX_INSTANCES,
-        move |_tick| {
-            let k = *keys.borrow();
+        move |tick| {
+            let mut k = *keys.borrow();
             let l = {
                 let mut b = look.borrow_mut();
                 let v = *b;
@@ -176,6 +191,11 @@ pub fn generia_start() {
                 v
             };
             let mut p = pose.borrow_mut();
+            if agent_mode {
+                let ground = terrain.height_at(p.x, p.z);
+                let control = agent_control(&p, ground, tick, &waypoints, &mut wp_idx.borrow_mut());
+                apply_control(&mut k, control);
+            }
             step(&mut p, &k, l);
             let ground = terrain.height_at(p.x, p.z);
             let eye = Vec3::new(p.x, ground + EYE_HEIGHT_M, p.z);
@@ -363,6 +383,57 @@ fn camera_view_proj(p: &Pose, ground: f32, fov_deg: f32, near: f32, far: f32) ->
     let proj = Mat4::perspective(fov_deg.to_radians(), aspect, near, far).unwrap_or(Mat4::IDENTITY);
     let view = Mat4::look_at(eye, target, Vec3::UNIT_Y).unwrap_or(Mat4::IDENTITY);
     proj.multiply(view)
+}
+
+// --- autonomous benchmark walk (agent) -----------------------------------------
+
+/// Whether `?agent=1` is present in the URL — enables the autonomous walk.
+fn agent_preference() -> bool {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .map(|s| s.contains("agent=1"))
+        .unwrap_or(false)
+}
+
+/// The deterministic waypoint ring the agent circles (a big loop through the
+/// streaming world, so chunks load/unload + the view varies across the run).
+fn agent_waypoints() -> Vec<(f32, f32)> {
+    (0..AGENT_WAYPOINTS)
+        .map(|i| {
+            let a = i as f32 / AGENT_WAYPOINTS as f32 * std::f32::consts::TAU;
+            (WALK_RADIUS_M * a.cos(), WALK_RADIUS_M * a.sin())
+        })
+        .collect()
+}
+
+/// One agent tick: seek the current waypoint (turn-toward + forward) through the
+/// first-person control harness, advancing to the next waypoint on arrival. Returns
+/// the control bitmask to fold into the keys.
+fn agent_control(p: &Pose, ground: f32, tick: u64, waypoints: &[(f32, f32)], wp_idx: &mut usize) -> u32 {
+    let m = |x: f32| AgentHarnessApi::micro(Meters::finite_or_zero(x));
+    let pose_micro = (m(p.x), m(ground + EYE_HEIGHT_M), m(p.z), m(p.yaw));
+    // generia's forward convention (see `step`): (sin yaw, -cos yaw).
+    let forward_micro = (m(p.yaw.sin()), m(-p.yaw.cos()));
+    let (gx, gz) = waypoints[*wp_idx % waypoints.len()];
+    let goal_micro = (m(gx), m(ground), m(gz));
+    let (control, _reason, _brain, _emitted, arrived) =
+        AgentHarnessApi::decide_goto(AGENT_ID, tick, pose_micro, forward_micro, goal_micro, m(ARRIVE_RADIUS_M));
+    if arrived == 1 {
+        *wp_idx = (*wp_idx + 1) % waypoints.len();
+    }
+    control
+}
+
+/// Fold an agent control bitmask into the keyboard keys (OR, so a human at the
+/// keyboard can still nudge the autonomous walk).
+fn apply_control(k: &mut Keys, control: u32) {
+    let has = |flag: u32| control & flag != 0;
+    k.forward |= has(AgentHarnessApi::FORWARD);
+    k.backward |= has(AgentHarnessApi::BACKWARD);
+    k.turn_left |= has(AgentHarnessApi::TURN_LEFT);
+    k.turn_right |= has(AgentHarnessApi::TURN_RIGHT);
+    k.strafe_left |= has(AgentHarnessApi::STRAFE_LEFT);
+    k.strafe_right |= has(AgentHarnessApi::STRAFE_RIGHT);
 }
 
 fn slice16(s: &[f32]) -> [f32; 16] {
