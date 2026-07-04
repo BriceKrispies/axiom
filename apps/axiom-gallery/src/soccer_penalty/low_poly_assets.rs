@@ -61,8 +61,13 @@ pub mod palette {
     // --- field & markings ---
     // Stronger light/dark contrast so the mown bands read as pronounced stripes
     // (they were near-identical and looked flat/minty), and a warmer light band.
-    pub const GRASS_LIGHT: Rgba = Rgba::rgb(0.34, 0.55, 0.22);
-    pub const GRASS_DARK: Rgba = Rgba::rgb(0.22, 0.41, 0.15);
+    // Re-saturated toward the reference's vivid turf: the app has no board-wide
+    // FramePostProcess grade (the GPU champion never applies one — that seam is an
+    // architect job), so the dominant surface's colour punch must come from its
+    // albedo. The green channel now dominates harder and blue is pulled down, which
+    // enriches the grass and warms it off the pale mint the ungraded raster read as.
+    pub const GRASS_LIGHT: Rgba = Rgba::rgb(0.31, 0.60, 0.17);
+    pub const GRASS_DARK: Rgba = Rgba::rgb(0.16, 0.44, 0.10);
     pub const LINE_WHITE: Rgba = Rgba::rgb(0.95, 0.97, 0.95);
 
     // --- goal & net ---
