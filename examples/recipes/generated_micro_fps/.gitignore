@@ -1,0 +1,5 @@
+/target
+*.pack
+Cargo.lock
+web/generated_micro_fps.js
+web/generated_micro_fps_bg.wasm

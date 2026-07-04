@@ -1,0 +1,14 @@
+[app]
+name = "proc-player"
+crate_name = "axiom-proc-player"
+
+allowed_layers = [
+    "math",
+    "recipe",
+    "proc-texture",
+    "proc-mesh",
+]
+
+allowed_modules = [
+    "engine",
+]

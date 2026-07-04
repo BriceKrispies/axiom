@@ -1,0 +1,22 @@
+[layer]
+name = "proc-mesh"
+crate_name = "axiom-proc-mesh"
+depends_on = ["recipe", "proc-core", "space", "noise", "math"]
+
+meaningful_dependency = """
+Proc-mesh adapts recipe parameter words (axiom-recipe Param), the shared graph
+executor (axiom-proc-core ProcCore/NodeEval), a root address (axiom-space
+SpaceApi), value noise (axiom-noise value_noise) and math vectors (axiom-math
+Vec3/Vec2) into a small set of mesh operators. ProcMeshApi bakes a mesh recipe
+through ProcCore with a branchless const-table evaluator into a neutral
+position/normal/uv/index MeshBuffer. The per-node entropy stream that seeds the
+Displace operator is proc-core's contract, delivered through NodeEval -
+axiom-entropy is a transitive dependency of proc-core, not a direct one here.
+"""
+
+introduced_capabilities = ["ProcMeshApi", "MeshBuffer", "MeshOp"]
+consumed_capabilities = ["Param", "ProcCore", "NodeEval", "SpaceApi", "value_noise", "Vec3"]
+
+[[proof_exports]]
+export = "ProcMeshApi"
+must_reference = ["ProcCore", "SpaceApi"]

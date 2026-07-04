@@ -1,0 +1,24 @@
+[package]
+name = "axiom-proc-player"
+description = "Composition-leaf app: the Axiom Proc v0 Player. It bakes texture and mesh recipes through the gated generation layers and registers the results as ordinary Axiom runtime resources (add_texture_data / add_mesh_data / add_material), places them in a normal scene with a camera and light, and reports the sizes. Its one demo — a small generated room — proves 'ship the recipe, not the resources'."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "axiom_proc_player"
+path = "src/lib.rs"
+
+[[bin]]
+name = "axiom-proc-player"
+path = "src/main.rs"
+
+[dependencies]
+# The engine umbrella (App/RunningApp/Material/MeshData/scene), the math vector
+# vocabulary the mesh buffers speak, and the four gated generation layers.
+axiom = { path = "../../modules/axiom" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+axiom-proc-texture = { path = "../../crates/axiom-proc-texture" }
+axiom-proc-mesh = { path = "../../crates/axiom-proc-mesh" }

@@ -34,6 +34,7 @@ use crate::material::Material;
 use crate::mesh::Mesh;
 use crate::mesh_data::{MeshData, MeshDataError};
 use crate::mesh_geometry::{mesh_data_geometry, mesh_geometry};
+use crate::point_light::PointLight;
 use crate::texture::Texture;
 
 /// Why app-supplied texture pixels are not valid renderable data. Returned by
@@ -131,6 +132,27 @@ impl RunningApp {
             )
             .expect("authored light parameters are valid");
         self.light_direction = light.direction;
+        self.scene.update_world_transforms();
+        node
+    }
+
+    /// Spawn a point-light node carrying `transform` and return its [`Entity`] —
+    /// the positional counterpart to [`Self::add_light`]. The light's colour +
+    /// intensity attach to the new node and radiate from its world position, so a
+    /// scene can place focal lights (a lamp, a fixture, a glowing prop) exactly
+    /// where they belong. World transforms refresh so the node is immediately
+    /// queryable.
+    pub fn add_point_light(&mut self, light: PointLight, transform: Transform) -> Entity {
+        let math = MathApi::new();
+        let node = self.scene.create_node_with_transform(transform);
+        self.scene
+            .add_point_light(
+                &math,
+                node,
+                Vec3::new(light.color.r.get(), light.color.g.get(), light.color.b.get()),
+                light.intensity,
+            )
+            .expect("authored point-light parameters are valid");
         self.scene.update_world_transforms();
         node
     }
@@ -405,6 +427,23 @@ mod tests {
         assert_eq!(
             app.get::<Transform>(entity).map(|t| t.translation),
             Some(Vec3::new(0.0, 5.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn add_point_light_adds_a_positional_light() {
+        let mut app = empty_render_app();
+        assert!(app.tick(0).lights().is_empty());
+
+        let entity = app.add_point_light(
+            PointLight { color: Color::WHITE, intensity: ch(1.0) },
+            Transform::from_translation(Vec3::new(2.0, 3.0, -1.0)),
+        );
+
+        assert_eq!(app.tick(1).lights().len(), 1);
+        assert_eq!(
+            app.get::<Transform>(entity).map(|t| t.translation),
+            Some(Vec3::new(2.0, 3.0, -1.0))
         );
     }
 

@@ -1,0 +1,25 @@
+[package]
+name = "axiom-proc-mesh"
+description = "Axiom layer: a tiny set of mesh operators baked from a recipe. Three sources (Cube, Cylinder, Grid) and seven transforms (Transform, Extrude, Bevel, Bend, Displace, UVProject, Triangulate), dispatched branchlessly by a const table over the operator code and evaluated through the shared proc-core executor into a neutral position/normal/uv/index MeshBuffer. Deterministic (Displace draws its noise seed from the per-node entropy stream), bounded (subdivision is clamped and a max vertex count enforced), branchless, and 100% covered."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# Read parameter words (recipe), run the graph (proc-core), root the address
+# (space), sample value noise (noise) over math vectors (math). The Displace
+# operator's per-node entropy stream arrives through proc-core's NodeEval, so
+# axiom-entropy is proc-core's dependency, not a direct one here.
+axiom-recipe = { path = "../axiom-recipe" }
+axiom-proc-core = { path = "../axiom-proc-core" }
+axiom-space = { path = "../axiom-space" }
+axiom-noise = { path = "../axiom-noise" }
+axiom-math = { path = "../axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

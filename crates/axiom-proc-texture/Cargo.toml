@@ -1,0 +1,25 @@
+[package]
+name = "axiom-proc-texture"
+description = "Axiom layer: a tiny orthogonal set of texture operators baked from a recipe. Four sources (Solid, Gradient, value Noise, staggered Bricks) and four transforms (box Blur, Blend, ColorRamp, HeightToNormal), dispatched branchlessly by a const table over the operator code and evaluated through the shared proc-core executor into a neutral row-major RGBA8 TextureBuffer. Deterministic (Noise draws its seed from the per-node entropy stream), bounded (dimensions and blur radius are clamped), branchless, and 100% covered."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# Read parameter words (recipe), run the graph (proc-core), root the address
+# (space), sample value noise (noise) at a math point (math). The Noise operator's
+# per-node entropy stream arrives through proc-core's NodeEval, so axiom-entropy
+# is proc-core's dependency, not a direct one here.
+axiom-recipe = { path = "../axiom-recipe" }
+axiom-proc-core = { path = "../axiom-proc-core" }
+axiom-space = { path = "../axiom-space" }
+axiom-noise = { path = "../axiom-noise" }
+axiom-math = { path = "../axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

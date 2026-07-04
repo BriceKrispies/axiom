@@ -130,11 +130,14 @@ fn parse_depends_on(value: &toml::Value) -> Vec<String> {
 }
 
 /// The declared dependencies whose import prefix (`axiom_<name>`) is absent from
-/// the set of crates actually referenced.
+/// the set of crates actually referenced. A layer name may contain hyphens (e.g.
+/// `proc-core`), but the compiler reports crate names with underscores
+/// (`axiom_proc_core`), so the dependency name is normalized the same way before
+/// the lookup.
 fn unused_dependencies(declared: &[String], used: &BTreeSet<String>) -> Vec<String> {
     declared
         .iter()
-        .filter(|dep| !used.contains(&format!("axiom_{dep}")))
+        .filter(|dep| !used.contains(&format!("axiom_{}", dep.replace('-', "_"))))
         .cloned()
         .collect()
 }
@@ -194,6 +197,16 @@ mod tests {
         // `math` is declared but `axiom_math` is not referenced.
         assert_eq!(unused_dependencies(&declared, &used), vec!["math".to_string()]);
         used.insert("axiom_math".to_string());
+        assert!(unused_dependencies(&declared, &used).is_empty());
+    }
+
+    #[test]
+    fn unused_dependencies_normalizes_hyphenated_layer_names() {
+        // A hyphenated layer (`proc-core`) is referenced as `axiom_proc_core`.
+        let declared = vec!["proc-core".to_string()];
+        let mut used = BTreeSet::new();
+        assert_eq!(unused_dependencies(&declared, &used), vec!["proc-core".to_string()]);
+        used.insert("axiom_proc_core".to_string());
         assert!(unused_dependencies(&declared, &used).is_empty());
     }
 }

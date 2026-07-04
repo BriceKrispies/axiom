@@ -1,0 +1,60 @@
+# A standalone example recipe project — NOT a workspace member. The empty
+# `[workspace]` table detaches it from the repo's root workspace, so it adds no
+# engine crate and never touches the spine's coverage / branchless / architecture
+# gates. It only *consumes* the existing procedural pipeline (axiom-recipe +
+# axiom-proc-texture + axiom-proc-mesh) and the engine umbrella through path
+# dependencies.
+[workspace]
+
+[package]
+name = "generated-micro-fps"
+description = "A generated micro-FPS recipe project: a hierarchical set of texture/mesh recipes plus a seeded scene grammar and gameplay ruleset that the existing Axiom recipe expander turns into a small playable industrial sci-fi training facility."
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "generated_micro_fps"
+path = "src/lib.rs"
+# `cdylib` for the browser wasm bundle (the `micro_fps_start` entry); `rlib` so
+# the native bin + tests link the same library.
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "generated-micro-fps"
+path = "src/main.rs"
+
+[dependencies]
+# The engine umbrella (App/RunningApp/Material/MeshData/scene/controller) and the
+# math vocabulary the mesh buffers speak.
+axiom = { path = "../../../modules/axiom" }
+axiom-math = { path = "../../../crates/axiom-math" }
+# The procedural pipeline this project is built on.
+axiom-recipe = { path = "../../../crates/axiom-recipe" }
+axiom-proc-texture = { path = "../../../crates/axiom-proc-texture" }
+axiom-proc-mesh = { path = "../../../crates/axiom-proc-mesh" }
+# Deterministic seeded placement for the scene grammar, and the kernel digest for
+# the determinism hash + packed-recipe stamp.
+axiom-space = { path = "../../../crates/axiom-space" }
+axiom-entropy = { path = "../../../crates/axiom-entropy" }
+axiom-kernel = { path = "../../../crates/axiom-kernel" }
+
+# Browser-only arm: the live windowing present loop (the `wasm32` platform edge)
+# and the wasm-bindgen glue. Mirrors how the gallery depends on windowing.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../../modules/axiom-windowing" }
+axiom-host = { path = "../../../crates/axiom-host" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "EventTarget",
+    "KeyboardEvent",
+    "MouseEvent",
+] }
+
+[profile.release]
+opt-level = "s"

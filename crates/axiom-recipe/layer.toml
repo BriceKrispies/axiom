@@ -1,0 +1,22 @@
+[layer]
+name = "recipe"
+crate_name = "axiom-recipe"
+depends_on = ["kernel"]
+
+meaningful_dependency = """
+Recipe adapts the kernel's stable ids, serialization (BinaryWriter/BinaryReader),
+SchemaVersion stamp, and StableHash digest into a domain-agnostic procedural
+recipe graph: a versioned DAG of operator nodes carrying an opaque operator code,
+raw parameter words, and links to strictly-earlier nodes. RecipeGraph validates
+the graph (every input references an earlier node, so it is acyclic by
+construction, within bounds), and serializes it to canonical little-endian bytes
+carrying a StableHash digest. It owns the container only - operator meaning and
+node evaluation belong to a higher generation layer.
+"""
+
+introduced_capabilities = ["RecipeGraph", "Node", "Param", "RecipeError"]
+consumed_capabilities = ["BinaryWriter", "BinaryReader", "SchemaVersion", "StableHash"]
+
+[[proof_exports]]
+export = "RecipeGraph"
+must_reference = ["BinaryWriter", "StableHash"]

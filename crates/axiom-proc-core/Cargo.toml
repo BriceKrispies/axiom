@@ -1,0 +1,21 @@
+[package]
+name = "axiom-proc-core"
+description = "Axiom layer: the domain-agnostic recipe-graph executor. Given a validated recipe and a domain evaluator (one function that turns a node's operator code, parameters, input outputs, and per-node entropy stream into an output), it evaluates the graph in dependency order, caches each node's output for its dependents, keys a deterministic entropy stream per node by (seed, address, version), and reports stable execution errors. It is generic over the output type, so the texture and mesh generation layers share one executor. Branchless and 100% covered."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# The executor walks a recipe graph (axiom-recipe), keying a deterministic
+# per-node entropy stream (axiom-entropy) at a per-node address (axiom-space).
+axiom-recipe = { path = "../axiom-recipe" }
+axiom-space = { path = "../axiom-space" }
+axiom-entropy = { path = "../axiom-entropy" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

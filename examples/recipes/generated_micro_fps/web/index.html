@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Generated Micro-FPS — first person</title>
+    <style>
+      body { margin: 0; background: #0b0d10; color: #cdd3da; font-family: system-ui, sans-serif; }
+      main { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; }
+      canvas { border: 1px solid #2a2f36; image-rendering: pixelated; }
+      .hint { font-size: 13px; opacity: 0.7; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <canvas id="axiom" width="960" height="600"></canvas>
+      <div class="hint">Click the canvas to capture the mouse · move mouse to look · WASD to move · append <code>?backend=canvas2d</code> if WebGPU is unavailable</div>
+    </main>
+    <script type="module">
+      import init, { micro_fps_start } from "./generated_micro_fps.js";
+      await init();
+      micro_fps_start("axiom");
+    </script>
+  </body>
+</html>

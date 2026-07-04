@@ -1,0 +1,25 @@
+[layer]
+name = "proc-core"
+crate_name = "axiom-proc-core"
+depends_on = ["recipe", "space", "entropy"]
+
+meaningful_dependency = """
+Proc-core adapts a recipe graph (axiom-recipe RecipeGraph/Node/Param), space's
+Address, and entropy's address-keyed stream into a deterministic graph executor.
+ProcCore validates the recipe, evaluates its nodes in dependency (id) order,
+caches each node's output so its dependents read it, and keys a per-node
+EntropyStream by (seed, SpaceApi::child(base, node), version) which it hands to a
+domain evaluator. It is generic over the output type and owns no operators - what
+a node computes is the domain layer's job.
+"""
+
+introduced_capabilities = ["ProcCore", "NodeEval", "ProcError"]
+consumed_capabilities = ["RecipeGraph", "Param", "SpaceApi", "Address", "EntropyApi", "EntropyStream"]
+
+[[proof_exports]]
+export = "ProcCore"
+must_reference = ["SpaceApi", "EntropyApi"]
+
+[[proof_exports]]
+export = "NodeEval"
+must_reference = ["EntropyStream", "Param"]

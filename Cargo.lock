@@ -621,6 +621,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-proc-core"
+version = "0.1.0"
+dependencies = [
+ "axiom-entropy",
+ "axiom-recipe",
+ "axiom-space",
+]
+
+[[package]]
 name = "axiom-proc-fuzz"
 version = "0.1.0"
 dependencies = [
@@ -643,12 +652,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-proc-mesh"
+version = "0.1.0"
+dependencies = [
+ "axiom-math",
+ "axiom-noise",
+ "axiom-proc-core",
+ "axiom-recipe",
+ "axiom-space",
+]
+
+[[package]]
+name = "axiom-proc-player"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-math",
+ "axiom-proc-mesh",
+ "axiom-proc-texture",
+ "axiom-recipe",
+]
+
+[[package]]
 name = "axiom-proc-playground"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-proc",
  "axiom-proc-validate",
+ "axiom-space",
+]
+
+[[package]]
+name = "axiom-proc-texture"
+version = "0.1.0"
+dependencies = [
+ "axiom-math",
+ "axiom-noise",
+ "axiom-proc-core",
+ "axiom-recipe",
  "axiom-space",
 ]
 
@@ -669,6 +711,13 @@ dependencies = [
  "axiom-render",
  "axiom-runtime",
  "axiom-scene",
+]
+
+[[package]]
+name = "axiom-recipe"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
 ]
 
 [[package]]
