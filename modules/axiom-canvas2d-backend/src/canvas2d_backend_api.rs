@@ -210,7 +210,14 @@ impl Canvas2dBackendApi {
         cues.lighting.ground_color = amb.ground();
         cues.lighting.ambient = 1.0;
         let options = self.options.with_depth_cues(cues);
-        SoftwareRasterizer::new(options).rasterize_packet(packet, &self.meshes)
+        // `now_ms` is the injected phase clock and `log_phases` the phase sink:
+        // both real on wasm (`performance.now()` + a console line), no-ops on native
+        // — so the pure rasterizer stays clock- and `web_sys`-free, and the native
+        // path stays deterministic (every phase time reads 0 and is discarded).
+        SoftwareRasterizer::new(options)
+            .with_clock(now_ms)
+            .with_phase_sink(log_phases)
+            .rasterize_packet(packet, &self.meshes)
     }
 
     /// Build the uniform host report from the rasterizer result and the packet's
@@ -346,6 +353,21 @@ fn now_ms() -> f64 {
 fn now_ms() -> f64 {
     0.0
 }
+
+/// The phase sink installed on the rasterizer: log the coarse `convert` /
+/// `rasterize` / `post` millisecond split as its own console line (wasm only;
+/// native is a no-op, so the deterministic path emits nothing). `convert` is the
+/// dominant Canvas2D cost — this line is what the render benchmark parses.
+#[cfg(target_arch = "wasm32")]
+fn log_phases(convert_ms: f64, rasterize_ms: f64, post_ms: f64) {
+    let msg = format!(
+        "axiom-canvas2d PROFILE: convert={convert_ms:.1}ms rasterize={rasterize_ms:.1}ms post={post_ms:.1}ms"
+    );
+    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn log_phases(_convert_ms: f64, _rasterize_ms: f64, _post_ms: f64) {}
 
 /// Log the per-frame raster telemetry + timings (wasm only; native is a no-op so
 /// the deterministic path emits nothing and reads no clock).

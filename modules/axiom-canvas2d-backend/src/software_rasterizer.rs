@@ -75,10 +75,27 @@ pub(crate) struct SoftwareRasterizer {
     framebuffer: SoftwareFramebuffer,
     depth: DepthBuffer,
     options: LowPolyRasterOptions,
+    clock: fn() -> f64,
+    phase_sink: fn(f64, f64, f64),
 }
 
+/// The default phase clock: always `0.0`, so a rasterizer built for a native test
+/// records zero phase times and stays deterministic + clock-free. The backend
+/// overrides it with the real wasm `performance.now()` clock via [`with_clock`].
+fn zero_clock() -> f64 {
+    0.0
+}
+
+/// The default phase sink: discards the `(convert, rasterize, post)` millisecond
+/// split. Native/test rasterizers keep it; the backend installs a wasm console
+/// logger via [`with_phase_sink`], so the phase profile is browser-only telemetry
+/// (matching the host contract, which keeps per-frame timings off the neutral
+/// report — the platform arm logs them).
+fn discard_phases(_convert_ms: f64, _rasterize_ms: f64, _post_ms: f64) {}
+
 impl SoftwareRasterizer {
-    /// A rasterizer sized to the options' framebuffer.
+    /// A rasterizer sized to the options' framebuffer, with the zero phase clock
+    /// and a discarding phase sink.
     pub(crate) fn new(options: LowPolyRasterOptions) -> Self {
         let w = options.framebuffer_width();
         let h = options.framebuffer_height();
@@ -86,18 +103,45 @@ impl SoftwareRasterizer {
             framebuffer: SoftwareFramebuffer::new(w, h),
             depth: DepthBuffer::new(w, h),
             options,
+            clock: zero_clock,
+            phase_sink: discard_phases,
         }
+    }
+
+    /// Install the phase clock (the backend passes the wasm `performance.now()`
+    /// source; native callers keep the `0.0` default).
+    pub(crate) fn with_clock(mut self, clock: fn() -> f64) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Install the phase sink that consumes the `(convert, rasterize, post)`
+    /// millisecond split (the backend passes the wasm console logger; native
+    /// callers keep the discarding default).
+    pub(crate) fn with_phase_sink(mut self, sink: fn(f64, f64, f64)) -> Self {
+        self.phase_sink = sink;
+        self
     }
 
     /// Clear the buffers, rasterize every surviving triangle from `packet`
     /// (projected + culled + LOD'd against `cache`), apply the optional debug
     /// overlay, and return the finished framebuffer bytes + stats.
+    /// The `clock` field is an injected monotonic millisecond source (the backend
+    /// sets the wasm `performance.now()` clock via [`Self::with_clock`]; it defaults
+    /// to a `0.0` clock so native tests stay deterministic). It is read only at
+    /// phase boundaries so the *pure rasterizer never references `web_sys`* — it just
+    /// calls the fn pointer it was handed — and the three coarse phase times
+    /// (`convert` / `rasterize` / `post`) ride out in the result.
     pub(crate) fn rasterize_packet(
         mut self,
         packet: &FramePacket,
         cache: &MeshCache,
     ) -> SoftwareRasterResult {
+        let clock = self.clock;
+        let phase_sink = self.phase_sink;
+        let t_convert0 = clock();
         let converted = convert(packet, cache, &self.options);
+        let t_convert1 = clock();
         let clear = packet.clear_color();
         let overlay = self.options.debug_overlay();
         let fb_w = self.framebuffer.width();
@@ -120,6 +164,7 @@ impl SoftwareRasterizer {
                 .iter()
                 .for_each(|t| rasterize_triangle(rgba, dep, &ctx, t, &mut p));
         }
+        let t_raster1 = clock();
 
         // SDF raymarch pass: composite the frame's SDF scene over the meshes,
         // depth-tested *and* depth-writing against the same buffer, so the fog /
@@ -182,6 +227,12 @@ impl SoftwareRasterizer {
         (overlay == CanvasDebugOverlay::Bounds)
             .then(|| apply_bounds_overlay(&mut self.framebuffer, &converted.triangles));
 
+        let t_post1 = clock();
+        // Report the coarse phase split to the injected sink (a no-op on native /
+        // in tests, the wasm console logger in the browser). The pure rasterizer
+        // measures via the injected clock and reports via the injected sink — it
+        // never references a clock source or `web_sys` itself.
+        phase_sink(t_convert1 - t_convert0, t_raster1 - t_convert1, t_post1 - t_raster1);
         SoftwareRasterResult {
             width: fb_w,
             height: fb_h,

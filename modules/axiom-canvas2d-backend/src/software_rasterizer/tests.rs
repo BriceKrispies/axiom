@@ -426,6 +426,41 @@ fn same_packet_is_byte_identical_every_run() {
     assert_eq!(a, b);
 }
 
+// A monotonic test clock: each read returns the next integer millisecond. Stateless
+// (a free `fn`, so it coerces to the rasterizer's `fn() -> f64` clock) via a
+// thread-local counter — only this test touches it, so it starts at 0.
+thread_local!(static CLOCK_TICKS: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) });
+fn ticking_clock() -> f64 {
+    CLOCK_TICKS.with(|t| {
+        let v = t.get();
+        t.set(v + 1.0);
+        v
+    })
+}
+
+// A recording phase sink: stashes the `(convert, rasterize, post)` split the
+// rasterizer reports, so the test can assert the hooks fired in order.
+thread_local!(static RECORDED_PHASES: std::cell::Cell<(f64, f64, f64)> = const { std::cell::Cell::new((0.0, 0.0, 0.0)) });
+fn record_phases(convert_ms: f64, rasterize_ms: f64, post_ms: f64) {
+    RECORDED_PHASES.with(|r| r.set((convert_ms, rasterize_ms, post_ms)));
+}
+
+#[test]
+fn phase_clock_and_sink_report_the_convert_rasterize_post_split() {
+    let cache = MeshCache::load(&[ground(7, [0.3, 0.7, 0.2, 1.0])]);
+    let p = packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]);
+    // Default clock (0.0) + discarding sink: the deterministic native path still
+    // rasterizes and reports a zero split to the discard sink.
+    let _ = SoftwareRasterizer::new(opts(32, 32)).rasterize_packet(&p, &cache);
+    // An injected clock advancing 1 ms per boundary read (0,1,2,3) + a recording
+    // sink: the sink receives a 1/1/1 split, proving both hooks feed the phases.
+    let _ = SoftwareRasterizer::new(opts(32, 32))
+        .with_clock(ticking_clock)
+        .with_phase_sink(record_phases)
+        .rasterize_packet(&p, &cache);
+    assert_eq!(RECORDED_PHASES.with(std::cell::Cell::get), (1.0, 1.0, 1.0));
+}
+
 #[test]
 fn vertical_grade_darkens_lower_screen_more_than_top() {
     let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
