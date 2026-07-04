@@ -766,6 +766,111 @@ impl WindowingApi {
         });
         Ok(())
     }
+
+    /// Like [`Self::run_web_multi`], but one designated mesh (`stream_mesh_id`) is
+    /// **streamed**: on any frame whose closure returns `Some((vertices, indices))`
+    /// as its last element, that mesh's geometry is replaced in place before the
+    /// frame presents. This is the walkable-world path — a terrain mesh that
+    /// slides/regenerates as the camera moves, while the vegetation rides as normal
+    /// instanced batches, all under the same WebGPU → WebGL2 → Canvas 2D cascade.
+    ///
+    /// The frame closure returns the [`Self::run_web_multi`] tuple (clear, lights,
+    /// shadow view-proj, instanced batches, camera view-proj, caster flags, SDF
+    /// scene) plus the optional new geometry for `stream_mesh_id`. Unlike
+    /// `run_web_multi` this leaner path omits the dev frame-scrubber overlay (a
+    /// streamed world re-authors its geometry every frame, so a recorded rewind is
+    /// not meaningful for it yet). wasm32 only.
+    #[allow(clippy::type_complexity)]
+    pub fn run_web_multi_streaming<F>(
+        self,
+        canvas_id: &str,
+        meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        stream_mesh_id: u64,
+        max_instances: u32,
+        frame_fn: F,
+    ) -> Result<(), wasm_bindgen::JsValue>
+    where
+        F: FnMut(
+                u64,
+            ) -> (
+                [f32; 4],
+                Vec<(u32, [f32; 3], [f32; 3], f32)>,
+                [f32; 16],
+                Vec<(u64, u64, Vec<f32>, u32)>,
+                [f32; 16],
+                Vec<bool>,
+                Option<axiom_host::SdfScene>,
+                Option<(Vec<f32>, Vec<u32>)>,
+            ) + 'static,
+    {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::closure::Closure;
+
+        let canvas = find_canvas(canvas_id)?;
+        let frame_fn = Rc::new(RefCell::new(frame_fn));
+        let windowing = self;
+        let preference = backend_preference();
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let request = match windowing.surface.as_ref() {
+                Some(request) => *request,
+                None => return,
+            };
+            let width = request.descriptor().viewport().physical_width();
+            let height = request.descriptor().viewport().physical_height();
+            let backend = match select_backend_or_report(
+                preference,
+                &request,
+                canvas,
+                &meshes,
+                &materials,
+                max_instances,
+            )
+            .await
+            {
+                Some(backend) => Rc::new(RefCell::new(backend)),
+                None => return,
+            };
+            let win = Rc::new(RefCell::new(windowing));
+            let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
+            let g = f.clone();
+            let be = backend.clone();
+            let ff = frame_fn.clone();
+            *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+                let tick = win.borrow_mut().step();
+                let (clear, lights, light_vp, batches, camera_vp, casters, sdf, new_geometry) =
+                    (ff.borrow_mut())(tick);
+                // Slide the streamed mesh on frames that carry new geometry (an empty
+                // option iterates zero times — a combinator, not `if let`).
+                new_geometry.into_iter().for_each(|(v, i)| {
+                    be.borrow_mut().replace_geometry(stream_mesh_id, &v, &i);
+                });
+                let _ = be.borrow().present(
+                    tick,
+                    width,
+                    height,
+                    clear,
+                    &lights,
+                    light_vp,
+                    &batches,
+                    camera_vp,
+                    &casters,
+                    sdf,
+                );
+                let next = f.borrow();
+                next.as_ref().into_iter().for_each(|cb| {
+                    let _ = request_animation_frame(cb);
+                });
+            }) as Box<dyn FnMut()>));
+            let initial = g.borrow();
+            initial.as_ref().into_iter().for_each(|cb| {
+                let _ = request_animation_frame(cb);
+            });
+        });
+        Ok(())
+    }
 }
 
 /// A live presenter bound to a canvas: the selected backend, the scene it
