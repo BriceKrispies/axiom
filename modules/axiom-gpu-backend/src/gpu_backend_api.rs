@@ -148,7 +148,7 @@ impl GpuBackendApi {
                 .live
                 .as_ref()
                 .map(|live| {
-                    live.render_frame(lights, light_view_proj, batches, clear_color, sdf, self.capability.bits())
+                    live.render_frame(lights, light_view_proj, batches, &[], clear_color, sdf, self.capability.bits())
                         .is_ok()
                 })
                 .unwrap_or(false);
@@ -168,17 +168,34 @@ impl GpuBackendApi {
     /// reconfigured around, or there is no live binding; `Err` only on an
     /// unrecoverable loss. wasm32 only.
     #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::too_many_arguments)]
     pub fn present_frame_result(
         &self,
         clear_color: [f32; 4],
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        skinned_draws: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
         sdf: Option<&SdfScene>,
     ) -> Result<(), wasm_bindgen::JsValue> {
+        let skinned: Vec<crate::scene_renderer::SkinnedGpuDraw> = skinned_draws
+            .iter()
+            .map(|(mesh_id, material_id, mvp, world, color, palette)| {
+                crate::scene_renderer::SkinnedGpuDraw {
+                    mesh_id: *mesh_id,
+                    material_id: *material_id,
+                    mvp: *mvp,
+                    world: *world,
+                    color: *color,
+                    palette: palette.clone(),
+                }
+            })
+            .collect();
         self.live
             .as_ref()
-            .map(|live| live.render_frame(lights, light_view_proj, batches, clear_color, sdf, self.capability.bits()))
+            .map(|live| {
+                live.render_frame(lights, light_view_proj, batches, &skinned, clear_color, sdf, self.capability.bits())
+            })
             .unwrap_or(Ok(()))
     }
 
@@ -357,6 +374,9 @@ impl GpuBackendApi {
             self.render_width,
             self.render_height,
             meshes,
+            // Live skinned-mesh upload is threaded through the present path as a
+            // follow-up; the live arm currently uploads none.
+            &[],
             materials,
             max_instances,
             self.shadow_size,

@@ -765,6 +765,7 @@ impl WindowingApi {
                     &lights,
                     light_vp,
                     &batches,
+                    &[],
                     NO_CAMERA,
                     &[],
                     // Streaming terrain authors no SDF shapes.
@@ -871,6 +872,7 @@ impl WindowingApi {
                     &lights,
                     light_vp,
                     &batches,
+                    &[],
                     camera_vp,
                     &casters,
                     sdf,
@@ -938,6 +940,12 @@ pub(crate) struct LivePresenter {
     // caller (the runtime) when it registers a mesh or clears the scene; the
     // backend re-upload then happens at most once per change, never per frame.
     applied_mesh_generation: std::cell::Cell<u32>,
+    // This frame's skinned draws (mesh + material ids, mvp/world/colour, joint
+    // palette) — set by the run loop before each present and consumed by
+    // `present_to_backend`. Empty on apps that submit no skinned bodies.
+    #[allow(clippy::type_complexity)]
+    pending_skinned:
+        std::cell::RefCell<Vec<(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)>>,
 }
 
 // The live backends hold no `Debug`; the presenter is a field of the
@@ -954,6 +962,17 @@ impl std::fmt::Debug for LivePresenter {
 
 #[cfg(target_arch = "wasm32")]
 impl LivePresenter {
+    /// Set this frame's skinned draws — the run loop calls this before each present;
+    /// [`Self::present_to_backend`] hands them to the GPU skinning pass. Empty on
+    /// apps that submit no skinned bodies.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn set_skinned(
+        &self,
+        skinned: Vec<(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)>,
+    ) {
+        *self.pending_skinned.borrow_mut() = skinned;
+    }
+
     /// Bind a presenter to `canvas`: select the backend from `?backend=` (else the
     /// WebGPU → WebGL2 → Canvas 2D cascade), upload the mesh set `meshes` and
     /// material set `materials` once, and mount the scrub-only dev overlay so a
@@ -1028,6 +1047,7 @@ impl LivePresenter {
             applied_texture_generation: Cell::new(u32::MAX),
             // No mesh generation applied yet; the first changed set uploads.
             applied_mesh_generation: Cell::new(u32::MAX),
+            pending_skinned: RefCell::new(Vec::new()),
         })
     }
 
@@ -1134,6 +1154,7 @@ impl LivePresenter {
                 lights,
                 light_vp,
                 batches,
+                &self.pending_skinned.borrow(),
                 camera_view_proj,
                 casters,
                 sdf,
@@ -1256,13 +1277,14 @@ impl LiveBackend {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_vp: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        skinned: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
         camera_view_proj: [f32; 16],
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         match self {
             LiveBackend::Gpu(backend) => {
-                backend.present_frame_result(clear, lights, light_vp, batches, sdf.as_ref())
+                backend.present_frame_result(clear, lights, light_vp, batches, skinned, sdf.as_ref())
             }
             LiveBackend::Canvas(backend) => {
                 let packet = frame_packet_from_batches(

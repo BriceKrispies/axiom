@@ -103,6 +103,7 @@ impl LiveGpuBinding {
         render_width: u32,
         render_height: u32,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
+        skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
@@ -249,9 +250,7 @@ impl LiveGpuBinding {
             &queue,
             format,
             meshes,
-            // Skinned meshes are threaded through the present path as a follow-up; the
-            // live arm currently uploads none.
-            &[],
+            skinned_meshes,
             materials,
             // The live arm has no authored normal maps yet; materials get a flat normal.
             &[],
@@ -336,11 +335,13 @@ impl LiveGpuBinding {
     /// [`UpscaleBlit`] samples it across the acquired swap-chain texture (upscaling
     /// on present). Real pixels. A frame skipped for surface recovery (see
     /// [`Self::acquire_texture`]) presents nothing and returns `Ok`.
+    #[allow(clippy::too_many_arguments)]
     pub fn render_frame(
         &self,
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        skinned: &[crate::scene_renderer::SkinnedGpuDraw],
         clear: [f32; 4],
         sdf: Option<&axiom_host::SdfScene>,
         caps: u32,
@@ -363,7 +364,7 @@ impl LiveGpuBinding {
             lights,
             light_view_proj,
             batches,
-            &[],
+            skinned,
             clear,
             sdf,
             caps,
