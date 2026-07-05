@@ -249,9 +249,12 @@ impl GpuBackendApi {
     /// and draws `meshes` / `materials` / `lights` / `batches` (the same data
     /// [`Self::present_frame`] takes, plus the mesh/material sets from
     /// [`Self::initialize`]) through the **same** [`crate::scene_renderer`] the
-    /// browser arm uses, then reads the pixels back. `None` if no native GPU
-    /// adapter is available. Compiled only behind the `offscreen` feature, so it
-    /// never enters the engine's default build or gates.
+    /// browser arm uses, then reads the pixels back. On the readback it applies the
+    /// backend-neutral whole-frame host passes in canonical order: the optional
+    /// `postprocess` cinematic grade FIRST, then the optional `retro_32bit` colour-depth
+    /// quantize + dither — so the screenshot carries the same colour the live/canvas2d
+    /// arms do. `None` if no native GPU adapter is available. Compiled only behind the
+    /// `offscreen` feature, so it never enters the engine's default build or gates.
     #[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
     #[allow(clippy::too_many_arguments)]
     pub fn render_offscreen_rgba(
@@ -266,6 +269,7 @@ impl GpuBackendApi {
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
         ambient: axiom_host::FrameAmbient,
+        postprocess: Option<axiom_host::FramePostProcess>,
         retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
     ) -> Option<Vec<u8>> {
         crate::offscreen::render_to_rgba(
@@ -280,6 +284,7 @@ impl GpuBackendApi {
             clear,
             sdf,
             ambient,
+            postprocess,
             retro_32bit,
         )
     }

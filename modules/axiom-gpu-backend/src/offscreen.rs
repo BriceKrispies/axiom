@@ -32,6 +32,7 @@ pub(crate) fn render_to_rgba(
     clear: [f32; 4],
     sdf: Option<&axiom_host::SdfScene>,
     ambient: axiom_host::FrameAmbient,
+    postprocess: Option<axiom_host::FramePostProcess>,
     retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
 ) -> Option<Vec<u8>> {
     let width = width.max(1);
@@ -174,6 +175,27 @@ pub(crate) fn render_to_rgba(
     });
     drop(mapped);
     readback.unmap();
+    // Cinematic grade (exposure / contrast / saturation) on the finished RGBA, applied
+    // BEFORE the retro colour-depth quantize below — the same whole-frame order the host
+    // composits (grade, then quantize), so the scored GPU champion carries the grade the
+    // live/canvas2d arms carry. A no-op when the caller passes no profile; mirrors the
+    // retro `Option` handling (no branch — the feature-gated offscreen arm is out of the
+    // branchless gate, but stays combinator-shaped anyway).
+    postprocess.into_iter().for_each(|pp| {
+        let packet = axiom_host::FramePacket::new(
+            0,
+            0,
+            axiom_host::FrameViewport::new(width, height),
+            clear,
+            None,
+            Vec::new(),
+            Vec::new(),
+            [0.0; 16],
+            axiom_host::FrameFeatureSet::new(false, false, 0, 0),
+        )
+        .with_postprocess(pp);
+        axiom_host::apply_frame_postprocess(&mut pixels, width, height, &packet);
+    });
     // retro 32-bit colour-depth quantize + ordered dither on the finished RGBA — the shared
     // host post (canvas2d + the live WGSL mirror the same numbers). Built from a
     // minimal packet carrying just the profile.

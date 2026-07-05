@@ -278,6 +278,8 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
         rd.clear,
         None,
         rd.ambient,
+        None,
+        None,
     )
     .expect("a native GPU adapter renders the visual-target frame");
     // The off-screen GPU path takes raw args (no FramePacket), so the composition

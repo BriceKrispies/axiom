@@ -99,11 +99,15 @@ fn main() {
     }
     let outcome = outcome.expect("at least one frame is ticked");
 
-    // The soccer-penalty app carries a retro 32-bit render profile.
+    // The soccer-penalty app carries a retro 32-bit render profile AND a cinematic
+    // grade — the grade is applied before the retro quantize on the readback so the
+    // scored GPU champion carries the same colour the live/canvas2d arms do.
     let retro_32bit =
         (app == "soccer-penalty").then(axiom_host::FrameRetro32BitProfile::retro_32bit);
+    let postprocess = (app == "soccer-penalty").then(axiom_host::FramePostProcess::cinematic);
 
-    let (pixels, w, h) = render(&backend, &meshes, &materials, &outcome, quality, retro_32bit);
+    let (pixels, w, h) =
+        render(&backend, &meshes, &materials, &outcome, quality, postprocess, retro_32bit);
 
     capture::write_png(&out, &pixels, w, h);
     println!("axiom-shot: wrote {out} ({w}x{h}, app={app}, backend={backend}, tick={render_tick})");
@@ -119,11 +123,14 @@ fn render(
     materials: &[(u64, u32, u32, Vec<u8>)],
     outcome: &FrameOutcome,
     quality: u8,
+    postprocess: Option<axiom_host::FramePostProcess>,
     retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
 ) -> (Vec<u8>, u32, u32) {
     match backend {
         "canvas2d" | "canvas" => capture::render_canvas2d(meshes, outcome, quality, WIDTH, HEIGHT),
-        _ => capture::render_gpu(meshes, materials, outcome, WIDTH, HEIGHT, retro_32bit),
+        _ => capture::render_gpu(
+            meshes, materials, outcome, WIDTH, HEIGHT, postprocess, retro_32bit,
+        ),
     }
 }
 
@@ -134,6 +141,7 @@ fn render(
     _materials: &[(u64, u32, u32, Vec<u8>)],
     outcome: &FrameOutcome,
     quality: u8,
+    _postprocess: Option<axiom_host::FramePostProcess>,
     _retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
 ) -> (Vec<u8>, u32, u32) {
     (backend != "canvas2d" && backend != "canvas").then(|| {

@@ -54,6 +54,7 @@ pub fn render_gpu(
     outcome: &FrameOutcome,
     w: u32,
     h: u32,
+    postprocess: Option<axiom_host::FramePostProcess>,
     retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
 ) -> (Vec<u8>, u32, u32) {
     use axiom_gpu_backend::GpuBackendApi;
@@ -75,6 +76,7 @@ pub fn render_gpu(
         outcome.clear_color(),
         outcome.sdf_scene(),
         axiom_host::FrameAmbient::default_hemisphere(),
+        postprocess,
         retro_32bit,
     )
     .expect("a native GPU adapter is required to render a GPU screenshot");
