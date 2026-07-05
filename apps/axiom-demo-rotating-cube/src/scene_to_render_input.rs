@@ -35,6 +35,10 @@ pub(crate) const DEMO_LIGHT_INTENSITY: f32 = 1.0;
 /// Render-side light kind code: a directional light.
 pub(crate) const LIGHT_KIND_DIRECTIONAL: u32 = 0;
 
+/// Render-side pipeline marker for the default basic-lit pipeline (mirrors
+/// `axiom_render::RenderApi::PIPELINE_BASIC_LIT`, un-nameable outside its module).
+pub(crate) const PIPELINE_BASIC_LIT: u32 = 1;
+
 /// One node entry mirrored from a scene snapshot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneNodeArtifact {
@@ -66,23 +70,44 @@ pub struct SceneLightArtifact {
     pub intensity: f32,
 }
 
-/// One renderable entry mirrored from a scene snapshot.
+/// One renderable entry mirrored from a scene snapshot. Carries the full
+/// object binding — mesh + material + the optional albedo `texture_id` and
+/// `animation_id` refs (`0` = untextured / static) the object contract added.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneRenderableArtifact {
     pub id: u64,
     pub node: u64,
     pub mesh_id: u64,
     pub material_id: u64,
+    pub texture_id: u64,
+    pub animation_id: u64,
     pub visible: bool,
 }
 
-/// Plain-data mirror of `axiom_scene::SceneSnapshot`.
+/// One tag entry mirrored from a scene snapshot: `(node id, kind code)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneTagArtifact {
+    pub node: u64,
+    pub kind_code: u32,
+}
+
+/// One bounds entry mirrored from a scene snapshot: `(node id, half-extents)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneBoundsArtifact {
+    pub node: u64,
+    pub half_extents: [f32; 3],
+}
+
+/// Plain-data mirror of `axiom_scene::SceneSnapshot`, including the `tags` and
+/// `bounds` now rolled into the snapshot (M8/H3).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneSnapshotArtifact {
     pub nodes: Vec<SceneNodeArtifact>,
     pub cameras: Vec<SceneCameraArtifact>,
     pub lights: Vec<SceneLightArtifact>,
     pub renderables: Vec<SceneRenderableArtifact>,
+    pub tags: Vec<SceneTagArtifact>,
+    pub bounds: Vec<SceneBoundsArtifact>,
 }
 
 impl SceneSnapshotArtifact {
@@ -152,12 +177,17 @@ pub struct RenderMaterialArtifact {
 
 /// One draw object in the render input. `mesh_idx`/`material_idx` are
 /// indices into the render input's mesh/material arrays (render uses
-/// indices, not resource ids).
+/// indices, not resource ids). Carries the object-contract binding channels:
+/// a per-object `texture_id` (`0` = inherit the material's texture), a
+/// `pipeline` selection (default basic-lit), and a semantic `tag`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderObjectArtifact {
     pub world: Mat4,
     pub mesh_idx: u32,
     pub material_idx: u32,
+    pub texture_id: u64,
+    pub pipeline: u32,
+    pub tag: u32,
     pub visible: bool,
 }
 
@@ -259,6 +289,16 @@ pub(crate) fn scene_to_render_input(
                         world: world.to_matrix(),
                         mesh_idx: mesh_idx as u32,
                         material_idx: material_idx as u32,
+                        // The object binding rides through: its bound texture, the
+                        // default pipeline, and its semantic tag (from the scene's
+                        // rolled-in `Tag`, `0` if the node is untagged).
+                        texture_id: r.texture_id,
+                        pipeline: PIPELINE_BASIC_LIT,
+                        tag: scene
+                            .tags
+                            .iter()
+                            .find(|t| t.node == r.node)
+                            .map_or(0, |t| t.kind_code),
                         visible: r.visible,
                     })
             })
@@ -320,8 +360,12 @@ mod tests {
                 node: 2,
                 mesh_id: 1,
                 material_id: 2,
+                texture_id: 0,
+                animation_id: 0,
                 visible: true,
             }],
+            tags: vec![],
+            bounds: vec![],
         }
     }
 

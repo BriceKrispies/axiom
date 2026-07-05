@@ -32,14 +32,21 @@ pub(crate) fn render_to_rgba(
     clear: [f32; 4],
     sdf: Option<&axiom_host::SdfScene>,
     ambient: axiom_host::FrameAmbient,
-    postprocess: Option<axiom_host::FramePostProcess>,
     retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
+    profile: axiom_host::BackendCapabilityProfile,
+    volumetrics: Option<axiom_host::FrameVolumetrics>,
+    postprocess: Option<axiom_host::FramePostProcess>,
 ) -> Option<Vec<u8>> {
     let width = width.max(1);
     let height = height.max(1);
-    // The retro 32-bit profile drives the low-res internal target (its internal resolution)
-    // and the colour-depth quantize + ordered dither applied to the readback.
-    let internal = retro_32bit.map(|p| (p.internal_width(), p.internal_height()));
+    // The per-fragment capability mask handed to the scene renderer (textures, alpha
+    // cutout, normal mapping, PCF shadow, SDF pass) — the GPU backend consults the same
+    // profile the Canvas 2D backend does.
+    let caps = profile.bits();
+    // Retro is active only when the frame carries a profile AND the capability is on;
+    // it then drives both the low-res internal target and the readback quantize+dither.
+    let retro_active = retro_32bit.filter(|_| profile.contains(axiom_host::RenderCapability::Retro32Bit));
+    let internal = retro_active.map(|p| (p.internal_width(), p.internal_height()));
 
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -98,7 +105,7 @@ pub(crate) fn render_to_rgba(
             let depth_view = create_depth_view(&device, width, height);
             renderer.record(
                 &device, &queue, &color_view, &depth_view, lights, light_view_proj, batches,
-                clear, sdf,
+                clear, sdf, caps,
             );
         }
         Some((iw, ih)) => {
@@ -116,7 +123,7 @@ pub(crate) fn render_to_rgba(
             let depth_view = create_depth_view(&device, iw, ih);
             renderer.record(
                 &device, &queue, &scene_view, &depth_view, lights, light_view_proj, batches,
-                clear, sdf,
+                clear, sdf, caps,
             );
             let blit = UpscaleBlit::new(&device, COLOR_FORMAT, &scene_view, wgpu::FilterMode::Nearest);
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -175,44 +182,41 @@ pub(crate) fn render_to_rgba(
     });
     drop(mapped);
     readback.unmap();
-    // Cinematic grade (exposure / contrast / saturation) on the finished RGBA, applied
-    // BEFORE the retro colour-depth quantize below — the same whole-frame order the host
-    // composits (grade, then quantize), so the scored GPU champion carries the grade the
-    // live/canvas2d arms carry. A no-op when the caller passes no profile; mirrors the
-    // retro `Option` handling (no branch — the feature-gated offscreen arm is out of the
-    // branchless gate, but stays combinator-shaped anyway).
-    postprocess.into_iter().for_each(|pp| {
-        let packet = axiom_host::FramePacket::new(
-            0,
-            0,
-            axiom_host::FrameViewport::new(width, height),
-            clear,
-            None,
-            Vec::new(),
-            Vec::new(),
-            [0.0; 16],
-            axiom_host::FrameFeatureSet::new(false, false, 0, 0),
-        )
-        .with_postprocess(pp);
-        axiom_host::apply_frame_postprocess(&mut pixels, width, height, &packet);
-    });
-    // retro 32-bit colour-depth quantize + ordered dither on the finished RGBA — the shared
-    // host post (canvas2d + the live WGSL mirror the same numbers). Built from a
-    // minimal packet carrying just the profile.
-    retro_32bit.into_iter().for_each(|p| {
-        let packet = axiom_host::FramePacket::new(
-            0,
-            0,
-            axiom_host::FrameViewport::new(width, height),
-            clear,
-            None,
-            Vec::new(),
-            Vec::new(),
-            [0.0; 16],
-            axiom_host::FrameFeatureSet::new(false, false, 0, 0),
-        )
-        .with_retro_32bit_profile(p);
-        axiom_host::apply_frame_retro_32bit(&mut pixels, width, height, &packet);
+    // Capability-gated neutral whole-frame post-passes on the finished RGBA, in the same
+    // order (and via the same host functions) the Canvas 2D backend applies them —
+    // god-rays → filmic grade → retro colour-depth quantize+dither — so both backends
+    // share the post pipeline. Each is skipped when the frame's profile drops it; the
+    // effects ride on one minimal packet (the whole-frame post fns ignore draws/lights).
+    let post_packet = axiom_host::FramePacket::new(
+        0,
+        0,
+        axiom_host::FrameViewport::new(width, height),
+        clear,
+        None,
+        Vec::new(),
+        Vec::new(),
+        [0.0; 16],
+        axiom_host::FrameFeatureSet::new(false, false, 0, 0),
+    );
+    let post_packet = volumetrics
+        .into_iter()
+        .fold(post_packet, |p, v| p.with_volumetrics(v));
+    let post_packet = postprocess
+        .into_iter()
+        .fold(post_packet, |p, pp| p.with_postprocess(pp));
+    let post_packet = retro_active
+        .into_iter()
+        .fold(post_packet, |p, r| p.with_retro_32bit_profile(r));
+    profile
+        .contains(axiom_host::RenderCapability::Volumetrics)
+        .then(|| axiom_host::apply_frame_volumetrics(&mut pixels, width, height, &post_packet));
+    profile
+        .contains(axiom_host::RenderCapability::PostProcess)
+        .then(|| axiom_host::apply_frame_postprocess(&mut pixels, width, height, &post_packet));
+    // Retro is already gated by `retro_active` (profile ∧ present), so applying it
+    // whenever it is active needs no further profile check.
+    retro_active.into_iter().for_each(|_| {
+        axiom_host::apply_frame_retro_32bit(&mut pixels, width, height, &post_packet);
     });
     Some(pixels)
 }

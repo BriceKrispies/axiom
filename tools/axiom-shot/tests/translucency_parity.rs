@@ -199,6 +199,8 @@ fn render_gpu(
         packet.sdf(),
         axiom_host::FrameAmbient::default_hemisphere(),
         None,
+        axiom_host::BackendCapabilityProfile::all(),
+        None,
         None,
     )
     .expect("a native GPU adapter is required to render a GPU screenshot")

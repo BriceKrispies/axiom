@@ -34,7 +34,10 @@ struct Light {
 };
 struct Lights {
     count: u32,
-    _pad0: u32,
+    // The frame's backend capability mask (BackendCapabilityProfile::bits). The
+    // fragment shader gates its per-fragment features on these bits so the GPU
+    // backend consults the same capability profile the Canvas 2D backend does.
+    caps: u32,
     _pad1: u32,
     _pad2: u32,
     // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
@@ -43,6 +46,14 @@ struct Lights {
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
+
+// Capability bits mirrored from axiom_host::RenderCapability (pinned by the host's
+// `capability_bits_are_the_gpu_shader_contract` test): the four per-fragment features
+// this main pass gates.
+const CAP_TEXTURES: u32 = 1u;
+const CAP_ALPHAMASK: u32 = 2u;
+const CAP_NORMALMAP: u32 = 4u;
+const CAP_SHADOWS: u32 = 8u;
 
 @group(2) @binding(0) var shadow_map: texture_depth_2d;
 @group(2) @binding(1) var shadow_samp: sampler_comparison;
@@ -126,16 +137,24 @@ const SHADOW_AMBIENT: f32 = 0.5;
 
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
-    let albedo = textureSample(albedo_tex, albedo_sampler, in.uv);
-    // Alpha cutout: drop fully-transparent texels (foliage leaf-alpha cards) so they
-    // neither shade nor write depth; the soft 0.5..1 rim still alpha-blends.
-    if (albedo.a < 0.5) { discard; }
+    let caps = lights.caps;
+    // Textures capability: sample the albedo image, or fall back to flat white (the
+    // per-vertex/instance `in.color` still tints it) — the GPU peer of the Canvas 2D
+    // flat degrade. `select` evaluates both arms, so the sample stays uniform.
+    let sampled = textureSample(albedo_tex, albedo_sampler, in.uv);
+    let albedo = select(vec4<f32>(1.0, 1.0, 1.0, 1.0), sampled, (caps & CAP_TEXTURES) != 0u);
+    // Alpha cutout capability: drop fully-transparent texels (foliage leaf-alpha cards)
+    // so they neither shade nor write depth; the soft 0.5..1 rim still alpha-blends.
+    // Gated on the AlphaMask bit; off → the quad renders opaque.
+    let cut = ((caps & CAP_ALPHAMASK) != 0u) && (albedo.a < 0.5);
+    if (cut) { discard; }
     let base = albedo * in.color;
     // Perturb the geometric normal by the material's tangent-space normal map. There is
     // no per-vertex tangent, so build the cotangent frame from screen-space derivatives
-    // of world position + uv (Mikkelsen). A flat (0,0,1) normal map leaves N unchanged.
+    // of world position + uv (Mikkelsen). Normal-mapping capability off → a flat
+    // (0,0,1) tangent-space normal, so N stays the geometric normal.
     let geo_n = normalize(in.normal);
-    let nmap = textureSample(normal_tex, normal_sampler, in.uv).xyz * 2.0 - 1.0;
+    let nmap = select(vec3<f32>(0.0, 0.0, 1.0), textureSample(normal_tex, normal_sampler, in.uv).xyz * 2.0 - 1.0, (caps & CAP_NORMALMAP) != 0u);
     let dp1 = dpdx(in.world_pos);
     let dp2 = dpdy(in.world_pos);
     let duv1 = dpdx(in.uv);
@@ -147,7 +166,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let bitangent = (r1 * duv1.y + r2 * duv2.y) * inv_det;
     let inv_max = inverseSqrt(max(dot(tangent, tangent), dot(bitangent, bitangent)));
     let N = normalize(tangent * (nmap.x * inv_max) + bitangent * (nmap.y * inv_max) + geo_n * nmap.z);
-    let shade = shadow_factor(in.world_pos);
+    // Shadow capability off → fully lit (`shadow_factor` is still evaluated in uniform
+    // control flow via `select`, so its `textureSampleCompare` derivatives stay valid).
+    let shade = select(1.0, shadow_factor(in.world_pos), (caps & CAP_SHADOWS) != 0u);
     // Hemisphere ambient from the frame's ambient uniform (sky overhead, warm-dark
     // ground below, blended by the normal's up-component). Strength is folded into the
     // colours, so this is a plain mix — no extra scale. An absent frame ambient is
@@ -747,8 +768,12 @@ impl SceneRenderer {
         batches: &[(u64, u64, Vec<f32>, u32)],
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
+        caps: u32,
     ) {
-        queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights, self.ambient));
+        // Gate the SDF raymarch pass on the frame's Sdf capability bit; a profile that
+        // drops SDF renders meshes only (the same policy the Canvas 2D backend applies).
+        let sdf = sdf.filter(|_| (caps & (axiom_host::RenderCapability::Sdf as u32)) != 0);
+        queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights, self.ambient, caps));
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
@@ -1294,15 +1319,18 @@ fn upload_texture(
 }
 
 /// Pack the frame's lights into the std140 lighting-uniform byte layout: a
-/// 48-byte header — light count `u32` + 12 bytes padding, then the hemisphere-ambient
+/// 48-byte header — light count `u32` + capability mask `u32` + 8 bytes padding, then the hemisphere-ambient
 /// `sky` + `ground` `vec4`s (rgb, w unused) — then `MAX_LIGHTS` entries of two
 /// `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb, intensity)`. Entries past
 /// the count stay zero. Capped at `MAX_LIGHTS`.
-fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)], ambient: axiom_host::FrameAmbient) -> Vec<u8> {
+fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)], ambient: axiom_host::FrameAmbient, caps: u32) -> Vec<u8> {
     let count = lights.len().min(MAX_LIGHTS);
     let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
     bytes.extend_from_slice(&(count as u32).to_le_bytes());
-    bytes.extend_from_slice(&[0u8; 12]);
+    // The capability mask occupies the first header pad slot (the WGSL `caps` field);
+    // the remaining two u32 pads stay zero.
+    bytes.extend_from_slice(&caps.to_le_bytes());
+    bytes.extend_from_slice(&[0u8; 8]);
     let (sky, ground) = (ambient.sky(), ambient.ground());
     [sky[0], sky[1], sky[2], 0.0, ground[0], ground[1], ground[2], 0.0]
         .iter()

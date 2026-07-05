@@ -88,7 +88,7 @@ mod tests {
     fn push_and_at_round_trip() {
         let mut l = RenderCommandList::new();
         l.push(RenderCommand::clear_frame([0.0, 0.0, 0.0, 1.0]));
-        l.push(RenderCommand::draw_indexed(7, 36, Mat4::IDENTITY));
+        l.push(RenderCommand::draw_indexed(7, 0, 36, Mat4::IDENTITY));
         assert_eq!(l.len(), 2);
         assert_eq!(
             l.at(0).unwrap().kind_code(),

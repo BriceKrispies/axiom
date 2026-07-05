@@ -17,15 +17,15 @@ determinism_test = "golden_artifacts"
 
 [[golden]]
 path = "tests/golden/full_artifact_tick0.bin"
-sha256 = "0c0d6fca172c75d0257207e6aacbf1761397b9ecbd345b8c69feb26bc13debfb"
+sha256 = "ba807de52c500419fdc3004cd71d5b4aa3bc30c1012afb0c0828c6f76d56e723"
 
 [[golden]]
 path = "tests/golden/full_artifact_tick60.bin"
-sha256 = "179b04d378a235e4692bf0c5665713c2932fa10e0f04ee4309e38eb8f3f45cec"
+sha256 = "1888c43d745ad2f6ba17d3e486e8a0914157abe7d48410416fff34bcdbb84c5c"
 
 [[golden]]
 path = "tests/golden/scene_snapshot_tick0.bin"
-sha256 = "552233ae31db7402b29c3a9fddfe729de8c59bdca5b6c423d4b73a6e03f05f21"
+sha256 = "5823750865a78ec08b9e3e3501d462b0aad4a725a42eb7ec48dd8b706faf897f"
 
 [[golden]]
 path = "tests/golden/resolved_resources_tick0.bin"
@@ -33,15 +33,15 @@ sha256 = "20a60fd987f1ecf97a4151a132431c7f3fbc3a5a0cf565b0f26ebb7faccec6a2"
 
 [[golden]]
 path = "tests/golden/render_input_tick0.bin"
-sha256 = "8bad211ba28b01339e27981aee7446da296b1acd704fa2ebf93cf712a0d26187"
+sha256 = "cbc8686b3e9652b179cb5caf3d2f953282edc67af13d9d0e36dd4d2967ae310c"
 
 [[golden]]
 path = "tests/golden/render_command_list_tick0.bin"
-sha256 = "4acf6ac9253cc27eeb51f679c77b294708375aa8256b39d9385194f1fc0ac53f"
+sha256 = "4a96d5573c0950d437d153849998fdcc9a33554a8870c4a1752ea968b657022c"
 
 [[golden]]
 path = "tests/golden/gpu_submission_tick0.bin"
-sha256 = "d3003887217de42cdec9289a12a80d0424fe4594e0609e4206afd851031f3b94"
+sha256 = "0a5c3e5cc09e4a6dc5b86134d80203feff94808b17f7543d47c6d1720c44b27e"
 
 [[golden]]
 path = "tests/golden/gpu_submission_report_tick0.bin"

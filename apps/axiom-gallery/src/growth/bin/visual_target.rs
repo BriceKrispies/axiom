@@ -279,6 +279,8 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
         None,
         rd.ambient,
         None,
+        axiom_host::BackendCapabilityProfile::all(),
+        None,
         None,
     )
     .expect("a native GPU adapter renders the visual-target frame");

@@ -281,6 +281,8 @@ fn render_capture(inputs: &CaptureInputs) -> Vec<u8> {
         None,
         axiom_host::FrameAmbient::default_hemisphere(),
         None,
+        axiom_host::BackendCapabilityProfile::all(),
+        None,
         None,
     )
     .expect("a native GPU adapter renders the growth snapshot")

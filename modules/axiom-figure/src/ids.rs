@@ -4,6 +4,7 @@
 //!
 //! [`FigureApi`]: crate::FigureApi
 
+pub use crate::bound_figure::BoundFigure;
 pub use crate::definition::FigureDefinition;
 pub use crate::figure_error::{FigureError, FigureResult};
 pub use crate::part::FigurePart;

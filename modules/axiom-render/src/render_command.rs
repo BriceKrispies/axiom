@@ -26,6 +26,7 @@ pub struct RenderCommand {
     material_id: u64,
     material_texture_id: u64,
     object_id: u64,
+    object_tag: u32,
     index_count: u32,
     world: Mat4,
 }
@@ -52,6 +53,7 @@ impl RenderCommand {
         material_id: 0,
         material_texture_id: 0,
         object_id: 0,
+        object_tag: 0,
         index_count: 0,
         world: Mat4::IDENTITY,
     };
@@ -105,13 +107,19 @@ impl RenderCommand {
     }
 
     /// A `DrawIndexed` command carrying its drawn object's `object_id`, its
-    /// `index_count`, and its `world` matrix. The id rides on the command so a
-    /// backend-neutral frame packet can preserve object identity from the
-    /// command list alone.
-    pub const fn draw_indexed(object_id: u64, index_count: u32, world: Mat4) -> Self {
+    /// semantic `object_tag` (`0` = untagged), its `index_count`, and its `world`
+    /// matrix. The id and tag ride on the command so a backend-neutral frame
+    /// packet can preserve object identity and kind from the command list alone.
+    pub const fn draw_indexed(
+        object_id: u64,
+        object_tag: u32,
+        index_count: u32,
+        world: Mat4,
+    ) -> Self {
         RenderCommand {
             kind: Self::KIND_DRAW_INDEXED,
             object_id,
+            object_tag,
             index_count,
             world,
             ..Self::DEFAULT
@@ -165,6 +173,12 @@ impl RenderCommand {
     pub fn as_draw_object_id(&self) -> Option<u64> {
         (self.kind == Self::KIND_DRAW_INDEXED).then_some(self.object_id)
     }
+
+    /// Extract this command's `DrawIndexed` semantic object tag (`0` = untagged),
+    /// or `None` for any other kind.
+    pub fn as_draw_object_tag(&self) -> Option<u32> {
+        (self.kind == Self::KIND_DRAW_INDEXED).then_some(self.object_tag)
+    }
 }
 
 #[cfg(test)]
@@ -184,7 +198,7 @@ mod tests {
             RenderCommand::KIND_CLEAR_FRAME
         );
         assert_eq!(
-            RenderCommand::draw_indexed(7, 36, Mat4::IDENTITY).kind_code(),
+            RenderCommand::draw_indexed(7, 0, 36, Mat4::IDENTITY).kind_code(),
             RenderCommand::KIND_DRAW_INDEXED
         );
     }
@@ -219,11 +233,13 @@ mod tests {
         // The texture accessor is gated on the SetMaterial kind.
         assert_eq!(RenderCommand::set_mesh(7).as_material_texture_id(), None);
 
-        let draw = RenderCommand::draw_indexed(13, 36, Mat4::IDENTITY);
+        let draw = RenderCommand::draw_indexed(13, 4, 36, Mat4::IDENTITY);
         assert_eq!(draw.as_draw_indexed(), Some((36, Mat4::IDENTITY)));
         assert_eq!(draw.as_draw_object_id(), Some(13));
+        assert_eq!(draw.as_draw_object_tag(), Some(4));
         assert_eq!(draw.as_material_id(), None);
-        // The object-id accessor is gated on the DrawIndexed kind.
+        // The object-id and tag accessors are gated on the DrawIndexed kind.
         assert_eq!(RenderCommand::set_mesh(7).as_draw_object_id(), None);
+        assert_eq!(RenderCommand::set_mesh(7).as_draw_object_tag(), None);
     }
 }

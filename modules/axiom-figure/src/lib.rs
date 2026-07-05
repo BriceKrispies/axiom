@@ -30,6 +30,7 @@
 //! value vocabulary ([`FigureDefinition`], [`FigurePart`], [`PosedPart`],
 //! [`FigureError`], [`FigureResult`]).
 
+mod bound_figure;
 mod definition;
 mod figure_api;
 mod figure_error;
@@ -38,4 +39,4 @@ mod part;
 mod posed_part;
 
 pub use figure_api::FigureApi;
-pub use ids::{FigureDefinition, FigureError, FigurePart, FigureResult, PosedPart};
+pub use ids::{BoundFigure, FigureDefinition, FigureError, FigurePart, FigureResult, PosedPart};

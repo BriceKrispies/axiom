@@ -40,8 +40,8 @@ pub use vertical_slice::{
 pub use scene_to_render_input::{
     RenderCameraArtifact, RenderInputArtifact, RenderLightArtifact, RenderMaterialArtifact,
     RenderMeshArtifact, RenderObjectArtifact, ResolvedMaterialArtifact, ResolvedMeshArtifact,
-    ResolvedResourcesArtifact, SceneCameraArtifact, SceneLightArtifact, SceneNodeArtifact,
-    SceneRenderableArtifact, SceneSnapshotArtifact,
+    ResolvedResourcesArtifact, SceneBoundsArtifact, SceneCameraArtifact, SceneLightArtifact,
+    SceneNodeArtifact, SceneRenderableArtifact, SceneSnapshotArtifact, SceneTagArtifact,
 };
 
 pub use render_to_gpu_submission::{

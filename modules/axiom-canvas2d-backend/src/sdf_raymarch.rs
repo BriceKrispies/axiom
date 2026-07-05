@@ -442,13 +442,33 @@ mod tests {
         )
         .with_sdf(scene);
 
+        use axiom_host::{BackendCapabilityProfile, RenderCapability};
         let mut fb = SoftwareFramebuffer::new(16, 16);
         fb.clear([0.0, 0.0, 0.0, 1.0]);
         let mut depth = DepthBuffer::new(16, 16);
         depth.clear_far();
-        let written = crate::software_rasterizer::sdf_pass(&mut fb, &mut depth, &with);
+        // Canvas 2D's default profile keeps the CPU SDF march (Sdf capability on).
+        let written =
+            crate::software_rasterizer::sdf_pass(&mut fb, &mut depth, &with, BackendCapabilityProfile::canvas2d());
         assert!(written > 0);
         assert!(pixel(&fb, 16, 8, 8)[0] > 60);
+
+        // A profile that drops the Sdf capability skips the pass even though the packet
+        // carries a scene — the gate that replaces the old unconditional march.
+        let mut fb_gated = SoftwareFramebuffer::new(16, 16);
+        fb_gated.clear([0.0, 0.0, 0.0, 1.0]);
+        let mut depth_gated = DepthBuffer::new(16, 16);
+        depth_gated.clear_far();
+        assert_eq!(
+            crate::software_rasterizer::sdf_pass(
+                &mut fb_gated,
+                &mut depth_gated,
+                &with,
+                BackendCapabilityProfile::canvas2d().without(RenderCapability::Sdf),
+            ),
+            0
+        );
+        assert_eq!(pixel(&fb_gated, 16, 8, 8), [0, 0, 0, 255]);
 
         // A camera-only packet carries no SDF scene, so the pass is a no-op.
         let without = FramePacket::new(
@@ -466,6 +486,9 @@ mod tests {
         fb2.clear([0.0, 0.0, 0.0, 1.0]);
         let mut depth2 = DepthBuffer::new(16, 16);
         depth2.clear_far();
-        assert_eq!(crate::software_rasterizer::sdf_pass(&mut fb2, &mut depth2, &without), 0);
+        assert_eq!(
+            crate::software_rasterizer::sdf_pass(&mut fb2, &mut depth2, &without, BackendCapabilityProfile::canvas2d()),
+            0
+        );
     }
 }

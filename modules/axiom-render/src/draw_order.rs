@@ -20,7 +20,9 @@ pub(crate) struct OrderedDraw {
     pub(crate) mesh_id: u64,
     pub(crate) material_id: u64,
     pub(crate) texture_id: u64,
+    pub(crate) pipeline: u32,
     pub(crate) object_id: u64,
+    pub(crate) object_tag: u32,
     pub(crate) index_count: u32,
     pub(crate) world: Mat4,
     translucent: bool,
@@ -67,8 +69,13 @@ pub(crate) fn ordered_draws(input: &RenderInput) -> Vec<OrderedDraw> {
                     OrderedDraw {
                         mesh_id: mesh.id(),
                         material_id: material.id(),
-                        texture_id: material.texture_id(),
+                        // Per-object albedo override wins when set (`!= 0`); else
+                        // the material's own texture — a branchless table select.
+                        texture_id: [material.texture_id(), object.texture_id()]
+                            [usize::from(object.texture_id() != 0)],
+                        pipeline: object.pipeline(),
                         object_id: object.id(),
+                        object_tag: object.tag(),
                         index_count: mesh.indices().len() as u32,
                         world: object.world(),
                         translucent,
@@ -181,6 +188,49 @@ mod tests {
         api.add_input_object(&mut input, 100, at_z(-2.0), mesh, opaque, true);
         api.add_input_object(&mut input, 200, at_z(-5.0), mesh, opaque, true);
         assert_eq!(order(&input), vec![100, 200]);
+    }
+
+    #[test]
+    fn per_object_texture_override_pipeline_and_tag_are_carried() {
+        let api = api();
+        let mut input = api.new_input(64, 64);
+        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        // A material carrying its own albedo texture (id 5).
+        let mat = api.add_input_textured_material(&mut input, 10, Vec4::ONE, 5);
+        // Object A inherits the material's texture (override 0); object B overrides
+        // it with texture 9, selects the UNLIT pipeline, and carries tag 3.
+        api.add_input_bound_object(
+            &mut input,
+            100,
+            Mat4::IDENTITY,
+            mesh,
+            mat,
+            0,
+            RenderApi::PIPELINE_BASIC_LIT,
+            0,
+            true,
+        );
+        api.add_input_bound_object(
+            &mut input,
+            200,
+            Mat4::IDENTITY,
+            mesh,
+            mat,
+            9,
+            RenderApi::PIPELINE_UNLIT,
+            3,
+            true,
+        );
+        let draws = ordered_draws(&input);
+        assert_eq!(draws.len(), 2);
+        // A: no override → inherits the material texture (5), default pipeline, tag 0.
+        assert_eq!(draws[0].texture_id, 5);
+        assert_eq!(draws[0].pipeline, RenderApi::PIPELINE_BASIC_LIT);
+        assert_eq!(draws[0].object_tag, 0);
+        // B: override wins (9), UNLIT pipeline, tag 3.
+        assert_eq!(draws[1].texture_id, 9);
+        assert_eq!(draws[1].pipeline, RenderApi::PIPELINE_UNLIT);
+        assert_eq!(draws[1].object_tag, 3);
     }
 
     #[test]

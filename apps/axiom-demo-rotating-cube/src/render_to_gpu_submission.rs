@@ -34,6 +34,8 @@ pub struct RenderCommandArtifact {
     pipeline_id: u32,
     mesh_id: u64,
     material_id: u64,
+    material_texture_id: u64,
+    object_tag: u32,
     index_count: u32,
     world: Mat4,
 }
@@ -57,6 +59,8 @@ impl RenderCommandArtifact {
         pipeline_id: 0,
         mesh_id: 0,
         material_id: 0,
+        material_texture_id: 0,
+        object_tag: 0,
         index_count: 0,
         world: Mat4::IDENTITY,
     };
@@ -98,21 +102,25 @@ impl RenderCommandArtifact {
         }
     }
 
-    /// A `SetMaterial` command carrying its `material_id`.
-    pub const fn set_material(material_id: u64) -> Self {
+    /// A `SetMaterial` command carrying its `material_id` and the albedo
+    /// `material_texture_id` it samples (`0` = untextured).
+    pub const fn set_material(material_id: u64, material_texture_id: u64) -> Self {
         RenderCommandArtifact {
             kind: Self::KIND_SET_MATERIAL,
             material_id,
+            material_texture_id,
             ..Self::DEFAULT
         }
     }
 
-    /// A `DrawIndexed` command carrying its `index_count` and `world` matrix.
-    pub const fn draw_indexed(index_count: u32, world: Mat4) -> Self {
+    /// A `DrawIndexed` command carrying its `index_count`, `world` matrix, and
+    /// the drawn object's semantic `object_tag` (`0` = untagged).
+    pub const fn draw_indexed(index_count: u32, world: Mat4, object_tag: u32) -> Self {
         RenderCommandArtifact {
             kind: Self::KIND_DRAW_INDEXED,
             index_count,
             world,
+            object_tag,
             ..Self::DEFAULT
         }
     }
@@ -142,14 +150,20 @@ impl RenderCommandArtifact {
         (self.kind == Self::KIND_SET_MESH).then_some(self.mesh_id)
     }
 
-    /// Extract this command's `SetMaterial` id, or `None`.
-    pub fn as_set_material(&self) -> Option<u64> {
-        (self.kind == Self::KIND_SET_MATERIAL).then_some(self.material_id)
+    /// Extract this command's `SetMaterial` `(material_id, texture_id)`, or
+    /// `None`. The texture id (`0` = untextured) is the binding the headless
+    /// slice previously dropped (audit M1) — it now threads through to the GPU
+    /// submission.
+    pub fn as_set_material(&self) -> Option<(u64, u64)> {
+        (self.kind == Self::KIND_SET_MATERIAL)
+            .then_some((self.material_id, self.material_texture_id))
     }
 
-    /// Extract this command's `DrawIndexed` `(index_count, world)`, or `None`.
-    pub fn as_draw_indexed(&self) -> Option<(u32, Mat4)> {
-        (self.kind == Self::KIND_DRAW_INDEXED).then_some((self.index_count, self.world))
+    /// Extract this command's `DrawIndexed` `(index_count, world, object_tag)`,
+    /// or `None`.
+    pub fn as_draw_indexed(&self) -> Option<(u32, Mat4, u32)> {
+        (self.kind == Self::KIND_DRAW_INDEXED)
+            .then_some((self.index_count, self.world, self.object_tag))
     }
 }
 
@@ -169,6 +183,7 @@ pub struct GpuCommandArtifact {
     pipeline_id: u32,
     mesh_id: u64,
     material_id: u64,
+    material_texture_id: u64,
     index_count: u32,
     world: Mat4,
 }
@@ -192,6 +207,7 @@ impl GpuCommandArtifact {
         pipeline_id: 0,
         mesh_id: 0,
         material_id: 0,
+        material_texture_id: 0,
         index_count: 0,
         world: Mat4::IDENTITY,
     };
@@ -233,11 +249,13 @@ impl GpuCommandArtifact {
         }
     }
 
-    /// A `SetMaterial` command carrying its `material_id`.
-    pub const fn set_material(material_id: u64) -> Self {
+    /// A `SetMaterial` command carrying its `material_id` and the albedo
+    /// `material_texture_id` it samples (`0` = untextured).
+    pub const fn set_material(material_id: u64, material_texture_id: u64) -> Self {
         GpuCommandArtifact {
             kind: Self::KIND_SET_MATERIAL,
             material_id,
+            material_texture_id,
             ..Self::DEFAULT
         }
     }
@@ -285,9 +303,11 @@ impl GpuCommandArtifact {
         (self.kind == Self::KIND_SET_MESH).then_some(self.mesh_id)
     }
 
-    /// Extract this command's `SetMaterial` id, or `None`.
-    pub fn as_set_material(&self) -> Option<u64> {
-        (self.kind == Self::KIND_SET_MATERIAL).then_some(self.material_id)
+    /// Extract this command's `SetMaterial` `(material_id, texture_id)`, or
+    /// `None` — the texture the headless slice now carries to the backend.
+    pub fn as_set_material(&self) -> Option<(u64, u64)> {
+        (self.kind == Self::KIND_SET_MATERIAL)
+            .then_some((self.material_id, self.material_texture_id))
     }
 
     /// Extract this command's `DrawIndexed` `(index_count, world)`, or `None`.
@@ -342,12 +362,12 @@ pub(crate) fn render_command_list_to_gpu_submission(
                 })
                 .or_else(|| command.as_set_mesh().map(GpuCommandArtifact::set_mesh))
                 .or_else(|| {
-                    command
-                        .as_set_material()
-                        .map(GpuCommandArtifact::set_material)
+                    command.as_set_material().map(|(material_id, texture_id)| {
+                        GpuCommandArtifact::set_material(material_id, texture_id)
+                    })
                 })
                 .or_else(|| {
-                    command.as_draw_indexed().map(|(index_count, world)| {
+                    command.as_draw_indexed().map(|(index_count, world, _tag)| {
                         GpuCommandArtifact::draw_indexed(index_count, world)
                     })
                 })
@@ -373,8 +393,8 @@ mod tests {
                 RenderCommandArtifact::set_camera(Mat4::IDENTITY, Mat4::IDENTITY),
                 RenderCommandArtifact::set_pipeline(1),
                 RenderCommandArtifact::set_mesh(7),
-                RenderCommandArtifact::set_material(9),
-                RenderCommandArtifact::draw_indexed(36, Mat4::IDENTITY),
+                RenderCommandArtifact::set_material(9, 11),
+                RenderCommandArtifact::draw_indexed(36, Mat4::IDENTITY, 4),
             ],
         }
     }
@@ -409,7 +429,8 @@ mod tests {
         );
         assert_eq!(sub.commands[2].as_set_pipeline(), Some(1));
         assert_eq!(sub.commands[3].as_set_mesh(), Some(7));
-        assert_eq!(sub.commands[4].as_set_material(), Some(9));
+        // The material's texture id (11) threads through — no longer dropped (M1).
+        assert_eq!(sub.commands[4].as_set_material(), Some((9, 11)));
         assert_eq!(
             sub.commands[5].as_draw_indexed(),
             Some((36, Mat4::IDENTITY))

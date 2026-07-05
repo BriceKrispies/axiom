@@ -5,8 +5,14 @@ use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult, Reflect, TypeSchema
 /// An opaque, stable reference to a material resource.
 ///
 /// `axiom-scene` does not own materials; a [`MaterialRef`] is just a
-/// `u64` identity that future resource/render modules (or apps) will
-/// resolve to actual material data.
+/// `u64` identity that resource/render modules (or apps) resolve to actual
+/// material data. It shares **one numeric identity space** with the resources
+/// tier's `ResourceId`: an app registers a material via
+/// `axiom_resources::ResourcesApi`, gets a `ResourceId`, and stamps that same
+/// `u64` here via [`MaterialRef::from_raw`] — so a renderable's material ref and
+/// its resolved `MaterialData` carry equal raw ids (the two modules never name
+/// each other; the app is the single owner that bridges them). The same
+/// convention holds for the renderable's `TextureRef` ⇄ a texture `ResourceId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MaterialRef(u64);
 
