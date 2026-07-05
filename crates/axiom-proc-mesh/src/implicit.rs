@@ -286,12 +286,7 @@ mod tests {
         let dominant_bone = |on_side: &dyn Fn(f32) -> bool| -> u16 {
             let idx = m.positions().iter().position(|p| on_side(p.x)).expect("a vertex on that side");
             let (w, j) = (m.weights()[idx], m.joints()[idx]);
-            let mut best = 0usize;
-            for i in 1..4 {
-                if w[i] > w[best] {
-                    best = i;
-                }
-            }
+            let best = (0..4).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap();
             j[best]
         };
         assert_eq!(dominant_bone(&|x| x < -0.5), 0);
