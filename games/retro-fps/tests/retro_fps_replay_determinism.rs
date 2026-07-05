@@ -9,14 +9,17 @@
 //! mismatch (frame / artifact / byte) — no ad-hoc debug printing.
 //!
 //! Artifact coverage at this boundary: the **input** artifact is the per-tick
-//! intent and the **state** artifact is the deterministic HUD projection of the
-//! game (health / score / ammo / enemies). The **render** and **runtime**
-//! artifacts are intentionally empty here: the instance-float render output comes
-//! from the live windowing pipeline (driven only in the wasm32 browser arm via
-//! the frame scrubber), which a native test does not stand up. Empty artifacts
-//! record and compare exactly like populated ones, so the game's determinism is
-//! still proven end-to-end through the recorder.
+//! intent, the **state** artifact is the deterministic HUD projection of the game
+//! (health / score / ammo / enemies), and the **render** artifact is the
+//! deterministic `FrameOutcome` the live GPU / Canvas2D backends consume (draws,
+//! camera view-projection, lights) — captured natively from
+//! `RunningApp::tick_with_controls`, so the recorder's replay+divergence proof
+//! now covers the render boundary too (it was previously recorded EMPTY, before
+//! Stream B gave the game a real render path). The **runtime** artifact stays
+//! empty (no native host-frame projection to record here). Empty artifacts record
+//! and compare exactly like populated ones.
 
+use axiom::prelude::FrameOutcome;
 use axiom_game_retro_fps::level::LevelDoc;
 use axiom_game_retro_fps::{apply_lifecycle, build_retro_fps_app, RetroFpsGame, Hud, Intent};
 use axiom_recording::RecordingApi;
@@ -78,8 +81,37 @@ fn encode_hud(h: &Hud) -> Vec<u8> {
     bytes
 }
 
+/// Canonical *render* artifact: the deterministic scene→render boundary the live
+/// backends consume — per-object draws (MVP / world / colour / mesh+material ids
+/// / caster flag), the camera + shadow view-projections, the clear colour, and
+/// the resolved lights, all little-endian and length-prefixed.
+fn encode_render(f: &FrameOutcome) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(f.command_count() as u32).to_le_bytes());
+    f.clear_color().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+    f.camera_view_proj().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+    f.light_view_proj().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+    out.extend_from_slice(&(f.draws().len() as u32).to_le_bytes());
+    f.draws().iter().for_each(|d| {
+        d.mvp().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        d.world().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        d.color().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        out.extend_from_slice(&d.mesh_id().to_le_bytes());
+        out.extend_from_slice(&d.material_id().to_le_bytes());
+        out.push(u8::from(d.casts_contact_shadow()));
+    });
+    out.extend_from_slice(&(f.lights().len() as u32).to_le_bytes());
+    f.lights().iter().for_each(|l| {
+        out.extend_from_slice(&l.kind().to_le_bytes());
+        l.vec().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        l.color().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        out.extend_from_slice(&l.intensity().to_le_bytes());
+    });
+    out
+}
+
 /// Run the fixed scenario through a fresh retro FPS game, recording each frame's
-/// input + state artifacts (render/runtime left empty — see the module note).
+/// input + render + state artifacts (runtime left empty — see the module note).
 fn record_run() -> RecordingApi {
     let mut recorder = RecordingApi::native().expect("native recorder budget is valid");
     let doc = LevelDoc::default();
@@ -89,14 +121,14 @@ fn record_run() -> RecordingApi {
     scenario().into_iter().enumerate().for_each(|(i, intent)| {
         let commands = game.step(intent, &app);
         apply_lifecycle(&mut game, &mut app, &assets, &commands);
-        app.tick_with_controls(i as u64, &commands.enemies, &[commands.control]);
+        let outcome = app.tick_with_controls(i as u64, &commands.enemies, &[commands.control]);
         let frame = i as u64;
         recorder
             .record_frame(
                 frame,
                 frame,
                 encode_intent(&intent),
-                Vec::new(),
+                encode_render(&outcome),
                 encode_hud(&commands.hud),
                 Vec::new(),
             )
@@ -143,14 +175,14 @@ fn a_diverging_input_track_is_detected() {
         intent.fire = intent.fire || i == 0;
         let commands = game.step(intent, &app);
         apply_lifecycle(&mut game, &mut app, &assets, &commands);
-        app.tick_with_controls(i as u64, &commands.enemies, &[commands.control]);
+        let outcome = app.tick_with_controls(i as u64, &commands.enemies, &[commands.control]);
         let frame = i as u64;
         perturbed
             .record_frame(
                 frame,
                 frame,
                 encode_intent(&intent),
-                Vec::new(),
+                encode_render(&outcome),
                 encode_hud(&commands.hud),
                 Vec::new(),
             )

@@ -7,8 +7,11 @@
 #
 # Determinism is proven by tests/retro_fps_replay_determinism.rs (a fixed
 # scenario replays byte-equal AND a perturbed run differs — the
-# a_diverging_input_track_is_detected pattern). Each committed golden state/HUD
-# sequence is pinned to a recorded SHA-256, caught on drift by check-slices.
+# a_diverging_input_track_is_detected pattern; the recorder now carries the real
+# render FrameOutcome bytes, not the old empty stand-in). Each committed golden
+# state/HUD/render sequence is pinned to a recorded SHA-256, caught on drift by
+# check-slices. The render-boundary golden is captured natively and headlessly by
+# tests/retro_fps_render_golden.rs (a diverged input yields different render bytes).
 [slice]
 name = "retro-fps"
 crate_name = "axiom-game-retro-fps"
@@ -23,3 +26,7 @@ sha256 = "c28b1643280cdc91cae2fe2e0cc0e6f07c8a1f8bfabdc4c0a918a73f15b3335c"
 [[golden]]
 path = "tests/retro_fps/golden/retro_fps_hud_sequence.bin"
 sha256 = "410313507b327b00cf70dace7cbbde70d5273cd830362022d271bc9aa3b4a9f9"
+
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_render_sequence.bin"
+sha256 = "94b2925f6a3bbbcbd0e18a0fc69ba5bc575033451c73564c6eacc51e9dc07407"
