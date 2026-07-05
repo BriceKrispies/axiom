@@ -301,6 +301,10 @@ impl GpuBackendApi {
             lights,
             light_view_proj,
             batches,
+            // Skinned meshes + draws are wired from the frame packet as a follow-up;
+            // the offscreen path currently renders none.
+            &[],
+            &[],
             clear,
             sdf,
             ambient,

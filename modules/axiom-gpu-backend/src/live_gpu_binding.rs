@@ -249,6 +249,9 @@ impl LiveGpuBinding {
             &queue,
             format,
             meshes,
+            // Skinned meshes are threaded through the present path as a follow-up; the
+            // live arm currently uploads none.
+            &[],
             materials,
             // The live arm has no authored normal maps yet; materials get a flat normal.
             &[],
@@ -360,6 +363,7 @@ impl LiveGpuBinding {
             lights,
             light_view_proj,
             batches,
+            &[],
             clear,
             sdf,
             caps,

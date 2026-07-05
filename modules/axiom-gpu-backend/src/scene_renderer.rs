@@ -60,6 +60,11 @@ const CAP_SHADOWS: u32 = 8u;
 struct ShadowU { light_vp: mat4x4<f32> };
 @group(2) @binding(2) var<uniform> shadow: ShadowU;
 
+// Skinning: the joint-matrix palette for the skinned pass (group 3). All skinned
+// draws' palettes are concatenated; each draw's per-instance `joint_base` indexes
+// the start of its own palette. Bound only by the skinned pipeline.
+@group(3) @binding(0) var<storage, read> joint_palette: array<mat4x4<f32>>;
+
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
@@ -94,6 +99,48 @@ fn vs(
     out.clip = mvp * vec4<f32>(position, 1.0);
     out.world_pos = (world * vec4<f32>(position, 1.0)).xyz;
     out.normal = (world * vec4<f32>(normal, 0.0)).xyz;
+    out.uv = uv;
+    out.color = vertex_color * instance_color;
+    return out;
+}
+
+// Skinned vertex stage: identical to `vs` but the position/normal are first
+// deformed by the linear-blend of the vertex's four joint matrices (from the
+// palette, offset by the per-instance `joint_base`), then run through the same
+// MVP/world as a rigid vertex. Bind-pose vertices with an identity palette are
+// unchanged, so a skinned mesh at rest matches its baked geometry.
+@vertex
+fn vs_skinned(
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) vertex_color: vec4<f32>,
+    @location(4) joints: vec4<f32>,
+    @location(5) weights: vec4<f32>,
+    @location(6) m0: vec4<f32>,
+    @location(7) m1: vec4<f32>,
+    @location(8) m2: vec4<f32>,
+    @location(9) m3: vec4<f32>,
+    @location(10) w0: vec4<f32>,
+    @location(11) w1: vec4<f32>,
+    @location(12) w2: vec4<f32>,
+    @location(13) w3: vec4<f32>,
+    @location(14) instance_color: vec4<f32>,
+    @location(15) joint_base: vec4<f32>,
+) -> VsOut {
+    let mvp = mat4x4<f32>(m0, m1, m2, m3);
+    let world = mat4x4<f32>(w0, w1, w2, w3);
+    let base = u32(joint_base.x);
+    let skin = weights.x * joint_palette[base + u32(joints.x)]
+             + weights.y * joint_palette[base + u32(joints.y)]
+             + weights.z * joint_palette[base + u32(joints.z)]
+             + weights.w * joint_palette[base + u32(joints.w)];
+    let sp = skin * vec4<f32>(position, 1.0);
+    let sn = skin * vec4<f32>(normal, 0.0);
+    var out: VsOut;
+    out.clip = mvp * sp;
+    out.world_pos = (world * sp).xyz;
+    out.normal = (world * sn).xyz;
     out.uv = uv;
     out.color = vertex_color * instance_color;
     return out;
@@ -444,6 +491,15 @@ const VERTEX_STRIDE: u64 = 12 * 4;
 /// Byte offset of the world matrix within an instance (after the 16-float mvp).
 const WORLD_OFFSET: u64 = 16 * 4;
 
+/// Bytes per **skinned** vertex: the 12 standard floats + joints(4) + weights(4).
+const SKINNED_VERTEX_STRIDE: u64 = 20 * 4;
+/// Floats per **skinned** instance: mvp(16) + world(16) + colour(4) + joint_base(4).
+const SKINNED_INSTANCE_FLOATS: usize = 40;
+const SKINNED_INSTANCE_STRIDE: u64 = (SKINNED_INSTANCE_FLOATS as u64) * 4;
+/// Max joint matrices across all skinned draws in one frame (the palette storage
+/// buffer capacity). A soccer frame uses ~65; 1024 is a generous, bounded cap.
+const PALETTE_CAP: usize = 1024;
+
 /// One uploaded mesh's GPU buffers: its interleaved vertex stream and triangle
 /// index buffer, plus the index count to draw.
 #[derive(Debug)]
@@ -457,6 +513,18 @@ struct MeshBuffers {
 /// shadow map. Its [`Self::record`] draws into any colour/depth view; the
 /// surface-vs-offscreen plumbing lives in the callers.
 #[derive(Debug)]
+/// One skinned draw handed to [`SceneRenderer::record`]: the mesh + material to
+/// draw, its MVP and world matrices (column-major), its colour tint, and the
+/// joint-matrix palette (column-major) the vertex shader blends per vertex.
+pub(crate) struct SkinnedGpuDraw {
+    pub(crate) mesh_id: u64,
+    pub(crate) material_id: u64,
+    pub(crate) mvp: [f32; 16],
+    pub(crate) world: [f32; 16],
+    pub(crate) color: [f32; 4],
+    pub(crate) palette: Vec<[f32; 16]>,
+}
+
 pub(crate) struct SceneRenderer {
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
@@ -485,6 +553,18 @@ pub(crate) struct SceneRenderer {
     sdf_bind_group: wgpu::BindGroup,
     /// The frame's hemisphere ambient, packed into the lights uniform each draw.
     ambient: axiom_host::FrameAmbient,
+    /// The skinned (linear-blend-skinning) main-pass pipeline: same lighting/
+    /// texturing/shadow as `pipeline`, but a 20-float vertex layout (with joints +
+    /// weights) and a joint-matrix palette bound at group 3.
+    skinned_pipeline: wgpu::RenderPipeline,
+    /// Skinned meshes (20-float streams), uploaded once at bind like `meshes`.
+    skinned_meshes: HashMap<u64, MeshBuffers>,
+    /// Per-skinned-draw instance data (mvp + world + colour + joint_base).
+    skinned_instance_buffer: wgpu::Buffer,
+    /// The concatenated joint-matrix palette for every skinned draw this frame.
+    palette_buffer: wgpu::Buffer,
+    /// Group 3 of the skinned pass: the joint palette storage buffer.
+    palette_bind_group: wgpu::BindGroup,
 }
 
 impl SceneRenderer {
@@ -499,6 +579,7 @@ impl SceneRenderer {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
+        skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         normals: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
@@ -704,6 +785,52 @@ impl SceneRenderer {
         );
         let shadow_pipeline = build_shadow_pipeline(device, &shadow_pass_layout);
 
+        // Skinning: the joint-palette storage buffer (group 3), the skinned
+        // pipeline, the skinned meshes (20-float streams), and the per-skinned-draw
+        // instance buffer.
+        let palette_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("axiom-palette-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let palette_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("axiom-joint-palette"),
+            size: (PALETTE_CAP as u64) * 64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let palette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("axiom-palette-bind-group"),
+            layout: &palette_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: palette_buffer.as_entire_binding() }],
+        });
+        let skinned_pipeline = build_skinned_pipeline(
+            device,
+            format,
+            &material_layout,
+            &lights_layout,
+            &shadow_sample_layout,
+            &palette_layout,
+        );
+        let skinned_meshes: HashMap<u64, MeshBuffers> = skinned_mesh_set
+            .iter()
+            .map(|(id, vertices, indices)| (*id, upload_mesh(device, vertices, indices)))
+            .collect();
+        let skinned_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("axiom-skinned-instances"),
+            size: SKINNED_INSTANCE_STRIDE * max_instances as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // SDF uniform (group 0 of the raymarch pass): primitives + camera matrices
         // + march tunables, rewritten each frame carrying an SdfScene.
         let sdf_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -745,6 +872,11 @@ impl SceneRenderer {
             sdf_uniform_buffer,
             sdf_bind_group,
             ambient,
+            skinned_pipeline,
+            skinned_meshes,
+            skinned_instance_buffer,
+            palette_buffer,
+            palette_bind_group,
         }
     }
 
@@ -766,6 +898,7 @@ impl SceneRenderer {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        skinned: &[SkinnedGpuDraw],
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
         caps: u32,
@@ -799,6 +932,30 @@ impl SceneRenderer {
             written += count;
         }
         queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&packed));
+
+        // Pack every skinned draw's palette back-to-back (recording each draw's base
+        // matrix index) and its instance (mvp + world + colour + joint_base), bounded
+        // by the palette capacity.
+        let mut palette_floats: Vec<f32> = Vec::new();
+        let mut skinned_instances: Vec<f32> = Vec::new();
+        let mut skinned_draws: Vec<(u64, u64, u64)> = Vec::new();
+        for d in skinned {
+            let base = palette_floats.len() / 16;
+            if base + d.palette.len() > PALETTE_CAP {
+                break;
+            }
+            for m in &d.palette {
+                palette_floats.extend_from_slice(m);
+            }
+            let byte_offset = (skinned_draws.len() as u64) * SKINNED_INSTANCE_STRIDE;
+            skinned_instances.extend_from_slice(&d.mvp);
+            skinned_instances.extend_from_slice(&d.world);
+            skinned_instances.extend_from_slice(&d.color);
+            skinned_instances.extend_from_slice(&[base as f32, 0.0, 0.0, 0.0]);
+            skinned_draws.push((d.mesh_id, d.material_id, byte_offset));
+        }
+        queue.write_buffer(&self.palette_buffer, 0, bytemuck::cast_slice(&palette_floats));
+        queue.write_buffer(&self.skinned_instance_buffer, 0, bytemuck::cast_slice(&skinned_instances));
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("axiom-frame-encoder"),
@@ -872,6 +1029,25 @@ impl SceneRenderer {
                     pass.set_vertex_buffer(1, self.instance_buffer.slice(*byte_offset..));
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
+                }
+            }
+
+            // Skinned draws: the same lit/textured/shadowed fragment stage, via the
+            // skinning pipeline with the joint palette bound at group 3. One draw per
+            // skinned body (each carries its own palette; they cannot be instanced).
+            pass.set_pipeline(&self.skinned_pipeline);
+            pass.set_bind_group(1, &self.lights_bind_group, &[]);
+            pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+            pass.set_bind_group(3, &self.palette_bind_group, &[]);
+            for (mesh_id, material_id, inst_offset) in &skinned_draws {
+                if let (Some(mesh), Some(material)) =
+                    (self.skinned_meshes.get(mesh_id), self.materials.get(material_id))
+                {
+                    pass.set_bind_group(0, material, &[]);
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, self.skinned_instance_buffer.slice(*inst_offset..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, 0..1);
                 }
             }
         }
@@ -1063,6 +1239,92 @@ fn build_main_pipeline(
                 // lowest-correct-layer fix so a material's `opacity` and the 2D
                 // surface's `alpha` actually composite instead of overwriting.
                 // `blend_state` selects per draw — additive is available for glow.
+                blend: Some(blend_state(false)),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
+/// Build the skinned (linear-blend-skinning) main pipeline: the same
+/// lit/textured/shadowed fragment stage, but a 20-float vertex layout carrying
+/// per-vertex joints + weights, a `vs_skinned` vertex stage, and a joint-matrix
+/// palette bound at group 3.
+fn build_skinned_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    material_layout: &wgpu::BindGroupLayout,
+    lights_layout: &wgpu::BindGroupLayout,
+    shadow_sample_layout: &wgpu::BindGroupLayout,
+    palette_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("axiom-scene-shader"),
+        source: wgpu::ShaderSource::Wgsl(SCENE_WGSL.into()),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("axiom-skinned-pl"),
+        bind_group_layouts: &[material_layout, lights_layout, shadow_sample_layout, palette_layout],
+        push_constant_ranges: &[],
+    });
+    // Per-vertex: pos(0) normal(1) uv(2) colour(3) joints(4) weights(5).
+    let vertex_attrs = [
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 2 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 32, shader_location: 3 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 48, shader_location: 4 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 64, shader_location: 5 },
+    ];
+    // Per-instance: mvp(6-9) world(10-13) colour(14) joint_base(15) — 10 vec4s.
+    let instance_attrs: Vec<wgpu::VertexAttribute> = (0..10)
+        .map(|i| wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: (i as u64) * 16,
+            shader_location: 6 + i,
+        })
+        .collect();
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("axiom-skinned-pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_skinned"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: SKINNED_VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attrs,
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: SKINNED_INSTANCE_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &instance_attrs,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
                 blend: Some(blend_state(false)),
                 write_mask: wgpu::ColorWrites::ALL,
             })],

@@ -29,6 +29,8 @@ pub(crate) fn render_to_rgba(
     lights: &[(u32, [f32; 3], [f32; 3], f32)],
     light_view_proj: [f32; 16],
     batches: &[(u64, u64, Vec<f32>, u32)],
+    skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
+    skinned: &[crate::scene_renderer::SkinnedGpuDraw],
     clear: [f32; 4],
     sdf: Option<&axiom_host::SdfScene>,
     ambient: axiom_host::FrameAmbient,
@@ -90,6 +92,7 @@ pub(crate) fn render_to_rgba(
         &queue,
         COLOR_FORMAT,
         meshes,
+        skinned_mesh_set,
         materials,
         normals,
         max_instances,
@@ -105,7 +108,7 @@ pub(crate) fn render_to_rgba(
             let depth_view = create_depth_view(&device, width, height);
             renderer.record(
                 &device, &queue, &color_view, &depth_view, lights, light_view_proj, batches,
-                clear, sdf, caps,
+                skinned, clear, sdf, caps,
             );
         }
         Some((iw, ih)) => {
@@ -123,7 +126,7 @@ pub(crate) fn render_to_rgba(
             let depth_view = create_depth_view(&device, iw, ih);
             renderer.record(
                 &device, &queue, &scene_view, &depth_view, lights, light_view_proj, batches,
-                clear, sdf, caps,
+                skinned, clear, sdf, caps,
             );
             let blit = UpscaleBlit::new(&device, COLOR_FORMAT, &scene_view, wgpu::FilterMode::Nearest);
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
