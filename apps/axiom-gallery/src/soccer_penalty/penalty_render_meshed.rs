@@ -313,7 +313,11 @@ pub fn soccer_meshed_shell() -> RunningApp {
     App::new()
         .window(
             Window::new(WIDTH, HEIGHT)
-                .with_clear_color(Color::linear_rgb(ch(0.07), ch(0.10), ch(0.18))),
+                // Warm dark neutral, not cold navy: the old (0.07,0.10,0.18) clear
+                // colour tinted the whole uncovered upper background cool blue,
+                // fighting the reference's sunlit warmth. A warm charcoal matches
+                // the stand behind it and lets the frame read warm off the grade.
+                .with_clear_color(Color::linear_rgb(ch(0.10), ch(0.09), ch(0.08))),
         )
         .add_plugins(DefaultPlugins)
         .build()

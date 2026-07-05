@@ -92,8 +92,14 @@ pub mod palette {
 
     // --- backdrop ---
     // The reference has no bright grey wall: the stand behind/above the goal is
-    // a dark near-black mass the packed crowd sits against. Darkened to match.
-    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.13, 0.14, 0.18);
+    // a dark near-black mass the packed crowd sits against. But the champion read
+    // as a *cold* blue-grey backdrop (R<G<B) against a navy clear colour, casting
+    // the whole upper third cool — the reference's sunlit stand is a WARM dark
+    // charcoal (R>=G>=B). Rebalanced to warm-neutral (and nudged a touch off pure
+    // black) so the stand reads as a lit warm mass, not a cold dead slab. The
+    // engine's 3 grade knobs carry no white-balance, so this warmth lives in the
+    // albedo, per the colorist lens.
+    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.17, 0.15, 0.12);
     pub const CROWD_A: Rgba = Rgba::rgb(0.72, 0.28, 0.30);
     pub const CROWD_B: Rgba = Rgba::rgb(0.28, 0.42, 0.70);
     pub const CROWD_C: Rgba = Rgba::rgb(0.86, 0.72, 0.24);
