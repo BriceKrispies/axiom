@@ -59,6 +59,12 @@ pub enum PenaltyMaterialId {
     KickerShoes,
     GoalieShoes,
     GoalieSocks,
+    // Kicker head hair and socks (appended for character identity; at the end so
+    // every existing discriminant/index stays stable). From behind the kicker the
+    // back of the head reads as dark hair, and the socks are royal blue below the
+    // knee (the boots stay black — `KickerShoes`).
+    KickerHair,
+    KickerSocksBlue,
 }
 
 /// One named material: its id, human name, base color, and lit/unlit flag.
@@ -81,7 +87,7 @@ const fn unlit(id: PenaltyMaterialId, name: &'static str, base_color: Rgba) -> P
 
 /// The fixed material palette, ordered to match [`PenaltyMaterialId`]. This is
 /// the whole palette — deterministic and stable.
-pub const PENALTY_PALETTE: [PenaltyMaterial; 31] = [
+pub const PENALTY_PALETTE: [PenaltyMaterial; 33] = [
     lit(PenaltyMaterialId::FieldGrass, "field grass", palette::GRASS_LIGHT),
     lit(PenaltyMaterialId::DarkerGrassBand, "darker grass band", palette::GRASS_DARK),
     lit(PenaltyMaterialId::WhiteFieldLines, "white field lines", palette::LINE_WHITE),
@@ -121,6 +127,12 @@ pub const PENALTY_PALETTE: [PenaltyMaterial; 31] = [
     lit(PenaltyMaterialId::KickerShoes, "kicker shoes", Rgba::rgb(0.06, 0.06, 0.08)),
     lit(PenaltyMaterialId::GoalieShoes, "goalie shoes", Rgba::rgb(0.06, 0.06, 0.08)),
     lit(PenaltyMaterialId::GoalieSocks, "goalie socks", Rgba::rgb(0.10, 0.10, 0.12)),
+    // Near-black brown so the back of the kicker's head reads as dark hair, not
+    // bald skin (matches the reference; mirrors GoalieHair's tone).
+    lit(PenaltyMaterialId::KickerHair, "kicker hair", Rgba::rgb(0.09, 0.07, 0.06)),
+    // Royal blue below-the-knee socks (a touch deeper than the jersey blue), the
+    // reference kit's third blue element between the white shorts and black boots.
+    lit(PenaltyMaterialId::KickerSocksBlue, "kicker socks blue", Rgba::rgb(0.14, 0.27, 0.70)),
 ];
 
 /// The material for an id. A direct index — the id's discriminant is its

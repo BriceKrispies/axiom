@@ -104,7 +104,7 @@ impl KickerRig {
                 KickerBox {
                     center: Vec3::new(KICKER_X + p.x, p.y, KICKER_Z - p.z),
                     size: pp.box_size,
-                    material: material_for(pp.tag),
+                    material: material_for_part(i, pp.tag),
                     label: KICKER_LABELS[i],
                 }
             })
@@ -125,6 +125,24 @@ fn material_for(tag: u32) -> PenaltyMaterialId {
         1 => PenaltyMaterialId::KickerShortsWhite,
         2 => PenaltyMaterialId::KickerSkin,
         _ => PenaltyMaterialId::KickerSocksDark, // socks + boots
+    }
+}
+
+/// Map a kicker *part* to its material.
+///
+/// The opaque figure tag alone can't tell three kit surfaces apart: the head
+/// (index 2) shares `TAG_SKIN` with the thighs and forearms, and the shins
+/// (indices 4, 7) and feet (indices 5, 8) share `TAG_LIMB`/`TAG_END` and both
+/// fell to one near-black `KickerSocksDark`. The reference kit, seen from
+/// behind, is dark hair on the head, royal-blue socks below the knee, and black
+/// boots — so those three parts are resolved by index here; everything else
+/// (jersey, shorts, skin) still falls back to the tag-based [`material_for`].
+fn material_for_part(index: usize, tag: u32) -> PenaltyMaterialId {
+    match index {
+        2 => PenaltyMaterialId::KickerHair,          // head: dark hair, not bald skin
+        4 | 7 => PenaltyMaterialId::KickerSocksBlue, // shins: royal-blue socks
+        5 | 8 => PenaltyMaterialId::KickerShoes,     // feet: black boots
+        _ => material_for(tag),
     }
 }
 
@@ -183,5 +201,31 @@ mod tests {
         assert_eq!(material_for(1), PenaltyMaterialId::KickerShortsWhite);
         assert_eq!(material_for(2), PenaltyMaterialId::KickerSkin);
         assert_eq!(material_for(4), PenaltyMaterialId::KickerSocksDark);
+    }
+
+    #[test]
+    fn head_shins_and_feet_are_resolved_by_part_index() {
+        // Head (index 2) is dark hair, not the skin its tag would give.
+        assert_eq!(material_for_part(2, 2), PenaltyMaterialId::KickerHair);
+        // Shins (4, 7) are royal-blue socks; feet (5, 8) are black boots.
+        assert_eq!(material_for_part(4, 3), PenaltyMaterialId::KickerSocksBlue);
+        assert_eq!(material_for_part(7, 3), PenaltyMaterialId::KickerSocksBlue);
+        assert_eq!(material_for_part(5, 4), PenaltyMaterialId::KickerShoes);
+        assert_eq!(material_for_part(8, 4), PenaltyMaterialId::KickerShoes);
+        // Everything else falls back to the tag: jersey, shorts, skin (thigh/forearm).
+        assert_eq!(material_for_part(1, 0), PenaltyMaterialId::KickerJerseyBlue);
+        assert_eq!(material_for_part(0, 1), PenaltyMaterialId::KickerShortsWhite);
+        assert_eq!(material_for_part(3, 2), PenaltyMaterialId::KickerSkin);
+        assert_eq!(material_for_part(10, 2), PenaltyMaterialId::KickerSkin);
+    }
+
+    #[test]
+    fn head_reads_as_hair_and_hands_stay_skin_in_world() {
+        let boxes = KickerRig::new().boxes_at(IDLE_FRAME);
+        assert_eq!(boxes[2].label, "kicker.head");
+        assert_eq!(boxes[2].material, PenaltyMaterialId::KickerHair);
+        // Forearm/hand tips keep skin so only the head turns to hair.
+        assert_eq!(boxes[10].material, PenaltyMaterialId::KickerSkin);
+        assert_eq!(boxes[12].material, PenaltyMaterialId::KickerSkin);
     }
 }
