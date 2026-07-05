@@ -1,7 +1,13 @@
 # Axiom CI.
 #
-# Runs formatting, lints, the full test suite, the architecture checker, the
-# 100% coverage gate (the Axiom Coverage Law), and a wasm build of the kernel.
+# The single gate for the repo. Every check the old local pre-commit hook ran now
+# lives here, so `main` is protected by CI rather than by a local hook:
+#   * the `check` job — formatting, clippy, the full test suite, the architecture
+#     checker (Axiom Layer/Module Law), the 100% coverage gate (Axiom Coverage
+#     Law), a wasm build, and the TypeScript SDK gate; and
+#   * the `lint` job — the engine dylint rulebook, ratcheted against
+#     tools/lints/dylint-baseline.txt (this is the check that used to live only in
+#     the pre-commit hook).
 # The architecture check is also covered by `cargo test` (the
 # `real_repo_layers_pass` test), but it is run explicitly here so a failure is
 # obvious and actionable in the job log.
@@ -72,3 +78,39 @@ jobs:
 
       - name: TypeScript SDK gate (tsgo + Oxlint + 100% coverage)
         run: bash scripts/ts-gate.sh
+
+  # The engine dylint rulebook (the check that used to run only in the local
+  # pre-commit hook). It builds its lint drivers against the pinned nightly in
+  # tools/lints/rust-toolchain, then ratchets findings against
+  # tools/lints/dylint-baseline.txt. Kept a separate job because it needs that
+  # dedicated toolchain and runs in parallel with `check`.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the dylint toolchain
+        run: |
+          # The lint drivers compile against rustc internals, so this pinned
+          # nightly needs rustc-dev + llvm-tools-preview. dylint selects it
+          # automatically via tools/lints/rust-toolchain.
+          rustup toolchain install nightly-2026-04-16 --profile minimal --component rustc-dev,llvm-tools-preview
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            target
+            tools/lints/target
+          key: ${{ runner.os }}-dylint-${{ hashFiles('**/Cargo.lock', 'tools/lints/**/Cargo.toml') }}
+
+      - name: Install cargo-dylint (pinned to the rulebook's dylint_linting version)
+        run: cargo install cargo-dylint@6.0.1 dylint-link@6.0.1 --locked
+
+      - name: Dylint rulebook gate (engine lint ratchet)
+        run: bash scripts/dylint-gate.sh

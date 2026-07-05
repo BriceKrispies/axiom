@@ -1,0 +1,31 @@
+# Axiom dylint ratchet baseline — read by scripts/dylint-gate.sh (CI + local).
+# Format: <lint_name>=<max allowed findings>
+# The dylint gate fails only if a run raises a lint above its baseline.
+#
+# IMPORTANT: the size lints (functions/impl-blocks) fire on exactly two sanctioned
+# spine items plus (for the unitless-float lint) one GPU-output float. The
+# Branchless Law is at ZERO on the spine (crates/ + modules/, non-test) — verified;
+# engine_no_branching now scopes off the exempt tiers (apps/, games/, tools/,
+# xtask), so it stays at 0 and any NEW spine branch trips the gate immediately.
+#
+# A spine regression still trips the gate: a layer/module crate that today emits
+# no finding would add a NEW one, pushing the count above these baselines. Drive
+# the spine to 0.
+#
+# The two `engine_no_large_functions` are two pre-existing spine fns >120 lines
+# (axiom-render-pipeline::render_pipeline_api and axiom::scene_commands); the one
+# `engine_no_large_impl_blocks` is axiom-math's 4x4-matrix impl block; the one
+# `engine_no_unitless_float_public_api` is FrameOutcome's render-float intensity
+# multiplier (GPU output data).
+#
+# History (pre-CI, when this gate ran as .git/hooks/pre-commit):
+#   2026-06-26: engine_no_large_files 2 -> 0 (six over-budget spine files split
+#     into private submodules — pure relocation, facade/coverage/branchless kept).
+#   2026-07-04: engine_no_branching 18 -> 0 (lint scoped off the Branchless-Law-
+#     exempt tiers + resolves each branch to its macro call site).
+#   2026-07-04: the gate moved off the pre-commit hook into CI (scripts/dylint-gate.sh).
+engine_no_branching=0
+engine_no_large_files=0
+engine_no_large_functions=2
+engine_no_large_impl_blocks=1
+engine_no_unitless_float_public_api=1

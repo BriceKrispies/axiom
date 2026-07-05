@@ -12,13 +12,18 @@ This repository is developed by committing and pushing **directly to `main`**.
 There is no pull-request or feature-branch workflow here. When you complete a
 change, commit it on `main` and push it to `origin/main`.
 
-This is only safe because `main` is protected by the gates that run on every
-commit: the architecture checker (the Layer Law and Module Law), the 100%
-coverage gate, the lint ratchet, and the `engine_no_branching` hard-ban gate
-(the Branchless Law). `main` is always green, always fully covered, always
-structurally legal, and always branchless across the spine — those invariants
-are what let work land on `main` without a review branch. Do not push a commit
-that breaks them.
+This is only safe because `main` is protected by the gates that run in
+**CI** (`.github/workflows/ci.yml`, on every push to `main` and every pull
+request): the architecture checker (the Layer Law and Module Law), the 100%
+coverage gate, the dylint rulebook ratchet — including the `engine_no_branching`
+hard-ban gate (the Branchless Law) — and the TypeScript SDK gate. There is **no
+local commit hook**; committing is fast and CI is the single source of truth.
+`main` must stay green, fully covered, structurally legal, and branchless across
+the spine — those invariants are what let work land on `main` without a review
+branch, so **do not push a commit that breaks CI**. Run the gates locally before
+pushing when a change touches the spine: `cargo xtask check-architecture`,
+`bash scripts/coverage.sh` (or `scripts/coverage.ps1`), `bash scripts/dylint-gate.sh`,
+and `bash scripts/ts-gate.sh` — the same four checks CI runs.
 
 ## No Shortcuts — Fix Problems Structurally
 
@@ -916,8 +921,8 @@ type-system impossibility for a `Uint8Array`/`DataView` codec — both documente
 `.oxlintrc.json`.
 
 **Status:** green. `tsgo` typecheck, Oxlint (every category an error + the branch
-ban), and `node:test` 100% coverage all pass, and `ts-gate` is wired into the
-pre-commit hook and CI as a hard gate. Do not relax the gate to make a change pass;
+ban), and `node:test` 100% coverage all pass, and `ts-gate` runs in CI as a hard
+gate (`.github/workflows/ci.yml`). Do not relax the gate to make a change pass;
 remediate the code (No-Shortcuts applies to the SDK too). The remediation history is
 in `docs/ts-sdk-hardening.md` and the tool↔law mapping in
 `packages/axiom-client/STATIC_ANALYSIS.md`.
