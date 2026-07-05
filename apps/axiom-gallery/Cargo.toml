@@ -138,6 +138,9 @@ axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-physics = { path = "../../modules/axiom-physics" }
 # The engine input module (zanzoban touch swipes).
 axiom-input = { path = "../../modules/axiom-input" }
+# The first-person walk+look controller (forest_walk + generia): the shared Pose,
+# step integration, eye seating, and camera view-projection both demos consume.
+axiom-fp-controller = { path = "../../modules/axiom-fp-controller" }
 # The residency-ring module (growth's chunk streamer): owns which chunk coords
 # are resident + the deterministic load/unload delta as the player moves. The
 # app pairs it with its own Chunk payloads.

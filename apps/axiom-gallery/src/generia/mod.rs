@@ -20,7 +20,8 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use axiom_agent_harness::AgentHarnessApi;
-use axiom_kernel::{Meters, Ratio, StableHash};
+use axiom_fp_controller::{FpController, Lens, LookDelta, MoveIntent, Pose, WalkTuning};
+use axiom_kernel::{Meters, Radians, Ratio, StableHash};
 use axiom_math::{Aabb, Mat4, Vec3};
 use axiom_scatter::{CellCoord, ScatterApi, ScatterRule, ScatterSite};
 use axiom_streaming::ChunkCoord;
@@ -65,11 +66,14 @@ const WALK_RADIUS_M: f32 = 45.0;
 const ARRIVE_RADIUS_M: f32 = 3.0;
 const AGENT_WAYPOINTS: u32 = 8;
 
-const EYE_HEIGHT_M: f32 = 1.7;
-const MOVE_SPEED_M: f32 = 0.22;
-const TURN_SPEED: f32 = 0.028;
-const LOOK_SENS: f32 = 0.0022;
-const PITCH_LIMIT: f32 = 1.45;
+/// The shared first-person walk tuning (rates, limits, look sensitivity), owned
+/// once by the engine's `axiom-fp-controller` for every first-person demo.
+const TUNING: WalkTuning = WalkTuning::walk();
+/// Eye height above ground, sourced from the shared tuning (the agent's pose math
+/// needs it explicitly).
+const EYE_HEIGHT_M: f32 = TUNING.eye_height().get();
+/// Mouse-look sensitivity (radians per pixel), sourced from the shared tuning.
+const LOOK_SENS: f32 = TUNING.look_sensitivity().get();
 
 const IDENTITY16: [f32; 16] =
     [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
@@ -86,31 +90,6 @@ struct ChunkVeg {
     trunk: Vec<Inst>,
     foliage: Vec<Inst>,
     branch: Vec<Inst>,
-}
-
-/// The player's first-person pose.
-#[derive(Clone, Copy, Default)]
-struct Pose {
-    x: f32,
-    z: f32,
-    yaw: f32,
-    pitch: f32,
-}
-
-#[derive(Clone, Copy, Default)]
-struct Keys {
-    forward: bool,
-    backward: bool,
-    strafe_left: bool,
-    strafe_right: bool,
-    turn_left: bool,
-    turn_right: bool,
-}
-
-#[derive(Clone, Copy, Default)]
-struct Look {
-    yaw: f32,
-    pitch: f32,
 }
 
 /// Boot the endless streamed generia forest on the demo canvas.
@@ -162,10 +141,16 @@ pub fn generia_start() {
     };
     let manifest = Rc::new(manifest);
 
-    let spawn = Pose { x: 0.0, z: 0.0, yaw: 0.0, pitch: -0.05 };
+    let spawn = Pose::new(
+        Meters::finite_or_zero(0.0),
+        Meters::finite_or_zero(0.0),
+        Radians::finite_or_zero(0.0),
+        Radians::finite_or_zero(-0.05),
+    );
     let pose = Rc::new(RefCell::new(spawn));
-    let keys = Rc::new(RefCell::new(Keys::default()));
-    let look = Rc::new(RefCell::new(Look::default()));
+    let keys = Rc::new(RefCell::new(MoveIntent::default()));
+    // Accumulated mouse-look (yaw, pitch) radians, drained each frame.
+    let look = Rc::new(RefCell::new((0.0f32, 0.0f32)));
     install_key_listener(&keys, "keydown", true);
     install_key_listener(&keys, "keyup", false);
     install_pointer_lock();
@@ -204,22 +189,29 @@ pub fn generia_start() {
         MAX_INSTANCES,
         move |tick| {
             let mut k = *keys.borrow();
-            let l = {
+            let (ly, lp) = {
                 let mut b = look.borrow_mut();
                 let v = *b;
-                *b = Look::default();
+                *b = (0.0, 0.0);
                 v
             };
+            let look = LookDelta::new(Radians::finite_or_zero(ly), Radians::finite_or_zero(lp));
             let mut p = pose.borrow_mut();
             if agent_mode {
-                let ground = terrain.height_at(p.x, p.z);
+                let ground = terrain.height_at(p.x().get(), p.z().get());
                 let control = agent_control(&p, ground, tick, &waypoints, &mut wp_idx.borrow_mut());
                 apply_control(&mut k, control);
             }
-            step(&mut p, &k, l);
-            let ground = terrain.height_at(p.x, p.z);
-            let eye = Vec3::new(p.x, ground + EYE_HEIGHT_M, p.z);
-            let vp = camera_view_proj(&p, ground, fov, near, far);
+            *p = FpController::step(*p, k, look, TUNING);
+            let ground = terrain.height_at(p.x().get(), p.z().get());
+            let eye = FpController::eye_position(*p, Meters::finite_or_zero(ground), TUNING);
+            let lens = Lens::new(
+                Radians::finite_or_zero(fov.to_radians()),
+                Ratio::finite_or_zero(SURFACE_W as f32 / SURFACE_H as f32),
+                Meters::finite_or_zero(near),
+                Meters::finite_or_zero(far),
+            );
+            let vp = FpController::view_projection(*p, Meters::finite_or_zero(ground), TUNING, lens);
 
             // Plan the frame: load / unload / visible chunks.
             let plan = world.borrow_mut().frame_plan(eye, vp, chunk_aabb);
@@ -235,8 +227,8 @@ pub fn generia_start() {
 
             // Regenerate the terrain window when the camera crosses into a new chunk.
             let focus = (
-                (p.x / CHUNK_M).floor() as i32,
-                (p.z / CHUNK_M).floor() as i32,
+                (p.x().get() / CHUNK_M).floor() as i32,
+                (p.z().get() / CHUNK_M).floor() as i32,
             );
             let new_geometry = {
                 let mut lf = last_focus.borrow_mut();
@@ -382,29 +374,6 @@ fn terrain_instance(vp: &Mat4) -> Vec<f32> {
     d
 }
 
-/// Integrate one frame of first-person movement + look.
-fn step(p: &mut Pose, k: &Keys, l: Look) {
-    let key_turn = (k.turn_left as i32 - k.turn_right as i32) as f32 * TURN_SPEED;
-    p.yaw += key_turn + l.yaw;
-    p.pitch = (p.pitch + l.pitch).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-    let (fx, fz) = (p.yaw.sin(), -p.yaw.cos());
-    let fwd = (k.forward as i32 - k.backward as i32) as f32 * MOVE_SPEED_M;
-    let strafe = (k.strafe_right as i32 - k.strafe_left as i32) as f32 * MOVE_SPEED_M;
-    p.x += fx * fwd + fz * -strafe;
-    p.z += fz * fwd - fx * -strafe;
-}
-
-fn camera_view_proj(p: &Pose, ground: f32, fov_deg: f32, near: f32, far: f32) -> Mat4 {
-    let eye = Vec3::new(p.x, ground + EYE_HEIGHT_M, p.z);
-    let (cp, sp) = (p.pitch.cos(), p.pitch.sin());
-    let fwd = Vec3::new(p.yaw.sin() * cp, sp, -p.yaw.cos() * cp);
-    let target = Vec3::new(eye.x + fwd.x, eye.y + fwd.y, eye.z + fwd.z);
-    let aspect = SURFACE_W as f32 / SURFACE_H as f32;
-    let proj = Mat4::perspective(fov_deg.to_radians(), aspect, near, far).unwrap_or(Mat4::IDENTITY);
-    let view = Mat4::look_at(eye, target, Vec3::UNIT_Y).unwrap_or(Mat4::IDENTITY);
-    proj.multiply(view)
-}
-
 // --- autonomous benchmark walk (agent) -----------------------------------------
 
 /// Whether `?agent=1` is present in the URL — enables the autonomous walk.
@@ -456,9 +425,10 @@ fn agent_waypoints() -> Vec<(f32, f32)> {
 /// the control bitmask to fold into the keys.
 fn agent_control(p: &Pose, ground: f32, tick: u64, waypoints: &[(f32, f32)], wp_idx: &mut usize) -> u32 {
     let m = |x: f32| AgentHarnessApi::micro(Meters::finite_or_zero(x));
-    let pose_micro = (m(p.x), m(ground + EYE_HEIGHT_M), m(p.z), m(p.yaw));
-    // generia's forward convention (see `step`): (sin yaw, -cos yaw).
-    let forward_micro = (m(p.yaw.sin()), m(-p.yaw.cos()));
+    let (px, pz, pyaw) = (p.x().get(), p.z().get(), p.yaw().get());
+    let pose_micro = (m(px), m(ground + EYE_HEIGHT_M), m(pz), m(pyaw));
+    // The first-person forward convention (see `FpController::step`): (sin yaw, -cos yaw).
+    let forward_micro = (m(pyaw.sin()), m(-pyaw.cos()));
     let (gx, gz) = waypoints[*wp_idx % waypoints.len()];
     let goal_micro = (m(gx), m(ground), m(gz));
     let (control, _reason, _brain, _emitted, arrived) =
@@ -471,7 +441,7 @@ fn agent_control(p: &Pose, ground: f32, tick: u64, waypoints: &[(f32, f32)], wp_
 
 /// Fold an agent control bitmask into the keyboard keys (OR, so a human at the
 /// keyboard can still nudge the autonomous walk).
-fn apply_control(k: &mut Keys, control: u32) {
+fn apply_control(k: &mut MoveIntent, control: u32) {
     let has = |flag: u32| control & flag != 0;
     k.forward |= has(AgentHarnessApi::FORWARD);
     k.backward |= has(AgentHarnessApi::BACKWARD);
@@ -501,7 +471,7 @@ fn pointer_is_locked() -> bool {
     document().pointer_lock_element().is_some()
 }
 
-fn install_key_listener(keys: &Rc<RefCell<Keys>>, event: &str, pressed: bool) {
+fn install_key_listener(keys: &Rc<RefCell<MoveIntent>>, event: &str, pressed: bool) {
     let keys = keys.clone();
     let cb = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
         let mut k = keys.borrow_mut();
@@ -530,13 +500,13 @@ fn install_pointer_lock() {
     }
 }
 
-fn install_mouse_look(look: &Rc<RefCell<Look>>) {
+fn install_mouse_look(look: &Rc<RefCell<(f32, f32)>>) {
     let look = look.clone();
     let cb = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |e: web_sys::MouseEvent| {
         if pointer_is_locked() {
             let mut l = look.borrow_mut();
-            l.yaw += e.movement_x() as f32 * LOOK_SENS;
-            l.pitch -= e.movement_y() as f32 * LOOK_SENS;
+            l.0 += e.movement_x() as f32 * LOOK_SENS;
+            l.1 -= e.movement_y() as f32 * LOOK_SENS;
         }
     });
     let _ = document().add_event_listener_with_callback("mousemove", cb.as_ref().unchecked_ref());

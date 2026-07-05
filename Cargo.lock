@@ -266,6 +266,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-fp-controller"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
 name = "axiom-frame"
 version = "0.1.0"
 dependencies = [
@@ -288,6 +296,7 @@ dependencies = [
  "axiom-debug-overlay",
  "axiom-entropy",
  "axiom-figure",
+ "axiom-fp-controller",
  "axiom-game-retro-fps",
  "axiom-geosphere",
  "axiom-gpu-backend",

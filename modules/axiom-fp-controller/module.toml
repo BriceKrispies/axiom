@@ -1,0 +1,22 @@
+# The pure first-person walk+look controller: it folds a frame of held movement
+# keys + mouse-look deltas into a deterministic ground Pose, and builds the
+# perspective camera view-projection that pose implies. Browser event capture
+# lives at the platform edge (the app / windowing); this module is the replayable
+# math both first-person gallery demos (forest_walk, generia) consume.
+
+[module]
+name = "fp-controller"
+crate_name = "axiom-fp-controller"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "first-person-walk-step",
+    "first-person-camera-projection",
+]

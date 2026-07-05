@@ -45,12 +45,9 @@ use crate::zanzoban::game_command::PuzzleCommand;
 use crate::zanzoban::group_id::GroupId;
 use crate::zanzoban::input_mapping::command_for_swipe;
 use crate::zanzoban::scene3d;
+use crate::zanzoban::scene3d::{SURFACE_H, SURFACE_W};
 use crate::zanzoban::tile_kind::TileKind;
 
-/// The engine render surface size (backing resolution); the backend upscales it
-/// to the canvas's CSS box. WebGPU / WebGL2 / Canvas2D all render at this size.
-const SURFACE_W: u32 = 960;
-const SURFACE_H: u32 = 720;
 /// Instance-buffer cap for the renderer — generous enough for any real board.
 const MAX_INSTANCES: u32 = 4608;
 
@@ -228,53 +225,11 @@ fn cached_view_proj(w: u32, h: u32, perspective: bool) -> Mat4 {
             .as_ref()
             .and_then(|(cw, ch, cp, vp)| (*cw == w && *ch == h && *cp == perspective).then_some(*vp));
         hit.unwrap_or_else(|| {
-            let vp = engine_view_proj(w, h, perspective);
+            let vp = scene3d::view_projection(w, h, perspective);
             *cache = Some((w, h, perspective, vp));
             vp
         })
     })
-}
-
-/// Build a single-camera engine `App` framing the board and read its
-/// `camera_view_proj` — the canonical clip-space matrix all three backends
-/// expect (the same one retro FPS composes its per-draw MVPs from). Edit uses a steep
-/// near-top-down camera; playtest an angled diorama.
-fn engine_view_proj(grid_w: u32, grid_h: u32, perspective: bool) -> Mat4 {
-    use axiom::prelude as ax;
-    let w = grid_w.max(1) as f32;
-    let h = grid_h.max(1) as f32;
-    let span = w.max(h);
-    let center = ax::Vec3::new(w * 0.5, 0.0, h * 0.5);
-    let (eye, fov_deg, far) = match perspective {
-        true => (
-            ax::Vec3::new(w * 0.5, span * 0.95, h * 0.5 + span * 0.85),
-            52.0,
-            span * 8.0 + 100.0,
-        ),
-        false => (
-            ax::Vec3::new(w * 0.5, span * 1.7, h * 0.5 + span * 0.45),
-            40.0,
-            span * 12.0 + 100.0,
-        ),
-    };
-    let mut app = ax::App::new()
-        .window(ax::Window::new(SURFACE_W, SURFACE_H))
-        .add_plugins(ax::DefaultPlugins)
-        .setup(move |world, _meshes, _materials| {
-            let camera = ax::Transform::from_translation(eye)
-                .looking_at(center, ax::Vec3::UNIT_Y)
-                .expect("camera look direction is well-defined");
-            world.spawn((
-                camera,
-                ax::Camera::perspective(ax::PerspectiveProjection {
-                    fov_y: ax::Angle::degrees(fov_deg),
-                    near: ax::Meters::new(0.1).expect("near plane is finite"),
-                    far: ax::Meters::new(far).expect("far plane is finite"),
-                }),
-            ));
-        })
-        .build();
-    Mat4::from_cols_array(app.tick(0).camera_view_proj())
 }
 
 /// Leave a ghost and reset the current life (the `q` action), wired to the

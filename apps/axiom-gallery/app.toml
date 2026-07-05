@@ -29,6 +29,7 @@ allowed_modules = [
     "windowing",
     "debug-overlay",
     "input",
+    "fp-controller",
     "physics",
     "agent",
     "agent-harness",
