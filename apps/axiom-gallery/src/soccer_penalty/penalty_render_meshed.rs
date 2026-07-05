@@ -161,8 +161,15 @@ fn sub_parts(role: PartRole, size: Vec3, lib: MeshLib) -> Vec<SubPart> {
     match role {
         PartRole::Ball => one(lib.sphere, size.mul_scalar(2.0)),
         PartRole::Limb => {
-            // Limb radius ≈ the average half-extent of the box's cross-section.
-            let radius = (size.x + size.z) * 0.25;
+            // Limb radius ≈ the average half-extent of the box's cross-section,
+            // inset to 0.82 so the rounded tube reads as a *lean* athletic limb
+            // rather than an inflated balloon that fills the whole box. The
+            // reference #10 has slender, tapered arms/legs; a capsule filling the
+            // full cross-section reads chunky and bulbous (worst at the bent elbow/
+            // knee, where two full-width joint spheres overlap). Inset shrinks the
+            // tube and its joint spheres together (both derive from `radius`), so
+            // the capsule stays coherent, just slimmer.
+            let radius = (size.x + size.z) * 0.25 * 0.82;
             let diameter = radius * 2.0;
             // The unit capsule's bbox is (0.8, 1.0, 0.8); scale its footprint to
             // the limb diameter and its height to the limb length.
