@@ -269,3 +269,93 @@ stadium_and_ad_boards     = 2
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 1
+
+# --- R4/R5/R6 + smooth-figure promotions + critic re-score ---------------------
+# After the R3 re-score (iteration 4) the champion image was swapped FOUR more
+# times — R4 (3bc82c6), R5 (00e5952), R6 (2855f48) and the smooth-figure merge
+# (fbd5ecd, feat/soccer-char-render) — each commit touching ONLY champion.png and
+# NEVER the scorecard/ledger. The record went stale AGAIN (kept scoring the R3
+# dithered frame while the champion advanced to a clean smooth-jointed render).
+# This iteration records those promotions AND the critic's honest re-score of the
+# ACTUAL smooth-figure champion. No render was touched here (bookkeeping only).
+[[iteration]]
+iteration = 5
+attacked_axis = "R4/R5/R6 + smooth-figure promotions + critic re-score"
+changed_files = [
+  # render changes (already committed; app-tier, NOT re-run here):
+  "apps/axiom-gallery/src/soccer_penalty/penalty_render_meshed.rs",  # smooth-figure: rounded limbs + sphere joints + beveled torso (542fb82)
+  "apps/axiom-gallery/src/soccer_penalty/recipe_meshes.rs",          # smooth-figure mesh generation
+  # (R4/R5/R6 swapped champion.png with no in-repo record of their per-lens edits)
+  # this critic re-score (bookkeeping only):
+  "visual_targets/soccer_penalty_gameplay/scorecard.champion.toml",
+  "visual_targets/soccer_penalty_gameplay/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "recalibrate"
+reason = """
+STALE-RECORD FIX. The champion image advanced R3 -> R4 -> R5 -> R6 -> smooth-figure \
+(champion.png md5 now d3b023b9…), replacing the dithered PS1 frame the scorecard \
+still described with a clean smooth-jointed render: white posts + a hanging GRID net, \
+rounded-limb/sphere-joint figures, solid red ad boxes, NO ordered-dither banding. \
+CRITIC RE-SCORE against the identity bar (harsh, proxy = 1, "when unsure take the \
+lower"), scoring the ACTUAL smooth-figure champion: \
+goal_and_net_fidelity 1->2 (wireframe cage replaced by white posts + real hanging \
+grid net; capped — coarse open grid, no cloth droop/crossbar depth); \
+artifact_level 1->3 (the two DOMINATING R3 artifacts — heavy ordered-dither crowd/ad \
+banding and the wireframe-goal cage — are GONE, clean flat colour; capped by blocky \
+low-res edges); \
+camera_lens_and_scale 3->2 (the smooth kicker is over-scaled and hard-cropped at the \
+torso — legs cut by the bottom edge — vs a fuller-body reference kicker at distance); \
+stadium_and_ad_boards 2->1 (ad boards are solid red boxes but carry NO "AXIOM SPORTS" \
+text, and the warm terracotta crowd band is GONE — replaced by a DARK EMPTY void with \
+no crowd figures; empty + textless = proxy = 1). \
+The rest HELD. Recomputed: lowest = 1 (three-way tie: goalkeeper_silhouette, \
+field_markings_and_turf, stadium_and_ad_boards), avg = 22/11 = 2.000, \
+final_score = 1.30 (the R3 card had claimed 1.27; the scalar is ~flat because the \
+real gains on goal/net + artifact are offset by real losses on camera-crop + emptied \
+crowd — this is a re-description of a different render, NOT inflation). \
+RIGHT-AXIS: by fixed axis order the first axis at the lowest value is still \
+goalkeeper_silhouette (camera/kicker now sit at 2, above it), so the NEXT attack \
+remains goalkeeper_silhouette — now for a FRESH reason: goal_and_net_fidelity and \
+artifact_level have LEFT the lowest tier, while field_markings_and_turf and \
+stadium_and_ad_boards have JOINED it. \
+PROCESS FLAG (no backfill committed): the smooth-figure renderer (542fb82: rounded \
+limbs + sphere joints + beveled torso in penalty_render_meshed.rs/recipe_meshes.rs) \
+landed via a feature-branch merge OUTSIDE the convergence-lens discipline — no lens \
+attribution, no ledger iteration, no failed-attempt log. It reads as an app-tier \
+mesh-DETAIL evolution of the existing humanoid kit (abstractions/0001.toml), not a \
+brand-new gated primitive/field/shader, so no abstractions/0002.toml is committed \
+here; but future structural render changes must land through the lens/abstraction- \
+gate loop, not as an unrecorded direct merge. \
+No parity is claimed; the render remains far from the clean low-poly mobile reference \
+(box-men actors, coarse grid net, empty stands, no HUD/reticle/power bar).
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 3
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 2
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 1
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 3
