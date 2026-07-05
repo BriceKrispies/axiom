@@ -14,10 +14,15 @@ behind the same facade:
   `GpuSubmissionReport`. **No real GPU calls are made.** This is what the
   headless rotating-cube vertical slice depends on, and its behaviour is
   byte-for-byte unchanged from before backend modes existed.
-- **Live** (`BackendKind::Live`). The structural seam for real presentation. A
-  live backend is built from the deterministic `axiom-host` presentation
-  boundary (`HostPresentationRequest`) and accepts the **same** `GpuSubmission`
-  shape, but performs **no real GPU work** in this pass.
+- **Live** (`BackendKind::Live`). The real-presentation arm, built from the
+  deterministic `axiom-host` presentation boundary (`HostPresentationRequest`)
+  and accepting the **same** `GpuSubmission` shape. Behind the off-by-default
+  `offscreen` feature it **executes that submission on a real native GPU
+  off-screen** and reads the pixels back
+  (`WebGpuApi::present_submission_offscreen_rgba`) — the headless proof that the
+  deterministic command chain the engine records is the chain that renders real
+  pixels. The deterministic `submit()` receipt is unchanged; only the new
+  off-screen method touches a GPU.
 
 ### Why `GpuSubmission` remains the stable input contract
 
@@ -46,27 +51,39 @@ future live pass can build a real surface/device from host-owned data without
 re-plumbing it. There is deliberately **no `LiveReady` state**, because no real
 backend binding exists yet.
 
-## What live mode does in this pass
+## What live mode does
 
 - Is constructible from a validated `HostPresentationRequest`
   (`WebGpuApi::new_live`), or as an explicitly unbound live backend
   (`WebGpuApi::new_live_unbound`).
 - Accepts the same `GpuSubmission` as recording mode.
-- Produces a deterministic `GpuSubmissionReport` whose **status** explicitly
-  states the outcome (`LiveNotBound` / `LiveNotInitialized`) and whose
-  `presented()` is **always `false`**.
+- The `submit()` receipt stays deterministic: its **status** explicitly states
+  the recording outcome (`LiveNotBound` / `LiveNotInitialized`) and its
+  `presented()` is **always `false`** — the receipt never claims a swap-chain
+  present occurred.
+- **Renders real pixels off-screen** (behind the `offscreen` feature):
+  `present_submission_offscreen_rgba` interprets the submission's command stream
+  (clear + camera + per-draw mesh/material/world), executes it on a throwaway
+  native `wgpu` device into an off-screen colour+depth target, and reads the
+  frame back to RGBA8. The wgpu `[0,1]` depth remap is applied **here, in the
+  wgpu consumer**, so the upstream contracts stay backend-neutral.
 - Rejects a structurally unusable setup — a request whose adapter does not
   require a presentation surface, or whose surface handle is invalid — through
   the kernel error model (`KernelResult` / `KernelError`, scope `Id`, code
   `InvalidId`).
 
-## What live mode intentionally does not do yet
+## The off-screen boundary (why the real GPU arm is isolated)
 
-- It does **not** touch a GPU, create an adapter/device/queue, configure a
-  swapchain, or present a single pixel. No `GpuSubmissionReport` ever claims
-  presentation happened.
-- It does **not** manage adapter/device/surface lifetimes. The purpose of this
-  pass is the *seam*, not the renderer backend.
+- The real `wgpu` work is **compiled only behind the off-by-default `offscreen`
+  feature on native**. The engine's default build — and therefore the coverage
+  gate, the branchless dylint, and the source-hygiene scan — never compile it,
+  exactly as `axiom-gpu-backend` isolates its own off-screen renderer. The
+  recording backend stays the deterministic, fully-covered, branchless default.
+- The off-screen arm needs only a native GPU adapter — **no surface, no
+  swap-chain, no browser objects** — so it proves the chain headlessly. A
+  browser swap-chain present still needs a bound surface and belongs to a host
+  adapter app, not this module (see below). This module stores **no** `web_sys`
+  / `js_sys` / `wasm_bindgen` binding.
 
 ## Why live mode consumes host presentation data, not browser objects
 
@@ -86,8 +103,9 @@ headless context.
 - `axiom-scene`, `axiom-resources`, `axiom-render` — no module imports another
   module (enforced by `tests/architecture.rs` and the architecture checker).
 - Any app or tool crate.
-- Real GPU/JS bindings (`wgpu::`, `web_sys::`, `js_sys::`, `wasm_bindgen::`) —
-  still absent, enforced by `tests/architecture.rs::no_real_gpu_backend_today`.
+- Real **browser** bindings (`web_sys::`, `js_sys::`, `wasm_bindgen::`) — absent,
+  enforced by `tests/architecture.rs::no_browser_bindings`. Native `wgpu::` is
+  permitted, but only inside the `offscreen`-gated `live_present` module.
 
 ### Why webgpu does not import render
 
@@ -106,19 +124,21 @@ and bool predicates such as `is_live()`, `report.presented()`).
 
 ## What remains for the browser-visible app pass
 
-This module is intentionally **not** the browser app and not the live renderer.
-The remaining work lives *outside* this module:
+The off-screen live arm proves the `GpuSubmission -> pixels` chain headlessly. A
+*browser swap-chain* present is the remaining work, and it lives **outside** this
+module:
 
 1. **A browser/native adapter app** (a new app, not a layer or module) that
-   owns the real `<canvas>`/window, creates the real `wgpu::Surface`, and
+   owns the real presentation surface, creates the real `wgpu::Surface`, and
    stores it in a `HandleId → real surface` table keyed by the
    `HostSurfaceHandle`. This is where `wasm-bindgen` / `web_sys` glue lives.
-2. **An async device-init path.** `wgpu`'s `Instance → Adapter → Device →
-   Queue` is async; runtime/host stepping is synchronous. The adapter must
-   bridge async acquisition to the point where a `HostSurfaceHandle` becomes
-   backed.
-3. **A real `submit()` live arm.** Once a surface/device is bound, the
-   `LivePresentationRequested` state gains a `LiveReady` successor and
-   `submit()` performs real submission — consuming the *same* `GpuSubmission`
-   and returning the *same* `GpuSubmissionReport` shape, with a future
+   (The `offscreen` arm here needs no surface, so it renders headlessly today.)
+2. **The async device-init bridge for the *surface* path.** The off-screen arm
+   drives `wgpu`'s async `Instance → Adapter → Device` synchronously with
+   `pollster::block_on`; a browser surface path must instead bridge async
+   acquisition into the run loop where a `HostSurfaceHandle` becomes backed.
+3. **A swap-chain `submit()` successor.** Once a surface/device is bound, the
+   `LivePresentationRequested` state can gain a `LiveReady` successor that
+   presents to the swap-chain — consuming the *same* `GpuSubmission` and
+   returning the *same* `GpuSubmissionReport` shape, with a future
    `Presented`-style status. Nothing else in the engine changes.

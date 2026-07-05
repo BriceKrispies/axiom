@@ -872,6 +872,9 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-runtime",
+ "bytemuck",
+ "pollster",
+ "wgpu",
 ]
 
 [[package]]

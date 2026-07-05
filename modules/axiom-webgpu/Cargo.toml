@@ -16,6 +16,23 @@ axiom-math = { path = "../../crates/axiom-math" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-frame = { path = "../../crates/axiom-frame" }
 
+# wgpu/bytemuck/pollster are optional: pulled in on native only by the
+# `offscreen` feature, which compiles the live backend arm that realizes a
+# GpuSubmission into real pixels off-screen and reads them back. Off by default,
+# so the default native build / coverage / branchless-lint never compile the
+# real-GPU arm — exactly the boundary `axiom-gpu-backend` draws for its own
+# offscreen renderer. pollster drives the async wgpu device init (block_on).
+wgpu = { version = "25", optional = true }
+bytemuck = { version = "1", optional = true }
+pollster = { version = "0.4", optional = true }
+
+[features]
+# The live presentation arm: real wgpu, off-screen, native. The recording
+# backend (the deterministic proof path) stays the default and never touches a
+# GPU; this feature adds the live realization used to prove the
+# GpuSubmission -> pixels chain headlessly on a native GPU.
+offscreen = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
