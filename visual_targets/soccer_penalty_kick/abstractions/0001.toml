@@ -1,8 +1,0 @@
-# Structural attack on subject_fidelity: the kicker figure.
-axis = "subject_fidelity"
-failed_attempts = []          # inexpressible at config: no constant can turn a static box-puppet into a posed figure
-inexpressible = true
-smallest_api = "No new engine surface. App-tier only: enrich the app-local kicker puppet geometry (penalty_scene.rs) from a static 9-box T-pose into a dynamically-posed 11-part figure (staggered mid-stride legs, forward lean, swung arms, added neck + hair). Reuses the existing GoalieHair material for the kicker's hair; no palette/enum growth."
-screenshot_command = "cargo run --manifest-path tools/axiom-shot/Cargo.toml --release -- --app soccer-penalty --backend gpu --out visual_targets/soccer_penalty_kick/candidate.png"
-screenshot_proof = "GPU offscreen path is deterministic within tolerance; verified byte-identical md5 on a double render at iteration 0."
-note = "Parity on the '10' back-number needs a text/digit decal (a texture or small digit-mesh) — queued as the next structural move once the pose/proportion gap is closed."

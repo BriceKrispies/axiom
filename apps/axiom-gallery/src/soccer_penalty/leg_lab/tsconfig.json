@@ -1,0 +1,23 @@
+{
+  "// note": "Compiles the leg lab + harness (src/*.ts) to dist/*.js with tsgo (serve.py runs `tsgo -p` on this). `@axiom/game` resolves to the SDK's built declarations for typecheck; the emitted JS keeps the bare specifier, resolved in the browser by the import map in index.html. The shared axiom-game-runtime wasm + the SDK boot edge resolve by absolute path, served by serve.py. Paths are relative to this file: five levels up is the repo root (leg_lab -> soccer_penalty -> src -> axiom-gallery -> apps -> root).",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": true,
+    "strict": true,
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@axiom/game": ["../../../../../packages/axiom-game/dist/index.d.ts"],
+      "/vendor/axiom-game/boot.js": ["../../../../../packages/axiom-game/dist/boot.d.ts"],
+      "/pkg/axiom_game_runtime.js": ["../../../../../apps/axiom-game-runtime/web/pkg/axiom_game_runtime.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

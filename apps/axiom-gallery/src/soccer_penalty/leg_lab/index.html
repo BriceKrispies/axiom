@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Leg Lab (procedural gait), authored in TypeScript</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 12px; padding: 16px;
+        font: 14px/1.5 system-ui, sans-serif; background: #0c0d10; color: #d7dbe2;
+      }
+      h1 { font-size: 15px; font-weight: 600; margin: 0; }
+      /* `!important` so the display size survives the canvas2d backend's inline
+         `width: 240px` (its low-res framebuffer size), which it re-applies on every
+         (re)bind — without this the canvas shrinks to 240px after a hot reload. */
+      #axiom-leg-lab-canvas {
+        width: 960px !important; height: 600px !important; max-width: 100%;
+        border: 1px solid #2a2e36; border-radius: 6px; background: #10141c;
+        touch-action: none; image-rendering: pixelated;
+      }
+      #hud {
+        display: flex; gap: 22px; width: 960px; max-width: 100%;
+        font-family: ui-monospace, monospace; justify-content: center; flex-wrap: wrap;
+      }
+      #hud b { color: #d8e6ff; font-weight: 600; }
+      #phase.planted { color: #7CFFB2; } #phase.swing { color: #ffd27c; }
+      .legend b { font-weight: 600; }
+      .cyan { color: #4fe3f0; } .magenta { color: #fb5fa0; }
+      #status { font-family: ui-monospace, monospace; transition: color .2s; }
+      .ok { color: #7fd17f; } .err { color: #e07a7a; }
+      .flash { color: #7CFFB2 !important; }
+    </style>
+
+    <!--
+      No bundler: the @axiom/game SDK loads as native ES modules from its dist/
+      build (import map below). The leg lab + harness are authored in TypeScript
+      (src/*.ts) and emitted to /dist by serve.py's tsgo compile; the shared
+      axiom-game-runtime wasm is served at /pkg. There is NO Rust in this app.
+    -->
+    <script type="importmap">
+      { "imports": { "@axiom/game": "/vendor/axiom-game/index.js" } }
+    </script>
+  </head>
+  <body>
+    <h1>Axiom — Leg Lab: one procedural leg, authored in TypeScript on @axiom/game</h1>
+    <canvas id="axiom-leg-lab-canvas" width="960" height="600"></canvas>
+    <div id="hud">
+      <span>TICK <b id="tick">0</b></span>
+      <span>PHASE <b id="phase">—</b></span>
+      <span>KNEE <b id="knee">—</b></span>
+    </div>
+    <div id="hud" class="legend">
+      <span><b class="cyan">cyan</b> = hip / root</span>
+      <span><b class="magenta">magenta</b> = foot target</span>
+      <span>deterministic gait — it loops on its own, no input</span>
+    </div>
+    <div id="status">booting…</div>
+
+    <script type="module" src="/dist/harness.js"></script>
+  </body>
+</html>

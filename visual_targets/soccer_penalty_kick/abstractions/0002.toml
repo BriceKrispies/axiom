@@ -1,8 +1,0 @@
-# Structural: real low-poly meshes (the fidelity pipeline).
-axis = "subject_fidelity"
-failed_attempts = []          # inexpressible at config: boxes can't become rounded figures by moving numbers
-inexpressible = true
-smallest_api = "No new ENGINE surface -- uses the engine's existing runtime authoring (RunningApp::add_mesh_data / add_material / spawn / set_camera / add_light). New APP-tier code: penalty_meshes.rs (unit_cube/unit_sphere/unit_capsule MeshData generators) + penalty_render_meshed.rs (soccer_meshed_app: builds an empty app, registers the mesh library, spawns one real-mesh renderable per world object, sets camera + light). axiom-shot's soccer-penalty registry now uses the meshed build."
-screenshot_command = "cargo run --manifest-path tools/axiom-shot/Cargo.toml --release -- --app soccer-penalty --backend gpu --out visual_targets/soccer_penalty_kick/candidate.png"
-screenshot_proof = "GPU offscreen path deterministic within tolerance."
-note = "ROOT CAUSE of the box look: the engine's setup/reauthor authoring closure can only name the fieldless catalog Mesh enum (cube/sphere/plane); custom MeshData is only reachable via RunningApp runtime authoring, which the live-rebuild loop doesn't use. Phase 1 fixes this on the headless/convergence path. Unifying the live/browser path (letting the closure accept MeshData) is a queued engine-level change (Phase 0)."

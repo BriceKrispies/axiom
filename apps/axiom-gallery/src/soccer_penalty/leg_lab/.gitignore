@@ -1,0 +1,3 @@
+# Build artifacts of the standalone TypeScript leg lab.
+# The compiled TS output and any local SDK/wasm outputs are produced by serve.py.
+dist/
