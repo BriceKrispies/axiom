@@ -41,7 +41,9 @@
 //! ±2; the text run is rendered 1:1 with the integer-aligned atlas cells, so each
 //! glyph pixel samples exactly one atlas texel on both backends.
 //!
-//! Requires the native GPU adapter the sandbox provides (the off-screen arm).
+//! Requires the native GPU adapter the sandbox provides (the off-screen arm),
+//! so the whole file is compiled only behind the `offscreen` feature.
+#![cfg(feature = "offscreen")]
 
 mod common;
 

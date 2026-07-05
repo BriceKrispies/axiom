@@ -103,17 +103,15 @@ members = [
     "tools/axiom-proc-inspect",
     "tools/axiom-proc-fuzz",
     "tools/axiom-render-bench",
+    # The capture harness. Its native GPU `offscreen` arm is behind a NON-DEFAULT
+    # feature (see tools/axiom-shot/Cargo.toml), so `cargo test --workspace` and
+    # the coverage/dylint gates — which build members with default features — never
+    # enable `axiom-gpu-backend/offscreen`, keeping that un-coverable native-wgpu
+    # arm compiled out. Its parity tests now run in CI; the GPU ones need
+    # `--features offscreen`. As a tool it loads the apps/games it renders (the
+    # sanctioned capture-host role — see CAPTURE_HARNESS_TOOLS in xtask).
+    "tools/axiom-shot",
 ]
-
-# `tools/axiom-shot` is deliberately NOT a workspace member. It enables
-# `axiom-gpu-backend`'s `offscreen` feature (native wgpu), and Cargo feature
-# unification would otherwise turn that feature on for the module during
-# `cargo test --workspace` / the coverage + dylint gates — pulling the wgpu
-# off-screen code into the module's *native* build, where it can't be covered or
-# kept branchless. Keeping the screenshot tool out of the workspace confines that
-# feature to the tool's own build. Run it with:
-#   cargo run --manifest-path tools/axiom-shot/Cargo.toml --release -- [out.png] [tick]
-exclude = ["tools/axiom-shot"]
 
 [workspace.package]
 edition = "2021"

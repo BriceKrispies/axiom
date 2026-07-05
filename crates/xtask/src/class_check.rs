@@ -10,6 +10,20 @@ use crate::cargo_metadata::WorkspaceGraph;
 use crate::classification::{classify, Classified, ManifestIndex, PackageClass};
 use crate::violation::{CheckReport, Violation, ViolationKind};
 
+/// Tool crates sanctioned as capture **hosts**: like the console/cartridge role
+/// (a host loads the cartridges it runs), a screenshot/capture harness
+/// legitimately depends on the apps and games it renders. This is a
+/// narrowly-scoped, documented amendment — the same shape as the
+/// `PLATFORM_FACING_*` allowlists and the `axiom-zones` Support class — not a
+/// general loosening of the tool→app / tool→game ban: every *other* tool is
+/// still forbidden from depending on an app or a game.
+const CAPTURE_HARNESS_TOOLS: &[&str] = &["axiom-shot"];
+
+/// Whether `crate_name` is a sanctioned capture-harness host.
+fn is_capture_harness(crate_name: &str) -> bool {
+    CAPTURE_HARNESS_TOOLS.contains(&crate_name)
+}
+
 /// Run every cross-class rule. Pushes violations into `report`.
 pub fn check(
     root: &Path,
@@ -713,8 +727,12 @@ fn check_forward_dependencies(
                 .or_else(|| {
                     // A layer, module, or tool depending on a game is illegal:
                     // games are content (the cartridge tier), not the reusable
-                    // spine. Only host apps (via `allowed_games`) may load a game.
-                    (matches!(pair, (Layer, Game) | (Module, Game) | (Tool, Game))).then(|| {
+                    // spine. Only host apps (via `allowed_games`) — and the
+                    // sanctioned capture-harness tools (which render the game) —
+                    // may load a game.
+                    (matches!(pair, (Layer, Game) | (Module, Game))
+                        | ((pair == (Tool, Game)) & !is_capture_harness(&c.package.name)))
+                    .then(|| {
                         report.push(Violation::new(
                             ViolationKind::NonHostDependsOnGame,
                             c.package.name.clone(),
@@ -893,6 +911,8 @@ fn check_apps_are_leaves(
                 app_names.contains(dep_name.as_str())
                     & (class_by_name.get(c.package.name.as_str()) != Some(&PackageClass::App))
                     & (class_by_name.get(c.package.name.as_str()) == Some(&PackageClass::Tool))
+                    // A sanctioned capture harness loads the apps it renders.
+                    & !is_capture_harness(&c.package.name)
             })
             .for_each(|dep_name| {
                 report.push(Violation::new(

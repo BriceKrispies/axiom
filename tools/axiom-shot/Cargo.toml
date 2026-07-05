@@ -1,21 +1,28 @@
-# Native headless screenshot tool: ticks an app's scene and renders it through
-# a selected backend (`gpu` or `canvas2d`), byte-faithful to what the browser
-# presents on that backend.
+# Native headless screenshot / capture harness: ticks any registered slice's
+# scene and renders it through a selected backend (`gpu` or `canvas2d`),
+# byte-faithful to what the browser presents on that backend.
 #
-# NOT a workspace member (see the root Cargo.toml `exclude`): enabling the GPU
-# `offscreen` feature here must not unify into the module during the workspace
-# coverage/dylint gates, and depending on app crates must not enter the engine
-# dependency graph the architecture checker validates.
+# It IS a workspace member so its parity tests run under `cargo test --workspace`
+# and CI. The native GPU off-screen arm (real wgpu) is gated behind this crate's
+# NON-DEFAULT `offscreen` feature so the workspace coverage/dylint gates — which
+# build members with default features — never enable `axiom-gpu-backend/offscreen`
+# and never compile that un-coverable native-wgpu arm into a module. Run the GPU
+# path (and the GPU parity tests) with the feature on:
+#   cargo run  -p axiom-shot --features offscreen -- --backend gpu ...
+#   cargo test -p axiom-shot --features offscreen
+# The canvas2d path and every non-GPU test run with the default build.
+#
+# axiom-shot is the sanctioned capture host: as a tool it legitimately loads the
+# apps/games it renders (the console/cartridge role), allowed via the checker's
+# CAPTURE_HARNESS_TOOLS allowlist (crates/xtask/src/class_check.rs).
 [package]
 name = "axiom-shot"
 version = "0.1.0"
 edition = "2021"
 
-[workspace]
-
 [dependencies]
 axiom = { path = "../../modules/axiom" }
-axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["offscreen"] }
+axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend" }
 axiom-canvas2d-backend = { path = "../../modules/axiom-canvas2d-backend" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-kernel = { path = "../../crates/axiom-kernel" }
@@ -24,8 +31,17 @@ axiom-math = { path = "../../crates/axiom-math" }
 # directly at the render-API level (the umbrella `Material`→asset boundary
 # drops `opacity`).
 axiom-render = { path = "../../modules/axiom-render" }
-# Every browser demo lives here as a module (`axiom_gallery::retro_fps`, …); the
-# tool screenshots them through this one crate.
+# Every browser demo lives here as a module (`axiom_gallery::rotating_cube`, …);
+# the harness renders the registered ones through this one crate.
 axiom-gallery = { path = "../../apps/axiom-gallery" }
 axiom-game-retro-fps = { path = "../../games/retro-fps" }
+# The animation lab's posed-figure scene — captured as real pixels (L3), not SVG.
+axiom-animation-lab = { path = "../../apps/axiom-animation-lab" }
 png = "0.17"
+
+[features]
+# Native off-screen GPU rendering (real wgpu). NON-DEFAULT: enabling it turns on
+# `axiom-gpu-backend/offscreen`, which must not unify into the module during the
+# workspace coverage/dylint gates (see the header note). The `--backend gpu`
+# path and the GPU parity tests require it.
+offscreen = ["axiom-gpu-backend/offscreen"]

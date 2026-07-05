@@ -17,3 +17,6 @@ toml = "0.8"
 # Faithfully evaluates the coverage gate's --ignore-filename-regex pattern
 # (same regex engine as llvm-cov); see coverage_scope.rs.
 regex = "1"
+# Pins each committed slice golden / reference image to a recorded SHA-256, so a
+# deleted or regenerated golden is caught by `check-slices` (see slice_check.rs).
+sha2 = "0.10"

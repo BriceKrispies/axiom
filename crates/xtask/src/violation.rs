@@ -143,13 +143,39 @@ pub enum ViolationKind {
     GameAllowedLayerUnknown,
     /// A `game.toml` names a module in `allowed_modules` that does not exist.
     GameAllowedModuleUnknown,
+
+    // --- Semantic slice rules (check-slices / check-slice-placement) ---
+    /// A `slice.toml` could not be parsed or was structurally invalid.
+    SliceManifestInvalid,
+    /// A slice's `crate_name` names no workspace package.
+    SliceCrateUnknown,
+    /// A slice's declared determinism test file does not exist.
+    SliceDeterminismTestMissing,
+    /// A slice declares a golden `.bin` whose file is missing.
+    SliceGoldenMissing,
+    /// A slice's committed golden file does not hash to the recorded SHA-256
+    /// (a deleted/regenerated/edited golden — trust-on-first-use closed).
+    SliceGoldenHashMismatch,
+    /// A slice declares a reference image whose file is missing.
+    SliceReferenceMissing,
+    /// A slice's committed reference image does not hash to the recorded SHA-256.
+    SliceReferenceHashMismatch,
+    /// A slice's `harness_entry` symbol is not a public export of its crate.
+    SliceHarnessEntryMissing,
+    /// A slice declares a `harness` name that is not registered in axiom-shot's
+    /// renderable-slice registry (runnable but un-harnessable).
+    SliceHarnessNotRegistered,
+    /// An `apps/`/`games/` source file is a large pure mesh/instance/matrix
+    /// data-transform with no module-facade call — engine render logic hiding
+    /// in an app/game (it belongs in a coverage+branchless feature module).
+    SlicePlacementEngineLogicInApp,
 }
 
 impl ViolationKind {
     /// The stable, greppable tokens, one per variant, in declaration order.
     /// `ViolationKind` is fieldless, so `self as usize` is its discriminant and
     /// indexes straight into this table — no per-variant match arm to maintain.
-    const TOKENS: [&'static str; 51] = [
+    const TOKENS: [&'static str; 61] = [
         "ManifestInvalid",
         "UnknownDependency",
         "DependencyCycle",
@@ -201,6 +227,16 @@ impl ViolationKind {
         "GameDependsOnModuleNotAllowed",
         "GameAllowedLayerUnknown",
         "GameAllowedModuleUnknown",
+        "SliceManifestInvalid",
+        "SliceCrateUnknown",
+        "SliceDeterminismTestMissing",
+        "SliceGoldenMissing",
+        "SliceGoldenHashMismatch",
+        "SliceReferenceMissing",
+        "SliceReferenceHashMismatch",
+        "SliceHarnessEntryMissing",
+        "SliceHarnessNotRegistered",
+        "SlicePlacementEngineLogicInApp",
     ];
 }
 

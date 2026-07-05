@@ -5,7 +5,9 @@
 //! is asserted as carried-but-not-yet-shaded (round-trips on the material; no
 //! backend threads it into a pixel yet).
 //!
-//! Requires the native GPU adapter the sandbox provides (the off-screen arm).
+//! Requires the native GPU adapter the sandbox provides (the off-screen arm)
+//! for the parity test; the pure material test runs in the default build.
+#![allow(dead_code)]
 
 mod common;
 
@@ -24,6 +26,7 @@ fn cylinder_emissive() -> Color {
     Color::linear_rgb(ch(0.6), ch(0.5), ch(0.1))
 }
 
+#[cfg(feature = "offscreen")]
 fn nova_roll() -> RunningApp {
     App::new()
         .window(
@@ -77,6 +80,9 @@ fn nova_roll() -> RunningApp {
         .build()
 }
 
+// The GPU↔canvas2d comparison needs the native off-screen arm (`offscreen`
+// feature); the pure material test below always runs.
+#[cfg(feature = "offscreen")]
 #[test]
 fn nova_roll_renders_one_frame_on_both_backends_in_agreement() {
     let mut app = nova_roll();

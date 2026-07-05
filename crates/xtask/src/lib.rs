@@ -16,4 +16,6 @@ pub mod hygiene;
 pub mod manifest;
 pub mod module_manifest;
 pub mod rust_source;
+pub mod slice_check;
+pub mod slice_manifest;
 pub mod violation;
