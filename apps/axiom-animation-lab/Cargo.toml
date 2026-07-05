@@ -1,6 +1,6 @@
 [package]
 name = "axiom-animation-lab"
-description = "Axiom app: authors a humanoid rig and a right-foot soccer kick entirely through the axiom-animation module facade, then samples, joint-limit-clamps, and forward-kinematics-solves the kick per frame and renders it as SVG stick figures. All the *meaning* (the humanoid, the named kick phases, the KickContact event) lives here in the app; the engine module owns only the mechanism."
+description = "Axiom app: authors a sample articulated rig and a sagittal limb-swing motion entirely through the axiom-animation module facade, then samples, joint-limit-clamps, and forward-kinematics-solves the motion per frame and renders it as SVG stick figures. All the *meaning* (the figure, the named motion phases, the marked event) lives here in the app; the engine module owns only the mechanism. The built-in content is a default — any portable figure/clip bytes can be scrubbed."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true

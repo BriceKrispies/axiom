@@ -101,7 +101,7 @@ fn build_soccer(p: &BuildParams) -> RunningApp {
 }
 
 /// L3: the animation-lab posed-figure scene captured as REAL pixels (not SVG).
-/// Loads the shared kicker figure + kick clip bytes, poses the figure at `frame`,
+/// Loads the sample figure + motion clip bytes, poses the figure at `frame`,
 /// and spawns one box renderable per posed part — the same posed boxes the SVG
 /// scrubber draws, now rendered through a real backend.
 fn build_posed_figure(p: &BuildParams) -> RunningApp {

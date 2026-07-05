@@ -1,13 +1,12 @@
-//! The lab scene: load the kicker figure + kick clip from their portable bytes,
-//! then pose the figure per frame.
+//! The lab scene: load the sample figure + motion clip from their portable
+//! bytes, then pose the figure per frame.
 //!
-//! This is the data-driven pipeline the game shares. The lab reads the *authored
-//! bytes* (which the emit command writes to the shared asset the game embeds),
-//! deserializes the figure and clip through the generic facades, builds the
-//! animation skeleton from the figure's parts, samples/resolves the clip, and
-//! hands the world transforms to the figure to get renderable boxes. Nothing
-//! about the kicker is hard-coded here — swap the bytes and this scrubs any
-//! figure.
+//! This is a generic, data-driven pipeline. The lab reads the *authored bytes*
+//! (which the emit command can write out), deserializes the figure and clip
+//! through the generic facades, builds the animation skeleton from the figure's
+//! parts, samples/resolves the clip, and hands the world transforms to the
+//! figure to get renderable boxes. Nothing about the specific figure is
+//! hard-coded here — swap the bytes and this scrubs any figure.
 
 use axiom_animation::{AnimationApi, BoneId, ClipId, SkeletonId};
 use axiom_figure::{FigureApi, FigureDefinition, PosedPart};
@@ -25,15 +24,15 @@ pub struct FrameView {
     pub phase: Option<u32>,
     /// The figure's renderable posed boxes.
     pub parts: Vec<PosedPart>,
-    /// World position of the kicking (right) foot joint.
-    pub right_foot: Vec3,
-    /// World position of the plant (left) foot joint.
-    pub plant_foot: Vec3,
-    /// Whether the `KickContact` event fires on this frame.
-    pub is_contact_frame: bool,
+    /// World position of the highlighted swinging joint.
+    pub swing_joint: Vec3,
+    /// World position of the highlighted anchored joint.
+    pub anchor_joint: Vec3,
+    /// Whether the sample event fires on this frame.
+    pub is_event_frame: bool,
 }
 
-/// The lab scene: a kicker figure and the animation registry driving it.
+/// The lab scene: a sample figure and the animation registry driving it.
 #[derive(Debug)]
 pub struct LabScene {
     figure: FigureDefinition,
@@ -49,12 +48,13 @@ impl Default for LabScene {
 }
 
 impl LabScene {
-    /// Load the kicker from its authored bytes and wire the animation registry.
+    /// Load the sample figure from its authored bytes and wire the animation
+    /// registry.
     pub fn new() -> Self {
         Self::from_bytes(&authoring::figure_bytes(), &authoring::clip_bytes())
     }
 
-    /// Build the scene from figure + clip bytes — the exact data the game loads.
+    /// Build the scene from figure + clip bytes — any portable figure/clip pair.
     pub fn from_bytes(figure_bytes: &[u8], clip_bytes: &[u8]) -> Self {
         let figure = FigureApi::new().deserialize(figure_bytes).expect("valid figure bytes");
         let mut api = AnimationApi::new();
@@ -72,7 +72,7 @@ impl LabScene {
         Self { figure, api, skeleton, clip }
     }
 
-    /// Total frames in the kick clip.
+    /// Total frames in the motion clip.
     pub fn frame_count(&self) -> u32 {
         authoring::FRAME_COUNT
     }
@@ -102,18 +102,18 @@ impl LabScene {
         let world = self.world_transforms(frame);
         let parts = FigureApi::new().posed_parts(&self.figure, &world).expect("posed parts");
         let tick = Tick::new(u64::from(frame));
-        let is_contact_frame = self
+        let is_event_frame = self
             .api
             .events_at(self.clip, tick)
-            .map(|codes| codes.contains(&authoring::KICK_CONTACT_CODE))
+            .map(|codes| codes.contains(&authoring::EVENT_CODE))
             .unwrap_or(false);
         FrameView {
             frame,
             phase: self.api.phase_at(self.clip, tick).ok().flatten(),
-            right_foot: world[authoring::RIGHT_FOOT].translation,
-            plant_foot: world[authoring::LEFT_FOOT].translation,
+            swing_joint: world[authoring::SWING_JOINT].translation,
+            anchor_joint: world[authoring::ANCHOR_JOINT].translation,
             parts,
-            is_contact_frame,
+            is_event_frame,
         }
     }
 }
@@ -131,28 +131,28 @@ mod tests {
     }
 
     #[test]
-    fn contact_frame_is_flagged_only_on_the_strike_frame() {
+    fn event_frame_is_flagged_only_on_the_event_frame() {
         let scene = LabScene::new();
-        assert!(scene.view(authoring::CONTACT_FRAME).is_contact_frame);
-        assert!(!scene.view(0).is_contact_frame);
-        assert!(!scene.view(authoring::CONTACT_FRAME - 1).is_contact_frame);
+        assert!(scene.view(authoring::EVENT_FRAME).is_event_frame);
+        assert!(!scene.view(0).is_event_frame);
+        assert!(!scene.view(authoring::EVENT_FRAME - 1).is_event_frame);
     }
 
     #[test]
-    fn kick_sweeps_the_right_foot_forward_and_is_deterministic() {
+    fn motion_sweeps_the_swing_joint_forward_and_is_deterministic() {
         let scene = LabScene::new();
-        assert_eq!(scene.view(20).right_foot, scene.view(20).right_foot);
-        // The right foot is well behind at backswing and well forward at strike.
-        let back = scene.view(24).right_foot.z;
-        let strike = scene.view(authoring::CONTACT_FRAME).right_foot.z;
-        assert!(strike - back > 0.4, "foot should sweep forward: back={back}, strike={strike}");
+        assert_eq!(scene.view(20).swing_joint, scene.view(20).swing_joint);
+        // The swing joint is well behind at windup and well forward at the event.
+        let back = scene.view(24).swing_joint.z;
+        let peak = scene.view(authoring::EVENT_FRAME).swing_joint.z;
+        assert!(peak - back > 0.4, "joint should sweep forward: back={back}, peak={peak}");
     }
 
     #[test]
-    fn plant_foot_stays_roughly_put() {
+    fn anchor_joint_stays_roughly_put() {
         let scene = LabScene::new();
-        let a = scene.view(0).plant_foot;
-        let b = scene.view(authoring::CONTACT_FRAME).plant_foot;
+        let a = scene.view(0).anchor_joint;
+        let b = scene.view(authoring::EVENT_FRAME).anchor_joint;
         assert!((a.z - b.z).abs() < 0.2);
     }
 }

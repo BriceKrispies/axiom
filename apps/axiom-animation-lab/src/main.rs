@@ -1,11 +1,11 @@
-//! Axiom Animation Lab CLI — scrub the kick, and emit the shared game assets.
+//! Axiom Animation Lab CLI — scrub a motion, and emit its portable assets.
 //!
 //! Usage:
 //!   axiom-animation-lab                       # inspection table (key frames)
 //!   axiom-animation-lab --full                # one line per frame
 //!   axiom-animation-lab --frame N [--out F]   # render frame N as SVG (stdout or F)
 //!   axiom-animation-lab --all --out DIR       # render every frame to DIR/frame_NNN.svg
-//!   axiom-animation-lab --emit-assets DIR     # write kicker.figure + kick_right.clip
+//!   axiom-animation-lab --emit-assets DIR     # write sample.figure + sample.clip
 
 use std::path::Path;
 
@@ -56,25 +56,25 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
         .cloned()
 }
 
-/// Write the shared binary assets the game embeds.
+/// Write the figure + clip as portable binary assets.
 fn emit_assets(dir: &str) {
     std::fs::create_dir_all(dir).ok();
-    write_bytes(&Path::new(dir).join("kicker.figure").to_string_lossy(), &authoring::figure_bytes());
-    write_bytes(&Path::new(dir).join("kick_right.clip").to_string_lossy(), &authoring::clip_bytes());
+    write_bytes(&Path::new(dir).join("sample.figure").to_string_lossy(), &authoring::figure_bytes());
+    write_bytes(&Path::new(dir).join("sample.clip").to_string_lossy(), &authoring::clip_bytes());
 }
 
 /// A text table of frames: every frame with `full`, else a handful of key ones.
 fn table(scene: &LabScene, full: bool) -> String {
     let key = [0_u32, 12, 18, 24, 33, 42, 47];
     let frames: Vec<u32> = if full { (0..scene.frame_count()).collect() } else { key.to_vec() };
-    let mut out = String::from("frame  phase           contact  Rfoot(z,y)       plant(z,y)\n");
+    let mut out = String::from("frame  phase           event    swing(z,y)       anchor(z,y)\n");
     for f in frames {
         let view = scene.view(f);
         let phase = view.phase.map_or("-", phase_name);
-        let contact = if view.is_contact_frame { "  *  " } else { "     " };
+        let event = if view.is_event_frame { "  *  " } else { "     " };
         out.push_str(&format!(
-            "{f:>3}    {phase:<14}  {contact}   ({:+.2}, {:+.2})   ({:+.2}, {:+.2})\n",
-            view.right_foot.z, view.right_foot.y, view.plant_foot.z, view.plant_foot.y
+            "{f:>3}    {phase:<14}  {event}   ({:+.2}, {:+.2})   ({:+.2}, {:+.2})\n",
+            view.swing_joint.z, view.swing_joint.y, view.anchor_joint.z, view.anchor_joint.y
         ));
     }
     out
@@ -98,12 +98,12 @@ fn write_bytes(path: &str, contents: &[u8]) {
 }
 
 fn print_usage() {
-    println!("Axiom Animation Lab — deterministic kicker scrubber + asset emitter");
+    println!("Axiom Animation Lab — deterministic motion scrubber + asset emitter");
     println!();
     println!("  (default)                 inspection table for key frames");
     println!("  --full                    one line per frame");
     println!("  --frame N [--out FILE]    render frame N as SVG (stdout or FILE)");
     println!("  --all --out DIR           render every frame to DIR/frame_NNN.svg");
-    println!("  --emit-assets DIR         write kicker.figure + kick_right.clip");
+    println!("  --emit-assets DIR         write sample.figure + sample.clip");
     println!("  --help                    this message");
 }

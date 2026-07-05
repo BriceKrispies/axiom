@@ -1,15 +1,15 @@
-//! Render a posed kick frame as a side-view SVG of low-poly boxes.
+//! Render a posed motion frame as a side-view SVG of low-poly boxes.
 //!
-//! The kick swings in the Y–Z plane (a pitch about X moves the legs forward in
-//! Z), so the side view projects `(z, y)` to screen. Each figure part is drawn
-//! as its box: the four sagittal-plane corners of the box are rotated by the
-//! part's world orientation and projected, so limbs tilt as they swing. Pure
+//! The sample motion swings in the Y–Z plane (a pitch about X moves the limbs
+//! forward in Z), so the side view projects `(z, y)` to screen. Each figure part
+//! is drawn as its box: the four sagittal-plane corners of the box are rotated by
+//! the part's world orientation and projected, so limbs tilt as they swing. Pure
 //! string building over the posed parts the scene produces.
 
 use axiom_figure::PosedPart;
 use axiom_math::Vec3;
 
-use crate::authoring::{self, KICK_PHASES};
+use crate::authoring::{self, PHASES};
 use crate::scene::{FrameView, LabScene};
 
 const WIDTH: f32 = 480.0;
@@ -30,11 +30,11 @@ fn project(p: Vec3) -> (f32, f32) {
 /// A muted fill/stroke color per opaque render tag.
 fn tag_colors(tag: u32) -> (&'static str, &'static str) {
     match tag {
-        0 => ("#2f6bd8", "#1c3f80"), // jersey
-        1 => ("#e6e6ea", "#9aa0aa"), // shorts
+        0 => ("#2f6bd8", "#1c3f80"), // body
+        1 => ("#e6e6ea", "#9aa0aa"), // pelvis
         2 => ("#d8a97e", "#9c7250"), // skin
-        3 => ("#33384a", "#20222c"), // sock
-        _ => ("#1a1c22", "#000000"), // boot
+        3 => ("#33384a", "#20222c"), // limb
+        _ => ("#1a1c22", "#000000"), // end
     }
 }
 
@@ -51,10 +51,10 @@ pub fn render_frame(scene: &LabScene, frame: u32) -> String {
     ));
 
     push_phase_strip(&mut s, scene, frame);
-    push_ground_and_ball(&mut s);
+    push_ground(&mut s);
     push_parts(&mut s, &view);
-    push_foot_markers(&mut s, &view);
-    push_contact_marker(&mut s, &view);
+    push_joint_markers(&mut s, &view);
+    push_event_marker(&mut s, &view);
     push_hud(&mut s, &view);
 
     s.push_str("</svg>\n");
@@ -78,9 +78,9 @@ fn push_phase_strip(s: &mut String, scene: &LabScene, frame: u32) {
          stroke=\"#ffffff\" stroke-width=\"2\"/>\n",
         cell + 0.5
     ));
-    let contact = STRIP_X + authoring::CONTACT_FRAME as f32 * cell + cell * 0.5;
+    let event = STRIP_X + authoring::EVENT_FRAME as f32 * cell + cell * 0.5;
     s.push_str(&format!(
-        "<line x1=\"{contact:.1}\" y1=\"{:.1}\" x2=\"{contact:.1}\" y2=\"{:.1}\" \
+        "<line x1=\"{event:.1}\" y1=\"{:.1}\" x2=\"{event:.1}\" y2=\"{:.1}\" \
          stroke=\"#ff5a5a\" stroke-width=\"2\"/>\n",
         STRIP_Y - 4.0,
         STRIP_Y + STRIP_H + 4.0
@@ -94,24 +94,14 @@ fn phase_color(code: u32) -> &'static str {
         .unwrap_or("#222222")
 }
 
-fn push_ground_and_ball(s: &mut String) {
+fn push_ground(s: &mut String) {
     s.push_str(&format!(
         "<line x1=\"0\" y1=\"{CY}\" x2=\"{WIDTH}\" y2=\"{CY}\" stroke=\"#44506a\" stroke-width=\"2\"/>\n"
-    ));
-    let (bx, by) = project(Vec3::new(0.0, 0.11, 0.62));
-    s.push_str(&format!(
-        "<circle cx=\"{bx:.1}\" cy=\"{by:.1}\" r=\"{:.1}\" fill=\"#e8e8e8\" stroke=\"#101010\" \
-         stroke-width=\"1.5\"/>\n",
-        0.11 * SCALE
-    ));
-    s.push_str(&format!(
-        "<text x=\"{bx:.1}\" y=\"{:.1}\" fill=\"#9aa0aa\" font-size=\"10\" text-anchor=\"middle\">ball</text>\n",
-        by + 0.11 * SCALE + 12.0
     ));
 }
 
 /// Draw each posed part as its projected box (four sagittal corners as a filled
-/// polygon), rear parts first so the near leg reads on top.
+/// polygon), rear parts first so the near limb reads on top.
 fn push_parts(s: &mut String, view: &FrameView) {
     view.parts.iter().for_each(|part| push_box(s, part));
 }
@@ -141,34 +131,34 @@ fn push_box(s: &mut String, part: &PosedPart) {
     ));
 }
 
-fn push_foot_markers(s: &mut String, view: &FrameView) {
-    let (rx, ry) = project(view.right_foot);
+fn push_joint_markers(s: &mut String, view: &FrameView) {
+    let (rx, ry) = project(view.swing_joint);
     s.push_str(&format!(
         "<circle cx=\"{rx:.1}\" cy=\"{ry:.1}\" r=\"7\" fill=\"none\" stroke=\"#ff7a3a\" stroke-width=\"2.5\"/>\n"
     ));
     s.push_str(&format!(
-        "<text x=\"{:.1}\" y=\"{ry:.1}\" fill=\"#ffb07a\" font-size=\"11\">R foot</text>\n",
+        "<text x=\"{:.1}\" y=\"{ry:.1}\" fill=\"#ffb07a\" font-size=\"11\">swing</text>\n",
         rx + 11.0
     ));
-    let (px, py) = project(view.plant_foot);
+    let (px, py) = project(view.anchor_joint);
     s.push_str(&format!(
         "<circle cx=\"{px:.1}\" cy=\"{py:.1}\" r=\"7\" fill=\"none\" stroke=\"#5ad0ff\" stroke-width=\"2.5\"/>\n"
     ));
     s.push_str(&format!(
-        "<text x=\"{:.1}\" y=\"{py:.1}\" fill=\"#9ae0ff\" font-size=\"11\">plant</text>\n",
+        "<text x=\"{:.1}\" y=\"{py:.1}\" fill=\"#9ae0ff\" font-size=\"11\">anchor</text>\n",
         px + 11.0
     ));
 }
 
-fn push_contact_marker(s: &mut String, view: &FrameView) {
-    if view.is_contact_frame {
-        let (x, y) = project(view.right_foot);
+fn push_event_marker(s: &mut String, view: &FrameView) {
+    if view.is_event_frame {
+        let (x, y) = project(view.swing_joint);
         s.push_str(&format!(
             "<circle cx=\"{x:.1}\" cy=\"{y:.1}\" r=\"15\" fill=\"none\" stroke=\"#ff3a3a\" stroke-width=\"3\"/>\n"
         ));
         s.push_str(&format!(
             "<text x=\"{x:.1}\" y=\"{:.1}\" fill=\"#ff5a5a\" font-size=\"12\" text-anchor=\"middle\" \
-             font-weight=\"bold\">KICK CONTACT</text>\n",
+             font-weight=\"bold\">EVENT</text>\n",
             y - 20.0
         ));
     }
@@ -180,7 +170,7 @@ fn push_hud(s: &mut String, view: &FrameView) {
         "<text x=\"20\" y=\"{:.1}\" fill=\"#eaeef5\" font-size=\"15\">frame {} / {}</text>\n",
         HEIGHT - 34.0,
         view.frame,
-        KICK_PHASES.len() * 6 - 1
+        PHASES.len() * 6 - 1
     ));
     s.push_str(&format!(
         "<text x=\"20\" y=\"{:.1}\" fill=\"#ffcf5a\" font-size=\"15\">phase: {phase}</text>\n",
@@ -195,23 +185,22 @@ mod tests {
     #[test]
     fn svg_has_core_debug_elements() {
         let scene = LabScene::new();
-        let svg = render_frame(&scene, authoring::CONTACT_FRAME);
+        let svg = render_frame(&scene, authoring::EVENT_FRAME);
         assert!(svg.starts_with("<svg"));
         assert!(svg.ends_with("</svg>\n"));
         assert!(svg.contains("<polygon"));
-        assert!(svg.contains("R foot"));
-        assert!(svg.contains("plant"));
-        assert!(svg.contains("ball"));
-        assert!(svg.contains("phase: strike"));
-        assert!(svg.contains("KICK CONTACT"));
+        assert!(svg.contains("swing"));
+        assert!(svg.contains("anchor"));
+        assert!(svg.contains("phase: action"));
+        assert!(svg.contains("EVENT"));
     }
 
     #[test]
-    fn non_contact_frame_omits_the_burst() {
+    fn non_event_frame_omits_the_burst() {
         let scene = LabScene::new();
         let svg = render_frame(&scene, 0);
-        assert!(!svg.contains("KICK CONTACT"));
-        assert!(svg.contains("phase: ready"));
+        assert!(!svg.contains("EVENT"));
+        assert!(svg.contains("phase: rest"));
     }
 
     #[test]

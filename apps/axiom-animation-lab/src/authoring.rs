@@ -1,37 +1,37 @@
-//! Authoring the soccer kicker as **portable data**.
+//! Authoring the sample figure and motion as **portable data**.
 //!
-//! This is the one place the kicker's *meaning* lives: a refined 13-part
-//! articulated figure (torso, head, two legs with knees, two arms with elbows)
-//! and a sagittal right-foot kick clip. It builds them through the generic
-//! `axiom-figure` and `axiom-animation` facades and serializes them to bytes —
-//! the exact bytes the game embeds. Tuning the kick here and re-emitting the
-//! assets is how the lab and the game stay 1-1. Nothing here is engine code;
-//! it is a game's content expressed against generic mechanisms.
+//! This is the one place the lab's built-in *content* lives: a generic 13-part
+//! articulated box-figure (torso, head, and four two-segment limbs) and a
+//! sagittal motion clip that swings its limbs. It builds them
+//! through the generic `axiom-figure` and `axiom-animation` facades and
+//! serializes them to bytes. Nothing here is engine code; it is example content
+//! expressed against generic mechanisms, so any other figure and clip can be
+//! substituted by loading different bytes.
 
 use axiom_animation::{AnimationApi, BoneId};
 use axiom_figure::{FigureApi, FigureDefinition, FigurePart};
 use axiom_math::{Quat, Transform, Vec3};
 
-/// Total frames in the kick clip.
+/// Total frames in the motion clip.
 pub const FRAME_COUNT: u32 = 48;
-/// The frame the `KickContact` event fires on.
-pub const CONTACT_FRAME: u32 = 33;
-/// Opaque clip-event code the app reads back as "the ball is struck".
-pub const KICK_CONTACT_CODE: u32 = 1;
-/// Part index of the kicking (right) foot.
-pub const RIGHT_FOOT: usize = 8;
-/// Part index of the support (plant, left) foot.
-pub const LEFT_FOOT: usize = 5;
+/// The frame the sample event fires on.
+pub const EVENT_FRAME: u32 = 33;
+/// Opaque clip-event code the app reads back as "the marked event fires".
+pub const EVENT_CODE: u32 = 1;
+/// Part index of the joint that swings the most (highlighted in the view).
+pub const SWING_JOINT: usize = 8;
+/// Part index of the joint that stays anchored (highlighted in the view).
+pub const ANCHOR_JOINT: usize = 5;
 
-// Opaque render tags (a game maps these to materials).
-const TAG_JERSEY: u32 = 0;
-const TAG_SHORTS: u32 = 1;
+// Opaque render tags (a consumer maps these to materials).
+const TAG_BODY: u32 = 0;
+const TAG_PELVIS: u32 = 1;
 const TAG_SKIN: u32 = 2;
-const TAG_SOCK: u32 = 3;
-const TAG_BOOT: u32 = 4;
+const TAG_LIMB: u32 = 3;
+const TAG_END: u32 = 4;
 
 /// `(parent, rest offset, box size, box offset, tag)` for each of the 13 parts,
-/// in parent-before-child order. Y up, +Z forward (kick direction), +X right.
+/// in parent-before-child order. Y up, +Z forward (motion direction), +X right.
 /// Boxes pivot at the joint (part origin) and are centered along the segment via
 /// the box offset.
 struct PartSpec {
@@ -47,19 +47,19 @@ const fn p(parent: Option<u32>, offset: Vec3, box_size: Vec3, box_offset: Vec3, 
 }
 
 const PARTS: [PartSpec; 13] = [
-    p(None, Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.34, 0.30, 0.24), Vec3::ZERO, TAG_SHORTS), // 0 pelvis
-    p(Some(0), Vec3::new(0.0, 0.34, 0.0), Vec3::new(0.42, 0.44, 0.28), Vec3::new(0.0, 0.06, 0.0), TAG_JERSEY), // 1 chest
+    p(None, Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.34, 0.30, 0.24), Vec3::ZERO, TAG_PELVIS), // 0 pelvis
+    p(Some(0), Vec3::new(0.0, 0.34, 0.0), Vec3::new(0.42, 0.44, 0.28), Vec3::new(0.0, 0.06, 0.0), TAG_BODY), // 1 chest
     p(Some(1), Vec3::new(0.0, 0.36, 0.0), Vec3::new(0.22, 0.26, 0.24), Vec3::new(0.0, 0.08, 0.0), TAG_SKIN), // 2 head
-    p(Some(0), Vec3::new(-0.11, -0.06, 0.0), Vec3::new(0.17, 0.48, 0.19), Vec3::new(0.0, -0.24, 0.0), TAG_SKIN), // 3 L thigh
-    p(Some(3), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.46, 0.16), Vec3::new(0.0, -0.23, 0.0), TAG_SOCK), // 4 L shin
-    p(Some(4), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.11, 0.30), Vec3::new(0.0, -0.02, 0.09), TAG_BOOT), // 5 L foot
-    p(Some(0), Vec3::new(0.11, -0.06, 0.0), Vec3::new(0.17, 0.48, 0.19), Vec3::new(0.0, -0.24, 0.0), TAG_SKIN), // 6 R thigh
-    p(Some(6), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.46, 0.16), Vec3::new(0.0, -0.23, 0.0), TAG_SOCK), // 7 R shin
-    p(Some(7), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.11, 0.30), Vec3::new(0.0, -0.02, 0.09), TAG_BOOT), // 8 R foot
-    p(Some(1), Vec3::new(-0.28, 0.16, 0.0), Vec3::new(0.14, 0.44, 0.14), Vec3::new(0.0, -0.22, 0.0), TAG_JERSEY), // 9 L upper arm
-    p(Some(9), Vec3::new(0.0, -0.44, 0.0), Vec3::new(0.12, 0.40, 0.12), Vec3::new(0.0, -0.20, 0.0), TAG_SKIN), // 10 L forearm
-    p(Some(1), Vec3::new(0.28, 0.16, 0.0), Vec3::new(0.14, 0.44, 0.14), Vec3::new(0.0, -0.22, 0.0), TAG_JERSEY), // 11 R upper arm
-    p(Some(11), Vec3::new(0.0, -0.44, 0.0), Vec3::new(0.12, 0.40, 0.12), Vec3::new(0.0, -0.20, 0.0), TAG_SKIN), // 12 R forearm
+    p(Some(0), Vec3::new(-0.11, -0.06, 0.0), Vec3::new(0.17, 0.48, 0.19), Vec3::new(0.0, -0.24, 0.0), TAG_SKIN), // 3 L lower-limb root
+    p(Some(3), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.46, 0.16), Vec3::new(0.0, -0.23, 0.0), TAG_LIMB), // 4 L lower-limb mid
+    p(Some(4), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.11, 0.30), Vec3::new(0.0, -0.02, 0.09), TAG_END), // 5 L lower-limb tip (anchor)
+    p(Some(0), Vec3::new(0.11, -0.06, 0.0), Vec3::new(0.17, 0.48, 0.19), Vec3::new(0.0, -0.24, 0.0), TAG_SKIN), // 6 R lower-limb root
+    p(Some(6), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.46, 0.16), Vec3::new(0.0, -0.23, 0.0), TAG_LIMB), // 7 R lower-limb mid
+    p(Some(7), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.11, 0.30), Vec3::new(0.0, -0.02, 0.09), TAG_END), // 8 R lower-limb tip (swing)
+    p(Some(1), Vec3::new(-0.28, 0.16, 0.0), Vec3::new(0.14, 0.44, 0.14), Vec3::new(0.0, -0.22, 0.0), TAG_BODY), // 9 L upper-limb root
+    p(Some(9), Vec3::new(0.0, -0.44, 0.0), Vec3::new(0.12, 0.40, 0.12), Vec3::new(0.0, -0.20, 0.0), TAG_SKIN), // 10 L upper-limb tip
+    p(Some(1), Vec3::new(0.28, 0.16, 0.0), Vec3::new(0.14, 0.44, 0.14), Vec3::new(0.0, -0.22, 0.0), TAG_BODY), // 11 R upper-limb root
+    p(Some(11), Vec3::new(0.0, -0.44, 0.0), Vec3::new(0.12, 0.40, 0.12), Vec3::new(0.0, -0.20, 0.0), TAG_SKIN), // 12 R upper-limb tip
 ];
 
 /// A per-part sagittal pitch track (rotation about X): `(frame, radians)`.
@@ -68,32 +68,32 @@ struct PitchTrack {
     keys: &'static [(u32, f32)],
 }
 
-const KICK_TRACKS: &[PitchTrack] = &[
-    PitchTrack { part: 1, keys: &[(0, 0.0), (9, 0.18), (33, 0.12), (47, 0.05)] }, // chest lean
-    PitchTrack { part: 6, keys: &[(0, 0.0), (15, -0.15), (21, 0.10), (27, 0.70), (33, -0.90), (39, -0.50), (47, 0.0)] }, // R hip swing
-    PitchTrack { part: 7, keys: &[(0, 0.15), (27, 1.20), (33, 0.10), (39, 0.50), (47, 0.20)] }, // R knee
-    PitchTrack { part: 11, keys: &[(0, 0.0), (27, -0.40), (33, 0.50), (47, 0.0)] }, // R arm counter-swing
-    PitchTrack { part: 9, keys: &[(0, 0.0), (27, 0.40), (33, -0.50), (47, 0.0)] }, // L arm counter-swing
-    PitchTrack { part: 3, keys: &[(0, 0.0), (21, -0.10), (47, 0.0)] }, // L (plant) hip
-    PitchTrack { part: 4, keys: &[(0, 0.10), (21, 0.30), (47, 0.10)] }, // L (plant) knee
+const MOTION_TRACKS: &[PitchTrack] = &[
+    PitchTrack { part: 1, keys: &[(0, 0.0), (9, 0.18), (33, 0.12), (47, 0.05)] }, // torso lean
+    PitchTrack { part: 6, keys: &[(0, 0.0), (15, -0.15), (21, 0.10), (27, 0.70), (33, -0.90), (39, -0.50), (47, 0.0)] }, // R lower-limb root swing
+    PitchTrack { part: 7, keys: &[(0, 0.15), (27, 1.20), (33, 0.10), (39, 0.50), (47, 0.20)] }, // R lower-limb mid
+    PitchTrack { part: 11, keys: &[(0, 0.0), (27, -0.40), (33, 0.50), (47, 0.0)] }, // R upper-limb counter-swing
+    PitchTrack { part: 9, keys: &[(0, 0.0), (27, 0.40), (33, -0.50), (47, 0.0)] }, // L upper-limb counter-swing
+    PitchTrack { part: 3, keys: &[(0, 0.0), (21, -0.10), (47, 0.0)] }, // L lower-limb root (anchor)
+    PitchTrack { part: 4, keys: &[(0, 0.10), (21, 0.30), (47, 0.10)] }, // L lower-limb mid (anchor)
 ];
 
-/// The eight kick phases in order, as `(name, start, end)` frame spans. The
+/// The eight motion phases in order, as `(name, start, end)` frame spans. The
 /// phase *code* stored in the clip is the index; the name is app-side meaning.
-pub const KICK_PHASES: [(&str, u32, u32); 8] = [
-    ("ready", 0, 6),
-    ("lean_forward", 6, 12),
-    ("approach", 12, 18),
-    ("plant", 18, 24),
-    ("backswing", 24, 30),
-    ("strike", 30, 36),
+pub const PHASES: [(&str, u32, u32); 8] = [
+    ("rest", 0, 6),
+    ("anticipate", 6, 12),
+    ("prepare", 12, 18),
+    ("load", 18, 24),
+    ("windup", 24, 30),
+    ("action", 30, 36),
     ("follow_through", 36, 42),
     ("recover", 42, 48),
 ];
 
 /// The name of the phase with code `code`, or `"-"`.
 pub fn phase_name(code: u32) -> &'static str {
-    KICK_PHASES.get(code as usize).map_or("-", |(name, _, _)| *name)
+    PHASES.get(code as usize).map_or("-", |(name, _, _)| *name)
 }
 
 /// The rest local transform of part `i` (its offset, identity rotation).
@@ -101,7 +101,7 @@ fn rest_of(i: u32) -> Transform {
     Transform::from_translation(PARTS[i as usize].offset)
 }
 
-/// Build the kicker figure (the render rig).
+/// Build the sample figure (the render rig).
 pub fn build_figure() -> FigureDefinition {
     let parts = PARTS
         .iter()
@@ -119,7 +119,7 @@ pub fn build_figure() -> FigureDefinition {
     FigureDefinition::new(parts)
 }
 
-/// The kicker figure serialized to portable bytes.
+/// The sample figure serialized to portable bytes.
 pub fn figure_bytes() -> Vec<u8> {
     FigureApi::new().serialize(&build_figure())
 }
@@ -130,13 +130,13 @@ fn pitch_transform(part: u32, angle: f32) -> Transform {
     Transform::new(PARTS[part as usize].offset, Quat::from_euler_xyz(angle, 0.0, 0.0), Vec3::ONE)
 }
 
-/// The kick clip serialized to portable bytes: pitch tracks, the eight phases,
-/// and the `KickContact` event on the strike frame.
+/// The motion clip serialized to portable bytes: pitch tracks, the eight phases,
+/// and the sample event on the event frame.
 pub fn clip_bytes() -> Vec<u8> {
     use axiom_kernel::Tick;
     let mut api = AnimationApi::new();
     let clip = api.create_clip();
-    for track in KICK_TRACKS {
+    for track in MOTION_TRACKS {
         let keys: Vec<(Tick, Transform)> = track
             .keys
             .iter()
@@ -144,11 +144,11 @@ pub fn clip_bytes() -> Vec<u8> {
             .collect();
         api.add_track(clip, BoneId::from_raw(u64::from(track.part)), &keys).unwrap();
     }
-    for (code, (_, start, end)) in KICK_PHASES.iter().enumerate() {
+    for (code, (_, start, end)) in PHASES.iter().enumerate() {
         api.add_phase(clip, Tick::new(u64::from(*start)), Tick::new(u64::from(*end)), code as u32)
             .unwrap();
     }
-    api.add_event(clip, Tick::new(u64::from(CONTACT_FRAME)), KICK_CONTACT_CODE).unwrap();
+    api.add_event(clip, Tick::new(u64::from(EVENT_FRAME)), EVENT_CODE).unwrap();
     api.serialize_clip(clip).unwrap()
 }
 
@@ -175,8 +175,8 @@ mod tests {
 
     #[test]
     fn phase_names_cover_the_timeline() {
-        assert_eq!(phase_name(0), "ready");
-        assert_eq!(phase_name(5), "strike");
+        assert_eq!(phase_name(0), "rest");
+        assert_eq!(phase_name(5), "action");
         assert_eq!(phase_name(99), "-");
     }
 }
