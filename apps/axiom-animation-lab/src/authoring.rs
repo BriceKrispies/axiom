@@ -75,11 +75,11 @@ struct PitchTrack {
 }
 
 const MOTION_TRACKS: &[PitchTrack] = &[
-    PitchTrack { part: 1, keys: &[(0, 0.0), (9, 0.18), (33, 0.12), (47, 0.05)] }, // torso lean
+    PitchTrack { part: 1, keys: &[(0, 0.0), (9, 0.20), (26, 0.34), (33, 0.14), (47, 0.05)] }, // torso lean (stronger run-up lean; peaks at the displayed plant)
     PitchTrack { part: 6, keys: &[(0, 0.0), (15, -0.15), (21, 0.10), (27, 0.70), (33, -0.90), (39, -0.50), (47, 0.0)] }, // R lower-limb root swing
     PitchTrack { part: 7, keys: &[(0, 0.15), (27, 1.20), (33, 0.10), (39, 0.50), (47, 0.20)] }, // R lower-limb mid
-    PitchTrack { part: 11, keys: &[(0, 0.0), (27, -0.40), (33, 0.50), (47, 0.0)] }, // R upper-limb counter-swing
-    PitchTrack { part: 9, keys: &[(0, 0.0), (27, 0.40), (33, -0.50), (47, 0.0)] }, // L upper-limb counter-swing
+    PitchTrack { part: 11, keys: &[(0, 0.0), (26, -0.55), (33, 0.55), (47, 0.0)] }, // R upper-limb counter-swing (stronger; leads the cocked leg)
+    PitchTrack { part: 9, keys: &[(0, 0.0), (26, 0.60), (33, -0.55), (47, 0.0)] }, // L upper-limb counter-swing (stronger; trails back for balance)
     PitchTrack { part: 3, keys: &[(0, 0.0), (21, -0.10), (47, 0.0)] }, // L lower-limb root (anchor)
     PitchTrack { part: 4, keys: &[(0, 0.10), (21, 0.30), (47, 0.10)] }, // L lower-limb mid (anchor)
 ];
