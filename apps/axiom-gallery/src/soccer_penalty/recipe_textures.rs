@@ -130,7 +130,7 @@ pub fn ad_axiom(style: &SoccerRecipeStyle) -> RecipeGraph {
     ad_board(ids::AD_AXIOM, "AXIOM", style.palette.ad_axiom, style.palette.ball_white)
 }
 
-/// The generic ad board — white "SPORTS" on a blue panel.
+/// The generic ad board — white "SPORTS" on a red panel (matching the AXIOM board).
 pub fn ad_generic(style: &SoccerRecipeStyle) -> RecipeGraph {
     ad_board(ids::AD_GENERIC, "SPORTS", style.palette.ad_generic, style.palette.ball_white)
 }

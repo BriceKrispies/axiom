@@ -111,7 +111,7 @@ pub const PENALTY_PALETTE: [PenaltyMaterial; 31] = [
     lit(PenaltyMaterialId::CrowdMutedColorsAltB, "crowd muted colors (alt b)", Rgba::rgb(0.78, 0.62, 0.26)),
     lit(PenaltyMaterialId::StadiumWallDarkGray, "stadium wall dark gray", palette::STADIUM_WALL),
     lit(PenaltyMaterialId::AdBoardRed, "ad board red", Rgba::rgb(0.80, 0.15, 0.19)),
-    lit(PenaltyMaterialId::AdBoardDark, "ad board blue", Rgba::rgb(0.16, 0.28, 0.66)),
+    lit(PenaltyMaterialId::AdBoardDark, "ad board red (generic)", Rgba::rgb(0.80, 0.15, 0.19)),
     unlit(PenaltyMaterialId::BlobShadow, "blob shadow", palette::BLOB_SHADOW),
     unlit(PenaltyMaterialId::HudDarkPanel, "HUD dark panel", Rgba::new(0.05, 0.06, 0.09, 0.85)),
     unlit(PenaltyMaterialId::HudWhiteText, "HUD white text", Rgba::rgb(0.96, 0.97, 0.98)),

@@ -40,7 +40,7 @@ pub struct Palette {
     pub ad_axiom: Color,
     /// The AXIOM board's dark rail/mortar.
     pub ad_axiom_dark: Color,
-    /// The generic ad board (blue) panel + its dark rail.
+    /// The generic ad board (red, matching the AXIOM board) panel + its dark rail.
     pub ad_generic: Color,
     /// The generic board's dark rail/mortar.
     pub ad_generic_dark: Color,
@@ -86,8 +86,8 @@ impl SoccerRecipeStyle {
                 keeper_dark: Color::rgba(0x96, 0x82, 0x1A, 0xFF),
                 ad_axiom: Color::rgba(0xB0, 0x28, 0x2E, 0xFF),
                 ad_axiom_dark: Color::rgba(0x3C, 0x0E, 0x10, 0xFF),
-                ad_generic: Color::rgba(0x2E, 0x4E, 0xBE, 0xFF),
-                ad_generic_dark: Color::rgba(0x10, 0x1A, 0x46, 0xFF),
+                ad_generic: Color::rgba(0xB0, 0x28, 0x2E, 0xFF),
+                ad_generic_dark: Color::rgba(0x3C, 0x0E, 0x10, 0xFF),
                 ball_white: Color::rgba(0xF4, 0xF4, 0xF8, 0xFF),
                 ball_grain: Color::rgba(0xD8, 0xD8, 0xE2, 0xFF),
                 ball_dark: Color::rgba(0x10, 0x10, 0x14, 0xFF),
