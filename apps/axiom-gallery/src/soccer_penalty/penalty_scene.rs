@@ -385,18 +385,26 @@ fn ball(b: &mut SceneBuilder) {
         "ball",
     );
     // The classic black pentagon panels, faked with small dark quads placed just
-    // PROUD of the sphere on its camera-/light-facing upper-front hemisphere (the
-    // old panels sat *inside* the sphere at panel_z < surface_z, so they never
+    // PROUD of the sphere on its camera-/light-facing front hemisphere (the old
+    // panels sat *inside* the sphere at panel_z < surface_z, so they never
     // rendered and the ball read as a blank white sphere). Each direction is a
     // unit-ish vector on that hemisphere; the panel sits a hair outside the
     // radius so it always wins the depth test against the white surface.
+    //
+    // The panels form a SYMMETRIC rosette — a central pentagon plus an evenly
+    // spaced ring of five around it — the truncated-icosahedron signature of a
+    // real soccer ball. The previous set biased every panel to the upper-front
+    // hemisphere, so the cluster read as a lopsided *face* (two eyes + mouth)
+    // rather than a ball. The ring is built around a front axis tilted slightly
+    // up (c = (0, 0.35, 0.94)) to face the elevated camera, at a ~40° cone so
+    // the five ring panels sit symmetrically around the central one.
     const PANEL_DIRS: [(f32, f32, f32, &str); 6] = [
-        (0.00, 0.62, 0.78, "ball.panel.top"),
-        (0.00, 0.20, 0.98, "ball.panel.front"),
-        (-0.60, 0.44, 0.67, "ball.panel.upleft"),
-        (0.60, 0.44, 0.67, "ball.panel.upright"),
-        (-0.42, 0.10, 0.90, "ball.panel.loleft"),
-        (0.42, 0.10, 0.90, "ball.panel.loright"),
+        (0.000, 0.349, 0.937, "ball.panel.center"),
+        (0.643, 0.267, 0.718, "ball.panel.ring0"),
+        (0.199, 0.840, 0.505, "ball.panel.ring1"),
+        (-0.520, 0.621, 0.586, "ball.panel.ring2"),
+        (-0.520, -0.087, 0.850, "ball.panel.ring3"),
+        (0.199, -0.306, 0.931, "ball.panel.ring4"),
     ];
     PANEL_DIRS.iter().for_each(|&(dx, dy, dz, label)| {
         let dir = Vec3::new(dx, dy, dz);
