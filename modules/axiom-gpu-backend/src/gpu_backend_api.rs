@@ -20,6 +20,10 @@ pub struct GpuBackendApi {
     // Shadow-atlas edge length from the device tier
     // (`HostDeviceProfile::shadow_map_size`), handed to the renderer on initialise.
     shadow_size: u32,
+    // Which optional render capabilities this backend attempts. Defaults to
+    // `BackendCapabilityProfile::all()` (the hardware GPU attempts everything); a host
+    // may restrict it (an fps/legibility lever) and the per-frame present consults it.
+    capability: axiom_host::BackendCapabilityProfile,
     // CPU sprite/atlas textures the 2D Draw2dList sprite path samples, as
     // `(texture_id, width, height, RGBA8)` — same upload shape as the 3D
     // material set.
@@ -44,6 +48,7 @@ impl GpuBackendApi {
             render_width,
             render_height,
             shadow_size: request.device().profile().shadow_map_size(),
+            capability: axiom_host::BackendCapabilityProfile::all(),
             draw2d_textures: Vec::new(),
             #[cfg(target_arch = "wasm32")]
             live: None,
@@ -78,6 +83,22 @@ impl GpuBackendApi {
     /// from the presentation request to the renderer at initialise time.
     pub fn shadow_size(&self) -> u32 {
         self.shadow_size
+    }
+
+    /// Restrict which optional render capabilities this backend attempts. The default
+    /// is [`axiom_host::BackendCapabilityProfile::all`] (the hardware GPU attempts
+    /// everything); a host may narrow it and the per-frame present
+    /// ([`Self::present_frame`] / [`Self::present_packet`]) consults it, so the live GPU
+    /// is no longer unconditionally full — it gates on the same profile the Canvas 2D
+    /// backend does.
+    pub fn set_capability_profile(&mut self, profile: axiom_host::BackendCapabilityProfile) {
+        self.capability = profile;
+    }
+
+    /// The optional render capabilities this backend attempts (default
+    /// [`axiom_host::BackendCapabilityProfile::all`]).
+    pub fn capability_profile(&self) -> axiom_host::BackendCapabilityProfile {
+        self.capability
     }
 
     /// The render-target width the device tier renders the scene at before
@@ -127,7 +148,7 @@ impl GpuBackendApi {
                 .live
                 .as_ref()
                 .map(|live| {
-                    live.render_frame(lights, light_view_proj, batches, clear_color, sdf)
+                    live.render_frame(lights, light_view_proj, batches, clear_color, sdf, self.capability.bits())
                         .is_ok()
                 })
                 .unwrap_or(false);
@@ -157,7 +178,7 @@ impl GpuBackendApi {
     ) -> Result<(), wasm_bindgen::JsValue> {
         self.live
             .as_ref()
-            .map(|live| live.render_frame(lights, light_view_proj, batches, clear_color, sdf))
+            .map(|live| live.render_frame(lights, light_view_proj, batches, clear_color, sdf, self.capability.bits()))
             .unwrap_or(Ok(()))
     }
 
@@ -267,6 +288,9 @@ impl GpuBackendApi {
         sdf: Option<&SdfScene>,
         ambient: axiom_host::FrameAmbient,
         retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
+        profile: axiom_host::BackendCapabilityProfile,
+        volumetrics: Option<axiom_host::FrameVolumetrics>,
+        postprocess: Option<axiom_host::FramePostProcess>,
     ) -> Option<Vec<u8>> {
         crate::offscreen::render_to_rgba(
             width,
@@ -281,6 +305,9 @@ impl GpuBackendApi {
             sdf,
             ambient,
             retro_32bit,
+            profile,
+            volumetrics,
+            postprocess,
         )
     }
 
@@ -425,6 +452,24 @@ mod tests {
         assert_eq!(backend.width(), 800);
         assert_eq!(backend.height(), 600);
         assert!(format!("{backend:?}").starts_with("GpuBackendApi"));
+    }
+
+    #[test]
+    fn capability_profile_defaults_to_all_and_is_settable() {
+        // The hardware GPU attempts everything by default.
+        let mut backend = GpuBackendApi::new(&request(320, 240));
+        assert_eq!(
+            backend.capability_profile(),
+            axiom_host::BackendCapabilityProfile::all()
+        );
+        // A host can restrict it; the present path then consults the narrowed profile.
+        let restricted = axiom_host::BackendCapabilityProfile::all()
+            .without(axiom_host::RenderCapability::Shadows);
+        backend.set_capability_profile(restricted);
+        assert_eq!(backend.capability_profile(), restricted);
+        assert!(!backend
+            .capability_profile()
+            .contains(axiom_host::RenderCapability::Shadows));
     }
 
     #[test]

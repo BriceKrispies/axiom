@@ -179,9 +179,9 @@ impl SoftwareRasterizer {
         let t_raster1 = clock();
 
         // SDF raymarch pass: composite the frame's SDF scene over the meshes,
-        // depth-tested *and* depth-writing against the same buffer, so the fog /
-        // shadow post-passes below still occlude against SDF surfaces.
-        sdf_pass(&mut self.framebuffer, &mut self.depth, packet);
+        // depth-tested + depth-writing against the same buffer. Gated on this backend's
+        // Sdf capability (was the one unconditional, ungated pass).
+        sdf_pass(&mut self.framebuffer, &mut self.depth, packet, self.options.capability_profile());
 
         // Depth-cue post-passes run in a fixed order: fog (6) → vertical grade
         // (7) → contact shadows + outlines (8). Per-triangle cues (lighting,
@@ -265,8 +265,11 @@ impl SoftwareRasterizer {
     }
 
     /// Apply the capability-gated backend-neutral whole-frame effects to the finished
-    /// framebuffer, in order: god-rays, then the filmic grade. Each is skipped when this
-    /// backend's capability profile drops it (and is a no-op when the frame carries none).
+    /// framebuffer, in order: god-rays, the filmic grade, then the retro 32-bit colour
+    /// quantize + ordered dither. Each is skipped when this backend's capability profile
+    /// drops it (and is a no-op when the frame carries none). This is the same neutral
+    /// post pipeline, in the same order, the GPU backend's offscreen readback applies —
+    /// so a retro/graded/volumetric frame reads consistently across both backends.
     fn apply_gated_frame_effects(&mut self, packet: &FramePacket, fb_w: u32, fb_h: u32) {
         let profile = self.options.capability_profile();
         profile
@@ -275,6 +278,9 @@ impl SoftwareRasterizer {
         profile
             .contains(axiom_host::RenderCapability::PostProcess)
             .then(|| axiom_host::apply_frame_postprocess(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
+        profile
+            .contains(axiom_host::RenderCapability::Retro32Bit)
+            .then(|| axiom_host::apply_frame_retro_32bit(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
     }
 }
 
@@ -284,9 +290,17 @@ impl SoftwareRasterizer {
 /// `view_proj` for the depth projection), so no `FrameCamera` is consulted.
 /// Returns the count of composited SDF pixels (`0` when the frame carries no
 /// SDF scene).
-pub(crate) fn sdf_pass(framebuffer: &mut SoftwareFramebuffer, depth: &mut DepthBuffer, packet: &FramePacket) -> u64 {
+pub(crate) fn sdf_pass(
+    framebuffer: &mut SoftwareFramebuffer,
+    depth: &mut DepthBuffer,
+    packet: &FramePacket,
+    profile: axiom_host::BackendCapabilityProfile,
+) -> u64 {
+    // Gate the CPU SDF march on this backend's Sdf capability — the same policy the GPU
+    // backend applies to its raymarch pass. A profile that drops SDF renders meshes only.
     packet
         .sdf()
+        .filter(|_| profile.contains(axiom_host::RenderCapability::Sdf))
         .map(|scene| apply_sdf_raymarch(framebuffer, depth, scene, packet.lights()))
         .unwrap_or(0)
 }

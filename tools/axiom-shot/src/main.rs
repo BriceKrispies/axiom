@@ -451,6 +451,11 @@ fn render_gpu(
         outcome.sdf_scene(),
         axiom_host::FrameAmbient::default_hemisphere(),
         retro_32bit,
+        // The GPU backend attempts every capability (the full-fidelity screenshot); the
+        // frame's volumetrics/post-process are not carried on the FrameOutcome here.
+        axiom_host::BackendCapabilityProfile::all(),
+        None,
+        None,
     )
     .expect("a native GPU adapter is required to render a GPU screenshot");
     (pixels, WIDTH, HEIGHT)

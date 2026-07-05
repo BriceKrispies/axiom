@@ -344,6 +344,7 @@ fn lib_exports_are_curated_set() {
         "pub use host_surface_handle::HostSurfaceHandle;",
         "pub use frame_ambient::FrameAmbient;",
         "pub use frame_capability::BackendCapabilityProfile;",
+        "pub use frame_capability::CapabilityDegradation;",
         "pub use frame_capability::RenderCapability;",
         "pub use frame_packet::FrameCamera;",
         "pub use frame_packet::FrameDrawItem;",
