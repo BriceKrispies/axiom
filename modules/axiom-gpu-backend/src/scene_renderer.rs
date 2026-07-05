@@ -513,18 +513,6 @@ struct MeshBuffers {
 /// shadow map. Its [`Self::record`] draws into any colour/depth view; the
 /// surface-vs-offscreen plumbing lives in the callers.
 #[derive(Debug)]
-/// One skinned draw handed to [`SceneRenderer::record`]: the mesh + material to
-/// draw, its MVP and world matrices (column-major), its colour tint, and the
-/// joint-matrix palette (column-major) the vertex shader blends per vertex.
-pub(crate) struct SkinnedGpuDraw {
-    pub(crate) mesh_id: u64,
-    pub(crate) material_id: u64,
-    pub(crate) mvp: [f32; 16],
-    pub(crate) world: [f32; 16],
-    pub(crate) color: [f32; 4],
-    pub(crate) palette: Vec<[f32; 16]>,
-}
-
 pub(crate) struct SceneRenderer {
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
@@ -565,6 +553,19 @@ pub(crate) struct SceneRenderer {
     palette_buffer: wgpu::Buffer,
     /// Group 3 of the skinned pass: the joint palette storage buffer.
     palette_bind_group: wgpu::BindGroup,
+}
+
+/// One skinned draw handed to [`SceneRenderer::record`]: the mesh + material to
+/// draw, its MVP and world matrices (column-major), its colour tint, and the
+/// joint-matrix palette (column-major) the vertex shader blends per vertex.
+#[derive(Debug)]
+pub(crate) struct SkinnedGpuDraw {
+    pub(crate) mesh_id: u64,
+    pub(crate) material_id: u64,
+    pub(crate) mvp: [f32; 16],
+    pub(crate) world: [f32; 16],
+    pub(crate) color: [f32; 4],
+    pub(crate) palette: Vec<[f32; 16]>,
 }
 
 impl SceneRenderer {
