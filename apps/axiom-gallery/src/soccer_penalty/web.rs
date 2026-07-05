@@ -242,4 +242,32 @@ mod tests {
         // kit-material bodies (the box-man's disjoint primitives are gone).
         assert!(kit_materials.len() < 31, "athletes drew as {} grouped bodies", kit_materials.len());
     }
+
+    /// Regression guard for the live loop: it must draw the athletes as pre-baked
+    /// articulated parts (posed by transform), NOT re-bake a `MetaSurface` body
+    /// per kit material every frame. Re-baking made the game ~7 FPS AND leaked a
+    /// fresh mesh per group per frame — and, because the live `run_web_multi`
+    /// uploads meshes only at bind, those per-frame meshes never reached the GPU
+    /// so the athletes vanished. This asserts the live default (`install` without
+    /// `with_smooth_bodies`) keeps the mesh store constant across frames.
+    #[test]
+    fn live_loop_does_not_rebake_meshes_per_frame() {
+        use crate::soccer_penalty::penalty_render_meshed::{soccer_meshed_shell, PenaltyMeshedScene};
+        let frame = SoccerPenaltyApp::build_stage1();
+        let mut app = soccer_meshed_shell();
+        let mut scene = PenaltyMeshedScene::install(&mut app); // live default = box-man
+        let meshes_at_bind = app.mesh_set().len();
+        scene.author(&mut app, &frame);
+        let draws = app.tick(0).draws().len();
+        let meshes_after_1 = app.mesh_set().len();
+        scene.author(&mut app, &frame);
+        let _ = app.tick(1);
+        let meshes_after_2 = app.mesh_set().len();
+        // The athletes render as many pre-baked parts, so the live frame draws far
+        // more primitives than the smooth path's handful of grouped bodies.
+        assert!(draws > 30, "live box-man should draw athlete parts, got {draws}");
+        // The core regression: authoring must register NO new meshes per frame.
+        assert_eq!(meshes_at_bind, meshes_after_1, "live author must not bake new meshes");
+        assert_eq!(meshes_after_1, meshes_after_2, "live author must not grow the mesh store per frame");
+    }
 }

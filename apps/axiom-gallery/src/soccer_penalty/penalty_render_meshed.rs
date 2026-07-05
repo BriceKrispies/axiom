@@ -230,6 +230,13 @@ pub struct PenaltyMeshedScene {
     tex: TexLib,
     palette: HashMap<([u8; 3], u64), Handle<Material>>,
     spawned: Vec<Entity>,
+    /// When true, the athletes are skinned into continuous `MetaSurface` bodies
+    /// (one marching-cubes bake per kit material). That bake (~10-30 ms per kit
+    /// group) is affordable for a ONE-SHOT offscreen render — the convergence
+    /// champion — but ruinous per frame: the live game re-authors every frame, so
+    /// there it stays `false` and the athletes draw as pre-baked articulated parts
+    /// (reused library meshes, posed by transform) like every other object.
+    smooth_bodies: bool,
 }
 
 impl PenaltyMeshedScene {
@@ -259,7 +266,17 @@ impl PenaltyMeshedScene {
             skin: bake_texture(app, &tex_api, &recipe_textures::skin(&style), style.seed),
             turf: bake_texture(app, &tex_api, &recipe_textures::turf(&style), style.seed),
         };
-        Self { lib, tex, palette: HashMap::new(), spawned: Vec::new() }
+        Self { lib, tex, palette: HashMap::new(), spawned: Vec::new(), smooth_bodies: false }
+    }
+
+    /// Opt this scene into continuous `MetaSurface` athlete bodies. **Only for a
+    /// one-shot offscreen render** (the convergence champion via `axiom-shot`);
+    /// never the per-frame live loop, where the marching-cubes bake per athlete
+    /// kit group every frame drops the game to single-digit FPS and leaks a fresh
+    /// mesh per group per frame.
+    pub fn with_smooth_bodies(mut self) -> Self {
+        self.smooth_bodies = true;
+        self
     }
 
     /// The retro 32-bit texture id for one object's role/label (0 = flat, no texture).
@@ -363,16 +380,23 @@ impl PenaltyMeshedScene {
             })
             .collect();
 
-        // The athletes are skinned into continuous MetaSurface bodies first.
+        // Athletes are skinned into continuous MetaSurface bodies ONLY when
+        // `smooth_bodies` is set (a one-shot offscreen render). The live loop
+        // leaves it false — the marching-cubes bake per kit group per frame is a
+        // ~136 ms/frame (7 FPS) cost and leaks a fresh mesh per group per frame —
+        // and draws the athletes as pre-baked parts through the loop below.
+        let smooth = self.smooth_bodies;
         let athletes: Vec<WorldObj> = objects.iter().copied().filter(|o| is_athlete(o.role)).collect();
-        self.author_bodies(app, &athletes);
+        smooth.then(|| self.author_bodies(app, &athletes));
 
-        // Everything else spawns per-primitive. The depth-bias index still walks
-        // every object (athletes included) so the non-athlete bias values stay
-        // byte-identical to before the split.
+        // Everything else spawns per-primitive from the pre-baked library. When
+        // `smooth_bodies` is off the athletes come through here too (reused meshes,
+        // posed by transform — cheap, and their ids are in the bind-time upload).
+        // The depth-bias index still walks every object so the non-athlete bias
+        // values stay byte-identical to before the split.
         let lib = self.lib;
         objects.into_iter().for_each(|o| {
-            (!is_athlete(o.role)).then(|| {
+            (!smooth || !is_athlete(o.role)).then(|| {
                 let to_eye = cam.eye.subtract(o.position);
                 let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
                 let biased = o.position.add(dir.mul_scalar(index as f32 * 0.0015));
@@ -450,7 +474,9 @@ pub fn soccer_meshed_shell() -> RunningApp {
 /// convergence champion (`axiom-shot`). Identical authoring to the live gallery.
 pub fn soccer_meshed_app(frame: Stage1Diorama) -> RunningApp {
     let mut app = soccer_meshed_shell();
-    let mut scene = PenaltyMeshedScene::install(&mut app);
+    // One-shot offscreen render (the convergence champion): the smooth MetaSurface
+    // bodies are affordable here because `author` runs exactly once.
+    let mut scene = PenaltyMeshedScene::install(&mut app).with_smooth_bodies();
     scene.set_view(&mut app, frame.render_plan.camera);
     scene.author(&mut app, &frame);
     app
