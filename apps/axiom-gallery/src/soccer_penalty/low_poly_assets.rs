@@ -102,11 +102,15 @@ pub mod palette {
 
     // --- shadows ---
     // A soft contact shadow, not a black cut-out: lower opacity (0.38 -> 0.20 ->
-    // 0.14) and a slightly grass-tinted, lifted tone so the ellipse reads as a
-    // grounded contact darkening rather than an opaque hole in the pitch. The
-    // reference's sunlit turf shows only a very faint soft darkening under the
-    // actors, so the blob is pushed fainter still without touching ambient.
-    pub const BLOB_SHADOW: Rgba = Rgba::new(0.06, 0.11, 0.07, 0.14);
+    // 0.14 -> 0.07) and a slightly grass-tinted, lifted tone so the ellipse
+    // reads as a grounded contact darkening rather than an opaque hole in the
+    // pitch. The reference's sunlit turf shows only a very faint soft darkening
+    // under the actors. R3 added a cinematic grade (contrast 1.32 / saturation
+    // 1.35) that amplifies dark ground patches, making the fake blob/planar
+    // shadows read as hard dark rectangles post-grade; halving the alpha again
+    // lets them survive the grade as a barely-there contact shadow, matching the
+    // reference — without touching ambient (0.55) or the brightness bands.
+    pub const BLOB_SHADOW: Rgba = Rgba::new(0.06, 0.11, 0.07, 0.07);
 }
 
 /// A convenience direction constant: the up axis the whole diorama uses. It is
