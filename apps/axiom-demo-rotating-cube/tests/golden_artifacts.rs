@@ -103,7 +103,19 @@ fn enc_scene_snapshot(w: &mut BinaryWriter, s: &SceneSnapshotArtifact) {
         w.write_u64(r.node);
         w.write_u64(r.mesh_id);
         w.write_u64(r.material_id);
+        w.write_u64(r.texture_id);
+        w.write_u64(r.animation_id);
         w.write_bool(r.visible);
+    }
+    w.write_u32(s.tags.len() as u32);
+    for t in &s.tags {
+        w.write_u64(t.node);
+        w.write_u32(t.kind_code);
+    }
+    w.write_u32(s.bounds.len() as u32);
+    for b in &s.bounds {
+        w.write_u64(b.node);
+        enc_f32_array(w, b.half_extents);
     }
 }
 
@@ -165,6 +177,9 @@ fn enc_render_input(w: &mut BinaryWriter, ri: &RenderInputArtifact) {
         enc_mat4(w, o.world);
         w.write_u32(o.mesh_idx);
         w.write_u32(o.material_idx);
+        w.write_u64(o.texture_id);
+        w.write_u32(o.pipeline);
+        w.write_u32(o.tag);
         w.write_bool(o.visible);
     }
 }
@@ -184,12 +199,14 @@ fn enc_render_command(w: &mut BinaryWriter, c: &RenderCommandArtifact) {
     if let Some(mesh) = c.as_set_mesh() {
         w.write_u64(mesh);
     }
-    if let Some(material) = c.as_set_material() {
+    if let Some((material, texture)) = c.as_set_material() {
         w.write_u64(material);
+        w.write_u64(texture);
     }
-    if let Some((index_count, world)) = c.as_draw_indexed() {
+    if let Some((index_count, world, tag)) = c.as_draw_indexed() {
         w.write_u32(index_count);
         enc_mat4(w, world);
+        w.write_u32(tag);
     }
 }
 
@@ -213,8 +230,9 @@ fn enc_gpu_command(w: &mut BinaryWriter, c: &GpuCommandArtifact) {
     if let Some(mesh) = c.as_set_mesh() {
         w.write_u64(mesh);
     }
-    if let Some(material) = c.as_set_material() {
+    if let Some((material, texture)) = c.as_set_material() {
         w.write_u64(material);
+        w.write_u64(texture);
     }
     if let Some((index_count, world)) = c.as_draw_indexed() {
         w.write_u32(index_count);

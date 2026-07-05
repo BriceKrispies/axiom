@@ -38,8 +38,7 @@ impl RenderApi {
         RenderApi { _sealed: () }
     }
 
-    /// Pipeline marker for the only pipeline the vertical slice
-    /// supports today.
+    /// Pipeline marker for the default basic-lit forward pipeline.
     pub const PIPELINE_BASIC_LIT: u32 = RenderPipelineKind::BASIC_LIT;
 
     /// Command kind codes (mirrors [`RenderCommand`]'s internal
@@ -150,10 +149,11 @@ impl RenderApi {
         ))
     }
 
-    /// Add an object to draw. `id` is a stable, caller-supplied identity (e.g. a
-    /// scene node id) that rides through to the object's `DrawIndexed` command
-    /// and into the backend-neutral frame packet, so a backend can preserve
-    /// object identity for picking/hit-testing.
+    /// Add an object to draw with the default basic-lit pipeline and no
+    /// per-object texture override or tag. `id` is a stable, caller-supplied
+    /// identity (e.g. a scene node id) that rides through to the object's
+    /// `DrawIndexed` command and into the backend-neutral frame packet, so a
+    /// backend can preserve object identity for picking/hit-testing.
     pub fn add_input_object(
         &self,
         input: &mut RenderInput,
@@ -189,13 +189,22 @@ impl RenderApi {
 
 
     /// Build a deterministic [`RenderCommandList`] from a [`RenderInput`]:
-    /// `ClearFrame`, then `SetCamera` (if present), `SetPipeline { BASIC_LIT }`,
-    /// and the drawable objects as `SetMesh` / `SetMaterial` / `DrawIndexed` —
-    /// **alpha-ordered** by [`crate::draw_order`] (opaque first in submission
-    /// order, then translucent back-to-front by camera depth; stable, so a tick
-    /// is reproducible).
+    /// `ClearFrame`, then `SetCamera` (if present), and the drawable objects as
+    /// `SetMesh` / `SetMaterial` / `DrawIndexed` — **alpha-ordered** by
+    /// [`crate::draw_order`] (opaque first in submission order, then translucent
+    /// back-to-front by camera depth; stable, so a tick is reproducible).
+    ///
+    /// A `SetPipeline` is emitted **run-length**: before a draw whose pipeline
+    /// differs from the previous draw's (and before the first draw). The pipeline
+    /// id comes from each object (defaulting to
+    /// [`RenderPipelineKind::BASIC_LIT`]) — **not** a hardcoded frame-wide pipeline
+    /// (audit M1), so the contract carries a genuine per-object selection. A
+    /// uniform-pipeline frame emits exactly one `SetPipeline` (its first draw), so
+    /// its command count is unchanged from the single-pipeline slice; a frame that
+    /// mixes pipelines emits one `SetPipeline` per switch; a drawless frame emits
+    /// none.
     pub fn build_command_list(&self, input: &RenderInput) -> RenderCommandList {
-        let mut list = RenderCommandList::with_capacity(3 + input.objects().len() * 3);
+        let mut list = RenderCommandList::with_capacity(2 + input.objects().len() * 4);
         list.push(RenderCommand::clear_frame(input.clear_color()));
         input.camera().into_iter().for_each(|camera| {
             list.push(RenderCommand::set_camera(
@@ -203,14 +212,22 @@ impl RenderApi {
                 camera.projection(),
             ));
         });
-        list.push(RenderCommand::set_pipeline(RenderPipelineKind::BASIC_LIT));
-        crate::draw_order::ordered_draws(input)
-            .iter()
-            .for_each(|d| {
+        let _last_pipeline = crate::draw_order::ordered_draws(input).iter().fold(
+            None::<u32>,
+            |prev_pipeline, d| {
+                (prev_pipeline != Some(d.pipeline))
+                    .then(|| list.push(RenderCommand::set_pipeline(d.pipeline)));
                 list.push(RenderCommand::set_mesh(d.mesh_id));
                 list.push(RenderCommand::set_material(d.material_id, d.texture_id));
-                list.push(RenderCommand::draw_indexed(d.object_id, d.index_count, d.world));
-            });
+                list.push(RenderCommand::draw_indexed(
+                    d.object_id,
+                    d.object_tag,
+                    d.index_count,
+                    d.world,
+                ));
+                Some(d.pipeline)
+            },
+        );
         list
     }
 
@@ -477,6 +494,57 @@ impl RenderApi {
     }
 }
 
+/// The object-binding channels the render contract carries per object: a fuller
+/// object builder, the second pipeline marker, and the per-object tag accessor.
+/// A third `impl RenderApi` block so no block exceeds the engine's per-impl item
+/// budget (`engine_no_large_impl_blocks`).
+impl RenderApi {
+    /// Pipeline marker for the unlit/emissive forward pipeline — the second
+    /// pipeline a per-object selection can carry.
+    pub const PIPELINE_UNLIT: u32 = RenderPipelineKind::UNLIT;
+
+    /// Add a fully-bound object to draw: identity + transform + mesh/material
+    /// indices + the per-object binding channels — `texture_id` (a per-object
+    /// albedo override; `0` inherits the material's texture), `pipeline` (which
+    /// pipeline draws it; use [`Self::PIPELINE_BASIC_LIT`] for the default), and
+    /// `tag` (the semantic kind carried from the scene; `0` = untagged). The
+    /// resolved texture and pipeline ride through to the object's `SetMaterial` /
+    /// `SetPipeline` commands, and the tag onto its `DrawIndexed`, so a backend
+    /// can select a pipeline and sample the bound texture from the command list.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_input_bound_object(
+        &self,
+        input: &mut RenderInput,
+        id: u64,
+        world: Mat4,
+        mesh_idx: u32,
+        material_idx: u32,
+        texture_id: u64,
+        pipeline: u32,
+        tag: u32,
+        visible: bool,
+    ) {
+        input.add_object(RenderObject::bound(
+            id,
+            world,
+            mesh_idx,
+            material_idx,
+            texture_id,
+            pipeline,
+            tag,
+            visible,
+        ));
+    }
+
+    /// The semantic object tag carried by the `DrawIndexed` command at `idx`
+    /// (`0` = untagged), or `None` for any other kind. Lets a caller thread the
+    /// object's kind (rolled in from the scene `Tag`) from the command list into
+    /// a backend submission.
+    pub fn command_draw_object_tag_at(&self, list: &RenderCommandList, idx: usize) -> Option<u32> {
+        list.at(idx).and_then(RenderCommand::as_draw_object_tag)
+    }
+}
+
 /// The linear RGBA per-draw colour of the material with `material_id` in `input`,
 /// or opaque white when no such material exists. The material's separate
 /// `opacity` is **folded into the alpha** (`alpha = base_color.a × opacity`), so
@@ -546,16 +614,13 @@ mod tests {
     fn empty_input_produces_minimum_command_list() {
         let input = api().new_input(100, 100);
         let list = api().build_command_list(&input);
-        // ClearFrame + SetPipeline (no camera).
-        assert_eq!(list.len(), 2);
+        // ClearFrame only (no camera, no draws → no per-object pipeline command).
+        assert_eq!(list.len(), 1);
         assert_eq!(
             api().command_kind_at(&list, 0),
             Some(RenderApi::KIND_CLEAR_FRAME)
         );
-        assert_eq!(
-            api().command_kind_at(&list, 1),
-            Some(RenderApi::KIND_SET_PIPELINE)
-        );
+        assert_eq!(api().command_kind_at(&list, 1), None);
     }
 
     #[test]
@@ -626,8 +691,8 @@ mod tests {
         let mat_idx = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
         api().add_input_object(&mut input, 1, Mat4::IDENTITY, mesh_idx, mat_idx, false);
         let list = api().build_command_list(&input);
-        // ClearFrame + SetPipeline only.
-        assert_eq!(list.len(), 2);
+        // ClearFrame only — the invisible object emits no pipeline/mesh/draw.
+        assert_eq!(list.len(), 1);
     }
 
     #[test]
@@ -648,8 +713,75 @@ mod tests {
         let mut input = api().new_input(100, 100);
         api().add_input_object(&mut input, 1, Mat4::IDENTITY, 99, 99, true);
         let list = api().build_command_list(&input);
-        // ClearFrame + SetPipeline only.
-        assert_eq!(list.len(), 2);
+        // ClearFrame only — the unresolved object emits nothing.
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn same_pipeline_objects_share_one_set_pipeline_command() {
+        // Two objects on the SAME (default) pipeline: run-length emits ONE
+        // SetPipeline (before the first draw), so the count matches the original
+        // single-pipeline slice — Clear + SetPipeline + 2×(Mesh, Mat, Draw) = 8
+        // (no camera). This covers the run-length `prev == Some(pipeline)` arm.
+        let mut input = api().new_input(64, 64);
+        let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mat = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
+        api().add_input_object(&mut input, 10, Mat4::IDENTITY, mesh, mat, true);
+        api().add_input_object(&mut input, 20, Mat4::IDENTITY, mesh, mat, true);
+        let list = api().build_command_list(&input);
+        assert_eq!(list.len(), 8);
+        let pipelines = (0..list.len())
+            .filter(|i| api().command_kind_at(&list, *i) == Some(RenderApi::KIND_SET_PIPELINE))
+            .count();
+        assert_eq!(pipelines, 1, "one shared SetPipeline for a uniform frame");
+    }
+
+    #[test]
+    fn per_object_pipeline_and_tag_thread_through_the_command_list() {
+        // Two objects with distinct pipelines and tags: each draw is preceded by
+        // its own SetPipeline, and its tag rides on the DrawIndexed command.
+        let mut input = api().new_input(64, 64);
+        let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mat = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
+        api().add_input_bound_object(
+            &mut input,
+            10,
+            Mat4::IDENTITY,
+            mesh,
+            mat,
+            0,
+            RenderApi::PIPELINE_BASIC_LIT,
+            7,
+            true,
+        );
+        api().add_input_bound_object(
+            &mut input,
+            20,
+            Mat4::IDENTITY,
+            mesh,
+            mat,
+            0,
+            RenderApi::PIPELINE_UNLIT,
+            9,
+            true,
+        );
+        let list = api().build_command_list(&input);
+        // ClearFrame + 2×(SetPipeline, SetMesh, SetMaterial, DrawIndexed) = 9.
+        assert_eq!(list.len(), 9);
+        assert_eq!(
+            api().command_pipeline_at(&list, 1),
+            Some(RenderApi::PIPELINE_BASIC_LIT)
+        );
+        assert_eq!(api().command_draw_object_id_at(&list, 4), Some(10));
+        assert_eq!(api().command_draw_object_tag_at(&list, 4), Some(7));
+        assert_eq!(
+            api().command_pipeline_at(&list, 5),
+            Some(RenderApi::PIPELINE_UNLIT)
+        );
+        assert_eq!(api().command_draw_object_id_at(&list, 8), Some(20));
+        assert_eq!(api().command_draw_object_tag_at(&list, 8), Some(9));
+        // The tag accessor is gated on the DrawIndexed kind.
+        assert_eq!(api().command_draw_object_tag_at(&list, 0), None);
     }
 }
 
@@ -669,8 +801,8 @@ mod cov {
         let mesh_idx = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
         api().add_input_object(&mut input, 1, Mat4::IDENTITY, mesh_idx, 99, true);
         let list = api().build_command_list(&input);
-        // ClearFrame + SetPipeline only; the object was dropped at material lookup.
-        assert_eq!(list.len(), 2);
+        // ClearFrame only; the object was dropped at material lookup.
+        assert_eq!(list.len(), 1);
     }
 
     #[test]
@@ -679,17 +811,22 @@ mod cov {
         let empty = api.new_input(10, 10);
         let list = api.build_command_list(&empty);
         assert_eq!(api.command_count(&list), list.len());
-        assert_eq!(api.command_count(&list), 2);
+        assert_eq!(api.command_count(&list), 1);
     }
 
     #[test]
     fn inspection_accessors_return_none_on_kind_mismatch() {
+        use axiom_math::{Mat4, Vec4};
         let api = api();
-        // A minimal list: index 0 is ClearFrame, index 1 is SetPipeline.
-        let list = api.build_command_list(&api.new_input(10, 10));
-
-        // Each typed accessor against a command of a different kind hits its
-        // `_ => None` arm.
+        // A full list (ClearFrame, SetCamera, SetPipeline, SetMesh, SetMaterial,
+        // DrawIndexed): each typed accessor against a command of a different kind
+        // hits its `_ => None` arm.
+        let mut input = api.new_input(10, 10);
+        api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
+        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mat = api.add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
+        api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh, mat, true);
+        let list = api.build_command_list(&input);
         assert_eq!(api.command_clear_color_at(&list, 1), None);
         assert_eq!(api.command_camera_at(&list, 0), None);
         assert_eq!(api.command_pipeline_at(&list, 0), None);
@@ -714,226 +851,7 @@ mod cov {
 }
 
 #[cfg(test)]
-mod frame_packet_cov {
-    use super::*;
-
-    fn api() -> RenderApi {
-        RenderApi::new()
-    }
-
-    /// A single triangle object with a known mesh/material/colour, plus a camera
-    /// and one directional light — exercises every populated packet field.
-    fn one_object_input() -> RenderInput {
-        let mut input = api().new_input(800, 600);
-        api().set_input_clear_color(&mut input, [0.1, 0.2, 0.3, 1.0]);
-        api().set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
-        api().add_input_directional_light(
-            &mut input,
-            Vec3::new(0.0, -1.0, 0.0),
-            Vec3::ONE,
-            Ratio::new(1.0).unwrap(),
-        );
-        let mesh = api().add_input_mesh(&mut input, 42, vec![], vec![], vec![], vec![0, 1, 2]);
-        let mat = api().add_input_basic_lit_material(&mut input, 99, Vec4::new(0.5, 0.5, 0.5, 1.0));
-        api().add_input_object(&mut input, 7, Mat4::IDENTITY, mesh, mat, true);
-        input
-    }
-
-    #[test]
-    fn packet_is_derived_from_the_command_list() {
-        let input = one_object_input();
-        let packet = api().build_frame_packet(&input, 4, 240, [9.0; 16]);
-
-        assert_eq!(packet.draws().len(), 1);
-        let draw = packet.draws()[0];
-        assert_eq!(draw.object_id(), 7);
-        assert_eq!(draw.mesh_id(), 42);
-        assert_eq!(draw.material_id(), 99);
-        // Identity camera => mvp == world == identity; colour is the material base.
-        assert_eq!(draw.world(), Mat4::IDENTITY.as_cols_array());
-        assert_eq!(draw.mvp(), Mat4::IDENTITY.as_cols_array());
-        assert_eq!(draw.color(), [0.5, 0.5, 0.5, 1.0]);
-
-        assert_eq!(packet.frame_index(), 4);
-        assert_eq!(packet.tick(), 240);
-        assert_eq!(packet.viewport(), FrameViewport::new(800, 600));
-        assert_eq!(packet.clear_color(), [0.1, 0.2, 0.3, 1.0]);
-        assert_eq!(packet.light_view_proj(), [9.0; 16]);
-
-        // Camera present with view_proj = projection * view (identity here).
-        let cam = packet.camera().expect("camera present");
-        assert_eq!(cam.view(), Mat4::IDENTITY.as_cols_array());
-        assert_eq!(cam.projection(), Mat4::IDENTITY.as_cols_array());
-        assert_eq!(cam.view_proj(), Mat4::IDENTITY.as_cols_array());
-
-        // One directional light → kind 0; features: no textures, shadows on.
-        assert_eq!(packet.lights().len(), 1);
-        assert_eq!(packet.lights()[0].kind(), 0);
-        let f = packet.features();
-        assert!(!f.uses_textures());
-        assert!(f.uses_shadows());
-        assert_eq!(f.directional_lights(), 1);
-        assert_eq!(f.point_lights(), 0);
-        // No SDF shapes were added, so the packet carries no SDF scene (the
-        // camera-present-but-no-shapes arm of `build_sdf_scene`).
-        assert!(packet.sdf().is_none());
-    }
-
-    #[test]
-    fn packet_draw_count_equals_draw_indexed_command_count() {
-        let input = one_object_input();
-        let list = api().build_command_list(&input);
-        let draw_cmds = (0..list.len())
-            .filter(|i| api().command_kind_at(&list, *i) == Some(RenderApi::KIND_DRAW_INDEXED))
-            .count();
-        let packet = api().build_frame_packet(&input, 0, 0, [0.0; 16]);
-        assert_eq!(packet.draws().len(), draw_cmds);
-        assert_eq!(packet.draws().len(), 1);
-    }
-
-    #[test]
-    fn packet_object_ids_and_order_match_the_command_list() {
-        let mut input = api().new_input(100, 100);
-        let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
-        let mat = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
-        api().add_input_object(&mut input, 100, Mat4::IDENTITY, mesh, mat, true);
-        api().add_input_object(&mut input, 200, Mat4::IDENTITY, mesh, mat, true);
-        api().add_input_object(&mut input, 300, Mat4::IDENTITY, mesh, mat, true);
-
-        let list = api().build_command_list(&input);
-        let cmd_ids: Vec<u64> = (0..list.len())
-            .filter_map(|i| api().command_draw_object_id_at(&list, i))
-            .collect();
-        assert_eq!(cmd_ids, vec![100, 200, 300]);
-
-        let packet = api().build_frame_packet(&input, 0, 0, [0.0; 16]);
-        let packet_ids: Vec<u64> = packet.draws().iter().map(|d| d.object_id()).collect();
-        assert_eq!(packet_ids, cmd_ids);
-    }
-
-    #[test]
-    fn command_draw_object_id_at_is_some_only_on_draws() {
-        let input = one_object_input();
-        let list = api().build_command_list(&input);
-        // Index 0 is ClearFrame → None; the final command is the draw → Some(7).
-        assert_eq!(api().command_draw_object_id_at(&list, 0), None);
-        assert_eq!(
-            api().command_draw_object_id_at(&list, list.len() - 1),
-            Some(7)
-        );
-    }
-
-    #[test]
-    fn empty_input_yields_a_cameraless_drawless_packet() {
-        let input = api().new_input(320, 240);
-        let packet = api().build_frame_packet(&input, 1, 2, [0.0; 16]);
-        assert!(packet.camera().is_none());
-        assert!(packet.draws().is_empty());
-        assert!(packet.lights().is_empty());
-        let f = packet.features();
-        assert!(!f.uses_textures());
-        assert!(!f.uses_shadows());
-        assert_eq!(f.directional_lights(), 0);
-        assert_eq!(f.point_lights(), 0);
-        assert_eq!(packet.viewport(), FrameViewport::new(320, 240));
-        assert!(packet.sdf().is_none());
-    }
-
-    #[test]
-    fn packet_carries_an_sdf_scene_when_shapes_and_camera_present() {
-        let mut input = api().new_input(64, 64);
-        api().set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
-        api().add_input_sdf(
-            &mut input,
-            1,
-            Mat4::IDENTITY,
-            Vec3::new(1.0, 2.0, 3.0),
-            Vec4::new(0.2, 0.4, 0.6, 1.0),
-        );
-        let packet = api().build_frame_packet(&input, 0, 0, [0.0; 16]);
-        let scene = packet.sdf().expect("sdf scene present");
-        assert_eq!(scene.primitives().len(), 1);
-        let p = scene.primitives()[0];
-        assert_eq!(p.kind(), 1);
-        // dims ride into params[0..3]; an identity world has uniform scale 1.
-        assert_eq!(p.params(), [1.0, 2.0, 3.0, 1.0]);
-        assert_eq!(p.color(), [0.2, 0.4, 0.6, 1.0]);
-        // Identity world → identity world→local matrix.
-        assert_eq!(p.inv_transform(), Mat4::IDENTITY.as_cols_array());
-        // Identity view → camera at the origin, identity inverse view-projection.
-        assert_eq!(scene.camera_world_pos(), [0.0, 0.0, 0.0]);
-        assert_eq!(scene.inv_view_proj(), Mat4::IDENTITY.as_cols_array());
-        assert_eq!(scene.march(), [100.0, 0.001, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn sdf_shapes_without_a_camera_produce_no_scene() {
-        let mut input = api().new_input(64, 64);
-        api().add_input_sdf(&mut input, 0, Mat4::IDENTITY, Vec3::ONE, Vec4::ONE);
-        let packet = api().build_frame_packet(&input, 0, 0, [0.0; 16]);
-        assert!(packet.sdf().is_none());
-    }
-
-    #[test]
-    fn build_sdf_scene_is_none_for_no_shapes_and_a_scene_for_some() {
-        let r = api();
-        // No shapes → no scene (the empty arm of the shared builder).
-        assert!(r.build_sdf_scene(Mat4::IDENTITY, Vec3::ZERO, &[]).is_none());
-        // Two shapes → a scene carrying both, with dims+scale in params and the
-        // supplied camera world position and inverse view-projection.
-        let shapes = [
-            (0u32, Mat4::IDENTITY, Vec3::new(2.0, 0.0, 0.0), Vec4::new(1.0, 0.0, 0.0, 1.0)),
-            (1u32, Mat4::IDENTITY, Vec3::new(1.0, 2.0, 3.0), Vec4::ONE),
-        ];
-        let scene = r
-            .build_sdf_scene(Mat4::IDENTITY, Vec3::new(0.0, 0.0, 5.0), &shapes)
-            .expect("two shapes yield a scene");
-        assert_eq!(scene.primitives().len(), 2);
-        assert_eq!(scene.primitives()[0].kind(), 0);
-        // Identity world → uniform scale 1, dims carried into params[0..3].
-        assert_eq!(scene.primitives()[1].params(), [1.0, 2.0, 3.0, 1.0]);
-        assert_eq!(scene.camera_world_pos(), [0.0, 0.0, 5.0]);
-        assert_eq!(scene.view_proj(), Mat4::IDENTITY.as_cols_array());
-        assert_eq!(scene.inv_view_proj(), Mat4::IDENTITY.as_cols_array());
-        assert_eq!(scene.march(), [100.0, 0.001, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn features_count_both_light_kinds_and_detect_textures() {
-        let mut input = api().new_input(100, 100);
-        api().add_input_directional_light(
-            &mut input,
-            Vec3::new(0.0, -1.0, 0.0),
-            Vec3::ONE,
-            Ratio::new(1.0).unwrap(),
-        );
-        api().add_input_point_light(&mut input, Vec3::ZERO, Vec3::ONE, Ratio::new(0.5).unwrap());
-        let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
-        // A textured material flips uses_textures on.
-        let mat = api().add_input_textured_material(&mut input, 5, Vec4::ONE, 77);
-        api().add_input_object(&mut input, 1, Mat4::IDENTITY, mesh, mat, true);
-
-        let packet = api().build_frame_packet(&input, 0, 0, [0.0; 16]);
-        let f = packet.features();
-        assert!(f.uses_textures());
-        assert!(f.uses_shadows());
-        assert_eq!(f.directional_lights(), 1);
-        assert_eq!(f.point_lights(), 1);
-        // Light kinds map directional→0, point→1, in input order.
-        let kinds: Vec<u32> = packet.lights().iter().map(|l| l.kind()).collect();
-        assert_eq!(kinds, vec![0, 1]);
-        // The point light's colour+intensity ride through unchanged ([r,g,b,i]).
-        assert_eq!(packet.lights()[1].color_intensity(), [1.0, 1.0, 1.0, 0.5]);
-    }
-
-    #[test]
-    fn material_base_color_resolves_by_id_with_white_fallback() {
-        let mut input = api().new_input(10, 10);
-        api().add_input_basic_lit_material(&mut input, 9, Vec4::new(0.2, 0.4, 0.6, 1.0));
-        assert_eq!(material_base_color(&input, 9), [0.2, 0.4, 0.6, 1.0]);
-        assert_eq!(material_base_color(&input, 404), [1.0, 1.0, 1.0, 1.0]);
-    }
-}
+mod frame_packet_cov;
 
 /// SPEC-11 §3.4 translucency: the material `opacity`→per-draw alpha fold. (The
 /// back-to-front translucent draw ordering is tested in `draw_order`.)

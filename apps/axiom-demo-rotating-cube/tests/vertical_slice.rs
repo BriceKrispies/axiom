@@ -114,7 +114,7 @@ fn draw_world(artifact: &axiom_demo_rotating_cube::VerticalSliceArtifact) -> axi
         .render_command_list
         .commands
         .iter()
-        .find_map(|c| c.as_draw_indexed().map(|(_, world)| world))
+        .find_map(|c| c.as_draw_indexed().map(|(_, world, _tag)| world))
         .expect("the cube draw command is present")
 }
 
@@ -180,7 +180,7 @@ fn every_boundary_artifact_is_present_and_well_formed() {
             .last()
             .unwrap()
             .as_draw_indexed()
-            .map(|(index_count, _world)| index_count),
+            .map(|(index_count, _world, _tag)| index_count),
         Some(36)
     );
     // (the kind vec exists only to assert the list is inspectable)

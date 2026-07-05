@@ -3,6 +3,7 @@
 use axiom_kernel::{BinaryReader, BinaryWriter};
 use axiom_math::Transform;
 
+use crate::bound_figure::BoundFigure;
 use crate::definition::FigureDefinition;
 use crate::figure_error::{FigureError, FigureResult};
 use crate::posed_part::PosedPart;
@@ -69,6 +70,25 @@ impl FigureApi {
                     })
                     .collect()
             })
+    }
+
+    /// Pose a figure **and bind it to a scene node** in one step: resolve the
+    /// figure's parts against `world_transforms` (as [`Self::posed_parts`]) and
+    /// wrap the result with the scene `node_id` it animates, yielding a
+    /// [`BoundFigure`] — the value that makes a posed character one engine object
+    /// rather than a loose figure blob keyed by nothing. `node_id` is the same
+    /// `u64` an app stamps onto that node's renderable `AnimationRef`, so the
+    /// scene and the figure name the same object. Fails with
+    /// `TransformCountMismatch` when the transform count differs from the part
+    /// count (delegated to [`Self::posed_parts`]).
+    pub fn bind(
+        &self,
+        node_id: u64,
+        figure: &FigureDefinition,
+        world_transforms: &[Transform],
+    ) -> FigureResult<BoundFigure> {
+        self.posed_parts(figure, world_transforms)
+            .map(|parts| BoundFigure::new(node_id, parts))
     }
 }
 
@@ -146,6 +166,31 @@ mod tests {
         let figure = two_part_figure();
         assert_eq!(
             api.posed_parts(&figure, &[Transform::IDENTITY]),
+            Err(FigureError::TransformCountMismatch)
+        );
+    }
+
+    #[test]
+    fn bind_binds_the_posed_figure_to_a_scene_node() {
+        let api = FigureApi::new();
+        let figure = two_part_figure();
+        let world = [
+            Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)),
+            Transform::from_translation(Vec3::new(0.0, 0.5, 0.0)),
+        ];
+        let bound = api.bind(77, &figure, &world).unwrap();
+        assert_eq!(bound.node(), 77);
+        assert_eq!(bound.part_count(), 2);
+        // The bound parts match a bare pose of the same figure.
+        assert_eq!(bound.parts(), api.posed_parts(&figure, &world).unwrap());
+    }
+
+    #[test]
+    fn bind_rejects_length_mismatch() {
+        let api = FigureApi::new();
+        let figure = two_part_figure();
+        assert_eq!(
+            api.bind(1, &figure, &[Transform::IDENTITY]),
             Err(FigureError::TransformCountMismatch)
         );
     }

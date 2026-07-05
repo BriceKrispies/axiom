@@ -1,8 +1,11 @@
 //! The single public facade of the `axiom-resources` module.
 
+use axiom_kernel::Ratio;
 use axiom_math::{Vec2, Vec3, Vec4};
 
-use crate::basic_lit_material::{build_basic_lit_material, build_textured_lit_material};
+use crate::basic_lit_material::{
+    build_basic_lit_material, build_lit_material, build_textured_lit_material,
+};
 use crate::biome_atlas_texture::{biome_cell_origin, build_biome_atlas_texture};
 use crate::checker_texture::build_checker_texture;
 use crate::cube_mesh::build_cube_mesh;
@@ -117,6 +120,25 @@ impl ResourcesApi {
     ) -> ResourceId {
         let id = table.next_id();
         table.insert_material(build_textured_lit_material(id, base_color, texture))
+    }
+
+    /// Register a full-catalog lit material: base colour + optional texture + the
+    /// `emissive` self-illumination colour, `roughness` (`0` mirror … `1` matte),
+    /// and `opacity` (`1` opaque) the render tier accepts — the resource-table
+    /// path to a complete material (audit M9).
+    pub fn register_lit_material(
+        &self,
+        table: &mut ResourceTable,
+        base_color: Vec4,
+        texture: Option<ResourceId>,
+        emissive: Vec3,
+        roughness: Ratio,
+        opacity: Ratio,
+    ) -> ResourceId {
+        let id = table.next_id();
+        table.insert_material(build_lit_material(
+            id, base_color, texture, emissive, roughness, opacity,
+        ))
     }
 
     /// Register a 2×2 solid-colour texture.
@@ -288,6 +310,42 @@ impl ResourcesApi {
             .material_by_id(ResourceId::from_raw(material_id))
             .and_then(|m| m.texture())
             .map(|t| t.raw())
+    }
+
+    /// The self-illumination (`emissive`) colour of a material, if present.
+    pub fn resolved_material_emissive(
+        &self,
+        resolved: &ResolvedResources,
+        material_id: u64,
+    ) -> Option<[f32; 3]> {
+        resolved
+            .material_by_id(ResourceId::from_raw(material_id))
+            .map(|m| {
+                let e = m.emissive();
+                [e.x, e.y, e.z]
+            })
+    }
+
+    /// The `roughness` of a material (`0` mirror … `1` matte), if present.
+    pub fn resolved_material_roughness(
+        &self,
+        resolved: &ResolvedResources,
+        material_id: u64,
+    ) -> Option<f32> {
+        resolved
+            .material_by_id(ResourceId::from_raw(material_id))
+            .map(|m| m.roughness().get())
+    }
+
+    /// The `opacity` of a material (`1` opaque), if present.
+    pub fn resolved_material_opacity(
+        &self,
+        resolved: &ResolvedResources,
+        material_id: u64,
+    ) -> Option<f32> {
+        resolved
+            .material_by_id(ResourceId::from_raw(material_id))
+            .map(|m| m.opacity().get())
     }
 
     pub fn resolved_texture_count(&self, resolved: &ResolvedResources) -> usize {
@@ -618,6 +676,55 @@ mod tests {
         );
         assert_eq!(api.resolved_material_texture_id(&r, untextured.raw()), None);
         assert_eq!(api.resolved_material_texture_id(&r, 9999), None);
+    }
+
+    #[test]
+    fn lit_material_registers_and_resolves_the_full_catalog() {
+        let api = api();
+        let mut t = api.empty_table();
+        let tex = api.register_solid_color_texture(&mut t, "white", [255, 255, 255, 255]);
+        let half = Ratio::new(0.5).expect("finite");
+        let mat = api.register_lit_material(
+            &mut t,
+            Vec4::new(0.2, 0.4, 0.6, 1.0),
+            Some(tex),
+            Vec3::new(0.0, 1.0, 0.0),
+            half,
+            half,
+        );
+        let r = api.resolve(&t);
+        assert_eq!(
+            api.resolved_material_base_color(&r, mat.raw()),
+            Some([0.2, 0.4, 0.6, 1.0])
+        );
+        assert_eq!(
+            api.resolved_material_texture_id(&r, mat.raw()),
+            Some(tex.raw())
+        );
+        assert_eq!(
+            api.resolved_material_emissive(&r, mat.raw()),
+            Some([0.0, 1.0, 0.0])
+        );
+        assert_eq!(api.resolved_material_roughness(&r, mat.raw()), Some(0.5));
+        assert_eq!(api.resolved_material_opacity(&r, mat.raw()), Some(0.5));
+        // Missing material → None on every catalog accessor.
+        assert_eq!(api.resolved_material_emissive(&r, 9999), None);
+        assert_eq!(api.resolved_material_roughness(&r, 9999), None);
+        assert_eq!(api.resolved_material_opacity(&r, 9999), None);
+    }
+
+    #[test]
+    fn basic_material_resolves_default_catalog_fields() {
+        let api = api();
+        let mut t = api.empty_table();
+        let mat = api.register_basic_lit_material(&mut t, Vec4::ONE);
+        let r = api.resolve(&t);
+        assert_eq!(
+            api.resolved_material_emissive(&r, mat.raw()),
+            Some([0.0, 0.0, 0.0])
+        );
+        assert_eq!(api.resolved_material_roughness(&r, mat.raw()), Some(1.0));
+        assert_eq!(api.resolved_material_opacity(&r, mat.raw()), Some(1.0));
     }
 
     #[test]

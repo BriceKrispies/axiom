@@ -29,9 +29,9 @@ use crate::render_to_gpu_submission::{
 };
 use crate::scene_to_render_input::{
     scene_to_render_input, ResolvedMaterialArtifact, ResolvedMeshArtifact,
-    ResolvedResourcesArtifact, SceneCameraArtifact, SceneLightArtifact, SceneNodeArtifact,
-    SceneRenderableArtifact, SceneSnapshotArtifact, DEMO_CUBE_BASE_COLOR, DEMO_LIGHT_COLOR,
-    DEMO_LIGHT_INTENSITY, VIEWPORT_HEIGHT, VIEWPORT_WIDTH,
+    ResolvedResourcesArtifact, SceneBoundsArtifact, SceneCameraArtifact, SceneLightArtifact,
+    SceneNodeArtifact, SceneRenderableArtifact, SceneSnapshotArtifact, SceneTagArtifact,
+    DEMO_CUBE_BASE_COLOR, DEMO_LIGHT_COLOR, DEMO_LIGHT_INTENSITY, VIEWPORT_HEIGHT, VIEWPORT_WIDTH,
 };
 
 // Re-exported artifact types are reachable through the facade's return
@@ -242,7 +242,28 @@ pub(crate) fn run_vertical_slice(
                 node: r.node().raw(),
                 mesh_id: r.mesh().raw(),
                 material_id: r.material().raw(),
+                texture_id: r.texture().raw(),
+                animation_id: r.animation().raw(),
                 visible: r.visible(),
+            })
+            .collect(),
+        tags: snapshot
+            .tags()
+            .iter()
+            .map(|t| SceneTagArtifact {
+                node: t.node().raw(),
+                kind_code: t.kind_code(),
+            })
+            .collect(),
+        bounds: snapshot
+            .bounds()
+            .iter()
+            .map(|b| {
+                let h = b.half_extents();
+                SceneBoundsArtifact {
+                    node: b.node().raw(),
+                    half_extents: [h.x, h.y, h.z],
+                }
             })
             .collect(),
     };
@@ -369,12 +390,15 @@ pub(crate) fn run_vertical_slice(
         .iter()
         .enumerate()
         .for_each(|(i, object)| {
-            api.render_api.add_input_object(
+            api.render_api.add_input_bound_object(
                 &mut render_input,
                 i as u64,
                 object.world,
                 object.mesh_idx,
                 object.material_idx,
+                object.texture_id,
+                object.pipeline,
+                object.tag,
                 object.visible,
             );
         });
@@ -422,7 +446,16 @@ pub(crate) fn run_vertical_slice(
                             .then(|| {
                                 api.render_api
                                     .command_material_id_at(&render_commands, i)
-                                    .map(RenderCommandArtifact::set_material)
+                                    .map(|material_id| {
+                                        // Thread the material's albedo texture id
+                                        // (0 = untextured) — the binding the slice
+                                        // previously dropped (M1).
+                                        let texture_id = api
+                                            .render_api
+                                            .command_material_texture_id_at(&render_commands, i)
+                                            .unwrap_or(0);
+                                        RenderCommandArtifact::set_material(material_id, texture_id)
+                                    })
                             })
                             .flatten();
                         let draw = (kind == RenderApi::KIND_DRAW_INDEXED)
@@ -430,7 +463,12 @@ pub(crate) fn run_vertical_slice(
                                 api.render_api
                                     .command_draw_indexed_at(&render_commands, i)
                                     .map(|(index_count, world)| {
-                                        RenderCommandArtifact::draw_indexed(index_count, world)
+                                        // Carry the object's semantic tag onto the draw.
+                                        let tag = api
+                                            .render_api
+                                            .command_draw_object_tag_at(&render_commands, i)
+                                            .unwrap_or(0);
+                                        RenderCommandArtifact::draw_indexed(index_count, world, tag)
                                     })
                             })
                             .flatten();
@@ -475,11 +513,11 @@ pub(crate) fn run_vertical_slice(
                     .map(|mesh_id| api.webgpu_api.submission_set_mesh(&mut submission, mesh_id))
             })
             .or_else(|| {
-                // The headless slice's artifacts carry no texture binding, so the
-                // backend material is untextured (texture id 0).
-                command.as_set_material().map(|material_id| {
+                // The material's albedo texture binding threads through to the
+                // backend (M1: previously hardcoded to 0 / dropped here).
+                command.as_set_material().map(|(material_id, texture_id)| {
                     api.webgpu_api
-                        .submission_set_material(&mut submission, material_id, 0)
+                        .submission_set_material(&mut submission, material_id, texture_id)
                 })
             })
             .or_else(|| {

@@ -6,6 +6,7 @@ use axiom_kernel::{
 };
 use axiom_math::{Mat4, MathApi, Transform, Vec3};
 
+use crate::animation_ref::AnimationRef;
 use crate::bounds::Bounds;
 use crate::camera::Camera;
 use crate::light::Light;
@@ -21,6 +22,7 @@ use crate::scene_snapshot::SceneSnapshot;
 use crate::sdf_shape::SdfShape;
 use crate::spin::Spin;
 use crate::tag::Tag;
+use crate::texture_ref::TextureRef;
 
 /// The players-and-controllers arm of the facade (per-tick command-driven node
 /// marks). A child module so neither `impl SceneApi` block exceeds the engine's
@@ -403,6 +405,41 @@ impl SceneApi {
     }
 }
 
+/// The object-binding contract's texture/animation slots: construct the opaque
+/// refs and bind them onto a node's renderable. Kept in its own `impl` block so
+/// neither block exceeds the engine's impl-block size budget.
+impl SceneApi {
+    /// Construct an opaque [`TextureRef`] (`0` = the untextured sentinel).
+    pub const fn texture_ref(&self, raw: u64) -> TextureRef {
+        TextureRef::from_raw(raw)
+    }
+
+    /// Construct an opaque [`AnimationRef`] (`0` = the un-animated sentinel).
+    pub const fn animation_ref(&self, raw: u64) -> AnimationRef {
+        AnimationRef::from_raw(raw)
+    }
+
+    /// Bind the albedo texture on `node`'s renderable — the object-binding
+    /// contract's texture slot. Pass `texture_ref(0)` to clear it (untextured).
+    pub fn set_renderable_texture(
+        &mut self,
+        node: SceneNodeId,
+        texture: TextureRef,
+    ) -> SceneResult<()> {
+        self.scene.set_renderable_texture(node, texture)
+    }
+
+    /// Bind the animation driving `node`'s renderable — the object-binding
+    /// contract's animation slot. Pass `animation_ref(0)` to clear it (static).
+    pub fn set_renderable_animation(
+        &mut self,
+        node: SceneNodeId,
+        animation: AnimationRef,
+    ) -> SceneResult<()> {
+        self.scene.set_renderable_animation(node, animation)
+    }
+}
+
 /// Data-declared animation authoring: attach the engine's tick-driven animation
 /// components (spin, procedural bob/spin) to a node. Kept in its own `impl` block
 /// so neither authoring block exceeds the engine's impl-block size budget.
@@ -666,6 +703,25 @@ mod tests {
         );
         a.set_renderable_visibility(n, false).unwrap();
         a.set_renderable_casts_contact_shadow(n, true).unwrap();
+        // The object-binding slots: bind a texture and an animation, then read
+        // them back off the snapshot's renderable entry.
+        a.set_renderable_texture(n, a.texture_ref(7)).unwrap();
+        a.set_renderable_animation(n, a.animation_ref(13)).unwrap();
+        let snap = a.snapshot();
+        assert_eq!(snap.renderables()[0].texture(), a.texture_ref(7));
+        assert_eq!(snap.renderables()[0].animation(), a.animation_ref(13));
+        assert_eq!(
+            a.set_renderable_texture(SceneNodeId::from_raw(99), a.texture_ref(1))
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingRenderable
+        );
+        assert_eq!(
+            a.set_renderable_animation(SceneNodeId::from_raw(99), a.animation_ref(1))
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingRenderable
+        );
         a.remove_renderable(n).unwrap();
         assert_eq!(
             a.set_renderable_casts_contact_shadow(n, true)

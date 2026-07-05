@@ -29,7 +29,9 @@
 //! handle it hands back and accepts. Every other type stays reachable only
 //! through the facade.
 
+mod animation_ref;
 mod bounds;
+mod bounds_snapshot;
 mod camera;
 mod camera_snapshot;
 mod controller_command;
@@ -44,6 +46,8 @@ mod player_command;
 mod procanim;
 mod renderable;
 mod renderable_snapshot;
+mod tag_snapshot;
+mod texture_ref;
 mod scene;
 mod scene_api;
 mod scene_error;
