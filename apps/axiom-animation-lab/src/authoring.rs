@@ -46,20 +46,26 @@ const fn p(parent: Option<u32>, offset: Vec3, box_size: Vec3, box_offset: Vec3, 
     PartSpec { parent, offset, box_size, box_offset, tag }
 }
 
+// Proportion pass toward the lean reference athlete (broad squared shoulders,
+// small head, trim tapered waist, long slightly-slimmer legs, slimmer arms). The
+// root sits 0.06 higher to soak up the extra leg length so the feet keep their
+// original ground contact. Segment child offsets and box offsets track the new
+// thigh/shin lengths (offset = full segment length; box offset = half length) so
+// the limbs stay connected end-to-end.
 const PARTS: [PartSpec; 13] = [
-    p(None, Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.34, 0.30, 0.24), Vec3::ZERO, TAG_PELVIS), // 0 pelvis
-    p(Some(0), Vec3::new(0.0, 0.34, 0.0), Vec3::new(0.42, 0.44, 0.28), Vec3::new(0.0, 0.06, 0.0), TAG_BODY), // 1 chest
-    p(Some(1), Vec3::new(0.0, 0.36, 0.0), Vec3::new(0.22, 0.26, 0.24), Vec3::new(0.0, 0.08, 0.0), TAG_SKIN), // 2 head
-    p(Some(0), Vec3::new(-0.11, -0.06, 0.0), Vec3::new(0.17, 0.48, 0.19), Vec3::new(0.0, -0.24, 0.0), TAG_SKIN), // 3 L lower-limb root
-    p(Some(3), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.46, 0.16), Vec3::new(0.0, -0.23, 0.0), TAG_LIMB), // 4 L lower-limb mid
-    p(Some(4), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.11, 0.30), Vec3::new(0.0, -0.02, 0.09), TAG_END), // 5 L lower-limb tip (anchor)
-    p(Some(0), Vec3::new(0.11, -0.06, 0.0), Vec3::new(0.17, 0.48, 0.19), Vec3::new(0.0, -0.24, 0.0), TAG_SKIN), // 6 R lower-limb root
-    p(Some(6), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.46, 0.16), Vec3::new(0.0, -0.23, 0.0), TAG_LIMB), // 7 R lower-limb mid
-    p(Some(7), Vec3::new(0.0, -0.48, 0.0), Vec3::new(0.15, 0.11, 0.30), Vec3::new(0.0, -0.02, 0.09), TAG_END), // 8 R lower-limb tip (swing)
-    p(Some(1), Vec3::new(-0.28, 0.16, 0.0), Vec3::new(0.14, 0.44, 0.14), Vec3::new(0.0, -0.22, 0.0), TAG_BODY), // 9 L upper-limb root
-    p(Some(9), Vec3::new(0.0, -0.44, 0.0), Vec3::new(0.12, 0.40, 0.12), Vec3::new(0.0, -0.20, 0.0), TAG_SKIN), // 10 L upper-limb tip
-    p(Some(1), Vec3::new(0.28, 0.16, 0.0), Vec3::new(0.14, 0.44, 0.14), Vec3::new(0.0, -0.22, 0.0), TAG_BODY), // 11 R upper-limb root
-    p(Some(11), Vec3::new(0.0, -0.44, 0.0), Vec3::new(0.12, 0.40, 0.12), Vec3::new(0.0, -0.20, 0.0), TAG_SKIN), // 12 R upper-limb tip
+    p(None, Vec3::new(0.0, 1.06, 0.0), Vec3::new(0.32, 0.30, 0.24), Vec3::ZERO, TAG_PELVIS), // 0 pelvis (trimmer waist, raised to reground longer legs)
+    p(Some(0), Vec3::new(0.0, 0.34, 0.0), Vec3::new(0.48, 0.44, 0.28), Vec3::new(0.0, 0.06, 0.0), TAG_BODY), // 1 chest (broader squared shoulders)
+    p(Some(1), Vec3::new(0.0, 0.36, 0.0), Vec3::new(0.19, 0.22, 0.20), Vec3::new(0.0, 0.08, 0.0), TAG_SKIN), // 2 head (smaller)
+    p(Some(0), Vec3::new(-0.11, -0.06, 0.0), Vec3::new(0.16, 0.52, 0.18), Vec3::new(0.0, -0.26, 0.0), TAG_SKIN), // 3 L thigh (longer, slimmer)
+    p(Some(3), Vec3::new(0.0, -0.52, 0.0), Vec3::new(0.14, 0.50, 0.15), Vec3::new(0.0, -0.25, 0.0), TAG_LIMB), // 4 L shin (longer, slimmer)
+    p(Some(4), Vec3::new(0.0, -0.50, 0.0), Vec3::new(0.15, 0.11, 0.30), Vec3::new(0.0, -0.02, 0.09), TAG_END), // 5 L foot (anchor)
+    p(Some(0), Vec3::new(0.11, -0.06, 0.0), Vec3::new(0.16, 0.52, 0.18), Vec3::new(0.0, -0.26, 0.0), TAG_SKIN), // 6 R thigh (longer, slimmer)
+    p(Some(6), Vec3::new(0.0, -0.52, 0.0), Vec3::new(0.14, 0.50, 0.15), Vec3::new(0.0, -0.25, 0.0), TAG_LIMB), // 7 R shin (longer, slimmer)
+    p(Some(7), Vec3::new(0.0, -0.50, 0.0), Vec3::new(0.15, 0.11, 0.30), Vec3::new(0.0, -0.02, 0.09), TAG_END), // 8 R foot (swing)
+    p(Some(1), Vec3::new(-0.32, 0.16, 0.0), Vec3::new(0.12, 0.44, 0.12), Vec3::new(0.0, -0.22, 0.0), TAG_BODY), // 9 L upper-arm (wider set, slimmer)
+    p(Some(9), Vec3::new(0.0, -0.44, 0.0), Vec3::new(0.10, 0.40, 0.10), Vec3::new(0.0, -0.20, 0.0), TAG_SKIN), // 10 L forearm (slimmer)
+    p(Some(1), Vec3::new(0.32, 0.16, 0.0), Vec3::new(0.12, 0.44, 0.12), Vec3::new(0.0, -0.22, 0.0), TAG_BODY), // 11 R upper-arm (wider set, slimmer)
+    p(Some(11), Vec3::new(0.0, -0.44, 0.0), Vec3::new(0.10, 0.40, 0.10), Vec3::new(0.0, -0.20, 0.0), TAG_SKIN), // 12 R forearm (slimmer)
 ];
 
 /// A per-part sagittal pitch track (rotation about X): `(frame, radians)`.
