@@ -55,6 +55,7 @@ pub mod ids {
     pub const AD_GENERIC: u64 = 604;
     pub const BALL: u64 = 605;
     pub const SKIN: u64 = 606;
+    pub const TURF: u64 = 607;
 }
 
 /// A packed crowd: a dark terrace densely filled with individual shirt "seats".
@@ -154,6 +155,21 @@ pub fn ball(style: &SoccerRecipeStyle) -> RecipeGraph {
     g
 }
 
+/// The pitch turf: a fine mown grain — soft near-neutral value noise that
+/// modulates the flat grass band base colour, so the largest surface in the
+/// frame reads as textured turf instead of a dead-flat green slab. The mowing
+/// stripes stay geometry (the alternating light/dark band quads); this only adds
+/// the intra-band grain those flat quads are missing. Each band quad carries its
+/// own `0..1` UV, so the texture tiles once per band and the grain reads fine.
+pub fn turf(style: &SoccerRecipeStyle) -> RecipeGraph {
+    let r = style.texture_res;
+    let p = &style.palette;
+    let mut g = RecipeGraph::new(RecipeId::from_raw(ids::TURF), 1);
+    let grain = g.add(TextureOp::Noise as u16, vec![i(r), i(r), i(20), c(p.turf_grain), c(p.turf_light)], vec![]);
+    g.add(TextureOp::ColorRamp as u16, vec![c(p.turf_grain), c(p.turf_light)], vec![grain]);
+    g
+}
+
 /// Athlete skin: a warm base with faint noise dither so heads/hands aren't
 /// perfectly flat.
 pub fn skin(style: &SoccerRecipeStyle) -> RecipeGraph {
@@ -176,6 +192,7 @@ pub fn catalog(style: &SoccerRecipeStyle) -> Vec<(&'static str, RecipeGraph)> {
         ("ad_generic", ad_generic(style)),
         ("ball", ball(style)),
         ("skin", skin(style)),
+        ("turf", turf(style)),
     ]
 }
 

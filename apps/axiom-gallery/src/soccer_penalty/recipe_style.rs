@@ -55,6 +55,12 @@ pub struct Palette {
     pub skin: Color,
     /// The skin's faint dither shadow.
     pub skin_dark: Color,
+    /// Pitch turf grain: a faint near-neutral value-noise floor that modulates the
+    /// flat grass band base colour into mown turf (near-white so it tints the
+    /// green only slightly; the mowing stripes stay the geometry band quads).
+    pub turf_grain: Color,
+    /// The turf grain's bright end (near white).
+    pub turf_light: Color,
 }
 
 /// Every art-direction knob for the generated soccer surfaces.
@@ -102,6 +108,8 @@ impl SoccerRecipeStyle {
                 ball_dark: Color::rgba(0x10, 0x10, 0x14, 0xFF),
                 skin: Color::rgba(0xD2, 0xA0, 0x80, 0xFF),
                 skin_dark: Color::rgba(0xAA, 0x78, 0x60, 0xFF),
+                turf_grain: Color::rgba(0xCE, 0xD4, 0xC6, 0xFF),
+                turf_light: Color::rgba(0xF8, 0xFA, 0xF2, 0xFF),
             },
             texture_res: 48,
             detail_res: 32,

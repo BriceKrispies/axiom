@@ -136,6 +136,7 @@ struct TexLib {
     keeper: u64,
     ball: u64,
     skin: u64,
+    turf: u64,
 }
 
 /// The shared meshed scene: the mesh + texture libraries, a
@@ -174,6 +175,7 @@ impl PenaltyMeshedScene {
             keeper: bake_texture(app, &tex_api, &recipe_textures::keeper(&style), style.seed),
             ball: bake_texture(app, &tex_api, &recipe_textures::ball(&style), style.seed),
             skin: bake_texture(app, &tex_api, &recipe_textures::skin(&style), style.seed),
+            turf: bake_texture(app, &tex_api, &recipe_textures::turf(&style), style.seed),
         };
         Self { lib, tex, palette: HashMap::new(), spawned: Vec::new() }
     }
@@ -181,6 +183,7 @@ impl PenaltyMeshedScene {
     /// The retro 32-bit texture id for one object's role/label (0 = flat, no texture).
     fn texture_for(&self, role: DioramaRole, label: &str) -> u64 {
         match role {
+            DioramaRole::Field => self.tex.turf,
             DioramaRole::CrowdCard => self.tex.crowd,
             DioramaRole::AdBoard => {
                 if label == "ad.board.axiom" {
