@@ -17,12 +17,15 @@ use axiom_math::Vec3;
 
 use crate::soccer_penalty::low_poly_assets::Rgba;
 
-/// Fixed ambient strength (flat fill light). Lifted so the pitch reads as open
-/// bright daylight instead of a dim, muddy field — the reference is a sunlit
-/// stadium, not a shaded one.
-pub const AMBIENT_STRENGTH: f32 = 0.55;
-/// Fixed directional strength (the "sun" contribution).
-pub const DIRECTIONAL_STRENGTH: f32 = 0.65;
+/// Fixed ambient strength (flat fill light). Lifted further so camera-facing
+/// (front) faces — lit by fill alone — read as bright open daylight instead of
+/// sitting at a dim 0.55 floor. The reference is a sunlit stadium with a strong
+/// sky bounce filling the shadowed faces, not a dim, muddy field.
+pub const AMBIENT_STRENGTH: f32 = 0.72;
+/// Fixed directional strength (the "sun" contribution). Kept high enough that a
+/// fully key-lit face (ambient + directional) overshoots the top band and reads
+/// at full daylight brightness.
+pub const DIRECTIONAL_STRENGTH: f32 = 0.55;
 
 /// The light direction, normalized. This is the unit form of the documented
 /// raw direction `(-0.45, -1.0, -0.35)` (roughly from the upper-front-left),
@@ -32,10 +35,10 @@ pub const LIGHT_DIRECTION: Vec3 = Vec3::new(-0.390932, -0.868799, -0.304059);
 
 /// The fixed brightness bands, ascending. Quantization snaps a computed
 /// brightness down to the largest band it meets or exceeds. The floor is lifted
-/// and the upper steps tightened (was `[0.35, 0.50, 0.70, 0.90]`, steps of
-/// 0.15/0.20/0.20) so the turf stops splitting into dark/bright slabs and holds
-/// an even, bright daylight tone across the pitch.
-pub const BRIGHTNESS_BANDS: [f32; 4] = [0.55, 0.68, 0.80, 0.92];
+/// to the ambient level and the top band opened to full `1.0` (was
+/// `[0.55, 0.68, 0.80, 0.92]`) so fill-only faces read as bright daylight and a
+/// key-lit face reaches full sunlit brightness instead of being clamped to 0.92.
+pub const BRIGHTNESS_BANDS: [f32; 4] = [0.72, 0.82, 0.91, 1.0];
 
 /// The deterministic flat-shading light model.
 #[derive(Debug, Clone, Copy, PartialEq)]
