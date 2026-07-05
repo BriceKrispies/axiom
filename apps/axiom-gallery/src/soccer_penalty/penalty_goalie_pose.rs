@@ -212,25 +212,28 @@ impl PenaltyGoaliePose {
         Self { local }
     }
 
-    /// A **render-only** ready stance: the keeper's arms spread out to the sides
-    /// (elbows slightly bent) and knees bent into a crouch, matching the
-    /// reference's set keeper. This is deliberately decoupled from [`Self::idle`]
-    /// — the Pass-6 save volumes keep riding the un-rotated `idle` rig, so this
-    /// pose changes only the visual silhouette, never the deterministic save
-    /// geometry (the dive clips are separate). Used by the static diorama emit.
+    /// A **render-only** braced ready stance: the keeper "makes himself big" —
+    /// arms spread WIDE and near-horizontal (the gloves flung out to the sides,
+    /// forearms continuing the outward line rather than curling up into a Y) and
+    /// legs planted in a wide braced crouch, matching the reference's large set
+    /// keeper. This is deliberately decoupled from [`Self::idle`] — the Pass-6
+    /// save volumes keep riding the un-rotated `idle` rig, so this pose changes
+    /// only the visual silhouette, never the deterministic save geometry (the
+    /// dive clips are separate). Used by the static diorama emit.
     pub fn idle_display() -> Self {
         let mut local = [Transform::IDENTITY; 16];
         (0..16).for_each(|i| local[i] = Transform::from_translation(IDLE_LOCAL[i]));
-        // (part-ordinal, euler x, y, z) — arms out + forward, elbows bent, knees crouched.
+        // (part-ordinal, euler x, y, z) — arms flung wide & near-horizontal,
+        // forearms continuing outward (not up), legs planted in a wide brace.
         [
-            (4_usize, 0.2_f32, 0.0_f32, -1.15_f32), // left upper arm — out to the side
-            (7, 0.2, 0.0, 1.15),                    // right upper arm — out to the side
-            (5, 0.45, 0.0, -0.15),                  // left forearm — bent up/forward
-            (8, 0.45, 0.0, 0.15),                   // right forearm
-            (10, 0.28, 0.0, -0.12),                 // left thigh — slight splay + forward
-            (13, 0.28, 0.0, 0.12),                  // right thigh
-            (11, -0.5, 0.0, 0.0),                   // left shin — knee bent
-            (14, -0.5, 0.0, 0.0),                   // right shin
+            (4_usize, 0.1_f32, 0.0_f32, -1.45_f32), // left upper arm — wide, near-horizontal
+            (7, 0.1, 0.0, 1.45),                    // right upper arm — wide, near-horizontal
+            (5, 0.15, 0.0, -0.28),                  // left forearm — continues outward, slight forward
+            (8, 0.15, 0.0, 0.28),                   // right forearm
+            (10, 0.12, 0.0, -0.32),                 // left thigh — wide plant + slight forward
+            (13, 0.12, 0.0, 0.32),                  // right thigh
+            (11, -0.34, 0.0, 0.0),                  // left shin — braced knee bend
+            (14, -0.34, 0.0, 0.0),                  // right shin
         ]
         .iter()
         .for_each(|&(i, x, y, z)| {
