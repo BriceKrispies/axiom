@@ -338,12 +338,28 @@ fn net(b: &mut SceneBuilder) {
 /// `soccer_penalty_app` (like the goalie's dive), driven by the shot so the
 /// strike lands as the ball is struck.
 fn kicker(b: &mut SceneBuilder) {
-    penalty_kicker::KickerRig::new()
-        .boxes_at(penalty_kicker::IDLE_FRAME)
-        .into_iter()
-        .for_each(|kb| {
-            b.emit(DioramaRole::Kicker, PrimitiveShape::Box, kb.center, kb.size, kb.material, kb.label);
-        });
+    let boxes = penalty_kicker::KickerRig::new().boxes_at(penalty_kicker::IDLE_FRAME);
+    boxes.iter().for_each(|kb| {
+        b.emit(DioramaRole::Kicker, PrimitiveShape::Box, kb.center, kb.size, kb.material, kb.label);
+    });
+    // A dark hair cap over the kicker's head. The reference #10 — the largest,
+    // nearest subject — has prominent black hair, but the shared figure's head is
+    // bare skin. Emitted as a plain (non-rig) box sized/placed from the idle head
+    // box, mirroring `goalie.hair`; the per-frame kicker pose overlay passes this
+    // label straight through, so it holds this rest position (the head barely
+    // moves across the kick). Reuses the existing dark hair material — no palette
+    // change.
+    if let Some(head) = boxes.iter().find(|kb| kb.label == "kicker.head") {
+        let cap_h = head.size.y * 0.42;
+        b.emit(
+            DioramaRole::Kicker,
+            PrimitiveShape::Box,
+            head.center.add(Vec3::new(0.0, head.size.y * 0.5 - cap_h * 0.4, 0.0)),
+            Vec3::new(head.size.x * 1.06, cap_h, head.size.z * 1.06),
+            PenaltyMaterialId::GoalieHair,
+            "kicker.hair",
+        );
+    }
 }
 
 fn goalie(b: &mut SceneBuilder) {
