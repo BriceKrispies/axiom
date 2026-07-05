@@ -99,7 +99,17 @@ pub mod palette {
     // black) so the stand reads as a lit warm mass, not a cold dead slab. The
     // engine's 3 grade knobs carry no white-balance, so this warmth lives in the
     // albedo, per the colorist lens.
-    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.17, 0.15, 0.12);
+    //
+    // Aerial-haze lift (colorist): at 0.17/0.15/0.12 the stand sat at ~0.15
+    // luminance and rendered as a near-black void under the flat-shade/quantize
+    // path, splitting the frame into a bright foreground over a black backdrop.
+    // The reference's backdrop is not black — it is a hazed, mid-value warm mass
+    // (aerial perspective veils the distance up off the shadow floor). With no
+    // volumetric-haze host seam wired to this render path, that recession must be
+    // baked into the albedo, so the stand is lifted to a hazed warm dark-grey:
+    // still a dark mass (R>=G>=B, warm — NOT the bright grey wall the reference
+    // lacks), but off the black floor so the distance reads as haze, not a hole.
+    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.30, 0.27, 0.24);
     pub const CROWD_A: Rgba = Rgba::rgb(0.72, 0.28, 0.30);
     pub const CROWD_B: Rgba = Rgba::rgb(0.28, 0.42, 0.70);
     pub const CROWD_C: Rgba = Rgba::rgb(0.86, 0.72, 0.24);
