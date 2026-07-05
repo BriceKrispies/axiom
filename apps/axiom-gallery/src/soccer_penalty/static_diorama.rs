@@ -26,17 +26,21 @@ pub struct CameraConfig {
     pub aspect: f32,
 }
 
-// Camera constants (behind the kicker at KICKER_Z, at a low broadcast-style
-// height, aimed at the goal). The reference frames the kicker in the LEFT third
-// over his right shoulder with the goal ENLARGED and its crossbar riding into
-// the upper third — a near-level look, not a steep top-down. So the eye is
-// offset to +X (to the kicker's right, pushing the kicker at x=-0.7 to
-// screen-left), sits low (shoulder height, not lifted), and is pushed forward
-// toward the goal; the target lifts to the goal mouth so the ~6deg tilt keeps
-// the crossbar high and the keeper large instead of small-and-far.
-pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 2.35, KICKER_Z + 3.8);
-pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.35, 0.6, 0.0);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 31.0;
+// Camera constants (behind the kicker at KICKER_Z, at broadcast shoulder
+// height, aimed at the goal mouth). The reference is a TELEPHOTO shot: the #10
+// kicker reads FULL-BODY in the left third AND the goal holds a healthy size at
+// the same time. That combination is only possible with lens compression — dolly
+// the eye well back behind the kicker (~8.4 units, past the penalty box) and
+// NARROW the FOV so the distant goal keeps its size while the near kicker shrinks
+// from cropped-and-oversized to full-body. The eye stays at shoulder height
+// (~1.8, roughly the kicker's head) rather than lifted: for a close, tall subject
+// a raised eye tilts the feet off the bottom edge — distance, not height, is what
+// reveals the full body here. Eye offset to +X keeps the kicker (x=-0.7) in the
+// left third; a near-level aim at the goal mouth keeps the crossbar in the upper
+// third and the keeper large.
+pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 1.8, KICKER_Z + 8.4);
+pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.25, 0.7, 0.0);
+pub const CAMERA_FOV_Y_DEGREES: f32 = 21.0;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;
