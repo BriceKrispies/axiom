@@ -36,6 +36,11 @@ pub enum MeshDataError {
     IndicesNotTriangles,
     /// An index addresses a vertex at or beyond the position count.
     IndexOutOfRange,
+    /// Skin streams were supplied but a joints/weights count does not match the
+    /// vertex count (both must have exactly one four-influence entry per vertex).
+    SkinCountMismatch,
+    /// A skin weight was NaN or infinite.
+    SkinWeightsNonFinite,
 }
 
 /// Author-supplied mesh geometry: per-vertex `positions` and `normals`, optional
@@ -52,6 +57,11 @@ pub struct MeshData {
     normals: Vec<Vec3>,
     uvs: Vec<Vec2>,
     indices: Vec<u32>,
+    /// Optional skin streams — four bone indices + four blend weights per vertex.
+    /// Empty on a static mesh; both are populated (length == vertex count) on a
+    /// skinned mesh built with [`MeshData::new_skinned`].
+    joints: Vec<[u16; 4]>,
+    weights: Vec<[f32; 4]>,
 }
 
 impl MeshData {
@@ -65,7 +75,26 @@ impl MeshData {
             normals,
             uvs,
             indices,
+            joints: Vec::new(),
+            weights: Vec::new(),
         }
+    }
+
+    /// Build **skinned** author geometry: the static streams plus one `joints`
+    /// (four bone indices) and `weights` (four blend weights) entry per vertex.
+    /// The joint indices address a skeleton's bones; the per-frame joint-matrix
+    /// palette (`AnimationApi::joint_matrices`) is supplied at draw time. Validated
+    /// at registration like [`Self::new`] — a mismatched or non-finite skin stream
+    /// is reported as a [`MeshDataError`].
+    pub fn new_skinned(
+        positions: Vec<Vec3>,
+        normals: Vec<Vec3>,
+        uvs: Vec<Vec2>,
+        joints: Vec<[u16; 4]>,
+        weights: Vec<[f32; 4]>,
+        indices: Vec<u32>,
+    ) -> Self {
+        MeshData { positions, normals, uvs, indices, joints, weights }
     }
 
     /// The per-vertex positions.
@@ -86,6 +115,21 @@ impl MeshData {
     /// The triangle-list indices into the vertices.
     pub fn indices(&self) -> &[u32] {
         &self.indices
+    }
+
+    /// The per-vertex bone indices (four per vertex); empty on a static mesh.
+    pub fn joints(&self) -> &[[u16; 4]] {
+        &self.joints
+    }
+
+    /// The per-vertex blend weights (four per vertex); empty on a static mesh.
+    pub fn weights(&self) -> &[[f32; 4]] {
+        &self.weights
+    }
+
+    /// Whether this mesh carries skin streams (is deformed by a skeleton).
+    pub fn is_skinned(&self) -> bool {
+        !self.joints.is_empty()
     }
 }
 
@@ -116,6 +160,26 @@ mod tests {
         let without = MeshData::new(vec![Vec3::ZERO], vec![Vec3::UNIT_Z], vec![], vec![0]);
         assert!(without.uvs().is_empty());
         assert_ne!(with, without);
+    }
+
+    #[test]
+    fn new_skinned_carries_skin_streams_and_new_does_not() {
+        let skinned = MeshData::new_skinned(
+            vec![Vec3::ZERO, Vec3::UNIT_X],
+            vec![Vec3::UNIT_Z; 2],
+            vec![],
+            vec![[0, 1, 0, 0]; 2],
+            vec![[0.5, 0.5, 0.0, 0.0]; 2],
+            vec![0, 1, 0],
+        );
+        assert!(skinned.is_skinned());
+        assert_eq!(skinned.joints().len(), 2);
+        assert_eq!(skinned.weights()[0], [0.5, 0.5, 0.0, 0.0]);
+
+        let static_mesh = MeshData::new(vec![Vec3::ZERO], vec![Vec3::UNIT_Z], vec![], vec![0]);
+        assert!(!static_mesh.is_skinned());
+        assert!(static_mesh.joints().is_empty());
+        assert!(static_mesh.weights().is_empty());
     }
 
     #[test]

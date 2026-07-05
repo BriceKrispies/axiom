@@ -1,7 +1,7 @@
 //! The single public facade for the animation module.
 
 use axiom_kernel::{BinaryReader, BinaryWriter, Ratio, Tick};
-use axiom_math::{Transform, Vec3};
+use axiom_math::{Mat4, Transform, Vec3};
 
 use crate::animation_error::AnimationError;
 use crate::animation_result::AnimationResult;
@@ -146,6 +146,56 @@ impl AnimationApi {
         pose: &Pose,
     ) -> AnimationResult<ModelPose> {
         self.skeleton(skeleton).and_then(|s| pose.to_model(s))
+    }
+
+    /// The **inverse bind matrices** of `skeleton` at `bind_pose`: for each bone,
+    /// the inverse of its model-space (world) matrix in the bind pose. A mesh is
+    /// baked once with its vertices in bind-pose model space; multiplying a vertex
+    /// by its bone's inverse bind matrix moves it into that bone's local frame, so
+    /// [`Self::joint_matrices`] can re-place it under any later pose (the basis of
+    /// linear blend skinning). Computed once, at bind time. A bone whose bind
+    /// matrix is singular (e.g. a zero-scale bone) contributes the identity.
+    pub fn inverse_binds(
+        &self,
+        skeleton: SkeletonId,
+        bind_pose: &Pose,
+    ) -> AnimationResult<Vec<Mat4>> {
+        self.resolve_model(skeleton, bind_pose).map(|model| {
+            model
+                .world_matrices()
+                .into_iter()
+                .map(|m| m.inverse().unwrap_or(Mat4::IDENTITY))
+                .collect()
+        })
+    }
+
+    /// The per-bone **joint matrices** for `pose`: `world(bone) * inverse_bind(bone)`.
+    /// This is the skinning palette the vertex shader blends by weight — each maps
+    /// a bind-pose vertex bound to that bone into the posed model space.
+    /// `inverse_binds` must be [`Self::inverse_binds`] for the same skeleton (its
+    /// length must equal the bone count), else `PoseLengthMismatch`.
+    pub fn joint_matrices(
+        &self,
+        skeleton: SkeletonId,
+        pose: &Pose,
+        inverse_binds: &[Mat4],
+    ) -> AnimationResult<Vec<Mat4>> {
+        self.resolve_model(skeleton, pose).and_then(|model| {
+            (model.bone_count() == inverse_binds.len())
+                .then(|| {
+                    model
+                        .world_matrices()
+                        .into_iter()
+                        .zip(inverse_binds.iter())
+                        .map(|(world, &inv)| world.multiply(inv))
+                        .collect()
+                })
+                .ok_or_else(|| {
+                    AnimationError::pose_length_mismatch(
+                        "inverse-bind count does not match the skeleton",
+                    )
+                })
+        })
     }
 
     /// Build a validated anatomical joint limit for `bone` with per-axis Euler
@@ -330,6 +380,73 @@ mod tests {
         assert_eq!(
             original.position(BoneId::from_raw(1)),
             copy.position(BoneId::from_raw(1))
+        );
+    }
+
+    fn mats_close(a: Mat4, b: Mat4) -> bool {
+        a.as_cols_array()
+            .iter()
+            .zip(b.as_cols_array().iter())
+            .all(|(x, y)| (x - y).abs() < 1.0e-4)
+    }
+
+    #[test]
+    fn inverse_binds_invert_the_bind_world_matrices() {
+        let (api, skel, _) = rig();
+        let rest = api.rest_pose(skel).unwrap();
+        let inv = api.inverse_binds(skel, &rest).unwrap();
+        assert_eq!(inv.len(), 2);
+        // world(bind) * inverse_bind == identity for each bone.
+        let world = api.resolve_model(skel, &rest).unwrap().world_matrices();
+        world
+            .into_iter()
+            .zip(inv)
+            .for_each(|(w, i)| assert!(mats_close(w.multiply(i), Mat4::IDENTITY)));
+    }
+
+    #[test]
+    fn a_singular_bind_bone_contributes_the_identity_inverse() {
+        let mut api = AnimationApi::new();
+        let skel = api.create_skeleton();
+        // A zero-scale bone collapses its world matrix (non-invertible).
+        api.add_root_bone(skel, Transform::from_scale(Vec3::ZERO)).unwrap();
+        let rest = api.rest_pose(skel).unwrap();
+        let inv = api.inverse_binds(skel, &rest).unwrap();
+        assert_eq!(inv.len(), 1);
+        assert!(mats_close(inv[0], Mat4::IDENTITY));
+    }
+
+    #[test]
+    fn joint_matrices_at_the_bind_pose_are_identity() {
+        let (api, skel, _) = rig();
+        let rest = api.rest_pose(skel).unwrap();
+        let inv = api.inverse_binds(skel, &rest).unwrap();
+        let palette = api.joint_matrices(skel, &rest, &inv).unwrap();
+        assert_eq!(palette.len(), 2);
+        palette.into_iter().for_each(|m| assert!(mats_close(m, Mat4::IDENTITY)));
+    }
+
+    #[test]
+    fn joint_matrices_under_a_pose_move_a_bound_vertex_with_its_bone() {
+        let (api, skel, clip) = rig();
+        let rest = api.rest_pose(skel).unwrap();
+        let inv = api.inverse_binds(skel, &rest).unwrap();
+        // At tick 10 the child bone has translated to x=10 (bind was x=0).
+        let posed = api.sample(skel, clip, Tick::new(10)).unwrap();
+        let palette = api.joint_matrices(skel, &posed, &inv).unwrap();
+        // A vertex at the child's bind position (origin), rigidly bound to the
+        // child, follows the bone to x=10.
+        let moved = palette[1].transform_point(Vec3::ZERO);
+        assert!(moved.approx_eq(&Vec3::new(10.0, 0.0, 0.0), eps()));
+    }
+
+    #[test]
+    fn joint_matrices_reject_a_mismatched_inverse_bind_count() {
+        let (api, skel, _) = rig();
+        let rest = api.rest_pose(skel).unwrap();
+        assert_eq!(
+            api.joint_matrices(skel, &rest, &[]).unwrap_err().code(),
+            AnimationErrorCode::PoseLengthMismatch
         );
     }
 

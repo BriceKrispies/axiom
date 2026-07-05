@@ -158,6 +158,31 @@ fn cell_vertices(base: [u32; 3], lo: Vec3, cell: Vec3, iso: f32, vx: u32, vals: 
         .collect()
 }
 
+/// The four strongest capsule influences at `p`, as `(joint indices, normalized
+/// weights)` — the automatic skin weights for a metaball vertex. A capsule's
+/// influence is `exp(-sdf / k)` (nearer ⇒ larger), and its index maps directly to
+/// a bone index, so a consumer uploads a joint palette in capsule order. Fewer
+/// than four capsules leave the trailing slots at weight zero (no influence), and
+/// a degenerate all-zero sum is floored so the division stays finite.
+fn skin_of(p: Vec3, caps: &[Capsule], k: f32) -> ([u16; 4], [f32; 4]) {
+    let mut scored: Vec<(usize, f32)> = caps
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| (i, (-capsule_sdf(p, c) / k).exp()))
+        .collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
+    let top: Vec<(usize, f32)> = scored.into_iter().take(4).collect();
+    let sum: f32 = top.iter().map(|&(_, w)| w).sum();
+    let denom = sum + (sum.abs() < EPS) as i32 as f32 * EPS;
+    let mut joints = [0u16; 4];
+    let mut weights = [0.0f32; 4];
+    top.iter().enumerate().for_each(|(slot, &(idx, w))| {
+        joints[slot] = idx as u16;
+        weights[slot] = w / denom;
+    });
+    (joints, weights)
+}
+
 /// **MetaSurface** operator — see [`crate::MeshOp::MetaSurface`].
 pub(crate) fn meta_surface(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
     parse(ctx.params()).and_then(|(iso, res, k, caps)| {
@@ -171,8 +196,13 @@ pub(crate) fn meta_surface(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> 
             .collect();
         let normals = positions.iter().map(|&p| field_normal(p, &caps, k)).collect();
         let uvs = positions.iter().map(|p| Vec2::new(p.x, p.z)).collect();
+        // Skin the surface to its own capsule skeleton: each vertex is auto-weighted
+        // to the capsules whose field built it, so the baked body deforms with the
+        // skeleton (bake once, pose per frame) instead of being re-baked.
+        let (joints, weights): (Vec<[u16; 4]>, Vec<[f32; 4]>) =
+            positions.iter().map(|&p| skin_of(p, &caps, k)).unzip();
         let indices = (0..positions.len() as u32).collect();
-        MeshBuffer::from_parts(positions, normals, uvs, indices)
+        MeshBuffer::from_parts_skinned(positions, normals, uvs, joints, weights, indices)
     })
 }
 
@@ -234,6 +264,38 @@ mod tests {
         assert!(m.triangle_count() > 0);
         // The waist (x≈0) is bridged: some vertices sit near the join plane.
         assert!(m.positions().iter().any(|p| p.x.abs() < 0.1), "the two balls are fused, not disjoint");
+    }
+
+    #[test]
+    fn metasurface_auto_skins_each_vertex_to_its_capsules() {
+        // Capsule 0 (left, x=-0.6) and capsule 1 (right, x=+0.6).
+        let params = vec![
+            s(0.0), Param::int(24), s(K),
+            s(-0.6), s(0.0), s(0.0), s(-0.6), s(0.0), s(0.0), s(0.7),
+            s(0.6), s(0.0), s(0.0), s(0.6), s(0.0), s(0.0), s(0.7),
+        ];
+        let m = bake(params).unwrap();
+        assert!(m.is_skinned());
+        assert_eq!(m.weights().len(), m.vertex_count());
+        assert_eq!(m.joints().len(), m.vertex_count());
+        // Partition of unity: each vertex's four weights sum to ~1.
+        assert!(m.weights().iter().all(|w| (w.iter().sum::<f32>() - 1.0).abs() < 1.0e-4));
+        // Only the two capsules (bones 0, 1) are referenced.
+        assert!(m.joints().iter().flatten().all(|&j| j <= 1));
+        // A clearly left-side vertex is dominated by capsule 0; a right-side by 1.
+        let dominant_bone = |on_side: &dyn Fn(f32) -> bool| -> u16 {
+            let idx = m.positions().iter().position(|p| on_side(p.x)).expect("a vertex on that side");
+            let (w, j) = (m.weights()[idx], m.joints()[idx]);
+            let mut best = 0usize;
+            for i in 1..4 {
+                if w[i] > w[best] {
+                    best = i;
+                }
+            }
+            j[best]
+        };
+        assert_eq!(dominant_bone(&|x| x < -0.5), 0);
+        assert_eq!(dominant_bone(&|x| x > 0.5), 1);
     }
 
     #[test]

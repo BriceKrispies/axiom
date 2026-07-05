@@ -14,12 +14,16 @@ use crate::mesh::Mesh;
 use crate::mesh_data::{MeshData, MeshDataError};
 
 /// One mesh's resolved geometry: the vertex streams the render pipeline uploads.
+/// `joints`/`weights` are empty for static meshes and one four-influence entry
+/// per vertex for a skinned mesh (deformed by a skeleton on the GPU).
 #[derive(Debug, PartialEq)]
 pub(crate) struct MeshGeometry {
     pub(crate) positions: Vec<Vec3>,
     pub(crate) normals: Vec<Vec3>,
     pub(crate) uvs: Vec<Vec2>,
     pub(crate) indices: Vec<u32>,
+    pub(crate) joints: Vec<[u16; 4]>,
+    pub(crate) weights: Vec<[f32; 4]>,
 }
 
 /// Resolve a mesh description into renderable geometry by its kind.
@@ -68,6 +72,8 @@ fn cube_geometry() -> MeshGeometry {
         normals,
         uvs,
         indices,
+        joints: Vec::new(),
+        weights: Vec::new(),
     }
 }
 
@@ -108,6 +114,8 @@ fn plane_geometry() -> MeshGeometry {
         normals,
         uvs,
         indices,
+        joints: Vec::new(),
+        weights: Vec::new(),
     }
 }
 
@@ -146,6 +154,8 @@ fn sphere_geometry() -> MeshGeometry {
         normals,
         uvs,
         indices,
+        joints: Vec::new(),
+        weights: Vec::new(),
     }
 }
 
@@ -184,6 +194,8 @@ fn cylinder_geometry() -> MeshGeometry {
         normals,
         uvs,
         indices,
+        joints: Vec::new(),
+        weights: Vec::new(),
     }
 }
 
@@ -193,7 +205,34 @@ fn cylinder_geometry() -> MeshGeometry {
 /// `axiom-resources` exactly like a primitive (see [`resolve_author_geometry`]),
 /// so an author mesh rides the identical pipeline — no special render path.
 pub(crate) fn mesh_data_geometry(data: &MeshData) -> Result<MeshGeometry, MeshDataError> {
-    validate(data).map_or_else(|| Ok(resolve_author_geometry(data)), Err)
+    validate(data).map_or_else(
+        || {
+            Ok(data
+                .is_skinned()
+                .then(|| skinned_author_geometry(data))
+                .unwrap_or_else(|| resolve_author_geometry(data)))
+        },
+        Err,
+    )
+}
+
+/// Build renderable geometry for a **skinned** author mesh directly from its
+/// streams. Skinned meshes bypass the `axiom-resources` round-trip (which carries
+/// only position/normal/uv) so the per-vertex skin streams stay aligned 1:1 with
+/// the vertices. UVs default to the origin when the author supplied none, matching
+/// [`resolve_author_geometry`]. Only called after [`validate`] passes.
+fn skinned_author_geometry(data: &MeshData) -> MeshGeometry {
+    let uvs = (0..data.positions().len())
+        .map(|i| data.uvs().get(i).copied().unwrap_or(Vec2::ZERO))
+        .collect();
+    MeshGeometry {
+        positions: data.positions().to_vec(),
+        normals: data.normals().to_vec(),
+        uvs,
+        indices: data.indices().to_vec(),
+        joints: data.joints().to_vec(),
+        weights: data.weights().to_vec(),
+    }
 }
 
 /// The first failing validation check, in [`MeshDataError`] declaration priority,
@@ -215,6 +254,18 @@ fn validate(data: &MeshData) -> Option<MeshDataError> {
         .iter()
         .any(|&i| i as usize >= positions.len())
         .then_some(MeshDataError::IndexOutOfRange);
+    // Skin streams: if either is present, both must carry one four-influence entry
+    // per vertex, and every weight must be finite.
+    let skin_present = (!data.joints().is_empty()) | (!data.weights().is_empty());
+    let skin_mismatch = (skin_present
+        & ((data.joints().len() != positions.len()) | (data.weights().len() != positions.len())))
+    .then_some(MeshDataError::SkinCountMismatch);
+    let skin_non_finite = data
+        .weights()
+        .iter()
+        .flatten()
+        .any(|w| !w.is_finite())
+        .then_some(MeshDataError::SkinWeightsNonFinite);
     empty
         .or(non_finite)
         .or(normal_mismatch)
@@ -222,6 +273,8 @@ fn validate(data: &MeshData) -> Option<MeshDataError> {
         .or(no_indices)
         .or(not_triangles)
         .or(out_of_range)
+        .or(skin_mismatch)
+        .or(skin_non_finite)
 }
 
 /// Whether every position / normal / UV coordinate is finite (no NaN, no ∞).
@@ -289,6 +342,8 @@ fn resolve_author_geometry(data: &MeshData) -> MeshGeometry {
         normals,
         uvs,
         indices,
+        joints: Vec::new(),
+        weights: Vec::new(),
     }
 }
 
@@ -438,5 +493,64 @@ mod tests {
             vec![0, 1, 9],
         );
         assert_eq!(mesh_data_geometry(&data), Err(MeshDataError::IndexOutOfRange));
+    }
+
+    fn skinned_triangle(joints: Vec<[u16; 4]>, weights: Vec<[f32; 4]>, uvs: Vec<Vec2>) -> MeshData {
+        MeshData::new_skinned(
+            vec![Vec3::ZERO, Vec3::UNIT_X, Vec3::UNIT_Y],
+            vec![Vec3::UNIT_Z; 3],
+            uvs,
+            joints,
+            weights,
+            vec![0, 1, 2],
+        )
+    }
+
+    #[test]
+    fn a_static_author_mesh_has_empty_skin_streams() {
+        let geom = mesh_data_geometry(&triangle_with_uvs()).expect("valid");
+        assert!(geom.joints.is_empty());
+        assert!(geom.weights.is_empty());
+    }
+
+    #[test]
+    fn skinned_author_geometry_carries_aligned_skin_streams() {
+        let geom = mesh_data_geometry(&skinned_triangle(
+            vec![[0, 1, 0, 0]; 3],
+            vec![[0.6, 0.4, 0.0, 0.0]; 3],
+            vec![Vec2::ZERO; 3],
+        ))
+        .expect("valid skinned mesh");
+        assert_eq!(geom.positions.len(), 3);
+        assert_eq!(geom.joints, vec![[0, 1, 0, 0]; 3]);
+        assert_eq!(geom.weights[0], [0.6, 0.4, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn skinned_author_geometry_defaults_omitted_uvs_to_the_origin() {
+        let geom = mesh_data_geometry(&skinned_triangle(
+            vec![[0, 0, 0, 0]; 3],
+            vec![[1.0, 0.0, 0.0, 0.0]; 3],
+            vec![],
+        ))
+        .expect("valid skinned mesh");
+        assert_eq!(geom.uvs, vec![Vec2::ZERO; 3]);
+    }
+
+    #[test]
+    fn mismatched_skin_count_is_rejected() {
+        // Joints present but shorter than the vertex count.
+        let data = skinned_triangle(vec![[0, 0, 0, 0]; 2], vec![[1.0, 0.0, 0.0, 0.0]; 3], vec![]);
+        assert_eq!(mesh_data_geometry(&data), Err(MeshDataError::SkinCountMismatch));
+    }
+
+    #[test]
+    fn non_finite_skin_weights_are_rejected() {
+        let data = skinned_triangle(
+            vec![[0, 0, 0, 0]; 3],
+            vec![[f32::NAN, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
+            vec![],
+        );
+        assert_eq!(mesh_data_geometry(&data), Err(MeshDataError::SkinWeightsNonFinite));
     }
 }

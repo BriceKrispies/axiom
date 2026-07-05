@@ -1,6 +1,6 @@
 //! A pose (one local transform per bone) and its resolved model-space form.
 
-use axiom_math::Transform;
+use axiom_math::{Mat4, Transform};
 
 use crate::animation_error::AnimationError;
 use crate::animation_result::AnimationResult;
@@ -107,6 +107,15 @@ impl ModelPose {
     /// location an app reads to place a renderable. `None` if out of range.
     pub fn position(&self, bone: BoneId) -> Option<axiom_math::Vec3> {
         self.transform(bone).map(|t| t.translation)
+    }
+
+    /// Every bone's model-space (world) matrix, in bone order — the `T * R * S`
+    /// expansion of each resolved [`Transform`]. This is the raw input to
+    /// skinning: [`crate::AnimationApi::inverse_binds`] inverts these at the bind
+    /// pose, and [`crate::AnimationApi::joint_matrices`] multiplies the current
+    /// world by the inverse bind to build the linear-blend-skinning palette.
+    pub fn world_matrices(&self) -> Vec<Mat4> {
+        self.models.iter().map(|t| t.to_matrix()).collect()
     }
 }
 

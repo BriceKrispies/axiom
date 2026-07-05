@@ -10,12 +10,18 @@ pub const MAX_VERTS: usize = 100_000;
 /// A generated mesh: parallel position / normal / uv streams (one entry per
 /// vertex) and a triangle-list index buffer. This is the neutral output an app
 /// translates into `axiom::MeshData`; it names no engine type.
+///
+/// A mesh may optionally carry **skin streams** — a `joints` (four bone indices)
+/// and `weights` (four blend weights) entry per vertex — for skeletal skinning.
+/// Both are empty on a static mesh and are ignored by every non-skinned path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeshBuffer {
     positions: Vec<Vec3>,
     normals: Vec<Vec3>,
     uvs: Vec<Vec2>,
     indices: Vec<u32>,
+    joints: Vec<[u16; 4]>,
+    weights: Vec<[f32; 4]>,
 }
 
 impl MeshBuffer {
@@ -30,7 +36,26 @@ impl MeshBuffer {
         let in_range = indices.iter().all(|&i| (i as usize) < n);
         (aligned & bounded & triangular & in_range)
             .then_some(())
-            .map(|()| Self { positions, normals, uvs, indices })
+            .map(|()| Self { positions, normals, uvs, indices, joints: Vec::new(), weights: Vec::new() })
+    }
+
+    /// Build a **skinned** mesh: the static streams plus one `joints` (four bone
+    /// indices) and `weights` (four blend weights) entry per vertex. `None` on
+    /// any static-stream failure (as [`Self::from_parts`]) or if the skin streams
+    /// disagree with the vertex count.
+    pub fn from_parts_skinned(
+        positions: Vec<Vec3>,
+        normals: Vec<Vec3>,
+        uvs: Vec<Vec2>,
+        joints: Vec<[u16; 4]>,
+        weights: Vec<[f32; 4]>,
+        indices: Vec<u32>,
+    ) -> Option<Self> {
+        let n = positions.len();
+        let skin_aligned = (joints.len() == n) & (weights.len() == n);
+        Self::from_parts(positions, normals, uvs, indices)
+            .filter(|_| skin_aligned)
+            .map(move |m| Self { joints, weights, ..m })
     }
 
     /// The vertex positions.
@@ -62,6 +87,21 @@ impl MeshBuffer {
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
+
+    /// The per-vertex bone indices (four per vertex); empty on a static mesh.
+    pub fn joints(&self) -> &[[u16; 4]] {
+        &self.joints
+    }
+
+    /// The per-vertex blend weights (four per vertex); empty on a static mesh.
+    pub fn weights(&self) -> &[[f32; 4]] {
+        &self.weights
+    }
+
+    /// Whether this mesh carries skin streams (is deformed by a skeleton).
+    pub fn is_skinned(&self) -> bool {
+        !self.joints.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -87,6 +127,44 @@ mod tests {
         assert_eq!(m.normals().len(), 3);
         assert_eq!(m.uvs().len(), 3);
         assert_eq!(m.indices(), &[0, 1, 2]);
+    }
+
+    #[test]
+    fn a_static_mesh_carries_no_skin_streams() {
+        let m = tri();
+        assert!(!m.is_skinned());
+        assert!(m.joints().is_empty());
+        assert!(m.weights().is_empty());
+    }
+
+    #[test]
+    fn from_parts_skinned_attaches_aligned_skin_streams() {
+        let m = MeshBuffer::from_parts_skinned(
+            vec![Vec3::ZERO, Vec3::UNIT_X, Vec3::UNIT_Y],
+            vec![Vec3::UNIT_Z; 3],
+            vec![Vec2::new(0.0, 0.0); 3],
+            vec![[0, 1, 0, 0]; 3],
+            vec![[1.0, 0.0, 0.0, 0.0]; 3],
+            vec![0, 1, 2],
+        )
+        .unwrap();
+        assert!(m.is_skinned());
+        assert_eq!(m.joints().len(), 3);
+        assert_eq!(m.weights()[0], [1.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn from_parts_skinned_rejects_misaligned_skin_streams() {
+        // Skin streams shorter than the vertex count.
+        assert!(MeshBuffer::from_parts_skinned(
+            vec![Vec3::ZERO; 3],
+            vec![Vec3::UNIT_Z; 3],
+            vec![Vec2::new(0.0, 0.0); 3],
+            vec![[0, 0, 0, 0]; 2],
+            vec![[1.0, 0.0, 0.0, 0.0]; 2],
+            vec![0, 1, 2],
+        )
+        .is_none());
     }
 
     #[test]
