@@ -18,7 +18,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use axiom_math::{Mat4, Vec3};
+use axiom_fp_controller::{FpController, Lens, LookDelta, MoveIntent, Pose, WalkTuning};
+use axiom_kernel::{Meters, Radians, Ratio};
+use axiom_math::Mat4;
 use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -30,13 +32,6 @@ use crate::growth::visual_target::scene::Manifest;
 const CANVAS_ID: &str = "axiom-forest-walk-canvas";
 const SURFACE_W: u32 = 1280;
 const SURFACE_H: u32 = 800;
-
-/// Eye height above the forest floor, and movement/turn/look rates (per frame / per px).
-const EYE_HEIGHT_M: f32 = 1.7;
-const MOVE_SPEED_M: f32 = 0.22;
-const TURN_SPEED: f32 = 0.028;
-const LOOK_SENS: f32 = 0.0022;
-const PITCH_LIMIT: f32 = 1.45;
 
 /// The champion scene, baked into the wasm bundle (the exact hero manifest).
 const MANIFEST: &str = include_str!("../../visual_targets/prologue_postcard_001/manifest.toml");
@@ -55,32 +50,12 @@ struct MeshBatch {
     casts: bool,
 }
 
-/// The player's first-person pose.
-#[derive(Clone, Copy, Default)]
-struct Pose {
-    x: f32,
-    z: f32,
-    yaw: f32,
-    pitch: f32,
-}
-
-/// Held movement/turn keys, polled each frame.
-#[derive(Clone, Copy, Default)]
-struct Keys {
-    forward: bool,
-    backward: bool,
-    strafe_left: bool,
-    strafe_right: bool,
-    turn_left: bool,
-    turn_right: bool,
-}
-
-/// Mouse-look deltas accumulated between frames (radians), drained each tick.
-#[derive(Clone, Copy, Default)]
-struct Look {
-    yaw: f32,
-    pitch: f32,
-}
+/// The shared first-person walk tuning (rates, limits, look sensitivity) — the
+/// engine's `axiom-fp-controller` owns these once for every first-person demo.
+const TUNING: WalkTuning = WalkTuning::walk();
+/// Mouse-look sensitivity (radians per pixel), sourced from the shared tuning so
+/// the browser handler and the controller agree on one value.
+const LOOK_SENS: f32 = TUNING.look_sensitivity().get();
 
 /// Boot the first-person forest walk on the demo canvas.
 #[wasm_bindgen]
@@ -101,15 +76,16 @@ pub fn forest_walk_start() {
     let light_vp = rd.light_view_proj;
 
     // Spawn where the hero camera stands, but seated on the ground and free to walk.
-    let spawn = Pose {
-        x: manifest.camera.eye[0],
-        z: manifest.camera.eye[2],
-        yaw: 0.0,
-        pitch: -0.05,
-    };
+    let spawn = Pose::new(
+        Meters::finite_or_zero(manifest.camera.eye[0]),
+        Meters::finite_or_zero(manifest.camera.eye[2]),
+        Radians::finite_or_zero(0.0),
+        Radians::finite_or_zero(-0.05),
+    );
     let pose = Rc::new(RefCell::new(spawn));
-    let keys = Rc::new(RefCell::new(Keys::default()));
-    let look = Rc::new(RefCell::new(Look::default()));
+    let keys = Rc::new(RefCell::new(MoveIntent::default()));
+    // Accumulated mouse-look (yaw, pitch) radians, drained each frame.
+    let look = Rc::new(RefCell::new((0.0f32, 0.0f32)));
     install_key_listener(&keys, "keydown", true);
     install_key_listener(&keys, "keyup", false);
     install_pointer_lock();
@@ -133,16 +109,23 @@ pub fn forest_walk_start() {
         max_instances,
         move |_tick| {
             let k = *keys.borrow();
-            let l = {
+            let (ly, lp) = {
                 let mut b = look.borrow_mut();
                 let v = *b;
-                *b = Look::default();
+                *b = (0.0, 0.0);
                 v
             };
+            let look = LookDelta::new(Radians::finite_or_zero(ly), Radians::finite_or_zero(lp));
             let mut p = pose.borrow_mut();
-            step(&mut p, &k, l);
-            let ground = terrain.height_at(p.x, p.z);
-            let vp = camera_view_proj(&p, ground, fov, near, far);
+            *p = FpController::step(*p, k, look, TUNING);
+            let ground = terrain.height_at(p.x().get(), p.z().get());
+            let lens = Lens::new(
+                Radians::finite_or_zero(fov.to_radians()),
+                Ratio::finite_or_zero(SURFACE_W as f32 / SURFACE_H as f32),
+                Meters::finite_or_zero(near),
+                Meters::finite_or_zero(far),
+            );
+            let vp = FpController::view_projection(*p, Meters::finite_or_zero(ground), TUNING, lens);
             let out = project_batches(&batches, &vp);
             (clear, lights.clone(), light_vp, out, vp.as_cols_array(), casters.clone(), None)
         },
@@ -196,30 +179,6 @@ fn project_batches(batches: &[MeshBatch], vp: &Mat4) -> Vec<(u64, u64, Vec<f32>,
         .collect()
 }
 
-/// Integrate one frame of first-person movement + look.
-fn step(p: &mut Pose, k: &Keys, l: Look) {
-    let key_turn = (k.turn_left as i32 - k.turn_right as i32) as f32 * TURN_SPEED;
-    p.yaw += key_turn + l.yaw;
-    p.pitch = (p.pitch + l.pitch).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-    let (fx, fz) = (p.yaw.sin(), -p.yaw.cos()); // yaw 0 ⇒ facing −Z
-    let fwd = (k.forward as i32 - k.backward as i32) as f32 * MOVE_SPEED_M;
-    let strafe = (k.strafe_right as i32 - k.strafe_left as i32) as f32 * MOVE_SPEED_M;
-    p.x += fx * fwd + fz * -strafe;
-    p.z += fz * fwd - fx * -strafe;
-}
-
-/// The camera view-projection for the current pose, eye seated on the terrain.
-fn camera_view_proj(p: &Pose, ground: f32, fov_deg: f32, near: f32, far: f32) -> Mat4 {
-    let eye = Vec3::new(p.x, ground + EYE_HEIGHT_M, p.z);
-    let (cp, sp) = (p.pitch.cos(), p.pitch.sin());
-    let fwd = Vec3::new(p.yaw.sin() * cp, sp, -p.yaw.cos() * cp);
-    let target = Vec3::new(eye.x + fwd.x, eye.y + fwd.y, eye.z + fwd.z);
-    let aspect = SURFACE_W as f32 / SURFACE_H as f32;
-    let proj = Mat4::perspective(fov_deg.to_radians(), aspect, near, far).unwrap_or(Mat4::IDENTITY);
-    let view = Mat4::look_at(eye, target, Vec3::UNIT_Y).unwrap_or(Mat4::IDENTITY);
-    proj.multiply(view)
-}
-
 fn slice16(s: &[f32]) -> [f32; 16] {
     let mut m = [0.0f32; 16];
     m.copy_from_slice(s);
@@ -241,7 +200,7 @@ fn pointer_is_locked() -> bool {
 }
 
 /// Install a keydown/keyup listener that sets the held-keys state.
-fn install_key_listener(keys: &Rc<RefCell<Keys>>, event: &str, pressed: bool) {
+fn install_key_listener(keys: &Rc<RefCell<MoveIntent>>, event: &str, pressed: bool) {
     let keys = keys.clone();
     let cb = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
         let mut k = keys.borrow_mut();
@@ -273,13 +232,13 @@ fn install_pointer_lock() {
 }
 
 /// Accumulate relative mouse movement into yaw/pitch while the pointer is locked.
-fn install_mouse_look(look: &Rc<RefCell<Look>>) {
+fn install_mouse_look(look: &Rc<RefCell<(f32, f32)>>) {
     let look = look.clone();
     let cb = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |e: web_sys::MouseEvent| {
         if pointer_is_locked() {
             let mut l = look.borrow_mut();
-            l.yaw += e.movement_x() as f32 * LOOK_SENS;
-            l.pitch -= e.movement_y() as f32 * LOOK_SENS;
+            l.0 += e.movement_x() as f32 * LOOK_SENS;
+            l.1 -= e.movement_y() as f32 * LOOK_SENS;
         }
     });
     let _ = document().add_event_listener_with_callback("mousemove", cb.as_ref().unchecked_ref());

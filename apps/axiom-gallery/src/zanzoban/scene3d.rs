@@ -22,6 +22,12 @@ use crate::zanzoban::render_model::{RenderActor, RenderModel, RenderTile};
 /// The background clear colour (linear RGBA).
 pub const CLEAR_COLOR: [f32; 4] = [0.055, 0.062, 0.078, 1.0];
 
+/// The presentation surface the board camera projects for. Owned here (with the
+/// camera) so the windowing surface and the projection aspect share one source;
+/// the live path (`web.rs`) reads these when it configures its surface.
+pub const SURFACE_W: u32 = 960;
+pub const SURFACE_H: u32 = 720;
+
 /// Floats per instance: MVP (4×4) + world (4×4) + an RGBA colour — the engine's
 /// lit-mesh batch layout (`run_web_multi`).
 const FLOATS_PER_INSTANCE: usize = 36;
@@ -64,37 +70,49 @@ const TILE_SIZE: f32 = 0.92;
 /// The actor/crate side (smaller, so they sit within a cell).
 const ACTOR_SIZE: f32 = 0.62;
 
-/// A hand-rolled camera view-projection for the board — the native-test fallback.
-/// The live browser path instead uses the engine's own `camera_view_proj` (see
-/// `web.rs`), whose clip-space convention the three backends expect.
-pub fn view_projection(width: u32, height: u32, aspect: f32, perspective: bool) -> Mat4 {
-    let w = width.max(1) as f32;
-    let h = height.max(1) as f32;
-    let center = Vec3::new(w * 0.5, 0.0, h * 0.5);
-    let up = Vec3::new(0.0, 1.0, 0.0);
-    if perspective {
-        // Angled diorama: above and to the south, looking at the board centre.
-        let span = w.max(h);
-        let eye = Vec3::new(w * 0.5, span * 0.95, h * 0.5 + span * 0.85);
-        let view = Mat4::look_at(eye, center, up).unwrap_or(Mat4::IDENTITY);
-        let proj = Mat4::perspective(0.85, aspect, 0.1, span * 6.0 + 50.0)
-            .unwrap_or(Mat4::IDENTITY);
-        proj.multiply(view)
-    } else {
-        // Straight-down orthographic: cells map linearly to the screen. The board
-        // is framed with a small margin, keeping cells square for the aspect.
-        let margin = 0.6;
-        let half_x = w * 0.5 + margin;
-        let half_z = h * 0.5 + margin;
-        // Fit both extents while holding square cells for the surface aspect.
-        let oy = half_z.max(half_x / aspect);
-        let ox = oy * aspect;
-        let eye = Vec3::new(w * 0.5, 20.0, h * 0.5);
-        // Straight down: use -Z as "up" so row 0 renders at the top.
-        let view = Mat4::look_at(eye, center, Vec3::new(0.0, 0.0, -1.0)).unwrap_or(Mat4::IDENTITY);
-        let proj = Mat4::orthographic(-ox, ox, -oy, oy, 0.1, 100.0).unwrap_or(Mat4::IDENTITY);
-        proj.multiply(view)
-    }
+/// The board camera view-projection — the **single** canonical clip matrix the
+/// three backends expect, built from a real engine `App` camera (the same one
+/// retro FPS composes its per-draw MVPs from). Edit mode (`perspective = false`)
+/// frames the board with a steep near-top-down camera; playtest
+/// (`perspective = true`) an angled perspective diorama. Both the live browser
+/// path (`web.rs`) and the native tests call this — there is one camera, not a
+/// test-only fallback diverging from the live path.
+pub fn view_projection(grid_w: u32, grid_h: u32, perspective: bool) -> Mat4 {
+    use axiom::prelude as ax;
+    let w = grid_w.max(1) as f32;
+    let h = grid_h.max(1) as f32;
+    let span = w.max(h);
+    let center = ax::Vec3::new(w * 0.5, 0.0, h * 0.5);
+    let (eye, fov_deg, far) = [
+        (
+            ax::Vec3::new(w * 0.5, span * 1.7, h * 0.5 + span * 0.45),
+            40.0,
+            span * 12.0 + 100.0,
+        ),
+        (
+            ax::Vec3::new(w * 0.5, span * 0.95, h * 0.5 + span * 0.85),
+            52.0,
+            span * 8.0 + 100.0,
+        ),
+    ][perspective as usize];
+    let mut app = ax::App::new()
+        .window(ax::Window::new(SURFACE_W, SURFACE_H))
+        .add_plugins(ax::DefaultPlugins)
+        .setup(move |world, _meshes, _materials| {
+            let camera = ax::Transform::from_translation(eye)
+                .looking_at(center, ax::Vec3::UNIT_Y)
+                .expect("camera look direction is well-defined");
+            world.spawn((
+                camera,
+                ax::Camera::perspective(ax::PerspectiveProjection {
+                    fov_y: ax::Angle::degrees(fov_deg),
+                    near: ax::Meters::new(0.1).expect("near plane is finite"),
+                    far: ax::Meters::new(far).expect("far plane is finite"),
+                }),
+            ));
+        })
+        .build();
+    Mat4::from_cols_array(app.tick(0).camera_view_proj())
 }
 
 /// One cube instance's 36 floats: `mvp(16)`, `world(16)` (both column-major),
@@ -155,7 +173,7 @@ mod tests {
         let level = level_codec::from_toml(LEVEL_001_TOML).expect("parses");
         let session = PlaytestSession::new(level);
         let model = session.render_model();
-        let vp = view_projection(model.width, model.height, 960.0 / 600.0, true);
+        let vp = view_projection(model.width, model.height, true);
         let (_clear, instances, count) = build_instances(&model, vp);
         // One cube per cell + the live player (one actor, no ghosts yet).
         let expected = model.cells.len() as u32 + model.actors.len() as u32;
@@ -170,7 +188,7 @@ mod tests {
         let level = level_codec::from_toml(LEVEL_001_TOML).expect("parses");
         let model = PlaytestSession::new(level).render_model();
         for perspective in [true, false] {
-            let vp = view_projection(model.width, model.height, 800.0 / 600.0, perspective);
+            let vp = view_projection(model.width, model.height, perspective);
             let (_c, inst, n) = build_instances(&model, vp);
             assert!(n > 0);
             assert!(inst.iter().all(|f| f.is_finite()));
