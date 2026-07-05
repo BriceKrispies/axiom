@@ -42,16 +42,26 @@ pub struct CameraConfig {
 // reference's readable field plane comes from looking down from above, not from a
 // long throw.
 //
-// So: LIFT the eye above the kicker's head (y~3.2), pull the dolly in to a
-// moderate ~4.6 units behind him (eye z~17.2, not 26.6), and WIDEN back to a
-// broadcast fov (~36) so depth divergence returns and the ground plane reads.
-// Eye offset to +X keeps the kicker (x=-0.7) in the left third; the target aims
-// low and into the midground (y~1.05, z~4.5, just short of the goal) so the ~10
-// deg downward tilt drops the ball into the lower third while the goal mouth
-// still fills the upper third and the keeper stays large.
-pub const CAMERA_EYE: Vec3 = Vec3::new(0.9, 3.2, KICKER_Z + 4.6);
+// The elevation was right (it opens the ground plane the R4 shoulder-height
+// telephoto flattened) but the WIDE fov was the miss: a 36-deg lens only ~4.6
+// units behind the kicker makes the near kicker loom and CROP to head-and-
+// shoulders while the far goal shrinks to a small distant rectangle (~44% of
+// frame width). The reference has it both ways — an open ground plane AND a
+// goal filling ~60% of the width with the crossbar in the upper third — which is
+// ELEVATION *plus* TELEPHOTO, a pairing neither prior pass tried (R4 had the
+// long lens but no lift; this pass had the lift but a wide lens).
+//
+// So: KEEP the eye lifted above the kicker's head (y~3.2), but DOLLY BACK to
+// ~9.4 units behind him (eye z~22, not 17.2) and NARROW the lens to a telephoto
+// broadcast fov (~18). The pullback+narrow is a depth compression: the far goal
+// and keeper grow to reference scale while the near kicker shrinks from cropped-
+// huge to a readable thigh-up silhouette. Eye offset to +X keeps the kicker
+// (x=-0.7) in the left third; the target still aims low into the midground
+// (y~1.05, z~4.5) so the ~7 deg downward tilt drops the ball into the lower
+// third while the goal mouth rides the upper third.
+pub const CAMERA_EYE: Vec3 = Vec3::new(0.9, 3.2, KICKER_Z + 9.4);
 pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.2, 1.05, 4.5);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 36.0;
+pub const CAMERA_FOV_Y_DEGREES: f32 = 18.0;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;
