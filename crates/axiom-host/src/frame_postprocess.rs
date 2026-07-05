@@ -45,11 +45,19 @@ impl FramePostProcess {
     }
 
     /// The public constructor: a tuned filmic preset that counters a washed-out,
-    /// flat-midtone raster — a slight exposure pull-down, added contrast to deepen the
-    /// shadows, and a saturation boost to enrich the palette. Presets keep the raw
-    /// tuning scalars off the public surface.
+    /// flat-midtone raster — a near-neutral exposure, gentle contrast to give the
+    /// midtones punch without crushing shadows to black, and a saturation boost to
+    /// enrich the palette. Presets keep the raw tuning scalars off the public surface.
+    ///
+    /// Retuned from the earlier heavy `(0.88, 1.32, 1.35)` grade: that combination
+    /// dimmed the whole frame (0.88), crushed the warm crowd/backdrop into near-black
+    /// (1.32 around the 0.5 pivot), and pushed the turf into a neon green (1.35) — the
+    /// opposite of a bright, warm, punchy-not-crushed reference. Exposure is lifted
+    /// toward neutral so the backdrop reads, contrast eased so shadows deepen without
+    /// clipping to black, and saturation tamed so the vivid albedo stays vivid rather
+    /// than radioactive.
     pub const fn cinematic() -> Self {
-        FramePostProcess::new(0.88, 1.32, 1.35)
+        FramePostProcess::new(0.96, 1.14, 1.18)
     }
 }
 
@@ -112,9 +120,9 @@ mod tests {
     #[test]
     fn preset_new_debug_and_equality() {
         let c = FramePostProcess::cinematic();
-        assert_eq!(c.exposure, 0.88);
-        assert_eq!(c.contrast, 1.32);
-        assert_eq!(c.saturation, 1.35);
+        assert_eq!(c.exposure, 0.96);
+        assert_eq!(c.contrast, 1.14);
+        assert_eq!(c.saturation, 1.18);
         let n = FramePostProcess::new(0.5, 2.0, 0.25);
         assert_eq!(n.exposure, 0.5);
         assert_eq!(n.contrast, 2.0);
