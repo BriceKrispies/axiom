@@ -268,6 +268,13 @@ pub struct PenaltyMeshedScene {
     /// material). Baked at the bind pose on the first authored frame, then deformed
     /// each frame by a joint palette — never re-baked.
     skinned_bodies: Vec<SkinnedBody>,
+    /// When true the athletes render as continuous **skinned** MetaSurface bodies
+    /// (GPU linear-blend skinning: bake once, deform per frame). The offscreen
+    /// champion (`axiom-shot`) uses this. The live browser loop leaves it false and
+    /// renders the athletes as pre-baked articulated parts until the skinned draw is
+    /// threaded through the `run_web_multi` present path (a follow-up); box-man keeps
+    /// the live game rendering + fast today.
+    skinned: bool,
 }
 
 /// One athlete's once-baked skinned body: the mesh, its material, and the inverse
@@ -307,7 +314,16 @@ impl PenaltyMeshedScene {
             skin: bake_texture(app, &tex_api, &recipe_textures::skin(&style), style.seed),
             turf: bake_texture(app, &tex_api, &recipe_textures::turf(&style), style.seed),
         };
-        Self { lib, tex, palette: HashMap::new(), spawned: Vec::new(), skinned_bodies: Vec::new() }
+        Self { lib, tex, palette: HashMap::new(), spawned: Vec::new(), skinned_bodies: Vec::new(), skinned: false }
+    }
+
+    /// Render the athletes as continuous **skinned** MetaSurface bodies (bake once,
+    /// deform per frame by a joint palette). Used by the one-shot offscreen champion
+    /// (`axiom-shot`); the live loop leaves this off (box-man) until the skinned draw
+    /// is threaded through the `run_web_multi` present path.
+    pub fn with_skinned_bodies(mut self) -> Self {
+        self.skinned = true;
+        self
     }
 
     /// The retro 32-bit texture id for one object's role/label (0 = flat, no texture).
@@ -416,16 +432,20 @@ impl PenaltyMeshedScene {
         // deformed each frame by a joint palette (each part's current-vs-bind
         // transform). No per-frame marching cubes, no per-frame mesh registration;
         // the bodies ride the bind-time GPU upload and only their palette changes.
+        let skinned = self.skinned;
         let athletes: Vec<WorldObj> = objects.iter().copied().filter(|o| is_athlete(o.role)).collect();
-        self.skinned_bodies.is_empty().then(|| self.bake_skinned_bodies(app, &athletes));
-        self.submit_skinned_bodies(app, &athletes);
+        skinned.then(|| {
+            self.skinned_bodies.is_empty().then(|| self.bake_skinned_bodies(app, &athletes));
+            self.submit_skinned_bodies(app, &athletes);
+        });
 
-        // Everything else spawns per-primitive from the pre-baked library. The
-        // depth-bias index still walks every object (athletes included) so the
-        // non-athlete bias values stay byte-identical.
+        // Everything else spawns per-primitive from the pre-baked library. When
+        // `skinned` is off the athletes come through here too (articulated box-man
+        // parts, posed by transform). The depth-bias index still walks every object
+        // so the non-athlete bias values stay byte-identical.
         let lib = self.lib;
         objects.into_iter().for_each(|o| {
-            (!is_athlete(o.role)).then(|| {
+            (!skinned || !is_athlete(o.role)).then(|| {
                 let to_eye = cam.eye.subtract(o.position);
                 let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
                 let biased = o.position.add(dir.mul_scalar(index as f32 * 0.0015));
@@ -514,9 +534,9 @@ pub fn soccer_meshed_shell() -> RunningApp {
 /// convergence champion (`axiom-shot`). Identical authoring to the live gallery.
 pub fn soccer_meshed_app(frame: Stage1Diorama) -> RunningApp {
     let mut app = soccer_meshed_shell();
-    // One-shot offscreen render (the convergence champion): the smooth MetaSurface
-    // bodies are affordable here because `author` runs exactly once.
-    let mut scene = PenaltyMeshedScene::install(&mut app);
+    // One-shot offscreen render (the convergence champion): the athletes are one
+    // continuous skinned MetaSurface body, baked once and deformed by a joint palette.
+    let mut scene = PenaltyMeshedScene::install(&mut app).with_skinned_bodies();
     scene.set_view(&mut app, frame.render_plan.camera);
     scene.author(&mut app, &frame);
     app
