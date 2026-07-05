@@ -371,10 +371,18 @@ fn goalie(b: &mut SceneBuilder) {
     // `soccer_penalty_app`), so at rest this is the goalie you see.
     let idle = PenaltyGoaliePose::idle_display().resolve();
     idle.parts().iter().for_each(|part| {
-        b.emit(
+        // Emit each bone with its resolved WORLD rotation, not identity. The
+        // smooth-figure renderer draws every limb as a capsule along its local Y
+        // and orients it by this rotation, so discarding it (via `emit`) collapsed
+        // the authored wide-arm braced stance into vertical capsules stacked beside
+        // the head — the keeper read as arms-up "goalpost" instead of the
+        // reference's arms-spread, knees-bent set position. Passing the bone
+        // rotation lays each capsule along its bone so the pose finally reads.
+        b.emit_rotated(
             DioramaRole::Goalie,
             PrimitiveShape::Box,
             part.world.translation,
+            part.world.rotation,
             part.size,
             part.material,
             part.kind.label(),
