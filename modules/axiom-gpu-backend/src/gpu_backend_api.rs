@@ -284,6 +284,8 @@ impl GpuBackendApi {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
+        skinned_draws: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
         ambient: axiom_host::FrameAmbient,
@@ -292,6 +294,19 @@ impl GpuBackendApi {
         volumetrics: Option<axiom_host::FrameVolumetrics>,
         postprocess: Option<axiom_host::FramePostProcess>,
     ) -> Option<Vec<u8>> {
+        let skinned: Vec<crate::scene_renderer::SkinnedGpuDraw> = skinned_draws
+            .iter()
+            .map(|(mesh_id, material_id, mvp, world, color, palette)| {
+                crate::scene_renderer::SkinnedGpuDraw {
+                    mesh_id: *mesh_id,
+                    material_id: *material_id,
+                    mvp: *mvp,
+                    world: *world,
+                    color: *color,
+                    palette: palette.clone(),
+                }
+            })
+            .collect();
         crate::offscreen::render_to_rgba(
             width,
             height,
@@ -301,10 +316,8 @@ impl GpuBackendApi {
             lights,
             light_view_proj,
             batches,
-            // Skinned meshes + draws are wired from the frame packet as a follow-up;
-            // the offscreen path currently renders none.
-            &[],
-            &[],
+            skinned_mesh_set,
+            &skinned,
             clear,
             sdf,
             ambient,

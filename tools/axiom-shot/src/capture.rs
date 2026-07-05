@@ -50,6 +50,7 @@ pub fn present_request(w: u32, h: u32) -> HostPresentationRequest {
 #[allow(clippy::too_many_arguments)]
 pub fn render_gpu(
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     outcome: &FrameOutcome,
     w: u32,
@@ -59,6 +60,11 @@ pub fn render_gpu(
 ) -> (Vec<u8>, u32, u32) {
     use axiom_gpu_backend::GpuBackendApi;
     let batches = outcome.mesh_batches();
+    let skinned_draws: Vec<(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)> = outcome
+        .skinned_draws()
+        .iter()
+        .map(|d| (d.mesh_id(), d.material_id(), d.mvp(), d.world(), d.color(), d.joints().to_vec()))
+        .collect();
     let lights: Vec<(u32, [f32; 3], [f32; 3], f32)> = outcome
         .lights()
         .iter()
@@ -73,6 +79,8 @@ pub fn render_gpu(
         &lights,
         outcome.light_view_proj(),
         &batches,
+        skinned_mesh_set,
+        &skinned_draws,
         outcome.clear_color(),
         outcome.sdf_scene(),
         axiom_host::FrameAmbient::default_hemisphere(),

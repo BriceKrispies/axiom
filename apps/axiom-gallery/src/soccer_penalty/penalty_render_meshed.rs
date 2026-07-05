@@ -34,7 +34,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use axiom::prelude::*;
-use axiom_math::Quat;
+use axiom_math::{Mat4, Quat};
 use axiom_proc_mesh::ProcMeshApi;
 use axiom_proc_texture::ProcTextureApi;
 use axiom_recipe::RecipeGraph;
@@ -62,12 +62,26 @@ fn ch(value: f32) -> Ratio {
 /// takes, so the app never hand-authors a mesh.
 fn bake_mesh(app: &mut RunningApp, api: &ProcMeshApi, recipe: &RecipeGraph, seed: u64) -> Handle<Mesh> {
     let mb = api.bake(recipe, seed).expect("soccer mesh recipe bakes");
-    let data = MeshData::new(
-        mb.positions().to_vec(),
-        mb.normals().to_vec(),
-        mb.uvs().to_vec(),
-        mb.indices().to_vec(),
-    );
+    // A skinned buffer (MetaSurface body) carries its joint/weight streams into a
+    // skinned MeshData so it uploads through the skinning pipeline; every other
+    // recipe is static geometry.
+    let data = if mb.is_skinned() {
+        MeshData::new_skinned(
+            mb.positions().to_vec(),
+            mb.normals().to_vec(),
+            mb.uvs().to_vec(),
+            mb.joints().to_vec(),
+            mb.weights().to_vec(),
+            mb.indices().to_vec(),
+        )
+    } else {
+        MeshData::new(
+            mb.positions().to_vec(),
+            mb.normals().to_vec(),
+            mb.uvs().to_vec(),
+            mb.indices().to_vec(),
+        )
+    };
     app.add_mesh_data(data).expect("baked mesh registers")
 }
 
@@ -158,6 +172,26 @@ struct SubPart {
 /// — so the part's world rotation orients them onto the joint. **Head/hand** →
 /// sphere; **torso/foot** → softened bevel box; **hair/other** → crisp box; the
 /// **ball** → sphere (radius→diameter).
+/// Group athletes' parts by kit material (deterministic `BTreeMap` order), each
+/// part as a [`BodyPart`] — shared by the bake and the per-frame skinning pass so
+/// their capsule/joint order matches exactly.
+fn body_groups(athletes: &[WorldObj]) -> Vec<(PenaltyMaterialId, Vec<BodyPart>)> {
+    let mut groups: BTreeMap<PenaltyMaterialId, Vec<BodyPart>> = BTreeMap::new();
+    athletes.iter().for_each(|o| {
+        groups
+            .entry(o.material)
+            .or_default()
+            .push(BodyPart { position: o.position, rotation: o.rotation, size: o.size });
+    });
+    groups.into_iter().collect()
+}
+
+/// A part's world matrix (translate ∘ rotate; the capsule shape lives in the baked
+/// geometry, so no scale) — the transform its MetaSurface capsule was placed at.
+fn part_world(p: &BodyPart) -> Mat4 {
+    Transform::new(p.position, p.rotation, Vec3::ONE).to_matrix()
+}
+
 fn sub_parts(role: PartRole, size: Vec3, lib: MeshLib) -> Vec<SubPart> {
     let one = |mesh: Handle<Mesh>, scale: Vec3| vec![SubPart { mesh, local: Transform::from_scale(scale) }];
     match role {
@@ -230,13 +264,20 @@ pub struct PenaltyMeshedScene {
     tex: TexLib,
     palette: HashMap<([u8; 3], u64), Handle<Material>>,
     spawned: Vec<Entity>,
-    /// When true, the athletes are skinned into continuous `MetaSurface` bodies
-    /// (one marching-cubes bake per kit material). That bake (~10-30 ms per kit
-    /// group) is affordable for a ONE-SHOT offscreen render — the convergence
-    /// champion — but ruinous per frame: the live game re-authors every frame, so
-    /// there it stays `false` and the athletes draw as pre-baked articulated parts
-    /// (reused library meshes, posed by transform) like every other object.
-    smooth_bodies: bool,
+    /// The athletes' once-baked skinned bodies (one continuous MetaSurface per kit
+    /// material). Baked at the bind pose on the first authored frame, then deformed
+    /// each frame by a joint palette — never re-baked.
+    skinned_bodies: Vec<SkinnedBody>,
+}
+
+/// One athlete's once-baked skinned body: the mesh, its material, and the inverse
+/// bind-pose world matrix of each of its capsules (in group order) — used to build
+/// the per-frame joint palette (`current_world * bind_inv`).
+#[derive(Debug)]
+struct SkinnedBody {
+    mesh: Handle<Mesh>,
+    material: Handle<Material>,
+    bind_inv: Vec<Mat4>,
 }
 
 impl PenaltyMeshedScene {
@@ -266,17 +307,7 @@ impl PenaltyMeshedScene {
             skin: bake_texture(app, &tex_api, &recipe_textures::skin(&style), style.seed),
             turf: bake_texture(app, &tex_api, &recipe_textures::turf(&style), style.seed),
         };
-        Self { lib, tex, palette: HashMap::new(), spawned: Vec::new(), smooth_bodies: false }
-    }
-
-    /// Opt this scene into continuous `MetaSurface` athlete bodies. **Only for a
-    /// one-shot offscreen render** (the convergence champion via `axiom-shot`);
-    /// never the per-frame live loop, where the marching-cubes bake per athlete
-    /// kit group every frame drops the game to single-digit FPS and leaks a fresh
-    /// mesh per group per frame.
-    pub fn with_smooth_bodies(mut self) -> Self {
-        self.smooth_bodies = true;
-        self
+        Self { lib, tex, palette: HashMap::new(), spawned: Vec::new(), skinned_bodies: Vec::new() }
     }
 
     /// The retro 32-bit texture id for one object's role/label (0 = flat, no texture).
@@ -380,23 +411,21 @@ impl PenaltyMeshedScene {
             })
             .collect();
 
-        // Athletes are skinned into continuous MetaSurface bodies ONLY when
-        // `smooth_bodies` is set (a one-shot offscreen render). The live loop
-        // leaves it false — the marching-cubes bake per kit group per frame is a
-        // ~136 ms/frame (7 FPS) cost and leaks a fresh mesh per group per frame —
-        // and draws the athletes as pre-baked parts through the loop below.
-        let smooth = self.smooth_bodies;
+        // The athletes are one continuous, **skinned** MetaSurface body per kit
+        // material — baked ONCE (bind pose = the first authored frame), then
+        // deformed each frame by a joint palette (each part's current-vs-bind
+        // transform). No per-frame marching cubes, no per-frame mesh registration;
+        // the bodies ride the bind-time GPU upload and only their palette changes.
         let athletes: Vec<WorldObj> = objects.iter().copied().filter(|o| is_athlete(o.role)).collect();
-        smooth.then(|| self.author_bodies(app, &athletes));
+        self.skinned_bodies.is_empty().then(|| self.bake_skinned_bodies(app, &athletes));
+        self.submit_skinned_bodies(app, &athletes);
 
-        // Everything else spawns per-primitive from the pre-baked library. When
-        // `smooth_bodies` is off the athletes come through here too (reused meshes,
-        // posed by transform — cheap, and their ids are in the bind-time upload).
-        // The depth-bias index still walks every object so the non-athlete bias
-        // values stay byte-identical to before the split.
+        // Everything else spawns per-primitive from the pre-baked library. The
+        // depth-bias index still walks every object (athletes included) so the
+        // non-athlete bias values stay byte-identical.
         let lib = self.lib;
         objects.into_iter().for_each(|o| {
-            (!smooth || !is_athlete(o.role)).then(|| {
+            (!is_athlete(o.role)).then(|| {
                 let to_eye = cam.eye.subtract(o.position);
                 let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
                 let biased = o.position.add(dir.mul_scalar(index as f32 * 0.0015));
@@ -414,25 +443,36 @@ impl PenaltyMeshedScene {
         });
     }
 
-    /// Skin the athletes into continuous bodies: group their posed parts by kit
-    /// material and bake one [`penalty_body`] `MetaSurface` per group, drawn as a
-    /// single world-space entity in that material's base colour. This replaces
-    /// the box-man's disjoint primitives (and its sphere-joint fillers) with one
-    /// smooth, tapered surface per region.
-    fn author_bodies(&mut self, app: &mut RunningApp, athletes: &[WorldObj]) {
-        let mut groups: BTreeMap<PenaltyMaterialId, Vec<BodyPart>> = BTreeMap::new();
-        athletes.iter().for_each(|o| {
-            groups.entry(o.material).or_default().push(BodyPart { position: o.position, rotation: o.rotation, size: o.size });
-        });
+    /// Bake the athletes' skinned bodies **once** at the bind pose: group each
+    /// athlete's parts by kit material, bake one [`penalty_body`] `MetaSurface`
+    /// (auto-weighted to its own capsule skeleton) per group, and remember each
+    /// group's material handle plus the inverse of every part's bind-pose world
+    /// transform. Called on the first authored frame; the geometry never re-bakes.
+    fn bake_skinned_bodies(&mut self, app: &mut RunningApp, athletes: &[WorldObj]) {
         let api = ProcMeshApi::new();
         let mut recipe_id = recipe_meshes::ids::BODY_BASE;
-        groups.iter().for_each(|(id, parts)| {
-            let mesh = bake_mesh(app, &api, &penalty_body::body_recipe(recipe_id, parts), 0);
-            let mat = self.material_for(app, material(*id).base_color, 0);
-            let entity = app.spawn(Spawn::new(Transform::IDENTITY, mesh, mat));
-            self.spawned.push(entity);
+        for (id, parts) in body_groups(athletes) {
+            let mesh = bake_mesh(app, &api, &penalty_body::body_recipe(recipe_id, &parts), 0);
+            let material = self.material_for(app, material(id).base_color, 0);
+            let bind_inv = parts.iter().map(|p| part_world(p).inverse().unwrap_or(Mat4::IDENTITY)).collect();
+            self.skinned_bodies.push(SkinnedBody { mesh, material, bind_inv });
             recipe_id += 1;
-        });
+        }
+    }
+
+    /// Submit each skinned body for this frame: a joint palette whose `k`-th matrix
+    /// is `current_world(part_k) * bind_world(part_k)^-1` deforms the once-baked
+    /// surface from its bind pose to the current pose (the MetaSurface auto-weights
+    /// fuse the joints via linear blend skinning). No geometry is regenerated.
+    fn submit_skinned_bodies(&self, app: &mut RunningApp, athletes: &[WorldObj]) {
+        for (body, (_id, parts)) in self.skinned_bodies.iter().zip(body_groups(athletes)) {
+            let palette: Vec<Mat4> = parts
+                .iter()
+                .zip(body.bind_inv.iter())
+                .map(|(p, &inv)| part_world(p).multiply(inv))
+                .collect();
+            app.submit_skinned_draw(body.mesh, body.material, Transform::IDENTITY, &palette);
+        }
     }
 }
 
@@ -476,7 +516,7 @@ pub fn soccer_meshed_app(frame: Stage1Diorama) -> RunningApp {
     let mut app = soccer_meshed_shell();
     // One-shot offscreen render (the convergence champion): the smooth MetaSurface
     // bodies are affordable here because `author` runs exactly once.
-    let mut scene = PenaltyMeshedScene::install(&mut app).with_smooth_bodies();
+    let mut scene = PenaltyMeshedScene::install(&mut app);
     scene.set_view(&mut app, frame.render_plan.camera);
     scene.author(&mut app, &frame);
     app

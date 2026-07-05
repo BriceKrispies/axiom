@@ -85,6 +85,7 @@ fn main() {
     });
 
     let meshes = running.mesh_set();
+    let skinned_meshes = running.skinned_mesh_set();
     let materials = running.material_textures();
     let mut outcome = None;
     for t in 0..=render_tick {
@@ -106,7 +107,7 @@ fn main() {
     let postprocess = (app == "soccer-penalty").then(axiom_host::FramePostProcess::cinematic);
 
     let (pixels, w, h) = render(
-        &backend, &meshes, &materials, &outcome, quality, retro_32bit, postprocess,
+        &backend, &meshes, &skinned_meshes, &materials, &outcome, quality, retro_32bit, postprocess,
     );
 
     capture::write_png(&out, &pixels, w, h);
@@ -120,6 +121,7 @@ fn main() {
 fn render(
     backend: &str,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     outcome: &FrameOutcome,
     quality: u8,
@@ -129,7 +131,7 @@ fn render(
     match backend {
         "canvas2d" | "canvas" => capture::render_canvas2d(meshes, outcome, quality, WIDTH, HEIGHT),
         _ => capture::render_gpu(
-            meshes, materials, outcome, WIDTH, HEIGHT, retro_32bit, postprocess,
+            meshes, skinned_meshes, materials, outcome, WIDTH, HEIGHT, retro_32bit, postprocess,
         ),
     }
 }
@@ -138,6 +140,7 @@ fn render(
 fn render(
     backend: &str,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    _skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     _materials: &[(u64, u32, u32, Vec<u8>)],
     outcome: &FrameOutcome,
     quality: u8,

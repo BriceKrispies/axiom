@@ -216,12 +216,9 @@ mod tests {
         use crate::soccer_penalty::penalty_render_meshed::soccer_meshed_app;
         use crate::soccer_penalty::penalty_scene::DioramaRole;
         let frame = SoccerPenaltyApp::build_stage1();
-        // The shared meshed scene (the one the gallery AND the convergence champion
-        // render) draws every world object, dropping nothing — but the athletes
-        // (kicker + goalie) are now skinned into ONE continuous MetaSurface body
-        // per kit material instead of one draw per part. So the expected draw count
-        // is: every non-athlete world item (one draw each) plus one body per
-        // distinct athlete kit material. Camera + light are not draws.
+        // Every non-athlete world object is a static draw; the athletes (kicker +
+        // goalie) are one continuous SKINNED body per kit material, submitted as
+        // skinned draws (deformed by a joint palette), not static draws.
         let is_athlete = |r| matches!(r, DioramaRole::Kicker | DioramaRole::Goalie);
         let mut non_athlete = 0usize;
         let mut kit_materials = std::collections::BTreeSet::new();
@@ -234,40 +231,37 @@ mod tests {
                 }
             }
         });
-        let expected = non_athlete + kit_materials.len();
         let mut app = soccer_meshed_app(frame);
         let outcome = app.tick(0);
-        assert_eq!(outcome.draws().len(), expected);
-        // The skinning genuinely collapses parts: there are more athlete parts than
-        // kit-material bodies (the box-man's disjoint primitives are gone).
-        assert!(kit_materials.len() < 31, "athletes drew as {} grouped bodies", kit_materials.len());
+        // Non-athletes draw statically; the athletes are one skinned body per kit material.
+        assert_eq!(outcome.draws().len(), non_athlete);
+        assert_eq!(outcome.skinned_draws().len(), kit_materials.len());
+        assert!(kit_materials.len() < 31, "athletes drew as {} grouped skinned bodies", kit_materials.len());
     }
 
-    /// Regression guard for the live loop: it must draw the athletes as pre-baked
-    /// articulated parts (posed by transform), NOT re-bake a `MetaSurface` body
-    /// per kit material every frame. Re-baking made the game ~7 FPS AND leaked a
-    /// fresh mesh per group per frame — and, because the live `run_web_multi`
-    /// uploads meshes only at bind, those per-frame meshes never reached the GPU
-    /// so the athletes vanished. This asserts the live default (`install` without
-    /// `with_smooth_bodies`) keeps the mesh store constant across frames.
+    /// Regression guard: the athletes are one **skinned** body per kit material,
+    /// baked ONCE at the bind pose and deformed each frame by a joint palette —
+    /// never re-baked. Re-baking `MetaSurface` per frame dropped the game to ~7 FPS
+    /// and leaked a fresh mesh per group per frame; and because the live
+    /// `run_web_multi` uploads meshes only at bind, those per-frame meshes never
+    /// reached the GPU (the athletes vanished). This asserts the bind bake happens
+    /// once and the mesh store never grows afterward.
     #[test]
-    fn live_loop_does_not_rebake_meshes_per_frame() {
+    fn live_loop_skins_bodies_once_and_never_rebakes() {
         use crate::soccer_penalty::penalty_render_meshed::{soccer_meshed_shell, PenaltyMeshedScene};
         let frame = SoccerPenaltyApp::build_stage1();
         let mut app = soccer_meshed_shell();
-        let mut scene = PenaltyMeshedScene::install(&mut app); // live default = box-man
-        let meshes_at_bind = app.mesh_set().len();
-        scene.author(&mut app, &frame);
-        let draws = app.tick(0).draws().len();
-        let meshes_after_1 = app.mesh_set().len();
-        scene.author(&mut app, &frame);
+        let mut scene = PenaltyMeshedScene::install(&mut app);
+        scene.author(&mut app, &frame); // first author bakes the skinned bodies once
+        let outcome1 = app.tick(0);
+        let meshes_after_1 = app.mesh_set().len() + app.skinned_mesh_set().len();
+        scene.author(&mut app, &frame); // second author only re-poses; bakes nothing
         let _ = app.tick(1);
-        let meshes_after_2 = app.mesh_set().len();
-        // The athletes render as many pre-baked parts, so the live frame draws far
-        // more primitives than the smooth path's handful of grouped bodies.
-        assert!(draws > 30, "live box-man should draw athlete parts, got {draws}");
-        // The core regression: authoring must register NO new meshes per frame.
-        assert_eq!(meshes_at_bind, meshes_after_1, "live author must not bake new meshes");
-        assert_eq!(meshes_after_1, meshes_after_2, "live author must not grow the mesh store per frame");
+        let meshes_after_2 = app.mesh_set().len() + app.skinned_mesh_set().len();
+        // The athletes are skinned draws (submitted per frame, geometry unchanged).
+        assert!(!outcome1.skinned_draws().is_empty(), "athletes are skinned draws");
+        // The core regression: after the one-time bind bake, authoring registers no
+        // new meshes per frame.
+        assert_eq!(meshes_after_1, meshes_after_2, "author must not bake new meshes per frame");
     }
 }
