@@ -26,30 +26,32 @@ pub struct CameraConfig {
     pub aspect: f32,
 }
 
-// Camera constants (behind the kicker at KICKER_Z, at broadcast shoulder
-// height, aimed at the goal mouth). The reference is a TELEPHOTO shot: the #10
-// kicker reads FULL-BODY in the left third AND the goal holds a healthy size at
-// the same time. That combination is only possible with lens compression — dolly
-// the eye well back behind the kicker (~8.4 units, past the penalty box) and
-// NARROW the FOV so the distant goal keeps its size while the near kicker shrinks
-// from cropped-and-oversized to full-body. The eye stays at shoulder height
-// (~1.8, roughly the kicker's head) rather than lifted: for a close, tall subject
-// a raised eye tilts the feet off the bottom edge — distance, not height, is what
-// reveals the full body here. Eye offset to +X keeps the kicker (x=-0.7) in the
-// left third; a near-level aim at the goal mouth keeps the crossbar in the upper
-// third and the keeper large.
-// R4: the R3 telephoto (eye z=KICKER_Z+8.4, fov 21) left a goal/kicker distance
-// ratio of ~2.5 -- still enough perspective divergence for the foreground kicker
-// to loom over a shrunken goal. The reference's broadcast compression reads the
-// near kicker and the far goal at comparable screen height, which needs a ratio
-// ~1.9. So dolly the eye further back to ~14 units behind the kicker (eye z~26.6,
-// ratio 26.6/14 = 1.9) and narrow the lens to fov ~15 so the dollied-back kicker
-// still fills the frame full-body (~35% of the height) while the goal grows to
-// fill more of the upper frame. Aim/height are unchanged; the longer throw only
-// flattens the tilt further toward level.
-pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 1.8, KICKER_Z + 14.0);
-pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.25, 0.7, 0.0);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 15.0;
+// Camera constants: an ELEVATED BROADCAST OVER-THE-SHOULDER shot behind the
+// kicker (KICKER_X=-0.7, KICKER_Z=12.6), the shot class the reference actually
+// uses. The reference camera sits ABOVE the kicker's head (~2.3) and looks DOWN
+// ~10 deg, so the whole penalty-area ground plane reads with perspective: the
+// full kicker from behind in the left third, the ball sitting on the grass
+// mid-lower, and the goal mouth filling the upper third above it.
+//
+// The prior R4 strategy — an extreme telephoto (fov 15) parked at shoulder
+// height (y=1.8) and dollied 14 units back — is the wrong shot class and misreads
+// as a ground-level close-up: at shoulder height the near-level aim flattens the
+// field plane to a thin edge-on band, and the narrow lens makes the near kicker
+// loom and crop to just the legs (no torso, no #10, no head) while the ball
+// oversizes. Lens compression cannot substitute for camera ELEVATION; the
+// reference's readable field plane comes from looking down from above, not from a
+// long throw.
+//
+// So: LIFT the eye above the kicker's head (y~3.2), pull the dolly in to a
+// moderate ~4.6 units behind him (eye z~17.2, not 26.6), and WIDEN back to a
+// broadcast fov (~36) so depth divergence returns and the ground plane reads.
+// Eye offset to +X keeps the kicker (x=-0.7) in the left third; the target aims
+// low and into the midground (y~1.05, z~4.5, just short of the goal) so the ~10
+// deg downward tilt drops the ball into the lower third while the goal mouth
+// still fills the upper third and the keeper stays large.
+pub const CAMERA_EYE: Vec3 = Vec3::new(0.9, 3.2, KICKER_Z + 4.6);
+pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.2, 1.05, 4.5);
+pub const CAMERA_FOV_Y_DEGREES: f32 = 36.0;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;
