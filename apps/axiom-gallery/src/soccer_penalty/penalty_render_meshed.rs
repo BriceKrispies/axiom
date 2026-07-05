@@ -34,6 +34,7 @@
 use std::collections::HashMap;
 
 use axiom::prelude::*;
+use axiom_math::Quat;
 use axiom_proc_mesh::ProcMeshApi;
 use axiom_proc_texture::ProcTextureApi;
 use axiom_recipe::RecipeGraph;
@@ -83,39 +84,109 @@ fn nonzero(s: Vec3) -> Vec3 {
     Vec3::new(c(s.x), c(s.y), c(s.z))
 }
 
-/// The library mesh + scale for one diorama object. The ball and the athletes'
-/// **head/hands round into true spheres** (the `MeshOp::Sphere` primitive) and
-/// their **limbs into capsules**, so the figures read as modelled low-poly people
-/// and the ball is genuinely round; the torso stays a box (it carries the jersey
-/// texture on a flat face), and all structure (posts, wall, crowd, ad boards,
-/// ground/net) stays angular boxes.
-fn select_mesh(
-    _role: DioramaRole,
-    label: &str,
-    shape: PrimitiveShape,
-    size: Vec3,
-    cube: Handle<Mesh>,
-    sphere: Handle<Mesh>,
-    capsule: Handle<Mesh>,
-) -> (Handle<Mesh>, Vec3) {
-    // The ball keeps its radius→diameter convention, drawn as a true sphere.
-    if matches!(shape, PrimitiveShape::FacetedBall) {
-        return (sphere, size.mul_scalar(2.0));
+/// The structural role of one posed rig part, derived from its label regardless
+/// of the rig's naming scheme.
+///
+/// Two rigs disagree on part names (the kicker uses `l_upper_arm`, the goalie
+/// `upperarm.left`; the kicker's torso is `chest`, the goalie's is `torso`; the
+/// kicker has no hand parts at all). The old brittle substring test mapped
+/// `l_upper_arm` to a plain cube (it never contained `"upperarm"`). This role is
+/// classified from a *normalized* label — lowercased with `.`/`_` stripped — so
+/// `l_upper_arm` and `upperarm.left` both land on [`PartRole::Limb`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PartRole {
+    /// The ball — a true sphere (`size` is its radius).
+    Ball,
+    /// An arm or leg segment (upper arm, forearm, thigh, shin) — a rounded,
+    /// jointed capsule (cylinder body + a sphere at each end).
+    Limb,
+    /// A head — a sphere.
+    Head,
+    /// A hand — a sphere (only the goalie rig emits these; the kicker's fists are
+    /// the distal joint spheres of its forearms).
+    Hand,
+    /// A torso, chest, or pelvis — a softened (bevelled) box.
+    Torso,
+    /// A foot — a softened (bevelled) box.
+    Foot,
+    /// A hair cap — a plain box (a flat cap, as authored).
+    Hair,
+    /// Anything else (structure: posts, wall, crowd, ad boards, ground, net) — a
+    /// crisp box.
+    Cube,
+}
+
+/// Classify a posed part into its structural [`PartRole`] from its shape and its
+/// label. The label is normalized (lowercased, `.`/`_` removed) so both rig
+/// naming schemes (`l_upper_arm` and `upperarm.left`) classify identically.
+fn classify(shape: PrimitiveShape, label: &str) -> PartRole {
+    let norm = label.to_lowercase().replace(['.', '_'], "");
+    let has = |needle: &str| norm.contains(needle);
+    let is_limb = has("upperarm") || has("forearm") || has("thigh") || has("shin");
+    match shape {
+        PrimitiveShape::FacetedBall => PartRole::Ball,
+        _ if is_limb => PartRole::Limb,
+        _ if has("hand") => PartRole::Hand,
+        _ if has("head") => PartRole::Head,
+        _ if has("foot") => PartRole::Foot,
+        _ if has("hair") => PartRole::Hair,
+        _ if has("torso") || has("chest") || has("pelvis") => PartRole::Torso,
+        _ => PartRole::Cube,
     }
-    let is_limb = label.contains("upperarm")
-        || label.contains("forearm")
-        || label.contains("thigh")
-        || label.contains("shin");
-    let is_joint = label.ends_with(".head") || label.contains(".hand.");
-    if is_limb {
-        // The unit capsule's bbox is (0.8, 1.0, 0.8); scale it to fill the part's
-        // box extents so the rounded tube matches the limb's footprint.
-        return (capsule, Vec3::new(size.x / 0.8, size.y, size.z / 0.8));
+}
+
+/// One drawable piece of a posed part, in the part's **local** (bone) frame: a
+/// mesh and the local transform that places it relative to the part's world
+/// translate∘rotate. A simple part yields one sub-part (a scaled mesh at the
+/// origin); a limb yields three (a cylinder body plus a sphere at each bone end).
+#[derive(Clone, Copy, Debug)]
+struct SubPart {
+    mesh: Handle<Mesh>,
+    local: Transform,
+}
+
+/// The drawable sub-parts of one posed part, in its local bone frame.
+///
+/// A **limb** becomes the classic capsule-and-ball: a cylinder body scaled to the
+/// limb's footprint plus a sphere at each end (proximal + distal joint). The
+/// joint spheres fill the gaps between adjacent bone segments (shoulder/elbow/
+/// wrist, hip/knee/ankle) and round the limb's caps; the distal forearm sphere
+/// doubles as the kicker's fist (its rig has no hand parts). They sit at
+/// `±size.y/2` along the local Y — the axis the part's box extends along its bone
+/// — so the part's world rotation orients them onto the joint. **Head/hand** →
+/// sphere; **torso/foot** → softened bevel box; **hair/other** → crisp box; the
+/// **ball** → sphere (radius→diameter).
+fn sub_parts(role: PartRole, size: Vec3, lib: MeshLib) -> Vec<SubPart> {
+    let one = |mesh: Handle<Mesh>, scale: Vec3| vec![SubPart { mesh, local: Transform::from_scale(scale) }];
+    match role {
+        PartRole::Ball => one(lib.sphere, size.mul_scalar(2.0)),
+        PartRole::Limb => {
+            // Limb radius ≈ the average half-extent of the box's cross-section.
+            let radius = (size.x + size.z) * 0.25;
+            let diameter = radius * 2.0;
+            // The unit capsule's bbox is (0.8, 1.0, 0.8); scale its footprint to
+            // the limb diameter and its height to the limb length.
+            let body = Vec3::new(diameter / 0.8, size.y, diameter / 0.8);
+            // The unit sphere's bbox is 1×1×1; scale to the limb diameter so each
+            // joint ball is as wide as the tube it caps.
+            let joint = Vec3::new(diameter, diameter, diameter);
+            let half = size.y * 0.5;
+            vec![
+                SubPart { mesh: lib.capsule, local: Transform::from_scale(body) },
+                SubPart {
+                    mesh: lib.sphere,
+                    local: Transform::new(Vec3::new(0.0, half, 0.0), Quat::IDENTITY, joint),
+                },
+                SubPart {
+                    mesh: lib.sphere,
+                    local: Transform::new(Vec3::new(0.0, -half, 0.0), Quat::IDENTITY, joint),
+                },
+            ]
+        }
+        PartRole::Head | PartRole::Hand => one(lib.sphere, nonzero(size)),
+        PartRole::Torso | PartRole::Foot => one(lib.bevel, nonzero(size)),
+        PartRole::Hair | PartRole::Cube => one(lib.cube, nonzero(size)),
     }
-    if is_joint {
-        return (sphere, nonzero(size));
-    }
-    (cube, nonzero(size))
 }
 
 /// The registered low-poly mesh library (one handle per shape family).
@@ -124,6 +195,7 @@ struct MeshLib {
     cube: Handle<Mesh>,
     sphere: Handle<Mesh>,
     capsule: Handle<Mesh>,
+    bevel: Handle<Mesh>,
 }
 
 /// The registered retro 32-bit pixel-art texture ids (0 = none), by surface kind.
@@ -166,6 +238,7 @@ impl PenaltyMeshedScene {
             cube: bake_mesh(app, &mesh_api, &recipe_meshes::box_mesh(), style.seed),
             sphere: bake_mesh(app, &mesh_api, &recipe_meshes::sphere_mesh(), style.seed),
             capsule: bake_mesh(app, &mesh_api, &recipe_meshes::capsule_mesh(), style.seed),
+            bevel: bake_mesh(app, &mesh_api, &recipe_meshes::bevel_box_mesh(), style.seed),
         };
         let tex = TexLib {
             crowd: bake_texture(app, &tex_api, &recipe_textures::crowd(&style), style.seed),
@@ -278,31 +351,31 @@ impl PenaltyMeshedScene {
                 _ => None,
             })
             .collect();
+        let lib = self.lib;
         objects.into_iter().for_each(|(role, label, shape, position, rotation, size, color)| {
-            let (mesh, scale) = select_mesh(
-                role,
-                label,
-                shape,
-                size,
-                self.lib.cube,
-                self.lib.sphere,
-                self.lib.capsule,
-            );
             let to_eye = cam.eye.subtract(position);
             let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
             let biased = position.add(dir.mul_scalar(index as f32 * 0.0015));
             let material = self.material_for(app, color, self.texture_for(role, label));
-            // Compose translate ∘ (rotate ∘ scale): the part is scaled, oriented to
-            // its posed rotation about its own center, then placed in the world.
-            let entity = app.spawn(Spawn::new(
-                Transform::combine(
-                    Transform::from_translation(biased),
-                    Transform::combine(Transform::from_rotation(rotation), Transform::from_scale(scale)),
-                ),
-                mesh,
-                material,
-            ));
-            self.spawned.push(entity);
+            // The part's world placement: translate ∘ rotate. Each sub-part carries
+            // its own local transform (scale, plus a bone-frame offset for limb
+            // joints), composed *inside* the part rotation so a limb's joint
+            // spheres ride onto the shoulder/elbow/wrist as the bone swings.
+            let base = Transform::combine(
+                Transform::from_translation(biased),
+                Transform::from_rotation(rotation),
+            );
+            // One posed part now yields a small list of drawable sub-parts (a limb
+            // is a cylinder body + two joint spheres; everything else is one mesh),
+            // each spawned and tracked so next frame's despawn clears them all.
+            sub_parts(classify(shape, label), size, lib).into_iter().for_each(|sp| {
+                let entity = app.spawn(Spawn::new(
+                    Transform::combine(base, sp.local),
+                    sp.mesh,
+                    material,
+                ));
+                self.spawned.push(entity);
+            });
             index += 1;
         });
     }

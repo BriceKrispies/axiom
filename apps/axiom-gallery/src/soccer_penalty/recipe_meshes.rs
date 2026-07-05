@@ -36,6 +36,8 @@ pub mod ids {
     pub const SPHERE: u64 = 701;
     /// The rounded limb tube — the athletes' arms and legs.
     pub const CAPSULE: u64 = 702;
+    /// The softened (bevelled) box — the athletes' torsos, pelvises, and feet.
+    pub const BEVEL_BOX: u64 = 703;
 }
 
 /// A unit cube (extent 1, centred at the origin), UV-projected — the shared shape
@@ -71,9 +73,29 @@ pub fn capsule_mesh() -> RecipeGraph {
     g
 }
 
+/// A softened box: a unit cube pulled a small amount toward its centroid
+/// (`Bevel[0.12]`) then UV-projected, so its edges read rounded rather than
+/// hard-cut. Used for the athletes' torsos, pelvises, and feet — the boxy body
+/// masses that should look modelled, not blocky. The bevel shrinks the mesh a
+/// touch off its unit bbox, so a bevelled box renders slightly inset inside the
+/// part's box extents (the intended softened look); structure boxes keep the
+/// crisp [`box_mesh`].
+pub fn bevel_box_mesh() -> RecipeGraph {
+    let mut g = RecipeGraph::new(RecipeId::from_raw(ids::BEVEL_BOX), 1);
+    let cube = g.add(MeshOp::Cube as u16, vec![s(1.0)], vec![]);
+    let bevelled = g.add(MeshOp::Bevel as u16, vec![s(0.12)], vec![cube]);
+    g.add(MeshOp::UVProject as u16, vec![s(0.5)], vec![bevelled]);
+    g
+}
+
 /// Every soccer mesh recipe, paired with a stable name.
 pub fn catalog() -> Vec<(&'static str, RecipeGraph)> {
-    vec![("box", box_mesh()), ("sphere", sphere_mesh()), ("capsule", capsule_mesh())]
+    vec![
+        ("box", box_mesh()),
+        ("sphere", sphere_mesh()),
+        ("capsule", capsule_mesh()),
+        ("bevel_box", bevel_box_mesh()),
+    ]
 }
 
 #[cfg(test)]
