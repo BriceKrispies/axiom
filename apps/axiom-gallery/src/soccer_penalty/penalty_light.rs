@@ -27,11 +27,12 @@ pub const AMBIENT_STRENGTH: f32 = 0.72;
 /// at full daylight brightness.
 pub const DIRECTIONAL_STRENGTH: f32 = 0.55;
 
-/// The light direction, normalized. This is the unit form of the documented
-/// raw direction `(-0.45, -1.0, -0.35)` (roughly from the upper-front-left),
-/// precomputed as a constant so no runtime normalization (and no fallible math)
-/// is needed. `|(-0.45,-1.0,-0.35)| = 1.151086`.
-pub const LIGHT_DIRECTION: Vec3 = Vec3::new(-0.390932, -0.868799, -0.304059);
+/// The light direction, normalized. A low, raking stadium key from the
+/// upper-behind-left: its shallower elevation lets the sun model the vertical
+/// figure faces (jerseys, keeper, player fronts) instead of dumping straight down
+/// onto the pitch. Already unit length (`|(-0.50,-0.66,-0.56)| = 0.99960`),
+/// precomputed so no runtime normalization (and no fallible math) is needed.
+pub const LIGHT_DIRECTION: Vec3 = Vec3::new(-0.50, -0.66, -0.56);
 
 /// The fixed brightness bands, ascending. Quantization snaps a computed
 /// brightness down to the largest band it meets or exceeds. The floor is lifted
