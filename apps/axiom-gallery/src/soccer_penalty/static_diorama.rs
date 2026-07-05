@@ -38,9 +38,18 @@ pub struct CameraConfig {
 // reveals the full body here. Eye offset to +X keeps the kicker (x=-0.7) in the
 // left third; a near-level aim at the goal mouth keeps the crossbar in the upper
 // third and the keeper large.
-pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 1.8, KICKER_Z + 8.4);
+// R4: the R3 telephoto (eye z=KICKER_Z+8.4, fov 21) left a goal/kicker distance
+// ratio of ~2.5 -- still enough perspective divergence for the foreground kicker
+// to loom over a shrunken goal. The reference's broadcast compression reads the
+// near kicker and the far goal at comparable screen height, which needs a ratio
+// ~1.9. So dolly the eye further back to ~14 units behind the kicker (eye z~26.6,
+// ratio 26.6/14 = 1.9) and narrow the lens to fov ~15 so the dollied-back kicker
+// still fills the frame full-body (~35% of the height) while the goal grows to
+// fill more of the upper frame. Aim/height are unchanged; the longer throw only
+// flattens the tilt further toward level.
+pub const CAMERA_EYE: Vec3 = Vec3::new(1.2, 1.8, KICKER_Z + 14.0);
 pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.25, 0.7, 0.0);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 21.0;
+pub const CAMERA_FOV_Y_DEGREES: f32 = 15.0;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;
