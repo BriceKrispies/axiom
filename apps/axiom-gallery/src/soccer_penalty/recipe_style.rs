@@ -76,10 +76,19 @@ impl SoccerRecipeStyle {
         Self {
             seed: 0x0000_50CC_E12A_0001,
             palette: Palette {
-                crowd_dark: Color::rgba(0x1A, 0x18, 0x1E, 0xFF),
-                crowd_shirt_a: Color::rgba(0xC8, 0x3C, 0x3C, 0xFF),
-                crowd_shirt_b: Color::rgba(0x3C, 0x5A, 0xBE, 0xFF),
-                crowd_bright: Color::rgba(0xD2, 0xC0, 0x46, 0xFF),
+                // Aerial-perspective-in-albedo: the GPU champion wires no post
+                // grade and no volumetric haze (both architect-tier host seams),
+                // so the distant stand can only be made to *recede* the way the
+                // reference's dark, hazed, cool-dominant terrace does by baking
+                // that recession into the crowd albedo itself. The three shirt
+                // tones are pulled toward low chroma, cooled, and darkened so the
+                // stand stops reading as a hot, razor-sharp red/yellow noise field
+                // and settles into a muted blue-grey mass with only faint warm
+                // speckle — matching the reference's hazed backdrop.
+                crowd_dark: Color::rgba(0x1C, 0x1E, 0x26, 0xFF),
+                crowd_shirt_a: Color::rgba(0x74, 0x42, 0x44, 0xFF),
+                crowd_shirt_b: Color::rgba(0x44, 0x52, 0x72, 0xFF),
+                crowd_bright: Color::rgba(0x92, 0x8A, 0x66, 0xFF),
                 jersey: Color::rgba(0x28, 0x4C, 0xC8, 0xFF),
                 jersey_dark: Color::rgba(0x18, 0x2E, 0x82, 0xFF),
                 keeper: Color::rgba(0xE6, 0xC8, 0x28, 0xFF),
