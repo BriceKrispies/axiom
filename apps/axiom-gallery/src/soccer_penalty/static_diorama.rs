@@ -59,7 +59,20 @@ pub struct CameraConfig {
 // (x=-0.7) in the left third; the target still aims low into the midground
 // (y~1.05, z~4.5) so the ~7 deg downward tilt drops the ball into the lower
 // third while the goal mouth rides the upper third.
-pub const CAMERA_EYE: Vec3 = Vec3::new(0.9, 3.2, KICKER_Z + 9.4);
+// ELEVATE + PULL BACK to reference broadcast framing. The prior eye (y=3.2,
+// z=KICKER_Z+9.4) reads too low and too close: only a ~7 deg downward tilt, so
+// the receding pitch stays a thin band, and a mere ~9.4-unit near-kicker throw
+// lets the near kicker LOOM (head near frame center, arms filling the lower
+// third) while the far goal shrinks. The reference is higher and further: a
+// thigh-up kicker riding the LEFT third with an OPEN receding pitch and the goal
+// mouth filling the upper-center. Lifting the eye to y~4.3 raises the downward
+// tilt to ~10.5 deg (target unchanged at y=1.05), opening the ground plane and
+// dropping the ball into the lower third; dollying back to z=KICKER_Z+12.4
+// throws the near kicker ~12.4 units (shrinking it ~24%) while the ~25-unit-away
+// goal shrinks only ~12% — the net lift in the kicker:goal size ratio the
+// reference wants. FOV (18) and aim (target) stay put: this is a pure camera
+// lift+dolly, not a lens change.
+pub const CAMERA_EYE: Vec3 = Vec3::new(0.9, 4.3, KICKER_Z + 12.4);
 pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.2, 1.05, 4.5);
 pub const CAMERA_FOV_Y_DEGREES: f32 = 18.0;
 pub const CAMERA_NEAR: f32 = 0.1;
