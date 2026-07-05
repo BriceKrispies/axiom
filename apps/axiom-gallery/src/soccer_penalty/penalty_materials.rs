@@ -102,9 +102,13 @@ pub const PENALTY_PALETTE: [PenaltyMaterial; 31] = [
     lit(PenaltyMaterialId::KickerSkin, "kicker skin", palette::KICKER_SKIN),
     lit(PenaltyMaterialId::BallWhite, "ball white", palette::BALL_WHITE),
     lit(PenaltyMaterialId::BallDarkPanels, "ball dark panels", Rgba::rgb(0.10, 0.11, 0.13)),
+    // Crowd: a coherent terracotta -> ochre -> amber family. The reference crowd
+    // is a uniformly WARM ochre/tan mass with no cold-blue section, so the old
+    // cold-blue alt-A card (0.32, 0.44, 0.66) is replaced by a mid ochre that
+    // sits between the terracotta and amber cards instead of fighting them.
     lit(PenaltyMaterialId::CrowdMutedColors, "crowd muted colors", Rgba::rgb(0.62, 0.30, 0.32)),
-    lit(PenaltyMaterialId::CrowdMutedColorsAltA, "crowd muted colors (alt a)", Rgba::rgb(0.32, 0.44, 0.66)),
-    lit(PenaltyMaterialId::CrowdMutedColorsAltB, "crowd muted colors (alt b)", Rgba::rgb(0.74, 0.66, 0.30)),
+    lit(PenaltyMaterialId::CrowdMutedColorsAltA, "crowd muted colors (alt a)", Rgba::rgb(0.64, 0.44, 0.24)),
+    lit(PenaltyMaterialId::CrowdMutedColorsAltB, "crowd muted colors (alt b)", Rgba::rgb(0.78, 0.62, 0.26)),
     lit(PenaltyMaterialId::StadiumWallDarkGray, "stadium wall dark gray", palette::STADIUM_WALL),
     lit(PenaltyMaterialId::AdBoardRed, "ad board red", Rgba::rgb(0.80, 0.15, 0.19)),
     lit(PenaltyMaterialId::AdBoardDark, "ad board blue", Rgba::rgb(0.16, 0.28, 0.66)),
