@@ -230,10 +230,10 @@ impl PenaltyGoaliePose {
             (7, 0.1, 0.0, 1.45),                    // right upper arm — wide, near-horizontal
             (5, 0.15, 0.0, -0.28),                  // left forearm — continues outward, slight forward
             (8, 0.15, 0.0, 0.28),                   // right forearm
-            (10, 0.12, 0.0, -0.32),                 // left thigh — wide plant + slight forward
-            (13, 0.12, 0.0, 0.32),                  // right thigh
-            (11, -0.34, 0.0, 0.0),                  // left shin — braced knee bend
-            (14, -0.34, 0.0, 0.0),                  // right shin
+            (10, 0.18, 0.0, -0.55),                 // left thigh — WIDE plant + weight forward
+            (13, 0.18, 0.0, 0.55),                  // right thigh
+            (11, -0.62, 0.0, 0.0),                  // left shin — deep braced knee bend (low set crouch)
+            (14, -0.62, 0.0, 0.0),                  // right shin
         ]
         .iter()
         .for_each(|&(i, x, y, z)| {
