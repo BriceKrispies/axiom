@@ -1,6 +1,6 @@
 //! The source mesh operators (no inputs): Cube, Cylinder, Grid.
 
-use core::f32::consts::TAU;
+use core::f32::consts::{PI, TAU};
 
 use axiom_math::{Vec2, Vec3};
 use axiom_proc_core::NodeEval;
@@ -140,6 +140,41 @@ pub(crate) fn cylinder(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
     })
 }
 
+/// **Sphere** — a UV sphere about the origin: `rings` latitude bands by
+/// `segments` longitude divisions, with outward unit normals and a lat/long UV
+/// wrap. This is the genuinely round primitive the other operators cannot fake
+/// (`Bevel` only shrinks a mesh toward its centroid). Params: `[radius, rings,
+/// segments]`; `rings` clamps to `2..=MAX_SEGMENTS`, `segments` to
+/// `3..=MAX_SEGMENTS`.
+pub(crate) fn sphere(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
+    let p = ctx.params();
+    (p.len() >= 3).then_some(()).and_then(|()| {
+        let radius = p[0].as_scalar().get();
+        let rings = p[1].as_int().clamp(2, MAX_SEGMENTS);
+        let seg = p[2].as_int().clamp(3, MAX_SEGMENTS);
+        let vx = seg + 1;
+        let count = (rings + 1) * vx;
+        // Latitude phi (0 = +Y pole .. PI = -Y pole), longitude theta.
+        let dir = move |k: u32| {
+            let phi = PI * (k / vx) as f32 / rings as f32;
+            let theta = TAU * (k % vx) as f32 / seg as f32;
+            Vec3::new(phi.sin() * theta.cos(), phi.cos(), phi.sin() * theta.sin())
+        };
+        let positions = (0..count).map(|k| dir(k).mul_scalar(radius)).collect();
+        let normals = (0..count).map(dir).collect();
+        let uvs = (0..count)
+            .map(|k| Vec2::new((k % vx) as f32 / seg as f32, (k / vx) as f32 / rings as f32))
+            .collect();
+        let indices = (0..rings * seg)
+            .flat_map(move |q| {
+                let a = (q / seg) * vx + (q % seg);
+                [a, a + vx, a + 1, a + 1, a + vx, a + vx + 1]
+            })
+            .collect();
+        MeshBuffer::from_parts(positions, normals, uvs, indices)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::dispatch::mesh_eval;
@@ -177,6 +212,27 @@ mod tests {
         let tiny = run(MeshOp::Grid, vec![Param::int(0), Param::int(0), Param::scalar(Scalar::new(1.0))]).unwrap();
         assert_eq!(tiny.vertex_count(), 4); // (1+1)*(1+1)
         assert!(run(MeshOp::Grid, vec![Param::int(2)]).is_none());
+    }
+
+    #[test]
+    fn sphere_is_round_bounded_and_clamped() {
+        let m = run(
+            MeshOp::Sphere,
+            vec![Param::scalar(Scalar::new(1.0)), Param::int(2), Param::int(3)],
+        )
+        .unwrap();
+        // (rings+1) * (segments+1) vertices, rings*segments*2 triangles.
+        assert_eq!(m.vertex_count(), 3 * 4);
+        assert_eq!(m.triangle_count(), 2 * 3 * 2);
+        // Every vertex sits on the sphere of the requested radius (genuine
+        // curvature — this is what a beveled cube cannot produce).
+        assert!(m.positions().iter().all(|p| ((p.x * p.x + p.y * p.y + p.z * p.z).sqrt() - 1.0).abs() < 1e-5));
+        // Rings/segments clamp at both ends.
+        let coarse = run(MeshOp::Sphere, vec![Param::scalar(Scalar::new(1.0)), Param::int(0), Param::int(1)]).unwrap();
+        assert_eq!(coarse.vertex_count(), (2 + 1) * (3 + 1)); // rings→2, seg→3
+        let fine = run(MeshOp::Sphere, vec![Param::scalar(Scalar::new(1.0)), Param::int(9999), Param::int(9999)]).unwrap();
+        assert_eq!(fine.vertex_count(), ((super::MAX_SEGMENTS + 1) * (super::MAX_SEGMENTS + 1)) as usize);
+        assert!(run(MeshOp::Sphere, vec![Param::scalar(Scalar::new(1.0))]).is_none());
     }
 
     #[test]

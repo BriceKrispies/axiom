@@ -1,10 +1,10 @@
 //! # Axiom Proc-Texture — texture operators (layer)
 //!
 //! A tiny, orthogonal set of texture operators that a recipe composes into an
-//! RGBA8 [`TextureBuffer`]. Four **sources** (Solid, Gradient, Noise, Bricks) and
-//! four **transforms** (Blur, Blend, ColorRamp, HeightToNormal), dispatched
-//! branchlessly by a `const` table over the operator code and baked through the
-//! shared [`axiom_proc_core::ProcCore`] executor.
+//! RGBA8 [`TextureBuffer`]. Six **sources** (Solid, Gradient, Noise, Bricks,
+//! Checker, Text) and four **transforms** (Blur, Blend, ColorRamp,
+//! HeightToNormal), dispatched branchlessly by a `const` table over the operator
+//! code and baked through the shared [`axiom_proc_core::ProcCore`] executor.
 //!
 //! ## What it is, and is not
 //! - **Neutral output.** A [`TextureBuffer`] is plain row-major RGBA8 — the shape
@@ -20,6 +20,7 @@ mod dispatch;
 mod filters;
 mod generators;
 mod proc_texture_api;
+mod text;
 mod texture_buffer;
 mod texture_op;
 

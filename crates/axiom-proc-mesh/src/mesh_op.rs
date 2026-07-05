@@ -1,7 +1,7 @@
 //! The mesh operator codes, as an authoring-friendly enum.
 
-/// The ten mesh operators. The discriminant **is** the operator code stored in a
-/// recipe node and indexes the dispatch table, so this order is the dispatch
+/// The eleven mesh operators. The discriminant **is** the operator code stored in
+/// a recipe node and indexes the dispatch table, so this order is the dispatch
 /// order and must not be reshuffled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
@@ -26,6 +26,8 @@ pub enum MeshOp {
     UVProject = 8,
     /// Re-wrap as a validated triangle list. No params.
     Triangulate = 9,
+    /// UV sphere about the origin. Params: `[radius, rings, segments]`.
+    Sphere = 10,
 }
 
 #[cfg(test)]
@@ -36,5 +38,6 @@ mod tests {
     fn codes_are_their_dispatch_indices() {
         assert_eq!(MeshOp::Cube as u16, 0);
         assert_eq!(MeshOp::Triangulate as u16, 9);
+        assert_eq!(MeshOp::Sphere as u16, 10);
     }
 }

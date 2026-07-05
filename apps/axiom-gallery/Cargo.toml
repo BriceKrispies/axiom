@@ -124,6 +124,12 @@ axiom-planetgen = { path = "../../modules/axiom-planetgen" }
 # are thin wrappers over this layer.
 axiom-hydrology = { path = "../../crates/axiom-hydrology" }
 axiom-proc = { path = "../../crates/axiom-proc" }
+# The recipe procedural pipeline (recipe graph + texture/mesh operators). The
+# soccer-penalty demo generates ALL its meshes and textures from recipes baked by
+# these layers — nothing hand-authored — mirroring examples/recipes/generated_micro_fps.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+axiom-proc-texture = { path = "../../crates/axiom-proc-texture" }
+axiom-proc-mesh = { path = "../../crates/axiom-proc-mesh" }
 # Generic bounded rejection-sampling harness (sample_until_valid): the growth
 # preset genome sampler draws candidates through it until one satisfies the band.
 axiom-proc-validate = { path = "../../crates/axiom-proc-validate" }

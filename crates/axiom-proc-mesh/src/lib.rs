@@ -2,7 +2,7 @@
 //!
 //! A tiny set of mesh operators that a recipe composes into a neutral
 //! [`MeshBuffer`] (parallel position / normal / uv streams + a triangle-list
-//! index buffer). Three **sources** (Cube, Cylinder, Grid) and seven
+//! index buffer). Four **sources** (Cube, Cylinder, Grid, Sphere) and seven
 //! **transforms** (Transform, Extrude, Bevel, Bend, Displace, UVProject,
 //! Triangulate), dispatched branchlessly by a `const` table over the operator
 //! code and baked through the shared [`axiom_proc_core::ProcCore`] executor.
