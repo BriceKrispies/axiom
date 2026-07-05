@@ -265,6 +265,22 @@ pub struct RunningApp {
     custom_textures: Vec<(u64, u32, u32, Vec<u8>)>,
     // The live backend's per-instance buffer capacity.
     renderables: usize,
+    // Per-frame skinned draws the app queued (bake-once meshes deformed by a joint
+    // palette). Filled during authoring via `submit_skinned_draw` and drained into
+    // the frame outcome each render, so it never accumulates across frames.
+    pending_skinned: Vec<PendingSkinned>,
+}
+
+/// A skinned draw the app queued this frame: the mesh + material to draw, the tint
+/// colour, its world transform (column-major), and the joint-matrix palette
+/// (column-major) that deforms it. Drained into the frame outcome each render.
+#[derive(Debug)]
+pub(crate) struct PendingSkinned {
+    pub(crate) mesh_id: u64,
+    pub(crate) material_id: u64,
+    pub(crate) color: [f32; 4],
+    pub(crate) world: [f32; 16],
+    pub(crate) palette: Vec<[f32; 16]>,
 }
 
 impl RunningApp {
@@ -316,6 +332,7 @@ impl RunningApp {
             materials: authored.materials,
             custom_textures: Vec::new(),
             renderables: authored.renderables,
+            pending_skinned: Vec::new(),
         }
     }
 

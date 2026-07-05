@@ -25,7 +25,9 @@ use axiom_kernel::{Radians, Ratio};
 use axiom_math::{MathApi, Transform, Vec3};
 use axiom_scene::SceneNodeId as Entity;
 
-use super::RunningApp;
+use axiom_math::Mat4;
+
+use super::{PendingSkinned, RunningApp};
 use crate::camera::Camera;
 use crate::controller::FirstPersonInput;
 use crate::directional_light::DirectionalLight;
@@ -74,6 +76,35 @@ impl RunningApp {
             self.meshes.push((id, geometry));
             Handle::new(id)
         })
+    }
+
+    /// Queue a **skinned** draw for this frame: `mesh` (registered via
+    /// [`Self::add_mesh_data`] with skin streams) deformed by `palette` — the
+    /// per-bone joint matrices from `AnimationApi::joint_matrices` — at `transform`,
+    /// tinted by `material`'s colour. Unlike a spawned node this is **not retained**:
+    /// it is drawn once, this frame, and must be re-submitted every frame with the
+    /// current pose. This is how an app renders a bake-once, pose-per-frame
+    /// character (skeletal skinning) without re-baking geometry.
+    pub fn submit_skinned_draw(
+        &mut self,
+        mesh: Handle<Mesh>,
+        material: Handle<Material>,
+        transform: Transform,
+        palette: &[Mat4],
+    ) {
+        let color = self
+            .materials
+            .iter()
+            .find(|(id, _)| *id == material.id())
+            .map(|(_, m)| m.base_color().to_array())
+            .expect("skinned draw references a registered material");
+        self.pending_skinned.push(PendingSkinned {
+            mesh_id: mesh.id(),
+            material_id: material.id(),
+            color,
+            world: transform.to_matrix().as_cols_array(),
+            palette: palette.iter().map(|m| m.as_cols_array()).collect(),
+        });
     }
 
     /// Register `material` into the running app's material store and return a
@@ -350,6 +381,60 @@ mod tests {
         );
         assert_eq!(app.add_mesh_data(bad), Err(MeshDataError::IndexOutOfRange));
         assert!(app.mesh_set().is_empty(), "a rejected mesh registers nothing");
+    }
+
+    /// A unit quad with skin streams (every vertex split 50/50 between bones 0, 1).
+    fn skinned_quad_mesh_data() -> MeshData {
+        MeshData::new_skinned(
+            vec![
+                Vec3::new(-0.5, -0.5, 0.0),
+                Vec3::new(0.5, -0.5, 0.0),
+                Vec3::new(0.5, 0.5, 0.0),
+                Vec3::new(-0.5, 0.5, 0.0),
+            ],
+            vec![Vec3::new(0.0, 0.0, 1.0); 4],
+            vec![],
+            vec![[0, 1, 0, 0]; 4],
+            vec![[0.5, 0.5, 0.0, 0.0]; 4],
+            vec![0, 1, 2, 0, 2, 3],
+        )
+    }
+
+    #[test]
+    fn skinned_mesh_uploads_through_the_skinned_set_not_the_static_set() {
+        let mut app = empty_render_app();
+        app.add_mesh_data(skinned_quad_mesh_data()).expect("valid skinned mesh");
+        // The static set excludes skinned meshes...
+        assert!(app.mesh_set().is_empty());
+        // ...and the skinned set carries the 20-float stream.
+        let skinned = app.skinned_mesh_set();
+        assert_eq!(skinned.len(), 1);
+        assert_eq!(skinned[0].1.len(), 4 * 20, "4 skinned vertices at 20 floats each");
+        assert_eq!(skinned[0].2, vec![0, 1, 2, 0, 2, 3]);
+        // The joints then weights ride at floats [12..20] of the first vertex.
+        assert_eq!(&skinned[0].1[12..20], &[0.0, 1.0, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn submit_skinned_draw_appears_in_the_outcome_and_drains_each_frame() {
+        let mut app = empty_render_app();
+        let mesh = app.add_mesh_data(skinned_quad_mesh_data()).expect("valid skinned mesh");
+        let mat = app.add_material(Material::lit(Color::linear_rgb(ch(0.2), ch(0.4), ch(0.8))));
+        let palette = [Mat4::IDENTITY, Mat4::IDENTITY];
+        app.submit_skinned_draw(mesh, mat, Transform::IDENTITY, &palette);
+
+        let outcome = app.tick(0);
+        assert_eq!(outcome.skinned_draws().len(), 1, "the submitted skinned draw is in the frame");
+        let d = &outcome.skinned_draws()[0];
+        assert_eq!(d.mesh_id(), mesh.id());
+        assert_eq!(d.material_id(), mat.id());
+        assert_eq!(d.joints().len(), 2, "the two-bone palette is carried");
+        assert_eq!(d.color()[3], 1.0, "opaque tint from the material");
+        // World is IDENTITY, so mvp == view_projection and world round-trips.
+        assert_eq!(d.world(), Mat4::IDENTITY.as_cols_array());
+        assert_eq!(d.mvp().len(), 16);
+        // The queue drains: a frame with no fresh submission has no skinned draws.
+        assert_eq!(app.tick(1).skinned_draws().len(), 0);
     }
 
     #[test]

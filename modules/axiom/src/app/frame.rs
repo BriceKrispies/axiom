@@ -7,7 +7,7 @@ use axiom_kernel::Radians;
 
 use super::RunningApp;
 use crate::controller::FirstPersonInput;
-use crate::frame_outcome::{DrawData, FrameOutcome, LightData};
+use crate::frame_outcome::{DrawData, FrameOutcome, LightData, SkinnedDraw};
 use crate::player::PlayerInput;
 use crate::texture::Texture;
 
@@ -165,6 +165,20 @@ impl RunningApp {
                 })
                 .collect();
 
+            // Drain this frame's queued skinned draws (bake-once meshes deformed by
+            // a joint palette), computing each MVP = view_proj * world so the
+            // skinning vertex shader only has to apply `mvp * skin * position`.
+            let skinned_draws: Vec<SkinnedDraw> = self
+                .pending_skinned
+                .drain(..)
+                .map(|p| {
+                    let mvp = view_projection
+                        .multiply(axiom_math::Mat4::from_cols_array(p.world))
+                        .as_cols_array();
+                    SkinnedDraw::new(mvp, p.world, p.color, p.mesh_id, p.material_id, p.palette)
+                })
+                .collect();
+
             // The frame's resolved lights (directional + point), threaded to
             // the live backend's lighting uniform.
             let light_count = pipeline.report_light_count(&report);
@@ -189,6 +203,7 @@ impl RunningApp {
                 pipeline.report_presented(&report),
                 pipeline.report_recorded(&report),
             )
+            .with_skinned_draws(skinned_draws)
         });
         rendered.unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
     }

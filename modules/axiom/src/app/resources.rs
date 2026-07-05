@@ -33,7 +33,23 @@ impl RunningApp {
     pub fn mesh_set(&self) -> Vec<(u64, Vec<f32>, Vec<u32>)> {
         self.meshes
             .iter()
+            .filter(|(_, geom)| geom.joints.is_empty())
             .map(|(id, geom)| (*id, interleave_vertices(geom), geom.indices.clone()))
+            .collect()
+    }
+
+    /// Every registered **skinned** mesh as the backend's skinned upload set:
+    /// `(mesh_id, interleaved 20-float vertices, triangle indices)`. Each vertex
+    /// is `position(3) + normal(3) + uv(2) + colour(4) + joints(4) + weights(4)` —
+    /// the standard 12-float stream plus the four bone indices (as floats) and four
+    /// blend weights the skinning vertex shader reads. Skinned meshes are excluded
+    /// from [`Self::mesh_set`] (they render only through the skinned pipeline with a
+    /// per-draw joint palette). Uploaded once at bind, like the static set.
+    pub fn skinned_mesh_set(&self) -> Vec<(u64, Vec<f32>, Vec<u32>)> {
+        self.meshes
+            .iter()
+            .filter(|(_, geom)| !geom.joints.is_empty())
+            .map(|(id, geom)| (*id, interleave_skinned_vertices(geom), geom.indices.clone()))
             .collect()
     }
 
@@ -75,6 +91,25 @@ fn interleave_vertices(geom: &MeshGeometry) -> Vec<f32> {
         .for_each(|((p, n), uv)| {
             vertices
                 .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0])
+        });
+    vertices
+}
+
+/// Interleave a **skinned** mesh into the 20-float skinning stream: the standard
+/// 12 floats followed by four bone indices (as floats) and four blend weights.
+/// Only called for meshes carrying skin streams (`skinned_mesh_set`).
+fn interleave_skinned_vertices(geom: &MeshGeometry) -> Vec<f32> {
+    let mut vertices = Vec::with_capacity(geom.positions.len() * 20);
+    geom.positions
+        .iter()
+        .zip(geom.normals.iter())
+        .zip(geom.uvs.iter())
+        .zip(geom.joints.iter())
+        .zip(geom.weights.iter())
+        .for_each(|((((p, n), uv), j), w)| {
+            vertices.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0]);
+            vertices.extend_from_slice(&[j[0] as f32, j[1] as f32, j[2] as f32, j[3] as f32]);
+            vertices.extend_from_slice(&w[..]);
         });
     vertices
 }

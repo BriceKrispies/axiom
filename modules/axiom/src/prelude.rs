@@ -40,7 +40,7 @@ pub use crate::contact_shadow_caster::ContactShadowCaster;
 pub use crate::controller::{Controller, FirstPersonInput};
 pub use crate::default_plugins::DefaultPlugins;
 pub use crate::directional_light::DirectionalLight;
-pub use crate::frame_outcome::{DrawData, FrameOutcome};
+pub use crate::frame_outcome::{DrawData, FrameOutcome, SkinnedDraw};
 pub use crate::handle::Handle;
 pub use crate::material::Material;
 pub use crate::mesh::Mesh;

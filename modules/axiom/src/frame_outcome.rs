@@ -115,6 +115,64 @@ impl LightData {
     }
 }
 
+/// One **skinned** draw: a mesh deformed by a per-draw joint-matrix palette
+/// (linear blend skinning). Unlike [`DrawData`] a skinned draw cannot be
+/// instanced — each carries its own palette — so skinned draws are collected
+/// separately and rendered one draw per entry. `joints` is the column-major joint
+/// palette the vertex shader blends by the mesh's per-vertex weights.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkinnedDraw {
+    mvp: [f32; 16],
+    world: [f32; 16],
+    color: [f32; 4],
+    mesh_id: u64,
+    material_id: u64,
+    joints: Vec<[f32; 16]>,
+}
+
+impl SkinnedDraw {
+    pub(crate) fn new(
+        mvp: [f32; 16],
+        world: [f32; 16],
+        color: [f32; 4],
+        mesh_id: u64,
+        material_id: u64,
+        joints: Vec<[f32; 16]>,
+    ) -> Self {
+        SkinnedDraw { mvp, world, color, mesh_id, material_id, joints }
+    }
+
+    /// The column-major model-view-projection matrix.
+    pub const fn mvp(&self) -> [f32; 16] {
+        self.mvp
+    }
+
+    /// The column-major world (model) matrix.
+    pub const fn world(&self) -> [f32; 16] {
+        self.world
+    }
+
+    /// The linear RGBA colour.
+    pub const fn color(&self) -> [f32; 4] {
+        self.color
+    }
+
+    /// The id of the skinned mesh this draws.
+    pub const fn mesh_id(&self) -> u64 {
+        self.mesh_id
+    }
+
+    /// The id of the material this uses.
+    pub const fn material_id(&self) -> u64 {
+        self.material_id
+    }
+
+    /// The column-major joint-matrix palette blended by the per-vertex weights.
+    pub fn joints(&self) -> &[[f32; 16]] {
+        &self.joints
+    }
+}
+
 /// The deterministic summary of one [`crate::prelude::App`] frame: the tick, the
 /// GPU command count, the clear colour, the per-object draw data, and the
 /// backend flags. Equal inputs at the same tick produce an equal `FrameOutcome`.
@@ -124,6 +182,7 @@ pub struct FrameOutcome {
     command_count: usize,
     clear_color: [f32; 4],
     draws: Vec<DrawData>,
+    skinned_draws: Vec<SkinnedDraw>,
     lights: Vec<LightData>,
     light_view_proj: [f32; 16],
     camera_view_proj: [f32; 16],
@@ -154,6 +213,7 @@ impl FrameOutcome {
             command_count,
             clear_color,
             draws,
+            skinned_draws: Vec::new(),
             lights,
             light_view_proj,
             camera_view_proj,
@@ -161,6 +221,18 @@ impl FrameOutcome {
             presented,
             recorded,
         }
+    }
+
+    /// Attach the frame's skinned draws (each a mesh + its own joint palette).
+    /// Empty on a frame with no skinned meshes.
+    pub(crate) fn with_skinned_draws(mut self, skinned_draws: Vec<SkinnedDraw>) -> Self {
+        self.skinned_draws = skinned_draws;
+        self
+    }
+
+    /// The frame's skinned draws, in submission order.
+    pub fn skinned_draws(&self) -> &[SkinnedDraw] {
+        &self.skinned_draws
     }
 
     /// The identity matrix as a column-major array (the no-shadow light VP).
