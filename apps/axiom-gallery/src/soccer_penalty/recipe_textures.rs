@@ -76,7 +76,13 @@ pub fn crowd(style: &SoccerRecipeStyle) -> RecipeGraph {
     let blue = g.add(TextureOp::Bricks as u16, vec![i(r), i(r), i(20), i(15), i(1), c(p.crowd_shirt_b), c(d)], vec![]);
     let pale = g.add(TextureOp::Bricks as u16, vec![i(r), i(r), i(22), i(17), i(1), c(p.crowd_bright), c(d)], vec![]);
     let rb = g.add(TextureOp::Blend as u16, vec![s(0.5)], vec![red, blue]);
-    g.add(TextureOp::Blend as u16, vec![s(0.4)], vec![rb, pale]);
+    let seats = g.add(TextureOp::Blend as u16, vec![s(0.4)], vec![rb, pale]);
+    // A final box blur diffuses the hard per-seat brick edges — which aliased
+    // into harsh vertical moiré streaks through the low retro render target —
+    // into the soft, out-of-focus colour haze of a real stadium crowd seen past
+    // the pitch, matching the reference's blurred terrace and removing the
+    // dominant background artifact.
+    g.add(TextureOp::Blur as u16, vec![i(2)], vec![seats]);
     g
 }
 
