@@ -134,6 +134,6 @@ fn draw_world(a: &VerticalSliceArtifact) -> axiom_math::Mat4 {
     a.render_command_list
         .commands
         .iter()
-        .find_map(|c| c.as_draw_indexed().map(|(_, world)| world))
+        .find_map(|c| c.as_draw_indexed().map(|(_, world, _tag)| world))
         .expect("cube draw command present")
 }

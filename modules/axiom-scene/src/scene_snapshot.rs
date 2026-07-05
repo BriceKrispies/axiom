@@ -1,5 +1,6 @@
 //! The deterministic per-scene snapshot future apps/modules consume.
 
+use crate::bounds_snapshot::BoundsSnapshot;
 use crate::camera_snapshot::CameraSnapshot;
 use crate::light_snapshot::LightSnapshot;
 use crate::node_snapshot::NodeSnapshot;
@@ -7,6 +8,7 @@ use crate::renderable_snapshot::RenderableSnapshot;
 use crate::scene::Scene;
 use crate::scene_node_id::SceneNodeId;
 use crate::sdf_shape_snapshot::SdfShapeSnapshot;
+use crate::tag_snapshot::TagSnapshot;
 
 /// A deterministic, value-typed snapshot of a [`Scene`].
 ///
@@ -24,6 +26,8 @@ pub struct SceneSnapshot {
     lights: Vec<LightSnapshot>,
     renderables: Vec<RenderableSnapshot>,
     sdf_shapes: Vec<SdfShapeSnapshot>,
+    tags: Vec<TagSnapshot>,
+    bounds: Vec<BoundsSnapshot>,
 }
 
 impl SceneSnapshot {
@@ -37,6 +41,8 @@ impl SceneSnapshot {
         let mut lights = Vec::new();
         let mut renderables = Vec::new();
         let mut sdf_shapes = Vec::new();
+        let mut tags = Vec::new();
+        let mut bounds = Vec::new();
 
         storage.locals.iter().for_each(|(id, &local)| {
             let node = SceneNodeId::from_raw(id.raw());
@@ -64,6 +70,8 @@ impl SceneSnapshot {
                     node,
                     r.mesh(),
                     r.material(),
+                    r.texture(),
+                    r.animation(),
                     r.visible(),
                     r.casts_contact_shadow(),
                 ));
@@ -76,6 +84,12 @@ impl SceneSnapshot {
                     shape.color(),
                 ));
             });
+            storage.tags.get(id).into_iter().for_each(|tag| {
+                tags.push(TagSnapshot::new(node, tag.kind_code()));
+            });
+            storage.bounds.get(id).into_iter().for_each(|b| {
+                bounds.push(BoundsSnapshot::new(node, b.half_extents()));
+            });
         });
 
         SceneSnapshot {
@@ -84,6 +98,8 @@ impl SceneSnapshot {
             lights,
             renderables,
             sdf_shapes,
+            tags,
+            bounds,
         }
     }
 
@@ -125,18 +141,34 @@ impl SceneSnapshot {
         &self.sdf_shapes
     }
 
+    /// The coarse semantic kinds attached to nodes, ordered by ascending node id.
+    /// Rolled into the snapshot (M8) so perception and render read the same scene.
+    pub fn tags(&self) -> &[TagSnapshot] {
+        &self.tags
+    }
+
+    /// The axis-aligned bounding volumes attached to nodes, ordered by ascending
+    /// node id — each object's collision/query proxy carried alongside its render
+    /// binding.
+    pub fn bounds(&self) -> &[BoundsSnapshot] {
+        &self.bounds
+    }
+
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
             & self.cameras.is_empty()
             & self.lights.is_empty()
             & self.renderables.is_empty()
             & self.sdf_shapes.is_empty()
+            & self.tags.is_empty()
+            & self.bounds.is_empty()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bounds::Bounds;
     use crate::camera::Camera;
     use crate::light::Light;
     use crate::material_ref::MaterialRef;
@@ -182,6 +214,8 @@ mod tests {
             SdfShape::sphere(&math(), Meters::new(0.5).unwrap(), Vec3::ONE).unwrap(),
         )
         .unwrap();
+        s.add_tag(b, 42).unwrap();
+        s.add_bounds(b, Bounds::new(Vec3::new(0.5, 0.5, 0.5))).unwrap();
         s.update_world_transforms();
         s
     }
@@ -195,6 +229,8 @@ mod tests {
         assert!(s.lights().is_empty());
         assert!(s.renderables().is_empty());
         assert!(s.sdf_shapes().is_empty());
+        assert!(s.tags().is_empty());
+        assert!(s.bounds().is_empty());
     }
 
     #[test]
@@ -217,6 +253,13 @@ mod tests {
         assert_eq!(shape.kind(), SdfShape::SPHERE);
         assert_eq!(shape.dims(), Vec3::new(0.5, 0.5, 0.5));
         assert!(s.node(shape.node()).is_some());
+        // Tag and Bounds are rolled into the same snapshot, keyed by the same node.
+        assert_eq!(s.tags().len(), 1);
+        assert_eq!(s.tags()[0].kind_code(), 42);
+        assert!(s.node(s.tags()[0].node()).is_some());
+        assert_eq!(s.bounds().len(), 1);
+        assert_eq!(s.bounds()[0].half_extents(), Vec3::new(0.5, 0.5, 0.5));
+        assert!(s.node(s.bounds()[0].node()).is_some());
     }
 
     #[test]
@@ -264,9 +307,11 @@ mod tests {
 #[cfg(test)]
 mod cov {
     use super::*;
+    use crate::animation_ref::AnimationRef;
     use crate::light_kind::LightKind;
     use crate::material_ref::MaterialRef;
     use crate::mesh_ref::MeshRef;
+    use crate::texture_ref::TextureRef;
     use axiom_kernel::{Meters, Radians, Ratio};
     use axiom_math::{Transform, Vec3};
 
@@ -300,6 +345,8 @@ mod cov {
             SceneNodeId::from_raw(1),
             MeshRef::from_raw(1),
             MaterialRef::from_raw(1),
+            TextureRef::INVALID,
+            AnimationRef::INVALID,
             true,
             false,
         )
@@ -307,15 +354,30 @@ mod cov {
     fn sdf_shape_only() -> SdfShapeSnapshot {
         SdfShapeSnapshot::new(SceneNodeId::from_raw(1), 0, Vec3::ONE, Vec3::ONE)
     }
+    fn tag_only() -> TagSnapshot {
+        TagSnapshot::new(SceneNodeId::from_raw(1), 3)
+    }
+    fn bounds_only() -> BoundsSnapshot {
+        BoundsSnapshot::new(SceneNodeId::from_raw(1), Vec3::ONE)
+    }
+
+    fn empty() -> SceneSnapshot {
+        SceneSnapshot {
+            nodes: vec![],
+            cameras: vec![],
+            lights: vec![],
+            renderables: vec![],
+            sdf_shapes: vec![],
+            tags: vec![],
+            bounds: vec![],
+        }
+    }
 
     #[test]
     fn not_empty_when_only_nodes_present() {
         let s = SceneSnapshot {
             nodes: vec![node_only()],
-            cameras: vec![],
-            lights: vec![],
-            renderables: vec![],
-            sdf_shapes: vec![],
+            ..empty()
         };
         assert!(!s.is_empty());
     }
@@ -323,11 +385,8 @@ mod cov {
     #[test]
     fn not_empty_when_only_cameras_present() {
         let s = SceneSnapshot {
-            nodes: vec![],
             cameras: vec![camera_only()],
-            lights: vec![],
-            renderables: vec![],
-            sdf_shapes: vec![],
+            ..empty()
         };
         assert!(!s.is_empty());
     }
@@ -335,11 +394,8 @@ mod cov {
     #[test]
     fn not_empty_when_only_lights_present() {
         let s = SceneSnapshot {
-            nodes: vec![],
-            cameras: vec![],
             lights: vec![light_only()],
-            renderables: vec![],
-            sdf_shapes: vec![],
+            ..empty()
         };
         assert!(!s.is_empty());
     }
@@ -347,11 +403,8 @@ mod cov {
     #[test]
     fn not_empty_when_only_renderables_present() {
         let s = SceneSnapshot {
-            nodes: vec![],
-            cameras: vec![],
-            lights: vec![],
             renderables: vec![renderable_only()],
-            sdf_shapes: vec![],
+            ..empty()
         };
         assert!(!s.is_empty());
     }
@@ -359,12 +412,32 @@ mod cov {
     #[test]
     fn not_empty_when_only_sdf_shapes_present() {
         let s = SceneSnapshot {
-            nodes: vec![],
-            cameras: vec![],
-            lights: vec![],
-            renderables: vec![],
             sdf_shapes: vec![sdf_shape_only()],
+            ..empty()
         };
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn not_empty_when_only_tags_present() {
+        let s = SceneSnapshot {
+            tags: vec![tag_only()],
+            ..empty()
+        };
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn not_empty_when_only_bounds_present() {
+        let s = SceneSnapshot {
+            bounds: vec![bounds_only()],
+            ..empty()
+        };
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn fully_empty_snapshot_is_empty() {
+        assert!(empty().is_empty());
     }
 }

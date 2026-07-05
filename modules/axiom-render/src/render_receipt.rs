@@ -166,7 +166,7 @@ mod tests {
             RenderCommand::set_pipeline(1),
             RenderCommand::set_mesh(7),
             RenderCommand::set_material(9, 11),
-            RenderCommand::draw_indexed(7, 36, Mat4::IDENTITY),
+            RenderCommand::draw_indexed(7, 0, 36, Mat4::IDENTITY),
         ]
     }
 

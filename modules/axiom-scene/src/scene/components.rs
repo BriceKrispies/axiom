@@ -6,6 +6,7 @@
 use axiom_kernel::Reflect;
 
 use super::Scene;
+use crate::animation_ref::AnimationRef;
 use crate::camera::Camera;
 use crate::light::Light;
 use crate::renderable::Renderable;
@@ -14,6 +15,7 @@ use crate::scene_node_id::SceneNodeId;
 use crate::scene_result::SceneResult;
 use crate::sdf_shape::SdfShape;
 use crate::tag::Tag;
+use crate::texture_ref::TextureRef;
 
 impl Scene {
     pub(crate) fn add_camera(&mut self, node: SceneNodeId, camera: Camera) -> SceneResult<()> {
@@ -146,6 +148,40 @@ impl Scene {
             })
     }
 
+    /// Bind (or clear) the albedo texture on `node`'s renderable — the
+    /// object-binding contract's texture slot (`INVALID` = untextured).
+    pub(crate) fn set_renderable_texture(
+        &mut self,
+        node: SceneNodeId,
+        texture: TextureRef,
+    ) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .renderables
+            .get_mut(Self::entity(node))
+            .map(|r| r.set_texture(texture))
+            .ok_or_else(|| {
+                SceneError::missing_renderable("set_renderable_texture: node has no renderable")
+            })
+    }
+
+    /// Bind (or clear) the animation driving `node`'s renderable — the
+    /// object-binding contract's animation slot (`INVALID` = static).
+    pub(crate) fn set_renderable_animation(
+        &mut self,
+        node: SceneNodeId,
+        animation: AnimationRef,
+    ) -> SceneResult<()> {
+        self.world
+            .storage_mut()
+            .renderables
+            .get_mut(Self::entity(node))
+            .map(|r| r.set_animation(animation))
+            .ok_or_else(|| {
+                SceneError::missing_renderable("set_renderable_animation: node has no renderable")
+            })
+    }
+
     /// Attach (or replace) the coarse semantic kind on `node` — what the thing
     /// *is*, the classification a perceiving agent reads off a hit.
     pub(crate) fn add_tag(&mut self, node: SceneNodeId, kind_code: u32) -> SceneResult<()> {
@@ -246,6 +282,7 @@ mod tests {
     use crate::material_ref::MaterialRef;
     use crate::mesh_ref::MeshRef;
     use crate::scene_error_code::SceneErrorCode;
+    use crate::texture_ref::TextureRef;
     use axiom_kernel::{Meters, Radians, Ratio};
     use axiom_math::{MathApi, Transform, Vec3};
 
@@ -322,6 +359,12 @@ mod tests {
         // render-pipeline tests.
         s.set_renderable_visible(n, false).unwrap();
         s.set_renderable_casts_contact_shadow(n, true).unwrap();
+        s.set_renderable_texture(n, TextureRef::from_raw(5)).unwrap();
+        s.set_renderable_animation(n, AnimationRef::from_raw(9))
+            .unwrap();
+        let snap = s.snapshot();
+        assert_eq!(snap.renderables()[0].texture(), TextureRef::from_raw(5));
+        assert_eq!(snap.renderables()[0].animation(), AnimationRef::from_raw(9));
         assert_eq!(
             s.set_renderable_visible(SceneNodeId::from_raw(99), true)
                 .unwrap_err()
@@ -330,6 +373,18 @@ mod tests {
         );
         assert_eq!(
             s.set_renderable_casts_contact_shadow(SceneNodeId::from_raw(99), true)
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingRenderable
+        );
+        assert_eq!(
+            s.set_renderable_texture(SceneNodeId::from_raw(99), TextureRef::from_raw(1))
+                .unwrap_err()
+                .code(),
+            SceneErrorCode::MissingRenderable
+        );
+        assert_eq!(
+            s.set_renderable_animation(SceneNodeId::from_raw(99), AnimationRef::from_raw(1))
                 .unwrap_err()
                 .code(),
             SceneErrorCode::MissingRenderable
