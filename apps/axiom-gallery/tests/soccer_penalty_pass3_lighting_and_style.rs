@@ -25,9 +25,9 @@ fn plan() -> PenaltyRenderPlan {
 fn light_model_constants_are_deterministic() {
     assert_eq!(PenaltyLightModel::stage1(), PenaltyLightModel::stage1());
     let l = PenaltyLightModel::stage1();
-    assert_eq!(l.ambient_strength, 0.55);
-    assert_eq!(l.directional_strength, 0.65);
-    assert_eq!(l.bands, [0.55, 0.68, 0.80, 0.92]);
+    assert_eq!(l.ambient_strength, 0.72);
+    assert_eq!(l.directional_strength, 0.55);
+    assert_eq!(l.bands, [0.72, 0.82, 0.91, 1.0]);
     // The stored direction is unit-length (normalized form of (-0.45,-1,-0.35)).
     let len = l.direction.length();
     assert!((len - 1.0).abs() < 1.0e-3, "light direction must be normalized (len {len})");
@@ -36,17 +36,16 @@ fn light_model_constants_are_deterministic() {
 #[test]
 fn brightness_quantization_maps_to_expected_bands() {
     let l = PenaltyLightModel::stage1();
-    // Snap-down to the largest band met, floored at 0.55.
-    assert_eq!(l.quantize(0.55), 0.55);
-    assert_eq!(l.quantize(0.67), 0.55);
-    assert_eq!(l.quantize(0.68), 0.68);
-    assert_eq!(l.quantize(0.79), 0.68);
-    assert_eq!(l.quantize(0.80), 0.80);
-    assert_eq!(l.quantize(0.91), 0.80);
-    assert_eq!(l.quantize(0.92), 0.92);
-    assert_eq!(l.quantize(1.00), 0.92);
-    // Below the first band still floors to 0.55.
-    assert_eq!(l.quantize(0.0), 0.55);
+    // Snap-down to the largest band met, floored at 0.72.
+    assert_eq!(l.quantize(0.72), 0.72);
+    assert_eq!(l.quantize(0.81), 0.72);
+    assert_eq!(l.quantize(0.82), 0.82);
+    assert_eq!(l.quantize(0.90), 0.82);
+    assert_eq!(l.quantize(0.91), 0.91);
+    assert_eq!(l.quantize(0.99), 0.91);
+    assert_eq!(l.quantize(1.00), 1.0);
+    // Below the first band still floors to 0.72.
+    assert_eq!(l.quantize(0.0), 0.72);
 }
 
 #[test]
@@ -54,12 +53,12 @@ fn face_brightness_follows_the_light_model() {
     let l = PenaltyLightModel::stage1();
     // A face pointing straight at the light is fully lit: ambient + directional.
     let toward_light = l.direction.mul_scalar(-1.0);
-    assert!((l.face_brightness(toward_light) - 1.20).abs() < 1.0e-3);
+    assert!((l.face_brightness(toward_light) - 1.27).abs() < 1.0e-3);
     // A face pointing away receives only ambient.
-    assert!((l.face_brightness(l.direction) - 0.55).abs() < 1.0e-3);
+    assert!((l.face_brightness(l.direction) - 0.72).abs() < 1.0e-3);
     // The up face is bright (upper-front-left light) → quantizes to the top band.
     let up = Vec3::new(0.0, 1.0, 0.0);
-    assert_eq!(l.quantize(l.face_brightness(up)), 0.92);
+    assert_eq!(l.quantize(l.face_brightness(up)), 1.0);
 }
 
 // --- materials --------------------------------------------------------------
@@ -212,9 +211,11 @@ fn pass3_render_and_style_descriptors_rebuild_identically() {
 
 #[test]
 fn representative_shaded_colors_use_the_top_band() {
-    // World lit items are shaded by the top face (up normal → 0.92 band), so a
-    // fully-white material renders at 0.92 brightness. This confirms shading is
-    // actually applied to render items.
+    // World lit items are shaded by the top face (up normal → the top band, now
+    // opened to full daylight 1.0 by the lighting pass), so a top-band item
+    // renders at its base color. This confirms shading is actually applied to
+    // render items and the top band is full daylight.
+    let l = PenaltyLightModel::stage1();
     let p = plan();
     let lines = p
         .items
@@ -224,8 +225,10 @@ fn representative_shaded_colors_use_the_top_band() {
     match lines.content {
         PenaltyRenderContent::World { shaded_color, material: m, .. } => {
             let base = material(m).base_color;
-            assert!(shaded_color.r < base.r, "lit material must be darkened by quantized brightness");
-            assert!((shaded_color.r - base.r * 0.92).abs() < 1.0e-4);
+            // Shading ran end-to-end: the up-face top band is full daylight (1.0),
+            // so the lit item renders at its base color.
+            assert_eq!(l.quantize(l.face_brightness(Vec3::new(0.0, 1.0, 0.0))), 1.0);
+            assert!((shaded_color.r - base.r).abs() < 1.0e-4);
         }
         PenaltyRenderContent::Hud { .. } => panic!("line.goal must be a world item"),
     }
