@@ -115,6 +115,18 @@ pub struct WasmGame {
     /// The version of `textures_2d`, bumped on every upload so the presenter
     /// re-uploads the set to the live backend only when it changed (never per frame).
     textures_2d_generation: u32,
+    /// The 3D mesh set, cached from the bridge so it is passed to the live presenter
+    /// by reference every frame (mirroring how the 2D path passes `textures_2d`).
+    /// The presenter gates the actual GPU re-upload on the generation, so passing it
+    /// every frame is what makes a game's own meshes reach the backend once its async
+    /// bind resolves — no runtime-side "already presented" flag that could race the
+    /// bind. Refreshed from the bridge only when the mesh generation changed, so a
+    /// steady stream of frames clones nothing.
+    render_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+    /// The generation of `render_meshes` (the bridge's mesh generation at the last
+    /// refresh), handed to the presenter as the re-upload gate. `u32::MAX` so the
+    /// first real generation refreshes the cache.
+    render_meshes_generation: u32,
 }
 
 /// The opaque background a 2D frame clears to before its draws — the dark slate the
@@ -163,6 +175,8 @@ impl WasmGame {
             windowing: WindowingApi::new(),
             textures_2d: Vec::new(),
             textures_2d_generation: 0,
+            render_meshes: Vec::new(),
+            render_meshes_generation: u32::MAX,
         }
     }
 
@@ -286,6 +300,21 @@ impl WasmGame {
     /// A no-op until [`Self::bind_surface`]'s backend init has resolved.
     #[wasm_bindgen(js_name = renderScene)]
     pub fn render_scene(&mut self) {
+        // Hand the live presenter the current mesh set every frame (by reference),
+        // versioned by the bridge's mesh generation; the presenter re-uploads to the
+        // backend only when the generation changed. This is the peer of the 2D
+        // texture-generation re-upload, and it is what lets a game's own meshes reach
+        // the GPU: only the meshes present when the surface bound — the engine's demo
+        // scene — are uploaded at bind, so without this a game's later meshes render
+        // as "unknown mesh" and are skipped. The local cache is refreshed only when
+        // the generation changed, so a steady stream of frames clones no geometry.
+        let generation = self.bridge.mesh_generation();
+        (generation != self.render_meshes_generation).then(|| {
+            self.render_meshes = self.bridge.mesh_set();
+            self.render_meshes_generation = generation;
+        });
+        self.windowing
+            .update_present_meshes(&self.render_meshes, self.render_meshes_generation);
         let outcome = self.bridge.render_frame();
         let lights: Vec<(u32, [f32; 3], [f32; 3], f32)> = outcome
             .lights()

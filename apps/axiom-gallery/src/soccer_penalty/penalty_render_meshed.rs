@@ -31,7 +31,7 @@
 //! `spawn`/`despawn` — never `reauthor`, which would rebuild the mesh store from
 //! the catalog-only closure and wipe the custom meshes.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use axiom::prelude::*;
 use axiom_math::Quat;
@@ -40,6 +40,8 @@ use axiom_proc_texture::ProcTextureApi;
 use axiom_recipe::RecipeGraph;
 
 use crate::soccer_penalty::low_poly_assets::{PrimitiveShape, Rgba};
+use crate::soccer_penalty::penalty_body::{self, BodyPart};
+use crate::soccer_penalty::penalty_materials::{material, PenaltyMaterialId};
 use crate::soccer_penalty::penalty_render_plan::PenaltyRenderContent;
 use crate::soccer_penalty::penalty_scene::DioramaRole;
 use crate::soccer_penalty::recipe_style::SoccerRecipeStyle;
@@ -349,45 +351,84 @@ impl PenaltyMeshedScene {
         let mut index = 0u64;
         // Collect first so the immutable borrow of `frame` doesn't overlap the
         // mutable `self`/`app` borrows in the spawn loop.
-        let objects: Vec<_> = frame
+        let objects: Vec<WorldObj> = frame
             .render_plan
             .items
             .iter()
             .filter_map(|item| match item.content {
-                PenaltyRenderContent::World { role, shape, position, rotation, size, shaded_color, .. } => {
-                    Some((role, item.label, shape, position, rotation, size, shaded_color))
+                PenaltyRenderContent::World { role, shape, position, rotation, size, material, shaded_color, .. } => {
+                    Some(WorldObj { role, label: item.label, shape, position, rotation, size, material, color: shaded_color })
                 }
                 _ => None,
             })
             .collect();
+
+        // The athletes are skinned into continuous MetaSurface bodies first.
+        let athletes: Vec<WorldObj> = objects.iter().copied().filter(|o| is_athlete(o.role)).collect();
+        self.author_bodies(app, &athletes);
+
+        // Everything else spawns per-primitive. The depth-bias index still walks
+        // every object (athletes included) so the non-athlete bias values stay
+        // byte-identical to before the split.
         let lib = self.lib;
-        objects.into_iter().for_each(|(role, label, shape, position, rotation, size, color)| {
-            let to_eye = cam.eye.subtract(position);
-            let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
-            let biased = position.add(dir.mul_scalar(index as f32 * 0.0015));
-            let material = self.material_for(app, color, self.texture_for(role, label));
-            // The part's world placement: translate ∘ rotate. Each sub-part carries
-            // its own local transform (scale, plus a bone-frame offset for limb
-            // joints), composed *inside* the part rotation so a limb's joint
-            // spheres ride onto the shoulder/elbow/wrist as the bone swings.
-            let base = Transform::combine(
-                Transform::from_translation(biased),
-                Transform::from_rotation(rotation),
-            );
-            // One posed part now yields a small list of drawable sub-parts (a limb
-            // is a cylinder body + two joint spheres; everything else is one mesh),
-            // each spawned and tracked so next frame's despawn clears them all.
-            sub_parts(classify(shape, label), size, lib).into_iter().for_each(|sp| {
-                let entity = app.spawn(Spawn::new(
-                    Transform::combine(base, sp.local),
-                    sp.mesh,
-                    material,
-                ));
-                self.spawned.push(entity);
+        objects.into_iter().for_each(|o| {
+            (!is_athlete(o.role)).then(|| {
+                let to_eye = cam.eye.subtract(o.position);
+                let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
+                let biased = o.position.add(dir.mul_scalar(index as f32 * 0.0015));
+                let mat = self.material_for(app, o.color, self.texture_for(o.role, o.label));
+                // The part's world placement: translate ∘ rotate. Each sub-part
+                // carries its own local transform (scale, plus a bone-frame offset
+                // for limb joints), composed *inside* the part rotation.
+                let base = Transform::combine(Transform::from_translation(biased), Transform::from_rotation(o.rotation));
+                sub_parts(classify(o.shape, o.label), o.size, lib).into_iter().for_each(|sp| {
+                    let entity = app.spawn(Spawn::new(Transform::combine(base, sp.local), sp.mesh, mat));
+                    self.spawned.push(entity);
+                });
             });
             index += 1;
         });
     }
+
+    /// Skin the athletes into continuous bodies: group their posed parts by kit
+    /// material and bake one [`penalty_body`] `MetaSurface` per group, drawn as a
+    /// single world-space entity in that material's base colour. This replaces
+    /// the box-man's disjoint primitives (and its sphere-joint fillers) with one
+    /// smooth, tapered surface per region.
+    fn author_bodies(&mut self, app: &mut RunningApp, athletes: &[WorldObj]) {
+        let mut groups: BTreeMap<PenaltyMaterialId, Vec<BodyPart>> = BTreeMap::new();
+        athletes.iter().for_each(|o| {
+            groups.entry(o.material).or_default().push(BodyPart { position: o.position, rotation: o.rotation, size: o.size });
+        });
+        let api = ProcMeshApi::new();
+        let mut recipe_id = recipe_meshes::ids::BODY_BASE;
+        groups.iter().for_each(|(id, parts)| {
+            let mesh = bake_mesh(app, &api, &penalty_body::body_recipe(recipe_id, parts), 0);
+            let mat = self.material_for(app, material(*id).base_color, 0);
+            let entity = app.spawn(Spawn::new(Transform::IDENTITY, mesh, mat));
+            self.spawned.push(entity);
+            recipe_id += 1;
+        });
+    }
+}
+
+/// One collected world primitive from the render plan.
+#[derive(Clone, Copy)]
+struct WorldObj {
+    role: DioramaRole,
+    label: &'static str,
+    shape: PrimitiveShape,
+    position: Vec3,
+    rotation: Quat,
+    size: Vec3,
+    material: PenaltyMaterialId,
+    color: Rgba,
+}
+
+/// Whether a role is an athlete (skinned as a continuous body) rather than
+/// scenery (drawn per primitive).
+fn is_athlete(role: DioramaRole) -> bool {
+    matches!(role, DioramaRole::Kicker | DioramaRole::Goalie)
 }
 
 /// Build the empty meshed app shell (window + clear colour + default plugins).

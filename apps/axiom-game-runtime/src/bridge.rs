@@ -103,6 +103,13 @@ pub struct GameBridge {
     /// The presentation texture/font handle registry (SPEC-04 §10), driven by the
     /// `load_texture` / `texture_url` / `load_font` methods in [`crate::assets`].
     pub(crate) assets: AssetRegistry,
+    /// The 3D mesh-set generation (SPEC-11), bumped whenever the retained scene
+    /// registers a mesh (`create_mesh` / `create_mesh_data`) or clears
+    /// (`clear_scene`). The wasm present loop reads it to re-upload the mesh set to
+    /// the live backend only on change — the peer of the 2D texture generation, and
+    /// what lets a game's own meshes reach the GPU instead of only the demo set the
+    /// surface bound with.
+    pub(crate) mesh_generation: u32,
 }
 
 impl GameBridge {
@@ -124,12 +131,20 @@ impl GameBridge {
             ui: UiState::new(),
             draw2d: Draw2dApi::new(),
             assets: AssetRegistry::new(),
+            mesh_generation: 0,
         }
     }
 
     /// The host-supplied session seed, fixed before tick 0.
     pub fn seed(&self) -> u64 {
         self.seed
+    }
+
+    /// The current 3D mesh-set generation (see the field docs): the wasm
+    /// `render_scene` compares it against the last uploaded generation to decide
+    /// whether to re-upload the mesh set to the live presenter this frame.
+    pub fn mesh_generation(&self) -> u32 {
+        self.mesh_generation
     }
 
     /// Bank `elapsed_nanos` of real host time and run the resulting whole fixed

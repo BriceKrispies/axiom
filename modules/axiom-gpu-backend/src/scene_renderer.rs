@@ -924,6 +924,23 @@ impl SceneRenderer {
         self.meshes
             .insert(mesh_id, upload_mesh(device, vertices, indices));
     }
+
+    /// Replace the WHOLE uploaded mesh set (`(mesh_id, 12-float vertices,
+    /// indices)`), rebuilding the id→buffers map. The 3D peer of
+    /// [`Self::replace_geometry`]: where that swaps one existing mesh's geometry,
+    /// this re-uploads the entire set, so a retained scene that registered new
+    /// meshes AFTER bind (e.g. an `@axiom/game` game that `clearScene`s then
+    /// authors its own meshes) has them all on the GPU, not just the bind-time set.
+    pub(crate) fn load_meshes(
+        &mut self,
+        device: &wgpu::Device,
+        meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    ) {
+        self.meshes = meshes
+            .iter()
+            .map(|(id, vertices, indices)| (*id, upload_mesh(device, vertices, indices)))
+            .collect();
+    }
 }
 
 /// A uniform-buffer bind group layout entry at `binding` for the given stages.

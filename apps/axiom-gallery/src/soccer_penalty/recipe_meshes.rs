@@ -38,6 +38,11 @@ pub mod ids {
     pub const CAPSULE: u64 = 702;
     /// The softened (bevelled) box — the athletes' torsos, pelvises, and feet.
     pub const BEVEL_BOX: u64 = 703;
+    /// Base of the reserved band for per-pose **continuous athlete body** recipes
+    /// (`MetaSurface`, one per kit-material group), built inline from the live
+    /// pose by [`crate::soccer_penalty::penalty_body`] rather than in
+    /// [`catalog`]. Ids `710..` are allocated per group per author pass.
+    pub const BODY_BASE: u64 = 710;
 }
 
 /// A unit cube (extent 1, centred at the origin), UV-projected — the shared shape

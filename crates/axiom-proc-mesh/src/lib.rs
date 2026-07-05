@@ -2,10 +2,12 @@
 //!
 //! A tiny set of mesh operators that a recipe composes into a neutral
 //! [`MeshBuffer`] (parallel position / normal / uv streams + a triangle-list
-//! index buffer). Four **sources** (Cube, Cylinder, Grid, Sphere) and seven
-//! **transforms** (Transform, Extrude, Bevel, Bend, Displace, UVProject,
-//! Triangulate), dispatched branchlessly by a `const` table over the operator
-//! code and baked through the shared [`axiom_proc_core::ProcCore`] executor.
+//! index buffer). Five **sources** (Cube, Cylinder, Grid, Sphere, MetaSurface)
+//! and seven **transforms** (Transform, Extrude, Bevel, Bend, Displace,
+//! UVProject, Triangulate), dispatched branchlessly by a `const` table over the
+//! operator code and baked through the shared [`axiom_proc_core::ProcCore`]
+//! executor. MetaSurface is the implicit-surface source that skins a capsule
+//! skeleton into one continuous body (marching cubes over a metaball field).
 //!
 //! ## What it is, and is not
 //! - **Neutral output.** A [`MeshBuffer`] is plain geometry — the shape an app
@@ -18,6 +20,8 @@
 //!   The transform/deform operators are deliberately simple v0 forms.
 
 mod dispatch;
+mod implicit;
+mod mc_tables;
 mod mesh_buffer;
 mod mesh_op;
 mod primitives;

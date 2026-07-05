@@ -428,6 +428,12 @@ impl LiveGpuBinding {
         self.renderer
             .replace_geometry(&self.device, mesh_id, vertices, indices);
     }
+
+    /// Re-upload the WHOLE mesh set, so a retained scene that registered meshes
+    /// after bind has them all on the GPU (see [`crate::scene_renderer::SceneRenderer::load_meshes`]).
+    pub fn load_meshes(&mut self, meshes: &[(u64, Vec<f32>, Vec<u32>)]) {
+        self.renderer.load_meshes(&self.device, meshes);
+    }
 }
 
 /// Request the render device + queue from an adapter, with the engine's shared

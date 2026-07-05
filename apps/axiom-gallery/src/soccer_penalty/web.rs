@@ -214,18 +214,32 @@ mod tests {
     #[test]
     fn authors_the_diorama_into_the_engine_scene() {
         use crate::soccer_penalty::penalty_render_meshed::soccer_meshed_app;
+        use crate::soccer_penalty::penalty_scene::DioramaRole;
         let frame = SoccerPenaltyApp::build_stage1();
-        let world_items = frame
-            .render_plan
-            .items
-            .iter()
-            .filter(|it| matches!(it.content, PenaltyRenderContent::World { .. }))
-            .count();
-        // The shared meshed scene (the one the gallery AND the convergence
-        // champion render) draws exactly one real-mesh renderable per world item;
-        // the camera + light are not draws.
+        // The shared meshed scene (the one the gallery AND the convergence champion
+        // render) draws every world object, dropping nothing — but the athletes
+        // (kicker + goalie) are now skinned into ONE continuous MetaSurface body
+        // per kit material instead of one draw per part. So the expected draw count
+        // is: every non-athlete world item (one draw each) plus one body per
+        // distinct athlete kit material. Camera + light are not draws.
+        let is_athlete = |r| matches!(r, DioramaRole::Kicker | DioramaRole::Goalie);
+        let mut non_athlete = 0usize;
+        let mut kit_materials = std::collections::BTreeSet::new();
+        frame.render_plan.items.iter().for_each(|it| {
+            if let PenaltyRenderContent::World { role, material, .. } = it.content {
+                if is_athlete(role) {
+                    kit_materials.insert(material);
+                } else {
+                    non_athlete += 1;
+                }
+            }
+        });
+        let expected = non_athlete + kit_materials.len();
         let mut app = soccer_meshed_app(frame);
         let outcome = app.tick(0);
-        assert_eq!(outcome.draws().len(), world_items);
+        assert_eq!(outcome.draws().len(), expected);
+        // The skinning genuinely collapses parts: there are more athlete parts than
+        // kit-material bodies (the box-man's disjoint primitives are gone).
+        assert!(kit_materials.len() < 31, "athletes drew as {} grouped bodies", kit_materials.len());
     }
 }

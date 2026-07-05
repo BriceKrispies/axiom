@@ -361,6 +361,15 @@ impl GpuBackendApi {
             .iter_mut()
             .for_each(|live| live.replace_geometry(mesh_id, vertices, indices));
     }
+
+    /// Re-upload the WHOLE mesh set (the 3D peer of [`Self::load_draw2d_textures`]),
+    /// so a retained scene that registered meshes after bind renders them all —
+    /// windowing calls this when its mesh-set generation changes. A no-op when no
+    /// live binding is initialised.
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_meshes(&mut self, meshes: &[(u64, Vec<f32>, Vec<u32>)]) {
+        self.live.iter_mut().for_each(|live| live.load_meshes(meshes));
+    }
 }
 
 #[cfg(test)]

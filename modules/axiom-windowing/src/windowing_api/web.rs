@@ -341,6 +341,22 @@ impl WindowingApi {
             });
     }
 
+    /// Update the bound presenter's 3D mesh set (a no-op until bind resolves, and
+    /// until `generation` changes). `generation` versions the set so the backend
+    /// re-uploads it only on change — the 3D peer of the `textures_generation` arg
+    /// [`Self::present_2d`] takes. A caller-owned 3D loop calls this before
+    /// [`Self::present_frame`] on frames where the retained scene registered a mesh
+    /// or cleared, so a game's own meshes reach the GPU instead of only the
+    /// bind-time (demo) set. wasm32 only.
+    #[cfg(target_arch = "wasm32")]
+    pub fn update_present_meshes(&self, meshes: &[(u64, Vec<f32>, Vec<u32>)], generation: u32) {
+        self.presenter
+            .borrow()
+            .as_ref()
+            .into_iter()
+            .for_each(|presenter| presenter.load_meshes(meshes, generation));
+    }
+
     /// Whether a caller-owned loop should keep stepping the game this frame —
     /// `true` when live and focused, `false` while the bound presenter's scrubber
     /// overlay is scrubbing or after focus loss (Escape / blur). `true` when no
@@ -888,7 +904,10 @@ pub(crate) struct LivePresenter {
     request: axiom_host::HostPresentationRequest,
     // Reference-counted so a device-loss rebuild re-uploads the same scene to a
     // fresh backend without re-cloning the (potentially large) vertex/pixel data.
-    meshes: std::rc::Rc<Vec<(u64, Vec<f32>, Vec<u32>)>>,
+    // The mesh set is in a `RefCell` because a retained scene can register new
+    // meshes after bind: `load_meshes` swaps in the current set (so a later
+    // device-loss rebuild re-uploads *that*, not the stale bind-time set).
+    meshes: std::cell::RefCell<std::rc::Rc<Vec<(u64, Vec<f32>, Vec<u32>)>>>,
     materials: std::rc::Rc<Vec<(u64, u32, u32, Vec<u8>)>>,
     max_instances: u32,
     width: u32,
@@ -912,6 +931,13 @@ pub(crate) struct LivePresenter {
     // when it adds a texture; the backend re-upload then happens at most once per
     // change, never per frame.
     applied_texture_generation: std::cell::Cell<u32>,
+    // The 3D mesh-set generation last uploaded to the backend (the peer of
+    // `applied_texture_generation`). `u32::MAX` until the first `load_meshes`, so
+    // the first changed set always uploads — which also re-applies the current set
+    // after an async (re)bind, since a fresh presenter starts here. Bumped by the
+    // caller (the runtime) when it registers a mesh or clears the scene; the
+    // backend re-upload then happens at most once per change, never per frame.
+    applied_mesh_generation: std::cell::Cell<u32>,
 }
 
 // The live backends hold no `Debug`; the presenter is a field of the
@@ -988,7 +1014,7 @@ impl LivePresenter {
             backend: Rc::new(RefCell::new(backend)),
             canvas,
             request,
-            meshes,
+            meshes: RefCell::new(meshes),
             materials,
             max_instances,
             width,
@@ -1000,6 +1026,8 @@ impl LivePresenter {
                 .flatten(),
             // No 2D textures applied yet; the first `present_2d` uploads the set.
             applied_texture_generation: Cell::new(u32::MAX),
+            // No mesh generation applied yet; the first changed set uploads.
+            applied_mesh_generation: Cell::new(u32::MAX),
         })
     }
 
@@ -1052,6 +1080,22 @@ impl LivePresenter {
         }
     }
 
+    /// Re-upload the 3D mesh set when its `generation` changed since the last
+    /// upload — the peer of [`Self::present_2d`]'s `textures_generation` gate. The
+    /// caller-owned loop calls this (via windowing's `update_present_meshes`)
+    /// whenever the retained scene registers a mesh or clears; the set is
+    /// (re)uploaded to the backend at most once per change, and stored so a later
+    /// device-loss rebuild re-uploads the CURRENT meshes, not the stale bind-time
+    /// set. Without this, only the meshes that existed at bind (the engine's demo
+    /// scene) are ever on the GPU, and a game's later meshes render as "unknown".
+    pub fn load_meshes(&self, meshes: &[(u64, Vec<f32>, Vec<u32>)], generation: u32) {
+        (self.applied_mesh_generation.get() != generation).then(|| {
+            self.backend.borrow_mut().load_meshes(meshes);
+            *self.meshes.borrow_mut() = std::rc::Rc::new(meshes.to_vec());
+            self.applied_mesh_generation.set(generation);
+        });
+    }
+
     /// Whether the caller-owned loop should keep stepping the game this frame: true
     /// when live AND focused, false while scrubbing or after focus loss (Escape /
     /// blur / tab hidden). The host gates its `advance` on this so the sim freezes
@@ -1099,7 +1143,9 @@ impl LivePresenter {
             self.reinitializing.set(true);
             let be = self.backend.clone();
             let canvas = self.canvas.clone();
-            let meshes = self.meshes.clone();
+            // Rebuild from the CURRENT mesh set (a retained scene may have registered
+            // meshes after bind), not the stale bind-time snapshot.
+            let meshes = self.meshes.borrow().clone();
             let materials = self.materials.clone();
             let flag = self.reinitializing.clone();
             let request = self.request;
@@ -1268,6 +1314,16 @@ impl LiveBackend {
         match self {
             LiveBackend::Gpu(backend) => backend.replace_geometry(mesh_id, vertices, indices),
             LiveBackend::Canvas(backend) => backend.replace_geometry(mesh_id, vertices, indices),
+        }
+    }
+
+    /// Re-upload (replacing) the WHOLE mesh set — the 3D peer of
+    /// [`Self::load_2d_textures`]. Forwarded to whichever backend won the cascade so
+    /// a retained scene that registered meshes after bind renders them all.
+    fn load_meshes(&mut self, meshes: &[(u64, Vec<f32>, Vec<u32>)]) {
+        match self {
+            LiveBackend::Gpu(backend) => backend.load_meshes(meshes),
+            LiveBackend::Canvas(backend) => backend.load_meshes(meshes),
         }
     }
 }

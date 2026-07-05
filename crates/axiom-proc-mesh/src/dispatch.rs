@@ -2,6 +2,7 @@
 
 use axiom_proc_core::NodeEval;
 
+use crate::implicit::meta_surface;
 use crate::mesh_buffer::MeshBuffer;
 use crate::primitives::{cube, cylinder, grid, sphere};
 use crate::transforms::{bend, bevel, displace, extrude, transform, triangulate, uv_project};
@@ -11,7 +12,7 @@ type MeshOpFn = for<'a> fn(NodeEval<'a, MeshBuffer>) -> Option<MeshBuffer>;
 
 /// The dispatch table. Its order mirrors [`crate::MeshOp`] so `op as usize`
 /// selects the operator — a table index, never a `match`.
-const OPS: [MeshOpFn; 11] = [
+const OPS: [MeshOpFn; 12] = [
     cube,
     cylinder,
     grid,
@@ -23,6 +24,7 @@ const OPS: [MeshOpFn; 11] = [
     uv_project,
     triangulate,
     sphere,
+    meta_surface,
 ];
 
 /// Evaluate one node: select its operator by code and run it. An operator code

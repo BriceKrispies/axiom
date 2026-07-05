@@ -92,7 +92,11 @@ impl GameBridge {
             .into_iter()
             .nth(index)
             .unwrap_or_else(Mesh::cube);
-        self.runtime.app_mut().add_mesh(mesh).id()
+        let id = self.runtime.app_mut().add_mesh(mesh).id();
+        // The mesh set changed → bump the generation so the wasm present loop
+        // re-uploads it to the live backend (else this new mesh is never on the GPU).
+        self.mesh_generation = self.mesh_generation.wrapping_add(1);
+        id
     }
 
     /// Register an author-supplied mesh from flat vertex arrays (`createMeshData`):
@@ -111,10 +115,10 @@ impl GameBridge {
         indices: &[u32],
     ) -> u64 {
         let data = MeshData::new(v3_list(positions), v3_list(normals), v2_list(uvs), indices.to_vec());
-        self.runtime
-            .app_mut()
-            .add_mesh_data(data)
-            .map_or(0, |handle| handle.id())
+        let id = self.runtime.app_mut().add_mesh_data(data).map_or(0, |handle| handle.id());
+        // The mesh set changed (even a rejected mesh is a cheap harmless re-upload).
+        self.mesh_generation = self.mesh_generation.wrapping_add(1);
+        id
     }
 
     /// Register a fully-specified lit material and return its handle id
@@ -212,6 +216,9 @@ impl GameBridge {
     /// [`Self::create_mesh`] / [`Self::create_material`] mint 1-based handles again.
     pub fn clear_scene(&mut self) {
         self.runtime.app_mut().reauthor(|_scene, _meshes, _materials| {});
+        // The mesh store was reset → bump the generation so the live backend drops
+        // the demo geometry and picks up whatever the game authors next.
+        self.mesh_generation = self.mesh_generation.wrapping_add(1);
     }
 
     /// Spawn the active camera as a first-person **controller** at `position` with
