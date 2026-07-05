@@ -126,12 +126,16 @@ fn no_scene_resources_or_render_imports() {
 }
 
 #[test]
-fn no_real_gpu_backend_today() {
-    // The vertical slice does not compile real wgpu / web-sys / wasm-bindgen
-    // bindings; the backend is the deterministic recorder.
+fn no_browser_bindings() {
+    // The default backend is the deterministic recorder, and the live arm is
+    // real *native* `wgpu` behind the off-by-default `offscreen` feature. Real
+    // *browser* bindings (web-sys / js-sys / wasm-bindgen) live in a host
+    // adapter app, never in this module — a browser swap-chain present is not
+    // this module's job. `wgpu::` is therefore permitted; browser glue is not.
     assert_absent(
-        &["wgpu::", "web_sys::", "js_sys::", "wasm_bindgen::"],
-        "axiom-webgpu must not import a real GPU/JS binding today (see ARCHITECTURE.md)",
+        &["web_sys::", "js_sys::", "wasm_bindgen::"],
+        "axiom-webgpu must not import a browser binding (see ARCHITECTURE.md); \
+         the native wgpu arm lives behind the `offscreen` feature",
     );
 }
 

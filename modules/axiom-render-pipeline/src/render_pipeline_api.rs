@@ -10,9 +10,28 @@ use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
 
 /// Column-major matrix that remaps OpenGL clip depth `z' = (z + w) / 2` so the
-/// engine's `[-1,1]` projection lands in wgpu's `[0,1]` clip space. The report's
-/// `view_projection` is pre-multiplied by this, so a caller's
-/// `view_projection * world` is a wgpu-ready model-view-projection.
+/// engine's `[-1,1]` projection lands in wgpu's `[0,1]` clip space.
+///
+/// # M2 — the report bakes a backend convention (known, cross-stream follow-up)
+/// The [`RenderReport`]'s `view_projection` and `light_view_proj` are still
+/// pre-multiplied by this, even though the report feeds *both* the wgpu path and
+/// the software Canvas2D path. That is the backend-neutrality break the
+/// vertical-slice audit flags as M2. The **correct end-state** — proven by the
+/// unified chain — is: keep the report (and the `GpuSubmission`, which already
+/// carries the *raw* camera via `set_input_camera` below) backend-neutral, and
+/// apply this remap **in the wgpu consumer**. `axiom-webgpu`'s live present does
+/// exactly that (`GL_TO_WGPU_DEPTH` lives in its `live_present` module).
+///
+/// Fully removing the bake *here* is **not** a render-pipeline-local change: the
+/// same convention threads through `axiom-render`'s `build_sdf_scene`
+/// (`view_proj`/`inv_view_proj` — Stream A's contract), `axiom-gpu-backend`'s
+/// mesh/shadow/SDF shaders (which today rely on the baked MVP), and
+/// `axiom-canvas2d-backend`'s depth-cue, whose fog is tuned for the `[0,1]`
+/// range it currently receives (`FogCue { near: 0.85, far: 1.0 }`). Neutralizing
+/// this field without moving the convention into each of those consumers would
+/// silently break Canvas2D fog and GPU depth compositing. It is a coordinated
+/// follow-up (Stream A `axiom-render` + gpu-backend shaders + canvas2d), not a
+/// local edit — see the report's field docs below.
 const GL_TO_WGPU_DEPTH: [f32; 16] = [
     1.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0,
@@ -254,11 +273,11 @@ impl RenderPipelineApi {
         render.set_input_clear_color(&mut input, frame.clear_color);
 
         // Camera: the first camera, if any. view = inverse(node world);
-        // projection from validated intrinsics. The wgpu-ready view-projection
-        // is reported for callers that build per-instance MVPs. `map_or`
-        // collapses the present/absent arms into a single expression: absent
-        // yields identity, present sets the camera command and returns the
-        // depth-corrected view-projection.
+        // projection from validated intrinsics. The GpuSubmission camera command
+        // carries the *raw* view/projection (neutral); only the reported
+        // `view_projection` bakes the wgpu depth remap (`GL_TO_WGPU_DEPTH` M2
+        // note). `map_or` collapses present/absent into one expression: absent
+        // yields identity; present sets the camera command + returns the VP.
         let camera = snapshot.cameras().first().map(|cam| {
             let cam_world = snapshot
                 .node(cam.node())
@@ -515,8 +534,13 @@ impl RenderPipelineApi {
         report.clear_color
     }
 
-    /// The wgpu-ready view-projection: multiply by an object's world matrix to
-    /// get its model-view-projection.
+    /// The view-projection: multiply by an object's world matrix to get its
+    /// model-view-projection. **Note (M2):** this currently bakes the wgpu depth
+    /// remap (`GL_TO_WGPU_DEPTH`) even though the same report also feeds the
+    /// Canvas2D backend; the backend-neutral end-state applies that remap in the
+    /// wgpu consumer (as `axiom-webgpu`'s live present does). See
+    /// `GL_TO_WGPU_DEPTH`'s doc for why neutralizing it here is a coordinated
+    /// cross-module follow-up.
     pub fn report_view_projection(&self, report: &RenderReport) -> Mat4 {
         report.view_projection
     }
