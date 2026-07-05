@@ -1,31 +1,34 @@
-# Champion = promoted iteration 2 (rigid low-poly humanoid character kit) vs reference.png.
-# Same harness (axiom-shot --app soccer-penalty --backend gpu, tick 0), byte-deterministic
-# (md5 77ba2c26… identical on a double render). 0..5, harsh; a proxy = 1.
+# Champion = the R3-STACK render (commit a042900 "promote R3-stack champion —
+# 7 lenses + cinematic grade") vs reference.png. Same harness (axiom-shot --app
+# soccer-penalty --backend gpu, tick 0), byte-deterministic. 0..5, harsh; a proxy = 1.
 # final_score = lowest*0.7 + avg*0.3
 #
-# RECALIBRATED by the convergence critic (2026-07-04). The prior scores were
-# inflated against the identity bar: "merely reads as the same subject = 1, not 3;
-# a stylized/low-poly render is not 4-5; when unsure take the lower." The champion
-# pairs flat-shaded low-poly actors/turf with dithered noise bands (the crowd and
-# the ad boards) — an illegible ad band, a flat two-line pitch, a wireframe goal
-# cage, a thumbnail keeper proxy — held against a clean, crisp low-poly mobile
-# penalty reference. Six axes lowered below; comments mark each change and its reason.
+# RE-SCORED by the convergence critic (2026-07-04, r4). The R3 promotion swapped
+# champion.png to the 7-lens render (telephoto dolly-back, ball rosette, warm
+# terracotta crowd, legible red+blue ad boards, cinematic exposure/contrast/
+# saturation grade, softer contact shadows) but the scorecard + ledger still
+# described the OLD iteration-2 render — a stale record. This re-audit scores the
+# ACTUAL R3 champion. Three axes rose on genuine render gains (camera, ball,
+# stadium); the rest hold. Still a stylized PS1-look proxy vs a clean low-poly
+# mobile reference — harsh caps applied, "when unsure take the lower."
 
-composition_and_framing   = 3  # unchanged — kicker foreground / ball centre / goal upper-mid roughly tracks the reference layout.
-camera_lens_and_scale     = 2  # LOWERED 3->2. FOV/scale is off vs reference: the keeper is a tiny thumbnail in the goal and the goal proportions are squashed; framing is in the neighbourhood but the lens/scale does not match.
-kicker_silhouette         = 2  # LOWERED 3->2. Reads as a blocky blue-torso figure (round bald head, one arm), cropped at the bottom edge; NO jersey number renders and there is no hair — a recognizable proxy, not the reference's clean low-poly "10" figure. A 3 would need a clearly-read player form with a legible number.
-goalkeeper_silhouette     = 1  # LOWERED 2->1. Still a barely-humanoid yellow blob, a thumbnail in the goal mouth — a proxy. NOTE: the render DOES use PenaltyGoaliePose::idle_display() (penalty_scene.rs:348), a save-volume-DECOUPLED render-only arms-out stance, so the earlier "ready stance reverted, out of scope, moves save volumes" narrative is false and the +1 it justified was inflated. Harsh identity read = proxy = 1.
-ball_fidelity             = 2  # unchanged — a recognizable black/white ball, but blocky/dithered.
-goal_and_net_fidelity     = 1  # unchanged — still a boxy wireframe cage, not a white frame + hanging net.
-field_markings_and_turf   = 1  # LOWERED 2->1. Flat green with two stray white lines; NO penalty spot, NO box, NO arc, NO mow stripes. A turf proxy, not the reference's marked pitch.
-stadium_and_ad_boards     = 1  # LOWERED 2->1. Ad boards are dark illegible blocks (reference: crisp red "AXIOM SPORTS"); crowd is a dithered noise band. Illegible = proxy = 1.
-lighting_shadow_and_depth = 2  # unchanged — hard blob shadows under the actors, flat fill.
-gameplay_readability      = 2  # unchanged — reads as a penalty setup (kicker/ball/goal/keeper) but no reticle, no HUD, no power bar.
-artifact_level            = 1  # LOWERED 2->1. Heavy ordered-dither banding + the wireframe-goal artifact dominate the frame; the reference is clean. Harsh = 1.
+composition_and_framing   = 3  # unchanged — telephoto kept the reference layout (kicker foreground / ball lower-mid / goal upper-mid / keeper centred); kicker now fuller-body.
+camera_lens_and_scale     = 3  # RAISED 2->3. The R3 telephoto dolly-back + narrow FOV matches the reference's flatter mobile-lens compression and the goal now HOLDS size (was "squashed / keeper a thumbnail"). Capped at 3: the kicker is over-scaled and cropped at the bottom edge and the keeper is still small in the goal mouth, so lens/scale is close but not matched.
+kicker_silhouette         = 2  # unchanged. Fuller-body now, but still a blocky blue-torso box-man from behind: round tan head (NO black hair), one bent arm, cropped legs, NO jersey "10". A recognizable proxy, not the reference's clean low-poly numbered figure.
+goalkeeper_silhouette     = 1  # unchanged. Still a small barely-humanoid yellow box-man arms-out in the goal mouth — a thumbnail proxy. (Render uses PenaltyGoaliePose::idle_display(), a save-volume-DECOUPLED render-only stance; the keeper is still identity-proxy = 1.) NEXT ATTACK.
+ball_fidelity             = 3  # RAISED 2->3. The modeler pass made the panels a symmetric pentagon ROSETTE (not a lopsided face); clean black/white, larger/closer under the telephoto. Capped at 3: still blocky low-res panels, not a crisp reference ball.
+goal_and_net_fidelity     = 1  # unchanged — still a boxy white WIREFRAME cage, not a white frame + hanging net cloth.
+field_markings_and_turf   = 1  # unchanged. Saturated green + two stray white lines; NO penalty spot, NO box, NO arc, NO mow stripes. A turf proxy, not the reference's marked pitch.
+stadium_and_ad_boards     = 2  # RAISED 1->2. Ad boards are now LEGIBLE solid red+blue colour panels (surfacing upres/aspect-correct) and the crowd is warm terracotta->ochre->amber (colorist) instead of a cold-blue noise band. Capped at 2: NO "AXIOM SPORTS" text, the reference boards are RED (render alternates red+blue), and the crowd is still dithered noise, not resolved figures.
+lighting_shadow_and_depth = 2  # unchanged. Contact shadows softened (0.20->0.14 alpha) and the cinematic grade deepens contrast, but the model is still flat Lambert with hard-ish blob shadows and no real depth/AO — grade is cosmetic, not lighting/depth fidelity.
+gameplay_readability      = 2  # unchanged — reads as a penalty setup (kicker/ball/goal/keeper) but still NO reticle, NO HUD (SCORE/ROUND/BEST), NO SHOT POWER bar.
+artifact_level            = 1  # unchanged. The warm grade recolours but does not remove the heavy ordered-dither crowd banding + the wireframe-goal artifact that still dominate the frame; the reference is clean. Harsh = 1.
 
 # lowest = 1, tied across goalkeeper_silhouette, goal_and_net_fidelity,
-# field_markings_and_turf, stadium_and_ad_boards, artifact_level.
+# field_markings_and_turf, artifact_level.
 # By FIXED axis order the first axis at the lowest value is goalkeeper_silhouette.
-# avg = 18/11 = 1.64. final_score = 1*0.7 + 1.64*0.3 = 1.19 (was reported 1.35).
-# Next axis (lowest, ties by fixed order): goalkeeper_silhouette (=1) — NOT
-# goal_and_net_fidelity, which the inflated card had queued.
+# sum = 3+3+2+1+3+1+1+2+2+2+1 = 21. avg = 21/11 = 1.909.
+# final_score = 1*0.7 + 1.909*0.3 = 1.27 (was 1.19 for the iteration-2 render;
+# the +0.08 tracks the real R3 gains on camera/ball/stadium — not inflation).
+# Next axis (lowest, ties by fixed order): goalkeeper_silhouette (=1) — unchanged
+# from the R3 target; the keeper is still the earliest lowest axis.

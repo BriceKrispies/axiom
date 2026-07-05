@@ -186,3 +186,86 @@ stadium_and_ad_boards     = 1
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 1
+
+# --- R3-stack promotion + critic re-score --------------------------------------
+# The R3-stack proposal board applied 7 lens changes onto the champion and the
+# human promoted the resulting render (commit a042900 swapped champion.png). That
+# promotion did NOT update the scorecard/ledger, so the record went stale (still
+# describing the iteration-2 render). This iteration records the promotion AND the
+# critic's honest re-score of the ACTUAL R3 champion.
+[[iteration]]
+iteration = 4
+attacked_axis = "R3-stack promotion (7 lenses) + critic re-score"
+changed_files = [
+  # render change (already committed at a042900; app-tier + one existing-primitive reuse):
+  "apps/axiom-gallery/src/soccer_penalty/static_diorama.rs",       # art-director: telephoto dolly-back + narrow FOV
+  "apps/axiom-gallery/src/soccer_penalty/penalty_scene.rs",        # modeler: ball panels -> symmetric rosette
+  "apps/axiom-gallery/src/soccer_penalty/low_poly_assets.rs",      # lighting: contact-shadow alpha 0.20 -> 0.14
+  "apps/axiom-gallery/src/soccer_penalty/recipe_textures.rs",      # surfacing: ad-board panels upres + aspect-correct
+  "apps/axiom-gallery/src/soccer_penalty/penalty_materials.rs",    # colorist: warm terracotta->ochre->amber crowd
+  "modules/axiom-gpu-backend/src/offscreen.rs",                    # architect: thread EXISTING axiom_host::FramePostProcess grade
+  "modules/axiom-gpu-backend/src/gpu_backend_api.rs",
+  # this critic re-score (bookkeeping only):
+  "visual_targets/soccer_penalty_gameplay/scorecard.champion.toml",
+  "visual_targets/soccer_penalty_gameplay/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+The 7-lens R3 stack moved real pixels toward identity: telephoto dolly-back \
+(art-director) so the goal HOLDS size and the kicker reads fuller-body; the ball \
+panels became a symmetric pentagon ROSETTE (modeler); the ad boards became LEGIBLE \
+red+blue colour panels (surfacing upres/aspect-correct); the crowd went warm \
+terracotta->ochre->amber (colorist, killing the cold-blue noise cast); softer \
+contact shadows (lighting 0.20->0.14); and a cinematic exposure/contrast/saturation \
+grade threaded through the offscreen GPU path (architect). \
+CRITIC RE-SCORE against the identity bar (harsh, proxy = 1, "when unsure take the \
+lower"): three axes rose on genuine gains — camera_lens_and_scale 2->3 (telephoto \
+lens compression + goal holds size; capped by over-scaled/cropped kicker + still- \
+small keeper), ball_fidelity 2->3 (symmetric rosette; capped by blocky panels), \
+stadium_and_ad_boards 1->2 (legible red+blue boards + warm crowd; capped: no \
+"AXIOM SPORTS" text, boards should be RED not red+blue, crowd still dithered noise). \
+Everything else HELD; NO axis dropped (a legitimate promotion). \
+Recomputed: lowest = 1 (four-way tie: goalkeeper_silhouette, goal_and_net_fidelity, \
+field_markings_and_turf, artifact_level), avg = 21/11 = 1.909, final_score = 1.27 \
+(was 1.19 for the iteration-2 render; +0.08 tracks the real gains, not inflation). \
+RIGHT-AXIS: by fixed axis order the first axis at the lowest value is still \
+goalkeeper_silhouette, so the NEXT attack remains goalkeeper_silhouette (the small \
+yellow box-man keeper). \
+ABSTRACTION-GATE: no new record owed. Six of the seven lens changes are app-tier \
+constants/textures/materials/camera (outside the spine); the architect's grade \
+threads the ALREADY-EXISTING axiom_host::FramePostProcess / apply_frame_postprocess \
+primitive through the offscreen readback — reuse of an existing capability, not a \
+new primitive/field/shader, so no abstractions/NNNN.toml is required. \
+No parity is claimed; the render remains far from the clean low-poly mobile reference \
+(box-men actors, wireframe goal, no HUD/reticle/power bar, all-dithered crowd).
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 2
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 1
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 3
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 1
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 2
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 1
