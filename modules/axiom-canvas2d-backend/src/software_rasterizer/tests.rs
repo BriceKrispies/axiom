@@ -609,6 +609,35 @@ fn capability_profile_gates_the_postprocess_pass() {
 }
 
 #[test]
+fn capability_profile_gates_the_retro_32bit_pass() {
+    use axiom_host::{BackendCapabilityProfile, FrameLight, FrameRetro32BitProfile, RenderCapability};
+    let cache = MeshCache::load(&[gameplay_object(42, [1.0, 1.0, 1.0, 1.0])]);
+    let cam = Some(FrameCamera::new(IDENTITY, IDENTITY, FRONT_VP));
+    // A smoothly-shaded frame so the retro colour-depth quantize + ordered dither
+    // visibly reshapes the finished pixels.
+    let retro = FramePacket::new(
+        2,
+        120,
+        FrameViewport::new(48, 48),
+        [0.35, 0.22, 0.11, 1.0],
+        cam,
+        vec![draw(42, 42, [1.0; 4])],
+        vec![FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])],
+        IDENTITY,
+        FrameFeatureSet::new(false, true, 1, 0),
+    )
+    .with_retro_32bit_profile(FrameRetro32BitProfile::retro_32bit());
+    // Default profile (all) applies the retro quantize + dither...
+    let with = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&retro, &cache);
+    // ...but a profile WITHOUT Retro32Bit skips it — the same neutral post the GPU
+    // backend gates, now gated (and applied) on Canvas 2D too.
+    let restricted = opts_cued(48, 48, cues_off())
+        .with_capability_profile(BackendCapabilityProfile::all().without(RenderCapability::Retro32Bit));
+    let without = SoftwareRasterizer::new(restricted).rasterize_packet(&retro, &cache);
+    assert_ne!(with.rgba_bytes(), without.rgba_bytes(), "capability gate skips the retro pass");
+}
+
+#[test]
 fn disabling_contact_shadows_draws_none() {
     let obj = MeshCache::load(&[gameplay_object(8, [0.8, 0.3, 0.2, 1.0])]);
     let r = SoftwareRasterizer::new(opts_cued(64, 64, cues_off())).rasterize_packet(

@@ -340,6 +340,7 @@ impl LiveGpuBinding {
         batches: &[(u64, u64, Vec<f32>, u32)],
         clear: [f32; 4],
         sdf: Option<&axiom_host::SdfScene>,
+        caps: u32,
     ) -> Result<(), JsValue> {
         let frame = match self.acquire_texture()? {
             Some(frame) => frame,
@@ -349,7 +350,8 @@ impl LiveGpuBinding {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         // Render the scene at tier resolution into the intermediate target
-        // (renderer owns its own encoder + submit), ...
+        // (renderer owns its own encoder + submit), gating each per-fragment feature
+        // on the caller's capability mask.
         self.renderer.record(
             &self.device,
             &self.queue,
@@ -360,6 +362,7 @@ impl LiveGpuBinding {
             batches,
             clear,
             sdf,
+            caps,
         );
         // ... then upscale-blit it across the full swapchain view and present.
         let mut encoder = self

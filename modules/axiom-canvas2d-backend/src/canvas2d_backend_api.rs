@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use axiom_host::{
     BackendKind, Draw2dList, FrameDepthCueStats, FrameFeature, FramePacket, FrameRasterStats,
-    FrameSubmissionReport, HostPresentationRequest,
+    FrameSubmissionReport, HostPresentationRequest, RenderCapability,
 };
 
 use crate::canvas_policy::{CanvasQualityPreset, CanvasVisualProfile};
@@ -54,12 +54,17 @@ impl Canvas2dBackendApi {
             profile: CanvasVisualProfile::LowPolyFramebuffer,
             // The internal framebuffer preserves the SURFACE aspect (not a fixed
             // 16:9), so the software image is the same shape the GPU renders and
-            // upscales without vertical distortion.
+            // upscales without vertical distortion. The default profile is the flat
+            // rasterizer's real capability set (`canvas2d()`): it drops the shader-only
+            // capabilities and substitutes the PCF shadow with a planar contact shadow,
+            // so the live backend degrades from the one full-richness frame instead of
+            // being handed default `all()` and silently no-op'ing what it can't do.
             options: LowPolyRasterOptions::from_preset_for_surface(
                 CanvasQualityPreset::Low,
                 width,
                 height,
-            ),
+            )
+            .with_capability_profile(axiom_host::BackendCapabilityProfile::canvas2d()),
             meshes: MeshCache::default(),
             textures: Draw2dTextures::default(),
             #[cfg(target_arch = "wasm32")]
@@ -225,11 +230,19 @@ impl Canvas2dBackendApi {
     /// feature metadata.
     fn report(&self, packet: &FramePacket, result: &SoftwareRasterResult) -> FrameSubmissionReport {
         let features = packet.features();
+        // A feature is degraded iff the frame relies on it AND this backend's capability
+        // profile does not provide it — the declared policy, not blanket telemetry.
+        // Albedo sampling is a reported drop (flat colour); the directional shadow is
+        // reported here and substituted with a planar contact shadow in the rasterizer
+        // (see `RenderCapability::degradation`). `&` (not `&&`) keeps this branchless.
+        let profile = self.options.capability_profile();
+        let textures_degraded =
+            features.uses_textures() & !profile.contains(RenderCapability::Textures);
+        let shadows_degraded =
+            features.uses_shadows() & !profile.contains(RenderCapability::Shadows);
         let degraded_features: Vec<FrameFeature> = [
-            features
-                .uses_textures()
-                .then_some(FrameFeature::AlbedoSampling),
-            features.uses_shadows().then_some(FrameFeature::Shadows),
+            textures_degraded.then_some(FrameFeature::AlbedoSampling),
+            shadows_degraded.then_some(FrameFeature::Shadows),
         ]
         .into_iter()
         .flatten()
@@ -276,22 +289,24 @@ impl Canvas2dBackendApi {
             c.projected_draws,
             c.skipped_draws,
             c.critical_coverage_skipped,
-            self.degraded_material_count(packet, features.uses_textures()),
+            self.degraded_material_count(packet, textures_degraded),
             degraded_features,
             raster,
         )
     }
 
     /// Distinct materials referenced by drawable (mesh-present) draws — degraded
-    /// when the frame wanted textures (the software path samples no albedo).
-    fn degraded_material_count(&self, packet: &FramePacket, uses_textures: bool) -> u32 {
+    /// when the frame wanted textures but this backend's profile drops the
+    /// [`RenderCapability::Textures`] capability (the flat software path samples no
+    /// albedo).
+    fn degraded_material_count(&self, packet: &FramePacket, textures_degraded: bool) -> u32 {
         let distinct: HashSet<u64> = packet
             .draws()
             .iter()
             .filter(|draw| self.meshes.get(draw.mesh_id()).is_some())
             .map(|draw| draw.material_id())
             .collect();
-        distinct.len() as u32 * u32::from(uses_textures)
+        distinct.len() as u32 * u32::from(textures_degraded)
     }
 
     /// Blit the rasterized framebuffer to the bound canvas. wasm32 uploads it via

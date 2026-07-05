@@ -280,6 +280,10 @@ fn render_capture(inputs: &CaptureInputs) -> Vec<u8> {
         // No SDF raymarch scene in the growth agent screenshot — meshes only.
         None,
         axiom_host::FrameAmbient::default_hemisphere(),
+        None,
+        axiom_host::BackendCapabilityProfile::all(),
+        None,
+        None,
     )
     .expect("a native GPU adapter renders the growth snapshot")
 }
