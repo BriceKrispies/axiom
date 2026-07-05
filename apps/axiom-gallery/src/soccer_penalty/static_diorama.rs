@@ -26,55 +26,37 @@ pub struct CameraConfig {
     pub aspect: f32,
 }
 
-// Camera constants: an ELEVATED BROADCAST OVER-THE-SHOULDER shot behind the
+// Camera constants: a NEAR-EYE-LEVEL OVER-THE-SHOULDER broadcast shot behind the
 // kicker (KICKER_X=-0.7, KICKER_Z=12.6), the shot class the reference actually
-// uses. The reference camera sits ABOVE the kicker's head (~2.3) and looks DOWN
-// ~10 deg, so the whole penalty-area ground plane reads with perspective: the
-// full kicker from behind in the left third, the ball sitting on the grass
-// mid-lower, and the goal mouth filling the upper third above it.
+// uses. The camera parks just above the kicker's head (y~2.1, KICKER head ~1.9)
+// ~9.9 units back and looks DOWN only ~4.3 deg — a gentle tilt, not a steep
+// bird's-eye. That low, near-level aim lets the WHOLE kicker stand tall in the
+// LEFT third (hair ~30% down, boots ~89% down, boots clear of the bottom edge),
+// with the ball on the grass mid-lower and the goal mouth + keeper riding the
+// upper-middle.
 //
-// The prior R4 strategy — an extreme telephoto (fov 15) parked at shoulder
-// height (y=1.8) and dollied 14 units back — is the wrong shot class and misreads
-// as a ground-level close-up: at shoulder height the near-level aim flattens the
-// field plane to a thin edge-on band, and the narrow lens makes the near kicker
-// loom and crop to just the legs (no torso, no #10, no head) while the ball
-// oversizes. Lens compression cannot substitute for camera ELEVATION; the
-// reference's readable field plane comes from looking down from above, not from a
-// long throw.
+// This corrects a prior OVER-ELEVATION miss. The previous pass lifted the eye
+// high above the kicker's head (y=4.3) and tilted down ~9 deg, on the theory that
+// only elevation opens the receding pitch. But looking DOWN that steeply onto the
+// near kicker drops him to the BOTTOM of the frame and crops him at the torso:
+// his feet fell to ~106% down (off the bottom edge), leaving only the upper body
+// and hands visible while the #10, legs, and boots vanished. Elevation past the
+// subject's own height doesn't "open the field" here — it just pushes the near,
+// tall subject off the bottom.
 //
-// The elevation was right (it opens the ground plane the R4 shoulder-height
-// telephoto flattened) but the WIDE fov was the miss: a 36-deg lens only ~4.6
-// units behind the kicker makes the near kicker loom and CROP to head-and-
-// shoulders while the far goal shrinks to a small distant rectangle (~44% of
-// frame width). The reference has it both ways — an open ground plane AND a
-// goal filling ~60% of the width with the crossbar in the upper third — which is
-// ELEVATION *plus* TELEPHOTO, a pairing neither prior pass tried (R4 had the
-// long lens but no lift; this pass had the lift but a wide lens).
-//
-// So: KEEP the eye lifted above the kicker's head (y~3.2), but DOLLY BACK to
-// ~9.4 units behind him (eye z~22, not 17.2) and NARROW the lens to a telephoto
-// broadcast fov (~18). The pullback+narrow is a depth compression: the far goal
-// and keeper grow to reference scale while the near kicker shrinks from cropped-
-// huge to a readable thigh-up silhouette. Eye offset to +X keeps the kicker
-// (x=-0.7) in the left third; the target still aims low into the midground
-// (y~1.05, z~4.5) so the ~7 deg downward tilt drops the ball into the lower
-// third while the goal mouth rides the upper third.
-// ELEVATE + PULL BACK to reference broadcast framing. The prior eye (y=3.2,
-// z=KICKER_Z+9.4) reads too low and too close: only a ~7 deg downward tilt, so
-// the receding pitch stays a thin band, and a mere ~9.4-unit near-kicker throw
-// lets the near kicker LOOM (head near frame center, arms filling the lower
-// third) while the far goal shrinks. The reference is higher and further: a
-// thigh-up kicker riding the LEFT third with an OPEN receding pitch and the goal
-// mouth filling the upper-center. Lifting the eye to y~4.3 raises the downward
-// tilt to ~10.5 deg (target unchanged at y=1.05), opening the ground plane and
-// dropping the ball into the lower third; dollying back to z=KICKER_Z+12.4
-// throws the near kicker ~12.4 units (shrinking it ~24%) while the ~25-unit-away
-// goal shrinks only ~12% — the net lift in the kicker:goal size ratio the
-// reference wants. FOV (18) and aim (target) stay put: this is a pure camera
-// lift+dolly, not a lens change.
-pub const CAMERA_EYE: Vec3 = Vec3::new(0.9, 4.3, KICKER_Z + 12.4);
-pub const CAMERA_TARGET: Vec3 = Vec3::new(-0.2, 1.05, 4.5);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 18.0;
+// The fix is to DROP the eye back down to just above the kicker's head and aim
+// NEARLY LEVEL (target y~0.75, so ~4.3 deg down). Geometrically this raises the
+// near ground plane toward the horizon: the kicker's boots climb from ~106% down
+// to ~89%, and his whole 1.9 m body rises into the frame (hair ~30%, boots ~89%)
+// while the far goal — being ~22 units away — barely moves and stays framed with
+// the crossbar in the upper third (~24% down) and the keeper's head ~30% down.
+// The dolly-in from z=KICKER_Z+12.4 to +9.9 plus a hair-wider lens (18 -> 19.5)
+// keep the kicker at reference SCALE without cropping. Eye offset to +X (x=1.1)
+// holds the kicker (x=-0.7) in the left third. This is a pure re-frame: EYE drops
+// + aim levels + a small dolly/FOV nudge — no scene, pose, or material change.
+pub const CAMERA_EYE: Vec3 = Vec3::new(1.1, 2.1, KICKER_Z + 9.9);
+pub const CAMERA_TARGET: Vec3 = Vec3::new(0.1, 0.75, 4.5);
+pub const CAMERA_FOV_Y_DEGREES: f32 = 19.5;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;
