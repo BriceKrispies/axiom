@@ -359,3 +359,89 @@ stadium_and_ad_boards     = 1
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 3
+
+# --- Focused KICKER-MODEL pass (4-lens board, user-directed) -------------------
+# The user asked to run the convergence loop with the agents focused SPECIFICALLY
+# on the kicker character model, split by concern. Four lenses each worked in an
+# isolated worktree and landed ONE bounded commit off HEAD (2bae5fd):
+#   proportion db27633 (authoring.rs PARTS: lean-athlete box sizes)
+#   pose       182381d (authoring.rs MOTION_TRACKS: run-up lean + arm counter-swing at the displayed plant frame 26)
+#   kit        31fe1da (penalty_materials.rs + penalty_kicker.rs: head->dark hair, blue socks, black boots, by part index)
+#   framing    cb2ee93 (static_diorama.rs: near-eye-level over-the-shoulder so the whole kicker is in frame)
+# The integrator stacked all four on convergence/soccer-kicker, regenerated
+# assets/soccer/kicker.figure + kick_right.clip from the merged authoring.rs,
+# rendered ONCE through the same harness, and scored the stack against the
+# reference. Both KICKER axes rose; no non-kicker axis dropped -> keep.
+[[iteration]]
+iteration = 6
+attacked_axis = "kicker character model (camera_lens_and_scale + kicker_silhouette) — focused 4-lens pass"
+changed_files = [
+  "apps/axiom-animation-lab/src/authoring.rs",                        # proportion + pose (PARTS + MOTION_TRACKS)
+  "apps/axiom-gallery/src/soccer_penalty/penalty_kicker.rs",          # kit: per-part material mapping (material_for_part)
+  "apps/axiom-gallery/src/soccer_penalty/penalty_materials.rs",       # kit: +KickerHair, +KickerSocksBlue
+  "apps/axiom-gallery/src/soccer_penalty/static_diorama.rs",          # framing: eye/target/fov
+  "apps/axiom-gallery/tests/soccer_penalty_stage1_diorama.rs",        # framing: fov assertion updated (was already stale 31.0 vs 18.0)
+  "assets/soccer/kicker.figure",                                      # regenerated from merged authoring.rs
+  "assets/soccer/kick_right.clip",                                    # regenerated from merged authoring.rs
+  "visual_targets/soccer_penalty_gameplay/champion.png",             # promoted (md5 ed321b04…)
+  "visual_targets/soccer_penalty_gameplay/scorecard.champion.toml",
+  "visual_targets/soccer_penalty_gameplay/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "diagnostics/kicker_pass/candidate_after.png"
+decision = "keep_candidate"
+reason = """
+Focused kicker-model pass. Four isolated lenses, one bounded commit each, stacked \
+and rendered once. camera_lens_and_scale 2->4: the champion's defining flaw — the \
+kicker hard-cropped at the torso (legs/boots off the bottom edge) — is FIXED by \
+dropping the eye to ~head height (y 4.3->2.1), levelling the aim (target y \
+1.05->0.75), a small dolly-in (z KICKER_Z+12.4 -> +9.9) and a hair-wider lens \
+(fov 18->19.5); the WHOLE kicker (hair to boots) now reads in the left third at \
+reference scale while the far goal barely moves. kicker_silhouette 2->3: leaner \
+athletic proportions (smaller head, longer/slimmer legs, broader shoulders, \
+quieter derived sphere-joints), a dark-HAIR head (was bald/skin), royal-blue \
+jersey + white shorts + BLUE socks over black boots, and a planted stride-ish \
+stance with a trailing arm. Every non-kicker axis HELD (composition kept at 3 — \
+the goal is a touch lower/larger but all relationships hold; keeper/ball/goal/ \
+field/stadium/light/gameplay/artifact unchanged); NO axis dropped, so promote. \
+lowest stays 1 (goalkeeper/field/stadium — all NON-kicker), avg 2.0->2.273, \
+final_score 1.30->1.38. The kicker axes are no longer the constraint: the \
+focused brief is achieved. \
+DEFERRED (queued next structural move): the jersey "10" — it IS authored in \
+recipe_textures.rs::jersey() as a TextureOp::Text but does not land on the rear \
+chest face; that is a UV/render-bridge fix (not a bounded app-tier material edit) \
+and belongs to a modeler/architect pass, not this surfacing lens. \
+NOTE: this pass lives on branch convergence/soccer-kicker (off main); it was NOT \
+landed on main, whose working tree carries unrelated in-flight work. A pre-existing \
+test failure (soccer_penalty::web::tests::authors_the_diorama_into_the_engine_scene, \
+draws 278 vs items 246) exists at base 2bae5fd, independent of this pass. \
+No parity is claimed; the render remains a stylized low-poly box-man proxy.
+"""
+next_attacked_axis = "goalkeeper_silhouette (non-kicker; kicker brief complete)"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 3
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 4
+kicker_silhouette         = 3
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 3
