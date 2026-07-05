@@ -6,14 +6,14 @@
 # RECALIBRATED by the convergence critic (2026-07-04). The prior scores were
 # inflated against the identity bar: "merely reads as the same subject = 1, not 3;
 # a stylized/low-poly render is not 4-5; when unsure take the lower." The champion
-# is a heavily-dithered PS1-look frame — an illegible ad band, a flat two-line
-# pitch, a wireframe goal cage, a thumbnail keeper blob — held against a clean,
-# crisp low-poly mobile penalty reference. Six axes lowered below; comments mark
-# each change and its reason.
+# pairs flat-shaded low-poly actors/turf with dithered noise bands (the crowd and
+# the ad boards) — an illegible ad band, a flat two-line pitch, a wireframe goal
+# cage, a thumbnail keeper proxy — held against a clean, crisp low-poly mobile
+# penalty reference. Six axes lowered below; comments mark each change and its reason.
 
 composition_and_framing   = 3  # unchanged — kicker foreground / ball centre / goal upper-mid roughly tracks the reference layout.
 camera_lens_and_scale     = 2  # LOWERED 3->2. FOV/scale is off vs reference: the keeper is a tiny thumbnail in the goal and the goal proportions are squashed; framing is in the neighbourhood but the lens/scale does not match.
-kicker_silhouette         = 2  # LOWERED 3->2. Reads as a blocky back-facing player with a faint "10", but the silhouette is angular/coarse and the number/arms barely resolve — a recognizable proxy, not the reference's clean low-poly figure. A 3 would need a clearly-read player form.
+kicker_silhouette         = 2  # LOWERED 3->2. Reads as a blocky blue-torso figure (round bald head, one arm), cropped at the bottom edge; NO jersey number renders and there is no hair — a recognizable proxy, not the reference's clean low-poly "10" figure. A 3 would need a clearly-read player form with a legible number.
 goalkeeper_silhouette     = 1  # LOWERED 2->1. Still a barely-humanoid yellow blob, a thumbnail in the goal mouth — a proxy. NOTE: the render DOES use PenaltyGoaliePose::idle_display() (penalty_scene.rs:348), a save-volume-DECOUPLED render-only arms-out stance, so the earlier "ready stance reverted, out of scope, moves save volumes" narrative is false and the +1 it justified was inflated. Harsh identity read = proxy = 1.
 ball_fidelity             = 2  # unchanged — a recognizable black/white ball, but blocky/dithered.
 goal_and_net_fidelity     = 1  # unchanged — still a boxy wireframe cage, not a white frame + hanging net.
