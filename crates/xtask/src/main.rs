@@ -1,15 +1,22 @@
 //! `cargo xtask` entry point. Today it offers one command:
 //!
 //! ```text
-//! cargo xtask check-architecture [--root <path>]
+//! cargo xtask check-architecture       [--root <path>]
+//! cargo xtask check-slices             [--root <path>]
+//! cargo xtask check-slice-placement    [--root <path>]
 //! ```
 //!
-//! It enforces the Axiom Layer Law (see repo-root `CLAUDE.md`).
+//! `check-architecture` enforces the Axiom Layer/Module Laws.
+//! `check-slices` enforces the semantic vertical-slice contract (`slice.toml`).
+//! `check-slice-placement` flags engine render logic hiding in an app/game.
+//! See repo-root `CLAUDE.md` and `docs/audits/vertical-slice-audit.md`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use xtask::check::check_architecture;
+use xtask::slice_check::{check_slice_placement, check_slices};
+use xtask::violation::CheckReport;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -22,7 +29,14 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         },
         |cmd| {
-            let checked = (cmd == "check-architecture").then(|| run_check(&args[1..]));
+            let checked = match cmd {
+                "check-architecture" => Some(run_check(&args[1..])),
+                "check-slices" => Some(run_slice_check(&args[1..], SliceCommand::Slices)),
+                "check-slice-placement" => {
+                    Some(run_slice_check(&args[1..], SliceCommand::Placement))
+                }
+                _ => None,
+            };
             checked.unwrap_or_else(|| {
                 eprintln!("xtask: unknown command `{cmd}`");
                 print_usage();
@@ -33,7 +47,65 @@ fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    eprintln!("usage: cargo xtask check-architecture [--root <path>]");
+    eprintln!(
+        "usage: cargo xtask <check-architecture|check-slices|check-slice-placement> [--root <path>]"
+    );
+}
+
+/// Which semantic slice check to run.
+#[derive(Clone, Copy)]
+enum SliceCommand {
+    Slices,
+    Placement,
+}
+
+impl SliceCommand {
+    fn label(self) -> &'static str {
+        match self {
+            SliceCommand::Slices => "slice contract",
+            SliceCommand::Placement => "slice placement",
+        }
+    }
+
+    fn run(self, root: &PathBuf, report: &mut CheckReport) {
+        match self {
+            SliceCommand::Slices => check_slices(root, report),
+            SliceCommand::Placement => check_slice_placement(root, report),
+        }
+    }
+}
+
+fn run_slice_check(rest: &[String], command: SliceCommand) -> ExitCode {
+    parse_root(rest).map_or_else(
+        |message| {
+            eprintln!("xtask: {message}");
+            print_usage();
+            ExitCode::from(2)
+        },
+        |root| {
+            println!(
+                "Axiom {} check — root: {}",
+                command.label(),
+                root.display()
+            );
+            let mut report = CheckReport::default();
+            command.run(&root, &mut report);
+            let report = report.finish();
+
+            report.is_ok().then_some(()).map_or_else(
+                || {
+                    let violations = report.violations();
+                    eprintln!("\nFAIL: {} {} violation(s):", violations.len(), command.label());
+                    violations.iter().for_each(|v| eprintln!("  - {v}"));
+                    ExitCode::FAILURE
+                },
+                |()| {
+                    println!("OK: the Axiom {} checks pass.", command.label());
+                    ExitCode::SUCCESS
+                },
+            )
+        },
+    )
 }
 
 fn run_check(rest: &[String]) -> ExitCode {

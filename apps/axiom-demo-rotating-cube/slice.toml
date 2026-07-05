@@ -1,0 +1,48 @@
+# Semantic vertical-slice contract for the rotating-cube slice — the canonical
+# named-contract chain (scene → resources → render → webgpu). This is a HEADLESS
+# slice: its determinism is proven by committed golden byte artifacts at every
+# boundary (tests/golden_artifacts.rs). It has no live pixel harness of its own
+# (the gallery `rotating-cube` core, registered in axiom-shot, is the pixel path),
+# so it declares no `harness` — only that its `harness_entry` core symbol exists.
+#
+# Each golden is pinned to a recorded SHA-256, so a deleted / regenerated /
+# hand-edited golden is caught by `xtask check-slices` — closing the
+# golden_artifacts.rs trust-on-first-use hole (a missing golden was silently
+# re-captured; AXIOM_REGOLD silently rewrote). The CHECKER now owns the baseline.
+[slice]
+name = "rotating-cube-demo"
+crate_name = "axiom-demo-rotating-cube"
+harness_entry = "DemoRotatingCubeApi"
+determinism_test = "golden_artifacts"
+
+[[golden]]
+path = "tests/golden/full_artifact_tick0.bin"
+sha256 = "0c0d6fca172c75d0257207e6aacbf1761397b9ecbd345b8c69feb26bc13debfb"
+
+[[golden]]
+path = "tests/golden/full_artifact_tick60.bin"
+sha256 = "179b04d378a235e4692bf0c5665713c2932fa10e0f04ee4309e38eb8f3f45cec"
+
+[[golden]]
+path = "tests/golden/scene_snapshot_tick0.bin"
+sha256 = "552233ae31db7402b29c3a9fddfe729de8c59bdca5b6c423d4b73a6e03f05f21"
+
+[[golden]]
+path = "tests/golden/resolved_resources_tick0.bin"
+sha256 = "20a60fd987f1ecf97a4151a132431c7f3fbc3a5a0cf565b0f26ebb7faccec6a2"
+
+[[golden]]
+path = "tests/golden/render_input_tick0.bin"
+sha256 = "8bad211ba28b01339e27981aee7446da296b1acd704fa2ebf93cf712a0d26187"
+
+[[golden]]
+path = "tests/golden/render_command_list_tick0.bin"
+sha256 = "4acf6ac9253cc27eeb51f679c77b294708375aa8256b39d9385194f1fc0ac53f"
+
+[[golden]]
+path = "tests/golden/gpu_submission_tick0.bin"
+sha256 = "d3003887217de42cdec9289a12a80d0424fe4594e0609e4206afd851031f3b94"
+
+[[golden]]
+path = "tests/golden/gpu_submission_report_tick0.bin"
+sha256 = "a68b06943d1225ac36308a235d57f2f4d76647add93ee80932a4b4cf4d328526"

@@ -1,0 +1,25 @@
+# Semantic vertical-slice contract for the retro-fps game — the slice closest to
+# golden (engine object model, engine raycast/overlap/camera, strong tick→state
+# determinism). Unlike the headless rotating-cube slice, retro-fps has a LIVE
+# pixel harness: it is registered in axiom-shot (`--app retro-fps`), so this
+# manifest declares `harness = "retro-fps"` and `check-slices` asserts the
+# registration exists.
+#
+# Determinism is proven by tests/retro_fps_replay_determinism.rs (a fixed
+# scenario replays byte-equal AND a perturbed run differs — the
+# a_diverging_input_track_is_detected pattern). Each committed golden state/HUD
+# sequence is pinned to a recorded SHA-256, caught on drift by check-slices.
+[slice]
+name = "retro-fps"
+crate_name = "axiom-game-retro-fps"
+harness_entry = "build_retro_fps_app"
+determinism_test = "retro_fps_replay_determinism"
+harness = "retro-fps"
+
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_state_sequence.bin"
+sha256 = "c28b1643280cdc91cae2fe2e0cc0e6f07c8a1f8bfabdc4c0a918a73f15b3335c"
+
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_hud_sequence.bin"
+sha256 = "410313507b327b00cf70dace7cbbde70d5273cd830362022d271bc9aa3b4a9f9"

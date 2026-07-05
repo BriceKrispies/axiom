@@ -798,6 +798,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-shot"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-animation-lab",
+ "axiom-canvas2d-backend",
+ "axiom-gallery",
+ "axiom-game-retro-fps",
+ "axiom-gpu-backend",
+ "axiom-host",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-render",
+ "png",
+]
+
+[[package]]
 name = "axiom-sim-core"
 version = "0.1.0"
 dependencies = [
@@ -2747,6 +2764,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "toml",
 ]
 

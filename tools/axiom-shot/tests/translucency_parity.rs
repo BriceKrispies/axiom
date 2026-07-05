@@ -13,7 +13,9 @@
 //! pixel on each backend, and (b) GPU/canvas2d coarse region agreement (the same
 //! metric `render_parity.rs` uses).
 //!
-//! Requires the native GPU adapter the sandbox provides (the off-screen arm).
+//! Requires the native GPU adapter the sandbox provides (the off-screen arm),
+//! so the whole file is compiled only behind the `offscreen` feature.
+#![cfg(feature = "offscreen")]
 
 mod common;
 
@@ -196,6 +198,7 @@ fn render_gpu(
         packet.clear_color(),
         packet.sdf(),
         axiom_host::FrameAmbient::default_hemisphere(),
+        None,
     )
     .expect("a native GPU adapter is required to render a GPU screenshot")
 }

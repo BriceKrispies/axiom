@@ -35,6 +35,20 @@ pub mod forest_walk;
 pub mod generia;
 pub mod soccer_penalty;
 
+/// Build the rotating-cube demo's renderable core as a headless [`RunningApp`],
+/// for the native capture harness (`axiom-shot`). The scene author
+/// (`rotating_cube::rotating_cubes_app`) is browser-free; this exposes it as a
+/// buildable core so the harness can render a real native frame of it.
+pub fn rotating_cube_core() -> axiom::prelude::RunningApp {
+    rotating_cube::rotating_cubes_app().build()
+}
+
+/// Build the stress-cubes demo's renderable core (an `N`-cube field) as a
+/// headless [`RunningApp`] for the native capture harness.
+pub fn stress_cubes_core(count: u32) -> axiom::prelude::RunningApp {
+    stress_cubes::stress_cubes_app(count).build()
+}
+
 /// Backend-comparison entry: render one demo three ways at once — WebGPU, WebGL2,
 /// and Canvas 2D — into three canvases, from ONE wasm instance and ONE
 /// deterministic sim. This is the no-iframe successor to the old gallery
