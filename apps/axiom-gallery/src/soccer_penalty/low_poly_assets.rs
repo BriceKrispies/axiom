@@ -101,16 +101,19 @@ pub mod palette {
     pub const AD_BOARD_AXIOM: Rgba = Rgba::rgb(0.86, 0.20, 0.42);
 
     // --- shadows ---
-    // A soft contact shadow, not a black cut-out: lower opacity (0.38 -> 0.20 ->
-    // 0.14 -> 0.07) and a slightly grass-tinted, lifted tone so the ellipse
-    // reads as a grounded contact darkening rather than an opaque hole in the
-    // pitch. The reference's sunlit turf shows only a very faint soft darkening
-    // under the actors. R3 added a cinematic grade (contrast 1.32 / saturation
-    // 1.35) that amplifies dark ground patches, making the fake blob/planar
-    // shadows read as hard dark rectangles post-grade; halving the alpha again
-    // lets them survive the grade as a barely-there contact shadow, matching the
-    // reference — without touching ambient (0.55) or the brightness bands.
-    pub const BLOB_SHADOW: Rgba = Rgba::new(0.06, 0.11, 0.07, 0.07);
+    // A soft contact shadow, not a black cut-out. ROOT CAUSE of the persistent
+    // hard dark shadow rectangles: the meshed render path (`material_for` in
+    // penalty_render_meshed.rs) keys materials on RGB only and builds
+    // `Material::lit(linear_rgb(r,g,b))` — it DROPS alpha entirely. So the four
+    // prior opacity cuts (0.38 -> 0.20 -> 0.14 -> 0.07) tuned a dead parameter;
+    // the quad still rasterised as solid near-black (0.06,0.11,0.07), a hole
+    // punched in the bright pitch. In this path the *tone*, not the alpha,
+    // carries the shadow: use a deep shaded-grass green — clearly darker than
+    // GRASS_DARK (0.16,0.44,0.10) so it still reads as shadow, but grass-hued and
+    // lifted off black so it grounds the actor as darkened turf, matching the
+    // reference's faint under-foot darkening. Alpha kept low for any
+    // alpha-respecting path; ambient (0.55) and the brightness bands untouched.
+    pub const BLOB_SHADOW: Rgba = Rgba::new(0.11, 0.27, 0.08, 0.07);
 }
 
 /// A convenience direction constant: the up axis the whole diorama uses. It is
