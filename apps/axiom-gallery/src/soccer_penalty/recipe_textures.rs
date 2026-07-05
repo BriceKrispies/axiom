@@ -111,9 +111,17 @@ pub fn keeper(style: &SoccerRecipeStyle) -> RecipeGraph {
 /// An ad board: the sponsor text (white) baked directly onto a coloured panel by
 /// the [`TextureOp::Text`] operator — real lettering, now that the recipe layer
 /// has a text op.
+///
+/// The panel is sized to the ad-board *mesh*, which is nearly square (~1.30 × 1.25
+/// world units in `penalty_scene`). The earlier 80×20 (4:1) texture stretched
+/// every 5×7 glyph ~4× vertically on that near-square quad and, at only 20 px tall,
+/// aliased into the illegible dark smear the boards read as under the low 426×240
+/// retro render target. A 128×120 panel matches the mesh aspect (no vertical
+/// stretch) and carries the lettering at scale 3, so "AXIOM"/"SPORTS" fills the
+/// board width and stays crisp as the reference's white-on-red hoardings do.
 fn ad_board(id: u64, text: &str, panel: Color, ink: Color) -> RecipeGraph {
     let mut g = RecipeGraph::new(RecipeId::from_raw(id), 1);
-    g.add(TextureOp::Text as u16, text_params(80, 20, ink, panel, 2, text), vec![]);
+    g.add(TextureOp::Text as u16, text_params(128, 120, ink, panel, 3, text), vec![]);
     g
 }
 
