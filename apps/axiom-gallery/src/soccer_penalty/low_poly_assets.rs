@@ -100,19 +100,24 @@ pub mod palette {
     // engine's 3 grade knobs carry no white-balance, so this warmth lives in the
     // albedo, per the colorist lens.
     //
-    // Aerial-haze lift (colorist): at 0.17/0.15/0.12 the stand sat at ~0.15
-    // luminance and rendered as a near-black void under the flat-shade/quantize
-    // path, splitting the frame into a bright foreground over a black backdrop.
-    // The reference's backdrop is not black — it is a hazed, mid-value warm mass
-    // (aerial perspective veils the distance up off the shadow floor). With no
-    // volumetric-haze host seam wired to this render path, that recession must be
-    // baked into the albedo, so the stand is lifted to a hazed warm dark-grey:
-    // still a dark mass (R>=G>=B, warm — NOT the bright grey wall the reference
-    // lacks), but off the black floor so the distance reads as haze, not a hole.
-    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.30, 0.27, 0.24);
-    pub const CROWD_A: Rgba = Rgba::rgb(0.72, 0.28, 0.30);
-    pub const CROWD_B: Rgba = Rgba::rgb(0.28, 0.42, 0.70);
-    pub const CROWD_C: Rgba = Rgba::rgb(0.86, 0.72, 0.24);
+    // Aerial-haze lift (colorist), 2nd pass. The earlier lift to 0.30/0.27/0.24
+    // was still too dark AND too *pure*: on the live GPU present path the distant
+    // stand faces catch only the engine ambient, which multiplies a 0.30 albedo
+    // back down to a near-black void — so the upper third still rendered as a hole
+    // beneath a radioactive-green foreground, the opposite of the reference's one
+    // continuous, hazed, sun-filled space. There is no volumetric-haze host seam on
+    // this present path (an architect-tier stage), so the aerial recession has to be
+    // *baked* into the backdrop albedo, and aerial perspective does two things at
+    // once: it lifts the distance in VALUE and washes it toward the haze colour,
+    // bleeding out SATURATION. So the wall is lifted to a genuine hazed warm mid-grey
+    // (up off the ambient-crushed floor without becoming the bright wall the
+    // reference lacks), and each crowd hue is raised in value and de-saturated toward
+    // that same warm veil — the busy stand speckle survives, but as a hazed mass, not
+    // three pure primaries punched against black.
+    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.52, 0.49, 0.45);
+    pub const CROWD_A: Rgba = Rgba::rgb(0.70, 0.46, 0.44);
+    pub const CROWD_B: Rgba = Rgba::rgb(0.46, 0.53, 0.66);
+    pub const CROWD_C: Rgba = Rgba::rgb(0.80, 0.72, 0.50);
     pub const AD_BOARD: Rgba = Rgba::rgb(0.09, 0.10, 0.13);
     pub const AD_BOARD_AXIOM: Rgba = Rgba::rgb(0.86, 0.20, 0.42);
 
