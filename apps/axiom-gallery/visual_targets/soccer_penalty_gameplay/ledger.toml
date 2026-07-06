@@ -507,3 +507,79 @@ stadium_and_ad_boards     = 1
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 3
+
+# --- Scoring recalibration (critic; not a render change) -----------------------
+# Two champion swaps (c059baa art-director reframe + rigger keeper + lighting fill;
+# 638130b daylight-ambient, engine channel 1a6ccd3) landed with NO ledger iteration
+# and NO rescore, leaving scorecard.champion.toml STALE (still the skinned render,
+# md5 be46c518). This iteration re-scores the ACTUAL current champion.png fresh and
+# backfills the missing structural record. No render was touched.
+[[iteration]]
+iteration = 8
+attacked_axis = "none (scoring recalibration + swap bookkeeping)"
+changed_files = [
+  "visual_targets/soccer_penalty_gameplay/scorecard.champion.toml",
+  "visual_targets/soccer_penalty_gameplay/abstractions/0002.toml",
+  "visual_targets/soccer_penalty_gameplay/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "recalibrate"
+reason = """
+STALE-CARD FIX. The champion.png at the audited base (638130b, md5 503880da — the \
+daylight-ambient render) no longer matched scorecard.champion.toml, which still \
+described the prior LIVE-SKINNED render (md5 be46c518, iter-7 values). Two swaps had \
+promoted new renders WITHOUT their own ledger iteration or rescore — exactly the \
+unrecorded-direct-merge drift the iter-7 critic flagged as forbidden. Re-scored the \
+current daylight render fresh against the harsh identity bar. \
+TWO HONEST, OFFSETTING MOVEMENTS: (1) lighting_shadow_and_depth — the new \
+hemisphere-ambient channel is a REAL tone gain (crushed pitch shadows lifted toward \
+the reference's daylight) but SUB-BAND: it stays flat (no AO/depth), the stands stay \
+dark/uneven, and the frame is washed — held at 2, the same discipline that capped the \
+iter-7 skinning gain. (2) artifact_level LOWERED 3->2 — the daylight render shipped a \
+pronounced NON-ATTACKED regression: HORIZONTAL streak / scanline tearing across the \
+grass, the kicker body, and the stands that the skinned render did not carry. \
+NET: final_score 1.30 -> 1.27. The swap was NOT progress — the sub-band lighting gain \
+was cancelled by the artifact regression, and the scalar should never have been left \
+implying otherwise. The lowest tier is unchanged (1, three-way tie keeper/field/ \
+stadium), so by fixed axis order the NEXT ATTACK stays goalkeeper_silhouette (axis 4); \
+the rigger's elbow-break did not clear the keeper band (still a small, featureless, \
+now BACK-TURNED yellow proxy). \
+ABSTRACTION-GATE: the engine hemisphere-ambient frame channel (commit 1a6ccd3) is a \
+NEW engine primitive/field reached for lighting_shadow_and_depth and shipped with NO \
+abstractions/NNNN.toml. Backfilled abstractions/0002.toml (inexpressible = true: a \
+directional-only model cannot express hemisphere ambient fill; one bounded \
+directional-fill attempt, 7746c70, preceded the reach; smallest-api = one ambient \
+channel on the frame contract read by both backends). \
+No parity is claimed; the render remains far from the reference. FORWARD RULE \
+(restated): future champion swaps must land through the lens loop with their own \
+ledger iteration AND a rescore at swap time — not as unrecorded direct merges.
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 3
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2
