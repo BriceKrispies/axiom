@@ -71,6 +71,19 @@ const GRASS_DRAW_M_LOW: f32 = 26.0;
 /// Blades stand taller than the baked ground-tufts (whose height range is ankle-low) so
 /// the streamed sward reads as swaying grass, not flat clutter.
 const GRASS_HEIGHT_MUL: f32 = 3.2;
+/// Second ground species: the taller upright sedge/fern mesh (`build.rs`'s `FERN_MESH`),
+/// also registered in `rd.meshes`. Draws on the flat `WHITE_MAT` like the tufts, so its
+/// per-instance tint carries the colour and it survives Canvas2D's texture-drop — real
+/// blade geometry, one merged draw. (Merged in from the `structural` team take.)
+const SEDGE_MESH: u64 = 8;
+/// Fraction of ground-cover sites that grow the low grass tuft; the rest grow the taller
+/// sedge frond — the streaming analogue of the hero build's ~55/45 two-species floor.
+const GRASS_FRACTION: f32 = 0.55;
+/// Sedge fronds stand markedly taller (and thinner) than the grass tufts, and sway a touch
+/// less at the tip so the taller blade does not whip.
+const SEDGE_HEIGHT_MUL: f32 = 5.0;
+const SEDGE_RADIUS_MUL: f32 = 0.6;
+const SEDGE_WIND_MUL: f32 = 0.7;
 
 /// Wind: a stepped, breeze-driven world-space blade lean.
 const WIND_HZ: f32 = 1.7; // sway oscillations per second
@@ -130,6 +143,9 @@ struct ChunkVeg {
     foliage: Vec<Inst>,
     branch: Vec<Inst>,
     grass: Vec<Grass>,
+    /// Taller upright sedge fronds — the second ground species, projected + swayed the
+    /// same way as `grass` but drawn on `SEDGE_MESH`.
+    sedge: Vec<Grass>,
 }
 
 /// One cached grass blade: its ground-seated base, base yaw, per-instance scale, a baked
@@ -311,9 +327,9 @@ pub fn generia_start() {
             // foliage is the triangle hog, so only the nearest band (lod 0) draws it;
             // farther chunks keep just trunks + branches (readable through the fog).
             let c = cache.borrow();
-            let (mut trunk, mut foliage_d, mut branch, mut grass) =
-                (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-            let (mut tn, mut fn_, mut bn, mut gn) = (0u32, 0u32, 0u32, 0u32);
+            let (mut trunk, mut foliage_d, mut branch, mut grass, mut sedge) =
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (mut tn, mut fn_, mut bn, mut gn, mut sn) = (0u32, 0u32, 0u32, 0u32, 0u32);
             let grass_draw_m = if low_detail { GRASS_DRAW_M_LOW } else { GRASS_DRAW_M_GPU };
             for vc in &plan.visible {
                 if let Some(veg) = c.get(&(vc.coord.x, vc.coord.z)) {
@@ -327,7 +343,10 @@ pub fn generia_start() {
                         let ccz = (vc.coord.z as f32 + 0.5) * CHUNK_M;
                         let cd = ((eye.x - ccx).powi(2) + (eye.z - ccz).powi(2)).sqrt();
                         if cd < grass_draw_m {
+                            // Both ground species sway through the same projector; they draw
+                            // as two batches (tuft mesh + taller sedge mesh).
                             gn += project_grass(&mut grass, &veg.grass, &vp, eye, tick);
+                            sn += project_grass(&mut sedge, &veg.sedge, &vp, eye, tick);
                         }
                     }
                 }
@@ -340,6 +359,7 @@ pub fn generia_start() {
                 (FOLIAGE_MESH, LEAF_ALPHA_MAT, foliage_d, fn_),
                 (BRANCH_MESH, WHITE_MAT, branch, bn),
                 (GRASS_MESH, WHITE_MAT, grass, gn),
+                (SEDGE_MESH, WHITE_MAT, sedge, sn),
             ];
             (clear, lights.clone(), light_vp, batches, vp.as_cols_array(), Vec::new(), None, new_geometry)
         },
@@ -374,11 +394,13 @@ fn gen_chunk_veg(
     );
     let trees: Vec<Tree> = sites.iter().map(|s| site_to_tree(manifest, s)).collect();
     let lean = manifest.scatter.as_ref().map(|s| s.lean_deg).unwrap_or(0.0);
+    let (grass, sedge) = gen_chunk_grass(manifest, cell, eye, grass_sites);
     ChunkVeg {
         trunk: extract(&trunk_instances(manifest, &trees, lean, &IDENTITY16, eye)),
         foliage: extract(&foliage_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
         branch: extract(&branch_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
-        grass: gen_chunk_grass(manifest, cell, eye, grass_sites),
+        grass,
+        sedge,
     }
 }
 
@@ -390,7 +412,7 @@ fn gen_chunk_veg(
 /// routed through `build::fogged` so the sward matches the world's fog + tone (fog
 /// parity). Wind phase + gust gain are baked here (one noise sample per blade), so the
 /// per-frame projector stays cheap.
-fn gen_chunk_grass(manifest: &Manifest, cell: ChunkCoord, eye: Vec3, sites_per_side: u32) -> Vec<Grass> {
+fn gen_chunk_grass(manifest: &Manifest, cell: ChunkCoord, eye: Vec3, sites_per_side: u32) -> (Vec<Grass>, Vec<Grass>) {
     let rule = ScatterRule {
         sites_per_side,
         jitter: Ratio::new(0.9).unwrap_or_else(|_| Ratio::new(0.0).unwrap()),
@@ -407,29 +429,37 @@ fn gen_chunk_grass(manifest: &Manifest, cell: ChunkCoord, eye: Vec3, sites_per_s
         None => ([0.05, 0.16], [0.10, 0.22], &[[0.33, 0.42, 0.18]]),
     };
     let style = style_of(manifest);
-    sites
-        .iter()
-        .map(|s| {
-            let (x, z) = (s.x.get(), s.z.get());
-            let ground = manifest.terrain.height_at(x, z);
-            let h = StableHash::of_words(&[s.seed]).raw();
-            let u = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
-            let lerp = |r: [f32; 2], t: f32| r[0] + (r[1] - r[0]) * t;
-            let height = lerp(hr, u(16)) * GRASS_HEIGHT_MUL;
-            let radius = lerp(rr, u(0));
-            let yaw = u(24) * std::f32::consts::TAU;
-            let base = pal.get((u(8) * pal.len() as f32) as usize).copied().unwrap_or([0.33, 0.42, 0.18]);
-            let col = grass_color(base, x, z);
-            let dist = eye.subtract(Vec3::new(x, ground + height * 0.5, z)).length();
-            let tint = build::fogged(col, &manifest.fog, dist, &style, 1.0);
-            // Bake the wind phase + gust gain from a low-frequency world field, so the
-            // per-frame projector only evaluates a cheap sine.
-            let phase = u(40) * std::f32::consts::TAU;
-            let gust = value_noise(GRASS_SEED ^ 0x_9E37_79B9, Vec3::new(x * 0.06, 0.0, z * 0.06)).get();
-            let wind_amp = WIND_AMP * (0.45 + 0.55 * (gust * 0.5 + 0.5));
-            Grass { base: Vec3::new(x, ground, z), yaw, scale: Vec3::new(radius, height, radius), tint, phase, wind_amp }
-        })
-        .collect()
+    // Split the ground cover into two species (low grass tuft / taller sedge frond) by a
+    // deterministic per-site hash, mirroring the hero build's two-species floor.
+    let (mut grass, mut sedge) = (Vec::new(), Vec::new());
+    for s in &sites {
+        let (x, z) = (s.x.get(), s.z.get());
+        let ground = manifest.terrain.height_at(x, z);
+        let h = StableHash::of_words(&[s.seed]).raw();
+        let u = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
+        let lerp = |r: [f32; 2], t: f32| r[0] + (r[1] - r[0]) * t;
+        let is_grass = u(56) < GRASS_FRACTION;
+        let (height_mul, radius_mul, wind_mul) = if is_grass {
+            (GRASS_HEIGHT_MUL, 1.0, 1.0)
+        } else {
+            (SEDGE_HEIGHT_MUL, SEDGE_RADIUS_MUL, SEDGE_WIND_MUL)
+        };
+        let height = lerp(hr, u(16)) * height_mul;
+        let radius = lerp(rr, u(0)) * radius_mul;
+        let yaw = u(24) * std::f32::consts::TAU;
+        let base = pal.get((u(8) * pal.len() as f32) as usize).copied().unwrap_or([0.33, 0.42, 0.18]);
+        let col = grass_color(base, x, z);
+        let dist = eye.subtract(Vec3::new(x, ground + height * 0.5, z)).length();
+        let tint = build::fogged(col, &manifest.fog, dist, &style, 1.0);
+        // Bake the wind phase + gust gain from a low-frequency world field, so the
+        // per-frame projector only evaluates a cheap sine.
+        let phase = u(40) * std::f32::consts::TAU;
+        let gust = value_noise(GRASS_SEED ^ 0x_9E37_79B9, Vec3::new(x * 0.06, 0.0, z * 0.06)).get();
+        let wind_amp = WIND_AMP * (0.45 + 0.55 * (gust * 0.5 + 0.5)) * wind_mul;
+        let blade = Grass { base: Vec3::new(x, ground, z), yaw, scale: Vec3::new(radius, height, radius), tint, phase, wind_amp };
+        [&mut sedge, &mut grass][is_grass as usize].push(blade);
+    }
+    (grass, sedge)
 }
 
 /// A blade's baked colour: the palette base nudged by a soft, low-frequency world-space
