@@ -233,10 +233,10 @@ impl PenaltyGoaliePose {
             (7, 0.1, 0.0, 1.05),                    // right upper arm — wide, angled down-&-out
             (5, 0.35, 0.0, 0.72),                   // left forearm — elbow breaks: glove drops down-&-forward
             (8, 0.35, 0.0, -0.72),                  // right forearm — elbow breaks: glove drops down-&-forward
-            (10, 0.18, 0.0, -0.55),                 // left thigh — WIDE plant + weight forward
-            (13, 0.18, 0.0, 0.55),                  // right thigh
-            (11, -0.62, 0.0, 0.0),                  // left shin — deep braced knee bend (low set crouch)
-            (14, -0.62, 0.0, 0.0),                  // right shin
+            (10, 0.20, 0.0, -0.30),                 // left thigh — natural braced plant (less A-splay), weight forward
+            (13, 0.20, 0.0, 0.30),                  // right thigh
+            (11, -0.80, 0.0, 0.0),                  // left shin — deeper braced knee bend (lower, coiled set)
+            (14, -0.80, 0.0, 0.0),                  // right shin
         ]
         .iter()
         .for_each(|&(i, x, y, z)| {
