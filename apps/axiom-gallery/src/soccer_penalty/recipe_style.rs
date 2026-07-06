@@ -97,10 +97,24 @@ impl SoccerRecipeStyle {
                 // brightened (keeping one cooler card for variety) so the baked
                 // seat grid reads as the reference's dense, sunlit terrace instead
                 // of a black smear.
-                crowd_dark: Color::rgba(0x4A, 0x3E, 0x34, 0xFF),
-                crowd_shirt_a: Color::rgba(0xA8, 0x6A, 0x4E, 0xFF),
-                crowd_shirt_b: Color::rgba(0x6E, 0x74, 0x88, 0xFF),
-                crowd_bright: Color::rgba(0xC6, 0xB4, 0x8E, 0xFF),
+                // Follow-up to that lift: the crowd texture MODULATES the flat
+                // crowd base colour (`albedo × base`, see penalty_render_meshed) —
+                // so this terrace tone is multiplied a SECOND time by the already
+                // dark crowd base (~0.62,0.30,0.32), and 0x4A3E34 (~0.29) × base
+                // crushes the dominant between-seats mass to ~(0.18,0.07,0.06): the
+                // near-black void the champion crowd still reads as. The multiply is
+                // the root cause, and it is fixable here in the terrace albedo. The
+                // reference terrace is a BRIGHT, warm, sunlit ochre/tan mass, so the
+                // terrace is lifted into the bright end (a warm tan) where it can
+                // survive the base multiply, and the three shirt flecks are lifted
+                // in step but kept tonally SEPARATED from it (a warm tan, a cool
+                // pale, a near-white highlight) so the dense per-seat grid still
+                // reads as thousands of individuals over the lit terrace instead of
+                // bright dots on a black field.
+                crowd_dark: Color::rgba(0xC8, 0xB4, 0x9A, 0xFF),
+                crowd_shirt_a: Color::rgba(0xE0, 0xA8, 0x82, 0xFF),
+                crowd_shirt_b: Color::rgba(0xB0, 0xB8, 0xCC, 0xFF),
+                crowd_bright: Color::rgba(0xF2, 0xE8, 0xCE, 0xFF),
                 jersey: Color::rgba(0x28, 0x4C, 0xC8, 0xFF),
                 jersey_dark: Color::rgba(0x18, 0x2E, 0x82, 0xFF),
                 keeper: Color::rgba(0xE6, 0xC8, 0x28, 0xFF),
