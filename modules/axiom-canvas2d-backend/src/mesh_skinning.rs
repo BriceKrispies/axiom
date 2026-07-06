@@ -22,17 +22,21 @@ use crate::mesh_cache::MeshGeometry;
 /// — the GPU backend's `SKINNED_VERTEX_STRIDE`.
 const SKINNED_VERTEX_STRIDE: usize = 20;
 
-/// Vertex-clustering resolution for the software-backend decimation: the body's
-/// bounding-box diagonal is divided into this many cells, all vertices in a cell
-/// weld to one representative, and triangles that collapse to a line/point are
-/// dropped. Higher = finer (more triangles kept). The athlete MetaSurface bodies
-/// bake to tens of thousands of triangles — trivial for the GPU, but the CPU
-/// rasterizer projects + culls every one and most are sub-pixel at the low-poly
-/// framebuffer resolution. Clustering thins them to a budget the software path
-/// affords while KEEPING coverage (unlike dropping triangles, which tears holes
-/// in a watertight surface) — the Canvas 2D backend is a low-poly degrade by
-/// design, so a chunkier athlete here is the intended trade, not a regression.
-const CLUSTER_CELLS_PER_DIAGONAL: f32 = 18.0;
+/// Vertex-clustering resolution for the software-backend decimation: each mesh's
+/// bounding box is divided into this many cells **per axis** (an anisotropic
+/// K×K×K grid over its own extent), all vertices in a cell weld to one
+/// representative, and triangles that collapse to a line/point are dropped.
+/// Higher = finer (more triangles kept). The athlete MetaSurface bodies bake to
+/// tens of thousands of triangles — trivial for the GPU, but the CPU rasterizer
+/// projects + culls every one and most are sub-pixel at the low-poly framebuffer
+/// resolution. Clustering thins them to a budget the software path affords while
+/// KEEPING coverage (unlike dropping triangles, which tears holes in a watertight
+/// surface). Per-axis (not a single diagonal-derived) cell size is essential: a
+/// thin feature (a neck, a leg) gets K cells across its *narrow* axis and so
+/// survives, where an isotropic cell derived from the tall body diagonal would be
+/// wider than the whole limb and collapse it to nothing. The Canvas 2D backend is
+/// a low-poly degrade by design, so a chunkier athlete here is the intended trade.
+const CLUSTER_CELLS_PER_AXIS: f32 = 16.0;
 
 /// A column-major identity matrix, the safe fallback for an out-of-range joint
 /// index (a malformed palette reference poses the vertex at its bind position
@@ -111,13 +115,15 @@ fn front_facing(a: [f32; 3], b: [f32; 3], c: [f32; 3], mvp: &[f32; 16]) -> bool 
 }
 
 /// Decimate a skinned mesh by **vertex clustering** for the software backend:
-/// snap every vertex to a coarse grid (cell = bbox diagonal /
-/// [`CLUSTER_CELLS_PER_DIAGONAL`]), weld all vertices in a cell to the first one
-/// seen, remap the triangles, and drop any that collapse to a line/point (two
-/// corners in one cell). Unlike dropping whole triangles, welding preserves the
-/// body's coverage — the surface stays closed, just chunkier — so it never tears.
-/// Clustering on the BIND pose is sound: welded vertices share (or nearly share)
-/// joints, so they stay welded once skinned. Runs once per mesh at upload.
+/// snap every vertex to a per-axis grid ([`CLUSTER_CELLS_PER_AXIS`] cells across
+/// each axis of the mesh's own bounding box), weld all vertices in a cell to the
+/// first one seen, remap the triangles, and drop any that collapse to a line/point
+/// (two corners in one cell). Unlike dropping whole triangles, welding preserves
+/// the body's coverage — the surface stays closed, just chunkier — so it never
+/// tears. The per-axis grid preserves thin limbs (a leg gets K cells across its
+/// narrow axis) that a single diagonal-derived cell would erase. Clustering on the
+/// BIND pose is sound: welded vertices share (or nearly share) joints, so they
+/// stay welded once skinned. Runs once per mesh at upload.
 fn decimate(verts: &[f32], indices: &[u32]) -> (Vec<f32>, Vec<u32>) {
     // Bounding box of the bind positions (first three floats per vertex).
     let big = f32::INFINITY;
@@ -130,15 +136,20 @@ fn decimate(verts: &[f32], indices: &[u32]) -> (Vec<f32>, Vec<u32>) {
             )
         },
     );
-    let diag = ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2) + (max[2] - min[2]).powi(2))
-        .sqrt();
-    // A tiny floor keeps a degenerate/empty mesh from dividing by zero.
-    let cell = (diag / CLUSTER_CELLS_PER_DIAGONAL).max(1e-4);
+    // Per-axis cell size: each axis's extent split into `CLUSTER_CELLS_PER_AXIS`
+    // cells (a K×K×K grid over the mesh's own box), with a tiny floor so a flat/
+    // degenerate axis never divides by zero. A narrow axis therefore gets a narrow
+    // cell — the key to preserving thin limbs the diagonal cell used to erase.
+    let cell = [
+        ((max[0] - min[0]) / CLUSTER_CELLS_PER_AXIS).max(1e-4),
+        ((max[1] - min[1]) / CLUSTER_CELLS_PER_AXIS).max(1e-4),
+        ((max[2] - min[2]) / CLUSTER_CELLS_PER_AXIS).max(1e-4),
+    ];
     let key = |v: &[f32]| {
         (
-            ((v[0] - min[0]) / cell) as i32,
-            ((v[1] - min[1]) / cell) as i32,
-            ((v[2] - min[2]) / cell) as i32,
+            ((v[0] - min[0]) / cell[0]) as i32,
+            ((v[1] - min[1]) / cell[1]) as i32,
+            ((v[2] - min[2]) / cell[2]) as i32,
         )
     };
     // Each original vertex → its cell representative's new index (first vertex in
