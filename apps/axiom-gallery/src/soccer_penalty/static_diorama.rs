@@ -37,18 +37,23 @@ pub struct CameraConfig {
 // goal was already well placed. Parking that close to the near, tall subjects
 // blows up the whole foreground without gaining anything at the goal.
 //
-// The fix is a pure DOLLY-BACK + TELEPHOTO re-frame: dolly the eye back from
-// z=KICKER_Z+9.9 to +14.9 and narrow the lens 19.5 -> 16.0 deg. The narrower FOV
-// re-enlarges the FAR goal to hold its reference placement (crossbar ~25% down,
-// goal line ~56%, keeper head ~31% — matching the reference within ~2%), while
-// the extra distance shrinks the NEAR foreground: the ball's loom roughly halves
-// and the kicker's boots climb from ~100% (cropped) to ~79% (fully in frame),
-// hair ~34% down, holding him in the LEFT third. Eye offset to +X (x=1.1) keeps
-// the kicker (x=-0.7) left and the goal centered. Pure re-frame: EYE dollies back
-// + lens narrows — no scene, pose, aim, or material change (target/up untouched).
-pub const CAMERA_EYE: Vec3 = Vec3::new(1.1, 2.1, KICKER_Z + 14.9);
+// The fix is a pure DOLLY-BACK + TELEPHOTO re-frame: dolly the eye back and
+// narrow the lens. A first pass moved z=KICKER_Z+9.9 -> +14.9 at 16.0 deg, but
+// residual FOREGROUND LOOM remained against the reference: the near kicker + ball
+// still read markedly larger than the reference's moderate foreground, while the
+// far goal read too small/narrow (keeper tiny) — the perspective was still too
+// exaggerated (near/far ratio too high) versus the reference's flatter, telephoto
+// broadcast compression. This pass pushes the SAME lever further: dolly the eye
+// back +14.9 -> +22.9 (another ~8 m) and narrow the lens 16.0 -> 12.5 deg. The
+// added distance drops the near/far ratio, so the near kicker + ball shrink
+// (loom ~-15%) while the narrower FOV holds the FAR goal's angular size — net,
+// the foreground de-looms and the goal/keeper grow relative to it, flattening the
+// perspective toward the reference. Eye offset to +X (x=1.1) keeps the kicker
+// (x=-0.7) in the LEFT third and the goal centered. Pure re-frame: EYE dollies
+// back + lens narrows — no scene, pose, aim, or material change (target/up fixed).
+pub const CAMERA_EYE: Vec3 = Vec3::new(1.1, 2.1, KICKER_Z + 22.9);
 pub const CAMERA_TARGET: Vec3 = Vec3::new(0.1, 0.75, 4.5);
-pub const CAMERA_FOV_Y_DEGREES: f32 = 16.0;
+pub const CAMERA_FOV_Y_DEGREES: f32 = 12.5;
 pub const CAMERA_NEAR: f32 = 0.1;
 pub const CAMERA_FAR: f32 = 120.0;
 pub const CAMERA_ASPECT: f32 = 16.0 / 9.0;
