@@ -159,7 +159,7 @@ impl Canvas2dBackendApi {
             .iter()
             .enumerate()
             .filter_map(|(i, (mesh_id, material_id, mvp, world, color, palette))| {
-                self.skinned_meshes.pose(*mesh_id, palette).map(|geo| {
+                self.skinned_meshes.pose(*mesh_id, palette, mvp).map(|geo| {
                     let draw = FrameDrawItem::new(
                         SKINNED_OBJECT_BASE + i as u64,
                         *mesh_id,

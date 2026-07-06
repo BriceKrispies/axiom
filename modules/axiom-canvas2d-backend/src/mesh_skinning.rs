@@ -32,7 +32,7 @@ const SKINNED_VERTEX_STRIDE: usize = 20;
 /// affords while KEEPING coverage (unlike dropping triangles, which tears holes
 /// in a watertight surface) — the Canvas 2D backend is a low-poly degrade by
 /// design, so a chunkier athlete here is the intended trade, not a regression.
-const CLUSTER_CELLS_PER_DIAGONAL: f32 = 26.0;
+const CLUSTER_CELLS_PER_DIAGONAL: f32 = 18.0;
 
 /// A column-major identity matrix, the safe fallback for an out-of-range joint
 /// index (a malformed palette reference poses the vertex at its bind position
@@ -65,14 +65,49 @@ impl SkinnedMeshCache {
     }
 
     /// Pose mesh `mesh_id` by `palette` into drawable [`MeshGeometry`] (world-space
-    /// positions + pass-through colours + the mesh's indices). `None` when the id
-    /// is not in the cache — the caller counts it as a skipped draw, exactly as a
-    /// cache miss on the ordinary mesh cache does.
-    pub(crate) fn pose(&self, mesh_id: u64, palette: &[[f32; 16]]) -> Option<MeshGeometry> {
+    /// positions + pass-through colours), keeping only the **front-facing**
+    /// triangles under `mvp` — the athlete bodies are closed solids, so their back
+    /// faces are always occluded by the front; dropping them here roughly halves
+    /// the software rasterizer's overdraw (candidate pixels + depth tests) at zero
+    /// visual cost. `None` when the id is not cached (a skipped draw, like an
+    /// ordinary cache miss).
+    pub(crate) fn pose(
+        &self,
+        mesh_id: u64,
+        palette: &[[f32; 16]],
+        mvp: &[f32; 16],
+    ) -> Option<MeshGeometry> {
         self.meshes
             .get(&mesh_id)
-            .map(|(verts, indices)| pose_vertices(verts, indices, palette))
+            .map(|(verts, indices)| pose_vertices(verts, indices, palette, mvp))
     }
+}
+
+/// Project a world position by a column-major `mvp` into `(ndc_x, ndc_y, w)` — the
+/// perspective-divided screen point plus the clip `w` (positive when in front of
+/// the camera). A triangle whose three `w` are all positive is fully in front, so
+/// its screen winding is a valid front/back test.
+fn project_ndc(mvp: &[f32; 16], p: [f32; 3]) -> (f32, f32, f32) {
+    let x = mvp[0] * p[0] + mvp[4] * p[1] + mvp[8] * p[2] + mvp[12];
+    let y = mvp[1] * p[0] + mvp[5] * p[1] + mvp[9] * p[2] + mvp[13];
+    let w = mvp[3] * p[0] + mvp[7] * p[1] + mvp[11] * p[2] + mvp[15];
+    let inv = 1.0 / w;
+    (x * inv, y * inv, w)
+}
+
+/// Whether triangle `a,b,c` (world positions) faces the camera under `mvp`: its
+/// projected screen winding is counter-clockwise (positive NDC signed area). A
+/// triangle with any vertex at/behind the camera plane (`w <= 0`) is **kept**
+/// (its projection is invalid, so back-face culling would be unreliable — better
+/// to draw it than to wrongly drop a triangle straddling the near plane).
+fn front_facing(a: [f32; 3], b: [f32; 3], c: [f32; 3], mvp: &[f32; 16]) -> bool {
+    let (ax, ay, aw) = project_ndc(mvp, a);
+    let (bx, by, bw) = project_ndc(mvp, b);
+    let (cx, cy, cw) = project_ndc(mvp, c);
+    let area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    let all_front = (aw > 0.0) & (bw > 0.0) & (cw > 0.0);
+    // Keep front-facing (area > 0) OR any near/behind-plane triangle.
+    (area > 0.0) | !all_front
 }
 
 /// Decimate a skinned mesh by **vertex clustering** for the software backend:
@@ -134,9 +169,15 @@ fn decimate(verts: &[f32], indices: &[u32]) -> (Vec<f32>, Vec<u32>) {
     (out_verts, out_indices)
 }
 
-/// Linear-blend-skin one 20-float vertex stream by `palette` into [`MeshGeometry`].
-/// Pure; the sole skinning math, unit-tested against known palettes.
-fn pose_vertices(verts: &[f32], indices: &[u32], palette: &[[f32; 16]]) -> MeshGeometry {
+/// Linear-blend-skin one 20-float vertex stream by `palette` into [`MeshGeometry`],
+/// then drop the back-facing triangles under `mvp` (see [`front_facing`]). Pure;
+/// the skinning math is unit-tested against known palettes.
+fn pose_vertices(
+    verts: &[f32],
+    indices: &[u32],
+    palette: &[[f32; 16]],
+    mvp: &[f32; 16],
+) -> MeshGeometry {
     let (positions, colors): (Vec<[f32; 3]>, Vec<[f32; 4]>) = verts
         .chunks_exact(SKINNED_VERTEX_STRIDE)
         .map(|v| {
@@ -157,7 +198,22 @@ fn pose_vertices(verts: &[f32], indices: &[u32], palette: &[[f32; 16]]) -> MeshG
             (posed, color)
         })
         .unzip();
-    MeshGeometry::from_posed(positions, colors, indices.to_vec())
+    // Keep only front-facing triangles (the closed body's back faces are always
+    // occluded), halving the software rasterizer's overdraw at no visual cost.
+    let front: Vec<u32> = indices
+        .chunks_exact(3)
+        .filter(|tri| {
+            front_facing(
+                positions[tri[0] as usize],
+                positions[tri[1] as usize],
+                positions[tri[2] as usize],
+                mvp,
+            )
+        })
+        .flatten()
+        .copied()
+        .collect();
+    MeshGeometry::from_posed(positions, colors, front)
 }
 
 /// Transform a point by a column-major 4×4 matrix (the `clip_coords`/`vs_skinned`
@@ -203,19 +259,25 @@ mod tests {
 
     // --- the skinning math (pose_vertices, bypassing decimation) --------------
 
+    // A front-facing (CCW) triangle in the XY plane under an identity mvp — its
+    // three bind positions posed by bone 0, so `pose_vertices` keeps all three.
+    fn ccw_triangle() -> (Vec<f32>, Vec<u32>) {
+        triangle([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+    }
+
     #[test]
     fn pose_identity_palette_returns_bind_positions_and_colours() {
-        let v = one_vertex([2.0, 3.0, 4.0], [0.1, 0.2, 0.3, 1.0]);
-        let geo = pose_vertices(&v, &[0], &[IDENTITY_MAT4]);
-        assert_eq!(geo.position(0), [2.0, 3.0, 4.0]);
-        assert_eq!(geo.color(0), [0.1, 0.2, 0.3, 1.0]);
-        assert_eq!(geo.indices(), &[0]);
+        let (v, i) = ccw_triangle();
+        let geo = pose_vertices(&v, &i, &[IDENTITY_MAT4], &IDENTITY_MAT4);
+        assert_eq!(geo.position(0), [0.0, 0.0, 0.0]);
+        assert_eq!(geo.color(0), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(geo.indices(), &[0, 1, 2], "the CCW triangle is front-facing");
     }
 
     #[test]
     fn pose_single_bone_translation_moves_the_vertex() {
         let v = one_vertex([1.0, 0.0, 0.0], [1.0; 4]);
-        let geo = pose_vertices(&v, &[0], &[translation(10.0, -5.0, 2.0)]);
+        let geo = pose_vertices(&v, &[0], &[translation(10.0, -5.0, 2.0)], &IDENTITY_MAT4);
         assert_eq!(geo.position(0), [11.0, -5.0, 2.0]);
     }
 
@@ -226,7 +288,8 @@ mod tests {
         v[13] = 1.0; // joint 1 -> bone 1
         v[16] = 0.5; // weight 0
         v[17] = 0.5; // weight 1
-        let geo = pose_vertices(&v, &[0], &[translation(10.0, 0.0, 0.0), IDENTITY_MAT4]);
+        let geo =
+            pose_vertices(&v, &[0], &[translation(10.0, 0.0, 0.0), IDENTITY_MAT4], &IDENTITY_MAT4);
         assert_eq!(geo.position(0), [5.0, 0.0, 0.0]);
     }
 
@@ -235,8 +298,31 @@ mod tests {
         // Joint index 9 with no such palette entry -> identity (bind position).
         let mut v = one_vertex([4.0, 4.0, 4.0], [1.0; 4]);
         v[12] = 9.0;
-        let geo = pose_vertices(&v, &[0], &[translation(100.0, 0.0, 0.0)]);
+        let geo = pose_vertices(&v, &[0], &[translation(100.0, 0.0, 0.0)], &IDENTITY_MAT4);
         assert_eq!(geo.position(0), [4.0, 4.0, 4.0]);
+    }
+
+    // --- back-face culling (front_facing / project_ndc) -----------------------
+
+    #[test]
+    fn pose_culls_a_back_facing_triangle() {
+        // Same corners as the CCW triangle but wound CW -> back-facing -> dropped.
+        let (v, _) = ccw_triangle();
+        let geo = pose_vertices(&v, &[0, 2, 1], &[IDENTITY_MAT4], &IDENTITY_MAT4);
+        assert!(geo.indices().is_empty(), "the CW (back) triangle is culled");
+    }
+
+    #[test]
+    fn pose_keeps_a_near_plane_triangle() {
+        // An mvp whose clip-w = z (row 3 = [0,0,1,0]); a vertex at z <= 0 has w <= 0,
+        // so its projection is invalid and the triangle is kept rather than risk a
+        // wrong cull across the near plane.
+        let near_mvp = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+        ];
+        let (v, i) = triangle([0.0, 0.0, -1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]);
+        let geo = pose_vertices(&v, &i, &[IDENTITY_MAT4], &near_mvp);
+        assert_eq!(geo.indices(), &[0, 1, 2], "a near-plane triangle is kept");
     }
 
     // --- the software-backend decimation (vertex clustering) ------------------
@@ -288,23 +374,23 @@ mod tests {
 
     #[test]
     fn cache_load_decimates_then_poses_a_real_triangle() {
-        let (v, i) = triangle([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let (v, i) = ccw_triangle();
         let cache = SkinnedMeshCache::load(&[(3, v, i)]);
-        let geo = cache.pose(3, &[IDENTITY_MAT4]).expect("mesh 3 is cached");
+        let geo = cache.pose(3, &[IDENTITY_MAT4], &IDENTITY_MAT4).expect("mesh 3 is cached");
         assert_eq!(geo.indices().len(), 3);
         assert_eq!(geo.position(0), [0.0, 0.0, 0.0]);
     }
 
     #[test]
     fn unknown_mesh_id_poses_to_none() {
-        let (v, i) = triangle([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let (v, i) = ccw_triangle();
         let cache = SkinnedMeshCache::load(&[(5, v, i)]);
-        assert!(cache.pose(999, &[IDENTITY_MAT4]).is_none());
+        assert!(cache.pose(999, &[IDENTITY_MAT4], &IDENTITY_MAT4).is_none());
     }
 
     #[test]
     fn default_cache_is_empty() {
         let cache = SkinnedMeshCache::default();
-        assert!(cache.pose(0, &[IDENTITY_MAT4]).is_none());
+        assert!(cache.pose(0, &[IDENTITY_MAT4], &IDENTITY_MAT4).is_none());
     }
 }
