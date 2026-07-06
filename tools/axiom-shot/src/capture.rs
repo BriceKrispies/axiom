@@ -105,6 +105,7 @@ pub fn render_gpu(
 /// resolution).
 pub fn render_canvas2d(
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     outcome: &FrameOutcome,
     quality: u8,
     w: u32,
@@ -112,8 +113,17 @@ pub fn render_canvas2d(
 ) -> (Vec<u8>, u32, u32) {
     let mut backend = Canvas2dBackendApi::new(&present_request(w, h));
     backend.load_meshes(meshes);
+    // Upload the bake-once skinned athlete bodies so the software backend CPU-skins
+    // them (the peer of the GPU path's `render_offscreen_rgba` skinned meshes).
+    backend.load_skinned_meshes(skinned_meshes);
     backend.set_quality_level(quality);
-    backend.render_offscreen_rgba(&frame_packet(outcome, w, h))
+    // This frame's skinned draws (mesh + material, mvp/world/colour, joint palette).
+    let skinned: Vec<(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)> = outcome
+        .skinned_draws()
+        .iter()
+        .map(|d| (d.mesh_id(), d.material_id(), d.mvp(), d.world(), d.color(), d.joints().to_vec()))
+        .collect();
+    backend.render_offscreen_rgba_skinned(&frame_packet(outcome, w, h), &skinned)
 }
 
 /// Reconstruct the backend-neutral frame packet from the per-`(mesh, material)`
@@ -166,7 +176,11 @@ pub fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
         lights,
         outcome.light_view_proj(),
         features,
-    );
+    )
+    // Carry the app-authored hemisphere ambient so the software rasterizer lights
+    // the frame the way the GPU path does (else it falls back to the dim default,
+    // which is why the canvas2d capture read dark).
+    .with_ambient(outcome.ambient());
     // Attach the frame's SDF scene (if any) so the Canvas2D backend marches and
     // composites the raymarched shapes against the rasterized meshes.
     match outcome.sdf_scene() {

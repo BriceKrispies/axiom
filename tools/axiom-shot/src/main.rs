@@ -129,7 +129,9 @@ fn render(
     postprocess: Option<axiom_host::FramePostProcess>,
 ) -> (Vec<u8>, u32, u32) {
     match backend {
-        "canvas2d" | "canvas" => capture::render_canvas2d(meshes, outcome, quality, WIDTH, HEIGHT),
+        "canvas2d" | "canvas" => {
+            capture::render_canvas2d(meshes, skinned_meshes, outcome, quality, WIDTH, HEIGHT)
+        }
         _ => capture::render_gpu(
             meshes, skinned_meshes, materials, outcome, WIDTH, HEIGHT, retro_32bit, postprocess,
         ),
@@ -140,7 +142,7 @@ fn render(
 fn render(
     backend: &str,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
-    _skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     _materials: &[(u64, u32, u32, Vec<u8>)],
     outcome: &FrameOutcome,
     quality: u8,
@@ -153,7 +155,7 @@ fn render(
              (rebuild with `--features offscreen`); rendering canvas2d instead."
         );
     });
-    capture::render_canvas2d(meshes, outcome, quality, WIDTH, HEIGHT)
+    capture::render_canvas2d(meshes, skinned_meshes, outcome, quality, WIDTH, HEIGHT)
 }
 
 /// Parse a `--pose "x,z,yaw,pitch"` argument into its four floats, or `None`.

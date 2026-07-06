@@ -10,7 +10,7 @@ fn convert(
     cache: &MeshCache,
     options: &LowPolyRasterOptions,
 ) -> ConvertedFrame {
-    super::convert(packet, cache, options, || 0.0, super::discard_deep)
+    super::convert(packet, cache, &[], options, || 0.0, super::discard_deep)
 }
 
 const IDENTITY: [f32; 16] = [

@@ -36,6 +36,23 @@ impl MeshGeometry {
         }
     }
 
+    /// Build geometry directly from parallel posed position/colour arrays plus
+    /// indices — the output shape of CPU skinning (see [`crate::mesh_skinning`]),
+    /// which produces world-posed positions per frame rather than an interleaved
+    /// upload. Colours ride through from the skinned mesh; normals/uvs are unused
+    /// by the flat-shading rasterizer, so they are not carried.
+    pub(crate) fn from_posed(
+        positions: Vec<[f32; 3]>,
+        colors: Vec<[f32; 4]>,
+        indices: Vec<u32>,
+    ) -> Self {
+        MeshGeometry {
+            positions,
+            colors,
+            indices,
+        }
+    }
+
     /// The triangle indices (triples index the position/colour arrays).
     pub(crate) fn indices(&self) -> &[u32] {
         &self.indices

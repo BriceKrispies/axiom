@@ -328,6 +328,7 @@ mod deep {
 pub(crate) fn convert(
     packet: &FramePacket,
     cache: &MeshCache,
+    skinned: &[(MeshGeometry, FrameDrawItem)],
     options: &LowPolyRasterOptions,
     clock: fn() -> f64,
     deep_sink: fn(f64, f64, u32, usize),
@@ -340,7 +341,15 @@ pub(crate) fn convert(
     let cues = options.depth_cues();
     let light = scene_light(packet, &cues);
 
-    let (mut frame, _spent) = packet.draws().iter().fold(
+    // Resolve each packet draw's geometry against the cache, then chain the
+    // already-posed CPU-skinned draws (their geometry is supplied directly, not
+    // cached) so both flow through the identical project/cull/shade pipeline.
+    let cached = packet
+        .draws()
+        .iter()
+        .map(|draw| (cache.get(draw.mesh_id()), draw));
+    let posed = skinned.iter().map(|(geo, draw)| (Some(geo), draw));
+    let (mut frame, _spent) = cached.chain(posed).fold(
         (
             ConvertedFrame {
                 triangles: Vec::new(),
@@ -349,9 +358,8 @@ pub(crate) fn convert(
             },
             0_u64,
         ),
-        |(mut frame, spent), draw| {
-            let drawn = cache
-                .get(draw.mesh_id())
+        |(mut frame, spent), (geo, draw)| {
+            let drawn = geo
                 .map(|geo| convert_draw(geo, draw, w, h, screen_px2, cap, &cues, &light, clock));
             frame.stats.skipped_draws += u32::from(drawn.is_none());
             let next = drawn.into_iter().fold(spent, |spent, dc| {

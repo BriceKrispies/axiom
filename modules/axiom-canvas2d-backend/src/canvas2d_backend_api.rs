@@ -3,15 +3,27 @@
 use std::collections::HashSet;
 
 use axiom_host::{
-    BackendKind, Draw2dList, FrameDepthCueStats, FrameFeature, FramePacket, FrameRasterStats,
-    FrameSubmissionReport, HostPresentationRequest, RenderCapability,
+    BackendKind, Draw2dList, FrameDepthCueStats, FrameDrawItem, FrameFeature, FramePacket,
+    FrameRasterStats, FrameSubmissionReport, HostPresentationRequest, RenderCapability,
 };
 
 use crate::canvas_policy::{CanvasQualityPreset, CanvasVisualProfile};
 use crate::draw2d_raster::Draw2dTextures;
 use crate::low_poly_raster_options::LowPolyRasterOptions;
-use crate::mesh_cache::MeshCache;
+use crate::mesh_cache::{MeshCache, MeshGeometry};
+use crate::mesh_skinning::SkinnedMeshCache;
 use crate::software_rasterizer::{SoftwareRasterResult, SoftwareRasterizer};
+
+/// One skinned draw as neutral data — the same tuple the GPU backend and
+/// windowing already pass: `(mesh_id, material_id, mvp, world, colour, joint
+/// palette)`. The palette is this frame's column-major joint matrices.
+#[allow(clippy::type_complexity)]
+pub type SkinnedDraw = (u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>);
+
+/// Object-id base for CPU-skinned draws, kept clear of the packet's draw-order
+/// ids (assigned `0..draw_count`) so the two never collide in the rasterizer's
+/// per-object stats.
+const SKINNED_OBJECT_BASE: u64 = 1 << 48;
 
 /// The software, last-resort presentation backend for one surface.
 ///
@@ -29,6 +41,10 @@ pub struct Canvas2dBackendApi {
     profile: CanvasVisualProfile,
     options: LowPolyRasterOptions,
     meshes: MeshCache,
+    // The bake-once skinned mesh set (20-float streams), uploaded at bind like
+    // `meshes`. Each frame's skinned draws are CPU-posed against it (the software
+    // peer of the GPU skinning pass). Empty for apps that submit no skinned bodies.
+    skinned_meshes: SkinnedMeshCache,
     // CPU sprite/atlas textures the 2D Draw2dList consumer samples (uploaded by
     // the app, the same fetch-in-the-app rule the mesh/material path follows).
     textures: Draw2dTextures,
@@ -66,6 +82,7 @@ impl Canvas2dBackendApi {
             )
             .with_capability_profile(axiom_host::BackendCapabilityProfile::canvas2d()),
             meshes: MeshCache::default(),
+            skinned_meshes: SkinnedMeshCache::default(),
             textures: Draw2dTextures::default(),
             #[cfg(target_arch = "wasm32")]
             binding: None,
@@ -121,6 +138,43 @@ impl Canvas2dBackendApi {
         self.meshes = MeshCache::load(meshes);
     }
 
+    /// Upload the **skinned** mesh set — the bake-once bodies in the GPU backend's
+    /// 20-float `(mesh_id, pos·normal·uv·colour·joints·weights, indices)` form,
+    /// distinct from the ordinary `load_meshes` set. Uploaded once at bind (the
+    /// per-frame joint palettes ride in on the skinned draws passed to
+    /// [`Self::present_packet_skinned`] / [`Self::render_offscreen_rgba_skinned`]),
+    /// so the software rasterizer CPU-skins them the way the GPU backend skins on
+    /// the vertex stage. Empty for apps that submit no skinned bodies.
+    pub fn load_skinned_meshes(&mut self, meshes: &[(u64, Vec<f32>, Vec<u32>)]) {
+        self.skinned_meshes = SkinnedMeshCache::load(meshes);
+    }
+
+    /// CPU-skin this frame's skinned draws into drawable `(geometry, draw)` pairs:
+    /// pose each against the uploaded skinned mesh set by its joint palette, and
+    /// synthesize a draw carrying the same `mvp`/`world`/`colour`/`material` the
+    /// GPU skinned pass uses (so the rasterizer projects + lights it identically).
+    /// A draw whose mesh isn't in the skinned set is dropped (`filter_map`).
+    fn pose_skinned(&self, skinned: &[SkinnedDraw]) -> Vec<(MeshGeometry, FrameDrawItem)> {
+        skinned
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (mesh_id, material_id, mvp, world, color, palette))| {
+                self.skinned_meshes.pose(*mesh_id, palette).map(|geo| {
+                    let draw = FrameDrawItem::new(
+                        SKINNED_OBJECT_BASE + i as u64,
+                        *mesh_id,
+                        *material_id,
+                        *world,
+                        *mvp,
+                        *color,
+                        false,
+                    );
+                    (geo, draw)
+                })
+            })
+            .collect()
+    }
+
     /// Bind the real browser canvas's 2D context (wasm32 only) and switch the
     /// canvas backing store to the low internal resolution with pixelated
     /// upscale. On success later [`Self::present_packet`] calls blit real
@@ -170,11 +224,23 @@ impl Canvas2dBackendApi {
     /// target (so the whole path is native-tested); the resulting framebuffer is
     /// blitted by the `wasm32` arm and discarded on native.
     pub fn present_packet(&self, packet: &FramePacket) -> FrameSubmissionReport {
+        self.present_packet_skinned(packet, &[])
+    }
+
+    /// Like [`Self::present_packet`], but also CPU-skins `skinned` — this frame's
+    /// bake-once skinned bodies (each with its own joint palette) — against the set
+    /// uploaded by [`Self::load_skinned_meshes`], so the software backend renders
+    /// the athletes the GPU skinning pass would. `present_packet` passes none.
+    pub fn present_packet_skinned(
+        &self,
+        packet: &FramePacket,
+        skinned: &[SkinnedDraw],
+    ) -> FrameSubmissionReport {
         // Wall-clock timing is read only on wasm (`now_ms` is 0.0 on native, so
         // the native path stays deterministic and timer-free); the pure
         // rasterizer never reads a clock.
         let t0 = now_ms();
-        let result = self.rasterize(packet);
+        let result = self.rasterize(packet, skinned);
         let t1 = now_ms();
         self.blit(result.rgba_bytes(), result.width(), result.height());
         let t2 = now_ms();
@@ -189,7 +255,20 @@ impl Canvas2dBackendApi {
     /// it lets a headless tool or test capture and inspect the Canvas 2D image
     /// natively (e.g. to reproduce a rendering artifact without a browser).
     pub fn render_offscreen_rgba(&self, packet: &FramePacket) -> (Vec<u8>, u32, u32) {
-        let result = self.rasterize(packet);
+        self.render_offscreen_rgba_skinned(packet, &[])
+    }
+
+    /// Like [`Self::render_offscreen_rgba`], but also CPU-skins `skinned` (this
+    /// frame's bake-once skinned bodies) against the [`Self::load_skinned_meshes`]
+    /// set — the software analogue of
+    /// [`axiom_gpu_backend::GpuBackendApi::render_offscreen_rgba`]'s skinned draws,
+    /// so a headless capture (axiom-shot) renders the athletes on Canvas 2D too.
+    pub fn render_offscreen_rgba_skinned(
+        &self,
+        packet: &FramePacket,
+        skinned: &[SkinnedDraw],
+    ) -> (Vec<u8>, u32, u32) {
+        let result = self.rasterize(packet, skinned);
         (
             result.rgba_bytes().to_vec(),
             result.width(),
@@ -202,7 +281,7 @@ impl Canvas2dBackendApi {
     /// recedes toward the *frame's* sky — override the cue profile's fog colour
     /// with the packet clear colour each frame, leaving every other knob as
     /// configured) and run the pure software z-buffer rasterizer.
-    fn rasterize(&self, packet: &FramePacket) -> SoftwareRasterResult {
+    fn rasterize(&self, packet: &FramePacket, skinned: &[SkinnedDraw]) -> SoftwareRasterResult {
         // Only one visual profile exists; this avoids an unused-field warning.
         let _ = self.profile;
         let mut cues = self.options.depth_cues();
@@ -215,6 +294,9 @@ impl Canvas2dBackendApi {
         cues.lighting.ground_color = amb.ground();
         cues.lighting.ambient = 1.0;
         let options = self.options.with_depth_cues(cues);
+        // CPU-skin this frame's skinned bodies into drawable geometry (the software
+        // peer of the GPU vertex-skinning pass); empty for non-skinned frames.
+        let posed = self.pose_skinned(skinned);
         // `now_ms` is the injected phase clock and `log_phases` the phase sink:
         // both real on wasm (`performance.now()` + a console line), no-ops on native
         // — so the pure rasterizer stays clock- and `web_sys`-free, and the native
@@ -223,7 +305,7 @@ impl Canvas2dBackendApi {
             .with_clock(now_ms)
             .with_phase_sink(log_phases)
             .with_deep_sink(deep_log)
-            .rasterize_packet(packet, &self.meshes)
+            .rasterize_packet(packet, &self.meshes, &posed)
     }
 
     /// Build the uniform host report from the rasterizer result and the packet's
@@ -555,6 +637,66 @@ mod tests {
         assert_eq!(report.raster().terrain_draws_preserved, 1);
         assert!(report.raster().candidate_pixels > 0);
         assert!(!report.raster().budget_exhausted);
+    }
+
+    /// One skinned quad vertex: the 20-float stream (pos·normal·uv·colour·
+    /// joints·weights) fully weighted to bone 0.
+    fn skinned_vertex(pos: [f32; 3], color: [f32; 4]) -> [f32; 20] {
+        [
+            pos[0], pos[1], pos[2], // position
+            0.0, 1.0, 0.0, // normal
+            0.0, 0.0, // uv
+            color[0], color[1], color[2], color[3], // colour
+            0.0, 0.0, 0.0, 0.0, // joints (bone 0)
+            1.0, 0.0, 0.0, 0.0, // weights (all on bone 0)
+        ]
+    }
+
+    fn skinned_quad(id: u64) -> (u64, Vec<f32>, Vec<u32>) {
+        let c = [0.9, 0.1, 0.1, 1.0];
+        let mut v = Vec::new();
+        v.extend_from_slice(&skinned_vertex([-0.5, -0.5, 0.0], c));
+        v.extend_from_slice(&skinned_vertex([0.5, -0.5, 0.0], c));
+        v.extend_from_slice(&skinned_vertex([0.5, 0.5, 0.0], c));
+        v.extend_from_slice(&skinned_vertex([-0.5, 0.5, 0.0], c));
+        (id, v, vec![0, 1, 2, 0, 2, 3])
+    }
+
+    #[test]
+    fn skinned_body_renders_via_cpu_skinning() {
+        use axiom_host::FrameFeatureSet;
+        let mut backend = Canvas2dBackendApi::new(&request(800, 600));
+        // A bake-once skinned quad, no ordinary meshes at all — so anything drawn
+        // came exclusively through the CPU skinning path.
+        backend.load_skinned_meshes(&[skinned_quad(3)]);
+        // One skinned draw, identity palette (bone 0 = identity) → posed at bind.
+        let skinned = vec![(3_u64, 9_u64, IDENTITY, IDENTITY, [1.0, 1.0, 1.0, 1.0], vec![IDENTITY])];
+        let p = packet(Vec::new(), FrameFeatureSet::new(false, false, 0, 0));
+
+        let report = backend.present_packet_skinned(&p, &skinned);
+        // The skinned quad's two triangles were projected + rasterized — the
+        // athlete geometry the plain `present_packet` (no skinned) would drop.
+        assert_eq!(report.raster().rasterized_triangles, 2);
+        assert!(report.raster().depth_written_pixels > 0);
+
+        // The offscreen peer paints the same body into the RGBA buffer.
+        let (rgba, w, h) = backend.render_offscreen_rgba_skinned(&p, &skinned);
+        assert_eq!(rgba.len() as u32, w * h * 4);
+        // Some pixel reads red-dominant (the quad's colour), distinct from the
+        // bluish clear — proof the skinned geometry actually shaded pixels.
+        assert!(rgba.chunks_exact(4).any(|px| px[0] > px[2]));
+    }
+
+    #[test]
+    fn skinned_draw_with_unloaded_mesh_is_dropped() {
+        use axiom_host::FrameFeatureSet;
+        let backend = Canvas2dBackendApi::new(&request(800, 600));
+        // No skinned mesh uploaded, so the draw's mesh id resolves to nothing and
+        // the draw is dropped before rasterization (nothing paints).
+        let skinned = vec![(99_u64, 0_u64, IDENTITY, IDENTITY, [1.0; 4], vec![IDENTITY])];
+        let p = packet(Vec::new(), FrameFeatureSet::new(false, false, 0, 0));
+        let report = backend.present_packet_skinned(&p, &skinned);
+        assert_eq!(report.raster().rasterized_triangles, 0);
     }
 
     #[test]

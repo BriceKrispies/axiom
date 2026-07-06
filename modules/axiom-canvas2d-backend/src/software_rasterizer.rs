@@ -28,15 +28,16 @@
 //! Everything here is pure Rust: no `web-sys`, no DOM, no canvas. It runs and is
 //! fully covered on native.
 
-use axiom_host::FramePacket;
+use axiom_host::{FrameDrawItem, FramePacket};
 
 use crate::canvas_depth_cue::to_byte;
+use crate::canvas_depth_cue_profile::CanvasDepthCueProfile;
 use crate::canvas_policy::CanvasDebugOverlay;
 use crate::canvas_post_pass::{apply_fog, apply_outlines, apply_vertical_grade, clamp_axis};
 use crate::depth_buffer::DepthBuffer;
-use crate::frame_packet_raster::{convert, discard_deep};
+use crate::frame_packet_raster::{convert, discard_deep, DrawOverlay};
 use crate::low_poly_raster_options::LowPolyRasterOptions;
-use crate::mesh_cache::MeshCache;
+use crate::mesh_cache::{MeshCache, MeshGeometry};
 use crate::planar_shadow::apply_planar_shadows;
 use crate::raster_triangle::RasterTriangle;
 use crate::sdf_raymarch::apply_sdf_raymarch;
@@ -147,12 +148,13 @@ impl SoftwareRasterizer {
         mut self,
         packet: &FramePacket,
         cache: &MeshCache,
+        skinned: &[(MeshGeometry, FrameDrawItem)],
     ) -> SoftwareRasterResult {
         let clock = self.clock;
         let phase_sink = self.phase_sink;
         let deep_sink = self.deep_sink;
         let t_convert0 = clock();
-        let converted = convert(packet, cache, &self.options, clock, deep_sink);
+        let converted = convert(packet, cache, skinned, &self.options, clock, deep_sink);
         let t_convert1 = clock();
         let clear = packet.clear_color();
         let overlay = self.options.debug_overlay();
@@ -183,45 +185,12 @@ impl SoftwareRasterizer {
         // Sdf capability (was the one unconditional, ungated pass).
         sdf_pass(&mut self.framebuffer, &mut self.depth, packet, self.options.capability_profile());
 
-        // Depth-cue post-passes run in a fixed order: fog (6) → vertical grade
-        // (7) → contact shadows + outlines (8). Per-triangle cues (lighting,
-        // height tint, falloff) are already baked into each flat triangle colour.
+        // Depth-cue post-passes (fog → vertical grade → contact shadows →
+        // outlines), in their fixed order. Per-triangle cues (lighting, height
+        // tint, falloff) are already baked into each flat triangle colour.
         let cues = self.options.depth_cues();
-
-        // 6. depth fog: mix each pixel toward the fog colour by its final depth.
-        let fog_opt = cues
-            .fog
-            .enabled
-            .then(|| apply_fog(&mut self.framebuffer, &self.depth, &cues));
-        let fog_px = fog_opt.unwrap_or(0);
-
-        // 7. vertical colour grade: a faint lower-screen darkening anchor.
-        let grade_opt = cues
-            .enable_vertical_grade
-            .then(|| apply_vertical_grade(&mut self.framebuffer, &cues));
-        let grade_px = grade_opt.unwrap_or(0);
-
-        // 8a. planar projected contact shadows for marked caster objects:
-        // project each caster's geometry along the light onto the ground plane and
-        // rasterize it depth-tested against the finished scene (so walls occlude
-        // it and it lands on the floor, never on a wall face).
-        let shadows_opt = cues.enable_contact_shadows.then(|| {
-            apply_planar_shadows(
-                &mut self.framebuffer,
-                &self.depth,
-                packet,
-                cache,
-                cues.contact_shadow_alpha,
-                cues.contact_shadow_depth_bias,
-            )
-        });
-        let (shadows, shadow_px) = shadows_opt.unwrap_or((0, 0));
-
-        // 8b. depth-weighted silhouette outlines for important objects.
-        let outlined_opt = cues
-            .enable_depth_outlines
-            .then(|| apply_outlines(&mut self.framebuffer, &converted.overlays, &cues));
-        let (outlined, outline_px) = outlined_opt.unwrap_or((0, 0));
+        let (fog_px, grade_px, shadows, shadow_px, outlined, outline_px) =
+            self.depth_cue_posts(packet, cache, &converted.overlays, &cues);
 
         // 9+10. capability-gated backend-neutral whole-frame effects (god-rays, then the
         // filmic grade) applied to the finished RGBA — each skipped when this backend's
@@ -262,6 +231,49 @@ impl SoftwareRasterizer {
             outline_pixels: outline_px,
             horizon_silhouette_drawn: horizon,
         }
+    }
+
+    /// Run the four depth-cue post-passes over the finished framebuffer in their
+    /// fixed order — fog → vertical grade → contact shadows → outlines — returning
+    /// each pass's `(fog_px, grade_px, shadows, shadow_px, outlined, outline_px)`
+    /// counts for the raster stats. Contact shadows project marked casters along
+    /// the light onto the ground, depth-tested against the finished scene (walls
+    /// occlude them). Each pass is skipped (`then`) when its cue is disabled.
+    #[allow(clippy::type_complexity)]
+    fn depth_cue_posts(
+        &mut self,
+        packet: &FramePacket,
+        cache: &MeshCache,
+        overlays: &[DrawOverlay],
+        cues: &CanvasDepthCueProfile,
+    ) -> (u64, u64, u32, u64, u32, u64) {
+        let fog_px = cues
+            .fog
+            .enabled
+            .then(|| apply_fog(&mut self.framebuffer, &self.depth, cues))
+            .unwrap_or(0);
+        let grade_px = cues
+            .enable_vertical_grade
+            .then(|| apply_vertical_grade(&mut self.framebuffer, cues))
+            .unwrap_or(0);
+        let (shadows, shadow_px) = cues
+            .enable_contact_shadows
+            .then(|| {
+                apply_planar_shadows(
+                    &mut self.framebuffer,
+                    &self.depth,
+                    packet,
+                    cache,
+                    cues.contact_shadow_alpha,
+                    cues.contact_shadow_depth_bias,
+                )
+            })
+            .unwrap_or((0, 0));
+        let (outlined, outline_px) = cues
+            .enable_depth_outlines
+            .then(|| apply_outlines(&mut self.framebuffer, overlays, cues))
+            .unwrap_or((0, 0));
+        (fog_px, grade_px, shadows, shadow_px, outlined, outline_px)
     }
 
     /// Apply the capability-gated backend-neutral whole-frame effects to the finished

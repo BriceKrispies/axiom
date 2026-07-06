@@ -1439,7 +1439,10 @@ impl LiveBackend {
                     casters,
                     sdf,
                 );
-                let _ = backend.present_packet(&packet);
+                // CPU-skin the athlete bodies too, so the software fallback renders
+                // them the way the GPU skinning pass does (uploaded at bind via
+                // `make_canvas`; per-frame palettes ride in on `skinned`).
+                let _ = backend.present_packet_skinned(&packet, skinned);
                 Ok(())
             }
         }
@@ -1631,7 +1634,7 @@ async fn select_backend(
 ) -> Option<LiveBackend> {
     use axiom_host::BackendKind;
     if matches!(preference, Some(BackendKind::Canvas2d)) {
-        return make_canvas(request, &canvas, meshes).map(LiveBackend::Canvas);
+        return make_canvas(request, &canvas, meshes, skinned_meshes).map(LiveBackend::Canvas);
     }
     // A forced GPU tier binds exactly that API and must not fall back to Canvas2D.
     let forced_gpu = matches!(
@@ -1667,7 +1670,7 @@ async fn select_backend(
     if forced_gpu {
         return None;
     }
-    make_canvas(request, &canvas, meshes).map(LiveBackend::Canvas)
+    make_canvas(request, &canvas, meshes, skinned_meshes).map(LiveBackend::Canvas)
 }
 
 /// `select_backend`, but log a distinct `console.error` when NO backend could be
@@ -1712,9 +1715,13 @@ fn make_canvas(
     request: &axiom_host::HostPresentationRequest,
     canvas: &web_sys::HtmlCanvasElement,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
 ) -> Option<axiom_canvas2d_backend::Canvas2dBackendApi> {
     let mut backend = axiom_canvas2d_backend::Canvas2dBackendApi::new(request);
     backend.load_meshes(meshes);
+    // The bake-once skinned athlete bodies, CPU-skinned each frame by the software
+    // backend (peer of the GPU arm's skinned mesh upload at bind).
+    backend.load_skinned_meshes(skinned_meshes);
     // The forced-fallback default is the Low tier; `?quality=ultralow|low|medium|high`
     // (or 0..3) overrides it for testing/perf comparison.
     backend.set_quality_level(canvas_quality_level().unwrap_or(1));
