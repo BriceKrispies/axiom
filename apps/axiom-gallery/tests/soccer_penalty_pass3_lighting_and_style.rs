@@ -25,9 +25,9 @@ fn plan() -> PenaltyRenderPlan {
 fn light_model_constants_are_deterministic() {
     assert_eq!(PenaltyLightModel::stage1(), PenaltyLightModel::stage1());
     let l = PenaltyLightModel::stage1();
-    assert_eq!(l.ambient_strength, 0.72);
-    assert_eq!(l.directional_strength, 0.55);
-    assert_eq!(l.bands, [0.72, 0.82, 0.91, 1.0]);
+    assert_eq!(l.ambient_strength, 0.80);
+    assert_eq!(l.directional_strength, 0.45);
+    assert_eq!(l.bands, [0.80, 0.87, 0.94, 1.0]);
     // The stored direction is unit-length (normalized form of (-0.45,-1,-0.35)).
     let len = l.direction.length();
     assert!((len - 1.0).abs() < 1.0e-3, "light direction must be normalized (len {len})");
@@ -36,16 +36,16 @@ fn light_model_constants_are_deterministic() {
 #[test]
 fn brightness_quantization_maps_to_expected_bands() {
     let l = PenaltyLightModel::stage1();
-    // Snap-down to the largest band met, floored at 0.72.
-    assert_eq!(l.quantize(0.72), 0.72);
-    assert_eq!(l.quantize(0.81), 0.72);
-    assert_eq!(l.quantize(0.82), 0.82);
-    assert_eq!(l.quantize(0.90), 0.82);
-    assert_eq!(l.quantize(0.91), 0.91);
-    assert_eq!(l.quantize(0.99), 0.91);
+    // Snap-down to the largest band met, floored at 0.80.
+    assert_eq!(l.quantize(0.80), 0.80);
+    assert_eq!(l.quantize(0.86), 0.80);
+    assert_eq!(l.quantize(0.87), 0.87);
+    assert_eq!(l.quantize(0.93), 0.87);
+    assert_eq!(l.quantize(0.94), 0.94);
+    assert_eq!(l.quantize(0.99), 0.94);
     assert_eq!(l.quantize(1.00), 1.0);
-    // Below the first band still floors to 0.72.
-    assert_eq!(l.quantize(0.0), 0.72);
+    // Below the first band still floors to 0.80.
+    assert_eq!(l.quantize(0.0), 0.80);
 }
 
 #[test]
@@ -53,9 +53,9 @@ fn face_brightness_follows_the_light_model() {
     let l = PenaltyLightModel::stage1();
     // A face pointing straight at the light is fully lit: ambient + directional.
     let toward_light = l.direction.mul_scalar(-1.0);
-    assert!((l.face_brightness(toward_light) - 1.27).abs() < 1.0e-3);
+    assert!((l.face_brightness(toward_light) - 1.25).abs() < 1.0e-3);
     // A face pointing away receives only ambient.
-    assert!((l.face_brightness(l.direction) - 0.72).abs() < 1.0e-3);
+    assert!((l.face_brightness(l.direction) - 0.80).abs() < 1.0e-3);
     // The up face is bright (upper-front-left light) → quantizes to the top band.
     let up = Vec3::new(0.0, 1.0, 0.0);
     assert_eq!(l.quantize(l.face_brightness(up)), 1.0);
