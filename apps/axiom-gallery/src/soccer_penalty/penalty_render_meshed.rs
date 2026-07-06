@@ -631,7 +631,20 @@ pub fn soccer_meshed_shell() -> RunningApp {
     // faces read as open shade, not night — the up-facing pitch (which draws the
     // brighter sky term) is untouched, so this lifts the darks without blowing the
     // grass. Strength is folded into the tints (a plain mix, no scale).
-    app.set_ambient(FrameAmbient::new([0.66, 0.71, 0.80], [0.60, 0.62, 0.64]));
+    //
+    // LIGHTING (depth restore): the ground term had crept to ~0.62, nearly equal to
+    // the ~0.72 sky term — a gradient-less omni-fill that flooded the whole frame
+    // flat. With that much floor light, the warm key's 5x5 PCF cast shadow and the
+    // under-actor darkening barely read (an in-shadow patch = ground fill + cool
+    // fill, almost as bright as its lit neighbour), so the athletes floated and the
+    // frame looked hazy, where the reference is a high-key stadium with clear
+    // grounding shadows and modelled figures. Re-open the hemisphere differential:
+    // hold the bright sky term (the up-facing pitch and the sky-lit half of the
+    // vertical stand cards are untouched — no background re-crush, no grass change),
+    // but drop the GROUND term so down-facing/occluded normals and the in-shadow
+    // pitch fall enough for the key to model form and the cast shadow to ground the
+    // athletes — daylight depth, still open shade, not night.
+    app.set_ambient(FrameAmbient::new([0.66, 0.71, 0.80], [0.41, 0.43, 0.47]));
     app
 }
 
