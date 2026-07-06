@@ -118,15 +118,7 @@ pub const KICKER_X: f32 = -0.7;
 pub const KICKER_Z: f32 = 12.6;
 pub const GOALIE_X: f32 = 0.0;
 pub const GOALIE_Z: f32 = 0.5;
-// Slightly-exaggerated-for-readability, but sized to the REFERENCE's ball-to-goal
-// proportion. The goal is at true regulation scale (GOAL_HEIGHT=2.44, width=7.32),
-// so a 0.32 radius made the near ball loom ~1.5x too big vs the reference, whose
-// ball reads at ~0.29 of the goal's on-screen height (champion geometry gave ~0.44).
-// 0.21 restores that proportion — still readable, no longer dominating the frame —
-// without disturbing the kicker size or the goal framing (both untouched). All ball
-// derivatives (rest y = BALL_RADIUS, blob-shadow extents, ball mesh) scale with it.
-pub const BALL_RADIUS: f32 = 0.21; // real ~0.11 m; kept mildly exaggerated to match the reference
-
+pub const BALL_RADIUS: f32 = 0.32; // exaggerated for readability (real ~0.11 m)
 
 // Backdrop.
 pub const STADIUM_WALL_Z: f32 = -4.6;
