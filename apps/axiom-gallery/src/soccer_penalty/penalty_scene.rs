@@ -126,7 +126,11 @@ pub const STADIUM_WALL_Z: f32 = -4.6;
 // lowest crowd row a base to rise from. Kept short so the crowd fills down close
 // to the goal top (as in the reference) instead of leaving a tall dead band.
 pub const STADIUM_WALL_HEIGHT: f32 = 1.2;
-pub const CROWD_CARD_COUNT: u32 = 26;
+pub const CROWD_CARD_COUNT: u32 = 44;
+/// Vertical sub-cells each terrace band is diced into, so the crowd reads as a
+/// granular mass of individual spectators (as in the reference) rather than a
+/// handful of tall monolithic slabs.
+pub const CROWD_ROW_CELLS: u32 = 3;
 pub const AD_BOARD_COUNT: u32 = 9;
 pub const AD_BOARD_Z: f32 = -2.6;
 pub const AD_BOARD_AXIOM_INDEX: u32 = 2;
@@ -482,20 +486,31 @@ fn backdrop(b: &mut SceneBuilder) {
         (5.4, 2.4, 0.0),
         (7.1, 2.4, 0.5),
     ];
+    // Each terrace band is also diced VERTICALLY into `CROWD_ROW_CELLS` short
+    // cells, so the crowd reads as a fine granular mass of individual spectators
+    // (as in the reference) rather than a handful of tall monolithic slabs. The
+    // material cycles on a 2D (column, cell) index so vertically-adjacent cells
+    // differ too — a speckle in both axes, not vertical stripes. Cell height
+    // stays well above a pixel at this backdrop distance, so the denser field
+    // survives rasterization and the canvas2d sub-pixel cull on every backend.
     rows.iter().enumerate().for_each(|(row, &(y, height, phase))| {
+        let cell_h = height / CROWD_ROW_CELLS as f32;
         (0..CROWD_CARD_COUNT).for_each(|i| {
             // Half-card horizontal offset on the upper row so the two rows
             // interleave like real terrace seating rather than lining up.
             let x = -span * 0.5 + card_w * (i as f32 + 0.5 + phase);
-            let material = crowd_materials[(i as usize + row * 2) % 3];
-            b.emit(
-                DioramaRole::CrowdCard,
-                PrimitiveShape::Box,
-                Vec3::new(x, y, STADIUM_WALL_Z - 0.3),
-                Vec3::new(card_w * 0.92, height, 0.2),
-                material,
-                "crowd.card",
-            );
+            (0..CROWD_ROW_CELLS).for_each(|s| {
+                let cy = y - height * 0.5 + cell_h * (s as f32 + 0.5);
+                let material = crowd_materials[(i as usize + row * 2 + s as usize) % 3];
+                b.emit(
+                    DioramaRole::CrowdCard,
+                    PrimitiveShape::Box,
+                    Vec3::new(x, cy, STADIUM_WALL_Z - 0.3),
+                    Vec3::new(card_w * 0.9, cell_h * 0.86, 0.2),
+                    material,
+                    "crowd.card",
+                );
+            });
         });
     });
     // Bright ad hoardings ringing the goal, alternating red "AXIOM" and blue
