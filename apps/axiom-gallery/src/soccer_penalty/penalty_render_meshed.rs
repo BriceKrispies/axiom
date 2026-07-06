@@ -381,6 +381,23 @@ impl PenaltyMeshedScene {
             },
             Transform::IDENTITY,
         );
+        // A cool sky-FILL light. The engine's default hemisphere ambient is a dark
+        // floor (sky ~0.4, ground ~0.15), so every face the warm key misses — the
+        // shadow side of the athletes, the keeper's front, the crowd/stand cards —
+        // crushes toward black, while the reference is a high-key sunlit stadium
+        // whose strong sky bounce lifts the shadows into open daylight. This second
+        // directional rakes in from the opposite (upper-front-left) side, shallower
+        // and dimmer than the key and tinted cool sky-blue, to lift those shadowed
+        // faces and cut the harsh key-to-fill contrast — the classic key + fill
+        // pairing. The single 5x5 PCF shadow stays on the warm key above.
+        app.add_light(
+            DirectionalLight {
+                direction: Vec3::new(0.46, -0.52, 0.42),
+                color: Color::linear_rgb(ch(0.60), ch(0.70), ch(0.86)),
+                intensity: ch(0.55),
+            },
+            Transform::IDENTITY,
+        );
     }
 
     /// A cached lit material for `color` (registered once, reused thereafter), so
