@@ -137,11 +137,22 @@ fn material_for(tag: u32) -> PenaltyMaterialId {
 /// behind, is dark hair on the head, royal-blue socks below the knee, and black
 /// boots — so those three parts are resolved by index here; everything else
 /// (jersey, shorts, skin) still falls back to the tag-based [`material_for`].
+///
+/// The **upper arms** (indices 9, 11) are also resolved by index to the jersey
+/// blue: the reference #10 wears a short-sleeve kit whose blue sleeve covers the
+/// upper arm (bare skin begins at the forearm). This is not only on-model — it is
+/// what re-attaches the arms to the body. The athletes bake as one continuous
+/// `MetaSurface` **per kit material** (see `body_groups`), so a skin-tagged upper
+/// arm baked in the *skin* group could never fuse to the *jersey* torso surface
+/// and read as a detached capsule floating at the shoulder. Grouping the upper
+/// arm with the jersey torso lets the smooth-union weld the shoulder into one
+/// surface, moving the only kit seam down to the elbow — a natural sleeve edge.
 fn material_for_part(index: usize, tag: u32) -> PenaltyMaterialId {
     match index {
-        2 => PenaltyMaterialId::KickerHair,          // head: dark hair, not bald skin
-        4 | 7 => PenaltyMaterialId::KickerSocksBlue, // shins: royal-blue socks
-        5 | 8 => PenaltyMaterialId::KickerShoes,     // feet: black boots
+        2 => PenaltyMaterialId::KickerHair,            // head: dark hair, not bald skin
+        4 | 7 => PenaltyMaterialId::KickerSocksBlue,   // shins: royal-blue socks
+        5 | 8 => PenaltyMaterialId::KickerShoes,       // feet: black boots
+        9 | 11 => PenaltyMaterialId::KickerJerseyBlue, // upper arms: blue sleeve, fuses to torso
         _ => material_for(tag),
     }
 }
@@ -212,6 +223,10 @@ mod tests {
         assert_eq!(material_for_part(7, 3), PenaltyMaterialId::KickerSocksBlue);
         assert_eq!(material_for_part(5, 4), PenaltyMaterialId::KickerShoes);
         assert_eq!(material_for_part(8, 4), PenaltyMaterialId::KickerShoes);
+        // Upper arms (9, 11) are the blue jersey sleeve, so they bake into the
+        // torso's MetaSurface group and fuse at the shoulder (bare-skin tag notwithstanding).
+        assert_eq!(material_for_part(9, 2), PenaltyMaterialId::KickerJerseyBlue);
+        assert_eq!(material_for_part(11, 2), PenaltyMaterialId::KickerJerseyBlue);
         // Everything else falls back to the tag: jersey, shorts, skin (thigh/forearm).
         assert_eq!(material_for_part(1, 0), PenaltyMaterialId::KickerJerseyBlue);
         assert_eq!(material_for_part(0, 1), PenaltyMaterialId::KickerShortsWhite);
