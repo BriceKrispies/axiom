@@ -59,15 +59,18 @@ pub mod palette {
     use super::Rgba;
 
     // --- field & markings ---
-    // Stronger light/dark contrast so the mown bands read as pronounced stripes
-    // (they were near-identical and looked flat/minty), and a warmer light band.
-    // Re-saturated toward the reference's vivid turf: the app has no board-wide
-    // FramePostProcess grade (the GPU champion never applies one — that seam is an
-    // architect job), so the dominant surface's colour punch must come from its
-    // albedo. The green channel now dominates harder and blue is pulled down, which
-    // enriches the grass and warms it off the pale mint the ungraded raster read as.
-    pub const GRASS_LIGHT: Rgba = Rgba::rgb(0.31, 0.60, 0.17);
-    pub const GRASS_DARK: Rgba = Rgba::rgb(0.16, 0.44, 0.10);
+    // Colorist de-neon: the prior 0.31/0.60/0.17 grass pushed green hard while
+    // starving red+blue, so the ungraded raster read as an electric, over-saturated
+    // neon pitch with harshly separated mown bands — nothing like the reference's
+    // bright, natural, faintly-yellow lawn turf. With no board-wide FramePostProcess
+    // grade to pull saturation down at the tone stage (the GPU champion applies none
+    // — that seam is an architect job), the desaturation has to be baked into the
+    // albedo: red and blue are lifted toward the green so the hue relaxes off neon
+    // into lawn-green, the whole band is brightened toward the sunlit reference, and
+    // the light/dark gap is narrowed so the stripes read as subtle mowing, not hard
+    // contrast banding.
+    pub const GRASS_LIGHT: Rgba = Rgba::rgb(0.40, 0.63, 0.31);
+    pub const GRASS_DARK: Rgba = Rgba::rgb(0.27, 0.48, 0.21);
     pub const LINE_WHITE: Rgba = Rgba::rgb(0.95, 0.97, 0.95);
 
     // --- goal & net ---
