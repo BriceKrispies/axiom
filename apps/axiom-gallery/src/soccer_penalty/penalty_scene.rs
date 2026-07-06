@@ -344,12 +344,13 @@ fn net(b: &mut SceneBuilder) {
 }
 
 /// Emit the articulated kicker: the shared `axiom-figure` kicker posed at its
-/// idle frame. Unlike the old frozen box puppet, this is the same data the lab
+/// run-up display frame (a planted/cocked stride, not the limp T-pose rest).
+/// Unlike the old frozen box puppet, this is the same data the lab
 /// authors and scrubs; the per-frame kick pose is overlaid in
 /// `soccer_penalty_app` (like the goalie's dive), driven by the shot so the
 /// strike lands as the ball is struck.
 fn kicker(b: &mut SceneBuilder) {
-    let boxes = penalty_kicker::KickerRig::new().boxes_at(penalty_kicker::IDLE_FRAME);
+    let boxes = penalty_kicker::KickerRig::new().boxes_at(penalty_kicker::DISPLAY_FRAME);
     boxes.iter().for_each(|kb| {
         b.emit(DioramaRole::Kicker, PrimitiveShape::Box, kb.center, kb.size, kb.material, kb.label);
     });

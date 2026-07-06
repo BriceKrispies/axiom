@@ -40,8 +40,19 @@ pub const KICKER_LABELS: [&str; 13] = [
     "kicker.r_forearm",
 ];
 
-/// The rest/idle frame the static diorama emits the kicker at.
+/// The rest/idle frame: the shared figure's authored T-pose rest (arms out
+/// horizontal, legs straight). Used by the rig tests as a stable reference frame.
 pub const IDLE_FRAME: u32 = 0;
+
+/// The frame the static diorama poses the kicker at. Frame 0 is the figure's
+/// limp rest — arms flung straight out to the sides and legs unbent, a scarecrow
+/// T-pose that reads dead against a run-up reference. Frame 26 is the
+/// planted/cocked run-up pose (the same one the live gameplay holds while the
+/// ball is at the spot): support leg planted, kicking leg wound back, weight
+/// carried forward — a braced, weighted athlete mid-approach rather than a
+/// mannequin. This is a render/display frame choice only; it does not touch the
+/// clip data or the gameplay strike timing.
+pub const DISPLAY_FRAME: u32 = 26;
 
 /// One posed kicker box, ready for [`crate::soccer_penalty::penalty_scene`] to
 /// emit or for the per-frame overlay to reposition.
