@@ -198,6 +198,30 @@ export const DEMOS = [
     ],
   },
   {
+    id: "gravix",
+    title: "Gravix",
+    blurb: "Roll a physics marble across procedurally-generated floating platform courses — over ramps, across jump gaps — collecting coins to the finish pad.",
+    desc:
+      "A marble-roll platformer on the engine's deterministic rigid-body physics. " +
+      "Steer with camera-relative roll torque (W A S D): the contact-point friction " +
+      "converts spin into real forward rolling, so the marble carries momentum. " +
+      "Space jumps when grounded, Shift brakes, and the arrow keys orbit the camera. " +
+      "Every course is procedurally generated from its level index — a winding grid " +
+      "path with turns, tilted ramps (oriented-box collision), jump gaps, and hovering " +
+      "coins — so each level replays identically. Reach the finish pad to advance; three " +
+      "falls end the run (press R to restart). (WebGPU, with a WebGL2 / Canvas2D fallback.)",
+    dir: "gravix",
+    startFn: "gravix_start",
+    canvasId: "axiom-gravix-canvas",
+    buttons: [
+      { key: "w", label: "▲", pos: "up" },
+      { key: "a", label: "◀", pos: "left" },
+      { key: "d", label: "▶", pos: "right" },
+      { key: "s", label: "▼", pos: "down" },
+      { key: " ", label: "JUMP", pos: "fire" },
+    ],
+  },
+  {
     id: "harness",
     title: "Debug Overlay",
     blurb: "A backquote-toggled developer debug overlay + command console for the engine's browser surface.",

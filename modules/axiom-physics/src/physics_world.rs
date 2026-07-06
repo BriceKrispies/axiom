@@ -21,7 +21,7 @@
 //! can never carry a non-finite value.
 
 use axiom_kernel::Meters;
-use axiom_math::Vec3;
+use axiom_math::{Transform, Vec3};
 use axiom_runtime::RuntimeStep;
 
 use crate::broad_phase_pair;
@@ -111,6 +111,18 @@ fn disable_cmd(
 /// `true` iff every component of `v` is finite.
 fn vec3_is_finite(v: Vec3) -> bool {
     v.x.is_finite() & v.y.is_finite() & v.z.is_finite()
+}
+
+/// `true` iff every component of a transform (translation, rotation, scale) is
+/// finite — the screen for an immediate teleport, so a non-finite target is
+/// rejected deterministically rather than committed into a snapshot.
+fn transform_is_finite(t: Transform) -> bool {
+    vec3_is_finite(t.translation)
+        & t.rotation.x.is_finite()
+        & t.rotation.y.is_finite()
+        & t.rotation.z.is_finite()
+        & t.rotation.w.is_finite()
+        & vec3_is_finite(t.scale)
 }
 
 /// Real per-step dynamics work, summed across the step's substeps.
@@ -367,6 +379,54 @@ impl PhysicsWorld {
 
     fn body_exists(&self, body: PhysicsBodyHandle) -> bool {
         self.body_at(body).is_some()
+    }
+
+    /// Immediately teleport a body to `transform` (no queue, no integration). The
+    /// transform must be finite and the body must exist. Used to (re)position a
+    /// body outside the normal integration — e.g. spawning or respawning a player
+    /// at a fixed point.
+    pub(crate) fn set_body_transform(
+        &mut self,
+        body: PhysicsBodyHandle,
+        transform: Transform,
+    ) -> PhysicsResult<()> {
+        transform_is_finite(transform)
+            .then_some(())
+            .ok_or(PhysicsError::non_finite_input(
+                "teleport transform must be finite",
+            ))
+            .and_then(|()| {
+                self.body_at_mut(body)
+                    .ok_or(PhysicsError::body_not_found("teleport target body not found"))
+            })
+            .map(|b| b.set_transform(transform))
+    }
+
+    /// Immediately set a body's linear and angular velocity (no queue). Both
+    /// vectors must be finite and the body must exist. Used to bring a body to
+    /// rest on respawn or to brake it. Velocity on a non-dynamic body is stored
+    /// but never integrated (only enabled dynamic bodies move), so it is a
+    /// harmless no-op there.
+    pub(crate) fn set_body_velocity(
+        &mut self,
+        body: PhysicsBodyHandle,
+        linear: Vec3,
+        angular: Vec3,
+    ) -> PhysicsResult<()> {
+        (vec3_is_finite(linear) & vec3_is_finite(angular))
+            .then_some(())
+            .ok_or(PhysicsError::non_finite_input(
+                "velocity vectors must be finite",
+            ))
+            .and_then(|()| {
+                self.body_at_mut(body).ok_or(PhysicsError::body_not_found(
+                    "velocity target body not found",
+                ))
+            })
+            .map(|b| {
+                b.set_linear_velocity(linear);
+                b.set_angular_velocity(angular);
+            })
     }
 
     /// Advance the world by one explicit fixed step, rejecting a zero step.

@@ -181,9 +181,14 @@ sphere/plane, sphere/box, box/plane** — in both collider orderings. Dispatch i
 branchless 16-entry function table indexed by `kind_a.index() * 4 + kind_b.index()`;
 the reversed orderings (box/sphere, plane/sphere, plane/box) reuse the canonical
 generator with arguments swapped and the resulting normal flipped, so each
-geometry test is written once. **Every other pairing — box/box (oriented or AABB),
-any capsule pair, plane/plane — deterministically produces no contact** and is a
-documented later-phase item.
+geometry test is written once. The two box pairings are **orientation-aware**:
+`sphere/box` resolves the sphere against the box's closest surface point *in the
+box's local frame* (via the box rotation's conjugate), and `box/plane` projects
+the half-extents onto the plane normal expressed in the box's rotated axes — so a
+tilted platform collides on its true faces. At the identity rotation both reduce
+exactly to the axis-aligned tests. **Every other pairing — box/box, any capsule
+pair, plane/plane — deterministically produces no contact** and is a documented
+later-phase item.
 
 Conventions (deterministic, documented):
 
@@ -269,22 +274,26 @@ never yield a `NaN`, and an inactive body keeps its exact stored orientation
 (the candidate is selected away by table index, not a branch). So a body **does**
 acquire rotation through simulation — from an applied torque.
 
-> **Where angular dynamics stop today.** Torque (`apply_torque`) spins a body and
-> orientation integrates, but the **contact solver applies no angular impulse** —
-> a collision or frictional slide changes only linear velocities, so contacts do
-> not yet induce spin. Contact-coupled angular response is the remaining angular
-> gap.
+> **Angular dynamics (landed).** Torque (`apply_torque`) spins a body, orientation
+> integrates, and the **contact solver applies the angular half of every impulse**
+> about the contact lever arm (`ω += I⁻¹·(r × J)` for both the normal and the two
+> friction tangents). So an off-centre hit induces spin and a frictional slide
+> converts into roll — a torque-driven sphere on a frictional surface genuinely
+> rolls forward. An immovable body's zero inverse inertia makes its angular delta
+> vanish exactly, with no branch.
 
-### Pose simplification: collider placement is translation-only
+### Pose handling: box rotation honoured, scale ignored
 
-A collider is placed at its owning body's **translation**, and **body rotation and
-scale are ignored for collision** (`world_aabb` builds `center ± half_extents`,
-the contact generators read body `translation`, and position correction preserves
-`rotation`/`scale`). Note this is now a genuine *approximation* rather than a
-consequence of "no rotation": a body **can** acquire an orientation through
-torque-driven angular integration, but its collider's world AABB and contact
-geometry do not rotate with it. Oriented-box contacts (and contact-induced
-angular response) remain a later-phase item.
+A collider is placed at its owning body's **translation** and **rotation**; only
+transform **scale is ignored** (the module carries no collider scale). Rotation is
+threaded into both the bounds (`world_aabb` takes a `Quat`) and the narrow phase
+(the contact generators receive each body's rotation): a **box** bounds and
+collides as an oriented box (OBB), while a **sphere/capsule** is rotation-invariant
+and keeps its tight axis-aligned bound. Spatial queries (`physics_query.rs`) remain
+rotation-unaware by design — they pass the identity rotation so a query never
+*over*-reports a rotated box (exact ray/OBB casting is a later-phase item), whereas
+the broad phase must not *miss* a candidate and so uses the true rotation. `box/box`
+contacts remain a documented later-phase item.
 
 ### Spatial queries (`physics_query.rs`)
 
@@ -389,14 +398,13 @@ app, test app, or WASM app can each drive the same world.
 Scheduled, in order, in [`ROADMAP.md`](ROADMAP.md). Each is genuinely **not**
 implemented yet (and is never claimed to be):
 
-- **contact-induced angular impulse** — torque + orientation integration + angular
-  damping are landed and a body spins from `apply_torque`, but the **contact solver
-  applies no angular impulse**, so collisions and frictional slides do not yet
-  induce spin (the per-step angular dynamics from contacts are the open piece);
 - **capsule contacts** — every capsule pairing produces no contact, and capsule is
   excluded from exact queries;
-- **box/box contacts** — oriented or AABB; collider placement is translation-only,
-  so a body's orientation does not rotate its collider geometry;
+- **box/box contacts** — two box colliders never contact each other (the marble
+  spine only needs a dynamic sphere against static boxes; `sphere/box` and
+  `box/plane` are orientation-aware, but box/box is unimplemented);
+- **exact ray/OBB and ray/capsule casting** — `raycast`/`overlap_sphere` treat a
+  box as axis-aligned (identity rotation) and never hit a capsule;
 - **collision / trigger lifecycle events** — no contact persistence across steps,
   so contact enter/stay/exit and trigger overlap events are not emitted (the
   `latest_contacts()` report exposes the current step's contacts, but there is no

@@ -39,7 +39,7 @@
 //! miss/empty.
 
 use axiom_kernel::Meters;
-use axiom_math::{Ray, Vec3};
+use axiom_math::{Quat, Ray, Vec3};
 
 use crate::collider_bounds::world_aabb;
 use crate::physics_body_handle::PhysicsBodyHandle;
@@ -184,10 +184,14 @@ fn ray_sphere(shape: PhysicsColliderShape, center: Vec3, ray: &Ray) -> Option<f3
     hits.then_some(entry)
 }
 
-/// Exact ray/box intersection: a box *is* its world axis-aligned extents, so the
-/// AABB slab entry distance is exact.
+/// Exact ray/box intersection for an axis-aligned box: a box *is* its world
+/// axis-aligned extents, so the AABB slab entry distance is exact. Queries remain
+/// rotation-unaware (they pass the identity rotation) — exact ray/OBB casting is a
+/// documented later-phase item (see `ROADMAP.md`), tracked alongside capsule
+/// queries; the rotation-aware bound belongs to the broad phase, which must not
+/// miss a candidate, whereas a query must not over-report.
 fn ray_box(shape: PhysicsColliderShape, center: Vec3, ray: &Ray) -> Option<f32> {
-    world_aabb(shape, center).and_then(|aabb| ray.intersect_aabb_entry(&aabb))
+    world_aabb(shape, center, Quat::IDENTITY).and_then(|aabb| ray.intersect_aabb_entry(&aabb))
 }
 
 /// A capsule is explicitly unsupported by `raycast` — never a hit.

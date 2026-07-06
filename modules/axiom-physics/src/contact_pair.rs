@@ -22,7 +22,7 @@
 //!   configurations (sphere centers equal, or a sphere center inside a box) have
 //!   no defined normal and likewise produce no contact.
 
-use axiom_math::Vec3;
+use axiom_math::{Quat, Vec3};
 
 use crate::broad_phase_pair::BroadPhasePair;
 use crate::contact_manifold::ContactManifold;
@@ -39,8 +39,14 @@ struct ContactGeom {
     point: Vec3,
 }
 
-/// A contact generator for one ordered shape pairing.
-type ContactFn = fn(PhysicsColliderShape, Vec3, PhysicsColliderShape, Vec3) -> Option<ContactGeom>;
+/// A contact generator for one ordered shape pairing. Each collider is given its
+/// owning body's world `center` **and** `rotation`, so an oriented box collides
+/// on its true tilted faces. Sphere and plane generators ignore the rotation
+/// arguments (a sphere is rotation-invariant; a plane's normal lives in its shape
+/// and is treated as world-space, so a plane body's rotation does not steer it —
+/// a documented choice, see the module docs).
+type ContactFn =
+    fn(PhysicsColliderShape, Vec3, Quat, PhysicsColliderShape, Vec3, Quat) -> Option<ContactGeom>;
 
 /// The branchless dispatch table, indexed by `kind_a.index() * 4 + kind_b.index()`
 /// with `Sphere = 0, Box = 1, Capsule = 2, Plane = 3`.
@@ -76,18 +82,22 @@ fn flip(geom: ContactGeom) -> ContactGeom {
 fn no_contact(
     _a: PhysicsColliderShape,
     _ca: Vec3,
+    _ra: Quat,
     _b: PhysicsColliderShape,
     _cb: Vec3,
+    _rb: Quat,
 ) -> Option<ContactGeom> {
     None
 }
 
-/// Sphere (A) vs sphere (B).
+/// Sphere (A) vs sphere (B). Rotation-invariant — the rotation args are unused.
 fn sphere_sphere(
     a: PhysicsColliderShape,
     ca: Vec3,
+    _ra: Quat,
     b: PhysicsColliderShape,
     cb: Vec3,
+    _rb: Quat,
 ) -> Option<ContactGeom> {
     let sum = a.radius() + b.radius();
     let delta = cb.subtract(ca);
@@ -104,13 +114,15 @@ fn sphere_sphere(
     })
 }
 
-/// Sphere (A) vs plane (B). The plane center is irrelevant — the plane is defined
-/// by its unit normal and signed offset `n · x = offset`.
+/// Sphere (A) vs plane (B). The plane center and rotation are irrelevant — the
+/// plane is defined by its unit normal and signed offset `n · x = offset`.
 fn sphere_plane(
     a: PhysicsColliderShape,
     ca: Vec3,
+    _ra: Quat,
     b: PhysicsColliderShape,
     _cb: Vec3,
+    _rb: Quat,
 ) -> Option<ContactGeom> {
     let r = a.radius();
     let n = b.normal();
@@ -127,17 +139,24 @@ fn sphere_plane(
 }
 
 /// Box (A) vs plane (B). The box projection radius onto the plane normal is the
-/// L1 combination of its half-extents with the absolute normal components.
+/// L1 combination of its half-extents with the plane normal expressed in the
+/// box's **rotated** world axes, so a tilted box's half-width along the normal is
+/// exact. At the identity box rotation `ra` this collapses to the axis-aligned
+/// `|n.x|·hx + |n.y|·hy + |n.z|·hz`.
 fn box_plane(
     a: PhysicsColliderShape,
     ca: Vec3,
+    ra: Quat,
     b: PhysicsColliderShape,
     _cb: Vec3,
+    _rb: Quat,
 ) -> Option<ContactGeom> {
     let he = a.half_extents();
     let n = b.normal();
     let signed = n.dot(ca) - b.offset();
-    let radius = n.x.abs() * he.x + n.y.abs() * he.y + n.z.abs() * he.z;
+    let radius = he.x * n.dot(ra.rotate(Vec3::UNIT_X)).abs()
+        + he.y * n.dot(ra.rotate(Vec3::UNIT_Y)).abs()
+        + he.z * n.dot(ra.rotate(Vec3::UNIT_Z)).abs();
     let depth = radius - signed;
     let penetrating = depth > 0.0;
     let normal = n.mul_scalar(-1.0);
@@ -150,63 +169,81 @@ fn box_plane(
 }
 
 /// Sphere (A) vs box (B): the sphere center against the box's closest surface
-/// point. A sphere whose center is inside the box (`dist == 0`) has no defined
-/// normal and produces no contact.
+/// point, computed in the **box's local frame** so an oriented (rotated) box
+/// collides on its true tilted faces. The sphere center is brought into the box
+/// frame with the box rotation's conjugate (its inverse for a unit body
+/// quaternion), clamped to the half-extents, and the resulting local normal /
+/// contact point are rotated back to world. A sphere whose center is inside the
+/// box (`dist == 0`) has no defined normal and produces no contact. At the
+/// identity box rotation `rb` this reduces exactly to the axis-aligned test.
 fn sphere_box(
     a: PhysicsColliderShape,
     ca: Vec3,
+    _ra: Quat,
     b: PhysicsColliderShape,
     cb: Vec3,
+    rb: Quat,
 ) -> Option<ContactGeom> {
     let r = a.radius();
     let he = b.half_extents();
-    let d = ca.subtract(cb);
-    let closest = cb.add(Vec3::new(
-        d.x.clamp(-he.x, he.x),
-        d.y.clamp(-he.y, he.y),
-        d.z.clamp(-he.z, he.z),
-    ));
-    let delta = ca.subtract(closest);
-    let dist = delta.length_squared().sqrt();
+    let local = rb.conjugate().rotate(ca.subtract(cb));
+    let closest_local = Vec3::new(
+        local.x.clamp(-he.x, he.x),
+        local.y.clamp(-he.y, he.y),
+        local.z.clamp(-he.z, he.z),
+    );
+    let delta_local = local.subtract(closest_local);
+    let dist = delta_local.length_squared().sqrt();
     let penetrating = (dist > 0.0) & (dist < r);
     let inv = 1.0 / dist.max(f32::MIN_POSITIVE);
-    let normal = delta.mul_scalar(-inv);
+    // A→B (sphere→box) points from the sphere centre toward the box surface, i.e.
+    // opposite the local separation; rotate it (and the closest point) to world.
+    let normal = rb.rotate(delta_local.mul_scalar(-inv));
     let depth = r - dist;
     penetrating.then_some(ContactGeom {
         normal,
         depth,
-        point: closest,
+        point: cb.add(rb.rotate(closest_local)),
     })
 }
 
-/// Box (A) vs sphere (B) — the canonical sphere/box with roles swapped.
+/// Box (A) vs sphere (B) — the canonical sphere/box with roles (and rotations)
+/// swapped.
 fn box_sphere(
     a: PhysicsColliderShape,
     ca: Vec3,
+    ra: Quat,
     b: PhysicsColliderShape,
     cb: Vec3,
+    rb: Quat,
 ) -> Option<ContactGeom> {
-    sphere_box(b, cb, a, ca).map(flip)
+    sphere_box(b, cb, rb, a, ca, ra).map(flip)
 }
 
-/// Plane (A) vs sphere (B) — the canonical sphere/plane with roles swapped.
+/// Plane (A) vs sphere (B) — the canonical sphere/plane with roles (and
+/// rotations) swapped.
 fn plane_sphere(
     a: PhysicsColliderShape,
     ca: Vec3,
+    ra: Quat,
     b: PhysicsColliderShape,
     cb: Vec3,
+    rb: Quat,
 ) -> Option<ContactGeom> {
-    sphere_plane(b, cb, a, ca).map(flip)
+    sphere_plane(b, cb, rb, a, ca, ra).map(flip)
 }
 
-/// Plane (A) vs box (B) — the canonical box/plane with roles swapped.
+/// Plane (A) vs box (B) — the canonical box/plane with roles (and rotations)
+/// swapped.
 fn plane_box(
     a: PhysicsColliderShape,
     ca: Vec3,
+    ra: Quat,
     b: PhysicsColliderShape,
     cb: Vec3,
+    rb: Quat,
 ) -> Option<ContactGeom> {
-    box_plane(b, cb, a, ca).map(flip)
+    box_plane(b, cb, rb, a, ca, ra).map(flip)
 }
 
 /// Generate a contact manifold for every candidate pair that is genuinely
@@ -231,8 +268,10 @@ pub(crate) fn generate_contacts(
                     CONTACT_TABLE[index](
                         ca.shape(),
                         ba.transform().translation,
+                        ba.transform().rotation,
                         cb.shape(),
                         bb.transform().translation,
+                        bb.transform().rotation,
                     )
                     .map(|geom| {
                         ContactManifold::new(
@@ -282,10 +321,15 @@ mod tests {
         assert!(d < 1.0e-9, "expected {b:?}, got {a:?}");
     }
 
+    /// The identity body rotation, for the axis-aligned generator tests.
+    fn id() -> Quat {
+        Quat::IDENTITY
+    }
+
 
     #[test]
     fn sphere_sphere_hit_reports_axis_normal_and_depth() {
-        let g = sphere_sphere(sphere(1.0), Vec3::ZERO, sphere(1.0), Vec3::new(1.5, 0.0, 0.0))
+        let g = sphere_sphere(sphere(1.0), Vec3::ZERO, id(), sphere(1.0), Vec3::new(1.5, 0.0, 0.0), id())
             .expect("overlapping spheres are in contact");
         approx(g.normal, Vec3::new(1.0, 0.0, 0.0)); // A -> B is +X
         assert!((g.depth - 0.5).abs() < 1.0e-6);
@@ -294,17 +338,17 @@ mod tests {
 
     #[test]
     fn sphere_sphere_miss_when_separated_or_coincident() {
-        assert!(sphere_sphere(sphere(1.0), Vec3::ZERO, sphere(1.0), Vec3::new(3.0, 0.0, 0.0)).is_none());
+        assert!(sphere_sphere(sphere(1.0), Vec3::ZERO, id(), sphere(1.0), Vec3::new(3.0, 0.0, 0.0), id()).is_none());
         // Exactly touching (dist == sum) is not a contact.
-        assert!(sphere_sphere(sphere(1.0), Vec3::ZERO, sphere(1.0), Vec3::new(2.0, 0.0, 0.0)).is_none());
+        assert!(sphere_sphere(sphere(1.0), Vec3::ZERO, id(), sphere(1.0), Vec3::new(2.0, 0.0, 0.0), id()).is_none());
         // Coincident centers have no defined normal.
-        assert!(sphere_sphere(sphere(1.0), Vec3::ZERO, sphere(1.0), Vec3::ZERO).is_none());
+        assert!(sphere_sphere(sphere(1.0), Vec3::ZERO, id(), sphere(1.0), Vec3::ZERO, id()).is_none());
     }
 
 
     #[test]
     fn sphere_plane_hit_pushes_along_plane_normal() {
-        let g = sphere_plane(sphere(1.0), Vec3::new(0.0, 0.5, 0.0), plane(), Vec3::ZERO)
+        let g = sphere_plane(sphere(1.0), Vec3::new(0.0, 0.5, 0.0), id(), plane(), Vec3::ZERO, id())
             .expect("sphere crossing the plane is in contact");
         approx(g.normal, Vec3::new(0.0, -1.0, 0.0)); // sphere(A) -> plane(B) is downward
         assert!((g.depth - 0.5).abs() < 1.0e-6);
@@ -313,13 +357,13 @@ mod tests {
 
     #[test]
     fn sphere_plane_miss_when_above_surface() {
-        assert!(sphere_plane(sphere(1.0), Vec3::new(0.0, 2.0, 0.0), plane(), Vec3::ZERO).is_none());
+        assert!(sphere_plane(sphere(1.0), Vec3::new(0.0, 2.0, 0.0), id(), plane(), Vec3::ZERO, id()).is_none());
     }
 
 
     #[test]
     fn box_plane_hit_uses_projection_radius() {
-        let g = box_plane(box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 0.5, 0.0), plane(), Vec3::ZERO)
+        let g = box_plane(box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 0.5, 0.0), id(), plane(), Vec3::ZERO, id())
             .expect("box crossing the plane is in contact");
         approx(g.normal, Vec3::new(0.0, -1.0, 0.0));
         assert!((g.depth - 0.5).abs() < 1.0e-6);
@@ -327,13 +371,30 @@ mod tests {
 
     #[test]
     fn box_plane_miss_when_above_surface() {
-        assert!(box_plane(box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 2.0, 0.0), plane(), Vec3::ZERO).is_none());
+        assert!(box_plane(box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 2.0, 0.0), id(), plane(), Vec3::ZERO, id()).is_none());
+    }
+
+    #[test]
+    fn box_plane_uses_the_rotated_projection_radius_for_a_tilted_box() {
+        use core::f32::consts::FRAC_PI_4;
+        // A unit box on the plane y = 0, yawed 45° about Z so its half-height along
+        // the plane normal (+Y) grows to sqrt(2)/2·(hx+hy) = sqrt(2). Its centre is
+        // lifted to y = 1.3, so the projected underside dips 1.414 - 1.3 = 0.114
+        // below the surface — a contact the axis-aligned radius (1.0 < 1.3) would
+        // have missed.
+        let tilt = Quat::from_axis_angle(Vec3::UNIT_Z, FRAC_PI_4).unwrap();
+        let g = box_plane(box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 1.3, 0.0), tilt, plane(), Vec3::ZERO, id())
+            .expect("tilted box dips below the plane");
+        approx(g.normal, Vec3::new(0.0, -1.0, 0.0));
+        assert!((g.depth - (2.0_f32.sqrt() - 1.3)).abs() < 1.0e-5, "rotated radius depth, got {}", g.depth);
+        // Axis-aligned, the same box at y = 1.3 clears the plane (radius 1.0).
+        assert!(box_plane(box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 1.3, 0.0), id(), plane(), Vec3::ZERO, id()).is_none());
     }
 
 
     #[test]
     fn sphere_box_hit_resolves_against_closest_face() {
-        let g = sphere_box(sphere(1.0), Vec3::new(0.0, 1.5, 0.0), box_shape(1.0, 1.0, 1.0), Vec3::ZERO)
+        let g = sphere_box(sphere(1.0), Vec3::new(0.0, 1.5, 0.0), id(), box_shape(1.0, 1.0, 1.0), Vec3::ZERO, id())
             .expect("sphere resting above the box top is in contact");
         approx(g.normal, Vec3::new(0.0, -1.0, 0.0)); // sphere(A) -> box(B) is downward
         assert!((g.depth - 0.5).abs() < 1.0e-6);
@@ -343,15 +404,40 @@ mod tests {
     #[test]
     fn sphere_box_miss_when_outside_or_center_inside() {
         // Far above the box.
-        assert!(sphere_box(sphere(1.0), Vec3::new(0.0, 5.0, 0.0), box_shape(1.0, 1.0, 1.0), Vec3::ZERO).is_none());
+        assert!(sphere_box(sphere(1.0), Vec3::new(0.0, 5.0, 0.0), id(), box_shape(1.0, 1.0, 1.0), Vec3::ZERO, id()).is_none());
         // Sphere center inside the box -> no defined normal -> no contact.
-        assert!(sphere_box(sphere(1.0), Vec3::ZERO, box_shape(1.0, 1.0, 1.0), Vec3::ZERO).is_none());
+        assert!(sphere_box(sphere(1.0), Vec3::ZERO, id(), box_shape(1.0, 1.0, 1.0), Vec3::ZERO, id()).is_none());
+    }
+
+    #[test]
+    fn sphere_box_collides_on_the_tilted_face_of_an_oriented_box() {
+        use core::f32::consts::FRAC_PI_4;
+        // A long ramp box (a thin slab, half-extents 3 × 0.25 × 1) pitched 45° about
+        // Z. Its top face normal rotates to (−sin45, cos45, 0). A sphere placed just
+        // off that face along the rotated normal must contact it, and the reported
+        // world normal (sphere→box) must be the inward rotated face normal.
+        let pitch = Quat::from_axis_angle(Vec3::UNIT_Z, FRAC_PI_4).unwrap();
+        let he = box_shape(3.0, 0.25, 1.0);
+        let face_normal = pitch.rotate(Vec3::UNIT_Y); // outward top-face normal
+        // Sphere centre = face point (0.25 out along local +Y, rotated) + 0.4 along
+        // the outward normal; radius 0.5 -> penetration depth 0.1.
+        let face_point = pitch.rotate(Vec3::new(0.0, 0.25, 0.0));
+        let sphere_center = face_point.add(face_normal.mul_scalar(0.4));
+        let g = sphere_box(sphere(0.5), sphere_center, id(), he, Vec3::ZERO, pitch)
+            .expect("sphere resting on the tilted face is in contact");
+        // Sphere(A) -> box(B) normal points into the ramp, i.e. -outward.
+        approx(g.normal, face_normal.mul_scalar(-1.0));
+        assert!((g.depth - 0.1).abs() < 1.0e-5, "depth on tilted face, got {}", g.depth);
+        // Slide the sphere out past the radius along the same normal -> a miss that
+        // the axis-aligned test (which sees a wide flat slab) would have reported.
+        let outside = face_point.add(face_normal.mul_scalar(0.6));
+        assert!(sphere_box(sphere(0.5), outside, id(), he, Vec3::ZERO, pitch).is_none());
     }
 
 
     #[test]
     fn box_sphere_flips_the_canonical_normal() {
-        let g = box_sphere(box_shape(1.0, 1.0, 1.0), Vec3::ZERO, sphere(1.0), Vec3::new(0.0, 1.5, 0.0))
+        let g = box_sphere(box_shape(1.0, 1.0, 1.0), Vec3::ZERO, id(), sphere(1.0), Vec3::new(0.0, 1.5, 0.0), id())
             .expect("box below sphere is in contact");
         approx(g.normal, Vec3::new(0.0, 1.0, 0.0)); // box(A) -> sphere(B) is upward
         assert!((g.depth - 0.5).abs() < 1.0e-6);
@@ -359,21 +445,21 @@ mod tests {
 
     #[test]
     fn plane_sphere_flips_the_canonical_normal() {
-        let g = plane_sphere(plane(), Vec3::ZERO, sphere(1.0), Vec3::new(0.0, 0.5, 0.0))
+        let g = plane_sphere(plane(), Vec3::ZERO, id(), sphere(1.0), Vec3::new(0.0, 0.5, 0.0), id())
             .expect("plane below sphere is in contact");
         approx(g.normal, Vec3::new(0.0, 1.0, 0.0)); // plane(A) -> sphere(B) is upward
     }
 
     #[test]
     fn plane_box_flips_the_canonical_normal() {
-        let g = plane_box(plane(), Vec3::ZERO, box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 0.5, 0.0))
+        let g = plane_box(plane(), Vec3::ZERO, id(), box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 0.5, 0.0), id())
             .expect("plane below box is in contact");
         approx(g.normal, Vec3::new(0.0, 1.0, 0.0));
     }
 
     #[test]
     fn swapped_miss_returns_none() {
-        assert!(box_sphere(box_shape(1.0, 1.0, 1.0), Vec3::ZERO, sphere(1.0), Vec3::new(0.0, 5.0, 0.0)).is_none());
+        assert!(box_sphere(box_shape(1.0, 1.0, 1.0), Vec3::ZERO, id(), sphere(1.0), Vec3::new(0.0, 5.0, 0.0), id()).is_none());
     }
 
 

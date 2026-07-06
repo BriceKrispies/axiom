@@ -73,7 +73,11 @@ fn candidates(colliders: &[PhysicsCollider], bodies: &[PhysicsBody]) -> Vec<Cand
                     collider: c.handle(),
                     body: c.body(),
                     active: c.enabled() & b.enabled(),
-                    aabb: world_aabb(c.shape(), b.transform().translation),
+                    aabb: world_aabb(
+                        c.shape(),
+                        b.transform().translation,
+                        b.transform().rotation,
+                    ),
                 })
         })
         .collect()
@@ -123,7 +127,7 @@ mod tests {
     use crate::physics_collider_shape::PhysicsColliderShape;
     use crate::physics_material::PhysicsMaterial;
     use axiom_kernel::{Meters, Ratio};
-    use axiom_math::{Transform, Vec3};
+    use axiom_math::{Quat, Transform, Vec3};
 
     fn material() -> PhysicsMaterial {
         PhysicsMaterial::new(
@@ -273,6 +277,46 @@ mod tests {
         let bodies = [body(1, 0.0)];
         let colliders = [sphere_collider(10, 1), sphere_collider(20, 1)];
         assert!(detect_pairs(&colliders, &bodies).is_empty());
+    }
+
+    fn box_body(raw: u64, x: f32, rotation: Quat) -> PhysicsBody {
+        let desc = PhysicsBodyDesc::static_body(Transform::new(
+            Vec3::new(x, 0.0, 0.0),
+            rotation,
+            Vec3::ONE,
+        ))
+        .unwrap();
+        PhysicsBody::from_desc(PhysicsBodyHandle::from_raw(raw), desc)
+    }
+
+    fn box_collider(collider_raw: u64, body_raw: u64) -> PhysicsCollider {
+        PhysicsCollider::new(
+            PhysicsColliderHandle::from_raw(collider_raw),
+            PhysicsBodyHandle::from_raw(body_raw),
+            PhysicsColliderShape::box_shape(Vec3::new(1.0, 1.0, 1.0)).unwrap(),
+            material(),
+            false,
+        )
+    }
+
+    #[test]
+    fn a_yawed_box_widens_its_aabb_enough_to_pair_a_sphere_it_would_miss_axis_aligned() {
+        use core::f32::consts::FRAC_PI_4;
+        // A unit box centred at the origin and a unit sphere at x = 2.2. Axis
+        // aligned, the box AABB reaches x = 1 and the sphere reaches x = 1.2 — a
+        // 0.2 gap, no pair. Yawed 45°, the box footprint reaches x = sqrt(2) ~ 1.414,
+        // now overlapping the sphere's [1.2, 3.2]. The rotation-aware broad phase
+        // must produce the pair.
+        let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, FRAC_PI_4).unwrap();
+        let colliders = [box_collider(10, 1), sphere_collider(20, 2)];
+        let aligned = [box_body(1, 0.0, Quat::IDENTITY), body(2, 2.2)];
+        assert!(
+            detect_pairs(&colliders, &aligned).is_empty(),
+            "axis-aligned box does not reach the sphere"
+        );
+        let yawed = [box_body(1, 0.0, yaw), body(2, 2.2)];
+        let pairs = detect_pairs(&colliders, &yawed);
+        assert_eq!(pairs.len(), 1, "the yawed box's widened AABB now pairs the sphere");
     }
 
     #[test]

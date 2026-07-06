@@ -182,6 +182,30 @@ impl PhysicsApi {
         self.world.enqueue_disable(body)
     }
 
+    /// Immediately teleport a body to `transform` (finite, existing body), outside
+    /// the normal integration — e.g. to spawn or respawn a player at a fixed
+    /// point. Unlike the queued force/impulse commands this applies at once and is
+    /// visible in the next [`PhysicsApi::snapshot`].
+    pub fn set_body_transform(
+        &mut self,
+        body: PhysicsBodyHandle,
+        transform: Transform,
+    ) -> PhysicsResult<()> {
+        self.world.set_body_transform(body, transform)
+    }
+
+    /// Immediately set a body's linear and angular velocity (finite, existing
+    /// body) — to bring it to rest on respawn or to brake it. Velocity on a
+    /// non-dynamic body is stored but never integrated.
+    pub fn set_body_velocity(
+        &mut self,
+        body: PhysicsBodyHandle,
+        linear: Vec3,
+        angular: Vec3,
+    ) -> PhysicsResult<()> {
+        self.world.set_body_velocity(body, linear, angular)
+    }
+
     /// Advance the world by one explicit, deterministic fixed step (taken from
     /// the runtime layer). Drains queued commands FIFO, then integrates.
     pub fn step(&mut self, step: RuntimeStep) -> PhysicsResult<()> {
@@ -292,5 +316,39 @@ mod tests {
         assert!(api.apply_torque(ground, Vec3::new(0.0, 1.0, 0.0)).is_err());
         api.step(step()).unwrap();
         assert_eq!(api.latest_step_record().command_count(), 1);
+    }
+
+    #[test]
+    fn set_body_transform_and_velocity_apply_immediately_and_validate() {
+        let mut api = PhysicsApi::new();
+        let body = api
+            .create_dynamic_body(Transform::IDENTITY, Ratio::new(1.0).unwrap())
+            .unwrap();
+
+        // Teleport applies at once and is visible in the snapshot without a step.
+        let target = Transform::from_translation(Vec3::new(3.0, 4.0, 5.0));
+        assert!(api.set_body_transform(body, target).is_ok());
+        let snap = api.snapshot();
+        let placed = snap.bodies().iter().find(|b| b.handle() == body).unwrap();
+        assert_eq!(placed.transform().translation, Vec3::new(3.0, 4.0, 5.0));
+
+        // Velocity (linear + angular) is set immediately and read back.
+        assert!(api
+            .set_body_velocity(body, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0))
+            .is_ok());
+        let snap = api.snapshot();
+        let moved = snap.bodies().iter().find(|b| b.handle() == body).unwrap();
+        assert_eq!(moved.linear_velocity(), Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(moved.angular_velocity(), Vec3::new(0.0, 2.0, 0.0));
+
+        // Rejections: non-finite transform, non-finite velocity, and unknown body.
+        let nan = Transform::from_translation(Vec3::new(f32::NAN, 0.0, 0.0));
+        assert!(api.set_body_transform(body, nan).is_err());
+        assert!(api
+            .set_body_velocity(body, Vec3::new(f32::INFINITY, 0.0, 0.0), Vec3::ZERO)
+            .is_err());
+        let missing = PhysicsBodyHandle::from_raw(999);
+        assert!(api.set_body_transform(missing, target).is_err());
+        assert!(api.set_body_velocity(missing, Vec3::ZERO, Vec3::ZERO).is_err());
     }
 }

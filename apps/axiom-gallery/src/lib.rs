@@ -29,6 +29,12 @@ pub mod growth;
 pub mod zanzoban;
 pub mod quintet;
 pub mod physics_crucible;
+pub mod gravix;
+// Gravix's `#[wasm_bindgen]` `gravix_start` surfaced at the crate root so the
+// shared bundle exports the entry gallery.js boots (wasm-only, mirroring how the
+// demo runs).
+#[cfg(target_arch = "wasm32")]
+pub use gravix::gravix_start;
 pub mod harness;
 pub mod forest_walk;
 pub mod generia;
