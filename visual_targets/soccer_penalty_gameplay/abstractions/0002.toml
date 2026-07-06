@@ -1,0 +1,44 @@
+# BACKFILLED by the convergence critic (2026-07-05).
+# Champion-branch commit 1a6ccd3 ("engine: carry hemisphere ambient as frame data,
+# app-authored, consumed by both backends") introduced a NEW engine data channel —
+# a structural primitive — to serve the lighting_shadow_and_depth axis, then 638130b
+# promoted the render that consumes it. That is a new field/primitive under the
+# abstraction gate, and it shipped with NO abstractions/NNNN.toml. This record
+# backfills the required justification after the fact. Unlike the app-tier humanoid
+# kit (0001), this change touches the ENGINE (frame data + both render backends), so
+# it is spine work — the /visual-convergence discipline still requires it be recorded
+# and justified, independent of the coverage/branchless gates it already passed.
+
+axis = "lighting_shadow_and_depth"  # the axis this channel was reached for.
+failed_attempts = [
+  # The bounded attempt within the PRIOR (directional-only) lighting capability that
+  # preceded the reach for a new primitive:
+  "sky-fill directional light (champion commit 7746c70): added a cool second directional to lift the crushed shadow side. Bounded — it tinted/filled one hemisphere but could not deliver uniform ambient without over-lighting the key side; the shadow floor stayed crushed and the frame stayed dark.",
+]
+inexpressible = true                # A directional/Lambert-only lighting model CANNOT
+                                    # express hemisphere AMBIENT fill: stacking more
+                                    # directional lights to fake uniform fill blows out
+                                    # the key-lit faces before it lifts the shadow floor.
+                                    # A distinct ambient term the backends read is the
+                                    # smallest thing that lifts crushed shadows toward
+                                    # even daylight without washing highlights — so the
+                                    # structural channel is the correct fix, not a
+                                    # config nudge on the existing lights.
+smallest_api = """
+Engine-tier (frame data + both backends), app-authored value:
+  - a hemisphere-ambient term carried as FRAME DATA (app authors sky/ground ambient;
+    the frame contract carries it), consumed identically by the GPU and canvas2d
+    backends so the offscreen champion and the live present agree.
+  - the soccer-penalty app authors the ambient values that lift the daylight tone.
+The minimal surface: one ambient channel on the frame contract + its read in each
+backend's shading — no new light-type enum, no per-object ambient, no material edit.
+"""
+screenshot_command = "cargo run -p axiom-shot -- --app soccer-penalty --backend gpu"
+screenshot_proof = "daylight champion.png md5 503880da… (base 638130b, this audit)"
+caveat = """
+HONEST NOTE (see scorecard.champion.toml iter-8): the channel delivered a REAL but
+SUB-BAND tone gain — lighting_shadow_and_depth held at 2 (still flat, no AO, stands
+still dark) — and the promoted render shipped a NON-ATTACKED artifact_level regression
+(3->2, new horizontal streak/scanline tearing). The primitive is justified; the swap
+that rode it in was not scored as progress.
+"""

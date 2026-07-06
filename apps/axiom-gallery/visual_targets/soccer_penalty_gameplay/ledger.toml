@@ -628,3 +628,88 @@ stadium_and_ad_boards     = 1
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 2
+
+# --- Champion swap e6030b7 + critic re-score (bookkeeping only). 2026-07-06 --------
+# STALE-RECORD FIX (recurring). The champion.png swapped to md5 091563c2 (the e6030b7
+# "7-lens board" promote render — camera dolly-back + braced-keeper pose + lighting/
+# crowd-albedo + lifted backdrop/haze) with NO ledger iteration and NO rescore; the
+# scorecard still described the prior LIVE-SKINNED render (md5 be46c518, now demoted
+# to candidate.png). This iteration re-scores the ACTUAL current champion (091563c2)
+# fresh, re-describes both scorecards to it, and confirms both target dirs carry
+# abstractions/0001 (humanoid kit) + 0002 (hemisphere-ambient channel). No render touched.
+[[iteration]]
+kind = "scoring-recalibration"
+attacked_axis = "none (champion-swap bookkeeping + record honesty)"
+render_changed = false
+decision = "recalibrate"
+changed_files = [
+  "visual_targets/soccer_penalty_gameplay/scorecard.champion.toml",
+  "visual_targets/soccer_penalty_gameplay/abstractions/0002.toml",
+  "visual_targets/soccer_penalty_gameplay/ledger.toml",
+  "apps/axiom-gallery/visual_targets/soccer_penalty_gameplay/scorecard.champion.toml",
+  "apps/axiom-gallery/visual_targets/soccer_penalty_gameplay/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+note = """
+The champion image advanced be46c518 -> 091563c2 (commit e6030b7, "promote pass \
+render (7-lens board: camera/keeper-pose/lighting/crowd-albedo/haze)") with NO \
+rescore. The scorecard therefore scored the WRONG artifact — be46c518 is now \
+candidate.png, not the champion. Re-scored 091563c2 fresh against the harsh identity \
+bar ("merely reads as the same subject = 1, not 3; stylized/low-poly is not 4-5; \
+when unsure take the lower"). \
+NUMBERS UNCHANGED — a LATERAL swap, not progress: the lifted backdrop/haze brightened \
+the frame (was near-black) toward the reference daylight, a REAL but SUB-BAND tone \
+gain (lighting held at 2 — still flat, no AO, washed); but the pitch gained \
+pronounced horizontal streak/scanline tearing (artifact held at 2, borderline 1), the \
+ball stayed over-scaled (camera held at 2), and the braced arms-up-star keeper is a \
+DIFFERENT wrong pose (not the reference's lowered ready-crouch), still a proxy = 1. \
+No axis crossed a band. lowest = 1 (three-way tie: goalkeeper_silhouette, \
+field_markings_and_turf, stadium_and_ad_boards), avg = 21/11 = 1.909, \
+final_score = 1.27 (flat). \
+RIGHT-AXIS: by fixed axis order the first axis at the lowest value is \
+goalkeeper_silhouette, so the NEXT attack is UNCHANGED: goalkeeper_silhouette — the \
+small yellow braced-star keeper is the campaign's constraint. \
+ABSTRACTION-GATE: no NEW reach this pass (the e6030b7 lenses are app-tier camera/ \
+pose/material/backdrop constants + reuse of the existing hemisphere-ambient channel). \
+Both target dirs now carry 0001 (humanoid kit) + 0002 (ambient); the primary was \
+missing 0002 and it was backfilled this pass. \
+PROCESS FLAG: the primary and mirror LEDGER HISTORIES diverge from iteration 6 on \
+(primary = KICKER-MODEL pass; mirror = live-skinning + daylight-ambient + iter-7/8 \
+recalibrations). This pass unifies the CURRENT scorecard, abstractions, and this \
+recalibration note across both dirs, but does not rewrite the divergent prior \
+history — a full history merge is out of a fast-critic's scope and would risk \
+destroying legitimate distinct records. Flagged for the render owner. \
+No parity is claimed; the render remains a stylized low-poly box-man proxy far from \
+the clean, bright, populated, HUD/reticle/power-bar reference. FORWARD RULE \
+(restated): future champion swaps must land through the lens loop with their own \
+ledger iteration AND a rescore at swap time — not as unrecorded direct promotes.
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2

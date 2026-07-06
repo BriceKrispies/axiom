@@ -1,41 +1,41 @@
 # CRITIC RECALIBRATION (convergence critic pass, 2026-07-06) — champion.png md5
-# be46c518d1087c88b25206bd495f7e38 (the ACTUAL artifact on disk / the convergence
-# champion branch tip), re-scored fresh against reference.png. Harness unchanged:
-# axiom-shot --app soccer-penalty --backend gpu --features offscreen, 960x600, tick 0.
-# 0..5, harsh; a proxy = 1. final_score = lowest*0.7 + avg*0.3.
+# 091563c28722b5548a3836e900abaaaa (the ACTUAL artifact on disk / the convergence
+# champion branch tip at e6030b7), re-scored fresh against reference.png. Harness
+# unchanged: axiom-shot --app soccer-penalty --backend gpu --features offscreen,
+# 960x600, tick 0. 0..5, harsh; a proxy = 1. final_score = lowest*0.7 + avg*0.3.
 #
-# WHY THIS REWRITE: the prior card described the "KICKER-PASS" render (claimed
-# promoted as md5 ed321b04, ledger iteration line 386) at final 1.38 — but that
-# render was NEVER the champion.png on disk. The champion.png present is be46c518,
-# the earlier live-skinned render (independently identified as such by the app-tier
-# mirror card). The scorecard had marched two axes UP (camera 2->4, kicker 2->3) to
-# describe a render that is not here. That is inflation: the record diverged from the
-# artifact. This rewrite scores the artifact that actually exists.
+# WHY THIS REWRITE (stale-record fix, AGAIN): the prior card described md5 be46c518
+# (the live-skinned render). But the champion.png on disk is now md5 091563c2 — the
+# e6030b7 "7-lens board" promote render (camera dolly-back + braced-keeper pose +
+# lighting/crowd-albedo + lifted backdrop/haze). be46c518 has been demoted to
+# candidate.png. The champion image swapped WITHOUT a scorecard/ledger rescore —
+# exactly the unrecorded-swap drift every prior critic pass flagged as forbidden.
+# This rewrite scores the artifact that ACTUALLY EXISTS (091563c2).
 #
-# THREE AXES LOWERED vs the KICKER-PASS card, each from my own harsh pixel read of
-# be46c518 (not from the KICKER-PASS narrative):
-#   * camera_lens_and_scale 4 -> 2
-#   * kicker_silhouette     3 -> 2
-#   * artifact_level        3 -> 2
-# Net final_score 1.38 -> 1.27. Lowest tier unchanged (=1), so next attack is
-# unchanged: goalkeeper_silhouette. No parity claimed.
+# NUMBERS: my fresh harsh pixel read of 091563c2 lands on the SAME eleven values the
+# prior be46c518 card carried — the e6030b7 swap was a LATERAL move, not progress:
+# the lifted backdrop/haze made the frame brighter (was near-black) but the pitch
+# gained pronounced horizontal streak/scanline tearing and the ball stayed
+# over-scaled; the braced-keeper pose is a different WRONG pose (arms-up star vs the
+# reference's lowered ready-crouch), still a proxy. No axis crosses a band. So this
+# is a RE-DESCRIPTION to the current artifact, NOT a numeric change and NOT inflation.
+# final_score stays 1.27; next attack stays goalkeeper_silhouette.
 
-composition_and_framing   = 3  # held. Kicker foreground-left / ball centre-low / goal + keeper upper-mid tracks the reference layout; goal a touch low/large (compressed crowd headroom). Essential relationships hold = 3.
-camera_lens_and_scale     = 2  # LOWERED 4->2 (critic). The KICKER-PASS card claimed the shot class matches the reference; it does NOT in be46c518 — the kicker is OVER-SCALED and TOO CLOSE on a low camera (dominates the left half) vs the reference's fuller-body kicker held at more distance (~1/3 frame). An over-scaled proxy shot = 2. "When unsure, take the lower."
-kicker_silhouette         = 2  # LOWERED 3->2 (critic). A washed light-blue box-man from behind with blocky sphere-joints and NO visible jersey "10". "Merely reads as a blue player from behind" = proxy+ = 2. The KICKER-PASS "royal-blue, on-model, athletic" 3 describes the un-promoted ed321b04 render, not be46c518.
-goalkeeper_silhouette     = 1  # held. Small yellow box-man, arms out in a non-keeper T/Y-stance; a thumbnail proxy = 1. Still the LOWEST axis and the correct NEXT ATTACK.
+composition_and_framing   = 3  # held. Kicker centre-left (from behind) / ball centre-low / goal + braced keeper upper-mid tracks the reference layout; the ball is over-large in the foreground and the goal reads small, but the essential relationships hold = 3.
+camera_lens_and_scale     = 2  # held. The e6030b7 dolly-back was meant to hold the goal size and give a fuller kicker; in 091563c2 the ball still dominates the foreground and the kicker is cropped ~at the knees while the goal reads small — NOT a shot-class match to the reference's elevated, pulled-back view (whole kicker + full goal in frame). An over-scaled proxy shot = 2. "When unsure, take the lower."
+kicker_silhouette         = 2  # held. A washed light-blue body from behind, blocky, with NO visible jersey "10" and legs merging into the ball. "Merely reads as a blue player from behind" = proxy+ = 2.
+goalkeeper_silhouette     = 1  # held. Small yellow box-man in a braced arms-UP star/Y, legs spread — NOT the reference keeper's lowered, bent, ready-to-dive crouch; featureless, wrong pose, wrong glove read. A thumbnail proxy = 1. Still the LOWEST axis and the correct NEXT ATTACK.
 ball_fidelity             = 3  # held. Black/white panelled ball, close and centred; blocky low-res panels cap it at 3. Strongest-matching element.
-goal_and_net_fidelity     = 2  # held. White posts + a coarse hanging grid net read as goal+net; no cloth droop / crossbar depth vs the reference's fine mesh = 2.
-field_markings_and_turf   = 1  # held. Green turf with broad horizontal banding but NO penalty spot/box/arc and no crisp mow-stripes = proxy = 1.
-stadium_and_ad_boards     = 1  # held. Near-black stands, solid red ad boards with NO "AXIOM SPORTS" text, no crowd figures = empty+textless = 1.
-lighting_shadow_and_depth = 2  # held. Flat Lambert, hard/absent shadows, and the scene is markedly DARK vs the reference's bright daylight; a proxy tone, no AO/depth = 2 (harsh-borderline).
+goal_and_net_fidelity     = 2  # held. White posts + a coarse hanging grid net read as goal+net (here the net grid is red/pink-tinted); no cloth droop / crossbar depth vs the reference's fine white mesh = 2.
+field_markings_and_turf   = 1  # held. Bright green turf with pronounced horizontal streak banding but NO penalty spot/box/arc and no crisp mow-stripes = proxy = 1.
+stadium_and_ad_boards     = 1  # held. The lifted "crowd-albedo" backdrop is a blank tan/brown blocky wall with NO crowd figures and NO "AXIOM SPORTS" text; a solid dark-red ad band with no legible text. Empty + textless = 1.
+lighting_shadow_and_depth = 2  # held. The lifted backdrop/haze brightened the frame (was markedly DARK in be46c518) toward the reference's daylight — a REAL but SUB-BAND tone gain: still flat Lambert, no AO/depth, washed, and now streak-torn. Held at 2 (harsh-borderline).
 gameplay_readability      = 2  # held. Reads as a penalty setup but the offscreen render carries NO reticle, NO HUD (SCORE/ROUND/BEST), NO SHOT POWER bar = 2.
-artifact_level            = 2  # LOWERED 3->2 (critic). Visible horizontal green banding across the pitch plus blocky low-res edges on the kicker/net; not the clean flat colour the KICKER-PASS card claimed. "When unsure, take the lower."
+artifact_level            = 2  # held. Pronounced horizontal streak/scanline tearing across the pitch (and faintly the actors) plus blocky low-res edges and the red-tinted net; not clean flat colour = 2. "When unsure, take the lower" — borderline 1.
 
 # lowest = 1, tied across goalkeeper_silhouette (axis 4), field_markings_and_turf
 # (axis 7) and stadium_and_ad_boards (axis 8). By FIXED axis order the FIRST axis at
 # the lowest value is goalkeeper_silhouette.
 # sum = 3+2+2+1+3+2+1+1+2+2+2 = 21. avg = 21/11 = 1.909.
-# final_score = 1*0.7 + 1.909*0.3 = 1.27 (the KICKER-PASS card claimed 1.38 for an
-# un-promoted render; the artifact that actually exists scores 1.27).
+# final_score = 1*0.7 + 1.909*0.3 = 1.27.
 # Next axis (lowest, ties by fixed order): goalkeeper_silhouette (=1).
