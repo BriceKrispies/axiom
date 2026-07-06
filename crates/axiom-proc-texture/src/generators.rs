@@ -1,4 +1,5 @@
-//! The source texture operators (no inputs): Solid, Gradient, Noise, Bricks.
+//! The source texture operators (no inputs): Solid, Gradient, Noise, Bricks,
+//! Checker, Spots.
 
 use axiom_math::Vec3;
 use axiom_noise::value_noise;
@@ -97,6 +98,40 @@ pub(crate) fn checker(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer>
     })
 }
 
+/// **Spots** — a `base_color` fill stamped with filled circles. Params:
+/// `[width, height, base_color, spot_color, count, cx0, cy0, r0, …]`: the 5-word
+/// header is followed by `count` `(center_x, center_y, radius)` texel-space
+/// triples. A texel inside any spot's radius is `spot_color`, else `base_color`.
+/// The declared `count` is clamped to the triples actually present, so a short
+/// parameter list can never read past the end. Unlike a `Checker`/`Bricks` grid
+/// (many small cells that alias into speckle under downsampling), a handful of
+/// large spots survives a mip cleanly — the primitive for painting the soccer
+/// ball's dark pentagon rosette directly onto the sphere's UVs so the panels are
+/// part of the surface and move with it.
+pub(crate) fn spots(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+    let p = ctx.params();
+    (p.len() >= 5).then(|| {
+        let base = rgba(p[2].as_color());
+        let spot = rgba(p[3].as_color());
+        let avail = p.len().saturating_sub(5) / 3;
+        let n = (p[4].as_int() as usize).min(avail);
+        let cw = p[0].as_int().clamp(1, MAX_DIM);
+        let ch = p[1].as_int().clamp(1, MAX_DIM);
+        // Snapshot the (cx, cy, r) triples as i64 so the closure owns them (the
+        // params borrow ends here) and the distance test can't underflow.
+        let discs: Vec<(i64, i64, i64)> = (0..n)
+            .map(|k| (p[5 + k * 3].as_int() as i64, p[6 + k * 3].as_int() as i64, p[7 + k * 3].as_int() as i64))
+            .collect();
+        TextureBuffer::from_fn(cw, ch, move |x, y| {
+            let hit = discs.iter().any(|&(cx, cy, r)| {
+                let (dx, dy) = (x as i64 - cx, y as i64 - cy);
+                dx * dx + dy * dy <= r * r
+            });
+            [base, spot][hit as usize]
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::dispatch::texture_eval;
@@ -164,5 +199,51 @@ mod tests {
         assert_eq!(t.texel(0, 0), [0x22, 0x22, 0x22, 0xFF]);
         assert_eq!(t.texel(3, 3), [0xAA, 0xAA, 0xAA, 0xFF]);
         assert!(run(TextureOp::Bricks, vec![Param::int(8)]).is_none());
+    }
+
+    #[test]
+    fn spots_paints_filled_discs_and_needs_five_params() {
+        // One radius-1 spot centred at (2, 2) on a 6x6 white field.
+        let t = run(
+            TextureOp::Spots,
+            vec![
+                Param::int(6),
+                Param::int(6),
+                c(0xFF_FF_FF_FF),
+                c(0x00_00_00_FF),
+                Param::int(1),
+                Param::int(2),
+                Param::int(2),
+                Param::int(1),
+            ],
+        )
+        .unwrap();
+        assert_eq!(t.texel(2, 2), [0, 0, 0, 255]); // spot centre
+        assert_eq!(t.texel(3, 2), [0, 0, 0, 255]); // within radius 1
+        assert_eq!(t.texel(0, 0), [255, 255, 255, 255]); // far corner is base
+        assert_eq!(t.texel(5, 5), [255, 255, 255, 255]);
+        // Fewer than five params fails the node.
+        assert!(run(TextureOp::Spots, vec![Param::int(6), Param::int(6)]).is_none());
+    }
+
+    #[test]
+    fn spots_clamps_declared_count_to_available_triples() {
+        // Declares five spots but supplies only one triple: the extra count is
+        // clamped away (no read past the end), so only the one spot paints.
+        let one = run(
+            TextureOp::Spots,
+            vec![Param::int(4), Param::int(4), c(0xFF_FF_FF_FF), c(0x00_00_00_FF), Param::int(5), Param::int(0), Param::int(0), Param::int(0)],
+        )
+        .unwrap();
+        assert_eq!(one.texel(0, 0), [0, 0, 0, 255]);
+        assert_eq!(one.texel(3, 3), [255, 255, 255, 255]);
+        // A zero count leaves the field entirely base-colored.
+        let none = run(
+            TextureOp::Spots,
+            vec![Param::int(4), Param::int(4), c(0xFF_FF_FF_FF), c(0x00_00_00_FF), Param::int(0)],
+        )
+        .unwrap();
+        assert_eq!(none.texel(0, 0), [255, 255, 255, 255]);
+        assert_eq!(none.texel(2, 2), [255, 255, 255, 255]);
     }
 }

@@ -416,41 +416,13 @@ fn ball(b: &mut SceneBuilder) {
         PenaltyMaterialId::BallWhite,
         "ball",
     );
-    // The classic black pentagon panels, faked with small dark quads placed just
-    // PROUD of the sphere on its camera-/light-facing front hemisphere (the old
-    // panels sat *inside* the sphere at panel_z < surface_z, so they never
-    // rendered and the ball read as a blank white sphere). Each direction is a
-    // unit-ish vector on that hemisphere; the panel sits a hair outside the
-    // radius so it always wins the depth test against the white surface.
-    //
-    // The panels form a SYMMETRIC rosette — a central pentagon plus an evenly
-    // spaced ring of five around it — the truncated-icosahedron signature of a
-    // real soccer ball. The previous set biased every panel to the upper-front
-    // hemisphere, so the cluster read as a lopsided *face* (two eyes + mouth)
-    // rather than a ball. The ring is built around a front axis tilted slightly
-    // up (c = (0, 0.35, 0.94)) to face the elevated camera, at a ~40° cone so
-    // the five ring panels sit symmetrically around the central one.
-    const PANEL_DIRS: [(f32, f32, f32, &str); 6] = [
-        (0.000, 0.349, 0.937, "ball.panel.center"),
-        (0.643, 0.267, 0.718, "ball.panel.ring0"),
-        (0.199, 0.840, 0.505, "ball.panel.ring1"),
-        (-0.520, 0.621, 0.586, "ball.panel.ring2"),
-        (-0.520, -0.087, 0.850, "ball.panel.ring3"),
-        (0.199, -0.306, 0.931, "ball.panel.ring4"),
-    ];
-    PANEL_DIRS.iter().for_each(|&(dx, dy, dz, label)| {
-        let dir = Vec3::new(dx, dy, dz);
-        let unit = dir.mul_scalar(1.0 / dir.length().max(1.0e-6));
-        let pos = center.add(unit.mul_scalar(BALL_RADIUS * 1.03));
-        b.emit(
-            DioramaRole::Ball,
-            PrimitiveShape::Quad,
-            pos,
-            Vec3::new(0.15, 0.15, 0.0),
-            PenaltyMaterialId::BallDarkPanels,
-            label,
-        );
-    });
+    // The classic dark pentagon panels are now baked into the ball's surface
+    // texture (`recipe_textures::ball` → `TextureOp::Spots`, mapped through the
+    // sphere's UVs), not stamped here as separate world-space quads. That is the
+    // fix for the panels "floating" at the penalty spot: as part of the sphere
+    // surface they carry the ball's per-frame pose automatically (and will roll
+    // with it once the ball is given spin). The single `"ball"` renderable above
+    // is the whole ball.
 }
 
 fn backdrop(b: &mut SceneBuilder) {

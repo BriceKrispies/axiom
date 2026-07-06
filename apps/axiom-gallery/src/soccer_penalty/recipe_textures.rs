@@ -155,16 +155,38 @@ pub fn ad_generic(style: &SoccerRecipeStyle) -> RecipeGraph {
     ad_board(ids::AD_GENERIC, "SPORTS", style.palette.ad_generic, style.palette.ball_white)
 }
 
-/// The soccer ball: white leather with a faint noise grain. The classic dark
-/// panels are the proud quads the scene places on the ball's front hemisphere —
-/// baking a regular brick/checker grid here instead aliases into speckle under the
-/// retro downsampling, so the texture stays a soft near-white leather.
+/// The soccer ball: white leather with the classic dark pentagon panels baked
+/// straight onto the sphere's UVs as filled [`TextureOp::Spots`]. The panels used
+/// to be six separate world-space quads the scene parked on the ball's front
+/// hemisphere — so they floated in place at the penalty spot while the ball flew
+/// (only the sphere carried the per-frame ball pose). Baked into the surface
+/// texture the panels are *part of the ball*: they translate with it now, and roll
+/// with it the moment the ball is given spin. A handful of large spots (unlike a
+/// brick/checker grid of many small cells) survives the retro downsample without
+/// aliasing into speckle. Centres/radii are texel-space on the `detail_res` grid;
+/// the rosette — a central pentagon ringed by five — sits on the camera-facing
+/// meridian (`u≈0.25` → `x≈res/4`, a touch above the equator for the elevated
+/// camera), the truncated-icosahedron signature of a real ball.
 pub fn ball(style: &SoccerRecipeStyle) -> RecipeGraph {
     let r = style.detail_res;
     let p = &style.palette;
+    // Rosette laid out on a nominal 32-texel grid, then scaled to detail_res.
+    let q = r as f32 / 32.0;
+    // A mostly-white ball: one small central pentagon ringed by five, well spread
+    // so they read as separate panels (an oversized or clustered rosette turns the
+    // ball into a black blob under the retro downsample). The ring is spread wider
+    // in `y` than `x` because equirectangular `u` compresses horizontally near the
+    // equator, so equal texel steps in x cover more of the sphere than in y.
+    let rosette: [(f32, f32, f32); 6] =
+        [(8.0, 12.5, 2.5), (8.0, 5.5, 2.0), (13.5, 10.0, 2.0), (12.0, 18.5, 2.0), (3.5, 18.5, 2.0), (2.5, 10.0, 2.0)];
+    let mut params = vec![i(r), i(r), c(p.ball_white), c(p.ball_dark), i(rosette.len() as u32)];
+    rosette.iter().for_each(|&(cx, cy, rad)| {
+        params.push(i((cx * q).round() as u32));
+        params.push(i((cy * q).round() as u32));
+        params.push(i((rad * q).round().max(1.0) as u32));
+    });
     let mut g = RecipeGraph::new(RecipeId::from_raw(ids::BALL), 1);
-    let grain = g.add(TextureOp::Noise as u16, vec![i(r), i(r), i(4), c(p.ball_grain), c(p.ball_white)], vec![]);
-    g.add(TextureOp::ColorRamp as u16, vec![c(p.ball_grain), c(p.ball_white)], vec![grain]);
+    g.add(TextureOp::Spots as u16, params, vec![]);
     g
 }
 

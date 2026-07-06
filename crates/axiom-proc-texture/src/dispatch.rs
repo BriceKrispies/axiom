@@ -3,7 +3,7 @@
 use axiom_proc_core::NodeEval;
 
 use crate::filters::{blend, blur, color_ramp, height_to_normal};
-use crate::generators::{bricks, checker, gradient, noise, solid};
+use crate::generators::{bricks, checker, gradient, noise, solid, spots};
 use crate::text::text;
 use crate::texture_buffer::TextureBuffer;
 
@@ -13,8 +13,8 @@ type TexOp = for<'a> fn(NodeEval<'a, TextureBuffer>) -> Option<TextureBuffer>;
 
 /// The dispatch table. Its order mirrors [`crate::TextureOp`] so `op as usize`
 /// selects the operator — a table index, never a `match`.
-const OPS: [TexOp; 10] =
-    [solid, gradient, noise, bricks, blur, blend, color_ramp, height_to_normal, checker, text];
+const OPS: [TexOp; 11] =
+    [solid, gradient, noise, bricks, blur, blend, color_ramp, height_to_normal, checker, text, spots];
 
 /// Evaluate one node: select its operator by code and run it. An operator code
 /// outside the table is an unknown operator and fails the node (`None`).

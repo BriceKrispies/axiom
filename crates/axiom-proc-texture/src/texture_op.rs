@@ -28,6 +28,13 @@ pub enum TextureOp {
     /// Params: `[width, height, fg, bg, scale, char_count, packed_0, …]` where
     /// each `packed_i` word holds up to 4 ASCII chars (one per byte).
     Text = 9,
+    /// A base fill stamped with filled circles ("spots"/"dots"). Params:
+    /// `[width, height, base_color, spot_color, count, cx0, cy0, r0, …]` — the
+    /// 5-word header is followed by `count` `(center_x, center_y, radius)` triples
+    /// in texel space; a texel inside any spot's radius is `spot_color`, else
+    /// `base_color`. The general dotted/panelled-surface primitive — polka, hide,
+    /// and the soccer ball's dark pentagon rosette baked onto the sphere's UVs.
+    Spots = 10,
 }
 
 #[cfg(test)]
@@ -40,5 +47,6 @@ mod tests {
         assert_eq!(TextureOp::HeightToNormal as u16, 7);
         assert_eq!(TextureOp::Checker as u16, 8);
         assert_eq!(TextureOp::Text as u16, 9);
+        assert_eq!(TextureOp::Spots as u16, 10);
     }
 }
