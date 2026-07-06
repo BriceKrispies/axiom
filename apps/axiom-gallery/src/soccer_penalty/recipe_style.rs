@@ -56,11 +56,17 @@ pub struct Palette {
     /// The skin's faint dither shadow.
     pub skin_dark: Color,
     /// Pitch turf grain: the dark end of the value-noise floor that modulates the
-    /// flat grass band base colour into mown turf. It is a desaturated green-grey
-    /// (not near-white) so the multiply against the base green actually *darkens*
-    /// the low-noise cells, giving the pitch visible mown-grass mottle instead of
-    /// a flat plastic slab; the light end (`turf_light`) keeps the bright cells
-    /// near the base green. The mowing stripes still stay the geometry band quads.
+    /// flat grass band base colour into mown turf. It is a *light* desaturated
+    /// green kept close to `turf_light` so the multiply against the base green only
+    /// gently darkens the low-noise cells — a faint mown-grass mottle rather than
+    /// the harsh grey-to-white swing the earlier dark grain (0x8C9A82, ~0.55) carried.
+    /// That earlier ~45% cell-to-cell amplitude, sampled through the low internal
+    /// render target, aliased into the speckle/streak noise that dominated the
+    /// pitch and pulled the turf/artifact axes down; halving the grain amplitude
+    /// quiets that aliasing so the largest surface in the frame reads as the
+    /// reference's smooth mown pitch. The light end (`turf_light`) still keeps the
+    /// bright cells near the base green (pitch brightness unchanged), and the mowing
+    /// stripes still stay the geometry band quads.
     pub turf_grain: Color,
     /// The turf grain's bright end (near white).
     pub turf_light: Color,
@@ -128,7 +134,7 @@ impl SoccerRecipeStyle {
                 ball_dark: Color::rgba(0x10, 0x10, 0x14, 0xFF),
                 skin: Color::rgba(0xD2, 0xA0, 0x80, 0xFF),
                 skin_dark: Color::rgba(0xAA, 0x78, 0x60, 0xFF),
-                turf_grain: Color::rgba(0x8C, 0x9A, 0x82, 0xFF),
+                turf_grain: Color::rgba(0xC8, 0xD2, 0xBC, 0xFF),
                 turf_light: Color::rgba(0xF8, 0xFA, 0xF2, 0xFF),
             },
             texture_res: 48,
