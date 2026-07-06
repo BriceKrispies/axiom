@@ -22,6 +22,18 @@ use crate::mesh_cache::MeshGeometry;
 /// — the GPU backend's `SKINNED_VERTEX_STRIDE`.
 const SKINNED_VERTEX_STRIDE: usize = 20;
 
+/// Vertex-clustering resolution for the software-backend decimation: the body's
+/// bounding-box diagonal is divided into this many cells, all vertices in a cell
+/// weld to one representative, and triangles that collapse to a line/point are
+/// dropped. Higher = finer (more triangles kept). The athlete MetaSurface bodies
+/// bake to tens of thousands of triangles — trivial for the GPU, but the CPU
+/// rasterizer projects + culls every one and most are sub-pixel at the low-poly
+/// framebuffer resolution. Clustering thins them to a budget the software path
+/// affords while KEEPING coverage (unlike dropping triangles, which tears holes
+/// in a watertight surface) — the Canvas 2D backend is a low-poly degrade by
+/// design, so a chunkier athlete here is the intended trade, not a regression.
+const CLUSTER_CELLS_PER_DIAGONAL: f32 = 26.0;
+
 /// A column-major identity matrix, the safe fallback for an out-of-range joint
 /// index (a malformed palette reference poses the vertex at its bind position
 /// rather than reading past the palette).
@@ -39,13 +51,15 @@ pub(crate) struct SkinnedMeshCache {
 
 impl SkinnedMeshCache {
     /// Upload the skinned mesh set in the GPU backend's `(mesh_id, 20-float
-    /// interleaved vertices, indices)` form, so windowing hands both backends the
-    /// identical skinning geometry.
+    /// interleaved vertices, indices)` form, **decimated** to the software
+    /// backend's per-body triangle budget once at upload — so every later frame
+    /// poses + rasterizes only the kept triangles (both costs drop proportionally),
+    /// while the GPU keeps the full-resolution mesh.
     pub(crate) fn load(meshes: &[(u64, Vec<f32>, Vec<u32>)]) -> Self {
         SkinnedMeshCache {
             meshes: meshes
                 .iter()
-                .map(|(id, verts, indices)| (*id, (verts.clone(), indices.clone())))
+                .map(|(id, verts, indices)| (*id, decimate(verts, indices)))
                 .collect(),
         }
     }
@@ -59,6 +73,65 @@ impl SkinnedMeshCache {
             .get(&mesh_id)
             .map(|(verts, indices)| pose_vertices(verts, indices, palette))
     }
+}
+
+/// Decimate a skinned mesh by **vertex clustering** for the software backend:
+/// snap every vertex to a coarse grid (cell = bbox diagonal /
+/// [`CLUSTER_CELLS_PER_DIAGONAL`]), weld all vertices in a cell to the first one
+/// seen, remap the triangles, and drop any that collapse to a line/point (two
+/// corners in one cell). Unlike dropping whole triangles, welding preserves the
+/// body's coverage — the surface stays closed, just chunkier — so it never tears.
+/// Clustering on the BIND pose is sound: welded vertices share (or nearly share)
+/// joints, so they stay welded once skinned. Runs once per mesh at upload.
+fn decimate(verts: &[f32], indices: &[u32]) -> (Vec<f32>, Vec<u32>) {
+    // Bounding box of the bind positions (first three floats per vertex).
+    let big = f32::INFINITY;
+    let (min, max) = verts.chunks_exact(SKINNED_VERTEX_STRIDE).fold(
+        ([big; 3], [-big; 3]),
+        |(mn, mx), v| {
+            (
+                [mn[0].min(v[0]), mn[1].min(v[1]), mn[2].min(v[2])],
+                [mx[0].max(v[0]), mx[1].max(v[1]), mx[2].max(v[2])],
+            )
+        },
+    );
+    let diag = ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2) + (max[2] - min[2]).powi(2))
+        .sqrt();
+    // A tiny floor keeps a degenerate/empty mesh from dividing by zero.
+    let cell = (diag / CLUSTER_CELLS_PER_DIAGONAL).max(1e-4);
+    let key = |v: &[f32]| {
+        (
+            ((v[0] - min[0]) / cell) as i32,
+            ((v[1] - min[1]) / cell) as i32,
+            ((v[2] - min[2]) / cell) as i32,
+        )
+    };
+    // Each original vertex → its cell representative's new index (first vertex in
+    // the cell becomes the representative and is copied into `out_verts`).
+    let mut reps: HashMap<(i32, i32, i32), u32> = HashMap::new();
+    let mut out_verts: Vec<f32> = Vec::new();
+    let vert_to_rep: Vec<u32> = verts
+        .chunks_exact(SKINNED_VERTEX_STRIDE)
+        .map(|v| {
+            *reps.entry(key(v)).or_insert_with(|| {
+                let idx = (out_verts.len() / SKINNED_VERTEX_STRIDE) as u32;
+                out_verts.extend_from_slice(v);
+                idx
+            })
+        })
+        .collect();
+    // Remap each triangle to representatives; keep only non-degenerate ones.
+    let out_indices: Vec<u32> = indices
+        .chunks_exact(3)
+        .filter_map(|tri| {
+            let a = vert_to_rep[tri[0] as usize];
+            let b = vert_to_rep[tri[1] as usize];
+            let c = vert_to_rep[tri[2] as usize];
+            ((a != b) & (b != c) & (a != c)).then_some([a, b, c])
+        })
+        .flatten()
+        .collect();
+    (out_verts, out_indices)
 }
 
 /// Linear-blend-skin one 20-float vertex stream by `palette` into [`MeshGeometry`].
@@ -120,53 +193,112 @@ mod tests {
         ]
     }
 
+    /// A triangle from three corners (each vertex bone-0 weighted). Corners far
+    /// enough apart survive vertex clustering; coincident corners collapse.
+    fn triangle(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> (Vec<f32>, Vec<u32>) {
+        let mut v = Vec::new();
+        [a, b, c].iter().for_each(|p| v.extend_from_slice(&one_vertex(*p, [1.0; 4])));
+        (v, vec![0, 1, 2])
+    }
+
+    // --- the skinning math (pose_vertices, bypassing decimation) --------------
+
     #[test]
-    fn identity_palette_returns_bind_positions_and_colours() {
-        let verts = one_vertex([2.0, 3.0, 4.0], [0.1, 0.2, 0.3, 1.0]);
-        let cache = SkinnedMeshCache::load(&[(7, verts, vec![0])]);
-        let geo = cache.pose(7, &[IDENTITY_MAT4]).expect("mesh 7 is cached");
+    fn pose_identity_palette_returns_bind_positions_and_colours() {
+        let v = one_vertex([2.0, 3.0, 4.0], [0.1, 0.2, 0.3, 1.0]);
+        let geo = pose_vertices(&v, &[0], &[IDENTITY_MAT4]);
         assert_eq!(geo.position(0), [2.0, 3.0, 4.0]);
         assert_eq!(geo.color(0), [0.1, 0.2, 0.3, 1.0]);
         assert_eq!(geo.indices(), &[0]);
     }
 
     #[test]
-    fn single_bone_translation_moves_the_vertex() {
-        let verts = one_vertex([1.0, 0.0, 0.0], [1.0, 1.0, 1.0, 1.0]);
-        let cache = SkinnedMeshCache::load(&[(0, verts, vec![0])]);
-        let geo = cache.pose(0, &[translation(10.0, -5.0, 2.0)]).expect("cached");
+    fn pose_single_bone_translation_moves_the_vertex() {
+        let v = one_vertex([1.0, 0.0, 0.0], [1.0; 4]);
+        let geo = pose_vertices(&v, &[0], &[translation(10.0, -5.0, 2.0)]);
         assert_eq!(geo.position(0), [11.0, -5.0, 2.0]);
     }
 
     #[test]
-    fn two_bones_blend_by_weight() {
+    fn pose_two_bones_blend_by_weight() {
         // Vertex split 0.5/0.5 between bone 0 (translate +10 x) and bone 1 (+0).
-        let mut v = one_vertex([0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 1.0]);
-        v[12] = 0.0; // joint 0 -> bone 0
+        let mut v = one_vertex([0.0, 0.0, 0.0], [1.0; 4]);
         v[13] = 1.0; // joint 1 -> bone 1
         v[16] = 0.5; // weight 0
         v[17] = 0.5; // weight 1
-        let cache = SkinnedMeshCache::load(&[(1, v, vec![0])]);
-        let geo = cache
-            .pose(1, &[translation(10.0, 0.0, 0.0), IDENTITY_MAT4])
-            .expect("cached");
-        // 0.5*(0+10) + 0.5*(0) = 5.0 on x.
+        let geo = pose_vertices(&v, &[0], &[translation(10.0, 0.0, 0.0), IDENTITY_MAT4]);
         assert_eq!(geo.position(0), [5.0, 0.0, 0.0]);
     }
 
     #[test]
-    fn out_of_range_joint_falls_back_to_identity() {
+    fn pose_out_of_range_joint_falls_back_to_identity() {
         // Joint index 9 with no such palette entry -> identity (bind position).
-        let mut v = one_vertex([4.0, 4.0, 4.0], [1.0, 1.0, 1.0, 1.0]);
+        let mut v = one_vertex([4.0, 4.0, 4.0], [1.0; 4]);
         v[12] = 9.0;
-        let cache = SkinnedMeshCache::load(&[(2, v, vec![0])]);
-        let geo = cache.pose(2, &[translation(100.0, 0.0, 0.0)]).expect("cached");
+        let geo = pose_vertices(&v, &[0], &[translation(100.0, 0.0, 0.0)]);
         assert_eq!(geo.position(0), [4.0, 4.0, 4.0]);
+    }
+
+    // --- the software-backend decimation (vertex clustering) ------------------
+
+    #[test]
+    fn decimate_keeps_a_spread_triangle() {
+        // Corners far apart -> distinct cells -> the triangle survives whole.
+        let (v, i) = triangle([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let (ov, oi) = decimate(&v, &i);
+        assert_eq!(oi.len(), 3, "the spread triangle is kept");
+        assert_eq!(ov.len() / SKINNED_VERTEX_STRIDE, 3);
+    }
+
+    #[test]
+    fn decimate_welds_a_dense_cluster_and_drops_degenerate_triangles() {
+        // Many near-coincident triangles at the origin (far smaller than one cell)
+        // all weld to a single representative -> every one is degenerate + dropped;
+        // one far-away spread triangle keeps the bbox (hence the cell) large and is
+        // the only survivor. This exercises the entry-already-present weld path and
+        // the dropped (degenerate) filter_map arm.
+        let mut v = Vec::new();
+        let mut i = Vec::new();
+        (0..50_u32).for_each(|t| {
+            let e = t as f32 * 1e-5;
+            [[e, 0.0, 0.0], [0.0, e, 0.0], [0.0, 0.0, e]]
+                .iter()
+                .for_each(|p| v.extend_from_slice(&one_vertex(*p, [1.0; 4])));
+            i.extend_from_slice(&[t * 3, t * 3 + 1, t * 3 + 2]);
+        });
+        [[100.0, 0.0, 0.0], [100.0, 40.0, 0.0], [100.0, 0.0, 40.0]]
+            .iter()
+            .for_each(|p| v.extend_from_slice(&one_vertex(*p, [1.0; 4])));
+        i.extend_from_slice(&[150, 151, 152]);
+        let (_ov, oi) = decimate(&v, &i);
+        assert_eq!(oi.len(), 3, "only the spread triangle survives");
+    }
+
+    #[test]
+    fn decimate_of_a_degenerate_point_mesh_yields_no_triangles() {
+        // All corners coincident -> zero diagonal -> the cell floor applies and the
+        // three verts weld to one representative, so the triangle is dropped.
+        let (v, i) = triangle([1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]);
+        let (ov, oi) = decimate(&v, &i);
+        assert!(oi.is_empty());
+        assert_eq!(ov.len() / SKINNED_VERTEX_STRIDE, 1);
+    }
+
+    // --- the cache (load decimates; pose looks up) ----------------------------
+
+    #[test]
+    fn cache_load_decimates_then_poses_a_real_triangle() {
+        let (v, i) = triangle([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let cache = SkinnedMeshCache::load(&[(3, v, i)]);
+        let geo = cache.pose(3, &[IDENTITY_MAT4]).expect("mesh 3 is cached");
+        assert_eq!(geo.indices().len(), 3);
+        assert_eq!(geo.position(0), [0.0, 0.0, 0.0]);
     }
 
     #[test]
     fn unknown_mesh_id_poses_to_none() {
-        let cache = SkinnedMeshCache::load(&[(5, one_vertex([0.0; 3], [1.0; 4]), vec![0])]);
+        let (v, i) = triangle([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let cache = SkinnedMeshCache::load(&[(5, v, i)]);
         assert!(cache.pose(999, &[IDENTITY_MAT4]).is_none());
     }
 
