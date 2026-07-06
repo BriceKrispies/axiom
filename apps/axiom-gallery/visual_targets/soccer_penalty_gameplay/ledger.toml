@@ -428,3 +428,82 @@ stadium_and_ad_boards     = 1
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 3
+
+# --- Scoring recalibration (critic; not a render change) -----------------------
+# The convergence critic audited the iteration-6 re-baseline against the identity
+# bar. No render was touched; this iteration only corrects the bookkeeping so the
+# loop stays honest and the NEXT-ATTACK axis is the true lowest one.
+[[iteration]]
+iteration = 7
+attacked_axis = "none (scoring recalibration)"
+changed_files = [
+  "visual_targets/soccer_penalty_gameplay/scorecard.champion.toml",
+  "visual_targets/soccer_penalty_gameplay/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "recalibrate"
+reason = """
+INFLATION FIX. Iteration 6 credited the GPU-skinning promotion with +1 on BOTH \
+character axes (kicker_silhouette 2->3, goalkeeper_silhouette 1->2). Against the \
+harsh identity bar ("a render that merely reads as the same subject is a 1, not a \
+3; stylized/low-poly is not 4-5; when unsure take the lower") that was inflation. \
+Skinning genuinely fused the segmented box-limbs into ONE continuous body, but the \
+actors remain crude, featureless, wrongly-posed low-poly proxies of the reference's \
+clean mobile players — a real gain that does not clear a whole score band. \
+LOWERED: kicker_silhouette 3->2 (featureless blue mannequin from behind, NO jersey \
+"10", stiff stick-arms, near-A stance not a mid-stride — "merely reads as a blue \
+player") and goalkeeper_silhouette 2->1 (a stiff yellow SCARECROW with arms held \
+dead-horizontal in a T/star, NOT the reference's lowered bent ready-to-dive crouch; \
+small, featureless, wrong glove colour — "merely reads as a yellow keeper" = proxy). \
+Recomputed: lowest = 1 (three-way tie: goalkeeper_silhouette, field_markings_and_turf, \
+stadium_and_ad_boards), avg = 22/11 = 2.000, final_score = 1.30 (the iter-6 card \
+claimed 1.35; the delta was pure character-axis inflation, not a render regression). \
+RIGHT-AXIS CORRECTION: by fixed axis order the first axis at the lowest value is \
+goalkeeper_silhouette (axis 4), so the NEXT attack is goalkeeper_silhouette — NOT \
+field_markings_and_turf, which iter-6 had queued only because inflating the keeper \
+to 2 had lifted it out of the lowest tier. Correcting the keeper score corrects the \
+routing. \
+PROGRESS-HONESTY FLAG (no scorecard change owed here): across iters 3->4->5->6 the \
+champion.png was swapped SIX times (R3/R4/R5/R6/smooth-figure/live-skinning), many \
+with NO in-loop ledger record at swap time, while final_score drifted UP \
+1.19->1.27->1.30->1.35 — even as real regressions landed (the warm terracotta crowd \
+of iter-4 became a DARK EMPTY void by iter-5/6). The scalar rose faster than the \
+render approached the bright, populated, HUD/reticle-rich reference. This \
+recalibration halts that drift; future champion swaps must land through the lens \
+loop with their own ledger iteration at swap time, not as unrecorded direct merges. \
+ABSTRACTION-GATE: the iter-6 GPU linear-blend-skinning pass (scene_renderer.rs) is \
+engine-tier work that landed independently on main and was ADOPTED as the champion \
+baseline — it was not a convergence-loop "reach" for a primitive to dodge bounded \
+attempts, and iter-6 recorded the promotion transparently, so no abstractions/NNNN \
+backfill is owed. (abstractions/0001.toml already covers the app-tier humanoid kit.) \
+No parity is claimed; the render remains far from the reference.
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 3
+goalkeeper_silhouette     = 2
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 3
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 3

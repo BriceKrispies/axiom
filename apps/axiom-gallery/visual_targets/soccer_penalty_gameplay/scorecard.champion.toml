@@ -4,30 +4,34 @@
 # tick 0, 960x600, byte-deterministic (md5 be46c518 on a double render).
 # 0..5, harsh; a proxy = 1. final_score = lowest*0.7 + avg*0.3.
 #
-# RE-BASELINED (iteration 6): the campaign moved from the editor-sidecar worktree
-# into the main tree, where the athletes are now ONE continuous GPU-skinned body
-# per kit material (not the segmented sphere-joint box-man the prior card scored).
-# The skinning smooths the limb seams into a coherent silhouette, so two character
-# axes rise on real render gains; everything else holds. Still a stylized low-poly
-# proxy vs a clean low-poly mobile reference — harsh caps, "when unsure take the
-# lower." No parity claimed.
+# CRITIC RECALIBRATION (iteration 7): the iteration-6 re-baseline credited the
+# GPU-skinning promotion with +1 on BOTH character axes (kicker 2->3, keeper 1->2).
+# Against the harsh identity bar — "a render that merely reads as the same subject
+# is a 1, not a 3; when unsure take the lower" — that was inflation. Skinning fused
+# the limb seams into a continuous body, a real but SMALL gain: the actors are still
+# crude, featureless, wrongly-posed low-poly proxies of the reference's clean mobile
+# players. Both character axes are LOWERED back to their harsh values. The keeper
+# drop restores it to the lowest tier, which CORRECTS the next-attack axis (see the
+# footer). No parity claimed.
 
 composition_and_framing   = 3  # unchanged — kicker foreground-left / ball centre-low / goal upper-mid / keeper centred still tracks the reference layout.
-camera_lens_and_scale     = 2  # unchanged. The skinned kicker is full-body now (feet visible, no torso crop) which helps, but it is still over-scaled and the keeper is small in the goal mouth vs the reference's fuller-body kicker at more distance.
-kicker_silhouette         = 3  # RAISED 2->3. The bake-once GPU skin fused the segmented box-limbs into ONE continuous body — a coherent player read from behind (blue jersey, white shorts, blue socks, dark boots), not an assemblage of boxes. Capped at 3: still NO jersey "10", a stiff near-A stance vs the reference's mid-stride, featureless mannequin surface.
-goalkeeper_silhouette     = 2  # RAISED 1->2. Now a continuous yellow-jersey body in an arms-OUT braced-ready stance (not the prior blob / arms-straight-up Y), dark shorts + legs, blue gloves. The right keeper structure has emerged; capped at 2 — small, stylized, glove colour wrong (blue not dark), no face detail.
-ball_fidelity             = 3  # unchanged. Clear black/white pentagon ball, close and centred; capped at 3 — blocky low-res panels, not a crisp reference ball.
+camera_lens_and_scale     = 2  # unchanged. Over-scaled kicker, low camera, keeper small in the goal mouth vs the reference's fuller-body kicker at more distance.
+kicker_silhouette         = 2  # LOWERED 3->2 (undo the iter-6 skinning inflation). The skin fuses the limbs into ONE continuous body — real, but the kicker is still a featureless blue mannequin from behind: NO jersey "10", cylindrical stick-arms held stiff, a near-A stance not the reference's mid-stride. It "merely reads as a blue player from behind" — a coarse proxy, harsh cap = 2, not 3.
+goalkeeper_silhouette     = 1  # LOWERED 2->1 (undo the iter-6 skinning inflation). The keeper is a stiff yellow SCARECROW: arms held dead-horizontal in a T/star, NOT the reference's lowered, bent, ready-to-dive crouch. Small, featureless, glove colour wrong (blue). It merely reads as "a yellow keeper figure" — a proxy = 1. This is the LOWEST axis and the correct NEXT ATTACK.
+ball_fidelity             = 3  # unchanged. Clear black/white panelled ball, close and centred; capped at 3 — blocky low-res panels, not a crisp reference ball. The strongest-matching element.
 goal_and_net_fidelity     = 2  # unchanged. White posts + a real hanging GRID net + crossbar reads as goal + net; capped at 2 — coarse open grid (no cloth droop / crossbar depth) vs the reference's fine hanging mesh.
-field_markings_and_turf   = 1  # unchanged. The turf carries mow bands + goal/box/spot line GEOMETRY, but at this low camera angle the lines are too thin (0.17 m) and the band contrast too weak to READ — the pitch looks like flat green with faint hints, not the reference's boldly striped, crisply-lined box. Proxy = 1. NEXT ATTACK.
-stadium_and_ad_boards     = 1  # unchanged. Ad boards are solid RED boxes (no "AXIOM SPORTS" text) and the stands are a DARK EMPTY void with no crowd figures. Reference has a dense stadium crowd + lettered boards. Empty + textless = proxy = 1.
-lighting_shadow_and_depth = 2  # unchanged. Flat daylight Lambert + a contact shadow under the kicker; the upper background reads too dark vs the reference's bright even stadium light. No real depth/AO.
+field_markings_and_turf   = 1  # unchanged. The turf carries mow bands + line GEOMETRY, but at this low angle the lines are too thin / the band contrast too weak to READ — flat green with faint hints, not the reference's boldly striped, crisply-lined box. Proxy = 1.
+stadium_and_ad_boards     = 1  # unchanged. Ad boards are solid RED boxes (no "AXIOM SPORTS" text) and the stands are a DARK EMPTY void with no crowd figures. Reference has a dense crowd + lettered boards. Empty + textless = proxy = 1.
+lighting_shadow_and_depth = 2  # unchanged. Flat Lambert + a contact shadow under the kicker; the whole upper frame reads far too dark vs the reference's bright, even stadium daylight. No real depth/AO. Borderline — held at 2 to avoid double-counting the empty-stands darkness scored on stadium.
 gameplay_readability      = 2  # unchanged — reads as a penalty setup (kicker/ball/goal/keeper) but the 3D viewport carries NO reticle, NO HUD (SCORE/ROUND/BEST), NO SHOT POWER bar (those are the DOM overlay, out of the offscreen render).
-artifact_level            = 3  # unchanged. Clean flat colour, no dither banding; capped at 3 — blocky low-res edges / aliasing remain, not a crisp reference frame.
+artifact_level            = 3  # unchanged. The dominating R3 artifacts (ordered-dither banding + wireframe-goal cage) are gone — clean flat colour; capped at 3 — blocky low-res edges / net + stripe aliasing remain, not a crisp reference frame.
 
-# lowest = 1, tied across field_markings_and_turf and stadium_and_ad_boards
-# (goalkeeper_silhouette left the lowest tier at 2). By FIXED axis order the first
-# axis at the lowest value is field_markings_and_turf.
-# sum = 3+2+3+2+3+2+1+1+2+2+3 = 24. avg = 24/11 = 2.182.
-# final_score = 1*0.7 + 2.182*0.3 = 1.35 (was 1.30 for the sphere-joint champion;
-# +0.05 tracks the real skinning gains on kicker + keeper silhouette).
-# Next axis (lowest, ties by fixed order): field_markings_and_turf (=1).
+# lowest = 1, tied across goalkeeper_silhouette (axis 4), field_markings_and_turf
+# (axis 7) and stadium_and_ad_boards (axis 8). By FIXED axis order the FIRST axis at
+# the lowest value is goalkeeper_silhouette — NOT field_markings_and_turf, which the
+# iter-6 card had queued only because it had inflated the keeper out of the lowest
+# tier (1->2). Correcting the keeper score corrects the next attack.
+# sum = 3+2+2+1+3+2+1+1+2+2+3 = 22. avg = 22/11 = 2.000.
+# final_score = 1*0.7 + 2.000*0.3 = 1.30 (the iter-6 card claimed 1.35; the delta is
+# pure inflation on the two character axes, not a render regression).
+# Next axis (lowest, ties by fixed order): goalkeeper_silhouette (=1).
