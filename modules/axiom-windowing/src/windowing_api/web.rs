@@ -125,6 +125,8 @@ impl WindowingApi {
             // The plain multi-mesh arm submits no skinned bodies.
             Vec::new(),
             None,
+            // ...and keeps the engine default hemisphere ambient.
+            axiom_host::FrameAmbient::default_hemisphere(),
         )
     }
 
@@ -146,6 +148,7 @@ impl WindowingApi {
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         max_instances: u32,
+        ambient: axiom_host::FrameAmbient,
         skinned_source: std::rc::Rc<std::cell::RefCell<Vec<SkinnedDrawTuple>>>,
         mut frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
@@ -172,6 +175,7 @@ impl WindowingApi {
             None,
             skinned_meshes,
             Some(skinned_source),
+            ambient,
         )
     }
 
@@ -254,6 +258,8 @@ impl WindowingApi {
                     Vec::new(),
                     (*materials).clone(),
                     max_instances,
+                    // The comparison view keeps the engine default hemisphere ambient.
+                    axiom_host::FrameAmbient::default_hemisphere(),
                 )
                 .await;
             });
@@ -330,9 +336,18 @@ impl WindowingApi {
         let slot = self.presenter.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let presenter =
-                // A caller-owned-loop host (the @axiom/game SDK) uploads no skinned bodies.
-                LivePresenter::bind(request, canvas, meshes, Vec::new(), materials, max_instances)
-                    .await;
+                // A caller-owned-loop host (the @axiom/game SDK) uploads no skinned
+                // bodies and keeps the engine default hemisphere ambient.
+                LivePresenter::bind(
+                    request,
+                    canvas,
+                    meshes,
+                    Vec::new(),
+                    materials,
+                    max_instances,
+                    axiom_host::FrameAmbient::default_hemisphere(),
+                )
+                .await;
             *slot.borrow_mut() = presenter;
         });
     }
@@ -455,6 +470,9 @@ impl WindowingApi {
         // frame (the joint palettes). `None` on arms that submit no skinned bodies.
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         skinned_source: Option<std::rc::Rc<std::cell::RefCell<Vec<SkinnedDrawTuple>>>>,
+        // The app-authored hemisphere ambient applied at bind (the engine default
+        // for the non-skinned arms).
+        ambient: axiom_host::FrameAmbient,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
         // The closure is handed this frame's identity and the engine's live
@@ -507,6 +525,7 @@ impl WindowingApi {
                 skinned_meshes,
                 materials,
                 max_instances,
+                ambient,
             )
             .await
             {
@@ -719,6 +738,8 @@ impl WindowingApi {
             // The forkable single-mesh arm submits no skinned bodies.
             Vec::new(),
             None,
+            // ...and keeps the engine default hemisphere ambient.
+            axiom_host::FrameAmbient::default_hemisphere(),
         )
     }
 
@@ -784,6 +805,8 @@ impl WindowingApi {
                 &[],
                 &materials,
                 max_instances,
+                // Streaming terrain keeps the engine default hemisphere ambient.
+                axiom_host::FrameAmbient::default_hemisphere(),
             )
             .await
             {
@@ -935,6 +958,8 @@ impl WindowingApi {
                 &[],
                 &materials,
                 max_instances,
+                // Streaming terrain keeps the engine default hemisphere ambient.
+                axiom_host::FrameAmbient::default_hemisphere(),
             )
             .await
             {
@@ -1041,6 +1066,10 @@ pub(crate) struct LivePresenter {
     // stream), retained so a device-loss rebuild re-uploads them alongside the
     // ordinary meshes. Empty on apps that submit no skinned bodies.
     skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+    // The app-authored hemisphere ambient the scene renderer lights unlit faces
+    // with, retained so a device-loss rebuild re-supplies it (a fresh backend
+    // otherwise falls back to the dim engine default). Copy, so cheap to hold.
+    ambient: axiom_host::FrameAmbient,
 }
 
 // The live backends hold no `Debug`; the presenter is a field of the
@@ -1073,6 +1102,7 @@ impl LivePresenter {
     /// material set `materials` once, and mount the scrub-only dev overlay so a
     /// caller-owned loop gets the frame slider + Escape/blur freeze the engine's
     /// own run loops have. `None` if no backend could be built.
+    #[allow(clippy::too_many_arguments)]
     async fn bind(
         request: axiom_host::HostPresentationRequest,
         canvas: web_sys::HtmlCanvasElement,
@@ -1080,6 +1110,7 @@ impl LivePresenter {
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
+        ambient: axiom_host::FrameAmbient,
     ) -> Option<LivePresenter> {
         Self::bind_with(
             request,
@@ -1090,6 +1121,7 @@ impl LivePresenter {
             skinned_meshes,
             materials,
             max_instances,
+            ambient,
         )
         .await
     }
@@ -1111,6 +1143,7 @@ impl LivePresenter {
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
+        ambient: axiom_host::FrameAmbient,
     ) -> Option<LivePresenter> {
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
@@ -1127,6 +1160,7 @@ impl LivePresenter {
             &skinned_meshes[..],
             &materials[..],
             max_instances,
+            ambient,
         )
         .await?;
         Some(LivePresenter {
@@ -1149,6 +1183,7 @@ impl LivePresenter {
             applied_mesh_generation: Cell::new(u32::MAX),
             pending_skinned: RefCell::new(Vec::new()),
             skinned_meshes,
+            ambient,
         })
     }
 
@@ -1270,6 +1305,7 @@ impl LivePresenter {
             let meshes = self.meshes.borrow().clone();
             let materials = self.materials.clone();
             let skinned_meshes = self.skinned_meshes.clone();
+            let ambient = self.ambient;
             let flag = self.reinitializing.clone();
             let request = self.request;
             let preference = self.preference;
@@ -1283,6 +1319,7 @@ impl LivePresenter {
                     &skinned_meshes[..],
                     &materials[..],
                     max_instances,
+                    ambient,
                 )
                 .await;
                 rebuilt
@@ -1590,6 +1627,7 @@ async fn select_backend(
     skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     max_instances: u32,
+    ambient: axiom_host::FrameAmbient,
 ) -> Option<LiveBackend> {
     use axiom_host::BackendKind;
     if matches!(preference, Some(BackendKind::Canvas2d)) {
@@ -1606,7 +1644,15 @@ async fn select_backend(
     // (common, expected) GPU→Canvas2D fallback is diagnosable in the console / by
     // the Playwright suite instead of being silent.
     match gpu
-        .initialize(canvas.clone(), meshes, skinned_meshes, materials, max_instances, preference)
+        .initialize(
+            canvas.clone(),
+            meshes,
+            skinned_meshes,
+            materials,
+            max_instances,
+            ambient,
+            preference,
+        )
         .await
     {
         Ok(()) => return Some(LiveBackend::Gpu(gpu)),
@@ -1638,6 +1684,7 @@ async fn select_backend_or_report(
     skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     max_instances: u32,
+    ambient: axiom_host::FrameAmbient,
 ) -> Option<LiveBackend> {
     let backend = select_backend(
         preference,
@@ -1647,6 +1694,7 @@ async fn select_backend_or_report(
         skinned_meshes,
         materials,
         max_instances,
+        ambient,
     )
     .await;
     if backend.is_none() {

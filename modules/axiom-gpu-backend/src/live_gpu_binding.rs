@@ -107,6 +107,7 @@ impl LiveGpuBinding {
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
+        ambient: axiom_host::FrameAmbient,
         preference: Option<axiom_host::BackendKind>,
     ) -> Result<LiveGpuBinding, JsValue> {
         use axiom_host::BackendKind;
@@ -256,9 +257,10 @@ impl LiveGpuBinding {
             &[],
             max_instances,
             shadow_size,
-            // The live arm keeps the engine default hemisphere ambient (a per-scene
-            // ambient can be threaded through the present path as a follow-up).
-            axiom_host::FrameAmbient::default_hemisphere(),
+            // The app-authored hemisphere ambient (daylight for the soccer pitch),
+            // threaded from the run loop through bind so the live render lights unlit
+            // faces the same way the offscreen capture does.
+            ambient,
         );
 
         // The intermediate colour target the scene renders into (then upscaled to

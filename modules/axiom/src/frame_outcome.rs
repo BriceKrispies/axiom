@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use axiom_host::SdfScene;
+use axiom_host::{FrameAmbient, SdfScene};
 
 /// One drawn object: its wgpu-ready model-view-projection matrix and its
 /// world (model) matrix (both column-major, 16 floats), its linear RGBA colour,
@@ -190,6 +190,11 @@ pub struct FrameOutcome {
     /// camera — the raymarched primitives a live/canvas backend composites with
     /// the meshes. `None` when the frame has no SDF content.
     sdf: Option<SdfScene>,
+    /// The frame's hemisphere ambient — the sky/ground fill every backend lights
+    /// unlit faces with. Carried on the frame (like the lights and clear colour)
+    /// so the offscreen capture and the live present arm light identically from
+    /// the app's authored value, instead of each hardcoding a dim default.
+    ambient: FrameAmbient,
     presented: bool,
     recorded: bool,
 }
@@ -218,6 +223,10 @@ impl FrameOutcome {
             light_view_proj,
             camera_view_proj,
             sdf,
+            // Default to the engine hemisphere; `with_ambient` overrides it with
+            // the app's authored value. A frame that never sets ambient renders
+            // exactly as before.
+            ambient: FrameAmbient::default_hemisphere(),
             presented,
             recorded,
         }
@@ -228,6 +237,17 @@ impl FrameOutcome {
     pub(crate) fn with_skinned_draws(mut self, skinned_draws: Vec<SkinnedDraw>) -> Self {
         self.skinned_draws = skinned_draws;
         self
+    }
+
+    /// Set the frame's hemisphere ambient (the app's authored sky/ground fill).
+    pub(crate) fn with_ambient(mut self, ambient: FrameAmbient) -> Self {
+        self.ambient = ambient;
+        self
+    }
+
+    /// The frame's hemisphere ambient — the sky/ground fill lighting unlit faces.
+    pub const fn ambient(&self) -> FrameAmbient {
+        self.ambient
     }
 
     /// The frame's skinned draws, in submission order.
@@ -417,6 +437,30 @@ mod tests {
         assert_eq!(&floats[36..52], &[2.0; 16]);
         assert_eq!(&floats[52..68], &[8.0; 16]);
         assert_eq!(&floats[68..72], &[0.4, 0.5, 0.6, 1.0]);
+    }
+
+    #[test]
+    fn ambient_defaults_to_hemisphere_and_with_ambient_overrides() {
+        let base = FrameOutcome::new(
+            0,
+            0,
+            [0.0; 4],
+            Vec::new(),
+            Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
+            None,
+            false,
+            false,
+        );
+        // A frame that never sets ambient carries the engine default hemisphere,
+        // so existing apps render byte-identically.
+        assert_eq!(base.ambient(), FrameAmbient::default_hemisphere());
+        // `with_ambient` overrides it with the app's authored sky/ground fill.
+        let daylight = FrameAmbient::new([0.66, 0.71, 0.80], [0.45, 0.42, 0.37]);
+        let lit = base.with_ambient(daylight);
+        assert_eq!(lit.ambient(), daylight);
+        assert_ne!(lit.ambient(), FrameAmbient::default_hemisphere());
     }
 
     #[test]

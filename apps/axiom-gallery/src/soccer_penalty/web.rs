@@ -112,6 +112,10 @@ pub fn soccer_penalty_start() {
     let meshes = running.mesh_set();
     let skinned_meshes = running.skinned_mesh_set();
     let materials = running.material_textures();
+    // The app-authored daylight hemisphere ambient (set in `soccer_meshed_shell`),
+    // threaded to the live backend at bind so the browser render lights the pitch
+    // the same way the offscreen champion does.
+    let ambient = running.ambient();
 
     // The shared cell the frame closure writes each frame's skinned draws into and
     // the run loop reads just before present (see `run_web_multi_skinned`).
@@ -180,6 +184,7 @@ pub fn soccer_penalty_start() {
         materials,
         skinned_meshes,
         CAPACITY,
+        ambient,
         skinned_source,
         frame,
     );

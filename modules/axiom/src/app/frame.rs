@@ -101,6 +101,10 @@ impl RunningApp {
         let width = self.viewport.physical_width();
         let height = self.viewport.physical_height();
 
+        // The app's authored hemisphere ambient rides onto the outcome so both
+        // backends light unlit faces from it (captured before the render closure
+        // borrows `self`).
+        let ambient = self.ambient;
         let rendered = self.render.then(|| {
             let mut frame =
                 self.pipeline
@@ -204,6 +208,7 @@ impl RunningApp {
                 pipeline.report_recorded(&report),
             )
             .with_skinned_draws(skinned_draws)
+            .with_ambient(ambient)
         });
         rendered.unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
     }

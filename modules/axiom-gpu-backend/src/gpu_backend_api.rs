@@ -373,6 +373,7 @@ impl GpuBackendApi {
         skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
+        ambient: axiom_host::FrameAmbient,
         preference: Option<axiom_host::BackendKind>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let binding = crate::live_gpu_binding::LiveGpuBinding::initialize(
@@ -386,6 +387,7 @@ impl GpuBackendApi {
             materials,
             max_instances,
             self.shadow_size,
+            ambient,
             preference,
         )
         .await?;

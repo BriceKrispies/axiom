@@ -9,7 +9,7 @@
 //! platform surface or a wall clock — the platform loop lives in `axiom-windowing`.
 
 use axiom_frame::{FrameApi, FrameBuilder};
-use axiom_host::{HostApi, HostLifecycleSignal, HostStepDriver, HostViewport};
+use axiom_host::{FrameAmbient, HostApi, HostLifecycleSignal, HostStepDriver, HostViewport};
 use axiom_kernel::{
     BinaryReader, BinaryWriter, DeterministicRng, KernelError, KernelErrorCode, KernelErrorScope,
     KernelResult, Ratio, Reflect, SchemaVersion,
@@ -54,6 +54,10 @@ pub use authoring::TextureDataError;
 
 /// The per-frame `tick` family.
 mod frame;
+
+/// The running app's per-frame render-look setters (clear colour + hemisphere
+/// ambient) — the "what the frame looks like" knobs, grouped in one small file.
+mod render_look;
 
 /// The live-backend resource exports (mesh streams, material albedos).
 mod resources;
@@ -253,6 +257,10 @@ pub struct RunningApp {
     step_nanos: u64,
     render: bool,
     clear_color: [f32; 4],
+    // The frame's hemisphere ambient (sky/ground fill), authored by the app and
+    // carried onto every `FrameOutcome`. Defaults to the engine hemisphere so an
+    // app that never sets it renders exactly as before.
+    ambient: FrameAmbient,
     light_direction: Vec3,
     // Held in full (not just an id) so base colour, albedo texture, and catalog
     // surface (emissive/roughness/opacity) all reach the render path.
@@ -327,6 +335,7 @@ impl RunningApp {
             step_nanos: app.step_nanos,
             render: app.render,
             clear_color: surface.clear_color().to_array(),
+            ambient: FrameAmbient::default_hemisphere(),
             light_direction: authored.light_direction,
             meshes: authored.meshes,
             materials: authored.materials,
@@ -402,12 +411,6 @@ impl RunningApp {
         self.meshes = authored.meshes;
         self.materials = authored.materials;
         self.renderables = authored.renderables;
-    }
-
-    /// Set the per-frame clear (background) colour. Used by a live reload to
-    /// update the background without rebuilding the running app.
-    pub fn set_clear_color(&mut self, color: [f32; 4]) {
-        self.clear_color = color;
     }
 
     /// How many renderables the scene draws each frame — the live backend's
@@ -958,6 +961,20 @@ mod tests {
         assert_eq!(app.tick(0).clear_color(), [0.05, 0.06, 0.08, 1.0]);
         app.set_clear_color([0.5, 0.25, 0.125, 1.0]);
         assert_eq!(app.tick(1).clear_color(), [0.5, 0.25, 0.125, 1.0]);
+    }
+
+    #[test]
+    fn set_ambient_flows_onto_the_frame_outcome() {
+        let mut app = three_cube_app().build();
+        // A fresh app carries the engine default hemisphere ambient, and it rides
+        // onto the rendered frame's outcome.
+        assert_eq!(app.ambient(), FrameAmbient::default_hemisphere());
+        assert_eq!(app.tick(0).ambient(), FrameAmbient::default_hemisphere());
+        // Authoring a daylight ambient is reflected on both the app and the frame.
+        let daylight = FrameAmbient::new([0.66, 0.71, 0.80], [0.45, 0.42, 0.37]);
+        app.set_ambient(daylight);
+        assert_eq!(app.ambient(), daylight);
+        assert_eq!(app.tick(1).ambient(), daylight);
     }
 
     #[test]

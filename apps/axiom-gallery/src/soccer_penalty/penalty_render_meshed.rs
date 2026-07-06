@@ -534,7 +534,7 @@ fn is_athlete(role: DioramaRole) -> bool {
 
 /// Build the empty meshed app shell (window + clear colour + default plugins).
 pub fn soccer_meshed_shell() -> RunningApp {
-    App::new()
+    let mut app = App::new()
         .window(
             Window::new(WIDTH, HEIGHT)
                 // Warm dark neutral, not cold navy: the old (0.07,0.10,0.18) clear
@@ -544,7 +544,15 @@ pub fn soccer_meshed_shell() -> RunningApp {
                 .with_clear_color(Color::linear_rgb(ch(0.10), ch(0.09), ch(0.08))),
         )
         .add_plugins(DefaultPlugins)
-        .build()
+        .build();
+    // Author a bright, faintly-warm DAYLIGHT hemisphere ambient, replacing the
+    // dim engine default (sky ~0.4 / ground ~0.16) both render paths otherwise
+    // hardcode. The reference is a high-key sunlit stadium, so the fill must lift
+    // every key-missed face — the athletes' shadow sides, the keeper's front, and
+    // the whole crowd/stand backdrop — off the near-black floor the dim default
+    // crushed them to. Strength is folded into the tints (a plain mix, no scale).
+    app.set_ambient(FrameAmbient::new([0.66, 0.71, 0.80], [0.45, 0.42, 0.37]));
+    app
 }
 
 /// Build the headless meshed [`RunningApp`] for one static frame — the
