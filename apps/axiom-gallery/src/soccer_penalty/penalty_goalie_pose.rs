@@ -213,23 +213,24 @@ impl PenaltyGoaliePose {
     }
 
     /// A **render-only** braced ready stance: the keeper "makes himself big" —
-    /// arms spread WIDE and near-horizontal (the gloves flung out to the sides,
-    /// forearms continuing the outward line rather than curling up into a Y) and
-    /// legs planted in a wide braced crouch, matching the reference's large set
-    /// keeper. This is deliberately decoupled from [`Self::idle`] — the Pass-6
+    /// arms spread WIDE but angled down-and-out (~35° below horizontal, gloves
+    /// dropping into a low smother rather than a stiff near-horizontal
+    /// scarecrow-T) and legs planted in a wide braced crouch, matching the
+    /// reference's large, compact set keeper. This is deliberately decoupled from [`Self::idle`] — the Pass-6
     /// save volumes keep riding the un-rotated `idle` rig, so this pose changes
     /// only the visual silhouette, never the deterministic save geometry (the
     /// dive clips are separate). Used by the static diorama emit.
     pub fn idle_display() -> Self {
         let mut local = [Transform::IDENTITY; 16];
         (0..16).for_each(|i| local[i] = Transform::from_translation(IDLE_LOCAL[i]));
-        // (part-ordinal, euler x, y, z) — upper arms flung wide & near-horizontal,
-        // but the elbows BREAK so the gloves drop down-and-forward into a catching
-        // set (the reference keeper's hands sit ~waist height, forward of the body,
-        // not a stiff scarecrow-T). Legs planted in a wide brace.
+        // (part-ordinal, euler x, y, z) — upper arms spread WIDE but angled
+        // down-and-out (~35° below horizontal), not a stiff near-horizontal
+        // scarecrow-T. The reference keeper's arms droop from the shoulders into a
+        // low, compact smother; the elbows still BREAK so the gloves drop further
+        // down-and-forward to ~waist/thigh height. Legs planted in a wide brace.
         [
-            (4_usize, 0.1_f32, 0.0_f32, -1.45_f32), // left upper arm — wide, near-horizontal
-            (7, 0.1, 0.0, 1.45),                    // right upper arm — wide, near-horizontal
+            (4_usize, 0.1_f32, 0.0_f32, -1.05_f32), // left upper arm — wide, angled down-&-out
+            (7, 0.1, 0.0, 1.05),                    // right upper arm — wide, angled down-&-out
             (5, 0.35, 0.0, 0.72),                   // left forearm — elbow breaks: glove drops down-&-forward
             (8, 0.35, 0.0, -0.72),                  // right forearm — elbow breaks: glove drops down-&-forward
             (10, 0.18, 0.0, -0.55),                 // left thigh — WIDE plant + weight forward
