@@ -112,9 +112,19 @@ pub const PENALTY_PALETTE: [PenaltyMaterial; 33] = [
     // is a uniformly WARM ochre/tan mass with no cold-blue section, so the old
     // cold-blue alt-A card (0.32, 0.44, 0.66) is replaced by a mid ochre that
     // sits between the terracotta and amber cards instead of fighting them.
-    lit(PenaltyMaterialId::CrowdMutedColors, "crowd muted colors", Rgba::rgb(0.62, 0.30, 0.32)),
-    lit(PenaltyMaterialId::CrowdMutedColorsAltA, "crowd muted colors (alt a)", Rgba::rgb(0.64, 0.44, 0.24)),
-    lit(PenaltyMaterialId::CrowdMutedColorsAltB, "crowd muted colors (alt b)", Rgba::rgb(0.78, 0.62, 0.26)),
+    //
+    // Aerial-haze lift, 3rd pass (colorist / atmosphere). The crowd is the dominant
+    // mass of the backdrop, and on the live GPU present path these ~0.3-0.6 albedos
+    // catch only the ~0.63 hemisphere ambient and land at ~0.2-0.4 — a dark, over-
+    // saturated speckle where the reference has a bright, hazed, uniformly warm tan
+    // mass. With no volumetric-haze host stage to wash the distance, the aerial
+    // perspective is baked into the albedo: each card is lifted in value and pulled
+    // toward a common warm haze veil (its dark channels raised more than its bright,
+    // bleeding out saturation) so the stand recedes as a luminous hazed crowd, not
+    // three punchy primaries crushed against black.
+    lit(PenaltyMaterialId::CrowdMutedColors, "crowd muted colors", Rgba::rgb(0.74, 0.54, 0.52)),
+    lit(PenaltyMaterialId::CrowdMutedColorsAltA, "crowd muted colors (alt a)", Rgba::rgb(0.76, 0.62, 0.46)),
+    lit(PenaltyMaterialId::CrowdMutedColorsAltB, "crowd muted colors (alt b)", Rgba::rgb(0.82, 0.70, 0.50)),
     lit(PenaltyMaterialId::StadiumWallDarkGray, "stadium wall dark gray", palette::STADIUM_WALL),
     lit(PenaltyMaterialId::AdBoardRed, "ad board red", Rgba::rgb(0.80, 0.15, 0.19)),
     lit(PenaltyMaterialId::AdBoardDark, "ad board red (generic)", Rgba::rgb(0.80, 0.15, 0.19)),

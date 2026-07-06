@@ -117,7 +117,18 @@ pub mod palette {
     // reference lacks), and each crowd hue is raised in value and de-saturated toward
     // that same warm veil — the busy stand speckle survives, but as a hazed mass, not
     // three pure primaries punched against black.
-    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.52, 0.49, 0.45);
+    //
+    // Aerial-haze lift, 3rd pass (colorist / atmosphere). The stand still read as a
+    // dark grey band beneath the reference's bright, sun-filled, hazed continuous
+    // space: on the live GPU present path this vertical wall face catches only the
+    // hemisphere ambient (~0.63), which multiplies a 0.52 albedo back down to a
+    // ~0.33 mid-dark — the stand sat well below the crowd it frames instead of
+    // reading as a bright hazed mass. There is no volumetric-haze host stage on this
+    // present path (an architect-tier seam), so the aerial recession stays baked in
+    // the albedo: the wall is lifted a full stop in value toward a bright warm haze
+    // grey so it survives the ambient multiply and reads as lit distant stand, not a
+    // crushed slab.
+    pub const STADIUM_WALL: Rgba = Rgba::rgb(0.70, 0.68, 0.63);
     pub const CROWD_A: Rgba = Rgba::rgb(0.70, 0.46, 0.44);
     pub const CROWD_B: Rgba = Rgba::rgb(0.46, 0.53, 0.66);
     pub const CROWD_C: Rgba = Rgba::rgb(0.80, 0.72, 0.50);
