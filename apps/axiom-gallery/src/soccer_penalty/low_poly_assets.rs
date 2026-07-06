@@ -79,7 +79,18 @@ pub mod palette {
     pub const NET_FRONT: Rgba = Rgba::new(0.90, 0.93, 0.96, 0.70);
 
     // --- kicker (blue jersey, white shorts, dark socks/boots) ---
-    pub const KICKER_JERSEY: Rgba = Rgba::rgb(0.16, 0.30, 0.78);
+    // Colorist deepen (color_palette). The hero #10 kit is the strongest colour
+    // identity in the frame, yet on the live GPU present path it read as a pale,
+    // cyan-tinged sky-blue instead of the reference's deep, saturated royal blue.
+    // Root cause: there is no board-wide FramePostProcess grade on this present
+    // path (an architect-tier seam), so the engine's hemisphere ambient lifts and
+    // de-saturates the albedo toward white with nothing to pull the saturation
+    // back at the tone stage — the mid-high green (0.30) let the wash slide the
+    // hue toward cyan/sky. The correction is baked into the albedo: green is
+    // pulled well below blue to swing the hue off cyan back to royal and lift
+    // saturation, red is trimmed to kill the washed lavender cast, and the value
+    // is deepened so the ambient multiply lands on reference royal, not pastel.
+    pub const KICKER_JERSEY: Rgba = Rgba::rgb(0.10, 0.18, 0.74);
     pub const KICKER_SHORTS: Rgba = Rgba::rgb(0.93, 0.94, 0.96);
     pub const KICKER_SKIN: Rgba = Rgba::rgb(0.86, 0.66, 0.52);
     pub const KICKER_SOCKS: Rgba = Rgba::rgb(0.10, 0.11, 0.14);
