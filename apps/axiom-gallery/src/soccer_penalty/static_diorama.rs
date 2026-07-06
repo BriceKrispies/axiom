@@ -37,21 +37,25 @@ pub struct CameraConfig {
 // goal was already well placed. Parking that close to the near, tall subjects
 // blows up the whole foreground without gaining anything at the goal.
 //
-// The fix is a pure DOLLY-BACK + TELEPHOTO re-frame: dolly the eye back and
-// narrow the lens. A first pass moved z=KICKER_Z+9.9 -> +14.9 at 16.0 deg, but
-// residual FOREGROUND LOOM remained against the reference: the near kicker + ball
-// still read markedly larger than the reference's moderate foreground, while the
-// far goal read too small/narrow (keeper tiny) — the perspective was still too
-// exaggerated (near/far ratio too high) versus the reference's flatter, telephoto
-// broadcast compression. This pass pushes the SAME lever further: dolly the eye
-// back +14.9 -> +22.9 (another ~8 m) and narrow the lens 16.0 -> 12.5 deg. The
-// added distance drops the near/far ratio, so the near kicker + ball shrink
-// (loom ~-15%) while the narrower FOV holds the FAR goal's angular size — net,
-// the foreground de-looms and the goal/keeper grow relative to it, flattening the
-// perspective toward the reference. Eye offset to +X (x=1.1) keeps the kicker
-// (x=-0.7) in the LEFT third and the goal centered. Pure re-frame: EYE dollies
-// back + lens narrows — no scene, pose, aim, or material change (target/up fixed).
-pub const CAMERA_EYE: Vec3 = Vec3::new(1.1, 2.1, KICKER_Z + 22.9);
+// The fix is a pure DOLLY + TELEPHOTO re-frame: dolly the eye and narrow the lens.
+// A first pass moved z=KICKER_Z+9.9 -> +14.9 at 16.0 deg, then a de-loom pass went
+// further to +22.9 at 12.5 deg to flatten the perspective.
+//
+// SCALE correction (art-director lens): that de-loom pass OVER-shot. At +22.9 the
+// hero over-the-shoulder kicker — the subject that defines this shot class — reads
+// far too small: head ~36% / boots ~72%, spanning only ~36% of frame height, versus
+// the reference's LARGE foreground kicker at head ~29% / boots ~88% (~59% span). The
+// ball likewise sat ~63% down (ref ~74%) and the goal ~53% wide (ref ~64%): the whole
+// foreground had been shrunk into a flatter, wronger shot. The single-lever fix is a
+// DOLLY-IN, restoring the eye distance from +22.9 to +15.0 while KEEPING the 12.5 deg
+// telephoto lens (so the goal stays sized as the narrow lens holds it). Coming closer
+// re-enlarges the near kicker + ball faster than the far goal (restoring the
+// reference's foreground presence): kicker head ~32% / boots ~87% (ref 29/88), ball
+// ~72% down (ref 74), goal-line ~58% (ref 57), goal ~69% wide. Eye offset to +X
+// (x=1.1) keeps the kicker (x=-0.7) in the LEFT third and the goal centered. One
+// lever: EYE dollies in — no lens, scene, pose, aim, or material change (target/up
+// fixed).
+pub const CAMERA_EYE: Vec3 = Vec3::new(1.1, 2.1, KICKER_Z + 15.0);
 pub const CAMERA_TARGET: Vec3 = Vec3::new(0.1, 0.75, 4.5);
 pub const CAMERA_FOV_Y_DEGREES: f32 = 12.5;
 pub const CAMERA_NEAR: f32 = 0.1;
