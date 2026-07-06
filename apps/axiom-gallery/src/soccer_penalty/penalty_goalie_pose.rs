@@ -529,9 +529,27 @@ impl PenaltyGoalieAnimation {
             .unwrap_or_else(PenaltyGoaliePose::idle)
     }
 
-    /// The resolved (world) pose descriptor for rendering + volumes.
+    /// The resolved (world) pose descriptor for volumes / contact geometry.
+    /// This rides the un-rotated `idle` rig at rest so the deterministic save
+    /// volumes never move (see [`PenaltyGoaliePose::idle_display`]).
     pub fn descriptor(&self) -> PenaltyGoaliePoseDescriptor {
         self.current_pose().resolve()
+    }
+
+    /// The **render-only** pose descriptor. At rest the keeper stands in the
+    /// braced `idle_display` ready stance — arms flung wide and near-horizontal
+    /// with the elbows breaking so the gloves drop into a catching set —
+    /// matching the reference's large "set" keeper, instead of the stiff
+    /// scarecrow-T the translation-only `idle` rig renders as. During a dive it
+    /// follows the authored clip exactly, identical to [`Self::descriptor`].
+    /// Deliberately decoupled from [`Self::descriptor`] / [`Self::animated_volumes`]:
+    /// the deterministic save geometry keeps riding the un-rotated `idle` rig,
+    /// so this changes only the visible silhouette, never gameplay.
+    pub fn render_descriptor(&self) -> PenaltyGoaliePoseDescriptor {
+        self.lane
+            .map(|_| self.current_pose())
+            .unwrap_or_else(PenaltyGoaliePose::idle_display)
+            .resolve()
     }
 
     /// The animated save-volume set for the current pose.

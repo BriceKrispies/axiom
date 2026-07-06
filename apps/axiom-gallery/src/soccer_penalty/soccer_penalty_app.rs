@@ -68,7 +68,7 @@ impl SoccerPenaltyApp {
     ) -> Stage1Diorama {
         let diorama = StaticDiorama::stage1();
         let pose = state.ball_pose();
-        let goalie_pose = state.goalie.descriptor();
+        let goalie_pose = state.goalie.render_descriptor();
 
         // Overlay the live ball pose, the sampled goalie pose, and the sampled
         // kicker pose onto the static objects (identity at rest → default
@@ -107,7 +107,7 @@ impl SoccerPenaltyApp {
     pub fn build_session_frame(session: &PenaltySessionState) -> Stage1Diorama {
         let diorama = StaticDiorama::stage1();
         let pose = session.shot.ball_pose();
-        let goalie_pose = session.shot.goalie.descriptor();
+        let goalie_pose = session.shot.goalie.render_descriptor();
 
         let kicker_boxes = penalty_kicker::KickerRig::new()
             .boxes_at(penalty_kicker::kicker_frame(&session.shot));
