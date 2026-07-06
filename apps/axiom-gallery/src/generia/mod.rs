@@ -32,7 +32,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::growth::visual_target::build::{
-    self, branch_instances, foliage_instances, terrain_window_mesh, trunk_instances,
+    self, branch_instances, canopy_instances, foliage_instances, terrain_window_mesh,
+    trunk_instances,
 };
 use crate::growth::visual_target::scene::{Foliage, Manifest, Tree};
 
@@ -43,6 +44,10 @@ const SURFACE_H: u32 = 800;
 /// Mesh + material ids (must match `build.rs`).
 const TERRAIN_MESH: u64 = 1;
 const TRUNK_MESH: u64 = 2;
+/// The solid canopy blob (`build.rs`'s `CANOPY_MESH` — a UV-sphere), already registered in
+/// `rd.meshes`. Drawn on both backends as the canopy silhouette; on Canvas2D it IS the
+/// canopy (the leaf cards below are GPU-only), on the GPU it backs the leaf-card detail.
+const CANOPY_MESH: u64 = 3;
 const FOLIAGE_MESH: u64 = 5;
 const BRANCH_MESH: u64 = 7;
 const WHITE_MAT: u64 = 1;
@@ -140,6 +145,8 @@ struct Inst {
 /// A loaded chunk's cached vegetation, grouped by mesh.
 struct ChunkVeg {
     trunk: Vec<Inst>,
+    /// Solid per-tree canopy spheres (the shared canopy mass, drawn on both backends).
+    canopy: Vec<Inst>,
     foliage: Vec<Inst>,
     branch: Vec<Inst>,
     grass: Vec<Grass>,
@@ -322,21 +329,28 @@ pub fn generia_start() {
                 }
             };
 
-            // Gather visible chunks' instances into the three vegetation batches.
-            // Distance LOD (WorldApi hands a level per visible chunk): the leaf-card
-            // foliage is the triangle hog, so only the nearest band (lod 0) draws it;
-            // farther chunks keep just trunks + branches (readable through the fog).
+            // Gather visible chunks' instances into the vegetation batches.
+            // The solid canopy sphere draws on every visible chunk (it's cheap and is the
+            // canopy silhouette on both backends). The leaf-CARD detail is the triangle hog
+            // AND is textureless noise on Canvas2D, so it draws only on the GPU, and only in
+            // the nearest band (lod 0); farther chunks keep trunks + branches + canopy.
             let c = cache.borrow();
-            let (mut trunk, mut foliage_d, mut branch, mut grass, mut sedge) =
-                (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
-            let (mut tn, mut fn_, mut bn, mut gn, mut sn) = (0u32, 0u32, 0u32, 0u32, 0u32);
+            let (mut trunk, mut canopy, mut foliage_d, mut branch, mut grass, mut sedge) =
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (mut tn, mut cn, mut fn_, mut bn, mut gn, mut sn) =
+                (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
             let grass_draw_m = if low_detail { GRASS_DRAW_M_LOW } else { GRASS_DRAW_M_GPU };
             for vc in &plan.visible {
                 if let Some(veg) = c.get(&(vc.coord.x, vc.coord.z)) {
                     tn += project_into(&mut trunk, &veg.trunk, &vp);
                     bn += project_into(&mut branch, &veg.branch, &vp);
+                    cn += project_into(&mut canopy, &veg.canopy, &vp);
                     if vc.lod == 0 {
-                        fn_ += project_into(&mut foliage_d, &veg.foliage, &vp);
+                        // GPU-only leaf detail (Canvas2D drops the leaf-alpha texture, so the
+                        // cards would be textureless sub-pixel noise — the sphere is its canopy).
+                        if !low_detail {
+                            fn_ += project_into(&mut foliage_d, &veg.foliage, &vp);
+                        }
                         // Grass only near the walker (wind / perspective / trample read up
                         // close); farther ground is carried by the terrain + litter.
                         let ccx = (vc.coord.x as f32 + 0.5) * CHUNK_M;
@@ -356,6 +370,7 @@ pub fn generia_start() {
             let batches = vec![
                 (TERRAIN_MESH, GROUND_MAT, terrain_inst, 1),
                 (TRUNK_MESH, BARK_MAT, trunk, tn),
+                (CANOPY_MESH, WHITE_MAT, canopy, cn),
                 (FOLIAGE_MESH, LEAF_ALPHA_MAT, foliage_d, fn_),
                 (BRANCH_MESH, WHITE_MAT, branch, bn),
                 (GRASS_MESH, WHITE_MAT, grass, gn),
@@ -397,6 +412,7 @@ fn gen_chunk_veg(
     let (grass, sedge) = gen_chunk_grass(manifest, cell, eye, grass_sites);
     ChunkVeg {
         trunk: extract(&trunk_instances(manifest, &trees, lean, &IDENTITY16, eye)),
+        canopy: extract(&canopy_instances(manifest, &trees, lean, &IDENTITY16, eye)),
         foliage: extract(&foliage_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
         branch: extract(&branch_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
         grass,

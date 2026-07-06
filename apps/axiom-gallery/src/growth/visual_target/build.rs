@@ -414,7 +414,7 @@ pub(crate) fn trunk_instances(manifest: &Manifest, trees: &[Tree], lean_deg: f32
 }
 
 /// The sphere-blob canopy (the fallback when no `[foliage]` is configured).
-fn canopy_instances(manifest: &Manifest, trees: &[Tree], lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
+pub(crate) fn canopy_instances(manifest: &Manifest, trees: &[Tree], lean_deg: f32, view_proj: &[f32; 16], eye: Vec3) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
     let mut out = Vec::with_capacity(trees.len() * 36);
