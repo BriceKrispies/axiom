@@ -61,16 +61,16 @@ const GRASS_MESH: u64 = 4;
 const GRASS_SEED: u64 = 0x_67_72_61_73_73_5f_76_31; // "grass_v1"
 /// Grass sites per chunk side. Canvas2D projects every blade on the CPU, so it grows a
 /// sparser sward than the GPU cascade.
-const GRASS_SITES_GPU: u32 = 9;
-const GRASS_SITES_LOW: u32 = 5;
+const GRASS_SITES_GPU: u32 = 12;
+const GRASS_SITES_LOW: u32 = 8;
 /// Only chunks whose centre is within this horizontal distance of the eye grow blades —
 /// wind, fake-perspective, and trample all read up close, and the far ground is carried
 /// by the terrain mottle + litter. Tighter on the CPU backend.
 const GRASS_DRAW_M_GPU: f32 = 46.0;
-const GRASS_DRAW_M_LOW: f32 = 26.0;
+const GRASS_DRAW_M_LOW: f32 = 34.0;
 /// Blades stand taller than the baked ground-tufts (whose height range is ankle-low) so
 /// the streamed sward reads as swaying grass, not flat clutter.
-const GRASS_HEIGHT_MUL: f32 = 3.2;
+const GRASS_HEIGHT_MUL: f32 = 6.5;
 /// Second ground species: the taller upright sedge/fern mesh (`build.rs`'s `FERN_MESH`),
 /// also registered in `rd.meshes`. Draws on the flat `WHITE_MAT` like the tufts, so its
 /// per-instance tint carries the colour and it survives Canvas2D's texture-drop — real
@@ -81,7 +81,7 @@ const SEDGE_MESH: u64 = 8;
 const GRASS_FRACTION: f32 = 0.55;
 /// Sedge fronds stand markedly taller (and thinner) than the grass tufts, and sway a touch
 /// less at the tip so the taller blade does not whip.
-const SEDGE_HEIGHT_MUL: f32 = 5.0;
+const SEDGE_HEIGHT_MUL: f32 = 9.0;
 const SEDGE_RADIUS_MUL: f32 = 0.6;
 const SEDGE_WIND_MUL: f32 = 0.7;
 
@@ -438,7 +438,7 @@ fn gen_chunk_grass(manifest: &Manifest, cell: ChunkCoord, eye: Vec3, sites_per_s
         let h = StableHash::of_words(&[s.seed]).raw();
         let u = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
         let lerp = |r: [f32; 2], t: f32| r[0] + (r[1] - r[0]) * t;
-        let is_grass = u(56) < GRASS_FRACTION;
+        let is_grass = u(48) < GRASS_FRACTION;
         let (height_mul, radius_mul, wind_mul) = if is_grass {
             (GRASS_HEIGHT_MUL, 1.0, 1.0)
         } else {
