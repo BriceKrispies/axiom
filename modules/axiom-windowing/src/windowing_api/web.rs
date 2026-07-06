@@ -7,6 +7,14 @@
 
 use super::WindowingApi;
 
+/// One skinned draw crossing the module boundary as neutral data: `(mesh_id,
+/// material_id, mvp, world, colour, joint palette)`. The joint palette is the
+/// per-frame column-major matrices the LBS vertex shader blends by weight. This
+/// is the flat peer of the runtime's `SkinnedDraw`, carried by value so no engine
+/// type crosses the windowing facade. wasm32 only.
+#[cfg(target_arch = "wasm32")]
+type SkinnedDrawTuple = (u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>);
+
 impl WindowingApi {
     /// Install unified pointer capture (mouse + touch + pen) on the canvas with
     /// the given id, returning a handle whose [`samples`] the app reads each
@@ -114,6 +122,56 @@ impl WindowingApi {
             move |tick, _fps_milli, _frame_micros| frame_fn(tick),
             None,
             None,
+            // The plain multi-mesh arm submits no skinned bodies.
+            Vec::new(),
+            None,
+        )
+    }
+
+    /// Like [`Self::run_web_multi`], but the scene ALSO carries **skinned** bodies:
+    /// `skinned_meshes` are the bake-once skinning meshes uploaded at bind (the
+    /// 20-float pos/norm/uv/col/joints/weights vertex stream), and `skinned_source`
+    /// is a shared cell the caller's frame closure writes this frame's skinned draws
+    /// into (each `(mesh_id, material_id, mvp, world, colour, joint palette)`) — the
+    /// driver reads it just before each present and hands it to the GPU skinning
+    /// pass. The frame closure returns the SAME 7-tuple as [`Self::run_web_multi`]
+    /// (the skinned draws ride the shared cell, not the tuple), so the nine other
+    /// `run_web_multi` callers stay untouched. wasm32 only; consumes the driver.
+    #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::type_complexity)]
+    pub fn run_web_multi_skinned<F>(
+        self,
+        canvas_id: &str,
+        meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        max_instances: u32,
+        skinned_source: std::rc::Rc<std::cell::RefCell<Vec<SkinnedDrawTuple>>>,
+        mut frame_fn: F,
+    ) -> Result<(), wasm_bindgen::JsValue>
+    where
+        F: FnMut(
+                u64,
+            ) -> (
+                [f32; 4],
+                Vec<(u32, [f32; 3], [f32; 3], f32)>,
+                [f32; 16],
+                Vec<(u64, u64, Vec<f32>, u32)>,
+                [f32; 16],
+                Vec<bool>,
+                Option<axiom_host::SdfScene>,
+            ) + 'static,
+    {
+        self.drive_web_multi(
+            canvas_id,
+            meshes,
+            materials,
+            max_instances,
+            move |tick, _fps_milli, _frame_micros| frame_fn(tick),
+            None,
+            None,
+            skinned_meshes,
+            Some(skinned_source),
         )
     }
 
@@ -192,6 +250,8 @@ impl WindowingApi {
                     Some(backend),
                     false,
                     (*meshes).clone(),
+                    // The backend-comparison view uploads no skinned bodies.
+                    Vec::new(),
                     (*materials).clone(),
                     max_instances,
                 )
@@ -270,7 +330,9 @@ impl WindowingApi {
         let slot = self.presenter.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let presenter =
-                LivePresenter::bind(request, canvas, meshes, materials, max_instances).await;
+                // A caller-owned-loop host (the @axiom/game SDK) uploads no skinned bodies.
+                LivePresenter::bind(request, canvas, meshes, Vec::new(), materials, max_instances)
+                    .await;
             *slot.borrow_mut() = presenter;
         });
     }
@@ -378,6 +440,7 @@ impl WindowingApi {
     /// the off-loop device-loss rebuild — to a [`LivePresenter`], the same backend
     /// path [`Self::present_surface`] hands to a caller-owned loop.
     #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::too_many_arguments)]
     fn drive_web_multi<F>(
         self,
         canvas_id: &str,
@@ -387,6 +450,11 @@ impl WindowingApi {
         frame_fn: F,
         snapshot: Option<crate::frame_scrubber::SnapshotHook>,
         restore: Option<crate::frame_scrubber::RestoreHook>,
+        // The bake-once skinned mesh set uploaded at bind (empty for the non-skinned
+        // arms), and the per-frame skinned-draw source the soccer arm writes each
+        // frame (the joint palettes). `None` on arms that submit no skinned bodies.
+        skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        skinned_source: Option<std::rc::Rc<std::cell::RefCell<Vec<SkinnedDrawTuple>>>>,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
         // The closure is handed this frame's identity and the engine's live
@@ -432,11 +500,19 @@ impl WindowingApi {
             // the device-loss rebuild — the same path `present_surface` hands a
             // caller-owned loop. The rAF loop here only resolves each frame and
             // delegates the present.
-            let presenter =
-                match LivePresenter::bind(request, canvas, meshes, materials, max_instances).await {
-                    Some(presenter) => presenter,
-                    None => return,
-                };
+            let presenter = match LivePresenter::bind(
+                request,
+                canvas,
+                meshes,
+                skinned_meshes,
+                materials,
+                max_instances,
+            )
+            .await
+            {
+                Some(presenter) => presenter,
+                None => return,
+            };
 
             let windowing = Rc::new(RefCell::new(windowing));
             // The shared dev frame-scrubber overlay (records each presented frame;
@@ -516,6 +592,14 @@ impl WindowingApi {
                     (clear, lights, light_vp, batches, camera_vp, casters, sdf)
                 };
                 let (clear, lights, light_vp, batches, camera_vp, casters, sdf) = present;
+                // Hand the presenter this frame's skinned draws (the soccer arm wrote
+                // them into the shared source during its closure just now); a scrubbed
+                // frame carries none, matching the scrub path's dropped camera/casters.
+                if let Some(src) = skinned_source.as_ref() {
+                    let live_skinned =
+                        if scrubbing { Vec::new() } else { src.borrow().clone() };
+                    presenter.set_skinned(live_skinned);
+                }
                 presenter.present(
                     tick, clear, &lights, light_vp, &batches, camera_vp, &casters, sdf,
                 );
@@ -632,6 +716,9 @@ impl WindowingApi {
             },
             Some(snapshot),
             Some(restore),
+            // The forkable single-mesh arm submits no skinned bodies.
+            Vec::new(),
+            None,
         )
     }
 
@@ -693,6 +780,8 @@ impl WindowingApi {
                 &request,
                 canvas,
                 &meshes,
+                // The streaming terrain arm submits no skinned bodies.
+                &[],
                 &materials,
                 max_instances,
             )
@@ -842,6 +931,8 @@ impl WindowingApi {
                 &request,
                 canvas,
                 &meshes,
+                // The streaming terrain arm submits no skinned bodies.
+                &[],
                 &materials,
                 max_instances,
             )
@@ -946,6 +1037,10 @@ pub(crate) struct LivePresenter {
     #[allow(clippy::type_complexity)]
     pending_skinned:
         std::cell::RefCell<Vec<(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)>>,
+    // The bake-once skinned mesh set uploaded at bind (the 20-float skinning vertex
+    // stream), retained so a device-loss rebuild re-uploads them alongside the
+    // ordinary meshes. Empty on apps that submit no skinned bodies.
+    skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
 }
 
 // The live backends hold no `Debug`; the presenter is a field of the
@@ -982,6 +1077,7 @@ impl LivePresenter {
         request: axiom_host::HostPresentationRequest,
         canvas: web_sys::HtmlCanvasElement,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
     ) -> Option<LivePresenter> {
@@ -991,6 +1087,7 @@ impl LivePresenter {
             backend_preference(),
             true,
             meshes,
+            skinned_meshes,
             materials,
             max_instances,
         )
@@ -1004,12 +1101,14 @@ impl LivePresenter {
     /// scrubber (three stacked overlays over the panes would be noise). Uploads
     /// the scene once and captures the rebuild inputs. `None` if no backend could
     /// be built.
+    #[allow(clippy::too_many_arguments)]
     async fn bind_with(
         request: axiom_host::HostPresentationRequest,
         canvas: web_sys::HtmlCanvasElement,
         preference: Option<axiom_host::BackendKind>,
         with_scrubber: bool,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
+        skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
     ) -> Option<LivePresenter> {
@@ -1025,6 +1124,7 @@ impl LivePresenter {
             &request,
             canvas.clone(),
             &meshes[..],
+            &skinned_meshes[..],
             &materials[..],
             max_instances,
         )
@@ -1048,6 +1148,7 @@ impl LivePresenter {
             // No mesh generation applied yet; the first changed set uploads.
             applied_mesh_generation: Cell::new(u32::MAX),
             pending_skinned: RefCell::new(Vec::new()),
+            skinned_meshes,
         })
     }
 
@@ -1168,6 +1269,7 @@ impl LivePresenter {
             // meshes after bind), not the stale bind-time snapshot.
             let meshes = self.meshes.borrow().clone();
             let materials = self.materials.clone();
+            let skinned_meshes = self.skinned_meshes.clone();
             let flag = self.reinitializing.clone();
             let request = self.request;
             let preference = self.preference;
@@ -1178,6 +1280,7 @@ impl LivePresenter {
                     &request,
                     canvas,
                     &meshes[..],
+                    &skinned_meshes[..],
                     &materials[..],
                     max_instances,
                 )
@@ -1478,11 +1581,13 @@ fn frame_packet_from_batches(
 ///
 /// wasm32 only.
 #[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
 async fn select_backend(
     preference: Option<axiom_host::BackendKind>,
     request: &axiom_host::HostPresentationRequest,
     canvas: web_sys::HtmlCanvasElement,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     max_instances: u32,
 ) -> Option<LiveBackend> {
@@ -1501,7 +1606,7 @@ async fn select_backend(
     // (common, expected) GPU→Canvas2D fallback is diagnosable in the console / by
     // the Playwright suite instead of being silent.
     match gpu
-        .initialize(canvas.clone(), meshes, materials, max_instances, preference)
+        .initialize(canvas.clone(), meshes, skinned_meshes, materials, max_instances, preference)
         .await
     {
         Ok(()) => return Some(LiveBackend::Gpu(gpu)),
@@ -1524,11 +1629,13 @@ async fn select_backend(
 /// This turns a previously-silent total failure into a loud, greppable error so a
 /// browser test can catch a demo that never renders. wasm32 only.
 #[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
 async fn select_backend_or_report(
     preference: Option<axiom_host::BackendKind>,
     request: &axiom_host::HostPresentationRequest,
     canvas: web_sys::HtmlCanvasElement,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     max_instances: u32,
 ) -> Option<LiveBackend> {
@@ -1537,6 +1644,7 @@ async fn select_backend_or_report(
         request,
         canvas,
         meshes,
+        skinned_meshes,
         materials,
         max_instances,
     )

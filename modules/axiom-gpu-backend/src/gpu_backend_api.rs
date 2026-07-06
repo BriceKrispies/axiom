@@ -358,11 +358,19 @@ impl GpuBackendApi {
     /// WebGPU→WebGL2; `Some(BackendKind::GpuPrimary)` binds WebGPU only (erroring if
     /// absent); `Some(BackendKind::GpuFallback)` binds WebGL2 only. This is what
     /// lets a caller render the same scene through each backend side by side.
+    ///
+    /// `skinned_meshes` are the bake-once skinned meshes (the 20-float
+    /// pos/norm/uv/col/joints/weights vertex stream) uploaded through the skinning
+    /// pipeline, distinct from the ordinary `meshes` — empty for apps that submit
+    /// no skinned bodies. The per-frame joint palettes ride in on
+    /// [`Self::present_frame_result`]'s `skinned_draws`.
     #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::too_many_arguments)]
     pub async fn initialize(
         &mut self,
         canvas: web_sys::HtmlCanvasElement,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
+        skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         preference: Option<axiom_host::BackendKind>,
@@ -374,9 +382,7 @@ impl GpuBackendApi {
             self.render_width,
             self.render_height,
             meshes,
-            // Live skinned-mesh upload is threaded through the present path as a
-            // follow-up; the live arm currently uploads none.
-            &[],
+            skinned_meshes,
             materials,
             max_instances,
             self.shadow_size,

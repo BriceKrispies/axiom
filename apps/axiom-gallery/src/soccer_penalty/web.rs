@@ -101,11 +101,22 @@ pub fn soccer_penalty_start() {
     let session = SoccerPenaltyApp::new_session();
     let initial = SoccerPenaltyApp::build_session_frame(&session);
     let mut running = soccer_meshed_shell();
-    let mut scene = PenaltyMeshedScene::install(&mut running);
+    // The live game skins the athletes exactly as the offscreen convergence
+    // champion does: one continuous bake-once MetaSurface body per kit material,
+    // deformed each frame by a joint palette (not the old articulated box-man).
+    let mut scene = PenaltyMeshedScene::install(&mut running).with_skinned_bodies();
     scene.set_view(&mut running, initial.render_plan.camera);
+    // The bodies bake on this first author, so the skinned mesh set is populated by
+    // the time we snapshot it below (they're excluded from the ordinary mesh set).
     scene.author(&mut running, &initial);
     let meshes = running.mesh_set();
+    let skinned_meshes = running.skinned_mesh_set();
     let materials = running.material_textures();
+
+    // The shared cell the frame closure writes each frame's skinned draws into and
+    // the run loop reads just before present (see `run_web_multi_skinned`).
+    let skinned_source = Rc::new(RefCell::new(Vec::new()));
+    let frame_skinned = skinned_source.clone();
 
     let state = Rc::new(RefCell::new((session, running, scene)));
     let frame_input = input.clone();
@@ -130,6 +141,23 @@ pub fn soccer_penalty_start() {
         let diorama = SoccerPenaltyApp::build_session_frame(session);
         scene.author(running, &diorama);
         let outcome = running.tick(tick);
+        // Hand the run loop this frame's skinned athlete bodies: each draw's mesh +
+        // material ids, its mvp/world, kit colour, and the per-frame joint palette
+        // the LBS shader blends. The driver reads this cell right before present.
+        *frame_skinned.borrow_mut() = outcome
+            .skinned_draws()
+            .iter()
+            .map(|d| {
+                (
+                    d.mesh_id(),
+                    d.material_id(),
+                    d.mvp(),
+                    d.world(),
+                    d.color(),
+                    d.joints().to_vec(),
+                )
+            })
+            .collect();
         let lights = outcome
             .lights()
             .iter()
@@ -146,7 +174,15 @@ pub fn soccer_penalty_start() {
         )
     };
 
-    let _ = windowing.run_web_multi(CANVAS_ID, meshes, materials, CAPACITY, frame);
+    let _ = windowing.run_web_multi_skinned(
+        CANVAS_ID,
+        meshes,
+        materials,
+        skinned_meshes,
+        CAPACITY,
+        skinned_source,
+        frame,
+    );
 }
 
 /// Match on the logical `key()` so the gallery's synthetic on-screen keypad
@@ -239,31 +275,44 @@ mod tests {
         assert!(kit_materials.len() < 31, "athletes drew as {} grouped skinned bodies", kit_materials.len());
     }
 
-    /// Regression guard for the live loop (`install`, no `with_skinned_bodies`): the
-    /// athletes render as pre-baked articulated parts, NOT a per-frame `MetaSurface`
-    /// re-bake. Re-baking dropped the game to ~7 FPS and leaked a fresh mesh per
-    /// group per frame; and because the live `run_web_multi` uploads meshes only at
-    /// bind, those per-frame meshes never reached the GPU (the athletes vanished).
-    /// This asserts the live default keeps the mesh store constant across frames.
-    /// (The offscreen champion opts into `with_skinned_bodies`; live skinning is a
-    /// follow-up — see the `skinned` flag doc.)
+    /// Regression guard for the live loop, which now skins the athletes exactly as
+    /// the offscreen champion does (`install().with_skinned_bodies()` — the same
+    /// call `soccer_penalty_start` makes): the athlete bodies bake **once** into the
+    /// skinned mesh set and then deform per frame via a joint palette — NOT a
+    /// per-frame `MetaSurface` re-bake. Re-baking dropped the game to ~7 FPS and
+    /// leaked a fresh mesh per group per frame; and because the live loop uploads
+    /// meshes only at bind, those per-frame meshes never reached the GPU (the
+    /// athletes vanished). This asserts both mesh stores stay constant across frames
+    /// after the one-time bake, and that the athletes surface as skinned draws.
     #[test]
     fn live_loop_does_not_rebake_meshes_per_frame() {
         use crate::soccer_penalty::penalty_render_meshed::{soccer_meshed_shell, PenaltyMeshedScene};
         let frame = SoccerPenaltyApp::build_stage1();
         let mut app = soccer_meshed_shell();
-        let mut scene = PenaltyMeshedScene::install(&mut app); // live default = box-man
-        let meshes_at_bind = app.mesh_set().len();
+        // The live path: skinned athletes (bake once), matching `soccer_penalty_start`.
+        let mut scene = PenaltyMeshedScene::install(&mut app).with_skinned_bodies();
         scene.author(&mut app, &frame);
-        let draws = app.tick(0).draws().len();
+        let outcome0 = app.tick(0);
+        let skinned = outcome0.skinned_draws().len();
+        let static_draws = outcome0.draws().len();
+        // The one-time bake populates the skinned mesh set; record both stores.
         let meshes_after_1 = app.mesh_set().len();
+        let skinned_meshes_after_1 = app.skinned_mesh_set().len();
         scene.author(&mut app, &frame);
         let _ = app.tick(1);
         let meshes_after_2 = app.mesh_set().len();
-        // Athletes render as many pre-baked parts (more draws than a few skinned bodies).
-        assert!(draws > 30, "live box-man should draw athlete parts, got {draws}");
-        // The core regression: authoring registers NO new meshes per frame.
-        assert_eq!(meshes_at_bind, meshes_after_1, "live author must not bake new meshes");
+        let skinned_meshes_after_2 = app.skinned_mesh_set().len();
+        // The athletes render as skinned bodies (one per kit material), not parts.
+        assert!(skinned > 0, "live athletes should draw as skinned bodies, got {skinned}");
+        // Non-athlete world objects still draw statically.
+        assert!(static_draws > 0, "static diorama objects should still draw, got {static_draws}");
+        // The core regression: authoring registers NO new meshes per frame — neither
+        // in the ordinary set nor the skinned set (the bodies baked exactly once).
         assert_eq!(meshes_after_1, meshes_after_2, "live author must not grow the mesh store per frame");
+        assert_eq!(
+            skinned_meshes_after_1, skinned_meshes_after_2,
+            "live author must not re-bake skinned meshes per frame"
+        );
+        assert!(skinned_meshes_after_1 > 0, "the bake must populate the skinned mesh set");
     }
 }
