@@ -1,42 +1,48 @@
-# Champion = the DAYLIGHT-AMBIENT render (champion.png md5 503880da…), promoted
-# across champion-branch commits c059baa (art-director reframe + rigger keeper set
-# + lighting fill) and 638130b (engine hemisphere-ambient frame channel, 1a6ccd3).
-# Harness: tools/axiom-shot --app soccer-penalty --backend gpu, tick 0, 960x600.
+# CRITIC RECALIBRATION (convergence critic pass, 2026-07-06) — champion.png md5
+# be46c518d1087c88b25206bd495f7e38 (the ACTUAL artifact on disk / the convergence
+# champion branch tip), re-scored fresh against reference.png. Harness unchanged:
+# axiom-shot --app soccer-penalty --backend gpu --features offscreen, 960x600, tick 0.
 # 0..5, harsh; a proxy = 1. final_score = lowest*0.7 + avg*0.3.
 #
-# CRITIC RECALIBRATION (iteration 8): the two champion swaps above landed WITHOUT a
-# ledger iteration and WITHOUT a rescore — the card went STALE, still describing the
-# prior LIVE-SKINNED render (md5 be46c518, iter-7 values). This rewrite re-scores the
-# ACTUAL current champion.png (the daylight render) fresh against the harsh identity
-# bar. Two honest movements, offsetting:
-#   * lighting_shadow_and_depth — the ambient lift is a REAL tone gain (crushed pitch
-#     shadows lifted toward the reference's daylight) but it stays flat (no AO/depth),
-#     uneven (stands still dark), and washed; a sub-band gain that does NOT clear into
-#     a 3. Held at 2 (same discipline that capped the skinning gain in iter-7).
-#   * artifact_level — LOWERED 3->2: the daylight render introduced pronounced
-#     HORIZONTAL streak/scanline tearing across the grass, the kicker, and the stands
-#     that the skinned render did not carry. A real NON-ATTACKED regression the swap
-#     shipped silently.
-# Net: final_score 1.30 -> 1.27 — the swap was NOT progress. Lowest tier is unchanged,
-# so the next attack stays goalkeeper_silhouette. No parity claimed.
+# CONSISTENCY NOTE (app-tier mirror): this file is kept BYTE-IDENTICAL to the primary
+# visual_targets/soccer_penalty_gameplay/scorecard.champion.toml. On base fafb48e the
+# mirror had DIVERGED — it carried a different "DAYLIGHT-AMBIENT" card AND a different
+# champion.png (md5 e1d355a2) than the authoritative primary (be46c518). The scorecard
+# record is reunified here to the authoritative champion. The mirror champion.png bytes
+# (e1d355a2) still need a render-side re-promotion to be46c518 to fully reconcile — that
+# is a render artifact, out of the critic's scope; flagged for the render owner.
+#
+# WHY THIS REWRITE: the prior primary card described the "KICKER-PASS" render (claimed
+# promoted as md5 ed321b04, ledger iteration line 386) at final 1.38 — but that
+# render was NEVER the champion.png on disk. The champion.png present is be46c518,
+# the earlier live-skinned render. The scorecard had marched two axes UP (camera 2->4,
+# kicker 2->3) to describe a render that is not here. That is inflation: the record
+# diverged from the artifact. This rewrite scores the artifact that actually exists.
+#
+# THREE AXES LOWERED vs the KICKER-PASS card, each from my own harsh pixel read of
+# be46c518 (not from the KICKER-PASS narrative):
+#   * camera_lens_and_scale 4 -> 2
+#   * kicker_silhouette     3 -> 2
+#   * artifact_level        3 -> 2
+# Net final_score 1.38 -> 1.27. Lowest tier unchanged (=1), so next attack is
+# unchanged: goalkeeper_silhouette. No parity claimed.
 
-composition_and_framing   = 3  # unchanged — the art-director reframe keeps kicker centre-left / ball centre-low / goal upper-mid / keeper centred tracking the reference layout.
-camera_lens_and_scale     = 2  # unchanged. Still an over-scaled, too-close kicker on a low camera; keeper small in the goal mouth vs the reference's fuller-body kicker at more distance.
-kicker_silhouette         = 2  # unchanged. Now a mid-stride running figure from behind, but featureless, WRONG-blue (washed light blue not royal), stick-limbed, NO jersey "10", and the new horizontal streaking corrupts the silhouette. "Merely reads as a blue player from behind" — proxy+, harsh cap = 2.
-goalkeeper_silhouette     = 1  # unchanged (this WAS the attacked axis: rigger "broke the keeper's elbows so gloves drop into a catching set"). The break did NOT clear a band — the keeper is still a small, featureless yellow figure, now reading BACK-TURNED (facing the goal, away from camera) rather than the reference's front-facing, lowered, ready-to-dive crouch. Merely reads as "a yellow keeper" = proxy = 1. Still the LOWEST axis and the correct NEXT ATTACK.
-ball_fidelity             = 3  # unchanged. Clear black/white panelled ball, close and centred; capped at 3 — blocky low-res panels + streak artifacts over it, not a crisp reference ball. Still the strongest-matching element.
-goal_and_net_fidelity     = 2  # unchanged. White posts + a hanging GRID net + crossbar read as goal + net; capped at 2 — coarse open grid (no cloth droop / crossbar depth) vs the reference's fine hanging mesh.
-field_markings_and_turf   = 1  # unchanged. The ambient lift brightened the turf toward the reference tone, but the line markings STILL do not read (too thin / washed) and the new horizontal streak artifacts dominate the grass — not the reference's boldly striped, crisply-lined box. Proxy = 1 (when unsure, take the lower).
-stadium_and_ad_boards     = 1  # unchanged. The colorist/surfacing lift raised the stands from a black void to dark maroon, but there are STILL no crowd figures (flat blocks) and the ad boards remain solid red/white with NO "AXIOM SPORTS" text. Empty + textless = proxy = 1.
-lighting_shadow_and_depth = 2  # unchanged VALUE, but note: the hemisphere-ambient channel is a REAL tone gain (crushed shadows lifted toward daylight) — a sub-band improvement held at 2 because it stays flat (no AO/depth), the stands are still dark/uneven, and the frame now carries streak artifacts. Harsh: does not clear into 3.
-gameplay_readability      = 2  # unchanged — reads as a penalty setup, but the offscreen render still carries NO reticle, NO HUD (SCORE/ROUND/BEST), NO SHOT POWER bar (those are the DOM overlay, out of the offscreen render).
-artifact_level            = 2  # LOWERED 3->2. The daylight render introduced pronounced HORIZONTAL streak / scanline tearing across the grass, the kicker body, and the stands that the prior skinned render did not have. A real regression, silently shipped by the swap; on top of the pre-existing blocky low-res edges + net/stripe aliasing.
+composition_and_framing   = 3  # held. Kicker foreground-left / ball centre-low / goal + keeper upper-mid tracks the reference layout; goal a touch low/large (compressed crowd headroom). Essential relationships hold = 3.
+camera_lens_and_scale     = 2  # LOWERED 4->2 (critic). The KICKER-PASS card claimed the shot class matches the reference; it does NOT in be46c518 — the kicker is OVER-SCALED and TOO CLOSE on a low camera (dominates the left half) vs the reference's fuller-body kicker held at more distance (~1/3 frame). An over-scaled proxy shot = 2. "When unsure, take the lower."
+kicker_silhouette         = 2  # LOWERED 3->2 (critic). A washed light-blue box-man from behind with blocky sphere-joints and NO visible jersey "10". "Merely reads as a blue player from behind" = proxy+ = 2. The KICKER-PASS "royal-blue, on-model, athletic" 3 describes the un-promoted ed321b04 render, not be46c518.
+goalkeeper_silhouette     = 1  # held. Small yellow box-man, arms out in a non-keeper T/Y-stance; a thumbnail proxy = 1. Still the LOWEST axis and the correct NEXT ATTACK.
+ball_fidelity             = 3  # held. Black/white panelled ball, close and centred; blocky low-res panels cap it at 3. Strongest-matching element.
+goal_and_net_fidelity     = 2  # held. White posts + a coarse hanging grid net read as goal+net; no cloth droop / crossbar depth vs the reference's fine mesh = 2.
+field_markings_and_turf   = 1  # held. Green turf with broad horizontal banding but NO penalty spot/box/arc and no crisp mow-stripes = proxy = 1.
+stadium_and_ad_boards     = 1  # held. Near-black stands, solid red ad boards with NO "AXIOM SPORTS" text, no crowd figures = empty+textless = 1.
+lighting_shadow_and_depth = 2  # held. Flat Lambert, hard/absent shadows, and the scene is markedly DARK vs the reference's bright daylight; a proxy tone, no AO/depth = 2 (harsh-borderline).
+gameplay_readability      = 2  # held. Reads as a penalty setup but the offscreen render carries NO reticle, NO HUD (SCORE/ROUND/BEST), NO SHOT POWER bar = 2.
+artifact_level            = 2  # LOWERED 3->2 (critic). Visible horizontal green banding across the pitch plus blocky low-res edges on the kicker/net; not the clean flat colour the KICKER-PASS card claimed. "When unsure, take the lower."
 
 # lowest = 1, tied across goalkeeper_silhouette (axis 4), field_markings_and_turf
 # (axis 7) and stadium_and_ad_boards (axis 8). By FIXED axis order the FIRST axis at
-# the lowest value is goalkeeper_silhouette — unchanged from iter-7.
+# the lowest value is goalkeeper_silhouette.
 # sum = 3+2+2+1+3+2+1+1+2+2+2 = 21. avg = 21/11 = 1.909.
-# final_score = 1*0.7 + 1.909*0.3 = 1.27 (iter-7 card claimed 1.30 for the prior
-# render; the daylight swap did NOT raise it — the lighting tone gain was sub-band and
-# was offset by the artifact_level regression).
+# final_score = 1*0.7 + 1.909*0.3 = 1.27 (the KICKER-PASS card claimed 1.38 for an
+# un-promoted render; the artifact that actually exists scores 1.27).
 # Next axis (lowest, ties by fixed order): goalkeeper_silhouette (=1).

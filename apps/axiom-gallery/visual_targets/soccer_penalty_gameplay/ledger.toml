@@ -583,3 +583,48 @@ stadium_and_ad_boards     = 1
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 2
+
+[[iteration]]
+# CRITIC RECONCILIATION (bookkeeping only). 2026-07-06.
+kind = "scoring-recalibration"
+attacked_axis = "none (record honesty)"
+render_changed = false
+decision = "recalibrate"
+note = """
+Reunifies the record with the AUTHORITATIVE champion.png (md5 be46c518, the convergence \
+champion branch tip). The primary visual_targets card had inflated to a "KICKER-PASS" \
+final 1.38 describing an un-promoted render (md5 ed321b04); it has been recalibrated to \
+the artifact that exists (be46c518) at final 1.27 — the SAME honest values this mirror \
+ledger already carried (camera 2, kicker 2, artifact 2). The two scorecards are now \
+byte-identical. One residual, render-side (out of critic scope): the mirror champion.png \
+bytes are md5 e1d355a2, which must be re-promoted to be46c518 to fully reconcile the \
+image artifacts. Next attack unchanged: goalkeeper_silhouette. No parity claimed.
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2

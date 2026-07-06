@@ -1,37 +1,41 @@
-# Champion = the KICKER-PASS render (convergence/soccer-kicker: a 4-lens board —
-# proportion db27633 + pose 182381d + kit 31fe1da + framing cb2ee93, assets
-# regenerated) vs reference.png. Same harness (axiom-shot --app soccer-penalty
-# --backend gpu --features offscreen, 960x600, tick 0; byte-deterministic).
-# 0..5, harsh; a proxy = 1. final_score = lowest*0.7 + avg*0.3
+# CRITIC RECALIBRATION (convergence critic pass, 2026-07-06) — champion.png md5
+# be46c518d1087c88b25206bd495f7e38 (the ACTUAL artifact on disk / the convergence
+# champion branch tip), re-scored fresh against reference.png. Harness unchanged:
+# axiom-shot --app soccer-penalty --backend gpu --features offscreen, 960x600, tick 0.
+# 0..5, harsh; a proxy = 1. final_score = lowest*0.7 + avg*0.3.
 #
-# This pass was a FOCUSED team effort on the KICKER CHARACTER MODEL only (user
-# request). Four lenses each landed one bounded, isolated commit; the integrator
-# stacked, regenerated the kicker.figure/kick_right.clip binaries from the merged
-# authoring.rs, rendered once, and scored. The two KICKER axes rose; every
-# non-kicker axis HELD (none dropped). The render remains a stylized low-poly
-# box-man proxy vs a clean low-poly mobile reference — harsh caps applied, no
-# parity claimed.
+# WHY THIS REWRITE: the prior card described the "KICKER-PASS" render (claimed
+# promoted as md5 ed321b04, ledger iteration line 386) at final 1.38 — but that
+# render was NEVER the champion.png on disk. The champion.png present is be46c518,
+# the earlier live-skinned render (independently identified as such by the app-tier
+# mirror card). The scorecard had marched two axes UP (camera 2->4, kicker 2->3) to
+# describe a render that is not here. That is inflation: the record diverged from the
+# artifact. This rewrite scores the artifact that actually exists.
+#
+# THREE AXES LOWERED vs the KICKER-PASS card, each from my own harsh pixel read of
+# be46c518 (not from the KICKER-PASS narrative):
+#   * camera_lens_and_scale 4 -> 2
+#   * kicker_silhouette     3 -> 2
+#   * artifact_level        3 -> 2
+# Net final_score 1.38 -> 1.27. Lowest tier unchanged (=1), so next attack is
+# unchanged: goalkeeper_silhouette. No parity claimed.
 
-composition_and_framing   = 3  # held. Near-eye-level over-the-shoulder now: kicker foreground-left / ball centre-low / goal + keeper upper-mid. The goal sits a touch lower/larger than the reference (less crowd headroom) but every essential relationship holds, and the FULL kicker now reads — net-neutral, kept at 3.
-camera_lens_and_scale     = 4  # RAISED 2->4. The defining champion flaw — the kicker hard-cropped at the torso (legs/boots off the bottom) — is FIXED: the framing lens dropped the eye to ~head height (y 4.3->2.1), levelled the aim, dollied in and widened the lens (fov 18->19.5) so the WHOLE kicker (hair to boots) reads in the left third at reference scale while the far goal barely moves. Shot class now MATCHES the reference. Capped at 4 (not 5): goal a touch larger/lower, ball-x ~44% vs ref ~49%.
-kicker_silhouette         = 3  # RAISED 2->3. Now clearly on-model: leaner athletic proportions (smaller head, longer/slimmer legs, broader shoulders, quieter sphere-joints), a dark-HAIR head (was bald/skin), a royal-blue jersey, white shorts, BLUE socks over black boots, and a planted stride-ish stance with a trailing arm. Capped at 3: still a blocky box-man with visible sphere joints, NO jersey "10" (the number IS authored in recipe_textures.rs::jersey() but does not land on the rear chest face — a UV/render-bridge gap, queued next), and from directly behind the run-up lean reads more upright than the reference.
-goalkeeper_silhouette     = 1  # held. Small yellow box-man, arms held up in a non-keeper Y-stance; slightly larger/lower after the re-frame but still a thumbnail proxy. Untouched by this kicker pass.
-ball_fidelity             = 3  # held. Black/white panelled ball, close and centred; still blocky low-res panels.
-goal_and_net_fidelity     = 2  # held. White posts + hanging grid net; the re-frame makes it larger/lower but no better/worse in fidelity (coarse open grid, no cloth droop).
-field_markings_and_turf   = 1  # held. Flat green, no penalty spot/box/arc/mow-stripes.
-stadium_and_ad_boards     = 1  # held. Solid red boards (no "AXIOM SPORTS" text) + dark near-empty crowd void.
-lighting_shadow_and_depth = 2  # held. Flat daylight Lambert + hard blob shadows.
-gameplay_readability      = 2  # held. Reads as a penalty setup; still no reticle/HUD/power bar.
-artifact_level            = 3  # held. Clean flat colour; blocky low-res edges + faint grass/crowd noise remain.
+composition_and_framing   = 3  # held. Kicker foreground-left / ball centre-low / goal + keeper upper-mid tracks the reference layout; goal a touch low/large (compressed crowd headroom). Essential relationships hold = 3.
+camera_lens_and_scale     = 2  # LOWERED 4->2 (critic). The KICKER-PASS card claimed the shot class matches the reference; it does NOT in be46c518 — the kicker is OVER-SCALED and TOO CLOSE on a low camera (dominates the left half) vs the reference's fuller-body kicker held at more distance (~1/3 frame). An over-scaled proxy shot = 2. "When unsure, take the lower."
+kicker_silhouette         = 2  # LOWERED 3->2 (critic). A washed light-blue box-man from behind with blocky sphere-joints and NO visible jersey "10". "Merely reads as a blue player from behind" = proxy+ = 2. The KICKER-PASS "royal-blue, on-model, athletic" 3 describes the un-promoted ed321b04 render, not be46c518.
+goalkeeper_silhouette     = 1  # held. Small yellow box-man, arms out in a non-keeper T/Y-stance; a thumbnail proxy = 1. Still the LOWEST axis and the correct NEXT ATTACK.
+ball_fidelity             = 3  # held. Black/white panelled ball, close and centred; blocky low-res panels cap it at 3. Strongest-matching element.
+goal_and_net_fidelity     = 2  # held. White posts + a coarse hanging grid net read as goal+net; no cloth droop / crossbar depth vs the reference's fine mesh = 2.
+field_markings_and_turf   = 1  # held. Green turf with broad horizontal banding but NO penalty spot/box/arc and no crisp mow-stripes = proxy = 1.
+stadium_and_ad_boards     = 1  # held. Near-black stands, solid red ad boards with NO "AXIOM SPORTS" text, no crowd figures = empty+textless = 1.
+lighting_shadow_and_depth = 2  # held. Flat Lambert, hard/absent shadows, and the scene is markedly DARK vs the reference's bright daylight; a proxy tone, no AO/depth = 2 (harsh-borderline).
+gameplay_readability      = 2  # held. Reads as a penalty setup but the offscreen render carries NO reticle, NO HUD (SCORE/ROUND/BEST), NO SHOT POWER bar = 2.
+artifact_level            = 2  # LOWERED 3->2 (critic). Visible horizontal green banding across the pitch plus blocky low-res edges on the kicker/net; not the clean flat colour the KICKER-PASS card claimed. "When unsure, take the lower."
 
-# lowest = 1, tied across goalkeeper_silhouette, field_markings_and_turf,
-# stadium_and_ad_boards. By FIXED axis order the first lowest axis is
-# goalkeeper_silhouette. THE KICKER AXES ARE NO LONGER THE CONSTRAINT — this
-# pass moved camera_lens_and_scale (2->4) and kicker_silhouette (2->3) off the
-# bottom, exactly the focused goal.
-# sum = 3+4+3+1+3+2+1+1+2+2+3 = 25. avg = 25/11 = 2.273.
-# final_score = 1*0.7 + 2.273*0.3 = 1.38 (was 1.30 for the pre-pass champion; the
-# +0.08 tracks the real kicker gains, not inflation — the lowest axis is unchanged
-# at 1, so final moves only via the average).
-# Next axis (lowest, ties by fixed order): goalkeeper_silhouette — a non-kicker
-# axis, so the kicker-focused campaign has achieved its brief.
+# lowest = 1, tied across goalkeeper_silhouette (axis 4), field_markings_and_turf
+# (axis 7) and stadium_and_ad_boards (axis 8). By FIXED axis order the FIRST axis at
+# the lowest value is goalkeeper_silhouette.
+# sum = 3+2+2+1+3+2+1+1+2+2+2 = 21. avg = 21/11 = 1.909.
+# final_score = 1*0.7 + 1.909*0.3 = 1.27 (the KICKER-PASS card claimed 1.38 for an
+# un-promoted render; the artifact that actually exists scores 1.27).
+# Next axis (lowest, ties by fixed order): goalkeeper_silhouette (=1).

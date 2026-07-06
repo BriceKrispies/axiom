@@ -445,3 +445,54 @@ stadium_and_ad_boards     = 1
 lighting_shadow_and_depth = 2
 gameplay_readability      = 2
 artifact_level            = 3
+
+[[iteration]]
+# CRITIC RECALIBRATION (not a render pass — bookkeeping only). 2026-07-06.
+kind = "scoring-recalibration"
+attacked_axis = "none (record honesty)"
+render_changed = false
+decision = "recalibrate"
+note = """
+The prior KICKER-PASS iteration claimed champion.png was promoted to md5 ed321b04 \
+(final 1.38, camera 2->4 + kicker 2->3). But the champion.png actually on disk / on \
+the convergence champion branch tip is md5 be46c518 — the earlier live-skinned render \
+(independently identified as such by the app-tier mirror card). The scorecard had \
+therefore diverged from the artifact: it scored an un-promoted render. \
+This recalibration re-scores the artifact that EXISTS (be46c518) from a fresh harsh \
+pixel read: camera_lens_and_scale 4->2 (kicker over-scaled/too-close, not a shot-class \
+match), kicker_silhouette 3->2 (washed-blue box-man, no jersey 10), artifact_level 3->2 \
+(visible pitch banding + blocky edges). final_score 1.38 -> 1.27. The lowest tier is \
+unchanged (=1), so the next attack is UNCHANGED: goalkeeper_silhouette. \
+Also reunified the app-tier mirror scorecard (which had diverged to a separate \
+"DAYLIGHT-AMBIENT" card + a different champion.png md5 e1d355a2) to this authoritative \
+card; the mirror champion.png bytes still need a render-side re-promotion to be46c518. \
+No parity claimed; the render remains a stylized low-poly box-man proxy.
+"""
+next_attacked_axis = "goalkeeper_silhouette"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing   = 3
+camera_lens_and_scale     = 4
+kicker_silhouette         = 3
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 3
+
+[iteration.scorecard_after]
+composition_and_framing   = 3
+camera_lens_and_scale     = 2
+kicker_silhouette         = 2
+goalkeeper_silhouette     = 1
+ball_fidelity             = 3
+goal_and_net_fidelity     = 2
+field_markings_and_turf   = 1
+stadium_and_ad_boards     = 1
+lighting_shadow_and_depth = 2
+gameplay_readability      = 2
+artifact_level            = 2
