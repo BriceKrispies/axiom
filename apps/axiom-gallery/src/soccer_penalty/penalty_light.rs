@@ -17,15 +17,18 @@ use axiom_math::Vec3;
 
 use crate::soccer_penalty::low_poly_assets::Rgba;
 
-/// Fixed ambient strength (flat fill light). Lifted further so camera-facing
-/// (front) faces — lit by fill alone — read as bright open daylight instead of
-/// sitting at a dim 0.55 floor. The reference is a sunlit stadium with a strong
-/// sky bounce filling the shadowed faces, not a dim, muddy field.
-pub const AMBIENT_STRENGTH: f32 = 0.72;
-/// Fixed directional strength (the "sun" contribution). Kept high enough that a
-/// fully key-lit face (ambient + directional) overshoots the top band and reads
-/// at full daylight brightness.
-pub const DIRECTIONAL_STRENGTH: f32 = 0.55;
+/// Fixed ambient strength (flat fill light). Lifted again (0.72 -> 0.80) so the
+/// shadowed/side faces sit even higher: the reference is a high-fill overcast-ish
+/// sunlit stadium where the sky bounce nearly fills the shade, giving the figures
+/// an almost flat, evenly-lit read with only a whisper of a terminator — not the
+/// darker, contrastier facet-stepping a low fill produces.
+pub const AMBIENT_STRENGTH: f32 = 0.80;
+/// Fixed directional strength (the "sun" contribution). Softened (0.55 -> 0.45)
+/// in step with the raised fill: a fully key-lit face (ambient + directional =
+/// 1.25) still overshoots the top band and reads at full daylight, but the gap
+/// between a key-lit face and a fill-only face narrows, flattening the terminator
+/// to match the reference's soft, even key instead of a hard sunlit contrast.
+pub const DIRECTIONAL_STRENGTH: f32 = 0.45;
 
 /// The light direction, normalized. A low, raking stadium key from the
 /// upper-behind-left: its shallower elevation lets the sun model the vertical
@@ -35,11 +38,13 @@ pub const DIRECTIONAL_STRENGTH: f32 = 0.55;
 pub const LIGHT_DIRECTION: Vec3 = Vec3::new(-0.50, -0.66, -0.56);
 
 /// The fixed brightness bands, ascending. Quantization snaps a computed
-/// brightness down to the largest band it meets or exceeds. The floor is lifted
-/// to the ambient level and the top band opened to full `1.0` (was
-/// `[0.55, 0.68, 0.80, 0.92]`) so fill-only faces read as bright daylight and a
-/// key-lit face reaches full sunlit brightness instead of being clamped to 0.92.
-pub const BRIGHTNESS_BANDS: [f32; 4] = [0.72, 0.82, 0.91, 1.0];
+/// brightness down to the largest band it meets or exceeds. The floor tracks the
+/// ambient level (0.72 -> 0.80) and the intermediate bands are pulled up with it
+/// (was `[0.72, 0.82, 0.91, 1.0]`), compressing the range into the bright upper
+/// end so fill-only faces read as full daylight and the terminator steps stay
+/// gentle — the reference's even, high-fill look — while the top band still
+/// reaches full `1.0` for a key-lit face.
+pub const BRIGHTNESS_BANDS: [f32; 4] = [0.80, 0.87, 0.94, 1.0];
 
 /// The deterministic flat-shading light model.
 #[derive(Debug, Clone, Copy, PartialEq)]
