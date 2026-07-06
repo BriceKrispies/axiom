@@ -85,19 +85,22 @@ impl SoccerRecipeStyle {
         Self {
             seed: 0x0000_50CC_E12A_0001,
             palette: Palette {
-                // Aerial-perspective-in-albedo: the GPU champion wires no post
-                // grade and no volumetric haze (both architect-tier host seams),
-                // so the distant stand can only be made to *recede* the way the
-                // reference's dark, hazed, cool-dominant terrace does by baking
-                // that recession into the crowd albedo itself. The three shirt
-                // tones are pulled toward low chroma, cooled, and darkened so the
-                // stand stops reading as a hot, razor-sharp red/yellow noise field
-                // and settles into a muted blue-grey mass with only faint warm
-                // speckle — matching the reference's hazed backdrop.
-                crowd_dark: Color::rgba(0x1C, 0x1E, 0x26, 0xFF),
-                crowd_shirt_a: Color::rgba(0x74, 0x42, 0x44, 0xFF),
-                crowd_shirt_b: Color::rgba(0x44, 0x52, 0x72, 0xFF),
-                crowd_bright: Color::rgba(0x92, 0x8A, 0x66, 0xFF),
+                // The crowd is the largest surface behind the goal, and its
+                // authored per-seat brick texture only reads if the terrace it
+                // sits on survives the Lambert light model. The earlier
+                // "aerial-recession-in-albedo" pass pulled every crowd tone toward
+                // near-black (terrace 0x1C1E26); under lighting that crushed the
+                // whole stand into a flat black void with no visible seats — the
+                // reference crowd is the opposite: a *bright*, warm ochre/tan mass
+                // densely flecked with individual shirts. So the terrace is lifted
+                // to a mid warm brown and the three shirt tones re-warmed and
+                // brightened (keeping one cooler card for variety) so the baked
+                // seat grid reads as the reference's dense, sunlit terrace instead
+                // of a black smear.
+                crowd_dark: Color::rgba(0x4A, 0x3E, 0x34, 0xFF),
+                crowd_shirt_a: Color::rgba(0xA8, 0x6A, 0x4E, 0xFF),
+                crowd_shirt_b: Color::rgba(0x6E, 0x74, 0x88, 0xFF),
+                crowd_bright: Color::rgba(0xC6, 0xB4, 0x8E, 0xFF),
                 jersey: Color::rgba(0x28, 0x4C, 0xC8, 0xFF),
                 jersey_dark: Color::rgba(0x18, 0x2E, 0x82, 0xFF),
                 keeper: Color::rgba(0xE6, 0xC8, 0x28, 0xFF),
