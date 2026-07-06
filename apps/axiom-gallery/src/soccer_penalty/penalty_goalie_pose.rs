@@ -223,13 +223,15 @@ impl PenaltyGoaliePose {
     pub fn idle_display() -> Self {
         let mut local = [Transform::IDENTITY; 16];
         (0..16).for_each(|i| local[i] = Transform::from_translation(IDLE_LOCAL[i]));
-        // (part-ordinal, euler x, y, z) — arms flung wide & near-horizontal,
-        // forearms continuing outward (not up), legs planted in a wide brace.
+        // (part-ordinal, euler x, y, z) — upper arms flung wide & near-horizontal,
+        // but the elbows BREAK so the gloves drop down-and-forward into a catching
+        // set (the reference keeper's hands sit ~waist height, forward of the body,
+        // not a stiff scarecrow-T). Legs planted in a wide brace.
         [
             (4_usize, 0.1_f32, 0.0_f32, -1.45_f32), // left upper arm — wide, near-horizontal
             (7, 0.1, 0.0, 1.45),                    // right upper arm — wide, near-horizontal
-            (5, 0.15, 0.0, -0.28),                  // left forearm — continues outward, slight forward
-            (8, 0.15, 0.0, 0.28),                   // right forearm
+            (5, 0.35, 0.0, 0.72),                   // left forearm — elbow breaks: glove drops down-&-forward
+            (8, 0.35, 0.0, -0.72),                  // right forearm — elbow breaks: glove drops down-&-forward
             (10, 0.18, 0.0, -0.55),                 // left thigh — WIDE plant + weight forward
             (13, 0.18, 0.0, 0.55),                  // right thigh
             (11, -0.62, 0.0, 0.0),                  // left shin — deep braced knee bend (low set crouch)
