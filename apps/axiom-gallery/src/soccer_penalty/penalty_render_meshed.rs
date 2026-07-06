@@ -263,7 +263,15 @@ pub struct PenaltyMeshedScene {
     lib: MeshLib,
     tex: TexLib,
     palette: HashMap<([u8; 3], u64), Handle<Material>>,
-    spawned: Vec<Entity>,
+    /// The entities spawned per object, keyed by the object's `(label, ordinal)`
+    /// and tagged with a content hash — a persistent per-frame cache. Re-authoring
+    /// reuses the entities of any object whose content is unchanged (the ~170
+    /// static scenery pieces), so only the objects that actually moved (the ball,
+    /// net wobble, impact effects) despawn + respawn. This turns the whole-scene
+    /// rebuild the live loop did every frame into an incremental diff. The one-shot
+    /// offscreen champion starts with an empty cache, so it spawns everything in
+    /// order exactly as before — its render stays byte-identical.
+    cache: HashMap<(&'static str, u32), CachedObject>,
     /// The athletes' once-baked skinned bodies (one continuous MetaSurface per kit
     /// material). Baked at the bind pose on the first authored frame, then deformed
     /// each frame by a joint palette — never re-baked.
@@ -275,6 +283,15 @@ pub struct PenaltyMeshedScene {
     /// threaded through the `run_web_multi` present path (a follow-up); box-man keeps
     /// the live game rendering + fast today.
     skinned: bool,
+}
+
+/// One object's cached spawn: the content hash it was spawned from and the
+/// entities it produced. Reused across frames while the hash matches (an unmoved
+/// static object), despawned + rebuilt when it changes or disappears.
+#[derive(Debug)]
+struct CachedObject {
+    hash: u64,
+    entities: Vec<Entity>,
 }
 
 /// One athlete's once-baked skinned body: the mesh, its material, and the inverse
@@ -314,7 +331,7 @@ impl PenaltyMeshedScene {
             skin: bake_texture(app, &tex_api, &recipe_textures::skin(&style), style.seed),
             turf: bake_texture(app, &tex_api, &recipe_textures::turf(&style), style.seed),
         };
-        Self { lib, tex, palette: HashMap::new(), spawned: Vec::new(), skinned_bodies: Vec::new(), skinned: false }
+        Self { lib, tex, palette: HashMap::new(), cache: HashMap::new(), skinned_bodies: Vec::new(), skinned: false }
     }
 
     /// Render the athletes as continuous **skinned** MetaSurface bodies (bake once,
@@ -420,18 +437,20 @@ impl PenaltyMeshedScene {
         })
     }
 
-    /// Re-author the diorama: despawn the previous frame's renderables, then spawn
-    /// this frame's world objects with real meshes (in the plan's back-to-front
-    /// order, each nudged a hair toward the camera so near-coplanar ground/net
-    /// quads win the depth test). Camera + light are untouched (set once).
+    /// Re-author the diorama as an **incremental diff**: every object whose content
+    /// is unchanged since last frame (the ~170 static scenery pieces) keeps its
+    /// entities; only objects that actually moved (the ball, net wobble, impact
+    /// effects) despawn + respawn. This replaces the whole-scene rebuild the live
+    /// loop did every frame — the dominant per-frame cost. Objects draw in the
+    /// plan's back-to-front order, each nudged a hair toward the camera so
+    /// near-coplanar ground/net quads win the depth test; camera + light are set
+    /// once. The one-shot offscreen champion starts with an empty cache, so it
+    /// spawns everything in order exactly as before — its render stays
+    /// byte-identical.
     pub fn author(&mut self, app: &mut RunningApp, frame: &Stage1Diorama) {
-        self.spawned.drain(..).for_each(|e| {
-            app.despawn(e);
-        });
         let cam = frame.render_plan.camera;
-        let mut index = 0u64;
         // Collect first so the immutable borrow of `frame` doesn't overlap the
-        // mutable `self`/`app` borrows in the spawn loop.
+        // mutable `self`/`app` borrows below.
         let objects: Vec<WorldObj> = frame
             .render_plan
             .items
@@ -456,28 +475,61 @@ impl PenaltyMeshedScene {
             self.submit_skinned_bodies(app, &athletes);
         });
 
-        // Everything else spawns per-primitive from the pre-baked library. When
-        // `skinned` is off the athletes come through here too (articulated box-man
-        // parts, posed by transform). The depth-bias index still walks every object
-        // so the non-athlete bias values stay byte-identical.
-        let lib = self.lib;
+        // Diff-author every non-athlete object against last frame's cache, keyed by
+        // `(label, ordinal)`. Unchanged content → reuse the entities; changed → swap
+        // them; new → spawn. When `skinned` is off the box-man athletes come through
+        // here too. The depth-bias `index` still walks EVERY object so the
+        // non-athlete bias values stay byte-identical to a full re-author.
+        let mut next: HashMap<(&'static str, u32), CachedObject> = HashMap::new();
+        let mut ordinals: HashMap<&'static str, u32> = HashMap::new();
+        let mut index = 0u64;
         objects.into_iter().for_each(|o| {
             (!skinned || !is_athlete(o.role)).then(|| {
-                let to_eye = cam.eye.subtract(o.position);
-                let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
-                let biased = o.position.add(dir.mul_scalar(index as f32 * 0.0015));
-                let mat = self.material_for(app, o.color, self.texture_for(o.role, o.label));
-                // The part's world placement: translate ∘ rotate. Each sub-part
-                // carries its own local transform (scale, plus a bone-frame offset
-                // for limb joints), composed *inside* the part rotation.
-                let base = Transform::combine(Transform::from_translation(biased), Transform::from_rotation(o.rotation));
-                sub_parts(classify(o.shape, o.label), o.size, lib).into_iter().for_each(|sp| {
-                    let entity = app.spawn(Spawn::new(Transform::combine(base, sp.local), sp.mesh, mat));
-                    self.spawned.push(entity);
-                });
+                let ord = ordinals.entry(o.label).or_insert(0);
+                let key = (o.label, *ord);
+                *ord += 1;
+                let hash = object_hash(&o, index);
+                let cached = match self.cache.remove(&key) {
+                    Some(c) if c.hash == hash => c,
+                    Some(c) => {
+                        c.entities.into_iter().for_each(|e| {
+                            app.despawn(e);
+                        });
+                        CachedObject { hash, entities: self.spawn_object(app, &o, cam, index) }
+                    }
+                    None => CachedObject { hash, entities: self.spawn_object(app, &o, cam, index) },
+                };
+                next.insert(key, cached);
             });
             index += 1;
         });
+        // Whatever is left in the old cache is an object that vanished this frame
+        // (e.g. the net wobble ending) — despawn it.
+        self.cache.drain().for_each(|(_, c)| {
+            c.entities.into_iter().for_each(|e| {
+                app.despawn(e);
+            });
+        });
+        self.cache = next;
+    }
+
+    /// Spawn one world object's sub-parts at its depth-biased world transform and
+    /// return the spawned entities. `index` is the object's position in the draw
+    /// walk, driving the tiny toward-camera nudge that breaks coplanar depth ties.
+    /// Shared by the initial author and every diff re-spawn.
+    fn spawn_object(&mut self, app: &mut RunningApp, o: &WorldObj, cam: CameraConfig, index: u64) -> Vec<Entity> {
+        let to_eye = cam.eye.subtract(o.position);
+        let dir = to_eye.mul_scalar(1.0 / to_eye.length().max(1.0e-6));
+        let biased = o.position.add(dir.mul_scalar(index as f32 * 0.0015));
+        let mat = self.material_for(app, o.color, self.texture_for(o.role, o.label));
+        // The part's world placement: translate ∘ rotate. Each sub-part carries its
+        // own local transform (scale, plus a bone-frame offset for limb joints),
+        // composed *inside* the part rotation.
+        let base = Transform::combine(Transform::from_translation(biased), Transform::from_rotation(o.rotation));
+        sub_parts(classify(o.shape, o.label), o.size, self.lib)
+            .into_iter()
+            .map(|sp| app.spawn(Spawn::new(Transform::combine(base, sp.local), sp.mesh, mat)))
+            .collect()
     }
 
     /// Bake the athletes' skinned bodies **once** at the bind pose: group each
@@ -530,6 +582,27 @@ struct WorldObj {
 /// scenery (drawn per primitive).
 fn is_athlete(role: DioramaRole) -> bool {
     matches!(role, DioramaRole::Kicker | DioramaRole::Goalie)
+}
+
+/// A content hash over exactly the fields that determine an object's spawned
+/// entities — its draw `index` (depth bias), world placement, size and colour.
+/// Shape / role / texture are constant for a given `label`, which is already part
+/// of the cache key, so they need not be hashed. Two frames with the same hash for
+/// the same `(label, ordinal)` spawn identical entities, so the diff reuses them.
+/// Floats are hashed by bit pattern for exact (bit-for-bit) reuse decisions.
+fn object_hash(o: &WorldObj, index: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    index.hash(&mut h);
+    [
+        o.position.x, o.position.y, o.position.z,
+        o.size.x, o.size.y, o.size.z,
+        o.rotation.x, o.rotation.y, o.rotation.z, o.rotation.w,
+        o.color.r, o.color.g, o.color.b, o.color.a,
+    ]
+    .iter()
+    .for_each(|f| f.to_bits().hash(&mut h));
+    h.finish()
 }
 
 /// Build the empty meshed app shell (window + clear colour + default plugins).
