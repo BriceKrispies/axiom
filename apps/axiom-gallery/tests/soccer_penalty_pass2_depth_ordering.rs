@@ -12,12 +12,14 @@ use axiom_gallery::soccer_penalty::penalty_render_plan::{
 use axiom_gallery::soccer_penalty::SoccerPenaltyApp;
 use axiom_math::Vec3;
 
-/// The exact number of render items = world objects (173) + HUD items
+/// The exact number of render items = world objects (664) + HUD items
 /// (score, round, best, power, reticle, instruction = 6). The world count grew
-/// with the visual-convergence pass: the crowd is now 3 stacked rows of 26 cards
-/// (78) instead of a single row of 9, the kicker is an 11-part posed figure, and
-/// the ball carries 6 dark panels instead of 2.
-const EXPECTED_RENDER_ITEMS: usize = 252;
+/// with the visual-convergence passes: the crowd terrace is now diced into
+/// 44 columns × 4 bands × 3 vertical cells (528 cards) for a granular spectator
+/// mass, the kicker is an 11-part posed figure, and the ball's dark pentagon
+/// panels are now baked into its surface texture (0 separate quads) instead of
+/// the 6 floating panel quads that used to trail the ball in flight.
+const EXPECTED_RENDER_ITEMS: usize = 670;
 
 fn plan() -> PenaltyRenderPlan {
     SoccerPenaltyApp::build_stage1().render_plan
@@ -139,7 +141,7 @@ fn render_items_are_a_total_sorted_order() {
     // the appended HUD items.
     let world = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::World { .. })).count();
     let hud = p.items.iter().filter(|it| matches!(it.content, PenaltyRenderContent::Hud { .. })).count();
-    assert_eq!(world, 246);
+    assert_eq!(world, 664);
     assert_eq!(hud, 6);
 }
 
