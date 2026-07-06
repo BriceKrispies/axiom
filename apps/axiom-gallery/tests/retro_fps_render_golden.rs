@@ -19,8 +19,8 @@
 use std::path::PathBuf;
 
 use axiom::prelude::FrameOutcome;
-use axiom_game_retro_fps::level::LevelDoc;
-use axiom_game_retro_fps::{apply_lifecycle, build_retro_fps_app, Intent, RetroFpsGame};
+use axiom_gallery::retro_fps::level::LevelDoc;
+use axiom_gallery::retro_fps::{apply_lifecycle, build_retro_fps_app, Intent, RetroFpsGame};
 
 /// The same fixed scenario the replay-determinism and state-golden tests use:
 /// one held-input intent per tick. Fixing these fixes the whole run.

@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 
 use crate::app_manifest::AppManifest;
 use crate::cargo_metadata::WorkspacePackage;
-use crate::game_manifest::GameManifest;
 use crate::manifest::LayerManifest;
 use crate::module_manifest::ModuleManifest;
 
@@ -17,12 +16,6 @@ pub enum PackageClass {
     Layer,
     Module,
     App,
-    /// A **game** (the cartridge tier): a title built on the engine, living in
-    /// `games/<name>/`. It composes layers and modules like an app, but unlike
-    /// an app it is not a leaf — host apps may depend on it and load it, while
-    /// the engine spine (layers/modules) never may. Content, not spine, so it is
-    /// excluded from the coverage and branchless gates just like an app.
-    Game,
     Tool,
     /// A build-time support crate (today: the `axiom-zones` zone-marker
     /// proc-macros). It is not on the runtime spine, every layer/module/app may
@@ -42,16 +35,10 @@ pub struct ManifestIndex {
     pub layer_by_dir: BTreeMap<PathBuf, LayerManifest>,
     pub module_by_dir: BTreeMap<PathBuf, ModuleManifest>,
     pub app_by_dir: BTreeMap<PathBuf, AppManifest>,
-    pub game_by_dir: BTreeMap<PathBuf, GameManifest>,
 }
 
 impl ManifestIndex {
-    pub fn new(
-        layers: &[LayerManifest],
-        modules: &[ModuleManifest],
-        apps: &[AppManifest],
-        games: &[GameManifest],
-    ) -> Self {
+    pub fn new(layers: &[LayerManifest], modules: &[ModuleManifest], apps: &[AppManifest]) -> Self {
         let mut idx = ManifestIndex::default();
         layers.iter().for_each(|m| {
             idx.layer_by_dir.insert(m.dir.clone(), m.clone());
@@ -62,9 +49,6 @@ impl ManifestIndex {
         apps.iter().for_each(|m| {
             idx.app_by_dir.insert(m.dir.clone(), m.clone());
         });
-        games.iter().for_each(|m| {
-            idx.game_by_dir.insert(m.dir.clone(), m.clone());
-        });
         idx
     }
 }
@@ -73,7 +57,6 @@ impl ManifestIndex {
 /// - `crates/<name>/layer.toml`           → Layer
 /// - `modules/<name>/module.toml`         → Module
 /// - `apps/<name>/app.toml`               → App
-/// - `games/<name>/game.toml`             → Game
 /// - package name `"xtask"`               → Tool
 /// - package name `"axiom-zones"`         → Support
 /// - `tools/<name>/...`                   → Tool
@@ -100,12 +83,6 @@ pub fn classify(
                 .app_by_dir
                 .contains_key(&pkg.dir)
                 .then_some(PackageClass::App)
-        })
-        .or_else(|| {
-            index
-                .game_by_dir
-                .contains_key(&pkg.dir)
-                .then_some(PackageClass::Game)
         })
         .or_else(|| (pkg.name == "xtask").then_some(PackageClass::Tool))
         .or_else(|| (pkg.name == "axiom-zones").then_some(PackageClass::Support))
@@ -143,34 +120,10 @@ mod tests {
             },
             proof_exports: vec![],
         };
-        let index = ManifestIndex::new(&[layer_manifest], &[], &[], &[]);
+        let index = ManifestIndex::new(&[layer_manifest], &[], &[]);
         assert_eq!(
             classify(Path::new("/repo"), &pkg, &index),
             Some(PackageClass::Layer)
-        );
-    }
-
-    #[test]
-    fn game_dir_is_classified_as_game() {
-        let pkg = WorkspacePackage {
-            name: "axiom-game-retro-fps".into(),
-            dir: PathBuf::from("/repo/games/retro-fps"),
-            workspace_deps: vec![],
-        };
-        let game_manifest = GameManifest {
-            dir: pkg.dir.clone(),
-            game: crate::game_manifest::GameSection {
-                name: "retro-fps".into(),
-                crate_name: "axiom-game-retro-fps".into(),
-                kind: "rust".into(),
-                allowed_layers: vec!["kernel".into()],
-                allowed_modules: vec!["engine".into()],
-            },
-        };
-        let index = ManifestIndex::new(&[], &[], &[], &[game_manifest]);
-        assert_eq!(
-            classify(Path::new("/repo"), &pkg, &index),
-            Some(PackageClass::Game)
         );
     }
 

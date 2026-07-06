@@ -297,7 +297,6 @@ dependencies = [
  "axiom-entropy",
  "axiom-figure",
  "axiom-fp-controller",
- "axiom-game-retro-fps",
  "axiom-geosphere",
  "axiom-gpu-backend",
  "axiom-host",
@@ -325,31 +324,6 @@ dependencies = [
  "axiom-terrain-mesh",
  "axiom-windowing",
  "axiom-world",
- "console_error_panic_hook",
- "js-sys",
- "png",
- "serde",
- "serde_json",
- "tiny_http",
- "toml",
- "tungstenite",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "axiom-game-retro-fps"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-agent",
- "axiom-debug-overlay",
- "axiom-interface",
- "axiom-kernel",
- "axiom-perception",
- "axiom-recording",
- "axiom-runtime",
- "axiom-windowing",
  "bytemuck",
  "console_error_panic_hook",
  "js-sys",
@@ -817,7 +791,6 @@ dependencies = [
  "axiom-animation-lab",
  "axiom-canvas2d-backend",
  "axiom-gallery",
- "axiom-game-retro-fps",
  "axiom-gpu-backend",
  "axiom-host",
  "axiom-kernel",

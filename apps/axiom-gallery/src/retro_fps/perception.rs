@@ -1,5 +1,5 @@
 //! Live, game-agnostic perception for the retro FPS agent — the app-side **sense
-//! adapter**. Native + `agent` feature only, like [`crate::agent`].
+//! adapter**. Native + `agent` feature only, like [`crate::retro_fps::agent`].
 //! The reusable sensor model and the neutral fact vocabulary live in the
 //! `axiom-perception` module (game-agnostic: it owns only the ray-fan geometry,
 //! the view-cone cull, the subject-tracking math, and the
@@ -24,10 +24,10 @@ use axiom_kernel::{FrameIndex, Radians, Tick};
 use axiom_perception::PerceptionApi;
 use axiom_runtime::RuntimeStep;
 
-use crate::agent::{
+use crate::retro_fps::agent::{
     control_code_of, retro_fps_drive_tick, intent_of_control_code, AGENT_RAW_ID, FIXED_DELTA_NANOS,
 };
-use crate::{build_retro_fps_app, level::LevelDoc, RetroFpsAssets, RetroFpsGame, Intent};
+use crate::retro_fps::{build_retro_fps_app, level::LevelDoc, RetroFpsAssets, RetroFpsGame, Intent};
 
 /// This game's coarse `Tag` kind vocabulary — the codes its entities carry. An
 /// enemy node is tagged [`KIND_ENEMY`]; level geometry is left untagged, so a hit

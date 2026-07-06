@@ -12,7 +12,6 @@ use crate::cargo_metadata::load as load_cargo_metadata;
 use crate::class_check::check as check_classes;
 use crate::classification::ManifestIndex;
 use crate::coverage_scope::check as check_coverage_scope;
-use crate::game_manifest::load_game_manifests;
 use crate::hygiene::check as check_hygiene;
 use crate::manifest::{load_manifests, LayerManifest};
 use crate::module_manifest::load_module_manifests;
@@ -66,21 +65,7 @@ pub fn check_architecture(root: &Path) -> CheckReport {
         );
     });
 
-    let (game_manifests, game_errors) = load_game_manifests(root);
-    game_errors.iter().for_each(|err| {
-        let rel = relativize(root, &err.path);
-        report.push(
-            Violation::new(
-                ViolationKind::GameManifestInvalid,
-                rel.display().to_string(),
-                format!("could not parse game manifest: {}", err.message),
-            )
-            .at(rel, 1),
-        );
-    });
-
-    let manifest_index =
-        ManifestIndex::new(&manifests, &module_manifests, &app_manifests, &game_manifests);
+    let manifest_index = ManifestIndex::new(&manifests, &module_manifests, &app_manifests);
 
     let layer_dirs: Vec<(String, PathBuf)> = manifests
         .iter()

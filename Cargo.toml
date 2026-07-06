@@ -92,7 +92,6 @@ members = [
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",
-    "games/retro-fps",
     "crates/xtask",
     "tools/axiom-asset-pack",
     "tools/axiom-netcode-relay",
@@ -108,7 +107,7 @@ members = [
     # the coverage/dylint gates — which build members with default features — never
     # enable `axiom-gpu-backend/offscreen`, keeping that un-coverable native-wgpu
     # arm compiled out. Its parity tests now run in CI; the GPU ones need
-    # `--features offscreen`. As a tool it loads the apps/games it renders (the
+    # `--features offscreen`. As a tool it loads the apps it renders (the
     # sanctioned capture-host role — see CAPTURE_HARNESS_TOOLS in xtask).
     "tools/axiom-shot",
 ]

@@ -8,7 +8,7 @@
 //!
 //! `check-architecture` enforces the Axiom Layer/Module Laws.
 //! `check-slices` enforces the semantic vertical-slice contract (`slice.toml`).
-//! `check-slice-placement` flags engine render logic hiding in an app/game.
+//! `check-slice-placement` flags engine render logic hiding in an app.
 //! See repo-root `CLAUDE.md` and `docs/audits/vertical-slice-audit.md`.
 
 use std::path::PathBuf;

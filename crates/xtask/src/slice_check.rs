@@ -12,8 +12,8 @@
 //!   declares a live `harness` — it is registered in axiom-shot's renderable
 //!   registry (so a slice is not "runnable but un-harnessable").
 //!
-//! * [`check_slice_placement`] flags engine render logic hiding in an app/game:
-//!   a large `apps/`/`games/` source file that is a dense mesh/instance/matrix
+//! * [`check_slice_placement`] flags engine render logic hiding in an app:
+//!   a large `apps/` source file that is a dense mesh/instance/matrix
 //!   data-transform (exposes geometry-producing `pub fn`s) that does NOT
 //!   genuinely compose modules (touches ≤1 module facade) — code that belongs
 //!   in a coverage+branchless feature module, not the coverage-exempt app tier.
@@ -322,11 +322,11 @@ const PLACEMENT_MIN_LINES: usize = 300;
 /// mesh/instance/matrix transform (not one incidental mention).
 const PLACEMENT_MIN_GEOMETRY_HITS: usize = 12;
 
-/// Run the slice-placement check: flag every `apps/`/`games/` source file that
+/// Run the slice-placement check: flag every `apps/` source file that
 /// is a large, pure mesh/instance/matrix data-transform with no module-facade
 /// call. Pushes [`ViolationKind::SlicePlacementEngineLogicInApp`] per offender.
 pub fn check_slice_placement(root: &Path, report: &mut CheckReport) {
-    ["apps", "games"]
+    ["apps"]
         .into_iter()
         .map(|sub| root.join(sub))
         .flat_map(|dir| collect_rs_files(&dir))
@@ -346,7 +346,7 @@ pub fn check_slice_placement(root: &Path, report: &mut CheckReport) {
                             format!(
                                 "`{}` is a large pure mesh/instance/matrix data-transform with \
                                  public geometry-producing fns and no module-facade call — \
-                                 engine render logic hiding in an app/game. Extract it into a \
+                                 engine render logic hiding in an app. Extract it into a \
                                  coverage+branchless feature module",
                                 rel.display()
                             ),

@@ -34,7 +34,7 @@ esac
 
 # Must match exactly what coverage_scope.rs expects (CoverageIgnoreScriptDrift):
 # apps/tools/xtask sit outside the gate, no layer or module file may be added here.
-exclude=(--ignore-filename-regex '[/\\](xtask|apps|games|axiom-zones|tools)[/\\]')
+exclude=(--ignore-filename-regex '[/\\](xtask|apps|axiom-zones|tools)[/\\]')
 
 # llvm-cov has no --fail-under-branches; regions are the branch-level
 # enforceable proxy (one region per branch arm).

@@ -21,7 +21,7 @@ use axiom_kernel::{FrameIndex, Tick};
 use axiom_runtime::RuntimeStep;
 use serde::Serialize;
 
-use crate::{build_retro_fps_app, RetroFpsAssets, RetroFpsGame, Hud, Intent};
+use crate::retro_fps::{build_retro_fps_app, RetroFpsAssets, RetroFpsGame, Hud, Intent};
 
 /// An absolute player pose: world position `(x, z)`, look `yaw`/`pitch` (radians).
 /// Returned in every [`Observation`] so a session always knows where it stands and
@@ -113,7 +113,7 @@ const FACT_PLAYER_POSE: u16 = 1;
 const FACT_HUD: u16 = 2;
 
 /// The stable agent id this single-agent session uses. `pub(crate)` so the
-/// perception adapter ([`crate::perception`]) drives the same agent identity.
+/// perception adapter ([`crate::retro_fps::perception`]) drives the same agent identity.
 pub(crate) const AGENT_RAW_ID: u64 = 1;
 
 /// The engine's fixed 60 Hz step delta in integer nanoseconds (1/60 s). Stamps
@@ -262,7 +262,7 @@ fn frame_hash(floats: &[f32]) -> String {
 /// there is a frame to read.
 fn retro_fps_session_start() -> (RetroFpsGame, RunningApp, RetroFpsAssets, FrameOutcome) {
     let mut game = RetroFpsGame::new();
-    let (mut app, assets) = build_retro_fps_app(&crate::level::LevelDoc::default());
+    let (mut app, assets) = build_retro_fps_app(&crate::retro_fps::level::LevelDoc::default());
     // Bind the enemies to their engine Entities so hits classify from tick 0.
     game.bind_entities(&app);
     let last = retro_fps_drive_tick(&mut game, &mut app, &assets, 0, Intent::default());
@@ -282,7 +282,7 @@ pub(crate) fn retro_fps_drive_tick(
     intent: Intent,
 ) -> FrameOutcome {
     let cmd = game.step(intent, &*app);
-    crate::apply_lifecycle(game, app, assets, &cmd);
+    crate::retro_fps::apply_lifecycle(game, app, assets, &cmd);
     app.tick_with_controls(tick, &cmd.enemies, &[cmd.control])
 }
 

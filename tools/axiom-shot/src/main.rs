@@ -68,7 +68,7 @@ fn main() {
     // pose at tick 0 via the game's one corrective teleport control.
     let teleport = match (app.as_str(), flag(&args, "--pose").as_deref().and_then(parse_pose)) {
         ("retro-fps", Some((x, z, yaw, pitch))) => {
-            let mut game = axiom_game_retro_fps::RetroFpsGame::from_level(&registry::retro_fps_doc(
+            let mut game = axiom_gallery::retro_fps::RetroFpsGame::from_level(&registry::retro_fps_doc(
                 params.level.as_deref(),
             ));
             Some(game.teleport(x, z, yaw, pitch))

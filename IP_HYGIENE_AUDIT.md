@@ -1,5 +1,10 @@
 # IP / Trademark Hygiene
 
+> **Structure note (2026-07-06):** the `games/` cartridge tier was later retired and
+> `retro-fps` folded back into the gallery app as the in-crate `apps/axiom-gallery/src/retro_fps/`
+> demo module. Historical `games/retro-fps` / `axiom-game-retro-fps` / `game.toml` references
+> below describe the layout at scrub time; the brand-scrub findings themselves are unchanged.
+
 A rename-and-scrub pass that removed third-party game/platform brand references from the
 repo while preserving all gameplay, rendering, tests, demos, and architecture. Two brand
 terms were present — a first-person-shooter title name and an early-console render-look

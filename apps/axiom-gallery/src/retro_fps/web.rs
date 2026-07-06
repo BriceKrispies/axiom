@@ -19,7 +19,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{Element, EventSource, KeyboardEvent, MessageEvent, MouseEvent, WebSocket};
 
 use super::{build_retro_fps_app, reload_retro_fps, RetroFpsGame, Hud as GameHud, Intent, CANVAS_ID};
-use crate::level::LevelDoc;
+use crate::retro_fps::level::LevelDoc;
 
 /// Radians of look per pixel of mouse movement.
 const MOUSE_SENSITIVITY: f32 = 0.0025;

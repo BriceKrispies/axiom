@@ -13,7 +13,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use axiom_game_retro_fps::agent::{Action, AgentSession, Observation};
+use axiom_gallery::retro_fps::agent::{Action, AgentSession, Observation};
 
 /// One held-key action (single tick).
 fn key(name: &str) -> Action {

@@ -13,7 +13,7 @@
 //! Plus determinism: the same run perceives the same thing every time.
 #![cfg(feature = "retro-fps-agent")]
 
-use axiom_game_retro_fps::perception::{RetroFpsPerceiver, KIND_ENEMY};
+use axiom_gallery::retro_fps::perception::{RetroFpsPerceiver, KIND_ENEMY};
 
 #[test]
 fn the_agent_faces_the_north_wall_at_a_real_distance() {

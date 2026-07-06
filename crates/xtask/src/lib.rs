@@ -11,7 +11,6 @@ pub mod check;
 pub mod class_check;
 pub mod classification;
 pub mod coverage_scope;
-pub mod game_manifest;
 pub mod hygiene;
 pub mod manifest;
 pub mod module_manifest;

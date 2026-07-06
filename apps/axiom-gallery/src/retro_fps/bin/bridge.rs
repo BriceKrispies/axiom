@@ -9,7 +9,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use axiom_game_retro_fps::agent::Action;
+use axiom_gallery::retro_fps::agent::Action;
 use tiny_http::{Header, Method, Response, Server};
 use tungstenite::Message;
 

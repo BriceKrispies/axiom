@@ -1,8 +1,8 @@
 //! The `slice.toml` manifest schema and loader.
 //!
-//! One manifest lives in each *renderable slice* — an app or game that renders a
-//! visible result and proves it deterministic — at `apps/<name>/slice.toml` or
-//! `games/<name>/slice.toml`. Where `app.toml`/`game.toml` describe a package's
+//! One manifest lives in each *renderable slice* — an app that renders a
+//! visible result and proves it deterministic — at `apps/<name>/slice.toml`.
+//! Where `app.toml` describes a package's
 //! *structural* place in the dependency graph, `slice.toml` describes its
 //! *semantic* vertical-slice contract: which determinism test proves it, which
 //! committed golden `.bin` artifacts it pins (each to a recorded SHA-256, so a
@@ -18,7 +18,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// A parsed `slice.toml`, paired with the directory it was found in (the owning
-/// app/game crate directory — golden/reference/test paths resolve against it).
+/// app crate directory — golden/reference/test paths resolve against it).
 #[derive(Debug, Clone)]
 pub struct SliceManifest {
     pub dir: PathBuf,
@@ -45,7 +45,7 @@ impl SliceManifest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SliceSection {
-    /// Short logical slice name (matches the owning app/game name).
+    /// Short logical slice name (matches the owning app name).
     pub name: String,
     /// The cargo package that owns this slice (its determinism test + goldens).
     pub crate_name: String,
@@ -118,10 +118,9 @@ pub fn parse_slice_manifest(dir: &Path, text: &str) -> Result<SliceManifest, Sli
         })
 }
 
-/// Discover and parse every slice manifest at `<root>/apps/*/slice.toml` and
-/// `<root>/games/*/slice.toml`.
+/// Discover and parse every slice manifest at `<root>/apps/*/slice.toml`.
 pub fn load_slice_manifests(root: &Path) -> (Vec<SliceManifest>, Vec<SliceManifestError>) {
-    let mut crate_dirs: Vec<PathBuf> = ["apps", "games"]
+    let mut crate_dirs: Vec<PathBuf> = ["apps"]
         .into_iter()
         .map(|sub| root.join(sub))
         .flat_map(|dir| {
@@ -171,39 +170,39 @@ mod tests {
     fn parses_a_full_slice_manifest() {
         let text = r#"
             [slice]
-            name = "retro-fps"
-            crate_name = "axiom-game-retro-fps"
-            harness_entry = "build_retro_fps_app"
-            determinism_test = "retro_fps_replay_determinism"
-            harness = "retro-fps"
+            name = "gallery"
+            crate_name = "axiom-gallery"
+            harness_entry = "rotating_cube_core"
+            determinism_test = "gallery_render_determinism"
+            harness = "rotating-cube"
 
             [[golden]]
-            path = "tests/retro_fps/golden/retro_fps_state_sequence.bin"
+            path = "tests/golden/rotating_cube_render_tick0.bin"
             sha256 = "deadbeef"
 
             [[golden]]
-            path = "tests/retro_fps/golden/retro_fps_hud_sequence.bin"
+            path = "tests/golden/rotating_cube_render_tick60.bin"
             sha256 = "cafef00d"
 
             [reference]
-            path = "reference/retro_fps.png"
+            path = "reference/rotating_cube.png"
             sha256 = "abc123"
             harness = "axiom-shot"
         "#;
-        let m = parse_slice_manifest(Path::new("games/retro-fps"), text).unwrap();
-        assert_eq!(m.slice.name, "retro-fps");
-        assert_eq!(m.slice.crate_name, "axiom-game-retro-fps");
-        assert_eq!(m.slice.harness_entry, "build_retro_fps_app");
-        assert_eq!(m.slice.determinism_test, "retro_fps_replay_determinism");
-        assert_eq!(m.slice.harness.as_deref(), Some("retro-fps"));
+        let m = parse_slice_manifest(Path::new("apps/axiom-gallery"), text).unwrap();
+        assert_eq!(m.slice.name, "gallery");
+        assert_eq!(m.slice.crate_name, "axiom-gallery");
+        assert_eq!(m.slice.harness_entry, "rotating_cube_core");
+        assert_eq!(m.slice.determinism_test, "gallery_render_determinism");
+        assert_eq!(m.slice.harness.as_deref(), Some("rotating-cube"));
         assert_eq!(m.goldens.len(), 2);
         assert_eq!(m.goldens[0].sha256, "deadbeef");
         let reference = m.reference.as_ref().expect("reference present");
-        assert_eq!(reference.path, "reference/retro_fps.png");
+        assert_eq!(reference.path, "reference/rotating_cube.png");
         assert_eq!(reference.harness.as_deref(), Some("axiom-shot"));
         assert_eq!(
             m.determinism_test_path(),
-            Path::new("games/retro-fps/tests/retro_fps_replay_determinism.rs")
+            Path::new("apps/axiom-gallery/tests/gallery_render_determinism.rs")
         );
     }
 

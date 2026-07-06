@@ -1,8 +1,0 @@
-[game]
-name = "retro-fps"
-crate_name = "axiom-game-retro-fps"
-# A Rust cartridge: it exposes `fn app()`/`build_retro_fps_app` returning the engine's
-# `App`/`RunningApp`, plus the `retro_fps_start` wasm browser entry.
-kind = "rust"
-allowed_layers = ["kernel", "interface", "runtime"]
-allowed_modules = ["engine", "windowing", "debug-overlay", "agent", "perception"]

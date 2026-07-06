@@ -1,5 +1,11 @@
 # Vertical Slice Audit
 
+> **Structure note (2026-07-06):** the `games/` cartridge tier has since been retired.
+> `retro-fps` is now the in-crate `apps/axiom-gallery/src/retro_fps/` demo module (its
+> determinism goldens are pinned in `apps/axiom-gallery/slice.toml`, its live harness is
+> still `axiom-shot --app retro-fps`). Read `games/retro-fps/…` paths below as
+> `apps/axiom-gallery/…`; the slice analysis is otherwise unchanged.
+
 _Repo-wide audit of where Axiom looks architecturally clean locally but fails as an
 end-to-end engine pipeline — where a real app can (or cannot) express intent at the
 app boundary, flow through existing layers/modules, produce deterministic

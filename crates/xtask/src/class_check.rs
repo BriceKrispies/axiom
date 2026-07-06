@@ -10,13 +10,11 @@ use crate::cargo_metadata::WorkspaceGraph;
 use crate::classification::{classify, Classified, ManifestIndex, PackageClass};
 use crate::violation::{CheckReport, Violation, ViolationKind};
 
-/// Tool crates sanctioned as capture **hosts**: like the console/cartridge role
-/// (a host loads the cartridges it runs), a screenshot/capture harness
-/// legitimately depends on the apps and games it renders. This is a
-/// narrowly-scoped, documented amendment — the same shape as the
-/// `PLATFORM_FACING_*` allowlists and the `axiom-zones` Support class — not a
-/// general loosening of the tool→app / tool→game ban: every *other* tool is
-/// still forbidden from depending on an app or a game.
+/// Tool crates sanctioned as capture **hosts**: a screenshot/capture harness
+/// legitimately depends on the apps it renders. This is a narrowly-scoped,
+/// documented amendment — the same shape as the `PLATFORM_FACING_*` allowlists
+/// and the `axiom-zones` Support class — not a general loosening of the tool→app
+/// ban: every *other* tool is still forbidden from depending on an app.
 const CAPTURE_HARNESS_TOOLS: &[&str] = &["axiom-shot"];
 
 /// Whether `crate_name` is a sanctioned capture-harness host.
@@ -46,13 +44,9 @@ pub fn check(
         check_layer_manifest_crate_name_matches(index, &class_by_name, report);
         check_module_manifest_crate_name_matches(index, report);
         check_app_manifest_crate_name_matches(index, report);
-        check_game_manifest_crate_name_matches(index, report);
         check_module_allowed_layer_references(index, report);
         check_app_allowed_layer_references(index, report);
         check_app_allowed_module_references(index, report);
-        check_app_allowed_game_references(index, report);
-        check_game_allowed_layer_references(index, report);
-        check_game_allowed_module_references(index, report);
         check_forward_dependencies(&classified, &class_by_name, index, report);
         check_apps_are_leaves(&classified, &class_by_name, report);
         check_tools_not_used_by_engine(&classified, &class_by_name, report);
@@ -127,10 +121,9 @@ fn classify_all(
                     ViolationKind::UnknownPackageClass,
                     pkg.name.clone(),
                     format!(
-                        "workspace package `{}` could not be classified as a layer, module, app, game, or tool; \
+                        "workspace package `{}` could not be classified as a layer, module, app, or tool; \
                          place it under `crates/<name>/` with a `layer.toml`, `modules/<name>/` with a \
-                         `module.toml`, `apps/<name>/` with an `app.toml`, `games/<name>/` with a \
-                         `game.toml`, or `tools/<name>/`",
+                         `module.toml`, `apps/<name>/` with an `app.toml`, or `tools/<name>/`",
                         pkg.name
                     ),
                 ));
@@ -367,95 +360,6 @@ fn check_app_allowed_module_references(index: &ManifestIndex, report: &mut Check
     });
 }
 
-fn check_app_allowed_game_references(index: &ManifestIndex, report: &mut CheckReport) {
-    let known_games: BTreeSet<&str> = index
-        .game_by_dir
-        .values()
-        .map(|g| g.game.name.as_str())
-        .collect();
-    index.app_by_dir.values().for_each(|a| {
-        a.app
-            .allowed_games
-            .iter()
-            .filter(|game_name| !known_games.contains(game_name.as_str()))
-            .for_each(|game_name| {
-                report.push(Violation::new(
-                    ViolationKind::AppAllowedGameUnknown,
-                    a.app.name.clone(),
-                    format!(
-                        "app `{}` allows game `{game_name}`, but no such game exists; \
-                         valid game names are: {known_games:?}",
-                        a.app.name
-                    ),
-                ));
-            });
-    });
-}
-
-fn check_game_manifest_crate_name_matches(index: &ManifestIndex, report: &mut CheckReport) {
-    index
-        .game_by_dir
-        .values()
-        .filter(|g| g.game.crate_name.trim().is_empty())
-        .for_each(|g| {
-            report.push(Violation::new(
-                ViolationKind::GameManifestInvalid,
-                g.game.name.clone(),
-                "game manifest has empty `crate_name`",
-            ));
-        });
-}
-
-fn check_game_allowed_layer_references(index: &ManifestIndex, report: &mut CheckReport) {
-    let known_layers: BTreeSet<&str> = index
-        .layer_by_dir
-        .values()
-        .map(|l| l.layer.name.as_str())
-        .collect();
-    index.game_by_dir.values().for_each(|g| {
-        g.game
-            .allowed_layers
-            .iter()
-            .filter(|layer_name| !known_layers.contains(layer_name.as_str()))
-            .for_each(|layer_name| {
-                report.push(Violation::new(
-                    ViolationKind::GameAllowedLayerUnknown,
-                    g.game.name.clone(),
-                    format!(
-                        "game `{}` allows layer `{layer_name}`, but no such layer exists; \
-                         valid layer names are: {known_layers:?}",
-                        g.game.name
-                    ),
-                ));
-            });
-    });
-}
-
-fn check_game_allowed_module_references(index: &ManifestIndex, report: &mut CheckReport) {
-    let known_modules: BTreeSet<&str> = index
-        .module_by_dir
-        .values()
-        .map(|m| m.module.name.as_str())
-        .collect();
-    index.game_by_dir.values().for_each(|g| {
-        g.game
-            .allowed_modules
-            .iter()
-            .filter(|module_name| !known_modules.contains(module_name.as_str()))
-            .for_each(|module_name| {
-                report.push(Violation::new(
-                    ViolationKind::GameAllowedModuleUnknown,
-                    g.game.name.clone(),
-                    format!(
-                        "game `{}` allows module `{module_name}`, but no such module exists; \
-                         valid module names are: {known_modules:?}",
-                        g.game.name
-                    ),
-                ));
-            });
-    });
-}
-
 fn check_forward_dependencies(
     classified: &[Classified],
     class_by_name: &BTreeMap<&str, PackageClass>,
@@ -471,11 +375,6 @@ fn check_forward_dependencies(
         .app_by_dir
         .values()
         .map(|a| (a.app.crate_name.as_str(), a))
-        .collect();
-    let game_by_crate: BTreeMap<&str, &crate::game_manifest::GameManifest> = index
-        .game_by_dir
-        .values()
-        .map(|g| (g.game.crate_name.as_str(), g))
         .collect();
     let layer_by_crate: BTreeMap<String, &crate::manifest::LayerManifest> = index
         .layer_by_dir
@@ -504,7 +403,7 @@ fn check_forward_dependencies(
             // The chain runs for its violation-pushing side effects; the
             // resulting `Option<()>` is discarded.
             let pair = (c.class, dep_class);
-            use PackageClass::{App, Game, Layer, Module, Tool};
+            use PackageClass::{App, Layer, Module, Tool};
 
             (pair == (Layer, Module))
                 .then(|| {
@@ -723,170 +622,10 @@ fn check_forward_dependencies(
                                 });
                             });
                     })
-                })
-                .or_else(|| {
-                    // A layer, module, or tool depending on a game is illegal:
-                    // games are content (the cartridge tier), not the reusable
-                    // spine. Only host apps (via `allowed_games`) — and the
-                    // sanctioned capture-harness tools (which render the game) —
-                    // may load a game.
-                    (matches!(pair, (Layer, Game) | (Module, Game))
-                        | ((pair == (Tool, Game)) & !is_capture_harness(&c.package.name)))
-                    .then(|| {
-                        report.push(Violation::new(
-                            ViolationKind::NonHostDependsOnGame,
-                            c.package.name.clone(),
-                            format!(
-                                "{} crate `{}` depends on game crate `{dep_name}`; games are content, \
-                                 not the reusable spine — only a host app that lists the game in \
-                                 `allowed_games` may depend on it",
-                                class_noun(c.class),
-                                c.package.name
-                            ),
-                        ));
-                    })
-                })
-                .or_else(|| {
-                    // App -> game: allowed only when the app lists the game in
-                    // `allowed_games` (the host-declares-its-cartridges rule).
-                    (pair == (App, Game)).then(|| {
-                        app_by_crate
-                            .get(c.package.name.as_str())
-                            .into_iter()
-                            .for_each(|app| {
-                                let game_name = game_by_crate
-                                    .get(dep_name.as_str())
-                                    .map(|g| g.game.name.clone());
-                                let allowed = game_name
-                                    .as_ref()
-                                    .is_some_and(|name| app.app.allowed_games.contains(name));
-                                (!allowed).then(|| {
-                                    report.push(Violation::new(
-                                        ViolationKind::AppDependsOnGameNotAllowed,
-                                        c.package.name.clone(),
-                                        format!(
-                                            "app `{}` depends on game crate `{dep_name}` but its `allowed_games` is {:?}; \
-                                             add `{}` to `allowed_games` or drop the dependency",
-                                            app.app.name,
-                                            app.app.allowed_games,
-                                            game_name.unwrap_or_else(|| dep_name.clone())
-                                        ),
-                                    ));
-                                });
-                            });
-                    })
-                })
-                .or_else(|| {
-                    (pair == (Game, App)).then(|| {
-                        report.push(Violation::new(
-                            ViolationKind::GameDependsOnApp,
-                            c.package.name.clone(),
-                            format!(
-                                "game crate `{}` depends on app crate `{dep_name}`; \
-                                 games must not depend on apps",
-                                c.package.name
-                            ),
-                        ));
-                    })
-                })
-                .or_else(|| {
-                    (pair == (Game, Tool)).then(|| {
-                        report.push(Violation::new(
-                            ViolationKind::GameDependsOnTool,
-                            c.package.name.clone(),
-                            format!(
-                                "game crate `{}` depends on tool crate `{dep_name}`; \
-                                 games must not depend on tools",
-                                c.package.name
-                            ),
-                        ));
-                    })
-                })
-                .or_else(|| {
-                    (pair == (Game, Game)).then(|| {
-                        report.push(Violation::new(
-                            ViolationKind::GameDependsOnGame,
-                            c.package.name.clone(),
-                            format!(
-                                "game crate `{}` depends on game crate `{dep_name}`; \
-                                 games are independent cartridges and do not compose one another",
-                                c.package.name
-                            ),
-                        ));
-                    })
-                })
-                .or_else(|| {
-                    (pair == (Game, Layer)).then(|| {
-                        game_by_crate
-                            .get(c.package.name.as_str())
-                            .into_iter()
-                            .for_each(|game| {
-                                let layer_name =
-                                    layer_by_crate.iter().find_map(|(crate_name, l)| {
-                                        (crate_name == dep_name).then(|| l.layer.name.clone())
-                                    });
-                                let allowed = layer_name
-                                    .as_ref()
-                                    .is_some_and(|name| game.game.allowed_layers.contains(name));
-                                (!allowed).then(|| {
-                                    report.push(Violation::new(
-                                        ViolationKind::GameDependsOnLayerNotAllowed,
-                                        c.package.name.clone(),
-                                        format!(
-                                            "game `{}` depends on layer crate `{dep_name}` but its `allowed_layers` is {:?}; \
-                                             add `{}` to `allowed_layers` or drop the dependency",
-                                            game.game.name,
-                                            game.game.allowed_layers,
-                                            layer_name.unwrap_or_else(|| dep_name.clone())
-                                        ),
-                                    ));
-                                });
-                            });
-                    })
-                })
-                .or_else(|| {
-                    (pair == (Game, Module)).then(|| {
-                        game_by_crate
-                            .get(c.package.name.as_str())
-                            .into_iter()
-                            .for_each(|game| {
-                                let module_name = module_by_crate
-                                    .get(dep_name.as_str())
-                                    .map(|m| m.module.name.clone());
-                                let allowed = module_name
-                                    .as_ref()
-                                    .is_some_and(|name| game.game.allowed_modules.contains(name));
-                                (!allowed).then(|| {
-                                    report.push(Violation::new(
-                                        ViolationKind::GameDependsOnModuleNotAllowed,
-                                        c.package.name.clone(),
-                                        format!(
-                                            "game `{}` depends on module crate `{dep_name}` but its `allowed_modules` is {:?}; \
-                                             add `{}` to `allowed_modules` or drop the dependency",
-                                            game.game.name,
-                                            game.game.allowed_modules,
-                                            module_name.unwrap_or_else(|| dep_name.clone())
-                                        ),
-                                    ));
-                                });
-                            });
-                    })
                 });
                 });
         });
     });
-}
-
-/// A human-readable class noun for diagnostics.
-fn class_noun(class: PackageClass) -> &'static str {
-    match class {
-        PackageClass::Layer => "layer",
-        PackageClass::Module => "module",
-        PackageClass::App => "app",
-        PackageClass::Game => "game",
-        PackageClass::Tool => "tool",
-        PackageClass::Support => "support",
-    }
 }
 
 fn check_apps_are_leaves(

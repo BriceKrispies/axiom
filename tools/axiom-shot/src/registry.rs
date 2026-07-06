@@ -87,7 +87,7 @@ pub fn names() -> Vec<&'static str> {
 }
 
 fn build_retro_fps(p: &BuildParams) -> RunningApp {
-    axiom_game_retro_fps::build_retro_fps_app(&retro_fps_doc(p.level.as_deref())).0
+    axiom_gallery::retro_fps::build_retro_fps_app(&retro_fps_doc(p.level.as_deref())).0
 }
 
 fn build_soccer(p: &BuildParams) -> RunningApp {
@@ -155,12 +155,12 @@ fn build_posed_figure(p: &BuildParams) -> RunningApp {
 
 /// The retro FPS level document for `--level PATH` (else the built-in default).
 /// Shared by the registry build and the binary's `--pose` teleport path.
-pub fn retro_fps_doc(level: Option<&str>) -> axiom_game_retro_fps::level::LevelDoc {
+pub fn retro_fps_doc(level: Option<&str>) -> axiom_gallery::retro_fps::level::LevelDoc {
     match level {
-        Some(path) => axiom_game_retro_fps::level::LevelDoc::parse(
+        Some(path) => axiom_gallery::retro_fps::level::LevelDoc::parse(
             &std::fs::read_to_string(path).expect("read --level file"),
         ),
-        None => axiom_game_retro_fps::level::LevelDoc::default(),
+        None => axiom_gallery::retro_fps::level::LevelDoc::default(),
     }
 }
 

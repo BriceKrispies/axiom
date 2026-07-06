@@ -37,3 +37,21 @@ sha256 = "73ba8ebbd274c3ca255f36be15611e56653c9da6f2af4df54f3977c79785fa78"
 [[golden]]
 path = "tests/golden/stress_cubes_render_tick0.bin"
 sha256 = "14f4ddc265bfb554f5f7a476ee8e24aa532a105ff269c4393a9035dfdb096938"
+
+# retro FPS's committed determinism goldens (produced by the `retro_fps_*` tests,
+# which fold in as ordinary gallery integration tests). The retro FPS demo was a
+# `games/retro-fps` cartridge with its own `slice.toml`; now that it is an in-crate
+# gallery demo, its goldens are hash-pinned here so a deleted/regenerated/edited
+# golden is still caught by `xtask check-slices`. Its live pixel harness stays
+# registered in axiom-shot as `--app retro-fps`.
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_state_sequence.bin"
+sha256 = "c28b1643280cdc91cae2fe2e0cc0e6f07c8a1f8bfabdc4c0a918a73f15b3335c"
+
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_hud_sequence.bin"
+sha256 = "410313507b327b00cf70dace7cbbde70d5273cd830362022d271bc9aa3b4a9f9"
+
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_render_sequence.bin"
+sha256 = "94b2925f6a3bbbcbd0e18a0fc69ba5bc575033451c73564c6eacc51e9dc07407"

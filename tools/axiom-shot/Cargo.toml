@@ -13,7 +13,7 @@
 # The canvas2d path and every non-GPU test run with the default build.
 #
 # axiom-shot is the sanctioned capture host: as a tool it legitimately loads the
-# apps/games it renders (the console/cartridge role), allowed via the checker's
+# apps it renders (the capture-host role), allowed via the checker's
 # CAPTURE_HARNESS_TOOLS allowlist (crates/xtask/src/class_check.rs).
 [package]
 name = "axiom-shot"
@@ -31,10 +31,10 @@ axiom-math = { path = "../../crates/axiom-math" }
 # directly at the render-API level (the umbrella `Material`→asset boundary
 # drops `opacity`).
 axiom-render = { path = "../../modules/axiom-render" }
-# Every browser demo lives here as a module (`axiom_gallery::rotating_cube`, …);
-# the harness renders the registered ones through this one crate.
+# Every browser demo lives here as a module (`axiom_gallery::rotating_cube`,
+# `axiom_gallery::retro_fps`, …); the harness renders the registered ones through
+# this one crate.
 axiom-gallery = { path = "../../apps/axiom-gallery" }
-axiom-game-retro-fps = { path = "../../games/retro-fps" }
 # The animation lab's posed-figure scene — captured as real pixels (L3), not SVG.
 axiom-animation-lab = { path = "../../apps/axiom-animation-lab" }
 png = "0.17"
