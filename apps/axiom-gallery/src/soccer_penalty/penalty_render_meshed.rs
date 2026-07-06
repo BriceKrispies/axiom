@@ -545,13 +545,20 @@ pub fn soccer_meshed_shell() -> RunningApp {
         )
         .add_plugins(DefaultPlugins)
         .build();
-    // Author a bright, faintly-warm DAYLIGHT hemisphere ambient, replacing the
-    // dim engine default (sky ~0.4 / ground ~0.16) both render paths otherwise
-    // hardcode. The reference is a high-key sunlit stadium, so the fill must lift
-    // every key-missed face — the athletes' shadow sides, the keeper's front, and
-    // the whole crowd/stand backdrop — off the near-black floor the dim default
-    // crushed them to. Strength is folded into the tints (a plain mix, no scale).
-    app.set_ambient(FrameAmbient::new([0.66, 0.71, 0.80], [0.45, 0.42, 0.37]));
+    // Author a bright DAYLIGHT hemisphere ambient, replacing the dim engine
+    // default (sky ~0.4 / ground ~0.16) both render paths otherwise hardcode. The
+    // reference is a high-key sunlit stadium, so the fill must lift every
+    // key-missed face — the athletes' shadow sides, the keeper's front, and the
+    // whole crowd/stand backdrop — off the near-black floor the dim default
+    // crushed them to. The GROUND term is the fill the vertical & camera-facing
+    // faces draw (a hemisphere face at normal.y≈0 mixes half sky / half ground),
+    // so the crushed background stands and shadow sides were pinned by the old
+    // dim, warm ground floor (0.45/0.42/0.37): a ~0.30-albedo stand card came out
+    // near black. Lift the ground toward a cool, near-sky daylight bounce so those
+    // faces read as open shade, not night — the up-facing pitch (which draws the
+    // brighter sky term) is untouched, so this lifts the darks without blowing the
+    // grass. Strength is folded into the tints (a plain mix, no scale).
+    app.set_ambient(FrameAmbient::new([0.66, 0.71, 0.80], [0.60, 0.62, 0.64]));
     app
 }
 
