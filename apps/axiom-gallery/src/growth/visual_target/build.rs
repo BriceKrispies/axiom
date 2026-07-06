@@ -656,8 +656,10 @@ fn expose(c: [f32; 3], s: &Style) -> [f32; 3] {
 
 /// The full styled tint for an instance: mute foliage saturation, desaturate with
 /// distance, blend toward the (blue-gray) fog, then expose + tone-clamp. `sat` is the
-/// foliage saturation (`1.0` for non-foliage surfaces).
-fn fogged(color: [f32; 3], fog: &super::scene::Fog, dist: f32, style: &Style, sat: f32) -> [f32; 4] {
+/// foliage saturation (`1.0` for non-foliage surfaces). Exposed `pub(crate)` so the
+/// streamed `generia` app can route its per-chunk grass tints through the *same* fog +
+/// tone path as the baked world, keeping the sward's colour matched to the forest.
+pub(crate) fn fogged(color: [f32; 3], fog: &super::scene::Fog, dist: f32, style: &Style, sat: f32) -> [f32; 4] {
     let f = fog_factor(dist, fog.start_m, fog.end_m);
     let muted = mute(color, sat);
     let far = mute(muted, 1.0 - style.distance_desaturation * f);

@@ -22,7 +22,8 @@ use std::rc::Rc;
 use axiom_agent_harness::AgentHarnessApi;
 use axiom_fp_controller::{FpController, Lens, LookDelta, MoveIntent, Pose, WalkTuning};
 use axiom_kernel::{Meters, Radians, Ratio, StableHash};
-use axiom_math::{Aabb, Mat4, Vec3};
+use axiom_math::{Aabb, Mat4, Quat, Transform, Vec3};
+use axiom_noise::value_noise;
 use axiom_scatter::{CellCoord, ScatterApi, ScatterRule, ScatterSite};
 use axiom_streaming::ChunkCoord;
 use axiom_windowing::WindowingApi;
@@ -48,6 +49,44 @@ const WHITE_MAT: u64 = 1;
 const LEAF_ALPHA_MAT: u64 = 2;
 const BARK_MAT: u64 = 3;
 const GROUND_MAT: u64 = 4;
+
+/// Grass mesh id == `build.rs`'s `GROUNDCOVER_MESH` — the crossed-blade *tuft* mesh,
+/// already registered in `rd.meshes` with up-facing blade normals (the light-vertex
+/// approximation: real geometry that catches the sun/ambient softly, no shader). Grass
+/// draws on the flat `WHITE_MAT`, so its per-instance tint carries the colour and the
+/// sward survives Canvas2D's texture-drop + per-triangle flatten — one merged draw call
+/// of real blades, never textured quads.
+const GRASS_MESH: u64 = 4;
+/// Ground-cover scatter seed — a stream distinct from the trees' `TREE_SEED`.
+const GRASS_SEED: u64 = 0x_67_72_61_73_73_5f_76_31; // "grass_v1"
+/// Grass sites per chunk side. Canvas2D projects every blade on the CPU, so it grows a
+/// sparser sward than the GPU cascade.
+const GRASS_SITES_GPU: u32 = 9;
+const GRASS_SITES_LOW: u32 = 5;
+/// Only chunks whose centre is within this horizontal distance of the eye grow blades —
+/// wind, fake-perspective, and trample all read up close, and the far ground is carried
+/// by the terrain mottle + litter. Tighter on the CPU backend.
+const GRASS_DRAW_M_GPU: f32 = 46.0;
+const GRASS_DRAW_M_LOW: f32 = 26.0;
+/// Blades stand taller than the baked ground-tufts (whose height range is ankle-low) so
+/// the streamed sward reads as swaying grass, not flat clutter.
+const GRASS_HEIGHT_MUL: f32 = 3.2;
+
+/// Wind: a stepped, breeze-driven world-space blade lean.
+const WIND_HZ: f32 = 1.7; // sway oscillations per second
+const WIND_AMP: f32 = 0.42; // peak lean, radians, at full gust
+const WIND_DIR: (f32, f32) = (0.82, 0.57); // prevailing breeze, world XZ
+/// Stepped framerate: quantise the wind clock to this many ticks so the sward animates
+/// in discrete retro steps instead of a smooth glide (reference feature 6).
+const WIND_STEP: u64 = 6;
+const TICK_DT: f32 = 1.0 / 60.0;
+/// Fake perspective: lean each blade's tip toward the camera (radians) so the real blade
+/// geometry reads as billboarded cards without a shader (reference feature 5).
+const PERSP_LEAN: f32 = 0.30;
+/// Interactive displacement: blades within this radius of the walker bend AWAY from the
+/// feet, hardest at contact (linear falloff) — reference feature 7, rigid.
+const TRAMPLE_M: f32 = 2.2;
+const TRAMPLE_LEAN: f32 = 0.9;
 
 /// Streaming shape: chunk size, load ring, and the terrain-window spacing.
 const CHUNK_M: f32 = 24.0;
@@ -90,6 +129,22 @@ struct ChunkVeg {
     trunk: Vec<Inst>,
     foliage: Vec<Inst>,
     branch: Vec<Inst>,
+    grass: Vec<Grass>,
+}
+
+/// One cached grass blade: its ground-seated base, base yaw, per-instance scale, a baked
+/// tint (palette + noise colour variation + accent + fog parity), and its pre-baked wind
+/// phase + gust amplitude. The cache stays camera-independent; the per-frame projector
+/// ([`project_grass`]) folds in wind sway, fake perspective, and trample as a single
+/// rigid rotation so every animated feature is free of per-blade per-frame noise calls.
+#[derive(Clone, Copy)]
+struct Grass {
+    base: Vec3,
+    yaw: f32,
+    scale: Vec3,
+    tint: [f32; 4],
+    phase: f32,
+    wind_amp: f32,
 }
 
 /// Boot the endless streamed generia forest on the demo canvas.
@@ -215,10 +270,11 @@ pub fn generia_start() {
 
             // Plan the frame: load / unload / visible chunks.
             let plan = world.borrow_mut().frame_plan(eye, vp, chunk_aabb);
+            let grass_sites = if low_detail { GRASS_SITES_LOW } else { GRASS_SITES_GPU };
             {
                 let mut c = cache.borrow_mut();
                 for coord in &plan.load {
-                    c.insert((coord.x, coord.z), gen_chunk_veg(&manifest, &foliage, *coord, eye));
+                    c.insert((coord.x, coord.z), gen_chunk_veg(&manifest, &foliage, *coord, eye, grass_sites));
                 }
                 for coord in &plan.unload {
                     c.remove(&(coord.x, coord.z));
@@ -255,14 +311,24 @@ pub fn generia_start() {
             // foliage is the triangle hog, so only the nearest band (lod 0) draws it;
             // farther chunks keep just trunks + branches (readable through the fog).
             let c = cache.borrow();
-            let (mut trunk, mut foliage_d, mut branch) = (Vec::new(), Vec::new(), Vec::new());
-            let (mut tn, mut fn_, mut bn) = (0u32, 0u32, 0u32);
+            let (mut trunk, mut foliage_d, mut branch, mut grass) =
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (mut tn, mut fn_, mut bn, mut gn) = (0u32, 0u32, 0u32, 0u32);
+            let grass_draw_m = if low_detail { GRASS_DRAW_M_LOW } else { GRASS_DRAW_M_GPU };
             for vc in &plan.visible {
                 if let Some(veg) = c.get(&(vc.coord.x, vc.coord.z)) {
                     tn += project_into(&mut trunk, &veg.trunk, &vp);
                     bn += project_into(&mut branch, &veg.branch, &vp);
                     if vc.lod == 0 {
                         fn_ += project_into(&mut foliage_d, &veg.foliage, &vp);
+                        // Grass only near the walker (wind / perspective / trample read up
+                        // close); farther ground is carried by the terrain + litter.
+                        let ccx = (vc.coord.x as f32 + 0.5) * CHUNK_M;
+                        let ccz = (vc.coord.z as f32 + 0.5) * CHUNK_M;
+                        let cd = ((eye.x - ccx).powi(2) + (eye.z - ccz).powi(2)).sqrt();
+                        if cd < grass_draw_m {
+                            gn += project_grass(&mut grass, &veg.grass, &vp, eye, tick);
+                        }
                     }
                 }
             }
@@ -273,6 +339,7 @@ pub fn generia_start() {
                 (TRUNK_MESH, BARK_MAT, trunk, tn),
                 (FOLIAGE_MESH, LEAF_ALPHA_MAT, foliage_d, fn_),
                 (BRANCH_MESH, WHITE_MAT, branch, bn),
+                (GRASS_MESH, WHITE_MAT, grass, gn),
             ];
             (clear, lights.clone(), light_vp, batches, vp.as_cols_array(), Vec::new(), None, new_geometry)
         },
@@ -287,7 +354,13 @@ fn style_of(m: &Manifest) -> crate::growth::visual_target::scene::Style {
 /// Generate one chunk's cached vegetation: scatter its trees, then run the hero
 /// trunk/foliage/branch generators over that chunk's trees (with an identity
 /// view-projection, so the emitted `mvp` slot equals the world transform we keep).
-fn gen_chunk_veg(manifest: &Manifest, foliage: &Foliage, cell: ChunkCoord, eye: Vec3) -> ChunkVeg {
+fn gen_chunk_veg(
+    manifest: &Manifest,
+    foliage: &Foliage,
+    cell: ChunkCoord,
+    eye: Vec3,
+    grass_sites: u32,
+) -> ChunkVeg {
     let rule = ScatterRule {
         sites_per_side: 3,
         jitter: Ratio::new(0.8).unwrap_or_else(|_| Ratio::new(0.0).unwrap()),
@@ -305,7 +378,125 @@ fn gen_chunk_veg(manifest: &Manifest, foliage: &Foliage, cell: ChunkCoord, eye: 
         trunk: extract(&trunk_instances(manifest, &trees, lean, &IDENTITY16, eye)),
         foliage: extract(&foliage_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
         branch: extract(&branch_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
+        grass: gen_chunk_grass(manifest, cell, eye, grass_sites),
     }
+}
+
+/// Scatter one chunk's grass sward and bake each blade's colour + fog. The blades use a
+/// denser, splayed scatter (its own entropy stream) than the trees; each site's
+/// height/radius/yaw are drawn deterministically from the manifest's `[groundcover]`
+/// ranges, its colour from the groundcover palette then varied by world-space noise
+/// (feature 2) with a noise-selected accent subset (feature 3, app-side), and its tint
+/// routed through `build::fogged` so the sward matches the world's fog + tone (fog
+/// parity). Wind phase + gust gain are baked here (one noise sample per blade), so the
+/// per-frame projector stays cheap.
+fn gen_chunk_grass(manifest: &Manifest, cell: ChunkCoord, eye: Vec3, sites_per_side: u32) -> Vec<Grass> {
+    let rule = ScatterRule {
+        sites_per_side,
+        jitter: Ratio::new(0.9).unwrap_or_else(|_| Ratio::new(0.0).unwrap()),
+        fill: Ratio::new(0.85).unwrap_or_else(|_| Ratio::new(0.0).unwrap()),
+    };
+    let sites = ScatterApi::chunk_sites(
+        GRASS_SEED,
+        CellCoord::new(cell.x, cell.z),
+        Meters::finite_or_zero(CHUNK_M),
+        &rule,
+    );
+    let (hr, rr, pal): ([f32; 2], [f32; 2], &[[f32; 3]]) = match &manifest.groundcover {
+        Some(g) => (g.height_m, g.radius_m, g.palette.as_slice()),
+        None => ([0.05, 0.16], [0.10, 0.22], &[[0.33, 0.42, 0.18]]),
+    };
+    let style = style_of(manifest);
+    sites
+        .iter()
+        .map(|s| {
+            let (x, z) = (s.x.get(), s.z.get());
+            let ground = manifest.terrain.height_at(x, z);
+            let h = StableHash::of_words(&[s.seed]).raw();
+            let u = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
+            let lerp = |r: [f32; 2], t: f32| r[0] + (r[1] - r[0]) * t;
+            let height = lerp(hr, u(16)) * GRASS_HEIGHT_MUL;
+            let radius = lerp(rr, u(0));
+            let yaw = u(24) * std::f32::consts::TAU;
+            let base = pal.get((u(8) * pal.len() as f32) as usize).copied().unwrap_or([0.33, 0.42, 0.18]);
+            let col = grass_color(base, x, z);
+            let dist = eye.subtract(Vec3::new(x, ground + height * 0.5, z)).length();
+            let tint = build::fogged(col, &manifest.fog, dist, &style, 1.0);
+            // Bake the wind phase + gust gain from a low-frequency world field, so the
+            // per-frame projector only evaluates a cheap sine.
+            let phase = u(40) * std::f32::consts::TAU;
+            let gust = value_noise(GRASS_SEED ^ 0x_9E37_79B9, Vec3::new(x * 0.06, 0.0, z * 0.06)).get();
+            let wind_amp = WIND_AMP * (0.45 + 0.55 * (gust * 0.5 + 0.5));
+            Grass { base: Vec3::new(x, ground, z), yaw, scale: Vec3::new(radius, height, radius), tint, phase, wind_amp }
+        })
+        .collect()
+}
+
+/// A blade's baked colour: the palette base nudged by a soft, low-frequency world-space
+/// noise field (feature 2 — colour drifts across the sward in patches), with a sparse
+/// noise-selected accent subset flared to a fresher yellow-green (feature 3, app-side).
+/// Fog + tone are applied by the caller through `build::fogged` (fog parity).
+fn grass_color(base: [f32; 3], x: f32, z: f32) -> [f32; 3] {
+    let n = value_noise(0x_6772_6173_ff01, Vec3::new(x * 0.22, 0.0, z * 0.22)).get(); // [-1,1]
+    let bright = 1.0 + n * 0.22;
+    let green = (0.5 + 0.5 * value_noise(0x_6772_6173_ff02, Vec3::new(x * 0.5, 0.0, z * 0.5)).get()) * 0.12;
+    let varied = [
+        (base[0] * bright).clamp(0.0, 1.0),
+        (base[1] * bright + green).clamp(0.0, 1.0),
+        (base[2] * bright * 0.9).clamp(0.0, 1.0),
+    ];
+    let accent = [
+        (varied[0] * 1.15 + 0.10).clamp(0.0, 1.0),
+        (varied[1] * 1.20 + 0.16).clamp(0.0, 1.0),
+        (varied[2] * 0.85).clamp(0.0, 1.0),
+    ];
+    // Roughly the top fifth of the selection field flares to the accent tint.
+    let sel = value_noise(0x_6772_6173_acce, Vec3::new(x * 0.09, 0.0, z * 0.09)).get();
+    let t = (sel > 0.45) as u32 as f32;
+    [
+        varied[0] + (accent[0] - varied[0]) * t,
+        varied[1] + (accent[1] - varied[1]) * t,
+        varied[2] + (accent[2] - varied[2]) * t,
+    ]
+}
+
+/// Re-project a chunk's cached grass into the live `[mvp, world, tint]` layout, folding
+/// in a single per-frame rigid blade rotation: prevailing wind sway on a *stepped* clock
+/// (features 4 + 6), fake perspective leaning the tip toward the camera (feature 5), and
+/// interactive trample bending blades away from the walker's feet (feature 7). The tuft's
+/// up-facing normals rotate with the blade, so the GPU's per-vertex light softens as the
+/// sward sways (light-vertex approximation). Appends onto `out`; returns the count added.
+fn project_grass(out: &mut Vec<f32>, blades: &[Grass], vp: &Mat4, eye: Vec3, tick: u64) -> u32 {
+    // Stepped framerate: quantise the wind clock so the sward animates in discrete steps.
+    let t = (tick / WIND_STEP * WIND_STEP) as f32 * TICK_DT;
+    for g in blades {
+        let sway = (t * WIND_HZ + g.phase).sin() * g.wind_amp;
+        // Wind lean, in world XZ, along the prevailing breeze.
+        let mut lx = WIND_DIR.0 * sway;
+        let mut lz = WIND_DIR.1 * sway;
+        // Horizontal direction toward the eye (shared by perspective + trample).
+        let dx = eye.x - g.base.x;
+        let dz = eye.z - g.base.z;
+        let d = (dx * dx + dz * dz).sqrt().max(1.0e-3);
+        let (ex, ez) = (dx / d, dz / d);
+        // Fake perspective: the tip leans toward the camera.
+        lx += ex * PERSP_LEAN;
+        lz += ez * PERSP_LEAN;
+        // Interactive displacement: within TRAMPLE_M, bend away from the walker, hardest
+        // at contact (linear falloff), overriding the toward-camera lean near the feet.
+        let trample = ((TRAMPLE_M - d) / TRAMPLE_M).max(0.0) * TRAMPLE_LEAN;
+        lx -= ex * trample;
+        lz -= ez * trample;
+        // Rotate the blade's up-axis toward the horizontal lean (lx, lz): axis = up × dir.
+        let angle = (lx * lx + lz * lz).sqrt();
+        let tilt = Quat::from_axis_angle(Vec3::new(lz, 0.0, -lx), angle).unwrap_or(Quat::IDENTITY);
+        let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, g.yaw).unwrap_or(Quat::IDENTITY);
+        let world = Transform::new(g.base, tilt.multiply(yaw), g.scale).to_matrix();
+        out.extend_from_slice(&vp.multiply(world).as_cols_array());
+        out.extend_from_slice(&world.as_cols_array());
+        out.extend_from_slice(&g.tint);
+    }
+    blades.len() as u32
 }
 
 /// A scattered site → a `Tree`, its size/rotation/colour drawn deterministically
