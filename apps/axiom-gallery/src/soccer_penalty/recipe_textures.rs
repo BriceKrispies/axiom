@@ -68,22 +68,35 @@ pub mod ids {
 /// shirt colour over the dark terrace) blended together: the mismatched row/column
 /// counts interfere so the seats never line up into stripes, reading as a dense
 /// stand of thousands rather than a few colour bands.
+///
+/// The crowd bakes at its **own** resolution (`CROWD_RES`), decoupled from the
+/// shared `texture_res` the kits use: the reference terrace is a mass of *many
+/// hundreds* of individuals across the frame, but ~20 seat-columns on the 48px
+/// kit texture — then softened by the anti-moiré blur — collapses into a handful
+/// of soft colour blobs, not a packed stand. Baking at 128px lets the seat grids
+/// carry ~3x the column/row count (finer, more numerous individuals) with pixels
+/// to spare, so the crowd survives the anti-moiré blur *and* the low retro target
+/// still reading as a dense stand rather than smeared bands. The blur radius is
+/// lifted proportionally (2→4) so the higher-frequency seat grid is diffused by
+/// the same *relative* amount that killed the moiré at 48px.
 pub fn crowd(style: &SoccerRecipeStyle) -> RecipeGraph {
-    let r = style.texture_res;
+    const CROWD_RES: u32 = 128;
+    let r = CROWD_RES;
     let p = &style.palette;
     let d = p.crowd_dark;
     let mut g = RecipeGraph::new(RecipeId::from_raw(ids::CROWD), 1);
-    let red = g.add(TextureOp::Bricks as u16, vec![i(r), i(r), i(18), i(13), i(1), c(p.crowd_shirt_a), c(d)], vec![]);
-    let blue = g.add(TextureOp::Bricks as u16, vec![i(r), i(r), i(20), i(15), i(1), c(p.crowd_shirt_b), c(d)], vec![]);
-    let pale = g.add(TextureOp::Bricks as u16, vec![i(r), i(r), i(22), i(17), i(1), c(p.crowd_bright), c(d)], vec![]);
+    let red = g.add(TextureOp::Bricks as u16, vec![i(r), i(r), i(52), i(38), i(1), c(p.crowd_shirt_a), c(d)], vec![]);
+    let blue = g.add(TextureOp::Bricks as u16, vec![i(r), i(r), i(58), i(43), i(1), c(p.crowd_shirt_b), c(d)], vec![]);
+    let pale = g.add(TextureOp::Bricks as u16, vec![i(r), i(r), i(64), i(49), i(1), c(p.crowd_bright), c(d)], vec![]);
     let rb = g.add(TextureOp::Blend as u16, vec![s(0.5)], vec![red, blue]);
     let seats = g.add(TextureOp::Blend as u16, vec![s(0.4)], vec![rb, pale]);
     // A final box blur diffuses the hard per-seat brick edges — which aliased
     // into harsh vertical moiré streaks through the low retro render target —
     // into the soft, out-of-focus colour haze of a real stadium crowd seen past
     // the pitch, matching the reference's blurred terrace and removing the
-    // dominant background artifact.
-    g.add(TextureOp::Blur as u16, vec![i(2)], vec![seats]);
+    // dominant background artifact. Radius scales with CROWD_RES (2 at 48px →
+    // 4 at 128px) so the relative softening — and the moiré suppression — holds.
+    g.add(TextureOp::Blur as u16, vec![i(4)], vec![seats]);
     g
 }
 
