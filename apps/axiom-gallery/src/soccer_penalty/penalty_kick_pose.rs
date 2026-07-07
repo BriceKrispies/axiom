@@ -366,7 +366,10 @@ mod tests {
 
     #[test]
     fn the_pose_is_structurally_valid_across_every_phase() {
-        SoccerPenaltyKickPose::default_kick().validate().expect("kinematic kick pose is valid");
+        assert!(
+            SoccerPenaltyKickPose::default_kick().validate().is_ok(),
+            "kinematic kick pose is valid across every phase"
+        );
     }
 
     #[test]
