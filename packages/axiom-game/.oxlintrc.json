@@ -203,7 +203,7 @@
       // scoped to EXACTLY these three files; nothing else is relaxed.
       //   - branch ban / optional chaining: the event wiring + running-state gate + `?? []`
       //   - async-await + unsafe-*: the DOM event / live-wasm boundary is untyped at its edge
-      "files": ["src/dom-input.ts", "src/boot.ts", "src/headless.ts", "src/hot-runtime.ts"],
+      "files": ["src/dom-input.ts", "src/boot.ts", "src/headless.ts", "src/hot-runtime.ts", "src/hot-app.ts"],
       "rules": {
         "eslint-js/no-restricted-syntax": "off",
         "eslint/no-await-in-loop": "off",
@@ -231,6 +231,34 @@
       // fake matchmaker covers it via `.then`; nothing else is relaxed.
       "files": ["src/net-room.ts"],
       "rules": {
+        "typescript/promise-function-async": "off"
+      }
+    },
+    {
+      // hot-app.ts is the shared ONE-CALL boot for a hot-reloadable app — the same
+      // browser edge as the boot group above (already in its `files`), but with richer
+      // browser glue: OffscreenCanvas 2D (font-atlas bake + pixel read-back),
+      // `fetch`+`createImageBitmap` sprite-texture streaming, and a present-mode config
+      // builder. Beyond the boot-group relaxations it scopes off the impure-browser-idiom
+      // rules that glue genuinely needs at this edge, each documented:
+      //   - no-continue / no-ternary / no-undefined: the per-frame texture-drain loop and
+      //     the `present === "2d" ? … : undefined` present-mode config;
+      //   - no-void + promise-function-async: fire-and-forget per-frame texture loads
+      //     (`void fetch(...).then(...).catch(...)`, self-handling their own errors);
+      //   - non-nullable-type-assertion-style: `OffscreenCanvas.getContext("2d")` is typed
+      //     `… | null`, so the 2D context is asserted (as canvas code everywhere must);
+      //   - max-params: the wasm `upload2dTexture(id, w, h, pixels)` 4-arg signature — the
+      //     same wasm-shape exception wasm-bridge.ts / wasm-host.ts already carry.
+      // It stays coverage-exempt (browser-only, Playwright-proven — see test-exempt.json).
+      "files": ["src/hot-app.ts"],
+      "rules": {
+        "eslint/max-params": "off",
+        "eslint/no-continue": "off",
+        "eslint/no-ternary": "off",
+        "eslint/no-underscore-dangle": "off",
+        "eslint/no-undefined": "off",
+        "eslint/no-void": "off",
+        "typescript/non-nullable-type-assertion-style": "off",
         "typescript/promise-function-async": "off"
       }
     }

@@ -64,8 +64,10 @@ export { classifyUpdate, diffManifest } from "./diff.ts";
 export type { ComponentsDiff, ManifestDiff, ResourcesDiff, ScenesDiff, SystemsDiff, UpdateClass } from "./diff.ts";
 export { bootSession } from "./boot.ts";
 export { createHotRuntime } from "./hot-runtime.ts";
+export { bootHotApp } from "./hot-app.ts";
 export type { BootGame, BootOptions, BootSession } from "./boot.ts";
 export type { HotRuntime, HotRuntimeOptions } from "./hot-runtime.ts";
+export type { Hot2dGame, HotAppConfig, HotGame } from "./hot-app.ts";
 
 export { mountScene } from "./scene-runtime.ts";
 export type { MountedScene } from "./scene-runtime.ts";

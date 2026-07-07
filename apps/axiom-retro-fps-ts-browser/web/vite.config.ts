@@ -1,30 +1,10 @@
 /*
- * Vite dev config for the retro-fps @axiom/game hot-reload harness (mirror of the
- * game-runtime app's config; hot-reload architecture §7.1). Repo tooling — outside the
- * engine graph. `@axiom/game` resolves to the workspace SDK source (so SDK edits
- * hot-reload too), `/pkg/*` (the shared wasm) is served from `web/pkg`, and the Axiom
- * plugin forces a full reload on a `*.wasm` rebuild (possible ABI change).
+ * Vite dev config for the retro-fps @axiom/game hot-reload harness — one call to the
+ * shared `axiomVitePreset`. The preset derives root, the @axiom/game SDK-source alias,
+ * server.fs.allow, and the wasm-restart plugin from this file's own URL.
  */
 
-import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
-import { axiomHotReload } from "../../../packages/axiom-vite/index.js";
+import { axiomVitePreset } from "../../../packages/axiom-vite/preset.js";
 
-const here = (relative: string): string => fileURLToPath(new URL(relative, import.meta.url));
-
-export default defineConfig({
-  plugins: [axiomHotReload()],
-  resolve: {
-    alias: {
-      "@axiom/game": here("../../../packages/axiom-game/src/index.ts"),
-    },
-  },
-  root: here("."),
-  server: {
-    fs: {
-      allow: [here("../../../")],
-    },
-    port: 8080,
-    strictPort: true,
-  },
-});
+export default defineConfig(axiomVitePreset(import.meta.url));
