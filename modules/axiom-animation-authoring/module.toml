@@ -1,0 +1,36 @@
+# Axiom module manifest — axiom-animation-authoring (an isolated ENGINE module).
+#
+# A deterministic procedural-animation *authoring* vocabulary. Where the sibling
+# `animation` module owns skeletal *mechanics* (skeletons, poses, clip sampling,
+# blending), this module owns the higher-level *authoring* layer: a humanoid rig
+# spec, a motion spec built from ordered phases carrying pose goals, constraints,
+# contacts and events, a compiler that validates that spec, and a sampler that
+# turns it into deterministic pose frames.
+#
+# It is an isolated engine module: it composes only the `kernel` and `math`
+# layers and NEVER another module (`allowed_modules = []`) — engine modules may
+# not depend on one another, so it consumes no scene/skeleton module and keeps
+# its output as neutral data it owns. It holds no rendering, physics, input,
+# asset, editor, browser API, wall-clock time, or randomness. Everything is
+# reached through the one facade, `AnimationAuthoringApi`, plus the id vocabulary
+# (rig/motion/phase/plan handles and joint/effector/target indices) the facade
+# hands back and accepts.
+
+[module]
+name = "animation-authoring"
+crate_name = "axiom-animation-authoring"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "humanoid-rig-spec",
+    "motion-authoring-vocabulary",
+    "motion-compilation",
+    "deterministic-pose-frame-sampling",
+]

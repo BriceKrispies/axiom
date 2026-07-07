@@ -1,0 +1,27 @@
+[package]
+name = "axiom-animation-authoring"
+description = "Axiom engine module: a deterministic procedural-animation authoring vocabulary — humanoid rig spec, motion phases/pose-goals/constraints/events, and a compiler+sampler that turns authored intent into replayable pose frames. Neutral data only; no rendering, physics, input, or app orchestration."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# kernel: Tick sampling time, Ratio finite scalars, deterministic error pattern.
+# math: Vec3 / Quat / Transform pose maths, Quat::from_euler_xyz + Quat::nlerp,
+# and Scalar::validate_finite for the non-finite rejection path.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[dev-dependencies]
+# The integration slice test names Tick / Ratio / Vec3 directly when driving the
+# public facade end-to-end.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

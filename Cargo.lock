@@ -96,6 +96,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-animation-authoring"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
 name = "axiom-animation-lab"
 version = "0.1.0"
 dependencies = [
@@ -291,6 +299,7 @@ dependencies = [
  "axiom-agent",
  "axiom-agent-harness",
  "axiom-animation",
+ "axiom-animation-authoring",
  "axiom-biome",
  "axiom-canvas2d-backend",
  "axiom-debug-overlay",
@@ -309,6 +318,7 @@ dependencies = [
  "axiom-math",
  "axiom-noise",
  "axiom-perception",
+ "axiom-physical-animation",
  "axiom-physics",
  "axiom-planetgen",
  "axiom-proc",
@@ -563,6 +573,17 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-math",
+]
+
+[[package]]
+name = "axiom-physical-animation"
+version = "0.1.0"
+dependencies = [
+ "axiom-animation-authoring",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-physics",
+ "axiom-runtime",
 ]
 
 [[package]]

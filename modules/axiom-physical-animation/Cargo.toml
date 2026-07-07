@@ -1,0 +1,31 @@
+[package]
+name = "axiom-physical-animation"
+description = "Axiom feature module: bridges the deterministic animation-authoring vocabulary to the real axiom-physics engine — binds a humanoid rig to physics bodies, translates a MotionPlan's physical objectives into physics forces/impulses/kinematic drives, steps the world, and reads back deterministic PhysicalAnimationFrames. Owns no simulation or authoring; composes both facades."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# Feature module composing two engine modules (the sanctioned exception) plus the
+# layers it genuinely uses: kernel (Ratio/Meters/Tick), math (Vec3/Transform),
+# runtime (RuntimeStep, the fixed physics step).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-animation-authoring = { path = "../axiom-animation-authoring" }
+axiom-physics = { path = "../axiom-physics" }
+
+[dev-dependencies]
+# The integration slice drives the public facades end-to-end and names Tick /
+# Ratio / Vec3 / the authoring facade directly.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-animation-authoring = { path = "../axiom-animation-authoring" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

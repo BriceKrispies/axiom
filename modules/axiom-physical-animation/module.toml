@@ -1,0 +1,35 @@
+# Axiom module manifest — axiom-physical-animation (a FEATURE module).
+#
+# The composition tier between two engine modules. `axiom-animation-authoring`
+# owns the authoring vocabulary and emits neutral physical *objectives*;
+# `axiom-physics` owns the real rigid-body simulation. This feature module is the
+# only place the two meet: it binds a humanoid rig to physics bodies, translates a
+# compiled motion's per-tick objectives into physics forces / impulses / kinematic
+# drives, steps the world deterministically, and reads back pose frames. It owns
+# no simulation and no authoring — both are reached through their facades.
+#
+# Feature modules are the sanctioned exception to "modules never depend on
+# modules": it may Cargo-depend on exactly the modules named in `allowed_modules`.
+# It holds no rendering, browser API, wall-clock time, or randomness.
+
+[module]
+name = "physical-animation"
+crate_name = "axiom-physical-animation"
+kind = "feature-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+    "runtime",
+]
+
+allowed_modules = [
+    "animation-authoring",
+    "physics",
+]
+
+introduced_capabilities = [
+    "humanoid-physics-binding",
+    "physical-motion-objectives-bridge",
+    "physics-backed-animation-frames",
+]
