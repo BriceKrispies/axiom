@@ -80,7 +80,7 @@ fn validate_finite(spec: &MotionSpec) -> AuthoringResult<()> {
     let styles_ok = spec.styles().iter().all(|(_, v)| v.is_finite());
     let phases_ok = spec.phases().iter().all(|ph| {
         ph.layer_weight().is_finite()
-            & ph.goals().iter().all(|g| finite3(g.euler()) & g.amount().is_finite())
+            & ph.goals().iter().all(|g| finite3(g.euler()) & finite3(g.axis()) & g.amount().is_finite())
     });
     let events_ok = spec.events().iter().all(|e| e.power().is_finite());
     (targets_ok & styles_ok & phases_ok & events_ok)
@@ -191,7 +191,8 @@ fn resolve_run_cycle(g: &PoseGoal, rig: &HumanoidRigSpec, _spec: &MotionSpec) ->
     g.joint_name()
         .and_then(|n| rig.joint_id(n))
         .ok_or_else(|| AuthoringError::unknown_joint("run_cycle joint absent from rig"))
-        .map(|joint| ResolvedGoal::new(GoalKind::RunCycle, joint, Vec3::ZERO, g.amount(), g.euler()))
+        // The oscillation axis rides in the (otherwise-unused) resolved `target` slot.
+        .map(|joint| ResolvedGoal::new(GoalKind::RunCycle, joint, g.axis(), g.amount(), g.euler()))
 }
 
 /// Per-kind goal resolvers, indexed by [`GoalKind`] discriminant.
@@ -564,7 +565,7 @@ mod tests {
             p.push_goal(PoseGoal::leg_backswing(true, 0.8));
             p.push_goal(PoseGoal::leg_strike(true, "ball"));
             p.push_goal(PoseGoal::follow_through(true, "net_center"));
-            p.push_goal(PoseGoal::run_cycle("left_thigh", 0.5, 0.0, 3.0, 0.0));
+            p.push_goal(PoseGoal::run_cycle("left_thigh", 0.5, 0.0, 3.0, 0.0, Vec3::new(1.0, 0.0, 0.0)));
             p.push_constraint(Constraint::pin_effector_to_target("left_foot_sole", "left_plant_spot"));
             p.push_constraint(Constraint::keep_gaze_on_target("ball"));
             p.push_constraint(Constraint::keep_center_of_mass_over_support("left_foot_sole"));
@@ -581,7 +582,7 @@ mod tests {
     #[test]
     fn a_run_cycle_on_an_unknown_joint_is_rejected() {
         let mut m = base_spec();
-        m.phase_mut(0).unwrap().push_goal(PoseGoal::run_cycle("no_such_joint", 0.5, 0.0, 3.0, 0.0));
+        m.phase_mut(0).unwrap().push_goal(PoseGoal::run_cycle("no_such_joint", 0.5, 0.0, 3.0, 0.0, Vec3::new(1.0, 0.0, 0.0)));
         assert_eq!(err(&m), AuthoringErrorCode::UnknownJoint);
     }
 }

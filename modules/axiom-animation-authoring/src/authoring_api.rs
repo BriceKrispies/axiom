@@ -214,29 +214,59 @@ impl AnimationAuthoringApi {
         arm_swing: Ratio,
     ) -> AuthoringResult<()> {
         use core::f32::consts::{FRAC_PI_2, PI};
-        // Maximum radians each cycle component reaches at full strength.
-        const STRIDE_MAX: f32 = 0.8;
-        const KNEE_MAX: f32 = 1.0;
-        const ARM_MAX: f32 = 0.7;
+        // Maximum radians each cycle component reaches at full strength — a full,
+        // athletic stride (~57° thigh swing), a high knee lift, and a strong arm pump.
+        const STRIDE_MAX: f32 = 1.0;
+        const KNEE_MAX: f32 = 1.1;
+        const ARM_MAX: f32 = 0.95;
+        // A runner carries the forearms bent forward (~this many radians at full arm
+        // swing) so the arms read as bent, pumping elbows — not straight sticks —
+        // from a behind-the-runner view. Negative X bends the down-hanging forearm
+        // forward (toward +Z).
+        const ELBOW_CARRY: f32 = 1.2;
+        // How far the elbows swing OUT to the sides (lateral abduction): a fore/aft
+        // pump alone is foreshortened to nothing from a behind-the-runner view, so the
+        // elbows are held out where they read. Full-amplitude (the cycle ignores phase
+        // strength), unlike a strength-scaled `set_joint_rotation`.
+        const ABDUCT: f32 = 0.4;
+        let swing = Vec3::new(1.0, 0.0, 0.0); // fore/aft (sagittal)
+        let lateral = Vec3::new(0.0, 0.0, 1.0); // out/in (coronal)
+        // The upper arms pump on a per-side DIAGONAL — fore/aft plus a lateral term —
+        // so that from a behind-the-runner view the swing has a visible out/in
+        // component (a pure fore/aft pump is foreshortened to nothing). `+Z` abducts
+        // the left arm out and `-Z` the right, so each arm swings forward-and-out then
+        // back-and-in, alternating.
+        let pump_l = Vec3::new(1.0, 0.0, 0.45);
+        let pump_r = Vec3::new(1.0, 0.0, -0.45);
         let n = steps as f32;
         let thigh = stride.get() * STRIDE_MAX;
         let knee = knee_bend.get() * KNEE_MAX;
         let arm = arm_swing.get() * ARM_MAX;
-        // `(joint, amplitude, phase_offset, bias)` per driven joint.
-        let cycle: [(&str, f32, f32, f32); 6] = [
-            ("left_thigh", thigh, 0.0, 0.0),
-            ("right_thigh", thigh, PI, 0.0),
+        let elbow = arm_swing.get() * ELBOW_CARRY;
+        let abduct = arm_swing.get() * ABDUCT;
+        // `(joint, amplitude, phase_offset, bias, axis)` per driven joint.
+        let cycle: [(&str, f32, f32, f32, Vec3); 10] = [
+            ("left_thigh", thigh, 0.0, 0.0, swing),
+            ("right_thigh", thigh, PI, 0.0, swing),
             // Shins lead their thigh by a quarter cycle and stay flexed (bias) so the
             // knee lifts on the forward swing and never hyperextends.
-            ("left_shin", knee * 0.5, FRAC_PI_2, knee * 0.5),
-            ("right_shin", knee * 0.5, PI + FRAC_PI_2, knee * 0.5),
-            // Arms oppose the same-side leg (contralateral swing).
-            ("left_upper_arm", arm, PI, 0.0),
-            ("right_upper_arm", arm, 0.0, 0.0),
+            ("left_shin", knee * 0.5, FRAC_PI_2, knee * 0.5, swing),
+            ("right_shin", knee * 0.5, PI + FRAC_PI_2, knee * 0.5, swing),
+            // Shoulders hold a modest base lateral abduction so the arms sit out from
+            // the torso; the upper arms then pump around it on the per-side diagonal.
+            ("left_shoulder", 0.0, 0.0, abduct, lateral),
+            ("right_shoulder", 0.0, 0.0, -abduct, lateral),
+            // Upper arms pump diagonally, opposing the same-side leg (contralateral).
+            ("left_upper_arm", arm, PI, 0.0, pump_l),
+            ("right_upper_arm", arm, 0.0, 0.0, pump_r),
+            // Forearms carry bent forward (bias) and flex a little in phase with their
+            // upper arm, so the bent elbows pump visibly.
+            ("left_forearm", arm * 0.35, PI, -elbow, swing),
+            ("right_forearm", arm * 0.35, 0.0, -elbow, swing),
         ];
         self.phase_mut(phase).map(|p| {
-            cycle.iter().for_each(|&(joint, amplitude, offset, bias)| {
-                p.push_goal(PoseGoal::run_cycle(joint, amplitude, offset, n, bias));
+            cycle.iter().for_each(|&(joint, amplitude, offset, bias, axis)| {
+                p.push_goal(PoseGoal::run_cycle(joint, amplitude, offset, n, bias, axis));
             });
         })
     }

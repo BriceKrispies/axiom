@@ -54,6 +54,10 @@ pub struct PoseGoal {
     side_right: bool,
     amount: f32,
     euler: Vec3,
+    /// The rotation axis a [`GoalKind::RunCycle`] oscillates about (a canonical unit
+    /// axis: `+X` = fore/aft swing, `+Z` = lateral abduction). Ignored by every other
+    /// kind (left `ZERO`).
+    axis: Vec3,
 }
 
 impl PoseGoal {
@@ -67,6 +71,7 @@ impl PoseGoal {
             side_right: false,
             amount: 0.0,
             euler,
+            axis: Vec3::ZERO,
         }
     }
 
@@ -80,6 +85,7 @@ impl PoseGoal {
             side_right: false,
             amount: 0.0,
             euler: Vec3::ZERO,
+            axis: Vec3::ZERO,
         }
     }
 
@@ -93,6 +99,7 @@ impl PoseGoal {
             side_right: false,
             amount,
             euler: Vec3::ZERO,
+            axis: Vec3::ZERO,
         }
     }
 
@@ -106,6 +113,7 @@ impl PoseGoal {
             side_right: right,
             amount: 0.0,
             euler: Vec3::ZERO,
+            axis: Vec3::ZERO,
         }
     }
 
@@ -119,6 +127,7 @@ impl PoseGoal {
             side_right: false,
             amount,
             euler: Vec3::ZERO,
+            axis: Vec3::ZERO,
         }
     }
 
@@ -132,6 +141,7 @@ impl PoseGoal {
             side_right: right,
             amount,
             euler: Vec3::ZERO,
+            axis: Vec3::ZERO,
         }
     }
 
@@ -145,6 +155,7 @@ impl PoseGoal {
             side_right: right,
             amount: 0.0,
             euler: Vec3::ZERO,
+            axis: Vec3::ZERO,
         }
     }
 
@@ -158,13 +169,15 @@ impl PoseGoal {
             side_right: right,
             amount: 0.0,
             euler: Vec3::ZERO,
+            axis: Vec3::ZERO,
         }
     }
 
-    /// Oscillate `joint` fore/aft over the phase: angle `bias + amplitude·sin(
+    /// Oscillate `joint` about `axis` over the phase: angle `bias + amplitude·sin(
     /// TAU·steps·progress + phase_offset)`. The three cycle parameters ride in
-    /// `euler = (phase_offset, steps, bias)`; `amount` carries the `amplitude`.
-    pub(crate) fn run_cycle(joint: &str, amplitude: f32, phase_offset: f32, steps: f32, bias: f32) -> Self {
+    /// `euler = (phase_offset, steps, bias)`; `amount` carries the `amplitude`; `axis`
+    /// is the canonical unit axis (`+X` fore/aft swing, `+Z` lateral abduction).
+    pub(crate) fn run_cycle(joint: &str, amplitude: f32, phase_offset: f32, steps: f32, bias: f32, axis: Vec3) -> Self {
         PoseGoal {
             kind: GoalKind::RunCycle,
             joint_name: Some(joint.to_string()),
@@ -173,6 +186,7 @@ impl PoseGoal {
             side_right: false,
             amount: amplitude,
             euler: Vec3::new(phase_offset, steps, bias),
+            axis,
         }
     }
 
@@ -209,6 +223,11 @@ impl PoseGoal {
     /// The explicit Euler orientation (only `SetJointRotation` uses it).
     pub(crate) fn euler(&self) -> Vec3 {
         self.euler
+    }
+
+    /// The oscillation axis (only `RunCycle` uses it).
+    pub(crate) fn axis(&self) -> Vec3 {
+        self.axis
     }
 }
 
@@ -305,11 +324,12 @@ mod tests {
         assert!(!f.side_right());
         assert_eq!(f.target_name(), Some("net_center"));
 
-        let rc = PoseGoal::run_cycle("left_thigh", 0.5, 1.0, 3.0, 0.2);
+        let rc = PoseGoal::run_cycle("left_thigh", 0.5, 1.0, 3.0, 0.2, Vec3::new(1.0, 0.0, 0.0));
         assert_eq!(rc.kind(), GoalKind::RunCycle);
         assert_eq!(rc.joint_name(), Some("left_thigh"));
         assert_eq!(rc.amount(), 0.5);
         assert_eq!(rc.euler(), Vec3::new(1.0, 3.0, 0.2));
+        assert_eq!(rc.axis(), Vec3::new(1.0, 0.0, 0.0));
     }
 
     #[test]

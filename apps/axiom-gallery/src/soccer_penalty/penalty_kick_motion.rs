@@ -217,7 +217,8 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     // cycle drives both legs (antiphase), the knees (lift on the swing), and the arms
     // (contralateral pump) — a run, not a slide.
     let steps = 3 + (style.runup_speed > 0.6) as u32;
-    api.add_run_cycle(sprint, steps, s(0.55 + 0.35 * style.runup_speed), s(0.6), s(0.45 + 0.25 * style.arm_balance)).unwrap();
+    // The gait itself holds the arms abducted (elbows out) + pumping — see add_run_cycle.
+    api.add_run_cycle(sprint, steps, s(0.7 + 0.25 * style.runup_speed), s(0.75), s(0.6 + 0.3 * style.arm_balance)).unwrap();
     api.add_torso_twist_toward_target(sprint, "ball", s(0.25 * style.torso_twist)).unwrap();
     // A forward torso lean into the run-up (+X rotation tips the chest toward the goal).
     api.add_set_joint_rotation(sprint, "chest", Vec3::new(0.28, 0.0, 0.0)).unwrap();

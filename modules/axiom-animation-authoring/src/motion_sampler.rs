@@ -148,7 +148,10 @@ fn apply_follow_through(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _roo
 fn apply_run_cycle(g: &ResolvedGoal, locals: &mut [Transform], _s: f32, _root: Vec3, progress: f32) {
     let e = g.euler();
     let angle = e.z + g.amount() * (core::f32::consts::TAU * e.y * progress + e.x).sin();
-    locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(angle, 0.0, 0.0);
+    // Rotate `angle` about the canonical unit axis carried in the resolved `target`
+    // (`+X` fore/aft swing, `+Z` lateral abduction).
+    let a = g.target();
+    locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(a.x * angle, a.y * angle, a.z * angle);
 }
 
 /// Per-kind goal appliers, indexed by the goal discriminant.
@@ -265,7 +268,7 @@ mod tests {
             p.push_goal(PoseGoal::leg_backswing(true, 0.8));
             p.push_goal(PoseGoal::leg_strike(false, "ball"));
             p.push_goal(PoseGoal::follow_through(false, "net_center"));
-            p.push_goal(PoseGoal::run_cycle("left_shin", 0.5, 0.0, 2.0, 0.1));
+            p.push_goal(PoseGoal::run_cycle("left_shin", 0.5, 0.0, 2.0, 0.1, Vec3::new(1.0, 0.0, 0.0)));
             p.push_constraint(Constraint::pin_effector_to_target("left_foot_sole", "left_plant_spot"));
             p.push_contact(ContactDeclaration::new("right_foot_sole", "ball"));
         }
