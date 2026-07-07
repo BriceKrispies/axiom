@@ -216,8 +216,10 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     // The stepping gait: ~3 strides over the sprint, scaled by run-up speed. The
     // cycle drives both legs (antiphase), the knees (lift on the swing), and the arms
     // (contralateral pump) — a run, not a slide.
-    let steps = 3 + (style.runup_speed > 0.6) as u32;
-    // The gait itself holds the arms abducted (elbows out) + pumping — see add_run_cycle.
+    // Two deliberate strides over the run-up (not a frantic shuffle); the kicker plays
+    // this at a slowed, interpolated rate (see penalty_kicker::RUNUP_PLAYBACK_RATE) for
+    // a smooth stride. The gait itself holds the arms abducted + pumping (add_run_cycle).
+    let steps = 2;
     api.add_run_cycle(sprint, steps, s(0.7 + 0.25 * style.runup_speed), s(0.75), s(0.6 + 0.3 * style.arm_balance)).unwrap();
     api.add_torso_twist_toward_target(sprint, "ball", s(0.25 * style.torso_twist)).unwrap();
     // A forward torso lean into the run-up (+X rotation tips the chest toward the goal).

@@ -69,7 +69,7 @@ fn the_motion_spec_compiles_and_has_nine_phases_in_order() {
 fn setup_places_the_kicker_behind_the_ball() {
     // In the rendered WORLD, the setup/idle kicker stands behind the ball: its pelvis
     // sits at a larger z (nearer the camera) than the ball on the penalty spot.
-    let boxes = KickerRig::new().boxes_at(PHASE_SAMPLE_TICKS[SETUP] as u32);
+    let boxes = KickerRig::new().boxes_at(PHASE_SAMPLE_TICKS[SETUP] as f32);
     let pelvis = boxes.iter().find(|b| b.label == "kicker.pelvis").expect("pelvis box");
     assert!(pelvis.center.z > PENALTY_SPOT_Z, "kicker stands behind the ball: pelvis z={}", pelvis.center.z);
 }

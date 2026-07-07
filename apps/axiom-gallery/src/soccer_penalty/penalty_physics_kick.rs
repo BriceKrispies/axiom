@@ -207,6 +207,26 @@ impl PenaltyPhysicsKick {
         &self.frames[i]
     }
 
+    /// The 13 joint world transforms at a **fractional** tick, interpolated between
+    /// the bracketing captured frames (matching `SoccerPenaltyKickPose::joints_at`, so
+    /// [`crate::soccer_penalty::penalty_kicker::KickerRig::boxes_at`] is source-agnostic).
+    pub fn joints_at(&self, t: f32) -> [axiom_math::Transform; 13] {
+        let max = self.frames.len().saturating_sub(1);
+        let t = t.max(0.0);
+        let i = (t.floor() as usize).min(max);
+        let j = (i + 1).min(max);
+        let f = t - (i as f32);
+        let a = &self.frames[i].joints;
+        let b = &self.frames[j].joints;
+        let mut out = [axiom_math::Transform::IDENTITY; 13];
+        for k in 0..13 {
+            let pos = a[k].translation.add(b[k].translation.subtract(a[k].translation).mul_scalar(f));
+            let rot = a[k].rotation.nlerp(b[k].rotation, f).unwrap_or(a[k].rotation);
+            out[k] = axiom_math::Transform::new(pos, rot, a[k].scale);
+        }
+        out
+    }
+
     /// The total authored tick count.
     pub fn duration(&self) -> u64 {
         DURATION

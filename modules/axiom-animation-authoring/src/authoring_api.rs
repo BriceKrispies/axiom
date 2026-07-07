@@ -216,9 +216,9 @@ impl AnimationAuthoringApi {
         use core::f32::consts::{FRAC_PI_2, PI};
         // Maximum radians each cycle component reaches at full strength — a full,
         // athletic stride (~57° thigh swing), a high knee lift, and a strong arm pump.
-        const STRIDE_MAX: f32 = 1.0;
-        const KNEE_MAX: f32 = 1.1;
-        const ARM_MAX: f32 = 0.95;
+        const STRIDE_MAX: f32 = 0.9;
+        const KNEE_MAX: f32 = 1.0;
+        const ARM_MAX: f32 = 0.75;
         // A runner carries the forearms bent forward (~this many radians at full arm
         // swing) so the arms read as bent, pumping elbows — not straight sticks —
         // from a behind-the-runner view. Negative X bends the down-hanging forearm

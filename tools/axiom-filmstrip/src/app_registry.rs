@@ -189,21 +189,22 @@ fn soccer_markers(scenario: &str) -> Vec<AnimationMarker> {
         tick,
     };
     match scenario {
-        // Ticks are grounded in the rendered shot: the run-up plays across the
-        // charge hold (shot_tick ≈ authored run-up progress), release ~51 fires the
-        // strike, the ball leaves the foot ~52, crosses the line ~74, settles ~90.
+        // Ticks are grounded in the rendered shot: the run-up plays at the slowed,
+        // interpolated rate across the ~96-tick charge hold (authored ≈ 4 +
+        // shot_tick/2), release ~97 fires the strike, the ball leaves the foot ~98,
+        // crosses the line ~122, settles ~135.
         "default_penalty_kick" => vec![
-            mark("kicker.runup.start", 2),
-            mark("kicker.stride.1", 12),
-            mark("kicker.stride.2", 22),
-            mark("kicker.left_foot.plant", 30),
-            mark("kicker.hip.twist.peak", 40),
-            mark("kicker.right_leg.swing.apex", 48),
-            mark("kicker.foot.ball_contact", 53),
-            mark("goalie.dive.commit", 54),
-            mark("kicker.followthrough.peak", 60),
-            mark("ball.goal_line.cross", 74),
-            mark("result.freeze", 90),
+            mark("kicker.runup.start", 8),
+            mark("kicker.stride.1", 24),
+            mark("kicker.stride.2", 40),
+            mark("kicker.left_foot.plant", 56),
+            mark("kicker.hip.twist.peak", 76),
+            mark("kicker.right_leg.swing.apex", 92),
+            mark("kicker.foot.ball_contact", 98),
+            mark("goalie.dive.commit", 99),
+            mark("kicker.followthrough.peak", 108),
+            mark("ball.goal_line.cross", 122),
+            mark("result.freeze", 135),
         ],
         _ => Vec::new(),
     }
@@ -283,11 +284,11 @@ mod tests {
         assert_eq!(
             pts[0],
             CapturePoint {
-                tick: 53,
+                tick: 98,
                 marker: Some("kicker.foot.ball_contact".into())
             }
         );
-        assert_eq!(pts[1].tick, 90);
+        assert_eq!(pts[1].tick, 135);
     }
 
     #[test]

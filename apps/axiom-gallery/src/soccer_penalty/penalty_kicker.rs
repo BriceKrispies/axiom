@@ -64,12 +64,12 @@ pub const KICKER_LABELS: [&str; 13] = [
 
 /// The rest/idle authored tick (phase `setup`): the kicker stands ready behind the
 /// ball. Used by the rig tests as a stable reference frame.
-pub const IDLE_FRAME: u32 = 0;
+pub const IDLE_FRAME: f32 = 0.0;
 
 /// The authored tick the static diorama poses the kicker at: late `backswing`, the
 /// kicking leg wound back and weight carried onto the planted support leg — a
 /// braced, weighted athlete cocked to strike rather than a limp mannequin.
-pub const DISPLAY_FRAME: u32 = 44;
+pub const DISPLAY_FRAME: f32 = 44.0;
 
 /// Which pose source the current build wires into the kicker — a greppable marker
 /// the tests assert on. `"kinematic"` is the stable default; `"physical_humanoid"`
@@ -130,10 +130,11 @@ impl KickerRig {
     /// spot and facing the goal. The 13 joint world transforms come from the
     /// physics-backed kick (`penalty_physics_kick`); the figure supplies the box
     /// sizes, offsets and kit tags.
-    pub fn boxes_at(&self, tick: u32) -> Vec<KickerBox> {
-        let frame = cached_kick().frame(u64::from(tick));
+    pub fn boxes_at(&self, tick: f32) -> Vec<KickerBox> {
         debug_assert_eq!(self.figure.part_count(), KICKER_JOINTS.len());
-        let world: Vec<Transform> = frame.joints.to_vec();
+        // Interpolate the joint transforms at the (possibly fractional) authored tick,
+        // so a slowed run-up plays smoothly between the captured keyframes.
+        let world: Vec<Transform> = cached_kick().joints_at(tick).to_vec();
         let posed = FigureApi::new().posed_parts(&self.figure, &world).expect("posed parts");
         posed
             .iter()
@@ -205,7 +206,14 @@ fn material_for_part(index: usize, tag: u32) -> PenaltyMaterialId {
 /// How far before the strike tick the held run-up caps: holding to charge winds the
 /// kicker up to the very start of the strike phase (`STRIKE` begins at tick 52) and
 /// holds there, cocked, until release fires the strike.
-const RUNUP_STRIKE_GAP: u32 = 3;
+const RUNUP_STRIKE_GAP: f32 = 3.0;
+
+/// Authored ticks advanced per game tick while the run-up is held. **Below 1** so the
+/// stride cadence reads as a few deliberate strides rather than a frantic shuffle; the
+/// pose is interpolated between keyframes ([`KickerRig::boxes_at`] → `joints_at`) so
+/// the sub-tick playback stays smooth instead of stair-stepping. `soccer_shot_state`
+/// holds the charge long enough (at this rate) for the run-up to reach the cocked pose.
+const RUNUP_PLAYBACK_RATE: f32 = 0.5;
 
 /// The authored kick tick to pose for the current shot state — a **time-based**
 /// mapping so the kick actually plays out as an animation (the earlier power-based
@@ -219,14 +227,14 @@ const RUNUP_STRIKE_GAP: u32 = 3;
 /// - **committed** (locked / in flight / resolved) → `strike … recover`, mapped from
 ///   the ball's flight progress, so the instep connects as the ball launches and the
 ///   leg follows through and recovers as the ball flies.
-pub fn kicker_frame(state: &PenaltyInteractionState) -> u32 {
+pub fn kicker_frame(state: &PenaltyInteractionState) -> f32 {
     use crate::soccer_penalty::penalty_interaction::PenaltyShotFlightState as S;
     match state.state {
-        S::Aiming => SPRINT_APPROACH.0 as u32,
+        S::Aiming => SPRINT_APPROACH.0 as f32,
         S::Charging => {
-            let start = SPRINT_APPROACH.0 as u32;
-            let cocked = (STRIKE_CONTACT_TICK as u32).saturating_sub(RUNUP_STRIKE_GAP);
-            (start + state.charge_ticks).min(cocked)
+            let start = SPRINT_APPROACH.0 as f32;
+            let cocked = STRIKE_CONTACT_TICK as f32 - RUNUP_STRIKE_GAP;
+            (start + state.charge_ticks as f32 * RUNUP_PLAYBACK_RATE).min(cocked)
         }
         _ => {
             let progress = state
@@ -236,7 +244,7 @@ pub fn kicker_frame(state: &PenaltyInteractionState) -> u32 {
                 .clamp(0.0, 1.0);
             let start = STRIKE_CONTACT_TICK as f32;
             let end = (DURATION - 1) as f32;
-            (start + (end - start) * progress) as u32
+            start + (end - start) * progress
         }
     }
 }
@@ -261,8 +269,8 @@ mod tests {
         let rig = KickerRig::new();
         // Right foot is part index 8; world -Z is toward the goal. It is drawn back
         // in the backswing and sweeps toward the goal by the follow-through.
-        let back = rig.boxes_at(41)[8].center.z; // backswing
-        let follow = rig.boxes_at(62)[8].center.z; // follow-through
+        let back = rig.boxes_at(41.0)[8].center.z; // backswing
+        let follow = rig.boxes_at(62.0)[8].center.z; // follow-through
         assert!(back - follow > 0.2, "foot should move toward goal (-Z): back={back}, follow={follow}");
     }
 
@@ -271,13 +279,13 @@ mod tests {
         // Aiming: the kicker stands ready behind the ball at the run-up start, never
         // at the strike.
         let aiming = PenaltyInteractionState::start();
-        assert!(kicker_frame(&aiming) < STRIKE_CONTACT_TICK as u32);
+        assert!(kicker_frame(&aiming) < STRIKE_CONTACT_TICK as f32);
         // Holding to charge strides the run-up forward by TIME held, but caps cocked
         // just before the strike — charging alone never reaches contact.
-        let short = PenaltyInteractionState::run(&[PenaltyInputIntent::charging(0, 0); 3]);
-        let long = PenaltyInteractionState::run(&[PenaltyInputIntent::charging(0, 0); 40]);
+        let short = PenaltyInteractionState::run(&[PenaltyInputIntent::charging(0, 0); 6]);
+        let long = PenaltyInteractionState::run(&[PenaltyInputIntent::charging(0, 0); 60]);
         assert!(kicker_frame(&long) > kicker_frame(&short), "a longer hold winds up further");
-        assert!(kicker_frame(&long) < STRIKE_CONTACT_TICK as u32, "the hold caps cocked, before contact");
+        assert!(kicker_frame(&long) < STRIKE_CONTACT_TICK as f32, "the hold caps cocked, before contact");
         // Release commits the shot; once the ball is in flight the tick is at/after
         // the strike.
         let mut intents = vec![PenaltyInputIntent::charging(0, 0); 20];
@@ -285,7 +293,7 @@ mod tests {
         intents.push(PenaltyInputIntent::neutral()); // LockedPreview → launch
         intents.push(PenaltyInputIntent::neutral()); // BallInFlight
         let launched = PenaltyInteractionState::run(&intents);
-        assert!(kicker_frame(&launched) >= STRIKE_CONTACT_TICK as u32);
+        assert!(kicker_frame(&launched) >= STRIKE_CONTACT_TICK as f32);
     }
 
     #[test]

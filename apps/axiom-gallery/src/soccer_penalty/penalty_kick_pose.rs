@@ -198,6 +198,28 @@ impl SoccerPenaltyKickPose {
         &self.frames[i]
     }
 
+    /// The 13 joint world transforms at a **fractional** authored tick, linearly
+    /// interpolated between the two bracketing captured frames (translation lerp +
+    /// quaternion nlerp). Sampling the kick at sub-tick rates (a slowed run-up) then
+    /// reads a smooth in-between pose instead of snapping frame to frame — the game
+    /// plays the authored keyframes as a continuous motion.
+    pub fn joints_at(&self, t: f32) -> [Transform; 13] {
+        let max = self.frames.len().saturating_sub(1);
+        let t = t.max(0.0);
+        let i = (t.floor() as usize).min(max);
+        let j = (i + 1).min(max);
+        let f = t - (i as f32);
+        let a = &self.frames[i].joints;
+        let b = &self.frames[j].joints;
+        let mut out = [Transform::IDENTITY; 13];
+        for k in 0..13 {
+            let pos = a[k].translation.add(b[k].translation.subtract(a[k].translation).mul_scalar(f));
+            let rot = a[k].rotation.nlerp(b[k].rotation, f).unwrap_or(a[k].rotation);
+            out[k] = Transform::new(pos, rot, a[k].scale);
+        }
+        out
+    }
+
     /// The total authored tick count.
     pub fn duration(&self) -> u64 {
         DURATION

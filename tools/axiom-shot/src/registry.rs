@@ -191,7 +191,9 @@ pub fn soccer_shot_state(
     use axiom_gallery::soccer_penalty::{PenaltyInputIntent, PenaltyInteractionState};
     // Hold ~ the full run-up (sprint → plant → backswing → hip_drive) before the
     // strike; power maxes early (~13 ticks) but the run-up keeps striding while held.
-    const CHARGE_TICKS: u32 = 50;
+    // The kicker plays the run-up at a slowed rate (RUNUP_PLAYBACK_RATE ~0.5) for a
+    // smooth, deliberate stride, so the hold spans ~twice the authored run-up ticks.
+    const CHARGE_TICKS: u32 = 96;
     (0..shot_tick).fold(PenaltyInteractionState::start(), |s, t| {
         let intent = if t < CHARGE_TICKS {
             PenaltyInputIntent::charging(0, 0)
