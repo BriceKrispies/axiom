@@ -65,17 +65,26 @@ fn horizontal_speed(v: Vec3) -> f32 {
     (v.x * v.x + v.z * v.z).sqrt()
 }
 
-/// Held / edge input for one frame (all movement is camera-relative).
+/// Held / edge input for one frame. Movement (WASD) is relative to where the
+/// camera looks; the camera is aimed only by the mouse (`yaw_delta`/`pitch_delta`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Intent {
+    /// W — drive away from the camera.
     pub forward: bool,
+    /// S — drive toward the camera.
     pub back: bool,
+    /// A — strafe the ball left (relative to the camera).
     pub left: bool,
+    /// D — strafe the ball right (relative to the camera).
     pub right: bool,
     /// Shift — brake (and, when nearly stopped, gate spin charging).
     pub brake: bool,
     /// A move key was *pressed this frame* (edge) — charges spin while braked.
     pub tap: bool,
+    /// Mouse motion this frame (pixels) that orbits the camera — horizontal /
+    /// vertical. The camera responds to nothing else.
+    pub yaw_delta: f32,
+    pub pitch_delta: f32,
     /// Restart the run (acted on any time; primarily after finish / fall-out).
     pub restart: bool,
 }
@@ -109,8 +118,7 @@ impl GravixGame {
     pub fn new() -> Self {
         let course = course::generate();
         let (physics, ball) = build_world(&course);
-        let facing = course.segments[0].forward;
-        let cam = ChaseCamera::new(facing, course.spawn);
+        let cam = ChaseCamera::new(initial_yaw(&course), course.spawn);
         let spawn = course.spawn;
         GravixGame {
             physics,
@@ -135,7 +143,7 @@ impl GravixGame {
             .set_body_velocity(self.ball, Vec3::ZERO, Vec3::ZERO)
             .expect("reset ball velocity");
         self.spin = SpinController::new();
-        self.cam = ChaseCamera::new(self.course.segments[0].forward, self.course.spawn);
+        self.cam = ChaseCamera::new(initial_yaw(&self.course), self.course.spawn);
         self.phase = Phase::Rolling;
         self.ball_pos = self.course.spawn;
         self.ball_rot = [0.0, 0.0, 0.0, 1.0];
@@ -186,14 +194,14 @@ impl GravixGame {
             // fall after a moment (finish waits for restart).
             Phase::FellOut => {
                 self.finish_ticks += 1;
-                self.cam.update(self.ball_pos, self.ball_velocity().0, dt);
+                self.cam.update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
                 if self.finish_ticks > 45 {
                     self.restart();
                 }
             }
             Phase::Finished => {
                 self.finish_ticks += 1;
-                self.cam.update(self.ball_pos, Vec3::ZERO, dt);
+                self.cam.update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
             }
         }
     }
@@ -226,7 +234,7 @@ impl GravixGame {
         self.step_n += 1;
         self.read_ball();
         self.clamp_speed();
-        self.cam.update(self.ball_pos, self.ball_velocity().0, dt);
+        self.cam.update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
         self.check_finish();
         self.check_fall();
     }
@@ -371,6 +379,13 @@ pub struct GravixReadout {
     pub ball: Vec3,
     pub speed: f32,
     pub grounded: bool,
+}
+
+/// The initial camera yaw (radians) that looks down the first segment — so the
+/// run starts framed along the course before the player takes the mouse.
+fn initial_yaw(course: &Course) -> f32 {
+    let f = course.segments[0].forward;
+    f.x.atan2(f.z)
 }
 
 /// The camera-relative move direction from held input (`None` if no key held).

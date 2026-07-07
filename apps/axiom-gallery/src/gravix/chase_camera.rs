@@ -1,85 +1,76 @@
-//! The **third-person chase camera**. It trails behind and slightly above the
-//! ball, turns its facing toward the ball's horizontal velocity when moving fast
-//! (but holds a stable facing at low speed so it never spins randomly), looks a
-//! little ahead of the ball, and smooths both its facing and its eye so a spin
-//! launch never snaps the view. Pure math — it hands the renderer an
-//! `(eye, target)` pair and the game a ground-plane `(forward, right)` basis for
-//! camera-relative input. All feel comes from the `settings::CAM_*` constants.
+//! The **third-person chase camera**. It orbits behind and above the ball at a
+//! yaw/pitch the **player aims with the mouse** — it does *not* auto-follow the
+//! ball's velocity (so strafing the ball never swings the view tank-style). The
+//! eye trails the ball smoothly (launch-safe); the yaw/pitch respond directly to
+//! mouse motion. It hands the renderer an `(eye, target)` pair and the game a
+//! ground-plane `(forward, right)` basis so WASD move relative to where the
+//! camera looks. All feel comes from the `settings::CAM_*` constants.
 
 use axiom::prelude::Vec3;
 
 use crate::gravix::settings;
 
-/// The chase rig: a smoothed horizontal facing direction and a smoothed eye.
+/// The chase rig: a mouse-controlled orbit (`yaw` about +Y, `pitch` elevation) and
+/// a smoothed eye that trails the ball.
 #[derive(Debug, Clone, Copy)]
 pub struct ChaseCamera {
-    facing: Vec3,
+    yaw: f32,
+    pitch: f32,
     eye: Vec3,
 }
 
 impl ChaseCamera {
-    /// A rig framing `ball`, initially facing `initial_facing` (any vector; the
-    /// horizontal component is used, defaulting to `+Z`).
-    pub fn new(initial_facing: Vec3, ball: Vec3) -> Self {
-        let facing = horizontal_unit(initial_facing);
-        ChaseCamera { facing, eye: desired_eye(ball, facing) }
+    /// A rig framing `ball`, initially looking along compass `initial_yaw`
+    /// (radians; `facing = (sin, 0, cos)`), at the default pitch.
+    pub fn new(initial_yaw: f32, ball: Vec3) -> Self {
+        let pitch = settings::CAM_PITCH_DEFAULT;
+        let facing = yaw_facing(initial_yaw);
+        ChaseCamera { yaw: initial_yaw, pitch, eye: desired_eye(ball, facing, pitch) }
     }
 
-    /// Advance one step: turn the facing toward the ball's horizontal velocity when
-    /// fast enough, hold it when slow, and ease the eye toward its trailing pose.
-    pub fn update(&mut self, ball: Vec3, ball_velocity: Vec3, dt: f32) {
-        let speed = horizontal_speed(ball_velocity);
-        let desired_facing = if speed > settings::CAM_ALIGN_MIN_SPEED {
-            horizontal_unit(ball_velocity)
-        } else {
-            self.facing
-        };
-        let kf = ease_rate(settings::CAM_FACING_SMOOTHING, dt);
-        self.facing = horizontal_unit(self.facing.add(desired_facing.subtract(self.facing).mul_scalar(kf)));
+    /// Advance one step. `yaw_delta` / `pitch_delta` are the mouse deltas this
+    /// step (in pixels; scaled by the mouse sensitivity here), turning the orbit;
+    /// the eye then eases toward its trailing pose behind the ball.
+    pub fn update(&mut self, ball: Vec3, yaw_delta: f32, pitch_delta: f32, dt: f32) {
+        self.yaw += yaw_delta * settings::CAM_MOUSE_SENSITIVITY;
+        self.pitch = (self.pitch + pitch_delta * settings::CAM_MOUSE_SENSITIVITY)
+            .clamp(settings::CAM_PITCH_MIN, settings::CAM_PITCH_MAX);
 
-        let want = desired_eye(ball, self.facing);
+        let want = desired_eye(ball, self.facing(), self.pitch);
         let ke = ease_rate(settings::CAM_EYE_SMOOTHING, dt);
         self.eye = self.eye.add(want.subtract(self.eye).mul_scalar(ke));
     }
 
-    /// The camera eye and the look target (a little ahead of the ball along the
-    /// facing, not the ball centre) for the renderer's `looking_at`.
+    /// The camera eye and look target (a little ahead of the ball along the
+    /// facing) for the renderer's `looking_at`.
     pub fn eye_target(&self, ball: Vec3) -> (Vec3, Vec3) {
-        (self.eye, ball.add(self.facing.mul_scalar(settings::CAM_LOOK_AHEAD)))
+        (self.eye, ball.add(self.facing().mul_scalar(settings::CAM_LOOK_AHEAD)))
     }
 
-    /// The horizontal facing direction (unit).
+    /// The horizontal facing direction (unit) the camera looks along.
     pub fn facing(&self) -> Vec3 {
-        self.facing
+        yaw_facing(self.yaw)
     }
 
-    /// The ground-plane forward/right unit basis for camera-relative input.
+    /// The ground-plane forward/right unit basis for camera-relative input: W/S
+    /// drive along `forward`, A/D strafe along `right`.
     pub fn ground_basis(&self) -> (Vec3, Vec3) {
-        let fwd = self.facing;
+        let fwd = self.facing();
         (fwd, Vec3::new(-fwd.z, 0.0, fwd.x))
     }
 }
 
-/// The trailing eye for a ball and facing: behind along `-facing`, up by the height.
-fn desired_eye(ball: Vec3, facing: Vec3) -> Vec3 {
-    ball.subtract(facing.mul_scalar(settings::CAM_DISTANCE))
-        .add(Vec3::new(0.0, settings::CAM_HEIGHT, 0.0))
+/// The horizontal unit facing for a yaw: `(sin, 0, cos)` — yaw `0` looks along `+Z`.
+fn yaw_facing(yaw: f32) -> Vec3 {
+    Vec3::new(yaw.sin(), 0.0, yaw.cos())
 }
 
-/// A horizontal unit vector from `v` (Y flattened), defaulting to `+Z` when the
-/// horizontal projection is degenerate.
-fn horizontal_unit(v: Vec3) -> Vec3 {
-    let flat = Vec3::new(v.x, 0.0, v.z);
-    let len = (flat.x * flat.x + flat.z * flat.z).sqrt();
-    if len < 1.0e-5 {
-        Vec3::new(0.0, 0.0, 1.0)
-    } else {
-        flat.mul_scalar(1.0 / len)
-    }
-}
-
-fn horizontal_speed(v: Vec3) -> f32 {
-    (v.x * v.x + v.z * v.z).sqrt()
+/// The trailing eye for a ball, facing, and pitch: behind along `-facing` and up,
+/// with pitch raising the eye (and drawing it in horizontally) to look down more.
+fn desired_eye(ball: Vec3, facing: Vec3, pitch: f32) -> Vec3 {
+    let back = facing.mul_scalar(-settings::CAM_DISTANCE * pitch.cos());
+    let lift = settings::CAM_HEIGHT + settings::CAM_DISTANCE * pitch.sin();
+    ball.add(back).add(Vec3::new(0.0, lift, 0.0))
 }
 
 /// An exponential-smoothing blend factor for rate `k` over `dt` (`1 - e^{-k·dt}`),
@@ -91,49 +82,64 @@ fn ease_rate(k: f32, dt: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::f32::consts::FRAC_PI_2;
 
     const DT: f32 = 1.0 / 60.0;
 
     #[test]
     fn the_eye_sits_behind_and_above_the_ball() {
-        let cam = ChaseCamera::new(Vec3::new(0.0, 0.0, 1.0), Vec3::ZERO);
+        let cam = ChaseCamera::new(0.0, Vec3::ZERO); // looking +z
         let (eye, target) = cam.eye_target(Vec3::ZERO);
         assert!(eye.y > 0.0, "camera is above the ball");
         assert!(eye.z < 0.0, "camera trails behind (−z) a +z facing");
-        // Looks ahead of the ball, not at its centre.
         assert!(target.z > 0.0, "target leads the ball along the facing");
     }
 
     #[test]
-    fn facing_is_stable_at_low_speed_and_aligns_to_velocity_when_fast() {
-        let mut cam = ChaseCamera::new(Vec3::new(0.0, 0.0, 1.0), Vec3::ZERO);
-        // Near-zero velocity: facing holds (no random spin) over many steps.
+    fn the_mouse_turns_the_camera_and_the_ball_velocity_does_not() {
+        let mut cam = ChaseCamera::new(0.0, Vec3::ZERO);
+        // No mouse input over many steps: the facing holds regardless of where the
+        // ball is (the camera never auto-aligns to motion).
         for _ in 0..120 {
-            cam.update(Vec3::ZERO, Vec3::new(0.01, 0.0, 0.0), DT);
+            cam.update(Vec3::new(5.0, 0.0, 5.0), 0.0, 0.0, DT);
         }
-        let f = cam.facing();
-        assert!((f.subtract(Vec3::new(0.0, 0.0, 1.0))).length() < 1.0e-3, "held facing, got {f:?}");
-        // Fast velocity toward +x: facing turns toward +x and stays unit + horizontal.
-        for _ in 0..240 {
-            cam.update(Vec3::ZERO, Vec3::new(20.0, -3.0, 0.0), DT);
+        let held = cam.facing();
+        assert!((held.subtract(Vec3::new(0.0, 0.0, 1.0))).length() < 1.0e-3, "facing held, got {held:?}");
+        // A rightward mouse sweep turns the facing toward +x.
+        for _ in 0..60 {
+            cam.update(Vec3::ZERO, 40.0, 0.0, DT);
         }
-        let g = cam.facing();
-        assert!(g.x > 0.9 && g.y.abs() < 1.0e-6, "aligned to +x velocity, got {g:?}");
-        assert!((g.length() - 1.0).abs() < 1.0e-4);
+        let turned = cam.facing();
+        assert!(turned.x > 0.3, "mouse turned the camera toward +x, got {turned:?}");
+        assert!((turned.length() - 1.0).abs() < 1.0e-4 && turned.y == 0.0);
     }
 
     #[test]
-    fn ground_basis_is_horizontal_and_orthogonal() {
-        let cam = ChaseCamera::new(Vec3::new(1.0, 2.0, 1.0), Vec3::ZERO);
+    fn pitch_is_clamped_within_range() {
+        let mut cam = ChaseCamera::new(0.0, Vec3::ZERO);
+        // Slam the mouse up far past the limit; pitch saturates, it does not flip.
+        for _ in 0..500 {
+            cam.update(Vec3::ZERO, 0.0, 400.0, DT);
+        }
+        let high = ChaseCamera::new(0.0, Vec3::ZERO);
+        let _ = high;
+        // Re-derive the clamped eye is finite + above.
+        let (eye, _) = cam.eye_target(Vec3::ZERO);
+        assert!(eye.y.is_finite() && eye.y > 0.0);
+        // Slam it down past the low limit too.
+        for _ in 0..500 {
+            cam.update(Vec3::ZERO, 0.0, -400.0, DT);
+        }
+        let (eye2, _) = cam.eye_target(Vec3::ZERO);
+        assert!(eye2.y.is_finite());
+    }
+
+    #[test]
+    fn ground_basis_is_horizontal_orthogonal_and_tracks_yaw() {
+        let cam = ChaseCamera::new(FRAC_PI_2, Vec3::ZERO); // facing +x
         let (fwd, right) = cam.ground_basis();
+        assert!((fwd.subtract(Vec3::new(1.0, 0.0, 0.0))).length() < 1.0e-5, "yaw π/2 faces +x");
         assert!(fwd.y.abs() < 1.0e-6 && right.y.abs() < 1.0e-6);
         assert!(fwd.x * right.x + fwd.z * right.z < 1.0e-5, "forward ⟂ right");
-    }
-
-    #[test]
-    fn degenerate_velocity_keeps_a_defined_facing() {
-        // A camera created facing straight up (no horizontal component) defaults to +z.
-        let cam = ChaseCamera::new(Vec3::UNIT_Y, Vec3::ZERO);
-        assert_eq!(cam.facing(), Vec3::new(0.0, 0.0, 1.0));
     }
 }

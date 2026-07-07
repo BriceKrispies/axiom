@@ -98,15 +98,18 @@ pub const CAM_LOOK_AHEAD: f32 = 6.0;
 
 /// Exponential smoothing rate for the camera eye (per second) — higher snaps
 /// faster; low enough to stay launch-safe (no snapping on a spin launch).
-pub const CAM_EYE_SMOOTHING: f32 = 6.0;
+pub const CAM_EYE_SMOOTHING: f32 = 10.0;
 
-/// Exponential smoothing rate for the camera facing (per second) — how fast the
-/// facing turns toward the ball's horizontal velocity direction.
-pub const CAM_FACING_SMOOTHING: f32 = 3.2;
+/// Mouse look sensitivity (radians of orbit per pixel of mouse movement). The
+/// camera is steered *only* by the mouse — it never auto-follows the ball.
+pub const CAM_MOUSE_SENSITIVITY: f32 = 0.0032;
 
-/// Below this horizontal speed the camera holds its facing (no random spinning
-/// when the ball is nearly stopped); above it, facing aligns to velocity.
-pub const CAM_ALIGN_MIN_SPEED: f32 = 2.5;
+/// Initial camera pitch (elevation) on spawn, radians above the horizon.
+pub const CAM_PITCH_DEFAULT: f32 = 0.22;
+
+/// Camera pitch clamp (radians) — how far the mouse can tilt the orbit down / up.
+pub const CAM_PITCH_MIN: f32 = -0.25;
+pub const CAM_PITCH_MAX: f32 = 1.05;
 
 // --- spin-launch (Sonic-style spin dash) ------------------------------------
 

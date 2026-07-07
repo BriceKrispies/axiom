@@ -2,10 +2,12 @@
 //! render loop (stepping the game and refreshing the ball + camera each frame via
 //! the persistent meshed scene), and paint a small DOM HUD.
 //!
-//! Controls: **W A S D** / **arrow keys** roll the ball (camera-relative), **Shift**
-//! brakes; braked and nearly stopped, **tapping** a move key charges a spin and
-//! **releasing Shift** launches it; **R** restarts the run. The gallery's on-screen
-//! keypad dispatches synthetic key events, so the buttons drive it too.
+//! Controls: **the mouse** aims the camera (click the canvas to capture the
+//! pointer); **W/S** drive the ball toward / away from the camera and **A/D** strafe
+//! it left / right relative to the camera; **Shift** brakes; braked and nearly
+//! stopped, **tapping** a move key charges a spin and **releasing Shift** launches
+//! it; **R** restarts. The gallery's on-screen keypad dispatches synthetic key
+//! events, so the buttons drive movement too.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,11 +15,11 @@ use std::rc::Rc;
 use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::KeyboardEvent;
+use web_sys::{KeyboardEvent, MouseEvent};
 
 use crate::gravix::{live_app, GravixGame, Intent, Phase, SpinState, CANVAS_ID, LIVE_CAPACITY};
 
-/// Held key state, plus one-shot edges drained into each frame's `Intent`.
+/// Held key state + accumulated mouse motion, drained into each frame's `Intent`.
 #[derive(Default)]
 struct Held {
     forward: bool,
@@ -27,10 +29,13 @@ struct Held {
     brake: bool,
     tap_edge: bool,
     restart_edge: bool,
+    /// Mouse motion accumulated since the last frame (pixels), for camera orbit.
+    mouse_dx: f32,
+    mouse_dy: f32,
 }
 
 impl Held {
-    /// The `Intent` for this frame, consuming the one-shot edges.
+    /// The `Intent` for this frame, consuming the one-shot edges + mouse motion.
     fn intent(&mut self) -> Intent {
         Intent {
             forward: self.forward,
@@ -39,6 +44,9 @@ impl Held {
             right: self.right,
             brake: self.brake,
             tap: std::mem::take(&mut self.tap_edge),
+            // Mouse right → orbit right; mouse up → orbit up (invert screen Y).
+            yaw_delta: std::mem::take(&mut self.mouse_dx),
+            pitch_delta: -std::mem::take(&mut self.mouse_dy),
             restart: std::mem::take(&mut self.restart_edge),
         }
     }
@@ -50,6 +58,7 @@ pub fn gravix_start() {
 
     let held = Rc::new(RefCell::new(Held::default()));
     install_key_listeners(&held);
+    install_mouse_look(&held);
 
     let mut windowing = WindowingApi::new();
     windowing.configure_surface(1280, 720).expect("surface dimensions are valid");
@@ -143,6 +152,44 @@ fn install_key_listeners(held: &Rc<RefCell<Held>>) {
         .expect("keyup listener installs");
     on_down.forget();
     on_up.forget();
+}
+
+/// Capture the pointer on canvas click and accumulate relative mouse motion into
+/// the camera-orbit deltas while it is locked — so the mouse (and nothing else)
+/// aims the camera.
+fn install_mouse_look(held: &Rc<RefCell<Held>>) {
+    let window = web_sys::window().expect("a browser window");
+    let document = window.document().expect("a document");
+    let canvas = document.get_element_by_id(CANVAS_ID).expect("the gravix canvas element");
+
+    // Click the canvas to capture the pointer.
+    let lock_target = canvas.clone();
+    let on_click = Closure::<dyn FnMut(MouseEvent)>::new(move |_e: MouseEvent| {
+        let _ = lock_target.request_pointer_lock();
+    });
+    canvas
+        .add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())
+        .expect("click listener installs");
+    on_click.forget();
+
+    // Accumulate relative motion only while the pointer is locked.
+    let move_held = held.clone();
+    let on_move = Closure::<dyn FnMut(MouseEvent)>::new(move |e: MouseEvent| {
+        let locked = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.pointer_lock_element())
+            .is_some();
+        if !locked {
+            return;
+        }
+        let mut h = move_held.borrow_mut();
+        h.mouse_dx += e.movement_x() as f32;
+        h.mouse_dy += e.movement_y() as f32;
+    });
+    window
+        .add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref())
+        .expect("mousemove listener installs");
+    on_move.forget();
 }
 
 /// Create (once) and update the DOM HUD overlay with the run state.
