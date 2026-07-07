@@ -177,6 +177,13 @@ axiom-world = { path = "../../modules/axiom-world" }
 axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
 axiom-animation = { path = "../../modules/axiom-animation" }
 axiom-figure = { path = "../../modules/axiom-figure" }
+# The deterministic procedural-animation authoring vocabulary + its physics-backed
+# execution bridge. The soccer penalty game authors its kick as a 9-phase
+# `SoccerPenaltyKickMotionSpec` through `AnimationAuthoringApi`, then drives it
+# through `PhysicalAnimationApi` (real axiom-physics bodies/impulse) — the app is
+# the composition root that wires the two module facades together.
+axiom-animation-authoring = { path = "../../modules/axiom-animation-authoring" }
+axiom-physical-animation = { path = "../../modules/axiom-physical-animation" }
 # Hand-editable level/data format used by several demos' codecs (zanzoban,
 # rotating-cube's data-package test) and the growth agent's tag/directive TOML.
 serde = { version = "1", features = ["derive"] }

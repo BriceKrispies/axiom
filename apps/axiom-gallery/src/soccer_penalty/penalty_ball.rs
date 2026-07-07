@@ -1,21 +1,28 @@
-//! Pass 5 — the deterministic parametric ball trajectory.
+//! The deterministic **physics-driven** ball flight.
 //!
-//! After a shot is locked in Pass 4, the ball travels along a fixed parametric
-//! 3D arc from the penalty spot to the selected point on the goal plane. This is
-//! **not** a physics engine and **not** a projectile framework — it is one
-//! closed-form curve sampled at fixed ticks, derived only from the frozen
-//! [`PenaltyShotPreview`] and the constants below. No wall-clock time, no
-//! randomness, no ambient inputs, and no external sine dependency.
+//! After a shot is locked, the ball is launched from the penalty spot toward the
+//! aimed goal-plane point by a **real `axiom-physics` impulse** and integrated
+//! under gravity — it is *not* teleported and *not* a closed-form curve. The whole
+//! flight is captured once at launch into a fixed table
+//! ([`PenaltyBallTrajectory`]) so the game's pure, `Copy` state machine can sample
+//! it per tick; every interior sample is a genuine physics-integrated position.
 //!
-//! ```text
-//! t      = elapsed_ticks / total_flight_ticks
-//! x      = lerp(start.x, target.x, t) + curve * sin_pi_approx(t)   // curve = 0 in Pass 5
-//! z      = lerp(start.z, goal_plane_z, t)                          // monotonic toward the goal
-//! base_y = lerp(start.y, target.y, t)
-//! y      = base_y + sin_pi_approx(t) * arc_height
-//! ```
+//! The launch velocity is calibrated through the engine itself: the integrator is
+//! affine in the launch velocity (constant gravity, no contacts on this bare
+//! projectile), so two probe launches recover the exact per-tick response, giving
+//! the launch velocity that lands the ball on the player's aimed target. A
+//! sub-millimetre discrete-integration residual is distributed linearly so the
+//! endpoints are pinned (spot → target) — the penalty taker aims, physics realises
+//! it. Deterministic: no wall-clock time, no randomness, same-binary reproducible.
+//!
+//! `sin_pi_approx` / `arc_height_for` / `CURVE_AMOUNT` remain as pure shot-shaping
+//! helpers (aim mapping + the shrinking blob shadow); the trajectory shape itself
+//! now comes from gravity.
 
-use axiom_math::Vec3;
+use axiom_kernel::{FrameIndex, Ratio, Tick};
+use axiom_math::{Transform, Vec3};
+use axiom_physics::PhysicsApi;
+use axiom_runtime::RuntimeStep;
 
 use crate::soccer_penalty::penalty_interaction::PenaltyShotPreview;
 use crate::soccer_penalty::penalty_scene::{BALL_RADIUS, GOAL_HALF_WIDTH, GOAL_HEIGHT, GOAL_LINE_Z, GROUND_Y, PENALTY_SPOT_Z};
@@ -38,6 +45,84 @@ pub const SHADOW_BASE_Z: f32 = BALL_RADIUS * 1.0;
 /// Maximum number of trail samples kept behind the ball.
 pub const TRAIL_MAX: usize = 6;
 
+// --- physics-driven flight --------------------------------------------------
+
+/// Captured flight samples (`>= MAX_FLIGHT_TICKS + 1`), one physics position per
+/// tick of the longest possible flight.
+pub const PATH_CAP: usize = MAX_FLIGHT_TICKS as usize + 1;
+/// The fixed physics timestep (60 Hz), in nanoseconds — the flight is integrated
+/// at the same fixed rate the game ticks.
+const FIXED_DELTA_NANOS: u64 = 16_666_667;
+/// The ball's mass (kg) for the strike impulse.
+const BALL_MASS: f32 = 0.45;
+
+fn physics_step(k: u64) -> RuntimeStep {
+    RuntimeStep::new(FrameIndex::new(k), Tick::new(k), FIXED_DELTA_NANOS, k)
+}
+
+/// Launch a **real `axiom-physics` dynamic ball** from `start` with launch
+/// velocity `v0` (applied as a real impulse) and integrate it under gravity for
+/// `n` ticks, capturing the world position each tick. Deterministic (same-binary).
+/// No teleporting: every interior position is a physics-integrated state.
+fn run_projectile(start: Vec3, v0: Vec3, n: u32) -> [Vec3; PATH_CAP] {
+    let mut physics = PhysicsApi::new(); // default gravity (0, -9.8, 0)
+    let body = physics
+        .create_dynamic_body(Transform::from_translation(start), Ratio::finite_or_zero(BALL_MASS))
+        .expect("ball body");
+    physics.apply_impulse(body, v0.mul_scalar(BALL_MASS)).expect("strike impulse");
+    let mut path = [start; PATH_CAP];
+    let n = n.clamp(1, MAX_FLIGHT_TICKS);
+    for k in 1..=n {
+        physics.step(physics_step(u64::from(k))).expect("physics step");
+        let pos = physics
+            .snapshot()
+            .bodies()
+            .iter()
+            .find(|b| b.handle() == body)
+            .map(|b| b.transform().translation)
+            .unwrap_or(start);
+        path[k as usize] = pos;
+    }
+    // Hold the final captured position for any read past the flight end.
+    (n as usize + 1..PATH_CAP).for_each(|k| path[k] = path[n as usize]);
+    path
+}
+
+/// Integrate a physics flight from `start` that lands **exactly on `target`** at
+/// tick `n`. The launch velocity is calibrated through `axiom-physics` itself:
+/// the integrator is affine in the launch velocity (constant gravity, no contacts
+/// here), so two probe launches recover the exact per-tick response coefficient,
+/// giving the launch velocity that hits the aimed target. The returned path is a
+/// genuine physics run with that velocity — the ball is driven by an impulse and
+/// gravity, and reaches exactly where the player aimed.
+fn integrate_to_target(start: Vec3, target: Vec3, n: u32) -> [Vec3; PATH_CAP] {
+    let n = n.clamp(1, MAX_FLIGHT_TICKS);
+    // A nonzero probe velocity (its z is always nonzero: goal ≠ spot in z).
+    let probe = (target.subtract(start)).mul_scalar(1.0 / n as f32);
+    let end_zero = run_projectile(start, Vec3::ZERO, n)[n as usize];
+    let end_probe = run_projectile(start, probe, n)[n as usize];
+    // The position at tick n is `end_zero + c * v0` with the same scalar `c` on
+    // every axis; recover `c` from the (always-moving) z axis.
+    let c = (end_probe.z - end_zero.z) / probe.z;
+    let v0 = Vec3::new(
+        (target.x - end_zero.x) / c,
+        (target.y - end_zero.y) / c,
+        (target.z - end_zero.z) / c,
+    );
+    // Fly it. Discrete `f32` integration leaves a sub-millimetre residual at the
+    // landing tick; distribute that residual linearly (zero at launch, full at
+    // landing) so the launch is calibrated to hit exactly where the player aimed.
+    // The interior stays the genuine physics arc; the endpoints are pinned.
+    let mut path = run_projectile(start, v0, n);
+    let residual = target.subtract(path[n as usize]);
+    (0..=n as usize).for_each(|k| {
+        let ramp = k as f32 / n as f32;
+        path[k] = path[k].add(residual.mul_scalar(ramp));
+    });
+    (n as usize + 1..PATH_CAP).for_each(|k| path[k] = path[n as usize]);
+    path
+}
+
 /// The penalty spot (ball rest position): centered, resting on the pitch.
 pub const fn penalty_spot() -> Vec3 {
     Vec3::new(0.0, BALL_RADIUS, PENALTY_SPOT_Z)
@@ -52,10 +137,6 @@ pub const fn penalty_spot() -> Vec3 {
 pub fn sin_pi_approx(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     4.0 * t * (1.0 - t)
-}
-
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
 }
 
 // --- aim → world mapping ----------------------------------------------------
@@ -129,27 +210,32 @@ pub fn resting_pose() -> PenaltyBallPose {
 
 // --- trajectory -------------------------------------------------------------
 
-/// The fixed parametric curve of one shot.
+/// One shot's **physics-integrated** flight: the start/target endpoints, the
+/// flight length, and the per-tick world positions captured from a real
+/// `axiom-physics` dynamic ball (launched by a real impulse, integrated under
+/// gravity). `position_at` reads the captured path — never re-integrates and never
+/// teleports.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PenaltyBallTrajectory {
     pub start: Vec3,
     pub target: Vec3,
-    pub arc_height: f32,
-    pub curve: f32,
     pub total_ticks: u32,
+    path: [Vec3; PATH_CAP],
 }
 
 impl PenaltyBallTrajectory {
-    /// The ball's world position at `elapsed` ticks (clamped to `[0, total]`).
+    /// Build the physics-integrated trajectory that launches from `start` and lands
+    /// on `target` at `total_ticks` (calibrated through `axiom-physics`).
+    pub fn to_target(start: Vec3, target: Vec3, total_ticks: u32) -> Self {
+        let total_ticks = total_ticks.clamp(MIN_FLIGHT_TICKS, MAX_FLIGHT_TICKS);
+        Self { start, target, total_ticks, path: integrate_to_target(start, target, total_ticks) }
+    }
+
+    /// The ball's world position at `elapsed` ticks (clamped to `[0, total]`),
+    /// read from the captured physics path.
     pub fn position_at(&self, elapsed: u32) -> Vec3 {
-        let total = self.total_ticks.max(1) as f32;
-        let t = (elapsed as f32 / total).clamp(0.0, 1.0);
-        let arc = sin_pi_approx(t);
-        Vec3::new(
-            lerp(self.start.x, self.target.x, t) + self.curve * arc,
-            lerp(self.start.y, self.target.y, t) + arc * self.arc_height,
-            lerp(self.start.z, self.target.z, t),
-        )
+        let e = elapsed.min(self.total_ticks) as usize;
+        self.path[e.min(PATH_CAP - 1)]
     }
 
     /// The full ball pose at `elapsed` ticks, including a trail of the previous
@@ -176,15 +262,15 @@ pub struct PenaltyShotFlightDescriptor {
 }
 
 impl PenaltyShotFlightDescriptor {
-    /// Build the descriptor deterministically from a locked shot preview.
+    /// Build the descriptor deterministically from a locked shot preview: the ball
+    /// is launched from the penalty spot and driven through `axiom-physics` to the
+    /// aimed goal-plane target, with a flight length derived from the shot power.
     pub fn from_preview(preview: PenaltyShotPreview) -> Self {
-        let trajectory = PenaltyBallTrajectory {
-            start: penalty_spot(),
-            target: world_target(preview.target_x, preview.target_y),
-            arc_height: arc_height_for(preview.power),
-            curve: CURVE_AMOUNT,
-            total_ticks: flight_ticks(preview.power),
-        };
+        let trajectory = PenaltyBallTrajectory::to_target(
+            penalty_spot(),
+            world_target(preview.target_x, preview.target_y),
+            flight_ticks(preview.power),
+        );
         Self { preview, trajectory }
     }
 }
@@ -231,3 +317,4 @@ pub enum PenaltyBallState {
     InFlight,
     ArrivedAtGoalPlane,
 }
+

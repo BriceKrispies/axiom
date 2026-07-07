@@ -42,4 +42,6 @@ allowed_modules = [
     "canvas2d-backend",
     "animation",
     "figure",
+    "animation-authoring",
+    "physical-animation",
 ]

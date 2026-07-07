@@ -1,29 +1,35 @@
-//! The articulated, data-driven penalty kicker.
+//! The articulated penalty kicker — now driven by the **physics-backed authored
+//! motion**.
 //!
-//! The kicker is no longer a frozen box puppet: it is the shared **figure +
-//! clip** data (authored in `axiom-animation-lab`, emitted to
-//! `assets/soccer/`) posed per frame. This module embeds those exact bytes,
-//! rebuilds the animation skeleton, samples the kick, and hands back the
-//! kicker's boxes in world space — placed at the kicker's spot and facing the
-//! goal. Tuning the kick in the lab and re-emitting the assets updates the game
-//! 1-1. The frame that plays is driven by the shot: the strike lands as the ball
-//! is struck.
+//! The kicker's box geometry is still the shared **figure** (`assets/soccer/
+//! kicker.figure`) — 13 parts with their sizes, offsets and kit tags — but the
+//! *pose* no longer comes from a baked clip. It comes from
+//! [`crate::soccer_penalty::penalty_physics_kick::PenaltyPhysicsKick`]: the
+//! authored nine-phase [`crate::soccer_penalty::penalty_kick_motion`] motion plan
+//! driven through the `axiom-physical-animation` bridge over real `axiom-physics`
+//! bodies. Each authored tick yields the 13 joints' physics body world transforms,
+//! which pose the figure's boxes (placed at the kicker's spot, `+Z`
+//! figure-forward mapped to `-Z` world-forward toward the goal).
+//!
+//! The whole kick is aim-independent, so it is simulated once and shared through a
+//! process-wide cache; the game samples it by authored tick via [`kicker_frame`].
 
-use axiom_animation::{AnimationApi, BoneId, ClipId, SkeletonId};
+use std::sync::OnceLock;
+
 use axiom_figure::{FigureApi, FigureDefinition};
-use axiom_kernel::Tick;
 use axiom_math::{Transform, Vec3};
 
-use crate::soccer_penalty::penalty_ball::PenaltyBallState;
 use crate::soccer_penalty::penalty_interaction::PenaltyInteractionState;
+use crate::soccer_penalty::penalty_kick_motion::{DURATION, SPRINT_APPROACH, STRIKE_CONTACT_TICK};
 use crate::soccer_penalty::penalty_materials::PenaltyMaterialId;
-use crate::soccer_penalty::penalty_scene::{KICKER_X, KICKER_Z, PENALTY_SPOT_Z};
+use crate::soccer_penalty::penalty_physics_kick::{PenaltyPhysicsKick, KICKER_JOINTS};
+use crate::soccer_penalty::penalty_scene::{KICKER_X, KICKER_Z};
 
-/// The shared kicker assets, byte-identical to what the lab emits.
+/// The shared kicker figure geometry, byte-identical to what the lab emits.
 const FIGURE_BYTES: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/soccer/kicker.figure"));
-const CLIP_BYTES: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/soccer/kick_right.clip"));
 
-/// Stable, greppable render labels for the 13 kicker parts, in figure order.
+/// Stable, greppable render labels for the 13 kicker parts, in figure order —
+/// the same order as [`KICKER_JOINTS`], so joint `i` poses part `i`.
 pub const KICKER_LABELS: [&str; 13] = [
     "kicker.pelvis",
     "kicker.chest",
@@ -40,19 +46,20 @@ pub const KICKER_LABELS: [&str; 13] = [
     "kicker.r_forearm",
 ];
 
-/// The rest/idle frame: the shared figure's authored T-pose rest (arms out
-/// horizontal, legs straight). Used by the rig tests as a stable reference frame.
+/// The rest/idle authored tick (phase `setup`): the kicker stands ready behind the
+/// ball. Used by the rig tests as a stable reference frame.
 pub const IDLE_FRAME: u32 = 0;
 
-/// The frame the static diorama poses the kicker at. Frame 0 is the figure's
-/// limp rest — arms flung straight out to the sides and legs unbent, a scarecrow
-/// T-pose that reads dead against a run-up reference. Frame 26 is the
-/// planted/cocked run-up pose (the same one the live gameplay holds while the
-/// ball is at the spot): support leg planted, kicking leg wound back, weight
-/// carried forward — a braced, weighted athlete mid-approach rather than a
-/// mannequin. This is a render/display frame choice only; it does not touch the
-/// clip data or the gameplay strike timing.
-pub const DISPLAY_FRAME: u32 = 26;
+/// The authored tick the static diorama poses the kicker at: late `backswing`, the
+/// kicking leg wound back and weight carried onto the planted support leg — a
+/// braced, weighted athlete cocked to strike rather than a limp mannequin.
+pub const DISPLAY_FRAME: u32 = 44;
+
+/// The process-wide cached default-style physics kick (aim-independent poses).
+fn cached_kick() -> &'static PenaltyPhysicsKick {
+    static KICK: OnceLock<PenaltyPhysicsKick> = OnceLock::new();
+    KICK.get_or_init(PenaltyPhysicsKick::default_kick)
+}
 
 /// One posed kicker box, ready for [`crate::soccer_penalty::penalty_scene`] to
 /// emit or for the per-frame overlay to reposition.
@@ -68,44 +75,27 @@ pub struct KickerBox {
     pub label: &'static str,
 }
 
-/// The kicker rig: the shared figure plus the animation registry driving it.
+/// The kicker rig: the shared figure geometry posed by the physics-backed kick.
 #[derive(Debug)]
 pub struct KickerRig {
     figure: FigureDefinition,
-    api: AnimationApi,
-    skeleton: SkeletonId,
-    clip: ClipId,
 }
 
 impl KickerRig {
-    /// Load the kicker from the embedded shared assets.
+    /// Load the kicker figure geometry (the physics kick is a shared cache).
     pub fn new() -> Self {
         let figure = FigureApi::new().deserialize(FIGURE_BYTES).expect("embedded kicker figure");
-        let mut api = AnimationApi::new();
-        let skeleton = api.create_skeleton();
-        for part in figure.parts() {
-            match part.parent {
-                None => {
-                    api.add_root_bone(skeleton, part.rest).expect("root bone");
-                }
-                Some(parent) => {
-                    api.add_child_bone(skeleton, BoneId::from_raw(u64::from(parent)), part.rest)
-                        .expect("child bone");
-                }
-            }
-        }
-        let clip = api.deserialize_clip(CLIP_BYTES).expect("embedded kick clip");
-        Self { figure, api, skeleton, clip }
+        Self { figure }
     }
 
-    /// The kicker's posed boxes at `frame`, in world space at the kicker's spot
-    /// and facing the goal (`+Z` figure-forward mapped to `-Z` world-forward).
-    pub fn boxes_at(&self, frame: u32) -> Vec<KickerBox> {
-        let pose = self.api.sample(self.skeleton, self.clip, Tick::new(u64::from(frame))).expect("sample");
-        let model = self.api.resolve_model(self.skeleton, &pose).expect("resolve");
-        let world: Vec<Transform> = (0..self.figure.part_count() as u64)
-            .map(|i| model.transform(BoneId::from_raw(i)).unwrap_or(Transform::IDENTITY))
-            .collect();
+    /// The kicker's posed boxes at authored `tick`, in world space at the kicker's
+    /// spot and facing the goal. The 13 joint world transforms come from the
+    /// physics-backed kick (`penalty_physics_kick`); the figure supplies the box
+    /// sizes, offsets and kit tags.
+    pub fn boxes_at(&self, tick: u32) -> Vec<KickerBox> {
+        let frame = cached_kick().frame(u64::from(tick));
+        debug_assert_eq!(self.figure.part_count(), KICKER_JOINTS.len());
+        let world: Vec<Transform> = frame.joints.to_vec();
         let posed = FigureApi::new().posed_parts(&self.figure, &world).expect("posed parts");
         posed
             .iter()
@@ -168,16 +158,33 @@ fn material_for_part(index: usize, tag: u32) -> PenaltyMaterialId {
     }
 }
 
-/// The kick frame to show for the current shot: planted/cocked while aiming, the
-/// strike frame (33) as the ball is struck, then follow-through as the ball
-/// travels toward the goal.
+/// The authored kick tick to pose for the current shot state:
+/// - **Aiming** → `setup` (standing ready behind the ball);
+/// - **Charging** → the run-up + wind-up, mapped from the power meter across
+///   `sprint_approach … strike` (holding to charge visibly runs the kicker up and
+///   cocks the leg);
+/// - **committed** (locked / in flight / resolved) → `strike … recover`, mapped
+///   from the ball's flight progress, so the instep connects as the ball launches
+///   and the leg follows through and recovers as the ball flies.
 pub fn kicker_frame(state: &PenaltyInteractionState) -> u32 {
-    match state.ball_state() {
-        PenaltyBallState::AtPenaltySpot => 26,
+    use crate::soccer_penalty::penalty_interaction::PenaltyShotFlightState as S;
+    match state.state {
+        S::Aiming => 2,
+        S::Charging => {
+            let p = (state.power.power.clamp(0, 100) as f32) / 100.0;
+            let start = SPRINT_APPROACH.0 as f32;
+            let end = STRIKE_CONTACT_TICK as f32;
+            (start + (end - start) * p) as u32
+        }
         _ => {
-            let ball_z = state.ball_pose().position.z;
-            let progress = ((PENALTY_SPOT_Z - ball_z) / PENALTY_SPOT_Z).clamp(0.0, 1.0);
-            33 + (progress * 14.0) as u32
+            let progress = state
+                .flight
+                .map(|f| (f.elapsed_ticks as f32) / (f.total().max(1) as f32))
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
+            let start = STRIKE_CONTACT_TICK as f32;
+            let end = (DURATION - 1) as f32;
+            (start + (end - start) * progress) as u32
         }
     }
 }
@@ -188,33 +195,34 @@ mod tests {
     use crate::soccer_penalty::penalty_input::PenaltyInputIntent;
 
     #[test]
-    fn rig_loads_and_poses_thirteen_boxes() {
+    fn rig_loads_and_poses_thirteen_boxes_from_physics() {
         let rig = KickerRig::new();
         let boxes = rig.boxes_at(IDLE_FRAME);
         assert_eq!(boxes.len(), 13);
-        // All parts sit at/near the kicker's spot in Z (a metre or so of rig depth).
-        assert!(boxes.iter().all(|b| (b.center.z - KICKER_Z).abs() < 2.0));
+        // All parts sit near the kicker's spot in Z (a metre or two of rig depth).
+        assert!(boxes.iter().all(|b| (b.center.z - KICKER_Z).abs() < 3.0));
         assert_eq!(boxes[0].label, "kicker.pelvis");
     }
 
     #[test]
     fn right_foot_sweeps_toward_the_goal_across_the_kick() {
         let rig = KickerRig::new();
-        // Right foot is part index 8; world -Z is toward the goal.
-        let back = rig.boxes_at(24)[8].center.z;
-        let strike = rig.boxes_at(33)[8].center.z;
-        assert!(back - strike > 0.4, "foot should move toward goal (-Z): back={back}, strike={strike}");
+        // Right foot is part index 8; world -Z is toward the goal. It is drawn back
+        // in the backswing and sweeps toward the goal by the follow-through.
+        let back = rig.boxes_at(41)[8].center.z; // backswing
+        let follow = rig.boxes_at(62)[8].center.z; // follow-through
+        assert!(back - follow > 0.2, "foot should move toward goal (-Z): back={back}, follow={follow}");
     }
 
     #[test]
-    fn kick_frame_is_cocked_while_aiming_and_strikes_in_flight() {
-        // At rest / aiming the kicker is cocked (frame 26), never past the strike.
+    fn kick_frame_reads_ready_while_aiming_and_strikes_once_committed() {
+        // Aiming: the kicker stands ready (an early setup tick), never at the strike.
         let aiming = PenaltyInteractionState::start();
-        assert_eq!(kicker_frame(&aiming), 26);
-        // Drive a full shot; once airborne the frame is at/after the strike.
+        assert!(kicker_frame(&aiming) < STRIKE_CONTACT_TICK as u32);
+        // Drive a full shot; once committed the tick is at/after the strike.
         let intents = vec![PenaltyInputIntent::charging(0, 0); 40];
         let launched = PenaltyInteractionState::run(&intents);
-        assert!(kicker_frame(&launched) >= 33 || launched.ball_state() == PenaltyBallState::AtPenaltySpot);
+        assert!(kicker_frame(&launched) >= STRIKE_CONTACT_TICK as u32);
     }
 
     #[test]

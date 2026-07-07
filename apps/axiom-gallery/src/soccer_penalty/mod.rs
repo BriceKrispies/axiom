@@ -131,6 +131,24 @@
 //! and no change to Pass 8 results or Pass 9 scores. See
 //! `PASS_10_IMPACT_POLISH.md`.
 //!
+//! ## Physics-backed kick — the kicker + ball now run the authored motion pipeline
+//! The kicker's animation and the ball's flight are no longer ad-hoc: they are the
+//! engine's **procedural-animation authoring** system executed through the
+//! **physics** module. [`penalty_kick_motion`] authors the kick as a nine-phase
+//! [`penalty_kick_motion::SoccerPenaltyKickMotionSpec`] (`setup → sprint_approach →
+//! pre_plant → plant → backswing → hip_drive → strike → follow_through → recover`)
+//! entirely in `AnimationAuthoringApi` vocabulary — targets, root motion, pose
+//! goals, constraints, contacts, a `ball_contact` event, and nine named style
+//! scalars. [`penalty_physics_kick::PenaltyPhysicsKick`] drives that plan through
+//! the `axiom-physical-animation` bridge over real `axiom-physics` bodies (dynamic
+//! pelvis force-driven up the run-up; kinematic limbs; a real strike impulse),
+//! capturing a [`penalty_physics_kick::PhysicalKickFrame`] per tick.
+//! [`penalty_kicker`] poses the shared figure boxes from those physics transforms,
+//! and [`penalty_ball`] launches the ball as a real `axiom-physics` projectile to
+//! the aimed target. See `docs/PHYSICS_BACKED_KICK.md`. The whole kick is
+//! aim-independent and simulated once (cached); `penalty_physics_kick`'s
+//! `debug_snapshot` inspects every phase at a fixed tick.
+//!
 //! ## Determinism
 //! Every artifact is a pure function of compile-time constants: no wall-clock
 //! time, no randomness, no unordered-map iteration. Objects are emitted into an
@@ -159,7 +177,10 @@ pub mod penalty_goalie_pose;
 pub mod penalty_hud;
 pub mod penalty_input;
 pub mod penalty_interaction;
+pub mod penalty_kick_motion;
 pub mod penalty_kicker;
+pub mod penalty_muscle;
+pub mod penalty_physics_kick;
 pub mod penalty_light;
 pub mod penalty_materials;
 pub mod penalty_render_plan;
