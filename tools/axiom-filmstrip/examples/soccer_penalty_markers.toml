@@ -1,0 +1,24 @@
+# A filmstrip plan (marker mode): capture the soccer penalty kick at named
+# animation markers (resolved to ticks by the tool's static trace). Run with:
+#   cargo run --manifest-path tools/axiom-filmstrip/Cargo.toml --release \
+#     --features offscreen -- --plan tools/axiom-filmstrip/examples/soccer_penalty_markers.toml
+# Any explicit CLI flag overrides the matching field here.
+app = "soccer_penalty"
+scenario = "default_penalty_kick"
+backend = "gpu"
+viewport_width = 1280
+viewport_height = 720
+columns = 4
+markers = [
+    "kicker.runup.start",
+    "kicker.left_foot.plant",
+    "kicker.hip.twist.peak",
+    "kicker.foot.ball_contact",
+    "kicker.followthrough.peak",
+    "goalie.dive.commit",
+    "ball.goal_line.cross",
+    "result.freeze",
+]
+camera = "default"
+debug_overlays = false
+out = "target/filmstrips/soccer_penalty_markers.png"

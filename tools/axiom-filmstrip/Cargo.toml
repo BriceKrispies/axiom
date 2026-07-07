@@ -1,0 +1,51 @@
+# axiom-filmstrip: an agent-facing deterministic *filmstrip* capture tool.
+#
+# It runs a real Axiom app from a deterministic scenario, captures the rendered
+# frame at a list of ticks (or named animation markers), and composes them into
+# ONE labeled contact-sheet PNG (+ a sidecar metadata TOML) for human review.
+#
+# It is a pure orchestrator over `axiom-shot`: the actual per-frame rendering
+# reuses `axiom_shot::registry` (build a slice's `RunningApp`) and
+# `axiom_shot::capture` (render it through the GPU/Canvas2D backend, write PNG) —
+# no renderer is duplicated or mocked.
+#
+# Like axiom-shot, the native GPU off-screen arm (real wgpu) is gated behind this
+# crate's NON-DEFAULT `offscreen` feature, which turns on `axiom-shot/offscreen`.
+# The workspace coverage/dylint gates build members with default features, so they
+# never pull the un-coverable native-wgpu arm into a module. Run the GPU path with:
+#   cargo run -p axiom-filmstrip --features offscreen -- --backend gpu ...
+# The canvas2d path and every non-GPU test run with the default build.
+#
+# It classifies as a Tool (under tools/, no layer/module/app manifest). It depends
+# on axiom-shot (tool -> tool, allowed) and never names an app crate directly, so
+# it needs no capture-harness exception of its own.
+[package]
+name = "axiom-filmstrip"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# The capture host we orchestrate: registry (build a slice by name) + capture
+# (render a RunningApp through a backend, write a PNG). Its `offscreen` feature is
+# passed through by ours.
+axiom-shot = { path = "../axiom-shot" }
+# `RunningApp` / `FrameOutcome` — the neutral live-render surface we tick and read.
+axiom = { path = "../../modules/axiom" }
+# The soccer cinematic look (retro-32-bit quantize + exposure/contrast grade) is a
+# GPU-capture concern, so `axiom-host` is optional and pulled in only by the
+# `offscreen` feature — the software (canvas2d) build never references it.
+axiom-host = { path = "../../crates/axiom-host", optional = true }
+# Plan-file loading (`--plan`) and the sidecar metadata TOML.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[features]
+# Native off-screen GPU rendering (real wgpu). NON-DEFAULT: enabling it turns on
+# `axiom-shot/offscreen` (→ `axiom-gpu-backend/offscreen`), which must not unify
+# into a module during the workspace coverage/dylint gates. It also pulls in
+# `axiom-host` for the GPU grade. `--backend gpu` requires it; without it the tool
+# renders canvas2d and says so.
+offscreen = ["axiom-shot/offscreen", "dep:axiom-host"]
+
+[lints.rust]
+unsafe_code = "forbid"

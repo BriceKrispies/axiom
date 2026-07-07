@@ -62,6 +62,9 @@ fn main() {
         shot_tick: flag(&args, "--shot-tick").and_then(|s| s.parse().ok()),
         frame: flag(&args, "--frame").and_then(|f| f.parse().ok()).unwrap_or(0),
         stress_count: flag(&args, "--cubes").and_then(|c| c.parse().ok()).unwrap_or(2000),
+        // axiom-shot's binary doesn't expose goalie debug overlays; that seam is
+        // driven by `axiom-filmstrip --debug-overlays`.
+        soccer_debug: false,
     };
 
     // `--pose "x,z,yaw,pitch"` (retro FPS only): snap controller 0 to an absolute

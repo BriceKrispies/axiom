@@ -265,6 +265,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-filmstrip"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-host",
+ "axiom-shot",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "axiom-forest"
 version = "0.1.0"
 dependencies = [

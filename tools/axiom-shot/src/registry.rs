@@ -34,6 +34,10 @@ pub struct BuildParams {
     pub frame: u32,
     /// `--cubes N` for the stress-cubes slice.
     pub stress_count: u32,
+    /// Overlay the soccer slice's goalie save-volume debug markers (the existing
+    /// `PenaltyGoalieDebugDescriptor::ENABLED` path). Off by default — byte-identical
+    /// to a normal build. Used by `axiom-filmstrip --debug-overlays`.
+    pub soccer_debug: bool,
 }
 
 /// One registered renderable slice: a stable `name` and a builder for its
@@ -91,12 +95,22 @@ fn build_retro_fps(p: &BuildParams) -> RunningApp {
 }
 
 fn build_soccer(p: &BuildParams) -> RunningApp {
+    use axiom_gallery::soccer_penalty::{
+        PenaltyGoalieDebugDescriptor, PenaltyInteractionState, SoccerPenaltyApp,
+    };
     // `--shot-tick N` renders a scripted power shot N ticks in (kick animation +
-    // ball flight + keeper dive visible); without it, the static stage-1 diorama.
-    let diorama = p
+    // ball flight + keeper dive visible); without it, the start (stage-1) state.
+    let state = p
         .shot_tick
-        .map(|n| axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_frame(&soccer_shot_state(n)))
-        .unwrap_or_else(axiom_gallery::soccer_penalty::SoccerPenaltyApp::build_stage1);
+        .map(soccer_shot_state)
+        .unwrap_or_else(PenaltyInteractionState::start);
+    // `soccer_debug` overlays the goalie save-volume markers (identical to
+    // `build_frame`/`build_stage1` when off — debug never affects gameplay).
+    let debug = [
+        PenaltyGoalieDebugDescriptor::DISABLED,
+        PenaltyGoalieDebugDescriptor::ENABLED,
+    ][usize::from(p.soccer_debug)];
+    let diorama = SoccerPenaltyApp::build_frame_with_debug(&state, debug);
     axiom_gallery::soccer_penalty::penalty_render_meshed::soccer_meshed_app(diorama)
 }
 
