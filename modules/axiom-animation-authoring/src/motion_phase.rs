@@ -205,14 +205,23 @@ impl ResolvedPhase {
         (tick >= self.start) & (tick < self.end)
     }
 
+    /// The phase's **raw** linear progress at `tick`: normalized `[0, 1]`
+    /// `(tick - start) / span`, *without* the ease curve or the layer weight. This
+    /// is the even clock a [`crate::pose_goal::GoalKind::RunCycle`] oscillates on, so
+    /// a gait's steps stay uniform (an eased/weighted clock would bunch or shrink
+    /// them). The span is floored at one tick so a zero-length span never divides by
+    /// zero (it reads progress `0` at its start tick).
+    pub(crate) fn progress(&self, tick: u64) -> f32 {
+        let span = self.end.saturating_sub(self.start).max(1) as f32;
+        tick.saturating_sub(self.start) as f32 / span
+    }
+
     /// The phase's eased progress at `tick`: its normalized `[0, 1]` progress
     /// reshaped by its ease curve, *without* the layer weight. Root motion
     /// interpolates on this. The span is floored at one tick so a zero-length span
     /// never divides by zero (it reads progress `0` at its start tick).
     pub(crate) fn eased_progress(&self, tick: u64) -> f32 {
-        let span = self.end.saturating_sub(self.start).max(1) as f32;
-        let raw = tick.saturating_sub(self.start) as f32 / span;
-        self.ease.apply(raw)
+        self.ease.apply(self.progress(tick))
     }
 
     /// The eased, weight-scaled application strength at `tick`: the eased progress
@@ -299,5 +308,20 @@ mod tests {
         // progress 0 at its start tick.
         let degenerate = resolved(5, 5, EaseCurve::Linear, 1.0);
         assert!((degenerate.strength(5) - 0.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn raw_progress_is_linear_and_independent_of_the_ease_curve() {
+        // Raw progress is (tick-start)/span regardless of the ease; a SmoothStep
+        // phase's eased progress differs from its raw progress at the midpoint.
+        let p = resolved(0, 10, EaseCurve::SmoothStep, 1.0);
+        assert!((p.progress(0) - 0.0).abs() < 1.0e-6);
+        assert!((p.progress(5) - 0.5).abs() < 1.0e-6);
+        assert!((p.progress(10) - 1.0).abs() < 1.0e-6);
+        // SmoothStep(0.5) == 0.5, so pick a quarter point where they diverge.
+        assert!((p.progress(2) - 0.2).abs() < 1.0e-6);
+        assert!(p.eased_progress(2) < p.progress(2), "smoothstep eases in below linear early");
+        // A zero-length span floors at 1 and reads 0 at the start.
+        assert!((resolved(5, 5, EaseCurve::Linear, 1.0).progress(5) - 0.0).abs() < 1.0e-6);
     }
 }

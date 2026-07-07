@@ -196,6 +196,51 @@ impl AnimationAuthoringApi {
         self.phase_mut(phase).map(|p| p.push_goal(PoseGoal::follow_through(right, target)))
     }
 
+    /// Author a **locomotion cycle** (a walk/run) over `phase` for the standard
+    /// humanoid: the legs step, the knees lift, and the arms pump for `steps`
+    /// strides across the phase's progress. `stride` scales the thigh fore/aft swing,
+    /// `knee_bend` the knee lift, and `arm_swing` the arm pump (each a `[0, 1]`
+    /// fraction of a sensible maximum). The two legs run in antiphase, each shin
+    /// leads its thigh by a quarter cycle to lift on the forward swing, and each arm
+    /// opposes the same-side leg — the standard contralateral gait. Composes the
+    /// per-joint [`PoseGoal::run_cycle`] oscillator; pair it with a forward
+    /// `set_phase_root_motion_move_toward` so the figure travels as it steps.
+    pub fn add_run_cycle(
+        &mut self,
+        phase: PhaseId,
+        steps: u32,
+        stride: Ratio,
+        knee_bend: Ratio,
+        arm_swing: Ratio,
+    ) -> AuthoringResult<()> {
+        use core::f32::consts::{FRAC_PI_2, PI};
+        // Maximum radians each cycle component reaches at full strength.
+        const STRIDE_MAX: f32 = 0.8;
+        const KNEE_MAX: f32 = 1.0;
+        const ARM_MAX: f32 = 0.7;
+        let n = steps as f32;
+        let thigh = stride.get() * STRIDE_MAX;
+        let knee = knee_bend.get() * KNEE_MAX;
+        let arm = arm_swing.get() * ARM_MAX;
+        // `(joint, amplitude, phase_offset, bias)` per driven joint.
+        let cycle: [(&str, f32, f32, f32); 6] = [
+            ("left_thigh", thigh, 0.0, 0.0),
+            ("right_thigh", thigh, PI, 0.0),
+            // Shins lead their thigh by a quarter cycle and stay flexed (bias) so the
+            // knee lifts on the forward swing and never hyperextends.
+            ("left_shin", knee * 0.5, FRAC_PI_2, knee * 0.5),
+            ("right_shin", knee * 0.5, PI + FRAC_PI_2, knee * 0.5),
+            // Arms oppose the same-side leg (contralateral swing).
+            ("left_upper_arm", arm, PI, 0.0),
+            ("right_upper_arm", arm, 0.0, 0.0),
+        ];
+        self.phase_mut(phase).map(|p| {
+            cycle.iter().for_each(|&(joint, amplitude, offset, bias)| {
+                p.push_goal(PoseGoal::run_cycle(joint, amplitude, offset, n, bias));
+            });
+        })
+    }
+
     // --- constraints ---------------------------------------------------------
 
     /// Pin `effector` to `target` during `phase`.
@@ -462,6 +507,7 @@ impl AnimationAuthoringApi {
 mod tests {
     use super::*;
     use crate::authoring_error_code::AuthoringErrorCode;
+    use axiom_math::Quat;
 
     fn ratio(v: f32) -> Ratio {
         Ratio::new(v).unwrap()
@@ -548,6 +594,29 @@ mod tests {
         assert_eq!(target, TargetId::from_raw(1)); // ball
         assert_eq!(direction, TargetId::from_raw(2)); // net_center
         assert!((power.get() - 0.7).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn a_run_cycle_authors_a_stepping_gait_that_oscillates_the_legs() {
+        let mut api = AnimationAuthoringApi::new();
+        let rig = api.standard_humanoid();
+        let m = api.create_motion("run", Tick::new(12), rig).unwrap();
+        api.add_target(m, "start", Vec3::new(0.0, 0.0, -3.0)).unwrap();
+        api.add_target(m, "ball", Vec3::new(0.0, 0.0, 0.0)).unwrap();
+        let run = api.add_phase(m, "run", Tick::new(0), Tick::new(12)).unwrap();
+        api.set_phase_root_motion_move_toward(run, "start", "ball").unwrap();
+        api.add_run_cycle(run, 3, ratio(0.6), ratio(0.5), ratio(0.4)).unwrap();
+        let plan = api.compile(m).unwrap();
+
+        let left = api.plan_joint_id(plan, "left_thigh").unwrap().unwrap();
+        let right = api.plan_joint_id(plan, "right_thigh").unwrap().unwrap();
+        let rot = |joint, t| api.sample(plan, Tick::new(t)).unwrap().joint_local(joint).unwrap().rotation;
+        // The gait cycles the thigh over raw progress: tick 1 (sin≈+1) and tick 3
+        // (sin≈-1) read distinct, non-identity rotations — the leg steps, not slides.
+        assert_ne!(rot(left, 1), rot(left, 3));
+        assert_ne!(rot(left, 1), Quat::IDENTITY);
+        // The two legs run in antiphase (offset π), so they differ at the same tick.
+        assert_ne!(rot(left, 1), rot(right, 1));
     }
 
     #[test]

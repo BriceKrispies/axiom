@@ -192,7 +192,6 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     let backswing = s(style.backswing_amount);
     let follow = s(style.follow_through_amount);
     let reach = s((style.follow_through_amount * 0.7).clamp(0.0, 1.0));
-    let arm = s(style.arm_balance);
     // Shoulder ABDUCTION (radians): swing the down-hanging arms OUT to the sides so
     // they read as braced balance arms from the behind-the-kicker camera, instead of
     // hiding in the torso silhouette. `+Z` roll abducts the left arm (+X side); `-Z`
@@ -207,20 +206,21 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     api.set_phase_layer_weight(setup, s(0.4)).unwrap();
     api.add_keep_gaze_on_target(setup, "ball").unwrap();
 
-    // 2. sprint_approach — a short burst run toward the ball: root drives forward,
-    //    torso leans in, arms pump opposite, gaze locked on the ball.
+    // 2. sprint_approach — a real run toward the ball: the root drives forward AND
+    //    the legs STEP (the engine locomotion cycle), knees lift, arms pump opposite
+    //    the legs, torso leans in, gaze locked on the ball.
     let sprint = api.add_phase(m, "sprint_approach", tick(SPRINT_APPROACH.0), tick(SPRINT_APPROACH.1)).unwrap();
     api.set_phase_root_motion_move_toward(sprint, "approach_start", "ball").unwrap();
     api.set_phase_ease_smoothstep(sprint).unwrap();
     api.set_phase_layer_weight(sprint, s(0.6 + 0.3 * style.urgency)).unwrap();
+    // The stepping gait: ~3 strides over the sprint, scaled by run-up speed. The
+    // cycle drives both legs (antiphase), the knees (lift on the swing), and the arms
+    // (contralateral pump) — a run, not a slide.
+    let steps = 3 + (style.runup_speed > 0.6) as u32;
+    api.add_run_cycle(sprint, steps, s(0.55 + 0.35 * style.runup_speed), s(0.6), s(0.45 + 0.25 * style.arm_balance)).unwrap();
     api.add_torso_twist_toward_target(sprint, "ball", s(0.25 * style.torso_twist)).unwrap();
     // A forward torso lean into the run-up (+X rotation tips the chest toward the goal).
     api.add_set_joint_rotation(sprint, "chest", Vec3::new(0.28, 0.0, 0.0)).unwrap();
-    // Arms swing out to a light run-up carry.
-    api.add_set_joint_rotation(sprint, "left_shoulder", Vec3::new(0.0, 0.0, 0.6 * spread)).unwrap();
-    api.add_set_joint_rotation(sprint, "right_shoulder", Vec3::new(0.0, 0.0, -0.6 * spread)).unwrap();
-    api.add_move_effector_toward_target(sprint, "right_hand", "approach_start", arm).unwrap();
-    api.add_move_effector_toward_target(sprint, "left_hand", "ball", arm).unwrap();
     api.add_keep_gaze_on_target(sprint, "ball").unwrap();
 
     // 3. pre_plant — the final step shortens, body lowers, pelvis begins turning

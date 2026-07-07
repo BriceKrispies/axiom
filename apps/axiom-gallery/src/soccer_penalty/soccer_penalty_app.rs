@@ -314,7 +314,7 @@ fn apply_kicker_pose(o: DioramaObject, boxes: &[penalty_kicker::KickerBox]) -> D
     boxes
         .iter()
         .find(|kb| kb.label == o.label)
-        .map(|kb| DioramaObject { position: kb.center, ..o })
+        .map(|kb| DioramaObject { position: kb.center, rotation: kb.rotation, ..o })
         .unwrap_or(o)
 }
 

@@ -34,6 +34,13 @@ pub enum GoalKind {
     LegStrike,
     /// Continue a leg's forward swing past a target (the follow-through).
     FollowThrough,
+    /// Oscillate a joint's fore/aft (X) angle over the phase's raw progress — the
+    /// per-joint building block of a locomotion cycle (a walk/run). The joint's
+    /// angle is `bias + amplitude·sin(TAU·steps·progress + phase_offset)`, so a
+    /// thigh swings fore/aft, a shin bends on the lift, and an arm pumps — each with
+    /// its own phase offset. Unlike every other goal this cycles on **raw progress**,
+    /// not the eased, weight-scaled strength, so a step never shrinks over the phase.
+    RunCycle,
 }
 
 /// An authored pose goal: a kind plus the (kind-specific) names and parameters.
@@ -151,6 +158,21 @@ impl PoseGoal {
             side_right: right,
             amount: 0.0,
             euler: Vec3::ZERO,
+        }
+    }
+
+    /// Oscillate `joint` fore/aft over the phase: angle `bias + amplitude·sin(
+    /// TAU·steps·progress + phase_offset)`. The three cycle parameters ride in
+    /// `euler = (phase_offset, steps, bias)`; `amount` carries the `amplitude`.
+    pub(crate) fn run_cycle(joint: &str, amplitude: f32, phase_offset: f32, steps: f32, bias: f32) -> Self {
+        PoseGoal {
+            kind: GoalKind::RunCycle,
+            joint_name: Some(joint.to_string()),
+            effector_name: None,
+            target_name: None,
+            side_right: false,
+            amount: amplitude,
+            euler: Vec3::new(phase_offset, steps, bias),
         }
     }
 
@@ -282,6 +304,12 @@ mod tests {
         assert_eq!(f.kind(), GoalKind::FollowThrough);
         assert!(!f.side_right());
         assert_eq!(f.target_name(), Some("net_center"));
+
+        let rc = PoseGoal::run_cycle("left_thigh", 0.5, 1.0, 3.0, 0.2);
+        assert_eq!(rc.kind(), GoalKind::RunCycle);
+        assert_eq!(rc.joint_name(), Some("left_thigh"));
+        assert_eq!(rc.amount(), 0.5);
+        assert_eq!(rc.euler(), Vec3::new(1.0, 3.0, 0.2));
     }
 
     #[test]

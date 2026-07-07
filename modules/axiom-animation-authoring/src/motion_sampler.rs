@@ -93,51 +93,66 @@ fn root_position(plan: &MotionPlan, t: u64) -> Vec3 {
         .unwrap_or(running)
 }
 
-type GoalApplier = fn(&ResolvedGoal, &mut [Transform], f32, Vec3);
+/// A per-kind goal applier. Receives the goal, the working locals, the phase's
+/// eased+weighted `strength` (the magnitude most goals scale by), the root world
+/// position, and the phase's **raw** linear `progress` (the even clock a gait
+/// cycles on — see [`apply_run_cycle`]).
+type GoalApplier = fn(&ResolvedGoal, &mut [Transform], f32, Vec3, f32);
 
-fn apply_set_joint(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3) {
+fn apply_set_joint(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3, _p: f32) {
     let e = g.euler();
     locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(e.x * s, e.y * s, e.z * s);
 }
 
-fn apply_aim(g: &ResolvedGoal, locals: &mut [Transform], s: f32, root: Vec3) {
+fn apply_aim(g: &ResolvedGoal, locals: &mut [Transform], s: f32, root: Vec3, _p: f32) {
     let d = g.target().subtract(root);
     let yaw = d.x.atan2(d.z);
     locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(0.0, yaw * s, 0.0);
 }
 
-fn apply_move(g: &ResolvedGoal, locals: &mut [Transform], s: f32, root: Vec3) {
+fn apply_move(g: &ResolvedGoal, locals: &mut [Transform], s: f32, root: Vec3, _p: f32) {
     let j = g.joint().raw() as usize;
     let shift = g.target().subtract(root).mul_scalar(g.amount() * s * MOVE_SCALE);
     locals[j].translation = locals[j].translation.add(shift);
 }
 
-fn apply_raise_arm(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3) {
+fn apply_raise_arm(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3, _p: f32) {
     locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(0.0, 0.0, RAISE_ANGLE * s);
 }
 
-fn apply_torso_twist(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3) {
+fn apply_torso_twist(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3, _p: f32) {
     locals[g.joint().raw() as usize].rotation =
         Quat::from_euler_xyz(0.0, TWIST_MAX * g.amount() * s, 0.0);
 }
 
-fn apply_leg_backswing(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3) {
+fn apply_leg_backswing(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3, _p: f32) {
     // Positive X thigh rotation swings the foot to -Z: behind the body.
     locals[g.joint().raw() as usize].rotation =
         Quat::from_euler_xyz(BACKSWING_MAX * g.amount() * s, 0.0, 0.0);
 }
 
-fn apply_leg_strike(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3) {
+fn apply_leg_strike(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3, _p: f32) {
     // Negative X thigh rotation swings the foot to +Z: forward through the ball.
     locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(-STRIKE_ANGLE * s, 0.0, 0.0);
 }
 
-fn apply_follow_through(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3) {
+fn apply_follow_through(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _root: Vec3, _p: f32) {
     locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(-FOLLOW_ANGLE * s, 0.0, 0.0);
 }
 
+/// A locomotion oscillator: the joint's fore/aft (X) angle is
+/// `bias + amplitude·sin(TAU·steps·progress + phase_offset)`, cycling on the phase's
+/// **raw** progress (not `strength`), so a stride is uniform across the phase. The
+/// three cycle parameters ride in `euler = (phase_offset, steps, bias)`; `amount`
+/// carries the amplitude.
+fn apply_run_cycle(g: &ResolvedGoal, locals: &mut [Transform], _s: f32, _root: Vec3, progress: f32) {
+    let e = g.euler();
+    let angle = e.z + g.amount() * (core::f32::consts::TAU * e.y * progress + e.x).sin();
+    locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(angle, 0.0, 0.0);
+}
+
 /// Per-kind goal appliers, indexed by the goal discriminant.
-const GOAL_APPLIERS: [GoalApplier; 8] = [
+const GOAL_APPLIERS: [GoalApplier; 9] = [
     apply_set_joint,
     apply_aim,
     apply_move,
@@ -146,13 +161,17 @@ const GOAL_APPLIERS: [GoalApplier; 8] = [
     apply_leg_backswing,
     apply_leg_strike,
     apply_follow_through,
+    apply_run_cycle,
 ];
 
-/// Apply an active phase's goals to a copy of the bind pose.
+/// Apply an active phase's goals to a copy of the bind pose. Each goal is applied at
+/// the phase's eased+weighted `strength`; a gait goal instead reads the raw
+/// `progress` its applier is also handed.
 fn apply_goals(bind: &[Transform], phase: &ResolvedPhase, t: u64, root: Vec3) -> Vec<Transform> {
     let s = phase.strength(t);
+    let progress = phase.progress(t);
     phase.goals().iter().fold(bind.to_vec(), |mut locals, g| {
-        GOAL_APPLIERS[g.kind() as usize](g, &mut locals, s, root);
+        GOAL_APPLIERS[g.kind() as usize](g, &mut locals, s, root, progress);
         locals
     })
 }
@@ -246,6 +265,7 @@ mod tests {
             p.push_goal(PoseGoal::leg_backswing(true, 0.8));
             p.push_goal(PoseGoal::leg_strike(false, "ball"));
             p.push_goal(PoseGoal::follow_through(false, "net_center"));
+            p.push_goal(PoseGoal::run_cycle("left_shin", 0.5, 0.0, 2.0, 0.1));
             p.push_constraint(Constraint::pin_effector_to_target("left_foot_sole", "left_plant_spot"));
             p.push_contact(ContactDeclaration::new("right_foot_sole", "ball"));
         }
@@ -281,6 +301,21 @@ mod tests {
         );
         let left_hand_bind = plan.rig().joints()[joint("left_hand").raw() as usize].bind_local().translation;
         assert_ne!(frame.joint_local(joint("left_hand")).unwrap().translation, left_hand_bind);
+    }
+
+    #[test]
+    fn a_run_cycle_oscillates_its_joint_over_raw_progress() {
+        // The left shin carries a RunCycle (steps=2 over [0,10)); its fore/aft angle
+        // is a sine of raw progress, so it reads different rotations at progresses
+        // that map to different points on the cycle — proof the gait actually moves,
+        // unlike a single interpolated pose.
+        let plan = full_plan();
+        let shin = plan.rig().joint_id("left_shin").unwrap();
+        let at = |t| MotionSampler::sample(&plan, Tick::new(t)).joint_local(shin).unwrap().rotation;
+        // progress 0.1 vs 0.3 -> sin(0.4π) vs sin(1.2π): opposite signs, distinct poses.
+        assert_ne!(at(1), at(3));
+        // The oscillation is off the bind identity at a non-zero point of the cycle.
+        assert_ne!(at(1), Quat::IDENTITY);
     }
 
     #[test]

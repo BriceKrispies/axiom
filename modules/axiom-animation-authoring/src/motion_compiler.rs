@@ -185,8 +185,17 @@ fn resolve_follow_through(g: &PoseGoal, rig: &HumanoidRigSpec, spec: &MotionSpec
     })
 }
 
+fn resolve_run_cycle(g: &PoseGoal, rig: &HumanoidRigSpec, _spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+    // Resolve the named joint (like set_joint); carry the amplitude (`amount`) and
+    // the `(phase_offset, steps, bias)` cycle parameters (`euler`) through.
+    g.joint_name()
+        .and_then(|n| rig.joint_id(n))
+        .ok_or_else(|| AuthoringError::unknown_joint("run_cycle joint absent from rig"))
+        .map(|joint| ResolvedGoal::new(GoalKind::RunCycle, joint, Vec3::ZERO, g.amount(), g.euler()))
+}
+
 /// Per-kind goal resolvers, indexed by [`GoalKind`] discriminant.
-const GOAL_RESOLVERS: [GoalResolver; 8] = [
+const GOAL_RESOLVERS: [GoalResolver; 9] = [
     resolve_set_joint,
     resolve_aim,
     resolve_move,
@@ -195,6 +204,7 @@ const GOAL_RESOLVERS: [GoalResolver; 8] = [
     resolve_leg_backswing,
     resolve_leg_strike,
     resolve_follow_through,
+    resolve_run_cycle,
 ];
 
 fn resolve_goal(g: &PoseGoal, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
@@ -554,6 +564,7 @@ mod tests {
             p.push_goal(PoseGoal::leg_backswing(true, 0.8));
             p.push_goal(PoseGoal::leg_strike(true, "ball"));
             p.push_goal(PoseGoal::follow_through(true, "net_center"));
+            p.push_goal(PoseGoal::run_cycle("left_thigh", 0.5, 0.0, 3.0, 0.0));
             p.push_constraint(Constraint::pin_effector_to_target("left_foot_sole", "left_plant_spot"));
             p.push_constraint(Constraint::keep_gaze_on_target("ball"));
             p.push_constraint(Constraint::keep_center_of_mass_over_support("left_foot_sole"));
@@ -562,8 +573,15 @@ mod tests {
             p.push_contact(ContactDeclaration::new("left_foot_sole", "left_plant_spot"));
         }
         let plan = MotionCompiler::compile(&m, &rig()).unwrap();
-        assert_eq!(plan.phases()[0].goals().len(), 8);
+        assert_eq!(plan.phases()[0].goals().len(), 9);
         assert_eq!(plan.phases()[0].constraints().len(), 5);
         assert_eq!(plan.phases()[0].contacts().len(), 1);
+    }
+
+    #[test]
+    fn a_run_cycle_on_an_unknown_joint_is_rejected() {
+        let mut m = base_spec();
+        m.phase_mut(0).unwrap().push_goal(PoseGoal::run_cycle("no_such_joint", 0.5, 0.0, 3.0, 0.0));
+        assert_eq!(err(&m), AuthoringErrorCode::UnknownJoint);
     }
 }

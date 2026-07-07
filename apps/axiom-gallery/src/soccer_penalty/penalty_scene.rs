@@ -348,7 +348,9 @@ fn net(b: &mut SceneBuilder) {
 fn kicker(b: &mut SceneBuilder) {
     let boxes = penalty_kicker::KickerRig::new().boxes_at(penalty_kicker::DISPLAY_FRAME);
     boxes.iter().for_each(|kb| {
-        b.emit(DioramaRole::Kicker, PrimitiveShape::Box, kb.center, kb.size, kb.material, kb.label);
+        // Emit each part at its bone ROTATION (like the goalie), so limbs render as
+        // oriented capsules along their bones instead of axis-aligned sticks.
+        b.emit_rotated(DioramaRole::Kicker, PrimitiveShape::Box, kb.center, kb.rotation, kb.size, kb.material, kb.label);
     });
     // A dark hair cap over the kicker's head. The reference #10 — the largest,
     // nearest subject — has prominent black hair, but the shared figure's head is
@@ -359,10 +361,11 @@ fn kicker(b: &mut SceneBuilder) {
     // change.
     if let Some(head) = boxes.iter().find(|kb| kb.label == "kicker.head") {
         let cap_h = head.size.y * 0.42;
-        b.emit(
+        b.emit_rotated(
             DioramaRole::Kicker,
             PrimitiveShape::Box,
             head.center.add(Vec3::new(0.0, head.size.y * 0.5 - cap_h * 0.4, 0.0)),
+            head.rotation,
             Vec3::new(head.size.x * 1.06, cap_h, head.size.z * 1.06),
             PenaltyMaterialId::GoalieHair,
             "kicker.hair",

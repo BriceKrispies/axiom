@@ -22,7 +22,7 @@
 use std::sync::OnceLock;
 
 use axiom_figure::{FigureApi, FigureDefinition};
-use axiom_math::{Transform, Vec3};
+use axiom_math::{Quat, Transform, Vec3};
 
 use crate::soccer_penalty::penalty_interaction::PenaltyInteractionState;
 use crate::soccer_penalty::penalty_kick_motion::{DURATION, SPRINT_APPROACH, STRIKE_CONTACT_TICK};
@@ -101,6 +101,10 @@ fn cached_kick() -> &'static PenaltyPhysicsKick {
 pub struct KickerBox {
     /// World-space box center.
     pub center: Vec3,
+    /// World-space box orientation (the bone rotation, mirror-corrected for the
+    /// goal-facing Z-flip) so the part renders as an *oriented* capsule/box along
+    /// its bone — not an axis-aligned stick at a joint point.
+    pub rotation: Quat,
     /// Full box extents.
     pub size: Vec3,
     /// The material this part is drawn with.
@@ -136,8 +140,14 @@ impl KickerRig {
             .enumerate()
             .map(|(i, pp)| {
                 let p = pp.transform.translation;
+                // The world map mirrors the figure across the XY plane (`KICKER_Z -
+                // p.z`) to face the goal. Conjugating a rotation by that reflection
+                // (`diag(1,1,-1)`) negates its X/Y components and preserves Z/W — so
+                // the box renders at the correctly-oriented world rotation.
+                let r = pp.transform.rotation;
                 KickerBox {
                     center: Vec3::new(KICKER_X + p.x, p.y, KICKER_Z - p.z),
+                    rotation: Quat::new(-r.x, -r.y, r.z, r.w),
                     size: pp.box_size,
                     material: material_for_part(i, pp.tag),
                     label: KICKER_LABELS[i],
