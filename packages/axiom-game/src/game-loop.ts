@@ -47,6 +47,12 @@ export class GameLoop {
   // Exactly once, before any fixed update — branchless (an `each` over a list that
   // Is then cleared), never an `if firstFrame`.
   readonly #pendingStart: (() => void)[] = [];
+  // The hot-update tick barrier (hot-reload architecture §6.5): the reconciler
+  // Enqueues a manifest-diff application here, and `advance` drains it AFTER this
+  // Frame's fixed updates + render, so a system-body swap / resource patch / scene
+  // Reauthor lands on a clean tick boundary — never mid-`stepFrame`. Same drained-
+  // List shape as `#pendingStart`.
+  readonly #pendingHotUpdates: (() => void)[] = [];
 
   public constructor(bridge: NativeBridge, fixedHz: number, registry: GameRegistry) {
     this.#bridge = bridge;
@@ -83,7 +89,21 @@ export class GameLoop {
       renders: this.#registry.renders(),
       startTick: this.#tick,
     });
+    // Drain queued hot updates AFTER the frame — they take effect next `advance`.
+    each(this.#pendingHotUpdates, (apply): void => {
+      apply();
+    });
+    this.#pendingHotUpdates.length = 0;
     return budget;
+  }
+
+  /*
+   * Queue a hot update to apply at the next tick barrier (after this frame's fixed
+   * updates + render). The reconciler calls this so a manifest-diff application
+   * never mutates the system/registry set mid-`stepFrame`.
+   */
+  public enqueueHotUpdate(apply: () => void): void {
+    this.#pendingHotUpdates.push(apply);
   }
 
   /** The monotonic count of fixed ticks driven so far. */

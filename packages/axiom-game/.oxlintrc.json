@@ -149,9 +149,15 @@
       //     (`physicsSetConfig(gx,gy,gz,lin,ang)`, the `(body,x,y,z)` vector
       //     verbs) — this is the exact constraint that deferred physics's TS
       //     binding in P3; the `NativeBridge`-facing arrows stay <=3 args.
+      //   - max-lines-per-function: `bridgeFromWasm` is ONE flat 1:1 map of ~50 wasm
+      //     methods. Splitting it needs an object MERGE, but `Object.assign` trips
+      //     `prefer-object-spread` while object spread trips `no-rest-spread-properties`
+      //     (banned in the spine) — the flat literal is the only legal shape, and it
+      //     necessarily exceeds the 50-line budget (documented in-file).
       "files": ["src/wasm-bridge.ts"],
       "rules": {
         "eslint/max-lines": "off",
+        "eslint/max-lines-per-function": "off",
         "eslint/max-params": "off",
         "typescript/no-unsafe-type-assertion": "off"
       }
@@ -197,7 +203,7 @@
       // scoped to EXACTLY these three files; nothing else is relaxed.
       //   - branch ban / optional chaining: the event wiring + running-state gate + `?? []`
       //   - async-await + unsafe-*: the DOM event / live-wasm boundary is untyped at its edge
-      "files": ["src/dom-input.ts", "src/boot.ts", "src/headless.ts"],
+      "files": ["src/dom-input.ts", "src/boot.ts", "src/headless.ts", "src/hot-runtime.ts"],
       "rules": {
         "eslint-js/no-restricted-syntax": "off",
         "eslint/no-await-in-loop": "off",

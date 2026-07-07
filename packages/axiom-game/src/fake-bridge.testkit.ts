@@ -108,6 +108,9 @@ const EASE_FNS: readonly ((p: number) => number)[] = [
   },
 ];
 
+/** A shared empty column, so a membership test can default an absent entity's column without optional chaining. */
+const EMPTY_COLUMN = new Map<string, never>();
+
 export class FakeBridge implements NativeBridge {
   // --- advance / snapshot ---
   public budgets: StepBudget[] = [];
@@ -129,9 +132,13 @@ export class FakeBridge implements NativeBridge {
   // --- in-memory ECS ---
   private readonly alive = new Set<Entity>();
   private readonly columns = new Map<Entity, Map<string, Component>>();
+  // Raw (un-decoded) component bytes for the migration path — parallel to `columns`.
+  private readonly rawColumns = new Map<Entity, Map<string, Uint8Array>>();
   private readonly parents = new Map<Entity, Entity>();
   private readonly order: Entity[] = [];
   public lastSpawn: readonly Component[] | undefined = undefined;
+  /** The last bytes handed to `restore` — a test asserts the transactional checkpoint. */
+  public restored: Uint8Array | undefined = undefined;
   // Scriptable world-transform returns: a live entity with no override reads the
   // identity pose; a dead entity is the empty Result.
   public readonly transforms = new Map<Entity, Transform>();
@@ -255,12 +262,36 @@ export class FakeBridge implements NativeBridge {
   }
 
   public worldQuery(kinds: readonly ComponentKind[]): readonly Entity[] {
-    return this.order.filter((entity) => {
-      const column = this.columns.get(entity);
-      return (
-        this.alive.has(entity) && column !== undefined && kinds.every((kind) => column.has(kind))
-      );
-    });
+    // An entity matches a kind held in EITHER the decoded or the raw-byte column. The
+    // `?? EMPTY_COLUMN` default keeps the membership test off optional chaining (banned
+    // here) and off the `x !== undefined && x.has(...)` pattern the lint also rejects.
+    return this.order.filter(
+      (entity) =>
+        this.alive.has(entity) &&
+        kinds.every(
+          (kind) =>
+            (this.columns.get(entity) ?? EMPTY_COLUMN).has(kind) ||
+            (this.rawColumns.get(entity) ?? EMPTY_COLUMN).has(kind),
+        ),
+    );
+  }
+
+  public restore(bytes: Uint8Array): void {
+    this.restored = bytes;
+  }
+
+  public worldRawGet(entity: Entity, kind: ComponentKind): Uint8Array {
+    return (this.rawColumns.get(entity) ?? new Map<string, Uint8Array>()).get(kind) ?? Uint8Array.of();
+  }
+
+  public worldRawSet(entity: Entity, kind: ComponentKind, bytes: Uint8Array): void {
+    const column = this.rawColumns.get(entity) ?? new Map<string, Uint8Array>();
+    column.set(kind, bytes);
+    this.rawColumns.set(entity, column);
+    this.alive.add(entity);
+    if (!this.order.includes(entity)) {
+      this.order.push(entity);
+    }
   }
 
   public worldChildrenOf(entity: Entity): readonly Entity[] {

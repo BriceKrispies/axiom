@@ -18,21 +18,18 @@
     </style>
 
     <!--
-      No bundler: the browser loads the @axiom/game SDK as native ES modules out of
-      its dist/ build, resolved by this import map. The author game + harness are
-      emitted under /dist by the dev server's tsgo compile. The boot edge module is
-      deep-imported by absolute path in the harness (the host page is its consumer).
+      Vite dev: the harness is a native ES module Vite transforms + serves with an
+      HMR client injected. `@axiom/game` resolves to the workspace SDK (a Vite alias),
+      and `./game.ts` edits arrive over `import.meta.hot.accept` — the running engine
+      is patched in place, never recreated. See web/vite.config.ts.
     -->
-    <script type="importmap">
-      { "imports": { "@axiom/game": "/vendor/axiom-game/index.js" } }
-    </script>
   </head>
   <body>
     <canvas id="c" width="960" height="540"></canvas>
     <div id="hud">
       <span id="status">booting…</span>
-      <span>edit <b>apps/axiom-game-runtime/web/src/game.ts</b> and save — the browser re-runs live</span>
+      <span>edit <b>apps/axiom-game-runtime/web/src/game.ts</b> and save — the engine hot-patches live</span>
     </div>
-    <script type="module" src="/dist/harness.js"></script>
+    <script type="module" src="/src/harness.ts"></script>
   </body>
 </html>

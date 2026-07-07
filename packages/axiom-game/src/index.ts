@@ -53,6 +53,20 @@ export type { Game, GameConfig, GameStatus } from "./game.ts";
 export { GameLoop } from "./game-loop.ts";
 export { onFixedUpdate, onRender, GameRegistry, activeRegistry, useRegistry } from "./registry.ts";
 
+// Hot-reload authoring model (docs/hot-reload-architecture-audit.md): the `defineApp` manifest + stable-id factories, the pure diff/classifier, and the live hot runtime the dev harness drives from `import.meta.hot.accept`.
+export { component, defineApp, resource, scene, system } from "./manifest.ts";
+export type {
+  AppManifest, ComponentDef, ComponentMigrate, FixedSystemSpec, MaterialResourceSpec, MaterialValue,
+  RenderSystemSpec, ResourceDef, ResourceSpec, SceneBuild, SceneDef, SceneSpec, SystemContext, SystemDef,
+  SystemHook, SystemPhase, SystemSpec,
+} from "./manifest.ts";
+export { classifyUpdate, diffManifest } from "./diff.ts";
+export type { ComponentsDiff, ManifestDiff, ResourcesDiff, ScenesDiff, SystemsDiff, UpdateClass } from "./diff.ts";
+export { bootSession } from "./boot.ts";
+export { createHotRuntime } from "./hot-runtime.ts";
+export type { BootGame, BootOptions, BootSession } from "./boot.ts";
+export type { HotRuntime, HotRuntimeOptions } from "./hot-runtime.ts";
+
 export { mountScene } from "./scene-runtime.ts";
 export type { MountedScene } from "./scene-runtime.ts";
 

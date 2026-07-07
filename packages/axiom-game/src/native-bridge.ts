@@ -54,6 +54,8 @@ export interface NativeBridge {
   readonly advance: (elapsedNanos: number) => StepBudget;
   /** The durable simulation state as opaque bytes (for checkpoint / determinism checks). */
   readonly snapshot: () => Uint8Array;
+  /** Restore the durable simulation state from `snapshot` bytes — the hot runtime's transactional checkpoint around a soft-reload migration. */
+  readonly restore: (bytes: Uint8Array) => void;
 
   // Deterministic RNG (SPEC-01): the native core owns the draw sequence and the projection turns these primitives into the author surface.
   /** A uniform float in `[0, 1)` from `stream`. */
@@ -94,6 +96,15 @@ export interface NativeBridge {
   readonly worldParentOf: (entity: Entity) => Result<Entity>;
   /** `entity`'s resolved (composed) world transform for this tick, or the empty value on a stale handle. */
   readonly worldWorldTransform: (entity: Entity) => Result<Transform>;
+  /**
+   * Read `entity`'s component of `kind` as its RAW field bytes (un-decoded), or the
+   * empty buffer on a miss. The migration path uses the raw bytes because a schema
+   * change means the stored bytes are the PRIOR layout — decoding them with the new
+   * `Component` shape would mis-read; the author's migrator transforms the bytes directly.
+   */
+  readonly worldRawGet: (entity: Entity, kind: ComponentKind) => Uint8Array;
+  /** Write RAW field bytes for `entity`'s component of `kind` (the migrated bytes; a stale handle / unknown kind is a clean no-op). */
+  readonly worldRawSet: (entity: Entity, kind: ComponentKind, bytes: Uint8Array) => void;
 
   // Input snapshot (SPEC-05): every read is scoped to a tick's snapshot.
   /** Whether `action` is held at `tick`. */

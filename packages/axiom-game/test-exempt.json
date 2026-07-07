@@ -4,5 +4,6 @@
   "wasm-host.ts",
   "dom-input.ts",
   "boot.ts",
-  "headless.ts"
+  "headless.ts",
+  "hot-runtime.ts"
 ]

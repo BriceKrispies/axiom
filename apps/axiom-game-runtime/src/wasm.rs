@@ -273,6 +273,16 @@ impl WasmGame {
         self.bridge.snapshot_sim()
     }
 
+    /// Restore the durable simulation state from bytes a prior [`Self::snapshot`]
+    /// produced, forking the live world to that recorded frame while the tick keeps
+    /// advancing. The `@axiom/game` hot runtime uses this as the transactional
+    /// checkpoint around a `soft_app_reload` migration (snapshot → migrate the live
+    /// component bytes → on a migrator error, restore). Returns whether the bytes
+    /// restored cleanly (a truncated / incompatible buffer is a deterministic `false`).
+    pub fn restore(&mut self, bytes: Vec<u8>) -> bool {
+        self.bridge.restore(&bytes)
+    }
+
     // The seam a 3D game's boot path drives: bind a canvas once the scene is
     // authored, then present the authored scene each host frame. A 2D game (which
     // draws through the `draw2d` command stream the harness rasterizes) never calls

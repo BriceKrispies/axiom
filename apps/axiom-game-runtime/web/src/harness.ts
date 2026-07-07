@@ -1,45 +1,42 @@
 /*
- * The browser boot harness for the @axiom/game hot-reload dev loop.
+ * The browser boot harness for the @axiom/game HOT-RUNTIME dev loop.
  *
  * This is the host / platform edge — NOT engine spine — so it lives in an app
  * `web/` dir, outside the branchless + coverage gates, and uses ordinary control
  * flow.
  *
- * It drives the REAL engine path, not a stand-in:
- *   - `createGame()` mints the per-game registry the author registers into;
- *   - `boot()` (the SDK's own platform-edge aggregator) installs the real host
- *     channel (`hostFromWasm`), builds the real `GameLoop` over the real
- *     `NativeBridge` (`bridgeFromWasm`), wires DOM input, and drives `rAF`;
- *   - the author draws through the real `frame.rect/circle/line/sprite/text/…` 2D
- *     surface, which records into the native `draw2d` builder.
+ * ## The long-lived engine host (the point of HMR)
+ * Unlike the old "deterministic re-run" harness, this constructs the `WasmGame`
+ * exactly ONCE and keeps it alive for the whole session. It builds a `HotRuntime`
+ * (the SDK's `createHotRuntime`) over that instance, mounts the author's `defineApp`
+ * manifest, and — on every Vite HMR update of `./game.ts` — calls
+ * `runtime.apply(next)`, which diffs the new manifest against the live one and
+ * SWAPS the changed system's body on the next tick barrier. The wasm engine, the
+ * ECS world, the canvas/backend binding, the uploaded textures, and the tick
+ * counter all persist across the edit. `globalThis.__wasmGameConstructCount` stays 1.
  *
  * ## The engine presents 2D — no TypeScript interpreter
- * Presentation is the engine's job, not the harness's. After the author's draws,
- * the harness calls `game.present2d()`, which drains the native `draw2d` builder
- * into its layer-sorted command list and hands it to `axiom-windowing` — the SAME
- * live presenter a 3D game uses. The engine rasterizes it through the WebGPU →
- * WebGL2 → Canvas 2D fallback cascade (the GPU 2D pipeline or the software
- * rasterizer, with byte-for-byte parity). The harness owns no `getContext("2d")`
- * and no per-shape drawing.
+ * Presentation is the engine's job. The author's `orb.draw` render system records
+ * into the native `draw2d` builder; the SDK's own `present2d` boot presenter (a
+ * boot concern, run after the frame's render systems) drains it into the engine's
+ * layer-sorted command list and hands it to `axiom-windowing` — the SAME live
+ * presenter a 3D game uses (WebGPU → WebGL2 → Canvas 2D). The harness owns no
+ * `getContext("2d")` and no per-shape drawing.
  *
  * ## Sprites + text (Tier-0) — fetch in the app, present in the engine
- * The engine's 2D rasterizers sample sprite/atlas textures by id. The harness is
- * the app side of the SPEC-04 "fetch in the app" rule: it polls the wasm core for
- * the texture handles the game has registered (`game.textureIds`), `fetch`+decodes
- * each handle's url (`game.textureUrl`) to RGBA8 pixels, and uploads them under the
- * same id (`game.upload2dTexture`); the engine binds them to its backend. The
- * built-in monospace font's atlas is baked once here (the same fixed ASCII grid
- * `src/font.rs` lays out) and uploaded under the reserved font-atlas id, so the
- * engine's text path samples it exactly as a sprite.
+ * The `present2d` presenter runs `beforePresent` each frame; we hook the texture
+ * loader there: it polls the wasm core for the handles the game registered
+ * (`textureIds`), `fetch`+decodes each url (`textureUrl`) to RGBA8, and uploads it
+ * under the same id (`upload2dTexture`). The monospace font atlas is baked once and
+ * uploaded under the reserved font-atlas id, so the engine's text path samples it.
  */
 
-import { boot } from "/vendor/axiom-game/boot.js";
-import { type Frame, createGame, onRender } from "@axiom/game";
+import { type AppManifest, type BootGame, createHotRuntime } from "@axiom/game";
 
 import initWasm, { WasmGame } from "/pkg/axiom_game_runtime.js";
+import manifest from "./game.ts";
 
 const FIXED_HZ = 60;
-const SEED = 1n;
 const NANOS_PER_SECOND = 1_000_000_000;
 const MAX_STEPS_PER_FRAME = 8;
 
@@ -48,8 +45,7 @@ const ATLAS_COLS = 16;
 const ATLAS_ROWS = 6;
 const CELL_W = 8;
 const CELL_H = 16;
-// The reserved font-atlas texture id — MUST match `font.rs` FONT_ATLAS_TEXTURE
-// (0x00F0_0000). The engine's text path samples the atlas the harness uploads here.
+// The reserved font-atlas texture id — MUST match `font.rs` FONT_ATLAS_TEXTURE.
 const FONT_ATLAS_TEXTURE = 0x00f0_0000;
 
 /** Decoded RGBA8 pixels plus their dimensions — the upload shape the engine takes. */
@@ -84,11 +80,7 @@ const bitmapToRgba = (bitmap: ImageBitmap): Rgba8 => {
   return canvasRgba(canvas);
 };
 
-/*
- * The per-run texture loader: discover the handles the game has registered
- * (`textureIds`), and fetch/decode/upload any not yet uploaded under their id. Each
- * (re)load mints a fresh loader so a new run re-uploads from the same urls.
- */
+/** The per-run texture loader: discover the handles the game registered and upload any not yet uploaded. */
 const makeTextureLoader = (game: WasmGame): (() => void) => {
   const uploaded = new Set<number>();
   const pending = new Set<number>();
@@ -122,61 +114,49 @@ const boot_ = async (): Promise<void> => {
   const canvas = document.getElementById("c") as HTMLCanvasElement;
   const status = document.getElementById("status") as HTMLSpanElement;
 
-  // Load the wasm engine MODULE once; each (re)load mints a fresh game instance.
+  // Load the wasm engine MODULE once, then construct the engine instance ONCE.
   await initWasm();
-  // Bake the font atlas once (handle-independent pixels); re-uploaded per run.
   const atlas = bakeFontAtlas();
-  // A plain `number` (not a BigInt): the wasm `WasmGame` constructor takes the
-  // fixed step as f64 so the Binaryen `wasm2js` fallback (no i64/BigInt ABI) runs.
   const fixedStepNanos = Math.round(NANOS_PER_SECOND / FIXED_HZ);
 
-  let teardown: (() => void) | undefined;
-  const load = async (version: number): Promise<void> => {
-    teardown?.();
-    const game = new WasmGame(fixedStepNanos, MAX_STEPS_PER_FRAME);
-    // Bind the engine's live 2D presenter to the canvas (selects the backend:
-    // WebGPU → WebGL2 → Canvas 2D), then upload the font atlas under its reserved id.
-    game.bind2dSurface("c");
-    game.upload2dTexture(FONT_ATLAS_TEXTURE, atlas.width, atlas.height, atlas.pixels);
-    const loadTextures = makeTextureLoader(game);
-    const app = createGame({ fixedHz: FIXED_HZ, seed: SEED, surface: "c" });
-    // The author module registers its onFixedUpdate / onRender into the active
-    // (this game's) registry as an import side effect.
-    await import(`/dist/game.js?v=${version}`);
-    // Register the presenter LAST so it runs after the author's draws: pick up any
-    // newly-registered textures, then hand the frame to the engine to present.
-    onRender((frame: Frame): void => {
-      loadTextures();
-      game.present2d();
-      status.textContent = `live · deterministic re-run · loop tick ${frame.tick}`;
-    });
-    app.start();
-    teardown = boot(game as unknown as Parameters<typeof boot>[0], app, { canvas });
-  };
-  await load(0);
+  const game = new WasmGame(fixedStepNanos, MAX_STEPS_PER_FRAME);
+  // The construct-count the browser proof asserts stays 1 across a system-body edit.
+  const globals = globalThis as unknown as { __wasmGameConstructCount: number; __game: WasmGame };
+  globals.__wasmGameConstructCount = 1;
+  globals.__game = game;
 
-  // Each save → fresh deterministic run with the new author logic. This live hot-reload
-  // is a DEV-SERVER feature (the SSE `/events` stream). A statically packaged bundle
-  // (scripts/package_app.py) has no such server, so close the stream the moment a
-  // connection fails to open instead of letting EventSource retry the missing endpoint
-  // forever. In the dev loop the stream opens (the server replies `: connected`), so
-  // `live` flips true and transient drops still auto-reconnect as before.
-  const events = new EventSource("/events");
-  let live = false;
-  events.addEventListener("open", (): void => {
-    live = true;
+  game.bind2dSurface("c");
+  game.upload2dTexture(FONT_ATLAS_TEXTURE, atlas.width, atlas.height, atlas.pixels);
+  const loadTextures = makeTextureLoader(game);
+
+  // The long-lived hot runtime: mount the author manifest, boot once, present 2D.
+  const runtime = createHotRuntime(game as unknown as BootGame, manifest, {
+    canvas,
+    onEngineRestart: (): void => {
+      // A config change (fixedHz/seed/surface) needs a fresh engine — fall back to a page reload.
+      globalThis.location.reload();
+    },
+    present2d: {
+      beforePresent: (): void => {
+        loadTextures();
+        status.textContent = `live · engine alive · tick ${game.current_tick}`;
+      },
+    },
   });
-  events.addEventListener("error", (): void => {
-    if (!live) {
-      events.close();
-    }
-  });
-  events.addEventListener("reload", (event: MessageEvent<string>): void => {
-    void load(Number(event.data)).then((): void => {
+
+  // Vite HMR: on a `./game.ts` edit, apply the new manifest into the LIVE engine.
+  if (import.meta.hot) {
+    import.meta.hot.accept("./game.ts", (mod: { readonly default: AppManifest } | undefined): void => {
+      const next = mod?.default;
+      if (!next) {
+        return;
+      }
+      const kind = runtime.apply(next);
       status.classList.add("flash");
+      status.textContent = `hot · ${kind} · tick ${game.current_tick} (engine #${globals.__wasmGameConstructCount})`;
       globalThis.setTimeout((): void => status.classList.remove("flash"), 400);
     });
-  });
+  }
 };
 
 void boot_();

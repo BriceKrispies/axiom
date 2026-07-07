@@ -206,6 +206,13 @@ impl GameBridge {
         self.runtime.snapshot_sim()
     }
 
+    /// Restore the durable simulation state from bytes a prior [`Self::snapshot_sim`]
+    /// produced. Returns whether it restored cleanly (the hot runtime's transactional
+    /// checkpoint for a soft-reload migration).
+    pub fn restore(&mut self, bytes: &[u8]) -> bool {
+        self.runtime.restore_sim(bytes)
+    }
+
     /// A uniform draw in `[0, 1)` from `stream` (`Rng::unit`, SPEC-01).
     pub fn rng_unit(&mut self, stream: u32) -> f64 {
         self.rng.unit(stream)
@@ -445,6 +452,29 @@ mod tests {
         assert_eq!(b.material_set().len(), 1);
         assert_eq!(b.render_frame(), outcome, "render is idempotent at a fixed tick");
         assert_eq!(before, b.snapshot_sim(), "render steps no simulation");
+    }
+
+    #[test]
+    fn restore_forks_the_world_back_to_a_snapshot_while_the_tick_advances() {
+        // The transactional-checkpoint seam the hot runtime uses: snapshot the world,
+        // advance it (the demo cube spins, so the sim state genuinely changes), then
+        // restore the snapshot — the durable sim state returns to the checkpoint.
+        let mut b = bridge(11);
+        b.advance(STEP);
+        let checkpoint = b.snapshot_sim();
+        b.advance(STEP);
+        b.advance(STEP);
+        assert_ne!(checkpoint, b.snapshot_sim(), "advancing moved the sim off the checkpoint");
+        assert!(b.restore(&checkpoint), "a well-formed snapshot restores cleanly");
+        assert_eq!(checkpoint, b.snapshot_sim(), "restore forked the sim back to the checkpoint");
+    }
+
+    #[test]
+    fn restore_rejects_a_malformed_buffer() {
+        // A truncated / incompatible buffer is a deterministic `false`, never a panic —
+        // so a corrupt checkpoint fails the transaction instead of crashing the engine.
+        let mut b = bridge(0);
+        assert!(!b.restore(&[0xFF, 0x00, 0x01]));
     }
 
     #[test]

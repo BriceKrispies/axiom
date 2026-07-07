@@ -99,6 +99,15 @@ impl GameRuntime {
     pub fn snapshot_sim(&self) -> Vec<u8> {
         self.app.snapshot_sim()
     }
+
+    /// Restore the durable simulation state from bytes a prior [`Self::snapshot_sim`]
+    /// produced — forking the wrapped app's world to that recorded frame while the
+    /// tick keeps advancing. The hot runtime uses this as a transactional checkpoint
+    /// around a soft-reload migration. Returns whether the bytes restored cleanly (a
+    /// truncated / version-incompatible buffer is a deterministic `false`, not a panic).
+    pub fn restore_sim(&mut self, bytes: &[u8]) -> bool {
+        self.app.restore_sim(bytes).is_ok()
+    }
 }
 
 #[cfg(test)]

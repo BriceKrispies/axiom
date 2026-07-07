@@ -5,6 +5,7 @@ import { FakeBridge } from "./fake-bridge.testkit.ts";
 import { GameLoop } from "./game-loop.ts";
 import { GameRegistry } from "./registry.ts";
 import { Scene } from "./scene.ts";
+import { system } from "./manifest.ts";
 import type { StepBudget } from "./step-budget.ts";
 
 const budget = (steps: number): StepBudget => ({ fixedStepNanos: 1000, remainderNanos: 0, steps });
@@ -63,6 +64,51 @@ test("GameLoop runs the mounted scene: create once, update per tick, assets from
   loop.advance(1000);
   // `create` ran exactly once before the first fixed update; `update` runs per tick.
   assert.deepEqual(calls, ["create", "u0", "u1", "u2"]);
+});
+
+test("enqueued hot updates drain AFTER the frame, taking effect on the next advance", () => {
+  const registry = new GameRegistry();
+  const events: string[] = [];
+  registry.onFixedUpdate((sim) => {
+    events.push(`tick${sim.tick}`);
+  });
+  const fake = new FakeBridge();
+  fake.budgets = [budget(1), budget(1)];
+  const loop = new GameLoop(fake, 60, registry);
+
+  // Enqueue a hot update mid-frame-zero (simulating the reconciler), then advance.
+  loop.enqueueHotUpdate(() => {
+    events.push("applied");
+  });
+  loop.advance(1000);
+  // The queued update ran AFTER frame 0's fixed update, not before or during it.
+  assert.deepEqual(events, ["tick0", "applied"]);
+
+  // It is a one-shot: the second frame does not re-run it.
+  loop.advance(1000);
+  assert.deepEqual(events, ["tick0", "applied", "tick1"]);
+});
+
+test("a hot update that upserts a system activates it on the following frame, never mid-frame", () => {
+  const registry = new GameRegistry();
+  const seen: string[] = [];
+  const fake = new FakeBridge();
+  fake.budgets = [budget(1), budget(1)];
+  const loop = new GameLoop(fake, 60, registry);
+
+  loop.enqueueHotUpdate(() => {
+    registry.upsert(
+      system("late", {
+        phase: "fixedUpdate",
+        run: (sim) => {
+          seen.push(`late@${sim.tick}`);
+        },
+      }),
+    );
+  });
+  loop.advance(1000); // frame 0: system not yet mounted (queued applies after)
+  loop.advance(1000); // frame 1: the upserted system runs
+  assert.deepEqual(seen, ["late@1"]);
 });
 
 test("GameLoop pumps a timer an author registers in a fixed update so it fires deterministically", () => {

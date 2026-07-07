@@ -1,45 +1,92 @@
 /*
  * The callback registry behind the free `onFixedUpdate`/`onRender` authoring
- * functions (SPEC-00 §4.2). A `GameRegistry` collects the fixed-update and render
- * callbacks an author registers; the loop core reads them back.
+ * functions (SPEC-00 §4.2) AND the KEYED system store the hot runtime reconciles
+ * (hot-reload architecture §6.1). A `GameRegistry` collects the systems a manifest
+ * declares; the loop core reads them back per phase.
  *
- * SPEC-14 §9 fix — per-game registry. The free `onFixedUpdate`/`onRender` retain
- * their Phaser-style module-level shape, but they no longer push into one shared
- * singleton that `createGame` *resets*: instead each `createGame` mints its OWN
- * fresh `GameRegistry` and installs it as the ACTIVE registry (`useRegistry`), and
- * the free functions delegate to whichever registry is active. Two games created
- * in sequence therefore get independent registries — the first keeps its
- * registrations instead of being silently cleared — closing the "two live games
- * share the global" debt without changing the author-facing free-function surface.
+ * The store is a single insertion-ordered `Map<string, SystemDef>` keyed by each
+ * system's STABLE id — the diff key. This is what makes a system REPLACEABLE: to
+ * hot-patch a system's body, the reconciler `upsert`s the new def under the same id,
+ * and `Map.set` on an existing key updates it IN PLACE (position preserved), so the
+ * swap takes effect on the next tick with no re-ordering. `remove` drops one system
+ * by id; the free `onFixedUpdate`/`onRender` remain, now thin adapters that `upsert`
+ * a synthetic-id system so existing side-effect demos keep booting.
+ *
+ * SPEC-14 §9 per-game registry is unchanged: `createGame` mints a fresh registry and
+ * installs it active (`useRegistry`); the free functions target whichever is active.
  * The active pointer lives in one mutable holder here, exactly as the bound host
  * lives in `host-binding.ts`'s `session`.
  */
 
+import type { FixedSystemSpec, RenderSystemSpec, SystemDef } from "./manifest.ts";
 import type { FixedUpdate, Render } from "./loop-core.ts";
+import { orElse } from "./control-flow.ts";
 
-/** Collects the callbacks an author registers for one game. */
+/** A system def narrowed to the fixed-update phase — the projection target for `fixedUpdates()`. */
+interface FixedSystemDef {
+  readonly id: string;
+  readonly spec: FixedSystemSpec;
+}
+/** A system def narrowed to the render phase — the projection target for `renders()`. */
+interface RenderSystemDef {
+  readonly id: string;
+  readonly spec: RenderSystemSpec;
+}
+
+/** The order key a system without an explicit `order` sorts at — insertion order then breaks ties (stable sort). */
+const DEFAULT_ORDER = 0;
+
+/** Collects the ID-keyed systems for one game and projects them per phase for the loop. */
 export class GameRegistry {
-  readonly #fixedUpdates: FixedUpdate[] = [];
-  readonly #renders: Render[] = [];
+  readonly #systems = new Map<string, SystemDef>();
+  #legacy = 0;
 
-  /** Register a fixed-update callback (run 0..N times per frame at constant dt). */
+  /** Add or replace a system by its stable id (SPEC hot-reload §6.1). Replacing preserves position. */
+  public upsert(def: SystemDef): void {
+    this.#systems.set(def.id, def);
+  }
+
+  /** Remove a system by id (a stale id is a clean no-op). */
+  public remove(id: string): void {
+    this.#systems.delete(id);
+  }
+
+  /** The system currently mounted under `id`, or the empty value — the reconciler reads its `dispose` hook. */
+  public get(id: string): SystemDef | undefined {
+    return this.#systems.get(id);
+  }
+
+  /** Register a fixed-update callback (legacy free-function path): upserted under a synthetic id. */
   public onFixedUpdate(callback: FixedUpdate): void {
-    this.#fixedUpdates.push(callback);
+    this.#legacy += 1;
+    this.upsert({ id: `legacy:fixed:${this.#legacy}`, spec: { phase: "fixedUpdate", run: callback } });
   }
 
-  /** Register a render callback (run once per frame, presentation only). */
+  /** Register a render callback (legacy free-function path): upserted under a synthetic id. */
   public onRender(callback: Render): void {
-    this.#renders.push(callback);
+    this.#legacy += 1;
+    this.upsert({ id: `legacy:render:${this.#legacy}`, spec: { phase: "render", run: callback } });
   }
 
-  /** The registered fixed-update callbacks, in registration order. */
+  /** The registered fixed-update callbacks, ordered by `order` then registration. */
   public fixedUpdates(): readonly FixedUpdate[] {
-    return this.#fixedUpdates;
+    return this.#ordered()
+      .filter((def): def is FixedSystemDef => def.spec.phase === "fixedUpdate")
+      .map((def) => def.spec.run);
   }
 
-  /** The registered render callbacks, in registration order. */
+  /** The registered render callbacks, ordered by `order` then registration. */
   public renders(): readonly Render[] {
-    return this.#renders;
+    return this.#ordered()
+      .filter((def): def is RenderSystemDef => def.spec.phase === "render")
+      .map((def) => def.spec.run);
+  }
+
+  /** All systems in insertion order, stably re-sorted by the optional `order` key. */
+  #ordered(): readonly SystemDef[] {
+    return [...this.#systems.values()].toSorted(
+      (lhs, rhs) => orElse(lhs.spec.order, DEFAULT_ORDER) - orElse(rhs.spec.order, DEFAULT_ORDER),
+    );
   }
 }
 

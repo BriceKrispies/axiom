@@ -73,6 +73,8 @@ export interface WasmGameExport
     | "worldChildrenOf"
     | "worldParentOf"
     | "worldWorldTransform"
+    | "worldRawGet"
+    | "worldRawSet"
   > {
   readonly advance: (elapsedNanos: number) => {
     readonly fixed_step_nanos: number;
@@ -461,6 +463,21 @@ const adaptTweenAdd =
  * receiver; the `adapt*` wrappers already call `game.method(…)` explicitly and so
  * need no bind.
  */
+/*
+ * Build the whole `NativeBridge` as ONE flat 1:1 map from the wasm exports. It is a
+ * single literal by necessity: splitting it would need an object MERGE, but
+ * `Object.assign` trips `prefer-object-spread` and object spread trips
+ * `no-rest-spread-properties` (banned in the spine) — the two rules leave the flat
+ * literal as the only legal shape, and mapping ~50 methods puts it past the 50-line
+ * per-function budget. That is why `max-lines-per-function` is scoped off for THIS
+ * file in `.oxlintrc.json` (documented there), exactly as `max-lines`/`max-params`
+ * already are for the same adapter.
+ *
+ * `worldGet`/`worldSet`/`worldSpawn` go through the `Component` codec; `worldRawGet`/
+ * `worldRawSet` bind the SAME wasm byte methods WITHOUT the codec — the migration
+ * path needs the prior-layout bytes verbatim (decoding them with the new `Component`
+ * shape would mis-read).
+ */
 export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   advance: adaptAdvance(game),
   inputIsDown: (tick: Ticks, action: string): boolean => game.inputIsDown(tick, action),
@@ -482,6 +499,7 @@ export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   physicsSetAngularVelocity: adaptPhysicsSetAngularVelocity(game),
   physicsSetConfig: adaptPhysicsSetConfig(game),
   physicsSetVelocity: adaptPhysicsSetVelocity(game),
+  restore: game.restore.bind(game),
   rngBelow: game.rngBelow.bind(game),
   rngPermutation: game.rngPermutation.bind(game),
   rngStream: game.rngStream.bind(game),
@@ -505,6 +523,8 @@ export const bridgeFromWasm = (game: WasmGameExport): NativeBridge => ({
   worldHas: game.worldHas.bind(game),
   worldParentOf: adaptWorldParentOf(game),
   worldQuery: game.worldQuery.bind(game),
+  worldRawGet: game.worldGet.bind(game),
+  worldRawSet: game.worldSet.bind(game),
   worldRemove: game.worldRemove.bind(game),
   worldSet: adaptWorldSet(game),
   worldSetParent: game.worldSetParent.bind(game),

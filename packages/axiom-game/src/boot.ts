@@ -25,6 +25,7 @@ import { type WasmGameExport, bridgeFromWasm } from "./wasm-bridge.ts";
 import { type WasmHostExport, hostFromWasm } from "./wasm-host.ts";
 import type { Game } from "./game.ts";
 import { GameLoop } from "./game-loop.ts";
+import type { NativeBridge } from "./native-bridge.ts";
 import { bindNative } from "./host-binding.ts";
 import { driveRaf } from "./raf-loop.ts";
 import { loadSound } from "./sound.ts";
@@ -41,8 +42,19 @@ export interface Present3dGame {
   readonly isInteractive: () => boolean;
 }
 
+/**
+ * The wasm method a 2D game's boot path drives to present the frame the author's
+ * render systems drew: it drains the native `draw2d` builder into the engine's
+ * layer-sorted command list and rasterizes it (WebGPU → WebGL2 → Canvas 2D). This is
+ * the platform-edge dual of `renderScene` — presentation is a boot concern, run AFTER
+ * the frame's render systems, not a system the author registers.
+ */
+export interface Present2dGame {
+  readonly present2d: () => void;
+}
+
 /** The live wasm game the boot path drives — it satisfies every wasm seam at once. */
-export type BootGame = WasmGameExport & WasmHostExport & DomInputTarget & Present3dGame;
+export type BootGame = WasmGameExport & WasmHostExport & DomInputTarget & Present3dGame & Present2dGame;
 
 /** The default per-frame instance-buffer cap a 3D surface binds with when the app names none. */
 const DEFAULT_MAX_INSTANCES = 4096;
@@ -69,6 +81,14 @@ export interface BootOptions {
    * draws through `onRender`). `maxInstances` caps the per-frame instance buffer.
    */
   readonly present3d?: { readonly maxInstances?: number };
+  /**
+   * Present a 2D game's drawn frame each frame. Set it for a 2D game (the engine
+   * rasterizes the `draw2d` command list the author's render systems recorded);
+   * omit it for a 3D game. `beforePresent` runs just before the present each frame —
+   * the app uses it to upload any newly-referenced sprite/atlas textures (SPEC-04
+   * "fetch in the app").
+   */
+  readonly present2d?: { readonly beforePresent?: () => void };
   /**
    * Pace the sim by the display's refresh rate — exactly one fixed tick per
    * rendered frame — instead of by wall-clock time. Off by default (real-time:
@@ -107,13 +127,51 @@ const make3dPresenter = (game: Present3dGame, options: BootOptions): (() => void
 };
 
 /**
- * Boot `game` (the wasm object) against the author's `app` lifecycle and the
- * browser `options`. Returns a stop function that halts the RAF chain and removes
- * the DOM listeners.
+ * Build the after-advance 2D presenter (a no-op unless `present2d` is set). Each
+ * frame it runs the app's `beforePresent` (texture upload) then drains + rasterizes
+ * the `draw2d` command list the author's render systems recorded this frame.
  */
-export const boot = (game: BootGame, app: Game, options: BootOptions): (() => void) => {
+const make2dPresenter = (game: Present2dGame, options: BootOptions): (() => void) => {
+  const config = options.present2d;
+  if (!config) {
+    return (): void => {
+      // 3D (or headless) game: nothing to present through the 2D path.
+    };
+  }
+  return (): void => {
+    config.beforePresent?.();
+    game.present2d();
+  };
+};
+
+/** Compose the 2D and 3D after-advance presenters into the single presenter the RAF driver runs each frame. */
+const makePresenter = (game: BootGame, options: BootOptions): (() => void) => {
+  const present3d = make3dPresenter(game, options);
+  const present2d = make2dPresenter(game, options);
+  return (): void => {
+    present3d();
+    present2d();
+  };
+};
+
+/** A booted session: the live deterministic `GameLoop`, the `NativeBridge` it drives (for the hot runtime's world reconciliation), plus the teardown. */
+export interface BootSession {
+  readonly loop: GameLoop;
+  readonly bridge: NativeBridge;
+  readonly teardown: () => void;
+}
+
+/**
+ * The shared boot wiring both `boot` and `createHotRuntime` (`hot-runtime.ts`) use:
+ * install the native host channel, build the deterministic `GameLoop` over the wasm
+ * bridge, wire DOM input, drive `requestAnimationFrame`, and preload sounds. It
+ * RETURNS the live loop (so the hot runtime can enqueue tick-barrier updates onto
+ * it) alongside the teardown, whereas `boot` exposes only the teardown.
+ */
+export const bootSession = (game: BootGame, app: Game, options: BootOptions): BootSession => {
   bindNative(hostFromWasm(game));
-  const loop = new GameLoop(bridgeFromWasm(game), app.config.fixedHz, app.registry);
+  const bridge = bridgeFromWasm(game);
+  const loop = new GameLoop(bridge, app.config.fixedHz, app.registry);
   const stopInput = driveDomInput(game, options.canvas);
   /*
    * Present a 3D game's retained scene every frame (a no-op for a 2D game), but
@@ -121,7 +179,7 @@ export const boot = (game: BootGame, app: Game, options: BootOptions): (() => vo
    * interactive (not scrubbing, not blurred). The presenter paints every frame
    * regardless, so a frozen or scrubbed-to frame stays on screen.
    */
-  const present = make3dPresenter(game, options);
+  const present = makePresenter(game, options);
   const running = (): boolean => app.status === "running" && game.isInteractive();
   const stopRaf = driveRaf(loop, {
     frameLockNanos: frameLockStep(options, app.config.fixedHz),
@@ -132,8 +190,20 @@ export const boot = (game: BootGame, app: Game, options: BootOptions): (() => vo
   for (const url of options.sounds ?? []) {
     loadSound(url);
   }
-  return (): void => {
-    stopRaf();
-    stopInput();
+  return {
+    bridge,
+    loop,
+    teardown: (): void => {
+      stopRaf();
+      stopInput();
+    },
   };
 };
+
+/**
+ * Boot `game` (the wasm object) against the author's `app` lifecycle and the
+ * browser `options`. Returns a stop function that halts the RAF chain and removes
+ * the DOM listeners.
+ */
+export const boot = (game: BootGame, app: Game, options: BootOptions): (() => void) =>
+  bootSession(game, app, options).teardown;

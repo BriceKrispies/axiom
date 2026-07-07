@@ -1,0 +1,11 @@
+{
+  "name": "@axiom/vite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Axiom Vite plugin (repo tooling, outside the engine graph): forces a full page reload on a *.wasm rebuild so an @axiom/game hot runtime never patches around a possibly-changed ABI. See docs/hot-reload-architecture-audit.md §7.3.",
+  "main": "index.js",
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  }
+}
