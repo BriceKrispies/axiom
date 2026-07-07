@@ -1,107 +1,173 @@
-//! Tuning constants for the marble game — control feel, gameplay rules, and the
-//! procedural-generation dials. Kept in one place so the whole game is legible
-//! and reproducible from a handful of named knobs (an app tier concern; the
-//! engine spine holds none of this).
+//! Tuning constants for **Gravix** — a physics rolling-ball speed game on shallow
+//! half-pipe tracks. Every control-feel, physics, camera, spin-launch, half-pipe
+//! shape, and course-layout knob lives here so the whole game is legible and
+//! reproducible from named values (an app-tier concern; the engine spine holds
+//! none of this). Adjust these to re-tune the feel.
 
 use axiom::prelude::Vec3;
 
-/// Simulation gravity (world units / s²) — a snappy, heavier-than-earth pull so
-/// the marble reads as fast and weighty rather than floaty.
-pub const GRAVITY: Vec3 = Vec3::new(0.0, -28.0, 0.0);
+// --- simulation -------------------------------------------------------------
 
-/// Fixed simulation step: 60 Hz, expressed in nanoseconds for the runtime step.
+/// Gravity (world units / s²) — heavier than earth so descents build real speed
+/// and the ball reads weighty, not floaty.
+pub const GRAVITY: Vec3 = Vec3::new(0.0, -26.0, 0.0);
+
+/// Fixed simulation step: 60 Hz, in nanoseconds for the runtime step.
 pub const FIXED_STEP_NANOS: u64 = 16_666_667;
 
-/// Substeps per fixed step — extra integration slices so a fast marble does not
-/// tunnel through thin platforms.
+/// Substeps per fixed step — extra integration slices so a fast ball does not
+/// tunnel through the track surface at speed.
 pub const MAX_SUBSTEPS: u32 = 8;
 
 /// Sequential-impulse solver iterations per (sub)step.
-pub const SOLVER_ITERATIONS: u32 = 8;
+pub const SOLVER_ITERATIONS: u32 = 10;
 
-/// Per-step global linear velocity decay fraction. This is applied *every* fixed
-/// step, so it must be tiny: `0.002/step` ≈ an 11%/s coast drag, enough to settle
-/// but not fight acceleration.
-pub const LINEAR_DAMPING: f32 = 0.002;
+/// Per-step linear velocity decay (tiny — applied every fixed step). Enough to
+/// settle jitter and give a gentle coast drag without fighting acceleration.
+pub const LINEAR_DAMPING: f32 = 0.0002;
 
-/// Per-step global angular velocity decay fraction (keeps roll from winding up
-/// without bound) — likewise tiny, applied every step.
-pub const ANGULAR_DAMPING: f32 = 0.004;
+/// Per-step angular velocity decay (rolling resistance) — keeps roll bounded.
+pub const ANGULAR_DAMPING: f32 = 0.001;
 
-/// Marble collision + visual radius (world units).
-pub const MARBLE_RADIUS: f32 = 0.5;
+// --- ball -------------------------------------------------------------------
 
-/// Marble mass.
-pub const MARBLE_MASS: f32 = 2.0;
+/// Ball collision + visual radius.
+pub const BALL_RADIUS: f32 = 0.55;
 
-/// Marble surface friction (combined with the platform's, geometric-mean) — high
-/// so applied torque grips the deck and converts to forward roll.
-pub const MARBLE_FRICTION: f32 = 1.0;
+/// Ball mass.
+pub const BALL_MASS: f32 = 2.0;
 
-/// Marble restitution — low, so it rolls rather than bounces.
-pub const MARBLE_RESTITUTION: f32 = 0.08;
+/// Ball surface friction (combined geometric-mean with the track) — deliberately
+/// low/arcade-slippery so gravity accelerates the ball down the shallow slope
+/// (high friction would statically pin a rolling ball on a gentle grade). Control
+/// comes from the direct linear drive force, and the raised half-pipe lips contain
+/// the ball geometrically, so low friction costs neither steering nor banking.
+pub const BALL_FRICTION: f32 = 0.10;
 
-/// Static platform friction.
-pub const PLATFORM_FRICTION: f32 = 1.0;
+/// Ball restitution — low, so it rolls and banks rather than bouncing (this is
+/// what keeps a shallow curved surface jitter-free).
+pub const BALL_RESTITUTION: f32 = 0.05;
 
-/// Static platform restitution.
-pub const PLATFORM_RESTITUTION: f32 = 0.05;
+/// Static track surface friction (matches the ball — slippery arcade track).
+pub const TRACK_FRICTION: f32 = 0.10;
 
-/// Direct camera-relative drive force — the *primary* accelerator, so steering
-/// feels responsive rather than waiting on friction to convert spin to motion.
-pub const ROLL_FORCE: f32 = 65.0;
+/// Static track surface restitution (near zero → no bounce on the facets).
+pub const TRACK_RESTITUTION: f32 = 0.02;
 
-/// Roll torque magnitude applied per pressed direction (camera-relative) — mainly
-/// for the visual roll now that a linear force drives the acceleration.
-pub const ROLL_TORQUE: f32 = 55.0;
+/// Safety cap on horizontal speed (world units / s). A guard against runaway
+/// integration on steep descents — **not** the main way the game feels controlled.
+pub const MAX_SPEED: f32 = 42.0;
+
+// --- movement controls ------------------------------------------------------
+
+/// Camera-relative drive force applied along the pressed input direction — the
+/// primary accelerator, so the ball responds immediately from a standstill instead
+/// of waiting on friction. Forward and steering share one force because input is a
+/// single combined direction vector.
+pub const DRIVE_FORCE: f32 = 78.0;
+
+/// Roll torque applied per pressed direction — the visible spin that accompanies
+/// the linear drive and lets the ball carve into a bank.
+pub const ROLL_TORQUE: f32 = 60.0;
 
 /// Reference horizontal speed for the sublinear drive attenuation (a soft top
-/// speed — the drive fades as the marble approaches it).
-pub const ROLL_SPEED_REFERENCE: f32 = 26.0;
+/// speed: input force fades as the ball approaches it, so high-speed input biases
+/// direction rather than piling on velocity).
+pub const DRIVE_SPEED_REFERENCE: f32 = 30.0;
 
-/// Exponent of the sublinear torque-vs-speed attenuation.
-pub const ROLL_SPEED_EXPONENT: f32 = 1.55;
+/// Exponent of the sublinear drive-vs-speed attenuation.
+pub const DRIVE_SPEED_EXPONENT: f32 = 1.5;
 
-/// Upward impulse of a jump.
-pub const JUMP_IMPULSE: f32 = 13.0;
+/// Drive/steer force multiplier while airborne (reduced control off the surface).
+pub const AIR_CONTROL: f32 = 0.35;
 
-/// While braking, roll torque is scaled by this (so steering still works a bit).
-pub const BRAKE_TORQUE_SCALE: f32 = 0.52;
+/// A contact counts as "grounded" when its world normal points upward at least
+/// this much (dot with +Y) — forgiving so banks and slopes still read as grounded.
+pub const GROUNDED_NORMAL_Y: f32 = 0.35;
 
-/// Per-second linear-velocity decay applied while braking (exponential).
-pub const BRAKE_LINEAR_DECAY: f32 = 7.45;
+// --- chase camera -----------------------------------------------------------
 
-/// Per-second angular-velocity decay applied while braking (exponential).
-pub const BRAKE_ANGULAR_DECAY: f32 = 9.1;
+/// Distance the chase camera trails behind the ball.
+pub const CAM_DISTANCE: f32 = 12.0;
 
-/// A contact counts as "grounded" (jump enabled) when its world normal points
-/// upward at least this much (dot with +Y). Slightly forgiving so ramps still
-/// allow a jump.
-pub const GROUNDED_NORMAL_Y: f32 = 0.5;
+/// Height the chase camera sits above the ball.
+pub const CAM_HEIGHT: f32 = 4.6;
 
-/// Camera orbit distance from the marble.
-pub const CAMERA_DISTANCE: f32 = 13.0;
+/// How far ahead of the ball the camera looks (along its facing).
+pub const CAM_LOOK_AHEAD: f32 = 6.0;
 
-/// Camera pitch clamp (radians).
-pub const CAMERA_PITCH_MIN: f32 = 0.12;
-pub const CAMERA_PITCH_MAX: f32 = 1.45;
+/// Exponential smoothing rate for the camera eye (per second) — higher snaps
+/// faster; low enough to stay launch-safe (no snapping on a spin launch).
+pub const CAM_EYE_SMOOTHING: f32 = 6.0;
 
-/// Camera orbit input speeds (radians / second).
-pub const CAMERA_YAW_SPEED: f32 = 2.1;
-pub const CAMERA_PITCH_SPEED: f32 = 1.5;
+/// Exponential smoothing rate for the camera facing (per second) — how fast the
+/// facing turns toward the ball's horizontal velocity direction.
+pub const CAM_FACING_SMOOTHING: f32 = 3.2;
 
-/// Initial camera pitch on level load.
-pub const CAMERA_INITIAL_PITCH: f32 = 0.52;
+/// Below this horizontal speed the camera holds its facing (no random spinning
+/// when the ball is nearly stopped); above it, facing aligns to velocity.
+pub const CAM_ALIGN_MIN_SPEED: f32 = 2.5;
 
-/// Extra yaw offset applied when aiming the initial orbit down the course.
-pub const CAMERA_COURSE_YAW_OFFSET: f32 = -core::f32::consts::FRAC_PI_6;
+// --- spin-launch (Sonic-style spin dash) ------------------------------------
 
-/// A fall this far below the spawn height is a death (the fallback kill plane
-/// when the level does not specify a lower one).
-pub const FALL_DEATH_BELOW_SPAWN: f32 = 12.0;
+/// Below this horizontal speed the braked ball is "nearly stopped" and tapping a
+/// move key charges a spin instead of steering.
+pub const SPIN_STOP_SPEED: f32 = 2.2;
 
-/// Falls allowed per run before it is over.
-pub const RUN_MAX_FALLS: u32 = 3;
+/// Per-second exponential linear velocity decay while braking.
+pub const BRAKE_LINEAR_DECAY: f32 = 8.5;
 
-/// Coin pickup radius (added to the marble radius for the overlap test).
-pub const COIN_PICKUP_RADIUS: f32 = 0.46;
+/// Per-second exponential angular velocity decay while braking.
+pub const BRAKE_ANGULAR_DECAY: f32 = 9.5;
+
+/// Charge added per move-key tap while spin-charging.
+pub const SPIN_CHARGE_PER_TAP: f32 = 0.22;
+
+/// Maximum stored spin charge (taps beyond this are capped).
+pub const SPIN_CHARGE_MAX: f32 = 1.0;
+
+/// Per-second charge decay while braked + charging but not tapping.
+pub const SPIN_CHARGE_DECAY: f32 = 0.35;
+
+/// Visible in-place spin rate (angular velocity, rad/s) per unit of charge while
+/// charging — the ball whirls faster as it winds up.
+pub const SPIN_CHARGE_VISUAL: f32 = 34.0;
+
+/// Launch forward speed (world units / s) at full charge on release.
+pub const SPIN_LAUNCH_LINEAR: f32 = 40.0;
+
+/// Launch angular speed (rad/s) at full charge — matches the linear launch so the
+/// ball rolls, not slides.
+pub const SPIN_LAUNCH_ANGULAR: f32 = 55.0;
+
+// --- half-pipe shape --------------------------------------------------------
+
+/// Half-pipe channel full width (world units, across the roll direction).
+pub const HALFPIPE_WIDTH: f32 = 12.0;
+
+/// Shallow-U depth: how much higher the channel edge sits than its centre — small,
+/// so it is a gentle bank the ball rides, not a deep skate ramp.
+pub const HALFPIPE_CURVE_DEPTH: f32 = 1.4;
+
+/// Extra raised **lip** height at the very edge, so the ball is contained and can
+/// bank without immediately falling off.
+pub const HALFPIPE_LIP_HEIGHT: f32 = 1.6;
+
+/// Fraction of the half-width at which the lip begins rising (inside this the
+/// surface is the shallow parabola; outside it the lip climbs steeply).
+pub const HALFPIPE_LIP_START: f32 = 0.82;
+
+/// Grid vertex spacing along the width (fine enough to reveal the shallow curve).
+pub const HALFPIPE_TESS_WIDTH: f32 = 0.75;
+
+/// Grid vertex spacing along the length.
+pub const HALFPIPE_TESS_LENGTH: f32 = 2.0;
+
+// --- course -----------------------------------------------------------------
+
+/// How far below the course's lowest track point the kill plane sits — a fall past
+/// it resets the ball to the spawn.
+pub const KILL_PLANE_DROP: f32 = 14.0;
+
+/// Finish-gate trigger radius (horizontal).
+pub const FINISH_RADIUS: f32 = 5.0;

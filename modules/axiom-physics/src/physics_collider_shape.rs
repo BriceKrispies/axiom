@@ -124,6 +124,26 @@ impl PhysicsColliderShape {
             })
     }
 
+    /// A heightfield shape, carrying the grid's local bounding half-extents (the
+    /// grid data itself lives on the collider). Rejects non-finite or non-positive
+    /// extents on the footprint axes.
+    pub(crate) fn heightfield_shape(half_extents: Vec3) -> PhysicsResult<Self> {
+        let h = half_extents;
+        let valid = h.x.is_finite() & h.y.is_finite() & h.z.is_finite() & (h.x > 0.0) & (h.z > 0.0);
+        [
+            Err(PhysicsError::invalid_collider_shape(
+                "heightfield footprint half-extents must be finite and positive",
+            )),
+            Ok(PhysicsColliderShape {
+                kind: PhysicsShapeKind::Heightfield,
+                half_extents,
+                radius: 0.0,
+                normal: Vec3::ZERO,
+                offset: 0.0,
+            }),
+        ][valid as usize]
+    }
+
     /// The shape discriminant.
     pub(crate) fn kind(&self) -> PhysicsShapeKind {
         self.kind
@@ -169,6 +189,11 @@ impl PhysicsColliderShape {
     /// `true` iff this collider is an infinite half-space plane.
     pub fn is_plane(&self) -> bool {
         self.kind == PhysicsShapeKind::Plane
+    }
+
+    /// `true` iff this collider is a static heightfield surface.
+    pub fn is_heightfield(&self) -> bool {
+        self.kind == PhysicsShapeKind::Heightfield
     }
 
     /// The sphere radius, or `None` if this is not a sphere.
@@ -304,5 +329,18 @@ mod tests {
         assert_eq!(plane.plane_distance().unwrap().get(), 5.0);
         assert!(sphere.plane_normal().is_none());
         assert!(sphere.plane_distance().is_none());
+    }
+
+    #[test]
+    fn heightfield_shape_stores_its_bounds_and_rejects_a_degenerate_footprint() {
+        let hf = PhysicsColliderShape::heightfield_shape(Vec3::new(4.0, 1.0, 6.0)).unwrap();
+        assert!(hf.is_heightfield() && !hf.is_box() && !hf.is_plane());
+        assert_eq!(hf.half_extents(), Vec3::new(4.0, 1.0, 6.0));
+        assert_eq!(hf.kind(), PhysicsShapeKind::Heightfield);
+        // A zero / non-finite footprint axis is rejected (a flat y is allowed).
+        assert!(PhysicsColliderShape::heightfield_shape(Vec3::new(0.0, 1.0, 6.0)).is_err());
+        assert!(PhysicsColliderShape::heightfield_shape(Vec3::new(4.0, 1.0, 0.0)).is_err());
+        assert!(PhysicsColliderShape::heightfield_shape(Vec3::new(4.0, 0.0, 6.0)).is_ok());
+        assert!(!PhysicsColliderShape::sphere(m(1.0)).unwrap().is_heightfield());
     }
 }

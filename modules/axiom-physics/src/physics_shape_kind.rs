@@ -1,4 +1,4 @@
-//! The four deterministic collider-shape discriminants.
+//! The five deterministic collider-shape discriminants.
 
 /// Which primitive a [`crate::physics_collider_shape::PhysicsColliderShape`] is.
 ///
@@ -7,7 +7,8 @@
 /// phase, and queries read a shape's parameters with plain field access and
 /// dispatch on `kind as usize` into function tables — never a `match` on a
 /// payload-carrying enum (the Branchless Law). The declaration order **is** the
-/// table order: `Sphere = 0`, `Box = 1`, `Capsule = 2`, `Plane = 3`.
+/// table order: `Sphere = 0`, `Box = 1`, `Capsule = 2`, `Plane = 3`,
+/// `Heightfield = 4`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PhysicsShapeKind {
     /// A sphere — finite, rounded, AABB-bounded.
@@ -21,6 +22,9 @@ pub(crate) enum PhysicsShapeKind {
     /// extent), so it never participates in the finite broad phase and is always
     /// a narrow-phase candidate.
     Plane,
+    /// A static single-valued **heightfield** surface — finite (the grid's XZ
+    /// footprint + height range give it a bounding box), oriented like a box.
+    Heightfield,
 }
 
 impl PhysicsShapeKind {
@@ -31,7 +35,7 @@ impl PhysicsShapeKind {
         self != PhysicsShapeKind::Plane
     }
 
-    /// The stable table index (`0..4`) used to dispatch contact generation and
+    /// The stable table index (`0..5`) used to dispatch contact generation and
     /// AABB construction without branching.
     pub(crate) fn index(self) -> usize {
         self as usize
@@ -48,6 +52,7 @@ mod tests {
         assert!(PhysicsShapeKind::Box.is_finite());
         assert!(PhysicsShapeKind::Capsule.is_finite());
         assert!(!PhysicsShapeKind::Plane.is_finite());
+        assert!(PhysicsShapeKind::Heightfield.is_finite());
     }
 
     #[test]
@@ -56,6 +61,7 @@ mod tests {
         assert_eq!(PhysicsShapeKind::Box.index(), 1);
         assert_eq!(PhysicsShapeKind::Capsule.index(), 2);
         assert_eq!(PhysicsShapeKind::Plane.index(), 3);
+        assert_eq!(PhysicsShapeKind::Heightfield.index(), 4);
     }
 
     #[test]

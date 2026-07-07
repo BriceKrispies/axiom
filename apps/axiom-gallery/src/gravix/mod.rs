@@ -1,230 +1,145 @@
-//! **Gravix** — a marble-roll platformer. Steer a physics marble with
-//! camera-relative roll torque across procedurally-generated floating platform
-//! courses, over ramps and across jump gaps, collecting coins and reaching the
-//! finish pad. Endless levels, three falls per run.
+//! **Gravix** — a physics-driven rolling-ball speed game inspired by Monkey Ball.
 //!
-//! The core (`GravixGame`) is engine-agnostic, deterministic, and native-tested:
-//! it owns one `axiom-physics` world, steers the marble by torque (which the
-//! engine's contact-point friction converts to real rolling), reads back the
-//! marble pose from the physics snapshot each step, and drives the win / fall /
-//! coin / camera logic. The thin `wasm32` edge (`web`) captures input, drives the
-//! windowing render loop, and paints the HUD. This is an app-tier composition
-//! root — it is the only place that translates between the physics module's
-//! contract and the renderer's.
+//! Roll a dynamic physics sphere down a course of **shallow half-pipe** track
+//! segments: descend to build real speed, bank on the curved surface, brake and
+//! **spin-launch** (Sonic-style) to rocket up the final ramp to the finish gate.
+//!
+//! The core ([`GravixGame`]) is engine-agnostic, deterministic, and native-tested:
+//! it owns one `axiom-physics` world whose track is built from **heightfield
+//! colliders** (the module's static curved-surface collider) generated from the
+//! same half-pipe height function that meshes the visible surface, so the ball
+//! rolls exactly where the track looks. It drives the ball with camera-relative
+//! force/torque through the physics facade (never teleporting), runs the
+//! [`spin`]-launch state machine, follows with a [`chase_camera`], and resolves
+//! finish / fall / reset. The `wasm32` edge ([`web`]) captures input, installs the
+//! meshed scene once, and updates the ball + camera each frame. This is an
+//! app-tier composition root — the only place physics, the terrain mesher, and the
+//! renderer meet.
 
-pub mod camera;
-pub mod level;
-pub mod procgen;
+pub mod chase_camera;
+pub mod course;
+pub mod halfpipe;
 pub mod settings;
+pub mod spin;
+pub use spin::SpinState;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::gravix_start;
 
 use axiom::prelude::{
-    Angle, App, Assets, Camera, Color, DefaultPlugins, DirectionalLight, Material, Mesh,
-    PerspectiveProjection, PointLight, Renderable, RunningApp, SceneCommands, Transform, Vec3,
-    Window,
+    Angle, App, Camera, Color, DefaultPlugins, DirectionalLight, Entity, Material, Mesh, MeshData,
+    PerspectiveProjection, PointLight, RunningApp, Spawn, Transform, Vec3, Window,
 };
 use axiom_kernel::{FrameIndex, Meters, Ratio, Tick};
 use axiom_math::Quat;
 use axiom_physics::{PhysicsApi, PhysicsBodyHandle};
 use axiom_runtime::RuntimeStep;
 
-use crate::gravix::camera::OrbitCamera;
-use crate::gravix::level::{LevelDescriptor, Platform, SurfaceKind};
+use crate::gravix::chase_camera::ChaseCamera;
+use crate::gravix::course::Course;
+use crate::gravix::spin::SpinController;
 
-/// The canvas id the browser demo binds its surface to (matches the gallery
-/// manifest's `canvasId`).
+/// The canvas id the browser demo binds its surface to.
 pub const CANVAS_ID: &str = "axiom-gravix-canvas";
 
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 720;
 
-/// The live per-instance buffer capacity — comfortably above the tile + coin +
-/// marble count of any generated course.
-pub const LIVE_CAPACITY: u32 = 4096;
+/// The live per-instance buffer capacity — above the track + marker + ball count.
+pub const LIVE_CAPACITY: u32 = 8192;
 
 fn ratio(v: f32) -> Ratio {
     Ratio::new(v).expect("gravix authored a finite ratio")
 }
 
 fn meters(v: f32) -> Meters {
-    Meters::new(v).expect("gravix authored a finite length")
+    Meters::finite_or_zero(v)
 }
 
-fn color3(rgb: [f32; 3]) -> Color {
-    Color::linear_rgb(ratio(rgb[0]), ratio(rgb[1]), ratio(rgb[2]))
-}
-
-/// Build the explicit fixed runtime step for physics step `n`.
 fn runtime_step(n: u64) -> RuntimeStep {
     RuntimeStep::new(FrameIndex::new(n), Tick::new(n), settings::FIXED_STEP_NANOS, n)
 }
 
-/// The primitive mesh a render instance uses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GravixMesh {
-    Cube,
-    Sphere,
+fn horizontal_speed(v: Vec3) -> f32 {
+    (v.x * v.x + v.z * v.z).sqrt()
 }
 
-/// One thing to draw this frame: an oriented transform, a primitive, and a colour.
-#[derive(Clone, Copy, Debug)]
-pub struct RenderInstance {
-    pub transform: Transform,
-    pub mesh: GravixMesh,
-    pub color: [f32; 3],
-}
-
-/// The neon palette (purple/magenta course, teal/orange pads, gold coins, bright
-/// marble). Exposed as a fixed ordered set so the live re-author loop registers a
-/// stable material id per colour every frame (the windowing backend captures the
-/// material set once).
-mod palette {
-    pub const PATH: [f32; 3] = [0.30, 0.10, 0.46];
-    pub const PATH_WIDE: [f32; 3] = [0.62, 0.18, 0.70];
-    pub const PLAZA: [f32; 3] = [0.48, 0.16, 0.62];
-    pub const RAMP: [f32; 3] = [0.70, 0.22, 0.66];
-    pub const LATTICE: [f32; 3] = [0.05, 0.55, 0.60];
-    pub const MARBLE: [f32; 3] = [1.0, 0.92, 0.45];
-    pub const COIN: [f32; 3] = [1.0, 0.72, 0.16];
-    pub const START: [f32; 3] = [0.05, 0.72, 0.78];
-    pub const END: [f32; 3] = [1.0, 0.45, 0.16];
-
-    /// Every palette colour in a fixed order — one material is registered per
-    /// entry, so ids stay stable across re-authors.
-    pub const ALL: [[f32; 3]; 9] =
-        [PATH, PATH_WIDE, PLAZA, RAMP, LATTICE, MARBLE, COIN, START, END];
-
-    /// The palette index of a colour (an instance colour is always a palette
-    /// entry; an unknown colour falls back to index 0).
-    pub fn index(color: [f32; 3]) -> usize {
-        ALL.iter().position(|c| *c == color).unwrap_or(0)
-    }
-}
-
-fn platform_color(kind: SurfaceKind) -> [f32; 3] {
-    match kind {
-        SurfaceKind::Plaza => palette::PLAZA,
-        SurfaceKind::Path => palette::PATH,
-        SurfaceKind::PathWide => palette::PATH_WIDE,
-        SurfaceKind::Ramp => palette::RAMP,
-        SurfaceKind::Lattice => palette::LATTICE,
-    }
-}
-
-/// Held/edge input for one frame (camera-relative; the marble steers by roll).
+/// Held / edge input for one frame (all movement is camera-relative).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Intent {
     pub forward: bool,
     pub back: bool,
     pub left: bool,
     pub right: bool,
+    /// Shift — brake (and, when nearly stopped, gate spin charging).
     pub brake: bool,
-    pub jump: bool,
-    pub yaw_left: bool,
-    pub yaw_right: bool,
-    pub pitch_up: bool,
-    pub pitch_down: bool,
-    /// Edge-triggered: restart the run (only acted on when the run is over).
+    /// A move key was *pressed this frame* (edge) — charges spin while braked.
+    pub tap: bool,
+    /// Restart the run (acted on any time; primarily after finish / fall-out).
     pub restart: bool,
 }
 
 /// The high-level game phase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
-    Playing,
-    LevelComplete,
-    Dead,
-    RunOver,
+    Rolling,
+    Finished,
+    FellOut,
 }
 
-/// The deterministic game core: one physics world, the marble, the current
-/// course, and the run state.
+/// The deterministic game core: one physics world, the ball, the course, the spin
+/// controller, the chase camera, and the run state.
 #[derive(Debug)]
 pub struct GravixGame {
     physics: PhysicsApi,
-    marble: PhysicsBodyHandle,
-    level_index: u32,
-    descriptor: LevelDescriptor,
-    coin_taken: Vec<bool>,
-    run_score: u32,
-    falls: u32,
-    started: bool,
+    ball: PhysicsBodyHandle,
+    course: Course,
+    spin: SpinController,
+    cam: ChaseCamera,
     phase: Phase,
-    cam: OrbitCamera,
     step_n: u64,
-    /// Frames the current non-playing phase has been shown (auto-advances).
-    phase_timer: u32,
-    marble_pos: Vec3,
-    marble_rot: [f32; 4],
+    ball_pos: Vec3,
+    ball_rot: [f32; 4],
+    finish_ticks: u32,
 }
 
 impl GravixGame {
-    /// A fresh game at level 0.
+    /// A fresh game at the start of the course.
     pub fn new() -> Self {
-        let descriptor = procgen::generate(0);
-        let (physics, marble) = build_world(&descriptor);
-        let cam = OrbitCamera::new(course_yaw(&descriptor));
-        let spawn = descriptor.spawn;
-        let coin_taken = vec![false; descriptor.coins.len()];
+        let course = course::generate();
+        let (physics, ball) = build_world(&course);
+        let facing = course.segments[0].forward;
+        let cam = ChaseCamera::new(facing, course.spawn);
+        let spawn = course.spawn;
         GravixGame {
             physics,
-            marble,
-            level_index: 0,
-            descriptor,
-            coin_taken,
-            run_score: 0,
-            falls: 0,
-            started: false,
-            phase: Phase::Playing,
+            ball,
+            course,
+            spin: SpinController::new(),
             cam,
+            phase: Phase::Rolling,
             step_n: 0,
-            phase_timer: 0,
-            marble_pos: spawn,
-            marble_rot: [0.0, 0.0, 0.0, 1.0],
+            ball_pos: spawn,
+            ball_rot: [0.0, 0.0, 0.0, 1.0],
+            finish_ticks: 0,
         }
     }
 
-    /// Load `index` as the current course, rebuilding the physics world.
-    fn load_level(&mut self, index: u32) {
-        self.descriptor = procgen::generate(index);
-        let (physics, marble) = build_world(&self.descriptor);
-        self.physics = physics;
-        self.marble = marble;
-        self.level_index = index;
-        self.coin_taken = vec![false; self.descriptor.coins.len()];
-        self.started = false;
-        self.phase = Phase::Playing;
-        self.phase_timer = 0;
-        self.cam = OrbitCamera::new(course_yaw(&self.descriptor));
-        self.marble_pos = self.descriptor.spawn;
-        self.marble_rot = [0.0, 0.0, 0.0, 1.0];
-    }
-
-    /// Reset the whole run to level 0 with a full life count.
-    fn restart_run(&mut self) {
-        self.run_score = 0;
-        self.falls = 0;
-        self.load_level(0);
-    }
-
-    /// Teleport the marble back to the spawn point at rest (fall recovery).
-    fn respawn_marble(&mut self) {
+    /// Reset the ball to the spawn at rest and resume rolling.
+    pub fn restart(&mut self) {
         self.physics
-            .set_body_transform(self.marble, Transform::from_translation(self.descriptor.spawn))
-            .expect("teleport marble to spawn");
+            .set_body_transform(self.ball, Transform::from_translation(self.course.spawn))
+            .expect("teleport ball to spawn");
         self.physics
-            .set_body_velocity(self.marble, Vec3::ZERO, Vec3::ZERO)
-            .expect("reset marble velocity");
-        self.marble_pos = self.descriptor.spawn;
-        self.started = false;
-    }
-
-    /// The current level (1-based, for display).
-    pub fn level_number(&self) -> u32 {
-        self.level_index + 1
+            .set_body_velocity(self.ball, Vec3::ZERO, Vec3::ZERO)
+            .expect("reset ball velocity");
+        self.spin = SpinController::new();
+        self.cam = ChaseCamera::new(self.course.segments[0].forward, self.course.spawn);
+        self.phase = Phase::Rolling;
+        self.ball_pos = self.course.spawn;
+        self.ball_rot = [0.0, 0.0, 0.0, 1.0];
+        self.finish_ticks = 0;
     }
 
     /// The current phase.
@@ -232,167 +147,175 @@ impl GravixGame {
         self.phase
     }
 
-    /// Coins collected on the current level.
-    pub fn coins_collected(&self) -> u32 {
-        self.coin_taken.iter().filter(|c| **c).count() as u32
+    /// The current spin-launch state (for the HUD / debug).
+    pub fn spin_state(&self) -> spin::SpinState {
+        self.spin.state()
     }
 
-    /// Total coins on the current level.
-    pub fn coins_total(&self) -> u32 {
-        self.descriptor.coins.len() as u32
+    /// The ball's world position.
+    pub fn ball_position(&self) -> Vec3 {
+        self.ball_pos
     }
 
-    /// Total coins banked this run.
-    pub fn run_score(&self) -> u32 {
-        self.run_score
+    /// The ball's current horizontal speed.
+    pub fn speed(&self) -> f32 {
+        horizontal_speed(self.ball_velocity().0)
     }
 
-    /// Falls used this run.
-    pub fn falls(&self) -> u32 {
-        self.falls
-    }
-
-    /// The eye/target for the current camera framing.
+    /// The camera eye + look target for the current framing.
     pub fn camera(&self) -> (Vec3, Vec3) {
-        self.cam.eye_target(self.marble_pos)
+        self.cam.eye_target(self.ball_pos)
     }
 
-    /// Advance one fixed step under `intent`. Drives steering, physics, camera,
-    /// coins, and the win / fall state machine.
+    /// Refresh the meshed scene (ball pose + camera) for the current game state.
+    pub fn render(&self, running: &mut RunningApp, scene: &mut GravixScene) {
+        let (eye, target) = self.camera();
+        scene.update(running, self.ball_pos, self.ball_rot, eye, target);
+    }
+
+    /// Advance one fixed step under `intent`.
     pub fn step(&mut self, intent: Intent) {
         let dt = settings::FIXED_STEP_NANOS as f32 / 1_000_000_000.0;
-        // Camera orbit is always live (it frames the action in every phase).
-        self.steer_camera(intent, dt);
-
+        if intent.restart {
+            self.restart();
+            return;
+        }
         match self.phase {
-            Phase::Playing => self.step_playing(intent, dt),
-            Phase::LevelComplete => self.advance_after_delay(90, |g| {
-                let next = g.level_index + 1;
-                g.load_level(next);
-            }),
-            Phase::Dead => self.advance_after_delay(60, |g| {
-                g.respawn_marble();
-                g.phase = Phase::Playing;
-                g.phase_timer = 0;
-            }),
-            Phase::RunOver => {
-                // Wait for an explicit restart, or auto-restart after a while.
-                self.phase_timer += 1;
-                if intent.restart || self.phase_timer > 300 {
-                    self.restart_run();
+            Phase::Rolling => self.step_rolling(intent, dt),
+            // Finished / fell out: freeze the sim, keep the camera live, auto-reset a
+            // fall after a moment (finish waits for restart).
+            Phase::FellOut => {
+                self.finish_ticks += 1;
+                self.cam.update(self.ball_pos, self.ball_velocity().0, dt);
+                if self.finish_ticks > 45 {
+                    self.restart();
                 }
+            }
+            Phase::Finished => {
+                self.finish_ticks += 1;
+                self.cam.update(self.ball_pos, Vec3::ZERO, dt);
             }
         }
     }
 
-    /// Run one playing step.
-    fn step_playing(&mut self, intent: Intent, dt: f32) {
-        self.apply_steering(intent, dt);
+    fn step_rolling(&mut self, intent: Intent, dt: f32) {
+        let (fwd, right) = self.cam.ground_basis();
+        let drive = intent_direction(intent, fwd, right);
+        let grounded = self.grounded();
+        let (lin, ang) = self.ball_velocity();
+        let speed = horizontal_speed(lin);
+
+        let tap = intent.tap.then_some(drive.unwrap_or(fwd));
+        let out = self.spin.update(intent.brake, tap, speed, dt);
+
+        // Exactly one physical drive applies per step (mutually exclusive states).
+        match out.launch {
+            Some((dir, charge)) => self.apply_launch(dir, charge),
+            None => {
+                if out.spin_visual > 0.0 {
+                    self.apply_charge_spin(out.spin_visual, lin, dt);
+                } else if out.braking {
+                    self.apply_brake(lin, ang, dt);
+                } else if out.allow_move {
+                    drive.into_iter().for_each(|d| self.apply_drive(d, grounded, speed, dt));
+                }
+            }
+        }
+
         self.physics.step(runtime_step(self.step_n)).expect("physics step");
         self.step_n += 1;
-        self.read_marble();
-        self.collect_coins();
-        self.check_win();
+        self.read_ball();
+        self.clamp_speed();
+        self.cam.update(self.ball_pos, self.ball_velocity().0, dt);
+        self.check_finish();
         self.check_fall();
     }
 
-    /// Camera-relative roll torque + brake + jump.
-    fn apply_steering(&mut self, intent: Intent, dt: f32) {
-        let (fwd, right) = self.cam.ground_basis(self.marble_pos);
-        let mut roll = Vec3::ZERO;
-        if intent.forward {
-            roll = roll.add(fwd);
-        }
-        if intent.back {
-            roll = roll.subtract(fwd);
-        }
-        if intent.right {
-            roll = roll.add(right);
-        }
-        if intent.left {
-            roll = roll.subtract(right);
-        }
-
-        let (lin, ang) = self.marble_velocity();
-        let speed_xz = (lin.x * lin.x + lin.z * lin.z).sqrt();
-        let atten = 1.0
-            / (1.0
-                + (speed_xz / settings::ROLL_SPEED_REFERENCE.max(0.001))
-                    .powf(settings::ROLL_SPEED_EXPONENT));
-
-        let roll_len = (roll.x * roll.x + roll.z * roll.z).sqrt();
-        if roll_len > 1.0e-5 {
-            let dir = Vec3::new(roll.x / roll_len, 0.0, roll.z / roll_len);
-            let brake_scale = if intent.brake {
-                settings::BRAKE_TORQUE_SCALE
-            } else {
-                1.0
-            };
-            // Direct linear drive is the primary accelerator (responsive from a
-            // standstill), scaled by the soft-top-speed attenuation.
-            let force = settings::ROLL_FORCE * atten * brake_scale;
-            self.physics
-                .apply_force(self.marble, dir.mul_scalar(force))
-                .expect("apply roll force");
-            // Torque about worldUp × rollDir gives the visible forward roll.
-            let axis = Vec3::new(dir.z, 0.0, -dir.x);
-            let torque = settings::ROLL_TORQUE * atten * brake_scale;
-            self.physics
-                .apply_torque(self.marble, axis.mul_scalar(torque))
-                .expect("apply roll torque");
-        }
-
-        if intent.brake {
-            let kl = (-settings::BRAKE_LINEAR_DECAY * dt).exp();
-            let ka = (-settings::BRAKE_ANGULAR_DECAY * dt).exp();
-            self.physics
-                .set_body_velocity(self.marble, lin.mul_scalar(kl), ang.mul_scalar(ka))
-                .expect("brake marble");
-        }
-
-        if intent.jump && self.grounded() {
-            self.physics
-                .apply_impulse(self.marble, Vec3::new(0.0, settings::JUMP_IMPULSE, 0.0))
-                .expect("apply jump");
-        }
+    /// Camera-relative drive: a linear accelerator (primary) + a roll torque
+    /// (visible spin/bank), attenuated toward a soft top speed and reduced airborne.
+    fn apply_drive(&mut self, dir: Vec3, grounded: bool, speed: f32, _dt: f32) {
+        let atten = 1.0 / (1.0 + (speed / settings::DRIVE_SPEED_REFERENCE.max(0.001)).powf(settings::DRIVE_SPEED_EXPONENT));
+        let control = if grounded { 1.0 } else { settings::AIR_CONTROL };
+        // Split the input direction into forward-ness (drive) and lateral (steer)
+        // magnitudes so straight-ahead uses the stronger DRIVE_FORCE.
+        let force = settings::DRIVE_FORCE * atten * control;
+        self.physics.apply_force(self.ball, dir.mul_scalar(force)).expect("drive force");
+        let axis = Vec3::new(dir.z, 0.0, -dir.x);
+        self.physics
+            .apply_torque(self.ball, axis.mul_scalar(settings::ROLL_TORQUE * atten * control))
+            .expect("roll torque");
     }
 
-    /// Read the marble's linear + angular velocity from the snapshot.
-    fn marble_velocity(&self) -> (Vec3, Vec3) {
+    fn apply_brake(&mut self, lin: Vec3, ang: Vec3, dt: f32) {
+        let kl = (-settings::BRAKE_LINEAR_DECAY * dt).exp();
+        let ka = (-settings::BRAKE_ANGULAR_DECAY * dt).exp();
+        self.physics
+            .set_body_velocity(self.ball, lin.mul_scalar(kl), ang.mul_scalar(ka))
+            .expect("brake");
+    }
+
+    /// While charging: bleed the linear velocity toward a stop (so the ball holds
+    /// its spot) while spinning it in place about the charge axis (visible wind-up).
+    fn apply_charge_spin(&mut self, spin_rate: f32, lin: Vec3, dt: f32) {
+        let kl = (-settings::BRAKE_LINEAR_DECAY * dt).exp();
+        let dir = self.spin_dir();
+        let axis = Vec3::new(dir.z, 0.0, -dir.x);
+        self.physics
+            .set_body_velocity(self.ball, lin.mul_scalar(kl), axis.mul_scalar(spin_rate))
+            .expect("charge spin");
+    }
+
+    /// Convert stored spin charge into a launch: forward linear velocity + a
+    /// matching roll angular velocity along the charged direction.
+    fn apply_launch(&mut self, dir: Vec3, charge: f32) {
+        let lin = dir.mul_scalar(settings::SPIN_LAUNCH_LINEAR * charge);
+        let axis = Vec3::new(dir.z, 0.0, -dir.x);
+        let ang = axis.mul_scalar(settings::SPIN_LAUNCH_ANGULAR * charge);
+        self.physics.set_body_velocity(self.ball, lin, ang).expect("launch");
+    }
+
+    /// The current camera-relative forward (the charge default direction).
+    fn spin_dir(&self) -> Vec3 {
+        self.cam.facing()
+    }
+
+    fn ball_velocity(&self) -> (Vec3, Vec3) {
         self.physics
             .snapshot()
             .bodies()
             .iter()
-            .find(|b| b.handle() == self.marble)
+            .find(|b| b.handle() == self.ball)
             .map(|b| (b.linear_velocity(), b.angular_velocity()))
             .unwrap_or((Vec3::ZERO, Vec3::ZERO))
     }
 
-    /// Read the marble's world position + orientation from the snapshot.
-    fn read_marble(&mut self) {
-        if let Some(b) = self
-            .physics
-            .snapshot()
-            .bodies()
-            .iter()
-            .find(|b| b.handle() == self.marble)
-        {
+    fn read_ball(&mut self) {
+        if let Some(b) = self.physics.snapshot().bodies().iter().find(|b| b.handle() == self.ball) {
             let t = b.transform();
-            self.marble_pos = t.translation;
+            self.ball_pos = t.translation;
             let r = t.rotation;
-            self.marble_rot = [r.x, r.y, r.z, r.w];
+            self.ball_rot = [r.x, r.y, r.z, r.w];
         }
     }
 
-    /// Whether the marble is resting on something (a contact with a sufficiently
-    /// upward normal), which gates jumping.
+    /// Safety cap: rescale the horizontal velocity if it exceeds `MAX_SPEED`.
+    fn clamp_speed(&mut self) {
+        let (lin, ang) = self.ball_velocity();
+        let speed = horizontal_speed(lin);
+        if speed > settings::MAX_SPEED {
+            let k = settings::MAX_SPEED / speed;
+            let capped = Vec3::new(lin.x * k, lin.y, lin.z * k);
+            self.physics.set_body_velocity(self.ball, capped, ang).expect("cap speed");
+        }
+    }
+
+    /// Whether the ball rests on a surface (an upward contact normal), gating air
+    /// control.
     fn grounded(&self) -> bool {
         self.physics.latest_contacts().iter().any(|c| {
-            // Normal points from body_a to body_b (ascending handle order). Resolve
-            // it to "away from the marble" and check it points up.
-            let up = if c.body_b() == self.marble {
+            let up = if c.body_b() == self.ball {
                 c.normal().y
-            } else if c.body_a() == self.marble {
+            } else if c.body_a() == self.ball {
                 -c.normal().y
             } else {
                 return false;
@@ -401,112 +324,34 @@ impl GravixGame {
         })
     }
 
-    /// Collect any coin the marble is now touching.
-    fn collect_coins(&mut self) {
-        let reach = settings::MARBLE_RADIUS + settings::COIN_PICKUP_RADIUS;
-        let reach_sq = reach * reach;
-        for (i, coin) in self.descriptor.coins.iter().enumerate() {
-            if self.coin_taken[i] {
-                continue;
-            }
-            if self.marble_pos.subtract(coin.position).length_squared() <= reach_sq {
-                self.coin_taken[i] = true;
-                self.run_score += 1;
-            }
+    fn check_finish(&mut self) {
+        let d = self.ball_pos.subtract(self.course.finish);
+        let horiz = (d.x * d.x + d.z * d.z).sqrt();
+        if horiz <= settings::FINISH_RADIUS && d.y.abs() < 4.0 {
+            self.phase = Phase::Finished;
+            self.finish_ticks = 0;
         }
     }
 
-    /// Start-then-finish zone win test (touch the start pad, then the finish pad).
-    fn check_win(&mut self) {
-        if touches_zone(self.marble_pos, self.descriptor.start_zone.position, self.descriptor.start_zone.radius) {
-            self.started = true;
-        }
-        if self.started
-            && touches_zone(
-                self.marble_pos,
-                self.descriptor.end_zone.position,
-                self.descriptor.end_zone.radius,
-            )
-        {
-            self.phase = Phase::LevelComplete;
-            self.phase_timer = 0;
-        }
-    }
-
-    /// Fall-death test: below the kill plane costs a life (or ends the run).
     fn check_fall(&mut self) {
-        if self.marble_pos.y >= self.descriptor.kill_plane_y {
-            return;
-        }
-        self.falls += 1;
-        if self.falls >= settings::RUN_MAX_FALLS {
-            self.phase = Phase::RunOver;
-            self.phase_timer = 0;
-        } else {
-            self.phase = Phase::Dead;
-            self.phase_timer = 0;
+        if self.ball_pos.y < self.course.kill_plane_y {
+            self.phase = Phase::FellOut;
+            self.finish_ticks = 0;
         }
     }
 
-    /// Apply orbit-camera input.
-    fn steer_camera(&mut self, intent: Intent, dt: f32) {
-        let mut yaw = 0.0;
-        let mut pitch = 0.0;
-        if intent.yaw_left {
-            yaw += settings::CAMERA_YAW_SPEED * dt;
+    /// A deterministic debug read of the ball + control state at the current tick,
+    /// for inspecting the run without a renderer.
+    pub fn debug_readout(&self) -> GravixReadout {
+        GravixReadout {
+            step: self.step_n,
+            phase: self.phase,
+            spin: self.spin.state(),
+            charge: self.spin.charge(),
+            ball: self.ball_pos,
+            speed: self.speed(),
+            grounded: self.grounded(),
         }
-        if intent.yaw_right {
-            yaw -= settings::CAMERA_YAW_SPEED * dt;
-        }
-        if intent.pitch_up {
-            pitch += settings::CAMERA_PITCH_SPEED * dt;
-        }
-        if intent.pitch_down {
-            pitch -= settings::CAMERA_PITCH_SPEED * dt;
-        }
-        self.cam.steer(yaw, pitch);
-    }
-
-    /// Hold a non-playing phase for `frames`, then run `then` once.
-    fn advance_after_delay(&mut self, frames: u32, then: impl FnOnce(&mut Self)) {
-        self.phase_timer += 1;
-        if self.phase_timer >= frames {
-            then(self);
-        }
-    }
-
-    /// The renderables for the current frame: platforms, coins, zones, and the
-    /// marble at its live pose.
-    pub fn render_instances(&self) -> Vec<RenderInstance> {
-        let mut out = Vec::with_capacity(self.descriptor.platforms.len() + self.descriptor.coins.len() + 3);
-        for p in &self.descriptor.platforms {
-            out.push(platform_instance(p));
-        }
-        // Zones as thin discs.
-        out.push(zone_instance(&self.descriptor.start_zone, palette::START));
-        out.push(zone_instance(&self.descriptor.end_zone, palette::END));
-        // Coins (uncollected) as small spheres.
-        for (i, coin) in self.descriptor.coins.iter().enumerate() {
-            if !self.coin_taken[i] {
-                out.push(RenderInstance {
-                    transform: Transform::new(coin.position, Quat::IDENTITY, Vec3::new(0.4, 0.4, 0.4)),
-                    mesh: GravixMesh::Sphere,
-                    color: palette::COIN,
-                });
-            }
-        }
-        // The marble at its live pose.
-        let d = settings::MARBLE_RADIUS * 2.0;
-        out.push(RenderInstance {
-            transform: Transform::new(
-                self.marble_pos,
-                Quat::new(self.marble_rot[0], self.marble_rot[1], self.marble_rot[2], self.marble_rot[3]),
-                Vec3::new(d, d, d),
-            ),
-            mesh: GravixMesh::Sphere,
-            color: palette::MARBLE,
-        });
-        out
     }
 }
 
@@ -516,56 +361,45 @@ impl Default for GravixGame {
     }
 }
 
-/// Whether `pos` overlaps a flat circular zone (horizontal disc, a little Y slack).
-fn touches_zone(pos: Vec3, center: Vec3, radius: f32) -> bool {
-    let dx = pos.x - center.x;
-    let dz = pos.z - center.z;
-    let horiz = (dx * dx + dz * dz).sqrt();
-    let reach = radius + settings::MARBLE_RADIUS * 0.92;
-    horiz <= reach && pos.y >= center.y - 0.6 && pos.y <= center.y + 3.0
+/// A one-tick debug snapshot of the game (see [`GravixGame::debug_readout`]).
+#[derive(Debug, Clone, Copy)]
+pub struct GravixReadout {
+    pub step: u64,
+    pub phase: Phase,
+    pub spin: spin::SpinState,
+    pub charge: f32,
+    pub ball: Vec3,
+    pub speed: f32,
+    pub grounded: bool,
 }
 
-/// The course heading (yaw) from spawn toward the finish, plus the framing offset.
-fn course_yaw(d: &LevelDescriptor) -> f32 {
-    let dir = d.end_zone.position.subtract(d.spawn);
-    let len = (dir.x * dir.x + dir.z * dir.z).sqrt();
-    if len < 1.0e-3 {
-        0.0
-    } else {
-        dir.x.atan2(dir.z) + settings::CAMERA_COURSE_YAW_OFFSET
+/// The camera-relative move direction from held input (`None` if no key held).
+fn intent_direction(intent: Intent, fwd: Vec3, right: Vec3) -> Option<Vec3> {
+    let mut d = Vec3::ZERO;
+    if intent.forward {
+        d = d.add(fwd);
     }
-}
-
-/// A platform's render instance (a unit cube scaled by full extents, oriented).
-fn platform_instance(p: &Platform) -> RenderInstance {
-    RenderInstance {
-        transform: Transform::new(p.position, p.rotation, p.half_extents.mul_scalar(2.0)),
-        mesh: GravixMesh::Cube,
-        color: platform_color(p.kind),
+    if intent.back {
+        d = d.subtract(fwd);
     }
-}
-
-/// A zone disc render instance (a thin flat cube).
-fn zone_instance(zone: &crate::gravix::level::Zone, color: [f32; 3]) -> RenderInstance {
-    RenderInstance {
-        transform: Transform::new(
-            Vec3::new(zone.position.x, zone.position.y + 0.06, zone.position.z),
-            Quat::IDENTITY,
-            Vec3::new(zone.radius * 2.0, 0.1, zone.radius * 2.0),
-        ),
-        mesh: GravixMesh::Cube,
-        color,
+    if intent.right {
+        d = d.add(right);
     }
+    if intent.left {
+        d = d.subtract(right);
+    }
+    let len = (d.x * d.x + d.z * d.z).sqrt();
+    (len > 1.0e-4).then(|| Vec3::new(d.x / len, 0.0, d.z / len))
 }
 
-/// Build a physics world for a descriptor: one static box per solid platform, and
-/// the dynamic marble sphere (created last, so it holds the highest handle).
-fn build_world(descriptor: &LevelDescriptor) -> (PhysicsApi, PhysicsBodyHandle) {
+/// Build the physics world for a course: one static **heightfield collider** per
+/// half-pipe segment (the track), and the dynamic ball sphere.
+fn build_world(course: &Course) -> (PhysicsApi, PhysicsBodyHandle) {
     let mut physics = PhysicsApi::with_config(
         settings::GRAVITY,
         settings::SOLVER_ITERATIONS,
-        512,
-        512,
+        4096,
+        4096,
         settings::MAX_SUBSTEPS,
         true,
         ratio(settings::LINEAR_DAMPING),
@@ -573,117 +407,160 @@ fn build_world(descriptor: &LevelDescriptor) -> (PhysicsApi, PhysicsBodyHandle) 
     )
     .expect("valid physics config");
 
-    let platform_mat = PhysicsApi::material(
-        ratio(settings::PLATFORM_FRICTION),
-        ratio(settings::PLATFORM_RESTITUTION),
-        ratio(1.0),
-    )
-    .expect("platform material");
-
-    for p in &descriptor.platforms {
-        if !p.kind.solid() {
-            continue;
-        }
-        let body = physics
-            .create_static_body(Transform::new(p.position, p.rotation, Vec3::ONE))
-            .expect("static platform body");
+    let track_mat = PhysicsApi::material(ratio(settings::TRACK_FRICTION), ratio(settings::TRACK_RESTITUTION), ratio(1.0))
+        .expect("track material");
+    for seg in &course.segments {
+        let body = physics.create_static_body(seg.transform()).expect("static segment body");
+        let grid = seg.params.collider_grid();
+        let heights: Vec<Meters> = grid.heights.iter().map(|h| meters(*h)).collect();
         physics
-            .attach_box_collider(body, p.half_extents, platform_mat, false)
-            .expect("platform collider");
+            .attach_heightfield_collider(body, grid.nx, grid.nz, meters(grid.spacing_x), meters(grid.spacing_z), &heights, track_mat, false)
+            .expect("segment heightfield collider");
     }
 
-    let marble_mat = PhysicsApi::material(
-        ratio(settings::MARBLE_FRICTION),
-        ratio(settings::MARBLE_RESTITUTION),
-        ratio(1.0),
-    )
-    .expect("marble material");
-    let marble = physics
-        .create_dynamic_body(
-            Transform::from_translation(descriptor.spawn),
-            ratio(settings::MARBLE_MASS),
-        )
-        .expect("marble body");
+    let ball_mat = PhysicsApi::material(ratio(settings::BALL_FRICTION), ratio(settings::BALL_RESTITUTION), ratio(1.0))
+        .expect("ball material");
+    let ball = physics
+        .create_dynamic_body(Transform::from_translation(course.spawn), ratio(settings::BALL_MASS))
+        .expect("ball body");
     physics
-        .attach_sphere_collider(marble, meters(settings::MARBLE_RADIUS), marble_mat, false)
-        .expect("marble collider");
-
-    (physics, marble)
+        .attach_sphere_collider(ball, meters(settings::BALL_RADIUS), ball_mat, false)
+        .expect("ball collider");
+    (physics, ball)
 }
 
-/// Author the current frame's scene into the umbrella world: primitive meshes, a
-/// lit material per instance, an orbit camera, and the light rig. Re-run every
-/// frame by the browser loop via `RunningApp::reauthor`.
-fn author_scene(
-    world: &mut SceneCommands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<Material>,
-    instances: &[RenderInstance],
-    eye: Vec3,
-    target: Vec3,
-) {
-    let cube = meshes.add(Mesh::cube());
-    let sphere = meshes.add(Mesh::sphere());
-    let mats: Vec<_> = palette::ALL
-        .iter()
-        .map(|c| materials.add(Material::lit(color3(*c))))
-        .collect();
-    for instance in instances {
-        let mesh = match instance.mesh {
-            GravixMesh::Cube => cube,
-            GravixMesh::Sphere => sphere,
-        };
-        let material = mats[palette::index(instance.color)];
-        world.spawn((instance.transform, Renderable { mesh, material }));
+// --- rendering (persistent meshed scene: install once, update per frame) -----
+
+/// The neon palette.
+mod palette {
+    pub const TRACK: [f32; 3] = [0.20, 0.10, 0.42];
+    pub const LIP: [f32; 3] = [0.62, 0.20, 0.72];
+    pub const STRIPE: [f32; 3] = [0.95, 0.85, 0.35];
+    pub const BALL: [f32; 3] = [1.0, 0.55, 0.15];
+    pub const FINISH: [f32; 3] = [0.10, 0.85, 0.70];
+}
+
+fn color3(rgb: [f32; 3]) -> Color {
+    Color::linear_rgb(ratio(rgb[0]), ratio(rgb[1]), ratio(rgb[2]))
+}
+
+/// Convert a terrain `GridMesh` into engine `MeshData` (no UVs — flat-lit track).
+fn to_mesh_data(mesh: &axiom_terrain_mesh::GridMesh) -> MeshData {
+    MeshData::new(mesh.positions().to_vec(), mesh.normals().to_vec(), Vec::new(), mesh.indices().to_vec())
+}
+
+/// The persistent meshed scene: the static track/finish/stripes are spawned once
+/// (custom-mesh handles survive because we never `reauthor`); the ball + camera are
+/// refreshed each frame via `despawn`/`spawn` + `set_camera`.
+#[derive(Debug)]
+pub struct GravixScene {
+    ball_mesh: axiom::prelude::Handle<Mesh>,
+    ball_mat: axiom::prelude::Handle<Material>,
+    ball_entity: Option<Entity>,
+}
+
+impl GravixScene {
+    fn install(app: &mut RunningApp, course: &Course) -> Self {
+        let track_mat = app.add_material(Material::lit(color3(palette::TRACK)));
+        // The uphill spin-launch-reward segment gets a distinct lip colour so the
+        // player reads it as the "charge and launch" ramp.
+        let reward_mat = app.add_material(Material::lit(color3(palette::LIP)));
+        let stripe_mat = app.add_material(Material::lit(color3(palette::STRIPE)));
+        let finish_mat = app.add_material(Material::lit(color3(palette::FINISH)));
+        let ball_mat = app.add_material(Material::lit(color3(palette::BALL)));
+        let cube = app.add_mesh(Mesh::cube());
+        let sphere = app.add_mesh(Mesh::sphere());
+
+        for seg in &course.segments {
+            let mesh = app.add_mesh_data(to_mesh_data(&seg.params.surface_mesh())).expect("segment mesh registers");
+            let mat = if seg.is_launch_reward { reward_mat } else { track_mat };
+            app.spawn(Spawn::new(seg.transform(), mesh, mat));
+            // Speed-stripe markers across the track at intervals along its length.
+            spawn_stripes(app, seg, cube, stripe_mat);
+        }
+
+        // Finish gate: a bright pillar pair at the finish.
+        let up = course.segments.last().unwrap().up;
+        let right = Vec3::new(up.z, 0.0, -up.x); // any horizontal perpendicular-ish
+        [right.mul_scalar(3.0), right.mul_scalar(-3.0)].iter().for_each(|off| {
+            app.spawn(Spawn::new(
+                Transform::new(course.finish.add(*off).add(Vec3::new(0.0, 2.5, 0.0)), Quat::IDENTITY, Vec3::new(0.8, 5.0, 0.8)),
+                cube,
+                finish_mat,
+            ));
+        });
+
+        // Light rig.
+        app.add_light(
+            DirectionalLight { direction: Vec3::new(0.35, -1.0, 0.28), color: Color::WHITE, intensity: ratio(1.0) },
+            Transform::IDENTITY,
+        );
+        app.add_point_light(
+            PointLight { color: Color::WHITE, intensity: ratio(120.0) },
+            Transform::from_translation(course.spawn.add(Vec3::new(0.0, 20.0, 0.0))),
+        );
+
+        GravixScene { ball_mesh: sphere, ball_mat, ball_entity: None }
     }
-    world.spawn((
-        Transform::from_translation(eye)
-            .looking_at(target, Vec3::UNIT_Y)
-            .expect("camera aims at the marble"),
-        Camera::perspective(PerspectiveProjection {
-            fov_y: Angle::degrees(58.0),
-            near: meters(0.1),
-            far: meters(400.0),
-        }),
-    ));
-    world.spawn((
-        Transform::IDENTITY,
-        DirectionalLight {
-            direction: Vec3::new(0.35, -1.0, 0.25),
-            color: Color::WHITE,
-            intensity: ratio(1.0),
-        },
-    ));
-    world.spawn((
-        Transform::from_translation(Vec3::new(0.0, 24.0, 12.0)),
-        PointLight {
-            color: Color::WHITE,
-            intensity: ratio(60.0),
-        },
-    ));
+
+    pub fn update(&mut self, app: &mut RunningApp, ball_pos: Vec3, ball_rot: [f32; 4], eye: Vec3, target: Vec3) {
+        app.set_camera(
+            Camera::perspective(PerspectiveProjection {
+                fov_y: Angle::degrees(60.0),
+                near: meters(0.1),
+                far: meters(600.0),
+            }),
+            Transform::from_translation(eye).looking_at(target, Vec3::UNIT_Y).expect("camera aims at the ball"),
+        );
+        if let Some(e) = self.ball_entity.take() {
+            app.despawn(e);
+        }
+        let d = settings::BALL_RADIUS * 2.0;
+        let rot = Quat::new(ball_rot[0], ball_rot[1], ball_rot[2], ball_rot[3]);
+        self.ball_entity = Some(app.spawn(Spawn::new(Transform::new(ball_pos, rot, Vec3::new(d, d, d)), self.ball_mesh, self.ball_mat)));
+    }
 }
 
-/// Build the initial live `RunningApp` for a game state, framed by its camera.
-pub fn live_app(game: &GravixGame) -> RunningApp {
-    let instances = game.render_instances();
-    let (eye, target) = game.camera();
-    App::new()
+/// Spawn evenly-spaced bright stripe markers across a segment's width, so speed is
+/// perceptible as they flash past.
+fn spawn_stripes(app: &mut RunningApp, seg: &course::Segment, cube: axiom::prelude::Handle<Mesh>, mat: axiom::prelude::Handle<Material>) {
+    let (half_x, half_z) = seg.params.half_extents();
+    let count = ((2.0 * half_z) / 8.0).round().max(1.0) as i32;
+    for i in 0..=count {
+        let t = if count == 0 { 0.5 } else { i as f32 / count as f32 };
+        let along = -half_z + t * 2.0 * half_z;
+        let center = seg.center.add(seg.forward.mul_scalar(along)).add(seg.up.mul_scalar(0.06));
+        app.spawn(Spawn::new(
+            Transform::new(center, seg.rotation, Vec3::new(2.0 * half_x * 0.96, 0.12, 0.5)),
+            cube,
+            mat,
+        ));
+    }
+}
+
+/// Build a live `RunningApp` for a game state with the meshed scene installed and
+/// the ball/camera placed at the current pose.
+pub fn live_app(game: &GravixGame) -> (RunningApp, GravixScene) {
+    let mut running = App::new()
         .window(
             Window::new(WIDTH, HEIGHT)
                 .with_surface_id(CANVAS_ID)
-                .with_clear_color(color3([0.02, 0.02, 0.05])),
+                .with_clear_color(color3([0.02, 0.02, 0.06])),
         )
         .add_plugins(DefaultPlugins)
-        .setup(move |world, meshes, materials| {
-            author_scene(world, meshes, materials, &instances, eye, target)
-        })
-        .build()
+        .setup(|_world, _meshes, _materials| {})
+        .build();
+    let mut scene = GravixScene::install(&mut running, &game.course);
+    let (eye, target) = game.camera();
+    scene.update(&mut running, game.ball_pos, game.ball_rot, eye, target);
+    (running, scene)
 }
 
-/// Build a headless `RunningApp` of level 0 at its spawn state, for the native
-/// capture harness (`axiom-shot`) and tests.
+/// Build a headless `RunningApp` of the course, framed at the spawn — for the
+/// native capture harness (`axiom-shot`) and tests.
 pub fn build_gravix() -> RunningApp {
-    live_app(&GravixGame::new())
+    let (running, _scene) = live_app(&GravixGame::new());
+    running
 }
 
 #[cfg(test)]
@@ -691,83 +568,106 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_new_game_starts_playing_at_level_one() {
+    fn a_new_game_starts_rolling_at_the_spawn() {
         let game = GravixGame::new();
-        assert_eq!(game.phase(), Phase::Playing);
-        assert_eq!(game.level_number(), 1);
-        assert!(game.coins_total() > 0, "the course has coins");
+        assert_eq!(game.phase(), Phase::Rolling);
+        assert_eq!(game.spin_state(), spin::SpinState::NormalRolling);
+        assert!(game.course.segments.len() >= 5);
     }
 
     #[test]
-    fn the_marble_falls_under_gravity_when_unsupported() {
-        // Spawn is above the pad; with no input the marble should at least settle
-        // (its Y should not fly upward) after several steps.
+    fn the_ball_rolls_down_the_course_and_gains_speed() {
         let mut game = GravixGame::new();
-        let start_y = game.marble_pos.y;
+        // Let it settle onto the track, then it should slide/roll downhill under
+        // gravity + the shallow bank, gaining horizontal speed.
         for _ in 0..30 {
             game.step(Intent::default());
         }
-        assert!(game.marble_pos.y <= start_y + 0.05, "marble does not float up");
-    }
-
-    #[test]
-    fn the_marble_rests_on_the_spawn_pad() {
-        // After settling with no input the marble stays near the pad top, not
-        // through it (proves sphere-vs-box collision holds it up).
-        let mut game = GravixGame::new();
-        for _ in 0..120 {
+        let early = game.speed();
+        for _ in 0..90 {
             game.step(Intent::default());
         }
-        let pad_top = game.descriptor.start_zone.position.y;
-        assert!(
-            game.marble_pos.y > pad_top - 0.2,
-            "marble rests on the pad (y {} vs pad top {})",
-            game.marble_pos.y,
-            pad_top
-        );
+        let late = game.speed();
+        assert!(late > early + 1.0, "the ball accelerates downhill: {early} -> {late}");
+        // It stays on the track (above the kill plane) rather than falling through.
+        assert!(game.ball_position().y > game.course.kill_plane_y, "ball stays on the course");
     }
 
     #[test]
-    fn forward_torque_rolls_the_marble_off_its_start() {
-        // With sphere inertia + contact friction, sustained forward torque should
-        // move the marble horizontally from where it settled.
+    fn forward_input_drives_the_ball_camera_relative() {
         let mut game = GravixGame::new();
+        for _ in 0..20 {
+            game.step(Intent::default());
+        }
+        let (fwd, _) = game.cam.ground_basis();
+        let before = game.ball_position();
+        for _ in 0..60 {
+            game.step(Intent { forward: true, ..Intent::default() });
+        }
+        let moved = game.ball_position().subtract(before);
+        // Net motion has a positive component along the camera forward.
+        assert!(moved.dot(fwd) > 0.5, "forward input drives along camera forward");
+    }
+
+    #[test]
+    fn falling_off_the_course_resets_after_a_moment() {
+        let mut game = GravixGame::new();
+        game.physics
+            .set_body_transform(game.ball, Transform::from_translation(Vec3::new(0.0, game.course.kill_plane_y - 10.0, 0.0)))
+            .unwrap();
+        game.step(Intent::default());
+        assert_eq!(game.phase(), Phase::FellOut);
+        // After the reset delay it returns to rolling at the spawn.
         for _ in 0..60 {
             game.step(Intent::default());
         }
-        let settled = game.marble_pos;
-        let intent = Intent {
-            forward: true,
-            ..Intent::default()
-        };
-        for _ in 0..120 {
-            game.step(intent);
-        }
-        let moved = game.marble_pos.subtract(settled);
-        let horiz = (moved.x * moved.x + moved.z * moved.z).sqrt();
-        assert!(horiz > 0.5, "forward torque rolls the marble (moved {horiz})");
+        assert_eq!(game.phase(), Phase::Rolling);
     }
 
     #[test]
-    fn falling_off_the_world_costs_a_life() {
+    fn reaching_the_finish_gate_finishes_the_run() {
         let mut game = GravixGame::new();
-        // Teleport the marble far below the kill plane and step once.
+        // Teleport the ball onto the finish gate; the next step detects it.
         game.physics
-            .set_body_transform(
-                game.marble,
-                Transform::from_translation(Vec3::new(0.0, game.descriptor.kill_plane_y - 20.0, 0.0)),
-            )
+            .set_body_transform(game.ball, Transform::from_translation(game.course.finish))
             .unwrap();
         game.step(Intent::default());
-        assert!(game.falls() >= 1, "a fall was counted");
-        assert!(matches!(game.phase(), Phase::Dead | Phase::RunOver));
+        assert_eq!(game.phase(), Phase::Finished);
     }
 
     #[test]
-    fn the_live_app_renders_draws() {
-        let game = GravixGame::new();
-        let mut app = live_app(&game);
+    fn two_identical_runs_are_deterministic() {
+        let script = [
+            Intent { forward: true, ..Intent::default() },
+            Intent { forward: true, right: true, ..Intent::default() },
+            Intent { brake: true, tap: true, ..Intent::default() },
+        ];
+        let run = || {
+            let mut g = GravixGame::new();
+            (0..90).for_each(|i| g.step(script[i % script.len()]));
+            g.debug_readout().ball
+        };
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn the_debug_readout_reports_the_run_state() {
+        let mut game = GravixGame::new();
+        for _ in 0..10 {
+            game.step(Intent::default());
+        }
+        let r = game.debug_readout();
+        assert_eq!(r.phase, Phase::Rolling);
+        assert!(r.step >= 10);
+        assert_eq!(r.ball, game.ball_position());
+    }
+
+    #[test]
+    fn the_course_builds_a_renderable_app() {
+        let mut app = build_gravix();
         let outcome = app.tick(0);
         assert!(!outcome.draws().is_empty(), "the course renders draws");
     }
 }
+
+

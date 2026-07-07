@@ -33,15 +33,16 @@ pub(crate) fn world_aabb(
 }
 
 /// The world-space half-extents of a finite shape's bounds. A sphere/capsule is
-/// rotation-invariant, so its local half-extents already bound it. A box's bound
-/// is the OBB→AABB projection of its rotated axes. The two candidates are blended
-/// arithmetically by `is_box` (`0`/`1`), so there is no branch and a rolling
-/// sphere body keeps a tight `(r, r, r)` bound while only boxes widen.
+/// rotation-invariant, so its local half-extents already bound it. A box's — and a
+/// heightfield's — bound is the OBB→AABB projection of its rotated axes. The two
+/// candidates are blended arithmetically by `oriented` (`0`/`1`), so there is no
+/// branch and a rolling sphere body keeps a tight `(r, r, r)` bound while only
+/// boxes and heightfields widen with orientation.
 fn world_extents(shape: PhysicsColliderShape, rotation: Quat) -> Vec3 {
     let aligned = shape.half_extents();
     let rotated = rotated_box_extents(rotation, aligned);
-    let is_box = (shape.is_box() as u32) as f32;
-    aligned.add(rotated.subtract(aligned).mul_scalar(is_box))
+    let oriented = ((shape.is_box() as u32) | (shape.is_heightfield() as u32)) as f32;
+    aligned.add(rotated.subtract(aligned).mul_scalar(oriented))
 }
 
 /// The world AABB half-extents of a box with local half-extents `he` rotated by
@@ -103,9 +104,10 @@ mod tests {
         let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, FRAC_PI_4).unwrap();
         let aabb = world_aabb(shape, Vec3::ZERO, yaw).expect("box is finite");
         let expected = 2.0_f32.sqrt();
-        assert!((aabb.max().x - expected).abs() < 1.0e-5, "x widened, got {:?}", aabb.max());
-        assert!((aabb.max().z - expected).abs() < 1.0e-5, "z widened, got {:?}", aabb.max());
-        assert!((aabb.max().y - 1.0).abs() < 1.0e-6, "y unchanged, got {:?}", aabb.max());
+        let mx = aabb.max();
+        assert!((mx.x - expected).abs() < 1.0e-5, "x widened to the rotated diagonal, got {mx:?}");
+        assert!((mx.z - expected).abs() < 1.0e-5, "z widened to the rotated diagonal, got {mx:?}");
+        assert!((mx.y - 1.0).abs() < 1.0e-6, "y unchanged under yaw, got {mx:?}");
     }
 
     #[test]
@@ -117,5 +119,18 @@ mod tests {
         let aabb = world_aabb(sphere, Vec3::ZERO, yaw).expect("sphere is finite");
         assert_eq!(aabb.min(), Vec3::new(-2.0, -2.0, -2.0));
         assert_eq!(aabb.max(), Vec3::new(2.0, 2.0, 2.0));
+    }
+
+    #[test]
+    fn a_heightfield_is_finite_and_widens_its_aabb_like_a_box_when_yawed() {
+        // A heightfield footprint (4, 1, 6): axis-aligned it bounds exactly; yawed
+        // it widens to the oriented envelope, unlike a sphere.
+        let hf = PhysicsColliderShape::heightfield_shape(Vec3::new(4.0, 1.0, 6.0)).unwrap();
+        let aligned = world_aabb(hf, Vec3::ZERO, Quat::IDENTITY).expect("heightfield is finite");
+        assert_eq!(aligned.max(), Vec3::new(4.0, 1.0, 6.0));
+        let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, FRAC_PI_4).unwrap();
+        let rotated = world_aabb(hf, Vec3::ZERO, yaw).expect("heightfield is finite");
+        let rmax = rotated.max();
+        assert!(rmax.x > 4.0 + 1.0, "footprint widened under yaw, got {rmax:?}");
     }
 }

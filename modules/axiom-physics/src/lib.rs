@@ -71,6 +71,7 @@ mod physics_config;
 mod physics_error;
 mod physics_error_code;
 mod physics_event;
+mod physics_heightfield;
 mod physics_material;
 mod physics_query;
 mod physics_result;

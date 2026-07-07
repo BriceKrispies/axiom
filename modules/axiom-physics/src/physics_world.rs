@@ -287,6 +287,37 @@ impl PhysicsWorld {
         handle
     }
 
+    /// Attach a heightfield collider (carrying its grid) to `body`, with the same
+    /// body-exists + capacity validation as [`Self::attach_collider`].
+    pub(crate) fn attach_heightfield_collider(
+        &mut self,
+        body: PhysicsBodyHandle,
+        shape: PhysicsColliderShape,
+        material: PhysicsMaterial,
+        is_trigger: bool,
+        heightfield: crate::physics_heightfield::Heightfield,
+    ) -> PhysicsResult<PhysicsColliderHandle> {
+        self.body_exists(body)
+            .then_some(())
+            .ok_or(PhysicsError::body_not_found("collider target body not found"))
+            .and_then(|()| {
+                ((self.colliders.len() as u32) < self.config.max_colliders())
+                    .then_some(())
+                    .ok_or(PhysicsError::collider_capacity_exceeded("collider capacity exceeded"))
+            })
+            .map(|()| {
+                self.next_collider_id += 1;
+                let handle = PhysicsColliderHandle::from_raw(self.next_collider_id);
+                self.colliders.push(PhysicsCollider::new_heightfield(handle, body, shape, material, is_trigger, heightfield));
+                self.body_at_mut(body).into_iter().for_each(|b| {
+                    let updated = b.mass_properties().with_inertia_for(shape);
+                    b.set_mass_properties(updated);
+                });
+                self.events.push(PhysicsEvent::ColliderAttached { collider: handle, body });
+                handle
+            })
+    }
+
     /// Queue a force on a dynamic, enabled body (validated immediately).
     pub(crate) fn enqueue_apply_force(
         &mut self,

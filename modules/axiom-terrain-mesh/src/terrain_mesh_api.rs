@@ -89,4 +89,71 @@ impl TerrainMeshApi {
 
         GridMesh::new(positions, normals, indices)
     }
+
+    /// Build a **rectangular** grid mesh centred on `center`, spanning
+    /// `half_extent.0` / `half_extent.1` metres in `±x` / `±z` with independent
+    /// `spacing.0` / `spacing.1` vertex spacings — the long-and-narrow generalization
+    /// of [`Self::heightfield_grid_mesh`] (which is the equal-dims, equal-spacing
+    /// case). Each vertex `y` is `height(x, z)`; its normal is the unit
+    /// gradient normal `(−∂h/∂x, 1, −∂h/∂z)` from the `±spacing` neighbours (exact
+    /// with unequal spacings). Triangles wind `[i0, i2, i1, i1, i2, i3]` per cell.
+    ///
+    /// The grid is `side_x × side_z` with `side_x = ceil(2·half_x/spacing_x) + 1`
+    /// (likewise `side_z`), so it has `side_x·side_z` vertices and
+    /// `(side_x−1)·(side_z−1)·2` triangles.
+    pub fn heightfield_grid_mesh_rect<H>(
+        center: (Meters, Meters),
+        half_extent: (Meters, Meters),
+        spacing: (Meters, Meters),
+        height: H,
+    ) -> GridMesh
+    where
+        H: Fn(Meters, Meters) -> Meters,
+    {
+        let cx = center.0.get();
+        let cz = center.1.get();
+        let hx = half_extent.0.get();
+        let hz = half_extent.1.get();
+        let sx = spacing.0.get();
+        let sz = spacing.1.get();
+        let side_x = (2.0 * hx / sx).ceil() as usize + 1;
+        let side_z = (2.0 * hz / sz).ceil() as usize + 1;
+
+        let sample =
+            |x: f32, z: f32| height(Meters::finite_or_zero(x), Meters::finite_or_zero(z)).get();
+
+        let (positions, normals): (Vec<Vec3>, Vec<Vec3>) = (0..side_x * side_z)
+            .map(|k| {
+                let ix = k % side_x;
+                let jz = k / side_x;
+                let x = cx - hx + ix as f32 * sx;
+                let z = cz - hz + jz as f32 * sz;
+                let y = sample(x, z);
+
+                // Gradient normal from the four `±spacing` neighbours (unequal-safe).
+                let nx = -(sample(x + sx, z) - sample(x - sx, z)) / (2.0 * sx);
+                let nz = -(sample(x, z + sz) - sample(x, z - sz)) / (2.0 * sz);
+                let ny = 1.0;
+                let len = (nx * nx + ny * ny + nz * nz).sqrt().max(MIN_NORMAL_LEN);
+
+                (Vec3::new(x, y, z), Vec3::new(nx / len, ny / len, nz / len))
+            })
+            .unzip();
+
+        let cells_x = side_x - 1;
+        let cells_z = side_z - 1;
+        let indices: Vec<u32> = (0..cells_x * cells_z)
+            .flat_map(|c| {
+                let ix = c % cells_x;
+                let jz = c / cells_x;
+                let i0 = (jz * side_x + ix) as u32;
+                let i1 = i0 + 1;
+                let i2 = i0 + side_x as u32;
+                let i3 = i2 + 1;
+                [i0, i2, i1, i1, i2, i3]
+            })
+            .collect();
+
+        GridMesh::new(positions, normals, indices)
+    }
 }

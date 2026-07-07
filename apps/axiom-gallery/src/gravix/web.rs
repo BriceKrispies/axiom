@@ -1,11 +1,11 @@
 //! The `wasm32` live arm: capture keyboard/keypad input, drive the windowing
-//! render loop (stepping the game and re-authoring the scene each frame), and
-//! paint a small DOM HUD.
+//! render loop (stepping the game and refreshing the ball + camera each frame via
+//! the persistent meshed scene), and paint a small DOM HUD.
 //!
-//! Controls: **W A S D** roll the marble (camera-relative), **Space** jumps,
-//! **Shift** brakes, the **arrow keys** orbit the camera, and **R** restarts the
-//! run once it is over. The gallery's on-screen keypad dispatches synthetic key
-//! events, so the WASD / jump buttons drive it too.
+//! Controls: **W A S D** / **arrow keys** roll the ball (camera-relative), **Shift**
+//! brakes; braked and nearly stopped, **tapping** a move key charges a spin and
+//! **releasing Shift** launches it; **R** restarts the run. The gallery's on-screen
+//! keypad dispatches synthetic key events, so the buttons drive it too.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -15,7 +15,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::KeyboardEvent;
 
-use crate::gravix::{author_scene, live_app, GravixGame, Intent, Phase, CANVAS_ID, LIVE_CAPACITY};
+use crate::gravix::{live_app, GravixGame, Intent, Phase, SpinState, CANVAS_ID, LIVE_CAPACITY};
 
 /// Held key state, plus one-shot edges drained into each frame's `Intent`.
 #[derive(Default)]
@@ -25,31 +25,21 @@ struct Held {
     left: bool,
     right: bool,
     brake: bool,
-    yaw_left: bool,
-    yaw_right: bool,
-    pitch_up: bool,
-    pitch_down: bool,
-    jump_edge: bool,
+    tap_edge: bool,
     restart_edge: bool,
 }
 
 impl Held {
     /// The `Intent` for this frame, consuming the one-shot edges.
     fn intent(&mut self) -> Intent {
-        let jump = std::mem::take(&mut self.jump_edge);
-        let restart = std::mem::take(&mut self.restart_edge);
         Intent {
             forward: self.forward,
             back: self.back,
             left: self.left,
             right: self.right,
             brake: self.brake,
-            jump,
-            yaw_left: self.yaw_left,
-            yaw_right: self.yaw_right,
-            pitch_up: self.pitch_up,
-            pitch_down: self.pitch_down,
-            restart,
+            tap: std::mem::take(&mut self.tap_edge),
+            restart: std::mem::take(&mut self.restart_edge),
         }
     }
 }
@@ -62,28 +52,21 @@ pub fn gravix_start() {
     install_key_listeners(&held);
 
     let mut windowing = WindowingApi::new();
-    windowing
-        .configure_surface(1280, 720)
-        .expect("surface dimensions are valid");
+    windowing.configure_surface(1280, 720).expect("surface dimensions are valid");
 
     let game = GravixGame::new();
-    let running = live_app(&game);
+    let (running, scene) = live_app(&game);
     let meshes = running.mesh_set();
     let materials = running.material_textures();
 
-    let state = Rc::new(RefCell::new((game, running)));
+    let state = Rc::new(RefCell::new((game, running, scene)));
     let frame_held = held.clone();
     let frame = move |tick: u64| {
         let mut guard = state.borrow_mut();
-        let (game, running) = &mut *guard;
+        let (game, running, scene) = &mut *guard;
         let intent = frame_held.borrow_mut().intent();
         game.step(intent);
-
-        let instances = game.render_instances();
-        let (eye, target) = game.camera();
-        running.reauthor(move |world, meshes, materials| {
-            author_scene(world, meshes, materials, &instances, eye, target)
-        });
+        game.render(running, scene);
         update_hud(game);
 
         let outcome = running.tick(tick);
@@ -107,37 +90,34 @@ pub fn gravix_start() {
 }
 
 /// Install keydown / keyup listeners on the window, matching logical `key()` so
-/// the gallery's synthetic-keyboard keypad drives it too.
+/// the gallery's synthetic-keyboard keypad drives it too. A move key's *first*
+/// press (rising edge, not auto-repeat) sets `tap_edge` for the spin charge.
 fn install_key_listeners(held: &Rc<RefCell<Held>>) {
     let down = held.clone();
     let on_down = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
         let mut h = down.borrow_mut();
         match e.key().as_str() {
-            "w" | "W" => h.forward = true,
-            "s" | "S" => h.back = true,
-            "a" | "A" => h.left = true,
-            "d" | "D" => h.right = true,
+            "w" | "W" | "ArrowUp" => {
+                h.tap_edge |= !h.forward;
+                h.forward = true;
+                e.prevent_default();
+            }
+            "s" | "S" | "ArrowDown" => {
+                h.tap_edge |= !h.back;
+                h.back = true;
+                e.prevent_default();
+            }
+            "a" | "A" | "ArrowLeft" => {
+                h.tap_edge |= !h.left;
+                h.left = true;
+                e.prevent_default();
+            }
+            "d" | "D" | "ArrowRight" => {
+                h.tap_edge |= !h.right;
+                h.right = true;
+                e.prevent_default();
+            }
             "Shift" => h.brake = true,
-            " " => {
-                h.jump_edge = true;
-                e.prevent_default();
-            }
-            "ArrowLeft" => {
-                h.yaw_left = true;
-                e.prevent_default();
-            }
-            "ArrowRight" => {
-                h.yaw_right = true;
-                e.prevent_default();
-            }
-            "ArrowUp" => {
-                h.pitch_up = true;
-                e.prevent_default();
-            }
-            "ArrowDown" => {
-                h.pitch_down = true;
-                e.prevent_default();
-            }
             "r" | "R" => h.restart_edge = true,
             _ => {}
         }
@@ -146,15 +126,11 @@ fn install_key_listeners(held: &Rc<RefCell<Held>>) {
     let on_up = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
         let mut h = up.borrow_mut();
         match e.key().as_str() {
-            "w" | "W" => h.forward = false,
-            "s" | "S" => h.back = false,
-            "a" | "A" => h.left = false,
-            "d" | "D" => h.right = false,
+            "w" | "W" | "ArrowUp" => h.forward = false,
+            "s" | "S" | "ArrowDown" => h.back = false,
+            "a" | "A" | "ArrowLeft" => h.left = false,
+            "d" | "D" | "ArrowRight" => h.right = false,
             "Shift" => h.brake = false,
-            "ArrowLeft" => h.yaw_left = false,
-            "ArrowRight" => h.yaw_right = false,
-            "ArrowUp" => h.pitch_up = false,
-            "ArrowDown" => h.pitch_down = false,
             _ => {}
         }
     });
@@ -194,19 +170,13 @@ fn update_hud(game: &GravixGame) {
         }
     };
     let banner = match game.phase() {
-        Phase::Playing => String::new(),
-        Phase::LevelComplete => "  —  LEVEL CLEAR".to_string(),
-        Phase::Dead => "  —  OUT!".to_string(),
-        Phase::RunOver => "  —  RUN OVER · press R".to_string(),
+        Phase::Rolling => match game.spin_state() {
+            SpinState::Braking => "  —  BRAKING".to_string(),
+            SpinState::SpinCharging => "  —  CHARGING ⚡ (release to launch)".to_string(),
+            _ => String::new(),
+        },
+        Phase::Finished => "  —  FINISH! · press R".to_string(),
+        Phase::FellOut => "  —  OUT! resetting…".to_string(),
     };
-    hud.set_text_content(Some(&format!(
-        "GRAVIX   LEVEL {}   COINS {}/{}   RUN {}   FALLS {}/{}{}",
-        game.level_number(),
-        game.coins_collected(),
-        game.coins_total(),
-        game.run_score(),
-        game.falls(),
-        crate::gravix::settings::RUN_MAX_FALLS,
-        banner,
-    )));
+    hud.set_text_content(Some(&format!("GRAVIX   SPEED {:>3.0}{}", game.speed(), banner)));
 }

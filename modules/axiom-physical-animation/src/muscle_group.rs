@@ -53,11 +53,6 @@ const MUSCLE_GROUP_NAMES: [&str; MUSCLE_GROUP_COUNT] = [
 ];
 
 impl MuscleGroup {
-    /// The stable facade code `0..=9`.
-    pub(crate) const fn code(self) -> u8 {
-        self as u8
-    }
-
     /// The group for a facade code, clamped into range (branchless).
     pub(crate) fn from_code(code: u8) -> MuscleGroup {
         MUSCLE_GROUPS[(code as usize).min(MUSCLE_GROUP_COUNT - 1)]
@@ -103,7 +98,6 @@ mod tests {
     fn codes_names_and_from_code_round_trip_and_clamp() {
         // Every group round-trips through its code and has a distinct name.
         MUSCLE_GROUPS.iter().enumerate().for_each(|(i, &g)| {
-            assert_eq!(g.code() as usize, i);
             assert_eq!(g.index(), i);
             assert_eq!(MuscleGroup::from_code(i as u8), g);
         });

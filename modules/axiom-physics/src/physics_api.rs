@@ -9,6 +9,8 @@ use crate::physics_body_handle::PhysicsBodyHandle;
 use crate::physics_collider_handle::PhysicsColliderHandle;
 use crate::physics_collider_shape::PhysicsColliderShape;
 use crate::physics_config::PhysicsConfig;
+use crate::physics_error::PhysicsError;
+use crate::physics_heightfield::Heightfield;
 use crate::contact_report::ContactReport;
 use crate::physics_event::PhysicsEvent;
 use crate::physics_material::PhysicsMaterial;
@@ -151,6 +153,38 @@ impl PhysicsApi {
     ) -> PhysicsResult<PhysicsColliderHandle> {
         PhysicsColliderShape::plane(normal, distance)
             .and_then(|shape| self.world.attach_collider(body, shape, material, is_trigger))
+    }
+
+    /// Attach a **static heightfield** collider to `body`: an `nx × nz` grid of
+    /// surface heights (row-major, `heights[iz*nx + ix]`), spaced `spacing_x` /
+    /// `spacing_z` metres and centred on the body origin in the local XZ plane. A
+    /// sphere collides it by the deterministic vertical-projection contact — ideal
+    /// for a shallow curved track surface. Rejects `nx`/`nz < 2`, non-positive
+    /// spacing, or a `heights` length that is not `nx·nz`.
+    pub fn attach_heightfield_collider(
+        &mut self,
+        body: PhysicsBodyHandle,
+        nx: u32,
+        nz: u32,
+        spacing_x: Meters,
+        spacing_z: Meters,
+        heights: &[Meters],
+        material: PhysicsMaterial,
+        is_trigger: bool,
+    ) -> PhysicsResult<PhysicsColliderHandle> {
+        let (sx, sz) = (spacing_x.get(), spacing_z.get());
+        let valid = (nx >= 2) & (nz >= 2) & (sx > 0.0) & (sz > 0.0) & (heights.len() as u64 == u64::from(nx) * u64::from(nz));
+        [
+            Err(PhysicsError::invalid_collider_shape(
+                "heightfield needs nx,nz >= 2, positive spacing, and heights.len() == nx*nz",
+            )),
+            Ok(()),
+        ][valid as usize]
+        .and_then(|()| {
+            let grid = Heightfield::new(nx, nz, sx, sz, heights.iter().map(|m| m.get()).collect());
+            PhysicsColliderShape::heightfield_shape(grid.half_extents())
+                .and_then(|shape| self.world.attach_heightfield_collider(body, shape, material, is_trigger, grid))
+        })
     }
 
     /// Queue a continuous force on a dynamic body (applied at the next step).

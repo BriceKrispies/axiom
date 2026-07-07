@@ -48,25 +48,38 @@ struct ContactGeom {
 type ContactFn =
     fn(PhysicsColliderShape, Vec3, Quat, PhysicsColliderShape, Vec3, Quat) -> Option<ContactGeom>;
 
-/// The branchless dispatch table, indexed by `kind_a.index() * 4 + kind_b.index()`
-/// with `Sphere = 0, Box = 1, Capsule = 2, Plane = 3`.
-const CONTACT_TABLE: [ContactFn; 16] = [
+/// The branchless dispatch table, indexed by `kind_a.index() * 5 + kind_b.index()`
+/// with `Sphere = 0, Box = 1, Capsule = 2, Plane = 3, Heightfield = 4`. The
+/// heightfield row/column are `no_contact` here: a heightfield's grid data is not
+/// reachable through the flat `ContactFn` signature, so sphere↔heightfield contact
+/// is generated alongside the table (which needs the whole collider) — see
+/// [`heightfield_contact`].
+const CONTACT_TABLE: [ContactFn; 25] = [
     sphere_sphere, // (Sphere, Sphere)
     sphere_box,    // (Sphere, Box)
     no_contact,    // (Sphere, Capsule)
     sphere_plane,  // (Sphere, Plane)
+    no_contact,    // (Sphere, Heightfield) — see heightfield_contact
     box_sphere,    // (Box, Sphere)
     no_contact,    // (Box, Box)
     no_contact,    // (Box, Capsule)
     box_plane,     // (Box, Plane)
+    no_contact,    // (Box, Heightfield)
     no_contact,    // (Capsule, Sphere)
     no_contact,    // (Capsule, Box)
     no_contact,    // (Capsule, Capsule)
     no_contact,    // (Capsule, Plane)
+    no_contact,    // (Capsule, Heightfield)
     plane_sphere,  // (Plane, Sphere)
     plane_box,     // (Plane, Box)
     no_contact,    // (Plane, Capsule)
     no_contact,    // (Plane, Plane)
+    no_contact,    // (Plane, Heightfield)
+    no_contact,    // (Heightfield, Sphere) — see heightfield_contact
+    no_contact,    // (Heightfield, Box)
+    no_contact,    // (Heightfield, Capsule)
+    no_contact,    // (Heightfield, Plane)
+    no_contact,    // (Heightfield, Heightfield)
 ];
 
 /// Reverse a contact: swapping the A/B roles flips the A→B normal.
@@ -246,10 +259,53 @@ fn plane_box(
     box_plane(b, cb, rb, a, ca, ra).map(flip)
 }
 
+/// A sphere against a static heightfield, by the deterministic
+/// **vertical-projection** contact: bring the sphere centre into the heightfield's
+/// local frame, sample the surface height + central-difference normal directly
+/// under it, and push the sphere out along that surface normal. Exact for the
+/// gentle slopes a shallow track uses (steep, near-vertical walls are out of scope
+/// and would need a closest-point-on-triangle test). Returns `None` unless the
+/// first collider is a sphere and the second carries a heightfield they overlap.
+/// The A→B normal points from the sphere into the surface.
+fn sphere_vs_heightfield(
+    sphere: PhysicsColliderShape,
+    sphere_center: Vec3,
+    heightfield: &PhysicsCollider,
+    hf_pos: Vec3,
+    hf_rot: Quat,
+) -> Option<ContactGeom> {
+    heightfield.heightfield().and_then(|grid| {
+        let r = sphere.radius();
+        let local = hf_rot.conjugate().rotate(sphere_center.subtract(hf_pos));
+        let h = grid.sample(local.x, local.z);
+        let n_local = grid.normal_at(local.x, local.z);
+        // Perpendicular gap of the centre above the local tangent plane, and the
+        // penetration of the sphere into it.
+        let above = (local.y - h) * n_local.y;
+        let depth = r - above;
+        let hit = sphere.is_sphere() & grid.within(local.x, local.z) & (depth > 0.0) & (above > -r);
+        let normal = hf_rot.rotate(n_local).mul_scalar(-1.0);
+        let point = hf_pos.add(hf_rot.rotate(Vec3::new(local.x, h, local.z)));
+        hit.then_some(ContactGeom { normal, depth, point })
+    })
+}
+
+/// The sphere↔heightfield contact for a pair in **either** ordering (`None` for any
+/// pair that is not a sphere against a heightfield). Complements [`CONTACT_TABLE`],
+/// whose flat generators cannot reach a collider's grid data.
+fn heightfield_contact(ca: &PhysicsCollider, ba_pos: Vec3, ba_rot: Quat, cb: &PhysicsCollider, cb_pos: Vec3, cb_rot: Quat) -> Option<ContactGeom> {
+    // A = sphere, B = heightfield (normal already A→B).
+    let a_sphere = sphere_vs_heightfield(ca.shape(), ba_pos, cb, cb_pos, cb_rot);
+    // A = heightfield, B = sphere → sphere(B)↔heightfield(A), then flip B→A to A→B.
+    let b_sphere = sphere_vs_heightfield(cb.shape(), cb_pos, ca, ba_pos, ba_rot).map(flip);
+    a_sphere.or(b_sphere)
+}
+
 /// Generate a contact manifold for every candidate pair that is genuinely
 /// overlapping, preserving the broad phase's sorted pair order. Each pair's
 /// colliders and bodies are resolved by handle (always present, since the pair
-/// came from these very slices), then dispatched through [`CONTACT_TABLE`].
+/// came from these very slices), then dispatched through [`CONTACT_TABLE`] (and
+/// the [`heightfield_contact`] path for sphere↔heightfield pairs).
 pub(crate) fn generate_contacts(
     pairs: &[BroadPhasePair],
     colliders: &[PhysicsCollider],
@@ -264,15 +320,11 @@ pub(crate) fn generate_contacts(
                 let ba = bodies.iter().find(|x| x.handle() == ca.body());
                 let bb = bodies.iter().find(|x| x.handle() == cb.body());
                 ba.zip(bb).and_then(|(ba, bb)| {
-                    let index = ca.shape().kind().index() * 4 + cb.shape().kind().index();
-                    CONTACT_TABLE[index](
-                        ca.shape(),
-                        ba.transform().translation,
-                        ba.transform().rotation,
-                        cb.shape(),
-                        bb.transform().translation,
-                        bb.transform().rotation,
-                    )
+                    let index = ca.shape().kind().index() * 5 + cb.shape().kind().index();
+                    let (pa, ra) = (ba.transform().translation, ba.transform().rotation);
+                    let (pb, rb) = (bb.transform().translation, bb.transform().rotation);
+                    CONTACT_TABLE[index](ca.shape(), pa, ra, cb.shape(), pb, rb)
+                        .or_else(|| heightfield_contact(ca, pa, ra, cb, pb, rb))
                     .map(|geom| {
                         ContactManifold::new(
                             ca.handle(),
@@ -487,6 +539,69 @@ mod tests {
             material(),
             false,
         )
+    }
+
+    fn heightfield_collider(collider_raw: u64, body_raw: u64, grid: crate::physics_heightfield::Heightfield) -> PhysicsCollider {
+        let shape = PhysicsColliderShape::heightfield_shape(grid.half_extents()).unwrap();
+        PhysicsCollider::new_heightfield(
+            PhysicsColliderHandle::from_raw(collider_raw),
+            PhysicsBodyHandle::from_raw(body_raw),
+            shape,
+            material(),
+            false,
+            grid,
+        )
+    }
+
+    fn flat_grid() -> crate::physics_heightfield::Heightfield {
+        crate::physics_heightfield::Heightfield::new(3, 3, 1.0, 1.0, vec![0.0; 9])
+    }
+
+    #[test]
+    fn sphere_rests_in_a_flat_heightfield_and_misses_when_away() {
+        let hf = heightfield_collider(20, 2, flat_grid());
+        // Centre 0.5 above the surface → penetrates 0.5; A(sphere)→B(field) is down.
+        let g = sphere_vs_heightfield(sphere(1.0), Vec3::new(0.0, 0.5, 0.0), &hf, Vec3::ZERO, id())
+            .expect("sphere sits in the surface");
+        approx(g.normal, Vec3::new(0.0, -1.0, 0.0));
+        assert!((g.depth - 0.5).abs() < 1.0e-5);
+        approx(g.point, Vec3::ZERO);
+        // Above by more than r, outside the footprint, tunnelled far below, and a
+        // non-sphere first shape all produce no contact.
+        assert!(sphere_vs_heightfield(sphere(1.0), Vec3::new(0.0, 2.0, 0.0), &hf, Vec3::ZERO, id()).is_none());
+        assert!(sphere_vs_heightfield(sphere(1.0), Vec3::new(10.0, 0.5, 0.0), &hf, Vec3::ZERO, id()).is_none());
+        assert!(sphere_vs_heightfield(sphere(1.0), Vec3::new(0.0, -2.0, 0.0), &hf, Vec3::ZERO, id()).is_none());
+        assert!(sphere_vs_heightfield(box_shape(1.0, 1.0, 1.0), Vec3::new(0.0, 0.5, 0.0), &hf, Vec3::ZERO, id()).is_none());
+    }
+
+    #[test]
+    fn heightfield_contact_handles_both_orderings_and_ignores_other_pairs() {
+        let hf = heightfield_collider(20, 2, flat_grid());
+        let sph = collider(10, 1, sphere(1.0));
+        // A = sphere over field: normal points down (sphere → field).
+        let ab = heightfield_contact(&sph, Vec3::new(0.0, 0.5, 0.0), id(), &hf, Vec3::ZERO, id())
+            .expect("sphere over heightfield");
+        approx(ab.normal, Vec3::new(0.0, -1.0, 0.0));
+        // A = field under sphere: the flip makes the field → sphere normal point up.
+        let ba = heightfield_contact(&hf, Vec3::ZERO, id(), &sph, Vec3::new(0.0, 0.5, 0.0), id())
+            .expect("heightfield under sphere");
+        approx(ba.normal, Vec3::new(0.0, 1.0, 0.0));
+        // Neither collider is a heightfield → no contact.
+        let box_c = collider(30, 3, box_shape(1.0, 1.0, 1.0));
+        assert!(heightfield_contact(&sph, Vec3::ZERO, id(), &box_c, Vec3::ZERO, id()).is_none());
+    }
+
+    #[test]
+    fn generate_contacts_resolves_a_sphere_on_a_heightfield_pair() {
+        let bodies = [body(1, 0.5), body(2, 0.0)];
+        let colliders = [collider(10, 1, sphere(1.0)), heightfield_collider(20, 2, flat_grid())];
+        let pairs = [BroadPhasePair::new(
+            PhysicsColliderHandle::from_raw(10),
+            PhysicsColliderHandle::from_raw(20),
+        )];
+        let contacts = generate_contacts(&pairs, &colliders, &bodies);
+        assert_eq!(contacts.len(), 1);
+        approx(contacts[0].normal(), Vec3::new(0.0, -1.0, 0.0));
     }
 
     #[test]

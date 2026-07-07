@@ -99,8 +99,8 @@ impl MassProperties {
 /// A per-shape diagonal moment of inertia for a solid body of `mass`, indexed by
 /// the shape's kind so the dispatch is a function table, not a `match`.
 fn diagonal_moment(mass: f32, shape: PhysicsColliderShape) -> Vec3 {
-    const TABLE: [fn(f32, PhysicsColliderShape) -> Vec3; 4] =
-        [sphere_moment, box_moment, capsule_moment, plane_moment];
+    const TABLE: [fn(f32, PhysicsColliderShape) -> Vec3; 5] =
+        [sphere_moment, box_moment, capsule_moment, plane_moment, heightfield_moment];
     TABLE[shape.kind().index()](mass, shape)
 }
 
@@ -133,6 +133,13 @@ fn capsule_moment(mass: f32, shape: PhysicsColliderShape) -> Vec3 {
 /// Infinite plane: no finite extent, so no rotational resistance is defined —
 /// zero moment (and therefore zero inverse inertia, like an immovable body).
 fn plane_moment(_mass: f32, _shape: PhysicsColliderShape) -> Vec3 {
+    Vec3::ZERO
+}
+
+/// Static heightfield: a track surface is always attached to an immovable (static)
+/// body, so its rotational resistance is irrelevant — zero moment (zero inverse
+/// inertia), exactly like a plane.
+fn heightfield_moment(_mass: f32, _shape: PhysicsColliderShape) -> Vec3 {
     Vec3::ZERO
 }
 
@@ -228,6 +235,15 @@ mod tests {
             .unwrap()
             .with_inertia_for(box_shape(1.0, 3.0, 1.0));
         assert_eq!(cap.inverse_inertia(), boxed.inverse_inertia());
+    }
+
+    #[test]
+    fn heightfield_contributes_no_inverse_inertia() {
+        // A heightfield is static-surface-only, so (like a plane) it yields zero
+        // moment and therefore zero inverse inertia.
+        let hf = PhysicsColliderShape::heightfield_shape(Vec3::new(4.0, 1.0, 6.0)).unwrap();
+        let mp = MassProperties::dynamic(Ratio::new(7.0).unwrap()).unwrap().with_inertia_for(hf);
+        assert_eq!(mp.inverse_inertia(), Vec3::ZERO);
     }
 
     #[test]

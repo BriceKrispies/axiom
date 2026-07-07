@@ -74,6 +74,7 @@ pub fn registry() -> Vec<SliceEntry> {
         SliceEntry { name: "soccer-penalty", build: build_soccer },
         SliceEntry { name: "retro-fps", build: build_retro_fps },
         SliceEntry { name: "animation-lab", build: build_posed_figure },
+        SliceEntry { name: "gravix", build: |_| axiom_gallery::gravix::build_gravix() },
     ]
 }
 
