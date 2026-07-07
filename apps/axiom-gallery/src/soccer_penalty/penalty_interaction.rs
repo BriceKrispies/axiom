@@ -125,6 +125,12 @@ pub struct PenaltyInteractionState {
     pub power: PenaltyPowerState,
     pub state: PenaltyShotFlightState,
     pub tick: u32,
+    /// Consecutive ticks the charge has been held (reset on release / reset /
+    /// aiming). A **render-only** counter: it drives the time-based run-up in
+    /// [`crate::soccer_penalty::penalty_kicker::kicker_frame`] so the kicker
+    /// strides forward while the player holds, instead of the run-up being crushed
+    /// into the power ramp. No scoring / flight / resolution logic reads it.
+    pub charge_ticks: u32,
     pub preview: Option<PenaltyShotPreview>,
     /// Present once the ball has launched (`BallInFlight` / `ContactDetected` /
     /// `ArrivedAtGoalPlane`).
@@ -146,6 +152,7 @@ impl PenaltyInteractionState {
             power: PenaltyPowerState::zero(),
             state: PenaltyShotFlightState::Aiming,
             tick: 0,
+            charge_ticks: 0,
             preview: None,
             flight: None,
             contact: None,
@@ -170,6 +177,7 @@ impl PenaltyInteractionState {
                 power: PenaltyPowerState::zero(),
                 state: PenaltyShotFlightState::Aiming,
                 tick,
+                charge_ticks: 0,
                 preview: None,
                 flight: None,
                 contact: None,
@@ -284,6 +292,7 @@ impl PenaltyInteractionState {
             power: self.power,
             state: PenaltyShotFlightState::LockedPreview,
             tick,
+            charge_ticks: 0,
             preview: Some(PenaltyShotPreview {
                 target_x: aim.target_x,
                 target_y: aim.target_y,
@@ -295,12 +304,14 @@ impl PenaltyInteractionState {
             ..self
         };
         // Charge raises power and enters Charging; otherwise power holds and the
-        // state is unchanged (Aiming stays Aiming, Charging holds).
+        // state is unchanged (Aiming stays Aiming, Charging holds). Each charging
+        // tick advances the render-only run-up clock.
         let charged = Self {
             aim,
             power: self.power.charged(),
             state: PenaltyShotFlightState::Charging,
             tick,
+            charge_ticks: self.charge_ticks + 1,
             preview: None,
             flight: None,
             contact: None,

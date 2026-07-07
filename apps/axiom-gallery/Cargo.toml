@@ -82,6 +82,16 @@ growth-agent = [
     "dep:axiom-canvas2d-backend",
 ]
 
+# The EXPERIMENTAL physics-backed full-humanoid kicker (`penalty_physics_kick` +
+# `penalty_muscle`), which drives the authored kick through the
+# `axiom-physical-animation` bridge over real `axiom-physics` bodies. DISABLED by
+# default: it poses the figure's root box from a free-integrating dynamic pelvis body
+# that drifts/tumbles away from the kinematically-driven limbs (an inverted body + an
+# orphan capsule). The default kicker is the authored/kinematic `penalty_kick_pose`.
+# See src/soccer_penalty/docs/KICK_ANIMATION.md for the invariants it must satisfy
+# before it can become the default again.
+experimental_physical_humanoid_kicker = ["dep:axiom-physical-animation"]
+
 # Zanzoban agent driver: play the grid puzzle through axiom-agent (native-only).
 zanzoban-agent = ["dep:axiom-agent"]
 # Soccer-penalty's headless agent driver. `axiom-agent` is the only optional dep
@@ -177,13 +187,15 @@ axiom-world = { path = "../../modules/axiom-world" }
 axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
 axiom-animation = { path = "../../modules/axiom-animation" }
 axiom-figure = { path = "../../modules/axiom-figure" }
-# The deterministic procedural-animation authoring vocabulary + its physics-backed
-# execution bridge. The soccer penalty game authors its kick as a 9-phase
-# `SoccerPenaltyKickMotionSpec` through `AnimationAuthoringApi`, then drives it
-# through `PhysicalAnimationApi` (real axiom-physics bodies/impulse) — the app is
-# the composition root that wires the two module facades together.
+# The deterministic procedural-animation authoring vocabulary. The soccer penalty
+# game authors its kick as a 9-phase `SoccerPenaltyKickMotionSpec` through
+# `AnimationAuthoringApi` and, by default, evaluates it kinematically
+# (`SoccerPenaltyKickMotionSpec` → `sample` → `frame_joint_world`) to pose the kicker.
 axiom-animation-authoring = { path = "../../modules/axiom-animation-authoring" }
-axiom-physical-animation = { path = "../../modules/axiom-physical-animation" }
+# The physics-backed execution bridge (`PhysicalAnimationApi` over real axiom-physics
+# bodies/impulse). Used ONLY by the experimental full-humanoid kicker, so it is
+# optional and pulled in only by `experimental_physical_humanoid_kicker`.
+axiom-physical-animation = { path = "../../modules/axiom-physical-animation", optional = true }
 # Hand-editable level/data format used by several demos' codecs (zanzoban,
 # rotating-cube's data-package test) and the growth agent's tag/directive TOML.
 serde = { version = "1", features = ["derive"] }

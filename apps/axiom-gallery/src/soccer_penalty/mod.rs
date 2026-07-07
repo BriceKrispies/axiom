@@ -131,23 +131,31 @@
 //! and no change to Pass 8 results or Pass 9 scores. See
 //! `PASS_10_IMPACT_POLISH.md`.
 //!
-//! ## Physics-backed kick — the kicker + ball now run the authored motion pipeline
-//! The kicker's animation and the ball's flight are no longer ad-hoc: they are the
-//! engine's **procedural-animation authoring** system executed through the
-//! **physics** module. [`penalty_kick_motion`] authors the kick as a nine-phase
+//! ## Kick animation — authored/kinematic kicker + physics ball (hybrid)
+//! [`penalty_kick_motion`] authors the kick as a nine-phase
 //! [`penalty_kick_motion::SoccerPenaltyKickMotionSpec`] (`setup → sprint_approach →
 //! pre_plant → plant → backswing → hip_drive → strike → follow_through → recover`)
 //! entirely in `AnimationAuthoringApi` vocabulary — targets, root motion, pose
 //! goals, constraints, contacts, a `ball_contact` event, and nine named style
-//! scalars. [`penalty_physics_kick::PenaltyPhysicsKick`] drives that plan through
-//! the `axiom-physical-animation` bridge over real `axiom-physics` bodies (dynamic
-//! pelvis force-driven up the run-up; kinematic limbs; a real strike impulse),
-//! capturing a [`penalty_physics_kick::PhysicalKickFrame`] per tick.
-//! [`penalty_kicker`] poses the shared figure boxes from those physics transforms,
-//! and [`penalty_ball`] launches the ball as a real `axiom-physics` projectile to
-//! the aimed target. See `docs/PHYSICS_BACKED_KICK.md`. The whole kick is
-//! aim-independent and simulated once (cached); `penalty_physics_kick`'s
-//! `debug_snapshot` inspects every phase at a fixed tick.
+//! scalars. The **default** kicker pose comes from
+//! [`penalty_kick_pose::SoccerPenaltyKickPose`], which evaluates that plan by pure
+//! forward kinematics (`sample` + `frame_joint_world`) into a
+//! [`penalty_kick_pose::KinematicKickFrame`] per tick — no physics body is ever a
+//! render transform, so the figure stays coherent and readable. [`penalty_kicker`]
+//! poses the shared figure boxes from those authored transforms; [`penalty_ball`]
+//! launches the ball as a real `axiom-physics` projectile (a real impulse at the
+//! strike, then gravity — never teleported) to the aimed target. The strike's
+//! authored `ball_contact` event is what bridges the animation to that physics
+//! launch. See `docs/KICK_ANIMATION.md`. The whole kick is aim-independent and
+//! simulated once (cached); `SoccerPenaltyKickPose::debug_snapshot` inspects every
+//! phase at a fixed tick and `::validate` asserts the pose invariants.
+//!
+//! The earlier **physics-backed full humanoid** path (a dynamic force/torque-driven
+//! pelvis body driving the figure's root) is experimental and **disabled by
+//! default** — it is compiled in only behind the
+//! `experimental_physical_humanoid_kicker` feature (`penalty_physics_kick` +
+//! `penalty_muscle`), because the free-integrating pelvis drifts away from the
+//! kinematic limbs and reads as an inverted body + an orphan capsule.
 //!
 //! ## Determinism
 //! Every artifact is a pure function of compile-time constants: no wall-clock
@@ -178,8 +186,17 @@ pub mod penalty_hud;
 pub mod penalty_input;
 pub mod penalty_interaction;
 pub mod penalty_kick_motion;
+/// The DEFAULT authored / kinematic kicker pose source (no physics in the render path).
+pub mod penalty_kick_pose;
 pub mod penalty_kicker;
+/// The experimental physics-backed humanoid kicker + its virtual-muscle policy, compiled
+/// in only behind the `experimental_physical_humanoid_kicker` feature. Disabled by default
+/// because it poses the figure's root from a free-integrating dynamic pelvis body (see
+/// `docs/KICK_ANIMATION.md`). The `axiom-physical-animation` bridge it drives keeps its own
+/// always-on, fully-covered module tests.
+#[cfg(feature = "experimental_physical_humanoid_kicker")]
 pub mod penalty_muscle;
+#[cfg(feature = "experimental_physical_humanoid_kicker")]
 pub mod penalty_physics_kick;
 pub mod penalty_light;
 pub mod penalty_materials;

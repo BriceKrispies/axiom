@@ -652,9 +652,13 @@ pub fn soccer_meshed_shell() -> RunningApp {
 /// convergence champion (`axiom-shot`). Identical authoring to the live gallery.
 pub fn soccer_meshed_app(frame: Stage1Diorama) -> RunningApp {
     let mut app = soccer_meshed_shell();
-    // One-shot offscreen render (the convergence champion): the athletes are one
-    // continuous skinned MetaSurface body, baked once and deformed by a joint palette.
-    let mut scene = PenaltyMeshedScene::install(&mut app).with_skinned_bodies();
+    // One-shot offscreen render (the convergence champion + the agent filmstrip): the
+    // athletes render as ARTICULATED low-poly parts — capsule limbs, sphere heads/
+    // joints, bevelled torso/feet (the `sub_parts` path) — so a run-up stride and a
+    // kicking-leg swing read as distinct limbs. The earlier fused-`MetaSurface`
+    // (`with_skinned_bodies`) path melted torso+arms+legs into one blob per kit
+    // material, which hid the pose; de-blobbed here for a legible kick animation.
+    let mut scene = PenaltyMeshedScene::install(&mut app);
     scene.set_view(&mut app, frame.render_plan.camera);
     scene.author(&mut app, &frame);
     app

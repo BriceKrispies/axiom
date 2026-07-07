@@ -4,10 +4,13 @@
 //! constraints, contacts, a ball-contact event, and named style scalars).
 //!
 //! This replaces the game's old ad-hoc frame-index kicker animation with a real
-//! authored motion plan. The plan is compiled once here; the physics-backed
-//! controller (`penalty_physics_kick`) then drives it through `axiom-physics`.
-//! Authoring lives in the **app** (the composition root) — the generic authoring
-//! module holds no soccer concepts.
+//! authored motion plan. The plan is compiled once here; the default kicker
+//! (`penalty_kick_pose`) evaluates it **kinematically** into per-tick joint world
+//! transforms, and the ball is launched as a real `axiom-physics` projectile at the
+//! authored `ball_contact` strike (`penalty_ball`). The experimental physics-backed
+//! humanoid controller (`penalty_physics_kick`) drives the same plan through
+//! `axiom-physics` bodies, but is disabled by default. Authoring lives in the **app**
+//! (the composition root) — the generic authoring module holds no soccer concepts.
 //!
 //! ## The nine phases (in order)
 //! `setup → sprint_approach → pre_plant → plant → backswing → hip_drive → strike
@@ -190,6 +193,12 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     let follow = s(style.follow_through_amount);
     let reach = s((style.follow_through_amount * 0.7).clamp(0.0, 1.0));
     let arm = s(style.arm_balance);
+    // Shoulder ABDUCTION (radians): swing the down-hanging arms OUT to the sides so
+    // they read as braced balance arms from the behind-the-kicker camera, instead of
+    // hiding in the torso silhouette. `+Z` roll abducts the left arm (+X side); `-Z`
+    // the right. Scaled by `arm_balance`. The reference #10 carries wide balance arms
+    // through the plant and strike.
+    let spread = 0.4 + 0.5 * style.arm_balance;
 
     // 1. setup — behind the ball, facing it; ball still. A brief ready hold with
     //    the gaze already on the ball.
@@ -205,6 +214,11 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     api.set_phase_ease_smoothstep(sprint).unwrap();
     api.set_phase_layer_weight(sprint, s(0.6 + 0.3 * style.urgency)).unwrap();
     api.add_torso_twist_toward_target(sprint, "ball", s(0.25 * style.torso_twist)).unwrap();
+    // A forward torso lean into the run-up (+X rotation tips the chest toward the goal).
+    api.add_set_joint_rotation(sprint, "chest", Vec3::new(0.28, 0.0, 0.0)).unwrap();
+    // Arms swing out to a light run-up carry.
+    api.add_set_joint_rotation(sprint, "left_shoulder", Vec3::new(0.0, 0.0, 0.6 * spread)).unwrap();
+    api.add_set_joint_rotation(sprint, "right_shoulder", Vec3::new(0.0, 0.0, -0.6 * spread)).unwrap();
     api.add_move_effector_toward_target(sprint, "right_hand", "approach_start", arm).unwrap();
     api.add_move_effector_toward_target(sprint, "left_hand", "ball", arm).unwrap();
     api.add_keep_gaze_on_target(sprint, "ball").unwrap();
@@ -231,6 +245,8 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     api.add_keep_center_of_mass_over_support(plant, "left_foot_sole").unwrap();
     api.add_raise_arm_for_balance(plant, true).unwrap();
     api.add_raise_arm_for_balance(plant, false).unwrap();
+    api.add_set_joint_rotation(plant, "left_shoulder", Vec3::new(0.0, 0.0, spread)).unwrap();
+    api.add_set_joint_rotation(plant, "right_shoulder", Vec3::new(0.0, 0.0, -spread)).unwrap();
     api.add_keep_gaze_on_target(plant, "ball").unwrap();
 
     // 5. backswing — the right hip extends back, knee bends, foot swings behind on
@@ -246,6 +262,8 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     api.add_torso_twist_toward_target(back, "approach_start", counter).unwrap();
     api.add_raise_arm_for_balance(back, true).unwrap();
     api.add_raise_arm_for_balance(back, false).unwrap();
+    api.add_set_joint_rotation(back, "left_shoulder", Vec3::new(0.0, 0.0, spread * 1.1)).unwrap();
+    api.add_set_joint_rotation(back, "right_shoulder", Vec3::new(0.0, 0.0, -spread * 1.1)).unwrap();
     api.add_preserve_foot_contact(back, "left_foot_sole", "left_plant_spot").unwrap();
 
     // 6. hip_drive — the pelvis initiates the kick before the lower leg follows:
@@ -260,6 +278,8 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     api.add_torso_twist_toward_target(hip, "net_center", counter).unwrap();
     api.add_raise_arm_for_balance(hip, true).unwrap();
     api.add_raise_arm_for_balance(hip, false).unwrap();
+    api.add_set_joint_rotation(hip, "left_shoulder", Vec3::new(0.0, 0.0, spread * 1.15)).unwrap();
+    api.add_set_joint_rotation(hip, "right_shoulder", Vec3::new(0.0, 0.0, -spread * 0.9)).unwrap();
     api.add_preserve_foot_contact(hip, "left_foot_sole", "left_plant_spot").unwrap();
 
     // 7. strike — the right instep meets the ball; hip + knee drive through; torso
@@ -274,6 +294,9 @@ fn build_kick(api: &mut AnimationAuthoringApi, style: SoccerPenaltyKickStyle) ->
     api.add_aim_effector_at_target(strike, "right_foot_instep", "ball").unwrap();
     api.add_orient_surface_toward_target(strike, "right_foot_instep", "net_center").unwrap();
     api.add_torso_twist_toward_target(strike, "net_center", twist).unwrap();
+    // Arms flung wide for the strike (the classic braced follow-through balance).
+    api.add_set_joint_rotation(strike, "left_shoulder", Vec3::new(0.0, 0.0, spread * 1.25)).unwrap();
+    api.add_set_joint_rotation(strike, "right_shoulder", Vec3::new(0.0, 0.0, -spread * 1.25)).unwrap();
     api.add_keep_gaze_on_target(strike, "ball").unwrap();
     api.add_preserve_foot_contact(strike, "left_foot_sole", "left_plant_spot").unwrap();
 

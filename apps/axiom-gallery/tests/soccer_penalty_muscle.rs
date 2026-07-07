@@ -1,3 +1,6 @@
+#![cfg(feature = "experimental_physical_humanoid_kicker")]
+//! EXPERIMENTAL — only compiled with `--features experimental_physical_humanoid_kicker`.
+//!
 //! Proof that the soccer penalty kicker runs on the **virtual-muscle active
 //! control layer** (the engine's `VirtualMuscleController`, configured by the
 //! soccer per-phase muscle policy). The kicker holds itself over its support

@@ -1,15 +1,20 @@
-//! The articulated penalty kicker — now driven by the **physics-backed authored
-//! motion**.
+//! The articulated penalty kicker — driven by the **authored / kinematic** kick pose.
 //!
-//! The kicker's box geometry is still the shared **figure** (`assets/soccer/
-//! kicker.figure`) — 13 parts with their sizes, offsets and kit tags — but the
-//! *pose* no longer comes from a baked clip. It comes from
-//! [`crate::soccer_penalty::penalty_physics_kick::PenaltyPhysicsKick`]: the
-//! authored nine-phase [`crate::soccer_penalty::penalty_kick_motion`] motion plan
-//! driven through the `axiom-physical-animation` bridge over real `axiom-physics`
-//! bodies. Each authored tick yields the 13 joints' physics body world transforms,
-//! which pose the figure's boxes (placed at the kicker's spot, `+Z`
-//! figure-forward mapped to `-Z` world-forward toward the goal).
+//! The kicker's box geometry is the shared **figure** (`assets/soccer/kicker.figure`)
+//! — 13 parts with their sizes, offsets and kit tags — and the *pose* comes from
+//! [`crate::soccer_penalty::penalty_kick_pose::SoccerPenaltyKickPose`]: the authored
+//! nine-phase [`crate::soccer_penalty::penalty_kick_motion`] motion plan evaluated by
+//! pure forward kinematics (`AnimationAuthoringApi::sample` + `frame_joint_world`).
+//! Each authored tick yields the 13 joints' world transforms, which pose the figure's
+//! boxes (placed at the kicker's spot, `+Z` figure-forward mapped to `-Z`
+//! world-forward toward the goal).
+//!
+//! Reading the pose directly keeps the whole figure coherent. The earlier
+//! physics-backed path posed the figure's root box from a free-integrating *dynamic*
+//! pelvis body, which drifted/tumbled away from the kinematically-driven limbs — the
+//! inverted body + orphan capsule. That path is now behind the
+//! `experimental_physical_humanoid_kicker` feature (`penalty_physics_kick`); see
+//! `docs/KICK_ANIMATION.md`.
 //!
 //! The whole kick is aim-independent, so it is simulated once and shared through a
 //! process-wide cache; the game samples it by authored tick via [`kicker_frame`].
@@ -21,9 +26,20 @@ use axiom_math::{Transform, Vec3};
 
 use crate::soccer_penalty::penalty_interaction::PenaltyInteractionState;
 use crate::soccer_penalty::penalty_kick_motion::{DURATION, SPRINT_APPROACH, STRIKE_CONTACT_TICK};
+use crate::soccer_penalty::penalty_kick_pose::KICKER_JOINTS;
 use crate::soccer_penalty::penalty_materials::PenaltyMaterialId;
-use crate::soccer_penalty::penalty_physics_kick::{PenaltyPhysicsKick, KICKER_JOINTS};
 use crate::soccer_penalty::penalty_scene::{KICKER_X, KICKER_Z};
+
+// The DEFAULT kicker pose source is the authored / kinematic pose
+// (`penalty_kick_pose`): every joint transform is pure forward kinematics, so the
+// figure stays coherent. The broken physics-backed humanoid (`penalty_physics_kick`)
+// is compiled in only behind the `experimental_physical_humanoid_kicker` feature —
+// see `docs/KICK_ANIMATION.md` for the invariants it must satisfy before it can
+// become the default again.
+#[cfg(not(feature = "experimental_physical_humanoid_kicker"))]
+use crate::soccer_penalty::penalty_kick_pose::SoccerPenaltyKickPose;
+#[cfg(feature = "experimental_physical_humanoid_kicker")]
+use crate::soccer_penalty::penalty_physics_kick::PenaltyPhysicsKick;
 
 /// The shared kicker figure geometry, byte-identical to what the lab emits.
 const FIGURE_BYTES: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/soccer/kicker.figure"));
@@ -55,7 +71,25 @@ pub const IDLE_FRAME: u32 = 0;
 /// braced, weighted athlete cocked to strike rather than a limp mannequin.
 pub const DISPLAY_FRAME: u32 = 44;
 
-/// The process-wide cached default-style physics kick (aim-independent poses).
+/// Which pose source the current build wires into the kicker — a greppable marker
+/// the tests assert on. `"kinematic"` is the stable default; `"physical_humanoid"`
+/// only appears when the experimental feature is enabled.
+#[cfg(not(feature = "experimental_physical_humanoid_kicker"))]
+pub const KICKER_POSE_SOURCE: &str = "kinematic";
+#[cfg(feature = "experimental_physical_humanoid_kicker")]
+pub const KICKER_POSE_SOURCE: &str = "physical_humanoid";
+
+/// The process-wide cached default-style kick (aim-independent poses). Default: the
+/// authored / kinematic pose. The frame's `joints: [Transform; 13]` field is the same
+/// shape for both sources, so [`KickerRig::boxes_at`] is source-agnostic.
+#[cfg(not(feature = "experimental_physical_humanoid_kicker"))]
+fn cached_kick() -> &'static SoccerPenaltyKickPose {
+    static KICK: OnceLock<SoccerPenaltyKickPose> = OnceLock::new();
+    KICK.get_or_init(SoccerPenaltyKickPose::default_kick)
+}
+
+/// The process-wide cached default-style **physics** kick (experimental).
+#[cfg(feature = "experimental_physical_humanoid_kicker")]
 fn cached_kick() -> &'static PenaltyPhysicsKick {
     static KICK: OnceLock<PenaltyPhysicsKick> = OnceLock::new();
     KICK.get_or_init(PenaltyPhysicsKick::default_kick)
@@ -158,23 +192,31 @@ fn material_for_part(index: usize, tag: u32) -> PenaltyMaterialId {
     }
 }
 
-/// The authored kick tick to pose for the current shot state:
-/// - **Aiming** → `setup` (standing ready behind the ball);
-/// - **Charging** → the run-up + wind-up, mapped from the power meter across
-///   `sprint_approach … strike` (holding to charge visibly runs the kicker up and
-///   cocks the leg);
-/// - **committed** (locked / in flight / resolved) → `strike … recover`, mapped
-///   from the ball's flight progress, so the instep connects as the ball launches
-///   and the leg follows through and recovers as the ball flies.
+/// How far before the strike tick the held run-up caps: holding to charge winds the
+/// kicker up to the very start of the strike phase (`STRIKE` begins at tick 52) and
+/// holds there, cocked, until release fires the strike.
+const RUNUP_STRIKE_GAP: u32 = 3;
+
+/// The authored kick tick to pose for the current shot state — a **time-based**
+/// mapping so the kick actually plays out as an animation (the earlier power-based
+/// map crushed the 74-tick kick into the ~8-tick charge, so no run-up ever read):
+/// - **Aiming** → the run-up start (`sprint_approach` begin): the kicker stands
+///   ready *behind* the ball, not on top of it;
+/// - **Charging** → strides forward one authored tick per tick held
+///   (`state.charge_ticks`) through `sprint_approach → pre_plant → plant → backswing
+///   → hip_drive`, capping cocked just before the strike — a longer hold winds up
+///   further, matching "HOLD to charge";
+/// - **committed** (locked / in flight / resolved) → `strike … recover`, mapped from
+///   the ball's flight progress, so the instep connects as the ball launches and the
+///   leg follows through and recovers as the ball flies.
 pub fn kicker_frame(state: &PenaltyInteractionState) -> u32 {
     use crate::soccer_penalty::penalty_interaction::PenaltyShotFlightState as S;
     match state.state {
-        S::Aiming => 2,
+        S::Aiming => SPRINT_APPROACH.0 as u32,
         S::Charging => {
-            let p = (state.power.power.clamp(0, 100) as f32) / 100.0;
-            let start = SPRINT_APPROACH.0 as f32;
-            let end = STRIKE_CONTACT_TICK as f32;
-            (start + (end - start) * p) as u32
+            let start = SPRINT_APPROACH.0 as u32;
+            let cocked = (STRIKE_CONTACT_TICK as u32).saturating_sub(RUNUP_STRIKE_GAP);
+            (start + state.charge_ticks).min(cocked)
         }
         _ => {
             let progress = state
@@ -195,7 +237,7 @@ mod tests {
     use crate::soccer_penalty::penalty_input::PenaltyInputIntent;
 
     #[test]
-    fn rig_loads_and_poses_thirteen_boxes_from_physics() {
+    fn rig_loads_and_poses_thirteen_boxes_from_authored_pose() {
         let rig = KickerRig::new();
         let boxes = rig.boxes_at(IDLE_FRAME);
         assert_eq!(boxes.len(), 13);
@@ -215,12 +257,23 @@ mod tests {
     }
 
     #[test]
-    fn kick_frame_reads_ready_while_aiming_and_strikes_once_committed() {
-        // Aiming: the kicker stands ready (an early setup tick), never at the strike.
+    fn kick_frame_runs_up_while_held_and_strikes_once_committed() {
+        // Aiming: the kicker stands ready behind the ball at the run-up start, never
+        // at the strike.
         let aiming = PenaltyInteractionState::start();
         assert!(kicker_frame(&aiming) < STRIKE_CONTACT_TICK as u32);
-        // Drive a full shot; once committed the tick is at/after the strike.
-        let intents = vec![PenaltyInputIntent::charging(0, 0); 40];
+        // Holding to charge strides the run-up forward by TIME held, but caps cocked
+        // just before the strike — charging alone never reaches contact.
+        let short = PenaltyInteractionState::run(&[PenaltyInputIntent::charging(0, 0); 3]);
+        let long = PenaltyInteractionState::run(&[PenaltyInputIntent::charging(0, 0); 40]);
+        assert!(kicker_frame(&long) > kicker_frame(&short), "a longer hold winds up further");
+        assert!(kicker_frame(&long) < STRIKE_CONTACT_TICK as u32, "the hold caps cocked, before contact");
+        // Release commits the shot; once the ball is in flight the tick is at/after
+        // the strike.
+        let mut intents = vec![PenaltyInputIntent::charging(0, 0); 20];
+        intents.push(PenaltyInputIntent::releasing());
+        intents.push(PenaltyInputIntent::neutral()); // LockedPreview → launch
+        intents.push(PenaltyInputIntent::neutral()); // BallInFlight
         let launched = PenaltyInteractionState::run(&intents);
         assert!(kicker_frame(&launched) >= STRIKE_CONTACT_TICK as u32);
     }

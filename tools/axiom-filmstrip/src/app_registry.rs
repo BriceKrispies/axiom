@@ -180,28 +180,30 @@ pub fn resolve_app(name: &str) -> Result<FilmstripApp, FilmstripError> {
 }
 
 /// The static marker trace for the soccer penalty scenarios. Tick values follow
-/// the deterministic shot (`soccer_shot_state`: charge for 8 ticks, release at 8,
-/// then ball flight and result freeze). Non-soccer scenarios have no markers.
+/// the deterministic shot (`soccer_shot_state`: hold to charge for 50 ticks — the
+/// kicker runs up over that hold — release at 50, then ball flight and result
+/// freeze). Non-soccer scenarios have no markers.
 fn soccer_markers(scenario: &str) -> Vec<AnimationMarker> {
     let mark = |name: &str, tick: u64| AnimationMarker {
         name: name.to_string(),
         tick,
     };
     match scenario {
-        // Ticks are grounded in the rendered shot (charge for 8 ticks, release at
-        // 8, ball leaves the foot ~tick 9, crosses the line ~tick 22, settles ~34).
+        // Ticks are grounded in the rendered shot: the run-up plays across the
+        // charge hold (shot_tick ≈ authored run-up progress), release ~51 fires the
+        // strike, the ball leaves the foot ~52, crosses the line ~74, settles ~90.
         "default_penalty_kick" => vec![
-            mark("kicker.runup.start", 0),
-            mark("kicker.stride.1", 2),
-            mark("kicker.stride.2", 4),
-            mark("kicker.left_foot.plant", 6),
-            mark("kicker.hip.twist.peak", 7),
-            mark("kicker.right_leg.swing.apex", 8),
-            mark("kicker.foot.ball_contact", 9),
-            mark("kicker.followthrough.peak", 13),
-            mark("goalie.dive.commit", 16),
-            mark("ball.goal_line.cross", 22),
-            mark("result.freeze", 40),
+            mark("kicker.runup.start", 2),
+            mark("kicker.stride.1", 12),
+            mark("kicker.stride.2", 22),
+            mark("kicker.left_foot.plant", 30),
+            mark("kicker.hip.twist.peak", 40),
+            mark("kicker.right_leg.swing.apex", 48),
+            mark("kicker.foot.ball_contact", 53),
+            mark("goalie.dive.commit", 54),
+            mark("kicker.followthrough.peak", 60),
+            mark("ball.goal_line.cross", 74),
+            mark("result.freeze", 90),
         ],
         _ => Vec::new(),
     }
@@ -281,11 +283,11 @@ mod tests {
         assert_eq!(
             pts[0],
             CapturePoint {
-                tick: 9,
+                tick: 53,
                 marker: Some("kicker.foot.ball_contact".into())
             }
         );
-        assert_eq!(pts[1].tick, 40);
+        assert_eq!(pts[1].tick, 90);
     }
 
     #[test]

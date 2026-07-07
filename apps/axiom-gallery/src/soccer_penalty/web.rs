@@ -101,10 +101,13 @@ pub fn soccer_penalty_start() {
     let session = SoccerPenaltyApp::new_session();
     let initial = SoccerPenaltyApp::build_session_frame(&session);
     let mut running = soccer_meshed_shell();
-    // The live game skins the athletes exactly as the offscreen convergence
-    // champion does: one continuous bake-once MetaSurface body per kit material,
-    // deformed each frame by a joint palette (not the old articulated box-man).
-    let mut scene = PenaltyMeshedScene::install(&mut running).with_skinned_bodies();
+    // The live game renders the athletes as ARTICULATED low-poly parts (capsule
+    // limbs / sphere heads / bevel torsos), matching the offscreen convergence
+    // champion + the agent filmstrip, so a run-up stride and a kicking-leg swing
+    // read as distinct limbs. (The fused-MetaSurface skinning welded a forearm to a
+    // thigh — same kit material — into one blob and hid the pose; de-blobbed here.)
+    // The skinned present path stays wired but simply carries no skinned draws.
+    let mut scene = PenaltyMeshedScene::install(&mut running);
     scene.set_view(&mut running, initial.render_plan.camera);
     // The bodies bake on this first author, so the skinned mesh set is populated by
     // the time we snapshot it below (they're excluded from the ordinary mesh set).
@@ -257,16 +260,17 @@ mod tests {
         use crate::soccer_penalty::penalty_render_meshed::soccer_meshed_app;
         use crate::soccer_penalty::penalty_scene::DioramaRole;
         let frame = SoccerPenaltyApp::build_stage1();
-        // Every non-athlete world object is a static draw; the athletes (kicker +
-        // goalie) are one continuous SKINNED body per kit material, submitted as
-        // skinned draws (deformed by a joint palette), not static draws.
+        // The offscreen/filmstrip path now renders every object — scenery AND the
+        // athletes (kicker + goalie) — as ARTICULATED static draws (distinct capsule
+        // limbs / sphere heads / bevel torsos), not fused skinned bodies. So there
+        // are NO skinned draws, and the athletes' parts add to the static draw count.
         let is_athlete = |r| matches!(r, DioramaRole::Kicker | DioramaRole::Goalie);
         let mut non_athlete = 0usize;
-        let mut kit_materials = std::collections::BTreeSet::new();
+        let mut athlete = 0usize;
         frame.render_plan.items.iter().for_each(|it| {
-            if let PenaltyRenderContent::World { role, material, .. } = it.content {
+            if let PenaltyRenderContent::World { role, .. } = it.content {
                 if is_athlete(role) {
-                    kit_materials.insert(material);
+                    athlete += 1;
                 } else {
                     non_athlete += 1;
                 }
@@ -274,50 +278,45 @@ mod tests {
         });
         let mut app = soccer_meshed_app(frame);
         let outcome = app.tick(0);
-        // Non-athletes draw statically; the athletes are one skinned body per kit material.
-        assert_eq!(outcome.draws().len(), non_athlete);
-        assert_eq!(outcome.skinned_draws().len(), kit_materials.len());
-        assert!(kit_materials.len() < 31, "athletes drew as {} grouped skinned bodies", kit_materials.len());
+        // No skinned draws; the athletes render as articulated parts (each world part
+        // expands to >= 1 sub-part), so the static draw count exceeds the non-athletes.
+        assert_eq!(outcome.skinned_draws().len(), 0);
+        assert!(athlete > 0, "the diorama has athlete parts");
+        assert!(outcome.draws().len() > non_athlete, "athlete parts render as static draws too");
     }
 
-    /// Regression guard for the live loop, which now skins the athletes exactly as
-    /// the offscreen champion does (`install().with_skinned_bodies()` — the same
-    /// call `soccer_penalty_start` makes): the athlete bodies bake **once** into the
-    /// skinned mesh set and then deform per frame via a joint palette — NOT a
-    /// per-frame `MetaSurface` re-bake. Re-baking dropped the game to ~7 FPS and
-    /// leaked a fresh mesh per group per frame; and because the live loop uploads
-    /// meshes only at bind, those per-frame meshes never reached the GPU (the
-    /// athletes vanished). This asserts both mesh stores stay constant across frames
-    /// after the one-time bake, and that the athletes surface as skinned draws.
+    /// Regression guard for the live loop, which renders the athletes as ARTICULATED
+    /// low-poly parts (`install()` without skinning — the same call
+    /// `soccer_penalty_start` makes): the parts reuse the pre-registered low-poly mesh
+    /// library (capsule / sphere / bevel / cube), so re-authoring each frame registers
+    /// **no** new meshes — it just re-spawns instances at the new pose. (Re-baking a
+    /// `MetaSurface` per frame previously dropped the game to ~7 FPS and, because the
+    /// live loop uploads meshes only at bind, those per-frame meshes never reached the
+    /// GPU and the athletes vanished.) This asserts the mesh store stays constant
+    /// across frames and that no skinned draws are emitted (the athletes are static
+    /// articulated draws now).
     #[test]
     fn live_loop_does_not_rebake_meshes_per_frame() {
         use crate::soccer_penalty::penalty_render_meshed::{soccer_meshed_shell, PenaltyMeshedScene};
         let frame = SoccerPenaltyApp::build_stage1();
         let mut app = soccer_meshed_shell();
-        // The live path: skinned athletes (bake once), matching `soccer_penalty_start`.
-        let mut scene = PenaltyMeshedScene::install(&mut app).with_skinned_bodies();
+        // The live path: articulated athletes (no skinning), matching `soccer_penalty_start`.
+        let mut scene = PenaltyMeshedScene::install(&mut app);
         scene.author(&mut app, &frame);
         let outcome0 = app.tick(0);
         let skinned = outcome0.skinned_draws().len();
         let static_draws = outcome0.draws().len();
-        // The one-time bake populates the skinned mesh set; record both stores.
+        // The mesh library is registered once at install; record it.
         let meshes_after_1 = app.mesh_set().len();
-        let skinned_meshes_after_1 = app.skinned_mesh_set().len();
         scene.author(&mut app, &frame);
         let _ = app.tick(1);
         let meshes_after_2 = app.mesh_set().len();
-        let skinned_meshes_after_2 = app.skinned_mesh_set().len();
-        // The athletes render as skinned bodies (one per kit material), not parts.
-        assert!(skinned > 0, "live athletes should draw as skinned bodies, got {skinned}");
-        // Non-athlete world objects still draw statically.
-        assert!(static_draws > 0, "static diorama objects should still draw, got {static_draws}");
-        // The core regression: authoring registers NO new meshes per frame — neither
-        // in the ordinary set nor the skinned set (the bodies baked exactly once).
+        // The athletes render as articulated static parts, not skinned bodies.
+        assert_eq!(skinned, 0, "the live loop emits no skinned draws (articulated parts)");
+        assert!(static_draws > 0, "diorama + athlete parts draw statically, got {static_draws}");
+        // The core regression: authoring registers NO new meshes per frame — the parts
+        // reuse the pre-registered low-poly library.
         assert_eq!(meshes_after_1, meshes_after_2, "live author must not grow the mesh store per frame");
-        assert_eq!(
-            skinned_meshes_after_1, skinned_meshes_after_2,
-            "live author must not re-bake skinned meshes per frame"
-        );
-        assert!(skinned_meshes_after_1 > 0, "the bake must populate the skinned mesh set");
+        assert!(meshes_after_1 > 0, "the mesh library is registered at install");
     }
 }

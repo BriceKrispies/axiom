@@ -179,12 +179,18 @@ pub fn retro_fps_doc(level: Option<&str>) -> axiom_gallery::retro_fps::level::Le
 }
 
 /// The soccer interaction state `shot_tick` ticks into a standard centred power
-/// shot: hold to charge for a few ticks, release, then let the ball fly.
+/// shot: hold to charge (during which the kicker runs up), release, then let the
+/// ball fly. The charge is held long enough for the full authored run-up to play
+/// out on screen before release fires the strike (the kick is a time-based
+/// animation now, not crushed into the power ramp — see
+/// `penalty_kicker::kicker_frame`).
 pub fn soccer_shot_state(
     shot_tick: u32,
 ) -> axiom_gallery::soccer_penalty::PenaltyInteractionState {
     use axiom_gallery::soccer_penalty::{PenaltyInputIntent, PenaltyInteractionState};
-    const CHARGE_TICKS: u32 = 8;
+    // Hold ~ the full run-up (sprint → plant → backswing → hip_drive) before the
+    // strike; power maxes early (~13 ticks) but the run-up keeps striding while held.
+    const CHARGE_TICKS: u32 = 50;
     (0..shot_tick).fold(PenaltyInteractionState::start(), |s, t| {
         let intent = if t < CHARGE_TICKS {
             PenaltyInputIntent::charging(0, 0)

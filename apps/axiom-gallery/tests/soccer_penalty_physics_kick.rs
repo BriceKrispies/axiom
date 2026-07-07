@@ -1,3 +1,9 @@
+#![cfg(feature = "experimental_physical_humanoid_kicker")]
+//! EXPERIMENTAL — only compiled with `--features experimental_physical_humanoid_kicker`.
+//! The default kicker is the authored/kinematic pose; this proves the *experimental*
+//! physics-backed path still runs. See `tests/soccer_penalty_kick_animation.rs` for
+//! the default-path proof.
+//!
 //! Proof that the soccer penalty game's kicker + ball now run on the
 //! **physics-backed authored motion pipeline**:
 //!

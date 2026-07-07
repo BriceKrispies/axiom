@@ -1,6 +1,17 @@
-# Physics-backed penalty kick
+# Physics-backed penalty kick — EXPERIMENTAL (disabled by default)
 
-The soccer penalty game's kicker animation and ball flight run on the engine's
+> **This documents the experimental full-humanoid kicker, which is NOT the default.**
+> The default kicker is the authored/kinematic pose — see
+> [`KICK_ANIMATION.md`](KICK_ANIMATION.md). The path below is compiled in only with
+> `--features experimental_physical_humanoid_kicker` and, as shipped, renders a broken
+> (inverted / orphan-capsule) kicker because it poses the figure's root box from a
+> free-integrating dynamic pelvis body. See *Why the physics humanoid is disabled* in
+> `KICK_ANIMATION.md` for the root cause and the invariants required before it can
+> become the default again. It is kept, behind the feature, so its binding can be
+> proven correct later; its `axiom-physical-animation` bridge keeps its own always-on,
+> fully-covered module tests.
+
+The experimental kicker animation and ball flight run on the engine's
 **procedural-animation authoring** system, executed through the **physics**
 module. This replaces the old ad-hoc path (a baked `kick_right.clip` posed by a
 frame index, and a closed-form parametric ball arc).
