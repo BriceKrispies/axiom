@@ -81,9 +81,11 @@ export const DEMOS = [
       "physics-arc ball flight, and goal / save / miss / post scoring over a five-round " +
       "session. Aim with ←/→ or A/D, set height with ↑/↓ or W/S, hold Space/K to charge " +
       "power and release to shoot, Enter to continue between rounds, R to reset.",
-    // Self-hosted: a standalone @axiom/game app on its own axiom-game-runtime wasm
-    // (not the merged gallery bundle), packaged self-contained into
-    // dist/soccer-penalty-kick/index.html by `make gallery-build` (the gallery-soccer step).
+    // Self-hosted like growth/quintet/etc.: its page is a COMMITTED file under
+    // web/soccer-penalty-kick/ that package_gallery copies verbatim into dist/. But
+    // this game runs on its own @axiom/game SDK + axiom-game-runtime wasm (not the
+    // gallery bundle), so that page is a SINGLE self-contained HTML (wasm + SDK + app
+    // inlined) — regenerate it with `make gallery-soccer` after editing the app.
     page: "soccer-penalty-kick/index.html",
   },
   {
