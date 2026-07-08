@@ -265,17 +265,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-filmstrip"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-host",
- "axiom-shot",
- "serde",
- "toml",
-]
-
-[[package]]
 name = "axiom-forest"
 version = "0.1.0"
 dependencies = [
@@ -309,13 +298,10 @@ dependencies = [
  "axiom",
  "axiom-agent",
  "axiom-agent-harness",
- "axiom-animation",
- "axiom-animation-authoring",
  "axiom-biome",
  "axiom-canvas2d-backend",
  "axiom-debug-overlay",
  "axiom-entropy",
- "axiom-figure",
  "axiom-fp-controller",
  "axiom-geosphere",
  "axiom-gpu-backend",
@@ -329,14 +315,10 @@ dependencies = [
  "axiom-math",
  "axiom-noise",
  "axiom-perception",
- "axiom-physical-animation",
  "axiom-physics",
  "axiom-planetgen",
  "axiom-proc",
- "axiom-proc-mesh",
- "axiom-proc-texture",
  "axiom-proc-validate",
- "axiom-recipe",
  "axiom-recording",
  "axiom-runtime",
  "axiom-scatter",

@@ -38,7 +38,6 @@ pub use gravix::gravix_start;
 pub mod harness;
 pub mod forest_walk;
 pub mod generia;
-pub mod soccer_penalty;
 
 /// Build the rotating-cube demo's renderable core as a headless [`RunningApp`],
 /// for the native capture harness (`axiom-shot`). The scene author
@@ -59,7 +58,7 @@ pub fn stress_cubes_core(count: u32) -> axiom::prelude::RunningApp {
 /// deterministic sim. This is the no-iframe successor to the old gallery
 /// triptych; a host (the workspace dev console) creates three canvases and calls
 /// this. Only the engine-`App` 3D demos are comparable (`quintet` is a bespoke
-/// Canvas 2D game, `retro_fps`/`soccer`/`netplay` build a `RunningApp` with their own
+/// Canvas 2D game, `retro_fps`/`netplay` build a `RunningApp` with their own
 /// input/relay wiring); an unknown or non-comparable `demo_id` is a no-op.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]

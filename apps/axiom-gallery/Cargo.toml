@@ -50,14 +50,6 @@ name = "visual-target"
 path = "src/growth/bin/visual_target.rs"
 required-features = ["visual-target"]
 
-# Soccer-penalty's native agent driver: plays a full deterministic 5-round
-# session through axiom-agent and prints a per-round report. Native-only,
-# behind `soccer-penalty-agent`.
-[[bin]]
-name = "soccer-penalty-agent"
-path = "src/soccer_penalty/bin/agent.rs"
-required-features = ["soccer-penalty-agent"]
-
 [features]
 # The Visual Target 001 diorama runner + convergence comparator. Reuses the growth
 # capture backends (offscreen GPU + software Canvas 2D) and the png codec; all
@@ -82,21 +74,8 @@ growth-agent = [
     "dep:axiom-canvas2d-backend",
 ]
 
-# The EXPERIMENTAL physics-backed full-humanoid kicker (`penalty_physics_kick` +
-# `penalty_muscle`), which drives the authored kick through the
-# `axiom-physical-animation` bridge over real `axiom-physics` bodies. DISABLED by
-# default: it poses the figure's root box from a free-integrating dynamic pelvis body
-# that drifts/tumbles away from the kinematically-driven limbs (an inverted body + an
-# orphan capsule). The default kicker is the authored/kinematic `penalty_kick_pose`.
-# See src/soccer_penalty/docs/KICK_ANIMATION.md for the invariants it must satisfy
-# before it can become the default again.
-experimental_physical_humanoid_kicker = ["dep:axiom-physical-animation"]
-
 # Zanzoban agent driver: play the grid puzzle through axiom-agent (native-only).
 zanzoban-agent = ["dep:axiom-agent"]
-# Soccer-penalty's headless agent driver. `axiom-agent` is the only optional dep
-# (kernel/runtime are always-on); native-only, never in the wasm bundle.
-soccer-penalty-agent = ["dep:axiom-agent"]
 
 # retro FPS's headless agent server: the neutral-contract agent loop + perception
 # adapter + native HTTP/WebSocket bridge. Native-only optional deps.
@@ -158,12 +137,6 @@ axiom-planetgen = { path = "../../modules/axiom-planetgen" }
 # are thin wrappers over this layer.
 axiom-hydrology = { path = "../../crates/axiom-hydrology" }
 axiom-proc = { path = "../../crates/axiom-proc" }
-# The recipe procedural pipeline (recipe graph + texture/mesh operators). The
-# soccer-penalty demo generates ALL its meshes and textures from recipes baked by
-# these layers — nothing hand-authored — mirroring examples/recipes/generated_micro_fps.
-axiom-recipe = { path = "../../crates/axiom-recipe" }
-axiom-proc-texture = { path = "../../crates/axiom-proc-texture" }
-axiom-proc-mesh = { path = "../../crates/axiom-proc-mesh" }
 # Generic bounded rejection-sampling harness (sample_until_valid): the growth
 # preset genome sampler draws candidates through it until one satisfies the band.
 axiom-proc-validate = { path = "../../crates/axiom-proc-validate" }
@@ -185,17 +158,6 @@ axiom-world = { path = "../../modules/axiom-world" }
 # grid config + a height callback in, positions/normals/indices out. The app
 # decorates the neutral mesh with its colour/vista/biome content.
 axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
-axiom-animation = { path = "../../modules/axiom-animation" }
-axiom-figure = { path = "../../modules/axiom-figure" }
-# The deterministic procedural-animation authoring vocabulary. The soccer penalty
-# game authors its kick as a 9-phase `SoccerPenaltyKickMotionSpec` through
-# `AnimationAuthoringApi` and, by default, evaluates it kinematically
-# (`SoccerPenaltyKickMotionSpec` → `sample` → `frame_joint_world`) to pose the kicker.
-axiom-animation-authoring = { path = "../../modules/axiom-animation-authoring" }
-# The physics-backed execution bridge (`PhysicalAnimationApi` over real axiom-physics
-# bodies/impulse). Used ONLY by the experimental full-humanoid kicker, so it is
-# optional and pulled in only by `experimental_physical_humanoid_kicker`.
-axiom-physical-animation = { path = "../../modules/axiom-physical-animation", optional = true }
 # Hand-editable level/data format used by several demos' codecs (zanzoban,
 # rotating-cube's data-package test) and the growth agent's tag/directive TOML.
 serde = { version = "1", features = ["derive"] }

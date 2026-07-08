@@ -33,6 +33,16 @@ const APP = process.env.AXIOM_DEV_APP ?? "axiom-game-runtime";
 const WEB_ROOT = join(REPO_ROOT, "apps", APP, "web");
 const SRC_DIR = join(WEB_ROOT, "src");
 const TSCONFIG = join(WEB_ROOT, "tsconfig.json");
+// The active app's compiled-TypeScript output. Relative imports INSIDE these
+// modules are version-stamped at serve time (see `serveFile`) so a hot reload
+// re-fetches the WHOLE module graph, not just the `game.js` entry the harness
+// re-imports — otherwise an edit to any non-entry module (e.g. scene.ts / kicker.ts)
+// serves STALE cached JS until a hard refresh. Single-module apps are unaffected.
+const DIST_DIR = join(REPO_ROOT, "apps", APP, "web", "dist");
+// A quoted RELATIVE `.js` specifier (`"./x.js"`, `"../a/b.js"`) — an import in a
+// compiled dist module. Absolute (`/dist`, `/vendor`, `/pkg`) and bare
+// (`@axiom/game`) specifiers are left alone (importmap / separate routes own them).
+const RELATIVE_IMPORT = /(["'])(\.\.?\/[^"']+?\.js)\1/g;
 const VENDOR_DIR = join(REPO_ROOT, "packages", "axiom-game", "dist");
 // The shared wasm engine: built once into the game-runtime app's web/pkg and
 // served at /pkg for whichever app is active (the runtime is game-agnostic).
@@ -107,7 +117,16 @@ const serveFile = async (root, relPath, res) => {
   try {
     const info = await stat(full);
     const target = info.isDirectory() ? join(full, "index.html") : full;
-    const body = await readFile(target);
+    let body = await readFile(target);
+    // Cache-bust the relative imports of a compiled dist module with the current
+    // reload version, so re-importing `game.js?v=N` pulls a fresh whole graph
+    // (every sibling module re-fetches, not just the entry).
+    if (extname(target) === ".js" && target.startsWith(DIST_DIR + sep)) {
+      body = Buffer.from(
+        body.toString("utf8").replace(RELATIVE_IMPORT, (_m, quote, spec) => `${quote}${spec}?v=${version}${quote}`),
+        "utf8",
+      );
+    }
     res.writeHead(200, {
       "Content-Type": MIME[extname(target)] ?? "application/octet-stream",
       "Cache-Control": "no-store",

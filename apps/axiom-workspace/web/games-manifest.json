@@ -18,14 +18,6 @@
     "compare": true
   },
   {
-    "id": "soccer-penalty",
-    "title": "Soccer Penalty (retro 32-bit)",
-    "kind": "inline",
-    "bundle": "/gallery/axiom-loader.js",
-    "entry": "soccer_penalty_start",
-    "canvas": "axiom-soccer-penalty-canvas"
-  },
-  {
     "id": "physics-crucible",
     "title": "Physics Crucible",
     "kind": "inline",

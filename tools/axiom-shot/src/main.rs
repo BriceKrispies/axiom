@@ -28,7 +28,7 @@
 //! Usage:
 //!   cargo run -p axiom-shot [--features offscreen] -- \
 //!     [--app <name>|list] [--backend gpu|canvas2d] [--tick N] [--out PATH] \
-//!     [--quality 0..3] [--frame N] [--cubes N] [--shot-tick N] [--level PATH] \
+//!     [--quality 0..3] [--frame N] [--cubes N] [--level PATH] \
 //!     [--script "ticks:key=val,...;..."] [--pose "x,z,yaw,pitch"]
 
 use axiom::prelude::*;
@@ -59,12 +59,8 @@ fn main() {
 
     let params = BuildParams {
         level: flag(&args, "--level"),
-        shot_tick: flag(&args, "--shot-tick").and_then(|s| s.parse().ok()),
         frame: flag(&args, "--frame").and_then(|f| f.parse().ok()).unwrap_or(0),
         stress_count: flag(&args, "--cubes").and_then(|c| c.parse().ok()).unwrap_or(2000),
-        // axiom-shot's binary doesn't expose goalie debug overlays; that seam is
-        // driven by `axiom-filmstrip --debug-overlays`.
-        soccer_debug: false,
     };
 
     // `--pose "x,z,yaw,pitch"` (retro FPS only): snap controller 0 to an absolute
@@ -103,11 +99,9 @@ fn main() {
     }
     let outcome = outcome.expect("at least one frame is ticked");
 
-    // The soccer-penalty app carries a retro 32-bit render profile AND a cinematic
-    // grade (exposure/contrast/saturation), applied before the retro quantize.
-    let retro_32bit =
-        (app == "soccer-penalty").then(axiom_host::FrameRetro32BitProfile::retro_32bit);
-    let postprocess = (app == "soccer-penalty").then(axiom_host::FramePostProcess::cinematic);
+    // No registered slice carries a retro/cinematic post profile today.
+    let retro_32bit: Option<axiom_host::FrameRetro32BitProfile> = None;
+    let postprocess: Option<axiom_host::FramePostProcess> = None;
 
     let (pixels, w, h) = render(
         &backend, &meshes, &skinned_meshes, &materials, &outcome, quality, retro_32bit, postprocess,

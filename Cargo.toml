@@ -112,11 +112,6 @@ members = [
     # `--features offscreen`. As a tool it loads the apps it renders (the
     # sanctioned capture-host role — see CAPTURE_HARNESS_TOOLS in xtask).
     "tools/axiom-shot",
-    # The filmstrip capture tool: orchestrates repeated axiom-shot captures across a
-    # tick/marker list into one labeled contact-sheet PNG for agent/human review. Its
-    # GPU arm is behind the same NON-DEFAULT `offscreen` feature (passed through to
-    # axiom-shot), so the coverage/dylint gates never pull the native-wgpu arm.
-    "tools/axiom-filmstrip",
 ]
 
 [workspace.package]

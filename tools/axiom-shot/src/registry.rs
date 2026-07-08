@@ -28,16 +28,10 @@ fn ch(v: f32) -> Ratio {
 pub struct BuildParams {
     /// `--level PATH` for the retro FPS slice (else its built-in default level).
     pub level: Option<String>,
-    /// `--shot-tick N` for the soccer slice (a scripted power shot N ticks in).
-    pub shot_tick: Option<u32>,
     /// `--frame N` for the animation-lab posed-figure slice.
     pub frame: u32,
     /// `--cubes N` for the stress-cubes slice.
     pub stress_count: u32,
-    /// Overlay the soccer slice's goalie save-volume debug markers (the existing
-    /// `PenaltyGoalieDebugDescriptor::ENABLED` path). Off by default — byte-identical
-    /// to a normal build. Used by `axiom-filmstrip --debug-overlays`.
-    pub soccer_debug: bool,
 }
 
 /// One registered renderable slice: a stable `name` and a builder for its
@@ -71,7 +65,6 @@ pub fn registry() -> Vec<SliceEntry> {
             name: "physics-crucible",
             build: |_| axiom_gallery::physics_crucible::build_physics_crucible(),
         },
-        SliceEntry { name: "soccer-penalty", build: build_soccer },
         SliceEntry { name: "retro-fps", build: build_retro_fps },
         SliceEntry { name: "animation-lab", build: build_posed_figure },
         SliceEntry { name: "gravix", build: |_| axiom_gallery::gravix::build_gravix() },
@@ -93,26 +86,6 @@ pub fn names() -> Vec<&'static str> {
 
 fn build_retro_fps(p: &BuildParams) -> RunningApp {
     axiom_gallery::retro_fps::build_retro_fps_app(&retro_fps_doc(p.level.as_deref())).0
-}
-
-fn build_soccer(p: &BuildParams) -> RunningApp {
-    use axiom_gallery::soccer_penalty::{
-        PenaltyGoalieDebugDescriptor, PenaltyInteractionState, SoccerPenaltyApp,
-    };
-    // `--shot-tick N` renders a scripted power shot N ticks in (kick animation +
-    // ball flight + keeper dive visible); without it, the start (stage-1) state.
-    let state = p
-        .shot_tick
-        .map(soccer_shot_state)
-        .unwrap_or_else(PenaltyInteractionState::start);
-    // `soccer_debug` overlays the goalie save-volume markers (identical to
-    // `build_frame`/`build_stage1` when off — debug never affects gameplay).
-    let debug = [
-        PenaltyGoalieDebugDescriptor::DISABLED,
-        PenaltyGoalieDebugDescriptor::ENABLED,
-    ][usize::from(p.soccer_debug)];
-    let diorama = SoccerPenaltyApp::build_frame_with_debug(&state, debug);
-    axiom_gallery::soccer_penalty::penalty_render_meshed::soccer_meshed_app(diorama)
 }
 
 /// L3: the animation-lab posed-figure scene captured as REAL pixels (not SVG).
@@ -177,33 +150,6 @@ pub fn retro_fps_doc(level: Option<&str>) -> axiom_gallery::retro_fps::level::Le
         ),
         None => axiom_gallery::retro_fps::level::LevelDoc::default(),
     }
-}
-
-/// The soccer interaction state `shot_tick` ticks into a standard centred power
-/// shot: hold to charge (during which the kicker runs up), release, then let the
-/// ball fly. The charge is held long enough for the full authored run-up to play
-/// out on screen before release fires the strike (the kick is a time-based
-/// animation now, not crushed into the power ramp — see
-/// `penalty_kicker::kicker_frame`).
-pub fn soccer_shot_state(
-    shot_tick: u32,
-) -> axiom_gallery::soccer_penalty::PenaltyInteractionState {
-    use axiom_gallery::soccer_penalty::{PenaltyInputIntent, PenaltyInteractionState};
-    // Hold ~ the full run-up (sprint → plant → backswing → hip_drive) before the
-    // strike; power maxes early (~13 ticks) but the run-up keeps striding while held.
-    // The kicker plays the run-up at a slowed rate (RUNUP_PLAYBACK_RATE ~0.5) for a
-    // smooth, deliberate stride, so the hold spans ~twice the authored run-up ticks.
-    const CHARGE_TICKS: u32 = 96;
-    (0..shot_tick).fold(PenaltyInteractionState::start(), |s, t| {
-        let intent = if t < CHARGE_TICKS {
-            PenaltyInputIntent::charging(0, 0)
-        } else if t == CHARGE_TICKS {
-            PenaltyInputIntent::releasing()
-        } else {
-            PenaltyInputIntent::neutral()
-        };
-        s.advance(intent)
-    })
 }
 
 /// Author the Stage-2/3 textured + lit showcase: three spinning checker cubes, a

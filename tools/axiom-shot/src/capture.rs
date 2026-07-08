@@ -83,9 +83,8 @@ pub fn render_gpu(
         &skinned_draws,
         outcome.clear_color(),
         outcome.sdf_scene(),
-        // The app authors the frame's hemisphere ambient (daylight for the soccer
-        // pitch); honour it instead of forcing the dim engine default so the
-        // screenshot matches what the app actually lit.
+        // The app authors the frame's hemisphere ambient; honour it instead of
+        // forcing the dim engine default so the screenshot matches what the app lit.
         outcome.ambient(),
         retro_32bit,
         // Full-fidelity reference render; volumetrics/post-process aren't carried

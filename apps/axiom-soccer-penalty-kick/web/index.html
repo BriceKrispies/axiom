@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Soccer Penalty (retro 32-bit), authored purely in TypeScript on @axiom/game</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 12px;
+        padding:
+          max(16px, env(safe-area-inset-top))
+          max(16px, env(safe-area-inset-right))
+          max(16px, env(safe-area-inset-bottom))
+          max(16px, env(safe-area-inset-left));
+        font: 14px/1.5 system-ui, sans-serif; background: #0c0d10; color: #d7dbe2;
+      }
+      h1 { font-size: 15px; font-weight: 600; margin: 0; }
+      /* The canvas id MUST match the id the harness passes to boot()/bindSurface. */
+      #axiom-canvas {
+        width: 960px; height: 600px; max-width: 100%;
+        border: 1px solid #2a2e36; border-radius: 6px; background: #000;
+        touch-action: none; cursor: crosshair;
+      }
+      #stage { position: relative; line-height: 0; max-width: 100%; }
+      /* The aim reticle, positioned over the goal by the HUD model. */
+      #reticle {
+        position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px;
+        border: 2px solid #ffe25a; border-radius: 50%; box-shadow: 0 0 6px #000;
+        pointer-events: none; opacity: 0.9;
+      }
+      #reticle::after {
+        content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px;
+        margin: -2px 0 0 -2px; background: #ffe25a; border-radius: 50%;
+      }
+      /* The result / session banner overlay, centred on the stage. */
+      #banner {
+        position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%);
+        font: 800 46px/1 ui-monospace, monospace; letter-spacing: 2px; color: #fff;
+        text-shadow: 0 3px 0 #000, 0 0 14px rgba(0,0,0,0.8); pointer-events: none;
+        opacity: 0; transition: opacity .12s; text-align: center;
+      }
+      #banner small { display: block; font-size: 18px; letter-spacing: 1px; color: #ffe25a; margin-top: 6px; }
+      #banner.show { opacity: 1; }
+      #hud {
+        display: flex; gap: 22px; width: 960px; max-width: 100%;
+        font-family: ui-monospace, monospace; justify-content: center; align-items: center;
+      }
+      #hud b { color: #d8e6ff; font-weight: 600; }
+      #power-wrap { width: 140px; height: 12px; border: 1px solid #3a3f49; border-radius: 6px; overflow: hidden; background: #16181d; }
+      #power-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#3fd17f,#ffe25a,#e07a7a); transition: width .05s; }
+      #instruction { color: #ffe25a; font-weight: 700; min-width: 84px; text-align: center; }
+      #prompt { color: #7fd17f; font-weight: 700; }
+      #status { font-family: ui-monospace, monospace; transition: color .2s; }
+      .ok { color: #7fd17f; } .err { color: #e07a7a; } .flash { color: #7CFFB2 !important; }
+    </style>
+
+    <!--
+      No bundler: the @axiom/game SDK loads as native ES modules from its dist/
+      build (import map below). The soccer game + harness are authored in TypeScript
+      and emitted to /dist by the dev server's tsgo compile; the shared
+      axiom-game-runtime wasm is served at /pkg. There is NO Rust in this app — the
+      whole game is the TypeScript in web/src/, driving the engine through the SDK.
+    -->
+    <script type="importmap">
+      { "imports": { "@axiom/game": "/vendor/axiom-game/index.js" } }
+    </script>
+  </head>
+  <body>
+    <h1>Axiom — Soccer Penalty (retro 32-bit), authored purely in TypeScript on @axiom/game</h1>
+    <div id="stage">
+      <canvas id="axiom-canvas" width="960" height="600"></canvas>
+      <div id="reticle"></div>
+      <div id="banner"><span id="banner-text"></span><small id="banner-sub"></small></div>
+    </div>
+    <div id="hud">
+      <span>SCORE <b id="score">0</b></span>
+      <span>ROUND <b id="round">1 / 5</b></span>
+      <span>BEST <b id="best">0</b></span>
+      <span id="power-label">POWER</span>
+      <div id="power-wrap"><div id="power-fill"></div></div>
+      <span id="instruction">AIM</span>
+      <span id="prompt"></span>
+    </div>
+    <div id="status">booting…</div>
+    <p style="font-family: ui-monospace, monospace; color: #6b7686; margin: 0;">
+      ←/→ or A/D aim · ↑/↓ or W/S height · hold <b>Space/K</b> to charge, release to shoot ·
+      <b>Enter</b> continue · <b>R</b> reset — edit
+      <b>apps/axiom-soccer-penalty-kick/web/src/*.ts</b> and save to re-run live
+    </p>
+
+    <script type="module" src="/dist/harness.js"></script>
+  </body>
+</html>
