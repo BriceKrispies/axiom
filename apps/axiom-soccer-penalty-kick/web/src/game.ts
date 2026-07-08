@@ -21,6 +21,7 @@ import { goalieRenderWorld } from "./goalie.ts";
 import { kickerFrameTick } from "./kicker.ts";
 import { type HudModel, readHudModel } from "./hud.ts";
 import { BALL_RADIUS } from "./scene-constants.ts";
+import { mountTouchControls, touchInput } from "./touch-controls.ts";
 
 const bindKeys = (): void => {
   bindAction("aimLeft", ["ArrowLeft", "KeyA"]);
@@ -32,15 +33,23 @@ const bindKeys = (): void => {
   bindAction("continue", ["Enter"]);
 };
 
-const readIntent = (sim: Sim): PenaltyInputIntent =>
-  makeIntent({
-    aimXAxis: (Number(sim.input.isDown("aimRight")) - Number(sim.input.isDown("aimLeft"))) * 100,
-    aimYAxis: (Number(sim.input.isDown("aimUp")) - Number(sim.input.isDown("aimDown"))) * 100,
-    chargePressed: sim.input.isDown("shoot"),
-    releasePressed: sim.input.released("shoot"),
-    resetPressed: sim.input.pressed("reset"),
-    continuePressed: sim.input.pressed("continue"),
+// Fold the keyboard actions and the on-screen touch controls into one intent. The
+// joystick supplies analog aim when deflected (else the keyboard axis is used); the
+// SHOOT button's hold/release joins the keyboard shoot; a SHOOT release also
+// continues between rounds; the RESET button joins the R key.
+const readIntent = (sim: Sim): PenaltyInputIntent => {
+  const keyX = (Number(sim.input.isDown("aimRight")) - Number(sim.input.isDown("aimLeft"))) * 100;
+  const keyY = (Number(sim.input.isDown("aimUp")) - Number(sim.input.isDown("aimDown"))) * 100;
+  const shootReleased = touchInput.takeShootReleased();
+  return makeIntent({
+    aimXAxis: touchInput.aimX !== 0 ? touchInput.aimX : keyX,
+    aimYAxis: touchInput.aimY !== 0 ? touchInput.aimY : keyY,
+    chargePressed: sim.input.isDown("shoot") || touchInput.shootHeld,
+    releasePressed: sim.input.released("shoot") || shootReleased,
+    resetPressed: sim.input.pressed("reset") || touchInput.takeReset(),
+    continuePressed: sim.input.pressed("continue") || shootReleased,
   });
+};
 
 /** The flight progress [0,1] the kicker's strike-through maps against. */
 const flightProgress = (session: SessionState): number => {
@@ -90,6 +99,7 @@ let session: SessionState = sessionNew();
 onFixedUpdate((sim: Sim): void => {
   if (handles === undefined) {
     bindKeys();
+    mountTouchControls();
     handles = buildScene();
     session = sessionNew();
   }

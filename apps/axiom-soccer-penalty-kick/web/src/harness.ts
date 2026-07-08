@@ -19,7 +19,7 @@
  */
 
 import { boot } from "/vendor/axiom-game/boot.js";
-import { type Frame, createGame, onRender } from "@axiom/game";
+import { createGame, onRender } from "@axiom/game";
 
 import initWasm, { WasmGame } from "/pkg/axiom_game_runtime.js";
 
@@ -60,8 +60,6 @@ const el = (id: string): HTMLElement => document.getElementById(id) as HTMLEleme
 
 const boot_ = async (): Promise<void> => {
   const canvas = el("axiom-canvas") as HTMLCanvasElement;
-  const status = el("status");
-  const stage = el("stage");
   const reticle = el("reticle");
   const banner = el("banner");
   const bannerText = el("banner-text");
@@ -78,7 +76,7 @@ const boot_ = async (): Promise<void> => {
 
   await initWasm();
 
-  const updateHud = (hud: Hud, tick: number): void => {
+  const updateHud = (hud: Hud): void => {
     fields.score.textContent = String(hud.score);
     fields.round.textContent = `${hud.roundCurrent} / ${hud.roundTotal}`;
     fields.best.textContent = String(hud.best);
@@ -101,12 +99,7 @@ const boot_ = async (): Promise<void> => {
     } else {
       banner.classList.remove("show");
     }
-
-    status.textContent = `live · tick ${tick}`;
-    status.className = "ok";
   };
-  // The stage sizes the reticle overlay to the canvas box.
-  void stage;
 
   let teardown: (() => void) | undefined;
   const load = async (version: number): Promise<void> => {
@@ -115,7 +108,7 @@ const boot_ = async (): Promise<void> => {
     const app = createGame({ fixedHz: FIXED_HZ, seed: SEED, surface: CANVAS_ID });
     const mod = (await import(`/dist/game.js?v=${version}`)) as SoccerModule;
 
-    onRender((frame: Frame): void => updateHud(mod.readHud(), frame.tick));
+    onRender((): void => updateHud(mod.readHud()));
 
     app.start();
     // The wasm-bindgen `WasmGame` satisfies every boot seam structurally; the cast
@@ -137,13 +130,15 @@ const boot_ = async (): Promise<void> => {
 
   await load(0);
 
-  const events = new EventSource("/events");
-  events.addEventListener("reload", (event: MessageEvent<string>): void => {
-    void load(Number(event.data)).then((): void => {
-      status.classList.add("flash");
-      globalThis.setTimeout((): void => status.classList.remove("flash"), 400);
+  // Live hot-reload is a dev-server convenience only; skip it on a static host
+  // (GitHub Pages / file://) where the /events SSE endpoint does not exist.
+  const isDev = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (isDev) {
+    const events = new EventSource("/events");
+    events.addEventListener("reload", (event: MessageEvent<string>): void => {
+      void load(Number(event.data));
     });
-  });
+  }
 };
 
 void boot_();
