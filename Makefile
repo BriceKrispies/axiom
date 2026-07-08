@@ -25,6 +25,15 @@ WORKSPACE_PORT   ?= 8123
 NETPLAY_VENDOR   := $(GALLERY_WEB)/netplay/vendor/axiom-client
 NETPLAY_PORT     ?= 8000
 
+# The TypeScript soccer-penalty game (apps/axiom-soccer-penalty-kick): a SELF-HOSTED
+# gallery demo. Unlike the merged Rust demos it runs on its own @axiom/game SDK +
+# axiom-game-runtime wasm (not the gallery bundle), so `gallery-soccer` builds those,
+# compiles the app, and packages it self-contained into dist/soccer-penalty-kick/.
+SOCCER_DIR            := apps/axiom-soccer-penalty-kick
+GAME_RUNTIME_CRATE    := axiom-game-runtime
+GAME_RUNTIME_PKG      := apps/axiom-game-runtime/web/pkg
+GAME_RUNTIME_ARTIFACT := target/$(WASM_TARGET)/release/axiom_game_runtime.wasm
+
 # The runtime asset-streaming demo (its own standalone app — not part of the gallery).
 ASSETSTREAM_DIR      := apps/axiom-asset-stream-demo
 ASSETSTREAM_CRATE    := axiom-asset-stream-demo
@@ -36,7 +45,7 @@ ASSETSTREAM_PORT     ?= 8000
 
 .PHONY: workspace workspace-build \
 	gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
-	gallery-debug-build render-bench \
+	gallery-debug-build gallery-soccer render-bench \
 	netplay netplay-build netplay-server netplay-dotnet relay retro-fps-hot \
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
@@ -123,6 +132,21 @@ gallery-build:
 	npm --prefix packages/axiom-client run build
 	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_VENDOR)'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
 	uv run --no-project python scripts/package_gallery.py
+	$(MAKE) gallery-soccer
+
+# Build the standalone TypeScript soccer-penalty game into the already-assembled
+# gallery dist/ as a self-contained page. It runs on its OWN @axiom/game SDK +
+# axiom-game-runtime wasm (not the gallery bundle), so this builds the SDK, builds
+# and binds the runtime wasm, compiles the app with tsgo, and inlines the whole
+# graph into dist/soccer-penalty-kick/index.html (the gallery grid links it via its
+# DEMOS `page` entry). Runs AFTER package_gallery, which recreates dist/.
+gallery-soccer:
+	npm --prefix packages/axiom-game install --no-audit --no-fund
+	npm --prefix packages/axiom-game run build
+	cargo build -p $(GAME_RUNTIME_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
+	npm --prefix packages/axiom-game exec -- tsgo -p $(SOCCER_DIR)/web/tsconfig.json
+	node scripts/package_soccer_penalty_singlefile.mjs $(DIST_DIR)/soccer-penalty-kick/index.html
 
 # THE MAIN DRIVER. One command to browse the whole engine surface during
 # development: it builds the merged browser app, assembles the static gallery into
@@ -147,6 +171,7 @@ gallery-serve:
 gallery-fast-build:
 	npm --prefix scripts/packaging install --no-audit --no-fund
 	uv run --no-project python scripts/package_gallery.py --fast
+	$(MAKE) gallery-soccer
 
 gallery-fast: gallery-fast-build
 	@echo Fast gallery (wasm-only) built into $(DIST_DIR)/. Serving at http://localhost:$(GALLERY_PORT) - Ctrl+C to stop.
@@ -172,6 +197,7 @@ workspace-build:
 gallery-debug-build:
 	npm --prefix scripts/packaging install --no-audit --no-fund
 	uv run --no-project python scripts/package_gallery.py --debug
+	$(MAKE) gallery-soccer
 
 # RENDER BENCHMARK: build+serve the gallery, auto-walk a demo (default generia) with
 # the agent, and report FPS + phase breakdown from the Canvas2D telemetry. Pass extra

@@ -102,7 +102,7 @@ const boot_ = async (): Promise<void> => {
       banner.classList.remove("show");
     }
 
-    status.textContent = `live · TypeScript-only · tick ${tick}`;
+    status.textContent = `live · tick ${tick}`;
     status.className = "ok";
   };
   // The stage sizes the reticle overlay to the canvas box.

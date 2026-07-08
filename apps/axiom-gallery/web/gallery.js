@@ -72,6 +72,21 @@ export const DEMOS = [
     ],
   },
   {
+    id: "soccer-penalty-kick",
+    title: "Soccer Penalty",
+    blurb: "Take penalty kicks against a diving keeper — aim, charge power, and shoot across five rounds.",
+    desc:
+      "A retro 32-bit penalty shootout on the engine: a fixed-camera stadium diorama " +
+      "with a run-up-and-strike kicker, a diving goalie with real save volumes, " +
+      "physics-arc ball flight, and goal / save / miss / post scoring over a five-round " +
+      "session. Aim with ←/→ or A/D, set height with ↑/↓ or W/S, hold Space/K to charge " +
+      "power and release to shoot, Enter to continue between rounds, R to reset.",
+    // Self-hosted: a standalone @axiom/game app on its own axiom-game-runtime wasm
+    // (not the merged gallery bundle), packaged self-contained into
+    // dist/soccer-penalty-kick/index.html by `make gallery-build` (the gallery-soccer step).
+    page: "soccer-penalty-kick/index.html",
+  },
+  {
     id: "stress-cubes",
     title: "Stress (N cubes)",
     blurb: "A field of N spinning cubes — a live load test you can watch.",
