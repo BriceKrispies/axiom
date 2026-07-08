@@ -89,6 +89,23 @@ export const DEMOS = [
     page: "soccer-penalty-kick/index.html",
   },
   {
+    id: "signal-runner",
+    title: "Signal Runner",
+    blurb: "A downhill signal courier: steer a hover-sled down a mountain ruin, grab shards, beat the storm.",
+    desc:
+      "A third-person downhill traversal game authored purely in TypeScript on the engine's " +
+      "2D draw2d surface: a hooded courier rides a hover-sled down a procedurally generated, " +
+      "winding mountain-ruin path in a flat-shaded low-poly world. Steer with A/D or ←/→, hold " +
+      "SHIFT to brake into turns, collect 20 cyan signal shards, trip 3 pressure plates, and dodge " +
+      "rocks, fallen columns, and drone hazards. Spend charge on BOOST (Space/1), SHIELD (2), " +
+      "PULSE (3), and a helper DRONE (4). Restore the final beacon with ENTER before the purple " +
+      "storm wall — a 2:30 countdown — overruns the relay. Fully deterministic from its seed.",
+    // Self-hosted single-file page (its own @axiom/game SDK + axiom-game-runtime wasm,
+    // 2D draw2d present path), COMMITTED under web/signal-runner/ and copied verbatim
+    // into dist/ by package_gallery — regenerate with `make gallery-signal-runner`.
+    page: "signal-runner/index.html",
+  },
+  {
     id: "stress-cubes",
     title: "Stress (N cubes)",
     blurb: "A field of N spinning cubes — a live load test you can watch.",
