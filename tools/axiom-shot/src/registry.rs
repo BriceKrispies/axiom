@@ -68,6 +68,13 @@ pub fn registry() -> Vec<SliceEntry> {
         SliceEntry { name: "retro-fps", build: build_retro_fps },
         SliceEntry { name: "animation-lab", build: build_posed_figure },
         SliceEntry { name: "gravix", build: |_| axiom_gallery::gravix::build_gravix() },
+        SliceEntry {
+            name: "sports-physics-lab",
+            // `--frame 1` photographs the third-person view (the player's body).
+            build: |p| {
+                axiom_gallery::sports_physics_lab::build_sports_physics_lab_posed(p.frame > 0)
+            },
+        },
     ]
 }
 

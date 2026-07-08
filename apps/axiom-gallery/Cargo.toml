@@ -158,6 +158,11 @@ axiom-world = { path = "../../modules/axiom-world" }
 # grid config + a height callback in, positions/normals/indices out. The app
 # decorates the neutral mesh with its colour/vista/biome content.
 axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
+# The articulated box-figure vocabulary (sports lab's humanoid dummy + player body).
+axiom-figure = { path = "../../modules/axiom-figure" }
+# Recipe-baked procedural textures (sports lab's field markings + ball skins).
+axiom-proc-texture = { path = "../../crates/axiom-proc-texture" }
+axiom-recipe = { path = "../../crates/axiom-recipe" }
 # Hand-editable level/data format used by several demos' codecs (zanzoban,
 # rotating-cube's data-package test) and the growth agent's tag/directive TOML.
 serde = { version = "1", features = ["derive"] }
@@ -221,6 +226,7 @@ web-sys = { version = "0.3", features = [
     "KeyboardEvent",
     "MouseEvent",
     "PointerEvent",
+    "WheelEvent",
     "WebSocket",
     "EventSource",
     "MessageEvent",

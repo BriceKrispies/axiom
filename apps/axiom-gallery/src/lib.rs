@@ -38,6 +38,12 @@ pub use gravix::gravix_start;
 pub mod harness;
 pub mod forest_walk;
 pub mod generia;
+pub mod sports_physics_lab;
+// The sports lab's `#[wasm_bindgen]` `sports_physics_lab_start` surfaced at the
+// crate root so the shared bundle exports the entry gallery.js boots (wasm-only,
+// mirroring how the demo runs).
+#[cfg(target_arch = "wasm32")]
+pub use sports_physics_lab::sports_physics_lab_start;
 
 /// Build the rotating-cube demo's renderable core as a headless [`RunningApp`],
 /// for the native capture harness (`axiom-shot`). The scene author

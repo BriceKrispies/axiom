@@ -232,6 +232,32 @@ export const DEMOS = [
     ],
   },
   {
+    id: "sports-physics-lab",
+    title: "Sports Physics Lab",
+    blurb: "A first-person procedural sports arena: walk the field, pick up four kinds of sports balls (and the practice dummy), and toss them with real physics.",
+    desc:
+      "The foundational interactive sports primitive lab. A procedurally generated " +
+      "60×90 practice field (markings baked in code) enclosed by bouncy walls; a " +
+      "lineup of four procedural balls — soccer, football, bowling, baseball — each " +
+      "a real rigid body with its own mass, bounce, and friction; and a T-pose " +
+      "humanoid practice dummy. Click the canvas to capture the mouse and look " +
+      "around; W A S D walk; left click picks up what the reticle targets and " +
+      "tosses what you hold (heavier objects throw slower); right click sets it " +
+      "down gently; V or the mouse wheel zooms out to third person to see your own " +
+      "procedural body; R resets the lineup. Everything visible is generated at " +
+      "runtime — no imported assets. (WebGPU, with a WebGL2 / Canvas2D fallback.)",
+    dir: "sports-physics-lab",
+    startFn: "sports_physics_lab_start",
+    canvasId: "axiom-sports-physics-lab-canvas",
+    buttons: [
+      { key: "w", label: "▲", pos: "up" },
+      { key: "a", label: "◀", pos: "left" },
+      { key: "d", label: "▶", pos: "right" },
+      { key: "s", label: "▼", pos: "down" },
+      { key: "v", label: "VIEW", pos: "fire" },
+    ],
+  },
+  {
     id: "harness",
     title: "Debug Overlay",
     blurb: "A backquote-toggled developer debug overlay + command console for the engine's browser surface.",
