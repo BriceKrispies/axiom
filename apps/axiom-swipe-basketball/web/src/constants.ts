@@ -24,11 +24,11 @@ export const SEED = 1n;
 /** Basketball radius (a slightly-large arcade ball, easy to grab and read). */
 export const BALL_RADIUS = 0.12;
 /**
- * How many basketballs live in the machine at once — a small foreground feed (arcade
- * ball-return pressure), not an unlimited pile. One may be in flight while the other
- * two wait in the rack; a released ball returns quickly (see REST_TICKS).
+ * How many basketballs sit in the foreground rack. A released ball returns quickly
+ * (see REST_TICKS), so the rack always looks full — an arcade ball-return, not an
+ * unlimited pile.
  */
-export const BALL_COUNT = 3;
+export const BALL_COUNT = 5;
 
 // ── arcade round / score-attack loop ──────────────────────────────────────────
 
@@ -55,12 +55,6 @@ export const STREAK_MULT_CAP = 4;
 
 /** Every Nth spawned ball is golden. */
 export const GOLDEN_EVERY = 5;
-
-/**
- * The hoop's lateral target shifts through this small, readable pattern (metres,
- * ±X) — one step every STREAK_STEP made shots. Subtle, never frustrating.
- */
-export const HOOP_SHIFT_PATTERN: readonly number[] = [0, 0.3, -0.3, 0.16, -0.24, 0.26, -0.14];
 
 /** Ticks a made-basket score flash / camera kick lingers. */
 export const SCORE_FLASH_TICKS = 22;

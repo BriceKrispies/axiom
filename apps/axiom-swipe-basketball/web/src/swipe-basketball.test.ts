@@ -298,8 +298,9 @@ test("9. a weak swipe falls short (does not score) and recycles", () => {
 // ── 10. arcade score-attack loop ──────────────────────────────────────────────
 
 /** Grab the centre rack ball, drag up ~300px over 10 ticks, release, and let it fly. */
+const CENTER_BALL = Math.floor(BALL_COUNT / 2); // the x ≈ 0 ball, aligned with the hoop
 const scoreShot = (session: SwipeBasketballSession): void => {
-  const at = projectRackBall(1); // ball 1 is centred (x ≈ 0) with 3 balls
+  const at = projectRackBall(CENTER_BALL);
   session.advance({ pointer: at, pressed: true, released: false, reset: false, viewport: VIEWPORT });
   for (let k = 1; k <= 10; k += 1) {
     session.advance({ pointer: vec2(at.x, at.y - 30 * k), pressed: false, released: false, reset: false, viewport: VIEWPORT });

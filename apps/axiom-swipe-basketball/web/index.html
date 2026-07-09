@@ -20,8 +20,11 @@
       h1 span { color: #ff8a3d; }
 
       #stage { position: relative; line-height: 0; max-width: 100%; }
+      /* Keep the 720×600 aspect when the canvas scales down on narrow / mobile
+         screens (height follows width) so the render isn't squished and screen↔world
+         pointer mapping stays correct. */
       #axiom-canvas {
-        width: 720px; height: 600px; max-width: 100%;
+        width: 720px; height: auto; aspect-ratio: 720 / 600; max-width: 100%;
         border: 1px solid #2a2e36; border-radius: 8px; background: #000;
         touch-action: none; cursor: grab;
       }

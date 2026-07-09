@@ -49,7 +49,6 @@ import {
   DRAG_SMOOTHING,
   DT,
   FIXED_HZ,
-  HOOP_SHIFT_PATTERN,
   HOOP_Y,
   RACK_SPREAD,
   RACK_Y,
@@ -59,7 +58,6 @@ import {
   SHAKE_BIG,
   SHAKE_DECAY,
   SHAKE_SCORE,
-  STREAK_STEP,
 } from "./constants.ts";
 
 /** How the player is currently interacting, per ball. */
@@ -400,17 +398,6 @@ export class SwipeBasketballSession {
     this.#lastScoreTick = this.#tick;
     this.#lastScoreBig = big;
     this.#shake = Math.max(this.#shake, big ? SHAKE_BIG : SHAKE_SCORE);
-    this.#applyHoopShift();
-  }
-
-  /** After every STREAK_STEP made shots, slide the hoop target through its pattern. */
-  #applyHoopShift(): void {
-    const shiftIndex = Math.floor(this.#arcade.makes / STREAK_STEP);
-    const next = HOOP_SHIFT_PATTERN[shiftIndex % HOOP_SHIFT_PATTERN.length]!;
-    if (next !== this.#hoopOffsetX) {
-      this.#hoopOffsetX = next;
-      this.#colliders = buildColliders(next);
-    }
   }
 
   #recycleIfDone(ball: Ball): void {

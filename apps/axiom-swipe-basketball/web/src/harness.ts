@@ -68,6 +68,14 @@ const boot_ = async (): Promise<void> => {
 
   await initWasm();
 
+  // Pointer events arrive in DISPLAYED (CSS) pixels relative to the canvas, so the
+  // game must project against the canvas's *displayed* size — not its 720×600 backing
+  // — or touch/clicks miss the ball when the canvas is scaled down (mobile). Keep it
+  // fresh across orientation changes / resizes.
+  let applyViewport = (): void => {};
+  globalThis.addEventListener("resize", (): void => applyViewport());
+  globalThis.addEventListener("orientationchange", (): void => applyViewport());
+
   let flashTimer = 0;
   const popFlash = (big: boolean): void => {
     flash.classList.add("on");
@@ -122,7 +130,8 @@ const boot_ = async (): Promise<void> => {
     const game = new WasmGame(FIXED_STEP_NANOS, MAX_STEPS_PER_FRAME);
     const app = createGame({ fixedHz: FIXED_HZ, seed: SEED, surface: CANVAS_ID });
     const mod = (await import(`/dist/game.js?v=${version}`)) as SwipeModule;
-    mod.configureViewport(canvas.width, canvas.height);
+    applyViewport = (): void => mod.configureViewport(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
+    applyViewport();
 
     onRender((): void => updateHud(mod.readHud()));
 
