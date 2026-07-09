@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Swipe Basketball</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 12px;
+        padding:
+          max(16px, env(safe-area-inset-top))
+          max(16px, env(safe-area-inset-right))
+          max(16px, env(safe-area-inset-bottom))
+          max(16px, env(safe-area-inset-left));
+        font: 14px/1.5 system-ui, sans-serif; background: #0b0c10; color: #d7dbe2;
+      }
+      h1 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: 1px; }
+      h1 span { color: #ff8a3d; }
+      /* The canvas id MUST match the id the harness passes to boot()/bindSurface. */
+      #axiom-canvas {
+        width: 720px; height: 600px; max-width: 100%;
+        border: 1px solid #2a2e36; border-radius: 8px; background: #000;
+        touch-action: none; cursor: grab;
+      }
+      #axiom-canvas:active { cursor: grabbing; }
+      #hud {
+        display: flex; gap: 26px; width: 720px; max-width: 100%;
+        font-family: ui-monospace, monospace; justify-content: center; align-items: center;
+      }
+      #hud b { color: #ffd08a; font-weight: 700; font-size: 18px; }
+      #score { display: inline-block; transition: transform .08s, color .08s; }
+      #score.pop { transform: scale(1.5); color: #7fffa8; }
+      #instruction { color: #ff8a3d; font-weight: 700; }
+    </style>
+
+    <!-- The @axiom/game SDK loads as native ES modules via the import map below. -->
+    <script type="importmap">
+      { "imports": { "@axiom/game": "/vendor/axiom-game/index.js" } }
+    </script>
+  </head>
+  <body>
+    <h1>Axiom — <span>Swipe Basketball</span></h1>
+    <canvas id="axiom-canvas" width="720" height="600"></canvas>
+    <div id="hud">
+      <span>SCORE <b id="score">0</b></span>
+      <span>SHOTS <b id="shots">0</b></span>
+      <span id="instruction">Drag a ball, swipe up, release</span>
+    </div>
+
+    <script type="module" src="/dist/harness.js"></script>
+  </body>
+</html>

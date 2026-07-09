@@ -106,6 +106,24 @@ export const DEMOS = [
     page: "signal-runner/index.html",
   },
   {
+    id: "swipe-basketball",
+    title: "Swipe Basketball",
+    blurb: "An arcade basketball machine: drag a ball, swipe up, and release to arc it into the hoop.",
+    desc:
+      "A first-person arcade basketball cabinet authored purely in TypeScript on the engine's " +
+      "3D scene surface: a fixed camera facing a procedurally-built machine — sloped return ramp, " +
+      "side rails, backboard, a real torus rim, hanging net, and a seven-segment scoreboard, with " +
+      "orange seam-lined basketballs racked in the foreground. Drag a ball with mouse or touch, " +
+      "swipe upward, and release: the swipe becomes a 3D throw and the ball is then fully physics-" +
+      "simulated — bouncing off the rim, backboard, rails and ramp with real restitution. A clean " +
+      "downward pass through the hoop scores once; misses rattle out or roll back down the ramp. " +
+      "Press R to reset. Deterministic under fixed-step replay.",
+    // Self-hosted single-file page (its own @axiom/game SDK + axiom-game-runtime wasm,
+    // 3D present path), COMMITTED under web/swipe-basketball/ and copied verbatim into
+    // dist/ by package_gallery — regenerate with `make gallery-swipe-basketball`.
+    page: "swipe-basketball/index.html",
+  },
+  {
     id: "stress-cubes",
     title: "Stress (N cubes)",
     blurb: "A field of N spinning cubes — a live load test you can watch.",

@@ -31,6 +31,7 @@ NETPLAY_PORT     ?= 8000
 # compiles the app, and packages it self-contained into dist/soccer-penalty-kick/.
 SOCCER_DIR            := apps/axiom-soccer-penalty-kick
 SIGNAL_DIR            := apps/axiom-signal-runner
+SWIPE_DIR             := apps/axiom-swipe-basketball
 GAME_RUNTIME_CRATE    := axiom-game-runtime
 GAME_RUNTIME_PKG      := apps/axiom-game-runtime/web/pkg
 GAME_RUNTIME_ARTIFACT := target/$(WASM_TARGET)/release/axiom_game_runtime.wasm
@@ -46,7 +47,7 @@ ASSETSTREAM_PORT     ?= 8000
 
 .PHONY: workspace workspace-build \
 	gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
-	gallery-debug-build gallery-soccer gallery-signal-runner render-bench \
+	gallery-debug-build gallery-soccer gallery-signal-runner gallery-swipe-basketball render-bench \
 	netplay netplay-build netplay-server netplay-dotnet relay retro-fps-hot \
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
@@ -166,6 +167,22 @@ gallery-signal-runner:
 	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
 	npm --prefix packages/axiom-game exec -- tsgo -p $(SIGNAL_DIR)/web/tsconfig.json
 	node scripts/package_signal_runner_singlefile.mjs $(GALLERY_WEB)/signal-runner/index.html
+
+# Regenerate the self-hosted Swipe Basketball gallery page. Like gallery-soccer, the
+# game runs on its OWN @axiom/game SDK + axiom-game-runtime wasm (the 3D present
+# path), not the gallery bundle, so it can't ride axiom-loader.js. This builds the
+# SDK, builds + binds the runtime wasm, compiles the app with tsgo, and inlines the
+# whole graph into a single self-contained page COMMITTED at
+# $(GALLERY_WEB)/swipe-basketball/index.html — which package_gallery then copies into
+# dist/ verbatim, so it deploys to GitHub Pages with NO build step. Run this after
+# editing the app, then commit the refreshed page.
+gallery-swipe-basketball:
+	npm --prefix packages/axiom-game install --no-audit --no-fund
+	npm --prefix packages/axiom-game run build
+	cargo build -p $(GAME_RUNTIME_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
+	npm --prefix packages/axiom-game exec -- tsgo -p $(SWIPE_DIR)/web/tsconfig.json
+	node scripts/package_swipe_basketball_singlefile.mjs $(GALLERY_WEB)/swipe-basketball/index.html
 
 # THE MAIN DRIVER. One command to browse the whole engine surface during
 # development: it builds the merged browser app, assembles the static gallery into
