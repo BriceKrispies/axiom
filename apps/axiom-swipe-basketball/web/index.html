@@ -8,31 +8,79 @@
       :root { color-scheme: dark; }
       body {
         margin: 0; min-height: 100vh; display: flex; flex-direction: column;
-        align-items: center; gap: 12px;
+        align-items: center; gap: 10px;
         padding:
-          max(16px, env(safe-area-inset-top))
-          max(16px, env(safe-area-inset-right))
-          max(16px, env(safe-area-inset-bottom))
-          max(16px, env(safe-area-inset-left));
+          max(14px, env(safe-area-inset-top))
+          max(14px, env(safe-area-inset-right))
+          max(14px, env(safe-area-inset-bottom))
+          max(14px, env(safe-area-inset-left));
         font: 14px/1.5 system-ui, sans-serif; background: #0b0c10; color: #d7dbe2;
       }
       h1 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: 1px; }
       h1 span { color: #ff8a3d; }
-      /* The canvas id MUST match the id the harness passes to boot()/bindSurface. */
+
+      #stage { position: relative; line-height: 0; max-width: 100%; }
       #axiom-canvas {
         width: 720px; height: 600px; max-width: 100%;
         border: 1px solid #2a2e36; border-radius: 8px; background: #000;
         touch-action: none; cursor: grab;
       }
       #axiom-canvas:active { cursor: grabbing; }
+
+      /* Brief white cabinet flash on a score (stronger for big events). */
+      #flash {
+        position: absolute; inset: 0; border-radius: 8px; pointer-events: none;
+        background: #fff; opacity: 0; transition: opacity .18s ease-out;
+      }
+      #flash.on { opacity: 0.16; transition: opacity .04s; }
+      #flash.big { opacity: 0.34; }
+
+      /* Floating feedback text (SWISH / BANK / STREAK / GOLD BALL / TIME BONUS). */
+      #floaters { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+      .floater {
+        position: absolute; left: 50%; top: 42%; transform: translate(-50%, 0);
+        font: 800 26px/1 ui-monospace, monospace; letter-spacing: 1px; white-space: nowrap;
+        color: #ffe25a; text-shadow: 0 2px 0 #000, 0 0 12px rgba(0,0,0,0.8);
+        animation: floatUp 1.15s ease-out forwards;
+      }
+      .floater.big { font-size: 34px; color: #ffd23d; }
+      .floater.gold { color: #ffd23d; }
+      .floater.streak { color: #7fffa8; }
+      .floater.bank { color: #8ac4ff; }
+      .floater.timebonus { color: #ff9de2; }
+      .floater.miss { color: #ff8a8a; font-size: 20px; }
+      @keyframes floatUp {
+        0% { opacity: 0; transform: translate(-50%, 18px) scale(0.8); }
+        18% { opacity: 1; transform: translate(-50%, 0) scale(1.08); }
+        100% { opacity: 0; transform: translate(-50%, -70px) scale(1); }
+      }
+
+      /* Game-over overlay. */
+      #gameover {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 8px; border-radius: 8px;
+        background: rgba(6, 7, 10, 0.72); opacity: 0; pointer-events: none;
+        transition: opacity .2s; font-family: ui-monospace, monospace; text-align: center;
+      }
+      #gameover.show { opacity: 1; }
+      #go-title { font: 800 48px/1 ui-monospace, monospace; color: #ff8a3d; letter-spacing: 2px; }
+      #gameover .row { font-size: 18px; }
+      #gameover b { color: #ffd08a; font-size: 26px; }
+      #go-best.record { color: #7fffa8; }
+      #go-restart { margin-top: 10px; color: #ffe25a; font-weight: 700; font-size: 15px; }
+
       #hud {
-        display: flex; gap: 26px; width: 720px; max-width: 100%;
+        display: flex; gap: 22px; width: 720px; max-width: 100%;
         font-family: ui-monospace, monospace; justify-content: center; align-items: center;
       }
       #hud b { color: #ffd08a; font-weight: 700; font-size: 18px; }
+      #time { display: inline-block; min-width: 54px; text-align: right; }
+      #time.final { color: #ff6a6a; animation: timePulse .5s ease-in-out infinite; }
       #score { display: inline-block; transition: transform .08s, color .08s; }
       #score.pop { transform: scale(1.5); color: #7fffa8; }
-      #instruction { color: #ff8a3d; font-weight: 700; }
+      #mult.up { color: #7fffa8; }
+      @keyframes timePulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.22); } }
+      #instructions { color: #ff8a3d; font-weight: 700; font-size: 13px; }
     </style>
 
     <!-- The @axiom/game SDK loads as native ES modules via the import map below. -->
@@ -42,12 +90,24 @@
   </head>
   <body>
     <h1>Axiom — <span>Swipe Basketball</span></h1>
-    <canvas id="axiom-canvas" width="720" height="600"></canvas>
-    <div id="hud">
-      <span>SCORE <b id="score">0</b></span>
-      <span>SHOTS <b id="shots">0</b></span>
-      <span id="instruction">Drag a ball, swipe up, release</span>
+    <div id="stage">
+      <canvas id="axiom-canvas" width="720" height="600"></canvas>
+      <div id="flash"></div>
+      <div id="floaters"></div>
+      <div id="gameover">
+        <div id="go-title">TIME!</div>
+        <div class="row">SCORE <b id="go-score">0</b></div>
+        <div class="row">BEST <b id="go-best">0</b></div>
+        <div id="go-restart">Press R or tap to restart</div>
+      </div>
     </div>
+    <div id="hud">
+      <span>TIME <b id="time">60.0</b></span>
+      <span>SCORE <b id="score">0</b></span>
+      <span>BEST <b id="best">0</b></span>
+      <span>STREAK <b id="mult">1&times;</b></span>
+    </div>
+    <div id="instructions">Drag a ball, swipe up, release &nbsp;·&nbsp; score before the clock runs out</div>
 
     <script type="module" src="/dist/harness.js"></script>
   </body>

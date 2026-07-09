@@ -23,8 +23,53 @@ export const SEED = 1n;
 
 /** Basketball radius (a slightly-large arcade ball, easy to grab and read). */
 export const BALL_RADIUS = 0.12;
-/** How many basketballs live in the machine at once (rack + in play). */
-export const BALL_COUNT = 5;
+/**
+ * How many basketballs live in the machine at once — a small foreground feed (arcade
+ * ball-return pressure), not an unlimited pile. One may be in flight while the other
+ * two wait in the rack; a released ball returns quickly (see REST_TICKS).
+ */
+export const BALL_COUNT = 3;
+
+// ── arcade round / score-attack loop ──────────────────────────────────────────
+
+/** A round lasts 60 seconds of fixed ticks. */
+export const ROUND_TICKS = 60 * FIXED_HZ;
+/** The final 10 seconds — points double and the cabinet gets loud. */
+export const FINAL_TICKS = 10 * FIXED_HZ;
+/** Points are multiplied by this during the final seconds. */
+export const FINAL_MULTIPLIER = 2;
+
+/** Base points for a normal make (rattled in off the rim, or a plain make). */
+export const POINTS_NORMAL = 2;
+/** Base points for a clean swish (no rim, no backboard). */
+export const POINTS_SWISH = 3;
+/** Base points for a bank shot (off the backboard, in). */
+export const POINTS_BANK = 3;
+/** Base points for a golden ball — worth the most. */
+export const POINTS_GOLDEN = 5;
+
+/** Every this many consecutive makes bumps the streak multiplier by one. */
+export const STREAK_STEP = 3;
+/** The streak multiplier caps here (1× … 4×). */
+export const STREAK_MULT_CAP = 4;
+
+/** Every Nth spawned ball is golden. */
+export const GOLDEN_EVERY = 5;
+
+/**
+ * The hoop's lateral target shifts through this small, readable pattern (metres,
+ * ±X) — one step every STREAK_STEP made shots. Subtle, never frustrating.
+ */
+export const HOOP_SHIFT_PATTERN: readonly number[] = [0, 0.3, -0.3, 0.16, -0.24, 0.26, -0.14];
+
+/** Ticks a made-basket score flash / camera kick lingers. */
+export const SCORE_FLASH_TICKS = 22;
+/** Camera-shake magnitude added on a normal score. */
+export const SHAKE_SCORE = 0.028;
+/** Camera-shake magnitude added on a big event (streak up / golden). */
+export const SHAKE_BIG = 0.065;
+/** Per-tick multiplicative decay of the camera shake. */
+export const SHAKE_DECAY = 0.84;
 
 // ── physics ─────────────────────────────────────────────────────────────────
 
@@ -56,9 +101,9 @@ export const RESTITUTION_DEFAULT = 0.40;
 /** Tangential velocity retained after a contact (1 = frictionless slide, 0 = grip). */
 export const TANGENTIAL_FRICTION = 0.70;
 /** Below this speed (m/s) a ball resting on the ramp/tray is snapped to rest + recycled. */
-export const REST_SPEED = 0.55;
-/** Ticks a ball must be slow-and-low before it recycles to the rack. */
-export const REST_TICKS = 36;
+export const REST_SPEED = 0.6;
+/** Ticks a ball must be slow before it recycles to the rack — short, for a fast ball return. */
+export const REST_TICKS = 20;
 
 // ── swipe → throw mapping (constrained arcade model) ──────────────────────────
 //

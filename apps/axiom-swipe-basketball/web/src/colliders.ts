@@ -64,20 +64,27 @@ export interface Colliders {
   readonly planes: readonly PlaneCollider[];
 }
 
-/** The rim ring's small collider boxes, evenly spaced around the hoop opening. */
-export const rimBoxes = (): BoxCollider[] => {
+/** The rim ring's small collider boxes, evenly spaced around the (shifted) hoop opening. */
+export const rimBoxes = (offsetX = 0): BoxCollider[] => {
   const boxes: BoxCollider[] = [];
   const ringRadius = RIM_RADIUS + RIM_TUBE;
   for (let i = 0; i < RIM_SEGMENTS; i += 1) {
     const angle = (2 * Math.PI * i) / RIM_SEGMENTS;
     boxes.push({
-      center: vec3(HOOP_X + Math.cos(angle) * ringRadius, HOOP_Y, HOOP_Z + Math.sin(angle) * ringRadius),
+      center: vec3(HOOP_X + offsetX + Math.cos(angle) * ringRadius, HOOP_Y, HOOP_Z + Math.sin(angle) * ringRadius),
       half: vec3(RIM_TUBE, RIM_TUBE, RIM_TUBE),
       material: "rim",
     });
   }
   return boxes;
 };
+
+/** The backboard box, shifted laterally with the moving hoop target. */
+export const backboardBox = (offsetX = 0): BoxCollider => ({
+  center: vec3(HOOP_X + offsetX, BACKBOARD_Y, BACKBOARD_Z),
+  half: vec3(BACKBOARD_HALF_W, BACKBOARD_HALF_H, BACKBOARD_HALF_D),
+  material: "backboard",
+});
 
 /** The sloped return-ramp plane (also the floor of the shaft), derived from its endpoints. */
 export const rampPlane = (): PlaneCollider => {
@@ -88,43 +95,29 @@ export const rampPlane = (): PlaneCollider => {
   return { material: "ramp", normal, point: vec3(0, RAMP_NEAR_Y, RAMP_NEAR_Z) };
 };
 
-/** Build every static collider in the cabinet. */
-export const buildColliders = (): Colliders => {
+/** The always-fixed cabinet colliders (side rails + front lip). */
+const staticBoxes = (): BoxCollider[] => {
   const railHalfW = 0.05;
   const railHalfH = 1.3;
   const railMidY = railHalfH;
   const railMidZ = (CABINET_NEAR_Z + CABINET_FAR_Z) / 2;
   const railHalfD = (CABINET_NEAR_Z - CABINET_FAR_Z) / 2;
-
-  const boxes: BoxCollider[] = [
-    // Backboard behind + above the rim.
-    {
-      center: vec3(0, BACKBOARD_Y, BACKBOARD_Z),
-      half: vec3(BACKBOARD_HALF_W, BACKBOARD_HALF_H, BACKBOARD_HALF_D),
-      material: "backboard",
-    },
-    // Left + right side rails.
-    {
-      center: vec3(-(CABINET_HALF_WIDTH + railHalfW), railMidY, railMidZ),
-      half: vec3(railHalfW, railHalfH, railHalfD),
-      material: "rail",
-    },
-    {
-      center: vec3(CABINET_HALF_WIDTH + railHalfW, railMidY, railMidZ),
-      half: vec3(railHalfW, railHalfH, railHalfD),
-      material: "rail",
-    },
-    // Front lip that keeps balls from rolling out toward the player.
-    {
-      center: vec3(0, FRONT_LIP_Y / 2, CABINET_NEAR_Z),
-      half: vec3(CABINET_HALF_WIDTH, FRONT_LIP_Y / 2, 0.05),
-      material: "lip",
-    },
-    ...rimBoxes(),
+  return [
+    { center: vec3(-(CABINET_HALF_WIDTH + railHalfW), railMidY, railMidZ), half: vec3(railHalfW, railHalfH, railHalfD), material: "rail" },
+    { center: vec3(CABINET_HALF_WIDTH + railHalfW, railMidY, railMidZ), half: vec3(railHalfW, railHalfH, railHalfD), material: "rail" },
+    { center: vec3(0, FRONT_LIP_Y / 2, CABINET_NEAR_Z), half: vec3(CABINET_HALF_WIDTH, FRONT_LIP_Y / 2, 0.05), material: "lip" },
   ];
-
-  return { boxes, planes: [rampPlane()] };
 };
+
+/**
+ * Build every collider in the cabinet for the current hoop offset. The rim ring and
+ * backboard follow the moving target (`offsetX`); the rails, lip, and ramp are
+ * fixed. Rebuilt only when the hoop shifts (every few makes), not per frame.
+ */
+export const buildColliders = (offsetX = 0): Colliders => ({
+  boxes: [backboardBox(offsetX), ...staticBoxes(), ...rimBoxes(offsetX)],
+  planes: [rampPlane()],
+});
 
 /** The scoring trigger volume, a box just below the rim opening. */
 export const triggerBox = (): BoxCollider => ({

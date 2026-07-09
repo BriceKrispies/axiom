@@ -15,12 +15,13 @@ import { HOOP_X, HOOP_Y, HOOP_Z, TRIGGER_HALF_D, TRIGGER_HALF_W } from "./consta
 /**
  * True iff the ball moved from `prevPos` to `curPos` this tick in a way that counts
  * as a made basket: it crossed the rim plane (`HOOP_Y`) top→bottom, is moving
- * downward, and its (x,z) is within the hoop opening.
+ * downward, and its (x,z) is within the hoop opening. `hoopOffsetX` shifts the
+ * opening laterally with the moving target (default: centred).
  */
-export const scoredThroughHoop = (prevPos: Vec3, curPos: Vec3, vel: Vec3): boolean => {
+export const scoredThroughHoop = (prevPos: Vec3, curPos: Vec3, vel: Vec3, hoopOffsetX = 0): boolean => {
   const crossedDown = prevPos.y >= HOOP_Y && curPos.y < HOOP_Y;
   const movingDown = vel.y < 0;
-  const insideX = Math.abs(curPos.x - HOOP_X) <= TRIGGER_HALF_W;
+  const insideX = Math.abs(curPos.x - (HOOP_X + hoopOffsetX)) <= TRIGGER_HALF_W;
   const insideZ = Math.abs(curPos.z - HOOP_Z) <= TRIGGER_HALF_D;
   return crossedDown && movingDown && insideX && insideZ;
 };

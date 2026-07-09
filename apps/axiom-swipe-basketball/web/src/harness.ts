@@ -1,14 +1,12 @@
 /*
  * The browser boot harness for Swipe Basketball — the host / platform edge (NOT
  * engine spine), so it lives in the app `web/` dir, outside the branchless +
- * coverage gates, and uses ordinary control flow. A near-clone of the soccer
- * harness: `createGame()` mints the per-game registry the author module (`game.ts`)
- * registers its `onFixedUpdate` into as an import side effect; the SDK's `boot()`
- * installs the host channel, builds the deterministic loop over the wasm bridge,
- * wires DOM input, drives `requestAnimationFrame`, and — because we pass `present3d`
- * — binds the live surface and presents the authored 3D machine every frame. The
- * only thing this harness adds is the DOM HUD, updated each frame from the game's
- * exported `readHud()` via a registered `onRender`.
+ * coverage gates, and uses ordinary control flow. `createGame()` mints the per-game
+ * registry the author module (`game.ts`) registers its `onFixedUpdate` into; the
+ * SDK's `boot()` builds the deterministic loop over the wasm bridge, wires DOM
+ * input, and presents the authored 3D machine every frame. This harness adds the
+ * DOM HUD: the round clock, score / best / streak, the game-over overlay, and the
+ * floating arcade feedback text — all driven from the game's `readHud()`.
  *
  * The three dev-server couplings (the wasm init call, the versioned hot-reload
  * import, and the `/events` SSE channel) are the anchors the single-file packager
@@ -28,13 +26,23 @@ const MAX_STEPS_PER_FRAME = 8;
 const MAX_INSTANCES = 4096;
 const CANVAS_ID = "axiom-canvas";
 
+interface Feedback {
+  readonly kind: string;
+  readonly text: string;
+  readonly big: boolean;
+}
+
 /** The HUD snapshot the game module exposes each frame. */
 interface Hud {
-  readonly title: string;
-  readonly instruction: string;
+  readonly phase: "ready" | "playing" | "gameover";
   readonly score: number;
-  readonly shots: number;
+  readonly best: number;
+  readonly time: number;
+  readonly streak: number;
+  readonly multiplier: number;
+  readonly finalWindow: boolean;
   readonly scorePop: boolean;
+  readonly events: readonly Feedback[];
 }
 
 interface SwipeModule {
@@ -46,19 +54,66 @@ const el = (id: string): HTMLElement => document.getElementById(id) as HTMLEleme
 
 const boot_ = async (): Promise<void> => {
   const canvas = el("axiom-canvas") as HTMLCanvasElement;
+  const flash = el("flash");
+  const floaters = el("floaters");
+  const gameover = el("gameover");
   const fields = {
-    instruction: el("instruction"),
+    best: el("best"),
+    goBest: el("go-best"),
+    goScore: el("go-score"),
+    mult: el("mult"),
     score: el("score"),
-    shots: el("shots"),
+    time: el("time"),
   };
 
   await initWasm();
 
+  let flashTimer = 0;
+  const popFlash = (big: boolean): void => {
+    flash.classList.add("on");
+    flash.classList.toggle("big", big);
+    globalThis.clearTimeout(flashTimer);
+    flashTimer = globalThis.setTimeout((): void => flash.classList.remove("on", "big"), big ? 200 : 130);
+  };
+
+  let floaterSeq = 0;
+  const spawnFloater = (fb: Feedback): void => {
+    const node = document.createElement("div");
+    node.className = `floater ${fb.kind}${fb.big ? " big" : ""}`;
+    node.textContent = fb.text;
+    // Fan successive floaters out horizontally so they don't overlap.
+    const spread = ((floaterSeq % 5) - 2) * 46;
+    floaterSeq += 1;
+    node.style.marginLeft = `${spread}px`;
+    floaters.append(node);
+    globalThis.setTimeout((): void => node.remove(), 1200);
+  };
+
   const updateHud = (hud: Hud): void => {
+    fields.time.textContent = hud.time.toFixed(1);
+    fields.time.classList.toggle("final", hud.finalWindow);
     fields.score.textContent = String(hud.score);
-    fields.shots.textContent = String(hud.shots);
-    fields.instruction.textContent = hud.instruction;
     fields.score.classList.toggle("pop", hud.scorePop);
+    fields.best.textContent = String(hud.best);
+    fields.mult.innerHTML = `${hud.multiplier}&times;`;
+    fields.mult.classList.toggle("up", hud.multiplier > 1);
+
+    const over = hud.phase === "gameover";
+    gameover.classList.toggle("show", over);
+    if (over) {
+      fields.goScore.textContent = String(hud.score);
+      fields.goBest.textContent = String(hud.best);
+      fields.goBest.classList.toggle("record", hud.best > 0 && hud.best === hud.score);
+    }
+
+    for (const fb of hud.events) {
+      spawnFloater(fb);
+      if (fb.big) {
+        popFlash(true);
+      } else if (fb.kind !== "miss") {
+        popFlash(false);
+      }
+    }
   };
 
   let teardown: (() => void) | undefined;
@@ -73,9 +128,7 @@ const boot_ = async (): Promise<void> => {
 
     app.start();
     // frameLocked: one sim tick per displayed frame, so the first frame builds the
-    // whole scene (registering every material) BEFORE the 3D surface binds — the
-    // engine snapshots the material bind-group set once at bind and never re-uploads
-    // it, so late-registered materials would otherwise be silently skipped.
+    // whole scene (registering every material) BEFORE the 3D surface binds.
     teardown = boot(game as unknown as Parameters<typeof boot>[0], app, {
       canvas,
       frameLocked: true,
@@ -85,8 +138,6 @@ const boot_ = async (): Promise<void> => {
 
   await load(0);
 
-  // Live hot-reload is a dev-server convenience only; skip it on a static host
-  // (GitHub Pages / file://) where the /events SSE endpoint does not exist.
   const isDev = location.hostname === "localhost" || location.hostname === "127.0.0.1";
   if (isDev) {
     const events = new EventSource("/events");

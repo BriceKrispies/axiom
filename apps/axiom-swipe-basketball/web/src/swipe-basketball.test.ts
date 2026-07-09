@@ -19,17 +19,38 @@ import { pickBall } from "./selection.ts";
 import { scoredThroughHoop } from "./scoring.ts";
 import { type Intent, SwipeBasketballSession, rackPositions } from "./session.ts";
 import {
+  basePoints,
+  classifyShot,
+  inFinalWindow,
+  isGoldenSpawn,
+  newRound,
+  registerMake,
+  registerMiss,
+  registerShot,
+  startIfReady,
+  tick as arcadeTick,
+} from "./arcade.ts";
+import {
   BALL_COUNT,
   CAMERA_FAR,
   CAMERA_FOV_Y,
   CAMERA_NEAR,
   CAMERA_POS,
   CAMERA_TARGET,
+  FINAL_MULTIPLIER,
+  FINAL_TICKS,
+  FIXED_HZ,
+  GOLDEN_EVERY,
   HOOP_X,
   HOOP_Y,
   HOOP_Z,
   MAX_POINTER_DELTA,
   POINTER_HISTORY,
+  POINTS_GOLDEN,
+  POINTS_SWISH,
+  ROUND_TICKS,
+  STREAK_MULT_CAP,
+  STREAK_STEP,
   THROW_FORWARD_MAX,
   THROW_FORWARD_MIN,
   THROW_VERTICAL_MIN,
@@ -272,4 +293,146 @@ test("9. a weak swipe falls short (does not score) and recycles", () => {
   }
   assert.equal(session.score, 0, "a weak swipe cannot reach the hoop");
   assert.equal(session.ballViews()[0]!.mode, "rack", "the ball settles and recycles (no endless bounce)");
+});
+
+// ── 10. arcade score-attack loop ──────────────────────────────────────────────
+
+/** Grab the centre rack ball, drag up ~300px over 10 ticks, release, and let it fly. */
+const scoreShot = (session: SwipeBasketballSession): void => {
+  const at = projectRackBall(1); // ball 1 is centred (x ≈ 0) with 3 balls
+  session.advance({ pointer: at, pressed: true, released: false, reset: false, viewport: VIEWPORT });
+  for (let k = 1; k <= 10; k += 1) {
+    session.advance({ pointer: vec2(at.x, at.y - 30 * k), pressed: false, released: false, reset: false, viewport: VIEWPORT });
+  }
+  session.advance({ pointer: vec2(at.x, at.y - 300), pressed: false, released: true, reset: false, viewport: VIEWPORT });
+  for (let k = 0; k < 60; k += 1) {
+    session.advance(idle);
+  }
+};
+
+/** Drive `n` makes into a fresh playing round (arcade state only). */
+const makes = (n: number, quality: "swish" | "bank" | "rim" = "swish", golden = false) => {
+  const state = newRound(0);
+  startIfReady(state);
+  for (let k = 0; k < n; k += 1) {
+    registerMake(state, quality, golden);
+  }
+  return state;
+};
+
+test("10a. swish detection requires no rim or backboard contact", () => {
+  assert.equal(classifyShot(false, false), "swish");
+  assert.equal(classifyShot(true, false), "rim"); // touched rim → not a swish
+  assert.equal(classifyShot(false, true), "bank"); // touched board → not a swish
+  assert.equal(basePoints("swish", false), POINTS_SWISH);
+});
+
+test("10b. bank detection requires backboard contact before the score", () => {
+  assert.equal(classifyShot(false, true), "bank");
+  assert.equal(classifyShot(true, true), "bank"); // board wins over rim
+  assert.equal(basePoints("bank", false), POINTS_SWISH); // bank and swish are both 3
+});
+
+test("10c. a made shot scores exactly once, however it rattles", () => {
+  const session = new SwipeBasketballSession();
+  scoreShot(session);
+  assert.ok(session.score > 0, "the scripted swipe is a make");
+  assert.equal(session.streak, 1, "exactly one make is counted");
+  const scoreAfter = session.score;
+  for (let k = 0; k < 120; k += 1) {
+    session.advance(idle);
+  }
+  assert.equal(session.score, scoreAfter, "the same ball never scores twice");
+  assert.equal(session.streak, 1, "still a single make");
+});
+
+test("10d. a miss breaks the streak", () => {
+  const state = makes(3); // multiplier now 2×, 3 consecutive
+  assert.equal(state.multiplier, 2);
+  registerMiss(state);
+  assert.equal(state.consecutiveMakes, 0, "streak count reset");
+  assert.equal(state.multiplier, 1, "multiplier reset to 1×");
+});
+
+test("10e. the streak multiplier rises every 3 makes and caps at 4×", () => {
+  const state = newRound(0);
+  startIfReady(state);
+  const seen: number[] = [];
+  for (let k = 0; k < 15; k += 1) {
+    registerMake(state, "swish", false);
+    seen.push(state.multiplier);
+  }
+  // makes 1,2,3 → …,…,2 ; 4,5,6 → 3 at 6 ; 9 → 4 ; then capped.
+  assert.equal(seen[2], 2, "3rd make → 2×");
+  assert.equal(seen[5], 3, "6th make → 3×");
+  assert.equal(seen[8], STREAK_MULT_CAP, "9th make → 4×");
+  assert.equal(seen[14], STREAK_MULT_CAP, "capped at 4×");
+});
+
+test("10f. the final 10 seconds doubles the awarded points", () => {
+  const normal = newRound(0);
+  startIfReady(normal);
+  registerMake(normal, "swish", false); // 3 × 1× = 3
+  assert.equal(normal.score, POINTS_SWISH);
+
+  const finalState = newRound(0);
+  startIfReady(finalState);
+  finalState.timeRemaining = FINAL_TICKS; // inside the doubling window
+  assert.ok(inFinalWindow(finalState));
+  registerMake(finalState, "swish", false); // 3 × 1× × 2 = 6
+  assert.equal(finalState.score, POINTS_SWISH * FINAL_MULTIPLIER);
+});
+
+test("10g. a golden ball awards golden points and every 5th spawn is golden", () => {
+  assert.equal(basePoints("swish", true), POINTS_GOLDEN, "golden trumps quality base");
+  const state = newRound(0);
+  startIfReady(state);
+  registerMake(state, "rim", true); // golden, one make
+  assert.equal(state.score, POINTS_GOLDEN);
+  assert.equal(isGoldenSpawn(GOLDEN_EVERY), true);
+  assert.equal(isGoldenSpawn(GOLDEN_EVERY - 1), false);
+});
+
+test("10h. the round timer runs out to game over", () => {
+  const state = newRound(0);
+  startIfReady(state);
+  assert.equal(state.phase, "playing");
+  for (let k = 0; k < ROUND_TICKS; k += 1) {
+    arcadeTick(state);
+  }
+  assert.equal(state.phase, "gameover");
+  assert.equal(state.timeRemaining, 0);
+  registerShot(state); // shots may still be tallied, but time stays out
+  arcadeTick(state);
+  assert.equal(state.timeRemaining, 0, "the clock never goes negative");
+});
+
+test("10i. reset restores score, streak, timer, and the ball rack", () => {
+  const session = new SwipeBasketballSession();
+  scoreShot(session); // build up some score + a streak, start the clock
+  session.advance({ ...idle, reset: true });
+  assert.equal(session.score, 0);
+  assert.equal(session.streak, 0);
+  assert.equal(session.multiplier, 1);
+  assert.equal(session.phase, "ready");
+  assert.equal(session.timeRemaining, ROUND_TICKS / FIXED_HZ, "clock back to 60 s");
+  for (const ball of session.ballViews()) {
+    assert.equal(ball.mode, "rack");
+  }
+});
+
+test("10j. the clock runs out to game over, then a tap restarts", () => {
+  const session = new SwipeBasketballSession();
+  scoreShot(session); // starts the round (phase → playing) and banks some score
+  assert.equal(session.phase, "playing");
+  for (let k = 0; k < ROUND_TICKS; k += 1) {
+    session.advance(idle);
+  }
+  assert.equal(session.phase, "gameover");
+  assert.ok(session.best > 0, "the best score is banked at game over");
+  // A tap (pointer-down edge) on game-over restarts a fresh round.
+  session.advance({ pointer: vec2(360, 300), pressed: true, released: false, reset: false, viewport: VIEWPORT });
+  assert.equal(session.phase, "ready");
+  assert.equal(session.score, 0);
+  assert.equal(session.timeRemaining, ROUND_TICKS / FIXED_HZ);
 });
