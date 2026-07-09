@@ -14,7 +14,7 @@ import test from "node:test";
 import { type Vec2, vec2, vec3 } from "./vec.ts";
 import { type Camera, project, viewProjection } from "./projection.ts";
 import { PointerHistory } from "./pointer.ts";
-import { swipeToThrow } from "./throw.ts";
+import { swipeToThrow, throwIntents } from "./throw.ts";
 import { pickBall } from "./selection.ts";
 import { scoredThroughHoop } from "./scoring.ts";
 import { type Intent, SwipeBasketballSession, rackPositions } from "./session.ts";
@@ -30,6 +30,10 @@ import {
   HOOP_Z,
   MAX_POINTER_DELTA,
   POINTER_HISTORY,
+  THROW_FORWARD_MAX,
+  THROW_FORWARD_MIN,
+  THROW_VERTICAL_MIN,
+  THROW_VERTICAL_TO_FORWARD_MAX_RATIO,
   TRIGGER_HALF_W,
 } from "./constants.ts";
 
@@ -66,25 +70,49 @@ test("1b. fewer than two samples yields zero velocity", () => {
   assert.deepEqual(h.releaseVelocity(), vec2(0, 0));
 });
 
-// ── 2. swipe → throw mapping ──────────────────────────────────────────────────
+// ── 2. constrained arcade throw model ─────────────────────────────────────────
 
-test("2. an upward swipe lifts and carries forward (−Z)", () => {
+test("2. an upward swipe lifts and carries forward, forward-dominant (−Z)", () => {
   const throwVel = swipeToThrow(vec2(0, -40));
   assert.ok(throwVel.y > 0, "upward swipe gives positive lift");
   assert.ok(throwVel.z < 0, "throw goes into the machine (−Z)");
+  assert.ok(Math.abs(throwVel.z) > throwVel.y, "forward speed dominates vertical");
 });
 
-test("2b. a harder flick throws farther forward", () => {
-  const soft = swipeToThrow(vec2(0, -20));
-  const hard = swipeToThrow(vec2(0, -80));
-  assert.ok(hard.z < soft.z, "harder upward flick has more forward speed");
-  assert.ok(hard.y > soft.y, "harder upward flick has more lift");
+test("2a. upward swipe cannot exceed the vertical/forward clamp (no rainbow)", () => {
+  for (const gy of [-15, -30, -60, -120, -500]) {
+    const intents = throwIntents(vec2(0, gy));
+    const ratio = intents.vertical / intents.forward;
+    assert.ok(
+      ratio <= THROW_VERTICAL_TO_FORWARD_MAX_RATIO + 1e-9,
+      `vertical/forward ${ratio.toFixed(3)} exceeds clamp for gy=${gy}`,
+    );
+  }
 });
 
-test("2c. horizontal swipe steers X, a downward swipe gives no lift", () => {
-  assert.ok(swipeToThrow(vec2(40, 0)).x > 0, "rightward swipe → +X");
-  assert.ok(swipeToThrow(vec2(-40, 0)).x < 0, "leftward swipe → −X");
-  assert.equal(swipeToThrow(vec2(0, 50)).y, 0, "a downward flick contributes no lift");
+test("2b. a stronger swipe increases forward speed", () => {
+  const soft = throwIntents(vec2(0, -15));
+  const hard = throwIntents(vec2(0, -40));
+  assert.ok(hard.forward > soft.forward, "harder upward flick has more forward speed");
+  assert.ok(hard.forward <= THROW_FORWARD_MAX + 1e-9 && soft.forward >= THROW_FORWARD_MIN - 1e-9, "forward stays in range");
+});
+
+test("2c. a lateral swipe changes the X launch velocity", () => {
+  assert.ok(swipeToThrow(vec2(40, -30)).x > 0, "rightward swipe → +X");
+  assert.ok(swipeToThrow(vec2(-40, -30)).x < 0, "leftward swipe → −X");
+  assert.equal(swipeToThrow(vec2(0, -30)).x, 0, "a purely vertical swipe has no lateral");
+});
+
+test("2d. a very weak swipe stays at the floor of the launch range (falls short)", () => {
+  const weak = throwIntents(vec2(0, -3)); // below the gesture dead-zone
+  assert.equal(weak.power, 0, "a sub-dead-zone flick has zero power");
+  assert.equal(weak.forward, THROW_FORWARD_MIN, "weak forward is the minimum");
+  assert.equal(weak.vertical, THROW_VERTICAL_MIN, "weak lift is the minimum");
+});
+
+test("2e. a strong flick drives forward, not straight up (forward-dominant)", () => {
+  const strong = throwIntents(vec2(0, -200));
+  assert.ok(strong.forward > strong.vertical, "forward speed exceeds lift even at full power");
 });
 
 // ── 3. ball selection from a pointer hit ──────────────────────────────────────
@@ -168,6 +196,19 @@ test("6b. a giant delta (tab-switch glitch) discards the history", () => {
   assert.deepEqual(h.releaseVelocity(), vec2(0, 0));
 });
 
+test("6c. a jittery final sample does not dominate the smoothed release velocity", () => {
+  const h = new PointerHistory();
+  // A steady upward swipe (x fixed, y climbing) …
+  for (let t = 1; t <= 5; t += 1) {
+    h.push(200, 400 - 25 * (t - 1), t);
+  }
+  // … then one twitchy final sample that jumps sideways.
+  h.push(260, 275, 6);
+  const v = h.releaseVelocity();
+  assert.ok(Math.abs(v.x) < 20, `smoothed x ${v.x.toFixed(1)} should not follow the +60 final jitter`);
+  assert.ok(v.y < -20, "the sustained upward swipe still dominates the vertical velocity");
+});
+
 // ── 7. determinism ────────────────────────────────────────────────────────────
 
 test("7. identical intent sequences produce identical state (replayable)", () => {
@@ -205,17 +246,30 @@ const swipeShot = (session: SwipeBasketballSession, i: number, dxPx: number, dyP
   session.advance({ pointer: end, pressed: false, released: true, reset: false, viewport: VIEWPORT });
 };
 
-test("8. after release the ball flies under physics (up then falling, toward the hoop)", () => {
+test("8. after release the ball flies under physics (rises, then drives into the machine)", () => {
   const session = new SwipeBasketballSession();
   const idx = BALL_COUNT - 1;
   swipeShot(session, idx, 0, -160); // a strong upward flick
   const start = session.ballViews()[idx]!.pos;
+  // Track the arc's high point and deepest point (robust to a make that recycles).
   let peakY = start.y;
-  for (let k = 0; k < 30; k += 1) {
+  let deepestZ = start.z;
+  for (let k = 0; k < 40; k += 1) {
     session.advance(idle);
-    peakY = Math.max(peakY, session.ballViews()[idx]!.pos.y);
+    const p = session.ballViews()[idx]!.pos;
+    peakY = Math.max(peakY, p.y);
+    deepestZ = Math.min(deepestZ, p.z);
   }
-  const end = session.ballViews()[idx]!.pos;
-  assert.ok(peakY > start.y + 0.15, "the ball rises after an upward swipe");
-  assert.ok(end.z < start.z, "the ball travels into the machine (−Z, toward the hoop)");
+  assert.ok(peakY > start.y + 0.2, "the ball rises after an upward swipe");
+  assert.ok(deepestZ < start.z - 0.5, "the ball drives well into the machine (−Z, toward the hoop)");
+});
+
+test("9. a weak swipe falls short (does not score) and recycles", () => {
+  const session = new SwipeBasketballSession();
+  swipeShot(session, 0, 0, -24); // a feeble upward flick
+  for (let k = 0; k < 360; k += 1) {
+    session.advance(idle);
+  }
+  assert.equal(session.score, 0, "a weak swipe cannot reach the hoop");
+  assert.equal(session.ballViews()[0]!.mode, "rack", "the ball settles and recycles (no endless bounce)");
 });

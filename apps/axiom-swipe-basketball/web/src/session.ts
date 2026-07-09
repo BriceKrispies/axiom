@@ -24,6 +24,7 @@ import { scoredThroughHoop } from "./scoring.ts";
 import {
   BALL_COUNT,
   BALL_RADIUS,
+  CABINET_FAR_Z,
   CABINET_HALF_WIDTH,
   CAMERA_FAR,
   CAMERA_FOV_Y,
@@ -269,11 +270,16 @@ export class SwipeBasketballSession {
   }
 
   #recycleIfDone(ball: Ball): void {
+    // A ball that has been slow for a while ANYWHERE is done — a heavy ball that
+    // trickles to a stop (on the ramp, in a corner, or behind the backboard where
+    // it can slip under the tall board) must still return to the rack, not creep
+    // forever. The forward speed of a live shot keeps it above REST_SPEED even at
+    // its apex, so this never recycles a ball mid-flight.
     const slow = length(ball.vel) < REST_SPEED;
-    const low = ball.pos.y < RACK_Y + 0.18;
-    ball.restTicks = slow && low ? ball.restTicks + 1 : 0;
+    ball.restTicks = slow ? ball.restTicks + 1 : 0;
     const settled = ball.restTicks >= REST_TICKS;
-    const outOfBounds = ball.pos.y < -0.6 || Math.abs(ball.pos.x) > 3 || ball.pos.z > 3 || ball.pos.z < -6;
+    const outOfBounds =
+      ball.pos.y < -0.6 || Math.abs(ball.pos.x) > 3 || ball.pos.z > 3 || ball.pos.z < CABINET_FAR_Z - 0.3;
     if (settled || outOfBounds) {
       ball.pos = rackSlot(ball.slot);
       ball.vel = vec3(0, 0, 0);

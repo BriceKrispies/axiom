@@ -1,18 +1,21 @@
 /*
- * pointer.ts — a bounded ring buffer of recent pointer samples and the swipe
- * velocity estimate derived from them. SDK-free and fully testable. The buffer has
- * a FIXED capacity (`POINTER_HISTORY`) and never grows; a per-tick delta larger
- * than `MAX_POINTER_DELTA` (a tab-switch / lost-focus / missing-sample glitch) is
- * treated as invalid and clears the history so a garbage flick can't be thrown.
+ * pointer.ts — a bounded ring buffer of recent pointer samples and the SMOOTHED
+ * release-gesture velocity derived from them. SDK-free and fully testable. The
+ * buffer has a FIXED capacity (`POINTER_HISTORY`) and never grows; a per-tick delta
+ * larger than `MAX_POINTER_DELTA` (a tab-switch / lost-focus / missing-sample
+ * glitch) is treated as invalid and clears the history so a garbage flick can't be
+ * thrown.
  *
- * Samples are stored in canvas pixels (top-left origin, y-down) with the tick they
- * arrived on; `releaseVelocity` returns pixels-per-tick over the recent window,
- * with screen-down +y (so an upward swipe reads negative y — `throw.ts` maps it to
- * lift).
+ * `releaseVelocity` does NOT just take the last sample pair: it averages the
+ * per-pair velocities across the last `THROW_SAMPLE_WINDOW` samples with a
+ * triangular (middle-emphasised) weighting, so a single jittery final sample — a
+ * finger twitch at lift-off — cannot dominate the shot. Samples are canvas pixels
+ * (top-left origin, y-down) with the tick they arrived on; the result is
+ * pixels-per-tick with screen-down +y (upward swipe ⇒ negative y).
  */
 
 import { type Vec2, vec2 } from "./vec.ts";
-import { MAX_POINTER_DELTA, POINTER_HISTORY, VELOCITY_WINDOW } from "./constants.ts";
+import { MAX_POINTER_DELTA, POINTER_HISTORY, THROW_SAMPLE_WINDOW } from "./constants.ts";
 
 interface Sample {
   readonly x: number;
@@ -20,7 +23,7 @@ interface Sample {
   readonly tick: number;
 }
 
-/** A fixed-capacity history of pointer samples with a recent-window velocity estimate. */
+/** A fixed-capacity history of pointer samples with a smoothed release-velocity estimate. */
 export class PointerHistory {
   readonly #samples: Sample[] = [];
 
@@ -51,28 +54,41 @@ export class PointerHistory {
   }
 
   /**
-   * The swipe velocity in pixels-per-tick over the recent window, computed from the
-   * oldest and newest samples within `VELOCITY_WINDOW` ticks of the latest. Returns
-   * `(0,0)` if fewer than two usable samples or a zero time span.
+   * The smoothed release velocity (px/tick): a triangular-weighted average of the
+   * per-pair velocities over the last `THROW_SAMPLE_WINDOW` samples. The middle of
+   * the swipe carries the most weight and the newest pair the least, so a final
+   * jitter can't dominate. Returns `(0,0)` with fewer than two usable samples.
    */
   public releaseVelocity(): Vec2 {
     const n = this.#samples.length;
     if (n < 2) {
       return vec2(0, 0);
     }
-    const newest = this.#samples[n - 1]!;
-    let oldest = newest;
-    for (let i = n - 2; i >= 0; i -= 1) {
-      const s = this.#samples[i]!;
-      if (newest.tick - s.tick > VELOCITY_WINDOW) {
-        break;
+    // The most-recent window of samples (at most THROW_SAMPLE_WINDOW + 1 → that many pairs).
+    const start = Math.max(0, n - (THROW_SAMPLE_WINDOW + 1));
+    const window = this.#samples.slice(start);
+    const pairs = window.length - 1;
+
+    let sumX = 0;
+    let sumY = 0;
+    let sumW = 0;
+    for (let j = 0; j < pairs; j += 1) {
+      const a = window[j]!;
+      const b = window[j + 1]!;
+      const span = b.tick - a.tick;
+      if (span <= 0) {
+        continue;
       }
-      oldest = s;
+      // Triangular weight: peaks in the middle of the window, so neither the first
+      // (start-up) nor the last (lift-off jitter) pair can dominate.
+      const weight = Math.min(j + 1, pairs - j);
+      sumX += (weight * (b.x - a.x)) / span;
+      sumY += (weight * (b.y - a.y)) / span;
+      sumW += weight;
     }
-    const span = newest.tick - oldest.tick;
-    if (span <= 0) {
+    if (sumW <= 0) {
       return vec2(0, 0);
     }
-    return vec2((newest.x - oldest.x) / span, (newest.y - oldest.y) / span);
+    return vec2(sumX / sumW, sumY / sumW);
   }
 }

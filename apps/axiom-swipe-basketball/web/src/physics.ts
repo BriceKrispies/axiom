@@ -14,7 +14,19 @@
 
 import { type Vec3, add, clampToBox, dot, length, normalize, scale, sub, vec3 } from "./vec.ts";
 import type { Colliders, ContactMaterial } from "./colliders.ts";
-import { GRAVITY, LINEAR_DAMPING, RESTITUTION, TANGENTIAL_FRICTION } from "./constants.ts";
+import {
+  GRAVITY,
+  LINEAR_DAMPING,
+  POST_COLLISION_DAMPING,
+  RESTITUTION_BACKBOARD,
+  RESTITUTION_DEFAULT,
+  RESTITUTION_RIM,
+  TANGENTIAL_FRICTION,
+} from "./constants.ts";
+
+/** The restitution for a contact material — rim is deadest, backboard liveliest. */
+const restitutionFor = (material: ContactMaterial): number =>
+  material === "rim" ? RESTITUTION_RIM : material === "backboard" ? RESTITUTION_BACKBOARD : RESTITUTION_DEFAULT;
 
 /** A contact reported by a step, for hit feedback (juice). */
 export interface Contact {
@@ -32,14 +44,19 @@ export interface StepResult {
   readonly contact: Contact | null;
 }
 
-/** Reflect `vel` about `normal` with restitution, then damp the tangential part by friction. */
-const bounce = (vel: Vec3, normal: Vec3): Vec3 => {
+/**
+ * Reflect `vel` about `normal` with the material's restitution (normal component),
+ * keep the tangential part scaled by friction, then bleed a MODERATE amount of
+ * energy off the whole result (`POST_COLLISION_DAMPING`) so a heavy ball settles
+ * instead of ping-ponging forever.
+ */
+const bounce = (vel: Vec3, normal: Vec3, restitution: number): Vec3 => {
   const vn = dot(vel, normal);
   const normalPart = scale(normal, vn);
   const tangentPart = sub(vel, normalPart);
-  // Reflected normal component (magnitude scaled by restitution), tangential kept by friction.
-  const reflected = scale(normal, -vn * RESTITUTION);
-  return add(scale(tangentPart, TANGENTIAL_FRICTION), reflected);
+  const reflected = scale(normal, -vn * restitution);
+  const bounced = add(scale(tangentPart, TANGENTIAL_FRICTION), reflected);
+  return scale(bounced, POST_COLLISION_DAMPING);
 };
 
 /** Resolve the ball against one plane half-space; returns the corrected pos/vel + optional contact. */
@@ -62,7 +79,7 @@ const resolvePlane = (
   return {
     contact: { impactSpeed, material, point: contactPoint },
     pos: correctedPos,
-    vel: bounce(vel, planeNormal),
+    vel: bounce(vel, planeNormal, restitutionFor(material)),
   };
 };
 
@@ -91,7 +108,7 @@ const resolveBox = (
   return {
     contact: { impactSpeed, material, point: closest },
     pos: add(pos, scale(normal, radius - dist)),
-    vel: bounce(vel, normal),
+    vel: bounce(vel, normal, restitutionFor(material)),
   };
 };
 

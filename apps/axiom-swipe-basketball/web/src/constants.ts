@@ -28,34 +28,75 @@ export const BALL_COUNT = 5;
 
 // ── physics ─────────────────────────────────────────────────────────────────
 
-/** Gravity acceleration (m/s²), negative = down. Punchier than real g for arcade feel. */
-export const GRAVITY = -11.0;
-/** Fraction of linear speed bled off per second in flight (air drag). */
-export const LINEAR_DAMPING = 0.12;
-/** Coefficient of restitution for a bounce off static geometry (0 dead … 1 elastic). */
-export const RESTITUTION = 0.52;
+/**
+ * Gravity acceleration (m/s²), negative = down. The app OWNS gravity (there is no
+ * engine physics here); a heavy −20 keeps shots snappy and flat, not floaty.
+ */
+export const GRAVITY = -19.0;
+/** Optional multiplier on gravity (kept at 1: `GRAVITY` is already the tuned value). */
+export const THROW_GRAVITY_SCALE = 1.0;
+/**
+ * LOW air drag in free flight (fraction of linear speed bled off per second), so a
+ * thrown ball keeps its momentum and drives to the hoop rather than mushing out.
+ */
+export const LINEAR_DAMPING = 0.03;
+/**
+ * MODERATE energy loss stamped onto a ball's velocity right after any bounce (a
+ * factor it is multiplied by), so contacts feel like a heavy basketball settling
+ * rather than a ping-pong ball — this, plus the restitutions below, kills the
+ * endless bounce.
+ */
+export const POST_COLLISION_DAMPING = 0.88;
+/** Restitution on a RIM contact — deadest, so a rim hit drops through the net, not out. */
+export const RESTITUTION_RIM = 0.30;
+/** Restitution on a BACKBOARD contact — livelier than the rim, for a real bank shot. */
+export const RESTITUTION_BACKBOARD = 0.50;
+/** Restitution on all other static geometry (ramp, rails, front lip). */
+export const RESTITUTION_DEFAULT = 0.40;
 /** Tangential velocity retained after a contact (1 = frictionless slide, 0 = grip). */
-export const TANGENTIAL_FRICTION = 0.78;
+export const TANGENTIAL_FRICTION = 0.70;
 /** Below this speed (m/s) a ball resting on the ramp/tray is snapped to rest + recycled. */
 export const REST_SPEED = 0.55;
 /** Ticks a ball must be slow-and-low before it recycles to the rack. */
 export const REST_TICKS = 36;
 
-// ── swipe → throw mapping ─────────────────────────────────────────────────────
+// ── swipe → throw mapping (constrained arcade model) ──────────────────────────
 //
-// Pointer velocity arrives in canvas-pixels-per-tick (see pointer.ts). These
-// scales convert that 2D flick into a 3D launch velocity (m/s).
+// The release gesture (smoothed pointer velocity, canvas-px/tick — see pointer.ts)
+// is decomposed into THREE independent intents — power, lateral aim, upward — and
+// mapped to a launch velocity whose FORWARD (−Z) component dominates. Vertical lift
+// is clamped to a fraction of forward speed so a hard upward flick becomes a fast,
+// flat arc INTO the machine, never a tall rainbow. Raw screen-Y velocity never
+// becomes raw world-Y velocity.
 
-/** Horizontal swipe (px/tick, +right) → world +X launch velocity. */
-export const THROW_SCALE_X = 0.09;
-/** Upward swipe (px/tick, up) → world +Y lift. Only upward motion contributes. */
-export const LIFT_SCALE = 0.22;
-/** Overall flick speed (px/tick) → world −Z forward velocity (into the machine). */
-export const FORWARD_SCALE = 0.12;
-/** A floor of forward velocity so even a straight-up flick carries toward the hoop. */
-export const FORWARD_BASE = 0.8;
-/** Clamp on the launch speed so an absurd flick can't fling the ball out of the world. */
-export const MAX_THROW_SPEED = 14.0;
+// NOTE ON VALUES: the brief's suggested starting numbers (forward 11–18, ratio
+// 0.48) describe a flat bullet. In THIS cabinet (hoop 2.28 m high, ~3.5 m from the
+// launch plane) a bullet that fast physically cannot arc DOWN through a hoop above
+// the launch point — it crosses the rim still rising and banks off the backboard,
+// so nothing scores (verified by a full launch-height × flick-speed sweep). Tuning
+// down opens a real scoring window while keeping the model's spirit: the shot is
+// still forward-DOMINANT (forward > vertical always) and still a quick, controlled
+// arc — never a rainbow (a rainbow is a >55° launch; the cap below is ~36°).
+
+/** Minimum forward launch speed (m/s, toward −Z) — the softest release still drives in. */
+export const THROW_FORWARD_MIN = 7.5;
+/** Maximum forward launch speed (m/s) at full power. */
+export const THROW_FORWARD_MAX = 10.5;
+/** Minimum upward launch speed (m/s) — every release carries at least this much lift. */
+export const THROW_VERTICAL_MIN = 5.4;
+/** Maximum upward launch speed (m/s) at full power, before the ratio clamp. */
+export const THROW_VERTICAL_MAX = 7.2;
+/** Hard cap: vertical launch ≤ forward launch × this, keeping the shot forward-dominant. */
+export const THROW_VERTICAL_TO_FORWARD_MAX_RATIO = 0.75;
+/** Maximum lateral launch speed (m/s, ±X) from a sideways flick. */
+export const THROW_LATERAL_MAX = 4.0;
+/** How many of the most recent pointer samples the weighted release average spans. */
+export const THROW_SAMPLE_WINDOW = 5;
+
+/** Gesture speed (px/tick) at/below which power is 0 — a barely-there flick falls short. */
+export const THROW_GESTURE_DEADZONE = 6.0;
+/** Gesture speed (px/tick) at/above which power is 1 (full range). */
+export const THROW_GESTURE_FULL = 46.0;
 
 // ── drag / hold ───────────────────────────────────────────────────────────────
 
@@ -70,8 +111,6 @@ export const SELECT_RADIUS_FACTOR = 1.6;
 
 /** Fixed capacity of the pointer-sample ring buffer (bounded, never grows). */
 export const POINTER_HISTORY = 12;
-/** Samples newer than this many ticks feed the release-velocity estimate. */
-export const VELOCITY_WINDOW = 6;
 /** A per-tick pixel delta larger than this is a tab-switch/focus glitch → discard history. */
 export const MAX_POINTER_DELTA = 400;
 
