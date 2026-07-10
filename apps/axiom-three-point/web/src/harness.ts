@@ -13,7 +13,7 @@
  * the static gallery build — keep them verbatim.
  */
 
-import { initRenderer, renderScene } from "./engine/renderer.ts";
+import { type BackendChoice, initRenderer, renderScene } from "./engine/renderer.ts";
 import { startLoop } from "./engine/loop.ts";
 import { InputState, attachDomInput } from "./engine/input.ts";
 import { BALLS_PER_RACK, FIXED_HZ, RACK_COUNT, SHOT_TUNING } from "./constants.ts";
@@ -169,7 +169,11 @@ const boot_ = async (): Promise<void> => {
     }
   };
 
-  initRenderer(canvas);
+  // Backend selection: WebGL2 with an automatic Canvas2D software fallback;
+  // `?backend=canvas2d` (or `?backend=webgl2`) forces one, the repo convention.
+  const requested = new URLSearchParams(location.search).get("backend");
+  const choice: BackendChoice = requested === "canvas2d" || requested === "webgl2" ? requested : "auto";
+  initRenderer(canvas, choice);
 
   let stopLoop: (() => void) | undefined;
   let detachInput: (() => void) | undefined;

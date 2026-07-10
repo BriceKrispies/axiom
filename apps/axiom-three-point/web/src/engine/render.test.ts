@@ -10,6 +10,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { EngineQuat, EngineVec3, MeshData } from "./api.ts";
+import { AMBIENT } from "./backend.ts";
+import { lambertLight } from "./backend-canvas2d.ts";
 import { fromTrs, identity, lookAt, multiply, perspective, transformPoint } from "./mat4.ts";
 import { unitBox, unitCylinderY, unitSphere } from "./meshes.ts";
 
@@ -170,4 +172,44 @@ test("unitCylinderY spans radius 0.5 and height 1 around +Y", () => {
     const radial = Math.abs(n.y) < 1e-6;
     assert.ok(flat || radial, "normal is a flat cap normal or a smooth radial wall normal");
   }
+});
+
+// ── the software backend's lighting matches the WebGL2 shader model ───────────
+
+test("lambertLight reproduces the shared shading model", () => {
+  // No lights: pure ambient floor.
+  const dark = lambertLight(0, 1, 0, 0, 0, 0, { dirLights: [], pointLights: [] });
+  assert.deepEqual(dark, [AMBIENT, AMBIENT, AMBIENT]);
+
+  // A directional light traveling straight down fully lights an up-facing
+  // triangle: ambient + color·intensity, per channel.
+  const sun = lambertLight(0, 1, 0, 0, 0, 0, {
+    dirLights: [{ color: [1, 0.5, 0.25], direction: [0, -1, 0] }],
+    pointLights: [],
+  });
+  assertClose(sun[0], AMBIENT + 1, "sun r");
+  assertClose(sun[1], AMBIENT + 0.5, "sun g");
+  assertClose(sun[2], AMBIENT + 0.25, "sun b");
+
+  // The same light from behind contributes nothing (max(0, ·)).
+  const back = lambertLight(0, -1, 0, 0, 0, 0, {
+    dirLights: [{ color: [1, 1, 1], direction: [0, -1, 0] }],
+    pointLights: [],
+  });
+  assert.deepEqual(back, [AMBIENT, AMBIENT, AMBIENT]);
+
+  // A point light 2 m overhead: lambert 1, falloff 1/(1+0.08·4) — the exact
+  // WebGL2 fragment expression.
+  const point = lambertLight(0, 1, 0, 0, 0, 0, {
+    dirLights: [],
+    pointLights: [{ color: [1, 1, 1], position: [0, 2, 0] }],
+  });
+  assertClose(point[0], AMBIENT + 1 / (1 + 0.08 * 4), "point falloff");
+
+  // Deterministic: identical inputs, identical output.
+  const again = lambertLight(0, 1, 0, 0, 0, 0, {
+    dirLights: [],
+    pointLights: [{ color: [1, 1, 1], position: [0, 2, 0] }],
+  });
+  assert.deepEqual(point, again);
 });
