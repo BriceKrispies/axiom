@@ -124,6 +124,25 @@ export const DEMOS = [
     page: "swipe-basketball/index.html",
   },
   {
+    id: "minimal-3v3",
+    title: "Minimal 3v3 Basketball",
+    blurb: "A deliberately minimal 3-on-3 half-court game: move, pass, rise, and release at the apex.",
+    desc:
+      "A minimally-legible 3D half-court basketball game authored purely in TypeScript on the " +
+      "engine's 3D scene surface: a procedural court (key, arc, backboard, real torus rim + net) and " +
+      "six box-and-sphere players. You control the blue ball handler — a third-person camera follows " +
+      "behind, aimed at the hoop. WASD moves, Q/E pass to the left/right wing (control transfers with " +
+      "the ball), and SPACE gathers into a jump: release at the apex for the best odds. Shot success " +
+      "is deterministic — timing, distance, and defender contest all matter, and PERFECT never " +
+      "guarantees. Three red defenders shade the handler, protect the lane, and rise for contest " +
+      "jumps; a steal, interception, make, or miss freezes play, shows the result, and resets with " +
+      "you in possession. Press R to reset. Deterministic under fixed-step replay.",
+    // Self-hosted single-file page (its own @axiom/game SDK + axiom-game-runtime wasm,
+    // 3D present path), COMMITTED under web/minimal-3v3/ and copied verbatim into
+    // dist/ by package_gallery — regenerate with `make gallery-minimal-3v3`.
+    page: "minimal-3v3/index.html",
+  },
+  {
     id: "stress-cubes",
     title: "Stress (N cubes)",
     blurb: "A field of N spinning cubes — a live load test you can watch.",
