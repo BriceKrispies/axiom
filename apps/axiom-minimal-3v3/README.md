@@ -35,6 +35,35 @@ Apps sit outside the engine's branchless + coverage gates; the core is still
 covered by a `node --test` suite (determinism/replay hash, shot formula,
 turnovers, control transfer, defender sanity).
 
+## Agent driver
+
+`web/src/agent.ts` is an autonomous agent that plays the game and scores,
+mirroring the engine's `axiom-agent` module (modules/axiom-agent) at app tier
+exactly the way the retro FPS native driver does — the Rust module is
+same-binary-only (no wasm/TS binding), so this is its TypeScript twin speaking
+the same vocabulary: game state is translated into a neutral `Observation` of
+`(kind, subject, x, y, z, value)` micro-unit facts, the brain emits a held
+**control-code bitmask**, the driver lowers it into the exact `Intent` a
+keyboard produces (press/release edges from the previous mask), and every
+decision transition is recorded as a `DecisionReport`.
+
+The `ApexScorerBrain` policy: drive into shooting range, sidestep a defender
+squatting in the path, wait out an airborne contest jump, gather, and release
+exactly at the jump apex; every third possession swings a pass to the wing
+first. Possessions vary range so the seeded shot rolls vary — it plays until
+it scores.
+
+```sh
+node apps/axiom-minimal-3v3/web/src/agent.ts    # headless play-by-play + decision log
+node --test apps/axiom-minimal-3v3/web/src/agent.test.ts
+```
+
+Browser-driving note: with `frameLocked` the sim advances one tick per
+*rendered* frame, so an external driver must time inputs by counting
+`requestAnimationFrame` callbacks (= ticks), not wall-clock milliseconds —
+on the software canvas2d backend dropped frames make ms-based timing miss
+the apex.
+
 ## Run
 
 ```sh
