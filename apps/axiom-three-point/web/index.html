@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Three-Point Shootout</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 10px;
+        padding:
+          max(14px, env(safe-area-inset-top))
+          max(14px, env(safe-area-inset-right))
+          max(14px, env(safe-area-inset-bottom))
+          max(14px, env(safe-area-inset-left));
+        font: 14px/1.5 system-ui, sans-serif; background: #0a0b12; color: #d7dbe2;
+      }
+      h1 { font-size: 15px; font-weight: 800; margin: 0; letter-spacing: 2px; }
+      h1 span { color: #ff8a3d; }
+
+      #stage { position: relative; line-height: 0; max-width: 100%; }
+      #axiom-canvas {
+        width: 960px; height: auto; aspect-ratio: 960 / 540; max-width: 100%;
+        border: 1px solid #23262f; border-radius: 10px; background: #05060a;
+        touch-action: none; cursor: crosshair;
+      }
+
+      /* A fixed center crosshair on the player's own aim line — it moves only
+         with the camera (i.e., only when the player aims), never by the game. */
+      #reticle {
+        position: absolute; left: 50%; top: 50%; width: 22px; height: 22px;
+        transform: translate(-50%, -50%); pointer-events: none;
+        border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 50%;
+        opacity: 0; transition: opacity 0.1s, border-color 0.08s;
+      }
+      #reticle::after {
+        content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px;
+        transform: translate(-50%, -50%); border-radius: 50%; background: #fff;
+      }
+      #reticle.active { opacity: 1; border-color: #ffd23d; }
+      #reticle.dim { opacity: 0.25; }
+      #reticle.hidden { opacity: 0; }
+
+      /* Score / streak (top-left) and rack / balls (top-right). */
+      .hud-panel {
+        position: absolute; padding: 8px 12px; border-radius: 8px;
+        background: rgba(8, 9, 14, 0.72); border: 1px solid #23262f;
+        font-family: ui-monospace, monospace; pointer-events: none; line-height: 1.35;
+      }
+      #panel-score { top: 10px; left: 10px; }
+      #panel-rack { top: 10px; right: 10px; text-align: right; }
+      .hud-k { font: 700 9px/1.6 ui-monospace, monospace; color: #6b7280; letter-spacing: 1.5px; }
+      #score { font: 800 24px/1.1 ui-monospace, monospace; color: #ffd08a; transition: transform .09s, color .09s; display: inline-block; }
+      #score.pop { transform: scale(1.4); color: #7fffa8; }
+      #streak { font: 800 14px/1.2 ui-monospace, monospace; color: #9aa0ad; }
+      #streak.hot { color: #ff8a3d; text-shadow: 0 0 10px rgba(255, 138, 61, 0.7); }
+      #rack { font: 800 15px/1.2 ui-monospace, monospace; color: #d7dbe2; }
+      #balls { display: inline-flex; gap: 5px; margin-top: 5px; }
+      #balls .pip {
+        width: 13px; height: 13px; border-radius: 50%;
+        background: #d96a1f; border: 1px solid #f08a3f;
+        transition: background .12s, opacity .12s;
+      }
+      #balls .pip.gold { background: #ffd23d; border-color: #ffe98a; box-shadow: 0 0 7px rgba(255, 210, 61, 0.75); }
+      #balls .pip.spent { background: #23262f; border-color: #33374a; box-shadow: none; opacity: 0.6; }
+
+      /* Power meter (bottom center, only while charging). */
+      #power {
+        position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%);
+        width: 260px; padding: 7px 10px 9px; border-radius: 8px;
+        background: rgba(8, 9, 14, 0.72); border: 1px solid #23262f;
+        opacity: 0; transition: opacity 0.1s; pointer-events: none;
+        font-family: ui-monospace, monospace;
+      }
+      #power.on { opacity: 1; }
+      #power .hud-k { display: block; margin-bottom: 4px; }
+      #power-track { position: relative; width: 100%; height: 9px; border-radius: 5px; background: #23262f; overflow: hidden; }
+      #power-zone { position: absolute; top: 0; bottom: 0; background: rgba(127, 255, 168, 0.28); border-left: 1px solid rgba(127,255,168,.5); border-right: 1px solid rgba(127,255,168,.5); }
+      #power-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: #ff8a3d; transition: width 0.04s linear; }
+      #power.maxed #power-fill { background: #ff4d4d; }
+      #power.maxed #power-label { color: #ff6a6a; }
+
+      /* Floating shot feedback. */
+      #floaters { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+      .floater {
+        position: absolute; left: 50%; top: 38%; transform: translate(-50%, 0);
+        font: 800 26px/1 ui-monospace, monospace; letter-spacing: 2px; white-space: nowrap;
+        color: #ffe25a; text-shadow: 0 2px 0 #000, 0 0 14px rgba(0,0,0,0.85);
+        animation: floatUp 1.15s ease-out forwards;
+      }
+      .floater.big { font-size: 34px; }
+      .floater.swish { color: #7fffa8; text-shadow: 0 2px 0 #000, 0 0 20px rgba(127,255,168,.8); }
+      .floater.made { color: #ffe25a; }
+      .floater.points { color: #ffd08a; font-size: 20px; top: 46%; }
+      .floater.rim { color: #ffb14d; }
+      .floater.backboard { color: #c79bff; }
+      .floater.miss { color: #ff6a6a; }
+      @keyframes floatUp {
+        0% { opacity: 0; transform: translate(-50%, 18px) scale(0.85); }
+        16% { opacity: 1; transform: translate(-50%, 0) scale(1.08); }
+        100% { opacity: 0; transform: translate(-50%, -72px) scale(1); }
+      }
+
+      /* Rack-transition banner. */
+      #moving {
+        position: absolute; left: 50%; top: 16%; transform: translateX(-50%);
+        font: 800 19px/1 ui-monospace, monospace; letter-spacing: 3px; color: #8fd0ff;
+        text-shadow: 0 2px 0 #000; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+      }
+      #moving.on { opacity: 1; }
+
+      /* Pointer-lock cue over the canvas. */
+      #lock-cue {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        background: rgba(5, 6, 10, 0.45); border-radius: 10px; pointer-events: none;
+        font: 700 17px/1 ui-monospace, monospace; color: #ffe25a; letter-spacing: 1px;
+        text-shadow: 0 2px 0 #000; opacity: 0; transition: opacity .15s;
+      }
+      #lock-cue.on { opacity: 1; }
+
+      /* Results overlay. */
+      #results {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 7px; border-radius: 10px;
+        background: rgba(5, 6, 10, 0.72); opacity: 0; pointer-events: none;
+        transition: opacity .25s; font-family: ui-monospace, monospace; text-align: center;
+      }
+      #results.show { opacity: 1; }
+      #res-title { font: 800 40px/1 ui-monospace, monospace; color: #ff8a3d; letter-spacing: 3px; }
+      #res-label { font: 800 24px/1 ui-monospace, monospace; color: #ffe25a; letter-spacing: 4px; margin: 6px 0 10px; }
+      #results .row { font: 400 17px/1.5 ui-monospace, monospace; color: #9aa0ad; }
+      #results b { color: #ffd08a; font-size: 24px; }
+      #res-restart { margin-top: 14px; color: #7fffa8; font-weight: 700; font-size: 15px; }
+
+      #instructions { color: #ff8a3d; font-weight: 700; font-size: 13px; }
+
+      /* Device-appropriate hints: touch devices see the swipe controls. */
+      .touch-only { display: none; }
+      @media (pointer: coarse) {
+        .touch-only { display: inline; }
+        .desktop-only { display: none; }
+      }
+    </style>
+
+    <!-- The @axiom/game SDK loads as native ES modules via the import map below. -->
+    <script type="importmap">
+      { "imports": { "@axiom/game": "/vendor/axiom-game/index.js" } }
+    </script>
+  </head>
+  <body>
+    <h1>Axiom — <span>Three-Point Shootout</span></h1>
+    <div id="stage">
+      <canvas id="axiom-canvas" width="960" height="540"></canvas>
+      <div id="floaters"></div>
+      <div id="reticle"></div>
+      <div id="panel-score" class="hud-panel">
+        <span class="hud-k">SCORE</span><br />
+        <span id="score">0</span><br />
+        <span id="streak">STREAK 0</span>
+      </div>
+      <div id="panel-rack" class="hud-panel">
+        <span id="rack">RACK 1/3</span><br />
+        <span id="balls">
+          <span class="pip" id="pip-0"></span>
+          <span class="pip" id="pip-1"></span>
+          <span class="pip" id="pip-2"></span>
+          <span class="pip" id="pip-3"></span>
+          <span class="pip gold" id="pip-4"></span>
+        </span>
+      </div>
+      <div id="power">
+        <span id="power-label" class="hud-k">SHOT</span>
+        <div id="power-track"><div id="power-zone"></div><div id="power-fill"></div></div>
+      </div>
+      <div id="moving"></div>
+      <div id="lock-cue"><span class="desktop-only">CLICK THE COURT TO AIM</span><span class="touch-only">DRAG TO AIM &middot; SWIPE UP FROM THE BALL TO SHOOT</span></div>
+      <div id="results">
+        <div id="res-title">BUZZER</div>
+        <div id="res-label">WARMING UP</div>
+        <div class="row">FINAL <b id="res-score">0</b></div>
+        <div class="row">MADE <b id="res-makes">0/15</b></div>
+        <div class="row">BEST STREAK <b id="res-streak">0</b></div>
+        <div id="res-restart">Press R to shoot again</div>
+      </div>
+    </div>
+    <div id="instructions"><span class="desktop-only">Click to aim · mouse steers left/right · hold SPACE to rise into the shot · release at the top · R restarts</span><span class="touch-only">Drag to aim · swipe up from the ball to shoot — flick harder for more power, flick sideways to steer</span></div>
+
+    <script type="module" src="/dist/harness.js"></script>
+  </body>
+</html>

@@ -143,6 +143,35 @@ export const DEMOS = [
     page: "minimal-3v3/index.html",
   },
   {
+    id: "three-point",
+    title: "Three-Point Shootout",
+    blurb: "A first-person three-point rack contest: ride the rise and release at the top — or swipe the ball up on touch.",
+    desc:
+      "A first-person 3D three-point contest authored purely in TypeScript on the engine's 3D " +
+      "scene surface, in the spirit of Wii Sports rack shooting. Fifteen shots from three spots " +
+      "around a procedurally-built arc — left wing, top of the key, right wing — five balls per " +
+      "rack with a golden fifth ball. Every shot is ONE continuous motion that never waits: the " +
+      "moment you release, the next ball is dealt off its rack slot into your hands while the " +
+      "last shots are still in the air (several fly at once, scored in shot order). Holding " +
+      "SPACE rises into the shot and releasing launches at that exact instant — the shot meter " +
+      "tracks the rise and its ideal window. Early is short, the ideal window swishes, late " +
+      "clangs off the glass. On touch, drag to look and swipe up from the " +
+      "held ball to shoot — flick strength is your release, sideways flick steers, with the " +
+      "same smoothed-gesture model as Swipe Basketball. The camera is exclusively player-driven " +
+      "(the game never touches your view), so skill is your aim plus release timing. The ball " +
+      "is a genuinely simulated projectile (deterministic fixed-step integrator — gravity, " +
+      "backspin, restitution) that can swish, rattle off a rim whose colliders match the " +
+      "visible torus exactly, bank off the glass, or airball. Baskets are confirmed by a " +
+      "two-plane downward-crossing detector; streaks compound (3, 6, 9, 12…) and a miss resets " +
+      "them. A broadcast-style glide carries you between racks; after ball 15 the buzzer shows " +
+      "your line. Press R to run it back. Deterministic under fixed-step replay, with a " +
+      "headless agent driver that plays full games in Node.",
+    // Self-hosted single-file page (its own @axiom/game SDK + axiom-game-runtime wasm,
+    // 3D present path), COMMITTED under web/three-point/ and copied verbatim into
+    // dist/ by package_gallery — regenerate with `make gallery-three-point`.
+    page: "three-point/index.html",
+  },
+  {
     id: "stress-cubes",
     title: "Stress (N cubes)",
     blurb: "A field of N spinning cubes — a live load test you can watch.",
