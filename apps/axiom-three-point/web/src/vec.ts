@@ -1,12 +1,12 @@
 /*
  * vec.ts — the pure-TypeScript linear-algebra core the whole game runs on. It
- * imports NOTHING (not even a type) from `@axiom/game`, so the gameplay + physics +
- * session modules that build on it are constructible in a bare `node --test` process
- * with no wasm and no DOM. The SDK adaptation (turning a `Vec3` into the SDK's
- * `Transform`) lives in `scene.ts`, the one file allowed to touch the engine.
+ * imports nothing, so the gameplay + physics + session modules that build on it
+ * are constructible in a bare `node --test` process with no DOM. The renderer
+ * adaptation (turning a `Vec3` into the engine's `Transform`) lives in
+ * `scene.ts`, the one file allowed to touch the renderer.
  *
  * `Vec3` is a plain `{x,y,z}` and `Quat` is an `[x,y,z,w]` tuple — structurally
- * identical to the SDK's own types, so `scene.ts` hands them straight through.
+ * identical to the engine's own types, so `scene.ts` hands them straight through.
  */
 
 /** A 3-vector — plain f64 `{x,y,z}`, structurally the SDK's `Vec3`. */

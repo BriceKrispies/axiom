@@ -1,6 +1,7 @@
 /*
- * scene.ts — the ONE gameplay file that touches the engine. It builds the whole
- * arena procedurally (no external assets) through the SDK's 3D scene surface —
+ * scene.ts — the ONE gameplay file that touches the renderer. It builds the
+ * whole arena procedurally (no external assets) through the app's OWN pure-TS
+ * WebGL2 engine (`engine/renderer.ts`) —
  * hardwood court with painted key / free-throw line / three-point arc, glass
  * backboard with a shooter's square, the real torus rim (the SAME
  * RIM_RADIUS/RIM_TUBE constants the physics collider ring uses, so the rim you
@@ -8,17 +9,15 @@
  * arena backdrop — then `applyFrame` re-poses every dynamic node each frame from
  * the SDK-free `SceneView` the session hands it.
  *
- * Mesh conventions (as in the sibling heat-check app): `box` is a UNIT CUBE
- * (scale = full extents); `sphere` is UNIT DIAMETER (scale = 2·radius). A node's
- * material is fixed at spawn, so the orange and golden live balls are two
- * pre-spawned entities and every glow/flash is an emissive node that gets scaled,
- * never re-colored.
+ * Mesh conventions: `box` is a UNIT CUBE (scale = full extents); `sphere` is
+ * UNIT DIAMETER (scale = 2·radius); `cylinder` is UNIT DIAMETER × UNIT HEIGHT.
+ * A node's material is fixed at spawn, so the orange and golden live balls are
+ * two pre-spawned entities and every glow/flash is an emissive node that gets
+ * scaled, never re-colored.
  */
 
+import type { Entity, Rgba, Transform } from "./engine/api.ts";
 import {
-  type Entity,
-  type Rgba,
-  type Transform,
   addLight,
   clearScene,
   createMaterial,
@@ -27,7 +26,7 @@ import {
   setCamera3D,
   setNodeTransform,
   spawnRenderable,
-} from "@axiom/game";
+} from "./engine/renderer.ts";
 import { type Quat, type Vec3, IDENTITY_QUAT, quatRotate, vec3 } from "./vec.ts";
 import { torusY } from "./meshgen.ts";
 import { RIM_COLLIDER_CENTERS } from "./physics.ts";

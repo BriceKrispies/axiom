@@ -2,15 +2,11 @@
  * physics.ts — the deterministic in-app ball physics the shot rides on. Pure,
  * SDK-free, fully testable under `node --test`.
  *
- * WHY THIS EXISTS (the engine limitation, and the smallest workaround): the
- * `@axiom/game` `sim.physics` facade spawns bodies with NO colliders, exposes no
- * restitution/contacts/triggers, and writes poses back only to the 2D world — it
- * cannot drive a 3D basketball. This module follows the repo's established
- * precedent (the soccer-penalty-kick app's `engine.ts`): a semi-implicit-Euler
- * integrator with real moving-sphere-vs-static-sphere and vs-AABB contacts, plus
- * the impulse response soccer's overlap-only tests lacked. The released ball is
- * genuinely simulated — gravity, damping, spin, rim/backboard/floor bounces — not
- * an interpolated arc.
+ * The app is fully self-contained, and so is its physics: a semi-implicit-Euler
+ * integrator with real moving-sphere-vs-static-sphere and vs-AABB contacts and
+ * impulse response (restitution + tangential graze). The released ball is
+ * genuinely simulated — gravity, damping, spin, rim/backboard/floor bounces —
+ * not an interpolated arc.
  *
  * The colliders are built from the SAME constants the visual scene uses
  * (`constants.ts`), so the rim you see is exactly the rim you hit: the torus is

@@ -1,10 +1,11 @@
 /*
- * game.ts — THE game, wired to the engine. Registering an `onFixedUpdate` as an
- * import side effect, it builds the scene on the first tick, folds this tick's
- * input into a plain `Intent`, advances the deterministic SDK-free
- * `ThreePointSession`, mirrors the result into the 3D scene, and turns the
- * session's audio cues into procedural tones. It exports `readHud()` for the
- * harness's DOM overlay and `configureViewport()` for touch-gesture projection.
+ * game.ts — THE game, wired to the app's own pure-TypeScript engine. The harness
+ * calls `initGame` once (build the scene, bind the keys) and then `updateGame`
+ * once per fixed tick: it folds this tick's input into a plain `Intent`,
+ * advances the deterministic SDK-free `ThreePointSession`, mirrors the result
+ * into the 3D scene, and turns the session's audio cues into procedural tones.
+ * It exports `readHud()` for the harness's DOM overlay and `configureViewport()`
+ * for touch-gesture projection.
  *
  * Desktop: click the court to grab the pointer · mouse aims · hold SPACE to rise
  * into the shot, release at the top · R restarts (Escape releases the pointer).
@@ -16,7 +17,9 @@
  * offset. The camera is never moved by a shot gesture.
  */
 
-import { type Sim, bindAction, onFixedUpdate, playTone } from "@axiom/game";
+import type { TickInput } from "./engine/api.ts";
+import type { InputState } from "./engine/input.ts";
+import { playTone } from "./engine/audio.ts";
 import { type SceneHandles, applyFrame, buildScene } from "./scene.ts";
 import type { AudioCue, Hud, Intent, SwipeGesture } from "./types.ts";
 import { type Vec2, vec2 } from "./vec.ts";
@@ -35,21 +38,29 @@ let gesture: "look" | "shot" | null = null;
 let lastPointer: Vec2 | null = null;
 const history = new PointerHistory();
 
-const bindKeys = (): void => {
-  bindAction("shoot", ["Space"]);
-  bindAction("restart", ["KeyR"]);
+/** Build the scene and bind the key actions. Called once by the harness, after
+ * the renderer is initialized. */
+export const initGame = (input: InputState): void => {
+  input.bindAction("shoot", ["Space"]);
+  input.bindAction("restart", ["KeyR"]);
+  handles = buildScene();
+  session = new ThreePointSession();
+  prevDown = false;
+  gesture = null;
+  lastPointer = null;
+  history.clear();
 };
 
 /** Fold this tick's pointer-locked mouse, keyboard, and touch gestures into the
  * session `Intent`. A drag outside the shot zone looks; a drag starting in the
  * lower-center zone is a shot whose lift-off flick launches the ball. */
-const readIntent = (sim: Sim): Intent => {
-  const look = sim.input.look();
+const readIntent = (input: TickInput, tick: number): Intent => {
+  const look = input.look();
   let lookDx = look.x;
   let lookDy = look.y;
   let swipe: SwipeGesture | null = null;
 
-  const sample = sim.input.pointer();
+  const sample = input.pointer();
   const down = sample !== undefined ? sample.down : false;
   // Gesture velocities are normalized to the reference height so a flick feels
   // the same on a phone-sized canvas and a desktop one.
@@ -59,11 +70,11 @@ const readIntent = (sim: Sim): Intent => {
     const fy = sample.pos.y / Math.max(1, viewport.y);
     gesture = fy >= SWIPE_ZONE_MIN_Y && Math.abs(fx - 0.5) <= SWIPE_ZONE_HALF_X ? "shot" : "look";
     history.clear();
-    if (gesture === "shot") history.push(sample.pos.x * gestureScale, sample.pos.y * gestureScale, sim.tick);
+    if (gesture === "shot") history.push(sample.pos.x * gestureScale, sample.pos.y * gestureScale, tick);
     lastPointer = vec2(sample.pos.x, sample.pos.y);
   } else if (down && sample !== undefined && gesture !== null) {
     if (gesture === "shot") {
-      history.push(sample.pos.x * gestureScale, sample.pos.y * gestureScale, sim.tick);
+      history.push(sample.pos.x * gestureScale, sample.pos.y * gestureScale, tick);
     } else if (lastPointer !== null) {
       lookDx += (sample.pos.x - lastPointer.x) * SHOT_TUNING.touchLookScale;
       lookDy += (sample.pos.y - lastPointer.y) * SHOT_TUNING.touchLookScale;
@@ -80,15 +91,15 @@ const readIntent = (sim: Sim): Intent => {
   return {
     lookDx,
     lookDy,
-    restartPressed: sim.input.pressed("restart"),
-    shootHeld: sim.input.isDown("shoot"),
-    shootPressed: sim.input.pressed("shoot"),
-    shootReleased: sim.input.released("shoot"),
+    restartPressed: input.pressed("restart"),
+    shootHeld: input.isDown("shoot"),
+    shootPressed: input.pressed("shoot"),
+    shootReleased: input.released("shoot"),
     swipe,
   };
 };
 
-/** Map a session audio cue onto the SDK's procedural tone synth. */
+/** Map a session audio cue onto the engine's procedural tone synth. */
 const playCue = (cue: AudioCue): void => {
   switch (cue.kind) {
     case "charge":
@@ -122,16 +133,13 @@ const playCue = (cue: AudioCue): void => {
   }
 };
 
-onFixedUpdate((sim: Sim): void => {
-  if (handles === undefined) {
-    bindKeys();
-    handles = buildScene();
-    session = new ThreePointSession();
-  }
-  session.advance(readIntent(sim));
+/** One fixed 60 Hz tick: input → session → scene + audio. */
+export const updateGame = (input: TickInput, tick: number): void => {
+  if (handles === undefined) return;
+  session.advance(readIntent(input, tick));
   for (const cue of session.drainAudio()) playCue(cue);
   applyFrame(handles, session.view());
-});
+};
 
 /** The HUD the harness reads each frame (draining feedback events). */
 export const readHud = (): Hud => session.hud();

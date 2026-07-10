@@ -1,9 +1,12 @@
 # Three-Point Shootout
 
 A first-person 3D basketball three-point contest in the spirit of Wii Sports rack
-shooting, authored **purely in TypeScript** on the `@axiom/game` SDK's 3D scene
-surface. Fifteen shots from three fixed spots around the arc — left wing, top of
-the key, right wing — five balls per rack, the fifth one golden.
+shooting — a **fully self-contained, pure-TypeScript app**. It ships its own
+engine under `web/src/engine/` (a WebGL2 forward renderer, a deterministic
+fixed-step loop, keyboard/pointer-lock/touch input, and a WebAudio tone synth)
+over bare browser APIs: no `@axiom/game` SDK, no wasm, no external packages.
+Fifteen shots from three fixed spots around the arc — left wing, top of the key,
+right wing — five balls per rack, the fifth one golden.
 
 ## The shot is one continuous motion — and the loop never waits
 
@@ -61,16 +64,24 @@ performance label.
 
 ## Structure
 
-Heat-check's split: an SDK-free deterministic core (`constants.ts` — everything
-shot-feel lives in `SHOT_TUNING` — `vec.ts`, `types.ts`, `physics.ts`,
-`gameplay.ts`, `session.ts`, `meshgen.ts`) under one engine-facing `scene.ts`,
-wired by `game.ts`, booted by `harness.ts`. The ball is genuinely simulated
-in-app (semi-implicit Euler, 4 substeps, sphere-vs-sphere rim ring +
-sphere-vs-AABB glass/floor with restitution) because the SDK's `sim.physics`
-facade exposes no colliders/contacts to TS; the rim colliders are built from the
-SAME constants as the visible torus. Baskets are detected by a two-plane
-downward-crossing detector (upper entry + lower confirmation, upward crossings
-disarm, score latches).
+Two layers, both pure TypeScript:
+
+- **The engine** (`web/src/engine/`) — `api.ts` (the contract), `renderer.ts`
+  (WebGL2 forward renderer: box/sphere/cylinder + custom-mesh primitives,
+  Lambert materials with emissive/opacity, directional + point lights, look-at
+  camera), `loop.ts` (fixed-step 60 Hz accumulator under requestAnimationFrame),
+  `input.ts` (keyboard actions, pointer-lock mouse look, canvas pointer
+  sampling), `audio.ts` (WebAudio tone synth), `mat4.ts`, `meshes.ts`.
+- **The game** — a deterministic, DOM-free core (`constants.ts` — everything
+  shot-feel lives in `SHOT_TUNING` — `vec.ts`, `types.ts`, `physics.ts`,
+  `gameplay.ts`, `session.ts`, `meshgen.ts`, `pointer.ts`) under one
+  renderer-facing `scene.ts`, wired by `game.ts`, booted by `harness.ts`.
+
+The ball is genuinely simulated (semi-implicit Euler, 4 substeps,
+sphere-vs-sphere rim ring + sphere-vs-AABB glass/floor with restitution); the
+rim colliders are built from the SAME constants as the visible torus. Baskets
+are detected by a two-plane downward-crossing detector (upper entry + lower
+confirmation, upward crossings disarm, score latches).
 
 Not a cargo workspace member; `cargo xtask check-architecture` does not classify
 it. App TS is typecheck-gated (tsgo); tests run separately.
@@ -78,12 +89,14 @@ it. App TS is typecheck-gated (tsgo); tests run separately.
 ## Run
 
 ```sh
-node --test apps/axiom-three-point/web/src/three-point.test.ts   # 26 deterministic tests
-node apps/axiom-three-point/web/src/agent.ts                     # headless full-game driver
-make gallery-three-point                                          # rebuild the self-hosted gallery page
+node --test apps/axiom-three-point/web/src/three-point.test.ts       # game-core tests
+node --test apps/axiom-three-point/web/src/engine/platform.test.ts   # loop + input tests
+node --test apps/axiom-three-point/web/src/engine/render.test.ts     # mat4 + mesh tests
+node apps/axiom-three-point/web/src/agent.ts                         # headless full-game driver
+make gallery-three-point                                             # rebuild the self-hosted gallery page
 ```
 
-The gallery page (`apps/axiom-gallery/web/three-point/index.html`) is a single
-self-contained file — SDK + compiled app + gzip-embedded runtime wasm — and runs
+The gallery page (`apps/axiom-gallery/web/three-point/index.html`) is one small
+self-contained HTML file (the esbuild-inlined app — no SDK, no wasm) and runs
 from `file://`. A `DEBUG_TRAJECTORY` constant in `constants.ts` renders the real
 predicted trajectory (same integrator) while holding a shot, for tuning.

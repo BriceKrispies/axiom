@@ -147,8 +147,10 @@ export const DEMOS = [
     title: "Three-Point Shootout",
     blurb: "A first-person three-point rack contest: ride the rise and release at the top — or swipe the ball up on touch.",
     desc:
-      "A first-person 3D three-point contest authored purely in TypeScript on the engine's 3D " +
-      "scene surface, in the spirit of Wii Sports rack shooting. Fifteen shots from three spots " +
+      "A first-person 3D three-point contest in the spirit of Wii Sports rack shooting — a FULLY " +
+      "SELF-CONTAINED pure-TypeScript app that ships its own engine (WebGL2 forward renderer, " +
+      "fixed-step loop, pointer-lock/touch input, WebAudio synth) with no SDK and no wasm; the " +
+      "whole game is one 70 KB page. Fifteen shots from three spots " +
       "around a procedurally-built arc — left wing, top of the key, right wing — five balls per " +
       "rack with a golden fifth ball. Every shot is ONE continuous motion that never waits: the " +
       "moment you release, the next ball is dealt off its rack slot into your hands while the " +

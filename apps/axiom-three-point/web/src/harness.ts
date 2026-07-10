@@ -1,32 +1,24 @@
 /*
- * The browser boot harness for the Three-Point Shootout — the host / platform edge
- * (NOT engine spine), so it lives in the app `web/` dir, outside the branchless +
- * coverage gates, and uses ordinary control flow. `createGame()` mints the per-game
- * registry the author module (`game.ts`) registers its `onFixedUpdate` into; the
- * SDK's `boot()` builds the deterministic loop over the wasm bridge, wires DOM
- * input (including the canvas-click pointer lock the mouse aim rides on), and
- * presents the authored 3D arena every frame. This harness adds the DOM HUD:
- * score / streak, rack + ball pips, the charging power meter with its useful-zone
- * band, floating shot feedback, the rack-transition banner, the pointer-lock cue,
- * and the results overlay — all driven from the game's `readHud()`.
+ * The browser boot harness for the Three-Point Shootout — the host / platform
+ * edge of a FULLY SELF-CONTAINED app: it boots the app's own pure-TypeScript
+ * engine (`web/src/engine/` — WebGL2 renderer, fixed-step loop, input, WebAudio)
+ * with no external SDK and no wasm. It wires the pieces together (renderer →
+ * input → game → loop) and drives the DOM HUD: score / streak, rack + ball pips,
+ * the shot meter with its ideal-window band, floating shot feedback, the
+ * rack-transition banner, the pointer-lock / touch cue, and the results overlay
+ * — all from the game's `readHud()`.
  *
- * The three dev-server couplings (the wasm init call, the versioned hot-reload
- * import, and the `/events` SSE channel) are the anchors the single-file packager
- * rewrites for the static gallery build — keep them verbatim.
+ * The two dev-server couplings (the versioned hot-reload import and the
+ * `/events` SSE channel) are the anchors the single-file packager rewrites for
+ * the static gallery build — keep them verbatim.
  */
 
-import { boot } from "/vendor/axiom-game/boot.js";
-import { createGame, onRender } from "@axiom/game";
+import { initRenderer, renderScene } from "./engine/renderer.ts";
+import { startLoop } from "./engine/loop.ts";
+import { InputState, attachDomInput } from "./engine/input.ts";
+import { BALLS_PER_RACK, FIXED_HZ, RACK_COUNT, SHOT_TUNING } from "./constants.ts";
 
-import initWasm, { WasmGame } from "/pkg/axiom_game_runtime.js";
-import { BALLS_PER_RACK, RACK_COUNT, SHOT_TUNING } from "./constants.ts";
-
-const FIXED_HZ = 60;
-const SEED = 1n;
-const NANOS_PER_SECOND = 1_000_000_000;
-const FIXED_STEP_NANOS = Math.round(NANOS_PER_SECOND / FIXED_HZ);
 const MAX_STEPS_PER_FRAME = 8;
-const MAX_INSTANCES = 4096;
 const CANVAS_ID = "axiom-canvas";
 
 interface Feedback {
@@ -63,6 +55,8 @@ interface Hud {
 }
 
 interface GameModule {
+  readonly initGame: (input: InputState) => void;
+  readonly updateGame: (input: InputState, tick: number) => void;
   readonly readHud: () => Hud;
   readonly configureViewport: (width: number, height: number) => void;
 }
@@ -71,17 +65,6 @@ const el = (id: string): HTMLElement => document.getElementById(id) as HTMLEleme
 
 /** A clamped 0..1 value as a CSS percentage (for meter fills). */
 const pct = (v: number): string => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
-
-// The Canvas2D software backend logs a verbose stats line EVERY frame (~60/sec) —
-// drop just that per-frame line here at the platform edge; one-time logs still show.
-const passthroughLog = console.log.bind(console);
-console.log = (...args: unknown[]): void => {
-  const first = args[0];
-  if (typeof first === "string" && first.startsWith("axiom-canvas2d:")) {
-    return;
-  }
-  passthroughLog(...args);
-};
 
 const boot_ = async (): Promise<void> => {
   const canvas = el(CANVAS_ID) as HTMLCanvasElement;
@@ -107,8 +90,6 @@ const boot_ = async (): Promise<void> => {
   // The ideal-release band is static: position it once from the tuning constants.
   powerZone.style.left = pct(SHOT_TUNING.idealWindowStart);
   powerZone.style.width = pct(SHOT_TUNING.idealWindowEnd - SHOT_TUNING.idealWindowStart);
-
-  await initWasm();
 
   let floaterSeq = 0;
   const spawnFloater = (fb: Feedback): void => {
@@ -188,14 +169,18 @@ const boot_ = async (): Promise<void> => {
     }
   };
 
-  let teardown: (() => void) | undefined;
+  initRenderer(canvas);
+
+  let stopLoop: (() => void) | undefined;
+  let detachInput: (() => void) | undefined;
   let applyViewport: () => void = () => {};
   globalThis.addEventListener("resize", (): void => applyViewport());
 
   const load = async (version: number): Promise<void> => {
-    teardown?.();
-    const game = new WasmGame(FIXED_STEP_NANOS, MAX_STEPS_PER_FRAME);
-    const app = createGame({ fixedHz: FIXED_HZ, seed: SEED, surface: CANVAS_ID });
+    stopLoop?.();
+    detachInput?.();
+    const input = new InputState();
+    detachInput = attachDomInput(input, canvas);
     const mod = (await import(`/dist/game.js?v=${version}`)) as GameModule;
 
     // Touch gestures project against the DISPLAYED canvas size (CSS px), which
@@ -203,15 +188,18 @@ const boot_ = async (): Promise<void> => {
     applyViewport = (): void => mod.configureViewport(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
     applyViewport();
 
-    onRender((): void => updateHud(mod.readHud()));
-
-    app.start();
-    // frameLocked: one sim tick per displayed frame, so the first frame builds the
-    // whole scene (registering every material) BEFORE the 3D surface binds.
-    teardown = boot(game as unknown as Parameters<typeof boot>[0], app, {
-      canvas,
-      frameLocked: true,
-      present3d: { maxInstances: MAX_INSTANCES },
+    mod.initGame(input);
+    stopLoop = startLoop({
+      fixedHz: FIXED_HZ,
+      maxCatchUpSteps: MAX_STEPS_PER_FRAME,
+      render: (): void => {
+        renderScene();
+        updateHud(mod.readHud());
+      },
+      update: (tick: number): void => {
+        input.beginTick();
+        mod.updateGame(input, tick);
+      },
     });
   };
 

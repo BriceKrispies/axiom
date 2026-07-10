@@ -199,16 +199,16 @@ gallery-minimal-3v3:
 	npm --prefix packages/axiom-game exec -- tsgo -p $(MIN3V3_DIR)/web/tsconfig.json
 	node scripts/package_minimal_3v3_singlefile.mjs $(GALLERY_WEB)/minimal-3v3/index.html
 
-# Regenerate the self-hosted Three-Point Shootout gallery page — the same
-# self-hosted TS-game shape as gallery-minimal-3v3 (its own @axiom/game SDK +
-# axiom-game-runtime wasm, 3D present path). Packages a single self-contained page
-# COMMITTED at $(GALLERY_WEB)/three-point/index.html. Run this after editing the
-# app, then commit the refreshed page.
+# Regenerate the self-hosted Three-Point Shootout gallery page. Unlike the other
+# self-hosted TS games this app is FULLY SELF-CONTAINED — it ships its own
+# pure-TypeScript engine (WebGL2 renderer, fixed-step loop, input, WebAudio)
+# under web/src/engine/ with no @axiom/game SDK and no wasm — so the build is
+# just a typecheck-compile (tsgo, borrowed from the SDK package's toolchain) and
+# an esbuild inline into a single page COMMITTED at
+# $(GALLERY_WEB)/three-point/index.html. Run this after editing the app, then
+# commit the refreshed page.
 gallery-three-point:
 	npm --prefix packages/axiom-game install --no-audit --no-fund
-	npm --prefix packages/axiom-game run build
-	cargo build -p $(GAME_RUNTIME_CRATE) --target $(WASM_TARGET) --release
-	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
 	npm --prefix packages/axiom-game exec -- tsgo -p $(THREEPOINT_DIR)/web/tsconfig.json
 	node scripts/package_three_point_singlefile.mjs $(GALLERY_WEB)/three-point/index.html
 
