@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Home Run! (pure CSS 3D)</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <h1>Axiom — <span>Home Run!</span> <em>pure CSS 3D</em></h1>
+
+    <!--
+      The 3D scene: a CSS-perspective "paper theater". Mapping from the engine app:
+        · #viewport      ↔ the canvas + Camera3D intrinsics (perspective = fovY)
+        · #scene         ↔ the camera extrinsics (setCamera3D pose, inverted)
+        · #floor         ↔ the world's ground plane; every buildGround decal is an
+                           absolutely-positioned child laid out in world XZ
+        · .standee       ↔ scene.ts figures (batter/fielders/machine), as cardboard
+                           cutouts standing on the floor (toy-theater idiom)
+        · .ball-anchor   ↔ the ball entity: XZ on the floor, height via translateZ
+      All MOTION is CSS animations/transitions; game.js only flips classes/vars.
+    -->
+    <div id="stage">
+      <div id="viewport">
+        <div id="scene">
+          <div id="floor">
+            <!-- ground decals (scene.ts buildGround) -->
+            <div id="ground-green"></div>
+            <div id="deck"></div>
+            <div id="stripes"></div>
+            <div id="infield-dirt"></div>
+            <div id="infield-grass"></div>
+            <div id="infield-bands"></div>
+            <div id="home-circle"></div>
+            <div id="mound"></div>
+            <div class="foul-line left"></div>
+            <div class="foul-line right"></div>
+            <div class="warning-track left"></div>
+            <div class="warning-track right"></div>
+            <div id="plate"></div>
+            <div class="batter-box left"></div>
+            <div class="batter-box right"></div>
+            <div class="base first"></div>
+            <div class="base second"></div>
+            <div class="base third"></div>
+            <div id="patrol-circles"></div>
+
+            <!-- stadium enclosure (scene.ts buildStadium): standing planes -->
+            <div class="wall left"></div>
+            <div class="wall right"></div>
+            <div class="wall-trim left"></div>
+            <div class="wall-trim right"></div>
+            <div id="seats"></div>
+            <div class="side-fence left"></div>
+            <div class="side-fence right"></div>
+            <div class="corner-block left"></div>
+            <div class="corner-block right"></div>
+
+            <!-- score panels on the deck (scene.ts buildScorePanels) -->
+            <div id="panel-score"><i></i><i></i></div>
+            <div id="panel-bso">
+              <b class="b"></b><b class="b"></b><b class="b"></b>
+              <b class="s"></b><b class="s"></b>
+              <b class="o"></b><b class="o"></b>
+            </div>
+
+            <!-- the pitching machine (buildMachine): cardboard body + barrel -->
+            <div id="machine" class="standee">
+              <div class="m-body"></div>
+              <div class="m-barrel"></div>
+              <div class="m-muzzle"></div>
+              <div class="m-flash"></div>
+            </div>
+
+            <!-- fielders (FIELDER_SPOTS ×10): cutouts injected by game.js from the
+                 same spot table — the ONE piece of scene construction JS does,
+                 because CSS cannot loop over data. -->
+            <div id="fielders"></div>
+
+            <!-- the batter + the oversized stepped bat (applyBatter) -->
+            <div id="batter-group">
+              <div id="batter-puck"></div>
+              <div id="batter" class="standee">
+                <div class="b-legs"></div>
+                <div class="b-torso"></div>
+                <div class="b-head"></div>
+              </div>
+              <div id="bat-pivot">
+                <div class="bat-knob"></div>
+                <div class="bat-handle"></div>
+                <div class="bat-barrel"></div>
+                <div class="bat-tip"></div>
+              </div>
+            </div>
+
+            <!-- the ball: XZ anchor animated on the floor, height on the inner lift -->
+            <div id="ball-anchor">
+              <div id="ball-shadow"></div>
+              <div id="ball-lift"><div id="ball"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DOM HUD: mapped verbatim from the engine app's index.html -->
+      <div id="confetti"></div>
+      <div id="message"></div>
+      <div id="load-meter"><div id="load-fill"></div></div>
+      <div id="ready" class="overlay show">
+        <div id="ready-title">HOME RUN!</div>
+        <div id="ready-sub">Press SPACE to swing — always full power.</div>
+        <div id="ready-controls">A / D shift the batter · the batter re-winds himself · 10 pitches · clear the wall · pure CSS 3D</div>
+      </div>
+      <div id="over" class="overlay">
+        <div id="over-title">ROUND OVER</div>
+        <div class="row">SCORE <b id="over-score">0</b></div>
+        <div class="row">HOME RUNS <b id="over-homers">0</b></div>
+        <div class="row">BEST DISTANCE <b id="over-best">—</b></div>
+        <div id="over-restart">Press SPACE or ENTER to play again</div>
+      </div>
+    </div>
+
+    <div id="hud">
+      <span><span class="k">SCORE</span> <b id="score">0</b></span>
+      <span><span class="k">PITCH</span> <b id="pitch">1/10</b></span>
+      <span><span class="k">HR</span> <b id="homers">0</b></span>
+      <span><span class="k">STREAK</span> <b id="streak">1&times;</b></span>
+      <span><span class="k">PITCH SPEED</span> <b id="mph">—</b></span>
+      <span><span class="k">BEST</span> <b id="best">—</b></span>
+    </div>
+    <div id="pad">
+      <div id="pad-left">◀ STEP</div>
+      <div id="pad-swing">SWING</div>
+      <div id="pad-right">STEP ▶</div>
+    </div>
+    <div id="instructions"><b>A/D</b> shift the batter · <b>SPACE</b> swings at full power · rendered entirely with CSS 3D transforms</div>
+
+    <script src="game.js"></script>
+  </body>
+</html>

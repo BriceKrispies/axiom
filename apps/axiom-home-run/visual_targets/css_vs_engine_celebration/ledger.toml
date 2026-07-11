@@ -1,0 +1,11 @@
+# Convergence ledger — the CSS edition's HOME RUN! celebration vs the engine's.
+# This target rides the css_vs_engine campaign's five kept iterations (same
+# scene, same palette); its own axis is homerun_presentation.
+
+[[iteration]]
+iteration = 1
+attacked_axis = "homerun_presentation"
+changed_files = ["apps/axiom-home-run/css/{index.html,style.css,game.js}"]
+decision = "keep_candidate"
+reason = "homerun_presentation lands at 4 essentially for free: the HUD/message/confetti layers are the engine page's markup+CSS near-verbatim (the mapping), so the big yellow HOME RUN! +points text and the confetti burst are pixel-siblings. The CSS homer is a REAL played outcome (scripted press via ?swingAfter) scoring through the verbatim scoreFor port — engine +694 vs CSS +638 differ only by distance. Remaining gap: the engine frame still shows the resting ball beyond the wall; the CSS ball has finished its bounce keyframes and sits at the landing point."
+next_attacked_axis = "pitcher_silhouette"

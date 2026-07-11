@@ -1,0 +1,50 @@
+# Convergence ledger — the pure-CSS 3D edition vs the ENGINE's own render.
+# reference.png = apps/axiom-gallery/web/home-run/index.html?backend=canvas2d&auto=1&shot=60
+#                 (the engine's deterministic frozen-tick capture, cropped to the canvas)
+# champion.png  = apps/axiom-home-run/css/index.html?auto=1&static=1 (frozen at the
+#                 wind-up moment, cropped to the #viewport)
+# Axes (fixed order): composition_and_framing, field_layout, batter_silhouette,
+# pitcher_silhouette, fielder_placement, stadium_enclosure, color_palette,
+# contrast_and_exposure, depth_and_separation, ui_placement.
+# All changes are app-tier CSS (config-level for this renderer) — no abstraction
+# gate entries were needed.
+
+[[iteration]]
+iteration = 1
+attacked_axis = "composition_and_framing"
+changed_files = ["apps/axiom-home-run/css/style.css"]
+decision = "keep_candidate"
+reason = "composition 2->3: floor tilt 72->79deg + eye lowered/dolly trimmed — the CSS camera was too top-down; now the flat, low view matches the engine's (batter large bottom-centre, wall band across the upper frame)."
+next_attacked_axis = "color_palette"
+
+[[iteration]]
+iteration = 2
+attacked_axis = "color_palette"
+changed_files = ["apps/axiom-home-run/css/style.css"]
+decision = "keep_candidate"
+reason = "color_palette 2->3: the whole :root palette re-set from PIXELS SAMPLED off the engine reference (desaturated gray-greens, gray-blue painted lines, navy walls, dark deck, hazy sky). The CSS version had albedo-bright toy colours; the engine renders through its hemisphere grade."
+next_attacked_axis = "depth_and_separation"
+
+[[iteration]]
+iteration = 3
+attacked_axis = "depth_and_separation"
+changed_files = ["apps/axiom-home-run/css/style.css", "apps/axiom-home-run/css/game.js"]
+decision = "keep_candidate"
+reason = "depth 2->3 (and exposure 2->3): a #viewport::after fog gradient peaked at the horizon band reproduces the canvas2d backend's depth fog toward the clear colour. Also fixed the ?static harness to freeze the game AT the wind-up moment (JS timers were outrunning the paused CSS, teleporting the ball into the frame)."
+next_attacked_axis = "batter_silhouette"
+
+[[iteration]]
+iteration = 4
+attacked_axis = "batter_silhouette"
+changed_files = ["apps/axiom-home-run/css/style.css"]
+decision = "keep_candidate"
+reason = "batter 2->3: round bowling-pin cutout re-blocked into the engine's box-man (square helmet, wide torso, split legs) and the stepped bat thickened so the cocked pose reads."
+next_attacked_axis = "ui_placement"
+
+[[iteration]]
+iteration = 5
+attacked_axis = "ui_placement"
+changed_files = ["apps/axiom-home-run/css/style.css"]
+decision = "keep_candidate"
+reason = "ui_placement 2->3: deck score/BSO panels shrunk toward the engine's footprint, glow removed, pulled in beside the plate. Still reads larger than the engine's (near-camera perspective magnification) — queued for a future pass along with pitcher_silhouette (lowest axis, 2: the machine is a flat orange cutout vs the engine's dark-barrelled launcher)."
+next_attacked_axis = "pitcher_silhouette"

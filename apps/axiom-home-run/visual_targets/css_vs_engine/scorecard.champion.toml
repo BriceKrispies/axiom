@@ -1,0 +1,15 @@
+# Champion axis scores: the pure-CSS 3D edition (css/index.html, frozen wind-up
+# via ?auto=1&static=1) vs reference.png = the ENGINE's deterministic canvas2d
+# render (?backend=canvas2d&auto=1&shot=60). Calibrated to identity — harsh.
+
+[scores]
+composition_and_framing = 3
+field_layout = 3
+batter_silhouette = 3
+pitcher_silhouette = 2
+fielder_placement = 3
+stadium_enclosure = 3
+color_palette = 3
+contrast_and_exposure = 3
+depth_and_separation = 3
+ui_placement = 3
