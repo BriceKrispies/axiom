@@ -7,8 +7,9 @@
  * for the harness's DOM overlay and `configure()` for the harness's URL-driven
  * dev/screenshot affordances (seed, freeze-at-tick, scripted autoplay).
  *
- * Controls: A/D (or ←/→) shift the batter · hold SPACE to load, release to swing ·
- * SPACE or ENTER restarts once the round is over.
+ * Controls: A/D (or ←/→) shift the batter · SPACE swings (always full power; the
+ * batter re-winds on his own between swings) · SPACE or ENTER restarts once the
+ * round is over.
  */
 
 import { type Sim, bindAction, onFixedUpdate, playTone } from "@axiom/game";
@@ -28,9 +29,9 @@ export interface Hud {
   readonly bestDistance: number;
   readonly lastMph: number;
   readonly lastPitchName: string;
-  /** Bat spring compression 0…1, for the load meter. */
-  readonly load: number;
-  readonly loading: boolean;
+  /** Rewind progress 0…1 — the ready meter (1 = wound and ready to swing). */
+  readonly readiness: number;
+  readonly ready: boolean;
   readonly results: readonly PitchResult[];
   /** Feedback events to present this frame (center text, flashes, audio). */
   readonly events: readonly Feedback[];
@@ -45,15 +46,15 @@ let session = new HomeRunSession(1);
 let pendingSeed = 1;
 let freezeAtTick = Number.POSITIVE_INFINITY;
 let autoStart = false;
-let autoLoadAt = -1;
 let autoSwingAt = -1;
 let ticks = 0;
 
-// The optional on-screen touch pad pushes its state here (see harness.ts).
+// The optional on-screen touch pad pushes its state here (see harness.ts). A tap
+// on the swing button queues one press edge, consumed by the next fixed tick.
 let padMoveX = 0;
-let padHolding = false;
+let padSwingQueued = false;
 
-let prevHolding = false;
+let prevReady = true;
 let hudEvents: Feedback[] = [];
 
 const bindKeys = (): void => {
@@ -68,20 +69,18 @@ export const configure = (opts: {
   readonly seed?: number;
   readonly freezeAt?: number;
   readonly autoStart?: boolean;
-  readonly loadAt?: number;
   readonly swingAt?: number;
 }): void => {
   pendingSeed = opts.seed ?? pendingSeed;
   freezeAtTick = opts.freezeAt ?? freezeAtTick;
   autoStart = opts.autoStart ?? autoStart;
-  autoLoadAt = opts.loadAt ?? autoLoadAt;
   autoSwingAt = opts.swingAt ?? autoSwingAt;
 };
 
-/** The harness's touch pad feeds its state here (world-sign moveX in [-1, 1]). */
-export const setPad = (moveX: number, holding: boolean): void => {
+/** The harness's touch pad feeds its state here (screen-sign moveX; tap queues a swing). */
+export const setPad = (moveX: number, swingTap: boolean): void => {
   padMoveX = moveX;
-  padHolding = holding;
+  padSwingQueued = padSwingQueued || swingTap;
 };
 
 /**
@@ -92,18 +91,17 @@ export const setPad = (moveX: number, holding: boolean): void => {
 const readIntent = (sim: Sim): Intent => {
   const kbAxis = sim.input.axis("left", "right");
   const moveX = padMoveX !== 0 ? -padMoveX : -kbAxis;
-  let holding = sim.input.isDown("swing") || padHolding;
+  let swing = sim.input.pressed("swing") || padSwingQueued;
+  padSwingQueued = false;
   let start = sim.input.pressed("swing") || sim.input.pressed("restart");
-  // Scripted autoplay for deterministic screenshots (?loadAt=&swingAt=).
-  if (autoLoadAt >= 0 && ticks >= autoLoadAt && (autoSwingAt < 0 || ticks < autoSwingAt)) {
-    holding = true;
+  // Scripted autoplay for deterministic screenshots (?swingAt=N presses once).
+  if (autoSwingAt >= 0 && ticks === autoSwingAt) {
+    swing = true;
   }
   if (autoStart && ticks === 2) {
     start = true;
   }
-  const released = prevHolding && !holding;
-  prevHolding = holding;
-  return { holding, moveX, released, start };
+  return { moveX, start, swing };
 };
 
 // ── audio hooks (synthesized; no assets) ──────────────────────────────────────
@@ -166,6 +164,12 @@ onFixedUpdate((sim: Sim): void => {
       hudEvents.push(event);
       toneFor(event.kind, event.big);
     }
+    // A soft click the instant the batter finishes re-winding (ready to swing).
+    const ready = session.swing.state === "ready";
+    if (ready && !prevReady) {
+      playTone({ duration: 0.05, freq: 880, volume: 0.14, wave: "sine" });
+    }
+    prevReady = ready;
   }
   applyFrame(handles, session.view());
 });
@@ -180,9 +184,9 @@ export const readHud = (): Hud => {
     homers: session.homers,
     lastMph: session.lastMph,
     lastPitchName: session.lastPitchName,
-    load: session.swing.load,
-    loading: session.swing.state === "loading" || session.swing.state === "loaded",
     multiplier: session.streakMultiplier,
+    readiness: session.swing.readiness,
+    ready: session.swing.state === "ready",
     phase: session.phase,
     pitchCount: PITCH_COUNT,
     pitchNumber: session.pitchNumber,

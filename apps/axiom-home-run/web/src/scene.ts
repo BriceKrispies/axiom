@@ -361,27 +361,26 @@ const applyCamera = (view: SceneView): void => {
   });
 };
 
-/** The bat's visual raise (radians) per swing state — up at rest, flat mid-strike. */
-const batTilt = (state: SwingState, load: number, theta: number): number => {
+/** The bat's visual raise (radians) per swing state — cocked up when armed, flat mid-strike. */
+const batTilt = (state: SwingState, readiness: number): number => {
   if (state === "swing" || state === "follow") {
     return 0.1;
   }
-  if (state === "recover") {
-    const back = clamp01((theta - C.THETA_IDLE) / (C.THETA_FOLLOW_END - C.THETA_IDLE));
-    return mix(0.55, 0.1, back);
-  }
-  return 0.55 + 0.28 * load;
+  // Rewind eases the bat back up as the batter re-arms; ready holds it cocked.
+  return mix(0.1, 0.68, readiness);
 };
 
 const applyBatter = (h: SceneHandles, view: SceneView): void => {
   const bx = view.batterX;
   const bz = C.BATTER_Z;
   const s = view.swing;
-  // Torso twist follows the bat backward under load and whips through the strike.
+  // The stance coil: fully wound while armed, whipped open through the strike.
+  const coil = s.state === "swing" || s.state === "follow" ? 0 : s.readiness;
+  // Torso twist follows the bat backward when coiled and whips through the strike.
   const twist = clamp01(1 - Math.abs(s.theta - C.THETA_SWEET) / 2.4);
-  const yawAngle = mix(-0.55, 0.5, twist) + s.load * -0.35;
-  const crouch = s.load * 0.09;
-  const yaw = quatFromEulerXyz(0, yawAngle, s.load * 0.12);
+  const yawAngle = mix(-0.55, 0.5, twist) + coil * -0.35;
+  const crouch = coil * 0.07;
+  const yaw = quatFromEulerXyz(0, yawAngle, coil * 0.12);
 
   // A wide, planted athletic stance: feet apart along the pitch line, knees bent.
   show(h.batter.puck, xform(vec3(bx, 0.16, bz), vec3(1.05, 0.12, 0.78)));
@@ -393,7 +392,7 @@ const applyBatter = (h: SceneHandles, view: SceneView): void => {
   show(h.batter.cap, xform(vec3(bx, 1.47 - crouch, bz), sphereScale(0.15)));
 
   // Bat: pivot at the hands; the box tilts up about the grip, then yaws with θ.
-  const tilt = batTilt(s.state, s.load, s.theta);
+  const tilt = batTilt(s.state, s.readiness);
   const d = batDir(s.theta);
   const pivotY = batPlaneY(s.theta) + 0.05;
   const rMid = (C.BAT_GRIP_R + C.BAT_TIP_R) / 2;

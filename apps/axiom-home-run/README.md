@@ -7,11 +7,12 @@ pitcher on the mound, blue stadium walls, and nine red toy fielders wandering
 their own patrol circles. Ten pitches per round; the whole game is hitting them
 as far as possible.
 
-**A / D (or ←/→)** shift the batter inside the batting box. **Holding SPACE**
-winds the spring-loaded bat — quick at first, resisting toward maximum load —
-and **releasing SPACE** snaps the committed forward swing (the game never swings
-on press). **SPACE or ENTER** restarts once the round is over. On touch, the
-on-screen pad mirrors the same three controls.
+**A / D (or ←/→)** shift the batter inside the batting box. The batter idles
+**wound at full power**: **pressing SPACE** fires the max-power swing instantly,
+then the bat follows through and **re-winds on its own** — that re-wind is the
+swing cooldown, shown by a small ready meter that fades once he's armed again.
+**SPACE or ENTER** restarts once the round is over. On touch, the on-screen pad
+mirrors the same controls (tap SWING).
 
 ## The batting model
 
@@ -20,9 +21,9 @@ a timing-window roll. Each tick of a forward swing runs a swept segment-vs-ball
 test (both the bat sweep and the ball path are subsampled, so neither tunnels).
 A touch resolves into:
 
-- **exit speed** — bat angular velocity (load-scaled) × the contact radius along
-  the barrel (tip beats handle), shaped by the sweet spot (~76% out), squareness
-  of timing, and vertical mishit;
+- **exit speed** — bat angular velocity (always full power) × the contact radius
+  along the barrel (tip beats handle), shaped by the sweet spot (~76% out),
+  squareness of timing, and vertical mishit;
 - **spray** — the bat's tangential direction at the contact angle: early pulls,
   late pushes, extremes go foul;
 - **loft** — the vertical contact offset: undercut lifts (flies, popups), topping
@@ -57,7 +58,7 @@ under `web/`:
   plays the synthesized audio hooks (`playTone`).
 - `web/src/harness.ts` — the browser boot edge (wasm init + `boot({ present3d })`
   + the DOM HUD + touch pad). URL affordances: `?seed=N`, `?shot=N` (freeze after
-  N ticks), `?auto=1`, `?loadAt=N&swingAt=N` (scripted deterministic swing) —
+  N ticks), `?auto=1`, `?swingAt=N` (scripted deterministic full-power swing) —
   used by the screenshot/convergence harness.
 
 ## Run

@@ -14,30 +14,28 @@ export type Phase = "ready" | "windup" | "pitch" | "flight" | "result" | "over";
 /** The arcade outcome of one pitch. */
 export type Outcome = "miss" | "foul" | "weak" | "grounder" | "popup" | "clean" | "homer";
 
-/** The bat's spring-loaded swing state machine. */
-export type SwingState = "idle" | "loading" | "loaded" | "swing" | "follow" | "recover";
+/** The bat's always-armed swing state machine (rewind = the swing cooldown). */
+export type SwingState = "ready" | "swing" | "follow" | "rewind";
 
 /** One tick's folded input. `moveX` is in WORLD sign (+X = batter's side / screen-left). */
 export interface Intent {
   /** Lateral step intent: -1, 0, +1 (world sign). */
   readonly moveX: number;
-  /** True while the swing control (Space) is held — winds the bat. */
-  readonly holding: boolean;
-  /** The release edge — the committed forward swing fires HERE, never on press. */
-  readonly released: boolean;
+  /** The swing press EDGE — fires the full-power swing when the batter is ready. */
+  readonly swing: boolean;
   /** A discrete press this tick (starts the round / restarts from `over`). */
   readonly start: boolean;
 }
 
-/** The bat's live pose + spring state (one immutable snapshot per tick). */
+/** The bat's live pose + cooldown state (one immutable snapshot per tick). */
 export interface Swing {
   readonly state: SwingState;
   /** Bat sweep angle θ (see constants.ts for the frame). */
   readonly theta: number;
   /** Current angular velocity (rad/tick); nonzero only in swing/follow. */
   readonly omega: number;
-  /** Stored spring compression 0…1. */
-  readonly load: number;
+  /** Rewind progress 0…1 — 1 means the batter is wound and ready to swing. */
+  readonly readiness: number;
   /** Ticks spent in the current state. */
   readonly stateTicks: number;
 }

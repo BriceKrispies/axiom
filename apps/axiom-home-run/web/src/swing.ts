@@ -1,11 +1,12 @@
 /*
- * swing.ts — the spring-loaded bat: an explicit state machine
- * (idle → loading → loaded → swing → follow → recover → idle) plus the swept
- * bat-vs-ball contact resolution. The swing NEVER fires on press: holding winds
- * the bat back (fast at first, resisting toward full load), releasing snaps it
- * forward with load-scaled angular velocity, it overshoots into follow-through,
- * and recovery back to idle is deliberately slower than the strike. Pure and
- * deterministic — identical inputs produce identical poses. SDK-free.
+ * swing.ts — the always-armed bat: an explicit state machine
+ * (ready → swing → follow → rewind → ready) plus the swept bat-vs-ball contact
+ * resolution. The batter STARTS wound at full power: one press fires the
+ * max-power forward swing instantly, the bat overshoots into follow-through,
+ * then re-winds ON ITS OWN back to the ready stance — that rewind is the swing
+ * cooldown (pressing during it does nothing). `readiness` (0…1, 1 = ready)
+ * drives the HUD's ready indicator. Pure and deterministic — identical inputs
+ * produce identical poses. SDK-free.
  */
 
 import { type Vec3, clamp, clamp01, mix, vec3 } from "./vec.ts";
@@ -13,14 +14,18 @@ import type { Contact, Swing } from "./types.ts";
 import * as C from "./constants.ts";
 
 export const newSwing = (): Swing => ({
-  load: 0,
   omega: 0,
-  state: "idle",
+  readiness: 1,
+  state: "ready",
   stateTicks: 0,
-  theta: C.THETA_IDLE,
+  theta: C.THETA_READY,
 });
 
-/** The effective ω this tick, including the release snap ramp-up. */
+/** Rewind progress (0 just after follow-through … 1 back at the ready stance). */
+const rewindReadiness = (theta: number): number =>
+  clamp01((C.THETA_FOLLOW_END - theta) / (C.THETA_FOLLOW_END - C.THETA_READY));
+
+/** The effective ω this tick, including the strike's snap ramp-up. */
 export const effectiveOmega = (s: Swing): number => {
   if (s.state === "swing") {
     const snap = s.stateTicks < C.SNAP_TICKS ? mix(C.SNAP_START, 1, (s.stateTicks + 1) / (C.SNAP_TICKS + 1)) : 1;
@@ -32,34 +37,22 @@ export const effectiveOmega = (s: Swing): number => {
   return 0;
 };
 
-/** Advance the swing one tick. `holding`/`released` come straight from the intent. */
-export const stepSwing = (s: Swing, holding: boolean, released: boolean): Swing => {
+/** Advance the swing one tick. `swingPressed` is the press EDGE from the intent. */
+export const stepSwing = (s: Swing, swingPressed: boolean): Swing => {
   const t = s.stateTicks + 1;
   switch (s.state) {
-    case "idle": {
-      if (holding) {
-        return { load: 0, omega: 0, state: "loading", stateTicks: 0, theta: s.theta };
+    case "ready": {
+      if (swingPressed) {
+        // The committed full-power swing — fires the instant it is pressed.
+        return { omega: C.OMEGA_SWING, readiness: 0, state: "swing", stateTicks: 0, theta: s.theta };
       }
       return { ...s, stateTicks: t };
-    }
-    case "loading":
-    case "loaded": {
-      if (released || !holding) {
-        // The committed forward swing — fires on RELEASE only.
-        const omega0 = mix(C.OMEGA_MIN, C.OMEGA_MAX, s.load);
-        return { load: s.load, omega: omega0, state: "swing", stateTicks: 0, theta: s.theta };
-      }
-      // Winding: quick at first, then resisting as it approaches maximum load.
-      const load = clamp01(s.load + (1 - s.load) * C.LOAD_RATE);
-      const theta = mix(C.THETA_IDLE, C.THETA_LOADED, load);
-      const state = load >= C.LOAD_FULL ? "loaded" : "loading";
-      return { load, omega: 0, state, stateTicks: state === s.state ? t : 0, theta };
     }
     case "swing": {
       const w = effectiveOmega({ ...s, stateTicks: t - 1 });
       const theta = s.theta + w;
       if (theta >= C.THETA_FOLLOW_START) {
-        return { load: s.load, omega: s.omega, state: "follow", stateTicks: 0, theta };
+        return { omega: s.omega, readiness: 0, state: "follow", stateTicks: 0, theta };
       }
       return { ...s, stateTicks: t, theta };
     }
@@ -67,17 +60,17 @@ export const stepSwing = (s: Swing, holding: boolean, released: boolean): Swing 
       const omega = s.omega * C.FOLLOW_DRAG;
       const theta = Math.min(C.THETA_FOLLOW_END, s.theta + omega);
       if (omega < C.FOLLOW_MIN_OMEGA || theta >= C.THETA_FOLLOW_END) {
-        return { load: 0, omega: 0, state: "recover", stateTicks: 0, theta };
+        return { omega: 0, readiness: rewindReadiness(theta), state: "rewind", stateTicks: 0, theta };
       }
-      return { load: s.load, omega, state: "follow", stateTicks: t, theta };
+      return { omega, readiness: 0, state: "follow", stateTicks: t, theta };
     }
-    case "recover": {
-      // The bat does NOT teleport back — it eases home slower than it struck.
-      const theta = s.theta + (C.THETA_IDLE - s.theta) * C.RECOVER_RATE;
-      if (Math.abs(theta - C.THETA_IDLE) < C.RECOVER_EPSILON) {
-        return { load: 0, omega: 0, state: "idle", stateTicks: 0, theta: C.THETA_IDLE };
+    case "rewind": {
+      // The cooldown: the batter re-winds the bat on his own — a press does nothing.
+      const theta = s.theta + (C.THETA_READY - s.theta) * C.REWIND_RATE;
+      if (Math.abs(theta - C.THETA_READY) < C.REWIND_EPSILON) {
+        return { omega: 0, readiness: 1, state: "ready", stateTicks: 0, theta: C.THETA_READY };
       }
-      return { load: 0, omega: 0, state: "recover", stateTicks: t, theta };
+      return { omega: 0, readiness: rewindReadiness(theta), state: "rewind", stateTicks: t, theta };
     }
     default:
       return s;

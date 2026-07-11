@@ -7,11 +7,11 @@
  * presents the authored stadium every frame. This harness adds the DOM HUD: score /
  * pitch / homers / streak / speed readouts, the bat-load meter, the big center
  * outcome text (HOME RUN! + confetti), the ready and round-over overlays, and a
- * hold-to-swing touch pad for mobile — all driven from the game's `readHud()`.
+ * tap-to-swing touch pad for mobile — all driven from the game's `readHud()`.
  *
  * URL affordances (dev + deterministic screenshots): ?seed=N picks the round seed,
  * ?shot=N freezes the simulation after exactly N ticks, ?auto=1 starts the round
- * unattended, ?loadAt=N&swingAt=N scripts one deterministic swing.
+ * unattended, ?swingAt=N scripts one deterministic full-power swing.
  *
  * The three dev-server couplings (the wasm init call, the versioned hot-reload
  * import, and the `/events` SSE channel) are the anchors the single-file packager
@@ -57,20 +57,19 @@ interface Hud {
   readonly bestDistance: number;
   readonly lastMph: number;
   readonly lastPitchName: string;
-  readonly load: number;
-  readonly loading: boolean;
+  readonly readiness: number;
+  readonly ready: boolean;
   readonly results: readonly PitchResult[];
   readonly events: readonly Feedback[];
 }
 
 interface GameModule {
   readonly readHud: () => Hud;
-  readonly setPad: (moveX: number, holding: boolean) => void;
+  readonly setPad: (moveX: number, swingTap: boolean) => void;
   readonly configure: (opts: {
     seed?: number;
     freezeAt?: number;
     autoStart?: boolean;
-    loadAt?: number;
     swingAt?: number;
   }) => void;
 }
@@ -161,9 +160,12 @@ const boot_ = async (): Promise<void> => {
     fields.mph.textContent = hud.lastMph > 0 ? `${hud.lastMph} MPH ${hud.lastPitchName}` : "—";
     fields.best.textContent = hud.bestDistance > 0 ? `${hud.bestDistance}m` : "—";
 
-    loadMeter.classList.toggle("on", hud.loading);
-    loadFill.style.width = `${Math.round(hud.load * 100)}%`;
-    loadFill.classList.toggle("full", hud.load >= 0.97);
+    // The ready meter: visible while the batter re-winds (the swing cooldown),
+    // fading away once he's wound and ready. Hidden on the ready/over screens.
+    const live = hud.phase !== "ready" && hud.phase !== "over";
+    loadMeter.classList.toggle("on", live && !hud.ready);
+    loadFill.style.width = `${Math.round(hud.readiness * 100)}%`;
+    loadFill.classList.toggle("full", hud.ready);
 
     ready.classList.toggle("show", hud.phase === "ready");
     const done = hud.phase === "over";
@@ -184,29 +186,23 @@ const boot_ = async (): Promise<void> => {
     }
   };
 
-  // Touch pad: left/right hold zones + a big hold-to-swing button (mobile parity).
+  // Touch pad: left/right hold zones + a tap-to-swing button (mobile parity).
   const wirePad = (mod: GameModule): void => {
     let moveX = 0;
-    let holding = false;
-    const push = (): void => mod.setPad(moveX, holding);
     const hold = (id: string, down: () => void, up: () => void): void => {
       const node = el(id);
       node.addEventListener("pointerdown", (e: PointerEvent): void => {
         node.setPointerCapture?.(e.pointerId);
         down();
-        push();
       });
-      const end = (): void => {
-        up();
-        push();
-      };
-      node.addEventListener("pointerup", end);
-      node.addEventListener("pointercancel", end);
+      node.addEventListener("pointerup", up);
+      node.addEventListener("pointercancel", up);
     };
     // Buttons are labeled in SCREEN direction; setPad expects screen sign (game.ts negates).
-    hold("pad-left", () => (moveX = -1), () => (moveX = 0));
-    hold("pad-right", () => (moveX = 1), () => (moveX = 0));
-    hold("pad-swing", () => (holding = true), () => (holding = false));
+    hold("pad-left", () => { moveX = -1; mod.setPad(moveX, false); }, () => { moveX = 0; mod.setPad(moveX, false); });
+    hold("pad-right", () => { moveX = 1; mod.setPad(moveX, false); }, () => { moveX = 0; mod.setPad(moveX, false); });
+    // The swing button queues one press edge per tap.
+    el("pad-swing").addEventListener("pointerdown", (): void => mod.setPad(moveX, true));
   };
 
   let teardown: (() => void) | undefined;
@@ -225,7 +221,6 @@ const boot_ = async (): Promise<void> => {
     mod.configure({
       autoStart: params.get("auto") === "1",
       freezeAt: num("shot"),
-      loadAt: num("loadAt"),
       seed: num("seed"),
       swingAt: num("swingAt"),
     });

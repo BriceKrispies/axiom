@@ -61,40 +61,36 @@ export const BATTER_STEP_SPEED = 0.055;
 /** The batter's feet (and the bat pivot) stand slightly behind the plate center. */
 export const BATTER_Z = -0.15;
 
-// ── the spring-loaded swing ───────────────────────────────────────────────────
+// ── the always-armed swing ────────────────────────────────────────────────────
 /**
  * The bat is a segment from the pivot (the batter's hands) sweeping in a mostly
  * horizontal plane. Its direction at angle θ is d(θ) = (−sin θ, 0, −cos θ):
  * θ=0 points straight back at the catcher, θ=π/2 points across the plate (−X),
- * θ=π points at the pitcher. The swing sweeps θ upward through the contact zone.
+ * θ=π points at the pitcher. The batter STARTS wound at full power; one press
+ * fires the max-power swing, then the bat follows through and re-winds on its
+ * own (the cooldown) back to the ready stance.
  */
-export const THETA_IDLE = 0.55;
-/** Fully wound: pulled back past straight-behind. */
-export const THETA_LOADED = -0.5;
+/** The wound-and-ready stance: pulled back past straight-behind. */
+export const THETA_READY = -0.5;
 /** Bat perpendicular to the pitch — square contact sends the ball dead center. */
 export const THETA_SWEET = Math.PI / 2;
 /** The angle where the forward strike hands off to the decelerating follow-through. */
 export const THETA_FOLLOW_START = 2.3;
-/** The bat overshoots to here before recovering. */
+/** The bat overshoots to here before re-winding. */
 export const THETA_FOLLOW_END = 3.05;
-/** Load saturation rate per held tick: fast start, resisting toward full (~⅓ s to full). */
-export const LOAD_RATE = 0.2;
-/** Load at/above this reads as "fully loaded" (the pose stops compressing). */
-export const LOAD_FULL = 0.98;
-/** Swing angular velocity (rad/tick) at zero load … full load. */
-export const OMEGA_MIN = 0.15;
-export const OMEGA_MAX = 0.3;
-/** The release "snap": ω ramps from SNAP_START·ω₀ to ω₀ over the first SNAP_TICKS. */
+/** Swing angular velocity (rad/tick) — every swing is full power. */
+export const OMEGA_SWING = 0.3;
+/** The strike "snap": ω ramps from SNAP_START·ω₀ to ω₀ over the first SNAP_TICKS. */
 export const SNAP_TICKS = 2;
 export const SNAP_START = 0.55;
-/** Per-tick ω decay through the follow-through (recovery is slower than the strike). */
+/** Per-tick ω decay through the follow-through. */
 export const FOLLOW_DRAG = 0.86;
-/** Follow-through ends (→ recover) when ω falls below this. */
+/** Follow-through ends (→ rewind) when ω falls below this. */
 export const FOLLOW_MIN_OMEGA = 0.02;
-/** Recovery eases θ back to idle at this rate per tick — visibly slower than the strike. */
-export const RECOVER_RATE = 0.055;
-/** Recovery is done when θ is within this of idle. */
-export const RECOVER_EPSILON = 0.02;
+/** The rewind cooldown eases θ back to the ready stance at this rate per tick (~1 s). */
+export const REWIND_RATE = 0.09;
+/** The rewind is done (batter ready again) when θ is within this of the stance. */
+export const REWIND_EPSILON = 0.02;
 
 // ── bat geometry + contact model ─────────────────────────────────────────────
 /** The hittable segment of the bat, as radii from the pivot (grip → tip). */

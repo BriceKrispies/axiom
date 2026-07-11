@@ -106,7 +106,7 @@ export class HomeRunSession {
     // The swing machine runs in every live phase (practice swings included).
     const prevTheta = this.#swing.theta;
     if (this.#phase !== "over") {
-      this.#swing = stepSwing(this.#swing, intent.holding, intent.released);
+      this.#swing = stepSwing(this.#swing, intent.swing);
       if (this.#swing.state === "swing" && (this.#phase === "pitch" || this.#phase === "windup")) {
         this.#swungThisPitch = true;
       }
@@ -115,7 +115,7 @@ export class HomeRunSession {
     switch (this.#phase) {
       case "ready":
         stepFielders(this.#fielders, this.#seed, this.#tick, null);
-        if (intent.start || intent.holding) {
+        if (intent.start || intent.swing) {
           this.#beginPitch();
         }
         return;

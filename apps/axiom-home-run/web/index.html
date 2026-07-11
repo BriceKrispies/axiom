@@ -50,16 +50,16 @@
         100% { transform: translateY(620px) rotate(540deg); opacity: 0.6; }
       }
 
-      /* Bat load meter, under the batter. */
+      /* Ready meter, under the batter: fills while he re-winds, fades once ready. */
       #load-meter {
         position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
         width: 180px; height: 10px; border-radius: 5px; overflow: hidden;
         background: rgba(8, 9, 14, 0.72); border: 1px solid #2a2e3c;
-        opacity: 0; transition: opacity 0.12s; pointer-events: none;
+        opacity: 0; transition: opacity 0.45s ease-out; pointer-events: none;
       }
-      #load-meter.on { opacity: 1; }
+      #load-meter.on { opacity: 1; transition: opacity 0.1s; }
       #load-fill { height: 100%; width: 0; background: #ffb23d; transition: width 0.04s linear; }
-      #load-fill.full { background: #ff5a2d; box-shadow: 0 0 12px #ff6a3d; }
+      #load-fill.full { background: #7fffa8; box-shadow: 0 0 12px #7fffa8; }
 
       /* Ready + round-over overlays. */
       .overlay {
@@ -118,8 +118,8 @@
       <div id="load-meter"><div id="load-fill"></div></div>
       <div id="ready" class="overlay show">
         <div id="ready-title">HOME RUN!</div>
-        <div id="ready-sub">Hold SPACE to load the bat. Release to swing.</div>
-        <div id="ready-controls">A / D shift the batter · 10 pitches · clear the wall</div>
+        <div id="ready-sub">Press SPACE to swing — always full power.</div>
+        <div id="ready-controls">A / D shift the batter · the batter re-winds himself between swings · 10 pitches · clear the wall</div>
       </div>
       <div id="over" class="overlay">
         <div id="over-title">ROUND OVER</div>
@@ -139,10 +139,10 @@
     </div>
     <div id="pad">
       <div id="pad-left">◀ STEP</div>
-      <div id="pad-swing">HOLD TO LOAD · RELEASE TO SWING</div>
+      <div id="pad-swing">SWING</div>
       <div id="pad-right">STEP ▶</div>
     </div>
-    <div id="instructions"><b>A/D</b> shift the batter · hold <b>SPACE</b> to load, release to swing · <b>SPACE/ENTER</b> restarts after pitch 10</div>
+    <div id="instructions"><b>A/D</b> shift the batter · <b>SPACE</b> swings at full power · the batter re-winds himself · <b>SPACE/ENTER</b> restarts after pitch 10</div>
 
     <script type="module" src="/dist/harness.js"></script>
   </body>

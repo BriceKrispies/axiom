@@ -133,9 +133,10 @@ export const DEMOS = [
       "with brown base paths, white foul lines, a pitching machine on the mound, blue stadium walls, " +
       "and nine red toy fielders wandering their own patrol circles. Ten pitches per round from a " +
       "deterministic seeded sequence — slow balls, sinkers, heaters, risers, inside and outside looks, " +
-      "each telegraphed by the machine's compression. A/D shift the batter inside the box; holding " +
-      "SPACE winds the spring-loaded bat (fast at first, resisting toward full load) and RELEASING " +
-      "snaps it forward. Contact is resolved from the real spatial sweep of bat vs ball — position " +
+      "each telegraphed by the machine's compression. A/D shift the batter inside the box; the batter " +
+      "idles wound at FULL POWER — one SPACE press fires the max-power swing instantly, then he " +
+      "re-winds on his own (the swing cooldown, shown by a fading ready meter). Contact is resolved " +
+      "from the real spatial sweep of bat vs ball — position " +
       "along the barrel, timing angle, and vertical offset decide exit speed, spray, and loft — so " +
       "mistimed swings foul off, jam, top grounders, or pop up, while a square, well-positioned strike " +
       "clears the wall for HOME RUN! (500 + distance, consecutive homers multiply). Fielders converge " +

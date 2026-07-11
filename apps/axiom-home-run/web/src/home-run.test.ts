@@ -20,7 +20,7 @@ import { beyondWall, classifyFlight, isFair, newFlight, scoreFor, stepFlight } f
 import { HomeRunSession } from "./session.ts";
 import * as C from "./constants.ts";
 
-const IDLE: Intent = { holding: false, moveX: 0, released: false, start: false };
+const IDLE: Intent = { moveX: 0, start: false, swing: false };
 const intent = (over: Partial<Intent>): Intent => ({ ...IDLE, ...over });
 
 const adv = (s: HomeRunSession, n: number, i: Intent = IDLE): void => {
@@ -43,16 +43,16 @@ const takeAllRound = (seed: number): HomeRunSession => {
 };
 
 /**
- * Play one pitch: hold from the first tick, release at `releaseTick`, optionally
- * stepping the batter first. Returns the first pitch's outcome.
+ * Play one pitch: start the round on tick 1, optionally step the batter, then
+ * press swing at `swingTick`. Returns the first pitch's outcome.
  */
-const playFirstPitch = (seed: number, releaseTick: number, moveX = 0, moveTicks = 0): Outcome => {
+const playFirstPitch = (seed: number, swingTick: number, moveX = 0, moveTicks = 0): Outcome => {
   const s = new HomeRunSession(seed);
-  for (let t = 1; t <= releaseTick; t += 1) {
+  for (let t = 1; t < swingTick; t += 1) {
     const moving = t <= moveTicks ? moveX : 0;
-    s.advance(intent({ holding: true, moveX: moving }));
+    s.advance(intent({ moveX: moving, start: t === 1 }));
   }
-  s.advance(intent({ released: true }));
+  s.advance(intent({ swing: true }));
   let guard = 1200;
   while (s.results.length === 0 && guard > 0) {
     s.advance(IDLE);
@@ -64,52 +64,46 @@ const playFirstPitch = (seed: number, releaseTick: number, moveX = 0, moveTicks 
 
 // ── swing state machine ───────────────────────────────────────────────────────
 
-test("the swing never fires on press — holding only loads", () => {
+test("the batter starts wound and ready at full power", () => {
+  const s = newSwing();
+  assert.equal(s.state, "ready");
+  assert.equal(s.readiness, 1);
+  assert.equal(s.theta, C.THETA_READY);
+});
+
+test("pressing swing fires the full-power strike instantly", () => {
   let s = newSwing();
-  s = stepSwing(s, true, false);
-  assert.equal(s.state, "loading");
-  for (let k = 0; k < 200; k += 1) {
-    s = stepSwing(s, true, false);
-    assert.ok(s.state === "loading" || s.state === "loaded", "held bat never swings");
-  }
+  s = stepSwing(s, true);
+  assert.equal(s.state, "swing");
+  assert.equal(s.omega, C.OMEGA_SWING, "every swing is max power");
+  assert.equal(s.theta, C.THETA_READY, "the strike starts from the wound stance");
 });
 
-test("loading reaches a bounded maximum and winds the bat back", () => {
+test("presses during the strike and the rewind cooldown do nothing", () => {
   let s = newSwing();
-  let prevLoad = 0;
-  for (let k = 0; k < 500; k += 1) {
-    s = stepSwing(s, true, false);
-    assert.ok(s.load <= 1, "load is bounded");
-    assert.ok(s.load >= prevLoad, "load never regresses while held");
-    prevLoad = s.load;
+  s = stepSwing(s, true);
+  const firstSwingTick = 0;
+  let sawRewind = false;
+  let reentered = false;
+  let guard = 500;
+  // Spam the button every tick: the machine must run its full cycle untouched —
+  // a spammed press must never restart the strike mid-cycle.
+  while (guard > 0 && s.state !== "ready") {
+    const before = s.state;
+    s = stepSwing(s, true);
+    sawRewind = sawRewind || s.state === "rewind";
+    reentered = reentered || (before !== "ready" && s.state === "swing" && s.stateTicks === firstSwingTick && before !== "swing");
+    guard -= 1;
   }
-  assert.equal(s.state, "loaded");
-  assert.ok(s.load >= C.LOAD_FULL);
-  assert.ok(Math.abs(s.theta - C.THETA_LOADED) < 0.03, "fully wound pose");
+  assert.ok(guard > 0, "the cycle returns to ready");
+  assert.ok(sawRewind, "the cooldown rewind ran");
+  assert.ok(!reentered, "spam never restarted the strike mid-cycle");
+  // Once ready, the very next press swings again.
+  s = stepSwing(s, true);
+  assert.equal(s.state, "swing");
 });
 
-test("release triggers a fast forward swing scaled by load", () => {
-  // Quick tap: barely loaded.
-  let quick = newSwing();
-  for (let k = 0; k < 3; k += 1) {
-    quick = stepSwing(quick, true, false);
-  }
-  quick = stepSwing(quick, false, true);
-  assert.equal(quick.state, "swing");
-
-  // Full hold: maximum spring.
-  let full = newSwing();
-  for (let k = 0; k < 300; k += 1) {
-    full = stepSwing(full, true, false);
-  }
-  full = stepSwing(full, false, true);
-  assert.equal(full.state, "swing");
-  assert.ok(full.omega > quick.omega, "longer load → faster swing");
-  assert.ok(Math.abs(full.omega - C.OMEGA_MAX) < 1e-9);
-  assert.ok(full.omega >= C.OMEGA_MIN);
-});
-
-test("full cycle: idle → loading → loaded → swing → follow → recover → idle, recovery slower than strike", () => {
+test("full cycle: ready → swing → follow → rewind → ready, rewind slower than the strike", () => {
   let s = newSwing();
   const seen: string[] = [s.state];
   const record = (): void => {
@@ -117,59 +111,69 @@ test("full cycle: idle → loading → loaded → swing → follow → recover �
       seen.push(s.state);
     }
   };
-  for (let k = 0; k < 300; k += 1) {
-    s = stepSwing(s, true, false);
-    record();
-  }
-  s = stepSwing(s, false, true);
+  s = stepSwing(s, true);
   record();
   let strikeTicks = 0;
   while (s.state === "swing") {
-    s = stepSwing(s, false, false);
+    s = stepSwing(s, false);
     strikeTicks += 1;
     record();
   }
   let followTicks = 0;
   while (s.state === "follow") {
-    s = stepSwing(s, false, false);
+    s = stepSwing(s, false);
     followTicks += 1;
     record();
   }
-  let recoverTicks = 0;
-  while (s.state === "recover") {
-    s = stepSwing(s, false, false);
-    recoverTicks += 1;
+  let rewindTicks = 0;
+  while (s.state === "rewind") {
+    s = stepSwing(s, false);
+    rewindTicks += 1;
     record();
-    assert.ok(recoverTicks < 500, "recovery terminates");
+    assert.ok(rewindTicks < 500, "the rewind terminates");
   }
   record();
-  assert.deepEqual(seen, ["idle", "loading", "loaded", "swing", "follow", "recover", "idle"]);
-  assert.ok(recoverTicks > strikeTicks, "the bat eases home slower than it struck");
+  assert.deepEqual(seen, ["ready", "swing", "follow", "rewind", "ready"]);
+  assert.ok(rewindTicks > strikeTicks, "the self-rewind is slower than the strike");
   assert.ok(followTicks > 0, "the bat overshoots into follow-through");
-  assert.equal(s.theta, C.THETA_IDLE);
+  assert.equal(s.theta, C.THETA_READY);
+});
+
+test("readiness is bounded and climbs monotonically through the rewind", () => {
+  let s = newSwing();
+  s = stepSwing(s, true);
+  let prev = -1;
+  let guard = 500;
+  while (s.state !== "ready" && guard > 0) {
+    s = stepSwing(s, false);
+    assert.ok(s.readiness >= 0 && s.readiness <= 1, "readiness is bounded");
+    if (s.state === "rewind") {
+      assert.ok(s.readiness >= prev, "rewind readiness never regresses");
+      prev = s.readiness;
+    }
+    guard -= 1;
+  }
+  assert.ok(guard > 0);
+  assert.equal(s.readiness, 1, "ready means fully re-wound");
 });
 
 test("identical inputs produce identical bat poses (pure state machine)", () => {
-  const script = (tick: number): { readonly hold: boolean; readonly rel: boolean } => ({
-    hold: tick % 90 < 40,
-    rel: tick % 90 === 40,
-  });
+  const script = (tick: number): boolean => tick % 90 === 5;
   let a = newSwing();
   let b = newSwing();
   for (let t = 0; t < 800; t += 1) {
-    const { hold, rel } = script(t);
-    a = stepSwing(a, hold, rel);
-    b = stepSwing(b, hold, rel);
+    a = stepSwing(a, script(t));
+    b = stepSwing(b, script(t));
     assert.equal(a.theta, b.theta);
     assert.equal(a.state, b.state);
-    assert.equal(a.load, b.load);
+    assert.equal(a.readiness, b.readiness);
   }
 });
 
 // ── contact model ────────────────────────────────────────────────────────────
 
 const contactAt = (theta: number, r: number, dy: number) =>
-  resolveContact(theta, C.OMEGA_MAX, r, dy, vec3(0, C.BAT_PLANE_Y + dy, 0), -0.3);
+  resolveContact(theta, C.OMEGA_SWING, r, dy, vec3(0, C.BAT_PLANE_Y + dy, 0), -0.3);
 
 test("centered contact launches much harder than handle contact", () => {
   const sweet = contactAt(C.THETA_SWEET, C.SWEET_SPOT_R, 0);
@@ -461,21 +465,20 @@ test("restart from the finished state resets all gameplay state", () => {
   assert.equal(s.streak, 0);
   assert.equal(s.bestDistance, 0);
   assert.equal(s.batterX, C.BATTER_START_X);
-  assert.equal(s.swing.state, "idle");
+  assert.equal(s.swing.state, "ready");
   assert.equal(s.pitchNumber, 1);
 });
 
 test("same seed + same input history reproduce the same final score and results", () => {
   const script = (tick: number): Intent => {
-    const phase = tick % 260;
-    const hold = phase >= 30 && phase < 30 + 40 + Math.floor(hash01(99, Math.floor(tick / 260)) * 50);
-    const prevPhase = (tick - 1) % 260;
-    const prevHold = prevPhase >= 30 && prevPhase < 30 + 40 + Math.floor(hash01(99, Math.floor((tick - 1) / 260)) * 50);
+    // A pseudo-random but fully deterministic press pattern: one swing press
+    // somewhere inside each ~260-tick window, plus periodic batter steps.
+    const window = Math.floor(tick / 260);
+    const pressAt = 30 + Math.floor(hash01(99, window) * 180);
     return intent({
-      holding: hold,
       moveX: tick % 3 === 0 ? (hash01(7, Math.floor(tick / 120)) > 0.5 ? 1 : -1) : 0,
-      released: prevHold && !hold,
       start: tick === 1,
+      swing: tick % 260 === pressAt,
     });
   };
   const run = (): { readonly score: number; readonly results: string; readonly hashes: number[] } => {

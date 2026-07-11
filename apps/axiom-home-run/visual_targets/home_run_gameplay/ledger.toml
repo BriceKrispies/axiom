@@ -115,3 +115,17 @@ decision = "keep_candidate"
 reason = "User-reported artifact: faint rectangular outlines around almost every object in the canvas2d render. Root cause in the SPINE (canvas2d backend): the depth-outline post-pass strokes the screen bbox of every draw classified GameplayObject by raw screen-coverage fraction — a box-built scene (stripes, walls, seats) grows a rectangle around every prop. Fixed at the lowest correct layer: outline anchors now require the scene's opt-in ContactShadowCaster mark (`casts_contact_shadow`), the same signal the contact-shadow pass uses. Both champions re-captured; the deterministic homer replays identically (+662, 81m) — pixels only."
 next_attacked_axis = "stadium_enclosure"
 abstraction_introduced = false
+
+[[iteration]]
+iteration = 8
+attacked_axis = "batter_silhouette"
+changed_files = [
+  "apps/axiom-home-run/web/src/{constants,types,swing,session,game,harness,scene}.ts",
+  "apps/axiom-home-run/web/index.html",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "Control redesign (user-directed), not a visual attack: hold-to-charge removed — the batter idles WOUND at full power (a coiled ready stance, closer to the reference's cocked-bat pose), one press fires the max-power swing, and the bat re-winds on its own as the cooldown; the meter now only signals readiness and fades once armed. Champions re-captured on the same frozen ticks; the scripted seed-2 homer re-derived (press tick 115 → 89m, resolve ~303). No axis regressed; batter_silhouette reads slightly better in the ready stance."
+next_attacked_axis = "stadium_enclosure"
+abstraction_introduced = false
