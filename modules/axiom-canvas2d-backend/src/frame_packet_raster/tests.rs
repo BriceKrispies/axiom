@@ -431,16 +431,22 @@ fn convert_shades_from_the_scene_directional_light() {
 }
 
 #[test]
-fn gameplay_object_emits_one_overlay_terrain_does_not() {
+fn caster_marked_gameplay_object_emits_one_overlay_unmarked_and_terrain_do_not() {
     let p = CanvasDepthCueProfile::low_poly_framebuffer();
     let obj = MeshCache::load(&[gameplay_object(8)]);
-    let out = convert(&packet(vec![draw(42, 8)]), &obj, &opts_cued(p));
+    let marked = FrameDrawItem::new(42, 8, 9, IDENTITY, IDENTITY, [1.0; 4], true);
+    let out = convert(&packet(vec![marked]), &obj, &opts_cued(p));
     assert_eq!(
         out.overlays.len(),
         1,
-        "gameplay object emits an overlay anchor"
+        "a caster-marked gameplay object emits an overlay anchor"
     );
     assert_eq!(out.overlays[0].object_id, 42);
+    // The same mid-coverage object WITHOUT the scene's caster mark gets no
+    // anchor — coverage alone is not importance (else every prop in a
+    // box-built level grows a faint outline rectangle).
+    let unmarked = convert(&packet(vec![draw(42, 8)]), &obj, &opts_cued(p));
+    assert!(unmarked.overlays.is_empty());
     let terrain = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0])]);
     let t = convert(&packet(vec![draw(1, 7)]), &terrain, &opts_cued(p));
     assert!(t.overlays.is_empty());

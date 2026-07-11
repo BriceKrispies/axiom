@@ -100,3 +100,18 @@ decision = "keep_candidate"
 reason = "Bottom-frame ownership: the brown home-plate deck widened to span the whole foreground (46u) with pale walkway seams framing the plate, matching the reference's deck. Determinism verified: two captures of the same frozen-tick URL are byte-identical (md5 E43C48545A4A5B2BD0A233283E722C9D). Campaign paused for review — no structural mismatch the engine can express remains unaddressed at proxy fidelity; residual gaps are the canvas2d fixed grade (GPU backend verified separately) and modeled-vs-boxy figures."
 next_attacked_axis = "stadium_enclosure"
 abstraction_introduced = false
+
+[[iteration]]
+iteration = 7
+attacked_axis = "artifact_level"
+changed_files = [
+  "modules/axiom-canvas2d-backend/src/frame_packet_raster.rs",
+  "modules/axiom-canvas2d-backend/src/frame_packet_raster/tests.rs",
+  "modules/axiom-canvas2d-backend/src/software_rasterizer/tests.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "User-reported artifact: faint rectangular outlines around almost every object in the canvas2d render. Root cause in the SPINE (canvas2d backend): the depth-outline post-pass strokes the screen bbox of every draw classified GameplayObject by raw screen-coverage fraction — a box-built scene (stripes, walls, seats) grows a rectangle around every prop. Fixed at the lowest correct layer: outline anchors now require the scene's opt-in ContactShadowCaster mark (`casts_contact_shadow`), the same signal the contact-shadow pass uses. Both champions re-captured; the deterministic homer replays identically (+662, 81m) — pixels only."
+next_attacked_axis = "stadium_enclosure"
+abstraction_introduced = false

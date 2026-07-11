@@ -150,7 +150,9 @@ pub(crate) struct ConversionStats {
 
 /// A gameplay object's screen footprint, derived from its projected triangles —
 /// the anchor the rasterizer uses for its contact-shadow blob and silhouette
-/// outline post-passes. Only emitted for `GameplayObject`-importance draws.
+/// outline post-passes. Only emitted for `GameplayObject`-importance draws the
+/// scene explicitly marked (`casts_contact_shadow`) — coverage alone is not
+/// importance.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DrawOverlay {
     /// Screen bounding box `[minx, miny, maxx, maxy]` (device pixels).
@@ -397,8 +399,8 @@ pub(crate) fn convert(
 }
 
 /// Project + cull + decimate + **depth-cue-shade** one draw's mesh into
-/// screen-space triangles, and (for gameplay objects) emit a contact-shadow /
-/// outline anchor.
+/// screen-space triangles, and (for caster-marked gameplay objects) emit a
+/// contact-shadow / outline anchor.
 #[allow(clippy::too_many_arguments)]
 fn convert_draw(
     geo: &MeshGeometry,
@@ -498,9 +500,13 @@ fn convert_draw(
     deep::exit_shade(clock);
 
     let n = triangles.len() as u32;
+    // Outline anchors are for objects the scene MARKED important (the opt-in
+    // `ContactShadowCaster` flag), not for anything that merely covers a
+    // mid-size share of the screen — a box-built level (walls, mow stripes,
+    // seating tiers) would otherwise grow a faint rectangle around every prop.
     let is_gameplay = importance == CanvasFallbackImportance::GameplayObject;
-    let overlay =
-        (is_gameplay & !triangles.is_empty()).then(|| draw_overlay(&triangles, object_id));
+    let overlay = (is_gameplay & draw.casts_contact_shadow() & !triangles.is_empty())
+        .then(|| draw_overlay(&triangles, object_id));
 
     DrawConversion {
         triangles,

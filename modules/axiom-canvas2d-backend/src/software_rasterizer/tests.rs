@@ -657,18 +657,30 @@ fn disabling_contact_shadows_draws_none() {
 }
 
 #[test]
-fn outline_drawn_for_gameplay_object_via_packet() {
+fn outline_drawn_for_caster_marked_gameplay_object_via_packet() {
     // (The near>far outline-alpha curve is unit-tested in `canvas_post_pass`.)
     let mut oc = cues_off();
     oc.enable_depth_outlines = true;
     let obj = MeshCache::load(&[gameplay_object(8, [0.8, 0.3, 0.2, 1.0])]);
+    let marked = FrameDrawItem::new(42, 8, 9, IDENTITY, IDENTITY, [1.0; 4], true);
     let r = SoftwareRasterizer::new(opts_cued(64, 64, oc)).rasterize_packet(
-        &packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]),
+        &packet(vec![marked], [0.3, 0.3, 0.3, 1.0]),
         &obj,
         &[],
     );
     assert_eq!(r.outlined_objects(), 1);
     assert!(r.outline_pixels() > 0);
+    // An unmarked mid-coverage draw gets NO outline — the scene's caster mark
+    // is the importance signal, not raw screen coverage.
+    let mut oc2 = cues_off();
+    oc2.enable_depth_outlines = true;
+    let u = SoftwareRasterizer::new(opts_cued(64, 64, oc2)).rasterize_packet(
+        &packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]),
+        &obj,
+        &[],
+    );
+    assert_eq!(u.outlined_objects(), 0);
+    assert_eq!(u.outline_pixels(), 0);
 }
 
 #[test]
