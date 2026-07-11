@@ -104,6 +104,10 @@ const buildMaterials = (): Materials => {
   for (const name of Object.keys(PALETTE) as MaterialName[]) {
     base.set(name, createMaterial({ baseColor: PALETTE[name] as Rgba }));
   }
+  // Painted field markings glow faintly so they read WHITE at grazing angles
+  // (the canvas2d hemisphere shading otherwise grays them out).
+  base.set("Line", createMaterial({ baseColor: PALETTE.Line as Rgba, emissive: [0.3, 0.3, 0.28, 1] }));
+  base.set("BaseWhite", createMaterial({ baseColor: PALETTE.BaseWhite as Rgba, emissive: [0.3, 0.3, 0.28, 1] }));
   return {
     base,
     bat: createMaterial({ baseColor: [1, 0.88, 0.25, 1], emissive: [0.45, 0.36, 0.08, 1] }),
@@ -154,13 +158,18 @@ const buildGround = (box: number, cyl: number, m: Map<MaterialName, number>): vo
   spawnRenderable(cyl, m.get("DirtLight")!, xform(vec3(C.MOUND.x, 0.075, C.MOUND.z), vec3(3.6, 0.14, 3.6)));
   spawnRenderable(cyl, m.get("Dirt")!, xform(vec3(0, 0.045, 0), vec3(5.4, 0.09, 5.4)));
 
-  // Home plate + batter boxes.
-  spawnRenderable(box, m.get("BaseWhite")!, xform(vec3(0, 0.1, 0), boxScale(vec3(0.5, 0.02, 0.5)), YAW_POS));
+  // Home plate + batter boxes. Ground decals near the plate live on a strict
+  // height LADDER (dirt circle top 0.09 < foul lines < batter boxes < plate):
+  // exact coplanarity z-fights, and at this grazing angle a strip narrower than
+  // ~0.14u projects to a sub-2px sliver the software rasterizer fills
+  // inconsistently frame-to-frame (the "flickering lines" artifact) — so the
+  // painted markings are deliberately chunky, toy-style.
+  spawnRenderable(box, m.get("BaseWhite")!, xform(vec3(0, 0.13, 0), boxScale(vec3(0.5, 0.02, 0.5)), YAW_POS));
   for (const side of [1, -1]) {
-    spawnRenderable(box, m.get("Line")!, xform(vec3(side * 0.5, 0.1, 0), boxScale(vec3(0.06, 0.015, 1.25))));
-    spawnRenderable(box, m.get("Line")!, xform(vec3(side * 0.975, 0.1, 0.6), boxScale(vec3(1.02, 0.015, 0.06))));
-    spawnRenderable(box, m.get("Line")!, xform(vec3(side * 0.975, 0.1, -0.6), boxScale(vec3(1.02, 0.015, 0.06))));
-    spawnRenderable(box, m.get("Line")!, xform(vec3(side * 1.45, 0.1, 0), boxScale(vec3(0.06, 0.015, 1.25))));
+    spawnRenderable(box, m.get("Line")!, xform(vec3(side * 0.5, 0.125, 0), boxScale(vec3(0.14, 0.012, 1.33))));
+    spawnRenderable(box, m.get("Line")!, xform(vec3(side * 1.0, 0.125, 0.6), boxScale(vec3(1.14, 0.012, 0.14))));
+    spawnRenderable(box, m.get("Line")!, xform(vec3(side * 1.0, 0.125, -0.6), boxScale(vec3(1.14, 0.012, 0.14))));
+    spawnRenderable(box, m.get("Line")!, xform(vec3(side * 1.5, 0.125, 0), boxScale(vec3(0.14, 0.012, 1.33))));
   }
 
   // Bases (1B, 2B, 3B).
@@ -173,9 +182,10 @@ const buildGround = (box: number, cyl: number, m: Map<MaterialName, number>): vo
     spawnRenderable(box, m.get("BaseWhite")!, xform(vec3(bx, 0.12, bz), boxScale(vec3(0.6, 0.14, 0.6)), YAW_POS));
   }
 
-  // Foul lines home → corners, and the warning track inside the walls.
-  spawnRenderable(box, m.get("Line")!, xform(vec3(8.5, 0.08, 8.5), boxScale(vec3(24, 0.02, 0.18)), YAW_NEG));
-  spawnRenderable(box, m.get("Line")!, xform(vec3(-8.5, 0.08, 8.5), boxScale(vec3(24, 0.02, 0.18)), YAW_POS));
+  // Foul lines home → corners (chunky + above the dirt-circle top, see the
+  // ladder note below), and the warning track inside the walls.
+  spawnRenderable(box, m.get("Line")!, xform(vec3(8.5, 0.105, 8.5), boxScale(vec3(24, 0.012, 0.32)), YAW_NEG));
+  spawnRenderable(box, m.get("Line")!, xform(vec3(-8.5, 0.105, 8.5), boxScale(vec3(24, 0.012, 0.32)), YAW_POS));
   spawnRenderable(box, m.get("DirtLight")!, xform(vec3(7.86, 0.028, 24.86), boxScale(vec3(24.5, 0.02, 1.7)), YAW_POS));
   spawnRenderable(box, m.get("DirtLight")!, xform(vec3(-7.86, 0.028, 24.86), boxScale(vec3(24.5, 0.02, 1.7)), YAW_NEG));
 };
@@ -350,6 +360,8 @@ export const buildScene = (): SceneHandles => {
   const trail = Array.from({ length: TRAIL_POOL }, () => spawnRenderable(sphere, mats.trail, parked()));
   const impactRing = spawnRenderable(sphere, mats.impact, parked());
 
+  // NOTE: a directional light's `direction` is authored as the direction the
+  // light TRAVELS (the engine negates it into the frame's to-light vector).
   addLight({ color: [1, 0.98, 0.92, 1], direction: sdk(vec3(-0.35, -0.85, 0.4)), intensity: 2.3, kind: "directional" });
   addLight({ color: [0.75, 0.82, 1, 1], direction: sdk(vec3(0.5, -0.55, -0.35)), intensity: 1.0, kind: "directional" });
   addLight({ color: [0.85, 0.87, 0.95, 1], direction: sdk(vec3(0, 1, 0.1)), intensity: 0.8, kind: "directional" });
