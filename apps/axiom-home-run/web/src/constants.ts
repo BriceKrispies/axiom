@@ -34,6 +34,13 @@ export const MOUND: Vec3 = vec3(0, 0, 10.2);
 export const PITCH_RELEASE: Vec3 = vec3(0, 1.12, 9.7);
 /** A pitch that reaches this z behind the plate was not hit — a miss/take. */
 export const CATCHER_Z = -2.2;
+/**
+ * The strike zone a taken pitch is judged against at the plate crossing (z = 0):
+ * a pitch outside it that you don't swing at is a BALL, not a strike.
+ */
+export const STRIKE_ZONE_HALF_X = 0.45;
+export const STRIKE_ZONE_LOW = 0.4;
+export const STRIKE_ZONE_HIGH = 1.3;
 /** Infield radius used by outcome classification (grounders die inside it). */
 export const INFIELD_RADIUS = 14;
 
@@ -93,23 +100,31 @@ export const REWIND_RATE = 0.09;
 export const REWIND_EPSILON = 0.02;
 
 // ── bat geometry + contact model ─────────────────────────────────────────────
+// The bat is OVERSIZED, toy-style: long, with a barrel that steps WIDER toward
+// the tip. The contact window matches the fat barrel, so the big bat genuinely
+// hits bigger.
 /** The hittable segment of the bat, as radii from the pivot (grip → tip). */
 export const BAT_GRIP_R = 0.14;
-export const BAT_TIP_R = 1.02;
-/** Horizontal contact tolerance: bat thickness + ball radius + arcade grace. */
-export const CONTACT_RADIUS = 0.19;
+export const BAT_TIP_R = 1.18;
+/** Where the thin handle hands off to the fat barrel, and the stepped widths. */
+export const BAT_BARREL_R = 0.55;
+export const BAT_HANDLE_W = 0.09;
+export const BAT_BARREL_W = 0.17;
+export const BAT_TIP_W = 0.24;
+/** Horizontal contact tolerance: barrel thickness + ball radius + arcade grace. */
+export const CONTACT_RADIUS = 0.24;
 /** Vertical contact window (the bat plane's effective reach up/down). */
-export const CONTACT_HEIGHT = 0.26;
+export const CONTACT_HEIGHT = 0.3;
 /** The bat plane's height at the sweet angle… */
 export const BAT_PLANE_Y = 0.85;
 /** …rising through the arc (a slight uppercut): batY = plane + UPPERCUT·(θ − sweet). */
 export const BAT_UPPERCUT = 0.22;
 export const BAT_UPPERCUT_CLAMP = 0.18;
-/** The sweet spot sits here along the bat, with a gaussian falloff of this width. */
-export const SWEET_SPOT_R = 0.78;
-export const SWEET_SPOT_WIDTH = 0.34;
+/** The sweet spot sits in the fat barrel, with a gaussian falloff of this width. */
+export const SWEET_SPOT_R = 0.88;
+export const SWEET_SPOT_WIDTH = 0.4;
 /** Exit speed = batPointSpeed·HIT_POWER·(sweet blend) + |pitch speed|·PITCH_BOUNCE_SHARE. */
-export const HIT_POWER = 2.4;
+export const HIT_POWER = 2.25;
 export const PITCH_BOUNCE_SHARE = 0.35;
 /** Launch loft (radians) at square contact, plus gain per unit of undercut (ball above bat). */
 export const LOFT_BASE = 0.34;
@@ -123,7 +138,7 @@ export const VERT_MISHIT_KEEP = 0.4;
 /** Timing quality gaussian width around the sweet angle. */
 export const TIMING_WIDTH = 0.38;
 /** How much of the exit speed rides on square timing (0 = timing only steers). */
-export const TIMING_SPEED_SHARE = 0.22;
+export const TIMING_SPEED_SHARE = 0.35;
 /** Contact substeps for the swept bat-vs-ball test (kills tunneling at max ω). */
 export const CONTACT_SUBSTEPS = 8;
 /** Fair territory half-angle: |spray| beyond this is a foul ball. */
@@ -230,6 +245,7 @@ export const POPUP_MAX_DIST = 19;
 
 // ── scoring ───────────────────────────────────────────────────────────────────
 export const SCORE_TABLE = {
+  ball: 0,
   clean: 100,
   foul: 0,
   grounder: 50,

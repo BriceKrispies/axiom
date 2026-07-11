@@ -135,6 +135,9 @@ const toneFor = (kind: Feedback["kind"], big: boolean): void => {
     case "miss":
       playTone({ duration: 0.12, freq: 110, volume: 0.18, wave: "sawtooth" });
       return;
+    case "ball":
+      playTone({ duration: 0.1, freq: 300, volume: 0.12, wave: "sine" });
+      return;
     case "foul":
       playTone({ duration: 0.08, freq: 240, volume: 0.18, wave: "square" });
       return;

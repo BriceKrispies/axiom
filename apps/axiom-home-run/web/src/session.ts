@@ -12,7 +12,7 @@
 import { type Vec3, add, clamp, clamp01, lerp, scale, vec3 } from "./vec.ts";
 import { type Swing, type Feedback, type Intent, type Outcome, type Phase, type PitchResult, type PitchSpec, type SceneView, type FielderState } from "./types.ts";
 import { newSwing, stepSwing, sweptContact } from "./swing.ts";
-import { pitchGapTicks, selectPitch, solvePitch } from "./pitch.ts";
+import { isStrike, pitchGapTicks, selectPitch, solvePitch } from "./pitch.ts";
 import { catchingFielder, newFielders, projectLanding, stepFielders } from "./fielders.ts";
 import { type BallFlight, classifyCaught, classifyFlight, newFlight, scoreFor, stepFlight } from "./ball.ts";
 import * as C from "./constants.ts";
@@ -21,6 +21,7 @@ const TRAIL_MAX = 14;
 const HIDDEN_BALL: Vec3 = vec3(0, -100, 0);
 
 const OUTCOME_TEXT: Record<Outcome, string> = {
+  ball: "BALL",
   clean: "CLEAN HIT",
   foul: "FOUL",
   grounder: "GROUNDER",
@@ -58,6 +59,8 @@ export class HomeRunSession {
   #ballVel: Vec3 = vec3(0, 0, 0);
   #pitchGravity = 0;
   #ballLive = false;
+  /** Where this pitch crossed the plate plane (z = 0), for the ball/strike call. */
+  #plateCross: { readonly x: number; readonly y: number } | undefined;
 
   // The ball in play (post-contact).
   #flight: BallFlight | undefined;
@@ -168,6 +171,7 @@ export class HomeRunSession {
     this.#ballVel = vec3(0, 0, 0);
     this.#pitchGravity = 0;
     this.#ballLive = false;
+    this.#plateCross = undefined;
     this.#flight = undefined;
     this.#trail = [];
     this.#fielders = newFielders(this.#seed);
@@ -193,6 +197,7 @@ export class HomeRunSession {
     this.#gap = pitchGapTicks(this.#seed, this.#pitchIndex);
     this.#ballPos = HIDDEN_BALL;
     this.#ballLive = false;
+    this.#plateCross = undefined;
     this.#trail = [];
     this.#emit({ big: false, kind: "windup", text: "" });
   }
@@ -218,6 +223,15 @@ export class HomeRunSession {
     this.#ballVel = vec3(this.#ballVel.x, this.#ballVel.y - this.#pitchGravity, this.#ballVel.z);
     this.#ballPos = add(this.#ballPos, this.#ballVel);
 
+    // Record the plate crossing (interpolated at z = 0) for the ball/strike call.
+    if (this.#plateCross === undefined && prevBall.z > 0 && this.#ballPos.z <= 0) {
+      const f = prevBall.z / (prevBall.z - this.#ballPos.z);
+      this.#plateCross = {
+        x: prevBall.x + (this.#ballPos.x - prevBall.x) * f,
+        y: prevBall.y + (this.#ballPos.y - prevBall.y) * f,
+      };
+    }
+
     // The swept bat-vs-ball test — only a committed forward swing can strike.
     if (this.#swing.state === "swing") {
       const contact = sweptContact(
@@ -234,11 +248,20 @@ export class HomeRunSession {
         return;
       }
     }
-    // Past the plate untouched → a miss (swung) or a take (watched it go by).
+    // Past the plate untouched. Swinging at anything is a MISS; a take is
+    // umpired at the plate crossing — in the zone it's a STRIKE, off the
+    // plate it's a BALL.
     if (this.#ballPos.z <= C.CATCHER_Z) {
       this.#ballLive = false;
       this.#ballPos = HIDDEN_BALL;
-      this.#resolve(this.#swungThisPitch ? "MISS" : "STRIKE", "miss", 0, false);
+      const cross = this.#plateCross;
+      const took = !this.#swungThisPitch;
+      const wasBall = took && (cross === undefined || !isStrike(cross.x, cross.y));
+      if (wasBall) {
+        this.#resolve("BALL", "ball", 0, false);
+        return;
+      }
+      this.#resolve(took ? "STRIKE" : "MISS", "miss", 0, false);
     }
   }
 
@@ -308,7 +331,7 @@ export class HomeRunSession {
     if (outcome === "homer") {
       this.#homers += 1;
     }
-    if (outcome !== "miss" && outcome !== "foul" && !caught) {
+    if (outcome !== "miss" && outcome !== "ball" && outcome !== "foul" && !caught) {
       this.#bestDist = Math.max(this.#bestDist, dist);
     }
     this.#results.push({ caught, distance: dist, mph: this.#lastMph, outcome, points });

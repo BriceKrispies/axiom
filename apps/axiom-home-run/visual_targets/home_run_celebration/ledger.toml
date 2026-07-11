@@ -4,9 +4,10 @@
 # iterations concern only the celebration moment. Harness: Playwright over the
 # packaged page with a scripted deterministic homer —
 # ?backend=canvas2d&seed=2&auto=1&swingAt=115&shot=330
-# (round auto-starts at tick 2, one full-power press at tick 115 → an 89m home
-# run resolving at ~tick 303; the frozen ?shot pins the HOME RUN! message and
-# lays the confetti out statically so the celebration frame is deterministic).
+# (round auto-starts at tick 2, one full-power press at tick 115 → a ~97m home
+# run resolving at ~tick 317 with the oversized bat; the frozen ?shot pins the
+# HOME RUN! message and lays the confetti out statically so the celebration
+# frame is deterministic).
 
 [[iteration]]
 iteration = 1

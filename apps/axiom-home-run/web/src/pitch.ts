@@ -49,6 +49,10 @@ export const selectPitch = (seed: number, pitchIndex: number): PitchSpec => {
 export const pitchGapTicks = (seed: number, pitchIndex: number): number =>
   C.GAP_TICKS + Math.floor(hash01(seed, pitchIndex, 5) * C.GAP_JITTER_TICKS);
 
+/** Whether a plate crossing at `(x, y)` is inside the strike zone. */
+export const isStrike = (x: number, y: number): boolean =>
+  Math.abs(x) <= C.STRIKE_ZONE_HALF_X && y >= C.STRIKE_ZONE_LOW && y <= C.STRIKE_ZONE_HIGH;
+
 /**
  * Solve the release velocity (per TICK) that carries the ball from PITCH_RELEASE
  * to the plate-crossing target under the pitch's own gravity. Closed form: the

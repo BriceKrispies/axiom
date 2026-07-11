@@ -14,7 +14,7 @@ import test from "node:test";
 import { hash01, vec3 } from "./vec.ts";
 import type { Intent, Outcome } from "./types.ts";
 import { newSwing, resolveContact, stepSwing } from "./swing.ts";
-import { pitchPool, selectPitch, solvePitch } from "./pitch.ts";
+import { isStrike, pitchPool, selectPitch, solvePitch } from "./pitch.ts";
 import { catchingFielder, projectLanding, stepFielders, wanderPos } from "./fielders.ts";
 import { beyondWall, classifyFlight, isFair, newFlight, scoreFor, stepFlight } from "./ball.ts";
 import { HomeRunSession } from "./session.ts";
@@ -405,13 +405,41 @@ test("batter movement is clamped to the batting box", () => {
   assert.equal(s.batterX, C.BATTER_MIN_X);
 });
 
-test("taking every pitch completes a 10-pitch round of misses", () => {
+test("taking every pitch completes a 10-pitch round of strikes and balls, scoring zero", () => {
   const s = takeAllRound(11);
   assert.equal(s.phase, "over");
   assert.equal(s.results.length, C.PITCHES_PER_ROUND);
-  assert.ok(s.results.every((r) => r.outcome === "miss"));
+  assert.ok(s.results.every((r) => r.outcome === "miss" || r.outcome === "ball"));
   assert.equal(s.score, 0);
   assert.equal(s.pitchNumber, C.PITCHES_PER_ROUND);
+});
+
+test("the strike zone judges plate crossings", () => {
+  assert.ok(isStrike(0, 0.9), "over the middle");
+  assert.ok(isStrike(C.STRIKE_ZONE_HALF_X, C.STRIKE_ZONE_LOW), "the zone edge is a strike");
+  assert.ok(!isStrike(C.STRIKE_ZONE_HALF_X + 0.1, 0.9), "off the outside edge");
+  assert.ok(!isStrike(-C.STRIKE_ZONE_HALF_X - 0.1, 0.9), "off the inside edge");
+  assert.ok(!isStrike(0, C.STRIKE_ZONE_HIGH + 0.1), "above the zone");
+  assert.ok(!isStrike(0, C.STRIKE_ZONE_LOW - 0.1), "in the dirt");
+});
+
+test("a taken pitch off the plate is a BALL (0 points); in the zone it is a strike", () => {
+  const outcomes: Outcome[] = [];
+  for (let seed = 1; seed <= 12; seed += 1) {
+    const s = takeAllRound(seed);
+    for (const r of s.results) {
+      assert.ok(r.outcome === "miss" || r.outcome === "ball", "a take never gets a swing outcome");
+      assert.equal(r.points, 0, "neither call scores");
+    }
+    outcomes.push(...s.results.map((r) => r.outcome));
+  }
+  assert.ok(outcomes.includes("ball"), "some off-the-plate takes get called balls");
+  assert.ok(outcomes.includes("miss"), "in-zone takes are still strikes");
+  // The umpire is deterministic: the same seed reproduces the same calls.
+  assert.deepEqual(
+    takeAllRound(3).results.map((r) => r.outcome),
+    takeAllRound(3).results.map((r) => r.outcome),
+  );
 });
 
 test("a round's pitch speeds vary and reproduce from the seed", () => {
@@ -446,10 +474,10 @@ test("some release timing on the first pitch produces a home run (and it replays
   assert.equal(playFirstPitch(1, found.t, found.move, found.mt), "homer");
 });
 
-test("different release timings on the same pitch produce different outcomes", () => {
+test("different swing timings on the same pitch produce different outcomes", () => {
   const outcomes = new Set<Outcome>();
-  for (let t = 90; t <= 135; t += 1) {
-    outcomes.add(playFirstPitch(2, t));
+  for (let t = 95; t <= 140; t += 1) {
+    outcomes.add(playFirstPitch(3, t));
   }
   assert.ok(outcomes.size >= 3, `timing matters: ${[...outcomes].join(",")}`);
 });

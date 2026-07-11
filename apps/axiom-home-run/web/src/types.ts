@@ -11,8 +11,8 @@ import type { Vec3 } from "./vec.ts";
 /** The round state machine. */
 export type Phase = "ready" | "windup" | "pitch" | "flight" | "result" | "over";
 
-/** The arcade outcome of one pitch. */
-export type Outcome = "miss" | "foul" | "weak" | "grounder" | "popup" | "clean" | "homer";
+/** The arcade outcome of one pitch. A taken pitch outside the zone is a `ball`. */
+export type Outcome = "miss" | "ball" | "foul" | "weak" | "grounder" | "popup" | "clean" | "homer";
 
 /** The bat's always-armed swing state machine (rewind = the swing cooldown). */
 export type SwingState = "ready" | "swing" | "follow" | "rewind";

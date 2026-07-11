@@ -304,9 +304,17 @@ const buildBatterFigure = (box: number, cyl: number, sphere: number, m: Map<Mate
 
 const TRAIL_POOL = 14;
 
+/** The oversized bat's stepped taper: [innerR, outerR, width] per segment — thin
+ * handle, fat barrel, fattest at the very tip. */
+const BAT_SEGMENTS: readonly (readonly [number, number, number])[] = [
+  [C.BAT_GRIP_R, C.BAT_BARREL_R, C.BAT_HANDLE_W],
+  [C.BAT_BARREL_R, (C.BAT_BARREL_R + C.BAT_TIP_R) / 2, C.BAT_BARREL_W],
+  [(C.BAT_BARREL_R + C.BAT_TIP_R) / 2, C.BAT_TIP_R, C.BAT_TIP_W],
+];
+
 export interface SceneHandles {
   readonly batter: FigureNodes;
-  readonly bat: Entity;
+  readonly bat: readonly Entity[];
   readonly batKnob: Entity;
   readonly machine: MachineNodes;
   readonly fielders: readonly FigureNodes[];
@@ -334,7 +342,7 @@ export const buildScene = (): SceneHandles => {
 
   const machine = buildMachine(box, cyl, sphere, m, mats.flash);
   const batter = buildBatterFigure(box, cyl, sphere, m);
-  const bat = spawnRenderable(box, mats.bat, parked());
+  const bat = BAT_SEGMENTS.map(() => spawnRenderable(box, mats.bat, parked()));
   const batKnob = spawnRenderable(box, m.get("BatKnob")!, parked());
   const fielders = C.FIELDER_SPOTS.map(() => buildFielderFigure(box, cyl, sphere, m));
   const ball = spawnRenderable(sphere, m.get("BallWhite")!, parked());
@@ -391,16 +399,20 @@ const applyBatter = (h: SceneHandles, view: SceneView): void => {
   show(h.batter.head, xform(vec3(bx, 1.4 - crouch, bz), sphereScale(0.14)));
   show(h.batter.cap, xform(vec3(bx, 1.47 - crouch, bz), sphereScale(0.15)));
 
-  // Bat: pivot at the hands; the box tilts up about the grip, then yaws with θ.
+  // Bat: pivot at the hands; each stepped segment tilts up about the grip, then
+  // yaws with θ — thin handle out to the oversized barrel, widest at the tip.
   const tilt = batTilt(s.state, s.readiness);
   const d = batDir(s.theta);
   const pivotY = batPlaneY(s.theta) + 0.05;
-  const rMid = (C.BAT_GRIP_R + C.BAT_TIP_R) / 2;
   const reach = Math.cos(tilt);
-  const center = vec3(bx + d.x * rMid * reach, pivotY + Math.sin(tilt) * rMid, bz + d.z * rMid * reach);
   const rot = quatFromEulerXyz(0, s.theta + Math.PI / 2, tilt);
-  show(h.bat, xform(center, boxScale(vec3(C.BAT_TIP_R - C.BAT_GRIP_R, 0.11, 0.11)), rot));
-  show(h.batKnob, xform(vec3(bx + d.x * C.BAT_GRIP_R, pivotY, bz + d.z * C.BAT_GRIP_R), boxScale(vec3(0.13, 0.13, 0.13)), rot));
+  for (let i = 0; i < h.bat.length; i += 1) {
+    const [r0, r1, w] = BAT_SEGMENTS[i]!;
+    const rc = (r0 + r1) / 2;
+    const center = vec3(bx + d.x * rc * reach, pivotY + Math.sin(tilt) * rc, bz + d.z * rc * reach);
+    show(h.bat[i]!, xform(center, boxScale(vec3(r1 - r0 + 0.02, w, w)), rot));
+  }
+  show(h.batKnob, xform(vec3(bx + d.x * C.BAT_GRIP_R, pivotY, bz + d.z * C.BAT_GRIP_R), boxScale(vec3(0.15, 0.15, 0.15)), rot));
 
   // Arms reach from the shoulders toward the grip.
   const handX = bx + d.x * (C.BAT_GRIP_R + 0.12) * reach;
