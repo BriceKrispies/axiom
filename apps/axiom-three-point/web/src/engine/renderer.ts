@@ -92,6 +92,9 @@ export const initRenderer = (canvas: HTMLCanvasElement, choice: BackendChoice = 
 /** The active backend's name (for HUD/debug readouts). */
 export const rendererBackendName = (): string => requireState().backend.name;
 
+/** Total retained scene nodes (development counter). */
+export const rendererNodeCount = (): number => requireState().nodes.size;
+
 /** Resize the canvas backing store and the backend's viewport. */
 export const resizeRenderer = (width: number, height: number): void => {
   const st = requireState();

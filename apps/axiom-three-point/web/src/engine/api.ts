@@ -100,4 +100,7 @@ export interface ToneSpec {
   readonly duration: number;
   /** 0..1, default 0.15. */
   readonly volume?: number;
+  /** Seconds from now to start (default 0) — lets one event play a two-note
+   * figure without a scheduler. */
+  readonly delay?: number;
 }

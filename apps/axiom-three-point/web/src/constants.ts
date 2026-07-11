@@ -193,6 +193,9 @@ export const aimDirection = (yaw: number, pitch: number): Vec3 => {
 const STATION_ANGLES = [-0.7, 0, 0.7] as const;
 const STATION_LABELS = ["LEFT WING", "TOP OF THE ARC", "RIGHT WING"] as const;
 
+/** Transition/arrival rack labels (none for the initial left spawn). */
+export const RACK_LABELS = [null, "CENTER RACK", "RIGHT RACK"] as const;
+
 /** Left wing → top of the arc → right wing, each on the 6.75 m arc facing the rim. */
 export const STATIONS: readonly ShootingStation[] = STATION_ANGLES.map((theta, i) => ({
   baseYaw: -theta,
@@ -277,12 +280,85 @@ export const GESTURE_REFERENCE_HEIGHT = 540;
 export const SWIPE_ZONE_MIN_Y = 0.5;
 export const SWIPE_ZONE_HALF_X = 0.35;
 
-// ── polish ────────────────────────────────────────────────────────────────────
 
-/** Golden-ball trail pool size. */
-export const TRAIL_POOL = 6;
-/** Ticks between golden-trail samples. */
-export const TRAIL_SAMPLE_TICKS = 2;
+// ── the one presentation tuning object (spec: "POLISH_TUNING") ────────────────
+
+/**
+ * Every duration, amplitude, cap, and scaling range of the PRESENTATION layer —
+ * the coordinated reactions to gameplay events (`types.ts` `GameEvent`, driven
+ * through `polish.ts`). Purely cosmetic: nothing here may change a launch, a
+ * collider, a score, or the aim. Times are fixed 60 Hz ticks, distances metres,
+ * strengths unitless multipliers, volumes 0..1, pitches multipliers on each
+ * sound's base frequency.
+ */
+export const POLISH_TUNING = {
+  // ── shot chain ─────────────────────────────────────────────────────────────
+  /** Pickup anticipation: the dealt ball lifts off its slot for this many ticks
+   * before flying to the chest (inside the existing pickup window — the moment
+   * Space becomes accepted is unchanged). */
+  pickupAnticipationTicks: 3,
+  /** Release kick: a tiny eye-position recoil (never orientation) at launch. */
+  releaseKickTicks: 8,
+  /** Peak eye recoil (m) against the launch direction. */
+  releaseKickStrength: 0.035,
+  /** Follow-through settle after the kick. */
+  followThroughTicks: 12,
+  /** Floor-impact squash: duration and Y-scale reduction. */
+  ballSquashTicks: 3,
+  ballSquashAmount: 0.94,
+  // ── hoop reactions ─────────────────────────────────────────────────────────
+  /** Rim vibration: a damped 2–3 oscillation wobble of the VISIBLE rim only. */
+  rimVibrationTicks: 16,
+  rimVibrationStrength: 0.02,
+  /** Backboard shake: a shorter, smaller wobble of the VISIBLE board only. */
+  backboardShakeTicks: 12,
+  backboardShakeStrength: 0.015,
+  /** Net: sharp snap (swish), softer drop (make), lingering damped sway. */
+  netSnapTicks: 10,
+  netSwayTicks: 40,
+  netDisplacementStrength: 0.09,
+  // ── HUD motion ─────────────────────────────────────────────────────────────
+  scorePulseTicks: 16,
+  streakPulseTicks: 20,
+  feedbackTextTicks: 60,
+  /** Streak level at which the screen-edge warmth appears. */
+  streakGlowLevel: 4,
+  /** Streak level thresholds for presentation escalation. */
+  streakLevelStrong: 2,
+  streakLevelAccent: 3,
+  // ── racks + transitions ────────────────────────────────────────────────────
+  rackSettleTicks: 14,
+  /** Station arrival label ("CENTER RACK" / "RIGHT RACK") hold time. */
+  stationLabelTicks: 100,
+  /** Cosmetic transition beat length (the glide itself is MOVE_TICKS). */
+  transitionTicks: MOVE_TICKS,
+  // ── pooled effects (hard caps) ─────────────────────────────────────────────
+  maxPooledParticles: 24,
+  /** Motion-trail samples per ordinary ball / per golden ball. */
+  ballTrailSamples: 4,
+  goldenTrailSamples: 8,
+  /** Ticks between trail samples. */
+  trailSampleStrideTicks: 2,
+  /** Speed² (m²/s²) above which an ordinary ball leaves a trail. */
+  trailSpeedSq: 16,
+  // ── arena life ─────────────────────────────────────────────────────────────
+  crowdReactionTicks: 50,
+  ambientCrowdVolume: 0.035,
+  // ── impact audio scaling ───────────────────────────────────────────────────
+  minImpactVolume: 0.04,
+  maxImpactVolume: 0.3,
+  minImpactPitch: 0.85,
+  maxImpactPitch: 1.25,
+  /** Impact speed (m/s) that maps to the maximum volume/pitch. */
+  impactSpeedFull: 8,
+  /** Per-surface cooldown between impact reactions (ticks) — rim rattle must
+   * not machine-gun the same sound. */
+  impactCooldownTicks: 7,
+  // ── input feel ─────────────────────────────────────────────────────────────
+  /** Space pressed slightly before the ball reaches the chest is buffered this
+   * long (never across transitions or restarts). */
+  inputBufferTicks: 10,
+} as const;
 
 // ── development trajectory preview ────────────────────────────────────────────
 
@@ -295,3 +371,7 @@ export const DEBUG_TRAJECTORY = false;
 /** Preview dot count and tick stride between dots. */
 export const PREVIEW_POINTS = 20;
 export const PREVIEW_STRIDE_TICKS = 3;
+
+/** When true, logs once-a-second development counters (active effects, trail
+ * samples, audio plays, scene nodes). MUST ship false. */
+export const DEBUG_COUNTERS = false;

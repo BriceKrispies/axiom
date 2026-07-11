@@ -16,6 +16,8 @@
 import { type BackendChoice, initRenderer, renderScene } from "./engine/renderer.ts";
 import { startLoop } from "./engine/loop.ts";
 import { InputState, attachDomInput } from "./engine/input.ts";
+import { stopAmbience } from "./engine/audio.ts";
+import { countTowards } from "./polish.ts";
 import { BALLS_PER_RACK, FIXED_HZ, RACK_COUNT, SHOT_TUNING } from "./constants.ts";
 
 const MAX_STEPS_PER_FRAME = 8;
@@ -50,6 +52,12 @@ interface Hud {
   readonly atTop: boolean;
   readonly reticle: ReticleView;
   readonly movingToLabel: string | undefined;
+  readonly stationLabel: string | null;
+  readonly award: { readonly points: number; readonly seq: number } | null;
+  readonly streakLevel: number;
+  readonly glow: number;
+  readonly streakPulseSeq: number;
+  readonly streakBrokenSeq: number;
   readonly results: Results | undefined;
   readonly events: readonly Feedback[];
 }
@@ -74,9 +82,13 @@ const boot_ = async (): Promise<void> => {
   const powerFill = el("power-fill");
   const powerZone = el("power-zone");
   const moving = el("moving");
+  const stationLabel = el("station-label");
   const lockCue = el("lock-cue");
   const resultsEl = el("results");
+  const glowEl = el("glow");
+  const award = el("award");
   const pips = Array.from({ length: BALLS_PER_RACK }, (_, i) => el(`pip-${i}`));
+  const revealRows = ["row-score", "row-makes", "row-streak", "row-label", "res-restart"].map(el);
   const fields = {
     rack: el("rack"),
     resLabel: el("res-label"),
@@ -118,16 +130,63 @@ const boot_ = async (): Promise<void> => {
     touched = true;
   });
 
+  // HUD animation baselines (reset whenever the game restarts).
+  let displayScore = 0;
+  let lastPulseSeq = 0;
+  let lastBrokenSeq = 0;
+  let lastAwardSeq = 0;
+  let resultsStart = 0;
+  let resultsScore = 0;
+
+  const retrigger = (element: HTMLElement, klass: string): void => {
+    element.classList.remove(klass);
+    // Force a reflow so the same animation can play again back-to-back.
+    void element.offsetWidth;
+    element.classList.add(klass);
+  };
+
   const updateHud = (hud: Hud): void => {
-    fields.score.textContent = String(hud.score);
+    // A restart rewinds the retrigger counters — re-baseline without animating.
+    if (hud.streakPulseSeq < lastPulseSeq || hud.streakBrokenSeq < lastBrokenSeq) {
+      lastPulseSeq = hud.streakPulseSeq;
+      lastBrokenSeq = hud.streakBrokenSeq;
+      lastAwardSeq = 0;
+      displayScore = hud.score;
+      resultsStart = 0;
+      fields.streak.classList.remove("grow", "collapse");
+      award.classList.remove("on");
+    }
+
+    // Score counts up quickly and always lands exactly on the real value.
+    displayScore = countTowards(displayScore, hud.score);
+    fields.score.textContent = String(displayScore);
     if (hud.score !== lastScore) {
+      const big = hud.streakLevel >= 2;
       lastScore = hud.score;
       fields.score.classList.add("pop");
+      fields.score.classList.toggle("big", big);
       globalThis.clearTimeout(scorePopTimer);
-      scorePopTimer = globalThis.setTimeout((): void => fields.score.classList.remove("pop"), 260);
+      scorePopTimer = globalThis.setTimeout((): void => fields.score.classList.remove("pop", "big"), big ? 340 : 260);
     }
+    // The pooled +N award element.
+    if (hud.award !== null && hud.award.seq !== lastAwardSeq) {
+      lastAwardSeq = hud.award.seq;
+      award.textContent = `+${hud.award.points}`;
+      retrigger(award, "on");
+    }
+
     fields.streak.textContent = `STREAK ${hud.streak}`;
-    fields.streak.classList.toggle("hot", hud.streak >= 3);
+    fields.streak.classList.toggle("hot", hud.streakLevel >= 3);
+    fields.streak.classList.toggle("accent", hud.streakLevel === 2);
+    if (hud.streakPulseSeq > lastPulseSeq) {
+      lastPulseSeq = hud.streakPulseSeq;
+      if (hud.streakLevel >= 1) retrigger(fields.streak, "grow");
+    }
+    if (hud.streakBrokenSeq > lastBrokenSeq) {
+      lastBrokenSeq = hud.streakBrokenSeq;
+      retrigger(fields.streak, "collapse");
+    }
+    glowEl.style.opacity = String(hud.glow * 0.55);
 
     fields.rack.textContent = `RACK ${hud.rackIndex + 1}/${RACK_COUNT}`;
     const spent = BALLS_PER_RACK - hud.ballsLeft;
@@ -151,15 +210,36 @@ const boot_ = async (): Promise<void> => {
     if (hud.movingToLabel !== undefined) {
       moving.textContent = `NEXT UP: ${hud.movingToLabel}`;
     }
+    stationLabel.classList.toggle("on", hud.stationLabel !== null);
+    if (hud.stationLabel !== null && stationLabel.textContent !== hud.stationLabel) {
+      stationLabel.textContent = hud.stationLabel;
+      retrigger(stationLabel, "on");
+    }
 
+    // Results: staged reveal — score counts up, then makes, best streak, the
+    // performance label last, then the restart hint.
     const over = hud.results !== undefined;
     resultsEl.classList.toggle("show", over);
     if (over) {
       const r = hud.results!;
-      fields.resScore.textContent = String(r.score);
+      if (resultsStart === 0) {
+        resultsStart = performance.now();
+        resultsScore = 0;
+        for (const row of revealRows) row.classList.remove("in");
+      }
+      resultsScore = countTowards(countTowards(resultsScore, r.score), r.score);
+      fields.resScore.textContent = String(resultsScore);
       fields.resMakes.textContent = `${r.makes}/15`;
       fields.resStreak.textContent = String(r.bestStreak);
       fields.resLabel.textContent = r.label;
+      const elapsed = performance.now() - resultsStart;
+      const stages = [0, 550, 950, 1400, 1850];
+      for (let i = 0; i < revealRows.length; i += 1) {
+        if (elapsed >= stages[i]!) revealRows[i]!.classList.add("in");
+      }
+    } else if (resultsStart !== 0) {
+      resultsStart = 0;
+      for (const row of revealRows) row.classList.remove("in");
     }
 
     lockCue.classList.toggle("on", !over && (coarsePointer ? !touched : !pointerLocked));
@@ -183,6 +263,7 @@ const boot_ = async (): Promise<void> => {
   const load = async (version: number): Promise<void> => {
     stopLoop?.();
     detachInput?.();
+    stopAmbience();
     const input = new InputState();
     detachInput = attachDomInput(input, canvas);
     const mod = (await import(`/dist/game.js?v=${version}`)) as GameModule;

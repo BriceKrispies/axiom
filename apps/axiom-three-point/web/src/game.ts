@@ -19,12 +19,13 @@
 
 import type { TickInput } from "./engine/api.ts";
 import type { InputState } from "./engine/input.ts";
-import { playTone } from "./engine/audio.ts";
-import { type SceneHandles, applyFrame, buildScene } from "./scene.ts";
-import type { AudioCue, Hud, Intent, SwipeGesture } from "./types.ts";
+import { playTone, setAmbienceLevel, startAmbience } from "./engine/audio.ts";
+import { type SceneHandles, applyFrame, buildScene, sceneNodeCount } from "./scene.ts";
+import type { GameEvent, Hud, Intent, SwipeGesture } from "./types.ts";
 import { type Vec2, vec2 } from "./vec.ts";
-import { GESTURE_REFERENCE_HEIGHT, SHOT_TUNING, SWIPE_ZONE_HALF_X, SWIPE_ZONE_MIN_Y } from "./constants.ts";
+import { DEBUG_COUNTERS, GESTURE_REFERENCE_HEIGHT, POLISH_TUNING, SHOT_TUNING, SWIPE_ZONE_HALF_X, SWIPE_ZONE_MIN_Y } from "./constants.ts";
 import { swipeIntents } from "./gameplay.ts";
+import { impactPitch, impactVolume } from "./polish.ts";
 import { PointerHistory } from "./pointer.ts";
 import { ThreePointSession } from "./session.ts";
 
@@ -49,6 +50,7 @@ export const initGame = (input: InputState): void => {
   gesture = null;
   lastPointer = null;
   history.clear();
+  startAmbience(POLISH_TUNING.ambientCrowdVolume);
 };
 
 /** Fold this tick's pointer-locked mouse, keyboard, and touch gestures into the
@@ -99,46 +101,97 @@ const readIntent = (input: TickInput, tick: number): Intent => {
   };
 };
 
-/** Map a session audio cue onto the engine's procedural tone synth. */
-const playCue = (cue: AudioCue): void => {
-  switch (cue.kind) {
-    case "charge":
-      playTone({ duration: 0.045, freq: 200 + 420 * cue.level, volume: 0.045, wave: "sine" });
+let audioPlays = 0;
+
+const tone = (spec: Parameters<typeof playTone>[0]): void => {
+  audioPlays += 1;
+  playTone(spec);
+};
+
+/**
+ * The unified event → sound map. Impact volume and pitch come from the shared
+ * `impactVolume`/`impactPitch` mappings (normalized collision speed, clamped by
+ * POLISH_TUNING) — a soft graze and a hard clank never sound identical. All
+ * variation is deterministic (speed, slot, streak); no randomness.
+ */
+const playEventAudio = (event: GameEvent): void => {
+  switch (event.kind) {
+    case "ballPickupStarted":
+      tone({ duration: 0.05, freq: 300 * (1 + event.slot * 0.04), volume: 0.05, wave: "triangle" });
       break;
-    case "release":
-      playTone({ duration: 0.09, freq: 540, volume: 0.12, wave: "sine" });
+    case "chargeTick":
+      tone({ duration: 0.045, freq: 200 + 420 * event.level, volume: 0.045, wave: "sine" });
       break;
-    case "contact": {
-      const volume = Math.min(0.3, 0.06 + cue.speed * 0.035);
-      if (cue.surface === "rim") playTone({ duration: 0.07, freq: 185, volume, wave: "triangle" });
-      else if (cue.surface === "backboard") playTone({ duration: 0.08, freq: 120, volume, wave: "square" });
-      else if (cue.surface === "floor") playTone({ duration: 0.1, freq: 85, volume, wave: "sine" });
-      else playTone({ duration: 0.07, freq: 100, volume, wave: "square" });
+    case "ballReleased":
+      tone({ duration: 0.09, freq: 520 + 60 * event.progress, volume: 0.12, wave: "sine" });
       break;
-    }
-    case "score": {
-      const base = cue.swish ? 740 : 620;
-      playTone({ duration: 0.28, freq: base + 40 * Math.min(cue.streak, 6), volume: 0.18, wave: "sine" });
+    case "rimHit":
+      tone({ duration: 0.07, freq: 185 * impactPitch(event.speed), volume: impactVolume(event.speed), wave: "triangle" });
       break;
-    }
-    case "miss":
-      playTone({ duration: 0.14, freq: 150, volume: 0.08, wave: "sine" });
+    case "backboardHit":
+      tone({ duration: 0.08, freq: 120 * impactPitch(event.speed), volume: impactVolume(event.speed), wave: "square" });
       break;
-    case "transition":
-      playTone({ duration: 0.32, freq: 300, volume: 0.09, wave: "triangle" });
+    case "floorHit":
+      tone({ duration: 0.1, freq: 85 * impactPitch(event.speed), volume: impactVolume(event.speed), wave: "sine" });
       break;
-    case "results":
-      playTone({ duration: 0.5, freq: 500, volume: 0.16, wave: "sine" });
+    case "basketMade":
+      if (!event.swish) {
+        tone({ duration: 0.26, freq: 620 + 40 * Math.min(event.streak, 6), volume: 0.17, wave: "sine" });
+      }
+      // The score-award blip rides every make.
+      tone({ delay: 0.06, duration: 0.06, freq: 1046, volume: 0.06, wave: "sine" });
+      break;
+    case "swishMade":
+      // The clean-net figure: a warm body plus a bright, short sparkle.
+      tone({ duration: 0.3, freq: 740, volume: 0.2, wave: "sine" });
+      tone({ delay: 0.05, duration: 0.08, freq: 1480, volume: 0.07, wave: "triangle" });
+      break;
+    case "shotMissed":
+      tone({ duration: 0.14, freq: 150, volume: 0.08, wave: "sine" });
+      break;
+    case "streakIncreased":
+      if (event.streak >= 2) {
+        tone({ duration: 0.07, freq: 500 + 70 * Math.min(event.streak, 7), volume: 0.07, wave: "sine" });
+      }
+      break;
+    case "streakBroken":
+      tone({ duration: 0.12, freq: 392, volume: 0.09, wave: "sine" });
+      tone({ delay: 0.09, duration: 0.16, freq: 262, volume: 0.07, wave: "sine" });
+      break;
+    case "stationTransitionStarted":
+      tone({ duration: 0.32, freq: 300, volume: 0.09, wave: "triangle" });
+      break;
+    case "stationTransitionCompleted":
+      tone({ duration: 0.12, freq: 523, volume: event.final ? 0.13 : 0.1, wave: "sine" });
+      if (event.final) tone({ delay: 0.1, duration: 0.16, freq: 659, volume: 0.12, wave: "sine" });
+      break;
+    case "gameCompleted":
+      tone({ duration: 0.2, freq: 523, volume: 0.14, wave: "sine" });
+      tone({ delay: 0.15, duration: 0.35, freq: 784, volume: 0.15, wave: "sine" });
+      break;
+    case "rackCompleted":
+    case "gameRestarted":
+    default:
       break;
   }
 };
 
-/** One fixed 60 Hz tick: input → session → scene + audio. */
+/** One fixed 60 Hz tick: input → session → events (audio) → scene. */
 export const updateGame = (input: TickInput, tick: number): void => {
   if (handles === undefined) return;
   session.advance(readIntent(input, tick));
-  for (const cue of session.drainAudio()) playCue(cue);
-  applyFrame(handles, session.view());
+  for (const event of session.drainGameEvents()) playEventAudio(event);
+  const view = session.view();
+  // Quiet arena bed, swelling gently with the crowd reaction.
+  setAmbienceLevel(POLISH_TUNING.ambientCrowdVolume * (1 + 1.6 * view.crowdPulse));
+  applyFrame(handles, view);
+  if (DEBUG_COUNTERS && tick % 60 === 0) {
+    console.log(
+      `three-point counters: effects=${session.activeEffects()} trails=${session.activeTrailSamples()} ` +
+        `audio/s=${audioPlays} nodes=${sceneNodeCount()}`,
+    );
+    audioPlays = 0;
+  }
 };
 
 /** The HUD the harness reads each frame (draining feedback events). */

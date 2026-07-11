@@ -51,6 +51,14 @@ export class InputState implements TickInput {
     }
   }
 
+  /** Release every held key (window blur / pointer-lock loss): each held code
+   * gets a normal `released` edge on the next tick, so a charge in progress
+   * resolves safely and nothing stays logically held while unfocused —
+   * regaining focus can never fabricate a press or a release. */
+  public releaseAllKeys(): void {
+    this.#liveCodes.clear();
+  }
+
   /** Accumulate a pointer-locked mouse-look delta (raw px, +x right / +y down). */
   public lookEvent(dx: number, dy: number): void {
     this.#lookAccX += dx;
@@ -143,10 +151,24 @@ export function attachDomInput(input: InputState, canvas: HTMLCanvasElement): ()
   const onPointerLeave = (): void => {
     input.pointerClear();
   };
+  // Browser interruptions must never leave a key logically held: losing focus
+  // or the pointer lock releases everything (a held Space resolves as a normal
+  // release edge; regaining focus starts from a clean slate).
+  const onBlur = (): void => {
+    input.releaseAllKeys();
+    input.pointerClear();
+  };
+  const onLockChange = (): void => {
+    if (document.pointerLockElement !== canvas) {
+      input.releaseAllKeys();
+    }
+  };
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   window.addEventListener("mousemove", onMouseMove);
+  window.addEventListener("blur", onBlur);
+  document.addEventListener("pointerlockchange", onLockChange);
   canvas.addEventListener("click", onClick);
   canvas.addEventListener("pointerdown", onPointer);
   canvas.addEventListener("pointermove", onPointer);
@@ -157,6 +179,8 @@ export function attachDomInput(input: InputState, canvas: HTMLCanvasElement): ()
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("mousemove", onMouseMove);
+    window.removeEventListener("blur", onBlur);
+    document.removeEventListener("pointerlockchange", onLockChange);
     canvas.removeEventListener("click", onClick);
     canvas.removeEventListener("pointerdown", onPointer);
     canvas.removeEventListener("pointermove", onPointer);

@@ -5,7 +5,11 @@
  * deterministic 60 Hz tick of the explicit phase machine
  * (ready → charging → releasing → ballInFlight → shotResolved → movingToNextRack →
  * results); `view()` exposes a read-only scene snapshot, `hud()` the HUD snapshot,
- * `drainAudio()` the sound cues, and `hash()` a replay-equality fingerprint.
+ * `drainGameEvents()` the unified feedback event stream (see `types.ts`
+ * `GameEvent` — audio, HUD, and scene reactions all key off it), and `hash()` a
+ * replay-equality fingerprint. Presentation reactions live in `polish.ts`
+ * (`PolishState`), fed those same events and advanced once per tick — cosmetic
+ * only, never folded into the hash, cleared exactly by restart.
  *
  * THE SHOT IS ONE CONTINUOUS MOTION, AND THE LOOP NEVER WAITS. The moment a ball
  * is released the NEXT ball is dealt off its actual rack slot into the hands (the
@@ -39,15 +43,18 @@ import {
   FEEDBACK_TICKS,
   GOLDEN_BALL_INDEX,
   MOVE_TICKS,
+  POLISH_TUNING,
   PREVIEW_POINTS,
   PREVIEW_STRIDE_TICKS,
   RACK_COUNT,
+  RACK_LABELS,
+  RIM_X,
+  RIM_Z,
   SHOT_TUNING,
   STATIONS,
-  TRAIL_POOL,
-  TRAIL_SAMPLE_TICKS,
   aimDirection,
   rackSlotPosition,
+  yawForward,
 } from "./constants.ts";
 import {
   AUTO_RELEASE_TICKS,
@@ -65,12 +72,12 @@ import {
   stepDetection,
 } from "./gameplay.ts";
 import { type BallState, makeBall, predictTrajectory, stepBall } from "./physics.ts";
-import type { AudioCue, BallView, Feedback, Hud, Intent, Phase, Results, ReticleView, SceneView, ShotOutcome } from "./types.ts";
+import { PolishState, glintOn, streakPresentationLevel } from "./polish.ts";
+import type { BallView, ContactSurface, Feedback, GameEvent, Hud, Intent, Phase, Results, ReticleView, SceneView, ShotOutcome } from "./types.ts";
 
 const FEEDBACK_MAX = 8;
-const CONTACT_CUE_GAP_TICKS = 6;
+const GAME_EVENT_MAX = 24;
 const IMPACT_DECAY = 0.08;
-const NET_PULSE_DECAY = 0.03;
 
 /** One launched ball still on the court. */
 interface LiveBall {
@@ -85,6 +92,11 @@ interface LiveBall {
   applied: boolean;
   /** Visual linger after resolution before the ball is cleared away. */
   fadeTicks: number;
+  /** Bounded motion-trail samples (golden balls carry more; see POLISH_TUNING). */
+  readonly trail: Vec3[];
+  /** Horizontal rim-axis offset at the moment of scoring (net displacement). */
+  entryX: number;
+  entryZ: number;
 }
 
 export class ThreePointSession {
@@ -119,13 +131,16 @@ export class ThreePointSession {
   #bestStreak = 0;
   #lastOutcome: ShotOutcome | undefined;
 
-  // Presentation side-channels.
+  // Presentation side-channels (cosmetic only — never folded into the hash).
   #events: Feedback[] = [];
-  #audio: AudioCue[] = [];
-  #netPulse = 0;
+  #gameEvents: GameEvent[] = [];
+  readonly #polish = new PolishState();
   #impact: { position: Vec3; strength: number } | null = null;
-  #trail: Vec3[] = [];
-  #lastContactCueTick = -1000;
+  /** Per-surface impact cooldown: last tick each surface reacted. */
+  #lastImpact: Record<ContactSurface, number> = { backboard: -1000, floor: -1000, pole: -1000, rim: -1000 };
+  /** Space pressed just before the ball reaches the chest is honored for a
+   * short bounded window (never across transitions or restarts). */
+  #bufferTicks = 0;
 
   #results: Results | undefined;
   #hash = 0x811c9dc5;
@@ -218,10 +233,22 @@ export class ThreePointSession {
     return out;
   }
 
-  drainAudio(): readonly AudioCue[] {
-    const out = this.#audio;
-    this.#audio = [];
+  /** Drain the unified feedback event stream (audio + HUD reactions key off it;
+   * the internal `PolishState` has already consumed each event). */
+  drainGameEvents(): readonly GameEvent[] {
+    const out = this.#gameEvents;
+    this.#gameEvents = [];
     return out;
+  }
+
+  /** Development counter: presentation reactions currently animating. */
+  activeEffects(): number {
+    return this.#polish.activeEffects();
+  }
+
+  /** Development counter: trail samples currently held across all live balls. */
+  activeTrailSamples(): number {
+    return this.#liveBalls.reduce((sum, b) => sum + b.trail.length, 0);
   }
 
   // ── reset (initial construction and the R key share one code path) ──────────
@@ -248,11 +275,11 @@ export class ThreePointSession {
     this.#bestStreak = 0;
     this.#lastOutcome = undefined;
     this.#events = [];
-    this.#audio = [];
-    this.#netPulse = 0;
+    this.#gameEvents = [];
+    this.#polish.reset();
     this.#impact = null;
-    this.#trail = [];
-    this.#lastContactCueTick = -1000;
+    this.#lastImpact = { backboard: -1000, floor: -1000, pole: -1000, rim: -1000 };
+    this.#bufferTicks = 0;
     this.#results = undefined;
     this.#hash = 0x811c9dc5;
     this.#dealNextBall();
@@ -265,6 +292,10 @@ export class ThreePointSession {
 
     if (intent.restartPressed) {
       this.reset();
+      // Queue for the platform layer only: `reset()` already restored the
+      // polish state (including the fresh first-ball pickup), so feeding it
+      // gameRestarted here would wipe that exact-initial presentation.
+      this.#gameEvents.push({ kind: "gameRestarted" });
       return;
     }
 
@@ -276,11 +307,18 @@ export class ThreePointSession {
       this.#handTicks += 1;
       // A completed swipe (mobile) IS the whole shot: flick strength decides the
       // release progress, the sideways flick offsets the launch yaw — the
-      // camera/aim are untouched. Space starts the desktop rise. Both wait for
-      // the dealt ball to reach the chest.
+      // camera/aim are untouched. Space starts the desktop rise (a press that
+      // lands just before the ball reaches the chest is buffered briefly). Both
+      // wait for the dealt ball to reach the chest.
+      if (intent.shootPressed && !this.ballInHand) {
+        this.#bufferTicks = POLISH_TUNING.inputBufferTicks;
+      } else if (this.#bufferTicks > 0) {
+        this.#bufferTicks -= 1;
+      }
       if (intent.swipe !== null && this.ballInHand) {
         this.#launchBall(intent.swipe.progress, intent.swipe.yawOffset);
-      } else if (intent.shootPressed && this.ballInHand) {
+      } else if ((intent.shootPressed || this.#bufferTicks > 0) && this.ballInHand) {
+        this.#bufferTicks = 0;
         this.#phase = "charging";
         this.#phaseTicks = 0;
         this.#motionTicks = 0;
@@ -289,9 +327,13 @@ export class ThreePointSession {
     if (this.#phase === "charging") {
       this.#tickCharging(intent);
     } else if (this.#phase === "releasing") {
+      // An eager press during the follow-through buffers into the next ball.
+      if (intent.shootPressed) this.#bufferTicks = POLISH_TUNING.inputBufferTicks;
       this.#tickFollowThrough();
     } else if (this.#phase === "ballInFlight") {
-      // The rack is empty; waiting for every airborne ball to resolve.
+      // The rack is empty; waiting for every airborne ball to resolve. Buffered
+      // input never crosses a rack boundary.
+      this.#bufferTicks = 0;
       if (this.ballsInFlight === 0) {
         this.#phase = "shotResolved";
         this.#phaseTicks = 0;
@@ -299,9 +341,11 @@ export class ThreePointSession {
     } else if (this.#phase === "shotResolved") {
       this.#tickRackEndBeat();
     } else if (this.#phase === "movingToNextRack") {
+      this.#bufferTicks = 0;
       this.#tickMoving();
     }
 
+    this.#polish.advance();
     this.#foldHash();
   }
 
@@ -323,6 +367,7 @@ export class ThreePointSession {
     this.#rackTaken[this.#station * BALLS_PER_RACK + this.#ballIndex] = true;
     this.#handSlot = this.#ballIndex;
     this.#handTicks = 0;
+    this.#pushGameEvent({ golden: this.#ballIndex === GOLDEN_BALL_INDEX, kind: "ballPickupStarted", slot: this.#ballIndex });
   }
 
   #tickCharging(intent: Intent): void {
@@ -330,7 +375,7 @@ export class ThreePointSession {
     this.#motionTicks += 1;
     const p = motionProgress(this.#motionTicks);
     if (p > 0 && p < 1 && this.#motionTicks % 6 === 0) {
-      this.#pushAudio({ kind: "charge", level: p });
+      this.#pushGameEvent({ kind: "chargeTick", level: p });
     }
     // Release at the player's instant — or auto-release after the max hold.
     if (intent.shootReleased || this.#motionTicks >= AUTO_RELEASE_TICKS) {
@@ -357,6 +402,8 @@ export class ThreePointSession {
       applied: false,
       ball: makeBall(from, launch.velocity, launch.angularVelocity),
       detection: INITIAL_DETECTION,
+      entryX: 0,
+      entryZ: 0,
       fadeTicks: FEEDBACK_TICKS,
       flightTicks: 0,
       outcome: undefined,
@@ -364,9 +411,9 @@ export class ThreePointSession {
       slot,
       touchedRim: false,
       touchedBackboard: false,
+      trail: [],
     });
     this.#launchSeq += 1;
-    if (slot === GOLDEN_BALL_INDEX) this.#trail = [];
     const nextSlot = slot + 1;
     if (nextSlot < BALLS_PER_RACK) {
       this.#ballIndex = nextSlot;
@@ -376,7 +423,7 @@ export class ThreePointSession {
     }
     this.#phase = "releasing";
     this.#phaseTicks = 0;
-    this.#pushAudio({ kind: "release" });
+    this.#pushGameEvent({ kind: "ballReleased", progress: p });
   }
 
   /** The follow-through: the launched ball is flying and the next one is already
@@ -389,6 +436,7 @@ export class ThreePointSession {
         this.#phase = "ready";
       } else {
         this.#phase = "ballInFlight";
+        this.#pushGameEvent({ kind: "rackCompleted", station: this.#station });
       }
       this.#phaseTicks = 0;
     }
@@ -400,7 +448,7 @@ export class ThreePointSession {
     if (this.#station < RACK_COUNT - 1) {
       this.#phase = "movingToNextRack";
       this.#phaseTicks = 0;
-      this.#pushAudio({ kind: "transition" });
+      this.#pushGameEvent({ kind: "stationTransitionStarted", label: RACK_LABELS[this.#station + 1] ?? "" });
     } else {
       this.#results = {
         bestStreak: this.#bestStreak,
@@ -410,7 +458,7 @@ export class ThreePointSession {
       };
       this.#phase = "results";
       this.#phaseTicks = 0;
-      this.#pushAudio({ kind: "results" });
+      this.#pushGameEvent({ kind: "gameCompleted", results: this.#results });
     }
   }
 
@@ -421,6 +469,12 @@ export class ThreePointSession {
     if (this.#phaseTicks >= MOVE_TICKS) {
       this.#station += 1;
       this.#ballIndex = 0;
+      this.#pushGameEvent({
+        final: this.#station === RACK_COUNT - 1,
+        kind: "stationTransitionCompleted",
+        label: RACK_LABELS[this.#station] ?? "",
+        station: this.#station,
+      });
       this.#dealNextBall();
       this.#phase = "ready";
       this.#phaseTicks = 0;
@@ -441,7 +495,7 @@ export class ThreePointSession {
           if (contact.surface === "rim") live.touchedRim = true;
           if (contact.surface === "backboard") live.touchedBackboard = true;
           if (contact.surface === "floor") hitFloor = true;
-          this.#reportContact(contact.surface, contact.speed, contact.position);
+          this.#reportContact(contact.surface, contact.speed, contact.position, live.seq);
         }
         let scoredNow = false;
         for (const sample of step.samples) {
@@ -451,23 +505,39 @@ export class ThreePointSession {
         }
         if (scoredNow) {
           live.outcome = classifyOutcome(true, live.touchedRim, live.touchedBackboard);
+          live.entryX = live.ball.pos.x - RIM_X;
+          live.entryZ = live.ball.pos.z - RIM_Z;
         } else if (hitFloor || outOfBounds(live.ball.pos) || live.flightTicks > SHOT_TUNING.maxShotLifetimeTicks) {
           live.outcome = classifyOutcome(false, live.touchedRim, live.touchedBackboard);
         }
       } else {
-        // Resolved: keep bouncing behind the action, then clear away.
-        stepBall(live.ball);
+        // Resolved: keep bouncing behind the action (still audible), then clear.
+        const step = stepBall(live.ball);
+        for (const contact of step.contacts) {
+          this.#reportContact(contact.surface, contact.speed, contact.position, live.seq);
+        }
         if (live.applied) live.fadeTicks -= 1;
       }
-      if (live.slot === GOLDEN_BALL_INDEX && this.#tick % TRAIL_SAMPLE_TICKS === 0 && live.fadeTicks > FEEDBACK_TICKS / 2) {
-        this.#trail.push(live.ball.pos);
-        if (this.#trail.length > TRAIL_POOL) this.#trail.shift();
-      }
+      this.#sampleTrail(live);
     }
     this.#applyOutcomesInOrder();
     this.#liveBalls = this.#liveBalls.filter((b) => b.fadeTicks > 0);
-    if (!this.#liveBalls.some((b) => b.slot === GOLDEN_BALL_INDEX)) {
-      if (this.#trail.length > 0) this.#trail.shift();
+  }
+
+  /** Bounded per-ball motion trail: golden balls always leave one (a longer
+   * cap); ordinary balls only while moving fast. Resolved balls bleed their
+   * trail out one sample per stride. All caps come from POLISH_TUNING. */
+  #sampleTrail(live: LiveBall): void {
+    if (this.#tick % POLISH_TUNING.trailSampleStrideTicks !== 0) return;
+    const golden = live.slot === GOLDEN_BALL_INDEX;
+    const v = live.ball.vel;
+    const fast = v.x * v.x + v.y * v.y + v.z * v.z > POLISH_TUNING.trailSpeedSq;
+    const cap = golden ? POLISH_TUNING.goldenTrailSamples : POLISH_TUNING.ballTrailSamples;
+    if (live.outcome === undefined && (golden || fast)) {
+      live.trail.push(live.ball.pos);
+      while (live.trail.length > cap) live.trail.shift();
+    } else if (live.trail.length > 0) {
+      live.trail.shift();
     }
   }
 
@@ -488,32 +558,50 @@ export class ThreePointSession {
         this.#streak += 1;
         this.#makes += 1;
         this.#bestStreak = Math.max(this.#bestStreak, this.#streak);
-        this.#netPulse = 1;
-        this.#pushEvent({ big: outcome === "swish" || this.#streak >= 3, kind: outcome, text: outcomeText(outcome) });
-        this.#pushEvent({ big: false, kind: "points", text: `+${points}` });
-        this.#pushAudio({ kind: "score", streak: this.#streak, swish: outcome === "swish" });
+        const swish = outcome === "swish";
+        if (swish) this.#pushGameEvent({ kind: "swishMade" });
+        this.#pushGameEvent({
+          entryX: next.entryX,
+          entryZ: next.entryZ,
+          golden: next.slot === GOLDEN_BALL_INDEX,
+          kind: "basketMade",
+          points,
+          streak: this.#streak,
+          swish,
+        });
+        this.#pushGameEvent({ kind: "streakIncreased", streak: this.#streak });
+        this.#pushEvent({ big: swish || this.#streak >= 3, kind: outcome, text: outcomeText(outcome) });
       } else {
+        const hadStreak = this.#streak;
         this.#streak = 0;
+        this.#pushGameEvent({ kind: "shotMissed", outcome });
+        if (hadStreak > 0) this.#pushGameEvent({ hadStreak, kind: "streakBroken" });
         this.#pushEvent({ big: false, kind: outcome, text: outcomeText(outcome) });
-        this.#pushAudio({ kind: "miss" });
       }
     }
   }
 
   // ── presentation helpers ────────────────────────────────────────────────────
 
-  #reportContact(surface: "rim" | "backboard" | "floor" | "pole", speed: number, position: Vec3): void {
-    if (surface === "rim" || surface === "backboard") {
+  /** One contact reaction per surface per cooldown window (a rim rattle must
+   * not machine-gun identical events); the ball's `seq` rides floor hits so the
+   * squash lands on the right ball. Pole contacts read as rim (metal). */
+  #reportContact(surface: ContactSurface, speed: number, position: Vec3, seq: number): void {
+    if (speed <= 0.4) return;
+    if (this.#tick - this.#lastImpact[surface] < POLISH_TUNING.impactCooldownTicks) return;
+    this.#lastImpact[surface] = this.#tick;
+    if (surface === "rim" || surface === "pole") {
       this.#impact = { position, strength: 1 };
-    }
-    if (this.#tick - this.#lastContactCueTick >= CONTACT_CUE_GAP_TICKS && speed > 0.4) {
-      this.#lastContactCueTick = this.#tick;
-      this.#pushAudio({ kind: "contact", speed, surface });
+      this.#pushGameEvent({ kind: "rimHit", position, speed });
+    } else if (surface === "backboard") {
+      this.#impact = { position, strength: 1 };
+      this.#pushGameEvent({ kind: "backboardHit", position, speed });
+    } else {
+      this.#pushGameEvent({ kind: "floorHit", seq, speed });
     }
   }
 
   #decayEffects(): void {
-    this.#netPulse = Math.max(0, this.#netPulse - NET_PULSE_DECAY);
     if (this.#impact !== null) {
       const strength = this.#impact.strength - IMPACT_DECAY;
       this.#impact = strength <= 0 ? null : { position: this.#impact.position, strength };
@@ -524,8 +612,11 @@ export class ThreePointSession {
     if (this.#events.length < FEEDBACK_MAX) this.#events.push(event);
   }
 
-  #pushAudio(cue: AudioCue): void {
-    if (this.#audio.length < FEEDBACK_MAX) this.#audio.push(cue);
+  /** The single emission point: queue for the platform (audio/HUD) and feed the
+   * internal presentation state the same event. */
+  #pushGameEvent(event: GameEvent): void {
+    if (this.#gameEvents.length < GAME_EVENT_MAX) this.#gameEvents.push(event);
+    this.#polish.onEvent(event);
   }
 
   #currentStation(): ShootingStation {
@@ -554,7 +645,9 @@ export class ThreePointSession {
 
   /** The camera: orientation is ALWAYS exactly the player's stored aim (the game
    * never offsets it); position is the station spot, interpolated during the
-   * rack-to-rack glide. */
+   * rack-to-rack glide, plus the release kick — a tiny, brief POSITION recoil
+   * against the shot direction (visual only; it never touches yaw/pitch and
+   * never alters a launch). */
   #cameraEye(): { position: Vec3; yaw: number; pitch: number } {
     const station = this.#currentStation();
     if (this.#phase === "movingToNextRack") {
@@ -563,7 +656,17 @@ export class ThreePointSession {
       const pos = lerp(station.position, next.position, t);
       return { pitch: this.#pitch, position: vec3(pos.x, EYE_HEIGHT, pos.z), yaw: this.#yaw };
     }
-    return { pitch: this.#pitch, position: vec3(station.position.x, EYE_HEIGHT, station.position.z), yaw: this.#yaw };
+    const recoil = this.#polish.kickRecoil();
+    const fwd = yawForward(this.#yaw);
+    return {
+      pitch: this.#pitch,
+      position: vec3(
+        station.position.x - fwd.x * recoil,
+        EYE_HEIGHT + recoil * 0.35,
+        station.position.z - fwd.z * recoil,
+      ),
+      yaw: this.#yaw,
+    };
   }
 
   /** The reticle: a FIXED center crosshair on the player's own aim line — the
@@ -579,16 +682,45 @@ export class ThreePointSession {
     if (this.#handSlot < 0) return null;
     const station = this.#currentStation();
     const golden = this.#handSlot === GOLDEN_BALL_INDEX;
+    const glint = golden && glintOn(this.#tick);
     if (this.#phase === "charging") {
-      return { golden, orientation: [0, 0, 0, 1], position: risePosition(station, this.#yaw, this.#handSlot, motionProgress(this.#motionTicks)) };
+      const p = motionProgress(this.#motionTicks);
+      const pos = risePosition(station, this.#yaw, this.#handSlot, p);
+      // Subtle hold tension: a restrained tremor that grows with the rise —
+      // presentation only (the launch reads the aim + progress, never this).
+      const tension = Math.sin(this.#tick * 0.55) * 0.004 * p;
+      return {
+        glint,
+        golden,
+        orientation: [0, 0, 0, 1],
+        position: vec3(pos.x, pos.y + tension, pos.z),
+        squash: 1,
+        trail: [],
+      };
     }
     if (this.#phase === "ready" || this.#phase === "releasing") {
       const from = rackSlotPosition(station, this.#handSlot);
       const chest = chestAnchor(station, this.#yaw, this.#handSlot);
-      const t = smoothstep(Math.min(this.#handTicks / SHOT_TUNING.pickupTicks, 1));
-      const held = lerp(from, chest, t);
-      const bob = t >= 1 ? Math.sin(this.#tick * 0.18) * 0.012 : 0;
-      return { golden, orientation: [0, 0, 0, 1], position: vec3(held.x, held.y + bob, held.z) };
+      // Anticipation: the ball lifts straight off its slot for a beat before it
+      // flies to the chest (all inside the unchanged pickup window).
+      const ant = POLISH_TUNING.pickupAnticipationTicks;
+      const lift = vec3(from.x, from.y + 0.035, from.z);
+      let held: Vec3;
+      if (this.#handTicks <= ant) {
+        held = lerp(from, lift, smoothstep(this.#handTicks / ant));
+      } else {
+        const t = smoothstep(Math.min((this.#handTicks - ant) / (SHOT_TUNING.pickupTicks - ant), 1));
+        held = lerp(lift, chest, t);
+      }
+      const bob = this.#handTicks >= SHOT_TUNING.pickupTicks ? Math.sin(this.#tick * 0.18) * 0.012 : 0;
+      return {
+        glint,
+        golden,
+        orientation: [0, 0, 0, 1],
+        position: vec3(held.x, held.y + bob, held.z),
+        squash: 1,
+        trail: [],
+      };
     }
     return null;
   }
@@ -607,17 +739,27 @@ export class ThreePointSession {
     return {
       cameraPosition: eye.position,
       cameraTarget: vec3(eye.position.x + dir.x, eye.position.y + dir.y, eye.position.z + dir.z),
+      boardOffset: this.#polish.boardOffset(),
+      crowdPulse: this.#polish.crowdPulse(),
       flying: this.#liveBalls.map((live) => ({
+        glint: live.slot === GOLDEN_BALL_INDEX && glintOn(this.#tick + live.seq * 17),
         golden: live.slot === GOLDEN_BALL_INDEX,
         orientation: live.ball.orient,
         position: live.ball.pos,
+        squash: this.#polish.squash(live.seq),
+        trail: live.trail,
       })),
       heldBall: this.#heldBallView(),
       impact: this.#impact,
-      netPulse: this.#netPulse,
+      net: this.#polish.net(),
       preview: this.#previewPath(),
+      rackDip: this.#polish.rackDip(),
       rackFilled: this.#rackTaken.map((taken) => !taken),
-      trail: this.#trail,
+      rimOffset: this.#polish.rimOffset(),
+      score: this.#score,
+      slotSettle: this.#polish.slotSettle(),
+      streak: this.#streak,
+      tick: this.#tick,
     };
   }
 
@@ -626,17 +768,23 @@ export class ThreePointSession {
     const ballsLeft = this.#rackTaken.slice(rackStart, rackStart + BALLS_PER_RACK).filter((taken) => !taken).length;
     return {
       atTop: this.#phase === "charging" && this.#motionTicks >= SHOT_TUNING.chestSettleTicks + SHOT_TUNING.shotRiseTicks,
+      award: this.#polish.award(),
       ballsLeft,
       events: this.drainEvents(),
+      glow: this.#polish.glow(),
       golden: this.#handSlot === GOLDEN_BALL_INDEX,
       motion: this.#phase === "charging" ? motionProgress(this.#motionTicks) : -1,
-      movingToLabel: this.#phase === "movingToNextRack" ? STATIONS[this.#station + 1]!.label : undefined,
+      movingToLabel: this.#phase === "movingToNextRack" ? (RACK_LABELS[this.#station + 1] ?? undefined) : undefined,
       phase: this.#phase,
       rackIndex: this.#station,
       results: this.#results,
       reticle: this.#reticleView(),
       score: this.#score,
+      stationLabel: this.#polish.stationLabel(),
       streak: this.#streak,
+      streakBrokenSeq: this.#polish.streakBrokenSeq(),
+      streakLevel: streakPresentationLevel(this.#streak),
+      streakPulseSeq: this.#polish.streakPulseSeq(),
     };
   }
 }

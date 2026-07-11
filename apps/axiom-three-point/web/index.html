@@ -53,8 +53,35 @@
       .hud-k { font: 700 9px/1.6 ui-monospace, monospace; color: #6b7280; letter-spacing: 1.5px; }
       #score { font: 800 24px/1.1 ui-monospace, monospace; color: #ffd08a; transition: transform .09s, color .09s; display: inline-block; }
       #score.pop { transform: scale(1.4); color: #7fffa8; }
-      #streak { font: 800 14px/1.2 ui-monospace, monospace; color: #9aa0ad; }
+      #score.pop.big { transform: scale(1.6); color: #ffe25a; }
+      /* The pooled award element (+3 / +6 / +9 / +12) rises out of the score. */
+      #award {
+        position: absolute; left: 14px; top: 54px; pointer-events: none;
+        font: 800 17px/1 ui-monospace, monospace; color: #7fffa8;
+        text-shadow: 0 1px 0 #000; opacity: 0;
+      }
+      #award.on { animation: awardRise 0.9s ease-out forwards; }
+      @keyframes awardRise {
+        0% { opacity: 0; transform: translateY(8px) scale(0.8); }
+        18% { opacity: 1; transform: translateY(0) scale(1.1); }
+        100% { opacity: 0; transform: translateY(-26px) scale(1); }
+      }
+      #streak { font: 800 14px/1.2 ui-monospace, monospace; color: #9aa0ad; display: inline-block; transition: color .15s; }
       #streak.hot { color: #ff8a3d; text-shadow: 0 0 10px rgba(255, 138, 61, 0.7); }
+      #streak.accent { color: #ffb14d; }
+      #streak.grow { animation: streakGrow 0.35s ease-out; }
+      #streak.collapse { animation: streakCollapse 0.4s ease-in; }
+      @keyframes streakGrow { 0% { transform: scale(1); } 40% { transform: scale(1.45); } 100% { transform: scale(1); } }
+      @keyframes streakCollapse {
+        0% { transform: scale(1.2); color: #ff6a6a; }
+        60% { transform: scale(0.75) translateY(3px); }
+        100% { transform: scale(1); }
+      }
+      /* Streak ≥ 4: a faint warm screen-edge glow (a cheap DOM overlay). */
+      #glow {
+        position: absolute; inset: 0; border-radius: 10px; pointer-events: none;
+        box-shadow: inset 0 0 64px 12px rgba(255, 138, 61, 0.55); opacity: 0;
+      }
       #rack { font: 800 15px/1.2 ui-monospace, monospace; color: #d7dbe2; }
       #balls { display: inline-flex; gap: 5px; margin-top: 5px; }
       #balls .pip {
@@ -63,7 +90,11 @@
         transition: background .12s, opacity .12s;
       }
       #balls .pip.gold { background: #ffd23d; border-color: #ffe98a; box-shadow: 0 0 7px rgba(255, 210, 61, 0.75); }
-      #balls .pip.spent { background: #23262f; border-color: #33374a; box-shadow: none; opacity: 0.6; }
+      #balls .pip.spent { background: #23262f; border-color: #33374a; box-shadow: none; opacity: 0.6; animation: pipPop 0.3s ease-out; }
+      @keyframes pipPop {
+        0% { transform: scale(1.5); opacity: 1; }
+        100% { transform: scale(1); opacity: 0.6; }
+      }
 
       /* Power meter (bottom center, only while charging). */
       #power {
@@ -80,6 +111,13 @@
       #power-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: #ff8a3d; transition: width 0.04s linear; }
       #power.maxed #power-fill { background: #ff4d4d; }
       #power.maxed #power-label { color: #ff6a6a; }
+      #power.maxed #power-track { animation: tremble 0.09s linear infinite; }
+      @keyframes tremble {
+        0% { transform: translateX(0); }
+        25% { transform: translateX(-1px); }
+        75% { transform: translateX(1px); }
+        100% { transform: translateX(0); }
+      }
 
       /* Floating shot feedback. */
       #floaters { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
@@ -102,13 +140,25 @@
         100% { opacity: 0; transform: translate(-50%, -72px) scale(1); }
       }
 
-      /* Rack-transition banner. */
+      /* Rack-transition banner + arrival station label. */
       #moving {
         position: absolute; left: 50%; top: 16%; transform: translateX(-50%);
         font: 800 19px/1 ui-monospace, monospace; letter-spacing: 3px; color: #8fd0ff;
         text-shadow: 0 2px 0 #000; opacity: 0; transition: opacity 0.2s; pointer-events: none;
       }
       #moving.on { opacity: 1; }
+      #station-label {
+        position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
+        font: 800 26px/1 ui-monospace, monospace; letter-spacing: 5px; color: #ffe25a;
+        text-shadow: 0 2px 0 #000, 0 0 18px rgba(255, 210, 61, 0.5);
+        opacity: 0; transition: opacity 0.25s; pointer-events: none;
+      }
+      #station-label.on { opacity: 1; animation: stationIn 0.45s ease-out; }
+      @keyframes stationIn {
+        0% { transform: translateX(-50%) scale(0.7); }
+        55% { transform: translateX(-50%) scale(1.12); }
+        100% { transform: translateX(-50%) scale(1); }
+      }
 
       /* Pointer-lock cue over the canvas. */
       #lock-cue {
@@ -132,6 +182,9 @@
       #results .row { font: 400 17px/1.5 ui-monospace, monospace; color: #9aa0ad; }
       #results b { color: #ffd08a; font-size: 24px; }
       #res-restart { margin-top: 14px; color: #7fffa8; font-weight: 700; font-size: 15px; }
+      /* Staged reveal: rows fade in one at a time (driven by the harness). */
+      #results .reveal { opacity: 0; transform: translateY(6px); transition: opacity 0.3s, transform 0.3s; }
+      #results .reveal.in { opacity: 1; transform: translateY(0); }
 
       #instructions { color: #ff8a3d; font-weight: 700; font-size: 13px; }
 
@@ -148,12 +201,15 @@
     <h1>Axiom — <span>Three-Point Shootout</span></h1>
     <div id="stage">
       <canvas id="axiom-canvas" width="960" height="540"></canvas>
+      <div id="glow"></div>
       <div id="floaters"></div>
       <div id="reticle"></div>
+      <div id="station-label"></div>
       <div id="panel-score" class="hud-panel">
         <span class="hud-k">SCORE</span><br />
         <span id="score">0</span><br />
         <span id="streak">STREAK 0</span>
+        <span id="award"></span>
       </div>
       <div id="panel-rack" class="hud-panel">
         <span id="rack">RACK 1/3</span><br />
@@ -173,11 +229,11 @@
       <div id="lock-cue"><span class="desktop-only">CLICK THE COURT TO AIM</span><span class="touch-only">DRAG TO AIM &middot; SWIPE UP FROM THE BALL TO SHOOT</span></div>
       <div id="results">
         <div id="res-title">BUZZER</div>
-        <div id="res-label">WARMING UP</div>
-        <div class="row">FINAL <b id="res-score">0</b></div>
-        <div class="row">MADE <b id="res-makes">0/15</b></div>
-        <div class="row">BEST STREAK <b id="res-streak">0</b></div>
-        <div id="res-restart">Press R to shoot again</div>
+        <div class="row reveal" id="row-score">FINAL <b id="res-score">0</b></div>
+        <div class="row reveal" id="row-makes">MADE <b id="res-makes">0/15</b></div>
+        <div class="row reveal" id="row-streak">BEST STREAK <b id="res-streak">0</b></div>
+        <div class="reveal" id="row-label"><span id="res-label">WARMING UP</span></div>
+        <div class="reveal" id="res-restart">Press R to shoot again</div>
       </div>
     </div>
     <div id="instructions"><span class="desktop-only">Click to aim · mouse steers left/right · hold SPACE to rise into the shot · release at the top · R restarts</span><span class="touch-only">Drag to aim · swipe up from the ball to shoot — flick harder for more power, flick sideways to steer</span></div>
