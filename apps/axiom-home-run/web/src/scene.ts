@@ -362,8 +362,9 @@ export const buildScene = (): SceneHandles => {
 
   // NOTE: a directional light's `direction` is authored as the direction the
   // light TRAVELS (the engine negates it into the frame's to-light vector).
-  addLight({ color: [1, 0.98, 0.92, 1], direction: sdk(vec3(-0.35, -0.85, 0.4)), intensity: 2.3, kind: "directional" });
-  addLight({ color: [0.75, 0.82, 1, 1], direction: sdk(vec3(0.5, -0.55, -0.35)), intensity: 1.0, kind: "directional" });
+  // The SUN: a strong, warm, high key — the daylight the toy stadium sits in.
+  addLight({ color: [1, 0.97, 0.88, 1], direction: sdk(vec3(-0.25, -0.9, 0.3)), intensity: 3.6, kind: "directional" });
+  addLight({ color: [0.75, 0.82, 1, 1], direction: sdk(vec3(0.5, -0.55, -0.35)), intensity: 1.2, kind: "directional" });
   addLight({ color: [0.85, 0.87, 0.95, 1], direction: sdk(vec3(0, 1, 0.1)), intensity: 0.8, kind: "directional" });
 
   return { ball, ballShadow, bat, batKnob, batter, fielders, impactRing, machine, trail };
