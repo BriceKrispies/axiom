@@ -103,6 +103,7 @@ test("every signal is a silent no-op until a host is bound", () => {
     UNBOUND_HOST_BASE.reportOutcome();
     UNBOUND_HOST_BASE.reportOutcomes();
     UNBOUND_HOST_BASE.setCamera3D();
+    UNBOUND_HOST_BASE.setClearColor();
     UNBOUND_HOST_BASE.setNodeTransform();
     UNBOUND_HOST_BASE.setNodeBounds();
     UNBOUND_HOST_BASE.clearScene();

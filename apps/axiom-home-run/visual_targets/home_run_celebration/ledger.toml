@@ -1,0 +1,23 @@
+# Convergence ledger — Home Run! celebration moment vs reference/baseball-1.PNG.
+# Axes: the gameplay campaign's ten plus homerun_presentation. This target rides
+# the gameplay campaign's structural work (same scene, same camera); its own
+# iterations concern only the celebration moment. Harness: Playwright over the
+# packaged page with a scripted deterministic homer —
+# ?backend=canvas2d&seed=2&auto=1&loadAt=2&swingAt=114&shot=330
+# (hold from tick 2, release at tick 114 → an 81m home run resolving at ~tick 300;
+# the frozen ?shot pins the HOME RUN! message and lays the confetti out statically
+# so the celebration frame is deterministic).
+
+[[iteration]]
+iteration = 1
+attacked_axis = "homerun_presentation"
+changed_files = [
+  "apps/axiom-home-run/web/src/harness.ts",
+  "apps/axiom-home-run/web/index.html",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "homerun_presentation 0->3: big centered yellow HOME RUN! +points text over the field (matching the reference's 'Home run!'), a full-canvas confetti burst, camera shake at the wall-cross, and the score/HR/best HUD updating beneath. Gaps to identity: reference confetti is 3D/dense and its camera sits lower behind the batter."
+next_attacked_axis = "composition_and_framing"
+abstraction_introduced = false

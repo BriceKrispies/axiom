@@ -1,0 +1,6 @@
+axis = "contrast_and_exposure"
+failed_attempts = []
+inexpressible = true
+smallest_api = "setClearColor(color: Rgba) on the @axiom/game 3D surface — one HostBridge op + one wasm export forwarding to the ALREADY-EXISTING RunningApp::set_clear_color. The clear colour is what the Canvas2D backend's depth fog fades toward; without it every 3D TS game's horizon is locked to the engine's dark default and a daylight scene cannot be expressed at the app tier."
+screenshot_command = "uv run scripts/playwright_controller.py goto \"file:///C:/dev/axiom/apps/axiom-gallery/web/home-run/index.html?backend=canvas2d&auto=1&shot=60\" && … screenshot"
+screenshot_proof = "canvas2d frozen-tick render; determinism verified by double-capture at the campaign end (see ledger)"

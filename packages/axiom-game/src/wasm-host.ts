@@ -221,6 +221,8 @@ export interface WasmHostExport {
     near: number,
     far: number,
   ) => void;
+  /** Set the frame clear (background / horizon) colour: a flat linear `[r,g,b,a]`. */
+  readonly setClearColor: (rgba: Float64Array) => void;
   readonly addLight: (direction: Float64Array, rgb: Float64Array, intensity: number) => number;
   /*
    * 3D scene node authoring (SPEC-11 §4.2): spawn a renderable from a `(mesh,
@@ -783,12 +785,29 @@ const meshAuthoringBridge = (game: WasmHostExport): Pick<HostBridge, "createMesh
 });
 
 /** The 3D scene-authoring `HostBridge` ops (SPEC-11), forwarding to the native runtime scene authoring on `RunningApp` (`add_mesh` / `add_mesh_data` / `add_material` / `set_camera` / `add_light` / `spawn` / `set::<Transform>` / `set::<Bounds>` / `reauthor`). The mesh-registration ops are composed in from `meshAuthoringBridge`. */
+/** The camera + frame-look `HostBridge` ops (SPEC-11): the perspective camera (eye + look-at target + degree FOV + near/far — the native `set_camera` aims from position toward target, world up = +Y) and the frame clear/horizon colour (full linear `[r, g, b, a]`; the native boundary sanitizes each channel to a finite ratio). */
+const cameraLookBridge = (game: WasmHostExport): Pick<HostBridge, "setCamera3D" | "setClearColor"> => ({
+  setCamera3D: (camera: CameraDescriptor): void => {
+    game.setCamera3D(
+      packVec3(camera.position),
+      packVec3(camera.target),
+      camera.fovY * RAD_TO_DEG,
+      camera.near,
+      camera.far,
+    );
+  },
+  setClearColor: (color: Rgba): void => {
+    game.setClearColor(Float64Array.from(color));
+  },
+});
+
 const scene3dBridge = (game: WasmHostExport): Pick<
   HostBridge,
   | "createMesh"
   | "createMeshData"
   | "createMaterial"
   | "setCamera3D"
+  | "setClearColor"
   | "addLight"
   | "spawnRenderable"
   | "setNodeTransform"
@@ -796,7 +815,7 @@ const scene3dBridge = (game: WasmHostExport): Pick<
   | "clearScene"
   | "createController"
   | "controlFirstPerson"
-> => Object.assign(meshAuthoringBridge(game), {
+> => Object.assign(meshAuthoringBridge(game), cameraLookBridge(game), {
   // Directional arm only: the native `add_light` mints a `DirectionalLight` (the `kind` discriminant is dropped — see header).
   addLight: (light: LightDescriptor): Entity =>
     game.addLight(packVec3(light.vector), packRgb(light.color), light.intensity),
@@ -811,16 +830,6 @@ const scene3dBridge = (game: WasmHostExport): Pick<
   // Full catalog surface: base colour + emissive (linear `[r,g,b]`) + roughness + opacity, all threaded to the native lit material (see header).
   createMaterial: (material: MaterialDescriptor): Handle =>
     game.createMaterial(packRgb(material.baseColor), packRgb(material.emissive), material.roughness, material.opacity),
-  // Eye position + look-at target + degree FOV + near/far: the native `set_camera` aims from position toward target (world up = +Y — see header).
-  setCamera3D: (camera: CameraDescriptor): void => {
-    game.setCamera3D(
-      packVec3(camera.position),
-      packVec3(camera.target),
-      camera.fovY * RAD_TO_DEG,
-      camera.near,
-      camera.far,
-    );
-  },
   setNodeBounds: (entity: Entity, halfExtents: Vec3): void => {
     game.setNodeBounds(entity, packVec3(halfExtents));
   },

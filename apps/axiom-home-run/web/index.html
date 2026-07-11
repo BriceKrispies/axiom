@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Home Run!</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; gap: 10px;
+        padding:
+          max(14px, env(safe-area-inset-top))
+          max(14px, env(safe-area-inset-right))
+          max(14px, env(safe-area-inset-bottom))
+          max(14px, env(safe-area-inset-left));
+        font: 14px/1.5 system-ui, sans-serif; background: #0a0c16; color: #d7dbe2;
+      }
+      h1 { font-size: 15px; font-weight: 800; margin: 0; letter-spacing: 2px; }
+      h1 span { color: #ffd23d; }
+
+      #stage { position: relative; line-height: 0; max-width: 100%; }
+      #axiom-canvas {
+        width: 800px; height: auto; aspect-ratio: 800 / 560; max-width: 100%;
+        border: 1px solid #23262f; border-radius: 10px; background: #05060a;
+        touch-action: none;
+      }
+
+      /* Big center outcome text (MISS / FOUL / CLEAN HIT / HOME RUN!). */
+      #message {
+        position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%) scale(0.9);
+        font: 800 34px/1 ui-monospace, monospace; letter-spacing: 2px; white-space: nowrap;
+        color: #fff; text-shadow: 0 3px 0 rgba(0,0,0,0.7), 0 0 18px rgba(0,0,0,0.8);
+        opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s;
+      }
+      #message.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      #message.big { font-size: 54px; color: #ffe25a; text-shadow: 0 4px 0 rgba(0,0,0,0.8), 0 0 34px #ffb23d; }
+      #message.miss, #message.foul { color: #ff8a7a; }
+      #message.weak, #message.grounder, #message.popup { color: #ffd08a; }
+      #message.clean { color: #7fffa8; }
+
+      /* Home-run confetti (DOM, presentation only). */
+      #confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: 10px; }
+      #confetti .bit {
+        position: absolute; top: -12px; width: 9px; height: 14px; border-radius: 2px;
+        animation: fall linear forwards;
+      }
+      @keyframes fall {
+        0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+        100% { transform: translateY(620px) rotate(540deg); opacity: 0.6; }
+      }
+
+      /* Bat load meter, under the batter. */
+      #load-meter {
+        position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+        width: 180px; height: 10px; border-radius: 5px; overflow: hidden;
+        background: rgba(8, 9, 14, 0.72); border: 1px solid #2a2e3c;
+        opacity: 0; transition: opacity 0.12s; pointer-events: none;
+      }
+      #load-meter.on { opacity: 1; }
+      #load-fill { height: 100%; width: 0; background: #ffb23d; transition: width 0.04s linear; }
+      #load-fill.full { background: #ff5a2d; box-shadow: 0 0 12px #ff6a3d; }
+
+      /* Ready + round-over overlays. */
+      .overlay {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 8px; border-radius: 10px;
+        background: rgba(5, 6, 10, 0.6); opacity: 0; pointer-events: none;
+        transition: opacity .2s; font-family: ui-monospace, monospace; text-align: center;
+        line-height: 1.45; /* #stage sets line-height 0 — restore it for the text rows */
+      }
+      .overlay.show { opacity: 1; }
+      #ready-title, #over-title { font: 800 52px/1 ui-monospace, monospace; color: #ffd23d; letter-spacing: 3px; }
+      #ready-sub { margin-top: 8px; color: #7fffa8; font-weight: 700; font-size: 16px; }
+      #ready-controls { color: #9aa0ad; font-size: 13px; margin-top: 4px; }
+      #over .row { font-size: 18px; }
+      #over b { color: #ffd08a; font-size: 26px; }
+      #over-restart { margin-top: 12px; color: #7fffa8; font-weight: 700; font-size: 15px; }
+
+      #hud {
+        display: flex; gap: 18px; width: 800px; max-width: 100%;
+        font-family: ui-monospace, monospace; justify-content: center; align-items: center;
+        flex-wrap: wrap;
+      }
+      #hud b { color: #ffd08a; font-weight: 700; font-size: 18px; }
+      #hud .k { color: #8a93a5; font-size: 11px; letter-spacing: 1px; }
+      #streak.up { color: #7fffa8; }
+      #mph { min-width: 130px; display: inline-block; }
+
+      /* Touch pad (mobile parity): hold zones. */
+      #pad {
+        display: flex; gap: 10px; width: 800px; max-width: 100%; height: 88px;
+        user-select: none; touch-action: none;
+      }
+      #pad > div {
+        flex: 1; border: 1px solid #2a2e3c; border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font: 700 15px/1 ui-monospace, monospace; color: #8a93a5;
+        background: #12141d; cursor: pointer;
+      }
+      #pad > div:active { background: #1c2030; color: #ffd23d; }
+      #pad-swing { flex: 2.2 !important; color: #ffb23d !important; letter-spacing: 2px; }
+      #instructions { color: #8a93a5; font-size: 13px; }
+      #instructions b { color: #ffd23d; }
+    </style>
+
+    <!-- The @axiom/game SDK loads as native ES modules via the import map below. -->
+    <script type="importmap">
+      { "imports": { "@axiom/game": "/vendor/axiom-game/index.js" } }
+    </script>
+  </head>
+  <body>
+    <h1>Axiom — <span>Home Run!</span></h1>
+    <div id="stage">
+      <canvas id="axiom-canvas" width="800" height="560"></canvas>
+      <div id="confetti"></div>
+      <div id="message"></div>
+      <div id="load-meter"><div id="load-fill"></div></div>
+      <div id="ready" class="overlay show">
+        <div id="ready-title">HOME RUN!</div>
+        <div id="ready-sub">Hold SPACE to load the bat. Release to swing.</div>
+        <div id="ready-controls">A / D shift the batter · 10 pitches · clear the wall</div>
+      </div>
+      <div id="over" class="overlay">
+        <div id="over-title">ROUND OVER</div>
+        <div class="row">SCORE <b id="over-score">0</b></div>
+        <div class="row">HOME RUNS <b id="over-homers">0</b></div>
+        <div class="row">BEST DISTANCE <b id="over-best">—</b></div>
+        <div id="over-restart">Press SPACE or ENTER to play again</div>
+      </div>
+    </div>
+    <div id="hud">
+      <span><span class="k">SCORE</span> <b id="score">0</b></span>
+      <span><span class="k">PITCH</span> <b id="pitch">1/10</b></span>
+      <span><span class="k">HR</span> <b id="homers">0</b></span>
+      <span><span class="k">STREAK</span> <b id="streak">1&times;</b></span>
+      <span><span class="k">PITCH SPEED</span> <b id="mph">—</b></span>
+      <span><span class="k">BEST</span> <b id="best">—</b></span>
+    </div>
+    <div id="pad">
+      <div id="pad-left">◀ STEP</div>
+      <div id="pad-swing">HOLD TO LOAD · RELEASE TO SWING</div>
+      <div id="pad-right">STEP ▶</div>
+    </div>
+    <div id="instructions"><b>A/D</b> shift the batter · hold <b>SPACE</b> to load, release to swing · <b>SPACE/ENTER</b> restarts after pitch 10</div>
+
+    <script type="module" src="/dist/harness.js"></script>
+  </body>
+</html>

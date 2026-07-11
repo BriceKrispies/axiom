@@ -34,6 +34,7 @@ SIGNAL_DIR            := apps/axiom-signal-runner
 SWIPE_DIR             := apps/axiom-swipe-basketball
 MIN3V3_DIR            := apps/axiom-minimal-3v3
 THREEPOINT_DIR        := apps/axiom-three-point
+HOMERUN_DIR           := apps/axiom-home-run
 GAME_RUNTIME_CRATE    := axiom-game-runtime
 GAME_RUNTIME_PKG      := apps/axiom-game-runtime/web/pkg
 GAME_RUNTIME_ARTIFACT := target/$(WASM_TARGET)/release/axiom_game_runtime.wasm
@@ -49,7 +50,7 @@ ASSETSTREAM_PORT     ?= 8000
 
 .PHONY: workspace workspace-build \
 	gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
-	gallery-debug-build gallery-soccer gallery-signal-runner gallery-swipe-basketball gallery-minimal-3v3 gallery-three-point render-bench \
+	gallery-debug-build gallery-soccer gallery-signal-runner gallery-swipe-basketball gallery-minimal-3v3 gallery-three-point gallery-home-run render-bench \
 	netplay netplay-build netplay-server netplay-dotnet relay retro-fps-hot \
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
@@ -198,6 +199,20 @@ gallery-minimal-3v3:
 	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
 	npm --prefix packages/axiom-game exec -- tsgo -p $(MIN3V3_DIR)/web/tsconfig.json
 	node scripts/package_minimal_3v3_singlefile.mjs $(GALLERY_WEB)/minimal-3v3/index.html
+
+# Regenerate the self-hosted Home Run! gallery page — the same self-hosted TS-game
+# shape as gallery-swipe-basketball (its own @axiom/game SDK + axiom-game-runtime
+# wasm, 3D present path). Builds the SDK, builds + binds the runtime wasm, compiles
+# the app with tsgo, and inlines the whole graph into a single self-contained page
+# COMMITTED at $(GALLERY_WEB)/home-run/index.html — which package_gallery then
+# copies into dist/ verbatim. Run this after editing the app, then commit the page.
+gallery-home-run:
+	npm --prefix packages/axiom-game install --no-audit --no-fund
+	npm --prefix packages/axiom-game run build
+	cargo build -p $(GAME_RUNTIME_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
+	npm --prefix packages/axiom-game exec -- tsgo -p $(HOMERUN_DIR)/web/tsconfig.json
+	node scripts/package_home_run_singlefile.mjs $(GALLERY_WEB)/home-run/index.html
 
 # Regenerate the self-hosted Three-Point Shootout gallery page. Unlike the other
 # self-hosted TS games this app is FULLY SELF-CONTAINED â€” it ships its own

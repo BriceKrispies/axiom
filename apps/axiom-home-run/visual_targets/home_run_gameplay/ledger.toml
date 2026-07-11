@@ -1,0 +1,102 @@
+# Convergence ledger — Home Run! neutral gameplay composition vs
+# reference/baseball-2.PNG. Axes (fixed order): composition_and_framing,
+# field_layout, batter_silhouette, pitcher_silhouette, fielder_placement,
+# stadium_enclosure, color_palette, contrast_and_exposure, depth_and_separation,
+# ui_placement. Harness: Playwright over the packaged single-file page,
+# file:///…/home-run/index.html?backend=canvas2d&auto=1&shot=60 (deterministic
+# freeze at tick 60, canvas2d software backend).
+
+[[iteration]]
+iteration = 1
+attacked_axis = "contrast_and_exposure"
+changed_files = [
+  "apps/axiom-home-run/web/src/scene.ts",
+  "apps/axiom-home-run/web/src/constants.ts",
+  "apps/axiom-game-runtime/src/scene3d.rs",
+  "packages/axiom-game/src/{scene3d,host-binding,unbound-host,wasm-host,fake-host.testkit,index}.ts",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "contrast_and_exposure 0->2: daylight lights+palette, sky-bowl backdrop, CAMERA_NEAR 0.1->2 (the tiny near plane crushed NDC depth so the backend fogged the whole scene), and setClearColor plumbed through runtime+SDK so fog fades to a sky tone instead of black. No non-attacked axis dropped."
+next_attacked_axis = "composition_and_framing"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+composition_and_framing = 1
+field_layout = 2
+batter_silhouette = 1
+pitcher_silhouette = 1
+fielder_placement = 2
+stadium_enclosure = 1
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 2
+ui_placement = 2
+
+[iteration.scorecard_after]
+composition_and_framing = 1
+field_layout = 2
+batter_silhouette = 1
+pitcher_silhouette = 1
+fielder_placement = 2
+stadium_enclosure = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+ui_placement = 2
+
+[[iteration]]
+iteration = 2
+attacked_axis = "composition_and_framing"
+changed_files = ["apps/axiom-home-run/web/src/constants.ts"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "composition_and_framing 1->2: camera moved down+in (7.4,-8.6 -> 6.1,-6.4), target deeper, FOV widened — batter now large at bottom-center, machine mid-frame, wall band near top, matching the reference's tabletop framing. No non-attacked drop."
+next_attacked_axis = "contrast_and_exposure"
+abstraction_introduced = false
+
+[[iteration]]
+iteration = 3
+attacked_axis = "contrast_and_exposure"
+changed_files = ["apps/axiom-home-run/web/src/constants.ts"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "CAMERA_NEAR 2->3.5 pushes the canvas2d fog knee further out; mid-field crisper. Small gain (2 stays 2, but visibly less haze). Residual wash is the canvas2d profile's fixed blue hemisphere grade — the legible flat proxy; the GPU backend (verified in real Chrome) shows the true palette."
+next_attacked_axis = "batter_silhouette"
+abstraction_introduced = false
+
+[[iteration]]
+iteration = 4
+attacked_axis = "batter_silhouette"
+changed_files = ["apps/axiom-home-run/web/src/scene.ts"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "batter_silhouette 1->2: wide side-on stance (feet along the pitch line), deeper torso, bigger helmet, and a thicker emissive-yellow bat that reads at rest and through the swing. Rendered together with iteration 5 (one rebuild, two independent axes — noted for honesty)."
+next_attacked_axis = "pitcher_silhouette"
+abstraction_introduced = false
+
+[[iteration]]
+iteration = 5
+attacked_axis = "pitcher_silhouette"
+changed_files = ["apps/axiom-home-run/web/src/scene.ts"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "pitcher_silhouette 1->2: launcher enlarged (wider chassis + wheels), longer barrel with a white muzzle ring aimed at the plate, taller hopper — reads as the reference's central pitching machine. Shared render with iteration 4."
+next_attacked_axis = "field_layout"
+abstraction_introduced = false
+
+[[iteration]]
+iteration = 6
+attacked_axis = "field_layout"
+changed_files = ["apps/axiom-home-run/web/src/scene.ts"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "candidate.png"
+decision = "keep_candidate"
+reason = "Bottom-frame ownership: the brown home-plate deck widened to span the whole foreground (46u) with pale walkway seams framing the plate, matching the reference's deck. Determinism verified: two captures of the same frozen-tick URL are byte-identical (md5 E43C48545A4A5B2BD0A233283E722C9D). Campaign paused for review — no structural mismatch the engine can express remains unaddressed at proxy fidelity; residual gaps are the canvas2d fixed grade (GPU backend verified separately) and modeled-vs-boxy figures."
+next_attacked_axis = "stadium_enclosure"
+abstraction_introduced = false

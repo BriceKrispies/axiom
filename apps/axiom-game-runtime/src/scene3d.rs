@@ -156,6 +156,17 @@ impl GameBridge {
             .set_camera(Camera::perspective(projection), transform);
     }
 
+    /// Set the frame clear (background) colour (`setClearColor`): a linear
+    /// `[r, g, b, a]` boundary slice (missing entries read `0`, non-finite ⇒ `0`).
+    /// This is both the colour the surface clears to each frame and the colour the
+    /// Canvas2D backend's depth fog fades toward — i.e. a 3D game's horizon/sky
+    /// tone. Forwards to the engine's existing `RunningApp::set_clear_color`.
+    pub fn set_clear_color(&mut self, rgba: &[f64]) {
+        let c: [f32; 4] =
+            core::array::from_fn(|i| channel(*rgba.get(i).unwrap_or(&0.0)).get());
+        self.runtime.app_mut().set_clear_color(c);
+    }
+
     /// Spawn a directional light (`addLight`): world-space `direction`, linear
     /// `[r, g, b]` colour, and `intensity`. Returns the light node's entity id.
     pub fn add_light(&mut self, direction: &[f64], rgb: &[f64], intensity: f64) -> u64 {
@@ -307,6 +318,13 @@ mod wasm_exports {
             far: f64,
         ) {
             self.bridge.set_camera_3d(position, target, fov_deg, near, far);
+        }
+
+        /// Set the frame clear (background / horizon) colour (`setClearColor`):
+        /// linear `[r, g, b, a]`.
+        #[wasm_bindgen(js_name = setClearColor)]
+        pub fn set_clear_color(&mut self, rgba: &[f64]) {
+            self.bridge.set_clear_color(rgba);
         }
 
         /// Spawn a directional light, returning its node id (`addLight`).
@@ -474,6 +492,19 @@ mod tests {
         let mut b = bridge();
         let light = b.add_light(&[0.0, -1.0, 0.0], &[1.0, 1.0, 1.0], 1.0);
         assert!(b.world_alive(light));
+    }
+
+    #[test]
+    fn set_clear_color_reaches_the_frame_outcome() {
+        let mut b = bridge();
+        let before = b.runtime.app_mut().tick(0).clear_color();
+        b.set_clear_color(&[0.5, 0.6, 0.9, 1.0]);
+        let after = b.runtime.app_mut().tick(1).clear_color();
+        assert_ne!(before, after, "the authored clear colour replaced the default");
+        assert_eq!(after, [0.5, 0.6, 0.9, 1.0]);
+        // Boundary sanitation: short + non-finite input clamps to zeroed channels.
+        b.set_clear_color(&[f64::NAN]);
+        assert_eq!(b.runtime.app_mut().tick(2).clear_color(), [0.0, 0.0, 0.0, 0.0]);
     }
 
     /// The identity-rotation flat 10-tuple for a node at `(x, y, z)` with uniform

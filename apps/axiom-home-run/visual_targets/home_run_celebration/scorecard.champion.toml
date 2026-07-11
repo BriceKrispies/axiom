@@ -1,0 +1,17 @@
+# Champion axis scores vs reference.png (reference/baseball-1.PNG, the home-run
+# celebration moment). Calibrated to IDENTITY — harsh by design. Champion =
+# canvas2d frozen capture of a real scripted homer
+# (?backend=canvas2d&seed=2&auto=1&loadAt=2&swingAt=114&shot=330).
+
+[scores]
+composition_and_framing = 2
+field_layout = 2
+batter_silhouette = 2
+pitcher_silhouette = 2
+fielder_placement = 3
+stadium_enclosure = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+ui_placement = 3
+homerun_presentation = 3

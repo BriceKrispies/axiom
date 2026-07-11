@@ -212,6 +212,7 @@ export {
   createMesh,
   createMeshData,
   setCamera3D,
+  setClearColor,
   setNodeBounds,
   setNodeTransform,
   spawnRenderable,

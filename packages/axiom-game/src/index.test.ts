@@ -89,6 +89,7 @@ const FUNCTION_EXPORTS = [
   "createMesh",
   "createMeshData",
   "setCamera3D",
+  "setClearColor",
   // netcode
   "bindNetTransport",
   "boundNetConfig",

@@ -23,7 +23,7 @@ import type {
   MeshDataDescriptor,
   PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Rect, Result, Transform, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, Quat, RayHit, Rect, Result, Rgba, Transform, Vec2, Vec3 } from "./vocabulary.ts";
 
 export class FakeHost implements HostBridge {
   public clampReturn = 0;
@@ -69,6 +69,7 @@ export class FakeHost implements HostBridge {
   public meshDatas: MeshDataDescriptor[] = [];
   public materials: MaterialDescriptor[] = [];
   public cameras: CameraDescriptor[] = [];
+  public clearColors: Rgba[] = [];
   public lights: LightDescriptor[] = [];
   public spawns: { mesh: Handle; material: Handle; transform: Transform }[] = [];
   public nodeTransforms: { entity: Entity; transform: Transform }[] = [];
@@ -301,6 +302,10 @@ export class FakeHost implements HostBridge {
 
   public setCamera3D(camera: CameraDescriptor): void {
     this.cameras.push(camera);
+  }
+
+  public setClearColor(color: Rgba): void {
+    this.clearColors.push(color);
   }
 
   public addLight(light: LightDescriptor): Entity {

@@ -27,7 +27,7 @@ import type {
   MeshDataDescriptor,
   PerspectiveSpec,
 } from "./host-descriptors.ts";
-import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, PlayerId, Quat, RayHit, Rect, Result, TextureId, Transform, Vec2, Vec3 } from "./vocabulary.ts";
+import type { Cell, Circle, Entity, FontSpec, Handle, Mat4, PlayerId, Quat, RayHit, Rect, Result, Rgba, TextureId, Transform, Vec2, Vec3 } from "./vocabulary.ts";
 import { type Draw2dBridge, UNBOUND_DRAW2D } from "./draw2d-binding.ts";
 import { UNBOUND_UI, type UiBridge } from "./ui-binding.ts";
 import { UNBOUND_HOST_BASE } from "./unbound-host.ts";
@@ -181,6 +181,8 @@ export interface HostBridge extends Draw2dBridge, UiBridge {
   readonly createMaterial: (material: MaterialDescriptor) => Handle;
   /** Build the perspective camera node (look-at + intrinsics) from its descriptor. */
   readonly setCamera3D: (camera: CameraDescriptor) => void;
+  /** Set the frame clear (background / horizon) colour — the tone the backends clear to and fog distant geometry toward. */
+  readonly setClearColor: (color: Rgba) => void;
   /** Add a light from its descriptor; return its entity. */
   readonly addLight: (light: LightDescriptor) => Entity;
   /** Spawn a renderable node from a `(mesh, material)` handle pair at `transform`; return its entity. */

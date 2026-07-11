@@ -124,6 +124,16 @@ export const setCamera3D = (camera: Camera3D): void => {
   boundHost().setCamera3D(descriptor);
 };
 
+/*
+ * Set the frame clear (background) colour (SPEC-11) — the tone the surface clears
+ * to each frame AND the colour the presentation backends fade distant geometry
+ * toward, i.e. a 3D game's horizon/sky. Linear `[r, g, b, a]`; the native boundary
+ * sanitizes each channel to a finite ratio.
+ */
+export const setClearColor = (color: Rgba): void => {
+  boundHost().setClearColor(color);
+};
+
 /** A scene light — directional (sun) or point (SPEC-11 §4.2). */
 export type Light =
   | { readonly kind: "directional"; readonly direction: Vec3; readonly color: Rgba; readonly intensity: number }

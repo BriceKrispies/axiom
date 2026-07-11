@@ -124,6 +124,28 @@ export const DEMOS = [
     page: "swipe-basketball/index.html",
   },
   {
+    id: "home-run",
+    title: "Home Run!",
+    blurb: "An arcade batting contest on a toy diamond: load the bat, read the pitch, clear the blue wall.",
+    desc:
+      "A toy-tabletop arcade baseball batting game authored purely in TypeScript on the engine's " +
+      "3D scene surface — a fixed elevated camera behind home plate frames a compact striped diamond " +
+      "with brown base paths, white foul lines, a pitching machine on the mound, blue stadium walls, " +
+      "and nine red toy fielders wandering their own patrol circles. Ten pitches per round from a " +
+      "deterministic seeded sequence — slow balls, sinkers, heaters, risers, inside and outside looks, " +
+      "each telegraphed by the machine's compression. A/D shift the batter inside the box; holding " +
+      "SPACE winds the spring-loaded bat (fast at first, resisting toward full load) and RELEASING " +
+      "snaps it forward. Contact is resolved from the real spatial sweep of bat vs ball — position " +
+      "along the barrel, timing angle, and vertical offset decide exit speed, spray, and loft — so " +
+      "mistimed swings foul off, jam, top grounders, or pop up, while a square, well-positioned strike " +
+      "clears the wall for HOME RUN! (500 + distance, consecutive homers multiply). Fielders converge " +
+      "on reachable landing points and rob weak hits. Deterministic under fixed-step replay.",
+    // Self-hosted single-file page (its own @axiom/game SDK + axiom-game-runtime wasm,
+    // 3D present path), COMMITTED under web/home-run/ and copied verbatim into
+    // dist/ by package_gallery — regenerate with `make gallery-home-run`.
+    page: "home-run/index.html",
+  },
+  {
     id: "minimal-3v3",
     title: "Minimal 3v3 Basketball",
     blurb: "A deliberately minimal 3-on-3 half-court game: move, pass, rise, and release at the apex.",

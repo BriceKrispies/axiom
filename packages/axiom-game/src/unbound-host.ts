@@ -92,6 +92,9 @@ export const UNBOUND_HOST_BASE = {
   setCamera3D: (): void => {
     // No-op until a host is bound
   },
+  setClearColor: (): void => {
+    // No-op until a host is bound
+  },
   setMasterVolume: (): void => {
     // No-op until a host is bound
   },

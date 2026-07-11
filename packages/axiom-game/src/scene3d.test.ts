@@ -10,6 +10,7 @@ import {
   createMesh,
   createMeshData,
   setCamera3D,
+  setClearColor,
   setNodeBounds,
   setNodeTransform,
   spawnRenderable,
@@ -143,6 +144,17 @@ test("setCamera3D marshals the flat perspective record to the scene facade", () 
   });
   assert.deepEqual(host.cameras, [
     { far: 100, fovY: 1.2, near: 0.1, position: { x: 0, y: 1, z: 5 }, target: { x: 0, y: 0, z: 0 } },
+  ]);
+});
+
+test("setClearColor forwards the linear rgba background to the scene facade", () => {
+  const host = new FakeHost();
+  bindNative(host);
+  setClearColor([0.7, 0.75, 1, 1]);
+  setClearColor([0, 0, 0, 1]);
+  assert.deepEqual(host.clearColors, [
+    [0.7, 0.75, 1, 1],
+    [0, 0, 0, 1],
   ]);
 });
 

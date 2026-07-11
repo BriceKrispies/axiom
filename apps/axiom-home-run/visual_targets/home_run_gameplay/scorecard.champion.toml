@@ -1,0 +1,17 @@
+# Champion axis scores vs reference.png (reference/baseball-2.PNG, the neutral
+# gameplay composition). Calibrated to IDENTITY — harsh by design. Champion =
+# canvas2d frozen-tick capture (?backend=canvas2d&auto=1&shot=60); the GPU
+# backend (real Chrome, WebGPU) renders brighter/saturated and was verified
+# by eye against the same reference.
+
+[scores]
+composition_and_framing = 2
+field_layout = 2
+batter_silhouette = 2
+pitcher_silhouette = 2
+fielder_placement = 3
+stadium_enclosure = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+ui_placement = 3
