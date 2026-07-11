@@ -286,15 +286,37 @@ body.fire .m-flash { animation: muzzle 160ms ease-out; }
 #batter .b-head { position: absolute; left: 4px; top: 0; width: 12px; height: 11px; border-radius: 4px; background: var(--helmet-blue); }
 #batter .b-torso { position: absolute; left: 1px; top: 10px; width: 18px; height: 14px; border-radius: 2px; background: var(--batter-blue); }
 #batter .b-legs { position: absolute; left: 2px; top: 23px; width: 16px; height: 11px; background: linear-gradient(to right, var(--batter-blue) 0 6px, transparent 6px 10px, var(--batter-blue) 10px); }
-/* The bat: a floor-plane rotation around the hands — swing.ts as ONE rotate. */
+/* The HELD bat: cocked up over the shoulder from the hands (engine ready pose).
+   Rewind visibly swings it from the follow-through back up into the stance. */
+#batter .b-hands { position: absolute; left: 12px; top: 12px; width: 6px; height: 5px; border-radius: 2px; background: var(--helmet-blue); }
+#batter .b-bat {
+  position: absolute; left: 13px; top: -9px; width: 5px; height: 24px;
+  transform-origin: 50% 100%;
+  transform: rotate(34deg);
+  background: linear-gradient(to top, #6b4b1d 0 4px, var(--bat-yellow) 4px);
+  border-radius: 2px;
+}
+#batter .b-bat i { /* the fat barrel tip of the oversized bat */
+  position: absolute; left: -2px; top: -2px; width: 9px; height: 12px;
+  border-radius: 3px; background: var(--bat-yellow);
+}
+body.striking #batter .b-bat, body.striking #batter .b-hands { visibility: hidden; }
+body.rewinding #batter .b-bat { animation: bat-rearm var(--rewind-ms) ease-out; }
+@keyframes bat-rearm {
+  0% { transform: rotate(150deg); }
+  55% { transform: rotate(10deg); }
+  100% { transform: rotate(34deg); }
+}
+/* The SWINGING bat: a floor-plane rotation around the hands — swing.ts as ONE
+   rotate. Visible only during the strike; the held bat lives on the batter. */
 #bat-pivot {
   position: absolute; left: var(--batter-u); top: 1003px; width: 0; height: 0;
   transform-style: preserve-3d;
   transform: translateZ(20px) rotate(var(--bat-theta));
-  transition: transform var(--rewind-ms) ease-in-out; /* the self re-wind */
+  visibility: hidden;
 }
 body.striking #bat-pivot {
-  transition: none;
+  visibility: visible;
   animation: bat-strike var(--strike-ms) cubic-bezier(0.25, 0.7, 0.3, 1) forwards;
 }
 @keyframes bat-strike {

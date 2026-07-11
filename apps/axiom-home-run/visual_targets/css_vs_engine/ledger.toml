@@ -48,3 +48,11 @@ changed_files = ["apps/axiom-home-run/css/style.css"]
 decision = "keep_candidate"
 reason = "ui_placement 2->3: deck score/BSO panels shrunk toward the engine's footprint, glow removed, pulled in beside the plate. Still reads larger than the engine's (near-camera perspective magnification) — queued for a future pass along with pitcher_silhouette (lowest axis, 2: the machine is a flat orange cutout vs the engine's dark-barrelled launcher)."
 next_attacked_axis = "pitcher_silhouette"
+
+[[iteration]]
+iteration = 6
+attacked_axis = "batter_silhouette"
+changed_files = ["apps/axiom-home-run/css/index.html", "apps/axiom-home-run/css/style.css"]
+decision = "keep_candidate"
+reason = "User-reported: the bat did not read as HELD (a flat floor-plane lump floating by the head). Split into two representations mapping the engine's batTilt: a held bat drawn ON the batter's cutout plane — grip nub at the hands, tapered barrel cocked over the shoulder — visible while armed/rewinding (the rewind animates it swinging back up into the stance), swapping to the floor-plane sweeping bat only during the 190ms strike. batter_silhouette holds at 3 but the held pose now matches the reference's read."
+next_attacked_axis = "pitcher_silhouette"
