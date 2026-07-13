@@ -13,19 +13,18 @@
  * flashes are animated by scaling emissive nodes, never by re-coloring.
  */
 
+import type { Entity, Rgba, Transform } from "@axiom/web-engine";
 import {
-  type Entity,
-  type Rgba,
-  type Transform,
   addLight,
   clearScene,
   createMaterial,
   createMesh,
   setCamera3D,
   setClearColor,
+  setLight,
   setNodeTransform,
   spawnRenderable,
-} from "@axiom/game";
+} from "@axiom/web-engine";
 import { type Quat, type Vec3, IDENTITY_QUAT, clamp01, mix, quatFromEulerXyz, vec3 } from "./vec.ts";
 import { batDir, batPlaneY } from "./swing.ts";
 import type { SceneView, SwingState } from "./types.ts";
@@ -108,6 +107,9 @@ const buildMaterials = (): Materials => {
   // (the canvas2d hemisphere shading otherwise grays them out).
   base.set("Line", createMaterial({ baseColor: PALETTE.Line as Rgba, emissive: [0.3, 0.3, 0.28, 1] }));
   base.set("BaseWhite", createMaterial({ baseColor: PALETTE.BaseWhite as Rgba, emissive: [0.3, 0.3, 0.28, 1] }));
+  // The backdrop bowl reads as SKY, so it is self-lit — never shaded by the sun
+  // (as lit geometry it would swing dark whenever the moving sun leaves it).
+  base.set("SkyBowl", createMaterial({ baseColor: PALETTE.SkyBowl as Rgba, emissive: [0.5, 0.56, 0.8, 1] }));
   return {
     base,
     bat: createMaterial({ baseColor: [1, 0.88, 0.25, 1], emissive: [0.45, 0.36, 0.08, 1] }),
@@ -332,7 +334,84 @@ export interface SceneHandles {
   readonly ballShadow: Entity;
   readonly trail: readonly Entity[];
   readonly impactRing: Entity;
+  /** The one directional key light — re-aimed each rendered frame by `applySun`. */
+  readonly sun: Entity;
+  /** Projected sun-shadows (flat ground ellipses aimed by `sunShadow`). */
+  readonly batterShadow: Entity;
+  readonly machineShadow: Entity;
+  readonly fielderShadows: readonly Entity[];
 }
+
+// ── the sun ───────────────────────────────────────────────────────────────────
+//
+// The stadium sits under ONE dominant directional sun (plus a faint fixed sky
+// fill so faces turned away read cool blue-gray instead of black — the engine's
+// ambient floor alone is too dark for a sunny toy park). The sun circles the
+// park once per lap of WALL-CLOCK time, entirely outside the fixed-step game
+// loop: low over the outfield wall at the lap's ends (warm, dim, backlit), high
+// behind home plate at its midpoint (bright, near-white noon). Both the azimuth
+// and the elevation are periodic in the lap phase, so the loop wrap is seamless.
+
+/** One full lap of the sun around the park, in wall-clock ms — really, really slow. */
+const SUN_LAP_MS = 40 * 60 * 1000;
+/** Sun elevation range (radians): the sun stays LOW all day — the whole lap is
+ * the warm raking golden-hour look (user-tuned to the dusk phase), never a high
+ * bright noon. */
+const SUN_ELEV_LOW = 0.14;
+const SUN_ELEV_HIGH = 0.42;
+/** Target sun irradiance on flat ground. The renderer is plain Lambert with NO
+ * tone-map: once a surface's summed light passes 1 it clips to full base color
+ * and all shading gradient dies (the "washed out" flood). Holding ground
+ * irradiance constant — intensity · sin(elev) ≈ this — keeps the field at the
+ * same level all day while the SHADING DIRECTION does the moving. */
+const SUN_GROUND = 0.28;
+/** Intensity cap once the sun is too low for the ground target. At the lap's
+ * dusk ends the cap binds and the ground dips a touch below SUN_GROUND — the
+ * deliberate "slightly darker at dusk" shoulder. */
+const SUN_GLARE_MAX = 1.5;
+/** The lap phase pinned for deterministic `?shot` screenshots: high noon. */
+export const SUN_NOON_MS = SUN_LAP_MS / 2;
+/** Where a fresh session starts the lap: pleasant mid-morning light. */
+export const SUN_START_MS = SUN_LAP_MS * 0.3;
+/** Longest projected shadow, as a multiple of the caster's height. True
+ * cot(elev) is 2.2–7 for this low sun — way too long on screen; the cap is the
+ * look-tuned length (it binds all day, so only the DIRECTION sweeps). */
+const SHADOW_STRETCH_MAX = 1.5;
+
+/** The sun state the projected shadows read: the horizontal direction shadows
+ * run (away from the sun, unit XZ) and their length per unit of caster height
+ * (cot of the sun's elevation, capped). Updated by `applySun`; consumed by
+ * `castShadow` during the per-frame apply pass. The engine has no shadow
+ * mapping (one Lambert pass on both backends), so shadows are honest scene
+ * nodes: flat translucent ellipses projected along the real sun direction —
+ * which is exactly why they sweep around the park as the sun crawls. */
+const sunShadow = { dx: 0, dz: 1, stretch: 2 };
+
+/** Aim the sun for wall-clock `timeMs` — pure presentation, gameplay never reads it. */
+export const applySun = (h: SceneHandles, timeMs: number): void => {
+  const azimuth = ((timeMs % SUN_LAP_MS) / SUN_LAP_MS) * Math.PI * 2;
+  // 0 at the lap ends (low sun over center field), 1 at the midpoint (noon).
+  const height = 0.5 - 0.5 * Math.cos(azimuth);
+  const elev = mix(SUN_ELEV_LOW, SUN_ELEV_HIGH, height);
+  // Unit vector pointing AT the sun; the light travels the opposite way.
+  const sunX = Math.cos(elev) * Math.sin(azimuth);
+  const sunY = Math.sin(elev);
+  const sunZ = Math.cos(elev) * Math.cos(azimuth);
+  // Shadows run along the light's horizontal travel; length ∝ cot(elevation).
+  const horiz = Math.hypot(sunX, sunZ);
+  sunShadow.dx = -sunX / horiz;
+  sunShadow.dz = -sunZ / horiz;
+  sunShadow.stretch = Math.min(horiz / sunY, SHADOW_STRETCH_MAX);
+  // Warmth follows √height: the whole day is amber golden-hour light, deepest
+  // at the dusk ends, only mildly lifted toward warm-white at the lap's peak.
+  const glow = Math.sqrt(height);
+  setLight(h.sun, {
+    color: [1, mix(0.62, 0.82, glow), mix(0.34, 0.6, glow), 1],
+    direction: sdk(vec3(-sunX, -sunY, -sunZ)),
+    intensity: Math.min(SUN_GROUND / Math.sin(elev), SUN_GLARE_MAX),
+    kind: "directional",
+  });
+};
 
 /** Build the whole stadium, set the lights, and return the dynamic handles. */
 export const buildScene = (): SceneHandles => {
@@ -359,15 +438,36 @@ export const buildScene = (): SceneHandles => {
   const ballShadow = spawnRenderable(cyl, mats.shadow, parked());
   const trail = Array.from({ length: TRAIL_POOL }, () => spawnRenderable(sphere, mats.trail, parked()));
   const impactRing = spawnRenderable(sphere, mats.impact, parked());
+  const batterShadow = spawnRenderable(cyl, mats.shadow, parked());
+  const machineShadow = spawnRenderable(cyl, mats.shadow, parked());
+  const fielderShadows = C.FIELDER_SPOTS.map(() => spawnRenderable(cyl, mats.shadow, parked()));
 
   // NOTE: a directional light's `direction` is authored as the direction the
   // light TRAVELS (the engine negates it into the frame's to-light vector).
-  // The SUN: a strong, warm, high key — the daylight the toy stadium sits in.
-  addLight({ color: [1, 0.97, 0.88, 1], direction: sdk(vec3(-0.25, -0.9, 0.3)), intensity: 3.6, kind: "directional" });
-  addLight({ color: [0.75, 0.82, 1, 1], direction: sdk(vec3(0.5, -0.55, -0.35)), intensity: 1.2, kind: "directional" });
-  addLight({ color: [0.85, 0.87, 0.95, 1], direction: sdk(vec3(0, 1, 0.1)), intensity: 0.8, kind: "directional" });
+  // ONE dominant sun (kept at a sane LDR peak — the renderer is plain Lambert
+  // with no tone-map, so a hotter key just clips the pale field to white) plus
+  // one faint cool sky fill. The sun's initial aim is a placeholder: `applySun`
+  // re-aims it before anything renders, and every rendered frame after.
+  const sun = addLight({ color: [1, 0.97, 0.88, 1], direction: sdk(vec3(0, -1, 0)), intensity: 2.25, kind: "directional" });
+  addLight({ color: [0.72, 0.8, 1, 1], direction: sdk(vec3(0.45, -0.5, -0.4)), intensity: 0.65, kind: "directional" });
 
-  return { ball, ballShadow, bat, batKnob, batter, fielders, impactRing, machine, trail };
+  const handles = {
+    ball,
+    ballShadow,
+    bat,
+    batKnob,
+    batter,
+    batterShadow,
+    fielderShadows,
+    fielders,
+    impactRing,
+    machine,
+    machineShadow,
+    sun,
+    trail,
+  };
+  applySun(handles, SUN_NOON_MS);
+  return handles;
 };
 
 // ── per-frame dynamic update ──────────────────────────────────────────────────
@@ -404,6 +504,7 @@ const applyBatter = (h: SceneHandles, view: SceneView): void => {
   const yaw = quatFromEulerXyz(0, yawAngle, coil * 0.12);
 
   // A wide, planted athletic stance: feet apart along the pitch line, knees bent.
+  castShadow(h.batterShadow, bx, bz, 1.5 - crouch, 0.95, 0.004);
   show(h.batter.puck, xform(vec3(bx, 0.16, bz), vec3(1.05, 0.12, 0.78)));
   show(h.batter.legL, xform(vec3(bx, 0.42 - crouch * 0.5, bz - 0.16), boxScale(vec3(0.17, 0.42 - crouch, 0.17))));
   show(h.batter.legR, xform(vec3(bx, 0.42 - crouch * 0.5, bz + 0.16), boxScale(vec3(0.17, 0.42 - crouch, 0.17))));
@@ -442,6 +543,7 @@ const applyBatter = (h: SceneHandles, view: SceneView): void => {
 
 const applyMachine = (h: SceneHandles, view: SceneView): void => {
   const mz = C.MOUND.z;
+  castShadow(h.machineShadow, 0, mz, 1.35, 1.15, 0.002);
   const squash = 1 - 0.2 * view.windup;
   const recoil = 0.26 * view.windup - 0.34 * view.muzzleFlash;
   show(h.machine.body, xform(vec3(0, 0.41 + 0.62 * squash * 0.5, mz), boxScale(vec3(0.9 * (1 + 0.12 * view.windup), 0.62 * squash, 0.78))));
@@ -458,6 +560,17 @@ const groundYAt = (x: number, z: number): number => {
   const onInfieldDirt = Math.abs(x) + Math.abs(z - 7.5) <= 7.6;
   const onHomeCircle = Math.hypot(x, z) <= 2.7;
   return onHomeCircle ? 0.1 : onInfieldDirt ? 0.066 : 0.03;
+};
+
+/** Lay a caster's projected sun-shadow: a flat translucent ellipse anchored at
+ * the feet `(x, z)`, running along `sunShadow`'s direction, `height·stretch`
+ * long. `lift` staggers stacked shadows so overlapping ones never z-fight. */
+const castShadow = (node: Entity, x: number, z: number, height: number, width: number, lift: number): void => {
+  const len = Math.max(height * sunShadow.stretch, width * 1.2);
+  const cx = x + sunShadow.dx * (len / 2 - width * 0.25);
+  const cz = z + sunShadow.dz * (len / 2 - width * 0.25);
+  const yaw = quatFromEulerXyz(0, Math.atan2(sunShadow.dx, sunShadow.dz), 0);
+  show(node, xform(vec3(cx, groundYAt(cx, cz) + 0.012 + lift, cz), vec3(width, 0.01, len), yaw));
 };
 
 const applyBall = (h: SceneHandles, view: SceneView): void => {
@@ -492,6 +605,7 @@ const applyFielders = (h: SceneHandles, view: SceneView): void => {
     const rot = quatFromEulerXyz(lean, 0, 0);
     const x = f.x;
     const z = f.z;
+    castShadow(h.fielderShadows[i]!, x, z, 1.15, 0.7, 0.006 + i * 0.002);
     show(nodes.puck, xform(vec3(x, 0.07, z), vec3(0.95, 0.12, 0.68)));
     show(nodes.legL, xform(vec3(x - 0.09, 0.3, z), boxScale(vec3(0.13, 0.34, 0.15))));
     show(nodes.legR, xform(vec3(x + 0.09, 0.3, z), boxScale(vec3(0.13, 0.34, 0.15))));

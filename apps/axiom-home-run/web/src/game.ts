@@ -12,8 +12,10 @@
  * round is over.
  */
 
-import { type Sim, bindAction, onFixedUpdate, playTone } from "@axiom/game";
-import { type SceneHandles, applyFrame, buildScene } from "./scene.ts";
+import type { TickInput } from "@axiom/web-engine";
+import type { InputState } from "@axiom/web-engine";
+import { playTone } from "@axiom/web-engine";
+import { SUN_NOON_MS, SUN_START_MS, type SceneHandles, applyFrame, applySun, buildScene } from "./scene.ts";
 import type { Feedback, Intent, Outcome, Phase, PitchResult } from "./types.ts";
 import { HomeRunSession } from "./session.ts";
 
@@ -57,11 +59,20 @@ let padSwingQueued = false;
 let prevReady = true;
 let hudEvents: Feedback[] = [];
 
-const bindKeys = (): void => {
-  bindAction("left", ["ArrowLeft", "KeyA"]);
-  bindAction("right", ["ArrowRight", "KeyD"]);
-  bindAction("swing", ["Space"]);
-  bindAction("restart", ["Enter"]);
+/** Bind the game's actions, build the scene, and start a fresh session. Called
+ * once by the harness (and again on hot-reload) before the first `updateGame`. */
+export const initGame = (input: InputState): void => {
+  input.bindAction("left", ["ArrowLeft", "KeyA"]);
+  input.bindAction("right", ["ArrowRight", "KeyD"]);
+  input.bindAction("swing", ["Space"]);
+  input.bindAction("restart", ["Enter"]);
+  handles = buildScene();
+  session = new HomeRunSession(pendingSeed);
+  ticks = 0;
+  prevReady = true;
+  padMoveX = 0;
+  padSwingQueued = false;
+  hudEvents = [];
 };
 
 /** Harness affordances: seed + deterministic screenshot/autoplay hooks. */
@@ -88,12 +99,13 @@ export const setPad = (moveX: number, swingTap: boolean): void => {
  * downfield so world +X renders to screen-LEFT; we negate the keyboard axis so
  * pressing D/→ moves the batter right ON SCREEN.
  */
-const readIntent = (sim: Sim): Intent => {
-  const kbAxis = sim.input.axis("left", "right");
+const readIntent = (input: TickInput): Intent => {
+  // `axis(neg, pos)` shim: the engine's InputState exposes only isDown/pressed.
+  const kbAxis = (input.isDown("right") ? 1 : 0) - (input.isDown("left") ? 1 : 0);
   const moveX = padMoveX !== 0 ? -padMoveX : -kbAxis;
-  let swing = sim.input.pressed("swing") || padSwingQueued;
+  let swing = input.pressed("swing") || padSwingQueued;
   padSwingQueued = false;
-  let start = sim.input.pressed("swing") || sim.input.pressed("restart");
+  let start = input.pressed("swing") || input.pressed("restart");
   // Scripted autoplay for deterministic screenshots (?swingAt=N presses once).
   if (autoSwingAt >= 0 && ticks === autoSwingAt) {
     swing = true;
@@ -116,17 +128,10 @@ const toneFor = (kind: Feedback["kind"], big: boolean): void => {
       playTone({ duration: 0.05, freq: big ? 1400 : 900, volume: 0.25, wave: "triangle" });
       return;
     case "homer": {
+      // A rising major arpeggio (C–E–G–C), staggered via the engine's tone
+      // `delay` so one event plays the whole triumphant flourish.
       const notes = [523, 659, 784, 1047];
-      notes.forEach((f, i) =>
-        playTone({
-          duration: 0.16,
-          envelope: { attack: 0.01, decay: 0.05, release: 0.1, sustain: 0.6 },
-          freq: f,
-          lfo: { depth: i, freq: 6 },
-          volume: 0.3,
-          wave: "triangle",
-        }),
-      );
+      notes.forEach((f, i) => playTone({ delay: i * 0.05, duration: 0.16, freq: f, volume: 0.3, wave: "triangle" }));
       return;
     }
     case "clean":
@@ -153,14 +158,15 @@ const toneFor = (kind: Feedback["kind"], big: boolean): void => {
   }
 };
 
-onFixedUpdate((sim: Sim): void => {
+/** One fixed-step tick: fold input → intent, advance the session, drain audio
+ * cues, and mirror the result into the scene. The harness calls this each step
+ * after `input.beginTick()`. */
+export const updateGame = (input: TickInput): void => {
   if (handles === undefined) {
-    bindKeys();
-    handles = buildScene();
-    session = new HomeRunSession(pendingSeed);
+    return;
   }
   ticks += 1;
-  const intent = readIntent(sim);
+  const intent = readIntent(input);
   if (ticks <= freezeAtTick) {
     session.advance(intent);
     for (const event of session.drainEvents()) {
@@ -175,7 +181,19 @@ onFixedUpdate((sim: Sim): void => {
     prevReady = ready;
   }
   applyFrame(handles, session.view());
-});
+};
+
+/** Once per RENDERED frame (not per fixed tick): wall-clock presentation work,
+ * independent of the game loop — the sun's slow crawl across the sky. Starts at
+ * mid-morning and pins to high noon under a ?shot freeze so screenshots stay
+ * deterministic. */
+export const frameGame = (nowMs: number): void => {
+  if (handles === undefined) {
+    return;
+  }
+  const pinned = freezeAtTick !== Number.POSITIVE_INFINITY;
+  applySun(handles, pinned ? SUN_NOON_MS : SUN_START_MS + nowMs);
+};
 
 /** The HUD the harness reads each frame (draining buffered feedback events). */
 export const readHud = (): Hud => {

@@ -1,34 +1,29 @@
 /*
- * The browser boot harness for Home Run! — the host / platform edge (NOT engine
- * spine), so it lives in the app `web/` dir, outside the branchless + coverage
- * gates, and uses ordinary control flow. `createGame()` mints the per-game registry
- * the author module (`game.ts`) registers its `onFixedUpdate` into; the SDK's
- * `boot()` builds the deterministic loop over the wasm bridge, wires DOM input, and
- * presents the authored stadium every frame. This harness adds the DOM HUD: score /
- * pitch / homers / streak / speed readouts, the bat-load meter, the big center
- * outcome text (HOME RUN! + confetti), the ready and round-over overlays, and a
- * tap-to-swing touch pad for mobile — all driven from the game's `readHud()`.
+ * The browser boot harness for Home Run! — the host / platform edge. It boots the
+ * shared pure-TypeScript engine (`@axiom/web-engine` — WebGL2 renderer, fixed-step
+ * loop, input, WebAudio) with no external SDK and no wasm. It wires the pieces
+ * together (renderer → input → game → loop) and adds the DOM HUD: score / pitch /
+ * homers / streak / speed readouts,
+ * the bat-load meter, the big center outcome text (HOME RUN! + confetti), the
+ * ready and round-over overlays, and a tap-to-swing touch pad for mobile — all
+ * driven from the game's `readHud()`.
  *
  * URL affordances (dev + deterministic screenshots): ?seed=N picks the round seed,
  * ?shot=N freezes the simulation after exactly N ticks, ?auto=1 starts the round
- * unattended, ?swingAt=N scripts one deterministic full-power swing.
+ * unattended, ?swingAt=N scripts one deterministic full-power swing, and
+ * ?backend=canvas2d|webgl2 forces a render backend.
  *
- * The three dev-server couplings (the wasm init call, the versioned hot-reload
- * import, and the `/events` SSE channel) are the anchors the single-file packager
- * rewrites for the static gallery build — keep them verbatim.
+ * The two dev-server couplings (the versioned hot-reload import and the `/events`
+ * SSE channel) are the anchors the single-file packager rewrites for the static
+ * gallery build — keep them verbatim.
  */
 
-import { boot } from "/vendor/axiom-game/boot.js";
-import { createGame, onRender } from "@axiom/game";
-
-import initWasm, { WasmGame } from "/pkg/axiom_game_runtime.js";
+import { type BackendChoice, initRenderer, renderScene } from "@axiom/web-engine";
+import { startLoop } from "@axiom/web-engine";
+import { InputState, attachDomInput } from "@axiom/web-engine";
 
 const FIXED_HZ = 60;
-const SEED = 1n;
-const NANOS_PER_SECOND = 1_000_000_000;
-const FIXED_STEP_NANOS = Math.round(NANOS_PER_SECOND / FIXED_HZ);
 const MAX_STEPS_PER_FRAME = 8;
-const MAX_INSTANCES = 4096;
 const CANVAS_ID = "axiom-canvas";
 
 interface Feedback {
@@ -64,6 +59,9 @@ interface Hud {
 }
 
 interface GameModule {
+  readonly initGame: (input: InputState) => void;
+  readonly updateGame: (input: InputState) => void;
+  readonly frameGame: (nowMs: number) => void;
   readonly readHud: () => Hud;
   readonly setPad: (moveX: number, swingTap: boolean) => void;
   readonly configure: (opts: {
@@ -75,17 +73,6 @@ interface GameModule {
 }
 
 const el = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
-
-// The Canvas2D software backend logs a verbose stats line EVERY frame (~60/sec) —
-// drop just that per-frame line at the platform edge; one-time engine logs still show.
-const passthroughLog = console.log.bind(console);
-console.log = (...args: unknown[]): void => {
-  const first = args[0];
-  if (typeof first === "string" && first.startsWith("axiom-canvas2d:")) {
-    return;
-  }
-  passthroughLog(...args);
-};
 
 const boot_ = async (): Promise<void> => {
   const canvas = el(CANVAS_ID) as HTMLCanvasElement;
@@ -106,8 +93,6 @@ const boot_ = async (): Promise<void> => {
     score: el("score"),
     streak: el("streak"),
   };
-
-  await initWasm();
 
   // Center outcome text: one message at a time, keyed by outcome kind for styling.
   // Under a ?shot=N freeze the message is pinned, so screenshots are deterministic.
@@ -205,11 +190,19 @@ const boot_ = async (): Promise<void> => {
     el("pad-swing").addEventListener("pointerdown", (): void => mod.setPad(moveX, true));
   };
 
-  let teardown: (() => void) | undefined;
+  // Backend selection: WebGL2 with an automatic Canvas2D software fallback;
+  // `?backend=canvas2d` (or `?backend=webgl2`) forces one, the repo convention.
+  const requested = new URLSearchParams(location.search).get("backend");
+  const choice: BackendChoice = requested === "canvas2d" || requested === "webgl2" ? requested : "auto";
+  initRenderer(canvas, choice);
+
+  let stopLoop: (() => void) | undefined;
+  let detachInput: (() => void) | undefined;
   const load = async (version: number): Promise<void> => {
-    teardown?.();
-    const game = new WasmGame(FIXED_STEP_NANOS, MAX_STEPS_PER_FRAME);
-    const app = createGame({ fixedHz: FIXED_HZ, seed: SEED, surface: CANVAS_ID });
+    stopLoop?.();
+    detachInput?.();
+    const input = new InputState();
+    detachInput = attachDomInput(input, canvas);
     const mod = (await import(`/dist/game.js?v=${version}`)) as GameModule;
 
     // URL-driven dev/screenshot affordances (all deterministic).
@@ -226,15 +219,19 @@ const boot_ = async (): Promise<void> => {
     });
     wirePad(mod);
 
-    onRender((): void => updateHud(mod.readHud()));
-
-    app.start();
-    // frameLocked: one sim tick per displayed frame, so the first frame builds the
-    // whole scene (registering every material) BEFORE the 3D surface binds.
-    teardown = boot(game as unknown as Parameters<typeof boot>[0], app, {
-      canvas,
-      frameLocked: true,
-      present3d: { maxInstances: MAX_INSTANCES },
+    mod.initGame(input);
+    stopLoop = startLoop({
+      fixedHz: FIXED_HZ,
+      maxCatchUpSteps: MAX_STEPS_PER_FRAME,
+      render: (): void => {
+        mod.frameGame(performance.now());
+        renderScene();
+        updateHud(mod.readHud());
+      },
+      update: (): void => {
+        input.beginTick();
+        mod.updateGame(input);
+      },
     });
   };
 
