@@ -124,6 +124,27 @@ export const DEMOS = [
     page: "swipe-basketball/index.html",
   },
   {
+    id: "heat-check",
+    title: "Heat Check",
+    blurb: "A stylized basketball scoring game about getting hot: create space, rise up, release in rhythm, swish.",
+    desc:
+      "A stylized 3D basketball SCORING game authored purely in TypeScript on the engine's " +
+      "3D scene surface — not literal drag-into-hoop, but the emotion of getting hot. A fixed, " +
+      "slightly-elevated camera looks down a procedurally-built half-court (key, arc, hoop with a " +
+      "real torus rim + net, abstract crowd silhouettes) at a symbolic player who auto-dribbles " +
+      "while a red defender mirrors them with a reaction delay. Drag left/right (or A/D · ←/→) to " +
+      "create separation and beat the defender off balance, then release (or SPACE) to rise up and " +
+      "shoot: the shot's success is decided by its QUALITY — separation, release timing against the " +
+      "rhythm meter under your feet, body stability, heat, and defender pressure — never by aiming. " +
+      "Makes build heat (the player glows, the trail brightens, the crowd pulses on a swish) and the " +
+      "defender gets hungrier; misses cool you down. Every-3-makes multiplier to 4×, final-10-second " +
+      "double points, 60-second score attack. Press R to run it back. Deterministic under fixed-step replay.",
+    // Self-hosted single-file page (its own @axiom/game SDK + axiom-game-runtime wasm,
+    // 3D present path), COMMITTED under web/heat-check/ and copied verbatim into
+    // dist/ by package_gallery — regenerate with `make gallery-heat-check`.
+    page: "heat-check/index.html",
+  },
+  {
     id: "home-run",
     title: "Home Run!",
     blurb: "An arcade batting contest on a toy diamond: load the bat, read the pitch, clear the blue wall.",
@@ -185,12 +206,11 @@ export const DEMOS = [
       "same smoothed-gesture model as Swipe Basketball. The camera is exclusively player-driven " +
       "(the game never touches your view), so skill is your aim plus release timing. The ball " +
       "is a genuinely simulated projectile (deterministic fixed-step integrator — gravity, " +
-      "backspin, restitution) that can swish, rattle off a rim whose colliders match the " +
-      "visible torus exactly, bank off the glass, or airball. Baskets are confirmed by a " +
-      "two-plane downward-crossing detector; streaks compound (3, 6, 9, 12…) and a miss resets " +
-      "them. A broadcast-style glide carries you between racks; after ball 15 the buzzer shows " +
-      "your line. Press R to run it back. Deterministic under fixed-step replay, with a " +
-      "headless agent driver that plays full games in Node.",
+      "backspin, restitution) against a rim whose colliders match the visible torus exactly; " +
+      "baskets are confirmed by a two-plane downward-crossing detector; streaks compound " +
+      "(3, 6, 9, 12…) and a miss resets them. After ball 15 the buzzer shows your line; R runs " +
+      "it back. Deterministic under fixed-step replay, with a headless agent driver that plays " +
+      "full games in Node.",
     // Self-hosted single-file page (its own @axiom/game SDK + axiom-game-runtime wasm,
     // 3D present path), COMMITTED under web/three-point/ and copied verbatim into
     // dist/ by package_gallery — regenerate with `make gallery-three-point`.
@@ -260,10 +280,11 @@ export const DEMOS = [
   {
     id: "quintet",
     title: "Quintet",
-    blurb: "Drag 5-cell blocks onto a 10×10 board and fill rows and columns to clear them for score.",
+    blurb: "Press the board to place 5-cell blocks on a 10×10 grid and fill rows and columns to clear them for score.",
     desc:
-      "A deterministic block-breaking placement game on the engine. Drag the " +
-      "generated quintet (a 5-cell polyomino) from the side panel onto the 10×10 " +
+      "A deterministic block-breaking placement game on the engine. Press the " +
+      "board to summon the generated quintet (a 5-cell polyomino) under your " +
+      "cursor — or drag it from the side panel — and release to place it on the 10×10 " +
       "board; fill any whole row or column to clear it, and clear several lines at " +
       "once for bonus points. Every offered piece is a real orthogonally-connected " +
       "pentomino guaranteed to fit somewhere — generation is seeded from the board, " +
