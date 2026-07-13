@@ -1,5 +1,5 @@
 /*
- * engine/backend-webgl2.ts — the hardware drawing backend: one Lambert forward
+ * backend-webgl2.ts — the hardware drawing backend: one Lambert forward
  * program over WebGL2. Meshes are uploaded into VAOs; a frame clears to the
  * shared dark-navy, draws opaque nodes first, then translucent nodes
  * (opacity < 1) back-to-front with blending on and depth writes off. Face
@@ -9,7 +9,7 @@
  */
 
 import type { Handle, MeshData } from "./api.ts";
-import { type FrameNode, type RenderBackend, type SceneFrame, AMBIENT, CLEAR_COLOR, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS } from "./backend.ts";
+import { type FrameNode, type RenderBackend, type SceneFrame, AMBIENT, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS } from "./backend.ts";
 import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
 
 const VERT_SRC = `#version 300 es
@@ -192,7 +192,7 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
     name: "WebGL2",
     render: (frame: SceneFrame): void => {
       gl.depthMask(true);
-      gl.clearColor(CLEAR_COLOR[0], CLEAR_COLOR[1], CLEAR_COLOR[2], 1);
+      gl.clearColor(frame.clearColor[0], frame.clearColor[1], frame.clearColor[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.useProgram(program);
 

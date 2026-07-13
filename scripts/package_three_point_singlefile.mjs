@@ -80,22 +80,27 @@ import { join } from "node:path";
 
 const APP_DIST = ${JSON.stringify(APP_DIST)};
 const ENTRY = ${JSON.stringify(join(work, "harness.entry.js"))};
+const ENGINE_ENTRY = ${JSON.stringify(join(REPO_ROOT, "packages", "axiom-web-engine", "src", "index.ts"))};
 
 const resolver = {
   name: "axiom-virtual-roots",
   setup(b) {
+    // The shared pure-TS engine package: esbuild bundles its TypeScript source
+    // directly into the single file (no wasm, no separate build step).
+    b.onResolve({ filter: /^@axiom\\/web-engine$/ }, () => ({ path: ENGINE_ENTRY }));
     b.onResolve({ filter: /^\\/dist\\// }, (a) => ({
       path: join(APP_DIST, a.path.replace("/dist/", "")),
     }));
-    // The relocated harness entry keeps its own relative imports (e.g.
-    // "./engine/renderer.js"). Those can't resolve from the temp dir, but every
-    // app module keeps its layout under the app dist — map the ENTRY's relatives
-    // there. App-internal relatives (importer already inside) resolve normally.
+    // The relocated harness ENTRY keeps its own relative imports (e.g.
+    // "./constants.js"). Those can't resolve from the temp dir, so ONLY the
+    // ENTRY's relatives are mapped into the app dist. Everything else — app-dist
+    // internals AND the engine package's own internal relatives ("./store.ts") —
+    // resolves normally where it already lives.
     b.onResolve({ filter: /^\\.\\.?\\// }, (a) => {
-      if (a.importer.startsWith(APP_DIST)) {
-        return undefined;
+      if (a.importer === ENTRY) {
+        return { path: join(APP_DIST, a.path.replace(/^\\.\\//, "")) };
       }
-      return { path: join(APP_DIST, a.path.replace(/^\\.\\//, "")) };
+      return undefined;
     });
   },
 };

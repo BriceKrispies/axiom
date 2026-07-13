@@ -16,9 +16,9 @@
 # install` once first.
 set -euo pipefail
 
-# The netcode client SDK and the Phaser-style game-authoring SDK; both run the
-# same tsgo + Oxlint(branch-ban) + 100%-coverage stack.
-pkgs=("packages/axiom-client" "packages/axiom-game")
+# The netcode client SDK, the Phaser-style game-authoring SDK, and the pure-TS
+# browser engine; all run the same tsgo + Oxlint(branch-ban) + 100%-coverage stack.
+pkgs=("packages/axiom-client" "packages/axiom-game" "packages/axiom-web-engine")
 
 command -v npm >/dev/null 2>&1 || { echo 'npm is not installed.' >&2; exit 2; }
 

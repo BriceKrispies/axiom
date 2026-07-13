@@ -17,9 +17,9 @@
  * offset. The camera is never moved by a shot gesture.
  */
 
-import type { TickInput } from "./engine/api.ts";
-import type { InputState } from "./engine/input.ts";
-import { playTone, setAmbienceLevel, startAmbience } from "./engine/audio.ts";
+import type { TickInput } from "@axiom/web-engine";
+import type { InputState } from "@axiom/web-engine";
+import { playTone, setAmbienceLevel, startAmbience } from "@axiom/web-engine";
 import { type SceneHandles, applyFrame, buildScene, sceneNodeCount } from "./scene.ts";
 import type { GameEvent, Hud, Intent, SwipeGesture } from "./types.ts";
 import { type Vec2, vec2 } from "./vec.ts";

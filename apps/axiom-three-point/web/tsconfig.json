@@ -1,5 +1,5 @@
 {
-  "// note": "Compiles the FULLY SELF-CONTAINED Three-Point Shootout (web/src/*.ts, including its own pure-TS engine under web/src/engine/) to web/dist/*.js via tsgo. There are no external imports — no @axiom/game, no wasm — so no path mappings are needed; every import is relative. Tests (*.test.ts) are excluded — they run under `node --test` with native TS type-stripping (no DOM), so they need no compile here.",
+  "// note": "Compiles the Three-Point Shootout (web/src/*.ts) to web/dist/*.js via tsgo. The pure-TS engine now lives in the shared spine package @axiom/web-engine (no wasm); it resolves to that package's source for typecheck, and the emitted JS keeps the bare specifier, inlined by the packager (gallery) or resolved by the import map in index.html (dev). Tests (*.test.ts) are excluded — they run under `node --test` with native TS type-stripping (no DOM), so they need no compile here.",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -12,7 +12,10 @@
     "outDir": "dist",
     "rootDir": "src",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": []
+    "types": [],
+    "paths": {
+      "@axiom/web-engine": ["../../../packages/axiom-web-engine/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]

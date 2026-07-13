@@ -13,10 +13,10 @@
  * the static gallery build — keep them verbatim.
  */
 
-import { type BackendChoice, initRenderer, renderScene } from "./engine/renderer.ts";
-import { startLoop } from "./engine/loop.ts";
-import { InputState, attachDomInput } from "./engine/input.ts";
-import { stopAmbience } from "./engine/audio.ts";
+import { type BackendChoice, initRenderer, renderScene } from "@axiom/web-engine";
+import { startLoop } from "@axiom/web-engine";
+import { InputState, attachDomInput } from "@axiom/web-engine";
+import { stopAmbience } from "@axiom/web-engine";
 import { countTowards } from "./polish.ts";
 import { BALLS_PER_RACK, FIXED_HZ, RACK_COUNT, SHOT_TUNING } from "./constants.ts";
 

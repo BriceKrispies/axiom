@@ -32,6 +32,7 @@ NETPLAY_PORT     ?= 8000
 SOCCER_DIR            := apps/axiom-soccer-penalty-kick
 SIGNAL_DIR            := apps/axiom-signal-runner
 SWIPE_DIR             := apps/axiom-swipe-basketball
+HEATCHECK_DIR         := apps/axiom-heat-check
 MIN3V3_DIR            := apps/axiom-minimal-3v3
 THREEPOINT_DIR        := apps/axiom-three-point
 HOMERUN_DIR           := apps/axiom-home-run
@@ -50,7 +51,7 @@ ASSETSTREAM_PORT     ?= 8000
 
 .PHONY: workspace workspace-build \
 	gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
-	gallery-debug-build gallery-soccer gallery-signal-runner gallery-swipe-basketball gallery-minimal-3v3 gallery-three-point gallery-home-run render-bench \
+	gallery-debug-build gallery-soccer gallery-signal-runner gallery-swipe-basketball gallery-heat-check gallery-minimal-3v3 gallery-three-point gallery-home-run render-bench \
 	netplay netplay-build netplay-server netplay-dotnet relay retro-fps-hot \
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
@@ -187,30 +188,34 @@ gallery-swipe-basketball:
 	npm --prefix packages/axiom-game exec -- tsgo -p $(SWIPE_DIR)/web/tsconfig.json
 	node scripts/package_swipe_basketball_singlefile.mjs $(GALLERY_WEB)/swipe-basketball/index.html
 
-# Regenerate the self-hosted Minimal 3v3 Basketball gallery page — the same
-# self-hosted TS-game shape as gallery-swipe-basketball (its own @axiom/game SDK +
-# axiom-game-runtime wasm, 3D present path). Packages a single self-contained page
-# COMMITTED at $(GALLERY_WEB)/minimal-3v3/index.html. Run this after editing the
-# app, then commit the refreshed page.
-gallery-minimal-3v3:
+# Regenerate the self-hosted Heat Check gallery page. Like gallery-swipe-basketball,
+# the game runs on its OWN @axiom/game SDK + axiom-game-runtime wasm (the 3D present
+# path), not the gallery bundle, so it can't ride axiom-loader.js. This builds the
+# SDK, builds + binds the runtime wasm, compiles the app with tsgo, and inlines the
+# whole graph into a single self-contained page COMMITTED at
+# $(GALLERY_WEB)/heat-check/index.html — which package_gallery then copies into dist/
+# verbatim, so it deploys to GitHub Pages with NO build step. Run this after editing
+# the app, then commit the refreshed page.
+gallery-heat-check:
 	npm --prefix packages/axiom-game install --no-audit --no-fund
 	npm --prefix packages/axiom-game run build
 	cargo build -p $(GAME_RUNTIME_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
-	npm --prefix packages/axiom-game exec -- tsgo -p $(MIN3V3_DIR)/web/tsconfig.json
-	node scripts/package_minimal_3v3_singlefile.mjs $(GALLERY_WEB)/minimal-3v3/index.html
+	npm --prefix packages/axiom-game exec -- tsgo -p $(HEATCHECK_DIR)/web/tsconfig.json
+	node scripts/package_heat_check_singlefile.mjs $(GALLERY_WEB)/heat-check/index.html
 
-# Regenerate the self-hosted Home Run! gallery page � the same self-hosted TS-game
-# shape as gallery-swipe-basketball (its own @axiom/game SDK + axiom-game-runtime
-# wasm, 3D present path). Builds the SDK, builds + binds the runtime wasm, compiles
-# the app with tsgo, and inlines the whole graph into a single self-contained page
-# COMMITTED at $(GALLERY_WEB)/home-run/index.html � which package_gallery then
+# Regenerate the self-hosted Home Run! gallery page — the same self-hosted TS-game
+# FULLY SELF-CONTAINED (like gallery-three-point): the app ships its own pure-TS
+# engine (WebGL2 renderer, fixed-step loop, input, WebAudio) under web/src/engine/
+# with no @axiom/game SDK and no wasm — so the build is just a typecheck-compile
+# (tsgo, borrowed from the SDK package's toolchain, a build-time tool) and the
+# packager, which esbuild-inlines the app into a single self-contained page
+# COMMITTED at $(GALLERY_WEB)/home-run/index.html — which package_gallery then
 # copies into dist/ verbatim. Run this after editing the app, then commit the page.
 gallery-home-run:
 	npm --prefix packages/axiom-game install --no-audit --no-fund
-	npm --prefix packages/axiom-game run build
-	cargo build -p $(GAME_RUNTIME_CRATE) --target $(WASM_TARGET) --release
-	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
+	npm --prefix packages/axiom-web-engine install --no-audit --no-fund
+	npm --prefix packages/axiom-web-engine run build
 	npm --prefix packages/axiom-game exec -- tsgo -p $(HOMERUN_DIR)/web/tsconfig.json
 	node scripts/package_home_run_singlefile.mjs $(GALLERY_WEB)/home-run/index.html
 
@@ -224,8 +229,23 @@ gallery-home-run:
 # commit the refreshed page.
 gallery-three-point:
 	npm --prefix packages/axiom-game install --no-audit --no-fund
+	npm --prefix packages/axiom-web-engine install --no-audit --no-fund
+	npm --prefix packages/axiom-web-engine run build
 	npm --prefix packages/axiom-game exec -- tsgo -p $(THREEPOINT_DIR)/web/tsconfig.json
 	node scripts/package_three_point_singlefile.mjs $(GALLERY_WEB)/three-point/index.html
+
+# Regenerate the self-hosted Minimal 3v3 Basketball gallery page — the same
+# self-hosted TS-game shape as gallery-swipe-basketball (its own @axiom/game SDK +
+# axiom-game-runtime wasm, 3D present path). Packages a single self-contained page
+# COMMITTED at $(GALLERY_WEB)/minimal-3v3/index.html. Run this after editing the
+# app, then commit the refreshed page.
+gallery-minimal-3v3:
+	npm --prefix packages/axiom-game install --no-audit --no-fund
+	npm --prefix packages/axiom-game run build
+	cargo build -p $(GAME_RUNTIME_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(GAME_RUNTIME_PKG) $(GAME_RUNTIME_ARTIFACT)
+	npm --prefix packages/axiom-game exec -- tsgo -p $(MIN3V3_DIR)/web/tsconfig.json
+	node scripts/package_minimal_3v3_singlefile.mjs $(GALLERY_WEB)/minimal-3v3/index.html
 
 # THE MAIN DRIVER. One command to browse the whole engine surface during
 # development: it builds the merged browser app, assembles the static gallery into

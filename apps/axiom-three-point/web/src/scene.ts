@@ -22,7 +22,7 @@
  * dedicated pre-spawned node that gets scaled or parked, never re-colored.
  */
 
-import type { Entity, Rgba, Transform } from "./engine/api.ts";
+import type { Entity, Rgba, Transform } from "@axiom/web-engine";
 import {
   addLight,
   clearScene,
@@ -33,7 +33,7 @@ import {
   setCamera3D,
   setNodeTransform,
   spawnRenderable,
-} from "./engine/renderer.ts";
+} from "@axiom/web-engine";
 import { type Quat, type Vec3, IDENTITY_QUAT, quatFromEulerXyz, quatRotate, vec3 } from "./vec.ts";
 import { torusY } from "./meshgen.ts";
 import { RIM_COLLIDER_CENTERS } from "./physics.ts";

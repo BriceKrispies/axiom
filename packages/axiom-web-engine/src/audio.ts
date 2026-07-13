@@ -1,10 +1,11 @@
 /*
- * engine/audio.ts — a tiny WebAudio layer: `playTone` fires one oscillator of
+ * audio.ts — a tiny WebAudio layer: `playTone` fires one oscillator of
  * the requested wave/frequency through a gain envelope (a ~5 ms attack so the
  * onset doesn't click, then an exponential decay over the tone's duration,
  * optionally delayed a few hundred ms so one event can play a two-note figure)
  * and auto-stops it; `startAmbience`/`setAmbienceLevel`/`stopAmbience` run one
- * looping low-passed noise bed (crowd-room tone) whose gain the game can swell.
+ * looping low-passed noise bed (a neutral room-tone ambience) whose gain the
+ * consumer can swell.
  *
  * One `AudioContext` is created lazily on the first call and reused forever; if
  * `AudioContext` doesn't exist (headless / node) every call is a silent no-op,
@@ -72,7 +73,7 @@ export function playTone(spec: ToneSpec): void {
 let ambienceSource: AudioBufferSourceNode | undefined;
 let ambienceGain: GainNode | undefined;
 
-/** Start the looping arena-room bed at `volume` (0..1). Idempotent. */
+/** Start the looping room-tone bed at `volume` (0..1). Idempotent. */
 export function startAmbience(volume: number): void {
   const ctx = context();
   if (ctx === undefined || ambienceSource !== undefined) {
@@ -108,7 +109,7 @@ export function startAmbience(volume: number): void {
   ambienceGain = gain;
 }
 
-/** Adjust the ambience gain (e.g. a crowd swell after a make). */
+/** Adjust the ambience gain (e.g. a swell in response to an event). */
 export function setAmbienceLevel(volume: number): void {
   if (ambienceGain !== undefined && sharedCtx !== undefined) {
     ambienceGain.gain.setTargetAtTime(Math.max(0, volume), sharedCtx.currentTime, 0.1);

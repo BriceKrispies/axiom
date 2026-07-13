@@ -1,29 +1,30 @@
 /*
- * engine/backend-canvas2d.ts — the SOFTWARE drawing fallback: a z-buffered
- * scanline rasterizer over the plain 2D canvas API, auto-selected when WebGL2
- * is unavailable (or forced with `?backend=canvas2d`). Per frame it transforms
+ * backend-canvas2d.ts — the SOFTWARE drawing fallback: a z-buffered scanline
+ * rasterizer over the plain 2D canvas API, auto-selected when WebGL2 is
+ * unavailable (or forced with `?backend=canvas2d`). Per frame it transforms
  * every visible node's vertices to world space, lights each triangle ONCE at
- * its centroid with the SAME Lambert model as the WebGL2 backend (shared
- * ambient / falloff constants from `backend.ts`), clips triangles crossing the
- * near plane (Sutherland–Hodgman — the camera stands INSIDE the arena's big
- * wall/floor boxes, so dropping them whole would punch holes in the world),
- * and rasterizes flat-shaded spans into a reduced-resolution framebuffer with
- * a perspective-correct 1/w depth buffer — per-PIXEL occlusion, so the stacked
- * court decals (apron / hardwood / key / lines, millimetres apart) and the
- * giant walls resolve exactly like the hardware path, with no painter's-sort
- * artifacts. The framebuffer is blitted up to the canvas each frame.
+ * its centroid with the SAME Lambert model as the WebGL2 backend (the shared
+ * `lambertLight` in `shading.ts`), clips triangles crossing the near plane
+ * (Sutherland–Hodgman — a camera standing INSIDE a large box would otherwise
+ * have that box dropped whole, punching a hole in the scene), and rasterizes
+ * flat-shaded spans into a reduced-resolution framebuffer with a
+ * perspective-correct 1/w depth buffer — per-PIXEL occlusion, so coplanar
+ * decals stacked millimetres apart and large enclosing surfaces resolve
+ * exactly like the hardware path, with no painter's-sort artifacts. The
+ * framebuffer is blitted up to the canvas each frame.
  *
  * Softening the workload keeps it real-time: half-resolution internally (the
  * chunky look of a software fallback is embraced), low-detail primitive meshes
  * (`meshDetail: "low"`), and whole-node culls — behind the camera, or a
- * bounding sphere projecting under half a pixel (which parks the off-court
- * entity pools for free). Translucent triangles rasterize after opaque ones
- * with depth TEST but no depth WRITE, alpha-blended in software.
+ * bounding sphere projecting under half a pixel. Translucent triangles
+ * rasterize after opaque ones with depth TEST but no depth WRITE, alpha-blended
+ * in software.
  */
 
 import type { Handle, MeshData } from "./api.ts";
-import { type RenderBackend, type SceneFrame, AMBIENT, CLEAR_COLOR } from "./backend.ts";
+import type { RenderBackend, SceneFrame } from "./backend.ts";
 import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
+import { lambertLight } from "./shading.ts";
 
 interface CpuMesh {
   /** xyz-interleaved model-space positions. */
@@ -35,43 +36,6 @@ interface CpuMesh {
 
 /** Internal framebuffer scale (the software fallback renders at half res). */
 const INTERNAL_SCALE = 0.5;
-
-/**
- * The shared Lambert term: ambient + Σ directional + Σ point (soft
- * 1/(1+0.08·d²) falloff), exactly the WebGL2 fragment math evaluated once per
- * triangle. Exported for the render tests, so both backends provably match.
- */
-export const lambertLight = (
-  nx: number,
-  ny: number,
-  nz: number,
-  px: number,
-  py: number,
-  pz: number,
-  frame: Pick<SceneFrame, "dirLights" | "pointLights">,
-): readonly [number, number, number] => {
-  let r = AMBIENT;
-  let g = AMBIENT;
-  let b = AMBIENT;
-  for (const light of frame.dirLights) {
-    const lambert = Math.max(0, -(nx * light.direction[0] + ny * light.direction[1] + nz * light.direction[2]));
-    r += lambert * light.color[0];
-    g += lambert * light.color[1];
-    b += lambert * light.color[2];
-  }
-  for (const light of frame.pointLights) {
-    const tx = light.position[0] - px;
-    const ty = light.position[1] - py;
-    const tz = light.position[2] - pz;
-    const d = Math.sqrt(tx * tx + ty * ty + tz * tz);
-    const inv = 1 / Math.max(d, 1e-5);
-    const lambert = Math.max(0, (nx * tx + ny * ty + nz * tz) * inv) / (1 + 0.08 * d * d);
-    r += lambert * light.color[0];
-    g += lambert * light.color[1];
-    b += lambert * light.color[2];
-  }
-  return [r, g, b];
-};
 
 const channel = (v: number): number => Math.max(0, Math.min(255, Math.round(v * 255)));
 
@@ -108,8 +72,10 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
   let image: ImageData | null = null;
   let pixels = new Uint32Array(0);
   let depth = new Float32Array(0);
-  const clearPixel =
-    (255 << 24) | (channel(CLEAR_COLOR[2]) << 16) | (channel(CLEAR_COLOR[1]) << 8) | channel(CLEAR_COLOR[0]);
+  // Packed ABGR background pixel, recomputed each frame from `frame.clearColor`
+  // (the store's `setClearColor`, default `CLEAR_COLOR`).
+  const clearPixelOf = (rgb: readonly [number, number, number]): number =>
+    (255 << 24) | (channel(rgb[2]) << 16) | (channel(rgb[1]) << 8) | channel(rgb[0]);
 
   const ensureFramebuffer = (): boolean => {
     const width = Math.max(1, Math.round(canvas.width * INTERNAL_SCALE));
@@ -194,7 +160,7 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
       if (!ensureFramebuffer() || image === null || fbCtx === null || fbCanvas === null) {
         return;
       }
-      pixels.fill(clearPixel);
+      pixels.fill(clearPixelOf(frame.clearColor));
       depth.fill(0);
 
       const w = fbWidth;

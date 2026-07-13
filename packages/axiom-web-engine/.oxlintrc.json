@@ -1,0 +1,207 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // Axiom @axiom/web-engine static-analysis gate. The TS-native counterpart of the
+  // Rust spine's clippy/dylint + engine_no_branching laws, identical to
+  // @axiom/client's / @axiom/game's: EVERY category is an error and maxWarnings is
+  // 0, so any finding fails the run. Type-aware rules run through tsgolint
+  // (typescript-go, TS 7). See packages/axiom-client/STATIC_ANALYSIS.md.
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "style": "error",
+    "restriction": "error",
+    "nursery": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "maxWarnings": 0
+  },
+  // The engine runs in the browser; tests run in Node. Declaring the environments
+  // gives no-undef the right global set (WebGL2RenderingContext, AudioContext,
+  // requestAnimationFrame, document, performance, ...). Configuration, not a relaxation.
+  "env": {
+    "browser": true,
+    "es2024": true,
+    "node": true
+  },
+  "jsPlugins": [{ "name": "eslint-js", "specifier": "oxlint-plugin-eslint" }],
+  "rules": {
+    // Disabled globally for the same reason @axiom/client / @axiom/game disable it:
+    // the engine threads inherently MUTABLE typed arrays (Float32Array/Uint16Array
+    // vertex + index buffers, Uint32Array framebuffers) and stateful GPU/context
+    // handles across its boundaries. `Readonly<Float32Array>` still exposes
+    // `set`/`fill`, so a deeply-readonly parameter type is a TypeScript
+    // impossibility for a typed-array codec — the rule fires with no code change
+    // that satisfies it. Per CLAUDE.md's "genuinely un-fixable -> documented
+    // decision", disabled here with justification rather than suppressed at sites.
+    "typescript/prefer-readonly-parameter-types": "off",
+
+    // id-length, scoped to the irreducible geometric vector components `x`/`y`/`z`
+    // (the engine's neutral spatial vocabulary; `position.x` is the contract).
+    // Every other identifier still owes a >= 2-char name. A narrowed exception,
+    // not a disable.
+    "eslint/id-length": ["error", { "exceptions": ["x", "y", "z"] }],
+
+    // capitalized-comments: OFF, a documented style-only decision. The engine's
+    // house comment idiom leads every block with the lowercase SOURCE FILENAME as
+    // a code-like token (`api.ts — ...`, `mat4.ts — ...`) — deliberately greppable,
+    // and consistent across all 15 files. That first token is, by construction, a
+    // lowercase filename, which this rule cannot accept. It is a pure-style rule
+    // (no bug-catching value), so per CLAUDE.md's "genuinely un-fixable ->
+    // documented decision" it is disabled here rather than fought at every header.
+    "eslint/capitalized-comments": "off",
+
+    // no-magic-numbers, with the three conventional non-magic integers allowed.
+    "eslint/no-magic-numbers": ["error", { "ignore": [-1, 0, 1], "ignoreNumericLiteralTypes": true }],
+
+    // The Branchless Law for TypeScript: the no-restricted-syntax analogue of the
+    // Rust engine_no_branching dylint. Every control-flow branch is banned. Same
+    // block as @axiom/client / @axiom/game.
+    "eslint-js/no-restricted-syntax": [
+      "error",
+      { "selector": "IfStatement", "message": "Branchless Law: no `if`. Use a table index `[b, a][Number(cond)]` or an iterator combinator. See docs/ts-sdk-hardening.md." },
+      { "selector": "ConditionalExpression", "message": "Branchless Law: no ternary `?:`. Select with a lookup table or arithmetic. See docs/ts-sdk-hardening.md." },
+      { "selector": "SwitchStatement", "message": "Branchless Law: no `switch`. Dispatch through a record/Map keyed by the discriminant. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForStatement", "message": "Branchless Law: no `for`. Use map/forEach/reduce/from over the iterable. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForInStatement", "message": "Branchless Law: no `for...in`. Iterate Object.keys/entries with array combinators. See docs/ts-sdk-hardening.md." },
+      { "selector": "ForOfStatement", "message": "Branchless Law: no `for...of`. Use map/forEach/reduce over the iterable. See docs/ts-sdk-hardening.md." },
+      { "selector": "WhileStatement", "message": "Branchless Law: no `while`. Express the loop as an iterator/fold. See docs/ts-sdk-hardening.md." },
+      { "selector": "DoWhileStatement", "message": "Branchless Law: no `do...while`. Express the loop as an iterator/fold. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='&&']", "message": "Branchless Law: no `&&` short-circuit. Use `&` when the RHS is pure, or combinators for guards. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='||']", "message": "Branchless Law: no `||` short-circuit. Use `|` when the RHS is pure, or combinators. See docs/ts-sdk-hardening.md." },
+      { "selector": "LogicalExpression[operator='??']", "message": "Branchless Law: no `??`. Default through a value transform, not a short-circuit. See docs/ts-sdk-hardening.md." },
+      { "selector": "ChainExpression", "message": "Branchless Law: no optional chaining `?.`. Make presence explicit through a value transform. See docs/ts-sdk-hardening.md." }
+    ]
+  },
+  "overrides": [
+    {
+      // Tests keep their branches — the Branchless Law exempts tests exactly as the
+      // Rust engine_no_branching lint does. Same relaxations as @axiom/client /
+      // @axiom/game: the production-ergonomics rules hostile to readable test code
+      // are relaxed; the bug-catching rules stay on.
+      "files": ["**/*.test.ts", "**/*.testkit.ts"],
+      "rules": {
+        "eslint-js/no-restricted-syntax": "off",
+        "eslint/capitalized-comments": "off",
+        "eslint/class-methods-use-this": "off",
+        "eslint/func-style": "off",
+        "eslint/id-length": "off",
+        "eslint/init-declarations": "off",
+        "eslint/max-lines": "off",
+        "eslint/max-lines-per-function": "off",
+        "eslint/max-statements": "off",
+        "eslint/no-inline-comments": "off",
+        "eslint/no-magic-numbers": "off",
+        "eslint/max-params": "off",
+        "eslint/no-plusplus": "off",
+        "eslint/no-undefined": "off",
+        "eslint/no-void": "off",
+        "eslint/sort-imports": "off",
+        "eslint/sort-keys": "off",
+        "oxc/no-rest-spread-properties": "off",
+        "typescript/no-confusing-void-expression": "off",
+        "unicorn/no-array-for-each": "off",
+        "unicorn/prefer-modern-math-apis": "off",
+        "typescript/no-floating-promises": "off",
+        "typescript/no-non-null-assertion": "off",
+        "typescript/promise-function-async": "off",
+        "unicorn/number-literal-case": "off",
+        "unicorn/prefer-at": "off",
+        "unicorn/prefer-spread": "off"
+      }
+    },
+    {
+      // The platform edge: the browser-API boundary files, the analogue of
+      // @axiom/game's raf-loop.ts / dom-input.ts and the Rust spine's
+      // host/windowing layers, which sit outside the strict spine laws. Each binds
+      // a real browser API (WebGL2/Canvas2D contexts, AudioContext,
+      // requestAnimationFrame, DOM events, backend construction). Only the rules
+      // that boundary genuinely fights are scoped off; every general-quality rule
+      // still applies. These files are ALSO coverage-exempt (browser-only, verified
+      // via the Playwright path) — see test-exempt.json.
+      //   - branch ban / optional chaining: context-availability gates + event wiring
+      //   - unsafe-*: the WebGL/canvas/DOM context boundary is untyped at its edge
+      // The second group is the low-level GRAPHICS reality of a software scanline
+      // rasterizer + a WebGL2 binding: bitwise framebuffer/ABGR packing (`no-bitwise`),
+      // typed-array element access under `noUncheckedIndexedAccess` (`no-non-null-
+      // assertion`), single-letter raster loop indices (`id-length`), dense per-pixel
+      // math full of literal constants (`no-magic-numbers`), nullable WebGL API returns
+      // (`no-null`, `no-unnecessary-condition`), `continue`-based inner-loop culls
+      // (`no-continue`/`curly`), and long imperative frame functions (`max-lines*`,
+      // `max-statements`, `complexity`). These are the exact rules the spine laws are
+      // NOT meant to govern; the files are already coverage-exempt (test-exempt.json)
+      // and branchless-exempt. Every general-quality rule not listed still applies.
+      "files": [
+        "src/backend-webgl2.ts",
+        "src/backend-canvas2d.ts",
+        "src/audio.ts",
+        "src/raf-loop.ts",
+        "src/dom-input.ts",
+        "src/renderer.ts"
+      ],
+      "rules": {
+        "eslint-js/no-restricted-syntax": "off",
+        "eslint/no-await-in-loop": "off",
+        "oxc/no-async-await": "off",
+        "oxc/no-optional-chaining": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-type-assertion": "off",
+        "typescript/no-non-null-assertion": "off",
+        "typescript/no-unnecessary-condition": "off",
+        "eslint/no-magic-numbers": "off",
+        "eslint/no-bitwise": "off",
+        "eslint/id-length": "off",
+        "eslint/no-undefined": "off",
+        "eslint/curly": "off",
+        "eslint/no-continue": "off",
+        "eslint/prefer-destructuring": "off",
+        "eslint/max-lines": "off",
+        "eslint/max-lines-per-function": "off",
+        "eslint/max-statements": "off",
+        "eslint/complexity": "off",
+        "eslint/func-style": "off",
+        "eslint/init-declarations": "off",
+        "eslint/sort-imports": "off",
+        "eslint/no-inline-comments": "off",
+        "eslint/no-void": "off",
+        "eslint/no-ternary": "off",
+        "eslint/no-console": "off",
+        "eslint/sort-keys": "off",
+        "unicorn/no-null": "off",
+        "unicorn/number-literal-case": "off",
+        "unicorn/numeric-separators-style": "off",
+        "unicorn/prefer-modern-math-apis": "off",
+        "unicorn/prefer-math-trunc": "off",
+        "unicorn/no-array-for-each": "off"
+      }
+    },
+    {
+      // The dense-math spine: mat4.ts (column-major 4x4 matrix ops) and shading.ts
+      // (the per-fragment Lambert term). These stay fully BRANCHLESS + 100% covered
+      // and game-agnostic — only the shape rules that fixed mathematical signatures
+      // inherently violate are scoped off, each documented:
+      //   - max-params: `perspective(fovY, aspect, near, far)` and the per-fragment
+      //     `lambertLight(...)` have fixed >3-arg signatures dictated by the math,
+      //     not by a refactorable data clump (the same wasm-signature exception
+      //     @axiom/game grants its bridge adapters).
+      //   - max-statements: a 4x4 matrix built as one flat literal is an irreducible
+      //     sequence of component assignments just over the 10-statement budget.
+      //   - prefer-modern-math-apis / no-array-for-each: sum-of-squares via an
+      //     explicit `dot`/`* ` fold is kept EXACT (Math.hypot rounds differently),
+      //     and the light accumulation is an ordered `.map` side-effect walk chosen
+      //     to preserve associativity — both deliberate for byte-identical output.
+      "files": ["src/mat4.ts", "src/shading.ts"],
+      "rules": {
+        "eslint/max-params": "off",
+        "eslint/max-statements": "off",
+        "unicorn/prefer-modern-math-apis": "off",
+        "unicorn/no-array-for-each": "off"
+      }
+    }
+  ]
+}

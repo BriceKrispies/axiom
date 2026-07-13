@@ -1,5 +1,5 @@
 /*
- * engine/backend.ts — the INTERNAL contract between the retained-scene store
+ * backend.ts — the INTERNAL contract between the retained-scene store
  * (`renderer.ts`) and the two drawing backends: `backend-webgl2.ts` (the
  * default, hardware path) and `backend-canvas2d.ts` (the software fallback,
  * auto-selected when WebGL2 is unavailable or forced with `?backend=canvas2d`).
@@ -43,6 +43,10 @@ export interface SceneFrame {
   readonly dirLights: readonly FrameDirLight[];
   readonly pointLights: readonly FramePointLight[];
   readonly camera: Camera3D;
+  /** Background clear color (RGB, 0..1). Defaults to `CLEAR_COLOR`; the store
+   * overrides it via `setClearColor`. Both backends read it per frame so a game
+   * can paint its own sky/void instead of the near-black default. */
+  readonly clearColor: readonly [number, number, number];
 }
 
 /** The drawing backend the store delegates to. */
@@ -52,17 +56,22 @@ export interface RenderBackend {
    * meshes at this detail level. */
   readonly meshDetail: "high" | "low";
   /** Ingest triangle-list geometry under the store's handle. */
-  uploadMesh(handle: Handle, data: MeshData): void;
+  readonly uploadMesh: (handle: Handle, data: MeshData) => void;
   /** Forget every uploaded mesh (the store is clearing the scene). */
-  dropMeshes(): void;
+  readonly dropMeshes: () => void;
   /** The canvas backing store was resized. */
-  resize(width: number, height: number): void;
+  readonly resize: (width: number, height: number) => void;
   /** Clear and draw the whole frame. */
-  render(frame: SceneFrame): void;
+  readonly render: (frame: SceneFrame) => void;
 }
 
 /** Ambient floor and clear color, shared by both backends so they match. */
 export const AMBIENT = 0.12;
-export const CLEAR_COLOR: readonly [number, number, number] = [5 / 255, 6 / 255, 10 / 255];
+/** The default near-black void, as 8-bit RGB channels normalized to 0..1. */
+const BYTE_MAX = 255;
+const VOID_R = 5;
+const VOID_G = 6;
+const VOID_B = 10;
+export const CLEAR_COLOR: readonly [number, number, number] = [VOID_R / BYTE_MAX, VOID_G / BYTE_MAX, VOID_B / BYTE_MAX];
 export const MAX_DIR_LIGHTS = 8;
 export const MAX_POINT_LIGHTS = 8;

@@ -16,7 +16,6 @@ import { BALLS_PER_RACK, POLISH_TUNING as P, RACK_LABELS } from "./constants.ts"
 import { RISE_START_TICKS } from "./gameplay.ts";
 import { SHOT_TUNING } from "./constants.ts";
 import { Impulse, PolishState, countTowards, glintOn, impactNorm, impactPitch, impactVolume, streakPresentationLevel } from "./polish.ts";
-import { InputState } from "./engine/input.ts";
 import { type GameEvent, type Intent, IDLE_INTENT } from "./types.ts";
 import { ThreePointSession } from "./session.ts";
 
@@ -254,39 +253,12 @@ test("collision sound cooldown suppresses duplicate contact spam", () => {
   }
 });
 
-// ── 15–16. focus loss + held restart safety ───────────────────────────────────
+// The input-edge safety properties this section used to re-check (focus-loss
+// release, held-key auto-repeat producing no repeated edges) are now owned and
+// fully covered by the engine's own `input.test.ts` in @axiom/web-engine — app
+// tests stay engine-free, so they are not duplicated here.
 
-test("losing focus cannot create a delayed accidental shot", () => {
-  const input = new InputState();
-  input.bindAction("shoot", ["Space"]);
-  input.keyEvent("Space", true);
-  input.beginTick();
-  assert.equal(input.pressed("shoot"), true);
-  // Blur mid-charge: everything releases; the charge resolves as a normal
-  // release edge on the NEXT tick, not at some later surprise moment.
-  input.releaseAllKeys();
-  input.beginTick();
-  assert.equal(input.released("shoot"), true, "the held key resolves immediately");
-  input.beginTick();
-  assert.equal(input.pressed("shoot"), false);
-  assert.equal(input.released("shoot"), false, "no delayed edges after refocus");
-  assert.equal(input.isDown("shoot"), false, "nothing stays logically held");
-});
-
-test("held R cannot trigger repeated restarts", () => {
-  const input = new InputState();
-  input.bindAction("restart", ["KeyR"]);
-  input.keyEvent("KeyR", true);
-  input.beginTick();
-  assert.equal(input.pressed("restart"), true);
-  for (let i = 0; i < 100; i += 1) {
-    input.keyEvent("KeyR", true); // browser auto-repeat
-    input.beginTick();
-    assert.equal(input.pressed("restart"), false, "auto-repeat never re-fires the edge");
-  }
-});
-
-// ── 17–18. count-up exactness + determinism ───────────────────────────────────
+// ── count-up exactness + determinism ──────────────────────────────────────────
 
 test("score animation reaches the authoritative score exactly", () => {
   for (const [from, to] of [

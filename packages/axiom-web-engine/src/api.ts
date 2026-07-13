@@ -1,21 +1,15 @@
 /*
- * engine/api.ts — the shared vocabulary of the game's OWN engine. This app is
- * fully self-contained: everything under `web/src/engine/` is pure TypeScript
- * over bare browser APIs (WebGL2, requestAnimationFrame, DOM events, WebAudio) —
- * no `@axiom/game`, no wasm, no external packages. The shapes here deliberately
- * mirror the vocabulary the game code already speaks (`Transform`, `Rgba`,
- * mesh/material handles, a look-at camera), so the gameplay layer stays intact.
+ * api.ts — the shared vocabulary of @axiom/web-engine. The whole package is pure
+ * TypeScript over bare browser APIs (WebGL2, Canvas2D, requestAnimationFrame, DOM
+ * events, WebAudio) — no wasm, no Rust-spine coupling. These shapes are the neutral
+ * contract every consumer speaks: transforms, colors, mesh/material handles, lights,
+ * a look-at camera, per-tick input, and procedural tones.
  *
- * The engine is split into four independent modules, all implementing the
- * contracts in this file:
- *   - `renderer.ts` — a WebGL2 forward renderer (meshes, Lambert materials,
- *     directional + point lights, look-at camera) behind the retained-scene
- *     functions (`createMesh` … `renderScene`).
- *   - `loop.ts`     — the deterministic fixed-step game loop (a testable
- *     accumulator core under a requestAnimationFrame driver).
- *   - `input.ts`    — keyboard actions, pointer-lock mouse look, and canvas
- *     pointer sampling (a testable state core under a DOM edge).
- *   - `audio.ts`    — a tiny WebAudio tone synth (`playTone`).
+ * The package is organized as a branchless, fully-tested spine (this contract, the
+ * matrix math, mesh + shading generators, the retained-scene store, the fixed-step
+ * accumulator, and the input state) behind a thin platform edge (the WebGL2 /
+ * Canvas2D backends, the AudioContext synth, the requestAnimationFrame driver, the
+ * DOM input binding, and the backend-constructing renderer facade).
  */
 
 /** A scene-node id returned by `spawnRenderable` / `addLight`. */
@@ -27,7 +21,7 @@ export type Handle = number;
 /** An sRGB color, 0..1 components. */
 export type Rgba = readonly [number, number, number, number];
 
-/** A plain 3-vector — structurally the game's own `vec.ts` `Vec3`. */
+/** A plain 3-vector. */
 export interface EngineVec3 {
   readonly x: number;
   readonly y: number;
@@ -47,7 +41,7 @@ export interface Transform {
   readonly scale: EngineVec3;
 }
 
-/** Custom triangle-list geometry (`meshgen.ts` produces this shape). */
+/** Custom triangle-list geometry passed to `createMeshData`. */
 export interface MeshData {
   readonly positions: readonly EngineVec3[];
   readonly normals: readonly EngineVec3[];
@@ -79,17 +73,17 @@ export interface Camera3D {
   readonly far: number;
 }
 
-/** One tick's worth of input, read by the game during a fixed update. The DOM
+/** One tick's worth of input, read by a consumer during a fixed update. The DOM
  * edge accumulates events; `beginTick()` snapshots them so `pressed`/`released`
  * are exact one-tick edges and `look()` is the delta since the previous tick. */
 export interface TickInput {
-  isDown(action: string): boolean;
-  pressed(action: string): boolean;
-  released(action: string): boolean;
+  readonly isDown: (action: string) => boolean;
+  readonly pressed: (action: string) => boolean;
+  readonly released: (action: string) => boolean;
   /** This tick's pointer-locked mouse delta (raw px, +x right / +y down). */
-  look(): { readonly x: number; readonly y: number };
+  readonly look: () => { readonly x: number; readonly y: number };
   /** The latest canvas pointer sample (CSS px, top-left origin), if any. */
-  pointer(): { readonly pos: { readonly x: number; readonly y: number }; readonly down: boolean } | undefined;
+  readonly pointer: () => { readonly pos: { readonly x: number; readonly y: number }; readonly down: boolean } | undefined;
 }
 
 /** A procedural tone (WebAudio oscillator + envelope). */
