@@ -560,7 +560,7 @@ impl WasmGame {
     /// `entity`'s authoritative world transform (`worldWorldTransform`) as `[]`
     /// or the flat 10-tuple `[tx, ty, tz, qx, qy, qz, qw, sx, sy, sz]`.
     #[wasm_bindgen(js_name = worldWorldTransform)]
-    pub fn world_world_transform(&self, entity: f64) -> Vec<f64> {
+    pub fn world_world_transform(&mut self, entity: f64) -> Vec<f64> {
         self.bridge.world_world_transform(entity as u64)
     }
 }

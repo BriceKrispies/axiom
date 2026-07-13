@@ -202,13 +202,16 @@ impl GameBridge {
     /// renderable (e.g. an enemy walking, the player camera following). A stale
     /// handle is a clean `false`.
     pub fn set_node_transform(&mut self, entity: u64, transform: &[f64]) -> bool {
-        let app = self.runtime.app_mut();
-        let moved = app.set::<Transform>(Entity::from_raw(entity), transform_from_tuple(transform));
-        // A bare `set::<Transform>` defers world-transform propagation to the next
-        // tick; commit it now so a query (or the present render) this frame sees the
-        // node at its new pose, the move-then-look-then-shoot loop a game runs.
-        app.update_world_transforms();
-        moved
+        // A bare `set::<Transform>` marks the scene's world transforms dirty (O(1)) but does
+        // NOT propagate — so moving N nodes this frame is N cheap writes, not N whole-scene
+        // propagations (the old O(N²) that tanked the FPS as a scene filled with nodes). The
+        // single propagation is committed lazily by `update_world_transforms` (now a
+        // dirty-coalesced no-op when nothing moved), which every read path — present
+        // (`render_frame`), `world_world_transform`, and the spatial queries — calls first,
+        // so the move-then-look-then-shoot loop still sees the new pose this frame.
+        self.runtime
+            .app_mut()
+            .set::<Transform>(Entity::from_raw(entity), transform_from_tuple(transform))
     }
 
     /// Set `entity`'s collision bounds to an axis-aligned box of `half_extents`

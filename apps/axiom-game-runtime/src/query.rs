@@ -32,9 +32,17 @@ fn v3(s: &[f64]) -> Vec3 {
 }
 
 impl GameBridge {
+    /// Commit any pending `setNodeTransform` writes before a spatial query reads world
+    /// boxes (a no-op when nothing moved) — so a move-then-query in the same tick sees the
+    /// new pose, now that `set_node_transform` defers propagation.
+    fn ensure_world_transforms(&mut self) {
+        self.runtime.app_mut().update_world_transforms();
+    }
+
     /// Every bounded entity whose world box overlaps the query sphere
     /// (`overlapCircle`), as raw ids in ascending order.
-    pub fn overlap_circle(&self, center: &[f64], radius: f64) -> Vec<f64> {
+    pub fn overlap_circle(&mut self, center: &[f64], radius: f64) -> Vec<f64> {
+        self.ensure_world_transforms();
         self.runtime
             .app()
             .overlap_circle(v3(center), meters(radius))
@@ -45,7 +53,8 @@ impl GameBridge {
 
     /// Every bounded entity whose world box overlaps the query box (`overlapBox`),
     /// as raw ids in ascending order.
-    pub fn overlap_box(&self, center: &[f64], half_extents: &[f64]) -> Vec<f64> {
+    pub fn overlap_box(&mut self, center: &[f64], half_extents: &[f64]) -> Vec<f64> {
+        self.ensure_world_transforms();
         self.runtime
             .app()
             .overlap_box(v3(center), v3(half_extents))
@@ -57,7 +66,8 @@ impl GameBridge {
     /// Cast a ray and return the nearest bounded hit (`raycast`): `[]` on a miss,
     /// else `[entity, hitX, hitY, hitZ]` — the entity id plus the world-space
     /// entry point on its box.
-    pub fn raycast(&self, origin: &[f64], direction: &[f64], max_distance: f64) -> Vec<f64> {
+    pub fn raycast(&mut self, origin: &[f64], direction: &[f64], max_distance: f64) -> Vec<f64> {
+        self.ensure_world_transforms();
         self.runtime
             .app()
             .raycast_hit(v3(origin), v3(direction), meters(max_distance))
@@ -83,19 +93,19 @@ mod wasm_exports {
     impl WasmGame {
         /// Bounded entities overlapping the query sphere (`overlapCircle`).
         #[wasm_bindgen(js_name = overlapCircle)]
-        pub fn overlap_circle(&self, center: &[f64], radius: f64) -> Vec<f64> {
+        pub fn overlap_circle(&mut self, center: &[f64], radius: f64) -> Vec<f64> {
             self.bridge.overlap_circle(center, radius)
         }
 
         /// Bounded entities overlapping the query box (`overlapBox`).
         #[wasm_bindgen(js_name = overlapBox)]
-        pub fn overlap_box(&self, center: &[f64], half_extents: &[f64]) -> Vec<f64> {
+        pub fn overlap_box(&mut self, center: &[f64], half_extents: &[f64]) -> Vec<f64> {
             self.bridge.overlap_box(center, half_extents)
         }
 
         /// The nearest bounded ray hit (`raycast`): `[]` or `[entity, x, y, z]`.
         #[wasm_bindgen(js_name = raycast)]
-        pub fn raycast(&self, origin: &[f64], direction: &[f64], max_distance: f64) -> Vec<f64> {
+        pub fn raycast(&mut self, origin: &[f64], direction: &[f64], max_distance: f64) -> Vec<f64> {
             self.bridge.raycast(origin, direction, max_distance)
         }
     }
@@ -134,7 +144,7 @@ mod tests {
 
     #[test]
     fn overlap_and_raycast_find_the_bounded_node_and_replay() {
-        let b = bridge();
+        let mut b = bridge();
         let hits = b.overlap_box(&[0.0, 0.0, -3.0], &[0.2, 0.2, 0.2]);
         assert_eq!(hits.len(), 1);
         assert_eq!(b.overlap_circle(&[0.0, 0.0, -3.0], 1.0), hits);
@@ -148,7 +158,7 @@ mod tests {
 
     #[test]
     fn a_miss_is_the_empty_array() {
-        let b = bridge();
+        let mut b = bridge();
         assert!(b.overlap_box(&[0.0, 0.0, 0.0], &[0.2, 0.2, 0.2]).is_empty());
         assert!(b.overlap_circle(&[0.0, 0.0, 0.0], 0.5).is_empty());
         assert!(b.raycast(&[0.0, 0.0, 0.0], &[0.0, 1.0, 0.0], 100.0).is_empty());

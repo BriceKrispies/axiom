@@ -79,6 +79,12 @@ pub struct SceneStorage {
     /// [`crate::scene::Scene::advance`] and drained by [`ControllerSystem`];
     /// transient, never serialized.
     pub pending_controls: Vec<(u32, Vec3, f32, f32, Option<Meters>)>,
+    /// Whether a local transform / parent link changed since world transforms were
+    /// last propagated — the coalescing flag behind [`crate::scene::Scene::update_world_transforms`].
+    /// Set by every transform/hierarchy mutation, cleared when a propagation runs, so
+    /// moving N nodes then reading once costs ONE whole-scene propagation instead of N
+    /// (the difference between O(N·nodes) and O(nodes) per frame). Transient, never serialized.
+    pub world_dirty: bool,
 }
 
 /// A first-person controller node's persistent orientation: the index it answers
@@ -175,6 +181,10 @@ pub struct TransformPropagation;
 impl WorldSystem<SceneStorage> for TransformPropagation {
     fn run(&self, _step: &WorldStep, entities: &EntityRegistry, storage: &mut SceneStorage) {
         propagate(entities.iter(), storage);
+        // Worlds are now fresh for this tick, so clear the coalescing flag — a subsequent
+        // on-demand `update_world_transforms` (present / query) is a no-op until the next
+        // authored move re-arms it, avoiding a redundant whole-scene re-propagation.
+        storage.world_dirty = false;
     }
 }
 

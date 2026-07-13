@@ -43,10 +43,11 @@ impl Scene {
                     })
             })
             .map(|()| {
-                self.world
-                    .storage_mut()
+                let storage = self.world.storage_mut();
+                storage
                     .parents
                     .insert(Self::entity(child), Self::entity(parent));
+                storage.world_dirty = true;
             })
     }
 
@@ -55,7 +56,9 @@ impl Scene {
             .then_some(())
             .ok_or_else(|| SceneError::missing_node("clear_parent: child id not in scene"))
             .map(|()| {
-                self.world.storage_mut().parents.remove(Self::entity(child));
+                let storage = self.world.storage_mut();
+                storage.parents.remove(Self::entity(child));
+                storage.world_dirty = true;
             })
     }
 

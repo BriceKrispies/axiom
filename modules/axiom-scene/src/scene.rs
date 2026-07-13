@@ -112,7 +112,9 @@ impl Scene {
 
     pub(crate) fn create_node(&mut self, local: Transform) -> SceneNodeId {
         let entity = self.world.spawn();
-        self.world.storage_mut().locals.insert(entity, local);
+        let storage = self.world.storage_mut();
+        storage.locals.insert(entity, local);
+        storage.world_dirty = true;
         SceneNodeId::from_raw(entity.raw())
     }
 
@@ -121,10 +123,9 @@ impl Scene {
             .then_some(())
             .ok_or_else(|| SceneError::missing_node("set_local: node id not in scene"))
             .map(|()| {
-                self.world
-                    .storage_mut()
-                    .locals
-                    .insert(Self::entity(id), local);
+                let storage = self.world.storage_mut();
+                storage.locals.insert(Self::entity(id), local);
+                storage.world_dirty = true;
             })
     }
 
@@ -252,13 +253,23 @@ impl Scene {
             pitch_delta,
             seat_y,
         );
+        // `apply_controller` writes locals straight to storage (not via `set_local`), so
+        // mark dirty here before the propagation below observes it.
+        self.world.storage_mut().world_dirty = true;
         self.update_world_transforms();
     }
 
-    /// Recompute every node's world transform now, regardless of frame state.
+    /// Propagate every node's world transform from its local — but ONLY if a transform
+    /// or parent link changed since the last propagation (`world_dirty`). This coalescing
+    /// is what lets a caller that moves N nodes and then reads once pay a single
+    /// whole-scene propagation instead of one per moved node: the runtime marks each
+    /// `setNodeTransform` dirty (O(1)) and this runs once before the frame is read.
     pub(crate) fn update_world_transforms(&mut self) {
-        let ids: Vec<EntityId> = self.world.entities().iter().collect();
-        propagate(ids.into_iter(), self.world.storage_mut());
+        self.world.storage().world_dirty.then(|| {
+            let ids: Vec<EntityId> = self.world.entities().iter().collect();
+            propagate(ids.into_iter(), self.world.storage_mut());
+            self.world.storage_mut().world_dirty = false;
+        });
     }
 
     /// Advance the scene for one engine frame: run the registered systems
@@ -350,6 +361,9 @@ impl Scene {
                 let storage = self.world.storage_mut();
                 storage.players = players;
                 storage.controllers = controllers;
+                // Restored locals need a fresh propagation before any query/present reads
+                // world transforms (the serialized `worlds` may predate propagation).
+                storage.world_dirty = true;
             })
     }
 }
@@ -480,6 +494,25 @@ mod tests {
         let w = s.world_transform(c).unwrap();
         assert_eq!(w.translation.x, 1.0);
         assert_eq!(w.translation.y, 2.0);
+    }
+
+    #[test]
+    fn update_world_transforms_coalesces_when_nothing_changed() {
+        // A mutation marks the scene dirty, so the first propagation runs; a second call
+        // with no mutation in between is a no-op (the `world_dirty == false` arm), and a
+        // subsequent local move re-arms it. This is the coalescing that turns N per-frame
+        // `setNodeTransform` calls into one whole-scene propagation.
+        let mut s = Scene::new();
+        let n = s.create_node(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
+        s.update_world_transforms();
+        assert_eq!(s.world_transform(n).unwrap().translation.x, 1.0);
+        // No mutation ⇒ the second call takes the clean (no-op) arm and leaves worlds intact.
+        s.update_world_transforms();
+        assert_eq!(s.world_transform(n).unwrap().translation.x, 1.0);
+        // A fresh local move re-arms the flag and the next propagation reflects it.
+        s.set_local(n, Transform::from_translation(Vec3::new(4.0, 0.0, 0.0))).unwrap();
+        s.update_world_transforms();
+        assert_eq!(s.world_transform(n).unwrap().translation.x, 4.0);
     }
 }
 

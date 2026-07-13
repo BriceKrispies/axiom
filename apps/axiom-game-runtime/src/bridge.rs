@@ -185,6 +185,10 @@ impl GameBridge {
     /// drive the same path a browser presents.
     pub fn render_frame(&mut self) -> FrameOutcome {
         let tick = self.runtime.tick();
+        // Commit this frame's authored `setNodeTransform` writes ONCE before present reads
+        // world transforms (a no-op when nothing moved) — the coalescing that replaces the
+        // former propagate-on-every-set with a single whole-scene propagation per frame.
+        self.runtime.app_mut().update_world_transforms();
         self.runtime.app_mut().render(tick)
     }
 
@@ -356,7 +360,11 @@ impl GameBridge {
 
     /// `entity`'s authoritative world transform (`worldWorldTransform`) as `[]`
     /// (absent) or the flat 10-tuple `[tx, ty, tz, qx, qy, qz, qw, sx, sy, sz]`.
-    pub fn world_world_transform(&self, entity: u64) -> Vec<f64> {
+    /// Takes `&mut self` so it can commit any pending `setNodeTransform` writes
+    /// (`update_world_transforms`, a no-op when nothing moved) before reading — the read
+    /// counterpart to the deferred propagation in [`Self::set_node_transform`].
+    pub fn world_world_transform(&mut self, entity: u64) -> Vec<f64> {
+        self.runtime.app_mut().update_world_transforms();
         self.runtime
             .app()
             .world_transform(Entity::from_raw(entity))
