@@ -38,12 +38,15 @@
         flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         font: 12px ui-monospace, monospace; color: #9fd1ff;
       }
-      #btn-reset {
+      #btn-undo, #btn-reset {
         pointer-events: auto; flex: none;
-        background: #2f6df0; color: #fff; border: 0; border-radius: 7px;
+        color: #fff; border: 0; border-radius: 7px;
         padding: 7px 12px; font: 600 12px system-ui; cursor: pointer;
       }
+      #btn-reset { background: #2f6df0; }
       #btn-reset:hover { background: #3b79ff; }
+      #btn-undo { background: #444b58; }
+      #btn-undo:hover { background: #545c6c; }
       #boot {
         position: fixed; inset: 0; display: grid; place-items: center;
         color: #9aa3b2; font-size: 13px; background: #15171c; z-index: 20;
@@ -55,7 +58,8 @@
       <canvas id="axiom-quintet-canvas" width="640" height="488"></canvas>
     </div>
     <div id="hud">
-      <span id="status">Drag the quintet onto the board.</span>
+      <span id="status">Press the board to place the quintet (or drag it from the tray).</span>
+      <button id="btn-undo">↶ Undo</button>
       <button id="btn-reset">↺ Reset</button>
     </div>
     <div id="boot">booting…</div>
@@ -75,7 +79,8 @@
       wasm.quintet_start();
       boot.style.display = "none";
 
-      document.getElementById("btn-reset").addEventListener("click", () => wasm.reset());
+      document.getElementById("btn-undo").addEventListener("click", () => wasm.quintet_undo());
+      document.getElementById("btn-reset").addEventListener("click", () => wasm.quintet_reset());
     </script>
   </body>
 </html>

@@ -2,19 +2,23 @@
 
 A deterministic block-breaking placement game built as an Axiom app.
 
-Drag a generated **quintet** — a 5-cell polyomino — from the side panel onto a
-10×10 board. Fill any whole row or column to clear it; clearing several lines
-with one placement multiplies the points each cleared block is worth. Every
-piece the generator offers is guaranteed to fit somewhere; when nothing can fit,
-the game shows a stuck state and you press **Reset**.
+Place a generated **quintet** — a 5-cell polyomino — onto a 10×10 board. Fill
+any whole row or column to clear it; clearing several lines with one placement
+multiplies the points each cleared block is worth. Every piece the generator
+offers is guaranteed to fit somewhere; when nothing can fit, the game shows a
+stuck state and you press **Reset**.
 
 ## Play
 
-* **Drag** the quintet from the *Next Quintet* panel onto the board.
+* **Press the board** — the waiting quintet is summoned and hovers under your
+  cursor/finger. (Dragging it from the *Next Quintet* panel still works too.)
 * The snapped preview reads **green** where it will land validly, **red** when it
   is off-board or overlapping a filled block.
 * **Release** on a valid spot to place it; release anywhere invalid to return it
   to the panel.
+* **Undo** rewinds the last placement in full — any rows/columns it cleared come
+  back, the score and move count rewind, and the same piece returns to the
+  panel. Press it repeatedly to rewind play by play.
 * **Reset board** clears everything and starts a fresh game.
 
 ## Scoring

@@ -3,9 +3,12 @@
 //! A thin 2D-`<canvas>` adapter over the pure [`QuintetGame`]. It draws the
 //! board, the piece tray (the current quintet in a 5×5 grid), the score, and —
 //! while the player drags — a snapped placement preview and the floating piece.
-//! **PointerEvent** drag-and-drop (mouse, touch, and pen alike): press on the tray
-//! piece to pick it up, drag over the board (the preview snaps to the nearest cell
-//! and reads green when valid / red when not), and release to drop.
+//! **PointerEvent** drag-and-drop (mouse, touch, and pen alike): press on the
+//! **board** to summon the waiting quintet — it hovers under the cursor — or
+//! press the tray piece to pick it up classically. Either way, drag over the
+//! board (the preview snaps to the nearest cell and reads green when valid / red
+//! when not) and release to drop; releasing anywhere invalid returns the piece
+//! to the tray.
 //!
 //! The on-screen placement is **engine-decided**: each frame the `axiom-layout`
 //! solver, driven from the live window size + orientation + safe-area, places a
@@ -146,12 +149,28 @@ pub fn quintet_start() {
     log("ready");
 }
 
-/// Reset to a fresh game (called by the page's reset button).
+/// Reset to a fresh game (called by the page's reset button). Namespaced like
+/// `quintet_start`: the merged gallery crate shares one wasm export namespace
+/// across every demo, so a bare `reset`/`undo` here would collide with (or bait
+/// a future collision from) another demo's export.
 #[wasm_bindgen]
-pub fn reset() {
+pub fn quintet_reset() {
     UI.with(|ui| {
         let mut ui = ui.borrow_mut();
         ui.game.reset();
+        ui.dragging = false;
+    });
+    refresh_status();
+}
+
+/// Rewind the last placement — including restoring any lines it cleared — and
+/// put the exact same piece back in the tray (called by the page's undo
+/// button). A no-op when nothing has been placed yet.
+#[wasm_bindgen]
+pub fn quintet_undo() {
+    UI.with(|ui| {
+        let mut ui = ui.borrow_mut();
+        ui.game.undo();
         ui.dragging = false;
     });
     refresh_status();
@@ -334,6 +353,15 @@ fn in_generator(px: f64, py: f64, layout: &Layout) -> bool {
         && py < layout.tray_y + layout.mini * 5.0
 }
 
+/// Is the canvas point inside the 10×10 board grid (the press-to-summon zone)?
+fn in_board(px: f64, py: f64, layout: &Layout) -> bool {
+    let span = layout.cell * BOARD_SIZE as f64;
+    px >= layout.board_x
+        && px < layout.board_x + span
+        && py >= layout.board_y
+        && py < layout.board_y + span
+}
+
 /// The board cell under a canvas point (may be out of bounds).
 fn board_cell(px: f64, py: f64, layout: &Layout) -> (i32, i32) {
     (
@@ -357,7 +385,8 @@ fn install_pointer() {
         return;
     };
 
-    // Press on the tray piece → capture the pointer and start dragging.
+    // Press on the board (summon the waiting piece under the cursor) or on the
+    // tray piece (classic pick-up) → capture the pointer and start dragging.
     let down_canvas = canvas.clone();
     let down = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
         e.prevent_default();
@@ -367,7 +396,9 @@ fn install_pointer() {
         UI.with(|ui| {
             let mut ui = ui.borrow_mut();
             ui.pointer = (px, py);
-            if !ui.game.is_stuck() && in_generator(px, py, &layout) {
+            if !ui.game.is_stuck()
+                && (in_board(px, py, &layout) || in_generator(px, py, &layout))
+            {
                 ui.dragging = true;
             }
         });
@@ -640,7 +671,7 @@ fn refresh_status() {
         let msg = if stuck {
             "No quintet fits anywhere — press Reset to start over."
         } else {
-            "Drag the quintet onto the board. Fill rows and columns to clear them."
+            "Press the board to place the quintet (or drag it from the tray). Fill rows and columns to clear them."
         };
         el.set_text_content(Some(msg));
     }

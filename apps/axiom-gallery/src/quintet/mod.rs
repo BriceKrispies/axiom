@@ -1,7 +1,8 @@
 //! # Quintet — a deterministic block-breaking placement game (Axiom app)
 //!
-//! Drag a generated **quintet** (a 5-cell polyomino) from the side panel onto a
-//! 10×10 board. Filling a whole row or column clears it for score; the more
+//! Press the board to summon the generated **quintet** (a 5-cell polyomino)
+//! under your cursor — or drag it from the side panel — and release to place it
+//! on a 10×10 board. Filling a whole row or column clears it for score; the more
 //! lines a single placement clears, the more each cleared block is worth. Every
 //! quintet the generator offers is guaranteed to fit *somewhere* on the current
 //! board — and when nothing can fit, the game shows a clear **stuck** state with

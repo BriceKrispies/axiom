@@ -4,8 +4,9 @@
 //! It owns the [`Board`], the running score, a monotonically increasing move
 //! count, and the *current* quintet to place (or `None` when the board is
 //! stuck). It exposes exactly the operations the UI needs — query the current
-//! piece, test/commit a placement at a board anchor, and reset — and keeps every
-//! rule (placement validity, clearing, scoring, deterministic generation) here.
+//! piece, test/commit a placement at a board anchor, undo the last placement,
+//! and reset — and keeps every rule (placement validity, clearing, scoring,
+//! deterministic generation) here.
 
 use crate::quintet::board::Board;
 use crate::quintet::clearing::{resolve_clears, ClearOutcome};
@@ -24,6 +25,18 @@ pub enum PlaceResult {
     Stuck,
 }
 
+/// Everything a placement mutates, captured before it commits — the unit of
+/// undo. Restoring one rewinds the board (including any rows/columns the
+/// placement cleared), the score, the move count, and the exact piece that was
+/// waiting in the tray.
+#[derive(Debug, Clone)]
+struct Snapshot {
+    board: Board,
+    score: u64,
+    moves: u64,
+    current: Option<QuintetMask>,
+}
+
 /// A full game of Quintet.
 #[derive(Debug, Clone)]
 pub struct QuintetGame {
@@ -31,6 +44,9 @@ pub struct QuintetGame {
     score: u64,
     moves: u64,
     current: Option<QuintetMask>,
+    /// Pre-placement snapshots, oldest first — popping the last one undoes the
+    /// most recent placement.
+    history: Vec<Snapshot>,
 }
 
 impl Default for QuintetGame {
@@ -48,6 +64,7 @@ impl QuintetGame {
             score: 0,
             moves: 0,
             current,
+            history: Vec::new(),
         }
     }
 
@@ -104,6 +121,12 @@ impl QuintetGame {
         if !can_place(&self.board, &mask, anchor_x, anchor_y) {
             return PlaceResult::Rejected;
         }
+        self.history.push(Snapshot {
+            board: self.board.clone(),
+            score: self.score,
+            moves: self.moves,
+            current: self.current.clone(),
+        });
         commit(&mut self.board, &mask, anchor_x, anchor_y);
         self.moves += 1;
         let outcome = resolve_clears(&mut self.board);
@@ -112,11 +135,35 @@ impl QuintetGame {
         PlaceResult::Placed(outcome)
     }
 
+    /// Is there a placement to rewind?
+    pub fn can_undo(&self) -> bool {
+        !self.history.is_empty()
+    }
+
+    /// Rewind the last placement in full: the board (with any rows/columns that
+    /// placement cleared restored), the score, the move count, and the exact
+    /// piece that was in the tray all return to their pre-placement values —
+    /// which also un-sticks a game the placement left stuck. Returns `false`
+    /// (and changes nothing) when there is no placement to rewind.
+    pub fn undo(&mut self) -> bool {
+        match self.history.pop() {
+            Some(snapshot) => {
+                self.board = snapshot.board;
+                self.score = snapshot.score;
+                self.moves = snapshot.moves;
+                self.current = snapshot.current;
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn reset(&mut self) {
         self.board = Board::empty();
         self.score = 0;
         self.moves = 0;
         self.current = generate(&self.board, 0, 0);
+        self.history.clear();
     }
 }
 
@@ -204,6 +251,98 @@ mod tests {
         stuck.current = generate(&stuck.board, stuck.score, stuck.moves);
         assert!(stuck.is_stuck());
         assert_eq!(stuck.snap_anchor((4, 4), 2), None);
+    }
+
+    #[test]
+    fn undo_on_a_fresh_game_is_a_no_op() {
+        let mut game = QuintetGame::new();
+        let board = game.board().clone();
+        let piece = game.current().cloned();
+        assert!(!game.can_undo());
+        assert!(!game.undo());
+        assert_eq!(game.board(), &board);
+        assert_eq!(game.current().cloned(), piece);
+        assert_eq!(game.score(), 0);
+        assert_eq!(game.moves(), 0);
+    }
+
+    #[test]
+    fn undo_rewinds_a_placement_and_restores_the_same_piece() {
+        let mut game = QuintetGame::new();
+        let board_before = game.board().clone();
+        let piece_before = game.current().cloned();
+        let (ax, ay) = any_valid_anchor(&game);
+        assert!(matches!(game.try_place(ax, ay), PlaceResult::Placed(_)));
+        assert!(game.can_undo());
+
+        assert!(game.undo());
+        assert_eq!(game.board(), &board_before);
+        assert_eq!(game.current().cloned(), piece_before);
+        assert_eq!(game.score(), 0);
+        assert_eq!(game.moves(), 0);
+        assert!(!game.can_undo());
+    }
+
+    #[test]
+    fn undo_restores_lines_the_placement_cleared() {
+        // Row 0 holds five blocks in columns 5..10; the I-pentomino placed at
+        // (0, 0) completes and clears the whole row, scoring 10 × 1.
+        let mut game = QuintetGame::new();
+        for x in 5..BOARD_SIZE as i32 {
+            game.board.fill(x, 0);
+        }
+        game.current = Some(crate::quintet::quintet::QuintetMask::from_rows(&["xxxxx"]));
+        let board_before = game.board().clone();
+        let piece_before = game.current().cloned();
+
+        let result = game.try_place(0, 0);
+        let PlaceResult::Placed(outcome) = result else {
+            panic!("the I-pentomino fits at (0, 0)");
+        };
+        assert_eq!(outcome.rows_cleared, 1);
+        assert_eq!(outcome.cols_cleared, 0);
+        assert_eq!(outcome.cleared_blocks, 10);
+        assert_eq!(game.score(), 10);
+        // The cleared row really is gone before the undo.
+        assert!((0..BOARD_SIZE as i32).all(|x| !game.board().is_filled(x, 0)));
+
+        assert!(game.undo());
+        // The five pre-existing blocks are back, the placement's own blocks are
+        // not, and the exact same piece waits in the tray again.
+        assert_eq!(game.board(), &board_before);
+        assert_eq!(game.current().cloned(), piece_before);
+        assert_eq!(game.score(), 0);
+        assert_eq!(game.moves(), 0);
+    }
+
+    #[test]
+    fn undo_rewinds_multiple_placements_newest_first() {
+        let mut game = QuintetGame::new();
+        let mut states = Vec::new();
+        for _ in 0..3 {
+            states.push((game.board().clone(), game.score(), game.moves()));
+            let (ax, ay) = any_valid_anchor(&game);
+            assert!(matches!(game.try_place(ax, ay), PlaceResult::Placed(_)));
+        }
+        for expected in states.iter().rev() {
+            assert!(game.undo());
+            assert_eq!(game.board(), &expected.0);
+            assert_eq!(game.score(), expected.1);
+            assert_eq!(game.moves(), expected.2);
+        }
+        assert!(!game.can_undo());
+    }
+
+    #[test]
+    fn reset_forgets_the_undo_history() {
+        let mut game = QuintetGame::new();
+        let (ax, ay) = any_valid_anchor(&game);
+        assert!(matches!(game.try_place(ax, ay), PlaceResult::Placed(_)));
+        assert!(game.can_undo());
+        game.reset();
+        assert!(!game.can_undo());
+        assert!(!game.undo());
+        assert!(game.board().is_clear());
     }
 
     #[test]
