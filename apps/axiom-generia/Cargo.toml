@@ -1,6 +1,6 @@
 [package]
 name = "axiom-generia"
-description = "Axiom app: standalone browser demo (extracted from the merged apps/axiom-gallery crate). Composition leaf: its own wasm bundle + web page."
+description = "Axiom app: generia, a first-person walk through an endless streamed procedural forest (extracted from the merged apps/axiom-gallery crate). A browser-free manifest/diorama core (scene manifest + scatter placer + trunk/foliage/branch/terrain instance builders) with a wasm32-only streaming shell: an axiom-world residency ring regenerates chunk vegetation and a terrain window around the walking camera, presented via axiom-windowing, with an autonomous agent-harness benchmark walk behind ?agent=1. Composition leaf: its own wasm bundle + web page."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,65 @@ rust-version.workspace = true
 # (e.g. the axiom-shot capture harness) can compose the pure core.
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+# Native + wasm dependencies: the browser-free diorama core only. Everything
+# here builds on native, so `cargo test -p axiom-generia` exercises the
+# manifest/build/scatter vocabulary DOM-free.
+[dependencies]
+# Deterministic primitives (Meters dimensioned scalars, StableHash).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+# Neutral frame/backend contracts (FrameAmbient, FramePostProcess, capability
+# profiles) the diorama builder emits alongside its meshes.
+axiom-host = { path = "../../crates/axiom-host" }
+# Deterministic, address-keyed entropy streams + the space addressing they key
+# on (the scatter placer's site jitter).
+axiom-entropy = { path = "../../crates/axiom-entropy" }
+axiom-space = { path = "../../crates/axiom-space" }
+# The domain-neutral heightfield mesher: grid config + a height callback in,
+# positions/normals/indices out. The builder decorates the neutral mesh with the
+# manifest's colour/fog content.
+axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
+# The hand-editable scene-manifest format (`visual_target::scene::Manifest`).
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Browser/live arm only: the streaming world ring, the wasm-bindgen glue, panic
+# hook, the live windowing presentation loop, the debug overlay, and the DOM
+# surface `web.rs` actually touches. Confined to wasm32, so native
+# `cargo test -p axiom-generia` compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The residency-ring module (which chunk coords are resident + the deterministic
+# load/unload/visible plan as the walker moves) and its chunk-coord vocabulary.
+axiom-world = { path = "../../modules/axiom-world" }
+axiom-streaming = { path = "../../modules/axiom-streaming" }
+# Deterministic per-chunk site scatter (trees + the grass/sedge sward).
+axiom-scatter = { path = "../../modules/axiom-scatter" }
+# Coherent value noise for the sward's colour drift + baked wind gusts.
+axiom-noise = { path = "../../crates/axiom-noise" }
+# The first-person walk+look controller: the shared Pose, step integration, eye
+# seating, and camera view-projection.
+axiom-fp-controller = { path = "../../modules/axiom-fp-controller" }
+# The autonomous benchmark walk (`?agent=1`) drives the camera through the
+# first-person control harness (composes axiom-agent).
+axiom-agent-harness = { path = "../../modules/axiom-agent-harness" }
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Location",
+    "Element",
+    "Node",
+    "Event",
+    "EventTarget",
+    "HtmlElement",
+    "KeyboardEvent",
+    "MouseEvent",
+    "console",
+] }
 
 [lints.rust]
 unsafe_code = "forbid"
