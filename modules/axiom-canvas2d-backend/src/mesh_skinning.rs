@@ -127,15 +127,15 @@ fn front_facing(a: [f32; 3], b: [f32; 3], c: [f32; 3], mvp: &[f32; 16]) -> bool 
 fn decimate(verts: &[f32], indices: &[u32]) -> (Vec<f32>, Vec<u32>) {
     // Bounding box of the bind positions (first three floats per vertex).
     let big = f32::INFINITY;
-    let (min, max) = verts.chunks_exact(SKINNED_VERTEX_STRIDE).fold(
-        ([big; 3], [-big; 3]),
-        |(mn, mx), v| {
-            (
-                [mn[0].min(v[0]), mn[1].min(v[1]), mn[2].min(v[2])],
-                [mx[0].max(v[0]), mx[1].max(v[1]), mx[2].max(v[2])],
-            )
-        },
-    );
+    let (min, max) =
+        verts
+            .chunks_exact(SKINNED_VERTEX_STRIDE)
+            .fold(([big; 3], [-big; 3]), |(mn, mx), v| {
+                (
+                    [mn[0].min(v[0]), mn[1].min(v[1]), mn[2].min(v[2])],
+                    [mx[0].max(v[0]), mx[1].max(v[1]), mx[2].max(v[2])],
+                )
+            });
     // Per-axis cell size: each axis's extent split into `CLUSTER_CELLS_PER_AXIS`
     // cells (a K×K×K grid over the mesh's own box), with a tiny floor so a flat/
     // degenerate axis never divides by zero. A narrow axis therefore gets a narrow
@@ -264,7 +264,9 @@ mod tests {
     /// enough apart survive vertex clustering; coincident corners collapse.
     fn triangle(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> (Vec<f32>, Vec<u32>) {
         let mut v = Vec::new();
-        [a, b, c].iter().for_each(|p| v.extend_from_slice(&one_vertex(*p, [1.0; 4])));
+        [a, b, c]
+            .iter()
+            .for_each(|p| v.extend_from_slice(&one_vertex(*p, [1.0; 4])));
         (v, vec![0, 1, 2])
     }
 
@@ -282,7 +284,11 @@ mod tests {
         let geo = pose_vertices(&v, &i, &[IDENTITY_MAT4], &IDENTITY_MAT4);
         assert_eq!(geo.position(0), [0.0, 0.0, 0.0]);
         assert_eq!(geo.color(0), [1.0, 1.0, 1.0, 1.0]);
-        assert_eq!(geo.indices(), &[0, 1, 2], "the CCW triangle is front-facing");
+        assert_eq!(
+            geo.indices(),
+            &[0, 1, 2],
+            "the CCW triangle is front-facing"
+        );
     }
 
     #[test]
@@ -299,8 +305,12 @@ mod tests {
         v[13] = 1.0; // joint 1 -> bone 1
         v[16] = 0.5; // weight 0
         v[17] = 0.5; // weight 1
-        let geo =
-            pose_vertices(&v, &[0], &[translation(10.0, 0.0, 0.0), IDENTITY_MAT4], &IDENTITY_MAT4);
+        let geo = pose_vertices(
+            &v,
+            &[0],
+            &[translation(10.0, 0.0, 0.0), IDENTITY_MAT4],
+            &IDENTITY_MAT4,
+        );
         assert_eq!(geo.position(0), [5.0, 0.0, 0.0]);
     }
 
@@ -387,7 +397,9 @@ mod tests {
     fn cache_load_decimates_then_poses_a_real_triangle() {
         let (v, i) = ccw_triangle();
         let cache = SkinnedMeshCache::load(&[(3, v, i)]);
-        let geo = cache.pose(3, &[IDENTITY_MAT4], &IDENTITY_MAT4).expect("mesh 3 is cached");
+        let geo = cache
+            .pose(3, &[IDENTITY_MAT4], &IDENTITY_MAT4)
+            .expect("mesh 3 is cached");
         assert_eq!(geo.indices().len(), 3);
         assert_eq!(geo.position(0), [0.0, 0.0, 0.0]);
     }

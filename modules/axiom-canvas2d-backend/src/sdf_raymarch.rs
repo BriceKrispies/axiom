@@ -129,10 +129,9 @@ fn march_pixel(
 
 /// The nearest signed distance from `p` (world space) to any primitive.
 fn scene_distance(scene: &SdfScene, p: Vec3) -> f32 {
-    scene
-        .primitives()
-        .iter()
-        .fold(f32::INFINITY, |best, prim| primitive_distance(prim, p).min(best))
+    scene.primitives().iter().fold(f32::INFINITY, |best, prim| {
+        primitive_distance(prim, p).min(best)
+    })
 }
 
 /// The linear RGBA colour of the primitive nearest to `p` (world space). Empty
@@ -174,8 +173,7 @@ fn box_distance(p: Vec3, params: [f32; 4]) -> f32 {
     let qx = p.x.abs() - params[0];
     let qy = p.y.abs() - params[1];
     let qz = p.z.abs() - params[2];
-    let outside =
-        Vec3::new(qx.max(0.0), qy.max(0.0), qz.max(0.0)).length();
+    let outside = Vec3::new(qx.max(0.0), qy.max(0.0), qz.max(0.0)).length();
     let inside = qx.max(qy.max(qz)).min(0.0);
     outside + inside
 }
@@ -198,7 +196,12 @@ fn shade(surface: [f32; 4], n: Vec3, hit: Vec3, lights: &[FrameLight]) -> [f32; 
         .iter()
         .fold(AMBIENT, |acc, l| acc + light_diffuse(l, n, hit))
         .min(1.0);
-    [surface[0] * lit, surface[1] * lit, surface[2] * lit, surface[3]]
+    [
+        surface[0] * lit,
+        surface[1] * lit,
+        surface[2] * lit,
+        surface[3],
+    ]
 }
 
 /// One light's diffuse contribution at `hit` with normal `n`. A directional
@@ -259,7 +262,12 @@ fn clip_coords(m: &[f32; 16], p: Vec3) -> [f32; 4] {
 /// quantization, replicated here for the inline indexed writes).
 fn quantize(color: [f32; 4]) -> [u8; 4] {
     let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-    [byte(color[0]), byte(color[1]), byte(color[2]), byte(color[3])]
+    [
+        byte(color[0]),
+        byte(color[1]),
+        byte(color[2]),
+        byte(color[3]),
+    ]
 }
 
 #[cfg(test)]
@@ -338,7 +346,10 @@ mod tests {
         depth.clear_far();
         // Every pixel's depth is nearer than anything: the SDF must lose the
         // depth test everywhere and write nothing.
-        depth.slice_mut().iter_mut().for_each(|d| *d = f32::NEG_INFINITY);
+        depth
+            .slice_mut()
+            .iter_mut()
+            .for_each(|d| *d = f32::NEG_INFINITY);
         let written = apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights);
         assert_eq!(written, 0);
         assert_eq!(pixel(&fb, 8, 4, 4), [0, 0, 0, 255]);
@@ -359,7 +370,12 @@ mod tests {
     #[test]
     fn box_and_plane_kinds_evaluate() {
         let (vp, inv, cam) = camera();
-        let cuboid = SdfPrimitive::new(SdfPrimitive::BOX, IDENTITY, [1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 0.0, 1.0]);
+        let cuboid = SdfPrimitive::new(
+            SdfPrimitive::BOX,
+            IDENTITY,
+            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0, 1.0],
+        );
         let scene = SdfScene::new(vec![cuboid], vp, inv, cam, [100.0, 0.001, 0.0, 0.0]);
         let lights = vec![FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])];
         let mut fb = SoftwareFramebuffer::new(8, 8);
@@ -369,8 +385,20 @@ mod tests {
         assert!(apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights) > 0);
 
         // The plane kind's local-space distance is just the local y.
-        let plane = SdfPrimitive::new(SdfPrimitive::PLANE, IDENTITY, [0.0, 0.0, 0.0, 1.0], [0.5, 0.5, 0.5, 1.0]);
-        assert_eq!(local_distance(SdfPrimitive::PLANE, Vec3::new(0.0, 2.0, 0.0), plane.params()), 2.0);
+        let plane = SdfPrimitive::new(
+            SdfPrimitive::PLANE,
+            IDENTITY,
+            [0.0, 0.0, 0.0, 1.0],
+            [0.5, 0.5, 0.5, 1.0],
+        );
+        assert_eq!(
+            local_distance(
+                SdfPrimitive::PLANE,
+                Vec3::new(0.0, 2.0, 0.0),
+                plane.params()
+            ),
+            2.0
+        );
     }
 
     #[test]
@@ -397,7 +425,10 @@ mod tests {
         depth.clear_far();
         // No primitives means an infinite scene distance, so the ray never
         // gets within `eps` of a hit.
-        assert_eq!(apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights_none()), 0);
+        assert_eq!(
+            apply_sdf_raymarch(&mut fb, &mut depth, &scene, &lights_none()),
+            0
+        );
     }
 
     fn lights_none() -> Vec<FrameLight> {
@@ -410,7 +441,12 @@ mod tests {
         // origin, so the ray direction normalize fails and falls back. The pass
         // must still complete (no panic) and simply write nothing meaningful.
         let (vp, _inv, cam) = camera();
-        let prim = SdfPrimitive::new(SdfPrimitive::SPHERE, IDENTITY, [1.0, 0.0, 0.0, 1.0], [1.0; 4]);
+        let prim = SdfPrimitive::new(
+            SdfPrimitive::SPHERE,
+            IDENTITY,
+            [1.0, 0.0, 0.0, 1.0],
+            [1.0; 4],
+        );
         let scene = SdfScene::new(vec![prim], vp, [0.0; 16], cam, [100.0, 0.001, 0.0, 0.0]);
         let mut fb = SoftwareFramebuffer::new(4, 4);
         fb.clear([0.0, 0.0, 0.0, 1.0]);
@@ -426,7 +462,12 @@ mod tests {
         use axiom_host::{FrameCamera, FrameFeatureSet, FramePacket, FrameViewport};
 
         let (vp, inv, cam) = camera();
-        let prim = SdfPrimitive::new(SdfPrimitive::SPHERE, IDENTITY, [1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]);
+        let prim = SdfPrimitive::new(
+            SdfPrimitive::SPHERE,
+            IDENTITY,
+            [1.0, 0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0, 1.0],
+        );
         let scene = SdfScene::new(vec![prim], vp, inv, cam, [100.0, 0.001, 0.0, 0.0]);
         let light = FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]);
         let with = FramePacket::new(
@@ -448,8 +489,12 @@ mod tests {
         let mut depth = DepthBuffer::new(16, 16);
         depth.clear_far();
         // Canvas 2D's default profile keeps the CPU SDF march (Sdf capability on).
-        let written =
-            crate::software_rasterizer::sdf_pass(&mut fb, &mut depth, &with, BackendCapabilityProfile::canvas2d());
+        let written = crate::software_rasterizer::sdf_pass(
+            &mut fb,
+            &mut depth,
+            &with,
+            BackendCapabilityProfile::canvas2d(),
+        );
         assert!(written > 0);
         assert!(pixel(&fb, 16, 8, 8)[0] > 60);
 
@@ -487,7 +532,12 @@ mod tests {
         let mut depth2 = DepthBuffer::new(16, 16);
         depth2.clear_far();
         assert_eq!(
-            crate::software_rasterizer::sdf_pass(&mut fb2, &mut depth2, &without, BackendCapabilityProfile::canvas2d()),
+            crate::software_rasterizer::sdf_pass(
+                &mut fb2,
+                &mut depth2,
+                &without,
+                BackendCapabilityProfile::canvas2d()
+            ),
             0
         );
     }

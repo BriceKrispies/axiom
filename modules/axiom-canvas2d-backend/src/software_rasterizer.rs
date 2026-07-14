@@ -183,7 +183,12 @@ impl SoftwareRasterizer {
         // SDF raymarch pass: composite the frame's SDF scene over the meshes,
         // depth-tested + depth-writing against the same buffer. Gated on this backend's
         // Sdf capability (was the one unconditional, ungated pass).
-        sdf_pass(&mut self.framebuffer, &mut self.depth, packet, self.options.capability_profile());
+        sdf_pass(
+            &mut self.framebuffer,
+            &mut self.depth,
+            packet,
+            self.options.capability_profile(),
+        );
 
         // Depth-cue post-passes (fog → vertical grade → contact shadows →
         // outlines), in their fixed order. Per-triangle cues (lighting, height
@@ -213,7 +218,11 @@ impl SoftwareRasterizer {
         // in tests, the wasm console logger in the browser). The pure rasterizer
         // measures via the injected clock and reports via the injected sink — it
         // never references a clock source or `web_sys` itself.
-        phase_sink(t_convert1 - t_convert0, t_raster1 - t_convert1, t_post1 - t_raster1);
+        phase_sink(
+            t_convert1 - t_convert0,
+            t_raster1 - t_convert1,
+            t_post1 - t_raster1,
+        );
         SoftwareRasterResult {
             width: fb_w,
             height: fb_h,
@@ -286,13 +295,19 @@ impl SoftwareRasterizer {
         let profile = self.options.capability_profile();
         profile
             .contains(axiom_host::RenderCapability::Volumetrics)
-            .then(|| axiom_host::apply_frame_volumetrics(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
+            .then(|| {
+                axiom_host::apply_frame_volumetrics(self.framebuffer.rgba_mut(), fb_w, fb_h, packet)
+            });
         profile
             .contains(axiom_host::RenderCapability::PostProcess)
-            .then(|| axiom_host::apply_frame_postprocess(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
+            .then(|| {
+                axiom_host::apply_frame_postprocess(self.framebuffer.rgba_mut(), fb_w, fb_h, packet)
+            });
         profile
             .contains(axiom_host::RenderCapability::Retro32Bit)
-            .then(|| axiom_host::apply_frame_retro_32bit(self.framebuffer.rgba_mut(), fb_w, fb_h, packet));
+            .then(|| {
+                axiom_host::apply_frame_retro_32bit(self.framebuffer.rgba_mut(), fb_w, fb_h, packet)
+            });
     }
 }
 
@@ -316,7 +331,6 @@ pub(crate) fn sdf_pass(
         .map(|scene| apply_sdf_raymarch(framebuffer, depth, scene, packet.lights()))
         .unwrap_or(0)
 }
-
 
 /// Rasterize one **non-degenerate** triangle into the colour + depth slices,
 /// updating `stats`. Pure, branchless, NaN-safe (callers guarantee area ≠ 0).

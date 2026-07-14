@@ -155,7 +155,10 @@ impl LowPolyRasterOptions {
 
     /// A copy of these options with the capability profile replaced — the facade's
     /// config lever for restricting what Canvas 2D attempts.
-    pub(crate) fn with_capability_profile(self, capability: axiom_host::BackendCapabilityProfile) -> Self {
+    pub(crate) fn with_capability_profile(
+        self,
+        capability: axiom_host::BackendCapabilityProfile,
+    ) -> Self {
         LowPolyRasterOptions { capability, ..self }
     }
 }

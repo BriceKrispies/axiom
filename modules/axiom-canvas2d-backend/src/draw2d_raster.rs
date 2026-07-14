@@ -167,23 +167,30 @@ fn composite_command(
         let ay = m.transform_vector(Vec2::new(0.0, radius.get()));
         fill_conic(fb, m.transform_point(center), ax, ay, &fill, &stroke, alpha);
     });
-    cmd.as_ellipse().into_iter().for_each(|(center, rx, ry, rotation)| {
-        let local = Mat3::rotation(rotation);
-        let ax = m.transform_vector(local.transform_vector(Vec2::new(rx.get(), 0.0)));
-        let ay = m.transform_vector(local.transform_vector(Vec2::new(0.0, ry.get())));
-        fill_conic(fb, m.transform_point(center), ax, ay, &fill, &stroke, alpha);
-    });
+    cmd.as_ellipse()
+        .into_iter()
+        .for_each(|(center, rx, ry, rotation)| {
+            let local = Mat3::rotation(rotation);
+            let ax = m.transform_vector(local.transform_vector(Vec2::new(rx.get(), 0.0)));
+            let ay = m.transform_vector(local.transform_vector(Vec2::new(0.0, ry.get())));
+            fill_conic(fb, m.transform_point(center), ax, ay, &fill, &stroke, alpha);
+        });
     cmd.as_line().into_iter().for_each(|(a, b, color, width)| {
         raster_line(fb, &m, a, b, color.channels(), width.get(), alpha);
     });
     cmd.as_path().into_iter().for_each(|(points, closed)| {
         fill_path(fb, &m, &points, closed, &fill, &stroke, alpha);
     });
-    cmd.as_particle().into_iter().for_each(|(center, size, color)| {
-        let h = size.get();
-        let quad = Rect::new(center.subtract(Vec2::new(h, h)), Vec2::new(2.0 * h, 2.0 * h));
-        fill_rect(fb, &m, quad, &FillSampler::solid(color.channels()), alpha);
-    });
+    cmd.as_particle()
+        .into_iter()
+        .for_each(|(center, size, color)| {
+            let h = size.get();
+            let quad = Rect::new(
+                center.subtract(Vec2::new(h, h)),
+                Vec2::new(2.0 * h, 2.0 * h),
+            );
+            fill_rect(fb, &m, quad, &FillSampler::solid(color.channels()), alpha);
+        });
     cmd.as_sprite().into_iter().for_each(|(texture, opts)| {
         textures
             .get(texture.raw())
@@ -251,7 +258,9 @@ impl FillSampler {
         let gradient = style
             .and_then(|f| f.fill_paint)
             .and_then(|id| build_gradient_sampler(m, id, list));
-        solid.or(gradient).unwrap_or(FillSampler::solid(TRANSPARENT))
+        solid
+            .or(gradient)
+            .unwrap_or(FillSampler::solid(TRANSPARENT))
     }
 
     /// The fill colour at screen-space pixel centre `p` (straight, not yet
@@ -368,8 +377,7 @@ fn stroke_rect(fb: &mut SoftwareFramebuffer, m: &Mat3, r: Rect, stroke: &StrokeS
         (x0..x1).for_each(|x| {
             let fx = x as f32 + 0.5;
             let fy = y as f32 + 0.5;
-            let on_border =
-                (fx < minx + w) | (fx >= maxx - w) | (fy < miny + w) | (fy >= maxy - w);
+            let on_border = (fx < minx + w) | (fx >= maxx - w) | (fy < miny + w) | (fy >= maxy - w);
             on_border.then(|| fb.composite_pixel(x, y, src));
         })
     });
@@ -436,7 +444,12 @@ fn fill_path(
     let pts: Vec<Vec2> = points.iter().map(|p| m.transform_point(*p)).collect();
     let n = pts.len();
     let (minx, miny, maxx, maxy) = pts.iter().fold(
-        (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
+        (
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ),
         |(a, b, c, d), p| (a.min(p.x), b.min(p.y), c.max(p.x), d.max(p.y)),
     );
     let half_w = 0.5 * m.transform_vector(Vec2::new(stroke.width, 0.0)).length();
@@ -522,12 +535,24 @@ fn composite_text(
 /// `[0, 1]` so the round-capped endpoints are handled with no branch; a
 /// zero-length segment's `length_squared` is floored by `EPS` so the projection
 /// never divides by zero.
-fn raster_line(fb: &mut SoftwareFramebuffer, m: &Mat3, a: Vec2, b: Vec2, color: [f32; 4], width: f32, alpha: f32) {
+fn raster_line(
+    fb: &mut SoftwareFramebuffer,
+    m: &Mat3,
+    a: Vec2,
+    b: Vec2,
+    color: [f32; 4],
+    width: f32,
+    alpha: f32,
+) {
     let pa = m.transform_point(a);
     let pb = m.transform_point(b);
     let half_w = 0.5 * m.transform_vector(Vec2::new(width, 0.0)).length();
     let (x0, x1) = pixel_range(pa.x.min(pb.x) - half_w, pa.x.max(pb.x) + half_w, fb.width());
-    let (y0, y1) = pixel_range(pa.y.min(pb.y) - half_w, pa.y.max(pb.y) + half_w, fb.height());
+    let (y0, y1) = pixel_range(
+        pa.y.min(pb.y) - half_w,
+        pa.y.max(pb.y) + half_w,
+        fb.height(),
+    );
     let ab = pb.subtract(pa);
     let len2 = ab.length_squared().max(EPS);
     let src = premultiply_alpha(color, alpha);
@@ -586,18 +611,23 @@ fn blit_sprite(
 /// `(minx, miny, maxx, maxy)` — its four corners through `m`, folded to extents.
 fn transformed_bbox(m: &Mat3, r: Rect) -> (f32, f32, f32, f32) {
     let mx = r.max();
-    [r.min, Vec2::new(mx.x, r.min.y), mx, Vec2::new(r.min.x, mx.y)]
-        .iter()
-        .map(|c| m.transform_point(*c))
-        .fold(
-            (
-                f32::INFINITY,
-                f32::INFINITY,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-            ),
-            |(mnx, mny, mxx, mxy), p| (mnx.min(p.x), mny.min(p.y), mxx.max(p.x), mxy.max(p.y)),
-        )
+    [
+        r.min,
+        Vec2::new(mx.x, r.min.y),
+        mx,
+        Vec2::new(r.min.x, mx.y),
+    ]
+    .iter()
+    .map(|c| m.transform_point(*c))
+    .fold(
+        (
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ),
+        |(mnx, mny, mxx, mxy), p| (mnx.min(p.x), mny.min(p.y), mxx.max(p.x), mxy.max(p.y)),
+    )
 }
 
 /// The covered pixel range `[lo, hi)` for a continuous `[min, max)` screen
@@ -607,7 +637,6 @@ fn pixel_range(min: f32, max: f32, dim: u32) -> (u32, u32) {
     let hi = (max.ceil() as i64).clamp(0, dim as i64) as u32;
     (lo, hi)
 }
-
 
 #[cfg(test)]
 mod tests;

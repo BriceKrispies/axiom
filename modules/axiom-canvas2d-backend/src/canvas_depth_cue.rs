@@ -330,8 +330,15 @@ mod tests {
         p.enable_height_tint = false;
         p.enable_distance_detail_falloff = false;
         // brightness 0.5 halves rgb (white light = no tint), alpha unchanged.
-        let (c, applied) =
-            shade_triangle([0.8, 0.4, 0.2, 1.0], 0.5, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p);
+        let (c, applied) = shade_triangle(
+            [0.8, 0.4, 0.2, 1.0],
+            0.5,
+            [1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            &p,
+        );
         assert!((c[0] - 0.4).abs() < 1e-6);
         assert!((c[1] - 0.2).abs() < 1e-6);
         assert!((c[2] - 0.1).abs() < 1e-6);
@@ -347,15 +354,29 @@ mod tests {
         p.enable_height_tint = false;
         p.enable_distance_detail_falloff = false;
         // Lit: a red light zeroes the green/blue channels of a white surface.
-        let (lit, _) =
-            shade_triangle([1.0, 1.0, 1.0, 1.0], 1.0, [1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p);
+        let (lit, _) = shade_triangle(
+            [1.0, 1.0, 1.0, 1.0],
+            1.0,
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            &p,
+        );
         assert!((lit[0] - 1.0).abs() < 1e-6);
         assert!(lit[1].abs() < 1e-6);
         assert!(lit[2].abs() < 1e-6);
         // Disabled lighting: the colour tint is neutral (white), so base survives.
         p.lighting.enabled = false;
-        let (off, _) =
-            shade_triangle([1.0, 1.0, 1.0, 1.0], 1.0, [1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p);
+        let (off, _) = shade_triangle(
+            [1.0, 1.0, 1.0, 1.0],
+            1.0,
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            &p,
+        );
         assert_eq!(off, [1.0, 1.0, 1.0, 1.0]);
     }
 
@@ -381,12 +402,26 @@ mod tests {
         p.high_height_color = [1.0, 1.0, 1.0, 1.0];
         p.low_height_color = [0.0, 0.0, 0.0, 1.0];
         // hfactor 1 → tint == high colour → full mix yields the high colour.
-        let (hi, _) =
-            shade_triangle([0.5, 0.5, 0.5, 1.0], 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 1.0, 0.0, &p);
+        let (hi, _) = shade_triangle(
+            [0.5, 0.5, 0.5, 1.0],
+            1.0,
+            [1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            1.0,
+            0.0,
+            &p,
+        );
         assert!((hi[0] - 1.0).abs() < 1e-6);
         // hfactor 0 → tint == low colour.
-        let (lo, _) =
-            shade_triangle([0.5, 0.5, 0.5, 1.0], 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p);
+        let (lo, _) = shade_triangle(
+            [0.5, 0.5, 0.5, 1.0],
+            1.0,
+            [1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            &p,
+        );
         assert!((lo[0] - 0.0).abs() < 1e-6);
     }
 
@@ -400,7 +435,7 @@ mod tests {
         let base = [1.0, 0.0, 0.0, 1.0]; // saturated red
         let (near, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 0.0, &p); // depth 0 → t 0
         let (far, _) = shade_triangle(base, 1.0, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 1.0, &p); // depth 1 → t max
-                                                                                 // Far red channel is pulled toward luminance (lower); near is unchanged.
+                                                                                                  // Far red channel is pulled toward luminance (lower); near is unchanged.
         assert!((near[0] - 1.0).abs() < 1e-6);
         assert!(far[0] < near[0]);
     }
@@ -437,8 +472,15 @@ mod tests {
         let mut p = profile();
         p.enable_height_tint = false;
         p.enable_distance_detail_falloff = false;
-        let (c, _) =
-            shade_triangle([0.6, 0.4, 0.2, 1.0], 0.5, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 0.5, &p);
+        let (c, _) = shade_triangle(
+            [0.6, 0.4, 0.2, 1.0],
+            0.5,
+            [1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.5,
+            &p,
+        );
         assert_eq!(c, [0.3, 0.2, 0.1, 1.0]);
     }
 
@@ -470,7 +512,15 @@ mod tests {
         p.enable_height_tint = false;
         p.enable_distance_detail_falloff = false;
         let ambient = [0.4, 0.5, 0.8];
-        let (c, _) = shade_triangle([1.0, 1.0, 1.0, 1.0], 0.0, [1.0, 1.0, 1.0], ambient, 0.0, 0.0, &p);
+        let (c, _) = shade_triangle(
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            [1.0, 1.0, 1.0],
+            ambient,
+            0.0,
+            0.0,
+            &p,
+        );
         assert!((c[0] - 0.4).abs() < 1e-6);
         assert!((c[1] - 0.5).abs() < 1e-6);
         assert!((c[2] - 0.8).abs() < 1e-6);

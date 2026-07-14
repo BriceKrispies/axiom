@@ -339,8 +339,11 @@ fn overlapping_grounds_reject_occluded_fragments() {
 fn invalid_projection_does_not_create_nans() {
     let cache = MeshCache::load(&[ground(7, [1.0; 4])]);
     let d = FrameDrawItem::new(1, 7, 9, IDENTITY, [0.0; 16], [1.0; 4], false);
-    let result = SoftwareRasterizer::new(opts(32, 32))
-        .rasterize_packet(&packet(vec![d], [0.1, 0.1, 0.1, 1.0]), &cache, &[]);
+    let result = SoftwareRasterizer::new(opts(32, 32)).rasterize_packet(
+        &packet(vec![d], [0.1, 0.1, 0.1, 1.0]),
+        &cache,
+        &[],
+    );
     assert_eq!(result.conversion().skipped_invalid_projection_triangles, 2);
     assert_eq!(result.rasterized_triangles(), 0);
     let clear_byte = (0.1_f32 * 255.0 + 0.5) as u8;
@@ -533,8 +536,9 @@ fn marked_caster_gets_a_planar_shadow_unmarked_draw_does_not() {
 
 /// A column-major toy view_proj with `m[11] = 1`, so a `+z` to-light projects in
 /// front of the camera (clip w > 0) — an on-screen sun for the volumetrics pass.
-const FRONT_VP: [f32; 16] =
-    [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+const FRONT_VP: [f32; 16] = [
+    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+];
 
 #[test]
 fn frame_volumetrics_reach_the_canvas_output() {
@@ -556,9 +560,15 @@ fn frame_volumetrics_reach_the_canvas_output() {
         FrameFeatureSet::new(false, true, 1, 0),
     );
     let lit = base.clone().with_volumetrics(FrameVolumetrics::low_poly());
-    let off = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&base, &cache, &[]);
-    let on = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache, &[]);
-    assert_ne!(off.rgba_bytes(), on.rgba_bytes(), "frame volumetrics reach the canvas output");
+    let off =
+        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&base, &cache, &[]);
+    let on =
+        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache, &[]);
+    assert_ne!(
+        off.rgba_bytes(),
+        on.rgba_bytes(),
+        "frame volumetrics reach the canvas output"
+    );
 }
 
 #[test]
@@ -579,13 +589,19 @@ fn capability_profile_gates_the_volumetric_pass() {
     )
     .with_volumetrics(FrameVolumetrics::low_poly());
     // Default profile (all) applies the god-ray pass...
-    let with = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache, &[]);
+    let with =
+        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache, &[]);
     // ...but a profile WITHOUT Volumetrics skips it (the Canvas 2D fps lever) — even
     // though the frame carries volumetrics, the gated backend never runs the pass.
-    let restricted = opts_cued(48, 48, cues_off())
-        .with_capability_profile(BackendCapabilityProfile::all().without(RenderCapability::Volumetrics));
+    let restricted = opts_cued(48, 48, cues_off()).with_capability_profile(
+        BackendCapabilityProfile::all().without(RenderCapability::Volumetrics),
+    );
     let without = SoftwareRasterizer::new(restricted).rasterize_packet(&lit, &cache, &[]);
-    assert_ne!(with.rgba_bytes(), without.rgba_bytes(), "capability gate skips the volumetric pass");
+    assert_ne!(
+        with.rgba_bytes(),
+        without.rgba_bytes(),
+        "capability gate skips the volumetric pass"
+    );
 }
 
 #[test]
@@ -607,17 +623,28 @@ fn capability_profile_gates_the_postprocess_pass() {
     )
     .with_postprocess(FramePostProcess::cinematic());
     // Default profile (all) applies the filmic tonemap...
-    let with = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&graded, &cache, &[]);
+    let with = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(
+        &graded,
+        &cache,
+        &[],
+    );
     // ...but a profile WITHOUT PostProcess skips it, so the finished frame is ungraded.
-    let restricted = opts_cued(48, 48, cues_off())
-        .with_capability_profile(BackendCapabilityProfile::all().without(RenderCapability::PostProcess));
+    let restricted = opts_cued(48, 48, cues_off()).with_capability_profile(
+        BackendCapabilityProfile::all().without(RenderCapability::PostProcess),
+    );
     let without = SoftwareRasterizer::new(restricted).rasterize_packet(&graded, &cache, &[]);
-    assert_ne!(with.rgba_bytes(), without.rgba_bytes(), "capability gate skips the tonemap pass");
+    assert_ne!(
+        with.rgba_bytes(),
+        without.rgba_bytes(),
+        "capability gate skips the tonemap pass"
+    );
 }
 
 #[test]
 fn capability_profile_gates_the_retro_32bit_pass() {
-    use axiom_host::{BackendCapabilityProfile, FrameLight, FrameRetro32BitProfile, RenderCapability};
+    use axiom_host::{
+        BackendCapabilityProfile, FrameLight, FrameRetro32BitProfile, RenderCapability,
+    };
     let cache = MeshCache::load(&[gameplay_object(42, [1.0, 1.0, 1.0, 1.0])]);
     let cam = Some(FrameCamera::new(IDENTITY, IDENTITY, FRONT_VP));
     // A smoothly-shaded frame so the retro colour-depth quantize + ordered dither
@@ -635,13 +662,22 @@ fn capability_profile_gates_the_retro_32bit_pass() {
     )
     .with_retro_32bit_profile(FrameRetro32BitProfile::retro_32bit());
     // Default profile (all) applies the retro quantize + dither...
-    let with = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&retro, &cache, &[]);
+    let with = SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(
+        &retro,
+        &cache,
+        &[],
+    );
     // ...but a profile WITHOUT Retro32Bit skips it — the same neutral post the GPU
     // backend gates, now gated (and applied) on Canvas 2D too.
-    let restricted = opts_cued(48, 48, cues_off())
-        .with_capability_profile(BackendCapabilityProfile::all().without(RenderCapability::Retro32Bit));
+    let restricted = opts_cued(48, 48, cues_off()).with_capability_profile(
+        BackendCapabilityProfile::all().without(RenderCapability::Retro32Bit),
+    );
     let without = SoftwareRasterizer::new(restricted).rasterize_packet(&retro, &cache, &[]);
-    assert_ne!(with.rgba_bytes(), without.rgba_bytes(), "capability gate skips the retro pass");
+    assert_ne!(
+        with.rgba_bytes(),
+        without.rgba_bytes(),
+        "capability gate skips the retro pass"
+    );
 }
 
 #[test]
@@ -687,7 +723,8 @@ fn outline_drawn_for_caster_marked_gameplay_object_via_packet() {
 fn all_cues_change_the_image_but_preserve_draw_and_object_counts() {
     let cache = MeshCache::load(&[ground(7, [0.5, 0.6, 0.4, 1.0])]);
     let p = packet(vec![draw(1, 7, [1.0; 4])], [0.4, 0.6, 0.9, 1.0]);
-    let on = SoftwareRasterizer::new(opts_cued(48, 48, cues_on())).rasterize_packet(&p, &cache, &[]);
+    let on =
+        SoftwareRasterizer::new(opts_cued(48, 48, cues_on())).rasterize_packet(&p, &cache, &[]);
     let off = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache, &[]);
     assert_ne!(
         on.rgba_bytes(),

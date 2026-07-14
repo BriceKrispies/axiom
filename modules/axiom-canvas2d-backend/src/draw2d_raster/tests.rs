@@ -16,7 +16,11 @@ fn rgba(r: f32, g: f32, b: f32, a: f32) -> Rgba {
 }
 
 fn header(submission: u32, layer: i32, alpha: f32) -> (u32, Mat3, Common2d) {
-    (submission, Mat3::IDENTITY, Common2d::new(layer, ratio(alpha)))
+    (
+        submission,
+        Mat3::IDENTITY,
+        Common2d::new(layer, ratio(alpha)),
+    )
 }
 
 /// One RGBA pixel out of a finished buffer's bytes.
@@ -95,7 +99,10 @@ fn unknown_paint_fill_composites_nothing() {
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 4, 4, &Draw2dTextures::default());
-    assert!(bytes.iter().all(|&b| b == 0), "an unknown paint draws nothing");
+    assert!(
+        bytes.iter().all(|&b| b == 0),
+        "an unknown paint draws nothing"
+    );
 }
 
 #[test]
@@ -158,8 +165,10 @@ fn path_fills_a_polygon_and_strokes_its_edges() {
             Vec2::new(8.0, 14.0),
             Vec2::new(2.0, 8.0),
         ],
-        Fill2d::color(rgba(0.0, 0.0, 1.0, 1.0))
-            .with_stroke(Stroke2d::new(rgba(1.0, 1.0, 1.0, 1.0), Meters::new(1.0).unwrap())),
+        Fill2d::color(rgba(0.0, 0.0, 1.0, 1.0)).with_stroke(Stroke2d::new(
+            rgba(1.0, 1.0, 1.0, 1.0),
+            Meters::new(1.0).unwrap(),
+        )),
         true,
     ));
     list.sort_commands();
@@ -173,9 +182,15 @@ fn open_path_strokes_without_filling() {
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::path(
         header(0, 0, 1.0),
-        vec![Vec2::new(2.0, 2.0), Vec2::new(2.0, 12.0), Vec2::new(12.0, 12.0)],
-        Fill2d::color(rgba(1.0, 0.0, 0.0, 1.0))
-            .with_stroke(Stroke2d::new(rgba(0.0, 1.0, 0.0, 1.0), Meters::new(2.0).unwrap())),
+        vec![
+            Vec2::new(2.0, 2.0),
+            Vec2::new(2.0, 12.0),
+            Vec2::new(12.0, 12.0),
+        ],
+        Fill2d::color(rgba(1.0, 0.0, 0.0, 1.0)).with_stroke(Stroke2d::new(
+            rgba(0.0, 1.0, 0.0, 1.0),
+            Meters::new(2.0).unwrap(),
+        )),
         false,
     ));
     list.sort_commands();
@@ -210,12 +225,22 @@ fn text_blits_glyph_cells_from_the_atlas() {
         header(0, 0, 1.0),
         GlyphRun::new(
             vec![
-                Glyph2d::new(rect(Vec2::ZERO, Vec2::new(8.0, 16.0)), Meters::new(8.0).unwrap()),
-                Glyph2d::new(rect(Vec2::new(8.0, 0.0), Vec2::new(8.0, 16.0)), Meters::new(8.0).unwrap()),
+                Glyph2d::new(
+                    rect(Vec2::ZERO, Vec2::new(8.0, 16.0)),
+                    Meters::new(8.0).unwrap(),
+                ),
+                Glyph2d::new(
+                    rect(Vec2::new(8.0, 0.0), Vec2::new(8.0, 16.0)),
+                    Meters::new(8.0).unwrap(),
+                ),
             ],
             Meters::new(16.0).unwrap(),
         ),
-        TextDraw2d::new(FontHandle::from_raw(1), rgba(1.0, 0.0, 0.0, 1.0), TextAlign::LEFT),
+        TextDraw2d::new(
+            FontHandle::from_raw(1),
+            rgba(1.0, 0.0, 0.0, 1.0),
+            TextAlign::LEFT,
+        ),
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 32, 16, &textures);
@@ -230,10 +255,17 @@ fn text_with_unloaded_atlas_draws_nothing() {
     list.push_command(Draw2dCommand::text(
         header(0, 0, 1.0),
         GlyphRun::new(
-            vec![Glyph2d::new(rect(Vec2::ZERO, Vec2::new(8.0, 16.0)), Meters::new(8.0).unwrap())],
+            vec![Glyph2d::new(
+                rect(Vec2::ZERO, Vec2::new(8.0, 16.0)),
+                Meters::new(8.0).unwrap(),
+            )],
             Meters::new(16.0).unwrap(),
         ),
-        TextDraw2d::new(FontHandle::from_raw(1), rgba(1.0, 1.0, 1.0, 1.0), TextAlign::LEFT),
+        TextDraw2d::new(
+            FontHandle::from_raw(1),
+            rgba(1.0, 1.0, 1.0, 1.0),
+            TextAlign::LEFT,
+        ),
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());
@@ -248,7 +280,11 @@ fn empty_text_run_draws_nothing() {
     list.push_command(Draw2dCommand::text(
         header(0, 0, 1.0),
         GlyphRun::new(vec![], Meters::new(16.0).unwrap()),
-        TextDraw2d::new(FontHandle::from_raw(1), rgba(1.0, 1.0, 1.0, 1.0), TextAlign::RIGHT),
+        TextDraw2d::new(
+            FontHandle::from_raw(1),
+            rgba(1.0, 1.0, 1.0, 1.0),
+            TextAlign::RIGHT,
+        ),
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &textures);
@@ -278,8 +314,10 @@ fn circle_stroke_draws_an_annulus_over_the_fill() {
         header(0, 0, 1.0),
         Vec2::new(8.0, 8.0),
         Meters::new(6.0).unwrap(),
-        Fill2d::color(rgba(0.0, 1.0, 0.0, 1.0))
-            .with_stroke(Stroke2d::new(rgba(1.0, 0.0, 0.0, 1.0), Meters::new(2.0).unwrap())),
+        Fill2d::color(rgba(0.0, 1.0, 0.0, 1.0)).with_stroke(Stroke2d::new(
+            rgba(1.0, 0.0, 0.0, 1.0),
+            Meters::new(2.0).unwrap(),
+        )),
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());
@@ -362,8 +400,10 @@ fn rect_stroke_borders_the_fill() {
     list.push_command(Draw2dCommand::rect(
         header(0, 0, 1.0),
         rect(Vec2::new(2.0, 2.0), Vec2::new(12.0, 12.0)),
-        Fill2d::color(rgba(0.0, 0.0, 1.0, 1.0))
-            .with_stroke(Stroke2d::new(rgba(1.0, 0.0, 0.0, 1.0), Meters::new(2.0).unwrap())),
+        Fill2d::color(rgba(0.0, 0.0, 1.0, 1.0)).with_stroke(Stroke2d::new(
+            rgba(1.0, 0.0, 0.0, 1.0),
+            Meters::new(2.0).unwrap(),
+        )),
     ));
     list.sort_commands();
     let (bytes, _, _) = render(&list, 16, 16, &Draw2dTextures::default());

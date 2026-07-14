@@ -49,14 +49,7 @@ fn dense_ground(id: u64, n: usize) -> (u64, Vec<f32>, Vec<u32>) {
     (0..n).for_each(|iy| {
         (0..n).for_each(|ix| {
             let i = iy as u32 * stride + ix as u32;
-            indices.extend_from_slice(&[
-                i,
-                i + 1,
-                i + stride,
-                i + 1,
-                i + 1 + stride,
-                i + stride,
-            ]);
+            indices.extend_from_slice(&[i, i + 1, i + stride, i + 1, i + 1 + stride, i + stride]);
         })
     });
     (id, verts, indices)
@@ -224,8 +217,7 @@ fn decorative_draw_skipped_once_budget_exhausted_critical_kept() {
     // Tiny budget: the first (critical) draw spends past it, so the later
     // decorative draw is skipped; terrain is never skipped.
     let cache = MeshCache::load(&[ground(7, [0.2, 0.6, 0.3, 1.0]), small_decorative(8)]);
-    let o =
-        LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 200_000, 10, cues_off());
+    let o = LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 200_000, 10, cues_off());
     let out = convert(&packet(vec![draw(1, 7), draw(2, 8)]), &cache, &o);
     assert!(out.stats.budget_exhausted, "budget exceeded by terrain");
     assert_eq!(out.stats.skipped_decorative_draws, 1);
@@ -282,8 +274,7 @@ fn decimation_keeps_the_largest_triangles_first() {
         indices.extend_from_slice(&[i, i + 1, i + 2]);
     });
     let cache = MeshCache::load(&[(7, verts, indices)]);
-    let o =
-        LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 2, 8_000_000, cues_off());
+    let o = LowPolyRasterOptions::new(320, 180, CanvasDebugOverlay::None, 2, 8_000_000, cues_off());
     let out = convert(&packet(vec![draw(1, 7)]), &cache, &o);
     assert_eq!(out.triangles.len(), 2);
     let kept: f32 = out
@@ -331,7 +322,10 @@ fn finely_tessellated_visible_draw_is_rescued_not_emptied() {
     assert_eq!(out.stats.projected_triangles, 72);
     assert_eq!(out.triangles.len(), 72, "rescued: all triangles kept");
     assert_eq!(out.stats.culled_triangles, 0, "nothing sub-pixel-culled");
-    assert_eq!(out.stats.terrain_draws_preserved, 0, "rescued, not critical");
+    assert_eq!(
+        out.stats.terrain_draws_preserved, 0,
+        "rescued, not critical"
+    );
     assert!(
         out.triangles
             .iter()

@@ -217,7 +217,6 @@ impl Canvas2dBackendApi {
         .with_capability_profile(capability);
     }
 
-
     /// Rasterize one [`FramePacket`] in the low-poly framebuffer profile and
     /// return the uniform [`FrameSubmissionReport`] (carrying the neutral
     /// [`FrameRasterStats`]). The rasterizer and report run identically on every
@@ -289,7 +288,10 @@ impl Canvas2dBackendApi {
         // The frame's hemisphere ambient drives the software lighting too, matching the
         // GPU path's ambient uniform. Colours are strength-folded, so the ambient scale
         // is 1.0; an absent frame ambient falls back to the engine default hemisphere.
-        let amb = packet.ambient().copied().unwrap_or_else(axiom_host::FrameAmbient::default_hemisphere);
+        let amb = packet
+            .ambient()
+            .copied()
+            .unwrap_or_else(axiom_host::FrameAmbient::default_hemisphere);
         cues.lighting.sky_color = amb.sky();
         cues.lighting.ground_color = amb.ground();
         cues.lighting.ambient = 1.0;
@@ -670,7 +672,14 @@ mod tests {
         // came exclusively through the CPU skinning path.
         backend.load_skinned_meshes(&[skinned_quad(3)]);
         // One skinned draw, identity palette (bone 0 = identity) → posed at bind.
-        let skinned = vec![(3_u64, 9_u64, IDENTITY, IDENTITY, [1.0, 1.0, 1.0, 1.0], vec![IDENTITY])];
+        let skinned = vec![(
+            3_u64,
+            9_u64,
+            IDENTITY,
+            IDENTITY,
+            [1.0, 1.0, 1.0, 1.0],
+            vec![IDENTITY],
+        )];
         let p = packet(Vec::new(), FrameFeatureSet::new(false, false, 0, 0));
 
         let report = backend.present_packet_skinned(&p, &skinned);
@@ -740,12 +749,22 @@ mod tests {
         let mut backend = Canvas2dBackendApi::new(&request(800, 600));
         backend.load_meshes(&[ground(7)]);
         backend.set_quality_level(1);
-        let draws = vec![FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [1.0, 1.0, 1.0, 1.0], false)];
+        let draws = vec![FrameDrawItem::new(
+            1,
+            7,
+            9,
+            IDENTITY,
+            IDENTITY,
+            [1.0, 1.0, 1.0, 1.0],
+            false,
+        )];
         // No directional light → the ground is lit by the hemisphere ambient alone.
         let base = packet(draws.clone(), FrameFeatureSet::new(false, false, 0, 0));
         let (dim, _, _) = backend.render_offscreen_rgba(&base);
         // A bright frame ambient (the `Some` path) lifts the ground above the default.
-        let bright = base.clone().with_ambient(FrameAmbient::new([0.95, 0.95, 0.95], [0.95, 0.95, 0.95]));
+        let bright = base
+            .clone()
+            .with_ambient(FrameAmbient::new([0.95, 0.95, 0.95], [0.95, 0.95, 0.95]));
         let (lit, _, _) = backend.render_offscreen_rgba(&bright);
         assert_ne!(dim, lit);
         assert!(dim.iter().zip(&lit).any(|(d, l)| l > d));
@@ -784,7 +803,10 @@ mod tests {
             BackendCapabilityProfile::all().without(RenderCapability::Volumetrics),
         );
         let (b, _, _) = restricted.render_offscreen_rgba(&vol);
-        assert_ne!(a, b, "set_capability_profile gates the god-ray pass on Canvas 2D");
+        assert_ne!(
+            a, b,
+            "set_capability_profile gates the god-ray pass on Canvas 2D"
+        );
     }
 
     #[test]
@@ -810,7 +832,6 @@ mod tests {
         assert_eq!(r2.raster().framebuffer_height, 240);
         assert!(r2.raster().candidate_pixels > r0.raster().candidate_pixels);
     }
-
 
     #[test]
     fn unknown_mesh_is_skipped_without_critical_violation() {

@@ -361,8 +361,8 @@ pub(crate) fn convert(
             0_u64,
         ),
         |(mut frame, spent), (geo, draw)| {
-            let drawn = geo
-                .map(|geo| convert_draw(geo, draw, w, h, screen_px2, cap, &cues, &light, clock));
+            let drawn =
+                geo.map(|geo| convert_draw(geo, draw, w, h, screen_px2, cap, &cues, &light, clock));
             frame.stats.skipped_draws += u32::from(drawn.is_none());
             let next = drawn.into_iter().fold(spent, |spent, dc| {
                 frame.stats.projected_draws += 1;
@@ -394,7 +394,11 @@ pub(crate) fn convert(
     );
     let distinct: HashSet<u64> = frame.triangles.iter().map(|t| t.object_id()).collect();
     frame.stats.rasterized_objects = distinct.len() as u32;
-    deep::flush(deep_sink, frame.stats.projected_draws, frame.triangles.len());
+    deep::flush(
+        deep_sink,
+        frame.stats.projected_draws,
+        frame.triangles.len(),
+    );
     frame
 }
 
@@ -465,8 +469,12 @@ fn convert_draw(
 
     // Cull sub-pixel detail, rescue a visible draw that would otherwise vanish,
     // and decimate a preserved draw to the cap (see `prune_candidates`).
-    let (kept, min_culled, decimated) =
-        prune_candidates(core::mem::take(&mut acc.candidates), is_critical, coverage, cap);
+    let (kept, min_culled, decimated) = prune_candidates(
+        core::mem::take(&mut acc.candidates),
+        is_critical,
+        coverage,
+        cap,
+    );
     acc.candidates = kept;
     // A draw's budget cost is its on-screen work, capped at one framebuffer's worth
     // of pixels. Without the cap a large or near-plane quad (the pitch plane / grass
@@ -482,22 +490,7 @@ fn convert_draw(
         .sum::<u64>()
         .min(screen_px2 as u64);
 
-    // Bake the per-triangle depth cues into each flat colour (lighting → height
-    // tint → distance falloff, the documented order).
-    let (y_min, y_max) = (acc.y_min, acc.y_max);
-    deep::enter(clock);
-    let triangles: Vec<RasterTriangle> = acc
-        .candidates
-        .iter()
-        .map(|c| {
-            let base = RasterTriangle::base_color(&c.verts);
-            let hf = height_factor(c.world_y, y_min, y_max);
-            let (shaded, _applied) =
-                shade_triangle(base, c.brightness, light.color, c.ambient, hf, c.mean_depth, cues);
-            RasterTriangle::shaded(c.verts, shaded)
-        })
-        .collect();
-    deep::exit_shade(clock);
+    let triangles = shade_candidates(&acc, cues, light, clock);
 
     let n = triangles.len() as u32;
     // Outline anchors are for objects the scene MARKED important (the opt-in
@@ -523,6 +516,39 @@ fn convert_draw(
         height_tinted: [0, n][usize::from(cues.enable_height_tint)],
         falloff: [0, n][usize::from(cues.enable_distance_detail_falloff)],
     }
+}
+
+/// Bake the per-triangle depth cues into each flat colour (lighting → height
+/// tint → distance falloff, the documented order), over the draw's surviving
+/// candidates and its accumulated world-Y extent.
+fn shade_candidates(
+    acc: &DrawAcc,
+    cues: &CanvasDepthCueProfile,
+    light: &SceneLight,
+    clock: fn() -> f64,
+) -> Vec<RasterTriangle> {
+    let (y_min, y_max) = (acc.y_min, acc.y_max);
+    deep::enter(clock);
+    let triangles: Vec<RasterTriangle> = acc
+        .candidates
+        .iter()
+        .map(|c| {
+            let base = RasterTriangle::base_color(&c.verts);
+            let hf = height_factor(c.world_y, y_min, y_max);
+            let (shaded, _applied) = shade_triangle(
+                base,
+                c.brightness,
+                light.color,
+                c.ambient,
+                hf,
+                c.mean_depth,
+                cues,
+            );
+            RasterTriangle::shaded(c.verts, shaded)
+        })
+        .collect();
+    deep::exit_shade(clock);
+    triangles
 }
 
 /// A projected triangle plus the depth-cue inputs derived during projection.
