@@ -1,0 +1,7 @@
+[app]
+name = "zanzoban"
+crate_name = "axiom-zanzoban"
+
+allowed_layers = []
+
+allowed_modules = []

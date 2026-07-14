@@ -1,0 +1,7 @@
+[app]
+name = "forest-walk"
+crate_name = "axiom-forest-walk"
+
+allowed_layers = []
+
+allowed_modules = []

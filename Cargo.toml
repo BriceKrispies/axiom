@@ -81,6 +81,22 @@ members = [
     # stress-cubes, growth, zanzoban, quintet, physics-crucible, debug-overlay
     # harness) merged into ONE composition-leaf app crate (apps/axiom-gallery).
     "apps/axiom-gallery",
+    # The standalone browser demo apps (the gallery de-merge): each former
+    # gallery demo is its own composition-leaf app with its own wasm bundle and
+    # page; the gallery is reduced to a static showcase that links out to them.
+    "apps/axiom-rotating-cube",
+    "apps/axiom-netplay",
+    "apps/axiom-retro-fps",
+    "apps/axiom-stress-cubes",
+    "apps/axiom-physics-crucible",
+    "apps/axiom-gravix",
+    "apps/axiom-sports-physics-lab",
+    "apps/axiom-dev-harness",
+    "apps/axiom-growth",
+    "apps/axiom-generia",
+    "apps/axiom-zanzoban",
+    "apps/axiom-quintet",
+    "apps/axiom-forest-walk",
     "apps/axiom-netcode-demo",
     "apps/axiom-netcode-sim",
     "apps/axiom-netplay-ffi",

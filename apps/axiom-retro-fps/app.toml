@@ -1,0 +1,7 @@
+[app]
+name = "retro-fps"
+crate_name = "axiom-retro-fps"
+
+allowed_layers = []
+
+allowed_modules = []

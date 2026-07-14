@@ -1,0 +1,7 @@
+[app]
+name = "stress-cubes"
+crate_name = "axiom-stress-cubes"
+
+allowed_layers = []
+
+allowed_modules = []

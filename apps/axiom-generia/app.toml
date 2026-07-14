@@ -1,0 +1,7 @@
+[app]
+name = "generia"
+crate_name = "axiom-generia"
+
+allowed_layers = []
+
+allowed_modules = []

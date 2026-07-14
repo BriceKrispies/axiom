@@ -222,6 +222,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-dev-harness"
+version = "0.1.0"
+
+[[package]]
 name = "axiom-dev-reload"
 version = "0.1.0"
 dependencies = [
@@ -272,6 +276,10 @@ dependencies = [
  "axiom-math",
  "axiom-scatter",
 ]
+
+[[package]]
+name = "axiom-forest-walk"
+version = "0.1.0"
 
 [[package]]
 name = "axiom-fp-controller"
@@ -372,6 +380,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-generia"
+version = "0.1.0"
+
+[[package]]
 name = "axiom-geosphere"
 version = "0.1.0"
 dependencies = [
@@ -393,12 +405,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-gravix"
+version = "0.1.0"
+
+[[package]]
 name = "axiom-grid"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-math",
 ]
+
+[[package]]
+name = "axiom-growth"
+version = "0.1.0"
 
 [[package]]
 name = "axiom-host"
@@ -521,6 +541,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-netplay"
+version = "0.1.0"
+
+[[package]]
 name = "axiom-netplay-ffi"
 version = "0.1.0"
 dependencies = [
@@ -590,6 +614,10 @@ dependencies = [
  "axiom-math",
  "axiom-runtime",
 ]
+
+[[package]]
+name = "axiom-physics-crucible"
+version = "0.1.0"
 
 [[package]]
 name = "axiom-placement"
@@ -717,6 +745,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-quintet"
+version = "0.1.0"
+
+[[package]]
 name = "axiom-recipe"
 version = "0.1.0"
 dependencies = [
@@ -769,6 +801,14 @@ dependencies = [
  "axiom-math",
  "axiom-runtime",
 ]
+
+[[package]]
+name = "axiom-retro-fps"
+version = "0.1.0"
+
+[[package]]
+name = "axiom-rotating-cube"
+version = "0.1.0"
 
 [[package]]
 name = "axiom-runtime"
@@ -840,7 +880,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-sports-physics-lab"
+version = "0.1.0"
+
+[[package]]
 name = "axiom-streaming"
+version = "0.1.0"
+
+[[package]]
+name = "axiom-stress-cubes"
 version = "0.1.0"
 
 [[package]]
@@ -950,6 +998,10 @@ dependencies = [
  "axiom-levelgen",
  "axiom-space",
 ]
+
+[[package]]
+name = "axiom-zanzoban"
+version = "0.1.0"
 
 [[package]]
 name = "axiom-zones"

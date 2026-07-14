@@ -1,0 +1,7 @@
+[app]
+name = "sports-physics-lab"
+crate_name = "axiom-sports-physics-lab"
+
+allowed_layers = []
+
+allowed_modules = []

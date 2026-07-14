@@ -1,0 +1,7 @@
+[app]
+name = "quintet"
+crate_name = "axiom-quintet"
+
+allowed_layers = []
+
+allowed_modules = []

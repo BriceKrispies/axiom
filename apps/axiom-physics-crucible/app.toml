@@ -1,0 +1,7 @@
+[app]
+name = "physics-crucible"
+crate_name = "axiom-physics-crucible"
+
+allowed_layers = []
+
+allowed_modules = []

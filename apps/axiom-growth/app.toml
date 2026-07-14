@@ -1,0 +1,7 @@
+[app]
+name = "growth"
+crate_name = "axiom-growth"
+
+allowed_layers = []
+
+allowed_modules = []

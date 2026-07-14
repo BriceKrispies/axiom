@@ -1,0 +1,7 @@
+[app]
+name = "gravix"
+crate_name = "axiom-gravix"
+
+allowed_layers = []
+
+allowed_modules = []

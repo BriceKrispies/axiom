@@ -1,0 +1,7 @@
+[app]
+name = "dev-harness"
+crate_name = "axiom-dev-harness"
+
+allowed_layers = []
+
+allowed_modules = []

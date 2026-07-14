@@ -1,0 +1,7 @@
+[app]
+name = "rotating-cube"
+crate_name = "axiom-rotating-cube"
+
+allowed_layers = []
+
+allowed_modules = []

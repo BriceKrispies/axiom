@@ -1,0 +1,7 @@
+[app]
+name = "netplay"
+crate_name = "axiom-netplay"
+
+allowed_layers = []
+
+allowed_modules = []
