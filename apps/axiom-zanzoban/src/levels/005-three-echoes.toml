@@ -1,0 +1,22 @@
+# Showcase: the echo budget. You may leave at most three ghosts; par is two.
+title = "Three Echoes"
+width = 9
+height = 5
+
+[player]
+start = [1, 2]
+
+[exit]
+position = [7, 2]
+
+[rules.budget]
+max_ghosts = 3
+par = 2
+
+[[buttons]]
+position = [3, 2]
+group = "a"
+
+[[doors]]
+position = [5, 2]
+group = "a"

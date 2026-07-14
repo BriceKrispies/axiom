@@ -2,6 +2,19 @@
 name = "zanzoban"
 crate_name = "axiom-zanzoban"
 
-allowed_layers = []
+allowed_layers = [
+    "kernel",
+    "math",
+    "interface",
+    "host",
+    "layout",
+    "runtime",
+]
 
-allowed_modules = []
+allowed_modules = [
+    "input",
+    "engine",
+    "windowing",
+    "debug-overlay",
+    "agent",
+]

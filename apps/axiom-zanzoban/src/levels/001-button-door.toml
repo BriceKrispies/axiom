@@ -1,0 +1,135 @@
+# Zanzoban — Level 001: "Button Door"
+#
+# A 10x10 room. A wall partition at column x=7 seals off the exit corridor
+# (column x=8); the door at (7,5) is the ONLY gap in that partition, so the exit
+# genuinely cannot be reached without opening the door. The button at (4,5) opens
+# it — but the button is far from the door, so a single live player cannot hold
+# the button and walk through at once. The intended solution:
+#
+#   1. Walk the player from the entrance (1,5) to the button (4,5).
+#   2. Press `q` — the recorded path becomes a ghost that replays it.
+#   3. The ghost walks back onto the button and holds it (door opens).
+#   4. Walk the (reset) live player through the open door to the exit (8,5).
+#
+# ASCII map (x to the right, y downward; #=wall .=floor P=start B=button
+# D=door E=exit):
+#
+#   # # # # # # # # # #
+#   # . . . . . . # . #
+#   # . . . . . . # . #
+#   # . . . . . . # . #
+#   # . . . . . . # . #
+#   # P . . B . . D E #
+#   # . . . . . . # . #
+#   # . . . . . . # . #
+#   # . . . . . . # . #
+#   # # # # # # # # # #
+
+title = "Button Door"
+width = 10
+height = 10
+
+[player]
+start = [1, 5]
+
+[exit]
+position = [8, 5]
+
+[[walls]]
+position = [0, 0]
+[[walls]]
+position = [1, 0]
+[[walls]]
+position = [2, 0]
+[[walls]]
+position = [3, 0]
+[[walls]]
+position = [4, 0]
+[[walls]]
+position = [5, 0]
+[[walls]]
+position = [6, 0]
+[[walls]]
+position = [7, 0]
+[[walls]]
+position = [8, 0]
+[[walls]]
+position = [9, 0]
+
+[[walls]]
+position = [0, 9]
+[[walls]]
+position = [1, 9]
+[[walls]]
+position = [2, 9]
+[[walls]]
+position = [3, 9]
+[[walls]]
+position = [4, 9]
+[[walls]]
+position = [5, 9]
+[[walls]]
+position = [6, 9]
+[[walls]]
+position = [7, 9]
+[[walls]]
+position = [8, 9]
+[[walls]]
+position = [9, 9]
+
+[[walls]]
+position = [0, 1]
+[[walls]]
+position = [0, 2]
+[[walls]]
+position = [0, 3]
+[[walls]]
+position = [0, 4]
+[[walls]]
+position = [0, 5]
+[[walls]]
+position = [0, 6]
+[[walls]]
+position = [0, 7]
+[[walls]]
+position = [0, 8]
+
+[[walls]]
+position = [9, 1]
+[[walls]]
+position = [9, 2]
+[[walls]]
+position = [9, 3]
+[[walls]]
+position = [9, 4]
+[[walls]]
+position = [9, 5]
+[[walls]]
+position = [9, 6]
+[[walls]]
+position = [9, 7]
+[[walls]]
+position = [9, 8]
+
+[[walls]]
+position = [7, 1]
+[[walls]]
+position = [7, 2]
+[[walls]]
+position = [7, 3]
+[[walls]]
+position = [7, 4]
+[[walls]]
+position = [7, 6]
+[[walls]]
+position = [7, 7]
+[[walls]]
+position = [7, 8]
+
+[[buttons]]
+position = [4, 5]
+group = "main"
+
+[[doors]]
+position = [7, 5]
+group = "main"

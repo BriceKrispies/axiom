@@ -1,6 +1,6 @@
 [package]
 name = "axiom-zanzoban"
-description = "Axiom app: standalone browser demo (extracted from the merged apps/axiom-gallery crate). Composition leaf: its own wasm bundle + web page."
+description = "Axiom Zanzoban browser demo (standalone, extracted from the merged apps/axiom-gallery crate): a deterministic top-down grid puzzle where frozen ghosts replay recorded paths, plus an in-browser level editor / playtest surface rendered through the engine's instanced-cube web loop."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,72 @@ rust-version.workspace = true
 # (e.g. the axiom-shot capture harness) can compose the pure core.
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[features]
+# Zanzoban agent driver: play the grid puzzle through axiom-agent (native-only;
+# was the gallery's `zanzoban-agent`). Gates `src/agent.rs` and its two
+# native-only optional deps, so the wasm build and the default gates never
+# compile it.
+agent = ["dep:axiom-agent", "dep:axiom-runtime"]
+
+# Native + wasm dependencies. The pure game core builds on native (so
+# `cargo test` exercises every gameplay rule) and on wasm (the live browser arm).
+[dependencies]
+# The engine umbrella (module `engine`): the board camera (`view_projection`)
+# and the canonical cube mesh stream are built from a real engine `App` — on
+# native (the tests exercise the camera) and on wasm (the live cube geometry).
+axiom = { path = "../../modules/axiom" }
+# Deterministic time primitives: the puzzle sim advances one `FixedStep` per
+# `Tick` on the kernel's `SimulationClock`; ghost cadence uses `TickDivider`.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+# `Mat4`/`Vec3` camera + per-instance transforms for the 3D board (scene3d).
+axiom-math = { path = "../../crates/axiom-math" }
+# The keymap contract (`Keymap`/`KeyBinding`) input_mapping routes DOM keys through.
+axiom-interface = { path = "../../crates/axiom-interface" }
+# The engine input module (touch swipes -> grid moves).
+axiom-input = { path = "../../modules/axiom-input" }
+# Hand-editable level format: the TOML level codec.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Native-only optional deps for the agent driver. Confined to non-wasm so the
+# browser bundle never sees them; pulled in only by the `agent` feature above.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The reusable agent substrate the driver runs every move through.
+axiom-agent = { path = "../../modules/axiom-agent", optional = true }
+# `RuntimeStep`, stamping each agent decision with the fixed 60 Hz step.
+axiom-runtime = { path = "../../crates/axiom-runtime", optional = true }
+
+# Browser/live arm only: the wasm-bindgen glue, panic hook, the live windowing
+# presentation loop, the debug overlay, the host viewport/safe-area contracts,
+# and the responsive layout solver. Confined to wasm32, so native `cargo test`
+# compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Viewport / safe-area-inset / pixel contracts the layout solver consumes.
+axiom-host = { path = "../../crates/axiom-host" }
+# The responsive flex solver that places the board and the side panel.
+axiom-layout = { path = "../../crates/axiom-layout" }
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CssStyleDeclaration",
+    "DomRect",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "MouseEvent",
+    "PointerEvent",
+    "Storage",
+    "console",
+] }
 
 [lints.rust]
 unsafe_code = "forbid"
