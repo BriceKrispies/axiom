@@ -224,6 +224,11 @@ dependencies = [
 [[package]]
 name = "axiom-dev-harness"
 version = "0.1.0"
+dependencies = [
+ "axiom-debug-overlay",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "axiom-dev-reload"
@@ -280,6 +285,22 @@ dependencies = [
 [[package]]
 name = "axiom-forest-walk"
 version = "0.1.0"
+dependencies = [
+ "axiom-debug-overlay",
+ "axiom-entropy",
+ "axiom-fp-controller",
+ "axiom-host",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-space",
+ "axiom-terrain-mesh",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "serde",
+ "toml",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "axiom-fp-controller"
@@ -382,6 +403,27 @@ dependencies = [
 [[package]]
 name = "axiom-generia"
 version = "0.1.0"
+dependencies = [
+ "axiom-agent-harness",
+ "axiom-debug-overlay",
+ "axiom-entropy",
+ "axiom-fp-controller",
+ "axiom-host",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-noise",
+ "axiom-scatter",
+ "axiom-space",
+ "axiom-streaming",
+ "axiom-terrain-mesh",
+ "axiom-windowing",
+ "axiom-world",
+ "console_error_panic_hook",
+ "serde",
+ "toml",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "axiom-geosphere"
@@ -407,6 +449,19 @@ dependencies = [
 [[package]]
 name = "axiom-gravix"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-debug-overlay",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-physics",
+ "axiom-runtime",
+ "axiom-terrain-mesh",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "axiom-grid"
@@ -419,6 +474,39 @@ dependencies = [
 [[package]]
 name = "axiom-growth"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-agent-harness",
+ "axiom-biome",
+ "axiom-canvas2d-backend",
+ "axiom-debug-overlay",
+ "axiom-entropy",
+ "axiom-geosphere",
+ "axiom-gpu-backend",
+ "axiom-host",
+ "axiom-interface",
+ "axiom-introspect",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-noise",
+ "axiom-perception",
+ "axiom-planetgen",
+ "axiom-proc-validate",
+ "axiom-space",
+ "axiom-streaming",
+ "axiom-terrain-mesh",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "js-sys",
+ "png",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "toml",
+ "tungstenite",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "axiom-host"
@@ -543,6 +631,13 @@ dependencies = [
 [[package]]
 name = "axiom-netplay"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-debug-overlay",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "axiom-netplay-ffi"
@@ -618,6 +713,17 @@ dependencies = [
 [[package]]
 name = "axiom-physics-crucible"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-debug-overlay",
+ "axiom-kernel",
+ "axiom-physics",
+ "axiom-runtime",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "axiom-placement"
@@ -747,6 +853,17 @@ dependencies = [
 [[package]]
 name = "axiom-quintet"
 version = "0.1.0"
+dependencies = [
+ "axiom-debug-overlay",
+ "axiom-host",
+ "axiom-kernel",
+ "axiom-layout",
+ "axiom-proc",
+ "axiom-space",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "axiom-recipe"
@@ -805,10 +922,42 @@ dependencies = [
 [[package]]
 name = "axiom-retro-fps"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-agent",
+ "axiom-debug-overlay",
+ "axiom-interface",
+ "axiom-kernel",
+ "axiom-perception",
+ "axiom-recording",
+ "axiom-runtime",
+ "axiom-windowing",
+ "bytemuck",
+ "console_error_panic_hook",
+ "js-sys",
+ "png",
+ "pollster",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "tungstenite",
+ "wasm-bindgen",
+ "web-sys",
+ "wgpu",
+]
 
 [[package]]
 name = "axiom-rotating-cube"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-debug-overlay",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "serde",
+ "toml",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "axiom-runtime"
@@ -838,6 +987,13 @@ dependencies = [
  "axiom-math",
  "axiom-runtime",
  "axiom-zones",
+]
+
+[[package]]
+name = "axiom-serve"
+version = "0.1.0"
+dependencies = [
+ "tiny_http",
 ]
 
 [[package]]
@@ -882,6 +1038,23 @@ dependencies = [
 [[package]]
 name = "axiom-sports-physics-lab"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-debug-overlay",
+ "axiom-figure",
+ "axiom-fp-controller",
+ "axiom-host",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-physics",
+ "axiom-proc-texture",
+ "axiom-recipe",
+ "axiom-runtime",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "axiom-streaming"
@@ -890,6 +1063,12 @@ version = "0.1.0"
 [[package]]
 name = "axiom-stress-cubes"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-debug-overlay",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "axiom-terrain"
@@ -1002,6 +1181,24 @@ dependencies = [
 [[package]]
 name = "axiom-zanzoban"
 version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-agent",
+ "axiom-debug-overlay",
+ "axiom-host",
+ "axiom-input",
+ "axiom-interface",
+ "axiom-kernel",
+ "axiom-layout",
+ "axiom-math",
+ "axiom-runtime",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "serde",
+ "toml",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "axiom-zones"
