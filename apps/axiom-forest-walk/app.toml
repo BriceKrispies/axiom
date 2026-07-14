@@ -2,6 +2,17 @@
 name = "forest-walk"
 crate_name = "axiom-forest-walk"
 
-allowed_layers = []
+allowed_layers = [
+    "kernel",
+    "math",
+    "host",
+    "entropy",
+    "space",
+]
 
-allowed_modules = []
+allowed_modules = [
+    "terrain-mesh",
+    "fp-controller",
+    "windowing",
+    "debug-overlay",
+]
