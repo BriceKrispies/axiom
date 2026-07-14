@@ -5,7 +5,7 @@ For each demo, and for each backend in {default, ?backend=canvas2d}, this:
   2. waits for the demo's positive ready signal (a stall times out → fail),
   3. asserts no uncaught page error and no FATAL console error
      (the engine logs `axiom: FATAL — no render backend …` on a hard failure;
-      benign WebGPU warnings and retro_fps's hot-reload /event 404 are not fatal),
+      benign WebGPU warnings and retro-fps's hot-reload /event 404 are not fatal),
   4. screenshots the canvas and asserts it actually painted (not a flat color).
 
 Skips netplay (the only multiplayer demo). Run with `make e2e`.
@@ -64,7 +64,7 @@ def test_demo_loads(demo: dict, backend: str, gallery_base_url: str, page: Page)
     page.wait_for_timeout(600)  # let a few frames present before sampling
 
     # 2. No hard failure. Benign noise (WebGPU "Device failed at creation" warnings,
-    #    retro_fps's hot-reload /event 404) is not fatal and is intentionally ignored.
+    #    retro-fps's hot-reload /event 404) is not fatal and is intentionally ignored.
     assert not errors, f"{demo['id']} [{backend}] uncaught page error(s): {errors}"
     fatal = [t for t in messages if "axiom: FATAL" in t or "Startup failed:" in t]
     assert not fatal, f"{demo['id']} [{backend}] fatal console error(s): {fatal}"

@@ -30,22 +30,17 @@ demo stays deterministic — a reload is just an explicit event applied at a tic
 ## Running it
 
 ```sh
-make retro_fps-build          # build the wasm bundle into web/pkg (once, and after Rust changes)
-make retro-fps-hot            # serve web/ + watch level.axiom, with SSE, at http://localhost:8080
+make retro-fps-hot            # package dist/, serve it + watch level.axiom, with SSE, at http://localhost:8080
 ```
 
-Then open <http://localhost:8080> in a WebGPU browser (recent Chrome/Edge), and
-edit `apps/axiom-retro-fps/src/level.axiom`. On every save the level reloads live.
-The browser console logs `level reloaded from edit` each time.
+Then open <http://localhost:8080/retro-fps/> in a WebGPU browser (recent
+Chrome/Edge), and edit `apps/axiom-retro-fps/src/level.axiom`. On every save the
+level reloads live. The browser console logs `level reloaded from edit` each time.
 
-Equivalently, without the Makefile:
-
-```sh
-cargo build -p axiom-retro-fps --target wasm32-unknown-unknown --release
-wasm-bindgen --target web --out-dir web/pkg \
-    target/wasm32-unknown-unknown/release/axiom_retro_fps.wasm
-cargo run -p axiom-dev-reload          # defaults: port 8080, serves web/, watches level.axiom
-```
+For code iteration on this app alone (rebuild + full-page reload on save,
+rather than the data-only level reload), `cargo run -p axiom-serve --
+retro-fps` is the general tool; `retro-fps-hot` remains the data hot-reload
+path that preserves the running wasm instance.
 
 If you serve the page with a plain static server instead (`make retro_fps`), there is
 no `/events` endpoint; the demo simply runs the built-in level and hot-reload is
@@ -69,4 +64,6 @@ and the combat tunables. A saved edit resets the player to the level start.
   instanced N times, so changing a wall's size/position/colour is per-instance
   data that already flows every frame — no geometry upload needed.
 - **Behaviour is still compiled.** This hot-reloads level *data*, not gameplay
-  *code* (enemy AI, shooting). Changing Rust still needs `make retro_fps-build`.
+  *code* (enemy AI, shooting). Changing Rust still needs a rebuild
+  (`make gallery-fast-build`, or `cargo run -p axiom-serve -- retro-fps` for a
+  self-rebuilding dev loop).

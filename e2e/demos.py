@@ -1,9 +1,9 @@
 """The gallery demos the smoke suite drives — its single source of truth.
 
 Repo tooling (alongside e2e/conftest.py + test_smoke.py), NOT part of the engine
-dependency graph. Mirrors gallery/gallery.js's DEMOS, plus the per-demo signals a
-browser test needs (which the manifest does not carry): how the demo proves it
-loaded, its canvas, and whether that canvas paints on entry.
+dependency graph. Mirrors apps/axiom-gallery/web/gallery.js's DEMOS, plus the
+per-demo signals a browser test needs (which the manifest does not carry): how the
+demo proves it loaded, its canvas, and whether that canvas paints on entry.
 
 `kind` selects the ready-signal + render-proof strategy in test_smoke.py:
   * windowing3d  — boots the engine run-loop; logs `axiom: render backend = …`.
@@ -15,19 +15,20 @@ loaded, its canvas, and whether that canvas paints on entry.
   * harness      — the debug-overlay dev page; signals via #boot text.
 """
 
-# id -> demo spec. `path` is relative to the gallery root (dist/). Shared-shell demos
-# boot via demo.html?id=<id>; self-hosted demos own <dir>/index.html.
+# id -> demo spec. `path` is relative to the gallery root (dist/). Every demo is a
+# standalone app packaged into dist/<dir>/ and self-hosts its own <dir>/index.html
+# (there is no shared demo.html shell anymore).
 DEMOS = [
-    {"id": "rotating-cube", "kind": "windowing3d", "path": "demo.html?id=rotating-cube", "canvas": "#axiom-cube-canvas"},
+    {"id": "rotating-cube", "kind": "windowing3d", "path": "rotating-cube/index.html", "canvas": "#axiom-cube-canvas"},
     {"id": "netplay", "skip": "multiplayer — needs a relay (needsRelay)"},
-    {"id": "retro-fps", "kind": "windowing3d", "path": "demo.html?id=retro_fps", "canvas": "#axiom-retro-fps-canvas"},
-    {"id": "stress-cubes", "kind": "windowing3d", "path": "demo.html?id=stress-cubes", "canvas": "#axiom-stress-canvas"},
+    {"id": "retro-fps", "kind": "windowing3d", "path": "retro-fps/index.html", "canvas": "#axiom-retro-fps-canvas"},
+    {"id": "stress-cubes", "kind": "windowing3d", "path": "stress-cubes/index.html", "canvas": "#axiom-stress-canvas"},
     {"id": "growth", "kind": "growth", "path": "growth/index.html", "check_canvas": False},
     {"id": "zanzoban", "kind": "canvas2d_app", "path": "zanzoban/index.html",
      "canvas": "#axiom-puzzle-canvas", "ready_log": "[zanzoban] ready"},
     {"id": "quintet", "kind": "canvas2d_app", "path": "quintet/index.html",
      "canvas": "#axiom-quintet-canvas", "ready_log": "[quintet] ready"},
-    {"id": "harness", "kind": "harness", "path": "harness/index.html", "canvas": "#axiom-harness-canvas"},
+    {"id": "harness", "kind": "harness", "path": "dev-harness/index.html", "canvas": "#axiom-harness-canvas"},
 ]
 
 

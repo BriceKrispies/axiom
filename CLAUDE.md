@@ -305,11 +305,13 @@ the per-category rules below are violated.
 > - **Apps** (`apps/<name>/` + `app.toml`) are the only *leaf* composition
 >   roots. An app may depend on layers and modules (engine or feature).
 >   Nothing else may depend on an app — apps are leaves in the dependency
->   graph. A *game* (a title built on the engine, e.g. the gallery's `retro_fps`
->   demo) is not a separate tier: it is either a demo module inside a host app
->   (the gallery bundles every browser demo as `src/<demo>/`) or its own leaf
->   app. The `@axiom/game` TS bundle world (hosted by `axiom-game-runtime`) is a
->   separate, app-tier mechanism, not an engine class.
+>   graph. A *game* (a title built on the engine, e.g. `apps/axiom-retro-fps`)
+>   is not a separate tier: it is its own leaf app. Every browser demo is a
+>   standalone app with its own wasm bundle and page; `apps/axiom-gallery` is
+>   no longer a crate — only its static `web/` showcase (the landing grid that
+>   links out to each app's page) remains. The `@axiom/game` TS bundle world
+>   (hosted by `axiom-game-runtime`) is a separate, app-tier mechanism, not an
+>   engine class.
 > - **Tools** (`tools/<name>/`, plus the existing `xtask` crate) are
 >   repo tooling. Tools must not be part of the runtime engine
 >   dependency graph; layers, modules, and apps must not depend on
@@ -924,6 +926,31 @@ uv run scripts/playwright_controller.py screenshot cubes
 
 This is verification tooling, outside the engine dependency graph — not a layer,
 module, app, or Cargo package.
+
+## Local app serving with hot reload (axiom-serve)
+
+To work on any single app under `apps/` in a real browser, use **axiom-serve**
+(`tools/axiom-serve` — a Tool by its location, outside the engine graph and the
+coverage gate). It builds the app, serves its `web/` locally, watches the
+sources, rebuilds on save, and pushes a reload to the open page over SSE:
+
+```sh
+cargo run -p axiom-serve -- gravix                      # Rust wasm app: cargo + wasm-bindgen, auto-reload
+cargo run -p axiom-serve -- heat-check                  # SDK-hosted TS app: tsgo recompile on save
+cargo run -p axiom-serve -- three-point --port 9000 --no-open
+make serve APP=growth                                   # the same, via make
+```
+
+It detects the app's shape on its own — Rust wasm cdylib (`cargo build
+--target wasm32-unknown-unknown` + `wasm-bindgen` into `web/pkg/`, page reload
+injected), pure-TS `@axiom/web-engine` app (tsgo + an injected import map), or
+SDK-hosted `@axiom/game` app (tsgo + the shared runtime wasm routes) — and
+builds missing prerequisites (SDK dist, runtime wasm) once. `--debug` skips the
+slow LTO release profile for Rust apps; the default port is 8080. Pair it with
+the Playwright controller above to verify rendering
+(`goto http://localhost:8080/`). For the two Vite dev apps
+(`axiom-game-runtime`, `axiom-retro-fps-ts-browser`) the Vite HMR flow
+(`packages/axiom-vite`) remains the richer alternative.
 
 ## Logging and Telemetry Rules
 

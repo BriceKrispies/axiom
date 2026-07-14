@@ -1,10 +1,11 @@
 # Build the browser/WASM demos and publish the mobile-first demo gallery
-# (gallery/) to GitHub Pages on every push to main.
+# to GitHub Pages on every push to main.
 #
 # This is repo tooling, NOT part of the engine dependency graph — same status as
-# the CI workflow, the Makefile, and scripts/. It PACKAGES each browser app
-# (scripts/package_gallery.py) into dist/ behind the shared capability-detecting
-# loader, matching `make gallery`, and deploys it.
+# the CI workflow, the Makefile, and scripts/. It PACKAGES each standalone demo
+# app (scripts/package_gallery.py) into dist/<id>/ behind its capability-detecting
+# loader, with the static landing grid (apps/axiom-gallery/web) laid over dist/,
+# matching `make gallery`, and deploys it.
 #
 # It runs the FAST packaging path (`--fast`: a normal wasm-bindgen build behind the
 # loader, no wasm2js fallback), to keep the deploy quick and on stable. `make gallery`
@@ -71,15 +72,16 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-pages-${{ hashFiles('**/Cargo.lock') }}
 
-      # Package every demo into dist/ behind the shared loader (scripts/package_gallery.py,
+      # Package every demo app into dist/<id>/ behind its loader (scripts/package_gallery.py,
       # the same driver `make gallery` uses). `--fast` keeps this on stable with no
-      # wasm2js fallback; it also builds + vendors the @axiom/client SDK netplay needs.
+      # wasm2js fallback; it also builds + vendors the @axiom/client SDK netplay needs
+      # (into apps/axiom-netplay/web/vendor/axiom-client).
       - name: Package the gallery (dist/)
         run: |
           npm --prefix scripts/packaging install --no-audit --no-fund
           npm --prefix packages/axiom-client install --no-audit --no-fund
           npm --prefix packages/axiom-client run build
-          python3 -c "import shutil, pathlib; d=pathlib.Path('apps/axiom-gallery/web/netplay/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
+          python3 -c "import shutil, pathlib; d=pathlib.Path('apps/axiom-netplay/web/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
           python3 scripts/package_gallery.py --fast
 
       - name: Upload Pages artifact

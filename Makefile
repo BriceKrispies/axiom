@@ -5,13 +5,15 @@
 # Module, and App laws — same status as the xtask crate and the coverage
 # scripts.
 #
-# Primary target: `make gallery` builds the ONE merged browser app
-# (apps/axiom-gallery — every demo in a single wasm bundle) and serves the
-# packaged dist/ over http://localhost. WebGPU requires an http:// origin, so a
-# plain file:// open will not work. The per-demo crates were merged into the
-# gallery, so there is one bundle and one set of commands, not nine.
+# Primary target: `make gallery` packages every standalone browser demo app
+# (apps/axiom-<demo>, each with its own wasm bundle) into dist/<id>/ behind the
+# static landing grid (apps/axiom-gallery/web), and serves the packaged dist/
+# over http://localhost. WebGPU requires an http:// origin, so a plain file://
+# open will not work.
 
 WASM_TARGET      := wasm32-unknown-unknown
+# The gallery's static landing grid (card grid + shared styles) — a plain web
+# dir, no crate. The committed single-file TS-game pages live under it too.
 GALLERY_DIR      := apps/axiom-gallery
 GALLERY_WEB      := $(GALLERY_DIR)/web
 DIST_DIR         := dist
@@ -20,14 +22,14 @@ WORKSPACE_PORT   ?= 8123
 
 # The live 2-browser SERVER-AUTHORITATIVE multiplayer demo lives at dist/netplay/.
 # Its browser networking is the TypeScript @axiom/client SDK (packages/axiom-client),
-# built and vendored into the gallery's web/netplay/ by netplay-build; the renderer is
-# the gallery wasm bundle (the merged netplay demo).
-NETPLAY_VENDOR   := $(GALLERY_WEB)/netplay/vendor/axiom-client
+# built and vendored into the netplay app's web/vendor/ by netplay-build; the renderer
+# is the netplay app's own wasm bundle (apps/axiom-netplay).
+NETPLAY_VENDOR   := apps/axiom-netplay/web/vendor/axiom-client
 NETPLAY_PORT     ?= 8000
 
 # The TypeScript soccer-penalty game (apps/axiom-soccer-penalty-kick): a SELF-HOSTED
-# gallery demo. Unlike the merged Rust demos it runs on its own @axiom/game SDK +
-# axiom-game-runtime wasm (not the gallery bundle), so `gallery-soccer` builds those,
+# gallery demo. Unlike the Rust demo apps it runs on its own @axiom/game SDK +
+# axiom-game-runtime wasm (no Rust app bundle), so `gallery-soccer` builds those,
 # compiles the app, and packages it self-contained into dist/soccer-penalty-kick/.
 SOCCER_DIR            := apps/axiom-soccer-penalty-kick
 SIGNAL_DIR            := apps/axiom-signal-runner
@@ -61,15 +63,15 @@ ASSETSTREAM_PORT     ?= 8000
 help:
 	@echo "Axiom tooling targets:"
 	@echo ""
-	@echo "  ===> MAIN DRIVER — the demo gallery (ONE merged app, PACKAGED + served):"
-	@echo "  make gallery        PACKAGE the gallery bundle (wasm + wasm2js fallback), assemble dist/, serve at http://localhost:$(GALLERY_PORT)"
+	@echo "  ===> MAIN DRIVER — the demo gallery (every demo app PACKAGED into dist/ + served):"
+	@echo "  make gallery        PACKAGE every demo app bundle (wasm + wasm2js fallback), assemble dist/, serve at http://localhost:$(GALLERY_PORT)"
 	@echo "  make gallery-fast   Quick wasm-only gallery (no fallback, normal incremental build) — seconds, for iteration"
 	@echo "  make gallery-serve  Re-serve the already-built dist/ WITHOUT rebuilding (fast restart)"
-	@echo "  make gallery-build  Package the gallery bundle + assemble dist/ only, no serve"
+	@echo "  make gallery-build  Package the demo app bundles + assemble dist/ only, no serve"
 	@echo "  make GALLERY_PORT=9000 gallery   Serve on a different port"
 	@echo "  (make gallery is slow the first time — it rebuilds std MVP so the wasm2js fallback is possible.)"
-	@echo "  (every browser demo is merged into apps/axiom-gallery: ONE bundle, ONE loader,"
-	@echo "   booted per-demo by <demo>_start. The card grid + shared shell live in web/.)"
+	@echo "  (every browser demo is its own app crate under apps/, packaged into dist/<id>/"
+	@echo "   behind the static landing grid from apps/axiom-gallery/web.)"
 	@echo ""
 	@echo "  ===> DEV CONSOLE — the axiom-workspace (loads every gallery app + games/ cartridges):"
 	@echo "  make workspace      Build the console (shell + gallery bundle) + serve at http://localhost:$(WORKSPACE_PORT)"
@@ -77,7 +79,7 @@ help:
 	@echo "  (hosts every app inline or opens the multi-screen ones; has the frame scrubber + backend-compare dev tools.)"
 	@echo ""
 	@echo "  Live 2-browser SERVER-AUTHORITATIVE multiplayer demo (dist/netplay/):"
-	@echo "  make netplay-build   Build the gallery dist/ + vendor the @axiom/client SDK + the worker cdylib"
+	@echo "  make netplay-build   Build dist/ (incl. the netplay app bundle) + vendor the @axiom/client SDK + the worker cdylib"
 	@echo "  make netplay-dotnet  Run the .NET 10 server: serves dist/ AND the game at http://localhost:8090 (open /netplay/)"
 	@echo "  (run 'make netplay-build' once, then 'make netplay-dotnet' and open"
 	@echo "   http://localhost:8090/netplay/ in TWO WebGPU browsers — one server does it all.)"
@@ -90,10 +92,10 @@ help:
 	@echo "  make netplay-load   Load-test a running node/cluster (ARGS=\"<soak|matchmake|scaleout|resilience> ...\")"
 	@echo ""
 	@echo "  retro FPS live level hot-reload:"
-	@echo "  make retro-fps-hot       Build the fast gallery + serve retro FPS with live level hot-reload at http://localhost:8080/retro_fps/"
-	@echo "  (edit apps/axiom-gallery/src/retro_fps/level.axiom and save to reload the level live.)"
+	@echo "  make retro-fps-hot       Build the fast gallery + serve retro FPS with live level hot-reload at http://localhost:8080/retro-fps/"
+	@echo "  (edit apps/axiom-retro-fps/src/level.axiom and save to reload the level live.)"
 	@echo ""
-	@echo "  Agent drivers (native, feature-gated bins of the gallery crate):"
+	@echo "  Agent drivers (native, feature-gated bins of the demo app crates):"
 	@echo "  make agent          retro FPS headless agent server (JSON over HTTP on :7878)"
 	@echo "  make agent-render   Same, plus an offscreen wgpu render so {\"render\":true} returns a PNG"
 	@echo "  make agent-bridge   Relay HTTP actions to a LIVE browser opened with ?agent=ws://127.0.0.1:7879"
@@ -121,11 +123,11 @@ help:
 
 # --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
 
-# PACKAGE the merged gallery into dist/ via scripts/package_gallery.py: ONE wasm bundle
-# (wasm-opt -Oz fast-path PLUS a Binaryen wasm2js fallback for browsers with no
-# WebAssembly) behind a shared loader, with the static site (card grid + shell + every
-# demo's page) laid over it. First it installs the pinned Binaryen toolchain and builds
-# + vendors the @axiom/client SDK the netplay demo needs.
+# PACKAGE the demo gallery into dist/ via scripts/package_gallery.py: every demo app's
+# own wasm bundle (wasm-opt -Oz fast-path PLUS a Binaryen wasm2js fallback for browsers
+# with no WebAssembly) into dist/<id>/ behind its capability-detecting loader, with the
+# static landing grid laid over it. First it installs the pinned Binaryen toolchain and
+# builds + vendors the @axiom/client SDK the netplay demo needs.
 #
 # This is the build half of `make gallery`. Because the app is rebuilt MVP via nightly
 # `-Z build-std` (so the wasm2js fallback is possible), the FIRST run is slow — it
@@ -139,9 +141,9 @@ gallery-build:
 	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_VENDOR)'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
 	uv run --no-project python scripts/package_gallery.py
 
-# Regenerate the self-hosted soccer-penalty gallery page. Unlike the merged Rust
-# demos, the game runs on its OWN @axiom/game SDK + axiom-game-runtime wasm (not the
-# gallery bundle), so it can't ride axiom-loader.js. This builds the SDK, builds and
+# Regenerate the self-hosted soccer-penalty gallery page. Unlike the Rust demo
+# apps, the game runs on its OWN @axiom/game SDK + axiom-game-runtime wasm (no
+# per-app engine bundle), so it can't ride axiom-loader.js. This builds the SDK, builds and
 # binds the runtime wasm, compiles the app with tsgo, and inlines the whole graph
 # into a single self-contained page COMMITTED at
 # $(GALLERY_WEB)/soccer-penalty-kick/index.html — which package_gallery then copies
@@ -158,7 +160,7 @@ gallery-soccer:
 
 # Regenerate the self-hosted Signal Runner gallery page. Like gallery-soccer, the
 # game runs on its OWN @axiom/game SDK + axiom-game-runtime wasm (the 2D draw2d
-# present path), not the gallery bundle, so it can't ride axiom-loader.js. This
+# present path), not a per-app engine bundle, so it can't ride axiom-loader.js. This
 # builds the SDK, builds + binds the runtime wasm, compiles the app with tsgo, and
 # inlines the whole graph into a single self-contained page COMMITTED at
 # $(GALLERY_WEB)/signal-runner/index.html — which package_gallery then copies into
@@ -174,7 +176,7 @@ gallery-signal-runner:
 
 # Regenerate the self-hosted Swipe Basketball gallery page. Like gallery-soccer, the
 # game runs on its OWN @axiom/game SDK + axiom-game-runtime wasm (the 3D present
-# path), not the gallery bundle, so it can't ride axiom-loader.js. This builds the
+# path), not a per-app engine bundle, so it can't ride axiom-loader.js. This builds the
 # SDK, builds + binds the runtime wasm, compiles the app with tsgo, and inlines the
 # whole graph into a single self-contained page COMMITTED at
 # $(GALLERY_WEB)/swipe-basketball/index.html — which package_gallery then copies into
@@ -190,7 +192,7 @@ gallery-swipe-basketball:
 
 # Regenerate the self-hosted Heat Check gallery page. Like gallery-swipe-basketball,
 # the game runs on its OWN @axiom/game SDK + axiom-game-runtime wasm (the 3D present
-# path), not the gallery bundle, so it can't ride axiom-loader.js. This builds the
+# path), not a per-app engine bundle, so it can't ride axiom-loader.js. This builds the
 # SDK, builds + binds the runtime wasm, compiles the app with tsgo, and inlines the
 # whole graph into a single self-contained page COMMITTED at
 # $(GALLERY_WEB)/heat-check/index.html — which package_gallery then copies into dist/
@@ -248,7 +250,7 @@ gallery-minimal-3v3:
 	node scripts/package_minimal_3v3_singlefile.mjs $(GALLERY_WEB)/minimal-3v3/index.html
 
 # THE MAIN DRIVER. One command to browse the whole engine surface during
-# development: it builds the merged browser app, assembles the static gallery into
+# development: it builds every demo app bundle, assembles the static gallery into
 # dist/, and serves it locally. It depends on gallery-build, so cargo's incremental
 # compilation keeps re-runs fast after the first build. To re-serve WITHOUT
 # rebuilding, use `make gallery-serve`.
@@ -323,10 +325,11 @@ netplay-dotnet:
 relay:
 	cargo run -p axiom-netcode-relay
 
-# Build the gallery dist/ (which contains the merged netplay renderer + its page) AND
-# build + vendor the TypeScript @axiom/client SDK the page uses for networking
-# (compiled to ESM into web/netplay/vendor/axiom-client, which package_gallery copies
-# into dist/netplay/). Also builds the native worker cdylib the .NET server loads.
+# Build the gallery dist/ (which contains the netplay app's renderer bundle + page at
+# dist/netplay/) AND build + vendor the TypeScript @axiom/client SDK the page uses for
+# networking (compiled to ESM into apps/axiom-netplay/web/vendor/axiom-client, which
+# package_gallery copies into dist/netplay/). Also builds the native worker cdylib the
+# .NET server loads.
 netplay-build:
 	npm --prefix scripts/packaging install --no-audit --no-fund
 	npm --prefix packages/axiom-client install --no-audit --no-fund
@@ -347,12 +350,12 @@ netplay:
 # --- retro FPS live level hot-reload ---
 
 # Serve retro FPS with LIVE LEVEL HOT-RELOAD. Builds the fast gallery into dist/ first
-# (so the bundle + retro FPS page exist), then the axiom-dev-reload dev server serves dist/
-# and additionally watches level.axiom, pushing every saved edit to the browser over
-# SSE — edit a wall and watch it update with no recompile and no reload. Open
-# http://localhost:8080/retro_fps/ and edit apps/axiom-gallery/src/retro_fps/level.axiom.
+# (so the retro FPS bundle + page exist at dist/retro-fps/), then the axiom-dev-reload
+# dev server serves dist/ and additionally watches level.axiom, pushing every saved edit
+# to the browser over SSE — edit a wall and watch it update with no recompile and no
+# reload. Open http://localhost:8080/retro-fps/ and edit apps/axiom-retro-fps/src/level.axiom.
 retro-fps-hot: gallery-fast-build
-	@echo Serving retro FPS with hot-reload at http://localhost:8080/retro_fps/ - edit apps/axiom-gallery/src/retro_fps/level.axiom and save.
+	@echo Serving retro FPS with hot-reload at http://localhost:8080/retro-fps/ - edit apps/axiom-retro-fps/src/level.axiom and save.
 	cargo run -p axiom-dev-reload
 
 # --- Agent bridge: drive + watch the retro FPS game from outside the engine ---
@@ -361,21 +364,21 @@ retro-fps-hot: gallery-fast-build
 # browser, so an external agent can send inputs and read back structured state.
 #   curl -s -XPOST localhost:7878/step -d '{"keys":["forward"],"fire":true}'
 agent:
-	cargo run -p axiom-gallery --features retro-fps-agent --bin retro-fps-agent
+	cargo run -p axiom-retro-fps --features agent --bin retro-fps-agent
 
 # Same, plus an offscreen wgpu render so `{"render":true}` returns a PNG path.
 agent-render:
-	cargo run -p axiom-gallery --features retro-fps-agent-render --bin retro-fps-agent
+	cargo run -p axiom-retro-fps --features agent-render --bin retro-fps-agent
 
 # Bridge: relay HTTP actions to a LIVE browser opened with
 # ?agent=ws://127.0.0.1:7879, and stream its frames back (canvas snapshots).
 agent-bridge:
-	cargo run -p axiom-gallery --features retro-fps-agent --bin retro-fps-agent -- --bridge
+	cargo run -p axiom-retro-fps --features agent --bin retro-fps-agent -- --bridge
 
 # Growth headless agent driver: walk the player up the Everest-scale mountain
 # holding "forward", printing the player's height each tick (the climb mode).
 growth-agent:
-	cargo run -p axiom-gallery --features growth-agent --bin growth-agent
+	cargo run -p axiom-growth --features agent --bin growth-agent
 
 # --- Runtime asset-streaming demo (apps/axiom-asset-stream-demo) ---
 

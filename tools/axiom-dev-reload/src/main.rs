@@ -26,8 +26,8 @@
 //!
 //! All three positional args are optional and default to:
 //! - `port`       = `8080`
-//! - `static_dir` = `dist` (the packaged gallery; retro FPS is at `dist/retro_fps/`)
-//! - `level_file` = `apps/axiom-gallery/src/retro_fps/level.axiom`
+//! - `static_dir` = `dist` (the packaged gallery; retro FPS is at `dist/retro-fps/`)
+//! - `level_file` = `apps/axiom-retro-fps/src/level.axiom`
 //!
 //! The level file may not exist yet — that is fine. A missing file is treated
 //! as empty contents, and the watcher keeps polling so a later-created file is
@@ -97,7 +97,7 @@ use tiny_http::{Header, Response, Server};
 /// Default values for the optional positional CLI args.
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_STATIC_DIR: &str = "dist";
-const DEFAULT_LEVEL_FILE: &str = "apps/axiom-gallery/src/retro_fps/level.axiom";
+const DEFAULT_LEVEL_FILE: &str = "apps/axiom-retro-fps/src/level.axiom";
 
 /// How often the watcher thread polls the level file's modification time.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);

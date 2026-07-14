@@ -15,7 +15,7 @@ normally, once with `?backend=canvas2d` (the engine's runtime backend override, 
   2D games log `[<id>] ready`; growth/harness signal via DOM) — a stall times out → fail;
 - **no uncaught page error and no FATAL console error**. The engine logs
   `axiom: FATAL — no render backend available …` if every backend fails, so a silent
-  non-render is caught. Benign noise (WebGPU `Device failed at creation` warnings, retro_fps's
+  non-render is caught. Benign noise (WebGPU `Device failed at creation` warnings, retro-fps's
   hot-reload `/event` 404 on a static server) is not fatal and is ignored;
 - the **canvas actually painted** — it screenshots the canvas (saved to `screenshots/`)
   and asserts it is not a single flat color.
