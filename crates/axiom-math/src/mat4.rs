@@ -842,7 +842,9 @@ mod cov {
         let inv = m.inverse().unwrap();
         assert!(inv.approx_eq(&Mat4::translation(t.mul_scalar(-1.0)), eps5()));
         let p = Vec3::new(1.0, 2.0, 3.0);
-        assert!(inv.transform_point(m.transform_point(p)).approx_eq(&p, eps5()));
+        assert!(inv
+            .transform_point(m.transform_point(p))
+            .approx_eq(&p, eps5()));
     }
 
     #[test]
@@ -871,10 +873,22 @@ mod cov {
     #[test]
     fn inverse_of_non_finite_matrix_is_none() {
         let m = Mat4::from_cols_array([
-            f32::NAN, 0.0, 0.0, 0.0, //
-            0.0, 1.0, 0.0, 0.0, //
-            0.0, 0.0, 1.0, 0.0, //
-            0.0, 0.0, 0.0, 1.0, //
+            f32::NAN,
+            0.0,
+            0.0,
+            0.0, //
+            0.0,
+            1.0,
+            0.0,
+            0.0, //
+            0.0,
+            0.0,
+            1.0,
+            0.0, //
+            0.0,
+            0.0,
+            0.0,
+            1.0, //
         ]);
         assert!(m.inverse().is_none());
     }

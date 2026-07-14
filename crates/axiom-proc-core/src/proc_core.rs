@@ -28,7 +28,13 @@ impl ProcCore {
     /// `(seed, child(base, node), version)`. An `eval` returning `None`
     /// (unknown operator, wrong input count) is `OpFailed`; an empty recipe is
     /// `EmptyRecipe`.
-    pub fn execute<Out, F>(&self, recipe: &RecipeGraph, seed: u64, base: &Address, eval: F) -> ProcResult<Out>
+    pub fn execute<Out, F>(
+        &self,
+        recipe: &RecipeGraph,
+        seed: u64,
+        base: &Address,
+        eval: F,
+    ) -> ProcResult<Out>
     where
         Out: Clone,
         F: Fn(NodeEval<'_, Out>) -> Option<Out>,
@@ -88,7 +94,9 @@ mod tests {
 
     #[test]
     fn executes_the_graph_and_returns_the_final_output() {
-        let out = ProcCore::new().execute(&adder(), 7, &SpaceApi::root(), eval).unwrap();
+        let out = ProcCore::new()
+            .execute(&adder(), 7, &SpaceApi::root(), eval)
+            .unwrap();
         assert_eq!(out, 8);
     }
 

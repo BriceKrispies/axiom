@@ -73,9 +73,18 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(a.message(), "x");
         assert_eq!(a.raw_code(), 1);
-        assert_eq!(PhysicalError::physics_failed("").code(), PhysicalErrorCode::PhysicsFailed);
-        assert_eq!(PhysicalError::authoring_failed("").code(), PhysicalErrorCode::AuthoringFailed);
-        assert_eq!(PhysicalError::not_bound("").code(), PhysicalErrorCode::NotBound);
+        assert_eq!(
+            PhysicalError::physics_failed("").code(),
+            PhysicalErrorCode::PhysicsFailed
+        );
+        assert_eq!(
+            PhysicalError::authoring_failed("").code(),
+            PhysicalErrorCode::AuthoringFailed
+        );
+        assert_eq!(
+            PhysicalError::not_bound("").code(),
+            PhysicalErrorCode::NotBound
+        );
         assert_eq!(PhysicalError::no_ball("").code(), PhysicalErrorCode::NoBall);
         assert_ne!(PhysicalError::not_bound(""), PhysicalError::no_ball(""));
     }

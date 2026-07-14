@@ -18,8 +18,8 @@ use crate::hold_set_brain::HoldSetBrain;
 use crate::observation::{Observation, ObservationFact};
 use crate::observation_builder::ObservationBuilder;
 use crate::observation_channel::ObservationChannel;
-use crate::scripted_brain::{ScriptRule, ScriptedBrain};
 use crate::replay_brain::ReplayBrain;
+use crate::scripted_brain::{ScriptRule, ScriptedBrain};
 use axiom_kernel::Tick;
 
 /// The deterministic embodied-agent facade — the only public type in the module.
@@ -62,7 +62,6 @@ impl AgentApi {
 }
 
 impl AgentApi {
-
     /// Create an agent id from a raw value.
     pub fn create_agent_id(raw: u64) -> AgentId {
         AgentId::from_raw(raw)
@@ -81,16 +80,17 @@ impl AgentApi {
     /// A copy of `profile` with its per-tick action budget overridden — used to
     /// throttle, or (at `0`) freeze, an agent without rebuilding its other
     /// control limits.
-    pub fn profile_with_action_budget(profile: AgentProfile, max_actions_per_tick: u32) -> AgentProfile {
+    pub fn profile_with_action_budget(
+        profile: AgentProfile,
+        max_actions_per_tick: u32,
+    ) -> AgentProfile {
         profile.with_action_budget(max_actions_per_tick)
     }
-
 
     /// An empty memory bounded to `capacity` entries.
     pub fn empty_memory(capacity: usize) -> AgentMemory {
         AgentMemory::empty_with_capacity(capacity)
     }
-
 
     /// An empty observation for `agent_id` at `tick`.
     pub fn empty_observation(agent_id: AgentId, tick: Tick) -> Observation {
@@ -193,7 +193,6 @@ impl AgentApi {
         ActionIntent::pointer_up(control_code)
     }
 
-
     /// Orient toward subject `subject_code`.
     pub fn look_at_subject_intent(subject_code: u32) -> ActionIntent {
         ActionIntent::look_at_subject(subject_code)
@@ -237,7 +236,6 @@ impl AgentApi {
         ActionQueue::empty_with_capacity(capacity)
     }
 
-
     /// A scripted-brain rule: match facts of `fact_kind_code`, emit `intent`,
     /// and report `reason_code` when the rule fires.
     pub fn script_rule(fact_kind_code: u16, intent: ActionIntent, reason_code: u16) -> ScriptRule {
@@ -261,7 +259,6 @@ impl AgentApi {
     pub fn hold_set_brain(controls: Vec<u32>) -> HoldSetBrain {
         HoldSetBrain::new(controls)
     }
-
 
     /// Step `brain` once: observe, decide, emit player-equivalent intents, and
     /// produce a deterministic decision report. The step's tick stamps the
@@ -296,9 +293,18 @@ mod tests {
         let mut memory = AgentApi::empty_memory(1);
         let observation = AgentApi::empty_observation(agent_id, Tick::new(0));
         let step = RuntimeStep::new(FrameIndex::new(0), Tick::new(0), 16_666_667, 0);
-        let (report, queue) =
-            AgentApi::step(agent_id, profile, &mut brain, &observation, &mut memory, step);
-        assert_eq!(report.selected_brain_kind_code(), AgentApi::BRAIN_KIND_HOLD_SET);
+        let (report, queue) = AgentApi::step(
+            agent_id,
+            profile,
+            &mut brain,
+            &observation,
+            &mut memory,
+            step,
+        );
+        assert_eq!(
+            report.selected_brain_kind_code(),
+            AgentApi::BRAIN_KIND_HOLD_SET
+        );
         assert_eq!(report.emitted_action_count(), 2);
         assert_eq!(report.reason_code(), AgentApi::REASON_HOLD_SET_EMITTED);
         assert_eq!(queue.combined_control_code(), 0b011);

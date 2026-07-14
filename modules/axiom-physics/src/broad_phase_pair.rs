@@ -73,11 +73,7 @@ fn candidates(colliders: &[PhysicsCollider], bodies: &[PhysicsBody]) -> Vec<Cand
                     collider: c.handle(),
                     body: c.body(),
                     active: c.enabled() & b.enabled(),
-                    aabb: world_aabb(
-                        c.shape(),
-                        b.transform().translation,
-                        b.transform().rotation,
-                    ),
+                    aabb: world_aabb(c.shape(), b.transform().translation, b.transform().rotation),
                 })
         })
         .collect()
@@ -108,12 +104,9 @@ pub(crate) fn detect_pairs(
         .iter()
         .enumerate()
         .flat_map(|(index, ci)| {
-            resolved
-                .iter()
-                .skip(index + 1)
-                .filter_map(move |cj| {
-                    is_candidate_pair(ci, cj).then(|| BroadPhasePair::new(ci.collider, cj.collider))
-                })
+            resolved.iter().skip(index + 1).filter_map(move |cj| {
+                is_candidate_pair(ci, cj).then(|| BroadPhasePair::new(ci.collider, cj.collider))
+            })
         })
         .collect();
     pairs.sort_by_key(|pair| (pair.a().raw(), pair.b().raw()));
@@ -316,7 +309,11 @@ mod tests {
         );
         let yawed = [box_body(1, 0.0, yaw), body(2, 2.2)];
         let pairs = detect_pairs(&colliders, &yawed);
-        assert_eq!(pairs.len(), 1, "the yawed box's widened AABB now pairs the sphere");
+        assert_eq!(
+            pairs.len(),
+            1,
+            "the yawed box's widened AABB now pairs the sphere"
+        );
     }
 
     #[test]

@@ -164,15 +164,28 @@ pub fn render(t: &Telemetry, label: &str, json: bool) -> String {
     out.push_str(&format!("\n  render benchmark — {label}\n"));
     out.push_str(&format!("  frames measured: {n}\n"));
     out.push_str("  ── FPS ─────────────────────────────\n");
-    out.push_str(&format!("    avg     {avg_fps:6.1} fps   ({avg_ms:.1} ms/frame)\n"));
+    out.push_str(&format!(
+        "    avg     {avg_fps:6.1} fps   ({avg_ms:.1} ms/frame)\n"
+    ));
     out.push_str(&format!("    best    {best:6.1} fps\n"));
     out.push_str(&format!("    median  {median:6.1} fps\n"));
-    out.push_str(&format!("    p95     {p95_slow:6.1} fps   (95th-percentile-slowest frame)\n"));
+    out.push_str(&format!(
+        "    p95     {p95_slow:6.1} fps   (95th-percentile-slowest frame)\n"
+    ));
     out.push_str(&format!("    worst   {worst:6.1} fps\n"));
     out.push_str("  ── phases (avg ms/frame) ───────────\n");
-    out.push_str(&format!("    convert    {avg_convert:7.1} ms  ({:4.1}%)\n", pct(avg_convert)));
-    out.push_str(&format!("    rasterize  {avg_rasterize:7.1} ms  ({:4.1}%)\n", pct(avg_rasterize)));
-    out.push_str(&format!("    post       {avg_post:7.1} ms  ({:4.1}%)\n", pct(avg_post)));
+    out.push_str(&format!(
+        "    convert    {avg_convert:7.1} ms  ({:4.1}%)\n",
+        pct(avg_convert)
+    ));
+    out.push_str(&format!(
+        "    rasterize  {avg_rasterize:7.1} ms  ({:4.1}%)\n",
+        pct(avg_rasterize)
+    ));
+    out.push_str(&format!(
+        "    post       {avg_post:7.1} ms  ({:4.1}%)\n",
+        pct(avg_post)
+    ));
     if !t.deeps.is_empty() {
         out.push_str("  ── convert deep-split (debug build) ─\n");
         out.push_str(&format!("    project     {avg_project:7.1} ms\n"));

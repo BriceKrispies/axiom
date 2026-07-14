@@ -95,7 +95,9 @@ fn integrate_velocity(
 /// velocity and its orientation by its angular velocity, over `dt`. Static,
 /// kinematic, and disabled bodies do not move or rotate.
 pub(crate) fn integrate_positions(bodies: &mut [PhysicsBody], dt: f32) {
-    bodies.iter_mut().for_each(|body| integrate_position(body, dt));
+    bodies
+        .iter_mut()
+        .for_each(|body| integrate_position(body, dt));
 }
 
 fn integrate_position(body: &mut PhysicsBody, dt: f32) {
@@ -114,7 +116,12 @@ fn integrate_position(body: &mut PhysicsBody, dt: f32) {
 /// untouched original orientation (index `0`), so an inactive body's orientation
 /// is byte-preserved.
 fn integrate_orientation(q: Quat, angular_velocity: Vec3, dt: f32, active: usize) -> Quat {
-    let omega = Quat::new(angular_velocity.x, angular_velocity.y, angular_velocity.z, 0.0);
+    let omega = Quat::new(
+        angular_velocity.x,
+        angular_velocity.y,
+        angular_velocity.z,
+        0.0,
+    );
     let spin = omega.multiply(q);
     let half = 0.5 * dt;
     let candidate = Quat::new(

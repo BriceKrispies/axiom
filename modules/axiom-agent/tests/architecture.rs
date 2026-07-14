@@ -137,11 +137,13 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
-    assert!(manifest.is_file(), "expected modules/axiom-agent/module.toml");
+    assert!(
+        manifest.is_file(),
+        "expected modules/axiom-agent/module.toml"
+    );
     let raw = fs::read_to_string(&manifest).unwrap();
     let stripped = strip_comments_and_strings(&raw);
     assert!(
@@ -176,7 +178,6 @@ fn lib_rs_exports_exactly_one_facade() {
         "axiom-agent exposes no identity-vocabulary line — only AgentApi"
     );
 }
-
 
 #[test]
 fn agent_imports_only_legal_layers() {
@@ -215,7 +216,10 @@ fn agent_imports_no_other_modules() {
         .map(|e| e.file_name().to_string_lossy().replace('-', "_"))
         .filter(|name| name != "axiom_agent")
         .collect();
-    assert!(!other_modules.is_empty(), "expected sibling modules to exist");
+    assert!(
+        !other_modules.is_empty(),
+        "expected sibling modules to exist"
+    );
     let mut violations = Vec::new();
     for path in source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -224,7 +228,11 @@ fn agent_imports_no_other_modules() {
             .collect();
         for other in &other_modules {
             if tokens.contains(other.as_str()) {
-                violations.push(format!("{}: references other module `{}`", path.display(), other));
+                violations.push(format!(
+                    "{}: references other module `{}`",
+                    path.display(),
+                    other
+                ));
             }
         }
     }
@@ -237,7 +245,14 @@ fn agent_imports_no_other_modules() {
 
 #[test]
 fn no_layer_imports_axiom_agent() {
-    for layer in ["axiom-kernel", "axiom-runtime", "axiom-math", "axiom-host", "axiom-frame", "axiom-ecs"] {
+    for layer in [
+        "axiom-kernel",
+        "axiom-runtime",
+        "axiom-math",
+        "axiom-host",
+        "axiom-frame",
+        "axiom-ecs",
+    ] {
         let src = repo_root().join("crates").join(layer).join("src");
         assert_absent_in_other(
             src,
@@ -247,7 +262,6 @@ fn no_layer_imports_axiom_agent() {
         );
     }
 }
-
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -260,7 +274,14 @@ fn no_browser_or_js_bindgen_apis() {
 #[test]
 fn no_dom_canvas_or_browser_globals() {
     assert_absent(
-        &["HtmlCanvas", "canvas", "requestAnimationFrame", "document.", "window.", "navigator."],
+        &[
+            "HtmlCanvas",
+            "canvas",
+            "requestAnimationFrame",
+            "document.",
+            "window.",
+            "navigator.",
+        ],
         "axiom-agent must not reference DOM/canvas/browser globals",
     );
 }
@@ -292,7 +313,13 @@ fn no_randomness() {
 #[test]
 fn no_threads_or_async_runtimes() {
     assert_absent(
-        &["thread::spawn", "tokio", "async_std", "std::net", "std::process"],
+        &[
+            "thread::spawn",
+            "tokio",
+            "async_std",
+            "std::net",
+            "std::process",
+        ],
         "axiom-agent must not spawn threads, use async runtimes, or touch net/process",
     );
 }
@@ -384,7 +411,10 @@ fn no_junk_drawer_modules() {
     for path in source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc", "shared", "prelude"] {
-            assert_ne!(name, banned, "axiom-agent must not have a `{banned}` module");
+            assert_ne!(
+                name, banned,
+                "axiom-agent must not have a `{banned}` module"
+            );
         }
     }
 }

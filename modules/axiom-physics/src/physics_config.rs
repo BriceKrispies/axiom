@@ -134,7 +134,14 @@ mod tests {
         substeps: u32,
     ) -> PhysicsResult<PhysicsConfig> {
         PhysicsConfig::new(
-            gravity, iters, bodies, colliders, substeps, true, r(0.0), r(0.0),
+            gravity,
+            iters,
+            bodies,
+            colliders,
+            substeps,
+            true,
+            r(0.0),
+            r(0.0),
         )
     }
 
@@ -152,7 +159,14 @@ mod tests {
     #[test]
     fn new_accepts_valid_values_and_stores_damping() {
         let c = PhysicsConfig::new(
-            Vec3::new(0.0, -1.0, 0.0), 4, 16, 16, 2, false, r(0.1), r(0.25),
+            Vec3::new(0.0, -1.0, 0.0),
+            4,
+            16,
+            16,
+            2,
+            false,
+            r(0.1),
+            r(0.25),
         )
         .unwrap();
         assert_eq!(c.solver_iterations(), 4);
@@ -177,13 +191,19 @@ mod tests {
         assert!(PhysicsConfig::new(Vec3::ZERO, 1, 1, 1, 1, true, r(1.1), r(0.0)).is_err());
         assert!(PhysicsConfig::new(Vec3::ZERO, 1, 1, 1, 1, true, r(0.0), r(-0.1)).is_err());
         let e = PhysicsConfig::new(Vec3::ZERO, 1, 1, 1, 1, true, r(0.0), r(2.0)).unwrap_err();
-        assert_eq!(e.code(), crate::physics_error_code::PhysicsErrorCode::InvalidConfig);
+        assert_eq!(
+            e.code(),
+            crate::physics_error_code::PhysicsErrorCode::InvalidConfig
+        );
     }
 
     #[test]
     fn new_rejects_non_finite_gravity() {
         let e = valid(Vec3::new(f32::NAN, 0.0, 0.0), 1, 1, 1, 1).unwrap_err();
-        assert_eq!(e.code(), crate::physics_error_code::PhysicsErrorCode::InvalidConfig);
+        assert_eq!(
+            e.code(),
+            crate::physics_error_code::PhysicsErrorCode::InvalidConfig
+        );
         assert!(valid(Vec3::new(0.0, f32::INFINITY, 0.0), 1, 1, 1, 1).is_err());
     }
 

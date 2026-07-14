@@ -17,9 +17,7 @@ use crate::constraint::{Constraint, ResolvedConstraint};
 use crate::contact::{ContactDeclaration, ResolvedContact};
 use crate::humanoid_rig::HumanoidRigSpec;
 use crate::ids::{EffectorId, JointId};
-use crate::motion_event::{
-    EventKind, MotionEvent, ResolvedEvent, UNUSED_EFFECTOR, UNUSED_TARGET,
-};
+use crate::motion_event::{EventKind, MotionEvent, ResolvedEvent, UNUSED_EFFECTOR, UNUSED_TARGET};
 use crate::motion_phase::{MotionPhase, ResolvedPhase};
 use crate::motion_plan::MotionPlan;
 use crate::motion_spec::MotionSpec;
@@ -55,9 +53,9 @@ fn validate_ranges(spec: &MotionSpec) -> AuthoringResult<()> {
         .iter()
         .all(|p| (p.start().raw() < p.end().raw()) & (p.end().raw() <= duration));
     let events_ok = spec.events().iter().all(|e| e.tick().raw() < duration);
-    (phases_ok & events_ok)
-        .then_some(())
-        .ok_or_else(|| AuthoringError::invalid_tick_range("phase or event tick range out of bounds"))
+    (phases_ok & events_ok).then_some(()).ok_or_else(|| {
+        AuthoringError::invalid_tick_range("phase or event tick range out of bounds")
+    })
 }
 
 /// Reject any pair of phases whose `[start, end)` spans overlap.
@@ -80,7 +78,9 @@ fn validate_finite(spec: &MotionSpec) -> AuthoringResult<()> {
     let styles_ok = spec.styles().iter().all(|(_, v)| v.is_finite());
     let phases_ok = spec.phases().iter().all(|ph| {
         ph.layer_weight().is_finite()
-            & ph.goals().iter().all(|g| finite3(g.euler()) & finite3(g.axis()) & g.amount().is_finite())
+            & ph.goals()
+                .iter()
+                .all(|g| finite3(g.euler()) & finite3(g.axis()) & g.amount().is_finite())
     });
     let events_ok = spec.events().iter().all(|e| e.power().is_finite());
     (targets_ok & styles_ok & phases_ok & events_ok)
@@ -103,8 +103,11 @@ fn resolve_effector_joint(
     rig: &HumanoidRigSpec,
     name: Option<&str>,
 ) -> AuthoringResult<(EffectorId, JointId)> {
-    name.and_then(|n| rig.effector_id(n).and_then(|eid| rig.effector(eid).map(|e| (eid, e.joint()))))
-        .ok_or_else(|| AuthoringError::unknown_effector("effector name absent from rig"))
+    name.and_then(|n| {
+        rig.effector_id(n)
+            .and_then(|eid| rig.effector(eid).map(|e| (eid, e.joint())))
+    })
+    .ok_or_else(|| AuthoringError::unknown_effector("effector name absent from rig"))
 }
 
 /// Resolve a target name to its position.
@@ -131,61 +134,141 @@ fn upper_arm_name(right: bool) -> &'static str {
 
 type GoalResolver = fn(&PoseGoal, &HumanoidRigSpec, &MotionSpec) -> AuthoringResult<ResolvedGoal>;
 
-fn resolve_set_joint(g: &PoseGoal, rig: &HumanoidRigSpec, _spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+fn resolve_set_joint(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    _spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
     // Collapse "no joint name" (unreachable — the constructor always sets one) and
     // "joint name absent from rig" into one reachable error arm.
     g.joint_name()
         .and_then(|n| rig.joint_id(n))
         .ok_or_else(|| AuthoringError::unknown_joint("set_joint_rotation joint absent from rig"))
-        .map(|joint| ResolvedGoal::new(GoalKind::SetJointRotation, joint, Vec3::ZERO, 0.0, g.euler()))
+        .map(|joint| {
+            ResolvedGoal::new(
+                GoalKind::SetJointRotation,
+                joint,
+                Vec3::ZERO,
+                0.0,
+                g.euler(),
+            )
+        })
 }
 
-fn resolve_aim(g: &PoseGoal, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+fn resolve_aim(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
     resolve_effector_joint(rig, g.effector_name()).and_then(|(_eff, joint)| {
-        resolve_target_pos(spec, g.target_name())
-            .map(|target| ResolvedGoal::new(GoalKind::AimEffectorAtTarget, joint, target, 0.0, Vec3::ZERO))
+        resolve_target_pos(spec, g.target_name()).map(|target| {
+            ResolvedGoal::new(
+                GoalKind::AimEffectorAtTarget,
+                joint,
+                target,
+                0.0,
+                Vec3::ZERO,
+            )
+        })
     })
 }
 
-fn resolve_move(g: &PoseGoal, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+fn resolve_move(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
     resolve_effector_joint(rig, g.effector_name()).and_then(|(_eff, joint)| {
-        resolve_target_pos(spec, g.target_name())
-            .map(|target| ResolvedGoal::new(GoalKind::MoveEffectorTowardTarget, joint, target, g.amount(), Vec3::ZERO))
+        resolve_target_pos(spec, g.target_name()).map(|target| {
+            ResolvedGoal::new(
+                GoalKind::MoveEffectorTowardTarget,
+                joint,
+                target,
+                g.amount(),
+                Vec3::ZERO,
+            )
+        })
     })
 }
 
-fn resolve_raise_arm(g: &PoseGoal, rig: &HumanoidRigSpec, _spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
-    resolve_joint(rig, upper_arm_name(g.side_right()))
-        .map(|joint| ResolvedGoal::new(GoalKind::RaiseArmForBalance, joint, Vec3::ZERO, 0.0, Vec3::ZERO))
+fn resolve_raise_arm(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    _spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
+    resolve_joint(rig, upper_arm_name(g.side_right())).map(|joint| {
+        ResolvedGoal::new(
+            GoalKind::RaiseArmForBalance,
+            joint,
+            Vec3::ZERO,
+            0.0,
+            Vec3::ZERO,
+        )
+    })
 }
 
-fn resolve_torso_twist(g: &PoseGoal, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+fn resolve_torso_twist(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
     resolve_joint(rig, "chest").and_then(|joint| {
-        resolve_target_pos(spec, g.target_name())
-            .map(|target| ResolvedGoal::new(GoalKind::TorsoTwistTowardTarget, joint, target, g.amount(), Vec3::ZERO))
+        resolve_target_pos(spec, g.target_name()).map(|target| {
+            ResolvedGoal::new(
+                GoalKind::TorsoTwistTowardTarget,
+                joint,
+                target,
+                g.amount(),
+                Vec3::ZERO,
+            )
+        })
     })
 }
 
-fn resolve_leg_backswing(g: &PoseGoal, rig: &HumanoidRigSpec, _spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
-    resolve_joint(rig, thigh_name(g.side_right()))
-        .map(|joint| ResolvedGoal::new(GoalKind::LegBackswing, joint, Vec3::ZERO, g.amount(), Vec3::ZERO))
+fn resolve_leg_backswing(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    _spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
+    resolve_joint(rig, thigh_name(g.side_right())).map(|joint| {
+        ResolvedGoal::new(
+            GoalKind::LegBackswing,
+            joint,
+            Vec3::ZERO,
+            g.amount(),
+            Vec3::ZERO,
+        )
+    })
 }
 
-fn resolve_leg_strike(g: &PoseGoal, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+fn resolve_leg_strike(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
     resolve_joint(rig, thigh_name(g.side_right())).and_then(|joint| {
         resolve_target_pos(spec, g.target_name())
             .map(|target| ResolvedGoal::new(GoalKind::LegStrike, joint, target, 0.0, Vec3::ZERO))
     })
 }
 
-fn resolve_follow_through(g: &PoseGoal, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+fn resolve_follow_through(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
     resolve_joint(rig, thigh_name(g.side_right())).and_then(|joint| {
-        resolve_target_pos(spec, g.target_name())
-            .map(|target| ResolvedGoal::new(GoalKind::FollowThrough, joint, target, 0.0, Vec3::ZERO))
+        resolve_target_pos(spec, g.target_name()).map(|target| {
+            ResolvedGoal::new(GoalKind::FollowThrough, joint, target, 0.0, Vec3::ZERO)
+        })
     })
 }
 
-fn resolve_run_cycle(g: &PoseGoal, rig: &HumanoidRigSpec, _spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+fn resolve_run_cycle(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    _spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
     // Resolve the named joint (like set_joint); carry the amplitude (`amount`) and
     // the `(phase_offset, steps, bias)` cycle parameters (`euler`) through.
     g.joint_name()
@@ -208,11 +291,19 @@ const GOAL_RESOLVERS: [GoalResolver; 9] = [
     resolve_run_cycle,
 ];
 
-fn resolve_goal(g: &PoseGoal, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedGoal> {
+fn resolve_goal(
+    g: &PoseGoal,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedGoal> {
     GOAL_RESOLVERS[g.kind() as usize](g, rig, spec)
 }
 
-fn resolve_constraint(c: &Constraint, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedConstraint> {
+fn resolve_constraint(
+    c: &Constraint,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedConstraint> {
     resolve_opt(
         c.effector_name(),
         |n| rig.effector_id(n),
@@ -228,9 +319,14 @@ fn resolve_constraint(c: &Constraint, rig: &HumanoidRigSpec, spec: &MotionSpec) 
     })
 }
 
-fn resolve_contact(c: &ContactDeclaration, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedContact> {
+fn resolve_contact(
+    c: &ContactDeclaration,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedContact> {
     resolve_effector_joint(rig, Some(c.effector_name())).and_then(|(eff, _joint)| {
-        resolve_target_pos(spec, Some(c.target_name())).map(|target| ResolvedContact::new(eff, target))
+        resolve_target_pos(spec, Some(c.target_name()))
+            .map(|target| ResolvedContact::new(eff, target))
     })
 }
 
@@ -246,11 +342,21 @@ fn resolve_root(root: &RootMotion, spec: &MotionSpec) -> AuthoringResult<Resolve
             |n| spec.target_position(n),
             AuthoringError::unknown_target("root-motion `to` target never declared"),
         )
-        .map(|to| ResolvedRootMotion::new(root.kind(), from.unwrap_or(Vec3::ZERO), to.unwrap_or(Vec3::ZERO)))
+        .map(|to| {
+            ResolvedRootMotion::new(
+                root.kind(),
+                from.unwrap_or(Vec3::ZERO),
+                to.unwrap_or(Vec3::ZERO),
+            )
+        })
     })
 }
 
-fn resolve_phase(ph: &MotionPhase, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedPhase> {
+fn resolve_phase(
+    ph: &MotionPhase,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedPhase> {
     resolve_root(ph.root(), spec).and_then(|root| {
         ph.goals()
             .iter()
@@ -282,9 +388,14 @@ fn resolve_phase(ph: &MotionPhase, rig: &HumanoidRigSpec, spec: &MotionSpec) -> 
     })
 }
 
-type EventResolver = fn(&MotionEvent, &HumanoidRigSpec, &MotionSpec) -> AuthoringResult<ResolvedEvent>;
+type EventResolver =
+    fn(&MotionEvent, &HumanoidRigSpec, &MotionSpec) -> AuthoringResult<ResolvedEvent>;
 
-fn resolve_named(e: &MotionEvent, _rig: &HumanoidRigSpec, _spec: &MotionSpec) -> AuthoringResult<ResolvedEvent> {
+fn resolve_named(
+    e: &MotionEvent,
+    _rig: &HumanoidRigSpec,
+    _spec: &MotionSpec,
+) -> AuthoringResult<ResolvedEvent> {
     Ok(ResolvedEvent::new(
         EventKind::Named,
         e.tick(),
@@ -296,7 +407,11 @@ fn resolve_named(e: &MotionEvent, _rig: &HumanoidRigSpec, _spec: &MotionSpec) ->
     ))
 }
 
-fn resolve_ball_contact(e: &MotionEvent, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedEvent> {
+fn resolve_ball_contact(
+    e: &MotionEvent,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedEvent> {
     resolve_effector_joint(rig, e.contact_surface()).and_then(|(surface, _joint)| {
         e.target_name()
             .and_then(|n| spec.target_id(n))
@@ -304,7 +419,11 @@ fn resolve_ball_contact(e: &MotionEvent, rig: &HumanoidRigSpec, spec: &MotionSpe
             .and_then(|target| {
                 e.direction_target_name()
                     .and_then(|n| spec.target_id(n))
-                    .ok_or_else(|| AuthoringError::unknown_target("ball-contact direction target never declared"))
+                    .ok_or_else(|| {
+                        AuthoringError::unknown_target(
+                            "ball-contact direction target never declared",
+                        )
+                    })
                     .map(|direction| {
                         ResolvedEvent::new(
                             EventKind::BallContact,
@@ -323,7 +442,11 @@ fn resolve_ball_contact(e: &MotionEvent, rig: &HumanoidRigSpec, spec: &MotionSpe
 /// Per-kind event resolvers, indexed by [`EventKind`] discriminant.
 const EVENT_RESOLVERS: [EventResolver; 2] = [resolve_named, resolve_ball_contact];
 
-fn resolve_event(e: &MotionEvent, rig: &HumanoidRigSpec, spec: &MotionSpec) -> AuthoringResult<ResolvedEvent> {
+fn resolve_event(
+    e: &MotionEvent,
+    rig: &HumanoidRigSpec,
+    spec: &MotionSpec,
+) -> AuthoringResult<ResolvedEvent> {
     EVENT_RESOLVERS[e.kind() as usize](e, rig, spec)
 }
 
@@ -396,7 +519,13 @@ mod tests {
     #[test]
     fn a_valid_ball_contact_event_resolves_into_the_plan() {
         let mut m = base_spec();
-        m.add_event(MotionEvent::ball_contact(Tick::new(5), "right_foot_instep", "ball", "net_center", 0.7));
+        m.add_event(MotionEvent::ball_contact(
+            Tick::new(5),
+            "right_foot_instep",
+            "ball",
+            "net_center",
+            0.7,
+        ));
         let plan = MotionCompiler::compile(&m, &rig()).unwrap();
         assert!(plan.events_at(5)[0].is_ball_contact());
         assert!((plan.events_at(5)[0].power() - 0.7).abs() < 1.0e-6);
@@ -441,7 +570,9 @@ mod tests {
         assert_eq!(err(&s), AuthoringErrorCode::NonFiniteValue);
 
         let mut g = base_spec();
-        g.phase_mut(0).unwrap().push_goal(PoseGoal::leg_backswing(true, f32::NAN));
+        g.phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::leg_backswing(true, f32::NAN));
         assert_eq!(err(&g), AuthoringErrorCode::NonFiniteValue);
 
         let mut w = base_spec();
@@ -449,76 +580,130 @@ mod tests {
         assert_eq!(err(&w), AuthoringErrorCode::NonFiniteValue);
 
         let mut e = base_spec();
-        e.add_event(MotionEvent::ball_contact(Tick::new(5), "right_foot_instep", "ball", "net_center", f32::NAN));
+        e.add_event(MotionEvent::ball_contact(
+            Tick::new(5),
+            "right_foot_instep",
+            "ball",
+            "net_center",
+            f32::NAN,
+        ));
         assert_eq!(err(&e), AuthoringErrorCode::NonFiniteValue);
     }
 
     #[test]
     fn an_unknown_joint_is_rejected() {
         let mut m = base_spec();
-        m.phase_mut(0).unwrap().push_goal(PoseGoal::set_joint_rotation("no_such_joint", Vec3::ZERO));
+        m.phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::set_joint_rotation("no_such_joint", Vec3::ZERO));
         assert_eq!(err(&m), AuthoringErrorCode::UnknownJoint);
     }
 
     #[test]
     fn an_unknown_effector_is_rejected_across_goals_constraints_contacts_and_events() {
         let mut g = base_spec();
-        g.phase_mut(0).unwrap().push_goal(PoseGoal::aim_effector_at_target("ghost", "ball"));
+        g.phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::aim_effector_at_target("ghost", "ball"));
         assert_eq!(err(&g), AuthoringErrorCode::UnknownEffector);
 
         let mut mv = base_spec();
-        mv.phase_mut(0).unwrap().push_goal(PoseGoal::move_effector_toward_target("ghost", "ball", 0.5));
+        mv.phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::move_effector_toward_target("ghost", "ball", 0.5));
         assert_eq!(err(&mv), AuthoringErrorCode::UnknownEffector);
 
         let mut c = base_spec();
-        c.phase_mut(0).unwrap().push_constraint(Constraint::pin_effector_to_target("ghost", "ball"));
+        c.phase_mut(0)
+            .unwrap()
+            .push_constraint(Constraint::pin_effector_to_target("ghost", "ball"));
         assert_eq!(err(&c), AuthoringErrorCode::UnknownEffector);
 
         let mut ct = base_spec();
-        ct.phase_mut(0).unwrap().push_contact(ContactDeclaration::new("ghost", "ball"));
+        ct.phase_mut(0)
+            .unwrap()
+            .push_contact(ContactDeclaration::new("ghost", "ball"));
         assert_eq!(err(&ct), AuthoringErrorCode::UnknownEffector);
 
         let mut ev = base_spec();
-        ev.add_event(MotionEvent::ball_contact(Tick::new(5), "ghost", "ball", "net_center", 0.5));
+        ev.add_event(MotionEvent::ball_contact(
+            Tick::new(5),
+            "ghost",
+            "ball",
+            "net_center",
+            0.5,
+        ));
         assert_eq!(err(&ev), AuthoringErrorCode::UnknownEffector);
     }
 
     #[test]
     fn an_unknown_target_is_rejected_across_every_reference_site() {
         let mut aim = base_spec();
-        aim.phase_mut(0).unwrap().push_goal(PoseGoal::aim_effector_at_target("right_foot_instep", "ghost"));
+        aim.phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::aim_effector_at_target(
+                "right_foot_instep",
+                "ghost",
+            ));
         assert_eq!(err(&aim), AuthoringErrorCode::UnknownTarget);
 
         let mut torso = base_spec();
-        torso.phase_mut(0).unwrap().push_goal(PoseGoal::torso_twist_toward_target("ghost", 0.5));
+        torso
+            .phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::torso_twist_toward_target("ghost", 0.5));
         assert_eq!(err(&torso), AuthoringErrorCode::UnknownTarget);
 
         let mut strike = base_spec();
-        strike.phase_mut(0).unwrap().push_goal(PoseGoal::leg_strike(true, "ghost"));
+        strike
+            .phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::leg_strike(true, "ghost"));
         assert_eq!(err(&strike), AuthoringErrorCode::UnknownTarget);
 
         let mut follow = base_spec();
-        follow.phase_mut(0).unwrap().push_goal(PoseGoal::follow_through(true, "ghost"));
+        follow
+            .phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::follow_through(true, "ghost"));
         assert_eq!(err(&follow), AuthoringErrorCode::UnknownTarget);
 
         let mut con = base_spec();
-        con.phase_mut(0).unwrap().push_constraint(Constraint::keep_gaze_on_target("ghost"));
+        con.phase_mut(0)
+            .unwrap()
+            .push_constraint(Constraint::keep_gaze_on_target("ghost"));
         assert_eq!(err(&con), AuthoringErrorCode::UnknownTarget);
 
         let mut ct = base_spec();
-        ct.phase_mut(0).unwrap().push_contact(ContactDeclaration::new("left_foot_sole", "ghost"));
+        ct.phase_mut(0)
+            .unwrap()
+            .push_contact(ContactDeclaration::new("left_foot_sole", "ghost"));
         assert_eq!(err(&ct), AuthoringErrorCode::UnknownTarget);
 
         let mut root = base_spec();
-        root.phase_mut(0).unwrap().set_root(RootMotion::move_toward("approach_start", "ball"));
+        root.phase_mut(0)
+            .unwrap()
+            .set_root(RootMotion::move_toward("approach_start", "ball"));
         assert_eq!(err(&root), AuthoringErrorCode::UnknownTarget); // approach_start not declared
 
         let mut evt = base_spec();
-        evt.add_event(MotionEvent::ball_contact(Tick::new(5), "right_foot_instep", "ghost", "net_center", 0.5));
+        evt.add_event(MotionEvent::ball_contact(
+            Tick::new(5),
+            "right_foot_instep",
+            "ghost",
+            "net_center",
+            0.5,
+        ));
         assert_eq!(err(&evt), AuthoringErrorCode::UnknownTarget);
 
         let mut evd = base_spec();
-        evd.add_event(MotionEvent::ball_contact(Tick::new(5), "right_foot_instep", "ball", "ghost", 0.5));
+        evd.add_event(MotionEvent::ball_contact(
+            Tick::new(5),
+            "right_foot_instep",
+            "ball",
+            "ghost",
+            0.5,
+        ));
         assert_eq!(err(&evd), AuthoringErrorCode::UnknownTarget);
     }
 
@@ -528,21 +713,28 @@ mod tests {
         // error arms of the raise-arm / torso / leg resolvers.
         let bare = HumanoidRigSpec::empty();
         let mut arm = base_spec();
-        arm.phase_mut(0).unwrap().push_goal(PoseGoal::raise_arm_for_balance(true));
+        arm.phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::raise_arm_for_balance(true));
         assert_eq!(
             MotionCompiler::compile(&arm, &bare).unwrap_err().code(),
             AuthoringErrorCode::UnknownJoint
         );
 
         let mut back = base_spec();
-        back.phase_mut(0).unwrap().push_goal(PoseGoal::leg_backswing(false, 0.5));
+        back.phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::leg_backswing(false, 0.5));
         assert_eq!(
             MotionCompiler::compile(&back, &bare).unwrap_err().code(),
             AuthoringErrorCode::UnknownJoint
         );
 
         let mut torso = base_spec();
-        torso.phase_mut(0).unwrap().push_goal(PoseGoal::torso_twist_toward_target("ball", 0.5));
+        torso
+            .phase_mut(0)
+            .unwrap()
+            .push_goal(PoseGoal::torso_twist_toward_target("ball", 0.5));
         assert_eq!(
             MotionCompiler::compile(&torso, &bare).unwrap_err().code(),
             AuthoringErrorCode::UnknownJoint
@@ -557,20 +749,48 @@ mod tests {
             let p = m.phase_mut(0).unwrap();
             p.set_ease(EaseCurve::SmoothStep);
             p.set_root(RootMotion::hold());
-            p.push_goal(PoseGoal::set_joint_rotation("chest", Vec3::new(0.0, 0.2, 0.0)));
-            p.push_goal(PoseGoal::aim_effector_at_target("right_foot_instep", "ball"));
-            p.push_goal(PoseGoal::move_effector_toward_target("left_hand", "ball", 0.5));
+            p.push_goal(PoseGoal::set_joint_rotation(
+                "chest",
+                Vec3::new(0.0, 0.2, 0.0),
+            ));
+            p.push_goal(PoseGoal::aim_effector_at_target(
+                "right_foot_instep",
+                "ball",
+            ));
+            p.push_goal(PoseGoal::move_effector_toward_target(
+                "left_hand",
+                "ball",
+                0.5,
+            ));
             p.push_goal(PoseGoal::raise_arm_for_balance(true));
             p.push_goal(PoseGoal::torso_twist_toward_target("net_center", 0.5));
             p.push_goal(PoseGoal::leg_backswing(true, 0.8));
             p.push_goal(PoseGoal::leg_strike(true, "ball"));
             p.push_goal(PoseGoal::follow_through(true, "net_center"));
-            p.push_goal(PoseGoal::run_cycle("left_thigh", 0.5, 0.0, 3.0, 0.0, Vec3::new(1.0, 0.0, 0.0)));
-            p.push_constraint(Constraint::pin_effector_to_target("left_foot_sole", "left_plant_spot"));
+            p.push_goal(PoseGoal::run_cycle(
+                "left_thigh",
+                0.5,
+                0.0,
+                3.0,
+                0.0,
+                Vec3::new(1.0, 0.0, 0.0),
+            ));
+            p.push_constraint(Constraint::pin_effector_to_target(
+                "left_foot_sole",
+                "left_plant_spot",
+            ));
             p.push_constraint(Constraint::keep_gaze_on_target("ball"));
-            p.push_constraint(Constraint::keep_center_of_mass_over_support("left_foot_sole"));
-            p.push_constraint(Constraint::orient_surface_toward_target("right_foot_instep", "net_center"));
-            p.push_constraint(Constraint::preserve_foot_contact("left_foot_sole", "left_plant_spot"));
+            p.push_constraint(Constraint::keep_center_of_mass_over_support(
+                "left_foot_sole",
+            ));
+            p.push_constraint(Constraint::orient_surface_toward_target(
+                "right_foot_instep",
+                "net_center",
+            ));
+            p.push_constraint(Constraint::preserve_foot_contact(
+                "left_foot_sole",
+                "left_plant_spot",
+            ));
             p.push_contact(ContactDeclaration::new("left_foot_sole", "left_plant_spot"));
         }
         let plan = MotionCompiler::compile(&m, &rig()).unwrap();
@@ -582,7 +802,14 @@ mod tests {
     #[test]
     fn a_run_cycle_on_an_unknown_joint_is_rejected() {
         let mut m = base_spec();
-        m.phase_mut(0).unwrap().push_goal(PoseGoal::run_cycle("no_such_joint", 0.5, 0.0, 3.0, 0.0, Vec3::new(1.0, 0.0, 0.0)));
+        m.phase_mut(0).unwrap().push_goal(PoseGoal::run_cycle(
+            "no_such_joint",
+            0.5,
+            0.0,
+            3.0,
+            0.0,
+            Vec3::new(1.0, 0.0, 0.0),
+        ));
         assert_eq!(err(&m), AuthoringErrorCode::UnknownJoint);
     }
 }

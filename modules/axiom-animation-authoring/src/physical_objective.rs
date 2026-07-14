@@ -72,7 +72,11 @@ pub(crate) fn ball_impulse(plan: &MotionPlan, tick: u64) -> Option<(EffectorId, 
                 .map(|(ball, net)| {
                     let delta = net.subtract(ball);
                     let len = delta.length().max(1.0e-6);
-                    (e.contact_surface(), delta.mul_scalar(1.0 / len), Ratio::finite_or_zero(e.power()))
+                    (
+                        e.contact_surface(),
+                        delta.mul_scalar(1.0 / len),
+                        Ratio::finite_or_zero(e.power()),
+                    )
                 })
         })
 }
@@ -106,16 +110,25 @@ mod tests {
         let (api, plan) = penalty(0.7);
         // Approach ([0,12)) is a MoveToward approach_start(z=-3) -> ball(z=0): the
         // root-velocity objective points +Z (toward the ball).
-        let v = api.objective_root_velocity(plan, Tick::new(4)).unwrap().unwrap();
+        let v = api
+            .objective_root_velocity(plan, Tick::new(4))
+            .unwrap()
+            .unwrap();
         assert!(v.z > 0.0);
         // Plant ([12,20)) holds — no root-velocity objective.
-        assert_eq!(api.objective_root_velocity(plan, Tick::new(16)).unwrap(), None);
+        assert_eq!(
+            api.objective_root_velocity(plan, Tick::new(16)).unwrap(),
+            None
+        );
     }
 
     #[test]
     fn foot_plant_pins_the_left_foot_during_plant_only() {
         let (api, plan) = penalty(0.7);
-        let (_effector, target) = api.objective_foot_plant(plan, Tick::new(16)).unwrap().unwrap();
+        let (_effector, target) = api
+            .objective_foot_plant(plan, Tick::new(16))
+            .unwrap()
+            .unwrap();
         assert_eq!(target, Vec3::new(0.25, 0.0, -0.1)); // left_plant_spot
         assert_eq!(api.objective_foot_plant(plan, Tick::new(4)).unwrap(), None);
     }
@@ -128,31 +141,59 @@ mod tests {
         assert!(!backswing.is_empty() && !strike.is_empty());
         assert!(strike[0].2.get() > backswing[0].2.get());
         // A tick in no phase yields no motors.
-        assert!(api.objective_joint_motors(plan, Tick::new(99)).unwrap().is_empty());
+        assert!(api
+            .objective_joint_motors(plan, Tick::new(99))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
     fn ball_impulse_fires_at_strike_toward_the_net_scaled_by_power() {
         let (api, plan) = penalty(0.7);
-        let (_surface, dir, power) = api.objective_ball_impulse(plan, Tick::new(38)).unwrap().unwrap();
+        let (_surface, dir, power) = api
+            .objective_ball_impulse(plan, Tick::new(38))
+            .unwrap()
+            .unwrap();
         assert!(dir.z > 0.0);
         assert!((dir.length() - 1.0).abs() < 1.0e-4);
         assert!((power.get() - 0.7).abs() < 1.0e-6);
-        assert_eq!(api.objective_ball_impulse(plan, Tick::new(10)).unwrap(), None);
+        assert_eq!(
+            api.objective_ball_impulse(plan, Tick::new(10)).unwrap(),
+            None
+        );
     }
 
     #[test]
     fn active_phase_name_and_target_position_read_through_the_facade() {
         let (api, plan) = penalty(0.7);
-        assert_eq!(api.active_phase_name(plan, Tick::new(4)).unwrap().as_deref(), Some("approach"));
-        assert_eq!(api.active_phase_name(plan, Tick::new(38)).unwrap().as_deref(), Some("strike"));
+        assert_eq!(
+            api.active_phase_name(plan, Tick::new(4))
+                .unwrap()
+                .as_deref(),
+            Some("approach")
+        );
+        assert_eq!(
+            api.active_phase_name(plan, Tick::new(38))
+                .unwrap()
+                .as_deref(),
+            Some("strike")
+        );
         assert_eq!(api.active_phase_name(plan, Tick::new(999)).unwrap(), None);
-        assert_eq!(api.plan_target_position(plan, "ball").unwrap(), Some(Vec3::new(0.0, 0.0, 0.0)));
-        assert_eq!(api.plan_target_position(plan, "net_center").unwrap(), Some(Vec3::new(0.0, 0.8, 8.0)));
+        assert_eq!(
+            api.plan_target_position(plan, "ball").unwrap(),
+            Some(Vec3::new(0.0, 0.0, 0.0))
+        );
+        assert_eq!(
+            api.plan_target_position(plan, "net_center").unwrap(),
+            Some(Vec3::new(0.0, 0.8, 8.0))
+        );
         assert_eq!(api.plan_target_position(plan, "nope").unwrap(), None);
         assert!(api.plan_joint_id(plan, "pelvis").unwrap().is_some());
         assert!(api.plan_joint_id(plan, "nope").unwrap().is_none());
-        assert!(api.plan_effector_id(plan, "left_foot_sole").unwrap().is_some());
+        assert!(api
+            .plan_effector_id(plan, "left_foot_sole")
+            .unwrap()
+            .is_some());
         assert!(api.plan_effector_id(plan, "nope").unwrap().is_none());
         // Missing-plan errors propagate.
         let ghost = PlanId::from_raw(9);
@@ -170,7 +211,10 @@ mod tests {
     #[test]
     fn gaze_targets_the_ball_during_strike_only() {
         let (api, plan) = penalty(0.7);
-        assert_eq!(api.objective_gaze(plan, Tick::new(38)).unwrap(), Some(Vec3::new(0.0, 0.0, 0.0)));
+        assert_eq!(
+            api.objective_gaze(plan, Tick::new(38)).unwrap(),
+            Some(Vec3::new(0.0, 0.0, 0.0))
+        );
         assert_eq!(api.objective_gaze(plan, Tick::new(4)).unwrap(), None);
     }
 
@@ -182,10 +226,20 @@ mod tests {
         let m = api.create_motion("k", Tick::new(10), rig).unwrap();
         api.add_target(m, "spot", Vec3::new(1.0, 2.0, 3.0)).unwrap();
         api.add_phase(m, "p", Tick::new(0), Tick::new(10)).unwrap();
-        api.add_ball_contact(m, Tick::new(5), "right_foot_instep", "spot", "spot", Ratio::new(0.5).unwrap())
-            .unwrap();
+        api.add_ball_contact(
+            m,
+            Tick::new(5),
+            "right_foot_instep",
+            "spot",
+            "spot",
+            Ratio::new(0.5).unwrap(),
+        )
+        .unwrap();
         let plan = api.compile(m).unwrap();
-        let (_s, dir, _power) = api.objective_ball_impulse(plan, Tick::new(5)).unwrap().unwrap();
+        let (_s, dir, _power) = api
+            .objective_ball_impulse(plan, Tick::new(5))
+            .unwrap()
+            .unwrap();
         assert!(dir.length() < 1.0e-3);
     }
 }

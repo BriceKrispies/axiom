@@ -65,7 +65,10 @@ mod tests {
 
     #[test]
     fn codes_are_distinct_and_ordered() {
-        assert_ne!(PhysicsErrorCode::InvalidMass, PhysicsErrorCode::InvalidMaterial);
+        assert_ne!(
+            PhysicsErrorCode::InvalidMass,
+            PhysicsErrorCode::InvalidMaterial
+        );
         assert!(PhysicsErrorCode::InvalidConfig < PhysicsErrorCode::InvalidStep);
     }
 }

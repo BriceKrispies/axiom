@@ -170,7 +170,6 @@ impl PhysicsColliderShape {
         self.offset
     }
 
-
     /// `true` iff this collider is a sphere.
     pub fn is_sphere(&self) -> bool {
         self.kind == PhysicsShapeKind::Sphere
@@ -289,7 +288,10 @@ mod tests {
         assert!(PhysicsColliderShape::plane(Vec3::UNIT_Y, m(0.0)).is_ok());
         let e = PhysicsColliderShape::plane(Vec3::ZERO, m(0.0)).unwrap_err();
         assert_eq!(e.code(), PhysicsErrorCode::InvalidColliderShape);
-        assert!(e.math().is_some(), "plane error wraps the math normalize cause");
+        assert!(
+            e.math().is_some(),
+            "plane error wraps the math normalize cause"
+        );
         assert!(PhysicsColliderShape::plane(Vec3::new(f32::NAN, 1.0, 0.0), m(0.0)).is_err());
     }
 
@@ -309,7 +311,9 @@ mod tests {
         let capsule = PhysicsColliderShape::capsule(m(1.0), m(2.0)).unwrap();
         let plane = PhysicsColliderShape::plane(Vec3::UNIT_Y, m(5.0)).unwrap();
 
-        assert!(sphere.is_sphere() && !sphere.is_box() && !sphere.is_capsule() && !sphere.is_plane());
+        assert!(
+            sphere.is_sphere() && !sphere.is_box() && !sphere.is_capsule() && !sphere.is_plane()
+        );
         assert!(boxes.is_box() && !boxes.is_sphere());
         assert!(capsule.is_capsule() && !capsule.is_plane());
         assert!(plane.is_plane() && !plane.is_capsule());
@@ -341,6 +345,8 @@ mod tests {
         assert!(PhysicsColliderShape::heightfield_shape(Vec3::new(0.0, 1.0, 6.0)).is_err());
         assert!(PhysicsColliderShape::heightfield_shape(Vec3::new(4.0, 1.0, 0.0)).is_err());
         assert!(PhysicsColliderShape::heightfield_shape(Vec3::new(4.0, 0.0, 6.0)).is_ok());
-        assert!(!PhysicsColliderShape::sphere(m(1.0)).unwrap().is_heightfield());
+        assert!(!PhysicsColliderShape::sphere(m(1.0))
+            .unwrap()
+            .is_heightfield());
     }
 }

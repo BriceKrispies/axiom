@@ -136,11 +136,13 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
-    assert!(manifest.is_file(), "expected modules/axiom-tween/module.toml");
+    assert!(
+        manifest.is_file(),
+        "expected modules/axiom-tween/module.toml"
+    );
     let stripped = strip_comments_and_strings(&fs::read_to_string(&manifest).unwrap());
     assert!(
         stripped.contains("allowed_modules = []"),
@@ -166,13 +168,15 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
         vec!["pub use tween_api::TweenApi;"],
         "axiom-tween must expose exactly one behavioral facade (TweenApi)"
     );
-    let id_lines = pub_uses.iter().filter(|line| line.contains("ids::")).count();
+    let id_lines = pub_uses
+        .iter()
+        .filter(|line| line.contains("ids::"))
+        .count();
     assert_eq!(
         id_lines, 1,
         "axiom-tween re-exports its value vocabulary via exactly one `pub use ids::{{…}}` line"
     );
 }
-
 
 #[test]
 fn tween_imports_only_the_kernel() {
@@ -185,7 +189,8 @@ fn tween_imports_only_the_kernel() {
                 continue;
             }
             for chunk in trimmed.split(|c: char| !c.is_alphanumeric() && c != '_') {
-                if chunk.starts_with("axiom_") && chunk != "axiom_kernel" && chunk != "axiom_tween" {
+                if chunk.starts_with("axiom_") && chunk != "axiom_kernel" && chunk != "axiom_tween"
+                {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
                 }
             }
@@ -207,7 +212,10 @@ fn tween_imports_no_other_modules() {
         .map(|e| e.file_name().to_string_lossy().replace('-', "_"))
         .filter(|name| name != "axiom_tween")
         .collect();
-    assert!(!other_modules.is_empty(), "expected sibling modules to exist");
+    assert!(
+        !other_modules.is_empty(),
+        "expected sibling modules to exist"
+    );
     let mut violations = Vec::new();
     for path in source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -216,7 +224,11 @@ fn tween_imports_no_other_modules() {
             .collect();
         for other in &other_modules {
             if tokens.contains(other.as_str()) {
-                violations.push(format!("{}: references other module `{}`", path.display(), other));
+                violations.push(format!(
+                    "{}: references other module `{}`",
+                    path.display(),
+                    other
+                ));
             }
         }
     }
@@ -229,7 +241,12 @@ fn tween_imports_no_other_modules() {
 
 #[test]
 fn no_layer_imports_axiom_tween() {
-    for layer in ["axiom-kernel", "axiom-math", "axiom-interface", "axiom-frame"] {
+    for layer in [
+        "axiom-kernel",
+        "axiom-math",
+        "axiom-interface",
+        "axiom-frame",
+    ] {
         let src = repo_root().join("crates").join(layer).join("src");
         assert_absent_in_other(
             src,
@@ -239,7 +256,6 @@ fn no_layer_imports_axiom_tween() {
         );
     }
 }
-
 
 #[test]
 fn no_browser_platform_or_renderer_apis() {
@@ -337,7 +353,10 @@ fn no_junk_drawer_modules() {
     for path in source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc", "shared", "prelude"] {
-            assert_ne!(name, banned, "axiom-tween must not have a `{banned}` module");
+            assert_ne!(
+                name, banned,
+                "axiom-tween must not have a `{banned}` module"
+            );
         }
     }
 }
@@ -366,7 +385,6 @@ fn every_source_module_is_declared_in_lib_rs() {
         missing.join("\n")
     );
 }
-
 
 #[test]
 fn identical_tweens_replay_to_identical_samples() {

@@ -108,7 +108,10 @@ fn interpret(sub: &GpuSubmission, materials: &[(u64, [f32; 4])]) -> ([f32; 4], V
                 .unwrap_or([1.0, 1.0, 1.0, 1.0]);
         }
         if let Some((_index_count, world)) = cmd.as_draw_indexed() {
-            let mvp = depth_fix.multiply(projection).multiply(view).multiply(world);
+            let mvp = depth_fix
+                .multiply(projection)
+                .multiply(view)
+                .multiply(world);
             draws.push(PreparedDraw {
                 mesh_id,
                 mvp: mvp.as_cols_array(),

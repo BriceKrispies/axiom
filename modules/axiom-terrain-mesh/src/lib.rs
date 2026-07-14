@@ -155,7 +155,12 @@ mod tests {
     #[test]
     fn rect_mesh_has_independent_x_and_z_sides_and_counts() {
         // half (6, 2) with spacing (2, 1): side_x = ceil(12/2)+1 = 7, side_z = ceil(4/1)+1 = 5.
-        let mesh = TerrainMeshApi::heightfield_grid_mesh_rect((m(0.0), m(0.0)), (m(6.0), m(2.0)), (m(2.0), m(1.0)), flat);
+        let mesh = TerrainMeshApi::heightfield_grid_mesh_rect(
+            (m(0.0), m(0.0)),
+            (m(6.0), m(2.0)),
+            (m(2.0), m(1.0)),
+            flat,
+        );
         let (sx, sz) = (7usize, 5usize);
         assert_eq!(mesh.positions().len(), sx * sz);
         assert_eq!(mesh.normals().len(), sx * sz);
@@ -167,7 +172,10 @@ mod tests {
         assert_eq!((p[1].x, p[1].z), (-4.0, -2.0));
         assert_eq!((p[sx].x, p[sx].z), (-6.0, -1.0));
         // Flat field → all normals up.
-        assert!(mesh.normals().iter().all(|n| (n.y - 1.0).abs() < 1.0e-6 && n.x == 0.0 && n.z == 0.0));
+        assert!(mesh
+            .normals()
+            .iter()
+            .all(|n| (n.y - 1.0).abs() < 1.0e-6 && n.x == 0.0 && n.z == 0.0));
     }
 
     #[test]
@@ -182,6 +190,9 @@ mod tests {
         let n = mesh.normals()[0];
         assert!(n.x < 0.0, "normal leans −x on a +x ramp, got {}", n.x);
         assert!(n.z.abs() < 1.0e-6, "flat in z");
-        assert!((n.x * n.x + n.y * n.y + n.z * n.z - 1.0).abs() < 1.0e-5, "unit normal");
+        assert!(
+            (n.x * n.x + n.y * n.y + n.z * n.z - 1.0).abs() < 1.0e-5,
+            "unit normal"
+        );
     }
 }

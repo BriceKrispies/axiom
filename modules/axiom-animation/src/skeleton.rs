@@ -44,11 +44,7 @@ impl Skeleton {
     /// [`crate::animation_error_code::AnimationErrorCode::BoneNotFound`] if
     /// `parent` is not an already-added bone (which also guarantees the
     /// parent-before-child ordering the model pass relies on).
-    pub(crate) fn add_child(
-        &mut self,
-        parent: BoneId,
-        rest: Transform,
-    ) -> AnimationResult<BoneId> {
+    pub(crate) fn add_child(&mut self, parent: BoneId, rest: Transform) -> AnimationResult<BoneId> {
         (parent.raw() < self.bones.len() as u64)
             .then(|| self.push(Bone::child(parent, rest)))
             .ok_or_else(|| AnimationError::bone_not_found("child bone parent index out of range"))
@@ -139,7 +135,10 @@ mod tests {
         let mut w = BinaryWriter::new();
         skel.write_to(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Skeleton::read_from(&mut BinaryReader::new(&bytes)).unwrap(), skel);
+        assert_eq!(
+            Skeleton::read_from(&mut BinaryReader::new(&bytes)).unwrap(),
+            skel
+        );
     }
 
     #[test]

@@ -49,7 +49,8 @@ impl MotionSpec {
         // Overwrite in place if present; otherwise append. Two independent,
         // branch-free effects keyed on the same lookup.
         pos.into_iter().for_each(|i| self.style[i].1 = value);
-        pos.is_none().then(|| self.style.push((name.to_string(), value)));
+        pos.is_none()
+            .then(|| self.style.push((name.to_string(), value)));
     }
 
     /// Append a phase, returning its index.
@@ -99,7 +100,10 @@ impl MotionSpec {
 
     /// The position of the target named `name`, if declared.
     pub(crate) fn target_position(&self, name: &str) -> Option<Vec3> {
-        self.targets.iter().find(|(n, _)| n == name).map(|(_, p)| *p)
+        self.targets
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, p)| *p)
     }
 
     /// The value of style scalar `name`, if set.

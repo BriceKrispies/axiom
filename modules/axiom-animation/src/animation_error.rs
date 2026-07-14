@@ -178,10 +178,12 @@ mod tests {
 
     #[test]
     fn wraps_math_cause_and_distinguishes_from_bare() {
-        let wrapped =
-            AnimationError::non_finite_interpolation("bad rotation", math_cause());
+        let wrapped = AnimationError::non_finite_interpolation("bad rotation", math_cause());
         assert_eq!(wrapped.code(), AnimationErrorCode::NonFiniteInterpolation);
-        assert_eq!(wrapped.math().unwrap().code(), MathErrorCode::NormalizeZeroLength);
+        assert_eq!(
+            wrapped.math().unwrap().code(),
+            MathErrorCode::NormalizeZeroLength
+        );
         let bare = AnimationError::new(AnimationErrorCode::NonFiniteInterpolation, "bad rotation");
         assert_ne!(bare, wrapped);
         assert_eq!(bare.math(), None);

@@ -69,7 +69,11 @@ mod tests {
     #[test]
     fn invalid_recipe_bakes_to_an_error() {
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
-        g.add(TextureOp::Blur as u16, vec![Param::int(1)], vec![NodeId::from_raw(9)]);
+        g.add(
+            TextureOp::Blur as u16,
+            vec![Param::int(1)],
+            vec![NodeId::from_raw(9)],
+        );
         assert!(ProcTextureApi::new().bake(&g, 0).is_err());
     }
 }

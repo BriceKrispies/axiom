@@ -77,7 +77,10 @@ mod tests {
         let mut w = BinaryWriter::new();
         p.write_to(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(ClipPhase::read_from(&mut BinaryReader::new(&bytes)).unwrap(), p);
+        assert_eq!(
+            ClipPhase::read_from(&mut BinaryReader::new(&bytes)).unwrap(),
+            p
+        );
         assert!(ClipPhase::read_from(&mut BinaryReader::new(&bytes[..10])).is_err());
     }
 }

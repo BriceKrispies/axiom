@@ -81,7 +81,9 @@ impl GridApi {
                     .min(field.get(xi, yi + 1))
                     .min(field.get(xi - 1, yi));
                 let relaxed = field.get(xi, yi).min(min_neighbor.plus_one());
-                let next = here_passable.then_some(relaxed).unwrap_or(Dist::UNREACHABLE);
+                let next = here_passable
+                    .then_some(relaxed)
+                    .unwrap_or(Dist::UNREACHABLE);
                 field.set(xi, yi, next);
             });
         });
@@ -169,9 +171,7 @@ impl GridApi {
         let [n, e, s, w] = Self::neighbors(c);
         let key = |cell: Cell| (to_goal.get(cell.x, cell.y), cell);
         [e, s, w].into_iter().fold(n, |best, cand| {
-            (key(cand) < key(best))
-                .then_some(cand)
-                .unwrap_or(best)
+            (key(cand) < key(best)).then_some(cand).unwrap_or(best)
         })
     }
 
@@ -320,7 +320,10 @@ mod tests {
         // A cell whose every neighbor is a wall stays put.
         let boxed = grid_from(&[&[1, 1, 1], &[1, 0, 1], &[1, 1, 1]]);
         let center = Cell::new(1, 1);
-        assert_eq!(api.step_toward(&boxed, center, Cell::new(2, 2), open), center);
+        assert_eq!(
+            api.step_toward(&boxed, center, Cell::new(2, 2), open),
+            center
+        );
     }
 
     #[test]

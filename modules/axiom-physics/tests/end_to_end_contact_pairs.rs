@@ -58,11 +58,16 @@ fn sphere_sphere_contact_response_through_step() {
     // 0.8 apart, radii sum 1.0). With no gravity the only effect is the position
     // correction pushing the dynamic sphere out along +X.
     let build = || {
-        let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+        let mut api =
+            PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0))
+                .unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let stat = api.create_static_body(Transform::IDENTITY).unwrap();
         let dynamic = api
-            .create_dynamic_body(Transform::from_translation(Vec3::new(0.8, 0.0, 0.0)), ratio(1.0))
+            .create_dynamic_body(
+                Transform::from_translation(Vec3::new(0.8, 0.0, 0.0)),
+                ratio(1.0),
+            )
             .unwrap();
         api.attach_sphere_collider(stat, meters(0.5), material, false)
             .unwrap();
@@ -74,9 +79,20 @@ fn sphere_sphere_contact_response_through_step() {
     api.step(tenth_second()).unwrap();
 
     let record = api.latest_step_record();
-    assert_eq!(record.broad_phase_pair_count(), 1, "the two spheres are one broad pair");
-    assert_eq!(record.contact_pair_count(), 1, "and a genuine narrow-phase contact");
-    assert!(pos(&api, dynamic).x > 0.8 + 1.0e-4, "the dynamic sphere is pushed out of penetration");
+    assert_eq!(
+        record.broad_phase_pair_count(),
+        1,
+        "the two spheres are one broad pair"
+    );
+    assert_eq!(
+        record.contact_pair_count(),
+        1,
+        "and a genuine narrow-phase contact"
+    );
+    assert!(
+        pos(&api, dynamic).x > 0.8 + 1.0e-4,
+        "the dynamic sphere is pushed out of penetration"
+    );
     assert!(all_finite(&api));
 
     let replay = || {
@@ -84,7 +100,11 @@ fn sphere_sphere_contact_response_through_step() {
         a.step(tenth_second()).unwrap();
         (a.snapshot(), a.latest_step_record())
     };
-    assert_eq!(replay(), replay(), "sphere/sphere step must replay identically");
+    assert_eq!(
+        replay(),
+        replay(),
+        "sphere/sphere step must replay identically"
+    );
 }
 
 #[test]
@@ -92,13 +112,26 @@ fn sphere_plane_contact_response_through_step() {
     // A dynamic sphere penetrating a static ground plane. Gravity pulls it down;
     // the solver must cancel the approaching velocity so it does not free-fall.
     let build = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+        let mut api = PhysicsApi::with_config(
+            Vec3::new(0.0, -9.8, 0.0),
+            8,
+            16,
+            16,
+            1,
+            true,
+            ratio(0.0),
+            ratio(0.0),
+        )
+        .unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let ground = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
             .unwrap();
         let ball = api
-            .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.3, 0.0)), ratio(1.0))
+            .create_dynamic_body(
+                Transform::from_translation(Vec3::new(0.0, 0.3, 0.0)),
+                ratio(1.0),
+            )
             .unwrap();
         api.attach_sphere_collider(ball, meters(0.5), material, false)
             .unwrap();
@@ -111,7 +144,11 @@ fn sphere_plane_contact_response_through_step() {
     assert_eq!(record.broad_phase_pair_count(), 1);
     assert_eq!(record.contact_pair_count(), 1);
     // Free fall would leave vy = -0.98; the contact cancels it to ~0.
-    assert!(vel(&api, ball).y.abs() < 1.0e-3, "contact must cancel gravity, vy={}", vel(&api, ball).y);
+    assert!(
+        vel(&api, ball).y.abs() < 1.0e-3,
+        "contact must cancel gravity, vy={}",
+        vel(&api, ball).y
+    );
     assert!(pos(&api, ball).y > 0.0, "the sphere stays above the plane");
     assert!(all_finite(&api));
 
@@ -120,7 +157,11 @@ fn sphere_plane_contact_response_through_step() {
         a.step(tenth_second()).unwrap();
         (a.snapshot(), a.latest_step_record())
     };
-    assert_eq!(replay(), replay(), "sphere/plane step must replay identically");
+    assert_eq!(
+        replay(),
+        replay(),
+        "sphere/plane step must replay identically"
+    );
 }
 
 #[test]
@@ -128,13 +169,26 @@ fn sphere_box_contact_response_through_step() {
     // A dynamic sphere resting on the top face of a static box. The box collider is
     // attached first, so the box is contact body A and the sphere body B.
     let build = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+        let mut api = PhysicsApi::with_config(
+            Vec3::new(0.0, -9.8, 0.0),
+            8,
+            16,
+            16,
+            1,
+            true,
+            ratio(0.0),
+            ratio(0.0),
+        )
+        .unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let block = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_box_collider(block, Vec3::new(1.0, 1.0, 1.0), material, false)
             .unwrap();
         let ball = api
-            .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 1.3, 0.0)), ratio(1.0))
+            .create_dynamic_body(
+                Transform::from_translation(Vec3::new(0.0, 1.3, 0.0)),
+                ratio(1.0),
+            )
             .unwrap();
         api.attach_sphere_collider(ball, meters(0.5), material, false)
             .unwrap();
@@ -146,8 +200,15 @@ fn sphere_box_contact_response_through_step() {
     let record = api.latest_step_record();
     assert_eq!(record.broad_phase_pair_count(), 1);
     assert_eq!(record.contact_pair_count(), 1);
-    assert!(vel(&api, ball).y.abs() < 1.0e-3, "the box top cancels gravity, vy={}", vel(&api, ball).y);
-    assert!(pos(&api, ball).y > 1.0, "the sphere stays above the box top face");
+    assert!(
+        vel(&api, ball).y.abs() < 1.0e-3,
+        "the box top cancels gravity, vy={}",
+        vel(&api, ball).y
+    );
+    assert!(
+        pos(&api, ball).y > 1.0,
+        "the sphere stays above the box top face"
+    );
     assert!(all_finite(&api));
 
     let replay = || {
@@ -155,7 +216,11 @@ fn sphere_box_contact_response_through_step() {
         a.step(tenth_second()).unwrap();
         (a.snapshot(), a.latest_step_record())
     };
-    assert_eq!(replay(), replay(), "sphere/box step must replay identically");
+    assert_eq!(
+        replay(),
+        replay(),
+        "sphere/box step must replay identically"
+    );
 }
 
 #[test]
@@ -163,13 +228,26 @@ fn box_plane_contact_response_through_step() {
     // A dynamic box penetrating a static ground plane. The plane collider is
     // attached first (body A); the box is the dynamic body B.
     let build = || {
-        let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+        let mut api = PhysicsApi::with_config(
+            Vec3::new(0.0, -9.8, 0.0),
+            8,
+            16,
+            16,
+            1,
+            true,
+            ratio(0.0),
+            ratio(0.0),
+        )
+        .unwrap();
         let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
         let ground = api.create_static_body(Transform::IDENTITY).unwrap();
         api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
             .unwrap();
         let crate_body = api
-            .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.3, 0.0)), ratio(1.0))
+            .create_dynamic_body(
+                Transform::from_translation(Vec3::new(0.0, 0.3, 0.0)),
+                ratio(1.0),
+            )
             .unwrap();
         api.attach_box_collider(crate_body, Vec3::new(0.5, 0.5, 0.5), material, false)
             .unwrap();
@@ -181,8 +259,15 @@ fn box_plane_contact_response_through_step() {
     let record = api.latest_step_record();
     assert_eq!(record.broad_phase_pair_count(), 1);
     assert_eq!(record.contact_pair_count(), 1);
-    assert!(vel(&api, crate_body).y.abs() < 1.0e-3, "the plane cancels gravity, vy={}", vel(&api, crate_body).y);
-    assert!(pos(&api, crate_body).y > 0.0, "the box stays above the plane");
+    assert!(
+        vel(&api, crate_body).y.abs() < 1.0e-3,
+        "the plane cancels gravity, vy={}",
+        vel(&api, crate_body).y
+    );
+    assert!(
+        pos(&api, crate_body).y > 0.0,
+        "the box stays above the plane"
+    );
     assert!(all_finite(&api));
 
     let replay = || {

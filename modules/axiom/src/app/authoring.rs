@@ -158,7 +158,11 @@ impl RunningApp {
             .add_directional_light(
                 &math,
                 node,
-                Vec3::new(light.color.r.get(), light.color.g.get(), light.color.b.get()),
+                Vec3::new(
+                    light.color.r.get(),
+                    light.color.g.get(),
+                    light.color.b.get(),
+                ),
                 light.intensity,
             )
             .expect("authored light parameters are valid");
@@ -180,7 +184,11 @@ impl RunningApp {
             .add_point_light(
                 &math,
                 node,
-                Vec3::new(light.color.r.get(), light.color.g.get(), light.color.b.get()),
+                Vec3::new(
+                    light.color.r.get(),
+                    light.color.g.get(),
+                    light.color.b.get(),
+                ),
                 light.intensity,
             )
             .expect("authored point-light parameters are valid");
@@ -207,8 +215,7 @@ impl RunningApp {
             let _ = self.scene.remove_camera(node);
         });
 
-        let aspect =
-            self.viewport.physical_width() as f32 / self.viewport.physical_height() as f32;
+        let aspect = self.viewport.physical_width() as f32 / self.viewport.physical_height() as f32;
         let projection = camera.projection();
         let node = self.scene.create_node_with_transform(transform);
         self.scene
@@ -256,7 +263,6 @@ impl RunningApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_math::Vec2;
     use crate::angle::Angle;
     use crate::app::App;
     use crate::camera::PerspectiveProjection;
@@ -265,6 +271,7 @@ mod tests {
     use crate::spawn::Spawn;
     use crate::window::Window;
     use axiom_kernel::Meters;
+    use axiom_math::Vec2;
 
     /// A linear colour channel from a known-finite authored literal.
     fn ch(value: f32) -> Ratio {
@@ -355,7 +362,11 @@ mod tests {
         let mesh_set = app.mesh_set();
         assert_eq!(mesh_set.len(), 1);
         assert_eq!(mesh_set[0].1.len(), 4 * 12, "4 authored vertices uploaded");
-        assert_eq!(mesh_set[0].2, vec![0, 1, 2, 0, 2, 3], "authored indices intact");
+        assert_eq!(
+            mesh_set[0].2,
+            vec![0, 1, 2, 0, 2, 3],
+            "authored indices intact"
+        );
     }
 
     #[test]
@@ -380,7 +391,10 @@ mod tests {
             vec![0, 1, 7],
         );
         assert_eq!(app.add_mesh_data(bad), Err(MeshDataError::IndexOutOfRange));
-        assert!(app.mesh_set().is_empty(), "a rejected mesh registers nothing");
+        assert!(
+            app.mesh_set().is_empty(),
+            "a rejected mesh registers nothing"
+        );
     }
 
     /// A unit quad with skin streams (every vertex split 50/50 between bones 0, 1).
@@ -403,28 +417,42 @@ mod tests {
     #[test]
     fn skinned_mesh_uploads_through_the_skinned_set_not_the_static_set() {
         let mut app = empty_render_app();
-        app.add_mesh_data(skinned_quad_mesh_data()).expect("valid skinned mesh");
+        app.add_mesh_data(skinned_quad_mesh_data())
+            .expect("valid skinned mesh");
         // The static set excludes skinned meshes...
         assert!(app.mesh_set().is_empty());
         // ...and the skinned set carries the 20-float stream.
         let skinned = app.skinned_mesh_set();
         assert_eq!(skinned.len(), 1);
-        assert_eq!(skinned[0].1.len(), 4 * 20, "4 skinned vertices at 20 floats each");
+        assert_eq!(
+            skinned[0].1.len(),
+            4 * 20,
+            "4 skinned vertices at 20 floats each"
+        );
         assert_eq!(skinned[0].2, vec![0, 1, 2, 0, 2, 3]);
         // The joints then weights ride at floats [12..20] of the first vertex.
-        assert_eq!(&skinned[0].1[12..20], &[0.0, 1.0, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0]);
+        assert_eq!(
+            &skinned[0].1[12..20],
+            &[0.0, 1.0, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0]
+        );
     }
 
     #[test]
     fn submit_skinned_draw_appears_in_the_outcome_and_drains_each_frame() {
         let mut app = empty_render_app();
-        let mesh = app.add_mesh_data(skinned_quad_mesh_data()).expect("valid skinned mesh");
+        let mesh = app
+            .add_mesh_data(skinned_quad_mesh_data())
+            .expect("valid skinned mesh");
         let mat = app.add_material(Material::lit(Color::linear_rgb(ch(0.2), ch(0.4), ch(0.8))));
         let palette = [Mat4::IDENTITY, Mat4::IDENTITY];
         app.submit_skinned_draw(mesh, mat, Transform::IDENTITY, &palette);
 
         let outcome = app.tick(0);
-        assert_eq!(outcome.skinned_draws().len(), 1, "the submitted skinned draw is in the frame");
+        assert_eq!(
+            outcome.skinned_draws().len(),
+            1,
+            "the submitted skinned draw is in the frame"
+        );
         let d = &outcome.skinned_draws()[0];
         assert_eq!(d.mesh_id(), mesh.id());
         assert_eq!(d.material_id(), mat.id());
@@ -445,13 +473,18 @@ mod tests {
             .add_texture_data(1, 2, vec![255, 0, 0, 255, 0, 255, 0, 255])
             .expect("well-formed pixels register");
         let material = app.add_material(
-            Material::lit(Color::linear_rgb(ch(1.0), ch(1.0), ch(1.0))).with_custom_texture(tex.id()),
+            Material::lit(Color::linear_rgb(ch(1.0), ch(1.0), ch(1.0)))
+                .with_custom_texture(tex.id()),
         );
         // Spawn + tick a renderable with the custom-textured material, so the
         // per-frame material build (which reports the texture id) runs it.
         let cube = app.add_mesh(Mesh::cube());
         app.spawn(Spawn::new(Transform::IDENTITY, cube, material));
-        assert_eq!(app.tick(0).draws().len(), 1, "the custom-textured mesh renders");
+        assert_eq!(
+            app.tick(0).draws().len(),
+            1,
+            "the custom-textured mesh renders"
+        );
         // The material set carries the app's custom pixels for that material id,
         // not the untextured 1x1 white default.
         let set = app.material_textures();
@@ -460,7 +493,11 @@ mod tests {
             .find(|(id, _, _, _)| *id == material.id())
             .expect("the material is in the set");
         assert_eq!((entry.1, entry.2), (1, 2), "authored dimensions surface");
-        assert_eq!(entry.3, vec![255, 0, 0, 255, 0, 255, 0, 255], "authored pixels surface");
+        assert_eq!(
+            entry.3,
+            vec![255, 0, 0, 255, 0, 255, 0, 255],
+            "authored pixels surface"
+        );
         // An untextured material still gets the 1x1 white fallback.
         let plain = app.add_material(Material::lit(Color::linear_rgb(ch(0.5), ch(0.5), ch(0.5))));
         let plain_entry = app
@@ -468,24 +505,32 @@ mod tests {
             .into_iter()
             .find(|(id, _, _, _)| *id == plain.id())
             .expect("plain material present");
-        assert_eq!((plain_entry.1, plain_entry.2, plain_entry.3), (1, 1, vec![255, 255, 255, 255]));
+        assert_eq!(
+            (plain_entry.1, plain_entry.2, plain_entry.3),
+            (1, 1, vec![255, 255, 255, 255])
+        );
     }
 
     #[test]
     fn add_texture_data_rejects_malformed_and_registers_nothing() {
         let mut app = empty_render_app();
         // Zero dimension.
-        assert_eq!(app.add_texture_data(0, 4, vec![]), Err(TextureDataError::Malformed));
+        assert_eq!(
+            app.add_texture_data(0, 4, vec![]),
+            Err(TextureDataError::Malformed)
+        );
         // Pixel buffer length != width*height*4.
-        assert_eq!(app.add_texture_data(2, 2, vec![0; 8]), Err(TextureDataError::Malformed));
+        assert_eq!(
+            app.add_texture_data(2, 2, vec![0; 8]),
+            Err(TextureDataError::Malformed)
+        );
         // A rejected texture registers nothing: the next valid one still gets id 1,
         // and a material referencing it resolves the authored pixels.
         let tex = app
             .add_texture_data(1, 1, vec![9, 8, 7, 255])
             .expect("valid pixels register");
         assert_eq!(tex.id(), 1, "no phantom ids from rejected textures");
-        let material =
-            app.add_material(Material::lit(Color::WHITE).with_custom_texture(tex.id()));
+        let material = app.add_material(Material::lit(Color::WHITE).with_custom_texture(tex.id()));
         let entry = app
             .material_textures()
             .into_iter()
@@ -521,7 +566,10 @@ mod tests {
         assert!(app.tick(0).lights().is_empty());
 
         let entity = app.add_point_light(
-            PointLight { color: Color::WHITE, intensity: ch(1.0) },
+            PointLight {
+                color: Color::WHITE,
+                intensity: ch(1.0),
+            },
             Transform::from_translation(Vec3::new(2.0, 3.0, -1.0)),
         );
 
@@ -537,7 +585,10 @@ mod tests {
         let mut app = empty_render_app();
         let identity = app.tick(0).camera_view_proj();
 
-        app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)));
+        app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+        );
         let near = app.tick(1).camera_view_proj();
         assert_ne!(near, identity, "a camera replaces the identity view");
 
@@ -555,7 +606,11 @@ mod tests {
     #[test]
     fn spawn_controller_drives_the_camera_immediately_via_first_person_input() {
         let mut app = empty_render_app();
-        let cam = app.spawn_controller(camera(), Transform::from_translation(Vec3::new(0.0, 1.0, 5.0)), 0);
+        let cam = app.spawn_controller(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 1.0, 5.0)),
+            0,
+        );
         assert_ne!(app.tick(0).camera_view_proj(), [0.0; 16]);
 
         // `control` applies immediately — no tick, no re-authoring the camera
@@ -580,8 +635,14 @@ mod tests {
             Angle::radians(std::f32::consts::FRAC_PI_2),
             Angle::radians(0.0),
         ));
-        let turned = app.world_transform(cam).expect("controller node is live").translation;
-        assert!(turned.x.abs() > 0.5, "yaw rotated the move frame off the z axis");
+        let turned = app
+            .world_transform(cam)
+            .expect("controller node is live")
+            .translation;
+        assert!(
+            turned.x.abs() > 0.5,
+            "yaw rotated the move frame off the z axis"
+        );
 
         let before = app.world_transform(cam).map(|t| t.translation);
         app.control(FirstPersonInput::new(

@@ -4,15 +4,15 @@ use axiom_kernel::{Meters, Ratio};
 use axiom_math::{Transform, Vec3};
 use axiom_runtime::RuntimeStep;
 
+use crate::contact_report::ContactReport;
 use crate::physics_body_desc::PhysicsBodyDesc;
 use crate::physics_body_handle::PhysicsBodyHandle;
 use crate::physics_collider_handle::PhysicsColliderHandle;
 use crate::physics_collider_shape::PhysicsColliderShape;
 use crate::physics_config::PhysicsConfig;
 use crate::physics_error::PhysicsError;
-use crate::physics_heightfield::Heightfield;
-use crate::contact_report::ContactReport;
 use crate::physics_event::PhysicsEvent;
+use crate::physics_heightfield::Heightfield;
 use crate::physics_material::PhysicsMaterial;
 use crate::physics_query::PhysicsQuery;
 use crate::physics_result::PhysicsResult;
@@ -113,8 +113,10 @@ impl PhysicsApi {
         material: PhysicsMaterial,
         is_trigger: bool,
     ) -> PhysicsResult<PhysicsColliderHandle> {
-        PhysicsColliderShape::sphere(radius)
-            .and_then(|shape| self.world.attach_collider(body, shape, material, is_trigger))
+        PhysicsColliderShape::sphere(radius).and_then(|shape| {
+            self.world
+                .attach_collider(body, shape, material, is_trigger)
+        })
     }
 
     /// Attach an axis-aligned box collider to `body`.
@@ -125,8 +127,10 @@ impl PhysicsApi {
         material: PhysicsMaterial,
         is_trigger: bool,
     ) -> PhysicsResult<PhysicsColliderHandle> {
-        PhysicsColliderShape::box_shape(half_extents)
-            .and_then(|shape| self.world.attach_collider(body, shape, material, is_trigger))
+        PhysicsColliderShape::box_shape(half_extents).and_then(|shape| {
+            self.world
+                .attach_collider(body, shape, material, is_trigger)
+        })
     }
 
     /// Attach a capsule collider to `body`.
@@ -138,8 +142,10 @@ impl PhysicsApi {
         material: PhysicsMaterial,
         is_trigger: bool,
     ) -> PhysicsResult<PhysicsColliderHandle> {
-        PhysicsColliderShape::capsule(radius, half_height)
-            .and_then(|shape| self.world.attach_collider(body, shape, material, is_trigger))
+        PhysicsColliderShape::capsule(radius, half_height).and_then(|shape| {
+            self.world
+                .attach_collider(body, shape, material, is_trigger)
+        })
     }
 
     /// Attach a plane collider to `body`.
@@ -151,8 +157,10 @@ impl PhysicsApi {
         material: PhysicsMaterial,
         is_trigger: bool,
     ) -> PhysicsResult<PhysicsColliderHandle> {
-        PhysicsColliderShape::plane(normal, distance)
-            .and_then(|shape| self.world.attach_collider(body, shape, material, is_trigger))
+        PhysicsColliderShape::plane(normal, distance).and_then(|shape| {
+            self.world
+                .attach_collider(body, shape, material, is_trigger)
+        })
     }
 
     /// Attach a **static heightfield** collider to `body`: an `nx × nz` grid of
@@ -173,18 +181,25 @@ impl PhysicsApi {
         is_trigger: bool,
     ) -> PhysicsResult<PhysicsColliderHandle> {
         let (sx, sz) = (spacing_x.get(), spacing_z.get());
-        let valid = (nx >= 2) & (nz >= 2) & (sx > 0.0) & (sz > 0.0) & (heights.len() as u64 == u64::from(nx) * u64::from(nz));
+        let valid = (nx >= 2)
+            & (nz >= 2)
+            & (sx > 0.0)
+            & (sz > 0.0)
+            & (heights.len() as u64 == u64::from(nx) * u64::from(nz));
         [
             Err(PhysicsError::invalid_collider_shape(
                 "heightfield needs nx,nz >= 2, positive spacing, and heights.len() == nx*nz",
             )),
             Ok(()),
         ][valid as usize]
-        .and_then(|()| {
-            let grid = Heightfield::new(nx, nz, sx, sz, heights.iter().map(|m| m.get()).collect());
-            PhysicsColliderShape::heightfield_shape(grid.half_extents())
-                .and_then(|shape| self.world.attach_heightfield_collider(body, shape, material, is_trigger, grid))
-        })
+            .and_then(|()| {
+                let grid =
+                    Heightfield::new(nx, nz, sx, sz, heights.iter().map(|m| m.get()).collect());
+                PhysicsColliderShape::heightfield_shape(grid.half_extents()).and_then(|shape| {
+                    self.world
+                        .attach_heightfield_collider(body, shape, material, is_trigger, grid)
+                })
+            })
     }
 
     /// Queue a continuous force on a dynamic body (applied at the next step).
@@ -331,10 +346,17 @@ mod tests {
     #[test]
     fn with_config_rejects_invalid_configuration() {
         assert!(PhysicsApi::with_config(Vec3::ZERO, 0, 1, 1, 1, true, zero(), zero()).is_err());
-        assert!(
-            PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, zero(), zero())
-                .is_ok()
-        );
+        assert!(PhysicsApi::with_config(
+            Vec3::new(0.0, -9.8, 0.0),
+            8,
+            16,
+            16,
+            1,
+            true,
+            zero(),
+            zero()
+        )
+        .is_ok());
         let bad = Ratio::new(2.0).unwrap();
         assert!(PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, bad, zero()).is_err());
     }
@@ -383,6 +405,8 @@ mod tests {
             .is_err());
         let missing = PhysicsBodyHandle::from_raw(999);
         assert!(api.set_body_transform(missing, target).is_err());
-        assert!(api.set_body_velocity(missing, Vec3::ZERO, Vec3::ZERO).is_err());
+        assert!(api
+            .set_body_velocity(missing, Vec3::ZERO, Vec3::ZERO)
+            .is_err());
     }
 }

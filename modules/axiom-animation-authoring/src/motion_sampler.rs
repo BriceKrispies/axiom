@@ -22,8 +22,8 @@ use axiom_math::{Quat, Transform, Vec3};
 
 use crate::humanoid_rig::HumanoidRigSpec;
 use crate::ids::EffectorId;
-use crate::motion_plan::MotionPlan;
 use crate::motion_phase::ResolvedPhase;
+use crate::motion_plan::MotionPlan;
 use crate::pose_frame::PoseFrame;
 use crate::pose_goal::ResolvedGoal;
 
@@ -67,7 +67,15 @@ impl MotionSampler {
         let contacts = active.map(|p| p.contacts().to_vec()).unwrap_or_default();
         let events = plan.events_at(t);
 
-        PoseFrame::new(root, locals, worlds, effector_worlds, constraints, contacts, events)
+        PoseFrame::new(
+            root,
+            locals,
+            worlds,
+            effector_worlds,
+            constraints,
+            contacts,
+            events,
+        )
     }
 }
 
@@ -112,7 +120,10 @@ fn apply_aim(g: &ResolvedGoal, locals: &mut [Transform], s: f32, root: Vec3, _p:
 
 fn apply_move(g: &ResolvedGoal, locals: &mut [Transform], s: f32, root: Vec3, _p: f32) {
     let j = g.joint().raw() as usize;
-    let shift = g.target().subtract(root).mul_scalar(g.amount() * s * MOVE_SCALE);
+    let shift = g
+        .target()
+        .subtract(root)
+        .mul_scalar(g.amount() * s * MOVE_SCALE);
     locals[j].translation = locals[j].translation.add(shift);
 }
 
@@ -145,13 +156,20 @@ fn apply_follow_through(g: &ResolvedGoal, locals: &mut [Transform], s: f32, _roo
 /// **raw** progress (not `strength`), so a stride is uniform across the phase. The
 /// three cycle parameters ride in `euler = (phase_offset, steps, bias)`; `amount`
 /// carries the amplitude.
-fn apply_run_cycle(g: &ResolvedGoal, locals: &mut [Transform], _s: f32, _root: Vec3, progress: f32) {
+fn apply_run_cycle(
+    g: &ResolvedGoal,
+    locals: &mut [Transform],
+    _s: f32,
+    _root: Vec3,
+    progress: f32,
+) {
     let e = g.euler();
     let angle = e.z + g.amount() * (core::f32::consts::TAU * e.y * progress + e.x).sin();
     // Rotate `angle` about the canonical unit axis carried in the resolved `target`
     // (`+X` fore/aft swing, `+Z` lateral abduction).
     let a = g.target();
-    locals[g.joint().raw() as usize].rotation = Quat::from_euler_xyz(a.x * angle, a.y * angle, a.z * angle);
+    locals[g.joint().raw() as usize].rotation =
+        Quat::from_euler_xyz(a.x * angle, a.y * angle, a.z * angle);
 }
 
 /// Per-kind goal appliers, indexed by the goal discriminant.
@@ -181,7 +199,11 @@ fn apply_goals(bind: &[Transform], phase: &ResolvedPhase, t: u64, root: Vec3) ->
 
 /// Compose local transforms down the joint hierarchy into world transforms in one
 /// forward pass (each parent has a smaller index, guaranteed by the rig).
-fn forward_kinematics(rig: &HumanoidRigSpec, locals: &[Transform], root: Transform) -> Vec<Transform> {
+fn forward_kinematics(
+    rig: &HumanoidRigSpec,
+    locals: &[Transform],
+    root: Transform,
+) -> Vec<Transform> {
     let joints = rig.joints();
     (0..joints.len()).fold(Vec::with_capacity(joints.len()), |mut worlds, i| {
         let parent = joints[i]
@@ -260,16 +282,36 @@ mod tests {
         {
             let p = m.phase_mut(0).unwrap();
             p.set_root(RootMotion::move_toward("approach_start", "ball"));
-            p.push_goal(PoseGoal::set_joint_rotation("chest", Vec3::new(0.0, 0.2, 0.0)));
-            p.push_goal(PoseGoal::aim_effector_at_target("right_foot_instep", "ball"));
-            p.push_goal(PoseGoal::move_effector_toward_target("left_hand", "ball", 0.5));
+            p.push_goal(PoseGoal::set_joint_rotation(
+                "chest",
+                Vec3::new(0.0, 0.2, 0.0),
+            ));
+            p.push_goal(PoseGoal::aim_effector_at_target(
+                "right_foot_instep",
+                "ball",
+            ));
+            p.push_goal(PoseGoal::move_effector_toward_target(
+                "left_hand",
+                "ball",
+                0.5,
+            ));
             p.push_goal(PoseGoal::raise_arm_for_balance(true));
             p.push_goal(PoseGoal::torso_twist_toward_target("net_center", 0.5));
             p.push_goal(PoseGoal::leg_backswing(true, 0.8));
             p.push_goal(PoseGoal::leg_strike(false, "ball"));
             p.push_goal(PoseGoal::follow_through(false, "net_center"));
-            p.push_goal(PoseGoal::run_cycle("left_shin", 0.5, 0.0, 2.0, 0.1, Vec3::new(1.0, 0.0, 0.0)));
-            p.push_constraint(Constraint::pin_effector_to_target("left_foot_sole", "left_plant_spot"));
+            p.push_goal(PoseGoal::run_cycle(
+                "left_shin",
+                0.5,
+                0.0,
+                2.0,
+                0.1,
+                Vec3::new(1.0, 0.0, 0.0),
+            ));
+            p.push_constraint(Constraint::pin_effector_to_target(
+                "left_foot_sole",
+                "left_plant_spot",
+            ));
             p.push_contact(ContactDeclaration::new("right_foot_sole", "ball"));
         }
         m.add_event(MotionEvent::named(Tick::new(5), "cue"));
@@ -279,7 +321,10 @@ mod tests {
     #[test]
     fn sampling_is_replayable() {
         let plan = full_plan();
-        assert_eq!(MotionSampler::sample(&plan, Tick::new(5)), MotionSampler::sample(&plan, Tick::new(5)));
+        assert_eq!(
+            MotionSampler::sample(&plan, Tick::new(5)),
+            MotionSampler::sample(&plan, Tick::new(5))
+        );
     }
 
     #[test]
@@ -289,7 +334,10 @@ mod tests {
         // Representative joints each moved off the bind pose: chest (twist/set), a thigh (strike),
         // the other thigh (backswing), an upper arm (raise), a hand (move).
         let joint = |name: &str| plan.rig().joint_id(name).unwrap();
-        assert_ne!(frame.joint_local(joint("chest")).unwrap(), Transform::IDENTITY);
+        assert_ne!(
+            frame.joint_local(joint("chest")).unwrap(),
+            Transform::IDENTITY
+        );
         assert_ne!(
             frame.joint_local(joint("right_thigh")).unwrap().rotation,
             Quat::IDENTITY
@@ -299,11 +347,19 @@ mod tests {
             Quat::IDENTITY
         );
         assert_ne!(
-            frame.joint_local(joint("right_upper_arm")).unwrap().rotation,
+            frame
+                .joint_local(joint("right_upper_arm"))
+                .unwrap()
+                .rotation,
             Quat::IDENTITY
         );
-        let left_hand_bind = plan.rig().joints()[joint("left_hand").raw() as usize].bind_local().translation;
-        assert_ne!(frame.joint_local(joint("left_hand")).unwrap().translation, left_hand_bind);
+        let left_hand_bind = plan.rig().joints()[joint("left_hand").raw() as usize]
+            .bind_local()
+            .translation;
+        assert_ne!(
+            frame.joint_local(joint("left_hand")).unwrap().translation,
+            left_hand_bind
+        );
     }
 
     #[test]
@@ -314,7 +370,12 @@ mod tests {
         // unlike a single interpolated pose.
         let plan = full_plan();
         let shin = plan.rig().joint_id("left_shin").unwrap();
-        let at = |t| MotionSampler::sample(&plan, Tick::new(t)).joint_local(shin).unwrap().rotation;
+        let at = |t| {
+            MotionSampler::sample(&plan, Tick::new(t))
+                .joint_local(shin)
+                .unwrap()
+                .rotation
+        };
         // progress 0.1 vs 0.3 -> sin(0.4π) vs sin(1.2π): opposite signs, distinct poses.
         assert_ne!(at(1), at(3));
         // The oscillation is off the bind identity at a non-zero point of the cycle.
@@ -326,8 +387,12 @@ mod tests {
         let plan = full_plan();
         let ball = Vec3::new(0.0, 0.0, 0.0);
         let start = Vec3::new(0.0, 0.0, -3.0);
-        let early = MotionSampler::sample(&plan, Tick::new(1)).root().translation;
-        let late = MotionSampler::sample(&plan, Tick::new(9)).root().translation;
+        let early = MotionSampler::sample(&plan, Tick::new(1))
+            .root()
+            .translation;
+        let late = MotionSampler::sample(&plan, Tick::new(9))
+            .root()
+            .translation;
         // Progress moves the root from approach_start toward the ball.
         assert!(late.distance(ball) < early.distance(ball));
         assert!(early.distance(ball) < start.distance(ball));
@@ -340,12 +405,18 @@ mod tests {
         let eff = |name: &str| plan.rig().effector_id(name).unwrap();
         // The pinned left foot sits exactly on the plant spot.
         assert_eq!(
-            frame.effector_world(eff("left_foot_sole")).unwrap().translation,
+            frame
+                .effector_world(eff("left_foot_sole"))
+                .unwrap()
+                .translation,
             Vec3::new(0.25, 0.0, -0.1)
         );
         // The contact right foot sits exactly on the ball.
         assert_eq!(
-            frame.effector_world(eff("right_foot_sole")).unwrap().translation,
+            frame
+                .effector_world(eff("right_foot_sole"))
+                .unwrap()
+                .translation,
             Vec3::new(0.0, 0.0, 0.0)
         );
         // An un-pinned effector is not at either target.
@@ -362,7 +433,9 @@ mod tests {
         m.add_target("approach_start", Vec3::new(0.0, 0.0, -3.0));
         m.add_target("ball", Vec3::new(0.0, 0.0, 2.0));
         m.add_phase(MotionPhase::new("p", Tick::new(0), Tick::new(5)));
-        m.phase_mut(0).unwrap().set_root(RootMotion::move_toward("approach_start", "ball"));
+        m.phase_mut(0)
+            .unwrap()
+            .set_root(RootMotion::move_toward("approach_start", "ball"));
         let plan = MotionCompiler::compile(&m, &rig()).unwrap();
         let frame = MotionSampler::sample(&plan, Tick::new(8));
         // Root holds at the completed move's destination (the ball).
@@ -379,7 +452,12 @@ mod tests {
     #[test]
     fn events_fire_only_on_their_exact_tick() {
         let plan = full_plan();
-        assert_eq!(MotionSampler::sample(&plan, Tick::new(5)).event_names(), vec!["cue"]);
-        assert!(MotionSampler::sample(&plan, Tick::new(4)).event_names().is_empty());
+        assert_eq!(
+            MotionSampler::sample(&plan, Tick::new(5)).event_names(),
+            vec!["cue"]
+        );
+        assert!(MotionSampler::sample(&plan, Tick::new(4))
+            .event_names()
+            .is_empty());
     }
 }

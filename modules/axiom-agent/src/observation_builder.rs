@@ -95,7 +95,13 @@ mod tests {
     use super::*;
 
     fn builder(max_channels: usize, max_facts: usize, max_legal: usize) -> ObservationBuilder {
-        ObservationBuilder::new(AgentId::from_raw(1), Tick::new(3), max_channels, max_facts, max_legal)
+        ObservationBuilder::new(
+            AgentId::from_raw(1),
+            Tick::new(3),
+            max_channels,
+            max_facts,
+            max_legal,
+        )
     }
 
     #[test]
@@ -106,10 +112,15 @@ mod tests {
         b.add_legal_action(10).unwrap();
         b.add_legal_action(20).unwrap();
         b.add_legal_action(30).unwrap();
-        b.add_fact(ObservationFact::new(100, 1, 0, 0, 0, 0)).unwrap();
-        b.add_fact(ObservationFact::new(200, 2, 0, 0, 0, 0)).unwrap();
+        b.add_fact(ObservationFact::new(100, 1, 0, 0, 0, 0))
+            .unwrap();
+        b.add_fact(ObservationFact::new(200, 2, 0, 0, 0, 0))
+            .unwrap();
         let o = b.build();
-        assert_eq!(o.channels(), &[ObservationChannel::Semantic, ObservationChannel::Replay]);
+        assert_eq!(
+            o.channels(),
+            &[ObservationChannel::Semantic, ObservationChannel::Replay]
+        );
         assert_eq!(o.legal_actions(), &[10, 20, 30]);
         assert_eq!(o.facts()[0].kind_code(), 100);
         assert_eq!(o.facts()[1].kind_code(), 200);
@@ -129,7 +140,10 @@ mod tests {
     fn legal_action_overflow_fails_deterministically() {
         let mut b = builder(1, 1, 1);
         assert!(b.add_legal_action(10).is_ok());
-        assert_eq!(b.add_legal_action(20).unwrap_err().code(), KernelErrorCode::OutOfBounds);
+        assert_eq!(
+            b.add_legal_action(20).unwrap_err().code(),
+            KernelErrorCode::OutOfBounds
+        );
     }
 
     #[test]
@@ -137,7 +151,9 @@ mod tests {
         let mut b = builder(1, 1, 1);
         assert!(b.add_fact(ObservationFact::new(1, 1, 0, 0, 0, 0)).is_ok());
         assert_eq!(
-            b.add_fact(ObservationFact::new(2, 2, 0, 0, 0, 0)).unwrap_err().code(),
+            b.add_fact(ObservationFact::new(2, 2, 0, 0, 0, 0))
+                .unwrap_err()
+                .code(),
             KernelErrorCode::OutOfBounds
         );
     }

@@ -156,6 +156,9 @@ mod tests {
             grid,
         );
         assert!(hf.heightfield().is_some());
-        assert_eq!(hf.shape().kind(), crate::physics_shape_kind::PhysicsShapeKind::Heightfield);
+        assert_eq!(
+            hf.shape().kind(),
+            crate::physics_shape_kind::PhysicsShapeKind::Heightfield
+        );
     }
 }

@@ -139,7 +139,6 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
@@ -182,7 +181,6 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
     );
 }
 
-
 #[test]
 fn physics_imports_only_legal_layers() {
     let mut illegal = Vec::new();
@@ -221,7 +219,10 @@ fn physics_imports_no_other_modules() {
         .map(|e| e.file_name().to_string_lossy().replace('-', "_"))
         .filter(|name| name != "axiom_physics")
         .collect();
-    assert!(!other_modules.is_empty(), "expected sibling modules to exist");
+    assert!(
+        !other_modules.is_empty(),
+        "expected sibling modules to exist"
+    );
     let mut violations = Vec::new();
     for path in source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -264,7 +265,6 @@ fn no_layer_imports_axiom_physics() {
         );
     }
 }
-
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -316,7 +316,13 @@ fn no_randomness() {
 #[test]
 fn no_threads_or_async_runtimes() {
     assert_absent(
-        &["thread::spawn", "tokio", "async_std", "std::net", "std::process"],
+        &[
+            "thread::spawn",
+            "tokio",
+            "async_std",
+            "std::net",
+            "std::process",
+        ],
         "axiom-physics must not spawn threads, use async runtimes, or touch net/process",
     );
 }
@@ -386,7 +392,10 @@ fn no_junk_drawer_modules() {
     for path in source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc", "shared", "prelude"] {
-            assert_ne!(name, banned, "axiom-physics must not have a `{banned}` module");
+            assert_ne!(
+                name, banned,
+                "axiom-physics must not have a `{banned}` module"
+            );
         }
     }
 }
@@ -435,7 +444,6 @@ fn every_source_module_is_declared_in_lib_rs() {
         missing.join("\n")
     );
 }
-
 
 fn ratio(v: f32) -> Ratio {
     Ratio::new(v).unwrap()

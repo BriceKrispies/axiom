@@ -282,7 +282,12 @@ impl LiveGpuBinding {
         });
         let intermediate_view = intermediate.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_view = create_depth_view(&device, render_width, render_height);
-        let upscale = UpscaleBlit::new(&device, format, &intermediate_view, wgpu::FilterMode::Nearest);
+        let upscale = UpscaleBlit::new(
+            &device,
+            format,
+            &intermediate_view,
+            wgpu::FilterMode::Nearest,
+        );
 
         // The 2D quad renderer, built for the non-sRGB swapchain view and the full
         // canvas size. Its sprite/atlas textures are uploaded later, once the app
@@ -388,7 +393,8 @@ impl LiveGpuBinding {
     /// (fetch/decode) and pushed here whenever the set changes — the 2D peer of the
     /// 3D material upload, kept off the per-frame path so a present uploads nothing.
     pub fn set_draw2d_textures(&mut self, textures: &[(u64, u32, u32, Vec<u8>)]) {
-        self.draw2d.set_textures(&self.device, &self.queue, textures);
+        self.draw2d
+            .set_textures(&self.device, &self.queue, textures);
     }
 
     /// Present one 2D frame: walk the layer-sorted [`axiom_host::Draw2dList`] into

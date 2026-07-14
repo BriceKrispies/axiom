@@ -173,7 +173,8 @@ impl VirtualMuscleController {
         // --- balance: deterministic CoM + a pull toward the support target ---
         let center_of_mass = mean(body.com_samples);
         let both_mid = body.left_foot.add(body.right_foot).mul_scalar(0.5);
-        let support_target = [both_mid, body.left_foot, body.right_foot, center_of_mass][phase.support().index()];
+        let support_target =
+            [both_mid, body.left_foot, body.right_foot, center_of_mass][phase.support().index()];
         let pelvis_stiffness = profile.group(MuscleGroup::Pelvis).stiffness;
         let to_support = support_target.subtract(center_of_mass);
         let balance_correction = Vec3::new(to_support.x, 0.0, to_support.z)
@@ -181,12 +182,18 @@ impl VirtualMuscleController {
 
         // --- upright torque: rotate the pelvis 'up' back toward world up ---
         let pelvis_up = body.pelvis.rotation.rotate(Vec3::new(0.0, 1.0, 0.0));
-        let upright_torque = pelvis_up.cross(Vec3::new(0.0, 1.0, 0.0)).mul_scalar(pelvis_stiffness * UPRIGHT_GAIN);
+        let upright_torque = pelvis_up
+            .cross(Vec3::new(0.0, 1.0, 0.0))
+            .mul_scalar(pelvis_stiffness * UPRIGHT_GAIN);
 
         // --- foot plant: hold strength, released when the objective ends ---
         let plant_strength = objectives
             .foot_plant
-            .map(|_| phase.weight(MuscleGroup::LeftLeg).max(phase.weight(MuscleGroup::LeftAnkle)))
+            .map(|_| {
+                phase
+                    .weight(MuscleGroup::LeftLeg)
+                    .max(phase.weight(MuscleGroup::LeftAnkle))
+            })
             .unwrap_or(0.0);
 
         // --- recovery: damping rises as the authored drive falls ---
@@ -220,7 +227,12 @@ mod tests {
     use super::*;
 
     fn body<'a>(samples: &'a [Vec3], left: Vec3, right: Vec3) -> MuscleBodyState<'a> {
-        MuscleBodyState { com_samples: samples, left_foot: left, right_foot: right, pelvis: Transform::IDENTITY }
+        MuscleBodyState {
+            com_samples: samples,
+            left_foot: left,
+            right_foot: right,
+            pelvis: Transform::IDENTITY,
+        }
     }
 
     fn phase(support: SupportMode, w: f32) -> MusclePhaseProfile {
@@ -230,11 +242,31 @@ mod tests {
     #[test]
     fn command_is_deterministic_and_reports() {
         let profile = VirtualMuscleProfile::default_profile();
-        let objs = MuscleObjectives { foot_plant: Some(Vec3::new(0.25, 0.0, -0.1)), motor_drive: 0.5, ball_impulse: None };
+        let objs = MuscleObjectives {
+            foot_plant: Some(Vec3::new(0.25, 0.0, -0.1)),
+            motor_drive: 0.5,
+            ball_impulse: None,
+        };
         let samples = [Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 0.0)];
-        let b = body(&samples, Vec3::new(0.2, 0.0, 0.0), Vec3::new(-0.2, 0.0, 0.0));
-        let a = VirtualMuscleController::command(&profile, MuscleStyle::default_style(), phase(SupportMode::LeftFoot, 0.6), objs, b);
-        let c = VirtualMuscleController::command(&profile, MuscleStyle::default_style(), phase(SupportMode::LeftFoot, 0.6), objs, b);
+        let b = body(
+            &samples,
+            Vec3::new(0.2, 0.0, 0.0),
+            Vec3::new(-0.2, 0.0, 0.0),
+        );
+        let a = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::default_style(),
+            phase(SupportMode::LeftFoot, 0.6),
+            objs,
+            b,
+        );
+        let c = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::default_style(),
+            phase(SupportMode::LeftFoot, 0.6),
+            objs,
+            b,
+        );
         assert_eq!(a, c);
         assert!(a.report().contains("support=1"));
         assert!(a.report().contains("core="));
@@ -243,30 +275,68 @@ mod tests {
     #[test]
     fn center_of_mass_is_the_mean_and_stable() {
         let profile = VirtualMuscleProfile::default_profile();
-        let objs = MuscleObjectives { foot_plant: None, motor_drive: 0.0, ball_impulse: None };
+        let objs = MuscleObjectives {
+            foot_plant: None,
+            motor_drive: 0.0,
+            ball_impulse: None,
+        };
         let samples = [Vec3::new(0.0, 2.0, 0.0), Vec3::new(0.0, 0.0, 0.0)];
         let b = body(&samples, Vec3::ZERO, Vec3::ZERO);
-        let cmd = VirtualMuscleController::command(&profile, MuscleStyle::default_style(), phase(SupportMode::BothFeet, 0.0), objs, b);
+        let cmd = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::default_style(),
+            phase(SupportMode::BothFeet, 0.0),
+            objs,
+            b,
+        );
         assert_eq!(cmd.center_of_mass(), Vec3::new(0.0, 1.0, 0.0));
         // Empty samples fold to ZERO (no divide-by-zero).
         let empty: [Vec3; 0] = [];
-        let cmd0 = VirtualMuscleController::command(&profile, MuscleStyle::default_style(), phase(SupportMode::BothFeet, 0.0), objs, body(&empty, Vec3::ZERO, Vec3::ZERO));
+        let cmd0 = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::default_style(),
+            phase(SupportMode::BothFeet, 0.0),
+            objs,
+            body(&empty, Vec3::ZERO, Vec3::ZERO),
+        );
         assert_eq!(cmd0.center_of_mass(), Vec3::ZERO);
     }
 
     #[test]
     fn each_support_mode_selects_its_target() {
         let profile = VirtualMuscleProfile::default_profile();
-        let objs = MuscleObjectives { foot_plant: None, motor_drive: 0.0, ball_impulse: None };
+        let objs = MuscleObjectives {
+            foot_plant: None,
+            motor_drive: 0.0,
+            ball_impulse: None,
+        };
         let samples = [Vec3::new(1.0, 0.0, 1.0)];
         let (left, right) = (Vec3::new(0.2, 0.0, 0.0), Vec3::new(-0.4, 0.0, 0.0));
         let b = body(&samples, left, right);
-        let target = |m| VirtualMuscleController::command(&profile, MuscleStyle::default_style(), phase(m, 0.0), objs, b).support_target();
-        assert_eq!(target(SupportMode::BothFeet), left.add(right).mul_scalar(0.5));
+        let target = |m| {
+            VirtualMuscleController::command(
+                &profile,
+                MuscleStyle::default_style(),
+                phase(m, 0.0),
+                objs,
+                b,
+            )
+            .support_target()
+        };
+        assert_eq!(
+            target(SupportMode::BothFeet),
+            left.add(right).mul_scalar(0.5)
+        );
         assert_eq!(target(SupportMode::LeftFoot), left);
         assert_eq!(target(SupportMode::RightFoot), right);
         // Airborne falls back to the CoM → zero balance correction.
-        let air = VirtualMuscleController::command(&profile, MuscleStyle::default_style(), phase(SupportMode::Airborne, 0.0), objs, b);
+        let air = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::default_style(),
+            phase(SupportMode::Airborne, 0.0),
+            objs,
+            b,
+        );
         assert_eq!(air.support_target(), air.center_of_mass());
         assert_eq!(air.balance_correction(), Vec3::ZERO);
     }
@@ -280,7 +350,11 @@ mod tests {
             &profile,
             MuscleStyle::default_style(),
             phase(SupportMode::BothFeet, 0.0),
-            MuscleObjectives { foot_plant: None, motor_drive: 0.0, ball_impulse: None },
+            MuscleObjectives {
+                foot_plant: None,
+                motor_drive: 0.0,
+                ball_impulse: None,
+            },
             b,
         );
         // Idle (zero authored weight, zero drive) still emits rest-posture weight.
@@ -291,7 +365,11 @@ mod tests {
             &profile,
             MuscleStyle::default_style(),
             phase(SupportMode::BothFeet, 0.0),
-            MuscleObjectives { foot_plant: None, motor_drive: 1.0, ball_impulse: None },
+            MuscleObjectives {
+                foot_plant: None,
+                motor_drive: 1.0,
+                ball_impulse: None,
+            },
             b,
         );
         assert!(driven.group_weight(MuscleGroup::Core) < idle.group_weight(MuscleGroup::Core));
@@ -300,14 +378,31 @@ mod tests {
     #[test]
     fn muscle_strength_scales_torque_and_balance_strength_scales_correction() {
         let profile = VirtualMuscleProfile::default_profile();
-        let objs = MuscleObjectives { foot_plant: None, motor_drive: 0.5, ball_impulse: None };
+        let objs = MuscleObjectives {
+            foot_plant: None,
+            motor_drive: 0.5,
+            ball_impulse: None,
+        };
         let samples = [Vec3::new(0.5, 0.0, 0.5)];
         let b = body(&samples, Vec3::new(0.2, 0.0, 0.0), Vec3::new(0.2, 0.0, 0.0));
         let p = phase(SupportMode::LeftFoot, 0.8);
-        let torque = |m| VirtualMuscleController::command(&profile, MuscleStyle::new(m, 1.0, 1.0), p, objs, b).group_max_torque(MuscleGroup::RightLeg);
-        assert!(torque(2.0) > torque(1.0), "muscle_strength scales max_torque");
-        let corr = |bal| VirtualMuscleController::command(&profile, MuscleStyle::new(1.0, 1.0, bal), p, objs, b).balance_correction().length();
-        assert!(corr(2.0) > corr(1.0), "balance_strength scales the correction");
+        let torque = |m| {
+            VirtualMuscleController::command(&profile, MuscleStyle::new(m, 1.0, 1.0), p, objs, b)
+                .group_max_torque(MuscleGroup::RightLeg)
+        };
+        assert!(
+            torque(2.0) > torque(1.0),
+            "muscle_strength scales max_torque"
+        );
+        let corr = |bal| {
+            VirtualMuscleController::command(&profile, MuscleStyle::new(1.0, 1.0, bal), p, objs, b)
+                .balance_correction()
+                .length()
+        };
+        assert!(
+            corr(2.0) > corr(1.0),
+            "balance_strength scales the correction"
+        );
     }
 
     #[test]
@@ -316,13 +411,53 @@ mod tests {
         let samples = [Vec3::ZERO];
         let b = body(&samples, Vec3::ZERO, Vec3::ZERO);
         let p = phase(SupportMode::LeftFoot, 0.7);
-        let planted = VirtualMuscleController::command(&profile, MuscleStyle::default_style(), p, MuscleObjectives { foot_plant: Some(Vec3::ZERO), motor_drive: 0.5, ball_impulse: None }, b);
-        let released = VirtualMuscleController::command(&profile, MuscleStyle::default_style(), p, MuscleObjectives { foot_plant: None, motor_drive: 0.5, ball_impulse: None }, b);
+        let planted = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::default_style(),
+            p,
+            MuscleObjectives {
+                foot_plant: Some(Vec3::ZERO),
+                motor_drive: 0.5,
+                ball_impulse: None,
+            },
+            b,
+        );
+        let released = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::default_style(),
+            p,
+            MuscleObjectives {
+                foot_plant: None,
+                motor_drive: 0.5,
+                ball_impulse: None,
+            },
+            b,
+        );
         assert!(planted.plant_strength() > 0.0);
         assert_eq!(released.plant_strength(), 0.0);
         // Recovery damping rises as drive falls and scales with muscle_damping.
-        let low_drive = VirtualMuscleController::command(&profile, MuscleStyle::new(1.0, 2.0, 1.0), phase(SupportMode::BothFeet, 0.0), MuscleObjectives { foot_plant: None, motor_drive: 0.1, ball_impulse: None }, b);
-        let high_drive = VirtualMuscleController::command(&profile, MuscleStyle::new(1.0, 2.0, 1.0), phase(SupportMode::BothFeet, 0.0), MuscleObjectives { foot_plant: None, motor_drive: 0.9, ball_impulse: None }, b);
+        let low_drive = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::new(1.0, 2.0, 1.0),
+            phase(SupportMode::BothFeet, 0.0),
+            MuscleObjectives {
+                foot_plant: None,
+                motor_drive: 0.1,
+                ball_impulse: None,
+            },
+            b,
+        );
+        let high_drive = VirtualMuscleController::command(
+            &profile,
+            MuscleStyle::new(1.0, 2.0, 1.0),
+            phase(SupportMode::BothFeet, 0.0),
+            MuscleObjectives {
+                foot_plant: None,
+                motor_drive: 0.9,
+                ball_impulse: None,
+            },
+            b,
+        );
         assert!(low_drive.recovery_damping() > high_drive.recovery_damping());
     }
 
@@ -335,7 +470,11 @@ mod tests {
             &profile,
             MuscleStyle::default_style(),
             phase(SupportMode::LeftFoot, 1.0),
-            MuscleObjectives { foot_plant: Some(Vec3::ZERO), motor_drive: 1.0, ball_impulse: Some(Vec3::new(0.0, 0.0, 5.0)) },
+            MuscleObjectives {
+                foot_plant: Some(Vec3::ZERO),
+                motor_drive: 1.0,
+                ball_impulse: Some(Vec3::new(0.0, 0.0, 5.0)),
+            },
             b,
         );
         // The report carries the strike magnitude (|(0,0,5)| = 5).
@@ -345,7 +484,11 @@ mod tests {
             &profile,
             MuscleStyle::default_style(),
             phase(SupportMode::LeftFoot, 1.0),
-            MuscleObjectives { foot_plant: None, motor_drive: 1.0, ball_impulse: None },
+            MuscleObjectives {
+                foot_plant: None,
+                motor_drive: 1.0,
+                ball_impulse: None,
+            },
             b,
         );
         assert!(no_strike.report().contains("strike=0.000"));

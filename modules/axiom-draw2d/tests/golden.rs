@@ -41,7 +41,6 @@ fn at(min: f32) -> Rect {
     Rect::new(Vec2::new(min, 0.0), Vec2::ONE)
 }
 
-
 #[test]
 fn finish_stably_sorts_by_layer_then_submit_order() {
     let mut api = Draw2dApi::new();
@@ -49,7 +48,11 @@ fn finish_stably_sorts_by_layer_then_submit_order() {
     // min.x doubles as the submission marker (i-th submitted draw has min.x = i).
     let layers = [2, 0, 1, 0, 2, 1];
     for (i, layer) in layers.iter().enumerate() {
-        api.rect(at(i as f32), Fill2d::color(rgba(1.0, 1.0, 1.0, 1.0)), common(*layer));
+        api.rect(
+            at(i as f32),
+            Fill2d::color(rgba(1.0, 1.0, 1.0, 1.0)),
+            common(*layer),
+        );
     }
     let list = api.finish();
 
@@ -83,7 +86,6 @@ fn finish_stably_sorts_by_layer_then_submit_order() {
         .all(|w| w[0].0 != w[1].0 || w[0].1 < w[1].1));
 }
 
-
 /// A rich, deterministic frame exercising every landed surface: camera, the
 /// transform stack (push/pop), every shape kind, sprite, text, and both
 /// gradient kinds referenced by a fill.
@@ -108,7 +110,12 @@ fn render_a_frame() -> axiom_host::Draw2dList {
     let depth = api.push_transform(Mat3::translation(Vec2::new(10.0, 20.0)));
     api.push_transform(Mat3::rotation(radians(0.25)));
     api.rect(at(0.0), Fill2d::paint(lin), common(3));
-    api.circle(Vec2::new(1.0, 1.0), meters(2.0), Fill2d::color(rgba(1.0, 1.0, 0.0, 1.0)), common(1));
+    api.circle(
+        Vec2::new(1.0, 1.0),
+        meters(2.0),
+        Fill2d::color(rgba(1.0, 1.0, 0.0, 1.0)),
+        common(1),
+    );
     api.pop_transform(depth);
 
     api.ellipse(
@@ -117,9 +124,19 @@ fn render_a_frame() -> axiom_host::Draw2dList {
         meters(2.0),
         radians(0.1),
         Fill2d::color(rgba(0.2, 0.3, 0.4, 1.0)),
-        Common2d::with_shadow(2, ratio(0.8), Shadow2d::new(rgba(0.0, 0.0, 0.0, 0.5), meters(3.0))),
+        Common2d::with_shadow(
+            2,
+            ratio(0.8),
+            Shadow2d::new(rgba(0.0, 0.0, 0.0, 0.5), meters(3.0)),
+        ),
     );
-    api.line(Vec2::ZERO, Vec2::new(9.0, 9.0), rgba(1.0, 1.0, 1.0, 1.0), meters(1.0), common(0));
+    api.line(
+        Vec2::ZERO,
+        Vec2::new(9.0, 9.0),
+        rgba(1.0, 1.0, 1.0, 1.0),
+        meters(1.0),
+        common(0),
+    );
     api.path(
         &[Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(1.0, 1.0)],
         Fill2d::color(rgba(0.5, 0.5, 0.5, 1.0)),
@@ -128,7 +145,13 @@ fn render_a_frame() -> axiom_host::Draw2dList {
     );
     api.sprite(
         TextureId::from_raw(7),
-        SpriteDraw2d::new(at(2.0), Vec2::new(0.5, 0.5), rgba(1.0, 1.0, 1.0, 1.0), true, false),
+        SpriteDraw2d::new(
+            at(2.0),
+            Vec2::new(0.5, 0.5),
+            rgba(1.0, 1.0, 1.0, 1.0),
+            true,
+            false,
+        ),
         common(4),
     );
     api.text(
@@ -139,7 +162,11 @@ fn render_a_frame() -> axiom_host::Draw2dList {
             ],
             meters(12.0),
         ),
-        TextDraw2d::new(FontHandle::from_raw(1), rgba(1.0, 1.0, 1.0, 1.0), TextAlign::CENTER),
+        TextDraw2d::new(
+            FontHandle::from_raw(1),
+            rgba(1.0, 1.0, 1.0, 1.0),
+            TextAlign::CENTER,
+        ),
         common(5),
     );
     api.finish()
@@ -165,7 +192,11 @@ fn rendered_frame_is_well_formed() {
     assert_eq!(list.paint_count(), 2);
     assert_eq!(list.camera().map(|c| c.center), Some(Vec2::new(3.0, 4.0)));
     // Every KIND landed exactly once.
-    let mut kinds: Vec<u32> = list.commands().iter().map(Draw2dCommand::kind_code).collect();
+    let mut kinds: Vec<u32> = list
+        .commands()
+        .iter()
+        .map(Draw2dCommand::kind_code)
+        .collect();
     kinds.sort_unstable();
     assert_eq!(
         kinds,

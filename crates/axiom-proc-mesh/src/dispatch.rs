@@ -45,6 +45,8 @@ mod tests {
     fn unknown_operator_code_fails_the_node() {
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
         g.add(250, vec![], vec![]);
-        assert!(ProcCore::new().execute(&g, 0, &SpaceApi::root(), mesh_eval).is_err());
+        assert!(ProcCore::new()
+            .execute(&g, 0, &SpaceApi::root(), mesh_eval)
+            .is_err());
     }
 }

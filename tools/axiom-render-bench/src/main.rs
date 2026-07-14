@@ -105,7 +105,13 @@ fn build_gallery(root: &Path, debug: bool) -> Result<(), String> {
     // Use `uv run --no-project python` — the interpreter the Makefile uses (it
     // guarantees a modern Python with `tomllib`, unlike a bare `python`).
     let mut cmd = Command::new("uv");
-    cmd.args(["run", "--no-project", "python", "scripts/package_gallery.py", "--fast"]);
+    cmd.args([
+        "run",
+        "--no-project",
+        "python",
+        "scripts/package_gallery.py",
+        "--fast",
+    ]);
     debug.then(|| cmd.arg("--debug"));
     let status = cmd
         .current_dir(root)
@@ -125,7 +131,13 @@ fn build_gallery(root: &Path, debug: bool) -> Result<(), String> {
 /// child, leaving the port bound and the next run serving stale content.
 fn serve(root: &Path, port: u16) -> Result<Child, String> {
     let child = Command::new("python")
-        .args(["-m", "http.server", &port.to_string(), "--directory", "dist"])
+        .args([
+            "-m",
+            "http.server",
+            &port.to_string(),
+            "--directory",
+            "dist",
+        ])
         .current_dir(root)
         .stdout(Stdio::null())
         .stderr(Stdio::null())

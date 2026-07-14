@@ -31,18 +31,15 @@ impl Fixture {
     /// Pave a slice crate under `apps/<dir>/` with `slice.toml`, a `lib.rs`
     /// exporting `harness_entry`, and a determinism test file.
     fn slice(&self, dir: &str, slice_toml: &str, harness_entry: &str, det_test: &str) -> &Self {
-        self.write(
-            &format!("apps/{dir}/slice.toml"),
-            slice_toml.as_bytes(),
-        )
-        .write(
-            &format!("apps/{dir}/src/lib.rs"),
-            format!("pub fn {harness_entry}() {{}}\n").as_bytes(),
-        )
-        .write(
-            &format!("apps/{dir}/tests/{det_test}.rs"),
-            b"#[test] fn t() { assert!(true); }\n",
-        )
+        self.write(&format!("apps/{dir}/slice.toml"), slice_toml.as_bytes())
+            .write(
+                &format!("apps/{dir}/src/lib.rs"),
+                format!("pub fn {harness_entry}() {{}}\n").as_bytes(),
+            )
+            .write(
+                &format!("apps/{dir}/tests/{det_test}.rs"),
+                b"#[test] fn t() { assert!(true); }\n",
+            )
     }
 
     fn report(&self) -> CheckReport {
@@ -85,7 +82,11 @@ fn a_healthy_headless_slice_passes() {
     f.slice("axiom-demo", &manifest(&sha, None), "build_demo", "det")
         .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES);
     let report = f.report();
-    assert!(report.is_ok(), "expected clean, got: {:?}", report.violations());
+    assert!(
+        report.is_ok(),
+        "expected clean, got: {:?}",
+        report.violations()
+    );
 }
 
 #[test]
@@ -93,10 +94,15 @@ fn missing_determinism_test_fires() {
     let f = Fixture::new("no_det");
     let sha = hex_sha256(GOLDEN_BYTES);
     // Pave everything but the determinism test file.
-    f.write("apps/axiom-demo/slice.toml", manifest(&sha, None).as_bytes())
-        .write("apps/axiom-demo/src/lib.rs", b"pub fn build_demo() {}\n")
-        .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES);
-    assert!(f.report().has_kind(ViolationKind::SliceDeterminismTestMissing));
+    f.write(
+        "apps/axiom-demo/slice.toml",
+        manifest(&sha, None).as_bytes(),
+    )
+    .write("apps/axiom-demo/src/lib.rs", b"pub fn build_demo() {}\n")
+    .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES);
+    assert!(f
+        .report()
+        .has_kind(ViolationKind::SliceDeterminismTestMissing));
 }
 
 #[test]
@@ -142,7 +148,9 @@ fn reference_hash_mismatch_and_missing_fire() {
         .slice("axiom-demo", &with_ref, "build_demo", "det")
         .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES);
     // reference/r.png not written.
-    assert!(missing.report().has_kind(ViolationKind::SliceReferenceMissing));
+    assert!(missing
+        .report()
+        .has_kind(ViolationKind::SliceReferenceMissing));
 }
 
 #[test]
@@ -150,10 +158,16 @@ fn harness_entry_not_exported_fires() {
     let f = Fixture::new("no_entry");
     let sha = hex_sha256(GOLDEN_BYTES);
     // Manifest declares harness_entry = build_demo, but lib.rs exports something else.
-    f.write("apps/axiom-demo/slice.toml", manifest(&sha, None).as_bytes())
-        .write("apps/axiom-demo/src/lib.rs", b"pub fn other_symbol() {}\n")
-        .write("apps/axiom-demo/tests/det.rs", b"#[test] fn t(){assert!(true);}\n")
-        .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES);
+    f.write(
+        "apps/axiom-demo/slice.toml",
+        manifest(&sha, None).as_bytes(),
+    )
+    .write("apps/axiom-demo/src/lib.rs", b"pub fn other_symbol() {}\n")
+    .write(
+        "apps/axiom-demo/tests/det.rs",
+        b"#[test] fn t(){assert!(true);}\n",
+    )
+    .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES);
     assert!(f.report().has_kind(ViolationKind::SliceHarnessEntryMissing));
 }
 
@@ -162,8 +176,13 @@ fn declared_harness_not_registered_fires() {
     let f = Fixture::new("unregistered");
     let sha = hex_sha256(GOLDEN_BYTES);
     // Declares a live harness, but there is no axiom-shot registry that names it.
-    f.slice("axiom-demo", &manifest(&sha, Some("demo-live")), "build_demo", "det")
-        .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES);
+    f.slice(
+        "axiom-demo",
+        &manifest(&sha, Some("demo-live")),
+        "build_demo",
+        "det",
+    )
+    .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES);
     assert!(f
         .report()
         .has_kind(ViolationKind::SliceHarnessNotRegistered));
@@ -173,13 +192,18 @@ fn declared_harness_not_registered_fires() {
 fn declared_harness_registered_in_shot_passes() {
     let f = Fixture::new("registered");
     let sha = hex_sha256(GOLDEN_BYTES);
-    f.slice("axiom-demo", &manifest(&sha, Some("demo-live")), "build_demo", "det")
-        .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES)
-        // A registry source that registers the name as a string literal.
-        .write(
-            "tools/axiom-shot/src/registry.rs",
-            b"pub fn registry() { let _ = SliceEntry { name: \"demo-live\" }; }\n",
-        );
+    f.slice(
+        "axiom-demo",
+        &manifest(&sha, Some("demo-live")),
+        "build_demo",
+        "det",
+    )
+    .write("apps/axiom-demo/tests/golden/g.bin", GOLDEN_BYTES)
+    // A registry source that registers the name as a string literal.
+    .write(
+        "tools/axiom-shot/src/registry.rs",
+        b"pub fn registry() { let _ = SliceEntry { name: \"demo-live\" }; }\n",
+    );
     let report = f.report();
     assert!(
         !report.has_kind(ViolationKind::SliceHarnessNotRegistered),
@@ -201,10 +225,12 @@ fn invalid_slice_manifest_fires() {
 #[test]
 fn placement_flags_a_large_hidden_engine_transform() {
     let f = Fixture::new("placement_bad");
-    let body = std::iter::repeat("    let m = Mat4::default(); let v = Vec3::ZERO; // mesh instance world")
-        .take(400)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let body = std::iter::repeat(
+        "    let m = Mat4::default(); let v = Vec3::ZERO; // mesh instance world",
+    )
+    .take(400)
+    .collect::<Vec<_>>()
+    .join("\n");
     let src = format!("pub fn build_geometry() -> Vec3 {{\n{body}\n}}\n");
     f.write("apps/axiom-demo/src/build.rs", src.as_bytes());
     assert!(f

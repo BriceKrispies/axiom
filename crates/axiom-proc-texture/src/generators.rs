@@ -120,7 +120,13 @@ pub(crate) fn spots(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
         // Snapshot the (cx, cy, r) triples as i64 so the closure owns them (the
         // params borrow ends here) and the distance test can't underflow.
         let discs: Vec<(i64, i64, i64)> = (0..n)
-            .map(|k| (p[5 + k * 3].as_int() as i64, p[6 + k * 3].as_int() as i64, p[7 + k * 3].as_int() as i64))
+            .map(|k| {
+                (
+                    p[5 + k * 3].as_int() as i64,
+                    p[6 + k * 3].as_int() as i64,
+                    p[7 + k * 3].as_int() as i64,
+                )
+            })
             .collect();
         TextureBuffer::from_fn(cw, ch, move |x, y| {
             let hit = discs.iter().any(|&(cx, cy, r)| {
@@ -145,7 +151,9 @@ mod tests {
     fn run(op: TextureOp, params: Vec<Param>) -> Option<TextureBuffer> {
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
         g.add(op as u16, params, vec![]);
-        ProcCore::new().execute(&g, 7, &SpaceApi::root(), texture_eval).ok()
+        ProcCore::new()
+            .execute(&g, 7, &SpaceApi::root(), texture_eval)
+            .ok()
     }
 
     fn c(packed: u32) -> Param {
@@ -154,7 +162,11 @@ mod tests {
 
     #[test]
     fn solid_fills_one_color_and_needs_three_params() {
-        let t = run(TextureOp::Solid, vec![Param::int(2), Param::int(2), c(0x11_22_33_44)]).unwrap();
+        let t = run(
+            TextureOp::Solid,
+            vec![Param::int(2), Param::int(2), c(0x11_22_33_44)],
+        )
+        .unwrap();
         assert_eq!(t.texel(0, 0), [0x11, 0x22, 0x33, 0x44]);
         assert_eq!(t.texel(1, 1), [0x11, 0x22, 0x33, 0x44]);
         assert!(run(TextureOp::Solid, vec![Param::int(2)]).is_none());
@@ -162,7 +174,17 @@ mod tests {
 
     #[test]
     fn checker_alternates_cells_and_needs_five_params() {
-        let t = run(TextureOp::Checker, vec![Param::int(4), Param::int(4), Param::int(2), c(0x00_00_00_FF), c(0xFF_FF_FF_FF)]).unwrap();
+        let t = run(
+            TextureOp::Checker,
+            vec![
+                Param::int(4),
+                Param::int(4),
+                Param::int(2),
+                c(0x00_00_00_FF),
+                c(0xFF_FF_FF_FF),
+            ],
+        )
+        .unwrap();
         // Cell (0,0) is color_a; the neighbor cell (2,0) is color_b.
         assert_eq!(t.texel(0, 0), [0, 0, 0, 255]);
         assert_eq!(t.texel(2, 0), [255, 255, 255, 255]);
@@ -172,17 +194,36 @@ mod tests {
 
     #[test]
     fn gradient_ramps_left_to_right() {
-        let t = run(TextureOp::Gradient, vec![Param::int(3), Param::int(1), c(0x00_00_00_FF), c(0xFF_FF_FF_FF)]).unwrap();
+        let t = run(
+            TextureOp::Gradient,
+            vec![
+                Param::int(3),
+                Param::int(1),
+                c(0x00_00_00_FF),
+                c(0xFF_FF_FF_FF),
+            ],
+        )
+        .unwrap();
         assert_eq!(t.texel(0, 0), [0, 0, 0, 255]);
         assert_eq!(t.texel(2, 0), [255, 255, 255, 255]);
         assert!(run(TextureOp::Gradient, vec![Param::int(3)]).is_none());
         // width 1 must not divide by zero.
-        assert!(run(TextureOp::Gradient, vec![Param::int(1), Param::int(1), c(0), c(0xFFFFFFFF)]).is_some());
+        assert!(run(
+            TextureOp::Gradient,
+            vec![Param::int(1), Param::int(1), c(0), c(0xFFFFFFFF)]
+        )
+        .is_some());
     }
 
     #[test]
     fn noise_is_deterministic_and_needs_five_params() {
-        let params = vec![Param::int(8), Param::int(8), Param::int(4), c(0), c(0xFFFFFFFF)];
+        let params = vec![
+            Param::int(8),
+            Param::int(8),
+            Param::int(4),
+            c(0),
+            c(0xFFFFFFFF),
+        ];
         let a = run(TextureOp::Noise, params.clone()).unwrap();
         let b = run(TextureOp::Noise, params).unwrap();
         assert_eq!(a, b);
@@ -193,7 +234,15 @@ mod tests {
     fn bricks_has_mortar_gaps_and_needs_seven_params() {
         let t = run(
             TextureOp::Bricks,
-            vec![Param::int(8), Param::int(8), Param::int(2), Param::int(2), Param::int(1), c(0xAA_AA_AA_FF), c(0x22_22_22_FF)],
+            vec![
+                Param::int(8),
+                Param::int(8),
+                Param::int(2),
+                Param::int(2),
+                Param::int(1),
+                c(0xAA_AA_AA_FF),
+                c(0x22_22_22_FF),
+            ],
         )
         .unwrap();
         assert_eq!(t.texel(0, 0), [0x22, 0x22, 0x22, 0xFF]);
@@ -232,7 +281,16 @@ mod tests {
         // clamped away (no read past the end), so only the one spot paints.
         let one = run(
             TextureOp::Spots,
-            vec![Param::int(4), Param::int(4), c(0xFF_FF_FF_FF), c(0x00_00_00_FF), Param::int(5), Param::int(0), Param::int(0), Param::int(0)],
+            vec![
+                Param::int(4),
+                Param::int(4),
+                c(0xFF_FF_FF_FF),
+                c(0x00_00_00_FF),
+                Param::int(5),
+                Param::int(0),
+                Param::int(0),
+                Param::int(0),
+            ],
         )
         .unwrap();
         assert_eq!(one.texel(0, 0), [0, 0, 0, 255]);
@@ -240,7 +298,13 @@ mod tests {
         // A zero count leaves the field entirely base-colored.
         let none = run(
             TextureOp::Spots,
-            vec![Param::int(4), Param::int(4), c(0xFF_FF_FF_FF), c(0x00_00_00_FF), Param::int(0)],
+            vec![
+                Param::int(4),
+                Param::int(4),
+                c(0xFF_FF_FF_FF),
+                c(0x00_00_00_FF),
+                Param::int(0),
+            ],
         )
         .unwrap();
         assert_eq!(none.texel(0, 0), [255, 255, 255, 255]);

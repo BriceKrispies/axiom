@@ -61,7 +61,10 @@ impl LookDelta {
 
     /// The zero delta — no mouse-look this frame.
     pub const fn none() -> Self {
-        Self { yaw: Radians::finite_or_zero(0.0), pitch: Radians::finite_or_zero(0.0) }
+        Self {
+            yaw: Radians::finite_or_zero(0.0),
+            pitch: Radians::finite_or_zero(0.0),
+        }
     }
 
     /// The yaw delta (about world +Y).
@@ -136,7 +139,13 @@ impl WalkTuning {
         pitch_limit: Radians,
         look_sensitivity: Ratio,
     ) -> Self {
-        Self { move_speed, turn_speed, eye_height, pitch_limit, look_sensitivity }
+        Self {
+            move_speed,
+            turn_speed,
+            eye_height,
+            pitch_limit,
+            look_sensitivity,
+        }
     }
 
     /// The shared first-person walk tuning: a human-paced stroll seated 1.7 m
@@ -199,7 +208,12 @@ impl Lens {
     /// A lens with vertical field of view `fov`, viewport `aspect`, and the
     /// `near`/`far` clip planes.
     pub const fn new(fov: Radians, aspect: Ratio, near: Meters, far: Meters) -> Self {
-        Self { fov, aspect, near, far }
+        Self {
+            fov,
+            aspect,
+            near,
+            far,
+        }
     }
 
     /// The vertical field of view.
@@ -229,8 +243,17 @@ mod tests {
 
     #[test]
     fn move_intent_merges_field_wise() {
-        let keyboard = MoveIntent { forward: true, turn_left: true, ..MoveIntent::default() };
-        let agent = MoveIntent { backward: true, turn_left: true, strafe_right: true, ..MoveIntent::default() };
+        let keyboard = MoveIntent {
+            forward: true,
+            turn_left: true,
+            ..MoveIntent::default()
+        };
+        let agent = MoveIntent {
+            backward: true,
+            turn_left: true,
+            strafe_right: true,
+            ..MoveIntent::default()
+        };
         let merged = keyboard.merged(agent);
         assert_eq!(
             merged,
@@ -244,7 +267,10 @@ mod tests {
             }
         );
         // Default is all-false.
-        assert_eq!(MoveIntent::default().merged(MoveIntent::default()), MoveIntent::default());
+        assert_eq!(
+            MoveIntent::default().merged(MoveIntent::default()),
+            MoveIntent::default()
+        );
     }
 
     #[test]

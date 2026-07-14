@@ -46,8 +46,6 @@ mod player_command;
 mod procanim;
 mod renderable;
 mod renderable_snapshot;
-mod tag_snapshot;
-mod texture_ref;
 mod scene;
 mod scene_api;
 mod scene_error;
@@ -60,6 +58,8 @@ mod sdf_shape;
 mod sdf_shape_snapshot;
 mod spin;
 mod tag;
+mod tag_snapshot;
+mod texture_ref;
 
 pub use ids::SceneNodeId;
 pub use scene_api::SceneApi;

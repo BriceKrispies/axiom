@@ -34,11 +34,7 @@ pub(crate) struct ServerSnapshotFor {
 impl ServerSnapshotFor {
     /// Validate and construct a `ServerSnapshotFor`. Fails if the ack list
     /// exceeds [`MAX_ACKS`] or the payload exceeds the payload bound.
-    pub(crate) fn new(
-        server_tick: u64,
-        acks: &[(u64, u64)],
-        payload: &[u8],
-    ) -> KernelResult<Self> {
+    pub(crate) fn new(server_tick: u64, acks: &[(u64, u64)], payload: &[u8]) -> KernelResult<Self> {
         validate_ack_len(acks.len())
             .and_then(|()| OpaquePayload::new(payload))
             .map(|payload| ServerSnapshotFor {

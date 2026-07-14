@@ -44,8 +44,11 @@ fn enabled(api: &PhysicsApi, h: PhysicsBodyHandle) -> bool {
 /// A gravity-free world with a single dynamic body that has been disabled and the
 /// disable committed by a step (so the body's `enabled` flag is genuinely false).
 fn disabled_world() -> (PhysicsApi, PhysicsBodyHandle) {
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
-    let body = api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
+    let mut api =
+        PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+    let body = api
+        .create_dynamic_body(Transform::IDENTITY, ratio(1.0))
+        .unwrap();
     api.disable_body(body).unwrap();
     api.step(tenth_second()).unwrap();
     assert!(!enabled(&api, body), "the disable must have committed");
@@ -58,7 +61,11 @@ fn apply_force_to_disabled_body_returns_error() {
     let err = api
         .apply_force(body, Vec3::new(1.0, 0.0, 0.0))
         .expect_err("a force on a disabled body must be rejected");
-    assert!(err.is_operation_on_disabled_body(), "raw={}", err.raw_code());
+    assert!(
+        err.is_operation_on_disabled_body(),
+        "raw={}",
+        err.raw_code()
+    );
 }
 
 #[test]
@@ -67,45 +74,79 @@ fn apply_impulse_to_disabled_body_returns_error() {
     let err = api
         .apply_impulse(body, Vec3::new(1.0, 0.0, 0.0))
         .expect_err("an impulse on a disabled body must be rejected");
-    assert!(err.is_operation_on_disabled_body(), "raw={}", err.raw_code());
+    assert!(
+        err.is_operation_on_disabled_body(),
+        "raw={}",
+        err.raw_code()
+    );
 }
 
 #[test]
 fn disabled_dynamic_body_does_not_integrate() {
     // Under gravity, a disabled dynamic body stays exactly put and is not counted
     // as integrated.
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
-    let body = api.create_dynamic_body(Transform::IDENTITY, ratio(1.0)).unwrap();
+    let mut api = PhysicsApi::with_config(
+        Vec3::new(0.0, -9.8, 0.0),
+        8,
+        16,
+        16,
+        1,
+        true,
+        ratio(0.0),
+        ratio(0.0),
+    )
+    .unwrap();
+    let body = api
+        .create_dynamic_body(Transform::IDENTITY, ratio(1.0))
+        .unwrap();
     api.disable_body(body).unwrap();
     for _ in 0..10 {
         api.step(tenth_second()).unwrap();
     }
     assert_eq!(pos(&api, body), Vec3::ZERO, "a disabled body must not fall");
-    assert_eq!(api.latest_step_record().integration_count(), 0, "nothing integrates");
+    assert_eq!(
+        api.latest_step_record().integration_count(),
+        0,
+        "nothing integrates"
+    );
 }
 
 #[test]
 fn disabled_body_is_skipped_by_broad_phase() {
     // Two overlapping spheres on different bodies form one broad pair while both are
     // enabled; disabling one removes the pair entirely.
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+    let mut api =
+        PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
     let a = api
-        .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)), ratio(1.0))
+        .create_dynamic_body(
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            ratio(1.0),
+        )
         .unwrap();
     let b = api
         .create_static_body(Transform::from_translation(Vec3::new(0.8, 0.0, 0.0)))
         .unwrap();
-    api.attach_sphere_collider(a, meters(0.5), material, false).unwrap();
-    api.attach_sphere_collider(b, meters(0.5), material, false).unwrap();
+    api.attach_sphere_collider(a, meters(0.5), material, false)
+        .unwrap();
+    api.attach_sphere_collider(b, meters(0.5), material, false)
+        .unwrap();
 
     api.step(tenth_second()).unwrap();
-    assert_eq!(api.latest_step_record().broad_phase_pair_count(), 1, "both enabled -> one pair");
+    assert_eq!(
+        api.latest_step_record().broad_phase_pair_count(),
+        1,
+        "both enabled -> one pair"
+    );
 
     api.disable_body(a).unwrap();
     api.step(tenth_second()).unwrap();
     let record = api.latest_step_record();
-    assert_eq!(record.broad_phase_pair_count(), 0, "disabled body is skipped by broad phase");
+    assert_eq!(
+        record.broad_phase_pair_count(),
+        0,
+        "disabled body is skipped by broad phase"
+    );
     assert_eq!(record.contact_pair_count(), 0, "and generates no contact");
 }
 
@@ -120,5 +161,8 @@ fn reenabled_body_accepts_force_again() {
 
     api.apply_force(body, Vec3::new(5.0, 0.0, 0.0)).unwrap();
     api.step(tenth_second()).unwrap();
-    assert!(pos(&api, body).x > 0.0, "a re-enabled body responds to force again");
+    assert!(
+        pos(&api, body).x > 0.0,
+        "a re-enabled body responds to force again"
+    );
 }

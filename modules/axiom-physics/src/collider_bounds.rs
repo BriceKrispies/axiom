@@ -105,9 +105,18 @@ mod tests {
         let aabb = world_aabb(shape, Vec3::ZERO, yaw).expect("box is finite");
         let expected = 2.0_f32.sqrt();
         let mx = aabb.max();
-        assert!((mx.x - expected).abs() < 1.0e-5, "x widened to the rotated diagonal, got {mx:?}");
-        assert!((mx.z - expected).abs() < 1.0e-5, "z widened to the rotated diagonal, got {mx:?}");
-        assert!((mx.y - 1.0).abs() < 1.0e-6, "y unchanged under yaw, got {mx:?}");
+        assert!(
+            (mx.x - expected).abs() < 1.0e-5,
+            "x widened to the rotated diagonal, got {mx:?}"
+        );
+        assert!(
+            (mx.z - expected).abs() < 1.0e-5,
+            "z widened to the rotated diagonal, got {mx:?}"
+        );
+        assert!(
+            (mx.y - 1.0).abs() < 1.0e-6,
+            "y unchanged under yaw, got {mx:?}"
+        );
     }
 
     #[test]
@@ -131,6 +140,9 @@ mod tests {
         let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, FRAC_PI_4).unwrap();
         let rotated = world_aabb(hf, Vec3::ZERO, yaw).expect("heightfield is finite");
         let rmax = rotated.max();
-        assert!(rmax.x > 4.0 + 1.0, "footprint widened under yaw, got {rmax:?}");
+        assert!(
+            rmax.x > 4.0 + 1.0,
+            "footprint widened under yaw, got {rmax:?}"
+        );
     }
 }

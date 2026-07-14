@@ -287,7 +287,10 @@ impl AudioApi {
     /// choice, §9).
     pub fn play_music(&mut self, urls: &[&str], opts: MusicOpts) -> VoiceId {
         let voice = VoiceId::from_raw(self.alloc_handle());
-        let tracks = urls.iter().map(|u| (*u).to_string()).collect::<Vec<String>>();
+        let tracks = urls
+            .iter()
+            .map(|u| (*u).to_string())
+            .collect::<Vec<String>>();
         self.pending.push(AudioCommand::PlayMusic {
             voice,
             tracks,
@@ -323,7 +326,10 @@ impl AudioApi {
         fresh
             .into_iter()
             .for_each(|input| self.pending.push(AudioCommand::OpenInput { input }));
-        let resolved = self.input.or(fresh).expect("an input handle exists after open");
+        let resolved = self
+            .input
+            .or(fresh)
+            .expect("an input handle exists after open");
         self.input = Some(resolved);
         resolved
     }
@@ -335,7 +341,8 @@ impl AudioApi {
     /// the only analysis math the core owns is the deterministic [`Self::band_layout`].
     pub fn create_analyser(&mut self, input: AudioInput) -> AnalyserId {
         let id = AnalyserId::from_raw(self.alloc_handle());
-        self.pending.push(AudioCommand::CreateAnalyser { id, input });
+        self.pending
+            .push(AudioCommand::CreateAnalyser { id, input });
         id
     }
 
@@ -692,10 +699,13 @@ mod tests {
         let s = a.load_sound("s.ogg");
         let v = a.play_sound(s, play_opts(1.0));
         a.stop_voice(v);
-        let _ = a.play_music(&["m.ogg"], MusicOpts {
-            looping: false,
-            crossfade: AudioSeconds::ZERO,
-        });
+        let _ = a.play_music(
+            &["m.ogg"],
+            MusicOpts {
+                looping: false,
+                crossfade: AudioSeconds::ZERO,
+            },
+        );
         let _ = a.play_tone(basic_tone(Wave::Sine));
         let input = a.open_audio_input();
         let _ = a.create_analyser(input);
@@ -712,7 +722,10 @@ mod tests {
         ]
         .into_iter()
         .for_each(|needle| {
-            assert!(rendered.contains(needle), "Debug missing `{needle}`: {rendered}");
+            assert!(
+                rendered.contains(needle),
+                "Debug missing `{needle}`: {rendered}"
+            );
         });
     }
 
@@ -724,7 +737,10 @@ mod tests {
         let first = a.open_audio_input();
         assert_eq!(first.raw(), 1);
         let batch = a.take_pending();
-        assert_eq!(batch.commands, vec![AudioCommand::OpenInput { input: first }]);
+        assert_eq!(
+            batch.commands,
+            vec![AudioCommand::OpenInput { input: first }]
+        );
         // Re-opening returns the same handle and records nothing: one stream / mix.
         let second = a.open_audio_input();
         assert_eq!(second, first);

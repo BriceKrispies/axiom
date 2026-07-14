@@ -21,7 +21,11 @@ impl TextureBuffer {
         let w = width.clamp(1, MAX_DIM);
         let h = height.clamp(1, MAX_DIM);
         let pixels = (0..w * h).flat_map(|i| f(i % w, i / w)).collect();
-        Self { width: w, height: h, pixels }
+        Self {
+            width: w,
+            height: h,
+            pixels,
+        }
     }
 
     /// The width in pixels.
@@ -50,7 +54,12 @@ impl TextureBuffer {
         let cx = x.min(self.width - 1);
         let cy = y.min(self.height - 1);
         let base = ((cy * self.width + cx) * 4) as usize;
-        [self.pixels[base], self.pixels[base + 1], self.pixels[base + 2], self.pixels[base + 3]]
+        [
+            self.pixels[base],
+            self.pixels[base + 1],
+            self.pixels[base + 2],
+            self.pixels[base + 3],
+        ]
     }
 }
 
@@ -66,7 +75,10 @@ mod tests {
         assert_eq!(t.texel(1, 2), [1, 2, 0, 255]);
         // Zero / oversize dimensions clamp into 1..=MAX_DIM.
         assert_eq!(TextureBuffer::from_fn(0, 0, |_, _| [0; 4]).width(), 1);
-        assert_eq!(TextureBuffer::from_fn(9999, 1, |_, _| [0; 4]).width(), MAX_DIM);
+        assert_eq!(
+            TextureBuffer::from_fn(9999, 1, |_, _| [0; 4]).width(),
+            MAX_DIM
+        );
     }
 
     #[test]

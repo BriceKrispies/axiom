@@ -85,8 +85,18 @@ pub(crate) struct MuscleGroupParams {
 
 impl MuscleGroupParams {
     /// Assemble params from `(stiffness, damping, max_torque, phase_weight)`.
-    pub(crate) const fn new(stiffness: f32, damping: f32, max_torque: f32, phase_weight: f32) -> Self {
-        MuscleGroupParams { stiffness, damping, max_torque, phase_weight }
+    pub(crate) const fn new(
+        stiffness: f32,
+        damping: f32,
+        max_torque: f32,
+        phase_weight: f32,
+    ) -> Self {
+        MuscleGroupParams {
+            stiffness,
+            damping,
+            max_torque,
+            phase_weight,
+        }
     }
 }
 
@@ -115,6 +125,9 @@ mod tests {
     #[test]
     fn params_store_their_fields() {
         let p = MuscleGroupParams::new(1.0, 2.0, 3.0, 0.4);
-        assert_eq!((p.stiffness, p.damping, p.max_torque, p.phase_weight), (1.0, 2.0, 3.0, 0.4));
+        assert_eq!(
+            (p.stiffness, p.damping, p.max_torque, p.phase_weight),
+            (1.0, 2.0, 3.0, 0.4)
+        );
     }
 }

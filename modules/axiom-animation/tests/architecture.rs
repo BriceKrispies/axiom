@@ -137,7 +137,10 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
-    assert!(manifest.is_file(), "expected modules/axiom-animation/module.toml");
+    assert!(
+        manifest.is_file(),
+        "expected modules/axiom-animation/module.toml"
+    );
     let stripped = strip_comments_and_strings(&fs::read_to_string(&manifest).unwrap());
     assert!(
         stripped.contains("allowed_modules = []"),
@@ -163,7 +166,10 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
         vec!["pub use animation_api::AnimationApi;"],
         "axiom-animation must expose exactly one behavioral facade (AnimationApi)"
     );
-    let id_lines = pub_uses.iter().filter(|line| line.contains("ids::")).count();
+    let id_lines = pub_uses
+        .iter()
+        .filter(|line| line.contains("ids::"))
+        .count();
     assert_eq!(
         id_lines, 1,
         "axiom-animation re-exports its identity vocabulary via exactly one `pub use ids::{{…}}` line"
@@ -207,7 +213,10 @@ fn animation_imports_no_other_modules() {
         .map(|e| e.file_name().to_string_lossy().replace('-', "_"))
         .filter(|name| name != "axiom_animation")
         .collect();
-    assert!(!other_modules.is_empty(), "expected sibling modules to exist");
+    assert!(
+        !other_modules.is_empty(),
+        "expected sibling modules to exist"
+    );
     let mut violations = Vec::new();
     for path in source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -216,7 +225,11 @@ fn animation_imports_no_other_modules() {
             .collect();
         for other in &other_modules {
             if tokens.contains(other.as_str()) {
-                violations.push(format!("{}: references other module `{}`", path.display(), other));
+                violations.push(format!(
+                    "{}: references other module `{}`",
+                    path.display(),
+                    other
+                ));
             }
         }
     }
@@ -229,7 +242,13 @@ fn animation_imports_no_other_modules() {
 
 #[test]
 fn no_layer_imports_axiom_animation() {
-    for layer in ["axiom-kernel", "axiom-math", "axiom-runtime", "axiom-frame", "axiom-host"] {
+    for layer in [
+        "axiom-kernel",
+        "axiom-math",
+        "axiom-runtime",
+        "axiom-frame",
+        "axiom-host",
+    ] {
         let src = repo_root().join("crates").join(layer).join("src");
         assert_absent_in_other(
             src,
@@ -358,7 +377,10 @@ fn no_junk_drawer_modules() {
     for path in source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc", "shared", "prelude"] {
-            assert_ne!(name, banned, "axiom-animation must not have a `{banned}` module");
+            assert_ne!(
+                name, banned,
+                "axiom-animation must not have a `{banned}` module"
+            );
         }
     }
 }

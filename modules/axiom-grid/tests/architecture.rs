@@ -136,11 +136,13 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
-    assert!(manifest.is_file(), "expected modules/axiom-grid/module.toml");
+    assert!(
+        manifest.is_file(),
+        "expected modules/axiom-grid/module.toml"
+    );
     let stripped = strip_comments_and_strings(&fs::read_to_string(&manifest).unwrap());
     assert!(
         stripped.contains("allowed_modules = []"),
@@ -166,13 +168,15 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
         vec!["pub use grid_api::GridApi;"],
         "axiom-grid must expose exactly one behavioral facade (GridApi)"
     );
-    let id_lines = pub_uses.iter().filter(|line| line.contains("ids::")).count();
+    let id_lines = pub_uses
+        .iter()
+        .filter(|line| line.contains("ids::"))
+        .count();
     assert_eq!(
         id_lines, 1,
         "axiom-grid re-exports its identity vocabulary via exactly one `pub use ids::{{…}}` line"
     );
 }
-
 
 #[test]
 fn grid_imports_only_legal_layers() {
@@ -211,7 +215,10 @@ fn grid_imports_no_other_modules() {
         .map(|e| e.file_name().to_string_lossy().replace('-', "_"))
         .filter(|name| name != "axiom_grid")
         .collect();
-    assert!(!other_modules.is_empty(), "expected sibling modules to exist");
+    assert!(
+        !other_modules.is_empty(),
+        "expected sibling modules to exist"
+    );
     let mut violations = Vec::new();
     for path in source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -237,7 +244,13 @@ fn grid_imports_no_other_modules() {
 
 #[test]
 fn no_layer_imports_axiom_grid() {
-    for layer in ["axiom-kernel", "axiom-math", "axiom-runtime", "axiom-frame", "axiom-ecs"] {
+    for layer in [
+        "axiom-kernel",
+        "axiom-math",
+        "axiom-runtime",
+        "axiom-frame",
+        "axiom-ecs",
+    ] {
         let src = repo_root().join("crates").join(layer).join("src");
         assert_absent_in_other(
             src,
@@ -247,7 +260,6 @@ fn no_layer_imports_axiom_grid() {
         );
     }
 }
-
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -377,7 +389,6 @@ fn every_source_module_is_declared_in_lib_rs() {
         missing.join("\n")
     );
 }
-
 
 /// Two independently-built identical boards, queried for the same path, must
 /// return byte-identical routes — the replay invariant, through the facade.

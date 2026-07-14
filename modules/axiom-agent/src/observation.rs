@@ -23,7 +23,14 @@ pub struct ObservationFact {
 
 impl ObservationFact {
     /// Construct a fact from its neutral codes and fixed-point fields.
-    pub const fn new(kind_code: u16, subject_code: u32, x: i64, y: i64, z: i64, value: i64) -> Self {
+    pub const fn new(
+        kind_code: u16,
+        subject_code: u32,
+        x: i64,
+        y: i64,
+        z: i64,
+        value: i64,
+    ) -> Self {
         ObservationFact {
             kind_code,
             subject_code,
@@ -186,7 +193,10 @@ mod tests {
                 ObservationFact::new(200, 2, 0, 0, 0, 0),
             ],
         );
-        assert_eq!(o.channels(), &[ObservationChannel::Semantic, ObservationChannel::Geometric]);
+        assert_eq!(
+            o.channels(),
+            &[ObservationChannel::Semantic, ObservationChannel::Geometric]
+        );
         assert_eq!(o.legal_actions(), &[10, 20, 30]);
         assert_eq!(o.fact_count(), 2);
         assert_eq!(o.legal_action_count(), 3);
@@ -206,8 +216,14 @@ mod tests {
                 ObservationFact::new(200, 3, 0, 0, 0, 0),
             ],
         );
-        assert_eq!(o.first_fact_with_kind(100).map(|f| f.subject_code()), Some(1));
-        assert_eq!(o.first_fact_with_kind(200).map(|f| f.subject_code()), Some(3));
+        assert_eq!(
+            o.first_fact_with_kind(100).map(|f| f.subject_code()),
+            Some(1)
+        );
+        assert_eq!(
+            o.first_fact_with_kind(200).map(|f| f.subject_code()),
+            Some(3)
+        );
         assert!(o.first_fact_with_kind(999).is_none());
     }
 

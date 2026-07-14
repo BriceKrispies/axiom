@@ -316,7 +316,14 @@ impl FrameScrubber {
                     .shared
                     .recorder
                     .borrow_mut()
-                    .record_frame(frame, frame, Vec::new(), Vec::new(), state_bytes, render_bytes)
+                    .record_frame(
+                        frame,
+                        frame,
+                        Vec::new(),
+                        Vec::new(),
+                        state_bytes,
+                        render_bytes,
+                    )
                     .is_ok();
                 // Mirror the push only when the recorder actually retained the frame,
                 // then trim the store's front to the timeline's retained length so the
@@ -507,20 +514,23 @@ fn render(nodes: &Nodes, items: &[InterfaceDrawItem]) {
 /// after the first paint this only updates text.
 fn sync_rows(document: &web_sys::Document, nodes: &Nodes, specs: &[(String, String)]) {
     let mut cache = nodes.rows.borrow_mut();
-    specs.iter().enumerate().for_each(|(index, (label, value))| {
-        (index >= cache.len())
-            .then(|| make_row(document))
-            .flatten()
-            .into_iter()
-            .for_each(|(row, key, val)| {
-                let _ = nodes.rows_box.append_child(&row);
-                cache.push((key, val));
+    specs
+        .iter()
+        .enumerate()
+        .for_each(|(index, (label, value))| {
+            (index >= cache.len())
+                .then(|| make_row(document))
+                .flatten()
+                .into_iter()
+                .for_each(|(row, key, val)| {
+                    let _ = nodes.rows_box.append_child(&row);
+                    cache.push((key, val));
+                });
+            cache.get(index).into_iter().for_each(|(key, val)| {
+                key.set_text_content(Some(label));
+                val.set_text_content(Some(value));
             });
-        cache.get(index).into_iter().for_each(|(key, val)| {
-            key.set_text_content(Some(label));
-            val.set_text_content(Some(value));
         });
-    });
 }
 
 /// Create one read-out row (`<div><span.k/><span.v/></div>`), returning the row
@@ -543,20 +553,23 @@ fn make_row(document: &web_sys::Document) -> Option<(Element, Element, Element)>
 /// click is never lost to a replaced node.
 fn sync_buttons(document: &web_sys::Document, nodes: &Nodes, specs: &[(u32, String)]) {
     let mut cache = nodes.buttons.borrow_mut();
-    specs.iter().enumerate().for_each(|(index, (action, label))| {
-        (index >= cache.len())
-            .then(|| make_button(document))
-            .flatten()
-            .into_iter()
-            .for_each(|button| {
-                let _ = nodes.actions_box.append_child(&button);
-                cache.push(button);
+    specs
+        .iter()
+        .enumerate()
+        .for_each(|(index, (action, label))| {
+            (index >= cache.len())
+                .then(|| make_button(document))
+                .flatten()
+                .into_iter()
+                .for_each(|button| {
+                    let _ = nodes.actions_box.append_child(&button);
+                    cache.push(button);
+                });
+            cache.get(index).into_iter().for_each(|button| {
+                let _ = button.set_attribute("data-action", &action.to_string());
+                button.set_text_content(Some(label));
             });
-        cache.get(index).into_iter().for_each(|button| {
-            let _ = button.set_attribute("data-action", &action.to_string());
-            button.set_text_content(Some(label));
         });
-    });
 }
 
 /// Create one `<button.axiom-scrub-btn>`, or `None` if creation failed.
@@ -568,10 +581,14 @@ fn make_button(document: &web_sys::Document) -> Option<Element> {
 
 /// Inject the scrubber stylesheet once (appended to the body).
 fn inject_style(document: &web_sys::Document, body: &Element) {
-    document.create_element("style").ok().into_iter().for_each(|style| {
-        style.set_text_content(Some(SCRUBBER_CSS));
-        let _ = body.append_child(&style);
-    });
+    document
+        .create_element("style")
+        .ok()
+        .into_iter()
+        .for_each(|style| {
+            style.set_text_content(Some(SCRUBBER_CSS));
+            let _ = body.append_child(&style);
+        });
 }
 
 /// Install one delegated click listener on the actions container: it reads the
@@ -807,8 +824,10 @@ fn install_visibility_toggle(window: &web_sys::Window, s: &Shared) {
         let shared = s.clone();
         Closure::<dyn FnMut()>::new(move || toggle_visibility(&shared))
     };
-    let _ = window
-        .add_event_listener_with_callback("axiom:scrubber-toggle", on_signal.as_ref().unchecked_ref());
+    let _ = window.add_event_listener_with_callback(
+        "axiom:scrubber-toggle",
+        on_signal.as_ref().unchecked_ref(),
+    );
     on_signal.forget();
 }
 
@@ -1043,12 +1062,18 @@ fn encode_command(bytes: &mut Vec<u8>, command: &axiom_host::Draw2dCommand) {
         None => put_u8(bytes, 0),
     }
 
-    command.as_rect().into_iter().for_each(|r| put_rect(bytes, r));
-    command.as_circle().into_iter().for_each(|(center, radius)| {
-        put_f32(bytes, center.x);
-        put_f32(bytes, center.y);
-        put_f32(bytes, radius.get());
-    });
+    command
+        .as_rect()
+        .into_iter()
+        .for_each(|r| put_rect(bytes, r));
+    command
+        .as_circle()
+        .into_iter()
+        .for_each(|(center, radius)| {
+            put_f32(bytes, center.x);
+            put_f32(bytes, center.y);
+            put_f32(bytes, radius.get());
+        });
     command
         .as_ellipse()
         .into_iter()
@@ -1059,14 +1084,17 @@ fn encode_command(bytes: &mut Vec<u8>, command: &axiom_host::Draw2dCommand) {
             put_f32(bytes, ry.get());
             put_f32(bytes, rotation.get());
         });
-    command.as_line().into_iter().for_each(|(a, b, color, width)| {
-        put_f32(bytes, a.x);
-        put_f32(bytes, a.y);
-        put_f32(bytes, b.x);
-        put_f32(bytes, b.y);
-        put_rgba(bytes, color);
-        put_f32(bytes, width.get());
-    });
+    command
+        .as_line()
+        .into_iter()
+        .for_each(|(a, b, color, width)| {
+            put_f32(bytes, a.x);
+            put_f32(bytes, a.y);
+            put_f32(bytes, b.x);
+            put_f32(bytes, b.y);
+            put_rgba(bytes, color);
+            put_f32(bytes, width.get());
+        });
     command.as_path().into_iter().for_each(|(points, closed)| {
         put_u32(bytes, points.len() as u32);
         points.iter().for_each(|p| {
@@ -1095,12 +1123,15 @@ fn encode_command(bytes: &mut Vec<u8>, command: &axiom_host::Draw2dCommand) {
         put_rgba(bytes, opts.color);
         put_u8(bytes, opts.align.raw());
     });
-    command.as_particle().into_iter().for_each(|(center, size, color)| {
-        put_f32(bytes, center.x);
-        put_f32(bytes, center.y);
-        put_f32(bytes, size.get());
-        put_rgba(bytes, color);
-    });
+    command
+        .as_particle()
+        .into_iter()
+        .for_each(|(center, size, color)| {
+            put_f32(bytes, center.x);
+            put_f32(bytes, center.y);
+            put_f32(bytes, size.get());
+            put_rgba(bytes, color);
+        });
 }
 
 /// A tiny bounds-checked little-endian reader over the recorded payload.

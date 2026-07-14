@@ -140,7 +140,13 @@ mod tests {
         let api = FigureApi::new();
         assert_eq!(api.deserialize(&[0xFF]), Err(FigureError::MalformedData));
         // A structurally-decodable but illegal figure (child before parent).
-        let bad = FigureDefinition::new(vec![FigurePart::child(5, Transform::IDENTITY, Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO, 0)]);
+        let bad = FigureDefinition::new(vec![FigurePart::child(
+            5,
+            Transform::IDENTITY,
+            Vec3::new(1.0, 1.0, 1.0),
+            Vec3::ZERO,
+            0,
+        )]);
         let bytes = api.serialize(&bad);
         assert_eq!(api.deserialize(&bytes), Err(FigureError::BadParent));
     }

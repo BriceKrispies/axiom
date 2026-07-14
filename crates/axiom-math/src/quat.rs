@@ -719,12 +719,18 @@ mod cov {
     #[test]
     fn from_euler_single_axis_matches_axis_angle() {
         let angle = 0.7f32;
-        assert!(Quat::from_euler_xyz(angle, 0.0, 0.0)
-            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_X, angle).unwrap(), cov_eps()));
-        assert!(Quat::from_euler_xyz(0.0, angle, 0.0)
-            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_Y, angle).unwrap(), cov_eps()));
-        assert!(Quat::from_euler_xyz(0.0, 0.0, angle)
-            .approx_eq(&Quat::from_axis_angle(Vec3::UNIT_Z, angle).unwrap(), cov_eps()));
+        assert!(Quat::from_euler_xyz(angle, 0.0, 0.0).approx_eq(
+            &Quat::from_axis_angle(Vec3::UNIT_X, angle).unwrap(),
+            cov_eps()
+        ));
+        assert!(Quat::from_euler_xyz(0.0, angle, 0.0).approx_eq(
+            &Quat::from_axis_angle(Vec3::UNIT_Y, angle).unwrap(),
+            cov_eps()
+        ));
+        assert!(Quat::from_euler_xyz(0.0, 0.0, angle).approx_eq(
+            &Quat::from_axis_angle(Vec3::UNIT_Z, angle).unwrap(),
+            cov_eps()
+        ));
     }
 
     #[test]

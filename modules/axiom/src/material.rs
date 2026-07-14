@@ -173,7 +173,9 @@ mod tests {
         assert_eq!(m.roughness().get(), 0.5);
         assert_eq!(m.opacity().get(), 0.5);
         // Equality requires every field: a differing roughness breaks it.
-        let other = Material::lit(Color::WHITE).with_emissive(Color::WHITE).with_opacity(half());
+        let other = Material::lit(Color::WHITE)
+            .with_emissive(Color::WHITE)
+            .with_opacity(half());
         assert_ne!(m, other);
     }
 }

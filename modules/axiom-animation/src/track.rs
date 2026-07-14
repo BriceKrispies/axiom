@@ -25,7 +25,9 @@ impl Track {
     pub(crate) fn new(bone: BoneId, keys: Vec<Keyframe>) -> AnimationResult<Track> {
         (!keys.is_empty())
             .then_some(())
-            .ok_or_else(|| AnimationError::empty_track("animation track needs at least one keyframe"))
+            .ok_or_else(|| {
+                AnimationError::empty_track("animation track needs at least one keyframe")
+            })
             .and_then(|()| {
                 keys.windows(2)
                     .all(|w| w[0].time().raw() < w[1].time().raw())
@@ -109,7 +111,10 @@ mod tests {
     }
 
     fn key(t: u64, x: f32) -> Keyframe {
-        Keyframe::new(Tick::new(t), Transform::from_translation(Vec3::new(x, 0.0, 0.0)))
+        Keyframe::new(
+            Tick::new(t),
+            Transform::from_translation(Vec3::new(x, 0.0, 0.0)),
+        )
     }
 
     fn two_key_track() -> Track {
@@ -118,7 +123,11 @@ mod tests {
 
     #[test]
     fn track_round_trips_through_bytes() {
-        let track = Track::new(BoneId::from_raw(3), vec![key(0, 0.0), key(4, 1.0), key(9, -2.0)]).unwrap();
+        let track = Track::new(
+            BoneId::from_raw(3),
+            vec![key(0, 0.0), key(4, 1.0), key(9, -2.0)],
+        )
+        .unwrap();
         let mut w = BinaryWriter::new();
         track.write_to(&mut w);
         let bytes = w.into_bytes();

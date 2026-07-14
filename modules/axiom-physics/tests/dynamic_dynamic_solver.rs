@@ -63,13 +63,20 @@ fn two_spheres(
     mass_b: f32,
     restitution: f32,
 ) -> (PhysicsApi, PhysicsBodyHandle, PhysicsBodyHandle) {
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+    let mut api =
+        PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(restitution), ratio(1.0)).unwrap();
     let a = api
-        .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)), ratio(mass_a))
+        .create_dynamic_body(
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            ratio(mass_a),
+        )
         .unwrap();
     let b = api
-        .create_dynamic_body(Transform::from_translation(Vec3::new(0.8, 0.0, 0.0)), ratio(mass_b))
+        .create_dynamic_body(
+            Transform::from_translation(Vec3::new(0.8, 0.0, 0.0)),
+            ratio(mass_b),
+        )
         .unwrap();
     api.attach_sphere_collider(a, meters(0.5), material, false)
         .unwrap();
@@ -92,7 +99,10 @@ fn dynamic_dynamic_momentum_exchange_through_step() {
     assert!((va - 1.5).abs() < 1.0e-3, "A settled at {va}");
     assert!((vb - 1.5).abs() < 1.0e-3, "B settled at {vb}");
     assert!(vb > 0.0, "the struck body must start moving");
-    assert!(va < 3.0, "the striking body must be slowed by the collision");
+    assert!(
+        va < 3.0,
+        "the striking body must be slowed by the collision"
+    );
     // Total linear momentum (mass 1 each) equals the 3.0 that was injected.
     assert!((va + vb - 3.0).abs() < 1.0e-3, "momentum {} != 3", va + vb);
 }
@@ -110,11 +120,17 @@ fn unequal_mass_dynamic_pair_splits_impulse_by_inverse_mass() {
     // e=0 inelastic: common velocity = (1*4)/(1+3) = 1. So A changes by 3, B by 1.
     let delta_a = (va - 4.0).abs();
     let delta_b = (vb - 0.0).abs();
-    assert!(delta_a > delta_b, "lighter body changes more: dA={delta_a}, dB={delta_b}");
+    assert!(
+        delta_a > delta_b,
+        "lighter body changes more: dA={delta_a}, dB={delta_b}"
+    );
     assert!((va - 1.0).abs() < 1.0e-3, "A settled at {va}");
     assert!((vb - 1.0).abs() < 1.0e-3, "B settled at {vb}");
     // Momentum: 1*4 == 1*va + 3*vb.
-    assert!((va + 3.0 * vb - 4.0).abs() < 1.0e-3, "momentum not conserved");
+    assert!(
+        (va + 3.0 * vb - 4.0).abs() < 1.0e-3,
+        "momentum not conserved"
+    );
 }
 
 #[test]
@@ -127,8 +143,14 @@ fn dynamic_dynamic_collision_conserves_linear_momentum_when_restitution_is_one()
     let va = body_vel(&api, a).x;
     let vb = body_vel(&api, b).x;
     // e=1, equal mass: A stops, B leaves at the full incoming speed.
-    assert!(va.abs() < 1.0e-2, "A should stop after an elastic equal-mass hit, got {va}");
-    assert!((vb - 3.0).abs() < 1.0e-2, "B should carry the speed, got {vb}");
+    assert!(
+        va.abs() < 1.0e-2,
+        "A should stop after an elastic equal-mass hit, got {va}"
+    );
+    assert!(
+        (vb - 3.0).abs() < 1.0e-2,
+        "B should carry the speed, got {vb}"
+    );
     assert!((va + vb - 3.0).abs() < 1.0e-3, "momentum {} != 3", va + vb);
 }
 
@@ -144,7 +166,10 @@ fn dynamic_dynamic_collision_loses_kinetic_energy_when_restitution_is_zero() {
     let vb = body_vel(&api, b).x;
     let injected_ke = 0.5 * 3.0 * 3.0; // 4.5
     let post_ke = 0.5 * va * va + 0.5 * vb * vb;
-    assert!(post_ke < injected_ke - 1.0e-3, "e=0 must lose KE: {post_ke} !< {injected_ke}");
+    assert!(
+        post_ke < injected_ke - 1.0e-3,
+        "e=0 must lose KE: {post_ke} !< {injected_ke}"
+    );
     // Equal mass, e=0 halves the kinetic energy (4.5 -> 2.25).
     assert!((post_ke - 2.25).abs() < 0.05, "post KE {post_ke}");
     assert!((va + vb - 3.0).abs() < 1.0e-3, "momentum still conserved");
@@ -179,7 +204,10 @@ fn dynamic_dynamic_collision_replays_deterministically() {
     };
     let (snap_a, rec_a) = run();
     let (snap_b, rec_b) = run();
-    assert_eq!(snap_a, snap_b, "dynamic/dynamic collision must replay byte-equal");
+    assert_eq!(
+        snap_a, snap_b,
+        "dynamic/dynamic collision must replay byte-equal"
+    );
     assert_eq!(rec_a, rec_b, "step records must be deterministic");
 }
 
@@ -188,19 +216,35 @@ fn two_dynamic_spheres_settle_into_a_resting_stack() {
     // A static ground plane plus two vertically stacked dynamic spheres. Under
     // gravity they must come to rest in a stable stack (bottom ~0.5, top ~1.5),
     // never sinking through the plane and never going non-finite.
-    let mut api = PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+    let mut api = PhysicsApi::with_config(
+        Vec3::new(0.0, -9.8, 0.0),
+        8,
+        16,
+        16,
+        1,
+        true,
+        ratio(0.0),
+        ratio(0.0),
+    )
+    .unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
 
     let ground = api.create_static_body(Transform::IDENTITY).unwrap();
     api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
         .unwrap();
     let bottom = api
-        .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.55, 0.0)), ratio(1.0))
+        .create_dynamic_body(
+            Transform::from_translation(Vec3::new(0.0, 0.55, 0.0)),
+            ratio(1.0),
+        )
         .unwrap();
     api.attach_sphere_collider(bottom, meters(0.5), material, false)
         .unwrap();
     let top = api
-        .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 1.55, 0.0)), ratio(1.0))
+        .create_dynamic_body(
+            Transform::from_translation(Vec3::new(0.0, 1.55, 0.0)),
+            ratio(1.0),
+        )
         .unwrap();
     api.attach_sphere_collider(top, meters(0.5), material, false)
         .unwrap();
@@ -216,7 +260,10 @@ fn two_dynamic_spheres_settle_into_a_resting_stack() {
     assert!((0.4..=0.65).contains(&by), "bottom settled at {by}");
     assert!((1.3..=1.7).contains(&ty), "top settled at {ty}");
     assert!(ty > by, "the stack order must be preserved");
-    assert!(min_bottom > 0.2, "the bottom sphere must never sink through the plane");
+    assert!(
+        min_bottom > 0.2,
+        "the bottom sphere must never sink through the plane"
+    );
     assert!(body_vel(&api, bottom).y.abs() < 0.3, "bottom at rest");
     assert!(body_vel(&api, top).y.abs() < 0.3, "top at rest");
     assert!(by.is_finite() && ty.is_finite(), "stack stays finite");

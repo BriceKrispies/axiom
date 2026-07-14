@@ -186,7 +186,10 @@ mod tests {
 
     #[test]
     fn reflect_schema_names_its_state_field() {
-        assert_eq!(<DeterministicRng as Reflect>::SCHEMA.name(), "DeterministicRng");
+        assert_eq!(
+            <DeterministicRng as Reflect>::SCHEMA.name(),
+            "DeterministicRng"
+        );
         assert_eq!(
             <DeterministicRng as Reflect>::SCHEMA.fields()[0].name(),
             "state"

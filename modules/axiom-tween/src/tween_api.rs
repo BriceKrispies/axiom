@@ -161,7 +161,10 @@ mod tests {
 
     #[test]
     fn quad_in_out_takes_the_accelerating_arm_below_the_midpoint() {
-        assert!(approx(TweenApi::ease(Ease::QuadInOut, val(0.25)).get(), 0.125));
+        assert!(approx(
+            TweenApi::ease(Ease::QuadInOut, val(0.25)).get(),
+            0.125
+        ));
     }
 
     #[test]

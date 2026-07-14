@@ -141,9 +141,15 @@ mod tests {
         assert_eq!(r.tick(), Tick::new(7));
         assert_eq!(r.observation_fact_count(), 3);
         assert_eq!(r.legal_action_count(), 2);
-        assert_eq!(r.selected_brain_kind_code(), DecisionReport::BRAIN_KIND_SCRIPTED);
+        assert_eq!(
+            r.selected_brain_kind_code(),
+            DecisionReport::BRAIN_KIND_SCRIPTED
+        );
         assert_eq!(r.emitted_action_count(), 1);
-        assert_eq!(r.first_emitted_action_kind_code(), ActionIntent::KIND_PRESS_CONTROL);
+        assert_eq!(
+            r.first_emitted_action_kind_code(),
+            ActionIntent::KIND_PRESS_CONTROL
+        );
         assert_eq!(r.reason_code(), DecisionReport::REASON_MATCHED_RULE);
     }
 

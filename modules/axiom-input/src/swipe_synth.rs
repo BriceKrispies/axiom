@@ -84,7 +84,10 @@ mod tests {
     #[test]
     fn mid_gesture_is_none_until_lift() {
         let mut synth = SwipeSynth::new();
-        assert_eq!(synth.fold(surface(), &[(Vec2::new(700.0, 300.0), true)]), None);
+        assert_eq!(
+            synth.fold(surface(), &[(Vec2::new(700.0, 300.0), true)]),
+            None
+        );
     }
 
     #[test]

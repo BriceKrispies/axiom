@@ -70,7 +70,9 @@ fn build_penalty_spec(rig: RigId, power: f32) -> MotionSpec {
     m.phase_mut(plant).into_iter().for_each(|p| {
         p.set_root(RootMotion::hold());
         p.push_contact(ContactDeclaration::new("left_foot_sole", "left_plant_spot"));
-        p.push_constraint(Constraint::keep_center_of_mass_over_support("left_foot_sole"));
+        p.push_constraint(Constraint::keep_center_of_mass_over_support(
+            "left_foot_sole",
+        ));
     });
 
     // backswing: the right leg draws back, arms rise, the torso counter-rotates.
@@ -82,8 +84,14 @@ fn build_penalty_spec(rig: RigId, power: f32) -> MotionSpec {
         p.push_goal(PoseGoal::leg_backswing(true, FULL));
         p.push_goal(PoseGoal::raise_arm_for_balance(true));
         p.push_goal(PoseGoal::raise_arm_for_balance(false));
-        p.push_goal(PoseGoal::torso_twist_toward_target("approach_start", COUNTER));
-        p.push_constraint(Constraint::preserve_foot_contact("left_foot_sole", "left_plant_spot"));
+        p.push_goal(PoseGoal::torso_twist_toward_target(
+            "approach_start",
+            COUNTER,
+        ));
+        p.push_constraint(Constraint::preserve_foot_contact(
+            "left_foot_sole",
+            "left_plant_spot",
+        ));
     });
 
     // strike: the right instep contacts the ball, hip leads knee, torso rotates through.
@@ -91,21 +99,35 @@ fn build_penalty_spec(rig: RigId, power: f32) -> MotionSpec {
     m.phase_mut(strike).into_iter().for_each(|p| {
         p.set_root(RootMotion::hold());
         p.set_ease(EaseCurve::EaseOut);
-        p.push_goal(PoseGoal::set_joint_rotation("right_hip", Vec3::new(-0.5, 0.0, 0.0)));
+        p.push_goal(PoseGoal::set_joint_rotation(
+            "right_hip",
+            Vec3::new(-0.5, 0.0, 0.0),
+        ));
         p.push_goal(PoseGoal::leg_strike(true, "ball"));
-        p.push_goal(PoseGoal::aim_effector_at_target("right_foot_instep", "ball"));
+        p.push_goal(PoseGoal::aim_effector_at_target(
+            "right_foot_instep",
+            "ball",
+        ));
         p.push_goal(PoseGoal::torso_twist_toward_target("net_center", COUNTER));
         p.push_constraint(Constraint::keep_gaze_on_target("ball"));
     });
 
     // follow_through: the right leg continues toward the net, arms counterbalance.
-    let follow = m.add_phase(MotionPhase::new("follow_through", Tick::new(44), Tick::new(54)));
+    let follow = m.add_phase(MotionPhase::new(
+        "follow_through",
+        Tick::new(44),
+        Tick::new(54),
+    ));
     m.phase_mut(follow).into_iter().for_each(|p| {
         p.set_root(RootMotion::hold());
         p.set_ease(EaseCurve::EaseOut);
         p.set_layer_weight(0.8); // easing off the strike
         p.push_goal(PoseGoal::follow_through(true, "net_center"));
-        p.push_goal(PoseGoal::move_effector_toward_target("left_hand", "net_center", REACH));
+        p.push_goal(PoseGoal::move_effector_toward_target(
+            "left_hand",
+            "net_center",
+            REACH,
+        ));
     });
 
     // recover: the body settles.
@@ -153,7 +175,9 @@ mod tests {
         let (_, _, _, power) = api.frame_ball_contact(&frame).unwrap();
         assert!((power.get() - 0.7).abs() < 1.0e-6);
         // No ball contact one tick earlier.
-        let before = api.sample(plan, Tick::new(STRIKE_CONTACT_TICK - 1)).unwrap();
+        let before = api
+            .sample(plan, Tick::new(STRIKE_CONTACT_TICK - 1))
+            .unwrap();
         assert_eq!(api.frame_ball_contact(&before), None);
     }
 

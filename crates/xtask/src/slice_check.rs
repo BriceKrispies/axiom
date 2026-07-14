@@ -270,19 +270,20 @@ fn candidate_name(rest: &str) -> Option<String> {
             .trim()
             .to_string()
     });
-    from_use.or_else(|| {
-        // `pub <kw> NAME ...`: skip the item keyword, take the next identifier.
-        const KEYWORDS: &[&str] = &[
-            "fn", "struct", "enum", "trait", "type", "const", "static", "union", "mod",
-        ];
-        KEYWORDS.iter().find_map(|kw| {
-            rest.strip_prefix(kw)
-                .filter(|after| after.chars().next().is_some_and(char::is_whitespace))
-                .and_then(|after| first_ident(after.trim_start()))
-                .map(str::to_string)
+    from_use
+        .or_else(|| {
+            // `pub <kw> NAME ...`: skip the item keyword, take the next identifier.
+            const KEYWORDS: &[&str] = &[
+                "fn", "struct", "enum", "trait", "type", "const", "static", "union", "mod",
+            ];
+            KEYWORDS.iter().find_map(|kw| {
+                rest.strip_prefix(kw)
+                    .filter(|after| after.chars().next().is_some_and(char::is_whitespace))
+                    .and_then(|after| first_ident(after.trim_start()))
+                    .map(str::to_string)
+            })
         })
-    })
-    .filter(|name| !name.is_empty())
+        .filter(|name| !name.is_empty())
 }
 
 fn first_ident(s: &str) -> Option<&str> {

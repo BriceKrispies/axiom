@@ -21,13 +21,19 @@ pub struct WorldApi {
 impl WorldApi {
     /// A new world with nothing loaded yet.
     pub fn new(config: WorldConfig) -> Self {
-        Self { config, residency: Residency::new() }
+        Self {
+            config,
+            residency: Residency::new(),
+        }
     }
 
     /// The chunk whose square contains ground position `(x, z)` metres.
     pub fn focus_chunk(&self, x: Meters, z: Meters) -> ChunkCoord {
         let size = self.config.chunk_size.get();
-        ChunkCoord::new((x.get() / size).floor() as i32, (z.get() / size).floor() as i32)
+        ChunkCoord::new(
+            (x.get() / size).floor() as i32,
+            (z.get() / size).floor() as i32,
+        )
     }
 
     /// Plan one frame.
@@ -48,7 +54,10 @@ impl WorldApi {
             Meters::finite_or_zero(camera.z),
         );
         let delta =
-            self.residency.apply(focus, self.config.load_radius, self.config.margin, |_| false);
+            self.residency
+                .apply(focus, self.config.load_radius, self.config.margin, |_| {
+                    false
+                });
         let resident = self.residency.resident_coords();
         let boxes: Vec<Aabb> = resident.iter().map(|c| chunk_aabb(*c)).collect();
         let mask = VisibilityApi::visible_mask(view_proj, &boxes);
@@ -60,7 +69,11 @@ impl WorldApi {
             .filter(|((_, keep), _)| *keep)
             .map(|((coord, _), lod)| VisibleChunk { coord: *coord, lod })
             .collect();
-        WorldFramePlan { load: delta.load, unload: delta.unload, visible }
+        WorldFramePlan {
+            load: delta.load,
+            unload: delta.unload,
+            visible,
+        }
     }
 }
 
@@ -82,7 +95,11 @@ mod tests {
         move |c| {
             let cx = (c.x as f32 + 0.5) * size;
             let cz = (c.z as f32 + 0.5) * size;
-            Aabb::from_center_extents(Vec3::new(cx, 0.0, cz), Vec3::new(size * 0.5, 2.0, size * 0.5)).unwrap()
+            Aabb::from_center_extents(
+                Vec3::new(cx, 0.0, cz),
+                Vec3::new(size * 0.5, 2.0, size * 0.5),
+            )
+            .unwrap()
         }
     }
 
@@ -96,9 +113,15 @@ mod tests {
     #[test]
     fn focus_chunk_maps_ground_position_to_its_cell() {
         let w = WorldApi::new(config(10.0, 1, 1, &[]));
-        assert_eq!(w.focus_chunk(Meters::finite_or_zero(5.0), Meters::finite_or_zero(25.0)), ChunkCoord::new(0, 2));
+        assert_eq!(
+            w.focus_chunk(Meters::finite_or_zero(5.0), Meters::finite_or_zero(25.0)),
+            ChunkCoord::new(0, 2)
+        );
         // Negative coordinates floor toward −∞ (cell −1, not 0).
-        assert_eq!(w.focus_chunk(Meters::finite_or_zero(-3.0), Meters::finite_or_zero(-11.0)), ChunkCoord::new(-1, -2));
+        assert_eq!(
+            w.focus_chunk(Meters::finite_or_zero(-3.0), Meters::finite_or_zero(-11.0)),
+            ChunkCoord::new(-1, -2)
+        );
     }
 
     #[test]
@@ -106,7 +129,11 @@ mod tests {
         let size = 10.0;
         let mut w = WorldApi::new(config(size, 1, 1, &[]));
         // Camera near the origin looking down −Z into the forest.
-        let plan = w.frame_plan(Vec3::new(5.0, 2.0, 5.0), view_proj(Vec3::new(5.0, 2.0, 5.0), Vec3::new(5.0, 2.0, -40.0)), boxer(size));
+        let plan = w.frame_plan(
+            Vec3::new(5.0, 2.0, 5.0),
+            view_proj(Vec3::new(5.0, 2.0, 5.0), Vec3::new(5.0, 2.0, -40.0)),
+            boxer(size),
+        );
         // Focus chunk (0,0); radius-1 ring = 9 chunks loaded, nothing unloaded.
         assert_eq!(plan.load.len(), 9);
         assert!(plan.unload.is_empty());
@@ -122,7 +149,7 @@ mod tests {
         let mut w = WorldApi::new(config(size, 1, 0, &[])); // margin 0 → eager eviction
         let vp = view_proj(Vec3::new(5.0, 2.0, 5.0), Vec3::new(5.0, 2.0, -40.0));
         w.frame_plan(Vec3::new(5.0, 2.0, 5.0), vp, boxer(size)); // focus (0,0)
-        // Move one chunk east (+X): focus (1,0). New east column loads, west unloads.
+                                                                 // Move one chunk east (+X): focus (1,0). New east column loads, west unloads.
         let plan = w.frame_plan(Vec3::new(15.0, 2.0, 5.0), vp, boxer(size));
         assert_eq!(plan.load.len(), 3); // new column x=2
         assert_eq!(plan.unload.len(), 3); // old column x=-1 exits the keep square

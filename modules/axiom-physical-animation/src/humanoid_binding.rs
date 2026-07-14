@@ -49,11 +49,19 @@ const FOOT_SPECS: [(&str, &str); 3] = [
 /// mass). Returns a bridge result — the physics-private error is funneled inside.
 type BodyMaker = fn(&mut PhysicsApi, Transform, Ratio) -> PhysicalResult<PhysicsBodyHandle>;
 
-fn make_kinematic(physics: &mut PhysicsApi, at: Transform, _mass: Ratio) -> PhysicalResult<PhysicsBodyHandle> {
+fn make_kinematic(
+    physics: &mut PhysicsApi,
+    at: Transform,
+    _mass: Ratio,
+) -> PhysicalResult<PhysicsBodyHandle> {
     phys(physics.create_kinematic_body(at))
 }
 
-fn make_dynamic(physics: &mut PhysicsApi, at: Transform, mass: Ratio) -> PhysicalResult<PhysicsBodyHandle> {
+fn make_dynamic(
+    physics: &mut PhysicsApi,
+    at: Transform,
+    mass: Ratio,
+) -> PhysicalResult<PhysicsBodyHandle> {
     phys(physics.create_dynamic_body(at, mass))
 }
 
@@ -62,9 +70,20 @@ const BODY_MAKERS: [BodyMaker; 2] = [make_kinematic, make_dynamic];
 
 /// A trigger surface material shared by the humanoid/ball bodies (obtained via
 /// inference — `PhysicsMaterial` is not a nameable public type).
-fn surface_material(physics: &mut PhysicsApi, body: PhysicsBodyHandle, half: Vec3, trigger: bool) -> PhysicalResult<PhysicsBodyHandle> {
-    phys(PhysicsApi::material(Ratio::finite_or_zero(0.5), Ratio::finite_or_zero(0.0), Ratio::finite_or_zero(1.0)))
-        .and_then(|material| phys(physics.attach_box_collider(body, half, material, trigger)).map(|_| body))
+fn surface_material(
+    physics: &mut PhysicsApi,
+    body: PhysicsBodyHandle,
+    half: Vec3,
+    trigger: bool,
+) -> PhysicalResult<PhysicsBodyHandle> {
+    phys(PhysicsApi::material(
+        Ratio::finite_or_zero(0.5),
+        Ratio::finite_or_zero(0.0),
+        Ratio::finite_or_zero(1.0),
+    ))
+    .and_then(|material| {
+        phys(physics.attach_box_collider(body, half, material, trigger)).map(|_| body)
+    })
 }
 
 /// One bound humanoid body.
@@ -132,7 +151,10 @@ impl HumanoidPhysicsBinding {
 
     /// The foot body that effector `effector` addresses, if bound.
     pub(crate) fn foot_body_for(&self, effector: EffectorId) -> Option<PhysicsBodyHandle> {
-        self.feet.iter().find(|f| f.effector() == effector).map(BoundFoot::body)
+        self.feet
+            .iter()
+            .find(|f| f.effector() == effector)
+            .map(BoundFoot::body)
     }
 
     /// Build the standard humanoid binding: create a physics body per bound joint
@@ -158,18 +180,29 @@ impl HumanoidPhysicsBinding {
                         })
                 })
                 .map(|(name, dynamic, joint, world)| {
-                    create_humanoid_body(physics, world, dynamic)
-                        .map(|body| BoundBody { name, joint, body, dynamic })
+                    create_humanoid_body(physics, world, dynamic).map(|body| BoundBody {
+                        name,
+                        joint,
+                        body,
+                        dynamic,
+                    })
                 })
                 .collect::<PhysicalResult<Vec<_>>>()
-                .and_then(|bodies| build_feet(authoring, plan, &bodies).map(|feet| HumanoidPhysicsBinding { bodies, feet }))
+                .and_then(|bodies| {
+                    build_feet(authoring, plan, &bodies)
+                        .map(|feet| HumanoidPhysicsBinding { bodies, feet })
+                })
         })
     }
 }
 
 /// Create one humanoid body (dynamic or kinematic) at `world` with a trigger box
 /// collider, so it never solver-collides with the dynamic ball.
-fn create_humanoid_body(physics: &mut PhysicsApi, world: Transform, dynamic: bool) -> PhysicalResult<PhysicsBodyHandle> {
+fn create_humanoid_body(
+    physics: &mut PhysicsApi,
+    world: Transform,
+    dynamic: bool,
+) -> PhysicalResult<PhysicsBodyHandle> {
     let mass = Ratio::finite_or_zero(LIMB_MASS);
     BODY_MAKERS[dynamic as usize](physics, world, mass)
         .and_then(|body| surface_material(physics, body, Vec3::new(HALF, HALF, HALF), true))
@@ -192,7 +225,10 @@ fn build_feet(
                     bodies
                         .iter()
                         .find(|b| b.name() == body_name)
-                        .map(|b| BoundFoot { effector, body: b.body() })
+                        .map(|b| BoundFoot {
+                            effector,
+                            body: b.body(),
+                        })
                 })
         })
         .map(Ok)
@@ -204,15 +240,23 @@ pub(crate) const BALL_RADIUS: f32 = 0.11;
 
 /// Create the dynamic soccer-ball body: a solid sphere at `center`, so it moves
 /// under gravity and its strike impulse. Returned handle is the ball body.
-pub(crate) fn create_ball(physics: &mut PhysicsApi, center: Vec3, mass: f32) -> PhysicalResult<PhysicsBodyHandle> {
+pub(crate) fn create_ball(
+    physics: &mut PhysicsApi,
+    center: Vec3,
+    mass: f32,
+) -> PhysicalResult<PhysicsBodyHandle> {
     let at = Transform::from_translation(center);
     phys(physics.create_dynamic_body(at, Ratio::finite_or_zero(mass))).and_then(|body| {
-        phys(PhysicsApi::material(Ratio::finite_or_zero(0.5), Ratio::finite_or_zero(0.4), Ratio::finite_or_zero(1.0)))
-            .and_then(|material| {
-                phys(Meters::new(BALL_RADIUS)).and_then(|radius| {
-                    phys(physics.attach_sphere_collider(body, radius, material, false)).map(|_| body)
-                })
+        phys(PhysicsApi::material(
+            Ratio::finite_or_zero(0.5),
+            Ratio::finite_or_zero(0.4),
+            Ratio::finite_or_zero(1.0),
+        ))
+        .and_then(|material| {
+            phys(Meters::new(BALL_RADIUS)).and_then(|radius| {
+                phys(physics.attach_sphere_collider(body, radius, material, false)).map(|_| body)
             })
+        })
     })
 }
 
@@ -221,7 +265,11 @@ mod tests {
     use super::*;
 
     fn body_of(binding: &HumanoidPhysicsBinding, name: &str) -> Option<PhysicsBodyHandle> {
-        binding.bodies().iter().find(|b| b.name() == name).map(BoundBody::body)
+        binding
+            .bodies()
+            .iter()
+            .find(|b| b.name() == name)
+            .map(BoundBody::body)
     }
 
     fn penalty_plan() -> (AnimationAuthoringApi, PlanId) {
@@ -242,8 +290,18 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(a.bodies().len(), 13);
         // The pelvis is dynamic; a limb is kinematic.
-        assert!(a.bodies().iter().find(|x| x.name() == "pelvis").unwrap().dynamic());
-        assert!(!a.bodies().iter().find(|x| x.name() == "left_foot").unwrap().dynamic());
+        assert!(a
+            .bodies()
+            .iter()
+            .find(|x| x.name() == "pelvis")
+            .unwrap()
+            .dynamic());
+        assert!(!a
+            .bodies()
+            .iter()
+            .find(|x| x.name() == "left_foot")
+            .unwrap()
+            .dynamic());
         assert!(body_of(&a, "head").is_some());
         assert_eq!(body_of(&a, "no_such_body"), None);
     }
@@ -252,11 +310,18 @@ mod tests {
     fn foot_effectors_address_their_foot_bodies() {
         let (authoring, plan) = penalty_plan();
         let mut physics = PhysicsApi::new();
-        let binding = HumanoidPhysicsBinding::build_standard(&mut physics, &authoring, plan).unwrap();
-        let left_sole = authoring.plan_effector_id(plan, "left_foot_sole").unwrap().unwrap();
+        let binding =
+            HumanoidPhysicsBinding::build_standard(&mut physics, &authoring, plan).unwrap();
+        let left_sole = authoring
+            .plan_effector_id(plan, "left_foot_sole")
+            .unwrap()
+            .unwrap();
         let left_foot = body_of(&binding, "left_foot").unwrap();
         assert_eq!(binding.foot_body_for(left_sole), Some(left_foot));
-        let missing = authoring.plan_effector_id(plan, "head_gaze").unwrap().unwrap();
+        let missing = authoring
+            .plan_effector_id(plan, "head_gaze")
+            .unwrap()
+            .unwrap();
         assert_eq!(binding.foot_body_for(missing), None); // head_gaze is not a bound foot
     }
 
@@ -276,16 +341,25 @@ mod tests {
             Ratio::new(0.0).unwrap(),
         )
         .unwrap();
-        let err = HumanoidPhysicsBinding::build_standard(&mut physics, &authoring, plan).unwrap_err();
-        assert_eq!(err.code(), crate::physical_error_code::PhysicalErrorCode::PhysicsFailed);
+        let err =
+            HumanoidPhysicsBinding::build_standard(&mut physics, &authoring, plan).unwrap_err();
+        assert_eq!(
+            err.code(),
+            crate::physical_error_code::PhysicalErrorCode::PhysicsFailed
+        );
     }
 
     #[test]
     fn a_missing_plan_fails_the_build_through_authoring() {
         let authoring = AnimationAuthoringApi::new();
         let mut physics = PhysicsApi::new();
-        let err = HumanoidPhysicsBinding::build_standard(&mut physics, &authoring, PlanId::from_raw(9)).unwrap_err();
-        assert_eq!(err.code(), crate::physical_error_code::PhysicalErrorCode::AuthoringFailed);
+        let err =
+            HumanoidPhysicsBinding::build_standard(&mut physics, &authoring, PlanId::from_raw(9))
+                .unwrap_err();
+        assert_eq!(
+            err.code(),
+            crate::physical_error_code::PhysicalErrorCode::AuthoringFailed
+        );
     }
 
     #[test]

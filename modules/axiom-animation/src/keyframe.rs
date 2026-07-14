@@ -60,11 +60,17 @@ mod tests {
 
     #[test]
     fn keyframe_round_trips_through_bytes() {
-        let key = Keyframe::new(Tick::new(42), Transform::from_translation(Vec3::new(1.0, -2.0, 3.0)));
+        let key = Keyframe::new(
+            Tick::new(42),
+            Transform::from_translation(Vec3::new(1.0, -2.0, 3.0)),
+        );
         let mut w = BinaryWriter::new();
         key.write_to(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(Keyframe::read_from(&mut BinaryReader::new(&bytes)).unwrap(), key);
+        assert_eq!(
+            Keyframe::read_from(&mut BinaryReader::new(&bytes)).unwrap(),
+            key
+        );
         assert!(Keyframe::read_from(&mut BinaryReader::new(&bytes[..2])).is_err());
     }
 }

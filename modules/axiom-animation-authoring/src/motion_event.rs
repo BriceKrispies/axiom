@@ -196,7 +196,13 @@ mod tests {
 
     #[test]
     fn ball_contact_carries_surface_targets_and_power() {
-        let e = MotionEvent::ball_contact(Tick::new(30), "right_foot_instep", "ball", "net_center", 0.75);
+        let e = MotionEvent::ball_contact(
+            Tick::new(30),
+            "right_foot_instep",
+            "ball",
+            "net_center",
+            0.75,
+        );
         assert_eq!(e.kind(), EventKind::BallContact);
         assert_eq!(e.name(), "ball_contact");
         assert_eq!(e.contact_surface(), Some("right_foot_instep"));

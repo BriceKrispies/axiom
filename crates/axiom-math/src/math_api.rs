@@ -1,8 +1,8 @@
 //! The math facade.
 
+use axiom_kernel::TelemetryMetric;
 use axiom_kernel::{KernelApi, Radians, Tick};
 use axiom_runtime::RuntimeContext;
-use axiom_kernel::TelemetryMetric;
 
 use crate::aabb::Aabb;
 use crate::approx_eq::ApproxEq;
@@ -55,7 +55,6 @@ impl MathApi {
         kernel.serializes_little_endian()
     }
 
-
     /// Return `v` if finite, otherwise produce a math error.
     pub fn validate_finite(&self, v: f32) -> MathResult<f32> {
         Scalar::validate_finite(v)
@@ -80,7 +79,6 @@ impl MathApi {
     pub fn approx_eq<T: ApproxEq>(&self, a: &T, b: &T, epsilon: Epsilon) -> bool {
         a.approx_eq(b, epsilon)
     }
-
 
     pub fn vec2(&self, x: f32, y: f32) -> Vec2 {
         Vec2::new(x, y)
@@ -115,7 +113,6 @@ impl MathApi {
         Vec4::new(x, y, z, w)
     }
 
-
     pub fn quat_identity(&self) -> Quat {
         Quat::IDENTITY
     }
@@ -123,7 +120,6 @@ impl MathApi {
     pub fn quat_from_axis_angle(&self, axis: Vec3, angle_radians: f32) -> MathResult<Quat> {
         Quat::from_axis_angle(axis, angle_radians)
     }
-
 
     pub fn mat4_identity(&self) -> Mat4 {
         Mat4::IDENTITY
@@ -173,7 +169,6 @@ impl MathApi {
         m.inverse()
     }
 
-
     pub fn transform_identity(&self) -> Transform {
         Transform::IDENTITY
     }
@@ -197,7 +192,6 @@ impl MathApi {
     pub fn combine_transforms(&self, parent: Transform, child: Transform) -> Transform {
         Transform::combine(parent, child)
     }
-
 
     pub fn aabb(&self, min: Vec3, max: Vec3) -> MathResult<Aabb> {
         Aabb::new(min, max)
@@ -231,7 +225,6 @@ impl MathApi {
     ) -> PlaneSide {
         plane.classify_point(point, epsilon)
     }
-
 
     /// Emit a `math.validation_failure` counter into the runtime's sink.
     /// Used by higher layers to track how often math validation rejects
@@ -287,8 +280,8 @@ impl MathApi {
     /// contract's `normalizeAngle`.
     pub fn normalize_angle(&self, angle: Radians) -> Radians {
         let x = angle.get();
-        let wrapped = x
-            - core::f32::consts::TAU * ((x - core::f32::consts::PI) / core::f32::consts::TAU).ceil();
+        let wrapped = x - core::f32::consts::TAU
+            * ((x - core::f32::consts::PI) / core::f32::consts::TAU).ceil();
         Radians::new(wrapped).expect("wrapping a finite angle yields a finite angle")
     }
 }
@@ -296,9 +289,9 @@ impl MathApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math_error_code::MathErrorCode;
     use axiom_kernel::{FrameIndex, KernelApi};
     use axiom_runtime::{RuntimeCommandQueue, RuntimeEventQueue, RuntimeStep};
-    use crate::math_error_code::MathErrorCode;
 
     #[test]
     fn clamp_holds_interior_and_pins_both_bounds() {
@@ -350,7 +343,10 @@ mod tests {
         let m = api();
         let pi = core::f32::consts::PI;
         let tau = core::f32::consts::TAU;
-        let wrap = |a: f32| m.normalize_angle(axiom_kernel::Radians::new(a).unwrap()).get();
+        let wrap = |a: f32| {
+            m.normalize_angle(axiom_kernel::Radians::new(a).unwrap())
+                .get()
+        };
         let approx = |a: f32, b: f32| (a - b).abs() < 1.0e-4;
 
         assert!(approx(wrap(0.0), 0.0));

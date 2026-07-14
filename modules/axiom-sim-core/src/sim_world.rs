@@ -27,11 +27,11 @@ use crate::dirty_set::{DirtyKind, DirtySet};
 use crate::process_dependency::{DependencyKind, ProcessDependency};
 use crate::process_handler::{HandlerSpec, ProcessContext, ProcessHandler};
 use crate::process_lifecycle::{ProcessExecutionRecord, ProcessStatus};
-use crate::wake_reason::WakeReason;
 use crate::scheduler::{
     ProcessExecutionOrder, ProcessScheduler, SchedulerBoundary, SchedulerStep, SchedulerStepResult,
 };
 use crate::sim_tick::SimTick;
+use crate::wake_reason::WakeReason;
 
 /// The owned simulation state: a [`FactStore`], [`RelationStore`],
 /// [`DefinitionRegistry`], [`ProcessQueue`], and [`CausalJournal`].
@@ -365,7 +365,6 @@ impl SimWorld {
         let report = self.apply_effects(batch, registry);
         MaterialEffectResult::new(matched, report.len())
     }
-
 
     pub(crate) fn dirty(&self) -> &DirtySet {
         &self.dirty

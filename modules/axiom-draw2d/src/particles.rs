@@ -162,7 +162,12 @@ fn lerp_ratio(a: Ratio, b: Ratio, t: f32) -> Ratio {
 /// burst's particles vary within their ranges yet a replay of the same emit
 /// reproduces them byte-for-byte. The draw order (speed, lifetime, size, jitter)
 /// is fixed, which is what makes the sequence reproducible.
-fn spawn(config: &EmitterConfig, at: Vec2, direction: Vec2, rng: &mut DeterministicRng) -> Particle {
+fn spawn(
+    config: &EmitterConfig,
+    at: Vec2,
+    direction: Vec2,
+    rng: &mut DeterministicRng,
+) -> Particle {
     let speed = pick(config.speed, pick01(rng)).get();
     let lifetime = pick(config.lifetime, pick01(rng)).get();
     let size = pick(config.size, pick01(rng));
@@ -214,7 +219,10 @@ impl ParticleField {
                 .map(|_| spawn(&config, at, direction, &mut rng))
                 .collect::<Vec<Particle>>()
         });
-        spawned.into_iter().flatten().for_each(|p| self.particles.push(p));
+        spawned
+            .into_iter()
+            .flatten()
+            .for_each(|p| self.particles.push(p));
     }
 
     /// Advance every live particle by the presentation delta `dt` and cull the
@@ -362,7 +370,10 @@ mod tests {
         );
         // The picks actually vary (not all the same value) — the range is used.
         let first = sizes[0];
-        assert!(sizes.iter().any(|&s| s != first), "sizes vary across the burst: {sizes:?}");
+        assert!(
+            sizes.iter().any(|&s| s != first),
+            "sizes vary across the burst: {sizes:?}"
+        );
     }
 
     #[test]
@@ -383,7 +394,11 @@ mod tests {
             let mut field = ParticleField::default();
             let id = field.create_emitter(sized_config(8, 0.5, 1.5));
             field.emit(id, Vec2::new(1.0, 2.0), Vec2::new(0.0, 1.0));
-            field.quads().iter().map(|q| q.size.get()).collect::<Vec<f32>>()
+            field
+                .quads()
+                .iter()
+                .map(|q| q.size.get())
+                .collect::<Vec<f32>>()
         };
         assert_eq!(run(), run());
     }

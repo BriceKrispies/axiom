@@ -138,7 +138,9 @@ mod tests {
         assert!(app.has_dynamic::<Marked>(a));
         assert!(!app.has_dynamic::<Marked>(b));
         assert!(app.get_dynamic::<Marked>(a).is_some());
-        assert!(app.get_dynamic::<Velocity2D>(Entity::from_raw(9999)).is_none());
+        assert!(app
+            .get_dynamic::<Velocity2D>(Entity::from_raw(9999))
+            .is_none());
         assert_eq!(app.query_dynamic(&["Velocity2D"]), vec![a, b]);
         assert_eq!(app.query_dynamic(&["Velocity2D", "Marked"]), vec![a]);
         assert!(app.remove_dynamic::<Marked>(a));

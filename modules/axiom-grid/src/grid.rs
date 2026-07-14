@@ -137,10 +137,7 @@ mod tests {
         g.fill(3);
         let mut seen = Vec::new();
         g.for_each(|v, x, y| seen.push((x, y, v)));
-        assert_eq!(
-            seen,
-            vec![(0, 0, 3), (1, 0, 3), (0, 1, 3), (1, 1, 3)]
-        );
+        assert_eq!(seen, vec![(0, 0, 3), (1, 0, 3), (0, 1, 3), (1, 1, 3)]);
     }
 
     #[test]

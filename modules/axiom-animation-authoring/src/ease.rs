@@ -38,12 +38,17 @@ mod tests {
 
     #[test]
     fn endpoints_are_fixed_for_every_curve() {
-        [EaseCurve::Linear, EaseCurve::SmoothStep, EaseCurve::EaseIn, EaseCurve::EaseOut]
-            .iter()
-            .for_each(|c| {
-                assert!(close(c.apply(0.0), 0.0), "{c:?} at 0");
-                assert!(close(c.apply(1.0), 1.0), "{c:?} at 1");
-            });
+        [
+            EaseCurve::Linear,
+            EaseCurve::SmoothStep,
+            EaseCurve::EaseIn,
+            EaseCurve::EaseOut,
+        ]
+        .iter()
+        .for_each(|c| {
+            assert!(close(c.apply(0.0), 0.0), "{c:?} at 0");
+            assert!(close(c.apply(1.0), 1.0), "{c:?} at 1");
+        });
     }
 
     #[test]

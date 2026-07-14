@@ -86,7 +86,10 @@ mod tests {
     #[test]
     fn the_action_budget_clamps_the_emission_count() {
         let mut brain = HoldSetBrain::new(vec![1, 2, 4]);
-        let d = decide(&mut brain, AgentProfile::debug_perfect().with_action_budget(2));
+        let d = decide(
+            &mut brain,
+            AgentProfile::debug_perfect().with_action_budget(2),
+        );
         assert_eq!(d.intents().len(), 2);
         assert_eq!(d.intents()[0].control_code(), 1);
         assert_eq!(d.intents()[1].control_code(), 2);
@@ -103,7 +106,10 @@ mod tests {
     #[test]
     fn a_zero_budget_emits_nothing_with_budget_zero_reason() {
         let mut brain = HoldSetBrain::new(vec![1, 2]);
-        let d = decide(&mut brain, AgentProfile::debug_perfect().with_action_budget(0));
+        let d = decide(
+            &mut brain,
+            AgentProfile::debug_perfect().with_action_budget(0),
+        );
         assert_eq!(d.intents().len(), 0);
         assert_eq!(d.reason_code(), DecisionReport::REASON_ACTION_BUDGET_ZERO);
     }

@@ -73,7 +73,15 @@ mod tests {
     fn part(parent: Option<u32>) -> FigurePart {
         parent.map_or_else(
             || FigurePart::root(Transform::IDENTITY, Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO, 0),
-            |p| FigurePart::child(p, Transform::IDENTITY, Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO, 0),
+            |p| {
+                FigurePart::child(
+                    p,
+                    Transform::IDENTITY,
+                    Vec3::new(1.0, 1.0, 1.0),
+                    Vec3::ZERO,
+                    0,
+                )
+            },
         )
     }
 
@@ -100,13 +108,27 @@ mod tests {
     #[test]
     fn figure_round_trips_through_bytes() {
         let def = FigureDefinition::new(vec![
-            FigurePart::root(Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)), Vec3::new(0.5, 0.6, 0.4), Vec3::ZERO, 1),
-            FigurePart::child(0, Transform::from_translation(Vec3::new(0.0, -0.4, 0.0)), Vec3::new(0.2, 0.5, 0.2), Vec3::new(0.0, -0.2, 0.0), 2),
+            FigurePart::root(
+                Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)),
+                Vec3::new(0.5, 0.6, 0.4),
+                Vec3::ZERO,
+                1,
+            ),
+            FigurePart::child(
+                0,
+                Transform::from_translation(Vec3::new(0.0, -0.4, 0.0)),
+                Vec3::new(0.2, 0.5, 0.2),
+                Vec3::new(0.0, -0.2, 0.0),
+                2,
+            ),
         ]);
         let mut w = BinaryWriter::new();
         def.write_to(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(FigureDefinition::read_from(&mut BinaryReader::new(&bytes)).unwrap(), def);
+        assert_eq!(
+            FigureDefinition::read_from(&mut BinaryReader::new(&bytes)).unwrap(),
+            def
+        );
     }
 
     #[test]

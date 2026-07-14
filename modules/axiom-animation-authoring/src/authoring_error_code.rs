@@ -70,8 +70,17 @@ mod tests {
             AuthoringErrorCode::OverlappingPhases,
             AuthoringErrorCode::NonFiniteValue,
         ];
-        assert_eq!(all.map(AuthoringErrorCode::raw), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        assert_eq!(AuthoringErrorCode::UnknownJoint, AuthoringErrorCode::UnknownJoint);
-        assert_ne!(AuthoringErrorCode::UnknownJoint, AuthoringErrorCode::UnknownEffector);
+        assert_eq!(
+            all.map(AuthoringErrorCode::raw),
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        );
+        assert_eq!(
+            AuthoringErrorCode::UnknownJoint,
+            AuthoringErrorCode::UnknownJoint
+        );
+        assert_ne!(
+            AuthoringErrorCode::UnknownJoint,
+            AuthoringErrorCode::UnknownEffector
+        );
     }
 }

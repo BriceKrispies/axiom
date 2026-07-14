@@ -104,12 +104,34 @@ impl ActionIntent {
 
     /// Begin holding the abstract control `control_code`.
     pub const fn press_control(control_code: u32) -> Self {
-        Self::new_raw(Self::KIND_PRESS_CONTROL, control_code, 0, 0, 0, 0, 0, 0, 0, 0)
+        Self::new_raw(
+            Self::KIND_PRESS_CONTROL,
+            control_code,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
     }
 
     /// Stop holding the abstract control `control_code`.
     pub const fn release_control(control_code: u32) -> Self {
-        Self::new_raw(Self::KIND_RELEASE_CONTROL, control_code, 0, 0, 0, 0, 0, 0, 0, 0)
+        Self::new_raw(
+            Self::KIND_RELEASE_CONTROL,
+            control_code,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
     }
 
     /// Drive movement axis `axis_code` by signed `value`.
@@ -129,7 +151,18 @@ impl ActionIntent {
 
     /// Begin a pointer contact with button `control_code`.
     pub const fn pointer_down(control_code: u32) -> Self {
-        Self::new_raw(Self::KIND_POINTER_DOWN, control_code, 0, 0, 0, 0, 0, 0, 0, 0)
+        Self::new_raw(
+            Self::KIND_POINTER_DOWN,
+            control_code,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
     }
 
     /// End a pointer contact with button `control_code`.
@@ -142,7 +175,18 @@ impl ActionIntent {
 impl ActionIntent {
     /// Orient toward subject `subject_code`.
     pub const fn look_at_subject(subject_code: u32) -> Self {
-        Self::new_raw(Self::KIND_LOOK_AT_SUBJECT, 0, 0, subject_code, 0, 0, 0, 0, 0, 0)
+        Self::new_raw(
+            Self::KIND_LOOK_AT_SUBJECT,
+            0,
+            0,
+            subject_code,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
     }
 
     /// Orient toward point `(x, y, z)`.
@@ -152,7 +196,18 @@ impl ActionIntent {
 
     /// Move toward subject `subject_code`.
     pub const fn move_toward_subject(subject_code: u32) -> Self {
-        Self::new_raw(Self::KIND_MOVE_TOWARD_SUBJECT, 0, 0, subject_code, 0, 0, 0, 0, 0, 0)
+        Self::new_raw(
+            Self::KIND_MOVE_TOWARD_SUBJECT,
+            0,
+            0,
+            subject_code,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
     }
 
     /// Move toward point `(x, y, z)`.
@@ -162,17 +217,50 @@ impl ActionIntent {
 
     /// Interact with subject `subject_code`.
     pub const fn interact_with_subject(subject_code: u32) -> Self {
-        Self::new_raw(Self::KIND_INTERACT_WITH_SUBJECT, 0, 0, subject_code, 0, 0, 0, 0, 0, 0)
+        Self::new_raw(
+            Self::KIND_INTERACT_WITH_SUBJECT,
+            0,
+            0,
+            subject_code,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
     }
 
     /// Use affordance `affordance_code`.
     pub const fn use_affordance(affordance_code: u32) -> Self {
-        Self::new_raw(Self::KIND_USE_AFFORDANCE, 0, 0, 0, affordance_code, 0, 0, 0, 0, 0)
+        Self::new_raw(
+            Self::KIND_USE_AFFORDANCE,
+            0,
+            0,
+            0,
+            affordance_code,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
     }
 
     /// Focus an attention slot on subject `subject_code`.
     pub const fn focus_attention(subject_code: u32) -> Self {
-        Self::new_raw(Self::KIND_FOCUS_ATTENTION, 0, 0, subject_code, 0, 0, 0, 0, 0, 0)
+        Self::new_raw(
+            Self::KIND_FOCUS_ATTENTION,
+            0,
+            0,
+            subject_code,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
     }
 }
 
@@ -237,9 +325,15 @@ mod tests {
     fn low_level_kinds_set_their_discriminant_and_payload() {
         assert_eq!(ActionIntent::noop().kind_code(), ActionIntent::KIND_NOOP);
         assert_eq!(ActionIntent::wait_ticks(9).ticks(), 9);
-        assert_eq!(ActionIntent::wait_ticks(9).kind_code(), ActionIntent::KIND_WAIT_TICKS);
+        assert_eq!(
+            ActionIntent::wait_ticks(9).kind_code(),
+            ActionIntent::KIND_WAIT_TICKS
+        );
         assert_eq!(ActionIntent::press_control(7).control_code(), 7);
-        assert_eq!(ActionIntent::press_control(7).kind_code(), ActionIntent::KIND_PRESS_CONTROL);
+        assert_eq!(
+            ActionIntent::press_control(7).kind_code(),
+            ActionIntent::KIND_PRESS_CONTROL
+        );
         assert_eq!(ActionIntent::release_control(7).control_code(), 7);
         assert_eq!(
             ActionIntent::release_control(7).kind_code(),
@@ -247,17 +341,29 @@ mod tests {
         );
         assert_eq!(ActionIntent::move_axis(2, -5).axis_code(), 2);
         assert_eq!(ActionIntent::move_axis(2, -5).value(), -5);
-        assert_eq!(ActionIntent::move_axis(2, -5).kind_code(), ActionIntent::KIND_MOVE_AXIS);
+        assert_eq!(
+            ActionIntent::move_axis(2, -5).kind_code(),
+            ActionIntent::KIND_MOVE_AXIS
+        );
         assert_eq!(ActionIntent::look_axis(3, 4).axis_code(), 3);
         assert_eq!(ActionIntent::look_axis(3, 4).value(), 4);
-        assert_eq!(ActionIntent::look_axis(3, 4).kind_code(), ActionIntent::KIND_LOOK_AXIS);
+        assert_eq!(
+            ActionIntent::look_axis(3, 4).kind_code(),
+            ActionIntent::KIND_LOOK_AXIS
+        );
         let pm = ActionIntent::pointer_move(11, 22);
         assert_eq!((pm.x(), pm.y()), (11, 22));
         assert_eq!(pm.kind_code(), ActionIntent::KIND_POINTER_MOVE);
         assert_eq!(ActionIntent::pointer_down(1).control_code(), 1);
-        assert_eq!(ActionIntent::pointer_down(1).kind_code(), ActionIntent::KIND_POINTER_DOWN);
+        assert_eq!(
+            ActionIntent::pointer_down(1).kind_code(),
+            ActionIntent::KIND_POINTER_DOWN
+        );
         assert_eq!(ActionIntent::pointer_up(1).control_code(), 1);
-        assert_eq!(ActionIntent::pointer_up(1).kind_code(), ActionIntent::KIND_POINTER_UP);
+        assert_eq!(
+            ActionIntent::pointer_up(1).kind_code(),
+            ActionIntent::KIND_POINTER_UP
+        );
     }
 
     #[test]

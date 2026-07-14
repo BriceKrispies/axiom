@@ -54,7 +54,9 @@ impl ForestApi {
         let brown = [0.34f32, 0.24, 0.13];
         let green = [0.28f32, 0.44, 0.16];
         let vert = |x: f32, y: f32, z: f32, n: [f32; 3], uv: [f32; 2], c: [f32; 3]| -> [f32; 12] {
-            [x, y, z, n[0], n[1], n[2], uv[0], uv[1], c[0], c[1], c[2], 1.0]
+            [
+                x, y, z, n[0], n[1], n[2], uv[0], uv[1], c[0], c[1], c[2], 1.0,
+            ]
         };
         let mut v = Vec::new();
         // Quad in the XY plane (normal +Z): base brown, top green.
@@ -102,7 +104,12 @@ mod tests {
 
     #[test]
     fn seats_one_tree_per_scattered_site_on_the_ground() {
-        let trees = ForestApi::chunk_trees(9, CellCoord::new(0, 0), &config(16.0, 4, 2.0, 5.0), flat(3.0));
+        let trees = ForestApi::chunk_trees(
+            9,
+            CellCoord::new(0, 0),
+            &config(16.0, 4, 2.0, 5.0),
+            flat(3.0),
+        );
         // Full-fill 4×4 sub-grid → 16 trees, each seated at ground height 3.0.
         assert_eq!(trees.len(), 16);
         for t in &trees {
@@ -114,7 +121,8 @@ mod tests {
     fn trees_follow_a_sloped_ground_function() {
         // Ground height = x, so each tree's y equals its own x.
         let ground = |x: Meters, _z: Meters| x;
-        let trees = ForestApi::chunk_trees(1, CellCoord::new(2, 0), &config(10.0, 3, 1.0, 2.0), ground);
+        let trees =
+            ForestApi::chunk_trees(1, CellCoord::new(2, 0), &config(10.0, 3, 1.0, 2.0), ground);
         for t in &trees {
             assert_eq!(t.translation.y, t.translation.x);
         }
@@ -122,15 +130,30 @@ mod tests {
 
     #[test]
     fn tree_placement_is_deterministic() {
-        let a = ForestApi::chunk_trees(4, CellCoord::new(-1, 2), &config(12.0, 4, 1.0, 3.0), flat(0.0));
-        let b = ForestApi::chunk_trees(4, CellCoord::new(-1, 2), &config(12.0, 4, 1.0, 3.0), flat(0.0));
+        let a = ForestApi::chunk_trees(
+            4,
+            CellCoord::new(-1, 2),
+            &config(12.0, 4, 1.0, 3.0),
+            flat(0.0),
+        );
+        let b = ForestApi::chunk_trees(
+            4,
+            CellCoord::new(-1, 2),
+            &config(12.0, 4, 1.0, 3.0),
+            flat(0.0),
+        );
         assert_eq!(a, b);
         assert!(!a.is_empty());
     }
 
     #[test]
     fn tree_size_stays_within_the_configured_range() {
-        let trees = ForestApi::chunk_trees(7, CellCoord::new(0, 0), &config(16.0, 5, 2.0, 6.0), flat(0.0));
+        let trees = ForestApi::chunk_trees(
+            7,
+            CellCoord::new(0, 0),
+            &config(16.0, 5, 2.0, 6.0),
+            flat(0.0),
+        );
         for t in &trees {
             assert!(t.scale.x >= 2.0);
             assert!(t.scale.x <= 6.0);
@@ -152,8 +175,18 @@ mod tests {
 
     #[test]
     fn distinct_seeds_grow_distinct_forests() {
-        let a = ForestApi::chunk_trees(1, CellCoord::new(0, 0), &config(16.0, 4, 1.0, 3.0), flat(0.0));
-        let b = ForestApi::chunk_trees(2, CellCoord::new(0, 0), &config(16.0, 4, 1.0, 3.0), flat(0.0));
+        let a = ForestApi::chunk_trees(
+            1,
+            CellCoord::new(0, 0),
+            &config(16.0, 4, 1.0, 3.0),
+            flat(0.0),
+        );
+        let b = ForestApi::chunk_trees(
+            2,
+            CellCoord::new(0, 0),
+            &config(16.0, 4, 1.0, 3.0),
+            flat(0.0),
+        );
         assert_ne!(a, b);
     }
 }

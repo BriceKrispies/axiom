@@ -83,11 +83,7 @@ fn run_slice_check(rest: &[String], command: SliceCommand) -> ExitCode {
             ExitCode::from(2)
         },
         |root| {
-            println!(
-                "Axiom {} check — root: {}",
-                command.label(),
-                root.display()
-            );
+            println!("Axiom {} check — root: {}", command.label(), root.display());
             let mut report = CheckReport::default();
             command.run(&root, &mut report);
             let report = report.finish();
@@ -95,7 +91,11 @@ fn run_slice_check(rest: &[String], command: SliceCommand) -> ExitCode {
             report.is_ok().then_some(()).map_or_else(
                 || {
                     let violations = report.violations();
-                    eprintln!("\nFAIL: {} {} violation(s):", violations.len(), command.label());
+                    eprintln!(
+                        "\nFAIL: {} {} violation(s):",
+                        violations.len(),
+                        command.label()
+                    );
                     violations.iter().for_each(|v| eprintln!("  - {v}"));
                     ExitCode::FAILURE
                 },

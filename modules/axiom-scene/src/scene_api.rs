@@ -64,7 +64,6 @@ impl SceneApi {
         }
     }
 
-
     /// Create a node with the identity local transform.
     pub fn create_node(&mut self) -> SceneNodeId {
         self.scene.create_node(Transform::IDENTITY)
@@ -114,7 +113,6 @@ impl SceneApi {
         self.scene.is_node(id)
     }
 
-
     /// Make `child` a child of `parent`. Rejects self-parenting, cycles, and
     /// missing ids.
     pub fn set_parent(&mut self, child: SceneNodeId, parent: SceneNodeId) -> SceneResult<()> {
@@ -125,7 +123,6 @@ impl SceneApi {
     pub fn clear_parent(&mut self, child: SceneNodeId) -> SceneResult<()> {
         self.scene.clear_parent(child)
     }
-
 
     /// Add a perspective camera to `node`. Intrinsic validation is delegated to
     /// [`MathApi::mat4_perspective`].
@@ -155,7 +152,6 @@ impl SceneApi {
         )
     }
 
-
     /// Add a directional light to `node`.
     pub fn add_directional_light(
         &mut self,
@@ -183,7 +179,6 @@ impl SceneApi {
     pub fn remove_light(&mut self, node: SceneNodeId) -> SceneResult<()> {
         self.scene.remove_light(node)
     }
-
 
     /// Construct an opaque [`MeshRef`].
     pub const fn mesh_ref(&self, raw: u64) -> MeshRef {
@@ -230,7 +225,6 @@ impl SceneApi {
         self.scene.set_renderable_casts_contact_shadow(node, casts)
     }
 
-
     /// Recompute every node's world transform now.
     pub fn update_world_transforms(&mut self) {
         self.scene.update_world_transforms();
@@ -249,7 +243,6 @@ impl SceneApi {
     pub fn snapshot(&self) -> SceneSnapshot {
         self.scene.snapshot()
     }
-
 
     /// The reflected schemas of the standard component types a scene is built
     /// from — the scene describing its own shape as data an agent can read.
@@ -823,7 +816,8 @@ mod tests {
     #[test]
     fn raycast_hit_and_tags_classify_through_the_facade() {
         let mut a = api();
-        let wall = a.create_node_with_transform(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
+        let wall =
+            a.create_node_with_transform(Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)));
         a.add_bounds(wall, Vec3::new(0.5, 0.5, 0.5)).unwrap();
         a.add_tag(wall, 1).unwrap(); // 1 = "wall" in this game's vocabulary
         a.update_world_transforms();

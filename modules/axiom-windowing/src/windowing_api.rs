@@ -338,7 +338,10 @@ mod tests {
         let mut clock = FrameClock::default();
         let mut now = 0_u64;
         let (fps_milli, frame_micros) = drive(&mut clock, &mut now, 16_667, 60);
-        assert!((59_800..=60_200).contains(&fps_milli), "fps_milli={fps_milli}");
+        assert!(
+            (59_800..=60_200).contains(&fps_milli),
+            "fps_milli={fps_milli}"
+        );
         assert!(
             (16_600..=16_700).contains(&frame_micros),
             "frame_micros={frame_micros}"
@@ -355,7 +358,10 @@ mod tests {
         let sixty = drive(&mut clock, &mut now, 16_667, 60);
         assert!((59_800..=60_200).contains(&sixty.0), "sixty={sixty:?}");
         let (fps_milli, frame_micros) = drive(&mut clock, &mut now, 33_333, 60);
-        assert!((29_800..=30_200).contains(&fps_milli), "fps_milli={fps_milli}");
+        assert!(
+            (29_800..=30_200).contains(&fps_milli),
+            "fps_milli={fps_milli}"
+        );
         assert!(
             (33_200..=33_400).contains(&frame_micros),
             "frame_micros={frame_micros}"

@@ -148,8 +148,16 @@ impl GpuBackendApi {
                 .live
                 .as_ref()
                 .map(|live| {
-                    live.render_frame(lights, light_view_proj, batches, &[], clear_color, sdf, self.capability.bits())
-                        .is_ok()
+                    live.render_frame(
+                        lights,
+                        light_view_proj,
+                        batches,
+                        &[],
+                        clear_color,
+                        sdf,
+                        self.capability.bits(),
+                    )
+                    .is_ok()
                 })
                 .unwrap_or(false);
         }
@@ -194,7 +202,15 @@ impl GpuBackendApi {
         self.live
             .as_ref()
             .map(|live| {
-                live.render_frame(lights, light_view_proj, batches, &skinned, clear_color, sdf, self.capability.bits())
+                live.render_frame(
+                    lights,
+                    light_view_proj,
+                    batches,
+                    &skinned,
+                    clear_color,
+                    sdf,
+                    self.capability.bits(),
+                )
             })
             .unwrap_or(Ok(()))
     }
@@ -233,7 +249,10 @@ impl GpuBackendApi {
             return self
                 .live
                 .as_ref()
-                .map(|live| live.render_draw2d(list, &self.draw2d_textures, clear).is_ok())
+                .map(|live| {
+                    live.render_draw2d(list, &self.draw2d_textures, clear)
+                        .is_ok()
+                })
                 .unwrap_or(false);
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -413,7 +432,9 @@ impl GpuBackendApi {
     /// live binding is initialised.
     #[cfg(target_arch = "wasm32")]
     pub fn load_meshes(&mut self, meshes: &[(u64, Vec<f32>, Vec<u32>)]) {
-        self.live.iter_mut().for_each(|live| live.load_meshes(meshes));
+        self.live
+            .iter_mut()
+            .for_each(|live| live.load_meshes(meshes));
     }
 }
 
@@ -564,8 +585,19 @@ mod tests {
             FrameFeatureSet::new(false, false, 1, 0),
         );
         assert!(!backend.present_packet(&packet));
-        let prim = SdfPrimitive::new(SdfPrimitive::SPHERE, [0.0; 16], [1.0, 0.0, 0.0, 1.0], [1.0; 4]);
-        let scene = SdfScene::new(vec![prim], [0.0; 16], [0.0; 16], [0.0, 0.0, 5.0], [100.0, 0.001, 0.0, 0.0]);
+        let prim = SdfPrimitive::new(
+            SdfPrimitive::SPHERE,
+            [0.0; 16],
+            [1.0, 0.0, 0.0, 1.0],
+            [1.0; 4],
+        );
+        let scene = SdfScene::new(
+            vec![prim],
+            [0.0; 16],
+            [0.0; 16],
+            [0.0, 0.0, 5.0],
+            [100.0, 0.001, 0.0, 0.0],
+        );
         assert!(!backend.present_packet(&packet.with_sdf(scene)));
     }
 
@@ -584,7 +616,12 @@ mod tests {
         list.push_command(Draw2dCommand::rect(
             header(0),
             Rect::new(Vec2::ZERO, Vec2::new(4.0, 4.0)),
-            Fill2d::color(Rgba::new(one, Ratio::new(0.0).unwrap(), Ratio::new(0.0).unwrap(), one)),
+            Fill2d::color(Rgba::new(
+                one,
+                Ratio::new(0.0).unwrap(),
+                Ratio::new(0.0).unwrap(),
+                one,
+            )),
         ));
         list.push_command(Draw2dCommand::sprite(
             header(1),

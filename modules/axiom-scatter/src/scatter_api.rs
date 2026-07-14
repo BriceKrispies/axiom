@@ -100,7 +100,12 @@ mod tests {
 
     #[test]
     fn full_fill_yields_one_site_per_subcell() {
-        let sites = ScatterApi::chunk_sites(1, CellCoord::new(0, 0), Meters::finite_or_zero(10.0), &rule(5, 0.5, 1.0));
+        let sites = ScatterApi::chunk_sites(
+            1,
+            CellCoord::new(0, 0),
+            Meters::finite_or_zero(10.0),
+            &rule(5, 0.5, 1.0),
+        );
         assert_eq!(sites.len(), 25);
     }
 
@@ -117,7 +122,12 @@ mod tests {
 
     #[test]
     fn zero_sites_per_side_is_empty() {
-        let sites = ScatterApi::chunk_sites(1, CellCoord::new(0, 0), Meters::finite_or_zero(10.0), &rule(0, 0.5, 1.0));
+        let sites = ScatterApi::chunk_sites(
+            1,
+            CellCoord::new(0, 0),
+            Meters::finite_or_zero(10.0),
+            &rule(0, 0.5, 1.0),
+        );
         assert!(sites.is_empty());
     }
 
@@ -125,7 +135,8 @@ mod tests {
     fn every_site_lies_inside_its_cell() {
         let size = 16.0;
         let cell = CellCoord::new(3, -2);
-        let sites = ScatterApi::chunk_sites(7, cell, Meters::finite_or_zero(size), &rule(4, 1.0, 1.0));
+        let sites =
+            ScatterApi::chunk_sites(7, cell, Meters::finite_or_zero(size), &rule(4, 1.0, 1.0));
         let (lo_x, hi_x) = (cell.x as f32 * size, (cell.x + 1) as f32 * size);
         let (lo_z, hi_z) = (cell.z as f32 * size, (cell.z + 1) as f32 * size);
         // Single-condition, message-less asserts: a short-circuit (`&&`) leaves its
@@ -164,7 +175,8 @@ mod tests {
         let mut nearest = f32::MAX;
         for pa in &a {
             for pb in &b {
-                let d = ((pa.x.get() - pb.x.get()).powi(2) + (pa.z.get() - pb.z.get()).powi(2)).sqrt();
+                let d =
+                    ((pa.x.get() - pb.x.get()).powi(2) + (pa.z.get() - pb.z.get()).powi(2)).sqrt();
                 nearest = nearest.min(d);
             }
         }

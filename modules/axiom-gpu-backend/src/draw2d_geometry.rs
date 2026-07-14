@@ -385,7 +385,14 @@ impl Draw2dGeometry {
     ) {
         let positions = corners.map(|c| [c.x, c.y]);
         let folded = [color[0], color[1], color[2], color[3] * alpha];
-        self.push_quad(positions, [[0.0, 0.0]; 4], fields, kind, folded, QuadSource::Solid);
+        self.push_quad(
+            positions,
+            [[0.0, 0.0]; 4],
+            fields,
+            kind,
+            folded,
+            QuadSource::Solid,
+        );
     }
 }
 
@@ -448,7 +455,15 @@ fn append_command(
     cmd.as_circle().into_iter().for_each(|(center, radius)| {
         let ax = m.transform_vector(Vec2::new(radius.get(), 0.0));
         let ay = m.transform_vector(Vec2::new(0.0, radius.get()));
-        append_conic(geo, m.transform_point(center), ax, ay, &fill, &stroke, alpha);
+        append_conic(
+            geo,
+            m.transform_point(center),
+            ax,
+            ay,
+            &fill,
+            &stroke,
+            alpha,
+        );
     });
     cmd.as_ellipse()
         .into_iter()
@@ -456,7 +471,15 @@ fn append_command(
             let local = Mat3::rotation(rotation);
             let ax = m.transform_vector(local.transform_vector(Vec2::new(rx.get(), 0.0)));
             let ay = m.transform_vector(local.transform_vector(Vec2::new(0.0, ry.get())));
-            append_conic(geo, m.transform_point(center), ax, ay, &fill, &stroke, alpha);
+            append_conic(
+                geo,
+                m.transform_point(center),
+                ax,
+                ay,
+                &fill,
+                &stroke,
+                alpha,
+            );
         });
     cmd.as_line().into_iter().for_each(|(a, b, color, width)| {
         append_line(geo, &m, a, b, color.channels(), width.get(), alpha);
@@ -464,11 +487,16 @@ fn append_command(
     cmd.as_path().into_iter().for_each(|(points, closed)| {
         append_path(geo, &m, &points, closed, &fill, &stroke, alpha);
     });
-    cmd.as_particle().into_iter().for_each(|(center, size, color)| {
-        let h = size.get();
-        let quad = Rect::new(center.subtract(Vec2::new(h, h)), Vec2::new(2.0 * h, 2.0 * h));
-        append_rect(geo, &m, quad, &FillPaint::solid(color.channels()), alpha);
-    });
+    cmd.as_particle()
+        .into_iter()
+        .for_each(|(center, size, color)| {
+            let h = size.get();
+            let quad = Rect::new(
+                center.subtract(Vec2::new(h, h)),
+                Vec2::new(2.0 * h, 2.0 * h),
+            );
+            append_rect(geo, &m, quad, &FillPaint::solid(color.channels()), alpha);
+        });
     cmd.as_sprite()
         .into_iter()
         .for_each(|(texture, opts)| append_sprite(geo, &m, texture, opts, alpha, sizes));
@@ -531,7 +559,13 @@ fn build_gradient_fill(
 /// source (solid or gradient) and the per-corner UV; the command alpha is folded
 /// in once.
 fn append_rect(geo: &mut Draw2dGeometry, m: &Mat3, r: Rect, fill: &FillPaint, alpha: f32) {
-    geo.push_fill(fill, bbox_corners(m, r), [PLAIN_FIELD; 4], KIND_CAPSULE, alpha);
+    geo.push_fill(
+        fill,
+        bbox_corners(m, r),
+        [PLAIN_FIELD; 4],
+        KIND_CAPSULE,
+        alpha,
+    );
 }
 
 /// Emit a rect's **stroke**: a quad over the same transformed AABB carrying, per
@@ -539,9 +573,18 @@ fn append_rect(geo: &mut Draw2dGeometry, m: &Mat3, r: Rect, fill: &FillPaint, al
 /// the shader keeps a fragment when `min(edge distances)/width < 1` — the inset
 /// border band the software `stroke_rect` composites. A zero / transparent stroke
 /// makes the band empty (huge field) or the colour a no-op, so it draws nothing.
-fn append_rect_stroke(geo: &mut Draw2dGeometry, m: &Mat3, r: Rect, stroke: &StrokeStyle, alpha: f32) {
+fn append_rect_stroke(
+    geo: &mut Draw2dGeometry,
+    m: &Mat3,
+    r: Rect,
+    stroke: &StrokeStyle,
+    alpha: f32,
+) {
     let (minx, miny, maxx, maxy) = transformed_bbox(m, r);
-    let inv_w = 1.0 / m.transform_vector(Vec2::new(stroke.width, 0.0)).length().max(EPS);
+    let inv_w = 1.0
+        / m.transform_vector(Vec2::new(stroke.width, 0.0))
+            .length()
+            .max(EPS);
     let corners = [
         Vec2::new(minx, miny),
         Vec2::new(maxx, miny),
@@ -600,7 +643,13 @@ fn append_conic(
         let s = st(c);
         [s[0], s[1], inner2, 0.0]
     });
-    geo.push_solid(corners, stroke_fields, KIND_CONIC_STROKE, stroke.color, alpha);
+    geo.push_solid(
+        corners,
+        stroke_fields,
+        KIND_CONIC_STROKE,
+        stroke.color,
+        alpha,
+    );
 }
 
 /// Emit a stroked line `a`–`b` (both through `m`) as **one** quad covering its
@@ -610,7 +659,15 @@ fn append_conic(
 /// zero-length segment falls back to the axis-aligned unit frame (branchless via
 /// `usize::from`) and collapses to a round dot, the same shape the software
 /// `EPS`-floored `len²` yields.
-fn append_line(geo: &mut Draw2dGeometry, m: &Mat3, a: Vec2, b: Vec2, color: [f32; 4], width: f32, alpha: f32) {
+fn append_line(
+    geo: &mut Draw2dGeometry,
+    m: &Mat3,
+    a: Vec2,
+    b: Vec2,
+    color: [f32; 4],
+    width: f32,
+    alpha: f32,
+) {
     let pa = m.transform_point(a);
     let pb = m.transform_point(b);
     let half_w = 0.5 * m.transform_vector(Vec2::new(width, 0.0)).length();
@@ -681,7 +738,14 @@ fn append_path(
 /// bounding box carrying per-corner barycentric coordinates and `KIND_TRI`. The
 /// `fill` supplies the colour source + per-corner UV (a gradient samples the same
 /// affine UV as any other fill).
-fn append_fan_triangle(geo: &mut Draw2dGeometry, a: Vec2, b: Vec2, c: Vec2, fill: &FillPaint, alpha: f32) {
+fn append_fan_triangle(
+    geo: &mut Draw2dGeometry,
+    a: Vec2,
+    b: Vec2,
+    c: Vec2,
+    fill: &FillPaint,
+    alpha: f32,
+) {
     let minx = a.x.min(b.x).min(c.x);
     let miny = a.y.min(b.y).min(c.y);
     let maxx = a.x.max(b.x).max(c.x);
@@ -800,20 +864,24 @@ fn bbox_corners(m: &Mat3, r: Rect) -> [Vec2; 4] {
 /// same screen region.
 fn transformed_bbox(m: &Mat3, r: Rect) -> (f32, f32, f32, f32) {
     let mx = r.max();
-    [r.min, Vec2::new(mx.x, r.min.y), mx, Vec2::new(r.min.x, mx.y)]
-        .iter()
-        .map(|c| m.transform_point(*c))
-        .fold(
-            (
-                f32::INFINITY,
-                f32::INFINITY,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-            ),
-            |(mnx, mny, mxx, mxy), p| (mnx.min(p.x), mny.min(p.y), mxx.max(p.x), mxy.max(p.y)),
-        )
+    [
+        r.min,
+        Vec2::new(mx.x, r.min.y),
+        mx,
+        Vec2::new(r.min.x, mx.y),
+    ]
+    .iter()
+    .map(|c| m.transform_point(*c))
+    .fold(
+        (
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ),
+        |(mnx, mny, mxx, mxy), p| (mnx.min(p.x), mny.min(p.y), mxx.max(p.x), mxy.max(p.y)),
+    )
 }
-
 
 #[cfg(test)]
 mod tests;

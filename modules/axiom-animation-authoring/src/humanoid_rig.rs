@@ -114,9 +114,11 @@ impl HumanoidRigSpec {
     /// kinematics relies on.
     pub(crate) fn is_valid(&self) -> bool {
         (!self.joints.is_empty())
-            & self.joints.iter().enumerate().all(|(i, j)| {
-                j.parent().map(|p| p.raw() < i as u64).unwrap_or(true)
-            })
+            & self
+                .joints
+                .iter()
+                .enumerate()
+                .all(|(i, j)| j.parent().map(|p| p.raw() < i as u64).unwrap_or(true))
     }
 
     /// The standard PS1/low-poly sports-character rig: a spine chain
@@ -198,18 +200,44 @@ mod tests {
         let rig = HumanoidRigSpec::standard_humanoid();
         let joints = rig.joint_names();
         [
-            "root", "pelvis", "spine_lower", "spine_upper", "chest", "neck", "head",
-            "left_shoulder", "left_upper_arm", "left_forearm", "left_hand",
-            "right_shoulder", "right_upper_arm", "right_forearm", "right_hand",
-            "left_hip", "left_thigh", "left_shin", "left_foot", "left_toe",
-            "right_hip", "right_thigh", "right_shin", "right_foot", "right_toe",
+            "root",
+            "pelvis",
+            "spine_lower",
+            "spine_upper",
+            "chest",
+            "neck",
+            "head",
+            "left_shoulder",
+            "left_upper_arm",
+            "left_forearm",
+            "left_hand",
+            "right_shoulder",
+            "right_upper_arm",
+            "right_forearm",
+            "right_hand",
+            "left_hip",
+            "left_thigh",
+            "left_shin",
+            "left_foot",
+            "left_toe",
+            "right_hip",
+            "right_thigh",
+            "right_shin",
+            "right_foot",
+            "right_toe",
         ]
         .iter()
         .for_each(|n| assert!(joints.contains(n), "missing joint {n}"));
         let effectors = rig.effector_names();
         [
-            "left_foot_sole", "right_foot_sole", "right_foot_instep", "left_hand",
-            "right_hand", "head_gaze", "chest_forward", "pelvis_forward",
+            "left_foot_sole",
+            "right_foot_sole",
+            "right_foot_instep",
+            "left_hand",
+            "right_hand",
+            "head_gaze",
+            "chest_forward",
+            "pelvis_forward",
         ]
         .iter()
         .for_each(|n| assert!(effectors.contains(n), "missing effector {n}"));

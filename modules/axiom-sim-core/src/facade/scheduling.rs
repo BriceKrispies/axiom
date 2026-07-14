@@ -12,10 +12,10 @@ use crate::ids::{CausalEventId, FactId, ProcessId, RelationId};
 use crate::process_dependency::DependencyKind;
 use crate::process_handler::HandlerSpec;
 use crate::process_lifecycle::ProcessExecutionRecord;
-use crate::wake_reason::WakeReason;
 use crate::scheduler::SchedulerStep;
 use crate::sim_tick::{SimTick, TickDelta};
 use crate::sim_world;
+use crate::wake_reason::WakeReason;
 
 use super::SimCoreApi;
 

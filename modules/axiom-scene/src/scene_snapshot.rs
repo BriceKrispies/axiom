@@ -215,7 +215,8 @@ mod tests {
         )
         .unwrap();
         s.add_tag(b, 42).unwrap();
-        s.add_bounds(b, Bounds::new(Vec3::new(0.5, 0.5, 0.5))).unwrap();
+        s.add_bounds(b, Bounds::new(Vec3::new(0.5, 0.5, 0.5)))
+            .unwrap();
         s.update_world_transforms();
         s
     }

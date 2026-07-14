@@ -135,9 +135,13 @@ mod tests {
 
     #[test]
     fn combined_control_code_ors_every_queued_intent() {
-        assert_eq!(ActionQueue::empty_with_capacity(2).combined_control_code(), 0);
         assert_eq!(
-            ActionQueue::from_intents(vec![ActionIntent::press_control(0b0100)]).combined_control_code(),
+            ActionQueue::empty_with_capacity(2).combined_control_code(),
+            0
+        );
+        assert_eq!(
+            ActionQueue::from_intents(vec![ActionIntent::press_control(0b0100)])
+                .combined_control_code(),
             0b0100,
         );
         // Distinct bits OR together (forward + turn held in one tick); a repeated

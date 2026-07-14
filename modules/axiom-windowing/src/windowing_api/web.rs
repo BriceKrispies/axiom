@@ -274,7 +274,8 @@ impl WindowingApi {
         let panes = slots.clone();
         *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
             let tick = win.borrow_mut().step();
-            let (clear, lights, light_vp, batches, camera_vp, casters, sdf) = (ff.borrow_mut())(tick);
+            let (clear, lights, light_vp, batches, camera_vp, casters, sdf) =
+                (ff.borrow_mut())(tick);
             panes.iter().for_each(|slot| {
                 slot.borrow().as_ref().into_iter().for_each(|presenter| {
                     presenter.present(
@@ -615,8 +616,11 @@ impl WindowingApi {
                 // them into the shared source during its closure just now); a scrubbed
                 // frame carries none, matching the scrub path's dropped camera/casters.
                 if let Some(src) = skinned_source.as_ref() {
-                    let live_skinned =
-                        if scrubbing { Vec::new() } else { src.borrow().clone() };
+                    let live_skinned = if scrubbing {
+                        Vec::new()
+                    } else {
+                        src.borrow().clone()
+                    };
                     presenter.set_skinned(live_skinned);
                 }
                 presenter.present(
@@ -1212,7 +1216,11 @@ impl LivePresenter {
             self.backend.borrow_mut().load_2d_textures(textures);
             self.applied_texture_generation.set(textures_generation);
         });
-        let scrubbing = self.scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+        let scrubbing = self
+            .scrubber
+            .as_ref()
+            .map(|s| !s.is_live())
+            .unwrap_or(false);
         match scrubbing {
             true => {
                 // Re-present the selected recorded 2D frame; nothing to present if
@@ -1355,7 +1363,11 @@ impl LivePresenter {
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
     ) {
-        let scrubbing = self.scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+        let scrubbing = self
+            .scrubber
+            .as_ref()
+            .map(|s| !s.is_live())
+            .unwrap_or(false);
         // The identity view-projection a re-presented (scrubbed) frame uses — its
         // recorded args carry no camera/casters, matching the run loop's scrub path.
         const IDENTITY_VP: [f32; 16] = [
@@ -1371,7 +1383,14 @@ impl LivePresenter {
                     .into_iter()
                     .for_each(|(rclear, rlights, rlight_vp, rbatches)| {
                         self.present_to_backend(
-                            tick, rclear, &rlights, rlight_vp, &rbatches, IDENTITY_VP, &[], None,
+                            tick,
+                            rclear,
+                            &rlights,
+                            rlight_vp,
+                            &rbatches,
+                            IDENTITY_VP,
+                            &[],
+                            None,
                         );
                     });
             }
@@ -1382,7 +1401,14 @@ impl LivePresenter {
                     .into_iter()
                     .for_each(|s| s.record(tick, clear, lights, light_vp, batches));
                 self.present_to_backend(
-                    tick, clear, lights, light_vp, batches, camera_view_proj, casters, sdf,
+                    tick,
+                    clear,
+                    lights,
+                    light_vp,
+                    batches,
+                    camera_view_proj,
+                    casters,
+                    sdf,
                 );
             }
         }
@@ -1423,9 +1449,14 @@ impl LiveBackend {
         sdf: Option<axiom_host::SdfScene>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         match self {
-            LiveBackend::Gpu(backend) => {
-                backend.present_frame_result(clear, lights, light_vp, batches, skinned, sdf.as_ref())
-            }
+            LiveBackend::Gpu(backend) => backend.present_frame_result(
+                clear,
+                lights,
+                light_vp,
+                batches,
+                skinned,
+                sdf.as_ref(),
+            ),
             LiveBackend::Canvas(backend) => {
                 let packet = frame_packet_from_batches(
                     tick,

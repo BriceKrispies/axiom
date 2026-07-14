@@ -53,7 +53,8 @@ pub fn tangent_basis(dir: Vec3) -> (Vec3, Vec3) {
     // zero and its normalization is meaningless. Select a fixed equatorial east
     // there via a table index rather than a branch.
     let degenerate = east_raw.length() < 1.0e-5;
-    let east = [east_raw.normalize().unwrap_or(Vec3::UNIT_X), Vec3::UNIT_X][usize::from(degenerate)];
+    let east =
+        [east_raw.normalize().unwrap_or(Vec3::UNIT_X), Vec3::UNIT_X][usize::from(degenerate)];
     // north = dir × east completes a right-handed frame; already unit when `dir`
     // and `east` are unit and orthogonal, but normalize for numerical safety.
     let north = dir.cross(east).normalize().unwrap_or(Vec3::UNIT_Z);
@@ -135,9 +136,21 @@ mod tests {
 
     #[test]
     fn latitude_poles_and_equator() {
-        assert!(approx(latitude(Vec3::new(0.0, 1.0, 0.0)).get(), PI / 2.0, 1.0e-5));
-        assert!(approx(latitude(Vec3::new(0.0, -1.0, 0.0)).get(), -PI / 2.0, 1.0e-5));
-        assert!(approx(latitude(Vec3::new(1.0, 0.0, 0.0)).get(), 0.0, 1.0e-5));
+        assert!(approx(
+            latitude(Vec3::new(0.0, 1.0, 0.0)).get(),
+            PI / 2.0,
+            1.0e-5
+        ));
+        assert!(approx(
+            latitude(Vec3::new(0.0, -1.0, 0.0)).get(),
+            -PI / 2.0,
+            1.0e-5
+        ));
+        assert!(approx(
+            latitude(Vec3::new(1.0, 0.0, 0.0)).get(),
+            0.0,
+            1.0e-5
+        ));
     }
 
     #[test]
@@ -148,9 +161,21 @@ mod tests {
 
     #[test]
     fn longitude_axes() {
-        assert!(approx(longitude(Vec3::new(1.0, 0.0, 0.0)).get(), 0.0, 1.0e-5));
-        assert!(approx(longitude(Vec3::new(0.0, 0.0, 1.0)).get(), PI / 2.0, 1.0e-5));
-        assert!(approx(longitude(Vec3::new(-1.0, 0.0, 0.0)).get(), PI, 1.0e-5));
+        assert!(approx(
+            longitude(Vec3::new(1.0, 0.0, 0.0)).get(),
+            0.0,
+            1.0e-5
+        ));
+        assert!(approx(
+            longitude(Vec3::new(0.0, 0.0, 1.0)).get(),
+            PI / 2.0,
+            1.0e-5
+        ));
+        assert!(approx(
+            longitude(Vec3::new(-1.0, 0.0, 0.0)).get(),
+            PI,
+            1.0e-5
+        ));
     }
 
     #[test]
@@ -202,7 +227,10 @@ mod tests {
         assert_orthonormal(Vec3::new(0.0, 1.0, 0.0));
         assert_orthonormal(Vec3::new(0.0, -1.0, 0.0));
         let (east_north, _) = tangent_basis(Vec3::new(0.0, 1.0, 0.0));
-        assert!(vec_approx(east_north, Vec3::UNIT_X, 1.0e-6), "pole east is +X");
+        assert!(
+            vec_approx(east_north, Vec3::UNIT_X, 1.0e-6),
+            "pole east is +X"
+        );
     }
 
     #[test]
@@ -259,7 +287,10 @@ mod tests {
         for &uu in &samples {
             for &vv in &samples {
                 let p = unit_vec3(ratio(uu), ratio(vv));
-                assert!(approx(p.length(), 1.0, 1.0e-4), "must be unit length on the sphere");
+                assert!(
+                    approx(p.length(), 1.0, 1.0e-4),
+                    "must be unit length on the sphere"
+                );
             }
         }
     }
@@ -269,20 +300,39 @@ mod tests {
         // u = 1 -> z = +1, ring radius 0 -> the +Z pole regardless of azimuth;
         // u = 0 -> z = -1 -> the -Z pole. This exercises the `max(0, 1 - z^2)`
         // collapse at both extremes.
-        assert!(vec_approx(unit_vec3(ratio(1.0), ratio(0.3)), Vec3::new(0.0, 0.0, 1.0), 1.0e-5));
-        assert!(vec_approx(unit_vec3(ratio(0.0), ratio(0.7)), Vec3::new(0.0, 0.0, -1.0), 1.0e-5));
+        assert!(vec_approx(
+            unit_vec3(ratio(1.0), ratio(0.3)),
+            Vec3::new(0.0, 0.0, 1.0),
+            1.0e-5
+        ));
+        assert!(vec_approx(
+            unit_vec3(ratio(0.0), ratio(0.7)),
+            Vec3::new(0.0, 0.0, -1.0),
+            1.0e-5
+        ));
     }
 
     #[test]
     fn unit_vec3_maps_draws_to_height_and_azimuth() {
         // The equator (u = 0.5 -> z = 0) at azimuth 0 (v = 0) is +X; a quarter turn
         // (v = 0.25 -> θ = π/2) is +Y. Ties the two uniforms to z and θ concretely.
-        assert!(vec_approx(unit_vec3(ratio(0.5), ratio(0.0)), Vec3::new(1.0, 0.0, 0.0), 1.0e-5));
-        assert!(vec_approx(unit_vec3(ratio(0.5), ratio(0.25)), Vec3::new(0.0, 1.0, 0.0), 1.0e-5));
+        assert!(vec_approx(
+            unit_vec3(ratio(0.5), ratio(0.0)),
+            Vec3::new(1.0, 0.0, 0.0),
+            1.0e-5
+        ));
+        assert!(vec_approx(
+            unit_vec3(ratio(0.5), ratio(0.25)),
+            Vec3::new(0.0, 1.0, 0.0),
+            1.0e-5
+        ));
     }
 
     #[test]
     fn unit_vec3_is_deterministic() {
-        assert_eq!(unit_vec3(ratio(0.31), ratio(0.62)), unit_vec3(ratio(0.31), ratio(0.62)));
+        assert_eq!(
+            unit_vec3(ratio(0.31), ratio(0.62)),
+            unit_vec3(ratio(0.31), ratio(0.62))
+        );
     }
 }

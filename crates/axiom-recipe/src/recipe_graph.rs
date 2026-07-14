@@ -31,7 +31,11 @@ pub struct RecipeGraph {
 impl RecipeGraph {
     /// A new, empty recipe with the given id and content version.
     pub fn new(id: RecipeId, version: u32) -> Self {
-        Self { id, version, nodes: Vec::new() }
+        Self {
+            id,
+            version,
+            nodes: Vec::new(),
+        }
     }
 
     /// Append an operator node and return its [`NodeId`] (its index). Does not
@@ -208,11 +212,17 @@ mod tests {
 
     #[test]
     fn deserialize_rejects_garbage_and_illegal_graphs() {
-        assert_eq!(RecipeGraph::deserialize(&[0xFF]), Err(RecipeError::MalformedData));
+        assert_eq!(
+            RecipeGraph::deserialize(&[0xFF]),
+            Err(RecipeError::MalformedData)
+        );
         // A structurally-decodable but cyclic graph is rejected on validate.
         let mut bad = RecipeGraph::new(RecipeId::from_raw(1), 1);
         bad.add(0, vec![], vec![NodeId::from_raw(5)]);
         let bytes = bad.serialize();
-        assert_eq!(RecipeGraph::deserialize(&bytes), Err(RecipeError::CyclicInput));
+        assert_eq!(
+            RecipeGraph::deserialize(&bytes),
+            Err(RecipeError::CyclicInput)
+        );
     }
 }

@@ -505,7 +505,9 @@ mod live_present_tests {
     /// preference, the way a host adapter would, so the request-bound live path
     /// can be exercised end-to-end.
     fn host_request(power: axiom_host::HostPowerPreference) -> HostPresentationRequest {
-        use axiom_host::{HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostPresentMode};
+        use axiom_host::{
+            HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostPresentMode,
+        };
         use axiom_kernel::{KernelApi, Ratio};
         let host = HostApi::new();
         let kernel = KernelApi::new();
@@ -627,7 +629,10 @@ mod live_present_tests {
             .expect("native GPU adapter available");
         let center = pixel(&pixels, 32, 16, 16);
         assert!(center[0] > 200, "expected red: {center:?}");
-        assert!(center[1] < 40 && center[2] < 40, "expected pure red: {center:?}");
+        assert!(
+            center[1] < 40 && center[2] < 40,
+            "expected pure red: {center:?}"
+        );
     }
 
     #[test]

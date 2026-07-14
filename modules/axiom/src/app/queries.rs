@@ -194,14 +194,20 @@ mod tests {
                 let material = materials.add(Material::lit(Color::WHITE));
                 world.spawn((
                     Transform::from_translation(Vec3::new(0.0, 0.0, -3.0)),
-                    Renderable { mesh: cube, material },
+                    Renderable {
+                        mesh: cube,
+                        material,
+                    },
                     Bounds::new(Vec3::new(0.5, 0.5, 0.5)),
                 ));
             })
             .build();
         let reach = Meters::new(100.0).unwrap();
         let node = app.query::<Bounds>()[0].0;
-        assert_eq!(app.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach), None);
+        assert_eq!(
+            app.raycast(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), reach),
+            None
+        );
         assert!(app.set::<Transform>(node, Transform::from_translation(Vec3::new(3.0, 0.0, 0.0))));
         app.update_world_transforms();
         assert_eq!(
@@ -275,12 +281,18 @@ mod tests {
                 // A wall (untagged geometry) east, an enemy (player 0) north.
                 world.spawn((
                     Transform::from_translation(Vec3::new(3.0, 0.0, 0.0)),
-                    Renderable { mesh: cube, material },
+                    Renderable {
+                        mesh: cube,
+                        material,
+                    },
                     Bounds::new(Vec3::new(0.5, 0.5, 0.5)),
                 ));
                 world.spawn((
                     Transform::from_translation(Vec3::new(0.0, 0.0, -3.0)),
-                    Renderable { mesh: cube, material },
+                    Renderable {
+                        mesh: cube,
+                        material,
+                    },
                     Player::new(0),
                     Bounds::new(Vec3::new(0.5, 0.5, 0.5)),
                 ));
@@ -295,7 +307,10 @@ mod tests {
             .raycast_hit(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), reach)
             .expect("ray hits the enemy");
         assert_eq!(north_node, enemy);
-        assert!((north_point.z + 2.5).abs() < 1.0e-5, "entry on the near face");
+        assert!(
+            (north_point.z + 2.5).abs() < 1.0e-5,
+            "entry on the near face"
+        );
         assert_eq!(app.tag_of(north_node), Some(2));
 
         let (east_node, _point) = app

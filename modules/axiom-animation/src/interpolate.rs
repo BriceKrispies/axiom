@@ -65,8 +65,16 @@ mod tests {
 
     #[test]
     fn midpoint_interpolates_translation_and_scale() {
-        let a = Transform::new(Vec3::new(0.0, 0.0, 0.0), Quat::IDENTITY, Vec3::new(1.0, 1.0, 1.0));
-        let b = Transform::new(Vec3::new(4.0, 0.0, 0.0), Quat::IDENTITY, Vec3::new(3.0, 3.0, 3.0));
+        let a = Transform::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            Vec3::new(1.0, 1.0, 1.0),
+        );
+        let b = Transform::new(
+            Vec3::new(4.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            Vec3::new(3.0, 3.0, 3.0),
+        );
         let mid = lerp_transform(a, b, 0.5).unwrap();
         assert!(mid.translation.approx_eq(&Vec3::new(2.0, 0.0, 0.0), eps()));
         assert!(mid.scale.approx_eq(&Vec3::new(2.0, 2.0, 2.0), eps()));

@@ -61,9 +61,7 @@ impl Pose {
         (self.locals.len() == skeleton.bone_count())
             .then_some(())
             .ok_or_else(|| {
-                AnimationError::pose_length_mismatch(
-                    "pose bone count does not match the skeleton",
-                )
+                AnimationError::pose_length_mismatch("pose bone count does not match the skeleton")
             })
             .map(|()| {
                 let models = self.locals.iter().enumerate().fold(

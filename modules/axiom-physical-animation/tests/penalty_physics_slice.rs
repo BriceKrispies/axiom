@@ -45,8 +45,14 @@ fn the_pose_path_and_the_physics_path_coexist() {
 fn two_identical_penalty_simulations_yield_the_same_ball_velocity_after_strike() {
     let (a_auth, a_plan, mut a) = ready(0.7);
     let (b_auth, b_plan, mut b) = ready(0.7);
-    let af = (0..40).map(|t| a.advance(&a_auth, a_plan, Tick::new(t)).unwrap()).last().unwrap();
-    let bf = (0..40).map(|t| b.advance(&b_auth, b_plan, Tick::new(t)).unwrap()).last().unwrap();
+    let af = (0..40)
+        .map(|t| a.advance(&a_auth, a_plan, Tick::new(t)).unwrap())
+        .last()
+        .unwrap();
+    let bf = (0..40)
+        .map(|t| b.advance(&b_auth, b_plan, Tick::new(t)).unwrap())
+        .last()
+        .unwrap();
     assert_eq!(
         a.frame_ball_velocity(&af).unwrap(),
         b.frame_ball_velocity(&bf).unwrap(),
@@ -57,20 +63,38 @@ fn two_identical_penalty_simulations_yield_the_same_ball_velocity_after_strike()
 #[test]
 fn the_strike_drives_the_ball_toward_the_net_with_a_real_impulse() {
     let (authoring, plan, mut sim) = ready(0.7);
-    let strike = (0..39).map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap()).last().unwrap();
+    let strike = (0..39)
+        .map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap())
+        .last()
+        .unwrap();
     let dir_to_net = Vec3::new(0.0, 0.8, 8.0).subtract(Vec3::new(0.0, 0.0, 0.0));
     let vel = sim.frame_ball_velocity(&strike).unwrap();
-    assert!(sim.frame_ball_impulse(&strike).is_some(), "a real impulse was applied");
-    assert!(vel.dot(dir_to_net) > 0.0, "ball velocity points toward the net");
-    assert!(vel.length() > 1.0, "the strike imparted real speed (not a teleport)");
+    assert!(
+        sim.frame_ball_impulse(&strike).is_some(),
+        "a real impulse was applied"
+    );
+    assert!(
+        vel.dot(dir_to_net) > 0.0,
+        "ball velocity points toward the net"
+    );
+    assert!(
+        vel.length() > 1.0,
+        "the strike imparted real speed (not a teleport)"
+    );
 }
 
 #[test]
 fn stronger_power_yields_a_faster_ball() {
     let (la, lp, mut low) = ready(0.2);
     let (ha, hp, mut high) = ready(0.9);
-    let lf = (0..39).map(|t| low.advance(&la, lp, Tick::new(t)).unwrap()).last().unwrap();
-    let hf = (0..39).map(|t| high.advance(&ha, hp, Tick::new(t)).unwrap()).last().unwrap();
+    let lf = (0..39)
+        .map(|t| low.advance(&la, lp, Tick::new(t)).unwrap())
+        .last()
+        .unwrap();
+    let hf = (0..39)
+        .map(|t| high.advance(&ha, hp, Tick::new(t)).unwrap())
+        .last()
+        .unwrap();
     let slow = low.frame_ball_velocity(&lf).unwrap().length();
     let fast = high.frame_ball_velocity(&hf).unwrap().length();
     assert!(fast > slow, "more power -> faster ball");
@@ -79,8 +103,14 @@ fn stronger_power_yields_a_faster_ball() {
 #[test]
 fn the_plant_phase_holds_the_left_foot_body_at_the_plant_spot() {
     let (authoring, plan, mut sim) = ready(0.7);
-    let frame = (0..17).map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap()).last().unwrap();
-    let foot = sim.frame_body_transform(&frame, "left_foot").unwrap().translation;
+    let frame = (0..17)
+        .map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap())
+        .last()
+        .unwrap();
+    let foot = sim
+        .frame_body_transform(&frame, "left_foot")
+        .unwrap()
+        .translation;
     assert!(foot.distance(Vec3::new(0.25, 0.0, -0.1)) < 1.0e-4);
     assert!(sim.frame_foot_plant(&frame).is_some());
     assert_eq!(sim.frame_phase_name(&frame).as_deref(), Some("plant"));
@@ -89,10 +119,22 @@ fn the_plant_phase_holds_the_left_foot_body_at_the_plant_spot() {
 #[test]
 fn the_follow_through_drives_the_right_foot_past_the_ball() {
     let (authoring, plan, mut sim) = ready(0.7);
-    let frame = (0..51).map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap()).last().unwrap();
-    let foot = sim.frame_body_transform(&frame, "right_foot").unwrap().translation;
-    assert!(foot.z > 0.0, "the right foot has swung past the ball toward the net");
-    assert_eq!(sim.frame_phase_name(&frame).as_deref(), Some("follow_through"));
+    let frame = (0..51)
+        .map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap())
+        .last()
+        .unwrap();
+    let foot = sim
+        .frame_body_transform(&frame, "right_foot")
+        .unwrap()
+        .translation;
+    assert!(
+        foot.z > 0.0,
+        "the right foot has swung past the ball toward the net"
+    );
+    assert_eq!(
+        sim.frame_phase_name(&frame).as_deref(),
+        Some("follow_through")
+    );
 }
 
 #[test]

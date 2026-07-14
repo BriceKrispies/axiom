@@ -15,13 +15,19 @@ fn rgba(r: f32, g: f32, b: f32, a: f32) -> Rgba {
 }
 
 fn header(submission: u32, layer: i32, alpha: f32) -> (u32, Mat3, Common2d) {
-    (submission, Mat3::IDENTITY, Common2d::new(layer, ratio(alpha)))
+    (
+        submission,
+        Mat3::IDENTITY,
+        Common2d::new(layer, ratio(alpha)),
+    )
 }
 
 /// The `VERTEX_FLOATS` floats of vertex `v` (0..4) of quad `q`.
 fn vert(geo: &Draw2dGeometry, q: usize, v: usize) -> [f32; VERTEX_FLOATS] {
     let base = (q * VERTS_PER_QUAD + v) * VERTEX_FLOATS;
-    geo.vertices()[base..base + VERTEX_FLOATS].try_into().unwrap()
+    geo.vertices()[base..base + VERTEX_FLOATS]
+        .try_into()
+        .unwrap()
 }
 
 #[test]
@@ -58,8 +64,10 @@ fn rect_stroke_field_is_edge_distance_over_width() {
     list.push_command(Draw2dCommand::rect(
         header(0, 0, 1.0),
         Rect::new(Vec2::ZERO, Vec2::new(8.0, 8.0)),
-        Fill2d::color(rgba(0.0, 0.0, 1.0, 1.0))
-            .with_stroke(Stroke2d::new(rgba(1.0, 0.0, 0.0, 1.0), Meters::new(2.0).unwrap())),
+        Fill2d::color(rgba(0.0, 0.0, 1.0, 1.0)).with_stroke(Stroke2d::new(
+            rgba(1.0, 0.0, 0.0, 1.0),
+            Meters::new(2.0).unwrap(),
+        )),
     ));
     list.sort_commands();
     let geo = build_geometry(&list, 16, 16, &Draw2dTextureSizes::default());
@@ -110,7 +118,10 @@ fn linear_gradient_fill_binds_a_ramp_with_affine_uvs() {
     assert_eq!(geo.sources()[0], QuadSource::Sprite(ramp_id));
     let textures = geo.gradient_textures();
     assert_eq!(textures.len(), 1);
-    assert_eq!((textures[0].0, textures[0].1, textures[0].2), (ramp_id, RAMP_N, 1));
+    assert_eq!(
+        (textures[0].0, textures[0].1, textures[0].2),
+        (ramp_id, RAMP_N, 1)
+    );
     // Colour is white (the ramp carries the colour); UV.x spans 0→1 across the
     // gradient axis (left corner 0, right corner 1).
     let tl = vert(&geo, 0, 0);
@@ -158,9 +169,15 @@ fn path_fan_triangulates_into_barycentric_quads_plus_stroke() {
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::path(
         header(0, 0, 1.0),
-        vec![Vec2::new(0.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(8.0, 8.0)],
-        Fill2d::color(rgba(0.2, 0.4, 0.6, 1.0))
-            .with_stroke(Stroke2d::new(rgba(1.0, 1.0, 1.0, 1.0), Meters::new(1.0).unwrap())),
+        vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(8.0, 0.0),
+            Vec2::new(8.0, 8.0),
+        ],
+        Fill2d::color(rgba(0.2, 0.4, 0.6, 1.0)).with_stroke(Stroke2d::new(
+            rgba(1.0, 1.0, 1.0, 1.0),
+            Meters::new(1.0).unwrap(),
+        )),
         true,
     ));
     list.sort_commands();
@@ -185,9 +202,15 @@ fn open_path_emits_no_fill_and_omits_the_closing_edge() {
     let mut list = Draw2dList::default();
     list.push_command(Draw2dCommand::path(
         header(0, 0, 1.0),
-        vec![Vec2::new(0.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(8.0, 8.0)],
-        Fill2d::color(rgba(0.2, 0.4, 0.6, 1.0))
-            .with_stroke(Stroke2d::new(rgba(1.0, 1.0, 1.0, 1.0), Meters::new(2.0).unwrap())),
+        vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(8.0, 0.0),
+            Vec2::new(8.0, 8.0),
+        ],
+        Fill2d::color(rgba(0.2, 0.4, 0.6, 1.0)).with_stroke(Stroke2d::new(
+            rgba(1.0, 1.0, 1.0, 1.0),
+            Meters::new(2.0).unwrap(),
+        )),
         false,
     ));
     list.sort_commands();
@@ -210,7 +233,10 @@ fn degenerate_path_under_three_points_emits_only_strokes() {
     list.push_command(Draw2dCommand::path(
         header(0, 0, 1.0),
         vec![Vec2::new(1.0, 1.0), Vec2::new(5.0, 1.0)],
-        Fill2d::stroked(Stroke2d::new(rgba(1.0, 0.0, 0.0, 1.0), Meters::new(1.0).unwrap())),
+        Fill2d::stroked(Stroke2d::new(
+            rgba(1.0, 0.0, 0.0, 1.0),
+            Meters::new(1.0).unwrap(),
+        )),
         true,
     ));
     list.sort_commands();
@@ -242,24 +268,47 @@ fn text_lays_out_glyphs_as_sprite_quads_against_the_atlas() {
         header(0, 0, 1.0),
         GlyphRun::new(
             vec![
-                Glyph2d::new(Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)), Meters::new(8.0).unwrap()),
-                Glyph2d::new(Rect::new(Vec2::new(8.0, 0.0), Vec2::new(8.0, 16.0)), Meters::new(8.0).unwrap()),
+                Glyph2d::new(
+                    Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)),
+                    Meters::new(8.0).unwrap(),
+                ),
+                Glyph2d::new(
+                    Rect::new(Vec2::new(8.0, 0.0), Vec2::new(8.0, 16.0)),
+                    Meters::new(8.0).unwrap(),
+                ),
             ],
             Meters::new(16.0).unwrap(),
         ),
-        TextDraw2d::new(FontHandle::from_raw(1), rgba(0.0, 1.0, 0.0, 1.0), TextAlign::LEFT),
+        TextDraw2d::new(
+            FontHandle::from_raw(1),
+            rgba(0.0, 1.0, 0.0, 1.0),
+            TextAlign::LEFT,
+        ),
     ));
     list.sort_commands();
     let sizes = Draw2dTextureSizes::from_textures(&[(atlas.raw(), 128, 96, vec![0; 128 * 96 * 4])]);
     let geo = build_geometry(&list, 64, 64, &sizes);
     // Two glyphs → two sprite quads against the atlas, tinted green.
     assert_eq!(geo.quad_count(), 2);
-    assert_eq!(geo.sources(), &[QuadSource::Sprite(atlas.raw()), QuadSource::Sprite(atlas.raw())]);
+    assert_eq!(
+        geo.sources(),
+        &[
+            QuadSource::Sprite(atlas.raw()),
+            QuadSource::Sprite(atlas.raw())
+        ]
+    );
     // Glyph 0 at pen x=0 (left aligned): its dest TL is the origin.
     assert_eq!([vert(&geo, 0, 0)[0], vert(&geo, 0, 0)[1]], [0.0, 0.0]);
     // Glyph 1 advanced by 8 → its dest TL is x=8.
     assert!((vert(&geo, 1, 0)[0] - 8.0).abs() < 1e-4);
-    assert_eq!([vert(&geo, 0, 0)[4], vert(&geo, 0, 0)[5], vert(&geo, 0, 0)[6]], [0.0, 1.0, 0.0]);
+    assert_eq!(
+        [
+            vert(&geo, 0, 0)[4],
+            vert(&geo, 0, 0)[5],
+            vert(&geo, 0, 0)[6]
+        ],
+        [0.0, 1.0, 0.0]
+    );
 }
 
 #[test]
@@ -267,7 +316,10 @@ fn text_alignment_shifts_the_pen_start() {
     let atlas = FontHandle::from_raw(1).atlas_texture();
     let run = || {
         GlyphRun::new(
-            vec![Glyph2d::new(Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)), Meters::new(8.0).unwrap())],
+            vec![Glyph2d::new(
+                Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)),
+                Meters::new(8.0).unwrap(),
+            )],
             Meters::new(16.0).unwrap(),
         )
     };
@@ -295,10 +347,17 @@ fn text_with_unloaded_atlas_emits_no_quads() {
     list.push_command(Draw2dCommand::text(
         header(0, 0, 1.0),
         GlyphRun::new(
-            vec![Glyph2d::new(Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)), Meters::new(8.0).unwrap())],
+            vec![Glyph2d::new(
+                Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)),
+                Meters::new(8.0).unwrap(),
+            )],
             Meters::new(16.0).unwrap(),
         ),
-        TextDraw2d::new(FontHandle::from_raw(1), rgba(1.0, 1.0, 1.0, 1.0), TextAlign::LEFT),
+        TextDraw2d::new(
+            FontHandle::from_raw(1),
+            rgba(1.0, 1.0, 1.0, 1.0),
+            TextAlign::LEFT,
+        ),
     ));
     list.sort_commands();
     // No atlas loaded → the sprite path skips every glyph.
@@ -313,7 +372,11 @@ fn empty_text_run_emits_nothing() {
     list.push_command(Draw2dCommand::text(
         header(0, 0, 1.0),
         GlyphRun::new(vec![], Meters::new(16.0).unwrap()),
-        TextDraw2d::new(FontHandle::from_raw(1), rgba(1.0, 1.0, 1.0, 1.0), TextAlign::LEFT),
+        TextDraw2d::new(
+            FontHandle::from_raw(1),
+            rgba(1.0, 1.0, 1.0, 1.0),
+            TextAlign::LEFT,
+        ),
     ));
     list.sort_commands();
     let sizes = Draw2dTextureSizes::from_textures(&[(atlas.raw(), 128, 96, vec![0; 128 * 96 * 4])]);
@@ -328,8 +391,10 @@ fn circle_emits_a_conic_fill_and_conic_stroke() {
         header(0, 0, 1.0),
         Vec2::new(4.0, 4.0),
         Meters::new(2.0).unwrap(),
-        Fill2d::color(rgba(1.0, 0.0, 0.0, 1.0))
-            .with_stroke(Stroke2d::new(rgba(0.0, 1.0, 0.0, 1.0), Meters::new(1.0).unwrap())),
+        Fill2d::color(rgba(1.0, 0.0, 0.0, 1.0)).with_stroke(Stroke2d::new(
+            rgba(0.0, 1.0, 0.0, 1.0),
+            Meters::new(1.0).unwrap(),
+        )),
     ));
     list.sort_commands();
     let geo = build_geometry(&list, 8, 8, &Draw2dTextureSizes::default());
@@ -478,7 +543,11 @@ fn sprite_emits_a_textured_quad_with_normalised_uvs() {
         false,
         false,
     );
-    list.push_command(Draw2dCommand::sprite(header(0, 0, 1.0), TextureId::from_raw(7), opts));
+    list.push_command(Draw2dCommand::sprite(
+        header(0, 0, 1.0),
+        TextureId::from_raw(7),
+        opts,
+    ));
     list.sort_commands();
     let sizes = Draw2dTextureSizes::from_textures(&[(7, 2, 2, vec![0; 16])]);
     let geo = build_geometry(&list, 8, 8, &sizes);
@@ -500,7 +569,11 @@ fn sprite_flip_x_and_y_swap_the_uv_corners() {
         true,
         true,
     );
-    list.push_command(Draw2dCommand::sprite(header(0, 0, 1.0), TextureId::from_raw(7), opts));
+    list.push_command(Draw2dCommand::sprite(
+        header(0, 0, 1.0),
+        TextureId::from_raw(7),
+        opts,
+    ));
     list.sort_commands();
     let sizes = Draw2dTextureSizes::from_textures(&[(7, 2, 2, vec![0; 16])]);
     let geo = build_geometry(&list, 8, 8, &sizes);
@@ -518,7 +591,11 @@ fn sprite_tint_and_alpha_fold_into_the_colour() {
         false,
         false,
     );
-    list.push_command(Draw2dCommand::sprite(header(0, 0, 0.5), TextureId::from_raw(9), opts));
+    list.push_command(Draw2dCommand::sprite(
+        header(0, 0, 0.5),
+        TextureId::from_raw(9),
+        opts,
+    ));
     list.sort_commands();
     let sizes = Draw2dTextureSizes::from_textures(&[(9, 1, 1, vec![255; 4])]);
     let geo = build_geometry(&list, 4, 4, &sizes);
@@ -535,7 +612,11 @@ fn sprite_with_unknown_texture_emits_no_quad() {
         false,
         false,
     );
-    list.push_command(Draw2dCommand::sprite(header(0, 0, 1.0), TextureId::from_raw(404), opts));
+    list.push_command(Draw2dCommand::sprite(
+        header(0, 0, 1.0),
+        TextureId::from_raw(404),
+        opts,
+    ));
     list.sort_commands();
     let geo = build_geometry(&list, 8, 8, &Draw2dTextureSizes::default());
     assert_eq!(geo.quad_count(), 0);

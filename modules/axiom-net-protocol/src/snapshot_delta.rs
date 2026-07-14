@@ -116,14 +116,20 @@ fn build(
         .ok_or_else(|| delta_error("delta tail length is inconsistent with the declared length"))
         .map(|()| {
             let mut result = base[..common].to_vec();
-            changes.iter().for_each(|&(offset, byte)| result[offset] = byte);
+            changes
+                .iter()
+                .for_each(|&(offset, byte)| result[offset] = byte);
             result.extend_from_slice(tail);
             result
         })
 }
 
 fn delta_error(message: &'static str) -> KernelError {
-    KernelError::new(KernelErrorScope::Message, KernelErrorCode::OutOfBounds, message)
+    KernelError::new(
+        KernelErrorScope::Message,
+        KernelErrorCode::OutOfBounds,
+        message,
+    )
 }
 
 #[cfg(test)]
@@ -132,7 +138,11 @@ mod tests {
 
     fn round_trip(base: &[u8], new: &[u8]) {
         let blob = diff(base, new);
-        assert_eq!(apply(base, &blob).unwrap(), new, "base={base:?} new={new:?}");
+        assert_eq!(
+            apply(base, &blob).unwrap(),
+            new,
+            "base={base:?} new={new:?}"
+        );
     }
 
     #[test]
@@ -150,7 +160,10 @@ mod tests {
     fn an_unchanged_payload_diffs_to_a_tiny_blob() {
         let payload = vec![7u8; 4096];
         let blob = diff(&payload, &payload);
-        assert!(blob.len() < payload.len(), "delta must beat the full payload");
+        assert!(
+            blob.len() < payload.len(),
+            "delta must beat the full payload"
+        );
         assert_eq!(apply(&payload, &blob).unwrap(), payload);
     }
 

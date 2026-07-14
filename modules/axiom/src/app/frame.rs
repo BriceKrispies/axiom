@@ -247,9 +247,15 @@ mod tests {
         // before presenting must see the *new* camera in the rendered frame — not
         // the camera as of the last fixed tick.
         let mut app = render_app();
-        app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)));
+        app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+        );
         let near = app.tick(0).camera_view_proj();
-        app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 40.0)));
+        app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 40.0)),
+        );
         let far = app.render(1).camera_view_proj();
         assert_ne!(
             near, far,
@@ -260,11 +266,17 @@ mod tests {
     #[test]
     fn render_only_does_not_advance_the_simulation_and_is_idempotent() {
         let mut app = render_app();
-        app.set_camera(camera(), Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)));
+        app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+        );
         let before = app.snapshot_sim();
         let first = app.render(7);
         let second = app.render(7);
-        assert_eq!(first, second, "render is a pure function of the scene at a tick");
+        assert_eq!(
+            first, second,
+            "render is a pure function of the scene at a tick"
+        );
         assert_eq!(
             before,
             app.snapshot_sim(),

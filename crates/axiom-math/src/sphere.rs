@@ -2,9 +2,9 @@
 
 use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult};
 
+use crate::aabb::Aabb;
 use crate::approx_eq::ApproxEq;
 use crate::epsilon::Epsilon;
-use crate::aabb::Aabb;
 use crate::math_error::MathError;
 use crate::math_result::MathResult;
 use crate::ray::Ray;

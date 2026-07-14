@@ -117,7 +117,11 @@ pub struct ResolvedConstraint {
 
 impl ResolvedConstraint {
     /// Construct a resolved constraint.
-    pub(crate) fn new(kind: ConstraintKind, effector: Option<EffectorId>, target: Option<Vec3>) -> Self {
+    pub(crate) fn new(
+        kind: ConstraintKind,
+        effector: Option<EffectorId>,
+        target: Option<Vec3>,
+    ) -> Self {
         ResolvedConstraint {
             kind,
             effector,
@@ -186,23 +190,28 @@ mod tests {
             Some(EffectorId::from_raw(0)),
             Some(Vec3::new(1.0, 0.0, 0.0)),
         );
-        assert_eq!(pinned.pin(), Some((EffectorId::from_raw(0), Vec3::new(1.0, 0.0, 0.0))));
+        assert_eq!(
+            pinned.pin(),
+            Some((EffectorId::from_raw(0), Vec3::new(1.0, 0.0, 0.0)))
+        );
 
         // A non-pinning kind never contributes a pin.
-        let gaze = ResolvedConstraint::new(
-            ConstraintKind::KeepGazeOnTarget,
-            None,
-            Some(Vec3::ZERO),
-        );
+        let gaze =
+            ResolvedConstraint::new(ConstraintKind::KeepGazeOnTarget, None, Some(Vec3::ZERO));
         assert_eq!(gaze.pin(), None);
 
         // A pinning kind missing an endpoint yields no pin.
-        let half = ResolvedConstraint::new(ConstraintKind::PinEffectorToTarget, None, Some(Vec3::ZERO));
+        let half =
+            ResolvedConstraint::new(ConstraintKind::PinEffectorToTarget, None, Some(Vec3::ZERO));
         assert_eq!(half.pin(), None);
         assert_eq!(half.gaze_target(), None);
 
         // A gaze constraint yields its target; a non-gaze one does not.
-        let gaze_c = ResolvedConstraint::new(ConstraintKind::KeepGazeOnTarget, None, Some(Vec3::new(0.0, 1.0, 2.0)));
+        let gaze_c = ResolvedConstraint::new(
+            ConstraintKind::KeepGazeOnTarget,
+            None,
+            Some(Vec3::new(0.0, 1.0, 2.0)),
+        );
         assert_eq!(gaze_c.gaze_target(), Some(Vec3::new(0.0, 1.0, 2.0)));
         assert_eq!(pinned.gaze_target(), None);
     }

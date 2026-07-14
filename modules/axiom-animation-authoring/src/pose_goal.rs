@@ -177,7 +177,14 @@ impl PoseGoal {
     /// TAU·steps·progress + phase_offset)`. The three cycle parameters ride in
     /// `euler = (phase_offset, steps, bias)`; `amount` carries the `amplitude`; `axis`
     /// is the canonical unit axis (`+X` fore/aft swing, `+Z` lateral abduction).
-    pub(crate) fn run_cycle(joint: &str, amplitude: f32, phase_offset: f32, steps: f32, bias: f32, axis: Vec3) -> Self {
+    pub(crate) fn run_cycle(
+        joint: &str,
+        amplitude: f32,
+        phase_offset: f32,
+        steps: f32,
+        bias: f32,
+        axis: Vec3,
+    ) -> Self {
         PoseGoal {
             kind: GoalKind::RunCycle,
             joint_name: Some(joint.to_string()),
@@ -245,7 +252,13 @@ pub struct ResolvedGoal {
 
 impl ResolvedGoal {
     /// Construct a resolved goal.
-    pub(crate) fn new(kind: GoalKind, joint: JointId, target: Vec3, amount: f32, euler: Vec3) -> Self {
+    pub(crate) fn new(
+        kind: GoalKind,
+        joint: JointId,
+        target: Vec3,
+        amount: f32,
+        euler: Vec3,
+    ) -> Self {
         ResolvedGoal {
             kind,
             joint,

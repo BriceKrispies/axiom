@@ -129,7 +129,10 @@ mod tests {
 
     #[test]
     fn the_two_profiles_differ() {
-        assert_ne!(AgentProfile::debug_perfect(), AgentProfile::human_like_default());
+        assert_ne!(
+            AgentProfile::debug_perfect(),
+            AgentProfile::human_like_default()
+        );
     }
 
     #[test]
@@ -144,8 +147,14 @@ mod tests {
             frozen.max_turn_milli_degrees_per_tick(),
             base.max_turn_milli_degrees_per_tick()
         );
-        assert_eq!(frozen.aim_error_milli_degrees(), base.aim_error_milli_degrees());
-        assert_eq!(frozen.movement_error_microunits(), base.movement_error_microunits());
+        assert_eq!(
+            frozen.aim_error_milli_degrees(),
+            base.aim_error_milli_degrees()
+        );
+        assert_eq!(
+            frozen.movement_error_microunits(),
+            base.movement_error_microunits()
+        );
         assert_eq!(base.with_action_budget(2).max_actions_per_tick(), 2);
     }
 

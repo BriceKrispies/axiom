@@ -71,7 +71,10 @@ fn rt_step(tick: u64) -> RuntimeStep {
 /// the predicting client.
 fn apply_and_step(world: &mut World, payload: &[u8], tick: u64) {
     let (dx, dy) = decode(payload);
-    world.0.apply_impulse(world.1, Vec3::new(dx, dy, 0.0)).unwrap();
+    world
+        .0
+        .apply_impulse(world.1, Vec3::new(dx, dy, 0.0))
+        .unwrap();
     world.0.step(rt_step(tick)).unwrap();
 }
 

@@ -92,7 +92,9 @@ pub(crate) fn text(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
             // Unpack the characters into an owned glyph-id list (blank for space /
             // unknown), so the per-pixel closure needs no parameter access.
             let ids: Vec<usize> = (0..count)
-                .map(|k| glyph_index(((p[(6 + k / 4) as usize].as_int() >> (8 * (k % 4))) & 0xFF) as u8))
+                .map(|k| {
+                    glyph_index(((p[(6 + k / 4) as usize].as_int() >> (8 * (k % 4))) & 0xFF) as u8)
+                })
                 .collect();
             let text_w = count * GLYPH_W * scale;
             let text_h = GLYPH_H * scale;
@@ -133,7 +135,9 @@ mod tests {
     fn run(params: Vec<Param>) -> Option<TextureBuffer> {
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
         g.add(TextureOp::Text as u16, params, vec![]);
-        ProcCore::new().execute(&g, 3, &SpaceApi::root(), texture_eval).ok()
+        ProcCore::new()
+            .execute(&g, 3, &SpaceApi::root(), texture_eval)
+            .ok()
     }
 
     fn c(packed: u32) -> Param {
@@ -155,9 +159,24 @@ mod tests {
     #[test]
     fn missing_header_or_packed_words_fail() {
         // Fewer than the six-word header.
-        assert!(run(vec![Param::int(8), Param::int(8), c(FG), c(BG), Param::int(1)]).is_none());
+        assert!(run(vec![
+            Param::int(8),
+            Param::int(8),
+            c(FG),
+            c(BG),
+            Param::int(1)
+        ])
+        .is_none());
         // Header claims four chars but no packed word follows.
-        assert!(run(vec![Param::int(8), Param::int(8), c(FG), c(BG), Param::int(1), Param::int(4)]).is_none());
+        assert!(run(vec![
+            Param::int(8),
+            Param::int(8),
+            c(FG),
+            c(BG),
+            Param::int(1),
+            Param::int(4)
+        ])
+        .is_none());
     }
 
     #[test]
@@ -165,7 +184,15 @@ mod tests {
         // "A1@" at scale 1 on a 32×16 canvas: 'A' (a letter) and '1' (a digit)
         // draw; '@' (neither) is blank — this one string exercises all three
         // glyph_index branches, plus lit / spacing / out-of-block / past-end paths.
-        let params = vec![Param::int(32), Param::int(16), c(FG), c(BG), Param::int(1), Param::int(3), word(b"A1@")];
+        let params = vec![
+            Param::int(32),
+            Param::int(16),
+            c(FG),
+            c(BG),
+            Param::int(1),
+            Param::int(3),
+            word(b"A1@"),
+        ];
         let t = run(params.clone()).unwrap();
         assert_eq!(t, run(params).unwrap(), "deterministic");
         let mut any_fg = false;
@@ -182,7 +209,16 @@ mod tests {
     #[test]
     fn scale_enlarges_and_glyph_index_maps_the_ranges() {
         // A 2× 'Z' still renders (covers scale > 1 and the alphabet upper bound).
-        let t = run(vec![Param::int(24), Param::int(20), c(FG), c(BG), Param::int(2), Param::int(1), word(b"Z")]).unwrap();
+        let t = run(vec![
+            Param::int(24),
+            Param::int(20),
+            c(FG),
+            c(BG),
+            Param::int(2),
+            Param::int(1),
+            word(b"Z"),
+        ])
+        .unwrap();
         let lit = (0..20).any(|y| (0..24).any(|x| t.texel(x, y) == [255, 255, 255, 255]));
         assert!(lit, "a scaled glyph draws");
         // Direct glyph-id checks: A→1, Z→26, 0→27, 9→36, space→0, symbol→0.

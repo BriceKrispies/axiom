@@ -350,7 +350,9 @@ mod tests {
         shape: PhysicsColliderShape,
         trigger: bool,
     ) -> PhysicsColliderHandle {
-        world.attach_collider(body, shape, material(), trigger).unwrap()
+        world
+            .attach_collider(body, shape, material(), trigger)
+            .unwrap()
     }
 
     fn far() -> Meters {
@@ -367,7 +369,12 @@ mod tests {
         use axiom_kernel::{FrameIndex, Tick};
         use axiom_runtime::RuntimeStep;
         world
-            .step(RuntimeStep::new(FrameIndex::new(0), Tick::new(0), 16_666_667, 0))
+            .step(RuntimeStep::new(
+                FrameIndex::new(0),
+                Tick::new(0),
+                16_666_667,
+                0,
+            ))
             .unwrap();
     }
 
@@ -390,15 +397,34 @@ mod tests {
         let b = spawn(&mut w, Vec3::ZERO);
         attach(&mut w, b, sphere(1.0), false);
         // From (-10,0,0) along +X the entry is at x = -1, i.e. distance 9 < 100.
-        assert_eq!(PhysicsQuery::new(&w).raycast(Vec3::new(-10.0, 0.0, 0.0), Vec3::UNIT_X, far()), Some(b));
+        assert_eq!(
+            PhysicsQuery::new(&w).raycast(Vec3::new(-10.0, 0.0, 0.0), Vec3::UNIT_X, far()),
+            Some(b)
+        );
         // Exact: a max_distance of 9 still reaches the entry (9 <= 9), 8 does not.
-        assert_eq!(PhysicsQuery::new(&w).raycast(Vec3::new(-10.0, 0.0, 0.0), Vec3::UNIT_X, Meters::new(9.0).unwrap()), Some(b));
-        assert!(PhysicsQuery::new(&w).raycast(Vec3::new(-10.0, 0.0, 0.0), Vec3::UNIT_X, Meters::new(8.0).unwrap()).is_none());
+        assert_eq!(
+            PhysicsQuery::new(&w).raycast(
+                Vec3::new(-10.0, 0.0, 0.0),
+                Vec3::UNIT_X,
+                Meters::new(9.0).unwrap()
+            ),
+            Some(b)
+        );
+        assert!(PhysicsQuery::new(&w)
+            .raycast(
+                Vec3::new(-10.0, 0.0, 0.0),
+                Vec3::UNIT_X,
+                Meters::new(8.0).unwrap()
+            )
+            .is_none());
         // Origin inside the sphere clamps the entry distance to 0 (still a hit).
         let mut wi = world();
         let bi = spawn(&mut wi, Vec3::ZERO);
         attach(&mut wi, bi, sphere(2.0), false);
-        assert_eq!(PhysicsQuery::new(&wi).raycast(Vec3::ZERO, Vec3::UNIT_X, Meters::new(0.0).unwrap()), Some(bi));
+        assert_eq!(
+            PhysicsQuery::new(&wi).raycast(Vec3::ZERO, Vec3::UNIT_X, Meters::new(0.0).unwrap()),
+            Some(bi)
+        );
     }
 
     #[test]
@@ -501,7 +527,9 @@ mod tests {
         attach(&mut w, b, sphere(1.0), false);
         let (o, d) = ray_x();
         // Entry at x = 49 (distance 59): a max of 5 rejects it, 100 accepts it.
-        assert!(PhysicsQuery::new(&w).raycast(o, d, Meters::new(5.0).unwrap()).is_none());
+        assert!(PhysicsQuery::new(&w)
+            .raycast(o, d, Meters::new(5.0).unwrap())
+            .is_none());
         assert_eq!(PhysicsQuery::new(&w).raycast(o, d, far()), Some(b));
     }
 
@@ -511,7 +539,11 @@ mod tests {
         let b = spawn(&mut w, Vec3::ZERO);
         attach(&mut w, b, sphere(1.0), true); // trigger
         let (o, d) = ray_x();
-        assert_eq!(PhysicsQuery::new(&w).raycast(o, d, far()), None, "raycast excludes triggers");
+        assert_eq!(
+            PhysicsQuery::new(&w).raycast(o, d, far()),
+            None,
+            "raycast excludes triggers"
+        );
         assert_eq!(
             PhysicsQuery::new(&w).overlap_sphere(Vec3::ZERO, Meters::new(0.5).unwrap()),
             vec![b],
@@ -540,7 +572,9 @@ mod tests {
         let b = spawn(&mut w, Vec3::ZERO);
         attach(&mut w, b, sphere(1.0), false);
         let (o, _) = ray_x();
-        assert!(PhysicsQuery::new(&w).raycast(o, Vec3::ZERO, far()).is_none());
+        assert!(PhysicsQuery::new(&w)
+            .raycast(o, Vec3::ZERO, far())
+            .is_none());
     }
 
     #[test]
@@ -609,7 +643,8 @@ mod tests {
             .overlap_sphere(Vec3::new(2.2, 2.2, 2.2), Meters::new(1.0).unwrap())
             .is_empty());
         assert_eq!(
-            PhysicsQuery::new(&w).overlap_sphere(Vec3::new(1.5, 1.5, 1.5), Meters::new(1.0).unwrap()),
+            PhysicsQuery::new(&w)
+                .overlap_sphere(Vec3::new(1.5, 1.5, 1.5), Meters::new(1.0).unwrap()),
             vec![b]
         );
     }
@@ -625,7 +660,8 @@ mod tests {
             .overlap_sphere(Vec3::new(0.0, 5.0, 0.0), Meters::new(1.0).unwrap())
             .is_empty());
         assert_eq!(
-            PhysicsQuery::new(&w).overlap_sphere(Vec3::new(0.0, 0.5, 0.0), Meters::new(1.0).unwrap()),
+            PhysicsQuery::new(&w)
+                .overlap_sphere(Vec3::new(0.0, 0.5, 0.0), Meters::new(1.0).unwrap()),
             vec![p]
         );
     }

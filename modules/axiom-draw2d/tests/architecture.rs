@@ -112,11 +112,13 @@ fn assert_absent(forbidden: &[&str], why: &str) {
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
-    assert!(manifest.is_file(), "expected modules/axiom-draw2d/module.toml");
+    assert!(
+        manifest.is_file(),
+        "expected modules/axiom-draw2d/module.toml"
+    );
     let stripped = strip_comments_and_strings(&fs::read_to_string(&manifest).unwrap());
     assert!(
         stripped.contains("allowed_modules = []"),
@@ -152,7 +154,6 @@ fn lib_rs_exports_exactly_one_facade_plus_its_id_vocabulary() {
         "axiom-draw2d's lib.rs must expose the Draw2dApi facade plus only its `ids` vocabulary"
     );
 }
-
 
 #[test]
 fn draw2d_imports_only_legal_layers() {
@@ -192,7 +193,10 @@ fn draw2d_imports_no_other_modules() {
         .map(|e| e.file_name().to_string_lossy().replace('-', "_"))
         .filter(|name| name != "axiom_draw2d")
         .collect();
-    assert!(!other_modules.is_empty(), "expected sibling modules to exist");
+    assert!(
+        !other_modules.is_empty(),
+        "expected sibling modules to exist"
+    );
     let mut violations = Vec::new();
     for path in source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -201,7 +205,11 @@ fn draw2d_imports_no_other_modules() {
             .collect();
         for other in &other_modules {
             if tokens.contains(other.as_str()) {
-                violations.push(format!("{}: references other module `{}`", path.display(), other));
+                violations.push(format!(
+                    "{}: references other module `{}`",
+                    path.display(),
+                    other
+                ));
             }
         }
     }
@@ -211,7 +219,6 @@ fn draw2d_imports_no_other_modules() {
         violations.join("\n")
     );
 }
-
 
 #[test]
 fn no_browser_or_js_bindgen_apis() {
@@ -256,7 +263,15 @@ fn no_randomness() {
 #[test]
 fn no_console_printing_or_placeholder_macros() {
     assert_absent(
-        &["println!", "eprintln!", "print!", "eprint!", "dbg!", "todo!", "unimplemented!"],
+        &[
+            "println!",
+            "eprintln!",
+            "print!",
+            "eprint!",
+            "dbg!",
+            "todo!",
+            "unimplemented!",
+        ],
         "axiom-draw2d must not print or contain placeholder architecture",
     );
 }
@@ -289,7 +304,10 @@ fn no_junk_drawer_modules() {
     for path in source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc", "shared", "prelude"] {
-            assert_ne!(name, banned, "axiom-draw2d must not have a `{banned}` module");
+            assert_ne!(
+                name, banned,
+                "axiom-draw2d must not have a `{banned}` module"
+            );
         }
     }
 }
@@ -318,7 +336,6 @@ fn every_source_module_is_declared_in_lib_rs() {
         missing.join("\n")
     );
 }
-
 
 /// The whole surface is presentation class (SPEC-04 §6/§17.5): nothing it
 /// produces may be read back into a sim-class API. Structurally, the facade's

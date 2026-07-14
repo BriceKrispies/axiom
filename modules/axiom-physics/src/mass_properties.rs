@@ -99,8 +99,13 @@ impl MassProperties {
 /// A per-shape diagonal moment of inertia for a solid body of `mass`, indexed by
 /// the shape's kind so the dispatch is a function table, not a `match`.
 fn diagonal_moment(mass: f32, shape: PhysicsColliderShape) -> Vec3 {
-    const TABLE: [fn(f32, PhysicsColliderShape) -> Vec3; 5] =
-        [sphere_moment, box_moment, capsule_moment, plane_moment, heightfield_moment];
+    const TABLE: [fn(f32, PhysicsColliderShape) -> Vec3; 5] = [
+        sphere_moment,
+        box_moment,
+        capsule_moment,
+        plane_moment,
+        heightfield_moment,
+    ];
     TABLE[shape.kind().index()](mass, shape)
 }
 
@@ -200,7 +205,10 @@ mod tests {
         assert!(MassProperties::dynamic(Ratio::new(0.0).unwrap()).is_err());
         assert!(MassProperties::dynamic(Ratio::new(-2.0).unwrap()).is_err());
         let e = MassProperties::dynamic(Ratio::new(0.0).unwrap()).unwrap_err();
-        assert_eq!(e.code(), crate::physics_error_code::PhysicsErrorCode::InvalidMass);
+        assert_eq!(
+            e.code(),
+            crate::physics_error_code::PhysicsErrorCode::InvalidMass
+        );
     }
 
     #[test]
@@ -230,7 +238,9 @@ mod tests {
     fn capsule_inertia_matches_its_aabb_box() {
         let mass = Ratio::new(2.0).unwrap();
         // capsule (r=1, hh=2) packs local half-extents (1, 3, 1).
-        let cap = MassProperties::dynamic(mass).unwrap().with_inertia_for(capsule(1.0, 2.0));
+        let cap = MassProperties::dynamic(mass)
+            .unwrap()
+            .with_inertia_for(capsule(1.0, 2.0));
         let boxed = MassProperties::dynamic(mass)
             .unwrap()
             .with_inertia_for(box_shape(1.0, 3.0, 1.0));
@@ -242,7 +252,9 @@ mod tests {
         // A heightfield is static-surface-only, so (like a plane) it yields zero
         // moment and therefore zero inverse inertia.
         let hf = PhysicsColliderShape::heightfield_shape(Vec3::new(4.0, 1.0, 6.0)).unwrap();
-        let mp = MassProperties::dynamic(Ratio::new(7.0).unwrap()).unwrap().with_inertia_for(hf);
+        let mp = MassProperties::dynamic(Ratio::new(7.0).unwrap())
+            .unwrap()
+            .with_inertia_for(hf);
         assert_eq!(mp.inverse_inertia(), Vec3::ZERO);
     }
 
@@ -265,7 +277,10 @@ mod tests {
         let mp = MassProperties::static_props();
         let c = mp;
         assert_eq!(mp, c);
-        assert_ne!(mp, MassProperties::dynamic(Ratio::new(1.0).unwrap()).unwrap());
+        assert_ne!(
+            mp,
+            MassProperties::dynamic(Ratio::new(1.0).unwrap()).unwrap()
+        );
         assert!(format!("{mp:?}").contains("MassProperties"));
     }
 }

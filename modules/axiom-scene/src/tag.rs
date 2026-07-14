@@ -17,8 +17,7 @@ pub struct Tag {
 
 impl Tag {
     /// The reflected shape of a tag component.
-    pub const SCHEMA: TypeSchema =
-        TypeSchema::new("Tag", &[FieldSchema::new("kind_code", "u32")]);
+    pub const SCHEMA: TypeSchema = TypeSchema::new("Tag", &[FieldSchema::new("kind_code", "u32")]);
 
     /// A tag carrying the given coarse kind code. Plain data: any `u32` is a
     /// valid kind, so there is nothing to reject.

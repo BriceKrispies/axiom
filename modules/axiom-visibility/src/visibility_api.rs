@@ -60,7 +60,8 @@ mod tests {
         // Camera at +Z=5 looking toward the origin (down −Z). The origin box is in
         // view; a box far behind the camera (+Z) is outside the frustum.
         let vp = view_proj(Vec3::new(0.0, 0.0, 5.0));
-        let mask = VisibilityApi::visible_mask(vp, &[box_at(0.0, 0.0, 0.0), box_at(0.0, 0.0, 60.0)]);
+        let mask =
+            VisibilityApi::visible_mask(vp, &[box_at(0.0, 0.0, 0.0), box_at(0.0, 0.0, 60.0)]);
         assert_eq!(mask, vec![true, false]);
     }
 
@@ -77,7 +78,8 @@ mod tests {
         // A zero matrix yields no extractable frustum → conservative all-visible,
         // preserving the box count.
         let zero = Mat4::from_cols_array([0.0; 16]);
-        let mask = VisibilityApi::visible_mask(zero, &[box_at(0.0, 0.0, 0.0), box_at(9.0, 9.0, 9.0)]);
+        let mask =
+            VisibilityApi::visible_mask(zero, &[box_at(0.0, 0.0, 0.0), box_at(9.0, 9.0, 9.0)]);
         assert_eq!(mask, vec![true, true]);
     }
 
@@ -85,7 +87,9 @@ mod tests {
     fn empty_boxes_yield_empty_outputs() {
         let vp = view_proj(Vec3::new(0.0, 0.0, 5.0));
         assert!(VisibilityApi::visible_mask(vp, &[]).is_empty());
-        assert!(VisibilityApi::lod_levels(Vec3::ZERO, &[], &[Meters::finite_or_zero(10.0)]).is_empty());
+        assert!(
+            VisibilityApi::lod_levels(Vec3::ZERO, &[], &[Meters::finite_or_zero(10.0)]).is_empty()
+        );
     }
 
     #[test]
@@ -93,9 +97,16 @@ mod tests {
         // Bands at 10 m and 20 m. Boxes at 5 m, 15 m, 30 m from the camera → levels
         // 0, 1, 2 (crossing 0, 1, and 2 bands respectively).
         let camera = Vec3::ZERO;
-        let boxes = [box_at(0.0, 0.0, 5.0), box_at(0.0, 0.0, 15.0), box_at(0.0, 0.0, 30.0)];
+        let boxes = [
+            box_at(0.0, 0.0, 5.0),
+            box_at(0.0, 0.0, 15.0),
+            box_at(0.0, 0.0, 30.0),
+        ];
         let bands = [Meters::finite_or_zero(10.0), Meters::finite_or_zero(20.0)];
-        assert_eq!(VisibilityApi::lod_levels(camera, &boxes, &bands), vec![0, 1, 2]);
+        assert_eq!(
+            VisibilityApi::lod_levels(camera, &boxes, &bands),
+            vec![0, 1, 2]
+        );
     }
 
     #[test]

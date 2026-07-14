@@ -28,7 +28,12 @@ impl MeshBuffer {
     /// Build a mesh from its streams. `None` if the streams disagree on vertex
     /// count, the index buffer is not a whole number of triangles, an index is
     /// out of range, or the vertex count exceeds [`MAX_VERTS`].
-    pub fn from_parts(positions: Vec<Vec3>, normals: Vec<Vec3>, uvs: Vec<Vec2>, indices: Vec<u32>) -> Option<Self> {
+    pub fn from_parts(
+        positions: Vec<Vec3>,
+        normals: Vec<Vec3>,
+        uvs: Vec<Vec2>,
+        indices: Vec<u32>,
+    ) -> Option<Self> {
         let n = positions.len();
         let aligned = (normals.len() == n) & (uvs.len() == n);
         let bounded = n <= MAX_VERTS;
@@ -36,7 +41,14 @@ impl MeshBuffer {
         let in_range = indices.iter().all(|&i| (i as usize) < n);
         (aligned & bounded & triangular & in_range)
             .then_some(())
-            .map(|()| Self { positions, normals, uvs, indices, joints: Vec::new(), weights: Vec::new() })
+            .map(|()| Self {
+                positions,
+                normals,
+                uvs,
+                indices,
+                joints: Vec::new(),
+                weights: Vec::new(),
+            })
     }
 
     /// Build a **skinned** mesh: the static streams plus one `joints` (four bone
@@ -55,7 +67,11 @@ impl MeshBuffer {
         let skin_aligned = (joints.len() == n) & (weights.len() == n);
         Self::from_parts(positions, normals, uvs, indices)
             .filter(|_| skin_aligned)
-            .map(move |m| Self { joints, weights, ..m })
+            .map(move |m| Self {
+                joints,
+                weights,
+                ..m
+            })
     }
 
     /// The vertex positions.
@@ -172,8 +188,20 @@ mod tests {
         // Stream length mismatch.
         assert!(MeshBuffer::from_parts(vec![Vec3::ZERO], vec![], vec![], vec![]).is_none());
         // Non-triangular index buffer.
-        assert!(MeshBuffer::from_parts(vec![Vec3::ZERO; 3], vec![Vec3::UNIT_Z; 3], vec![Vec2::new(0.0, 0.0); 3], vec![0, 1]).is_none());
+        assert!(MeshBuffer::from_parts(
+            vec![Vec3::ZERO; 3],
+            vec![Vec3::UNIT_Z; 3],
+            vec![Vec2::new(0.0, 0.0); 3],
+            vec![0, 1]
+        )
+        .is_none());
         // Out-of-range index.
-        assert!(MeshBuffer::from_parts(vec![Vec3::ZERO; 3], vec![Vec3::UNIT_Z; 3], vec![Vec2::new(0.0, 0.0); 3], vec![0, 1, 9]).is_none());
+        assert!(MeshBuffer::from_parts(
+            vec![Vec3::ZERO; 3],
+            vec![Vec3::UNIT_Z; 3],
+            vec![Vec2::new(0.0, 0.0); 3],
+            vec![0, 1, 9]
+        )
+        .is_none());
     }
 }

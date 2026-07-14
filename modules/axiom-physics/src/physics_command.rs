@@ -143,7 +143,10 @@ mod tests {
         let c = PhysicsCommand::enable_body(PhysicsBodyHandle::from_raw(1));
         let d = c;
         assert_eq!(c, d);
-        assert_ne!(c, PhysicsCommand::disable_body(PhysicsBodyHandle::from_raw(1)));
+        assert_ne!(
+            c,
+            PhysicsCommand::disable_body(PhysicsBodyHandle::from_raw(1))
+        );
         assert!(format!("{c:?}").contains("EnableBody"));
     }
 }

@@ -21,7 +21,8 @@ impl SceneApi {
         radius: Meters,
         color: Vec3,
     ) -> SceneResult<()> {
-        SdfShape::sphere(math, radius, color).and_then(|shape| self.scene.add_sdf_shape(node, shape))
+        SdfShape::sphere(math, radius, color)
+            .and_then(|shape| self.scene.add_sdf_shape(node, shape))
     }
 
     /// Attach a raymarched axis-aligned SDF **box** of `half_extents` and

@@ -123,12 +123,7 @@ impl AnimationApi {
     }
 
     /// Sample `clip` at `tick` against `skeleton`, producing a full pose.
-    pub fn sample(
-        &self,
-        skeleton: SkeletonId,
-        clip: ClipId,
-        tick: Tick,
-    ) -> AnimationResult<Pose> {
+    pub fn sample(&self, skeleton: SkeletonId, clip: ClipId, tick: Tick) -> AnimationResult<Pose> {
         self.clip(clip)
             .and_then(|c| self.skeleton(skeleton).and_then(|s| c.sample(s, tick)))
     }
@@ -140,11 +135,7 @@ impl AnimationApi {
     }
 
     /// Resolve `pose` to model space against `skeleton`.
-    pub fn resolve_model(
-        &self,
-        skeleton: SkeletonId,
-        pose: &Pose,
-    ) -> AnimationResult<ModelPose> {
+    pub fn resolve_model(&self, skeleton: SkeletonId, pose: &Pose) -> AnimationResult<ModelPose> {
         self.skeleton(skeleton).and_then(|s| pose.to_model(s))
     }
 
@@ -202,11 +193,7 @@ impl AnimationApi {
     /// `min`/`max` bounds (radians). The returned value is handed back to
     /// [`AnimationApi::clamp_pose`] / [`AnimationApi::is_pose_legal`]. Fails if
     /// any `min` axis exceeds its `max`.
-    pub fn joint_limit(
-        bone: BoneId,
-        min: Vec3,
-        max: Vec3,
-    ) -> AnimationResult<JointLimit> {
+    pub fn joint_limit(bone: BoneId, min: Vec3, max: Vec3) -> AnimationResult<JointLimit> {
         JointLimit::new(bone, min, max)
     }
 
@@ -230,9 +217,11 @@ impl AnimationApi {
     /// Whether every limit in `limits` is already satisfied by `pose` (a limit
     /// whose bone is absent from the pose is vacuously satisfied).
     pub fn is_pose_legal(&self, limits: &[JointLimit], pose: &Pose) -> bool {
-        limits
-            .iter()
-            .all(|l| pose.local(l.bone()).map(|t| l.contains(t.rotation)).unwrap_or(true))
+        limits.iter().all(|l| {
+            pose.local(l.bone())
+                .map(|t| l.contains(t.rotation))
+                .unwrap_or(true)
+        })
     }
 
     /// Encode `skeleton` to a portable byte buffer that
@@ -334,8 +323,12 @@ mod tests {
         let root = api.add_root_bone(skel, tx(0.0)).unwrap();
         let child = api.add_child_bone(skel, root, Transform::IDENTITY).unwrap();
         let clip = api.create_clip();
-        api.add_track(clip, child, &[(Tick::new(0), tx(0.0)), (Tick::new(10), tx(10.0))])
-            .unwrap();
+        api.add_track(
+            clip,
+            child,
+            &[(Tick::new(0), tx(0.0)), (Tick::new(10), tx(10.0))],
+        )
+        .unwrap();
         (api, skel, clip)
     }
 
@@ -367,7 +360,10 @@ mod tests {
         let bytes = api.serialize_skeleton(skel).unwrap();
         let reloaded = api.deserialize_skeleton(&bytes).unwrap();
         assert_ne!(reloaded, skel);
-        assert_eq!(api.bone_count(reloaded).unwrap(), api.bone_count(skel).unwrap());
+        assert_eq!(
+            api.bone_count(reloaded).unwrap(),
+            api.bone_count(skel).unwrap()
+        );
     }
 
     #[test]
@@ -375,8 +371,12 @@ mod tests {
         let (mut api, skel, clip) = rig();
         let bytes = api.serialize_clip(clip).unwrap();
         let reloaded = api.deserialize_clip(&bytes).unwrap();
-        let original = api.resolve_model(skel, &api.sample(skel, clip, Tick::new(7)).unwrap()).unwrap();
-        let copy = api.resolve_model(skel, &api.sample(skel, reloaded, Tick::new(7)).unwrap()).unwrap();
+        let original = api
+            .resolve_model(skel, &api.sample(skel, clip, Tick::new(7)).unwrap())
+            .unwrap();
+        let copy = api
+            .resolve_model(skel, &api.sample(skel, reloaded, Tick::new(7)).unwrap())
+            .unwrap();
         assert_eq!(
             original.position(BoneId::from_raw(1)),
             copy.position(BoneId::from_raw(1))
@@ -409,7 +409,8 @@ mod tests {
         let mut api = AnimationApi::new();
         let skel = api.create_skeleton();
         // A zero-scale bone collapses its world matrix (non-invertible).
-        api.add_root_bone(skel, Transform::from_scale(Vec3::ZERO)).unwrap();
+        api.add_root_bone(skel, Transform::from_scale(Vec3::ZERO))
+            .unwrap();
         let rest = api.rest_pose(skel).unwrap();
         let inv = api.inverse_binds(skel, &rest).unwrap();
         assert_eq!(inv.len(), 1);
@@ -423,7 +424,9 @@ mod tests {
         let inv = api.inverse_binds(skel, &rest).unwrap();
         let palette = api.joint_matrices(skel, &rest, &inv).unwrap();
         assert_eq!(palette.len(), 2);
-        palette.into_iter().for_each(|m| assert!(mats_close(m, Mat4::IDENTITY)));
+        palette
+            .into_iter()
+            .for_each(|m| assert!(mats_close(m, Mat4::IDENTITY)));
     }
 
     #[test]
@@ -454,7 +457,9 @@ mod tests {
     fn serializing_unknown_ids_reports_not_found() {
         let api = AnimationApi::new();
         assert_eq!(
-            api.serialize_skeleton(SkeletonId::from_raw(3)).unwrap_err().code(),
+            api.serialize_skeleton(SkeletonId::from_raw(3))
+                .unwrap_err()
+                .code(),
             AnimationErrorCode::SkeletonNotFound
         );
         assert_eq!(
@@ -559,7 +564,9 @@ mod tests {
             AnimationErrorCode::ClipNotFound
         );
         assert_eq!(
-            api.sample(real_skel, ghost_clip, Tick::new(0)).unwrap_err().code(),
+            api.sample(real_skel, ghost_clip, Tick::new(0))
+                .unwrap_err()
+                .code(),
             AnimationErrorCode::ClipNotFound
         );
         let pose = api.rest_pose(real_skel).unwrap();
@@ -569,11 +576,15 @@ mod tests {
         );
         // The event/phase methods reject a missing clip id too.
         assert_eq!(
-            api.add_event(ghost_clip, Tick::new(0), 1).unwrap_err().code(),
+            api.add_event(ghost_clip, Tick::new(0), 1)
+                .unwrap_err()
+                .code(),
             AnimationErrorCode::ClipNotFound
         );
         assert_eq!(
-            api.add_phase(ghost_clip, Tick::new(0), Tick::new(1), 1).unwrap_err().code(),
+            api.add_phase(ghost_clip, Tick::new(0), Tick::new(1), 1)
+                .unwrap_err()
+                .code(),
             AnimationErrorCode::ClipNotFound
         );
         assert_eq!(
@@ -629,8 +640,17 @@ mod tests {
         assert!(!api.is_pose_legal(&limits, &pose));
         let clamped = api.clamp_pose(&limits, &pose);
         // Bone 0 clamped to x = 0.5; bone 1 untouched at x = 0.2.
-        assert!((clamped.local(BoneId::from_raw(0)).unwrap().rotation.to_euler_xyz().x - 0.5).abs()
-            <= 1.0e-3);
+        assert!(
+            (clamped
+                .local(BoneId::from_raw(0))
+                .unwrap()
+                .rotation
+                .to_euler_xyz()
+                .x
+                - 0.5)
+                .abs()
+                <= 1.0e-3
+        );
         assert!(clamped
             .local(BoneId::from_raw(1))
             .unwrap()

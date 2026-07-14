@@ -14,7 +14,9 @@ use crate::muscle_profile::{MusclePhaseProfile, MuscleStyle, SupportMode, Virtua
 use crate::physical_error::PhysicalError;
 use crate::physical_frame::{FrameParts, PhysicalAnimationFrame};
 use crate::physical_result::{auth, phys, PhysicalResult};
-use crate::virtual_muscle::{MuscleBodyState, MuscleObjectives, VirtualMuscleCommand, VirtualMuscleController};
+use crate::virtual_muscle::{
+    MuscleBodyState, MuscleObjectives, VirtualMuscleCommand, VirtualMuscleController,
+};
 
 /// The fixed physics timestep (60 Hz), in nanoseconds.
 const FIXED_DELTA_NANOS: u64 = 16_666_667;
@@ -62,7 +64,11 @@ impl PhysicalAnimationApi {
 
     /// Bind the standard humanoid of `plan`'s rig to physics bodies, placed at the
     /// pose sampled at tick 0.
-    pub fn bind_standard_humanoid(&mut self, authoring: &AnimationAuthoringApi, plan: PlanId) -> PhysicalResult<()> {
+    pub fn bind_standard_humanoid(
+        &mut self,
+        authoring: &AnimationAuthoringApi,
+        plan: PlanId,
+    ) -> PhysicalResult<()> {
         HumanoidPhysicsBinding::build_standard(&mut self.physics, authoring, plan).map(|binding| {
             self.binding = Some(binding);
         })
@@ -70,16 +76,24 @@ impl PhysicalAnimationApi {
 
     /// Attach the dynamic soccer ball at `plan`'s `"ball"` target, so a strike
     /// impulse sends it flying under real physics.
-    pub fn attach_ball(&mut self, authoring: &AnimationAuthoringApi, plan: PlanId) -> PhysicalResult<()> {
+    pub fn attach_ball(
+        &mut self,
+        authoring: &AnimationAuthoringApi,
+        plan: PlanId,
+    ) -> PhysicalResult<()> {
         let PhysicalAnimationApi { physics, ball, .. } = self;
         auth(authoring.plan_target_position(plan, "ball"))
             .map(|opt| opt.unwrap_or(Vec3::ZERO))
             .and_then(|center| {
                 // Rest the ball on its radius above the target ground level.
-                create_ball(physics, center.add(Vec3::new(0.0, crate::humanoid_binding::BALL_RADIUS, 0.0)), BALL_MASS)
-                    .map(|handle| {
-                        *ball = Some(handle);
-                    })
+                create_ball(
+                    physics,
+                    center.add(Vec3::new(0.0, crate::humanoid_binding::BALL_RADIUS, 0.0)),
+                    BALL_MASS,
+                )
+                .map(|handle| {
+                    *ball = Some(handle);
+                })
             })
     }
 
@@ -87,14 +101,27 @@ impl PhysicalAnimationApi {
     /// (`core, pelvis, spine, neck_head, left_leg, right_leg, left_ankle,
     /// right_ankle, left_arm, right_arm`), each `(stiffness, damping, max_torque,
     /// rest_weight)`.
-    pub fn set_muscle_profile(&mut self, groups: [(Ratio, Ratio, Ratio, Ratio); MUSCLE_GROUP_COUNT]) {
-        self.muscle_profile =
-            VirtualMuscleProfile::new(groups.map(|(s, d, t, w)| MuscleGroupParams::new(s.get(), d.get(), t.get(), w.get())));
+    pub fn set_muscle_profile(
+        &mut self,
+        groups: [(Ratio, Ratio, Ratio, Ratio); MUSCLE_GROUP_COUNT],
+    ) {
+        self.muscle_profile = VirtualMuscleProfile::new(
+            groups.map(|(s, d, t, w)| MuscleGroupParams::new(s.get(), d.get(), t.get(), w.get())),
+        );
     }
 
     /// Set the global muscle-style scalars.
-    pub fn set_muscle_style(&mut self, muscle_strength: Ratio, muscle_damping: Ratio, balance_strength: Ratio) {
-        self.muscle_style = MuscleStyle::new(muscle_strength.get(), muscle_damping.get(), balance_strength.get());
+    pub fn set_muscle_style(
+        &mut self,
+        muscle_strength: Ratio,
+        muscle_damping: Ratio,
+        balance_strength: Ratio,
+    ) {
+        self.muscle_style = MuscleStyle::new(
+            muscle_strength.get(),
+            muscle_damping.get(),
+            balance_strength.get(),
+        );
     }
 
     /// Advance the physics-backed animation to `tick`, returning the frame. Reads
@@ -106,7 +133,12 @@ impl PhysicalAnimationApi {
         plan: PlanId,
         tick: Tick,
     ) -> PhysicalResult<PhysicalAnimationFrame> {
-        let PhysicalAnimationApi { physics, binding, ball, .. } = self;
+        let PhysicalAnimationApi {
+            physics,
+            binding,
+            ball,
+            ..
+        } = self;
         binding
             .as_ref()
             .ok_or_else(|| PhysicalError::not_bound("bind a humanoid before advancing"))
@@ -131,15 +163,30 @@ impl PhysicalAnimationApi {
         support_mode: u8,
         group_phase_weights: [Ratio; MUSCLE_GROUP_COUNT],
     ) -> PhysicalResult<PhysicalAnimationFrame> {
-        let PhysicalAnimationApi { physics, binding, ball, muscle_profile, muscle_style } = self;
-        let phase = MusclePhaseProfile::new(SupportMode::from_code(support_mode), group_phase_weights.map(|r| r.get()));
-        let cfg = MuscleConfig { profile: muscle_profile, style: *muscle_style, phase };
+        let PhysicalAnimationApi {
+            physics,
+            binding,
+            ball,
+            muscle_profile,
+            muscle_style,
+        } = self;
+        let phase = MusclePhaseProfile::new(
+            SupportMode::from_code(support_mode),
+            group_phase_weights.map(|r| r.get()),
+        );
+        let cfg = MuscleConfig {
+            profile: muscle_profile,
+            style: *muscle_style,
+            phase,
+        };
         binding
             .as_ref()
             .ok_or_else(|| PhysicalError::not_bound("bind a humanoid before advancing"))
             .and_then(|binding| {
                 ball.ok_or_else(|| PhysicalError::no_ball("attach a ball before advancing"))
-                    .and_then(|ball| step_once(physics, binding, ball, authoring, plan, tick, Some(cfg)))
+                    .and_then(|ball| {
+                        step_once(physics, binding, ball, authoring, plan, tick, Some(cfg))
+                    })
             })
     }
 
@@ -156,12 +203,20 @@ impl PhysicalAnimationApi {
     }
 
     /// The world transform of the bound body named `name` in a frame.
-    pub fn frame_body_transform(&self, frame: &PhysicalAnimationFrame, name: &str) -> Option<Transform> {
+    pub fn frame_body_transform(
+        &self,
+        frame: &PhysicalAnimationFrame,
+        name: &str,
+    ) -> Option<Transform> {
         frame.body_transform(name)
     }
 
     /// The world transform of the key effector named `name` in a frame.
-    pub fn frame_effector_transform(&self, frame: &PhysicalAnimationFrame, name: &str) -> Option<Transform> {
+    pub fn frame_effector_transform(
+        &self,
+        frame: &PhysicalAnimationFrame,
+        name: &str,
+    ) -> Option<Transform> {
         frame.effector_transform(name)
     }
 
@@ -197,7 +252,9 @@ impl PhysicalAnimationApi {
 
     /// The applied ball-impulse `(direction, magnitude)` in a frame, if any.
     pub fn frame_ball_impulse(&self, frame: &PhysicalAnimationFrame) -> Option<(Vec3, Ratio)> {
-        frame.ball_impulse().map(|(dir, mag)| (dir, Ratio::finite_or_zero(mag)))
+        frame
+            .ball_impulse()
+            .map(|(dir, mag)| (dir, Ratio::finite_or_zero(mag)))
     }
 
     /// The active gaze objective in a frame, if any.
@@ -239,18 +296,32 @@ impl PhysicalAnimationApi {
     }
 
     /// The final actuation weight for muscle group `group` (code `0..=9`).
-    pub fn frame_muscle_group_weight(&self, frame: &PhysicalAnimationFrame, group: u8) -> Option<Ratio> {
-        frame.muscle().map(|c| Ratio::finite_or_zero(c.group_weight(MuscleGroup::from_code(group))))
+    pub fn frame_muscle_group_weight(
+        &self,
+        frame: &PhysicalAnimationFrame,
+        group: u8,
+    ) -> Option<Ratio> {
+        frame
+            .muscle()
+            .map(|c| Ratio::finite_or_zero(c.group_weight(MuscleGroup::from_code(group))))
     }
 
     /// The peak actuation for muscle group `group` (scaled by muscle strength).
-    pub fn frame_muscle_group_max_torque(&self, frame: &PhysicalAnimationFrame, group: u8) -> Option<Ratio> {
-        frame.muscle().map(|c| Ratio::finite_or_zero(c.group_max_torque(MuscleGroup::from_code(group))))
+    pub fn frame_muscle_group_max_torque(
+        &self,
+        frame: &PhysicalAnimationFrame,
+        group: u8,
+    ) -> Option<Ratio> {
+        frame
+            .muscle()
+            .map(|c| Ratio::finite_or_zero(c.group_max_torque(MuscleGroup::from_code(group))))
     }
 
     /// The foot-plant hold strength this tick (`0` once the plant releases).
     pub fn frame_plant_strength(&self, frame: &PhysicalAnimationFrame) -> Option<Ratio> {
-        frame.muscle().map(|c| Ratio::finite_or_zero(c.plant_strength()))
+        frame
+            .muscle()
+            .map(|c| Ratio::finite_or_zero(c.plant_strength()))
     }
 
     /// The horizontal balance-correction force applied to the pelvis.
@@ -260,7 +331,9 @@ impl PhysicalAnimationApi {
 
     /// The recovery / settling damping factor this tick.
     pub fn frame_recovery_damping(&self, frame: &PhysicalAnimationFrame) -> Option<Ratio> {
-        frame.muscle().map(|c| Ratio::finite_or_zero(c.recovery_damping()))
+        frame
+            .muscle()
+            .map(|c| Ratio::finite_or_zero(c.recovery_damping()))
     }
 
     /// A deterministic one-line muscle debug report for this tick.
@@ -277,11 +350,20 @@ impl Default for PhysicalAnimationApi {
 
 /// The deterministic fixed step for `tick`.
 fn runtime_step(tick: u64) -> RuntimeStep {
-    RuntimeStep::new(FrameIndex::new(tick), Tick::new(tick), FIXED_DELTA_NANOS, tick)
+    RuntimeStep::new(
+        FrameIndex::new(tick),
+        Tick::new(tick),
+        FIXED_DELTA_NANOS,
+        tick,
+    )
 }
 
 /// The plant-hold transform for `b` if it is the currently-planted foot body.
-fn plant_hold(binding: &HumanoidPhysicsBinding, b: &BoundBody, foot_plant: Option<(EffectorId, Vec3)>) -> Option<Transform> {
+fn plant_hold(
+    binding: &HumanoidPhysicsBinding,
+    b: &BoundBody,
+    foot_plant: Option<(EffectorId, Vec3)>,
+) -> Option<Transform> {
     foot_plant.and_then(|(effector, target)| {
         binding
             .foot_body_for(effector)
@@ -292,9 +374,16 @@ fn plant_hold(binding: &HumanoidPhysicsBinding, b: &BoundBody, foot_plant: Optio
 
 /// Force the dynamic pelvis: an anti-gravity hold, the approach drive, plus the
 /// muscle balance correction (`ZERO` on the muscle-free path).
-fn drive_dynamic(physics: &mut PhysicsApi, b: &BoundBody, root_velocity: Option<Vec3>, balance: Vec3) -> PhysicalResult<()> {
+fn drive_dynamic(
+    physics: &mut PhysicsApi,
+    b: &BoundBody,
+    root_velocity: Option<Vec3>,
+    balance: Vec3,
+) -> PhysicalResult<()> {
     let hold = Vec3::new(0.0, GRAVITY_Y * BODY_MASS, 0.0);
-    let drive = root_velocity.map(|v| v.mul_scalar(APPROACH_DRIVE)).unwrap_or(Vec3::ZERO);
+    let drive = root_velocity
+        .map(|v| v.mul_scalar(APPROACH_DRIVE))
+        .unwrap_or(Vec3::ZERO);
     phys(physics.apply_force(b.body(), hold.add(drive).add(balance)))
 }
 
@@ -307,7 +396,11 @@ struct MuscleConfig<'a> {
 
 /// The world transform of the body named `name` in `bodies` (`IDENTITY` if absent).
 fn named_transform(bodies: &[(&'static str, Transform)], name: &str) -> Transform {
-    bodies.iter().find(|(n, _)| *n == name).map(|(_, t)| *t).unwrap_or(Transform::IDENTITY)
+    bodies
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, t)| *t)
+        .unwrap_or(Transform::IDENTITY)
 }
 
 /// Run the virtual-muscle controller against the current (pre-step) physics state.
@@ -323,7 +416,12 @@ fn muscle_command(
     let bodies: Vec<(&'static str, Transform)> = binding
         .bodies()
         .iter()
-        .filter_map(|b| snap.bodies().iter().find(|sb| sb.handle() == b.body()).map(|sb| (b.name(), sb.transform())))
+        .filter_map(|b| {
+            snap.bodies()
+                .iter()
+                .find(|sb| sb.handle() == b.body())
+                .map(|sb| (b.name(), sb.transform()))
+        })
         .collect();
     let com: Vec<Vec3> = bodies.iter().map(|(_, t)| t.translation).collect();
     let body = MuscleBodyState {
@@ -336,7 +434,11 @@ fn muscle_command(
         cfg.profile,
         cfg.style,
         cfg.phase,
-        MuscleObjectives { foot_plant, motor_drive, ball_impulse },
+        MuscleObjectives {
+            foot_plant,
+            motor_drive,
+            ball_impulse,
+        },
         body,
     )
 }
@@ -355,84 +457,134 @@ fn step_once(
 ) -> PhysicalResult<PhysicalAnimationFrame> {
     auth(authoring.sample(plan, tick)).and_then(|pose| {
         auth(authoring.objective_root_velocity(plan, tick)).and_then(|root_velocity| {
-        auth(authoring.objective_foot_plant(plan, tick)).and_then(|foot_plant| {
-        auth(authoring.objective_joint_motors(plan, tick)).and_then(|motors| {
-        auth(authoring.objective_ball_impulse(plan, tick)).and_then(|ball_impulse| {
-        auth(authoring.objective_gaze(plan, tick)).and_then(|gaze| {
-        auth(authoring.active_phase_name(plan, tick)).and_then(|phase_name| {
-            let motor_drive = motors.iter().map(|(_, _, d)| d.get()).fold(0.0, f32::max);
-            let impulse_vec = ball_impulse.map(|(_, dir, mag)| dir.mul_scalar(mag.get() * IMPULSE_SPEED * BALL_MASS));
-            // 1. Kinematic limbs: hold the planted foot, else track the authored pose.
-            binding
-                .bodies()
-                .iter()
-                .filter(|b| !b.dynamic())
-                .try_for_each(|b| {
-                    let target = plant_hold(binding, b, foot_plant)
-                        .or_else(|| authoring.frame_joint_world(&pose, b.joint()));
-                    target.into_iter().try_for_each(|t| phys(physics.set_body_transform(b.body(), t)))
-                })
-                // 2. Muscle control + dynamic pelvis: hold + approach drive + the
-                //    balance-correction force, plus the upright torque.
-                .and_then(|()| {
-                    let command =
-                        muscle.map(|cfg| muscle_command(physics, binding, cfg, foot_plant.map(|(_, t)| t), motor_drive, impulse_vec));
-                    let balance = command.map(|c| c.balance_correction()).unwrap_or(Vec3::ZERO);
-                    let torque = command.map(|c| c.upright_torque()).unwrap_or(Vec3::ZERO);
-                    binding
-                        .bodies()
-                        .iter()
-                        .filter(|b| b.dynamic())
-                        .try_for_each(|b| {
-                            drive_dynamic(physics, b, root_velocity, balance)
-                                .and_then(|()| phys(physics.apply_torque(b.body(), torque)))
-                        })
-                        // 3. Ball: a real impulse at the strike tick — never a teleport.
-                        .and_then(|()| impulse_vec.into_iter().try_for_each(|imp| phys(physics.apply_impulse(ball, imp))))
-                        // 4. Step the world deterministically.
-                        .and_then(|()| phys(physics.step(runtime_step(tick.raw()))))
-                        // 5. Read the world back into a frame.
-                        .map(|()| {
-                            let snap = physics.snapshot();
-                            let bodies = binding
-                                .bodies()
-                                .iter()
-                                .filter_map(|b| {
-                                    snap.bodies().iter().find(|sb| sb.handle() == b.body()).map(|sb| (b.name(), sb.transform()))
-                                })
-                                .collect();
-                            let effectors = KEY_EFFECTORS
-                                .iter()
-                                .filter_map(|&name| {
-                                    authoring
-                                        .plan_effector_id(plan, name)
-                                        .ok()
-                                        .flatten()
-                                        .and_then(|eid| authoring.frame_effector_world(&pose, eid).map(|t| (name, t)))
-                                })
-                                .collect();
-                            let ball_state = snap.bodies().iter().find(|sb| sb.handle() == ball).map(|sb| (sb.transform(), sb.linear_velocity()));
-                            PhysicalAnimationFrame::new(FrameParts {
-                                tick: tick.raw(),
-                                phase_name,
-                                bodies,
-                                effectors,
-                                root_velocity,
-                                foot_plant,
-                                motor_count: motors.len(),
-                                motor_max_drive: motor_drive,
-                                ball_impulse: ball_impulse.map(|(_, dir, mag)| (dir, mag.get())),
-                                gaze,
-                                contact_count: physics.latest_contacts().len(),
-                                events: authoring.frame_event_names(&pose),
-                                step_index: physics.latest_step_record().step_index(),
-                                ball_transform: ball_state.map(|(t, _)| t),
-                                ball_velocity: ball_state.map(|(_, v)| v),
-                                muscle: command,
+            auth(authoring.objective_foot_plant(plan, tick)).and_then(|foot_plant| {
+                auth(authoring.objective_joint_motors(plan, tick)).and_then(|motors| {
+                    auth(authoring.objective_ball_impulse(plan, tick)).and_then(|ball_impulse| {
+                        auth(authoring.objective_gaze(plan, tick)).and_then(|gaze| {
+                            auth(authoring.active_phase_name(plan, tick)).and_then(|phase_name| {
+                                let motor_drive =
+                                    motors.iter().map(|(_, _, d)| d.get()).fold(0.0, f32::max);
+                                let impulse_vec = ball_impulse.map(|(_, dir, mag)| {
+                                    dir.mul_scalar(mag.get() * IMPULSE_SPEED * BALL_MASS)
+                                });
+                                // 1. Kinematic limbs: hold the planted foot, else track the authored pose.
+                                binding
+                                    .bodies()
+                                    .iter()
+                                    .filter(|b| !b.dynamic())
+                                    .try_for_each(|b| {
+                                        let target =
+                                            plant_hold(binding, b, foot_plant).or_else(|| {
+                                                authoring.frame_joint_world(&pose, b.joint())
+                                            });
+                                        target.into_iter().try_for_each(|t| {
+                                            phys(physics.set_body_transform(b.body(), t))
+                                        })
+                                    })
+                                    // 2. Muscle control + dynamic pelvis: hold + approach drive + the
+                                    //    balance-correction force, plus the upright torque.
+                                    .and_then(|()| {
+                                        let command = muscle.map(|cfg| {
+                                            muscle_command(
+                                                physics,
+                                                binding,
+                                                cfg,
+                                                foot_plant.map(|(_, t)| t),
+                                                motor_drive,
+                                                impulse_vec,
+                                            )
+                                        });
+                                        let balance = command
+                                            .map(|c| c.balance_correction())
+                                            .unwrap_or(Vec3::ZERO);
+                                        let torque = command
+                                            .map(|c| c.upright_torque())
+                                            .unwrap_or(Vec3::ZERO);
+                                        binding
+                                            .bodies()
+                                            .iter()
+                                            .filter(|b| b.dynamic())
+                                            .try_for_each(|b| {
+                                                drive_dynamic(physics, b, root_velocity, balance)
+                                                    .and_then(|()| {
+                                                        phys(physics.apply_torque(b.body(), torque))
+                                                    })
+                                            })
+                                            // 3. Ball: a real impulse at the strike tick — never a teleport.
+                                            .and_then(|()| {
+                                                impulse_vec.into_iter().try_for_each(|imp| {
+                                                    phys(physics.apply_impulse(ball, imp))
+                                                })
+                                            })
+                                            // 4. Step the world deterministically.
+                                            .and_then(|()| {
+                                                phys(physics.step(runtime_step(tick.raw())))
+                                            })
+                                            // 5. Read the world back into a frame.
+                                            .map(|()| {
+                                                let snap = physics.snapshot();
+                                                let bodies = binding
+                                                    .bodies()
+                                                    .iter()
+                                                    .filter_map(|b| {
+                                                        snap.bodies()
+                                                            .iter()
+                                                            .find(|sb| sb.handle() == b.body())
+                                                            .map(|sb| (b.name(), sb.transform()))
+                                                    })
+                                                    .collect();
+                                                let effectors = KEY_EFFECTORS
+                                                    .iter()
+                                                    .filter_map(|&name| {
+                                                        authoring
+                                                            .plan_effector_id(plan, name)
+                                                            .ok()
+                                                            .flatten()
+                                                            .and_then(|eid| {
+                                                                authoring
+                                                                    .frame_effector_world(
+                                                                        &pose, eid,
+                                                                    )
+                                                                    .map(|t| (name, t))
+                                                            })
+                                                    })
+                                                    .collect();
+                                                let ball_state = snap
+                                                    .bodies()
+                                                    .iter()
+                                                    .find(|sb| sb.handle() == ball)
+                                                    .map(|sb| {
+                                                        (sb.transform(), sb.linear_velocity())
+                                                    });
+                                                PhysicalAnimationFrame::new(FrameParts {
+                                                    tick: tick.raw(),
+                                                    phase_name,
+                                                    bodies,
+                                                    effectors,
+                                                    root_velocity,
+                                                    foot_plant,
+                                                    motor_count: motors.len(),
+                                                    motor_max_drive: motor_drive,
+                                                    ball_impulse: ball_impulse
+                                                        .map(|(_, dir, mag)| (dir, mag.get())),
+                                                    gaze,
+                                                    contact_count: physics.latest_contacts().len(),
+                                                    events: authoring.frame_event_names(&pose),
+                                                    step_index: physics
+                                                        .latest_step_record()
+                                                        .step_index(),
+                                                    ball_transform: ball_state.map(|(t, _)| t),
+                                                    ball_velocity: ball_state.map(|(_, v)| v),
+                                                    muscle: command,
+                                                })
+                                            })
+                                    })
                             })
                         })
+                    })
                 })
-        })})})})})})
+            })
+        })
     })
 }
 
@@ -468,14 +620,20 @@ mod tests {
         // Advancing before binding fails NotBound.
         let mut unbound = PhysicalAnimationApi::new();
         assert_eq!(
-            unbound.advance(&authoring, plan, Tick::new(0)).unwrap_err().code(),
+            unbound
+                .advance(&authoring, plan, Tick::new(0))
+                .unwrap_err()
+                .code(),
             PhysicalErrorCode::NotBound
         );
         // Bound but no ball fails NoBall.
         let mut no_ball = PhysicalAnimationApi::new();
         no_ball.bind_standard_humanoid(&authoring, plan).unwrap();
         assert_eq!(
-            no_ball.advance(&authoring, plan, Tick::new(0)).unwrap_err().code(),
+            no_ball
+                .advance(&authoring, plan, Tick::new(0))
+                .unwrap_err()
+                .code(),
             PhysicalErrorCode::NoBall
         );
     }
@@ -486,8 +644,14 @@ mod tests {
         let mut a = ready(&authoring, plan);
         let mut b = ready(&authoring, plan);
         // Run both simulations through the strike and compare the final frames.
-        let last_a = (0..40).map(|t| a.advance(&authoring, plan, Tick::new(t)).unwrap()).last().unwrap();
-        let last_b = (0..40).map(|t| b.advance(&authoring, plan, Tick::new(t)).unwrap()).last().unwrap();
+        let last_a = (0..40)
+            .map(|t| a.advance(&authoring, plan, Tick::new(t)).unwrap())
+            .last()
+            .unwrap();
+        let last_b = (0..40)
+            .map(|t| b.advance(&authoring, plan, Tick::new(t)).unwrap())
+            .last()
+            .unwrap();
         assert_eq!(format!("{last_a:?}"), format!("{last_b:?}"));
     }
 
@@ -497,10 +661,24 @@ mod tests {
         let mut sim = ready(&authoring, plan);
         let ball_z = 0.0;
         let early = sim.advance(&authoring, plan, Tick::new(2)).unwrap();
-        let early_z = sim.frame_body_transform(&early, "pelvis").unwrap().translation.z;
-        let late = (3..11).map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap()).last().unwrap();
-        let late_z = sim.frame_body_transform(&late, "pelvis").unwrap().translation.z;
-        assert!(late_z > early_z, "pelvis moved toward the ball under physics");
+        let early_z = sim
+            .frame_body_transform(&early, "pelvis")
+            .unwrap()
+            .translation
+            .z;
+        let late = (3..11)
+            .map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap())
+            .last()
+            .unwrap();
+        let late_z = sim
+            .frame_body_transform(&late, "pelvis")
+            .unwrap()
+            .translation
+            .z;
+        assert!(
+            late_z > early_z,
+            "pelvis moved toward the ball under physics"
+        );
         assert!(early_z <= ball_z + 1.0);
         // The approach frame reports the root-velocity objective (+Z).
         assert!(sim.frame_root_velocity(&early).unwrap().z > 0.0);
@@ -512,9 +690,15 @@ mod tests {
     fn plant_holds_the_left_foot_body_at_the_plant_spot() {
         let (authoring, plan) = penalty(0.7);
         let mut sim = ready(&authoring, plan);
-        let frame = (0..17).map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap()).last().unwrap();
+        let frame = (0..17)
+            .map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap())
+            .last()
+            .unwrap();
         // At tick 16 (plant phase), the left-foot body is held at the plant spot.
-        let foot = sim.frame_body_transform(&frame, "left_foot").unwrap().translation;
+        let foot = sim
+            .frame_body_transform(&frame, "left_foot")
+            .unwrap()
+            .translation;
         assert!(foot.distance(Vec3::new(0.25, 0.0, -0.1)) < 1.0e-4);
         assert!(sim.frame_foot_plant(&frame).is_some());
     }
@@ -547,13 +731,27 @@ mod tests {
     fn frame_exposes_gaze_effectors_contacts_events_and_step_index() {
         let (authoring, plan) = penalty(0.7);
         let mut sim = ready(&authoring, plan);
-        let strike = (0..39).map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap()).last().unwrap();
+        let strike = (0..39)
+            .map(|t| sim.advance(&authoring, plan, Tick::new(t)).unwrap())
+            .last()
+            .unwrap();
         assert_eq!(sim.frame_gaze(&strike), Some(Vec3::new(0.0, 0.0, 0.0))); // gaze on the ball
-        assert!(sim.frame_effector_transform(&strike, "right_foot_instep").is_some());
-        assert_eq!(sim.frame_effector_transform(&strike, "no_such_effector"), None);
-        assert_eq!(sim.frame_event_names(&strike), vec!["ball_contact".to_string()]);
+        assert!(sim
+            .frame_effector_transform(&strike, "right_foot_instep")
+            .is_some());
+        assert_eq!(
+            sim.frame_effector_transform(&strike, "no_such_effector"),
+            None
+        );
+        assert_eq!(
+            sim.frame_event_names(&strike),
+            vec!["ball_contact".to_string()]
+        );
         assert_eq!(sim.frame_step_index(&strike), 39); // 39 steps taken (ticks 0..39)
-        assert_eq!(sim.frame_contact_count(&strike), sim.frame_contact_count(&strike));
+        assert_eq!(
+            sim.frame_contact_count(&strike),
+            sim.frame_contact_count(&strike)
+        );
         assert!(sim.frame_ball_transform(&strike).is_some());
         assert_eq!(sim.frame_body_transform(&strike, "no_such_body"), None);
     }
@@ -580,7 +778,9 @@ mod tests {
         let mut sim = PhysicalAnimationApi::new();
         let authoring = AnimationAuthoringApi::new();
         assert_eq!(
-            sim.attach_ball(&authoring, PlanId::from_raw(9)).unwrap_err().code(),
+            sim.attach_ball(&authoring, PlanId::from_raw(9))
+                .unwrap_err()
+                .code(),
             PhysicalErrorCode::AuthoringFailed
         );
     }
@@ -591,8 +791,18 @@ mod tests {
     }
 
     /// Ten identical per-group base params.
-    fn profile(s: f32, d: f32, t: f32, rw: f32) -> [(Ratio, Ratio, Ratio, Ratio); MUSCLE_GROUP_COUNT] {
-        [(Ratio::new(s).unwrap(), Ratio::new(d).unwrap(), Ratio::new(t).unwrap(), Ratio::new(rw).unwrap()); MUSCLE_GROUP_COUNT]
+    fn profile(
+        s: f32,
+        d: f32,
+        t: f32,
+        rw: f32,
+    ) -> [(Ratio, Ratio, Ratio, Ratio); MUSCLE_GROUP_COUNT] {
+        [(
+            Ratio::new(s).unwrap(),
+            Ratio::new(d).unwrap(),
+            Ratio::new(t).unwrap(),
+            Ratio::new(rw).unwrap(),
+        ); MUSCLE_GROUP_COUNT]
     }
 
     #[test]
@@ -601,7 +811,10 @@ mod tests {
         let mut sim = ready(&authoring, plan);
         // Run into the plant phase with left-foot support.
         let frame = (0..17)
-            .map(|t| sim.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.6)).unwrap())
+            .map(|t| {
+                sim.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.6))
+                    .unwrap()
+            })
             .last()
             .unwrap();
         assert_eq!(sim.frame_support_mode(&frame), Some(1));
@@ -612,7 +825,10 @@ mod tests {
         assert!(sim.frame_recovery_damping(&frame).is_some());
         assert!(sim.frame_muscle_group_weight(&frame, 5).is_some());
         assert!(sim.frame_muscle_group_max_torque(&frame, 5).unwrap().get() > 0.0);
-        assert!(sim.frame_muscle_report(&frame).unwrap().contains("support=1"));
+        assert!(sim
+            .frame_muscle_report(&frame)
+            .unwrap()
+            .contains("support=1"));
 
         // The muscle-free path carries no muscle readouts.
         let plain = sim.advance(&authoring, plan, Tick::new(17)).unwrap();
@@ -633,19 +849,45 @@ mod tests {
         let torque_at = |strength: f32| {
             let mut sim = ready(&authoring, plan);
             sim.set_muscle_profile(profile(1.0, 0.5, 1.0, 0.6));
-            sim.set_muscle_style(Ratio::new(strength).unwrap(), Ratio::new(1.0).unwrap(), Ratio::new(1.0).unwrap());
-            let f = (0..17).map(|t| sim.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.8)).unwrap()).last().unwrap();
+            sim.set_muscle_style(
+                Ratio::new(strength).unwrap(),
+                Ratio::new(1.0).unwrap(),
+                Ratio::new(1.0).unwrap(),
+            );
+            let f = (0..17)
+                .map(|t| {
+                    sim.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.8))
+                        .unwrap()
+                })
+                .last()
+                .unwrap();
             sim.frame_muscle_group_max_torque(&f, 5).unwrap().get()
         };
-        assert!(torque_at(2.0) > torque_at(1.0), "muscle_strength scales max_torque");
+        assert!(
+            torque_at(2.0) > torque_at(1.0),
+            "muscle_strength scales max_torque"
+        );
 
         let corr_at = |bal: f32| {
             let mut sim = ready(&authoring, plan);
-            sim.set_muscle_style(Ratio::new(1.0).unwrap(), Ratio::new(1.0).unwrap(), Ratio::new(bal).unwrap());
-            let f = (0..17).map(|t| sim.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.6)).unwrap()).last().unwrap();
+            sim.set_muscle_style(
+                Ratio::new(1.0).unwrap(),
+                Ratio::new(1.0).unwrap(),
+                Ratio::new(bal).unwrap(),
+            );
+            let f = (0..17)
+                .map(|t| {
+                    sim.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.6))
+                        .unwrap()
+                })
+                .last()
+                .unwrap();
             sim.frame_balance_correction(&f).unwrap().length()
         };
-        assert!(corr_at(2.0) > corr_at(1.0), "balance_strength scales the balance force");
+        assert!(
+            corr_at(2.0) > corr_at(1.0),
+            "balance_strength scales the balance force"
+        );
     }
 
     #[test]
@@ -654,17 +896,31 @@ mod tests {
         // support than the muscle-free run — proof the balance force is real.
         let (authoring, plan) = penalty(0.7);
         let mut muscled = ready(&authoring, plan);
-        muscled.set_muscle_style(Ratio::new(1.0).unwrap(), Ratio::new(1.0).unwrap(), Ratio::new(3.0).unwrap());
+        muscled.set_muscle_style(
+            Ratio::new(1.0).unwrap(),
+            Ratio::new(1.0).unwrap(),
+            Ratio::new(3.0).unwrap(),
+        );
         let mut plain = ready(&authoring, plan);
         let (mut mf, mut pf) = (None, None);
         (0..20).for_each(|t| {
-            mf = Some(muscled.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.7)).unwrap());
+            mf = Some(
+                muscled
+                    .advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.7))
+                    .unwrap(),
+            );
             pf = Some(plain.advance(&authoring, plan, Tick::new(t)).unwrap());
         });
         let mframe = mf.unwrap();
         let support = muscled.frame_support_target(&mframe).unwrap();
-        let m_pelvis = muscled.frame_body_transform(&mframe, "pelvis").unwrap().translation;
-        let p_pelvis = plain.frame_body_transform(&pf.unwrap(), "pelvis").unwrap().translation;
+        let m_pelvis = muscled
+            .frame_body_transform(&mframe, "pelvis")
+            .unwrap()
+            .translation;
+        let p_pelvis = plain
+            .frame_body_transform(&pf.unwrap(), "pelvis")
+            .unwrap()
+            .translation;
         let horiz = |a: Vec3, b: Vec3| ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt();
         let muscled_gap = horiz(m_pelvis, support);
         let plain_gap = horiz(p_pelvis, support);
@@ -677,7 +933,13 @@ mod tests {
         let (authoring, plan) = penalty(0.7);
         let run = || {
             let mut sim = ready(&authoring, plan);
-            (0..40).map(|t| sim.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.6)).unwrap()).last().unwrap()
+            (0..40)
+                .map(|t| {
+                    sim.advance_muscled(&authoring, plan, Tick::new(t), 1, weights(0.6))
+                        .unwrap()
+                })
+                .last()
+                .unwrap()
         };
         assert_eq!(format!("{:?}", run()), format!("{:?}", run()));
     }
@@ -687,21 +949,33 @@ mod tests {
         let (authoring, plan) = penalty(0.7);
         let mut unbound = PhysicalAnimationApi::new();
         assert_eq!(
-            unbound.advance_muscled(&authoring, plan, Tick::new(0), 1, weights(0.5)).unwrap_err().code(),
+            unbound
+                .advance_muscled(&authoring, plan, Tick::new(0), 1, weights(0.5))
+                .unwrap_err()
+                .code(),
             PhysicalErrorCode::NotBound
         );
         let mut no_ball = PhysicalAnimationApi::new();
         no_ball.bind_standard_humanoid(&authoring, plan).unwrap();
         assert_eq!(
-            no_ball.advance_muscled(&authoring, plan, Tick::new(0), 1, weights(0.5)).unwrap_err().code(),
+            no_ball
+                .advance_muscled(&authoring, plan, Tick::new(0), 1, weights(0.5))
+                .unwrap_err()
+                .code(),
             PhysicalErrorCode::NoBall
         );
     }
 
     #[test]
     fn named_transform_finds_bodies_and_defaults_when_absent() {
-        let bodies = [("pelvis", Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)))];
-        assert_eq!(named_transform(&bodies, "pelvis").translation, Vec3::new(1.0, 2.0, 3.0));
+        let bodies = [(
+            "pelvis",
+            Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)),
+        )];
+        assert_eq!(
+            named_transform(&bodies, "pelvis").translation,
+            Vec3::new(1.0, 2.0, 3.0)
+        );
         assert_eq!(named_transform(&bodies, "left_foot"), Transform::IDENTITY);
     }
 }

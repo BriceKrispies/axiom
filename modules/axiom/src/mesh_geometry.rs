@@ -30,8 +30,12 @@ pub(crate) struct MeshGeometry {
 pub(crate) fn mesh_geometry(mesh: &Mesh) -> MeshGeometry {
     // Table order must match the `Mesh` variant order (Cube=0, Plane=1, Sphere=2,
     // Cylinder=3); adding a variant requires adding its generator at the same index.
-    let generators: [fn() -> MeshGeometry; 4] =
-        [cube_geometry, plane_geometry, sphere_geometry, cylinder_geometry];
+    let generators: [fn() -> MeshGeometry; 4] = [
+        cube_geometry,
+        plane_geometry,
+        sphere_geometry,
+        cylinder_geometry,
+    ];
     generators[*mesh as usize]()
 }
 
@@ -242,7 +246,9 @@ fn validate(data: &MeshData) -> Option<MeshDataError> {
     let normals = data.normals();
     let uvs = data.uvs();
     let indices = data.indices();
-    let empty = positions.is_empty().then_some(MeshDataError::EmptyPositions);
+    let empty = positions
+        .is_empty()
+        .then_some(MeshDataError::EmptyPositions);
     let non_finite = (!all_finite(positions, normals, uvs)).then_some(MeshDataError::NonFinite);
     let normal_mismatch =
         (normals.len() != positions.len()).then_some(MeshDataError::NormalCountMismatch);
@@ -362,11 +368,13 @@ mod tests {
         assert!(sphere.positions.len() > 100);
         // Cylinder: 4 rings of 17 + 2 cap centers = 70 vertices.
         assert_eq!(cylinder.positions.len(), 70);
-        [&cube, &plane, &sphere, &cylinder].into_iter().for_each(|g| {
-            assert_eq!(g.positions.len(), g.normals.len());
-            assert_eq!(g.positions.len(), g.uvs.len());
-            assert!(!g.indices.is_empty());
-        });
+        [&cube, &plane, &sphere, &cylinder]
+            .into_iter()
+            .for_each(|g| {
+                assert_eq!(g.positions.len(), g.normals.len());
+                assert_eq!(g.positions.len(), g.uvs.len());
+                assert!(!g.indices.is_empty());
+            });
     }
 
     /// A well-formed author triangle with explicit UVs.
@@ -411,7 +419,10 @@ mod tests {
     #[test]
     fn empty_positions_are_rejected() {
         let data = MeshData::new(vec![], vec![], vec![], vec![]);
-        assert_eq!(mesh_data_geometry(&data), Err(MeshDataError::EmptyPositions));
+        assert_eq!(
+            mesh_data_geometry(&data),
+            Err(MeshDataError::EmptyPositions)
+        );
     }
 
     #[test]
@@ -456,7 +467,10 @@ mod tests {
             vec![Vec2::ZERO],
             vec![0, 1, 2],
         );
-        assert_eq!(mesh_data_geometry(&data), Err(MeshDataError::UvCountMismatch));
+        assert_eq!(
+            mesh_data_geometry(&data),
+            Err(MeshDataError::UvCountMismatch)
+        );
     }
 
     #[test]
@@ -492,7 +506,10 @@ mod tests {
             vec![],
             vec![0, 1, 9],
         );
-        assert_eq!(mesh_data_geometry(&data), Err(MeshDataError::IndexOutOfRange));
+        assert_eq!(
+            mesh_data_geometry(&data),
+            Err(MeshDataError::IndexOutOfRange)
+        );
     }
 
     fn skinned_triangle(joints: Vec<[u16; 4]>, weights: Vec<[f32; 4]>, uvs: Vec<Vec2>) -> MeshData {
@@ -541,16 +558,26 @@ mod tests {
     fn mismatched_skin_count_is_rejected() {
         // Joints present but shorter than the vertex count.
         let data = skinned_triangle(vec![[0, 0, 0, 0]; 2], vec![[1.0, 0.0, 0.0, 0.0]; 3], vec![]);
-        assert_eq!(mesh_data_geometry(&data), Err(MeshDataError::SkinCountMismatch));
+        assert_eq!(
+            mesh_data_geometry(&data),
+            Err(MeshDataError::SkinCountMismatch)
+        );
     }
 
     #[test]
     fn non_finite_skin_weights_are_rejected() {
         let data = skinned_triangle(
             vec![[0, 0, 0, 0]; 3],
-            vec![[f32::NAN, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
+            vec![
+                [f32::NAN, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+            ],
             vec![],
         );
-        assert_eq!(mesh_data_geometry(&data), Err(MeshDataError::SkinWeightsNonFinite));
+        assert_eq!(
+            mesh_data_geometry(&data),
+            Err(MeshDataError::SkinWeightsNonFinite)
+        );
     }
 }

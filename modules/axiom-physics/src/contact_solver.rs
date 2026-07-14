@@ -78,7 +78,10 @@ fn body_state(bodies: &[PhysicsBody], handle: PhysicsBodyHandle) -> (Vec3, f32) 
     body_index(handle)
         .and_then(|i| bodies.get(i))
         .map_or((Vec3::ZERO, 0.0), |b| {
-            (b.linear_velocity(), b.mass_properties().inverse_mass().get())
+            (
+                b.linear_velocity(),
+                b.mass_properties().inverse_mass().get(),
+            )
         })
 }
 
@@ -96,15 +99,16 @@ fn add_velocity(bodies: &mut [PhysicsBody], handle: PhysicsBodyHandle, delta: Ve
 /// translation (its centre of mass); `inverse_inertia` is the diagonal world
 /// inverse inertia the integrator already consumes.
 fn body_angular(bodies: &[PhysicsBody], handle: PhysicsBodyHandle) -> (Vec3, Vec3, Vec3) {
-    body_index(handle)
-        .and_then(|i| bodies.get(i))
-        .map_or((Vec3::ZERO, Vec3::ZERO, Vec3::ZERO), |b| {
+    body_index(handle).and_then(|i| bodies.get(i)).map_or(
+        (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO),
+        |b| {
             (
                 b.angular_velocity(),
                 b.mass_properties().inverse_inertia(),
                 b.transform().translation,
             )
-        })
+        },
+    )
 }
 
 /// Apply a diagonal world inverse inertia to an angular vector — the same
@@ -140,7 +144,8 @@ fn add_angular_velocity(
         .and_then(|i| bodies.get_mut(i))
         .into_iter()
         .for_each(|b| {
-            let delta = apply_inverse_inertia(b.mass_properties().inverse_inertia(), r.cross(impulse));
+            let delta =
+                apply_inverse_inertia(b.mass_properties().inverse_inertia(), r.cross(impulse));
             b.set_angular_velocity(b.angular_velocity().add(delta));
         });
 }
@@ -153,7 +158,11 @@ fn translate(bodies: &mut [PhysicsBody], handle: PhysicsBodyHandle, delta: Vec3)
         .into_iter()
         .for_each(|b| {
             let t = b.transform();
-            b.set_transform(Transform::new(t.translation.add(delta), t.rotation, t.scale));
+            b.set_transform(Transform::new(
+                t.translation.add(delta),
+                t.rotation,
+                t.scale,
+            ));
         });
 }
 
@@ -283,7 +292,10 @@ fn apply_friction_axis(
     let (wa, inv_ia, _) = body_angular(bodies, manifold.body_a());
     let (wb, inv_ib, _) = body_angular(bodies, manifold.body_b());
     // Tangential relative velocity *at the contact point* (linear + angular lever).
-    let relative = vb.add(wb.cross(r_b)).subtract(va.add(wa.cross(r_a))).dot(axis);
+    let relative = vb
+        .add(wb.cross(r_b))
+        .subtract(va.add(wa.cross(r_a)))
+        .dot(axis);
     let k_raw = inv_a
         + inv_b
         + angular_effective_mass(inv_ia, r_a, axis)
@@ -322,7 +334,10 @@ fn solve_contact(
     let r_b = manifold.point().subtract(cb);
     // Relative normal velocity *at the contact point* — the linear approach plus
     // each body's angular contribution `ω × r` at the lever arm.
-    let relative = vb.add(wb.cross(r_b)).subtract(va.add(wa.cross(r_a))).dot(normal);
+    let relative = vb
+        .add(wb.cross(r_b))
+        .subtract(va.add(wa.cross(r_a)))
+        .dot(normal);
     // Effective mass: the linear inverse-mass sum plus the rotational coupling of
     // each body's lever arm. An immovable body contributes zero to both halves.
     let k_raw = inv_a
@@ -384,12 +399,19 @@ pub(crate) fn correct_positions(bodies: &mut [PhysicsBody], manifolds: &[Contact
         let inv_a = body_state(bodies, manifold.body_a()).1;
         let inv_b = body_state(bodies, manifold.body_b()).1;
         let inverse_sum = inv_a + inv_b;
-        let correction =
-            (manifold.depth() - PENETRATION_SLOP).max(0.0) * CORRECTION_BETA
-                / inverse_sum.max(f32::MIN_POSITIVE);
+        let correction = (manifold.depth() - PENETRATION_SLOP).max(0.0) * CORRECTION_BETA
+            / inverse_sum.max(f32::MIN_POSITIVE);
         let normal = manifold.normal();
-        translate(bodies, manifold.body_a(), normal.mul_scalar(-correction * inv_a));
-        translate(bodies, manifold.body_b(), normal.mul_scalar(correction * inv_b));
+        translate(
+            bodies,
+            manifold.body_a(),
+            normal.mul_scalar(-correction * inv_a),
+        );
+        translate(
+            bodies,
+            manifold.body_b(),
+            normal.mul_scalar(correction * inv_b),
+        );
     });
 }
 
@@ -543,7 +565,10 @@ mod tests {
         let mut bodies = [dynamic(1, Vec3::new(1.5, -2.0, 0.0)), static_body(2)];
         let colliders = [collider_with(1, 1, 0.0, 1.0), collider_with(2, 2, 0.0, 1.0)];
         solve(&mut bodies, &colliders, &[manifold(0.1)], 8);
-        assert!(bodies[0].linear_velocity().y.abs() < 1.0e-5, "normal cancelled");
+        assert!(
+            bodies[0].linear_velocity().y.abs() < 1.0e-5,
+            "normal cancelled"
+        );
         assert!(
             bodies[0].linear_velocity().x.abs() < 1.0e-4,
             "within-cone friction kills the slide"
@@ -556,7 +581,10 @@ mod tests {
         let mut bodies = [dynamic(1, Vec3::new(3.0, -2.0, 0.0)), static_body(2)];
         let colliders = [collider_with(1, 1, 0.0, 0.0), collider_with(2, 2, 0.0, 0.0)];
         solve(&mut bodies, &colliders, &[manifold(0.1)], 8);
-        assert!(bodies[0].linear_velocity().y.abs() < 1.0e-5, "normal cancelled");
+        assert!(
+            bodies[0].linear_velocity().y.abs() < 1.0e-5,
+            "normal cancelled"
+        );
         // The frictionless slide is exactly preserved.
         assert_eq!(bodies[0].linear_velocity().x, 3.0);
     }
@@ -569,12 +597,20 @@ mod tests {
         let colliders = [collider_with(1, 1, 0.0, 0.2), collider_with(2, 2, 0.0, 0.2)];
         solve(&mut bodies, &colliders, &[manifold(0.1)], 1);
         let vx = bodies[0].linear_velocity().x;
-        assert!(vx < 10.0 && vx > 0.0, "slide reduced but not removed, got {vx}");
+        assert!(
+            vx < 10.0 && vx > 0.0,
+            "slide reduced but not removed, got {vx}"
+        );
     }
 
     #[test]
     fn tangent_basis_is_orthonormal_for_each_dominant_normal_axis() {
-        for n in [Vec3::UNIT_X, Vec3::UNIT_Y, Vec3::UNIT_Z, Vec3::new(0.0, -1.0, 0.0)] {
+        for n in [
+            Vec3::UNIT_X,
+            Vec3::UNIT_Y,
+            Vec3::UNIT_Z,
+            Vec3::new(0.0, -1.0, 0.0),
+        ] {
             let (t1, t2) = tangent_basis(n);
             assert!((t1.length() - 1.0).abs() < 1.0e-6, "t1 unit for {n:?}");
             assert!((t2.length() - 1.0).abs() < 1.0e-6, "t2 unit for {n:?}");
@@ -589,16 +625,28 @@ mod tests {
         let colliders = [collider_with(1, 1, 0.0, 0.5), collider_with(2, 2, 0.0, 0.5)];
         // Approaching + sliding + friction -> counted.
         let sliding = [dynamic(1, Vec3::new(2.0, -2.0, 0.0)), static_body(2)];
-        assert_eq!(count_frictioned_contacts(&sliding, &colliders, &[manifold(0.1)]), 1);
+        assert_eq!(
+            count_frictioned_contacts(&sliding, &colliders, &[manifold(0.1)]),
+            1
+        );
         // Approaching but no tangential motion -> not counted.
         let straight = [dynamic(1, Vec3::new(0.0, -2.0, 0.0)), static_body(2)];
-        assert_eq!(count_frictioned_contacts(&straight, &colliders, &[manifold(0.1)]), 0);
+        assert_eq!(
+            count_frictioned_contacts(&straight, &colliders, &[manifold(0.1)]),
+            0
+        );
         // Separating -> not counted even while sliding.
         let separating = [dynamic(1, Vec3::new(2.0, 3.0, 0.0)), static_body(2)];
-        assert_eq!(count_frictioned_contacts(&separating, &colliders, &[manifold(0.1)]), 0);
+        assert_eq!(
+            count_frictioned_contacts(&separating, &colliders, &[manifold(0.1)]),
+            0
+        );
         // Frictionless material -> not counted even while pressed and sliding.
         let frictionless = [collider_with(1, 1, 0.0, 0.0), collider_with(2, 2, 0.0, 0.0)];
-        assert_eq!(count_frictioned_contacts(&sliding, &frictionless, &[manifold(0.1)]), 0);
+        assert_eq!(
+            count_frictioned_contacts(&sliding, &frictionless, &[manifold(0.1)]),
+            0
+        );
     }
 
     #[test]
@@ -665,7 +713,10 @@ mod tests {
             dynamic_mass(2, Vec3::new(0.0, 2.0, 0.0), 1.0),
         ];
         let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
-        assert_eq!(count_solved_contacts(&bodies, &[dynamic_pair_manifold()]), 1);
+        assert_eq!(
+            count_solved_contacts(&bodies, &[dynamic_pair_manifold()]),
+            1
+        );
         solve(&mut bodies, &colliders, &[dynamic_pair_manifold()], 4);
         assert!(bodies[0].linear_velocity().y.abs() < 1.0e-5);
         assert!(bodies[1].linear_velocity().y.abs() < 1.0e-5);
@@ -696,9 +747,17 @@ mod tests {
     fn off_center_normal_impulse_induces_spin_with_correct_sign() {
         // A sphere driving down (-Y) onto a static floor, contacting at +X of its
         // centre. The upward reaction at +X torques it about +Z.
-        let mut bodies = [dynamic_spinning(1, Vec3::new(0.0, -2.0, 0.0)), static_body(2)];
+        let mut bodies = [
+            dynamic_spinning(1, Vec3::new(0.0, -2.0, 0.0)),
+            static_body(2),
+        ];
         let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
-        solve(&mut bodies, &colliders, &[manifold_at(Vec3::new(1.0, 0.0, 0.0))], 1);
+        solve(
+            &mut bodies,
+            &colliders,
+            &[manifold_at(Vec3::new(1.0, 0.0, 0.0))],
+            1,
+        );
         let w = bodies[0].angular_velocity();
         assert!(w.z > 0.0, "off-centre hit spins about +Z, got {w:?}");
         // The static floor never spins (zero inverse inertia), despite a real lever.
@@ -707,18 +766,31 @@ mod tests {
         // reduced); the residual reflects the share that became spin, since the
         // impulse is split between the linear and angular halves.
         let vy = bodies[0].linear_velocity().y;
-        assert!(vy > -2.0 && vy < 0.0, "downward approach reduced but not reversed, got {vy}");
+        assert!(
+            vy > -2.0 && vy < 0.0,
+            "downward approach reduced but not reversed, got {vy}"
+        );
     }
 
     #[test]
     fn center_line_normal_impulse_induces_no_spin() {
         // Contact exactly at the body centre: the lever arm is zero, so the normal
         // impulse produces no torque even with a non-zero inverse inertia.
-        let mut bodies = [dynamic_spinning(1, Vec3::new(0.0, -2.0, 0.0)), static_body(2)];
+        let mut bodies = [
+            dynamic_spinning(1, Vec3::new(0.0, -2.0, 0.0)),
+            static_body(2),
+        ];
         let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
         solve(&mut bodies, &colliders, &[manifold_at(Vec3::ZERO)], 4);
-        assert_eq!(bodies[0].angular_velocity(), Vec3::ZERO, "centre hit never spins");
-        assert!(bodies[0].linear_velocity().y.abs() < 1.0e-5, "normal still cancelled");
+        assert_eq!(
+            bodies[0].angular_velocity(),
+            Vec3::ZERO,
+            "centre hit never spins"
+        );
+        assert!(
+            bodies[0].linear_velocity().y.abs() < 1.0e-5,
+            "normal still cancelled"
+        );
     }
 
     #[test]
@@ -726,11 +798,26 @@ mod tests {
         // A is the immovable (static) body and B the dynamic one. The off-centre
         // point gives A a real lever arm, but its zero inverse inertia makes the
         // angular delta vanish, while B genuinely acquires spin.
-        let mut bodies = [static_body(1), dynamic_spinning(2, Vec3::new(0.0, 2.0, 0.0))];
+        let mut bodies = [
+            static_body(1),
+            dynamic_spinning(2, Vec3::new(0.0, 2.0, 0.0)),
+        ];
         let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
-        solve(&mut bodies, &colliders, &[manifold_at(Vec3::new(1.0, 0.0, 0.0))], 1);
-        assert_eq!(bodies[0].angular_velocity(), Vec3::ZERO, "immovable body never spins");
-        assert!(bodies[1].angular_velocity().length() > 0.0, "dynamic body does spin");
+        solve(
+            &mut bodies,
+            &colliders,
+            &[manifold_at(Vec3::new(1.0, 0.0, 0.0))],
+            1,
+        );
+        assert_eq!(
+            bodies[0].angular_velocity(),
+            Vec3::ZERO,
+            "immovable body never spins"
+        );
+        assert!(
+            bodies[1].angular_velocity().length() > 0.0,
+            "dynamic body does spin"
+        );
     }
 
     #[test]
@@ -739,12 +826,26 @@ mod tests {
         // contacting directly below its centre. The normal impulse is along the
         // lever (no normal torque), so the only spin comes from the friction
         // tangent opposing the +X slide at a point below centre -> rolls about -Z.
-        let mut bodies = [dynamic_spinning(1, Vec3::new(2.0, -2.0, 0.0)), static_body(2)];
+        let mut bodies = [
+            dynamic_spinning(1, Vec3::new(2.0, -2.0, 0.0)),
+            static_body(2),
+        ];
         let colliders = [collider_with(1, 1, 0.0, 1.0), collider_with(2, 2, 0.0, 1.0)];
-        solve(&mut bodies, &colliders, &[manifold_at(Vec3::new(0.0, -0.5, 0.0))], 1);
+        solve(
+            &mut bodies,
+            &colliders,
+            &[manifold_at(Vec3::new(0.0, -0.5, 0.0))],
+            1,
+        );
         let w = bodies[0].angular_velocity();
-        assert!(w.z < 0.0, "ground friction on a +X slide rolls the ball about -Z, got {w:?}");
-        assert!(w.x.abs() < 1.0e-6 && w.y.abs() < 1.0e-6, "spin only about Z, got {w:?}");
+        assert!(
+            w.z < 0.0,
+            "ground friction on a +X slide rolls the ball about -Z, got {w:?}"
+        );
+        assert!(
+            w.x.abs() < 1.0e-6 && w.y.abs() < 1.0e-6,
+            "spin only about Z, got {w:?}"
+        );
     }
 
     #[test]
@@ -757,12 +858,23 @@ mod tests {
             dynamic_spinning(2, Vec3::new(0.0, 2.0, 0.0)),
         ];
         let colliders = [collider(1, 1, 0.0), collider(2, 2, 0.0)];
-        solve(&mut bodies, &colliders, &[manifold_at(Vec3::new(1.0, 0.0, 0.0))], 4);
+        solve(
+            &mut bodies,
+            &colliders,
+            &[manifold_at(Vec3::new(1.0, 0.0, 0.0))],
+            4,
+        );
         let momentum = bodies[0].linear_velocity().add(bodies[1].linear_velocity());
-        assert!(momentum.length() < 1.0e-5, "linear momentum conserved, got {momentum:?}");
+        assert!(
+            momentum.length() < 1.0e-5,
+            "linear momentum conserved, got {momentum:?}"
+        );
         let wa = bodies[0].angular_velocity();
         let wb = bodies[1].angular_velocity();
         assert!(wa.z.abs() > 1.0e-4, "the pair acquires spin, got {wa:?}");
-        assert!((wa.z + wb.z).abs() < 1.0e-6, "equal and opposite spin, got {wa:?} {wb:?}");
+        assert!(
+            (wa.z + wb.z).abs() < 1.0e-6,
+            "equal and opposite spin, got {wa:?} {wb:?}"
+        );
     }
 }

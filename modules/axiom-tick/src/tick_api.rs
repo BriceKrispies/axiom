@@ -122,7 +122,10 @@ mod tests {
     fn timer_sequence_is_deterministic_and_replayable() {
         let first = run_timers();
         let second = run_timers();
-        assert_eq!(first, second, "timer fire sequence must replay byte-identically");
+        assert_eq!(
+            first, second,
+            "timer fire sequence must replay byte-identically"
+        );
         assert_eq!(
             first,
             vec![
@@ -153,14 +156,20 @@ mod tests {
     fn machine_event_stream_is_deterministic_and_replayable() {
         let first = run_machine();
         let second = run_machine();
-        assert_eq!(first, second, "state event stream must replay byte-identically");
+        assert_eq!(
+            first, second,
+            "state event stream must replay byte-identically"
+        );
         assert_eq!(
             first,
             vec![
                 (0, vec![(0, StateEventKind::Enter)]),
                 (1, vec![(0, StateEventKind::Update)]),
                 (2, vec![(0, StateEventKind::Update)]),
-                (3, vec![(0, StateEventKind::Exit), (2, StateEventKind::Enter)]),
+                (
+                    3,
+                    vec![(0, StateEventKind::Exit), (2, StateEventKind::Enter)]
+                ),
                 (4, vec![(2, StateEventKind::Update)]),
                 (5, vec![(2, StateEventKind::Update)]),
             ]

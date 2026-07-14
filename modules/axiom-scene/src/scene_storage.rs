@@ -483,14 +483,18 @@ mod tests {
         let mut storage = SceneStorage::default();
         storage.locals.insert(e(1), Transform::IDENTITY);
         storage.controllers.insert(e(1), ctrl(0));
-        storage.pending_controls.push((0, Vec3::ZERO, 0.0, 10.0, None));
+        storage
+            .pending_controls
+            .push((0, Vec3::ZERO, 0.0, 10.0, None));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, PITCH_LIMIT);
         assert!(
             storage.locals.get(e(1)).unwrap().rotation.x.abs() > 0.1,
             "pitched"
         );
-        storage.pending_controls.push((0, Vec3::ZERO, 0.0, -20.0, None));
+        storage
+            .pending_controls
+            .push((0, Vec3::ZERO, 0.0, -20.0, None));
         ControllerSystem.run(&WorldStep::new(0), &reg, &mut storage);
         assert_eq!(storage.controllers.get(&e(1)).unwrap().pitch, -PITCH_LIMIT);
     }

@@ -58,7 +58,11 @@ fn every_intent_factory_sets_its_kind() {
     let mut sorted = kinds.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
-    assert_eq!(sorted.len(), kinds.len(), "every intent factory has a distinct kind");
+    assert_eq!(
+        sorted.len(),
+        kinds.len(),
+        "every intent factory has a distinct kind"
+    );
 }
 
 #[test]
@@ -103,8 +107,10 @@ fn observation_builder_preserves_order_and_builds() {
     b.add_channel(AgentApi::channel_replay()).unwrap();
     b.add_legal_action(10).unwrap();
     b.add_legal_action(20).unwrap();
-    b.add_fact(AgentApi::observation_fact(100, 1, 0, 0, 0, 0)).unwrap();
-    b.add_fact(AgentApi::observation_fact(200, 2, 0, 0, 0, 0)).unwrap();
+    b.add_fact(AgentApi::observation_fact(100, 1, 0, 0, 0, 0))
+        .unwrap();
+    b.add_fact(AgentApi::observation_fact(200, 2, 0, 0, 0, 0))
+        .unwrap();
     let obs = b.build();
     assert_eq!(obs.tick(), Tick::new(3));
     assert_eq!(obs.legal_actions(), &[10, 20]);
@@ -122,10 +128,17 @@ fn observation_builder_overflows_deterministically() {
     assert_eq!(channel_err.code(), KernelErrorCode::OutOfBounds);
     assert_eq!(channel_err.scope(), KernelErrorScope::Memory);
     assert!(b.add_legal_action(1).is_ok());
-    assert_eq!(b.add_legal_action(2).unwrap_err().code(), KernelErrorCode::OutOfBounds);
-    assert!(b.add_fact(AgentApi::observation_fact(1, 1, 0, 0, 0, 0)).is_ok());
     assert_eq!(
-        b.add_fact(AgentApi::observation_fact(2, 2, 0, 0, 0, 0)).unwrap_err().code(),
+        b.add_legal_action(2).unwrap_err().code(),
+        KernelErrorCode::OutOfBounds
+    );
+    assert!(b
+        .add_fact(AgentApi::observation_fact(1, 1, 0, 0, 0, 0))
+        .is_ok());
+    assert_eq!(
+        b.add_fact(AgentApi::observation_fact(2, 2, 0, 0, 0, 0))
+            .unwrap_err()
+            .code(),
         KernelErrorCode::OutOfBounds
     );
 }
@@ -186,7 +199,8 @@ fn scripted_brain_emits_configured_intent_and_rule_reason_on_match() {
     )]);
     let mut mem = AgentApi::empty_memory(4);
     let mut b = AgentApi::observation_builder(id, Tick::new(0), 1, 1, 1);
-    b.add_fact(AgentApi::observation_fact(100, 1, 0, 0, 0, 0)).unwrap();
+    b.add_fact(AgentApi::observation_fact(100, 1, 0, 0, 0, 0))
+        .unwrap();
     let obs = b.build();
     let (report, queue) = AgentApi::step(
         id,
@@ -199,7 +213,10 @@ fn scripted_brain_emits_configured_intent_and_rule_reason_on_match() {
     assert_eq!(queue.len(), 1);
     assert_eq!(queue.intents()[0].control_code(), 7);
     assert_eq!(report.emitted_action_count(), 1);
-    assert_eq!(report.selected_brain_kind_code(), AgentApi::BRAIN_KIND_SCRIPTED);
+    assert_eq!(
+        report.selected_brain_kind_code(),
+        AgentApi::BRAIN_KIND_SCRIPTED
+    );
     assert_eq!(
         report.reason_code(),
         AgentApi::REASON_MATCHED_RULE,
@@ -227,7 +244,10 @@ fn scripted_brain_emits_noop_when_no_rule_matches() {
         step_at(1),
     );
     assert_eq!(queue.len(), 1);
-    assert_eq!(queue.intents()[0].kind_code(), AgentApi::noop_intent().kind_code());
+    assert_eq!(
+        queue.intents()[0].kind_code(),
+        AgentApi::noop_intent().kind_code()
+    );
     assert_eq!(report.emitted_action_count(), 1);
     assert_eq!(report.reason_code(), AgentApi::REASON_NO_MATCHING_RULE);
 }
@@ -242,13 +262,17 @@ fn scripted_brain_with_zero_budget_emits_nothing_with_budget_zero_reason() {
     )]);
     let mut mem = AgentApi::empty_memory(4);
     let mut b = AgentApi::observation_builder(id, Tick::new(0), 1, 1, 1);
-    b.add_fact(AgentApi::observation_fact(100, 1, 0, 0, 0, 0)).unwrap();
+    b.add_fact(AgentApi::observation_fact(100, 1, 0, 0, 0, 0))
+        .unwrap();
     let obs = b.build();
     let frozen = AgentApi::profile_with_action_budget(AgentApi::debug_perfect_profile(), 0);
     let (report, queue) = AgentApi::step(id, frozen, &mut brain, &obs, &mut mem, step_at(5));
     assert!(queue.is_empty());
     assert_eq!(report.emitted_action_count(), 0);
-    assert_eq!(report.first_emitted_action_kind_code(), AgentApi::noop_intent().kind_code());
+    assert_eq!(
+        report.first_emitted_action_kind_code(),
+        AgentApi::noop_intent().kind_code()
+    );
     assert_eq!(report.reason_code(), AgentApi::REASON_ACTION_BUDGET_ZERO);
 }
 
@@ -271,7 +295,10 @@ fn replay_brain_emits_recorded_actions_then_noop() {
     assert_eq!(q2.intents()[0].control_code(), 2);
     assert_eq!(r2.reason_code(), AgentApi::REASON_REPLAY_EMITTED);
     // Past the end of a non-empty recording: a Noop reported as replay_complete.
-    assert_eq!(q3.intents()[0].kind_code(), AgentApi::noop_intent().kind_code());
+    assert_eq!(
+        q3.intents()[0].kind_code(),
+        AgentApi::noop_intent().kind_code()
+    );
     assert_eq!(r3.reason_code(), AgentApi::REASON_REPLAY_COMPLETE);
 }
 
@@ -289,7 +316,10 @@ fn empty_replay_brain_emits_noop_with_reason_four() {
         &mut mem,
         step_at(0),
     );
-    assert_eq!(queue.intents()[0].kind_code(), AgentApi::noop_intent().kind_code());
+    assert_eq!(
+        queue.intents()[0].kind_code(),
+        AgentApi::noop_intent().kind_code()
+    );
     assert_eq!(
         report.reason_code(),
         AgentApi::REASON_REPLAY_EMPTY,
@@ -308,7 +338,8 @@ fn identical_inputs_replay_to_identical_report_and_actions() {
         )]);
         let mut mem = AgentApi::empty_memory(8);
         let mut b = AgentApi::observation_builder(id, Tick::new(0), 1, 1, 1);
-        b.add_fact(AgentApi::observation_fact(100, 1, 0, 0, 0, 0)).unwrap();
+        b.add_fact(AgentApi::observation_fact(100, 1, 0, 0, 0, 0))
+            .unwrap();
         let obs = b.build();
         let (report, queue) = AgentApi::step(
             id,
@@ -320,28 +351,55 @@ fn identical_inputs_replay_to_identical_report_and_actions() {
         );
         (report, queue.intents().to_vec())
     };
-    assert_eq!(run(), run(), "same observation + brain + memory + step must replay identically");
+    assert_eq!(
+        run(),
+        run(),
+        "same observation + brain + memory + step must replay identically"
+    );
 }
 
 #[test]
 fn a_different_matching_rule_yields_a_different_report() {
     let id = AgentApi::create_agent_id(1);
     let mut brain = AgentApi::scripted_brain(vec![
-        AgentApi::script_rule(100, AgentApi::press_control_intent(7), AgentApi::REASON_MATCHED_RULE),
-        AgentApi::script_rule(200, AgentApi::wait_ticks_intent(3), AgentApi::REASON_MATCHED_RULE),
+        AgentApi::script_rule(
+            100,
+            AgentApi::press_control_intent(7),
+            AgentApi::REASON_MATCHED_RULE,
+        ),
+        AgentApi::script_rule(
+            200,
+            AgentApi::wait_ticks_intent(3),
+            AgentApi::REASON_MATCHED_RULE,
+        ),
     ]);
     let profile = AgentApi::debug_perfect_profile();
 
     let build_obs = |kind: u16| {
         let mut b = AgentApi::observation_builder(id, Tick::new(0), 1, 1, 1);
-        b.add_fact(AgentApi::observation_fact(kind, 1, 0, 0, 0, 0)).unwrap();
+        b.add_fact(AgentApi::observation_fact(kind, 1, 0, 0, 0, 0))
+            .unwrap();
         b.build()
     };
 
     let mut mem_a = AgentApi::empty_memory(4);
-    let (report_a, _qa) = AgentApi::step(id, profile, &mut brain, &build_obs(100), &mut mem_a, step_at(5));
+    let (report_a, _qa) = AgentApi::step(
+        id,
+        profile,
+        &mut brain,
+        &build_obs(100),
+        &mut mem_a,
+        step_at(5),
+    );
     let mut mem_b = AgentApi::empty_memory(4);
-    let (report_b, _qb) = AgentApi::step(id, profile, &mut brain, &build_obs(200), &mut mem_b, step_at(5));
+    let (report_b, _qb) = AgentApi::step(
+        id,
+        profile,
+        &mut brain,
+        &build_obs(200),
+        &mut mem_b,
+        step_at(5),
+    );
 
     assert_ne!(report_a, report_b);
     assert_eq!(

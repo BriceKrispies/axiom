@@ -320,7 +320,10 @@ mod tests {
         assert!((p.progress(10) - 1.0).abs() < 1.0e-6);
         // SmoothStep(0.5) == 0.5, so pick a quarter point where they diverge.
         assert!((p.progress(2) - 0.2).abs() < 1.0e-6);
-        assert!(p.eased_progress(2) < p.progress(2), "smoothstep eases in below linear early");
+        assert!(
+            p.eased_progress(2) < p.progress(2),
+            "smoothstep eases in below linear early"
+        );
         // A zero-length span floors at 1 and reads 0 at the start.
         assert!((resolved(5, 5, EaseCurve::Linear, 1.0).progress(5) - 0.0).abs() < 1.0e-6);
     }

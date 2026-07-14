@@ -9,13 +9,33 @@
 
 /// The unit-cube corner offsets, in the canonical marching-cubes order. Corner
 /// `i` sits at `MC_CORNER_OFFSET[i]` within a cell (0 = low, 1 = high per axis).
-pub(crate) const MC_CORNER_OFFSET: [[u32; 3]; 8] =
-    [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]];
+pub(crate) const MC_CORNER_OFFSET: [[u32; 3]; 8] = [
+    [0, 0, 0],
+    [1, 0, 0],
+    [1, 1, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [1, 0, 1],
+    [1, 1, 1],
+    [0, 1, 1],
+];
 
 /// The two corner indices each of the twelve cube edges connects, in canonical
 /// marching-cubes order (edge `e` joins corners `MC_EDGE_CORNERS[e]`).
-pub(crate) const MC_EDGE_CORNERS: [[usize; 2]; 12] =
-    [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
+pub(crate) const MC_EDGE_CORNERS: [[usize; 2]; 12] = [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 0],
+    [4, 5],
+    [5, 6],
+    [6, 7],
+    [7, 4],
+    [0, 4],
+    [1, 5],
+    [2, 6],
+    [3, 7],
+];
 
 /// The canonical marching-cubes triangle table: `MC_TRI_TABLE[config]` is a
 /// `-1`-terminated list of edge indices, three per emitted triangle, padded to

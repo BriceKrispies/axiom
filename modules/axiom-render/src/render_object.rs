@@ -145,9 +145,27 @@ mod tests {
         let b = RenderObject::new(1, Mat4::IDENTITY, 0, 0, true);
         let c = RenderObject::new(1, Mat4::IDENTITY, 0, 0, false);
         let d = RenderObject::new(2, Mat4::IDENTITY, 0, 0, true);
-        let e = RenderObject::bound(1, Mat4::IDENTITY, 0, 0, 1, RenderPipelineKind::BASIC_LIT, 0, true);
+        let e = RenderObject::bound(
+            1,
+            Mat4::IDENTITY,
+            0,
+            0,
+            1,
+            RenderPipelineKind::BASIC_LIT,
+            0,
+            true,
+        );
         let f = RenderObject::bound(1, Mat4::IDENTITY, 0, 0, 0, 2, 0, true);
-        let g = RenderObject::bound(1, Mat4::IDENTITY, 0, 0, 0, RenderPipelineKind::BASIC_LIT, 3, true);
+        let g = RenderObject::bound(
+            1,
+            Mat4::IDENTITY,
+            0,
+            0,
+            0,
+            RenderPipelineKind::BASIC_LIT,
+            3,
+            true,
+        );
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_ne!(a, d);

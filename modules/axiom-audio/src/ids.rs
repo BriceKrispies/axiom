@@ -308,7 +308,10 @@ mod tests {
     fn audio_seconds_is_a_plain_clock_value() {
         assert_eq!(AudioSeconds::ZERO.seconds(), 0.0);
         assert_eq!(AudioSeconds::from_seconds(1.5).seconds(), 1.5);
-        assert_eq!(AudioSeconds::from_seconds(1.5), AudioSeconds::from_seconds(1.5));
+        assert_eq!(
+            AudioSeconds::from_seconds(1.5),
+            AudioSeconds::from_seconds(1.5)
+        );
         assert!(format!("{:?}", AudioSeconds::ZERO).starts_with("AudioSeconds"));
     }
 

@@ -126,7 +126,6 @@ fn empty_batch_applies_nothing() {
     assert!(report.is_empty());
 }
 
-
 use crate::definition::{DefinitionKind, PropertySet, TagSet};
 use crate::interaction::{InteractionKind, InteractionParams, InteractionRoute};
 use crate::transfer::{TransferMode, TransferOutcome};
@@ -152,10 +151,9 @@ fn transfer_setup() -> (SimWorld, InteractionRecord, ResidueId, ResidueLocation)
         .unwrap();
     let src_loc = ResidueLocation::symbol(1);
     let dst = ResidueLocation::symbol(2);
-    let source =
-        world
-            .residues_mut()
-            .create(sub, vol(10), src_loc, ResidueState::new(0), None, 0);
+    let source = world
+        .residues_mut()
+        .create(sub, vol(10), src_loc, ResidueState::new(0), None, 0);
     let id = world.interactions_mut().create(InteractionParams {
         kind: InteractionKind::new(1),
         route: InteractionRoute::Touch,

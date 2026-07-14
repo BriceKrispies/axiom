@@ -57,17 +57,16 @@ impl AnimationClip {
 
     /// The code of the first phase whose span contains `tick`, if any.
     pub(crate) fn phase_at(&self, tick: Tick) -> Option<u32> {
-        self.phases.iter().find(|p| p.contains(tick)).map(|p| p.code())
+        self.phases
+            .iter()
+            .find(|p| p.contains(tick))
+            .map(|p| p.code())
     }
 
     /// Add a validated track for `bone` from `keys`. Fails with `EmptyTrack`
     /// (no keyframes) or `NonMonotonicKeyframes` (times not strictly
     /// increasing).
-    pub(crate) fn add_track(
-        &mut self,
-        bone: BoneId,
-        keys: Vec<Keyframe>,
-    ) -> AnimationResult<()> {
+    pub(crate) fn add_track(&mut self, bone: BoneId, keys: Vec<Keyframe>) -> AnimationResult<()> {
         Track::new(bone, keys).map(|track| self.tracks.push(track))
     }
 
@@ -120,8 +119,11 @@ impl AnimationClip {
     pub(crate) fn read_from(reader: &mut BinaryReader<'_>) -> KernelResult<AnimationClip> {
         read_counted(reader, Track::read_from).and_then(|tracks| {
             read_counted(reader, ClipEvent::read_from).and_then(|events| {
-                read_counted(reader, ClipPhase::read_from)
-                    .map(|phases| AnimationClip { tracks, events, phases })
+                read_counted(reader, ClipPhase::read_from).map(|phases| AnimationClip {
+                    tracks,
+                    events,
+                    phases,
+                })
             })
         })
     }
@@ -153,7 +155,10 @@ mod tests {
     }
 
     fn key(t: u64, x: f32) -> Keyframe {
-        Keyframe::new(Tick::new(t), Transform::from_translation(Vec3::new(x, 0.0, 0.0)))
+        Keyframe::new(
+            Tick::new(t),
+            Transform::from_translation(Vec3::new(x, 0.0, 0.0)),
+        )
     }
 
     /// A two-bone skeleton (root + child) where only the child is animated, so
@@ -168,8 +173,10 @@ mod tests {
     #[test]
     fn clip_round_trips_through_bytes() {
         let mut clip = AnimationClip::new();
-        clip.add_track(BoneId::from_raw(1), vec![key(0, 0.0), key(10, 10.0)]).unwrap();
-        clip.add_track(BoneId::from_raw(0), vec![key(0, 1.0)]).unwrap();
+        clip.add_track(BoneId::from_raw(1), vec![key(0, 0.0), key(10, 10.0)])
+            .unwrap();
+        clip.add_track(BoneId::from_raw(0), vec![key(0, 1.0)])
+            .unwrap();
         clip.add_event(Tick::new(5), 42);
         clip.add_phase(Tick::new(0), Tick::new(6), 1);
         clip.add_phase(Tick::new(6), Tick::new(10), 2);
@@ -186,7 +193,10 @@ mod tests {
         let mut w = BinaryWriter::new();
         clip.write_to(&mut w);
         let bytes = w.into_bytes();
-        assert_eq!(AnimationClip::read_from(&mut BinaryReader::new(&bytes)).unwrap(), clip);
+        assert_eq!(
+            AnimationClip::read_from(&mut BinaryReader::new(&bytes)).unwrap(),
+            clip
+        );
         assert!(AnimationClip::read_from(&mut BinaryReader::new(&bytes[..4])).is_err());
     }
 
@@ -238,7 +248,9 @@ mod tests {
     fn add_track_validates_keys() {
         let mut clip = AnimationClip::new();
         assert_eq!(
-            clip.add_track(BoneId::from_raw(0), Vec::new()).unwrap_err().code(),
+            clip.add_track(BoneId::from_raw(0), Vec::new())
+                .unwrap_err()
+                .code(),
             AnimationErrorCode::EmptyTrack
         );
     }
@@ -274,7 +286,10 @@ mod tests {
         let mut clip = AnimationClip::new();
         clip.add_track(
             BoneId::from_raw(0),
-            vec![Keyframe::new(Tick::new(0), bad), Keyframe::new(Tick::new(4), bad)],
+            vec![
+                Keyframe::new(Tick::new(0), bad),
+                Keyframe::new(Tick::new(4), bad),
+            ],
         )
         .unwrap();
         assert_eq!(

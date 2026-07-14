@@ -55,7 +55,11 @@ pub(crate) struct MuscleStyle {
 impl MuscleStyle {
     /// Assemble a style from its three scalars.
     pub(crate) fn new(muscle_strength: f32, muscle_damping: f32, balance_strength: f32) -> Self {
-        MuscleStyle { muscle_strength, muscle_damping, balance_strength }
+        MuscleStyle {
+            muscle_strength,
+            muscle_damping,
+            balance_strength,
+        }
     }
 
     /// A neutral, unit-strength style.
@@ -75,8 +79,12 @@ pub(crate) enum SupportMode {
 }
 
 /// Support modes in code order.
-const SUPPORT_MODES: [SupportMode; 4] =
-    [SupportMode::BothFeet, SupportMode::LeftFoot, SupportMode::RightFoot, SupportMode::Airborne];
+const SUPPORT_MODES: [SupportMode; 4] = [
+    SupportMode::BothFeet,
+    SupportMode::LeftFoot,
+    SupportMode::RightFoot,
+    SupportMode::Airborne,
+];
 
 impl SupportMode {
     /// The stable facade code.
@@ -106,7 +114,10 @@ pub(crate) struct MusclePhaseProfile {
 impl MusclePhaseProfile {
     /// Assemble a phase profile from a support mode and per-group weights.
     pub(crate) fn new(support: SupportMode, group_weights: [f32; MUSCLE_GROUP_COUNT]) -> Self {
-        MusclePhaseProfile { support, group_weights }
+        MusclePhaseProfile {
+            support,
+            group_weights,
+        }
     }
 
     /// The support mode for the phase.
@@ -151,7 +162,13 @@ mod tests {
         assert_eq!(phase.support(), SupportMode::LeftFoot);
         assert_eq!(phase.weight(MuscleGroup::Core), 0.5);
         let s = MuscleStyle::new(2.0, 0.5, 1.5);
-        assert_eq!((s.muscle_strength, s.muscle_damping, s.balance_strength), (2.0, 0.5, 1.5));
-        assert_eq!(MuscleStyle::default_style(), MuscleStyle::new(1.0, 1.0, 1.0));
+        assert_eq!(
+            (s.muscle_strength, s.muscle_damping, s.balance_strength),
+            (2.0, 0.5, 1.5)
+        );
+        assert_eq!(
+            MuscleStyle::default_style(),
+            MuscleStyle::new(1.0, 1.0, 1.0)
+        );
     }
 }

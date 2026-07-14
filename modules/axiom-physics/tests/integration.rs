@@ -38,7 +38,6 @@ fn meters(v: f32) -> Meters {
     Meters::new(v).unwrap()
 }
 
-
 #[test]
 fn identical_inputs_produce_byte_identical_snapshots_and_records() {
     // A fixed scenario built as a closure so its sealed snapshot/record return
@@ -104,7 +103,6 @@ fn collider_handles_are_allocated_in_stable_increasing_order() {
     assert_ne!(first, PhysicsColliderHandle::NULL);
 }
 
-
 #[test]
 fn dynamic_body_falls_under_gravity() {
     let mut api = PhysicsApi::new();
@@ -145,11 +143,14 @@ fn kinematic_body_does_not_move_under_gravity() {
     let platform = api.create_kinematic_body(Transform::IDENTITY).unwrap();
     api.step(tenth_second()).unwrap();
     let snap = api.snapshot();
-    let body = snap.bodies().iter().find(|b| b.handle() == platform).unwrap();
+    let body = snap
+        .bodies()
+        .iter()
+        .find(|b| b.handle() == platform)
+        .unwrap();
     assert_eq!(body.transform().translation, Vec3::ZERO);
     assert_eq!(body.linear_velocity(), Vec3::ZERO);
 }
-
 
 #[test]
 fn applying_force_changes_dynamic_velocity_deterministically() {
@@ -168,8 +169,15 @@ fn applying_force_changes_dynamic_velocity_deterministically() {
             .linear_velocity()
     };
     let v = velocity_after_force();
-    assert!(v.x > 0.0, "a positive x force must produce positive x velocity");
-    assert_eq!(v, velocity_after_force(), "force response must be deterministic");
+    assert!(
+        v.x > 0.0,
+        "a positive x force must produce positive x velocity"
+    );
+    assert_eq!(
+        v,
+        velocity_after_force(),
+        "force response must be deterministic"
+    );
 }
 
 #[test]
@@ -189,8 +197,15 @@ fn applying_impulse_changes_dynamic_velocity_deterministically() {
             .linear_velocity()
     };
     let v = velocity_after_impulse();
-    assert!(v.z > 0.0, "a positive z impulse must produce positive z velocity");
-    assert_eq!(v, velocity_after_impulse(), "impulse response must be deterministic");
+    assert!(
+        v.z > 0.0,
+        "a positive z impulse must produce positive z velocity"
+    );
+    assert_eq!(
+        v,
+        velocity_after_impulse(),
+        "impulse response must be deterministic"
+    );
 }
 
 #[test]
@@ -238,7 +253,6 @@ fn disabled_dynamic_body_does_not_integrate() {
     assert_eq!(api.latest_step_record().integration_count(), 0);
 }
 
-
 #[test]
 fn step_record_reports_real_counts_for_a_single_body() {
     // A lone dynamic body with one collider and a queued force: there is no second
@@ -263,13 +277,25 @@ fn step_record_reports_real_counts_for_a_single_body() {
     assert_eq!(rec.collider_count(), 1);
     assert_eq!(rec.dynamic_body_count(), 1);
     assert_eq!(rec.command_count(), 1, "one force command was drained");
-    assert_eq!(rec.integration_count(), 1, "one enabled dynamic body integrated");
+    assert_eq!(
+        rec.integration_count(),
+        1,
+        "one enabled dynamic body integrated"
+    );
     // A single collider can form no pair, so the collision pipeline does no work
     // and — crucially — no contact is *solved*.
     assert_eq!(rec.broad_phase_pair_count(), 0);
     assert_eq!(rec.contact_pair_count(), 0);
-    assert_eq!(rec.solved_contact_count(), 0, "a lone body solves no contact");
-    assert_eq!(rec.substep_count(), 1, "the default world runs a single substep");
+    assert_eq!(
+        rec.solved_contact_count(),
+        0,
+        "a lone body solves no contact"
+    );
+    assert_eq!(
+        rec.substep_count(),
+        1,
+        "the default world runs a single substep"
+    );
     // `solver_iteration_count` is the *configured* budget (8), reported every step
     // as metadata — never as proof that any contact was solved.
     assert_eq!(rec.solver_iteration_count(), 8);
@@ -296,7 +322,11 @@ fn snapshot_lists_bodies_and_colliders_in_insertion_order() {
     let snap = api.snapshot();
     assert_eq!(snap.step_index(), 1);
     let handles: Vec<PhysicsBodyHandle> = snap.bodies().iter().map(|b| b.handle()).collect();
-    assert_eq!(handles, vec![first, second], "bodies stay in insertion order");
+    assert_eq!(
+        handles,
+        vec![first, second],
+        "bodies stay in insertion order"
+    );
     assert_eq!(snap.colliders().len(), 1);
     let collider = snap.colliders()[0];
     assert_eq!(collider.handle(), col);
@@ -304,7 +334,6 @@ fn snapshot_lists_bodies_and_colliders_in_insertion_order() {
     assert!(!collider.is_trigger());
     assert!(collider.enabled());
 }
-
 
 #[test]
 fn non_finite_body_transform_is_rejected() {
@@ -319,7 +348,8 @@ fn non_finite_body_transform_is_rejected() {
 fn invalid_mass_is_rejected() {
     let mut api = PhysicsApi::new();
     assert!(
-        api.create_dynamic_body(Transform::IDENTITY, ratio(0.0)).is_err(),
+        api.create_dynamic_body(Transform::IDENTITY, ratio(0.0))
+            .is_err(),
         "zero mass must be rejected"
     );
 }
@@ -404,16 +434,27 @@ fn zero_length_step_is_rejected() {
     let mut api = PhysicsApi::new();
     api.create_dynamic_body(Transform::IDENTITY, ratio(1.0))
         .unwrap();
-    assert!(api.step(step_of(0)).is_err(), "a zero-nanosecond step is invalid");
+    assert!(
+        api.step(step_of(0)).is_err(),
+        "a zero-nanosecond step is invalid"
+    );
     // A rejected step must not advance the world.
     assert_eq!(api.latest_step_record().step_index(), 0);
 }
 
-
 #[test]
 fn body_capacity_is_enforced() {
-    let mut api =
-        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 1, 1, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+    let mut api = PhysicsApi::with_config(
+        Vec3::new(0.0, -9.8, 0.0),
+        8,
+        1,
+        1,
+        1,
+        true,
+        ratio(0.0),
+        ratio(0.0),
+    )
+    .unwrap();
     assert!(api.create_static_body(Transform::IDENTITY).is_ok());
     assert!(
         api.create_static_body(Transform::IDENTITY).is_err(),
@@ -423,15 +464,25 @@ fn body_capacity_is_enforced() {
 
 #[test]
 fn collider_capacity_is_enforced() {
-    let mut api =
-        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 4, 1, 1, true, ratio(0.0), ratio(0.0)).unwrap();
+    let mut api = PhysicsApi::with_config(
+        Vec3::new(0.0, -9.8, 0.0),
+        8,
+        4,
+        1,
+        1,
+        true,
+        ratio(0.0),
+        ratio(0.0),
+    )
+    .unwrap();
     let body = api.create_static_body(Transform::IDENTITY).unwrap();
     let material = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
     assert!(api
         .attach_sphere_collider(body, meters(1.0), material, false)
         .is_ok());
     assert!(
-        api.attach_box_collider(body, Vec3::ONE, material, false).is_err(),
+        api.attach_box_collider(body, Vec3::ONE, material, false)
+            .is_err(),
         "a second collider must exceed max_colliders = 1"
     );
 }
@@ -441,7 +492,17 @@ fn invalid_configuration_is_rejected() {
     // Zero capacities / iterations are invalid.
     assert!(PhysicsApi::with_config(Vec3::ZERO, 0, 1, 1, 1, true, ratio(0.0), ratio(0.0)).is_err());
     // Non-finite gravity is invalid.
-    assert!(PhysicsApi::with_config(Vec3::new(f32::NAN, 0.0, 0.0), 1, 1, 1, 1, true, ratio(0.0), ratio(0.0)).is_err());
+    assert!(PhysicsApi::with_config(
+        Vec3::new(f32::NAN, 0.0, 0.0),
+        1,
+        1,
+        1,
+        1,
+        true,
+        ratio(0.0),
+        ratio(0.0)
+    )
+    .is_err());
 }
 
 #[test]
@@ -453,7 +514,6 @@ fn attaching_to_a_missing_body_is_rejected() {
         .attach_sphere_collider(bogus, meters(1.0), material, false)
         .is_err());
 }
-
 
 #[test]
 fn no_collision_or_trigger_events_are_emitted_yet() {
@@ -498,7 +558,9 @@ fn bodies_without_colliders_are_not_hit_by_queries() {
         .unwrap();
     api.step(tenth_second()).unwrap();
 
-    assert!(api.raycast(Vec3::ZERO, Vec3::UNIT_X, meters(100.0)).is_none());
+    assert!(api
+        .raycast(Vec3::ZERO, Vec3::UNIT_X, meters(100.0))
+        .is_none());
     assert!(api.overlap_sphere(Vec3::ZERO, meters(100.0)).is_empty());
 }
 
@@ -526,7 +588,11 @@ fn raycast_and_overlap_find_a_collidered_body_through_the_facade() {
     let before = api.snapshot();
     let _ = api.raycast(Vec3::ZERO, Vec3::UNIT_X, meters(100.0));
     let _ = api.overlap_sphere(Vec3::ZERO, meters(100.0));
-    assert_eq!(before, api.snapshot(), "queries must not mutate world state");
+    assert_eq!(
+        before,
+        api.snapshot(),
+        "queries must not mutate world state"
+    );
 }
 
 #[test]
@@ -537,7 +603,6 @@ fn default_world_is_empty_and_unstepped() {
     assert!(api.snapshot().colliders().is_empty());
     assert_eq!(api.latest_step_record().step_index(), 0);
 }
-
 
 /// A small `1/120 s` step — fine enough for stable resting contact.
 fn small_step() -> RuntimeStep {
@@ -600,7 +665,10 @@ fn dynamic_sphere_settles_on_static_plane_without_tunnelling() {
     // A 0.5-radius sphere on the plane at y = 0 rests with its centre near y = 0.5.
     assert!((0.4..=0.6).contains(&y), "settled centre y = {y}");
     // It never sinks through the surface.
-    assert!(min_y > 0.2, "minimum centre y = {min_y} indicates tunnelling");
+    assert!(
+        min_y > 0.2,
+        "minimum centre y = {min_y} indicates tunnelling"
+    );
     // And it is at rest (no residual vertical velocity).
     assert!(body_vy(&api, ball).abs() < 0.2, "should be at rest");
 }
@@ -614,7 +682,11 @@ fn settling_is_deterministic() {
         }
         api.snapshot()
     };
-    assert_eq!(drop(), drop(), "a settling drop must replay byte-identically");
+    assert_eq!(
+        drop(),
+        drop(),
+        "a settling drop must replay byte-identically"
+    );
 }
 
 #[test]

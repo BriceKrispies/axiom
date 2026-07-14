@@ -41,13 +41,12 @@ fn angular_velocity(api: &PhysicsApi, body: PhysicsBodyHandle) -> Vec3 {
         .angular_velocity()
 }
 
-
 #[test]
 fn linear_damping_decays_a_coasting_body_monotonically_to_rest() {
     // No gravity, 50% linear damping per step: a shoved body coasts and its speed
     // halves every step, approaching rest.
-    let mut api = PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.5), ratio(0.0))
-        .unwrap();
+    let mut api =
+        PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.5), ratio(0.0)).unwrap();
     let body = api
         .create_dynamic_body(Transform::IDENTITY, ratio(1.0))
         .unwrap();
@@ -58,7 +57,10 @@ fn linear_damping_decays_a_coasting_body_monotonically_to_rest() {
     for _ in 0..6 {
         api.step(tenth_second()).unwrap();
         let vx = linear_velocity(&api, body).x;
-        assert!(vx < last, "speed must strictly decay each step: {vx} !< {last}");
+        assert!(
+            vx < last,
+            "speed must strictly decay each step: {vx} !< {last}"
+        );
         last = vx;
         speeds.push(vx);
     }
@@ -76,14 +78,24 @@ fn zero_damping_reproduces_prior_behaviour_exactly() {
     let scenario = |damped: bool| {
         let mut api = if damped {
             PhysicsApi::with_config(
-                Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 1, true, ratio(0.0), ratio(0.0),
+                Vec3::new(0.0, -9.8, 0.0),
+                8,
+                16,
+                16,
+                1,
+                true,
+                ratio(0.0),
+                ratio(0.0),
             )
             .unwrap()
         } else {
             PhysicsApi::new()
         };
         let body = api
-            .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 5.0, 0.0)), ratio(2.0))
+            .create_dynamic_body(
+                Transform::from_translation(Vec3::new(0.0, 5.0, 0.0)),
+                ratio(2.0),
+            )
             .unwrap();
         api.apply_force(body, Vec3::new(3.0, 0.0, 1.0)).unwrap();
         api.apply_impulse(body, Vec3::new(0.0, 0.0, 0.5)).unwrap();
@@ -94,17 +106,27 @@ fn zero_damping_reproduces_prior_behaviour_exactly() {
     };
     let (snap_zero, rec_zero) = scenario(true);
     let (snap_default, rec_default) = scenario(false);
-    assert_eq!(snap_zero, snap_default, "explicit zero damping == default behaviour");
+    assert_eq!(
+        snap_zero, snap_default,
+        "explicit zero damping == default behaviour"
+    );
     assert_eq!(rec_zero, rec_default);
 }
-
 
 /// A lone dynamic sphere (which gives the body a finite moment of inertia) in a
 /// gravity-free world with the given angular damping.
 fn lone_spinner(angular_damping: f32) -> (PhysicsApi, PhysicsBodyHandle) {
-    let mut api =
-        PhysicsApi::with_config(Vec3::ZERO, 8, 16, 16, 1, true, ratio(0.0), ratio(angular_damping))
-            .unwrap();
+    let mut api = PhysicsApi::with_config(
+        Vec3::ZERO,
+        8,
+        16,
+        16,
+        1,
+        true,
+        ratio(0.0),
+        ratio(angular_damping),
+    )
+    .unwrap();
     let body = api
         .create_dynamic_body(Transform::IDENTITY, ratio(1.0))
         .unwrap();
@@ -123,7 +145,10 @@ fn torque_spins_a_body_up_and_advances_its_orientation() {
     api.apply_torque(body, Vec3::new(0.0, 2.0, 0.0)).unwrap();
     api.step(tenth_second()).unwrap();
     let w1 = angular_velocity(&api, body).y;
-    assert!(w1 > 0.0, "torque must produce +Y angular velocity, got {w1}");
+    assert!(
+        w1 > 0.0,
+        "torque must produce +Y angular velocity, got {w1}"
+    );
 
     let r1 = api.snapshot().bodies()[0].transform().rotation;
     assert!(r1.y > 0.0, "orientation must advance about +Y, got {r1:?}");
@@ -132,7 +157,10 @@ fn torque_spins_a_body_up_and_advances_its_orientation() {
     // With no further torque and zero damping, angular velocity is conserved and
     // the orientation keeps advancing.
     api.step(tenth_second()).unwrap();
-    assert!((angular_velocity(&api, body).y - w1).abs() < 1.0e-6, "spin conserved");
+    assert!(
+        (angular_velocity(&api, body).y - w1).abs() < 1.0e-6,
+        "spin conserved"
+    );
     let r2 = api.snapshot().bodies()[0].transform().rotation;
     assert!(r2.y > r1.y, "orientation continues to advance");
 }
@@ -155,7 +183,6 @@ fn angular_damping_decays_a_spin_monotonically_toward_rest() {
     }
 }
 
-
 /// A box sliding sideways across a flat floor under gravity, with the given
 /// surface friction on both bodies. Returns the world, the box handle, and runs
 /// `steps` fixed steps after launching the box with a sideways impulse.
@@ -166,7 +193,10 @@ fn sliding_box(friction: f32, steps: u32) -> (PhysicsApi, PhysicsBodyHandle) {
     api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
         .unwrap();
     let boxed = api
-        .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.45, 0.0)), ratio(1.0))
+        .create_dynamic_body(
+            Transform::from_translation(Vec3::new(0.0, 0.45, 0.0)),
+            ratio(1.0),
+        )
         .unwrap();
     api.attach_box_collider(boxed, Vec3::new(0.5, 0.5, 0.5), material, false)
         .unwrap();
@@ -185,16 +215,32 @@ fn friction_grips_a_sliding_box_but_frictionless_keeps_sliding() {
     let (gripped, body) = sliding_box(1.0, 12);
     let vx_gripped = linear_velocity(&gripped, body).x;
     let spin_gripped = angular_velocity(&gripped, body).z;
-    assert!(vx_gripped < 4.0, "high friction bleeds off the slide, got {vx_gripped}");
-    assert!(spin_gripped < 0.0, "friction torque rolls the box forward (-Z), got {spin_gripped}");
+    assert!(
+        vx_gripped < 4.0,
+        "high friction bleeds off the slide, got {vx_gripped}"
+    );
+    assert!(
+        spin_gripped < 0.0,
+        "friction torque rolls the box forward (-Z), got {spin_gripped}"
+    );
 
     // Frictionless: the slide is conserved (gravity only changes the vertical) and,
     // with no tangential impulse, the box never picks up spin.
     let (frictionless, body) = sliding_box(0.0, 12);
     let vx_free = linear_velocity(&frictionless, body).x;
-    assert!(vx_free > 5.5, "a frictionless box keeps sliding, got {vx_free}");
-    assert_eq!(angular_velocity(&frictionless, body).z, 0.0, "frictionless never rolls");
-    assert!(vx_gripped < vx_free, "friction slows the box more than no friction does");
+    assert!(
+        vx_free > 5.5,
+        "a frictionless box keeps sliding, got {vx_free}"
+    );
+    assert_eq!(
+        angular_velocity(&frictionless, body).z,
+        0.0,
+        "frictionless never rolls"
+    );
+    assert!(
+        vx_gripped < vx_free,
+        "friction slows the box more than no friction does"
+    );
 }
 
 #[test]
@@ -207,7 +253,10 @@ fn step_record_reports_an_honest_frictioned_contact_count() {
     api.attach_plane_collider(ground, Vec3::UNIT_Y, meters(0.0), material, false)
         .unwrap();
     let boxed = api
-        .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.45, 0.0)), ratio(1.0))
+        .create_dynamic_body(
+            Transform::from_translation(Vec3::new(0.0, 0.45, 0.0)),
+            ratio(1.0),
+        )
         .unwrap();
     api.attach_box_collider(boxed, Vec3::new(0.5, 0.5, 0.5), material, false)
         .unwrap();
@@ -225,28 +274,38 @@ fn step_record_reports_an_honest_frictioned_contact_count() {
     // The same scene with a frictionless floor reports zero frictioned contacts.
     let mut frictionless = PhysicsApi::new();
     let slick = PhysicsApi::material(ratio(0.0), ratio(0.0), ratio(1.0)).unwrap();
-    let g2 = frictionless.create_static_body(Transform::IDENTITY).unwrap();
+    let g2 = frictionless
+        .create_static_body(Transform::IDENTITY)
+        .unwrap();
     frictionless
         .attach_plane_collider(g2, Vec3::UNIT_Y, meters(0.0), slick, false)
         .unwrap();
     let b2 = frictionless
-        .create_dynamic_body(Transform::from_translation(Vec3::new(0.0, 0.45, 0.0)), ratio(1.0))
+        .create_dynamic_body(
+            Transform::from_translation(Vec3::new(0.0, 0.45, 0.0)),
+            ratio(1.0),
+        )
         .unwrap();
     frictionless
         .attach_box_collider(b2, Vec3::new(0.5, 0.5, 0.5), slick, false)
         .unwrap();
-    frictionless.apply_impulse(b2, Vec3::new(6.0, 0.0, 0.0)).unwrap();
+    frictionless
+        .apply_impulse(b2, Vec3::new(6.0, 0.0, 0.0))
+        .unwrap();
     frictionless.step(tenth_second()).unwrap();
     frictionless.step(tenth_second()).unwrap();
-    assert_eq!(frictionless.latest_step_record().frictioned_contact_count(), 0);
+    assert_eq!(
+        frictionless.latest_step_record().frictioned_contact_count(),
+        0
+    );
 }
-
 
 #[test]
 fn torque_and_friction_replay_byte_equal_within_one_binary() {
     let scenario = || {
         let (mut api, spinner) = lone_spinner(0.25);
-        api.apply_torque(spinner, Vec3::new(0.3, 1.5, -0.2)).unwrap();
+        api.apply_torque(spinner, Vec3::new(0.3, 1.5, -0.2))
+            .unwrap();
         let (mut floor_world, slider) = sliding_box(0.6, 0);
         api.step(tenth_second()).unwrap();
         floor_world.step(tenth_second()).unwrap();
@@ -259,5 +318,9 @@ fn torque_and_friction_replay_byte_equal_within_one_binary() {
             linear_velocity(&floor_world, slider),
         )
     };
-    assert_eq!(scenario(), scenario(), "the angular + friction paths replay byte-equal");
+    assert_eq!(
+        scenario(),
+        scenario(),
+        "the angular + friction paths replay byte-equal"
+    );
 }

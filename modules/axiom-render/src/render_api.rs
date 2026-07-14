@@ -50,7 +50,6 @@ impl RenderApi {
     pub const KIND_SET_MATERIAL: u32 = RenderCommand::KIND_SET_MATERIAL;
     pub const KIND_DRAW_INDEXED: u32 = RenderCommand::KIND_DRAW_INDEXED;
 
-
     pub fn new_input(&self, viewport_width: u32, viewport_height: u32) -> RenderInput {
         RenderInput::new(viewport_width, viewport_height)
     }
@@ -187,7 +186,6 @@ impl RenderApi {
         input.add_sdf_shape(RenderSdf::new(kind, world, dims, color));
     }
 
-
     /// Build a deterministic [`RenderCommandList`] from a [`RenderInput`]:
     /// `ClearFrame`, then `SetCamera` (if present), and the drawable objects as
     /// `SetMesh` / `SetMaterial` / `DrawIndexed` — **alpha-ordered** by
@@ -212,25 +210,24 @@ impl RenderApi {
                 camera.projection(),
             ));
         });
-        let _last_pipeline = crate::draw_order::ordered_draws(input).iter().fold(
-            None::<u32>,
-            |prev_pipeline, d| {
-                (prev_pipeline != Some(d.pipeline))
-                    .then(|| list.push(RenderCommand::set_pipeline(d.pipeline)));
-                list.push(RenderCommand::set_mesh(d.mesh_id));
-                list.push(RenderCommand::set_material(d.material_id, d.texture_id));
-                list.push(RenderCommand::draw_indexed(
-                    d.object_id,
-                    d.object_tag,
-                    d.index_count,
-                    d.world,
-                ));
-                Some(d.pipeline)
-            },
-        );
+        let _last_pipeline =
+            crate::draw_order::ordered_draws(input)
+                .iter()
+                .fold(None::<u32>, |prev_pipeline, d| {
+                    (prev_pipeline != Some(d.pipeline))
+                        .then(|| list.push(RenderCommand::set_pipeline(d.pipeline)));
+                    list.push(RenderCommand::set_mesh(d.mesh_id));
+                    list.push(RenderCommand::set_material(d.material_id, d.texture_id));
+                    list.push(RenderCommand::draw_indexed(
+                        d.object_id,
+                        d.object_tag,
+                        d.index_count,
+                        d.world,
+                    ));
+                    Some(d.pipeline)
+                });
         list
     }
-
 
     pub fn command_count(&self, list: &RenderCommandList) -> usize {
         list.len()
@@ -290,7 +287,6 @@ impl RenderApi {
     pub fn command_draw_object_id_at(&self, list: &RenderCommandList, idx: usize) -> Option<u64> {
         list.at(idx).and_then(RenderCommand::as_draw_object_id)
     }
-
 
     /// Compile a [`RenderInput`] to a deterministic
     /// [`axiom_host::FramePacket`] — the single backend-neutral artifact the GPU
@@ -443,7 +439,10 @@ impl RenderApi {
         shapes: &[(u32, Mat4, Vec3, Vec4)],
     ) -> Option<SdfScene> {
         (!shapes.is_empty()).then(|| {
-            let inv_view_proj = view_proj.inverse().unwrap_or(Mat4::IDENTITY).as_cols_array();
+            let inv_view_proj = view_proj
+                .inverse()
+                .unwrap_or(Mat4::IDENTITY)
+                .as_cols_array();
             let primitives = shapes
                 .iter()
                 .map(|(kind, world, dims, color)| {
@@ -467,7 +466,6 @@ impl RenderApi {
             )
         })
     }
-
 
     /// Capture a deterministic [`RenderReceipt`] for one frame: the frame
     /// identity ([`FrameIndex`] + [`Tick`]) plus the ordered command list,

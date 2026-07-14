@@ -26,8 +26,8 @@ impl FpController {
     /// up or down never tilts movement off the horizontal plane (`yaw 0` faces
     /// −Z, matching the perspective convention in [`Self::view_projection`]).
     pub fn step(pose: Pose, intent: MoveIntent, look: LookDelta, tuning: WalkTuning) -> Pose {
-        let key_turn = (intent.turn_left as i32 - intent.turn_right as i32) as f32
-            * tuning.turn_speed().get();
+        let key_turn =
+            (intent.turn_left as i32 - intent.turn_right as i32) as f32 * tuning.turn_speed().get();
         let yaw = pose.yaw().get() + key_turn + look.yaw().get();
         let limit = tuning.pitch_limit().get();
         let pitch = (pose.pitch().get() + look.pitch().get()).clamp(-limit, limit);
@@ -52,7 +52,11 @@ impl FpController {
     /// the walker). This is the point [`Self::view_projection`] looks from, and
     /// the point a streaming world uses to plan residency around the camera.
     pub fn eye_position(pose: Pose, ground: Meters, tuning: WalkTuning) -> Vec3 {
-        Vec3::new(pose.x().get(), ground.get() + tuning.eye_height().get(), pose.z().get())
+        Vec3::new(
+            pose.x().get(),
+            ground.get() + tuning.eye_height().get(),
+            pose.z().get(),
+        )
     }
 
     /// The camera view-projection (`proj · view`) for `pose`, seated on `ground`,
@@ -62,10 +66,19 @@ impl FpController {
     pub fn view_projection(pose: Pose, ground: Meters, tuning: WalkTuning, lens: Lens) -> Mat4 {
         let eye = Self::eye_position(pose, ground, tuning);
         let (cp, sp) = (pose.pitch().get().cos(), pose.pitch().get().sin());
-        let fwd = Vec3::new(pose.yaw().get().sin() * cp, sp, -pose.yaw().get().cos() * cp);
+        let fwd = Vec3::new(
+            pose.yaw().get().sin() * cp,
+            sp,
+            -pose.yaw().get().cos() * cp,
+        );
         let target = Vec3::new(eye.x + fwd.x, eye.y + fwd.y, eye.z + fwd.z);
-        let proj = Mat4::perspective(lens.fov().get(), lens.aspect().get(), lens.near().get(), lens.far().get())
-            .unwrap_or(Mat4::IDENTITY);
+        let proj = Mat4::perspective(
+            lens.fov().get(),
+            lens.aspect().get(),
+            lens.near().get(),
+            lens.far().get(),
+        )
+        .unwrap_or(Mat4::IDENTITY);
         let view = Mat4::look_at(eye, target, Vec3::UNIT_Y).unwrap_or(Mat4::IDENTITY);
         proj.multiply(view)
     }
@@ -93,7 +106,14 @@ mod tests {
         turn_left: bool,
         turn_right: bool,
     ) -> MoveIntent {
-        MoveIntent { forward, backward, strafe_left, strafe_right, turn_left, turn_right }
+        MoveIntent {
+            forward,
+            backward,
+            strafe_left,
+            strafe_right,
+            turn_left,
+            turn_right,
+        }
     }
 
     fn lens() -> Lens {
@@ -243,10 +263,20 @@ mod tests {
             Radians::finite_or_zero(0.3),
             Radians::finite_or_zero(-0.2),
         );
-        let vp = FpController::view_projection(pose, Meters::finite_or_zero(0.0), WalkTuning::walk(), lens());
+        let vp = FpController::view_projection(
+            pose,
+            Meters::finite_or_zero(0.0),
+            WalkTuning::walk(),
+            lens(),
+        );
         assert!(vp.as_cols_array().iter().all(|f| f.is_finite()));
         // Same inputs → byte-identical matrix (replayable).
-        let vp2 = FpController::view_projection(pose, Meters::finite_or_zero(0.0), WalkTuning::walk(), lens());
+        let vp2 = FpController::view_projection(
+            pose,
+            Meters::finite_or_zero(0.0),
+            WalkTuning::walk(),
+            lens(),
+        );
         assert_eq!(vp.as_cols_array(), vp2.as_cols_array());
     }
 
@@ -260,7 +290,12 @@ mod tests {
             Meters::finite_or_zero(0.1),
             Meters::finite_or_zero(500.0),
         );
-        let vp = FpController::view_projection(origin(), Meters::finite_or_zero(0.0), WalkTuning::walk(), bad_lens);
+        let vp = FpController::view_projection(
+            origin(),
+            Meters::finite_or_zero(0.0),
+            WalkTuning::walk(),
+            bad_lens,
+        );
         assert!(vp.as_cols_array().iter().all(|f| f.is_finite()));
     }
 

@@ -107,7 +107,8 @@ fn interleave_skinned_vertices(geom: &MeshGeometry) -> Vec<f32> {
         .zip(geom.joints.iter())
         .zip(geom.weights.iter())
         .for_each(|((((p, n), uv), j), w)| {
-            vertices.extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0]);
+            vertices
+                .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0]);
             vertices.extend_from_slice(&[j[0] as f32, j[1] as f32, j[2] as f32, j[3] as f32]);
             vertices.extend_from_slice(&w[..]);
         });

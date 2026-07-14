@@ -146,7 +146,10 @@ mod tests {
         let fixed = Range::exact(Meters::new(0.5).unwrap());
         assert_eq!(fixed.min(), Meters::new(0.5).unwrap());
         assert_eq!(fixed.max(), Meters::new(0.5).unwrap());
-        assert_eq!(fixed, Range::new(Meters::new(0.5).unwrap(), Meters::new(0.5).unwrap()));
+        assert_eq!(
+            fixed,
+            Range::new(Meters::new(0.5).unwrap(), Meters::new(0.5).unwrap())
+        );
     }
 
     #[test]

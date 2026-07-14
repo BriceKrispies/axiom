@@ -60,7 +60,9 @@ impl FigurePart {
     /// parent's `u32` index), then the rest transform, box size, and tag.
     pub(crate) fn write_to(self, writer: &mut BinaryWriter) {
         writer.write_u8(u8::from(self.parent.is_some()));
-        self.parent.iter().for_each(|parent| writer.write_u32(*parent));
+        self.parent
+            .iter()
+            .for_each(|parent| writer.write_u32(*parent));
         self.rest.write_to(writer);
         self.box_size.write_to(writer);
         self.box_offset.write_to(writer);

@@ -47,7 +47,10 @@ mod tests {
 
     #[test]
     fn lerp_rgba_blends_each_channel() {
-        assert_eq!(lerp_rgba([0, 0, 0, 0], [10, 20, 30, 40], 0.5), [5, 10, 15, 20]);
+        assert_eq!(
+            lerp_rgba([0, 0, 0, 0], [10, 20, 30, 40], 0.5),
+            [5, 10, 15, 20]
+        );
     }
 
     #[test]

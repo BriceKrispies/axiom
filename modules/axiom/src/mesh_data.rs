@@ -69,7 +69,12 @@ impl MeshData {
     /// normal per vertex, an optional UV per vertex (pass an empty `uvs` to
     /// default them to the origin), and a triangle-list `indices` into the
     /// vertices.
-    pub fn new(positions: Vec<Vec3>, normals: Vec<Vec3>, uvs: Vec<Vec2>, indices: Vec<u32>) -> Self {
+    pub fn new(
+        positions: Vec<Vec3>,
+        normals: Vec<Vec3>,
+        uvs: Vec<Vec2>,
+        indices: Vec<u32>,
+    ) -> Self {
         MeshData {
             positions,
             normals,
@@ -94,7 +99,14 @@ impl MeshData {
         weights: Vec<[f32; 4]>,
         indices: Vec<u32>,
     ) -> Self {
-        MeshData { positions, normals, uvs, indices, joints, weights }
+        MeshData {
+            positions,
+            normals,
+            uvs,
+            indices,
+            joints,
+            weights,
+        }
     }
 
     /// The per-vertex positions.
@@ -156,7 +168,12 @@ mod tests {
 
     #[test]
     fn empty_uvs_are_a_distinct_value() {
-        let with = MeshData::new(vec![Vec3::ZERO], vec![Vec3::UNIT_Z], vec![Vec2::ONE], vec![0]);
+        let with = MeshData::new(
+            vec![Vec3::ZERO],
+            vec![Vec3::UNIT_Z],
+            vec![Vec2::ONE],
+            vec![0],
+        );
         let without = MeshData::new(vec![Vec3::ZERO], vec![Vec3::UNIT_Z], vec![], vec![0]);
         assert!(without.uvs().is_empty());
         assert_ne!(with, without);
@@ -186,7 +203,10 @@ mod tests {
     fn errors_are_distinct_and_debuggable() {
         // Kills any "all errors equal" collapse: the variants are distinct.
         assert_ne!(MeshDataError::EmptyPositions, MeshDataError::NonFinite);
-        assert_eq!(MeshDataError::IndexOutOfRange, MeshDataError::IndexOutOfRange);
+        assert_eq!(
+            MeshDataError::IndexOutOfRange,
+            MeshDataError::IndexOutOfRange
+        );
         assert!(format!("{:?}", MeshDataError::NoIndices).contains("NoIndices"));
     }
 }

@@ -23,7 +23,10 @@ pub struct ReplayBrain {
 impl ReplayBrain {
     /// A replay brain over `recorded`, starting at the first intent.
     pub fn new(recorded: Vec<ActionIntent>) -> Self {
-        ReplayBrain { recorded, cursor: 0 }
+        ReplayBrain {
+            recorded,
+            cursor: 0,
+        }
     }
 }
 

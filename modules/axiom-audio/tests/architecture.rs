@@ -160,11 +160,13 @@ fn assert_absent_in_other(dir: PathBuf, label: &str, forbidden: &[&str], why: &s
     assert!(violations.is_empty(), "{why}\n{}", violations.join("\n"));
 }
 
-
 #[test]
 fn module_toml_exists_and_is_isolated() {
     let manifest = module_root().join("module.toml");
-    assert!(manifest.is_file(), "expected modules/axiom-audio/module.toml");
+    assert!(
+        manifest.is_file(),
+        "expected modules/axiom-audio/module.toml"
+    );
     let stripped = strip_comments_and_strings(&fs::read_to_string(&manifest).unwrap());
     assert!(
         stripped.contains("allowed_modules = []"),
@@ -190,13 +192,15 @@ fn lib_rs_exports_one_facade_plus_identity_vocabulary() {
         vec!["pub use audio_api::AudioApi;"],
         "axiom-audio must expose exactly one behavioral facade (AudioApi)"
     );
-    let id_lines = pub_uses.iter().filter(|line| line.contains("ids::")).count();
+    let id_lines = pub_uses
+        .iter()
+        .filter(|line| line.contains("ids::"))
+        .count();
     assert_eq!(
         id_lines, 1,
         "axiom-audio re-exports its identity vocabulary via exactly one `pub use ids::{{…}}` line"
     );
 }
-
 
 #[test]
 fn audio_imports_only_legal_layers() {
@@ -211,9 +215,7 @@ fn audio_imports_only_legal_layers() {
                 continue;
             }
             for chunk in trimmed.split(|c: char| !c.is_alphanumeric() && c != '_') {
-                if chunk.starts_with("axiom_")
-                    && chunk != "axiom_kernel"
-                    && chunk != "axiom_audio"
+                if chunk.starts_with("axiom_") && chunk != "axiom_kernel" && chunk != "axiom_audio"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
                 }
@@ -236,7 +238,10 @@ fn audio_imports_no_other_modules() {
         .map(|e| e.file_name().to_string_lossy().replace('-', "_"))
         .filter(|name| name != "axiom_audio")
         .collect();
-    assert!(!other_modules.is_empty(), "expected sibling modules to exist");
+    assert!(
+        !other_modules.is_empty(),
+        "expected sibling modules to exist"
+    );
     let mut violations = Vec::new();
     for path in source_files() {
         let stripped = strip_comments_and_strings(&read(&path));
@@ -245,7 +250,11 @@ fn audio_imports_no_other_modules() {
             .collect();
         for other in &other_modules {
             if tokens.contains(other.as_str()) {
-                violations.push(format!("{}: references other module `{}`", path.display(), other));
+                violations.push(format!(
+                    "{}: references other module `{}`",
+                    path.display(),
+                    other
+                ));
             }
         }
     }
@@ -275,7 +284,6 @@ fn no_layer_imports_axiom_audio() {
         );
     }
 }
-
 
 #[test]
 fn core_has_no_browser_or_js_bindgen_apis() {
@@ -330,7 +338,13 @@ fn core_has_no_randomness() {
 fn core_has_no_threads_or_async_runtimes() {
     assert_absent_in(
         &core_source_files(),
-        &["thread::spawn", "tokio", "async_std", "std::net", "std::process"],
+        &[
+            "thread::spawn",
+            "tokio",
+            "async_std",
+            "std::net",
+            "std::process",
+        ],
         "the axiom-audio CORE must not spawn threads, use async runtimes, or touch net/process",
     );
 }
@@ -403,7 +417,10 @@ fn no_junk_drawer_modules() {
     for path in source_files() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc", "shared", "prelude"] {
-            assert_ne!(name, banned, "axiom-audio must not have a `{banned}` module");
+            assert_ne!(
+                name, banned,
+                "axiom-audio must not have a `{banned}` module"
+            );
         }
     }
 }
@@ -436,7 +453,6 @@ fn every_top_level_source_module_is_declared_in_lib_rs() {
         missing.join("\n")
     );
 }
-
 
 /// Two independently-built mixers, driven by the identical sequence of public
 /// facade calls, must drain to equal batches — the core replay invariant,

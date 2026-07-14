@@ -26,8 +26,8 @@ use axiom_runtime::RuntimeStep;
 
 use crate::broad_phase_pair;
 use crate::contact_manifold::ContactManifold;
-use crate::contact_report::ContactReport;
 use crate::contact_pair;
+use crate::contact_report::ContactReport;
 use crate::contact_solver;
 use crate::integrator;
 use crate::physics_body::PhysicsBody;
@@ -221,7 +221,10 @@ impl PhysicsWorld {
     }
 
     /// Create a body from a validated description, rejecting a full world.
-    pub(crate) fn create_body(&mut self, desc: PhysicsBodyDesc) -> PhysicsResult<PhysicsBodyHandle> {
+    pub(crate) fn create_body(
+        &mut self,
+        desc: PhysicsBodyDesc,
+    ) -> PhysicsResult<PhysicsBodyHandle> {
         ((self.bodies.len() as u32) < self.config.max_bodies())
             .then_some(())
             .ok_or(PhysicsError::body_capacity_exceeded(
@@ -271,8 +274,9 @@ impl PhysicsWorld {
     ) -> PhysicsColliderHandle {
         self.next_collider_id += 1;
         let handle = PhysicsColliderHandle::from_raw(self.next_collider_id);
-        self.colliders
-            .push(PhysicsCollider::new(handle, body, shape, material, is_trigger));
+        self.colliders.push(PhysicsCollider::new(
+            handle, body, shape, material, is_trigger,
+        ));
         // Derive the body's inverse inertia from this collider's shape + mass, so
         // a torque produces the correct angular acceleration. An immovable body
         // (zero mass) derives zero inertia and is unaffected.
@@ -299,21 +303,35 @@ impl PhysicsWorld {
     ) -> PhysicsResult<PhysicsColliderHandle> {
         self.body_exists(body)
             .then_some(())
-            .ok_or(PhysicsError::body_not_found("collider target body not found"))
+            .ok_or(PhysicsError::body_not_found(
+                "collider target body not found",
+            ))
             .and_then(|()| {
                 ((self.colliders.len() as u32) < self.config.max_colliders())
                     .then_some(())
-                    .ok_or(PhysicsError::collider_capacity_exceeded("collider capacity exceeded"))
+                    .ok_or(PhysicsError::collider_capacity_exceeded(
+                        "collider capacity exceeded",
+                    ))
             })
             .map(|()| {
                 self.next_collider_id += 1;
                 let handle = PhysicsColliderHandle::from_raw(self.next_collider_id);
-                self.colliders.push(PhysicsCollider::new_heightfield(handle, body, shape, material, is_trigger, heightfield));
+                self.colliders.push(PhysicsCollider::new_heightfield(
+                    handle,
+                    body,
+                    shape,
+                    material,
+                    is_trigger,
+                    heightfield,
+                ));
                 self.body_at_mut(body).into_iter().for_each(|b| {
                     let updated = b.mass_properties().with_inertia_for(shape);
                     b.set_mass_properties(updated);
                 });
-                self.events.push(PhysicsEvent::ColliderAttached { collider: handle, body });
+                self.events.push(PhysicsEvent::ColliderAttached {
+                    collider: handle,
+                    body,
+                });
                 handle
             })
     }
@@ -343,7 +361,10 @@ impl PhysicsWorld {
             impulse,
             PhysicsError::impulse_on_non_dynamic_body("impulse requires a dynamic body"),
         )
-        .map(|()| self.commands.push(PhysicsCommand::apply_impulse(body, impulse)))
+        .map(|()| {
+            self.commands
+                .push(PhysicsCommand::apply_impulse(body, impulse))
+        })
     }
 
     /// Queue a torque on a dynamic, enabled body (validated immediately), rejected
@@ -358,7 +379,10 @@ impl PhysicsWorld {
             torque,
             PhysicsError::force_on_non_dynamic_body("torque requires a dynamic body"),
         )
-        .map(|()| self.commands.push(PhysicsCommand::apply_torque(body, torque)))
+        .map(|()| {
+            self.commands
+                .push(PhysicsCommand::apply_torque(body, torque))
+        })
     }
 
     /// Validate a force/impulse target: the vector is finite, the body exists, it
@@ -427,8 +451,9 @@ impl PhysicsWorld {
                 "teleport transform must be finite",
             ))
             .and_then(|()| {
-                self.body_at_mut(body)
-                    .ok_or(PhysicsError::body_not_found("teleport target body not found"))
+                self.body_at_mut(body).ok_or(PhysicsError::body_not_found(
+                    "teleport target body not found",
+                ))
             })
             .map(|b| b.set_transform(transform))
     }
@@ -576,11 +601,8 @@ impl PhysicsWorld {
         self.events.push(PhysicsEvent::StepCompleted {
             step_index: self.step_index,
         });
-        let dynamic_body_count = self
-            .bodies
-            .iter()
-            .filter(|b| b.kind().is_dynamic())
-            .count() as u32;
+        let dynamic_body_count =
+            self.bodies.iter().filter(|b| b.kind().is_dynamic()).count() as u32;
         let result = PhysicsStepResult::new(
             agg.integration_count,
             agg.broad_phase_pair_count,

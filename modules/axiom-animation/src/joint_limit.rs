@@ -112,8 +112,7 @@ mod tests {
 
     #[test]
     fn clamp_preserves_translation_and_scale() {
-        let limit =
-            JointLimit::new(BoneId::from_raw(0), bound(-0.1), bound(0.1)).unwrap();
+        let limit = JointLimit::new(BoneId::from_raw(0), bound(-0.1), bound(0.1)).unwrap();
         let t = Transform::new(
             Vec3::new(2.0, 3.0, 4.0),
             Quat::from_euler_xyz(1.0, 0.0, 0.0),

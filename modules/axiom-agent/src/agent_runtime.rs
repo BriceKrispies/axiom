@@ -36,7 +36,9 @@ impl AgentRuntime {
         memory: &mut AgentMemory,
         step: RuntimeStep,
     ) -> (DecisionReport, ActionQueue) {
-        let (intents, reason_code) = brain.decide(agent_id, profile, observation, memory).into_parts();
+        let (intents, reason_code) = brain
+            .decide(agent_id, profile, observation, memory)
+            .into_parts();
         let tick = step.tick();
         let emitted_action_count = intents.len();
         let first_emitted_action_kind_code = intents
@@ -101,17 +103,26 @@ mod tests {
             step_at(5),
         );
         assert_eq!(report.tick(), Tick::new(5));
-        assert_eq!(report.selected_brain_kind_code(), DecisionReport::BRAIN_KIND_SCRIPTED);
+        assert_eq!(
+            report.selected_brain_kind_code(),
+            DecisionReport::BRAIN_KIND_SCRIPTED
+        );
         assert_eq!(report.observation_fact_count(), 1);
         assert_eq!(report.legal_action_count(), 2);
         assert_eq!(report.emitted_action_count(), 1);
-        assert_eq!(report.first_emitted_action_kind_code(), ActionIntent::KIND_PRESS_CONTROL);
+        assert_eq!(
+            report.first_emitted_action_kind_code(),
+            ActionIntent::KIND_PRESS_CONTROL
+        );
         assert_eq!(report.reason_code(), DecisionReport::REASON_MATCHED_RULE);
         assert_eq!(queue.len(), 1);
         assert_eq!(queue.intents()[0].control_code(), 7);
         assert_eq!(memory.len(), 1);
         assert_eq!(memory.entries()[0].tick(), Tick::new(5));
-        assert_eq!(memory.entries()[0].key_code(), AgentRuntime::MEMORY_KEY_DECISION);
+        assert_eq!(
+            memory.entries()[0].key_code(),
+            AgentRuntime::MEMORY_KEY_DECISION
+        );
         assert_eq!(
             memory.entries()[0].value_code(),
             DecisionReport::REASON_MATCHED_RULE as i64
@@ -134,8 +145,14 @@ mod tests {
             &mut memory,
             step_at(1),
         );
-        assert_eq!(report.first_emitted_action_kind_code(), ActionIntent::KIND_NOOP);
-        assert_eq!(report.reason_code(), DecisionReport::REASON_NO_MATCHING_RULE);
+        assert_eq!(
+            report.first_emitted_action_kind_code(),
+            ActionIntent::KIND_NOOP
+        );
+        assert_eq!(
+            report.reason_code(),
+            DecisionReport::REASON_NO_MATCHING_RULE
+        );
     }
 
     #[test]
@@ -155,8 +172,14 @@ mod tests {
             step_at(9),
         );
         assert_eq!(report.emitted_action_count(), 0);
-        assert_eq!(report.first_emitted_action_kind_code(), ActionIntent::KIND_NOOP);
-        assert_eq!(report.reason_code(), DecisionReport::REASON_ACTION_BUDGET_ZERO);
+        assert_eq!(
+            report.first_emitted_action_kind_code(),
+            ActionIntent::KIND_NOOP
+        );
+        assert_eq!(
+            report.reason_code(),
+            DecisionReport::REASON_ACTION_BUDGET_ZERO
+        );
         assert!(queue.is_empty());
         assert_eq!(
             memory.entries()[0].value_code(),
@@ -176,7 +199,10 @@ mod tests {
             &mut memory,
             step_at(2),
         );
-        assert_eq!(report.selected_brain_kind_code(), DecisionReport::BRAIN_KIND_REPLAY);
+        assert_eq!(
+            report.selected_brain_kind_code(),
+            DecisionReport::BRAIN_KIND_REPLAY
+        );
         assert_eq!(report.reason_code(), DecisionReport::REASON_REPLAY_EMITTED);
         assert_eq!(queue.intents()[0].control_code(), 3);
     }
@@ -194,12 +220,29 @@ mod tests {
             &mut memory,
             step_at(3),
         );
-        assert_eq!(report.selected_brain_kind_code(), DecisionReport::BRAIN_KIND_HOLD_SET);
-        assert_eq!(report.emitted_action_count(), 2, "two controls → two intents this tick");
-        assert_eq!(report.first_emitted_action_kind_code(), ActionIntent::KIND_PRESS_CONTROL);
-        assert_eq!(report.reason_code(), DecisionReport::REASON_HOLD_SET_EMITTED);
+        assert_eq!(
+            report.selected_brain_kind_code(),
+            DecisionReport::BRAIN_KIND_HOLD_SET
+        );
+        assert_eq!(
+            report.emitted_action_count(),
+            2,
+            "two controls → two intents this tick"
+        );
+        assert_eq!(
+            report.first_emitted_action_kind_code(),
+            ActionIntent::KIND_PRESS_CONTROL
+        );
+        assert_eq!(
+            report.reason_code(),
+            DecisionReport::REASON_HOLD_SET_EMITTED
+        );
         assert_eq!(queue.len(), 2);
-        assert_eq!(queue.combined_control_code(), 0b0101, "the two held controls combine");
+        assert_eq!(
+            queue.combined_control_code(),
+            0b0101,
+            "the two held controls combine"
+        );
     }
 
     #[test]

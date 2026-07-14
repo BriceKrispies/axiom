@@ -18,7 +18,6 @@ use axiom_runtime::RuntimeStep;
 pub struct AgentHarnessApi;
 
 impl AgentHarnessApi {
-
     /// Hold "move forward".
     pub const FORWARD: u32 = 1 << 0;
     /// Hold "move backward".
@@ -35,7 +34,6 @@ impl AgentHarnessApi {
     pub const ACTION_PRIMARY: u32 = 1 << 6;
     /// Hold the secondary action button.
     pub const ACTION_SECONDARY: u32 = 1 << 7;
-
 
     /// The agent's own pose fact: `x`/`y`/`z` carry world position **with the
     /// player's height in `y`**, and `value` carries the yaw.

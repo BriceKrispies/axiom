@@ -348,7 +348,10 @@ mod tests {
         let script = sample_script();
         let first = run_authority(&script);
         let second = run_authority(&script);
-        assert_eq!(first, second, "the snapshot byte sequences must be identical");
+        assert_eq!(
+            first, second,
+            "the snapshot byte sequences must be identical"
+        );
         assert_eq!(hashes(&first), hashes(&second));
         // A third run reproduces it again (determinism is stable across runs).
         assert_eq!(hashes(&first), hashes(&run_authority(&script)));
@@ -409,7 +412,10 @@ mod tests {
             block.participants[0],
             (1, FLAG_JOINED_THIS_TICK, move_payload(0.25, -0.50))
         );
-        assert_eq!(block.participants[1], (2, FLAG_JOINED_THIS_TICK, Vec::new()));
+        assert_eq!(
+            block.participants[1],
+            (2, FLAG_JOINED_THIS_TICK, Vec::new())
+        );
         assert!(block.left.is_empty());
         assert!(
             !block.state.is_empty(),

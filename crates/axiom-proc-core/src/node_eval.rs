@@ -17,8 +17,18 @@ pub struct NodeEval<'a, Out> {
 
 impl<'a, Out> NodeEval<'a, Out> {
     /// Build a context (crate-internal — only the executor mints these).
-    pub(crate) fn new(op: u16, params: &'a [Param], inputs: &'a [Out], stream: EntropyStream) -> Self {
-        Self { op, params, inputs, stream }
+    pub(crate) fn new(
+        op: u16,
+        params: &'a [Param],
+        inputs: &'a [Out],
+        stream: EntropyStream,
+    ) -> Self {
+        Self {
+            op,
+            params,
+            inputs,
+            stream,
+        }
     }
 
     /// The node's operator code.

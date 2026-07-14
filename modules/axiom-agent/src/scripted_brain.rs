@@ -76,7 +76,11 @@ impl AgentBrain for ScriptedBrain {
         let matched = self
             .rules
             .iter()
-            .find(|rule| observation.first_fact_with_kind(rule.fact_kind_code()).is_some())
+            .find(|rule| {
+                observation
+                    .first_fact_with_kind(rule.fact_kind_code())
+                    .is_some()
+            })
             .copied();
         let has_match = matched.is_some();
         let max = profile.max_actions_per_tick() as usize;
@@ -109,7 +113,9 @@ mod tests {
             Tick::new(0),
             Vec::new(),
             Vec::new(),
-            vec![crate::observation::ObservationFact::new(kind_code, 1, 0, 0, 0, 0)],
+            vec![crate::observation::ObservationFact::new(
+                kind_code, 1, 0, 0, 0, 0,
+            )],
         )
     }
 
@@ -117,8 +123,17 @@ mod tests {
         Observation::empty(AgentId::from_raw(1), Tick::new(0))
     }
 
-    fn decide(brain: &mut ScriptedBrain, observation: &Observation, profile: AgentProfile) -> BrainDecision {
-        brain.decide(AgentId::from_raw(1), profile, observation, &AgentMemory::empty_with_capacity(1))
+    fn decide(
+        brain: &mut ScriptedBrain,
+        observation: &Observation,
+        profile: AgentProfile,
+    ) -> BrainDecision {
+        brain.decide(
+            AgentId::from_raw(1),
+            profile,
+            observation,
+            &AgentMemory::empty_with_capacity(1),
+        )
     }
 
     const MATCHED: u16 = DecisionReport::REASON_MATCHED_RULE;
@@ -126,7 +141,11 @@ mod tests {
     #[test]
     fn empty_brain_emits_noop_with_no_matching_rule_reason() {
         let mut brain = ScriptedBrain::new(Vec::new());
-        let d = decide(&mut brain, &empty_observation(), AgentProfile::debug_perfect());
+        let d = decide(
+            &mut brain,
+            &empty_observation(),
+            AgentProfile::debug_perfect(),
+        );
         assert_eq!(d.intents().len(), 1);
         assert_eq!(d.intents()[0].kind_code(), ActionIntent::KIND_NOOP);
         assert_eq!(d.reason_code(), DecisionReport::REASON_NO_MATCHING_RULE);
@@ -134,8 +153,16 @@ mod tests {
 
     #[test]
     fn matching_fact_emits_configured_intent_and_rule_reason() {
-        let mut brain = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(7), MATCHED)]);
-        let d = decide(&mut brain, &observation_with_fact(100), AgentProfile::debug_perfect());
+        let mut brain = ScriptedBrain::new(vec![ScriptRule::new(
+            100,
+            ActionIntent::press_control(7),
+            MATCHED,
+        )]);
+        let d = decide(
+            &mut brain,
+            &observation_with_fact(100),
+            AgentProfile::debug_perfect(),
+        );
         assert_eq!(d.intents().len(), 1);
         assert_eq!(d.intents()[0].kind_code(), ActionIntent::KIND_PRESS_CONTROL);
         assert_eq!(d.intents()[0].control_code(), 7);
@@ -144,8 +171,16 @@ mod tests {
 
     #[test]
     fn a_rules_custom_reason_code_propagates_to_the_decision() {
-        let mut brain = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(7), 42)]);
-        let d = decide(&mut brain, &observation_with_fact(100), AgentProfile::debug_perfect());
+        let mut brain = ScriptedBrain::new(vec![ScriptRule::new(
+            100,
+            ActionIntent::press_control(7),
+            42,
+        )]);
+        let d = decide(
+            &mut brain,
+            &observation_with_fact(100),
+            AgentProfile::debug_perfect(),
+        );
         assert_eq!(d.reason_code(), 42);
     }
 
@@ -155,22 +190,45 @@ mod tests {
             ScriptRule::new(100, ActionIntent::press_control(1), MATCHED),
             ScriptRule::new(100, ActionIntent::press_control(2), MATCHED),
         ]);
-        let d = decide(&mut brain, &observation_with_fact(100), AgentProfile::debug_perfect());
-        assert_eq!(d.intents()[0].control_code(), 1, "first rule in order must win");
+        let d = decide(
+            &mut brain,
+            &observation_with_fact(100),
+            AgentProfile::debug_perfect(),
+        );
+        assert_eq!(
+            d.intents()[0].control_code(),
+            1,
+            "first rule in order must win"
+        );
     }
 
     #[test]
     fn non_matching_observation_falls_back_to_noop() {
-        let mut brain = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(1), MATCHED)]);
-        let d = decide(&mut brain, &observation_with_fact(200), AgentProfile::debug_perfect());
+        let mut brain = ScriptedBrain::new(vec![ScriptRule::new(
+            100,
+            ActionIntent::press_control(1),
+            MATCHED,
+        )]);
+        let d = decide(
+            &mut brain,
+            &observation_with_fact(200),
+            AgentProfile::debug_perfect(),
+        );
         assert_eq!(d.intents()[0].kind_code(), ActionIntent::KIND_NOOP);
         assert_eq!(d.reason_code(), DecisionReport::REASON_NO_MATCHING_RULE);
     }
 
     #[test]
     fn emitted_count_never_exceeds_the_action_budget() {
-        let mut brain = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(1), MATCHED)]);
-        for profile in [AgentProfile::debug_perfect(), AgentProfile::human_like_default()] {
+        let mut brain = ScriptedBrain::new(vec![ScriptRule::new(
+            100,
+            ActionIntent::press_control(1),
+            MATCHED,
+        )]);
+        for profile in [
+            AgentProfile::debug_perfect(),
+            AgentProfile::human_like_default(),
+        ] {
             let d = decide(&mut brain, &observation_with_fact(100), profile);
             assert_eq!(d.intents().len(), 1, "a single matched action is emitted");
             assert!(
@@ -183,11 +241,19 @@ mod tests {
     #[test]
     fn zero_action_budget_emits_nothing_with_budget_zero_reason() {
         let frozen = AgentProfile::debug_perfect().with_action_budget(0);
-        let mut matching = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(1), MATCHED)]);
+        let mut matching = ScriptedBrain::new(vec![ScriptRule::new(
+            100,
+            ActionIntent::press_control(1),
+            MATCHED,
+        )]);
         let d = decide(&mut matching, &observation_with_fact(100), frozen);
         assert_eq!(d.intents().len(), 0, "a zero budget emits no action");
         assert_eq!(d.reason_code(), DecisionReport::REASON_ACTION_BUDGET_ZERO);
-        let mut nonmatching = ScriptedBrain::new(vec![ScriptRule::new(100, ActionIntent::press_control(1), MATCHED)]);
+        let mut nonmatching = ScriptedBrain::new(vec![ScriptRule::new(
+            100,
+            ActionIntent::press_control(1),
+            MATCHED,
+        )]);
         let d2 = decide(&mut nonmatching, &observation_with_fact(200), frozen);
         assert_eq!(d2.intents().len(), 0);
         assert_eq!(d2.reason_code(), DecisionReport::REASON_ACTION_BUDGET_ZERO);

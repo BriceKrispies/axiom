@@ -510,7 +510,8 @@ mod tests {
         s.update_world_transforms();
         assert_eq!(s.world_transform(n).unwrap().translation.x, 1.0);
         // A fresh local move re-arms the flag and the next propagation reflects it.
-        s.set_local(n, Transform::from_translation(Vec3::new(4.0, 0.0, 0.0))).unwrap();
+        s.set_local(n, Transform::from_translation(Vec3::new(4.0, 0.0, 0.0)))
+            .unwrap();
         s.update_world_transforms();
         assert_eq!(s.world_transform(n).unwrap().translation.x, 4.0);
     }

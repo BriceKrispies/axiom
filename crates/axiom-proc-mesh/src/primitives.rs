@@ -40,28 +40,33 @@ const FACE_UVS: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
 /// **Cube** — an axis-aligned box with per-face normals and UVs. Params:
 /// `[size]` (full edge length).
 pub(crate) fn cube(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
-    ctx.params().first().map(|p| p.as_scalar().get()).and_then(|s| {
-        let positions = (0..24)
-            .map(|k| {
-                let c = CORNERS[FACES[k / 4].0[k % 4]];
-                Vec3::new(c[0] * s, c[1] * s, c[2] * s)
-            })
-            .collect();
-        let normals = (0..24)
-            .map(|k| {
-                let n = FACES[k / 4].1;
-                Vec3::new(n[0], n[1], n[2])
-            })
-            .collect();
-        let uvs = (0..24)
-            .map(|k| {
-                let uv = FACE_UVS[k % 4];
-                Vec2::new(uv[0], uv[1])
-            })
-            .collect();
-        let indices = (0..6_u32).flat_map(|f| [0_u32, 1, 2, 0, 2, 3].map(|i| f * 4 + i)).collect();
-        MeshBuffer::from_parts(positions, normals, uvs, indices)
-    })
+    ctx.params()
+        .first()
+        .map(|p| p.as_scalar().get())
+        .and_then(|s| {
+            let positions = (0..24)
+                .map(|k| {
+                    let c = CORNERS[FACES[k / 4].0[k % 4]];
+                    Vec3::new(c[0] * s, c[1] * s, c[2] * s)
+                })
+                .collect();
+            let normals = (0..24)
+                .map(|k| {
+                    let n = FACES[k / 4].1;
+                    Vec3::new(n[0], n[1], n[2])
+                })
+                .collect();
+            let uvs = (0..24)
+                .map(|k| {
+                    let uv = FACE_UVS[k % 4];
+                    Vec2::new(uv[0], uv[1])
+                })
+                .collect();
+            let indices = (0..6_u32)
+                .flat_map(|f| [0_u32, 1, 2, 0, 2, 3].map(|i| f * 4 + i))
+                .collect();
+            MeshBuffer::from_parts(positions, normals, uvs, indices)
+        })
 }
 
 /// **Grid** — a flat `cols`×`rows` plane in the XZ plane, +Y up. Params:
@@ -187,7 +192,9 @@ mod tests {
     fn run(op: MeshOp, params: Vec<Param>) -> Option<MeshBuffer> {
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
         g.add(op as u16, params, vec![]);
-        ProcCore::new().execute(&g, 1, &SpaceApi::root(), mesh_eval).ok()
+        ProcCore::new()
+            .execute(&g, 1, &SpaceApi::root(), mesh_eval)
+            .ok()
     }
 
     #[test]
@@ -202,14 +209,38 @@ mod tests {
 
     #[test]
     fn grid_subdivides_and_clamps() {
-        let m = run(MeshOp::Grid, vec![Param::int(2), Param::int(2), Param::scalar(Scalar::new(4.0))]).unwrap();
+        let m = run(
+            MeshOp::Grid,
+            vec![
+                Param::int(2),
+                Param::int(2),
+                Param::scalar(Scalar::new(4.0)),
+            ],
+        )
+        .unwrap();
         assert_eq!(m.vertex_count(), 9); // (2+1)*(2+1)
         assert_eq!(m.triangle_count(), 8); // 2*2 quads * 2
-        // Oversize subdivision is clamped, not unbounded.
-        let big = run(MeshOp::Grid, vec![Param::int(9999), Param::int(1), Param::scalar(Scalar::new(1.0))]).unwrap();
+                                           // Oversize subdivision is clamped, not unbounded.
+        let big = run(
+            MeshOp::Grid,
+            vec![
+                Param::int(9999),
+                Param::int(1),
+                Param::scalar(Scalar::new(1.0)),
+            ],
+        )
+        .unwrap();
         assert_eq!(big.vertex_count(), ((super::MAX_GRID + 1) * 2) as usize);
         // Zero subdivision clamps up to 1 (exercises the lower clamp bound).
-        let tiny = run(MeshOp::Grid, vec![Param::int(0), Param::int(0), Param::scalar(Scalar::new(1.0))]).unwrap();
+        let tiny = run(
+            MeshOp::Grid,
+            vec![
+                Param::int(0),
+                Param::int(0),
+                Param::scalar(Scalar::new(1.0)),
+            ],
+        )
+        .unwrap();
         assert_eq!(tiny.vertex_count(), 4); // (1+1)*(1+1)
         assert!(run(MeshOp::Grid, vec![Param::int(2)]).is_none());
     }
@@ -218,7 +249,11 @@ mod tests {
     fn sphere_is_round_bounded_and_clamped() {
         let m = run(
             MeshOp::Sphere,
-            vec![Param::scalar(Scalar::new(1.0)), Param::int(2), Param::int(3)],
+            vec![
+                Param::scalar(Scalar::new(1.0)),
+                Param::int(2),
+                Param::int(3),
+            ],
         )
         .unwrap();
         // (rings+1) * (segments+1) vertices, rings*segments*2 triangles.
@@ -226,12 +261,34 @@ mod tests {
         assert_eq!(m.triangle_count(), 2 * 3 * 2);
         // Every vertex sits on the sphere of the requested radius (genuine
         // curvature — this is what a beveled cube cannot produce).
-        assert!(m.positions().iter().all(|p| ((p.x * p.x + p.y * p.y + p.z * p.z).sqrt() - 1.0).abs() < 1e-5));
+        assert!(m
+            .positions()
+            .iter()
+            .all(|p| ((p.x * p.x + p.y * p.y + p.z * p.z).sqrt() - 1.0).abs() < 1e-5));
         // Rings/segments clamp at both ends.
-        let coarse = run(MeshOp::Sphere, vec![Param::scalar(Scalar::new(1.0)), Param::int(0), Param::int(1)]).unwrap();
+        let coarse = run(
+            MeshOp::Sphere,
+            vec![
+                Param::scalar(Scalar::new(1.0)),
+                Param::int(0),
+                Param::int(1),
+            ],
+        )
+        .unwrap();
         assert_eq!(coarse.vertex_count(), (2 + 1) * (3 + 1)); // rings→2, seg→3
-        let fine = run(MeshOp::Sphere, vec![Param::scalar(Scalar::new(1.0)), Param::int(9999), Param::int(9999)]).unwrap();
-        assert_eq!(fine.vertex_count(), ((super::MAX_SEGMENTS + 1) * (super::MAX_SEGMENTS + 1)) as usize);
+        let fine = run(
+            MeshOp::Sphere,
+            vec![
+                Param::scalar(Scalar::new(1.0)),
+                Param::int(9999),
+                Param::int(9999),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            fine.vertex_count(),
+            ((super::MAX_SEGMENTS + 1) * (super::MAX_SEGMENTS + 1)) as usize
+        );
         assert!(run(MeshOp::Sphere, vec![Param::scalar(Scalar::new(1.0))]).is_none());
     }
 
@@ -239,15 +296,38 @@ mod tests {
     fn cylinder_is_closed_and_bounded() {
         let m = run(
             MeshOp::Cylinder,
-            vec![Param::scalar(Scalar::new(1.0)), Param::scalar(Scalar::new(2.0)), Param::int(8)],
+            vec![
+                Param::scalar(Scalar::new(1.0)),
+                Param::scalar(Scalar::new(2.0)),
+                Param::int(8),
+            ],
         )
         .unwrap();
         assert_eq!(m.vertex_count(), 2 * 8 + 2);
-        assert_eq!(m.triangle_count(), 8 /*side*/ * 2 + 8 /*bottom*/ + 8 /*top*/);
+        assert_eq!(
+            m.triangle_count(),
+            8 /*side*/ * 2 + 8 /*bottom*/ + 8 /*top*/
+        );
         // Segment count clamps at both ends (below 3 → 3, above the cap → cap).
-        let coarse = run(MeshOp::Cylinder, vec![Param::scalar(Scalar::new(1.0)), Param::scalar(Scalar::new(1.0)), Param::int(1)]).unwrap();
+        let coarse = run(
+            MeshOp::Cylinder,
+            vec![
+                Param::scalar(Scalar::new(1.0)),
+                Param::scalar(Scalar::new(1.0)),
+                Param::int(1),
+            ],
+        )
+        .unwrap();
         assert_eq!(coarse.vertex_count(), 2 * 3 + 2);
-        let fine = run(MeshOp::Cylinder, vec![Param::scalar(Scalar::new(1.0)), Param::scalar(Scalar::new(1.0)), Param::int(9999)]).unwrap();
+        let fine = run(
+            MeshOp::Cylinder,
+            vec![
+                Param::scalar(Scalar::new(1.0)),
+                Param::scalar(Scalar::new(1.0)),
+                Param::int(9999),
+            ],
+        )
+        .unwrap();
         assert_eq!(fine.vertex_count(), (2 * super::MAX_SEGMENTS + 2) as usize);
         assert!(run(MeshOp::Cylinder, vec![Param::scalar(Scalar::new(1.0))]).is_none());
     }

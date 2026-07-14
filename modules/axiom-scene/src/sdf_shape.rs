@@ -12,7 +12,9 @@
 //! as a [`Renderable`](crate::renderable::Renderable) is placed by its node — there
 //! is no transform stored on the component.
 
-use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Meters, Reflect, TypeSchema};
+use axiom_kernel::{
+    BinaryReader, BinaryWriter, FieldSchema, KernelResult, Meters, Reflect, TypeSchema,
+};
 use axiom_math::{MathApi, Vec3};
 
 use crate::scene_error::SceneError;
@@ -221,8 +223,8 @@ mod tests {
 
     #[test]
     fn non_finite_box_extent_is_rejected() {
-        let err = SdfShape::cuboid(&math(), Vec3::new(f32::INFINITY, 1.0, 1.0), Vec3::ONE)
-            .unwrap_err();
+        let err =
+            SdfShape::cuboid(&math(), Vec3::new(f32::INFINITY, 1.0, 1.0), Vec3::ONE).unwrap_err();
         assert_eq!(err.code(), SceneErrorCode::InvalidSdfShapeParameters);
     }
 

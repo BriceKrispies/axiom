@@ -50,8 +50,7 @@ pub(crate) fn build_cylinder_mesh() -> (Vec<MeshInputVertex>, Vec<u32>) {
     let top_cap = ring(HALF_H, 1.0, 0.0);
     let bottom_cap = ring(-HALF_H, -1.0, 1.0);
     let top_center: MeshInputVertex = ([0.0, HALF_H, 0.0], [0.0, 1.0, 0.0], [0.5, 0.5], WHITE);
-    let bottom_center: MeshInputVertex =
-        ([0.0, -HALF_H, 0.0], [0.0, -1.0, 0.0], [0.5, 0.5], WHITE);
+    let bottom_center: MeshInputVertex = ([0.0, -HALF_H, 0.0], [0.0, -1.0, 0.0], [0.5, 0.5], WHITE);
 
     let vertices: Vec<MeshInputVertex> = top_side
         .into_iter()
@@ -76,11 +75,14 @@ pub(crate) fn build_cylinder_mesh() -> (Vec<MeshInputVertex>, Vec<u32>) {
         [t0, b0, t1, t1, b0, b1]
     });
     // Top cap fan (center → ring), and bottom cap fan with reversed winding.
-    let top_fan = (0..SEGMENTS).flat_map(move |seg| {
-        [top_center_idx, off_top_cap + seg, off_top_cap + seg + 1]
-    });
+    let top_fan = (0..SEGMENTS)
+        .flat_map(move |seg| [top_center_idx, off_top_cap + seg, off_top_cap + seg + 1]);
     let bottom_fan = (0..SEGMENTS).flat_map(move |seg| {
-        [bottom_center_idx, off_bottom_cap + seg + 1, off_bottom_cap + seg]
+        [
+            bottom_center_idx,
+            off_bottom_cap + seg + 1,
+            off_bottom_cap + seg,
+        ]
     });
 
     let indices: Vec<u32> = wall.chain(top_fan).chain(bottom_fan).collect();

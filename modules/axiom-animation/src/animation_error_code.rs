@@ -63,9 +63,18 @@ mod tests {
             AnimationErrorCode::MalformedData,
         ];
         // Each maps to its documented discriminant, in order 1..=9.
-        assert_eq!(all.map(AnimationErrorCode::raw), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(
+            all.map(AnimationErrorCode::raw),
+            [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        );
         // Distinct codes and matching equality.
-        assert_eq!(AnimationErrorCode::BoneNotFound, AnimationErrorCode::BoneNotFound);
-        assert_ne!(AnimationErrorCode::BoneNotFound, AnimationErrorCode::ClipNotFound);
+        assert_eq!(
+            AnimationErrorCode::BoneNotFound,
+            AnimationErrorCode::BoneNotFound
+        );
+        assert_ne!(
+            AnimationErrorCode::BoneNotFound,
+            AnimationErrorCode::ClipNotFound
+        );
     }
 }

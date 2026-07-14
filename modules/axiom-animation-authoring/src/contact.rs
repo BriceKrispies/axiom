@@ -71,6 +71,9 @@ mod tests {
     #[test]
     fn resolved_contact_yields_its_pin() {
         let c = ResolvedContact::new(EffectorId::from_raw(2), Vec3::new(0.25, 0.0, -0.1));
-        assert_eq!(c.pin(), (EffectorId::from_raw(2), Vec3::new(0.25, 0.0, -0.1)));
+        assert_eq!(
+            c.pin(),
+            (EffectorId::from_raw(2), Vec3::new(0.25, 0.0, -0.1))
+        );
     }
 }

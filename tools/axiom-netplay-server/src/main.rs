@@ -71,7 +71,12 @@ async fn run_server(listener: TcpListener) {
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<Command>();
     let (snap_tx, _snap_rx) = broadcast::channel::<Arc<Vec<u8>>>(1024);
     tokio::join!(
-        authority_loop(Authority::new(), JwtPolicy::from_env(), cmd_rx, snap_tx.clone()),
+        authority_loop(
+            Authority::new(),
+            JwtPolicy::from_env(),
+            cmd_rx,
+            snap_tx.clone()
+        ),
         accept_loop(listener, cmd_tx, snap_tx),
     );
 }
@@ -92,7 +97,9 @@ async fn authority_loop(
         .map(|_instant| AuthEvent::tick());
     let commands = UnboundedReceiverStream::new(cmd_rx).map(AuthEvent::command);
     tokio_stream::StreamExt::merge(ticks, commands)
-        .fold(authority, |authority, event| fold_event(authority, event, &policy, &snap_tx))
+        .fold(authority, |authority, event| {
+            fold_event(authority, event, &policy, &snap_tx)
+        })
         .await;
 }
 
@@ -127,8 +134,9 @@ fn apply_command(authority: &mut Authority, policy: &JwtPolicy, command: Option<
                     .map(|seat| (seat, authority.tick()));
                 let _ = reply.send(seated);
             });
-            cmd.intent
-                .map(|(player, sequence, payload)| authority.apply_intent(player, sequence, payload));
+            cmd.intent.map(|(player, sequence, payload)| {
+                authority.apply_intent(player, sequence, payload)
+            });
             cmd.leave.map(|seat| authority.leave(seat));
         })
         .unwrap_or(());
@@ -185,7 +193,10 @@ async fn serve_ws(ws: WebSocketStream<TcpStream>, cmd_tx: CmdTx, snap_tx: SnapTx
         .map(Ok::<Action, Peer>)
         .try_fold(Peer::new(sink), |peer, action| peer.apply(action, &cmd_tx))
         .await;
-    folded.unwrap_or_else(|stopped| stopped).cleanup(&cmd_tx).await;
+    folded
+        .unwrap_or_else(|stopped| stopped)
+        .cleanup(&cmd_tx)
+        .await;
 }
 
 /// A command from a peer task to the single authority task. Modelled as a struct of
@@ -464,7 +475,9 @@ fn log_join(claimed: Option<u64>, send_ok: bool) {
         .unwrap_or_else(|| {
             claimed
                 .map(|_| println!("netplay-server: a joining player dropped before welcome"))
-                .unwrap_or_else(|| println!("netplay-server: rejected an extra player (room full)"));
+                .unwrap_or_else(|| {
+                    println!("netplay-server: rejected an extra player (room full)")
+                });
         });
 }
 
@@ -583,7 +596,10 @@ mod tests {
     fn inbound_classifies_join_intent_leave_and_junk() {
         // A JoinRoom frame → a join action carrying the (here empty) token.
         let join = NetProtocolApi::encode_join_room(PROTOCOL_VERSION, b"r", b"tok").unwrap();
-        assert_eq!(inbound_action(Ok(Message::binary(join))).join, Some(b"tok".to_vec()));
+        assert_eq!(
+            inbound_action(Ok(Message::binary(join))).join,
+            Some(b"tok".to_vec())
+        );
 
         // A ClientIntentFor frame → an intent action carrying the bytes.
         let intent = NetProtocolApi::encode_client_intent_for(1, 1, 0, 0, b"x").unwrap();

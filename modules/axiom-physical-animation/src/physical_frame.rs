@@ -97,12 +97,18 @@ impl PhysicalAnimationFrame {
 
     /// The world transform of the bound body named `name`, if bound.
     pub(crate) fn body_transform(&self, name: &str) -> Option<Transform> {
-        self.bodies.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
+        self.bodies
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, t)| *t)
     }
 
     /// The world transform of the key effector named `name`, if present.
     pub(crate) fn effector_transform(&self, name: &str) -> Option<Transform> {
-        self.effectors.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
+        self.effectors
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, t)| *t)
     }
 
     /// The applied root-velocity objective, if any.

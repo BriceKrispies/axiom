@@ -58,8 +58,14 @@ mod tests {
 
     #[test]
     fn equality_and_ordering_are_numeric() {
-        assert_eq!(PhysicsBodyHandle::from_raw(3), PhysicsBodyHandle::from_raw(3));
-        assert_ne!(PhysicsBodyHandle::from_raw(3), PhysicsBodyHandle::from_raw(4));
+        assert_eq!(
+            PhysicsBodyHandle::from_raw(3),
+            PhysicsBodyHandle::from_raw(3)
+        );
+        assert_ne!(
+            PhysicsBodyHandle::from_raw(3),
+            PhysicsBodyHandle::from_raw(4)
+        );
         assert!(PhysicsBodyHandle::from_raw(1) < PhysicsBodyHandle::from_raw(2));
     }
 }

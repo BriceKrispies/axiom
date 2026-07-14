@@ -77,8 +77,14 @@ mod tests {
             SdfShapeSnapshot::new(SceneNodeId::from_raw(8), 0, Vec3::ONE, Vec3::ONE)
         );
         assert_ne!(base, SdfShapeSnapshot::new(node(), 2, Vec3::ONE, Vec3::ONE));
-        assert_ne!(base, SdfShapeSnapshot::new(node(), 0, Vec3::ZERO, Vec3::ONE));
-        assert_ne!(base, SdfShapeSnapshot::new(node(), 0, Vec3::ONE, Vec3::ZERO));
+        assert_ne!(
+            base,
+            SdfShapeSnapshot::new(node(), 0, Vec3::ZERO, Vec3::ONE)
+        );
+        assert_ne!(
+            base,
+            SdfShapeSnapshot::new(node(), 0, Vec3::ONE, Vec3::ZERO)
+        );
         assert!(format!("{base:?}").contains("SdfShapeSnapshot"));
     }
 }

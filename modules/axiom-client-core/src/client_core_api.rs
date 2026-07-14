@@ -92,12 +92,7 @@ impl ClientCoreApi {
             self.next_client_sequence = self.next_client_sequence.saturating_add(1);
             let body = payload.to_vec();
             self.pending.push((sequence, body.clone()));
-            (
-                sequence,
-                predicted_client_tick,
-                last_seen_server_tick,
-                body,
-            )
+            (sequence, predicted_client_tick, last_seen_server_tick, body)
         })
     }
 

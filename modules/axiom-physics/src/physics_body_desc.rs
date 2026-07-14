@@ -123,7 +123,8 @@ mod tests {
 
     #[test]
     fn dynamic_body_carries_reciprocal_mass() {
-        let d = PhysicsBodyDesc::dynamic_body(Transform::IDENTITY, Ratio::new(2.0).unwrap()).unwrap();
+        let d =
+            PhysicsBodyDesc::dynamic_body(Transform::IDENTITY, Ratio::new(2.0).unwrap()).unwrap();
         assert_eq!(d.kind(), PhysicsBodyKind::Dynamic);
         assert_eq!(d.mass_properties().inverse_mass().get(), 0.5);
     }
@@ -148,7 +149,10 @@ mod tests {
         let d = PhysicsBodyDesc::static_body(Transform::IDENTITY).unwrap();
         let c = d;
         assert_eq!(d, c);
-        assert_ne!(d, PhysicsBodyDesc::kinematic_body(Transform::IDENTITY).unwrap());
+        assert_ne!(
+            d,
+            PhysicsBodyDesc::kinematic_body(Transform::IDENTITY).unwrap()
+        );
         assert!(format!("{d:?}").contains("PhysicsBodyDesc"));
     }
 }

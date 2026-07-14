@@ -33,10 +33,7 @@ use axiom_webgpu::WebGpuApi;
 /// follow-up (Stream A `axiom-render` + gpu-backend shaders + canvas2d), not a
 /// local edit — see the report's field docs below.
 const GL_TO_WGPU_DEPTH: [f32; 16] = [
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.0,
-    0.0, 0.0, 0.5, 1.0,
+    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 1.0,
 ];
 
 /// Build the directional shadow caster's light view-projection from the sun's
@@ -301,9 +298,9 @@ impl RenderPipelineApi {
         });
         // Set the input camera and read the wgpu-ready view-projection (0-or-1
         // over the Option — no branch; absent yields identity, no camera command).
-        camera
-            .iter()
-            .for_each(|&(view, projection, _, _)| render.set_input_camera(&mut input, view, projection));
+        camera.iter().for_each(|&(view, projection, _, _)| {
+            render.set_input_camera(&mut input, view, projection)
+        });
         let view_projection = camera.map_or(Mat4::IDENTITY, |(_, _, vp, _)| vp);
 
         // Lights are resolved into the report below (a frame-uniform set), not
@@ -505,7 +502,12 @@ impl RenderPipelineApi {
                         .world()
                         .to_matrix();
                     let c = shape.color();
-                    (shape.kind(), world, shape.dims(), Vec4::new(c.x, c.y, c.z, 1.0))
+                    (
+                        shape.kind(),
+                        world,
+                        shape.dims(),
+                        Vec4::new(c.x, c.y, c.z, 1.0),
+                    )
                 })
                 .collect();
             render.build_sdf_scene(view_proj, camera_world_pos, &shapes)
@@ -524,7 +526,6 @@ impl RenderPipelineApi {
             recorded: gpu_report.is_recorded(),
         }
     }
-
 
     pub fn report_command_count(&self, report: &RenderReport) -> usize {
         report.command_count
@@ -699,8 +700,8 @@ mod tests {
         // An SDF sphere placed by a translation-only world transform (scale 1),
         // plus a camera (required for the SDF scene's rays). No renderables, so
         // the frame needs no mesh/material assets.
-        let shape_node = scene
-            .create_node_with_transform(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
+        let shape_node =
+            scene.create_node_with_transform(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)));
         scene
             .add_sdf_sphere(
                 &math(),
@@ -709,8 +710,8 @@ mod tests {
                 Vec3::new(1.0, 0.0, 0.0),
             )
             .unwrap();
-        let camera = scene
-            .create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
+        let camera =
+            scene.create_node_with_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
         scene
             .add_perspective_camera(
                 &math(),
@@ -732,7 +733,7 @@ mod tests {
         assert_eq!(sdf.primitives().len(), 1);
         let p = sdf.primitives()[0];
         assert_eq!(p.kind(), 0); // sphere
-        // dims (0.5, 0.5, 0.5) carried; translation-only world → uniform scale 1.
+                                 // dims (0.5, 0.5, 0.5) carried; translation-only world → uniform scale 1.
         assert_eq!(p.params(), [0.5, 0.5, 0.5, 1.0]);
         // The scene's RGB rides through with an opaque alpha synthesized.
         assert_eq!(p.color(), [1.0, 0.0, 0.0, 1.0]);
@@ -901,7 +902,10 @@ mod tests {
             0,
         );
         let report = api.submit(&frame, &scene, &webgpu);
-        assert_eq!(api.report_draw_color(&report, 0), Some([0.2, 0.4, 0.8, 0.5]));
+        assert_eq!(
+            api.report_draw_color(&report, 0),
+            Some([0.2, 0.4, 0.8, 0.5])
+        );
     }
 
     #[test]

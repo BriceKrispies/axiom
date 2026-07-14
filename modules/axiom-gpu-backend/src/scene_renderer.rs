@@ -650,7 +650,13 @@ impl SceneRenderer {
                     .unwrap_or((flat_normal.0, flat_normal.1, flat_normal.2.as_slice()));
                 (
                     *id,
-                    upload_material(device, queue, &material_layout, (*w, *h, rgba8), (nw, nh, nrgba)),
+                    upload_material(
+                        device,
+                        queue,
+                        &material_layout,
+                        (*w, *h, rgba8),
+                        (nw, nh, nrgba),
+                    ),
                 )
             })
             .collect();
@@ -811,7 +817,10 @@ impl SceneRenderer {
         let palette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("axiom-palette-bind-group"),
             layout: &palette_layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: palette_buffer.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: palette_buffer.as_entire_binding(),
+            }],
         });
         let skinned_pipeline = build_skinned_pipeline(
             device,
@@ -907,7 +916,11 @@ impl SceneRenderer {
         // Gate the SDF raymarch pass on the frame's Sdf capability bit; a profile that
         // drops SDF renders meshes only (the same policy the Canvas 2D backend applies).
         let sdf = sdf.filter(|_| (caps & (axiom_host::RenderCapability::Sdf as u32)) != 0);
-        queue.write_buffer(&self.lights_buffer, 0, &pack_lights(lights, self.ambient, caps));
+        queue.write_buffer(
+            &self.lights_buffer,
+            0,
+            &pack_lights(lights, self.ambient, caps),
+        );
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
@@ -955,8 +968,16 @@ impl SceneRenderer {
             skinned_instances.extend_from_slice(&[base as f32, 0.0, 0.0, 0.0]);
             skinned_draws.push((d.mesh_id, d.material_id, byte_offset));
         }
-        queue.write_buffer(&self.palette_buffer, 0, bytemuck::cast_slice(&palette_floats));
-        queue.write_buffer(&self.skinned_instance_buffer, 0, bytemuck::cast_slice(&skinned_instances));
+        queue.write_buffer(
+            &self.palette_buffer,
+            0,
+            bytemuck::cast_slice(&palette_floats),
+        );
+        queue.write_buffer(
+            &self.skinned_instance_buffer,
+            0,
+            bytemuck::cast_slice(&skinned_instances),
+        );
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("axiom-frame-encoder"),
@@ -1041,9 +1062,10 @@ impl SceneRenderer {
             pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
             pass.set_bind_group(3, &self.palette_bind_group, &[]);
             for (mesh_id, material_id, inst_offset) in &skinned_draws {
-                if let (Some(mesh), Some(material)) =
-                    (self.skinned_meshes.get(mesh_id), self.materials.get(material_id))
-                {
+                if let (Some(mesh), Some(material)) = (
+                    self.skinned_meshes.get(mesh_id),
+                    self.materials.get(material_id),
+                ) {
                     pass.set_bind_group(0, material, &[]);
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, self.skinned_instance_buffer.slice(*inst_offset..));
@@ -1280,17 +1302,46 @@ fn build_skinned_pipeline(
     });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("axiom-skinned-pl"),
-        bind_group_layouts: &[material_layout, lights_layout, shadow_sample_layout, palette_layout],
+        bind_group_layouts: &[
+            material_layout,
+            lights_layout,
+            shadow_sample_layout,
+            palette_layout,
+        ],
         push_constant_ranges: &[],
     });
     // Per-vertex: pos(0) normal(1) uv(2) colour(3) joints(4) weights(5).
     let vertex_attrs = [
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 2 },
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 32, shader_location: 3 },
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 48, shader_location: 4 },
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 64, shader_location: 5 },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 0,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 12,
+            shader_location: 1,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x2,
+            offset: 24,
+            shader_location: 2,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 32,
+            shader_location: 3,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 48,
+            shader_location: 4,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 64,
+            shader_location: 5,
+        },
     ];
     // Per-instance: mvp(6-9) world(10-13) colour(14) joint_base(15) — 10 vec4s.
     let instance_attrs: Vec<wgpu::VertexAttribute> = (0..10)
@@ -1509,7 +1560,14 @@ fn upload_material(
 ) -> wgpu::BindGroup {
     // Albedo is sRGB-encoded colour; the normal map is linear data (RGB = the
     // tangent-space normal), so it uses the non-sRGB format.
-    let albedo = upload_texture(device, queue, albedo.0, albedo.1, albedo.2, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let albedo = upload_texture(
+        device,
+        queue,
+        albedo.0,
+        albedo.1,
+        albedo.2,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    );
     let normal = upload_texture(
         device,
         queue,
@@ -1603,7 +1661,11 @@ fn upload_texture(
 /// `sky` + `ground` `vec4`s (rgb, w unused) — then `MAX_LIGHTS` entries of two
 /// `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb, intensity)`. Entries past
 /// the count stay zero. Capped at `MAX_LIGHTS`.
-fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)], ambient: axiom_host::FrameAmbient, caps: u32) -> Vec<u8> {
+fn pack_lights(
+    lights: &[(u32, [f32; 3], [f32; 3], f32)],
+    ambient: axiom_host::FrameAmbient,
+    caps: u32,
+) -> Vec<u8> {
     let count = lights.len().min(MAX_LIGHTS);
     let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
     bytes.extend_from_slice(&(count as u32).to_le_bytes());
@@ -1612,9 +1674,11 @@ fn pack_lights(lights: &[(u32, [f32; 3], [f32; 3], f32)], ambient: axiom_host::F
     bytes.extend_from_slice(&caps.to_le_bytes());
     bytes.extend_from_slice(&[0u8; 8]);
     let (sky, ground) = (ambient.sky(), ambient.ground());
-    [sky[0], sky[1], sky[2], 0.0, ground[0], ground[1], ground[2], 0.0]
-        .iter()
-        .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));
+    [
+        sky[0], sky[1], sky[2], 0.0, ground[0], ground[1], ground[2], 0.0,
+    ]
+    .iter()
+    .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));
     (0..MAX_LIGHTS).for_each(|i| {
         let (kind, vec, color, intensity) =
             lights

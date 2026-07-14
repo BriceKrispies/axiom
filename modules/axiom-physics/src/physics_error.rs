@@ -29,7 +29,11 @@ impl PhysicsError {
 
     /// A physics error that wraps a math validation failure (e.g. a plane
     /// normal that could not be normalized).
-    pub const fn with_math(code: PhysicsErrorCode, message: &'static str, cause: MathError) -> Self {
+    pub const fn with_math(
+        code: PhysicsErrorCode,
+        message: &'static str,
+        cause: MathError,
+    ) -> Self {
         PhysicsError {
             code,
             message,

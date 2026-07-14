@@ -21,7 +21,9 @@ pub(crate) const MAX_ACKS: usize = 4096;
 
 /// Reject an ack list longer than [`MAX_ACKS`], branchlessly.
 pub(crate) fn validate_ack_len(len: usize) -> KernelResult<()> {
-    (len <= MAX_ACKS).then_some(()).ok_or_else(too_many_acks_error)
+    (len <= MAX_ACKS)
+        .then_some(())
+        .ok_or_else(too_many_acks_error)
 }
 
 /// Write the count-prefixed `(player, sequence)` ack list.

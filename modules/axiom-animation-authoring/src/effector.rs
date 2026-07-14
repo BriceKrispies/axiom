@@ -21,7 +21,11 @@ pub struct Effector {
 impl Effector {
     /// Construct an effector `name` attached to `joint` at local `offset`.
     pub const fn new(name: &'static str, joint: JointId, offset: Transform) -> Self {
-        Effector { name, joint, offset }
+        Effector {
+            name,
+            joint,
+            offset,
+        }
     }
 
     /// The effector's stable name.

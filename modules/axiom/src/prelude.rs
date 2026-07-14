@@ -9,8 +9,8 @@ pub use axiom_ecs::SchedulePhase;
 // Re-exported from the scene's identity vocabulary under the engine-standard
 // name `Entity` (Bevy-shaped); the app-facing world API on `RunningApp` is
 // built on this handle.
-pub use axiom_scene::SceneNodeId as Entity;
 pub use axiom_kernel::{Meters, Ratio};
+pub use axiom_scene::SceneNodeId as Entity;
 // An app driving its own variable-dt run loop (a wasm `requestAnimationFrame`
 // host) banks real elapsed time into whole fixed steps through these.
 pub use axiom_frame::{FrameAccumulator, StepBudget};
@@ -27,7 +27,9 @@ pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
 // `Reflect` is the trait an app implements to declare its own dynamic
 // component vocabulary; the rest are the (de)serialization primitives its
 // hand-written impls call.
-pub use axiom_kernel::{BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema};
+pub use axiom_kernel::{
+    BinaryReader, BinaryWriter, FieldSchema, KernelResult, Reflect, TypeSchema,
+};
 
 pub use crate::angle::Angle;
 pub use crate::app::{App, RunningApp, TextureDataError};

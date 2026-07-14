@@ -49,7 +49,8 @@ impl Timers {
     pub fn every(&mut self, now: Tick, ticks: TickDelta) -> TimerId {
         let interval = TickDelta::new(ticks.raw().max(1));
         let id = self.mint();
-        self.schedule.schedule(id, now.add(interval), (interval, true));
+        self.schedule
+            .schedule(id, now.add(interval), (interval, true));
         id
     }
 

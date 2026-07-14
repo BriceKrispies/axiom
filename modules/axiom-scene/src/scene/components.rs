@@ -109,9 +109,7 @@ impl Scene {
             .sdf_shapes
             .remove(Self::entity(node))
             .map(|_| ())
-            .ok_or_else(|| {
-                SceneError::missing_sdf_shape("remove_sdf_shape: node has no sdf shape")
-            })
+            .ok_or_else(|| SceneError::missing_sdf_shape("remove_sdf_shape: node has no sdf shape"))
     }
 
     pub(crate) fn set_renderable_visible(
@@ -359,7 +357,8 @@ mod tests {
         // render-pipeline tests.
         s.set_renderable_visible(n, false).unwrap();
         s.set_renderable_casts_contact_shadow(n, true).unwrap();
-        s.set_renderable_texture(n, TextureRef::from_raw(5)).unwrap();
+        s.set_renderable_texture(n, TextureRef::from_raw(5))
+            .unwrap();
         s.set_renderable_animation(n, AnimationRef::from_raw(9))
             .unwrap();
         let snap = s.snapshot();
@@ -440,7 +439,9 @@ mod tests {
         assert_eq!(s.tag_of(enemy_a), Some(1));
 
         assert_eq!(
-            s.add_tag(SceneNodeId::from_raw(9999), 5).unwrap_err().code(),
+            s.add_tag(SceneNodeId::from_raw(9999), 5)
+                .unwrap_err()
+                .code(),
             SceneErrorCode::MissingNode
         );
     }

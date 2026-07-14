@@ -76,7 +76,6 @@ impl Draw2dApi {
         self.list.push_command_routed(self.active_target, cmd);
     }
 
-
     /// Set the 2D camera for this frame (centre + zoom).
     pub fn set_camera2d(&mut self, center: Vec2, zoom: Ratio) {
         self.list.set_camera(Camera2d::new(center, zoom));
@@ -96,7 +95,6 @@ impl Draw2dApi {
     pub fn pop_transform(&mut self, depth: TransformDepth) {
         self.transform_stack.truncate(depth.raw());
     }
-
 
     /// Draw a filled/stroked rectangle.
     pub fn rect(&mut self, r: Rect, style: Fill2d, common: Common2d) {
@@ -136,7 +134,6 @@ impl Draw2dApi {
         self.route(cmd);
     }
 
-
     /// Draw a textured sprite (source sub-rect / anchor / tint / flips ride on
     /// `opts`; placement on the current transform).
     pub fn sprite(&mut self, texture: TextureId, opts: SpriteDraw2d, common: Common2d) {
@@ -157,7 +154,6 @@ impl Draw2dApi {
         run.measure(font)
     }
 
-
     /// Register a linear gradient, returning its [`PaintId`]. A command's
     /// [`Fill2d`] references the paint by id; it never inlines stops.
     pub fn linear_gradient(&mut self, from: Vec2, to: Vec2, stops: &[GradientStop]) -> PaintId {
@@ -173,7 +169,6 @@ impl Draw2dApi {
     ) -> PaintId {
         self.list.register_radial(center, radius, stops.to_vec())
     }
-
 
     /// Register a particle emitter, returning its [`EmitterId`]. The emitter is a
     /// recipe; nothing is spawned until [`Self::emit`].
@@ -206,7 +201,6 @@ impl Draw2dApi {
         });
     }
 
-
     /// Create an off-screen render target of `width`×`height` pixels, returning
     /// its [`RenderTargetId`]. A render target is a named nested list; the backend
     /// owns the actual surface.
@@ -230,7 +224,6 @@ impl Draw2dApi {
         self.list.target_texture(target)
     }
 
-
     /// Sample a flip-book animation (§10.2): the atlas sub-rect to show at
     /// presentation time `elapsed`. A **pure** function of `(anim, elapsed,
     /// looping)` — it holds no state, takes no `&self`, and reads no clock, so the
@@ -251,9 +244,11 @@ impl Draw2dApi {
         let clamped = index.clamp(0, count - 1);
         let wrapped = index.rem_euclid(count);
         let chosen = [clamped, wrapped][usize::from(looping)];
-        anim.frames.get(chosen as usize).copied().unwrap_or(INERT_FRAME)
+        anim.frames
+            .get(chosen as usize)
+            .copied()
+            .unwrap_or(INERT_FRAME)
     }
-
 
     /// Finish the frame: take the accumulated list, **stable-sort it by
     /// `(layer, submission)`** so equal layers keep call order, and yield the
@@ -380,7 +375,11 @@ mod tests {
             common(0),
         );
         let list = api.finish();
-        let kinds: Vec<u32> = list.commands().iter().map(Draw2dCommand::kind_code).collect();
+        let kinds: Vec<u32> = list
+            .commands()
+            .iter()
+            .map(Draw2dCommand::kind_code)
+            .collect();
         assert_eq!(
             kinds,
             vec![
@@ -403,7 +402,8 @@ mod tests {
         // Inside both transforms: a draw bakes translation * scale.
         api.rect(unit_rect(), Fill2d::color(red()), common(0));
         let baked = api.finish();
-        let expected = Mat3::translation(Vec2::new(10.0, 0.0)).multiply(Mat3::scale(Vec2::new(2.0, 2.0)));
+        let expected =
+            Mat3::translation(Vec2::new(10.0, 0.0)).multiply(Mat3::scale(Vec2::new(2.0, 2.0)));
         assert_eq!(baked.at(0).unwrap().transform(), expected);
         // The returned depth marks the empty stack to restore to.
         assert_eq!(depth, TransformDepth::from_raw(0));
@@ -426,7 +426,10 @@ mod tests {
         let mut api = Draw2dApi::new();
         api.set_camera2d(Vec2::new(3.0, 4.0), ratio(2.0));
         let list = api.finish();
-        assert_eq!(list.camera(), Some(Camera2d::new(Vec2::new(3.0, 4.0), ratio(2.0))));
+        assert_eq!(
+            list.camera(),
+            Some(Camera2d::new(Vec2::new(3.0, 4.0), ratio(2.0)))
+        );
     }
 
     #[test]
@@ -442,7 +445,10 @@ mod tests {
         api.rect(unit_rect(), Fill2d::paint(lin), common(0));
         let list = api.finish();
         assert_eq!(list.paint_count(), 2);
-        assert_eq!(list.paint_linear(lin), Some((Vec2::ZERO, Vec2::new(1.0, 0.0))));
+        assert_eq!(
+            list.paint_linear(lin),
+            Some((Vec2::ZERO, Vec2::new(1.0, 0.0)))
+        );
         assert_eq!(list.paint_radial(rad), Some((Vec2::ONE, meters(4.0))));
         assert_eq!(list.paint_stops(lin).map(|s| s.len()), Some(2));
         // The rect's fill references the paint id, carrying no stops itself.
@@ -483,7 +489,11 @@ mod tests {
     fn finish_resets_surface_for_next_frame() {
         let mut api = Draw2dApi::new();
         api.set_camera2d(Vec2::ONE, ratio(1.0));
-        api.linear_gradient(Vec2::ZERO, Vec2::ONE, &[GradientStop::new(ratio(0.0), red())]);
+        api.linear_gradient(
+            Vec2::ZERO,
+            Vec2::ONE,
+            &[GradientStop::new(ratio(0.0), red())],
+        );
         api.rect(unit_rect(), Fill2d::color(red()), common(0));
         let first = api.finish();
         assert_eq!(first.len(), 1);
@@ -507,10 +517,16 @@ mod tests {
         // One KIND_PARTICLE_QUAD per emitted particle.
         assert_eq!(list.len(), 3);
         let (center, size, color) = list.at(0).unwrap().as_particle().unwrap();
-        assert_eq!(list.at(0).unwrap().kind_code(), Draw2dCommand::KIND_PARTICLE_QUAD);
+        assert_eq!(
+            list.at(0).unwrap().kind_code(),
+            Draw2dCommand::KIND_PARTICLE_QUAD
+        );
         // Real work: the particle moved along +x and its colour faded toward the
         // (transparent) end colour, so alpha dropped below the start's 1.0.
-        assert!(center.x > 0.0, "particle integrated along the emit direction");
+        assert!(
+            center.x > 0.0,
+            "particle integrated along the emit direction"
+        );
         assert_eq!(size, meters(0.5));
         assert!(color.a.get() < 1.0, "colour faded toward color_end");
     }
@@ -538,7 +554,11 @@ mod tests {
         api.emit(id, Vec2::ZERO, Vec2::new(1.0, 0.0));
         api.advance_particles(seconds(0.5));
         let list = api.finish();
-        let kinds: Vec<u32> = list.commands().iter().map(Draw2dCommand::kind_code).collect();
+        let kinds: Vec<u32> = list
+            .commands()
+            .iter()
+            .map(Draw2dCommand::kind_code)
+            .collect();
         // The low-layer rect sorts before the higher-layer particle quads.
         assert_eq!(
             kinds,
@@ -591,10 +611,22 @@ mod tests {
         let anim = flipbook();
         // index = floor(elapsed * fps): 0, then the mid-frame 0.25s still in frame 0
         // (floor(0.5) = 0), then the frame boundaries at 0.5s and 1.0s.
-        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(0.0), true), frame_at(0.0));
-        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(0.25), true), frame_at(0.0));
-        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(0.5), true), frame_at(1.0));
-        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(1.0), true), frame_at(2.0));
+        assert_eq!(
+            Draw2dApi::sample_animation(&anim, seconds(0.0), true),
+            frame_at(0.0)
+        );
+        assert_eq!(
+            Draw2dApi::sample_animation(&anim, seconds(0.25), true),
+            frame_at(0.0)
+        );
+        assert_eq!(
+            Draw2dApi::sample_animation(&anim, seconds(0.5), true),
+            frame_at(1.0)
+        );
+        assert_eq!(
+            Draw2dApi::sample_animation(&anim, seconds(1.0), true),
+            frame_at(2.0)
+        );
     }
 
     #[test]
@@ -602,8 +634,14 @@ mod tests {
         let anim = flipbook();
         // elapsed 2.0s ⇒ index floor(4.0) = 4, past the 3 frames.
         // looping wraps (4 mod 3 = 1 ⇒ frame 1); non-looping clamps to the last.
-        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(2.0), true), frame_at(1.0));
-        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(2.0), false), frame_at(2.0));
+        assert_eq!(
+            Draw2dApi::sample_animation(&anim, seconds(2.0), true),
+            frame_at(1.0)
+        );
+        assert_eq!(
+            Draw2dApi::sample_animation(&anim, seconds(2.0), false),
+            frame_at(2.0)
+        );
     }
 
     #[test]
@@ -611,16 +649,31 @@ mod tests {
         let anim = flipbook();
         // index floor(-0.5 * 2) = -1. Non-looping clamps the negative up to frame 0;
         // looping wraps it with rem_euclid (-1 mod 3 = 2 ⇒ the last frame).
-        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(-0.5), false), frame_at(0.0));
-        assert_eq!(Draw2dApi::sample_animation(&anim, seconds(-0.5), true), frame_at(2.0));
+        assert_eq!(
+            Draw2dApi::sample_animation(&anim, seconds(-0.5), false),
+            frame_at(0.0)
+        );
+        assert_eq!(
+            Draw2dApi::sample_animation(&anim, seconds(-0.5), true),
+            frame_at(2.0)
+        );
     }
 
     #[test]
     fn sample_animation_of_an_empty_book_is_the_inert_rect() {
-        let empty = SpriteAnimation { frames: vec![], fps: 24 };
+        let empty = SpriteAnimation {
+            frames: vec![],
+            fps: 24,
+        };
         // No frame to show: the inert zero-Rect on both the wrap and the clamp arm.
-        assert_eq!(Draw2dApi::sample_animation(&empty, seconds(1.0), true), Rect::new(Vec2::ZERO, Vec2::ZERO));
-        assert_eq!(Draw2dApi::sample_animation(&empty, seconds(1.0), false), Rect::new(Vec2::ZERO, Vec2::ZERO));
+        assert_eq!(
+            Draw2dApi::sample_animation(&empty, seconds(1.0), true),
+            Rect::new(Vec2::ZERO, Vec2::ZERO)
+        );
+        assert_eq!(
+            Draw2dApi::sample_animation(&empty, seconds(1.0), false),
+            Rect::new(Vec2::ZERO, Vec2::ZERO)
+        );
     }
 
     #[test]

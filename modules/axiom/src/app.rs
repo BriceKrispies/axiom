@@ -199,12 +199,8 @@ impl App {
         let meshes = running.mesh_set();
         let materials = running.material_textures();
         let max_instances = running.renderable_count() as u32;
-        let _ = windowing.run_web_compare(
-            surface_ids,
-            meshes,
-            materials,
-            max_instances,
-            move |tick| {
+        let _ =
+            windowing.run_web_compare(surface_ids, meshes, materials, max_instances, move |tick| {
                 let outcome = running.tick(tick);
                 let lights = outcome
                     .lights()
@@ -220,8 +216,7 @@ impl App {
                     outcome.mesh_batch_casters(),
                     outcome.sdf_scene().cloned(),
                 )
-            },
-        );
+            });
     }
 }
 
@@ -712,7 +707,9 @@ mod tests {
         SchemaVersion::new(SESSION_SCHEMA.major() + 1, 0).write_to(&mut writer);
         let mut app = controller_app().build();
         assert_eq!(
-            app.restore_session(&writer.into_bytes()).unwrap_err().code(),
+            app.restore_session(&writer.into_bytes())
+                .unwrap_err()
+                .code(),
             KernelErrorCode::SchemaVersionMismatch
         );
     }

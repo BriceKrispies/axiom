@@ -121,7 +121,10 @@ mod tests {
             Angle::radians(-0.1),
         );
         let seated = base.with_seat_y(Meters::new(3.75).expect("seat is finite"));
-        assert_eq!(seated.seat_y, Some(Meters::new(3.75).expect("seat is finite")));
+        assert_eq!(
+            seated.seat_y,
+            Some(Meters::new(3.75).expect("seat is finite"))
+        );
         // Every other field is carried through unchanged.
         assert_eq!(seated.index, base.index);
         assert_eq!(seated.move_local, base.move_local);

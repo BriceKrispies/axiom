@@ -119,15 +119,45 @@ mod tests {
 
     #[test]
     fn shorthand_constructors_use_their_codes() {
-        assert_eq!(AuthoringError::rig_not_found("").code(), AuthoringErrorCode::RigNotFound);
-        assert_eq!(AuthoringError::motion_not_found("").code(), AuthoringErrorCode::MotionNotFound);
-        assert_eq!(AuthoringError::phase_not_found("").code(), AuthoringErrorCode::PhaseNotFound);
-        assert_eq!(AuthoringError::plan_not_found("").code(), AuthoringErrorCode::PlanNotFound);
-        assert_eq!(AuthoringError::unknown_joint("").code(), AuthoringErrorCode::UnknownJoint);
-        assert_eq!(AuthoringError::unknown_effector("").code(), AuthoringErrorCode::UnknownEffector);
-        assert_eq!(AuthoringError::unknown_target("").code(), AuthoringErrorCode::UnknownTarget);
-        assert_eq!(AuthoringError::invalid_tick_range("").code(), AuthoringErrorCode::InvalidTickRange);
-        assert_eq!(AuthoringError::overlapping_phases("").code(), AuthoringErrorCode::OverlappingPhases);
-        assert_eq!(AuthoringError::non_finite_value("").code(), AuthoringErrorCode::NonFiniteValue);
+        assert_eq!(
+            AuthoringError::rig_not_found("").code(),
+            AuthoringErrorCode::RigNotFound
+        );
+        assert_eq!(
+            AuthoringError::motion_not_found("").code(),
+            AuthoringErrorCode::MotionNotFound
+        );
+        assert_eq!(
+            AuthoringError::phase_not_found("").code(),
+            AuthoringErrorCode::PhaseNotFound
+        );
+        assert_eq!(
+            AuthoringError::plan_not_found("").code(),
+            AuthoringErrorCode::PlanNotFound
+        );
+        assert_eq!(
+            AuthoringError::unknown_joint("").code(),
+            AuthoringErrorCode::UnknownJoint
+        );
+        assert_eq!(
+            AuthoringError::unknown_effector("").code(),
+            AuthoringErrorCode::UnknownEffector
+        );
+        assert_eq!(
+            AuthoringError::unknown_target("").code(),
+            AuthoringErrorCode::UnknownTarget
+        );
+        assert_eq!(
+            AuthoringError::invalid_tick_range("").code(),
+            AuthoringErrorCode::InvalidTickRange
+        );
+        assert_eq!(
+            AuthoringError::overlapping_phases("").code(),
+            AuthoringErrorCode::OverlappingPhases
+        );
+        assert_eq!(
+            AuthoringError::non_finite_value("").code(),
+            AuthoringErrorCode::NonFiniteValue
+        );
     }
 }

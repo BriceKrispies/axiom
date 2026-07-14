@@ -54,7 +54,10 @@ impl MotionPlan {
 
     /// The world position of the target named `name`, if declared.
     pub(crate) fn target_position_by_name(&self, name: &str) -> Option<Vec3> {
-        self.targets.iter().find(|(n, _)| n == name).map(|(_, p)| *p)
+        self.targets
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, p)| *p)
     }
 
     /// The name of the phase covering `tick`, if any.
@@ -153,9 +156,15 @@ mod tests {
         assert_eq!(p.duration(), 30);
         assert_eq!(p.phases().len(), 2);
         assert_eq!(p.events().len(), 2);
-        assert_eq!(p.target_position(TargetId::from_raw(1)), Some(Vec3::new(0.0, 0.8, 8.0)));
+        assert_eq!(
+            p.target_position(TargetId::from_raw(1)),
+            Some(Vec3::new(0.0, 0.8, 8.0))
+        );
         assert_eq!(p.target_position(TargetId::from_raw(9)), None);
-        assert_eq!(p.target_position_by_name("ball"), Some(Vec3::new(0.0, 0.0, 0.0)));
+        assert_eq!(
+            p.target_position_by_name("ball"),
+            Some(Vec3::new(0.0, 0.0, 0.0))
+        );
         assert_eq!(p.target_position_by_name("nope"), None);
         assert_eq!(p.active_phase_name(5), Some("a"));
         assert_eq!(p.active_phase_name(20), Some("b"));

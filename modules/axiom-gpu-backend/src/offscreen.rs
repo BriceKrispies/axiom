@@ -47,7 +47,8 @@ pub(crate) fn render_to_rgba(
     let caps = profile.bits();
     // Retro is active only when the frame carries a profile AND the capability is on;
     // it then drives both the low-res internal target and the readback quantize+dither.
-    let retro_active = retro_32bit.filter(|_| profile.contains(axiom_host::RenderCapability::Retro32Bit));
+    let retro_active =
+        retro_32bit.filter(|_| profile.contains(axiom_host::RenderCapability::Retro32Bit));
     let internal = retro_active.map(|p| (p.internal_width(), p.internal_height()));
 
     let instance = wgpu::Instance::default();
@@ -107,28 +108,56 @@ pub(crate) fn render_to_rgba(
         None => {
             let depth_view = create_depth_view(&device, width, height);
             renderer.record(
-                &device, &queue, &color_view, &depth_view, lights, light_view_proj, batches,
-                skinned, clear, sdf, caps,
+                &device,
+                &queue,
+                &color_view,
+                &depth_view,
+                lights,
+                light_view_proj,
+                batches,
+                skinned,
+                clear,
+                sdf,
+                caps,
             );
         }
         Some((iw, ih)) => {
             let scene_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("axiom-offscreen-scene"),
-                size: wgpu::Extent3d { width: iw, height: ih, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: iw,
+                    height: ih,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: COLOR_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
             let scene_view = scene_texture.create_view(&wgpu::TextureViewDescriptor::default());
             let depth_view = create_depth_view(&device, iw, ih);
             renderer.record(
-                &device, &queue, &scene_view, &depth_view, lights, light_view_proj, batches,
-                skinned, clear, sdf, caps,
+                &device,
+                &queue,
+                &scene_view,
+                &depth_view,
+                lights,
+                light_view_proj,
+                batches,
+                skinned,
+                clear,
+                sdf,
+                caps,
             );
-            let blit = UpscaleBlit::new(&device, COLOR_FORMAT, &scene_view, wgpu::FilterMode::Nearest);
+            let blit = UpscaleBlit::new(
+                &device,
+                COLOR_FORMAT,
+                &scene_view,
+                wgpu::FilterMode::Nearest,
+            );
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("axiom-offscreen-upscale"),
             });

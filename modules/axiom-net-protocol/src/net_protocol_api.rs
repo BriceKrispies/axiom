@@ -240,9 +240,7 @@ impl NetProtocolApi {
 
     /// Decode a `ClientIntentFor`, returning `(player, client_sequence,
     /// predicted_client_tick, last_seen_server_tick, payload)`.
-    pub fn decode_client_intent_for(
-        bytes: &[u8],
-    ) -> KernelResult<(u64, u64, u64, u64, Vec<u8>)> {
+    pub fn decode_client_intent_for(bytes: &[u8]) -> KernelResult<(u64, u64, u64, u64, Vec<u8>)> {
         ClientIntentFor::decode(bytes).map(|m| {
             (
                 m.player(),
@@ -266,9 +264,7 @@ impl NetProtocolApi {
     }
 
     /// Decode a `ServerSnapshotFor`, returning `(server_tick, acks, payload)`.
-    pub fn decode_server_snapshot_for(
-        bytes: &[u8],
-    ) -> KernelResult<DecodedServerSnapshotFor> {
+    pub fn decode_server_snapshot_for(bytes: &[u8]) -> KernelResult<DecodedServerSnapshotFor> {
         ServerSnapshotFor::decode(bytes)
             .map(|m| (m.server_tick(), m.acks().to_vec(), m.payload().to_vec()))
     }
@@ -286,8 +282,14 @@ impl NetProtocolApi {
         base_payload: &[u8],
         new_payload: &[u8],
     ) -> KernelResult<Vec<u8>> {
-        ServerSnapshotForDelta::from_payloads(server_tick, acks, base_tick, base_payload, new_payload)
-            .map(|m| m.encode())
+        ServerSnapshotForDelta::from_payloads(
+            server_tick,
+            acks,
+            base_tick,
+            base_payload,
+            new_payload,
+        )
+        .map(|m| m.encode())
     }
 
     /// Decode a `ServerSnapshotForDelta`, returning `(server_tick, base_tick, acks,
@@ -494,8 +496,9 @@ mod tests {
                 .code(),
             KernelErrorCode::OutOfBounds
         );
-        let too_many: Vec<(u64, u64)> =
-            (0..=NetProtocolApi::MAX_ACKS as u64).map(|p| (p, p)).collect();
+        let too_many: Vec<(u64, u64)> = (0..=NetProtocolApi::MAX_ACKS as u64)
+            .map(|p| (p, p))
+            .collect();
         assert_eq!(
             NetProtocolApi::encode_server_snapshot_for(0, &too_many, b"")
                 .unwrap_err()

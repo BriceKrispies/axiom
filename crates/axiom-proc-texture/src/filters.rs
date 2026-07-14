@@ -14,7 +14,9 @@ pub(crate) const MAX_BLUR: u32 = 8;
 pub(crate) fn blur(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
     let radius = ctx.params().first().map(|p| p.as_int().min(MAX_BLUR));
     ctx.inputs().first().zip(radius).map(|(src, r)| {
-        TextureBuffer::from_fn(src.width(), src.height(), |x, y| box_blur_pixel(src, x, y, r))
+        TextureBuffer::from_fn(src.width(), src.height(), |x, y| {
+            box_blur_pixel(src, x, y, r)
+        })
     })
 }
 
@@ -52,7 +54,9 @@ pub(crate) fn blend(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
         .zip(factor)
         .filter(|((a, b), _)| (a.width() == b.width()) & (a.height() == b.height()))
         .map(|((a, b), f)| {
-            TextureBuffer::from_fn(a.width(), a.height(), |x, y| lerp_rgba(a.texel(x, y), b.texel(x, y), f))
+            TextureBuffer::from_fn(a.width(), a.height(), |x, y| {
+                lerp_rgba(a.texel(x, y), b.texel(x, y), f)
+            })
         })
 }
 
@@ -62,7 +66,9 @@ pub(crate) fn color_ramp(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuff
     let p = ctx.params();
     let colors = (p.len() >= 2).then(|| (rgba(p[0].as_color()), rgba(p[1].as_color())));
     ctx.inputs().first().zip(colors).map(|(src, (lo, hi))| {
-        TextureBuffer::from_fn(src.width(), src.height(), |x, y| lerp_rgba(lo, hi, luminance(src.texel(x, y))))
+        TextureBuffer::from_fn(src.width(), src.height(), |x, y| {
+            lerp_rgba(lo, hi, luminance(src.texel(x, y)))
+        })
     })
 }
 
@@ -118,12 +124,22 @@ mod tests {
         let s = g.add(src_op as u16, src_params, vec![]);
         let inputs = (0..input_count).map(|_| s).collect();
         g.add(filter_op as u16, filter_params, inputs);
-        ProcCore::new().execute(&g, 7, &SpaceApi::root(), texture_eval).ok()
+        ProcCore::new()
+            .execute(&g, 7, &SpaceApi::root(), texture_eval)
+            .ok()
     }
 
     fn checker() -> (TextureOp, Vec<Param>) {
         // A horizontal black→white gradient makes a good filter input.
-        (TextureOp::Gradient, vec![Param::int(4), Param::int(4), c(0x00_00_00_FF), c(0xFF_FF_FF_FF)])
+        (
+            TextureOp::Gradient,
+            vec![
+                Param::int(4),
+                Param::int(4),
+                c(0x00_00_00_FF),
+                c(0xFF_FF_FF_FF),
+            ],
+        )
     }
 
     #[test]
@@ -140,27 +156,62 @@ mod tests {
     fn blend_mixes_two_equal_inputs() {
         // factor 1.0 → the second input verbatim (both are the same source here).
         let (op, p) = checker();
-        let out = run(op, p.clone(), TextureOp::Blend, vec![Param::scalar(Scalar::new(1.0))], 2).unwrap();
+        let out = run(
+            op,
+            p.clone(),
+            TextureOp::Blend,
+            vec![Param::scalar(Scalar::new(1.0))],
+            2,
+        )
+        .unwrap();
         assert_eq!(out.width(), 4);
         // One input is not enough for a blend.
-        assert!(run(op, p, TextureOp::Blend, vec![Param::scalar(Scalar::new(0.5))], 1).is_none());
+        assert!(run(
+            op,
+            p,
+            TextureOp::Blend,
+            vec![Param::scalar(Scalar::new(0.5))],
+            1
+        )
+        .is_none());
     }
 
     #[test]
     fn blend_rejects_mismatched_sizes() {
         // A 4x4 gradient blended with a 2x2 solid: different sizes → op fails.
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
-        let a = g.add(TextureOp::Gradient as u16, vec![Param::int(4), Param::int(4), c(0), c(0xFFFFFFFF)], vec![]);
-        let b = g.add(TextureOp::Solid as u16, vec![Param::int(2), Param::int(2), c(0xFFFFFFFF)], vec![]);
-        g.add(TextureOp::Blend as u16, vec![Param::scalar(Scalar::new(0.5))], vec![a, b]);
-        assert!(ProcCore::new().execute(&g, 7, &SpaceApi::root(), texture_eval).is_err());
+        let a = g.add(
+            TextureOp::Gradient as u16,
+            vec![Param::int(4), Param::int(4), c(0), c(0xFFFFFFFF)],
+            vec![],
+        );
+        let b = g.add(
+            TextureOp::Solid as u16,
+            vec![Param::int(2), Param::int(2), c(0xFFFFFFFF)],
+            vec![],
+        );
+        g.add(
+            TextureOp::Blend as u16,
+            vec![Param::scalar(Scalar::new(0.5))],
+            vec![a, b],
+        );
+        assert!(ProcCore::new()
+            .execute(&g, 7, &SpaceApi::root(), texture_eval)
+            .is_err());
     }
 
     #[test]
     fn color_ramp_remaps_luminance() {
         let (op, p) = checker();
         // Ramp black..red: the dark end stays black, the light end goes red.
-        let out = run(op, p.clone(), TextureOp::ColorRamp, vec![c(0x00_00_00_FF), c(0xFF_00_00_FF)], 1).unwrap();
+        let out = run(
+            op,
+            p.clone(),
+            TextureOp::ColorRamp,
+            vec![c(0x00_00_00_FF), c(0xFF_00_00_FF)],
+            1,
+        )
+        .unwrap();
         assert_eq!(out.texel(0, 0), [0, 0, 0, 255]);
         assert_eq!(out.texel(3, 0)[0], 255);
         assert!(run(op, p, TextureOp::ColorRamp, vec![c(0)], 1).is_none()); // needs 2 colors
@@ -180,6 +231,13 @@ mod tests {
         let n = out.texel(2, 2);
         assert_eq!((n[0], n[1]), (127, 127)); // flat → centered x/y
         assert!(n[2] >= 250); // strong +Z
-        assert!(run(TextureOp::Solid, vec![Param::int(4), Param::int(4), c(0)], TextureOp::HeightToNormal, vec![], 1).is_none());
+        assert!(run(
+            TextureOp::Solid,
+            vec![Param::int(4), Param::int(4), c(0)],
+            TextureOp::HeightToNormal,
+            vec![],
+            1
+        )
+        .is_none());
     }
 }

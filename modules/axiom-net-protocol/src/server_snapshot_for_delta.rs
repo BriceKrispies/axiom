@@ -108,8 +108,8 @@ impl ServerSnapshotForDelta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_kernel::KernelErrorCode;
     use crate::opaque_payload::MAX_PAYLOAD_LEN;
+    use axiom_kernel::KernelErrorCode;
 
     const BASE: &[u8] = b"the authoritative snapshot payload, tick N";
     const NEW: &[u8] = b"the authoritative snapshot PAYLOAD, tick N+1!";
@@ -192,10 +192,9 @@ mod tests {
     fn cross_language_byte_parity_fixture() {
         // The exact bytes the `@axiom/client` TS twin must reproduce
         // (`snapshot-delta.test.ts` asserts the identical literal).
-        let bytes =
-            ServerSnapshotForDelta::from_payloads(43, &[(1, 9)], 42, b"abc", b"abd")
-                .unwrap()
-                .encode();
+        let bytes = ServerSnapshotForDelta::from_payloads(43, &[(1, 9)], 42, b"abc", b"abd")
+            .unwrap()
+            .encode();
         let expected: &[u8] = &[
             1, 0, 0, 0, 9, 43, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0,
             0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0,

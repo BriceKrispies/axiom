@@ -102,10 +102,20 @@ mod tests {
     fn frame() -> PoseFrame {
         PoseFrame::new(
             Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
-            vec![Transform::IDENTITY, Transform::from_translation(Vec3::new(0.0, 0.9, 0.0))],
-            vec![Transform::IDENTITY, Transform::from_translation(Vec3::new(0.0, 0.9, 1.0))],
+            vec![
+                Transform::IDENTITY,
+                Transform::from_translation(Vec3::new(0.0, 0.9, 0.0)),
+            ],
+            vec![
+                Transform::IDENTITY,
+                Transform::from_translation(Vec3::new(0.0, 0.9, 1.0)),
+            ],
             vec![Transform::from_translation(Vec3::new(0.25, 0.0, -0.1))],
-            vec![ResolvedConstraint::new(ConstraintKind::KeepGazeOnTarget, None, Some(Vec3::ZERO))],
+            vec![ResolvedConstraint::new(
+                ConstraintKind::KeepGazeOnTarget,
+                None,
+                Some(Vec3::ZERO),
+            )],
             vec![],
             vec![
                 ResolvedEvent::new(
@@ -134,11 +144,22 @@ mod tests {
     fn accessors_read_every_field() {
         let f = frame();
         assert_eq!(f.root().translation, Vec3::new(0.0, 0.0, 1.0));
-        assert_eq!(f.joint_local(JointId::from_raw(1)).unwrap().translation, Vec3::new(0.0, 0.9, 0.0));
+        assert_eq!(
+            f.joint_local(JointId::from_raw(1)).unwrap().translation,
+            Vec3::new(0.0, 0.9, 0.0)
+        );
         assert_eq!(f.joint_local(JointId::from_raw(9)), None);
-        assert_eq!(f.joint_world(JointId::from_raw(1)).unwrap().translation, Vec3::new(0.0, 0.9, 1.0));
+        assert_eq!(
+            f.joint_world(JointId::from_raw(1)).unwrap().translation,
+            Vec3::new(0.0, 0.9, 1.0)
+        );
         assert_eq!(f.joint_world(JointId::from_raw(9)), None);
-        assert_eq!(f.effector_world(EffectorId::from_raw(0)).unwrap().translation, Vec3::new(0.25, 0.0, -0.1));
+        assert_eq!(
+            f.effector_world(EffectorId::from_raw(0))
+                .unwrap()
+                .translation,
+            Vec3::new(0.25, 0.0, -0.1)
+        );
         assert_eq!(f.effector_world(EffectorId::from_raw(9)), None);
         assert_eq!(f.active_constraints().len(), 1);
         assert_eq!(f.active_contacts().len(), 0);

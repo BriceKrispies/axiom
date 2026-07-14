@@ -10,9 +10,9 @@ use crate::mesh_buffer::MeshBuffer;
 /// The centroid of a position list (origin for an empty list).
 fn centroid(positions: &[Vec3]) -> Vec3 {
     let count = positions.len().max(1) as f32;
-    let sum = positions
-        .iter()
-        .fold(Vec3::ZERO, |acc, p| Vec3::new(acc.x + p.x, acc.y + p.y, acc.z + p.z));
+    let sum = positions.iter().fold(Vec3::ZERO, |acc, p| {
+        Vec3::new(acc.x + p.x, acc.y + p.y, acc.z + p.z)
+    });
     Vec3::new(sum.x / count, sum.y / count, sum.z / count)
 }
 
@@ -33,7 +33,12 @@ pub(crate) fn transform(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
                 )
             })
             .collect();
-        MeshBuffer::from_parts(positions, src.normals().to_vec(), src.uvs().to_vec(), src.indices().to_vec())
+        MeshBuffer::from_parts(
+            positions,
+            src.normals().to_vec(),
+            src.uvs().to_vec(),
+            src.indices().to_vec(),
+        )
     })
 }
 
@@ -50,9 +55,24 @@ pub(crate) fn extrude(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
             .copied()
             .chain(src.positions().iter().map(|p| Vec3::new(p.x, p.y + d, p.z)))
             .collect();
-        let normals = src.normals().iter().copied().chain(src.normals().iter().copied()).collect();
-        let uvs = src.uvs().iter().copied().chain(src.uvs().iter().copied()).collect();
-        let indices = src.indices().iter().copied().chain(src.indices().iter().map(|i| i + base)).collect();
+        let normals = src
+            .normals()
+            .iter()
+            .copied()
+            .chain(src.normals().iter().copied())
+            .collect();
+        let uvs = src
+            .uvs()
+            .iter()
+            .copied()
+            .chain(src.uvs().iter().copied())
+            .collect();
+        let indices = src
+            .indices()
+            .iter()
+            .copied()
+            .chain(src.indices().iter().map(|i| i + base))
+            .collect();
         MeshBuffer::from_parts(positions, normals, uvs, indices)
     })
 }
@@ -60,7 +80,10 @@ pub(crate) fn extrude(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
 /// **Bevel** — pull every vertex toward the mesh centroid by `amount` (0..1), a
 /// crude chamfer/inset. Params: `[amount]`. Normals/UVs pass through.
 pub(crate) fn bevel(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
-    let amount = ctx.params().first().map(|p| p.as_scalar().get().clamp(0.0, 1.0));
+    let amount = ctx
+        .params()
+        .first()
+        .map(|p| p.as_scalar().get().clamp(0.0, 1.0));
     ctx.inputs().first().zip(amount).and_then(|(src, t)| {
         let mid = centroid(src.positions());
         let positions = src
@@ -74,7 +97,12 @@ pub(crate) fn bevel(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
                 )
             })
             .collect();
-        MeshBuffer::from_parts(positions, src.normals().to_vec(), src.uvs().to_vec(), src.indices().to_vec())
+        MeshBuffer::from_parts(
+            positions,
+            src.normals().to_vec(),
+            src.uvs().to_vec(),
+            src.indices().to_vec(),
+        )
     })
 }
 
@@ -88,10 +116,19 @@ pub(crate) fn bend(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
             .iter()
             .map(|p| {
                 let theta = a * p.x;
-                Vec3::new(p.x * theta.cos() - p.y * theta.sin(), p.x * theta.sin() + p.y * theta.cos(), p.z)
+                Vec3::new(
+                    p.x * theta.cos() - p.y * theta.sin(),
+                    p.x * theta.sin() + p.y * theta.cos(),
+                    p.z,
+                )
             })
             .collect();
-        MeshBuffer::from_parts(positions, src.normals().to_vec(), src.uvs().to_vec(), src.indices().to_vec())
+        MeshBuffer::from_parts(
+            positions,
+            src.normals().to_vec(),
+            src.uvs().to_vec(),
+            src.indices().to_vec(),
+        )
     })
 }
 
@@ -110,7 +147,12 @@ pub(crate) fn displace(mut ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> 
                 Vec3::new(pos.x + nrm.x * n, pos.y + nrm.y * n, pos.z + nrm.z * n)
             })
             .collect();
-        MeshBuffer::from_parts(positions, src.normals().to_vec(), src.uvs().to_vec(), src.indices().to_vec())
+        MeshBuffer::from_parts(
+            positions,
+            src.normals().to_vec(),
+            src.uvs().to_vec(),
+            src.indices().to_vec(),
+        )
     })
 }
 
@@ -119,8 +161,17 @@ pub(crate) fn displace(mut ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> 
 pub(crate) fn uv_project(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
     let scale = ctx.params().first().map(|p| p.as_scalar().get());
     ctx.inputs().first().zip(scale).and_then(|(src, s)| {
-        let uvs = src.positions().iter().map(|p| Vec2::new(p.x * s, p.z * s)).collect();
-        MeshBuffer::from_parts(src.positions().to_vec(), src.normals().to_vec(), uvs, src.indices().to_vec())
+        let uvs = src
+            .positions()
+            .iter()
+            .map(|p| Vec2::new(p.x * s, p.z * s))
+            .collect();
+        MeshBuffer::from_parts(
+            src.positions().to_vec(),
+            src.normals().to_vec(),
+            uvs,
+            src.indices().to_vec(),
+        )
     })
 }
 
@@ -129,7 +180,12 @@ pub(crate) fn uv_project(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
 /// non-triangular buffer). No params.
 pub(crate) fn triangulate(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
     ctx.inputs().first().and_then(|src| {
-        MeshBuffer::from_parts(src.positions().to_vec(), src.normals().to_vec(), src.uvs().to_vec(), src.indices().to_vec())
+        MeshBuffer::from_parts(
+            src.positions().to_vec(),
+            src.normals().to_vec(),
+            src.uvs().to_vec(),
+            src.indices().to_vec(),
+        )
     })
 }
 
@@ -152,16 +208,28 @@ mod tests {
         let c = g.add(MeshOp::Cube as u16, vec![s(2.0)], vec![]);
         let inputs = (0..input_count).map(|_| c).collect();
         g.add(op as u16, params, inputs);
-        ProcCore::new().execute(&g, 3, &SpaceApi::root(), mesh_eval).ok()
+        ProcCore::new()
+            .execute(&g, 3, &SpaceApi::root(), mesh_eval)
+            .ok()
     }
 
     #[test]
     fn transform_translates_and_scales_and_needs_six_params() {
-        let m = cube_then(MeshOp::Transform, vec![s(10.0), s(0.0), s(0.0), s(1.0), s(1.0), s(1.0)], 1).unwrap();
+        let m = cube_then(
+            MeshOp::Transform,
+            vec![s(10.0), s(0.0), s(0.0), s(1.0), s(1.0), s(1.0)],
+            1,
+        )
+        .unwrap();
         // Every vertex shifted +10 in x.
         assert!(m.positions().iter().all(|p| p.x >= 9.0));
         assert!(cube_then(MeshOp::Transform, vec![s(1.0)], 1).is_none());
-        assert!(cube_then(MeshOp::Transform, vec![s(0.0), s(0.0), s(0.0), s(1.0), s(1.0), s(1.0)], 0).is_none());
+        assert!(cube_then(
+            MeshOp::Transform,
+            vec![s(0.0), s(0.0), s(0.0), s(1.0), s(1.0), s(1.0)],
+            0
+        )
+        .is_none());
     }
 
     #[test]
@@ -176,7 +244,10 @@ mod tests {
     fn bevel_pulls_vertices_inward() {
         let m = cube_then(MeshOp::Bevel, vec![s(1.0)], 1).unwrap();
         // amount 1.0 collapses everything to the centroid (origin).
-        assert!(m.positions().iter().all(|p| p.x.abs() < 1e-5 && p.y.abs() < 1e-5 && p.z.abs() < 1e-5));
+        assert!(m
+            .positions()
+            .iter()
+            .all(|p| p.x.abs() < 1e-5 && p.y.abs() < 1e-5 && p.z.abs() < 1e-5));
         // amount clamps into [0, 1]: above 1 still collapses, below 0 is identity.
         let over = cube_then(MeshOp::Bevel, vec![s(2.0)], 1).unwrap();
         assert!(over.positions().iter().all(|p| p.x.abs() < 1e-5));

@@ -139,7 +139,14 @@ impl SkinnedDraw {
         material_id: u64,
         joints: Vec<[f32; 16]>,
     ) -> Self {
-        SkinnedDraw { mvp, world, color, mesh_id, material_id, joints }
+        SkinnedDraw {
+            mvp,
+            world,
+            color,
+            mesh_id,
+            material_id,
+            joints,
+        }
     }
 
     /// The column-major model-view-projection matrix.
@@ -465,7 +472,13 @@ mod tests {
 
     #[test]
     fn sdf_scene_round_trips_present_and_absent() {
-        let scene = SdfScene::new(Vec::new(), [0.0; 16], [0.0; 16], [1.0, 2.0, 3.0], [100.0, 0.001, 0.0, 0.0]);
+        let scene = SdfScene::new(
+            Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
+            [1.0, 2.0, 3.0],
+            [100.0, 0.001, 0.0, 0.0],
+        );
         let with = FrameOutcome::new(
             0,
             0,

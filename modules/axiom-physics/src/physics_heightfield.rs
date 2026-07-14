@@ -32,7 +32,15 @@ impl Heightfield {
     pub(crate) fn new(nx: u32, nz: u32, spacing_x: f32, spacing_z: f32, heights: Vec<f32>) -> Self {
         let half_x = (nx.saturating_sub(1) as f32) * spacing_x * 0.5;
         let half_z = (nz.saturating_sub(1) as f32) * spacing_z * 0.5;
-        Heightfield { nx, nz, spacing_x, spacing_z, half_x, half_z, heights }
+        Heightfield {
+            nx,
+            nz,
+            spacing_x,
+            spacing_z,
+            half_x,
+            half_z,
+            heights,
+        }
     }
 
     /// The grid height at integer indices (clamped into range).
@@ -63,8 +71,10 @@ impl Heightfield {
     /// The upward unit surface normal at local `(x, z)` — the central-difference
     /// gradient of the sampled height, `(−dh/dx, 1, −dh/dz)` normalized.
     pub(crate) fn normal_at(&self, x: f32, z: f32) -> Vec3 {
-        let gx = (self.sample(x + self.spacing_x, z) - self.sample(x - self.spacing_x, z)) / (2.0 * self.spacing_x);
-        let gz = (self.sample(x, z + self.spacing_z) - self.sample(x, z - self.spacing_z)) / (2.0 * self.spacing_z);
+        let gx = (self.sample(x + self.spacing_x, z) - self.sample(x - self.spacing_x, z))
+            / (2.0 * self.spacing_x);
+        let gz = (self.sample(x, z + self.spacing_z) - self.sample(x, z - self.spacing_z))
+            / (2.0 * self.spacing_z);
         let v = Vec3::new(-gx, 1.0, -gz);
         let len = v.length_squared().sqrt().max(f32::MIN_POSITIVE);
         v.mul_scalar(1.0 / len)
@@ -78,7 +88,11 @@ impl Heightfield {
     /// The grid's `(min, max)` height.
     pub(crate) fn bounds(&self) -> (f32, f32) {
         let min = self.heights.iter().copied().fold(f32::INFINITY, f32::min);
-        let max = self.heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let max = self
+            .heights
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         (min, max)
     }
 
@@ -101,7 +115,13 @@ mod tests {
 
     /// A 3×3 grid tilted so height rises +1 per +1 x (a 45° ramp about z).
     fn ramp() -> Heightfield {
-        Heightfield::new(3, 3, 1.0, 1.0, vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0])
+        Heightfield::new(
+            3,
+            3,
+            1.0,
+            1.0,
+            vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0],
+        )
     }
 
     #[test]

@@ -43,7 +43,9 @@ impl Bone {
     /// the parent's `u64` id) followed by the rest transform.
     pub(crate) fn write_to(self, writer: &mut BinaryWriter) {
         writer.write_u8(u8::from(self.parent.is_some()));
-        self.parent.iter().for_each(|parent| writer.write_u64(parent.raw()));
+        self.parent
+            .iter()
+            .for_each(|parent| writer.write_u64(parent.raw()));
         self.rest.write_to(writer);
     }
 
@@ -89,7 +91,10 @@ mod tests {
     #[test]
     fn root_and_child_bones_round_trip() {
         let root = Bone::root(Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)));
-        let child = Bone::child(BoneId::from_raw(4), Transform::from_translation(Vec3::new(0.0, -1.0, 0.5)));
+        let child = Bone::child(
+            BoneId::from_raw(4),
+            Transform::from_translation(Vec3::new(0.0, -1.0, 0.5)),
+        );
         assert_eq!(round_trip(root), root);
         assert_eq!(round_trip(child), child);
     }
