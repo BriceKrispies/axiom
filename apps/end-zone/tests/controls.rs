@@ -88,6 +88,63 @@ fn the_stick_respects_the_controller_limits() {
 }
 
 #[test]
+fn after_the_whistle_the_carrier_stays_put_and_the_showcase_auto_resets() {
+    use axiom_end_zone::showcase::RESET_DELAY;
+    let mut run = ShowcaseRun::new(EndZoneConfig::default());
+    let mut ended_at: Option<u64> = None;
+    let mut holder_at_whistle = None;
+    let mut max_drift = 0.0f32;
+    let mut restarted_at: Option<u64> = None;
+    for tick in 0..1200u64 {
+        let commands: &[DiagnosticCommand] = if tick == TRACE_THROW_TICK {
+            &[DiagnosticCommand::PrimaryAction]
+        } else {
+            &[]
+        };
+        let out = run.step(commands);
+        if ended_at.is_none()
+            && out
+                .events
+                .iter()
+                .any(|e| matches!(e.event, SimEvent::PlayEnded { .. }))
+        {
+            ended_at = Some(tick);
+            holder_at_whistle = out
+                .snapshot
+                .possession
+                .map(|id| out.snapshot.player(id).pos);
+        }
+        if let (Some(_), None) = (ended_at, restarted_at) {
+            if out
+                .events
+                .iter()
+                .any(|e| matches!(e.event, SimEvent::PlayStarted { .. }))
+            {
+                restarted_at = Some(tick);
+            } else if let (Some(holder), Some(anchor)) =
+                (out.snapshot.possession, holder_at_whistle)
+            {
+                // The recovered carrier must NOT take off for the end zone
+                // on the dead play.
+                let pos = out.snapshot.player(holder).pos;
+                max_drift = max_drift.max(pos.subtract(anchor).length());
+            }
+        }
+    }
+    let ended_at = ended_at.expect("the play ends");
+    let restarted_at = restarted_at.expect("the showcase resets itself");
+    assert!(
+        max_drift < 2.5,
+        "the downed carrier stayed put after the whistle (drifted {max_drift} yd)"
+    );
+    let pause = restarted_at - ended_at;
+    assert!(
+        (RESET_DELAY..RESET_DELAY + 5).contains(&pause),
+        "the post-whistle beat is ~5 seconds (was {pause} ticks)"
+    );
+}
+
+#[test]
 fn the_primary_action_snaps_then_throws_then_restarts() {
     let mut run = ShowcaseRun::new(EndZoneConfig::default());
     // Press A immediately: the ball snaps this tick (long before the

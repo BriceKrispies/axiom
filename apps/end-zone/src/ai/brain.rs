@@ -146,9 +146,11 @@ pub fn decide(
         // Back on our feet: resume the assignment.
         *role = RoleState::Waiting;
     }
-    // A player who holds the ball carries it, whatever their assignment says
-    // (the catch promotes a receiver to carrier without new data).
-    if ctx.possession == Some(player.id) && !is_quarterback(assignment) {
+    // A player who holds the ball in a LIVE play carries it, whatever their
+    // assignment says (the catch promotes a receiver to carrier without new
+    // data). After the whistle the holder just stands with the ball — a
+    // recovered carrier must never take off for the end zone on a dead play.
+    if ctx.live && ctx.possession == Some(player.id) && !is_quarterback(assignment) {
         *role = RoleState::Carrying;
         return offense::carry(player, ctx);
     }

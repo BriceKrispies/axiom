@@ -16,6 +16,9 @@ use crate::state::{PlayPhase, SimCommand, SimState};
 pub const AUTO_START_DELAY: u64 = 100;
 /// Ticks between the play start (formation) and the snap.
 pub const SNAP_DELAY: u64 = 80;
+/// Post-whistle pause before the showcase resets itself to formation
+/// (~5 seconds at 60 Hz).
+pub const RESET_DELAY: u64 = 300;
 /// The tick [`run_trace`] injects its scripted throw press at (the replay
 /// harness's stand-in for the user's SNAP·THROW — the quarterback NEVER
 /// throws on his own).
@@ -53,8 +56,8 @@ enum Stage {
     Armed { snap_at: u64 },
     /// Snapped; play running to its end.
     Running,
-    /// Play over; waiting for Space.
-    Done,
+    /// Play over; holding the post-whistle beat, then auto-resetting.
+    Done { since: u64 },
 }
 
 /// The deterministic showcase controller.
@@ -106,9 +109,17 @@ impl ShowcaseController {
                 Stage::Running
             }
             Stage::Armed { snap_at } => Stage::Armed { snap_at },
-            Stage::Running if phase == PlayPhase::Ended => Stage::Done,
+            Stage::Running if phase == PlayPhase::Ended => Stage::Done { since: tick },
             Stage::Running => Stage::Running,
-            Stage::Done => Stage::Done,
+            Stage::Done { since } if tick >= since + RESET_DELAY => {
+                // The post-whistle beat is over: back to formation, with the
+                // next snap scheduled exactly like the boot sequence.
+                commands.push(SimCommand::BeginPlay);
+                Stage::Armed {
+                    snap_at: tick + SNAP_DELAY,
+                }
+            }
+            Stage::Done { since } => Stage::Done { since },
         };
         commands
     }
