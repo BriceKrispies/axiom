@@ -1,15 +1,52 @@
 [package]
 name = "axiom-physics-crucible"
-description = "Axiom app: standalone browser demo (extracted from the merged apps/axiom-gallery crate). Composition leaf: its own wasm bundle + web page."
+description = "Axiom Physics Crucible: a rendered, deterministic physics proving room (extracted from the merged apps/axiom-gallery crate). Six scripted stations drive the axiom-physics module through its public PhysicsApi facade — body kinds, contacts, materials, queries, a stress pile, and a hidden lock-step replay world that makes determinism visible. Composition leaf: its own wasm bundle + web page, plus the native `physics-crucible-report` headless report runner."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+# The crate declares its one binary (the headless report runner) explicitly, so
+# cargo must not auto-discover anything.
+autobins = false
 
-# `cdylib` for the app's own wasm bundle; `rlib` so native tests and tooling
-# (e.g. the axiom-shot capture harness) can compose the pure core.
+# `cdylib` for the app's own wasm bundle (the `physics_start` entry the page
+# boots); `rlib` so the native test suite, the report bin, and the axiom-shot
+# capture harness can compose the pure core.
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+# The physics crucible's headless report runner (was the gallery's
+# `physics-crucible-report` bin). Native, no extra features.
+[[bin]]
+name = "physics-crucible-report"
+path = "src/main.rs"
+
+[dependencies]
+# The engine umbrella (module `engine`): App/scene/camera/render authoring + the
+# live wgpu backend (wasm32).
+axiom = { path = "../../modules/axiom" }
+# Dimensioned kernel primitives (Meters/Ratio/Tick/FrameIndex) the crucible's
+# physics scripting speaks.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+# The fixed-step runtime contract (RuntimeStep) the crucible steps both worlds by.
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+# The physics module under test, composed only through PhysicsApi.
+axiom-physics = { path = "../../modules/axiom-physics" }
+
+# Browser/live arm only: the wasm-bindgen glue, panic hook, the live windowing
+# presentation loop, the debug overlay, and the web-sys surface `web.rs` actually
+# touches. Confined to wasm32, so native `cargo test` compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+] }
 
 [lints.rust]
 unsafe_code = "forbid"

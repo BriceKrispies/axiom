@@ -2,6 +2,14 @@
 name = "physics-crucible"
 crate_name = "axiom-physics-crucible"
 
-allowed_layers = []
+allowed_layers = [
+    "kernel",
+    "runtime",
+]
 
-allowed_modules = []
+allowed_modules = [
+    "engine",
+    "physics",
+    "windowing",
+    "debug-overlay",
+]
