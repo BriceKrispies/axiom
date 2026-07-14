@@ -2,6 +2,16 @@
 name = "gravix"
 crate_name = "axiom-gravix"
 
-allowed_layers = []
+allowed_layers = [
+    "kernel",
+    "math",
+    "runtime",
+]
 
-allowed_modules = []
+allowed_modules = [
+    "engine",
+    "physics",
+    "terrain-mesh",
+    "windowing",
+    "debug-overlay",
+]

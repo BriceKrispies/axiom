@@ -1,15 +1,58 @@
 [package]
 name = "axiom-gravix"
-description = "Axiom app: standalone browser demo (extracted from the merged apps/axiom-gallery crate). Composition leaf: its own wasm bundle + web page."
+description = "Axiom Gravix demo app: a physics-driven rolling-ball speed game (Monkey Ball-inspired) — roll a dynamic sphere down half-pipe heightfield track segments, brake, spin-charge, and launch to the finish gate. Standalone browser demo extracted from the merged apps/axiom-gallery crate; composition leaf with its own wasm bundle + web page."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-# `cdylib` for the app's own wasm bundle; `rlib` so native tests and tooling
-# (e.g. the axiom-shot capture harness) can compose the pure core.
+# `cdylib` for the app's own wasm bundle (the `#[wasm_bindgen]` `gravix_start`
+# entry); `rlib` so the native test suite and tooling (e.g. the axiom-shot
+# capture harness via `build_gravix`) can compose the pure deterministic core.
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+# Native + wasm dependencies: everything here builds on native (so `cargo test`
+# exercises the pure game core) and on wasm (the live browser arm). Paths are
+# `../../{crates,modules}` because the app sits at `apps/<name>` depth.
+[dependencies]
+# The engine umbrella (module `engine`): App/scene/camera/render authoring the
+# meshed track scene + live RunningApp are built with.
+axiom = { path = "../../modules/axiom" }
+# Deterministic kernel primitives: FrameIndex/Tick for the fixed physics step,
+# Meters/Ratio for the dimensioned physics + camera parameters.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+# Quaternions for the ball's roll pose and the track-segment orientation.
+axiom-math = { path = "../../crates/axiom-math" }
+# The deterministic rigid-body physics module under composition: the track's
+# static heightfield colliders + the dynamic ball sphere, via PhysicsApi.
+axiom-physics = { path = "../../modules/axiom-physics" }
+# RuntimeStep — the fixed-step descriptor each physics step is driven by.
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+# The domain-neutral heightfield mesher: the half-pipe height function becomes
+# both the visible surface mesh and the physics collider grid.
+axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
+
+# Browser/live arm only: the wasm-bindgen glue, panic hook, the live windowing
+# presentation loop, the debug overlay, and exactly the web-sys surface the
+# `web.rs` input/HUD code references. Confined to wasm32, so native
+# `cargo test` compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "MouseEvent",
+] }
 
 [lints.rust]
 unsafe_code = "forbid"

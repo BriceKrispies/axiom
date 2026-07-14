@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Axiom — Gravix</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0e12; color: #d8f6ec;
+                 font-family: ui-monospace, Menlo, Consolas, monospace; }
+    main { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px; }
+    canvas { width: min(92vw, 960px); aspect-ratio: 16 / 9; background: #000;
+             border: 1px solid #223; touch-action: none; }
+    /* On-screen keypad (the gallery shell's styles, carried with keypad.js). */
+    .keypad { display: grid; grid-template-columns: repeat(3, 56px); grid-auto-rows: 56px;
+              gap: 8px; justify-content: center; user-select: none; }
+    .keypad .pad { appearance: none; border: 1px solid #2a4; border-radius: 10px;
+                   background: #10251c; color: #d8f6ec; font: inherit; font-size: 18px;
+                   touch-action: none; cursor: pointer; }
+    .keypad .pad.active { background: #1e4634; }
+    .keypad .pad-up { grid-column: 2; grid-row: 1; }
+    .keypad .pad-left { grid-column: 1; grid-row: 2; }
+    .keypad .pad-right { grid-column: 3; grid-row: 2; }
+    .keypad .pad-down { grid-column: 2; grid-row: 2; }
+    .keypad .pad-fire { grid-column: 1 / span 3; grid-row: 3; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Gravix</h1>
+  <canvas id="axiom-gravix-canvas"></canvas>
+  <div id="keypad"></div>
+</main>
+<script type="module">
+  import init, { gravix_start, overlay_start } from "./pkg/axiom_gravix.js";
+  import { renderKeypad } from "./keypad.js";
+  await init();
+  gravix_start();
+  overlay_start();
+  // The demo's keypad buttons, exactly as the gallery's DEMOS entry declared them.
+  renderKeypad(document.getElementById("keypad"), [
+    { key: "w", label: "▲", pos: "up" },
+    { key: "a", label: "◀", pos: "left" },
+    { key: "d", label: "▶", pos: "right" },
+    { key: "s", label: "▼", pos: "down" },
+    { key: " ", label: "JUMP", pos: "fire" },
+  ]);
+</script>
+</body>
+</html>

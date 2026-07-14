@@ -1,15 +1,24 @@
 [package]
 name = "axiom-dev-harness"
-description = "Axiom app: standalone browser demo (extracted from the merged apps/axiom-gallery crate). Composition leaf: its own wasm bundle + web page."
+description = "Axiom app: developer harness for the browser debug overlay + command console (extracted from the merged apps/axiom-gallery crate). A thin wasm host that mounts the axiom-debug-overlay module over a bare canvas and lets the module's measured-diagnostics driver feed it real browser values."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-# `cdylib` for the app's own wasm bundle; `rlib` so native tests and tooling
-# (e.g. the axiom-shot capture harness) can compose the pure core.
+# `cdylib` for the app's own wasm bundle; `rlib` so native tests can compile
+# the crate (the native build carries only the crate docs — every browser
+# concern is confined to the wasm32 arm).
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+# Browser/live arm only: the overlay module (which owns the overlay state
+# machine, its DOM binding, and the measured-diagnostics driver), the
+# wasm-bindgen glue, and the panic hook.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
 
 [lints.rust]
 unsafe_code = "forbid"

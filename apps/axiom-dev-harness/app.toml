@@ -2,6 +2,8 @@
 name = "dev-harness"
 crate_name = "axiom-dev-harness"
 
+# The harness composes no engine layers directly: it is a thin wasm host for
+# the debug-overlay module, which owns the overlay and its diagnostics driver.
 allowed_layers = []
 
-allowed_modules = []
+allowed_modules = ["debug-overlay"]

@@ -17,6 +17,9 @@ use web_sys::{Document, Element, HtmlInputElement, KeyboardEvent, PointerEvent, 
 
 use crate::overlay_state::OverlayState;
 
+/// A live pointer-event listener, kept alive by [`Binding`].
+type PointerClosure = Closure<dyn FnMut(PointerEvent)>;
+
 const OVERLAY_ID: &str = "axiom-debug-overlay";
 const STYLE_ID: &str = "axiom-dbg-style";
 const CONSOLE_INPUT_ID: &str = "axiom-dbg-console-input";
@@ -500,11 +503,7 @@ fn set_hidden(element: &Element, hidden: bool) {
 fn install_drag(
     state: &Rc<RefCell<OverlayState>>,
     nodes: &Nodes,
-) -> (
-    Closure<dyn FnMut(PointerEvent)>,
-    Closure<dyn FnMut(PointerEvent)>,
-    Closure<dyn FnMut(PointerEvent)>,
-) {
+) -> (PointerClosure, PointerClosure, PointerClosure) {
     let header = nodes.header.clone();
 
     let down = {

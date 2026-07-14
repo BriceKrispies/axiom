@@ -21,6 +21,10 @@ use crate::DebugOverlayApi;
 /// Re-measure fps over at least this many milliseconds before updating the rate.
 const FPS_WINDOW_MS: f64 = 250.0;
 
+/// The self-scheduling animation-frame callback slot: the closure re-arms itself
+/// through a shared handle to its own cell.
+type RafCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
+
 /// Probe the live render backend the way the engine does: WebGPU when
 /// `navigator.gpu` exists, else the WebGL2 fallback (the engine's real
 /// degradation path). Returns `(renderer, fallback_count, fallback_reason)`.
@@ -45,7 +49,7 @@ pub(crate) fn drive(overlay: DebugOverlayApi) {
         .performance()
         .expect("performance clock");
 
-    let callback: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
+    let callback: RafCallback = Rc::new(RefCell::new(None));
     let scheduler = callback.clone();
 
     let mut frame: u64 = 0;

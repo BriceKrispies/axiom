@@ -2,6 +2,11 @@
 name = "quintet"
 crate_name = "axiom-quintet"
 
-allowed_layers = []
+# The pure game core uses the kernel (deterministic entropy via StableHash +
+# DeterministicRng) and the proc/space content substrate (the generated piece is
+# a recipe evaluated at a space address). The wasm32 shell adds the host viewport
+# + layout solver (the engine decides the board/tray on-screen placement).
+allowed_layers = ["kernel", "space", "proc", "host", "layout"]
 
-allowed_modules = []
+# The wasm32 bundle mounts the shared backquote debug overlay.
+allowed_modules = ["debug-overlay"]
