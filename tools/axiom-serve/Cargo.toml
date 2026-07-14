@@ -1,0 +1,19 @@
+[package]
+name = "axiom-serve"
+description = "Repo tooling: a build-and-serve dev server for any browser app under apps/. Resolves an app by name, detects its shape (Rust wasm via wasm-bindgen, or TypeScript over @axiom/game, @axiom/web-engine, or plain tsgo), builds it, serves its web/ dir with the vendor/pkg routes the dev pages expect, and hot-reloads connected browsers over Server-Sent Events when sources change. Outside the engine graph and the coverage gate (a Tool, by its tools/ location). Native only; depends on nothing engine — just tiny_http and std."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-serve"
+path = "src/main.rs"
+
+[dependencies]
+# A tiny blocking HTTP server (no async runtime); everything else — app
+# resolution, kind detection, child builds, mtime watching, SSE — is std.
+tiny_http = "0.12"
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -120,6 +120,7 @@ members = [
     "tools/axiom-proc-inspect",
     "tools/axiom-proc-fuzz",
     "tools/axiom-render-bench",
+    "tools/axiom-serve",
     # The capture harness. Its native GPU `offscreen` arm is behind a NON-DEFAULT
     # feature (see tools/axiom-shot/Cargo.toml), so `cargo test --workspace` and
     # the coverage/dylint gates — which build members with default features — never

@@ -56,7 +56,7 @@ ASSETSTREAM_PORT     ?= 8000
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
 	package loader-test e2e e2e-netplay e2e-matchmaking e2e-scaleout \
-	netplay-cluster netplay-load ts-gate help
+	netplay-cluster netplay-load serve ts-gate help
 
 help:
 	@echo "Axiom tooling targets:"
@@ -394,6 +394,16 @@ asset-stream-build:
 asset-stream:
 	@echo Serving asset-stream demo at http://localhost:$(ASSETSTREAM_PORT) - run make asset-stream-pack asset-stream-build first
 	uv run --no-project python -m http.server $(ASSETSTREAM_PORT) --directory $(ASSETSTREAM_WEB)
+
+# --- Build + serve any apps/ browser app locally with hot reload ---
+
+# tools/axiom-serve: resolve APP (short name, axiom- name, or path), detect its
+# shape (Rust wasm via wasm-bindgen, or TypeScript over @axiom/game /
+# @axiom/web-engine / plain tsgo), build it, serve its web/ with the vendor/pkg
+# routes and SSE hot reload, and rebuild + reload the browser on save. Extra
+# flags via ARGS, e.g. `make serve APP=home-run ARGS="--port 9000 --no-open"`.
+serve:
+	cargo run -p axiom-serve -- $(APP) $(ARGS)
 
 # --- Package a single app into a self-contained, droppable bundle ---
 
