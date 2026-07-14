@@ -4,4 +4,7 @@ crate_name = "axiom-stress-cubes"
 
 allowed_layers = []
 
-allowed_modules = []
+allowed_modules = [
+    "engine",
+    "debug-overlay",
+]
