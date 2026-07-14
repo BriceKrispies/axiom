@@ -44,9 +44,10 @@ import package_app  # noqa: E402  (local repo tooling, not an installed package)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GALLERY_WEB = REPO_ROOT / "apps" / "axiom-gallery" / "web"
 
-# The extracted standalone demo apps: (gallery page id -> apps/axiom-<id> crate).
-# Each ships its own web/index.html importing ./pkg/axiom_<snake>.js, which the
-# per-app packaging rewrites to the bundle-root ./axiom-loader.js.
+# The extracted standalone demo apps: gallery page id -> app crate dir, resolved
+# through package_app.resolve_app (apps/<id> or apps/axiom-<id>). Each ships its
+# own web/index.html importing ./pkg/axiom_<snake>.js, which the per-app
+# packaging rewrites to the bundle-root ./axiom-loader.js.
 DEMO_APPS: list[str] = [
     "rotating-cube",
     "netplay",
@@ -61,11 +62,12 @@ DEMO_APPS: list[str] = [
     "zanzoban",
     "quintet",
     "forest-walk",
+    "end-zone",
 ]
 
 
 def demo_app_dir(demo_id: str) -> Path:
-    return REPO_ROOT / "apps" / f"axiom-{demo_id}"
+    return package_app.resolve_app(demo_id)
 
 
 def copy_gallery_static(dist: Path) -> None:

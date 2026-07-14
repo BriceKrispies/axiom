@@ -177,6 +177,24 @@ export const DEMOS = [
     page: "three-point/index.html",
   },
   {
+    id: "end-zone",
+    title: "End Zone",
+    blurb: "An original arcade-football game: pick a team, snap the ball, fire the pass, and take the end zone.",
+    desc:
+      "A complete arcade-football experience on the engine — a full early-2000s arcade " +
+      "front-end (chrome END ZONE mark, attract mode, team select across six original " +
+      "fictional teams with procedural emblems and real POWER/SPEED/PASS/DEFENSE ratings, " +
+      "a VS matchup screen, five categories of working settings with persistence, pause " +
+      "and rebindable controls) over a deterministic 7-on-7 football simulation: formation, " +
+      "snap, drop-back, routes, blocking, a real physics pass, catch, pursuit, tackle, and " +
+      "ground impact, directed by an event-driven camera with impact juice. Menus: arrows/WASD " +
+      "move, Enter selects, Esc backs out. In the match: WASD/arrows steer your ball " +
+      "handler, Enter snaps then throws (the quarterback never throws on his own), P pauses. " +
+      "On touch: a virtual joystick plus SNAP·THROW and PAUSE buttons. Every visual is " +
+      "procedural — no image assets. Deterministic under fixed-step replay.",
+    page: "end-zone/index.html",
+  },
+  {
     id: "stress-cubes",
     title: "Stress (N cubes)",
     blurb: "A field of N spinning cubes — a live load test you can watch.",
