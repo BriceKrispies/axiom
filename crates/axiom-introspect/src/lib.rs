@@ -32,6 +32,14 @@
 
 mod frame_diff;
 mod frame_history;
+// `frame_report.rs` trips an upstream rustfmt performance bug on current
+// stable (1.96 era): formatting it never terminates — locally and on CI, which
+// hung the CI `Format` step for hours. The hang is file-global (every item
+// formats alone in <0.1s; removing almost any 20 lines also cures it), so no
+// in-file reshape durably fixes it. The file is already formatted and stable;
+// skipping it is the stable-toolchain escape (rustfmt.toml `ignore` is
+// nightly-only). Delete this attribute once rustfmt is fixed.
+#[rustfmt::skip]
 mod frame_report;
 mod introspect_api;
 mod metric_report;

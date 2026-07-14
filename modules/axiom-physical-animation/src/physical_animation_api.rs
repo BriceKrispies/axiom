@@ -443,6 +443,55 @@ fn muscle_command(
     )
 }
 
+/// Steps 2–4 of the tick (nothing here touches the un-nameable pose frame):
+/// run the muscle controller when configured, drive the dynamic bodies with the
+/// root-velocity approach + balance correction + upright torque, apply the
+/// strike-tick ball impulse, and step the world deterministically. Returns the
+/// muscle command for the frame read-back.
+fn drive_and_step(
+    physics: &mut PhysicsApi,
+    binding: &HumanoidPhysicsBinding,
+    ball: PhysicsBodyHandle,
+    tick: Tick,
+    muscle: Option<MuscleConfig<'_>>,
+    foot_plant: Option<(EffectorId, Vec3)>,
+    root_velocity: Option<Vec3>,
+    motor_drive: f32,
+    impulse_vec: Option<Vec3>,
+) -> PhysicalResult<Option<VirtualMuscleCommand>> {
+    let command = muscle.map(|cfg| {
+        muscle_command(
+            physics,
+            binding,
+            cfg,
+            foot_plant.map(|(_, t)| t),
+            motor_drive,
+            impulse_vec,
+        )
+    });
+    let balance = command
+        .map(|c| c.balance_correction())
+        .unwrap_or(Vec3::ZERO);
+    let torque = command.map(|c| c.upright_torque()).unwrap_or(Vec3::ZERO);
+    binding
+        .bodies()
+        .iter()
+        .filter(|b| b.dynamic())
+        .try_for_each(|b| {
+            drive_dynamic(physics, b, root_velocity, balance)
+                .and_then(|()| phys(physics.apply_torque(b.body(), torque)))
+        })
+        // The ball: a real impulse at the strike tick — never a teleport.
+        .and_then(|()| {
+            impulse_vec
+                .into_iter()
+                .try_for_each(|imp| phys(physics.apply_impulse(ball, imp)))
+        })
+        // Step the world deterministically.
+        .and_then(|()| phys(physics.step(runtime_step(tick.raw()))))
+        .map(|()| command)
+}
+
 /// The one-tick step: read authored objectives, run the muscle controller (when
 /// configured), apply everything to physics, step, and read it back. The pose
 /// frame is only nameable by inference, so all pose-dependent work is inlined.
@@ -481,103 +530,74 @@ fn step_once(
                                             phys(physics.set_body_transform(b.body(), t))
                                         })
                                     })
-                                    // 2. Muscle control + dynamic pelvis: hold + approach drive + the
-                                    //    balance-correction force, plus the upright torque.
+                                    // 2–4. Muscle control, dynamic drive, ball impulse, world step
+                                    //      (pose-free, so it lives in `drive_and_step`).
                                     .and_then(|()| {
-                                        let command = muscle.map(|cfg| {
-                                            muscle_command(
-                                                physics,
-                                                binding,
-                                                cfg,
-                                                foot_plant.map(|(_, t)| t),
-                                                motor_drive,
-                                                impulse_vec,
-                                            )
-                                        });
-                                        let balance = command
-                                            .map(|c| c.balance_correction())
-                                            .unwrap_or(Vec3::ZERO);
-                                        let torque = command
-                                            .map(|c| c.upright_torque())
-                                            .unwrap_or(Vec3::ZERO);
-                                        binding
-                                            .bodies()
-                                            .iter()
-                                            .filter(|b| b.dynamic())
-                                            .try_for_each(|b| {
-                                                drive_dynamic(physics, b, root_velocity, balance)
-                                                    .and_then(|()| {
-                                                        phys(physics.apply_torque(b.body(), torque))
-                                                    })
-                                            })
-                                            // 3. Ball: a real impulse at the strike tick — never a teleport.
-                                            .and_then(|()| {
-                                                impulse_vec.into_iter().try_for_each(|imp| {
-                                                    phys(physics.apply_impulse(ball, imp))
+                                        drive_and_step(
+                                            physics,
+                                            binding,
+                                            ball,
+                                            tick,
+                                            muscle,
+                                            foot_plant,
+                                            root_velocity,
+                                            motor_drive,
+                                            impulse_vec,
+                                        )
+                                        // 5. Read the world back into a frame.
+                                        .map(|command| {
+                                            let snap = physics.snapshot();
+                                            let bodies = binding
+                                                .bodies()
+                                                .iter()
+                                                .filter_map(|b| {
+                                                    snap.bodies()
+                                                        .iter()
+                                                        .find(|sb| sb.handle() == b.body())
+                                                        .map(|sb| (b.name(), sb.transform()))
                                                 })
-                                            })
-                                            // 4. Step the world deterministically.
-                                            .and_then(|()| {
-                                                phys(physics.step(runtime_step(tick.raw())))
-                                            })
-                                            // 5. Read the world back into a frame.
-                                            .map(|()| {
-                                                let snap = physics.snapshot();
-                                                let bodies = binding
-                                                    .bodies()
-                                                    .iter()
-                                                    .filter_map(|b| {
-                                                        snap.bodies()
-                                                            .iter()
-                                                            .find(|sb| sb.handle() == b.body())
-                                                            .map(|sb| (b.name(), sb.transform()))
-                                                    })
-                                                    .collect();
-                                                let effectors = KEY_EFFECTORS
-                                                    .iter()
-                                                    .filter_map(|&name| {
-                                                        authoring
-                                                            .plan_effector_id(plan, name)
-                                                            .ok()
-                                                            .flatten()
-                                                            .and_then(|eid| {
-                                                                authoring
-                                                                    .frame_effector_world(
-                                                                        &pose, eid,
-                                                                    )
-                                                                    .map(|t| (name, t))
-                                                            })
-                                                    })
-                                                    .collect();
-                                                let ball_state = snap
-                                                    .bodies()
-                                                    .iter()
-                                                    .find(|sb| sb.handle() == ball)
-                                                    .map(|sb| {
-                                                        (sb.transform(), sb.linear_velocity())
-                                                    });
-                                                PhysicalAnimationFrame::new(FrameParts {
-                                                    tick: tick.raw(),
-                                                    phase_name,
-                                                    bodies,
-                                                    effectors,
-                                                    root_velocity,
-                                                    foot_plant,
-                                                    motor_count: motors.len(),
-                                                    motor_max_drive: motor_drive,
-                                                    ball_impulse: ball_impulse
-                                                        .map(|(_, dir, mag)| (dir, mag.get())),
-                                                    gaze,
-                                                    contact_count: physics.latest_contacts().len(),
-                                                    events: authoring.frame_event_names(&pose),
-                                                    step_index: physics
-                                                        .latest_step_record()
-                                                        .step_index(),
-                                                    ball_transform: ball_state.map(|(t, _)| t),
-                                                    ball_velocity: ball_state.map(|(_, v)| v),
-                                                    muscle: command,
+                                                .collect();
+                                            let effectors = KEY_EFFECTORS
+                                                .iter()
+                                                .filter_map(|&name| {
+                                                    authoring
+                                                        .plan_effector_id(plan, name)
+                                                        .ok()
+                                                        .flatten()
+                                                        .and_then(|eid| {
+                                                            authoring
+                                                                .frame_effector_world(&pose, eid)
+                                                                .map(|t| (name, t))
+                                                        })
                                                 })
+                                                .collect();
+                                            let ball_state = snap
+                                                .bodies()
+                                                .iter()
+                                                .find(|sb| sb.handle() == ball)
+                                                .map(|sb| (sb.transform(), sb.linear_velocity()));
+                                            PhysicalAnimationFrame::new(FrameParts {
+                                                tick: tick.raw(),
+                                                phase_name,
+                                                bodies,
+                                                effectors,
+                                                root_velocity,
+                                                foot_plant,
+                                                motor_count: motors.len(),
+                                                motor_max_drive: motor_drive,
+                                                ball_impulse: ball_impulse
+                                                    .map(|(_, dir, mag)| (dir, mag.get())),
+                                                gaze,
+                                                contact_count: physics.latest_contacts().len(),
+                                                events: authoring.frame_event_names(&pose),
+                                                step_index: physics
+                                                    .latest_step_record()
+                                                    .step_index(),
+                                                ball_transform: ball_state.map(|(t, _)| t),
+                                                ball_velocity: ball_state.map(|(_, v)| v),
+                                                muscle: command,
                                             })
+                                        })
                                     })
                             })
                         })
