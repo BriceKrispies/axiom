@@ -6,17 +6,23 @@
 use axiom::prelude::Vec2;
 use axiom_end_zone::config::EndZoneConfig;
 use axiom_end_zone::events::SimEvent;
-use axiom_end_zone::showcase::{run_trace, DiagnosticCommand, ShowcaseRun};
+use axiom_end_zone::showcase::{run_trace, DiagnosticCommand, ShowcaseRun, TRACE_THROW_TICK};
 use axiom_end_zone::state::PlayPhase;
 
 #[test]
-fn a_zero_stick_reproduces_the_autonomous_showcase_exactly() {
+fn a_zero_stick_reproduces_the_scripted_showcase_exactly() {
     let baseline = run_trace(EndZoneConfig::default(), 700);
     let mut run = ShowcaseRun::new(EndZoneConfig::default());
     let mut events = Vec::new();
-    for _ in 0..700 {
+    for tick in 0..700u64 {
         run.sim.user_stick = Vec2::ZERO;
-        let out = run.step(&[]);
+        // The trace's one scripted input (the throw press), same tick.
+        let commands: &[DiagnosticCommand] = if tick == TRACE_THROW_TICK {
+            &[DiagnosticCommand::PrimaryAction]
+        } else {
+            &[]
+        };
+        let out = run.step(commands);
         events.extend(out.events);
     }
     assert_eq!(baseline.final_digest, run.sim.digest());

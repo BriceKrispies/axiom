@@ -224,12 +224,15 @@ fn button_style(anchor: &str, color: &str) -> String {
 }
 
 fn knob_style(dx: f32, dy: f32) -> String {
+    // `dy` is stick-up-positive and the element is BOTTOM-anchored (a larger
+    // `bottom` is higher on screen), so it adds — a minus here mirrors the
+    // knob against the finger.
     format!(
         "position:fixed;left:{}px;bottom:{}px;width:60px;height:60px;z-index:31;\
          border-radius:50%;background:rgba(240,244,238,0.85);pointer-events:none;\
          box-shadow:0 2px 8px rgba(0,0,0,0.5);",
         26.0 + 42.0 + dx,
-        26.0 + 42.0 - dy,
+        26.0 + 42.0 + dy,
     )
 }
 

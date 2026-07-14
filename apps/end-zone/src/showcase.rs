@@ -16,8 +16,10 @@ use crate::state::{PlayPhase, SimCommand, SimState};
 pub const AUTO_START_DELAY: u64 = 100;
 /// Ticks between the play start (formation) and the snap.
 pub const SNAP_DELAY: u64 = 80;
-/// Ticks between the snap and the throw order.
-pub const THROW_DELAY: u64 = 78;
+/// The tick [`run_trace`] injects its scripted throw press at (the replay
+/// harness's stand-in for the user's SNAP·THROW — the quarterback NEVER
+/// throws on his own).
+pub const TRACE_THROW_TICK: u64 = 258;
 
 /// Diagnostic + touch input commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,16 +42,16 @@ pub enum DiagnosticCommand {
     ToggleDebug,
 }
 
-/// The scripted timeline stage.
+/// The scripted timeline stage. The controller only ever starts the play and
+/// snaps the ball — the THROW is always the user's (SNAP·THROW / Enter); a
+/// quarterback left holding the ball simply gets sacked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stage {
     /// Waiting for the auto-start (or Space).
     Idle { start_at: Option<u64> },
     /// Play begun; snap scheduled.
     Armed { snap_at: u64 },
-    /// Snapped; throw order scheduled.
-    Snapped { throw_at: u64 },
-    /// Ball is out (or thrown order given); play running to its end.
+    /// Snapped; play running to its end.
     Running,
     /// Play over; waiting for Space.
     Done,
@@ -83,11 +85,9 @@ impl ShowcaseController {
     }
 
     /// The user snapped the ball themselves: cancel any pending auto
-    /// start/snap and schedule only the scripted throw order.
-    pub fn notify_user_snap(&mut self, tick: u64) {
-        self.stage = Stage::Snapped {
-            throw_at: tick + THROW_DELAY,
-        };
+    /// start/snap — the play is running.
+    pub fn notify_user_snap(&mut self, _tick: u64) {
+        self.stage = Stage::Running;
     }
 
     /// The sim commands for this tick.
@@ -103,16 +103,9 @@ impl ShowcaseController {
             Stage::Idle { start_at } => Stage::Idle { start_at },
             Stage::Armed { snap_at } if tick >= snap_at => {
                 commands.push(SimCommand::Snap);
-                Stage::Snapped {
-                    throw_at: tick + THROW_DELAY,
-                }
-            }
-            Stage::Armed { snap_at } => Stage::Armed { snap_at },
-            Stage::Snapped { throw_at } if tick >= throw_at => {
-                commands.push(SimCommand::ThrowNow);
                 Stage::Running
             }
-            Stage::Snapped { throw_at } => Stage::Snapped { throw_at },
+            Stage::Armed { snap_at } => Stage::Armed { snap_at },
             Stage::Running if phase == PlayPhase::Ended => Stage::Done,
             Stage::Running => Stage::Running,
             Stage::Done => Stage::Done,
@@ -244,8 +237,9 @@ pub struct ShowcaseTrace {
     pub final_digest: Vec<u32>,
 }
 
-/// Run the whole showcase for `ticks` fixed steps with no diagnostic input
-/// and collect the deterministic artifacts.
+/// Run the whole showcase for `ticks` fixed steps with ONE scripted input —
+/// the throw press at [`TRACE_THROW_TICK`] (the quarterback never throws on
+/// his own) — and collect the deterministic artifacts.
 pub fn run_trace(config: EndZoneConfig, ticks: u64) -> ShowcaseTrace {
     let mut run = ShowcaseRun::new(config);
     let mut trace = ShowcaseTrace {
@@ -258,8 +252,13 @@ pub fn run_trace(config: EndZoneConfig, ticks: u64) -> ShowcaseTrace {
         final_digest: Vec::new(),
     };
     let mut last_possession = None;
-    for _ in 0..ticks {
-        let output = run.step(&[]);
+    for tick in 0..ticks {
+        let scripted: &[DiagnosticCommand] = if tick == TRACE_THROW_TICK {
+            &[DiagnosticCommand::PrimaryAction]
+        } else {
+            &[]
+        };
+        let output = run.step(scripted);
         trace.events.extend_from_slice(&output.events);
         trace.ball_samples.push(output.snapshot.ball.pos);
         if output.snapshot.possession != last_possession {

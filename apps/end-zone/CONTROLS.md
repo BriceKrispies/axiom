@@ -8,7 +8,7 @@ The page mounts a virtual joystick (bottom-left) and two buttons
 | Control | Action |
 |---|---|
 | Joystick | Steer YOUR player — the quarterback while he holds the snap, then the ball carrier after the catch. Stick up = downfield, stick right = the offense's right. Release it and the AI resumes. |
-| `SNAP · THROW` | Contextual: snaps the ball pre-snap, orders the throw while the quarterback holds it, restarts after the play ends |
+| `SNAP · THROW` | Contextual: snaps the ball pre-snap, throws while the quarterback holds it, restarts after the play ends. **The quarterback never throws on his own** — hold the ball too long and the rush will sack you. |
 | `RESET` | Reset all showcase state to formation |
 
 The ball in flight, the defense, and downed players are never user-driven;
@@ -32,6 +32,7 @@ clamp) apply to steered movement.
 | `` ` `` | Toggle the engine debug overlay panel (tick, phase, ball state, possession, camera mode, seed, impulses, QB role) |
 
 On load the showcase arms itself: the play starts automatically after a short
-deterministic delay and runs by itself if you never touch anything. Steering
-or pressing `SNAP · THROW` takes over at any point; on touch devices the
-debug overlay panel stays closed by default (Backquote opens it).
+deterministic delay and the ball snaps on schedule — but the throw is always
+yours (`SNAP · THROW` / `Enter`); a quarterback left holding the ball gets
+sacked. On touch devices the debug overlay panel stays closed by default
+(Backquote opens it).

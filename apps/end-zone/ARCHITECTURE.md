@@ -50,11 +50,14 @@ after the catch) through `SimState::user_stick`, an offense-relative `[-1,1]²`
 input stream sampled once per tick. A live stick replaces that one player's AI
 intent with a movement intent at the AI stage — the controller still applies
 every acceleration/turn-rate/boundary limit, so steered movement obeys the
-same physics as AI movement, and a zero stick reproduces the autonomous
+same physics as AI movement, and a zero stick reproduces the scripted
 showcase bit-for-bit (`tests/controls.rs`). The contextual
-`DiagnosticCommand::PrimaryAction` (touch A / `Enter`) snaps pre-snap, orders
-the throw while the quarterback holds the ball, and restarts after the
-whistle. The platform edge (`web.rs`) mounts a pointer-event virtual joystick
+`DiagnosticCommand::PrimaryAction` (touch A / `Enter`) snaps pre-snap, throws
+while the quarterback holds the ball, and restarts after the whistle. The
+quarterback NEVER throws on his own — the showcase controller auto-starts and
+auto-snaps, but the throw is exclusively user input (the deterministic replay
+harness injects one scripted throw press at `TRACE_THROW_TICK` to stand in
+for it). The platform edge (`web.rs`) mounts a pointer-event virtual joystick
 and two buttons for mobile; `WASD`/arrows and `Enter` are the keyboard twin.
 
 ## Deterministic stepping
