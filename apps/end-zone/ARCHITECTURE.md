@@ -43,6 +43,20 @@ Four boundaries:
    `src/showcase.rs`, `src/web.rs`) — wires the headless `ShowcaseRun` to the
    engine `RunningApp`, retained entities, and the browser edge.
 
+## User control (touch + keyboard)
+
+The player steers the OFFENSE's ball holder (quarterback pre-throw, carrier
+after the catch) through `SimState::user_stick`, an offense-relative `[-1,1]²`
+input stream sampled once per tick. A live stick replaces that one player's AI
+intent with a movement intent at the AI stage — the controller still applies
+every acceleration/turn-rate/boundary limit, so steered movement obeys the
+same physics as AI movement, and a zero stick reproduces the autonomous
+showcase bit-for-bit (`tests/controls.rs`). The contextual
+`DiagnosticCommand::PrimaryAction` (touch A / `Enter`) snaps pre-snap, orders
+the throw while the quarterback holds the ball, and restarts after the
+whistle. The platform edge (`web.rs`) mounts a pointer-event virtual joystick
+and two buttons for mobile; `WASD`/arrows and `Enter` are the keyboard twin.
+
 ## Deterministic stepping
 
 - Fixed step: 60 Hz (`FIXED_STEP_NANOS = 16_666_667`), one sim tick per

@@ -30,6 +30,23 @@ const ACTION_CAM_FLIGHT: ActionId = ActionId::new(5);
 const ACTION_CAM_CARRIER: ActionId = ActionId::new(6);
 const ACTION_CAM_AUTO: ActionId = ActionId::new(7);
 const ACTION_DEBUG: ActionId = ActionId::new(8);
+// Player-control actions (the keyboard twin of the touch stick + A button).
+const ACTION_PRIMARY: ActionId = ActionId::new(9);
+const ACTION_UP: ActionId = ActionId::new(10);
+const ACTION_DOWN: ActionId = ActionId::new(11);
+const ACTION_LEFT: ActionId = ActionId::new(12);
+const ACTION_RIGHT: ActionId = ActionId::new(13);
+
+/// One frame of touch input from the platform edge: the virtual joystick
+/// vector (`x` right, `y` up/downfield, each `-1..=1`) plus the button edges
+/// (already debounced to a single frame by the edge).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TouchInput {
+    pub stick_x: f32,
+    pub stick_y: f32,
+    pub primary: bool,
+    pub reset: bool,
+}
 
 /// The complete End Zone app.
 #[derive(Debug)]
@@ -86,6 +103,23 @@ impl EndZoneApp {
         input.bind_action(ACTION_CAM_CARRIER, &[KeyToken::new("Digit4")]);
         input.bind_action(ACTION_CAM_AUTO, &[KeyToken::new("Digit5")]);
         input.bind_action(ACTION_DEBUG, &[KeyToken::new("F1")]);
+        input.bind_action(ACTION_PRIMARY, &[KeyToken::new("Enter")]);
+        input.bind_action(
+            ACTION_UP,
+            &[KeyToken::new("KeyW"), KeyToken::new("ArrowUp")],
+        );
+        input.bind_action(
+            ACTION_DOWN,
+            &[KeyToken::new("KeyS"), KeyToken::new("ArrowDown")],
+        );
+        input.bind_action(
+            ACTION_LEFT,
+            &[KeyToken::new("KeyA"), KeyToken::new("ArrowLeft")],
+        );
+        input.bind_action(
+            ACTION_RIGHT,
+            &[KeyToken::new("KeyD"), KeyToken::new("ArrowRight")],
+        );
 
         EndZoneApp {
             run,
@@ -100,14 +134,14 @@ impl EndZoneApp {
         }
     }
 
-    /// One frame: sample input → diagnostic commands → fixed sim step →
-    /// snapshot → camera + juice → scene sync → engine tick.
-    pub fn frame(&mut self, keys_down: &[KeyToken]) -> FrameOutcome {
+    /// One frame: sample input (keyboard + touch) → commands + stick → fixed
+    /// sim step → snapshot → camera + juice → scene sync → engine tick.
+    pub fn frame(&mut self, keys_down: &[KeyToken], touch: TouchInput) -> FrameOutcome {
         let frame = DeviceFrame::new(Vec2::new(WIDTH as f32, HEIGHT as f32), keys_down, &[]);
         self.input.sample(Tick::new(self.frame_n), &frame);
 
         let mut commands: Vec<DiagnosticCommand> = Vec::new();
-        let pressed: [(ActionId, DiagnosticCommand); 8] = [
+        let pressed: [(ActionId, DiagnosticCommand); 9] = [
             (ACTION_START, DiagnosticCommand::StartPlay),
             (ACTION_RESET, DiagnosticCommand::ResetAll),
             (
@@ -119,12 +153,27 @@ impl EndZoneApp {
             (ACTION_CAM_CARRIER, DiagnosticCommand::ForceCarrierCamera),
             (ACTION_CAM_AUTO, DiagnosticCommand::AutomaticCamera),
             (ACTION_DEBUG, DiagnosticCommand::ToggleDebug),
+            (ACTION_PRIMARY, DiagnosticCommand::PrimaryAction),
         ];
         for (action, command) in pressed {
             if self.input.pressed(action) {
                 commands.push(command);
             }
         }
+        if touch.primary {
+            commands.push(DiagnosticCommand::PrimaryAction);
+        }
+        if touch.reset {
+            commands.push(DiagnosticCommand::ResetAll);
+        }
+
+        // The movement stick: touch joystick + the keyboard axes, clamped.
+        let axis = |negative: ActionId, positive: ActionId| -> f32 {
+            f32::from(self.input.is_down(positive)) - f32::from(self.input.is_down(negative))
+        };
+        let stick_x = (touch.stick_x + axis(ACTION_LEFT, ACTION_RIGHT)).clamp(-1.0, 1.0);
+        let stick_y = (touch.stick_y + axis(ACTION_DOWN, ACTION_UP)).clamp(-1.0, 1.0);
+        self.run.sim.user_stick = Vec2::new(stick_x, stick_y);
 
         let output = self.run.step(&commands);
         self.last_camera_mode = output.camera_mode;
@@ -185,6 +234,6 @@ impl EndZoneApp {
 /// formation scene is posed.
 pub fn build_end_zone() -> RunningApp {
     let mut app = EndZoneApp::new(EndZoneConfig::default());
-    let _ = app.frame(&[]);
+    let _ = app.frame(&[], TouchInput::default());
     app.into_running()
 }

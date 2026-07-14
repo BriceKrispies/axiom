@@ -15,8 +15,8 @@ use crate::data::{
     showcase_play, showcase_rosters, BehaviorTuning, PlayDefinition, RosterDefinition,
 };
 use crate::events::{EventSink, PlayEndReason, SimEvent, StampedEvent};
-use crate::field::{OffenseFrame, OffensePoint, FIELD_HALF_WIDTH, GOAL_LINE_Z};
-use crate::football::state::BALL_RADIUS;
+use crate::field::{OffenseFrame, OffensePoint};
+use crate::football::sim::ball_rest;
 use crate::football::BallSim;
 use crate::identity::PlayerId;
 use crate::physics_rig::PhysicsRig;
@@ -66,6 +66,11 @@ pub struct SimState {
     pub possession: Option<PlayerId>,
     pub quarterback: PlayerId,
     pub end_reason: Option<PlayEndReason>,
+    /// The user's movement stick for this tick, offense-relative
+    /// (`x` = offense right, `y` = downfield), each in `-1..=1`. Part of the
+    /// deterministic input stream: zero when no one is steering, in which
+    /// case the AI intent stands untouched.
+    pub user_stick: axiom::prelude::Vec2,
     pub(crate) perception: Perception,
     pub(crate) events: EventSink,
     pub(crate) rig: PhysicsRig,
@@ -108,6 +113,7 @@ impl SimState {
             possession: None,
             quarterback,
             end_reason: None,
+            user_stick: axiom::prelude::Vec2::ZERO,
             perception: Perception::new(),
             events: EventSink::default(),
             rig,
@@ -279,21 +285,4 @@ impl SimState {
         self.end_reason = Some(reason);
         self.events.emit(SimEvent::PlayEnded { reason });
     }
-
-    fn check_carrier_bounds(&mut self) {
-        if let Some(carrier) = self.ball.carrier() {
-            let pos = self.players[carrier.index()].pos;
-            if pos.x.abs() >= FIELD_HALF_WIDTH - self.tuning.bounds_margin {
-                self.end_play(PlayEndReason::OutOfBounds);
-            } else if pos.z * self.frame.direction.sign() >= GOAL_LINE_Z {
-                // Crossed the attacked goal line untouched.
-                self.end_play(PlayEndReason::BrokeFree);
-            }
-        }
-    }
-}
-
-/// The ball's resting offset above the turf when dead at the spot.
-pub(crate) fn ball_rest() -> axiom::prelude::Vec3 {
-    axiom::prelude::Vec3::new(0.0, BALL_RADIUS, 0.0)
 }

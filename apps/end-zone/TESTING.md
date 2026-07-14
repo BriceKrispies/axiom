@@ -54,6 +54,11 @@ replay comparisons are exact.
   seeded-effect proofs: bounded pools, clamped amplitudes, identical effects
   for identical events, full expiry, and sim-inertness of all presentation
   input (forced cameras + debug toggles leave the digest unchanged).
+- `tests/controls.rs` — user-control proofs: a zero stick reproduces the
+  autonomous showcase exactly (digest + events); the stick steers only the
+  offensive ball holder and respects the archetype's speed limit; the
+  contextual primary action snaps early, orders the throw, and restarts a
+  finished play.
 - `tests/architecture.rs` — app hygiene: `app.toml` lists exactly the consumed
   layers/modules; the deterministic core is browser-free, wall-clock-free, and
   ambient-randomness-free (only `web.rs` touches the DOM); no placeholder or

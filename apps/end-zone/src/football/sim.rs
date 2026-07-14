@@ -8,9 +8,15 @@ use axiom::prelude::Vec3;
 use crate::ai::{AssignmentKind, RoleState};
 use crate::config::DT;
 use crate::events::{PlayEndReason, SimEvent};
+use crate::field::{FIELD_HALF_WIDTH, GOAL_LINE_Z};
 use crate::identity::PlayerId;
 use crate::player::AnimState;
 use crate::state::{PlayPhase, SimState};
+
+/// The ball's resting offset above the turf when dead at the spot.
+pub(crate) fn ball_rest() -> Vec3 {
+    Vec3::new(0.0, BALL_RADIUS, 0.0)
+}
 
 use super::possession::{catch_point, evaluate_catch, CatchVerdict};
 use super::state::{BallState, BALL_RADIUS};
@@ -183,6 +189,20 @@ impl SimState {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// End the play when the carrier leaves the field of play: a sideline
+    /// exit is out of bounds, crossing the attacked goal line is a clean
+    /// break (no scoring rules yet — the play simply ends).
+    pub(crate) fn check_carrier_bounds(&mut self) {
+        if let Some(carrier) = self.ball.carrier() {
+            let pos = self.players[carrier.index()].pos;
+            if pos.x.abs() >= FIELD_HALF_WIDTH - self.tuning.bounds_margin {
+                self.end_play(PlayEndReason::OutOfBounds);
+            } else if pos.z * self.frame.direction.sign() >= GOAL_LINE_Z {
+                self.end_play(PlayEndReason::BrokeFree);
+            }
         }
     }
 

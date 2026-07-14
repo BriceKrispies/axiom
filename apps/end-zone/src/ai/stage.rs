@@ -50,6 +50,56 @@ impl SimState {
         drop(ctx);
         self.roles = roles;
         self.intents = intents;
+        self.apply_user_stick();
+    }
+
+    /// The player the user steers: the ball holder while the OFFENSE has
+    /// possession in a live play (the quarterback pre-throw, the receiver
+    /// after the catch). `None` otherwise — the ball in flight, the defense,
+    /// a downed carrier, or a dead play are never user-driven.
+    pub fn controlled_player(&self) -> Option<crate::identity::PlayerId> {
+        self.possession
+            .filter(|_| self.phase == PlayPhase::Live)
+            .filter(|id| {
+                let player = &self.players[id.index()];
+                player.team == self.play.possession && player.anim.can_act()
+            })
+    }
+
+    /// A live stick past the dead zone replaces the controlled player's AI
+    /// intent with a movement intent (the controller still applies every
+    /// acceleration/turn-rate/boundary limit). Stick `x` is toward the
+    /// offense's right hand, `y` is downfield — matching the follow cameras,
+    /// which look downfield from behind the offense.
+    fn apply_user_stick(&mut self) {
+        const DEAD_ZONE: f32 = 0.18;
+        const REACH: f32 = 4.0;
+        let stick = self.user_stick;
+        let magnitude = (stick.x * stick.x + stick.y * stick.y).sqrt();
+        if magnitude <= DEAD_ZONE {
+            return;
+        }
+        let Some(id) = self.controlled_player() else {
+            return;
+        };
+        let clamped = magnitude.min(1.0);
+        let direction = self
+            .frame
+            .right()
+            .mul_scalar(stick.x)
+            .add(self.frame.forward().mul_scalar(stick.y));
+        let length = direction.length();
+        if length <= 1.0e-4 {
+            return;
+        }
+        let player = &self.players[id.index()];
+        let point = player
+            .pos
+            .add(direction.mul_scalar(REACH * clamped / length));
+        self.intents[id.index()] = super::PlayerIntent::MoveToward {
+            point: Vec3::new(point.x, 0.0, point.z),
+            sprint: clamped > 0.55,
+        };
     }
 
     /// Record this tick's true world state into the perception ring the

@@ -19,13 +19,17 @@ pub const SNAP_DELAY: u64 = 80;
 /// Ticks between the snap and the throw order.
 pub const THROW_DELAY: u64 = 78;
 
-/// Diagnostic input (keyboard) — these are NOT gameplay controls.
+/// Diagnostic + touch input commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticCommand {
     /// Space: start the play, or restart it after completion.
     StartPlay,
     /// R: reset all showcase state to formation (idle until started).
     ResetAll,
+    /// The contextual action button (touch A / Enter): snap the ball
+    /// pre-snap, order the throw while the quarterback holds it, restart
+    /// after the play ends.
+    PrimaryAction,
     /// 1–4: force a camera mode; 5: return to automatic direction.
     ForceFormationCamera,
     ForceQuarterbackCamera,
@@ -76,6 +80,14 @@ impl ShowcaseController {
     /// R pressed: back to formation and idle (no schedule until Space).
     pub fn request_reset(&mut self) {
         self.stage = Stage::Idle { start_at: None };
+    }
+
+    /// The user snapped the ball themselves: cancel any pending auto
+    /// start/snap and schedule only the scripted throw order.
+    pub fn notify_user_snap(&mut self, tick: u64) {
+        self.stage = Stage::Snapped {
+            throw_at: tick + THROW_DELAY,
+        };
     }
 
     /// The sim commands for this tick.
@@ -150,15 +162,32 @@ impl ShowcaseRun {
     /// Advance one fixed tick under the diagnostic commands.
     pub fn step(&mut self, diagnostics: &[DiagnosticCommand]) -> StepOutput {
         let tick = self.sim.tick;
+        let mut user_commands: Vec<SimCommand> = Vec::new();
         for command in diagnostics {
             match command {
                 DiagnosticCommand::StartPlay => self.controller.request_start(tick),
                 DiagnosticCommand::ResetAll => self.controller.request_reset(),
                 DiagnosticCommand::ToggleDebug => self.debug_enabled = !self.debug_enabled,
+                DiagnosticCommand::PrimaryAction => {
+                    // Contextual on the PRE-step state: snap → throw → restart.
+                    match self.sim.phase {
+                        crate::state::PlayPhase::PreSnap => {
+                            user_commands.push(SimCommand::Snap);
+                            self.controller.notify_user_snap(tick);
+                        }
+                        crate::state::PlayPhase::Live => {
+                            if self.sim.possession == Some(self.sim.quarterback) {
+                                user_commands.push(SimCommand::ThrowNow);
+                            }
+                        }
+                        crate::state::PlayPhase::Ended => self.controller.request_start(tick),
+                    }
+                }
                 _ => {}
             }
         }
         let mut sim_commands = self.controller.step(tick, self.sim.phase);
+        sim_commands.extend(user_commands);
         // R additionally puts the sim itself back in formation right away.
         if diagnostics.contains(&DiagnosticCommand::ResetAll) {
             sim_commands.insert(0, SimCommand::ResetPlay);
