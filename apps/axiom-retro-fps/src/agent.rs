@@ -22,7 +22,7 @@ use axiom_kernel::{FrameIndex, Tick};
 use axiom_runtime::RuntimeStep;
 use serde::Serialize;
 
-use crate::{build_retro_fps_app, RetroFpsAssets, RetroFpsGame, Hud, Intent};
+use crate::{build_retro_fps_app, Hud, Intent, RetroFpsAssets, RetroFpsGame};
 
 /// An absolute player pose: world position `(x, z)`, look `yaw`/`pitch` (radians).
 /// Returned in every [`Observation`] so a session always knows where it stands and
@@ -236,8 +236,14 @@ fn decide_intent(px: f32, pz: f32, yaw: f32, hud: Hud, control_code: u32, tick: 
     // Decide + emit: the substrate runs the brain and hands back a queue of
     // player-equivalent intents, stamped with this tick.
     let step = RuntimeStep::new(FrameIndex::new(0), Tick::new(tick), FIXED_DELTA_NANOS, 0);
-    let (_report, queue) =
-        AgentApi::step(agent_id, profile, &mut brain, &observation, &mut memory, step);
+    let (_report, queue) = AgentApi::step(
+        agent_id,
+        profile,
+        &mut brain,
+        &observation,
+        &mut memory,
+        step,
+    );
 
     // Recombine the tick's emitted intents into one held-control bitmask and lower
     // it back into the concrete retro FPS Intent — N simultaneous controls applied
@@ -347,8 +353,13 @@ impl AgentSession {
         for _ in 0..steps {
             let (px, pz, yaw, _pitch) = self.game.pose();
             let intent = decide_intent(px, pz, yaw, self.game.hud(), control_code, self.tick);
-            self.last =
-                retro_fps_drive_tick(&mut self.game, &mut self.app, &self.assets, self.tick, intent);
+            self.last = retro_fps_drive_tick(
+                &mut self.game,
+                &mut self.app,
+                &self.assets,
+                self.tick,
+                intent,
+            );
             self.tick += 1;
         }
         self.observe()
@@ -473,7 +484,10 @@ mod tests {
             });
             best = best.max(obs.hud.score);
         }
-        assert!(best > start, "an agent playing retro FPS through axiom-agent scores kills");
+        assert!(
+            best > start,
+            "an agent playing retro FPS through axiom-agent scores kills"
+        );
     }
 
     #[test]

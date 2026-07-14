@@ -25,7 +25,11 @@ impl ChaseCamera {
     pub fn new(initial_yaw: f32, ball: Vec3) -> Self {
         let pitch = settings::CAM_PITCH_DEFAULT;
         let facing = yaw_facing(initial_yaw);
-        ChaseCamera { yaw: initial_yaw, pitch, eye: desired_eye(ball, facing, pitch) }
+        ChaseCamera {
+            yaw: initial_yaw,
+            pitch,
+            eye: desired_eye(ball, facing, pitch),
+        }
     }
 
     /// Advance one step. `yaw_delta` / `pitch_delta` are the mouse deltas this
@@ -44,7 +48,10 @@ impl ChaseCamera {
     /// The camera eye and look target (a little ahead of the ball along the
     /// facing) for the renderer's `looking_at`.
     pub fn eye_target(&self, ball: Vec3) -> (Vec3, Vec3) {
-        (self.eye, ball.add(self.facing().mul_scalar(settings::CAM_LOOK_AHEAD)))
+        (
+            self.eye,
+            ball.add(self.facing().mul_scalar(settings::CAM_LOOK_AHEAD)),
+        )
     }
 
     /// The horizontal facing direction (unit) the camera looks along.
@@ -104,13 +111,19 @@ mod tests {
             cam.update(Vec3::new(5.0, 0.0, 5.0), 0.0, 0.0, DT);
         }
         let held = cam.facing();
-        assert!((held.subtract(Vec3::new(0.0, 0.0, 1.0))).length() < 1.0e-3, "facing held, got {held:?}");
+        assert!(
+            (held.subtract(Vec3::new(0.0, 0.0, 1.0))).length() < 1.0e-3,
+            "facing held, got {held:?}"
+        );
         // A rightward mouse sweep turns the facing toward +x.
         for _ in 0..60 {
             cam.update(Vec3::ZERO, 40.0, 0.0, DT);
         }
         let turned = cam.facing();
-        assert!(turned.x > 0.3, "mouse turned the camera toward +x, got {turned:?}");
+        assert!(
+            turned.x > 0.3,
+            "mouse turned the camera toward +x, got {turned:?}"
+        );
         assert!((turned.length() - 1.0).abs() < 1.0e-4 && turned.y == 0.0);
     }
 
@@ -138,8 +151,14 @@ mod tests {
     fn ground_basis_is_horizontal_orthogonal_and_tracks_yaw() {
         let cam = ChaseCamera::new(FRAC_PI_2, Vec3::ZERO); // facing +x
         let (fwd, right) = cam.ground_basis();
-        assert!((fwd.subtract(Vec3::new(1.0, 0.0, 0.0))).length() < 1.0e-5, "yaw π/2 faces +x");
+        assert!(
+            (fwd.subtract(Vec3::new(1.0, 0.0, 0.0))).length() < 1.0e-5,
+            "yaw π/2 faces +x"
+        );
         assert!(fwd.y.abs() < 1.0e-6 && right.y.abs() < 1.0e-6);
-        assert!(fwd.x * right.x + fwd.z * right.z < 1.0e-5, "forward ⟂ right");
+        assert!(
+            fwd.x * right.x + fwd.z * right.z < 1.0e-5,
+            "forward ⟂ right"
+        );
     }
 }

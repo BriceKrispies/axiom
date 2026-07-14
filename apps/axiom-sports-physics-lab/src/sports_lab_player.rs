@@ -90,8 +90,14 @@ impl PlayerRig {
 
         // Keep the player inside the walls (margin: body radius + wall skin).
         let margin = PLAYER_RADIUS + WALL_THICKNESS * 0.5;
-        let x = next.x().get().clamp(-(ARENA_HALF_W - margin), ARENA_HALF_W - margin);
-        let z = next.z().get().clamp(-(ARENA_HALF_L - margin), ARENA_HALF_L - margin);
+        let x = next
+            .x()
+            .get()
+            .clamp(-(ARENA_HALF_W - margin), ARENA_HALF_W - margin);
+        let z = next
+            .z()
+            .get()
+            .clamp(-(ARENA_HALF_L - margin), ARENA_HALF_L - margin);
         self.pose = Pose::new(
             Meters::finite_or_zero(x),
             Meters::finite_or_zero(z),
@@ -116,7 +122,11 @@ impl PlayerRig {
         physics
             .set_body_velocity(
                 self.body,
-                Vec3::new(dx / super::sports_lab_physics::DT, 0.0, dz / super::sports_lab_physics::DT),
+                Vec3::new(
+                    dx / super::sports_lab_physics::DT,
+                    0.0,
+                    dz / super::sports_lab_physics::DT,
+                ),
                 Vec3::ZERO,
             )
             .expect("player kinematic body carries its walk velocity");
@@ -203,19 +213,41 @@ mod tests {
         let (mut physics, mut rig) = rig();
         let start = rig.feet();
         for _ in 0..60 {
-            rig.step(&mut physics, &Intent { forward: true, ..intent() });
+            rig.step(
+                &mut physics,
+                &Intent {
+                    forward: true,
+                    ..intent()
+                },
+            );
         }
         let moved = rig.feet().subtract(start);
-        assert!(moved.z < -3.0, "one second of forward walk covers ground, got {moved:?}");
-        assert!(rig.body_transform().translation.y > 0.9, "the body bobs above the ground");
+        assert!(
+            moved.z < -3.0,
+            "one second of forward walk covers ground, got {moved:?}"
+        );
+        assert!(
+            rig.body_transform().translation.y > 0.9,
+            "the body bobs above the ground"
+        );
     }
 
     #[test]
     fn mouse_look_turns_yaw_and_clamps_pitch() {
         let (mut physics, mut rig) = rig();
-        rig.step(&mut physics, &Intent { look_yaw: 0.5, look_pitch: 9.0, ..intent() });
+        rig.step(
+            &mut physics,
+            &Intent {
+                look_yaw: 0.5,
+                look_pitch: 9.0,
+                ..intent()
+            },
+        );
         assert!((rig.yaw() - 0.5).abs() < 1e-6);
-        assert!((rig.pitch() - 1.45).abs() < 1e-6, "pitch clamps to the tuning limit");
+        assert!(
+            (rig.pitch() - 1.45).abs() < 1e-6,
+            "pitch clamps to the tuning limit"
+        );
         // Look direction follows both axes and stays unit length.
         let d = rig.look_dir();
         assert!((d.length() - 1.0).abs() < 1e-4);
@@ -225,22 +257,50 @@ mod tests {
     fn the_arena_walls_clamp_the_walk() {
         let (mut physics, mut rig) = rig();
         // Face +X (yaw π/2) and hold forward for a long time.
-        rig.step(&mut physics, &Intent { look_yaw: core::f32::consts::FRAC_PI_2, ..intent() });
+        rig.step(
+            &mut physics,
+            &Intent {
+                look_yaw: core::f32::consts::FRAC_PI_2,
+                ..intent()
+            },
+        );
         for _ in 0..3000 {
-            rig.step(&mut physics, &Intent { forward: true, ..intent() });
+            rig.step(
+                &mut physics,
+                &Intent {
+                    forward: true,
+                    ..intent()
+                },
+            );
         }
-        assert!(rig.feet().x < ARENA_HALF_W - PLAYER_RADIUS + 0.01, "the wall stopped the player");
-        assert!(rig.feet().x > ARENA_HALF_W - 2.0, "the player reached the wall");
+        assert!(
+            rig.feet().x < ARENA_HALF_W - PLAYER_RADIUS + 0.01,
+            "the wall stopped the player"
+        );
+        assert!(
+            rig.feet().x > ARENA_HALF_W - 2.0,
+            "the player reached the wall"
+        );
     }
 
     #[test]
     fn the_kinematic_body_follows_the_pose() {
         let (mut physics, mut rig) = rig();
         for _ in 0..30 {
-            rig.step(&mut physics, &Intent { forward: true, ..intent() });
+            rig.step(
+                &mut physics,
+                &Intent {
+                    forward: true,
+                    ..intent()
+                },
+            );
         }
         let snap = physics.snapshot();
-        let body = snap.bodies().iter().find(|b| b.handle() == rig.body).unwrap();
+        let body = snap
+            .bodies()
+            .iter()
+            .find(|b| b.handle() == rig.body)
+            .unwrap();
         let t = body.transform().translation;
         assert!((t.x - rig.feet().x).abs() < 1e-4 && (t.z - rig.feet().z).abs() < 1e-4);
         assert_eq!(t.y, PLAYER_BODY_CENTER_Y);
@@ -256,8 +316,16 @@ mod tests {
         preset.spawn = Vec3::new(SPAWN_X, preset.radius, SPAWN_Z - 2.0);
         let ball = sports_lab_physics::add_ball(&mut physics, &preset);
         for n in 0..240 {
-            rig.step(&mut physics, &Intent { forward: true, ..Intent::default() });
-            physics.step(sports_lab_physics::runtime_step(n)).expect("step");
+            rig.step(
+                &mut physics,
+                &Intent {
+                    forward: true,
+                    ..Intent::default()
+                },
+            );
+            physics
+                .step(sports_lab_physics::runtime_step(n))
+                .expect("step");
         }
         let snap = physics.snapshot();
         let b = snap.bodies().iter().find(|b| b.handle() == ball).unwrap();

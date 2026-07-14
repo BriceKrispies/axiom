@@ -396,9 +396,7 @@ fn install_pointer() {
         UI.with(|ui| {
             let mut ui = ui.borrow_mut();
             ui.pointer = (px, py);
-            if !ui.game.is_stuck()
-                && (in_board(px, py, &layout) || in_generator(px, py, &layout))
-            {
+            if !ui.game.is_stuck() && (in_board(px, py, &layout) || in_generator(px, py, &layout)) {
                 ui.dragging = true;
             }
         });

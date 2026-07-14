@@ -96,14 +96,22 @@ fn parse_args(argv: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             positional => {
                 if app.is_some() {
-                    return Err(format!("unexpected extra argument: {positional}\n\n{}", help()));
+                    return Err(format!(
+                        "unexpected extra argument: {positional}\n\n{}",
+                        help()
+                    ));
                 }
                 app = Some(positional.to_string());
             }
         }
     }
     let app = app.ok_or_else(|| format!("missing <app> argument\n\n{}", help()))?;
-    Ok(Args { app, port, open, debug })
+    Ok(Args {
+        app,
+        port,
+        open,
+        debug,
+    })
 }
 
 /// The repository root (this crate lives at `<root>/tools/axiom-serve`), so the
@@ -239,7 +247,14 @@ mod tests {
 
     #[test]
     fn parses_flags() {
-        let args = parse_args(argv(&["home-run", "--port", "9000", "--no-open", "--debug"])).unwrap();
+        let args = parse_args(argv(&[
+            "home-run",
+            "--port",
+            "9000",
+            "--no-open",
+            "--debug",
+        ]))
+        .unwrap();
         assert_eq!(args.port, 9000);
         assert!(!args.open);
         assert!(args.debug);
@@ -247,10 +262,16 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_missing_app_and_extra_positional() {
-        assert!(parse_args(argv(&["x", "--nope"])).unwrap_err().contains("unknown flag"));
+        assert!(parse_args(argv(&["x", "--nope"]))
+            .unwrap_err()
+            .contains("unknown flag"));
         assert!(parse_args(argv(&[])).unwrap_err().contains("missing <app>"));
-        assert!(parse_args(argv(&["a", "b"])).unwrap_err().contains("unexpected extra"));
-        assert!(parse_args(argv(&["a", "--port", "zzz"])).unwrap_err().contains("bad --port"));
+        assert!(parse_args(argv(&["a", "b"]))
+            .unwrap_err()
+            .contains("unexpected extra"));
+        assert!(parse_args(argv(&["a", "--port", "zzz"]))
+            .unwrap_err()
+            .contains("bad --port"));
     }
 
     #[test]

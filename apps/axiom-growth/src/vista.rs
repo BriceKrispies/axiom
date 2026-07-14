@@ -46,7 +46,6 @@ const VISTA_SALT: u64 = 0x5713_A115_7A00_0000;
 /// the viewer's `EYE_HEIGHT_M` so the scoring sightlines agree with what renders.
 const EYE_HEIGHT_M: f32 = 1.7;
 
-
 /// Tunable thresholds and band altitudes that shape the vista. All distances are
 /// in metres in the local world-metre frame; slopes are dimensionless rise/run.
 #[derive(Clone, Copy, Debug)]
@@ -130,7 +129,6 @@ impl Default for VistaConfig {
         }
     }
 }
-
 
 /// A reference to the target mountain landform the vista is composed around.
 /// The massif is generated (not found in noise), so the id distinguishes the
@@ -322,7 +320,6 @@ pub struct MountainVistaPlan {
     pub debug: VistaScore,
 }
 
-
 /// Composite the vista into a base terrain height at `(x, z)`: flatten the spawn
 /// shelf, raise the analytic massif, then carve the route ledge. `base_h` is the
 /// un-composited terrain height (macro + detail) at the same point. Pure and
@@ -357,7 +354,6 @@ fn shelf_blend(plan: &MountainVistaPlan, base_h: f32, x: f32, z: f32) -> f32 {
         plan.shelf_height_m * (1.0 - s) + base_h * s
     }
 }
-
 
 /// The deterministic scenic generator. Stateless; [`Self::plan`] is the entry.
 #[derive(Debug)]
@@ -448,9 +444,8 @@ fn evaluate(
 
     // Base visibility: the lower flank (a reference point ~15% up the relief)
     // must clear intervening base terrain along the sightline from the eye.
-    let base_visible = lower_flank_visible(
-        atlas, localmap, seed, spawn, shelf_height, peak_xz, cfg,
-    );
+    let base_visible =
+        lower_flank_visible(atlas, localmap, seed, spawn, shelf_height, peak_xz, cfg);
     // Silhouette: the summit must rise clear above the eye's horizon line.
     let silhouette_visible =
         (peak_height - (shelf_height + EYE_HEIGHT_M)) > cfg.min_prominence_m * 0.5;
@@ -578,7 +573,6 @@ impl VistaConfig {
     }
 }
 
-
 /// Deterministically pick the flattest spot within `spawn_search_radius_m` of
 /// the local origin (the map pick), so the shelf blends gently and the player
 /// never lands on rough ground. Evaluates the origin plus a fixed ring of
@@ -625,7 +619,6 @@ fn flatness_at(
     1.0 / (1.0 + slope * 4.0)
 }
 
-
 /// Whether a reference point ~15% up the relief (representing the visible lower
 /// mountain) clears intervening base terrain on the sightline from the eye.
 fn lower_flank_visible(
@@ -667,7 +660,6 @@ fn lower_flank_visible(
     }
     visible
 }
-
 
 /// Build the carved route as `(x, z, target_absolute_height)` waypoints: a flat
 /// leg from the spawn to the near rim, then a switchback spiral up the flank to
@@ -741,7 +733,6 @@ fn route_within_slope(route: &[(f32, f32, f32)], max_slope: f32) -> bool {
     })
 }
 
-
 /// The base material colour (linear RGB) for terrain at `altitude_m` above the
 /// spawn ground: green vegetation low, grey-brown rock mid, white snow high.
 pub fn band_color(altitude_m: f32, plan: &MountainVistaPlan) -> [f32; 3] {
@@ -752,7 +743,9 @@ pub fn band_color(altitude_m: f32, plan: &MountainVistaPlan) -> [f32; 3] {
     if a <= plan.vegetation_line_m {
         veg
     } else if a <= plan.rockline_m {
-        let t = smoothstep01((a - plan.vegetation_line_m) / (plan.rockline_m - plan.vegetation_line_m).max(1.0));
+        let t = smoothstep01(
+            (a - plan.vegetation_line_m) / (plan.rockline_m - plan.vegetation_line_m).max(1.0),
+        );
         lerp3(veg, rock, t)
     } else if a <= plan.snowline_m {
         let t = smoothstep01((a - plan.rockline_m) / (plan.snowline_m - plan.rockline_m).max(1.0));
@@ -810,7 +803,6 @@ pub fn trail_tint(base: [f32; 4], weight: f32) -> [f32; 4] {
         base[3],
     ]
 }
-
 
 /// Smooth radial massif profile: 1 at the centre (`u = 0`), 0 at the rim
 /// (`u = 1`), with a broad base and a sharpened, dominant summit. Smooth (no
@@ -870,7 +862,6 @@ fn build_ridges(seed: u64) -> Vec<Ridge> {
         .collect()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -884,14 +875,21 @@ mod tests {
         let sites = vec![
             Vec3::new(0.0, 1.0, 0.0).normalize().unwrap_or(Vec3::UNIT_Y),
             Vec3::new(0.1, 1.0, 0.0).normalize().unwrap_or(Vec3::UNIT_Y),
-            Vec3::new(-0.1, 1.0, 0.0).normalize().unwrap_or(Vec3::UNIT_Y),
+            Vec3::new(-0.1, 1.0, 0.0)
+                .normalize()
+                .unwrap_or(Vec3::UNIT_Y),
             Vec3::new(0.0, 1.0, 0.1).normalize().unwrap_or(Vec3::UNIT_Y),
-            Vec3::new(0.0, 1.0, -0.1).normalize().unwrap_or(Vec3::UNIT_Y),
+            Vec3::new(0.0, 1.0, -0.1)
+                .normalize()
+                .unwrap_or(Vec3::UNIT_Y),
         ];
         let region_elevation = vec![0.30, 0.33, 0.28, 0.31, 0.29];
         let offsets = vec![0u32, 4, 5, 6, 7, 8];
         let neighbours = vec![1, 2, 3, 4, 0, 0, 0, 0];
-        let graph = RegionGraph { offsets, neighbours };
+        let graph = RegionGraph {
+            offsets,
+            neighbours,
+        };
         PlanetSurfaceAtlas {
             sites,
             graph,
@@ -922,7 +920,10 @@ mod tests {
         let cfg = VistaConfig::default();
         let a = VistaDirector::plan(&atlas, &localmap, seed, cfg);
         let b = VistaDirector::plan(&atlas, &localmap, seed, cfg);
-        assert_eq!(a.debug.fingerprint, b.debug.fingerprint, "fingerprints differ");
+        assert_eq!(
+            a.debug.fingerprint, b.debug.fingerprint,
+            "fingerprints differ"
+        );
         assert_eq!(a.spawn_xz, b.spawn_xz);
         assert_eq!(a.distance_m, b.distance_m);
         assert_eq!(a.peak_xz, b.peak_xz);
@@ -949,7 +950,9 @@ mod tests {
                 let h = base(sx + dx, sz + dz);
                 let hx = base(sx + dx + step, sz + dz);
                 let hzz = base(sx + dx, sz + dz + step);
-                max_slope = max_slope.max((hx - h).abs() / step).max((hzz - h).abs() / step);
+                max_slope = max_slope
+                    .max((hx - h).abs() / step)
+                    .max((hzz - h).abs() / step);
                 dx += step;
             }
             dz += step;
@@ -965,7 +968,11 @@ mod tests {
     #[test]
     fn spawn_flat_radius_within_threshold() {
         let p = plan();
-        assert!(p.flat_radius_m >= 30.0, "flat radius too small: {}", p.flat_radius_m);
+        assert!(
+            p.flat_radius_m >= 30.0,
+            "flat radius too small: {}",
+            p.flat_radius_m
+        );
         // The disk is genuinely flat: centre and a point near the rim agree.
         let (atlas, localmap, seed) = fixture();
         let (sx, sz) = p.spawn_xz;
@@ -977,7 +984,10 @@ mod tests {
             sx + edge_r,
             sz,
         );
-        assert!((c - e).abs() < 1.0e-3, "shelf not flat to its radius: {c} vs {e}");
+        assert!(
+            (c - e).abs() < 1.0e-3,
+            "shelf not flat to its radius: {c} vs {e}"
+        );
     }
 
     /// 4. Mountain distance is within the configured range.
@@ -1060,7 +1070,10 @@ mod tests {
         for &(x, z, target) in &p.massif.route_pts {
             let b = sample_height_m(&atlas, &localmap, seed, x, z);
             let h = vista_height_m(&p, b, x, z);
-            assert!((h - target).abs() < 1.0, "waypoint height {h} != target {target}");
+            assert!(
+                (h - target).abs() < 1.0,
+                "waypoint height {h} != target {target}"
+            );
         }
     }
 
@@ -1084,7 +1097,15 @@ mod tests {
         let cfg = VistaConfig::default();
         let spawn = choose_spawn(&atlas, &localmap, seed, cfg);
         let shelf = sample_height_m(&atlas, &localmap, seed, spawn.0, spawn.1);
-        let e = evaluate(&atlas, &localmap, seed, spawn, shelf, cfg.ideal_distance_m, cfg);
+        let e = evaluate(
+            &atlas,
+            &localmap,
+            seed,
+            spawn,
+            shelf,
+            cfg.ideal_distance_m,
+            cfg,
+        );
         assert!(e.accept, "the ideal-distance candidate must be accepted");
         // And the produced plan is itself an accepted composition.
         let p = plan();
@@ -1134,7 +1155,10 @@ mod tests {
         let far = p.massif.massif_raise(p.peak_xz.0 + 9000.0, p.peak_xz.1);
         assert_eq!(far, 0.0, "massif must not affect far-away ground");
         let summit = p.massif.massif_raise(p.peak_xz.0, p.peak_xz.1);
-        assert!(summit > p.prominence_m * 0.8, "summit raise too small: {summit}");
+        assert!(
+            summit > p.prominence_m * 0.8,
+            "summit raise too small: {summit}"
+        );
     }
 
     /// Atmosphere fades distant geometry toward the sky and snowcaps high ground.
@@ -1144,7 +1168,10 @@ mod tests {
         let sky = [0.45, 0.62, 0.85];
         let low = band_color(p.shelf_height_m + 100.0, &p);
         let high = band_color(p.shelf_height_m + p.snowline_m + 500.0, &p);
-        assert!(high[0] > low[0] && high[2] > low[2], "snow band must be paler than vegetation");
+        assert!(
+            high[0] > low[0] && high[2] > low[2],
+            "snow band must be paler than vegetation"
+        );
         let near = apply_atmosphere([0.3, 0.4, 0.2], 200.0, p.shelf_height_m + 50.0, &p, sky);
         let farc = apply_atmosphere([0.3, 0.4, 0.2], 8000.0, p.shelf_height_m + 50.0, &p, sky);
         // Distant colour is pulled toward the (bluer) sky.

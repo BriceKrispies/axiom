@@ -63,7 +63,16 @@ pub fn render_gpu(
     let skinned_draws: Vec<(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)> = outcome
         .skinned_draws()
         .iter()
-        .map(|d| (d.mesh_id(), d.material_id(), d.mvp(), d.world(), d.color(), d.joints().to_vec()))
+        .map(|d| {
+            (
+                d.mesh_id(),
+                d.material_id(),
+                d.mvp(),
+                d.world(),
+                d.color(),
+                d.joints().to_vec(),
+            )
+        })
         .collect();
     let lights: Vec<(u32, [f32; 3], [f32; 3], f32)> = outcome
         .lights()
@@ -120,7 +129,16 @@ pub fn render_canvas2d(
     let skinned: Vec<(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)> = outcome
         .skinned_draws()
         .iter()
-        .map(|d| (d.mesh_id(), d.material_id(), d.mvp(), d.world(), d.color(), d.joints().to_vec()))
+        .map(|d| {
+            (
+                d.mesh_id(),
+                d.material_id(),
+                d.mvp(),
+                d.world(),
+                d.color(),
+                d.joints().to_vec(),
+            )
+        })
         .collect();
     backend.render_offscreen_rgba_skinned(&frame_packet(outcome, w, h), &skinned)
 }
@@ -143,7 +161,13 @@ pub fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
             let color: [f32; 4] = floats[off + 32..off + 36].try_into().unwrap_or([1.0; 4]);
             let casts = casters.get(object_id as usize).copied().unwrap_or(false);
             draws.push(FrameDrawItem::new(
-                object_id, *mesh_id, *material_id, world, mvp, color, casts,
+                object_id,
+                *mesh_id,
+                *material_id,
+                world,
+                mvp,
+                color,
+                casts,
             ));
             object_id += 1;
         }
@@ -164,7 +188,11 @@ pub fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
     let identity = [
         1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0_f32,
     ];
-    let camera = Some(FrameCamera::new(identity, identity, outcome.camera_view_proj()));
+    let camera = Some(FrameCamera::new(
+        identity,
+        identity,
+        outcome.camera_view_proj(),
+    ));
     let packet = FramePacket::new(
         outcome.tick(),
         outcome.tick(),

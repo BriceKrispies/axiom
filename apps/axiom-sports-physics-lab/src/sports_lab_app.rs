@@ -12,9 +12,7 @@ use super::sports_lab_balls::{BallKind, BallPreset, BALLS};
 use super::sports_lab_camera::{CameraMode, CameraRig};
 use super::sports_lab_humanoid::{DUMMY_GRAB_RADIUS, FIGURE_CENTER_Y};
 use super::sports_lab_interaction::InteractionState;
-use super::sports_lab_physics::{
-    self, runtime_step, MAX_ANGULAR_SPEED, MAX_LINEAR_SPEED,
-};
+use super::sports_lab_physics::{self, runtime_step, MAX_ANGULAR_SPEED, MAX_LINEAR_SPEED};
 use super::sports_lab_player::PlayerRig;
 
 /// Where the T-pose dummy stands.
@@ -147,14 +145,19 @@ impl SportsPhysicsLab {
         let look = self.player.look_dir();
         self.interaction.update_hover(eye, look, &self.objects);
         if intent.primary {
-            self.interaction.primary(&mut self.physics, &self.objects, look);
+            self.interaction
+                .primary(&mut self.physics, &self.objects, look);
         }
         if intent.secondary {
-            self.interaction.secondary(&mut self.physics, &self.objects, look);
+            self.interaction
+                .secondary(&mut self.physics, &self.objects, look);
         }
-        self.interaction.drive_held(&mut self.physics, &self.objects, eye, look);
+        self.interaction
+            .drive_held(&mut self.physics, &self.objects, eye, look);
 
-        self.physics.step(runtime_step(self.step_n)).expect("physics step");
+        self.physics
+            .step(runtime_step(self.step_n))
+            .expect("physics step");
         let _ = self.physics.drain_events();
         self.mirror_objects();
         self.clamp_velocities();
@@ -202,8 +205,16 @@ impl SportsPhysicsLab {
             let lin = object.vel.length();
             let ang = object.ang.length();
             if lin > MAX_LINEAR_SPEED || ang > MAX_ANGULAR_SPEED {
-                let lin_k = if lin > MAX_LINEAR_SPEED { MAX_LINEAR_SPEED / lin } else { 1.0 };
-                let ang_k = if ang > MAX_ANGULAR_SPEED { MAX_ANGULAR_SPEED / ang } else { 1.0 };
+                let lin_k = if lin > MAX_LINEAR_SPEED {
+                    MAX_LINEAR_SPEED / lin
+                } else {
+                    1.0
+                };
+                let ang_k = if ang > MAX_ANGULAR_SPEED {
+                    MAX_ANGULAR_SPEED / ang
+                } else {
+                    1.0
+                };
                 object.vel = object.vel.mul_scalar(lin_k);
                 object.ang = object.ang.mul_scalar(ang_k);
                 self.physics
@@ -261,7 +272,10 @@ impl SportsPhysicsLab {
 
     /// A deterministic digest of the dynamic state (for replay tests).
     pub fn state_digest(&self) -> Vec<(f32, f32, f32)> {
-        self.objects.iter().map(|o| (o.pos.x, o.pos.y, o.pos.z)).collect()
+        self.objects
+            .iter()
+            .map(|o| (o.pos.x, o.pos.y, o.pos.z))
+            .collect()
     }
 }
 
@@ -282,7 +296,12 @@ fn object_for_ball(preset: &BallPreset, body: PhysicsBodyHandle) -> LabObject {
         mass: preset.mass,
         initial,
         pos: initial.translation,
-        rot: [initial.rotation.x, initial.rotation.y, initial.rotation.z, initial.rotation.w],
+        rot: [
+            initial.rotation.x,
+            initial.rotation.y,
+            initial.rotation.z,
+            initial.rotation.w,
+        ],
         vel: Vec3::ZERO,
         ang: Vec3::ZERO,
     }

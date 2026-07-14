@@ -117,7 +117,15 @@ pub fn view_projection(grid_w: u32, grid_h: u32, perspective: bool) -> Mat4 {
 
 /// One cube instance's 36 floats: `mvp(16)`, `world(16)` (both column-major),
 /// then `colour(4)`.
-fn push_instance(out: &mut Vec<f32>, view_proj: Mat4, cx: f32, cz: f32, size: f32, height: f32, color: [f32; 4]) {
+fn push_instance(
+    out: &mut Vec<f32>,
+    view_proj: Mat4,
+    cx: f32,
+    cz: f32,
+    size: f32,
+    height: f32,
+    color: [f32; 4],
+) {
     // Model: a cube of `size × height × size`, its base on the floor (y = 0).
     let model = Transform::new(
         Vec3::new(cx, height * 0.5, cz),
@@ -136,8 +144,9 @@ fn push_instance(out: &mut Vec<f32>, view_proj: Mat4, cx: f32, cz: f32, size: f3
 /// `(clear_color, instances, count)` for `WindowingApi::run_web`.
 pub fn build_instances(model: &RenderModel, vp: Mat4) -> ([f32; 4], Vec<f32>, u32) {
     let cell_count = model.cells.len();
-    let mut instances =
-        Vec::with_capacity((cell_count + model.crates.len() + model.actors.len()) * FLOATS_PER_INSTANCE);
+    let mut instances = Vec::with_capacity(
+        (cell_count + model.crates.len() + model.actors.len()) * FLOATS_PER_INSTANCE,
+    );
 
     // Cells (row-major), then crates, then actors (ghosts under the player).
     model.cells.iter().for_each(|cell| {
@@ -148,7 +157,15 @@ pub fn build_instances(model: &RenderModel, vp: Mat4) -> ([f32; 4], Vec<f32>, u3
     });
     model.crates.iter().for_each(|c| {
         let (height, color) = crate_box();
-        push_instance(&mut instances, vp, c.x as f32 + 0.5, c.y as f32 + 0.5, ACTOR_SIZE, height, color);
+        push_instance(
+            &mut instances,
+            vp,
+            c.x as f32 + 0.5,
+            c.y as f32 + 0.5,
+            ACTOR_SIZE,
+            height,
+            color,
+        );
     });
     model.actors.iter().for_each(|actor| {
         let (height, color) = actor_box(actor);

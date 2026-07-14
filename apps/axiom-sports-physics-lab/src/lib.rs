@@ -91,7 +91,10 @@ pub fn build_sports_physics_lab_posed(third_person: bool) -> RunningApp {
         lab.step(Intent::default());
     }
     if third_person {
-        lab.step(Intent { toggle_view: true, ..Intent::default() });
+        lab.step(Intent {
+            toggle_view: true,
+            ..Intent::default()
+        });
         for _ in 0..40 {
             lab.step(Intent::default());
         }
@@ -103,8 +106,13 @@ pub fn build_sports_physics_lab_posed(third_person: bool) -> RunningApp {
 mod tests {
     use super::*;
 
-    const NAMES: [&str; 5] =
-        ["Soccer Ball", "Football", "Bowling Ball", "Baseball", "Humanoid Dummy"];
+    const NAMES: [&str; 5] = [
+        "Soccer Ball",
+        "Football",
+        "Bowling Ball",
+        "Baseball",
+        "Humanoid Dummy",
+    ];
 
     fn settled() -> SportsPhysicsLab {
         let mut lab = SportsPhysicsLab::new();
@@ -173,7 +181,10 @@ mod tests {
         for name in ["Soccer Ball", "Football", "Bowling Ball", "Baseball"] {
             let mut lab = settled();
             hover_named(&mut lab, name);
-            lab.step(Intent { primary: true, ..Intent::default() });
+            lab.step(Intent {
+                primary: true,
+                ..Intent::default()
+            });
             assert_eq!(lab.hud().held, Some(name), "picked up {name}");
 
             // Carry for a moment: the object tracks the hold point.
@@ -190,7 +201,10 @@ mod tests {
 
             // Toss: it leaves the hand with velocity along the look direction.
             let look = lab.player().look_dir();
-            lab.step(Intent { primary: true, ..Intent::default() });
+            lab.step(Intent {
+                primary: true,
+                ..Intent::default()
+            });
             assert_eq!(lab.hud().held, None, "tossed {name}");
             let vel = lab.objects()[idx].vel;
             assert!(
@@ -204,12 +218,22 @@ mod tests {
     fn only_one_object_is_held_at_a_time() {
         let mut lab = settled();
         hover_named(&mut lab, "Soccer Ball");
-        lab.step(Intent { primary: true, ..Intent::default() });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         assert_eq!(lab.hud().held, Some("Soccer Ball"));
         // Look at another ball and click: it's a toss, not a second pickup.
         hover_named(&mut lab, "Bowling Ball");
-        assert_eq!(lab.hud().held, Some("Soccer Ball"), "still holding the first ball");
-        lab.step(Intent { primary: true, ..Intent::default() });
+        assert_eq!(
+            lab.hud().held,
+            Some("Soccer Ball"),
+            "still holding the first ball"
+        );
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         assert_eq!(lab.hud().held, None, "the click tossed, never double-held");
     }
 
@@ -218,11 +242,17 @@ mod tests {
         let speed_of = |name: &str| {
             let mut lab = settled();
             hover_named(&mut lab, name);
-            lab.step(Intent { primary: true, ..Intent::default() });
+            lab.step(Intent {
+                primary: true,
+                ..Intent::default()
+            });
             for _ in 0..30 {
                 lab.step(Intent::default());
             }
-            lab.step(Intent { primary: true, ..Intent::default() });
+            lab.step(Intent {
+                primary: true,
+                ..Intent::default()
+            });
             let idx = lab.objects().iter().position(|o| o.name == name).unwrap();
             lab.objects()[idx].vel.length()
         };
@@ -239,27 +269,51 @@ mod tests {
     fn dropping_sets_the_object_down_gently() {
         let mut lab = settled();
         hover_named(&mut lab, "Soccer Ball");
-        lab.step(Intent { primary: true, ..Intent::default() });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         for _ in 0..20 {
             lab.step(Intent::default());
         }
-        lab.step(Intent { secondary: true, ..Intent::default() });
+        lab.step(Intent {
+            secondary: true,
+            ..Intent::default()
+        });
         assert_eq!(lab.hud().held, None);
-        let ball = lab.objects().iter().find(|o| o.name == "Soccer Ball").unwrap();
-        assert!(ball.vel.length() < 2.0, "a drop is gentle: v={:?}", ball.vel);
+        let ball = lab
+            .objects()
+            .iter()
+            .find(|o| o.name == "Soccer Ball")
+            .unwrap();
+        assert!(
+            ball.vel.length() < 2.0,
+            "a drop is gentle: v={:?}",
+            ball.vel
+        );
     }
 
     #[test]
     fn the_dummy_can_be_picked_up_and_tossed() {
         let mut lab = settled();
         hover_named(&mut lab, "Humanoid Dummy");
-        lab.step(Intent { primary: true, ..Intent::default() });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         assert_eq!(lab.hud().held, Some("Humanoid Dummy"));
-        lab.step(Intent { primary: true, ..Intent::default() });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         for _ in 0..10 {
             lab.step(Intent::default());
         }
-        let dummy = lab.objects().iter().find(|o| o.name == "Humanoid Dummy").unwrap();
+        let dummy = lab
+            .objects()
+            .iter()
+            .find(|o| o.name == "Humanoid Dummy")
+            .unwrap();
         assert!(dummy.vel.length() > 0.5, "the tossed dummy is moving");
     }
 
@@ -267,15 +321,24 @@ mod tests {
     fn reset_restores_the_lineup() {
         let mut lab = settled();
         hover_named(&mut lab, "Soccer Ball");
-        lab.step(Intent { primary: true, ..Intent::default() });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         for _ in 0..30 {
             lab.step(Intent::default());
         }
-        lab.step(Intent { primary: true, ..Intent::default() }); // toss it away
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        }); // toss it away
         for _ in 0..60 {
             lab.step(Intent::default());
         }
-        lab.step(Intent { reset: true, ..Intent::default() });
+        lab.step(Intent {
+            reset: true,
+            ..Intent::default()
+        });
         for object in lab.objects() {
             let d = object.pos.subtract(object.initial.translation).length();
             assert!(d < 0.05, "{} is back at its spawn (moved {d})", object.name);
@@ -288,39 +351,72 @@ mod tests {
         let mut lab = settled();
         assert_eq!(lab.camera_mode(), CameraMode::FirstPerson);
         let (fp_eye, _) = lab.camera_eye_target();
-        assert!((fp_eye.y - 1.7).abs() < 1e-4, "first person sits at eye height");
+        assert!(
+            (fp_eye.y - 1.7).abs() < 1e-4,
+            "first person sits at eye height"
+        );
 
-        lab.step(Intent { toggle_view: true, ..Intent::default() });
+        lab.step(Intent {
+            toggle_view: true,
+            ..Intent::default()
+        });
         assert_eq!(lab.camera_mode(), CameraMode::ThirdPerson);
         for _ in 0..60 {
             lab.step(Intent::default());
         }
         let (tp_eye, _) = lab.camera_eye_target();
         let feet = lab.player().feet();
-        assert!(tp_eye.subtract(feet).length() > 3.0, "third person pulls back");
+        assert!(
+            tp_eye.subtract(feet).length() > 3.0,
+            "third person pulls back"
+        );
         assert!(tp_eye.y > 1.9, "third person rises above the player");
 
-        lab.step(Intent { toggle_view: true, ..Intent::default() });
+        lab.step(Intent {
+            toggle_view: true,
+            ..Intent::default()
+        });
         assert_eq!(lab.camera_mode(), CameraMode::FirstPerson);
         // Wheel zoom-out also enters third person.
-        lab.step(Intent { zoom: 1.0, ..Intent::default() });
+        lab.step(Intent {
+            zoom: 1.0,
+            ..Intent::default()
+        });
         assert_eq!(lab.camera_mode(), CameraMode::ThirdPerson);
     }
 
     #[test]
     fn two_identical_runs_are_deterministic() {
         let script = [
-            Intent { forward: true, ..Intent::default() },
-            Intent { forward: true, look_yaw: 0.02, ..Intent::default() },
-            Intent { primary: true, ..Intent::default() },
-            Intent { strafe_right: true, look_pitch: -0.01, ..Intent::default() },
+            Intent {
+                forward: true,
+                ..Intent::default()
+            },
+            Intent {
+                forward: true,
+                look_yaw: 0.02,
+                ..Intent::default()
+            },
+            Intent {
+                primary: true,
+                ..Intent::default()
+            },
+            Intent {
+                strafe_right: true,
+                look_pitch: -0.01,
+                ..Intent::default()
+            },
         ];
         let run = || {
             let mut lab = SportsPhysicsLab::new();
             for i in 0..240 {
                 lab.step(script[i % script.len()]);
             }
-            (lab.state_digest(), lab.player().feet().x, lab.player().feet().z)
+            (
+                lab.state_digest(),
+                lab.player().feet().x,
+                lab.player().feet().z,
+            )
         };
         assert_eq!(run(), run());
     }
@@ -337,7 +433,10 @@ mod tests {
         let mut lab = settled();
         let (mut app, mut scene) = live_app(&mut lab);
         let fp_draws = app.tick(0).draws().len();
-        lab.step(Intent { toggle_view: true, ..Intent::default() });
+        lab.step(Intent {
+            toggle_view: true,
+            ..Intent::default()
+        });
         scene.update(&mut app, &mut lab);
         let tp_draws = app.tick(1).draws().len();
         assert!(
@@ -352,8 +451,14 @@ mod tests {
         let mut lab = settled();
         // Toss the baseball (fastest) straight at the far wall many times over.
         hover_named(&mut lab, "Baseball");
-        lab.step(Intent { primary: true, ..Intent::default() });
-        lab.step(Intent { primary: true, ..Intent::default() });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         for _ in 0..1200 {
             lab.step(Intent::default());
             let ball = lab.objects().iter().find(|o| o.name == "Baseball").unwrap();
@@ -369,8 +474,14 @@ mod tests {
     fn velocities_never_exceed_the_safety_caps() {
         let mut lab = settled();
         hover_named(&mut lab, "Baseball");
-        lab.step(Intent { primary: true, ..Intent::default() });
-        lab.step(Intent { primary: true, ..Intent::default() });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         for _ in 0..300 {
             lab.step(Intent::default());
             for object in lab.objects() {
@@ -389,7 +500,10 @@ mod tests {
         assert!(hud.physics_step > 0, "the physics stepped");
         hover_named(&mut lab, "Soccer Ball");
         assert_eq!(lab.hud().hover, Some("Soccer Ball"));
-        lab.step(Intent { primary: true, ..Intent::default() });
+        lab.step(Intent {
+            primary: true,
+            ..Intent::default()
+        });
         assert_eq!(lab.hud().held, Some("Soccer Ball"));
     }
 

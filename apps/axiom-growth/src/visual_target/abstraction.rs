@@ -29,7 +29,10 @@ pub enum AbstractionPermission {
     /// The default. No abstraction may be introduced.
     Forbidden { axis: Axis, failed_attempts: usize },
     /// Unlocked because `MIN_FAILED_ATTEMPTS` bounded attempts on this axis failed.
-    JustifiedByRepeatedFailure { axis: Axis, failed_attempts: Vec<u32> },
+    JustifiedByRepeatedFailure {
+        axis: Axis,
+        failed_attempts: Vec<u32>,
+    },
     /// Unlocked because the current implementation cannot express the change.
     JustifiedByInexpressible { axis: Axis },
 }
@@ -73,9 +76,15 @@ impl AbstractionPermission {
 pub fn permit(ledger: &Ledger, axis: Axis, inexpressible: bool) -> AbstractionPermission {
     let failed = ledger.failed_attempts_on(axis);
     match (failed.len() >= MIN_FAILED_ATTEMPTS, inexpressible) {
-        (true, _) => AbstractionPermission::JustifiedByRepeatedFailure { axis, failed_attempts: failed },
+        (true, _) => AbstractionPermission::JustifiedByRepeatedFailure {
+            axis,
+            failed_attempts: failed,
+        },
         (false, true) => AbstractionPermission::JustifiedByInexpressible { axis },
-        (false, false) => AbstractionPermission::Forbidden { axis, failed_attempts: failed.len() },
+        (false, false) => AbstractionPermission::Forbidden {
+            axis,
+            failed_attempts: failed.len(),
+        },
     }
 }
 
@@ -116,9 +125,9 @@ impl AbstractionRecord {
             .then_some(())
             .ok_or_else(|| format!("abstraction {}", permission.describe()))?;
         let (failed_attempts, inexpressible) = match permission {
-            AbstractionPermission::JustifiedByRepeatedFailure { failed_attempts, .. } => {
-                (failed_attempts.clone(), false)
-            }
+            AbstractionPermission::JustifiedByRepeatedFailure {
+                failed_attempts, ..
+            } => (failed_attempts.clone(), false),
             AbstractionPermission::JustifiedByInexpressible { .. } => (Vec::new(), true),
             AbstractionPermission::Forbidden { .. } => (Vec::new(), false),
         };
@@ -138,7 +147,9 @@ impl AbstractionRecord {
     pub fn validate(&self) -> Result<(), String> {
         (!self.failed_attempts.is_empty() || self.inexpressible)
             .then_some(())
-            .ok_or("abstraction record has neither failed attempts nor an inexpressibility claim")?;
+            .ok_or(
+                "abstraction record has neither failed attempts nor an inexpressibility claim",
+            )?;
         (!self.smallest_api.trim().is_empty())
             .then_some(())
             .ok_or("abstraction record must state the smallest API it needs")?;
@@ -167,10 +178,10 @@ impl AbstractionRecord {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::super::axes::Scorecard;
     use super::super::ledger::LedgerEntry;
     use super::super::review::Decision;
-    use super::super::axes::Scorecard;
+    use super::*;
 
     fn failed_entry(iteration: u32, axis: Axis) -> LedgerEntry {
         LedgerEntry {
@@ -204,7 +215,10 @@ mod tests {
         }
         let p = permit(&ledger_with_failures(axis, 3), axis, false);
         assert!(p.is_permitted());
-        assert!(matches!(p, AbstractionPermission::JustifiedByRepeatedFailure { .. }));
+        assert!(matches!(
+            p,
+            AbstractionPermission::JustifiedByRepeatedFailure { .. }
+        ));
     }
 
     #[test]
@@ -212,7 +226,10 @@ mod tests {
         let axis = Axis::LightingDirectionality;
         let p = permit(&Ledger::new(), axis, true);
         assert!(p.is_permitted());
-        assert!(matches!(p, AbstractionPermission::JustifiedByInexpressible { .. }));
+        assert!(matches!(
+            p,
+            AbstractionPermission::JustifiedByInexpressible { .. }
+        ));
         assert_eq!(p.axis(), axis);
     }
 
@@ -221,7 +238,9 @@ mod tests {
         let axis = Axis::FogAndHaze;
         let p = permit(&ledger_with_failures(axis, 4), axis, true);
         match p {
-            AbstractionPermission::JustifiedByRepeatedFailure { failed_attempts, .. } => {
+            AbstractionPermission::JustifiedByRepeatedFailure {
+                failed_attempts, ..
+            } => {
                 assert_eq!(failed_attempts, vec![1, 2, 3, 4]);
             }
             other => panic!("expected repeated-failure justification, got {other:?}"),

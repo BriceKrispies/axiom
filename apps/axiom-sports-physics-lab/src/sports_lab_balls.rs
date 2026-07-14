@@ -132,6 +132,9 @@ mod tests {
     fn the_football_is_visually_elongated() {
         let football = BALLS.iter().find(|b| b.kind == BallKind::Football).unwrap();
         assert!(football.visual_scale.y > football.visual_scale.x * 1.5);
-        assert!(football.spawn_pitch > 0.0, "the football spawns lying on its side");
+        assert!(
+            football.spawn_pitch > 0.0,
+            "the football spawns lying on its side"
+        );
     }
 }

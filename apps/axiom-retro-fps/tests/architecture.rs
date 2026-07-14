@@ -121,7 +121,13 @@ fn app_toml_exists_and_lists_only_consumed_layers_and_modules() {
         assert!(text.contains(required), "app.toml lists {required}");
     }
     // It must not claim modules it does not use.
-    for forbidden in ["\"physics\"", "\"input\"", "\"scene\"", "\"render\"", "\"webgpu\""] {
+    for forbidden in [
+        "\"physics\"",
+        "\"input\"",
+        "\"scene\"",
+        "\"render\"",
+        "\"webgpu\"",
+    ] {
         assert!(
             !text.contains(forbidden),
             "app.toml must not list `{forbidden}`"

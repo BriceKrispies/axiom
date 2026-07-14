@@ -15,12 +15,12 @@
 
 use std::net::{TcpListener, TcpStream};
 
+use axiom_agent_harness::AgentHarnessApi;
+use axiom_canvas2d_backend::Canvas2dBackendApi;
 use axiom_growth::agent::{
     control_to_keys, parse_directives, Action, AgentSession, CaptureRequest, Observation,
 };
 use axiom_growth::ground::CaptureInputs;
-use axiom_agent_harness::AgentHarnessApi;
-use axiom_canvas2d_backend::Canvas2dBackendApi;
 use axiom_host::{
     FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
     HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostPowerPreference,
@@ -55,7 +55,9 @@ fn main() {
         "shots" | "screenshots" => shots(args.get(2).map(String::as_str).unwrap_or("gpu")),
         "summit" | "lookdown" => summit(args.get(2).map(String::as_str).unwrap_or("gpu")),
         "run" => run(
-            args.get(2).map(String::as_str).expect("usage: agent run <script.toml> [gpu|canvas2d]"),
+            args.get(2)
+                .map(String::as_str)
+                .expect("usage: agent run <script.toml> [gpu|canvas2d]"),
             args.get(3).map(String::as_str).unwrap_or("gpu"),
         ),
         "perceive" => perceive(
@@ -92,7 +94,10 @@ fn perceive(max_ticks: u64) {
             last = lines;
         }
     }
-    println!("[growth-agent] done at tick {} (reached_summit={}).", obs.tick, obs.reached_summit);
+    println!(
+        "[growth-agent] done at tick {} (reached_summit={}).",
+        obs.tick, obs.reached_summit
+    );
 }
 
 /// The conventional location of the app's authored world tags (the static-world
@@ -111,7 +116,9 @@ fn run(script_path: &str, backend: &str) {
             session.register_toml_tags(&toml);
             println!("[growth-agent] loaded authored tags from {TAGS_PATH}");
         }
-        Err(_) => println!("[growth-agent] no authored tags at {TAGS_PATH}; using runtime tags only"),
+        Err(_) => {
+            println!("[growth-agent] no authored tags at {TAGS_PATH}; using runtime tags only")
+        }
     }
 
     let script_str = std::fs::read_to_string(script_path)
@@ -141,7 +148,11 @@ fn render_captures(captures: &[CaptureRequest], backend: &str) {
         let (pixels, w, h) = if is_canvas2d {
             render_capture_canvas2d(&capture.inputs)
         } else {
-            (render_capture(&capture.inputs), capture.inputs.width, capture.inputs.height)
+            (
+                render_capture(&capture.inputs),
+                capture.inputs.width,
+                capture.inputs.height,
+            )
         };
         let path = format!("screenshots/{}{suffix}.png", capture.label);
         write_png(&path, &pixels, w, h);
@@ -234,7 +245,10 @@ fn shots(backend: &str) {
     ];
     let is_canvas2d = matches!(backend, "canvas2d" | "canvas");
     let suffix = if is_canvas2d { "_canvas2d" } else { "" };
-    println!("[growth-agent] backend: {}", if is_canvas2d { "canvas2d" } else { "gpu" });
+    println!(
+        "[growth-agent] backend: {}",
+        if is_canvas2d { "canvas2d" } else { "gpu" }
+    );
     for (name, dir_x, dir_z) in cardinals {
         let inputs = session.capture_portrait(dir_x, dir_z, distance);
         let (pixels, w, h) = if is_canvas2d {
@@ -320,7 +334,11 @@ fn render_capture_canvas2d(inputs: &CaptureInputs) -> (Vec<u8>, u32, u32) {
     let directional = inputs.lights.iter().filter(|(k, ..)| *k == 0).count() as u32;
     let point = inputs.lights.iter().filter(|(k, ..)| *k == 1).count() as u32;
     let features = FrameFeatureSet::new(false, directional > 0, directional, point);
-    let camera = Some(FrameCamera::new(IDENTITY_4X4, IDENTITY_4X4, inputs.view_proj));
+    let camera = Some(FrameCamera::new(
+        IDENTITY_4X4,
+        IDENTITY_4X4,
+        inputs.view_proj,
+    ));
     let packet = FramePacket::new(
         0,
         0,
@@ -535,7 +553,11 @@ fn serve_browser(stream: TcpStream) {
                     micro(obs.z),
                     micro(obs.yaw),
                 );
-                let goal = (micro(obs.peak_x), micro(obs.peak_height_m), micro(obs.peak_z));
+                let goal = (
+                    micro(obs.peak_x),
+                    micro(obs.peak_height_m),
+                    micro(obs.peak_z),
+                );
                 let (control, _reason, _brain, _emitted) = AgentHarnessApi::decide_hold(
                     AGENT_RAW_ID,
                     obs.tick,

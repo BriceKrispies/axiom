@@ -115,7 +115,12 @@ mod tests {
 
     #[test]
     fn dynamic_sphere_renders_blue_at_its_position_scaled_by_diameter() {
-        let reg = [body(1, KindTag::Dynamic, CrucibleShape::Sphere { radius: 0.5 }, false)];
+        let reg = [body(
+            1,
+            KindTag::Dynamic,
+            CrucibleShape::Sphere { radius: 0.5 },
+            false,
+        )];
         let out = render_instances(&[state(1, true)], &reg);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].mesh, CrucibleMesh::Sphere);
@@ -126,12 +131,22 @@ mod tests {
 
     #[test]
     fn disabled_overrides_kind_and_trigger_overrides_kind() {
-        let disabled = [body(1, KindTag::Dynamic, CrucibleShape::Sphere { radius: 1.0 }, false)];
+        let disabled = [body(
+            1,
+            KindTag::Dynamic,
+            CrucibleShape::Sphere { radius: 1.0 },
+            false,
+        )];
         assert_eq!(
             render_instances(&[state(1, false)], &disabled)[0].color,
             palette::DISABLED
         );
-        let trigger = [body(2, KindTag::Static, CrucibleShape::Sphere { radius: 1.0 }, true)];
+        let trigger = [body(
+            2,
+            KindTag::Static,
+            CrucibleShape::Sphere { radius: 1.0 },
+            true,
+        )];
         assert_eq!(
             render_instances(&[state(2, true)], &trigger)[0].color,
             palette::TRIGGER
@@ -140,10 +155,30 @@ mod tests {
 
     #[test]
     fn kind_colours_static_and_kinematic_distinctly() {
-        let s = [body(1, KindTag::Static, CrucibleShape::BoxShape { half_extents: Vec3::ONE }, false)];
-        assert_eq!(render_instances(&[state(1, true)], &s)[0].color, palette::STATIC);
-        let k = [body(2, KindTag::Kinematic, CrucibleShape::BoxShape { half_extents: Vec3::ONE }, false)];
-        assert_eq!(render_instances(&[state(2, true)], &k)[0].color, palette::KINEMATIC);
+        let s = [body(
+            1,
+            KindTag::Static,
+            CrucibleShape::BoxShape {
+                half_extents: Vec3::ONE,
+            },
+            false,
+        )];
+        assert_eq!(
+            render_instances(&[state(1, true)], &s)[0].color,
+            palette::STATIC
+        );
+        let k = [body(
+            2,
+            KindTag::Kinematic,
+            CrucibleShape::BoxShape {
+                half_extents: Vec3::ONE,
+            },
+            false,
+        )];
+        assert_eq!(
+            render_instances(&[state(2, true)], &k)[0].color,
+            palette::KINEMATIC
+        );
     }
 
     #[test]
@@ -178,7 +213,12 @@ mod tests {
 
     #[test]
     fn an_unregistered_state_is_skipped() {
-        let reg = [body(1, KindTag::Dynamic, CrucibleShape::Sphere { radius: 1.0 }, false)];
+        let reg = [body(
+            1,
+            KindTag::Dynamic,
+            CrucibleShape::Sphere { radius: 1.0 },
+            false,
+        )];
         let out = render_instances(&[state(2, true)], &reg);
         assert!(out.is_empty());
     }

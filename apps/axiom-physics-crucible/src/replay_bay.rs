@@ -57,11 +57,13 @@ impl Station for ReplayBay {
         world
             .nth_body(self.id(), 1)
             .and_then(|h| world.position_of(h))
-            .map(|p| vec![DebugShape::Marker {
-                position: p,
-                color: crate::debug_geometry::palette::REPLAY_OK,
-                size: 0.3,
-            }])
+            .map(|p| {
+                vec![DebugShape::Marker {
+                    position: p,
+                    color: crate::debug_geometry::palette::REPLAY_OK,
+                    size: 0.3,
+                }]
+            })
             .unwrap_or_default()
     }
 }
@@ -106,8 +108,16 @@ mod tests {
             .into_iter()
             .find(|b| b.handle == spinner)
             .unwrap();
-        assert!(state.angular.y > 0.0, "torque produced +Y spin: {:?}", state.angular);
-        assert!(state.rotation[1].abs() > 0.0, "orientation advanced: {:?}", state.rotation);
+        assert!(
+            state.angular.y > 0.0,
+            "torque produced +Y spin: {:?}",
+            state.angular
+        );
+        assert!(
+            state.rotation[1].abs() > 0.0,
+            "orientation advanced: {:?}",
+            state.rotation
+        );
         assert_ne!(state.rotation, [0.0, 0.0, 0.0, 1.0]);
     }
 

@@ -56,7 +56,10 @@ impl Decision {
 
     /// Whether this decision promotes the candidate to champion.
     pub fn replaces_champion(self) -> bool {
-        matches!(self, Decision::KeepCandidate | Decision::KeepCandidateMarkRegression)
+        matches!(
+            self,
+            Decision::KeepCandidate | Decision::KeepCandidateMarkRegression
+        )
     }
 }
 
@@ -77,7 +80,10 @@ pub struct Regression {
 impl Regression {
     /// The largest drop magnitude across non-attacked axes (0 if none dropped).
     pub fn worst_drop(&self) -> i16 {
-        self.worst.map(|(_, d)| -d).filter(|&drop| drop > 0).unwrap_or(0)
+        self.worst
+            .map(|(_, d)| -d)
+            .filter(|&drop| drop > 0)
+            .unwrap_or(0)
     }
 
     /// A non-attacked axis fell by `SIGNIFICANT_DROP` or more.
@@ -199,10 +205,16 @@ pub struct ResolvedDecision {
 /// machine decision stands.
 pub fn resolve_decision(machine: Decision, verdict: Option<&HumanVerdict>) -> ResolvedDecision {
     match verdict.and_then(|v| v.decision) {
-        Some(forced) => {
-            ResolvedDecision { machine, effective: forced, human_overrode: forced != machine }
-        }
-        None => ResolvedDecision { machine, effective: machine, human_overrode: false },
+        Some(forced) => ResolvedDecision {
+            machine,
+            effective: forced,
+            human_overrode: forced != machine,
+        },
+        None => ResolvedDecision {
+            machine,
+            effective: machine,
+            human_overrode: false,
+        },
     }
 }
 
@@ -216,8 +228,11 @@ pub fn is_complete(champion: &Scorecard, verdict: Option<&HumanVerdict>) -> bool
 /// champion. `None` when the champion is complete. A human `attacked_axis` override
 /// wins; otherwise the champion's lowest-scoring axis is the next flaw.
 pub fn next_attacked_axis(champion: &Scorecard, verdict: Option<&HumanVerdict>) -> Option<Axis> {
-    (!is_complete(champion, verdict))
-        .then(|| verdict.and_then(|v| v.attacked_axis).unwrap_or_else(|| champion.lowest_axis()))
+    (!is_complete(champion, verdict)).then(|| {
+        verdict
+            .and_then(|v| v.attacked_axis)
+            .unwrap_or_else(|| champion.lowest_axis())
+    })
 }
 
 #[cfg(test)]
@@ -305,12 +320,18 @@ mod tests {
     #[test]
     fn human_verdict_overrides_decision() {
         let machine = Decision::RejectCandidate;
-        let verdict = HumanVerdict { decision: Some(Decision::KeepCandidate), ..Default::default() };
+        let verdict = HumanVerdict {
+            decision: Some(Decision::KeepCandidate),
+            ..Default::default()
+        };
         let resolved = resolve_decision(machine, Some(&verdict));
         assert_eq!(resolved.effective, Decision::KeepCandidate);
         assert!(resolved.human_overrode);
         // A verdict that agrees with the machine is not counted as an override.
-        let agree = HumanVerdict { decision: Some(machine), ..Default::default() };
+        let agree = HumanVerdict {
+            decision: Some(machine),
+            ..Default::default()
+        };
         assert!(!resolve_decision(machine, Some(&agree)).human_overrode);
         // No verdict → machine stands.
         assert_eq!(resolve_decision(machine, None).effective, machine);
@@ -321,7 +342,10 @@ mod tests {
         // Not complete: lowest axis is the next attack.
         let champion = champ();
         assert!(!is_complete(&champion, None));
-        assert_eq!(next_attacked_axis(&champion, None), Some(Axis::VegetationDensity));
+        assert_eq!(
+            next_attacked_axis(&champion, None),
+            Some(Axis::VegetationDensity)
+        );
 
         // All axes pass → complete, no next axis.
         let passing = Scorecard::uniform(4);
@@ -329,13 +353,22 @@ mod tests {
         assert_eq!(next_attacked_axis(&passing, None), None);
 
         // Human accept forces completion even on a weak champion.
-        let accept = HumanVerdict { accept_champion: true, ..Default::default() };
+        let accept = HumanVerdict {
+            accept_champion: true,
+            ..Default::default()
+        };
         assert!(is_complete(&champion, Some(&accept)));
         assert_eq!(next_attacked_axis(&champion, Some(&accept)), None);
 
         // Human axis override picks the next attack when not complete.
-        let force = HumanVerdict { attacked_axis: Some(Axis::FogAndHaze), ..Default::default() };
-        assert_eq!(next_attacked_axis(&champion, Some(&force)), Some(Axis::FogAndHaze));
+        let force = HumanVerdict {
+            attacked_axis: Some(Axis::FogAndHaze),
+            ..Default::default()
+        };
+        assert_eq!(
+            next_attacked_axis(&champion, Some(&force)),
+            Some(Axis::FogAndHaze)
+        );
     }
 
     #[test]

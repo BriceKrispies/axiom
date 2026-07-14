@@ -60,7 +60,12 @@ fn meters(v: f32) -> Meters {
 }
 
 fn runtime_step(n: u64) -> RuntimeStep {
-    RuntimeStep::new(FrameIndex::new(n), Tick::new(n), settings::FIXED_STEP_NANOS, n)
+    RuntimeStep::new(
+        FrameIndex::new(n),
+        Tick::new(n),
+        settings::FIXED_STEP_NANOS,
+        n,
+    )
 }
 
 fn horizontal_speed(v: Vec3) -> f32 {
@@ -196,14 +201,16 @@ impl GravixGame {
             // fall after a moment (finish waits for restart).
             Phase::FellOut => {
                 self.finish_ticks += 1;
-                self.cam.update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
+                self.cam
+                    .update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
                 if self.finish_ticks > 45 {
                     self.restart();
                 }
             }
             Phase::Finished => {
                 self.finish_ticks += 1;
-                self.cam.update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
+                self.cam
+                    .update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
             }
         }
     }
@@ -227,16 +234,21 @@ impl GravixGame {
                 } else if out.braking {
                     self.apply_brake(lin, ang, dt);
                 } else if out.allow_move {
-                    drive.into_iter().for_each(|d| self.apply_drive(d, grounded, speed, dt));
+                    drive
+                        .into_iter()
+                        .for_each(|d| self.apply_drive(d, grounded, speed, dt));
                 }
             }
         }
 
-        self.physics.step(runtime_step(self.step_n)).expect("physics step");
+        self.physics
+            .step(runtime_step(self.step_n))
+            .expect("physics step");
         self.step_n += 1;
         self.read_ball();
         self.clamp_speed();
-        self.cam.update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
+        self.cam
+            .update(self.ball_pos, intent.yaw_delta, intent.pitch_delta, dt);
         self.check_finish();
         self.check_fall();
     }
@@ -244,15 +256,23 @@ impl GravixGame {
     /// Camera-relative drive: a linear accelerator (primary) + a roll torque
     /// (visible spin/bank), attenuated toward a soft top speed and reduced airborne.
     fn apply_drive(&mut self, dir: Vec3, grounded: bool, speed: f32, _dt: f32) {
-        let atten = 1.0 / (1.0 + (speed / settings::DRIVE_SPEED_REFERENCE.max(0.001)).powf(settings::DRIVE_SPEED_EXPONENT));
+        let atten = 1.0
+            / (1.0
+                + (speed / settings::DRIVE_SPEED_REFERENCE.max(0.001))
+                    .powf(settings::DRIVE_SPEED_EXPONENT));
         let control = if grounded { 1.0 } else { settings::AIR_CONTROL };
         // Split the input direction into forward-ness (drive) and lateral (steer)
         // magnitudes so straight-ahead uses the stronger DRIVE_FORCE.
         let force = settings::DRIVE_FORCE * atten * control;
-        self.physics.apply_force(self.ball, dir.mul_scalar(force)).expect("drive force");
+        self.physics
+            .apply_force(self.ball, dir.mul_scalar(force))
+            .expect("drive force");
         let axis = Vec3::new(dir.z, 0.0, -dir.x);
         self.physics
-            .apply_torque(self.ball, axis.mul_scalar(settings::ROLL_TORQUE * atten * control))
+            .apply_torque(
+                self.ball,
+                axis.mul_scalar(settings::ROLL_TORQUE * atten * control),
+            )
             .expect("roll torque");
     }
 
@@ -281,7 +301,9 @@ impl GravixGame {
         let lin = dir.mul_scalar(settings::SPIN_LAUNCH_LINEAR * charge);
         let axis = Vec3::new(dir.z, 0.0, -dir.x);
         let ang = axis.mul_scalar(settings::SPIN_LAUNCH_ANGULAR * charge);
-        self.physics.set_body_velocity(self.ball, lin, ang).expect("launch");
+        self.physics
+            .set_body_velocity(self.ball, lin, ang)
+            .expect("launch");
     }
 
     /// The current camera-relative forward (the charge default direction).
@@ -300,7 +322,13 @@ impl GravixGame {
     }
 
     fn read_ball(&mut self) {
-        if let Some(b) = self.physics.snapshot().bodies().iter().find(|b| b.handle() == self.ball) {
+        if let Some(b) = self
+            .physics
+            .snapshot()
+            .bodies()
+            .iter()
+            .find(|b| b.handle() == self.ball)
+        {
             let t = b.transform();
             self.ball_pos = t.translation;
             let r = t.rotation;
@@ -315,7 +343,9 @@ impl GravixGame {
         if speed > settings::MAX_SPEED {
             let k = settings::MAX_SPEED / speed;
             let capped = Vec3::new(lin.x * k, lin.y, lin.z * k);
-            self.physics.set_body_velocity(self.ball, capped, ang).expect("cap speed");
+            self.physics
+                .set_body_velocity(self.ball, capped, ang)
+                .expect("cap speed");
         }
     }
 
@@ -424,21 +454,43 @@ fn build_world(course: &Course) -> (PhysicsApi, PhysicsBodyHandle) {
     )
     .expect("valid physics config");
 
-    let track_mat = PhysicsApi::material(ratio(settings::TRACK_FRICTION), ratio(settings::TRACK_RESTITUTION), ratio(1.0))
-        .expect("track material");
+    let track_mat = PhysicsApi::material(
+        ratio(settings::TRACK_FRICTION),
+        ratio(settings::TRACK_RESTITUTION),
+        ratio(1.0),
+    )
+    .expect("track material");
     for seg in &course.segments {
-        let body = physics.create_static_body(seg.transform()).expect("static segment body");
+        let body = physics
+            .create_static_body(seg.transform())
+            .expect("static segment body");
         let grid = seg.params.collider_grid();
         let heights: Vec<Meters> = grid.heights.iter().map(|h| meters(*h)).collect();
         physics
-            .attach_heightfield_collider(body, grid.nx, grid.nz, meters(grid.spacing_x), meters(grid.spacing_z), &heights, track_mat, false)
+            .attach_heightfield_collider(
+                body,
+                grid.nx,
+                grid.nz,
+                meters(grid.spacing_x),
+                meters(grid.spacing_z),
+                &heights,
+                track_mat,
+                false,
+            )
             .expect("segment heightfield collider");
     }
 
-    let ball_mat = PhysicsApi::material(ratio(settings::BALL_FRICTION), ratio(settings::BALL_RESTITUTION), ratio(1.0))
-        .expect("ball material");
+    let ball_mat = PhysicsApi::material(
+        ratio(settings::BALL_FRICTION),
+        ratio(settings::BALL_RESTITUTION),
+        ratio(1.0),
+    )
+    .expect("ball material");
     let ball = physics
-        .create_dynamic_body(Transform::from_translation(course.spawn), ratio(settings::BALL_MASS))
+        .create_dynamic_body(
+            Transform::from_translation(course.spawn),
+            ratio(settings::BALL_MASS),
+        )
         .expect("ball body");
     physics
         .attach_sphere_collider(ball, meters(settings::BALL_RADIUS), ball_mat, false)
@@ -463,7 +515,12 @@ fn color3(rgb: [f32; 3]) -> Color {
 
 /// Convert a terrain `GridMesh` into engine `MeshData` (no UVs — flat-lit track).
 fn to_mesh_data(mesh: &axiom_terrain_mesh::GridMesh) -> MeshData {
-    MeshData::new(mesh.positions().to_vec(), mesh.normals().to_vec(), Vec::new(), mesh.indices().to_vec())
+    MeshData::new(
+        mesh.positions().to_vec(),
+        mesh.normals().to_vec(),
+        Vec::new(),
+        mesh.indices().to_vec(),
+    )
 }
 
 /// The persistent meshed scene: the static track/finish/stripes are spawned once
@@ -489,8 +546,14 @@ impl GravixScene {
         let sphere = app.add_mesh(Mesh::sphere());
 
         for seg in &course.segments {
-            let mesh = app.add_mesh_data(to_mesh_data(&seg.params.surface_mesh())).expect("segment mesh registers");
-            let mat = if seg.is_launch_reward { reward_mat } else { track_mat };
+            let mesh = app
+                .add_mesh_data(to_mesh_data(&seg.params.surface_mesh()))
+                .expect("segment mesh registers");
+            let mat = if seg.is_launch_reward {
+                reward_mat
+            } else {
+                track_mat
+            };
             app.spawn(Spawn::new(seg.transform(), mesh, mat));
             // Speed-stripe markers across the track at intervals along its length.
             spawn_stripes(app, seg, cube, stripe_mat);
@@ -499,56 +562,102 @@ impl GravixScene {
         // Finish gate: a bright pillar pair at the finish.
         let up = course.segments.last().unwrap().up;
         let right = Vec3::new(up.z, 0.0, -up.x); // any horizontal perpendicular-ish
-        [right.mul_scalar(3.0), right.mul_scalar(-3.0)].iter().for_each(|off| {
-            app.spawn(Spawn::new(
-                Transform::new(course.finish.add(*off).add(Vec3::new(0.0, 2.5, 0.0)), Quat::IDENTITY, Vec3::new(0.8, 5.0, 0.8)),
-                cube,
-                finish_mat,
-            ));
-        });
+        [right.mul_scalar(3.0), right.mul_scalar(-3.0)]
+            .iter()
+            .for_each(|off| {
+                app.spawn(Spawn::new(
+                    Transform::new(
+                        course.finish.add(*off).add(Vec3::new(0.0, 2.5, 0.0)),
+                        Quat::IDENTITY,
+                        Vec3::new(0.8, 5.0, 0.8),
+                    ),
+                    cube,
+                    finish_mat,
+                ));
+            });
 
         // Light rig.
         app.add_light(
-            DirectionalLight { direction: Vec3::new(0.35, -1.0, 0.28), color: Color::WHITE, intensity: ratio(1.0) },
+            DirectionalLight {
+                direction: Vec3::new(0.35, -1.0, 0.28),
+                color: Color::WHITE,
+                intensity: ratio(1.0),
+            },
             Transform::IDENTITY,
         );
         app.add_point_light(
-            PointLight { color: Color::WHITE, intensity: ratio(120.0) },
+            PointLight {
+                color: Color::WHITE,
+                intensity: ratio(120.0),
+            },
             Transform::from_translation(course.spawn.add(Vec3::new(0.0, 20.0, 0.0))),
         );
 
-        GravixScene { ball_mesh: sphere, ball_mat, ball_entity: None }
+        GravixScene {
+            ball_mesh: sphere,
+            ball_mat,
+            ball_entity: None,
+        }
     }
 
-    pub fn update(&mut self, app: &mut RunningApp, ball_pos: Vec3, ball_rot: [f32; 4], eye: Vec3, target: Vec3) {
+    pub fn update(
+        &mut self,
+        app: &mut RunningApp,
+        ball_pos: Vec3,
+        ball_rot: [f32; 4],
+        eye: Vec3,
+        target: Vec3,
+    ) {
         app.set_camera(
             Camera::perspective(PerspectiveProjection {
                 fov_y: Angle::degrees(60.0),
                 near: meters(0.1),
                 far: meters(600.0),
             }),
-            Transform::from_translation(eye).looking_at(target, Vec3::UNIT_Y).expect("camera aims at the ball"),
+            Transform::from_translation(eye)
+                .looking_at(target, Vec3::UNIT_Y)
+                .expect("camera aims at the ball"),
         );
         if let Some(e) = self.ball_entity.take() {
             app.despawn(e);
         }
         let d = settings::BALL_RADIUS * 2.0;
         let rot = Quat::new(ball_rot[0], ball_rot[1], ball_rot[2], ball_rot[3]);
-        self.ball_entity = Some(app.spawn(Spawn::new(Transform::new(ball_pos, rot, Vec3::new(d, d, d)), self.ball_mesh, self.ball_mat)));
+        self.ball_entity = Some(app.spawn(Spawn::new(
+            Transform::new(ball_pos, rot, Vec3::new(d, d, d)),
+            self.ball_mesh,
+            self.ball_mat,
+        )));
     }
 }
 
 /// Spawn evenly-spaced bright stripe markers across a segment's width, so speed is
 /// perceptible as they flash past.
-fn spawn_stripes(app: &mut RunningApp, seg: &course::Segment, cube: axiom::prelude::Handle<Mesh>, mat: axiom::prelude::Handle<Material>) {
+fn spawn_stripes(
+    app: &mut RunningApp,
+    seg: &course::Segment,
+    cube: axiom::prelude::Handle<Mesh>,
+    mat: axiom::prelude::Handle<Material>,
+) {
     let (half_x, half_z) = seg.params.half_extents();
     let count = ((2.0 * half_z) / 8.0).round().max(1.0) as i32;
     for i in 0..=count {
-        let t = if count == 0 { 0.5 } else { i as f32 / count as f32 };
+        let t = if count == 0 {
+            0.5
+        } else {
+            i as f32 / count as f32
+        };
         let along = -half_z + t * 2.0 * half_z;
-        let center = seg.center.add(seg.forward.mul_scalar(along)).add(seg.up.mul_scalar(0.06));
+        let center = seg
+            .center
+            .add(seg.forward.mul_scalar(along))
+            .add(seg.up.mul_scalar(0.06));
         app.spawn(Spawn::new(
-            Transform::new(center, seg.rotation, Vec3::new(2.0 * half_x * 0.96, 0.12, 0.5)),
+            Transform::new(
+                center,
+                seg.rotation,
+                Vec3::new(2.0 * half_x * 0.96, 0.12, 0.5),
+            ),
             cube,
             mat,
         ));
@@ -605,9 +714,15 @@ mod tests {
             game.step(Intent::default());
         }
         let late = game.speed();
-        assert!(late > early + 1.0, "the ball accelerates downhill: {early} -> {late}");
+        assert!(
+            late > early + 1.0,
+            "the ball accelerates downhill: {early} -> {late}"
+        );
         // It stays on the track (above the kill plane) rather than falling through.
-        assert!(game.ball_position().y > game.course.kill_plane_y, "ball stays on the course");
+        assert!(
+            game.ball_position().y > game.course.kill_plane_y,
+            "ball stays on the course"
+        );
     }
 
     #[test]
@@ -619,18 +734,27 @@ mod tests {
         let (fwd, _) = game.cam.ground_basis();
         let before = game.ball_position();
         for _ in 0..60 {
-            game.step(Intent { forward: true, ..Intent::default() });
+            game.step(Intent {
+                forward: true,
+                ..Intent::default()
+            });
         }
         let moved = game.ball_position().subtract(before);
         // Net motion has a positive component along the camera forward.
-        assert!(moved.dot(fwd) > 0.5, "forward input drives along camera forward");
+        assert!(
+            moved.dot(fwd) > 0.5,
+            "forward input drives along camera forward"
+        );
     }
 
     #[test]
     fn falling_off_the_course_resets_after_a_moment() {
         let mut game = GravixGame::new();
         game.physics
-            .set_body_transform(game.ball, Transform::from_translation(Vec3::new(0.0, game.course.kill_plane_y - 10.0, 0.0)))
+            .set_body_transform(
+                game.ball,
+                Transform::from_translation(Vec3::new(0.0, game.course.kill_plane_y - 10.0, 0.0)),
+            )
             .unwrap();
         game.step(Intent::default());
         assert_eq!(game.phase(), Phase::FellOut);
@@ -655,9 +779,20 @@ mod tests {
     #[test]
     fn two_identical_runs_are_deterministic() {
         let script = [
-            Intent { forward: true, ..Intent::default() },
-            Intent { forward: true, right: true, ..Intent::default() },
-            Intent { brake: true, tap: true, ..Intent::default() },
+            Intent {
+                forward: true,
+                ..Intent::default()
+            },
+            Intent {
+                forward: true,
+                right: true,
+                ..Intent::default()
+            },
+            Intent {
+                brake: true,
+                tap: true,
+                ..Intent::default()
+            },
         ];
         let run = || {
             let mut g = GravixGame::new();
@@ -686,5 +821,3 @@ mod tests {
         assert!(!outcome.draws().is_empty(), "the course renders draws");
     }
 }
-
-

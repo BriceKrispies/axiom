@@ -123,14 +123,27 @@ fn assert_absent_in_native_app(forbidden: &[&str], why: &str) {
 fn app_toml_exists_and_lists_only_consumed_layers_and_modules() {
     let manifest = app_root().join("app.toml");
     let text = fs::read_to_string(&manifest).expect("app.toml exists");
-    for required in ["\"kernel\"", "\"runtime\"", "\"engine\"", "\"physics\"", "\"windowing\"", "\"debug-overlay\""] {
+    for required in [
+        "\"kernel\"",
+        "\"runtime\"",
+        "\"engine\"",
+        "\"physics\"",
+        "\"windowing\"",
+        "\"debug-overlay\"",
+    ] {
         assert!(
             text.contains(required),
             "app.toml lists the consumed {required} layer/module"
         );
     }
     // It must not claim modules it does not use.
-    for forbidden in ["\"scene\"", "\"render\"", "\"webgpu\"", "\"agent\"", "\"input\""] {
+    for forbidden in [
+        "\"scene\"",
+        "\"render\"",
+        "\"webgpu\"",
+        "\"agent\"",
+        "\"input\"",
+    ] {
         assert!(
             !text.contains(forbidden),
             "app.toml must not list `{forbidden}`"

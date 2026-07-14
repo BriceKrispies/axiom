@@ -164,7 +164,12 @@ mod tests {
         assert_eq!(TileKind::Switch.required_addon(), Some(Addon::Switches));
         assert_eq!(TileKind::Crate.required_addon(), Some(Addon::Crates));
         assert_eq!(TileKind::Hazard.required_addon(), Some(Addon::Hazards));
-        for k in [TileKind::Floor, TileKind::Wall, TileKind::Button, TileKind::Door] {
+        for k in [
+            TileKind::Floor,
+            TileKind::Wall,
+            TileKind::Button,
+            TileKind::Door,
+        ] {
             assert_eq!(k.required_addon(), None);
         }
     }

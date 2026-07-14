@@ -93,13 +93,26 @@ pub fn field_texture() -> BakedTexture {
     let mut tex = bake(
         101,
         TextureOp::Noise,
-        vec![int(w as u32), int(h as u32), int(20), col(0x3A, 0x6E, 0x30), col(0x4C, 0x86, 0x3C)],
+        vec![
+            int(w as u32),
+            int(h as u32),
+            int(20),
+            col(0x3A, 0x6E, 0x30),
+            col(0x4C, 0x86, 0x3C),
+        ],
     );
     // Boundary rectangle.
     rect_outline(&mut tex, 10, 10, w - 11, h - 11, 3, LINE_WHITE);
     // Center line + center circle.
     fill_rect(&mut tex, 10, h / 2 - 1, w - 11, h / 2 + 1, LINE_WHITE);
-    circle_outline(&mut tex, w as f32 / 2.0, h as f32 / 2.0, 34.0, 3.0, LINE_WHITE);
+    circle_outline(
+        &mut tex,
+        w as f32 / 2.0,
+        h as f32 / 2.0,
+        34.0,
+        3.0,
+        LINE_WHITE,
+    );
     // Two faint practice zones, one in each half.
     rect_outline(&mut tex, 40, 48, 120, 128, 2, LINE_FAINT);
     rect_outline(&mut tex, w - 121, h - 129, w - 41, h - 49, 2, LINE_FAINT);
@@ -119,7 +132,11 @@ pub fn soccer_texture() -> BakedTexture {
     let mut spots: Vec<(u32, u32, u32)> = vec![(64, 64, 12)];
     for k in 0..5 {
         let a = k as f32 * core::f32::consts::TAU / 5.0;
-        spots.push(((64.0 + a.cos() * 34.0) as u32, (64.0 + a.sin() * 30.0) as u32, 10));
+        spots.push((
+            (64.0 + a.cos() * 34.0) as u32,
+            (64.0 + a.sin() * 30.0) as u32,
+            10,
+        ));
     }
     // A row near each pole and the wrap seam (u=0/128 meet on the sphere).
     spots.push((16, 16, 8));
@@ -157,7 +174,11 @@ pub fn bowling_texture() -> BakedTexture {
 
 /// Baseball: white leather with two painted red seam loops (no arc op exists).
 pub fn baseball_texture() -> BakedTexture {
-    let mut tex = bake(104, TextureOp::Solid, vec![int(128), int(128), col(0xEC, 0xE8, 0xE0)]);
+    let mut tex = bake(
+        104,
+        TextureOp::Solid,
+        vec![int(128), int(128), col(0xEC, 0xE8, 0xE0)],
+    );
     let seam = [0xBC, 0x2C, 0x34, 0xFF];
     circle_outline(&mut tex, 42.0, 64.0, 30.0, 3.0, seam);
     circle_outline(&mut tex, 86.0, 64.0, 30.0, 3.0, seam);
@@ -167,7 +188,11 @@ pub fn baseball_texture() -> BakedTexture {
 /// Football: brown leather, two white tip stripes, and a painted lace strip.
 /// The ball's long axis is the texture's poles (v = 0 / v = 1).
 pub fn football_texture() -> BakedTexture {
-    let mut tex = bake(105, TextureOp::Solid, vec![int(128), int(128), col(0x76, 0x3A, 0x1C)]);
+    let mut tex = bake(
+        105,
+        TextureOp::Solid,
+        vec![int(128), int(128), col(0x76, 0x3A, 0x1C)],
+    );
     // Tip stripes (latitude bands near the poles).
     fill_rect(&mut tex, 0, 14, 127, 19, LINE_WHITE);
     fill_rect(&mut tex, 0, 108, 127, 113, LINE_WHITE);
@@ -191,7 +216,13 @@ mod tests {
 
     #[test]
     fn every_surface_bakes_well_formed_and_deterministic() {
-        for baker in [field_texture, soccer_texture, bowling_texture, baseball_texture, football_texture] {
+        for baker in [
+            field_texture,
+            soccer_texture,
+            bowling_texture,
+            baseball_texture,
+            football_texture,
+        ] {
             let a = baker();
             is_well_formed(&a);
             assert_eq!(a.pixels, baker().pixels, "bakes are byte-identical");
@@ -207,9 +238,15 @@ mod tests {
         };
         // The boundary line is white; the middle of a quadrant is green.
         assert_eq!(texel(11, 11), [LINE_WHITE[0], LINE_WHITE[1], LINE_WHITE[2]]);
-        assert_eq!(texel(128, 192), [LINE_WHITE[0], LINE_WHITE[1], LINE_WHITE[2]]);
+        assert_eq!(
+            texel(128, 192),
+            [LINE_WHITE[0], LINE_WHITE[1], LINE_WHITE[2]]
+        );
         let quad = texel(200, 80);
-        assert!(quad[1] > quad[0] && quad[1] > quad[2], "grass reads green, got {quad:?}");
+        assert!(
+            quad[1] > quad[0] && quad[1] > quad[2],
+            "grass reads green, got {quad:?}"
+        );
     }
 
     #[test]
@@ -223,11 +260,17 @@ mod tests {
         let bowling = bowling_texture();
         let hole = ((42 * bowling.width + 56) * 4) as usize;
         let base = ((100 * bowling.width + 64) * 4) as usize;
-        assert!(bowling.pixels[hole] < bowling.pixels[base] + 20, "finger hole is darker");
+        assert!(
+            bowling.pixels[hole] < bowling.pixels[base] + 20,
+            "finger hole is darker"
+        );
 
         let baseball = baseball_texture();
         let seam = ((64 * baseball.width + 12) * 4) as usize;
-        assert!(baseball.pixels[seam] > 0xA0 && baseball.pixels[seam + 1] < 0x60, "red seam");
+        assert!(
+            baseball.pixels[seam] > 0xA0 && baseball.pixels[seam + 1] < 0x60,
+            "red seam"
+        );
 
         let football = football_texture();
         let lace = ((60 * football.width + 63) * 4) as usize;

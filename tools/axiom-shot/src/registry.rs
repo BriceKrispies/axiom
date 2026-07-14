@@ -43,7 +43,9 @@ pub struct SliceEntry {
 
 impl std::fmt::Debug for SliceEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SliceEntry").field("name", &self.name).finish()
+        f.debug_struct("SliceEntry")
+            .field("name", &self.name)
+            .finish()
     }
 }
 
@@ -51,8 +53,14 @@ impl std::fmt::Debug for SliceEntry {
 /// `axiom-shot` can render by name.
 pub fn registry() -> Vec<SliceEntry> {
     vec![
-        SliceEntry { name: "showcase", build: |_| showcase_app().build() },
-        SliceEntry { name: "nova-roll", build: |_| nova_roll_app().build() },
+        SliceEntry {
+            name: "showcase",
+            build: |_| showcase_app().build(),
+        },
+        SliceEntry {
+            name: "nova-roll",
+            build: |_| nova_roll_app().build(),
+        },
         SliceEntry {
             name: "rotating-cube",
             build: |_| axiom_rotating_cube::rotating_cube_core(),
@@ -65,15 +73,22 @@ pub fn registry() -> Vec<SliceEntry> {
             name: "physics-crucible",
             build: |_| axiom_physics_crucible::build_physics_crucible(),
         },
-        SliceEntry { name: "retro-fps", build: build_retro_fps },
-        SliceEntry { name: "animation-lab", build: build_posed_figure },
-        SliceEntry { name: "gravix", build: |_| axiom_gravix::build_gravix() },
+        SliceEntry {
+            name: "retro-fps",
+            build: build_retro_fps,
+        },
+        SliceEntry {
+            name: "animation-lab",
+            build: build_posed_figure,
+        },
+        SliceEntry {
+            name: "gravix",
+            build: |_| axiom_gravix::build_gravix(),
+        },
         SliceEntry {
             name: "sports-physics-lab",
             // `--frame 1` photographs the third-person view (the player's body).
-            build: |p| {
-                axiom_sports_physics_lab::build_sports_physics_lab_posed(p.frame > 0)
-            },
+            build: |p| axiom_sports_physics_lab::build_sports_physics_lab_posed(p.frame > 0),
         },
     ]
 }
@@ -102,11 +117,13 @@ fn build_retro_fps(p: &BuildParams) -> RunningApp {
 fn build_posed_figure(p: &BuildParams) -> RunningApp {
     let parts = LabScene::new().view(p.frame).parts;
     App::new()
-        .window(Window::new(WIDTH, HEIGHT).with_clear_color(Color::linear_rgb(
-            ch(0.06),
-            ch(0.07),
-            ch(0.09),
-        )))
+        .window(
+            Window::new(WIDTH, HEIGHT).with_clear_color(Color::linear_rgb(
+                ch(0.06),
+                ch(0.07),
+                ch(0.09),
+            )),
+        )
         .add_plugins(DefaultPlugins)
         .setup(move |world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
@@ -125,7 +142,10 @@ fn build_posed_figure(p: &BuildParams) -> RunningApp {
                 );
                 world.spawn((
                     Transform::combine(part.transform, Transform::from_scale(scale)),
-                    Renderable { mesh: cube, material: body },
+                    Renderable {
+                        mesh: cube,
+                        material: body,
+                    },
                 ));
             });
             world.spawn((
@@ -164,25 +184,42 @@ pub fn retro_fps_doc(level: Option<&str>) -> axiom_retro_fps::level::LevelDoc {
 /// camera, a directional sun, and three orbiting coloured point lights.
 pub fn showcase_app() -> App {
     App::new()
-        .window(Window::new(WIDTH, HEIGHT).with_clear_color(Color::linear_rgb(
-            ch(0.05),
-            ch(0.06),
-            ch(0.08),
-        )))
+        .window(
+            Window::new(WIDTH, HEIGHT).with_clear_color(Color::linear_rgb(
+                ch(0.05),
+                ch(0.06),
+                ch(0.08),
+            )),
+        )
         .add_plugins(DefaultPlugins)
         .setup(|world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
             let cubes = [
-                (-2.6, Vec3::UNIT_Y, Color::linear_rgb(ch(0.85), ch(0.25), ch(0.25))),
-                (0.0, Vec3::UNIT_X, Color::linear_rgb(ch(0.30), ch(0.80), ch(0.35))),
-                (2.6, Vec3::new(1.0, 1.0, 0.0), Color::linear_rgb(ch(0.30), ch(0.50), ch(0.95))),
+                (
+                    -2.6,
+                    Vec3::UNIT_Y,
+                    Color::linear_rgb(ch(0.85), ch(0.25), ch(0.25)),
+                ),
+                (
+                    0.0,
+                    Vec3::UNIT_X,
+                    Color::linear_rgb(ch(0.30), ch(0.80), ch(0.35)),
+                ),
+                (
+                    2.6,
+                    Vec3::new(1.0, 1.0, 0.0),
+                    Color::linear_rgb(ch(0.30), ch(0.50), ch(0.95)),
+                ),
             ];
             cubes.into_iter().for_each(|(offset_x, axis, color)| {
                 let material = materials.add(Material::lit(color).with_texture(Texture::Checker));
                 world
                     .spawn(Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)))
                     .with_child((
-                        Renderable { mesh: cube, material },
+                        Renderable {
+                            mesh: cube,
+                            material,
+                        },
                         Spin::around(axis).period(360),
                     ));
             });
@@ -196,7 +233,10 @@ pub fn showcase_app() -> App {
                     Transform::from_translation(Vec3::new(0.0, -2.0, 0.0)),
                     Transform::from_scale(Vec3::new(30.0, 1.0, 30.0)),
                 ),
-                Renderable { mesh: plane, material: ground },
+                Renderable {
+                    mesh: plane,
+                    material: ground,
+                },
             ));
             let sphere = meshes.add(Mesh::sphere());
             let sphere_material = materials.add(
@@ -208,7 +248,10 @@ pub fn showcase_app() -> App {
                     Transform::from_translation(Vec3::new(0.0, 2.6, 0.0)),
                     Transform::from_scale(Vec3::new(1.6, 1.6, 1.6)),
                 ),
-                Renderable { mesh: sphere, material: sphere_material },
+                Renderable {
+                    mesh: sphere,
+                    material: sphere_material,
+                },
             ));
             world.spawn((
                 Transform::from_translation(Vec3::new(-4.6, 1.6, 0.0)),
@@ -224,11 +267,17 @@ pub fn showcase_app() -> App {
                     Color::linear_rgb(ch(0.95), ch(0.45), ch(0.85)),
                 ),
             ));
-            let proc_material =
-                materials.add(Material::lit(Color::linear_rgb(ch(0.95), ch(0.55), ch(0.12))));
+            let proc_material = materials.add(Material::lit(Color::linear_rgb(
+                ch(0.95),
+                ch(0.55),
+                ch(0.12),
+            )));
             world.spawn((
                 Transform::from_translation(Vec3::new(0.0, -0.6, 3.4)),
-                Renderable { mesh: cube, material: proc_material },
+                Renderable {
+                    mesh: cube,
+                    material: proc_material,
+                },
                 ProcAnim::bob(Meters::new(1.6).expect("finite bob"), 120).spin(Vec3::UNIT_Y, 180),
             ));
             world.spawn((
@@ -254,10 +303,16 @@ pub fn showcase_app() -> App {
             ];
             orbit_lights.into_iter().for_each(|(color, period)| {
                 world
-                    .spawn((Transform::IDENTITY, Spin::around(Vec3::UNIT_Y).period(period)))
+                    .spawn((
+                        Transform::IDENTITY,
+                        Spin::around(Vec3::UNIT_Y).period(period),
+                    ))
                     .with_child((
                         Transform::from_translation(Vec3::new(4.5, 1.2, 0.0)),
-                        PointLight { color, intensity: ch(9.0) },
+                        PointLight {
+                            color,
+                            intensity: ch(9.0),
+                        },
                     ));
             });
         })
@@ -268,28 +323,39 @@ pub fn showcase_app() -> App {
 /// exercises `Mesh::cylinder` + an emissive material on both backends.
 pub fn nova_roll_app() -> App {
     App::new()
-        .window(Window::new(WIDTH, HEIGHT).with_clear_color(Color::linear_rgb(
-            ch(0.02),
-            ch(0.02),
-            ch(0.05),
-        )))
+        .window(
+            Window::new(WIDTH, HEIGHT).with_clear_color(Color::linear_rgb(
+                ch(0.02),
+                ch(0.02),
+                ch(0.05),
+            )),
+        )
         .add_plugins(DefaultPlugins)
         .setup(|world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
             let cylinder = meshes.add(Mesh::cylinder());
-            let cube_mat =
-                materials.add(Material::lit(Color::linear_rgb(ch(0.85), ch(0.30), ch(0.25))));
+            let cube_mat = materials.add(Material::lit(Color::linear_rgb(
+                ch(0.85),
+                ch(0.30),
+                ch(0.25),
+            )));
             let cyl_mat = materials.add(
                 Material::lit(Color::linear_rgb(ch(0.25), ch(0.55), ch(0.90)))
                     .with_emissive(Color::linear_rgb(ch(0.6), ch(0.5), ch(0.1))),
             );
             world.spawn((
                 Transform::from_translation(Vec3::new(-1.6, 0.0, 0.0)),
-                Renderable { mesh: cube, material: cube_mat },
+                Renderable {
+                    mesh: cube,
+                    material: cube_mat,
+                },
             ));
             world.spawn((
                 Transform::from_translation(Vec3::new(1.6, 0.0, 0.0)),
-                Renderable { mesh: cylinder, material: cyl_mat },
+                Renderable {
+                    mesh: cylinder,
+                    material: cyl_mat,
+                },
             ));
             world.spawn((
                 Transform::from_translation(Vec3::new(0.0, 0.0, 6.0)),

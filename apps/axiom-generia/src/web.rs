@@ -124,8 +124,9 @@ const EYE_HEIGHT_M: f32 = TUNING.eye_height().get();
 /// Mouse-look sensitivity (radians per pixel), sourced from the shared tuning.
 const LOOK_SENS: f32 = TUNING.look_sensitivity().get();
 
-const IDENTITY16: [f32; 16] =
-    [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+const IDENTITY16: [f32; 16] = [
+    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+];
 
 /// One instance's fixed world transform + tint (camera-independent).
 #[derive(Clone, Copy)]
@@ -178,7 +179,11 @@ pub fn generia_start() {
     // Build once for the unit meshes + materials; the baked batches are ignored —
     // generia generates its own per-chunk instances.
     let rd = build::build(&manifest);
-    let (near, far, fov) = (manifest.camera.near_m, manifest.camera.far_m, manifest.camera.fov_deg);
+    let (near, far, fov) = (
+        manifest.camera.near_m,
+        manifest.camera.far_m,
+        manifest.camera.fov_deg,
+    );
     let clear = rd.clear;
     let lights = rd.lights.clone();
     let light_vp = rd.light_view_proj;
@@ -281,15 +286,23 @@ pub fn generia_start() {
                 Meters::finite_or_zero(near),
                 Meters::finite_or_zero(far),
             );
-            let vp = FpController::view_projection(*p, Meters::finite_or_zero(ground), TUNING, lens);
+            let vp =
+                FpController::view_projection(*p, Meters::finite_or_zero(ground), TUNING, lens);
 
             // Plan the frame: load / unload / visible chunks.
             let plan = world.borrow_mut().frame_plan(eye, vp, chunk_aabb);
-            let grass_sites = if low_detail { GRASS_SITES_LOW } else { GRASS_SITES_GPU };
+            let grass_sites = if low_detail {
+                GRASS_SITES_LOW
+            } else {
+                GRASS_SITES_GPU
+            };
             {
                 let mut c = cache.borrow_mut();
                 for coord in &plan.load {
-                    c.insert((coord.x, coord.z), gen_chunk_veg(&manifest, &foliage, *coord, eye, grass_sites));
+                    c.insert(
+                        (coord.x, coord.z),
+                        gen_chunk_veg(&manifest, &foliage, *coord, eye, grass_sites),
+                    );
                 }
                 for coord in &plan.unload {
                     c.remove(&(coord.x, coord.z));
@@ -327,11 +340,21 @@ pub fn generia_start() {
             // AND is textureless noise on Canvas2D, so it draws only on the GPU, and only in
             // the nearest band (lod 0); farther chunks keep trunks + branches + canopy.
             let c = cache.borrow();
-            let (mut trunk, mut canopy, mut foliage_d, mut branch, mut grass, mut sedge) =
-                (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (mut trunk, mut canopy, mut foliage_d, mut branch, mut grass, mut sedge) = (
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            );
             let (mut tn, mut cn, mut fn_, mut bn, mut gn, mut sn) =
                 (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
-            let grass_draw_m = if low_detail { GRASS_DRAW_M_LOW } else { GRASS_DRAW_M_GPU };
+            let grass_draw_m = if low_detail {
+                GRASS_DRAW_M_LOW
+            } else {
+                GRASS_DRAW_M_GPU
+            };
             for vc in &plan.visible {
                 if let Some(veg) = c.get(&(vc.coord.x, vc.coord.z)) {
                     tn += project_into(&mut trunk, &veg.trunk, &vp);
@@ -368,14 +391,25 @@ pub fn generia_start() {
                 (GRASS_MESH, WHITE_MAT, grass, gn),
                 (SEDGE_MESH, WHITE_MAT, sedge, sn),
             ];
-            (clear, lights.clone(), light_vp, batches, vp.as_cols_array(), Vec::new(), None, new_geometry)
+            (
+                clear,
+                lights.clone(),
+                light_vp,
+                batches,
+                vp.as_cols_array(),
+                Vec::new(),
+                None,
+                new_geometry,
+            )
         },
     );
 }
 
 /// The manifest's style (or the neutral default).
 fn style_of(m: &Manifest) -> crate::visual_target::scene::Style {
-    m.style.clone().unwrap_or_else(crate::visual_target::scene::Style::neutral)
+    m.style
+        .clone()
+        .unwrap_or_else(crate::visual_target::scene::Style::neutral)
 }
 
 /// Generate one chunk's cached vegetation: scatter its trees, then run the hero
@@ -405,8 +439,22 @@ fn gen_chunk_veg(
     ChunkVeg {
         trunk: extract(&trunk_instances(manifest, &trees, lean, &IDENTITY16, eye)),
         canopy: extract(&canopy_instances(manifest, &trees, lean, &IDENTITY16, eye)),
-        foliage: extract(&foliage_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
-        branch: extract(&branch_instances(manifest, &trees, foliage, lean, &IDENTITY16, eye)),
+        foliage: extract(&foliage_instances(
+            manifest,
+            &trees,
+            foliage,
+            lean,
+            &IDENTITY16,
+            eye,
+        )),
+        branch: extract(&branch_instances(
+            manifest,
+            &trees,
+            foliage,
+            lean,
+            &IDENTITY16,
+            eye,
+        )),
         grass,
         sedge,
     }
@@ -420,7 +468,12 @@ fn gen_chunk_veg(
 /// routed through `build::fogged` so the sward matches the world's fog + tone (fog
 /// parity). Wind phase + gust gain are baked here (one noise sample per blade), so the
 /// per-frame projector stays cheap.
-fn gen_chunk_grass(manifest: &Manifest, cell: ChunkCoord, eye: Vec3, sites_per_side: u32) -> (Vec<Grass>, Vec<Grass>) {
+fn gen_chunk_grass(
+    manifest: &Manifest,
+    cell: ChunkCoord,
+    eye: Vec3,
+    sites_per_side: u32,
+) -> (Vec<Grass>, Vec<Grass>) {
     let rule = ScatterRule {
         sites_per_side,
         jitter: Ratio::new(0.9).unwrap_or_else(|_| Ratio::new(0.0).unwrap()),
@@ -455,16 +508,32 @@ fn gen_chunk_grass(manifest: &Manifest, cell: ChunkCoord, eye: Vec3, sites_per_s
         let height = lerp(hr, u(16)) * height_mul;
         let radius = lerp(rr, u(0)) * radius_mul;
         let yaw = u(24) * std::f32::consts::TAU;
-        let base = pal.get((u(8) * pal.len() as f32) as usize).copied().unwrap_or([0.33, 0.42, 0.18]);
+        let base = pal
+            .get((u(8) * pal.len() as f32) as usize)
+            .copied()
+            .unwrap_or([0.33, 0.42, 0.18]);
         let col = grass_color(base, x, z);
-        let dist = eye.subtract(Vec3::new(x, ground + height * 0.5, z)).length();
+        let dist = eye
+            .subtract(Vec3::new(x, ground + height * 0.5, z))
+            .length();
         let tint = build::fogged(col, &manifest.fog, dist, &style, 1.0);
         // Bake the wind phase + gust gain from a low-frequency world field, so the
         // per-frame projector only evaluates a cheap sine.
         let phase = u(40) * std::f32::consts::TAU;
-        let gust = value_noise(GRASS_SEED ^ 0x_9E37_79B9, Vec3::new(x * 0.06, 0.0, z * 0.06)).get();
+        let gust = value_noise(
+            GRASS_SEED ^ 0x_9E37_79B9,
+            Vec3::new(x * 0.06, 0.0, z * 0.06),
+        )
+        .get();
         let wind_amp = WIND_AMP * (0.45 + 0.55 * (gust * 0.5 + 0.5)) * wind_mul;
-        let blade = Grass { base: Vec3::new(x, ground, z), yaw, scale: Vec3::new(radius, height, radius), tint, phase, wind_amp };
+        let blade = Grass {
+            base: Vec3::new(x, ground, z),
+            yaw,
+            scale: Vec3::new(radius, height, radius),
+            tint,
+            phase,
+            wind_amp,
+        };
         [&mut sedge, &mut grass][is_grass as usize].push(blade);
     }
     (grass, sedge)
@@ -477,7 +546,8 @@ fn gen_chunk_grass(manifest: &Manifest, cell: ChunkCoord, eye: Vec3, sites_per_s
 fn grass_color(base: [f32; 3], x: f32, z: f32) -> [f32; 3] {
     let n = value_noise(0x_6772_6173_ff01, Vec3::new(x * 0.22, 0.0, z * 0.22)).get(); // [-1,1]
     let bright = 1.0 + n * 0.22;
-    let green = (0.5 + 0.5 * value_noise(0x_6772_6173_ff02, Vec3::new(x * 0.5, 0.0, z * 0.5)).get()) * 0.12;
+    let green =
+        (0.5 + 0.5 * value_noise(0x_6772_6173_ff02, Vec3::new(x * 0.5, 0.0, z * 0.5)).get()) * 0.12;
     let varied = [
         (base[0] * bright).clamp(0.0, 1.0),
         (base[1] * bright + green).clamp(0.0, 1.0),
@@ -541,13 +611,21 @@ fn project_grass(out: &mut Vec<f32>, blades: &[Grass], vp: &Mat4, eye: Vec3, tic
 /// from the site's seed across the manifest scatter's ranges.
 fn site_to_tree(manifest: &Manifest, s: &ScatterSite) -> Tree {
     let (th, tr, cr, pal): ([f32; 2], [f32; 2], [f32; 2], &[[f32; 3]]) = match &manifest.scatter {
-        Some(sc) => (sc.trunk_height_m, sc.trunk_radius_m, sc.canopy_radius_m, sc.canopy_palette.as_slice()),
+        Some(sc) => (
+            sc.trunk_height_m,
+            sc.trunk_radius_m,
+            sc.canopy_radius_m,
+            sc.canopy_palette.as_slice(),
+        ),
         None => ([6.0, 14.0], [0.2, 0.5], [2.0, 4.0], &[[0.8, 0.5, 0.2]]),
     };
     let h = StableHash::of_words(&[s.seed]).raw();
     let u = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
     let lerp = |r: [f32; 2], t: f32| r[0] + (r[1] - r[0]) * t;
-    let color = pal.get(((h >> 8) as usize) % pal.len().max(1)).copied().unwrap_or([0.8, 0.5, 0.2]);
+    let color = pal
+        .get(((h >> 8) as usize) % pal.len().max(1))
+        .copied()
+        .unwrap_or([0.8, 0.5, 0.2]);
     Tree {
         x: s.x.get(),
         z: s.z.get(),
@@ -563,8 +641,11 @@ fn site_to_tree(manifest: &Manifest, s: &ScatterSite) -> Tree {
 fn chunk_aabb(c: ChunkCoord) -> Aabb {
     let x = c.x as f32 * CHUNK_M;
     let z = c.z as f32 * CHUNK_M;
-    Aabb::new(Vec3::new(x, -12.0, z), Vec3::new(x + CHUNK_M, 48.0, z + CHUNK_M))
-        .unwrap_or_else(|_| Aabb::from_center_extents(Vec3::ZERO, Vec3::ONE).unwrap())
+    Aabb::new(
+        Vec3::new(x, -12.0, z),
+        Vec3::new(x + CHUNK_M, 48.0, z + CHUNK_M),
+    )
+    .unwrap_or_else(|_| Aabb::from_center_extents(Vec3::ZERO, Vec3::ONE).unwrap())
 }
 
 /// Split a `[mvp, world, tint]` instance stream into camera-independent
@@ -652,7 +733,13 @@ fn agent_waypoints() -> Vec<(f32, f32)> {
 /// One agent tick: seek the current waypoint (turn-toward + forward) through the
 /// first-person control harness, advancing to the next waypoint on arrival. Returns
 /// the control bitmask to fold into the keys.
-fn agent_control(p: &Pose, ground: f32, tick: u64, waypoints: &[(f32, f32)], wp_idx: &mut usize) -> u32 {
+fn agent_control(
+    p: &Pose,
+    ground: f32,
+    tick: u64,
+    waypoints: &[(f32, f32)],
+    wp_idx: &mut usize,
+) -> u32 {
     let m = |x: f32| AgentHarnessApi::micro(Meters::finite_or_zero(x));
     let (px, pz, pyaw) = (p.x().get(), p.z().get(), p.yaw().get());
     let pose_micro = (m(px), m(ground + EYE_HEIGHT_M), m(pz), m(pyaw));
@@ -660,8 +747,14 @@ fn agent_control(p: &Pose, ground: f32, tick: u64, waypoints: &[(f32, f32)], wp_
     let forward_micro = (m(pyaw.sin()), m(-pyaw.cos()));
     let (gx, gz) = waypoints[*wp_idx % waypoints.len()];
     let goal_micro = (m(gx), m(ground), m(gz));
-    let (control, _reason, _brain, _emitted, arrived) =
-        AgentHarnessApi::decide_goto(AGENT_ID, tick, pose_micro, forward_micro, goal_micro, m(ARRIVE_RADIUS_M));
+    let (control, _reason, _brain, _emitted, arrived) = AgentHarnessApi::decide_goto(
+        AGENT_ID,
+        tick,
+        pose_micro,
+        forward_micro,
+        goal_micro,
+        m(ARRIVE_RADIUS_M),
+    );
     if arrived == 1 {
         *wp_idx = (*wp_idx + 1) % waypoints.len();
     }
@@ -693,7 +786,9 @@ fn log(msg: &str) {
 }
 
 fn document() -> web_sys::Document {
-    web_sys::window().and_then(|w| w.document()).expect("a document")
+    web_sys::window()
+        .and_then(|w| w.document())
+        .expect("a document")
 }
 
 fn pointer_is_locked() -> bool {
@@ -722,7 +817,9 @@ fn install_pointer_lock() {
     if let Some(canvas) = document().get_element_by_id(CANVAS_ID) {
         let target = canvas.clone();
         let cb = Closure::<dyn FnMut()>::new(move || {
-            target.unchecked_ref::<web_sys::HtmlElement>().request_pointer_lock();
+            target
+                .unchecked_ref::<web_sys::HtmlElement>()
+                .request_pointer_lock();
         });
         let _ = canvas.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
         cb.forget();

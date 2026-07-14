@@ -70,7 +70,11 @@ pub fn forest_walk_start() {
     };
     let rd = build::build(&manifest);
     let batches = split_batches(&rd);
-    let (near, far, fov) = (manifest.camera.near_m, manifest.camera.far_m, manifest.camera.fov_deg);
+    let (near, far, fov) = (
+        manifest.camera.near_m,
+        manifest.camera.far_m,
+        manifest.camera.fov_deg,
+    );
     let clear = rd.clear;
     let lights = rd.lights.clone();
     let light_vp = rd.light_view_proj;
@@ -99,7 +103,11 @@ pub fn forest_walk_start() {
     let terrain = manifest.terrain.clone();
     // The live backend packs every batch into ONE instance buffer at cumulative
     // offsets, so the capacity must be the TOTAL instance count across all batches.
-    let max_instances = batches.iter().map(|b| b.insts.len() as u32).sum::<u32>().max(1);
+    let max_instances = batches
+        .iter()
+        .map(|b| b.insts.len() as u32)
+        .sum::<u32>()
+        .max(1);
     let casters = flat_casters(&batches);
 
     let _ = windowing.run_web_multi(
@@ -125,9 +133,18 @@ pub fn forest_walk_start() {
                 Meters::finite_or_zero(near),
                 Meters::finite_or_zero(far),
             );
-            let vp = FpController::view_projection(*p, Meters::finite_or_zero(ground), TUNING, lens);
+            let vp =
+                FpController::view_projection(*p, Meters::finite_or_zero(ground), TUNING, lens);
             let out = project_batches(&batches, &vp);
-            (clear, lights.clone(), light_vp, out, vp.as_cols_array(), casters.clone(), None)
+            (
+                clear,
+                lights.clone(),
+                light_vp,
+                out,
+                vp.as_cols_array(),
+                casters.clone(),
+                None,
+            )
         },
     );
 }
@@ -143,20 +160,33 @@ fn split_batches(rd: &RenderData) -> Vec<MeshBatch> {
                     let base = i * 36;
                     Inst {
                         world: Mat4::from_cols_array(slice16(&data[base + 16..base + 32])),
-                        tint: [data[base + 32], data[base + 33], data[base + 34], data[base + 35]],
+                        tint: [
+                            data[base + 32],
+                            data[base + 33],
+                            data[base + 34],
+                            data[base + 35],
+                        ],
                     }
                 })
                 .collect();
             // Trees (trunk mesh 2, canopy/foliage mesh 3 & 5) cast contact shadows.
             let casts = *mesh_id == 2 || *mesh_id == 3 || *mesh_id == 5;
-            MeshBatch { mesh_id: *mesh_id, material_id: *material_id, insts, casts }
+            MeshBatch {
+                mesh_id: *mesh_id,
+                material_id: *material_id,
+                insts,
+                casts,
+            }
         })
         .collect()
 }
 
 /// The per-instance caster flags in batch-expansion order (for the planar-shadow pass).
 fn flat_casters(batches: &[MeshBatch]) -> Vec<bool> {
-    batches.iter().flat_map(|b| std::iter::repeat(b.casts).take(b.insts.len())).collect()
+    batches
+        .iter()
+        .flat_map(|b| std::iter::repeat(b.casts).take(b.insts.len()))
+        .collect()
 }
 
 /// Re-project every instance through the current camera view-projection into the
@@ -192,7 +222,9 @@ fn log(msg: &str) {
 }
 
 fn document() -> web_sys::Document {
-    web_sys::window().and_then(|w| w.document()).expect("a document")
+    web_sys::window()
+        .and_then(|w| w.document())
+        .expect("a document")
 }
 
 fn pointer_is_locked() -> bool {
@@ -214,8 +246,7 @@ fn install_key_listener(keys: &Rc<RefCell<MoveIntent>>, event: &str, pressed: bo
             _ => {}
         }
     });
-    let _ = document()
-        .add_event_listener_with_callback(event, cb.as_ref().unchecked_ref());
+    let _ = document().add_event_listener_with_callback(event, cb.as_ref().unchecked_ref());
     cb.forget();
 }
 
@@ -224,7 +255,9 @@ fn install_pointer_lock() {
     if let Some(canvas) = document().get_element_by_id(CANVAS_ID) {
         let target = canvas.clone();
         let cb = Closure::<dyn FnMut()>::new(move || {
-            target.unchecked_ref::<web_sys::HtmlElement>().request_pointer_lock();
+            target
+                .unchecked_ref::<web_sys::HtmlElement>()
+                .request_pointer_lock();
         });
         let _ = canvas.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
         cb.forget();

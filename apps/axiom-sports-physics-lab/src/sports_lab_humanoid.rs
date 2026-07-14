@@ -53,35 +53,137 @@ struct PartSpec {
     tag: u32,
 }
 
-const fn p(parent: Option<u32>, offset: Vec3, box_size: Vec3, box_offset: Vec3, tag: u32) -> PartSpec {
-    PartSpec { parent, offset, box_size, box_offset, tag }
+const fn p(
+    parent: Option<u32>,
+    offset: Vec3,
+    box_size: Vec3,
+    box_offset: Vec3,
+    tag: u32,
+) -> PartSpec {
+    PartSpec {
+        parent,
+        offset,
+        box_size,
+        box_offset,
+        tag,
+    }
 }
 
 /// Feet on y=0, head top ≈ 1.89. The pelvis root is expressed relative to the
 /// figure center ([`FIGURE_CENTER_Y`]), everything else relative to its parent.
 const PARTS: [PartSpec; PART_COUNT] = [
     // 0 pelvis (root; pivot at y 1.02 absolute = 0.07 above the figure center)
-    p(None, Vec3::new(0.0, 1.02 - FIGURE_CENTER_Y, 0.0), Vec3::new(0.30, 0.26, 0.20), Vec3::ZERO, TAG_SHORTS),
+    p(
+        None,
+        Vec3::new(0.0, 1.02 - FIGURE_CENTER_Y, 0.0),
+        Vec3::new(0.30, 0.26, 0.20),
+        Vec3::ZERO,
+        TAG_SHORTS,
+    ),
     // 1 chest
-    p(Some(0), Vec3::new(0.0, 0.33, 0.0), Vec3::new(0.44, 0.42, 0.24), Vec3::new(0.0, 0.04, 0.0), TAG_SHIRT),
+    p(
+        Some(0),
+        Vec3::new(0.0, 0.33, 0.0),
+        Vec3::new(0.44, 0.42, 0.24),
+        Vec3::new(0.0, 0.04, 0.0),
+        TAG_SHIRT,
+    ),
     // 2 head
-    p(Some(1), Vec3::new(0.0, 0.34, 0.0), Vec3::new(0.20, 0.22, 0.20), Vec3::new(0.0, 0.09, 0.0), TAG_SKIN),
+    p(
+        Some(1),
+        Vec3::new(0.0, 0.34, 0.0),
+        Vec3::new(0.20, 0.22, 0.20),
+        Vec3::new(0.0, 0.09, 0.0),
+        TAG_SKIN,
+    ),
     // 3 left thigh / 4 left shin / 5 left foot
-    p(Some(0), Vec3::new(-0.10, -0.14, 0.0), Vec3::new(0.15, 0.48, 0.16), Vec3::new(0.0, -0.24, 0.0), TAG_LEGS),
-    p(Some(3), Vec3::new(0.0, -0.42, 0.0), Vec3::new(0.13, 0.40, 0.14), Vec3::new(0.0, -0.20, 0.0), TAG_LEGS),
-    p(Some(4), Vec3::new(0.0, -0.40, 0.0), Vec3::new(0.14, 0.11, 0.30), Vec3::new(0.0, -0.005, 0.07), TAG_SHOES),
+    p(
+        Some(0),
+        Vec3::new(-0.10, -0.14, 0.0),
+        Vec3::new(0.15, 0.48, 0.16),
+        Vec3::new(0.0, -0.24, 0.0),
+        TAG_LEGS,
+    ),
+    p(
+        Some(3),
+        Vec3::new(0.0, -0.42, 0.0),
+        Vec3::new(0.13, 0.40, 0.14),
+        Vec3::new(0.0, -0.20, 0.0),
+        TAG_LEGS,
+    ),
+    p(
+        Some(4),
+        Vec3::new(0.0, -0.40, 0.0),
+        Vec3::new(0.14, 0.11, 0.30),
+        Vec3::new(0.0, -0.005, 0.07),
+        TAG_SHOES,
+    ),
     // 6 right thigh / 7 right shin / 8 right foot
-    p(Some(0), Vec3::new(0.10, -0.14, 0.0), Vec3::new(0.15, 0.48, 0.16), Vec3::new(0.0, -0.24, 0.0), TAG_LEGS),
-    p(Some(6), Vec3::new(0.0, -0.42, 0.0), Vec3::new(0.13, 0.40, 0.14), Vec3::new(0.0, -0.20, 0.0), TAG_LEGS),
-    p(Some(7), Vec3::new(0.0, -0.40, 0.0), Vec3::new(0.14, 0.11, 0.30), Vec3::new(0.0, -0.005, 0.07), TAG_SHOES),
+    p(
+        Some(0),
+        Vec3::new(0.10, -0.14, 0.0),
+        Vec3::new(0.15, 0.48, 0.16),
+        Vec3::new(0.0, -0.24, 0.0),
+        TAG_LEGS,
+    ),
+    p(
+        Some(6),
+        Vec3::new(0.0, -0.42, 0.0),
+        Vec3::new(0.13, 0.40, 0.14),
+        Vec3::new(0.0, -0.20, 0.0),
+        TAG_LEGS,
+    ),
+    p(
+        Some(7),
+        Vec3::new(0.0, -0.40, 0.0),
+        Vec3::new(0.14, 0.11, 0.30),
+        Vec3::new(0.0, -0.005, 0.07),
+        TAG_SHOES,
+    ),
     // 9 left upper arm / 10 left forearm / 11 left hand
-    p(Some(1), Vec3::new(-0.28, 0.12, 0.0), Vec3::new(0.11, 0.36, 0.11), Vec3::new(0.0, -0.18, 0.0), TAG_SHIRT),
-    p(Some(9), Vec3::new(0.0, -0.36, 0.0), Vec3::new(0.10, 0.32, 0.10), Vec3::new(0.0, -0.16, 0.0), TAG_SKIN),
-    p(Some(10), Vec3::new(0.0, -0.32, 0.0), Vec3::new(0.09, 0.12, 0.10), Vec3::new(0.0, -0.06, 0.0), TAG_SKIN),
+    p(
+        Some(1),
+        Vec3::new(-0.28, 0.12, 0.0),
+        Vec3::new(0.11, 0.36, 0.11),
+        Vec3::new(0.0, -0.18, 0.0),
+        TAG_SHIRT,
+    ),
+    p(
+        Some(9),
+        Vec3::new(0.0, -0.36, 0.0),
+        Vec3::new(0.10, 0.32, 0.10),
+        Vec3::new(0.0, -0.16, 0.0),
+        TAG_SKIN,
+    ),
+    p(
+        Some(10),
+        Vec3::new(0.0, -0.32, 0.0),
+        Vec3::new(0.09, 0.12, 0.10),
+        Vec3::new(0.0, -0.06, 0.0),
+        TAG_SKIN,
+    ),
     // 12 right upper arm / 13 right forearm / 14 right hand
-    p(Some(1), Vec3::new(0.28, 0.12, 0.0), Vec3::new(0.11, 0.36, 0.11), Vec3::new(0.0, -0.18, 0.0), TAG_SHIRT),
-    p(Some(12), Vec3::new(0.0, -0.36, 0.0), Vec3::new(0.10, 0.32, 0.10), Vec3::new(0.0, -0.16, 0.0), TAG_SKIN),
-    p(Some(13), Vec3::new(0.0, -0.32, 0.0), Vec3::new(0.09, 0.12, 0.10), Vec3::new(0.0, -0.06, 0.0), TAG_SKIN),
+    p(
+        Some(1),
+        Vec3::new(0.28, 0.12, 0.0),
+        Vec3::new(0.11, 0.36, 0.11),
+        Vec3::new(0.0, -0.18, 0.0),
+        TAG_SHIRT,
+    ),
+    p(
+        Some(12),
+        Vec3::new(0.0, -0.36, 0.0),
+        Vec3::new(0.10, 0.32, 0.10),
+        Vec3::new(0.0, -0.16, 0.0),
+        TAG_SKIN,
+    ),
+    p(
+        Some(13),
+        Vec3::new(0.0, -0.32, 0.0),
+        Vec3::new(0.09, 0.12, 0.10),
+        Vec3::new(0.0, -0.06, 0.0),
+        TAG_SKIN,
+    ),
 ];
 
 /// Indices of the upper-arm parts (the joints an [`ArmPose`] rotates).
@@ -129,7 +231,10 @@ pub fn posed_boxes(figure: &FigureDefinition, body: Transform) -> Vec<axiom_figu
         };
         locals.push(local);
     }
-    let worlds: Vec<Transform> = locals.iter().map(|l| Transform::combine(body, *l)).collect();
+    let worlds: Vec<Transform> = locals
+        .iter()
+        .map(|l| Transform::combine(body, *l))
+        .collect();
     FigureApi::new()
         .posed_parts(figure, &worlds)
         .expect("humanoid part/world counts match")
@@ -169,11 +274,23 @@ mod tests {
         let t_pose = posed_boxes(&humanoid_figure(ArmPose::TPose), body);
         let lowered = posed_boxes(&humanoid_figure(ArmPose::Lowered), body);
         // Hands: far out in ±X in the T-pose, near the hips lowered.
-        let (lh_t, rh_t) = (t_pose[11].transform.translation, t_pose[14].transform.translation);
-        assert!(lh_t.x < -0.85 && rh_t.x > 0.85, "T-pose hands reach out: {lh_t:?} {rh_t:?}");
-        assert!((lh_t.y - t_pose[9].transform.translation.y).abs() < 0.25, "T-pose arms are level");
+        let (lh_t, rh_t) = (
+            t_pose[11].transform.translation,
+            t_pose[14].transform.translation,
+        );
+        assert!(
+            lh_t.x < -0.85 && rh_t.x > 0.85,
+            "T-pose hands reach out: {lh_t:?} {rh_t:?}"
+        );
+        assert!(
+            (lh_t.y - t_pose[9].transform.translation.y).abs() < 0.25,
+            "T-pose arms are level"
+        );
         let rh_low = lowered[14].transform.translation;
-        assert!(rh_low.x < 0.5 && rh_low.y < 1.0, "lowered hands hang by the hips: {rh_low:?}");
+        assert!(
+            rh_low.x < 0.5 && rh_low.y < 1.0,
+            "lowered hands hang by the hips: {rh_low:?}"
+        );
         // Arm span stays inside the grab radius.
         assert!(rh_t.x + 0.1 < DUMMY_GRAB_RADIUS);
     }

@@ -193,9 +193,9 @@ impl Scorecard {
     /// Reject a scorecard whose any axis is out of `0..=5`.
     pub fn validate(&self) -> Result<(), String> {
         match self.scores().find(|&(_, s)| s > MAX_SCORE) {
-            Some((axis, score)) => {
-                Err(format!("axis '{axis}' score {score} out of range 0..={MAX_SCORE}"))
-            }
+            Some((axis, score)) => Err(format!(
+                "axis '{axis}' score {score} out of range 0..={MAX_SCORE}"
+            )),
             None => Ok(()),
         }
     }
@@ -231,7 +231,10 @@ impl Scorecard {
     pub fn lowest_axis(&self) -> Axis {
         // `min_by_key` returns the *first* element on ties, and `scores()` yields
         // canonical order, so the tie-break is the axis declaration order.
-        self.scores().min_by_key(|&(_, s)| s).map(|(a, _)| a).unwrap_or(Axis::TerrainSilhouette)
+        self.scores()
+            .min_by_key(|&(_, s)| s)
+            .map(|(a, _)| a)
+            .unwrap_or(Axis::TerrainSilhouette)
     }
 
     /// The mean score across all twelve axes.

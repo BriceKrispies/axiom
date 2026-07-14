@@ -269,7 +269,10 @@ fn translucent_scene_agrees_across_backends() {
     let (gcx, gcy, gcov) = common::region_stats(&gpu, W, H, 24);
     let (scx, scy, scov) = common::region_stats(&sw, sw_w, sw_h, 24);
 
-    assert!(gcov > 0.02 && gcov < 0.9, "gpu coverage {gcov:.3} out of range");
+    assert!(
+        gcov > 0.02 && gcov < 0.9,
+        "gpu coverage {gcov:.3} out of range"
+    );
     assert!(
         scov > 0.02 && scov < 0.9,
         "canvas2d coverage {scov:.3} out of range"

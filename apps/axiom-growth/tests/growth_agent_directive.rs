@@ -39,7 +39,10 @@ fn directive_script_climbs_resolves_tags_and_captures() {
     let inputs = &captures[0].inputs;
     assert!(!inputs.vertices.is_empty(), "capture has terrain geometry");
     assert!(!inputs.indices.is_empty());
-    assert!(inputs.view_proj.iter().all(|v| v.is_finite()), "finite view-projection");
+    assert!(
+        inputs.view_proj.iter().all(|v| v.is_finite()),
+        "finite view-projection"
+    );
 }
 
 #[test]
@@ -51,8 +54,14 @@ fn directive_runner_is_deterministic() {
     let a = run();
     let b = run();
     assert_eq!(a.len(), b.len());
-    assert_eq!(a[0].inputs.view_proj, b[0].inputs.view_proj, "view is replay-identical");
-    assert_eq!(a[0].inputs.vertices, b[0].inputs.vertices, "mesh is replay-identical");
+    assert_eq!(
+        a[0].inputs.view_proj, b[0].inputs.view_proj,
+        "view is replay-identical"
+    );
+    assert_eq!(
+        a[0].inputs.vertices, b[0].inputs.vertices,
+        "mesh is replay-identical"
+    );
 }
 
 #[test]

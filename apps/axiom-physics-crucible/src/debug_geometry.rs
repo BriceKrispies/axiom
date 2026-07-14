@@ -39,7 +39,11 @@ impl RenderInstance {
     /// A small axis-aligned marker cube at `position`.
     pub fn marker(position: Vec3, color: [f32; 3], size: f32) -> Self {
         RenderInstance::new(
-            Transform::new(position, axiom::prelude::Transform::IDENTITY.rotation, Vec3::new(size, size, size)),
+            Transform::new(
+                position,
+                axiom::prelude::Transform::IDENTITY.rotation,
+                Vec3::new(size, size, size),
+            ),
             CrucibleMesh::Cube,
             color,
         )
@@ -136,13 +140,23 @@ const SAMPLES: u32 = 6;
 pub fn debug_instances(shape: DebugShape) -> Vec<RenderInstance> {
     match shape {
         DebugShape::ContactPoint { position } => {
-            vec![RenderInstance::marker(position, palette::CONTACT_POINT, 0.18)]
+            vec![RenderInstance::marker(
+                position,
+                palette::CONTACT_POINT,
+                0.18,
+            )]
         }
         DebugShape::ContactNormal {
             origin,
             direction,
             length,
-        } => sampled_line(origin, direction, length, palette::CONTACT_NORMAL, SAMPLE_SIZE),
+        } => sampled_line(
+            origin,
+            direction,
+            length,
+            palette::CONTACT_NORMAL,
+            SAMPLE_SIZE,
+        ),
         DebugShape::Ray {
             origin,
             direction,

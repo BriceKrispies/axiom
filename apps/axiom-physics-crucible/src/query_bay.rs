@@ -19,7 +19,10 @@ pub const PROBE_RADIUS: f32 = 0.9;
 
 /// The standing overlap probe in world space (centre, radius).
 pub fn probe_world() -> (Vec3, f32) {
-    (CrucibleStation::QueryBay.origin().add(PROBE_LOCAL), PROBE_RADIUS)
+    (
+        CrucibleStation::QueryBay.origin().add(PROBE_LOCAL),
+        PROBE_RADIUS,
+    )
 }
 
 /// Station 4 — spatial queries.
@@ -29,14 +32,18 @@ pub struct QueryBay;
 impl QueryBay {
     /// The world-space ray that hits the target box (origin, direction, max).
     fn target_ray() -> (Vec3, Vec3, f32) {
-        let origin = CrucibleStation::QueryBay.origin().add(Vec3::new(0.0, 1.0, 9.0));
+        let origin = CrucibleStation::QueryBay
+            .origin()
+            .add(Vec3::new(0.0, 1.0, 9.0));
         (origin, Vec3::new(0.0, 0.0, -1.0), 20.0)
     }
 
     /// A world-space ray aimed over the top of the box — a deliberate miss.
     #[cfg(test)]
     fn miss_ray() -> (Vec3, Vec3, f32) {
-        let origin = CrucibleStation::QueryBay.origin().add(Vec3::new(0.0, 8.0, 9.0));
+        let origin = CrucibleStation::QueryBay
+            .origin()
+            .add(Vec3::new(0.0, 8.0, 9.0));
         (origin, Vec3::new(0.0, 0.0, -1.0), 20.0)
     }
 
@@ -57,7 +64,10 @@ impl Station for QueryBay {
 
     fn populate(&self, world: &mut CrucibleWorld) {
         // 0: the raycast target — a solid static box.
-        world.spawn(self.id(), BodySpec::static_box(Vec3::new(0.0, 1.0, 0.0), Vec3::ONE));
+        world.spawn(
+            self.id(),
+            BodySpec::static_box(Vec3::new(0.0, 1.0, 0.0), Vec3::ONE),
+        );
         // 1,2: two static spheres parked inside the overlap probe (no gravity
         // drift, so the probe finds them at any step).
         world.spawn(self.id(), BodySpec::static_sphere(PROBE_LOCAL, 0.5));
@@ -71,7 +81,10 @@ impl Station for QueryBay {
             BodySpec::static_box(Vec3::new(4.0, 1.0, -6.0), Vec3::new(0.4, 0.4, 0.4)),
         );
         // 4: a trigger sphere in front of the solid body.
-        world.spawn(self.id(), BodySpec::trigger_sphere(Vec3::new(-4.0, 1.0, 3.0), 0.8));
+        world.spawn(
+            self.id(),
+            BodySpec::trigger_sphere(Vec3::new(-4.0, 1.0, 3.0), 0.8),
+        );
         // 5: a solid box behind the trigger (the through-trigger ray must hit this).
         world.spawn(
             self.id(),
@@ -128,7 +141,11 @@ mod tests {
         let world = populated();
         let (center, radius) = probe_world();
         let hits = world.overlap_sphere(center, radius);
-        assert!(hits.len() >= 2, "expected >=2 overlap hits, got {}", hits.len());
+        assert!(
+            hits.len() >= 2,
+            "expected >=2 overlap hits, got {}",
+            hits.len()
+        );
     }
 
     #[test]
@@ -146,7 +163,11 @@ mod tests {
         let solid = world.nth_body(CrucibleStation::QueryBay, 5).unwrap();
         let (o, d, m) = QueryBay::through_trigger_ray();
         let hit = world.raycast(o, d, m);
-        assert_eq!(hit, Some(solid), "ray should skip the trigger and hit the solid box");
+        assert_eq!(
+            hit,
+            Some(solid),
+            "ray should skip the trigger and hit the solid box"
+        );
         assert_ne!(hit, Some(trigger));
     }
 }

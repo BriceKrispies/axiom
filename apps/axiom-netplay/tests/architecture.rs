@@ -124,7 +124,12 @@ fn app_toml_exists_and_lists_only_consumed_layers_and_modules() {
         "app.toml lists the debug-overlay module (wasm overlay mount)"
     );
     // It must not claim modules/layers it does not use.
-    for forbidden in ["\"physics\"", "\"agent\"", "\"perception\"", "\"streaming\""] {
+    for forbidden in [
+        "\"physics\"",
+        "\"agent\"",
+        "\"perception\"",
+        "\"streaming\"",
+    ] {
         assert!(
             !text.contains(forbidden),
             "app.toml must not list `{forbidden}`"

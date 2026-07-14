@@ -164,7 +164,9 @@ impl CrucibleWorld {
 
     /// Queue a continuous torque on a body (applied at the next step).
     pub fn apply_torque(&mut self, body: PhysicsBodyHandle, torque: Vec3) {
-        self.physics.apply_torque(body, torque).expect("apply torque");
+        self.physics
+            .apply_torque(body, torque)
+            .expect("apply torque");
     }
 
     /// Queue enabling a body.
@@ -509,8 +511,8 @@ fn build_render_app(instances: Vec<RenderInstance>) -> App {
                 let material = materials.add(Material::lit(color3(instance.color)));
                 world.spawn((instance.transform, Renderable { mesh, material }));
             }
-            let floor_mat = materials
-                .add(Material::lit(color3(palette::FLOOR)).with_texture(Texture::UvGrid));
+            let floor_mat =
+                materials.add(Material::lit(color3(palette::FLOOR)).with_texture(Texture::UvGrid));
             world.spawn((
                 Transform::combine(
                     Transform::from_translation(Vec3::new(0.0, -0.05, 0.0)),
@@ -565,7 +567,11 @@ pub const LIVE_CAPACITY: u32 = 2048;
 pub fn live_instances(world: &CrucibleWorld) -> Vec<RenderInstance> {
     let mut instances = physics_to_render::render_instances(&world.body_states(), world.bodies());
     for contact in world.contacts() {
-        instances.push(RenderInstance::marker(contact.point, palette::CONTACT_POINT, 0.2));
+        instances.push(RenderInstance::marker(
+            contact.point,
+            palette::CONTACT_POINT,
+            0.2,
+        ));
     }
     for station in CrucibleStation::ALL {
         let here = station.origin().add(Vec3::new(0.0, 7.5, 0.0));
@@ -705,7 +711,10 @@ mod tests {
             .unwrap()
             .linear_velocity
             .x;
-        assert!(vx > 0.0, "a horizontal force should add +x velocity, got {vx}");
+        assert!(
+            vx > 0.0,
+            "a horizontal force should add +x velocity, got {vx}"
+        );
     }
 
     #[test]

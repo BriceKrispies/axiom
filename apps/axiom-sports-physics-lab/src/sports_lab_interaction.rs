@@ -114,14 +114,24 @@ impl InteractionState {
     /// Drive the held object toward the hold point with a bounded velocity.
     /// The hold point is clamped above the field and inside the walls so the
     /// carry never presses the body through a boundary.
-    pub fn drive_held(&mut self, physics: &mut PhysicsApi, objects: &[LabObject], eye: Vec3, look: Vec3) {
+    pub fn drive_held(
+        &mut self,
+        physics: &mut PhysicsApi,
+        objects: &[LabObject],
+        eye: Vec3,
+        look: Vec3,
+    ) {
         let Some(i) = self.held else { return };
         let o = &objects[i];
         let mut hold = eye.add(look.mul_scalar(HOLD_DISTANCE));
         let margin = o.grab_radius.min(0.6) + WALL_THICKNESS * 0.5;
         hold.y = hold.y.max(o.grab_radius.min(0.5) + 0.05);
-        hold.x = hold.x.clamp(-(ARENA_HALF_W - margin), ARENA_HALF_W - margin);
-        hold.z = hold.z.clamp(-(ARENA_HALF_L - margin), ARENA_HALF_L - margin);
+        hold.x = hold
+            .x
+            .clamp(-(ARENA_HALF_W - margin), ARENA_HALF_W - margin);
+        hold.z = hold
+            .z
+            .clamp(-(ARENA_HALF_L - margin), ARENA_HALF_L - margin);
 
         let mut velocity = hold.subtract(o.pos).mul_scalar(1.0 / DT);
         let speed = velocity.length();
@@ -172,6 +182,9 @@ mod tests {
         // Beyond reach: miss.
         assert!(ray_sphere(Vec3::ZERO, dir, Vec3::new(0.0, 0.0, -(REACH + 2.0)), 0.5).is_none());
         // Starting inside: immediate hit.
-        assert_eq!(ray_sphere(Vec3::ZERO, dir, Vec3::new(0.0, 0.0, -0.1), 0.5), Some(0.0));
+        assert_eq!(
+            ray_sphere(Vec3::ZERO, dir, Vec3::new(0.0, 0.0, -0.1), 0.5),
+            Some(0.0)
+        );
     }
 }

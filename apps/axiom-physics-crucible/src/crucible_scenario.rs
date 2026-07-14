@@ -91,7 +91,10 @@ impl MaterialSpec {
 
     /// The same material with a different restitution (the bounce ladder).
     pub const fn with_restitution(self, restitution: f32) -> Self {
-        MaterialSpec { restitution, ..self }
+        MaterialSpec {
+            restitution,
+            ..self
+        }
     }
 
     /// The same material with a different density (mass via volume).
@@ -193,7 +196,10 @@ impl BodySpec {
     pub fn dynamic_capsule(local: Vec3, radius: f32, half_height: f32, mass: f32) -> Self {
         BodySpec {
             kind: CrucibleKind::Dynamic { mass },
-            shape: CrucibleShape::Capsule { radius, half_height },
+            shape: CrucibleShape::Capsule {
+                radius,
+                half_height,
+            },
             local,
             material: MaterialSpec::INELASTIC,
             is_trigger: false,
@@ -246,7 +252,9 @@ mod tests {
 
     #[test]
     fn material_builders_override_one_field_each() {
-        let m = MaterialSpec::INELASTIC.with_restitution(0.8).with_density(3.0);
+        let m = MaterialSpec::INELASTIC
+            .with_restitution(0.8)
+            .with_density(3.0);
         assert_eq!(m.restitution, 0.8);
         assert_eq!(m.density, 3.0);
         assert_eq!(m.friction, MaterialSpec::INELASTIC.friction);

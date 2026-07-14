@@ -93,7 +93,10 @@ pub fn run_report() -> String {
     let report = crucible.report();
     let mut out = String::from("Axiom Physics Crucible — deterministic proof run\n");
     out.push_str(&format!("stations: {}\n", all_stations().len()));
-    out.push_str(&format!("steps:    0..={}\n", crucible.steps_run().saturating_sub(1)));
+    out.push_str(&format!(
+        "steps:    0..={}\n",
+        crucible.steps_run().saturating_sub(1)
+    ));
     out.push_str(&report.render());
     out
 }

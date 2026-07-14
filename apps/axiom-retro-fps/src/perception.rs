@@ -25,9 +25,9 @@ use axiom_perception::PerceptionApi;
 use axiom_runtime::RuntimeStep;
 
 use crate::agent::{
-    control_code_of, retro_fps_drive_tick, intent_of_control_code, AGENT_RAW_ID, FIXED_DELTA_NANOS,
+    control_code_of, intent_of_control_code, retro_fps_drive_tick, AGENT_RAW_ID, FIXED_DELTA_NANOS,
 };
-use crate::{build_retro_fps_app, level::LevelDoc, RetroFpsAssets, RetroFpsGame, Intent};
+use crate::{build_retro_fps_app, level::LevelDoc, Intent, RetroFpsAssets, RetroFpsGame};
 
 /// This game's coarse `Tag` kind vocabulary — the codes its entities carry. An
 /// enemy node is tagged [`KIND_ENEMY`]; level geometry is left untagged, so a hit
@@ -104,7 +104,11 @@ impl Sight {
             .unwrap_or_else(|| "open ahead".to_string());
         let mut lines = vec![ahead];
         for v in &self.visible {
-            let what = if v.kind == KIND_ENEMY { "ENEMY" } else { "object" };
+            let what = if v.kind == KIND_ENEMY {
+                "ENEMY"
+            } else {
+                "object"
+            };
             lines.push(format!(
                 "  sees {what} subject={} at ({:.2}, {:.2})",
                 v.subject, v.x, v.z
@@ -292,8 +296,14 @@ fn decide(facts: &[Fact], engage: &Intent, roam: &Intent, tick: u64) -> Intent {
     let observation = builder.build();
 
     let step = RuntimeStep::new(FrameIndex::new(0), Tick::new(tick), FIXED_DELTA_NANOS, 0);
-    let (_report, mut queue) =
-        AgentApi::step(agent_id, profile, &mut brain, &observation, &mut memory, step);
+    let (_report, mut queue) = AgentApi::step(
+        agent_id,
+        profile,
+        &mut brain,
+        &observation,
+        &mut memory,
+        step,
+    );
     let neutral = queue.pop().unwrap_or_else(AgentApi::noop_intent);
     intent_of_control_code(neutral.control_code())
 }
@@ -421,7 +431,11 @@ mod tests {
         // 0.5 half-extent: its near face is z = 0.5, so the distance is 8 - 0.5.
         let perceiver = RetroFpsPerceiver::new();
         let ahead = perceiver.sight().ahead.expect("a wall is dead ahead");
-        assert_eq!(ahead.probe, RAY_COUNT / 2, "the centre ray is the ahead probe");
+        assert_eq!(
+            ahead.probe,
+            RAY_COUNT / 2,
+            "the centre ray is the ahead probe"
+        );
         assert!(
             (ahead.distance_m - 7.5).abs() < 0.05,
             "north wall ~7.5 m ahead, got {}",
@@ -461,7 +475,10 @@ mod tests {
                 .iter()
                 .any(|t| t.vx.abs() > 1.0e-5 || t.vz.abs() > 1.0e-5);
         }
-        assert!(tracked_moving, "the agent tracked a moving enemy's velocity");
+        assert!(
+            tracked_moving,
+            "the agent tracked a moving enemy's velocity"
+        );
     }
 
     #[test]

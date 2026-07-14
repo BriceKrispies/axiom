@@ -45,7 +45,10 @@ fn the_agent_sees_classifies_and_tracks_a_moving_enemy() {
             .any(|t| t.vx.abs() > 1.0e-5 || t.vz.abs() > 1.0e-5);
     }
     assert!(saw_enemy, "the agent saw and classified an enemy");
-    assert!(tracked_moving, "the agent tracked a moving enemy's velocity");
+    assert!(
+        tracked_moving,
+        "the agent tracked a moving enemy's velocity"
+    );
 }
 
 #[test]

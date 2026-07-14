@@ -25,7 +25,11 @@ pub fn status_markers(report: &CrucibleReport, at: Vec3) -> Vec<RenderInstance> 
     let tally = report.live_contact_count().min(MAX_TALLY);
     for i in 0..tally {
         let position = at.add(Vec3::new(1.0 + i as f32 * 0.5, 0.0, 0.0));
-        out.push(RenderInstance::marker(position, palette::CONTACT_POINT, 0.25));
+        out.push(RenderInstance::marker(
+            position,
+            palette::CONTACT_POINT,
+            0.25,
+        ));
     }
     out
 }
@@ -83,7 +87,10 @@ mod tests {
     #[test]
     fn beacon_is_green_on_match_and_red_on_divergence() {
         let matched = CrucibleReport::build(1, &[state()], &counts(), &[], 0, true);
-        assert_eq!(status_markers(&matched, Vec3::ZERO)[0].color, palette::REPLAY_OK);
+        assert_eq!(
+            status_markers(&matched, Vec3::ZERO)[0].color,
+            palette::REPLAY_OK
+        );
         let diverged = CrucibleReport::build(1, &[state()], &counts(), &[], 0, false);
         assert_eq!(
             status_markers(&diverged, Vec3::ZERO)[0].color,
@@ -93,7 +100,8 @@ mod tests {
 
     #[test]
     fn tally_has_one_marker_per_live_contact_plus_the_beacon() {
-        let report = CrucibleReport::build(1, &[state()], &counts(), &[contact(), contact()], 0, true);
+        let report =
+            CrucibleReport::build(1, &[state()], &counts(), &[contact(), contact()], 0, true);
         let markers = status_markers(&report, Vec3::ZERO);
         assert_eq!(markers.len(), 3);
     }

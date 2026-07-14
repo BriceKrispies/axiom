@@ -129,7 +129,13 @@ fn app_toml_exists_and_lists_only_consumed_layers_and_modules() {
         );
     }
     // It must not claim engine surfaces it does not use.
-    for forbidden in ["\"engine\"", "\"scene\"", "\"render\"", "\"webgpu\"", "\"physics\""] {
+    for forbidden in [
+        "\"engine\"",
+        "\"scene\"",
+        "\"render\"",
+        "\"webgpu\"",
+        "\"physics\"",
+    ] {
         assert!(
             !text.contains(forbidden),
             "app.toml must not list `{forbidden}`"

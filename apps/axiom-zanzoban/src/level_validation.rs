@@ -269,18 +269,14 @@ pub fn validate_level(level: &LevelDefinition) -> LevelValidationReport {
 /// off. Needs `level.rules`, which the census does not carry, so it lives here.
 fn rule_errors(level: &LevelDefinition) -> Vec<LevelError> {
     let mut errors = Vec::new();
-    level
-        .rules
-        .decay
-        .is_none()
-        .then(|| {
-            level.wells.iter().for_each(|&coord| {
-                errors.push(LevelError::PlacementWithoutRule {
-                    coord,
-                    mechanic: Mechanic::Decay,
-                })
+    level.rules.decay.is_none().then(|| {
+        level.wells.iter().for_each(|&coord| {
+            errors.push(LevelError::PlacementWithoutRule {
+                coord,
+                mechanic: Mechanic::Decay,
             })
-        });
+        })
+    });
     (!level.rules.switches).then(|| {
         level.switches.iter().for_each(|s| {
             errors.push(LevelError::PlacementWithoutRule {

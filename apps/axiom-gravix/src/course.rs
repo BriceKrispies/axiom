@@ -28,13 +28,26 @@ pub struct Segment {
 impl Segment {
     /// Place a segment centred at `center`, running along `heading` (yaw about +Y)
     /// and tilted down by `pitch` (positive = downhill, negative = uphill).
-    fn placed(params: HalfPipeParams, center: Vec3, heading: f32, pitch: f32, is_launch_reward: bool) -> Self {
+    fn placed(
+        params: HalfPipeParams,
+        center: Vec3,
+        heading: f32,
+        pitch: f32,
+        is_launch_reward: bool,
+    ) -> Self {
         let rotation = Quat::from_axis_angle(Vec3::UNIT_Y, heading)
             .expect("finite heading")
             .multiply(Quat::from_axis_angle(Vec3::UNIT_X, pitch).expect("finite pitch"));
         let forward = rotation.rotate(Vec3::UNIT_Z);
         let up = rotation.rotate(Vec3::UNIT_Y);
-        Segment { params, center, rotation, forward, up, is_launch_reward }
+        Segment {
+            params,
+            center,
+            rotation,
+            forward,
+            up,
+            is_launch_reward,
+        }
     }
 
     fn half_len(&self) -> f32 {
@@ -43,7 +56,8 @@ impl Segment {
 
     /// The world point at the centre of the segment's near (start) edge.
     pub fn start(&self) -> Vec3 {
-        self.center.subtract(self.forward.mul_scalar(self.half_len()))
+        self.center
+            .subtract(self.forward.mul_scalar(self.half_len()))
     }
 
     /// The world point at the centre of the segment's far (end) edge.
@@ -59,12 +73,14 @@ impl Segment {
     /// The world point on the channel-centre surface at the segment's end (finish /
     /// marker placement): the end edge lifted by the channel-centre height.
     pub fn end_surface(&self) -> Vec3 {
-        self.end().add(self.up.mul_scalar(self.params.centre_height()))
+        self.end()
+            .add(self.up.mul_scalar(self.params.centre_height()))
     }
 
     /// The world point on the channel-centre surface at the segment's start.
     pub fn start_surface(&self) -> Vec3 {
-        self.start().add(self.up.mul_scalar(self.params.centre_height()))
+        self.start()
+            .add(self.up.mul_scalar(self.params.centre_height()))
     }
 }
 
@@ -84,11 +100,11 @@ pub struct Course {
 pub fn generate() -> Course {
     // (length, heading-delta, pitch, is_launch_reward). Positive pitch = downhill.
     let specs: [(f32, f32, f32, bool); 5] = [
-        (46.0, 0.00, 0.24, false), // downhill 1
-        (46.0, 0.22, 0.30, false), // downhill 2 (bends right, steeper)
+        (46.0, 0.00, 0.24, false),  // downhill 1
+        (46.0, 0.22, 0.30, false),  // downhill 2 (bends right, steeper)
         (46.0, -0.18, 0.26, false), // downhill 3 (bends back)
-        (32.0, 0.00, 0.04, false), // flatter recovery
-        (36.0, 0.00, -0.16, true), // uphill: needs a spin-launch to clear
+        (32.0, 0.00, 0.04, false),  // flatter recovery
+        (36.0, 0.00, -0.16, true),  // uphill: needs a spin-launch to clear
     ];
 
     let mut segments: Vec<Segment> = Vec::new();
@@ -112,7 +128,9 @@ pub fn generate() -> Course {
 
     let first = segments[0];
     let last = *segments.last().unwrap();
-    let spawn = first.start_surface().add(first.up.mul_scalar(settings::BALL_RADIUS + 0.6));
+    let spawn = first
+        .start_surface()
+        .add(first.up.mul_scalar(settings::BALL_RADIUS + 0.6));
     let finish = last.end_surface();
 
     Course {
@@ -133,8 +151,16 @@ mod tests {
         assert_eq!(c.segments.len(), 5, "3 downhill + recovery + launch-reward");
         // At least three descend (forward points downward), one is ~flat, one climbs.
         let downhill = c.segments.iter().filter(|s| s.forward.y < -0.05).count();
-        assert!(downhill >= 3, "at least three downhill segments, got {downhill}");
-        assert!(c.segments.iter().any(|s| s.is_launch_reward && s.forward.y > 0.02), "an uphill launch-reward segment");
+        assert!(
+            downhill >= 3,
+            "at least three downhill segments, got {downhill}"
+        );
+        assert!(
+            c.segments
+                .iter()
+                .any(|s| s.is_launch_reward && s.forward.y > 0.02),
+            "an uphill launch-reward segment"
+        );
     }
 
     #[test]
@@ -146,7 +172,12 @@ mod tests {
             assert!(gap < 1.0e-3, "segments are continuous, gap = {gap}");
         }
         // The run descends overall: the finish is well below the spawn.
-        assert!(c.finish.y < c.spawn.y - 8.0, "the course drops: spawn {} -> finish {}", c.spawn.y, c.finish.y);
+        assert!(
+            c.finish.y < c.spawn.y - 8.0,
+            "the course drops: spawn {} -> finish {}",
+            c.spawn.y,
+            c.finish.y
+        );
         // The kill plane sits below the whole track.
         assert!(c.kill_plane_y < c.finish.y - 5.0);
     }
@@ -157,7 +188,10 @@ mod tests {
         let s0 = c.segments[0];
         // The spawn is lifted above the start surface along the segment up axis.
         let lift = c.spawn.subtract(s0.start_surface()).dot(s0.up);
-        assert!(lift > settings::BALL_RADIUS, "spawn rests above the surface, lift = {lift}");
+        assert!(
+            lift > settings::BALL_RADIUS,
+            "spawn rests above the surface, lift = {lift}"
+        );
         assert_eq!(s0.transform().translation, s0.center);
     }
 }

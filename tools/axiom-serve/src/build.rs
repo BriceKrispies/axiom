@@ -101,7 +101,10 @@ impl BuildPlan {
             return Ok(());
         }
         println!("axiom-serve: tsgo missing — installing packages/axiom-game node_modules (once)");
-        npm(&self.root.join("packages").join("axiom-game"), &["install", "--no-audit", "--no-fund"])
+        npm(
+            &self.root.join("packages").join("axiom-game"),
+            &["install", "--no-audit", "--no-fund"],
+        )
     }
 
     /// TsSdkHosted pages import the SDK from `/vendor/axiom-game/` — build its
@@ -144,7 +147,14 @@ impl BuildPlan {
         preflight_wasm_bindgen(&self.root)?;
         let mut cargo = Command::new("cargo");
         cargo
-            .args(["build", "-p", "axiom-game-runtime", "--target", WASM_TARGET, "--release"])
+            .args([
+                "build",
+                "-p",
+                "axiom-game-runtime",
+                "--target",
+                WASM_TARGET,
+                "--release",
+            ])
             .current_dir(&self.root);
         run(
             &mut cargo,
@@ -182,7 +192,11 @@ fn wasm_bindgen(root: &Path, wasm: &Path, out_dir: &Path) -> Result<(), String> 
         .current_dir(root);
     run(
         &mut cmd,
-        &format!("wasm-bindgen --target web --out-dir {} {}", out_dir.display(), wasm.display()),
+        &format!(
+            "wasm-bindgen --target web --out-dir {} {}",
+            out_dir.display(),
+            wasm.display()
+        ),
     )
 }
 
@@ -299,7 +313,10 @@ source = \"registry+https://github.com/rust-lang/crates.io-index\"
 name = \"wasm-bindgen-macro\"
 version = \"0.2.104\"
 ";
-        assert_eq!(parse_wasm_bindgen_lock_version(lock).as_deref(), Some("0.2.104"));
+        assert_eq!(
+            parse_wasm_bindgen_lock_version(lock).as_deref(),
+            Some("0.2.104")
+        );
     }
 
     #[test]

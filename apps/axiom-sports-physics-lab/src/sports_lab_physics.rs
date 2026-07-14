@@ -107,14 +107,23 @@ pub fn world() -> PhysicsApi {
 /// half-spaces at the arena bounds. Solid side is `n·x ≥ distance`, matching
 /// the floor's `(0,1,0), 0` convention, so each wall keeps bodies inside.
 pub fn add_arena(physics: &mut PhysicsApi) {
-    let field_mat = PhysicsApi::material(ratio(FIELD_FRICTION), ratio(FIELD_RESTITUTION), ratio(1.0))
-        .expect("field material");
+    let field_mat =
+        PhysicsApi::material(ratio(FIELD_FRICTION), ratio(FIELD_RESTITUTION), ratio(1.0))
+            .expect("field material");
     let wall_mat = PhysicsApi::material(ratio(WALL_FRICTION), ratio(WALL_RESTITUTION), ratio(1.0))
         .expect("wall material");
 
-    let floor = physics.create_static_body(Transform::IDENTITY).expect("floor body");
+    let floor = physics
+        .create_static_body(Transform::IDENTITY)
+        .expect("floor body");
     physics
-        .attach_plane_collider(floor, Vec3::new(0.0, 1.0, 0.0), meters(0.0), field_mat, false)
+        .attach_plane_collider(
+            floor,
+            Vec3::new(0.0, 1.0, 0.0),
+            meters(0.0),
+            field_mat,
+            false,
+        )
         .expect("floor plane collider");
 
     // (inward normal, distance): keeps n·p ≥ distance, i.e. the body inside.
@@ -125,7 +134,9 @@ pub fn add_arena(physics: &mut PhysicsApi) {
         (Vec3::new(0.0, 0.0, 1.0), -ARENA_HALF_L),  // z ≥ −45
     ];
     for (normal, distance) in walls {
-        let body = physics.create_static_body(Transform::IDENTITY).expect("wall body");
+        let body = physics
+            .create_static_body(Transform::IDENTITY)
+            .expect("wall body");
         physics
             .attach_plane_collider(body, normal, meters(distance), wall_mat, false)
             .expect("wall plane collider");
@@ -134,8 +145,12 @@ pub fn add_arena(physics: &mut PhysicsApi) {
 
 /// Add one ball as a dynamic sphere at its spawn transform.
 pub fn add_ball(physics: &mut PhysicsApi, preset: &BallPreset) -> PhysicsBodyHandle {
-    let material = PhysicsApi::material(ratio(preset.friction), ratio(preset.restitution), ratio(1.0))
-        .expect("ball material");
+    let material = PhysicsApi::material(
+        ratio(preset.friction),
+        ratio(preset.restitution),
+        ratio(1.0),
+    )
+    .expect("ball material");
     let body = physics
         .create_dynamic_body(ball_spawn_transform(preset), ratio(preset.mass))
         .expect("ball body");
@@ -147,13 +162,18 @@ pub fn add_ball(physics: &mut PhysicsApi, preset: &BallPreset) -> PhysicsBodyHan
 
 /// A ball's initial transform (position + the football's lie-down pitch).
 pub fn ball_spawn_transform(preset: &BallPreset) -> Transform {
-    Transform::new(preset.spawn, Quat::from_euler_xyz(preset.spawn_pitch, 0.0, 0.0), Vec3::ONE)
+    Transform::new(
+        preset.spawn,
+        Quat::from_euler_xyz(preset.spawn_pitch, 0.0, 0.0),
+        Vec3::ONE,
+    )
 }
 
 /// Add the T-pose dummy as one dynamic box body standing at `(x, z)`.
 pub fn add_dummy(physics: &mut PhysicsApi, x: f32, z: f32) -> PhysicsBodyHandle {
-    let material = PhysicsApi::material(ratio(DUMMY_FRICTION), ratio(DUMMY_RESTITUTION), ratio(1.0))
-        .expect("dummy material");
+    let material =
+        PhysicsApi::material(ratio(DUMMY_FRICTION), ratio(DUMMY_RESTITUTION), ratio(1.0))
+            .expect("dummy material");
     let body = physics
         .create_dynamic_body(dummy_spawn_transform(x, z), ratio(DUMMY_MASS))
         .expect("dummy body");
@@ -174,7 +194,11 @@ pub fn add_player(physics: &mut PhysicsApi, x: f32, z: f32) -> PhysicsBodyHandle
     let material =
         PhysicsApi::material(ratio(0.5), ratio(0.3), ratio(1.0)).expect("player material");
     let body = physics
-        .create_kinematic_body(Transform::from_translation(Vec3::new(x, PLAYER_BODY_CENTER_Y, z)))
+        .create_kinematic_body(Transform::from_translation(Vec3::new(
+            x,
+            PLAYER_BODY_CENTER_Y,
+            z,
+        )))
         .expect("player body");
     physics
         .attach_sphere_collider(body, meters(PLAYER_RADIUS), material, false)
@@ -207,8 +231,14 @@ mod tests {
         }
         // It never fell through, it bounced (rose again after first contact),
         // and it ends resting near its radius.
-        assert!(max_after_drop > preset.radius + 0.05, "the soccer ball bounced");
-        assert!((y - preset.radius).abs() < 0.15, "ball rests on the field, y={y}");
+        assert!(
+            max_after_drop > preset.radius + 0.05,
+            "the soccer ball bounced"
+        );
+        assert!(
+            (y - preset.radius).abs() < 0.15,
+            "ball rests on the field, y={y}"
+        );
     }
 
     #[test]
@@ -229,8 +259,14 @@ mod tests {
             min_vx = min_vx.min(b.linear_velocity().x);
             max_x = max_x.max(b.transform().translation.x);
         }
-        assert!(max_x <= ARENA_HALF_W + 0.01, "the wall contained the ball, x={max_x}");
-        assert!(min_vx < -3.0, "the ball rebounded (negative x velocity), vx={min_vx}");
+        assert!(
+            max_x <= ARENA_HALF_W + 0.01,
+            "the wall contained the ball, x={max_x}"
+        );
+        assert!(
+            min_vx < -3.0,
+            "the ball rebounded (negative x velocity), vx={min_vx}"
+        );
     }
 
     #[test]
@@ -244,9 +280,16 @@ mod tests {
         }
         let snap = physics.snapshot();
         let d = snap.bodies().iter().find(|b| b.handle() == dummy).unwrap();
-        assert!((d.transform().translation.y - FIGURE_CENTER_Y).abs() < 0.1, "dummy stands");
+        assert!(
+            (d.transform().translation.y - FIGURE_CENTER_Y).abs() < 0.1,
+            "dummy stands"
+        );
         let p = snap.bodies().iter().find(|b| b.handle() == player).unwrap();
-        assert_eq!(p.transform().translation.y, PLAYER_BODY_CENTER_Y, "kinematic player holds");
+        assert_eq!(
+            p.transform().translation.y,
+            PLAYER_BODY_CENTER_Y,
+            "kinematic player holds"
+        );
     }
 
     #[test]
@@ -273,7 +316,13 @@ mod tests {
         }
         let snap = physics.snapshot();
         let bb = snap.bodies().iter().find(|x| x.handle() == ball_b).unwrap();
-        assert!(bb.transform().translation.x > 2.05, "the bowling ball was shoved");
-        assert!(min_vx < -0.2, "the light soccer ball rebounded off the heavy one");
+        assert!(
+            bb.transform().translation.x > 2.05,
+            "the bowling ball was shoved"
+        );
+        assert!(
+            min_vx < -0.2,
+            "the light soccer ball rebounded off the heavy one"
+        );
     }
 }

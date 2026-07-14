@@ -98,7 +98,13 @@ impl HalfPipeParams {
                 heights.push(self.height_at(x));
             }
         }
-        HalfPipeGrid { nx, nz, spacing_x: self.tess_width, spacing_z: self.tess_length, heights }
+        HalfPipeGrid {
+            nx,
+            nz,
+            spacing_x: self.tess_width,
+            spacing_z: self.tess_length,
+            heights,
+        }
     }
 
     /// The visual surface mesh, built by the engine's terrain grid mesher from the
@@ -109,8 +115,14 @@ impl HalfPipeParams {
         let params = *self;
         TerrainMeshApi::heightfield_grid_mesh_rect(
             (Meters::finite_or_zero(0.0), Meters::finite_or_zero(0.0)),
-            (Meters::finite_or_zero(half_x), Meters::finite_or_zero(half_z)),
-            (Meters::finite_or_zero(self.tess_width), Meters::finite_or_zero(self.tess_length)),
+            (
+                Meters::finite_or_zero(half_x),
+                Meters::finite_or_zero(half_z),
+            ),
+            (
+                Meters::finite_or_zero(self.tess_width),
+                Meters::finite_or_zero(self.tess_length),
+            ),
             move |mx, _mz| Meters::finite_or_zero(params.height_at(mx.get())),
         )
     }

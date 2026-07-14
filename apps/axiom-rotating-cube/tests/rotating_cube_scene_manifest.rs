@@ -15,7 +15,6 @@ use std::path::Path;
 use axiom_rotating_cube as app;
 use serde::Deserialize;
 
-
 #[derive(Debug, Deserialize)]
 struct PackageManifest {
     package: PackageSection,
@@ -36,7 +35,6 @@ struct PackageSurface {
     height: u32,
     surface_id: String,
 }
-
 
 #[derive(Debug, Deserialize)]
 struct Scene {
@@ -116,9 +114,8 @@ fn load_package() -> PackageManifest {
 }
 
 fn load_scene(entry: &str) -> Scene {
-    let text =
-        std::fs::read_to_string(manifest_dir().join("tests/rotating_cube").join(entry))
-            .expect("entry scene file is present");
+    let text = std::fs::read_to_string(manifest_dir().join("tests/rotating_cube").join(entry))
+        .expect("entry scene file is present");
     toml::from_str(&text).expect("scene toml parses")
 }
 
@@ -194,16 +191,17 @@ fn scene_references_are_internally_consistent() {
     let material_ids: Vec<&str> = scene.material.iter().map(|m| m.id.as_str()).collect();
     // Every renderable reference resolves to a declared mesh + material asset
     // (referential validation — the seed of `axiom-appc`'s pass 2).
-    let renderables = scene
-        .entity
-        .iter()
-        .flat_map(|e| {
-            e.renderable
-                .iter()
-                .chain(e.child.iter().flat_map(|c| c.renderable.iter()))
-        });
+    let renderables = scene.entity.iter().flat_map(|e| {
+        e.renderable
+            .iter()
+            .chain(e.child.iter().flat_map(|c| c.renderable.iter()))
+    });
     renderables.for_each(|r| {
-        assert!(mesh_ids.contains(&r.mesh.as_str()), "mesh {} declared", r.mesh);
+        assert!(
+            mesh_ids.contains(&r.mesh.as_str()),
+            "mesh {} declared",
+            r.mesh
+        );
         assert!(
             material_ids.contains(&r.material.as_str()),
             "material {} declared",

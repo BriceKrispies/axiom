@@ -186,8 +186,12 @@ pub fn sense_sim(sim: &GroundSim) -> Sight {
         reach,
         RAY_COUNT,
         |dir| {
-            march(sim, eye, dir)
-                .map(|(distance, point)| (Meters::new(distance).expect("a finite march distance"), point))
+            march(sim, eye, dir).map(|(distance, point)| {
+                (
+                    Meters::new(distance).expect("a finite march distance"),
+                    point,
+                )
+            })
         },
         &marks,
     );
@@ -208,10 +212,7 @@ mod tests {
             session.step(&crate::agent::Action::seek());
             let sight = session.sight();
             faced_slope |= sight.ahead.is_some();
-            saw_summit |= sight
-                .visible
-                .iter()
-                .any(|v| v.kind == KIND_MOUNTAINTOP);
+            saw_summit |= sight.visible.iter().any(|v| v.kind == KIND_MOUNTAINTOP);
         }
         assert!(faced_slope, "the agent faced a rising slope while climbing");
         assert!(saw_summit, "the agent saw and classified the mountaintop");

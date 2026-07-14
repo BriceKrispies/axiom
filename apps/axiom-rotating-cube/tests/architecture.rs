@@ -193,7 +193,10 @@ fn no_junk_drawer_modules() {
     for path in app_sources() {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc"] {
-            assert_ne!(name, banned, "no `{banned}` module in the rotating-cube app");
+            assert_ne!(
+                name, banned,
+                "no `{banned}` module in the rotating-cube app"
+            );
         }
     }
 }

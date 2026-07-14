@@ -110,5 +110,8 @@ fn seeking_the_summit_also_climbs() {
     while !obs.reached_summit && obs.tick < 20_000 {
         obs = session.step(&seek);
     }
-    assert!(obs.reached_summit, "seek policy should reach the summit; ended at {obs:?}");
+    assert!(
+        obs.reached_summit,
+        "seek policy should reach the summit; ended at {obs:?}"
+    );
 }

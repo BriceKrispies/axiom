@@ -110,11 +110,17 @@ fn font_atlas() -> Vec<(u64, u32, u32, Vec<u8>)> {
 /// host `(layer, submission)` sort.
 fn scene() -> Draw2dList {
     let mut list = Draw2dList::default();
-    let header = |sub: u32, layer: i32, alpha: f32| (sub, Mat3::IDENTITY, Common2d::new(layer, ratio(alpha)));
+    let header = |sub: u32, layer: i32, alpha: f32| {
+        (sub, Mat3::IDENTITY, Common2d::new(layer, ratio(alpha)))
+    };
 
     // Submit the translucent sprite (layer 3) FIRST to prove the sort.
     list.push_command(Draw2dCommand::sprite(
-        (0, Mat3::translation(Vec2::new(16.0, 40.0)), Common2d::new(3, ratio(0.6))),
+        (
+            0,
+            Mat3::translation(Vec2::new(16.0, 40.0)),
+            Common2d::new(3, ratio(0.6)),
+        ),
         TextureId::from_raw(7),
         SpriteDraw2d::new(
             Rect::new(Vec2::ZERO, Vec2::new(4.0, 4.0)),
@@ -197,8 +203,10 @@ fn scene() -> Draw2dList {
             Vec2::new(14.0, 54.0),
             Vec2::new(6.0, 46.0),
         ],
-        Fill2d::color(rgba(0.9, 0.2, 0.8, 1.0))
-            .with_stroke(Stroke2d::new(rgba(1.0, 1.0, 1.0, 1.0), Meters::new(2.0).expect("finite"))),
+        Fill2d::color(rgba(0.9, 0.2, 0.8, 1.0)).with_stroke(Stroke2d::new(
+            rgba(1.0, 1.0, 1.0, 1.0),
+            Meters::new(2.0).expect("finite"),
+        )),
         true,
     ));
 
@@ -239,15 +247,29 @@ fn scene() -> Draw2dList {
     // texel on both backends. Tinted red; placed at (46, 30) — clear of the other
     // top-layer shapes' sample points.
     list.push_command(Draw2dCommand::text(
-        (11, Mat3::translation(Vec2::new(46.0, 30.0)), Common2d::new(11, ratio(1.0))),
+        (
+            11,
+            Mat3::translation(Vec2::new(46.0, 30.0)),
+            Common2d::new(11, ratio(1.0)),
+        ),
         GlyphRun::new(
             vec![
-                Glyph2d::new(Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)), Meters::new(8.0).expect("finite")),
-                Glyph2d::new(Rect::new(Vec2::new(8.0, 0.0), Vec2::new(8.0, 16.0)), Meters::new(8.0).expect("finite")),
+                Glyph2d::new(
+                    Rect::new(Vec2::ZERO, Vec2::new(8.0, 16.0)),
+                    Meters::new(8.0).expect("finite"),
+                ),
+                Glyph2d::new(
+                    Rect::new(Vec2::new(8.0, 0.0), Vec2::new(8.0, 16.0)),
+                    Meters::new(8.0).expect("finite"),
+                ),
             ],
             Meters::new(16.0).expect("finite"),
         ),
-        TextDraw2d::new(FontHandle::from_raw(1), rgba(1.0, 0.2, 0.2, 1.0), TextAlign::LEFT),
+        TextDraw2d::new(
+            FontHandle::from_raw(1),
+            rgba(1.0, 0.2, 0.2, 1.0),
+            TextAlign::LEFT,
+        ),
     ));
 
     list.sort_commands();
@@ -281,57 +303,114 @@ fn gpu_and_software_2d_alpha_blend_match() {
     // distinct purple-ish mix on BOTH backends (not pure red, not pure green),
     // proving src-over compositing rather than overwrite.
     let overlap_sw = px(&sw_px, 30, 30);
-    assert!(overlap_sw[0] > 60 && overlap_sw[1] > 60, "software overlap blended: {overlap_sw:?}");
-    assert!(overlap_sw[0] < 220 && overlap_sw[1] < 220, "software overlap is a mix: {overlap_sw:?}");
+    assert!(
+        overlap_sw[0] > 60 && overlap_sw[1] > 60,
+        "software overlap blended: {overlap_sw:?}"
+    );
+    assert!(
+        overlap_sw[0] < 220 && overlap_sw[1] < 220,
+        "software overlap is a mix: {overlap_sw:?}"
+    );
 
     // Sanity: each new shape actually rasterized (its interior centre reads the
     // shape colour) on BOTH backends — proving the analytic coverage filled the
     // shape rather than discarding everything.
     let circle_sw = px(&sw_px, 16, 18);
     let circle_gpu = px(&gpu_px, 16, 18);
-    assert!(circle_sw[0] > 200 && circle_sw[1] > 200 && circle_sw[2] < 60, "software circle: {circle_sw:?}");
-    assert!(circle_gpu[0] > 200 && circle_gpu[1] > 200 && circle_gpu[2] < 60, "gpu circle: {circle_gpu:?}");
+    assert!(
+        circle_sw[0] > 200 && circle_sw[1] > 200 && circle_sw[2] < 60,
+        "software circle: {circle_sw:?}"
+    );
+    assert!(
+        circle_gpu[0] > 200 && circle_gpu[1] > 200 && circle_gpu[2] < 60,
+        "gpu circle: {circle_gpu:?}"
+    );
     let ellipse_sw = px(&sw_px, 46, 18);
     let ellipse_gpu = px(&gpu_px, 46, 18);
-    assert!(ellipse_sw[2] > 200 && ellipse_sw[0] < 60, "software ellipse: {ellipse_sw:?}");
-    assert!(ellipse_gpu[2] > 200 && ellipse_gpu[0] < 60, "gpu ellipse: {ellipse_gpu:?}");
+    assert!(
+        ellipse_sw[2] > 200 && ellipse_sw[0] < 60,
+        "software ellipse: {ellipse_sw:?}"
+    );
+    assert!(
+        ellipse_gpu[2] > 200 && ellipse_gpu[0] < 60,
+        "gpu ellipse: {ellipse_gpu:?}"
+    );
     let particle_sw = px(&sw_px, 46, 50);
     let particle_gpu = px(&gpu_px, 46, 50);
-    assert!(particle_sw[0] > 200 && particle_sw[2] < 60, "software particle: {particle_sw:?}");
-    assert!(particle_gpu[0] > 200 && particle_gpu[2] < 60, "gpu particle: {particle_gpu:?}");
+    assert!(
+        particle_sw[0] > 200 && particle_sw[2] < 60,
+        "software particle: {particle_sw:?}"
+    );
+    assert!(
+        particle_gpu[0] > 200 && particle_gpu[2] < 60,
+        "gpu particle: {particle_gpu:?}"
+    );
     // The line is thin; sample a point on the segment midline (round(18,57)).
     let line_sw = px(&sw_px, 18, 57);
     let line_gpu = px(&gpu_px, 18, 57);
-    assert!(line_sw[0] > 200 && line_sw[1] > 200 && line_sw[2] > 200, "software line: {line_sw:?}");
-    assert!(line_gpu[0] > 200 && line_gpu[1] > 200 && line_gpu[2] > 200, "gpu line: {line_gpu:?}");
+    assert!(
+        line_sw[0] > 200 && line_sw[1] > 200 && line_sw[2] > 200,
+        "software line: {line_sw:?}"
+    );
+    assert!(
+        line_gpu[0] > 200 && line_gpu[1] > 200 && line_gpu[2] > 200,
+        "gpu line: {line_gpu:?}"
+    );
 
     // Path fill: the diamond's centre (14,46) is interior → its magenta fill on
     // BOTH backends (proving the even-odd fill and the barycentric fan agree).
     let path_sw = px(&sw_px, 14, 46);
     let path_gpu = px(&gpu_px, 14, 46);
-    assert!(path_sw[0] > 200 && path_sw[2] > 180 && path_sw[1] < 80, "software path fill: {path_sw:?}");
-    assert!(path_gpu[0] > 200 && path_gpu[2] > 180 && path_gpu[1] < 80, "gpu path fill: {path_gpu:?}");
+    assert!(
+        path_sw[0] > 200 && path_sw[2] > 180 && path_sw[1] < 80,
+        "software path fill: {path_sw:?}"
+    );
+    assert!(
+        path_gpu[0] > 200 && path_gpu[2] > 180 && path_gpu[1] < 80,
+        "gpu path fill: {path_gpu:?}"
+    );
 
     // Linear gradient: dark on the left edge of the rect, bright on the right.
     let grad_l_sw = px(&sw_px, 35, 5);
     let grad_r_sw = px(&sw_px, 56, 5);
-    assert!(grad_l_sw[0] < 70, "software linear-gradient left is dark: {grad_l_sw:?}");
-    assert!(grad_r_sw[0] > 190, "software linear-gradient right is bright: {grad_r_sw:?}");
-    assert!(px(&gpu_px, 35, 5)[0] < 70, "gpu linear-gradient left is dark");
-    assert!(px(&gpu_px, 56, 5)[0] > 190, "gpu linear-gradient right is bright");
+    assert!(
+        grad_l_sw[0] < 70,
+        "software linear-gradient left is dark: {grad_l_sw:?}"
+    );
+    assert!(
+        grad_r_sw[0] > 190,
+        "software linear-gradient right is bright: {grad_r_sw:?}"
+    );
+    assert!(
+        px(&gpu_px, 35, 5)[0] < 70,
+        "gpu linear-gradient left is dark"
+    );
+    assert!(
+        px(&gpu_px, 56, 5)[0] > 190,
+        "gpu linear-gradient right is bright"
+    );
 
     // Radial gradient: bright near the centre (10,8), darker toward the edge.
     let rad_c_sw = px(&sw_px, 10, 8);
     let rad_e_sw = px(&sw_px, 2, 1);
-    assert!(rad_c_sw[0] > 190, "software radial centre is bright: {rad_c_sw:?}");
-    assert!(rad_e_sw[0] < 130, "software radial edge is darker: {rad_e_sw:?}");
+    assert!(
+        rad_c_sw[0] > 190,
+        "software radial centre is bright: {rad_c_sw:?}"
+    );
+    assert!(
+        rad_e_sw[0] < 130,
+        "software radial edge is darker: {rad_e_sw:?}"
+    );
     assert!(px(&gpu_px, 10, 8)[0] > 190, "gpu radial centre is bright");
 
     // Text: a glyph pixel inside the first cell (≈(48,38)) reads the red tint on
     // BOTH backends (proving the glyph-run sampled the atlas and placed the glyph).
     let text_sw = px(&sw_px, 48, 38);
     let text_gpu = px(&gpu_px, 48, 38);
-    assert!(text_sw[0] > 60 && text_sw[3] == 255, "software text glyph is drawn: {text_sw:?}");
+    assert!(
+        text_sw[0] > 60 && text_sw[3] == 255,
+        "software text glyph is drawn: {text_sw:?}"
+    );
     assert!(text_gpu[3] == 255, "gpu text glyph is drawn: {text_gpu:?}");
 
     // Tight pixel parity across the whole frame.

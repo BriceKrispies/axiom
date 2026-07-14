@@ -59,7 +59,11 @@ pub struct SpinController {
 impl SpinController {
     /// A fresh controller in `NormalRolling` with no charge.
     pub fn new() -> Self {
-        SpinController { state: SpinState::NormalRolling, charge: 0.0, dir: Vec3::new(0.0, 0.0, 1.0) }
+        SpinController {
+            state: SpinState::NormalRolling,
+            charge: 0.0,
+            dir: Vec3::new(0.0, 0.0, 1.0),
+        }
     }
 
     /// The current state.
@@ -89,7 +93,8 @@ impl SpinController {
                 } else if speed < settings::SPIN_STOP_SPEED {
                     if let Some(d) = tap {
                         self.dir = horizontal_unit(d);
-                        self.charge = (self.charge + settings::SPIN_CHARGE_PER_TAP).min(settings::SPIN_CHARGE_MAX);
+                        self.charge = (self.charge + settings::SPIN_CHARGE_PER_TAP)
+                            .min(settings::SPIN_CHARGE_MAX);
                         self.state = SpinState::SpinCharging;
                     }
                 }
@@ -99,10 +104,15 @@ impl SpinController {
                     let has = self.charge > 0.0;
                     launch = has.then_some((self.dir, self.charge));
                     self.charge = 0.0;
-                    self.state = if has { SpinState::LaunchRelease } else { SpinState::NormalRolling };
+                    self.state = if has {
+                        SpinState::LaunchRelease
+                    } else {
+                        SpinState::NormalRolling
+                    };
                 } else if let Some(d) = tap {
                     self.dir = horizontal_unit(d);
-                    self.charge = (self.charge + settings::SPIN_CHARGE_PER_TAP).min(settings::SPIN_CHARGE_MAX);
+                    self.charge = (self.charge + settings::SPIN_CHARGE_PER_TAP)
+                        .min(settings::SPIN_CHARGE_MAX);
                 } else {
                     self.charge = (self.charge - settings::SPIN_CHARGE_DECAY * dt).max(0.0);
                     if self.charge <= 0.0 {
@@ -169,7 +179,7 @@ mod tests {
     fn tapping_while_braked_and_stopped_charges_up_to_the_cap() {
         let mut c = SpinController::new();
         c.update(true, None, 10.0, DT); // -> Braking
-        // Nearly stopped + tap forward -> SpinCharging, charge rises.
+                                        // Nearly stopped + tap forward -> SpinCharging, charge rises.
         let a = c.update(true, Some(FWD), 0.5, DT);
         assert_eq!(a.state, SpinState::SpinCharging);
         assert!((a.charge - settings::SPIN_CHARGE_PER_TAP).abs() < 1.0e-6);
@@ -189,7 +199,12 @@ mod tests {
         let charged = c.charge();
         // A step with no tap decays the charge.
         let out = c.update(true, None, 0.3, DT);
-        assert!(out.charge < charged, "charge decays without taps: {} < {}", out.charge, charged);
+        assert!(
+            out.charge < charged,
+            "charge decays without taps: {} < {}",
+            out.charge,
+            charged
+        );
         // Enough idle steps bleed it off entirely, dropping back to Braking.
         for _ in 0..600 {
             c.update(true, None, 0.3, DT);
@@ -208,7 +223,10 @@ mod tests {
         // Release -> launch in +x with the stored charge; charge resets.
         let out = c.update(false, None, 0.3, DT);
         let (dir, charge) = out.launch.expect("a charged release launches");
-        assert!((dir.subtract(RIGHT)).length() < 1.0e-6, "launches along the charged direction");
+        assert!(
+            (dir.subtract(RIGHT)).length() < 1.0e-6,
+            "launches along the charged direction"
+        );
         assert!((charge - stored).abs() < 1.0e-6);
         assert_eq!(out.state, SpinState::LaunchRelease);
         assert_eq!(c.charge(), 0.0);
@@ -232,12 +250,21 @@ mod tests {
         ];
         let run = || {
             let mut c = SpinController::new();
-            script.iter().map(|&(b, t)| c.update(b, t, 0.4, DT).state).collect::<Vec<_>>()
+            script
+                .iter()
+                .map(|&(b, t)| c.update(b, t, 0.4, DT).state)
+                .collect::<Vec<_>>()
         };
         assert_eq!(run(), run());
         // And the launch fires exactly on the release-with-charge frame (index 5).
         let mut c = SpinController::new();
-        let launches: Vec<bool> = script.iter().map(|&(b, t)| c.update(b, t, 0.4, DT).launch.is_some()).collect();
-        assert_eq!(launches, vec![false, false, false, false, false, true, false]);
+        let launches: Vec<bool> = script
+            .iter()
+            .map(|&(b, t)| c.update(b, t, 0.4, DT).launch.is_some())
+            .collect();
+        assert_eq!(
+            launches,
+            vec![false, false, false, false, false, true, false]
+        );
     }
 }

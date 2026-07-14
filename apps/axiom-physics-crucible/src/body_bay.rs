@@ -152,7 +152,9 @@ mod tests {
         let bay = BodyBay;
         let mut world = CrucibleWorld::new();
         bay.populate(&mut world);
-        let h = world.nth_body(CrucibleStation::BodyBay, DISABLED_INDEX).unwrap();
+        let h = world
+            .nth_body(CrucibleStation::BodyBay, DISABLED_INDEX)
+            .unwrap();
         world.disable(h);
         world.step(0);
         let y_while_disabled = world.position_of(h).unwrap().y;

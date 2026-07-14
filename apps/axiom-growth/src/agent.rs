@@ -172,7 +172,12 @@ impl AgentSession {
         let steps = action.steps.unwrap_or(1).max(1);
         for _ in 0..steps {
             let (x, z, yaw, _pitch) = self.sim.pose();
-            let self_pose = (micro(x), micro(self.sim.ground_height_m()), micro(z), micro(yaw));
+            let self_pose = (
+                micro(x),
+                micro(self.sim.ground_height_m()),
+                micro(z),
+                micro(yaw),
+            );
             let goal = self.goal_micro();
 
             let (control, reason) = if action.seek {
@@ -188,8 +193,13 @@ impl AgentSession {
                 (control, reason)
             } else {
                 let held = control_of_keys(&action.keys);
-                let (control, reason, _brain, _emitted) =
-                    AgentHarnessApi::decide_hold(AGENT_RAW_ID, self.sim.tick(), self_pose, goal, held);
+                let (control, reason, _brain, _emitted) = AgentHarnessApi::decide_hold(
+                    AGENT_RAW_ID,
+                    self.sim.tick(),
+                    self_pose,
+                    goal,
+                    held,
+                );
                 (control, reason)
             };
 
@@ -243,12 +253,7 @@ impl AgentSession {
 
     /// Gather the render inputs for a portrait of the mountain from a vantage
     /// `distance` m out along the outward unit direction `(dir_x, dir_z)`.
-    pub fn capture_portrait(
-        &mut self,
-        dir_x: f32,
-        dir_z: f32,
-        distance: f32,
-    ) -> CaptureInputs {
+    pub fn capture_portrait(&mut self, dir_x: f32, dir_z: f32, distance: f32) -> CaptureInputs {
         self.sim.capture_portrait(dir_x, dir_z, distance)
     }
 
@@ -266,7 +271,6 @@ impl AgentSession {
     pub fn reached_summit_now(&self) -> bool {
         self.sim.reached_summit()
     }
-
 
     /// Run a parsed directive **script** — the data form of a command like "walk
     /// to the mountaintop, look at the ground, take a screenshot". Each directive
@@ -289,7 +293,10 @@ impl AgentSession {
                 "capture" | "screenshot" => {
                     let (tx, ty, tz) = look_at.unwrap_or_else(|| self.resolve_point("mountaintop"));
                     captures.push(CaptureRequest {
-                        label: directive.label.clone().unwrap_or_else(|| "capture".to_string()),
+                        label: directive
+                            .label
+                            .clone()
+                            .unwrap_or_else(|| "capture".to_string()),
                         inputs: self.sim.capture_lookat(tx, ty, tz),
                     });
                 }
@@ -318,7 +325,12 @@ impl AgentSession {
         let mut steps = 0u64;
         loop {
             let (x, z, yaw, _pitch) = self.sim.pose();
-            let self_pose = (micro(x), micro(self.sim.ground_height_m()), micro(z), micro(yaw));
+            let self_pose = (
+                micro(x),
+                micro(self.sim.ground_height_m()),
+                micro(z),
+                micro(yaw),
+            );
             let (fx, fz) = self.sim.forward_xz();
             let (control, reason, _brain, _emitted, arrived) = AgentHarnessApi::decide_goto(
                 AGENT_RAW_ID,

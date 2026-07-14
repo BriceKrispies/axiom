@@ -223,14 +223,7 @@ mod tests {
 
     #[test]
     fn build_captures_counts_and_tracked_bodies() {
-        let report = CrucibleReport::build(
-            12,
-            &[state(1), state(2)],
-            &counts(),
-            &[],
-            7,
-            true,
-        );
+        let report = CrucibleReport::build(12, &[state(1), state(2)], &counts(), &[], 7, true);
         assert_eq!(report.steps_run(), 12);
         assert_eq!(report.counts().broad_phase_pair_count, 5);
         assert_eq!(report.total_events(), 7);

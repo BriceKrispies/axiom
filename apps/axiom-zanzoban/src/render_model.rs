@@ -197,9 +197,7 @@ impl RenderModel {
 /// proportional to remaining life, floored at [`GHOST_FADE_FLOOR`].
 fn ghost_alpha(life: Option<u32>, lifetime: Option<u32>) -> f32 {
     match (life, lifetime) {
-        (Some(n), Some(l)) if l > 0 => {
-            (GHOST_ALPHA * (n as f32 / l as f32)).max(GHOST_FADE_FLOOR)
-        }
+        (Some(n), Some(l)) if l > 0 => (GHOST_ALPHA * (n as f32 / l as f32)).max(GHOST_FADE_FLOOR),
         _ => GHOST_ALPHA,
     }
 }

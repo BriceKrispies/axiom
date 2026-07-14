@@ -202,7 +202,11 @@ mod tests {
         let up_look = Vec3::new(0.0, 0.99, -0.14);
         for _ in 0..120 {
             let (eye, _) = rig.eye_target(FEET, EYE_FP, up_look);
-            assert!(eye.y >= TP_EYE_MIN_Y - 1e-4, "eye stays above the field, y={}", eye.y);
+            assert!(
+                eye.y >= TP_EYE_MIN_Y - 1e-4,
+                "eye stays above the field, y={}",
+                eye.y
+            );
         }
     }
 }

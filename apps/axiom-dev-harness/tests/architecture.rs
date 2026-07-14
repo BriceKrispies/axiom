@@ -205,7 +205,10 @@ fn scan_raw(dir: PathBuf, needles: &[&str]) -> Vec<String> {
 #[test]
 fn no_layer_or_module_depends_on_this_app() {
     let mut hits = scan_raw(repo_root().join("crates"), &["axiom_dev_harness"]);
-    hits.extend(scan_raw(repo_root().join("modules"), &["axiom_dev_harness"]));
+    hits.extend(scan_raw(
+        repo_root().join("modules"),
+        &["axiom_dev_harness"],
+    ));
     assert!(
         hits.is_empty(),
         "no layer/module may depend on the dev-harness app:\n{}",

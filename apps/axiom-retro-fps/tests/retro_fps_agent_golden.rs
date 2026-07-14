@@ -72,7 +72,8 @@ fn render_golden(observations: &[Observation]) -> String {
 }
 
 fn golden_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/retro_fps/golden/retro_fps_agent_play.txt")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/retro_fps/golden/retro_fps_agent_play.txt")
 }
 
 #[test]

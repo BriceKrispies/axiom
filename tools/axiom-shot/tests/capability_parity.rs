@@ -97,7 +97,10 @@ fn coverage(px: &[u8], threshold: u8) -> f64 {
     let count = px
         .chunks_exact(4)
         .filter(|p| {
-            p[0].abs_diff(bg[0]).max(p[1].abs_diff(bg[1])).max(p[2].abs_diff(bg[2])) > threshold
+            p[0].abs_diff(bg[0])
+                .max(p[1].abs_diff(bg[1]))
+                .max(p[2].abs_diff(bg[2]))
+                > threshold
         })
         .count();
     count as f64 / (px.len() / 4) as f64
@@ -174,7 +177,18 @@ fn textures_gpu_samples_albedo_canvas2d_reports_the_drop() {
 
     // GPU with Textures on samples the four-colour checker (a varied frame); with
     // Textures dropped it renders flat white — so the profile is load-bearing.
-    let textured = gpu(&meshes, &materials, &[], &front_light(), IDENTITY, &batches, clear, None, None, BackendCapabilityProfile::all());
+    let textured = gpu(
+        &meshes,
+        &materials,
+        &[],
+        &front_light(),
+        IDENTITY,
+        &batches,
+        clear,
+        None,
+        None,
+        BackendCapabilityProfile::all(),
+    );
     let flat = gpu(
         &meshes,
         &materials,
@@ -187,15 +201,26 @@ fn textures_gpu_samples_albedo_canvas2d_reports_the_drop() {
         None,
         BackendCapabilityProfile::all().without(RenderCapability::Textures),
     );
-    assert!(differs(&textured, &flat), "GPU must consult the Textures capability");
-    assert!(coverage(&textured, 24) > 0.5, "textured quad should cover the frame");
+    assert!(
+        differs(&textured, &flat),
+        "GPU must consult the Textures capability"
+    );
+    assert!(
+        coverage(&textured, 24) > 0.5,
+        "textured quad should cover the frame"
+    );
 
     // Canvas 2D declares Textures a reported drop; a frame that uses textures reports
     // AlbedoSampling degraded and a degraded material count — the declared policy.
-    assert_eq!(RenderCapability::Textures.degradation(), CapabilityDegradation::Drop);
+    assert_eq!(
+        RenderCapability::Textures.degradation(),
+        CapabilityDegradation::Drop
+    );
     let mut backend = Canvas2dBackendApi::new(&request(W, H));
     backend.load_meshes(&meshes);
-    let draws = vec![FrameDrawItem::new(0, 1, 7, IDENTITY, IDENTITY, [1.0; 4], false)];
+    let draws = vec![FrameDrawItem::new(
+        0, 1, 7, IDENTITY, IDENTITY, [1.0; 4], false,
+    )];
     let packet = FramePacket::new(
         1,
         1,
@@ -209,10 +234,16 @@ fn textures_gpu_samples_albedo_canvas2d_reports_the_drop() {
     );
     let report = backend.present_packet(&packet);
     assert!(
-        report.degraded_features().contains(&FrameFeature::AlbedoSampling),
+        report
+            .degraded_features()
+            .contains(&FrameFeature::AlbedoSampling),
         "Canvas 2D must report the albedo-sampling drop"
     );
-    assert_eq!(report.degraded_materials(), 1, "the textured material is degraded to flat");
+    assert_eq!(
+        report.degraded_materials(),
+        1,
+        "the textured material is degraded to flat"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +270,18 @@ fn alpha_cutout_is_gated_on_the_gpu_and_dropped_on_canvas2d() {
 
     // With both Textures + AlphaMask on, the transparent texels are discarded, so the
     // quad no longer fully covers the frame; dropping AlphaMask keeps the quad opaque.
-    let cutout = gpu(&meshes, &materials, &[], &front_light(), IDENTITY, &batches, clear, None, None, BackendCapabilityProfile::all());
+    let cutout = gpu(
+        &meshes,
+        &materials,
+        &[],
+        &front_light(),
+        IDENTITY,
+        &batches,
+        clear,
+        None,
+        None,
+        BackendCapabilityProfile::all(),
+    );
     let opaque = gpu(
         &meshes,
         &materials,
@@ -252,13 +294,19 @@ fn alpha_cutout_is_gated_on_the_gpu_and_dropped_on_canvas2d() {
         None,
         BackendCapabilityProfile::all().without(RenderCapability::AlphaMask),
     );
-    assert!(differs(&cutout, &opaque), "GPU must consult the AlphaMask capability");
+    assert!(
+        differs(&cutout, &opaque),
+        "GPU must consult the AlphaMask capability"
+    );
     assert!(
         coverage(&cutout, 24) < coverage(&opaque, 24),
         "the cutout must punch holes the opaque render fills"
     );
     // The Canvas 2D flat rasterizer cannot cutout: the declared degradation is a drop.
-    assert_eq!(RenderCapability::AlphaMask.degradation(), CapabilityDegradation::Drop);
+    assert_eq!(
+        RenderCapability::AlphaMask.degradation(),
+        CapabilityDegradation::Drop
+    );
     assert!(!BackendCapabilityProfile::canvas2d().contains(RenderCapability::AlphaMask));
 }
 
@@ -273,12 +321,21 @@ fn sdf_camera() -> ([f32; 16], [f32; 16], [f32; 3]) {
     let proj = Mat4::perspective(std::f32::consts::FRAC_PI_2, W as f32 / H as f32, 0.1, 100.0)
         .expect("proj");
     let vp = proj.multiply(view);
-    (vp.as_cols_array(), vp.inverse().expect("inv").as_cols_array(), [eye.x, eye.y, eye.z])
+    (
+        vp.as_cols_array(),
+        vp.inverse().expect("inv").as_cols_array(),
+        [eye.x, eye.y, eye.z],
+    )
 }
 
 fn unit_sphere_scene() -> SdfScene {
     let (vp, inv, cam) = sdf_camera();
-    let prim = SdfPrimitive::new(SdfPrimitive::SPHERE, IDENTITY, [1.0, 0.0, 0.0, 1.0], [1.0, 0.2, 0.2, 1.0]);
+    let prim = SdfPrimitive::new(
+        SdfPrimitive::SPHERE,
+        IDENTITY,
+        [1.0, 0.0, 0.0, 1.0],
+        [1.0, 0.2, 0.2, 1.0],
+    );
     SdfScene::new(vec![prim], vp, inv, cam, [100.0, 0.001, 0.0, 0.0])
 }
 
@@ -289,7 +346,18 @@ fn sdf_renders_on_both_backends_and_both_gate_it() {
 
     // GPU: the raymarch pass draws the sphere; dropping Sdf renders meshes only (none
     // here → empty), so the capability is load-bearing.
-    let with = gpu(&[], &[], &[], &front_light(), IDENTITY, &[], clear, Some(&scene), None, BackendCapabilityProfile::all());
+    let with = gpu(
+        &[],
+        &[],
+        &[],
+        &front_light(),
+        IDENTITY,
+        &[],
+        clear,
+        Some(&scene),
+        None,
+        BackendCapabilityProfile::all(),
+    );
     let without = gpu(
         &[],
         &[],
@@ -302,8 +370,14 @@ fn sdf_renders_on_both_backends_and_both_gate_it() {
         None,
         BackendCapabilityProfile::all().without(RenderCapability::Sdf),
     );
-    assert!(coverage(&with, 24) > 0.02, "GPU SDF pass should draw the sphere");
-    assert!(coverage(&without, 24) < 0.005, "dropping Sdf must skip the raymarch");
+    assert!(
+        coverage(&with, 24) > 0.02,
+        "GPU SDF pass should draw the sphere"
+    );
+    assert!(
+        coverage(&without, 24) < 0.005,
+        "dropping Sdf must skip the raymarch"
+    );
 
     // Canvas 2D marches the SAME scene on the CPU (its profile keeps Sdf), and drops it
     // when Sdf is removed — parity up to the flat CPU march degrade.
@@ -321,11 +395,17 @@ fn sdf_renders_on_both_backends_and_both_gate_it() {
     .with_sdf(scene);
     let mut on = Canvas2dBackendApi::new(&request(W, H));
     let (cpu_on, _, _) = on.render_offscreen_rgba(&packet);
-    assert!(coverage(&cpu_on, 24) > 0.02, "Canvas 2D CPU march should draw the sphere");
+    assert!(
+        coverage(&cpu_on, 24) > 0.02,
+        "Canvas 2D CPU march should draw the sphere"
+    );
     let mut off = Canvas2dBackendApi::new(&request(W, H));
     off.set_capability_profile(BackendCapabilityProfile::canvas2d().without(RenderCapability::Sdf));
     let (cpu_off, _, _) = off.render_offscreen_rgba(&packet);
-    assert!(coverage(&cpu_off, 24) < 0.005, "Canvas 2D must gate the SDF march too");
+    assert!(
+        coverage(&cpu_off, 24) < 0.005,
+        "Canvas 2D must gate the SDF march too"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +422,18 @@ fn retro_32bit_is_gated_on_both_backends() {
 
     // GPU: the retro colour-depth quantize + dither reshapes the readback; dropping
     // Retro32Bit leaves it full-fidelity.
-    let quantized = gpu(&meshes, &materials, &[], &front_light(), IDENTITY, &batches, clear, None, Some(retro), BackendCapabilityProfile::all());
+    let quantized = gpu(
+        &meshes,
+        &materials,
+        &[],
+        &front_light(),
+        IDENTITY,
+        &batches,
+        clear,
+        None,
+        Some(retro),
+        BackendCapabilityProfile::all(),
+    );
     let full = gpu(
         &meshes,
         &materials,
@@ -355,7 +446,10 @@ fn retro_32bit_is_gated_on_both_backends() {
         Some(retro),
         BackendCapabilityProfile::all().without(RenderCapability::Retro32Bit),
     );
-    assert!(differs(&quantized, &full), "GPU must consult the Retro32Bit capability");
+    assert!(
+        differs(&quantized, &full),
+        "GPU must consult the Retro32Bit capability"
+    );
 
     // Canvas 2D applies the SAME neutral retro post (its profile keeps Retro32Bit) and
     // skips it when the capability is dropped.
@@ -365,7 +459,9 @@ fn retro_32bit_is_gated_on_both_backends() {
         FrameViewport::new(W, H),
         clear,
         Some(FrameCamera::new(IDENTITY, IDENTITY, IDENTITY)),
-        vec![FrameDrawItem::new(0, 1, 9, IDENTITY, IDENTITY, [1.0; 4], false)],
+        vec![FrameDrawItem::new(
+            0, 1, 9, IDENTITY, IDENTITY, [1.0; 4], false,
+        )],
         vec![FrameLight::new(0, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])],
         IDENTITY,
         FrameFeatureSet::new(false, false, 0, 0),
@@ -376,9 +472,14 @@ fn retro_32bit_is_gated_on_both_backends() {
     let (cpu_retro, _, _) = on.render_offscreen_rgba(&packet);
     let mut off = Canvas2dBackendApi::new(&request(W, H));
     off.load_meshes(&meshes);
-    off.set_capability_profile(BackendCapabilityProfile::canvas2d().without(RenderCapability::Retro32Bit));
+    off.set_capability_profile(
+        BackendCapabilityProfile::canvas2d().without(RenderCapability::Retro32Bit),
+    );
     let (cpu_plain, _, _) = off.render_offscreen_rgba(&packet);
-    assert!(differs(&cpu_retro, &cpu_plain), "Canvas 2D must gate the retro post pass too");
+    assert!(
+        differs(&cpu_retro, &cpu_plain),
+        "Canvas 2D must gate the retro post pass too"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -408,21 +509,35 @@ fn shadow_scene() -> (
     [f32; 16],
     [f32; 16],
 ) {
-    let cam_view = Mat4::look_at(Vec3::new(0.0, 3.5, 5.5), Vec3::ZERO, Vec3::UNIT_Y).expect("cam view");
-    let cam_proj = Mat4::perspective(std::f32::consts::FRAC_PI_3, W as f32 / H as f32, 0.1, 100.0).expect("cam proj");
+    let cam_view =
+        Mat4::look_at(Vec3::new(0.0, 3.5, 5.5), Vec3::ZERO, Vec3::UNIT_Y).expect("cam view");
+    let cam_proj = Mat4::perspective(std::f32::consts::FRAC_PI_3, W as f32 / H as f32, 0.1, 100.0)
+        .expect("cam proj");
     let cam_vp = cam_proj.multiply(cam_view).as_cols_array();
 
     // A directional light from up and to the side, so the caster's shadow lands on the
     // *visible* part of the ground (not hidden behind the caster).
-    let light_view = Mat4::look_at(Vec3::new(3.0, 6.0, 1.5), Vec3::ZERO, Vec3::UNIT_Y).expect("light view");
-    let light_proj = Mat4::perspective(std::f32::consts::FRAC_PI_2, 1.0, 0.5, 40.0).expect("light proj");
+    let light_view =
+        Mat4::look_at(Vec3::new(3.0, 6.0, 1.5), Vec3::ZERO, Vec3::UNIT_Y).expect("light view");
+    let light_proj =
+        Mat4::perspective(std::f32::consts::FRAC_PI_2, 1.0, 0.5, 40.0).expect("light proj");
     let light_vp = light_proj.multiply(light_view).as_cols_array();
 
     let meshes = vec![ground_quad(1, 0.0, 4.0), ground_quad(2, 1.6, 0.9)];
     let materials = vec![(5_u64, 1_u32, 1_u32, vec![255, 255, 255, 255])];
     let batches = vec![
-        (1_u64, 5_u64, instance(cam_vp, IDENTITY, [0.65, 0.65, 0.65, 1.0]), 1_u32),
-        (2_u64, 5_u64, instance(cam_vp, IDENTITY, [0.85, 0.25, 0.25, 1.0]), 1_u32),
+        (
+            1_u64,
+            5_u64,
+            instance(cam_vp, IDENTITY, [0.65, 0.65, 0.65, 1.0]),
+            1_u32,
+        ),
+        (
+            2_u64,
+            5_u64,
+            instance(cam_vp, IDENTITY, [0.85, 0.25, 0.25, 1.0]),
+            1_u32,
+        ),
     ];
     // Directional light: to-light direction points up toward the light.
     let lights = vec![(0_u32, [0.4, 1.0, 0.2], [1.0, 1.0, 1.0], 1.0_f32)];
@@ -436,7 +551,18 @@ fn shadows_gpu_casts_pcf_canvas2d_substitutes_planar_contact() {
 
     // GPU with Shadows on darkens the ground under the caster (the PCF lookup); dropping
     // Shadows leaves the directional light fully lit — the capability is load-bearing.
-    let shadowed = gpu(&meshes, &materials, &[], &lights, light_vp, &batches, clear, None, None, BackendCapabilityProfile::all());
+    let shadowed = gpu(
+        &meshes,
+        &materials,
+        &[],
+        &lights,
+        light_vp,
+        &batches,
+        clear,
+        None,
+        None,
+        BackendCapabilityProfile::all(),
+    );
     let unshadowed = gpu(
         &meshes,
         &materials,
@@ -449,12 +575,18 @@ fn shadows_gpu_casts_pcf_canvas2d_substitutes_planar_contact() {
         None,
         BackendCapabilityProfile::all().without(RenderCapability::Shadows),
     );
-    assert!(differs(&shadowed, &unshadowed), "GPU must consult the Shadows capability (PCF)");
+    assert!(
+        differs(&shadowed, &unshadowed),
+        "GPU must consult the Shadows capability (PCF)"
+    );
 
     // Canvas 2D declares the shadow a SUBSTITUTE (planar contact shadow). Rendering the
     // same caster reports the shadow degraded AND draws the substitute — the declared
     // degradation applied, not a silent drop.
-    assert_eq!(RenderCapability::Shadows.degradation(), CapabilityDegradation::Substitute);
+    assert_eq!(
+        RenderCapability::Shadows.degradation(),
+        CapabilityDegradation::Substitute
+    );
     let mut backend = Canvas2dBackendApi::new(&request(W, H));
     backend.load_meshes(&meshes);
     let draws = vec![

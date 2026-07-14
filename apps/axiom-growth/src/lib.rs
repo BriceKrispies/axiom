@@ -273,7 +273,11 @@ mod integration {
         // fit_land_coverage produced both land and ocean; moisture stayed in range.
         assert!(a.atlas.region_elevation.iter().any(|&e| e >= 0.0));
         assert!(a.atlas.region_elevation.iter().any(|&e| e < 0.0));
-        assert!(a.atlas.region_moisture.iter().all(|&m| (0.0..=1.0).contains(&m)));
+        assert!(a
+            .atlas
+            .region_moisture
+            .iter()
+            .all(|&m| (0.0..=1.0).contains(&m)));
         // Determinism: the same seed reproduces the same planet.
         assert_eq!(a.world_hash, b.world_hash);
         assert_eq!(a.atlas.region_elevation, b.atlas.region_elevation);

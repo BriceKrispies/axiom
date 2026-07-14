@@ -59,13 +59,20 @@ fn main() {
 
     let params = BuildParams {
         level: flag(&args, "--level"),
-        frame: flag(&args, "--frame").and_then(|f| f.parse().ok()).unwrap_or(0),
-        stress_count: flag(&args, "--cubes").and_then(|c| c.parse().ok()).unwrap_or(2000),
+        frame: flag(&args, "--frame")
+            .and_then(|f| f.parse().ok())
+            .unwrap_or(0),
+        stress_count: flag(&args, "--cubes")
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(2000),
     };
 
     // `--pose "x,z,yaw,pitch"` (retro FPS only): snap controller 0 to an absolute
     // pose at tick 0 via the game's one corrective teleport control.
-    let teleport = match (app.as_str(), flag(&args, "--pose").as_deref().and_then(parse_pose)) {
+    let teleport = match (
+        app.as_str(),
+        flag(&args, "--pose").as_deref().and_then(parse_pose),
+    ) {
         ("retro-fps", Some((x, z, yaw, pitch))) => {
             let mut game = axiom_retro_fps::RetroFpsGame::from_level(&registry::retro_fps_doc(
                 params.level.as_deref(),
@@ -104,7 +111,14 @@ fn main() {
     let postprocess: Option<axiom_host::FramePostProcess> = None;
 
     let (pixels, w, h) = render(
-        &backend, &meshes, &skinned_meshes, &materials, &outcome, quality, retro_32bit, postprocess,
+        &backend,
+        &meshes,
+        &skinned_meshes,
+        &materials,
+        &outcome,
+        quality,
+        retro_32bit,
+        postprocess,
     );
 
     capture::write_png(&out, &pixels, w, h);
@@ -130,7 +144,14 @@ fn render(
             capture::render_canvas2d(meshes, skinned_meshes, outcome, quality, WIDTH, HEIGHT)
         }
         _ => capture::render_gpu(
-            meshes, skinned_meshes, materials, outcome, WIDTH, HEIGHT, retro_32bit, postprocess,
+            meshes,
+            skinned_meshes,
+            materials,
+            outcome,
+            WIDTH,
+            HEIGHT,
+            retro_32bit,
+            postprocess,
         ),
     }
 }

@@ -17,11 +17,26 @@ position = [8, 8]\n";
 pub const TEMPLATES: &[(&str, &str)] = &[
     ("Blank 10×10", BLANK_10),
     ("Button Door", super::LEVEL_001_TOML),
-    ("Fading Steps · decay + wells", include_str!("levels/002-fading-steps.toml")),
-    ("Latches · switches", include_str!("levels/003-latches.toml")),
-    ("Heavy Cargo · crates", include_str!("levels/004-heavy-cargo.toml")),
-    ("Three Echoes · budget", include_str!("levels/005-three-echoes.toml")),
-    ("Minefield · hazards", include_str!("levels/006-minefield.toml")),
+    (
+        "Fading Steps · decay + wells",
+        include_str!("levels/002-fading-steps.toml"),
+    ),
+    (
+        "Latches · switches",
+        include_str!("levels/003-latches.toml"),
+    ),
+    (
+        "Heavy Cargo · crates",
+        include_str!("levels/004-heavy-cargo.toml"),
+    ),
+    (
+        "Three Echoes · budget",
+        include_str!("levels/005-three-echoes.toml"),
+    ),
+    (
+        "Minefield · hazards",
+        include_str!("levels/006-minefield.toml"),
+    ),
 ];
 
 /// The TOML of the template named `name`, if it exists.

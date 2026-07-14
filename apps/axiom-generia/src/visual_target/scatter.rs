@@ -40,7 +40,12 @@ pub fn expand(scatter: &Scatter, terrain: &Terrain, clear_center: [f32; 2]) -> V
     // Clump centres, drawn up front so placement can gather around them (clearings
     // fall between). Empty when `clusters == 0` → uniform placement.
     let centers: Vec<(f32, f32)> = (0..scatter.clusters)
-        .map(|_| (lerp(-half, half, unit(&mut stream)), lerp(-half, half, unit(&mut stream))))
+        .map(|_| {
+            (
+                lerp(-half, half, unit(&mut stream)),
+                lerp(-half, half, unit(&mut stream)),
+            )
+        })
         .collect();
     let mut placed: Vec<Tree> = Vec::with_capacity(scatter.count as usize);
     let attempt_cap = scatter.count.saturating_mul(MAX_ATTEMPTS_PER_TREE);
@@ -98,7 +103,12 @@ pub fn expand_groundcover(gc: &Groundcover, terrain: &Terrain) -> Vec<Tuft> {
     let min_sq = gc.min_spacing_m * gc.min_spacing_m;
     // Clump centres (empty → uniform), so ground clutter gathers into patches.
     let centers: Vec<(f32, f32)> = (0..gc.clusters)
-        .map(|_| (lerp(-half, half, unit(&mut stream)), lerp(-half, half, unit(&mut stream))))
+        .map(|_| {
+            (
+                lerp(-half, half, unit(&mut stream)),
+                lerp(-half, half, unit(&mut stream)),
+            )
+        })
         .collect();
     let mut placed: Vec<Tuft> = Vec::with_capacity(gc.count as usize);
     let attempt_cap = gc.count.saturating_mul(MAX_ATTEMPTS_PER_TREE);
@@ -122,7 +132,14 @@ pub fn expand_groundcover(gc: &Groundcover, terrain: &Terrain) -> Vec<Tuft> {
         let radius_m = range(&mut stream, gc.radius_m);
         let yaw_deg = range(&mut stream, [0.0, 360.0]);
         let color = gc.palette[stream.pick_index(gc.palette.len())];
-        placed.push(Tuft { x, z, yaw_deg, height_m, radius_m, color });
+        placed.push(Tuft {
+            x,
+            z,
+            yaw_deg,
+            height_m,
+            radius_m,
+            color,
+        });
     }
     placed
 }
@@ -130,9 +147,17 @@ pub fn expand_groundcover(gc: &Groundcover, terrain: &Terrain) -> Vec<Tuft> {
 /// A candidate placement site. With no clump centres it is uniform over the patch
 /// (unchanged sequence); with centres it gathers around a randomly-chosen centre
 /// (`sqrt` radius → uniform disc density), so trees clump and clearings open between.
-fn site(stream: &mut EntropyStream, centers: &[(f32, f32)], half: f32, cluster_radius_m: f32) -> (f32, f32) {
+fn site(
+    stream: &mut EntropyStream,
+    centers: &[(f32, f32)],
+    half: f32,
+    cluster_radius_m: f32,
+) -> (f32, f32) {
     if centers.is_empty() {
-        return (lerp(-half, half, unit(stream)), lerp(-half, half, unit(stream)));
+        return (
+            lerp(-half, half, unit(stream)),
+            lerp(-half, half, unit(stream)),
+        );
     }
     let (cx, cz) = centers[stream.pick_index(centers.len())];
     let ang = unit(stream) * std::f32::consts::TAU;
@@ -161,7 +186,11 @@ mod tests {
             spacing_m: 1.0,
             base_height_m: 0.0,
             slope,
-            detail: vec![Octave { amplitude_m: 0.5, wavelength_m: 10.0, seed: 1 }],
+            detail: vec![Octave {
+                amplitude_m: 0.5,
+                wavelength_m: 10.0,
+                seed: 1,
+            }],
             ground_bands: vec![],
             rock_albedo: [0.4, 0.4, 0.4],
             rock_slope_start: 0.45,
@@ -278,7 +307,12 @@ mod tests {
             SCATTER_VERSION,
         );
         let centers: Vec<(f32, f32)> = (0..s.clusters)
-            .map(|_| (lerp(-half, half, unit(&mut stream)), lerp(-half, half, unit(&mut stream))))
+            .map(|_| {
+                (
+                    lerp(-half, half, unit(&mut stream)),
+                    lerp(-half, half, unit(&mut stream)),
+                )
+            })
             .collect();
         let mean_to_centre = |trees: &[Tree]| -> f32 {
             let sum: f32 = trees
@@ -294,7 +328,10 @@ mod tests {
             sum / trees.len() as f32
         };
         assert!(!clumped.is_empty() && !uniform.is_empty());
-        assert!(mean_to_centre(&clumped) < mean_to_centre(&uniform), "clustered trees hug centres");
+        assert!(
+            mean_to_centre(&clumped) < mean_to_centre(&uniform),
+            "clustered trees hug centres"
+        );
     }
 
     #[test]

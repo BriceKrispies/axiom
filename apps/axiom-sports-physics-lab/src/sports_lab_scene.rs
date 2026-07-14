@@ -5,8 +5,8 @@
 //! every non-decorative visible object has a physics twin in the core.
 
 use axiom::prelude::{
-    Angle, Camera, Color, DirectionalLight, Entity, Handle, Material, Mesh,
-    PerspectiveProjection, RunningApp, Spawn, Transform, Vec3,
+    Angle, Camera, Color, DirectionalLight, Entity, Handle, Material, Mesh, PerspectiveProjection,
+    RunningApp, Spawn, Transform, Vec3,
 };
 use axiom_host::FrameAmbient;
 use axiom_kernel::{Meters, Ratio};
@@ -117,13 +117,37 @@ impl SportsLabScene {
         // Four walls (visual twins of the physics half-spaces at their inner faces).
         let long = ARENA_HALF_L * 2.0 + WALL_THICKNESS * 2.0;
         let walls = [
-            (Vec3::new(ARENA_HALF_W + WALL_THICKNESS * 0.5, WALL_HEIGHT * 0.5, 0.0), Vec3::new(WALL_THICKNESS, WALL_HEIGHT, long)),
-            (Vec3::new(-(ARENA_HALF_W + WALL_THICKNESS * 0.5), WALL_HEIGHT * 0.5, 0.0), Vec3::new(WALL_THICKNESS, WALL_HEIGHT, long)),
-            (Vec3::new(0.0, WALL_HEIGHT * 0.5, ARENA_HALF_L + WALL_THICKNESS * 0.5), Vec3::new(ARENA_HALF_W * 2.0, WALL_HEIGHT, WALL_THICKNESS)),
-            (Vec3::new(0.0, WALL_HEIGHT * 0.5, -(ARENA_HALF_L + WALL_THICKNESS * 0.5)), Vec3::new(ARENA_HALF_W * 2.0, WALL_HEIGHT, WALL_THICKNESS)),
+            (
+                Vec3::new(ARENA_HALF_W + WALL_THICKNESS * 0.5, WALL_HEIGHT * 0.5, 0.0),
+                Vec3::new(WALL_THICKNESS, WALL_HEIGHT, long),
+            ),
+            (
+                Vec3::new(
+                    -(ARENA_HALF_W + WALL_THICKNESS * 0.5),
+                    WALL_HEIGHT * 0.5,
+                    0.0,
+                ),
+                Vec3::new(WALL_THICKNESS, WALL_HEIGHT, long),
+            ),
+            (
+                Vec3::new(0.0, WALL_HEIGHT * 0.5, ARENA_HALF_L + WALL_THICKNESS * 0.5),
+                Vec3::new(ARENA_HALF_W * 2.0, WALL_HEIGHT, WALL_THICKNESS),
+            ),
+            (
+                Vec3::new(
+                    0.0,
+                    WALL_HEIGHT * 0.5,
+                    -(ARENA_HALF_L + WALL_THICKNESS * 0.5),
+                ),
+                Vec3::new(ARENA_HALF_W * 2.0, WALL_HEIGHT, WALL_THICKNESS),
+            ),
         ];
         for (center, scale) in walls {
-            app.spawn(Spawn::new(Transform::new(center, Quat::IDENTITY, scale), cube, wall_mat));
+            app.spawn(Spawn::new(
+                Transform::new(center, Quat::IDENTITY, scale),
+                cube,
+                wall_mat,
+            ));
         }
 
         // Sun + hemisphere sky.

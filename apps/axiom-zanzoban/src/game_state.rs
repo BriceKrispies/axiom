@@ -257,7 +257,10 @@ impl PuzzleGameState {
     pub fn apply_player_move(&mut self, direction: Direction) -> PuzzleStepResult {
         let target = self.player.position.stepped(direction);
         if !self.resolve_move(ActorId::PLAYER, target, direction) {
-            return PuzzleStepResult::new(StepKind::PlayerMoveRejected(direction), self.is_solved());
+            return PuzzleStepResult::new(
+                StepKind::PlayerMoveRejected(direction),
+                self.is_solved(),
+            );
         }
         self.player.position = target;
         self.recording.record(direction);
@@ -279,10 +282,7 @@ impl PuzzleGameState {
     pub fn reset_life_from_recording(&mut self) -> PuzzleStepResult {
         if let Some(budget) = self.level.rules.budget {
             if self.ghosts.len() as u32 >= budget.max_ghosts {
-                return PuzzleStepResult::new(
-                    StepKind::LifeRejectedBudgetFull,
-                    self.is_solved(),
-                );
+                return PuzzleStepResult::new(StepKind::LifeRejectedBudgetFull, self.is_solved());
             }
         }
         let replay = GhostReplay::new(self.recording.recorded().to_vec());

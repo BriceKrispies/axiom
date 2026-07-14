@@ -108,11 +108,17 @@ fn a_switch_latches_a_door_open_and_toggles() {
     // Step off onto the (now open) door: latch persists (not a hold).
     mv(&mut s, Direction::Right);
     assert_eq!(s.player().position, GridCoord::new(2, 0));
-    assert!(s.is_group_open(&group), "latch persists after leaving the switch");
+    assert!(
+        s.is_group_open(&group),
+        "latch persists after leaving the switch"
+    );
     // Step back onto the switch -> toggles the latch off (edge-triggered on entry).
     mv(&mut s, Direction::Left);
     assert_eq!(s.player().position, GridCoord::new(1, 0));
-    assert!(!s.is_group_open(&group), "re-entering the switch toggled it off");
+    assert!(
+        !s.is_group_open(&group),
+        "re-entering the switch toggled it off"
+    );
 }
 
 #[test]
@@ -198,7 +204,11 @@ fn a_hazard_kills_the_live_player() {
         died.player_died(),
         "stepping onto a hazard kills the current life"
     );
-    assert_eq!(s.player().position, GridCoord::new(0, 0), "back at the entrance");
+    assert_eq!(
+        s.player().position,
+        GridCoord::new(0, 0),
+        "back at the entrance"
+    );
     assert_eq!(s.ghost_count(), 0, "no ghost is created by a death");
     assert_eq!(s.recording_len(), 0, "the recording was cleared");
 }

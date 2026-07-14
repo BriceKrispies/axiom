@@ -231,8 +231,7 @@ mod tests {
     use crate::seed::WorldSeed;
 
     fn genome_for(preset: PlanetPreset, seed: &str) -> PlanetGenome {
-        let mut rng =
-            crate::seed::worldgen_stream(WorldSeed::from_str_seed(seed).value);
+        let mut rng = crate::seed::worldgen_stream(WorldSeed::from_str_seed(seed).value);
         sample_genome(preset, &mut rng)
     }
 

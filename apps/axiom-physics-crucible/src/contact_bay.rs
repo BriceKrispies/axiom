@@ -128,7 +128,10 @@ mod tests {
         // never pass through the floor.
         let h = world.nth_body(CrucibleStation::ContactBay, 1).unwrap();
         let y = world.position_of(h).unwrap().y;
-        assert!(y > 0.3 && y < 0.8, "sphere did not rest on the plane: y={y}");
+        assert!(
+            y > 0.3 && y < 0.8,
+            "sphere did not rest on the plane: y={y}"
+        );
     }
 
     #[test]

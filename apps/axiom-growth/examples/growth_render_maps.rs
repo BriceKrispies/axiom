@@ -9,9 +9,9 @@
 //!
 //! Run: cargo run -p axiom-growth --example growth_render_maps
 
+use axiom_growth::curves;
 use axiom_growth::gameworld;
 use axiom_growth::model_world::{GameWorldLocalMap, CHUNK_SIZE_CELLS, CHUNK_VERT_SIDE};
-use axiom_growth::curves;
 use axiom_growth::presets::PlanetPreset;
 use axiom_growth::sampler::{self, biome};
 use axiom_growth::Growth;

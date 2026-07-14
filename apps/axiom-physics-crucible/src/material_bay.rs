@@ -119,7 +119,10 @@ mod tests {
     fn an_elastic_sphere_rebounds_upward_and_an_inelastic_one_does_not() {
         let elastic = rebound_velocity(0.9);
         let inelastic = rebound_velocity(0.0);
-        assert!(elastic > 0.1, "elastic sphere should rebound up, got {elastic}");
+        assert!(
+            elastic > 0.1,
+            "elastic sphere should rebound up, got {elastic}"
+        );
         assert!(
             inelastic < elastic - 0.1,
             "inelastic ({inelastic}) should rebound far less than elastic ({elastic})"

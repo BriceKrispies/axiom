@@ -29,10 +29,7 @@ fn cylinder_emissive() -> Color {
 #[cfg(feature = "offscreen")]
 fn nova_roll() -> RunningApp {
     App::new()
-        .window(
-            Window::new(W, H)
-                .with_clear_color(Color::linear_rgb(ch(0.02), ch(0.02), ch(0.05))),
-        )
+        .window(Window::new(W, H).with_clear_color(Color::linear_rgb(ch(0.02), ch(0.02), ch(0.05))))
         .add_plugins(DefaultPlugins)
         .setup(|world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
@@ -102,8 +99,14 @@ fn nova_roll_renders_one_frame_on_both_backends_in_agreement() {
     let (gcx, gcy, gcov) = common::region_stats(&gpu_px, gw, gh, 24);
     let (scx, scy, scov) = common::region_stats(&sw_px, sw_w, sw_h, 24);
 
-    assert!(gcov > 0.02 && gcov < 0.7, "gpu coverage {gcov:.3} out of range");
-    assert!(scov > 0.02 && scov < 0.7, "canvas2d coverage {scov:.3} out of range");
+    assert!(
+        gcov > 0.02 && gcov < 0.7,
+        "gpu coverage {gcov:.3} out of range"
+    );
+    assert!(
+        scov > 0.02 && scov < 0.7,
+        "canvas2d coverage {scov:.3} out of range"
+    );
 
     let dx = (gcx - scx).abs();
     let dy = (gcy - scy).abs();
@@ -114,8 +117,14 @@ fn nova_roll_renders_one_frame_on_both_backends_in_agreement() {
 
     let (gl, gr) = common::half_coverage(&gpu_px, gw, gh, 24);
     let (sl, sr) = common::half_coverage(&sw_px, sw_w, sw_h, 24);
-    assert!(gl > 0.01 && gr > 0.01, "gpu missing an object in a half: l={gl:.3} r={gr:.3}");
-    assert!(sl > 0.01 && sr > 0.01, "canvas2d missing an object in a half: l={sl:.3} r={sr:.3}");
+    assert!(
+        gl > 0.01 && gr > 0.01,
+        "gpu missing an object in a half: l={gl:.3} r={gr:.3}"
+    );
+    assert!(
+        sl > 0.01 && sr > 0.01,
+        "canvas2d missing an object in a half: l={sl:.3} r={sr:.3}"
+    );
 }
 
 #[test]

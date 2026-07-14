@@ -221,9 +221,9 @@ fn frame(_tick: u64) -> FrameOut {
 fn cached_view_proj(w: u32, h: u32, perspective: bool) -> Mat4 {
     VIEW_PROJ.with(|cache| {
         let mut cache = cache.borrow_mut();
-        let hit = cache
-            .as_ref()
-            .and_then(|(cw, ch, cp, vp)| (*cw == w && *ch == h && *cp == perspective).then_some(*vp));
+        let hit = cache.as_ref().and_then(|(cw, ch, cp, vp)| {
+            (*cw == w && *ch == h && *cp == perspective).then_some(*vp)
+        });
         hit.unwrap_or_else(|| {
             let vp = scene3d::view_projection(w, h, perspective);
             *cache = Some((w, h, perspective, vp));

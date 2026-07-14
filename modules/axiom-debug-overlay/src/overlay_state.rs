@@ -64,7 +64,6 @@ impl OverlayState {
         state
     }
 
-
     pub(crate) fn is_visible(&self) -> bool {
         self.interface.is_visible(self.panel)
     }
@@ -95,7 +94,6 @@ impl OverlayState {
         SYNC[usize::from(self.is_visible())](self);
     }
 
-
     pub(crate) fn is_pinned(&self) -> bool {
         self.interface.is_pinned(self.panel)
     }
@@ -114,7 +112,6 @@ impl OverlayState {
         self.interface.toggle_pin(self.panel);
         self.refresh_panel();
     }
-
 
     pub(crate) fn density_label(&self) -> &'static str {
         self.density.label()
@@ -161,14 +158,11 @@ impl OverlayState {
             OverlayState::toggle_pin,
             OverlayState::focus_console,
         ];
-        OPS.get(action as usize)
-            .into_iter()
-            .for_each(|op| op(self));
+        OPS.get(action as usize).into_iter().for_each(|op| op(self));
     }
 }
 
 impl OverlayState {
-
     pub(crate) fn focus_console(&mut self) {
         self.interface.focus_console(self.panel);
         self.refresh_panel();
@@ -229,7 +223,6 @@ impl OverlayState {
         });
         self.refresh_panel();
     }
-
 
     pub(crate) fn diagnostics(&self) -> &Diagnostics {
         &self.diagnostics
@@ -641,7 +634,10 @@ mod tests {
         };
         // Plain ` toggles; Shift cycles density; Ctrl pins; Alt focuses console.
         // Opening via the plain chord also lands focus in the console.
-        assert_eq!(s.apply_key("Backquote", chord(false, false, false)), Some(0));
+        assert_eq!(
+            s.apply_key("Backquote", chord(false, false, false)),
+            Some(0)
+        );
         assert!(s.is_visible());
         assert!(s.is_console_focused());
         assert_eq!(s.apply_key("Backquote", chord(true, false, false)), Some(1));
@@ -758,7 +754,10 @@ mod tests {
     #[test]
     fn scrubber_command_queues_a_single_toggle_request() {
         let mut s = OverlayState::new();
-        assert!(!s.take_scrubber_toggle(), "nothing pending before the command");
+        assert!(
+            !s.take_scrubber_toggle(),
+            "nothing pending before the command"
+        );
         s.submit_command("scrubber");
         assert!(s
             .recent_results()

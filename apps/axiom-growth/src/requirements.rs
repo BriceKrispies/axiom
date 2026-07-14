@@ -186,7 +186,12 @@ pub const REQUIREMENTS: &[Requirement] = &[
         Engine,
         "axiom-noise layer (value_noise/Fbm)",
     ),
-    r("PRIM-geo", "procgen", Implemented, "axiom_math:: spherical math"),
+    r(
+        "PRIM-geo",
+        "procgen",
+        Implemented,
+        "axiom_math:: spherical math",
+    ),
     r(
         "PRIM-icosphere",
         "procgen",

@@ -104,7 +104,11 @@ pub fn handle(request: Request, ctx: &ServeCtx) {
     }
     if ctx.kind == AppKind::TsWebEngine {
         if let Some(rest) = path.strip_prefix("/vendor/axiom-web-engine/") {
-            let base = ctx.root.join("packages").join("axiom-web-engine").join("dist");
+            let base = ctx
+                .root
+                .join("packages")
+                .join("axiom-web-engine")
+                .join("dist");
             serve_file(request, ctx, &base, rest);
             return;
         }
@@ -132,8 +136,8 @@ fn serve_file(request: Request, ctx: &ServeCtx, base: &Path, rel: &str) {
             let _ = request.respond(response);
         }
         Err(_) => {
-            let _ = request
-                .respond(Response::from_string(format!("404 {rel}")).with_status_code(404));
+            let _ =
+                request.respond(Response::from_string(format!("404 {rel}")).with_status_code(404));
         }
     }
 }
@@ -348,25 +352,48 @@ mod tests {
         // A <head> with attributes still gets the map after its tag; and a
         // page with no <head> gets it prepended, never inside "<header>".
         let attrs = "<html><head lang=\"en\"><title>t</title></head></html>";
-        assert!(inject_import_map(attrs).find("importmap").unwrap()
-            > attrs.find('>').unwrap());
+        assert!(inject_import_map(attrs).find("importmap").unwrap() > attrs.find('>').unwrap());
         let headless = "<header>x</header>";
         assert!(inject_import_map(headless).starts_with(WEB_ENGINE_IMPORT_MAP));
     }
 
     #[test]
     fn content_types_cover_the_extended_table() {
-        assert_eq!(content_type_for(Path::new("i.html")), "text/html; charset=utf-8");
-        assert_eq!(content_type_for(Path::new("a.js")), "text/javascript; charset=utf-8");
-        assert_eq!(content_type_for(Path::new("a.mjs")), "text/javascript; charset=utf-8");
-        assert_eq!(content_type_for(Path::new("s.css")), "text/css; charset=utf-8");
-        assert_eq!(content_type_for(Path::new("d.json")), "application/json; charset=utf-8");
-        assert_eq!(content_type_for(Path::new("a.js.map")), "application/json; charset=utf-8");
+        assert_eq!(
+            content_type_for(Path::new("i.html")),
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            content_type_for(Path::new("a.js")),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(
+            content_type_for(Path::new("a.mjs")),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(
+            content_type_for(Path::new("s.css")),
+            "text/css; charset=utf-8"
+        );
+        assert_eq!(
+            content_type_for(Path::new("d.json")),
+            "application/json; charset=utf-8"
+        );
+        assert_eq!(
+            content_type_for(Path::new("a.js.map")),
+            "application/json; charset=utf-8"
+        );
         assert_eq!(content_type_for(Path::new("m.wasm")), "application/wasm");
         assert_eq!(content_type_for(Path::new("p.png")), "image/png");
         assert_eq!(content_type_for(Path::new("v.svg")), "image/svg+xml");
-        assert_eq!(content_type_for(Path::new("s.ts")), "text/typescript; charset=utf-8");
-        assert_eq!(content_type_for(Path::new("x.bin")), "application/octet-stream");
+        assert_eq!(
+            content_type_for(Path::new("s.ts")),
+            "text/typescript; charset=utf-8"
+        );
+        assert_eq!(
+            content_type_for(Path::new("x.bin")),
+            "application/octet-stream"
+        );
     }
 
     #[test]

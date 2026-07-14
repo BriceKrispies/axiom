@@ -61,7 +61,9 @@ pub fn gravix_start() {
     install_mouse_look(&held);
 
     let mut windowing = WindowingApi::new();
-    windowing.configure_surface(1280, 720).expect("surface dimensions are valid");
+    windowing
+        .configure_surface(1280, 720)
+        .expect("surface dimensions are valid");
 
     let game = GravixGame::new();
     let (running, scene) = live_app(&game);
@@ -160,7 +162,9 @@ fn install_key_listeners(held: &Rc<RefCell<Held>>) {
 fn install_mouse_look(held: &Rc<RefCell<Held>>) {
     let window = web_sys::window().expect("a browser window");
     let document = window.document().expect("a document");
-    let canvas = document.get_element_by_id(CANVAS_ID).expect("the gravix canvas element");
+    let canvas = document
+        .get_element_by_id(CANVAS_ID)
+        .expect("the gravix canvas element");
 
     // Click the canvas to capture the pointer.
     let lock_target = canvas.clone();
@@ -225,5 +229,9 @@ fn update_hud(game: &GravixGame) {
         Phase::Finished => "  —  FINISH! · press R".to_string(),
         Phase::FellOut => "  —  OUT! resetting…".to_string(),
     };
-    hud.set_text_content(Some(&format!("GRAVIX   SPEED {:>3.0}{}", game.speed(), banner)));
+    hud.set_text_content(Some(&format!(
+        "GRAVIX   SPEED {:>3.0}{}",
+        game.speed(),
+        banner
+    )));
 }

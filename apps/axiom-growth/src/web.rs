@@ -553,7 +553,8 @@ fn gen_chunk(
         let dir = localmap.world_metres_to_unit_dir(x_m, z_m);
         let s = sampler::sample_surface(atlas, Vec3::new(dir[0], dir[1], dir[2]));
         let t = (0.5 + y_m / RELIEF_SPAN_M).clamp(0.0, 1.0);
-        let [cr, cg, cb, ca] = biome_terrain_color(s.biome.0, s.elevation.get(), s.moisture.get(), t);
+        let [cr, cg, cb, ca] =
+            biome_terrain_color(s.biome.0, s.elevation.get(), s.moisture.get(), t);
 
         // Albedo UV into the biome atlas: pick the vertex's biome cell, then tile
         // a fractional position within that 0.5×0.5 cell by world metres so the
@@ -967,7 +968,9 @@ pub fn descend(u: f32, v: f32) {
             ),
         );
     }
-    let far_field = Rc::new(build_far_field_mesh(&growth, &localmap, seed, &plan, anchor_h));
+    let far_field = Rc::new(build_far_field_mesh(
+        &growth, &localmap, seed, &plan, anchor_h,
+    ));
     let (init_vertices, init_indices) = assemble_with_far(&loaded, &far_field);
     log(&format!(
         "[lod] chunks={} verts={} far_verts={} draw={:.0}m (initial, anchor_h={:.1}m)",
@@ -1068,8 +1071,7 @@ pub fn descend(u: f32, v: f32) {
                 let above = out.ground_height_m - plan.shelf_height_m;
                 let (peak_x, peak_z) = plan.peak_xz;
                 let dist = ((player_x - peak_x).powi(2) + (player_z - peak_z).powi(2)).sqrt();
-                let reached =
-                    dist <= ground::MOVE_SPEED * 1.5 || above >= plan.prominence_m * 0.99;
+                let reached = dist <= ground::MOVE_SPEED * 1.5 || above >= plan.prominence_m * 0.99;
                 let obs = format!(
                     "{{\"tick\":{tick},\"x\":{player_x},\"z\":{player_z},\"yaw\":{player_yaw},\
                      \"ground_height_m\":{ground},\"height_above_spawn_m\":{above},\

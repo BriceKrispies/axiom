@@ -8,5 +8,6 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub fn overlay_start() {
     console_error_panic_hook::set_once();
-    axiom_debug_overlay::DebugOverlayApi::new().mount_with_measured_diagnostics("axiom-stress-cubes");
+    axiom_debug_overlay::DebugOverlayApi::new()
+        .mount_with_measured_diagnostics("axiom-stress-cubes");
 }

@@ -182,9 +182,18 @@ mod tests {
         let sdk = r#"{"paths": {"@axiom/game": ["../x"]}}"#;
         let engine = r#"{"paths": {"@axiom/web-engine": ["../x"]}}"#;
         let plain = r#"{"compilerOptions": {}}"#;
-        assert_eq!(detect_kind_from(Some(sdk), None).unwrap(), AppKind::TsSdkHosted);
-        assert_eq!(detect_kind_from(Some(engine), None).unwrap(), AppKind::TsWebEngine);
-        assert_eq!(detect_kind_from(Some(plain), None).unwrap(), AppKind::TsPlain);
+        assert_eq!(
+            detect_kind_from(Some(sdk), None).unwrap(),
+            AppKind::TsSdkHosted
+        );
+        assert_eq!(
+            detect_kind_from(Some(engine), None).unwrap(),
+            AppKind::TsWebEngine
+        );
+        assert_eq!(
+            detect_kind_from(Some(plain), None).unwrap(),
+            AppKind::TsPlain
+        );
     }
 
     #[test]
@@ -214,8 +223,12 @@ mod tests {
     fn rejects_unrecognized_shapes() {
         // No tsconfig, no cdylib: not servable.
         let cargo = "[package]\nname = \"axiom-native-only\"\n";
-        assert!(detect_kind_from(None, Some(cargo)).unwrap_err().contains("Recognized shapes"));
-        assert!(detect_kind_from(None, None).unwrap_err().contains("Recognized shapes"));
+        assert!(detect_kind_from(None, Some(cargo))
+            .unwrap_err()
+            .contains("Recognized shapes"));
+        assert!(detect_kind_from(None, None)
+            .unwrap_err()
+            .contains("Recognized shapes"));
     }
 
     #[test]
@@ -240,7 +253,11 @@ mod tests {
         assert!(err.contains("definitely-not-an-app"));
         assert!(err.contains("axiom-definitely-not-an-app"));
         // All four candidate forms are listed.
-        assert_eq!(err.lines().count(), 5, "one header + four candidates:\n{err}");
+        assert_eq!(
+            err.lines().count(),
+            5,
+            "one header + four candidates:\n{err}"
+        );
 
         fs::remove_dir_all(&root).ok();
     }
@@ -282,7 +299,10 @@ mod tests {
         let app = Path::new("apps").join("axiom-x");
         let rust = watch_spec(
             &app,
-            &AppKind::RustWasm { crate_name: "axiom-x".into(), snake: "axiom_x".into() },
+            &AppKind::RustWasm {
+                crate_name: "axiom-x".into(),
+                snake: "axiom_x".into(),
+            },
         );
         assert!(rust.roots.contains(&app.join("src")));
         assert!(rust.roots.contains(&app.join("Cargo.toml")));

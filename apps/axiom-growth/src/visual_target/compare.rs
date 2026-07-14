@@ -34,11 +34,19 @@ pub struct Tolerance {
 
 impl Tolerance {
     /// Byte-exact (deterministic Canvas 2D backend).
-    pub const EXACT: Tolerance = Tolerance { mean: 0.0, max: 0, per_pixel: 0 };
+    pub const EXACT: Tolerance = Tolerance {
+        mean: 0.0,
+        max: 0,
+        per_pixel: 0,
+    };
 
     /// A lenient default for the GPU backend (same-adapter reproducible, but not
     /// bit-identical across drivers).
-    pub const GPU_DEFAULT: Tolerance = Tolerance { mean: 2.0, max: 40, per_pixel: 16 };
+    pub const GPU_DEFAULT: Tolerance = Tolerance {
+        mean: 2.0,
+        max: 40,
+        per_pixel: 16,
+    };
 
     /// Whether `report` passes this tolerance.
     pub fn passes(&self, report: &DiffReport) -> bool {
@@ -94,13 +102,20 @@ pub fn compare_rgba(
 /// runner only ever blesses RGBA8 references).
 pub fn decode_rgba_png(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
     let decoder = png::Decoder::new(bytes);
-    let mut reader = decoder.read_info().map_err(|e| format!("PNG header: {e}"))?;
+    let mut reader = decoder
+        .read_info()
+        .map_err(|e| format!("PNG header: {e}"))?;
     let mut buf = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buf).map_err(|e| format!("PNG decode: {e}"))?;
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("PNG decode: {e}"))?;
     (info.color_type == png::ColorType::Rgba && info.bit_depth == png::BitDepth::Eight)
         .then_some(())
         .ok_or_else(|| {
-            format!("reference must be RGBA8 PNG (got {:?} {:?})", info.color_type, info.bit_depth)
+            format!(
+                "reference must be RGBA8 PNG (got {:?} {:?})",
+                info.color_type, info.bit_depth
+            )
         })?;
     buf.truncate(info.buffer_size());
     Ok((buf, info.width, info.height))
@@ -113,7 +128,12 @@ pub fn diff_heatmap(produced: &[u8], reference: &[u8]) -> Vec<u8> {
         .chunks_exact(4)
         .zip(reference.chunks_exact(4))
         .flat_map(|(p, r)| {
-            let d = p.iter().zip(r).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            let d = p
+                .iter()
+                .zip(r)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap_or(0);
             [d, 0, 0, 255]
         })
         .collect()

@@ -154,7 +154,12 @@ impl Target {
         let human_note = verdict.as_ref().map(|v| v.note.clone()).unwrap_or_default();
         let reason = resolved
             .human_overrode
-            .then(|| format!("{machine_reason} [human override: machine said {}]", resolved.machine))
+            .then(|| {
+                format!(
+                    "{machine_reason} [human override: machine said {}]",
+                    resolved.machine
+                )
+            })
             .unwrap_or(machine_reason);
 
         let promoted = resolved.effective.replaces_champion();
@@ -191,7 +196,13 @@ impl Target {
         // Consume the one-shot verdict so it never silently re-applies next round.
         self.archive_verdict(iteration)?;
 
-        Ok(ReviewOutcome { attacked_axis: attacked, resolved, promoted, entry, diagnostics })
+        Ok(ReviewOutcome {
+            attacked_axis: attacked,
+            resolved,
+            promoted,
+            entry,
+            diagnostics,
+        })
     }
 
     /// Promote the candidate to champion: the candidate manifest, screenshot, and
@@ -199,7 +210,10 @@ impl Target {
     fn promote(&self) -> Result<(), String> {
         copy_if_exists(&self.candidate_manifest(), &self.champion_manifest())?;
         copy_if_exists(&self.candidate_png(), &self.champion_png())?;
-        copy_if_exists(&self.candidate_scorecard_path(), &self.champion_scorecard_path())?;
+        copy_if_exists(
+            &self.candidate_scorecard_path(),
+            &self.champion_scorecard_path(),
+        )?;
         Ok(())
     }
 
@@ -211,7 +225,9 @@ impl Target {
             .then(|| {
                 std::fs::create_dir_all(self.diagnostics_dir())
                     .map_err(|e| format!("create diagnostics dir: {e}"))?;
-                let dst = self.diagnostics_dir().join(format!("verdict.iter{iteration:04}.toml"));
+                let dst = self
+                    .diagnostics_dir()
+                    .join(format!("verdict.iter{iteration:04}.toml"));
                 std::fs::rename(&path, &dst).map_err(|e| format!("archive verdict: {e}"))
             })
             .transpose()
@@ -231,7 +247,8 @@ impl Target {
         let written = pairs
             .into_iter()
             .filter_map(|(base, label)| {
-                self.try_diff(&self.candidate_png(), &base, iteration, label).transpose()
+                self.try_diff(&self.candidate_png(), &base, iteration, label)
+                    .transpose()
             })
             .collect::<Result<Vec<String>, String>>()?;
         Ok(written)
@@ -254,7 +271,9 @@ impl Target {
             .filter(|((_, aw, ah), (_, bw, bh))| aw == bw && ah == bh)
             .map(|((ap, aw, ah), (bp, _, _))| {
                 let heat = compare::diff_heatmap(&ap, &bp);
-                let out = self.diagnostics_dir().join(format!("iter{iteration:04}_{label}.png"));
+                let out = self
+                    .diagnostics_dir()
+                    .join(format!("iter{iteration:04}_{label}.png"));
                 write_png(&out, &heat, aw, ah).map(|()| file_name(&out))
             })
             .transpose()
@@ -272,33 +291,43 @@ fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> Result<(), St
     path.parent()
         .map(|p| std::fs::create_dir_all(p).map_err(|e| format!("create {}: {e}", p.display())))
         .transpose()?;
-    let file = std::fs::File::create(path).map_err(|e| format!("create {}: {e}", path.display()))?;
+    let file =
+        std::fs::File::create(path).map_err(|e| format!("create {}: {e}", path.display()))?;
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(|e| format!("PNG header: {e}"))?;
-    writer.write_image_data(rgba).map_err(|e| format!("PNG data: {e}"))
+    let mut writer = encoder
+        .write_header()
+        .map_err(|e| format!("PNG header: {e}"))?;
+    writer
+        .write_image_data(rgba)
+        .map_err(|e| format!("PNG data: {e}"))
 }
 
 /// Copy `src` over `dst`, erroring if `src` is missing.
 #[allow(clippy::obfuscated_if_else)] // branchless-style selection, moved as-is
 fn copy_if_exists(src: &Path, dst: &Path) -> Result<(), String> {
     src.exists()
-        .then(|| std::fs::copy(src, dst).map(|_| ()).map_err(|e| {
-            format!("copy {} -> {}: {e}", src.display(), dst.display())
-        }))
+        .then(|| {
+            std::fs::copy(src, dst)
+                .map(|_| ())
+                .map_err(|e| format!("copy {} -> {}: {e}", src.display(), dst.display()))
+        })
         .unwrap_or_else(|| Err(format!("cannot promote: {} is missing", src.display())))
 }
 
 /// The file name of a path as an owned `String` (for ledger paths).
 fn file_name(path: &Path) -> String {
-    path.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string()
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::review::Decision;
+    use super::*;
 
     /// A 2×2 solid-colour RGBA8 PNG written to `path`.
     fn write_solid(path: &Path, rgba: [u8; 4]) {
@@ -353,13 +382,18 @@ mod tests {
         let mut cand = champ;
         cand.set(Axis::FogAndHaze, 3); // attacked axis improves, nothing drops
         let t = seed("promote", champ, cand);
-        let out = t.review(vec!["manifest.candidate.toml".into()], false).unwrap();
+        let out = t
+            .review(vec!["manifest.candidate.toml".into()], false)
+            .unwrap();
         assert_eq!(out.attacked_axis, Axis::FogAndHaze);
         assert_eq!(out.resolved.effective, Decision::KeepCandidate);
         assert!(out.promoted);
         // Champion scorecard + png were overwritten by the candidate's.
         assert_eq!(t.champion_scorecard().unwrap(), cand);
-        assert_eq!(std::fs::read(t.champion_png()).unwrap(), std::fs::read(t.candidate_png()).unwrap());
+        assert_eq!(
+            std::fs::read(t.champion_png()).unwrap(),
+            std::fs::read(t.candidate_png()).unwrap()
+        );
         // Ledger has one full entry, and diagnostics were emitted.
         let ledger = t.ledger().unwrap();
         assert_eq!(ledger.entries.len(), 1);
@@ -442,7 +476,13 @@ mod tests {
         write_solid_rgb(&t.reference_png(), [30, 30, 30]); // overwrite RGBA ref with RGB
         let out = t.review(vec![], false).unwrap();
         assert!(out.promoted);
-        assert!(out.diagnostics.iter().any(|d| d.contains("candidate_vs_champion")));
-        assert!(!out.diagnostics.iter().any(|d| d.contains("candidate_vs_reference")));
+        assert!(out
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("candidate_vs_champion")));
+        assert!(!out
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("candidate_vs_reference")));
     }
 }

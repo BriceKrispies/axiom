@@ -108,7 +108,8 @@ pub fn step_first_person(
     state.z += world_step.z;
 
     // 3. Sample the vista-composited surface and seat the eye on it.
-    let sampled = sample_height_m_lod_vista(atlas, localmap, seed, state.x, state.z, 0.0, Some(plan));
+    let sampled =
+        sample_height_m_lod_vista(atlas, localmap, seed, state.x, state.z, 0.0, Some(plan));
     let desired_y = sampled - anchor_h + EYE_HEIGHT_M;
 
     // 4. Build the engine input: the horizontal step (move_local carries no
@@ -207,9 +208,17 @@ impl GroundSim {
         let (spawn_x, spawn_z) = plan.spawn_xz;
         let view_yaw = plan.view_yaw;
         let eye_y = EYE_HEIGHT_M; // shelf recentred to 0.
-        let app = build_first_person_app(Self::HEADLESS_SURFACE_ID, 960, 600, spawn_x, spawn_z, eye_y);
-        let ground_height_m =
-            sample_height_m_lod_vista(&growth.atlas, &localmap, seed, spawn_x, spawn_z, 0.0, Some(&plan));
+        let app =
+            build_first_person_app(Self::HEADLESS_SURFACE_ID, 960, 600, spawn_x, spawn_z, eye_y);
+        let ground_height_m = sample_height_m_lod_vista(
+            &growth.atlas,
+            &localmap,
+            seed,
+            spawn_x,
+            spawn_z,
+            0.0,
+            Some(&plan),
+        );
         Self {
             growth,
             localmap,
@@ -303,7 +312,15 @@ impl GroundSim {
     /// Sample the absolute composited terrain height (metres) at a world point —
     /// used to seat a tagged ground point on the actual surface.
     pub fn ground_abs_at(&self, x: f32, z: f32) -> f32 {
-        sample_height_m_lod_vista(&self.growth.atlas, &self.localmap, self.seed, x, z, 0.0, Some(&self.plan))
+        sample_height_m_lod_vista(
+            &self.growth.atlas,
+            &self.localmap,
+            self.seed,
+            x,
+            z,
+            0.0,
+            Some(&self.plan),
+        )
     }
 
     /// Absolute summit altitude (metres).
@@ -333,7 +350,6 @@ impl GroundSim {
         self.distance_to_peak_m() <= MOVE_SPEED * 1.5
             || self.height_above_spawn_m() >= self.plan.prominence_m * 0.99
     }
-
 }
 
 /// The neutral render data for one off-screen capture — plain values only, **no
@@ -466,7 +482,12 @@ impl GroundSim {
     /// terrain, points yaw + pitch straight at the target, and gathers the render
     /// inputs. A target below the eye (the ground) naturally pitches down; a target
     /// above (a far peak) pitches up.
-    pub fn capture_lookat(&mut self, target_x: f32, target_y_abs: f32, target_z: f32) -> CaptureInputs {
+    pub fn capture_lookat(
+        &mut self,
+        target_x: f32,
+        target_y_abs: f32,
+        target_z: f32,
+    ) -> CaptureInputs {
         // Lift the eye clear above the terrain: from a near-vertical spire the
         // coarse snapshot mesh's peak spikes would engulf an eye at exactly summit
         // height, so a commanding look needs the camera a few hundred metres up.

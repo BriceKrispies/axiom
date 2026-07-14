@@ -95,7 +95,12 @@ fn micro(cell: i32) -> i64 {
 /// hold-set of the planned move: the plan *is* the decision, run through the
 /// substrate so it produces a real report and emits a player-equivalent intent
 /// the app then lowers.
-fn decide_move(state: &PuzzleGameState, planned: Direction, goal: GridCoord, tick: u64) -> Direction {
+fn decide_move(
+    state: &PuzzleGameState,
+    planned: Direction,
+    goal: GridCoord,
+    tick: u64,
+) -> Direction {
     let agent_id = AgentApi::create_agent_id(AGENT_RAW_ID);
     let profile = AgentApi::debug_perfect_profile();
     let mut brain = AgentApi::hold_set_brain(vec![control_of(planned)]);
@@ -129,8 +134,14 @@ fn decide_move(state: &PuzzleGameState, planned: Direction, goal: GridCoord, tic
     let observation = builder.build();
 
     let step = RuntimeStep::new(FrameIndex::new(0), Tick::new(tick), FIXED_DELTA_NANOS, 0);
-    let (_report, queue) =
-        AgentApi::step(agent_id, profile, &mut brain, &observation, &mut memory, step);
+    let (_report, queue) = AgentApi::step(
+        agent_id,
+        profile,
+        &mut brain,
+        &observation,
+        &mut memory,
+        step,
+    );
 
     // The debug-perfect hold-set emits exactly the planned control, so the lowered
     // move equals the plan — but it is the agent's *emitted* decision we apply.
@@ -220,10 +231,8 @@ pub fn play_first_level() -> Playthrough {
 /// walks the live player through the opened door to the exit. Every move is
 /// emitted through `axiom-agent`; ghost cadence advances via `Tick` commands.
 pub fn play(level: LevelDefinition) -> Playthrough {
-    let gate: Option<(GridCoord, GroupId)> = level
-        .buttons
-        .first()
-        .map(|b| (b.position, b.group.clone()));
+    let gate: Option<(GridCoord, GroupId)> =
+        level.buttons.first().map(|b| (b.position, b.group.clone()));
     let exit = level.exit;
     let mut state = PuzzleGameState::new(level);
     let mut moves = Vec::new();
@@ -300,7 +309,8 @@ pub fn play(level: LevelDefinition) -> Playthrough {
             }
         }
     }
-    (state.is_solved()).then(|| events.push(format!("reached the exit at ({}, {})", exit.x, exit.y)));
+    (state.is_solved())
+        .then(|| events.push(format!("reached the exit at ({}, {})", exit.x, exit.y)));
 
     Playthrough {
         solved: state.is_solved(),
@@ -330,10 +340,7 @@ mod tests {
         for event in &run.events {
             println!("  · {event}");
         }
-        println!(
-            "  moves emitted through axiom-agent: {:?}",
-            run.moves
-        );
+        println!("  moves emitted through axiom-agent: {:?}", run.moves);
         println!(
             "  outcome: solved={} ghosts={} final_tick={}\n",
             run.solved, run.ghosts, run.ticks

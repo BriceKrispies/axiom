@@ -130,7 +130,12 @@ pub struct Style {
 impl Style {
     /// The neutral style (no change) used when the manifest omits `[style]`.
     pub fn neutral() -> Style {
-        Style { exposure: 1.0, ambient: 0.0, foliage_saturation: 1.0, distance_desaturation: 0.0 }
+        Style {
+            exposure: 1.0,
+            ambient: 0.0,
+            foliage_saturation: 1.0,
+            distance_desaturation: 0.0,
+        }
     }
 }
 
@@ -392,12 +397,14 @@ impl Manifest {
 
     /// Reject a manifest whose numbers cannot describe a renderable frame.
     fn validate(&self) -> Result<(), String> {
-        (self.version == MANIFEST_VERSION).then_some(()).ok_or_else(|| {
-            format!(
+        (self.version == MANIFEST_VERSION)
+            .then_some(())
+            .ok_or_else(|| {
+                format!(
                 "manifest version {} unsupported (this runner speaks version {MANIFEST_VERSION})",
                 self.version
             )
-        })?;
+            })?;
         let c = &self.camera;
         (c.width_px > 0 && c.height_px > 0)
             .then_some(())

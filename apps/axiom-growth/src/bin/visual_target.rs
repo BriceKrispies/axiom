@@ -26,14 +26,14 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use axiom_canvas2d_backend::Canvas2dBackendApi;
+use axiom_gpu_backend::GpuBackendApi;
 use axiom_growth::visual_target::abstraction::{self, AbstractionRecord};
 use axiom_growth::visual_target::axes::Scorecard;
 use axiom_growth::visual_target::compare::{self, Tolerance};
 use axiom_growth::visual_target::review::{self, HumanVerdict};
+use axiom_growth::visual_target::scene::Manifest;
 use axiom_growth::visual_target::target::Target;
 use axiom_growth::visual_target::{build, RenderData};
-use axiom_growth::visual_target::scene::Manifest;
-use axiom_gpu_backend::GpuBackendApi;
 use axiom_host::{
     FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
     HostAlphaMode, HostApi, HostColorFormat, HostDeviceProfile, HostPowerPreference,
@@ -160,7 +160,9 @@ impl<'a> Args<'a> {
     }
 
     fn backend(&self) -> Result<Backend, String> {
-        self.flag("backend").map(Backend::parse).unwrap_or(Ok(Backend::Gpu))
+        self.flag("backend")
+            .map(Backend::parse)
+            .unwrap_or(Ok(Backend::Gpu))
     }
 }
 
@@ -179,7 +181,10 @@ fn load(path: &str) -> Result<RenderData, String> {
 
 fn cmd_render(tail: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(tail)?;
-    let scene = *args.positional.first().ok_or("render needs a <scene.toml> path")?;
+    let scene = *args
+        .positional
+        .first()
+        .ok_or("render needs a <scene.toml> path")?;
     let backend = args.backend()?;
     let rd = load(scene)?;
     let (pixels, w, h) = render(&rd, backend);
@@ -194,11 +199,17 @@ fn cmd_render(tail: &[String]) -> Result<ExitCode, String> {
 
 fn cmd_bless(tail: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(tail)?;
-    let scene = *args.positional.first().ok_or("bless needs a <scene.toml> path")?;
+    let scene = *args
+        .positional
+        .first()
+        .ok_or("bless needs a <scene.toml> path")?;
     let backend = args.backend()?;
     let rd = load(scene)?;
     let (pixels, w, h) = render(&rd, backend);
-    let out = args.flag("out").map(str::to_string).unwrap_or_else(|| reference_path(scene, backend));
+    let out = args
+        .flag("out")
+        .map(str::to_string)
+        .unwrap_or_else(|| reference_path(scene, backend));
     write_png(&out, &pixels, w, h)?;
     println!("[visual-target] blessed reference {out} ({w}x{h}, {backend:?})");
     Ok(ExitCode::SUCCESS)
@@ -206,8 +217,14 @@ fn cmd_bless(tail: &[String]) -> Result<ExitCode, String> {
 
 fn cmd_compare(tail: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(tail)?;
-    let scene = *args.positional.first().ok_or("compare needs a <scene.toml> path")?;
-    let reference = *args.positional.get(1).ok_or("compare needs a <reference.png> path")?;
+    let scene = *args
+        .positional
+        .first()
+        .ok_or("compare needs a <scene.toml> path")?;
+    let reference = *args
+        .positional
+        .get(1)
+        .ok_or("compare needs a <reference.png> path")?;
     let backend = args.backend()?;
     let tolerance = parse_tolerance(&args, backend)?;
 
@@ -238,7 +255,11 @@ fn cmd_compare(tail: &[String]) -> Result<ExitCode, String> {
 
     let passed = tolerance.passes(&report);
     println!("[visual-target] {}", if passed { "PASS" } else { "FAIL" });
-    Ok(if passed { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+    Ok(if passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 /// Parse an optional `--tol MEAN,MAX` override, defaulting per backend.
@@ -248,9 +269,19 @@ fn parse_tolerance(args: &Args, backend: Backend) -> Result<Tolerance, String> {
         None => Ok(base),
         Some(spec) => {
             let (mean, max) = spec.split_once(',').ok_or("--tol wants MEAN,MAX")?;
-            let mean = mean.trim().parse::<f32>().map_err(|e| format!("bad --tol mean: {e}"))?;
-            let max = max.trim().parse::<u8>().map_err(|e| format!("bad --tol max: {e}"))?;
-            Ok(Tolerance { mean, max, per_pixel: base.per_pixel })
+            let mean = mean
+                .trim()
+                .parse::<f32>()
+                .map_err(|e| format!("bad --tol mean: {e}"))?;
+            let max = max
+                .trim()
+                .parse::<u8>()
+                .map_err(|e| format!("bad --tol max: {e}"))?;
+            Ok(Tolerance {
+                mean,
+                max,
+                per_pixel: base.per_pixel,
+            })
         }
     }
 }
@@ -351,7 +382,15 @@ fn render_canvas2d(rd: &RenderData) -> (Vec<u8>, u32, u32) {
             // Only the trees (trunk mesh 2, canopy mesh 3) cast contact shadows;
             // the terrain (1) and the ground-cover tufts (4) do not.
             let casts = *mesh_id == 2 || *mesh_id == 3;
-            draws.push(FrameDrawItem::new(object_id, *mesh_id, *material_id, world, mvp, tint, casts));
+            draws.push(FrameDrawItem::new(
+                object_id,
+                *mesh_id,
+                *material_id,
+                world,
+                mvp,
+                tint,
+                casts,
+            ));
             object_id += 1;
         }
     }
@@ -435,8 +474,12 @@ fn write_png(path: &str, rgba: &[u8], width: u32, height: u32) -> Result<(), Str
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(|e| format!("PNG header: {e}"))?;
-    writer.write_image_data(rgba).map_err(|e| format!("PNG data: {e}"))?;
+    let mut writer = encoder
+        .write_header()
+        .map_err(|e| format!("PNG header: {e}"))?;
+    writer
+        .write_image_data(rgba)
+        .map_err(|e| format!("PNG data: {e}"))?;
     Ok(())
 }
 
@@ -451,7 +494,10 @@ fn stem(scene: &str) -> String {
 
 /// The default reference PNG path, alongside the scene file.
 fn reference_path(scene: &str, backend: Backend) -> String {
-    let dir = Path::new(scene).parent().and_then(|p| p.to_str()).unwrap_or(".");
+    let dir = Path::new(scene)
+        .parent()
+        .and_then(|p| p.to_str())
+        .unwrap_or(".");
     let dot = match backend {
         Backend::Gpu => String::new(),
         Backend::Canvas2d => ".canvas2d".to_string(),
@@ -469,8 +515,9 @@ fn print_scorecard(label: &str, card: &Scorecard) {
     for (axis, score) in card.scores() {
         let filled = usize::from(score);
         let empty = usize::from(5u8.saturating_sub(score));
-        let bar: String =
-            std::iter::repeat_n('#', filled).chain(std::iter::repeat_n('.', empty)).collect();
+        let bar: String = std::iter::repeat_n('#', filled)
+            .chain(std::iter::repeat_n('.', empty))
+            .collect();
         println!("    {axis:<28} {score}  [{bar}]");
     }
 }
@@ -478,7 +525,10 @@ fn print_scorecard(label: &str, card: &Scorecard) {
 /// `status <target-dir>` — champion scores, final score, completion, next flaw.
 fn cmd_status(tail: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(tail)?;
-    let dir = *args.positional.first().ok_or("status needs a <target-dir>")?;
+    let dir = *args
+        .positional
+        .first()
+        .ok_or("status needs a <target-dir>")?;
     let status = Target::new(dir).status()?;
     print_scorecard("champion", &status.champion);
     println!(
@@ -492,7 +542,10 @@ fn cmd_status(tail: &[String]) -> Result<ExitCode, String> {
         true => println!("[visual-target] COMPLETE — every axis >= 4 or human-accepted"),
         false => println!(
             "[visual-target] next attacked axis: {}",
-            status.next_axis.map(|a| a.to_string()).unwrap_or_else(|| "-".to_string()),
+            status
+                .next_axis
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "-".to_string()),
         ),
     }
     Ok(ExitCode::SUCCESS)
@@ -501,7 +554,10 @@ fn cmd_status(tail: &[String]) -> Result<ExitCode, String> {
 /// `attack <target-dir>` — name the one axis the next candidate must target.
 fn cmd_attack(tail: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(tail)?;
-    let dir = *args.positional.first().ok_or("attack needs a <target-dir>")?;
+    let dir = *args
+        .positional
+        .first()
+        .ok_or("attack needs a <target-dir>")?;
     let status = Target::new(dir).status()?;
     match status.next_axis {
         None => println!("[visual-target] champion is complete — nothing to attack"),
@@ -525,18 +581,36 @@ fn cmd_attack(tail: &[String]) -> Result<ExitCode, String> {
 /// append a ledger entry, promote on a win, emit diagnostics.
 fn cmd_review(tail: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(tail)?;
-    let dir = *args.positional.first().ok_or("review needs a <target-dir>")?;
+    let dir = *args
+        .positional
+        .first()
+        .ok_or("review needs a <target-dir>")?;
     let target = Target::new(dir);
     let changed: Vec<String> = args
         .flag("changed")
-        .map(|s| s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect())
+        .map(|s| {
+            s.split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
+        })
         .unwrap_or_else(|| vec!["manifest.candidate.toml".to_string()]);
     let outcome = target.review(changed, args.has("abstraction-introduced"))?;
     let entry = &outcome.entry;
-    println!("[visual-target] iteration {}  attacked {}", entry.iteration, outcome.attacked_axis);
+    println!(
+        "[visual-target] iteration {}  attacked {}",
+        entry.iteration, outcome.attacked_axis
+    );
     #[allow(clippy::obfuscated_if_else)] // branchless-style selection, moved as-is
-    let override_note = outcome.resolved.human_overrode.then_some(" (human override)").unwrap_or("");
-    println!("[visual-target] decision: {}{override_note}", outcome.resolved.effective);
+    let override_note = outcome
+        .resolved
+        .human_overrode
+        .then_some(" (human override)")
+        .unwrap_or("");
+    println!(
+        "[visual-target] decision: {}{override_note}",
+        outcome.resolved.effective
+    );
     println!("[visual-target] reason: {}", entry.reason);
     match outcome.promoted {
         true => println!("[visual-target] champion REPLACED by candidate"),
@@ -544,7 +618,10 @@ fn cmd_review(tail: &[String]) -> Result<ExitCode, String> {
     }
     println!(
         "[visual-target] next attacked axis: {}",
-        entry.next_attacked_axis.map(|a| a.to_string()).unwrap_or_else(|| "COMPLETE".to_string()),
+        entry
+            .next_attacked_axis
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "COMPLETE".to_string()),
     );
     for d in &outcome.diagnostics {
         println!("[visual-target] diagnostic: diagnostics/{d}");
@@ -557,15 +634,24 @@ fn cmd_review(tail: &[String]) -> Result<ExitCode, String> {
 /// as complete (the human half of the completion criterion).
 fn cmd_accept(tail: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(tail)?;
-    let dir = *args.positional.first().ok_or("accept needs a <target-dir>")?;
+    let dir = *args
+        .positional
+        .first()
+        .ok_or("accept needs a <target-dir>")?;
     let target = Target::new(dir);
     let note = args.flag("note").unwrap_or("champion accepted by human");
-    let verdict =
-        HumanVerdict { accept_champion: true, note: note.to_string(), ..Default::default() };
+    let verdict = HumanVerdict {
+        accept_champion: true,
+        note: note.to_string(),
+        ..Default::default()
+    };
     let toml = toml::to_string_pretty(&verdict).map_err(|e| format!("serialize verdict: {e}"))?;
     std::fs::write(target.verdict_path(), toml)
         .map_err(|e| format!("write {}: {e}", target.verdict_path().display()))?;
-    println!("[visual-target] wrote {} (accept_champion = true)", target.verdict_path().display());
+    println!(
+        "[visual-target] wrote {} (accept_champion = true)",
+        target.verdict_path().display()
+    );
     println!("[visual-target] champion accepted as complete: {note}");
     Ok(ExitCode::SUCCESS)
 }
@@ -575,7 +661,10 @@ fn cmd_accept(tail: &[String]) -> Result<ExitCode, String> {
 /// axis, and if so write the justified record. Exits non-zero (3) if forbidden.
 fn cmd_abstraction(tail: &[String]) -> Result<ExitCode, String> {
     let args = Args::parse(tail)?;
-    let dir = *args.positional.first().ok_or("abstraction needs a <target-dir>")?;
+    let dir = *args
+        .positional
+        .first()
+        .ok_or("abstraction needs a <target-dir>")?;
     let target = Target::new(dir);
     let champion = target.champion_scorecard()?;
     let verdict = target.verdict()?;
@@ -583,12 +672,17 @@ fn cmd_abstraction(tail: &[String]) -> Result<ExitCode, String> {
         .ok_or("champion is complete; no axis to unlock an abstraction for")?;
     let ledger = target.ledger()?;
     let permission = abstraction::permit(&ledger, axis, args.has("inexpressible"));
-    println!("[visual-target] abstraction gate for {axis}: {}", permission.describe());
+    println!(
+        "[visual-target] abstraction gate for {axis}: {}",
+        permission.describe()
+    );
     match permission.is_permitted() {
         false => Ok(ExitCode::from(3)),
         true => {
             let api = args.flag("api").ok_or("abstraction needs --api TEXT")?;
-            let command = args.flag("command").ok_or("abstraction needs --command TEXT")?;
+            let command = args
+                .flag("command")
+                .ok_or("abstraction needs --command TEXT")?;
             let proof = args.flag("proof").ok_or("abstraction needs --proof TEXT")?;
             let record = AbstractionRecord::new(&permission, api, command, proof)?;
             std::fs::create_dir_all(target.abstractions_dir())
@@ -600,10 +694,15 @@ fn cmd_abstraction(tail: &[String]) -> Result<ExitCode, String> {
                         .count()
                 })
                 .unwrap_or(0);
-            let path = target.abstractions_dir().join(format!("{:04}.toml", existing + 1));
+            let path = target
+                .abstractions_dir()
+                .join(format!("{:04}.toml", existing + 1));
             std::fs::write(&path, record.to_toml())
                 .map_err(|e| format!("write {}: {e}", path.display()))?;
-            println!("[visual-target] wrote abstraction record {}", path.display());
+            println!(
+                "[visual-target] wrote abstraction record {}",
+                path.display()
+            );
             Ok(ExitCode::SUCCESS)
         }
     }

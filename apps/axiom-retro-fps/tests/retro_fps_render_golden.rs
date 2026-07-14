@@ -62,14 +62,26 @@ fn encode_frame(f: &FrameOutcome) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&f.tick().to_le_bytes());
     out.extend_from_slice(&(f.command_count() as u32).to_le_bytes());
-    f.clear_color().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
-    f.camera_view_proj().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
-    f.light_view_proj().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+    f.clear_color()
+        .iter()
+        .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+    f.camera_view_proj()
+        .iter()
+        .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+    f.light_view_proj()
+        .iter()
+        .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
     out.extend_from_slice(&(f.draws().len() as u32).to_le_bytes());
     f.draws().iter().for_each(|d| {
-        d.mvp().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
-        d.world().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
-        d.color().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        d.mvp()
+            .iter()
+            .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        d.world()
+            .iter()
+            .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        d.color()
+            .iter()
+            .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
         out.extend_from_slice(&d.mesh_id().to_le_bytes());
         out.extend_from_slice(&d.material_id().to_le_bytes());
         out.push(u8::from(d.casts_contact_shadow()));
@@ -77,8 +89,12 @@ fn encode_frame(f: &FrameOutcome) -> Vec<u8> {
     out.extend_from_slice(&(f.lights().len() as u32).to_le_bytes());
     f.lights().iter().for_each(|l| {
         out.extend_from_slice(&l.kind().to_le_bytes());
-        l.vec().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
-        l.color().iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        l.vec()
+            .iter()
+            .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
+        l.color()
+            .iter()
+            .for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
         out.extend_from_slice(&l.intensity().to_le_bytes());
     });
     out

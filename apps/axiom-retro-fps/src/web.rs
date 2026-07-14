@@ -18,7 +18,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, EventSource, KeyboardEvent, MessageEvent, MouseEvent, WebSocket};
 
-use super::{build_retro_fps_app, reload_retro_fps, RetroFpsGame, Hud as GameHud, Intent, CANVAS_ID};
+use super::{
+    build_retro_fps_app, reload_retro_fps, Hud as GameHud, Intent, RetroFpsGame, CANVAS_ID,
+};
 use crate::level::LevelDoc;
 
 /// Radians of look per pixel of mouse movement.

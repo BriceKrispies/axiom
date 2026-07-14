@@ -58,7 +58,9 @@ pub struct Ledger {
 impl Ledger {
     /// An empty ledger.
     pub fn new() -> Ledger {
-        Ledger { entries: Vec::new() }
+        Ledger {
+            entries: Vec::new(),
+        }
     }
 
     /// Parse a ledger from TOML text.
@@ -93,7 +95,11 @@ impl Ledger {
 
     /// The iteration number the next appended entry should carry (max + 1, or 1).
     pub fn next_iteration(&self) -> u32 {
-        self.entries.iter().map(|e| e.iteration).max().map_or(1, |m| m + 1)
+        self.entries
+            .iter()
+            .map(|e| e.iteration)
+            .max()
+            .map_or(1, |m| m + 1)
     }
 
     /// Append an entry.
@@ -157,7 +163,11 @@ mod tests {
     fn failed_attempts_count_only_non_promoting_entries_on_the_axis() {
         let mut ledger = Ledger::new();
         ledger.append(entry(1, Axis::FogAndHaze, Decision::RejectCandidate));
-        ledger.append(entry(2, Axis::FogAndHaze, Decision::StartNewCandidateBranch));
+        ledger.append(entry(
+            2,
+            Axis::FogAndHaze,
+            Decision::StartNewCandidateBranch,
+        ));
         ledger.append(entry(3, Axis::FogAndHaze, Decision::KeepCandidate)); // promoted → not failed
         ledger.append(entry(4, Axis::ColorPalette, Decision::RejectCandidate)); // other axis
         assert_eq!(ledger.failed_attempts_on(Axis::FogAndHaze), vec![1, 2]);
