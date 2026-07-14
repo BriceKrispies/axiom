@@ -104,6 +104,9 @@ members = [
     "apps/axiom-worldgen-demo",
     "apps/axiom-animation-lab",
     "apps/axiom-game-runtime",
+    # End Zone: the arcade-football engine framework + deterministic systems
+    # showcase (composition leaf; all football concepts stay app-local).
+    "apps/end-zone",
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",

@@ -284,16 +284,20 @@ fn apply_friction_axis(
     let (wb, inv_ib, _) = body_angular(bodies, manifold.body_b());
     // Tangential relative velocity *at the contact point* (linear + angular lever).
     let relative = vb.add(wb.cross(r_b)).subtract(va.add(wa.cross(r_a))).dot(axis);
-    let k = (inv_a
+    let k_raw = inv_a
         + inv_b
         + angular_effective_mass(inv_ia, r_a, axis)
-        + angular_effective_mass(inv_ib, r_b, axis))
-    .max(f32::MIN_POSITIVE);
+        + angular_effective_mass(inv_ib, r_b, axis);
+    // Same immovable-pair gate as the normal pass: with `k_raw == 0` the
+    // numerator is zeroed BEFORE the floored division, so no `inf` is ever
+    // produced (the movable `* 1.0` is exact — movable results are unchanged).
+    let movable = (k_raw > 0.0) as u8 as f32;
+    let k = k_raw.max(f32::MIN_POSITIVE);
     // Coulomb clamp to `[-bound, bound]` via `max`/`min` (never `f32::clamp`,
     // which panics on a NaN bound that a finite-but-extreme input can produce).
     // A non-finite result here is caught and rolled back by the world's atomic
     // finiteness check, so it can never poison committed state.
-    let magnitude = (-relative / k).max(-bound).min(bound);
+    let magnitude = (-relative * movable / k).max(-bound).min(bound);
     let impulse = axis.mul_scalar(magnitude);
     add_velocity(bodies, manifold.body_a(), impulse.mul_scalar(-inv_a));
     add_velocity(bodies, manifold.body_b(), impulse.mul_scalar(inv_b));
@@ -321,16 +325,23 @@ fn solve_contact(
     let relative = vb.add(wb.cross(r_b)).subtract(va.add(wa.cross(r_a))).dot(normal);
     // Effective mass: the linear inverse-mass sum plus the rotational coupling of
     // each body's lever arm. An immovable body contributes zero to both halves.
-    let k = (inv_a
+    let k_raw = inv_a
         + inv_b
         + angular_effective_mass(inv_ia, r_a, normal)
-        + angular_effective_mass(inv_ib, r_b, normal))
-    .max(f32::MIN_POSITIVE);
+        + angular_effective_mass(inv_ib, r_b, normal);
+    // Arithmetic gate: a manifold between two IMMOVABLE bodies (two kinematic
+    // characters brushing, `k_raw == 0`) has no solvable impulse. Gating the
+    // numerator keeps `relative / k` from overflowing to `inf` at the floored
+    // denominator — an `inf` a zero normal component would turn into `NaN`,
+    // poisoning the step so the world rolls back every tick, forever. The
+    // movable `* 1.0` is exact, so movable contacts are bit-identical.
+    let movable = (k_raw > 0.0) as u8 as f32;
+    let k = k_raw.max(f32::MIN_POSITIVE);
     // Arithmetic gate: a separating contact (`relative >= 0`) zeroes the impulse,
     // so only an approaching contact pushes apart. The flag multiply is exact
     // (`* 1.0` / `* 0.0`), matching the prior `then(..).unwrap_or(0.0)` form.
     let approaching = (relative < 0.0) as u8 as f32;
-    let magnitude = -(1.0 + restitution) * relative / k * approaching;
+    let magnitude = -(1.0 + restitution) * relative * movable / k * approaching;
     let impulse = normal.mul_scalar(magnitude);
     add_velocity(bodies, manifold.body_a(), impulse.mul_scalar(-inv_a));
     add_velocity(bodies, manifold.body_b(), impulse.mul_scalar(inv_b));
@@ -588,6 +599,33 @@ mod tests {
         // Frictionless material -> not counted even while pressed and sliding.
         let frictionless = [collider_with(1, 1, 0.0, 0.0), collider_with(2, 2, 0.0, 0.0)];
         assert_eq!(count_frictioned_contacts(&sliding, &frictionless, &[manifold(0.1)]), 0);
+    }
+
+    #[test]
+    fn immovable_pair_contact_is_a_finite_no_op() {
+        // Two KINEMATIC bodies (zero inverse mass AND zero inverse inertia)
+        // approaching through a manifold: the effective-mass denominator is
+        // exactly zero, which used to overflow `relative / k` to `inf` at the
+        // floored denominator and turn the zero normal components into `NaN` —
+        // poisoning the step so the world rolled back every tick, forever.
+        // The movable gate must leave both bodies bit-identical and finite.
+        let kinematic = |raw: u64, velocity: Vec3| {
+            let desc = PhysicsBodyDesc::kinematic_body(Transform::IDENTITY).unwrap();
+            let mut b = PhysicsBody::from_desc(PhysicsBodyHandle::from_raw(raw), desc);
+            b.set_linear_velocity(velocity);
+            b
+        };
+        // Approaching along the manifold normal, with friction and restitution
+        // in play so both the normal and friction passes hit the gate.
+        let mut bodies = [
+            kinematic(1, Vec3::new(1.5, -6.0, 0.0)),
+            kinematic(2, Vec3::new(0.0, 6.0, 0.0)),
+        ];
+        let colliders = [collider_with(1, 1, 0.5, 0.8), collider_with(2, 2, 0.5, 0.8)];
+        solve(&mut bodies, &colliders, &[manifold(0.2)], 8);
+        assert_eq!(bodies[0].linear_velocity(), Vec3::new(1.5, -6.0, 0.0));
+        assert_eq!(bodies[1].linear_velocity(), Vec3::new(0.0, 6.0, 0.0));
+        assert!(bodies.iter().all(PhysicsBody::is_finite_state));
     }
 
     #[test]
