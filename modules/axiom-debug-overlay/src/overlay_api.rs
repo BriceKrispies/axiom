@@ -290,6 +290,26 @@ impl DebugOverlayApi {
             .for_each(|body| self.mount(&body));
     }
 
+    /// Mount into `document.body` (hidden until `` ` `` is pressed), seed the
+    /// real backend probe, and drive the overlay with measured diagnostics —
+    /// frame counter, fps + frame time over a short window, and live document
+    /// visibility — every animation frame for the page's lifetime. Consumes the
+    /// overlay: the animation loop owns it from here on. `canvas_owner` labels
+    /// the host in the backend read-out (e.g. the app's name). Apps that run a
+    /// real engine loop and want richer diagnostics use the granular setters
+    /// instead.
+    #[cfg(target_arch = "wasm32")]
+    pub fn mount_with_measured_diagnostics(mut self, canvas_owner: &str) {
+        self.mount_to_body();
+        let (backend, fallback_count, fallback_reason) =
+            crate::measured_diagnostics::probe_backend();
+        self.set_backends(&backend, canvas_owner, "none", "none", "none", "none");
+        self.set_fallback(fallback_count, &fallback_reason);
+        // With no engine loop attached these are honest zeroes.
+        self.set_counters(0, 0, 0, 0);
+        crate::measured_diagnostics::drive(self);
+    }
+
     /// Remove the overlay nodes, the injected style, and the listeners.
     #[cfg(target_arch = "wasm32")]
     pub fn unmount(&mut self) {

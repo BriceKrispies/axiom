@@ -46,4 +46,7 @@ mod overlay_api;
 #[cfg(target_arch = "wasm32")]
 mod dom_binding;
 
+#[cfg(target_arch = "wasm32")]
+mod measured_diagnostics;
+
 pub use overlay_api::DebugOverlayApi;
