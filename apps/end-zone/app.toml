@@ -1,0 +1,19 @@
+[app]
+name = "end-zone"
+crate_name = "axiom-end-zone"
+
+allowed_layers = [
+    "kernel",
+    "math",
+    "host",
+    "runtime",
+]
+
+allowed_modules = [
+    "engine",
+    "physics",
+    "figure",
+    "input",
+    "windowing",
+    "debug-overlay",
+]

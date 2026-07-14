@@ -200,6 +200,57 @@ fn snapshot_never_contains_non_finite_values_after_public_operations() {
 }
 
 #[test]
+fn overlapping_kinematic_bodies_never_wedge_the_world() {
+    // Two kinematic character bodies (zero inverse mass and inertia) whose
+    // sphere colliders overlap while approaching — the immovable-pair contact
+    // used to overflow the solver's floored effective mass to `inf`, whose
+    // zero normal components became `NaN`, so EVERY step was rejected and the
+    // whole world froze while the app kept mirroring the characters. The
+    // solver's movable gate must keep such steps committing: the kinematic
+    // pair is untouched and a dynamic body elsewhere keeps integrating.
+    let mut api =
+        PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 16, 16, 4, true, ratio(0.0), ratio(0.0)).unwrap();
+    let material = PhysicsApi::material(ratio(0.5), ratio(0.3), ratio(1.0)).unwrap();
+    let a = api
+        .create_kinematic_body(Transform::from_translation(Vec3::new(0.0, 1.0, 0.0)))
+        .unwrap();
+    let b = api
+        .create_kinematic_body(Transform::from_translation(Vec3::new(0.6, 1.0, 0.0)))
+        .unwrap();
+    api.attach_sphere_collider(a, Meters::new(0.5).unwrap(), material, false)
+        .unwrap();
+    api.attach_sphere_collider(b, Meters::new(0.5).unwrap(), material, false)
+        .unwrap();
+    api.set_body_velocity(a, Vec3::new(2.0, 0.0, 0.0), Vec3::ZERO).unwrap();
+    api.set_body_velocity(b, Vec3::new(-2.0, 0.0, 0.0), Vec3::ZERO).unwrap();
+    let ball = api
+        .create_dynamic_body(Transform::from_translation(Vec3::new(10.0, 8.0, 0.0)), ratio(1.0))
+        .unwrap();
+    api.attach_sphere_collider(ball, Meters::new(0.2).unwrap(), material, false)
+        .unwrap();
+
+    for n in 0..30 {
+        let step = RuntimeStep::new(FrameIndex::new(n), Tick::new(n), 16_666_667, n);
+        api.step(step).expect("an immovable-pair contact must not reject the step");
+        // The app keeps re-pinning its characters, exactly like a real game loop.
+        api.set_body_velocity(a, Vec3::new(2.0, 0.0, 0.0), Vec3::ZERO).unwrap();
+        api.set_body_velocity(b, Vec3::new(-2.0, 0.0, 0.0), Vec3::ZERO).unwrap();
+    }
+    assert!(snapshot_is_finite(&api));
+    let snap = api.snapshot();
+    let ball_y = snap
+        .bodies()
+        .iter()
+        .find(|body| body.handle() == ball)
+        .map(|body| body.transform().translation.y)
+        .unwrap();
+    assert!(
+        ball_y < 7.0,
+        "the dynamic body must keep integrating (fell from 8.0, got {ball_y})"
+    );
+}
+
+#[test]
 fn a_perturbed_angular_or_friction_replay_is_detected() {
     // The angular + friction paths are a pure function of world state, so two
     // identical runs agree byte-for-byte — and any perturbation of the angular

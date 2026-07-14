@@ -1,0 +1,44 @@
+[package]
+name = "axiom-end-zone"
+description = "End Zone: an original arcade-football engine framework and deterministic systems showcase. A composition-leaf browser app that reuses the engine's public facades (scene/render via the axiom umbrella, physics, figure, input, debug overlay) and keeps every football concept — field, plays, routes, AI assignments, contact rules, camera grammar, impact juice — app-local. The showcase runs one data-driven play end to end: formation, snap, drop-back, routes, blocking, pass, catch, pursuit, tackle, ground impact."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+axiom = { path = "../../modules/axiom" }
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-physics = { path = "../../modules/axiom-physics" }
+axiom-figure = { path = "../../modules/axiom-figure" }
+axiom-input = { path = "../../modules/axiom-input" }
+
+# The nondeterministic browser edge — wasm32 only, so native `cargo test`
+# compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "console",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

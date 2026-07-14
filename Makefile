@@ -49,12 +49,22 @@ ASSETSTREAM_PKG      := $(ASSETSTREAM_WEB)/pkg
 ASSETSTREAM_FIXTURE  := $(ASSETSTREAM_DIR)/fixture/assets.toml
 ASSETSTREAM_PORT     ?= 8000
 
+# End Zone: the arcade-football engine framework + deterministic showcase
+# (its own standalone app — not part of the gallery).
+ENDZONE_DIR      := apps/end-zone
+ENDZONE_CRATE    := axiom-end-zone
+ENDZONE_ARTIFACT := target/$(WASM_TARGET)/release/axiom_end_zone.wasm
+ENDZONE_WEB      := $(ENDZONE_DIR)/web
+ENDZONE_PKG      := $(ENDZONE_WEB)/pkg
+ENDZONE_PORT     ?= 8000
+
 .PHONY: workspace workspace-build \
 	gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
 	gallery-debug-build gallery-soccer gallery-signal-runner gallery-swipe-basketball gallery-heat-check gallery-minimal-3v3 gallery-three-point gallery-home-run render-bench \
 	netplay netplay-build netplay-server netplay-dotnet relay retro-fps-hot \
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
+	end-zone end-zone-build \
 	package loader-test e2e e2e-netplay e2e-matchmaking e2e-scaleout \
 	netplay-cluster netplay-load ts-gate help
 
@@ -103,6 +113,10 @@ help:
 	@echo "  make asset-stream-pack  Pack the fixture (manifest.bin + blobs) into web/"
 	@echo "  make asset-stream-build Rebuild the asset-stream wasm bundle into web/pkg"
 	@echo "  make asset-stream       Serve the asset-stream pages at http://localhost:$(ASSETSTREAM_PORT)"
+	@echo ""
+	@echo "  End Zone arcade-football showcase (standalone, not in the gallery):"
+	@echo "  make end-zone-build     Rebuild the End Zone wasm bundle into web/pkg"
+	@echo "  make end-zone           Serve End Zone at http://localhost:$(ENDZONE_PORT)"
 	@echo ""
 	@echo "  Package ONE single-page app into a self-contained, droppable bundle (wasm + wasm2js fallback):"
 	@echo "  make package APP=game-runtime      Build dist-app/game-runtime/ (an SDK-hosted TypeScript app)"
@@ -394,6 +408,18 @@ asset-stream-build:
 asset-stream:
 	@echo Serving asset-stream demo at http://localhost:$(ASSETSTREAM_PORT) - run make asset-stream-pack asset-stream-build first
 	uv run --no-project python -m http.server $(ASSETSTREAM_PORT) --directory $(ASSETSTREAM_WEB)
+
+# --- End Zone (apps/end-zone) ---
+
+# Rebuild the End Zone wasm bundle (raw cargo + wasm-bindgen flow).
+end-zone-build:
+	cargo build -p $(ENDZONE_CRATE) --target $(WASM_TARGET) --release
+	wasm-bindgen --target web --out-dir $(ENDZONE_PKG) $(ENDZONE_ARTIFACT)
+
+# Serve the End Zone showcase. Run `make end-zone-build` first.
+end-zone:
+	@echo Serving End Zone at http://localhost:$(ENDZONE_PORT) - run make end-zone-build first
+	uv run --no-project python -m http.server $(ENDZONE_PORT) --directory $(ENDZONE_WEB)
 
 # --- Package a single app into a self-contained, droppable bundle ---
 

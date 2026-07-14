@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>End Zone — Axiom arcade-football systems showcase</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 10px;
+        background: #0d1410; color: #d7dbe2;
+        font: 14px/1.5 system-ui, sans-serif;
+      }
+      canvas { background: #10231a; max-width: 96vw; }
+      #boot { font: 13px ui-monospace, monospace; color: #9fd1ff; min-height: 1.4em; }
+    </style>
+  </head>
+  <body>
+    <canvas id="axiom-end-zone-canvas" width="1280" height="720"></canvas>
+    <div id="boot">booting…</div>
+    <script type="module">
+      // Cache-bust the JS glue + wasm on every load, matching the other
+      // Axiom browser apps.
+      const v = Date.now();
+      const boot = document.getElementById("boot");
+      try {
+        const wasm = await import(`./pkg/axiom_end_zone.js?v=${v}`);
+        const wasmUrl = new URL(`./pkg/axiom_end_zone_bg.wasm?v=${v}`, import.meta.url);
+        await wasm.default({ module_or_path: wasmUrl });
+        wasm.end_zone_start();
+        boot.textContent = "running — Space starts the play early, R resets, 1–5 cameras, F1 debug";
+      } catch (e) {
+        boot.textContent = "Startup failed: " + e;
+        boot.style.color = "#e07a7a";
+        throw e;
+      }
+    </script>
+  </body>
+</html>
