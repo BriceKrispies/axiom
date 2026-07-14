@@ -2,6 +2,20 @@
 name = "sports-physics-lab"
 crate_name = "axiom-sports-physics-lab"
 
-allowed_layers = []
+allowed_layers = [
+    "kernel",
+    "math",
+    "host",
+    "runtime",
+    "recipe",
+    "proc-texture",
+]
 
-allowed_modules = []
+allowed_modules = [
+    "engine",
+    "physics",
+    "fp-controller",
+    "figure",
+    "windowing",
+    "debug-overlay",
+]
