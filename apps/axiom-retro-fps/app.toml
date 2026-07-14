@@ -2,6 +2,16 @@
 name = "retro-fps"
 crate_name = "axiom-retro-fps"
 
-allowed_layers = []
+allowed_layers = [
+    "kernel",
+    "runtime",
+    "interface",
+]
 
-allowed_modules = []
+allowed_modules = [
+    "engine",
+    "windowing",
+    "debug-overlay",
+    "agent",
+    "perception",
+]

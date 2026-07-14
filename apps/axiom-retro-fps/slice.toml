@@ -1,0 +1,28 @@
+# Semantic vertical-slice contract for the retro FPS app's render boundary.
+#
+# Carved out of the gallery's slice.toml in the de-merge: the retro FPS demo is
+# its own app crate again, so its committed determinism goldens are hash-pinned
+# here (a deleted / regenerated / hand-edited golden is caught by `cargo xtask
+# check-slices`, which owns the baseline — not the tests' AXIOM_REGOLD capture
+# path). The slice is proven at the boundary the demo actually renders through:
+# `RunningApp::tick -> FrameOutcome`. `harness_entry` names the renderable
+# App-core this crate exposes (`build_retro_fps_app`); `harness` points at the
+# demo's live pixel registration in axiom-shot (`--app retro-fps`).
+[slice]
+name = "retro-fps"
+crate_name = "axiom-retro-fps"
+harness_entry = "build_retro_fps_app"
+determinism_test = "retro_fps_replay_determinism"
+harness = "retro-fps"
+
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_state_sequence.bin"
+sha256 = "c28b1643280cdc91cae2fe2e0cc0e6f07c8a1f8bfabdc4c0a918a73f15b3335c"
+
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_hud_sequence.bin"
+sha256 = "410313507b327b00cf70dace7cbbde70d5273cd830362022d271bc9aa3b4a9f9"
+
+[[golden]]
+path = "tests/retro_fps/golden/retro_fps_render_sequence.bin"
+sha256 = "94b2925f6a3bbbcbd0e18a0fc69ba5bc575033451c73564c6eacc51e9dc07407"

@@ -1,15 +1,120 @@
 [package]
 name = "axiom-retro-fps"
-description = "Axiom app: standalone browser demo (extracted from the merged apps/axiom-gallery crate). Composition leaf: its own wasm bundle + web page."
+description = "Axiom retro FPS: a first-person shooter browser demo built from just the engine — cube-walled level, first-person controller camera, chasing cube enemies, hitscan shooting — extracted from the merged apps/axiom-gallery crate into its own composition-leaf app with its own wasm bundle, web page, and feature-gated native agent driver."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+# The agent driver's `render.rs` is a bin *submodule* (not its own bin), so cargo
+# must not auto-discover anything — especially the wasm build must never try to
+# compile it as a standalone binary.
+autobins = false
 
-# `cdylib` for the app's own wasm bundle; `rlib` so native tests and tooling
-# (e.g. the axiom-shot capture harness) can compose the pure core.
+# `cdylib` for the app's own wasm bundle (the `retro_fps_start` entry); `rlib` so
+# the native test suites and the library APIs the agent bin + axiom-shot compose
+# still build and link.
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+# The native agent driver: drives the headless game through the reusable
+# `axiom-agent` module and answers JSON over HTTP. Native-only deps, behind the
+# `agent` feature so the default gates and the wasm build never compile it. The
+# `render.rs` submodule (offscreen wgpu readback) is gated further behind
+# `agent-render`, mirroring the gallery's (and the old cartridge's) two-feature
+# split. The bin NAME is unchanged from the gallery.
+[[bin]]
+name = "retro-fps-agent"
+path = "src/bin/agent.rs"
+required-features = ["agent"]
+
+[features]
+# The headless agent server: the neutral-contract agent loop + perception
+# adapter + native HTTP/WebSocket bridge. Native-only optional deps.
+agent = [
+    "dep:tiny_http",
+    "dep:serde_json",
+    "dep:tungstenite",
+    "dep:axiom-agent",
+    "dep:axiom-perception",
+    "dep:axiom-kernel",
+    "dep:axiom-runtime",
+    "dep:serde",
+]
+# Adds the native offscreen wgpu renderer so the agent can read back images
+# (the `render.rs` bin submodule). Native-only.
+agent-render = [
+    "agent",
+    "dep:wgpu",
+    "dep:bytemuck",
+    "dep:pollster",
+    "dep:png",
+]
+
+# The engine umbrella (module `engine`): App/scene/camera/render authoring + the
+# spatial queries (raycast/overlap) the deterministic game core asks each tick.
+# Builds on native (the pure game core is natively tested) and on wasm (the live
+# browser arm).
+[dependencies]
+axiom = { path = "../../modules/axiom" }
+
+# Native-only optional deps for the agent driver. Confined to non-wasm so the
+# browser bundle never sees them; pulled in only by the agent features above.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The agent substrate + the game-agnostic perception model.
+axiom-agent = { path = "../../modules/axiom-agent", optional = true }
+axiom-perception = { path = "../../modules/axiom-perception", optional = true }
+# Deterministic tick/frame identity + the fixed-step RuntimeStep the agent's
+# observe→decide cycle stamps its decisions with.
+axiom-kernel = { path = "../../crates/axiom-kernel", optional = true }
+axiom-runtime = { path = "../../crates/axiom-runtime", optional = true }
+# The agent bridge's JSON Action/Observation codec.
+serde = { version = "1", features = ["derive"], optional = true }
+# Native server/codec deps for the agent driver.
+tiny_http = { version = "0.12", optional = true }
+serde_json = { version = "1", optional = true }
+tungstenite = { version = "0.24", optional = true }
+# Offscreen PNG capture for the agent's image readback.
+png = { version = "0.17", optional = true }
+# The offscreen agent renderer (the `render.rs` bin submodule) talks to wgpu
+# directly — kept in the bin, never the cdylib, behind `agent-render`.
+wgpu = { version = "25", optional = true }
+bytemuck = { version = "1", optional = true }
+pollster = { version = "0.4", optional = true }
+
+# Browser/live arm only: the wasm-bindgen glue, panic hook, the live windowing
+# presentation loop, the debug overlay, the interface-layer keymap, and exactly
+# the web-sys surface `web.rs` touches. Confined to wasm32, so native
+# `cargo test` compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+# The interface-layer keymap that routes keyboard chords (and the on-screen
+# pad's synthetic keys) into movement actions.
+axiom-interface = { path = "../../crates/axiom-interface" }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Location",
+    "Element",
+    "Node",
+    "HtmlCanvasElement",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "MouseEvent",
+    "WebSocket",
+    "EventSource",
+    "MessageEvent",
+    "console",
+] }
+
+# Native integration-test only: the deterministic frame recorder (the
+# replay-determinism proof). Never enters the wasm bundle.
+[dev-dependencies]
+axiom-recording = { path = "../../modules/axiom-recording" }
 
 [lints.rust]
 unsafe_code = "forbid"
